@@ -13,6 +13,7 @@
 								v-if="item.image"
 								:src="item.image"
 								:alt="item.item_name"
+								loading="lazy"
 								class="w-full h-full object-cover"
 							/>
 							<svg v-else class="h-6 w-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
