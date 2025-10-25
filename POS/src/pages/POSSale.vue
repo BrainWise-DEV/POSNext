@@ -281,6 +281,7 @@
 			:pos-profile="shiftStore.profileName"
 			:currency="shiftStore.profileCurrency"
 			:is-offline="offlineStore.isOffline"
+			:allow-partial-payment="posSettingsStore.allowPartialPayment"
 			@payment-completed="handlePaymentCompleted"
 		/>
 
@@ -410,6 +411,20 @@
 			:pos-profile="shiftStore.profileName"
 			:current-warehouse="shiftStore.profileWarehouse"
 			@warehouse-changed="handleWarehouseChanged"
+		/>
+
+		<!-- Invoice Management -->
+		<InvoiceManagement
+			v-model="showInvoiceManagement"
+			:pos-profile="shiftStore.profileName"
+			:currency="shiftStore.profileCurrency"
+			:history-invoices="invoiceHistoryData"
+			:draft-invoices="draftsStore.drafts"
+			@view-invoice="handleViewInvoice"
+			@print-invoice="handlePrintInvoiceFromManagement"
+			@load-draft="handleLoadDraftFromManagement"
+			@delete-draft="handleDeleteDraft"
+			@refresh-history="loadInvoiceHistoryData"
 		/>
 
 		<!-- Clear Cart Confirmation Dialog -->
@@ -643,12 +658,14 @@ import PaymentDialog from "@/components/sale/PaymentDialog.vue"
 import PromotionManagement from "@/components/sale/PromotionManagement.vue"
 import ReturnInvoiceDialog from "@/components/sale/ReturnInvoiceDialog.vue"
 import POSSettings from "@/components/settings/POSSettings.vue"
+import InvoiceManagement from "@/components/invoices/InvoiceManagement.vue"
 import { useRealtimeStock } from "@/composables/useRealtimeStock"
 import { session } from "@/data/session"
 import { parseError } from "@/utils/errorHandler"
 import { offlineWorker } from "@/utils/offline/workerClient"
 import { printInvoiceByName } from "@/utils/printInvoice"
 import { Button, Dialog, createResource, toast } from "frappe-ui"
+import { call } from "@/utils/apiWrapper"
 import { computed, onMounted, onUnmounted, ref, watch } from "vue"
 
 import { useItemSearchStore } from "@/stores/itemSearch"
@@ -656,6 +673,7 @@ import { useStockStore } from "@/stores/stock"
 // Pinia Stores
 import { usePOSCartStore } from "@/stores/posCart"
 import { usePOSDraftsStore } from "@/stores/posDrafts"
+import { usePOSSettingsStore } from "@/stores/posSettings"
 import { usePOSShiftStore } from "@/stores/posShift"
 import { usePOSSyncStore } from "@/stores/posSync"
 import { usePOSUIStore } from "@/stores/posUI"
@@ -667,6 +685,7 @@ const shiftStore = usePOSShiftStore()
 const uiStore = usePOSUIStore()
 const offlineStore = usePOSSyncStore()
 const draftsStore = usePOSDraftsStore()
+const posSettingsStore = usePOSSettingsStore()
 const itemStore = useItemSearchStore()
 const stockStore = useStockStore()
 
@@ -707,6 +726,12 @@ const showPromotionManagement = ref(false)
 
 // Settings dialog
 const showPOSSettings = ref(false)
+
+// Invoice Management dialog
+const showInvoiceManagement = ref(false)
+
+// Invoice history data (used by InvoiceManagement component)
+const invoiceHistoryData = ref([])
 
 // Stock sync status
 const isStockSyncActive = ref(false)
@@ -810,6 +835,14 @@ onMounted(async () => {
 			if (shiftStore.currentProfile) {
 				cartStore.posProfile = shiftStore.profileName
 				cartStore.posOpeningShift = shiftStore.currentShift?.name
+
+				// Load POS Settings
+				await posSettingsStore.loadSettings(shiftStore.profileName)
+				log.info('POS Settings loaded:', {
+					allowPartialPayment: posSettingsStore.allowPartialPayment,
+					settings: posSettingsStore.settings
+				})
+
 				await cartStore.loadTaxRules(shiftStore.profileName)
 
 				// Set warehouse context in stock store for stock operations
@@ -1965,7 +1998,52 @@ function handleManagementMenuClick(menuItem) {
 		showPromotionManagement.value = true
 	} else if (menuItem === "settings") {
 		showPOSSettings.value = true
+	} else if (menuItem === "invoices") {
+		// Load invoice history data before showing
+		loadInvoiceHistoryData()
+		showInvoiceManagement.value = true
 	}
+}
+
+// Load invoice history data
+async function loadInvoiceHistoryData() {
+	log.info("Loading invoice history data for profile:", shiftStore.profileName)
+
+	try {
+		// Use custom API from pos_next.api.invoices
+		const result = await call("pos_next.api.invoices.get_invoices", {
+			pos_profile: shiftStore.profileName,
+			limit: 100,
+		})
+
+		invoiceHistoryData.value = result || []
+		log.info("Loaded invoice history:", invoiceHistoryData.value.length, "invoices")
+	} catch (error) {
+		log.error("Error loading invoice history:", error)
+		invoiceHistoryData.value = []
+	}
+}
+
+// Handle invoice actions from InvoiceManagement
+function handleViewInvoice(invoice) {
+	// For now just log, can be enhanced later to show invoice details dialog
+	log.info("View invoice:", invoice.name)
+	// TODO: Add invoice detail view dialog if needed
+}
+
+// Note: handlePrintInvoice already exists above, will reuse it for invoice param
+function handlePrintInvoiceFromManagement(invoice) {
+	printInvoiceByName(invoice.name, shiftStore.profileName)
+}
+
+// Note: handleLoadDraft already exists above, will delegate to it
+function handleLoadDraftFromManagement(draft) {
+	handleLoadDraft(draft)
+	showInvoiceManagement.value = false
+}
+
+function handleDeleteDraft(draftId) {
+	draftsStore.deleteDraft(draftId)
 }
 
 async function handleWarehouseChanged(newWarehouse) {

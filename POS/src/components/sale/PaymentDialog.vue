@@ -195,7 +195,7 @@
 								<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
 							</svg>
 						</template>
-						Complete Payment
+						{{ paymentButtonText }}
 					</Button>
 				</div>
 			</div>
@@ -221,6 +221,10 @@ const props = defineProps({
 		default: "USD",
 	},
 	isOffline: {
+		type: Boolean,
+		default: false,
+	},
+	allowPartialPayment: {
 		type: Boolean,
 		default: false,
 	},
@@ -305,7 +309,29 @@ const changeAmount = computed(() => {
 })
 
 const canComplete = computed(() => {
+	// If partial payment is allowed, can complete with any amount > 0
+	if (props.allowPartialPayment) {
+		return totalPaid.value > 0 && paymentEntries.value.length > 0
+	}
+	// Otherwise require full payment
 	return totalPaid.value >= props.grandTotal && paymentEntries.value.length > 0
+})
+
+const paymentButtonText = computed(() => {
+	console.log('[PaymentDialog] Button text calculation:', {
+		totalPaid: totalPaid.value,
+		grandTotal: props.grandTotal,
+		allowPartialPayment: props.allowPartialPayment,
+		canComplete: canComplete.value
+	})
+
+	if (totalPaid.value >= props.grandTotal) {
+		return "Complete Payment"
+	}
+	if (props.allowPartialPayment && totalPaid.value > 0) {
+		return "Partial Payment"
+	}
+	return "Complete Payment"
 })
 
 const quickAmounts = computed(() => {
@@ -362,6 +388,12 @@ watch(show, (newVal) => {
 
 // One-click payment - adds remaining amount with selected method
 function quickAddPayment(method) {
+	console.log('[PaymentDialog] Quick add payment:', {
+		method: method.mode_of_payment,
+		remainingAmount: remainingAmount.value,
+		currentEntries: paymentEntries.value.length
+	})
+
 	if (remainingAmount.value === 0) return
 
 	lastSelectedMethod.value = method
@@ -372,11 +404,18 @@ function quickAddPayment(method) {
 		type: method.type || "Cash",
 	})
 
+	console.log('[PaymentDialog] Payment added, new entries:', paymentEntries.value)
 	customAmount.value = ""
 }
 
 // Add custom amount for a method
 function addCustomPayment(method, amount) {
+	console.log('[PaymentDialog] Add custom payment:', {
+		method: method.mode_of_payment,
+		amount: amount,
+		currentEntries: paymentEntries.value.length
+	})
+
 	const amt = Number.parseFloat(amount)
 	if (!amt || amt <= 0) return
 
@@ -386,6 +425,7 @@ function addCustomPayment(method, amount) {
 		type: method.type || "Cash",
 	})
 
+	console.log('[PaymentDialog] Payment added, new entries:', paymentEntries.value)
 	customAmount.value = ""
 }
 
@@ -406,12 +446,32 @@ function clearAll() {
 }
 
 function completePayment() {
-	if (!canComplete.value) return
+	console.log('[PaymentDialog] Complete payment called:', {
+		canComplete: canComplete.value,
+		totalPaid: totalPaid.value,
+		grandTotal: props.grandTotal,
+		allowPartialPayment: props.allowPartialPayment,
+		paymentEntries: paymentEntries.value
+	})
 
-	emit("payment-completed", {
+	if (!canComplete.value) {
+		console.warn('[PaymentDialog] Cannot complete - validation failed')
+		return
+	}
+
+	const isPartial = totalPaid.value < props.grandTotal
+
+	const paymentData = {
 		payments: paymentEntries.value,
 		change_amount: changeAmount.value,
-	})
+		is_partial_payment: isPartial,
+		paid_amount: totalPaid.value,
+		outstanding_amount: isPartial ? remainingAmount.value : 0,
+	}
+
+	console.log('[PaymentDialog] Emitting payment-completed:', paymentData)
+
+	emit("payment-completed", paymentData)
 
 	show.value = false
 }

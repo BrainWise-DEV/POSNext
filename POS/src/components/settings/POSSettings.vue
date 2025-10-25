@@ -302,6 +302,11 @@
 												description="Write off small change amounts"
 											/>
 											<CheckboxField
+												v-model="settings.allow_partial_payment"
+												label="Allow Partial Payment"
+												description="Enable partial payment for invoices"
+											/>
+											<CheckboxField
 												v-model="settings.silent_print"
 												label="Silent Print"
 												description="Print without confirmation"
@@ -370,6 +375,7 @@ const settings = ref({
 	allow_credit_sale: 0,
 	allow_return: 0,
 	allow_write_off_change: 0,
+	allow_partial_payment: 0,
 	silent_print: 0,
 	allow_negative_stock: 0,
 })

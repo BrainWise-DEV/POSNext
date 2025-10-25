@@ -106,6 +106,12 @@ function printInvoiceCustom(invoiceData) {
 					margin-bottom: 3px;
 				}
 
+				.partial-status {
+					color: #dc3545;
+					font-weight: bold;
+					margin-bottom: 5px;
+				}
+
 				.items-table {
 					width: 100%;
 					margin-bottom: 15px;
@@ -115,23 +121,28 @@ function printInvoiceCustom(invoiceData) {
 				}
 
 				.item-row {
-					display: flex;
-					justify-content: space-between;
-					margin-bottom: 8px;
+					margin-bottom: 10px;
 					font-size: 12px;
 				}
 
 				.item-name {
-					flex: 1;
 					font-weight: bold;
+					margin-bottom: 3px;
 				}
 
 				.item-details {
 					display: flex;
 					justify-content: space-between;
 					font-size: 11px;
-					color: #666;
-					margin-left: 10px;
+					color: #333;
+				}
+
+				.item-discount {
+					display: flex;
+					justify-content: space-between;
+					font-size: 10px;
+					color: #28a745;
+					margin-top: 2px;
 				}
 
 				.totals {
@@ -166,6 +177,25 @@ function printInvoiceCustom(invoiceData) {
 					justify-content: space-between;
 					margin-bottom: 3px;
 					font-size: 11px;
+				}
+
+				.total-paid {
+					font-weight: bold;
+					border-top: 1px solid #ccc;
+					padding-top: 5px;
+					margin-top: 5px;
+				}
+
+				.outstanding-row {
+					display: flex;
+					justify-content: space-between;
+					font-size: 13px;
+					font-weight: bold;
+					color: #dc3545;
+					background-color: #fff3cd;
+					padding: 8px;
+					margin-top: 8px;
+					border-radius: 4px;
 				}
 
 				.footer {
@@ -215,6 +245,16 @@ function printInvoiceCustom(invoiceData) {
 					`
 							: ""
 					}
+					${
+						(invoiceData.status === "Partly Paid" || (invoiceData.outstanding_amount && invoiceData.outstanding_amount > 0 && invoiceData.outstanding_amount < invoiceData.grand_total))
+							? `
+					<div class="partial-status">
+						<span>Status:</span>
+						<span>PARTIAL PAYMENT</span>
+					</div>
+					`
+							: ""
+					}
 				</div>
 
 				<!-- Items -->
@@ -226,57 +266,29 @@ function printInvoiceCustom(invoiceData) {
 									Number.parseFloat(item.discount_percentage) > 0) ||
 								(item.discount_amount &&
 									Number.parseFloat(item.discount_amount) > 0)
-							const hasDistributedDiscount =
-								item.distributed_discount_amount &&
-								Number.parseFloat(item.distributed_discount_amount) > 0
 							const isFree = item.is_free_item
 							const qty = item.qty || item.quantity
 							const amount = item.amount || item.rate * qty
 
-							// Calculate original amount if there's a discount
-							let originalAmount = amount
-							if (
-								hasItemDiscount &&
-								item.price_list_rate &&
-								item.price_list_rate > item.rate
-							) {
-								originalAmount = qty * item.price_list_rate
-							}
-
 							return `
 						<div class="item-row">
-							<div style="flex: 1;">
-								<div class="item-name">
-									${item.item_name || item.item_code}${isFree ? " (FREE)" : ""}
-								</div>
-								<div class="item-details">
-									<span>${qty} × ${formatCurrency(item.rate)}</span>
-									<span>${formatCurrency(amount)}</span>
-								</div>
-								${
-									hasItemDiscount
-										? `
-								<div class="item-details" style="margin-top: 2px;">
-									<span style="font-size: 10px; color: #666;">
-										${item.discount_percentage ? `  Disc ${item.discount_percentage}%` : ""}
-										${item.price_list_rate && item.price_list_rate > item.rate ? ` (was ${formatCurrency(originalAmount)})` : ""}
-									</span>
-									<span style="font-size: 10px; color: #28a745;">-${formatCurrency(item.discount_amount || 0)}</span>
-								</div>
-								`
-										: ""
-								}
-								${
-									hasDistributedDiscount
-										? `
-								<div class="item-details" style="margin-top: 2px;">
-									<span style="font-size: 10px; color: #666;">  Additional Disc</span>
-									<span style="font-size: 10px; color: #28a745;">-${formatCurrency(item.distributed_discount_amount)}</span>
-								</div>
-								`
-										: ""
-								}
+							<div class="item-name">
+								${item.item_name || item.item_code}${isFree ? " (FREE)" : ""}
 							</div>
+							<div class="item-details">
+								<span>${qty} × ${formatCurrency(item.rate)}</span>
+								<span><strong>${formatCurrency(amount)}</strong></span>
+							</div>
+							${
+								hasItemDiscount
+									? `
+							<div class="item-discount">
+								<span>Discount ${item.discount_percentage ? `(${item.discount_percentage}%)` : ""}</span>
+								<span>-${formatCurrency(item.discount_amount || 0)}</span>
+							</div>
+							`
+									: ""
+							}
 						</div>
 						`
 						})
@@ -285,62 +297,14 @@ function printInvoiceCustom(invoiceData) {
 
 				<!-- Totals -->
 				<div class="totals">
-					${(() => {
-						// Calculate actual subtotal from item amounts
-						let subtotal = 0
-						let totalItemDiscount = 0
-
-						invoiceData.items.forEach((item) => {
-							const qty = item.qty || item.quantity
-							const amount = item.amount || item.rate * qty
-							subtotal += amount
-
-							// Sum up item-level discounts - only if they actually exist
-							if (
-								item.discount_amount &&
-								Number.parseFloat(item.discount_amount) > 0
-							) {
-								totalItemDiscount += Number.parseFloat(item.discount_amount)
-							}
-							if (
-								item.distributed_discount_amount &&
-								Number.parseFloat(item.distributed_discount_amount) > 0
-							) {
-								totalItemDiscount += Number.parseFloat(
-									item.distributed_discount_amount,
-								)
-							}
-						})
-
-						// Add invoice-level additional discount - only if it exists
-						const additionalDiscount = Number.parseFloat(
-							invoiceData.discount_amount || 0,
-						)
-						const totalDiscount = totalItemDiscount + additionalDiscount
-
-						// Calculate subtotal before discount (only if there is a discount)
-						const subtotalBeforeDiscount =
-							totalDiscount > 0 ? subtotal + totalDiscount : subtotal
-
-						return `
-					<div class="total-row">
-						<span>Subtotal:</span>
-						<span>${formatCurrency(subtotalBeforeDiscount)}</span>
-					</div>
-					${
-						totalDiscount > 0
-							? `
-					<div class="total-row">
-						<span>Discount${invoiceData.additional_discount_percentage ? ` (${invoiceData.additional_discount_percentage}%)` : ""}:</span>
-						<span style="color: #28a745;">-${formatCurrency(totalDiscount)}</span>
-					</div>
-					`
-							: ""
-					}
 					${
 						invoiceData.total_taxes_and_charges &&
 						invoiceData.total_taxes_and_charges > 0
 							? `
+					<div class="total-row">
+						<span>Subtotal:</span>
+						<span>${formatCurrency((invoiceData.grand_total || 0) - (invoiceData.total_taxes_and_charges || 0))}</span>
+					</div>
 					<div class="total-row">
 						<span>Tax:</span>
 						<span>${formatCurrency(invoiceData.total_taxes_and_charges)}</span>
@@ -352,8 +316,6 @@ function printInvoiceCustom(invoiceData) {
 						<span>TOTAL:</span>
 						<span>${formatCurrency(invoiceData.grand_total)}</span>
 					</div>
-						`
-					})()}
 				</div>
 
 				<!-- Payments -->
@@ -372,12 +334,26 @@ function printInvoiceCustom(invoiceData) {
 					`,
 						)
 						.join("")}
+					<div class="payment-row total-paid">
+						<span>Total Paid:</span>
+						<span>${formatCurrency(invoiceData.paid_amount || 0)}</span>
+					</div>
 					${
 						invoiceData.change_amount && invoiceData.change_amount > 0
 							? `
 					<div class="payment-row" style="font-weight: bold; margin-top: 5px;">
 						<span>Change:</span>
 						<span>${formatCurrency(invoiceData.change_amount)}</span>
+					</div>
+					`
+							: ""
+					}
+					${
+						invoiceData.outstanding_amount && invoiceData.outstanding_amount > 0
+							? `
+					<div class="outstanding-row">
+						<span>BALANCE DUE:</span>
+						<span>${formatCurrency(invoiceData.outstanding_amount)}</span>
 					</div>
 					`
 							: ""

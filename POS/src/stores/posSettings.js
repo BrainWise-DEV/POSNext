@@ -14,6 +14,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		allow_credit_sale: 0,
 		allow_return: 0,
 		allow_write_off_change: 0,
+		allow_partial_payment: 0,
 		// Display Settings
 		default_card_view: 0,
 		display_item_code: 0,
@@ -71,6 +72,9 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	const allowReturn = computed(() => Boolean(settings.value.allow_return))
 	const allowWriteOffChange = computed(() =>
 		Boolean(settings.value.allow_write_off_change),
+	)
+	const allowPartialPayment = computed(() =>
+		Boolean(settings.value.allow_partial_payment),
 	)
 
 	// Computed - Display Settings
@@ -168,8 +172,11 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	const settingsResource = createResource({
 		url: "pos_next.pos_next.doctype.pos_settings.pos_settings.get_pos_settings",
 		onSuccess(data) {
+			console.log('[POSSettings Store] Loaded settings:', data)
 			if (data) {
 				Object.assign(settings.value, data)
+				console.log('[POSSettings Store] Updated settings.value:', settings.value)
+				console.log('[POSSettings Store] allowPartialPayment computed:', Boolean(settings.value.allow_partial_payment))
 				isLoaded.value = true
 			}
 			isLoading.value = false
@@ -209,6 +216,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 			allow_credit_sale: 0,
 			allow_return: 0,
 			allow_write_off_change: 0,
+			allow_partial_payment: 0,
 			default_card_view: 0,
 			display_item_code: 0,
 			show_customer_balance: 0,
@@ -283,6 +291,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		allowCreditSale,
 		allowReturn,
 		allowWriteOffChange,
+		allowPartialPayment,
 
 		// Computed - Display Settings
 		defaultCardView,

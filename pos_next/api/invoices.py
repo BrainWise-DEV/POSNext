@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright (c) 2024, POS Next and contributors
+# Copyright (c) 2025, BrainWise and contributors
 # For license information, please see license.txt
 
 from __future__ import unicode_literals
@@ -585,6 +585,68 @@ def submit_invoice(invoice=None, data=None):
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "Submit Invoice Error")
         raise
+
+
+# ==========================================
+# Invoice History Management
+# ==========================================
+
+
+@frappe.whitelist()
+def get_invoices(pos_profile, limit=100):
+	"""
+	Get list of invoices for a POS Profile.
+
+	Args:
+		pos_profile: POS Profile name
+		limit: Maximum number of invoices to return (default 100)
+
+	Returns:
+		List of invoices with details
+	"""
+	if not pos_profile:
+		frappe.throw(_("POS Profile is required"))
+
+	# Check if user has access to this POS Profile
+	has_access = frappe.db.exists(
+		"POS Profile User",
+		{"parent": pos_profile, "user": frappe.session.user}
+	)
+
+	if not has_access and not frappe.has_permission("Sales Invoice", "read"):
+		frappe.throw(_("You don't have access to this POS Profile"))
+
+	# Query for invoices
+	invoices = frappe.db.sql("""
+		SELECT
+			name,
+			customer,
+			customer_name,
+			posting_date,
+			posting_time,
+			grand_total,
+			paid_amount,
+			outstanding_amount,
+			status,
+			docstatus,
+			is_return,
+			return_against
+		FROM
+			`tabSales Invoice`
+		WHERE
+			pos_profile = %(pos_profile)s
+			AND docstatus = 1
+			AND is_pos = 1
+		ORDER BY
+			posting_date DESC,
+			posting_time DESC
+		LIMIT %(limit)s
+	""", {
+		"pos_profile": pos_profile,
+		"limit": limit
+	}, as_dict=True)
+
+	return invoices
 
 
 # ==========================================

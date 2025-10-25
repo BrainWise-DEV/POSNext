@@ -14,6 +14,7 @@
   "allow_credit_sale",
   "allow_return",
   "allow_write_off_change",
+  "allow_partial_payment",
   "section_break_display",
   "default_card_view",
   "display_item_code",
@@ -122,6 +123,13 @@
    "fieldtype": "Check",
    "label": "Allow Write Off Change",
    "description": "Write off small change amounts"
+  },
+  {
+   "default": "0",
+   "fieldname": "allow_partial_payment",
+   "fieldtype": "Check",
+   "label": "Allow Partial Payment",
+   "description": "Enable partial payment for invoices"
   },
   {
    "collapsible": 1,

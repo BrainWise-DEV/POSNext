@@ -69,6 +69,23 @@
 			</div>
 		</button>
 
+		<!-- Invoices -->
+		<button
+			@click="handleMenuClick('invoices')"
+			:class="[
+				'w-12 h-12 rounded-lg flex items-center justify-center transition-all relative group',
+				activeMenu === 'invoices'
+					? 'bg-indigo-100 text-indigo-600'
+					: 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+			]"
+			:title="'Invoice Management'"
+		>
+			<FeatherIcon name="file-text" class="w-5 h-5" />
+			<div class="absolute left-full ml-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50">
+				Invoice Management
+			</div>
+		</button>
+
 		<!-- Divider -->
 		<div class="w-8 border-t border-gray-200 my-2"></div>
 
