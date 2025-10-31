@@ -8,6 +8,7 @@ import { viteStaticCopy } from "vite-plugin-static-copy"
 
 // Get build version from environment or use timestamp
 const buildVersion = process.env.POS_NEXT_BUILD_VERSION || Date.now().toString()
+const enableSourceMap = process.env.POS_NEXT_ENABLE_SOURCEMAP === "true"
 
 /**
  * Vite plugin to write build version to version.json file
@@ -54,7 +55,7 @@ export default defineConfig({
 				indexHtmlPath: "../pos_next/www/pos.html",
 				outDir: "../pos_next/public/pos",
 				emptyOutDir: true,
-				sourcemap: true,
+				sourcemap: enableSourceMap,
 			},
 		}),
 		vue(),
@@ -210,7 +211,7 @@ export default defineConfig({
 		outDir: "../pos_next/public/pos",
 		emptyOutDir: true,
 		target: "es2015",
-		sourcemap: true,
+		sourcemap: enableSourceMap,
 	},
 	worker: {
 		format: "es",
