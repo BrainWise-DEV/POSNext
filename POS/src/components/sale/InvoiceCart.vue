@@ -190,9 +190,22 @@
 						<div class="flex-1 min-w-0 flex flex-col">
 							<!-- Header: Item Name & Delete -->
 							<div class="flex items-start justify-between gap-1 mb-1">
-								<h4 class="text-[11px] sm:text-xs font-bold text-gray-900 truncate leading-tight">
-									{{ item.item_name }}
-								</h4>
+								<div class="flex items-center gap-1.5 flex-1 min-w-0">
+									<h4 class="text-[11px] sm:text-xs font-bold text-gray-900 truncate leading-tight">
+										{{ item.item_name }}
+									</h4>
+									<!-- Free Item Badge -->
+									<span
+										v-if="item.free_qty && item.free_qty > 0"
+										class="inline-flex items-center px-1.5 py-0.5 bg-green-600 text-white rounded-full text-[9px] font-bold flex-shrink-0"
+										:title="`${item.free_qty} free item(s) included`"
+									>
+										<svg class="w-2.5 h-2.5 mr-0.5" fill="currentColor" viewBox="0 0 20 20">
+											<path fill-rule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clip-rule="evenodd"/>
+										</svg>
+										+{{ item.free_qty }} FREE
+									</span>
+								</div>
 								<button
 									type="button"
 									@click.stop="$emit('remove-item', item.item_code)"
@@ -744,7 +757,11 @@ watch(customerResults, () => {
 })
 
 const totalQuantity = computed(() => {
-	return props.items.reduce((sum, item) => sum + (item.quantity || 0), 0)
+	return props.items.reduce((sum, item) => {
+		const qty = item.quantity || 0
+		const freeQty = item.free_qty || 0
+		return sum + qty + freeQty
+	}, 0)
 })
 
 // Handle search input with instant reactivity

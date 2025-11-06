@@ -569,14 +569,15 @@ def get_coupons(company=None, include_disabled=False, coupon_type=None):
 	if coupon_type:
 		filters["coupon_type"] = coupon_type
 
-	# Build field list - only include disabled if it exists
+	# Build field list - only include fields that exist
 	fields = [
 		"name", "coupon_name", "coupon_code", "coupon_type",
-		"customer", "customer_name", "pos_offer",
+		"customer", "customer_name",
 		"valid_from", "valid_upto", "maximum_use", "used",
 		"one_use", "company", "campaign"
 	]
 
+	# Check for optional fields
 	if has_disabled_field:
 		fields.append("disabled")
 
@@ -854,27 +855,6 @@ def delete_coupon(coupon_name):
 			message=frappe.get_traceback()
 		)
 		frappe.throw(_("Failed to delete coupon: {0}").format(str(e)))
-
-
-@frappe.whitelist()
-def get_pos_offers(company=None):
-	"""Get all coupon-based POS offers."""
-	filters = {"coupon_based": 1, "disable": 0}
-
-	if company:
-		filters["company"] = company
-
-	offers = frappe.get_all(
-		"POS Offer",
-		filters=filters,
-		fields=[
-			"name", "title", "discount_percentage", "discount_amount",
-			"apply_on", "valid_from", "valid_upto"
-		],
-		order_by="title"
-	)
-
-	return offers
 
 
 # =============================================================================

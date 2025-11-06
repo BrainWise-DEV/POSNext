@@ -203,6 +203,64 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		return hasDiscounts
 	}
 
+	/**
+	 * Parses the backend offer response and applies free item quantities to cart items
+	 *
+	 * @param {Array} freeItems - Array of free items from backend (e.g., [{item_code, qty, uom}])
+	 * @returns {void}
+	 *
+	 * @example
+	 * // Backend returns: [{ item_code: "SKU001", qty: 1, uom: "Nos" }]
+	 * // Cart has: [{ item_code: "SKU001", quantity: 2, uom: "Nos" }]
+	 * // Result: Cart item gets free_qty = 1 (shown as "2 items + 1 FREE")
+	 */
+	function processFreeItems(freeItems) {
+		// Reset all free quantities
+		invoiceItems.value.forEach(item => {
+			item.free_qty = 0
+		})
+
+		// Early return if no free items
+		if (!Array.isArray(freeItems) || freeItems.length === 0) {
+			return
+		}
+
+		// Match free items to cart items and set free_qty
+		for (const freeItem of freeItems) {
+			const freeQty = Number.parseFloat(freeItem.qty) || 0
+			if (freeQty <= 0) continue
+
+			// Find matching cart item by item_code and uom
+			const cartItem = invoiceItems.value.find(
+				item => item.item_code === freeItem.item_code &&
+				(item.uom || item.stock_uom) === (freeItem.uom || freeItem.stock_uom)
+			)
+
+			if (cartItem) {
+				cartItem.free_qty = freeQty
+			}
+		}
+	}
+
+	/**
+	 * Extracts and normalizes the offer response from backend
+	 *
+	 * @param {Object} response - Raw API response from backend
+	 * @param {Array} fallbackRules - Default rules to use if none returned
+	 * @returns {Object} Normalized response with items, freeItems, and appliedRules
+	 */
+	function parseOfferResponse(response, fallbackRules = []) {
+		const payload = response?.message || response || {}
+
+		return {
+			items: Array.isArray(payload.items) ? payload.items : [],
+			freeItems: Array.isArray(payload.free_items) ? payload.free_items : [],
+			appliedRules: Array.isArray(payload.applied_pricing_rules) && payload.applied_pricing_rules.length
+				? payload.applied_pricing_rules
+				: fallbackRules
+		}
+	}
+
 	function getAppliedOfferCodes() {
 		return appliedOffers.value.map((entry) => entry.code)
 	}
@@ -248,31 +306,16 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				selected_offers: offerNames,
 			})
 
-			const payload = response?.message || response || {}
-			const responseItems = payload.items || []
-			const rawAppliedRules = payload.applied_pricing_rules
-			const appliedRules =
-				Array.isArray(rawAppliedRules) && rawAppliedRules.length
-					? rawAppliedRules
-					: existingCodes
-			const freeItems = Array.isArray(payload.free_items)
-				? payload.free_items
-				: []
+			const { items: responseItems, freeItems, appliedRules } =
+				parseOfferResponse(response, existingCodes)
 
 			suppressOfferReapply.value = true
 			applyServerDiscounts(responseItems)
+			processFreeItems(freeItems)
 
 			filterActiveOffers(appliedRules)
 
-			const offerApplied =
-				appliedRules.includes(offerCode) ||
-				freeItems.some((item) => {
-					const ruleName = item?.pricing_rules
-					if (Array.isArray(ruleName)) {
-						return ruleName.includes(offerCode)
-					}
-					return ruleName === offerCode
-				})
+			const offerApplied = appliedRules.includes(offerCode)
 
 			if (!offerApplied) {
 				// No new offer applied - restore previous state without new offer
@@ -282,15 +325,14 @@ export const usePOSCartStore = defineStore("posCart", () => {
 							invoice_data: invoiceData,
 							selected_offers: existingCodes,
 						})
-						const rollbackPayload =
-							rollbackResponse?.message || rollbackResponse || {}
-						const rollbackItems = rollbackPayload.items || []
-						const rollbackRawRules = rollbackPayload.applied_pricing_rules
-						const rollbackRules =
-							Array.isArray(rollbackRawRules) && rollbackRawRules.length
-								? rollbackRawRules
-								: existingCodes
+						const {
+							items: rollbackItems,
+							freeItems: rollbackFreeItems,
+							appliedRules: rollbackRules,
+						} = parseOfferResponse(rollbackResponse, existingCodes)
+
 						applyServerDiscounts(rollbackItems)
+						processFreeItems(rollbackFreeItems)
 						filterActiveOffers(rollbackRules)
 					} catch (rollbackError) {
 						console.error("Error rolling back offers:", rollbackError)
@@ -342,6 +384,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			// Remove all offers
 			suppressOfferReapply.value = true
 			appliedOffers.value = []
+			processFreeItems([]) // Remove all free items
 			removeDiscount()
 			showSuccess("Offer has been removed from cart")
 			offersDialogRef?.resetApplyingState()
@@ -356,6 +399,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		if (remainingCodes.length === 0) {
 			suppressOfferReapply.value = true
 			appliedOffers.value = []
+			processFreeItems([]) // Remove all free items
 			removeDiscount()
 			showSuccess("Offer has been removed from cart")
 			offersDialogRef?.resetApplyingState()
@@ -370,16 +414,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				selected_offers: remainingCodes,
 			})
 
-			const payload = response?.message || response || {}
-			const responseItems = payload.items || []
-			const rawAppliedRules = payload.applied_pricing_rules
-			const appliedRules =
-				Array.isArray(rawAppliedRules) && rawAppliedRules.length
-					? rawAppliedRules
-					: remainingCodes
+			const { items: responseItems, freeItems, appliedRules } =
+				parseOfferResponse(response, remainingCodes)
 
 			suppressOfferReapply.value = true
 			applyServerDiscounts(responseItems)
+			processFreeItems(freeItems)
 			filterActiveOffers(appliedRules)
 
 			appliedOffers.value = appliedOffers.value.filter((entry) =>
@@ -401,6 +441,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		// Clear offers if cart is empty
 		if (invoiceItems.value.length === 0 && appliedOffers.value.length) {
 			appliedOffers.value = []
+			processFreeItems([]) // Remove all free items when cart is empty
 			return
 		}
 
@@ -417,16 +458,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 					selected_offers: offerNames,
 				})
 
-				const payload = response?.message || response || {}
-				const responseItems = payload.items || []
-				const rawAppliedRules = payload.applied_pricing_rules
-				const appliedRules =
-					Array.isArray(rawAppliedRules) && rawAppliedRules.length
-						? rawAppliedRules
-						: offerNames
+				const { items: responseItems, freeItems, appliedRules } =
+					parseOfferResponse(response, offerNames)
 
 				suppressOfferReapply.value = true
 				applyServerDiscounts(responseItems)
+				processFreeItems(freeItems)
 				filterActiveOffers(appliedRules)
 			} catch (error) {
 				console.error("Error re-applying offers:", error)
@@ -574,9 +611,14 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				previousItemCodesHash = currentHash
 			}
 
+			// Calculate total quantity (sum of all item quantities, not line count)
+			const totalQty = invoiceItems.value.reduce((sum, item) => {
+				return sum + (item.quantity || 0)
+			}, 0)
+
 			offersStore.updateCartSnapshot({
 				subtotal: subtotal.value,
-				itemCount: invoiceItems.value.length,
+				itemCount: totalQty, // Total quantity, not number of line items
 				itemCodes: cachedItemCodes,
 				itemGroups: cachedItemGroups,
 				brands: cachedBrands,
@@ -584,10 +626,13 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		}
 	}
 
-	// Watch for cart changes to update offer snapshot (min/max thresholds etc.)
-	// Optimized: Only watch length and subtotal, calculate hash inside the watcher
+	// Watch for cart changes to update offer snapshot
+	// Watch subtotal and create a reactive hash of items to detect any changes
 	watch(
-		[subtotal, () => invoiceItems.value.length],
+		[
+			subtotal,
+			() => invoiceItems.value.map(item => `${item.item_code}:${item.quantity}`).join(',')
+		],
 		() => {
 			// Defer to next tick to prevent blocking UI
 			nextTick(() => {

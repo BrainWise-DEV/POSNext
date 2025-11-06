@@ -63,6 +63,11 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 		hasFetched.value = false
 	}
 
+	/**
+	 * Checks if an offer is eligible based on current cart state
+	 * @param {Object} offer - The offer to check
+	 * @returns {Object} {eligible: boolean, reason: string|null}
+	 */
 	function checkOfferEligibility(offer) {
 		const subtotal = cartSnapshot.value.subtotal || 0
 		const itemCount = cartSnapshot.value.itemCount || 0
@@ -75,6 +80,14 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 			return {
 				eligible: false,
 				reason: "Cart is empty",
+			}
+		}
+
+		// Check minimum quantity (e.g., "Buy 2 Get 1 Free" requires at least 2 items)
+		if (offer?.min_qty && itemCount < offer.min_qty) {
+			return {
+				eligible: false,
+				reason: `At least ${offer.min_qty} items required`,
 			}
 		}
 
