@@ -32,13 +32,21 @@
 					</div>
 					<!-- Item Info -->
 					<div class="flex-1 min-w-0">
-						<h3 class="text-base font-semibold text-gray-900 truncate">
-							{{ localItem.item_name }}
-						</h3>
-						<p class="text-sm text-gray-500 truncate">
+						<p class="text-sm text-gray-500 truncate mb-1">
 							{{ formatCurrency(localItem.price_list_rate || localItem.rate) }} / {{ localItem.stock_uom || 'Nos' }}
 						</p>
 					</div>
+				</div>
+
+				<!-- Item Name Editor -->
+				<div>
+					<label class="block text-sm font-medium text-gray-700 mb-2">Item Name</label>
+					<input
+						v-model="localItemName"
+						type="text"
+						class="w-full h-10 border border-gray-300 rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+						placeholder="Enter item name"
+					/>
 				</div>
 
 				<!-- Two Column Layout for Quantity, UOM, Rate, Warehouse -->
@@ -246,6 +254,7 @@ const emit = defineEmits(["update:modelValue", "update-item"])
 
 // Local state
 const localItem = ref(null)
+const localItemName = ref("")
 const localQuantity = ref(1)
 const localUom = ref("")
 const localRate = ref(0)
@@ -278,6 +287,7 @@ watch(
 	(newItem) => {
 		if (newItem) {
 			localItem.value = { ...newItem }
+			localItemName.value = newItem.item_name || ""
 			localQuantity.value = newItem.quantity || 1
 			localUom.value = newItem.uom || newItem.stock_uom || "Nos"
 			localRate.value = newItem.rate || 0
@@ -455,6 +465,7 @@ function formatCurrency(amount) {
 function updateItem() {
 	const updatedItem = {
 		...localItem.value,
+		item_name: localItemName.value,
 		quantity: localQuantity.value,
 		uom: localUom.value,
 		rate: localRate.value,
@@ -495,6 +506,7 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 
 input[type="number"] {
+	appearance: textfield;
 	-moz-appearance: textfield;
 }
 </style>

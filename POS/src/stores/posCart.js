@@ -506,29 +506,30 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				}
 			}
 
-			// Update all provided details
-			if (updatedDetails.quantity !== undefined) {
-				cartItem.quantity = updatedDetails.quantity
-			}
-			// Don't update rate directly - let recalculateItem compute it from price_list_rate and discount
-			// if (updatedDetails.rate !== undefined) {
-			// 	cartItem.rate = updatedDetails.rate
-			// }
-			if (updatedDetails.warehouse !== undefined) {
-				cartItem.warehouse = updatedDetails.warehouse
-			}
-			if (updatedDetails.discount_percentage !== undefined) {
-				cartItem.discount_percentage = updatedDetails.discount_percentage
-			}
-			if (updatedDetails.discount_amount !== undefined) {
-				cartItem.discount_amount = updatedDetails.discount_amount
-			}
-			// Update price_list_rate if provided (for UOM changes)
-			if (updatedDetails.price_list_rate !== undefined) {
-				cartItem.price_list_rate = updatedDetails.price_list_rate
-			}
-
-			// Recalculate item totals (this will compute the correct rate from price_list_rate and discount)
+		// Update all provided details
+		if (updatedDetails.item_name !== undefined) {
+			cartItem.item_name = updatedDetails.item_name
+		}
+		if (updatedDetails.quantity !== undefined) {
+			cartItem.quantity = updatedDetails.quantity
+		}
+		// Don't update rate directly - let recalculateItem compute it from price_list_rate and discount
+		// if (updatedDetails.rate !== undefined) {
+		// 	cartItem.rate = updatedDetails.rate
+		// }
+		if (updatedDetails.warehouse !== undefined) {
+			cartItem.warehouse = updatedDetails.warehouse
+		}
+		if (updatedDetails.discount_percentage !== undefined) {
+			cartItem.discount_percentage = updatedDetails.discount_percentage
+		}
+		if (updatedDetails.discount_amount !== undefined) {
+			cartItem.discount_amount = updatedDetails.discount_amount
+		}
+		// Update price_list_rate if provided (for UOM changes)
+		if (updatedDetails.price_list_rate !== undefined) {
+			cartItem.price_list_rate = updatedDetails.price_list_rate
+		}			// Recalculate item totals (this will compute the correct rate from price_list_rate and discount)
 			recalculateItem(cartItem)
 
 			// Rebuild cache after item update to ensure totals are accurate
