@@ -356,6 +356,9 @@ class OfflineWorkerClient {
 			case "CACHE_CUSTOMERS":
 			case "CACHE_PAYMENT_METHODS":
 			case "UPDATE_STOCK_QUANTITIES":
+			case "CLEAR_ITEMS_CACHE":
+			case "CLEAR_CUSTOMERS_CACHE":
+			case "REMOVE_ITEMS_BY_GROUPS":
 				// For write operations, throw error so caller knows to handle differently
 				throw new Error(`Worker unavailable: Cannot perform ${type}`)
 			default:
@@ -430,6 +433,18 @@ class OfflineWorkerClient {
 
 	async updateStockQuantities(stockUpdates) {
 		return this.sendMessage("UPDATE_STOCK_QUANTITIES", { stockUpdates })
+	}
+
+	async clearItemsCache() {
+		return this.sendMessage("CLEAR_ITEMS_CACHE")
+	}
+
+	async clearCustomersCache() {
+		return this.sendMessage("CLEAR_CUSTOMERS_CACHE")
+	}
+
+	async removeItemsByGroups(itemGroups) {
+		return this.sendMessage("REMOVE_ITEMS_BY_GROUPS", { itemGroups })
 	}
 
 	// ========================================================================

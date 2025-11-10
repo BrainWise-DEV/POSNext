@@ -7,12 +7,16 @@ import { createResource } from "frappe-ui"
 import { defineStore } from "pinia"
 import { computed, ref } from "vue"
 import { useStockStore } from "./stock"
+import { useRealtimePosProfile } from "@/composables/useRealtimePosProfile"
 
 const log = logger.create('ItemSearch')
 
 export const useItemSearchStore = defineStore("itemSearch", () => {
 	// Get stock store instance
 	const stockStore = useStockStore()
+
+	// Real-time POS Profile updates
+	const { onPosProfileUpdate } = useRealtimePosProfile()
 
 	// State
 	const allItems = ref([]) // For browsing (lazy loaded)
@@ -42,7 +46,6 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 	const allItemsVersion = ref(0)
 	const searchResultsVersion = ref(0)
 
-	const MAX_CACHE_ENTRIES = 50
 	const baseResultCache = new Map()
 	const itemRegistry = new Map()
 	const registeredAllItems = new Set()
@@ -51,6 +54,199 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 	// Search debounce timer
 	let searchDebounceTimer = null
 	let backgroundSyncInterval = null
+
+	// Real-time POS Profile update handler
+	let posProfileUpdateCleanup = null
+
+	// ========================================================================
+	// SMART CACHE UPDATE HELPERS
+	// ========================================================================
+
+	/**
+	 * Calculates delta between old and new item groups
+	 * @param {Array<Object>} oldGroups - Previous item groups
+	 * @param {Array<Object>} newGroups - New item groups
+	 * @returns {Object} Delta with added and removed groups
+	 */
+	function calculateItemGroupDelta(oldGroups, newGroups) {
+		const oldSet = new Set(oldGroups.map(g => g.item_group))
+		const newSet = new Set(newGroups.map(g => g.item_group))
+
+		return {
+			added: [...newSet].filter(g => !oldSet.has(g)),
+			removed: [...oldSet].filter(g => !newSet.has(g)),
+			unchanged: [...newSet].filter(g => oldSet.has(g))
+		}
+	}
+
+	/**
+	 * Removes items from specified groups (surgical deletion)
+	 * @param {Array<string>} groups - Groups to remove
+	 * @returns {Promise<number>} Number of items removed
+	 */
+	async function removeItemsFromGroups(groups) {
+		if (!groups || groups.length === 0) {
+			return 0
+		}
+
+		try {
+			const result = await offlineWorker.removeItemsByGroups(groups)
+			const removed = result?.removed || 0
+
+			log.success(`Removed ${removed} items from ${groups.length} group(s)`, {
+				groups: groups.slice(0, 5), // Log first 5 to avoid spam
+				totalGroups: groups.length
+			})
+
+			return removed
+		} catch (error) {
+			log.error("Failed to remove items from groups", {
+				groups,
+				error: error.message
+			})
+			throw error
+		}
+	}
+
+	/**
+	 * Fetches and caches items from new groups (incremental addition)
+	 * Uses the standard fetchItemsFromGroups function
+	 * @param {Array<string>} groups - Group names to fetch
+	 * @param {string} profile - POS Profile name
+	 * @returns {Promise<number>} Total items cached
+	 */
+	async function fetchAndCacheNewGroups(groups, profile) {
+		if (!groups || groups.length === 0) {
+			return 0
+		}
+
+		try {
+			// Convert group names to group objects format
+			const groupObjects = groups.map(g => ({ item_group: g }))
+
+			// Reuse the standard fetch function
+			const items = await fetchItemsFromGroups(profile, groupObjects)
+
+			if (items.length > 0) {
+				await offlineWorker.cacheItems(items)
+				log.success(`Cached ${items.length} items from ${groups.length} group(s)`)
+				return items.length
+			}
+
+			return 0
+		} catch (error) {
+			log.error("Failed to fetch and cache new groups", error)
+			return 0
+		}
+	}
+
+	/**
+	 * Handles POS Profile update with smart cache strategy and recovery
+	 * @param {Object} updateData - Update event data
+	 * @param {string} profile - Current POS Profile
+	 */
+	async function handlePosProfileUpdateWithRecovery(updateData, profile) {
+		// Guard: Only handle updates for our current profile
+		if (updateData.pos_profile !== profile) {
+			log.debug("Ignoring update for different profile", {
+				received: updateData.pos_profile,
+				current: profile
+			})
+			return
+		}
+
+		log.info(`POS Profile ${profile} updated remotely - applying smart cache update`, {
+			changeType: updateData.change_type,
+			timestamp: updateData.timestamp
+		})
+
+		// Calculate delta
+		const delta = calculateItemGroupDelta(
+			profileItemGroups.value || [],
+			updateData.item_groups || []
+		)
+
+		// Update the reference immediately
+		if (updateData.item_groups) {
+			profileItemGroups.value = updateData.item_groups
+		}
+
+		// No changes? Early exit
+		if (delta.added.length === 0 && delta.removed.length === 0) {
+			log.info("No item group changes detected - skipping cache update")
+			return
+		}
+
+		log.info("Item group delta calculated", {
+			added: delta.added.length,
+			removed: delta.removed.length,
+			unchanged: delta.unchanged.length
+		})
+
+		// Attempt smart cache update
+		try {
+			const startTime = performance.now()
+
+			// Phase 1: Remove obsolete items
+			const removedCount = await removeItemsFromGroups(delta.removed)
+
+			// Phase 2: Add new items
+			const cachedCount = await fetchAndCacheNewGroups(delta.added, profile)
+
+			// Phase 3: Refresh view from updated cache
+			await loadAllItems(profile)
+
+			const duration = Math.round(performance.now() - startTime)
+
+			log.success("Smart cache update completed", {
+				duration: `${duration}ms`,
+				removed: removedCount,
+				cached: cachedCount,
+				addedGroups: delta.added.length,
+				removedGroups: delta.removed.length
+			})
+
+		} catch (error) {
+			log.error("Smart cache update failed - attempting recovery", {
+				error: error.message,
+				stack: error.stack
+			})
+
+			// Recovery Strategy: Full cache rebuild
+			await attemptFullCacheRecovery(profile)
+		}
+	}
+
+	/**
+	 * Fallback recovery: Full cache rebuild
+	 * @param {string} profile - POS Profile name
+	 */
+	async function attemptFullCacheRecovery(profile) {
+		log.warn("Attempting full cache recovery")
+
+		try {
+			// Clear corrupted cache
+			await offlineWorker.clearItemsCache()
+			log.info("Cache cleared successfully")
+
+			// Reload from server
+			await loadAllItems(profile)
+			log.success("Full cache recovery completed")
+
+		} catch (recoveryError) {
+			log.error("Recovery failed - manual intervention required", {
+				error: recoveryError.message,
+				stack: recoveryError.stack
+			})
+
+			// Last resort: Show user a message
+			// TODO: Integrate with notification system
+			console.error(
+				"Failed to update item cache. Please refresh the page manually.",
+				recoveryError
+			)
+		}
+	}
 
 	// Resources (for server-side operations)
 	const itemGroupsResource = createResource({
@@ -76,16 +272,6 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 	})
 
 	// Getters
-	function setCache(map, key, value) {
-		if (map.size >= MAX_CACHE_ENTRIES) {
-			const firstKey = map.keys().next().value
-			if (firstKey !== undefined) {
-				map.delete(firstKey)
-			}
-		}
-		map.set(key, value)
-	}
-
 	function clearBaseCache() {
 		baseResultCache.clear()
 	}
@@ -192,7 +378,10 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 		}))
 	})
 
-	// Actions
+	/**
+	 * Load items with POS Profile filter-aware caching
+	 * CRITICAL: Must be called AFTER setPosProfile() to ensure filters are loaded
+	 */
 	async function loadAllItems(profile) {
 		if (!profile) {
 			return
@@ -207,21 +396,25 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 		totalItemsLoaded.value = 0
 
 		try {
-			// STRATEGY: Cache-first lazy loading
-			// 1. Check if cache has items
-			// 2. If yes, load from cache first (instant!)
-			// 3. Load small batch from server (50 items)
-			// 4. Start background sync to populate cache
+			// FILTER-AWARE CACHING STRATEGY:
+			// 1. Check if POS Profile has item group filters
+			// 2. Load from cache ONLY if it contains filtered items
+			// 3. Fetch from server with item group filters applied
+			// 4. Cache ONLY the filtered items
+
+			const itemGroupFilters = profileItemGroups.value || []
+			const hasFilters = itemGroupFilters.length > 0
+
+			log.info("Loading items with filter strategy", {
+				profile,
+				filterCount: itemGroupFilters.length,
+				filters: hasFilters ? itemGroupFilters.map(g => g.item_group).slice(0, 3) : []
+			})
 
 			// Check cache status
 			const stats = await offlineWorker.getCacheStats()
 			cacheStats.value = stats
 			cacheReady.value = stats.cacheReady
-
-			log.info("Cache status", {
-				items: stats.items,
-				ready: stats.cacheReady
-			})
 
 			// Load from cache first if available (instant load)
 			if (stats.cacheReady && stats.items > 0) {
@@ -234,53 +427,64 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 					replaceAllItems(cached)
 					totalItemsLoaded.value = cached.length
 					currentOffset.value = cached.length
-					loading.value = false // Show UI immediately with cached data
+					loading.value = false
 					log.success(`Loaded ${cached.length} items from cache`)
 
-					// Cache is ready - skip server fetch to prevent duplicate load
-					// Background sync will handle updates if needed
+					// Cache is ready - skip server fetch
 					return
 				}
 			}
 
-			// Only fetch from server if cache is not ready
-			log.debug(`Fetching ${itemsPerPage.value} items from server`)
-			const response = await call("pos_next.api.items.get_items", {
-				pos_profile: profile,
-				search_term: "",
-				item_group: null,
-				start: 0,
-				limit: itemsPerPage.value, // Only 50 items!
-			})
-			const list = response?.message || response || []
+			// Fetch from server with filters applied
+			if (hasFilters) {
+				// OPTIMIZED: Fetch all filtered groups in parallel
+				log.debug(`Fetching items from ${itemGroupFilters.length} filtered groups`)
+				const allItems = await fetchItemsFromGroups(profile, itemGroupFilters)
 
-			// Update UI with fresh server data
-			if (list.length > 0) {
-				replaceAllItems(list)
-				totalItemsLoaded.value = list.length
-				currentOffset.value = list.length
-				hasMore.value = true // There's likely more on server
+				if (allItems.length > 0) {
+					replaceAllItems(allItems.slice(0, itemsPerPage.value))
+					totalItemsLoaded.value = allItems.length
+					currentOffset.value = Math.min(itemsPerPage.value, allItems.length)
+					hasMore.value = allItems.length > itemsPerPage.value
 
-				// Cache the fresh data
-				await offlineWorker.cacheItems(list)
-				log.success(`Loaded ${list.length} items from server`)
-			}
+					// Cache ALL filtered items (not just first page)
+					await offlineWorker.cacheItems(allItems)
+					cacheReady.value = true
+					log.success(`Loaded and cached ${allItems.length} filtered items`)
+				}
+			} else {
+				// No filters - fetch first batch only
+				log.debug(`Fetching ${itemsPerPage.value} items (no filters)`)
+				const response = await call("pos_next.api.items.get_items", {
+					pos_profile: profile,
+					search_term: "",
+					item_group: null,
+					start: 0,
+					limit: itemsPerPage.value,
+				})
+				const list = response?.message || response || []
 
-			// Start background sync to populate cache (don't await!)
-			// Only sync if cache is empty or has very few items (< 50)
-			// This prevents re-syncing on every page load for catalogs with 100-500 items
-			if (!stats.cacheReady || stats.items < 50) {
-				startBackgroundCacheSync(profile)
+				if (list.length > 0) {
+					replaceAllItems(list)
+					totalItemsLoaded.value = list.length
+					currentOffset.value = list.length
+					hasMore.value = true
+
+					await offlineWorker.cacheItems(list)
+					log.success(`Loaded ${list.length} items from server`)
+				}
+
+				// Start background sync for unfiltered catalogs
+				if (!stats.cacheReady || stats.items < 50) {
+					startBackgroundCacheSync(profile, [])
+				}
 			}
 		} catch (error) {
 			log.error("Error loading items", error)
 
-			// Fallback to cached items if server fails (offline support)
+			// Fallback to cache
 			try {
-				const cached = await offlineWorker.searchCachedItems(
-					"",
-					itemsPerPage.value,
-				)
+				const cached = await offlineWorker.searchCachedItems("", itemsPerPage.value)
 				replaceAllItems(cached || [])
 				totalItemsLoaded.value = cached?.length || 0
 				currentOffset.value = cached?.length || 0
@@ -289,13 +493,49 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 			} catch (cacheError) {
 				log.error("Cache also failed", cacheError)
 				replaceAllItems([])
-				totalItemsLoaded.value = 0
-				currentOffset.value = 0
-				hasMore.value = false
 			}
 		} finally {
 			loading.value = false
 		}
+	}
+
+	/**
+	 * Fetch items from specific item groups in parallel
+	 * Returns merged and deduplicated results
+	 */
+	async function fetchItemsFromGroups(profile, itemGroups) {
+		const fetchPromises = itemGroups.map(async (groupObj) => {
+			const itemGroup = groupObj.item_group
+			try {
+				const response = await call("pos_next.api.items.get_items", {
+					pos_profile: profile,
+					search_term: "",
+					item_group: itemGroup,
+					start: 0,
+					limit: 1000, // Get all items from this group
+				})
+				const items = response?.message || response || []
+				log.debug(`Fetched ${items.length} items from group: ${itemGroup}`)
+				return items
+			} catch (error) {
+				log.error(`Failed to fetch items from group: ${itemGroup}`, error)
+				return []
+			}
+		})
+
+		const results = await Promise.all(fetchPromises)
+
+		// Merge and deduplicate by item_code
+		const itemMap = new Map()
+		for (const batch of results) {
+			for (const item of batch) {
+				if (!itemMap.has(item.item_code)) {
+					itemMap.set(item.item_code, item)
+				}
+			}
+		}
+
+		return Array.from(itemMap.values())
 	}
 
 	async function loadMoreItems() {
@@ -348,40 +588,43 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 		}
 	}
 
-	async function startBackgroundCacheSync(profile) {
+	/**
+	 * Background sync with filter awareness
+	 * @param {string} profile - POS Profile name
+	 * @param {Array} itemGroups - Item group filters (empty = no filters)
+	 */
+	async function startBackgroundCacheSync(profile, itemGroups = []) {
 		// Prevent multiple sync intervals
 		if (backgroundSyncInterval) {
 			return
 		}
 
+		const hasFilters = itemGroups.length > 0
+
+		// If filters are present, items are already cached in loadAllItems
+		if (hasFilters) {
+			log.info("Skipping background sync - filtered items already cached")
+			return
+		}
+
 		/**
-		 * PERFORMANCE OPTIMIZATIONS:
+		 * PERFORMANCE OPTIMIZATIONS (unfiltered catalogs only):
 		 *
-		 * 1. Sync Interval: Changed from 2 seconds to 15 seconds
-		 *    - Dramatically reduces CPU load and API call frequency
-		 *    - Prevents constant "Syncing catalog" message
-		 *    - For 1000 items: 75 seconds total instead of 10 seconds
-		 *
-		 * 2. Stats Polling: Only every 3 batches instead of every batch
-		 *    - Reduces expensive IndexedDB count operations
-		 *    - Stats update every 45 seconds instead of every 2 seconds
-		 *    - Final stats still updated when sync completes
-		 *
-		 * 3. Threshold: Lowered from 100 to 50 items
-		 *    - Prevents re-syncing on page load for most stores
-		 *    - Only syncs if cache is truly empty
+		 * 1. Sync Interval: 15 seconds between batches
+		 * 2. Stats Polling: Every 3 batches instead of every batch
+		 * 3. Threshold: Only sync if cache has < 50 items
 		 *
 		 * Impact: 87.5% reduction in API call frequency, 90% reduction in CPU usage
 		 */
 
-		log.info("Starting background cache sync")
+		log.info("Starting background cache sync (no filters)")
 		cacheSyncing.value = true
 
 		// Start from current offset to avoid re-fetching already loaded items
 		let offset = currentOffset.value || 0
 		const batchSize = performanceConfig.get("backgroundSyncBatchSize") // Auto-adjusted: 100/200/300 based on device
 		const statsUpdateFrequency = performanceConfig.get("statsUpdateFrequency") // Auto-adjusted: 5/3/2 based on device
-		let batchCount = 0 // Track number of batches processed
+		let batchCount = 0
 
 		// Function to fetch one batch
 		const fetchBatch = async () => {
@@ -390,7 +633,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 				const response = await call("pos_next.api.items.get_items", {
 					pos_profile: profile,
 					search_term: "",
-					item_group: null,
+					item_group: null, // No filters for background sync
 					start: offset,
 					limit: batchSize,
 				})
@@ -403,7 +646,6 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 					batchCount++
 
 					// Only update stats periodically to reduce IndexedDB queries
-					// Frequency auto-adjusted: 5/3/2 batches based on device (low/medium/high)
 					const shouldUpdateStats = batchCount % statsUpdateFrequency === 0 || list.length < batchSize
 
 					if (shouldUpdateStats) {
@@ -633,6 +875,12 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 			clearTimeout(searchDebounceTimer)
 			searchDebounceTimer = null
 		}
+
+		// Clean up real-time POS Profile update handler
+		if (posProfileUpdateCleanup) {
+			posProfileUpdateCleanup()
+			posProfileUpdateCleanup = null
+		}
 	}
 
 	function setSelectedItemGroup(group) {
@@ -662,10 +910,22 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 		stockStore.reserve(items) // Simple!
 	}
 
-	async function setPosProfile(profile) {
+	/**
+	 * Set POS Profile and load item group filters
+	 * CRITICAL: This must complete BEFORE loadAllItems() is called
+	 * @param {string} profile - POS Profile name
+	 * @param {boolean} autoLoadItems - Automatically load items after setting profile (default: true)
+	 */
+	async function setPosProfile(profile, autoLoadItems = true) {
 		posProfile.value = profile
 
-		// Fetch item groups from POS Profile
+		// Clean up previous real-time handler
+		if (posProfileUpdateCleanup) {
+			posProfileUpdateCleanup()
+			posProfileUpdateCleanup = null
+		}
+
+		// Fetch item groups from POS Profile FIRST
 		if (profile) {
 			try {
 				const data = await call("pos_next.api.pos_profile.get_pos_profile_data", {
@@ -678,6 +938,21 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 					log.info(`Loaded ${profileItemGroups.value.length} item group filters from POS Profile`)
 				} else {
 					profileItemGroups.value = []
+					log.info("No item group filters in POS Profile")
+				}
+
+				// Set up real-time listener for POS Profile updates
+				posProfileUpdateCleanup = onPosProfileUpdate(async (updateData) => {
+					await handlePosProfileUpdateWithRecovery(updateData, profile)
+				})
+
+				log.debug("Real-time POS Profile update listener registered")
+
+				// Automatically load items with the filters (if enabled)
+				if (autoLoadItems) {
+					log.debug("Auto-loading items with filters")
+					await loadAllItems(profile)
+					await loadItemGroups()
 				}
 			} catch (error) {
 				log.error("Error fetching POS Profile item groups", error)

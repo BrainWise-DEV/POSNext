@@ -195,6 +195,9 @@ doc_events = {
 		"on_submit": "pos_next.realtime_events.emit_stock_update_event",
 		"on_cancel": "pos_next.realtime_events.emit_stock_update_event",
 		"after_insert": "pos_next.realtime_events.emit_invoice_created_event"
+	},
+	"POS Profile": {
+		"on_update": "pos_next.realtime_events.emit_pos_profile_updated_event"
 	}
 }
 

@@ -712,10 +712,8 @@ function handleScroll(event) {
 }
 
 onMounted(() => {
-	if (props.posProfile) {
-		itemStore.loadAllItems(props.posProfile)
-		itemStore.loadItemGroups()
-	}
+	// Items are now loaded automatically by setPosProfile() in the watcher
+	// This ensures item group filters are loaded BEFORE fetching items
 
 	// Add passive scroll listeners for better performance
 	// Only bind to the currently active view

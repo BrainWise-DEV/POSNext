@@ -11,7 +11,7 @@
 
 import { performanceConfig } from "@/utils/performanceConfig"
 import { logger } from "@/utils/logger"
-import { onUnmounted, ref } from "vue"
+import { ref } from "vue"
 
 const log = logger.create('RealtimeStock')
 
@@ -186,11 +186,8 @@ export function useRealtimeStock() {
 		}
 	}
 
-	// Cleanup on component unmount
-	onUnmounted(() => {
-		// Note: We don't stop listening here because other components
-		// might still be using it. Each handler cleans up individually.
-	})
+	// Note: Each handler is responsible for its own cleanup via the returned cleanup function.
+	// The singleton listener remains active as long as there are registered handlers.
 
 	return {
 		isListening,
