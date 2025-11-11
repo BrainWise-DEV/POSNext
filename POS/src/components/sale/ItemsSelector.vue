@@ -539,7 +539,7 @@ const emit = defineEmits(["item-selected"])
 // Use composables
 const { getStockStatus } = useStock()
 const settingsStore = usePOSSettingsStore()
-const { showError } = useToast()
+const { showError, showWarning } = useToast()
 
 // Use Pinia store
 const itemStore = useItemSearchStore()
@@ -666,13 +666,6 @@ watch(
 			if (lastAutoSwitchCount.value !== itemCount) {
 				viewMode.value = "list"
 				lastAutoSwitchCount.value = itemCount
-
-				toast.create({
-					title: "Switched to List View",
-					text: `Displaying ${itemCount} items - automatically switched to list view for better performance`,
-					icon: "list",
-					iconClasses: "text-blue-600",
-				})
 			}
 		} else if (itemCount <= itemThreshold.value) {
 			lastAutoSwitchCount.value = 0
@@ -876,22 +869,6 @@ async function handleBarcodeSearch(forceAutoAdd = false) {
 			// Item found by barcode - add to cart immediately with auto-add flag
 			emit("item-selected", item, shouldAutoAdd)
 			itemStore.clearSearch()
-
-			if (shouldAutoAdd) {
-				toast.create({
-					title: "✓ Auto-Added",
-					text: `${item.item_name} added to cart`,
-					icon: "check",
-					iconClasses: "text-blue-600",
-				})
-			} else {
-				toast.create({
-					title: "Item Added",
-					text: `${item.item_name} added to cart`,
-					icon: "check",
-					iconClasses: "text-green-600",
-				})
-			}
 			return
 		}
 	} catch (error) {
@@ -902,29 +879,8 @@ async function handleBarcodeSearch(forceAutoAdd = false) {
 	if (filteredItems.value.length === 1) {
 		emit("item-selected", filteredItems.value[0], shouldAutoAdd)
 		itemStore.clearSearch()
-
-		if (shouldAutoAdd) {
-			toast.create({
-				title: "✓ Auto-Added",
-				text: `${filteredItems.value[0].item_name} added to cart`,
-				icon: "check",
-				iconClasses: "text-blue-600",
-			})
-		} else {
-			toast.create({
-				title: "Item Added",
-				text: `${filteredItems.value[0].item_name} added to cart`,
-				icon: "check",
-				iconClasses: "text-green-600",
-			})
-		}
 	} else if (filteredItems.value.length === 0) {
-		toast.create({
-			title: "Item Not Found",
-			text: `No item found with barcode: ${barcode}`,
-			icon: "alert-circle",
-			iconClasses: "text-red-600",
-		})
+		showWarning(`Item Not Found: No item found with barcode: ${barcode}`)
 
 		// If scanner mode is enabled, clear search immediately for next scan
 		if (shouldAutoAdd) {
@@ -933,19 +889,9 @@ async function handleBarcodeSearch(forceAutoAdd = false) {
 	} else {
 		if (shouldAutoAdd) {
 			// In scanner mode, don't show manual selection - just notify
-			toast.create({
-				title: "Multiple Items Found",
-				text: `${filteredItems.value.length} items match barcode. Please refine search.`,
-				icon: "alert-circle",
-				iconClasses: "text-orange-600",
-			})
+			showWarning(`Multiple Items Found: ${filteredItems.value.length} items match barcode. Please refine search.`)
 		} else {
-			toast.create({
-				title: "Multiple Items Found",
-				text: `${filteredItems.value.length} items match. Please select one.`,
-				icon: "alert-circle",
-				iconClasses: "text-blue-600",
-			})
+			showWarning(`Multiple Items Found: ${filteredItems.value.length} items match. Please select one.`)
 		}
 	}
 }
@@ -964,20 +910,6 @@ function toggleBarcodeScanner() {
 		if (input) {
 			input.focus()
 		}
-
-		toast.create({
-			title: "Barcode Scanner Enabled",
-			text: "Click 'Auto' button to automatically add items when you press Enter",
-			icon: "check",
-			iconClasses: "text-green-600",
-		})
-	} else {
-		toast.create({
-			title: "Barcode Scanner Disabled",
-			text: "Scanner mode turned off",
-			icon: "alert-circle",
-			iconClasses: "text-gray-600",
-		})
 	}
 }
 
@@ -997,25 +929,11 @@ function toggleAutoAdd() {
 	}
 
 	if (autoAddEnabled.value) {
-		toast.create({
-			title: "Auto-Add Enabled",
-			text: "Type or scan barcode - items will be added automatically after 0.5s",
-			icon: "check",
-			iconClasses: "text-blue-600",
-		})
-
 		// Focus on search input
 		const input = searchInputRef.value || document.getElementById("item-search")
 		if (input) {
 			input.focus()
 		}
-	} else {
-		toast.create({
-			title: "Auto-Add Disabled",
-			text: "Items will require manual selection",
-			icon: "alert-circle",
-			iconClasses: "text-gray-600",
-		})
 	}
 }
 

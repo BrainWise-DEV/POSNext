@@ -193,8 +193,8 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 			// Phase 2: Add new items
 			const cachedCount = await fetchAndCacheNewGroups(delta.added, profile)
 
-			// Phase 3: Refresh view from updated cache
-			await loadAllItems(profile)
+			// Phase 3: Refresh view from server (bypass stale cache)
+			await loadAllItems(profile, true)
 
 			const duration = Math.round(performance.now() - startTime)
 
@@ -229,8 +229,8 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 			await offlineWorker.clearItemsCache()
 			log.info("Cache cleared successfully")
 
-			// Reload from server
-			await loadAllItems(profile)
+			// Reload from server (force server fetch since cache was cleared)
+			await loadAllItems(profile, true)
 			log.success("Full cache recovery completed")
 
 		} catch (recoveryError) {
@@ -381,8 +381,10 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 	/**
 	 * Load items with POS Profile filter-aware caching
 	 * CRITICAL: Must be called AFTER setPosProfile() to ensure filters are loaded
+	 * @param {string} profile - POS Profile name
+	 * @param {boolean} forceServerFetch - Skip cache and force fetch from server (used after filter updates)
 	 */
-	async function loadAllItems(profile) {
+	async function loadAllItems(profile, forceServerFetch = false) {
 		if (!profile) {
 			return
 		}
@@ -408,7 +410,8 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 			log.info("Loading items with filter strategy", {
 				profile,
 				filterCount: itemGroupFilters.length,
-				filters: hasFilters ? itemGroupFilters.map(g => g.item_group).slice(0, 3) : []
+				filters: hasFilters ? itemGroupFilters.map(g => g.item_group).slice(0, 3) : [],
+				forceServerFetch
 			})
 
 			// Check cache status
@@ -416,8 +419,8 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 			cacheStats.value = stats
 			cacheReady.value = stats.cacheReady
 
-			// Load from cache first if available (instant load)
-			if (stats.cacheReady && stats.items > 0) {
+			// Load from cache first if available (instant load) - but only if not forcing server fetch
+			if (!forceServerFetch && stats.cacheReady && stats.items > 0) {
 				log.debug("Loading initial items from cache (instant)")
 				const cached = await offlineWorker.searchCachedItems(
 					"",
@@ -441,16 +444,19 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 				log.debug(`Fetching items from ${itemGroupFilters.length} filtered groups`)
 				const allItems = await fetchItemsFromGroups(profile, itemGroupFilters)
 
-				if (allItems.length > 0) {
-					replaceAllItems(allItems.slice(0, itemsPerPage.value))
-					totalItemsLoaded.value = allItems.length
-					currentOffset.value = Math.min(itemsPerPage.value, allItems.length)
-					hasMore.value = allItems.length > itemsPerPage.value
+				// Always update items, even if result is empty
+				replaceAllItems(allItems.length > 0 ? allItems.slice(0, itemsPerPage.value) : [])
+				totalItemsLoaded.value = allItems.length
+				currentOffset.value = Math.min(itemsPerPage.value, allItems.length)
+				hasMore.value = allItems.length > itemsPerPage.value
 
+				if (allItems.length > 0) {
 					// Cache ALL filtered items (not just first page)
 					await offlineWorker.cacheItems(allItems)
 					cacheReady.value = true
 					log.success(`Loaded and cached ${allItems.length} filtered items`)
+				} else {
+					log.info('No items found for the selected filter groups')
 				}
 			} else {
 				// No filters - fetch first batch only
