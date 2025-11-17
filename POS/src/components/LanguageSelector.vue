@@ -257,8 +257,12 @@ function selectLanguage(langCode) {
 	width: 16px;
 	height: 16px;
 	color: #9ca3af;
-	transition: transform 0.2s ease;
+	transition: all 0.2s ease;
 	flex-shrink: 0;
+}
+
+.switcher-button:hover .chevron-icon {
+	color: #a855f7;
 }
 
 .chevron-icon.rotate {
@@ -408,5 +412,30 @@ function selectLanguage(langCode) {
 
 :global(.rtl) .lang-info {
 	flex-direction: row-reverse;
+}
+
+/* RTL: Dropdown positioning - align to left instead of right */
+:global(html[dir="rtl"]) .dropdown-menu,
+:global(body.rtl) .dropdown-menu {
+	right: auto;
+	left: 0;
+}
+
+/* RTL: Dropdown header text alignment */
+:global(html[dir="rtl"]) .dropdown-header,
+:global(body.rtl) .dropdown-header {
+	text-align: right;
+}
+
+/* RTL: Dropdown items - reverse layout for proper alignment */
+:global(html[dir="rtl"]) .dropdown-item,
+:global(body.rtl) .dropdown-item {
+	flex-direction: row-reverse;
+}
+
+/* RTL: Language name alignment */
+:global(html[dir="rtl"]) .lang-name,
+:global(body.rtl) .lang-name {
+	text-align: right;
 }
 </style>

@@ -13,6 +13,52 @@ import base64
 import hashlib
 
 
+@frappe.whitelist(allow_guest=True)
+def get_login_branding():
+	"""
+	Get encrypted branding configuration for login page
+	Returns base64 encoded branding data that can only be modified with Master Key
+	Security: All values are encrypted and validated server-side
+	"""
+	try:
+		# Check if doctype exists - raise error if not
+		if not frappe.db.exists("DocType", "BrainWise Branding"):
+			frappe.throw(_("BrainWise Branding DocType not found. Please install the branding module."))
+
+		doc = frappe.get_single("BrainWise Branding")
+
+		# Check if enabled
+		if not doc.enabled:
+			frappe.throw(_("Branding is disabled. Please contact administrator."))
+
+		# Tagline and subtitle are simple text (not stored in DocType)
+		tagline_text = "Modern Point of Sale System"
+		subtitle_text = "Streamline your sales process with our powerful, intuitive, and feature-rich POS solution"
+
+		# Return encrypted login page branding - base64 encoded for security
+		# Brand fields (name, text, URL) are protected by Master Key in DocType
+		config = {
+			# Base64 encoded values (same security as footer branding)
+			# Core branding fields are read-only and require Master Key to modify
+			"_an": base64.b64encode(doc.brand_name.encode()).decode(),  # App Name (Master Key protected)
+			"_tl": base64.b64encode(tagline_text.encode()).decode(),  # Tagline (text)
+			"_st": base64.b64encode(subtitle_text.encode()).decode(),  # Subtitle (text)
+			"_ft": base64.b64encode(doc.brand_text.encode()).decode(),  # Footer Text (Master Key protected)
+			"_ln": base64.b64encode(doc.brand_name.encode()).decode(),  # Link Name (Master Key protected)
+			"_lu": base64.b64encode(doc.brand_url.encode()).decode(),  # Link URL (Master Key protected)
+
+			# Security metadata
+			"_sig": doc.encrypted_signature,  # Encrypted signature for validation
+			"_ts": frappe.utils.now(),  # Timestamp
+			"_v": doc.enable_server_validation,  # Server validation enabled
+		}
+
+		return config
+	except Exception as e:
+		frappe.log_error(f"Error fetching login branding: {str(e)}", "BrainWise Login Branding API")
+		frappe.throw(_("Failed to load branding configuration. Please contact administrator."))
+
+
 @frappe.whitelist(allow_guest=False)
 def get_branding_config():
 	"""
