@@ -175,6 +175,20 @@ async function initializeApp() {
 		session.user = null
 	}
 
+	// Initialize translations after CSRF token is ready
+	if (window.$initTranslations) {
+		try {
+			await window.$initTranslations()
+			if (import.meta.env.DEV) {
+				console.log("Translations initialized")
+			}
+		} catch (error) {
+			if (import.meta.env.DEV) {
+				console.warn("Failed to initialize translations:", error)
+			}
+		}
+	}
+
 	// NOW register router after session.user is set
 	if (import.meta.env.DEV) {
 		console.log("[Main] Registering router with auth state:", session.isLoggedIn)

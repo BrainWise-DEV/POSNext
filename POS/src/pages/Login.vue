@@ -1,5 +1,10 @@
 <template>
-  <div class="min-h-screen flex flex-col items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
+  <div class="min-h-screen flex flex-col items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8 relative">
+    <!-- Language Switcher - Fixed Top Right -->
+    <div class="fixed top-6 right-6 z-50">
+      <LanguageSelector />
+    </div>
+
     <div class="max-w-md w-full space-y-8">
       <div class="text-center">
         <h2 class="mt-6 text-3xl font-extrabold text-gray-900">
@@ -92,34 +97,17 @@
       v-model="showShiftDialog"
       @shift-opened="handleShiftOpened"
     />
-
-    <!-- Language Switcher Footer -->
-    <div class="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 py-3 px-4">
-      <div class="max-w-md mx-auto flex items-center justify-center gap-2">
-        <svg class="h-5 w-5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" />
-        </svg>
-        <select
-          v-model="selectedLanguage"
-          @change="handleLanguageChange"
-          class="form-select text-sm border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
-        >
-          <option v-for="lang in availableLanguages" :key="lang.language_code" :value="lang.language_code">
-            {{ lang.language_name }}
-          </option>
-        </select>
-      </div>
-    </div>
   </div>
 </template>
 
 <script setup>
 import { usePOSCartStore } from "@/stores/posCart"
 import { usePOSUIStore } from "@/stores/posUI"
-import { createResource, FeatherIcon } from "frappe-ui"
+import { FeatherIcon } from "frappe-ui"
 import { onMounted, reactive, ref, watch } from "vue"
 import { useRouter } from "vue-router"
 import ShiftOpeningDialog from "../components/ShiftOpeningDialog.vue"
+import LanguageSelector from "../components/LanguageSelector.vue"
 import { useShift } from "../composables/useShift"
 import { session } from "../data/session"
 import { ensureCSRFToken } from "../utils/csrf"
@@ -137,17 +125,6 @@ const loginForm = reactive({
 
 const showShiftDialog = ref(false)
 const showPassword = ref(false)
-const availableLanguages = ref([])
-const selectedLanguage = ref(localStorage.getItem("preferredLanguage") || "en")
-
-// Fetch available languages
-const languagesResource = createResource({
-	url: "pos_next.api.get_available_languages",
-	auto: true,
-	onSuccess(data) {
-		availableLanguages.value = data
-	},
-})
 
 // Reset state when login page mounts
 onMounted(() => {
@@ -174,12 +151,6 @@ onMounted(() => {
 		isOpen: false,
 	}
 	localStorage.removeItem("pos_shift_data")
-
-	// Set initial RTL direction based on stored language
-	const language = localStorage.getItem("preferredLanguage") || "en"
-	const rtlLanguages = ["ar", "he", "fa", "ur"]
-	document.documentElement.dir = rtlLanguages.includes(language) ? "rtl" : "ltr"
-	document.documentElement.lang = language
 })
 
 function submit() {
@@ -220,35 +191,6 @@ watch(
 function handleShiftOpened() {
 	// Navigate to POS sale after shift is opened
 	router.push({ name: "POSSale" })
-}
-
-// Handle language change
-async function handleLanguageChange() {
-	const language = selectedLanguage.value
-	if (!language) return
-
-	// Store preference
-	localStorage.setItem("preferredLanguage", language)
-
-	// Set document direction for RTL languages
-	const rtlLanguages = ["ar", "he", "fa", "ur"]
-	document.documentElement.dir = rtlLanguages.includes(language) ? "rtl" : "ltr"
-	document.documentElement.lang = language
-
-	// Fetch new translations
-	try {
-		const translationsResource = createResource({
-			url: "pos_next.api.get_translations",
-			params: { language },
-		})
-		await translationsResource.fetch()
-		window.translatedMessages = translationsResource.data
-
-		// Force page reload to apply translations
-		window.location.reload()
-	} catch (error) {
-		console.error("Failed to load translations:", error)
-	}
 }
 
 // Clear error when user starts typing
