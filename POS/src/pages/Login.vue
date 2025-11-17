@@ -3,10 +3,10 @@
     <div class="max-w-md w-full space-y-8">
       <div class="text-center">
         <h2 class="mt-6 text-3xl font-extrabold text-gray-900">
-          Sign in to POS Next
+          {{ __("Sign in to POS Next") }}
         </h2>
         <p class="mt-2 text-sm text-gray-600">
-          Access your point of sale system
+          {{ __("Access your point of sale system") }}
         </p>
       </div>
 
@@ -21,7 +21,7 @@
               </div>
               <div class="ml-3">
                 <h3 class="text-sm font-medium text-red-800">
-                  Login Failed
+                  {{ __("Login Failed") }}
                 </h3>
                 <div class="mt-2 text-sm text-red-700">
                   <p>{{ session.login.error }}</p>
@@ -36,22 +36,22 @@
               required
               name="email"
               type="text"
-              placeholder="Enter your username or email"
-              label="User ID / Email"
+              :placeholder="__('Enter your username or email')"
+              :label="__('User ID / Email')"
               :disabled="session.login.loading"
             />
           </div>
 
           <div>
             <label class="block">
-              <span class="mb-2 block text-sm leading-4 text-gray-700">Password</span>
+              <span class="mb-2 block text-sm leading-4 text-gray-700">{{ __("Password") }}</span>
               <div class="relative">
                 <input
                   v-model="loginForm.password"
                   required
                   name="password"
                   :type="showPassword ? 'text' : 'password'"
-                  placeholder="Enter your password"
+                  :placeholder="__('Enter your password')"
                   :disabled="session.login.loading"
                   class="form-input block w-full border-gray-400 placeholder-gray-500 pr-10"
                 />
@@ -61,7 +61,7 @@
                   class="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-600 hover:text-gray-800 transition-colors focus:outline-none"
                   :disabled="session.login.loading"
                   tabindex="-1"
-                  :aria-label="showPassword ? 'Hide password' : 'Show password'"
+                  :aria-label="showPassword ? __('Hide password') : __('Show password')"
                 >
                   <FeatherIcon
                     :name="showPassword ? 'eye-off' : 'eye'"
@@ -80,7 +80,7 @@
               class="w-full py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
               type="submit"
             >
-              {{ session.login.loading ? 'Signing in...' : 'Sign in' }}
+              {{ session.login.loading ? __('Signing in...') : __('Sign in') }}
             </Button>
           </div>
         </form>
@@ -92,13 +92,31 @@
       v-model="showShiftDialog"
       @shift-opened="handleShiftOpened"
     />
+
+    <!-- Language Switcher Footer -->
+    <div class="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 py-3 px-4">
+      <div class="max-w-md mx-auto flex items-center justify-center gap-2">
+        <svg class="h-5 w-5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" />
+        </svg>
+        <select
+          v-model="selectedLanguage"
+          @change="handleLanguageChange"
+          class="form-select text-sm border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
+        >
+          <option v-for="lang in availableLanguages" :key="lang.language_code" :value="lang.language_code">
+            {{ lang.language_name }}
+          </option>
+        </select>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { usePOSCartStore } from "@/stores/posCart"
 import { usePOSUIStore } from "@/stores/posUI"
-import { FeatherIcon } from "frappe-ui"
+import { createResource, FeatherIcon } from "frappe-ui"
 import { onMounted, reactive, ref, watch } from "vue"
 import { useRouter } from "vue-router"
 import ShiftOpeningDialog from "../components/ShiftOpeningDialog.vue"
@@ -119,6 +137,17 @@ const loginForm = reactive({
 
 const showShiftDialog = ref(false)
 const showPassword = ref(false)
+const availableLanguages = ref([])
+const selectedLanguage = ref(localStorage.getItem("preferredLanguage") || "en")
+
+// Fetch available languages
+const languagesResource = createResource({
+	url: "pos_next.api.get_available_languages",
+	auto: true,
+	onSuccess(data) {
+		availableLanguages.value = data
+	},
+})
 
 // Reset state when login page mounts
 onMounted(() => {
@@ -145,6 +174,12 @@ onMounted(() => {
 		isOpen: false,
 	}
 	localStorage.removeItem("pos_shift_data")
+
+	// Set initial RTL direction based on stored language
+	const language = localStorage.getItem("preferredLanguage") || "en"
+	const rtlLanguages = ["ar", "he", "fa", "ur"]
+	document.documentElement.dir = rtlLanguages.includes(language) ? "rtl" : "ltr"
+	document.documentElement.lang = language
 })
 
 function submit() {
@@ -185,6 +220,35 @@ watch(
 function handleShiftOpened() {
 	// Navigate to POS sale after shift is opened
 	router.push({ name: "POSSale" })
+}
+
+// Handle language change
+async function handleLanguageChange() {
+	const language = selectedLanguage.value
+	if (!language) return
+
+	// Store preference
+	localStorage.setItem("preferredLanguage", language)
+
+	// Set document direction for RTL languages
+	const rtlLanguages = ["ar", "he", "fa", "ur"]
+	document.documentElement.dir = rtlLanguages.includes(language) ? "rtl" : "ltr"
+	document.documentElement.lang = language
+
+	// Fetch new translations
+	try {
+		const translationsResource = createResource({
+			url: "pos_next.api.get_translations",
+			params: { language },
+		})
+		await translationsResource.fetch()
+		window.translatedMessages = translationsResource.data
+
+		// Force page reload to apply translations
+		window.location.reload()
+	} catch (error) {
+		console.error("Failed to load translations:", error)
+	}
 }
 
 // Clear error when user starts typing

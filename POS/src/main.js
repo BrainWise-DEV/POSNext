@@ -12,6 +12,7 @@ import {
 	onCSRFTokenRefresh,
 } from "./utils/csrf"
 import { offlineWorker } from "./utils/offline/workerClient"
+import translationPlugin from "./translation"
 
 import {
 	Alert,
@@ -113,6 +114,7 @@ async function initializeApp() {
 	app.use(pinia)
 	app.use(resourcesPlugin)
 	app.use(pageMetaPlugin)
+	app.use(translationPlugin)
 
 	for (const key in globalComponents) {
 		app.component(key, globalComponents[key])
