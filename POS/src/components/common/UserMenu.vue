@@ -7,8 +7,14 @@
 			<div class="text-right hidden sm:block">
 				<p class="text-sm font-semibold text-gray-900">{{ userName }}</p>
 			</div>
-			<div class="w-9 h-9 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center shadow-md">
-				<span class="text-sm font-bold text-white">{{ userInitials }}</span>
+			<div class="w-9 h-9 rounded-full flex items-center justify-center shadow-md overflow-hidden" :class="profileImage ? 'bg-gray-200' : 'bg-gradient-to-br from-blue-500 to-blue-600'">
+				<img
+					v-if="profileImage"
+					:src="profileImage"
+					:alt="userName"
+					class="w-full h-full object-cover"
+				/>
+				<span v-else class="text-sm font-bold text-white">{{ userInitials }}</span>
 			</div>
 			<svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
@@ -22,9 +28,20 @@
 			class="absolute right-0 mt-2 w-60 bg-white rounded-xl shadow-xl border border-gray-200 py-2 z-[250]"
 		>
 			<!-- User Info Header -->
-			<div class="px-4 py-3 border-b border-gray-100">
-				<p class="text-sm font-semibold text-gray-900">{{ userName }}</p>
-				<p v-if="profileName" class="text-xs text-gray-500 mt-0.5">{{ profileName }}</p>
+			<div class="px-4 py-3 border-b border-gray-100 flex items-center space-x-3">
+				<div class="w-10 h-10 rounded-full flex items-center justify-center shadow-md overflow-hidden flex-shrink-0" :class="profileImage ? 'bg-gray-200' : 'bg-gradient-to-br from-blue-500 to-blue-600'">
+					<img
+						v-if="profileImage"
+						:src="profileImage"
+						:alt="userName"
+						class="w-full h-full object-cover"
+					/>
+					<span v-else class="text-sm font-bold text-white">{{ userInitials }}</span>
+				</div>
+				<div class="flex-1 min-w-0">
+					<p class="text-sm font-semibold text-gray-900 truncate">{{ userName }}</p>
+					<p v-if="profileName" class="text-xs text-gray-500 mt-0.5 truncate">{{ profileName }}</p>
+				</div>
 			</div>
 
 			<!-- Menu Items -->
@@ -65,6 +82,10 @@ const props = defineProps({
 		required: true,
 	},
 	profileName: {
+		type: String,
+		default: null,
+	},
+	profileImage: {
 		type: String,
 		default: null,
 	},

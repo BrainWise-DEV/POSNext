@@ -1,10 +1,14 @@
 import { call } from "@/utils/apiWrapper"
+import { logger } from "@/utils/logger"
+
+const log = logger.create('PrintInvoice')
 
 /**
  * Print invoice using Frappe's print format system
  * @param {Object} invoiceData - The invoice document data
  * @param {string} printFormat - The print format name (optional)
  * @param {string} letterhead - The letterhead name (optional)
+ * @note Use "POS Next Receipt" format for thermal printer (80mm) or configure via POS Profile
  */
 export async function printInvoice(
 	invoiceData,
@@ -35,7 +39,7 @@ export async function printInvoice(
 		}
 
 		// Open PDF in new window - browser will handle print dialog
-		const printUrl = `/api/method/frappe.utils.print_format.download_pdf?${params.toString()}`
+		const printUrl = `/printview?${params.toString()}`
 		const printWindow = window.open(printUrl, "_blank", "width=800,height=600")
 
 		if (!printWindow) {
@@ -46,7 +50,7 @@ export async function printInvoice(
 
 		return true
 	} catch (error) {
-		console.error("Error printing with Frappe print format:", error)
+		log.error("Error printing with Frappe print format:", error)
 		// Fallback to custom print format
 		return printInvoiceCustom(invoiceData)
 	}
@@ -452,10 +456,9 @@ export async function printInvoiceByName(
 	letterhead = null,
 ) {
 	try {
-		// Fetch the invoice document
-		const invoiceDoc = await call("frappe.client.get", {
-			doctype: "Sales Invoice",
-			name: invoiceName,
+		// Fetch the invoice document using proper POS API endpoint
+		const invoiceDoc = await call("pos_next.api.invoices.get_invoice", {
+			invoice_name: invoiceName,
 		})
 
 		if (!invoiceDoc) {
@@ -475,7 +478,7 @@ export async function printInvoiceByName(
 					letterhead = letterhead || posProfileDoc.letter_head
 				}
 			} catch (error) {
-				console.warn("Could not fetch POS Profile print settings:", error)
+				log.warn("Could not fetch POS Profile print settings:", error)
 				// Continue with default print format
 			}
 		}
@@ -483,7 +486,7 @@ export async function printInvoiceByName(
 		// Print the invoice
 		return await printInvoice(invoiceDoc, printFormat, letterhead)
 	} catch (error) {
-		console.error("Error fetching invoice for print:", error)
+		log.error("Error fetching invoice for print:", error)
 		throw error
 	}
 }

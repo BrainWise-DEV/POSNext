@@ -88,22 +88,11 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 			const needsRefresh =
 				!stats.lastSync || Date.now() - stats.lastSync > 24 * 60 * 60 * 1000
 
-			if (!cacheReady || needsRefresh) {
-				// NOTE: Items are now handled by itemStore's background sync
-				// to prevent duplicate fetches and improve performance.
-				// Only cache customers and payment methods here.
-
-				showSuccess("Loading customers and payment methods for offline use...")
-
-				// Fetch customers and payment methods (items handled by itemStore)
-				const [customersData, paymentMethodsData] =
-					await Promise.all([
-						cacheCustomersFromServer(currentProfile.name),
-						cachePaymentMethodsFromServer(currentProfile.name),
-					])
-
-				// Cache customers using composable
-				await cacheData([], customersData.customers || [])
+			// ALWAYS load payment methods at startup for reliable offline support
+			// This ensures payment modes are available even if cache is considered "ready"
+			console.log('[POSSync] Loading payment methods for offline use...')
+			try {
+				const paymentMethodsData = await cachePaymentMethodsFromServer(currentProfile.name)
 
 				// Cache payment methods using worker
 				if (paymentMethodsData.payment_methods && paymentMethodsData.payment_methods.length > 0) {
@@ -113,7 +102,25 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 						pos_profile: currentProfile.name,
 					}))
 					await offlineWorker.cachePaymentMethods(methodsWithProfile)
+					console.log(`[POSSync] Cached ${methodsWithProfile.length} payment methods for offline use`)
 				}
+			} catch (error) {
+				console.error('[POSSync] Error loading payment methods:', error)
+				// Don't throw - continue with other data loading
+			}
+
+			if (!cacheReady || needsRefresh) {
+				// NOTE: Items are now handled by itemStore's background sync
+				// to prevent duplicate fetches and improve performance.
+				// Only cache customers here (payment methods already loaded above).
+
+				showSuccess("Loading customers for offline use...")
+
+				// Fetch customers (items handled by itemStore, payment methods already loaded above)
+				const customersData = await cacheCustomersFromServer(currentProfile.name)
+
+				// Cache customers using composable
+				await cacheData([], customersData.customers || [])
 
 				showSuccess("Data is ready for offline use")
 			}

@@ -117,22 +117,6 @@
 								</div>
 							</div>
 						</div>
-
-						<!-- Items Preview (collapsed) -->
-						<div v-if="expandedInvoice === invoice.name" class="mt-3 pt-3 border-t border-gray-100">
-							<div class="space-y-1">
-								<div
-									v-for="(item, idx) in invoice.items"
-									:key="idx"
-									class="flex justify-between text-xs py-1"
-								>
-									<span class="text-gray-700">{{ item.item_name }}</span>
-									<span class="text-gray-600">
-										{{ item.qty }} × {{ formatCurrency(item.rate) }} = {{ formatCurrency(item.amount) }}
-									</span>
-								</div>
-							</div>
-						</div>
 					</div>
 				</div>
 
@@ -153,7 +137,6 @@
 </template>
 
 <script setup>
-import { printInvoiceByName } from "@/utils/printInvoice"
 import { useToast } from "@/composables/useToast"
 import { useFormatters } from "@/composables/useFormatters"
 import { Button, Dialog, Input, createResource } from "frappe-ui"
@@ -167,12 +150,11 @@ const props = defineProps({
 	posProfile: String,
 })
 
-const emit = defineEmits(["update:modelValue", "create-return"])
+const emit = defineEmits(["update:modelValue", "create-return", "view-invoice", "print-invoice"])
 
 const show = ref(props.modelValue)
 const invoices = ref([])
 const searchTerm = ref("")
-const expandedInvoice = ref(null)
 const page = ref(0)
 const pageSize = 20
 const hasMore = ref(true)
@@ -261,24 +243,11 @@ function searchInvoices() {
 }
 
 function viewInvoice(invoice) {
-	if (expandedInvoice.value === invoice.name) {
-		expandedInvoice.value = null
-	} else {
-		expandedInvoice.value = invoice.name
-	}
+	emit("view-invoice", invoice)
 }
 
-async function printInvoice(invoice) {
-	try {
-		await printInvoiceByName(invoice.name)
-	} catch (error) {
-		console.error("Error printing invoice:", error)
-		window.frappe.msgprint({
-			title: "Error",
-			message: "Failed to print invoice",
-			indicator: "red",
-		})
-	}
+function printInvoice(invoice) {
+	emit("print-invoice", invoice)
 }
 
 function createReturn(invoice) {

@@ -7,13 +7,82 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] - 2025-11-17
+
+### Added
+- **User-Controlled Sorting UI**
+  - Added interactive sort dropdown with adjustments icon next to view controls
+  - Toggle-based sorting: click to cycle between ascending/descending/none
+  - Sort by name, quantity, item group, price, and item code
+  - Visual feedback with active state icons and tooltips
+  - Conditional sorting: only sorts when user explicitly triggers
+  - Easy to extend with new sort fields
+- **First/Last Page Navigation**
+  - Added First/Last page navigation buttons to both grid and list views
+  - First button (« on mobile) jumps to page 1
+  - Last button (» on mobile) jumps to last page
+  - Buttons disabled when already on first/last page
+
+### Changed
+- **Payment Methods Preloading**
+  - Payment methods now always load at application startup
+  - Ensures payment modes are available for offline mode
+  - Removed conditional cache check that could skip loading
+  - Added comprehensive logging for payment methods caching
+  - Better offline reliability for payment processing
+
 ### Fixed
+- **Payment Dialog UX Improvements**
+  - Fixed payment amount increment step from 0.01 to 5 for better user experience
+  - Changed increment applies to both payment entry inputs and custom amount fields
+  - More logical increments for typical payment amounts
+- **Payment Dialog Layout**
+  - Fixed button alignment in payment dialog footer
+  - All action buttons now appear on the same row
+  - "Clear All" button positioned on left, action buttons on right
+  - Improved visual consistency and professional appearance
+- **Print Format Discount Display**
+  - Fixed print format condition to handle negative discount_amount values
+  - Changed condition from `> 0` to checking if discount exists
+  - Added absolute value filter for correct display regardless of sign
+  - Fixed issue where Frappe's print pipeline negates discount_amount causing display failure
+- **Pagination Display Logic**
+  - Fixed "All items loaded" message to only show on last page or when all items fit in one page
+  - Previously showed incorrectly on first page
 - **Browser Compatibility**
   - Fixed "crypto.randomUUID is not a function" error in POS Events Store
-  - Added robust UUID generation with multi-tier fallback strategy (native API → Crypto API → Math.random)
-  - Implemented RFC4122 v4 compliant UUID generation for older browsers and environments
-  - Performance optimization with pre-computed byte-to-hex lookup table
+  - Implemented multi-tier UUID generation strategy for older browsers
+  - RFC4122 v4 compliant fallback using Crypto API and Math.random()
   - Support for globalThis, window.crypto, and legacy environments
+
+### Improved
+- **Shift Closing Dialog Performance & Accessibility**
+  - Fixed hideExpectedAmount reactivity bug using storeToRefs
+  - Added comprehensive prop validation with type checking
+  - Converted template function calls to computed properties for better performance
+  - Extracted complex nested conditions to readable computed properties
+  - Added ARIA labels for screen readers and keyboard navigation
+  - Improved error handling with user-friendly messages and dismiss action
+  - Added loading states and input validation
+- **Item Sorting Implementation**
+  - Refactored from 265 lines of repetitive code to 78 lines using v-for loop
+  - 70% code reduction in dropdown implementation
+  - Extracted sort configuration into SORT_OPTIONS and SORT_ICONS constants
+  - O(n log n) sorting only on user action, not every render
+  - Improved maintainability: new sort options require single array entry
+- **Quantity-Based Sorting**
+  - Items sorted by stock quantity in descending order (highest first)
+  - Out-of-stock items automatically move to the bottom
+  - Uses JavaScript's native Timsort algorithm for optimal performance
+  - O(n log n) worst case, O(n) best case for nearly-sorted data
+  - Performance: 100 items ~1ms, 500 items ~3ms, 1000 items ~5ms
+  - Works for regular stock items and Product Bundles
+- **Bundle Stock Display**
+  - Show stock badge only for stock items and bundles
+  - Display "N/A" for non-stock items in list view
+  - Add bundle-specific UOM label in tooltips
+  - Skip validation for batch/serial items (handled in dialog)
+  - Differentiate error messages between bundles and regular items
 
 ## [1.7.1] - 2025-11-13
 
@@ -368,17 +437,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Shift management
 - Stock tracking
 
-[Unreleased]: https://github.com/yourusername/pos_next/compare/v1.7.1...HEAD
-[1.7.1]: https://github.com/yourusername/pos_next/compare/v1.7.0...v1.7.1
-[1.7.0]: https://github.com/yourusername/pos_next/compare/v1.6.1...v1.7.0
-[1.6.1]: https://github.com/yourusername/pos_next/compare/v1.6.0...v1.6.1
-[1.6.0]: https://github.com/yourusername/pos_next/compare/v1.5.0...v1.6.0
-[1.5.0]: https://github.com/yourusername/pos_next/compare/v1.4.0...v1.5.0
-[1.4.0]: https://github.com/yourusername/pos_next/compare/v1.3.0...v1.4.0
-[1.3.0]: https://github.com/yourusername/pos_next/compare/v1.2.0...v1.3.0
-[1.2.0]: https://github.com/yourusername/pos_next/compare/v1.1.1...v1.2.0
-[1.1.1]: https://github.com/yourusername/pos_next/compare/v1.1.0...v1.1.1
-[1.1.0]: https://github.com/yourusername/pos_next/compare/v1.0.2...v1.1.0
-[1.0.2]: https://github.com/yourusername/pos_next/compare/v1.0.1...v1.0.2
-[1.0.1]: https://github.com/yourusername/pos_next/compare/v1.0.0...v1.0.1
-[1.0.0]: https://github.com/yourusername/pos_next/releases/tag/v1.0.0
+[Unreleased]: https://github.com/BrainWise-DEV/POSNext/compare/v1.8.0...HEAD
+[1.8.0]: https://github.com/BrainWise-DEV/POSNext/compare/v1.7.1...v1.8.0
+[1.7.1]: https://github.com/BrainWise-DEV/POSNext/compare/v1.7.0...v1.7.1
+[1.7.0]: https://github.com/BrainWise-DEV/POSNext/compare/v1.6.1...v1.7.0
+[1.6.1]: https://github.com/BrainWise-DEV/POSNext/compare/v1.6.0...v1.6.1
+[1.6.0]: https://github.com/BrainWise-DEV/POSNext/compare/v1.5.0...v1.6.0
+[1.5.0]: https://github.com/BrainWise-DEV/POSNext/compare/v1.4.0...v1.5.0
+[1.4.0]: https://github.com/BrainWise-DEV/POSNext/compare/v1.3.0...v1.4.0
+[1.3.0]: https://github.com/BrainWise-DEV/POSNext/compare/v1.2.0...v1.3.0
+[1.2.0]: https://github.com/BrainWise-DEV/POSNext/compare/v1.1.1...v1.2.0
+[1.1.1]: https://github.com/BrainWise-DEV/POSNext/compare/v1.1.0...v1.1.1
+[1.1.0]: https://github.com/BrainWise-DEV/POSNext/compare/v1.0.2...v1.1.0
+[1.0.2]: https://github.com/BrainWise-DEV/POSNext/compare/v1.0.1...v1.0.2
+[1.0.1]: https://github.com/BrainWise-DEV/POSNext/compare/v1.0.0...v1.0.1
+[1.0.0]: https://github.com/BrainWise-DEV/POSNext/releases/tag/v1.0.0

@@ -216,6 +216,7 @@
 					<UserMenu
 						:user-name="userName"
 						:profile-name="profileName"
+						:profile-image="userImage"
 						@logout="$emit('logout')"
 						@menu-opened="$emit('menu-opened')"
 						@menu-closed="$emit('menu-closed')"
@@ -309,6 +310,10 @@ const props = defineProps({
 	userName: {
 		type: String,
 		required: true,
+	},
+	userImage: {
+		type: String,
+		default: null,
 	},
 	isOffline: {
 		type: Boolean,

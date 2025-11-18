@@ -144,6 +144,86 @@
 						</svg>
 					</button>
 				</div>
+
+				<!-- Sort Dropdown -->
+				<div class="relative z-50">
+					<button
+						@click="toggleSortDropdown"
+						:class="[
+							'p-1.5 sm:p-2 rounded-lg transition-[background-color,box-shadow] duration-75 touch-manipulation border',
+							sortBy
+								? 'bg-blue-50 border-blue-400 text-blue-700 shadow-sm'
+								: 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50 active:bg-gray-100'
+						]"
+						:title="sortBy ? `Sorted by ${getSortLabel(sortBy)} (${sortOrder === 'asc' ? 'A-Z' : 'Z-A'})` : 'Sort items'"
+						:aria-label="'Sort items'"
+					>
+						<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/>
+						</svg>
+					</button>
+
+					<!-- Dropdown Menu -->
+					<div
+						v-if="showSortDropdown"
+						@click.stop
+						class="absolute right-0 mt-1 w-56 bg-white rounded-lg shadow-xl border border-gray-200 z-[9999]"
+						style="box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);"
+					>
+						<div class="py-2">
+							<div class="px-3 py-2 text-xs font-semibold text-gray-500 uppercase border-b border-gray-100">
+								Sort Items
+							</div>
+							<div class="py-1">
+								<!-- Clear Sort -->
+								<button
+									@click="handleSortToggle(null)"
+									:class="[
+										'w-full px-3 py-2 text-sm transition-colors flex items-center justify-between group',
+										!sortBy ? 'bg-blue-50 text-blue-700' : 'text-gray-700 hover:bg-gray-50'
+									]"
+								>
+									<span class="flex items-center gap-2.5">
+										<svg class="w-4 h-4 text-gray-400 group-hover:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+										</svg>
+										<span>No Sorting</span>
+									</span>
+								</button>
+
+								<div class="h-px bg-gray-100 my-1"></div>
+
+								<!-- Sort Options Loop -->
+								<button
+									v-for="option in SORT_OPTIONS"
+									:key="option.field"
+									@click="handleSortToggle(option.field)"
+									:class="[
+										'w-full px-3 py-2 text-sm transition-colors flex items-center justify-between group',
+										sortBy === option.field ? 'bg-blue-50 text-blue-700' : 'text-gray-700 hover:bg-gray-50'
+									]"
+								>
+									<span class="flex items-center gap-2.5">
+										<svg class="w-4 h-4 text-gray-400 group-hover:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="option.icon"/>
+										</svg>
+										<span>{{ option.label }}</span>
+									</span>
+									<!-- Sort direction icon -->
+									<svg
+										class="w-5 h-5"
+										:class="sortBy === option.field ? 'text-blue-600' : 'text-gray-300'"
+										fill="none"
+										stroke="currentColor"
+										viewBox="0 0 24 24"
+									>
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="SORT_ICONS[getSortIconState(option.field)]"/>
+									</svg>
+								</button>
+							</div>
+						</div>
+					</div>
+				</div>
 			</div>
 		</div>
 
@@ -619,6 +699,8 @@ const {
 	hasMore,
 	cacheSyncing,
 	cacheStats,
+	sortBy,
+	sortOrder,
 } = storeToRefs(itemStore)
 
 // Local state
@@ -634,6 +716,7 @@ const scannerInputDetected = ref(false) // Track if current input is from scanne
 const autoSearchTimer = ref(null) // Timer for auto-search when typing stops
 const lastAutoSwitchCount = ref(0)
 const lastFilterSignature = ref("")
+const showSortDropdown = ref(false) // Sort dropdown visibility
 
 // Infinite scroll refs
 const gridScrollContainer = ref(null)
@@ -664,6 +747,41 @@ const SEARCH_PLACEHOLDERS = Object.freeze({
 	auto: "Auto-Add ON - Type or scan barcode",
 	scanner: "Scanner ON - Enable Auto for automatic addition",
 	default: "Search by item code, name or scan barcode",
+})
+
+// Sort configuration
+const SORT_OPTIONS = Object.freeze([
+	{
+		field: 'name',
+		label: 'Name',
+		icon: 'M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z'
+	},
+	{
+		field: 'quantity',
+		label: 'Quantity',
+		icon: 'M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4'
+	},
+	{
+		field: 'item_group',
+		label: 'Item Group',
+		icon: 'M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10'
+	},
+	{
+		field: 'price',
+		label: 'Price',
+		icon: 'M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z'
+	},
+	{
+		field: 'item_code',
+		label: 'Item Code',
+		icon: 'M7 20l4-16m2 16l4-16M6 9h14M4 15h14'
+	}
+])
+
+const SORT_ICONS = Object.freeze({
+	ascending: 'M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12',
+	descending: 'M3 4h13M3 8h9m-9 4h9m5-4v12m0 0l-4-4m4 4l4-4',
+	inactive: 'M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4'
 })
 
 const searchMode = computed(() => {
@@ -792,6 +910,9 @@ onMounted(() => {
 		)
 		scrollCleanupFns.value.push(cleanup)
 	}
+
+	// Add click outside listener for sort dropdown
+	document.addEventListener('click', handleClickOutside)
 })
 
 onUnmounted(() => {
@@ -810,6 +931,9 @@ onUnmounted(() => {
 
 	// Clear optimized click handlers
 	optimizedClickHandlers.clear()
+
+	// Remove click outside listener for sort dropdown
+	document.removeEventListener('click', handleClickOutside)
 })
 
 // Handle keydown for barcode scanner detection
@@ -1098,6 +1222,49 @@ function getPaginationRange() {
 	}
 
 	return range
+}
+
+// Sort dropdown functions
+function toggleSortDropdown() {
+	showSortDropdown.value = !showSortDropdown.value
+}
+
+function handleSortToggle(field) {
+	if (!field) {
+		// Clear sorting
+		itemStore.clearSortFilter()
+		showSortDropdown.value = false
+		return
+	}
+
+	// If clicking the same field, toggle between asc/desc
+	if (sortBy.value === field) {
+		const newOrder = sortOrder.value === 'asc' ? 'desc' : 'asc'
+		itemStore.setSortFilter(field, newOrder)
+	} else {
+		// New field - start with ascending
+		itemStore.setSortFilter(field, 'asc')
+	}
+}
+
+function getSortLabel(sortByValue) {
+	const option = SORT_OPTIONS.find(opt => opt.field === sortByValue)
+	return option?.label || sortByValue
+}
+
+function getSortIconState(field) {
+	if (sortBy.value !== field) return 'inactive'
+	return sortOrder.value === 'asc' ? 'ascending' : 'descending'
+}
+
+// Close dropdown when clicking outside
+function handleClickOutside(event) {
+	if (showSortDropdown.value) {
+		const dropdown = event.target.closest('.relative')
+		if (!dropdown || !dropdown.querySelector('button[aria-label="Sort items"]')?.contains(event.target)) {
+			showSortDropdown.value = false
+		}
+	}
 }
 
 // Check if an item can be added to cart based on stock

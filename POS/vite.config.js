@@ -242,7 +242,7 @@ export default defineConfig({
 		allowedHosts: true,
 		port: 8080,
 		proxy: {
-			"^/(app|api|assets|files)": {
+			"^/(app|api|assets|files|printview)": {
 				target: "http://127.0.0.1:8000",
 				ws: true,
 				changeOrigin: true,

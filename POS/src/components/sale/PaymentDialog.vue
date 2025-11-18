@@ -269,7 +269,7 @@
 							<Input
 								v-model="customAmount"
 								type="number"
-								step="0.01"
+								step="5"
 								min="0"
 								placeholder="0.00"
 								class="flex-1"
@@ -307,7 +307,7 @@
 								<input
 									v-model.number="entry.amount"
 									type="number"
-									step="0.01"
+									step="5"
 									min="0"
 									class="w-28 px-3 py-1 text-right font-bold text-gray-900 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
 									@input="updatePaymentEntry(index, $event.target.value)"
@@ -328,20 +328,20 @@
 		</template>
 
 		<template #actions>
-			<div class="flex flex-col w-full space-y-2">
-				<!-- Top Row: Clear All -->
-				<div v-if="paymentEntries.length > 0" class="flex justify-start">
-					<Button
-						variant="subtle"
-						@click="clearAll"
-						theme="red"
-					>
-						Clear All
-					</Button>
-				</div>
+			<div class="flex justify-between items-center w-full space-x-2">
+				<!-- Left: Clear All Button -->
+				<Button
+					v-if="paymentEntries.length > 0"
+					variant="subtle"
+					@click="clearAll"
+					theme="red"
+				>
+					Clear All
+				</Button>
+				<div v-else></div>
 
-				<!-- Bottom Row: Main Action Buttons -->
-				<div class="flex justify-end items-center w-full space-x-2">
+				<!-- Right: Main Action Buttons -->
+				<div class="flex items-center space-x-2">
 					<Button variant="subtle" @click="show = false">
 						Cancel
 					</Button>

@@ -31,6 +31,10 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 	const posProfile = ref(null)
 	const cartItems = ref([])
 
+	// Sorting state - for user-triggered sorting filters
+	const sortBy = ref(null) // Options: 'name', 'quantity', 'item_group', null (no sorting)
+	const sortOrder = ref('asc') // Options: 'asc', 'desc'
+
 	// Lazy loading state - dynamically adjusted based on device performance
 	const currentOffset = ref(0)
 	const itemsPerPage = computed(() => performanceConfig.get("itemsPerPage")) // Reactive: auto-adjusted 20/50/100 based on device
@@ -457,12 +461,53 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 			}
 		})
 
-		// Step 5: Sort by quantity (higher quantity first) - optimized with Timsort
-		// JavaScript's native sort uses Timsort which is O(n log n) worst case
-		// but O(n) best case for nearly-sorted arrays
-		// For 1000 items: ~2-5ms on modern devices
-		// Sorts in-place for memory efficiency
-		itemsWithStock.sort((a, b) => (b.actual_qty ?? 0) - (a.actual_qty ?? 0))
+		// Step 5: Conditional sorting - only sort when user explicitly triggers a sort filter
+		// This optimizes performance by avoiding unnecessary sorting on every render
+		if (sortBy.value) {
+			itemsWithStock.sort((a, b) => {
+				let compareResult = 0
+
+				switch (sortBy.value) {
+					case 'name':
+						// Sort by item_name alphabetically
+						const nameA = (a.item_name || '').toLowerCase()
+						const nameB = (b.item_name || '').toLowerCase()
+						compareResult = nameA.localeCompare(nameB)
+						break
+
+					case 'quantity':
+						// Sort by stock quantity
+						compareResult = (a.actual_qty ?? 0) - (b.actual_qty ?? 0)
+						break
+
+					case 'item_group':
+						// Sort by item_group alphabetically
+						const groupA = (a.item_group || '').toLowerCase()
+						const groupB = (b.item_group || '').toLowerCase()
+						compareResult = groupA.localeCompare(groupB)
+						break
+
+					case 'price':
+						// Sort by price_list_rate (standard selling rate)
+						compareResult = (a.price_list_rate ?? 0) - (b.price_list_rate ?? 0)
+						break
+
+					case 'item_code':
+						// Sort by item_code alphabetically
+						const codeA = (a.item_code || '').toLowerCase()
+						const codeB = (b.item_code || '').toLowerCase()
+						compareResult = codeA.localeCompare(codeB)
+						break
+
+					default:
+						// No sorting
+						compareResult = 0
+				}
+
+				// Apply sort order (asc or desc)
+				return sortOrder.value === 'desc' ? -compareResult : compareResult
+			})
+		}
 
 		return itemsWithStock
 	})
@@ -1226,6 +1271,34 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 		}
 	}
 
+	/**
+	 * Set sorting filter - triggers sorting only when explicitly called
+	 * @param {string} field - Field to sort by: 'name', 'quantity', 'item_group', 'price', 'item_code'
+	 * @param {string} order - Sort order: 'asc' or 'desc' (default: 'asc')
+	 */
+	function setSortFilter(field, order = 'asc') {
+		sortBy.value = field
+		sortOrder.value = order
+
+		// Clear filtered items cache to force re-computation with new sort
+		clearBaseCache()
+
+		log.debug(`Sort filter set: ${field} ${order}`)
+	}
+
+	/**
+	 * Clear sorting filter - returns to unsorted view
+	 */
+	function clearSortFilter() {
+		sortBy.value = null
+		sortOrder.value = 'asc'
+
+		// Clear filtered items cache to force re-computation
+		clearBaseCache()
+
+		log.debug('Sort filter cleared')
+	}
+
 	function cleanup() {
 		// Stop background sync when store is destroyed
 		stopBackgroundCacheSync()
@@ -1354,6 +1427,8 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 		cacheReady,
 		cacheSyncing,
 		cacheStats,
+		sortBy,
+		sortOrder,
 
 		// ========================================================================
 		// COMPUTED PROPERTIES
@@ -1378,6 +1453,8 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 		stopBackgroundCacheSync,
 		cleanup,
 		invalidateCache,
+		setSortFilter,
+		clearSortFilter,
 
 		// ========================================================================
 		// STOCK ACTIONS - Delegates to stock store

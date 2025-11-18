@@ -700,6 +700,33 @@ def submit_invoice(invoice=None, data=None):
 
 
 @frappe.whitelist()
+def get_invoice(invoice_name):
+	"""
+	Get a single invoice with all details for POS.
+
+	Args:
+		invoice_name: Sales Invoice name
+
+	Returns:
+		Complete invoice document with items and payments
+	"""
+	if not invoice_name:
+		frappe.throw(_("Invoice name is required"))
+
+	if not frappe.db.exists("Sales Invoice", invoice_name):
+		frappe.throw(_("Invoice {0} does not exist").format(invoice_name))
+
+	# Check permissions
+	if not frappe.has_permission("Sales Invoice", "read", invoice_name):
+		frappe.throw(_("You don't have permission to view this invoice"))
+
+	# Get invoice document
+	invoice = frappe.get_doc("Sales Invoice", invoice_name)
+
+	return invoice.as_dict()
+
+
+@frappe.whitelist()
 def get_invoices(pos_profile, limit=100):
 	"""
 	Get list of invoices for a POS Profile.

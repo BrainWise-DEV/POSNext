@@ -63,3 +63,4 @@ dev-dist/
 !docs/screenshots/*.png
 !docs/screenshots/*.gif
 .playwright-mcp/*
+TODO.md

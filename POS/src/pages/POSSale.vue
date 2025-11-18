@@ -11,7 +11,8 @@
 				:shift-duration="shiftStore.shiftDuration"
 				:has-open-shift="shiftStore.hasOpenShift"
 				:profile-name="shiftStore.profileName"
-				:user-name="getCurrentUser()"
+				:user-name="userName"
+				:user-image="userImage"
 				:is-offline="offlineStore.isOffline"
 				:is-syncing="offlineStore.isSyncing"
 				:pending-invoices-count="offlineStore.pendingInvoicesCount"
@@ -228,6 +229,11 @@
 						@remove-offer="offer => cartStore.removeOffer(offer, shiftStore.currentProfile, offersDialogRef.value)"
 						@update-uom="cartStore.changeItemUOM"
 						@edit-item="handleEditItem"
+						@view-shift="uiStore.showOpenShiftDialog = true"
+						@show-drafts="uiStore.showDraftDialog = true"
+						@show-history="uiStore.showHistoryDialog = true"
+						@show-return="uiStore.showReturnDialog = true"
+						@close-shift="handleCloseShift()"
 					/>
 				</div>
 			</keep-alive>
@@ -380,6 +386,8 @@
 			v-model="uiStore.showHistoryDialog"
 			:pos-profile="shiftStore.profileName"
 			@create-return="handleCreateReturnFromHistory"
+			@view-invoice="handleViewInvoice"
+			@print-invoice="handlePrintInvoice"
 		/>
 
 		<!-- Offline Invoices Dialog -->
@@ -428,10 +436,18 @@
 			:history-invoices="invoiceHistoryData"
 			:draft-invoices="draftsStore.drafts"
 			@view-invoice="handleViewInvoice"
-			@print-invoice="handlePrintInvoiceFromManagement"
+			@print-invoice="handlePrintInvoice"
 			@load-draft="handleLoadDraftFromManagement"
 			@delete-draft="handleDeleteDraft"
 			@refresh-history="loadInvoiceHistoryData"
+		/>
+
+		<!-- Invoice Detail Dialog -->
+		<InvoiceDetailDialog
+			v-model="showInvoiceDetail"
+			:invoice-name="selectedInvoiceForView"
+			:pos-profile="shiftStore.profileName"
+			@print-invoice="handlePrintInvoice"
 		/>
 
 		<!-- Clear Cart Confirmation Dialog -->
@@ -583,7 +599,7 @@
 					<Button variant="subtle" @click="uiStore.showSuccessDialog = false">
 						Close
 					</Button>
-					<Button variant="solid" theme="blue" @click="handlePrintInvoice">
+					<Button variant="solid" theme="blue" @click="() => { handlePrintInvoice({ name: uiStore.lastInvoiceName }); uiStore.showSuccessDialog = false }">
 						Print Invoice
 					</Button>
 				</div>
@@ -670,12 +686,14 @@ import PromotionManagement from "@/components/sale/PromotionManagement.vue"
 import ReturnInvoiceDialog from "@/components/sale/ReturnInvoiceDialog.vue"
 import POSSettings from "@/components/settings/POSSettings.vue"
 import InvoiceManagement from "@/components/invoices/InvoiceManagement.vue"
+import InvoiceDetailDialog from "@/components/invoices/InvoiceDetailDialog.vue"
 import { useRealtimeStock } from "@/composables/useRealtimeStock"
 import { usePOSEvents } from "@/composables/usePOSEvents"
 import { session } from "@/data/session"
+import { useUserData } from "@/data/user"
 import { parseError } from "@/utils/errorHandler"
 import { offlineWorker } from "@/utils/offline/workerClient"
-import { printInvoiceByName } from "@/utils/printInvoice"
+import { printInvoice, printInvoiceByName } from "@/utils/printInvoice"
 import { Button, Dialog, createResource } from "frappe-ui"
 import { call } from "@/utils/apiWrapper"
 import { computed, onMounted, onUnmounted, ref, watch } from "vue"
@@ -715,6 +733,9 @@ const { showSuccess, showError, showWarning } = useToast()
 // Initialize logger
 const log = logger.create('POSSale')
 
+// User data composable
+const { userName, userImage } = useUserData()
+
 // Component refs
 const itemsSelectorRef = ref(null)
 const offersDialogRef = ref(null)
@@ -749,6 +770,10 @@ const showPOSSettings = ref(false)
 
 // Invoice Management dialog
 const showInvoiceManagement = ref(false)
+
+// Invoice Detail dialog
+const showInvoiceDetail = ref(false)
+const selectedInvoiceForView = ref(null)
 
 // Invoice history data (used by InvoiceManagement component)
 const invoiceHistoryData = ref([])
@@ -1503,7 +1528,7 @@ async function handlePaymentCompleted(paymentData) {
 
 				if (shiftStore.autoPrintEnabled) {
 					try {
-						await printInvoiceByName(invoiceName)
+						await handlePrintInvoice({ name: invoiceName })
 						showSuccess(`Invoice ${invoiceName} created and sent to printer`)
 					} catch (error) {
 						log.error("Auto-print error:", error)
@@ -1610,29 +1635,8 @@ function handleCloseShift() {
 	uiStore.showCloseShiftDialog = true
 }
 
-async function handlePrintInvoice() {
-	try {
-		await printInvoiceByName(uiStore.lastInvoiceName)
-		uiStore.showSuccessDialog = false
-	} catch (error) {
-		log.error("Error printing invoice:", error)
-		showError("Failed to print invoice. Please try again.")
-	}
-}
-
 function formatCurrency(amount) {
 	return Number.parseFloat(amount || 0).toFixed(2)
-}
-
-function getCurrentUser() {
-	if (typeof window !== "undefined" && window.frappe?.session) {
-		return (
-			window.frappe.session.user_fullname ||
-			window.frappe.session.user ||
-			"User"
-		)
-	}
-	return "User"
 }
 
 function confirmLogout() {
@@ -2051,14 +2055,29 @@ async function loadInvoiceHistoryData() {
 
 // Handle invoice actions from InvoiceManagement
 function handleViewInvoice(invoice) {
-	// For now just log, can be enhanced later to show invoice details dialog
-	log.info("View invoice:", invoice.name)
-	// TODO: Add invoice detail view dialog if needed
+	selectedInvoiceForView.value = invoice.name || invoice
+	showInvoiceDetail.value = true
 }
 
-// Note: handlePrintInvoice already exists above, will reuse it for invoice param
-function handlePrintInvoiceFromManagement(invoice) {
-	printInvoiceByName(invoice.name, shiftStore.profileName)
+// Centralized print handler - uses printInvoice.js utilities
+async function handlePrintInvoice(invoiceData) {
+	try {
+		// If invoiceData is a full document with items, use printInvoice directly
+		if (invoiceData.items && Array.isArray(invoiceData.items)) {
+			await printInvoice(invoiceData)
+		} else {
+			// If it's just an invoice object with name, fetch and print
+			// printInvoiceByName will automatically fetch the print format from the invoice's POS Profile
+			await printInvoiceByName(invoiceData.name)
+		}
+	} catch (error) {
+		log.error("Error printing invoice:", error)
+		window.frappe?.msgprint({
+			title: "Error",
+			message: "Failed to print invoice",
+			indicator: "red",
+		})
+	}
 }
 
 // Note: handleLoadDraft already exists above, will delegate to it
