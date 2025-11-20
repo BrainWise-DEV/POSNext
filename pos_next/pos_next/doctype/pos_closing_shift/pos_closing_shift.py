@@ -83,38 +83,6 @@ class POSClosingShift(Document):
         # link invoices with this closing shift so ERPNext can block edits
         self._set_closing_entry_invoices()
 
-        if frappe.db.get_value(
-            "POS Profile",
-            self.pos_profile,
-            "create_pos_invoice_instead_of_sales_invoice",
-        ):
-            pos_invoices = []
-            for d in self.pos_transactions:
-                invoice_details = frappe._dict(
-                    frappe.db.get_value(
-                        "POS Invoice",
-                        d.pos_invoice,
-                        [
-                            "name as pos_invoice",
-                            "customer",
-                            "is_return",
-                            "return_against",
-                            "currency",
-                        ],
-                        as_dict=True,
-                    )
-                )
-                if invoice_details:
-                    pos_invoices.append(invoice_details)
-
-            if pos_invoices:
-                invoices_by_currency = {}
-                for invoice in pos_invoices:
-                    invoices_by_currency.setdefault(invoice.currency, []).append(invoice)
-
-                for invoices in invoices_by_currency.values():
-                    consolidate_pos_invoices(pos_invoices=invoices)
-
     def on_cancel(self):
         if frappe.db.exists("POS Opening Shift", self.pos_opening_shift):
             opening_entry = frappe.get_doc("POS Opening Shift", self.pos_opening_shift)
@@ -201,15 +169,7 @@ class POSClosingShift(Document):
 
     def delete_draft_invoices(self):
         if frappe.get_value("POS Profile", self.pos_profile, "posa_allow_delete"):
-            doctype = (
-                "POS Invoice"
-                if frappe.db.get_value(
-                    "POS Profile",
-                    self.pos_profile,
-                    "create_pos_invoice_instead_of_sales_invoice",
-                )
-                else "Sales Invoice"
-            )
+            doctype = "Sales Invoice"
             data = frappe.db.sql(
                 f"""
 		select
@@ -404,11 +364,7 @@ def get_cashiers(doctype, txt, searchfield, start, page_len, filters):
 def get_pos_invoices(pos_opening_shift, doctype=None):
     if not doctype:
         pos_profile = frappe.db.get_value("POS Opening Shift", pos_opening_shift, "pos_profile")
-        use_pos_invoice = frappe.db.get_value(
-            "POS Profile",
-            pos_profile,
-            "create_pos_invoice_instead_of_sales_invoice",
-        )
+        use_pos_invoice = False
         doctype = "POS Invoice" if use_pos_invoice else "Sales Invoice"
     submit_printed_invoices(pos_opening_shift, doctype)
     cond = " and ifnull(consolidated_invoice,'') = ''" if doctype == "POS Invoice" else ""
@@ -455,11 +411,7 @@ def get_payments_entries(pos_opening_shift):
 @frappe.whitelist()
 def make_closing_shift_from_opening(opening_shift):
     opening_shift = json.loads(opening_shift)
-    use_pos_invoice = frappe.db.get_value(
-        "POS Profile",
-        opening_shift.get("pos_profile"),
-        "create_pos_invoice_instead_of_sales_invoice",
-    )
+    use_pos_invoice = False
     doctype = "POS Invoice" if use_pos_invoice else "Sales Invoice"
     submit_printed_invoices(opening_shift.get("name"), doctype)
     closing_shift = frappe.new_doc("POS Closing Shift")
