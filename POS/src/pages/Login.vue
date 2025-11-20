@@ -24,7 +24,7 @@
                   Login Failed
                 </h3>
                 <div class="mt-2 text-sm text-red-700">
-                  <p>{{ session.login.error }}</p>
+                  <p>{{ session.login.error.messages.join('\n') }}</p>
                 </div>
               </div>
             </div>
@@ -91,6 +91,7 @@
     <ShiftOpeningDialog
       v-model="showShiftDialog"
       @shift-opened="handleShiftOpened"
+      @dialog-closed="handleDialogClosed"
     />
   </div>
 </template>
@@ -185,6 +186,13 @@ watch(
 function handleShiftOpened() {
 	// Navigate to POS sale after shift is opened
 	router.push({ name: "POSSale" })
+}
+
+function handleDialogClosed({ reason }) {
+	// Navigate to /pos when dialog is cancelled
+	if (reason === "cancelled") {
+		router.push({ name: "POSSale" })
+	}
 }
 
 // Clear error when user starts typing

@@ -148,7 +148,7 @@
         <div v-else></div>
 
         <div class="flex space-x-2">
-          <Button variant="subtle" @click="closeDialog" :disabled="createShiftResource.loading">
+          <Button variant="subtle" @click="closeDialog('cancelled')" :disabled="createShiftResource.loading">
             Cancel
           </Button>
           <Button
@@ -194,7 +194,7 @@ const props = defineProps({
 	modelValue: Boolean,
 })
 
-const emit = defineEmits(["update:modelValue", "shift-opened"])
+const emit = defineEmits(["update:modelValue", "shift-opened", "dialog-closed"])
 
 const open = computed({
 	get: () => props.modelValue,
@@ -322,7 +322,7 @@ async function openShift() {
 		})
 
 		emit("shift-opened")
-		closeDialog()
+		closeDialog("shift-opened")
 	} catch (error) {
 		console.error("Error opening shift:", error)
 	}
@@ -330,7 +330,7 @@ async function openShift() {
 
 function resumeShift() {
 	emit("shift-opened")
-	closeDialog()
+	closeDialog("resumed")
 }
 
 function closeAndOpenNew() {
@@ -342,8 +342,9 @@ function closeAndOpenNew() {
 	showClosingDialog.value = true
 }
 
-function closeDialog() {
+function closeDialog(reason) {
 	open.value = false
+	emit("dialog-closed", { reason })
 }
 
 async function handleExistingShiftClosed() {
