@@ -209,11 +209,11 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 
 		loading.value = true
 		try {
-			// Try to get from worker cache first
-			const cachedCustomers = await offlineWorker.searchCachedCustomers(
-				"",
-				9999,
-			)
+                        // Try to get from worker cache first
+                        const cachedCustomers = await offlineWorker.searchCachedCustomers(
+                                "",
+                                0,
+                        )
 
 			if (cachedCustomers && cachedCustomers.length > 0) {
 				allCustomers.value = cachedCustomers
@@ -222,12 +222,12 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 				)
 			} else if (!isOffline()) {
 				// Fetch from server if cache is empty and online
-				const response = await call("pos_next.api.customers.get_customers", {
-					pos_profile: posProfile,
-					search_term: "",
-					start: 0,
-					limit: 9999,
-				})
+                                const response = await call("pos_next.api.customers.get_customers", {
+                                        pos_profile: posProfile,
+                                        search_term: "",
+                                        start: 0,
+                                        limit: 0,
+                                })
 				const list = response?.message || response || []
 				allCustomers.value = list
 

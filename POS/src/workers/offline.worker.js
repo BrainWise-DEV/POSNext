@@ -579,7 +579,9 @@ async function searchCachedCustomers(searchTerm = "", limit = 20) {
 		const term = searchTerm.toLowerCase()
 
 		if (!term) {
-			return await db.table("customers").limit(limit).toArray()
+			return limit > 0
+				? await db.table("customers").limit(limit).toArray()
+				: await db.table("customers").toArray()
 		}
 
 		// Get all customers and filter in memory for 'includes' behavior
@@ -594,7 +596,7 @@ async function searchCachedCustomers(searchTerm = "", limit = 20) {
 
 				return name.includes(term) || mobile.includes(term) || id.includes(term)
 			})
-			.slice(0, limit)
+			.slice(0, limit || allCustomers.length)
 
 		return results
 	} catch (error) {
