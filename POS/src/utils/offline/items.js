@@ -145,22 +145,26 @@ export const cacheCustomers = async (customers) => {
 
 // Search cached customers
 export const searchCachedCustomers = async (searchTerm, limit = 20) => {
-	try {
-		if (!searchTerm) {
-			return await db.customers.limit(limit).toArray();
-		}
+        try {
+                if (!searchTerm) {
+                        return limit > 0
+                                ? await db.customers.limit(limit).toArray()
+                                : await db.customers.toArray();
+                }
 
 		const term = searchTerm.toLowerCase();
 
-		const results = await db.customers
-			.where("customer_name")
-			.startsWithIgnoreCase(term)
-			.or("mobile_no")
-			.startsWithIgnoreCase(term)
-			.or("email_id")
-			.startsWithIgnoreCase(term)
-			.limit(limit)
-			.toArray();
+                const query = db.customers
+                        .where("customer_name")
+                        .startsWithIgnoreCase(term)
+                        .or("mobile_no")
+                        .startsWithIgnoreCase(term)
+                        .or("email_id")
+                        .startsWithIgnoreCase(term);
+
+                const results = await (limit > 0
+                        ? query.limit(limit).toArray()
+                        : query.toArray());
 
 		return results;
 	} catch (error) {

@@ -34,15 +34,16 @@ def get_customers(search_term="", pos_profile=None, limit=20):
 				filters["customer_group"] = profile_doc.customer_group
 				frappe.logger().debug(f"Filtering by customer_group: {profile_doc.customer_group}")
 
-		# Return all customers (for client-side filtering)
-		filters["disabled"] = 0
-		result = frappe.get_all(
-			"Customer",
-			filters=filters,
-			fields=["name", "customer_name", "mobile_no", "email_id"],
-			limit=limit,
-			order_by="customer_name asc"
-		)
+                # Return all customers (for client-side filtering)
+                filters["disabled"] = 0
+                customer_limit = limit if limit not in (None, 0) else frappe.db.count("Customer", filters)
+                result = frappe.get_all(
+                        "Customer",
+                        filters=filters,
+                        fields=["name", "customer_name", "mobile_no", "email_id"],
+                        limit=customer_limit,
+                        order_by="customer_name asc"
+                )
 		frappe.logger().debug(f"get_customers returned {len(result)} customers")
 		return result
 	except Exception as e:

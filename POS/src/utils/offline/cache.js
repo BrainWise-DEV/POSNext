@@ -188,10 +188,10 @@ export const cacheCustomersFromServer = async (posProfile) => {
 		console.log("Fetching customers from server...")
 
 		const response = await call("pos_next.api.customers.get_customers", {
-			pos_profile: posProfile,
-			start: 0,
-			limit: 9999, // Get all customers
-		})
+                        pos_profile: posProfile,
+                        start: 0,
+                        limit: 0, // Get all customers
+                })
 
 		if (response.message && Array.isArray(response.message)) {
 			const customers = response.message

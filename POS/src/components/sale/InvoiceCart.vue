@@ -751,12 +751,12 @@ const openUomDropdown = ref(null)
 const customersResource = createResource({
 	url: "pos_next.api.customers.get_customers",
 	makeParams() {
-		return {
-			search_term: "", // Empty to get all customers
-			pos_profile: props.posProfile,
-			limit: 9999, // Get all customers
-		}
-	},
+                return {
+                        search_term: "", // Empty to get all customers
+                        pos_profile: props.posProfile,
+                        limit: 0, // Get all customers
+                }
+        },
 	auto: false, // Don't auto-load - check offline status first
 	async onSuccess(data) {
 		const customers = data?.message || data || []
@@ -773,11 +773,11 @@ const customersResource = createResource({
 
 // Load customers from cache first (instant), then from server if online
 ;(async () => {
-	try {
-		// Always try cache first for instant load
-		const cachedCustomers = await offlineWorker.searchCachedCustomers("", 9999)
-		if (cachedCustomers && cachedCustomers.length > 0) {
-			allCustomers.value = cachedCustomers
+        try {
+                // Always try cache first for instant load
+                const cachedCustomers = await offlineWorker.searchCachedCustomers("", 0)
+                if (cachedCustomers && cachedCustomers.length > 0) {
+                        allCustomers.value = cachedCustomers
 			customersLoaded.value = true
 		}
 	} catch (error) {
