@@ -1,7 +1,7 @@
 <template>
 	<Dialog
 		v-model="show"
-		:options="{ title: 'Create Return Invoice', size: '3xl' }"
+		:options="{ title: 'Create Return Invoice', size: '5xl' }"
 	>
 		<template #body-content>
 			<div class="space-y-4">
@@ -66,7 +66,7 @@
 	<!-- Return Process Modal -->
 	<Dialog
 		v-model="returnModal.visible"
-		:options="{ title: 'Process Return', size: 'full' }"
+		:options="{ title: 'Process Return', size: '5xl' }"
 	>
 		<template #body-content>
 			<div class="space-y-4">
