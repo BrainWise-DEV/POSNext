@@ -401,6 +401,7 @@
 <script setup>
 import { usePOSSettingsStore } from "@/stores/posSettings"
 import { formatCurrency as formatCurrencyUtil } from "@/utils/currency"
+import { getPaymentIcon } from "@/utils/payment"
 import { offlineWorker } from "@/utils/offline/workerClient"
 import { Button, Dialog, Input, createResource } from "frappe-ui"
 import { computed, ref, watch } from "vue"
@@ -846,23 +847,6 @@ function getMethodTotal(methodName) {
 		.reduce((sum, entry) => sum + (entry.amount || 0), 0)
 }
 
-// Get icon based on payment type
-function getPaymentIcon(type) {
-	const iconMap = {
-		Cash: "💵",
-		Card: "💳",
-		Bank: "🏦",
-		Phone: "📱",
-		Wallet: "👛",
-		Credit: "💚",
-		"Credit Card": "💳",
-		"Debit Card": "💳",
-		"Mobile Money": "📱",
-		Check: "🧾",
-		"Gift Card": "🎁",
-	}
-	return iconMap[type] || "💰"
-}
 
 // Additional discount handlers
 function handleAdditionalDiscountChange() {
