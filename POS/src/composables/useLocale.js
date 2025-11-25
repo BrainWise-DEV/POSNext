@@ -1,4 +1,6 @@
 import { ref, computed, onMounted } from "vue"
+import { sessionUser } from "../data/session"
+import { call } from "frappe-ui"
 
 // Reactive locale state (shared across all components)
 const currentLocale = ref("en")
@@ -104,22 +106,18 @@ export function useLocale() {
 		}
 
 		// Update Frappe user settings
-		if (typeof window !== "undefined" && window.frappe?.call) {
 			try {
-				await window.frappe.call({
-					method: "frappe.client.set_value",
-					args: {
+				await call(
+					"frappe.client.set_value",
+					{
 						doctype: "User",
-						name: window.frappe.session.user,
+						name: sessionUser(),
 						fieldname: "language",
 						value: newLocale.toLowerCase(),
-					},
-					freeze: false,
-				})
+					})
 			} catch (error) {
 				console.error("Failed to save language preference to Frappe:", error)
 			}
-		}
 	}
 
 	/**
