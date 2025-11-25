@@ -10,6 +10,7 @@ import base64
 from datetime import datetime
 import secrets
 
+# REVIEW: We should not have the hashes in the code.
 
 # MASTER KEY HASH - Only the person with the original key can disable branding
 # This hash was created from: secrets.token_urlsafe(32)
@@ -19,11 +20,20 @@ MASTER_KEY_HASH = "a19686b133d17d0b528355ae39692a0792780a55b50707dc1a58a0e590838
 # Secondary protection - requires both master key AND this phrase
 PROTECTION_PHRASE_HASH = "3ddb5c12a034095ff81a85bbd06623a60e81252c296b747cf9c127dc57e013a8"
 
-
+# REVIEW: We need to respect the order of frappe hooks like validate, before_save, etc.
+# And respect the order of the helper methods. python files should be read from top to bottom.
 class BrainWiseBranding(Document):
 	# Protected fields that require master key to modify
 	PROTECTED_FIELDS = ['enabled', 'brand_text', 'brand_name', 'brand_url', 'check_interval']
 
+	# REVIEW: The validate() method is too large and mixes responsibilities:
+	# - permission verification
+	# - logging
+	# - enforcing state logic
+	# RECOMMENDATION: Split into smaller helper methods:
+	#   _verify_protected_field_permissions()
+	#   _enforce_disable_protection()
+	#   _log_master_key_usage()
 	def validate(self):
 		"""Validate before saving - enforce master key requirement"""
 		if not self.is_new():
@@ -63,6 +73,9 @@ class BrainWiseBranding(Document):
 					frappe.PermissionError
 				)
 
+	# REVIEW:
+	# Suggest caching DB values or batching pull requests to reduce DB calls,
+	# especially if PROTECTED_FIELDS grows longer.
 	def _check_protected_fields_changed(self):
 		"""Check if any protected fields have been modified"""
 		if self.is_new():
@@ -79,6 +92,9 @@ class BrainWiseBranding(Document):
 
 		return changed_fields
 
+	# REVIEW: It's not good to have the code directly in the before_save method.
+	# We should have a helper method for this.
+	# RECOMMENDATION: clear master key using: self.set("master_key_provided", None)
 	def before_save(self):
 		"""Generate encrypted signature and enforce protections"""
 		# Always enforce enabled state unless master key provided
@@ -92,6 +108,17 @@ class BrainWiseBranding(Document):
 		if self.master_key_provided:
 			self.master_key_provided = None
 
+	# REVIEW: This function does multiple things:
+	# 1) input parsing
+	# 2) hashing
+	# 3) logging
+	# 4) validation decision
+	# Recommend splitting into:
+	#   _parse_master_key()
+	#   _hash_keys()
+	#   _log_key_attempt(success=True/False)
+	# Also — security note:
+	# Too much detail about failure logging could help attackers.
 	def _validate_master_key(self):
 		"""Internal method to validate master key"""
 		if not self.master_key_provided:
@@ -143,6 +170,7 @@ class BrainWiseBranding(Document):
 			frappe.log_error(f"Master key validation error: {str(e)}", "BrainWise Branding")
 			return False
 
+	# REVIEW: Suggest moving encryption logic to a utility module.
 	def generate_signature(self):
 		"""Generate an encrypted signature for branding validation"""
 		# Create a signature from branding data
@@ -194,6 +222,10 @@ class BrainWiseBranding(Document):
 			frappe.log_error(f"Branding validation error: {str(e)}", "BrainWise Branding")
 			return False
 
+	# REVIEW: Method makes DB writes inside a validation / logging scenario.
+	# This could cause recursive save loops.
+	# Suggest: use frappe.db.set_value instead of self.save()
+	# Also tampering_attempts should likely be limited or rate-tracked.
 	def log_tampering(self, details):
 		"""Log tampering attempts"""
 		if not self.log_tampering_attempts:
@@ -210,7 +242,12 @@ class BrainWiseBranding(Document):
 			message=json.dumps(details, indent=2, default=str)
 		)
 
+# REVIEW: It's better to have these apis in a separate file in the api folder.
 
+# REVIEW: API function does too many things:
+# Suggest splitting into:
+#   _serialize_branding_config()
+#   _self_heal_branding_state() 
 @frappe.whitelist(allow_guest=False)
 def get_branding_config():
 	"""API endpoint to get branding configuration"""
@@ -248,7 +285,10 @@ def get_branding_config():
 			"_e": 1
 		}
 
-
+# REVIEW: validate_branding calls doc.save() on every validation.
+# If this is called frequently by the client (e.g., every 10 seconds),
+# this will cause unnecessary constant writes.
+# Suggest: move last_validation into cache or redis instead of Doc field.
 @frappe.whitelist(allow_guest=False)
 def validate_branding(client_signature=None, brand_name=None, brand_url=None):
 	"""Validate branding integrity from client"""
@@ -325,7 +365,8 @@ def log_client_event(event_type=None, details=None):
 		frappe.log_error(f"Error logging client event: {str(e)}", "BrainWise Branding")
 		return {"logged": False, "error": str(e)}
 
-
+# REVIEW: Good — but mixes responsibilities again: parsing, logging, validation.
+# Consider moving key verification logic into _validate_master_key_shared()
 @frappe.whitelist()
 def verify_master_key(master_key_input):
 	"""
@@ -376,7 +417,8 @@ def verify_master_key(master_key_input):
 			"error": str(e)
 		}
 
-
+# REVIEW: The system allows regeneration of master key but requires manual code editing.
+# Suggest storing hashes in Site Config instead of hard-coded python constants.
 @frappe.whitelist()
 def generate_new_master_key():
 	"""
