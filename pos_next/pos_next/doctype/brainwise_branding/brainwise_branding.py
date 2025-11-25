@@ -203,6 +203,10 @@ class BrainWiseBranding(Document):
 			}).encode()
 		).decode()
 
+	# REVIEW: validate_signature() currently only checks brand_name / brand_url.
+	# It does NOT actually validate HMAC integrity.
+	# Meaning: any attacker can replay the existing signature successfully.
+	# SUGGESTION: Recalculate HMAC from received data & compare!
 	def validate_signature(self, client_data):
 		"""Validate client-side data against server signature"""
 		if not self.encrypted_signature:
