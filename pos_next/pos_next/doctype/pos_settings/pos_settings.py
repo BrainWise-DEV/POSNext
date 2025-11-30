@@ -7,6 +7,10 @@ from frappe.utils import cint, flt
 
 
 class POSSettings(Document):
+	# REVIEW:
+	# RECOMMENDATIONS:
+	# - Extract discount validation & search_limit validation into private helper methods for SRP.
+	# - Add explicit type hints for maintainability.
 	def validate(self):
 		"""Validate POS Settings"""
 		# Guard against None values and validate discount percentage
@@ -24,6 +28,10 @@ class POSSettings(Document):
 		"""Sync allow_negative_stock with Stock Settings"""
 		self.sync_negative_stock_setting()
 
+	# REVIEW:
+	# RECOMMENDATIONS:
+	# - Use caching if many transactions call this repeatedly.
+	# - Potential scalability issue: frappe.db.count on every change (consider caching or optimizing).
 	def sync_negative_stock_setting(self):
 		"""
 		Synchronize allow_negative_stock with Stock Settings.
@@ -69,6 +77,11 @@ class POSSettings(Document):
 					)
 
 
+# REVIEW:
+# - This function does authentication + DB fetch + side-effect mutation (inject field).
+#   Consider splitting responsibilities for cleaner architecture.
+# - Input parameter should be validated for type (string).
+# - Return schema should be documented for API stability.
 @frappe.whitelist()
 def get_pos_settings(pos_profile):
 	"""
@@ -122,6 +135,14 @@ def create_default_settings(pos_profile):
 	return doc.as_dict()
 
 
+# REVIEW:
+# - Handles JSON input + validation + DB update.
+# - RECOMMENDATIONS:
+#   - Split actions into separate helper functions:
+#       _check_access(), _update_existing_settings(), _create_new_settings()
+#   - Returning full doc.as_dict() may leak unnecessary internal data.
+# - Security suggestion:
+#   - Validate the fields being saved to avoid unauthorized update of restricted properties.
 @frappe.whitelist()
 def update_pos_settings(pos_profile, settings):
 	"""Update POS Settings for a POS Profile"""

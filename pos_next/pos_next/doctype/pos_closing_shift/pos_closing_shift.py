@@ -5,6 +5,7 @@ import json
 from collections import defaultdict
 
 import frappe
+# REVIEW: We import the consolidate_pos_invoices but we don't use it.
 from erpnext.accounts.doctype.pos_invoice_merge_log.pos_invoice_merge_log import (
     consolidate_pos_invoices,
 )
@@ -13,6 +14,11 @@ from frappe.model.document import Document
 from frappe.utils import flt
 
 
+# REVIEW:
+#   - The conversion rate detection is duplicated in many places.
+#     Should be extracted to a shared method.
+#   - Consider caching conversion rate to avoid multiple doc.get() calls.
+#   - Should explicitly type input args for clarity.
 def get_base_value(doc, fieldname, base_fieldname=None, conversion_rate=None):
     """Return the value for a field in company currency."""
 
@@ -39,6 +45,12 @@ def get_base_value(doc, fieldname, base_fieldname=None, conversion_rate=None):
 
 
 class POSClosingShift(Document):
+    # REVIEW:
+    # Issues:
+    #   - DB calls and business logic mixed.
+    #   - Could be split into:
+    #       _validate_user_shift_conflict()
+    #       _validate_opening_shift_status()
     def validate(self):
         user = frappe.get_all(
             "POS Closing Shift",
@@ -67,6 +79,9 @@ class POSClosingShift(Document):
             )
         self.update_payment_reconciliation()
 
+    # REVIEW:
+    # But name is misleading — it is computing diffs not updating reconciliation
+    #   Should be: compute_payment_differences()
     def update_payment_reconciliation(self):
         # update the difference values in Payment Reconciliation child table
         # get default precision for site
@@ -74,6 +89,13 @@ class POSClosingShift(Document):
         for d in self.payment_reconciliation:
             d.difference = +flt(d.closing_amount, precision) - flt(d.expected_amount, precision)
 
+    # REVIEW:
+    # But function is doing 4 things:
+    #   - retrieve shift
+    #   - link shift to opening
+    #   - delete invoices
+    #   - link invoices
+    #   Should be split for readability and testability.
     def on_submit(self):
         opening_entry = frappe.get_doc("POS Opening Shift", self.pos_opening_shift)
         opening_entry.pos_closing_shift = self.name
@@ -83,6 +105,8 @@ class POSClosingShift(Document):
         # link invoices with this closing shift so ERPNext can block edits
         self._set_closing_entry_invoices()
 
+    # REVIEW:
+    # It's better to have a helper method for this.
     def on_cancel(self):
         if frappe.db.exists("POS Opening Shift", self.pos_opening_shift):
             opening_entry = frappe.get_doc("POS Opening Shift", self.pos_opening_shift)
@@ -103,6 +127,17 @@ class POSClosingShift(Document):
             if frappe.db.has_column(doctype, "pos_closing_entry"):
                 frappe.db.set_value(doctype, invoice, "pos_closing_entry", self.name)
 
+    # REVIEW:
+    # _clear_closing_entry_invoices is large and mixes responsibilities:
+    #  - unlink pos_invoice -> pos_closing_entry
+    #  - cancel and delete POS Invoice Merge Log entries
+    #  - clear consolidated_invoice pointers
+    #  - set POS Invoice status
+    #  - collect consolidated sales invoices and cancel them
+    # RECOMMENDATIONS:
+    #  - Break into: _unlink_pos_invoice(), _handle_merge_logs_for_pos_invoice(), _accumulate_consolidated_si()
+    #  - Use batched queries when collecting merge logs to reduce query overhead.
+    #  - Add defensive error handling and logging per invoice to avoid stopping midway.
     def _clear_closing_entry_invoices(self):
         """Clear closing shift links, cancel merge logs and cancel consolidated sales invoices."""
         consolidated_sales_invoices = set()
@@ -167,6 +202,9 @@ class POSClosingShift(Document):
             )
         )
 
+    # REVIEW:
+    # It's not good to write raw SQL queries.
+    # We should use frappe.db.get_all() instead.
     def delete_draft_invoices(self):
         if frappe.get_value("POS Profile", self.pos_profile, "posa_allow_delete"):
             doctype = "Sales Invoice"
@@ -186,6 +224,16 @@ class POSClosingShift(Document):
             for invoice in data:
                 frappe.delete_doc(doctype, invoice.name, force=1)
 
+    # REVIEW:
+    # get_payment_reconciliation_details assembles a template context and renders HTML.
+    # This method does:
+    #  - iterates invoices and payment entries (many DB interactions)
+    #  - builds breakdowns and mode summaries
+    #  - renders with frappe.render_template
+    # RECOMMENDATIONS:
+    #  - Extract data-aggregation into a service returning a serializable dict.
+    #  - Rendering should be the final step of a small function that accepts aggregated data.
+    #  - Use batch fetching and caching for invoices to reduce many get_doc calls.
     @frappe.whitelist()
     def get_payment_reconciliation_details(self):
         company_currency = frappe.get_cached_value(
@@ -360,6 +408,8 @@ def get_cashiers(doctype, txt, searchfield, start, page_len, filters):
     return result
 
 
+# REVIEW:
+# It's not good to write raw SQL queries.
 @frappe.whitelist()
 def get_pos_invoices(pos_opening_shift, doctype=None):
     if not doctype:
@@ -408,6 +458,17 @@ def get_payments_entries(pos_opening_shift):
     )
 
 
+# REVIEW:
+# make_closing_shift_from_opening:
+# - deserializes opening_shift from JSON expecting a string.
+# - lots of logic building the closing_shift: aggregation, conversion, taxes, payments.
+# SUGGESTIONS:
+#  - Validate that opening_shift is dict before json.loads to avoid unexpected exceptions.
+#  - Split into smaller functions:
+#       _build_transactions()
+#       _aggregate_taxes()
+#       _aggregate_payments()
+#  - Use batch retrieval of invoices to avoid repeated DB calls.
 @frappe.whitelist()
 def make_closing_shift_from_opening(opening_shift):
     opening_shift = json.loads(opening_shift)

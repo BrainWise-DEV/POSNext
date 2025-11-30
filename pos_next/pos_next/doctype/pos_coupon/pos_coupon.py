@@ -20,6 +20,16 @@ class POSCoupon(Document):
             elif self.coupon_type == "Gift Card":
                 self.coupon_code = frappe.generate_hash()[:10].upper()
 
+    # REVIEW:
+    # - validate() function is too large and handles multiple validation responsibilities.
+    # - Should be broken into smaller functions like:
+    #       validate_gift_card(),
+    #       validate_discount_configuration(),
+    #       validate_amount_rules(),
+    #       validate_dates()
+    # - Improves readability, organization, debugging, and unit‐testability.
+    # - Consider moving static messages to a constants file for localization consistency.
+    # - Should not mutate maximum_use inside validation — better in before_insert or separate initializer.
     def validate(self):
         # Gift Card validations
         if self.coupon_type == "Gift Card":
@@ -57,6 +67,12 @@ class POSCoupon(Document):
 
 
 
+# REVIEW:
+# - This function is doing too many things: lookup, date validation, company validation, usage count checking.
+# - Should be split into smaller logical units for readability and scalability.
+# - Return value should be standardized (either return objects or standardized response schema).
+# - coupon_code.upper() is repeated — normalize once at the top.
+# - Database lookups could be optimized using frappe.db.get_value instead of get_doc when not needed.
 def check_coupon_code(coupon_code, customer=None, company=None):
     """Validate and return coupon details"""
     res = {"coupon": None}
@@ -118,6 +134,11 @@ def check_coupon_code(coupon_code, customer=None, company=None):
     return res
 
 
+# REVIEW:
+# - Function contains both calculation logic and business rule enforcement.
+# - Consider moving business rules to configuration settings or database for flexibility.
+# - Should support future extensibility — e.g. buy-one-get-one, item-specific discounts.
+# - Recommend returning a strongly typed object instead of a free-form dict (dataclass or standardized dict).
 def apply_coupon_discount(coupon, cart_total, net_total=None):
     """Calculate discount amount based on coupon configuration"""
     from frappe.utils import flt
@@ -157,6 +178,11 @@ def apply_coupon_discount(coupon, cart_total, net_total=None):
     }
 
 
+# REVIEW:
+# - Should NOT call frappe.db.commit() inside utility function.
+# - This breaks transaction atomicity and makes rollback impossible.
+# - Instead allow commit at the request controller level.
+# - Should perform update using frappe.db.set_value instead of loading document for performance.
 def increment_coupon_usage(coupon_code):
     """Increment the usage counter for a coupon"""
     try:
@@ -171,6 +197,11 @@ def increment_coupon_usage(coupon_code):
         )
 
 
+# REVIEW:
+# - Same commit issue as above — commit should not be internal.
+# - Should gracefully handle case where coupon does not exist.
+# - Should avoid loading full document just to decrement integer.
+# - Consider storing usage as tracked metrics rather than mutating document.
 def decrement_coupon_usage(coupon_code):
     """Decrement the usage counter for a coupon (for cancelled invoices)"""
     try:

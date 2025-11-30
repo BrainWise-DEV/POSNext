@@ -19,6 +19,11 @@ class ReferralCode(Document):
         if not self.referral_code:
             self.referral_code = frappe.generate_hash()[:10].upper()
 
+    # REVIEW: This validation method is long and includes duplicated logic for referrer & referee.
+    # Consider refactoring into smaller helper functions like:
+    # validate_referrer_discounts() and validate_referee_discounts()
+    # RECOMMENDATIONS:
+    # - Improves readability & testability.
     def validate(self):
         # Validate Referrer (Primary Customer) rewards
         if not self.referrer_discount_type:
@@ -51,6 +56,11 @@ class ReferralCode(Document):
                 frappe.throw(_("Referee Discount Amount must be greater than 0"))
 
 
+# REVIEW: This factory method creates referral codes successfully,
+# but should validate input more strictly at the beginning.
+# Consider using `frappe.new_doc().update({...})` as a more concise approach.
+# The commit() inside this function makes it unsafe for batch operations —
+# consider removing commit() and let caller handle transaction boundaries.
 def create_referral_code(company, customer, referrer_discount_type, referrer_discount_percentage=None,
                         referrer_discount_amount=None, referee_discount_type="Percentage",
                         referee_discount_percentage=None, referee_discount_amount=None, campaign=None):
@@ -88,6 +98,19 @@ def create_referral_code(company, customer, referrer_discount_type, referrer_dis
     return doc
 
 
+# REVIEW: Good business logic, but function is too large and mixes responsibilities:
+# - validation
+# - coupon generation
+# - DB writes
+# RECOMMENDATIONS:
+# Split responsibility into:
+#   validate_referral_usage()
+#   create_referrer_coupon()
+#   create_referee_coupon()
+#   update_referral_statistics()
+#
+# Also — manual commit() inside can break transactional integrity
+# if called inside another transaction context.
 def apply_referral_code(referral_code, referee_customer):
     """
     Apply a referral code - generates coupons for both referrer and referee
@@ -197,6 +220,10 @@ def generate_referrer_coupon(referral):
     return coupon
 
 
+# REVIEW: Similar to generate_referrer_coupon — duplicated structure.
+# Suggest merging both into a single generic coupon generator:
+# generate_coupon_from_referral(referral, recipient, type)
+# That removes duplicated code & centralizes discount assignment logic.
 def generate_referee_coupon(referral, referee_customer):
     """Generate a Promotional coupon for the referee (new customer)"""
     coupon = frappe.new_doc("POS Coupon")
