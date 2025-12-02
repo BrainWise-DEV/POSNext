@@ -14,6 +14,17 @@ from frappe import _
 from frappe.utils import flt, nowdate, today, cint, get_datetime
 
 
+# REVIEW: GIG QUESTION: Why do we use @frappe.whitelist??!!
+
+# REVIEW: This function mixes multiple concerns:
+# 1. Calculating outstanding invoices
+# 2. Calculating negative credits
+# 3. Calculating unallocated advances
+# RECOMMENDATIONS: breaking into helper functions like:
+# - _get_customer_outstanding()
+# - _get_customer_credits()
+# - _get_customer_advances()
+# Also, it's not good to write raw SQL queries.
 @frappe.whitelist()
 def get_customer_balance(customer, company=None):
 	"""
@@ -129,6 +140,11 @@ def check_credit_sale_enabled(pos_profile):
 	return bool(pos_settings)
 
 
+# REVIEW: 
+# Suggestions:
+# - Break into _get_negative_invoices() and _get_unallocated_advances()
+# - DRY: negative outstanding conversion occurs multiple times.
+# - Consider performance with large datasets (pagination or filters)
 @frappe.whitelist()
 def get_available_credit(customer, company, pos_profile=None):
 	"""
@@ -216,6 +232,11 @@ def get_available_credit(customer, company, pos_profile=None):
 	return total_credit
 
 
+# REVIEW: 
+# Suggestions:
+# - Validation of input dict should be stricter.
+# - Transactional safety: consider wrapping all allocations in a single transaction.
+# - Could extract allocation logic to a CreditAllocationService class for scalability.
 @frappe.whitelist()
 def redeem_customer_credit(invoice_name, customer_credit_dict):
 	"""
@@ -279,6 +300,11 @@ def redeem_customer_credit(invoice_name, customer_credit_dict):
 	return created_journal_entries
 
 
+# REVIEW:
+# - Directly submits JE, which can fail mid-process — consider transaction/atomic commit.
+# - Consider extracting debit/credit creation into a helper for DRY.
+# - Cost center retrieval should default more safely if not set.
+# - Could add logging/debug info for audit.
 def _create_credit_allocation_journal_entry(invoice_doc, original_invoice_name, amount):
 	"""
 	Create Journal Entry to allocate credit from one invoice to another.
@@ -494,6 +520,10 @@ def get_credit_sale_summary(pos_profile):
 	}
 
 
+# REVIEW: Retrieves credit invoices.
+# - Access control is manual; consider central permission check for POS Profiles.
+# - Could refactor SQL query into a helper for reuse.
+# - It's not good to write raw SQL queries.
 @frappe.whitelist()
 def get_credit_invoices(pos_profile, limit=100):
 	"""

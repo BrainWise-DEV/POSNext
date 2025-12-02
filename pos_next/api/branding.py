@@ -12,7 +12,18 @@ import json
 import base64
 import hashlib
 
+# REVIEW: GIG QUESTION: Why do we use @frappe.whitelist??!!
 
+# REVIEW: This function has too many responsibilities:
+#   - DB existence check
+#   - configuration retrieval
+#   - obfuscation
+#   - formatting UI config
+# Suggest refactoring into smaller helpers:
+#   fetch_branding_doc()
+#   obfuscate_branding_data()
+#   build_branding_payload()
+# Also consider caching via frappe.cache() since branding rarely changes.
 @frappe.whitelist(allow_guest=False)
 def get_branding_config():
 	"""
@@ -57,6 +68,10 @@ def get_branding_config():
 		return get_default_config()
 
 
+# REVIEW: Static default config is ok,
+# but returns nearly same structure as get_branding_config().
+# Consider making a constant DEFAULT_BRANDING dict or reading defaults from System Settings or Branding DocType schema.
+# Also avoid computing base64 repeatedly — generate once, reuse.
 def get_default_config():
 	"""Return default branding configuration"""
 	return {
@@ -128,6 +143,10 @@ def validate_branding(client_signature=None, brand_name=None, brand_url=None):
 		return {"valid": False, "error": str(e)}
 
 
+# REVIEW: This API is overly permissive:
+# Users can POST arbitrary events. Consider logging only for authenticated roles.
+# Also `event_type` should be enumerated centrally to avoid typos.
+# Suggest moving event mapping into a constant DICT instead of if/elif chains.
 @frappe.whitelist(allow_guest=False)
 def log_client_event(event_type=None, details=None):
 	"""
@@ -197,6 +216,9 @@ def log_tampering_attempt(doc, details):
 		frappe.log_error(f"Error logging tampering: {str(e)}", "BrainWise Branding")
 
 
+# REVIEW: Direct role check is acceptable, but use frappe.has_permission()
+# or a permission rule instead of manual role checking.
+# Also consider caching the statistics if this is called frequently.
 @frappe.whitelist(allow_guest=False)
 def get_tampering_stats():
 	"""Get tampering statistics (admin only)"""
