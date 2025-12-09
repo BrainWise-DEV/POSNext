@@ -1,4 +1,4 @@
-from pos_next.utils.version import get_build_version
+from pos_next.utils import get_build_version
 
 app_name = "pos_next"
 app_title = "POS Next"
@@ -121,15 +121,15 @@ fixtures = [
 # Installation
 # ------------
 
-# before_install = "pos_next.utils.install.before_install"
-after_install = "pos_next.utils.install.after_install"
-after_migrate = "pos_next.utils.install.after_migrate"
+# before_install = "pos_next.install.before_install"
+after_install = "pos_next.install.after_install"
+after_migrate = "pos_next.install.after_migrate"
 
 # Uninstallation
 # ------------
 
-before_uninstall = "pos_next.utils.uninstall.before_uninstall"
-# after_uninstall = "pos_next.utils.uninstall.after_uninstall"
+before_uninstall = "pos_next.uninstall.before_uninstall"
+# after_uninstall = "pos_next.uninstall.after_uninstall"
 
 # Integration Setup
 # ------------------
@@ -169,7 +169,7 @@ before_uninstall = "pos_next.utils.uninstall.before_uninstall"
 # ----------------
 # Custom query for company-aware item filtering
 standard_queries = {
-	"Item": "pos_next.utils.validations.item_query"
+	"Item": "pos_next.validations.item_query"
 }
 
 # DocType Class
@@ -186,17 +186,17 @@ standard_queries = {
 
 doc_events = {
 	"Item": {
-		"validate": "pos_next.utils.validations.validate_item"
+		"validate": "pos_next.validations.validate_item"
 	},
 	"Sales Invoice": {
 		"validate": "pos_next.api.sales_invoice_hooks.validate",
 		"before_cancel": "pos_next.api.sales_invoice_hooks.before_cancel",
-		"on_submit": "pos_next.events.stock.emit_stock_update_event",
-		"on_cancel": "pos_next.events.stock.emit_stock_update_event",
-		"after_insert": "pos_next.events.invoice.emit_invoice_created_event"
+		"on_submit": "pos_next.realtime_events.emit_stock_update_event",
+		"on_cancel": "pos_next.realtime_events.emit_stock_update_event",
+		"after_insert": "pos_next.realtime_events.emit_invoice_created_event"
 	},
 	"POS Profile": {
-		"on_update": "pos_next.events.pos_profile.emit_pos_profile_updated_event"
+		"on_update": "pos_next.realtime_events.emit_pos_profile_updated_event"
 	}
 }
 
@@ -219,7 +219,7 @@ scheduler_events = {
 # Testing
 # -------
 
-# before_tests = "pos_next.utils.install.before_tests"
+# before_tests = "pos_next.install.before_tests"
 
 # Overriding Methods
 # ------------------------------

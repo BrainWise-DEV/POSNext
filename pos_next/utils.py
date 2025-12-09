@@ -8,8 +8,7 @@ from pathlib import Path
 
 from pos_next import __version__ as app_version
 
-# _BASE_DIR should point to the pos_next app directory
-_BASE_DIR = Path(__file__).resolve().parent.parent
+_BASE_DIR = Path(__file__).resolve().parent
 _VERSION_FILE = _BASE_DIR / "public" / "pos" / "version.json"
 _MANIFEST_FILE = _BASE_DIR / "public" / "pos" / "manifest.webmanifest"
 _FALLBACK_VERSION: str | None = None
