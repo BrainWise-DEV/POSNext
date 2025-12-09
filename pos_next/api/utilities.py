@@ -1,10 +1,13 @@
 # -*- coding: utf-8 -*-
-# Copyright (c) 2024, POS Next and contributors
+# Copyright (c) 2025, BrainWise and contributors
 # For license information, please see license.txt
 
 from __future__ import unicode_literals
 import frappe
 
+def get_base_value(doc, fieldname, base_fieldname=None, conversion_rate=None):
+    from pos_next.api.utils.currency import get_base_value as _get_base_value
+    return _get_base_value(doc, fieldname, base_fieldname, conversion_rate)
 
 @frappe.whitelist()
 def get_csrf_token():

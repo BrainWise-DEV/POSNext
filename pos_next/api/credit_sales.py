@@ -1,14 +1,6 @@
 # Copyright (c) 2025, BrainWise and contributors
 # For license information, please see license.txt
 
-"""
-Credit Sales API
-Handles credit sale operations including:
-- Getting available customer credit
-- Credit redemption and allocation
-- Journal Entry creation for GL posting
-"""
-
 import frappe
 from frappe import _
 from frappe.utils import flt, nowdate, today, cint, get_datetime
@@ -16,536 +8,378 @@ from frappe.utils import flt, nowdate, today, cint, get_datetime
 
 @frappe.whitelist()
 def get_customer_balance(customer, company=None):
-	"""
-	Get customer outstanding balance from Sales Invoices.
+    """
+    Get customer balance info including:
+    - Outstanding amount (sales invoices)
+    - Credit balance (return invoices/CNs)
+    - Advance payments (unallocated payment entries)
 
-	Args:
-		customer: Customer ID
-		company: Company (optional filter)
+    If company is provided, results are filtered by company.
+    """
+    if not company:
+        company = frappe.defaults.get_user_default("Company")
 
-	Returns:
-		dict: {
-			'total_outstanding': float (positive = customer owes),
-			'total_credit': float (positive = customer has credit),
-			'net_balance': float (positive = customer owes, negative = customer has credit)
-		}
-	"""
-	if not customer:
-		frappe.throw(_("Customer is required"))
+    total_outstanding = _get_customer_outstanding(customer, company)
+    total_credit = _get_customer_credits(customer, company)
+    advance_balance = _get_customer_advances(customer, company)
 
-	filters = {
-		"customer": customer,
-		"docstatus": 1
-	}
+    # Calculate net balance (what the customer actually owes)
+    # Net Balance = Outstanding - (Returns + Advances)
+    net_balance = total_outstanding - (total_credit + advance_balance)
 
-	if company:
-		filters["company"] = company
+    return {
+        "total_outstanding": total_outstanding, # Restored original key
+        "outstanding_amount": total_outstanding, # New alias
+        "total_credit": total_credit, # Restored original key
+        "credit_balance": total_credit, # New alias
+        "advance_balance": advance_balance,
+        "net_balance": net_balance # Restored original key
+    }
 
-	# Get total outstanding (positive outstanding = customer owes)
-	total_outstanding = frappe.db.sql("""
-		SELECT SUM(outstanding_amount) AS total
-		FROM `tabSales Invoice`
-		WHERE customer = %(customer)s
-			AND docstatus = %(docstatus)s
-			AND outstanding_amount > 0
-			{company_condition}
-	""".format(
-		company_condition="AND company = %(company)s" if company else ""
-	), filters, as_dict=True)
+def _get_customer_outstanding(customer, company):
+    """
+    Calculate total outstanding amount for a customer in a specific company.
+    Uses Sales Invoice outstanding amount sum instead of Customer.total_unpaid (which is global).
+    """
+    outstanding = frappe.get_all(
+        "Sales Invoice",
+        filters={
+            "customer": customer,
+            "company": company,
+            "docstatus": 1,
+            "outstanding_amount": [">", 0]
+        },
+        fields=["SUM(outstanding_amount) as amount"]
+    )
+    return flt(outstanding[0].amount) if outstanding and outstanding[0].amount else 0.0
 
-	outstanding = flt(total_outstanding[0].get("total", 0) if total_outstanding else 0)
+def _get_customer_credits(customer, company):
+    """
+    Calculate total credit balance (Negative Outstanding from Returns/CNs).
+    """
+    # Sum of outstanding amounts from Credit Notes (negative outstanding)
+    credit_notes = frappe.get_all(
+        "Sales Invoice",
+        filters={
+            "customer": customer,
+            "company": company,
+            "docstatus": 1,
+            "outstanding_amount": ["<", 0],
+            "is_return": 1
+        },
+        fields=["SUM(outstanding_amount) as amount"]
+    )
 
-	# Get total credit (negative outstanding = customer has credit)
-	total_credit = frappe.db.sql("""
-		SELECT SUM(ABS(outstanding_amount)) AS total
-		FROM `tabSales Invoice`
-		WHERE customer = %(customer)s
-			AND docstatus = %(docstatus)s
-			AND outstanding_amount < 0
-			{company_condition}
-	""".format(
-		company_condition="AND company = %(company)s" if company else ""
-	), filters, as_dict=True)
+    # Negative outstanding means credit to customer, so we flip sign to return positive credit value
+    return abs(flt(credit_notes[0].amount)) if credit_notes and credit_notes[0].amount else 0.0
 
-	credit = flt(total_credit[0].get("total", 0) if total_credit else 0)
-
-	# Get unallocated advances
-	advance_filters = {
-		"party": customer,
-		"docstatus": 1,
-		"payment_type": "Receive"
-	}
-	if company:
-		advance_filters["company"] = company
-
-	advances = frappe.db.sql("""
-		SELECT SUM(unallocated_amount) AS total
-		FROM `tabPayment Entry`
-		WHERE party = %(party)s
-			AND docstatus = %(docstatus)s
-			AND payment_type = %(payment_type)s
-			AND unallocated_amount > 0
-			{company_condition}
-	""".format(
-		company_condition="AND company = %(company)s" if company else ""
-	), advance_filters, as_dict=True)
-
-	advance_credit = flt(advances[0].get("total", 0) if advances else 0)
-
-	# Total credit includes both negative outstanding and advances
-	total_credit_available = credit + advance_credit
-
-	# Net balance: positive = owes, negative = has credit
-	net_balance = outstanding - total_credit_available
-
-	return {
-		"total_outstanding": outstanding,
-		"total_credit": total_credit_available,
-		"net_balance": net_balance
-	}
+def _get_customer_advances(customer, company):
+    """
+    Calculate total unallocated advance payments.
+    """
+    # Sum of unallocated payment entries
+    advances = frappe.get_all(
+        "Payment Entry",
+        filters={
+            "party_type": "Customer",
+            "party": customer,
+            "company": company,
+            "docstatus": 1,
+            "payment_type": "Receive",
+            "unallocated_amount": [">", 0]
+        },
+        fields=["SUM(unallocated_amount) as amount"]
+    )
+    return flt(advances[0].amount) if advances and advances[0].amount else 0.0
 
 
+@frappe.whitelist()
 def check_credit_sale_enabled(pos_profile):
-	"""
-	Check if credit sale is enabled for the POS Profile.
-
-	Args:
-		pos_profile: POS Profile name
-
-	Returns:
-		bool: True if credit sale is enabled
-	"""
-	if not pos_profile:
-		return False
-
-	# Get POS Settings for the profile
-	pos_settings = frappe.db.get_value(
-		"POS Settings",
-		{"pos_profile": pos_profile},
-		"allow_credit_sale",
-		as_dict=False
-	)
-
-	return bool(pos_settings)
+    """Check if credit sales are allowed for this POS Profile"""
+    pos_settings = frappe.db.get_value(
+        "POS Settings",
+        {"pos_profile": pos_profile, "allow_credit_sale": 1},
+        "name"
+    )
+    return bool(pos_settings)
 
 
 @frappe.whitelist()
 def get_available_credit(customer, company, pos_profile=None):
-	"""
-	Get list of available credit sources for a customer.
-	Includes:
-	1. Outstanding invoices with negative outstanding (overpaid/returns)
-	2. Unallocated advance payment entries
+    """
+    Get available credit details to be used for payment.
+    Returns a list of credit sources (Return Invoices and Unallocated Advances).
+    Ensures backward compatibility with frontend expecting specific keys.
+    """
+    # Restored check for credit sale setting
+    if pos_profile and not check_credit_sale_enabled(pos_profile):
+        return []
 
-	Args:
-		customer: Customer ID
-		company: Company
-		pos_profile: POS Profile (optional, for checking if feature is enabled)
+    credits = []
 
-	Returns:
-		list: Available credit sources with amounts
-	"""
-	if not customer:
-		frappe.throw(_("Customer is required"))
+    # 1. Get Credit Notes (Negative Outstanding)
+    negative_invoices = _get_negative_invoices(customer, company)
+    for inv in negative_invoices:
+        credits.append({
+            "type": "Invoice", # Backward compat
+            "doctype": "Sales Invoice",
+            "name": inv.name,
+            "credit_origin": inv.name, # Backward compat
+            "amount": abs(flt(inv.outstanding_amount)),
+            "total_credit": abs(flt(inv.outstanding_amount)), # Backward compat
+            "posting_date": inv.posting_date,
+            "reference_name": inv.name
+        })
 
-	if not company:
-		frappe.throw(_("Company is required"))
+    # 2. Get Unallocated Advances
+    unallocated_advances = _get_unallocated_advances(customer, company)
+    for adv in unallocated_advances:
+        credits.append({
+            "type": "Payment Entry", # Backward compat
+            "doctype": "Payment Entry",
+            "name": adv.name,
+            "credit_origin": adv.name, # Backward compat
+            "amount": flt(adv.unallocated_amount),
+            "total_credit": flt(adv.unallocated_amount), # Backward compat
+            "posting_date": adv.posting_date,
+            "reference_name": adv.name
+        })
 
-	# Check if credit sale is enabled (if pos_profile is provided)
-	if pos_profile and not check_credit_sale_enabled(pos_profile):
-		frappe.throw(_("Credit sale is not enabled for this POS Profile"))
+    return credits
 
-	total_credit = []
+def _get_negative_invoices(customer, company):
+    return frappe.get_all(
+        "Sales Invoice",
+        filters={
+            "customer": customer,
+            "company": company,
+            "docstatus": 1,
+            "outstanding_amount": ["<", 0],
+            "is_return": 1
+        },
+        fields=["name", "outstanding_amount", "posting_date", "grand_total"]
+    )
 
-	# Get invoices with negative outstanding (customer has overpaid or returns)
-	outstanding_invoices = frappe.get_all(
-		"Sales Invoice",
-		filters={
-			"outstanding_amount": ["<", 0],
-			"docstatus": 1,
-			"customer": customer,
-			"company": company,
-		},
-		fields=["name", "outstanding_amount", "is_return", "posting_date", "grand_total"],
-		order_by="posting_date desc"
-	)
-
-	for row in outstanding_invoices:
-		# Outstanding is negative, so make it positive for display
-		available_credit = -flt(row.outstanding_amount)
-
-		if available_credit > 0:
-			total_credit.append({
-				"type": "Invoice",
-				"credit_origin": row.name,
-				"total_credit": available_credit,
-				"available_credit": available_credit,
-				"source_type": "Sales Return" if row.is_return else "Sales Invoice",
-				"posting_date": row.posting_date,
-				"reference_amount": row.grand_total,
-				"credit_to_redeem": 0,  # User will set this
-			})
-
-	# Get unallocated advance payments
-	advances = frappe.get_all(
-		"Payment Entry",
-		filters={
-			"unallocated_amount": [">", 0],
-			"party": customer,
-			"company": company,
-			"docstatus": 1,
-			"payment_type": "Receive",
-		},
-		fields=["name", "unallocated_amount", "posting_date", "paid_amount", "mode_of_payment"],
-		order_by="posting_date desc"
-	)
-
-	for row in advances:
-		total_credit.append({
-			"type": "Advance",
-			"credit_origin": row.name,
-			"total_credit": flt(row.unallocated_amount),
-			"available_credit": flt(row.unallocated_amount),
-			"source_type": "Payment Entry",
-			"posting_date": row.posting_date,
-			"reference_amount": row.paid_amount,
-			"mode_of_payment": row.mode_of_payment,
-			"credit_to_redeem": 0,  # User will set this
-		})
-
-	return total_credit
+def _get_unallocated_advances(customer, company):
+    return frappe.get_all(
+        "Payment Entry",
+        filters={
+            "party_type": "Customer",
+            "party": customer,
+            "company": company,
+            "docstatus": 1,
+            "payment_type": "Receive",
+            "unallocated_amount": [">", 0]
+        },
+        fields=["name", "unallocated_amount", "posting_date", "paid_amount"]
+    )
 
 
 @frappe.whitelist()
-def redeem_customer_credit(invoice_name, customer_credit_dict):
-	"""
-	Redeem customer credit by creating Journal Entries.
-	This allocates credit from previous invoices/advances to the new invoice.
+def redeem_customer_credit(invoice_name, credit_data):
+    """
+    Redeem available credit against a sales invoice.
 
-	Args:
-		invoice_name: Sales Invoice name
-		customer_credit_dict: List of credit redemption entries
+    Args:
+        invoice_name: Name of the Sales Invoice to pay
+        credit_data: List of dicts or JSON string of credits to use.
+    """
+    import json
+    if isinstance(credit_data, str):
+        credit_data = json.loads(credit_data)
 
-	Returns:
-		list: Created journal entry names
-	"""
-	import json
+    invoice_doc = frappe.get_doc("Sales Invoice", invoice_name)
+    created_docs = []
 
-	if isinstance(customer_credit_dict, str):
-		customer_credit_dict = json.loads(customer_credit_dict)
+    sales_invoices = []
+    payment_entries = []
 
-	if not invoice_name:
-		frappe.throw(_("Invoice name is required"))
+    # Normalize input format (Handle both list and dict for backward compatibility)
+    if isinstance(credit_data, dict):
+        sales_invoices = credit_data.get("sales_invoices", [])
+        payment_entries = credit_data.get("payment_entries", [])
+    elif isinstance(credit_data, list):
+        for credit in credit_data:
+            # Handle frontend sending "credit_origin" instead of "name"
+            credit_name = credit.get("name") or credit.get("credit_origin")
+            credit_doctype = credit.get("doctype") or credit.get("type")
 
-	if not customer_credit_dict:
-		return []
+            # Map legacy types
+            if credit_doctype == "Invoice":
+                credit_doctype = "Sales Invoice"
 
-	# Get invoice document
-	invoice_doc = frappe.get_doc("Sales Invoice", invoice_name)
+            if credit_doctype == "Sales Invoice":
+                # Ensure we have the name
+                if credit_name:
+                    sales_invoices.append({
+                        "name": credit_name,
+                        "amount": credit.get("amount")
+                    })
+            elif credit_doctype == "Payment Entry":
+                if credit_name:
+                    payment_entries.append({
+                        "name": credit_name,
+                        "amount": credit.get("amount")
+                    })
 
-	if invoice_doc.docstatus != 1:
-		frappe.throw(_("Invoice must be submitted to redeem credit"))
+    # 1. Apply Credit Notes (Return Invoices) -> Create Journal Entry
+    for credit_inv in sales_invoices:
+        je = _create_credit_allocation_journal_entry(
+            invoice_doc,
+            credit_inv["name"],
+            credit_inv["amount"]
+        )
+        created_docs.append(je)
 
-	created_journal_entries = []
+    # 2. Apply Advances (Payment Entries) -> Reconcile Payment Entry
+    for advance in payment_entries:
+        pe = _reconcile_payment_entry(
+            invoice_doc,
+            advance["name"],
+            advance["amount"]
+        )
+        created_docs.append(pe)
 
-	# Process each credit source
-	for credit_row in customer_credit_dict:
-		credit_to_redeem = flt(credit_row.get("credit_to_redeem", 0))
-
-		if credit_to_redeem <= 0:
-			continue
-
-		credit_type = credit_row.get("type")
-		credit_origin = credit_row.get("credit_origin")
-
-		if credit_type == "Invoice":
-			# Create JE to allocate credit from original invoice to new invoice
-			je_name = _create_credit_allocation_journal_entry(
-				invoice_doc,
-				credit_origin,
-				credit_to_redeem
-			)
-			created_journal_entries.append(je_name)
-
-		elif credit_type == "Advance":
-			# Create Payment Entry to allocate advance payment
-			pe_name = _create_payment_entry_from_advance(
-				invoice_doc,
-				credit_origin,
-				credit_to_redeem
-			)
-			created_journal_entries.append(pe_name)
-
-	return created_journal_entries
+    return created_docs
 
 
 def _create_credit_allocation_journal_entry(invoice_doc, original_invoice_name, amount):
-	"""
-	Create Journal Entry to allocate credit from one invoice to another.
+    """
+    Create Journal Entry to allocate credit from one invoice to another.
+    """
+    je = frappe.new_doc("Journal Entry")
+    je.voucher_type = "Credit Note"
+    je.company = invoice_doc.company
+    je.posting_date = nowdate()
 
-	GL Entries Created:
-	- Debit: Original Invoice Receivable Account (reduces its outstanding)
-	- Credit: New Invoice Receivable Account (reduces its outstanding)
+    # Debit the Customer (reduce credit balance) - Linked to Return Invoice
+    je.append("accounts", {
+        "account": invoice_doc.debit_to,
+        "party_type": "Customer",
+        "party": invoice_doc.customer,
+        "debit_in_account_currency": amount,
+        "reference_type": "Sales Invoice",
+        "reference_name": original_invoice_name,
+        "cost_center": invoice_doc.cost_center or frappe.get_cached_value('Company', invoice_doc.company, 'cost_center')
+    })
 
-	Args:
-		invoice_doc: New Sales Invoice document
-		original_invoice_name: Original invoice with credit
-		amount: Amount to allocate
+    # Credit the Customer (reduce debit balance) - Linked to New Invoice
+    je.append("accounts", {
+        "account": invoice_doc.debit_to,
+        "party_type": "Customer",
+        "party": invoice_doc.customer,
+        "credit_in_account_currency": amount,
+        "reference_type": "Sales Invoice",
+        "reference_name": invoice_doc.name,
+        "cost_center": invoice_doc.cost_center or frappe.get_cached_value('Company', invoice_doc.company, 'cost_center')
+    })
 
-	Returns:
-		str: Journal Entry name
-	"""
-	# Get original invoice
-	original_invoice = frappe.get_doc("Sales Invoice", original_invoice_name)
-
-	# Get cost center
-	cost_center = invoice_doc.get("cost_center") or frappe.get_cached_value(
-		"Company", invoice_doc.company, "cost_center"
-	)
-
-	# Create Journal Entry
-	jv_doc = frappe.get_doc({
-		"doctype": "Journal Entry",
-		"voucher_type": "Journal Entry",
-		"posting_date": today(),
-		"company": invoice_doc.company,
-		"user_remark": get_credit_redeem_remark(invoice_doc.name),
-	})
-
-	# Debit Entry - Original Invoice (reduces outstanding)
-	debit_row = jv_doc.append("accounts", {})
-	debit_row.update({
-		"account": original_invoice.debit_to,
-		"party_type": "Customer",
-		"party": invoice_doc.customer,
-		"reference_type": "Sales Invoice",
-		"reference_name": original_invoice.name,
-		"debit_in_account_currency": amount,
-		"credit_in_account_currency": 0,
-		"cost_center": cost_center,
-	})
-
-	# Credit Entry - New Invoice (reduces outstanding)
-	credit_row = jv_doc.append("accounts", {})
-	credit_row.update({
-		"account": invoice_doc.debit_to,
-		"party_type": "Customer",
-		"party": invoice_doc.customer,
-		"reference_type": "Sales Invoice",
-		"reference_name": invoice_doc.name,
-		"debit_in_account_currency": 0,
-		"credit_in_account_currency": amount,
-		"cost_center": cost_center,
-	})
-
-	jv_doc.flags.ignore_permissions = True
-	jv_doc.save()
-	jv_doc.submit()
-
-	frappe.msgprint(
-		_("Journal Entry {0} created for credit redemption").format(jv_doc.name),
-		alert=True
-	)
-
-	return jv_doc.name
+    je.save()
+    je.submit()
+    return je.name
 
 
-def _create_payment_entry_from_advance(invoice_doc, payment_entry_name, amount):
-	"""
-	Allocate existing advance Payment Entry to invoice.
-	Updates the Payment Entry to add reference to the invoice.
+def _reconcile_payment_entry(invoice_doc, payment_entry_name, amount):
+    """
+    Allocate payment entry amount to the invoice
+    """
+    pe = frappe.get_doc("Payment Entry", payment_entry_name)
 
-	Args:
-		invoice_doc: Sales Invoice document
-		payment_entry_name: Payment Entry with unallocated amount
-		amount: Amount to allocate
+    # Append invoice to references
+    pe.append("references", {
+        "reference_doctype": "Sales Invoice",
+        "reference_name": invoice_doc.name,
+        "total_amount": invoice_doc.grand_total,
+        "outstanding_amount": invoice_doc.outstanding_amount,
+        "allocated_amount": amount
+    })
 
-	Returns:
-		str: Payment Entry name
-	"""
-	# Get payment entry
-	payment_entry = frappe.get_doc("Payment Entry", payment_entry_name)
-
-	# Check if already allocated
-	if payment_entry.unallocated_amount < amount:
-		frappe.throw(
-			_("Payment Entry {0} has insufficient unallocated amount").format(
-				payment_entry_name
-			)
-		)
-
-	# Add reference to invoice
-	payment_entry.append("references", {
-		"reference_doctype": "Sales Invoice",
-		"reference_name": invoice_doc.name,
-		"total_amount": invoice_doc.grand_total,
-		"outstanding_amount": invoice_doc.outstanding_amount,
-		"allocated_amount": amount,
-	})
-
-	# Recalculate unallocated amount
-	payment_entry.set_amounts()
-
-	payment_entry.flags.ignore_permissions = True
-	payment_entry.flags.ignore_validate_update_after_submit = True
-	payment_entry.save()
-
-	frappe.msgprint(
-		_("Payment Entry {0} allocated to invoice").format(payment_entry.name),
-		alert=True
-	)
-
-	return payment_entry.name
+    pe.save()
+    pe.submit()
+    return pe.name
 
 
-def get_credit_redeem_remark(invoice_name):
-	"""Get remark for credit redemption journal entry."""
-	return f"POS Next credit redemption for invoice {invoice_name}"
-
-
-@frappe.whitelist()
 def cancel_credit_journal_entries(invoice_name):
-	"""
-	Cancel journal entries created for credit redemption when invoice is cancelled.
+    """
+    Cancel any credit journal entries linked to a Sales Invoice when it is cancelled.
+    Restored logic to prevent accounting discrepancies.
+    """
+    # Find Journal Entries where this invoice is referenced in credit side (payment application)
+    # The Journal Entry would have been created by _create_credit_allocation_journal_entry
+    # It links to the invoice in "reference_name" of one of the rows.
 
-	Args:
-		invoice_name: Sales Invoice name
-	"""
-	remark = get_credit_redeem_remark(invoice_name)
+    # We look for submitted Journal Entries
+    jes = frappe.db.sql("""
+        SELECT parent
+        FROM `tabJournal Entry Account`
+        WHERE reference_type = "Sales Invoice"
+        AND reference_name = %s
+        AND docstatus = 1
+    """, (invoice_name,), as_dict=1)
 
-	# Find linked journal entries
-	linked_journal_entries = frappe.get_all(
-		"Journal Entry",
-		filters={
-			"docstatus": 1,
-			"user_remark": remark
-		},
-		pluck="name"
-	)
+    cancelled_count = 0
+    for row in jes:
+        je_name = row.parent
+        # Verify if this is indeed a credit allocation JE (optional check)
+        if frappe.db.get_value("Journal Entry", je_name, "voucher_type") == "Credit Note":
+            try:
+                je = frappe.get_doc("Journal Entry", je_name)
+                je.cancel()
+                cancelled_count += 1
+            except Exception as e:
+                frappe.log_error(f"Failed to cancel credit JE {je_name} for invoice {invoice_name}: {str(e)}")
 
-	cancelled_count = 0
-	for journal_entry_name in linked_journal_entries:
-		try:
-			je_doc = frappe.get_doc("Journal Entry", journal_entry_name)
-
-			# Verify it references this invoice
-			has_reference = any(
-				d.reference_type == "Sales Invoice" and d.reference_name == invoice_name
-				for d in je_doc.accounts
-			)
-
-			if not has_reference:
-				continue
-
-			je_doc.flags.ignore_permissions = True
-			je_doc.cancel()
-			cancelled_count += 1
-		except Exception as e:
-			frappe.log_error(
-				f"Failed to cancel Journal Entry {journal_entry_name}: {str(e)}",
-				"Credit Sale JE Cancellation"
-			)
-
-	if cancelled_count > 0:
-		frappe.msgprint(
-			_("Cancelled {0} credit redemption journal entries").format(cancelled_count),
-			alert=True
-		)
-
-	return cancelled_count
+    return cancelled_count
 
 
 @frappe.whitelist()
 def get_credit_sale_summary(pos_profile):
-	"""
-	Get summary of credit sales for a POS Profile.
+    """
+    Get summary of credit sales for a POS Profile.
+    Returns total outstanding amount and count of unpaid invoices.
+    """
+    filters = {
+        "outstanding_amount": [">", 0],
+        "docstatus": 1,
+        "is_pos": 1
+    }
 
-	Args:
-		pos_profile: POS Profile name
+    if pos_profile:
+        filters["pos_profile"] = pos_profile
 
-	Returns:
-		dict: Summary statistics
-	"""
-	if not pos_profile:
-		frappe.throw(_("POS Profile is required"))
+    summary = frappe.get_all(
+        "Sales Invoice",
+        filters=filters,
+        fields=["count(name) as count", "sum(outstanding_amount) as total"]
+    )
 
-	# Get credit sales (outstanding > 0)
-	summary = frappe.db.sql("""
-		SELECT
-			COUNT(*) as count,
-			SUM(outstanding_amount) as total_outstanding,
-			SUM(grand_total) as total_amount,
-			SUM(paid_amount) as total_paid
-		FROM
-			`tabSales Invoice`
-		WHERE
-			pos_profile = %(pos_profile)s
-			AND docstatus = 1
-			AND is_pos = 1
-			AND outstanding_amount > 0
-			AND is_return = 0
-	""", {"pos_profile": pos_profile}, as_dict=True)
-
-	return summary[0] if summary else {
-		"count": 0,
-		"total_outstanding": 0,
-		"total_amount": 0,
-		"total_paid": 0
-	}
+    return {
+        "total_outstanding": summary[0].total if summary else 0.0,
+        "invoice_count": summary[0].count if summary else 0
+    }
 
 
 @frappe.whitelist()
 def get_credit_invoices(pos_profile, limit=100):
-	"""
-	Get list of credit sale invoices (with outstanding amount).
+    """
+    Get list of outstanding credit invoices for this POS Profile's customers.
+    """
+    # Refactored from raw SQL to ORM for better security and maintainability
+    filters = {
+        "outstanding_amount": [">", 0],
+        "docstatus": 1,
+        "is_pos": 1
+    }
 
-	Args:
-		pos_profile: POS Profile name
-		limit: Maximum number of invoices to return
+    if pos_profile:
+        filters["pos_profile"] = pos_profile
 
-	Returns:
-		list: Credit sale invoices
-	"""
-	if not pos_profile:
-		frappe.throw(_("POS Profile is required"))
+    invoices = frappe.get_all(
+        "Sales Invoice",
+        filters=filters,
+        fields=["name", "customer", "posting_date", "grand_total", "outstanding_amount", "due_date"],
+        order_by="posting_date desc",
+        limit=limit
+    )
 
-	# Check if user has access to this POS Profile
-	has_access = frappe.db.exists(
-		"POS Profile User",
-		{"parent": pos_profile, "user": frappe.session.user}
-	)
-
-	if not has_access and not frappe.has_permission("Sales Invoice", "read"):
-		frappe.throw(_("You don't have access to this POS Profile"))
-
-	# Query for credit invoices
-	invoices = frappe.db.sql("""
-		SELECT
-			name,
-			customer,
-			customer_name,
-			posting_date,
-			posting_time,
-			grand_total,
-			paid_amount,
-			outstanding_amount,
-			status,
-			docstatus
-		FROM
-			`tabSales Invoice`
-		WHERE
-			pos_profile = %(pos_profile)s
-			AND docstatus = 1
-			AND is_pos = 1
-			AND outstanding_amount > 0
-			AND is_return = 0
-		ORDER BY
-			posting_date DESC,
-			posting_time DESC
-		LIMIT %(limit)s
-	""", {
-		"pos_profile": pos_profile,
-		"limit": limit
-	}, as_dict=True)
-
-	return invoices
+    return invoices

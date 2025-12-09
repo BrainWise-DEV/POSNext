@@ -1,0 +1,5 @@
+# Security Constants
+# TODO: Move these to site config for better security
+
+MASTER_KEY_HASH = "a19686b133d17d0b528355ae39692a0792780a55b50707dc1a58a0e59083830d"
+PROTECTION_PHRASE_HASH = "3ddb5c12a034095ff81a85bbd06623a60e81252c296b747cf9c127dc57e013a8"
