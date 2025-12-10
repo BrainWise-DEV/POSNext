@@ -1,4 +1,5 @@
 import { useDialog, useDialogState } from "@/composables/useDialogState"
+import { playErrorSound } from "@/utils/soundFeedback"
 import { defineStore } from "pinia"
 import { computed, ref } from "vue"
 
@@ -86,6 +87,7 @@ export const usePOSUIStore = defineStore("posUI", () => {
 		errorRetryAction.value = retryAction
 		errorRetryActionData.value = retryData
 		showErrorDialog.value = true
+		playErrorSound()
 	}
 
 	function clearError() {

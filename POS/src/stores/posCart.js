@@ -7,6 +7,7 @@ import {
 	formatStockError,
 } from "@/utils/stockValidator"
 import { useToast } from "@/composables/useToast"
+import { playSuccessSound } from "@/utils/soundFeedback"
 import { defineStore } from "pinia"
 import { computed, nextTick, ref, toRaw, watch } from "vue"
 
@@ -107,6 +108,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 		// Add item to cart - no toast notification for performance
 		addItemToInvoice(item, qty)
+		playSuccessSound()
 	}
 
 	function clearCart() {

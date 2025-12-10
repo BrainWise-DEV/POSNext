@@ -1,4 +1,5 @@
 import { ref } from "vue"
+import { playSuccessSound, playErrorSound } from "@/utils/soundFeedback"
 
 // Global toast state
 const toastNotification = ref(null)
@@ -20,14 +21,17 @@ export function useToast() {
 
 	function showSuccess(message) {
 		showToastNotification("Success", message, "success")
+		playSuccessSound()
 	}
 
 	function showError(message) {
 		showToastNotification("Error", message, "error")
+		playErrorSound()
 	}
 
 	function showWarning(message) {
 		showToastNotification("Validation Error", message, "warning")
+		playErrorSound()
 	}
 
 	function hideToast() {
