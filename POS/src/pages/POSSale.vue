@@ -1158,6 +1158,9 @@ onMounted(async () => {
 	onPricingChanged(async ({ changes }) => {
 		log.info("Event: Pricing settings changed", changes);
 
+		// Reload settings in the store to get fresh values
+		await posSettingsStore.reloadSettings();
+
 		// Update tax_inclusive setting if it changed
 		if (changes.hasOwnProperty("tax_inclusive")) {
 			const newTaxInclusive = changes.tax_inclusive.new;

@@ -235,6 +235,9 @@ import SelectInput from "@/components/common/SelectInput.vue"
 const { showSuccess, showError, showWarning } = useToast()
 const settingsStore = usePOSSettingsStore()
 const serialStore = useSerialNumberStore()
+watch(() => settingsStore.allowUserToEditRate, (val) => {
+	console.log('EditItemDialog - allowUserToEditRate changed:', val)
+}, { immediate: true })
 
 const props = defineProps({
 	modelValue: Boolean,

@@ -98,9 +98,11 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	const allowItemDiscount = computed(() =>
 		Boolean(settings.value.allow_user_to_edit_item_discount),
 	)
-	const allowUserToEditRate = computed(() =>
-		Boolean(settings.value.allow_user_to_edit_rate),
-	)
+	const allowUserToEditRate = computed(() => {
+		const val = Boolean(settings.value.allow_user_to_edit_rate)
+		console.log('[POSSettings] allowUserToEditRate:', val, 'raw:', settings.value.allow_user_to_edit_rate)
+		return val
+	})
 	const disableRoundedTotal = computed(() =>
 		Boolean(settings.value.disable_rounded_total),
 	)
