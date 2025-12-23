@@ -252,6 +252,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		settings.value.pos_profile = posProfile
 
 		// OPTIMIZATION: Check if bootstrap has preloaded the settings
+		/*
 		try {
 			const bootstrapStore = useBootstrapStore()
 			const preloadedSettings = bootstrapStore.getPreloadedPOSSettings()
@@ -266,6 +267,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 			// Bootstrap store may not be available, fall through to API call
 			console.log('[POSSettings Store] Bootstrap not available, fetching from API')
 		}
+		*/
 
 		// Fallback to API call
 		try {
