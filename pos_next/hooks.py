@@ -116,7 +116,19 @@ fixtures = [
 				]
 			]
 		]
-	}
+	},
+    {
+        "dt": "Role",
+        "filters": [
+            ["role_name", "in", ["POSNext Cashier"]]
+        ]
+    },
+    {
+        "dt": "Custom DocPerm",
+        "filters": [
+            ["role", "in", ["POSNext Cashier"]]
+        ]
+    }
 ]
 
 # Installation
