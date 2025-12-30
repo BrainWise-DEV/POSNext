@@ -20,7 +20,7 @@ class OfflineInvoiceSync(Document):
             self.synced_at = frappe.utils.now_datetime()
 
     @staticmethod
-    def create_sync_record(offline_id, sales_invoice, pos_profile=None, customer=None):
+    def create_sync_record(offline_id, sales_invoice, pos_profile=None, customer=None, status="Synced"):
         """
         Create a sync record for an offline invoice.
 
@@ -29,28 +29,40 @@ class OfflineInvoiceSync(Document):
             sales_invoice: The Sales Invoice name created on the server
             pos_profile: Optional POS Profile name
             customer: Optional Customer name
+            status: Sync status - "Pending", "Synced", or "Failed"
 
         Returns:
             The created OfflineInvoiceSync document or existing one if duplicate
         """
-        if not offline_id or not sales_invoice:
+        if not offline_id:
             return None
 
         # Check if record already exists
         existing = frappe.db.get_value(
             "Offline Invoice Sync",
             {"offline_id": offline_id},
-            "name"
+            ["name", "status"],
+            as_dict=True
         )
+
         if existing:
-            return frappe.get_doc("Offline Invoice Sync", existing)
+            # If existing record is Pending and we're setting to Synced, update it
+            if existing.status == "Pending" and status == "Synced" and sales_invoice:
+                sync_doc = frappe.get_doc("Offline Invoice Sync", existing.name)
+                sync_doc.sales_invoice = sales_invoice
+                sync_doc.status = "Synced"
+                sync_doc.synced_at = frappe.utils.now_datetime()
+                sync_doc.flags.ignore_permissions = True
+                sync_doc.save()
+            return frappe.get_doc("Offline Invoice Sync", existing.name)
 
         doc = frappe.get_doc({
             "doctype": "Offline Invoice Sync",
             "offline_id": offline_id,
-            "sales_invoice": sales_invoice,
+            "sales_invoice": sales_invoice or "",
             "pos_profile": pos_profile,
             "customer": customer,
+            "status": status,
         })
         doc.flags.ignore_permissions = True
         doc.insert()
@@ -65,19 +77,25 @@ class OfflineInvoiceSync(Document):
             offline_id: The offline ID to check
 
         Returns:
-            dict with 'synced' (bool) and 'sales_invoice' (str or None)
+            dict with 'synced' (bool), 'sales_invoice' (str or None), and 'status' (str or None)
         """
         if not offline_id:
-            return {"synced": False, "sales_invoice": None}
+            return {"synced": False, "sales_invoice": None, "status": None}
 
         existing = frappe.db.get_value(
             "Offline Invoice Sync",
             {"offline_id": offline_id},
-            ["name", "sales_invoice"],
+            ["name", "sales_invoice", "status"],
             as_dict=True
         )
 
         if existing:
-            return {"synced": True, "sales_invoice": existing.sales_invoice}
+            # Only consider it synced if status is "Synced" and has a sales_invoice
+            is_synced = existing.status == "Synced" and existing.sales_invoice
+            return {
+                "synced": is_synced,
+                "sales_invoice": existing.sales_invoice if is_synced else None,
+                "status": existing.status
+            }
 
-        return {"synced": False, "sales_invoice": None}
+        return {"synced": False, "sales_invoice": None, "status": None}
