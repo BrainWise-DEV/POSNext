@@ -162,7 +162,7 @@
 										{{ __('Select Items to Return') }}
 									</label>
 									<div class="flex gap-2 self-end sm:self-auto">
-										<Button size="sm" variant="subtle" @click="selectAllItems">
+										<Button size="sm" variant="subtle" @click="selectAllFilteredItems">
 											<span class="text-xs whitespace-nowrap">{{ __('Select All') }}</span>
 										</Button>
 										<Button size="sm" variant="subtle" @click="deselectAllItems">
@@ -170,9 +170,23 @@
 										</Button>
 									</div>
 								</div>
+
+								<!-- Search bar for items (shown when more than 7 items) -->
+								<div v-if="returnItems.length > 7" class="mb-3 relative">
+									<input
+										v-model="itemSearchFilter"
+										type="text"
+										:placeholder="__('Search items by name or code...')"
+										class="w-full px-4 py-2.5 ps-10 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+									/>
+									<svg class="absolute start-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+									</svg>
+								</div>
+
 								<div class="flex flex-col gap-2 max-h-96 overflow-y-auto pe-2">
 									<div
-										v-for="(item, index) in returnItems"
+										v-for="(item, index) in filteredReturnItems"
 										:key="index"
 										@click="toggleItemSelection(item)"
 										:class="[
@@ -210,7 +224,7 @@
 												<span class="text-xs font-medium text-gray-600">{{ __('Return Qty:') }}</span>
 												<div class="flex items-center gap-2">
 													<button
-														@click="decrementQty(item)"
+														@click="decrementReturnQuantity(item)"
 														:disabled="!item.selected || item.return_qty <= 1"
 														class="w-6 h-6 rounded-full bg-white border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
 													>
@@ -225,12 +239,12 @@
 														type="number"
 														min="1"
 														step="1"
-														@change="normalizeItemQty(item)"
-														@blur="normalizeItemQty(item)"
+														@change="normalizeItemQuantity(item)"
+														@blur="normalizeItemQuantity(item)"
 														class="w-14 px-2 py-1 border border-gray-300 rounded-lg text-sm text-center font-semibold focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
 													/>
 													<button
-														@click="incrementQty(item)"
+														@click="incrementReturnQuantity(item)"
 														:disabled="!item.selected || item.return_qty >= item.quantity"
 														class="w-6 h-6 rounded-full bg-white border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
 													>
@@ -282,7 +296,7 @@
 												</div>
 												<div class="flex items-center gap-2">
 													<button
-														@click="decrementQty(item)"
+														@click="decrementReturnQuantity(item)"
 														:disabled="!item.selected || item.return_qty <= 1"
 														class="flex-1 h-10 rounded-lg bg-white border-2 border-gray-300 flex items-center justify-center text-gray-700 active:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed font-bold text-xl"
 													>
@@ -295,12 +309,12 @@
 														type="number"
 														min="1"
 														step="1"
-														@change="normalizeItemQty(item)"
-														@blur="normalizeItemQty(item)"
+														@change="normalizeItemQuantity(item)"
+														@blur="normalizeItemQuantity(item)"
 														class="w-16 h-10 px-2 border-2 border-gray-300 rounded-lg text-lg text-center font-bold focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
 													/>
 													<button
-														@click="incrementQty(item)"
+														@click="incrementReturnQuantity(item)"
 														:disabled="!item.selected || item.return_qty >= item.quantity"
 														class="flex-1 h-10 rounded-lg bg-white border-2 border-gray-300 flex items-center justify-center text-gray-700 active:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed font-bold text-xl"
 													>
@@ -564,7 +578,6 @@ import { formatCurrency as formatCurrencyUtil } from "@/utils/currency"
 import { getInvoiceStatusColor } from "@/utils/invoice"
 import { Button, Dialog, Input, createResource } from "frappe-ui"
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue"
-import TranslatedHTML from "../common/TranslatedHTML.vue"
 
 const { showSuccess, showError, showWarning } = useToast()
 
@@ -572,14 +585,12 @@ const props = defineProps({
 	modelValue: Boolean,
 	posProfile: String,
 	posOpeningShift: String,
-	currency: {
-		type: String,
-		default: "USD",
-	},
+	currency: { type: String, default: "USD" },
 })
 
 const emit = defineEmits(["update:modelValue", "return-created"])
 
+// State
 const show = ref(props.modelValue)
 const originalInvoice = ref(null)
 const returnItems = ref([])
@@ -588,24 +599,19 @@ const paymentMethods = ref([])
 const refundPayments = ref([])
 const invoiceList = ref([])
 const invoiceListFilter = ref("")
+const itemSearchFilter = ref("")
 const submitError = ref("")
 const isSubmitting = ref(false)
-const errorDialog = reactive({
-	visible: false,
-	title: __("Validation Error"),
-	message: "",
-})
-const returnModal = reactive({
-	visible: false,
-})
 
-// Track if original invoice was a credit sale (Pay on Account)
+// Invoice payment tracking
 const isOriginalCreditSale = ref(false)
-
-// Track if original invoice was partially paid
 const isPartiallyPaid = ref(false)
 const originalPaidAmount = ref(0)
 const originalOutstandingAmount = ref(0)
+
+// UI state
+const errorDialog = reactive({ visible: false, title: __("Validation Error"), message: "" })
+const returnModal = reactive({ visible: false })
 
 // Resource for loading recent invoices (only those with items available for return)
 const loadInvoicesResource = createResource({
@@ -683,7 +689,7 @@ const fetchInvoiceResource = createResource({
 				return_qty: item.qty, // This will be the remaining qty after previous returns
 				original_qty: item.original_qty || item.qty, // Track original quantity
 			}))
-			returnItems.value.forEach(normalizeItemQty)
+			returnItems.value.forEach(normalizeItemQuantity)
 
 			// Track payment amounts from original invoice
 			const totalPaidFromPayments = data.payments?.reduce((sum, p) => sum + Math.abs(p.amount || 0), 0) || 0
@@ -819,291 +825,180 @@ watch(show, (val) => {
 })
 
 // Computed properties
-const selectedItems = computed(() => {
-	if (!returnItems.value || !Array.isArray(returnItems.value)) {
-		return []
-	}
-	return returnItems.value.filter(
-		(item) => item.selected && item.return_qty > 0,
+const selectedItems = computed(() =>
+	returnItems.value.filter(item => item.selected && item.return_qty > 0)
+)
+
+const filteredReturnItems = computed(() => {
+	if (!itemSearchFilter.value) return returnItems.value
+	const searchTerm = itemSearchFilter.value.toLowerCase()
+	return returnItems.value.filter(item =>
+		item.item_name?.toLowerCase().includes(searchTerm) ||
+		item.item_code?.toLowerCase().includes(searchTerm)
 	)
 })
 
 const hasOpenShift = computed(() => Boolean(props.posOpeningShift))
 
-const returnTotal = computed(() => {
-	if (!selectedItems.value || !Array.isArray(selectedItems.value)) {
-		return 0
-	}
-	return selectedItems.value.reduce((sum, item) => {
-		return sum + item.return_qty * item.rate
-	}, 0)
-})
+const returnTotal = computed(() =>
+	selectedItems.value.reduce((sum, item) => sum + item.return_qty * item.rate, 0)
+)
 
-// For partially paid invoices, calculate the proportional refundable amount
+const totalPaymentAmount = computed(() =>
+	refundPayments.value.reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0)
+)
+
 const maxRefundableAmount = computed(() => {
 	if (!originalInvoice.value) return 0
+	if (!isPartiallyPaid.value && !isOriginalCreditSale.value) return returnTotal.value
 
-	// For fully paid invoices, refund up to return total
-	if (!isPartiallyPaid.value && !isOriginalCreditSale.value) {
-		return returnTotal.value
-	}
-
-	// For partially paid invoices, calculate proportional refund
-	// If return is 50% of grand total, refund 50% of paid amount
 	const grandTotal = Math.abs(originalInvoice.value.grand_total) || 1
 	const returnRatio = returnTotal.value / grandTotal
 	return Math.min(returnTotal.value, originalPaidAmount.value * returnRatio)
 })
 
-// Amount that will be adjusted from outstanding (credit adjustment)
-const creditAdjustmentAmount = computed(() => {
-	if (!isPartiallyPaid.value) return 0
-	return Math.max(0, returnTotal.value - maxRefundableAmount.value)
-})
+const creditAdjustmentAmount = computed(() =>
+	isPartiallyPaid.value ? Math.max(0, returnTotal.value - maxRefundableAmount.value) : 0
+)
 
-// Summary display values - shows breakdown for partially paid, simple for others
 const showPartialBreakdown = computed(() => isPartiallyPaid.value && !isOriginalCreditSale.value)
 const summaryRefundLabel = computed(() => showPartialBreakdown.value ? 'Cash Refund:' : 'Refund Amount:')
 const summaryRefundAmount = computed(() => showPartialBreakdown.value ? maxRefundableAmount.value : returnTotal.value)
 
-// RTL-aware style for payment select dropdown
 const paymentSelectStyle = computed(() => ({
 	backgroundPosition: document.documentElement.dir === 'rtl' ? 'left 12px center' : 'right 12px center'
 }))
 
-const totalPaymentAmount = computed(() => {
-	if (!refundPayments.value || !Array.isArray(refundPayments.value)) {
-		return 0
-	}
-	return refundPayments.value.reduce((sum, payment) => {
-		return sum + (Number(payment.amount) || 0)
-	}, 0)
-})
-
 const canCreateReturn = computed(() => {
-	if (!selectedItems.value) {
-		return false
-	}
 	const hasSelectedItems = selectedItems.value.length > 0
-	if (!hasOpenShift.value) {
-		return false
-	}
+	if (!hasSelectedItems || !hasOpenShift.value) return false
+	if (isOriginalCreditSale.value) return true
 
-	// For credit sales (Pay on Account), no payment validation needed
-	// The return will simply reverse the A/R entry
-	if (isOriginalCreditSale.value) {
-		return hasSelectedItems
-	}
-
-	// For partially paid invoices, payment should match the refundable portion only
+	const payments = refundPayments.value
 	if (isPartiallyPaid.value) {
-		if (!refundPayments.value || refundPayments.value.length === 0) {
-			return hasSelectedItems // Allow if no refund needed (all credit adjustment)
-		}
-		const hasValidPayments = refundPayments.value.every(p => p.mode_of_payment && p.amount >= 0)
-		const paymentsMatchRefundable = Math.abs(totalPaymentAmount.value - maxRefundableAmount.value) < 0.01
-		return hasSelectedItems && hasValidPayments && paymentsMatchRefundable
+		if (!payments.length) return true
+		const hasValidPayments = payments.every(payment => payment.mode_of_payment && payment.amount >= 0)
+		return hasValidPayments && Math.abs(totalPaymentAmount.value - maxRefundableAmount.value) < 0.01
 	}
 
-	// For regular fully paid sales, validate payment methods
-	if (!refundPayments.value) {
-		return false
-	}
-	const hasValidPayments = refundPayments.value.length > 0 &&
-		refundPayments.value.every(p => p.mode_of_payment && p.amount > 0)
-	const paymentsMatch = Math.abs(totalPaymentAmount.value - returnTotal.value) < 0.01
-
-	return hasSelectedItems && hasValidPayments && paymentsMatch
+	if (!payments.length) return false
+	const hasValidPayments = payments.every(payment => payment.mode_of_payment && payment.amount > 0)
+	return hasValidPayments && Math.abs(totalPaymentAmount.value - returnTotal.value) < 0.01
 })
 
 const filteredInvoiceList = computed(() => {
-	if (!invoiceList.value || !Array.isArray(invoiceList.value)) {
-		return []
-	}
 	if (!invoiceListFilter.value) return invoiceList.value
-
-	const filter = invoiceListFilter.value.toLowerCase()
-	return invoiceList.value.filter(
-		(invoice) =>
-			invoice.name.toLowerCase().includes(filter) ||
-			invoice.customer_name.toLowerCase().includes(filter),
+	const searchTerm = invoiceListFilter.value.toLowerCase()
+	return invoiceList.value.filter(invoice =>
+		invoice.name.toLowerCase().includes(searchTerm) ||
+		invoice.customer_name.toLowerCase().includes(searchTerm)
 	)
 })
 
-// Watch returnTotal to auto-populate payment amount for single payment method
+// Auto-populate payment amount when return total changes (single payment only)
 watch(returnTotal, (newTotal) => {
-	// Only run if return modal is visible and component is active
-	if (!returnModal.visible || !show.value) {
-		return
-	}
+	if (!returnModal.visible || !show.value || isOriginalCreditSale.value) return
+	if (refundPayments.value.length !== 1 || newTotal <= 0) return
 
-	// For credit sales, no payment needed
-	if (isOriginalCreditSale.value) {
-		return
-	}
-
-	// Safety checks: ensure refundPayments exists and has exactly one row
-	if (refundPayments.value &&
-		Array.isArray(refundPayments.value) &&
-		refundPayments.value.length === 1 &&
-		refundPayments.value[0] &&
-		newTotal > 0) {
-		// For partially paid invoices, set the proportional refundable amount
-		if (isPartiallyPaid.value) {
-			refundPayments.value[0].amount = Number(maxRefundableAmount.value.toFixed(2))
-		} else {
-			refundPayments.value[0].amount = newTotal
-		}
-	}
+	refundPayments.value[0].amount = isPartiallyPaid.value
+		? Number(maxRefundableAmount.value.toFixed(2))
+		: newTotal
 })
 
 // Methods
-function extractErrorMessage(
-	error,
-	fallback = __("Failed to create return invoice"),
-) {
-	if (!error) return fallback
-
-	if (
-		error.messages &&
-		Array.isArray(error.messages) &&
-		error.messages.length > 0
-	) {
-		return error.messages.join(", ")
-	}
+function extractErrorMessage(error, fallbackMessage = __("Failed to create return invoice")) {
+	if (!error) return fallbackMessage
+	if (error.messages?.length) return error.messages.join(", ")
 
 	if (error._server_messages) {
 		try {
-			const serverMsgs = JSON.parse(error._server_messages)
-			if (Array.isArray(serverMsgs) && serverMsgs.length > 0) {
-				const firstMsg = JSON.parse(serverMsgs[0])
-				if (firstMsg?.message) {
-					return firstMsg.message
-				}
-			}
-		} catch (e) {
-			console.error("Failed to parse server messages:", e)
+			const serverMessages = JSON.parse(error._server_messages)
+			const firstMessage = serverMessages[0] && JSON.parse(serverMessages[0])
+			if (firstMessage?.message) return firstMessage.message
+		} catch (parseError) {
+			// Ignore JSON parse errors, continue to other extraction methods
 		}
 	}
 
 	if (typeof error.exc === "string") {
-		const match = error.exc.match(/ValidationError: (.+?)\\n/)
-		if (match) {
-			return match[1]
-		}
+		const validationMatch = error.exc.match(/ValidationError: (.+?)\\n/)
+		if (validationMatch) return validationMatch[1]
 	}
 
-	if (error.httpStatusText && error.httpStatusText !== "Expectation Failed") {
-		return error.httpStatusText
-	}
-
-	if (error.message && error.message !== "ValidationError") {
-		return error.message
-	}
-
-	return fallback
+	if (error.httpStatusText && error.httpStatusText !== "Expectation Failed") return error.httpStatusText
+	if (error.message && error.message !== "ValidationError") return error.message
+	return fallbackMessage
 }
 
 function openErrorDialog(message, title = __("Validation Error")) {
-	errorDialog.title = title
-	errorDialog.message = message
-	errorDialog.visible = true
+	Object.assign(errorDialog, { visible: true, title, message })
 }
 
 function closeErrorDialog() {
 	errorDialog.visible = false
 }
 
-function normalizeItemQty(item) {
-	const maxQty = Number(item.quantity) || 0
-	const minQty = 1
-	let qty = Number(item.return_qty)
-	if (!Number.isFinite(qty)) {
-		qty = minQty
-	}
-	if (maxQty > 0 && qty > maxQty) {
-		qty = maxQty
-	}
-	if (qty < minQty) {
-		qty = minQty
-	}
-	item.return_qty = qty
+function normalizeItemQuantity(item) {
+	const maxQuantity = Number(item.quantity) || 0
+	const currentQuantity = Number(item.return_qty)
+	const validQuantity = Number.isFinite(currentQuantity) ? currentQuantity : 1
+	item.return_qty = Math.max(1, Math.min(validQuantity, maxQuantity || validQuantity))
 }
 
 function validateSelectedItems() {
-	const invalidItems = selectedItems.value.filter(
-		(item) => item.return_qty > item.quantity,
-	)
-	if (invalidItems.length === 0) {
-		return true
-	}
-	invalidItems.forEach(normalizeItemQty)
-	const details = invalidItems
-		.map((item) => __('{0}: maximum {1}', [
-			(item.item_name || item.item_code),
-			item.quantity
-		]))
-		.join("\n")
-	const message = __('Adjust return quantities before submitting.\n\n{0}', [details])
-	submitError.value = message
-	openErrorDialog(message)
+	const invalidItems = selectedItems.value.filter(item => item.return_qty > item.quantity)
+	if (!invalidItems.length) return true
+
+	invalidItems.forEach(normalizeItemQuantity)
+	const errorDetails = invalidItems.map(item => __('{0}: maximum {1}', [item.item_name || item.item_code, item.quantity])).join("\n")
+	const errorMessage = __('Adjust return quantities before submitting.\n\n{0}', [errorDetails])
+	submitError.value = errorMessage
+	openErrorDialog(errorMessage)
 	return false
 }
 
 function addPaymentRow() {
-	refundPayments.value.push({
-		mode_of_payment: "",
-		amount: 0
-	})
+	refundPayments.value.push({ mode_of_payment: "", amount: 0 })
 }
 
-function removePaymentRow(index) {
-	refundPayments.value.splice(index, 1)
+function removePaymentRow(paymentIndex) {
+	refundPayments.value.splice(paymentIndex, 1)
 }
 
 function initializePaymentsFromInvoice() {
-	// If original invoice was a credit sale (Pay on Account), no payment method needed
-	// The return will simply reverse the A/R entry
 	if (isOriginalCreditSale.value) {
-		// For credit sales, set empty payments - the return will reverse A/R only
 		refundPayments.value = []
 		return
 	}
 
-	// Initialize refund payments from original invoice payments
-	if (originalInvoice.value && originalInvoice.value.payments && originalInvoice.value.payments.length > 0) {
-		// For partially paid invoices, we'll set the amount to 0 initially
-		// It will be updated by the watcher when returnTotal changes
-		refundPayments.value = originalInvoice.value.payments.map(payment => ({
+	const invoicePayments = originalInvoice.value?.payments
+	if (invoicePayments?.length) {
+		refundPayments.value = invoicePayments.map(payment => ({
 			mode_of_payment: payment.mode_of_payment,
 			amount: isPartiallyPaid.value ? 0 : Math.abs(payment.amount)
 		}))
 	} else {
-		// Default to one empty row if no payments in invoice
 		refundPayments.value = [{
-			mode_of_payment: paymentMethods.value.length > 0 ? paymentMethods.value[0].mode_of_payment : "",
+			mode_of_payment: paymentMethods.value[0]?.mode_of_payment || "",
 			amount: 0
 		}]
 	}
 }
 
 function openReturnModal(invoice) {
-	// Fetch the full invoice details with return tracking
 	submitError.value = ""
-	fetchInvoiceResource.fetch({
-		invoice_name: invoice.name,
-	})
+	fetchInvoiceResource.fetch({ invoice_name: invoice.name })
 	returnModal.visible = true
 }
 
 function closeReturnModal() {
 	returnModal.visible = false
-	// Reset return items when closing
 	originalInvoice.value = null
 	returnItems.value = []
 	returnReason.value = ""
 	refundPayments.value = []
 	submitError.value = ""
+	itemSearchFilter.value = ""
 	isOriginalCreditSale.value = false
 	isPartiallyPaid.value = false
 	originalPaidAmount.value = 0
@@ -1111,56 +1006,53 @@ function closeReturnModal() {
 }
 
 function selectAllItems() {
-	returnItems.value.forEach((item) => {
+	returnItems.value.forEach(item => {
 		item.selected = true
-		item.return_qty = item.quantity // Set to full quantity
+		item.return_qty = item.quantity
+	})
+}
+
+function selectAllFilteredItems() {
+	filteredReturnItems.value.forEach(item => {
+		item.selected = true
+		item.return_qty = item.quantity
 	})
 }
 
 function deselectAllItems() {
-	returnItems.value.forEach((item) => {
-		item.selected = false
-	})
+	returnItems.value.forEach(item => { item.selected = false })
 }
 
 function toggleItemSelection(item) {
 	item.selected = !item.selected
 	if (item.selected && item.return_qty === 0) {
-		item.return_qty = item.quantity // Auto-set to full quantity on select
+		item.return_qty = item.quantity
 	}
 }
 
-function handleKeyboardShortcuts(e) {
-	// Only handle shortcuts when return modal is visible
+function handleKeyboardShortcuts(event) {
 	if (!returnModal.visible) return
 
-	// Ctrl+A or Cmd+A: Select all items
-	if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
-		e.preventDefault()
+	const isModifierPressed = event.ctrlKey || event.metaKey
+
+	if (isModifierPressed && event.key === 'a') {
+		event.preventDefault()
 		selectAllItems()
 	}
-
-	// Ctrl+Enter or Cmd+Enter: Submit if valid
-	if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-		e.preventDefault()
-		if (canCreateReturn.value && !isSubmitting.value) {
-			handleCreateReturn()
-		}
+	if (isModifierPressed && event.key === 'Enter' && canCreateReturn.value && !isSubmitting.value) {
+		event.preventDefault()
+		handleCreateReturn()
 	}
-
-	// Escape: Close modal
-	if (e.key === 'Escape') {
-		closeReturnModal()
-	}
+	if (event.key === 'Escape') closeReturnModal()
 }
 
-function incrementQty(item) {
+function incrementReturnQuantity(item) {
 	if (item.return_qty < item.quantity) {
 		item.return_qty++
 	}
 }
 
-function decrementQty(item) {
+function decrementReturnQuantity(item) {
 	if (item.return_qty > 1) {
 		item.return_qty--
 	}
