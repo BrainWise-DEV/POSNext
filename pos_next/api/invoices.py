@@ -1484,7 +1484,18 @@ def apply_offers(invoice_data, selected_offers=None):
             # Either no POS profile supplied or ERPNext promotional engine unavailable
             return {"items": items}
 
-        profile = frappe.get_doc("POS Profile", invoice.get("pos_profile"))
+        profile = frappe.get_cached_doc("POS Profile", invoice.get("pos_profile"))
+
+        # Batch fetch all item details in a single query (reduces N queries to 1)
+        item_codes = list({item.get("item_code") for item in items if item.get("item_code")})
+        item_details_map = {}
+        if item_codes:
+            item_records = frappe.get_all(
+                "Item",
+                filters={"name": ["in", item_codes]},
+                fields=["name", "item_name", "item_group", "brand", "stock_uom"],
+            )
+            item_details_map = {r.name: r for r in item_records}
 
         pricing_items = []
         index_map = []
@@ -1497,15 +1508,8 @@ def apply_offers(invoice_data, selected_offers=None):
             if not item_code or qty <= 0:
                 continue
 
-            try:
-                cached = frappe.get_cached_value(
-                    "Item",
-                    item_code,
-                    ["item_name", "item_group", "brand", "stock_uom"],
-                    as_dict=1,
-                )
-            except frappe.DoesNotExistError:
-                cached = None
+            # Use batch-fetched item details
+            cached = item_details_map.get(item_code)
 
             conversion_factor = flt(item.get("conversion_factor") or 1) or 1
             price_list_rate = flt(item.get("price_list_rate") or item.get("rate") or 0)

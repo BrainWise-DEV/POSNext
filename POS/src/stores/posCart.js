@@ -12,51 +12,6 @@ import { defineStore } from "pinia"
 import { computed, nextTick, ref, toRaw, watch } from "vue"
 
 /**
- * Creates a debounced function that delays invoking fn until after delay ms
- * have elapsed since the last time it was invoked.
- * Returns a function with .cancel() and .flush() methods.
- */
-function createDebounce(fn, delay) {
-	let timeoutId = null
-	let pendingArgs = null
-
-	const debounced = (...args) => {
-		pendingArgs = args
-		if (timeoutId) {
-			clearTimeout(timeoutId)
-		}
-		timeoutId = setTimeout(() => {
-			timeoutId = null
-			const args = pendingArgs
-			pendingArgs = null
-			fn(...args)
-		}, delay)
-	}
-
-	debounced.cancel = () => {
-		if (timeoutId) {
-			clearTimeout(timeoutId)
-			timeoutId = null
-		}
-		pendingArgs = null
-	}
-
-	debounced.flush = () => {
-		if (timeoutId && pendingArgs) {
-			clearTimeout(timeoutId)
-			timeoutId = null
-			const args = pendingArgs
-			pendingArgs = null
-			fn(...args)
-		}
-	}
-
-	debounced.isPending = () => timeoutId !== null
-
-	return debounced
-}
-
-/**
  * Creates an async task queue that ensures only one operation runs at a time.
  * Subsequent calls while processing will be queued and the latest one executed.
  */
@@ -1604,13 +1559,48 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	}
 
 	/**
-	 * Debounced offer processing to prevent race conditions.
-	 * Uses 150ms delay to batch rapid cart changes (e.g., quantity adjustments).
-	 * The delay allows multiple quick changes to be batched into a single processing run.
+	 * Calculate dynamic debounce delay based on cart size.
+	 * Small carts (1-3 items): 100ms - fast response
+	 * Medium carts (4-10 items): 200ms - balanced
+	 * Large carts (11+ items): 300ms - reduce API load
 	 */
-	const debouncedProcessOffers = createDebounce(() => {
-		triggerOfferProcessing(false)
-	}, 150)
+	function getDynamicDebounceDelay() {
+		const itemCount = invoiceItems.value.length
+		if (itemCount <= 3) return 100
+		if (itemCount <= 10) return 200
+		return 300
+	}
+
+	/**
+	 * Debounced offer processing with dynamic delay based on cart size.
+	 * Prevents race conditions while staying responsive for small carts.
+	 */
+	let debounceTimeoutId = null
+	function debouncedProcessOffers() {
+		if (debounceTimeoutId) {
+			clearTimeout(debounceTimeoutId)
+		}
+		debounceTimeoutId = setTimeout(() => {
+			debounceTimeoutId = null
+			triggerOfferProcessing(false)
+		}, getDynamicDebounceDelay())
+	}
+
+	// Add cancel and flush methods for compatibility
+	debouncedProcessOffers.cancel = () => {
+		if (debounceTimeoutId) {
+			clearTimeout(debounceTimeoutId)
+			debounceTimeoutId = null
+		}
+	}
+
+	debouncedProcessOffers.flush = () => {
+		if (debounceTimeoutId) {
+			clearTimeout(debounceTimeoutId)
+			debounceTimeoutId = null
+			triggerOfferProcessing(false)
+		}
+	}
 
 	// Watch for ANY cart changes that might affect offer eligibility
 	// This includes: items, quantities, customer, subtotal, etc.
