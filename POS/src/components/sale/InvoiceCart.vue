@@ -1286,73 +1286,11 @@ if (props.posProfile) {
 	customerSearchStore.loadAllCustomers(props.posProfile);
 }
 
-/**
- * Offers Resource
- *
- * Fetches all promotional offers for the current POS Profile.
- * - Loads available offers and stores them in Pinia offers store
- * - Caches offers for offline use when loaded online
- * - Loads from cache when offline
- * - Used for the "Offers" button badge count and offers dialog
- *
- * @endpoint pos_next.api.offers.get_offers
- */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const offersResource = createResource({
-	url: "pos_next.api.offers.get_offers",
-	makeParams() {
-		return {
-			pos_profile: props.posProfile,
-		};
-	},
-	auto: false, // Don't auto-load - check offline status first
-	onSuccess(data) {
-		const offers = data?.message || data || [];
-		offersStore.setAvailableOffers(offers);
-
-		// Cache offers for offline use
-		if (props.posProfile && offers.length > 0) {
-			offlineWorker.cacheOffers(offers, props.posProfile)
-				.then(result => {
-					if (result?.success) {
-						log.info(`Cached ${result.count} offers for offline use`);
-					}
-				})
-				.catch(err => {
-					log.warn("Failed to cache offers:", err);
-				});
-		}
-	},
-	onError(error) {
-		log.error("Error loading offers:", error);
-	},
-});
-
-/**
- * Load offers - online from API, offline from IndexedDB cache
- */
-async function loadOffers() {
-	if (isOffline()) {
-		// Load offers from cache when offline
-		if (props.posProfile) {
-			try {
-				const cachedOffers = await offlineWorker.getCachedOffers(props.posProfile);
-				if (cachedOffers && cachedOffers.length > 0) {
-					offersStore.setAvailableOffers(cachedOffers);
-					log.info(`Loaded ${cachedOffers.length} cached offers for offline use`);
-				}
-			} catch (err) {
-				log.warn("Failed to load cached offers:", err);
-			}
-		}
-	} else {
-		// Load offers from API when online
-		offersResource.reload();
-	}
+// Load offers on component init (uses shared store method to prevent duplicate fetches)
+// ensureOffersFetched handles both online/offline cases and caching
+if (props.posProfile) {
+	offersStore.ensureOffersFetched(props.posProfile);
 }
-
-// Load offers on component init
-loadOffers();
 
 /**
  * Gift Cards Resource

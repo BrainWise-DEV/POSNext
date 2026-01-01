@@ -1447,19 +1447,36 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			return // Skip stale operation
 		}
 
+		// Only process offers if we have a POS profile
+		// posProfile.value is the profile NAME (a string), not an object
+		if (!posProfile.value) {
+			return
+		}
+
+		// Ensure offers are fetched before processing
+		// This is critical for mobile view where InvoiceCart may not be mounted yet
+		// IMPORTANT: This must happen BEFORE hash check, because if offers weren't
+		// fetched on previous runs, we need to re-process even if cart hash matches
+		const wasFetched = offersStore.hasFetched
+		// posProfile.value is the profile name string directly
+		const profileName = posProfile.value
+		await offersStore.ensureOffersFetched(profileName)
+
+		// Check cancellation after fetch
+		if (signal?.aborted) return
+
 		// Generate current cart hash
 		const currentHash = generateCartHash()
 
 		// Skip if cart hasn't changed since last successful processing (unless forced)
-		if (!force && currentHash === offerProcessingState.value.lastCartHash) {
+		// Also force re-processing if offers were just fetched for the first time
+		const justFetched = !wasFetched && offersStore.hasFetched
+		if (!force && !justFetched && currentHash === offerProcessingState.value.lastCartHash) {
 			return
 		}
 
 		// Update offer snapshot for eligibility checking
 		syncOfferSnapshot()
-
-		// Only process offers if we have a POS profile
-		if (!posProfile.value) return
 
 		// === OFFLINE MODE ===
 		// When offline, use cached offers and apply discounts client-side

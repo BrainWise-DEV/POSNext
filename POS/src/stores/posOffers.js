@@ -1,5 +1,8 @@
 import { defineStore } from "pinia"
 import { computed, ref } from "vue"
+import { call } from "@/utils/apiWrapper"
+import { isOffline } from "@/utils/offline"
+import { offlineWorker } from "@/utils/offline/workerClient"
 
 const defaultSnapshot = () => ({
 	subtotal: 0,
@@ -268,6 +271,76 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 		return 0
 	}
 
+	// Track if we're currently fetching to prevent duplicate requests
+	let fetchPromise = null
+
+	/**
+	 * Ensures offers are fetched before offer processing.
+	 * This is critical for mobile view where InvoiceCart (which loads offers)
+	 * may not be mounted when items are first added to the cart.
+	 *
+	 * @param {string} posProfile - POS Profile name to fetch offers for
+	 * @returns {Promise<boolean>} True if offers are available (fetched or cached)
+	 */
+	async function ensureOffersFetched(posProfile) {
+		// If already fetched, return immediately
+		if (hasFetched.value) {
+			return true
+		}
+
+		// If already fetching, wait for the existing request
+		if (fetchPromise) {
+			return fetchPromise
+		}
+
+		// No profile means we can't fetch
+		if (!posProfile) {
+			return false
+		}
+
+		// Start fetching
+		fetchPromise = (async () => {
+			try {
+				if (isOffline()) {
+					// Load offers from cache when offline
+					const cachedOffers = await offlineWorker.getCachedOffers(posProfile)
+					if (cachedOffers && cachedOffers.length > 0) {
+						setAvailableOffers(cachedOffers)
+						return true
+					}
+					// No cached offers available offline
+					hasFetched.value = true // Mark as fetched to prevent retries
+					return false
+				}
+
+				// Online: fetch from API
+				const response = await call("pos_next.api.offers.get_offers", {
+					pos_profile: posProfile,
+				})
+
+				const offers = response?.message || response || []
+				setAvailableOffers(offers)
+
+				// Cache offers for offline use
+				if (offers.length > 0) {
+					offlineWorker.cacheOffers(offers, posProfile).catch(() => {
+						// Silently ignore cache errors
+					})
+				}
+
+				return true
+			} catch (error) {
+				console.error("Error fetching offers:", error)
+				hasFetched.value = true // Mark as fetched to prevent infinite retries
+				return false
+			} finally {
+				fetchPromise = null
+			}
+		})()
+
+		return fetchPromise
+	}
+
 	return {
 		// State
 		availableOffers,
@@ -287,5 +360,6 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 		clearOffers,
 		checkOfferEligibility,
 		getUnlockAmount,
+		ensureOffersFetched,
 	}
 })
