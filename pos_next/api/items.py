@@ -1029,7 +1029,7 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20)
 
 		query = f"""
 			SELECT {item_columns},
-				GROUP_CONCAT(DISTINCT ib.barcode) as barcodes,
+				GROUP_CONCAT(DISTINCT ib.barcode) as barcode,
 				GROUP_CONCAT(DISTINCT ib.uom) as barcode_uoms
 			FROM `tabItem` i
 			LEFT JOIN `tabItem Barcode` ib ON ib.parent = i.name
@@ -1042,7 +1042,6 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20)
 		params.extend(score_params)
 		params.extend([limit, start])
 		items = frappe.db.sql(query, tuple(params), as_dict=1)
-		print(items)
 
 		# Prepare maps for enrichment
 		item_codes = [item["item_code"] for item in items]

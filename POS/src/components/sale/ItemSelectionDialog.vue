@@ -421,10 +421,22 @@ function loadOptions() {
 		loading.value = true
 		variantsResource.reload()
 	} else {
-		// Load UOM options and auto-select first one
+		// Load UOM options
 		options.value = buildUomOptions()
 		if (options.value.length > 0) {
-			selectedOption.value = options.value[0]
+			// Check if item has a single barcode UOM to auto-select
+			const barcodeUoms = props.item?.barcode_uoms
+				? props.item.barcode_uoms.split(",").filter(Boolean)
+				: []
+
+			if (barcodeUoms.length === 1) {
+				// Find and select the matching UOM option
+				const matchingOption = options.value.find((opt) => opt.uom === barcodeUoms[0])
+				selectedOption.value = matchingOption || options.value[0]
+			} else {
+				// Default to first option (stock UOM)
+				selectedOption.value = options.value[0]
+			}
 		}
 		loading.value = false
 	}
@@ -440,6 +452,7 @@ watch(matchedVariant, (variant) => {
 })
 
 function buildUomOptions() {
+	console.log("dialog item", props.item)
 	if (!props.item) return []
 
 	const uomOptions = []
