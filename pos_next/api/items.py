@@ -26,6 +26,7 @@ ITEM_RESULT_FIELDS = [
 	"has_variants",
 	"custom_company",
 	"disabled",
+	"custom_allow_custom_item_name_in_cart"
 ]
 
 ITEM_RESULT_COLUMNS = ",\n\t".join(ITEM_RESULT_FIELDS)
@@ -493,6 +494,7 @@ def get_item_variants(template_item, pos_profile):
 				"item_group",
 				"brand",
 				"custom_company",
+				"custom_allow_custom_item_name_in_cart"
 			],
 		)
 
@@ -1033,6 +1035,7 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20)
 					"has_variants",
 					"custom_company",
 					"disabled",
+					"custom_allow_custom_item_name_in_cart"
 				],
 				start=start,
 				page_length=limit,

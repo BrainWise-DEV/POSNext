@@ -63,6 +63,9 @@
   "allow_submissions_in_background_job",
   "allow_delete_offline_invoice",
   "allow_change_posting_date",
+  "item_name_customization_section",
+  "allow_custom_item_name_in_cart",
+  "allow_custom_item_name_in_cart_allowed_users",
   "section_break_misc",
   "input_qty",
   "allow_negative_stock"
@@ -488,6 +491,27 @@
    "fieldtype": "Check",
    "label": "Allow Negative Stock",
    "description": "Enable selling items even when stock reaches zero or below. Integrates with ERPNext negative stock settings."
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "item_name_customization_section",
+   "fieldtype": "Section Break",
+   "label": "Item Name Customization"
+  },
+  {
+   "default": "0",
+   "description": "Allow users to specify a custom item name for an item in cart. This feature must be enabled on a per-item basis in Item DocType.",
+   "fieldname": "allow_custom_item_name_in_cart",
+   "fieldtype": "Check",
+   "label": "Enabled"
+  },
+  {
+   "depends_on": "eval:doc.allow_custom_item_name_in_cart",
+   "description": "List of users for whom this feature is enabled",
+   "fieldname": "allow_custom_item_name_in_cart_allowed_users",
+   "fieldtype": "Table MultiSelect",
+   "label": "Allowed Users",
+   "options": "POS Item Name Customization Allowed User"
   }
  ],
  "index_web_pages_for_search": 1,
@@ -528,6 +552,7 @@
    "role": "Sales User"
   }
  ],
+ "row_format": "Dynamic",
  "sort_field": "modified",
  "sort_order": "DESC",
  "states": [],

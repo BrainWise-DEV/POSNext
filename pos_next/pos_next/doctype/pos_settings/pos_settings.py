@@ -109,7 +109,43 @@ def get_pos_settings(pos_profile):
 		frappe.db.get_single_value("Stock Settings", "allow_negative_stock") or 0
 	)
 
+	# Return Item Name Customization information for the current user only
+	settings["allow_custom_item_name_in_cart"] = is_item_name_customization_enabled_for_user(settings)
+
 	return settings
+
+
+def is_item_name_customization_enabled_for_user(pos_settings: str | dict) -> 0 | 1:
+	"""
+	Returns whether the item name customization feature is enabled for the POS and whether the user is authorized to use it.
+	
+	:param pos_settings: The name of the POS Settings for the current point of sale
+	:type pos_settings: str | dict POS Settings name or dict
+	:return: 1 if item name customization is enabled and allowed for the user, else 0
+	:rtype: 0 | 1
+	"""
+
+	if isinstance(pos_settings, str):
+		if not frappe.db.get_value(
+			"POS Settings",
+			pos_settings,
+			"allow_custom_item_name_in_cart"
+		):
+			return 0
+	elif not pos_settings.allow_custom_item_name_in_cart:
+		return 0
+	
+	user = frappe.session.user
+	is_user_allowed = frappe.db.exists(
+		"POS Item Name Customization Allowed User",
+		{
+			"parenttype": "POS Settings",
+			"parent": pos_settings.get("name") if isinstance(pos_settings, dict) else pos_settings,
+			"user": user
+		}
+	)
+	
+	return 1 if is_user_allowed else 0
 
 
 def create_default_settings(pos_profile):

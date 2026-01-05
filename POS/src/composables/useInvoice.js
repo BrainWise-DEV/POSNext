@@ -216,6 +216,7 @@ export function useInvoice() {
 				// Add item_group and brand for offer eligibility checking
 				item_group: item.item_group,
 				brand: item.brand,
+				custom_allow_custom_item_name_in_cart: item.custom_allow_custom_item_name_in_cart
 			}
 			invoiceItems.value.push(newItem)
 			// Recalculate the newly added item to apply taxes

@@ -15,6 +15,8 @@ Performance improvement: ~300-500ms faster initial load
 import frappe
 from frappe import _
 
+from pos_next.pos_next.doctype.pos_settings.pos_settings import is_item_name_customization_enabled_for_user
+
 
 @frappe.whitelist()
 def get_initial_data():
@@ -154,13 +156,16 @@ def get_pos_settings(pos_profile):
 				"silent_print",
 				"allow_sales_order",
 				"allow_select_sales_order",
-				"create_only_sales_order"
+				"create_only_sales_order",
+				"allow_custom_item_name_in_cart"
 			],
 			as_dict=True
 		)
 
 		if not pos_settings:
 			return get_default_pos_settings()
+		
+		pos_settings["allow_custom_item_name_in_cart"] = is_item_name_customization_enabled_for_user(pos_settings)
 
 		return pos_settings
 	except Exception:
@@ -188,7 +193,8 @@ def get_default_pos_settings():
 		"silent_print": 0,
 		"allow_sales_order": 0,
 		"allow_select_sales_order": 0,
-		"create_only_sales_order": 0
+		"create_only_sales_order": 0,
+		"allow_custom_item_name_in_cart": 0
 	}
 
 

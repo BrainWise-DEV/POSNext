@@ -8,6 +8,7 @@ from frappe import _
 from pos_next.api.utilities import check_user_company
 from pos_next.api.utilities import _parse_list_parameter
 
+from pos_next.pos_next.doctype.pos_settings.pos_settings import is_item_name_customization_enabled_for_user
 
 @frappe.whitelist()
 def get_pos_profiles():
@@ -88,7 +89,8 @@ def get_pos_settings(pos_profile):
 				"enable_sales_persons",
 				"allow_sales_order",
 				"allow_select_sales_order",
-				"create_only_sales_order"
+				"create_only_sales_order",
+				"allow_custom_item_name_in_cart"
 			],
 			as_dict=True
 		)
@@ -111,8 +113,11 @@ def get_pos_settings(pos_profile):
 				"enable_sales_persons": "Disabled",
 				"allow_sales_order": 0,
 				"allow_select_sales_order": 0,
-				"create_only_sales_order": 0
+				"create_only_sales_order": 0,
+				"allow_custom_item_name_in_cart": 0
 			}
+		
+		pos_settings["allow_custom_item_name_in_cart"] = is_item_name_customization_enabled_for_user(pos_settings)
 
 		return pos_settings
 	except Exception as e:

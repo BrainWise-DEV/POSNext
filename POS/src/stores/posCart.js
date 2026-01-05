@@ -1337,6 +1337,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			}
 
 			// Apply other updates
+			if (settingsStore.allowCustomItemNameInCart && updates.item_name !== undefined) cartItem.item_name = updates.item_name
 			if (updates.quantity !== undefined) cartItem.quantity = updates.quantity
 			if (updates.warehouse !== undefined) cartItem.warehouse = updates.warehouse
 			if (updates.discount_percentage !== undefined) cartItem.discount_percentage = updates.discount_percentage

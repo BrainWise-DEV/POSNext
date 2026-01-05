@@ -61,6 +61,8 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		allow_negative_stock: 0,
 		// Sales Persons
 		enable_sales_persons: "Disabled",
+		// Item Name Customization
+		allow_custom_item_name_in_cart: 0
 	})
 
 	const isLoading = ref(false)
@@ -216,6 +218,11 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		settings.value.enable_sales_persons === "Multiple"
 	)
 
+	// Computed - Item Name Customization
+	const allowCustomItemNameInCart = computed(() => 
+		Boolean(settings.value.allow_custom_item_name_in_cart)
+	)
+
 	// Resource
 	const settingsResource = createResource({
 		url: "pos_next.pos_next.doctype.pos_settings.pos_settings.get_pos_settings",
@@ -319,6 +326,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 			input_qty: 0,
 			allow_negative_stock: 0,
 			enable_sales_persons: "Disabled",
+			allow_custom_item_name_in_cart: 0
 		}
 		isLoaded.value = false
 	}
@@ -447,6 +455,9 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		salesPersonsMode,
 		isSingleSalesPerson,
 		isMultipleSalesPersons,
+
+		// Computed - Item Name Customization
+		allowCustomItemNameInCart,
 
 		// Actions
 		loadSettings,

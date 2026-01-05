@@ -315,6 +315,9 @@ def update_invoice(data):
         # Ensure the document type is set
         data.setdefault("doctype", doctype)
 
+        # Validate item name customizations in invoice data
+        _validate_invoice_item_names(data)
+
         # Create or update invoice
         if data.get("name"):
             invoice_doc = frappe.get_doc(doctype, data.get("name"))
@@ -526,6 +529,60 @@ def update_invoice(data):
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "Update Invoice Error")
         raise
+
+
+def _validate_invoice_item_names(data):
+    """
+    Validates that custom item names are provided only if the feature is enabled for both the POS and all relevant items.
+    Raises an error if any item contains a custom name where it is not allowed.
+    
+    :param data: The request data
+    :rtype: None
+    """
+
+    item_data = data.get("items")
+    pos_profile = data.get("pos_profile")
+
+    if not pos_profile: # Assume feature is disabled
+        is_enabled = False
+    else:
+        is_enabled = frappe.db.get_value(
+            "POS Settings",
+            { "pos_profile": pos_profile },
+            "allow_custom_item_name_in_cart"
+            )
+
+    item_codes = [x["item_code"] for x in item_data]
+
+    # Fetch items from database to compare names
+    db_items = {
+        item["item_code"]: item
+        for item in frappe.db.get_list(
+            "Item", 
+            fields=["item_code", "item_name", "custom_allow_custom_item_name_in_cart"],
+            filters={"item_code": ["in", item_codes]}
+        )
+    }
+
+    for item in item_data:
+        db_item = db_items[item["item_code"]]
+
+        # If item name is not present, set the one from database
+        if not item["item_name"]:
+            item["item_name"] = db_item["item_name"]
+            continue
+        
+        # Invoice item that matches database item name is always valid
+        if item["item_name"] == db_item["item_name"]:
+            continue
+
+        # Check if feature is enabled for both POS and item
+        if not is_enabled or not db_item["custom_allow_custom_item_name_in_cart"]:
+            frappe.throw(_("Not allowed to set custom name {0} for item {1} (Item Code: {2}).").format(
+                item["item_name"],
+                db_item["item_name"],
+                item["item_code"]
+            ))
 
 
 PENDING_TIMEOUT_MINUTES = 5  # Pending records older than this are considered stale

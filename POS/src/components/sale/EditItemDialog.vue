@@ -28,10 +28,35 @@
 						</svg>
 					</div>
 					<!-- Item Info -->
-					<div class="flex-1 min-w-0">
-						<h3 class="text-base font-semibold text-gray-900 truncate">
-							{{ localItem.item_name }}
-						</h3>
+					<div class="flex flex-col flex-1 min-w-0 gap-2">
+						<!-- Item Name Editor -->
+						<div>
+							<div class="flex gap-2 items-center" v-if="isItemNameEditable">
+								<input
+								v-model="localItemName"
+								type="text"
+								class="w-full h-10 border border-gray-300 rounded-lg px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+								:placeholder="__('Enter item name')"
+								@blur="handleItemNameBlur"
+								/>
+								<Button 
+									variant="ghost" 
+									:title="__('Reset')" 
+									:aria-label="__('Reset')"
+									@click="restoreOriginalItemName"
+								>
+									<svg fill="none" class="h-4 w-4" viewBox="0 0 24 24" stroke-width="1" stroke="currentColor">
+										<path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
+									</svg>
+								</Button>
+							</div>
+							<h3 v-else class="text-base font-semibold text-gray-900 truncate">
+								{{ localItemName }}
+							</h3>
+						</div>
+						<p class="text-sm text-gray-500 truncate">
+							{{ localItem.item_code }}
+						</p>
 						<p class="text-sm text-gray-500 truncate">
 							{{ formatCurrency(localItem.price_list_rate || localItem.rate) }} / {{ localItem.stock_uom || __('Nos', null, 'UOM') }}
 						</p>
@@ -209,7 +234,7 @@
 				<Button
 					variant="solid"
 					@click="updateItem"
-					:disabled="!hasStock || isCheckingStock"
+					:disabled="!hasStock || !localItemName || isCheckingStock"
 				>
 					<span v-if="isCheckingStock">{{ __('Checking Stock...') }}</span>
 					<span v-else-if="!hasStock">{{ __('No Stock Available') }}</span>
@@ -224,6 +249,7 @@
 import { useToast } from "@/composables/useToast"
 import { usePOSSettingsStore } from "@/stores/posSettings"
 import { useSerialNumberStore } from "@/stores/serialNumber"
+import { useItemSearchStore } from "../../stores/itemSearch"
 import { getItemStock } from "@/utils/stockValidator"
 import { formatCurrency as formatCurrencyUtil, getCurrencySymbol } from "@/utils/currency"
 import { Button, Dialog } from "frappe-ui"
@@ -233,6 +259,7 @@ import SelectInput from "@/components/common/SelectInput.vue"
 const { showSuccess, showError, showWarning } = useToast()
 const settingsStore = usePOSSettingsStore()
 const serialStore = useSerialNumberStore()
+const { getItem } = useItemSearchStore()
 
 const props = defineProps({
 	modelValue: Boolean,
@@ -251,6 +278,11 @@ const emit = defineEmits(["update:modelValue", "update-item"])
 
 // Local state
 const localItem = ref(null)
+
+// Store item name states for item name customization
+const localItemName = ref("")
+const originalItemName = ref("")
+
 const localQuantity = ref(1)
 const localUom = ref("")
 const localRate = ref(0)
@@ -313,6 +345,14 @@ watch(
 	(newItem) => {
 		if (newItem) {
 			localItem.value = { ...newItem }
+
+			localItemName.value = newItem.item_name || ""
+
+			// Track original name from cache to restore when appropriate
+			originalItemName.value = newItem.item_name || "" // Initial value as fallback
+			getItem(localItem.value.item_code)
+				.then((item) => originalItemName.value = item.item_name)
+
 			localQuantity.value = newItem.quantity || 1
 			localUom.value = newItem.uom || newItem.stock_uom || __("Nos")
 			localRate.value = newItem.rate || 0
@@ -354,6 +394,22 @@ watch(
 	},
 	{ immediate: true },
 )
+
+const isItemNameEditable = computed(() => {
+	const allowedForPOS = settingsStore.allowCustomItemNameInCart 
+	const allowedForItem = localItem.value.custom_allow_custom_item_name_in_cart
+	return allowedForPOS && allowedForItem
+})
+
+function restoreOriginalItemName() {
+	localItemName.value = originalItemName.value
+}
+
+function handleItemNameBlur() {
+	if (!localItemName.value) {
+		restoreOriginalItemName()
+	}
+}
 
 /**
  * Intelligently determine the step size based on current quantity
@@ -531,6 +587,10 @@ function updateItem() {
 			discountType.value === "percentage" ? discountValue.value : 0,
 		discount_amount:
 			discountType.value === "amount" ? discountValue.value : 0,
+	}
+
+	if (settingsStore.allowCustomItemNameInCart) {
+		updatedItem.item_name = localItemName.value || originalItemName.value
 	}
 
 	// Update serial numbers if item has serials
