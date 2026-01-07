@@ -449,6 +449,7 @@
 			:tax-amount="cartStore.totalTax"
 			:discount-amount="cartStore.totalDiscount"
 			:target-doctype="cartStore.targetDoctype"
+			:is-submitting="cartStore.isSubmitting"
 			@payment-completed="handlePaymentCompleted"
 			@update-additional-discount="handleAdditionalDiscountUpdate"
 		/>

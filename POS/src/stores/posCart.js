@@ -92,6 +92,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		salesTeam,
 		additionalDiscount,
 		taxInclusive,
+		isSubmitting,
 		addItem: addItemToInvoice,
 		removeItem,
 		updateItemQuantity,
@@ -1687,6 +1688,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		isEmpty,
 		hasCustomer,
 		isProcessingOffers, // True when any offer operation is in progress
+		isSubmitting, // True when invoice submission is in progress (mutex protected)
 
 		// Actions
 		addItem,
