@@ -7,10 +7,12 @@ import { logger } from "@/utils/logger"
 
 const log = logger.create("Invoice")
 
-
 // Shared mutex for invoice submission across all useInvoice instances
 // This prevents duplicate invoice creation from rapid clicks or concurrent submissions
-const submitMutex = new CoalescingMutex({ timeout: 60000, name: "InvoiceSubmit" })
+const submitMutex = new CoalescingMutex({
+	timeout: 60000,
+	name: "InvoiceSubmit",
+})
 
 export function useInvoice() {
 	// Serial Number Store for returning serials when items are removed
