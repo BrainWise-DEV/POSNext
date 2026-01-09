@@ -417,8 +417,11 @@ def update_invoice(data):
                         )
                         if account_info:
                             payment["account"] = account_info.get("account")
-                    except Exception:
-                        pass  # Will be handled during save
+                    except Exception as e:
+                        frappe.log_error(
+                            f"Failed to get payment account for {mode_of_payment}: {e}",
+                            "Payment Account Lookup"
+                        )
 
         # Validate return items if this is a return invoice
         if (data.get("is_return") or invoice_doc.get("is_return")) and invoice_doc.get(
@@ -502,7 +505,8 @@ def update_invoice(data):
                         if isinstance(rules_list, list):
                             item.pricing_rules = ",".join(str(r) for r in rules_list)
                     except (json.JSONDecodeError, TypeError):
-                        pass  # Keep original value if parsing fails
+                        # Keep original value - malformed JSON will be handled by standardize_pricing_rules
+                        item.pricing_rules = ""
 
         # Set invoice flags BEFORE calculations
         if doctype == "Sales Invoice":
@@ -553,8 +557,11 @@ def update_invoice(data):
                     )
                     if account_info:
                         payment.account = account_info.get("account")
-                except Exception:
-                    pass  # Will be handled during save
+                except Exception as e:
+                    frappe.log_error(
+                        f"Failed to get payment account for {mode_of_payment}: {e}",
+                        "Payment Account Lookup"
+                    )
 
         # For return invoices, ensure payments are negative
         if invoice_doc.get("is_return"):
@@ -925,8 +932,12 @@ def submit_invoice(invoice=None, data=None):
                     for item in invoice_doc.get("items", []):
                         if not item.get("branch"):
                             item.branch = pos_profile_doc.branch
-            except Exception:
-                pass  # Branch is optional, continue without it
+            except Exception as e:
+                # Branch is optional, log and continue
+                frappe.log_error(
+                    f"Failed to set branch from POS Profile {pos_profile}: {e}",
+                    "POS Profile Branch"
+                )
 
         # Set accounts for all payment methods before saving
         if doctype == "Sales Invoice" and hasattr(invoice_doc, "payments"):
@@ -1654,8 +1665,12 @@ def apply_offers(invoice_data, selected_offers=None):
                     customer_group = customer_data.get("customer_group")
                     if not territory:
                         territory = customer_data.get("territory")
-            except Exception:
-                pass
+            except Exception as e:
+                # Customer lookup failed, will use defaults
+                frappe.log_error(
+                    f"Failed to fetch customer data for {customer}: {e}",
+                    "Customer Data Lookup"
+                )
 
         # If still no customer_group, use default
         if not customer_group:
