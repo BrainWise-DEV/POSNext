@@ -596,6 +596,59 @@ export function useInvoice() {
 		item.amount = netAmount    // Net amount for backend calculations
 	}
 
+	/**
+	 * Compute the rate to send to ERPNext based on tax mode.
+	 * - Tax-inclusive: gross rate (price - discount, before tax extraction)
+	 * - Tax-exclusive: net rate (amount / qty, after discount)
+	 */
+	function computeBackendRate(item) {
+		const qty = item.quantity || item.qty || 1
+		const priceListRate = item.price_list_rate || item.rate || 0
+		const discountAmount = item.discount_amount || 0
+
+		if (taxInclusive.value) {
+			// Gross rate: price minus per-unit discount
+			return priceListRate - (discountAmount / qty)
+		}
+		// Net rate: total amount divided by quantity
+		return qty > 0 ? (item.amount || 0) / qty : item.rate || 0
+	}
+
+	/**
+	 * Convert pricing_rules to comma-separated string.
+	 * Handles: array, string, or empty value.
+	 */
+	function stringifyPricingRules(pricingRules) {
+		if (!pricingRules) return ''
+		if (Array.isArray(pricingRules)) return pricingRules.join(',')
+		return String(pricingRules)
+	}
+
+	/**
+	 * Format cart items for server submission.
+	 * Used by both online and offline flows for consistent formatting.
+	 *
+	 * @param {Array} items - Raw cart items
+	 * @returns {Array} Items formatted for ERPNext Sales Invoice
+	 */
+	function formatItemsForSubmission(items) {
+		return items.map((item) => ({
+			item_code: item.item_code,
+			item_name: item.item_name,
+			qty: item.quantity || item.qty || 1,
+			rate: computeBackendRate(item),
+			price_list_rate: item.price_list_rate || item.rate,
+			uom: item.uom,
+			warehouse: item.warehouse,
+			batch_no: item.batch_no,
+			serial_no: item.serial_no,
+			conversion_factor: item.conversion_factor || 1,
+			discount_percentage: item.discount_percentage || 0,
+			discount_amount: item.discount_amount || 0,
+			pricing_rules: stringifyPricingRules(item.pricing_rules),
+		}))
+	}
+
 	function addPayment(payment) {
 		const amount = Number.parseFloat(payment.amount) || 0
 		payments.value.push({
@@ -671,28 +724,7 @@ export function useInvoice() {
 			pos_profile: posProfile.value,
 			posa_pos_opening_shift: posOpeningShift.value,
 			customer: customer.value?.name || customer.value,
-			items: rawItems.map((item) => ({
-				item_code: item.item_code,
-				item_name: item.item_name,
-				qty: item.quantity,
-				// IMPORTANT: Rate calculation depends on tax mode and discounts
-				// Tax-inclusive mode: Send gross amount (price after discount, before tax extraction)
-				//   - With discount: price_list_rate - discount_amount
-				//   - Without discount: price_list_rate
-				//   ERPNext will extract net amount based on included_in_print_rate flag
-				// Tax-exclusive mode: Send net amount (after discount, before tax addition)
-				rate: taxInclusive.value
-					? ((item.price_list_rate || item.rate) - (item.discount_amount || 0) / (item.quantity || 1))
-					: (item.quantity > 0 ? item.amount / item.quantity : item.rate),
-				price_list_rate: item.price_list_rate || item.rate,
-				uom: item.uom,
-				warehouse: item.warehouse,
-				batch_no: item.batch_no,
-				serial_no: item.serial_no,
-				conversion_factor: item.conversion_factor || 1,
-				discount_percentage: item.discount_percentage || 0,
-				discount_amount: item.discount_amount || 0,
-			})),
+			items: formatItemsForSubmission(rawItems),
 			payments: rawPayments.map((p) => ({
 				mode_of_payment: p.mode_of_payment,
 				amount: p.amount,
@@ -746,28 +778,7 @@ export function useInvoice() {
 					pos_profile: posProfile.value,
 					posa_pos_opening_shift: posOpeningShift.value,
 					customer: customer.value?.name || customer.value,
-					items: rawItems.map((item) => ({
-						item_code: item.item_code,
-						item_name: item.item_name,
-						qty: item.quantity,
-						// IMPORTANT: Rate calculation depends on tax mode and discounts
-						// Tax-inclusive mode: Send gross amount (price after discount, before tax extraction)
-						//   - With discount: price_list_rate - discount_amount
-						//   - Without discount: price_list_rate
-						//   ERPNext will extract net amount based on included_in_print_rate flag
-						// Tax-exclusive mode: Send net amount (after discount, before tax addition)
-						rate: taxInclusive.value
-							? ((item.price_list_rate || item.rate) - (item.discount_amount || 0) / (item.quantity || 1))
-							: (item.quantity > 0 ? item.amount / item.quantity : item.rate),
-						price_list_rate: item.price_list_rate || item.rate,
-						uom: item.uom,
-						warehouse: item.warehouse,
-						batch_no: item.batch_no,
-						serial_no: item.serial_no,
-						conversion_factor: item.conversion_factor || 1,
-						discount_percentage: item.discount_percentage || 0,
-						discount_amount: item.discount_amount || 0,
-					})),
+					items: formatItemsForSubmission(rawItems),
 					payments: rawPayments.map((p) => ({
 						mode_of_payment: p.mode_of_payment,
 						amount: p.amount,
@@ -1067,6 +1078,7 @@ export function useInvoice() {
 		setTaxInclusive,
 		recalculateItem,
 		rebuildIncrementalCache,
+		formatItemsForSubmission,
 
 		// Resources
 		updateInvoiceResource,

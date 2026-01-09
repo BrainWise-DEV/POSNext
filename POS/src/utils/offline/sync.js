@@ -246,28 +246,41 @@ const handleSyncFailure = async (invoice, errorMessage) => {
 }
 
 /**
- * Transform invoice data for server submission
- * @param {Object} invoiceData - Raw invoice data
- * @param {string} offlineId - Offline ID
- * @returns {Object} Transformed invoice data
+ * Convert pricing_rules to comma-separated string.
+ * Returns empty string for invalid/malformed values.
  */
-const prepareInvoiceForSubmission = (invoiceData, offlineId) => {
-	const prepared = { ...invoiceData }
+const stringifyPricingRules = (value) => {
+	if (!value) return ''
+	if (Array.isArray(value)) return value.filter(Boolean).join(',')
+	if (typeof value !== 'string') return ''
 
-	// Map 'quantity' to 'qty' for ERPNext compatibility
-	if (prepared.items?.length) {
-		prepared.items = prepared.items.map((item) => ({
-			...item,
-			qty: item.quantity || item.qty || 1,
-		}))
+	const stripped = value.trim()
+	if (!stripped.startsWith('[')) return stripped
+
+	try {
+		const parsed = JSON.parse(stripped)
+		if (Array.isArray(parsed)) return parsed.filter(Boolean).join(',')
+	} catch (e) {
+		log.warn('Invalid pricing_rules JSON, clearing value', { value: stripped.slice(0, 100) })
+		return ''
 	}
-
-	if (offlineId) {
-		prepared.offline_id = offlineId
-	}
-
-	return prepared
+	return ''
 }
+
+/**
+ * Normalize invoice data for server sync.
+ * Items should already be formatted by formatItemsForSubmission() when saved.
+ * This provides a safety net for legacy data.
+ */
+const normalizeInvoiceForSync = (invoiceData, offlineId) => ({
+	...invoiceData,
+	offline_id: offlineId || invoiceData.offline_id,
+	items: invoiceData.items?.map((item) => ({
+		...item,
+		qty: item.qty || item.quantity || 1,
+		pricing_rules: stringifyPricingRules(item.pricing_rules),
+	})),
+})
 
 /**
  * Sync a single invoice to the server with retry for in-progress errors
@@ -275,7 +288,7 @@ const prepareInvoiceForSubmission = (invoiceData, offlineId) => {
  * @param {number} retryCount - Current retry attempt (for in-progress waits)
  * @returns {Promise<{status: 'success'|'skipped'|'failed', error?: Error}>}
  */
-const syncSingleInvoice = async (invoice, retryCount = 0) => {
+const syncInvoiceToServer = async (invoice, retryCount = 0) => {
 	const MAX_IN_PROGRESS_RETRIES = 3
 	const IN_PROGRESS_WAIT_MS = 2000  // Wait 2 seconds between retries
 
@@ -296,7 +309,7 @@ const syncSingleInvoice = async (invoice, retryCount = 0) => {
 	}
 
 	// Prepare and submit
-	const invoiceData = prepareInvoiceForSubmission(invoice.data, offlineId)
+	const invoiceData = normalizeInvoiceForSync(invoice.data, offlineId)
 
 	try {
 		const response = await call("pos_next.api.invoices.submit_invoice", {
@@ -323,7 +336,7 @@ const syncSingleInvoice = async (invoice, retryCount = 0) => {
 				retry: retryCount + 1,
 			})
 			await sleep(IN_PROGRESS_WAIT_MS)
-			return syncSingleInvoice(invoice, retryCount + 1)
+			return syncInvoiceToServer(invoice, retryCount + 1)
 		}
 
 		// Re-throw other errors
@@ -357,7 +370,7 @@ export const syncOfflineInvoices = async () => {
 
 		for (const invoice of pendingInvoices) {
 			try {
-				const syncResult = await syncSingleInvoice(invoice)
+				const syncResult = await syncInvoiceToServer(invoice)
 
 				if (syncResult.status === "success") {
 					result.success++

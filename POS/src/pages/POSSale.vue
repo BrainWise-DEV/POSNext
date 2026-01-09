@@ -1826,11 +1826,16 @@ async function handlePaymentCompleted(paymentData) {
 		const draftIdToDelete = cartStore.currentDraftId;
 
 		if (offlineStore.isOffline) {
+			// Use the same item transformation as online flow for consistency
+			// This ensures rate, discount_percentage, discount_amount, and pricing_rules
+			// are all correctly formatted for ERPNext
+			const preparedItems = cartStore.formatItemsForSubmission(cartStore.invoiceItems);
+
 			const invoiceData = {
 				pos_profile: cartStore.posProfile,
 				posa_pos_opening_shift: cartStore.posOpeningShift,
 				customer: customerValue || shiftStore.profileCustomer,
-				items: JSON.parse(JSON.stringify(cartStore.invoiceItems)),
+				items: preparedItems,
 				payments: JSON.parse(JSON.stringify(cartStore.payments)),
 				sales_team: JSON.parse(JSON.stringify(cartStore.salesTeam || [])),
 				grand_total: cartStore.grandTotal,

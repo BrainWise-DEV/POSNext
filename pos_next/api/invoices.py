@@ -27,6 +27,62 @@ except Exception:  # pragma: no cover - ERPNext not installed in some environmen
 # ==========================================
 
 
+def standardize_pricing_rules(items):
+    """
+    Standardize pricing_rules field on invoice items.
+    ERPNext expects a comma-separated string, but frontend/offline may send:
+    - Python list: ["PRLE-0001", "PRLE-0002"]
+    - JSON string: '["PRLE-0001"]' or '[\\n "PRLE-0001"\\n]'
+
+    Args:
+        items: List of item dicts to standardize (modified in place)
+    """
+    for item in items or []:
+        pricing_rules = item.get("pricing_rules")
+        if not pricing_rules:
+            continue
+
+        item["pricing_rules"] = _pricing_rule_to_string(pricing_rules)
+
+
+def _pricing_rule_to_string(value):
+    """
+    Convert pricing_rules value to comma-separated string.
+    Returns empty string if value is invalid/unparseable.
+    """
+    if not value:
+        return ""
+
+    # Already a list - join it
+    if isinstance(value, list):
+        return ",".join(str(r) for r in value if r)
+
+    # Must be a string at this point
+    if not isinstance(value, str):
+        return ""
+
+    stripped = value.strip()
+
+    # Not JSON-like - return as-is (already a string like "PRLE-0001,PRLE-0002")
+    if not stripped.startswith("["):
+        return stripped
+
+    # Try to parse JSON array
+    try:
+        parsed = json.loads(stripped)
+        if isinstance(parsed, list):
+            return ",".join(str(r) for r in parsed if r)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        # Malformed JSON that looks like array - clear it to prevent issues
+        frappe.log_error(
+            f"Invalid pricing_rules JSON: {stripped[:100]}",
+            "Pricing Rules Normalization"
+        )
+        return ""
+
+    return ""
+
+
 def get_payment_account(mode_of_payment, company):
     """
     Get account for mode of payment.
@@ -315,6 +371,9 @@ def update_invoice(data):
         # Ensure the document type is set
         data.setdefault("doctype", doctype)
 
+        # Normalize pricing_rules before document creation
+        standardize_pricing_rules(data.get("items"))
+
         # Create or update invoice
         if data.get("name"):
             invoice_doc = frappe.get_doc(doctype, data.get("name"))
@@ -429,6 +488,21 @@ def update_invoice(data):
             # IMPORTANT: Keep the rate from frontend (do NOT set to 0)
             # ERPNext will recalculate if needed, but preserving frontend rate
             # prevents rounding issues and ensures UI matches invoice
+
+            # Convert pricing_rules from list to comma-separated string
+            # ERPNext expects pricing_rules as a string, not a list
+            pricing_rules = item.get("pricing_rules")
+            if pricing_rules:
+                if isinstance(pricing_rules, list):
+                    item.pricing_rules = ",".join(str(r) for r in pricing_rules)
+                elif isinstance(pricing_rules, str) and pricing_rules.startswith("["):
+                    # Handle JSON string representation of list
+                    try:
+                        rules_list = json.loads(pricing_rules)
+                        if isinstance(rules_list, list):
+                            item.pricing_rules = ",".join(str(r) for r in rules_list)
+                    except (json.JSONDecodeError, TypeError):
+                        pass  # Keep original value if parsing fails
 
         # Set invoice flags BEFORE calculations
         if doctype == "Sales Invoice":
@@ -549,9 +623,9 @@ def _reuse_sync_record(sync_record_name):
     return {"already_synced": False, "sync_record_name": sync_record_name}
 
 
-def _handle_offline_deduplication(offline_id, pos_profile=None, customer=None):
+def _ensure_offline_uniqueness(offline_id, pos_profile=None, customer=None):
     """
-    Handle offline invoice deduplication with race condition protection.
+    Ensure offline invoice uniqueness with race condition protection.
 
     Uses a reservation pattern:
     1. Check if a sync record exists (with row-level lock)
@@ -650,7 +724,7 @@ def _handle_offline_deduplication(offline_id, pos_profile=None, customer=None):
     except frappe.DuplicateEntryError:
         # Race condition: another request just created the record
         # Retry the check to get the new record
-        return _handle_offline_deduplication(offline_id, pos_profile, customer)
+        return _ensure_offline_uniqueness(offline_id, pos_profile, customer)
 
 
 def _complete_offline_sync(sync_record_name, invoice_name):
@@ -790,6 +864,9 @@ def submit_invoice(invoice=None, data=None):
     pos_profile = invoice.get("pos_profile")
     doctype = invoice.get("doctype", "Sales Invoice")
 
+    # Normalize pricing_rules before processing
+    standardize_pricing_rules(invoice.get("items"))
+
     # ========================================================================
     # OFFLINE INVOICE DEDUPLICATION
     # ========================================================================
@@ -802,7 +879,7 @@ def submit_invoice(invoice=None, data=None):
     sync_record_name = None
 
     if offline_id:
-        dedup_result = _handle_offline_deduplication(
+        dedup_result = _ensure_offline_uniqueness(
             offline_id=offline_id,
             pos_profile=pos_profile,
             customer=invoice.get("customer")
@@ -1787,7 +1864,8 @@ def apply_offers(invoice_data, selected_offers=None):
             item_doc.discount_amount = line_discount_amount
             item_doc.price_list_rate = price_list_rate
             item_doc.rate = flt(item_doc.get("rate") or price_list_rate)
-            item_doc.pricing_rules = applicable_rule_names
+            # ERPNext expects pricing_rules as comma-separated string, not a list
+            item_doc.pricing_rules = ",".join(applicable_rule_names) if applicable_rule_names else ""
 
             item_doc.applied_promotional_schemes = list(
                 {

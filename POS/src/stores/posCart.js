@@ -107,7 +107,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		getItemDetailsResource,
 		recalculateItem,
 		rebuildIncrementalCache,
-		saveDraft,
+		formatItemsForSubmission,
 	} = useInvoice()
 
 	const offersStore = usePOSOffersStore()
@@ -298,7 +298,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		showSuccess(__("Discount has been removed from cart"))
 	}
 
-	function buildInvoiceDataForOffers(currentProfile) {
+	function buildOfferEvaluationPayload(currentProfile) {
 		// Use toRaw() to ensure we get current, non-reactive values (prevents stale cached quantities)
 		const rawItems = toRaw(invoiceItems.value)
 
@@ -327,46 +327,42 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		}
 	}
 
-	function applyServerDiscounts(serverItems) {
-		if (!Array.isArray(serverItems)) {
-			return false
-		}
+	/**
+	 * Check if pricing_rules has a value (handles string or array).
+	 */
+	function hasPricingRules(value) {
+		if (!value) return false
+		if (Array.isArray(value)) return value.length > 0
+		return typeof value === 'string' && value.trim().length > 0
+	}
 
-		// Server returns items in same order as sent - match by array index
-		// This correctly handles duplicate SKUs (same item_code in cart multiple times)
+	/**
+	 * Sync discounts from server response to cart items.
+	 * Server returns items in same order as sent (handles duplicate SKUs).
+	 */
+	function applyDiscountsFromServer(serverItems) {
+		if (!Array.isArray(serverItems)) return false
+
 		let hasDiscounts = false
 
 		invoiceItems.value.forEach((item, index) => {
 			const serverItem = serverItems[index] || {}
-			const serverDiscountPercentage =
-				Number.parseFloat(serverItem.discount_percentage) || 0
-			const serverDiscountAmount = Number.parseFloat(serverItem.discount_amount) || 0
-			const hasServerDiscount = serverDiscountPercentage > 0 || serverDiscountAmount > 0
+			const discountPct = Number.parseFloat(serverItem.discount_percentage) || 0
+			const discountAmt = Number.parseFloat(serverItem.discount_amount) || 0
 
-			// Check if server applied pricing rules to this item
-			const hasPricingRules = serverItem.pricing_rules &&
-				Array.isArray(serverItem.pricing_rules) &&
-				serverItem.pricing_rules.length > 0
-
-			if (hasPricingRules || hasServerDiscount) {
-				// Server found a pricing rule - apply server discount
-				item.discount_percentage = serverDiscountPercentage
-				item.discount_amount = serverDiscountAmount
+			// Only update if server applied a pricing rule or discount
+			if (hasPricingRules(serverItem.pricing_rules) || discountPct > 0 || discountAmt > 0) {
+				item.discount_percentage = discountPct
+				item.discount_amount = discountAmt
 				item.pricing_rules = serverItem.pricing_rules
-				hasDiscounts = hasServerDiscount
-			} else {
-				// No pricing rules matched for this item
-				// Preserve existing manual discount (don't overwrite with server's 0)
-				// This fixes the bug where manual discounts are lost when customer changes
+				hasDiscounts = discountPct > 0 || discountAmt > 0
 			}
+			// Otherwise preserve existing manual discount
 
-			// Recalculate item (from useInvoice)
 			recalculateItem(item)
 		})
 
-		// Rebuild cache after bulk operation
 		rebuildIncrementalCache()
-
 		return hasDiscounts
 	}
 
@@ -481,7 +477,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				offerProcessingState.value.isProcessing = true
 				offerProcessingState.value.error = null
 
-				const invoiceData = buildInvoiceDataForOffers(currentProfile)
+				const invoiceData = buildOfferEvaluationPayload(currentProfile)
 				const offerNames = [...new Set([...existingCodes, offerCode])]
 
 				const response = await applyOffersResource.submit({
@@ -496,7 +492,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 					parseOfferResponse(response)
 
 				suppressOfferReapply.value = true
-				applyServerDiscounts(responseItems)
+				applyDiscountsFromServer(responseItems)
 				processFreeItems(freeItems)
 				filterActiveOffers(appliedRules)
 
@@ -516,7 +512,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 								appliedRules: rollbackRules,
 							} = parseOfferResponse(rollbackResponse)
 
-							applyServerDiscounts(rollbackItems)
+							applyDiscountsFromServer(rollbackItems)
 							processFreeItems(rollbackFreeItems)
 							filterActiveOffers(rollbackRules)
 						} catch (rollbackError) {
@@ -625,7 +621,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				offerProcessingState.value.isProcessing = true
 				offerProcessingState.value.error = null
 
-				const invoiceData = buildInvoiceDataForOffers(currentProfile)
+				const invoiceData = buildOfferEvaluationPayload(currentProfile)
 
 				const response = await applyOffersResource.submit({
 					invoice_data: invoiceData,
@@ -638,7 +634,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 					parseOfferResponse(response)
 
 				suppressOfferReapply.value = true
-				applyServerDiscounts(responseItems)
+				applyDiscountsFromServer(responseItems)
 				processFreeItems(freeItems)
 				filterActiveOffers(appliedRules)
 
@@ -745,7 +741,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 					rebuildIncrementalCache()
 				} else {
 					// Reapply only valid offers
-					const invoiceData = buildInvoiceDataForOffers(currentProfile)
+					const invoiceData = buildOfferEvaluationPayload(currentProfile)
 					const response = await applyOffersResource.submit({
 						invoice_data: invoiceData,
 						selected_offers: validOfferCodes,
@@ -756,7 +752,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 					const { items: responseItems, freeItems, appliedRules } =
 						parseOfferResponse(response)
 
-					applyServerDiscounts(responseItems)
+					applyDiscountsFromServer(responseItems)
 					processFreeItems(freeItems)
 					filterActiveOffers(appliedRules)
 
@@ -829,7 +825,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			const newOfferCodes = newOffers.map(offer => offer.name)
 			const allCodes = [...existingCodes, ...newOfferCodes]
 
-			const invoiceData = buildInvoiceDataForOffers(currentProfile)
+			const invoiceData = buildOfferEvaluationPayload(currentProfile)
 
 			const response = await applyOffersResource.submit({
 				invoice_data: invoiceData,
@@ -842,7 +838,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			const { items: responseItems, freeItems, appliedRules } =
 				parseOfferResponse(response)
 
-			applyServerDiscounts(responseItems)
+			applyDiscountsFromServer(responseItems)
 			processFreeItems(freeItems)
 			filterActiveOffers(appliedRules)
 
@@ -976,10 +972,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 				if (isProductDiscount) {
 					// === PRODUCT DISCOUNT (FREE ITEMS) ===
-					offerApplied = applyFreeItemOffline(offer, eligibleItems)
+					offerApplied = applyOfflineFreeItem(offer, eligibleItems)
 				} else {
 					// === PRICE DISCOUNT ===
-					offerApplied = applyPriceDiscountOffline(offer, eligibleItems)
+					offerApplied = applyOfflinePriceDiscount(offer, eligibleItems)
 				}
 
 				if (offerApplied) {
@@ -1017,7 +1013,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * @param {Array} eligibleItems - Items eligible for the discount
 	 * @returns {boolean} True if discount was applied
 	 */
-	function applyPriceDiscountOffline(offer, eligibleItems) {
+	function applyOfflinePriceDiscount(offer, eligibleItems) {
 		const discountType = offer.discount_type || offer.rate_or_discount
 		const discountPercentage = Number.parseFloat(offer.discount_percentage) || 0
 		const discountAmount = Number.parseFloat(offer.discount_amount) || 0
@@ -1066,7 +1062,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * @param {Array} eligibleItems - Items eligible for the free item
 	 * @returns {boolean} True if free item was applied
 	 */
-	function applyFreeItemOffline(offer, eligibleItems) {
+	function applyOfflineFreeItem(offer, eligibleItems) {
 		const freeQty = Number.parseFloat(offer.free_qty) || 0
 		const sameItem = offer.same_item === 1
 		const isRecursive = offer.is_recursive === 1
@@ -1714,7 +1710,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		recalculateItem,
 		rebuildIncrementalCache,
 		applyOffersResource,
-		buildInvoiceDataForOffers,
+		buildOfferEvaluationPayload,
+		formatItemsForSubmission,
 
 		// Sales Order feature
 		targetDoctype,
