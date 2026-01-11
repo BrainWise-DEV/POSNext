@@ -1,6 +1,6 @@
 {
  "actions": [],
- "creation": "2025-10-15 00:00:00.000000",
+ "creation": "2025-10-15 00:00:00",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
@@ -65,7 +65,9 @@
   "allow_change_posting_date",
   "section_break_misc",
   "input_qty",
-  "allow_negative_stock"
+  "allow_negative_stock",
+  "barcode_tab",
+  "barcode_rules"
  ],
  "fields": [
   {
@@ -79,54 +81,52 @@
   },
   {
    "default": "1",
+   "description": "Enable custom POS settings for this profile",
    "fieldname": "enabled",
    "fieldtype": "Check",
-   "label": "Enabled",
-   "description": "Enable custom POS settings for this profile"
+   "label": "Enabled"
   },
   {
-   "collapsible": 0,
    "fieldname": "section_break_localization",
    "fieldtype": "Section Break",
    "label": "Localization"
   },
   {
+   "description": "Select languages available in the POS language switcher. If empty, defaults to English and Arabic.",
    "fieldname": "allowed_locales",
    "fieldtype": "Table MultiSelect",
    "label": "Allowed Languages",
-   "options": "POS Allowed Locale",
-   "description": "Select languages available in the POS language switcher. If empty, defaults to English and Arabic."
+   "options": "POS Allowed Locale"
   },
   {
-   "collapsible": 0,
    "fieldname": "section_break_wallet",
    "fieldtype": "Section Break",
    "label": "Wallet & Loyalty"
   },
   {
    "default": "0",
+   "description": "Enable loyalty program features for this POS profile",
    "fieldname": "enable_loyalty_program",
    "fieldtype": "Check",
-   "label": "Enable Loyalty Program",
-   "description": "Enable loyalty program features for this POS profile"
+   "label": "Enable Loyalty Program"
   },
   {
+   "depends_on": "enable_loyalty_program",
+   "description": "Loyalty program for this POS profile",
    "fieldname": "default_loyalty_program",
    "fieldtype": "Link",
    "label": "Loyalty Program",
-   "options": "Loyalty Program",
-   "depends_on": "enable_loyalty_program",
    "mandatory_depends_on": "enable_loyalty_program",
-   "description": "Loyalty program for this POS profile"
+   "options": "Loyalty Program"
   },
   {
+   "depends_on": "enable_loyalty_program",
+   "description": "Receivable account for customer wallets",
    "fieldname": "wallet_account",
    "fieldtype": "Link",
    "label": "Wallet Account",
-   "options": "Account",
-   "depends_on": "enable_loyalty_program",
    "mandatory_depends_on": "enable_loyalty_program",
-   "description": "Receivable account for customer wallets"
+   "options": "Account"
   },
   {
    "fieldname": "column_break_wallet",
@@ -134,63 +134,62 @@
   },
   {
    "default": "1",
+   "depends_on": "enable_loyalty_program",
+   "description": "Automatically create wallet for new customers (always enabled when loyalty program is active)",
    "fieldname": "auto_create_wallet",
    "fieldtype": "Check",
    "label": "Auto Create Wallet",
-   "depends_on": "enable_loyalty_program",
-   "read_only_depends_on": "enable_loyalty_program",
-   "description": "Automatically create wallet for new customers (always enabled when loyalty program is active)"
+   "read_only_depends_on": "enable_loyalty_program"
   },
   {
    "default": "1",
+   "depends_on": "enable_loyalty_program",
+   "description": "Automatically convert earned loyalty points to wallet balance. Uses Conversion Factor from Loyalty Program (always enabled when loyalty program is active)",
    "fieldname": "loyalty_to_wallet",
    "fieldtype": "Check",
    "label": "Convert Loyalty Points to Wallet",
-   "depends_on": "enable_loyalty_program",
-   "read_only_depends_on": "enable_loyalty_program",
-   "description": "Automatically convert earned loyalty points to wallet balance. Uses Conversion Factor from Loyalty Program (always enabled when loyalty program is active)"
+   "read_only_depends_on": "enable_loyalty_program"
   },
   {
-   "collapsible": 0,
    "fieldname": "section_break_general",
    "fieldtype": "Section Break",
    "label": "General Settings"
   },
   {
    "default": "0",
+   "description": "Enable cart-wide discount",
    "fieldname": "allow_user_to_edit_additional_discount",
    "fieldtype": "Check",
-   "label": "Allow Additional Discount",
-   "description": "Enable cart-wide discount"
+   "label": "Allow Additional Discount"
   },
   {
    "default": "1",
+   "description": "Enable item-level discount in edit dialog",
    "fieldname": "allow_user_to_edit_item_discount",
    "fieldtype": "Check",
-   "label": "Allow Item Discount",
-   "description": "Enable item-level discount in edit dialog"
+   "label": "Allow Item Discount"
   },
   {
    "default": "0",
+   "description": "Show discounts as percentages",
    "fieldname": "use_percentage_discount",
    "fieldtype": "Check",
-   "label": "Use Percentage Discount",
-   "description": "Show discounts as percentages"
+   "label": "Use Percentage Discount"
   },
   {
    "default": "0",
+   "description": "Maximum discount percentage (enforced in UI)",
    "fieldname": "max_discount_allowed",
    "fieldtype": "Float",
    "label": "Max Discount Percentage Allowed",
-   "precision": "2",
-   "description": "Maximum discount percentage (enforced in UI)"
+   "precision": "2"
   },
   {
    "default": "1",
+   "description": "Show exact totals without rounding",
    "fieldname": "disable_rounded_total",
    "fieldtype": "Check",
-   "label": "Disable Rounded Total",
-   "description": "Show exact totals without rounding"
+   "label": "Disable Rounded Total"
   },
   {
    "fieldname": "column_break_general",
@@ -198,39 +197,39 @@
   },
   {
    "default": "0",
+   "description": "Enable sales on credit",
    "fieldname": "allow_credit_sale",
    "fieldtype": "Check",
-   "label": "Allow Credit Sale",
-   "description": "Enable sales on credit"
+   "label": "Allow Credit Sale"
   },
   {
    "default": "0",
+   "description": "Enable product returns",
    "fieldname": "allow_return",
    "fieldtype": "Check",
-   "label": "Allow Return",
-   "description": "Enable product returns"
+   "label": "Allow Return"
   },
   {
    "default": "0",
+   "description": "Write off small change amounts",
    "fieldname": "allow_write_off_change",
    "fieldtype": "Check",
-   "label": "Allow Write Off Change",
-   "description": "Write off small change amounts"
+   "label": "Allow Write Off Change"
   },
   {
    "default": "0",
+   "description": "Enable partial payment for invoices",
    "fieldname": "allow_partial_payment",
    "fieldtype": "Check",
-   "label": "Allow Partial Payment",
-   "description": "Enable partial payment for invoices"
+   "label": "Allow Partial Payment"
   },
   {
    "default": "Disabled",
+   "description": "Disabled: No sales person selection. Single: Select one sales person (100%). Multiple: Select multiple with allocation percentages.",
    "fieldname": "enable_sales_persons",
    "fieldtype": "Select",
    "label": "Sales Persons Selection",
-   "options": "Disabled\nSingle\nMultiple",
-   "description": "Disabled: No sales person selection. Single: Select one sales person (100%). Multiple: Select multiple with allocation percentages."
+   "options": "Disabled\nSingle\nMultiple"
   },
   {
    "collapsible": 1,
@@ -240,24 +239,24 @@
   },
   {
    "default": "0",
+   "description": "Show items in card view by default",
    "fieldname": "default_card_view",
    "fieldtype": "Check",
-   "label": "Default Card View",
-   "description": "Show items in card view by default"
+   "label": "Default Card View"
   },
   {
    "default": "0",
+   "description": "Show item codes in the UI",
    "fieldname": "display_item_code",
    "fieldtype": "Check",
-   "label": "Display Item Code",
-   "description": "Show item codes in the UI"
+   "label": "Display Item Code"
   },
   {
    "default": "0",
+   "description": "Display customer balance on screen",
    "fieldname": "show_customer_balance",
    "fieldtype": "Check",
-   "label": "Show Customer Balance",
-   "description": "Display customer balance on screen"
+   "label": "Show Customer Balance"
   },
   {
    "fieldname": "column_break_display",
@@ -265,24 +264,24 @@
   },
   {
    "default": "0",
+   "description": "Hide expected cash amount in closing",
    "fieldname": "hide_expected_amount",
    "fieldtype": "Check",
-   "label": "Hide Expected Amount",
-   "description": "Hide expected cash amount in closing"
+   "label": "Hide Expected Amount"
   },
   {
    "default": "0",
+   "description": "Show discount as percentage",
    "fieldname": "display_discount_percentage",
    "fieldtype": "Check",
-   "label": "Display Discount %",
-   "description": "Show discount as percentage"
+   "label": "Display Discount %"
   },
   {
    "default": "0",
+   "description": "Show discount value",
    "fieldname": "display_discount_amount",
    "fieldtype": "Check",
-   "label": "Display Discount Amount",
-   "description": "Show discount value"
+   "label": "Display Discount Amount"
   },
   {
    "collapsible": 1,
@@ -292,24 +291,24 @@
   },
   {
    "default": "0",
+   "description": "Enable sales order creation",
    "fieldname": "allow_sales_order",
    "fieldtype": "Check",
-   "label": "Allow Create Sales Order",
-   "description": "Enable sales order creation"
+   "label": "Allow Create Sales Order"
   },
   {
    "default": "0",
+   "description": "Select from existing sales orders",
    "fieldname": "allow_select_sales_order",
    "fieldtype": "Check",
-   "label": "Allow Select Sales Order",
-   "description": "Select from existing sales orders"
+   "label": "Allow Select Sales Order"
   },
   {
    "default": "0",
+   "description": "Don't create invoices, only orders",
    "fieldname": "create_only_sales_order",
    "fieldtype": "Check",
-   "label": "Create Only Sales Order",
-   "description": "Don't create invoices, only orders"
+   "label": "Create Only Sales Order"
   },
   {
    "fieldname": "column_break_operations",
@@ -317,24 +316,24 @@
   },
   {
    "default": "0",
+   "description": "Process returns without invoice reference",
    "fieldname": "allow_return_without_invoice",
    "fieldtype": "Check",
-   "label": "Allow Return Without Invoice",
-   "description": "Process returns without invoice reference"
+   "label": "Allow Return Without Invoice"
   },
   {
    "default": "0",
+   "description": "Return items without batch restriction",
    "fieldname": "allow_free_batch_return",
    "fieldtype": "Check",
-   "label": "Allow Free Batch Return",
-   "description": "Return items without batch restriction"
+   "label": "Allow Free Batch Return"
   },
   {
    "default": "0",
+   "description": "Print invoices before submission",
    "fieldname": "allow_print_draft_invoices",
    "fieldtype": "Check",
-   "label": "Allow Print Draft Invoices",
-   "description": "Print invoices before submission"
+   "label": "Allow Print Draft Invoices"
   },
   {
    "collapsible": 1,
@@ -344,18 +343,18 @@
   },
   {
    "default": "2",
+   "description": "Number of decimal places for amounts",
    "fieldname": "decimal_precision",
    "fieldtype": "Select",
    "label": "Decimal Precision",
-   "options": "2\n3\n4\n5\n6",
-   "description": "Number of decimal places for amounts"
+   "options": "2\n3\n4\n5\n6"
   },
   {
    "default": "0",
+   "description": "Automatically set taxes as included in item prices. When enabled, displayed prices include tax amounts.",
    "fieldname": "tax_inclusive",
    "fieldtype": "Check",
-   "label": "Tax Inclusive",
-   "description": "Automatically set taxes as included in item prices. When enabled, displayed prices include tax amounts."
+   "label": "Tax Inclusive"
   },
   {
    "collapsible": 1,
@@ -365,24 +364,24 @@
   },
   {
    "default": "0",
+   "description": "Accept customer purchase orders",
    "fieldname": "allow_customer_purchase_order",
    "fieldtype": "Check",
-   "label": "Allow Customer Purchase Order",
-   "description": "Accept customer purchase orders"
+   "label": "Allow Customer Purchase Order"
   },
   {
    "default": "0",
+   "description": "Permit duplicate customer names",
    "fieldname": "allow_duplicate_customer_names",
    "fieldtype": "Check",
-   "label": "Allow Duplicate Customer Names",
-   "description": "Permit duplicate customer names"
+   "label": "Allow Duplicate Customer Names"
   },
   {
    "default": "0",
+   "description": "Automatically apply eligible coupons",
    "fieldname": "fetch_coupon",
    "fieldtype": "Check",
-   "label": "Auto Fetch Coupon Gifts",
-   "description": "Automatically apply eligible coupons"
+   "label": "Auto Fetch Coupon Gifts"
   },
   {
    "collapsible": 1,
@@ -392,17 +391,17 @@
   },
   {
    "default": "0",
+   "description": "Reprint the last invoice",
    "fieldname": "allow_print_last_invoice",
    "fieldtype": "Check",
-   "label": "Allow Print Last Invoice",
-   "description": "Reprint the last invoice"
+   "label": "Allow Print Last Invoice"
   },
   {
    "default": "0",
+   "description": "Print without dialog",
    "fieldname": "silent_print",
    "fieldtype": "Check",
-   "label": "Enable Silent Print",
-   "description": "Print without dialog"
+   "label": "Enable Silent Print"
   },
   {
    "collapsible": 1,
@@ -412,17 +411,17 @@
   },
   {
    "default": "0",
+   "description": "Enable delivery fee calculation",
    "fieldname": "use_delivery_charges",
    "fieldtype": "Check",
-   "label": "Use Delivery Charges",
-   "description": "Enable delivery fee calculation"
+   "label": "Use Delivery Charges"
   },
   {
    "default": "0",
+   "description": "Automatically calculate delivery fee",
    "fieldname": "auto_set_delivery_charges",
    "fieldtype": "Check",
-   "label": "Auto Set Delivery Charges",
-   "description": "Automatically calculate delivery fee"
+   "label": "Auto Set Delivery Charges"
   },
   {
    "collapsible": 1,
@@ -432,17 +431,17 @@
   },
   {
    "default": "0",
+   "description": "Limit search results for performance",
    "fieldname": "use_limit_search",
    "fieldtype": "Check",
-   "label": "Use Limit Search",
-   "description": "Limit search results for performance"
+   "label": "Use Limit Search"
   },
   {
    "default": "1000",
+   "description": "Maximum number of search results",
    "fieldname": "search_limit",
    "fieldtype": "Int",
-   "label": "Search Limit Number",
-   "description": "Maximum number of search results"
+   "label": "Search Limit Number"
   },
   {
    "fieldname": "column_break_advanced",
@@ -450,24 +449,24 @@
   },
   {
    "default": "0",
+   "description": "Submit invoices in background",
    "fieldname": "allow_submissions_in_background_job",
    "fieldtype": "Check",
-   "label": "Allow Submissions in Background Job",
-   "description": "Submit invoices in background"
+   "label": "Allow Submissions in Background Job"
   },
   {
    "default": "0",
+   "description": "Delete offline saved invoices",
    "fieldname": "allow_delete_offline_invoice",
    "fieldtype": "Check",
-   "label": "Allow Delete Offline Invoice",
-   "description": "Delete offline saved invoices"
+   "label": "Allow Delete Offline Invoice"
   },
   {
    "default": "0",
+   "description": "Modify invoice posting date",
    "fieldname": "allow_change_posting_date",
    "fieldtype": "Check",
-   "label": "Allow Change Posting Date",
-   "description": "Modify invoice posting date"
+   "label": "Allow Change Posting Date"
   },
   {
    "collapsible": 1,
@@ -477,23 +476,33 @@
   },
   {
    "default": "0",
+   "description": "Show quantity input field",
    "fieldname": "input_qty",
    "fieldtype": "Check",
-   "label": "Use QTY Input",
-   "description": "Show quantity input field"
+   "label": "Use QTY Input"
   },
   {
    "default": "0",
+   "description": "Enable selling items even when stock reaches zero or below. Integrates with ERPNext negative stock settings.",
    "fieldname": "allow_negative_stock",
    "fieldtype": "Check",
-   "label": "Allow Negative Stock",
-   "description": "Enable selling items even when stock reaches zero or below. Integrates with ERPNext negative stock settings."
+   "label": "Allow Negative Stock"
+  },
+  {
+   "fieldname": "barcode_tab",
+   "fieldtype": "Tab Break",
+   "label": "Barcode"
+  },
+  {
+   "fieldname": "barcode_rules",
+   "fieldtype": "Table",
+   "label": "Barcode Rules",
+   "options": "POS Barcode Rules"
   }
  ],
  "index_web_pages_for_search": 1,
- "issingle": 0,
  "links": [],
- "modified": "2025-11-24 12:00:00.000000",
+ "modified": "2026-01-11 16:52:08.009217",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Settings",
@@ -528,6 +537,7 @@
    "role": "Sales User"
   }
  ],
+ "row_format": "Dynamic",
  "sort_field": "modified",
  "sort_order": "DESC",
  "states": [],
