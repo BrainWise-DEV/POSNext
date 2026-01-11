@@ -413,7 +413,7 @@ watch([() => props.mode, () => props.item], ([, newItem]) => {
 
 function loadOptions() {
 	selectedOption.value = null
-	quantity.value = 1
+	quantity.value = props.item.resolved_qty || 1
 	selectedAttributes.value = {} // Reset attribute selection
 
 	if (props.mode === "variant") {
@@ -431,7 +431,8 @@ function loadOptions() {
 
 			if (barcodeUoms.length === 1) {
 				// Find and select the matching UOM option
-				const matchingOption = options.value.find((opt) => opt.uom === barcodeUoms[0])
+				const uom = props.item.resolved_uom || barcodeUoms[0]
+				const matchingOption = options.value.find((opt) => opt.uom === uom)
 				selectedOption.value = matchingOption || options.value[0]
 			} else {
 				// Default to first option (stock UOM)

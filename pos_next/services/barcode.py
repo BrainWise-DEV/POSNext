@@ -25,6 +25,8 @@ from functools import lru_cache
 from typing import TypedDict
 
 import frappe
+from erpnext.stock.get_item_details import get_conversion_factor
+from barcode_resolver.barcode_resolver.doctype.barcode_rule.utils import BarcodeTypes
 
 
 class BarcodeResult(TypedDict, total=False):
@@ -103,7 +105,7 @@ def resolve_barcode(barcode: str) -> BarcodeResult | None:
 
 def compute_resolved_item_data(
     resolved_barcode: BarcodeResult | None,
-    item_rate: float = 0,
+    item,
 ) -> ResolvedItemData | None:
     """
     Compute qty and uom from resolved barcode data.
@@ -128,29 +130,48 @@ def compute_resolved_item_data(
     if not resolved_barcode:
         return None
 
-    from barcode_resolver.barcode_resolver.doctype.barcode_rule.utils import BarcodeTypes
 
     barcode_type = resolved_barcode.get("barcode_type")
     barcode_uom = resolved_barcode.get("uom")
+    uom_prices = item.get("uom_prices", {})
+    barcode_uom_price = uom_prices.get(barcode_uom)
+    item_uom = item.get("uom")
+    item_price = item.get("rate")
 
+    integer_value = resolved_barcode.get("integer_value", "0")
+    decimal_value = resolved_barcode.get("decimal_value", "0")
     if barcode_type == BarcodeTypes.WEIGHTED.value:
+        qty = float(f"{integer_value}.{decimal_value}")
+        uom = barcode_uom
+        price = barcode_uom_price
+        if barcode_uom not in uom_prices:
+            conversion_factor = get_conversion_factor(item.get("name"), barcode_uom).get("conversion_factor", 1)
+            qty *= conversion_factor
+            uom = item_uom
+            price = item_price
+
         return {
-            "resolved_qty": resolved_barcode.get("qty"),
-            "resolved_uom": barcode_uom,
+            "resolved_qty": qty,
+            "resolved_uom": uom,
+            "resolved_price": price,
             "resolved_barcode_type": barcode_type,
         }
     elif barcode_type == BarcodeTypes.PRICED.value:
-        integer_value = resolved_barcode.get("integer_value", "0")
-        decimal_value = resolved_barcode.get("decimal_value", "0")
         encoded_price = float(f"{integer_value}.{decimal_value}")
-
-        resolved_qty = None
-        if item_rate and item_rate > 0:
-            resolved_qty = encoded_price / item_rate
-
+        if barcode_uom in uom_prices:
+            barcode_uom_price = uom_prices.get(barcode_uom)
+            price = barcode_uom_price
+            uom = barcode_uom
+            qty = encoded_price / price if price and price > 0 else None
+        else:
+            conversion_factor = get_conversion_factor(item.get("name"), barcode_uom).get("conversion_factor", 1)
+            uom = item_uom
+            price = conversion_factor * item_price
+            qty = encoded_price / price if price and price > 0 else None
         return {
-            "resolved_qty": resolved_qty,
-            "resolved_uom": barcode_uom,
+            "resolved_qty": qty,
+            "resolved_uom": uom,
+            "resolved_price": encoded_price,
             "resolved_barcode_type": barcode_type,
         }
 

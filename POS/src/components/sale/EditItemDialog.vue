@@ -44,10 +44,17 @@
 					<div class="flex flex-col gap-4">
 						<!-- Quantity Control -->
 						<div>
-							<label class="block text-sm font-medium text-gray-700 mb-2 text-start">{{ __('Quantity') }}</label>
+							<label class="block text-sm font-medium text-gray-700 mb-2 text-start">
+								{{ __('Quantity') }}
+								<span v-if="localItem?.is_resolved_barcode" class="ms-1 text-xs text-amber-600">({{ __('Locked') }})</span>
+							</label>
 							<!-- For serial items, quantity is read-only (controlled by serial list) -->
 							<div v-if="localItem?.has_serial_no && localSerials.length > 0" class="w-full h-10 border border-gray-300 rounded-lg bg-gray-50 flex items-center justify-center">
 								<span class="text-sm font-semibold text-gray-600">{{ localSerials.length }}</span>
+							</div>
+							<!-- For resolved barcode items, quantity is read-only -->
+							<div v-else-if="localItem?.is_resolved_barcode" class="w-full h-10 border border-amber-300 rounded-lg bg-amber-50 flex items-center justify-center">
+								<span class="text-sm font-semibold text-amber-700">{{ localQuantity }}</span>
 							</div>
 							<!-- For non-serial items, show quantity controls -->
 							<div v-else class="w-full h-10 border border-gray-300 rounded-lg bg-white flex items-center overflow-hidden">
@@ -106,8 +113,15 @@
 					<div class="flex flex-col gap-4">
 						<!-- UOM Selector -->
 						<div>
-							<label class="block text-sm font-medium text-gray-700 mb-2 text-start">{{ __('UOM') }}</label>
-							<SelectInput v-model="localUom" :options="uomOptions" @change="handleUomChange" />
+							<label class="block text-sm font-medium text-gray-700 mb-2 text-start">
+								{{ __('UOM') }}
+								<span v-if="localItem?.is_resolved_barcode" class="ms-1 text-xs text-amber-600">({{ __('Locked') }})</span>
+							</label>
+							<!-- For resolved barcode items, UOM is read-only -->
+							<div v-if="localItem?.is_resolved_barcode" class="w-full h-10 border border-amber-300 rounded-lg bg-amber-50 flex items-center justify-center">
+								<span class="text-sm font-semibold text-amber-700">{{ localUom }}</span>
+							</div>
+							<SelectInput v-else v-model="localUom" :options="uomOptions" @change="handleUomChange" />
 						</div>
 
 						<!-- Warehouse Selector -->

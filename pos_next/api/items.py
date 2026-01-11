@@ -1289,7 +1289,7 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20)
 			from pos_next.services.barcode import compute_resolved_item_data
 			resolved_item_data = compute_resolved_item_data(
 				resolved_barcode_data,
-				item_rate=items[0].get("rate", 0),
+				item=items[0],
 			)
 			if resolved_item_data:
 				items[0].update(resolved_item_data)
