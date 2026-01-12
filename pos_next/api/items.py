@@ -2,13 +2,12 @@
 # For license information, please see license.txt
 
 import json
-import re
 from collections import defaultdict
 
 import frappe
 from erpnext.stock.doctype.batch.batch import get_batch_qty
 from erpnext.stock.get_item_details import get_item_details as erpnext_get_item_details
-from frappe import _, as_json
+from frappe import _
 from frappe.query_builder import DocType, functions as fn
 from frappe.utils import flt, nowdate
 
@@ -250,7 +249,12 @@ def get_item_detail(item, doc=None, warehouse=None, price_list=None, company=Non
 	if not doc and company:
 		doc = frappe._dict({"doctype": "Sales Invoice", "company": company})
 
-	max_discount = frappe.get_value("Item", item_code, "max_discount")
+	# Fetch all needed Item fields in a single query (performance optimization)
+	item_data = frappe.db.get_value(
+		"Item", item_code,
+		["max_discount", "item_group", "brand", "stock_uom"],
+		as_dict=True
+	) or {}
 
 	# Prepare args dict for get_item_details - only include necessary fields
 	args = frappe._dict(
@@ -272,14 +276,11 @@ def get_item_detail(item, doc=None, warehouse=None, price_list=None, company=Non
 	if item.get("is_stock_item") and warehouse:
 		res["actual_qty"] = get_stock_availability(item_code, warehouse)
 
-	res["max_discount"] = max_discount
+	res["max_discount"] = item_data.get("max_discount")
 	res["batch_no_data"] = batch_no_data
 	res["serial_no_data"] = serial_no_data
-
-	# Add item_group and brand for offer eligibility checking
-	item_group, brand = frappe.db.get_value("Item", item_code, ["item_group", "brand"])
-	res["item_group"] = item_group
-	res["brand"] = brand
+	res["item_group"] = item_data.get("item_group")
+	res["brand"] = item_data.get("brand")
 
 	# Add UOMs data
 	uoms = frappe.get_all(
@@ -289,16 +290,9 @@ def get_item_detail(item, doc=None, warehouse=None, price_list=None, company=Non
 	)
 
 	# Add stock UOM if not already in uoms list
-	stock_uom = frappe.db.get_value("Item", item_code, "stock_uom")
-	if stock_uom:
-		stock_uom_exists = False
-		for uom_data in uoms:
-			if uom_data.get("uom") == stock_uom:
-				stock_uom_exists = True
-				break
-
-		if not stock_uom_exists:
-			uoms.append({"uom": stock_uom, "conversion_factor": 1.0})
+	stock_uom = item_data.get("stock_uom")
+	if stock_uom and not any(u.get("uom") == stock_uom for u in uoms):
+		uoms.append({"uom": stock_uom, "conversion_factor": 1.0})
 
 	res["item_uoms"] = uoms
 
@@ -388,26 +382,23 @@ def search_by_barcode(barcode, pos_profile):
 def get_item_stock(item_code, warehouse):
 	"""Get real-time stock for item"""
 	try:
-		from frappe.utils import flt
+		# Get both quantities in a single query (performance optimization)
+		bin_data = frappe.db.get_value(
+			"Bin",
+			{"item_code": item_code, "warehouse": warehouse},
+			["actual_qty", "reserved_qty"],
+			as_dict=True
+		) or {}
 
-		# Get actual stock quantity
-		stock_qty = (
-			frappe.db.get_value("Bin", {"item_code": item_code, "warehouse": warehouse}, "actual_qty") or 0
-		)
-
-		# Get reserved quantity
-		reserved_qty = (
-			frappe.db.get_value("Bin", {"item_code": item_code, "warehouse": warehouse}, "reserved_qty") or 0
-		)
-
-		available_qty = flt(stock_qty) - flt(reserved_qty)
+		stock_qty = flt(bin_data.get("actual_qty", 0))
+		reserved_qty = flt(bin_data.get("reserved_qty", 0))
 
 		return {
 			"item_code": item_code,
 			"warehouse": warehouse,
-			"stock_qty": flt(stock_qty),
-			"reserved_qty": flt(reserved_qty),
-			"available_qty": available_qty,
+			"stock_qty": stock_qty,
+			"reserved_qty": reserved_qty,
+			"available_qty": stock_qty - reserved_qty,
 		}
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Item Stock Error")
@@ -418,10 +409,15 @@ def get_item_stock(item_code, warehouse):
 def get_batch_serial_details(item_code, warehouse):
 	"""Get batch/serial number details"""
 	try:
-		# Check if item has batch
-		has_batch_no = frappe.db.get_value("Item", item_code, "has_batch_no")
-		# Check if item has serial
-		has_serial_no = frappe.db.get_value("Item", item_code, "has_serial_no")
+		# Get both flags in a single query (performance optimization)
+		item_flags = frappe.db.get_value(
+			"Item", item_code,
+			["has_batch_no", "has_serial_no"],
+			as_dict=True
+		) or {}
+
+		has_batch_no = item_flags.get("has_batch_no")
+		has_serial_no = item_flags.get("has_serial_no")
 
 		result = {
 			"item_code": item_code,
@@ -493,6 +489,7 @@ def get_item_variants(template_item, pos_profile):
 				"item_group",
 				"brand",
 				"custom_company",
+				"variant_of",  # Include for offline caching
 			],
 		)
 
@@ -1272,7 +1269,7 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20)
 
 
 @frappe.whitelist()
-def get_item_details(item_code, pos_profile, customer=None, qty=1, uom=None):
+def get_item_details(item_code, pos_profile, customer=None, qty=1, uom=None):  # noqa: ARG001 - customer reserved for future use
 	"""Get detailed item info including price, tax, stock"""
 	try:
 		# Parse pos_profile if it's a JSON string

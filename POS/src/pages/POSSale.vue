@@ -1647,13 +1647,16 @@ function handleItemSelected(item, autoAdd = false) {
 	}
 
 	// Check stock availability first (before any dialogs)
-	// Skip validation for batch/serial items - they have their own validation in the dialog
+	// Skip validation for:
+	// - batch/serial items (they have their own validation in the dialog)
+	// - template items with variants (variants carry their own stock)
 	// Product Bundles have calculated stock based on component availability
 	if (
 		settingsStore.shouldEnforceStockValidation() &&
 		(item.is_stock_item || item.is_bundle) &&
 		!item.has_serial_no &&
-		!item.has_batch_no
+		!item.has_batch_no &&
+		!item.has_variants
 	) {
 		const actualQty = Math.floor(item.actual_qty ?? item.stock_qty ?? 0);
 
@@ -1939,6 +1942,22 @@ async function handleOptionSelected(option) {
 	try {
 		if (option.type === "variant") {
 			const variant = option.data;
+
+			// Stock validation for variants (same as regular items)
+			if (
+				settingsStore.shouldEnforceStockValidation() &&
+				variant.is_stock_item &&
+				!variant.has_serial_no &&
+				!variant.has_batch_no
+			) {
+				const actualQty = Math.floor(variant.actual_qty ?? 0);
+				if (actualQty <= 0) {
+					showError(
+						__('"{0}" cannot be added to cart. Item is out of stock. Allow Negative Stock is disabled.', [variant.item_name])
+					);
+					return;
+				}
+			}
 
 			if (variant.item_uoms && variant.item_uoms.length > 0) {
 				cartStore.setPendingItem(variant, cartStore.pendingItemQty, "uom");

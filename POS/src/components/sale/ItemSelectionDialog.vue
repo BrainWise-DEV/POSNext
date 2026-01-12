@@ -238,6 +238,8 @@ import { Button, Dialog } from "frappe-ui"
 import { createResource } from "frappe-ui"
 import { computed, ref, watch } from "vue"
 import TranslatedHTML from "../common/TranslatedHTML.vue"
+import { offlineState } from "@/utils/offline/offlineState"
+import { getCachedVariants, cacheItems } from "@/utils/offline/items"
 
 const props = defineProps({
 	modelValue: Boolean,
@@ -363,7 +365,39 @@ const matchedVariant = computed(() => {
 	})
 })
 
-// Resource for fetching variants
+/**
+ * Transform raw variant data into option format for the UI
+ */
+function mapVariantsToOptions(variants) {
+	return variants.map((v) => ({
+		type: "variant",
+		item_code: v.item_code,
+		label: v.item_name,
+		description: v.item_code,
+		attributes: v.attributes || {},
+		rate: v.rate || v.price_list_rate || 0,
+		priceLabel: __('per {0}', [v.stock_uom]),
+		stock: v.actual_qty ?? 0,
+		data: v,
+	}))
+}
+
+/**
+ * Load variants from IndexedDB cache (for offline mode or API fallback)
+ */
+async function loadVariantsFromCache() {
+	try {
+		const cachedVariants = await getCachedVariants(props.item?.item_code)
+		options.value = cachedVariants?.length > 0 ? mapVariantsToOptions(cachedVariants) : []
+	} catch (error) {
+		console.error("Error loading variants from cache:", error)
+		options.value = []
+	} finally {
+		loading.value = false
+	}
+}
+
+// Resource for fetching variants from API
 const variantsResource = createResource({
 	url: "pos_next.api.items.get_item_variants",
 	makeParams() {
@@ -373,24 +407,20 @@ const variantsResource = createResource({
 		}
 	},
 	auto: false,
-	onSuccess(data) {
+	async onSuccess(data) {
 		const variants = data?.message || data || []
-		options.value = variants.map((v) => ({
-			type: "variant",
-			item_code: v.item_code,
-			label: v.item_name,
-			description: v.item_code,
-			attributes: v.attributes || {},
-			rate: v.rate || 0,
-			priceLabel: __('per {0}', [v.stock_uom]),
-			stock: v.actual_qty ?? 0,
-			data: v, // Full variant data
-		}))
+		options.value = mapVariantsToOptions(variants)
 		loading.value = false
+
+		// Cache variants for offline use
+		if (variants.length > 0) {
+			cacheItems(variants).catch((err) => console.error("Error caching variants:", err))
+		}
 	},
-	onError(error) {
+	async onError(error) {
 		console.error("Error loading variants:", error)
-		loading.value = false
+		// Try cache as fallback (user might have just gone offline)
+		await loadVariantsFromCache()
 	},
 })
 
@@ -411,17 +441,23 @@ watch([() => props.mode, () => props.item], ([, newItem]) => {
 	}
 })
 
-function loadOptions() {
+/**
+ * Load options based on mode (variant or UOM)
+ */
+async function loadOptions() {
 	selectedOption.value = null
 	quantity.value = 1
-	selectedAttributes.value = {} // Reset attribute selection
+	selectedAttributes.value = {}
 
 	if (props.mode === "variant") {
-		// Load variants from API
 		loading.value = true
-		variantsResource.reload()
+
+		if (offlineState.isOffline) {
+			await loadVariantsFromCache()
+		} else {
+			variantsResource.reload()
+		}
 	} else {
-		// Load UOM options and auto-select first one
 		options.value = buildUomOptions()
 		if (options.value.length > 0) {
 			selectedOption.value = options.value[0]

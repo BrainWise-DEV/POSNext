@@ -103,6 +103,24 @@ export const getItemByBarcode = async (barcode) => {
 	}
 };
 
+// Get cached variants for a template item
+export const getCachedVariants = async (templateItemCode) => {
+	try {
+		if (!templateItemCode) return [];
+
+		// Query items where variant_of equals the template item code
+		const variants = await db.items
+			.where("variant_of")
+			.equals(templateItemCode)
+			.toArray();
+
+		return variants;
+	} catch (error) {
+		console.error("Error getting cached variants:", error);
+		return [];
+	}
+};
+
 // Get item with price
 export const getItemWithPrice = async (itemCode, priceList) => {
 	try {
