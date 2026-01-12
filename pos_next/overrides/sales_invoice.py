@@ -11,6 +11,7 @@ import frappe
 from frappe.utils import cint, flt
 from erpnext.accounts.doctype.sales_invoice.sales_invoice import SalesInvoice
 from erpnext.accounts.utils import get_account_currency
+from pos_next.pricing_utils.cheapest_item_discount import apply_cheapest_item_discounts
 
 
 class CustomSalesInvoice(SalesInvoice):
@@ -110,3 +111,13 @@ class CustomSalesInvoice(SalesInvoice):
 			party_type, party = "Customer", self.customer
 
 		return party_type, party
+
+	def validate(self):
+		"""
+		Override validate to apply cheapest item discounts after standard pricing rules.
+		"""
+		# Call parent validate first (this applies standard pricing rules)
+		super().validate()
+		
+		# Apply cheapest item discounts after all standard pricing rules are processed
+		apply_cheapest_item_discounts(self)

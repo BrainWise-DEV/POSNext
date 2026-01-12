@@ -100,7 +100,9 @@ fixtures = [
 					"POS Profile-posa_cash_mode_of_payment",
 					"POS Profile-posa_allow_delete",
 					"POS Profile-posa_block_sale_beyond_available_qty",
-					"Mode of Payment-is_wallet_payment"
+					"Mode of Payment-is_wallet_payment",
+					"Pricing Rule-apply_discount_on_cheapest",
+					"Pricing Rule-cheapest_qty"
 				]
 			]
 		]
@@ -137,6 +139,13 @@ fixtures = [
 # before_install = "pos_next.install.before_install"
 after_install = "pos_next.install.after_install"
 after_migrate = "pos_next.install.after_migrate"
+
+# Patch pricing rule function on app startup
+try:
+	from pos_next.install import patch_pricing_rule_function
+	patch_pricing_rule_function()
+except Exception:
+	pass
 
 # Uninstallation
 # ------------
@@ -219,6 +228,12 @@ doc_events = {
 	},
 	"POS Profile": {
 		"on_update": "pos_next.realtime_events.emit_pos_profile_updated_event"
+	},
+	"Sales Order": {
+		"before_validate": "pos_next.pricing_utils.cheapest_item_discount.apply_cheapest_item_discounts"
+	},
+	"Quotation": {
+		"before_validate": "pos_next.pricing_utils.cheapest_item_discount.apply_cheapest_item_discounts"
 	}
 }
 
@@ -245,10 +260,6 @@ scheduler_events = {
 
 # Overriding Methods
 # ------------------------------
-#
-# override_whitelisted_methods = {
-# 	"frappe.desk.doctype.event.event.get_events": "pos_next.event.get_events"
-# }
 #
 # each overriding function accepts a `data` argument;
 # generated from the base implementation of the doctype dashboard,
