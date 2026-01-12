@@ -95,7 +95,7 @@
    "fieldtype": "Table MultiSelect",
    "label": "Allowed Languages",
    "options": "POS Allowed Locale",
-   "description": "Select languages available in the POS language switcher. If empty, defaults to English and Arabic."
+   "description": "Select languages available in the POS language switcher. If empty, all supported languages are available."
   },
   {
    "collapsible": 0,

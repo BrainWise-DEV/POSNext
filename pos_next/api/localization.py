@@ -2,6 +2,7 @@
 # Copyright (c) 2024, POS Next and contributors
 # For license information, please see license.txt
 
+import os
 import frappe
 from frappe import translate
 
@@ -59,16 +60,42 @@ def get_allowed_locales():
 	}
 
 
+def get_supported_locales():
+	"""
+	Get all supported locales by scanning available .po translation files.
+	Always includes 'en' as the base language.
+
+	Returns:
+		set: Set of supported locale codes
+	"""
+	supported = {'en'}  # English is always supported as base language
+
+	try:
+		# Get the locale directory path for pos_next app
+		locale_path = frappe.get_app_path('pos_next', 'locale')
+
+		if os.path.exists(locale_path):
+			for filename in os.listdir(locale_path):
+				if filename.endswith('.po'):
+					# Extract locale code from filename (e.g., 'fr.po' -> 'fr')
+					locale_code = filename[:-3]  # Remove '.po' extension
+					if locale_code != 'main':  # Skip template file
+						supported.add(locale_code.lower())
+	except Exception:
+		# Fallback to known locales if directory scan fails
+		supported = {'en', 'ar', 'pt_br', 'fr'}
+
+	return supported
+
+
 def get_allowed_locales_from_settings():
 	"""
 	Get allowed locales from POS Settings.
-	Falls back to default locales if not configured.
+	Returns empty set if not configured (frontend will show all languages).
 
 	Returns:
-		set: Set of allowed locale codes
+		set: Set of allowed locale codes, or empty set for all languages
 	"""
-	default_locales = {'ar', 'en'}
-
 	try:
 		# Get the first POS Settings (or we could use a specific one based on user's profile)
 		pos_settings_list = frappe.get_all(
@@ -79,16 +106,16 @@ def get_allowed_locales_from_settings():
 		)
 
 		if not pos_settings_list:
-			return default_locales
+			return set()  # Empty = all languages allowed
 
 		pos_settings = frappe.get_doc("POS Settings", pos_settings_list[0].name)
 
 		if pos_settings.allowed_locales and len(pos_settings.allowed_locales) > 0:
-			return {row.language.lower() for row in pos_settings.allowed_locales}
+			return {row.locale.lower() for row in pos_settings.allowed_locales}
 
-		return default_locales
+		return set()  # Empty = all languages allowed
 	except Exception:
-		return default_locales
+		return set()  # Empty = all languages allowed
 
 
 @frappe.whitelist()
@@ -121,8 +148,14 @@ def change_user_language(locale):
 	# Normalize locale to lowercase
 	locale = locale.lower()
 
+	# Get dynamically supported locales from translation files
+	all_supported_locales = get_supported_locales()
+
 	allowed_locales = get_allowed_locales_from_settings()
-	if locale not in allowed_locales:
+	# If allowed_locales is empty, all supported locales are allowed
+	effective_allowed = allowed_locales if allowed_locales else all_supported_locales
+
+	if locale not in effective_allowed:
 		frappe.throw(f"Locale '{locale}' is not supported", frappe.ValidationError)
 
 	# Update user's language preference
