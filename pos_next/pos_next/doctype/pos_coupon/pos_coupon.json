@@ -19,6 +19,12 @@
   "disabled",
   "company",
   "campaign",
+  "gift_card_section",
+  "gift_card_amount",
+  "original_amount",
+  "column_break_gift_card",
+  "coupon_code_residual",
+  "source_invoice",
   "erpnext_integration_section",
   "erpnext_coupon_code",
   "pricing_rule",
@@ -64,7 +70,8 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Customer",
-   "options": "Customer"
+   "options": "Customer",
+   "description": "Optional: Assign gift card to a specific customer. If set, only this customer can use the gift card."
   },
   {
    "fieldname": "column_break_4",
@@ -102,6 +109,54 @@
    "in_standard_filter": 1,
    "label": "Campaign",
    "options": "Campaign"
+  },
+  {
+   "collapsible": 0,
+   "depends_on": "eval: doc.coupon_type == \"Gift Card\"",
+   "fieldname": "gift_card_section",
+   "fieldtype": "Section Break",
+   "label": "Gift Card Balance"
+  },
+  {
+   "depends_on": "eval: doc.coupon_type == \"Gift Card\"",
+   "fieldname": "gift_card_amount",
+   "fieldtype": "Currency",
+   "label": "Current Balance",
+   "options": "Company:company:default_currency",
+   "precision": "2",
+   "read_only": 1,
+   "in_list_view": 1,
+   "description": "Current available balance on this gift card"
+  },
+  {
+   "depends_on": "eval: doc.coupon_type == \"Gift Card\"",
+   "fieldname": "original_amount",
+   "fieldtype": "Currency",
+   "label": "Original Amount",
+   "options": "Company:company:default_currency",
+   "precision": "2",
+   "read_only": 1,
+   "description": "Original gift card value when created"
+  },
+  {
+   "fieldname": "column_break_gift_card",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "coupon_code_residual",
+   "fieldtype": "Link",
+   "label": "Original Gift Card",
+   "options": "POS Coupon",
+   "read_only": 1,
+   "description": "Reference to original gift card if this was created from a split"
+  },
+  {
+   "fieldname": "source_invoice",
+   "fieldtype": "Link",
+   "label": "Source Invoice",
+   "options": "POS Invoice",
+   "read_only": 1,
+   "description": "POS Invoice that created this gift card"
   },
   {
    "collapsible": 1,
@@ -263,7 +318,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2021-07-30 00:17:17.711972",
+ "modified": "2025-01-12 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Coupon",

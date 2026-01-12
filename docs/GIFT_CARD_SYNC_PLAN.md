@@ -1,5 +1,42 @@
 # Gift Card & ERPNext Coupon Code Sync - Implementation Plan
 
+## Implementation Progress
+
+| Phase | Description | Status | Date |
+|-------|-------------|--------|------|
+| 1 | Custom fields for ERPNext Coupon Code | ✅ Done | 2025-01-12 |
+| 2 | Gift Card settings in POS Settings | ✅ Done | 2025-01-12 |
+| 3 | Update POS Coupon (customer optional) | ✅ Done | 2025-01-12 |
+| 4 | Gift Card sync API | ⏳ Pending | - |
+| 5 | Gift Card splitting logic | ⏳ Pending | - |
+| 6 | Frontend Gift Card components | ⏳ Pending | - |
+| 7 | Hooks & Events | ⏳ Pending | - |
+| 8 | Migration & Patches | ⏳ Pending | - |
+
+### Completed Changes
+
+**Phase 1-3 (2025-01-12):**
+- Added custom fields to `Coupon Code` doctype via fixtures:
+  - `pos_next_section` (Section Break)
+  - `gift_card_amount` (Currency)
+  - `original_gift_card_amount` (Currency)
+  - `coupon_code_residual` (Link to Coupon Code)
+  - `pos_coupon` (Link to POS Coupon)
+  - `source_pos_invoice` (Link to POS Invoice)
+- Added Gift Card settings section to POS Settings:
+  - `enable_gift_cards` (Check)
+  - `gift_card_item` (Link to Item)
+  - `sync_with_erpnext_coupon` (Check)
+  - `enable_gift_card_splitting` (Check)
+  - `gift_card_validity_months` (Int)
+  - `gift_card_notification` (Link to Notification)
+- Updated POS Coupon:
+  - Made `customer` field optional for Gift Cards
+  - Added `gift_card_amount`, `original_amount`, `coupon_code_residual`, `source_invoice` fields
+  - Updated validation to initialize gift card balance
+
+---
+
 ## Overview
 
 This feature adds optional synchronization between POS Next's gift card system and ERPNext's native Coupon Code doctype. It enables:

@@ -24,8 +24,15 @@ class POSCoupon(Document):
         # Gift Card validations
         if self.coupon_type == "Gift Card":
             self.maximum_use = 1
-            if not self.customer:
-                frappe.throw(_("Please select the customer for Gift Card."))
+            # Customer is OPTIONAL for gift cards - they can be anonymous
+            # If customer is set, only that customer can use the gift card
+
+            # Initialize gift card balance if not set
+            if self.discount_type == "Amount" and self.discount_amount:
+                if not self.gift_card_amount:
+                    self.gift_card_amount = flt(self.discount_amount)
+                if not self.original_amount:
+                    self.original_amount = flt(self.discount_amount)
 
         # Discount validations
         if not self.discount_type:
@@ -87,6 +94,12 @@ def check_coupon_code(coupon_code, customer=None, company=None):
     if coupon.used and coupon.maximum_use and coupon.used >= coupon.maximum_use:
         res["msg"] = _("Sorry, this coupon code has been fully redeemed")
         return res
+
+    # Check gift card balance (for gift cards with splitting enabled)
+    if coupon.coupon_type == "Gift Card" and hasattr(coupon, 'gift_card_amount'):
+        if coupon.gift_card_amount is not None and flt(coupon.gift_card_amount) <= 0:
+            res["msg"] = _("Sorry, this gift card has no remaining balance")
+            return res
 
     # Check company
     if company and coupon.company != company:

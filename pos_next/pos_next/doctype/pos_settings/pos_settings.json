@@ -15,6 +15,14 @@
   "column_break_wallet",
   "auto_create_wallet",
   "loyalty_to_wallet",
+  "section_break_gift_card",
+  "enable_gift_cards",
+  "gift_card_item",
+  "sync_with_erpnext_coupon",
+  "column_break_gift_card",
+  "enable_gift_card_splitting",
+  "gift_card_validity_months",
+  "gift_card_notification",
   "section_break_general",
   "allow_user_to_edit_additional_discount",
   "allow_user_to_edit_item_discount",
@@ -153,6 +161,64 @@
    "read_only_depends_on": "enable_loyalty_program"
   },
   {
+   "collapsible": 0,
+   "fieldname": "section_break_gift_card",
+   "fieldtype": "Section Break",
+   "label": "Gift Cards"
+  },
+  {
+   "default": "0",
+   "fieldname": "enable_gift_cards",
+   "fieldtype": "Check",
+   "label": "Enable Gift Cards",
+   "description": "Enable gift card functionality in POS"
+  },
+  {
+   "fieldname": "gift_card_item",
+   "fieldtype": "Link",
+   "label": "Gift Card Item",
+   "options": "Item",
+   "depends_on": "enable_gift_cards",
+   "description": "Item that represents a gift card purchase. When sold, creates a gift card coupon with the item's price as the gift card value."
+  },
+  {
+   "default": "1",
+   "fieldname": "sync_with_erpnext_coupon",
+   "fieldtype": "Check",
+   "label": "Sync with ERPNext Coupon Code",
+   "depends_on": "enable_gift_cards",
+   "description": "Create ERPNext Coupon Code and Pricing Rule for each gift card. Enables accounting integration and usage in ERPNext."
+  },
+  {
+   "fieldname": "column_break_gift_card",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "fieldname": "enable_gift_card_splitting",
+   "fieldtype": "Check",
+   "label": "Enable Gift Card Splitting",
+   "depends_on": "enable_gift_cards",
+   "description": "When gift card amount exceeds invoice total, keep the remaining balance on the card for future use."
+  },
+  {
+   "default": "12",
+   "fieldname": "gift_card_validity_months",
+   "fieldtype": "Int",
+   "label": "Gift Card Validity (Months)",
+   "depends_on": "enable_gift_cards",
+   "description": "Number of months a gift card is valid from creation date. Set to 0 for no expiration."
+  },
+  {
+   "fieldname": "gift_card_notification",
+   "fieldtype": "Link",
+   "label": "Gift Card Notification",
+   "options": "Notification",
+   "depends_on": "enable_gift_cards",
+   "description": "Notification template to send when a gift card is created (e.g., email with gift card code)."
+  },
+  {
+   "collapsible": 0,
    "fieldname": "section_break_general",
    "fieldtype": "Section Break",
    "label": "General Settings"
@@ -518,7 +584,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-01-11 16:52:08.009217",
+ "modified": "2026-01-12 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Settings",

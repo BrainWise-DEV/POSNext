@@ -100,7 +100,13 @@ fixtures = [
 					"POS Profile-posa_cash_mode_of_payment",
 					"POS Profile-posa_allow_delete",
 					"POS Profile-posa_block_sale_beyond_available_qty",
-					"Mode of Payment-is_wallet_payment"
+					"Mode of Payment-is_wallet_payment",
+					"Coupon Code-pos_next_section",
+					"Coupon Code-gift_card_amount",
+					"Coupon Code-original_gift_card_amount",
+					"Coupon Code-coupon_code_residual",
+					"Coupon Code-pos_coupon",
+					"Coupon Code-source_pos_invoice"
 				]
 			]
 		]
