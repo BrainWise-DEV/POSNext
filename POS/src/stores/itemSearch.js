@@ -1,6 +1,7 @@
 import { call } from "@/utils/apiWrapper"
 import { isOffline } from "@/utils/offline"
 import { offlineWorker } from "@/utils/offline/workerClient"
+import { cacheItems, getCachedVariants } from "@/utils/offline/items"
 import { performanceConfig } from "@/utils/performanceConfig"
 import { logger } from "@/utils/logger"
 import { createResource } from "frappe-ui"
@@ -10,6 +11,68 @@ import { useStockStore } from "./stock"
 import { useRealtimePosProfile } from "@/composables/useRealtimePosProfile"
 
 const log = logger.create('ItemSearch')
+
+/**
+ * Fetch and cache variants for all template items
+ * This ensures variants are available for offline use
+ * @param {Array} items - Items array to check for templates
+ * @param {string} posProfile - POS Profile name
+ */
+async function cacheVariantsForTemplates(items, posProfile) {
+	if (!items || items.length === 0 || !posProfile) return
+
+	// Find template items (items with has_variants = 1)
+	const templateItems = items.filter(item => item.has_variants)
+
+	if (templateItems.length === 0) {
+		log.debug("No template items found - skipping variant caching")
+		return
+	}
+
+	log.info(`Caching variants for ${templateItems.length} template items`)
+
+	// Fetch variants for each template in parallel (with concurrency limit)
+	const CONCURRENCY_LIMIT = 3
+	const allVariants = []
+
+	for (let i = 0; i < templateItems.length; i += CONCURRENCY_LIMIT) {
+		const batch = templateItems.slice(i, i + CONCURRENCY_LIMIT)
+
+		const batchPromises = batch.map(async (template) => {
+			try {
+				const response = await call("pos_next.api.items.get_item_variants", {
+					template_item: template.item_code,
+					pos_profile: posProfile,
+				})
+				const variants = response?.message || response || []
+
+				if (variants.length > 0) {
+					log.debug(`Fetched ${variants.length} variants for ${template.item_code}`)
+					return variants
+				}
+				return []
+			} catch (error) {
+				log.warn(`Failed to fetch variants for ${template.item_code}:`, error.message)
+				return []
+			}
+		})
+
+		const batchResults = await Promise.all(batchPromises)
+		for (const variants of batchResults) {
+			allVariants.push(...variants)
+		}
+	}
+
+	// Cache all variants in IndexedDB
+	if (allVariants.length > 0) {
+		try {
+			await cacheItems(allVariants)
+			log.success(`Cached ${allVariants.length} variants for offline use`)
+		} catch (error) {
+			log.error("Failed to cache variants:", error)
+		}
+	}
+}
 
 export const useItemSearchStore = defineStore("itemSearch", () => {
 	// Get stock store instance
@@ -659,6 +722,28 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 							// Disable infinite scroll if filters active (all data loaded)
 							hasMore.value = hasFilters ? false : cached.length >= itemsPerPage.value
 							log.success(`Loaded ${cached.length} items from cache (offline mode)`)
+
+							// Eager variant verification: Check if template items have cached variants
+							const templateItems = cached.filter(item => item.has_variants)
+							if (templateItems.length > 0) {
+								log.info(`Verifying variants for ${templateItems.length} template items`)
+								const missingVariants = []
+
+								for (const template of templateItems) {
+									const variants = await getCachedVariants(template.item_code)
+									if (!variants || variants.length === 0) {
+										missingVariants.push(template.item_code)
+									} else {
+										log.debug(`Template ${template.item_code} has ${variants.length} cached variants`)
+									}
+								}
+
+								if (missingVariants.length > 0) {
+									log.warn(`${missingVariants.length} template items missing variants in offline cache:`, missingVariants)
+								} else {
+									log.success(`All ${templateItems.length} template items have variants cached`)
+								}
+							}
 						} else {
 							replaceAllItems([])
 							log.warn("No items in cache")
@@ -749,6 +834,12 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 					serverDataFresh.value = true
 
 					log.success(`Loaded and cached ${fetchedItems.length} filtered items`)
+
+					// Cache variants for template items (for offline use)
+					// Run in background to not block UI
+					cacheVariantsForTemplates(fetchedItems, profile).catch(err => {
+						log.warn("Background variant caching failed:", err.message)
+					})
 				} else {
 					log.info('No items found for the selected filter groups')
 				}
@@ -790,6 +881,12 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 					serverDataFresh.value = true
 
 					log.success(`Loaded ${list.length} items from server`)
+
+					// Cache variants for template items (for offline use)
+					// Run in background to not block UI
+					cacheVariantsForTemplates(list, profile).catch(err => {
+						log.warn("Background variant caching failed:", err.message)
+					})
 				}
 
 				// Start background sync to cache remaining items over time
@@ -1051,6 +1148,11 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 					await offlineWorker.cacheItems(list)
 					offset += list.length
 					batchCount++
+
+					// Cache variants for template items in this batch (background, non-blocking)
+					cacheVariantsForTemplates(list, profile).catch(err => {
+						log.warn("Background variant caching failed:", err.message)
+					})
 
 					// Only update stats periodically to reduce IndexedDB queries
 					const shouldUpdateStats = batchCount % statsUpdateFrequency === 0 || list.length < batchSize
