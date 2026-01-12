@@ -9,9 +9,9 @@
 	--z-dropdown: 10000;
 }
 
-/* Apply Saudi Riyal symbol font to body for currency support */
+/* Apply fonts - Inter first for text, Saudi Riyal for currency symbol */
 body {
-	font-family: "SaudiRiyalSymbol", "Inter", sans-serif;
+	font-family: "Inter", "SaudiRiyalSymbol", sans-serif;
 }
 
 /* Ensure all text elements inherit the font stack with Saudi Riyal support */
