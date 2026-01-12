@@ -523,38 +523,96 @@ def _get_standalone_pricing_rule_offers(company: str, date: str) -> List[Offer]:
 # ============================================================================
 
 @frappe.whitelist()
-def get_active_coupons(customer: str, company: str) -> List[Dict]:
-	"""Get active gift card coupons for a customer"""
+def get_active_coupons(customer: str = None, company: str = None) -> List[Dict]:
+	"""
+	Get active gift card coupons available for use.
+
+	Returns gift cards that are:
+	- Assigned to the customer, OR
+	- Anonymous (no customer assigned)
+	- Have remaining balance > 0
+	- Are within validity dates
+	"""
 	if not frappe.db.table_exists("POS Coupon"):
 		return []
 
-	coupons = frappe.get_all(
+	# Build filters - get both customer-specific and anonymous gift cards
+	base_filters = {
+		"company": company,
+		"coupon_type": "Gift Card",
+		"disabled": 0,
+	}
+
+	# Get customer-assigned gift cards
+	customer_cards = []
+	if customer:
+		customer_filters = {**base_filters, "customer": customer}
+		customer_cards = frappe.get_all(
+			"POS Coupon",
+			filters=customer_filters,
+			fields=[
+				"name", "coupon_code", "coupon_name", "customer", "customer_name",
+				"gift_card_amount", "original_amount", "discount_amount",
+				"valid_from", "valid_upto", "used", "maximum_use"
+			],
+		)
+
+	# Get anonymous gift cards (no customer assigned)
+	anonymous_filters = {**base_filters, "customer": ["is", "not set"]}
+	anonymous_cards = frappe.get_all(
 		"POS Coupon",
-		filters={
-			"company": company,
-			"coupon_type": "Gift Card",
-			"customer": customer,
-			"used": 0,
-		},
-		fields=["name", "coupon_code", "coupon_name", "valid_from", "valid_upto"],
+		filters=anonymous_filters,
+		fields=[
+			"name", "coupon_code", "coupon_name", "customer", "customer_name",
+			"gift_card_amount", "original_amount", "discount_amount",
+			"valid_from", "valid_upto", "used", "maximum_use"
+		],
 	)
 
-	return coupons
+	# Combine and filter by validity and balance
+	all_cards = customer_cards + anonymous_cards
+	today = getdate(nowdate())
+	valid_cards = []
+
+	for card in all_cards:
+		# Check validity dates
+		if card.valid_from and getdate(card.valid_from) > today:
+			continue
+		if card.valid_upto and getdate(card.valid_upto) < today:
+			continue
+
+		# Check usage (for non-splitting cards)
+		if card.used and card.maximum_use and card.used >= card.maximum_use:
+			continue
+
+		# Check balance
+		balance = flt(card.gift_card_amount) if card.gift_card_amount else flt(card.discount_amount)
+		if balance <= 0:
+			continue
+
+		# Add balance to the card info
+		card["balance"] = balance
+		valid_cards.append(card)
+
+	return valid_cards
 
 
 @frappe.whitelist()
-def validate_coupon(coupon_code: str, customer: str, company: str) -> Dict:
-	"""Validate a coupon code and return its details"""
+def validate_coupon(coupon_code: str, customer: str = None, company: str = None) -> Dict:
+	"""
+	Validate a coupon code and return its details.
+
+	For gift cards, also checks balance and supports splitting.
+	"""
 	if not frappe.db.table_exists("POS Coupon"):
 		return {"valid": False, "message": _("Coupons are not enabled")}
 
 	date = getdate()
 
 	# Fetch coupon with case-insensitive code matching
-	# Note: coupon_code field is unique, so we can fetch directly
 	coupon = frappe.db.get_value(
 		"POS Coupon",
-		{"coupon_code": coupon_code, "company": company},
+		{"coupon_code": coupon_code.upper(), "company": company},
 		["*"],
 		as_dict=1
 	)
@@ -565,15 +623,6 @@ def validate_coupon(coupon_code: str, customer: str, company: str) -> Dict:
 	if coupon.disabled:
 		return {"valid": False, "message": _("This coupon is disabled")}
 
-	# Check usage limits
-	if coupon.coupon_type == "Gift Card":
-		if coupon.used:
-			return {"valid": False, "message": _("This gift card has already been used")}
-	else:
-		# Promotional coupons
-		if coupon.maximum_use > 0 and coupon.used >= coupon.maximum_use:
-			return {"valid": False, "message": _("This coupon has reached its usage limit")}
-
 	# Check validity dates
 	if coupon.valid_from and coupon.valid_from > date:
 		return {"valid": False, "message": _("This coupon is not yet valid")}
@@ -581,9 +630,24 @@ def validate_coupon(coupon_code: str, customer: str, company: str) -> Dict:
 	if coupon.valid_upto and coupon.valid_upto < date:
 		return {"valid": False, "message": _("This coupon has expired")}
 
-	# Check customer restriction
+	# Check customer restriction - gift cards with no customer can be used by anyone
 	if coupon.customer and coupon.customer != customer:
 		return {"valid": False, "message": _("This coupon is not valid for this customer")}
+
+	# Gift card specific validations
+	if coupon.coupon_type == "Gift Card":
+		# Check balance
+		balance = flt(coupon.gift_card_amount) if coupon.gift_card_amount else flt(coupon.discount_amount)
+		if balance <= 0:
+			return {"valid": False, "message": _("This gift card has no remaining balance")}
+
+		# Add balance info to coupon
+		coupon["balance"] = balance
+		coupon["is_gift_card"] = True
+	else:
+		# Promotional coupons - check usage limits
+		if coupon.maximum_use > 0 and coupon.used >= coupon.maximum_use:
+			return {"valid": False, "message": _("This coupon has reached its usage limit")}
 
 	return {
 		"valid": True,

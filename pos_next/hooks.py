@@ -228,6 +228,13 @@ doc_events = {
 		"on_cancel": "pos_next.realtime_events.emit_stock_update_event",
 		"after_insert": "pos_next.realtime_events.emit_invoice_created_event"
 	},
+	"POS Invoice": {
+		"on_submit": [
+			"pos_next.api.gift_cards.create_gift_card_from_invoice",
+			"pos_next.api.gift_cards.process_gift_card_on_submit"
+		],
+		"on_cancel": "pos_next.api.gift_cards.process_gift_card_on_cancel"
+	},
 	"POS Profile": {
 		"on_update": "pos_next.realtime_events.emit_pos_profile_updated_event"
 	}

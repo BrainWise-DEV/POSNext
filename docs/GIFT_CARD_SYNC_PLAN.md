@@ -7,10 +7,10 @@
 | 1 | Custom fields for ERPNext Coupon Code | ✅ Done | 2025-01-12 |
 | 2 | Gift Card settings in POS Settings | ✅ Done | 2025-01-12 |
 | 3 | Update POS Coupon (customer optional) | ✅ Done | 2025-01-12 |
-| 4 | Gift Card sync API | ⏳ Pending | - |
-| 5 | Gift Card splitting logic | ⏳ Pending | - |
-| 6 | Frontend Gift Card components | ⏳ Pending | - |
-| 7 | Hooks & Events | ⏳ Pending | - |
+| 4 | Gift Card sync API | ✅ Done | 2025-01-12 |
+| 5 | Gift Card splitting logic | ✅ Done | 2025-01-12 |
+| 6 | Frontend Gift Card components | ✅ Done | 2025-01-12 |
+| 7 | Hooks & Events | ✅ Done | 2025-01-12 |
 | 8 | Migration & Patches | ⏳ Pending | - |
 
 ### Completed Changes
@@ -34,6 +34,37 @@
   - Made `customer` field optional for Gift Cards
   - Added `gift_card_amount`, `original_amount`, `coupon_code_residual`, `source_invoice` fields
   - Updated validation to initialize gift card balance
+
+**Phase 4-7 (2025-01-12):**
+- Created `pos_next/api/gift_cards.py` with full gift card API:
+  - `generate_gift_card_code()` - Creates XXXX-XXXX-XXXX format codes
+  - `get_gift_card_settings()` - Gets settings from POS Settings
+  - `is_gift_card_item()` - Checks if item is the gift card item
+  - `create_gift_card_from_invoice()` - Creates gift cards when selling gift card items
+  - `_sync_to_erpnext_coupon()` - Syncs to ERPNext Coupon Code + Pricing Rule
+  - `_create_pricing_rule_for_gift_card()` - Creates Pricing Rule for discount
+  - `apply_gift_card()` - Applies gift card to invoice
+  - `get_gift_cards_with_balance()` - Gets available gift cards
+  - `process_gift_card_on_submit()` - Handles splitting on invoice submit
+  - `_split_gift_card()` - Updates balance on original card
+  - `process_gift_card_on_cancel()` - Restores balance on cancel
+- Updated `pos_next/hooks.py` with doc_events for POS Invoice:
+  - `on_submit`: create_gift_card_from_invoice, process_gift_card_on_submit
+  - `on_cancel`: process_gift_card_on_cancel
+- Updated `pos_next/api/offers.py`:
+  - Enhanced `get_active_coupons()` to support anonymous gift cards and balance field
+  - Enhanced `validate_coupon()` to check gift card balance and add `is_gift_card` flag
+- Created `POS/src/composables/useGiftCard.js`:
+  - `loadGiftCards()` - Fetch available gift cards
+  - `applyGiftCard()` - Apply gift card to invoice
+  - `calculateGiftCardDiscount()` - Calculate discount with splitting info
+  - `formatGiftCard()` - Format gift card for display
+  - Computed: `groupedGiftCards`, `totalAvailableBalance`, `hasGiftCards`
+- Updated `POS/src/components/sale/CouponDialog.vue`:
+  - Added balance display for gift cards in the list
+  - Added "Anonymous" label for cards without customer
+  - Enhanced applied coupon preview to show gift card balance info
+  - Added remaining balance display for splitting scenarios
 
 ---
 
