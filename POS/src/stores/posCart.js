@@ -309,6 +309,24 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		showSuccess(__("Discount has been removed from cart"))
 	}
 
+	// Watch appliedCoupon to ensure additionalDiscount stays in sync
+	// This handles cases where appliedCoupon is restored from state but additionalDiscount is lost
+	// Using flush: 'post' to ensure the watcher runs after Vue updates and store is fully initialized
+	watch(appliedCoupon, (newCoupon) => {
+		if (newCoupon && newCoupon.amount > 0) {
+			// Always sync the discount to ensure consistency
+			// Use nextTick to ensure the store and composable are ready
+			nextTick(() => {
+				if (additionalDiscount.value !== newCoupon.amount) {
+					applyDiscount(newCoupon)
+				}
+			})
+		} else if (!newCoupon && additionalDiscount.value > 0) {
+			// Clear the discount if coupon is removed
+			removeDiscount()
+		}
+	}, { immediate: true, flush: 'post' })
+
 	function buildOfferEvaluationPayload(currentProfile) {
 		// Use toRaw() to ensure we get current, non-reactive values (prevents stale cached quantities)
 		const rawItems = toRaw(invoiceItems.value)

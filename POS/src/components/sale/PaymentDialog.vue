@@ -1751,6 +1751,10 @@ const canComplete = computed(() => {
 		return false
 	}
 
+	// If grand total is 0 (fully covered by discount/gift card), can complete without payment entries
+	if (props.grandTotal === 0) {
+		return true
+	}
 	// If partial payment is allowed, can complete with any amount > 0
 	if (props.allowPartialPayment) {
 		return totalPaid.value > 0 && paymentEntries.value.length > 0
