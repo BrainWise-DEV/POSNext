@@ -1,0 +1,148 @@
+name: Update Translation Template
+
+on:
+  push:
+    branches: [develop, main]
+    paths:
+      - "**.py"
+      - "**.js"
+      - "**.vue"
+      - "**.html"
+      - "**.json"
+      - "!pos_next/locale/**"
+      - "!pos_next/translations/**"
+  workflow_dispatch:
+    inputs:
+      force_update:
+        description: "Force update even if no changes"
+        required: false
+        default: "false"
+
+jobs:
+  update-pot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install gettext tools
+        run: sudo apt-get update && sudo apt-get install -y gettext
+
+      - name: Extract translatable strings
+        run: |
+          # Create locale directory if it doesn't exist
+          mkdir -p pos_next/locale
+
+          # Extract strings from Python files
+          find pos_next -name "*.py" -type f | xargs xgettext \
+            --language=Python \
+            --keyword=_ \
+            --keyword=_lt \
+            --from-code=UTF-8 \
+            --output=pos_next/locale/main_py.pot \
+            --package-name="POS Next" \
+            --package-version="1.13.0" \
+            --msgid-bugs-address="support@brainwise.me" \
+            2>/dev/null || true
+
+          # Extract strings from JavaScript/Vue files using a simple regex approach
+          # This catches __("string") and __('string') patterns
+          python3 << 'EOF'
+          import os
+          import re
+          from datetime import datetime
+
+          def extract_js_strings(directory):
+              """Extract translatable strings from JS/Vue files."""
+              strings = set()
+              pattern = re.compile(r'__\(["\']([^"\']+)["\']\s*(?:,|\))')
+
+              for root, dirs, files in os.walk(directory):
+                  # Skip node_modules
+                  dirs[:] = [d for d in dirs if d != 'node_modules']
+
+                  for file in files:
+                      if file.endswith(('.js', '.vue', '.ts')):
+                          filepath = os.path.join(root, file)
+                          try:
+                              with open(filepath, 'r', encoding='utf-8') as f:
+                                  content = f.read()
+                                  matches = pattern.findall(content)
+                                  strings.update(matches)
+                          except Exception:
+                              pass
+              return strings
+
+          # Extract from POS directory
+          strings = extract_js_strings('POS/src')
+
+          # Write to POT file
+          now = datetime.now().strftime("%Y-%m-%d %H:%M%z")
+          with open('pos_next/locale/main_js.pot', 'w', encoding='utf-8') as f:
+              f.write(f'''# JavaScript/Vue translatable strings for POS Next.
+          # Copyright (C) {datetime.now().year} BrainWise
+          #
+          msgid ""
+          msgstr ""
+          "Project-Id-Version: POS Next 1.13.0\\n"
+          "Report-Msgid-Bugs-To: support@brainwise.me\\n"
+          "POT-Creation-Date: {now}\\n"
+          "Content-Type: text/plain; charset=UTF-8\\n"
+
+          ''')
+              for s in sorted(strings):
+                  escaped = s.replace('\\', '\\\\').replace('"', '\\"')
+                  f.write(f'msgid "{escaped}"\n')
+                  f.write('msgstr ""\n\n')
+
+          print(f"Extracted {len(strings)} strings from JavaScript/Vue files")
+          EOF
+
+          # Merge Python and JS POT files
+          if [ -f pos_next/locale/main_py.pot ] && [ -f pos_next/locale/main_js.pot ]; then
+            msgcat pos_next/locale/main_py.pot pos_next/locale/main_js.pot -o pos_next/locale/main.pot
+            rm pos_next/locale/main_py.pot pos_next/locale/main_js.pot
+          elif [ -f pos_next/locale/main_py.pot ]; then
+            mv pos_next/locale/main_py.pot pos_next/locale/main.pot
+          elif [ -f pos_next/locale/main_js.pot ]; then
+            mv pos_next/locale/main_js.pot pos_next/locale/main.pot
+          fi
+
+          echo "POT file generated successfully"
+
+      - name: Update PO files from POT
+        run: |
+          # Update existing PO files with new strings from POT
+          for po_file in pos_next/locale/*.po; do
+            if [ -f "$po_file" ]; then
+              echo "Updating $po_file..."
+              msgmerge --update --no-fuzzy-matching "$po_file" pos_next/locale/main.pot || true
+            fi
+          done
+
+      - name: Check for changes
+        id: check_changes
+        run: |
+          git add pos_next/locale/
+          if git diff --staged --quiet; then
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          else
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit and push changes
+        if: steps.check_changes.outputs.has_changes == 'true'
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git commit -m "chore(i18n): update translation template
+
+          Auto-generated from source code changes"
+          git push

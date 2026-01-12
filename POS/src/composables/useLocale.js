@@ -43,12 +43,18 @@ export const SUPPORTED_LOCALES = {
 		countryCode: "eg",
 		dir: "rtl",
 	},
-	"pt-br": {
+	pt_br: {
 		name: "Portuguese (Brazil)",
-		nativeName: "Portugues (Brasil)",
+		nativeName: "Português (Brasil)",
 		countryCode: "br",
 		dir: "ltr",
-	}
+	},
+	fr: {
+		name: "French",
+		nativeName: "Français",
+		countryCode: "fr",
+		dir: "ltr",
+	},
 }
 
 /**
