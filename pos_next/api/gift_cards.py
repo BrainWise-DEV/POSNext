@@ -533,8 +533,16 @@ def process_gift_card_on_submit(doc, method=None):
 		# Called with document object from hook
 		invoice = doc
 
-	# Check if a coupon was used (Sales Invoice may not have coupon_code field)
-	coupon_code = getattr(invoice, 'coupon_code', None)
+	# Check if a coupon was used
+	# Sales Invoice uses custom field posa_coupon_code, POS Invoice may use coupon_code
+	coupon_code = getattr(invoice, 'posa_coupon_code', None) or getattr(invoice, 'coupon_code', None)
+
+	frappe.log_error(
+		"Gift Card Hook - Coupon Check",
+		f"Invoice: {invoice.name}, posa_coupon_code: {getattr(invoice, 'posa_coupon_code', None)}, "
+		f"coupon_code attr: {getattr(invoice, 'coupon_code', None)}, final: {coupon_code}"
+	)
+
 	if not coupon_code:
 		return
 
@@ -544,6 +552,11 @@ def process_gift_card_on_submit(doc, method=None):
 		{"coupon_code": coupon_code.upper()},
 		["name", "coupon_type", "gift_card_amount", "discount_amount"],
 		as_dict=True
+	)
+
+	frappe.log_error(
+		"Gift Card Hook - Coupon Found",
+		f"Coupon code: {coupon_code}, Found: {coupon}"
 	)
 
 	if not coupon or coupon.coupon_type != "Gift Card":
@@ -562,11 +575,18 @@ def process_gift_card_on_submit(doc, method=None):
 	# Get gift card settings
 	settings = get_gift_card_settings(pos_profile)
 	if not settings:
+		frappe.log_error("Gift Card Hook - No Settings", f"pos_profile: {pos_profile}")
 		return
 
 	# Calculate amounts
 	gift_card_balance = flt(coupon.gift_card_amount) if coupon.gift_card_amount else flt(coupon.discount_amount)
 	used_amount = flt(invoice.discount_amount) if invoice.discount_amount else gift_card_balance
+
+	frappe.log_error(
+		"Gift Card Hook - Processing",
+		f"Coupon: {coupon.name}, balance: {gift_card_balance}, used: {used_amount}, "
+		f"splitting enabled: {settings.get('enable_gift_card_splitting')}"
+	)
 
 	# Check if splitting is needed and enabled
 	if gift_card_balance > used_amount and settings.get("enable_gift_card_splitting"):
@@ -708,8 +728,9 @@ def process_gift_card_on_cancel(doc, method=None):
 		# Called with document object from hook
 		invoice = doc
 
-	# Check if a coupon was used (Sales Invoice may not have coupon_code field)
-	coupon_code = getattr(invoice, 'coupon_code', None)
+	# Check if a coupon was used
+	# Sales Invoice uses custom field posa_coupon_code, POS Invoice may use coupon_code
+	coupon_code = getattr(invoice, 'posa_coupon_code', None) or getattr(invoice, 'coupon_code', None)
 	if not coupon_code:
 		return
 

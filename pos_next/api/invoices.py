@@ -900,13 +900,14 @@ def update_invoice(data):
                     error_msg = coupon_result.get("msg", "Invalid coupon code") if coupon_result else "Invalid coupon code"
                     frappe.throw(_(error_msg))
 
-                # Store coupon code on invoice for tracking
-                invoice_doc.coupon_code = coupon_code
+                # Store coupon code on invoice for tracking (using custom field)
+                invoice_doc.posa_coupon_code = coupon_code
 
         # Store discount values before save (ERPNext validation may clear them)
         discount_amount_to_persist = flt(invoice_doc.get("discount_amount"))
         apply_discount_on = invoice_doc.get("apply_discount_on")
         calculated_grand_total = flt(invoice_doc.get("grand_total"))
+        coupon_code_to_persist = invoice_doc.get("posa_coupon_code")
 
         # Save as draft
         invoice_doc.flags.ignore_permissions = True
@@ -916,19 +917,25 @@ def update_invoice(data):
 
         # Restore discount values directly to database if they were cleared by ERPNext validation
         if discount_amount_to_persist > 0:
-            # Update database directly to persist the discount values
+            # Build update dict
+            update_dict = {
+                "discount_amount": discount_amount_to_persist,
+                "apply_discount_on": apply_discount_on or "Grand Total",
+                "grand_total": calculated_grand_total,
+                "base_grand_total": calculated_grand_total,
+                "rounded_total": calculated_grand_total,
+                "base_rounded_total": calculated_grand_total,
+                "outstanding_amount": calculated_grand_total
+            }
+            # Also persist the coupon code if set
+            if coupon_code_to_persist:
+                update_dict["posa_coupon_code"] = coupon_code_to_persist
+
+            # Update database directly to persist the values
             frappe.db.set_value(
                 doctype,
                 invoice_doc.name,
-                {
-                    "discount_amount": discount_amount_to_persist,
-                    "apply_discount_on": apply_discount_on or "Grand Total",
-                    "grand_total": calculated_grand_total,
-                    "base_grand_total": calculated_grand_total,
-                    "rounded_total": calculated_grand_total,
-                    "base_rounded_total": calculated_grand_total,
-                    "outstanding_amount": calculated_grand_total
-                },
+                update_dict,
                 update_modified=False
             )
 
@@ -940,6 +947,8 @@ def update_invoice(data):
             invoice_doc.rounded_total = calculated_grand_total
             invoice_doc.base_rounded_total = calculated_grand_total
             invoice_doc.outstanding_amount = calculated_grand_total
+            if coupon_code_to_persist:
+                invoice_doc.posa_coupon_code = coupon_code_to_persist
 
         return invoice_doc.as_dict()
     except Exception as e:
