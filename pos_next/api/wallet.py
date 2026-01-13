@@ -43,47 +43,58 @@ def process_loyalty_to_wallet(doc, method=None):
 	Convert earned loyalty points to wallet balance after invoice submission.
 	Called during on_submit hook.
 	"""
-	if not doc.is_pos or doc.is_return:
-		return
-
-	# Check if loyalty to wallet is enabled
-	pos_settings = get_pos_settings(doc.pos_profile)
-	if not pos_settings:
-		return
-
-	if not cint(pos_settings.get("enable_loyalty_program")) or not cint(pos_settings.get("loyalty_to_wallet")):
-		return
-
-	# Check if customer has loyalty program
-	loyalty_program = frappe.db.get_value("Customer", doc.customer, "loyalty_program")
-	if not loyalty_program:
-		return
-
-	# Get the loyalty points earned from this invoice
-	loyalty_entry = frappe.db.get_value(
-		"Loyalty Point Entry",
-		{
-			"invoice_type": "Sales Invoice",
-			"invoice": doc.name,
-			"loyalty_points": [">", 0]
-		},
-		["loyalty_points", "name"],
-		as_dict=True
-	)
-
-	if not loyalty_entry or loyalty_entry.loyalty_points <= 0:
-		return
-
-	# Get conversion rate from Loyalty Program (standard ERPNext field)
-	conversion_rate = flt(frappe.db.get_value("Loyalty Program", loyalty_program, "conversion_factor")) or 1.0
-
-	# Calculate wallet credit amount
-	credit_amount = flt(loyalty_entry.loyalty_points) * conversion_rate
-
-	if credit_amount <= 0:
-		return
-
 	try:
+		if not doc.is_pos or doc.is_return:
+			return
+
+		# Check if loyalty to wallet is enabled
+		pos_settings = get_pos_settings(doc.pos_profile)
+		if not pos_settings:
+			return
+
+		if not cint(pos_settings.get("enable_loyalty_program")) or not cint(pos_settings.get("loyalty_to_wallet")):
+			return
+
+		# Check if wallet account is properly configured before proceeding
+		wallet_account = pos_settings.get("wallet_account")
+		if wallet_account:
+			account_type = frappe.db.get_value("Account", wallet_account, "account_type")
+			if account_type != "Receivable":
+				frappe.log_error(
+					"Wallet Account Configuration Error",
+					f"Wallet account {wallet_account} is not a Receivable type. Skipping loyalty to wallet conversion."
+				)
+				return
+
+		# Check if customer has loyalty program
+		loyalty_program = frappe.db.get_value("Customer", doc.customer, "loyalty_program")
+		if not loyalty_program:
+			return
+
+		# Get the loyalty points earned from this invoice
+		loyalty_entry = frappe.db.get_value(
+			"Loyalty Point Entry",
+			{
+				"invoice_type": "Sales Invoice",
+				"invoice": doc.name,
+				"loyalty_points": [">", 0]
+			},
+			["loyalty_points", "name"],
+			as_dict=True
+		)
+
+		if not loyalty_entry or loyalty_entry.loyalty_points <= 0:
+			return
+
+		# Get conversion rate from Loyalty Program (standard ERPNext field)
+		conversion_rate = flt(frappe.db.get_value("Loyalty Program", loyalty_program, "conversion_factor")) or 1.0
+
+		# Calculate wallet credit amount
+		credit_amount = flt(loyalty_entry.loyalty_points) * conversion_rate
+
+		if credit_amount <= 0:
+			return
+
 		# Get or create customer wallet
 		wallet = get_or_create_wallet(doc.customer, doc.company, pos_settings)
 
