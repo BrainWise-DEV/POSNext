@@ -282,7 +282,7 @@
 											<!-- Show info badge for read-only Pricing Rules -->
 											<div v-if="isPricingRule" class="flex items-center gap-2 px-3 py-1 bg-blue-50 rounded-lg">
 												<FeatherIcon name="info" class="w-4 h-4 text-blue-600" />
-												<span class="text-xs text-blue-700 font-medium">{{ __('Read-only: Edit in ERPNext') }}</span>
+												<span class="text-xs text-blue-700 font-medium">{{ __('Read-only: Edit in Back Office') }}</span>
 											</div>
 
 											<Button
