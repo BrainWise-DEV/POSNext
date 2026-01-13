@@ -549,52 +549,57 @@ def search_items(search_term, pos_profile=None, limit=20):
 
 
 # ==================== COUPON MANAGEMENT ====================
+# Uses ERPNext Coupon Code directly for native integration
 
 @frappe.whitelist()
 def get_coupons(company=None, include_disabled=False, coupon_type=None):
-	"""Get all coupons for the company with enhanced filtering."""
+	"""Get all coupons for the company with enhanced filtering.
+
+	Uses ERPNext Coupon Code doctype directly for native integration.
+	"""
 	check_promotion_permissions("read")
 
-	filters = {}
-
-	if company:
-		filters["company"] = company
-
-	# Check if disabled field exists before filtering
-	has_disabled_field = frappe.db.has_column("POS Coupon", "disabled")
-
-	if not include_disabled and has_disabled_field:
-		filters["disabled"] = 0
-
-	if coupon_type:
-		filters["coupon_type"] = coupon_type
-
-	# Build field list - only include fields that exist
-	fields = [
-		"name", "coupon_name", "coupon_code", "coupon_type",
-		"customer", "customer_name",
-		"valid_from", "valid_upto", "maximum_use", "used",
-		"one_use", "company", "campaign"
-	]
-
-	# Check for optional fields
-	if has_disabled_field:
-		fields.append("disabled")
-
-	coupons = frappe.get_all(
-		"POS Coupon",
-		filters=filters,
-		fields=fields,
-		order_by="modified desc"
-	)
-
-	# Enrich with status
 	today = getdate(nowdate())
 
+	# Query ERPNext Coupon Code with Pricing Rule join for company filter
+	coupons = frappe.db.sql("""
+		SELECT
+			cc.name,
+			cc.coupon_name,
+			cc.coupon_code,
+			cc.coupon_type,
+			cc.customer,
+			cc.valid_from,
+			cc.valid_upto,
+			cc.maximum_use,
+			cc.used,
+			cc.pos_next_gift_card,
+			cc.gift_card_amount,
+			pr.company,
+			pr.disable as disabled
+		FROM `tabCoupon Code` cc
+		LEFT JOIN `tabPricing Rule` pr ON cc.pricing_rule = pr.name
+		WHERE
+			(pr.company = %(company)s OR pr.company IS NULL OR %(company)s IS NULL)
+			AND (%(include_disabled)s = 1 OR pr.disable = 0 OR pr.disable IS NULL)
+			AND (%(coupon_type)s IS NULL OR cc.coupon_type = %(coupon_type)s)
+		ORDER BY cc.modified DESC
+	""", {
+		"company": company,
+		"include_disabled": 1 if include_disabled else 0,
+		"coupon_type": coupon_type
+	}, as_dict=True)
+
+	# Enrich with status and customer name
 	for coupon in coupons:
-		# Set disabled to 0 if field doesn't exist
-		if not has_disabled_field:
-			coupon["disabled"] = 0
+		# Get customer name
+		if coupon.customer:
+			coupon["customer_name"] = frappe.db.get_value("Customer", coupon.customer, "customer_name")
+		else:
+			coupon["customer_name"] = None
+
+		# Set disabled default
+		coupon["disabled"] = coupon.get("disabled") or 0
 
 		# Calculate status - disabled takes precedence
 		if coupon.get("disabled"):
@@ -619,14 +624,41 @@ def get_coupons(company=None, include_disabled=False, coupon_type=None):
 
 @frappe.whitelist()
 def get_coupon_details(coupon_name):
-	"""Get detailed information about a specific coupon."""
+	"""Get detailed information about a specific coupon.
+
+	Uses ERPNext Coupon Code doctype directly.
+	"""
 	check_promotion_permissions("read")
 
-	if not frappe.db.exists("POS Coupon", coupon_name):
+	if not frappe.db.exists("Coupon Code", coupon_name):
 		frappe.throw(_("Coupon {0} not found").format(coupon_name))
 
-	coupon = frappe.get_doc("POS Coupon", coupon_name)
+	coupon = frappe.get_doc("Coupon Code", coupon_name)
 	data = coupon.as_dict()
+
+	# Add company from linked Pricing Rule
+	if coupon.pricing_rule:
+		data["company"] = frappe.db.get_value("Pricing Rule", coupon.pricing_rule, "company")
+
+	# Add customer name
+	if coupon.customer:
+		data["customer_name"] = frappe.db.get_value("Customer", coupon.customer, "customer_name")
+
+	# Add discount info from Pricing Rule
+	if coupon.pricing_rule:
+		pr = frappe.db.get_value(
+			"Pricing Rule",
+			coupon.pricing_rule,
+			["rate_or_discount", "discount_percentage", "discount_amount", "min_amt", "max_amt"],
+			as_dict=True
+		)
+		if pr:
+			data["discount_type"] = "Percentage" if pr.rate_or_discount == "Discount Percentage" else "Amount"
+			data["discount_percentage"] = pr.discount_percentage or 0
+			data["discount_amount"] = pr.discount_amount or 0
+			data["min_amount"] = pr.min_amt or 0
+			data["max_amount"] = pr.max_amt or 0
+			data["apply_on"] = "Grand Total"  # Default for POS
 
 	return data
 
@@ -634,7 +666,7 @@ def get_coupon_details(coupon_name):
 @frappe.whitelist()
 def create_coupon(data):
 	"""
-	Create a new coupon.
+	Create a new coupon using ERPNext Coupon Code + Pricing Rule.
 
 	Input format:
 	{
@@ -648,7 +680,7 @@ def create_coupon(data):
 		"max_amount": 200,  # Optional - Maximum discount cap
 		"apply_on": "Grand Total",  # Grand Total or Net Total
 		"company": "Company Name",
-		"customer": "CUST-001",  # Required for Gift Card
+		"customer": "CUST-001",  # Optional for Gift Card
 		"valid_from": "2025-01-01",
 		"valid_upto": "2025-12-31",
 		"maximum_use": 100,  # Optional
@@ -684,33 +716,54 @@ def create_coupon(data):
 		if flt(data.get("discount_amount")) <= 0:
 			frappe.throw(_("Discount amount must be greater than 0"))
 
-	# Validate Gift Card requires customer
-	if data.get("coupon_type") == "Gift Card" and not data.get("customer"):
-		frappe.throw(_("Customer is required for Gift Card coupons"))
-
 	try:
-		# Create coupon
-		coupon = frappe.new_doc("POS Coupon")
-		coupon.update({
-			"coupon_name": data.get("coupon_name"),
-			"coupon_type": data.get("coupon_type"),
-			"coupon_code": data.get("coupon_code"),  # Will auto-generate if empty
-			"discount_type": data.get("discount_type"),
-			"discount_percentage": flt(data.get("discount_percentage")) if data.get("discount_type") == "Percentage" else None,
-			"discount_amount": flt(data.get("discount_amount")) if data.get("discount_type") == "Amount" else None,
-			"min_amount": flt(data.get("min_amount")) if data.get("min_amount") else None,
-			"max_amount": flt(data.get("max_amount")) if data.get("max_amount") else None,
-			"apply_on": data.get("apply_on", "Grand Total"),
-			"company": data.get("company"),
-			"customer": data.get("customer"),
-			"valid_from": data.get("valid_from"),
-			"valid_upto": data.get("valid_upto"),
-			"maximum_use": cint(data.get("maximum_use", 0)) or None,
-			"one_use": cint(data.get("one_use", 0)),
-			"campaign": data.get("campaign"),
-		})
+		# Generate coupon code if not provided
+		coupon_code = data.get("coupon_code")
+		if not coupon_code:
+			import random
+			import string
+			coupon_code = "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
 
-		coupon.insert()
+		# Create Pricing Rule first
+		pricing_rule = frappe.get_doc({
+			"doctype": "Pricing Rule",
+			"title": f"Coupon - {coupon_code}",
+			"apply_on": "Transaction",
+			"price_or_product_discount": "Price",
+			"rate_or_discount": "Discount Percentage" if data.get("discount_type") == "Percentage" else "Discount Amount",
+			"discount_percentage": flt(data.get("discount_percentage")) if data.get("discount_type") == "Percentage" else 0,
+			"discount_amount": flt(data.get("discount_amount")) if data.get("discount_type") == "Amount" else 0,
+			"min_amt": flt(data.get("min_amount")) if data.get("min_amount") else 0,
+			"max_amt": flt(data.get("max_amount")) if data.get("max_amount") else 0,
+			"selling": 1,
+			"buying": 0,
+			"company": data.get("company"),
+			"coupon_code_based": 1,
+			"valid_from": data.get("valid_from") or nowdate(),
+			"valid_upto": data.get("valid_upto"),
+			"priority": 1,
+			"disable": 0,
+		})
+		pricing_rule.insert(ignore_permissions=True)
+
+		# Create Coupon Code
+		coupon = frappe.get_doc({
+			"doctype": "Coupon Code",
+			"coupon_name": data.get("coupon_name"),
+			"coupon_code": coupon_code,
+			"coupon_type": data.get("coupon_type"),
+			"pricing_rule": pricing_rule.name,
+			"valid_from": data.get("valid_from") or nowdate(),
+			"valid_upto": data.get("valid_upto"),
+			"maximum_use": cint(data.get("maximum_use", 0)) or 0,
+			"used": 0,
+			"customer": data.get("customer"),
+			# Gift card custom fields
+			"pos_next_gift_card": 1 if data.get("coupon_type") == "Gift Card" else 0,
+			"gift_card_amount": flt(data.get("discount_amount")) if data.get("coupon_type") == "Gift Card" else 0,
+			"original_gift_card_amount": flt(data.get("discount_amount")) if data.get("coupon_type") == "Gift Card" else 0,
+		})
+		coupon.insert(ignore_permissions=True)
 
 		return {
 			"success": True,
@@ -722,8 +775,8 @@ def create_coupon(data):
 	except Exception as e:
 		frappe.db.rollback()
 		frappe.log_error(
-			title=_("Coupon Creation Failed"),
-			message=frappe.get_traceback()
+			"Coupon Creation Failed",
+			frappe.get_traceback()
 		)
 		frappe.throw(_("Failed to create coupon: {0}").format(str(e)))
 
@@ -731,7 +784,7 @@ def create_coupon(data):
 @frappe.whitelist()
 def update_coupon(coupon_name, data):
 	"""
-	Update an existing coupon.
+	Update an existing coupon (ERPNext Coupon Code + Pricing Rule).
 	Can update validity dates, usage limits, disabled status, and discount configuration.
 	"""
 	check_promotion_permissions("write")
@@ -740,41 +793,42 @@ def update_coupon(coupon_name, data):
 	if isinstance(data, str):
 		data = json.loads(data)
 
-	if not frappe.db.exists("POS Coupon", coupon_name):
+	if not frappe.db.exists("Coupon Code", coupon_name):
 		frappe.throw(_("Coupon {0} not found").format(coupon_name))
 
 	try:
-		coupon = frappe.get_doc("POS Coupon", coupon_name)
+		coupon = frappe.get_doc("Coupon Code", coupon_name)
 
-		# Update discount fields
-		if "discount_type" in data:
-			coupon.discount_type = data["discount_type"]
-		if "discount_percentage" in data:
-			coupon.discount_percentage = flt(data["discount_percentage"]) if data["discount_percentage"] else None
-		if "discount_amount" in data:
-			coupon.discount_amount = flt(data["discount_amount"]) if data["discount_amount"] else None
-		if "min_amount" in data:
-			coupon.min_amount = flt(data["min_amount"]) if data["min_amount"] else None
-		if "max_amount" in data:
-			coupon.max_amount = flt(data["max_amount"]) if data["max_amount"] else None
-		if "apply_on" in data:
-			coupon.apply_on = data["apply_on"]
-
-		# Update validity and usage fields
+		# Update Coupon Code fields
 		if "valid_from" in data:
 			coupon.valid_from = data["valid_from"]
 		if "valid_upto" in data:
 			coupon.valid_upto = data["valid_upto"]
 		if "maximum_use" in data:
-			coupon.maximum_use = cint(data["maximum_use"]) or None
-		if "one_use" in data:
-			coupon.one_use = cint(data["one_use"])
-		if "disabled" in data:
-			coupon.disabled = cint(data["disabled"])
-		if "description" in data:
-			coupon.description = data["description"]
+			coupon.maximum_use = cint(data["maximum_use"]) or 0
 
-		coupon.save()
+		coupon.save(ignore_permissions=True)
+
+		# Update linked Pricing Rule for discount fields
+		if coupon.pricing_rule:
+			pr = frappe.get_doc("Pricing Rule", coupon.pricing_rule)
+
+			if "discount_type" in data:
+				pr.rate_or_discount = "Discount Percentage" if data["discount_type"] == "Percentage" else "Discount Amount"
+			if "discount_percentage" in data:
+				pr.discount_percentage = flt(data["discount_percentage"]) if data["discount_percentage"] else 0
+			if "discount_amount" in data:
+				pr.discount_amount = flt(data["discount_amount"]) if data["discount_amount"] else 0
+			if "min_amount" in data:
+				pr.min_amt = flt(data["min_amount"]) if data["min_amount"] else 0
+			if "max_amount" in data:
+				pr.max_amt = flt(data["max_amount"]) if data["max_amount"] else 0
+			if "valid_from" in data:
+				pr.valid_from = data["valid_from"]
+			if "valid_upto" in data:
+				pr.valid_upto = data["valid_upto"]
+
+			pr.save(ignore_permissions=True)
 
 		return {
 			"success": True,
@@ -784,64 +838,78 @@ def update_coupon(coupon_name, data):
 	except Exception as e:
 		frappe.db.rollback()
 		frappe.log_error(
-			title=_("Coupon Update Failed"),
-			message=frappe.get_traceback()
+			"Coupon Update Failed",
+			frappe.get_traceback()
 		)
 		frappe.throw(_("Failed to update coupon: {0}").format(str(e)))
 
 
 @frappe.whitelist()
 def toggle_coupon(coupon_name, disabled=None):
-	"""Enable or disable a coupon."""
+	"""Enable or disable a coupon by toggling its linked Pricing Rule."""
 	check_promotion_permissions("write")
 
-	if not frappe.db.exists("POS Coupon", coupon_name):
+	if not frappe.db.exists("Coupon Code", coupon_name):
 		frappe.throw(_("Coupon {0} not found").format(coupon_name))
 
 	try:
-		coupon = frappe.get_doc("POS Coupon", coupon_name)
+		coupon = frappe.get_doc("Coupon Code", coupon_name)
+
+		if not coupon.pricing_rule:
+			frappe.throw(_("Coupon {0} has no linked Pricing Rule").format(coupon_name))
+
+		# Toggle the Pricing Rule disable status
+		pr = frappe.get_doc("Pricing Rule", coupon.pricing_rule)
 
 		if disabled is not None:
-			coupon.disabled = cint(disabled)
+			pr.disable = cint(disabled)
 		else:
 			# Toggle current state
-			coupon.disabled = 0 if coupon.disabled else 1
+			pr.disable = 0 if pr.disable else 1
 
-		coupon.save()
+		pr.save(ignore_permissions=True)
 
-		status = "disabled" if coupon.disabled else "enabled"
+		status = "disabled" if pr.disable else "enabled"
 		return {
 			"success": True,
 			"message": _("Coupon {0} {1}").format(coupon.coupon_code, status),
-			"disabled": coupon.disabled
+			"disabled": pr.disable
 		}
 
 	except Exception as e:
 		frappe.db.rollback()
 		frappe.log_error(
-			title=_("Coupon Toggle Failed"),
-			message=frappe.get_traceback()
+			"Coupon Toggle Failed",
+			frappe.get_traceback()
 		)
 		frappe.throw(_("Failed to toggle coupon: {0}").format(str(e)))
 
 
 @frappe.whitelist()
 def delete_coupon(coupon_name):
-	"""Delete a coupon."""
+	"""Delete a coupon (ERPNext Coupon Code and its linked Pricing Rule)."""
 	check_promotion_permissions("delete")
 
-	if not frappe.db.exists("POS Coupon", coupon_name):
+	if not frappe.db.exists("Coupon Code", coupon_name):
 		frappe.throw(_("Coupon {0} not found").format(coupon_name))
 
 	try:
 		# Check if coupon has been used
-		coupon = frappe.get_doc("POS Coupon", coupon_name)
+		coupon = frappe.get_doc("Coupon Code", coupon_name)
 		if coupon.used > 0:
 			frappe.throw(_("Cannot delete coupon {0} as it has been used {1} times").format(
 				coupon.coupon_code, coupon.used
 			))
 
-		frappe.delete_doc("POS Coupon", coupon_name)
+		# Store pricing rule name before deletion
+		pricing_rule_name = coupon.pricing_rule
+
+		# Delete Coupon Code first
+		frappe.delete_doc("Coupon Code", coupon_name, ignore_permissions=True)
+
+		# Delete linked Pricing Rule
+		if pricing_rule_name and frappe.db.exists("Pricing Rule", pricing_rule_name):
+			frappe.delete_doc("Pricing Rule", pricing_rule_name, ignore_permissions=True)
 
 		return {
 			"success": True,
@@ -851,8 +919,8 @@ def delete_coupon(coupon_name):
 	except Exception as e:
 		frappe.db.rollback()
 		frappe.log_error(
-			title=_("Coupon Deletion Failed"),
-			message=frappe.get_traceback()
+			"Coupon Deletion Failed",
+			frappe.get_traceback()
 		)
 		frappe.throw(_("Failed to delete coupon: {0}").format(str(e)))
 
