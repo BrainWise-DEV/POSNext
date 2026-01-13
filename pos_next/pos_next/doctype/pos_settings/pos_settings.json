@@ -41,6 +41,7 @@
   "create_only_sales_order",
   "column_break_operations",
   "allow_return_without_invoice",
+  "return_validity_days",
   "allow_free_batch_return",
   "allow_print_draft_invoices",
   "section_break_pricing",
@@ -321,6 +322,14 @@
    "fieldtype": "Check",
    "label": "Allow Return Without Invoice",
    "description": "Process returns without invoice reference"
+  },
+  {
+   "default": "0",
+   "fieldname": "return_validity_days",
+   "fieldtype": "Int",
+   "label": "Return Validity Days",
+   "description": "Number of days allowed for invoice returns. Set to 0 for unlimited returns.",
+   "depends_on": "allow_return"
   },
   {
    "default": "0",

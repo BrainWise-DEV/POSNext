@@ -313,8 +313,33 @@ def validate_cart_items(items, pos_profile=None):
 
 @frappe.whitelist()
 def validate_return_items(original_invoice_name, return_items, doctype="Sales Invoice"):
-    """Ensure that return items do not exceed the quantity from the original invoice."""
+    """Ensure that return items do not exceed the quantity from the original invoice.
+    Also validates return time frame based on POS Settings."""
+    from frappe.utils import date_diff, getdate
+
     original_invoice = frappe.get_doc(doctype, original_invoice_name)
+
+    # Check return validity period from POS Settings
+    if original_invoice.pos_profile:
+        return_validity_days = cint(
+            frappe.db.get_value(
+                "POS Settings",
+                {"pos_profile": original_invoice.pos_profile},
+                "return_validity_days"
+            ) or 0
+        )
+
+        if return_validity_days > 0:
+            days_since_invoice = date_diff(getdate(nowdate()), getdate(original_invoice.posting_date))
+            if days_since_invoice > return_validity_days:
+                return {
+                    "valid": False,
+                    "message": _(
+                        "Return period has expired. Invoice {0} was created {1} days ago. "
+                        "Returns are only allowed within {2} days of purchase."
+                    ).format(original_invoice_name, days_since_invoice, return_validity_days),
+                }
+
     original_item_qty = {}
 
     for item in original_invoice.items:
@@ -1268,16 +1293,37 @@ def cleanup_old_drafts(pos_profile=None, max_age_hours=24):
 
 
 @frappe.whitelist()
-def get_returnable_invoices(limit=50):
-    """Get list of invoices that have items available for return."""
+def get_returnable_invoices(limit=50, pos_profile=None):
+    """Get list of invoices that have items available for return.
+    Filters by return validity period if configured in POS Settings."""
     # Performance: Use SQL aggregation to calculate returned quantities in one query
     # This eliminates N+1 queries by joining return invoices and aggregating in the database
 
-    query = """
+    # Check return validity days from POS Settings
+    return_validity_days = 0
+    if pos_profile:
+        return_validity_days = cint(
+            frappe.db.get_value(
+                "POS Settings",
+                {"pos_profile": pos_profile},
+                "return_validity_days"
+            ) or 0
+        )
+
+    # Build date filter condition
+    date_filter = ""
+    query_params = []
+
+    if return_validity_days > 0:
+        date_filter = "AND si.posting_date >= DATE_SUB(CURDATE(), INTERVAL %s DAY)"
+        query_params.append(return_validity_days)
+
+    query = f"""
         SELECT
             si.name,
             si.customer,
             si.customer_name,
+            si.contact_mobile,
             si.posting_date,
             si.grand_total,
             si.status,
@@ -1293,25 +1339,144 @@ def get_returnable_invoices(limit=50):
         WHERE si.docstatus = 1
             AND si.is_return = 0
             AND si.is_pos = 1
+            {date_filter}
         GROUP BY si.name
         HAVING total_original_qty > total_returned_qty
         ORDER BY si.posting_date DESC, si.creation DESC
         LIMIT %s
     """
 
-    returnable_invoices = frappe.db.sql(query, [cint(limit)], as_dict=1)
+    query_params.append(cint(limit))
+    returnable_invoices = frappe.db.sql(query, query_params, as_dict=1)
 
     return returnable_invoices
 
 
 @frappe.whitelist()
+def search_invoice_by_number(search_term, pos_profile=None):
+    """Search for invoices by invoice number across the entire database.
+    No date restrictions - searches all returnable invoices matching the term.
+
+    Args:
+        search_term: Invoice number or partial number to search for
+        pos_profile: Optional POS profile for context
+
+    Returns:
+        List of matching invoices with return availability info
+    """
+    if not search_term or len(search_term) < 3:
+        return []
+
+    search_term = cstr(search_term).strip()
+
+    # Search invoices matching the term (case-insensitive LIKE search)
+    query = """
+        SELECT
+            si.name,
+            si.customer,
+            si.customer_name,
+            si.contact_mobile,
+            si.posting_date,
+            si.grand_total,
+            si.status,
+            COALESCE(SUM(CASE WHEN ret_item.qty IS NOT NULL THEN ABS(ret_item.qty) ELSE 0 END), 0) as total_returned_qty,
+            COALESCE(SUM(CASE WHEN si_item.qty IS NOT NULL THEN si_item.qty ELSE 0 END), 0) as total_original_qty
+        FROM `tabSales Invoice` si
+        LEFT JOIN `tabSales Invoice Item` si_item ON si_item.parent = si.name
+        LEFT JOIN `tabSales Invoice` ret_si ON ret_si.return_against = si.name
+            AND ret_si.docstatus = 1
+            AND ret_si.is_return = 1
+        LEFT JOIN `tabSales Invoice Item` ret_item ON ret_item.parent = ret_si.name
+            AND (ret_item.sales_invoice_item = si_item.name OR ret_item.item_code = si_item.item_code)
+        WHERE si.docstatus = 1
+            AND si.is_return = 0
+            AND si.is_pos = 1
+            AND si.name LIKE %s
+        GROUP BY si.name
+        HAVING total_original_qty > total_returned_qty
+        ORDER BY si.posting_date DESC, si.creation DESC
+        LIMIT 10
+    """
+
+    # Use LIKE search with wildcards
+    search_pattern = f"%{search_term}%"
+    matching_invoices = frappe.db.sql(query, [search_pattern], as_dict=1)
+
+    return matching_invoices
+
+
+@frappe.whitelist()
+def check_invoice_return_validity(invoice_name):
+    """Check if an invoice is within the return validity period.
+    Returns detailed information for the UI to display."""
+    from frappe.utils import date_diff, getdate, formatdate
+
+    if not frappe.db.exists("Sales Invoice", invoice_name):
+        return {
+            "valid": False,
+            "error_type": "not_found",
+            "message": _("Invoice {0} does not exist").format(invoice_name)
+        }
+
+    invoice = frappe.get_doc("Sales Invoice", invoice_name)
+
+    # Check return validity period from POS Settings
+    if invoice.pos_profile:
+        return_validity_days = cint(
+            frappe.db.get_value(
+                "POS Settings",
+                {"pos_profile": invoice.pos_profile},
+                "return_validity_days"
+            ) or 0
+        )
+
+        if return_validity_days > 0:
+            days_since_invoice = date_diff(getdate(nowdate()), getdate(invoice.posting_date))
+            if days_since_invoice > return_validity_days:
+                return {
+                    "valid": False,
+                    "error_type": "return_period_expired",
+                    "invoice_name": invoice_name,
+                    "invoice_date": formatdate(invoice.posting_date),
+                    "days_since": days_since_invoice,
+                    "allowed_days": return_validity_days,
+                    "message": _("Return period has expired")
+                }
+
+    return {"valid": True}
+
+
+@frappe.whitelist()
 def get_invoice_for_return(invoice_name):
-    """Get invoice with return tracking - calculates remaining qty for each item."""
+    """Get invoice with return tracking - calculates remaining qty for each item.
+    Also validates return validity period based on POS Settings."""
+    from frappe.utils import date_diff, getdate
+
     if not frappe.db.exists("Sales Invoice", invoice_name):
         frappe.throw(_("Invoice {0} does not exist").format(invoice_name))
 
     # Get the original invoice
     invoice = frappe.get_doc("Sales Invoice", invoice_name)
+
+    # Check return validity period from POS Settings
+    if invoice.pos_profile:
+        return_validity_days = cint(
+            frappe.db.get_value(
+                "POS Settings",
+                {"pos_profile": invoice.pos_profile},
+                "return_validity_days"
+            ) or 0
+        )
+
+        if return_validity_days > 0:
+            days_since_invoice = date_diff(getdate(nowdate()), getdate(invoice.posting_date))
+            if days_since_invoice > return_validity_days:
+                frappe.throw(
+                    _("Return period has expired. Invoice {0} was created {1} days ago. "
+                      "Returns are only allowed within {2} days of purchase.").format(
+                        invoice_name, days_since_invoice, return_validity_days
+                    )
+                )
 
     # Performance: Use SQL aggregation to calculate returned quantities in one query
     # This eliminates N+1 queries by aggregating all return items at once
