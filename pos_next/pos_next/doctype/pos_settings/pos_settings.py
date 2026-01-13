@@ -115,14 +115,14 @@ def get_pos_settings(pos_profile):
 	return settings
 
 
-def is_item_name_customization_enabled_for_user(pos_settings: str | dict) -> 0 | 1:
+def is_item_name_customization_enabled_for_user(pos_settings: str | dict) -> int:
 	"""
 	Returns whether the item name customization feature is enabled for the POS and whether the user is authorized to use it.
 	
 	:param pos_settings: The name of the POS Settings for the current point of sale
 	:type pos_settings: str | dict POS Settings name or dict
 	:return: 1 if item name customization is enabled and allowed for the user, else 0
-	:rtype: 0 | 1
+	:rtype: int
 	"""
 
 	if isinstance(pos_settings, str):
