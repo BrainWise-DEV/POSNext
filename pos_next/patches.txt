@@ -5,3 +5,4 @@
 [post_model_sync]
 # Patches added in this section will be executed after doctypes are migrated
 pos_next.patches.v1_7_0.reinstall_workspace
+pos_next.patches.v2_0_0.migrate_pos_coupons_to_erpnext
