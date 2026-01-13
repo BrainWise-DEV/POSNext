@@ -103,11 +103,11 @@ fixtures = [
 					"POS Profile-posa_block_sale_beyond_available_qty",
 					"Mode of Payment-is_wallet_payment",
 					"Coupon Code-pos_next_section",
+					"Coupon Code-pos_next_gift_card",
 					"Coupon Code-gift_card_amount",
 					"Coupon Code-original_gift_card_amount",
 					"Coupon Code-coupon_code_residual",
-					"Coupon Code-pos_coupon",
-					"Coupon Code-source_pos_invoice"
+					"Coupon Code-source_invoice"
 				]
 			]
 		]
