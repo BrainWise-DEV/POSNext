@@ -903,29 +903,43 @@ def update_invoice(data):
                 # Store coupon code on invoice for tracking
                 invoice_doc.coupon_code = coupon_code
 
+        # Store discount values before save (ERPNext validation may clear them)
+        discount_amount_to_persist = flt(invoice_doc.get("discount_amount"))
+        apply_discount_on = invoice_doc.get("apply_discount_on")
+        calculated_grand_total = flt(invoice_doc.get("grand_total"))
+
         # Save as draft
         invoice_doc.flags.ignore_permissions = True
         frappe.flags.ignore_account_permission = True
         invoice_doc.docstatus = 0
         invoice_doc.save()
 
-        # DEBUG: Log after save to check if discount persisted
-        frappe.log_error(
-            "DEBUG update_invoice after save",
-            f"discount_amount: {invoice_doc.get('discount_amount')}, grand_total: {invoice_doc.grand_total}"
-        )
+        # Restore discount values directly to database if they were cleared by ERPNext validation
+        if discount_amount_to_persist > 0:
+            # Update database directly to persist the discount values
+            frappe.db.set_value(
+                doctype,
+                invoice_doc.name,
+                {
+                    "discount_amount": discount_amount_to_persist,
+                    "apply_discount_on": apply_discount_on or "Grand Total",
+                    "grand_total": calculated_grand_total,
+                    "base_grand_total": calculated_grand_total,
+                    "rounded_total": calculated_grand_total,
+                    "base_rounded_total": calculated_grand_total,
+                    "outstanding_amount": calculated_grand_total
+                },
+                update_modified=False
+            )
 
-        # DEBUG: Check what's actually in the database
-        db_discount = frappe.db.get_value(
-            doctype,
-            invoice_doc.name,
-            ["discount_amount", "apply_discount_on", "grand_total"],
-            as_dict=True
-        )
-        frappe.log_error(
-            "DEBUG database values",
-            f"DB discount_amount: {db_discount.get('discount_amount')}, apply_discount_on: {db_discount.get('apply_discount_on')}, grand_total: {db_discount.get('grand_total')}"
-        )
+            # Update the in-memory document to reflect the changes
+            invoice_doc.discount_amount = discount_amount_to_persist
+            invoice_doc.apply_discount_on = apply_discount_on or "Grand Total"
+            invoice_doc.grand_total = calculated_grand_total
+            invoice_doc.base_grand_total = calculated_grand_total
+            invoice_doc.rounded_total = calculated_grand_total
+            invoice_doc.base_rounded_total = calculated_grand_total
+            invoice_doc.outstanding_amount = calculated_grand_total
 
         return invoice_doc.as_dict()
     except Exception as e:
