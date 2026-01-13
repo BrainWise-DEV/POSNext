@@ -101,8 +101,7 @@ fixtures = [
 					"POS Profile-posa_allow_delete",
 					"POS Profile-posa_block_sale_beyond_available_qty",
 					"Mode of Payment-is_wallet_payment",
-					"Pricing Rule-apply_discount_on_cheapest",
-					"Pricing Rule-cheapest_qty"
+					"Pricing Rule-apply_discount_on_price"
 				]
 			]
 		]
@@ -139,13 +138,6 @@ fixtures = [
 # before_install = "pos_next.install.before_install"
 after_install = "pos_next.install.after_install"
 after_migrate = "pos_next.install.after_migrate"
-
-# Patch pricing rule function on app startup
-try:
-	from pos_next.install import patch_pricing_rule_function
-	patch_pricing_rule_function()
-except Exception:
-	pass
 
 # Uninstallation
 # ------------
@@ -216,7 +208,8 @@ doc_events = {
 	"Sales Invoice": {
 		"validate": [
 			"pos_next.api.sales_invoice_hooks.validate",
-			"pos_next.api.wallet.validate_wallet_payment"
+			"pos_next.api.wallet.validate_wallet_payment",
+			"pos_next.overrides.pricing_rule.apply_min_max_price_discounts"
 		],
 		"before_cancel": "pos_next.api.sales_invoice_hooks.before_cancel",
 		"on_submit": [
@@ -230,10 +223,16 @@ doc_events = {
 		"on_update": "pos_next.realtime_events.emit_pos_profile_updated_event"
 	},
 	"Sales Order": {
-		"before_validate": "pos_next.pricing_utils.cheapest_item_discount.apply_cheapest_item_discounts"
+		"validate": "pos_next.overrides.pricing_rule.apply_min_max_price_discounts"
 	},
 	"Quotation": {
-		"before_validate": "pos_next.pricing_utils.cheapest_item_discount.apply_cheapest_item_discounts"
+		"validate": "pos_next.overrides.pricing_rule.apply_min_max_price_discounts"
+	},
+	"Delivery Note": {
+		"validate": "pos_next.overrides.pricing_rule.apply_min_max_price_discounts"
+	},
+	"POS Invoice": {
+		"validate": "pos_next.overrides.pricing_rule.apply_min_max_price_discounts"
 	}
 }
 
@@ -252,7 +251,12 @@ scheduler_events = {
 		"pos_next.tasks.branding_monitor.reset_tampering_counter",
 	],
 }
-
+try:
+	from erpnext.accounts.doctype.pricing_rule import pricing_rule as pricing_rule_module
+	from pos_next.overrides.pricing_rule import apply_price_discount_rule
+	pricing_rule_module.apply_price_discount_rule = apply_price_discount_rule
+except Exception:
+	pass
 # Testing
 # -------
 

@@ -32,7 +32,6 @@ def after_migrate():
 		# Migrate runs often, so we use quiet mode to reduce noise
 		install_fixtures(quiet=True)
 		setup_default_print_format(quiet=True)
-		patch_pricing_rule_function()
 		frappe.db.commit()
 		log_message("POS Next: Fixtures updated successfully", level="success")
 	except Exception as e:
@@ -253,21 +252,6 @@ def setup_default_print_format(quiet=False):
 			message=frappe.get_traceback()
 		)
 
-
-def patch_pricing_rule_function():
-	"""
-	Monkey patch apply_price_discount_rule to support cheapest item discount.
-	"""
-	try:
-		from erpnext.accounts.doctype.pricing_rule import pricing_rule as pricing_rule_module
-		from pos_next.overrides.pricing_rule import apply_price_discount_rule
-		
-		# Patch the function
-		pricing_rule_module.apply_price_discount_rule = apply_price_discount_rule
-		log_message("Patched apply_price_discount_rule for cheapest item discount", level="info", quiet=True)
-	except Exception as e:
-		# Silently fail if ERPNext not available or already patched
-		pass
 
 def log_message(message, level="info", indent=0):
 	"""
