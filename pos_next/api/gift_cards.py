@@ -6,15 +6,15 @@
 Gift Card API for POS Next
 
 Handles:
-- Gift card creation from POS Invoice (when selling gift card items)
+- Gift card creation from Invoice (when selling gift card items)
 - Gift card validation and application
 - Gift card splitting (when amount > invoice total)
-- ERPNext Coupon Code synchronization
+- Direct ERPNext Coupon Code integration (no POS Coupon)
 """
 
 import frappe
 from frappe import _
-from frappe.utils import flt, nowdate, add_months, getdate, random_string
+from frappe.utils import flt, nowdate, add_months, getdate
 import random
 import string
 
@@ -25,7 +25,7 @@ import string
 
 def generate_gift_card_code():
 	"""
-	Generate unique gift card code in format XXXX-XXXX-XXXX
+	Generate unique gift card code in format GC-XXXX-XXXX
 
 	Returns:
 		str: Unique gift card code
@@ -35,15 +35,14 @@ def generate_gift_card_code():
 
 	max_attempts = 100
 	for _ in range(max_attempts):
-		code = f"{segment()}-{segment()}-{segment()}"
+		code = f"GC-{segment()}-{segment()}"
 
-		# Check uniqueness in both POS Coupon and ERPNext Coupon Code
-		if not frappe.db.exists("POS Coupon", {"coupon_code": code}):
-			if not frappe.db.exists("Coupon Code", {"coupon_code": code}):
-				return code
+		# Check uniqueness in ERPNext Coupon Code only
+		if not frappe.db.exists("Coupon Code", {"coupon_code": code}):
+			return code
 
 	# Fallback: use hash-based code
-	return frappe.generate_hash()[:12].upper()
+	return f"GC-{frappe.generate_hash()[:8].upper()}"
 
 
 # ==========================================
@@ -70,7 +69,6 @@ def get_gift_card_settings(pos_profile):
 		[
 			"enable_gift_cards",
 			"gift_card_item",
-			"sync_with_erpnext_coupon",
 			"enable_gift_card_splitting",
 			"gift_card_validity_months",
 			"gift_card_notification"
@@ -103,7 +101,7 @@ def is_gift_card_item(item_code, pos_profile):
 
 
 # ==========================================
-# Gift Card Creation
+# Gift Card Creation (Direct to ERPNext Coupon Code)
 # ==========================================
 
 @frappe.whitelist()
@@ -111,6 +109,7 @@ def create_gift_card_from_invoice(doc, method=None):
 	"""
 	Create gift card(s) when a gift card item is sold.
 	Called after POS Invoice or Sales Invoice submission.
+	Creates ERPNext Coupon Code directly (no POS Coupon).
 
 	Args:
 		doc: Invoice document or invoice name
@@ -119,25 +118,25 @@ def create_gift_card_from_invoice(doc, method=None):
 	Returns:
 		dict: Created gift card details or None
 	"""
-	# Handle both document object and string name
 	if not doc:
 		return None
 
 	if isinstance(doc, str):
-		# Called with invoice name string
-		invoice = frappe.get_doc("POS Invoice", doc)
+		# Try Sales Invoice first, then POS Invoice
+		if frappe.db.exists("Sales Invoice", doc):
+			invoice = frappe.get_doc("Sales Invoice", doc)
+		else:
+			invoice = frappe.get_doc("POS Invoice", doc)
 	else:
-		# Called with document object from hook
 		invoice = doc
 
-	# Check if invoice is submitted and paid
+	# Check if invoice is submitted
 	if invoice.docstatus != 1:
 		return None
 
-	# Get POS profile - handle both POS Invoice and Sales Invoice
+	# Get POS profile
 	pos_profile = getattr(invoice, 'pos_profile', None)
 	if not pos_profile and invoice.doctype == "Sales Invoice":
-		# Try to get from related POS Opening Entry
 		pos_profile = frappe.db.get_value(
 			"POS Opening Entry",
 			{"name": invoice.get("posa_pos_opening_shift")},
@@ -163,7 +162,7 @@ def create_gift_card_from_invoice(doc, method=None):
 		# Create gift card for each quantity
 		qty = int(item.qty)
 		for i in range(qty):
-			gift_card = _create_single_gift_card(
+			gift_card = _create_gift_card(
 				amount=flt(item.rate),
 				customer=invoice.customer,
 				company=invoice.company,
@@ -181,18 +180,18 @@ def create_gift_card_from_invoice(doc, method=None):
 	return {
 		"success": True,
 		"gift_cards": created_gift_cards
-	}
+	} if created_gift_cards else None
 
 
-def _create_single_gift_card(amount, customer, company, source_invoice, settings):
+def _create_gift_card(amount, customer, company, source_invoice, settings):
 	"""
-	Create a single gift card.
+	Create a gift card directly as ERPNext Coupon Code + Pricing Rule.
 
 	Args:
 		amount: Gift card value
 		customer: Customer name (can be None for anonymous)
 		company: Company name
-		source_invoice: Source POS Invoice name
+		source_invoice: Source Invoice name
 		settings: Gift card settings dict
 
 	Returns:
@@ -208,136 +207,54 @@ def _create_single_gift_card(amount, customer, company, source_invoice, settings
 		if validity_months > 0:
 			valid_upto = add_months(valid_from, validity_months)
 
-		# Create POS Coupon
-		coupon_name = f"GC-{code}-{frappe.utils.now_datetime().strftime('%Y%m%d%H%M%S')}"
+		# Create Pricing Rule first
+		pricing_rule = _create_pricing_rule_for_gift_card(
+			amount=flt(amount),
+			coupon_code=code,
+			company=company,
+			valid_from=valid_from,
+			valid_upto=valid_upto
+		)
 
-		pos_coupon = frappe.get_doc({
-			"doctype": "POS Coupon",
-			"coupon_name": coupon_name,
+		if not pricing_rule:
+			frappe.log_error(
+				"Gift Card Creation Failed",
+				f"Failed to create pricing rule for gift card {code}"
+			)
+			return None
+
+		# Create ERPNext Coupon Code directly
+		coupon = frappe.get_doc({
+			"doctype": "Coupon Code",
+			"coupon_name": f"Gift Card {code}",
 			"coupon_type": "Gift Card",
 			"coupon_code": code,
-			"discount_type": "Amount",
-			"discount_amount": flt(amount),
-			"gift_card_amount": flt(amount),
-			"original_amount": flt(amount),
-			"customer": customer,  # Can be None for anonymous gift cards
-			"company": company,
+			"pricing_rule": pricing_rule,
 			"valid_from": valid_from,
 			"valid_upto": valid_upto,
-			"maximum_use": 1,
+			"maximum_use": 0,  # Unlimited uses until balance is exhausted
 			"used": 0,
-			"source_invoice": source_invoice,
-			"apply_on": "Grand Total"
+			# Custom fields for POS Next
+			"pos_next_gift_card": 1,
+			"gift_card_amount": flt(amount),
+			"original_gift_card_amount": flt(amount),
+			"source_invoice": source_invoice
 		})
-		pos_coupon.insert(ignore_permissions=True)
-
-		# Sync with ERPNext Coupon Code if enabled
-		erpnext_coupon = None
-		if settings.get("sync_with_erpnext_coupon"):
-			erpnext_coupon = _sync_to_erpnext_coupon(pos_coupon)
+		coupon.insert(ignore_permissions=True)
 
 		return {
-			"name": pos_coupon.name,
+			"name": coupon.name,
 			"coupon_code": code,
 			"amount": flt(amount),
 			"valid_from": valid_from,
 			"valid_upto": valid_upto,
-			"customer": customer,
-			"erpnext_coupon": erpnext_coupon
+			"customer": customer
 		}
 
 	except Exception as e:
 		frappe.log_error(
 			"Gift Card Creation Failed",
 			f"Failed to create gift card for invoice {source_invoice}: {str(e)}"
-		)
-		return None
-
-
-def _send_gift_card_notification(gift_card_info, notification_name):
-	"""
-	Send notification for a created gift card.
-
-	Args:
-		gift_card_info: Dict with gift card details
-		notification_name: Name of the Notification template
-	"""
-	try:
-		if not frappe.db.exists("Notification", notification_name):
-			return
-
-		# Get the POS Coupon document
-		pos_coupon = frappe.get_doc("POS Coupon", gift_card_info.get("name"))
-
-		# Trigger the notification
-		from frappe.email.doctype.notification.notification import evaluate_alert
-		notification = frappe.get_doc("Notification", notification_name)
-		evaluate_alert(pos_coupon, notification.event, notification.name)
-
-	except Exception as e:
-		frappe.log_error(
-			"Gift Card Notification Failed",
-			f"Failed to send notification for gift card {gift_card_info.get('coupon_code')}: {str(e)}"
-		)
-
-
-# ==========================================
-# ERPNext Coupon Code Sync
-# ==========================================
-
-def _sync_to_erpnext_coupon(pos_coupon):
-	"""
-	Create ERPNext Coupon Code and Pricing Rule linked to POS Coupon.
-
-	Args:
-		pos_coupon: POS Coupon document
-
-	Returns:
-		str: Name of created ERPNext Coupon Code or None
-	"""
-	try:
-		# First create the Pricing Rule
-		pricing_rule = _create_pricing_rule_for_gift_card(
-			amount=flt(pos_coupon.gift_card_amount or pos_coupon.discount_amount),
-			coupon_code=pos_coupon.coupon_code,
-			company=pos_coupon.company,
-			valid_from=pos_coupon.valid_from,
-			valid_upto=pos_coupon.valid_upto
-		)
-
-		if not pricing_rule:
-			return None
-
-		# Create ERPNext Coupon Code
-		erpnext_coupon = frappe.get_doc({
-			"doctype": "Coupon Code",
-			"coupon_name": f"Gift Card {pos_coupon.coupon_code}",
-			"coupon_type": "Gift Card",
-			"coupon_code": pos_coupon.coupon_code,
-			"pricing_rule": pricing_rule,
-			"valid_from": pos_coupon.valid_from,
-			"valid_upto": pos_coupon.valid_upto,
-			"maximum_use": 1,
-			"used": 0,
-			"customer": pos_coupon.customer,
-			# Custom fields
-			"gift_card_amount": flt(pos_coupon.gift_card_amount or pos_coupon.discount_amount),
-			"original_gift_card_amount": flt(pos_coupon.original_amount or pos_coupon.discount_amount),
-			"pos_coupon": pos_coupon.name,
-			"source_pos_invoice": pos_coupon.source_invoice
-		})
-		erpnext_coupon.insert(ignore_permissions=True)
-
-		# Update POS Coupon with ERPNext references
-		pos_coupon.db_set("erpnext_coupon_code", erpnext_coupon.name)
-		pos_coupon.db_set("pricing_rule", pricing_rule)
-
-		return erpnext_coupon.name
-
-	except Exception as e:
-		frappe.log_error(
-			"ERPNext Coupon Sync Failed",
-			f"Failed to sync POS Coupon {pos_coupon.name} to ERPNext: {str(e)}"
 		)
 		return None
 
@@ -387,6 +304,100 @@ def _create_pricing_rule_for_gift_card(amount, coupon_code, company, valid_from=
 		return None
 
 
+def _send_gift_card_notification(gift_card_info, notification_name):
+	"""
+	Send notification for a created gift card.
+
+	Args:
+		gift_card_info: Dict with gift card details
+		notification_name: Name of the Notification template
+	"""
+	try:
+		if not frappe.db.exists("Notification", notification_name):
+			return
+
+		coupon = frappe.get_doc("Coupon Code", gift_card_info.get("name"))
+
+		from frappe.email.doctype.notification.notification import evaluate_alert
+		notification = frappe.get_doc("Notification", notification_name)
+		evaluate_alert(coupon, notification.event, notification.name)
+
+	except Exception as e:
+		frappe.log_error(
+			"Gift Card Notification Failed",
+			f"Failed to send notification for gift card {gift_card_info.get('coupon_code')}: {str(e)}"
+		)
+
+
+# ==========================================
+# Manual Gift Card Creation (for ERPNext UI button)
+# ==========================================
+
+@frappe.whitelist()
+def create_gift_card_manual(amount, company, customer=None, validity_months=12):
+	"""
+	Create a gift card manually (from ERPNext Coupon Code list button).
+
+	Args:
+		amount: Gift card value
+		company: Company name
+		customer: Optional customer assignment
+		validity_months: Validity period in months
+
+	Returns:
+		dict: Created gift card info
+	"""
+	try:
+		code = generate_gift_card_code()
+
+		valid_from = nowdate()
+		valid_upto = None
+		if int(validity_months) > 0:
+			valid_upto = add_months(valid_from, int(validity_months))
+
+		# Create Pricing Rule
+		pricing_rule = _create_pricing_rule_for_gift_card(
+			amount=flt(amount),
+			coupon_code=code,
+			company=company,
+			valid_from=valid_from,
+			valid_upto=valid_upto
+		)
+
+		if not pricing_rule:
+			return {"success": False, "message": _("Failed to create pricing rule")}
+
+		# Create Coupon Code
+		coupon = frappe.get_doc({
+			"doctype": "Coupon Code",
+			"coupon_name": f"Gift Card {code}",
+			"coupon_type": "Gift Card",
+			"coupon_code": code,
+			"pricing_rule": pricing_rule,
+			"valid_from": valid_from,
+			"valid_upto": valid_upto,
+			"maximum_use": 0,
+			"used": 0,
+			"pos_next_gift_card": 1,
+			"gift_card_amount": flt(amount),
+			"original_gift_card_amount": flt(amount)
+		})
+		coupon.insert(ignore_permissions=True)
+
+		return {
+			"success": True,
+			"name": coupon.name,
+			"coupon_code": code,
+			"amount": flt(amount),
+			"valid_from": valid_from,
+			"valid_upto": valid_upto
+		}
+
+	except Exception as e:
+		frappe.log_error("Manual Gift Card Creation Failed", str(e))
+		return {"success": False, "message": str(e)}
+
+
 # ==========================================
 # Gift Card Application
 # ==========================================
@@ -400,31 +411,50 @@ def apply_gift_card(coupon_code, invoice_total, customer=None, company=None):
 		coupon_code: Gift card code
 		invoice_total: Total invoice amount
 		customer: Optional customer for validation
+		company: Company for validation
 
 	Returns:
 		dict: Discount amount and gift card info
 	"""
-	from pos_next.pos_next.doctype.pos_coupon.pos_coupon import check_coupon_code
+	coupon_code = (coupon_code or "").strip().upper()
 
-	# Validate the coupon
-	result = check_coupon_code(coupon_code, customer=customer, company=company)
+	if not coupon_code:
+		return {"success": False, "message": _("Please enter a gift card code")}
 
-	if not result.get("valid"):
-		return {
-			"success": False,
-			"message": result.get("msg", _("Invalid gift card"))
-		}
+	# Get the Coupon Code from ERPNext
+	coupon = frappe.db.get_value(
+		"Coupon Code",
+		{"coupon_code": coupon_code},
+		[
+			"name", "coupon_code", "coupon_type", "pricing_rule",
+			"valid_from", "valid_upto", "maximum_use", "used",
+			"pos_next_gift_card", "gift_card_amount", "original_gift_card_amount"
+		],
+		as_dict=True
+	)
 
-	coupon = result.get("coupon")
+	if not coupon:
+		return {"success": False, "message": _("Gift card not found")}
 
-	if coupon.coupon_type != "Gift Card":
-		return {
-			"success": False,
-			"message": _("This is not a gift card")
-		}
+	# Check if it's a POS Next gift card
+	if not coupon.get("pos_next_gift_card"):
+		return {"success": False, "message": _("This is not a POS Next gift card")}
+
+	if coupon.get("coupon_type") != "Gift Card":
+		return {"success": False, "message": _("This is not a gift card")}
+
+	# Check validity dates
+	today = getdate(nowdate())
+	if coupon.valid_from and getdate(coupon.valid_from) > today:
+		return {"success": False, "message": _("Gift card is not yet valid")}
+	if coupon.valid_upto and getdate(coupon.valid_upto) < today:
+		return {"success": False, "message": _("Gift card has expired")}
 
 	# Get available balance
-	available_balance = flt(coupon.gift_card_amount) if coupon.gift_card_amount else flt(coupon.discount_amount)
+	available_balance = flt(coupon.gift_card_amount)
+
+	if available_balance <= 0:
+		return {"success": False, "message": _("Gift card has no remaining balance")}
 
 	# Calculate discount (minimum of balance and invoice total)
 	discount_amount = min(available_balance, flt(invoice_total))
@@ -441,7 +471,6 @@ def apply_gift_card(coupon_code, invoice_total, customer=None, company=None):
 		"available_balance": available_balance,
 		"will_split": will_split,
 		"remaining_balance": remaining_balance,
-		"customer": coupon.customer,
 		"valid_upto": coupon.valid_upto
 	}
 
@@ -449,7 +478,7 @@ def apply_gift_card(coupon_code, invoice_total, customer=None, company=None):
 @frappe.whitelist()
 def get_gift_cards_with_balance(customer=None, company=None):
 	"""
-	Get all gift cards with available balance.
+	Get all POS Next gift cards with available balance.
 
 	Args:
 		customer: Optional customer filter
@@ -460,20 +489,18 @@ def get_gift_cards_with_balance(customer=None, company=None):
 	"""
 	filters = {
 		"coupon_type": "Gift Card",
-		"disabled": 0
+		"pos_next_gift_card": 1
 	}
 
-	if company:
-		filters["company"] = company
-
-	# Get all gift cards
+	# Get all POS Next gift cards
 	gift_cards = frappe.get_all(
-		"POS Coupon",
+		"Coupon Code",
 		filters=filters,
 		fields=[
-			"name", "coupon_code", "coupon_name", "customer", "customer_name",
-			"gift_card_amount", "original_amount", "discount_amount",
-			"valid_from", "valid_upto", "used", "maximum_use"
+			"name", "coupon_code", "coupon_name",
+			"gift_card_amount", "original_gift_card_amount",
+			"valid_from", "valid_upto", "used", "maximum_use",
+			"source_invoice"
 		],
 		order_by="creation desc"
 	)
@@ -489,17 +516,9 @@ def get_gift_cards_with_balance(customer=None, company=None):
 		if gc.valid_upto and getdate(gc.valid_upto) < today:
 			continue
 
-		# Check usage
-		if gc.used and gc.maximum_use and gc.used >= gc.maximum_use:
-			continue
-
 		# Check balance
-		balance = flt(gc.gift_card_amount) if gc.gift_card_amount else flt(gc.discount_amount)
+		balance = flt(gc.gift_card_amount)
 		if balance <= 0:
-			continue
-
-		# Check customer filter (if customer specified, show both assigned and anonymous)
-		if customer and gc.customer and gc.customer != customer:
 			continue
 
 		gc["balance"] = balance
@@ -509,197 +528,118 @@ def get_gift_cards_with_balance(customer=None, company=None):
 
 
 # ==========================================
-# Gift Card Splitting
+# Gift Card Processing on Invoice Submit
 # ==========================================
 
 @frappe.whitelist()
 def process_gift_card_on_submit(doc, method=None):
 	"""
 	Process gift card after invoice submission.
+	Updates the ERPNext Coupon Code balance.
 	Handles splitting if gift card amount > invoice total.
 
 	Args:
 		doc: Invoice document or invoice name
 		method: Hook method name (optional)
 	"""
-	# Handle both document object and string name
 	if not doc:
 		return
 
 	if isinstance(doc, str):
-		# Called with invoice name string
-		invoice = frappe.get_doc("POS Invoice", doc)
+		if frappe.db.exists("Sales Invoice", doc):
+			invoice = frappe.get_doc("Sales Invoice", doc)
+		else:
+			invoice = frappe.get_doc("POS Invoice", doc)
 	else:
-		# Called with document object from hook
 		invoice = doc
 
-	# Check if a coupon was used
-	# Sales Invoice uses custom field posa_coupon_code, POS Invoice may use coupon_code
+	# Get coupon code from invoice
 	coupon_code = getattr(invoice, 'posa_coupon_code', None) or getattr(invoice, 'coupon_code', None)
-
-	frappe.log_error(
-		"Gift Card Hook - Coupon Check",
-		f"Invoice: {invoice.name}, posa_coupon_code: {getattr(invoice, 'posa_coupon_code', None)}, "
-		f"coupon_code attr: {getattr(invoice, 'coupon_code', None)}, final: {coupon_code}"
-	)
 
 	if not coupon_code:
 		return
 
-	# Get the POS Coupon
+	coupon_code = coupon_code.strip().upper()
+
+	# Get the Coupon Code from ERPNext
 	coupon = frappe.db.get_value(
-		"POS Coupon",
-		{"coupon_code": coupon_code.upper()},
-		["name", "coupon_type", "gift_card_amount", "discount_amount"],
+		"Coupon Code",
+		{"coupon_code": coupon_code},
+		["name", "coupon_type", "pos_next_gift_card", "gift_card_amount", "pricing_rule"],
 		as_dict=True
 	)
 
-	frappe.log_error(
-		"Gift Card Hook - Coupon Found",
-		f"Coupon code: {coupon_code}, Found: {coupon}"
-	)
-
-	if not coupon or coupon.coupon_type != "Gift Card":
+	if not coupon:
 		return
 
-	# Get POS profile - handle both POS Invoice and Sales Invoice
+	# Only process POS Next gift cards
+	if not coupon.get("pos_next_gift_card") or coupon.get("coupon_type") != "Gift Card":
+		return
+
+	# Get gift card settings for splitting option
 	pos_profile = getattr(invoice, 'pos_profile', None)
 	if not pos_profile and invoice.doctype == "Sales Invoice":
-		# Try to get from related POS Opening Entry
 		pos_profile = frappe.db.get_value(
 			"POS Opening Entry",
 			{"name": invoice.get("posa_pos_opening_shift")},
 			"pos_profile"
 		) if invoice.get("posa_pos_opening_shift") else None
 
-	# Get gift card settings
 	settings = get_gift_card_settings(pos_profile)
-	if not settings:
-		frappe.log_error("Gift Card Hook - No Settings", f"pos_profile: {pos_profile}")
-		return
+	enable_splitting = settings.get("enable_gift_card_splitting") if settings else True
 
 	# Calculate amounts
-	gift_card_balance = flt(coupon.gift_card_amount) if coupon.gift_card_amount else flt(coupon.discount_amount)
+	gift_card_balance = flt(coupon.gift_card_amount)
 	used_amount = flt(invoice.discount_amount) if invoice.discount_amount else gift_card_balance
 
-	frappe.log_error(
-		"Gift Card Hook - Processing",
-		f"Coupon: {coupon.name}, balance: {gift_card_balance}, used: {used_amount}, "
-		f"splitting enabled: {settings.get('enable_gift_card_splitting')}"
-	)
+	if gift_card_balance <= 0:
+		return
 
-	# Check if splitting is needed and enabled
-	if gift_card_balance > used_amount and settings.get("enable_gift_card_splitting"):
+	# Process based on splitting
+	if gift_card_balance > used_amount and enable_splitting:
+		# Partial usage - update balance
 		remaining_amount = gift_card_balance - used_amount
-		_split_gift_card(coupon.name, used_amount, remaining_amount, invoice.name, settings)
+		_update_gift_card_balance(coupon.name, remaining_amount, coupon.pricing_rule)
 	else:
-		# Full usage - mark as used
-		_mark_gift_card_used(coupon.name)
+		# Full usage - mark as exhausted
+		_update_gift_card_balance(coupon.name, 0, coupon.pricing_rule)
 
 
-def _split_gift_card(coupon_name, used_amount, remaining_amount, invoice_name, settings):
+def _update_gift_card_balance(coupon_name, new_balance, pricing_rule=None):
 	"""
-	Split a gift card into used and remaining portions.
+	Update gift card balance in Coupon Code and Pricing Rule.
 
 	Args:
-		coupon_name: Original POS Coupon name
-		used_amount: Amount being used in current transaction
-		remaining_amount: Amount to keep for future use
-		invoice_name: Invoice using the gift card
-		settings: Gift card settings
-
-	Returns:
-		dict: Split result info
+		coupon_name: Coupon Code name
+		new_balance: New balance amount
+		pricing_rule: Associated Pricing Rule name
 	"""
 	try:
-		original_coupon = frappe.get_doc("POS Coupon", coupon_name)
-
-		# Update original coupon with remaining balance
-		original_coupon.gift_card_amount = flt(remaining_amount)
-		original_coupon.discount_amount = flt(remaining_amount)
-
-		# Add note about the split
-		split_note = _(
-			"\n\n---\nSplit on {date}: {used} used for invoice {invoice}, {remaining} remaining."
-		).format(
-			date=nowdate(),
-			used=frappe.format_value(used_amount, {"fieldtype": "Currency"}),
-			invoice=invoice_name,
-			remaining=frappe.format_value(remaining_amount, {"fieldtype": "Currency"})
+		# Update Coupon Code
+		frappe.db.set_value(
+			"Coupon Code",
+			coupon_name,
+			{
+				"gift_card_amount": flt(new_balance),
+				"used": 1 if flt(new_balance) <= 0 else 0
+			}
 		)
-		original_coupon.description = (original_coupon.description or "") + split_note
-		original_coupon.save(ignore_permissions=True)
 
-		# Update ERPNext Coupon Code if synced
-		if settings.get("sync_with_erpnext_coupon") and original_coupon.erpnext_coupon_code:
-			_update_erpnext_coupon_amount(original_coupon.erpnext_coupon_code, remaining_amount)
-
-		frappe.db.commit()
-
-		return {
-			"success": True,
-			"remaining_balance": remaining_amount,
-			"used_amount": used_amount
-		}
-
-	except Exception as e:
-		frappe.log_error(
-			"Gift Card Split Failed",
-			f"Failed to split gift card {coupon_name}: {str(e)}"
-		)
-		return None
-
-
-def _mark_gift_card_used(coupon_name):
-	"""
-	Mark a gift card as fully used.
-
-	Args:
-		coupon_name: POS Coupon name
-	"""
-	try:
-		coupon = frappe.get_doc("POS Coupon", coupon_name)
-		coupon.used = 1
-		coupon.gift_card_amount = 0
-		coupon.save(ignore_permissions=True)
-
-		# Update ERPNext Coupon Code if synced
-		if coupon.erpnext_coupon_code:
-			frappe.db.set_value("Coupon Code", coupon.erpnext_coupon_code, {
-				"used": 1,
-				"gift_card_amount": 0
-			})
+		# Update Pricing Rule
+		if pricing_rule:
+			frappe.db.set_value(
+				"Pricing Rule",
+				pricing_rule,
+				"discount_amount",
+				flt(new_balance)
+			)
 
 		frappe.db.commit()
 
 	except Exception as e:
 		frappe.log_error(
-			"Gift Card Mark Used Failed",
-			f"Failed to mark gift card {coupon_name} as used: {str(e)}"
-		)
-
-
-def _update_erpnext_coupon_amount(erpnext_coupon_name, new_amount):
-	"""
-	Update ERPNext Coupon Code and its Pricing Rule with new amount.
-
-	Args:
-		erpnext_coupon_name: ERPNext Coupon Code name
-		new_amount: New gift card amount
-	"""
-	try:
-		erpnext_coupon = frappe.get_doc("Coupon Code", erpnext_coupon_name)
-		erpnext_coupon.gift_card_amount = flt(new_amount)
-		erpnext_coupon.save(ignore_permissions=True)
-
-		# Update linked Pricing Rule
-		if erpnext_coupon.pricing_rule:
-			frappe.db.set_value("Pricing Rule", erpnext_coupon.pricing_rule, "discount_amount", flt(new_amount))
-
-	except Exception as e:
-		frappe.log_error(
-			"ERPNext Coupon Update Failed",
-			f"Failed to update ERPNext Coupon {erpnext_coupon_name}: {str(e)}"
+			"Gift Card Balance Update Failed",
+			f"Failed to update gift card {coupon_name}: {str(e)}"
 		)
 
 
@@ -711,78 +651,64 @@ def _update_erpnext_coupon_amount(erpnext_coupon_name, new_amount):
 def process_gift_card_on_cancel(doc, method=None):
 	"""
 	Process gift card when invoice is cancelled.
-	Restores gift card balance if it was partially used.
+	Restores gift card balance.
 
 	Args:
 		doc: Invoice document or invoice name
 		method: Hook method name (optional)
 	"""
-	# Handle both document object and string name
 	if not doc:
 		return
 
 	if isinstance(doc, str):
-		# Called with invoice name string
-		invoice = frappe.get_doc("POS Invoice", doc)
+		if frappe.db.exists("Sales Invoice", doc):
+			invoice = frappe.get_doc("Sales Invoice", doc)
+		else:
+			invoice = frappe.get_doc("POS Invoice", doc)
 	else:
-		# Called with document object from hook
 		invoice = doc
 
-	# Check if a coupon was used
-	# Sales Invoice uses custom field posa_coupon_code, POS Invoice may use coupon_code
+	# Get coupon code from invoice
 	coupon_code = getattr(invoice, 'posa_coupon_code', None) or getattr(invoice, 'coupon_code', None)
+
 	if not coupon_code:
 		return
 
-	# Get the POS Coupon
-	coupon_name = frappe.db.get_value(
-		"POS Coupon",
-		{"coupon_code": coupon_code.upper()},
-		"name"
+	coupon_code = coupon_code.strip().upper()
+
+	# Get the Coupon Code
+	coupon = frappe.db.get_value(
+		"Coupon Code",
+		{"coupon_code": coupon_code},
+		["name", "coupon_type", "pos_next_gift_card", "gift_card_amount",
+		 "original_gift_card_amount", "pricing_rule"],
+		as_dict=True
 	)
 
-	if not coupon_name:
+	if not coupon:
+		return
+
+	# Only process POS Next gift cards
+	if not coupon.get("pos_next_gift_card") or coupon.get("coupon_type") != "Gift Card":
 		return
 
 	try:
-		coupon = frappe.get_doc("POS Coupon", coupon_name)
-
-		if coupon.coupon_type != "Gift Card":
-			return
-
-		# Restore balance
+		# Calculate restored balance
 		refund_amount = flt(invoice.discount_amount)
 		current_balance = flt(coupon.gift_card_amount)
+		original_amount = flt(coupon.original_gift_card_amount)
+
 		new_balance = current_balance + refund_amount
 
 		# Cap at original amount
-		if coupon.original_amount and new_balance > flt(coupon.original_amount):
-			new_balance = flt(coupon.original_amount)
+		if original_amount and new_balance > original_amount:
+			new_balance = original_amount
 
-		coupon.gift_card_amount = new_balance
-		coupon.discount_amount = new_balance
-		coupon.used = 0  # Reset used flag
-
-		# Add note
-		cancel_note = _(
-			"\n\n---\nInvoice {invoice} cancelled on {date}. {amount} restored to balance."
-		).format(
-			invoice=invoice_name,
-			date=nowdate(),
-			amount=frappe.format_value(refund_amount, {"fieldtype": "Currency"})
-		)
-		coupon.description = (coupon.description or "") + cancel_note
-		coupon.save(ignore_permissions=True)
-
-		# Update ERPNext Coupon Code if synced
-		if coupon.erpnext_coupon_code:
-			_update_erpnext_coupon_amount(coupon.erpnext_coupon_code, new_balance)
-			frappe.db.set_value("Coupon Code", coupon.erpnext_coupon_code, "used", 0)
-
-		frappe.db.commit()
+		# Update balance
+		_update_gift_card_balance(coupon.name, new_balance, coupon.pricing_rule)
 
 	except Exception as e:
 		frappe.log_error(
 			"Gift Card Cancel Processing Failed",
-			f"Failed to process gift card cancel for invoice {invoice_name}: {str(e)}"
+			f"Failed to process gift card cancel for invoice {invoice.name}: {str(e)}"
 		)
