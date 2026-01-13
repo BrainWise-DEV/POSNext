@@ -2363,6 +2363,12 @@ watch(
 		if (isOpen) {
 			// Only sync when dialog opens, not continuously
 			localAdditionalDiscount.value = props.additionalDiscount || 0
+
+			// If there's already a discount applied (e.g., from gift card/coupon),
+			// set the mode to 'amount' since coupon discounts are always amounts
+			if (props.additionalDiscount > 0) {
+				additionalDiscountType.value = 'amount'
+			}
 		}
 	},
 )
