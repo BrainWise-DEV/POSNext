@@ -234,7 +234,7 @@
 				<Button
 					variant="solid"
 					@click="updateItem"
-					:disabled="!hasStock || !localItemName || isCheckingStock"
+					:disabled="!hasStock || isItemNameEmpty || isCheckingStock"
 				>
 					<span v-if="isCheckingStock">{{ __('Checking Stock...') }}</span>
 					<span v-else-if="!hasStock">{{ __('No Stock Available') }}</span>
@@ -401,13 +401,17 @@ const isItemNameEditable = computed(() => {
 	return allowedForPOS && allowedForItem
 })
 
+const isItemNameEmpty = computed(() => !(localItemName.value.trim()))
+
 function restoreOriginalItemName() {
 	localItemName.value = originalItemName.value
 }
 
-function handleItemNameBlur() {
-	if (!localItemName.value) {
+function handleItemNameBlur() {	
+	if (isItemNameEmpty.value) {
 		restoreOriginalItemName()
+	} else {
+		localItemName.value = localItemName.value.trim()
 	}
 }
 
@@ -589,7 +593,7 @@ function updateItem() {
 			discountType.value === "amount" ? discountValue.value : 0,
 	}
 
-	if (settingsStore.allowCustomItemNameInCart) {
+	if (isItemNameEditable.value) {
 		updatedItem.item_name = localItemName.value || originalItemName.value
 	}
 
