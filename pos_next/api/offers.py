@@ -527,72 +527,73 @@ def get_active_coupons(customer: str = None, company: str = None) -> List[Dict]:
 	"""
 	Get active gift card coupons available for use.
 
-	Returns gift cards that are:
+	Returns gift cards (ERPNext Coupon Code with pos_next_gift_card=1) that are:
 	- Assigned to the customer, OR
 	- Anonymous (no customer assigned)
 	- Have remaining balance > 0
 	- Are within validity dates
 	"""
-	if not frappe.db.table_exists("POS Coupon"):
-		return []
-
-	# Build filters - get both customer-specific and anonymous gift cards
-	base_filters = {
-		"company": company,
-		"coupon_type": "Gift Card",
-		"disabled": 0,
-	}
-
-	# Get customer-assigned gift cards
-	customer_cards = []
-	if customer:
-		customer_filters = {**base_filters, "customer": customer}
-		customer_cards = frappe.get_all(
-			"POS Coupon",
-			filters=customer_filters,
-			fields=[
-				"name", "coupon_code", "coupon_name", "customer", "customer_name",
-				"gift_card_amount", "original_amount", "discount_amount",
-				"valid_from", "valid_upto", "used", "maximum_use"
-			],
-		)
-
-	# Get anonymous gift cards (no customer assigned)
-	anonymous_filters = {**base_filters, "customer": ["is", "not set"]}
-	anonymous_cards = frappe.get_all(
-		"POS Coupon",
-		filters=anonymous_filters,
-		fields=[
-			"name", "coupon_code", "coupon_name", "customer", "customer_name",
-			"gift_card_amount", "original_amount", "discount_amount",
-			"valid_from", "valid_upto", "used", "maximum_use"
-		],
-	)
-
-	# Combine and filter by validity and balance
-	all_cards = customer_cards + anonymous_cards
 	today = getdate(nowdate())
+
+	# Build SQL query for ERPNext Coupon Code with gift card custom fields
+	# Get both customer-specific and anonymous gift cards
+	coupons = frappe.db.sql("""
+		SELECT
+			cc.name,
+			cc.coupon_code,
+			cc.coupon_name,
+			cc.customer,
+			cc.valid_from,
+			cc.valid_upto,
+			cc.used,
+			cc.maximum_use,
+			cc.gift_card_amount,
+			cc.original_gift_card_amount,
+			cc.source_invoice,
+			pr.company
+		FROM `tabCoupon Code` cc
+		LEFT JOIN `tabPricing Rule` pr ON cc.pricing_rule = pr.name
+		WHERE
+			cc.pos_next_gift_card = 1
+			AND (pr.company = %(company)s OR pr.company IS NULL)
+			AND (cc.customer = %(customer)s OR cc.customer IS NULL OR cc.customer = '')
+			AND (cc.valid_from IS NULL OR cc.valid_from <= %(today)s)
+			AND (cc.valid_upto IS NULL OR cc.valid_upto >= %(today)s)
+	""", {"company": company, "customer": customer or "", "today": today}, as_dict=1)
+
 	valid_cards = []
-
-	for card in all_cards:
-		# Check validity dates
-		if card.valid_from and getdate(card.valid_from) > today:
-			continue
-		if card.valid_upto and getdate(card.valid_upto) < today:
-			continue
-
-		# Check usage (for non-splitting cards)
+	for card in coupons:
+		# Check usage limits
 		if card.used and card.maximum_use and card.used >= card.maximum_use:
 			continue
 
 		# Check balance
-		balance = flt(card.gift_card_amount) if card.gift_card_amount else flt(card.discount_amount)
+		balance = flt(card.gift_card_amount)
 		if balance <= 0:
 			continue
 
-		# Add balance to the card info
-		card["balance"] = balance
-		valid_cards.append(card)
+		# Get customer name if customer is set
+		customer_name = None
+		if card.customer:
+			customer_name = frappe.db.get_value("Customer", card.customer, "customer_name")
+
+		# Add balance and format response for frontend compatibility
+		valid_cards.append({
+			"name": card.name,
+			"coupon_code": card.coupon_code,
+			"coupon_name": card.coupon_name or card.coupon_code,
+			"customer": card.customer,
+			"customer_name": customer_name,
+			"gift_card_amount": card.gift_card_amount,
+			"original_amount": card.original_gift_card_amount,
+			"balance": balance,
+			"valid_from": card.valid_from,
+			"valid_upto": card.valid_upto,
+			"used": card.used,
+			"maximum_use": card.maximum_use,
+			"source_invoice": card.source_invoice,
+			"company": card.company,
+		})
 
 	return valid_cards
 
@@ -602,26 +603,41 @@ def validate_coupon(coupon_code: str, customer: str = None, company: str = None)
 	"""
 	Validate a coupon code and return its details.
 
-	For gift cards, also checks balance and supports splitting.
+	Works with ERPNext Coupon Code directly.
+	For gift cards (pos_next_gift_card=1), also checks balance and supports splitting.
 	"""
-	if not frappe.db.table_exists("POS Coupon"):
-		return {"valid": False, "message": _("Coupons are not enabled")}
-
 	date = getdate()
 
-	# Fetch coupon with case-insensitive code matching
-	coupon = frappe.db.get_value(
-		"POS Coupon",
-		{"coupon_code": coupon_code.upper(), "company": company},
-		["*"],
-		as_dict=1
-	)
+	# Fetch ERPNext Coupon Code with case-insensitive code matching
+	coupon = frappe.db.sql("""
+		SELECT
+			cc.name,
+			cc.coupon_code,
+			cc.coupon_name,
+			cc.coupon_type,
+			cc.customer,
+			cc.valid_from,
+			cc.valid_upto,
+			cc.used,
+			cc.maximum_use,
+			cc.pricing_rule,
+			cc.pos_next_gift_card,
+			cc.gift_card_amount,
+			cc.original_gift_card_amount,
+			cc.source_invoice,
+			pr.company,
+			pr.discount_amount as pricing_rule_discount
+		FROM `tabCoupon Code` cc
+		LEFT JOIN `tabPricing Rule` pr ON cc.pricing_rule = pr.name
+		WHERE
+			UPPER(cc.coupon_code) = %(coupon_code)s
+			AND (pr.company = %(company)s OR pr.company IS NULL)
+	""", {"coupon_code": coupon_code.upper(), "company": company}, as_dict=1)
 
 	if not coupon:
 		return {"valid": False, "message": _("Invalid coupon code")}
 
-	if coupon.disabled:
-		return {"valid": False, "message": _("This coupon is disabled")}
+	coupon = coupon[0]
 
 	# Check validity dates
 	if coupon.valid_from and coupon.valid_from > date:
@@ -634,22 +650,60 @@ def validate_coupon(coupon_code: str, customer: str = None, company: str = None)
 	if coupon.customer and coupon.customer != customer:
 		return {"valid": False, "message": _("This coupon is not valid for this customer")}
 
-	# Gift card specific validations
-	if coupon.coupon_type == "Gift Card":
+	# POS Next Gift Card specific validations
+	if coupon.pos_next_gift_card:
 		# Check balance
-		balance = flt(coupon.gift_card_amount) if coupon.gift_card_amount else flt(coupon.discount_amount)
+		balance = flt(coupon.gift_card_amount)
 		if balance <= 0:
 			return {"valid": False, "message": _("This gift card has no remaining balance")}
 
-		# Add balance info to coupon
-		coupon["balance"] = balance
-		coupon["is_gift_card"] = True
+		# Get customer name if customer is set
+		customer_name = None
+		if coupon.customer:
+			customer_name = frappe.db.get_value("Customer", coupon.customer, "customer_name")
+
+		# Format response for frontend compatibility
+		return {
+			"valid": True,
+			"coupon": {
+				"name": coupon.name,
+				"coupon_code": coupon.coupon_code,
+				"coupon_name": coupon.coupon_name or coupon.coupon_code,
+				"coupon_type": "Gift Card",
+				"customer": coupon.customer,
+				"customer_name": customer_name,
+				"gift_card_amount": coupon.gift_card_amount,
+				"original_amount": coupon.original_gift_card_amount,
+				"balance": balance,
+				"discount_amount": balance,
+				"valid_from": coupon.valid_from,
+				"valid_upto": coupon.valid_upto,
+				"used": coupon.used,
+				"maximum_use": coupon.maximum_use,
+				"is_gift_card": True,
+				"pricing_rule": coupon.pricing_rule,
+				"company": coupon.company,
+			}
+		}
 	else:
-		# Promotional coupons - check usage limits
-		if coupon.maximum_use > 0 and coupon.used >= coupon.maximum_use:
+		# Standard promotional coupons - check usage limits
+		if coupon.maximum_use and coupon.maximum_use > 0 and coupon.used >= coupon.maximum_use:
 			return {"valid": False, "message": _("This coupon has reached its usage limit")}
 
-	return {
-		"valid": True,
-		"coupon": coupon
-	}
+		return {
+			"valid": True,
+			"coupon": {
+				"name": coupon.name,
+				"coupon_code": coupon.coupon_code,
+				"coupon_name": coupon.coupon_name,
+				"coupon_type": coupon.coupon_type,
+				"customer": coupon.customer,
+				"valid_from": coupon.valid_from,
+				"valid_upto": coupon.valid_upto,
+				"used": coupon.used,
+				"maximum_use": coupon.maximum_use,
+				"is_gift_card": False,
+				"pricing_rule": coupon.pricing_rule,
+				"company": coupon.company,
+			}
+		}
