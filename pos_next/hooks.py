@@ -251,12 +251,7 @@ scheduler_events = {
 		"pos_next.tasks.branding_monitor.reset_tampering_counter",
 	],
 }
-try:
-	from erpnext.accounts.doctype.pricing_rule import pricing_rule as pricing_rule_module
-	from pos_next.overrides.pricing_rule import apply_price_discount_rule
-	pricing_rule_module.apply_price_discount_rule = apply_price_discount_rule
-except Exception:
-	pass
+
 # Testing
 # -------
 

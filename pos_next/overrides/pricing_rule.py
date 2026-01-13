@@ -56,9 +56,10 @@ def apply_min_max_price_discounts(doc, method=None):
             # Reset discount for non-target items FIRST
             for item in eligible_items:
                 if item != target_item:
-                    # Remove this pricing rule's discount contribution
                     item.discount_percentage = 0.0
                     item.discount_amount = 0.0
+                    item.rate = flt(item.price_list_rate)
+                    item.amount = flt(item.rate) * flt(item.qty)
             
             # Then apply discount to target item
             _apply_discount(pr, target_item)
@@ -89,19 +90,21 @@ def _get_min_max_pricing_rules(doc):
 
 
 def _apply_discount(pricing_rule, item):
-	"""
-	Apply discount safely to a single item.
-	"""
+    """
+    Apply discount safely and force the rate to update.
+    """
+    # Use price_list_rate as the source of truth to avoid compounding discounts
+    base_rate = flt(item.price_list_rate) or flt(item.rate)
+    if not base_rate:
+        return
 
-	base_rate = flt(item.rate or item.price_list_rate)
-	if not base_rate:
-		return
+    if pricing_rule.rate_or_discount == "Discount Percentage":
+        item.discount_percentage = flt(pricing_rule.discount_percentage)
+        item.discount_amount = 0.0
+    elif pricing_rule.rate_or_discount == "Discount Amount":
+        item.discount_amount = flt(pricing_rule.discount_amount)
+        item.discount_percentage = 0.0
+    
 
-	if pricing_rule.rate_or_discount == "Discount Percentage":
-		item.discount_percentage = flt(pricing_rule.discount_percentage)
-	elif pricing_rule.rate_or_discount == "Discount Amount":
-		item.discount_amount = flt(pricing_rule.discount_amount)
-		item.discount_percentage = flt(
-			(item.discount_amount / base_rate) * 100,
-			2
-		)
+    item.rate = base_rate * (1.0 - (flt(item.discount_percentage) / 100.0)) - flt(item.discount_amount)
+    item.amount = flt(item.rate) * flt(item.qty)
