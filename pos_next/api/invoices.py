@@ -619,12 +619,24 @@ def update_invoice(data):
         # Normalize pricing_rules before document creation
         standardize_pricing_rules(data.get("items"))
 
+        # DEBUG: Log incoming discount values
+        frappe.log_error(
+            "DEBUG update_invoice incoming",
+            f"discount_amount: {data.get('discount_amount')}, apply_discount_on: {data.get('apply_discount_on')}, coupon_code: {data.get('coupon_code')}"
+        )
+
         # Create or update invoice
         if data.get("name"):
             invoice_doc = frappe.get_doc(doctype, data.get("name"))
             invoice_doc.update(data)
         else:
             invoice_doc = frappe.get_doc(data)
+
+        # DEBUG: Log after doc creation
+        frappe.log_error(
+            "DEBUG update_invoice after get_doc",
+            f"discount_amount: {invoice_doc.get('discount_amount')}, apply_discount_on: {invoice_doc.get('apply_discount_on')}"
+        )
 
         pos_profile_doc = None
         if pos_profile:
@@ -813,11 +825,29 @@ def update_invoice(data):
 
         invoice_doc.disable_rounded_total = disable_rounded
 
+        # DEBUG: Log before set_missing_values
+        frappe.log_error(
+            "DEBUG before set_missing_values",
+            f"discount_amount: {invoice_doc.get('discount_amount')}, apply_discount_on: {invoice_doc.get('apply_discount_on')}"
+        )
+
         # Populate missing fields (company, currency, accounts, etc.)
         invoice_doc.set_missing_values()
 
+        # DEBUG: Log after set_missing_values
+        frappe.log_error(
+            "DEBUG after set_missing_values",
+            f"discount_amount: {invoice_doc.get('discount_amount')}, apply_discount_on: {invoice_doc.get('apply_discount_on')}"
+        )
+
         # Calculate totals and apply discounts (with rounding disabled)
         invoice_doc.calculate_taxes_and_totals()
+
+        # DEBUG: Log after calculate_taxes_and_totals
+        frappe.log_error(
+            "DEBUG after calculate_taxes",
+            f"discount_amount: {invoice_doc.get('discount_amount')}, grand_total: {invoice_doc.grand_total}"
+        )
         if invoice_doc.grand_total is None:
             invoice_doc.grand_total = 0.0
         if invoice_doc.base_grand_total is None:
@@ -878,6 +908,24 @@ def update_invoice(data):
         frappe.flags.ignore_account_permission = True
         invoice_doc.docstatus = 0
         invoice_doc.save()
+
+        # DEBUG: Log after save to check if discount persisted
+        frappe.log_error(
+            "DEBUG update_invoice after save",
+            f"discount_amount: {invoice_doc.get('discount_amount')}, grand_total: {invoice_doc.grand_total}"
+        )
+
+        # DEBUG: Check what's actually in the database
+        db_discount = frappe.db.get_value(
+            doctype,
+            invoice_doc.name,
+            ["discount_amount", "apply_discount_on", "grand_total"],
+            as_dict=True
+        )
+        frappe.log_error(
+            "DEBUG database values",
+            f"DB discount_amount: {db_discount.get('discount_amount')}, apply_discount_on: {db_discount.get('apply_discount_on')}, grand_total: {db_discount.get('grand_total')}"
+        )
 
         return invoice_doc.as_dict()
     except Exception as e:
@@ -1190,6 +1238,11 @@ def submit_invoice(invoice=None, data=None):
             if not invoice_name:
                 frappe.throw(_("Failed to get invoice name from draft"))
             invoice_doc = frappe.get_doc(doctype, invoice_name)
+            # DEBUG: Log after reloading from update_invoice
+            frappe.log_error(
+                "DEBUG submit after get_doc",
+                f"discount_amount: {invoice_doc.get('discount_amount')}, grand_total: {invoice_doc.grand_total}"
+            )
         else:
             invoice_doc = frappe.get_doc(doctype, invoice_name)
             invoice_doc.update(invoice)
@@ -1309,10 +1362,22 @@ def submit_invoice(invoice=None, data=None):
         if not pos_settings_allow_negative:
             _validate_stock_on_invoice(invoice_doc)
 
+        # DEBUG: Log before final save
+        frappe.log_error(
+            "DEBUG before final save",
+            f"discount_amount: {invoice_doc.get('discount_amount')}, grand_total: {invoice_doc.grand_total}"
+        )
+
         # Save before submit
         invoice_doc.flags.ignore_permissions = True
         frappe.flags.ignore_account_permission = True
         invoice_doc.save()
+
+        # DEBUG: Log after final save
+        frappe.log_error(
+            "DEBUG after final save",
+            f"discount_amount: {invoice_doc.get('discount_amount')}, grand_total: {invoice_doc.grand_total}"
+        )
 
         # Submit invoice
         invoice_doc.submit()

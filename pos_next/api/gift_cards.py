@@ -107,28 +107,45 @@ def is_gift_card_item(item_code, pos_profile):
 # ==========================================
 
 @frappe.whitelist()
-def create_gift_card_from_invoice(invoice_name):
+def create_gift_card_from_invoice(doc, method=None):
 	"""
 	Create gift card(s) when a gift card item is sold.
-	Called after POS Invoice submission.
+	Called after POS Invoice or Sales Invoice submission.
 
 	Args:
-		invoice_name: Name of the POS Invoice
+		doc: Invoice document or invoice name
+		method: Hook method name (optional)
 
 	Returns:
 		dict: Created gift card details or None
 	"""
-	if not invoice_name:
+	# Handle both document object and string name
+	if not doc:
 		return None
 
-	invoice = frappe.get_doc("POS Invoice", invoice_name)
+	if isinstance(doc, str):
+		# Called with invoice name string
+		invoice = frappe.get_doc("POS Invoice", doc)
+	else:
+		# Called with document object from hook
+		invoice = doc
 
 	# Check if invoice is submitted and paid
 	if invoice.docstatus != 1:
 		return None
 
+	# Get POS profile - handle both POS Invoice and Sales Invoice
+	pos_profile = getattr(invoice, 'pos_profile', None)
+	if not pos_profile and invoice.doctype == "Sales Invoice":
+		# Try to get from related POS Opening Entry
+		pos_profile = frappe.db.get_value(
+			"POS Opening Entry",
+			{"name": invoice.get("posa_pos_opening_shift")},
+			"pos_profile"
+		) if invoice.get("posa_pos_opening_shift") else None
+
 	# Get gift card settings
-	settings = get_gift_card_settings(invoice.pos_profile)
+	settings = get_gift_card_settings(pos_profile)
 	if not settings:
 		return None
 
@@ -496,27 +513,35 @@ def get_gift_cards_with_balance(customer=None, company=None):
 # ==========================================
 
 @frappe.whitelist()
-def process_gift_card_on_submit(invoice_name):
+def process_gift_card_on_submit(doc, method=None):
 	"""
 	Process gift card after invoice submission.
 	Handles splitting if gift card amount > invoice total.
 
 	Args:
-		invoice_name: Name of the submitted POS Invoice
+		doc: Invoice document or invoice name
+		method: Hook method name (optional)
 	"""
-	if not invoice_name:
+	# Handle both document object and string name
+	if not doc:
 		return
 
-	invoice = frappe.get_doc("POS Invoice", invoice_name)
+	if isinstance(doc, str):
+		# Called with invoice name string
+		invoice = frappe.get_doc("POS Invoice", doc)
+	else:
+		# Called with document object from hook
+		invoice = doc
 
-	# Check if a coupon was used
-	if not invoice.coupon_code:
+	# Check if a coupon was used (Sales Invoice may not have coupon_code field)
+	coupon_code = getattr(invoice, 'coupon_code', None)
+	if not coupon_code:
 		return
 
 	# Get the POS Coupon
 	coupon = frappe.db.get_value(
 		"POS Coupon",
-		{"coupon_code": invoice.coupon_code.upper()},
+		{"coupon_code": coupon_code.upper()},
 		["name", "coupon_type", "gift_card_amount", "discount_amount"],
 		as_dict=True
 	)
@@ -524,8 +549,18 @@ def process_gift_card_on_submit(invoice_name):
 	if not coupon or coupon.coupon_type != "Gift Card":
 		return
 
+	# Get POS profile - handle both POS Invoice and Sales Invoice
+	pos_profile = getattr(invoice, 'pos_profile', None)
+	if not pos_profile and invoice.doctype == "Sales Invoice":
+		# Try to get from related POS Opening Entry
+		pos_profile = frappe.db.get_value(
+			"POS Opening Entry",
+			{"name": invoice.get("posa_pos_opening_shift")},
+			"pos_profile"
+		) if invoice.get("posa_pos_opening_shift") else None
+
 	# Get gift card settings
-	settings = get_gift_card_settings(invoice.pos_profile)
+	settings = get_gift_card_settings(pos_profile)
 	if not settings:
 		return
 
@@ -653,27 +688,35 @@ def _update_erpnext_coupon_amount(erpnext_coupon_name, new_amount):
 # ==========================================
 
 @frappe.whitelist()
-def process_gift_card_on_cancel(invoice_name):
+def process_gift_card_on_cancel(doc, method=None):
 	"""
 	Process gift card when invoice is cancelled.
 	Restores gift card balance if it was partially used.
 
 	Args:
-		invoice_name: Name of the cancelled POS Invoice
+		doc: Invoice document or invoice name
+		method: Hook method name (optional)
 	"""
-	if not invoice_name:
+	# Handle both document object and string name
+	if not doc:
 		return
 
-	invoice = frappe.get_doc("POS Invoice", invoice_name)
+	if isinstance(doc, str):
+		# Called with invoice name string
+		invoice = frappe.get_doc("POS Invoice", doc)
+	else:
+		# Called with document object from hook
+		invoice = doc
 
-	# Check if a coupon was used
-	if not invoice.coupon_code:
+	# Check if a coupon was used (Sales Invoice may not have coupon_code field)
+	coupon_code = getattr(invoice, 'coupon_code', None)
+	if not coupon_code:
 		return
 
 	# Get the POS Coupon
 	coupon_name = frappe.db.get_value(
 		"POS Coupon",
-		{"coupon_code": invoice.coupon_code.upper()},
+		{"coupon_code": coupon_code.upper()},
 		"name"
 	)
 
