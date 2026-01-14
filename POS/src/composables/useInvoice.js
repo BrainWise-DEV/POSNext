@@ -836,6 +836,8 @@ export function useInvoice() {
 			})),
 			discount_amount: additionalDiscount.value || 0,
 			coupon_code: couponCode.value,
+			posa_coupon_code: couponCode.value ? couponCode.value.toUpperCase() : null,
+			posa_gift_card_amount_used: additionalDiscount.value || 0,
 			is_pos: 1,
 			update_stock: 1,
 		}
@@ -900,6 +902,8 @@ export function useInvoice() {
 					})),
 					discount_amount: additionalDiscount.value || 0,
 					coupon_code: couponCode.value,
+					posa_coupon_code: couponCode.value ? couponCode.value.toUpperCase() : null,
+					posa_gift_card_amount_used: additionalDiscount.value || 0,
 					is_pos: 1,
 					update_stock: 1, // Critical: Ensures stock is updated
 				}

@@ -594,7 +594,12 @@ def process_gift_card_on_submit(doc, method=None):
 
 	# Calculate amounts
 	gift_card_balance = flt(coupon.gift_card_amount)
-	used_amount = flt(invoice.discount_amount) if invoice.discount_amount else gift_card_balance
+
+	# Use posa_gift_card_amount_used if available (persisted field that ERPNext doesn't clear)
+	# Fall back to discount_amount, then to gift_card_balance as last resort
+	used_amount = flt(getattr(invoice, 'posa_gift_card_amount_used', 0))
+	if not used_amount:
+		used_amount = flt(invoice.discount_amount) if invoice.discount_amount else gift_card_balance
 
 	if gift_card_balance <= 0:
 		return
@@ -730,7 +735,11 @@ def process_gift_card_on_cancel(doc, method=None):
 
 	try:
 		# Calculate restored balance
-		refund_amount = flt(invoice.discount_amount)
+		# Use posa_gift_card_amount_used if available (persisted field that ERPNext doesn't clear)
+		refund_amount = flt(getattr(invoice, 'posa_gift_card_amount_used', 0))
+		if not refund_amount:
+			refund_amount = flt(invoice.discount_amount)
+
 		current_balance = flt(coupon.gift_card_amount)
 		original_amount = flt(coupon.original_gift_card_amount)
 
