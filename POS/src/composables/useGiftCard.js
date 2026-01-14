@@ -44,6 +44,14 @@ export function useGiftCard() {
 	})
 
 	/**
+	 * Resource to get gift cards created from an invoice
+	 */
+	const giftCardsFromInvoiceResource = createResource({
+		url: "pos_next.api.gift_cards.get_gift_cards_from_invoice",
+		auto: false,
+	})
+
+	/**
 	 * Load available gift cards for a customer and company
 	 *
 	 * @param {Object} params - Parameters
@@ -99,6 +107,35 @@ export function useGiftCard() {
 				success: false,
 				message: err.message || __("Failed to apply gift card"),
 			}
+		}
+	}
+
+	/**
+	 * Get gift cards created from a specific invoice
+	 * Called after invoice submission to check if gift cards were created
+	 *
+	 * @param {string} invoiceName - Name of the invoice
+	 * @returns {Promise<Array>} - List of gift cards created from this invoice
+	 */
+	async function getGiftCardsFromInvoice(invoiceName) {
+		if (!invoiceName) {
+			console.log("[useGiftCard] No invoice name provided")
+			return []
+		}
+
+		try {
+			console.log("[useGiftCard] Fetching gift cards for invoice:", invoiceName)
+			const result = await giftCardsFromInvoiceResource.fetch({
+				invoice_name: invoiceName,
+			})
+			console.log("[useGiftCard] Raw API result:", result)
+
+			const data = result?.message || result || []
+			console.log("[useGiftCard] Parsed data:", data)
+			return Array.isArray(data) ? data : []
+		} catch (err) {
+			console.error("Failed to get gift cards from invoice:", err)
+			return []
 		}
 	}
 
@@ -190,11 +227,13 @@ export function useGiftCard() {
 		// Methods
 		loadGiftCards,
 		applyGiftCard,
+		getGiftCardsFromInvoice,
 		calculateGiftCardDiscount,
 		formatGiftCard,
 
 		// Resources (for advanced usage)
 		giftCardsResource,
 		applyGiftCardResource,
+		giftCardsFromInvoiceResource,
 	}
 }

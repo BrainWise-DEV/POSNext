@@ -511,6 +511,14 @@
 				@discount-removed="handleDiscountRemoved"
 			/>
 
+			<!-- Gift Card Created Dialog -->
+			<GiftCardCreatedDialog
+				:open="showGiftCardCreatedDialog"
+				:gift-cards="createdGiftCards"
+				:currency="shiftStore.profileCurrency"
+				@close="showGiftCardCreatedDialog = false"
+			/>
+
 			<!-- Offers Dialog -->
 			<OffersDialog
 				ref="offersDialogRef"
@@ -954,6 +962,7 @@ import POSHeader from "@/components/pos/POSHeader.vue";
 import BatchSerialDialog from "@/components/sale/BatchSerialDialog.vue";
 import CouponDialog from "@/components/sale/CouponDialog.vue";
 import CreateCustomerDialog from "@/components/sale/CreateCustomerDialog.vue";
+import GiftCardCreatedDialog from "@/components/sale/GiftCardCreatedDialog.vue";
 import CustomerDialog from "@/components/sale/CustomerDialog.vue";
 import DraftInvoicesDialog from "@/components/sale/DraftInvoicesDialog.vue";
 import InvoiceCart from "@/components/sale/InvoiceCart.vue";
@@ -971,6 +980,7 @@ import InvoiceManagement from "@/components/invoices/InvoiceManagement.vue";
 import InvoiceDetailDialog from "@/components/invoices/InvoiceDetailDialog.vue";
 import { useRealtimeStock } from "@/composables/useRealtimeStock";
 import { usePOSEvents } from "@/composables/usePOSEvents";
+import { useGiftCard } from "@/composables/useGiftCard";
 import { useLocale } from "@/composables/useLocale";
 import { session } from "@/data/session";
 import { useUserData } from "@/data/user";
@@ -1079,6 +1089,13 @@ const showInvoiceManagement = ref(false);
 // Invoice Detail dialog
 const showInvoiceDetail = ref(false);
 const selectedInvoiceForView = ref(null);
+
+// Gift Card Created dialog
+const showGiftCardCreatedDialog = ref(false);
+const createdGiftCards = ref([]);
+
+// Gift Card composable
+const { getGiftCardsFromInvoice } = useGiftCard();
 
 // Invoice history data (used by InvoiceManagement component)
 const invoiceHistoryData = ref([]);
@@ -2004,6 +2021,20 @@ async function handlePaymentCompleted(paymentData) {
 				loadInvoiceHistoryData().catch((err) =>
 					log.debug("Background invoice cache refresh failed:", err)
 				);
+
+				// Check if gift cards were created from this invoice
+				try {
+					log.info("[GiftCard] Checking for gift cards from invoice:", invoiceName);
+					const giftCards = await getGiftCardsFromInvoice(invoiceName);
+					log.info("[GiftCard] Result:", giftCards);
+					if (giftCards && giftCards.length > 0) {
+						createdGiftCards.value = giftCards;
+						showGiftCardCreatedDialog.value = true;
+						log.info("[GiftCard] Showing dialog with", giftCards.length, "gift cards");
+					}
+				} catch (err) {
+					log.warn("Failed to check for created gift cards:", err);
+				}
 
 				if (shiftStore.autoPrintEnabled || posSettingsStore.silentPrint) {
 					try {
