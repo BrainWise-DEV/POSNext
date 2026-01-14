@@ -997,16 +997,25 @@ def get_referral_details(referral_name):
 	referral = frappe.get_doc("Referral Code", referral_name)
 	data = referral.as_dict()
 
-	# Get generated coupons for this referral
+	# Get generated coupons for this referral (now using ERPNext Coupon Code)
 	coupons = frappe.get_all(
-		"POS Coupon",
+		"Coupon Code",
 		filters={"referral_code": referral_name},
 		fields=[
-			"name", "coupon_code", "coupon_type", "customer", "customer_name",
-			"used", "valid_from", "valid_upto", "disabled"
+			"name", "coupon_code", "coupon_type", "customer",
+			"used", "valid_from", "valid_upto", "maximum_use"
 		],
 		order_by="creation desc"
 	)
+
+	# Add customer_name and used status for each coupon
+	for coupon in coupons:
+		if coupon.customer:
+			coupon["customer_name"] = frappe.db.get_value("Customer", coupon.customer, "customer_name")
+		else:
+			coupon["customer_name"] = None
+		# Coupon is disabled/used if used >= maximum_use
+		coupon["disabled"] = coupon.used >= (coupon.maximum_use or 99999999)
 
 	data["generated_coupons"] = coupons
 	data["total_coupons_generated"] = len(coupons)

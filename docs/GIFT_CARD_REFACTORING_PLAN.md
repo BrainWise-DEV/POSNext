@@ -1,5 +1,22 @@
 # Gift Card Refactoring Plan - ERPNext Native Integration
 
+## 📊 Progression
+
+| Phase | Description | Status |
+|-------|-------------|--------|
+| 1 | Custom Fields ERPNext Coupon Code | ✅ Done |
+| 2 | Refactoring gift_cards.py | ✅ Done |
+| 3 | Refactoring offers.py | ✅ Done |
+| 4 | Patch de Migration | ✅ Done |
+| 5 | Bouton de Création Rapide | ✅ Done |
+| 6 | Adaptation Frontend | ✅ Done |
+| 7 | Nettoyage | ✅ Done |
+| 8 | Referral Code Migration | ✅ Done |
+| 9 | Tests Backend | 🔄 En cours |
+| 10 | Tests Frontend (Chrome) | ⏳ Pending |
+
+---
+
 ## 🎯 Objectif
 
 Supprimer la dépendance à `POS Coupon` et utiliser directement `ERPNext Coupon Code` pour:

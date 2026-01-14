@@ -109,8 +109,8 @@ def apply_referral_code(referral_code, referee_customer):
     if referral.disabled:
         frappe.throw(_("This referral code has been disabled"))
 
-    # Check if referee has already used this referral code
-    existing_coupon = frappe.db.exists("POS Coupon", {
+    # Check if referee has already used this referral code (now using ERPNext Coupon Code)
+    existing_coupon = frappe.db.exists("Coupon Code", {
         "referral_code": referral.name,
         "customer": referee_customer,
         "coupon_type": "Promotional"
@@ -124,18 +124,18 @@ def apply_referral_code(referral_code, referee_customer):
         "referee_coupon": None
     }
 
-    # Generate Gift Card coupon for referrer (primary customer)
+    # Generate coupon for referrer (primary customer)
     try:
         referrer_coupon = generate_referrer_coupon(referral)
         result["referrer_coupon"] = {
             "name": referrer_coupon.name,
             "coupon_code": referrer_coupon.coupon_code,
-            "customer": referrer_coupon.customer
+            "customer": referral.customer
         }
     except Exception as e:
         frappe.log_error(
-            title="Referrer Coupon Generation Failed",
-            message=f"Failed to generate referrer coupon: {str(e)}"
+            "Referrer Coupon Generation Failed",
+            f"Failed to generate referrer coupon: {str(e)}"
         )
 
     # Generate Promotional coupon for referee (new customer)
@@ -148,8 +148,8 @@ def apply_referral_code(referral_code, referee_customer):
         }
     except Exception as e:
         frappe.log_error(
-            title="Referee Coupon Generation Failed",
-            message=f"Failed to generate referee coupon: {str(e)}"
+            "Referee Coupon Generation Failed",
+            f"Failed to generate referee coupon: {str(e)}"
         )
         frappe.throw(_("Failed to generate your welcome coupon"))
 
@@ -162,72 +162,132 @@ def apply_referral_code(referral_code, referee_customer):
 
 
 def generate_referrer_coupon(referral):
-    """Generate a Gift Card coupon for the referrer"""
-    coupon = frappe.new_doc("POS Coupon")
-
+    """Generate a coupon for the referrer using ERPNext Coupon Code + Pricing Rule"""
     # Calculate validity dates
     valid_from = today()
     valid_days = referral.referrer_coupon_valid_days or 30
     valid_upto = add_days(valid_from, valid_days)
 
-    coupon.update({
-        "coupon_name": f"Referral Reward - {referral.customer} - {frappe.utils.now_datetime().strftime('%Y%m%d%H%M%S')}",
-        "coupon_type": "Gift Card",
+    # Generate unique coupon code
+    coupon_code = f"REF-{frappe.generate_hash()[:8].upper()}"
+    coupon_name = f"Referral Reward - {referral.customer} - {frappe.utils.now_datetime().strftime('%Y%m%d%H%M%S')}"
+
+    # Create Pricing Rule first
+    pricing_rule_data = {
+        "doctype": "Pricing Rule",
+        "title": coupon_name,
+        "apply_on": "Transaction",
+        "price_or_product_discount": "Price",
+        "selling": 1,
+        "buying": 0,
+        "applicable_for": "Customer",
         "customer": referral.customer,
         "company": referral.company,
-        "campaign": referral.campaign,
-        "referral_code": referral.name,
-
-        # Discount configuration
-        "discount_type": referral.referrer_discount_type,
-        "discount_percentage": flt(referral.referrer_discount_percentage) if referral.referrer_discount_type == "Percentage" else None,
-        "discount_amount": flt(referral.referrer_discount_amount) if referral.referrer_discount_type == "Amount" else None,
-        "min_amount": flt(referral.referrer_min_amount) if referral.referrer_min_amount else None,
-        "max_amount": flt(referral.referrer_max_amount) if referral.referrer_max_amount else None,
-        "apply_on": "Grand Total",
-
-        # Validity
         "valid_from": valid_from,
         "valid_upto": valid_upto,
-        "maximum_use": 1,  # Gift cards are single-use
-        "one_use": 1,
-    })
+        "coupon_code_based": 1,
+        "disable": 0,
+    }
 
-    coupon.insert()
+    # Set discount type
+    if referral.referrer_discount_type == "Percentage":
+        pricing_rule_data["rate_or_discount"] = "Discount Percentage"
+        pricing_rule_data["discount_percentage"] = flt(referral.referrer_discount_percentage)
+    else:  # Amount
+        pricing_rule_data["rate_or_discount"] = "Discount Amount"
+        pricing_rule_data["discount_amount"] = flt(referral.referrer_discount_amount)
+
+    # Set min/max conditions if specified
+    if referral.referrer_min_amount:
+        pricing_rule_data["min_amt"] = flt(referral.referrer_min_amount)
+    if referral.referrer_max_amount:
+        pricing_rule_data["max_amt"] = flt(referral.referrer_max_amount)
+
+    pricing_rule = frappe.get_doc(pricing_rule_data)
+    pricing_rule.insert(ignore_permissions=True)
+
+    # Create Coupon Code linked to Pricing Rule
+    coupon = frappe.get_doc({
+        "doctype": "Coupon Code",
+        "coupon_name": coupon_name,
+        "coupon_code": coupon_code,
+        "coupon_type": "Gift Card",
+        "pricing_rule": pricing_rule.name,
+        "valid_from": valid_from,
+        "valid_upto": valid_upto,
+        "maximum_use": 1,
+        "used": 0,
+        # Custom fields for POS Next
+        "pos_next_gift_card": 0,  # Not a gift card balance, just a referral reward
+        "referral_code": referral.name,
+        "customer": referral.customer,
+    })
+    coupon.insert(ignore_permissions=True)
+
     return coupon
 
 
 def generate_referee_coupon(referral, referee_customer):
-    """Generate a Promotional coupon for the referee (new customer)"""
-    coupon = frappe.new_doc("POS Coupon")
-
+    """Generate a Promotional coupon for the referee (new customer) using ERPNext Coupon Code + Pricing Rule"""
     # Calculate validity dates
     valid_from = today()
     valid_days = referral.referee_coupon_valid_days or 30
     valid_upto = add_days(valid_from, valid_days)
 
-    coupon.update({
-        "coupon_name": f"Welcome Referral - {referee_customer} - {frappe.utils.now_datetime().strftime('%Y%m%d%H%M%S')}",
-        "coupon_type": "Promotional",
+    # Generate unique coupon code
+    coupon_code = f"WELCOME-{frappe.generate_hash()[:8].upper()}"
+    coupon_name = f"Welcome Referral - {referee_customer} - {frappe.utils.now_datetime().strftime('%Y%m%d%H%M%S')}"
+
+    # Create Pricing Rule first
+    pricing_rule_data = {
+        "doctype": "Pricing Rule",
+        "title": coupon_name,
+        "apply_on": "Transaction",
+        "price_or_product_discount": "Price",
+        "selling": 1,
+        "buying": 0,
+        "applicable_for": "Customer",
         "customer": referee_customer,
         "company": referral.company,
-        "campaign": referral.campaign,
-        "referral_code": referral.name,
-
-        # Discount configuration
-        "discount_type": referral.referee_discount_type,
-        "discount_percentage": flt(referral.referee_discount_percentage) if referral.referee_discount_type == "Percentage" else None,
-        "discount_amount": flt(referral.referee_discount_amount) if referral.referee_discount_type == "Amount" else None,
-        "min_amount": flt(referral.referee_min_amount) if referral.referee_min_amount else None,
-        "max_amount": flt(referral.referee_max_amount) if referral.referee_max_amount else None,
-        "apply_on": "Grand Total",
-
-        # Validity
         "valid_from": valid_from,
         "valid_upto": valid_upto,
-        "maximum_use": 1,  # One-time use for referee
-        "one_use": 1,
-    })
+        "coupon_code_based": 1,
+        "disable": 0,
+    }
 
-    coupon.insert()
+    # Set discount type
+    if referral.referee_discount_type == "Percentage":
+        pricing_rule_data["rate_or_discount"] = "Discount Percentage"
+        pricing_rule_data["discount_percentage"] = flt(referral.referee_discount_percentage)
+    else:  # Amount
+        pricing_rule_data["rate_or_discount"] = "Discount Amount"
+        pricing_rule_data["discount_amount"] = flt(referral.referee_discount_amount)
+
+    # Set min/max conditions if specified
+    if referral.referee_min_amount:
+        pricing_rule_data["min_amt"] = flt(referral.referee_min_amount)
+    if referral.referee_max_amount:
+        pricing_rule_data["max_amt"] = flt(referral.referee_max_amount)
+
+    pricing_rule = frappe.get_doc(pricing_rule_data)
+    pricing_rule.insert(ignore_permissions=True)
+
+    # Create Coupon Code linked to Pricing Rule
+    coupon = frappe.get_doc({
+        "doctype": "Coupon Code",
+        "coupon_name": coupon_name,
+        "coupon_code": coupon_code,
+        "coupon_type": "Promotional",
+        "pricing_rule": pricing_rule.name,
+        "valid_from": valid_from,
+        "valid_upto": valid_upto,
+        "maximum_use": 1,
+        "used": 0,
+        # Custom fields for POS Next
+        "pos_next_gift_card": 0,
+        "referral_code": referral.name,
+        "customer": referee_customer,
+    })
+    coupon.insert(ignore_permissions=True)
+
     return coupon
