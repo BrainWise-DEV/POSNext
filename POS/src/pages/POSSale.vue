@@ -314,6 +314,7 @@
 							style="min-width: 300px; contain: layout style paint"
 						>
 							<InvoiceCart
+								ref="invoiceCartRef"
 								:items="cartStore.invoiceItems"
 								:customer="cartStore.customer"
 								:subtotal="cartStore.subtotal"
@@ -981,7 +982,7 @@ import { qzConnected, connect as qzConnect, disconnect as qzDisconnect } from "@
 
 import { Button, Dialog, createResource } from "frappe-ui";
 import { call } from "@/utils/apiWrapper";
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useToast } from "@/composables/useToast";
 
 import { useCustomerSearchStore } from "@/stores/customerSearch";
@@ -1036,6 +1037,7 @@ const { isRTL } = useLocale();
 // Component refs
 const itemsSelectorRef = ref(null);
 const offersDialogRef = ref(null);
+const invoiceCartRef = ref(null);
 const containerRef = ref(null);
 const dividerRef = ref(null);
 const pendingPaymentAfterCustomer = ref(false);
@@ -1773,6 +1775,32 @@ function handleItemSelected(item, autoAdd = false) {
 	if (item.has_batch_no || item.has_serial_no) {
 		cartStore.setPendingItem(item, 1);
 		uiStore.showBatchSerialDialog = true;
+		return;
+	}
+
+	// Check for zero-price items (e.g., gift cards that need custom value)
+	const itemRate = item.price_list_rate || item.rate || 0;
+	if (itemRate === 0) {
+		// Add item to cart first
+		try {
+			cartStore.addItem(item, 1, false, shiftStore.currentProfile);
+		} catch (error) {
+			uiStore.showError(
+				__("Insufficient Stock"),
+				error.message,
+				__("Item: {0}", [item.item_code])
+			);
+			return;
+		}
+		// Open edit dialog to set the price
+		nextTick(() => {
+			const addedItem = cartStore.invoiceItems.find(
+				(i) => i.item_code === item.item_code
+			);
+			if (addedItem && invoiceCartRef.value) {
+				invoiceCartRef.value.openEditDialog(addedItem);
+			}
+		});
 		return;
 	}
 

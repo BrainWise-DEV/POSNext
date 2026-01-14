@@ -2000,5 +2000,13 @@ onBeforeUnmount(() => {
 	if (typeof document === "undefined") return;
 	document.removeEventListener("mousedown", handleOutsideClick);
 });
+
+/**
+ * Expose methods to parent component.
+ * Allows POSSale to trigger edit dialog for zero-price items (e.g., gift cards).
+ */
+defineExpose({
+	openEditDialog,
+});
 </script>
 ```
