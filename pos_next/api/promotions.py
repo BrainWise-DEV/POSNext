@@ -782,16 +782,23 @@ def create_coupon(data):
 
 
 @frappe.whitelist()
-def update_coupon(coupon_name, data):
+def update_coupon(data):
 	"""
 	Update an existing coupon (ERPNext Coupon Code + Pricing Rule).
 	Can update validity dates, usage limits, disabled status, and discount configuration.
+
+	Args:
+		data: JSON string or dict containing 'name' and fields to update
 	"""
 	check_promotion_permissions("write")
 
 	import json
 	if isinstance(data, str):
 		data = json.loads(data)
+
+	coupon_name = data.get("name")
+	if not coupon_name:
+		frappe.throw(_("Coupon name is required"))
 
 	if not frappe.db.exists("Coupon Code", coupon_name):
 		frappe.throw(_("Coupon {0} not found").format(coupon_name))

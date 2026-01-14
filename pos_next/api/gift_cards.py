@@ -274,7 +274,7 @@ def _create_pricing_rule_for_gift_card(amount, coupon_code, company, valid_from=
 		str: Name of created Pricing Rule or None
 	"""
 	try:
-		pricing_rule = frappe.get_doc({
+		pricing_rule_data = {
 			"doctype": "Pricing Rule",
 			"title": f"Gift Card {coupon_code}",
 			"apply_on": "Transaction",
@@ -287,11 +287,17 @@ def _create_pricing_rule_for_gift_card(amount, coupon_code, company, valid_from=
 			"company": company,
 			"currency": frappe.get_cached_value("Company", company, "default_currency"),
 			"valid_from": valid_from or nowdate(),
-			"valid_upto": valid_upto,
 			"coupon_code_based": 1,
-			"is_cumulative": 1,
 			"priority": "1"
-		})
+		}
+
+		# Only set valid_upto and is_cumulative if we have an end date
+		# ERPNext requires valid_upto when is_cumulative=1
+		if valid_upto:
+			pricing_rule_data["valid_upto"] = valid_upto
+			pricing_rule_data["is_cumulative"] = 1
+
+		pricing_rule = frappe.get_doc(pricing_rule_data)
 		pricing_rule.insert(ignore_permissions=True)
 
 		return pricing_rule.name
