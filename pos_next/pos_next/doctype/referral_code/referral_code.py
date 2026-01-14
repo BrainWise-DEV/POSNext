@@ -168,9 +168,10 @@ def generate_referrer_coupon(referral):
     valid_days = referral.referrer_coupon_valid_days or 30
     valid_upto = add_days(valid_from, valid_days)
 
-    # Generate unique coupon code
-    coupon_code = f"REF-{frappe.generate_hash()[:8].upper()}"
-    coupon_name = f"Referral Reward - {referral.customer} - {frappe.utils.now_datetime().strftime('%Y%m%d%H%M%S')}"
+    # Generate unique coupon code and name
+    unique_hash = frappe.generate_hash()[:8].upper()
+    coupon_code = f"REF-{unique_hash}"
+    coupon_name = f"Referral Reward - {referral.customer} - {unique_hash}"
 
     # Create Pricing Rule first
     pricing_rule_data = {
@@ -234,9 +235,10 @@ def generate_referee_coupon(referral, referee_customer):
     valid_days = referral.referee_coupon_valid_days or 30
     valid_upto = add_days(valid_from, valid_days)
 
-    # Generate unique coupon code
-    coupon_code = f"WELCOME-{frappe.generate_hash()[:8].upper()}"
-    coupon_name = f"Welcome Referral - {referee_customer} - {frappe.utils.now_datetime().strftime('%Y%m%d%H%M%S')}"
+    # Generate unique coupon code and name
+    unique_hash = frappe.generate_hash()[:8].upper()
+    coupon_code = f"WELCOME-{unique_hash}"
+    coupon_name = f"Welcome Referral - {referee_customer} - {unique_hash}"
 
     # Create Pricing Rule first
     pricing_rule_data = {

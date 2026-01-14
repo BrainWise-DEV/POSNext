@@ -768,7 +768,7 @@ def create_coupon(data):
 		return {
 			"success": True,
 			"message": _("Coupon {0} created successfully").format(coupon.coupon_code),
-			"coupon_name": coupon.name,
+			"name": coupon.name,
 			"coupon_code": coupon.coupon_code
 		}
 

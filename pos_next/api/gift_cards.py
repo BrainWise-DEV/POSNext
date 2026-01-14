@@ -380,7 +380,8 @@ def create_gift_card_manual(amount, company, customer=None, validity_months=12):
 			"used": 0,
 			"pos_next_gift_card": 1,
 			"gift_card_amount": flt(amount),
-			"original_gift_card_amount": flt(amount)
+			"original_gift_card_amount": flt(amount),
+			"customer": customer
 		})
 		coupon.insert(ignore_permissions=True)
 
