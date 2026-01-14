@@ -119,19 +119,15 @@ export function useGiftCard() {
 	 */
 	async function getGiftCardsFromInvoice(invoiceName) {
 		if (!invoiceName) {
-			console.log("[useGiftCard] No invoice name provided")
 			return []
 		}
 
 		try {
-			console.log("[useGiftCard] Fetching gift cards for invoice:", invoiceName)
 			const result = await giftCardsFromInvoiceResource.fetch({
 				invoice_name: invoiceName,
 			})
-			console.log("[useGiftCard] Raw API result:", result)
 
 			const data = result?.message || result || []
-			console.log("[useGiftCard] Parsed data:", data)
 			return Array.isArray(data) ? data : []
 		} catch (err) {
 			console.error("Failed to get gift cards from invoice:", err)

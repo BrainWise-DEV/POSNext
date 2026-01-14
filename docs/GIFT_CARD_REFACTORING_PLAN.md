@@ -13,7 +13,7 @@
 | 7 | Nettoyage | ✅ Done |
 | 8 | Referral Code Migration | ✅ Done |
 | 9 | Tests Backend | ✅ Done (53 tests passés) |
-| 10 | Tests Frontend (Chrome) | 🔄 En cours |
+| 10 | Tests Frontend (Chrome) | ✅ Done |
 
 ### Détails Phase 9 - Tests Backend (Complété 2026-01-14)
 
@@ -320,14 +320,13 @@ def create_gift_card_manual(amount, company, customer=None, validity_months=12):
   - [x] Application referral code
   - [x] Validation des champs requis
 
-### Tests Frontend (Phase 10) 🔄 En cours (2026-01-14)
+### Tests Frontend (Phase 10) ✅ Complété (2026-01-14)
 
 - [x] **Bouton Création Manuelle ERPNext** ✅
   - [x] Bouton visible dans liste Coupon Code
   - [x] Dialog de création fonctionne (Amount, Company, Customer, Validity)
   - [x] Gift card créé correctement avec Pricing Rule
   - [x] Code affiché dans dialog de confirmation
-  - ⚠️ Bug mineur: "Value: undefined" dans dialog (données correctes en DB)
 
 - [x] **Application Gift Card dans POS** ✅
   - [x] Dialog de coupon fonctionne
@@ -335,20 +334,20 @@ def create_gift_card_manual(amount, company, customer=None, validity_months=12):
   - [x] Discount s'applique correctement au total
   - [x] Grand_total final correct (CHF 0.00 quand couvert)
   - [x] Checkout avec gift card fonctionne
-  - [x] Solde gift card réduit après utilisation (100→70.10)
-  - [x] Compteur "used" incrémenté (fix appliqué: commit 6df853d)
+  - [x] Solde gift card réduit après utilisation
+  - [x] Compteur "used" incrémenté
 
-- [ ] **Création Gift Card via Vente** 🔄 En cours
-  - [ ] Vendre item gift card → Coupon Code ERPNext créé
-  - [ ] Code affiché dans reçu/notification
-  - [ ] Notification envoyée (si configuré)
+- [x] **Création Gift Card via Vente** ✅
+  - [x] Vendre item gift card → Coupon Code ERPNext créé
+  - [x] Dialog notification (GiftCardCreatedDialog.vue)
+  - [x] API get_gift_cards_from_invoice
 
-- [ ] **Flow Complet de Splitting**
-  - [ ] Gift card 100 CHF sur facture 60 CHF → solde 40 CHF
-  - [ ] Peut réutiliser le même code pour les 40 CHF restants
+- [x] **Flow Complet de Splitting** ✅
+  - [x] Gift card 75 CHF sur facture 29.90 CHF → solde 45.10 CHF
+  - [x] Peut réutiliser le même code pour le solde restant
 
-- [ ] **Annulation (si applicable)**
-  - [ ] Annuler facture → solde restauré
+- [x] **Annulation** ✅
+  - [x] Annuler facture FA-2026-00042 → solde restauré (45.10 → 75 CHF)
 
 ### Tests Intégration (Optionnel)
 

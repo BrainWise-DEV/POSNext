@@ -2024,13 +2024,10 @@ async function handlePaymentCompleted(paymentData) {
 
 				// Check if gift cards were created from this invoice
 				try {
-					log.info("[GiftCard] Checking for gift cards from invoice:", invoiceName);
 					const giftCards = await getGiftCardsFromInvoice(invoiceName);
-					log.info("[GiftCard] Result:", giftCards);
 					if (giftCards && giftCards.length > 0) {
 						createdGiftCards.value = giftCards;
 						showGiftCardCreatedDialog.value = true;
-						log.info("[GiftCard] Showing dialog with", giftCards.length, "gift cards");
 					}
 				} catch (err) {
 					log.warn("Failed to check for created gift cards:", err);
