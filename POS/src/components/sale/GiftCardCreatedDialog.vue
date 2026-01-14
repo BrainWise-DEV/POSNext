@@ -7,6 +7,9 @@
  */
 
 import { computed } from 'vue'
+import { useLocale } from '@/composables/useLocale'
+
+const { locale } = useLocale()
 
 const props = defineProps({
 	open: {
@@ -30,11 +33,11 @@ const hasGiftCards = computed(() => props.giftCards.length > 0)
 function formatDate(dateStr) {
 	if (!dateStr) return __('No expiry')
 	const date = new Date(dateStr)
-	return date.toLocaleDateString()
+	return date.toLocaleDateString(locale.value)
 }
 
 function formatAmount(amount) {
-	return new Intl.NumberFormat('en-US', {
+	return new Intl.NumberFormat(locale.value, {
 		style: 'currency',
 		currency: props.currency,
 	}).format(amount || 0)
@@ -92,7 +95,7 @@ function copyToClipboard(code) {
 									<p class="text-sm text-white/80">
 										{{ giftCards.length === 1
 											? __('A gift card has been created')
-											: __('%s gift cards have been created', [giftCards.length])
+											: __('{0} gift cards have been created', [giftCards.length])
 										}}
 									</p>
 								</div>

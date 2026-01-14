@@ -1047,6 +1047,18 @@ const walletInfo = ref({
 const loadingWallet = ref(false)
 const walletPaymentMethods = ref(new Set()) // Set of mode_of_payment names that are wallet payments
 
+// Wallee Terminal Payment state
+const showWalleeDialog = ref(false)
+const walleeDialogAmount = ref(0)
+const walleeSelectedTerminal = ref(null)
+const walleePaymentStatus = ref('')
+const walleePaymentError = ref(false)
+const walleePaymentInProgress = ref(false)
+const walleeCurrentTransaction = ref(null)
+const walleeLockedPayments = ref([])
+const walleePaymentMode = ref(null) // The Mode of Payment configured for Wallee in POS Profile
+const walleeCurrentMethod = ref(null) // The payment method being used
+
 // Delivery date for Sales Orders
 const deliveryDate = ref("")
 const today = new Date().toISOString().split("T")[0]

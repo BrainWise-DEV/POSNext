@@ -641,8 +641,6 @@ def _update_gift_card_balance(coupon_name, new_balance, pricing_rule=None):
 				flt(new_balance)
 			)
 
-		frappe.db.commit()
-
 	except Exception as e:
 		frappe.log_error(
 			"Gift Card Balance Update Failed",
