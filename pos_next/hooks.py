@@ -1,5 +1,5 @@
 from pos_next.utils import get_build_version
-
+import frappe
 app_name = "pos_next"
 app_title = "POS Next"
 app_publisher = "BrainWise"
@@ -251,7 +251,12 @@ scheduler_events = {
 		"pos_next.tasks.branding_monitor.reset_tampering_counter",
 	],
 }
-
+try:
+	from erpnext.accounts.doctype.pricing_rule import pricing_rule as pricing_rule_module
+	from pos_next.overrides.pricing_rule import apply_price_discount_rule
+	pricing_rule_module.apply_price_discount_rule = apply_price_discount_rule
+except Exception as e:
+	frappe.log_error(frappe.get_traceback(), "Error in pricing rule module")
 # Testing
 # -------
 

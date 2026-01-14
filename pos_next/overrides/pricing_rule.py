@@ -27,7 +27,11 @@ def apply_min_max_price_discounts(doc, method=None):
     Reset discount on other items for the same pricing rule.
     """
     try:
-        for pr_name in _get_min_max_pricing_rules(doc):
+        min_max_rules = _get_min_max_pricing_rules(doc)
+        if not min_max_rules:
+            return
+        
+        for pr_name in min_max_rules:
             pr = frappe.get_cached_doc("Pricing Rule", pr_name)
 
             # Enforce price list
@@ -45,7 +49,7 @@ def apply_min_max_price_discounts(doc, method=None):
             if not eligible_items:
                 continue
 
-            reverse = pr.apply_discount_on_price == "Max"
+            reverse = pr.apply_discount_on_price == "Min"
             eligible_items.sort(
                 key=lambda x: flt(x.price_list_rate or x.rate or 0),
                 reverse=reverse
