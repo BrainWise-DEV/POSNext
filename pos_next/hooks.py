@@ -108,8 +108,7 @@ fixtures = [
 					"Coupon Code-original_gift_card_amount",
 					"Coupon Code-coupon_code_residual",
 					"Coupon Code-source_invoice",
-					"Coupon Code-referral_code",
-					"Coupon Code-customer"
+					"Coupon Code-referral_code"
 				]
 			]
 		]
