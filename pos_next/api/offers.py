@@ -703,7 +703,15 @@ def validate_coupon(coupon_code: str, customer: str = None, company: str = None)
 				as_dict=True
 			)
 			if pr:
-				discount_type = pr.rate_or_discount
+				# Map Pricing Rule values to frontend expected values
+				# "Discount Percentage" -> "Percentage", "Discount Amount" -> "Amount"
+				rate_or_discount = pr.rate_or_discount or ""
+				if "Percentage" in rate_or_discount:
+					discount_type = "Percentage"
+				elif "Amount" in rate_or_discount:
+					discount_type = "Amount"
+				else:
+					discount_type = rate_or_discount
 				discount_percentage = flt(pr.discount_percentage)
 				discount_amount = flt(pr.discount_amount)
 
