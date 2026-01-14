@@ -619,13 +619,16 @@ def _update_gift_card_balance(coupon_name, new_balance, pricing_rule=None):
 		pricing_rule: Associated Pricing Rule name
 	"""
 	try:
+		# Get current used count and increment it
+		current_used = frappe.db.get_value("Coupon Code", coupon_name, "used") or 0
+
 		# Update Coupon Code
 		frappe.db.set_value(
 			"Coupon Code",
 			coupon_name,
 			{
 				"gift_card_amount": flt(new_balance),
-				"used": 1 if flt(new_balance) <= 0 else 0
+				"used": current_used + 1
 			}
 		)
 
