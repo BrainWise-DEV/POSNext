@@ -690,6 +690,23 @@ def validate_coupon(coupon_code: str, customer: str = None, company: str = None)
 		if coupon.maximum_use and coupon.maximum_use > 0 and coupon.used >= coupon.maximum_use:
 			return {"valid": False, "message": _("This coupon has reached its usage limit")}
 
+		# Fetch discount details from the linked Pricing Rule
+		discount_type = None
+		discount_percentage = 0
+		discount_amount = 0
+
+		if coupon.pricing_rule:
+			pr = frappe.db.get_value(
+				"Pricing Rule",
+				coupon.pricing_rule,
+				["rate_or_discount", "discount_percentage", "discount_amount"],
+				as_dict=True
+			)
+			if pr:
+				discount_type = pr.rate_or_discount
+				discount_percentage = flt(pr.discount_percentage)
+				discount_amount = flt(pr.discount_amount)
+
 		return {
 			"valid": True,
 			"coupon": {
@@ -705,5 +722,8 @@ def validate_coupon(coupon_code: str, customer: str = None, company: str = None)
 				"is_gift_card": False,
 				"pricing_rule": coupon.pricing_rule,
 				"company": coupon.company,
+				"discount_type": discount_type,
+				"discount_percentage": discount_percentage,
+				"discount_amount": discount_amount,
 			}
 		}
