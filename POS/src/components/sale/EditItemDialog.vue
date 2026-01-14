@@ -348,10 +348,18 @@ const hasPricingRules = computed(() => {
 	return Boolean(localItem.value.pricing_rules) && localItem.value.pricing_rules.length > 0
 })
 
-// Rate editing is allowed only if:
-// 1. POS Settings allows rate editing AND
-// 2. Item does NOT have pricing rules (promotional offers) applied
+// Zero-price items (e.g., gift cards) always allow rate editing
+const isZeroPriceItem = computed(() => {
+	if (!localItem.value) return false
+	const originalRate = localItem.value.price_list_rate || localItem.value.rate || 0
+	return originalRate === 0
+})
+
+// Rate editing is allowed if:
+// 1. Item has zero price (gift cards with custom value), OR
+// 2. POS Settings allows rate editing AND item has no pricing rules applied
 const canEditRate = computed(() => {
+	if (isZeroPriceItem.value) return true
 	return settingsStore.allowUserToEditRate && !hasPricingRules.value
 })
 

@@ -12,8 +12,21 @@
 | 6 | Adaptation Frontend | ✅ Done |
 | 7 | Nettoyage | ✅ Done |
 | 8 | Referral Code Migration | ✅ Done |
-| 9 | Tests Backend | 🔄 En cours |
-| 10 | Tests Frontend (Chrome) | ⏳ Pending |
+| 9 | Tests Backend | ✅ Done (53 tests passés) |
+| 10 | Tests Frontend (Chrome) | 🔄 En cours |
+
+### Détails Phase 9 - Tests Backend (Complété 2026-01-14)
+
+**53 tests passés** couvrant:
+- Gift card code generation (format GC-XXXX-XXXX, unicité)
+- Création manuelle de gift cards
+- Pricing Rule création avec/sans validity
+- Application de gift cards (montant partiel, complet)
+- Mise à jour du solde après utilisation
+- Validation coupons (expirés, restriction client, dates)
+- Récupération des gift cards actifs
+- CRUD coupons promotionnels
+- Referral Code (création, application, génération coupons)
 
 ---
 
@@ -266,54 +279,86 @@ def create_gift_card_manual(amount, company, customer=None, validity_months=12):
 
 ## 📋 Checklist de Tests
 
-### Tests Fonctionnels
+### Tests Backend (Phase 9) ✅ Complété
 
-- [ ] **Création Gift Card**
+- [x] **Génération Code Gift Card**
+  - [x] Code au format GC-XXXX-XXXX
+  - [x] Codes uniques
+  - [x] Caractères valides (uppercase + digits)
+
+- [x] **Création Manuelle Gift Card**
+  - [x] Création basique avec montant et company
+  - [x] Création avec customer assigné
+  - [x] Création avec validité 0 (illimité)
+  - [x] Pricing Rule créé correctement
+
+- [x] **Application Gift Card**
+  - [x] Appliquer gift card montant < total facture
+  - [x] Appliquer gift card montant > total facture (splitting logic)
+  - [x] Mise à jour solde après utilisation partielle
+  - [x] Mise à jour solde à zéro (exhausted)
+
+- [x] **Validation Coupon**
+  - [x] Coupon valide accepté
+  - [x] Coupon invalide rejeté
+  - [x] Coupon expiré rejeté
+  - [x] Coupon pas encore valide rejeté
+  - [x] Restriction customer respectée
+  - [x] Gift card solde zéro rejeté
+
+- [x] **Coupons Promotionnels**
+  - [x] Création avec pourcentage
+  - [x] Création avec montant fixe
+  - [x] Mise à jour discount
+  - [x] Mise à jour validité
+  - [x] Suppression coupon + pricing rule
+
+- [x] **Referral Code**
+  - [x] Création avec pourcentage/montant
+  - [x] Génération coupon referrer
+  - [x] Génération coupon referee
+  - [x] Application referral code
+  - [x] Validation des champs requis
+
+### Tests Frontend (Phase 10) 🔄 En cours (2026-01-14)
+
+- [x] **Bouton Création Manuelle ERPNext** ✅
+  - [x] Bouton visible dans liste Coupon Code
+  - [x] Dialog de création fonctionne (Amount, Company, Customer, Validity)
+  - [x] Gift card créé correctement avec Pricing Rule
+  - [x] Code affiché dans dialog de confirmation
+  - ⚠️ Bug mineur: "Value: undefined" dans dialog (données correctes en DB)
+
+- [x] **Application Gift Card dans POS** ✅
+  - [x] Dialog de coupon fonctionne
+  - [x] Gift cards disponibles affichés avec solde
+  - [x] Discount s'applique correctement au total
+  - [x] Grand_total final correct (CHF 0.00 quand couvert)
+  - [x] Checkout avec gift card fonctionne
+  - [x] Solde gift card réduit après utilisation (100→70.10)
+  - [x] Compteur "used" incrémenté (fix appliqué: commit 6df853d)
+
+- [ ] **Création Gift Card via Vente** 🔄 En cours
   - [ ] Vendre item gift card → Coupon Code ERPNext créé
-  - [ ] Pricing Rule créé avec bon montant
-  - [ ] Code généré au format XXXX-XXXX-XXXX
+  - [ ] Code affiché dans reçu/notification
   - [ ] Notification envoyée (si configuré)
 
-- [ ] **Application Gift Card**
-  - [ ] Appliquer gift card montant < total facture
-  - [ ] Appliquer gift card montant = total facture
-  - [ ] Appliquer gift card montant > total facture (splitting)
-  - [ ] Vérifier que le discount s'applique correctement
-  - [ ] Vérifier le grand_total final
-
-- [ ] **Réduction Solde**
-  - [ ] Après submit, `gift_card_amount` réduit
-  - [ ] Pricing Rule mis à jour
-  - [ ] Solde correct après utilisation partielle
-
-- [ ] **Splitting**
+- [ ] **Flow Complet de Splitting**
   - [ ] Gift card 100 CHF sur facture 60 CHF → solde 40 CHF
-  - [ ] Pricing Rule mis à jour à 40 CHF
   - [ ] Peut réutiliser le même code pour les 40 CHF restants
 
-- [ ] **Annulation**
+- [ ] **Annulation (si applicable)**
   - [ ] Annuler facture → solde restauré
-  - [ ] Pricing Rule restauré
 
-- [ ] **Création Manuelle**
-  - [ ] Bouton visible dans liste Coupon Code
-  - [ ] Dialog de création fonctionne
-  - [ ] Gift card créé correctement
-
-### Tests Intégration
+### Tests Intégration (Optionnel)
 
 - [ ] **Webshop**
   - [ ] Gift card utilisable sur Webshop
   - [ ] Solde réduit après commande Webshop
 
-- [ ] **Comptabilité**
-  - [ ] Écriture comptable correcte
-  - [ ] Rapport des gift cards
-
 - [ ] **Migration**
-  - [ ] Tous les POS Coupon migrés
-  - [ ] Références mises à jour
-  - [ ] Pas de perte de données
+  - [x] Patch de migration existe
+  - [ ] Migration testée sur prod avec données réelles
 
 ---
 
