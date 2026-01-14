@@ -655,6 +655,37 @@ def _update_gift_card_balance(coupon_name, new_balance, pricing_rule=None):
 # ==========================================
 
 @frappe.whitelist()
+def get_gift_cards_from_invoice(invoice_name):
+	"""
+	Get gift cards created from a specific invoice.
+
+	Args:
+		invoice_name: Name of the source invoice
+
+	Returns:
+		list: Gift cards created from this invoice
+	"""
+	if not invoice_name:
+		return []
+
+	gift_cards = frappe.get_all(
+		"Coupon Code",
+		filters={
+			"pos_next_gift_card": 1,
+			"source_invoice": invoice_name
+		},
+		fields=[
+			"name", "coupon_code", "coupon_name",
+			"gift_card_amount", "original_gift_card_amount",
+			"valid_from", "valid_upto"
+		],
+		order_by="creation asc"
+	)
+
+	return gift_cards
+
+
+@frappe.whitelist()
 def process_gift_card_on_cancel(doc, method=None):
 	"""
 	Process gift card when invoice is cancelled.
