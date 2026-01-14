@@ -669,7 +669,7 @@ def validate_coupon(coupon_code: str, customer: str = None, company: str = None)
 				"name": coupon.name,
 				"coupon_code": coupon.coupon_code,
 				"coupon_name": coupon.coupon_name or coupon.coupon_code,
-				"coupon_type": "Gift Card",
+				"coupon_type": "Gift Card",  # Keep as Gift Card for frontend display
 				"customer": coupon.customer,
 				"customer_name": customer_name,
 				"gift_card_amount": coupon.gift_card_amount,

@@ -211,7 +211,7 @@ def generate_referrer_coupon(referral):
         "doctype": "Coupon Code",
         "coupon_name": coupon_name,
         "coupon_code": coupon_code,
-        "coupon_type": "Gift Card",
+        "coupon_type": "Promotional",
         "pricing_rule": pricing_rule.name,
         "valid_from": valid_from,
         "valid_upto": valid_upto,

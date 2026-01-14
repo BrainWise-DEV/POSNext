@@ -227,7 +227,7 @@ def _create_gift_card(amount, customer, company, source_invoice, settings):
 		coupon = frappe.get_doc({
 			"doctype": "Coupon Code",
 			"coupon_name": f"Gift Card {code}",
-			"coupon_type": "Gift Card",
+			"coupon_type": "Promotional",
 			"coupon_code": code,
 			"pricing_rule": pricing_rule,
 			"valid_from": valid_from,
@@ -371,7 +371,7 @@ def create_gift_card_manual(amount, company, customer=None, validity_months=12):
 		coupon = frappe.get_doc({
 			"doctype": "Coupon Code",
 			"coupon_name": f"Gift Card {code}",
-			"coupon_type": "Gift Card",
+			"coupon_type": "Promotional",
 			"coupon_code": code,
 			"pricing_rule": pricing_rule,
 			"valid_from": valid_from,
@@ -440,9 +440,6 @@ def apply_gift_card(coupon_code, invoice_total, customer=None, company=None):
 	if not coupon.get("pos_next_gift_card"):
 		return {"success": False, "message": _("This is not a POS Next gift card")}
 
-	if coupon.get("coupon_type") != "Gift Card":
-		return {"success": False, "message": _("This is not a gift card")}
-
 	# Check validity dates
 	today = getdate(nowdate())
 	if coupon.valid_from and getdate(coupon.valid_from) > today:
@@ -488,7 +485,7 @@ def get_gift_cards_with_balance(customer=None, company=None):
 		list: Gift cards with balance > 0
 	"""
 	filters = {
-		"coupon_type": "Gift Card",
+		"coupon_type": "Promotional",
 		"pos_next_gift_card": 1
 	}
 
@@ -573,7 +570,7 @@ def process_gift_card_on_submit(doc, method=None):
 		return
 
 	# Only process POS Next gift cards
-	if not coupon.get("pos_next_gift_card") or coupon.get("coupon_type") != "Gift Card":
+	if not coupon.get("pos_next_gift_card"):
 		return
 
 	# Get gift card settings for splitting option
@@ -689,7 +686,7 @@ def process_gift_card_on_cancel(doc, method=None):
 		return
 
 	# Only process POS Next gift cards
-	if not coupon.get("pos_next_gift_card") or coupon.get("coupon_type") != "Gift Card":
+	if not coupon.get("pos_next_gift_card"):
 		return
 
 	try:

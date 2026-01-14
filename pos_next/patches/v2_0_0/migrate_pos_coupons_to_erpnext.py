@@ -137,7 +137,7 @@ def _create_erpnext_coupon(pos_coupon: dict):
 		"doctype": "Coupon Code",
 		"coupon_name": pos_coupon.coupon_name or f"Gift Card {pos_coupon.coupon_code}",
 		"coupon_code": pos_coupon.coupon_code,
-		"coupon_type": "Gift Card",
+		"coupon_type": "Promotional",
 		"pricing_rule": pricing_rule.name,
 		"valid_from": pos_coupon.valid_from or getdate(nowdate()),
 		"valid_upto": pos_coupon.valid_upto or add_months(getdate(nowdate()), 12),

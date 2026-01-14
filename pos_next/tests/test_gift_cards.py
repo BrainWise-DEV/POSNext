@@ -112,7 +112,7 @@ class TestManualGiftCardCreation(unittest.TestCase):
 
 		# Verify coupon was created in database
 		coupon = frappe.get_doc("Coupon Code", result.get("name"))
-		self.assertEqual(coupon.coupon_type, "Gift Card")
+		self.assertEqual(coupon.coupon_type, "Promotional")
 		self.assertEqual(coupon.pos_next_gift_card, 1)
 		self.assertEqual(flt(coupon.gift_card_amount), 100)
 		self.assertEqual(flt(coupon.original_gift_card_amount), 100)
