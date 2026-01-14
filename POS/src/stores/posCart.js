@@ -1363,6 +1363,14 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			if (updates.discount_amount !== undefined) cartItem.discount_amount = updates.discount_amount
 			if (updates.rate !== undefined) cartItem.rate = updates.rate
 			if (updates.price_list_rate !== undefined) cartItem.price_list_rate = updates.price_list_rate
+			if (updates.rate !== undefined) {
+				// Update rate (for zero-price items like gift cards)
+				cartItem.rate = updates.rate
+				// Also update price_list_rate to keep consistency
+				if (cartItem.price_list_rate === 0) {
+					cartItem.price_list_rate = updates.rate
+				}
+			}
 			if (updates.serial_no !== undefined) cartItem.serial_no = updates.serial_no
 			// Track manual rate edits for audit purposes
 			if (updates.is_rate_manually_edited !== undefined) cartItem.is_rate_manually_edited = updates.is_rate_manually_edited
