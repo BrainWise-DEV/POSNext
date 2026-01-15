@@ -541,6 +541,7 @@ def process_gift_card_on_submit(doc, method=None):
 	Process gift card after invoice submission.
 	Updates the ERPNext Coupon Code balance.
 	Handles splitting if gift card amount > invoice total.
+	Also handles returns (Credit Notes) to restore gift card balance.
 
 	Args:
 		doc: Invoice document or invoice name
@@ -556,6 +557,11 @@ def process_gift_card_on_submit(doc, method=None):
 			invoice = frappe.get_doc("POS Invoice", doc)
 	else:
 		invoice = doc
+
+	# Handle returns (Credit Notes) - restore gift card balance
+	if getattr(invoice, 'is_return', 0) and getattr(invoice, 'return_against', None):
+		_process_gift_card_return(invoice)
+		return
 
 	# Get coupon code from invoice
 	coupon_code = getattr(invoice, 'posa_coupon_code', None) or getattr(invoice, 'coupon_code', None)
@@ -656,6 +662,99 @@ def _update_gift_card_balance(coupon_name, new_balance, pricing_rule=None):
 # ==========================================
 # Gift Card Return/Cancel Handling
 # ==========================================
+
+def _process_gift_card_return(return_invoice):
+	"""
+	Process gift card balance restoration when a return (Credit Note) is submitted.
+	Gets the gift card info from the original invoice and restores the balance.
+
+	Args:
+		return_invoice: The return invoice document (with is_return=1)
+	"""
+	try:
+		original_invoice_name = return_invoice.return_against
+		if not original_invoice_name:
+			return
+
+		# Get the original invoice to find the gift card used
+		original_invoice = frappe.get_doc(return_invoice.doctype, original_invoice_name)
+
+		# Get coupon code from original invoice
+		coupon_code = getattr(original_invoice, 'posa_coupon_code', None) or getattr(original_invoice, 'coupon_code', None)
+
+		if not coupon_code:
+			return
+
+		coupon_code = coupon_code.strip().upper()
+
+		# Get the Coupon Code
+		coupon = frappe.db.get_value(
+			"Coupon Code",
+			{"coupon_code": coupon_code},
+			["name", "coupon_type", "pos_next_gift_card", "gift_card_amount",
+			 "original_gift_card_amount", "pricing_rule"],
+			as_dict=True
+		)
+
+		if not coupon:
+			return
+
+		# Only process POS Next gift cards
+		if not coupon.get("pos_next_gift_card"):
+			return
+
+		# Calculate the refund amount from the return invoice
+		# Use absolute value since return invoices have negative amounts
+		# Get the gift card amount used from the original invoice
+		refund_amount = flt(getattr(original_invoice, 'posa_gift_card_amount_used', 0))
+		if not refund_amount:
+			refund_amount = flt(original_invoice.discount_amount)
+
+		# For partial returns, calculate proportionally
+		# Compare return total vs original total to get the return ratio
+		original_total = abs(flt(original_invoice.grand_total)) + flt(original_invoice.discount_amount)
+		return_total = abs(flt(return_invoice.grand_total))
+
+		if original_total > 0 and return_total < original_total:
+			# Partial return - calculate proportional refund
+			return_ratio = return_total / original_total
+			refund_amount = flt(refund_amount * return_ratio)
+
+		if refund_amount <= 0:
+			return
+
+		current_balance = flt(coupon.gift_card_amount)
+		original_amount = flt(coupon.original_gift_card_amount)
+
+		new_balance = current_balance + refund_amount
+
+		# Cap at original amount
+		if original_amount and new_balance > original_amount:
+			new_balance = original_amount
+
+		# Update balance (don't increment used counter for returns)
+		frappe.db.set_value(
+			"Coupon Code",
+			coupon.name,
+			"gift_card_amount",
+			flt(new_balance)
+		)
+
+		# Update Pricing Rule
+		if coupon.pricing_rule:
+			frappe.db.set_value(
+				"Pricing Rule",
+				coupon.pricing_rule,
+				"discount_amount",
+				flt(new_balance)
+			)
+
+	except Exception as e:
+		frappe.log_error(
+			"Gift Card Return Processing Failed",
+			f"Failed to process gift card return for invoice {return_invoice.name}: {str(e)}"
+		)
+
 
 @frappe.whitelist()
 def get_gift_cards_from_invoice(invoice_name):
