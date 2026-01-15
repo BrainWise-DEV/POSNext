@@ -711,13 +711,13 @@ def _process_gift_card_return(return_invoice):
 			refund_amount = flt(original_invoice.discount_amount)
 
 		# For partial returns, calculate proportionally
-		# Compare return total vs original total to get the return ratio
-		original_total = abs(flt(original_invoice.grand_total)) + flt(original_invoice.discount_amount)
-		return_total = abs(flt(return_invoice.grand_total))
+		# Compare return net total vs original net total (both are after discount)
+		original_net = abs(flt(original_invoice.grand_total))
+		return_net = abs(flt(return_invoice.grand_total))
 
-		if original_total > 0 and return_total < original_total:
+		if original_net > 0 and return_net < original_net:
 			# Partial return - calculate proportional refund
-			return_ratio = return_total / original_total
+			return_ratio = return_net / original_net
 			refund_amount = flt(refund_amount * return_ratio)
 
 		if refund_amount <= 0:
