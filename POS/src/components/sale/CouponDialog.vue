@@ -182,7 +182,12 @@ const props = defineProps({
 	subtotal: {
 		type: Number,
 		required: true,
-		note: __("Cart subtotal BEFORE tax - used for discount calculations"),
+		note: __("Cart subtotal BEFORE tax - used for regular coupon discount calculations"),
+	},
+	netTotal: {
+		type: Number,
+		required: true,
+		note: __("Net total AFTER pricing rules but BEFORE additional discount - used for gift card calculations"),
 	},
 	items: Array,
 	posProfile: String,
@@ -318,12 +323,14 @@ async function applyCoupon() {
 		let remainingBalance = 0
 
 		if (isGiftCard) {
-			// Gift card: use balance as discount, cap at subtotal
+			// Gift card: use balance as discount, cap at netTotal (after pricing rules)
+			// This is critical: gift card discount must be based on the ACTUAL amount to pay
+			// after pricing rules have been applied, not the original subtotal
 			availableBalance = coupon.balance || coupon.gift_card_amount || coupon.discount_amount || 0
-			discountAmount = Math.min(availableBalance, props.subtotal)
+			discountAmount = Math.min(availableBalance, props.netTotal)
 			remainingBalance = availableBalance - discountAmount
 		} else {
-			// Regular coupon: calculate based on discount type
+			// Regular coupon: calculate based on discount type (uses original subtotal)
 			const discountObj = {
 				percentage: coupon.discount_type === "Percentage" ? coupon.discount_percentage : 0,
 				amount: coupon.discount_type === "Amount" ? coupon.discount_amount : 0,
@@ -336,8 +343,11 @@ async function applyCoupon() {
 			}
 		}
 
-		// Clamp discount to subtotal to prevent negative totals
-		discountAmount = Math.min(discountAmount, props.subtotal)
+		// Clamp discount to the appropriate total based on coupon type
+		// Gift cards: clamp to netTotal (after pricing rules)
+		// Regular coupons: clamp to subtotal (original prices)
+		const maxDiscount = isGiftCard ? props.netTotal : props.subtotal
+		discountAmount = Math.min(discountAmount, maxDiscount)
 
 		appliedDiscount.value = {
 			name: coupon.coupon_name || coupon.coupon_code,

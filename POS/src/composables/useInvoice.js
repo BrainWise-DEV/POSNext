@@ -189,6 +189,11 @@ export function useInvoice() {
 	const totalDiscount = computed(() =>
 		roundCurrency(_cachedTotalDiscount.value + (additionalDiscount.value || 0)),
 	)
+	// Net total after item-level discounts (pricing rules) but BEFORE additional discount (coupon/gift card)
+	// This is the correct base for gift card calculations
+	const netTotalBeforeAdditionalDiscount = computed(
+		() => _cachedSubtotal.value - _cachedTotalDiscount.value,
+	)
 	const grandTotal = computed(() => {
 		const discount =
 			_cachedTotalDiscount.value + (additionalDiscount.value || 0)
@@ -1150,6 +1155,7 @@ export function useInvoice() {
 		totalPaid,
 		remainingAmount,
 		canSubmit,
+		netTotalBeforeAdditionalDiscount,
 
 		// Actions
 		addItem,
