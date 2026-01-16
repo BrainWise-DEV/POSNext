@@ -18,7 +18,6 @@
   "section_break_gift_card",
   "enable_gift_cards",
   "gift_card_item",
-  "sync_with_erpnext_coupon",
   "column_break_gift_card",
   "enable_gift_card_splitting",
   "gift_card_validity_months",
@@ -180,14 +179,6 @@
    "options": "Item",
    "depends_on": "enable_gift_cards",
    "description": "Item that represents a gift card purchase. When sold, creates a gift card coupon with the item's price as the gift card value."
-  },
-  {
-   "default": "1",
-   "fieldname": "sync_with_erpnext_coupon",
-   "fieldtype": "Check",
-   "label": "Sync with ERPNext Coupon Code",
-   "depends_on": "enable_gift_cards",
-   "description": "Create ERPNext Coupon Code and Pricing Rule for each gift card. Enables accounting integration and usage in ERPNext."
   },
   {
    "fieldname": "column_break_gift_card",
@@ -584,7 +575,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-01-12 12:00:00.000000",
+ "modified": "2026-01-16 14:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Settings",
