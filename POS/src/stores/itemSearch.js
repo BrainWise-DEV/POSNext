@@ -1,13 +1,14 @@
 import { call } from "@/utils/apiWrapper"
 import { isOffline } from "@/utils/offline"
 import { offlineWorker } from "@/utils/offline/workerClient"
-import { cacheItems, getCachedVariants } from "@/utils/offline/items"
+import { cacheItems, getCachedVariants, updateItemBatchSerialData } from "@/utils/offline/items"
 import { performanceConfig } from "@/utils/performanceConfig"
 import { logger } from "@/utils/logger"
 import { createResource } from "frappe-ui"
 import { defineStore } from "pinia"
 import { computed, ref } from "vue"
 import { useStockStore } from "./stock"
+import { usePOSShiftStore } from "./posShift"
 import { useRealtimePosProfile } from "@/composables/useRealtimePosProfile"
 
 const log = logger.create('ItemSearch')
@@ -74,9 +75,60 @@ async function cacheVariantsForTemplates(items, posProfile) {
 	}
 }
 
+/**
+ * Fetch and cache batch/serial data for items with batch or serial tracking
+ * This ensures batch/serial selection works offline
+ * @param {Array} items - Items array to check for batch/serial items
+ * @param {string} warehouse - Warehouse to fetch stock from
+ */
+async function cacheBatchSerialForItems(items, warehouse) {
+	if (!items || items.length === 0 || !warehouse) return
+
+	// Find items with batch or serial tracking
+	const batchSerialItems = items.filter(
+		item => item.has_batch_no || item.has_serial_no
+	)
+
+	if (batchSerialItems.length === 0) {
+		log.debug("No batch/serial items found - skipping batch/serial caching")
+		return
+	}
+
+	log.info(`Caching batch/serial data for ${batchSerialItems.length} items`)
+
+	// Fetch in batches to avoid too large requests
+	const BATCH_SIZE = 20
+	const itemCodes = batchSerialItems.map(item => item.item_code)
+
+	for (let i = 0; i < itemCodes.length; i += BATCH_SIZE) {
+		const batchCodes = itemCodes.slice(i, i + BATCH_SIZE)
+
+		try {
+			const response = await call("pos_next.api.items.get_batch_serial_data_for_items", {
+				item_codes: JSON.stringify(batchCodes),
+				warehouse: warehouse,
+			})
+
+			const data = response?.message || response || {}
+
+			if (Object.keys(data).length > 0) {
+				await updateItemBatchSerialData(data)
+				log.debug(`Cached batch/serial data for ${Object.keys(data).length} items`)
+			}
+		} catch (error) {
+			log.warn(`Failed to fetch batch/serial data for batch ${i}:`, error.message)
+		}
+	}
+
+	log.success(`Finished caching batch/serial data for offline use`)
+}
+
 export const useItemSearchStore = defineStore("itemSearch", () => {
 	// Get stock store instance
 	const stockStore = useStockStore()
+
+	// Get shift store for warehouse info (for batch/serial caching)
+	const shiftStore = usePOSShiftStore()
 
 	// Real-time POS Profile updates
 	const { onPosProfileUpdate } = useRealtimePosProfile()
@@ -840,6 +892,13 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 					cacheVariantsForTemplates(fetchedItems, profile).catch(err => {
 						log.warn("Background variant caching failed:", err.message)
 					})
+
+					// Cache batch/serial data for offline use
+					if (shiftStore.profileWarehouse) {
+						cacheBatchSerialForItems(fetchedItems, shiftStore.profileWarehouse).catch(err => {
+							log.warn("Background batch/serial caching failed:", err.message)
+						})
+					}
 				} else {
 					log.info('No items found for the selected filter groups')
 				}
@@ -887,6 +946,13 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 					cacheVariantsForTemplates(list, profile).catch(err => {
 						log.warn("Background variant caching failed:", err.message)
 					})
+
+					// Cache batch/serial data for offline use
+					if (shiftStore.profileWarehouse) {
+						cacheBatchSerialForItems(list, shiftStore.profileWarehouse).catch(err => {
+							log.warn("Background batch/serial caching failed:", err.message)
+						})
+					}
 				}
 
 				// Start background sync to cache remaining items over time
@@ -1153,6 +1219,13 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 					cacheVariantsForTemplates(list, profile).catch(err => {
 						log.warn("Background variant caching failed:", err.message)
 					})
+
+					// Cache batch/serial data for offline use
+					if (shiftStore.profileWarehouse) {
+						cacheBatchSerialForItems(list, shiftStore.profileWarehouse).catch(err => {
+							log.warn("Background batch/serial caching failed:", err.message)
+						})
+					}
 
 					// Only update stats periodically to reduce IndexedDB queries
 					const shouldUpdateStats = batchCount % statsUpdateFrequency === 0 || list.length < batchSize

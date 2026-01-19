@@ -1745,3 +1745,109 @@ def get_product_bundle_availability(item_code, warehouse):
 			f"Bundle Availability Error: {item_code} in {warehouse}"
 		)
 		frappe.throw(_("Error fetching bundle availability for {0}: {1}").format(item_code, str(e)))
+
+
+@frappe.whitelist()
+def get_batch_serial_data_for_items(item_codes, warehouse):
+	"""
+	Get batch and serial number data for multiple items (for offline caching).
+
+	This endpoint is optimized for bulk fetching to enable offline batch/serial selection.
+	Similar to how variants are cached for offline use.
+
+	Args:
+		item_codes (list|str): List of item codes or JSON string
+		warehouse (str): Warehouse to fetch stock from
+
+	Returns:
+		dict: Mapping of item_code to batch/serial data
+			{
+				"ITEM-001": {
+					"batch_no_data": [...],
+					"serial_no_data": [...]
+				},
+				...
+			}
+	"""
+	try:
+		if isinstance(item_codes, str):
+			item_codes = json.loads(item_codes)
+
+		if not item_codes or not warehouse:
+			return {}
+
+		today = nowdate()
+		result = {}
+
+		# Get item details to check which items have batch/serial tracking
+		Item = DocType("Item")
+		items = (
+			frappe.qb.from_(Item)
+			.select(
+				Item.name.as_("item_code"),
+				Item.has_batch_no,
+				Item.has_serial_no,
+			)
+			.where(Item.name.isin(item_codes))
+			.run(as_dict=True)
+		)
+
+		items_map = {item["item_code"]: item for item in items}
+
+		# Batch items - fetch all batches in bulk
+		batch_items = [code for code in item_codes if items_map.get(code, {}).get("has_batch_no")]
+		serial_items = [code for code in item_codes if items_map.get(code, {}).get("has_serial_no")]
+
+		# Initialize result for all items
+		for item_code in item_codes:
+			result[item_code] = {
+				"batch_no_data": [],
+				"serial_no_data": [],
+			}
+
+		# Fetch batch data for batch-tracked items
+		if batch_items:
+			for item_code in batch_items:
+				batch_list = get_batch_qty(warehouse=warehouse, item_code=item_code)
+				if batch_list:
+					for batch in batch_list:
+						if batch.qty > 0 and batch.batch_no:
+							batch_doc = frappe.get_cached_doc("Batch", batch.batch_no)
+							is_not_expired = (
+								str(batch_doc.expiry_date) > str(today)
+								or batch_doc.expiry_date in ["", None]
+							)
+							is_enabled = batch_doc.disabled == 0
+
+							if is_not_expired and is_enabled:
+								result[item_code]["batch_no_data"].append({
+									"batch_no": batch.batch_no,
+									"batch_qty": batch.qty,
+									"expiry_date": str(batch_doc.expiry_date) if batch_doc.expiry_date else None,
+									"manufacturing_date": str(batch_doc.manufacturing_date) if batch_doc.manufacturing_date else None,
+								})
+
+		# Fetch serial data for serial-tracked items in bulk
+		if serial_items:
+			serials = frappe.get_all(
+				"Serial No",
+				filters={
+					"item_code": ["in", serial_items],
+					"status": "Active",
+					"warehouse": warehouse,
+				},
+				fields=["name as serial_no", "item_code", "warehouse"],
+			)
+
+			# Group by item_code
+			for serial in serials:
+				result[serial["item_code"]]["serial_no_data"].append({
+					"serial_no": serial["serial_no"],
+					"warehouse": serial["warehouse"],
+				})
+
+		return result
+
+	except Exception as e:
+		frappe.log_error(frappe.get_traceback(), "Get Batch/Serial Data for Items Error")
+		return {}

@@ -202,6 +202,8 @@ import { Button, Dialog, createResource } from "frappe-ui"
 import { computed, ref, watch } from "vue"
 import { useSerialNumberStore } from "@/stores/serialNumber"
 import { usePOSCartStore } from "@/stores/posCart"
+import { getCachedBatchData, getCachedSerialData } from "@/utils/offline/items"
+import { isOffline } from "@/utils/offline"
 
 const props = defineProps({
 	modelValue: Boolean,
@@ -320,8 +322,30 @@ const isLoadingSerials = computed(() => serialStore.loading)
 
 async function loadBatchesOrSerials() {
 	if (props.item?.has_batch_no) {
+		// Try cached data first when offline
+		if (isOffline()) {
+			const cachedBatches = await getCachedBatchData(props.item.item_code)
+			if (cachedBatches && cachedBatches.length > 0) {
+				warehouseBatches.value = cachedBatches.map((batch) => ({
+					batch_no: batch.batch_no,
+					qty: batch.batch_qty,
+					expiry_date: batch.expiry_date,
+					manufacturing_date: batch.manufacturing_date,
+				}))
+				return
+			}
+		}
+		// Fetch from server when online
 		batchesResource.reload()
 	} else if (props.item?.has_serial_no) {
+		// Try cached data first when offline
+		if (isOffline()) {
+			const cachedSerials = await getCachedSerialData(props.item.item_code)
+			if (cachedSerials && cachedSerials.length > 0) {
+				availableSerials.value = cachedSerials
+				return
+			}
+		}
 		// Set warehouse in store
 		serialStore.setWarehouse(props.warehouse)
 		// Fetch from store (uses cache if valid)
