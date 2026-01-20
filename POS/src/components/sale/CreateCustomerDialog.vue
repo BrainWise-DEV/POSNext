@@ -394,7 +394,7 @@ const updateTerritoryFromCountry = () => {
 // GSTIN Autofill Methods
 // =============================================================================
 
-/** Fetch GSTIN info from India Compliance API */
+/** Fetch GSTIN info from POS API */
 const fetchGSTINInfo = async () => {
 	const gstin = customerData.value.gstin?.trim()
 
@@ -407,7 +407,7 @@ const fetchGSTINInfo = async () => {
 	gstinStatus.value = ""
 
 	try {
-		const response = await fetch("/api/method/india_compliance.gst_india.utils.gstin_info.get_gstin_info", {
+		const response = await fetch("/api/method/pos_next.api.gstin.get_gstin_info_for_pos", {
 			method: "POST",
 			headers: {
 				"Content-Type": "application/json",
@@ -415,14 +415,12 @@ const fetchGSTINInfo = async () => {
 			},
 			body: JSON.stringify({
 				gstin: gstin,
-				throw_error: false,
-				doc: { doctype: "Customer" },
 			}),
 		})
 
 		const data = await response.json()
 
-		if (data.message && !data.exc) {
+		if (data.message && !data.message.error) {
 			const gstinInfo = data.message
 
 			// Set business name as customer name
@@ -459,13 +457,17 @@ const fetchGSTINInfo = async () => {
 			}
 
 			log.info("GSTIN info fetched successfully", gstinInfo)
+			showSuccess(__("GSTIN details fetched successfully"))
 		} else {
-			gstinStatus.value = "Invalid GSTIN or unable to fetch details"
+			const errorMsg = data.message?.message || data.exc || "Invalid GSTIN or unable to fetch details"
+			gstinStatus.value = errorMsg
+			showError(errorMsg)
 			log.warn("Failed to fetch GSTIN info", data)
 		}
 	} catch (error) {
 		log.error("Error fetching GSTIN info", error)
 		gstinStatus.value = "Error fetching GSTIN details"
+		showError(__("Error fetching GSTIN details"))
 	} finally {
 		fetchingGSTIN.value = false
 	}
