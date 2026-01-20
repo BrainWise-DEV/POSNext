@@ -99,6 +99,65 @@
 					<Input v-model="customerData.email_id" type="email" :placeholder="__('Enter email address')" />
 				</div>
 
+				<!-- GSTIN with Autofill -->
+				<div>
+					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
+						{{ __("GSTIN") }}
+					</label>
+					<div class="flex gap-2">
+						<input
+							v-model="customerData.gstin"
+							type="text"
+							:placeholder="__('Enter 15-digit GSTIN')"
+							maxlength="15"
+							class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-start uppercase"
+							@input="customerData.gstin = customerData.gstin.toUpperCase()"
+						/>
+						<button
+							type="button"
+							@click="fetchGSTINInfo"
+							:disabled="!customerData.gstin || customerData.gstin.length !== 15 || fetchingGSTIN"
+							class="px-4 py-2 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed"
+						>
+							{{ fetchingGSTIN ? __("Fetching...") : __("Autofill") }}
+						</button>
+					</div>
+					<p v-if="gstinStatus" class="mt-1 text-xs" :class="gstinStatus.includes('Status') ? 'text-green-600' : 'text-red-600'">
+						{{ gstinStatus }}
+					</p>
+				</div>
+
+				<!-- Customer Type -->
+				<div>
+					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
+						{{ __("Customer Type") }}
+					</label>
+					<select
+						v-model="customerData.customer_type"
+						class="w-full px-8 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+					>
+						<option v-for="type in customerTypes" :key="type" :value="type">
+							{{ type }}
+						</option>
+					</select>
+				</div>
+
+				<!-- GST Category -->
+				<div>
+					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
+						{{ __("GST Category") }}
+					</label>
+					<select
+						v-model="customerData.gst_category"
+						class="w-full px-8 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+					>
+						<option value="">{{ __("Select GST Category") }}</option>
+						<option v-for="category in gstCategories" :key="category" :value="category">
+							{{ category }}
+						</option>
+					</select>
+				</div>
+
 				<!-- Customer Group -->
 				<div>
 					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
@@ -227,13 +286,20 @@ const countrySearchRef = ref(null)
 
 const customerGroups = ref(["Commercial", "Individual", "Non Profit", "Government"])
 const territories = ref(["All Territories"])
+const customerTypes = ref(["Company", "Individual", "Partnership"])
+const gstCategories = ref(["Registered Regular", "Registered Composition", "Unregistered", "SEZ", "Overseas", "Tax Deductor", "Tax Collector", "UIN Holders"])
+const fetchingGSTIN = ref(false)
+const gstinStatus = ref("")
 
 const customerData = ref({
 	customer_name: "",
+	customer_type: "Individual",
 	mobile_no: "",
 	email_id: "",
 	customer_group: "Individual",
 	territory: "All Territories",
+	gstin: "",
+	gst_category: "",
 })
 
 // =============================================================================
@@ -325,6 +391,87 @@ const updateTerritoryFromCountry = () => {
 }
 
 // =============================================================================
+// GSTIN Autofill Methods
+// =============================================================================
+
+/** Fetch GSTIN info from India Compliance API */
+const fetchGSTINInfo = async () => {
+	const gstin = customerData.value.gstin?.trim()
+
+	if (!gstin || gstin.length !== 15) {
+		gstinStatus.value = ""
+		return
+	}
+
+	fetchingGSTIN.value = true
+	gstinStatus.value = ""
+
+	try {
+		const response = await fetch("/api/method/india_compliance.gst_india.utils.gstin_info.get_gstin_info", {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				"X-Frappe-CSRF-Token": frappe.csrf_token || window.csrf_token,
+			},
+			body: JSON.stringify({
+				gstin: gstin,
+				throw_error: false,
+				doc: { doctype: "Customer" },
+			}),
+		})
+
+		const data = await response.json()
+
+		if (data.message && !data.exc) {
+			const gstinInfo = data.message
+
+			// Set business name as customer name
+			if (gstinInfo.business_name && !customerData.value.customer_name) {
+				customerData.value.customer_name = gstinInfo.business_name
+			}
+
+			// Set GST Category
+			if (gstinInfo.gst_category) {
+				customerData.value.gst_category = gstinInfo.gst_category
+			}
+
+			// Set customer type based on GSTIN 6th character (F=Partnership, C=Company)
+			const gstinTypeChar = gstin[5]
+			if (gstinTypeChar === "F") {
+				customerData.value.customer_type = "Partnership"
+			} else if (gstinTypeChar === "C") {
+				customerData.value.customer_type = "Company"
+			}
+
+			// Set address if available
+			if (gstinInfo.permanent_address) {
+				const addr = gstinInfo.permanent_address
+
+				// Set state-based territory
+				if (addr.state && territories.value.includes(addr.state)) {
+					customerData.value.territory = addr.state
+				}
+			}
+
+			// Set status description
+			if (gstinInfo.status) {
+				gstinStatus.value = `Status: ${gstinInfo.status}`
+			}
+
+			log.info("GSTIN info fetched successfully", gstinInfo)
+		} else {
+			gstinStatus.value = "Invalid GSTIN or unable to fetch details"
+			log.warn("Failed to fetch GSTIN info", data)
+		}
+	} catch (error) {
+		log.error("Error fetching GSTIN info", error)
+		gstinStatus.value = "Error fetching GSTIN details"
+	} finally {
+		fetchingGSTIN.value = false
+	}
+}
+
+// =============================================================================
 // API Resources
 // =============================================================================
 
@@ -334,11 +481,13 @@ const createCustomerResource = createResource({
 		doc: {
 			doctype: "Customer",
 			customer_name: customerData.value.customer_name,
-			customer_type: "Individual",
+			customer_type: customerData.value.customer_type || "Individual",
 			customer_group: customerData.value.customer_group || __("Individual"),
 			territory: customerData.value.territory || __("All Territories"),
 			mobile_no: customerData.value.mobile_no || "",
 			email_id: customerData.value.email_id || "",
+			gstin: customerData.value.gstin || "",
+			gst_category: customerData.value.gst_category || "",
 		},
 	}),
 	onSuccess: (data) => {
@@ -428,13 +577,17 @@ const handleCreate = async () => {
 const resetForm = () => {
 	Object.assign(customerData.value, {
 		customer_name: "",
+		customer_type: "Individual",
 		mobile_no: "",
 		email_id: "",
 		customer_group: "Individual",
 		territory: "All Territories",
+		gstin: "",
+		gst_category: "",
 	})
 	selectedCountryCode.value = ""
 	phoneNumber.value = ""
+	gstinStatus.value = ""
 }
 
 // =============================================================================
