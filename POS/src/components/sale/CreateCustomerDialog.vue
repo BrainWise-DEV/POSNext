@@ -411,11 +411,14 @@ const fetchGSTINInfo = async () => {
 	gstinStatus.value = "Fetching..."
 
 	try {
+		// Get CSRF token from window.frappe or window
+		const csrfToken = window.frappe?.csrf_token || window.csrf_token || ""
+
 		const response = await fetch("/api/method/pos_next.api.gstin.get_gstin_info_for_pos", {
 			method: "POST",
 			headers: {
 				"Content-Type": "application/json",
-				"X-Frappe-CSRF-Token": frappe.csrf_token || window.csrf_token,
+				"X-Frappe-CSRF-Token": csrfToken,
 			},
 			body: JSON.stringify({
 				gstin: gstin,
