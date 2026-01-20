@@ -1352,11 +1352,21 @@ function handleShiftClosed() {
 }
 
 function handleItemSelected(item, autoAdd = false) {
+	console.log("[POSSale] handleItemSelected called:", {
+		item_code: item.item_code,
+		serial_no: item.serial_no,
+		autoAdd: autoAdd,
+		has_serial_no: item.has_serial_no
+	})
+
 	// Auto-add mode
 	if (autoAdd) {
 		try {
+			console.log("[POSSale] Adding item to cart with autoAdd=true")
 			cartStore.addItem(item, 1, true, shiftStore.currentProfile)
+			console.log("[POSSale] Item successfully added to cart")
 		} catch (error) {
+			console.error("[POSSale] Error adding item to cart:", error)
 			uiStore.showError(
 				__("Insufficient Stock"),
 				error.message,

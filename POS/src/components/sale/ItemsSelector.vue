@@ -1122,13 +1122,28 @@ async function handleBarcodeSearch(forceAutoAdd = false) {
 		const item = await itemStore.searchByBarcode(barcode)
 
 		if (item) {
-			// Item found by barcode - add to cart immediately with auto-add flag
-			emit("item-selected", item, shouldAutoAdd)
+			// If item has a pre-selected serial number, always auto-add (bypasses dialog)
+			// Otherwise, respect the shouldAutoAdd flag from scanner/auto-add settings
+			const autoAddItem = shouldAutoAdd || (item.has_serial_no && item.serial_no)
+
+			console.log("[ItemsSelector] Item found by barcode:", {
+				item_code: item.item_code,
+				serial_no: item.serial_no,
+				has_serial_no: item.has_serial_no,
+				shouldAutoAdd: shouldAutoAdd,
+				autoAddItem: autoAddItem
+			})
+
+			emit("item-selected", item, autoAddItem)
 			itemStore.clearSearch()
 			return
+		} else {
+			console.log("[ItemsSelector] Barcode search returned empty result for:", barcode)
 		}
 	} catch (error) {
-		console.error("Barcode API error:", error)
+		console.error("[ItemsSelector] Barcode API error:", error)
+		// Show error to user for debugging
+		showError(__("Barcode search error: {0}", [error.message || error]))
 	}
 
 	// Fallback: If only one item matches in filtered results, auto-select it

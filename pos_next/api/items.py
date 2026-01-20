@@ -41,10 +41,15 @@ def get_stock_availability(item_code, warehouse):
 		# Include all child warehouses when a group warehouse is set
 		warehouses = frappe.db.get_descendants("Warehouse", warehouse) or []
 
-	rows = frappe.get_all(
-		"Bin",
-		fields=["sum(actual_qty) as actual_qty"],
-		filters={"item_code": item_code, "warehouse": ["in", warehouses]},
+	# Use raw SQL for aggregate function
+	rows = frappe.db.sql(
+		"""
+		SELECT SUM(actual_qty) as actual_qty
+		FROM `tabBin`
+		WHERE item_code = %s AND warehouse IN %s
+		""",
+		(item_code, warehouses),
+		as_dict=1,
 	)
 
 	return flt(rows[0].actual_qty) if rows else 0.0
@@ -336,6 +341,20 @@ def search_by_barcode(barcode, pos_profile):
 			item_code = frappe.db.get_value("Item", {"name": barcode})
 			barcode_uom = None
 
+			# If still not found, try searching in Serial No table
+		found_serial_no = None
+		if not item_code:
+			serial_data = frappe.db.get_value(
+				"Serial No",
+				{"name": barcode, "status": "Active"},
+				["item_code", "warehouse"],
+				as_dict=True
+			)
+			if serial_data:
+				item_code = serial_data.item_code
+				found_serial_no = barcode  # Store the serial number to pre-select it
+				barcode_uom = None
+
 		if not item_code:
 			frappe.throw(_("Item with barcode {0} not found").format(barcode))
 
@@ -377,6 +396,11 @@ def search_by_barcode(barcode, pos_profile):
 			price_list=pos_profile_doc.selling_price_list,
 			company=pos_profile_doc.company,
 		)
+
+		# If serial number was found, pre-select it in the item details
+		if found_serial_no and item_doc.has_serial_no:
+			item_details["serial_no"] = found_serial_no
+			item_details["qty"] = 1  # Serial items are quantity 1
 
 		return item_details
 	except Exception as e:
@@ -1014,6 +1038,33 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20)
 			params.extend(score_params)
 			params.extend([limit, start])
 			items = frappe.db.sql(query, tuple(params), as_dict=1)
+
+			# If no items found, try searching by serial number
+			if not items:
+				serial_items = frappe.db.sql("""
+					SELECT DISTINCT sn.item_code
+					FROM `tabSerial No` sn
+					WHERE sn.name LIKE %s
+						AND sn.status = 'Active'
+					LIMIT 10
+				""", (f"%{search_term}%",), as_dict=1)
+
+				if serial_items:
+					item_codes = [s.item_code for s in serial_items]
+					# Fetch items by codes found via serial numbers
+					conditions, params = _build_item_base_conditions(pos_profile_doc, item_group)
+					conditions.append("name IN %s")
+					params.append(tuple(item_codes))
+					where_clause = " AND ".join(conditions)
+
+					query = f"""
+						SELECT {ITEM_RESULT_COLUMNS}
+						FROM `tabItem`
+						WHERE {where_clause}
+						LIMIT %s
+					"""
+					params.append(limit)
+					items = frappe.db.sql(query, tuple(params), as_dict=1)
 		else:
 			# No search term - return all items with base filters
 			items = frappe.get_list(
