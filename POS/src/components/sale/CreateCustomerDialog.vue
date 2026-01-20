@@ -2,6 +2,38 @@
 	<Dialog v-model="show" :options="{ title: __('Create New Customer'), size: 'md' }">
 		<template #body-content>
 			<div class="flex flex-col gap-6">
+				<!-- GSTIN with Autofill (Optional) -->
+				<div>
+					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
+						{{ __("GSTIN") }}
+						<span class="text-xs text-gray-500 font-normal ml-1">({{ __("Optional") }})</span>
+					</label>
+					<div class="flex gap-2">
+						<input
+							v-model="customerData.gstin"
+							type="text"
+							:placeholder="__('Enter 15-digit GSTIN to autofill')"
+							maxlength="15"
+							class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-start uppercase"
+							@input="customerData.gstin = customerData.gstin.toUpperCase()"
+						/>
+						<button
+							type="button"
+							@click="fetchGSTINInfo"
+							:disabled="!customerData.gstin || customerData.gstin.length !== 15 || fetchingGSTIN"
+							class="px-4 py-2 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+						>
+							{{ fetchingGSTIN ? __("Fetching...") : __("Autofill") }}
+						</button>
+					</div>
+					<p v-if="gstinStatus" class="mt-1 text-xs" :class="gstinStatus.includes('Status') ? 'text-green-600' : 'text-red-600'">
+						{{ gstinStatus }}
+					</p>
+					<p class="mt-1 text-xs text-gray-500">
+						{{ __("Enter GSTIN to auto-populate business details, or fill manually below") }}
+					</p>
+				</div>
+
 				<!-- Customer Name (Required) -->
 				<div>
 					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
@@ -13,6 +45,37 @@
 						:placeholder="__('Enter customer name')"
 						required
 					/>
+				</div>
+
+				<!-- Customer Type -->
+				<div>
+					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
+						{{ __("Customer Type") }}
+					</label>
+					<select
+						v-model="customerData.customer_type"
+						class="w-full px-8 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+					>
+						<option v-for="type in customerTypes" :key="type" :value="type">
+							{{ type }}
+						</option>
+					</select>
+				</div>
+
+				<!-- GST Category -->
+				<div>
+					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
+						{{ __("GST Category") }}
+					</label>
+					<select
+						v-model="customerData.gst_category"
+						class="w-full px-8 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+					>
+						<option value="">{{ __("Select GST Category") }}</option>
+						<option v-for="category in gstCategories" :key="category" :value="category">
+							{{ category }}
+						</option>
+					</select>
 				</div>
 
 				<!-- Mobile Number with Country Code Selector -->
@@ -97,65 +160,6 @@
 						{{ __("Email") }}
 					</label>
 					<Input v-model="customerData.email_id" type="email" :placeholder="__('Enter email address')" />
-				</div>
-
-				<!-- GSTIN with Autofill -->
-				<div>
-					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
-						{{ __("GSTIN") }}
-					</label>
-					<div class="flex gap-2">
-						<input
-							v-model="customerData.gstin"
-							type="text"
-							:placeholder="__('Enter 15-digit GSTIN')"
-							maxlength="15"
-							class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-start uppercase"
-							@input="customerData.gstin = customerData.gstin.toUpperCase()"
-						/>
-						<button
-							type="button"
-							@click="fetchGSTINInfo"
-							:disabled="!customerData.gstin || customerData.gstin.length !== 15 || fetchingGSTIN"
-							class="px-4 py-2 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed"
-						>
-							{{ fetchingGSTIN ? __("Fetching...") : __("Autofill") }}
-						</button>
-					</div>
-					<p v-if="gstinStatus" class="mt-1 text-xs" :class="gstinStatus.includes('Status') ? 'text-green-600' : 'text-red-600'">
-						{{ gstinStatus }}
-					</p>
-				</div>
-
-				<!-- Customer Type -->
-				<div>
-					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
-						{{ __("Customer Type") }}
-					</label>
-					<select
-						v-model="customerData.customer_type"
-						class="w-full px-8 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-					>
-						<option v-for="type in customerTypes" :key="type" :value="type">
-							{{ type }}
-						</option>
-					</select>
-				</div>
-
-				<!-- GST Category -->
-				<div>
-					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
-						{{ __("GST Category") }}
-					</label>
-					<select
-						v-model="customerData.gst_category"
-						class="w-full px-8 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-					>
-						<option value="">{{ __("Select GST Category") }}</option>
-						<option v-for="category in gstCategories" :key="category" :value="category">
-							{{ category }}
-						</option>
-					</select>
 				</div>
 
 				<!-- Customer Group -->
@@ -404,7 +408,7 @@ const fetchGSTINInfo = async () => {
 	}
 
 	fetchingGSTIN.value = true
-	gstinStatus.value = ""
+	gstinStatus.value = "Fetching..."
 
 	try {
 		const response = await fetch("/api/method/pos_next.api.gstin.get_gstin_info_for_pos", {
@@ -418,12 +422,38 @@ const fetchGSTINInfo = async () => {
 			}),
 		})
 
+		if (!response.ok) {
+			throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+		}
+
 		const data = await response.json()
+
+		// Check for Frappe exception
+		if (data.exc || data._server_messages) {
+			let errorMsg = "Unable to verify GSTIN"
+
+			// Try to extract error message from server messages
+			if (data._server_messages) {
+				try {
+					const messages = JSON.parse(data._server_messages)
+					if (messages.length > 0) {
+						const parsedMsg = JSON.parse(messages[0])
+						errorMsg = parsedMsg.message || errorMsg
+					}
+				} catch (e) {
+					log.warn("Could not parse server messages", e)
+				}
+			}
+
+			gstinStatus.value = errorMsg
+			log.warn("GSTIN verification failed", { gstin, error: errorMsg })
+			return
+		}
 
 		if (data.message && !data.message.error) {
 			const gstinInfo = data.message
 
-			// Set business name as customer name
+			// Set business name as customer name (only if empty)
 			if (gstinInfo.business_name && !customerData.value.customer_name) {
 				customerData.value.customer_name = gstinInfo.business_name
 			}
@@ -454,20 +484,22 @@ const fetchGSTINInfo = async () => {
 			// Set status description
 			if (gstinInfo.status) {
 				gstinStatus.value = `Status: ${gstinInfo.status}`
+			} else {
+				gstinStatus.value = "Details fetched successfully"
 			}
 
 			log.info("GSTIN info fetched successfully", gstinInfo)
 			showSuccess(__("GSTIN details fetched successfully"))
 		} else {
-			const errorMsg = data.message?.message || data.exc || "Invalid GSTIN or unable to fetch details"
+			const errorMsg = data.message?.message || "Invalid GSTIN or unable to fetch details"
 			gstinStatus.value = errorMsg
-			showError(errorMsg)
 			log.warn("Failed to fetch GSTIN info", data)
 		}
 	} catch (error) {
 		log.error("Error fetching GSTIN info", error)
-		gstinStatus.value = "Error fetching GSTIN details"
-		showError(__("Error fetching GSTIN details"))
+		const errorMsg = error.message || "Network error while fetching GSTIN details"
+		gstinStatus.value = errorMsg
+		showError(__("Error: {0}", [errorMsg]))
 	} finally {
 		fetchingGSTIN.value = false
 	}
