@@ -977,7 +977,7 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20)
 		filters = {
 			"disabled": 0,
 			"is_sales_item": 1,  # Only show items with "Allow Sales" enabled
-			"ifnull(variant_of, '')": "",  # Exclude items that are variants of a template
+		"variant_of": ["", None],  # Exclude items that are variants of a template
 		}
 
 		# IMPORTANT: Filtering logic explained:
