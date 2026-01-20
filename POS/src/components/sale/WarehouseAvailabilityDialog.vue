@@ -416,6 +416,10 @@
 									]">
 										{{ Math.floor(warehouse.available_qty) }} {{ warehouse.item_code ? getVariantUom(warehouse.item_code) : displayUom }}
 									</div>
+									<!-- Converted quantity in barcode UOM if different -->
+									<div v-if="selectedBarcodeUom && convertToBarcodeUom(warehouse.available_qty) !== null" class="text-sm text-blue-600 font-medium">
+										≈ {{ Math.floor(convertToBarcodeUom(warehouse.available_qty) * 100) / 100 }} {{ selectedBarcodeUom }}
+									</div>
 									<div class="text-xs text-gray-500 mt-0.5">
 										<span v-if="warehouse.reserved_qty > 0" class="text-orange-600">
 											{{ __( '{0} reserved', [Math.floor(warehouse.reserved_qty)]) }}
@@ -452,16 +456,22 @@
 			<div v-if="isReady" class="pt-4 mt-4 border-t border-gray-200">
 				<div class="flex flex-col sm:flex-row items-start sm:items-center gap-3">
 					<div v-if="(selectedItemCode || itemCode) && warehouses.length > 0" class="text-sm text-gray-600 text-start">
-						<span class="font-medium">{{ __('Total Available') }}:</span>
-						<span class="ms-2 text-gray-900 font-semibold text-lg">
-							{{ totalAvailable }} {{ displayUom }}
-						</span>
-						<span v-if="warehouses.length > 0" class="ms-2 text-gray-500">
-							{{ warehouses.length === 1
-								? __('in 1 warehouse')
-								: __('in {0} warehouses', [warehouses.length])
-							}}
-						</span>
+						<div>
+							<span class="font-medium">{{ __('Total Available') }}:</span>
+							<span class="ms-2 text-gray-900 font-semibold text-lg">
+								{{ totalAvailable }} {{ displayUom }}
+							</span>
+							<span v-if="warehouses.length > 0" class="ms-2 text-gray-500">
+								{{ warehouses.length === 1
+									? __('in 1 warehouse')
+									: __('in {0} warehouses', [warehouses.length])
+								}}
+							</span>
+						</div>
+						<!-- Converted total in barcode UOM if different -->
+						<div v-if="selectedBarcodeUom && convertToBarcodeUom(totalAvailable) !== null" class="text-blue-600 font-medium mt-1">
+							≈ {{ Math.floor(convertToBarcodeUom(totalAvailable) * 100) / 100 }} {{ selectedBarcodeUom }}
+						</div>
 					</div>
 					<button
 						@click="closeDialog"
@@ -548,6 +558,8 @@ const selectedItemName = ref('')
 const selectedItemImage = ref('')
 const selectedUom = ref('Nos')
 const selectedItemHasVariants = ref(false)
+const selectedBarcodeUom = ref('') // Single barcode UOM if different from default
+const selectedItemUoms = ref([]) // Conversion factors for UOMs
 
 // Variant state
 const variants = ref([])
@@ -674,6 +686,8 @@ function resetSearchState() {
 	selectedItemImage.value = ''
 	selectedUom.value = 'Nos'
 	selectedItemHasVariants.value = false
+	selectedBarcodeUom.value = ''
+	selectedItemUoms.value = []
 	variants.value = []
 	selectedVariants.value = []
 	showVariantSelection.value = false
@@ -773,6 +787,16 @@ async function selectItem(item) {
 	selectedItemImage.value = item.image || ''
 	selectedUom.value = item.stock_uom || item.uom || 'Nos'
 	selectedItemHasVariants.value = item.has_variants || false
+	selectedItemUoms.value = item.item_uoms || []
+
+	// Check if barcode_uoms has a single value different from default UOM
+	const barcodeUoms = item.barcode_uoms ? item.barcode_uoms.split(',').map(u => u.trim()).filter(u => u) : []
+	if (barcodeUoms.length === 1 && barcodeUoms[0] !== selectedUom.value) {
+		selectedBarcodeUom.value = barcodeUoms[0]
+	} else {
+		selectedBarcodeUom.value = ''
+	}
+
 	searchQuery.value = ''
 	searchResults.value = []
 	showSearchResults.value = false
@@ -814,6 +838,8 @@ function clearSelectedItem() {
 	selectedItemImage.value = ''
 	selectedUom.value = 'Nos'
 	selectedItemHasVariants.value = false
+	selectedBarcodeUom.value = ''
+	selectedItemUoms.value = []
 	variants.value = []
 	selectedVariants.value = []
 	showVariantSelection.value = false
@@ -822,6 +848,21 @@ function clearSelectedItem() {
 	nextTick(() => {
 		focusSearch()
 	})
+}
+
+/**
+ * Convert quantity from stock UOM to barcode UOM
+ * @param {number} qty - Quantity in stock UOM
+ * @returns {number|null} Converted quantity or null if conversion not possible
+ */
+function convertToBarcodeUom(qty) {
+	if (!selectedBarcodeUom.value || !selectedItemUoms.value.length) return null
+
+	const uomData = selectedItemUoms.value.find(u => u.uom === selectedBarcodeUom.value)
+	if (!uomData || !uomData.conversion_factor) return null
+
+	// Convert: stock_qty / conversion_factor = barcode_uom_qty
+	return qty / uomData.conversion_factor
 }
 
 async function loadVariants() {
