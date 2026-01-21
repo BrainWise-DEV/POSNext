@@ -36,79 +36,204 @@
 					</div>
 
 					<!-- Sales Person Selection (Compact) -->
-					<div v-if="settingsStore.enableSalesPersons" class="bg-purple-50 border border-purple-200 rounded-lg p-2">
-						<!-- Search Input with inline selected badge -->
-						<div class="relative">
-							<input
-								v-model="salesPersonSearch"
-								type="text"
-								:placeholder="selectedSalesPersons.length > 0
-									? selectedSalesPersons[0].sales_person_name || selectedSalesPersons[0].sales_person
-									: __('Search sales person...')"
-								class="w-full px-3 py-2 ps-9 pe-20 text-xs border border-purple-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent bg-white"
-							/>
-							<svg class="w-4 h-4 text-purple-500 absolute start-3 top-1/2 -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
-							</svg>
-							<!-- Selected count badge -->
-							<div v-if="selectedSalesPersons.length > 0" class="absolute end-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-								<span class="text-[10px] font-bold text-purple-600 bg-purple-100 px-1.5 py-0.5 rounded">
-									{{ selectedSalesPersons.length }}
-								</span>
+					<div v-if="settingsStore.enableSalesPersons" :class="[
+						'rounded-lg p-2',
+						!isSalesPersonValid ? 'bg-red-50 border-2 border-red-300' : 'bg-purple-50 border border-purple-200'
+					]">
+						<!-- Single Mode: Show selected person or dropdown -->
+						<template v-if="settingsStore.isSingleSalesPerson">
+							<!-- Show selected person as a nice display -->
+							<div v-if="selectedSalesPersons.length > 0" class="flex items-center justify-between">
+								<div class="flex items-center gap-2">
+									<svg class="w-4 h-4 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+									</svg>
+									<span class="text-sm font-medium text-gray-900">
+										{{ selectedSalesPersons[0].sales_person_name || selectedSalesPersons[0].sales_person }}
+									</span>
+								</div>
 								<button
 									@click="clearSalesPersons"
-									class="text-purple-500 hover:text-purple-700 p-0.5"
+									class="text-purple-500 hover:text-purple-700 p-1 rounded hover:bg-purple-100"
+									:title="__('Change sales person')"
 								>
-									<svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
-										<path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/>
+									<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/>
 									</svg>
 								</button>
 							</div>
-						</div>
-
-						<!-- Dropdown Results (only when searching) -->
-						<div v-if="salesPersonSearch && filteredSalesPersons.length > 0" class="mt-1 max-h-32 overflow-y-auto border border-purple-200 rounded-lg bg-white">
-							<div
-								v-for="person in filteredSalesPersons"
-								:key="person.name"
-								@click="addSalesPerson(person)"
-								class="flex items-center gap-2 p-2 hover:bg-purple-50 cursor-pointer border-b border-purple-100 last:border-b-0 text-xs"
-							>
-								<svg class="w-3.5 h-3.5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
-								</svg>
-								<span class="font-medium text-gray-900">{{ person.sales_person_name || person.name }}</span>
+							<!-- Show dropdown when no selection -->
+							<div v-else ref="salesPersonDropdownRef">
+								<label class="text-xs font-medium text-purple-700 flex items-center gap-1 mb-1">
+									<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+									</svg>
+									{{ __('Sales Person') }}
+									<span class="text-red-500">*</span>
+								</label>
+								<div class="relative">
+									<input
+										v-model="salesPersonSearch"
+										type="text"
+										:placeholder="__('Select sales person...')"
+										@focus="salesPersonDropdownOpen = true"
+										@blur="handleSalesPersonBlur"
+										class="w-full px-3 py-2 ps-3 pe-8 text-xs border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent bg-white"
+										:class="!isSalesPersonValid ? 'border-red-300' : 'border-purple-300'"
+									/>
+									<svg
+										class="w-4 h-4 text-purple-500 absolute end-2 top-1/2 -translate-y-1/2 pointer-events-none transition-transform"
+										:class="{ 'rotate-180': salesPersonDropdownOpen }"
+										fill="none" stroke="currentColor" viewBox="0 0 24 24"
+									>
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+									</svg>
+									<!-- Dropdown -->
+									<div
+										v-if="salesPersonDropdownOpen && availableSalesPersons.length > 0"
+										class="absolute z-50 mt-1 w-full max-h-40 overflow-y-auto border border-purple-200 rounded-lg bg-white shadow-lg"
+									>
+										<div
+											v-for="person in availableSalesPersons"
+											:key="person.name"
+											@mousedown.prevent="addSalesPerson(person)"
+											class="flex items-center justify-between p-2 hover:bg-purple-50 cursor-pointer border-b border-purple-100 last:border-b-0 text-xs"
+										>
+											<span class="font-medium text-gray-900">{{ person.sales_person_name || person.name }}</span>
+											<span v-if="person.commission_rate" class="text-purple-500 text-[10px]">
+												{{ person.commission_rate }}% {{ __('comm.') }}
+											</span>
+										</div>
+									</div>
+									<!-- No Results -->
+									<div
+										v-if="salesPersonDropdownOpen && availableSalesPersons.length === 0 && !loadingSalesPersons"
+										class="absolute z-50 mt-1 w-full border border-purple-200 rounded-lg bg-white shadow-lg"
+									>
+										<div class="text-center py-3 text-xs text-gray-500">
+											{{ __('No sales persons available') }}
+										</div>
+									</div>
+								</div>
+								<!-- Validation message -->
+								<div v-if="!isSalesPersonValid" class="mt-1 text-xs text-red-600 flex items-center gap-1">
+									<svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+										<path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
+									</svg>
+									{{ __('Sales person is required') }}
+								</div>
 							</div>
-						</div>
+						</template>
 
-						<!-- No Results -->
-						<div v-if="salesPersonSearch && filteredSalesPersons.length === 0 && !loadingSalesPersons" class="mt-1 text-center py-2 text-xs text-gray-500">
-							{{ __('No sales persons found') }}
-						</div>
+						<!-- Multiple Mode: Show label, dropdown, and chips -->
+						<template v-else>
+							<!-- Label with required indicator -->
+							<div class="flex items-center justify-between mb-1.5">
+								<label class="text-xs font-medium text-purple-700 flex items-center gap-1">
+									<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+									</svg>
+									{{ __('Sales Persons') }}
+									<span class="text-red-500">*</span>
+								</label>
+								<span v-if="selectedSalesPersons.length > 0" class="text-[10px] text-purple-600">
+									{{ __('Total: {0}%', [Math.round(totalSalesAllocation)]) }}
+								</span>
+							</div>
 
-						<!-- Selected Sales Persons (compact chips) -->
-						<div v-if="selectedSalesPersons.length > 0 && !salesPersonSearch" class="mt-2 flex flex-wrap gap-1">
-							<div
-								v-for="person in selectedSalesPersons"
-								:key="person.sales_person"
-								class="inline-flex items-center gap-1 px-2 py-1 bg-purple-100 border border-purple-300 rounded text-xs"
-							>
-								<span class="font-medium text-gray-900 truncate max-w-[100px]">
-									{{ person.sales_person_name || person.sales_person }}
-								</span>
-								<span v-if="settingsStore.isMultipleSalesPersons" class="text-purple-600 font-semibold">
-									{{ person.allocated_percentage }}%
-								</span>
+							<!-- Search Input with dropdown -->
+							<div class="relative" ref="salesPersonDropdownRef">
+								<input
+									v-model="salesPersonSearch"
+									type="text"
+									:placeholder="selectedSalesPersons.length > 0
+										? __('Add another...')
+										: __('Select sales person...')"
+									@focus="salesPersonDropdownOpen = true"
+									@blur="handleSalesPersonBlur"
+									class="w-full px-3 py-2 ps-3 pe-8 text-xs border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent bg-white"
+									:class="!isSalesPersonValid ? 'border-red-300' : 'border-purple-300'"
+								/>
+								<svg
+									class="w-4 h-4 text-purple-500 absolute end-2 top-1/2 -translate-y-1/2 pointer-events-none transition-transform"
+									:class="{ 'rotate-180': salesPersonDropdownOpen }"
+									fill="none" stroke="currentColor" viewBox="0 0 24 24"
+								>
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+								</svg>
+
+								<!-- Dropdown Results -->
+								<div
+									v-if="salesPersonDropdownOpen && availableSalesPersons.length > 0"
+									class="absolute z-50 mt-1 w-full max-h-40 overflow-y-auto border border-purple-200 rounded-lg bg-white shadow-lg"
+								>
+									<div
+										v-for="person in availableSalesPersons"
+										:key="person.name"
+										@mousedown.prevent="addSalesPerson(person)"
+										class="flex items-center justify-between p-2 hover:bg-purple-50 cursor-pointer border-b border-purple-100 last:border-b-0 text-xs"
+									>
+										<span class="font-medium text-gray-900">{{ person.sales_person_name || person.name }}</span>
+										<span v-if="person.commission_rate" class="text-purple-500 text-[10px]">
+											{{ person.commission_rate }}% {{ __('comm.') }}
+										</span>
+									</div>
+								</div>
+
+								<!-- No Results -->
+								<div
+									v-if="salesPersonDropdownOpen && availableSalesPersons.length === 0 && !loadingSalesPersons"
+									class="absolute z-50 mt-1 w-full border border-purple-200 rounded-lg bg-white shadow-lg"
+								>
+									<div class="text-center py-3 text-xs text-gray-500">
+										{{ salesPersons.length === 0 ? __('No sales persons available') : __('All sales persons selected') }}
+									</div>
+								</div>
+							</div>
+
+							<!-- Validation message -->
+							<div v-if="!isSalesPersonValid" class="mt-1 text-xs text-red-600 flex items-center gap-1">
+								<svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+									<path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
+								</svg>
+								{{ __('Sales person is required') }}
+							</div>
+
+							<!-- Selected Sales Persons (chips) -->
+							<div v-if="selectedSalesPersons.length > 0" class="mt-2 flex flex-wrap gap-1">
+								<div
+									v-for="person in selectedSalesPersons"
+									:key="person.sales_person"
+									class="inline-flex items-center gap-1 px-2 py-1 bg-purple-100 border border-purple-300 rounded text-xs"
+								>
+									<span class="font-medium text-gray-900 truncate max-w-[120px]">
+										{{ person.sales_person_name || person.sales_person }}
+									</span>
+									<span class="text-purple-600 font-semibold">
+										{{ Math.round(person.allocated_percentage) }}%
+									</span>
+									<button
+										@click="removeSalesPerson(person.sales_person)"
+										class="text-purple-500 hover:text-purple-700"
+									>
+										<svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+											<path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/>
+										</svg>
+									</button>
+								</div>
+								<!-- Clear all button -->
 								<button
-									@click="removeSalesPerson(person.sales_person)"
-									class="text-purple-500 hover:text-purple-700"
+									v-if="selectedSalesPersons.length > 1"
+									@click="clearSalesPersons"
+									class="inline-flex items-center gap-1 px-2 py-1 text-xs text-red-600 hover:text-red-700"
 								>
 									<svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
 										<path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/>
 									</svg>
+									{{ __('Clear all') }}
 								</button>
 							</div>
-						</div>
+						</template>
 					</div>
 
 					<!-- Outstanding Balance Row (full width, two columns) -->
@@ -1205,6 +1330,8 @@ const salesPersons = ref([])
 const selectedSalesPersons = ref([])
 const salesPersonSearch = ref('')
 const loadingSalesPersons = ref(false)
+const salesPersonDropdownOpen = ref(false)
+const salesPersonDropdownRef = ref(null)
 
 const salesPersonsResource = createResource({
 	url: "pos_next.api.pos_profile.get_sales_persons",
@@ -1226,14 +1353,10 @@ const salesPersonsResource = createResource({
 	},
 })
 
-// Computed: Filter sales persons based on search and exclude already selected
-const filteredSalesPersons = computed(() => {
-	if (!salesPersonSearch.value) {
-		return []
-	}
-
-	const searchLower = salesPersonSearch.value.toLowerCase()
+// Computed: Available sales persons (exclude already selected, filter by search)
+const availableSalesPersons = computed(() => {
 	const selectedIds = selectedSalesPersons.value.map(p => p.sales_person)
+	const searchLower = (salesPersonSearch.value || '').toLowerCase()
 
 	return salesPersons.value
 		.filter(person => {
@@ -1241,50 +1364,91 @@ const filteredSalesPersons = computed(() => {
 			if (selectedIds.includes(person.name)) {
 				return false
 			}
-			// Filter by search term
-			const name = (person.sales_person_name || person.name || '').toLowerCase()
-			return name.includes(searchLower)
+			// Filter by search term if provided
+			if (searchLower) {
+				const name = (person.sales_person_name || person.name || '').toLowerCase()
+				return name.includes(searchLower)
+			}
+			return true
 		})
 		.slice(0, 10) // Limit to 10 results for performance
 })
 
+// Computed: Total allocation percentage
+const totalSalesAllocation = computed(() => {
+	return selectedSalesPersons.value.reduce((sum, p) => sum + (p.allocated_percentage || 0), 0)
+})
+
+// Computed: Validation - sales person is required when enabled
+const isSalesPersonValid = computed(() => {
+	// If sales persons feature is disabled, always valid
+	if (!settingsStore.enableSalesPersons) {
+		return true
+	}
+	// At least one sales person must be selected
+	return selectedSalesPersons.value.length > 0
+})
+
 // Helper functions for sales persons
 function addSalesPerson(person) {
-	// For Single mode, replace the existing selection
+	// For Single mode, replace the existing selection with 100%
 	if (settingsStore.isSingleSalesPerson) {
 		selectedSalesPersons.value = [{
 			sales_person: person.name,
 			sales_person_name: person.sales_person_name || person.name,
-			allocated_percentage: 100, // Always 100% for single mode
+			allocated_percentage: 100,
 			commission_rate: person.commission_rate,
 		}]
 	} else {
-		// For Multiple mode, add to the list
-		// Calculate default allocation
-		const defaultAllocation = selectedSalesPersons.value.length === 0 ? 100 : 0
-
+		// For Multiple mode, add to the list and redistribute evenly
 		selectedSalesPersons.value.push({
 			sales_person: person.name,
 			sales_person_name: person.sales_person_name || person.name,
-			allocated_percentage: defaultAllocation,
+			allocated_percentage: 0, // Will be recalculated
 			commission_rate: person.commission_rate,
 		})
+		// Redistribute commission evenly among all selected
+		redistributeCommission()
 	}
 
-	// Clear search after adding
+	// Clear search and close dropdown after adding
 	salesPersonSearch.value = ''
+	salesPersonDropdownOpen.value = false
 }
 
 function removeSalesPerson(personName) {
 	const index = selectedSalesPersons.value.findIndex(p => p.sales_person === personName)
 	if (index > -1) {
 		selectedSalesPersons.value.splice(index, 1)
+		// Redistribute commission among remaining
+		if (selectedSalesPersons.value.length > 0) {
+			redistributeCommission()
+		}
 	}
 }
 
 function clearSalesPersons() {
 	selectedSalesPersons.value = []
 	salesPersonSearch.value = ''
+}
+
+// Redistribute commission evenly among all selected sales persons
+function redistributeCommission() {
+	const count = selectedSalesPersons.value.length
+	if (count === 0) return
+
+	const evenShare = 100 / count
+	selectedSalesPersons.value.forEach(person => {
+		person.allocated_percentage = evenShare
+	})
+}
+
+// Handle blur event for dropdown
+function handleSalesPersonBlur() {
+	// Delay closing to allow click events on dropdown items
+	setTimeout(() => {
+		salesPersonDropdownOpen.value = false
+	}, 150)
 }
 
 // Load payment methods - from cache if offline, from server if online
@@ -1372,6 +1536,11 @@ const changeAmount = computed(() => {
 })
 
 const canComplete = computed(() => {
+	// Check sales person validation first (mandatory when enabled)
+	if (!isSalesPersonValid.value) {
+		return false
+	}
+
 	// If partial payment is allowed, can complete with any amount > 0
 	if (props.allowPartialPayment) {
 		return totalPaid.value > 0 && paymentEntries.value.length > 0
