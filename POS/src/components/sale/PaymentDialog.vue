@@ -147,7 +147,209 @@
 					</div>
 				</div>
 
-				<!-- Sales Persons Selection -->
+					<!-- Additional Discount Section (Compact) -->
+				<div v-if="settingsStore.allowAdditionalDiscount" class="bg-gradient-to-r from-orange-50 to-red-50 border border-orange-300 rounded-lg p-2">
+					<div class="flex items-center justify-between mb-1.5">
+						<div class="flex items-center gap-1.5">
+							<div class="w-5 h-5 rounded-full bg-orange-200 flex items-center justify-center">
+								<svg class="w-3 h-3 text-orange-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+								</svg>
+							</div>
+							<span class="text-[11px] font-bold text-orange-900">{{ __('Additional Discount') }}</span>
+							<span v-if="localAdditionalDiscount > 0" class="text-[10px] font-bold text-red-600 bg-red-100 px-1.5 py-0.5 rounded">
+								-{{ formatCurrency(additionalDiscountType === 'percentage' ? (subtotal * localAdditionalDiscount / 100) : localAdditionalDiscount) }}
+							</span>
+						</div>
+						<button
+							v-if="localAdditionalDiscount > 0"
+							@click="clearAdditionalDiscount"
+							class="text-[10px] text-orange-700 hover:text-orange-900 font-semibold px-1.5 py-0.5 bg-orange-100 hover:bg-orange-200 rounded transition-colors"
+						>
+							{{ __('Clear') }}
+						</button>
+					</div>
+					<div class="grid grid-cols-[100px_1fr] gap-1.5">
+						<!-- Discount Type Selector (Compact) -->
+						<select
+							v-model="additionalDiscountType"
+							@change="handleAdditionalDiscountTypeChange"
+							class="w-full px-1.5 py-1.5 text-[11px] font-medium border border-orange-300 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 focus:border-transparent bg-white"
+						>
+							<option value="percentage">{{ __('% Percent') }}</option>
+							<option value="amount">{{ __('{0} Amount', [currencySymbol]) }}</option>
+						</select>
+						<!-- Discount Value Input (Compact) -->
+						<div class="relative">
+							<span v-if="additionalDiscountType === 'amount'" class="absolute start-2 top-1/2 -translate-y-1/2 text-gray-600 text-[11px] font-medium">{{ currencySymbol }}</span>
+							<input
+								type="number"
+								v-model.number="localAdditionalDiscount"
+								@input="handleAdditionalDiscountChange"
+								placeholder="0.00"
+								min="0"
+								:max="additionalDiscountType === 'percentage' ? 100 : subtotal"
+								step="0.01"
+								:class="[
+									'w-full py-1.5 text-[11px] font-semibold border border-orange-300 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 focus:border-transparent bg-white placeholder-gray-400',
+									additionalDiscountType === 'amount' ? 'ps-9 pe-2' : 'px-2 pe-6'
+								]"
+							/>
+							<span v-if="additionalDiscountType === 'percentage'" class="absolute end-2 top-1/2 -translate-y-1/2 text-gray-600 text-[11px] font-medium">%</span>
+						</div>
+					</div>
+				</div>
+
+				<!-- Finance Lender Payments Section -->
+				<div class="text-start mb-3">
+					<div class="flex items-center justify-between mb-3">
+						<div>
+							<h3 class="text-sm font-semibold text-gray-700 flex items-center gap-2">
+								<svg class="w-4 h-4 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"/>
+								</svg>
+								{{ __('Finance Lender Payments') }}
+							</h3>
+						</div>
+						<Button
+							variant="solid"
+							theme="blue"
+							size="sm"
+							@click="addFinanceLenderRow"
+							:disabled="remainingAmount === 0"
+							class="shadow-sm"
+						>
+							<svg class="w-4 h-4 me-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+							</svg>
+							{{ __('Add Entry') }}
+						</Button>
+					</div>
+
+					<!-- Loading State -->
+					<div v-if="loadingFinanceLenders" class="flex items-center justify-center py-4 bg-gray-50 rounded-lg">
+						<div class="animate-spin rounded-full h-6 w-6 border-b-2 border-purple-500"></div>
+						<span class="ms-2 text-sm text-gray-500">{{ __('Loading...') }}</span>
+					</div>
+
+					<!-- Finance Lender Payment Rows -->
+					<div v-else class="space-y-2">
+						<!-- Single Line Payment Entry Rows -->
+						<div
+							v-for="(row, index) in financeLenderPayments"
+							:key="index"
+							class="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg p-2"
+						>
+							<!-- Mode Selector -->
+							<select
+								v-model="row.mode"
+								@change="handleModeChange(index)"
+								class="w-24 flex-shrink-0 px-2 py-1.5 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-purple-500 focus:border-transparent bg-white"
+							>
+								<option value="">{{ __('Mode') }}</option>
+								<option value="Account">{{ __('Account') }}</option>
+								<option value="Customer">{{ __('Customer') }}</option>
+							</select>
+
+							<!-- Finance Lender Selector -->
+							<div class="relative flex-1 min-w-0">
+								<input
+									v-model="row.finance_lender_search"
+									type="text"
+									:placeholder="row.mode === 'Account' ? __('Search account...') : row.mode === 'Customer' ? __('Search customer...') : __('Select mode')"
+									:disabled="!row.mode"
+									class="w-full px-2 py-1.5 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-purple-500 focus:border-transparent bg-white disabled:bg-gray-100 disabled:cursor-not-allowed"
+									@focus="showLenderDropdown(index)"
+									@input="searchFinanceLender(index)"
+								/>
+								<!-- Selected Lender Display Chip -->
+								<div v-if="row.finance_lender && !row.showDropdown" class="absolute inset-0 flex items-center">
+									<div class="flex items-center gap-1 mx-1 px-2 py-0.5 bg-purple-100 text-purple-700 rounded text-xs flex-1 min-w-0">
+										<span class="truncate">{{ row.finance_lender }}</span>
+										<button
+											@click.stop="clearFinanceLender(index)"
+											class="flex-shrink-0 text-purple-500 hover:text-purple-700"
+										>
+											<svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+												<path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/>
+											</svg>
+										</button>
+									</div>
+								</div>
+								<!-- Dropdown Results -->
+								<div
+									v-if="row.showDropdown && row.lenderOptions.length > 0"
+									class="absolute left-0 right-0 top-full mt-1 z-[9999] bg-white border border-gray-200 rounded-lg shadow-xl max-h-40 overflow-y-auto"
+								>
+									<div
+										v-for="option in row.lenderOptions"
+										:key="option.name"
+										@click="selectFinanceLender(index, option)"
+										class="px-3 py-2 hover:bg-purple-50 cursor-pointer border-b border-gray-100 last:border-b-0 transition-colors"
+									>
+										<div class="font-medium text-xs text-gray-900">{{ option.name }}</div>
+										<div v-if="option.label" class="text-[10px] text-gray-500">{{ option.label }}</div>
+									</div>
+								</div>
+								<!-- No Results -->
+								<div
+									v-if="row.showDropdown && row.lenderOptions.length === 0 && row.finance_lender_search"
+									class="absolute left-0 right-0 top-full mt-1 z-[9999] bg-white border border-gray-200 rounded-lg shadow-xl p-2"
+								>
+									<div class="text-xs text-gray-500 text-center">{{ __('No results') }}</div>
+								</div>
+							</div>
+
+							<!-- Amount Input -->
+							<div class="relative w-28 flex-shrink-0">
+								<span class="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">{{ currencySymbol }}</span>
+								<input
+									v-model.number="row.amount"
+									type="number"
+									step="0.01"
+									min="0"
+									placeholder="0.00"
+									class="w-full ps-6 pe-2 py-1.5 text-xs font-semibold border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-purple-500 focus:border-transparent bg-white text-end"
+									@input="recalculateFinanceLenderTotals"
+								/>
+							</div>
+
+							<!-- Reference No Input -->
+							<input
+								v-model="row.reference_no"
+								type="text"
+								:placeholder="__('Ref No.')"
+								class="w-24 flex-shrink-0 px-2 py-1.5 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-purple-500 focus:border-transparent bg-white"
+							/>
+
+							<!-- Delete Button -->
+							<button
+								@click="removeFinanceLenderRow(index)"
+								class="p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-all flex-shrink-0"
+								:title="__('Remove')"
+							>
+								<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+								</svg>
+							</button>
+						</div>
+
+						<!-- Empty State -->
+						<div v-if="financeLenderPayments.length === 0" class="text-center py-6 bg-gray-50 border border-dashed border-gray-200 rounded-lg">
+							<p class="text-xs text-gray-500">{{ __('Click "Add Entry" to add a finance lender payment') }}</p>
+						</div>
+
+						<!-- Total Summary -->
+						<div v-if="financeLenderPayments.length > 0" class="bg-purple-50 border border-purple-200 rounded-lg p-3 mt-2">
+							<div class="flex items-center justify-between">
+								<span class="text-sm font-semibold text-gray-700">{{ __('Total Finance Lender Payments') }}</span>
+								<span class="text-lg font-bold text-purple-600">{{ formatCurrency(financeLenderTotal) }}</span>
+							</div>
+						</div>
+					</div>
+				</div>
+
+				<!-- Sales Persons Selection (Moved below Finance Lender Payments) -->
 				<div v-if="settingsStore.enableSalesPersons" class="bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-200 rounded-lg p-3">
 					<div class="flex items-center justify-between mb-2">
 						<div class="flex items-center gap-2">
@@ -282,197 +484,6 @@
 					<!-- No Results -->
 					<div v-if="salesPersonSearch && filteredSalesPersons.length === 0 && !loadingSalesPersons" class="text-center py-3">
 						<div class="text-xs text-gray-500">{{ __('No sales persons found') }}</div>
-					</div>
-				</div>
-
-				<!-- Additional Discount Section (Compact) -->
-				<div v-if="settingsStore.allowAdditionalDiscount" class="bg-gradient-to-r from-orange-50 to-red-50 border border-orange-300 rounded-lg p-2">
-					<div class="flex items-center justify-between mb-1.5">
-						<div class="flex items-center gap-1.5">
-							<div class="w-5 h-5 rounded-full bg-orange-200 flex items-center justify-center">
-								<svg class="w-3 h-3 text-orange-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-								</svg>
-							</div>
-							<span class="text-[11px] font-bold text-orange-900">{{ __('Additional Discount') }}</span>
-							<span v-if="localAdditionalDiscount > 0" class="text-[10px] font-bold text-red-600 bg-red-100 px-1.5 py-0.5 rounded">
-								-{{ formatCurrency(additionalDiscountType === 'percentage' ? (subtotal * localAdditionalDiscount / 100) : localAdditionalDiscount) }}
-							</span>
-						</div>
-						<button
-							v-if="localAdditionalDiscount > 0"
-							@click="clearAdditionalDiscount"
-							class="text-[10px] text-orange-700 hover:text-orange-900 font-semibold px-1.5 py-0.5 bg-orange-100 hover:bg-orange-200 rounded transition-colors"
-						>
-							{{ __('Clear') }}
-						</button>
-					</div>
-					<div class="grid grid-cols-[100px_1fr] gap-1.5">
-						<!-- Discount Type Selector (Compact) -->
-						<select
-							v-model="additionalDiscountType"
-							@change="handleAdditionalDiscountTypeChange"
-							class="w-full px-1.5 py-1.5 text-[11px] font-medium border border-orange-300 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 focus:border-transparent bg-white"
-						>
-							<option value="percentage">{{ __('% Percent') }}</option>
-							<option value="amount">{{ __('{0} Amount', [currencySymbol]) }}</option>
-						</select>
-						<!-- Discount Value Input (Compact) -->
-						<div class="relative">
-							<span v-if="additionalDiscountType === 'amount'" class="absolute start-2 top-1/2 -translate-y-1/2 text-gray-600 text-[11px] font-medium">{{ currencySymbol }}</span>
-							<input
-								type="number"
-								v-model.number="localAdditionalDiscount"
-								@input="handleAdditionalDiscountChange"
-								placeholder="0.00"
-								min="0"
-								:max="additionalDiscountType === 'percentage' ? 100 : subtotal"
-								step="0.01"
-								:class="[
-									'w-full py-1.5 text-[11px] font-semibold border border-orange-300 rounded focus:outline-none focus:ring-1 focus:ring-orange-500 focus:border-transparent bg-white placeholder-gray-400',
-									additionalDiscountType === 'amount' ? 'ps-9 pe-2' : 'px-2 pe-6'
-								]"
-							/>
-							<span v-if="additionalDiscountType === 'percentage'" class="absolute end-2 top-1/2 -translate-y-1/2 text-gray-600 text-[11px] font-medium">%</span>
-						</div>
-					</div>
-				</div>
-
-				<!-- Payment Methods Grid -->
-				<div class="text-start mb-3">
-					<h3 class="text-sm font-semibold text-gray-700 mb-1">{{ __('Payment Methods') }}</h3>
-					<div class="text-xs text-gray-500">
-						{{ __('Select payment method to add') }}
-					</div>
-					<!-- Loading State -->
-					<div v-if="loadingPaymentMethods" class="flex items-center justify-center py-8">
-						<div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-						<span class="ms-3 text-sm text-gray-500">{{ __('Loading payment methods...') }}</span>
-					</div>
-					<!-- Payment Methods -->
-					<div v-else-if="paymentMethods.length > 0" class="grid grid-cols-2 md:grid-cols-3 gap-3 mt-3">
-						<button
-							v-for="method in paymentMethods"
-							:key="method.mode_of_payment"
-							@click="quickAddPayment(method)"
-							:disabled="remainingAmount === 0"
-							:class="[
-								'group relative p-4 rounded-xl border-2 transition-all text-start',
-								'hover:shadow-lg transform hover:-translate-y-0.5',
-								remainingAmount === 0 ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
-								'border-gray-200 hover:border-blue-400 bg-white hover:bg-blue-50'
-							]"
-						>
-							<div class="flex items-start justify-between">
-								<div class="flex-1">
-									<div class="flex items-center mb-1">
-										<span class="text-2xl me-2">{{ getPaymentIcon(method.type) }}</span>
-										<div>
-											<div class="font-semibold text-sm text-gray-900">
-												{{ method.mode_of_payment }}
-											</div>
-											<div class="text-xs text-gray-500">{{ method.type || __('Cash') }}</div>
-										</div>
-									</div>
-								</div>
-								<div class="opacity-0 group-hover:opacity-100 transition-opacity">
-									<svg class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
-									</svg>
-								</div>
-							</div>
-							<div v-if="getMethodTotal(method.mode_of_payment) > 0"
-								class="mt-2 pt-2 border-t border-gray-200">
-								<div class="text-xs text-gray-500">{{ __('Added') }}</div>
-								<div class="font-bold text-blue-600">
-									{{ formatCurrency(getMethodTotal(method.mode_of_payment)) }}
-								</div>
-							</div>
-						</button>
-					</div>
-					<!-- Empty State -->
-					<div v-else class="text-center py-8 text-gray-500">
-						<svg class="mx-auto h-10 w-10 text-gray-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"/>
-						</svg>
-						<p class="text-sm">{{ __('No payment methods available') }}</p>
-					</div>
-				</div>
-
-				<!-- Quick Amount Buttons -->
-				<div v-if="remainingAmount > 0 && lastSelectedMethod" class="bg-gray-50 rounded-lg p-4 border border-gray-200">
-					<div class="text-start text-xs font-medium text-gray-600 mb-2">
-						{{ __('Quick amounts for {0}', [lastSelectedMethod.mode_of_payment]) }}
-					</div>
-					<div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
-						<button
-							v-for="amount in quickAmounts"
-							:key="amount"
-							@click="addCustomPayment(lastSelectedMethod, amount)"
-							class="px-4 py-3 text-sm font-semibold rounded-lg bg-white border-2 border-gray-200 hover:border-blue-400 hover:bg-blue-50 text-gray-700 hover:text-blue-600 transition-all"
-						>
-							{{ formatCurrency(amount) }}
-						</button>
-					</div>
-					<div class="mt-4">
-						<div class="text-start text-xs font-medium text-gray-600 mb-1">{{ __('Custom amount') }}</div>
-						<div class="flex gap-2">
-							<Input
-								v-model="customAmount"
-								type="number"
-								step="5"
-								min="0"
-								placeholder="0.00"
-								class="flex-1"
-								@keyup.enter="addCustomPayment(lastSelectedMethod, customAmount)"
-							/>
-							<Button
-								variant="solid"
-								theme="blue"
-								@click="addCustomPayment(lastSelectedMethod, customAmount)"
-								:disabled="!customAmount || customAmount <= 0"
-							>
-								{{ __('Add') }}
-							</Button>
-						</div>
-					</div>
-				</div>
-
-				<!-- Active Payment Entries -->
-				<div v-if="paymentEntries.length > 0">
-					<h3 class="text-start text-sm font-semibold text-gray-700 mb-3">{{ __('Payment Breakdown') }}</h3>
-					<div class="flex flex-col gap-2 max-h-64 overflow-y-auto">
-						<div
-							v-for="(entry, index) in paymentEntries"
-							:key="index"
-							class="group flex items-center justify-between p-3 bg-white rounded-lg border-2 border-gray-200 hover:border-red-300 transition-all"
-						>
-							<div class="flex items-center gap-3">
-								<span class="text-xl">{{ getPaymentIcon(entry.type) }}</span>
-								<div>
-									<div class="font-medium text-sm text-gray-900">{{ entry.mode_of_payment }}</div>
-									<div class="text-xs text-gray-500">{{ entry.type }}</div>
-								</div>
-							</div>
-							<div class="flex items-center gap-4">
-								<input
-									v-model.number="entry.amount"
-									type="number"
-									step="5"
-									min="0"
-									class="w-28 px-3 py-1 text-end font-bold text-gray-900 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-									@input="updatePaymentEntry(index, $event.target.value)"
-								/>
-								<button
-									@click="removePaymentEntry(index)"
-									class="opacity-0 group-hover:opacity-100 p-1 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-all"
-								>
-									<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
-									</svg>
-								</button>
-							</div>
-						</div>
 					</div>
 				</div>
 			</div>
@@ -707,6 +718,10 @@ const customerCredit = ref([])
 const customerBalance = ref({ total_outstanding: 0, total_credit: 0, net_balance: 0 })
 const loadingCredit = ref(false)
 
+// Finance Lender Payments state
+const financeLenderPayments = ref([])
+const loadingFinanceLenders = ref(false)
+
 // Additional discount state
 const localAdditionalDiscount = ref(0)
 // Initialize discount type from settings (default to percentage if enabled, otherwise amount)
@@ -803,6 +818,29 @@ const salesPersonsResource = createResource({
 		salesPersons.value = []
 		loadingSalesPersons.value = false
 	},
+})
+
+// Resource for searching Bank/Cash accounts
+const searchAccountsResource = createResource({
+	url: "pos_next.api.finance_lender.search_accounts",
+	makeParams({ search_term }) {
+		return {
+			search_term: search_term || '',
+			company: props.company,
+		}
+	},
+	auto: false,
+})
+
+// Resource for searching Finance Lender customers
+const searchFinanceLendersResource = createResource({
+	url: "pos_next.api.finance_lender.search_finance_lenders",
+	makeParams({ search_term }) {
+		return {
+			search_term: search_term || '',
+		}
+	},
+	auto: false,
 })
 
 // Computed: Filter sales persons based on search and exclude already selected
@@ -926,8 +964,14 @@ const currencySymbol = computed(() => getCurrencySymbol(props.currency))
 const round2 = (val) => Number(Number(val).toFixed(2))
 
 const totalPaid = computed(() => {
-	const sum = paymentEntries.value.reduce(
-		(sum, entry) => sum + (entry.amount || 0),
+	// Use finance lender payments total instead of payment entries
+	return round2(financeLenderTotal.value)
+})
+
+// Finance Lender Total
+const financeLenderTotal = computed(() => {
+	const sum = financeLenderPayments.value.reduce(
+		(sum, row) => sum + (row.amount || 0),
 		0,
 	)
 	return round2(sum)
@@ -950,12 +994,16 @@ const changeAmount = computed(() => {
 })
 
 const canComplete = computed(() => {
+	// Check if we have valid finance lender payments
+	const hasValidPayments = financeLenderPayments.value.length > 0 &&
+		financeLenderPayments.value.some(row => row.amount > 0 && row.mode && row.finance_lender)
+	
 	// If partial payment is allowed, can complete with any amount > 0
 	if (props.allowPartialPayment) {
-		return totalPaid.value > 0 && paymentEntries.value.length > 0
+		return totalPaid.value > 0 && hasValidPayments
 	}
 	// Otherwise require full payment
-	return remainingAmount.value === 0 && paymentEntries.value.length > 0
+	return remainingAmount.value === 0 && hasValidPayments
 })
 
 const paymentButtonText = computed(() => {
@@ -1062,6 +1110,9 @@ watch(show, (newVal) => {
 		customerBalance.value = { total_outstanding: 0, total_credit: 0, net_balance: 0 }
 		selectedSalesPersons.value = []
 		salesPersonSearch.value = ''
+		
+		// Reset finance lender payments
+		financeLenderPayments.value = []
 
 		// Debug logging
 		console.log('[PaymentDialog] Dialog opened with props:', {
@@ -1202,7 +1253,120 @@ function updatePaymentEntry(index, value) {
 function clearAll() {
 	paymentEntries.value = []
 	customAmount.value = ""
+	financeLenderPayments.value = []
 }
+
+// ============================================
+// Finance Lender Payment Methods
+// ============================================
+
+function addFinanceLenderRow() {
+	financeLenderPayments.value.push({
+		mode: '',
+		finance_lender: '',
+		finance_lender_search: '',
+		amount: 0,
+		reference_no: '',
+		showDropdown: false,
+		lenderOptions: []
+	})
+}
+
+function removeFinanceLenderRow(index) {
+	financeLenderPayments.value.splice(index, 1)
+}
+
+function handleModeChange(index) {
+	const row = financeLenderPayments.value[index]
+	// Clear the lender selection when mode changes
+	row.finance_lender = ''
+	row.finance_lender_search = ''
+	row.lenderOptions = []
+	row.showDropdown = false
+}
+
+function showLenderDropdown(index) {
+	const row = financeLenderPayments.value[index]
+	if (row.mode) {
+		row.showDropdown = true
+		// Trigger search with empty string to show initial options
+		searchFinanceLender(index)
+	}
+}
+
+async function searchFinanceLender(index) {
+	const row = financeLenderPayments.value[index]
+	if (!row.mode) return
+
+	row.showDropdown = true
+	const searchTerm = row.finance_lender_search || ''
+
+	console.log('[PaymentDialog] searchFinanceLender:', {
+		index,
+		mode: row.mode,
+		searchTerm,
+		company: props.company
+	})
+
+	try {
+		if (row.mode === 'Account') {
+			// Search for Bank/Cash accounts
+			console.log('[PaymentDialog] Searching accounts with company:', props.company)
+			const result = await searchAccountsResource.submit({
+				search_term: searchTerm
+			})
+			console.log('[PaymentDialog] Account search result:', result)
+			row.lenderOptions = (result || []).map(acc => ({
+				name: acc.name,
+				label: acc.account_type || ''
+			}))
+		} else if (row.mode === 'Customer') {
+			// Search for customers in Finance Lender group
+			const result = await searchFinanceLendersResource.submit({
+				search_term: searchTerm
+			})
+			console.log('[PaymentDialog] Customer search result:', result)
+			row.lenderOptions = (result || []).map(cust => ({
+				name: cust.name,
+				label: cust.customer_name || ''
+			}))
+		}
+	} catch (error) {
+		console.error('Error searching finance lenders:', error)
+		row.lenderOptions = []
+	}
+}
+
+function selectFinanceLender(index, option) {
+	const row = financeLenderPayments.value[index]
+	row.finance_lender = option.name
+	row.finance_lender_search = option.name
+	row.showDropdown = false
+	row.lenderOptions = []
+}
+
+function clearFinanceLender(index) {
+	const row = financeLenderPayments.value[index]
+	row.finance_lender = ''
+	row.finance_lender_search = ''
+	row.showDropdown = false
+}
+
+function recalculateFinanceLenderTotals() {
+	// Totals are computed automatically via the computed property
+	// This function is a placeholder for any additional logic if needed
+}
+
+// Close dropdown when clicking outside
+function handleClickOutside(event) {
+	financeLenderPayments.value.forEach(row => {
+		row.showDropdown = false
+	})
+}
+
+// ============================================
+// End Finance Lender Payment Methods
+// ============================================
 
 function completePayment() {
 	console.log('[PaymentDialog] Complete payment called:', {
@@ -1210,7 +1374,7 @@ function completePayment() {
 		totalPaid: totalPaid.value,
 		grandTotal: props.grandTotal,
 		allowPartialPayment: props.allowPartialPayment,
-		paymentEntries: paymentEntries.value,
+		financeLenderPayments: financeLenderPayments.value,
 		salesPersons: selectedSalesPersons.value
 	})
 
@@ -1221,8 +1385,20 @@ function completePayment() {
 
 	const isPartial = totalPaid.value < props.grandTotal
 
+	// Convert finance lender payments to the format expected by backend
+	// These will be saved to custom_finance_lender_payments child table
+	const financeLenderPaymentsData = financeLenderPayments.value
+		.filter(row => row.amount > 0 && row.mode && row.finance_lender)
+		.map(row => ({
+			mode: row.mode,
+			finance_lender: row.finance_lender,
+			amount: row.amount,
+			reference_no: row.reference_no || ''
+		}))
+
 	const paymentData = {
 		payments: paymentEntries.value,
+		finance_lender_payments: financeLenderPaymentsData,
 		change_amount: changeAmount.value,
 		is_partial_payment: isPartial,
 		paid_amount: totalPaid.value,

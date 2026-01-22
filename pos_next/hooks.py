@@ -190,6 +190,7 @@ doc_events = {
 	},
 	"Sales Invoice": {
 		"validate": "pos_next.api.sales_invoice_hooks.validate",
+		"before_save": "pos_next.api.sales_invoice_hooks.before_save",
 		"before_cancel": "pos_next.api.sales_invoice_hooks.before_cancel",
 		"on_submit": "pos_next.realtime_events.emit_stock_update_event",
 		"on_cancel": "pos_next.realtime_events.emit_stock_update_event",

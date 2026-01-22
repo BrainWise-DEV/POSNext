@@ -1520,6 +1520,13 @@ async function handlePaymentCompleted(paymentData) {
 			})
 		}
 
+		// Store finance lender payments if provided
+		if (paymentData.finance_lender_payments && Array.isArray(paymentData.finance_lender_payments)) {
+			cartStore.financeLenderPayments = paymentData.finance_lender_payments
+		} else {
+			cartStore.financeLenderPayments = []
+		}
+
 		// Store sales team data if provided
 		if (paymentData.sales_team && Array.isArray(paymentData.sales_team)) {
 			cartStore.salesTeam = paymentData.sales_team

@@ -11,6 +11,7 @@ export function useInvoice() {
 	const customer = ref(null)
 	const payments = ref([])
 	const salesTeam = ref([]) // Sales team for Sales Invoice
+	const financeLenderPayments = ref([]) // Finance Lender Payments for custom_finance_lender_payments
 	const posProfile = ref(null)
 	const posOpeningShift = ref(null) // POS Opening Shift name
 	const additionalDiscount = ref(0)
@@ -88,6 +89,9 @@ export function useInvoice() {
 
 	const getTaxesResource = createResource({
 		url: "pos_next.api.pos_profile.get_taxes",
+		makeParams({ pos_profile, customer }) {
+			return { pos_profile, customer }
+		},
 		auto: false,
 	})
 
@@ -708,12 +712,15 @@ export function useInvoice() {
 			const rawItems = toRaw(invoiceItems.value)
 			const rawPayments = toRaw(payments.value)
 			const rawSalesTeam = toRaw(salesTeam.value)
+			const rawFinanceLenderPayments = toRaw(financeLenderPayments.value)
 
 			const invoiceData = {
 				doctype: "Sales Invoice",
 				pos_profile: posProfile.value,
 				posa_pos_opening_shift: posOpeningShift.value,
 				customer: customer.value?.name || customer.value,
+				// Include tax inclusive flag for backend processing
+				custom_is_this_tax_included_in_basic_rate: taxInclusive.value ? 1 : 0,
 				items: rawItems.map((item) => ({
 					item_code: item.item_code,
 					item_name: item.item_name,
@@ -745,13 +752,44 @@ export function useInvoice() {
 				coupon_code: couponCode.value,
 				is_pos: 1,
 				update_stock: 1, // Critical: Ensures stock is updated
+				// Send the determined tax template based on customer's GST state
+				taxes_and_charges: currentTaxTemplate.value || null,
 			}
+
+			// DEBUG: Log invoice data being sent to backend for GST troubleshooting
+			console.log('=== POS TO SALES INVOICE DEBUG ===')
+			console.log('Tax Inclusive Mode:', taxInclusive.value)
+			console.log('Tax Rules:', JSON.stringify(taxRules.value, null, 2))
+			console.log('Invoice Data:', JSON.stringify(invoiceData, null, 2))
+			console.log('Raw Items with tax details:', rawItems.map(item => ({
+				item_code: item.item_code,
+				quantity: item.quantity,
+				rate: item.rate,
+				price_list_rate: item.price_list_rate,
+				amount: item.amount,
+				tax_amount: item.tax_amount,
+				discount_amount: item.discount_amount,
+				calculated_rate_sent: taxInclusive.value
+					? ((item.price_list_rate || item.rate) - (item.discount_amount || 0) / (item.quantity || 1))
+					: (item.quantity > 0 ? item.amount / item.quantity : item.rate)
+			})))
+			console.log('=== END DEBUG ===')
 
 			// Add sales_team if provided
 			if (rawSalesTeam && rawSalesTeam.length > 0) {
 				invoiceData.sales_team = rawSalesTeam.map((member) => ({
 					sales_person: member.sales_person,
 					allocated_percentage: member.allocated_percentage || 0,
+				}))
+			}
+
+			// Add custom_finance_lender_payments if provided
+			if (rawFinanceLenderPayments && rawFinanceLenderPayments.length > 0) {
+				invoiceData.custom_finance_lender_payments = rawFinanceLenderPayments.map((row) => ({
+					mode: row.mode,
+					finance_lender: row.finance_lender,
+					amount: row.amount,
+					reference_no: row.reference_no || '',
 				}))
 			}
 
@@ -889,6 +927,7 @@ export function useInvoice() {
 	function resetInvoice() {
 		invoiceItems.value = []
 		payments.value = []
+		financeLenderPayments.value = []
 		additionalDiscount.value = 0
 		couponCode.value = null
 
@@ -916,6 +955,7 @@ export function useInvoice() {
 
 		invoiceItems.value = []
 		payments.value = []
+		financeLenderPayments.value = []
 		additionalDiscount.value = 0
 		couponCode.value = null
 
@@ -943,13 +983,46 @@ export function useInvoice() {
 		}
 	}
 
-	async function loadTaxRules(profileName, posSettings = null) {
+	// Track current tax template and inter-state status
+	const currentTaxTemplate = ref(null)
+	const isInterState = ref(false)
+
+	async function loadTaxRules(profileName, posSettings = null, customerName = null) {
 		/**
-		 * Load tax rules from POS Profile and tax inclusive setting from POS Settings
+		 * Load tax rules from POS Profile and tax inclusive setting from POS Settings.
+		 * If customerName is provided, determines correct tax template based on
+		 * customer's GST state (CGST+SGST for intra-state, IGST for inter-state).
 		 */
 		try {
-			const result = await getTaxesResource.submit({ pos_profile: profileName })
-			taxRules.value = result?.data || result || []
+			const customerParam = customerName || (customer.value?.name || customer.value)
+			console.log('[loadTaxRules] Calling API with:', { pos_profile: profileName, customer: customerParam })
+
+			const result = await getTaxesResource.submit({
+				pos_profile: profileName,
+				customer: customerParam
+			})
+
+			console.log('[loadTaxRules] API response:', result)
+
+			// Handle new response format with taxes, tax_template, is_inter_state
+			const data = result?.data || result || {}
+			if (Array.isArray(data)) {
+				// Legacy format - array of taxes
+				taxRules.value = data
+				currentTaxTemplate.value = null
+				isInterState.value = false
+			} else {
+				// New format with tax template info
+				taxRules.value = data.taxes || []
+				currentTaxTemplate.value = data.tax_template || null
+				isInterState.value = data.is_inter_state || false
+			}
+
+			console.log('[loadTaxRules] Parsed:', {
+				taxRules: taxRules.value,
+				currentTaxTemplate: currentTaxTemplate.value,
+				isInterState: isInterState.value
+			})
 
 			// Load tax inclusive setting from POS Settings if provided
 			if (posSettings && posSettings.tax_inclusive !== undefined) {
@@ -968,6 +1041,16 @@ export function useInvoice() {
 			taxRules.value = []
 			return []
 		}
+	}
+
+	async function updateTaxesForCustomer(customerName) {
+		/**
+		 * Update tax rules when customer changes (for GST state determination).
+		 * Call this when customer is selected/changed in POS.
+		 */
+		if (!posProfile.value) return
+
+		await loadTaxRules(posProfile.value, null, customerName)
 	}
 
 	function setTaxInclusive(value) {
@@ -989,12 +1072,15 @@ export function useInvoice() {
 		customer,
 		payments,
 		salesTeam,
+		financeLenderPayments,
 		posProfile,
 		posOpeningShift,
 		additionalDiscount,
 		couponCode,
 		taxRules,
 		taxInclusive,
+		currentTaxTemplate,
+		isInterState,
 
 		// Computed
 		subtotal,
@@ -1024,6 +1110,7 @@ export function useInvoice() {
 		clearCart,
 		setDefaultCustomer,
 		loadTaxRules,
+		updateTaxesForCustomer,
 		setTaxInclusive,
 		recalculateItem,
 		rebuildIncrementalCache,
