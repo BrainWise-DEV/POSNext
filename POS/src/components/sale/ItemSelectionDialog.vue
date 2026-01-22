@@ -490,7 +490,6 @@ watch(matchedVariant, (variant) => {
 })
 
 function buildUomOptions() {
-	console.log("dialog item", props.item)
 	if (!props.item) return []
 
 	const uomOptions = []

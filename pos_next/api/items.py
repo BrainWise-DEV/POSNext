@@ -251,7 +251,8 @@ def get_item_detail(item, doc=None, warehouse=None, price_list=None, company=Non
 
 	# Fetch all needed Item fields in a single query (performance optimization)
 	item_data = frappe.db.get_value(
-		"Item", item_code,
+		"Item",
+		item_code,
 		["max_discount", "item_group", "brand", "stock_uom"],
 		as_dict=True
 	) or {}
@@ -603,28 +604,21 @@ def get_item_variants(template_item, pos_profile):
 		frappe.throw(_("Error fetching item variants: {0}").format(str(e)))
 
 
-def _build_item_base_conditions(pos_profile_doc, item_group=None, table_alias="i"):
-	"""Build reusable SQL conditions for POS item search.
-
-	Args:
-		pos_profile_doc: POS Profile document
-		item_group: Optional item group filter
-		table_alias: Table alias for Item table (default: "i")
-	"""
-	prefix = f"{table_alias}." if table_alias else ""
+def _build_item_base_conditions(pos_profile_doc, item_group=None):
+	"""Build reusable SQL conditions for POS item search."""
 	conditions = [
-		f"{prefix}disabled = 0",
-		f"{prefix}is_sales_item = 1",
-		f"IFNULL({prefix}variant_of, '') = ''",
+		"disabled = 0",
+		"is_sales_item = 1",
+		"IFNULL(variant_of, '') = ''",
 	]
 	params = []
 
 	if pos_profile_doc.company:
-		conditions.append(f"(IFNULL({prefix}custom_company, '') IN (%s, ''))")
+		conditions.append("(IFNULL(custom_company, '') IN (%s, ''))")
 		params.append(pos_profile_doc.company)
 
 	if item_group:
-		conditions.append(f"{prefix}item_group = %s")
+		conditions.append("item_group = %s")
 		params.append(item_group)
 
 	return conditions, params
@@ -1055,44 +1049,12 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20)
 		params.extend([limit, start])
 		items = frappe.db.sql(query, tuple(params), as_dict=1)
 
-			# Add company filter - show items for specific company + global items
-			if pos_profile_doc.company:
-				query = query.where(
-					fn.Coalesce(Item.custom_company, "").isin([pos_profile_doc.company, ""])
-				)
-
-			# Add item group filter if provided
-			if item_group:
-				query = query.where(Item.item_group == item_group)
-
-			query = query.orderby(Item.item_name).limit(limit).offset(start)
-			items = query.run(as_dict=True)
-
 		# Prepare maps for enrichment
 		item_codes = [item["item_code"] for item in items]
 		barcode_map = {item_code: [] for item_code in item_codes}  # item_code -> barcodes list
 		conversion_map = defaultdict(dict)  # parent -> {uom: factor}
 		uom_map = {}  # parent -> [ {uom, conversion_factor}, ... ]
 		uom_prices_map = {}  # item_code -> {uom: price_list_rate}
-
-		# Barcodes
-		# barcodes_or_filters = []
-		# if search_term:
-		# 	barcodes_or_filters.append(["barcode", "=", search_term])
-		# if item_codes:
-		# 	barcodes_or_filters.append(["parent", "in", item_codes])
-
-		# if barcodes_or_filters:	
-		# 	barcodes = frappe.get_all(
-		# 		"Item Barcode",
-		# 		or_filters=barcodes_or_filters,
-		# 		fields=["parent", "barcode", "uom"],
-		# 	)
-		# 	for barcode in barcodes:
-				
-		# 		barcode_map[barcode.parent].append(
-		# 			{"barcode": barcode.barcode, "uom": barcode.uom}
-		# 		)
 
 		# UOM conversions (both list & map for quick lookup)
 		if item_codes:

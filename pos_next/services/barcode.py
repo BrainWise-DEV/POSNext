@@ -26,7 +26,6 @@ from typing import List, TypedDict
 
 import frappe
 from erpnext.stock.get_item_details import get_conversion_factor
-from barcode_resolver.barcode_resolver.doctype.barcode_rule.utils import BarcodeTypes
 
 
 class BarcodeResult(TypedDict, total=False):
@@ -45,6 +44,7 @@ class ResolvedItemData(TypedDict, total=False):
 
     resolved_qty: float | None
     resolved_uom: str | None
+    resolved_price: float | None
     resolved_barcode_type: str | None
 
 
@@ -129,9 +129,10 @@ def compute_resolved_item_data(
         ...     item_data = compute_resolved_item_data(resolved, item_rate=10.0)
         ...     print(f"Qty: {item_data['resolved_qty']}, UOM: {item_data['resolved_uom']}")
     """
-    if not resolved_barcode:
+    if not resolved_barcode or not is_barcode_resolver_available():
         return None
 
+    from barcode_resolver.barcode_resolver.doctype.barcode_rule.utils import BarcodeTypes
 
     barcode_type = resolved_barcode.get("barcode_type")
     barcode_uom = resolved_barcode.get("uom")
