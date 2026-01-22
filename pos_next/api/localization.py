@@ -67,7 +67,7 @@ def get_allowed_locales_from_settings():
 	Returns:
 		set: Set of allowed locale codes
 	"""
-	default_locales = {'ar', 'en'}
+	default_locales = {'ar', 'en', 'id'}
 
 	try:
 		# Get the first POS Settings (or we could use a specific one based on user's profile)
