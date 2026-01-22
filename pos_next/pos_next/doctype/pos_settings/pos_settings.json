@@ -535,6 +535,12 @@
   {
    "read": 1,
    "role": "Sales User"
+  },
+  {
+   "export": 1,
+   "read": 1,
+   "role": "POSNext Cashier",
+   "write": 1
   }
  ],
  "sort_field": "modified",
