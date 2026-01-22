@@ -1,5 +1,6 @@
 import frappe
 from frappe.utils import flt
+from collections import defaultdict
 from erpnext.accounts.doctype.pricing_rule.utils import get_applied_pricing_rules
 from erpnext.accounts.doctype.pricing_rule.pricing_rule import (
 	apply_price_discount_rule as _original_apply_price_discount_rule
@@ -27,70 +28,39 @@ def apply_min_max_price_discounts(doc, method=None):
     Reset discount on other items for the same pricing rule.
     """
     try:
-        min_max_rules = _get_min_max_pricing_rules(doc)
-        if not min_max_rules:
-            return
-        
-        for pr_name in min_max_rules:
-            pr = frappe.get_cached_doc("Pricing Rule", pr_name)
+        rule_items, pricing_rules = _collect_min_max_rule_items(doc)
 
-            # Enforce price list
+        for pr_name, items in rule_items.items():
+            pr = pricing_rules[pr_name]
+
             if pr.for_price_list and pr.for_price_list != doc.selling_price_list:
                 continue
 
-            eligible_items = [
-                item for item in doc.items
-                if not item.is_free_item
-                and flt(item.qty) > 0
-                and item.pricing_rules
-                and pr_name in get_applied_pricing_rules(item.pricing_rules)
-            ]
-
-            if not eligible_items:
+            if not items:
                 continue
 
-            reverse = pr.apply_discount_on_price == "Min"
-            eligible_items.sort(
-                key=lambda x: flt(x.price_list_rate or x.rate or 0),
-                reverse=reverse
+            key = lambda i: flt(i.price_list_rate or i.rate or 0)
+            target_item = (
+                max(items, key=key)
+                if pr.apply_discount_on_price == "Max"
+                else min(items, key=key)
             )
 
-            target_item = eligible_items[0]
-
-            # Reset discount for non-target items FIRST
-            for item in eligible_items:
+            for item in items:
                 if item != target_item:
                     item.discount_percentage = 0.0
                     item.discount_amount = 0.0
                     item.rate = flt(item.price_list_rate)
-                    item.amount = flt(item.rate) * flt(item.qty)
-            
-            # Then apply discount to target item
+                    item.amount = item.rate * item.qty
+
             _apply_discount(pr, target_item)
-        
-        # Recalculate totals once after processing all pricing rules
+
         if hasattr(doc, "calculate_taxes_and_totals"):
             doc.calculate_taxes_and_totals()
-            
-    except Exception as e:
-        frappe.log_error(
-            frappe.get_traceback(),
-            "Min/Max Pricing Rule Failed"
-        )
 
-def _get_min_max_pricing_rules(doc):
-	"""
-	Extract unique Pricing Rules with apply_discount_on_price.
-	"""
-	rules = set()
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), "Min/Max Pricing Rule Failed")
 
-	for item in doc.items:
-		for pr_name in get_applied_pricing_rules(item.pricing_rules or ""):
-			pr = frappe.get_cached_doc("Pricing Rule", pr_name)
-			if pr.price_or_product_discount == "Price" and pr.apply_discount_on_price in ("Min", "Max"):
-				rules.add(pr_name)
-
-	return rules
 
 
 def _apply_discount(pricing_rule, item):
@@ -112,3 +82,28 @@ def _apply_discount(pricing_rule, item):
 
     item.rate = base_rate * (1.0 - (flt(item.discount_percentage) / 100.0)) - flt(item.discount_amount)
     item.amount = flt(item.rate) * flt(item.qty)
+
+
+def _collect_min_max_rule_items(doc):
+    rule_items = defaultdict(list)
+    pricing_rules_cache = {}
+
+    for item in doc.items:
+        if item.is_free_item or flt(item.qty) <= 0 or not item.pricing_rules:
+            continue
+
+        for pr_name in get_applied_pricing_rules(item.pricing_rules):
+            if pr_name not in pricing_rules_cache:
+                pr = frappe.get_cached_doc("Pricing Rule", pr_name)
+                if (
+                    pr.price_or_product_discount == "Price"
+                    and pr.apply_discount_on_price in ("Min", "Max")
+                ):
+                    pricing_rules_cache[pr_name] = pr
+                else:
+                    pricing_rules_cache[pr_name] = None
+
+            if pricing_rules_cache[pr_name]:
+                rule_items[pr_name].append(item)
+
+    return rule_items, pricing_rules_cache
