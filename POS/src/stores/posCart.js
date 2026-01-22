@@ -23,14 +23,17 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		posOpeningShift,
 		payments,
 		salesTeam,
+		financeLenderPayments,
 		additionalDiscount,
 		taxInclusive,
+		taxRules,
 		addItem: addItemToInvoice,
 		removeItem,
 		updateItemQuantity,
 		submitInvoice,
 		clearCart: clearInvoiceCart,
 		loadTaxRules,
+		updateTaxesForCustomer,
 		setTaxInclusive,
 		setDefaultCustomer,
 		applyDiscount,
@@ -39,6 +42,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		getItemDetailsResource,
 		recalculateItem,
 		rebuildIncrementalCache,
+		currentTaxTemplate,
+		isInterState,
 	} = useInvoice()
 
 	const offersStore = usePOSOffersStore()
@@ -115,7 +120,15 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	}
 
 	function setCustomer(selectedCustomer) {
+		console.log('[setCustomer] Called with:', selectedCustomer)
 		customer.value = selectedCustomer
+
+		// Update tax rules based on customer's GST state (intra vs inter-state)
+		if (selectedCustomer) {
+			const customerName = selectedCustomer?.name || selectedCustomer
+			console.log('[setCustomer] Calling updateTaxesForCustomer with:', customerName)
+			updateTaxesForCustomer(customerName)
+		}
 	}
 
 	function setPendingItem(item, qty = 1, mode = "uom") {
@@ -783,6 +796,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		selectionMode,
 		suppressOfferReapply,
 		currentDraftId,
+		financeLenderPayments,
 		// Computed
 		itemCount,
 		isEmpty,
@@ -798,6 +812,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		setPendingItem,
 		clearPendingItem,
 		loadTaxRules,
+		updateTaxesForCustomer,
 		setTaxInclusive,
 		submitInvoice,
 		applyDiscountToCart,
@@ -812,5 +827,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		rebuildIncrementalCache,
 		applyOffersResource,
 		buildInvoiceDataForOffers,
+
+		// Tax template info
+		currentTaxTemplate,
+		isInterState,
+		taxRules,
 	}
 })

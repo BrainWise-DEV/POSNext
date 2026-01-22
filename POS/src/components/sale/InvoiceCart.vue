@@ -630,7 +630,7 @@
 						<svg class="w-3.5 h-3.5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"/>
 						</svg>
-						<span class="font-medium">{{ __('Tax') }}</span>
+						<span class="font-medium">{{ taxLabel }}</span>
 					</div>
 					<span class="font-bold text-gray-900 text-center min-w-[60px]">{{ formatCurrency(taxAmount) }}</span>
 				</div>
@@ -967,6 +967,70 @@ watch(
  * @returns {Number} Count of applied offers
  */
 const appliedOfferCount = computed(() => (props.appliedOffers || []).length)
+
+/**
+ * Format tax label based on inter-state status and tax rules.
+ * Shows "IGST" for inter-state transactions or "SGST + CGST" for intra-state.
+ * Defaults to "SGST + CGST" for intra-state (when isInterState is false).
+ * No fallback to "Tax" - always shows specific tax type.
+ * @returns {String} Formatted tax label
+ */
+const taxLabel = computed(() => {
+	// Get inter-state status from cart store (primary source of truth)
+	const isInterState = cartStore.isInterState || false
+	const taxRules = cartStore.taxRules || []
+	
+	// PRIMARY: Use isInterState flag as the main determinant
+	// Default to "SGST + CGST" for intra-state (most common case in India)
+	if (!isInterState) {
+		// Intra-state: Default to SGST + CGST
+		// Verify with tax rules if available
+		if (taxRules && taxRules.length > 0) {
+			const nonRcmRules = taxRules.filter(rule => {
+				const accountHead = (rule.account_head || '').toUpperCase()
+				return !accountHead.includes('RCM')
+			})
+			
+			const hasSGST = nonRcmRules.some(rule => {
+				const accountHead = (rule.account_head || '').toUpperCase()
+				return accountHead.includes('SGST')
+			})
+			const hasCGST = nonRcmRules.some(rule => {
+				const accountHead = (rule.account_head || '').toUpperCase()
+				return accountHead.includes('CGST')
+			})
+			
+			// If we have both SGST and CGST, confirm it
+			if (hasSGST && hasCGST) {
+				return 'SGST + CGST'
+			}
+		}
+		
+		// Default for intra-state (even if tax rules not loaded yet)
+		return 'SGST + CGST'
+	} else {
+		// Inter-state: Show IGST
+		// Verify with tax rules if available
+		if (taxRules && taxRules.length > 0) {
+			const nonRcmRules = taxRules.filter(rule => {
+				const accountHead = (rule.account_head || '').toUpperCase()
+				return !accountHead.includes('RCM')
+			})
+			
+			const hasIGST = nonRcmRules.some(rule => {
+				const accountHead = (rule.account_head || '').toUpperCase()
+				return accountHead.includes('IGST')
+			})
+			
+			if (hasIGST) {
+				return 'IGST'
+			}
+		}
+		
+		// Default for inter-state
+		return 'IGST'
+	}
+})
 
 /**
  * Instant customer search results with in-memory filtering.
