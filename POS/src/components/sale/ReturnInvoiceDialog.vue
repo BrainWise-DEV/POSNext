@@ -752,6 +752,9 @@ const emit = defineEmits(["update:modelValue", "return-created"])
 // State
 const show = ref(props.modelValue)
 const originalInvoice = ref(null)
+// Stores the return document created by ERPNext's make_sales_return().
+// Contains sales_team, taxes, and other child tables copied from the original invoice.
+const preparedReturnDoc = ref(null)
 const returnItems = ref([])
 const returnReason = ref("")
 const paymentMethods = ref([])
@@ -846,57 +849,73 @@ const loadPaymentMethodsResource = createResource({
 	},
 })
 
-// Resource for fetching a specific invoice with return tracking
+// Resource for fetching a prepared return invoice.
+// Uses ERPNext's make_sales_return() which creates a properly structured return document
+// with all child tables (sales_team, taxes, etc.) copied from the original invoice.
+// This ensures sales commissions are correctly reversed when processing returns.
 const fetchInvoiceResource = createResource({
-	url: "pos_next.api.invoices.get_invoice_for_return",
+	url: "pos_next.api.invoices.prepare_return_invoice",
 	auto: false,
 	onSuccess(data) {
 		if (data) {
-			// Validate that invoice can be returned
-			if (data.docstatus !== 1) {
-				showWarning(__("Invoice must be submitted to create a return"))
-				return
-			}
-			if (data.is_return === 1) {
-				showWarning(__("Cannot create return against a return invoice"))
-				return
-			}
+			// Store the complete return document from make_sales_return.
+			// This includes sales_team entries needed for commission reversal.
+			preparedReturnDoc.value = data
 
-			// Check if all items have been fully returned
-			const availableItems = data.items.filter((item) => item.qty > 0)
+			// The API returns original invoice data in _original_invoice for reference
+			const origInvoice = data._original_invoice || {}
+
+			// Filter items that still have quantity available for return.
+			// The API calculates remaining_qty by subtracting previously returned quantities.
+			const availableItems = data.items.filter((item) => item.remaining_qty > 0)
 
 			if (availableItems.length === 0) {
 				showWarning(__("All items from this invoice have already been returned"))
 				originalInvoice.value = null
+				preparedReturnDoc.value = null
 				returnItems.value = []
 				return
 			}
 
-			originalInvoice.value = data
-			// Map server 'qty' to 'quantity' for internal consistency
+			// Store original invoice data for display in the UI
+			originalInvoice.value = {
+				name: data.return_against,
+				customer: data.customer,
+				company: data.company,
+				grand_total: origInvoice.grand_total,
+				paid_amount: origInvoice.paid_amount,
+				outstanding_amount: origInvoice.outstanding_amount,
+				payments: origInvoice.payments || [],
+				docstatus: 1, // Already validated by backend
+				is_return: 0,
+			}
+
+			// Map items for UI display and selection.
+			// - sales_invoice_item: links to original item row for accurate return tracking
+			// - remaining_qty: maximum quantity user can return for this item
 			returnItems.value = availableItems.map((item) => ({
 				...item,
-				quantity: item.qty, // Standardize to 'quantity' from server's 'qty'
+				name: item.sales_invoice_item,
+				quantity: item.remaining_qty,
 				selected: false,
-				return_qty: item.qty, // This will be the remaining qty after previous returns
-				original_qty: item.original_qty || item.qty, // Track original quantity
+				return_qty: item.remaining_qty,
+				original_qty: item.original_qty,
 			}))
 			returnItems.value.forEach(normalizeItemQuantity)
 
-			// Track payment amounts from original invoice
-			const totalPaidFromPayments = data.payments?.reduce((sum, p) => sum + Math.abs(p.amount || 0), 0) || 0
-			originalPaidAmount.value = data.paid_amount || totalPaidFromPayments || 0
-			originalOutstandingAmount.value = data.outstanding_amount || 0
+			// Calculate payment totals from original invoice for refund handling
+			const totalPaidFromPayments = origInvoice.payments?.reduce((sum, p) => sum + Math.abs(p.amount || 0), 0) || 0
+			originalPaidAmount.value = origInvoice.paid_amount || totalPaidFromPayments || 0
+			originalOutstandingAmount.value = origInvoice.outstanding_amount || 0
 
-			// Detect if original invoice was a credit sale (Pay on Account)
-			// Credit sale indicators:
-			// 1. No payments in the payments array, OR
-			// 2. Outstanding amount equals grand total (nothing was paid)
-			const hasNoPayments = !data.payments || data.payments.length === 0
-			const isFullyUnpaid = Math.abs(data.outstanding_amount - data.grand_total) < 0.01
+			// Detect credit sale (Pay on Account): no payments recorded OR full amount outstanding.
+			// Credit sales don't require cash refund - they reverse the accounts receivable.
+			const hasNoPayments = !origInvoice.payments || origInvoice.payments.length === 0
+			const isFullyUnpaid = Math.abs(origInvoice.outstanding_amount - origInvoice.grand_total) < 0.01
 			isOriginalCreditSale.value = hasNoPayments || (totalPaidFromPayments < 0.01 && isFullyUnpaid)
 
-			// Detect if invoice was partially paid (has both paid amount and outstanding)
+			// Detect partial payment: some amount paid but still has outstanding balance.
+			// Partial payments require proportional refund calculation.
 			isPartiallyPaid.value = originalPaidAmount.value > 0 && originalOutstandingAmount.value > 0
 
 			// Load payment methods if not already loaded
@@ -904,7 +923,7 @@ const fetchInvoiceResource = createResource({
 				loadPaymentMethodsResource.reload()
 			}
 
-			// Initialize payment methods from invoice
+			// Set up refund payment rows based on original invoice payments
 			initializePaymentsFromInvoice()
 		}
 	},
@@ -918,36 +937,50 @@ const fetchInvoiceResource = createResource({
 	},
 })
 
-// Resource for creating return invoice
+// Resource for submitting the return invoice to the server
 const createReturnResource = createResource({
 	url: "pos_next.api.invoices.submit_invoice",
 	makeParams() {
-		// Build invoice data matching the API's expected format
+		// Use the prepared return document as the base.
+		// This document was created by ERPNext's make_sales_return() and contains
+		// the sales_team entries from the original invoice.
+		const baseDoc = preparedReturnDoc.value || {}
+
 		const invoiceData = {
 			doctype: "Sales Invoice",
 			pos_profile: props.posProfile,
 			posa_pos_opening_shift: props.posOpeningShift,
-			customer: originalInvoice.value.customer,
-			company: originalInvoice.value.company,
+			customer: baseDoc.customer || originalInvoice.value.customer,
+			company: baseDoc.company || originalInvoice.value.company,
 			is_return: 1,
-			return_against: originalInvoice.value.name,
-			update_outstanding_for_self: 0, // Ensure original invoice outstanding is reduced
+			return_against: baseDoc.return_against || originalInvoice.value.name,
+			// Setting to 0 ensures GL entries point to original invoice,
+			// which reduces its outstanding amount and updates its status
+			update_outstanding_for_self: 0,
 			is_pos: 1,
 			update_stock: 1,
+			// Include sales_team from the prepared document.
+			// This ensures sales commission is reversed for the returned items.
+			sales_team: baseDoc.sales_team?.map(member => ({
+				sales_person: member.sales_person,
+				allocated_percentage: member.allocated_percentage || 0,
+			})) || [],
+			// Build items array from user's selection with negative quantities for return
 			items: selectedItems.value.map((item) => ({
 				item_code: item.item_code,
 				item_name: item.item_name,
-				qty: -Math.abs(item.return_qty), // Negative for returns
+				qty: -Math.abs(item.return_qty),
 				rate: item.rate,
 				warehouse: item.warehouse,
 				uom: item.uom,
 				conversion_factor: item.conversion_factor || 1,
-				// Link to original invoice item for proper return tracking
-				sales_invoice_item: item.name, // Reference to the original Sales Invoice Item
+				// Link to original invoice item row for accurate return tracking in ERPNext
+				sales_invoice_item: item.name,
 			})),
+			// Payment amounts are negative for refunds
 			payments: refundPayments.value.map(payment => ({
 				mode_of_payment: payment.mode_of_payment,
-				amount: -Math.abs(payment.amount), // Negative for refunds
+				amount: -Math.abs(payment.amount),
 			})),
 			remarks:
 				returnReason.value || __('Return against {0}', [originalInvoice.value.name]),
@@ -1274,7 +1307,10 @@ function handleValidityResponse(validity) {
  */
 function openReturnModal(invoice) {
 	submitError.value = ""
-	fetchInvoiceResource.fetch({ invoice_name: invoice.name })
+	fetchInvoiceResource.fetch({
+		invoice_name: invoice.name,
+		pos_opening_shift: props.posOpeningShift
+	})
 	returnModal.visible = true
 }
 
@@ -1287,7 +1323,10 @@ async function checkValidityAndOpenModal(invoiceName, fallbackOnError = false) {
 	try {
 		const validity = await checkInvoiceValidityResource.fetch({ invoice_name: invoiceName })
 		if (handleValidityResponse(validity)) {
-			fetchInvoiceResource.fetch({ invoice_name: invoiceName })
+			fetchInvoiceResource.fetch({
+				invoice_name: invoiceName,
+				pos_opening_shift: props.posOpeningShift
+			})
 			returnModal.visible = true
 		}
 	} catch (error) {
@@ -1313,6 +1352,7 @@ async function searchInvoiceDirectly() {
 function closeReturnModal() {
 	returnModal.visible = false
 	originalInvoice.value = null
+	preparedReturnDoc.value = null
 	returnItems.value = []
 	returnReason.value = ""
 	refundPayments.value = []
