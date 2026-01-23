@@ -407,9 +407,14 @@
 									<div class="text-xs font-medium text-orange-600 uppercase tracking-wide mb-1">{{ __('Remaining') }}</div>
 									<div :class="['font-bold text-orange-600', dynamicTextSize.amount]">{{ formatCurrency(remainingAmount) }}</div>
 								</div>
-								<div v-else-if="changeAmount > 0" :class="['bg-green-50 text-center', isCompactMode ? 'p-2' : 'p-3']">
+								<div v-else-if="changeAmount > 0 && allowsOverpayment" :class="['bg-green-50 text-center', isCompactMode ? 'p-2' : 'p-3']">
 									<div class="text-xs font-medium text-green-600 uppercase tracking-wide mb-1">{{ __('Change Due') }}</div>
 									<div :class="['font-bold text-green-600', dynamicTextSize.amount]">{{ formatCurrency(changeAmount) }}</div>
+								</div>
+								<!-- Exact Amount Warning (when overpayment not allowed) -->
+								<div v-else-if="changeAmount > 0 && !allowsOverpayment" :class="['bg-red-50 text-center', isCompactMode ? 'p-2' : 'p-3']">
+									<div class="text-xs font-medium text-red-600 uppercase tracking-wide mb-1">{{ __('Overpayment') }}</div>
+									<div :class="['font-bold text-red-600', dynamicTextSize.amount]">{{ formatCurrency(changeAmount) }}</div>
 								</div>
 								<div v-else :class="['bg-green-50 flex flex-col items-center justify-center', isCompactMode ? 'p-2' : 'p-3']">
 									<svg class="w-5 h-5 text-green-600 mb-1" fill="currentColor" viewBox="0 0 20 20">
@@ -511,26 +516,57 @@
 							</button>
 						</div>
 						<div v-else :class="['text-gray-500', isSmallMobile ? 'text-xs' : 'text-sm']">{{ __('No payment methods available') }}</div>
+
+						<!-- Exact Amount Mode Info Banner -->
+						<div v-if="isExactAmountModeActive && paymentEntries.length > 0 && hasNonCashPayment"
+							:class="['mt-2 p-2 rounded-lg border', !isExactAmountValid ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200']">
+							<div class="flex items-center gap-2">
+								<svg v-if="!isExactAmountValid" class="w-4 h-4 flex-shrink-0 text-red-500" fill="currentColor" viewBox="0 0 20 20">
+									<path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/>
+								</svg>
+								<svg v-else class="w-4 h-4 flex-shrink-0 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+									<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+								</svg>
+								<span :class="['text-xs font-medium', !isExactAmountValid ? 'text-red-700' : 'text-green-700']">
+									{{ !isExactAmountValid ? __('Total must equal invoice amount') : __('Payment amount is correct') }}
+								</span>
+							</div>
+						</div>
 					</div>
 
 					<!-- Quick Amounts Area (Desktop) -->
 					<div v-if="lastSelectedMethod && remainingAmount > 0" class="hidden lg:block" :class="isCompactMode ? 'mb-2' : 'mb-3'">
-						<div class="text-start text-xs font-medium text-gray-600 mb-1.5">
-							{{ __('Quick amounts for {0}', [__(lastSelectedMethod.mode_of_payment)]) }}
-						</div>
-						<div class="grid grid-cols-4 gap-1.5">
+						<!-- Exact amount mode for non-cash: show single button -->
+						<template v-if="isExactAmountModeActive && !isCashPaymentMethod(lastSelectedMethod)">
+							<div class="text-start text-xs font-medium text-gray-600 mb-1.5">
+								{{ __('Pay') }} {{ __(lastSelectedMethod.mode_of_payment) }}
+							</div>
 							<button
-								v-for="amount in quickAmounts"
-								:key="amount"
-								@click="addCustomPayment(lastSelectedMethod, amount)"
-								:class="[
-									'font-semibold rounded-lg bg-white border-2 border-gray-200 hover:border-blue-400 hover:bg-blue-50 text-gray-700 hover:text-blue-600 transition-all',
-									isCompactMode ? 'px-2 py-2 text-sm' : 'px-2 py-2 text-sm'
-								]"
+								@click="addCustomPayment(lastSelectedMethod, remainingAmount)"
+								class="w-full font-semibold rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-all px-4 py-3 text-base"
 							>
-								{{ formatCurrency(amount) }}
+								{{ formatCurrency(remainingAmount) }}
 							</button>
-						</div>
+						</template>
+						<!-- Normal mode: show quick amounts grid -->
+						<template v-else>
+							<div class="text-start text-xs font-medium text-gray-600 mb-1.5">
+								{{ __('Quick amounts for {0}', [__(lastSelectedMethod.mode_of_payment)]) }}
+							</div>
+							<div class="grid grid-cols-4 gap-1.5">
+								<button
+									v-for="amount in quickAmounts"
+									:key="amount"
+									@click="addCustomPayment(lastSelectedMethod, amount)"
+									:class="[
+										'font-semibold rounded-lg bg-white border-2 border-gray-200 hover:border-blue-400 hover:bg-blue-50 text-gray-700 hover:text-blue-600 transition-all',
+										isCompactMode ? 'px-2 py-2 text-sm' : 'px-2 py-2 text-sm'
+									]"
+								>
+									{{ formatCurrency(amount) }}
+								</button>
+							</div>
+						</template>
 					</div>
 					<div v-else-if="!lastSelectedMethod && remainingAmount > 0" class="hidden lg:block" :class="['bg-blue-50 rounded-lg text-center', isCompactMode ? 'mb-2 p-2' : 'mb-3 p-3 lg:p-2']">
 						<p class="text-xs text-blue-600">{{ __('Select a payment method to start') }}</p>
@@ -540,55 +576,70 @@
 					<div class="lg:hidden flex flex-col" :class="isSmallMobile ? 'gap-1' : 'gap-1.5'">
 						<!-- Mobile Quick Amounts + Custom Input -->
 						<div v-if="lastSelectedMethod && remainingAmount > 0" :class="['space-y-1 flex-shrink-0', isSmallMobile ? 'mb-1' : 'mb-1.5']">
-							<!-- Quick Amounts Row (4 columns, responsive sizing) -->
-							<div class="grid grid-cols-4" :class="isSmallMobile ? 'gap-0.5' : 'gap-1'">
+							<!-- Exact amount mode for non-cash: show single button -->
+							<template v-if="isExactAmountModeActive && !isCashPaymentMethod(lastSelectedMethod)">
 								<button
-									v-for="amount in quickAmounts"
-									:key="amount"
-									@click="addCustomPayment(lastSelectedMethod, amount)"
+									@click="addCustomPayment(lastSelectedMethod, remainingAmount)"
 									:class="[
-										'font-semibold rounded bg-white border border-gray-200 text-gray-700 active:bg-blue-50 active:border-blue-400 transition-colors',
-										isSmallMobile ? 'py-1 text-[10px]' : 'py-1.5 text-xs'
+										'w-full font-semibold rounded bg-blue-600 text-white active:bg-blue-700 transition-colors',
+										isSmallMobile ? 'py-2 text-sm' : 'py-2.5 text-base'
 									]"
 								>
-									{{ formatCurrency(amount) }}
+									{{ __('Pay') }} {{ formatCurrency(remainingAmount) }}
 								</button>
-							</div>
-
-							<!-- Custom Amount Row -->
-							<div :class="['flex', isSmallMobile ? 'gap-0.5' : 'gap-1']">
-								<div class="relative flex-1">
-									<span :class="[
-										'absolute start-2 top-1/2 -translate-y-1/2 text-gray-400',
-										isSmallMobile ? 'text-[10px]' : 'text-xs'
-									]">{{ currencySymbol }}</span>
-									<input
-										v-model="mobileCustomAmount"
-										type="number"
-										inputmode="decimal"
-										:placeholder="__('Custom')"
-										min="0"
-										step="0.01"
+							</template>
+							<!-- Normal mode: show quick amounts grid and custom input -->
+							<template v-else>
+								<!-- Quick Amounts Row (4 columns, responsive sizing) -->
+								<div class="grid grid-cols-4" :class="isSmallMobile ? 'gap-0.5' : 'gap-1'">
+									<button
+										v-for="amount in quickAmounts"
+										:key="amount"
+										@click="addCustomPayment(lastSelectedMethod, amount)"
 										:class="[
-											'w-full border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white font-semibold',
-											isSmallMobile ? 'h-7 ps-5 pe-1.5 text-xs' : 'h-8 ps-6 pe-2 text-sm'
+											'font-semibold rounded bg-white border border-gray-200 text-gray-700 active:bg-blue-50 active:border-blue-400 transition-colors',
+											isSmallMobile ? 'py-1 text-[10px]' : 'py-1.5 text-xs'
 										]"
-									/>
+									>
+										{{ formatCurrency(amount) }}
+									</button>
 								</div>
-								<button
-									@click="addMobileCustomPayment"
-									:disabled="!mobileCustomAmount || mobileCustomAmount <= 0"
-									:class="[
-										'font-semibold rounded transition-all flex-shrink-0',
-										isSmallMobile ? 'h-7 px-2 text-[10px]' : 'h-8 px-3 text-xs',
-										!mobileCustomAmount || mobileCustomAmount <= 0
-											? 'bg-gray-100 text-gray-400'
-											: 'bg-blue-500 text-white active:bg-blue-600'
-									]"
-								>
-									{{ __('Add') }}
-								</button>
-							</div>
+
+								<!-- Custom Amount Row -->
+								<div :class="['flex', isSmallMobile ? 'gap-0.5' : 'gap-1']">
+									<div class="relative flex-1">
+										<span :class="[
+											'absolute start-2 top-1/2 -translate-y-1/2 text-gray-400',
+											isSmallMobile ? 'text-[10px]' : 'text-xs'
+										]">{{ currencySymbol }}</span>
+										<input
+											v-model="mobileCustomAmount"
+											type="number"
+											inputmode="decimal"
+											:placeholder="__('Custom')"
+											min="0"
+											step="0.01"
+											:class="[
+												'w-full border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white font-semibold',
+												isSmallMobile ? 'h-7 ps-5 pe-1.5 text-xs' : 'h-8 ps-6 pe-2 text-sm'
+											]"
+										/>
+									</div>
+									<button
+										@click="addMobileCustomPayment"
+										:disabled="!mobileCustomAmount || mobileCustomAmount <= 0"
+										:class="[
+											'font-semibold rounded transition-all flex-shrink-0',
+											isSmallMobile ? 'h-7 px-2 text-[10px]' : 'h-8 px-3 text-xs',
+											!mobileCustomAmount || mobileCustomAmount <= 0
+												? 'bg-gray-100 text-gray-400'
+												: 'bg-blue-500 text-white active:bg-blue-600'
+										]"
+									>
+										{{ __('Add') }}
+									</button>
+								</div>
+							</template>
 						</div>
 
 						<!-- Mobile: Select payment method prompt -->
@@ -847,7 +898,7 @@ import { useLongPress } from "@/composables/useLongPress"
 
 const log = logger.create('PaymentDialog')
 const settingsStore = usePOSSettingsStore()
-const { showWarning } = useToast()
+const { showWarning, showInfo } = useToast()
 
 const props = defineProps({
 	modelValue: Boolean,
@@ -1279,31 +1330,49 @@ const walletInfoResource = createResource({
 	},
 })
 
-// Identify which payment methods are wallet payments
+// Identify which payment methods are wallet payments (batch query)
 async function identifyWalletPaymentMethods() {
 	walletPaymentMethods.value = new Set()
 
-	for (const method of paymentMethods.value) {
-		try {
-			// Check if the mode of payment has is_wallet_payment flag
-			const result = await call('frappe.client.get_value', {
-				doctype: 'Mode of Payment',
-				filters: { name: method.mode_of_payment },
-				fieldname: 'is_wallet_payment'
-			})
-			if (result?.is_wallet_payment) {
-				walletPaymentMethods.value.add(method.mode_of_payment)
-				log.debug('[PaymentDialog] Wallet payment method identified:', method.mode_of_payment)
+	if (paymentMethods.value.length === 0) return
+
+	try {
+		// Single batch API call instead of N individual calls
+		const methodNames = paymentMethods.value.map(m => m.mode_of_payment)
+		const result = await call('pos_next.api.pos_profile.get_wallet_payment_flags', {
+			methods: methodNames
+		})
+
+		if (result) {
+			for (const [methodName, isWallet] of Object.entries(result)) {
+				if (isWallet) {
+					walletPaymentMethods.value.add(methodName)
+					log.debug('[PaymentDialog] Wallet payment method identified:', methodName)
+				}
 			}
-		} catch (error) {
-			log.error('[PaymentDialog] Error checking wallet payment method:', error)
 		}
+	} catch (error) {
+		log.error('[PaymentDialog] Error checking wallet payment methods:', error)
 	}
 }
 
 // Check if a payment method is a wallet payment
 function isWalletPaymentMethod(methodName) {
 	return walletPaymentMethods.value.has(methodName)
+}
+
+// Check if a payment method is a cash payment (allows overpayment/change)
+function isCashPaymentMethod(method) {
+	if (!method) return false
+	// Check by account_type first (most reliable - from linked Account)
+	const accountType = (method.account_type || '').toLowerCase()
+	if (accountType === 'cash') return true
+	// Fallback to Mode of Payment type
+	const type = (method.type || '').toLowerCase()
+	if (type === 'cash') return true
+	// Check by mode_of_payment name as fallback
+	const name = (method.mode_of_payment || '').toLowerCase()
+	return name.includes('cash') || name.includes('نقد') || name.includes('نقدي')
 }
 
 // Get available wallet balance for payment (considering already added wallet payments)
@@ -1537,9 +1606,74 @@ const changeAmount = computed(() => {
 	return change > 0 ? round2(change) : 0
 })
 
+// ===========================================
+// Exact Amount Validation Logic
+// When useExactAmount is enabled:
+// - Cash only: allows overpayment (change)
+// - Non-cash only: must be exact amount
+// - Mixed (cash + non-cash): must be exact total
+// ===========================================
+
+// Check if exact amount mode is active
+// Note: Backend validation in POS Settings already prevents enabling use_exact_amount
+// together with allow_credit_sale or allow_partial_payment
+const isExactAmountModeActive = computed(() => {
+	return settingsStore.useExactAmount
+})
+
+// Check if payment entries contain any cash payments
+const hasCashPayment = computed(() => {
+	return paymentEntries.value.some(entry => {
+		const method = paymentMethods.value.find(m => m.mode_of_payment === entry.mode_of_payment)
+		return isCashPaymentMethod(method)
+	})
+})
+
+// Check if payment entries contain any non-cash payments
+const hasNonCashPayment = computed(() => {
+	return paymentEntries.value.some(entry => {
+		const method = paymentMethods.value.find(m => m.mode_of_payment === entry.mode_of_payment)
+		return method && !isCashPaymentMethod(method) && !entry.is_customer_credit
+	})
+})
+
+// Check if current payment scenario allows overpayment (change)
+const allowsOverpayment = computed(() => {
+	// If exact amount mode is not active, allow overpayment
+	if (!isExactAmountModeActive.value) return true
+
+	// If no payments yet, default to allowing overpayment
+	if (paymentEntries.value.length === 0) return true
+
+	// Cash only: allows overpayment
+	if (hasCashPayment.value && !hasNonCashPayment.value) return true
+
+	// Non-cash or mixed: no overpayment allowed
+	return false
+})
+
+// Check if current payment is valid according to exact amount rules
+const isExactAmountValid = computed(() => {
+	if (!isExactAmountModeActive.value) return true
+
+	// If no payments, it's valid (nothing to validate yet)
+	if (paymentEntries.value.length === 0) return true
+
+	// Cash only: always valid (allows overpayment)
+	if (hasCashPayment.value && !hasNonCashPayment.value) return true
+
+	// Non-cash or mixed: total paid must not exceed grand total
+	return totalPaid.value <= round2(props.grandTotal)
+})
+
 const canComplete = computed(() => {
 	// Check sales person validation first (mandatory when enabled)
 	if (!isSalesPersonValid.value) {
+		return false
+	}
+
+	// Check exact amount validation
+	if (!isExactAmountValid.value) {
 		return false
 	}
 
@@ -1740,11 +1874,8 @@ function switchToNextPaymentMethod(partialAmount) {
 			// Also set mobile custom amount
 			mobileCustomAmount.value = newRemaining.toFixed(2)
 		}
-		frappe.show_alert({
-			message: __('Points applied: {0}. Please pay remaining {1} with {2}',
-				[formatCurrency(partialAmount), formatCurrency(newRemaining), __(nextMethod.mode_of_payment)]),
-			indicator: 'blue'
-		})
+		showInfo(__('Points applied: {0}. Please pay remaining {1} with {2}',
+			[formatCurrency(partialAmount), formatCurrency(newRemaining), __(nextMethod.mode_of_payment)]))
 	}
 }
 
@@ -1761,10 +1892,7 @@ function quickAddPayment(method) {
 	if (isWalletPaymentMethod(method.mode_of_payment)) {
 		const walletAvailable = availableWalletBalance.value
 		if (walletAvailable <= 0) {
-			frappe.show_alert({
-				message: __('No redeemable points available'),
-				indicator: 'orange'
-			})
+			showWarning(__('No redeemable points available'))
 			return
 		}
 		if (amt > walletAvailable) {
@@ -1772,6 +1900,37 @@ function quickAddPayment(method) {
 			amt = walletAvailable
 			isPartialWalletPayment = true
 		}
+	}
+
+	// Exact amount validation for non-cash payments
+	if (isExactAmountModeActive.value && !isCashPaymentMethod(method)) {
+		const currentNonCashTotal = paymentEntries.value
+			.filter(entry => {
+				const m = paymentMethods.value.find(pm => pm.mode_of_payment === entry.mode_of_payment)
+				return m && !isCashPaymentMethod(m) && !entry.is_customer_credit
+			})
+			.reduce((sum, entry) => sum + (entry.amount || 0), 0)
+
+		const maxAllowed = round2(props.grandTotal) - currentNonCashTotal
+
+		if (maxAllowed <= 0) {
+			showWarning(__('Cannot add more non-cash payments. Use cash for overpayment.'))
+			return
+		}
+
+		// For quick add (long press), always use exact remaining amount
+		amt = maxAllowed
+	}
+
+	// For mixed payments in exact amount mode, validate total doesn't exceed grand total
+	if (isExactAmountModeActive.value && hasNonCashPayment.value && isCashPaymentMethod(method)) {
+		const maxAllowed = round2(props.grandTotal) - totalPaid.value
+		if (maxAllowed <= 0) {
+			showInfo(__('Invoice fully paid. No additional payment needed.'))
+			return
+		}
+		// For quick add (long press), use exact remaining to complete payment
+		amt = maxAllowed
 	}
 
 	paymentEntries.value.push({
@@ -1831,16 +1990,43 @@ function addCustomPayment(method, amount) {
 	if (isWalletPaymentMethod(method.mode_of_payment)) {
 		const walletAvailable = availableWalletBalance.value
 		if (walletAvailable <= 0) {
-			frappe.show_alert({
-				message: __('No redeemable points available'),
-				indicator: 'orange'
-			})
+			showWarning(__('No redeemable points available'))
 			return
 		}
 		if (amt > walletAvailable) {
 			// Limit payment to available redeemable points
 			amt = walletAvailable
 			isPartialWalletPayment = true
+		}
+	}
+
+	// Exact amount validation for non-cash payments
+	if (isExactAmountModeActive.value && !isCashPaymentMethod(method)) {
+		// Calculate the remaining amount after ALL existing payments (cash + non-cash)
+		// Non-cash payments in exact amount mode must equal the remaining balance exactly
+		const maxAllowed = round2(props.grandTotal - totalPaid.value)
+
+		if (maxAllowed <= 0) {
+			showWarning(__('Cannot add more non-cash payments. Use cash for overpayment.'))
+			return
+		}
+
+		// Warn and reject if amount doesn't match exact remaining (use rounded comparison to avoid floating-point issues)
+		if (round2(amt) !== maxAllowed) {
+			showWarning(__('Non-cash payment must equal {0} exactly', [formatCurrency(maxAllowed)]))
+			return
+		}
+
+		// Use the maxAllowed value to ensure exact match
+		amt = maxAllowed
+	}
+
+	// For mixed payments in exact amount mode, validate total doesn't exceed grand total
+	if (isExactAmountModeActive.value && hasNonCashPayment.value && isCashPaymentMethod(method)) {
+		const newTotal = totalPaid.value + amt
+		if (newTotal > round2(props.grandTotal)) {
+			showWarning(__('Mixed payment cannot exceed invoice total. Limit: {0}', [formatCurrency(round2(props.grandTotal) - totalPaid.value)]))
+			return
 		}
 	}
 

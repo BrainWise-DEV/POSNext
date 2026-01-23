@@ -83,6 +83,7 @@ def get_pos_settings(pos_profile):
 				"allow_return",
 				"allow_write_off_change",
 				"allow_partial_payment",
+				"use_exact_amount",
 				"decimal_precision",
 				"allow_negative_stock",
 				"enable_sales_persons",
@@ -106,6 +107,7 @@ def get_pos_settings(pos_profile):
 				"allow_return": 0,
 				"allow_write_off_change": 0,
 				"allow_partial_payment": 0,
+				"use_exact_amount": 0,
 				"decimal_precision": "2",
 				"allow_negative_stock": 0,
 				"enable_sales_persons": "Disabled",
@@ -122,29 +124,47 @@ def get_pos_settings(pos_profile):
 
 @frappe.whitelist()
 def get_payment_methods(pos_profile):
-	"""Get available payment methods from POS Profile"""
+	"""Get available payment methods from POS Profile with optimized queries"""
 	try:
 		# Validate pos_profile parameter
 		if not pos_profile:
 			frappe.throw(_("POS Profile is required"))
 
-		payment_methods = frappe.get_list(
-			"POS Payment Method",
-			filters={"parent": pos_profile},
-			fields=["mode_of_payment", "default", "allow_in_returns"],
-			order_by="idx",
-			ignore_permissions=True
+		# Get company from POS Profile
+		company = frappe.db.get_value("POS Profile", pos_profile, "company")
+
+		from frappe.query_builder import DocType
+		from frappe.query_builder.functions import Coalesce
+
+		POSPaymentMethod = DocType("POS Payment Method")
+		ModeOfPayment = DocType("Mode of Payment")
+		ModeOfPaymentAccount = DocType("Mode of Payment Account")
+		Account = DocType("Account")
+
+		# Single query with JOINs to get payment methods with type and account info
+		query = (
+			frappe.qb.from_(POSPaymentMethod)
+			.left_join(ModeOfPayment)
+			.on(POSPaymentMethod.mode_of_payment == ModeOfPayment.name)
+			.left_join(ModeOfPaymentAccount)
+			.on(
+				(ModeOfPaymentAccount.parent == ModeOfPayment.name) &
+				(ModeOfPaymentAccount.company == company)
+			)
+			.left_join(Account)
+			.on(Account.name == ModeOfPaymentAccount.default_account)
+			.select(
+				POSPaymentMethod.mode_of_payment,
+				POSPaymentMethod.default,
+				POSPaymentMethod.allow_in_returns,
+				Coalesce(ModeOfPayment.type, "Cash").as_("type"),
+				Coalesce(Account.account_type, "").as_("account_type")
+			)
+			.where(POSPaymentMethod.parent == pos_profile)
+			.orderby(POSPaymentMethod.idx)
 		)
 
-		# Get payment type for each method
-		for method in payment_methods:
-			payment_type = frappe.db.get_value(
-				"Mode of Payment",
-				method["mode_of_payment"],
-				"type"
-			)
-			method["type"] = payment_type or "Cash"
-
+		payment_methods = query.run(as_dict=True)
 		return payment_methods
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Payment Methods Error")
@@ -290,6 +310,51 @@ def update_warehouse(pos_profile, warehouse):
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Update Warehouse Error")
 		frappe.throw(_("Error updating warehouse: {0}").format(str(e)))
+
+
+@frappe.whitelist()
+def get_wallet_payment_flags(methods):
+	"""
+	Get is_wallet_payment flags for multiple payment methods in a single query.
+
+	Args:
+		methods: List of mode_of_payment names (can be JSON string or list)
+
+	Returns:
+		Dict mapping mode_of_payment name to is_wallet_payment flag
+	"""
+	import json
+
+	if not methods:
+		return {}
+
+	# Parse JSON string if needed
+	if isinstance(methods, str):
+		try:
+			methods = json.loads(methods)
+		except json.JSONDecodeError:
+			return {}
+
+	if not isinstance(methods, list) or len(methods) == 0:
+		return {}
+
+	from frappe.query_builder import DocType
+
+	ModeOfPayment = DocType("Mode of Payment")
+
+	query = (
+		frappe.qb.from_(ModeOfPayment)
+		.select(
+			ModeOfPayment.name,
+			ModeOfPayment.is_wallet_payment
+		)
+		.where(ModeOfPayment.name.isin(methods))
+	)
+
+	results = query.run(as_dict=True)
+
+	# Return as dict for easy lookup
+	return {r["name"]: r["is_wallet_payment"] or 0 for r in results}
 
 
 @frappe.whitelist()

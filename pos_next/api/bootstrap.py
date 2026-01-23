@@ -148,6 +148,7 @@ def get_pos_settings(pos_profile):
 				"allow_return",
 				"allow_write_off_change",
 				"allow_partial_payment",
+				"use_exact_amount",
 				"decimal_precision",
 				"allow_negative_stock",
 				"enable_sales_persons",
@@ -182,6 +183,7 @@ def get_default_pos_settings():
 		"allow_return": 0,
 		"allow_write_off_change": 0,
 		"allow_partial_payment": 0,
+		"use_exact_amount": 0,
 		"decimal_precision": "2",
 		"allow_negative_stock": 0,
 		"enable_sales_persons": "Disabled",
@@ -193,28 +195,33 @@ def get_default_pos_settings():
 
 
 def get_payment_methods(pos_profile):
-	"""Get available payment methods from POS Profile"""
+	"""Get available payment methods from POS Profile with a single optimized query"""
 	if not pos_profile:
 		return []
 
 	try:
-		payment_methods = frappe.get_list(
-			"POS Payment Method",
-			filters={"parent": pos_profile},
-			fields=["mode_of_payment", "default", "allow_in_returns"],
-			order_by="idx",
-			ignore_permissions=True
+		from frappe.query_builder import DocType
+		from frappe.query_builder.functions import Coalesce
+
+		POSPaymentMethod = DocType("POS Payment Method")
+		ModeOfPayment = DocType("Mode of Payment")
+
+		# Single JOIN query instead of N+1 queries
+		query = (
+			frappe.qb.from_(POSPaymentMethod)
+			.left_join(ModeOfPayment)
+			.on(POSPaymentMethod.mode_of_payment == ModeOfPayment.name)
+			.select(
+				POSPaymentMethod.mode_of_payment,
+				POSPaymentMethod.default,
+				POSPaymentMethod.allow_in_returns,
+				Coalesce(ModeOfPayment.type, "Cash").as_("type")
+			)
+			.where(POSPaymentMethod.parent == pos_profile)
+			.orderby(POSPaymentMethod.idx)
 		)
 
-		# Get payment type for each method
-		for method in payment_methods:
-			payment_type = frappe.db.get_value(
-				"Mode of Payment",
-				method["mode_of_payment"],
-				"type"
-			)
-			method["type"] = payment_type or "Cash"
-
+		payment_methods = query.run(as_dict=True)
 		return payment_methods
 	except Exception:
 		frappe.log_error(frappe.get_traceback(), "Get Payment Methods Error")
