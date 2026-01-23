@@ -466,300 +466,73 @@ def update_invoice(data):
         tax_template = data.get("taxes_and_charges")
         shipping_address = data.get("shipping_address_name") or invoice_doc.get("shipping_address_name")
         
-        frappe.log_error(f"Tax template from frontend: {tax_template}", "POS Tax Debug")
-
         if tax_template:
             invoice_doc.taxes_and_charges = tax_template
-            frappe.log_error(f"Set taxes_and_charges to: {tax_template}", "POS Tax Debug")
         elif invoice_doc.customer and invoice_doc.company:
             # Auto-detect tax template using comprehensive GST utilities
-            # This considers customer address, not just GSTIN
-            # Wrap in try-except to prevent deadlocks from breaking invoice creation
             try:
                 from pos_next.api.gst_tax import get_gst_tax_template
-                
                 detected_template = get_gst_tax_template(
                     invoice_doc.company,
                     customer=invoice_doc.customer,
                     shipping_address=shipping_address
                 )
-                
                 if detected_template:
                     invoice_doc.taxes_and_charges = detected_template
-                    frappe.log_error(
-                        f"Auto-detected tax template: {detected_template} "
-                        f"(customer: {invoice_doc.customer}, shipping_address: {shipping_address})",
-                        "POS Tax Debug"
-                    )
             except Exception as e:
-                # If GST tax lookup fails (e.g., deadlock), log but don't break invoice creation
+                # If GST tax lookup fails, log but don't break invoice creation
                 frappe.log_error(
-                    f"Error detecting GST tax template: {str(e)}\n{frappe.get_traceback()}",
+                    f"Error detecting GST tax template: {str(e)}",
                     "GST Tax Template Detection Error"
                 )
-                # Invoice will use default template or no template
 
         # CRITICAL: Preserve taxes_and_charges from frontend BEFORE set_missing_values()
         # set_pos_fields() might overwrite it if not selected in POS Profile
         taxes_and_charges_from_frontend = invoice_doc.taxes_and_charges
-        
-        frappe.log_error(
-            f"Before set_missing_values - taxes_and_charges: {invoice_doc.taxes_and_charges}, "
-            f"pos_profile: {invoice_doc.pos_profile}",
-            "POS Tax Debug"
-        )
 
         # Populate missing fields (company, currency, accounts, etc.)
-        # This calls set_pos_fields() which:
-        # 1. Sets taxes_and_charges from POS Profile (if selected in POS Profile)
-        # 2. Calls set_taxes() if taxes_and_charges is set but taxes are not loaded
-        # 
-        # IMPORTANT: If taxes are NOT selected in POS Profile, set_pos_fields() might
-        # set taxes_and_charges to None. We need to preserve the value from frontend.
         invoice_doc.set_missing_values()
         
         # If set_pos_fields() cleared taxes_and_charges but we had one from frontend, restore it
         if not invoice_doc.taxes_and_charges and taxes_and_charges_from_frontend:
             invoice_doc.taxes_and_charges = taxes_and_charges_from_frontend
-            frappe.log_error(
-                f"Restored taxes_and_charges from frontend: {taxes_and_charges_from_frontend} "
-                f"(POS Profile did not have taxes selected)",
-                "POS Tax Debug"
-            )
-
-        taxes_count = len(invoice_doc.get('taxes', []))
-        frappe.log_error(
-            f"After set_missing_values - taxes count: {taxes_count}, "
-            f"taxes_and_charges: {invoice_doc.taxes_and_charges}",
-            "POS Tax Debug"
+        
+        # Use utility functions for tax handling
+        from pos_next.api.tax_utils import (
+            filter_rcm_taxes, 
+            apply_tax_inclusive_settings, 
+            ensure_taxes_loaded,
+            calculate_taxes_if_needed
         )
         
-        # CRITICAL: If no taxes loaded but template is set, manually load them
-        # This handles the case when taxes are NOT selected in POS Profile
-        # but are sent from frontend or auto-detected
-        if taxes_count == 0 and invoice_doc.taxes_and_charges:
-            try:
-                # Use the same method ERPNext uses
-                invoice_doc.set_taxes()
-                taxes_count_after = len(invoice_doc.get('taxes', []))
-                frappe.log_error(
-                    f"Manually loaded {taxes_count_after} taxes using set_taxes() from template: {invoice_doc.taxes_and_charges}",
-                    "POS Tax Debug"
-                )
-            except Exception as e:
-                frappe.log_error(f"Error loading taxes via set_taxes(): {str(e)}", "POS Tax Error")
-                # Fallback to direct loading
-                try:
-                    from erpnext.controllers.accounts_controller import get_taxes_and_charges
-                    taxes = get_taxes_and_charges("Sales Taxes and Charges Template", invoice_doc.taxes_and_charges)
-                    if taxes:
-                        invoice_doc.set("taxes", taxes)
-                        frappe.log_error(f"Fallback: Manually loaded {len(taxes)} taxes from template", "POS Tax Debug")
-                except Exception as e2:
-                    frappe.log_error(f"Error in fallback tax loading: {str(e2)}", "POS Tax Error")
+        # Ensure taxes are loaded if template is set
+        if not invoice_doc.get("taxes") and invoice_doc.taxes_and_charges:
+            ensure_taxes_loaded(invoice_doc)
         
-        # CRITICAL: Filter out RCM (Reverse Charge Mechanism) taxes if is_reverse_charge is not set
-        # RCM taxes should only be used when is_reverse_charge = 1
-        # India Compliance validates this and throws error if RCM accounts are used without reverse charge
-        if invoice_doc.get("taxes") and not cint(invoice_doc.get("is_reverse_charge", 0)):
-            rcm_taxes_removed = []
-            taxes_to_keep = []
-            
-            # Get list of RCM accounts if India Compliance is installed
-            rcm_accounts = set()
-            try:
-                from india_compliance.gst_india.utils import get_gst_accounts_by_type
-                sales_rcm_accounts = get_gst_accounts_by_type(
-                    invoice_doc.company, "Sales Reverse Charge", throw=False
-                )
-                if sales_rcm_accounts:
-                    rcm_accounts.update(sales_rcm_accounts.values())
-            except Exception:
-                # India Compliance not installed or error - use pattern matching
-                pass
-            
-            # Filter taxes - remove RCM taxes
-            for tax in invoice_doc.get("taxes", []):
-                is_rcm = False
-                
-                # Check if account is in RCM accounts list (India Compliance method)
-                if tax.account_head in rcm_accounts:
-                    is_rcm = True
-                # Fallback: Check if account name contains "RCM" (pattern matching)
-                elif "RCM" in (tax.account_head or "").upper():
-                    is_rcm = True
-                
-                if is_rcm:
-                    rcm_taxes_removed.append(tax.account_head)
-                else:
-                    taxes_to_keep.append(tax)
-            
-            if rcm_taxes_removed:
-                invoice_doc.set("taxes", taxes_to_keep)
-                frappe.log_error(
-                    f"Filtered out {len(rcm_taxes_removed)} RCM taxes (is_reverse_charge not set): {rcm_taxes_removed}",
-                    "POS Tax Debug"
-                )
+        # Filter RCM taxes
+        filter_rcm_taxes(invoice_doc)
         
         # Final check - if still no taxes, log warning
-        final_taxes_count = len(invoice_doc.get('taxes', []))
-        if final_taxes_count == 0 and invoice_doc.taxes_and_charges:
+        if not invoice_doc.get("taxes") and invoice_doc.taxes_and_charges:
             frappe.log_error(
                 f"WARNING: taxes_and_charges is set ({invoice_doc.taxes_and_charges}) but no taxes were loaded!",
                 "POS Tax Warning"
             )
 
-        # IMPORTANT: Set included_in_print_rate AFTER set_missing_values()
-        # because set_missing_values() loads taxes from template and would overwrite our changes
+        # Apply tax-inclusive settings and calculate taxes if needed
         if tax_inclusive:
-            frappe.log_error(f"Setting included_in_print_rate=1 for {len(invoice_doc.get('taxes', []))} taxes", "POS Tax Debug")
-            for tax in invoice_doc.get("taxes", []):
-                # Skip Actual charge type - these can't be inclusive
-                if tax.charge_type == "Actual":
-                    continue
-                tax.included_in_print_rate = 1
-                frappe.log_error(f"Tax {tax.account_head}: included_in_print_rate set to {tax.included_in_print_rate}", "POS Tax Debug")
+            apply_tax_inclusive_settings(invoice_doc, tax_inclusive=tax_inclusive)
+            calculate_taxes_if_needed(invoice_doc, force=True)
             
-            # In tax-inclusive mode, ensure item rates are preserved as tax-inclusive
-            # ERPNext's calculate_taxes_and_totals() will extract tax from these rates
-            for item in invoice_doc.get("items", []):
-                # Ensure rate is set (it should already be from frontend)
-                if not item.rate and item.price_list_rate:
-                    item.rate = item.price_list_rate
-                # Mark that rate includes tax (ERPNext uses this internally)
-                if hasattr(item, 'included_in_print_rate'):
-                    item.included_in_print_rate = 1
-
-        # DEBUG: Log invoice data for GST troubleshooting
-        frappe.log_error(
-            f"""
-=== POS INVOICE DEBUG (update_invoice) ===
-Tax Inclusive Mode: {tax_inclusive}
-Items before calculation:
-{json.dumps([{
-    'item_code': item.item_code,
-    'rate': item.rate,
-    'price_list_rate': item.price_list_rate,
-    'qty': item.qty,
-    'amount': item.amount,
-    'discount_percentage': item.discount_percentage,
-    'discount_amount': item.discount_amount
-} for item in invoice_doc.get('items', [])], indent=2, default=str)}
-
-Taxes before calculation:
-{json.dumps([{
-    'charge_type': tax.charge_type,
-    'account_head': tax.account_head,
-    'rate': tax.rate,
-    'included_in_print_rate': tax.included_in_print_rate,
-    'tax_amount': tax.tax_amount
-} for tax in invoice_doc.get('taxes', [])], indent=2, default=str)}
-=== END DEBUG ===
-            """,
-            "POS Invoice Debug - Before Calc"
-        )
-
-        # Calculate item amounts first (important for tax calculation)
-        for item in invoice_doc.get("items", []):
-            if not item.amount:
-                item.amount = flt(item.rate or item.price_list_rate or 0) * flt(item.qty or 1)
-        
-        # Calculate totals and apply discounts (with rounding disabled)
-        # This will extract tax from item rates if included_in_print_rate = 1
-        invoice_doc.calculate_taxes_and_totals()
-        
-        # Verify taxes were calculated - if not, try once more with explicit recalculation
-        if tax_inclusive and invoice_doc.get("taxes"):
-            total_tax = sum(flt(tax.tax_amount or 0) for tax in invoice_doc.get("taxes", []))
-            if total_tax == 0:
-                # Force recalculation - ensure included_in_print_rate is still set
-                # and item amounts are set correctly
-                for tax in invoice_doc.get("taxes", []):
-                    if tax.charge_type != "Actual":
-                        tax.included_in_print_rate = 1
-                
-                # Ensure item amounts are set (tax-inclusive amounts)
-                for item in invoice_doc.get("items", []):
-                    if not item.amount:
-                        item.amount = flt(item.rate or item.price_list_rate or 0) * flt(item.qty or 1)
-                    if not item.base_amount:
-                        item.base_amount = item.amount * flt(invoice_doc.conversion_rate or 1)
-                
-                # Recalculate with tax-inclusive flag set
-                invoice_doc.calculate_taxes_and_totals()
-                
-                total_tax_after = sum(flt(tax.tax_amount or 0) for tax in invoice_doc.get("taxes", []))
-                if total_tax_after == 0:
-                    # Log detailed information for debugging
-                    tax_details = []
-                    for t in invoice_doc.get("taxes", []):
-                        tax_details.append({
-                            'account': t.account_head,
-                            'rate': t.rate,
-                            'included': t.included_in_print_rate,
-                            'amount': t.tax_amount,
-                            'charge_type': t.charge_type
-                        })
-                    
-                    item_details = []
-                    for item in invoice_doc.get("items", []):
-                        item_details.append({
-                            'item_code': item.item_code,
-                            'rate': item.rate,
-                            'amount': item.amount,
-                            'net_amount': getattr(item, 'net_amount', None),
-                            'qty': item.qty
-                        })
-                    
+            # Verify taxes were calculated - log warning if still zero
+            if invoice_doc.get("taxes"):
+                total_tax = sum(flt(tax.tax_amount or 0) for tax in invoice_doc.get("taxes", []))
+                if total_tax == 0:
                     frappe.log_error(
-                        f"WARNING: Tax-inclusive mode enabled but tax amount is still 0 after recalculation.\n"
-                        f"Items: {json.dumps(item_details, indent=2, default=str)}\n"
-                        f"Taxes: {json.dumps(tax_details, indent=2, default=str)}",
+                        f"WARNING: Tax-inclusive mode enabled but tax amount is 0. "
+                        f"Invoice: {invoice_doc.name if hasattr(invoice_doc, 'name') else 'NEW'}",
                         "POS Tax Calculation Warning"
                     )
-
-        # DEBUG: Log after calculation
-        frappe.log_error(
-            f"""
-=== POS INVOICE DEBUG (after calculate_taxes_and_totals) ===
-Items after calculation:
-{json.dumps([{
-    'item_code': item.item_code,
-    'rate': item.rate,
-    'net_rate': getattr(item, 'net_rate', None),
-    'price_list_rate': item.price_list_rate,
-    'qty': item.qty,
-    'amount': item.amount,
-    'net_amount': getattr(item, 'net_amount', None),
-    'taxable_value': getattr(item, 'taxable_value', None),
-    'cgst_rate': getattr(item, 'cgst_rate', None),
-    'sgst_rate': getattr(item, 'sgst_rate', None),
-    'cgst_amount': getattr(item, 'cgst_amount', None),
-    'sgst_amount': getattr(item, 'sgst_amount', None),
-    'igst_amount': getattr(item, 'igst_amount', None)
-} for item in invoice_doc.get('items', [])], indent=2, default=str)}
-
-Taxes after calculation:
-{json.dumps([{
-    'charge_type': tax.charge_type,
-    'account_head': tax.account_head,
-    'rate': tax.rate,
-    'tax_amount': tax.tax_amount,
-    'included_in_print_rate': tax.included_in_print_rate,
-    'gst_tax_type': getattr(tax, 'gst_tax_type', None),
-    'item_wise_tax_detail': tax.get('item_wise_tax_detail', None)
-} for tax in invoice_doc.get('taxes', [])], indent=2, default=str)}
-
-_item_wise_tax_details: {invoice_doc.get('_item_wise_tax_details', 'NOT SET')}
-
-Totals:
-- net_total: {invoice_doc.net_total}
-- total_taxes_and_charges: {invoice_doc.total_taxes_and_charges}
-- grand_total: {invoice_doc.grand_total}
-=== END DEBUG ===
-            """,
-            "POS Invoice Debug - After Calc"
-        )
 
         # Set accounts for payment methods before saving
         for payment in invoice_doc.payments:
