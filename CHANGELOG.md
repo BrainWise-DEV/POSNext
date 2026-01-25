@@ -7,6 +7,100 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.14.0] - 2026-01-25
+
+### Added
+- **Frappe 16 Compatibility**
+  - Converted SQL queries to Query Builder for full Frappe 16 support
+  - Updated item filtering conditions using Query Builder patterns
+  - Replaced pypika date functions with frappe.utils for date filtering
+
+- **Enhanced Barcode Support**
+  - Added POS Barcode Rules DocType for configurable barcode parsing
+  - Integrated barcode rules into POS Settings for centralized management
+  - Implemented resolved barcode handling for weighted and priced items
+  - Auto-select UOM based on single barcode presence
+  - Enhanced barcode resolution with POS profile settings integration
+  - Warehouse availability now supports barcode UOM conversion
+
+- **Offline Mode Enhancements**
+  - Added offline support for invoice history and unpaid invoices
+  - Cache batch/serial data for offline selection
+  - Enhanced Return Invoice dialog with offline support and optimizations
+  - Eager variant caching with offline verification
+  - Disable clear cache button when offline mode is active
+
+- **Sales Person Management**
+  - Enhanced sales person selection with validation and dropdown support
+  - Keep dropdown open for multiple sales person selection
+
+- **Permissions & Roles**
+  - Added new roles and permissions for system and sales managers
+  - Correct POS Settings permissions with create for managers
+  - Moved POSNext Cashier permissions from fixtures to DocType definitions
+
+- **Payment Improvements**
+  - Added exact amount mode for payment processing
+  - Optimized payment queries for better performance
+  - Added Arabic translations for payment dialog
+  - Extract shared constants and add payment composables
+  - Add toast queue system for better notification management
+
+- **Localization**
+  - Added Indonesian translations
+  - Updated terminology and translations
+  - Corrected CSV escaping and RTL toast positioning
+
+- **POS Settings**
+  - Added use_exact_amount field with validation
+
+### Changed
+- **Promotions UX**
+  - Improved item selection UX with searchable dropdowns
+  - Added clear all functionality for promotion items
+  - Expanded template items to include variants in eligibility check
+
+- **Code Quality**
+  - Improved code quality with shared utilities and consistent patterns
+  - Standardized pricing and submission functions across frontend and backend
+  - Replaced console.warn with logger utility
+  - Replaced silent exception handling with proper error logging
+
+### Fixed
+- **InvoiceCart**
+  - Prevented event propagation on quantity buttons and input fields
+
+- **Returns**
+  - Use ERPNext make_sales_return for proper sales_team handling
+  - Set update_outstanding_for_self=0 for proper credit note handling
+
+- **Batch Display**
+  - Show actual batch quantities instead of hardcoded 999
+
+- **Offers**
+  - Expanded template items to include variants in eligibility check
+
+- **Permissions**
+  - Preserve standard ERPNext role permissions in Custom DocPerm fixtures
+
+- **Payment**
+  - Added mutex protection to prevent duplicate invoice submissions
+
+- **User Display**
+  - Prevent undefined initials when name has trailing spaces
+
+- **Localization**
+  - Removed 'id' from default locales in get_allowed_locales_from_settings
+  - Fixed RTL toast positioning
+
+- **Info Toast**
+  - Added info toast type for informational messages
+
+### DevOps
+- Added stale issue/PR automation workflow
+- Added comprehensive issue templates
+- Added .claude/settings.json to gitignore
+
 ## [1.13.0] - 2026-01-07
 
 ### Added
@@ -781,7 +875,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Shift management
 - Stock tracking
 
-[Unreleased]: https://github.com/BrainWise-DEV/POSNext/compare/v1.13.0...HEAD
+[Unreleased]: https://github.com/BrainWise-DEV/POSNext/compare/v1.14.0...HEAD
+[1.14.0]: https://github.com/BrainWise-DEV/POSNext/compare/v1.13.0...v1.14.0
 [1.13.0]: https://github.com/BrainWise-DEV/POSNext/compare/v1.12.0...v1.13.0
 [1.12.0]: https://github.com/BrainWise-DEV/POSNext/compare/v1.11.0...v1.12.0
 [1.11.0]: https://github.com/BrainWise-DEV/POSNext/compare/v1.10.0...v1.11.0
