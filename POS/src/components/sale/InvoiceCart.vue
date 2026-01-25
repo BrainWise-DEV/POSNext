@@ -817,7 +817,7 @@
 									>
 										<button
 											type="button"
-											@click="decrementQuantity(item)"
+											@click.stop="decrementQuantity(item)"
 											:disabled="item.is_resolved_barcode"
 											:class="[
 												'w-6 h-6 sm:w-7 sm:h-7 flex items-center justify-center font-bold transition-colors touch-manipulation border-e',
@@ -844,6 +844,7 @@
 										</button>
 										<input
 											:value="formatQuantity(item.quantity)"
+											@click.stop
 											@input="updateQuantity(item, $event.target.value)"
 											@blur="handleQuantityBlur(item)"
 											@keydown.enter="$event.target.blur()"
@@ -861,7 +862,7 @@
 										/>
 										<button
 											type="button"
-											@click="incrementQuantity(item)"
+											@click.stop="incrementQuantity(item)"
 											:disabled="item.is_resolved_barcode"
 											:class="[
 												'w-6 h-6 sm:w-7 sm:h-7 flex items-center justify-center font-bold transition-colors touch-manipulation border-s',
