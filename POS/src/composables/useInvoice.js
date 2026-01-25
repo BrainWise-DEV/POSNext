@@ -2,7 +2,17 @@ import { createResource } from "frappe-ui"
 import { computed, ref, toRaw } from "vue"
 import { isOffline } from "@/utils/offline"
 import { useSerialNumberStore } from "@/stores/serialNumber"
+import { CoalescingMutex } from "@/utils/mutex"
+import { logger } from "@/utils/logger"
 
+const log = logger.create("Invoice")
+
+// Shared mutex for invoice submission across all useInvoice instances
+// This prevents duplicate invoice creation from rapid clicks or concurrent submissions
+const submitMutex = new CoalescingMutex({
+	timeout: 60000,
+	name: "InvoiceSubmit",
+})
 
 export function useInvoice() {
 	// Serial Number Store for returning serials when items are removed
@@ -19,6 +29,9 @@ export function useInvoice() {
 	const couponCode = ref(null)
 	const taxRules = ref([]) // Tax rules from POS Profile
 	const taxInclusive = ref(false) // Tax inclusive setting from POS Settings
+
+	// Submission state - prevents duplicate submissions
+	const isSubmitting = ref(false)
 
 	// Performance: Incrementally maintained aggregates (updated on add/remove/change)
 	// This avoids O(n) array reductions on every reactive change
@@ -216,6 +229,8 @@ export function useInvoice() {
 				// Add item_group and brand for offer eligibility checking
 				item_group: item.item_group,
 				brand: item.brand,
+				// Resolved barcode flag - prevents editing qty/uom/rate for weighted/priced barcodes
+				is_resolved_barcode: item.is_resolved_barcode || false,
 			}
 			invoiceItems.value.push(newItem)
 			// Recalculate the newly added item to apply taxes
@@ -583,6 +598,59 @@ export function useInvoice() {
 		item.amount = netAmount    // Net amount for backend calculations
 	}
 
+	/**
+	 * Compute the rate to send to ERPNext based on tax mode.
+	 * - Tax-inclusive: gross rate (price - discount, before tax extraction)
+	 * - Tax-exclusive: net rate (amount / qty, after discount)
+	 */
+	function computeBackendRate(item) {
+		const qty = item.quantity || item.qty || 1
+		const priceListRate = item.price_list_rate || item.rate || 0
+		const discountAmount = item.discount_amount || 0
+
+		if (taxInclusive.value) {
+			// Gross rate: price minus per-unit discount
+			return priceListRate - (discountAmount / qty)
+		}
+		// Net rate: total amount divided by quantity
+		return qty > 0 ? (item.amount || 0) / qty : item.rate || 0
+	}
+
+	/**
+	 * Convert pricing_rules to comma-separated string.
+	 * Handles: array, string, or empty value.
+	 */
+	function stringifyPricingRules(pricingRules) {
+		if (!pricingRules) return ''
+		if (Array.isArray(pricingRules)) return pricingRules.join(',')
+		return String(pricingRules)
+	}
+
+	/**
+	 * Format cart items for server submission.
+	 * Used by both online and offline flows for consistent formatting.
+	 *
+	 * @param {Array} items - Raw cart items
+	 * @returns {Array} Items formatted for ERPNext Sales Invoice
+	 */
+	function formatItemsForSubmission(items) {
+		return items.map((item) => ({
+			item_code: item.item_code,
+			item_name: item.item_name,
+			qty: item.quantity || item.qty || 1,
+			rate: computeBackendRate(item),
+			price_list_rate: item.price_list_rate || item.rate,
+			uom: item.uom,
+			warehouse: item.warehouse,
+			batch_no: item.batch_no,
+			serial_no: item.serial_no,
+			conversion_factor: item.conversion_factor || 1,
+			discount_percentage: item.discount_percentage || 0,
+			discount_amount: item.discount_amount || 0,
+			pricing_rules: stringifyPricingRules(item.pricing_rules),
+		}))
+	}
+
 	function addPayment(payment) {
 		const amount = Number.parseFloat(payment.amount) || 0
 		payments.value.push({
@@ -658,28 +726,7 @@ export function useInvoice() {
 			pos_profile: posProfile.value,
 			posa_pos_opening_shift: posOpeningShift.value,
 			customer: customer.value?.name || customer.value,
-			items: rawItems.map((item) => ({
-				item_code: item.item_code,
-				item_name: item.item_name,
-				qty: item.quantity,
-				// IMPORTANT: Rate calculation depends on tax mode and discounts
-				// Tax-inclusive mode: Send gross amount (price after discount, before tax extraction)
-				//   - With discount: price_list_rate - discount_amount
-				//   - Without discount: price_list_rate
-				//   ERPNext will extract net amount based on included_in_print_rate flag
-				// Tax-exclusive mode: Send net amount (after discount, before tax addition)
-				rate: taxInclusive.value
-					? ((item.price_list_rate || item.rate) - (item.discount_amount || 0) / (item.quantity || 1))
-					: (item.quantity > 0 ? item.amount / item.quantity : item.rate),
-				price_list_rate: item.price_list_rate || item.rate,
-				uom: item.uom,
-				warehouse: item.warehouse,
-				batch_no: item.batch_no,
-				serial_no: item.serial_no,
-				conversion_factor: item.conversion_factor || 1,
-				discount_percentage: item.discount_percentage || 0,
-				discount_amount: item.discount_amount || 0,
-			})),
+			items: formatItemsForSubmission(rawItems),
 			payments: rawPayments.map((p) => ({
 				mode_of_payment: p.mode_of_payment,
 				amount: p.amount,
@@ -703,158 +750,154 @@ export function useInvoice() {
 
 	async function submitInvoice(targetDoctype = "Sales Invoice", deliveryDate = null) {
 		/**
-		 * Two-step submission process:
+		 * Two-step submission process with mutex protection:
 		 * 1. Create/update draft invoice
 		 * 2. Validate stock and submit
+		 *
+		 * The mutex prevents duplicate invoice creation from:
+		 * - Rapid double-clicks on payment buttons
+		 * - Concurrent submissions from multiple UI interactions
+		 * - Credit sales where full amount goes on account
 		 */
-		try {
-			// Step 1: Create invoice draft
-			// Use toRaw() to ensure we get current, non-reactive values (prevents stale cached quantities)
-			const rawItems = toRaw(invoiceItems.value)
-			const rawPayments = toRaw(payments.value)
-			const rawSalesTeam = toRaw(salesTeam.value)
-
-			const invoiceData = {
-				doctype: targetDoctype,
-				pos_profile: posProfile.value,
-				posa_pos_opening_shift: posOpeningShift.value,
-				customer: customer.value?.name || customer.value,
-				items: rawItems.map((item) => ({
-					item_code: item.item_code,
-					item_name: item.item_name,
-					qty: item.quantity,
-					// IMPORTANT: Rate calculation depends on tax mode and discounts
-					// Tax-inclusive mode: Send gross amount (price after discount, before tax extraction)
-					//   - With discount: price_list_rate - discount_amount
-					//   - Without discount: price_list_rate
-					//   ERPNext will extract net amount based on included_in_print_rate flag
-					// Tax-exclusive mode: Send net amount (after discount, before tax addition)
-					rate: taxInclusive.value
-						? ((item.price_list_rate || item.rate) - (item.discount_amount || 0) / (item.quantity || 1))
-						: (item.quantity > 0 ? item.amount / item.quantity : item.rate),
-					price_list_rate: item.price_list_rate || item.rate,
-					uom: item.uom,
-					warehouse: item.warehouse,
-					batch_no: item.batch_no,
-					serial_no: item.serial_no,
-					conversion_factor: item.conversion_factor || 1,
-					discount_percentage: item.discount_percentage || 0,
-					discount_amount: item.discount_amount || 0,
-				})),
-				payments: rawPayments.map((p) => ({
-					mode_of_payment: p.mode_of_payment,
-					amount: p.amount,
-					type: p.type,
-				})),
-				discount_amount: additionalDiscount.value || 0,
-				coupon_code: couponCode.value,
-				is_pos: 1,
-				update_stock: 1, // Critical: Ensures stock is updated
+		return await submitMutex.withLock(async () => {
+			// Check if already submitting (belt and suspenders with mutex)
+			if (isSubmitting.value) {
+				log.warn("Invoice submission already in progress, skipping duplicate request")
+				return null
 			}
 
-			if (targetDoctype === "Sales Order" && deliveryDate) {
-				invoiceData.delivery_date = deliveryDate
-			}
-
-			// Add sales_team if provided
-			if (rawSalesTeam && rawSalesTeam.length > 0) {
-				invoiceData.sales_team = rawSalesTeam.map((member) => ({
-					sales_person: member.sales_person,
-					allocated_percentage: member.allocated_percentage || 0,
-				}))
-			}
-
-			const draftInvoice = await updateInvoiceResource.submit({
-				data: invoiceData,
-			})
-
-			let invoiceDoc = draftInvoice
-			if (
-				draftInvoice &&
-				typeof draftInvoice === "object" &&
-				"data" in draftInvoice
-			) {
-				invoiceDoc = draftInvoice.data
-			}
-
-			if (!invoiceDoc || !invoiceDoc.name) {
-				throw new Error(
-					"Failed to create draft invoice - no invoice name returned",
-				)
-			}
-
-			const submitData = {
-				change_amount:
-					remainingAmount.value < 0 ? Math.abs(remainingAmount.value) : 0,
-			}
+			isSubmitting.value = true
 
 			try {
-				const result = await submitInvoiceResource.submit({
-					invoice: invoiceDoc,
-					data: submitData,
+				// Step 1: Create invoice draft
+				// Use toRaw() to ensure we get current, non-reactive values (prevents stale cached quantities)
+				const rawItems = toRaw(invoiceItems.value)
+				const rawPayments = toRaw(payments.value)
+				const rawSalesTeam = toRaw(salesTeam.value)
+
+				const invoiceData = {
+					doctype: targetDoctype,
+					pos_profile: posProfile.value,
+					posa_pos_opening_shift: posOpeningShift.value,
+					customer: customer.value?.name || customer.value,
+					items: formatItemsForSubmission(rawItems),
+					payments: rawPayments.map((p) => ({
+						mode_of_payment: p.mode_of_payment,
+						amount: p.amount,
+						type: p.type,
+					})),
+					discount_amount: additionalDiscount.value || 0,
+					coupon_code: couponCode.value,
+					is_pos: 1,
+					update_stock: 1, // Critical: Ensures stock is updated
+				}
+
+				if (targetDoctype === "Sales Order" && deliveryDate) {
+					invoiceData.delivery_date = deliveryDate
+				}
+
+				// Add sales_team if provided
+				if (rawSalesTeam && rawSalesTeam.length > 0) {
+					invoiceData.sales_team = rawSalesTeam.map((member) => ({
+						sales_person: member.sales_person,
+						allocated_percentage: member.allocated_percentage || 0,
+					}))
+				}
+
+				const draftInvoice = await updateInvoiceResource.submit({
+					data: invoiceData,
 				})
 
-				// Check if resource has error (frappe-ui pattern)
-				if (submitInvoiceResource.error) {
-					const resourceError = submitInvoiceResource.error
-					console.error("Submit invoice resource error:", resourceError)
-
-					// Create a detailed error object
-					const detailedError = new Error(
-						resourceError.message || "Invoice submission failed",
-					)
-					detailedError.exc_type = resourceError.exc_type
-					detailedError._server_messages = resourceError._server_messages
-					detailedError.httpStatus = resourceError.httpStatus
-					detailedError.messages = resourceError.messages
-
-					throw detailedError
+				let invoiceDoc = draftInvoice
+				if (
+					draftInvoice &&
+					typeof draftInvoice === "object" &&
+					"data" in draftInvoice
+				) {
+					invoiceDoc = draftInvoice.data
 				}
 
-				resetInvoice()
-				return result
-			} catch (error) {
-				// Preserve original error object with all its properties
-				console.error("Submit invoice error:", error)
-				console.log("submitInvoiceResource.error:", submitInvoiceResource.error)
+				if (!invoiceDoc || !invoiceDoc.name) {
+					throw new Error(
+						"Failed to create draft invoice - no invoice name returned",
+					)
+				}
 
-				// If resource has error data, extract and attach it
-				if (submitInvoiceResource.error) {
-					const resourceError = submitInvoiceResource.error
-					console.log("Resource error details:", {
-						exc_type: resourceError.exc_type,
-						_server_messages: resourceError._server_messages,
-						httpStatus: resourceError.httpStatus,
-						messages: resourceError.messages,
-						messagesContent: JSON.stringify(resourceError.messages),
-						data: resourceError.data,
-						exception: resourceError.exception,
-						keys: Object.keys(resourceError),
+				const submitData = {
+					change_amount:
+						remainingAmount.value < 0 ? Math.abs(remainingAmount.value) : 0,
+				}
+
+				try {
+					const result = await submitInvoiceResource.submit({
+						invoice: invoiceDoc,
+						data: submitData,
 					})
 
-					// The messages array likely contains the detailed error info
-					if (resourceError.messages && resourceError.messages.length > 0) {
-						console.log("First message:", resourceError.messages[0])
+					// Check if resource has error (frappe-ui pattern)
+					if (submitInvoiceResource.error) {
+						const resourceError = submitInvoiceResource.error
+						console.error("Submit invoice resource error:", resourceError)
+
+						// Create a detailed error object
+						const detailedError = new Error(
+							resourceError.message || "Invoice submission failed",
+						)
+						detailedError.exc_type = resourceError.exc_type
+						detailedError._server_messages = resourceError._server_messages
+						detailedError.httpStatus = resourceError.httpStatus
+						detailedError.messages = resourceError.messages
+
+						throw detailedError
 					}
 
-					// Attach all resource error properties to the error
-					error.exc_type = resourceError.exc_type || error.exc_type
-					error._server_messages = resourceError._server_messages
-					error.httpStatus = resourceError.httpStatus
-					error.messages = resourceError.messages
-					error.exception = resourceError.exception
-					error.data = resourceError.data
+					resetInvoice()
+					return result
+				} catch (error) {
+					// Preserve original error object with all its properties
+					console.error("Submit invoice error:", error)
+					console.log("submitInvoiceResource.error:", submitInvoiceResource.error)
 
-					console.log("After attaching, error.messages:", error.messages)
+					// If resource has error data, extract and attach it
+					if (submitInvoiceResource.error) {
+						const resourceError = submitInvoiceResource.error
+						console.log("Resource error details:", {
+							exc_type: resourceError.exc_type,
+							_server_messages: resourceError._server_messages,
+							httpStatus: resourceError.httpStatus,
+							messages: resourceError.messages,
+							messagesContent: JSON.stringify(resourceError.messages),
+							data: resourceError.data,
+							exception: resourceError.exception,
+							keys: Object.keys(resourceError),
+						})
+
+						// The messages array likely contains the detailed error info
+						if (resourceError.messages && resourceError.messages.length > 0) {
+							console.log("First message:", resourceError.messages[0])
+						}
+
+						// Attach all resource error properties to the error
+						error.exc_type = resourceError.exc_type || error.exc_type
+						error._server_messages = resourceError._server_messages
+						error.httpStatus = resourceError.httpStatus
+						error.messages = resourceError.messages
+						error.exception = resourceError.exception
+						error.data = resourceError.data
+
+						console.log("After attaching, error.messages:", error.messages)
+					}
+
+					throw error
 				}
-
+			} catch (error) {
+				// Outer catch to ensure error propagates
+				console.error("Submit invoice outer error:", error)
 				throw error
+			} finally {
+				isSubmitting.value = false
 			}
-		} catch (error) {
-			// Outer catch to ensure error propagates
-			console.error("Submit invoice outer error:", error)
-			throw error
-		}
+		}) // End of submitMutex.withLock
 	}
 
 	/**
@@ -1004,6 +1047,7 @@ export function useInvoice() {
 		couponCode,
 		taxRules,
 		taxInclusive,
+		isSubmitting,
 
 		// Computed
 		subtotal,
@@ -1036,6 +1080,7 @@ export function useInvoice() {
 		setTaxInclusive,
 		recalculateItem,
 		rebuildIncrementalCache,
+		formatItemsForSubmission,
 
 		// Resources
 		updateInvoiceResource,

@@ -151,7 +151,7 @@
 											<CheckboxField
 												v-model="settings.allow_negative_stock"
 												:label="__('Allow Negative Stock')"
-												:description="__('Enable selling items even when stock reaches zero or below. Integrates with ERPNext stock settings.')"
+												:description="__('Enable selling items even when stock reaches zero or below. Integrates with Back Office stock settings.')"
 											/>
 											<div class="mt-3 p-3 bg-blue-100 rounded-md">
 												<div class="flex items-start gap-2">

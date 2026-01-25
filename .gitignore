@@ -64,3 +64,4 @@ dev-dist/
 !docs/screenshots/*.gif
 .playwright-mcp/*
 TODO.md
+.claude/settings.json

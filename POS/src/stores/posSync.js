@@ -19,7 +19,11 @@ import {
 	cacheCustomersFromServer,
 	cachePaymentMethodsFromServer,
 	syncOfflineInvoices,
+	cacheInvoiceHistory,
+	cacheUnpaidInvoices,
+	cacheUnpaidSummary,
 } from "@/utils/offline"
+import { call } from "@/utils/apiWrapper"
 import { logger } from "@/utils/logger"
 import { offlineState } from "@/utils/offline/offlineState"
 import { offlineWorker } from "@/utils/offline/workerClient"
@@ -278,6 +282,55 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 				await cacheData([], customersData.customers || [])
 
 				showSuccess(__("Data is ready for offline use"))
+			}
+
+			// Preload invoice history and unpaid invoices in parallel for faster startup
+			log.info('Loading invoice data for offline use')
+			try {
+				const [invoices, unpaidInvoices, unpaidSummary] = await Promise.all([
+					call("pos_next.api.invoices.get_invoices", {
+						pos_profile: currentProfile.name,
+						limit: 100,
+					}).catch(err => {
+						log.error('Failed to load invoice history', err)
+						return []
+					}),
+					call("pos_next.api.partial_payments.get_unpaid_invoices", {
+						pos_profile: currentProfile.name,
+						limit: 100,
+					}).catch(err => {
+						log.error('Failed to load unpaid invoices', err)
+						return []
+					}),
+					call("pos_next.api.partial_payments.get_unpaid_summary", {
+						pos_profile: currentProfile.name,
+					}).catch(err => {
+						log.error('Failed to load unpaid summary', err)
+						return null
+					}),
+				])
+
+				// Cache results in parallel
+				await Promise.all([
+					invoices?.length > 0
+						? cacheInvoiceHistory(invoices, currentProfile.name).then(() =>
+							log.success(`Cached ${invoices.length} invoices for offline viewing`)
+						)
+						: Promise.resolve(),
+					unpaidInvoices?.length > 0
+						? cacheUnpaidInvoices(unpaidInvoices, currentProfile.name).then(() =>
+							log.success(`Cached ${unpaidInvoices.length} unpaid invoices for offline viewing`)
+						)
+						: Promise.resolve(),
+					unpaidSummary
+						? cacheUnpaidSummary(unpaidSummary, currentProfile.name).then(() =>
+							log.debug('Cached unpaid invoice summary')
+						)
+						: Promise.resolve(),
+				])
+			} catch (error) {
+				log.error('Failed to load invoice data for offline', error)
+				// Continue - not critical for POS operation
 			}
 		} catch (error) {
 			log.error('Failed to preload offline data', error)

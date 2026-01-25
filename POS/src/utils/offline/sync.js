@@ -246,28 +246,41 @@ const handleSyncFailure = async (invoice, errorMessage) => {
 }
 
 /**
- * Transform invoice data for server submission
- * @param {Object} invoiceData - Raw invoice data
- * @param {string} offlineId - Offline ID
- * @returns {Object} Transformed invoice data
+ * Convert pricing_rules to comma-separated string.
+ * Returns empty string for invalid/malformed values.
  */
-const prepareInvoiceForSubmission = (invoiceData, offlineId) => {
-	const prepared = { ...invoiceData }
+const stringifyPricingRules = (value) => {
+	if (!value) return ''
+	if (Array.isArray(value)) return value.filter(Boolean).join(',')
+	if (typeof value !== 'string') return ''
 
-	// Map 'quantity' to 'qty' for ERPNext compatibility
-	if (prepared.items?.length) {
-		prepared.items = prepared.items.map((item) => ({
-			...item,
-			qty: item.quantity || item.qty || 1,
-		}))
+	const stripped = value.trim()
+	if (!stripped.startsWith('[')) return stripped
+
+	try {
+		const parsed = JSON.parse(stripped)
+		if (Array.isArray(parsed)) return parsed.filter(Boolean).join(',')
+	} catch (e) {
+		log.warn('Invalid pricing_rules JSON, clearing value', { value: stripped.slice(0, 100) })
+		return ''
 	}
-
-	if (offlineId) {
-		prepared.offline_id = offlineId
-	}
-
-	return prepared
+	return ''
 }
+
+/**
+ * Normalize invoice data for server sync.
+ * Items should already be formatted by formatItemsForSubmission() when saved.
+ * This provides a safety net for legacy data.
+ */
+const normalizeInvoiceForSync = (invoiceData, offlineId) => ({
+	...invoiceData,
+	offline_id: offlineId || invoiceData.offline_id,
+	items: invoiceData.items?.map((item) => ({
+		...item,
+		qty: item.qty || item.quantity || 1,
+		pricing_rules: stringifyPricingRules(item.pricing_rules),
+	})),
+})
 
 /**
  * Sync a single invoice to the server with retry for in-progress errors
@@ -275,7 +288,7 @@ const prepareInvoiceForSubmission = (invoiceData, offlineId) => {
  * @param {number} retryCount - Current retry attempt (for in-progress waits)
  * @returns {Promise<{status: 'success'|'skipped'|'failed', error?: Error}>}
  */
-const syncSingleInvoice = async (invoice, retryCount = 0) => {
+const syncInvoiceToServer = async (invoice, retryCount = 0) => {
 	const MAX_IN_PROGRESS_RETRIES = 3
 	const IN_PROGRESS_WAIT_MS = 2000  // Wait 2 seconds between retries
 
@@ -296,7 +309,7 @@ const syncSingleInvoice = async (invoice, retryCount = 0) => {
 	}
 
 	// Prepare and submit
-	const invoiceData = prepareInvoiceForSubmission(invoice.data, offlineId)
+	const invoiceData = normalizeInvoiceForSync(invoice.data, offlineId)
 
 	try {
 		const response = await call("pos_next.api.invoices.submit_invoice", {
@@ -323,7 +336,7 @@ const syncSingleInvoice = async (invoice, retryCount = 0) => {
 				retry: retryCount + 1,
 			})
 			await sleep(IN_PROGRESS_WAIT_MS)
-			return syncSingleInvoice(invoice, retryCount + 1)
+			return syncInvoiceToServer(invoice, retryCount + 1)
 		}
 
 		// Re-throw other errors
@@ -357,7 +370,7 @@ export const syncOfflineInvoices = async () => {
 
 		for (const invoice of pendingInvoices) {
 			try {
-				const syncResult = await syncSingleInvoice(invoice)
+				const syncResult = await syncInvoiceToServer(invoice)
 
 				if (syncResult.status === "success") {
 					result.success++
@@ -484,4 +497,220 @@ export const saveOfflinePayment = async (paymentData) => {
 
 	log.info("Payment saved to offline queue")
 	return true
+}
+
+// ============================================================================
+// INVOICE HISTORY CACHE OPERATIONS
+// ============================================================================
+
+/**
+ * Cache invoice history for offline viewing
+ * @param {Array} invoices - Array of invoice objects
+ * @param {string} posProfile - POS Profile name
+ * @returns {Promise<boolean>}
+ */
+export const cacheInvoiceHistory = async (invoices, posProfile) => {
+	if (!invoices || invoices.length === 0) return false
+
+	try {
+		// Clean data and add pos_profile for filtering
+		const invoicesToCache = invoices.map((invoice) => ({
+			...JSON.parse(JSON.stringify(invoice)),
+			pos_profile: posProfile,
+			cached_at: Date.now(),
+		}))
+
+		await db.invoice_history.bulkPut(invoicesToCache)
+		log.info(`Cached ${invoices.length} invoices for offline viewing`)
+		return true
+	} catch (error) {
+		log.error("Failed to cache invoice history", error)
+		return false
+	}
+}
+
+/**
+ * Get cached invoice history for offline viewing
+ * @param {string} posProfile - POS Profile name (optional filter)
+ * @param {Object} options - Query options
+ * @param {number} options.limit - Max number of invoices to return
+ * @param {string} options.customer - Filter by customer name
+ * @param {string} options.fromDate - Filter by posting_date >= fromDate
+ * @param {string} options.toDate - Filter by posting_date <= toDate
+ * @returns {Promise<Array>}
+ */
+export const getCachedInvoiceHistory = async (posProfile, options = {}) => {
+	try {
+		const { limit = 100, customer, fromDate, toDate } = options
+
+		let query = db.invoice_history
+
+		// Filter by POS profile if provided
+		if (posProfile) {
+			query = query.where("pos_profile").equals(posProfile)
+		}
+
+		let invoices = await query.toArray()
+
+		// Apply additional filters
+		if (customer) {
+			invoices = invoices.filter((inv) =>
+				inv.customer?.toLowerCase().includes(customer.toLowerCase()),
+			)
+		}
+
+		if (fromDate) {
+			invoices = invoices.filter((inv) => inv.posting_date >= fromDate)
+		}
+
+		if (toDate) {
+			invoices = invoices.filter((inv) => inv.posting_date <= toDate)
+		}
+
+		// Sort by posting_date descending (newest first)
+		invoices.sort((a, b) => {
+			const dateA = new Date(b.posting_date + " " + (b.posting_time || "00:00:00"))
+			const dateB = new Date(a.posting_date + " " + (a.posting_time || "00:00:00"))
+			return dateA - dateB
+		})
+
+		return invoices.slice(0, limit)
+	} catch (error) {
+		log.error("Failed to get cached invoice history", error)
+		return []
+	}
+}
+
+/**
+ * Clear cached invoice history
+ * @param {string} posProfile - Optional POS Profile to clear (clears all if not provided)
+ * @returns {Promise<boolean>}
+ */
+export const clearInvoiceHistoryCache = async (posProfile) => {
+	try {
+		if (posProfile) {
+			await db.invoice_history.where("pos_profile").equals(posProfile).delete()
+		} else {
+			await db.invoice_history.clear()
+		}
+		log.info("Invoice history cache cleared")
+		return true
+	} catch (error) {
+		log.error("Failed to clear invoice history cache", error)
+		return false
+	}
+}
+
+// ============================================================================
+// UNPAID INVOICES CACHE OPERATIONS
+// ============================================================================
+
+/**
+ * Cache unpaid invoices for offline viewing
+ * @param {Array} invoices - Array of unpaid invoice objects
+ * @param {string} posProfile - POS Profile name
+ * @returns {Promise<boolean>}
+ */
+export const cacheUnpaidInvoices = async (invoices, posProfile) => {
+	if (!invoices || invoices.length === 0) {
+		// Clear existing cache if no invoices
+		try {
+			await db.unpaid_invoices.where("pos_profile").equals(posProfile).delete()
+		} catch (e) {
+			// Ignore errors on clear
+		}
+		return true
+	}
+
+	try {
+		// Clean data and add pos_profile for filtering
+		const invoicesToCache = invoices.map((invoice) => ({
+			...JSON.parse(JSON.stringify(invoice)),
+			pos_profile: posProfile,
+			cached_at: Date.now(),
+		}))
+
+		// Clear existing cache for this profile first
+		await db.unpaid_invoices.where("pos_profile").equals(posProfile).delete()
+
+		// Add new data
+		await db.unpaid_invoices.bulkPut(invoicesToCache)
+		log.info(`Cached ${invoices.length} unpaid invoices for offline viewing`)
+		return true
+	} catch (error) {
+		log.error("Failed to cache unpaid invoices", error)
+		return false
+	}
+}
+
+/**
+ * Get cached unpaid invoices for offline viewing
+ * @param {string} posProfile - POS Profile name
+ * @param {Object} options - Query options
+ * @param {number} options.limit - Max number of invoices to return
+ * @returns {Promise<Array>}
+ */
+export const getCachedUnpaidInvoices = async (posProfile, options = {}) => {
+	try {
+		const { limit = 100 } = options
+
+		if (!posProfile) {
+			return []
+		}
+
+		let invoices = await db.unpaid_invoices
+			.where("pos_profile")
+			.equals(posProfile)
+			.toArray()
+
+		// Sort by outstanding_amount descending (highest first)
+		invoices.sort((a, b) => {
+			const amountA = parseFloat(b.outstanding_amount || 0)
+			const amountB = parseFloat(a.outstanding_amount || 0)
+			return amountA - amountB
+		})
+
+		return invoices.slice(0, limit)
+	} catch (error) {
+		log.error("Failed to get cached unpaid invoices", error)
+		return []
+	}
+}
+
+/**
+ * Cache unpaid invoice summary for offline viewing
+ * @param {Object} summary - Summary object with count, total_outstanding, total_paid
+ * @param {string} posProfile - POS Profile name
+ * @returns {Promise<boolean>}
+ */
+export const cacheUnpaidSummary = async (summary, posProfile) => {
+	try {
+		await db.settings.put({
+			key: `unpaid_summary_${posProfile}`,
+			value: {
+				...summary,
+				cached_at: Date.now(),
+			},
+		})
+		log.debug("Cached unpaid invoice summary")
+		return true
+	} catch (error) {
+		log.error("Failed to cache unpaid summary", error)
+		return false
+	}
+}
+
+/**
+ * Get cached unpaid invoice summary
+ * @param {string} posProfile - POS Profile name
+ * @returns {Promise<Object>}
+ */
+export const getCachedUnpaidSummary = async (posProfile) => {
+	try {
+		const result = await db.settings.get(`unpaid_summary_${posProfile}`)
+		return result?.value || { count: 0, total_outstanding: 0, total_paid: 0 }
+	} catch (error) {
+		log.error("Failed to get cached unpaid summary", error)
+		return { count: 0, total_outstanding: 0, total_paid: 0 }
+	}
 }

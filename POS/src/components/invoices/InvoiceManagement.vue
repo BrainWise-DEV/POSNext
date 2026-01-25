@@ -156,6 +156,17 @@
 									</div>
 								</div>
 
+								<!-- Offline Warning -->
+								<div v-if="isOffline()" class="bg-yellow-50 border border-yellow-300 rounded-lg p-3 flex items-center gap-3">
+									<svg class="w-5 h-5 text-yellow-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+									</svg>
+									<div class="flex-1 text-start">
+										<p class="text-sm font-medium text-yellow-800">{{ __('You are offline') }}</p>
+										<p class="text-xs text-yellow-700">{{ __('Payments cannot be added while offline. Connect to the internet to add payments.') }}</p>
+									</div>
+								</div>
+
 								<!-- Empty State -->
 								<div v-if="filteredUnpaidInvoices.length === 0" class="flex flex-col items-center justify-center py-16 text-center">
 									<svg class="w-16 h-16 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -204,8 +215,11 @@
 												</div>
 												<button
 													@click="selectInvoiceForPayment(invoice)"
-													class="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors text-sm font-semibold"
+													:disabled="loadingInvoiceDetails || isOffline()"
+													:title="isOffline() ? __('Payments cannot be added while offline') : ''"
+													class="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
 												>
+													<LoadingIndicator v-if="loadingInvoiceDetails" class="w-4 h-4" />
 													{{ __('Add Payment') }}
 												</button>
 											</div>
@@ -530,6 +544,9 @@
 	<PaymentDialog
 		v-model="showPaymentDialog"
 		:grand-total="selectedInvoice?.outstanding_amount || 0"
+		:subtotal="selectedInvoice?.grand_total || 0"
+		:items="selectedInvoice?.items || []"
+		:customer="selectedInvoice?.customer_name || selectedInvoice?.customer"
 		:pos-profile="posProfile"
 		:currency="currency"
 		:is-offline="false"
@@ -547,9 +564,18 @@ import { formatCurrency as formatCurrencyUtil } from "@/utils/currency"
 import { getInvoiceStatusColor } from "@/utils/invoice"
 import { useFormatters } from "@/composables/useFormatters"
 import { useToast } from "@/composables/useToast"
-import { Button, call } from "frappe-ui"
+import { Button, call, LoadingIndicator } from "frappe-ui"
 import { computed, onMounted, ref, watch } from "vue"
+import { isOffline } from "@/utils/offline/offlineState"
+import {
+	cacheUnpaidInvoices,
+	getCachedUnpaidInvoices,
+	cacheUnpaidSummary,
+	getCachedUnpaidSummary,
+} from "@/utils/offline/sync"
+import { logger } from "@/utils/logger"
 
+const log = logger.create("InvoiceManagement")
 const { showSuccess, showError } = useToast()
 const { formatDate, formatDateTime, formatTime } = useFormatters()
 
@@ -799,8 +825,31 @@ async function refreshCurrentTab() {
 async function loadUnpaidInvoices() {
 	if (!props.posProfile) return
 
+	// Start loading immediately - show skeleton while fetching
 	loading.value = true
 
+	// Load cached data immediately for instant display
+	try {
+		const cachedInvoices = await getCachedUnpaidInvoices(props.posProfile, {
+			limit: 100,
+		})
+		if (cachedInvoices && cachedInvoices.length > 0) {
+			unpaidInvoices.value = cachedInvoices
+			loading.value = false // Hide skeleton once we have cached data
+			log.debug("Loaded", cachedInvoices.length, "unpaid invoices from cache (instant)")
+		}
+	} catch (cacheError) {
+		log.debug("No cached unpaid invoices available")
+	}
+
+	// If offline, we're done - use only cached data
+	if (isOffline()) {
+		log.info("Offline mode - using cached unpaid invoices")
+		loading.value = false
+		return
+	}
+
+	// Fetch fresh data from server in background
 	try {
 		const result = await call(
 			"pos_next.api.partial_payments.get_unpaid_invoices",
@@ -811,9 +860,18 @@ async function loadUnpaidInvoices() {
 		)
 
 		unpaidInvoices.value = result || []
+
+		// Cache for offline use
+		if (result && result.length > 0) {
+			cacheUnpaidInvoices(result, props.posProfile)
+		}
 	} catch (error) {
-		console.error("Error loading unpaid invoices:", error)
-		showError(error.message || __("Failed to load unpaid invoices"))
+		log.error("Error loading unpaid invoices:", error)
+
+		// If we already have cached data, don't show error
+		if (unpaidInvoices.value.length === 0) {
+			showError(error.message || __("Failed to load unpaid invoices"))
+		}
 	} finally {
 		loading.value = false
 	}
@@ -822,6 +880,24 @@ async function loadUnpaidInvoices() {
 async function loadUnpaidSummary() {
 	if (!props.posProfile) return
 
+	// Load cached summary immediately for instant display
+	try {
+		const cachedSummary = await getCachedUnpaidSummary(props.posProfile)
+		if (cachedSummary && (cachedSummary.count > 0 || cachedSummary.total_outstanding > 0)) {
+			unpaidSummary.value = cachedSummary
+			log.debug("Loaded unpaid summary from cache (instant)")
+		}
+	} catch (cacheError) {
+		log.debug("No cached unpaid summary available")
+	}
+
+	// If offline, we're done - use only cached data
+	if (isOffline()) {
+		log.info("Offline mode - using cached unpaid summary")
+		return
+	}
+
+	// Fetch fresh summary from server in background
 	try {
 		const result = await call(
 			"pos_next.api.partial_payments.get_unpaid_summary",
@@ -835,14 +911,36 @@ async function loadUnpaidSummary() {
 			total_outstanding: 0,
 			total_paid: 0,
 		}
+
+		// Cache for offline use
+		if (result) {
+			cacheUnpaidSummary(result, props.posProfile)
+		}
 	} catch (error) {
-		console.error("Error loading summary:", error)
+		log.error("Error loading summary:", error)
+		// If we already have cached data, don't show any error - silent fail
 	}
 }
 
-function selectInvoiceForPayment(invoice) {
-	selectedInvoice.value = invoice
-	showPaymentDialog.value = true
+const loadingInvoiceDetails = ref(false)
+
+async function selectInvoiceForPayment(invoice) {
+	loadingInvoiceDetails.value = true
+	try {
+		// Fetch full invoice details including items for the payment dialog
+		const details = await call("pos_next.api.partial_payments.get_partial_payment_details", {
+			invoice_name: invoice.name,
+		})
+		selectedInvoice.value = details
+		showPaymentDialog.value = true
+	} catch (error) {
+		log.error("Error loading invoice details:", error)
+		// Fallback to basic invoice data
+		selectedInvoice.value = invoice
+		showPaymentDialog.value = true
+	} finally {
+		loadingInvoiceDetails.value = false
+	}
 }
 
 async function handlePaymentCompleted(paymentData) {

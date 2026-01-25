@@ -20,6 +20,19 @@ class POSSettings(Document):
 			if search_limit <= 0:
 				frappe.throw("Search Limit must be greater than 0")
 
+		# Validate use_exact_amount cannot be enabled with credit sale or partial payment
+		if cint(self.use_exact_amount):
+			if cint(self.allow_credit_sale):
+				frappe.throw(
+					"'Use Exact Amount for Non-Cash' cannot be enabled together with 'Allow Credit Sale'. "
+					"Please disable Credit Sale first."
+				)
+			if cint(self.allow_partial_payment):
+				frappe.throw(
+					"'Use Exact Amount for Non-Cash' cannot be enabled together with 'Allow Partial Payment'. "
+					"Please disable Partial Payment first."
+				)
+
 	def on_update(self):
 		"""Sync allow_negative_stock with Stock Settings"""
 		self.sync_negative_stock_setting()

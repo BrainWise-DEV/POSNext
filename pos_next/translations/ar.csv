@@ -374,8 +374,8 @@
 "Shift closed successfully","تم إغلاق الوردية بنجاح",""
 "Insufficient Stock","الرصيد غير كافٍ",""
 "Item: {0}","الصنف: {0}",""
-"\"{0}\" cannot be added to cart. Bundle is out of stock. Allow Negative Stock is disabled.","لا يمكن إضافة \"{0}\". المجموعة غير متوفرة (البيع بالسالب معطل).",""
-"\"{0}\" cannot be added to cart. Item is out of stock. Allow Negative Stock is disabled.","لا يمكن إضافة \"{0}\". الصنف غير متوفر (البيع بالسالب معطل).",""
+"""{0}"" cannot be added to cart. Bundle is out of stock. Allow Negative Stock is disabled.","تعذرت إضافة ""{0}"". رصيد المجموعة لا يسمح.",""
+"""{0}"" cannot be added to cart. Item is out of stock. Allow Negative Stock is disabled.","تعذرت إضافة ""{0}"". رصيد الصنف لا يسمح.",""
 "{0} selected","تم تحديد {0}",""
 "Please add items to cart before proceeding to payment","يرجى إضافة أصناف للسلة قبل الدفع",""
 "Please select a customer before proceeding","يرجى اختيار العميل أولاً",""
@@ -531,7 +531,7 @@
 "✓ Shift Closed","✓ تم إغلاق الوردية",""
 "Total Variance","إجمالي الفرق",""
 "Enter actual amount for {0}","أدخل المبلغ الفعلي لـ {0}",""
-"Expected: <span class=\"font-medium\">{0}</span>","المتوقع: <span class=\"font-medium\">{0}</span>",""
+"Expected: <span class=""font-medium"">{0}</span>","المتوقع: <span class=""font-medium"">{0}</span>",""
 "✓ Balanced","✓ متوازن",""
 "Over {0}","زيادة {0}",""
 "Short {0}","نقص {0}",""
@@ -570,7 +570,7 @@
 "Loading customers...","جاري تحميل العملاء...",""
 "No customers available","لا يوجد عملاء متاحين",""
 "Create your first customer to get started","قم بإنشاء أول عميل للبدء",""
-"No results for \"{0}\"","لا توجد نتائج لـ \"{0}\"",""
+"No results for ""{0}""","لا توجد نتائج لـ ""{0}""",""
 "Try a different search term or create a new customer","جرب مصطلح بحث مختلف أو أنشئ عميلاً جديداً",""
 "+ Create New Customer","+ إنشاء عميل جديد",""
 "All Items","جميع المنتجات",""
@@ -702,7 +702,7 @@
 "Fill in the details to create a new promotional scheme","أملأ التفاصيل لإنشاء مخطط ترويجي جديد",""
 "View pricing rule details (read-only)","عرض تفاصيل قاعدة التسعير (للقراءة فقط)",""
 "Update the promotion details below","تحديث تفاصيل العرض أدناه",""
-"Read-only: Edit in ERPNext","للقراءة فقط: عدّل في ERPNext",""
+"Read-only: Edit in Back Office","للقراءة فقط: عدّل في لوحة التحكم",""
 "Enable","تفعيل",""
 "Basic Information","المعلومات الأساسية",""
 "Promotion Name","اسم العرض",""
@@ -718,8 +718,12 @@
 "Required","مطلوب",""
 "Search items... (min 2 characters)","البحث عن منتجات... (حرفين كحد أدنى)",""
 "Searching from {0} cached items","البحث من {0} منتج مخزن",""
-"-- Select Item Group --","-- اختر مجموعة المنتجات --",""
-"-- Select Brand --","-- اختر العلامة التجارية --",""
+"Select Item Group","اختر مجموعة المنتجات",""
+"Select Brand","اختر العلامة التجارية",""
+"Select Item","اختر المنتج",""
+"Select option","اختر خياراً",""
+"Search by name or code...","البحث بالاسم أو الكود...",""
+"No items found","لم يتم العثور على منتجات",""
 "Discount Details","تفاصيل الخصم",""
 "Discount Type","نوع الخصم",""
 "Discount (%)","الخصم (%)",""
@@ -732,7 +736,7 @@
 "Minimum Amount ({0})","الحد الأدنى للمبلغ ({0})",""
 "Maximum Amount ({0})","الحد الأقصى للمبلغ ({0})",""
 "Delete Promotion","حذف العرض",""
-"Are you sure you want to delete <strong>\"{0}\"<strong>?","هل أنت متأكد من حذف <strong>\"{0}\"<strong>؟",""
+"Are you sure you want to delete <strong>""{0}""<strong>?","هل أنت متأكد من حذف <strong>""{0}""<strong>؟",""
 "This will also delete all associated pricing rules. This action cannot be undone.","سيؤدي هذا أيضاً إلى حذف جميع قواعد التسعير المرتبطة. لا يمكن التراجع عن هذا الإجراء.",""
 "Percentage","نسبة مئوية",""
 "Fixed Amount","مبلغ ثابت",""
@@ -749,7 +753,7 @@
 "Failed to load promotion details","فشل في تحميل تفاصيل العرض",""
 "An error occurred","حدث خطأ",""
 "Please enter a promotion name","يرجى إدخال اسم العرض",""
-"Promotion \"{0}\" already exists. Please use a different name.","العرض \"{0}\" موجود بالفعل. يرجى استخدام اسم مختلف.",""
+"Promotion ""{0}"" already exists. Please use a different name.","العرض ""{0}"" موجود بالفعل. يرجى استخدام اسم مختلف.",""
 "Please select at least one {0}","يرجى اختيار {0} واحد على الأقل",""
 "Partially Paid ({0})","مدفوع جزئياً ({0})",""
 "Unpaid ({0})","غير مدفوع ({0})",""
@@ -789,7 +793,7 @@
 "Save these filters as...","حفظ هذه الفلاتر كـ...",""
 "Saved Filters","الفلاتر المحفوظة",""
 "Partial","جزئي",""
-"Delete \"{0}\"?","حذف \"{0}\"؟",""
+"Delete ""{0}""?","حذف ""{0}""؟",""
 "Install POSNext","تثبيت POSNext",""
 "Faster access and offline support","وصول أسرع ودعم بدون اتصال",""
 "Snooze for 7 days","تأجيل لمدة 7 أيام",""
@@ -866,9 +870,9 @@
 "Checking Stock...","جاري فحص المخزون...",""
 "No Stock Available","لا يوجد مخزون متاح",""
 "Update Item","تحديث المنتج",""
-"\"{0}\" is not available in warehouse \"{1}\". Please select another warehouse.","\"{0}\" غير متوفر في المستودع \"{1}\". يرجى اختيار مستودع آخر.",""
-"Only {0} units of \"{1}\" available in \"{2}\". Current quantity: {3}","فقط {0} وحدات من \"{1}\" متوفرة في \"{2}\". الكمية الحالية: {3}",""
-"{0} units available in \"{1}\"","{0} وحدات متوفرة في \"{1}\"",""
+"""{0}"" is not available in warehouse ""{1}"". Please select another warehouse.","""{0}"" غير متوفر في المستودع ""{1}"". يرجى اختيار مستودع آخر.",""
+"Only {0} units of ""{1}"" available in ""{2}"". Current quantity: {3}","فقط {0} وحدات من ""{1}"" متوفرة في ""{2}"". الكمية الحالية: {3}",""
+"{0} units available in ""{1}""","{0} وحدات متوفرة في ""{1}""",""
 "Available Offers","العروض المتاحة",""
 "Loading offers...","جاري تحميل العروض...",""
 "Applying offer...","جاري تطبيق العرض...",""
@@ -891,6 +895,8 @@
 "Select Invoice to Return","اختر الفاتورة للإرجاع",""
 "Search by invoice number or customer name...","البحث برقم الفاتورة أو اسم العميل...",""
 "Search by invoice number or customer...","البحث برقم الفاتورة أو العميل...",""
+"Search by invoice, customer, or mobile...","البحث بالفاتورة أو العميل أو الجوال...",""
+"Search for ""{0}""","البحث عن ""{0}""",""
 "Process Return","معالجة الإرجاع",""
 "Select Items to Return","اختر المنتجات للإرجاع",""
 "⚠️ {0} already returned","⚠️ تم إرجاع {0} مسبقاً",""
@@ -944,7 +950,7 @@
 "All stock operations will use this warehouse. Stock quantities will refresh after saving.","جميع عمليات المخزون ستستخدم هذا المستودع. سيتم تحديث كميات المخزون بعد الحفظ.",""
 "Stock Validation Policy","سياسة التحقق من المخزون",""
 "Allow Negative Stock","السماح بالمخزون السالب",""
-"Enable selling items even when stock reaches zero or below. Integrates with ERPNext stock settings.","تمكين بيع المنتجات حتى عندما يصل المخزون إلى الصفر أو أقل. يتكامل مع إعدادات مخزون ERPNext.",""
+"Enable selling items even when stock reaches zero or below. Integrates with Back Office stock settings.","تمكين بيع المنتجات حتى عندما يصل المخزون إلى الصفر أو أقل. يتكامل مع إعدادات المخزون في لوحة التحكم.",""
 "Background Stock Sync","مزامنة المخزون في الخلفية",""
 "Enable Automatic Stock Sync","تمكين مزامنة المخزون التلقائية",""
 "Periodically sync stock quantities from server in the background (runs in Web Worker)","مزامنة كميات المخزون دورياً من الخادم في الخلفية (تعمل في Web Worker)",""
@@ -1071,8 +1077,8 @@
 "Pricing Rules","قواعد التسعير",""
 "Promo Schemes","المخططات الترويجية",""
 "Return Reason","سبب الإرجاع",""
-"Settings saved. Tax mode is now \"inclusive\". Cart will be recalculated.","تم حفظ الإعدادات. وضع الضريبة الآن \"شامل\". سيتم إعادة حساب السلة.",""
-"Settings saved. Tax mode is now \"exclusive\". Cart will be recalculated.","تم حفظ الإعدادات. وضع الضريبة الآن \"غير شامل\". سيتم إعادة حساب السلة.",""
+"Settings saved. Tax mode is now ""inclusive"". Cart will be recalculated.","تم حفظ الإعدادات. وضع الضريبة الآن ""شامل"". سيتم إعادة حساب السلة.",""
+"Settings saved. Tax mode is now ""exclusive"". Cart will be recalculated.","تم حفظ الإعدادات. وضع الضريبة الآن ""غير شامل"". سيتم إعادة حساب السلة.",""
 "This will clear all cached items, customers, and stock data. Invoices and drafts will be preserved.","سيتم مسح جميع الأصناف والعملاء وبيانات المخزون المخزنة مؤقتاً. سيتم الاحتفاظ بالفواتير والمسودات.",""
 "Clear All Data","مسح جميع البيانات",""
 "Clearing...","جاري المسح...",""
@@ -1210,9 +1216,9 @@
 "Referral Code","رمز الدعوة",""
 "Times Used","مرات الاستخدام",""
 "Maximum Use","الحد الأقصى للاستخدام",""
-"Are you sure you want to delete <strong>\"{0}\"<strong>?","هل أنت متأكد من حذف <strong>\"{0}\"<strong>؟",""
-"Return Reason <span class=\"text-gray-400\">(optional)</span>","سبب الإرجاع <span class=\"text-gray-400\">(اختياري)</span>",""
-"Return Reason &lt;span class=&quot;text-gray-400&quot;&gt;(optional)&lt;/span&gt;","سبب الإرجاع <span class=\"text-gray-400\">(اختياري)</span>",""
+"Are you sure you want to delete <strong>""{0}""<strong>?","هل أنت متأكد من حذف <strong>""{0}""<strong>؟",""
+"Return Reason <span class=""text-gray-400"">(optional)</span>","سبب الإرجاع <span class=""text-gray-400"">(اختياري)</span>",""
+"Return Reason &lt;span class=&quot;text-gray-400&quot;&gt;(optional)&lt;/span&gt;","سبب الإرجاع <span class=""text-gray-400"">(اختياري)</span>",""
 "<strong>Note:<strong> When enabled, the system will allow sales even when stock quantity is zero or negative. This is useful for handling stock sync delays or backorders. All transactions are tracked in the stock ledger.","<strong>ملاحظة:<strong> عند التفعيل، سيسمح النظام بالبيع حتى لو كانت كمية المخزون صفراً أو سالبة. هذا مفيد لمعالجة تأخر مزامنة المخزون أو الطلبات الآجلة. يتم تتبع جميع المعاملات في دفتر المخزون.",""
 "<strong>Status:<strong> Running","<strong>الحالة:<strong> يعمل",""
 "<strong>Status:<strong> Stopped","<strong>الحالة:<strong> متوقف",""
@@ -1317,7 +1323,7 @@
 "Search for items across warehouses","البحث عن الأصناف عبر المستودعات",""
 "Type to search items...","اكتب للبحث عن صنف...",""
 "Search by item name, code, or scan barcode","البحث بالاسم، الرمز، أو قراءة الباركود",""
-"No items found for \"{0}\"","لم يتم العثور على نتائج لـ \"{0}\"",""
+"No items found for ""{0}""","لم يتم العثور على نتائج لـ ""{0}""",""
 "Try a different search term","جرب كلمة بحث أخرى",""
 "Search Again","إعادة البحث",""
 "Search for an item","البحث عن صنف",""
@@ -1388,3 +1394,61 @@
 "{0} returns","{0} مرتجعات",""
 "Type","النوع",""
 "Search items by name or code...","البحث عن الأصناف بالاسم أو الكود...",""
+"Return Period Expired","انتهت مهلة الإرجاع",""
+"This invoice cannot be returned because the return period has expired.","عفواً، لا يمكن عمل مرتجع لانتهاء المهلة المسموحة.",""
+"Invoice Date","تاريخ الفاتورة",""
+"Days Since Purchase","المدة منذ الشراء",""
+"Return Allowed Within","صلاحية الإرجاع",""
+"days","أيام",""
+"Please contact your manager if you need to process this return.","تتطلب العملية موافقة المدير. يرجى مراجعته.",""
+"Return period has expired for invoice {0}. Invoice date: {1}, Days since: {2}, Allowed: {3} days","انتهت صلاحية الإرجاع للفاتورة {0}. التاريخ: {1}، مرّ عليها: {2}، المهلة: {3} يوم",""
+"Invoice {0} does not exist","لم يتم العثور على الفاتورة {0}",""
+"Invoice not found","لم يتم العثور على الفاتورة",""
+"Cannot process return for this invoice","تعذر عمل مرتجع لهذه الفاتورة",""
+"Failed to check invoice","حدث خطأ أثناء فحص الفاتورة",""
+"Try a different search term or check the invoice number","تأكد من رقم الفاتورة أو جرب البحث بكلمة أخرى",""
+"Search in all invoices","بحث في كل الفواتير",""
+"{0} days ago","منذ {0} أيام",""
+"1 week ago","منذ أسبوع",""
+"Looking for invoice in database","جاري البحث عن الفاتورة...",""
+"Searching database...","جاري البحث...",""
+"Offline Mode","دون اتصال بالإنترنت",""
+"Return invoices cannot be processed while offline. Please connect to the internet to search for invoices and create returns.","لا يمكن عمل مرتجع دون اتصال. اتصل بالإنترنت للمتابعة.",""
+"Search unavailable offline","البحث غير متاح حالياً",""
+"Refresh unavailable offline","التحديث غير متاح حالياً",""
+"No connection","لا يوجد اتصال بالشبكة",""
+"Connect to the internet to load invoices","يجب الاتصال بالإنترنت لعرض الفواتير",""
+"You are offline","أنت غير متصل بالإنترنت",""
+"Payments cannot be added while offline. Connect to the internet to add payments.","لا يمكن إضافة مدفوعات أثناء عدم الاتصال. اتصل بالإنترنت لإضافة المدفوعات.",""
+"Payments cannot be added while offline","لا يمكن إضافة مدفوعات أثناء عدم الاتصال",""
+Add another...,إضافة المزيد...
+All sales persons selected,تم تحديد كافة المندوبين
+Cannot add more non-cash payments. Use cash for overpayment.,لا يمكن إضافة دفع غير نقدي. يرجى استخدام النقد للمبلغ الزائد.
+Change sales person,تغيير المندوب
+Clear all payments,حذف كافة المدفوعات
+Complete Sales Order,إتمام الطلب
+Credit Balance,الرصيد الدائن
+Custom,مخصص
+Delivery Date,موعد التسليم
+Invoice fully paid. No additional payment needed.,الفاتورة مدفوعة بالكامل. لا يلزم سداد إضافي.
+Mixed payment (cash + non-cash) must equal exact invoice amount. No overpayment allowed.,يجب أن يطابق الدفع المختلط قيمة الفاتورة تماماً. غير مسموح بزيادة المبلغ.
+No items,لا توجد أصناف
+No payment methods available,طرق الدفع غير متاحة
+No sales persons available,قائمة المندوبين فارغة
+Non-cash payment capped to remaining amount: {0},الحد الأقصى للدفع غير النقدي هو المتبقي: {0}
+Non-cash payment must equal exact invoice amount. No overpayment allowed.,يجب أن يطابق الدفع غير النقدي قيمة الفاتورة. الزيادة غير مسموحة.
+Overpayment,مبلغ زائد
+Pay,سداد
+Payment amount is correct,مبلغ السداد صحيح
+Sales person is required,يرجى اختيار المندوب
+Select a payment method,تحديد طريقة الدفع
+Select a payment method to start,يرجى تحديد طريقة دفع للبدء
+Select sales person...,تحديد المندوب...
+Total must equal invoice amount,يجب مطابقة الإجمالي مع قيمة الفاتورة
+Total: {0}%,الإجمالي: {0}%
+Warning: Mixed payment exceeds invoice total. Change not allowed for mixed payments.,تنبيه: الدفع المختلط يتجاوز الفاتورة. لا يوجد باقي للمدفوعات المختلطة.
+comm.,عمولة
+No redeemable points available,لا تتوفر نقاط للاستبدال
+Points applied: {0}. Please pay remaining {1} with {2},تم خصم النقاط: {0}. يرجى سداد المتبقي {1} عبر {2}
+"Non-cash payment must equal {0} exactly","يجب أن يطابق الدفع غير النقدي {0} تماماً",""
+"Mixed payment cannot exceed invoice total. Limit: {0}","غير مسموح بتجاوز قيمة الفاتورة في الدفع المختلط. الحد الأقصى: {0}",""

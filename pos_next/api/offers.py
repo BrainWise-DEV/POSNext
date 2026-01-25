@@ -130,16 +130,61 @@ class EligibilityFetcher:
 
 	@staticmethod
 	def _fetch_items(parent_names: List[str]) -> Dict[str, List[str]]:
-		"""Fetch item codes for given parents"""
+		"""
+		Fetch item codes for given parents, expanding template items to include variants.
+
+		When a pricing rule is created for a template item (has_variants=1), this method
+		automatically includes all its variant items in the eligible items list.
+		This ensures offers work correctly when variants are added to cart.
+		"""
 		results = frappe.db.sql("""
 			SELECT parent, item_code
 			FROM `tabPricing Rule Item Code`
 			WHERE parent IN %s
 		""", [parent_names], as_dict=1)
 
+		if not results:
+			return {}
+
+		# Collect all unique item codes
+		all_item_codes = list({row["item_code"] for row in results})
+
+		# Find which items are templates (have variants)
+		template_items = frappe.get_all(
+			"Item",
+			filters={
+				"name": ["in", all_item_codes],
+				"has_variants": 1
+			},
+			pluck="name"
+		)
+
+		# Fetch variants for all template items in one query
+		variants_map = {}
+		if template_items:
+			variants = frappe.get_all(
+				"Item",
+				filters={
+					"variant_of": ["in", template_items],
+					"disabled": 0
+				},
+				fields=["name", "variant_of"]
+			)
+			for variant in variants:
+				variants_map.setdefault(variant["variant_of"], []).append(variant["name"])
+
+		# Build items map, expanding templates to include their variants
 		items_map = {}
 		for row in results:
-			items_map.setdefault(row["parent"], []).append(row["item_code"])
+			parent = row["parent"]
+			item_code = row["item_code"]
+
+			items_map.setdefault(parent, []).append(item_code)
+
+			# If this item is a template, also add all its variants
+			if item_code in variants_map:
+				items_map[parent].extend(variants_map[item_code])
+
 		return items_map
 
 	@staticmethod

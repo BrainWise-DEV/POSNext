@@ -1,0 +1,71 @@
+name: Question / Help Request
+description: Ask a question about using POS Next
+title: "[Question]: "
+labels: ["question"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Before asking a question
+
+        Please check these resources first:
+        - [ ] [POS Next Documentation](https://github.com/BrainWise-DEV/POSNext/wiki) (if available)
+        - [ ] [Frappe Documentation](https://frappeframework.com/docs)
+        - [ ] [Existing Issues](https://github.com/BrainWise-DEV/POSNext/issues?q=is%3Aissue) - your question may already be answered
+        - [ ] [Discussions](https://github.com/BrainWise-DEV/POSNext/discussions)
+
+        ---
+
+  - type: checkboxes
+    id: search-confirmation
+    attributes:
+      label: Search Confirmation
+      description: Please confirm you have searched for existing answers
+      options:
+        - label: I have searched documentation and existing issues before asking this question
+          required: true
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Your Question
+      description: Describe your question in detail
+      placeholder: |
+        Be specific about what you're trying to achieve and what you don't understand.
+
+        Example: How do I configure POS Next to work with multiple warehouses? I have 3 retail locations and want each POS terminal to pull stock from its respective warehouse.
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context / What You've Tried
+      description: |
+        Provide context about your setup and what you've already tried.
+      placeholder: |
+        - What is your use case?
+        - What steps have you already taken?
+        - What documentation have you read?
+    validations:
+      required: false
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots (if applicable)
+      description: Add any screenshots that help explain your question
+      placeholder: Drag and drop images here...
+    validations:
+      required: false
+
+  - type: input
+    id: pos-version
+    attributes:
+      label: POS Next Version
+      description: What version are you using?
+      placeholder: "e.g., 1.13.0"
+    validations:
+      required: true

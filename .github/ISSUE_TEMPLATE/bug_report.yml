@@ -1,0 +1,312 @@
+name: Bug Report
+description: Report a bug or unexpected behavior in POS Next
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Before submitting a bug report
+
+        **Please search for existing issues first!**
+
+        Before creating a new issue, please check if a similar issue already exists:
+        - [ ] I have searched the [open issues](https://github.com/BrainWise-DEV/POSNext/issues?q=is%3Aopen+is%3Aissue) and this bug has not been reported yet
+        - [ ] I have searched the [closed issues](https://github.com/BrainWise-DEV/POSNext/issues?q=is%3Aclosed+is%3Aissue) to see if this was already resolved
+
+        ---
+
+  - type: checkboxes
+    id: search-confirmation
+    attributes:
+      label: Issue Search Confirmation
+      description: Please confirm you have searched for existing issues
+      options:
+        - label: I have searched existing open and closed issues and this is not a duplicate
+          required: true
+
+  - type: textarea
+    id: bug-description
+    attributes:
+      label: Bug Description
+      description: |
+        Provide a clear and detailed description of the bug.
+        - What happened?
+        - What did you expect to happen instead?
+      placeholder: |
+        Describe the bug in detail...
+
+        Example: When I click the "Pay" button after adding items to cart, the application shows a blank screen instead of the payment dialog.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps-to-reproduce
+    attributes:
+      label: Steps to Reproduce
+      description: |
+        List the exact steps to reproduce the bug. Be as specific as possible.
+        Include any specific data, settings, or conditions required.
+      placeholder: |
+        1. Open POS Next application
+        2. Login with user credentials
+        3. Add item 'XYZ' to cart
+        4. Click on 'Pay' button
+        5. Observe the error/unexpected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected Behavior
+      description: What should have happened instead?
+      placeholder: |
+        Describe what you expected to happen...
+
+        Example: The payment dialog should open with payment method options.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual-behavior
+    attributes:
+      label: Actual Behavior
+      description: What actually happened?
+      placeholder: |
+        Describe what actually happened...
+
+        Example: A blank white screen appears and the console shows "TypeError: Cannot read property 'amount' of undefined"
+    validations:
+      required: true
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots / Screen Recordings
+      description: |
+        **REQUIRED**: Please attach screenshots or screen recordings showing the issue.
+
+        Include:
+        - Screenshot of the error/bug visible on screen
+        - Screenshot of the browser console (F12 > Console tab) showing any errors
+        - Screenshot of the Network tab (F12 > Network) if relevant
+        - Screen recording if the bug involves a sequence of actions
+
+        Drag and drop images here or paste from clipboard.
+      placeholder: |
+        Drag and drop screenshots here...
+
+        Tips:
+        - Use Snipping Tool (Windows), Screenshot (Mac), or browser extensions
+        - For screen recordings, use tools like Loom, OBS, or built-in screen recorders
+        - Make sure to capture the browser console errors (F12 > Console)
+    validations:
+      required: true
+
+  - type: textarea
+    id: console-errors
+    attributes:
+      label: Browser Console Errors
+      description: |
+        Open browser developer tools (F12 or Cmd+Shift+I) and copy any error messages from the Console tab.
+        Please paste the full error message including the stack trace if available.
+      placeholder: |
+        ```
+        Paste console errors here...
+
+        Example:
+        TypeError: Cannot read property 'amount' of undefined
+            at processPayment (pos_next.bundle.js:1234:56)
+            at HTMLButtonElement.onclick (pos_next.bundle.js:789:12)
+        ```
+      render: shell
+    validations:
+      required: false
+
+  - type: dropdown
+    id: pos-version
+    attributes:
+      label: POS Next Version
+      description: |
+        Select your POS Next version. Find it in:
+        - POS Settings > About, or
+        - Run: `bench version` in terminal
+      options:
+        - "1.13.0 (Latest)"
+        - "1.12.x"
+        - "1.11.x"
+        - "1.10.x"
+        - "1.9.x"
+        - "1.8.x or older"
+        - "Development/Custom build"
+    validations:
+      required: true
+
+  - type: input
+    id: exact-version
+    attributes:
+      label: Exact Version (if known)
+      description: |
+        Provide the exact version number if you know it.
+        Run `bench version` or check `pos_next/__init__.py`
+      placeholder: "e.g., 1.13.0"
+    validations:
+      required: false
+
+  - type: input
+    id: frappe-version
+    attributes:
+      label: Frappe Framework Version
+      description: |
+        Run `bench version` in your terminal to get this.
+      placeholder: "e.g., 15.0.0"
+    validations:
+      required: true
+
+  - type: input
+    id: erpnext-version
+    attributes:
+      label: ERPNext Version
+      description: |
+        Run `bench version` in your terminal to get this.
+      placeholder: "e.g., 15.0.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: browser
+    attributes:
+      label: Browser
+      description: Which browser(s) does this issue occur in?
+      multiple: true
+      options:
+        - Chrome
+        - Firefox
+        - Safari
+        - Edge
+        - Opera
+        - Mobile Safari (iOS)
+        - Chrome Mobile (Android)
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: browser-version
+    attributes:
+      label: Browser Version
+      description: |
+        Find this in browser settings or type `chrome://version` (Chrome), `about:` (Firefox)
+      placeholder: "e.g., Chrome 120.0.6099.109"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: operating-system
+    attributes:
+      label: Operating System
+      description: What OS are you using?
+      options:
+        - Windows 11
+        - Windows 10
+        - macOS Sonoma (14)
+        - macOS Ventura (13)
+        - macOS (older)
+        - Ubuntu/Debian Linux
+        - Other Linux
+        - iOS
+        - Android
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment Type
+      description: How is your Frappe/ERPNext instance deployed?
+      options:
+        - Self-hosted (Production)
+        - Self-hosted (Development)
+        - Frappe Cloud
+        - Docker
+        - Other Cloud Provider
+    validations:
+      required: true
+
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: Bug Frequency
+      description: How often does this bug occur?
+      options:
+        - Always (100% reproducible)
+        - Often (more than 50% of the time)
+        - Sometimes (less than 50% of the time)
+        - Rarely (happened once or twice)
+        - Unable to reproduce consistently
+    validations:
+      required: true
+
+  - type: dropdown
+    id: offline-mode
+    attributes:
+      label: Offline Mode
+      description: Were you using offline mode when the bug occurred?
+      options:
+        - "No - Online mode only"
+        - "Yes - Offline mode"
+        - "Yes - Transitioning between online/offline"
+        - "Not sure"
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: |
+        Add any other context about the problem here, such as:
+        - Recent changes made to your system
+        - Custom modifications or patches
+        - Related configuration settings
+        - Any workarounds you've tried
+      placeholder: |
+        Any additional information that might help us understand and fix the issue...
+    validations:
+      required: false
+
+  - type: textarea
+    id: server-logs
+    attributes:
+      label: Server Logs (if applicable)
+      description: |
+        If this is a server-side error, please include relevant logs from:
+        - `bench --site [sitename] console`
+        - `tail -f logs/frappe.log`
+        - `tail -f logs/web.error.log`
+      placeholder: |
+        ```
+        Paste server logs here if applicable...
+        ```
+      render: shell
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-submission Checklist
+      description: Please confirm the following before submitting
+      options:
+        - label: I have provided screenshots showing the issue
+          required: true
+        - label: I have included my application version information
+          required: true
+        - label: I have provided clear steps to reproduce the issue
+          required: true
+        - label: I have checked browser console for errors and included them if present
+          required: false

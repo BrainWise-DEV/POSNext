@@ -202,7 +202,7 @@
 										</div>
 										<div class="flex items-center justify-between text-xs">
 											<Badge variant="subtle">
-												{{ promotion.apply_on }}
+												{{ translateApplyOn(promotion.apply_on) }}
 											</Badge>
 											<span class="text-gray-500">
 												{{ promotion.valid_upto ? formatDate(promotion.valid_upto) : __('No expiry') }}
@@ -282,7 +282,7 @@
 											<!-- Show info badge for read-only Pricing Rules -->
 											<div v-if="isPricingRule" class="flex items-center gap-2 px-3 py-1 bg-blue-50 rounded-lg">
 												<FeatherIcon name="info" class="w-4 h-4 text-blue-600" />
-												<span class="text-xs text-blue-700 font-medium">{{ __('Read-only: Edit in ERPNext') }}</span>
+												<span class="text-xs text-blue-700 font-medium">{{ __('Read-only: Edit in Back Office') }}</span>
 											</div>
 
 											<Button
@@ -363,19 +363,17 @@
 														:disabled="isPricingRule"
 													/>
 
-													<FormControl
-														type="select"
-														:label="__('Apply On')"
-														v-model="form.apply_on"
-														:disabled="!isCreating || isPricingRule"
-														:options="[
-															{ label: __('Specific Items'), value: 'Item Code' },
-															{ label: __('Item Groups'), value: 'Item Group' },
-															{ label: __('Brands'), value: 'Brand' },
-															{ label: __('Entire Transaction'), value: 'Transaction' }
-														]"
-														required
-													/>
+													<div>
+														<label class="block text-sm font-medium text-gray-700 mb-1.5 text-start">
+															{{ __('Apply On') }} <span class="text-red-500">*</span>
+														</label>
+														<SelectInput
+															v-model="form.apply_on"
+															:disabled="!isCreating || isPricingRule"
+															:options="applyOnOptions"
+															:placeholder="__('Select option')"
+														/>
+													</div>
 												</div>
 											</div>
 										</Card>
@@ -385,50 +383,33 @@
 											<div class="p-5">
 												<div class="flex items-center gap-2 mb-4">
 													<FeatherIcon name="list" class="w-4 h-4 text-green-600" />
-													<h4 class="text-sm font-semibold text-gray-900">{{ __('Select {0}', [form.apply_on]) }}</h4>
+													<h4 class="text-sm font-semibold text-gray-900">{{ __('Select {0}', [translateApplyOn(form.apply_on)]) }}</h4>
 													<Badge variant="subtle" theme="red" size="sm">{{ __('Required') }}</Badge>
 												</div>
 
-												<!-- Item Code Search -->
+												<!-- Item Code Selection -->
 												<div v-if="form.apply_on === 'Item Code'" class="flex flex-col gap-3">
-													<div>
-														<FormControl
-															type="text"
-															v-model="itemSearch"
-															:disabled="!isCreating"
-															:placeholder="__('Search items... (min 2 characters)')"
-														>
-															<template #prefix>
-																<FeatherIcon name="search" class="w-4 h-4 text-gray-500" />
-															</template>
-														</FormControl>
-														<p class="text-xs text-gray-500 mt-1">{{ __('Searching from {0} cached items', [itemSearchStore.allItems.length]) }}</p>
-													</div>
-
-													<!-- Search Results -->
-													<div v-if="searchResults.length > 0" class="border rounded-lg overflow-hidden">
-														<div class="max-h-40 overflow-y-auto divide-y">
-															<button
-																v-for="item in searchResults"
-																:key="item.item_code"
-																@click="addItem(item)"
-																class="w-full text-start px-4 py-2 hover:bg-gray-50 transition-colors"
-															>
-																<p class="text-sm font-medium text-gray-900">{{ item.item_name }}</p>
-																<p class="text-xs text-gray-500">{{ item.item_code }}</p>
-															</button>
-														</div>
-													</div>
+													<SelectInput
+														v-model="selectedItemCode"
+														:disabled="!isCreating"
+														@change="addItemByCode"
+														:options="itemCodeOptions"
+														:placeholder="__('Select Item')"
+														:searchable="true"
+														:searchPlaceholder="__('Search by name or code...')"
+														:noResultsText="__('No items found')"
+														:maxDisplayed="30"
+													/>
 
 													<!-- Selected Items -->
-													<div v-if="form.items.length > 0" class="flex flex-wrap gap-2">
+													<div v-if="form.items.length > 0" class="flex flex-wrap gap-2 items-center">
 														<Badge
 															v-for="(item, index) in form.items"
 															:key="index"
 															variant="subtle"
 															theme="blue"
 														>
-															{{ item.item_code }}
+															{{ item.item_name || item.item_code }}
 															<button
 																@click="removeItem(index)"
 																class="ms-1 hover:text-blue-900"
@@ -436,23 +417,27 @@
 																×
 															</button>
 														</Badge>
+														<button
+															v-if="form.items.length > 1 && isCreating"
+															@click="clearAllItems"
+															class="text-xs text-red-600 hover:text-red-800 hover:underline"
+														>
+															{{ __('Clear All') }}
+														</button>
 													</div>
 												</div>
 
 												<!-- Item Group Selection -->
 												<div v-else-if="form.apply_on === 'Item Group'" class="flex flex-col gap-3">
-													<FormControl
-														type="select"
+													<SelectInput
 														v-model="selectedItemGroup"
 														:disabled="!isCreating"
 														@change="addItemGroup"
-														:options="[
-															{ label: __('-- Select Item Group --'), value: '' },
-															...itemGroups.map(g => ({ label: g.name, value: g.name }))
-														]"
+														:options="itemGroupOptions"
+														:placeholder="__('Select Item Group')"
 													/>
 
-													<div v-if="form.items.length > 0" class="flex flex-wrap gap-2">
+													<div v-if="form.items.length > 0" class="flex flex-wrap gap-2 items-center">
 														<Badge
 															v-for="(item, index) in form.items"
 															:key="index"
@@ -467,23 +452,27 @@
 																×
 															</button>
 														</Badge>
+														<button
+															v-if="form.items.length > 1 && isCreating"
+															@click="clearAllItems"
+															class="text-xs text-red-600 hover:text-red-800 hover:underline"
+														>
+															{{ __('Clear All') }}
+														</button>
 													</div>
 												</div>
 
 												<!-- Brand Selection -->
 												<div v-else-if="form.apply_on === 'Brand'" class="flex flex-col gap-3">
-													<FormControl
-														type="select"
+													<SelectInput
 														v-model="selectedBrand"
 														:disabled="!isCreating"
 														@change="addBrand"
-														:options="[
-															{ label: __('-- Select Brand --'), value: '' },
-															...brands.map(b => ({ label: b.name, value: b.name }))
-														]"
+														:options="brandOptions"
+														:placeholder="__('Select Brand')"
 													/>
 
-													<div v-if="form.items.length > 0" class="flex flex-wrap gap-2">
+													<div v-if="form.items.length > 0" class="flex flex-wrap gap-2 items-center">
 														<Badge
 															v-for="(item, index) in form.items"
 															:key="index"
@@ -498,6 +487,13 @@
 																×
 															</button>
 														</Badge>
+														<button
+															v-if="form.items.length > 1 && isCreating"
+															@click="clearAllItems"
+															class="text-xs text-red-600 hover:text-red-800 hover:underline"
+														>
+															{{ __('Clear All') }}
+														</button>
 													</div>
 												</div>
 											</div>
@@ -713,7 +709,9 @@
 import { usePOSPermissions } from "@/composables/usePermissions"
 import { useToast } from "@/composables/useToast"
 import { useItemSearchStore } from "@/stores/itemSearch"
+import { __ } from "@/utils/translation"
 import CouponManagement from "./CouponManagement.vue"
+import SelectInput from "../common/SelectInput.vue"
 import {
 	Badge,
 	Button,
@@ -868,6 +866,46 @@ const freeItemSearchResults = computed(() => {
 
 	// Limit to 20 results for performance
 	return filtered.slice(0, 20)
+})
+
+// Single source of truth for apply_on configuration
+// Used by both applyOnOptions dropdown and translateApplyOn function
+const APPLY_ON_CONFIG = {
+	'Item Code': { label: () => __('Specific Items') },
+	'Item Group': { label: () => __('Item Groups') },
+	'Brand': { label: () => __('Brands') },
+	'Transaction': { label: () => __('Entire Transaction') }
+}
+
+// Computed: Options for Apply On dropdown
+const applyOnOptions = computed(() =>
+	Object.entries(APPLY_ON_CONFIG).map(([value, config]) => ({
+		label: config.label(),
+		value
+	}))
+)
+
+// Computed: Options for Item Group dropdown
+const itemGroupOptions = computed(() =>
+	itemGroups.value.map(g => ({ label: g.name, value: g.name }))
+)
+
+// Computed: Options for Brand dropdown
+const brandOptions = computed(() =>
+	brands.value.map(b => ({ label: b.name, value: b.name }))
+)
+
+// Item Code selection
+const selectedItemCode = ref("")
+
+// Computed: Options for Item Code dropdown (searchable)
+const itemCodeOptions = computed(() => {
+	const allItems = itemSearchStore.allItems || []
+	return allItems.map(item => ({
+		label: item.item_name,
+		value: item.item_code,
+		subtitle: item.item_code
+	}))
 })
 
 // Resources
@@ -1049,6 +1087,16 @@ watch(show, (val) => {
 	}
 })
 
+// Clear items when apply_on type changes (only when creating new promotion)
+watch(
+	() => form.value.apply_on,
+	(newVal, oldVal) => {
+		if (isCreating.value && oldVal && newVal !== oldVal) {
+			form.value.items = []
+		}
+	}
+)
+
 onMounted(() => {
 	checkPermissions()
 })
@@ -1185,7 +1233,7 @@ function handleSubmit() {
 	}
 
 	if (form.value.apply_on !== "Transaction" && form.value.items.length === 0) {
-		showWarning(__('`Please select at least one {0}`', [form.value.apply_on]))
+		showWarning(__('Please select at least one {0}', [translateApplyOn(form.value.apply_on)]))
 		return
 	}
 
@@ -1204,6 +1252,20 @@ function addItem(item) {
 	}
 	// Clear search term (searchResults will automatically update via computed)
 	itemSearch.value = ""
+}
+
+function addItemByCode() {
+	if (
+		selectedItemCode.value &&
+		!form.value.items.some((i) => i.item_code === selectedItemCode.value)
+	) {
+		// Find the item name from allItems
+		const allItems = itemSearchStore.allItems || []
+		const selectedItem = allItems.find(item => item.item_code === selectedItemCode.value)
+		const itemName = selectedItem?.item_name || selectedItemCode.value
+		form.value.items.push({ item_code: selectedItemCode.value, item_name: itemName })
+	}
+	selectedItemCode.value = ""
 }
 
 function addItemGroup() {
@@ -1228,6 +1290,10 @@ function addBrand() {
 
 function removeItem(index) {
 	form.value.items.splice(index, 1)
+}
+
+function clearAllItems() {
+	form.value.items = []
 }
 
 function selectFreeItem(item) {
@@ -1343,6 +1409,11 @@ function getStatusTheme(status) {
 		default:
 			return "gray"
 	}
+}
+
+// Translate apply_on values for display (uses APPLY_ON_CONFIG for consistency)
+function translateApplyOn(value) {
+	return APPLY_ON_CONFIG[value]?.label() || value
 }
 
 function handleCouponSaved(data) {

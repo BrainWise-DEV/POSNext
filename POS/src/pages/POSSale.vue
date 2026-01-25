@@ -449,6 +449,7 @@
 			:tax-amount="cartStore.totalTax"
 			:discount-amount="cartStore.totalDiscount"
 			:target-doctype="cartStore.targetDoctype"
+			:is-submitting="cartStore.isSubmitting"
 			@payment-completed="handlePaymentCompleted"
 			@update-additional-discount="handleAdditionalDiscountUpdate"
 		/>
@@ -532,6 +533,7 @@
 				:item="cartStore.pendingItem"
 				:quantity="cartStore.pendingItemQty"
 				:warehouse="shiftStore.profileWarehouse"
+				:pos-profile="cartStore.posProfile"
 				@batch-serial-selected="handleBatchSerialSelected"
 			/>
 
@@ -960,6 +962,7 @@ import { session } from "@/data/session";
 import { useUserData } from "@/data/user";
 import { parseError } from "@/utils/errorHandler";
 import { offlineWorker } from "@/utils/offline/workerClient";
+import { cacheInvoiceHistory, getCachedInvoiceHistory } from "@/utils/offline/sync";
 import { printInvoice, printInvoiceByName } from "@/utils/printInvoice";
 import { Button, Dialog, createResource } from "frappe-ui";
 import { call } from "@/utils/apiWrapper";
@@ -1634,7 +1637,23 @@ function handleItemSelected(item, autoAdd = false) {
 	// Auto-add mode
 	if (autoAdd) {
 		try {
-			cartStore.addItem(item, 1, true, shiftStore.currentProfile);
+			// Check if item has resolved barcode data (weighted/priced)
+			if (item.resolved_qty && item.resolved_barcode_type) {
+				// Get the unit price for the resolved UOM from uom_prices, or fall back to item rate
+				const resolvedUom = item.resolved_uom || item.uom;
+				const unitRate = item.uom_prices?.[resolvedUom] || item.rate;
+
+				const resolvedItem = {
+					...item,
+					uom: resolvedUom,
+					rate: unitRate,
+					price_list_rate: unitRate,
+					is_resolved_barcode: true, // Mark as readonly
+				};
+				cartStore.addItem(resolvedItem, item.resolved_qty, true, shiftStore.currentProfile);
+			} else {
+				cartStore.addItem(item, 1, true, shiftStore.currentProfile);
+			}
 		} catch (error) {
 			uiStore.showError(
 				__("Insufficient Stock"),
@@ -1646,13 +1665,16 @@ function handleItemSelected(item, autoAdd = false) {
 	}
 
 	// Check stock availability first (before any dialogs)
-	// Skip validation for batch/serial items - they have their own validation in the dialog
+	// Skip validation for:
+	// - batch/serial items (they have their own validation in the dialog)
+	// - template items with variants (variants carry their own stock)
 	// Product Bundles have calculated stock based on component availability
 	if (
 		settingsStore.shouldEnforceStockValidation() &&
 		(item.is_stock_item || item.is_bundle) &&
 		!item.has_serial_no &&
-		!item.has_batch_no
+		!item.has_batch_no &&
+		!item.has_variants
 	) {
 		const actualQty = Math.floor(item.actual_qty ?? item.stock_qty ?? 0);
 
@@ -1825,11 +1847,16 @@ async function handlePaymentCompleted(paymentData) {
 		const draftIdToDelete = cartStore.currentDraftId;
 
 		if (offlineStore.isOffline) {
+			// Use the same item transformation as online flow for consistency
+			// This ensures rate, discount_percentage, discount_amount, and pricing_rules
+			// are all correctly formatted for ERPNext
+			const preparedItems = cartStore.formatItemsForSubmission(cartStore.invoiceItems);
+
 			const invoiceData = {
 				pos_profile: cartStore.posProfile,
 				posa_pos_opening_shift: cartStore.posOpeningShift,
 				customer: customerValue || shiftStore.profileCustomer,
-				items: JSON.parse(JSON.stringify(cartStore.invoiceItems)),
+				items: preparedItems,
 				payments: JSON.parse(JSON.stringify(cartStore.payments)),
 				sales_team: JSON.parse(JSON.stringify(cartStore.salesTeam || [])),
 				grand_total: cartStore.grandTotal,
@@ -1877,6 +1904,11 @@ async function handlePaymentCompleted(paymentData) {
 
 				// Refresh stock - Direct API (50-200ms), no Socket.IO lag!
 				await stockStore.refresh(soldItemCodes, shiftStore.profileWarehouse);
+
+				// Refresh invoice history cache in background (non-blocking)
+				loadInvoiceHistoryData().catch((err) =>
+					log.debug("Background invoice cache refresh failed:", err)
+				);
 
 				if (shiftStore.autoPrintEnabled) {
 					try {
@@ -1933,6 +1965,22 @@ async function handleOptionSelected(option) {
 	try {
 		if (option.type === "variant") {
 			const variant = option.data;
+
+			// Stock validation for variants (same as regular items)
+			if (
+				settingsStore.shouldEnforceStockValidation() &&
+				variant.is_stock_item &&
+				!variant.has_serial_no &&
+				!variant.has_batch_no
+			) {
+				const actualQty = Math.floor(variant.actual_qty ?? 0);
+				if (actualQty <= 0) {
+					showError(
+						__('"{0}" cannot be added to cart. Item is out of stock. Allow Negative Stock is disabled.', [variant.item_name])
+					);
+					return;
+				}
+			}
 
 			if (variant.item_uoms && variant.item_uoms.length > 0) {
 				cartStore.setPendingItem(variant, cartStore.pendingItemQty, "uom");
@@ -2461,6 +2509,22 @@ async function loadInvoiceHistoryData() {
 	// Also reload drafts
 	await draftsStore.loadDrafts();
 
+	// Check if offline - use cached data
+	if (offlineStore.isOffline) {
+		log.info("Offline mode - loading invoice history from cache");
+		try {
+			const cachedInvoices = await getCachedInvoiceHistory(shiftStore.profileName, {
+				limit: 100,
+			});
+			invoiceHistoryData.value = cachedInvoices || [];
+			log.info("Loaded", invoiceHistoryData.value.length, "invoices from offline cache");
+		} catch (error) {
+			log.error("Error loading cached invoice history:", error);
+			invoiceHistoryData.value = [];
+		}
+		return;
+	}
+
 	try {
 		// Use custom API from pos_next.api.invoices
 		const result = await call("pos_next.api.invoices.get_invoices", {
@@ -2470,8 +2534,28 @@ async function loadInvoiceHistoryData() {
 
 		invoiceHistoryData.value = result || [];
 		log.info("Loaded invoice history:", invoiceHistoryData.value.length, "invoices");
+
+		// Cache invoices for offline use
+		if (result && result.length > 0) {
+			cacheInvoiceHistory(result, shiftStore.profileName);
+		}
 	} catch (error) {
 		log.error("Error loading invoice history:", error);
+
+		// Fallback to cached data on error
+		try {
+			const cachedInvoices = await getCachedInvoiceHistory(shiftStore.profileName, {
+				limit: 100,
+			});
+			if (cachedInvoices && cachedInvoices.length > 0) {
+				invoiceHistoryData.value = cachedInvoices;
+				log.info("Loaded", cachedInvoices.length, "invoices from cache (fallback)");
+				return;
+			}
+		} catch (cacheError) {
+			log.error("Error loading fallback cache:", cacheError);
+		}
+
 		invoiceHistoryData.value = [];
 	}
 }

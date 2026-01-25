@@ -2,6 +2,13 @@
 @import "frappe-ui/style.css";
 @import "@abdulrysr/saudi-riyal-new-symbol-font/style.css";
 
+/* CSS Custom Properties for consistent z-index layering */
+:root {
+	--z-dialog-overlay: 400;
+	--z-dialog-content: 500;
+	--z-dropdown: 10000;
+}
+
 /* Apply Saudi Riyal symbol font to body for currency support */
 body {
 	font-family: "SaudiRiyalSymbol", "Inter", sans-serif;
@@ -100,4 +107,61 @@ button.active\:scale-95:active,
 [dir="rtl"] .relative > input.pr-10 {
 	padding-right: 0.75rem !important;
 	padding-left: 2.5rem !important;
+}
+
+/* Shared dialog animations - can be used by any custom dialog component */
+.dialog-enter-active {
+	animation: dialog-overlay-in 100ms ease-out;
+}
+
+.dialog-leave-active {
+	animation: dialog-overlay-out 150ms ease-in;
+}
+
+.dialog-content-enter-active {
+	animation: dialog-content-in 100ms ease-out;
+}
+
+.dialog-content-leave-active {
+	animation: dialog-content-out 150ms ease-in;
+}
+
+@keyframes dialog-overlay-in {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
+}
+
+@keyframes dialog-overlay-out {
+	from {
+		opacity: 1;
+	}
+	to {
+		opacity: 0;
+	}
+}
+
+@keyframes dialog-content-in {
+	from {
+		opacity: 0.5;
+		transform: scale(0.98);
+	}
+	to {
+		opacity: 1;
+		transform: scale(1);
+	}
+}
+
+@keyframes dialog-content-out {
+	from {
+		opacity: 1;
+		transform: scale(1);
+	}
+	to {
+		opacity: 0.5;
+		transform: scale(0.98);
+	}
 }

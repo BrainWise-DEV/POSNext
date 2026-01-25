@@ -103,6 +103,75 @@ export const getItemByBarcode = async (barcode) => {
 	}
 };
 
+// Get cached variants for a template item
+export const getCachedVariants = async (templateItemCode) => {
+	try {
+		if (!templateItemCode) return [];
+
+		// Query items where variant_of equals the template item code
+		const variants = await db.items
+			.where("variant_of")
+			.equals(templateItemCode)
+			.toArray();
+
+		return variants;
+	} catch (error) {
+		console.error("Error getting cached variants:", error);
+		return [];
+	}
+};
+
+// Get cached batch data for an item
+export const getCachedBatchData = async (itemCode) => {
+	try {
+		if (!itemCode) return [];
+
+		const item = await db.items.get(itemCode);
+		return item?.batch_no_data || [];
+	} catch (error) {
+		console.error("Error getting cached batch data:", error);
+		return [];
+	}
+};
+
+// Get cached serial number data for an item
+export const getCachedSerialData = async (itemCode) => {
+	try {
+		if (!itemCode) return [];
+
+		const item = await db.items.get(itemCode);
+		return item?.serial_no_data || [];
+	} catch (error) {
+		console.error("Error getting cached serial data:", error);
+		return [];
+	}
+};
+
+// Update batch/serial data for items in cache
+export const updateItemBatchSerialData = async (batchSerialDataMap) => {
+	try {
+		if (!batchSerialDataMap || Object.keys(batchSerialDataMap).length === 0) return;
+
+		// Update each item with its batch/serial data
+		const updates = Object.entries(batchSerialDataMap).map(async ([itemCode, data]) => {
+			const item = await db.items.get(itemCode);
+			if (item) {
+				await db.items.update(itemCode, {
+					batch_no_data: data.batch_no_data || [],
+					serial_no_data: data.serial_no_data || [],
+				});
+			}
+		});
+
+		await Promise.all(updates);
+		console.log(`Updated batch/serial data for ${Object.keys(batchSerialDataMap).length} items`);
+		return true;
+	} catch (error) {
+		console.error("Error updating batch/serial data:", error);
+		return false;
+	}
+};
+
 // Get item with price
 export const getItemWithPrice = async (itemCode, priceList) => {
 	try {

@@ -179,7 +179,14 @@
 								<div class="mt-1.5 sm:mt-2 pt-1.5 sm:pt-2 border-t border-gray-700">
 									<button
 										@click="handleClearCacheClick"
-										class="w-full px-2 py-1.5 sm:py-2 bg-red-500/20 hover:bg-red-500/30 text-red-300 hover:text-red-200 rounded transition-colors font-semibold text-[10px] sm:text-[11px] flex items-center justify-center gap-1.5 active:scale-95"
+										:disabled="isOffline"
+										:class="[
+											'w-full px-2 py-1.5 sm:py-2 rounded transition-colors font-semibold text-[10px] sm:text-[11px] flex items-center justify-center gap-1.5',
+											isOffline
+												? 'bg-gray-500/20 text-gray-500 cursor-not-allowed'
+												: 'bg-red-500/20 hover:bg-red-500/30 text-red-300 hover:text-red-200 active:scale-95'
+										]"
+										:title="isOffline ? __('Cannot clear cache while offline') : __('Clear all cached data')"
 									>
 										<svg class="w-2.5 h-2.5 sm:w-3 sm:h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>

@@ -1,0 +1,104 @@
+name: Mark stale issues and pull requests
+
+on:
+  schedule:
+    # Run every day at midnight UTC
+    - cron: '0 0 * * *'
+  workflow_dispatch: # Allow manual trigger
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/stale@v9
+        with:
+          # Issue configuration
+          stale-issue-message: |
+            This issue has been automatically marked as **stale** because it has not had recent activity for 14 days.
+
+            **To keep this issue open, please:**
+            - [ ] Provide the requested information (screenshots, version details, steps to reproduce)
+            - [ ] Reply with an update on whether this issue is still relevant
+            - [ ] Use our [issue template](https://github.com/BrainWise-DEV/POSNext/issues/new/choose) to provide complete details
+
+            If no further activity occurs within the next **7 days**, this issue will be automatically closed.
+
+            Thank you for your understanding! 🙏
+
+          close-issue-message: |
+            This issue has been automatically **closed** due to inactivity.
+
+            If you believe this issue is still relevant:
+            1. Please open a new issue using our [issue template](https://github.com/BrainWise-DEV/POSNext/issues/new/choose)
+            2. Include all required information (screenshots, version details, steps to reproduce)
+            3. Reference this issue number if applicable
+
+            Thank you for your contributions to POS Next!
+
+          stale-issue-label: 'stale'
+          close-issue-label: 'closed-stale'
+          days-before-issue-stale: 14
+          days-before-issue-close: 7
+
+          # Exempt issues with these labels from being marked stale
+          exempt-issue-labels: |
+            pinned
+            security
+            bug-confirmed
+            in-progress
+            enhancement-approved
+            help-wanted
+            good-first-issue
+
+          # Pull request configuration
+          stale-pr-message: |
+            This pull request has been automatically marked as **stale** because it has not had recent activity for 21 days.
+
+            **To keep this PR open, please:**
+            - Rebase on the latest `develop` branch
+            - Address any pending review comments
+            - Reply with an update on the PR status
+
+            If no further activity occurs within the next **14 days**, this PR will be automatically closed.
+
+          close-pr-message: |
+            This pull request has been automatically **closed** due to inactivity.
+
+            If you'd like to continue working on this:
+            1. Reopen this PR or create a new one
+            2. Rebase on the latest `develop` branch
+            3. Address any pending review comments
+
+            Thank you for your contributions to POS Next!
+
+          stale-pr-label: 'stale'
+          close-pr-label: 'closed-stale'
+          days-before-pr-stale: 21
+          days-before-pr-close: 14
+
+          # Exempt PRs with these labels from being marked stale
+          exempt-pr-labels: |
+            pinned
+            security
+            work-in-progress
+            awaiting-review
+            blocked
+
+          # General configuration
+          remove-stale-when-updated: true
+          delete-branch: false
+          operations-per-run: 100
+
+          # Only process issues/PRs in specific states
+          only-labels: ''
+          any-of-labels: ''
+
+          # Ascending order processes oldest first
+          ascending: true
+
+          # Enable debug logging
+          debug-only: false

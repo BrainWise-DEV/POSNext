@@ -1,0 +1,160 @@
+name: Feature Request
+description: Suggest a new feature or enhancement for POS Next
+title: "[Feature]: "
+labels: ["enhancement", "needs-triage"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Before submitting a feature request
+
+        **Please search for existing requests first!**
+
+        - [ ] I have searched the [open issues](https://github.com/BrainWise-DEV/POSNext/issues?q=is%3Aopen+is%3Aissue+label%3Aenhancement) for similar feature requests
+        - [ ] I have searched the [closed issues](https://github.com/BrainWise-DEV/POSNext/issues?q=is%3Aclosed+is%3Aissue+label%3Aenhancement) to see if this was already requested/implemented
+
+        ---
+
+  - type: checkboxes
+    id: search-confirmation
+    attributes:
+      label: Search Confirmation
+      description: Please confirm you have searched for existing feature requests
+      options:
+        - label: I have searched existing issues and this feature has not been requested before
+          required: true
+
+  - type: textarea
+    id: problem-statement
+    attributes:
+      label: Problem Statement
+      description: |
+        Describe the problem or limitation you're facing.
+        What use case is not currently supported?
+      placeholder: |
+        I'm always frustrated when...
+        Currently, there's no way to...
+
+        Example: Currently, there's no way to apply multiple discount types (percentage + fixed amount) to a single invoice, which is a common requirement for our retail business.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: Proposed Solution
+      description: |
+        Describe your ideal solution. How would you like this to work?
+      placeholder: |
+        I would like to be able to...
+
+        Example: I would like a dropdown in the discount section that allows selecting "Percentage", "Fixed Amount", or "Combined", where combined allows entering both a percentage and a fixed amount discount.
+    validations:
+      required: true
+
+  - type: textarea
+    id: mockups
+    attributes:
+      label: UI Mockups / Screenshots
+      description: |
+        If applicable, provide mockups, wireframes, or reference screenshots showing how you envision this feature.
+        You can also include screenshots from other applications that have similar functionality.
+      placeholder: |
+        Drag and drop images here...
+
+        Include:
+        - Hand-drawn wireframes
+        - UI mockups
+        - Screenshots from similar features in other apps
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: |
+        Have you considered any alternative solutions or workarounds?
+      placeholder: |
+        I've tried...
+        An alternative would be...
+
+        Example: I've tried applying discounts manually at the item level, but this is time-consuming and error-prone for large orders.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: feature-area
+    attributes:
+      label: Feature Area
+      description: Which area of the application does this feature affect?
+      multiple: true
+      options:
+        - Cart / Item Management
+        - Payments / Checkout
+        - Invoicing / Billing
+        - Customer Management
+        - Inventory / Stock
+        - Discounts / Pricing
+        - Offline Mode
+        - Reports / Analytics
+        - Settings / Configuration
+        - User Interface / UX
+        - Performance
+        - Integration / API
+        - Printing / Receipts
+        - Returns / Refunds
+        - Multi-language / i18n
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Business Priority
+      description: How important is this feature to your business?
+      options:
+        - Critical - Blocking our operations
+        - High - Significant impact on daily operations
+        - Medium - Would improve efficiency
+        - Low - Nice to have
+    validations:
+      required: true
+
+  - type: input
+    id: pos-version
+    attributes:
+      label: Current POS Next Version
+      description: What version are you currently using?
+      placeholder: "e.g., 1.13.0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: |
+        Any other context, links, or references that would help us understand this request.
+      placeholder: |
+        - Links to documentation
+        - Similar features in other products
+        - Industry standards or requirements
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      description: Would you be willing to contribute to implementing this feature?
+      options:
+        - label: I would be willing to submit a PR to implement this feature
+          required: false
+        - label: I would be willing to test/review a PR for this feature
+          required: false
+        - label: I can provide detailed requirements or domain expertise
+          required: false

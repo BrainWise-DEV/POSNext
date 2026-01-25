@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Discussion Forum
+    url: https://github.com/frappe/frappe/discussions
+    about: Ask questions and discuss with the community
+  - name: Documentation
+    url: https://frappeframework.com/docs
+    about: Read the Frappe documentation before opening an issue

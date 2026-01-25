@@ -43,7 +43,8 @@ const CURRENT_SCHEMA = {
 	invoice_queue: "++id, &offline_id, timestamp, synced",
 
 	// Items cache with searchable fields
-	items: "&item_code, item_name, item_group, *barcodes",
+	// variant_of index allows querying variants by their template item
+	items: "&item_code, item_name, item_group, variant_of, *barcodes",
 
 	// Customers cache
 	customers: "&name, customer_name, mobile_no, email_id",
@@ -69,6 +70,14 @@ const CURRENT_SCHEMA = {
 	// Promotional offers cache for offline use
 	// Indexed by name (unique), filterable by pos_profile
 	offers: "&name, pos_profile, apply_on, valid_upto",
+
+	// Invoice history cache for offline viewing
+	// Stores submitted invoices for offline access
+	invoice_history: "&name, pos_profile, posting_date, customer",
+
+	// Unpaid invoices cache for offline viewing
+	// Stores invoices with outstanding amounts for partial payment management
+	unpaid_invoices: "&name, pos_profile, outstanding_amount, customer",
 }
 
 /**

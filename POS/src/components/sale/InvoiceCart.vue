@@ -776,12 +776,13 @@
 
 							<!-- Single Row: Quantity Counter, UOM, Price & Total -->
 							<div class="flex items-center justify-between gap-1.5">
-								<div class="flex items-center gap-1.5" @click.stop>
+								<div class="flex items-center gap-1.5">
 									<!-- Quantity Counter -->
 									<!-- For serial items, show serial badge with edit button -->
 									<div
 										v-if="item.has_serial_no && item.serial_no"
 										class="flex items-center gap-1"
+										@click.stop
 									>
 										<!-- Serial count badge -->
 										<div
@@ -809,14 +810,23 @@
 									<!-- For non-serial items, show normal quantity controls -->
 									<div
 										v-else
-										class="flex items-center bg-gray-50 border border-gray-200 rounded overflow-hidden"
+										:class="[
+											'flex items-center bg-gray-50 border rounded overflow-hidden',
+											item.is_resolved_barcode ? 'border-amber-300 bg-amber-50' : 'border-gray-200'
+										]"
 									>
 										<button
 											type="button"
-											@click="decrementQuantity(item)"
-											class="w-6 h-6 sm:w-7 sm:h-7 bg-white hover:bg-gray-100 active:bg-gray-200 flex items-center justify-center font-bold text-gray-700 transition-colors touch-manipulation border-e border-gray-200"
+											@click.stop="decrementQuantity(item)"
+											:disabled="item.is_resolved_barcode"
+											:class="[
+												'w-6 h-6 sm:w-7 sm:h-7 flex items-center justify-center font-bold transition-colors touch-manipulation border-e',
+												item.is_resolved_barcode
+													? 'bg-gray-100 text-gray-400 cursor-not-allowed border-amber-300'
+													: 'bg-white hover:bg-gray-100 active:bg-gray-200 text-gray-700 border-gray-200'
+											]"
 											:aria-label="__('Decrease quantity')"
-											:title="__('Decrease quantity')"
+											:title="item.is_resolved_barcode ? __('Quantity locked (barcode item)') : __('Decrease quantity')"
 										>
 											<svg
 												class="w-3 h-3"
@@ -834,20 +844,34 @@
 										</button>
 										<input
 											:value="formatQuantity(item.quantity)"
+											@click.stop
 											@input="updateQuantity(item, $event.target.value)"
 											@blur="handleQuantityBlur(item)"
 											@keydown.enter="$event.target.blur()"
 											type="text"
 											inputmode="decimal"
-											class="w-14 sm:w-16 h-6 sm:h-7 text-center bg-white border-0 text-xs sm:text-sm font-bold text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+											:disabled="item.is_resolved_barcode"
+											:class="[
+												'w-14 sm:w-16 h-6 sm:h-7 text-center border-0 text-xs sm:text-sm font-bold focus:outline-none',
+												item.is_resolved_barcode
+													? 'bg-amber-50 text-amber-700 cursor-not-allowed'
+													: 'bg-white text-gray-900 focus:ring-2 focus:ring-blue-500'
+											]"
 											:aria-label="__('Quantity')"
+											:title="item.is_resolved_barcode ? __('Quantity locked (barcode item)') : ''"
 										/>
 										<button
 											type="button"
-											@click="incrementQuantity(item)"
-											class="w-6 h-6 sm:w-7 sm:h-7 bg-white hover:bg-gray-100 active:bg-gray-200 flex items-center justify-center font-bold text-gray-700 transition-colors touch-manipulation border-s border-gray-200"
+											@click.stop="incrementQuantity(item)"
+											:disabled="item.is_resolved_barcode"
+											:class="[
+												'w-6 h-6 sm:w-7 sm:h-7 flex items-center justify-center font-bold transition-colors touch-manipulation border-s',
+												item.is_resolved_barcode
+													? 'bg-gray-100 text-gray-400 cursor-not-allowed border-amber-300'
+													: 'bg-white hover:bg-gray-100 active:bg-gray-200 text-gray-700 border-gray-200'
+											]"
 											:aria-label="__('Increase quantity')"
-											:title="__('Increase quantity')"
+											:title="item.is_resolved_barcode ? __('Quantity locked (barcode item)') : __('Increase quantity')"
 										>
 											<svg
 												class="w-3 h-3"
@@ -866,23 +890,27 @@
 									</div>
 
 									<!-- UOM Selector Dropdown -->
-									<div class="relative group/uom">
+									<div class="relative group/uom" @click.stop>
 										<button
 											type="button"
 											@click="toggleUomDropdown(item.item_code, item.uom)"
 											:disabled="
-												!item.item_uoms || item.item_uoms.length === 0
+												item.is_resolved_barcode || !item.item_uoms || item.item_uoms.length === 0
 											"
 											:class="[
 												'h-6 sm:h-7 text-[10px] sm:text-xs font-bold rounded ps-2 pe-5 transition-all touch-manipulation flex items-center justify-center min-w-[45px]',
-												item.item_uoms && item.item_uoms.length > 0
-													? 'bg-blue-500 text-white border border-blue-400 hover:bg-blue-600 active:scale-95 cursor-pointer'
-													: 'bg-gray-100 text-gray-500 border border-gray-200 cursor-not-allowed opacity-60',
+												item.is_resolved_barcode
+													? 'bg-amber-100 text-amber-700 border border-amber-300 cursor-not-allowed'
+													: item.item_uoms && item.item_uoms.length > 0
+														? 'bg-blue-500 text-white border border-blue-400 hover:bg-blue-600 active:scale-95 cursor-pointer'
+														: 'bg-gray-100 text-gray-500 border border-gray-200 cursor-not-allowed opacity-60',
 											]"
 											:title="
-												item.item_uoms && item.item_uoms.length > 0
-													? __('Click to change unit')
-													: __('Only one unit available')
+												item.is_resolved_barcode
+													? __('UOM locked (barcode item)')
+													: item.item_uoms && item.item_uoms.length > 0
+														? __('Click to change unit')
+														: __('Only one unit available')
 											"
 										>
 											{{
@@ -897,9 +925,11 @@
 												openUomDropdown === `${item.item_code}-${item.uom}`
 													? 'rotate-180'
 													: '',
-												item.item_uoms && item.item_uoms.length > 0
-													? 'text-white'
-													: 'text-gray-400',
+												item.is_resolved_barcode
+													? 'text-amber-600'
+													: item.item_uoms && item.item_uoms.length > 0
+														? 'text-white'
+														: 'text-gray-400',
 											]"
 											fill="none"
 											stroke="currentColor"
@@ -1668,6 +1698,9 @@ function getSmartStep(quantity) {
  * @param {Object} item - Cart item to increment
  */
 function incrementQuantity(item) {
+	// Prevent editing resolved barcode items
+	if (item.is_resolved_barcode) return;
+
 	const step = getSmartStep(item.quantity);
 	const newQty = Math.round((item.quantity + step) * 10000) / 10000;
 	emit("update-quantity", item.item_code, newQty, item.uom);
@@ -1680,6 +1713,9 @@ function incrementQuantity(item) {
  * @param {Object} item - Cart item to decrement
  */
 function decrementQuantity(item) {
+	// Prevent editing resolved barcode items
+	if (item.is_resolved_barcode) return;
+
 	const step = getSmartStep(item.quantity);
 	const newQty = Math.round((item.quantity - step) * 10000) / 10000;
 
@@ -1700,6 +1736,9 @@ function decrementQuantity(item) {
  */
   
 function updateQuantity(item, value) {
+	// Prevent editing resolved barcode items
+	if (item.is_resolved_barcode) return;
+
 	const qty = Number.parseFloat(value);
 
 	// If the input isn't a valid number (e.g., user cleared the field), do nothing

@@ -24,10 +24,6 @@
 							<h3 class="text-sm font-semibold text-gray-900">{{ item.item_name }}</h3>
 							<p class="text-xs text-gray-600">{{ item.item_code }}</p>
 						</div>
-						<!-- Show quantity for batch items only -->
-						<div v-if="item?.has_batch_no">
-							<p class="text-sm font-bold text-gray-900">{{ __('Qty') }}: {{ quantity }}</p>
-						</div>
 					</div>
 				</div>
 
@@ -205,6 +201,9 @@
 import { Button, Dialog, createResource } from "frappe-ui"
 import { computed, ref, watch } from "vue"
 import { useSerialNumberStore } from "@/stores/serialNumber"
+import { usePOSCartStore } from "@/stores/posCart"
+import { getCachedBatchData, getCachedSerialData } from "@/utils/offline/items"
+import { isOffline } from "@/utils/offline"
 
 const props = defineProps({
 	modelValue: Boolean,
@@ -214,6 +213,7 @@ const props = defineProps({
 		default: 1,
 	},
 	warehouse: String,
+	posProfile: String,
 })
 
 const emit = defineEmits(["update:modelValue", "batch-serial-selected"])
@@ -221,35 +221,52 @@ const emit = defineEmits(["update:modelValue", "batch-serial-selected"])
 // Serial Number Store for caching
 const serialStore = useSerialNumberStore()
 
+// Cart store to check quantities already in cart
+const cartStore = usePOSCartStore()
+
 const show = ref(props.modelValue)
-const availableBatches = ref([])
+const warehouseBatches = ref([]) // Raw batches from warehouse
 const availableSerials = ref([])
 const selectedBatch = ref(null)
 const selectedSerials = ref([])
 const serialSearchQuery = ref("")
 
-// Resource for loading batches
+// Computed: Available batches with cart quantities subtracted
+const availableBatches = computed(() => {
+	return warehouseBatches.value.map((batch) => {
+		// Find quantity of this batch already in cart
+		const cartQtyForBatch = cartStore.invoiceItems
+			.filter((item) =>
+				item.item_code === props.item?.item_code &&
+				item.batch_no === batch.batch_no
+			)
+			.reduce((sum, item) => sum + (item.quantity || 0), 0)
+
+		return {
+			...batch,
+			qty: Math.max(0, batch.qty - cartQtyForBatch), // Available = warehouse - cart
+		}
+	}).filter((batch) => batch.qty > 0) // Only show batches with available qty
+})
+
+// Resource for loading batches with actual stock quantities
 const batchesResource = createResource({
-	url: "frappe.client.get_list",
+	url: "pos_next.api.items.get_item_details",
 	makeParams() {
 		return {
-			doctype: "Batch",
-			filters: {
-				item: props.item?.item_code,
-				disabled: 0,
-			},
-			fields: ["name as batch_no", "expiry_date"],
-			limit_page_length: 100,
+			item_code: props.item?.item_code,
+			pos_profile: props.posProfile,
 		}
 	},
 	auto: false,
 	async onSuccess(data) {
-		if (data && Array.isArray(data)) {
-			// For simplicity, set qty to 999 for all batches
-			// In production, you'd want to query actual stock
-			availableBatches.value = data.map((batch) => ({
-				...batch,
-				qty: 999,
+		if (data && data.batch_no_data && Array.isArray(data.batch_no_data)) {
+			// Store raw warehouse batch data
+			warehouseBatches.value = data.batch_no_data.map((batch) => ({
+				batch_no: batch.batch_no,
+				qty: batch.batch_qty,
+				expiry_date: batch.expiry_date,
+				manufacturing_date: batch.manufacturing_date,
 			}))
 		}
 	},
@@ -305,8 +322,30 @@ const isLoadingSerials = computed(() => serialStore.loading)
 
 async function loadBatchesOrSerials() {
 	if (props.item?.has_batch_no) {
+		// Try cached data first when offline
+		if (isOffline()) {
+			const cachedBatches = await getCachedBatchData(props.item.item_code)
+			if (cachedBatches && cachedBatches.length > 0) {
+				warehouseBatches.value = cachedBatches.map((batch) => ({
+					batch_no: batch.batch_no,
+					qty: batch.batch_qty,
+					expiry_date: batch.expiry_date,
+					manufacturing_date: batch.manufacturing_date,
+				}))
+				return
+			}
+		}
+		// Fetch from server when online
 		batchesResource.reload()
 	} else if (props.item?.has_serial_no) {
+		// Try cached data first when offline
+		if (isOffline()) {
+			const cachedSerials = await getCachedSerialData(props.item.item_code)
+			if (cachedSerials && cachedSerials.length > 0) {
+				availableSerials.value = cachedSerials
+				return
+			}
+		}
 		// Set warehouse in store
 		serialStore.setWarehouse(props.warehouse)
 		// Fetch from store (uses cache if valid)
@@ -376,7 +415,7 @@ function resetSelection() {
 	selectedBatch.value = null
 	selectedSerials.value = []
 	serialSearchQuery.value = ""
-	availableBatches.value = []
+	warehouseBatches.value = []
 	// Don't clear availableSerials - it's managed by the store cache
 }
 

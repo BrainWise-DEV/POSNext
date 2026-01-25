@@ -7,6 +7,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-01-07
+
+### Added
+- **POSNext Cashier Role & Permissions**
+  - Created dedicated POSNext Cashier role for POS operations
+  - Added custom permissions for Customer, Bin, Item, and Warehouse doctypes
+  - Proper role-based access control for POS users
+
+- **Offline Invoice Sync Enhancement**
+  - Added deduplication mechanism for offline invoice synchronization
+  - Prevents duplicate invoice creation during sync recovery
+  - Defensive type checks and mutex for concurrent sync operations
+
+- **Return Invoice Improvements**
+  - Added item search functionality in Return Invoice Dialog
+  - Improved code quality and user experience for returns
+
+- **Shift Closing Enhancement**
+  - Return invoices now included in shift closing calculations
+  - More accurate end-of-day reporting
+
+### Changed
+- **Offers & Promotions Optimization**
+  - Optimized apply_offers with batch queries for better performance
+  - Added dynamic debounce for offer application
+  - Support for standalone pricing rules in apply_offers
+  - Validate min_qty against eligible item quantity instead of total cart
+  - Ensures offers fetched before processing in mobile view
+  - Added offline support for promotions with mixed conditions
+
+- **Cart & Payment Improvements**
+  - Corrected subtotal display for tax-inclusive mode
+  - Enhanced mobile responsiveness and dynamic sizing in PaymentDialog
+  - Restored Hold Order button functionality
+
+- **Internationalization**
+  - Fixed translation API and added missing translations
+  - Improved i18n coverage across the application
+
+- **Build & Dependencies**
+  - Updated frappe-ui imports to use proper exports
+  - Improved build compatibility
+
+### Fixed
+- **Offers System**
+  - Fixed min_qty validation to check eligible item quantity, not total cart
+  - Fixed standalone pricing rules not being applied correctly
+  - Fixed offers not being fetched before processing in mobile view
+
+- **Cart Display**
+  - Fixed subtotal display in tax-inclusive mode showing incorrect values
+
+- **Offline Sync**
+  - Added defensive type checks preventing sync errors
+  - Added mutex to prevent concurrent sync race conditions
+
+- **UI/UX**
+  - Fixed Hold Order button missing from cart (regression fix)
+  - Enhanced mobile responsiveness in PaymentDialog
+
 ## [1.12.0] - 2025-12-18
 
 ### Added
@@ -721,7 +781,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Shift management
 - Stock tracking
 
-[Unreleased]: https://github.com/BrainWise-DEV/POSNext/compare/v1.12.0...HEAD
+[Unreleased]: https://github.com/BrainWise-DEV/POSNext/compare/v1.13.0...HEAD
+[1.13.0]: https://github.com/BrainWise-DEV/POSNext/compare/v1.12.0...v1.13.0
 [1.12.0]: https://github.com/BrainWise-DEV/POSNext/compare/v1.11.0...v1.12.0
 [1.11.0]: https://github.com/BrainWise-DEV/POSNext/compare/v1.10.0...v1.11.0
 [1.10.0]: https://github.com/BrainWise-DEV/POSNext/compare/v1.9.0...v1.10.0

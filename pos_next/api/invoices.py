@@ -27,6 +27,62 @@ except Exception:  # pragma: no cover - ERPNext not installed in some environmen
 # ==========================================
 
 
+def standardize_pricing_rules(items):
+    """
+    Standardize pricing_rules field on invoice items.
+    ERPNext expects a comma-separated string, but frontend/offline may send:
+    - Python list: ["PRLE-0001", "PRLE-0002"]
+    - JSON string: '["PRLE-0001"]' or '[\\n "PRLE-0001"\\n]'
+
+    Args:
+        items: List of item dicts to standardize (modified in place)
+    """
+    for item in items or []:
+        pricing_rules = item.get("pricing_rules")
+        if not pricing_rules:
+            continue
+
+        item["pricing_rules"] = _pricing_rule_to_string(pricing_rules)
+
+
+def _pricing_rule_to_string(value):
+    """
+    Convert pricing_rules value to comma-separated string.
+    Returns empty string if value is invalid/unparseable.
+    """
+    if not value:
+        return ""
+
+    # Already a list - join it
+    if isinstance(value, list):
+        return ",".join(str(r) for r in value if r)
+
+    # Must be a string at this point
+    if not isinstance(value, str):
+        return ""
+
+    stripped = value.strip()
+
+    # Not JSON-like - return as-is (already a string like "PRLE-0001,PRLE-0002")
+    if not stripped.startswith("["):
+        return stripped
+
+    # Try to parse JSON array
+    try:
+        parsed = json.loads(stripped)
+        if isinstance(parsed, list):
+            return ",".join(str(r) for r in parsed if r)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        # Malformed JSON that looks like array - clear it to prevent issues
+        frappe.log_error(
+            f"Invalid pricing_rules JSON: {stripped[:100]}",
+            "Pricing Rules Normalization"
+        )
+        return ""
+
+    return ""
+
+
 def get_payment_account(mode_of_payment, company):
     """
     Get account for mode of payment.
@@ -257,37 +313,90 @@ def validate_cart_items(items, pos_profile=None):
 
 @frappe.whitelist()
 def validate_return_items(original_invoice_name, return_items, doctype="Sales Invoice"):
-    """Ensure that return items do not exceed the quantity from the original invoice."""
-    original_invoice = frappe.get_doc(doctype, original_invoice_name)
-    original_item_qty = {}
+    """Ensure that return items do not exceed the quantity from the original invoice.
+    Also validates return time frame based on POS Settings.
 
-    for item in original_invoice.items:
-        original_item_qty[item.item_code] = (
-            original_item_qty.get(item.item_code, 0) + item.qty
+    Uses query builder for parameterized queries. Fetches invoice details, original
+    item quantities, and already-returned quantities in 3 queries total.
+    """
+    from frappe.utils import date_diff, getdate
+    from frappe.query_builder.functions import Sum, Abs
+
+    if isinstance(return_items, str):
+        return_items = json.loads(return_items)
+
+    # Fetch invoice pos_profile and posting_date for validation
+    si = frappe.qb.DocType(doctype)
+    invoice_data = (
+        frappe.qb.from_(si)
+        .select(si.pos_profile, si.posting_date)
+        .where(si.name == original_invoice_name)
+    ).run(as_dict=True)
+
+    if not invoice_data:
+        return {"valid": False, "message": _("Invoice {0} not found").format(original_invoice_name)}
+
+    invoice_info = invoice_data[0]
+
+    # Check return validity period from POS Settings
+    if invoice_info.pos_profile:
+        return_validity_days = cint(
+            frappe.db.get_value(
+                "POS Settings",
+                {"pos_profile": invoice_info.pos_profile},
+                "return_validity_days"
+            ) or 0
         )
 
-    # Get all returned items from this invoice
-    returned_items = frappe.get_all(
-        doctype,
-        filters={
-            "return_against": original_invoice_name,
-            "docstatus": 1,
-            "is_return": 1,
-        },
-        fields=["name"],
-    )
+        if return_validity_days > 0:
+            days_since_invoice = date_diff(getdate(nowdate()), getdate(invoice_info.posting_date))
+            if days_since_invoice > return_validity_days:
+                return {
+                    "valid": False,
+                    "message": _(
+                        "Return period has expired. Invoice {0} was created {1} days ago. "
+                        "Returns are only allowed within {2} days of purchase."
+                    ).format(original_invoice_name, days_since_invoice, return_validity_days),
+                }
 
-    for returned_invoice in returned_items:
-        ret_doc = frappe.get_doc(doctype, returned_invoice.name)
-        for item in ret_doc.items:
-            if item.item_code in original_item_qty:
-                original_item_qty[item.item_code] -= abs(item.qty)
+    # Aggregate original item quantities by item_code
+    si_item = frappe.qb.DocType(f"{doctype} Item")
+    original_items = (
+        frappe.qb.from_(si_item)
+        .select(si_item.item_code, Sum(si_item.qty).as_("total_qty"))
+        .where(si_item.parent == original_invoice_name)
+        .groupby(si_item.item_code)
+    ).run(as_dict=True)
+
+    original_item_qty = {item.item_code: flt(item.total_qty) for item in original_items}
+
+    # Aggregate quantities already returned from previous return invoices
+    ret_si = frappe.qb.DocType(doctype)
+    ret_item = frappe.qb.DocType(f"{doctype} Item")
+
+    returned_qty_data = (
+        frappe.qb.from_(ret_si)
+        .inner_join(ret_item).on(ret_item.parent == ret_si.name)
+        .select(ret_item.item_code, Sum(Abs(ret_item.qty)).as_("returned_qty"))
+        .where(
+            (ret_si.return_against == original_invoice_name)
+            & (ret_si.docstatus == 1)
+            & (ret_si.is_return == 1)
+        )
+        .groupby(ret_item.item_code)
+    ).run(as_dict=True)
+
+    # Subtract returned quantities
+    for row in returned_qty_data:
+        if row.item_code in original_item_qty:
+            original_item_qty[row.item_code] -= flt(row.returned_qty)
 
     # Validate new return items
     for item in return_items:
         item_code = item.get("item_code")
-        return_qty = abs(item.get("qty", 0))
-        if item_code in original_item_qty and return_qty > original_item_qty[item_code]:
+        return_qty = abs(flt(item.get("qty", 0)))
+        remaining = original_item_qty.get(item_code, 0)
+        if return_qty > remaining:
             return {
                 "valid": False,
                 "message": _(
@@ -314,6 +423,9 @@ def update_invoice(data):
 
         # Ensure the document type is set
         data.setdefault("doctype", doctype)
+
+        # Normalize pricing_rules before document creation
+        standardize_pricing_rules(data.get("items"))
 
         # Create or update invoice
         if data.get("name"):
@@ -358,8 +470,11 @@ def update_invoice(data):
                         )
                         if account_info:
                             payment["account"] = account_info.get("account")
-                    except Exception:
-                        pass  # Will be handled during save
+                    except Exception as e:
+                        frappe.log_error(
+                            f"Failed to get payment account for {mode_of_payment}: {e}",
+                            "Payment Account Lookup"
+                        )
 
         # Validate return items if this is a return invoice
         if (data.get("is_return") or invoice_doc.get("is_return")) and invoice_doc.get(
@@ -430,6 +545,22 @@ def update_invoice(data):
             # ERPNext will recalculate if needed, but preserving frontend rate
             # prevents rounding issues and ensures UI matches invoice
 
+            # Convert pricing_rules from list to comma-separated string
+            # ERPNext expects pricing_rules as a string, not a list
+            pricing_rules = item.get("pricing_rules")
+            if pricing_rules:
+                if isinstance(pricing_rules, list):
+                    item.pricing_rules = ",".join(str(r) for r in pricing_rules)
+                elif isinstance(pricing_rules, str) and pricing_rules.startswith("["):
+                    # Handle JSON string representation of list
+                    try:
+                        rules_list = json.loads(pricing_rules)
+                        if isinstance(rules_list, list):
+                            item.pricing_rules = ",".join(str(r) for r in rules_list)
+                    except (json.JSONDecodeError, TypeError):
+                        # Keep original value - malformed JSON will be handled by standardize_pricing_rules
+                        item.pricing_rules = ""
+
         # Set invoice flags BEFORE calculations
         if doctype == "Sales Invoice":
             invoice_doc.is_pos = 1
@@ -479,8 +610,11 @@ def update_invoice(data):
                     )
                     if account_info:
                         payment.account = account_info.get("account")
-                except Exception:
-                    pass  # Will be handled during save
+                except Exception as e:
+                    frappe.log_error(
+                        f"Failed to get payment account for {mode_of_payment}: {e}",
+                        "Payment Account Lookup"
+                    )
 
         # For return invoices, ensure payments are negative
         if invoice_doc.get("is_return"):
@@ -549,9 +683,9 @@ def _reuse_sync_record(sync_record_name):
     return {"already_synced": False, "sync_record_name": sync_record_name}
 
 
-def _handle_offline_deduplication(offline_id, pos_profile=None, customer=None):
+def _ensure_offline_uniqueness(offline_id, pos_profile=None, customer=None):
     """
-    Handle offline invoice deduplication with race condition protection.
+    Ensure offline invoice uniqueness with race condition protection.
 
     Uses a reservation pattern:
     1. Check if a sync record exists (with row-level lock)
@@ -650,7 +784,7 @@ def _handle_offline_deduplication(offline_id, pos_profile=None, customer=None):
     except frappe.DuplicateEntryError:
         # Race condition: another request just created the record
         # Retry the check to get the new record
-        return _handle_offline_deduplication(offline_id, pos_profile, customer)
+        return _ensure_offline_uniqueness(offline_id, pos_profile, customer)
 
 
 def _complete_offline_sync(sync_record_name, invoice_name):
@@ -790,6 +924,9 @@ def submit_invoice(invoice=None, data=None):
     pos_profile = invoice.get("pos_profile")
     doctype = invoice.get("doctype", "Sales Invoice")
 
+    # Normalize pricing_rules before processing
+    standardize_pricing_rules(invoice.get("items"))
+
     # ========================================================================
     # OFFLINE INVOICE DEDUPLICATION
     # ========================================================================
@@ -802,7 +939,7 @@ def submit_invoice(invoice=None, data=None):
     sync_record_name = None
 
     if offline_id:
-        dedup_result = _handle_offline_deduplication(
+        dedup_result = _ensure_offline_uniqueness(
             offline_id=offline_id,
             pos_profile=pos_profile,
             customer=invoice.get("customer")
@@ -838,6 +975,13 @@ def submit_invoice(invoice=None, data=None):
         if doctype == "Sales Invoice":
             invoice_doc.update_stock = 1
 
+        # For return invoices, set update_outstanding_for_self = 0
+        # This ensures the GL entry's against_voucher points to the original invoice,
+        # which properly reduces the original invoice's outstanding amount and
+        # sets its status to "Credit Note Issued"
+        if invoice_doc.get("is_return") and invoice_doc.get("return_against"):
+            invoice_doc.update_outstanding_for_self = 0
+
         # Copy accounting dimensions from POS Profile if not already set
         if pos_profile and not invoice_doc.get("branch"):
             try:
@@ -848,8 +992,12 @@ def submit_invoice(invoice=None, data=None):
                     for item in invoice_doc.get("items", []):
                         if not item.get("branch"):
                             item.branch = pos_profile_doc.branch
-            except Exception:
-                pass  # Branch is optional, continue without it
+            except Exception as e:
+                # Branch is optional, log and continue
+                frappe.log_error(
+                    f"Failed to set branch from POS Profile {pos_profile}: {e}",
+                    "POS Profile Branch"
+                )
 
         # Set accounts for all payment methods before saving
         if doctype == "Sales Invoice" and hasattr(invoice_doc, "payments"):
@@ -1180,76 +1328,292 @@ def cleanup_old_drafts(pos_profile=None, max_age_hours=24):
 
 
 @frappe.whitelist()
-def get_returnable_invoices(limit=50):
-    """Get list of invoices that have items available for return."""
-    # Performance: Use SQL aggregation to calculate returned quantities in one query
-    # This eliminates N+1 queries by joining return invoices and aggregating in the database
+def get_returnable_invoices(limit=50, pos_profile=None):
+    """Get list of invoices that have items available for return.
+    Filters by return validity period if configured in POS Settings.
 
-    query = """
-        SELECT
+    Uses query builder with LEFT JOINs to calculate original and returned quantities
+    in a single query. Returns invoices where total_original_qty > total_returned_qty.
+    """
+    from frappe.query_builder.functions import Sum, Coalesce, Abs
+    from frappe.query_builder import Case
+    from frappe.utils import add_days, today
+
+    # Check return validity days from POS Settings
+    return_validity_days = 0
+    if pos_profile:
+        return_validity_days = cint(
+            frappe.db.get_value(
+                "POS Settings",
+                {"pos_profile": pos_profile},
+                "return_validity_days"
+            ) or 0
+        )
+
+    # Define tables
+    si = frappe.qb.DocType("Sales Invoice")
+    si_item = frappe.qb.DocType("Sales Invoice Item")
+    ret_si = frappe.qb.DocType("Sales Invoice").as_("ret_si")
+    ret_item = frappe.qb.DocType("Sales Invoice Item").as_("ret_item")
+
+    # Build query with query builder
+    query = (
+        frappe.qb.from_(si)
+        .left_join(si_item).on(si_item.parent == si.name)
+        .left_join(ret_si).on(
+            (ret_si.return_against == si.name)
+            & (ret_si.docstatus == 1)
+            & (ret_si.is_return == 1)
+        )
+        .left_join(ret_item).on(
+            (ret_item.parent == ret_si.name)
+            & ((ret_item.sales_invoice_item == si_item.name) | (ret_item.item_code == si_item.item_code))
+        )
+        .select(
             si.name,
             si.customer,
             si.customer_name,
+            si.contact_mobile,
             si.posting_date,
             si.grand_total,
             si.status,
-            COALESCE(SUM(CASE WHEN ret_item.qty IS NOT NULL THEN ABS(ret_item.qty) ELSE 0 END), 0) as total_returned_qty,
-            COALESCE(SUM(CASE WHEN si_item.qty IS NOT NULL THEN si_item.qty ELSE 0 END), 0) as total_original_qty
-        FROM `tabSales Invoice` si
-        LEFT JOIN `tabSales Invoice Item` si_item ON si_item.parent = si.name
-        LEFT JOIN `tabSales Invoice` ret_si ON ret_si.return_against = si.name
-            AND ret_si.docstatus = 1
-            AND ret_si.is_return = 1
-        LEFT JOIN `tabSales Invoice Item` ret_item ON ret_item.parent = ret_si.name
-            AND (ret_item.sales_invoice_item = si_item.name OR ret_item.item_code = si_item.item_code)
-        WHERE si.docstatus = 1
-            AND si.is_return = 0
-            AND si.is_pos = 1
-        GROUP BY si.name
-        HAVING total_original_qty > total_returned_qty
-        ORDER BY si.posting_date DESC, si.creation DESC
-        LIMIT %s
-    """
+            Coalesce(Sum(Case().when(ret_item.qty.isnotnull(), Abs(ret_item.qty)).else_(0)), 0).as_("total_returned_qty"),
+            Coalesce(Sum(Case().when(si_item.qty.isnotnull(), si_item.qty).else_(0)), 0).as_("total_original_qty"),
+        )
+        .where(
+            (si.docstatus == 1)
+            & (si.is_return == 0)
+            & (si.is_pos == 1)
+        )
+        .groupby(si.name)
+        .orderby(si.posting_date, order=frappe.qb.desc)
+        .orderby(si.creation, order=frappe.qb.desc)
+        .limit(cint(limit))
+    )
 
-    returnable_invoices = frappe.db.sql(query, [cint(limit)], as_dict=1)
+    # Add date filter if return validity is configured
+    if return_validity_days > 0:
+        cutoff_date = add_days(today(), -return_validity_days)
+        query = query.where(si.posting_date >= cutoff_date)
+
+    # Execute and filter results with HAVING equivalent (post-filter)
+    results = query.run(as_dict=True)
+
+    # Filter: only include invoices where original qty > returned qty
+    returnable_invoices = [
+        inv for inv in results
+        if flt(inv.get("total_original_qty", 0)) > flt(inv.get("total_returned_qty", 0))
+    ]
 
     return returnable_invoices
 
 
 @frappe.whitelist()
+def search_invoice_by_number(search_term, pos_profile=None):
+    """Search for invoices by invoice number across the entire database.
+    No date restrictions - searches all returnable invoices matching the term.
+
+    Uses query builder with LEFT JOINs to calculate remaining returnable quantities.
+    Only returns invoices that have items available for return.
+
+    Args:
+        search_term: Invoice number or partial number to search for (min 3 chars)
+        pos_profile: Optional POS profile for context (reserved for future use)
+
+    Returns:
+        List of matching invoices with return availability info (max 10 results)
+    """
+    from frappe.query_builder.functions import Sum, Coalesce, Abs
+    from frappe.query_builder import Case
+
+    if not search_term or len(search_term) < 3:
+        return []
+
+    search_term = cstr(search_term).strip()
+
+    # Define tables
+    si = frappe.qb.DocType("Sales Invoice")
+    si_item = frappe.qb.DocType("Sales Invoice Item")
+    ret_si = frappe.qb.DocType("Sales Invoice").as_("ret_si")
+    ret_item = frappe.qb.DocType("Sales Invoice Item").as_("ret_item")
+
+    # Build query with query builder
+    query = (
+        frappe.qb.from_(si)
+        .left_join(si_item).on(si_item.parent == si.name)
+        .left_join(ret_si).on(
+            (ret_si.return_against == si.name)
+            & (ret_si.docstatus == 1)
+            & (ret_si.is_return == 1)
+        )
+        .left_join(ret_item).on(
+            (ret_item.parent == ret_si.name)
+            & ((ret_item.sales_invoice_item == si_item.name) | (ret_item.item_code == si_item.item_code))
+        )
+        .select(
+            si.name,
+            si.customer,
+            si.customer_name,
+            si.contact_mobile,
+            si.posting_date,
+            si.grand_total,
+            si.status,
+            Coalesce(Sum(Case().when(ret_item.qty.isnotnull(), Abs(ret_item.qty)).else_(0)), 0).as_("total_returned_qty"),
+            Coalesce(Sum(Case().when(si_item.qty.isnotnull(), si_item.qty).else_(0)), 0).as_("total_original_qty"),
+        )
+        .where(
+            (si.docstatus == 1)
+            & (si.is_return == 0)
+            & (si.is_pos == 1)
+            & (si.name.like(f"%{search_term}%"))
+        )
+        .groupby(si.name)
+        .orderby(si.posting_date, order=frappe.qb.desc)
+        .orderby(si.creation, order=frappe.qb.desc)
+        .limit(10)
+    )
+
+    results = query.run(as_dict=True)
+
+    # Filter: only include invoices where original qty > returned qty
+    matching_invoices = [
+        inv for inv in results
+        if flt(inv.get("total_original_qty", 0)) > flt(inv.get("total_returned_qty", 0))
+    ]
+
+    return matching_invoices
+
+
+@frappe.whitelist()
+def check_invoice_return_validity(invoice_name):
+    """Check if an invoice is within the return validity period.
+
+    Returns detailed information for the UI to display, including:
+    - valid: Boolean indicating if return is allowed
+    - error_type: 'not_found' or 'return_period_expired' if invalid
+    - Additional context (invoice_date, days_since, allowed_days) for expired returns
+    """
+    from frappe.utils import date_diff, getdate, formatdate
+
+    # Fetch only the fields needed for validation
+    si = frappe.qb.DocType("Sales Invoice")
+    invoice_data = (
+        frappe.qb.from_(si)
+        .select(si.pos_profile, si.posting_date)
+        .where(si.name == invoice_name)
+    ).run(as_dict=True)
+
+    if not invoice_data:
+        return {
+            "valid": False,
+            "error_type": "not_found",
+            "message": _("Invoice {0} does not exist").format(invoice_name)
+        }
+
+    invoice_info = invoice_data[0]
+
+    # Check return validity period from POS Settings
+    if invoice_info.pos_profile:
+        return_validity_days = cint(
+            frappe.db.get_value(
+                "POS Settings",
+                {"pos_profile": invoice_info.pos_profile},
+                "return_validity_days"
+            ) or 0
+        )
+
+        if return_validity_days > 0:
+            days_since_invoice = date_diff(getdate(nowdate()), getdate(invoice_info.posting_date))
+            if days_since_invoice > return_validity_days:
+                return {
+                    "valid": False,
+                    "error_type": "return_period_expired",
+                    "invoice_name": invoice_name,
+                    "invoice_date": formatdate(invoice_info.posting_date),
+                    "days_since": days_since_invoice,
+                    "allowed_days": return_validity_days,
+                    "message": _("Return period has expired")
+                }
+
+    return {"valid": True}
+
+
+@frappe.whitelist()
 def get_invoice_for_return(invoice_name):
-    """Get invoice with return tracking - calculates remaining qty for each item."""
-    if not frappe.db.exists("Sales Invoice", invoice_name):
+    """Get invoice with return tracking - calculates remaining qty for each item.
+    Also validates return validity period based on POS Settings.
+
+    Returns the full invoice document with each item's qty adjusted to show
+    only the remaining returnable quantity (original qty minus already returned).
+    """
+    from frappe.utils import date_diff, getdate
+    from frappe.query_builder.functions import Sum, Abs, Coalesce
+
+    # Validate invoice exists and get fields needed for return period check
+    si = frappe.qb.DocType("Sales Invoice")
+    invoice_check = (
+        frappe.qb.from_(si)
+        .select(si.pos_profile, si.posting_date)
+        .where(si.name == invoice_name)
+    ).run(as_dict=True)
+
+    if not invoice_check:
         frappe.throw(_("Invoice {0} does not exist").format(invoice_name))
 
-    # Get the original invoice
+    invoice_info = invoice_check[0]
+
+    # Check return validity period from POS Settings
+    if invoice_info.pos_profile:
+        return_validity_days = cint(
+            frappe.db.get_value(
+                "POS Settings",
+                {"pos_profile": invoice_info.pos_profile},
+                "return_validity_days"
+            ) or 0
+        )
+
+        if return_validity_days > 0:
+            days_since_invoice = date_diff(getdate(nowdate()), getdate(invoice_info.posting_date))
+            if days_since_invoice > return_validity_days:
+                frappe.throw(
+                    _("Return period has expired. Invoice {0} was created {1} days ago. "
+                      "Returns are only allowed within {2} days of purchase.").format(
+                        invoice_name, days_since_invoice, return_validity_days
+                    )
+                )
+
+    # Aggregate quantities already returned from previous return invoices.
+    # Uses COALESCE to match by sales_invoice_item (row ID) first, then item_code as fallback.
+    ret_si = frappe.qb.DocType("Sales Invoice")
+    ret_item = frappe.qb.DocType("Sales Invoice Item")
+
+    returned_qty_results = (
+        frappe.qb.from_(ret_si)
+        .inner_join(ret_item).on(ret_item.parent == ret_si.name)
+        .select(
+            Coalesce(ret_item.sales_invoice_item, ret_item.item_code).as_("key_field"),
+            Sum(Abs(ret_item.qty)).as_("returned_qty")
+        )
+        .where(
+            (ret_si.return_against == invoice_name)
+            & (ret_si.docstatus == 1)
+            & (ret_si.is_return == 1)
+        )
+        .groupby(Coalesce(ret_item.sales_invoice_item, ret_item.item_code))
+    ).run(as_dict=True)
+
+    returned_qty = {row["key_field"]: flt(row["returned_qty"]) for row in returned_qty_results}
+
+    # Get the full invoice document (needed for complete response)
     invoice = frappe.get_doc("Sales Invoice", invoice_name)
-
-    # Performance: Use SQL aggregation to calculate returned quantities in one query
-    # This eliminates N+1 queries by aggregating all return items at once
-    returned_qty_query = """
-        SELECT
-            COALESCE(ret_item.sales_invoice_item, ret_item.item_code) as key_field,
-            SUM(ABS(ret_item.qty)) as returned_qty
-        FROM `tabSales Invoice` ret_si
-        INNER JOIN `tabSales Invoice Item` ret_item ON ret_item.parent = ret_si.name
-        WHERE ret_si.return_against = %s
-            AND ret_si.docstatus = 1
-            AND ret_si.is_return = 1
-        GROUP BY key_field
-    """
-
-    returned_qty_results = frappe.db.sql(returned_qty_query, [invoice_name], as_dict=1)
-    returned_qty = {row["key_field"]: row["returned_qty"] for row in returned_qty_results}
+    invoice_dict = invoice.as_dict()
 
     # Calculate remaining quantities
-    invoice_dict = invoice.as_dict()
     updated_items = []
-
     for item in invoice_dict.get("items", []):
         # Check how much has been returned using the item's name (row ID)
         already_returned = returned_qty.get(item.name, 0)
-        remaining_qty = item.qty - already_returned
+        remaining_qty = flt(item.qty) - already_returned
 
         if remaining_qty > 0:
             item_copy = item.copy()
@@ -1260,6 +1624,173 @@ def get_invoice_for_return(invoice_name):
 
     invoice_dict["items"] = updated_items
     return invoice_dict
+
+
+@frappe.whitelist()
+def prepare_return_invoice(invoice_name, pos_opening_shift=None):
+    """Prepare a return invoice using ERPNext's make_sales_return.
+
+    This uses ERPNext's standard return document creation which properly copies
+    all child tables including:
+    - sales_team: For correct commission reversal on returned items
+    - taxes: For correct tax reversal
+    - Other child tables maintained by ERPNext
+
+    The function validates:
+    - Invoice exists and is submitted (docstatus = 1)
+    - Invoice is not already a return
+    - Return is within the validity period (if configured in POS Settings)
+
+    Args:
+        invoice_name: The original Sales Invoice name to create return against
+        pos_opening_shift: The current POS Opening Shift name
+
+    Returns:
+        dict: The prepared return invoice document with:
+            - items: Only items with remaining_qty > 0 (not fully returned)
+            - _original_invoice: Reference data from original invoice (payments, amounts)
+            - Each item includes original_qty, already_returned, and remaining_qty
+    """
+    from frappe.utils import date_diff, getdate
+    from frappe.query_builder.functions import Sum, Abs, Coalesce
+    from erpnext.accounts.doctype.sales_invoice.sales_invoice import make_sales_return
+
+    # Validate invoice and get fields needed for return period check
+    si = frappe.qb.DocType("Sales Invoice")
+    invoice_check = (
+        frappe.qb.from_(si)
+        .select(
+            si.docstatus,
+            si.is_return,
+            si.pos_profile,
+            si.posting_date,
+            si.is_pos,
+            si.grand_total,
+            si.paid_amount,
+            si.outstanding_amount
+        )
+        .where(si.name == invoice_name)
+    ).run(as_dict=True)
+
+    if not invoice_check:
+        frappe.throw(_("Invoice {0} does not exist").format(invoice_name))
+
+    invoice_info = invoice_check[0]
+
+    # Validate docstatus
+    if invoice_info.docstatus != 1:
+        frappe.throw(_("Invoice must be submitted to create a return"))
+
+    # Check if it's already a return
+    if invoice_info.is_return:
+        frappe.throw(_("Cannot create return against a return invoice"))
+
+    # Check return validity period from POS Settings
+    if invoice_info.pos_profile:
+        return_validity_days = cint(
+            frappe.db.get_value(
+                "POS Settings",
+                {"pos_profile": invoice_info.pos_profile},
+                "return_validity_days"
+            ) or 0
+        )
+
+        if return_validity_days > 0:
+            days_since_invoice = date_diff(getdate(nowdate()), getdate(invoice_info.posting_date))
+            if days_since_invoice > return_validity_days:
+                frappe.throw(
+                    _("Return period has expired. Invoice {0} was created {1} days ago. "
+                      "Returns are only allowed within {2} days of purchase.").format(
+                        invoice_name, days_since_invoice, return_validity_days
+                    )
+                )
+
+    # Use ERPNext's make_sales_return to create properly mapped return document
+    # This automatically copies sales_team, taxes, and other child tables
+    return_doc = make_sales_return(invoice_name)
+
+    # Set POS-specific fields
+    if pos_opening_shift:
+        return_doc.posa_pos_opening_shift = pos_opening_shift
+
+    # Ensure POS flags are set
+    return_doc.is_pos = invoice_info.is_pos
+    return_doc.pos_profile = invoice_info.pos_profile
+
+    # Aggregate quantities already returned from previous return invoices
+    ret_si = frappe.qb.DocType("Sales Invoice")
+    ret_item = frappe.qb.DocType("Sales Invoice Item")
+
+    returned_qty_results = (
+        frappe.qb.from_(ret_si)
+        .inner_join(ret_item).on(ret_item.parent == ret_si.name)
+        .select(
+            Coalesce(ret_item.sales_invoice_item, ret_item.item_code).as_("key_field"),
+            Sum(Abs(ret_item.qty)).as_("returned_qty")
+        )
+        .where(
+            (ret_si.return_against == invoice_name)
+            & (ret_si.docstatus == 1)
+            & (ret_si.is_return == 1)
+        )
+        .groupby(Coalesce(ret_item.sales_invoice_item, ret_item.item_code))
+    ).run(as_dict=True)
+
+    returned_qty_map = {row["key_field"]: flt(row["returned_qty"]) for row in returned_qty_results}
+
+    # Convert to dict and update items with remaining quantities
+    return_dict = return_doc.as_dict()
+
+    # Fetch original invoice payments for refund handling in frontend
+    si_payment = frappe.qb.DocType("Sales Invoice Payment")
+    payments_data = (
+        frappe.qb.from_(si_payment)
+        .select(
+            si_payment.mode_of_payment,
+            si_payment.amount,
+            si_payment.base_amount,
+            si_payment.account
+        )
+        .where(si_payment.parent == invoice_name)
+    ).run(as_dict=True)
+
+    # Include original invoice data for reference (payments, amounts, etc.)
+    return_dict["_original_invoice"] = {
+        "name": invoice_name,
+        "grand_total": invoice_info.grand_total,
+        "paid_amount": invoice_info.paid_amount,
+        "outstanding_amount": invoice_info.outstanding_amount,
+        "payments": payments_data,
+    }
+
+    updated_items = []
+    for item in return_dict.get("items", []):
+        # Get the original item reference (sales_invoice_item points to original item name)
+        original_item_ref = item.get("sales_invoice_item") or item.get("item_code")
+        already_returned = returned_qty_map.get(original_item_ref, 0)
+
+        # The qty from make_sales_return is already negative (full original qty negated)
+        # We need to calculate remaining returnable qty
+        original_qty = abs(flt(item.get("qty", 0)))
+        remaining_qty = original_qty - already_returned
+
+        if remaining_qty > 0:
+            item_copy = item.copy()
+            # Store quantities for frontend use
+            item_copy["original_qty"] = original_qty
+            item_copy["already_returned"] = already_returned
+            item_copy["remaining_qty"] = remaining_qty
+            # Set qty to negative of remaining (for return)
+            item_copy["qty"] = -remaining_qty
+            updated_items.append(item_copy)
+
+    return_dict["items"] = updated_items
+
+    # Check if all items have been fully returned
+    if not updated_items:
+        frappe.throw(_("All items from this invoice have already been returned"))
+
+    return return_dict
 
 
 @frappe.whitelist()
@@ -1276,124 +1807,161 @@ def search_invoices_for_return(
     page=1,
     doctype="Sales Invoice",
 ):
-    """Search for invoices that can be returned with pagination."""
-    # Start with base filters - use Any type for frappe filter values
-    filters: dict = {
-        "docstatus": 1,
-        "is_return": 0,
-    }
+    """Search for invoices that can be returned with pagination.
 
-    if company:
-        filters["company"] = company
+    Supports filtering by:
+    - invoice_name: Partial match on invoice number
+    - company: Exact match
+    - customer_name, customer_id, mobile_no: Partial match (OR condition)
+    - from_date, to_date: Date range
+    - min_amount, max_amount: Amount range
 
-    # Convert page to integer
-    if page and isinstance(page, str):
-        page = int(page)
-    else:
-        page = 1
+    Returns invoices with their items adjusted to show remaining returnable quantities.
+    """
+    from frappe.query_builder.functions import Sum, Abs, Count
 
-    # Items per page
+    page = cint(page) or 1
     page_length = 100
     start = (page - 1) * page_length
 
+    # Build main invoice query
+    si = frappe.qb.DocType(doctype)
+
+    # Start building the query
+    query = (
+        frappe.qb.from_(si)
+        .select(
+            si.name,
+            si.customer,
+            si.customer_name,
+            si.posting_date,
+            si.grand_total,
+            si.status
+        )
+        .where(
+            (si.docstatus == 1)
+            & (si.is_return == 0)
+        )
+        .orderby(si.posting_date, order=frappe.qb.desc)
+        .orderby(si.name, order=frappe.qb.desc)
+        .limit(page_length)
+        .offset(start)
+    )
+
+    # Add company filter
+    if company:
+        query = query.where(si.company == company)
+
     # Add invoice name filter
     if invoice_name:
-        filters["name"] = ["like", f"%{invoice_name}%"]
+        query = query.where(si.name.like(f"%{invoice_name}%"))
 
     # Add date range filters
-    if from_date:
-        filters["posting_date"] = [">=", from_date]
-
-    if to_date:
-        if "posting_date" in filters:
-            filters["posting_date"] = ["between", [from_date, to_date]]
-        else:
-            filters["posting_date"] = ["<=", to_date]
+    if from_date and to_date:
+        query = query.where(si.posting_date.between(from_date, to_date))
+    elif from_date:
+        query = query.where(si.posting_date >= from_date)
+    elif to_date:
+        query = query.where(si.posting_date <= to_date)
 
     # Add amount filters
-    if min_amount:
-        filters["grand_total"] = [">=", float(min_amount)]
+    if min_amount and max_amount:
+        query = query.where(si.grand_total.between(float(min_amount), float(max_amount)))
+    elif min_amount:
+        query = query.where(si.grand_total >= float(min_amount))
+    elif max_amount:
+        query = query.where(si.grand_total <= float(max_amount))
 
-    if max_amount:
-        if "grand_total" in filters and min_amount:
-            filters["grand_total"] = ["between", [float(min_amount), float(max_amount)]]
-        else:
-            filters["grand_total"] = ["<=", float(max_amount)]
-
-    # If any customer search criteria is provided, find matching customers
-    customer_ids = []
+    # Search customers matching any of the provided criteria (OR logic)
     if customer_name or customer_id or mobile_no:
-        conditions = []
-        params = {}
+        cust = frappe.qb.DocType("Customer")
+        cust_query = frappe.qb.from_(cust).select(cust.name).limit(100)
 
+        # Build OR conditions for customer search
+        cust_conditions = []
         if customer_name:
-            conditions.append("customer_name LIKE %(customer_name)s")
-            params["customer_name"] = f"%{customer_name}%"
-
+            cust_conditions.append(cust.customer_name.like(f"%{customer_name}%"))
         if customer_id:
-            conditions.append("name LIKE %(customer_id)s")
-            params["customer_id"] = f"%{customer_id}%"
-
+            cust_conditions.append(cust.name.like(f"%{customer_id}%"))
         if mobile_no:
-            conditions.append("mobile_no LIKE %(mobile_no)s")
-            params["mobile_no"] = f"%{mobile_no}%"
+            cust_conditions.append(cust.mobile_no.like(f"%{mobile_no}%"))
 
-        where_clause = " OR ".join(conditions)
-        customer_query = f"""
-			SELECT name
-			FROM `tabCustomer`
-			WHERE {where_clause}
-			LIMIT 100
-		"""
+        # Combine with OR
+        if cust_conditions:
+            combined_condition = cust_conditions[0]
+            for cond in cust_conditions[1:]:
+                combined_condition = combined_condition | cond
+            cust_query = cust_query.where(combined_condition)
 
-        customers = frappe.db.sql(customer_query, params, as_dict=True)
+        customers = cust_query.run(as_dict=True)
         customer_ids = [c.name for c in customers]
 
         if customer_ids:
-            filters["customer"] = ["in", customer_ids]
-        elif any([customer_name, customer_id, mobile_no]):
+            query = query.where(si.customer.isin(customer_ids))
+        else:
             return {"invoices": [], "has_more": False}
 
-    # Count total invoices
-    total_count_query = frappe.get_list(
-        doctype,
-        filters=filters,
-        fields=["count(name) as total_count"],
-        as_list=False,
-    )
-    total_count = total_count_query[0].total_count if total_count_query else 0
-
-    # Get invoices with pagination
-    invoices_list = frappe.get_list(
-        doctype,
-        filters=filters,
-        fields=["name"],
-        limit_start=start,
-        limit_page_length=page_length,
-        order_by="posting_date desc, name desc",
-    )
+    # Execute main query
+    invoices_list = query.run(as_dict=True)
 
     if not invoices_list:
         return {"invoices": [], "has_more": False}
 
-    # Performance: Batch query all returned quantities for all invoices at once
-    # This eliminates N+1 queries by aggregating return data in a single SQL call
     invoice_names = [inv["name"] for inv in invoices_list]
 
-    returned_qty_query = """
-        SELECT
-            ret_si.return_against as invoice_name,
-            ret_item.item_code,
-            SUM(ABS(ret_item.qty)) as returned_qty
-        FROM `tabSales Invoice` ret_si
-        INNER JOIN `tabSales Invoice Item` ret_item ON ret_item.parent = ret_si.name
-        WHERE ret_si.return_against IN %s
-            AND ret_si.docstatus = 1
-            AND ret_si.is_return = 1
-        GROUP BY ret_si.return_against, ret_item.item_code
-    """
+    # Count total matching invoices for pagination
+    count_query = (
+        frappe.qb.from_(si)
+        .select(Count(si.name).as_("total"))
+        .where(
+            (si.docstatus == 1)
+            & (si.is_return == 0)
+        )
+    )
 
-    returned_qty_results = frappe.db.sql(returned_qty_query, [invoice_names], as_dict=1)
+    # Re-apply the same filters for count
+    if company:
+        count_query = count_query.where(si.company == company)
+    if invoice_name:
+        count_query = count_query.where(si.name.like(f"%{invoice_name}%"))
+    if from_date and to_date:
+        count_query = count_query.where(si.posting_date.between(from_date, to_date))
+    elif from_date:
+        count_query = count_query.where(si.posting_date >= from_date)
+    elif to_date:
+        count_query = count_query.where(si.posting_date <= to_date)
+    if min_amount and max_amount:
+        count_query = count_query.where(si.grand_total.between(float(min_amount), float(max_amount)))
+    elif min_amount:
+        count_query = count_query.where(si.grand_total >= float(min_amount))
+    elif max_amount:
+        count_query = count_query.where(si.grand_total <= float(max_amount))
+    if customer_name or customer_id or mobile_no:
+        if customer_ids:
+            count_query = count_query.where(si.customer.isin(customer_ids))
+
+    count_result = count_query.run(as_dict=True)
+    total_count = count_result[0].total if count_result else 0
+
+    # Batch fetch returned quantities for all invoices in current page
+    ret_si = frappe.qb.DocType(doctype)
+    ret_item = frappe.qb.DocType(f"{doctype} Item")
+
+    returned_qty_results = (
+        frappe.qb.from_(ret_si)
+        .inner_join(ret_item).on(ret_item.parent == ret_si.name)
+        .select(
+            ret_si.return_against.as_("invoice_name"),
+            ret_item.item_code,
+            Sum(Abs(ret_item.qty)).as_("returned_qty")
+        )
+        .where(
+            (ret_si.return_against.isin(invoice_names))
+            & (ret_si.docstatus == 1)
+            & (ret_si.is_return == 1)
+        )
+        .groupby(ret_si.return_against, ret_item.item_code)
+    ).run(as_dict=True)
 
     # Build a map of invoice_name -> {item_code: returned_qty}
     returned_qty_map = {}
@@ -1401,40 +1969,62 @@ def search_invoices_for_return(
         inv_name = row["invoice_name"]
         if inv_name not in returned_qty_map:
             returned_qty_map[inv_name] = {}
-        returned_qty_map[inv_name][row["item_code"]] = row["returned_qty"]
+        returned_qty_map[inv_name][row["item_code"]] = flt(row["returned_qty"])
+
+    # Batch fetch all items for invoices in current page
+    si_item = frappe.qb.DocType(f"{doctype} Item")
+    all_items = (
+        frappe.qb.from_(si_item)
+        .select(
+            si_item.parent,
+            si_item.name,
+            si_item.item_code,
+            si_item.item_name,
+            si_item.qty,
+            si_item.rate,
+            si_item.amount,
+            si_item.stock_qty,
+            si_item.uom,
+            si_item.warehouse
+        )
+        .where(si_item.parent.isin(invoice_names))
+        .orderby(si_item.idx)
+    ).run(as_dict=True)
+
+    # Group items by parent invoice
+    items_by_invoice = {}
+    for item in all_items:
+        parent = item["parent"]
+        if parent not in items_by_invoice:
+            items_by_invoice[parent] = []
+        items_by_invoice[parent].append(item)
 
     # Process and return results
     data = []
-
     for invoice in invoices_list:
-        invoice_doc = frappe.get_doc(doctype, invoice.name)
-        returned_qty = returned_qty_map.get(invoice.name, {})
+        inv_name = invoice["name"]
+        returned_qty = returned_qty_map.get(inv_name, {})
+        items = items_by_invoice.get(inv_name, [])
 
-        if returned_qty:
-            # Filter items with remaining qty
-            filtered_items = []
-            for item in invoice_doc.items:
-                already_returned = returned_qty.get(item.item_code, 0)
-                remaining_qty = item.qty - already_returned
+        # Calculate remaining quantities
+        filtered_items = []
+        for item in items:
+            already_returned = returned_qty.get(item["item_code"], 0)
+            remaining_qty = flt(item["qty"]) - already_returned
 
-                if remaining_qty > 0:
-                    new_item = item.as_dict().copy()
-                    new_item["qty"] = remaining_qty
-                    new_item["amount"] = remaining_qty * item.rate
-                    if item.get("stock_qty"):
-                        new_item["stock_qty"] = (
-                            item.stock_qty / item.qty * remaining_qty
-                            if item.qty
-                            else remaining_qty
-                        )
-                    filtered_items.append(frappe._dict(new_item))
+            if remaining_qty > 0:
+                new_item = item.copy()
+                new_item["qty"] = remaining_qty
+                new_item["amount"] = remaining_qty * flt(item["rate"])
+                if item.get("stock_qty") and item.get("qty"):
+                    new_item["stock_qty"] = flt(item["stock_qty"]) / flt(item["qty"]) * remaining_qty
+                filtered_items.append(frappe._dict(new_item))
 
-            if filtered_items:
-                filtered_invoice = frappe.get_doc(doctype, invoice.name)
-                filtered_invoice.items = filtered_items
-                data.append(filtered_invoice)
-        else:
-            data.append(invoice_doc)
+        # Only include invoices with returnable items
+        if filtered_items or not returned_qty:
+            invoice_data = frappe._dict(invoice)
+            invoice_data["items"] = filtered_items if filtered_items else items
+            data.append(invoice_data)
 
     # Check if there are more results
     has_more = (start + page_length) < total_count
@@ -1577,8 +2167,12 @@ def apply_offers(invoice_data, selected_offers=None):
                     customer_group = customer_data.get("customer_group")
                     if not territory:
                         territory = customer_data.get("territory")
-            except Exception:
-                pass
+            except Exception as e:
+                # Customer lookup failed, will use defaults
+                frappe.log_error(
+                    f"Failed to fetch customer data for {customer}: {e}",
+                    "Customer Data Lookup"
+                )
 
         # If still no customer_group, use default
         if not customer_group:
@@ -1787,7 +2381,8 @@ def apply_offers(invoice_data, selected_offers=None):
             item_doc.discount_amount = line_discount_amount
             item_doc.price_list_rate = price_list_rate
             item_doc.rate = flt(item_doc.get("rate") or price_list_rate)
-            item_doc.pricing_rules = applicable_rule_names
+            # ERPNext expects pricing_rules as comma-separated string, not a list
+            item_doc.pricing_rules = ",".join(applicable_rule_names) if applicable_rule_names else ""
 
             item_doc.applied_promotional_schemes = list(
                 {

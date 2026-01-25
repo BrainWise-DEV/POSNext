@@ -1,5 +1,14 @@
 """
 Installation and Migration hooks for POS Next
+
+This module relies on Frappe's fixture system for:
+- Custom fields (custom_field.json)
+- Roles (role.json)
+- Custom DocPerm (custom_docperm.json)
+- Print formats (print_format.json)
+
+The fixtures are defined in hooks.py and synced automatically during install/migrate.
+This module handles post-fixture tasks like setting defaults and clearing cache.
 """
 import frappe
 import logging
@@ -11,29 +20,37 @@ logger = logging.getLogger(__name__)
 def after_install():
 	"""Hook that runs after app installation"""
 	try:
-		log_message("Installing POS Next fixtures", level="info")
-		install_fixtures()
+		log_message("POS Next: Running post-install setup", level="info")
+
+		# Setup default print format for POS Profiles
 		setup_default_print_format()
+
+		# Clear cache to ensure changes take effect
+		frappe.clear_cache()
 		frappe.db.commit()
-		log_message("POS Next installation completed successfully", level="success")
+
+		log_message("POS Next: Installation completed successfully", level="success")
 	except Exception as e:
 		frappe.db.rollback()
 		frappe.log_error(
 			title="POS Next Installation Error",
 			message=frappe.get_traceback()
 		)
-		log_message(f"Error during POS Next installation: {str(e)}", level="error")
+		log_message(f"POS Next: Installation error - {str(e)}", level="error")
 		raise
 
 
 def after_migrate():
 	"""Hook that runs after bench migrate"""
 	try:
-		# Migrate runs often, so we use quiet mode to reduce noise
-		install_fixtures(quiet=True)
+		# Setup default print format
 		setup_default_print_format(quiet=True)
+
+		# Clear cache
+		frappe.clear_cache()
 		frappe.db.commit()
-		log_message("POS Next: Fixtures updated successfully", level="success")
+
+		log_message("POS Next: Migration completed successfully", level="success")
 	except Exception as e:
 		frappe.db.rollback()
 		frappe.log_error(
@@ -44,171 +61,9 @@ def after_migrate():
 		raise
 
 
-def install_fixtures(quiet=False):
-	"""
-	Install or update fixtures from JSON files
-	This includes custom fields, print formats, etc.
-
-	Args:
-		quiet (bool): If True, suppress detailed logs (useful for migrations)
-	"""
-	import os
-	import json
-
-	fixtures_path = frappe.get_app_path("pos_next", "fixtures")
-
-	if not os.path.exists(fixtures_path):
-		if not quiet:
-			log_message(f"Fixtures directory not found: {fixtures_path}", level="warning")
-		return
-
-	# Install print format fixture
-	print_format_file = os.path.join(fixtures_path, "print_format.json")
-	if os.path.exists(print_format_file):
-		try:
-			with open(print_format_file, 'r') as f:
-				print_formats = json.load(f)
-
-			for pf in print_formats:
-				install_print_format(pf, quiet=quiet)
-
-			if not quiet:
-				log_message(f"Installed print formats successfully", level="success")
-		except Exception as e:
-			log_message(f"Error installing print formats: {str(e)}", level="error")
-			frappe.log_error(
-				title="Print Format Installation Error",
-				message=frappe.get_traceback()
-			)
-
-	# Install custom field fixture
-	custom_field_file = os.path.join(fixtures_path, "custom_field.json")
-	if os.path.exists(custom_field_file):
-		try:
-			with open(custom_field_file, 'r') as f:
-				custom_fields = json.load(f)
-
-			for cf in custom_fields:
-				install_custom_field(cf, quiet=quiet)
-
-			if not quiet:
-				log_message(f"Installed custom fields successfully", level="success")
-		except Exception as e:
-			log_message(f"Error installing custom fields: {str(e)}", level="error")
-			frappe.log_error(
-				title="Custom Field Installation Error",
-				message=frappe.get_traceback()
-			)
-
-
-def install_print_format(doc_dict, quiet=False):
-	"""
-	Install or update a print format from dict
-	Updates existing print format instead of deleting (idempotent)
-
-	Args:
-		quiet (bool): If True, suppress detailed logs
-	"""
-	try:
-		name = doc_dict.get("name")
-
-		if frappe.db.exists("Print Format", name):
-			# Update existing print format
-			existing_doc = frappe.get_doc("Print Format", name)
-
-			# Update key properties
-			update_fields = ["html", "doc_type", "module", "disabled", "standard"]
-			updated = False
-
-			for field in update_fields:
-				if field in doc_dict and existing_doc.get(field) != doc_dict.get(field):
-					existing_doc.set(field, doc_dict.get(field))
-					updated = True
-
-			if updated:
-				existing_doc.flags.ignore_permissions = True
-				existing_doc.flags.ignore_mandatory = True
-				existing_doc.save()
-				if not quiet:
-					log_message(f"Updated Print Format: {name}", level="info", indent=1)
-
-			return existing_doc
-		else:
-			# Create fresh print format
-			doc = frappe.get_doc(doc_dict)
-			doc.flags.ignore_permissions = True
-			doc.flags.ignore_mandatory = True
-			doc.insert()
-			if not quiet:
-				log_message(f"Created Print Format: {doc.name}", level="info", indent=1)
-			return doc
-
-	except Exception as e:
-		log_message(f"Error installing print format {doc_dict.get('name')}: {str(e)}", level="error", indent=1)
-		frappe.log_error(
-			title=f"Print Format Installation Error: {doc_dict.get('name')}",
-			message=frappe.get_traceback()
-		)
-
-
-def install_custom_field(doc_dict, quiet=False):
-	"""
-	Install or update a custom field from dict
-	Updates existing field if it exists (to avoid conflicts with other apps like Nexus)
-
-	Args:
-		quiet (bool): If True, suppress detailed logs
-	"""
-	try:
-		name = doc_dict.get("name")
-
-		if frappe.db.exists("Custom Field", name):
-			# Update existing custom field instead of deleting
-			# This prevents conflicts when multiple apps manage the same field
-			existing_doc = frappe.get_doc("Custom Field", name)
-
-			# Update only key properties that we care about
-			# Don't override everything to preserve other app's customizations
-			update_fields = [
-				"description", "in_standard_filter", "label",
-				"options", "fieldtype", "insert_after"
-			]
-
-			updated = False
-			for field in update_fields:
-				if field in doc_dict and existing_doc.get(field) != doc_dict.get(field):
-					existing_doc.set(field, doc_dict.get(field))
-					updated = True
-
-			if updated:
-				existing_doc.flags.ignore_permissions = True
-				existing_doc.flags.ignore_mandatory = True
-				existing_doc.save()
-				if not quiet:
-					log_message(f"Updated Custom Field: {name}", level="info", indent=1)
-
-			return existing_doc
-		else:
-			# Create fresh custom field
-			doc = frappe.get_doc(doc_dict)
-			doc.flags.ignore_permissions = True
-			doc.flags.ignore_mandatory = True
-			doc.insert()
-			if not quiet:
-				log_message(f"Created Custom Field: {doc.name}", level="info", indent=1)
-			return doc
-
-	except Exception as e:
-		log_message(f"Error installing custom field {doc_dict.get('name')}: {str(e)}", level="error", indent=1)
-		frappe.log_error(
-			title=f"Custom Field Installation Error: {doc_dict.get('name')}",
-			message=frappe.get_traceback()
-		)
-
-
 def setup_default_print_format(quiet=False):
 	"""
-	Set POS Next Receipt as default print format for POS Profiles if not already set
+	Set POS Next Receipt as default print format for POS Profiles if not already set.
 
 	Args:
 		quiet (bool): If True, suppress detailed logs
@@ -231,13 +86,15 @@ def setup_default_print_format(quiet=False):
 			updated_count = 0
 			for profile in pos_profiles:
 				try:
-					doc = frappe.get_doc("POS Profile", profile.name)
-					doc.print_format = "POS Next Receipt"
-					doc.flags.ignore_permissions = True
-					doc.flags.ignore_mandatory = True
-					doc.save()
+					frappe.db.set_value(
+						"POS Profile",
+						profile.name,
+						"print_format",
+						"POS Next Receipt",
+						update_modified=False
+					)
 					if not quiet:
-						log_message(f"Set default print format for POS Profile: {profile.name}", level="info", indent=1)
+						log_message(f"Set default print format for: {profile.name}", level="info", indent=1)
 					updated_count += 1
 				except Exception as e:
 					log_message(f"Error updating POS Profile {profile.name}: {str(e)}", level="error", indent=1)
@@ -255,7 +112,7 @@ def setup_default_print_format(quiet=False):
 
 def log_message(message, level="info", indent=0):
 	"""
-	Standardized logging function with consistent formatting
+	Standardized logging function with consistent formatting.
 
 	Args:
 		message (str): The message to log
@@ -264,7 +121,6 @@ def log_message(message, level="info", indent=0):
 	"""
 	indent_str = "  " * indent
 
-	# Log level prefixes
 	prefixes = {
 		"info": "[INFO]",
 		"success": "[SUCCESS]",
@@ -278,12 +134,10 @@ def log_message(message, level="info", indent=0):
 	# Print to console
 	print(formatted_message)
 
-	# Also log to frappe logger with appropriate level
+	# Also log to frappe logger
 	if level == "error":
 		logger.error(message)
 	elif level == "warning":
 		logger.warning(message)
-	elif level == "success":
-		logger.info(f"SUCCESS: {message}")
 	else:
 		logger.info(message)

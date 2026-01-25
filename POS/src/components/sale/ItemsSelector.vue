@@ -1213,17 +1213,18 @@ async function handleBarcodeSearch(forceAutoAdd = false) {
 function toggleBarcodeScanner() {
 	scannerEnabled.value = !scannerEnabled.value
 
-	// Disable auto-add when scanner is disabled
-	if (!scannerEnabled.value) {
-		autoAddEnabled.value = false
-	}
-
-	// Focus on search input when enabling scanner
 	if (scannerEnabled.value) {
+		// Auto-enable auto-add when scanner is enabled
+		autoAddEnabled.value = true
+
+		// Focus on search input when enabling scanner
 		const input = searchInputRef.value || document.getElementById("item-search")
 		if (input) {
 			input.focus()
 		}
+	} else {
+		// Disable auto-add when scanner is disabled
+		autoAddEnabled.value = false
 	}
 }
 
