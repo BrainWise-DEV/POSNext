@@ -1637,7 +1637,23 @@ function handleItemSelected(item, autoAdd = false) {
 	// Auto-add mode
 	if (autoAdd) {
 		try {
-			cartStore.addItem(item, 1, true, shiftStore.currentProfile);
+			// Check if item has resolved barcode data (weighted/priced)
+			if (item.resolved_qty && item.resolved_barcode_type) {
+				// Get the unit price for the resolved UOM from uom_prices, or fall back to item rate
+				const resolvedUom = item.resolved_uom || item.uom;
+				const unitRate = item.uom_prices?.[resolvedUom] || item.rate;
+
+				const resolvedItem = {
+					...item,
+					uom: resolvedUom,
+					rate: unitRate,
+					price_list_rate: unitRate,
+					is_resolved_barcode: true, // Mark as readonly
+				};
+				cartStore.addItem(resolvedItem, item.resolved_qty, true, shiftStore.currentProfile);
+			} else {
+				cartStore.addItem(item, 1, true, shiftStore.currentProfile);
+			}
 		} catch (error) {
 			uiStore.showError(
 				__("Insufficient Stock"),

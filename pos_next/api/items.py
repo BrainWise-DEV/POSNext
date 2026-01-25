@@ -251,7 +251,8 @@ def get_item_detail(item, doc=None, warehouse=None, price_list=None, company=Non
 
 	# Fetch all needed Item fields in a single query (performance optimization)
 	item_data = frappe.db.get_value(
-		"Item", item_code,
+		"Item",
+		item_code,
 		["max_discount", "item_group", "brand", "stock_uom"],
 		as_dict=True
 	) or {}
@@ -606,9 +607,9 @@ def get_item_variants(template_item, pos_profile):
 def _build_item_base_conditions(pos_profile_doc, item_group=None):
 	"""Build reusable SQL conditions for POS item search."""
 	conditions = [
-		"disabled = 0",
-		"is_sales_item = 1",
-		"IFNULL(variant_of, '') = ''",
+		"i.disabled = 0",
+		"i.is_sales_item = 1",
+		"IFNULL(i.variant_of, '') = ''",
 	]
 	params = []
 
@@ -952,114 +953,95 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20)
 	try:
 		pos_profile_doc = frappe.get_cached_doc("POS Profile", pos_profile)
 
+		# Try to resolve weighted/priced barcodes if barcode_resolver is available
+		resolved_barcode_data = None
+		effective_search_term = search_term
+		if search_term and len(search_term.strip().split()) == 1:
+			from pos_next.services.barcode import resolve_barcode
+			resolved_barcode_data = resolve_barcode(search_term.strip(), pos_profile)
+			if resolved_barcode_data and resolved_barcode_data.get("item_barcode"):
+				# Use the extracted item barcode for searching
+				effective_search_term = resolved_barcode_data["item_barcode"]
+
 		# IMPORTANT: Filtering logic explained:
 		# - Template items (has_variants=1) are shown → users select variants via dialog
 		# - Regular items (has_variants=0, variant_of is null) are shown → direct add to cart
 		# - Variant items (has_variants=0, variant_of is not null) are HIDDEN from main list
 
-		# Build search conditions with fuzzy word-order independent matching
-		if search_term and len(search_term.strip()) > 0:
+		# Add company filter - show items for specific company + global items (empty company)
+		# Global items (custom_company is empty) are available to all companies
+
+		# Build base conditions
+		conditions, params = _build_item_base_conditions(pos_profile_doc, item_group)
+
+		# Build column list with table alias
+		item_columns = ",\n\t".join([f"i.{col}" for col in ITEM_RESULT_FIELDS])
+		# For GROUP BY, extract just the column name (before " as " if present)
+		group_by_columns = ", ".join([
+			f"i.{col.split(' as ')[0]}" for col in ITEM_RESULT_FIELDS
+		])
+
+		# Add search conditions if search term provided
+		if effective_search_term and effective_search_term.strip():
 			# Split search term into words for fuzzy matching
-			search_words = [word.strip() for word in search_term.split() if word.strip()]
-			# Deduplicate to keep boolean queries lean and LIKE predicates minimal
-			search_words = list(dict.fromkeys(search_words))
+			search_words = [word.strip() for word in effective_search_term.split() if word.strip()]
 
-			# Fuzzy search: match if search term appears anywhere in item fields
-			conditions, params = _build_item_base_conditions(pos_profile_doc, item_group)
-
-			# Word-order independent: all words must appear somewhere
-			search_text = "CONCAT(COALESCE(name, ''), ' ', COALESCE(item_name, ''), ' ', COALESCE(description, ''))"
+			# Word-order independent: all words must appear somewhere in item fields
+			search_text = "CONCAT(COALESCE(i.name, ''), ' ', COALESCE(i.item_name, ''), ' ', COALESCE(i.description, ''))"
 			word_conditions = " AND ".join([f"{search_text} LIKE %s"] * len(search_words))
-			conditions.append(f"({word_conditions})")
+
+			# Also match if barcode contains the search term
+			barcode_condition = "ib.barcode LIKE %s"
+
+			# Combine: match item fields OR match barcode
+			conditions.append(f"(({word_conditions}) OR {barcode_condition})")
 			params.extend([f"%{word}%" for word in search_words])
+			params.append(f"%{effective_search_term}%")  # For barcode matching
 
-			# Use parameterized queries - no need to escape, SQL handles it
-			prefix_pattern = f"{search_term}%"
-
-			where_clause = " AND ".join(conditions)
-
-			# Simple relevance scoring with case-insensitive comparison
+			# Relevance scoring with case-insensitive comparison
+			# Exact barcode match gets highest priority, use MAX() for grouping
+			prefix_pattern = f"{effective_search_term}%"
 			relevance = f"""
-				CASE
-					WHEN LOWER(item_name) = LOWER(%s) THEN 1000
-					WHEN LOWER(name) = LOWER(%s) THEN 900
-					WHEN LOWER(item_name) LIKE LOWER(%s) THEN 500
-					WHEN LOWER(name) LIKE LOWER(%s) THEN 400
+				MAX(CASE
+					WHEN ib.barcode = %s THEN 1500
+					WHEN ib.barcode LIKE %s THEN 1200
+					WHEN LOWER(i.item_name) = LOWER(%s) THEN 1000
+					WHEN LOWER(i.name) = LOWER(%s) THEN 900
+					WHEN LOWER(i.item_name) LIKE LOWER(%s) THEN 500
+					WHEN LOWER(i.name) LIKE LOWER(%s) THEN 400
 					ELSE 100
-				END
+				END)
 			"""
-			score_params = [search_term, search_term, prefix_pattern, prefix_pattern]
-
-			query = f"""
-				SELECT {ITEM_RESULT_COLUMNS}
-				FROM `tabItem`
-				WHERE {where_clause}
-				ORDER BY {relevance} DESC, item_name ASC
-				LIMIT %s OFFSET %s
-			"""
-
-			params.extend(score_params)
-			params.extend([limit, start])
-			items = frappe.db.sql(query, tuple(params), as_dict=1)
+			score_params = [effective_search_term, prefix_pattern, effective_search_term, effective_search_term, prefix_pattern, prefix_pattern]
+			order_by = f"{relevance} DESC, i.item_name ASC"
 		else:
-			# No search term - return all items with base filters using Query Builder
-			# for Frappe 16 compatibility (ifnull in filter keys is no longer allowed)
-			Item = DocType("Item")
-			query = (
-				frappe.qb.from_(Item)
-				.select(
-					Item.name.as_("item_code"),
-					Item.item_name,
-					Item.description,
-					Item.stock_uom,
-					Item.image,
-					Item.is_stock_item,
-					Item.has_batch_no,
-					Item.has_serial_no,
-					Item.item_group,
-					Item.brand,
-					Item.has_variants,
-					Item.custom_company,
-					Item.disabled,
-				)
-				.where(Item.disabled == 0)
-				.where(Item.is_sales_item == 1)
-				.where(fn.Coalesce(Item.variant_of, "") == "")  # Exclude variants
-			)
+			# No search term - simple ordering
+			score_params = []
+			order_by = "i.item_name ASC"
 
-			# Add company filter - show items for specific company + global items
-			if pos_profile_doc.company:
-				query = query.where(
-					fn.Coalesce(Item.custom_company, "").isin([pos_profile_doc.company, ""])
-				)
+		where_clause = " AND ".join(conditions)
 
-			# Add item group filter if provided
-			if item_group:
-				query = query.where(Item.item_group == item_group)
+		query = f"""
+			SELECT {item_columns},
+				GROUP_CONCAT(DISTINCT ib.barcode) as barcode,
+				GROUP_CONCAT(DISTINCT ib.uom) as barcode_uoms
+			FROM `tabItem` i
+			LEFT JOIN `tabItem Barcode` ib ON ib.parent = i.name
+			WHERE {where_clause}
+			GROUP BY {group_by_columns}
+			ORDER BY {order_by}
+			LIMIT %s OFFSET %s
+		"""
 
-			query = query.orderby(Item.item_name).limit(limit).offset(start)
-			items = query.run(as_dict=True)
+		params.extend(score_params)
+		params.extend([limit, start])
+		items = frappe.db.sql(query, tuple(params), as_dict=1)
 
 		# Prepare maps for enrichment
 		item_codes = [item["item_code"] for item in items]
-		barcode_map = {}
 		conversion_map = defaultdict(dict)  # parent -> {uom: factor}
 		uom_map = {}  # parent -> [ {uom, conversion_factor}, ... ]
 		uom_prices_map = {}  # item_code -> {uom: price_list_rate}
-
-		# Barcodes
-		if item_codes:
-			barcodes = frappe.db.sql(
-				"""
-				SELECT parent, barcode
-				FROM `tabItem Barcode`
-				WHERE parent IN %s
-				GROUP BY parent
-				""",
-				[item_codes],
-				as_dict=1,
-			)
-			barcode_map = {b["parent"]: b["barcode"] for b in barcodes}
 
 		# UOM conversions (both list & map for quick lookup)
 		if item_codes:
@@ -1257,7 +1239,7 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20)
 			item["warehouse"] = pos_profile_doc.warehouse
 
 			# Barcode
-			item["barcode"] = barcode_map.get(item["item_code"], "")
+			# item["barcode"] = barcode_map.get(item["item_code"], "")
 
 			# Item UOMs (exclude stock UOM to avoid duplicates)
 			all_uoms = uom_map.get(item["item_code"], []) or []
@@ -1265,6 +1247,16 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20)
 
 			# UOM-specific prices map for frontend selector
 			item["uom_prices"] = uom_prices_map.get(item["item_code"], {})
+
+		# Apply resolved barcode data (weighted/priced) to the first matching item
+		if resolved_barcode_data and items:
+			from pos_next.services.barcode import compute_resolved_item_data
+			resolved_item_data = compute_resolved_item_data(
+				resolved_barcode_data,
+				item=items[0],
+			)
+			if resolved_item_data:
+				items[0].update(resolved_item_data)
 
 		return items
 	except Exception as e:

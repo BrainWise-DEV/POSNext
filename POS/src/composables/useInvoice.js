@@ -229,6 +229,8 @@ export function useInvoice() {
 				// Add item_group and brand for offer eligibility checking
 				item_group: item.item_group,
 				brand: item.brand,
+				// Resolved barcode flag - prevents editing qty/uom/rate for weighted/priced barcodes
+				is_resolved_barcode: item.is_resolved_barcode || false,
 			}
 			invoiceItems.value.push(newItem)
 			// Recalculate the newly added item to apply taxes
