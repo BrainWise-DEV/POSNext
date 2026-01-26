@@ -534,39 +534,31 @@
 						</div>
 					</div>
 
-					<!-- Quick Amounts Area (Desktop) -->
+					<!-- Quick Amounts Area (Desktop) - Consistent layout for all payment methods -->
 					<div v-if="lastSelectedMethod && remainingAmount > 0" class="hidden lg:block" :class="isCompactMode ? 'mb-2' : 'mb-3'">
-						<!-- Exact amount mode for non-cash: show single button -->
-						<template v-if="isExactAmountModeActive && !isCashPaymentMethod(lastSelectedMethod)">
-							<div class="text-start text-xs font-medium text-gray-600 mb-1.5">
-								{{ __('Pay') }} {{ __(lastSelectedMethod.mode_of_payment) }}
-							</div>
+						<div class="text-start text-xs font-medium text-gray-600 mb-1.5">
+							{{ (isExactAmountModeActive && !isCashPaymentMethod(lastSelectedMethod))
+								? __('Exact amount only')
+								: __('Quick amounts for {0}', [__(lastSelectedMethod.mode_of_payment)])
+							}}
+						</div>
+						<div class="grid grid-cols-4 gap-1.5">
 							<button
-								@click="addCustomPayment(lastSelectedMethod, remainingAmount)"
-								class="w-full font-semibold rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-all px-4 py-3 text-base"
+								v-for="amount in quickAmounts"
+								:key="amount"
+								@click="addCustomPayment(lastSelectedMethod, amount)"
+								:disabled="isExactAmountModeActive && !isCashPaymentMethod(lastSelectedMethod) && amount !== Math.ceil(remainingAmount)"
+								:class="[
+									'font-semibold rounded-lg border-2 transition-all',
+									isCompactMode ? 'px-2 py-2 text-sm' : 'px-2 py-2 text-sm',
+									isExactAmountModeActive && !isCashPaymentMethod(lastSelectedMethod) && amount !== Math.ceil(remainingAmount)
+										? 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed'
+										: 'bg-white border-gray-200 hover:border-blue-400 hover:bg-blue-50 text-gray-700 hover:text-blue-600'
+								]"
 							>
-								{{ formatCurrency(remainingAmount) }}
+								{{ formatCurrency(amount) }}
 							</button>
-						</template>
-						<!-- Normal mode: show quick amounts grid -->
-						<template v-else>
-							<div class="text-start text-xs font-medium text-gray-600 mb-1.5">
-								{{ __('Quick amounts for {0}', [__(lastSelectedMethod.mode_of_payment)]) }}
-							</div>
-							<div class="grid grid-cols-4 gap-1.5">
-								<button
-									v-for="amount in quickAmounts"
-									:key="amount"
-									@click="addCustomPayment(lastSelectedMethod, amount)"
-									:class="[
-										'font-semibold rounded-lg bg-white border-2 border-gray-200 hover:border-blue-400 hover:bg-blue-50 text-gray-700 hover:text-blue-600 transition-all',
-										isCompactMode ? 'px-2 py-2 text-sm' : 'px-2 py-2 text-sm'
-									]"
-								>
-									{{ formatCurrency(amount) }}
-								</button>
-							</div>
-						</template>
+						</div>
 					</div>
 					<div v-else-if="!lastSelectedMethod && remainingAmount > 0" class="hidden lg:block" :class="['bg-blue-50 rounded-lg text-center', isCompactMode ? 'mb-2 p-2' : 'mb-3 p-3 lg:p-2']">
 						<p class="text-xs text-blue-600">{{ __('Select a payment method to start') }}</p>
@@ -574,72 +566,66 @@
 
 					<!-- Mobile Payment Section - Dynamic & Responsive -->
 					<div class="lg:hidden flex flex-col" :class="isSmallMobile ? 'gap-1' : 'gap-1.5'">
-						<!-- Mobile Quick Amounts + Custom Input -->
+						<!-- Mobile Quick Amounts + Custom Input (consistent layout for all payment methods) -->
 						<div v-if="lastSelectedMethod && remainingAmount > 0" :class="['space-y-1 flex-shrink-0', isSmallMobile ? 'mb-1' : 'mb-1.5']">
-							<!-- Exact amount mode for non-cash: show single button -->
-							<template v-if="isExactAmountModeActive && !isCashPaymentMethod(lastSelectedMethod)">
+							<!-- Quick Amounts Row (4 columns, responsive sizing) -->
+							<div class="grid grid-cols-4" :class="isSmallMobile ? 'gap-0.5' : 'gap-1'">
 								<button
-									@click="addCustomPayment(lastSelectedMethod, remainingAmount)"
+									v-for="amount in quickAmounts"
+									:key="amount"
+									@click="addCustomPayment(lastSelectedMethod, amount)"
+									:disabled="isExactAmountModeActive && !isCashPaymentMethod(lastSelectedMethod) && amount !== Math.ceil(remainingAmount)"
 									:class="[
-										'w-full font-semibold rounded bg-blue-600 text-white active:bg-blue-700 transition-colors',
-										isSmallMobile ? 'py-2 text-sm' : 'py-2.5 text-base'
+										'font-semibold rounded border transition-colors',
+										isSmallMobile ? 'py-1 text-[10px]' : 'py-1.5 text-xs',
+										isExactAmountModeActive && !isCashPaymentMethod(lastSelectedMethod) && amount !== Math.ceil(remainingAmount)
+											? 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed'
+											: 'bg-white border-gray-200 text-gray-700 active:bg-blue-50 active:border-blue-400'
 									]"
 								>
-									{{ __('Pay') }} {{ formatCurrency(remainingAmount) }}
+									{{ formatCurrency(amount) }}
 								</button>
-							</template>
-							<!-- Normal mode: show quick amounts grid and custom input -->
-							<template v-else>
-								<!-- Quick Amounts Row (4 columns, responsive sizing) -->
-								<div class="grid grid-cols-4" :class="isSmallMobile ? 'gap-0.5' : 'gap-1'">
-									<button
-										v-for="amount in quickAmounts"
-										:key="amount"
-										@click="addCustomPayment(lastSelectedMethod, amount)"
-										:class="[
-											'font-semibold rounded bg-white border border-gray-200 text-gray-700 active:bg-blue-50 active:border-blue-400 transition-colors',
-											isSmallMobile ? 'py-1 text-[10px]' : 'py-1.5 text-xs'
-										]"
-									>
-										{{ formatCurrency(amount) }}
-									</button>
-								</div>
+							</div>
 
-								<!-- Custom Amount Row -->
-								<div :class="['flex', isSmallMobile ? 'gap-0.5' : 'gap-1']">
-									<div class="relative flex-1">
-										<span :class="[
-											'absolute start-2 top-1/2 -translate-y-1/2 text-gray-400',
-											isSmallMobile ? 'text-[10px]' : 'text-xs'
-										]">{{ currencySymbol }}</span>
-										<input
-											v-model="mobileCustomAmount"
-											type="number"
-											inputmode="decimal"
-											:placeholder="__('Custom')"
-											min="0"
-											step="0.01"
-											:class="[
-												'w-full border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white font-semibold',
-												isSmallMobile ? 'h-7 ps-5 pe-1.5 text-xs' : 'h-8 ps-6 pe-2 text-sm'
-											]"
-										/>
-									</div>
-									<button
-										@click="addMobileCustomPayment"
-										:disabled="!mobileCustomAmount || mobileCustomAmount <= 0"
+							<!-- Custom Amount Row (disabled for non-cash when exact amount mode is active) -->
+							<div :class="['flex', isSmallMobile ? 'gap-0.5' : 'gap-1']">
+								<div class="relative flex-1">
+									<span :class="[
+										'absolute start-2 top-1/2 -translate-y-1/2',
+										isSmallMobile ? 'text-[10px]' : 'text-xs',
+										isExactAmountModeActive && !isCashPaymentMethod(lastSelectedMethod) ? 'text-gray-300' : 'text-gray-400'
+									]">{{ currencySymbol }}</span>
+									<input
+										v-model="mobileCustomAmount"
+										type="number"
+										inputmode="decimal"
+										:placeholder="isExactAmountModeActive && !isCashPaymentMethod(lastSelectedMethod) ? __('Exact amount only') : __('Custom')"
+										min="0"
+										step="0.01"
+										:disabled="isExactAmountModeActive && !isCashPaymentMethod(lastSelectedMethod)"
 										:class="[
-											'font-semibold rounded transition-all flex-shrink-0',
-											isSmallMobile ? 'h-7 px-2 text-[10px]' : 'h-8 px-3 text-xs',
-											!mobileCustomAmount || mobileCustomAmount <= 0
-												? 'bg-gray-100 text-gray-400'
-												: 'bg-blue-500 text-white active:bg-blue-600'
+											'w-full border rounded focus:outline-none font-semibold',
+											isSmallMobile ? 'h-7 ps-5 pe-1.5 text-xs' : 'h-8 ps-6 pe-2 text-sm',
+											isExactAmountModeActive && !isCashPaymentMethod(lastSelectedMethod)
+												? 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed'
+												: 'bg-white border-gray-200 focus:ring-1 focus:ring-blue-500'
 										]"
-									>
-										{{ __('Add') }}
-									</button>
+									/>
 								</div>
-							</template>
+								<button
+									@click="addMobileCustomPayment"
+									:disabled="(isExactAmountModeActive && !isCashPaymentMethod(lastSelectedMethod)) || !mobileCustomAmount || mobileCustomAmount <= 0"
+									:class="[
+										'font-semibold rounded transition-all flex-shrink-0',
+										isSmallMobile ? 'h-7 px-2 text-[10px]' : 'h-8 px-3 text-xs',
+										(isExactAmountModeActive && !isCashPaymentMethod(lastSelectedMethod)) || !mobileCustomAmount || mobileCustomAmount <= 0
+											? 'bg-gray-100 text-gray-400'
+											: 'bg-blue-500 text-white active:bg-blue-600'
+									]"
+								>
+									{{ __('Add') }}
+								</button>
+							</div>
 						</div>
 
 						<!-- Mobile: Select payment method prompt -->
@@ -1030,7 +1016,17 @@ watch(() => props.modelValue, (isOpen) => {
 	}
 })
 
-// Use numpad composable for keypad input handling
+// Handle Enter key from numpad keyboard input
+function handleNumpadEnter(value) {
+	if (value > 0 && lastSelectedMethod.value) {
+		numpadAddPayment()
+	} else if (remainingAmount.value === 0 && totalPaid.value > 0 && canComplete.value) {
+		// If fully paid and can complete, trigger complete payment
+		completePayment()
+	}
+}
+
+// Use numpad composable for keypad input handling with keyboard support
 const {
 	numpadDisplay,
 	numpadValue,
@@ -1038,7 +1034,10 @@ const {
 	numpadBackspace,
 	numpadClear,
 	setNumpadValue,
-} = usePaymentNumpad()
+} = usePaymentNumpad({
+	isEnabled: computed(() => props.modelValue), // Only enabled when dialog is open
+	onEnter: handleNumpadEnter,
+})
 
 // Mobile custom amount state
 const mobileCustomAmount = ref('')

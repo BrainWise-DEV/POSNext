@@ -1,11 +1,11 @@
 /**
  * Payment Numpad Composable
- * Handles numeric keypad state and input for payment dialog
+ * Handles numeric keypad state, input, and keyboard support for payment dialog
  */
 
-import { ref, computed } from "vue"
+import { ref, computed, onMounted, onUnmounted } from "vue"
 
-export function usePaymentNumpad() {
+export function usePaymentNumpad(options = {}) {
 	const numpadDisplay = ref("")
 
 	const numpadValue = computed(() => {
@@ -65,6 +65,79 @@ export function usePaymentNumpad() {
 			numpadDisplay.value = String(value)
 		}
 	}
+
+	// Keyboard input handling
+	const {
+		isEnabled = ref(true),
+		onEnter = null,
+	} = options
+
+	/**
+	 * Handle keyboard input for physical keyboard support
+	 * @param {KeyboardEvent} event
+	 */
+	function handleKeyboardInput(event) {
+		// Check if keyboard input is enabled (e.g., dialog is open)
+		const enabled = typeof isEnabled === 'function' ? isEnabled() : isEnabled.value
+		if (!enabled) return
+
+		// Don't handle if user is typing in an input field
+		const activeElement = document.activeElement
+		const isInInput = activeElement && (
+			activeElement.tagName === 'INPUT' ||
+			activeElement.tagName === 'TEXTAREA' ||
+			activeElement.isContentEditable
+		)
+		if (isInInput) return
+
+		const key = event.key
+
+		// Handle numeric keys (0-9)
+		if (/^[0-9]$/.test(key)) {
+			event.preventDefault()
+			numpadInput(key)
+			return
+		}
+
+		// Handle decimal point (. or ,)
+		if (key === '.' || key === ',') {
+			event.preventDefault()
+			numpadInput('.')
+			return
+		}
+
+		// Handle backspace
+		if (key === 'Backspace') {
+			event.preventDefault()
+			numpadBackspace()
+			return
+		}
+
+		// Handle Delete or Escape to clear
+		if (key === 'Delete' || key === 'Escape') {
+			event.preventDefault()
+			numpadClear()
+			return
+		}
+
+		// Handle Enter - call custom handler if provided
+		if (key === 'Enter') {
+			event.preventDefault()
+			if (onEnter && typeof onEnter === 'function') {
+				onEnter(numpadValue.value)
+			}
+			return
+		}
+	}
+
+	// Set up keyboard event listeners
+	onMounted(() => {
+		window.addEventListener('keydown', handleKeyboardInput)
+	})
+
+	onUnmounted(() => {
+		window.removeEventListener('keydown', handleKeyboardInput)
+	})
 
 	return {
 		// State
