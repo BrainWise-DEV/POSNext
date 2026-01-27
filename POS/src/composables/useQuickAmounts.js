@@ -6,14 +6,23 @@
 import { computed } from "vue"
 
 /**
+ * Round to 2 decimal places (avoids floating point issues)
+ */
+function round2(val) {
+	return Math.round(val * 100) / 100
+}
+
+/**
  * Create quick amounts suggestions based on remaining amount
  * @param {ComputedRef<number>} remainingAmount - Remaining amount to pay
+ * @param {ComputedRef<boolean>} isCash - Whether the selected payment method is cash
  * @returns {Object} Computed quick amounts array
  */
-export function useQuickAmounts(remainingAmount) {
+export function useQuickAmounts(remainingAmount, isCash) {
 	/**
 	 * Generate smart quick amount suggestions
-	 * - Always includes exact amount first
+	 * - Cash: starts with ceil (whole denomination), since cash is physical
+	 * - Non-cash: starts with exact fractional amount (digital transfer)
 	 * - Adds rounded amounts based on common denominations
 	 * - Maintains meaningful spacing between suggestions
 	 */
@@ -23,15 +32,15 @@ export function useQuickAmounts(remainingAmount) {
 			return [10, 20, 50, 100]
 		}
 
+		const cash = isCash ? isCash.value : true
 		const amounts = new Set()
-		const exactAmount = Math.ceil(remaining)
+		// Cash payments use ceil (physical denominations), non-cash use exact amount
+		const exactAmount = cash ? Math.ceil(remaining) : round2(remaining)
 
-		// Always include exact amount first
+		// Always include the primary amount first
 		amounts.add(exactAmount)
 
 		// Determine appropriate denominations based on amount size
-		// For amounts < 50, use smaller denominations
-		// For amounts >= 50, skip to larger denominations for meaningful differences
 		let denominations
 		if (remaining < 20) {
 			denominations = [5, 10, 20, 50]

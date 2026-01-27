@@ -547,11 +547,11 @@
 								v-for="amount in quickAmounts"
 								:key="amount"
 								@click="addCustomPayment(lastSelectedMethod, amount)"
-								:disabled="isExactAmountModeActive && !isCashPaymentMethod(lastSelectedMethod) && amount !== Math.ceil(remainingAmount)"
+								:disabled="isQuickAmountDisabled(amount)"
 								:class="[
 									'font-semibold rounded-lg border-2 transition-all',
 									isCompactMode ? 'px-2 py-2 text-sm' : 'px-2 py-2 text-sm',
-									isExactAmountModeActive && !isCashPaymentMethod(lastSelectedMethod) && amount !== Math.ceil(remainingAmount)
+									isQuickAmountDisabled(amount)
 										? 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed'
 										: 'bg-white border-gray-200 hover:border-blue-400 hover:bg-blue-50 text-gray-700 hover:text-blue-600'
 								]"
@@ -574,11 +574,11 @@
 									v-for="amount in quickAmounts"
 									:key="amount"
 									@click="addCustomPayment(lastSelectedMethod, amount)"
-									:disabled="isExactAmountModeActive && !isCashPaymentMethod(lastSelectedMethod) && amount !== Math.ceil(remainingAmount)"
+									:disabled="isQuickAmountDisabled(amount)"
 									:class="[
 										'font-semibold rounded border transition-colors',
 										isSmallMobile ? 'py-1 text-[10px]' : 'py-1.5 text-xs',
-										isExactAmountModeActive && !isCashPaymentMethod(lastSelectedMethod) && amount !== Math.ceil(remainingAmount)
+										isQuickAmountDisabled(amount)
 											? 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed'
 											: 'bg-white border-gray-200 text-gray-700 active:bg-blue-50 active:border-blue-400'
 									]"
@@ -1522,7 +1522,20 @@ const paymentButtonText = computed(() => {
 })
 
 // Use quick amounts composable for smart amount suggestions
-const { quickAmounts } = useQuickAmounts(remainingAmount)
+// Cash methods show rounded/ceil amounts (physical denominations),
+// non-cash methods show the exact fractional amount
+const isLastMethodCash = computed(() => {
+	return !lastSelectedMethod.value || isCashPaymentMethod(lastSelectedMethod.value)
+})
+const { quickAmounts } = useQuickAmounts(remainingAmount, isLastMethodCash)
+
+// Whether a quick amount button should be disabled in exact-amount mode
+// Non-cash methods can only pay the exact remaining — no rounding allowed
+function isQuickAmountDisabled(amount) {
+	return isExactAmountModeActive.value
+		&& !isCashPaymentMethod(lastSelectedMethod.value)
+		&& amount !== round2(remainingAmount.value)
+}
 
 // Preload payment methods when posProfile is set (before dialog opens)
 watch(
