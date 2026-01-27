@@ -1667,7 +1667,9 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
             si.is_pos,
             si.grand_total,
             si.paid_amount,
-            si.outstanding_amount
+            si.outstanding_amount,
+            si.customer,
+            si.customer_name
         )
         .where(si.name == invoice_name)
     ).run(as_dict=True)
@@ -1760,6 +1762,9 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
         "grand_total": invoice_info.grand_total,
         "paid_amount": invoice_info.paid_amount,
         "outstanding_amount": invoice_info.outstanding_amount,
+        "customer": invoice_info.customer,
+        "customer_name": invoice_info.customer_name,
+        "posting_date": invoice_info.posting_date,
         "payments": payments_data,
     }
 

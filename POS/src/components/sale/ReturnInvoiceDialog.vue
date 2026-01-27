@@ -881,7 +881,9 @@ const fetchInvoiceResource = createResource({
 			originalInvoice.value = {
 				name: data.return_against,
 				customer: data.customer,
+				customer_name: origInvoice.customer_name || data.customer_name,
 				company: data.company,
+				posting_date: origInvoice.posting_date,
 				grand_total: origInvoice.grand_total,
 				paid_amount: origInvoice.paid_amount,
 				outstanding_amount: origInvoice.outstanding_amount,
