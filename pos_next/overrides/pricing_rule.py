@@ -18,32 +18,33 @@ from frappe import _
 
 
 def apply_price_discount_rule(pricing_rule, item_details, args):
-	"""
-	Override function to defer Min/Max discount application to a later stage.
-	
-	This function intercepts the standard pricing rule application process.
-	For Min/Max pricing rules, it skips the immediate discount application
-	because these rules require evaluating all items together to determine
-	which items qualify based on their relative prices.
-	
-	Args:
-		pricing_rule (dict): The pricing rule configuration dictionary
-		item_details (dict): Details about the item being processed
-		args (dict): Additional arguments for the pricing rule application
-		
-	Returns:
-		None: If the rule is Min/Max type (deferred to apply_min_max_price_discounts)
-		Any: Result from the original function for non-Min/Max rules
-	"""
-	apply_discount_on_price = pricing_rule.get("apply_discount_on_price") or ""
-	
-	# Defer Min/Max discount application - these require evaluating all items
-	# together to determine which items qualify based on price ranking
-	if apply_discount_on_price in ["Min", "Max"]:
-		return 
-	
-	# For standard pricing rules, use the original implementation
-	return _original_apply_price_discount_rule(pricing_rule, item_details, args)
+    """
+    Override function to defer Min/Max discount application to a later stage.
+    
+    This function intercepts the standard pricing rule application process.
+    For Min/Max pricing rules, it skips the immediate discount application
+    because these rules require evaluating all items together to determine
+    which items qualify based on their relative prices.
+    
+    Args:
+        pricing_rule (dict): The pricing rule configuration dictionary
+        item_details (dict): Details about the item being processed
+        args (dict): Additional arguments for the pricing rule application
+        
+    Returns:
+        None: If the rule is Min/Max type (deferred to apply_min_max_price_discounts)
+        Any: Result from the original function for non-Min/Max rules
+    """
+    apply_discount_on_price = pricing_rule.get("apply_discount_on_price") or ""
+    
+    # Defer Min/Max discount application - these require evaluating all items
+    # together to determine which items qualify based on price ranking
+    if apply_discount_on_price in ["Min", "Max"]:
+        item_details.pricing_rule_for = pricing_rule.rate_or_discount
+        return 
+    
+    # For standard pricing rules, use the original implementation
+    return _original_apply_price_discount_rule(pricing_rule, item_details, args)
 
 def patch_pricing_rule():
     """Safely patch the pricing rule module after Frappe is initialized."""
@@ -77,9 +78,13 @@ def apply_min_max_price_discounts(doc, method=None):
         # Process each pricing rule separately
         for pr_name, items in rule_items.items():
             pr = pricing_rules[pr_name]
-
+            doc_price_list = (
+                doc.get("selling_price_list") 
+                or doc.get("buying_price_list") 
+                or doc.get("price_list")
+            )
             # Skip if pricing rule is restricted to a different price list
-            if pr.for_price_list and pr.for_price_list != doc.selling_price_list:
+            if pr.for_price_list and pr.for_price_list != doc_price_list:
                 continue
 
             # Skip if no items match this rule
@@ -121,10 +126,7 @@ def apply_min_max_price_discounts(doc, method=None):
 
                 # Calculate how much of this item's quantity qualifies for discount
                 # This ensures we don't exceed the total discount quantity limit
-                discount_qty = (
-                    item.qty if remaining_qty <= 0
-                    else min(item.qty, remaining_qty)
-                )
+                discount_qty =  min(flt(item.qty), remaining_qty)
 
                 # Apply discount to the eligible quantity
                 _apply_discount(pr, item, discount_qty)
@@ -133,13 +135,14 @@ def apply_min_max_price_discounts(doc, method=None):
         # Recalculate totals after applying all discounts
         if hasattr(doc, "calculate_taxes_and_totals"):
             doc.calculate_taxes_and_totals()
-
-    except Exception:
+    except frappe.ValidationError:
+        raise
+    except Exception as e:
         # Log errors but don't break the document processing flow
-        frappe.log_error(frappe.get_traceback(), "Min/Max Pricing Rule Failed")
+        frappe.log_error(frappe.get_traceback(), "Min/Max Pricing Rule Failed", e)
         frappe.throw(
-            _("Failed to apply pricing rule discounts. Please review pricing rules or contact support."),
-            title="Min/Max Pricing Rule Failed"
+            _("Failed to apply pricing rule discounts: {0}").format(str(e)),
+            title=_("Pricing Rule Error")
         )
 
 

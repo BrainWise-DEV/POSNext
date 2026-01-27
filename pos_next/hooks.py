@@ -1,5 +1,4 @@
 from pos_next.utils import get_build_version
-import frappe
 app_name = "pos_next"
 app_title = "POS Next"
 app_publisher = "BrainWise"
