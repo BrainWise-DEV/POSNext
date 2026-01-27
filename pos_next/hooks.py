@@ -138,7 +138,7 @@ fixtures = [
 
 # before_install = "pos_next.install.before_install"
 after_install = "pos_next.install.after_install"
-after_migrate = "pos_next.install.after_migrate"
+after_migrate = ["pos_next.install.after_migrate", "pos_next.overrides.pricing_rule.patch_pricing_rule"]
 
 # Uninstallation
 # ------------
@@ -252,12 +252,6 @@ scheduler_events = {
 		"pos_next.tasks.branding_monitor.reset_tampering_counter",
 	],
 }
-try:
-	from erpnext.accounts.doctype.pricing_rule import pricing_rule as pricing_rule_module
-	from pos_next.overrides.pricing_rule import apply_price_discount_rule
-	pricing_rule_module.apply_price_discount_rule = apply_price_discount_rule
-except Exception as e:
-	frappe.log_error(frappe.get_traceback(), "Error in pricing rule module")
 # Testing
 # -------
 

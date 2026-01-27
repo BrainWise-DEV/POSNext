@@ -14,6 +14,7 @@ from erpnext.accounts.doctype.pricing_rule.utils import get_applied_pricing_rule
 from erpnext.accounts.doctype.pricing_rule.pricing_rule import (
 	apply_price_discount_rule as _original_apply_price_discount_rule
 )
+from frappe import _
 
 
 def apply_price_discount_rule(pricing_rule, item_details, args):
@@ -44,6 +45,13 @@ def apply_price_discount_rule(pricing_rule, item_details, args):
 	# For standard pricing rules, use the original implementation
 	return _original_apply_price_discount_rule(pricing_rule, item_details, args)
 
+def patch_pricing_rule():
+    """Safely patch the pricing rule module after Frappe is initialized."""
+    try:
+        from erpnext.accounts.doctype.pricing_rule import pricing_rule as pricing_rule_module
+        pricing_rule_module.apply_price_discount_rule = apply_price_discount_rule
+    except Exception:
+        frappe.log_error("Failed to patch pricing rule module for Min/Max discounts")
 
 def apply_min_max_price_discounts(doc, method=None):
     """
@@ -88,20 +96,27 @@ def apply_min_max_price_discounts(doc, method=None):
 
             # Track remaining quantity that can receive discount
             # This limit ensures only a specified quantity gets discounted
-            remaining_qty = flt(pr.min_or_max_discount_qty_limit or 0)
+            qty_limit = flt(pr.min_or_max_discount_qty_limit or 0)
+            has_qty_limit = qty_limit > 0
+            remaining_qty = qty_limit if has_qty_limit else 0
 
             # Apply discount to items in priority order (sorted by price)
             for item in items:
                 base_rate = flt(item.price_list_rate) or flt(item.rate)
                 if not base_rate:
                     continue
+                
+                # Unlimited discount -> apply fully
+                if not has_qty_limit:
+                    if item == items[0]:
+                        _apply_discount(pr, item, item.qty)
+                        continue
 
+                    
                 # If discount quantity limit exhausted, reset item to base price
                 if remaining_qty <= 0:
                     item.discount_percentage = 0.0
                     item.discount_amount = 0.0
-                    # item.rate = base_rate
-                    # item.amount = item.rate * item.qty
                     continue
 
                 # Calculate how much of this item's quantity qualifies for discount
