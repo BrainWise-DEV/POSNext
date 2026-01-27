@@ -5,6 +5,7 @@ app_publisher = "BrainWise"
 app_description = "POS built on ERPNext that brings together real-time billing, stock management, multi-user access, offline mode, and direct ERP integration. Run your store or restaurant with confidence and control, while staying 100% open source."
 app_email = "support@brainwise.me"
 app_license = "agpl-3.0"
+import frappe
 
 # Apps
 # ------------------
@@ -189,7 +190,12 @@ standard_queries = {
 # DocType Class
 # ---------------
 # Override standard doctype classes
-
+try:
+    from erpnext.accounts.doctype.pricing_rule import pricing_rule as pricing_rule_module
+    from pos_next.overrides.pricing_rule import apply_price_discount_rule
+    pricing_rule_module.apply_price_discount_rule = apply_price_discount_rule
+except Exception as e:
+    frappe.log_error(frappe.get_traceback(), "Error in pricing rule module")
 override_doctype_class = {
 	"Sales Invoice": "pos_next.overrides.sales_invoice.CustomSalesInvoice"
 }

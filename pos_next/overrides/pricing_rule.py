@@ -58,7 +58,7 @@ def patch_pricing_rule():
     except Exception:
         frappe.log_error("Failed to patch pricing rule module for Min/Max discounts")
 
-def apply_min_max_price_discounts(doc, method=None):
+def apply_min_max_price_discounts(doc, method=None, allowed_rules=None):
     """
     Apply Min/Max pricing rule discounts to document items.
     
@@ -72,8 +72,9 @@ def apply_min_max_price_discounts(doc, method=None):
     - For "Max" rules: Items with highest prices get discounted first
     
     Args:
-        doc: The document (e.g., Sales Invoice, Quotation) containing items
-        method (str, optional): Hook method name if called via Frappe hooks
+        doc: Document or dict containing items
+        method: Hook method name (optional)
+        allowed_rules: Optional list/set of rule names to restrict application to
     """
     try:
         # Collect all items that have Min/Max pricing rules applied
@@ -81,7 +82,14 @@ def apply_min_max_price_discounts(doc, method=None):
 
         # Process each pricing rule separately
         for pr_name, items in rule_items.items():
+            # Respect allowed_rules filter if provided
+            if allowed_rules is not None and pr_name not in allowed_rules:
+                continue
+
             pr = pricing_rules[pr_name]
+            if not pr:
+                continue
+
             doc_price_list = (
                 doc.get("selling_price_list") 
                 or doc.get("buying_price_list") 
@@ -89,10 +97,6 @@ def apply_min_max_price_discounts(doc, method=None):
             )
             # Skip if pricing rule is restricted to a different price list
             if pr.for_price_list and pr.for_price_list != doc_price_list:
-                continue
-
-            # Skip if no items match this rule
-            if not items:
                 continue
 
             # Determine sort direction: Max rules need descending order (highest first)
@@ -104,7 +108,6 @@ def apply_min_max_price_discounts(doc, method=None):
             )
 
             # Track remaining quantity that can receive discount
-            # This limit ensures only a specified quantity gets discounted
             qty_limit = flt(pr.min_or_max_discount_qty_limit or 0)
             has_qty_limit = qty_limit > 0
             remaining_qty = qty_limit if has_qty_limit else 0
@@ -112,98 +115,81 @@ def apply_min_max_price_discounts(doc, method=None):
             # Apply discount to items in priority order (sorted by price)
             for item in items:
                 base_rate = flt(item.price_list_rate) or flt(item.rate)
-                if not base_rate:
+                qty = flt(item.qty)
+                if not base_rate or qty <= 0:
                     continue
                 
-                # Unlimited discount -> apply fully
+                # Unlimited discount to first item only if no limit is set
                 if not has_qty_limit:
                     if item == items[0]:
-                        _apply_discount(pr, item, item.qty)
-                        continue
+                        _apply_discount(pr, item, qty)
+                    else:
+                        # Reset other items that might have had discounts
+                        item.discount_percentage = 0.0
+                        item.discount_amount = 0.0
+                        item.rate = base_rate
+                        item.amount = base_rate * qty
+                    continue
 
-                    
                 # If discount quantity limit exhausted, reset item to base price
                 if remaining_qty <= 0:
                     item.discount_percentage = 0.0
                     item.discount_amount = 0.0
+                    item.rate = base_rate
+                    item.amount = base_rate * qty
                     continue
 
                 # Calculate how much of this item's quantity qualifies for discount
-                # This ensures we don't exceed the total discount quantity limit
-                discount_qty = min(flt(item.qty), remaining_qty)
+                discount_qty = min(qty, remaining_qty)
 
                 # Apply discount to the eligible quantity
                 _apply_discount(pr, item, discount_qty)
                 remaining_qty -= discount_qty
 
         # Recalculate totals after applying all discounts
-        if hasattr(doc, "calculate_taxes_and_totals"):
+        if hasattr(doc, "calculate_taxes_and_totals") and callable(doc.calculate_taxes_and_totals):
             doc.calculate_taxes_and_totals()
-    except frappe.ValidationError:
-        raise
     except Exception as e:
-        # Log errors but don't break the document processing flow
-        frappe.log_error(frappe.get_traceback(), "Min/Max Pricing Rule Failed", e)
-        frappe.throw(
-            _("Failed to apply pricing rule discounts: {0}").format(str(e)),
-            title=_("Pricing Rule Error")
-        )
+        frappe.log_error(frappe.get_traceback(), "Min/Max Pricing Rule Failed")
+        if not frappe.flags.in_test:
+            frappe.msgprint(_("Warning: Min/Max pricing rules could not be fully applied."), indicator="orange")
 
 
 def _apply_discount(pr, item, eligible_qty):
     """
     Apply discount to an item based on the pricing rule configuration.
-    
-    This helper function calculates and applies the discount amount based on
-    the pricing rule's discount type (Rate, Discount Percentage, or Discount Amount).
-    It ensures that discounts never result in negative item rates.
-    
-    Args:
-        pr: The Pricing Rule document
-        item: The item row to apply discount to
-        eligible_qty (float): The quantity of this item that qualifies for discount
+    Ensures mathematical accuracy where rate * qty = amount.
     """
     base_rate = flt(item.price_list_rate) or flt(item.rate)
-    if not base_rate or eligible_qty <= 0:
+    qty = flt(item.qty)
+    
+    if not base_rate or eligible_qty <= 0 or qty <= 0:
         return
 
-    qty = flt(item.qty)
     # Calculate maximum possible discount to prevent negative rates
-    # This ensures the discount never exceeds the item's base value
     base_discount_cap = base_rate * eligible_qty
     total_discount = 0.0
 
     # Calculate discount based on pricing rule type
     if pr.rate_or_discount == "Rate" and pr.rate:
-        # Fixed rate: discount is the difference between base rate and rule rate
         total_discount = (base_rate - flt(pr.rate)) * eligible_qty
-
     elif pr.rate_or_discount == "Discount Percentage" and pr.discount_percentage:
-        # Percentage discount: calculate per unit, then multiply by eligible quantity
-        per_unit_discount = base_rate * flt(pr.discount_percentage) / 100
-        total_discount = per_unit_discount * eligible_qty
-
+        total_discount = (base_rate * flt(pr.discount_percentage) / 100) * eligible_qty
     elif pr.rate_or_discount == "Discount Amount" and pr.discount_amount:
-        # Fixed amount discount: apply per unit of eligible quantity
         total_discount = flt(pr.discount_amount) * eligible_qty
 
-    # Enforce discount cap to prevent negative rates
+    # Enforce discount cap
     total_discount = min(total_discount, base_discount_cap)
-
-    # Calculate effective rate after discount
-    # Note: discount is applied to eligible_qty, but rate is calculated per total qty
-    effective_rate = (base_rate * qty - total_discount) / qty
-
-    # Update item fields with calculated values
-    item.rate = max(effective_rate, 0.0)  # Ensure rate is never negative
+    
+    # Mathematical accuracy: Set amount first, then derive rate
+    # This ensures (rate * qty) exactly matches (base_value - total_discount)
+    total_line_value = base_rate * qty
+    net_amount = max(total_line_value - total_discount, 0.0)
+    
+    item.amount = net_amount
+    item.rate = net_amount / qty
     item.discount_amount = total_discount
-    # Calculate discount percentage based on total item value
-    item.discount_percentage = (
-        total_discount / (base_rate * qty)
-    ) * 100 if base_rate * qty else 0.0
-
-    # Recalculate item amount with new rate
-    item.amount = item.rate * qty
+    item.discount_percentage = (total_discount / total_line_value * 100) if total_line_value else 0.0
 
 
 def _collect_min_max_rule_items(doc):
@@ -227,13 +213,14 @@ def _collect_min_max_rule_items(doc):
     # Cache pricing rule documents to avoid redundant database queries
     pricing_rules_cache = {}
 
-    for item in doc.items:
+    items = doc.get("items") or []
+    for item in items:
         # Skip free items, items with zero/negative quantity, or items without pricing rules
-        if item.is_free_item or flt(item.qty) <= 0 or not item.pricing_rules:
+        if item.get("is_free_item") or flt(item.get("qty")) <= 0 or not item.get("pricing_rules"):
             continue
 
         # Get all pricing rules applied to this item
-        for pr_name in get_applied_pricing_rules(item.pricing_rules):
+        for pr_name in get_applied_pricing_rules(item.get("pricing_rules")):
             # Fetch and cache pricing rule if not already cached
             if pr_name not in pricing_rules_cache:
                 pr = frappe.get_cached_doc("Pricing Rule", pr_name)

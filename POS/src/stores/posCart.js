@@ -1493,21 +1493,110 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			currency: posProfile.value.currency,
 		}
 
-		// Validate and auto-remove invalid offers (if any are applied)
-		if (appliedOffers.value.length > 0) {
-			await reapplyOffer(currentProfile, signal)
+		// Consolidate offer re-validation and auto-application into a single sequential operation.
+		// This ensures Min/Max rules and other cart-wide discounts are updated correctly
+		// when ANY cart change occurs (items, quantities, prices).
+		try {
+			// 1. Identify invalid offers to remove (client-side check)
+			const invalidOffers = []
+			for (const entry of appliedOffers.value) {
+				if (entry.offer) {
+					const { eligible } = offersStore.checkOfferEligibility(entry.offer)
+					if (!eligible) invalidOffers.push(entry)
+				}
+			}
+
+			// 2. Identify new eligible offers to apply (client-side check)
+			const allEligibleOffers = offersStore.allEligibleOffers
+			const currentAppliedCodes = new Set(appliedOffers.value.map(o => o.code))
+			const newOffers = allEligibleOffers.filter(offer => !currentAppliedCodes.has(offer.name))
+
+			// 3. Determine if we need to call the server
+			// We MUST hit the server if:
+			// - We have applied offers (calculations might change even if codes don't)
+			// - We have new auto-offers to apply
+			// - We have invalid offers to remove
+			const validExistingCodes = appliedOffers.value
+				.filter(o => !invalidOffers.find(inv => inv.code === o.code))
+				.map(o => o.code)
+			
+			const newOfferCodes = newOffers.map(o => o.name)
+			const combinedCodes = [...new Set([...validExistingCodes, ...newOfferCodes])]
+
+			if (combinedCodes.length > 0 || invalidOffers.length > 0) {
+				const invoiceData = buildOfferEvaluationPayload(currentProfile)
+				const response = await applyOffersResource.submit({
+					invoice_data: invoiceData,
+					selected_offers: combinedCodes,
+				})
+
+				// Check for cancellation or stale operation
+				if (signal?.aborted || (generation > 0 && generation < cartGeneration)) return
+
+				const { items: responseItems, freeItems, appliedRules } = parseOfferResponse(response)
+
+				// 4. Update cart items with new discounts
+				suppressOfferReapply.value = true
+				applyDiscountsFromServer(responseItems)
+				processFreeItems(freeItems)
+				
+				// 5. Update appliedOffers list based on server confirmation
+				const actuallyApplied = new Set(appliedRules)
+				const nextAppliedOffers = []
+				const newlyAddedNames = []
+				
+				// Handle existing ones
+				for (const entry of appliedOffers.value) {
+					if (!invalidOffers.find(inv => inv.code === entry.code) && actuallyApplied.has(entry.code)) {
+						nextAppliedOffers.push(entry)
+					}
+				}
+				
+				// Handle new ones
+				for (const offer of newOffers) {
+					if (actuallyApplied.has(offer.name)) {
+						nextAppliedOffers.push({
+							name: offer.title || offer.name,
+							code: offer.name,
+							offer,
+							source: "auto",
+							applied: true,
+							rules: [offer.name],
+							min_qty: offer.min_qty,
+							max_qty: offer.max_qty,
+							min_amt: offer.min_amt,
+							max_amt: offer.max_amt,
+						})
+						newlyAddedNames.push(offer.title || offer.name)
+					}
+				}
+				
+				appliedOffers.value = nextAppliedOffers
+
+				// 6. UI Feedback
+				if (invalidOffers.length > 0) {
+					const names = invalidOffers.map(o => o.name).join(', ')
+					showWarning(__('Offer removed: {0}. Cart no longer meets requirements.', [names]))
+				}
+				
+				if (newlyAddedNames.length > 0) {
+					if (newlyAddedNames.length === 1) {
+						showSuccess(__('Offer applied: {0}', [newlyAddedNames[0]]))
+					} else {
+						showSuccess(__('Offers applied: {0}', [newlyAddedNames.join(', ')]))
+					}
+				}
+			} else if (invoiceItems.value.length === 0 && appliedOffers.value.length > 0) {
+				// Cart cleared, reset offers
+				appliedOffers.value = []
+				processFreeItems([])
+				rebuildIncrementalCache()
+			}
+		} catch (error) {
+			if (signal?.aborted) return
+			console.error("Error in offer synchronization:", error)
+			offerProcessingState.value.error = error.message
 		}
-
-		// Check cancellation before auto-apply
-		if (signal?.aborted) return
-
-		// Check again if stale after reapply
-		if (generation > 0 && generation < cartGeneration) {
-			return
-		}
-
-		// Auto-apply eligible offers (always check for new eligible offers)
-		await autoApplyEligibleOffers(currentProfile, signal)
 
 		// Update last processed hash on success
 		offerProcessingState.value.lastCartHash = generateCartHash()

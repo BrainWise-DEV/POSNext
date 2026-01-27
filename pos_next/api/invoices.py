@@ -240,7 +240,7 @@ def _validate_stock_on_invoice(invoice_doc):
     items_to_check = [d.as_dict() for d in invoice_doc.items if d.get("is_stock_item")]
 
     # Include packed items if present
-    if hasattr(invoice_doc, "packed_items"):
+    if getattr(invoice_doc, "packed_items", None):
         items_to_check.extend([d.as_dict() for d in invoice_doc.packed_items])
 
     # Check for stock errors
@@ -2272,7 +2272,7 @@ def apply_offers(invoice_data, selected_offers=None):
                 # Include both promotional scheme rules and standalone pricing rules
                 rule_map[record.name] = record
 
-        if selected_offer_names:
+        if selected_offers is not None:
             # Restrict available rules to the ones explicitly selected from the UI.
             rule_map = {
                 name: details
@@ -2401,6 +2401,30 @@ def apply_offers(invoice_data, selected_offers=None):
                     rule_name
                 ].promotional_scheme
                 free_items.append(free_item_doc)
+
+        # ========================================================================
+        # 2. APPLY MIN/MAX PRICING RULES (BULK EVALUATION)
+        # ========================================================================
+        # These rules require evaluating all items together to determine which
+        # items qualify based on price ranking. They were skipped by the standard
+        # engine above and now we evaluate them across the entire cart.
+        # ========================================================================
+        from pos_next.overrides.pricing_rule import apply_min_max_price_discounts
+
+        # Create a mock document for the bulk evaluator
+        # It needs 'items' (list of dicts) and price list info
+        mock_doc = frappe._dict({
+            "doctype": invoice.get("doctype") or "Sales Invoice",
+            "items": prepared_items,
+            "selling_price_list": pricing_args.price_list,
+            "company": pricing_args.company,
+            "customer": pricing_args.customer
+        })
+
+        # Determine allowed rules for Min/Max evaluator
+        allowed_rules = set(rule_map.keys()) if selected_offers is not None else None
+
+        apply_min_max_price_discounts(mock_doc, allowed_rules=allowed_rules)
 
         return {
             "items": [dict(item) for item in prepared_items],
