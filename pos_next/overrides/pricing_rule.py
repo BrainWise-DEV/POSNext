@@ -40,8 +40,12 @@ def apply_price_discount_rule(pricing_rule, item_details, args):
     # Defer Min/Max discount application - these require evaluating all items
     # together to determine which items qualify based on price ranking
     if apply_discount_on_price in ["Min", "Max"]:
-        item_details.pricing_rule_for = pricing_rule.rate_or_discount
-        return 
+        # Set pricing_rule_for for reference, but don't apply discount here
+        # The discount will be applied later in apply_min_max_price_discounts
+        if hasattr(item_details, 'pricing_rule_for'):
+            item_details.pricing_rule_for = pricing_rule.get("rate_or_discount")
+        # Return None to skip standard pricing rule application
+        return None
     
     # For standard pricing rules, use the original implementation
     return _original_apply_price_discount_rule(pricing_rule, item_details, args)
@@ -126,7 +130,7 @@ def apply_min_max_price_discounts(doc, method=None):
 
                 # Calculate how much of this item's quantity qualifies for discount
                 # This ensures we don't exceed the total discount quantity limit
-                discount_qty =  min(flt(item.qty), remaining_qty)
+                discount_qty = min(flt(item.qty), remaining_qty)
 
                 # Apply discount to the eligible quantity
                 _apply_discount(pr, item, discount_qty)
