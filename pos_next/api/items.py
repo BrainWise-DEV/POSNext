@@ -40,13 +40,16 @@ def get_stock_availability(item_code, warehouse):
 		# Include all child warehouses when a group warehouse is set
 		warehouses = frappe.db.get_descendants("Warehouse", warehouse) or []
 
-	rows = frappe.get_all(
-		"Bin",
-		fields=["sum(actual_qty) as actual_qty"],
-		filters={"item_code": item_code, "warehouse": ["in", warehouses]},
+	Bin = DocType("Bin")
+	result = (
+		frappe.qb.from_(Bin)
+		.select(fn.Sum(Bin.actual_qty).as_("actual_qty"))
+		.where(Bin.item_code == item_code)
+		.where(Bin.warehouse.isin(warehouses))
+		.run(as_dict=True)
 	)
 
-	return flt(rows[0].actual_qty) if rows else 0.0
+	return flt(result[0].actual_qty) if result and result[0].actual_qty else 0.0
 
 
 def get_item_detail(item, doc=None, warehouse=None, price_list=None, company=None):
