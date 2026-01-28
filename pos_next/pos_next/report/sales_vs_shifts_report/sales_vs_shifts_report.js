@@ -2,6 +2,517 @@
 // For license information, please see license.txt
 
 frappe.query_reports["Sales vs Shifts Report"] = {
+	// =========================================================================
+	// REPORT CALCULATION GUIDE
+	// =========================================================================
+	// This report analyzes POS shift performance by linking closing shifts to
+	// their associated sales invoices. It calculates metrics to evaluate
+	// cashier efficiency, sales productivity, and shift profitability.
+	//
+	// -------------------------------------------------------------------------
+	// CORE METRICS
+	// -------------------------------------------------------------------------
+	//
+	// GROSS SALES
+	//   Formula: SUM of grand_total from all non-return invoices in the shift
+	//   Source: Sales Invoice.grand_total WHERE is_return = 0
+	//
+	// RETURNS
+	//   Formula: SUM of ABS(grand_total) from all return invoices in the shift
+	//   Source: ABS(Sales Invoice.grand_total) WHERE is_return = 1
+	//
+	// NET SALES
+	//   Formula: Gross Sales - Returns
+	//   Example: If Gross = 10,000 and Returns = 500, then Net = 9,500
+	//
+	// DISCOUNTS
+	//   Formula: SUM of discount_amount from all non-return invoices
+	//   Source: Sales Invoice.discount_amount WHERE is_return = 0
+	//
+	// -------------------------------------------------------------------------
+	// VOLUME METRICS
+	// -------------------------------------------------------------------------
+	//
+	// INVOICES
+	//   Formula: COUNT of non-return invoices
+	//   Source: COUNT(Sales Invoice) WHERE is_return = 0
+	//
+	// ITEMS (Qty Sold)
+	//   Formula: SUM of total_qty from all non-return invoices
+	//   Source: Sales Invoice.total_qty WHERE is_return = 0
+	//
+	// CUSTOMERS
+	//   Formula: COUNT DISTINCT customers from non-return invoices
+	//   Source: COUNT(DISTINCT Sales Invoice.customer) WHERE is_return = 0
+	//
+	// -------------------------------------------------------------------------
+	// PAYMENT BREAKDOWN
+	// -------------------------------------------------------------------------
+	//
+	// CASH
+	//   Formula: SUM of payments where mode_of_payment contains "cash"
+	//   Source: Sales Invoice Payment.amount WHERE mode LIKE '%cash%'
+	//
+	// NON-CASH
+	//   Formula: SUM of all other payment methods (card, mobile, etc.)
+	//   Source: Sales Invoice Payment.amount WHERE mode NOT LIKE '%cash%'
+	//
+	// -------------------------------------------------------------------------
+	// PERFORMANCE METRICS
+	// -------------------------------------------------------------------------
+	//
+	// DURATION (Hours)
+	//   Formula: (period_end_date - period_start_date) in hours
+	//   Example: Start 09:00, End 17:00 = 8 hours
+	//
+	// AVG TICKET
+	//   Formula: Gross Sales / Number of Invoices
+	//   Example: 10,000 / 50 invoices = 200 average per transaction
+	//
+	// SALES/HR (Sales per Hour)
+	//   Formula: Gross Sales / Duration Hours
+	//   Example: 10,000 / 8 hours = 1,250 per hour
+	//
+	// INV/HR (Invoices per Hour)
+	//   Formula: Number of Invoices / Duration Hours
+	//   Example: 50 invoices / 8 hours = 6.25 invoices per hour
+	//
+	// PEAK HOUR
+	//   Formula: Hour with highest total sales during the shift
+	//   Method: GROUP BY HOUR(posting_time), ORDER BY total DESC, LIMIT 1
+	//   Example: "14:00" means 2pm had the most sales
+	//
+	// -------------------------------------------------------------------------
+	// RATE CALCULATIONS
+	// -------------------------------------------------------------------------
+	//
+	// RETURN RATE (Return %)
+	//   Formula: (Returns / Gross Sales) × 100
+	//   Example: 500 returns / 10,000 gross = 5%
+	//   Warning: Highlighted red if > 10%
+	//
+	// DISCOUNT RATE (Disc %)
+	//   Formula: (Discounts / Gross Sales) × 100
+	//   Example: 800 discounts / 10,000 gross = 8%
+	//
+	// -------------------------------------------------------------------------
+	// EFFICIENCY SCORE (0-100)
+	// -------------------------------------------------------------------------
+	//
+	// Base Score: 70 points
+	//
+	// Factor 1: RETURN RATE ADJUSTMENT (-20 to +5 points)
+	//   - If return_rate > 15%: Penalty = min(20, (rate - 15) × 2)
+	//   - If return_rate ≤ 5%: Bonus = +5 points
+	//   Example: 18% return rate → penalty = min(20, 6) = -6 points
+	//
+	// Factor 2: DISCOUNT RATE ADJUSTMENT (-10 to +5 points)
+	//   - If discount_rate > 20%: Penalty = min(10, (rate - 20))
+	//   - If discount_rate ≤ 5%: Bonus = +5 points
+	//   Example: 25% discount rate → penalty = min(10, 5) = -5 points
+	//
+	// Factor 3: TICKET SIZE vs AVERAGE (-5 to +10 points)
+	//   Dataset Average Ticket = Total Sales / Total Invoices (all shifts)
+	//   Ratio = Shift Avg Ticket / Dataset Avg Ticket
+	//   - If ratio ≥ 1.5: Bonus = +10 points (50%+ above average)
+	//   - If ratio ≥ 1.2: Bonus = +5 points (20%+ above average)
+	//   - If ratio < 0.7: Penalty = -5 points (30%+ below average)
+	//
+	// Factor 4: PRODUCTIVITY vs AVERAGE (-5 to +10 points)
+	//   Dataset Avg Inv/Hr = Total Invoices / Total Hours (all shifts)
+	//   Ratio = Shift Inv/Hr / Dataset Avg Inv/Hr
+	//   - If ratio ≥ 1.5: Bonus = +10 points
+	//   - If ratio ≥ 1.2: Bonus = +5 points
+	//   - If ratio < 0.7: Penalty = -5 points
+	//
+	// EFFICIENCY RANGE: Capped between 0 and 100
+	//
+	// Example Calculation:
+	//   Base:          70
+	//   Return 3%:     +5 (≤5%, bonus)
+	//   Discount 8%:    0 (between 5-20%, no change)
+	//   Ticket 1.3×:   +5 (≥1.2× average)
+	//   Inv/Hr 0.6×:   -5 (<0.7× average)
+	//   ─────────────────
+	//   Final:         75
+	//
+	// -------------------------------------------------------------------------
+	// RATING LABELS
+	// -------------------------------------------------------------------------
+	//
+	//   Efficiency ≥ 90  →  "Excellent"  (Green)
+	//   Efficiency ≥ 75  →  "Good"       (Blue)
+	//   Efficiency ≥ 60  →  "Average"    (Yellow)
+	//   Efficiency < 60  →  "Needs Improvement" (Red)
+	//   No sales (0)     →  (blank)
+	//
+	// -------------------------------------------------------------------------
+	// INVOICE MATCHING LOGIC
+	// -------------------------------------------------------------------------
+	//
+	// Invoices are matched to a shift using OR logic:
+	//   1. posa_pos_opening_shift matches the shift's opening reference
+	//   OR
+	//   2. ALL of these match:
+	//      - pos_profile matches
+	//      - owner (cashier) matches
+	//      - posting_date is within shift period
+	//
+	// This ensures invoices are captured even if the opening shift link is
+	// missing, as long as the profile, cashier, and date align.
+	//
+	// =========================================================================
+
+	onload: function(report) {
+		// Add "Guide" button with icon
+		report.page.add_inner_button(__("Report Guide"), function() {
+			this.show_report_guide();
+		}.bind(this));
+	},
+
+	show_report_guide: function() {
+		const dialog = new frappe.ui.Dialog({
+			title: __("Sales vs Shifts Report Guide"),
+			size: "extra-large",
+			fields: [
+				{
+					fieldtype: "HTML",
+					fieldname: "guide_content"
+				}
+			]
+		});
+
+		dialog.fields_dict.guide_content.$wrapper.html(this.get_guide_html());
+		dialog.show();
+
+		// Add tab functionality after dialog is shown
+		setTimeout(() => {
+			const tabs = dialog.$wrapper.find(".guide-tab");
+			const contents = dialog.$wrapper.find(".guide-tab-content");
+
+			tabs.on("click", function() {
+				const target = $(this).data("tab");
+				tabs.removeClass("active");
+				$(this).addClass("active");
+				contents.removeClass("active");
+				dialog.$wrapper.find(`[data-content="${target}"]`).addClass("active");
+			});
+		}, 100);
+	},
+
+	get_guide_html: function() {
+		return `
+			<style>
+				.guide-container { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+				.guide-header { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); color: white; padding: 24px; border-radius: 12px; margin-bottom: 20px; }
+				.guide-header h2 { margin: 0 0 8px 0; font-size: 22px; font-weight: 600; }
+				.guide-header p { margin: 0; opacity: 0.85; font-size: 14px; }
+				.guide-tabs { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+				.guide-tab { padding: 10px 20px; background: #f1f3f5; border: none; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 500; color: #495057; transition: all 0.2s; }
+				.guide-tab:hover { background: #e9ecef; }
+				.guide-tab.active { background: #4263eb; color: white; }
+				.guide-tab-content { display: none; }
+				.guide-tab-content.active { display: block; }
+				.metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+				.metric-card { background: #fff; border: 1px solid #e9ecef; border-radius: 10px; padding: 16px; transition: box-shadow 0.2s; }
+				.metric-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+				.metric-card-header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+				.metric-icon { width: 36px; height: 36px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+				.metric-card-title { font-weight: 600; font-size: 14px; color: #212529; }
+				.metric-card-subtitle { font-size: 11px; color: #868e96; }
+				.metric-list { margin: 0; padding: 0; list-style: none; }
+				.metric-list li { padding: 8px 0; border-bottom: 1px solid #f1f3f5; font-size: 13px; display: flex; justify-content: space-between; }
+				.metric-list li:last-child { border-bottom: none; }
+				.metric-name { color: #495057; }
+				.metric-formula { color: #868e96; font-size: 11px; font-family: monospace; background: #f8f9fa; padding: 2px 6px; border-radius: 4px; }
+				.efficiency-breakdown { background: linear-gradient(135deg, #f8f9fa 0%, #fff 100%); border-radius: 12px; padding: 20px; }
+				.efficiency-base { text-align: center; padding: 20px; background: #4263eb; color: white; border-radius: 10px; margin-bottom: 16px; }
+				.efficiency-base-number { font-size: 48px; font-weight: 700; }
+				.efficiency-base-label { font-size: 13px; opacity: 0.9; }
+				.factor-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+				.factor-card { background: white; border-radius: 8px; padding: 14px; border: 1px solid #e9ecef; }
+				.factor-title { font-weight: 600; font-size: 12px; color: #495057; margin-bottom: 8px; }
+				.factor-row { display: flex; justify-content: space-between; font-size: 12px; padding: 4px 0; }
+				.factor-condition { color: #666; }
+				.factor-points { font-weight: 600; }
+				.factor-points.positive { color: #2f9e44; }
+				.factor-points.negative { color: #e03131; }
+				.rating-scale { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 16px; }
+				.rating-badge { padding: 12px 20px; border-radius: 10px; color: white; font-weight: 600; font-size: 13px; text-align: center; min-width: 140px; }
+				.rating-badge span { display: block; font-size: 11px; font-weight: 400; opacity: 0.9; margin-top: 4px; }
+				.chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+				.chart-card { background: #f8f9fa; border-radius: 10px; padding: 16px; border-left: 4px solid #4263eb; }
+				.chart-card-title { font-weight: 600; font-size: 13px; color: #212529; margin-bottom: 6px; }
+				.chart-card-desc { font-size: 12px; color: #666; line-height: 1.5; }
+				.tip-list { margin: 0; padding: 0; list-style: none; }
+				.tip-item { display: flex; gap: 12px; padding: 14px; background: #fff; border-radius: 10px; margin-bottom: 10px; border: 1px solid #e9ecef; }
+				.tip-icon { width: 32px; height: 32px; background: #fff3bf; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+				.tip-content { flex: 1; }
+				.tip-title { font-weight: 600; font-size: 13px; color: #212529; margin-bottom: 4px; }
+				.tip-desc { font-size: 12px; color: #666; line-height: 1.5; }
+			</style>
+
+			<div class="guide-container">
+				<div class="guide-header">
+					<h2>Understanding Your Shift Performance</h2>
+					<p>Analyze cashier productivity, identify top performers, and optimize your POS operations</p>
+				</div>
+
+				<div class="guide-tabs">
+					<button class="guide-tab active" data-tab="metrics">Metrics</button>
+					<button class="guide-tab" data-tab="efficiency">Efficiency Score</button>
+					<button class="guide-tab" data-tab="charts">Charts</button>
+					<button class="guide-tab" data-tab="tips">Analysis Tips</button>
+				</div>
+
+				<!-- METRICS TAB -->
+				<div class="guide-tab-content active" data-content="metrics">
+					<div class="metric-grid">
+						<div class="metric-card">
+							<div class="metric-card-header">
+								<div class="metric-icon" style="background: #d3f9d8; color: #2f9e44;">$</div>
+								<div>
+									<div class="metric-card-title">Sales Metrics</div>
+									<div class="metric-card-subtitle">Revenue tracking</div>
+								</div>
+							</div>
+							<ul class="metric-list">
+								<li><span class="metric-name">Gross Sales</span><span class="metric-formula">Total before deductions</span></li>
+								<li><span class="metric-name">Returns</span><span class="metric-formula">Refunded amount</span></li>
+								<li><span class="metric-name">Net Sales</span><span class="metric-formula">Gross - Returns</span></li>
+								<li><span class="metric-name">Discounts</span><span class="metric-formula">Total discounts given</span></li>
+							</ul>
+						</div>
+
+						<div class="metric-card">
+							<div class="metric-card-header">
+								<div class="metric-icon" style="background: #d0ebff; color: #1971c2;">#</div>
+								<div>
+									<div class="metric-card-title">Volume Metrics</div>
+									<div class="metric-card-subtitle">Transaction counts</div>
+								</div>
+							</div>
+							<ul class="metric-list">
+								<li><span class="metric-name">Invoices</span><span class="metric-formula">Transaction count</span></li>
+								<li><span class="metric-name">Items</span><span class="metric-formula">Qty sold</span></li>
+								<li><span class="metric-name">Customers</span><span class="metric-formula">Unique customers</span></li>
+							</ul>
+						</div>
+
+						<div class="metric-card">
+							<div class="metric-card-header">
+								<div class="metric-icon" style="background: #e5dbff; color: #7048e8;">⚡</div>
+								<div>
+									<div class="metric-card-title">Performance</div>
+									<div class="metric-card-subtitle">Productivity measures</div>
+								</div>
+							</div>
+							<ul class="metric-list">
+								<li><span class="metric-name">Avg Ticket</span><span class="metric-formula">Gross ÷ Invoices</span></li>
+								<li><span class="metric-name">Sales/Hr</span><span class="metric-formula">Gross ÷ Hours</span></li>
+								<li><span class="metric-name">Inv/Hr</span><span class="metric-formula">Invoices ÷ Hours</span></li>
+								<li><span class="metric-name">Peak Hour</span><span class="metric-formula">Busiest hour</span></li>
+							</ul>
+						</div>
+
+						<div class="metric-card">
+							<div class="metric-card-header">
+								<div class="metric-icon" style="background: #ffe3e3; color: #e03131;">%</div>
+								<div>
+									<div class="metric-card-title">Rate Analysis</div>
+									<div class="metric-card-subtitle">Percentage indicators</div>
+								</div>
+							</div>
+							<ul class="metric-list">
+								<li><span class="metric-name">Return %</span><span class="metric-formula">Returns ÷ Gross × 100</span></li>
+								<li><span class="metric-name">Disc %</span><span class="metric-formula">Discounts ÷ Gross × 100</span></li>
+							</ul>
+						</div>
+
+						<div class="metric-card">
+							<div class="metric-card-header">
+								<div class="metric-icon" style="background: #fff3bf; color: #f08c00;">💳</div>
+								<div>
+									<div class="metric-card-title">Payment Split</div>
+									<div class="metric-card-subtitle">Payment methods</div>
+								</div>
+							</div>
+							<ul class="metric-list">
+								<li><span class="metric-name">Cash</span><span class="metric-formula">Cash payments total</span></li>
+								<li><span class="metric-name">Non-Cash</span><span class="metric-formula">Card, mobile, etc.</span></li>
+							</ul>
+						</div>
+
+						<div class="metric-card">
+							<div class="metric-card-header">
+								<div class="metric-icon" style="background: #c3fae8; color: #0ca678;">⏱</div>
+								<div>
+									<div class="metric-card-title">Shift Details</div>
+									<div class="metric-card-subtitle">Time & identity</div>
+								</div>
+							</div>
+							<ul class="metric-list">
+								<li><span class="metric-name">Duration</span><span class="metric-formula">End - Start (hours)</span></li>
+								<li><span class="metric-name">Cashier</span><span class="metric-formula">Shift operator</span></li>
+								<li><span class="metric-name">POS Profile</span><span class="metric-formula">Terminal/Location</span></li>
+							</ul>
+						</div>
+					</div>
+				</div>
+
+				<!-- EFFICIENCY TAB -->
+				<div class="guide-tab-content" data-content="efficiency">
+					<div class="efficiency-breakdown">
+						<div class="efficiency-base">
+							<div class="efficiency-base-number">70</div>
+							<div class="efficiency-base-label">Base Score (Starting Point)</div>
+						</div>
+
+						<div class="factor-grid">
+							<div class="factor-card">
+								<div class="factor-title">📉 Return Rate Impact</div>
+								<div class="factor-row">
+									<span class="factor-condition">≤ 5% returns</span>
+									<span class="factor-points positive">+5 pts</span>
+								</div>
+								<div class="factor-row">
+									<span class="factor-condition">> 15% returns</span>
+									<span class="factor-points negative">up to -20 pts</span>
+								</div>
+							</div>
+
+							<div class="factor-card">
+								<div class="factor-title">🏷️ Discount Rate Impact</div>
+								<div class="factor-row">
+									<span class="factor-condition">≤ 5% discounts</span>
+									<span class="factor-points positive">+5 pts</span>
+								</div>
+								<div class="factor-row">
+									<span class="factor-condition">> 20% discounts</span>
+									<span class="factor-points negative">up to -10 pts</span>
+								</div>
+							</div>
+
+							<div class="factor-card">
+								<div class="factor-title">🎫 Ticket Size vs Average</div>
+								<div class="factor-row">
+									<span class="factor-condition">≥ 50% above avg</span>
+									<span class="factor-points positive">+10 pts</span>
+								</div>
+								<div class="factor-row">
+									<span class="factor-condition">≥ 20% above avg</span>
+									<span class="factor-points positive">+5 pts</span>
+								</div>
+								<div class="factor-row">
+									<span class="factor-condition">< 30% below avg</span>
+									<span class="factor-points negative">-5 pts</span>
+								</div>
+							</div>
+
+							<div class="factor-card">
+								<div class="factor-title">⚡ Transactions/Hr vs Average</div>
+								<div class="factor-row">
+									<span class="factor-condition">≥ 50% above avg</span>
+									<span class="factor-points positive">+10 pts</span>
+								</div>
+								<div class="factor-row">
+									<span class="factor-condition">≥ 20% above avg</span>
+									<span class="factor-points positive">+5 pts</span>
+								</div>
+								<div class="factor-row">
+									<span class="factor-condition">< 30% below avg</span>
+									<span class="factor-points negative">-5 pts</span>
+								</div>
+							</div>
+						</div>
+
+						<div class="rating-scale">
+							<div class="rating-badge" style="background: linear-gradient(135deg, #2f9e44, #40c057);">
+								Excellent<span>90 - 100</span>
+							</div>
+							<div class="rating-badge" style="background: linear-gradient(135deg, #1971c2, #339af0);">
+								Good<span>75 - 89</span>
+							</div>
+							<div class="rating-badge" style="background: linear-gradient(135deg, #f08c00, #fab005);">
+								Average<span>60 - 74</span>
+							</div>
+							<div class="rating-badge" style="background: linear-gradient(135deg, #e03131, #ff6b6b);">
+								Needs Work<span>Below 60</span>
+							</div>
+						</div>
+					</div>
+				</div>
+
+				<!-- CHARTS TAB -->
+				<div class="guide-tab-content" data-content="charts">
+					<div class="chart-grid">
+						<div class="chart-card">
+							<div class="chart-card-title">📊 Shift Performance</div>
+							<div class="chart-card-desc">Compare Net Sales and Efficiency across your most recent shifts. Bars show revenue, line shows efficiency trend.</div>
+						</div>
+						<div class="chart-card">
+							<div class="chart-card-title">👥 Cashier Comparison</div>
+							<div class="chart-card-desc">Rank your team by total sales and average efficiency. Identify top performers and coaching opportunities.</div>
+						</div>
+						<div class="chart-card">
+							<div class="chart-card-title">🕐 Hourly Breakdown</div>
+							<div class="chart-card-desc">Discover which hours generate the most sales. Perfect for staffing optimization and break scheduling.</div>
+						</div>
+						<div class="chart-card">
+							<div class="chart-card-title">💳 Payment Methods</div>
+							<div class="chart-card-desc">View the distribution of payment types. Track cash vs card trends for cash handling and reconciliation.</div>
+						</div>
+						<div class="chart-card">
+							<div class="chart-card-title">📈 Daily Trend</div>
+							<div class="chart-card-desc">Track daily sales with a 3-day moving average. Spot patterns, seasonality, and growth trends.</div>
+						</div>
+					</div>
+				</div>
+
+				<!-- TIPS TAB -->
+				<div class="guide-tab-content" data-content="tips">
+					<ul class="tip-list">
+						<li class="tip-item">
+							<div class="tip-icon">🔴</div>
+							<div class="tip-content">
+								<div class="tip-title">High Return Rate (>10%)</div>
+								<div class="tip-desc">May indicate product quality issues, incorrect item selection at POS, or need for staff training on product knowledge.</div>
+							</div>
+						</li>
+						<li class="tip-item">
+							<div class="tip-icon">🐢</div>
+							<div class="tip-content">
+								<div class="tip-title">Low Transactions per Hour</div>
+								<div class="tip-desc">During peak hours, this suggests staffing shortages or process bottlenecks. Review queue management and checkout procedures.</div>
+							</div>
+						</li>
+						<li class="tip-item">
+							<div class="tip-icon">📊</div>
+							<div class="tip-content">
+								<div class="tip-title">Compare Avg Ticket by Cashier</div>
+								<div class="tip-desc">Higher tickets may indicate better upselling skills. Use top performers to train others on suggestive selling techniques.</div>
+							</div>
+						</li>
+						<li class="tip-item">
+							<div class="tip-icon">⏰</div>
+							<div class="tip-content">
+								<div class="tip-title">Use Peak Hour Data</div>
+								<div class="tip-desc">Schedule your best performers during peak hours. Align breaks and shift changes with slower periods.</div>
+							</div>
+						</li>
+						<li class="tip-item">
+							<div class="tip-icon">🏷️</div>
+							<div class="tip-content">
+								<div class="tip-title">Monitor Discount Patterns</div>
+								<div class="tip-desc">Consistently high discounts from specific cashiers may indicate unauthorized discounting or need for price override controls.</div>
+							</div>
+						</li>
+					</ul>
+				</div>
+			</div>
+		`;
+	},
+
 	filters: [
 		{
 			fieldname: "from_date",
@@ -104,6 +615,321 @@ frappe.query_reports["Sales vs Shifts Report"] = {
 		if (chart_type && chart_type !== "Shift Performance") {
 			this.render_custom_chart(chart_type);
 		}
+
+		// Enhance the summary section
+		this.enhance_summary();
+	},
+
+	enhance_summary: function() {
+		// Wait for summary to render
+		setTimeout(() => {
+			const $summary = $(".report-summary");
+			if (!$summary.length) return;
+
+			// Get the summary data
+			const summaryData = frappe.query_report.report_summary || [];
+			if (!summaryData.length) return;
+
+			// Build enhanced summary HTML
+			const enhancedHtml = this.build_enhanced_summary(summaryData);
+
+			// Replace the default summary
+			$summary.html(enhancedHtml);
+		}, 100);
+	},
+
+	build_enhanced_summary: function(summaryData) {
+		// Parse summary data into categories
+		const getValue = (label) => {
+			const item = summaryData.find(s => s.label === label);
+			return item ? item.value : 0;
+		};
+
+		const formatCurrency = (val) => {
+			return frappe.format(val, { fieldtype: "Currency" });
+		};
+
+		const formatInt = (val) => {
+			return parseInt(val || 0).toLocaleString();
+		};
+
+		const formatPercent = (val) => {
+			return (val || 0).toFixed(1) + "%";
+		};
+
+		// Extract values
+		const shifts = getValue("Shifts");
+		const grossSales = getValue("Gross Sales");
+		const netSales = getValue("Net Sales");
+		const invoices = getValue("Invoices");
+		const itemsSold = getValue("Items Sold");
+		const customers = getValue("Customers");
+		const avgTicket = getValue("Avg Ticket");
+		const cash = getValue("Cash");
+		const nonCash = getValue("Non-Cash");
+		const returns = getValue("Returns");
+		const discounts = getValue("Discounts");
+		const avgEfficiency = getValue("Avg Efficiency");
+		const highPerformers = getValue("High Performers");
+
+		// Calculate derived values
+		const returnRate = grossSales > 0 ? (returns / grossSales * 100) : 0;
+		const discountRate = grossSales > 0 ? (discounts / grossSales * 100) : 0;
+		const cashPercent = (cash + nonCash) > 0 ? (cash / (cash + nonCash) * 100) : 0;
+
+		// Efficiency color
+		let effColor = "#ef4444";
+		if (avgEfficiency >= 80) effColor = "#10b981";
+		else if (avgEfficiency >= 65) effColor = "#3b82f6";
+		else if (avgEfficiency >= 50) effColor = "#f59e0b";
+
+		return `
+			<style>
+				.enhanced-summary {
+					padding: 20px 0;
+					font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+				}
+				.summary-grid {
+					display: grid;
+					grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+					gap: 16px;
+				}
+				.summary-card {
+					background: #fff;
+					border: 1px solid #e5e7eb;
+					border-radius: 12px;
+					padding: 16px 20px;
+					box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+				}
+				.summary-card-header {
+					display: flex;
+					align-items: center;
+					gap: 10px;
+					margin-bottom: 14px;
+					padding-bottom: 12px;
+					border-bottom: 1px solid #f3f4f6;
+				}
+				.summary-card-icon {
+					width: 36px;
+					height: 36px;
+					border-radius: 10px;
+					display: flex;
+					align-items: center;
+					justify-content: center;
+					font-size: 18px;
+				}
+				.summary-card-title {
+					font-size: 13px;
+					font-weight: 600;
+					color: #374151;
+				}
+				.summary-card-subtitle {
+					font-size: 11px;
+					color: #9ca3af;
+				}
+				.summary-stats {
+					display: grid;
+					grid-template-columns: 1fr 1fr;
+					gap: 12px;
+				}
+				.summary-stat {
+					text-align: center;
+					padding: 8px;
+					background: #f9fafb;
+					border-radius: 8px;
+				}
+				.summary-stat.full-width {
+					grid-column: span 2;
+				}
+				.summary-stat-value {
+					font-size: 20px;
+					font-weight: 700;
+					color: #111827;
+					line-height: 1.2;
+				}
+				.summary-stat-value.positive { color: #10b981; }
+				.summary-stat-value.negative { color: #ef4444; }
+				.summary-stat-value.warning { color: #f59e0b; }
+				.summary-stat-value.info { color: #3b82f6; }
+				.summary-stat-label {
+					font-size: 10px;
+					color: #6b7280;
+					text-transform: uppercase;
+					letter-spacing: 0.5px;
+					margin-top: 2px;
+				}
+				.summary-highlight {
+					background: linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%);
+					border: 1px solid #bbf7d0;
+				}
+				.summary-highlight.warning {
+					background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+					border: 1px solid #fde68a;
+				}
+				.summary-highlight.danger {
+					background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+					border: 1px solid #fecaca;
+				}
+				.payment-bar {
+					height: 8px;
+					border-radius: 4px;
+					background: #e5e7eb;
+					overflow: hidden;
+					margin-top: 8px;
+				}
+				.payment-bar-fill {
+					height: 100%;
+					border-radius: 4px;
+					transition: width 0.3s ease;
+				}
+				.efficiency-ring {
+					position: relative;
+					width: 80px;
+					height: 80px;
+					margin: 0 auto 8px;
+				}
+				.efficiency-ring svg {
+					transform: rotate(-90deg);
+				}
+				.efficiency-ring-value {
+					position: absolute;
+					top: 50%;
+					left: 50%;
+					transform: translate(-50%, -50%);
+					font-size: 18px;
+					font-weight: 700;
+				}
+			</style>
+
+			<div class="enhanced-summary">
+				<div class="summary-grid">
+
+					<!-- Sales Overview -->
+					<div class="summary-card">
+						<div class="summary-card-header">
+							<div class="summary-card-icon" style="background: #dcfce7; color: #16a34a;">💰</div>
+							<div>
+								<div class="summary-card-title">${__("Sales Overview")}</div>
+								<div class="summary-card-subtitle">${__("Revenue summary")}</div>
+							</div>
+						</div>
+						<div class="summary-stats">
+							<div class="summary-stat">
+								<div class="summary-stat-value">${formatCurrency(grossSales)}</div>
+								<div class="summary-stat-label">${__("Gross Sales")}</div>
+							</div>
+							<div class="summary-stat">
+								<div class="summary-stat-value positive">${formatCurrency(netSales)}</div>
+								<div class="summary-stat-label">${__("Net Sales")}</div>
+							</div>
+							<div class="summary-stat">
+								<div class="summary-stat-value negative">-${formatCurrency(returns)}</div>
+								<div class="summary-stat-label">${__("Returns")} (${returnRate.toFixed(1)}%)</div>
+							</div>
+							<div class="summary-stat">
+								<div class="summary-stat-value warning">-${formatCurrency(discounts)}</div>
+								<div class="summary-stat-label">${__("Discounts")} (${discountRate.toFixed(1)}%)</div>
+							</div>
+						</div>
+					</div>
+
+					<!-- Volume Metrics -->
+					<div class="summary-card">
+						<div class="summary-card-header">
+							<div class="summary-card-icon" style="background: #dbeafe; color: #2563eb;">📊</div>
+							<div>
+								<div class="summary-card-title">${__("Volume Metrics")}</div>
+								<div class="summary-card-subtitle">${__("Transaction counts")}</div>
+							</div>
+						</div>
+						<div class="summary-stats">
+							<div class="summary-stat">
+								<div class="summary-stat-value info">${formatInt(shifts)}</div>
+								<div class="summary-stat-label">${__("Shifts")}</div>
+							</div>
+							<div class="summary-stat">
+								<div class="summary-stat-value">${formatInt(invoices)}</div>
+								<div class="summary-stat-label">${__("Invoices")}</div>
+							</div>
+							<div class="summary-stat">
+								<div class="summary-stat-value">${formatInt(itemsSold)}</div>
+								<div class="summary-stat-label">${__("Items Sold")}</div>
+							</div>
+							<div class="summary-stat">
+								<div class="summary-stat-value">${formatInt(customers)}</div>
+								<div class="summary-stat-label">${__("Customers")}</div>
+							</div>
+						</div>
+					</div>
+
+					<!-- Payment Breakdown -->
+					<div class="summary-card">
+						<div class="summary-card-header">
+							<div class="summary-card-icon" style="background: #fef3c7; color: #d97706;">💳</div>
+							<div>
+								<div class="summary-card-title">${__("Payment Methods")}</div>
+								<div class="summary-card-subtitle">${__("Cash vs Non-Cash")}</div>
+							</div>
+						</div>
+						<div class="summary-stats">
+							<div class="summary-stat">
+								<div class="summary-stat-value" style="color: #059669;">${formatCurrency(cash)}</div>
+								<div class="summary-stat-label">${__("Cash")} (${cashPercent.toFixed(0)}%)</div>
+							</div>
+							<div class="summary-stat">
+								<div class="summary-stat-value" style="color: #7c3aed;">${formatCurrency(nonCash)}</div>
+								<div class="summary-stat-label">${__("Non-Cash")} (${(100 - cashPercent).toFixed(0)}%)</div>
+							</div>
+							<div class="summary-stat full-width">
+								<div class="payment-bar">
+									<div class="payment-bar-fill" style="width: ${cashPercent}%; background: linear-gradient(90deg, #10b981 0%, #34d399 ${cashPercent}%, #8b5cf6 ${cashPercent}%, #a78bfa 100%);"></div>
+								</div>
+								<div style="display: flex; justify-content: space-between; margin-top: 6px;">
+									<span style="font-size: 10px; color: #059669;">● ${__("Cash")}</span>
+									<span style="font-size: 10px; color: #7c3aed;">● ${__("Non-Cash")}</span>
+								</div>
+							</div>
+						</div>
+					</div>
+
+					<!-- Performance -->
+					<div class="summary-card ${avgEfficiency >= 75 ? 'summary-highlight' : avgEfficiency >= 50 ? 'summary-highlight warning' : 'summary-highlight danger'}">
+						<div class="summary-card-header">
+							<div class="summary-card-icon" style="background: ${avgEfficiency >= 75 ? '#dcfce7' : avgEfficiency >= 50 ? '#fef3c7' : '#fee2e2'}; color: ${effColor};">⚡</div>
+							<div>
+								<div class="summary-card-title">${__("Performance")}</div>
+								<div class="summary-card-subtitle">${__("Efficiency & productivity")}</div>
+							</div>
+						</div>
+						<div class="summary-stats">
+							<div class="summary-stat" style="background: transparent;">
+								<div class="efficiency-ring">
+									<svg width="80" height="80" viewBox="0 0 80 80">
+										<circle cx="40" cy="40" r="35" fill="none" stroke="#e5e7eb" stroke-width="6"/>
+										<circle cx="40" cy="40" r="35" fill="none" stroke="${effColor}" stroke-width="6"
+											stroke-dasharray="${2 * Math.PI * 35}"
+											stroke-dashoffset="${2 * Math.PI * 35 * (1 - avgEfficiency / 100)}"
+											stroke-linecap="round"/>
+									</svg>
+									<div class="efficiency-ring-value" style="color: ${effColor};">${avgEfficiency.toFixed(0)}%</div>
+								</div>
+								<div class="summary-stat-label">${__("Avg Efficiency")}</div>
+							</div>
+							<div class="summary-stat" style="background: transparent;">
+								<div class="summary-stat-value positive" style="font-size: 28px;">${formatInt(highPerformers)}</div>
+								<div class="summary-stat-label">${__("High Performers")}</div>
+								<div style="font-size: 10px; color: #6b7280; margin-top: 4px;">${__("Excellent + Good")}</div>
+							</div>
+							<div class="summary-stat full-width">
+								<div class="summary-stat-value" style="font-size: 18px;">${formatCurrency(avgTicket)}</div>
+								<div class="summary-stat-label">${__("Average Ticket Size")}</div>
+							</div>
+						</div>
+					</div>
+
+				</div>
+			</div>
+		`;
 	},
 
 	render_custom_chart: function(chart_type) {

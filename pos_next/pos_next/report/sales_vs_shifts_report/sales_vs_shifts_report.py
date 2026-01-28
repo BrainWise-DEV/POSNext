@@ -1,6 +1,82 @@
 # Copyright (c) 2026, BrainWise and contributors
 # For license information, please see license.txt
 
+"""
+Sales vs Shifts Report - Calculation Documentation
+===================================================
+
+This report analyzes POS shift performance by linking closing shifts to their
+associated sales invoices. It calculates metrics to evaluate cashier efficiency,
+sales productivity, and shift profitability.
+
+CORE METRICS
+------------
+- Gross Sales: SUM(grand_total) from non-return invoices
+- Returns: SUM(ABS(grand_total)) from return invoices
+- Net Sales: Gross Sales - Returns
+- Discounts: SUM(discount_amount) from non-return invoices
+
+VOLUME METRICS
+--------------
+- Invoices: COUNT of non-return invoices
+- Items: SUM(total_qty) from non-return invoices
+- Customers: COUNT(DISTINCT customer) from non-return invoices
+
+PAYMENT BREAKDOWN
+-----------------
+- Cash: SUM(amount) where mode_of_payment contains "cash"
+- Non-Cash: SUM(amount) for all other payment methods
+
+PERFORMANCE METRICS
+-------------------
+- Duration: (period_end_date - period_start_date) in hours
+- Avg Ticket: Gross Sales / Invoices
+- Sales/Hr: Gross Sales / Duration
+- Inv/Hr: Invoices / Duration
+- Peak Hour: Hour with highest total sales (GROUP BY HOUR, ORDER BY total DESC)
+
+RATE CALCULATIONS
+-----------------
+- Return Rate: (Returns / Gross Sales) × 100
+- Discount Rate: (Discounts / Gross Sales) × 100
+
+EFFICIENCY SCORE (0-100)
+------------------------
+Base score: 70 points
+
+Factor 1 - Return Rate (-20 to +5):
+  - return_rate > 15%: penalty = min(20, (rate - 15) × 2)
+  - return_rate ≤ 5%: bonus = +5
+
+Factor 2 - Discount Rate (-10 to +5):
+  - discount_rate > 20%: penalty = min(10, (rate - 20))
+  - discount_rate ≤ 5%: bonus = +5
+
+Factor 3 - Ticket Size vs Dataset Average (-5 to +10):
+  - ratio ≥ 1.5: +10 (50%+ above avg)
+  - ratio ≥ 1.2: +5 (20%+ above avg)
+  - ratio < 0.7: -5 (30%+ below avg)
+
+Factor 4 - Productivity vs Dataset Average (-5 to +10):
+  - ratio ≥ 1.5: +10
+  - ratio ≥ 1.2: +5
+  - ratio < 0.7: -5
+
+RATING LABELS
+-------------
+- Efficiency ≥ 90: "Excellent"
+- Efficiency ≥ 75: "Good"
+- Efficiency ≥ 60: "Average"
+- Efficiency < 60: "Needs Improvement"
+
+INVOICE MATCHING
+----------------
+Invoices match a shift when:
+  1. posa_pos_opening_shift = shift.pos_opening_shift
+  OR
+  2. pos_profile AND owner AND posting_date all match the shift
+"""
+
 import frappe
 from frappe import _
 from frappe.utils import flt, cint, time_diff_in_hours, getdate
@@ -12,7 +88,179 @@ def execute(filters=None):
 	columns = get_columns()
 	summary = get_summary(data)
 	chart = get_chart(data)
-	return columns, data, summary, chart
+	message = get_report_message(data)
+	return columns, data, message, chart, summary
+
+
+def get_report_message(data):
+	"""Generate an informative message with key insights"""
+	if not data:
+		return None
+
+	# Calculate metrics
+	total_shifts = len(data)
+	shifts_with_sales = len([d for d in data if d.gross_sales > 0])
+	excellent_count = len([d for d in data if d.rating == "Excellent"])
+	good_count = len([d for d in data if d.rating == "Good"])
+	average_count = len([d for d in data if d.rating == "Average"])
+	needs_improvement = len([d for d in data if d.rating == "Needs Improvement"])
+
+	total_gross = sum(d.gross_sales for d in data)
+	total_net = sum(d.net_sales for d in data)
+	total_returns = sum(d.returns for d in data)
+	total_invoices = sum(d.invoices for d in data)
+
+	avg_efficiency = sum(d.efficiency for d in data) / total_shifts if total_shifts else 0
+	avg_return_rate = (total_returns / total_gross * 100) if total_gross else 0
+	avg_ticket = total_gross / total_invoices if total_invoices else 0
+
+	# Efficiency gauge color and status
+	if avg_efficiency >= 80:
+		gauge_color = "#059669"
+		gauge_bg = "#ecfdf5"
+		gauge_border = "#a7f3d0"
+		status_text = "Excellent"
+	elif avg_efficiency >= 65:
+		gauge_color = "#2563eb"
+		gauge_bg = "#eff6ff"
+		gauge_border = "#bfdbfe"
+		status_text = "Good"
+	elif avg_efficiency >= 50:
+		gauge_color = "#d97706"
+		gauge_bg = "#fffbeb"
+		gauge_border = "#fde68a"
+		status_text = "Average"
+	else:
+		gauge_color = "#dc2626"
+		gauge_bg = "#fef2f2"
+		gauge_border = "#fecaca"
+		status_text = "Needs Work"
+
+	# Build alert if needed
+	alerts_html = ""
+	if avg_return_rate > 10:
+		alerts_html += f'''
+			<div style="display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; margin-top: 16px;">
+				<span style="font-size: 16px;">⚠️</span>
+				<span style="font-size: 12px; color: #991b1b;"><strong>High return rate:</strong> {avg_return_rate:.1f}% — Review return patterns and product issues</span>
+			</div>
+		'''
+	if needs_improvement > total_shifts * 0.3:
+		alerts_html += f'''
+			<div style="display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; margin-top: {'8px' if avg_return_rate > 10 else '16px'};">
+				<span style="font-size: 16px;">💡</span>
+				<span style="font-size: 12px; color: #92400e;"><strong>{needs_improvement} shifts</strong> need improvement — Consider additional training</span>
+			</div>
+		'''
+
+	return f'''
+		<div style="
+			background: #ffffff;
+			border: 1px solid #e5e7eb;
+			border-radius: 12px;
+			padding: 20px 24px;
+			margin-bottom: 16px;
+			box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+			font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+		">
+			<div style="display: flex; flex-wrap: wrap; gap: 24px; align-items: stretch;">
+
+				<!-- Efficiency Score -->
+				<div style="
+					background: {gauge_bg};
+					border: 1px solid {gauge_border};
+					border-radius: 10px;
+					padding: 16px 24px;
+					text-align: center;
+					min-width: 140px;
+				">
+					<div style="font-size: 11px; color: #6b7280; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px;">
+						Efficiency
+					</div>
+					<div style="font-size: 36px; font-weight: 700; color: {gauge_color}; line-height: 1;">
+						{avg_efficiency:.0f}<span style="font-size: 18px;">%</span>
+					</div>
+					<div style="
+						display: inline-block;
+						margin-top: 8px;
+						padding: 3px 10px;
+						background: {gauge_color};
+						color: white;
+						border-radius: 12px;
+						font-size: 10px;
+						font-weight: 600;
+						text-transform: uppercase;
+					">
+						{status_text}
+					</div>
+				</div>
+
+				<!-- Key Stats -->
+				<div style="flex: 1; min-width: 280px;">
+					<div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;">
+						<div style="background: #f9fafb; border-radius: 8px; padding: 12px; text-align: center;">
+							<div style="font-size: 10px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Shifts</div>
+							<div style="font-size: 22px; font-weight: 600; color: #111827;">{total_shifts}</div>
+						</div>
+						<div style="background: #f9fafb; border-radius: 8px; padding: 12px; text-align: center;">
+							<div style="font-size: 10px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Invoices</div>
+							<div style="font-size: 22px; font-weight: 600; color: #111827;">{total_invoices:,}</div>
+						</div>
+						<div style="background: #f9fafb; border-radius: 8px; padding: 12px; text-align: center;">
+							<div style="font-size: 10px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Avg Ticket</div>
+							<div style="font-size: 22px; font-weight: 600; color: #111827;">{avg_ticket:,.0f}</div>
+						</div>
+						<div style="background: {'#fef2f2' if avg_return_rate > 10 else '#f9fafb'}; border-radius: 8px; padding: 12px; text-align: center; {'border: 1px solid #fecaca;' if avg_return_rate > 10 else ''}">
+							<div style="font-size: 10px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Return Rate</div>
+							<div style="font-size: 22px; font-weight: 600; color: {'#dc2626' if avg_return_rate > 10 else '#111827'};">{avg_return_rate:.1f}%</div>
+						</div>
+					</div>
+				</div>
+
+				<!-- Rating Distribution -->
+				<div style="min-width: 200px; background: #f9fafb; border-radius: 10px; padding: 14px 16px;">
+					<div style="font-size: 10px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; font-weight: 500;">
+						Performance Distribution
+					</div>
+					<div style="display: flex; gap: 8px; align-items: flex-end; height: 44px; margin-bottom: 6px;">
+						<div style="flex: 1; display: flex; flex-direction: column; align-items: center;">
+							<div style="width: 100%; background: #10b981; border-radius: 4px 4px 0 0; height: {max(6, excellent_count / max(total_shifts, 1) * 44)}px; transition: height 0.3s;"></div>
+						</div>
+						<div style="flex: 1; display: flex; flex-direction: column; align-items: center;">
+							<div style="width: 100%; background: #3b82f6; border-radius: 4px 4px 0 0; height: {max(6, good_count / max(total_shifts, 1) * 44)}px; transition: height 0.3s;"></div>
+						</div>
+						<div style="flex: 1; display: flex; flex-direction: column; align-items: center;">
+							<div style="width: 100%; background: #f59e0b; border-radius: 4px 4px 0 0; height: {max(6, average_count / max(total_shifts, 1) * 44)}px; transition: height 0.3s;"></div>
+						</div>
+						<div style="flex: 1; display: flex; flex-direction: column; align-items: center;">
+							<div style="width: 100%; background: #ef4444; border-radius: 4px 4px 0 0; height: {max(6, needs_improvement / max(total_shifts, 1) * 44)}px; transition: height 0.3s;"></div>
+						</div>
+					</div>
+					<div style="display: flex; gap: 8px; text-align: center;">
+						<div style="flex: 1;">
+							<div style="font-size: 13px; font-weight: 600; color: #10b981;">{excellent_count}</div>
+							<div style="font-size: 8px; color: #6b7280;">Excellent</div>
+						</div>
+						<div style="flex: 1;">
+							<div style="font-size: 13px; font-weight: 600; color: #3b82f6;">{good_count}</div>
+							<div style="font-size: 8px; color: #6b7280;">Good</div>
+						</div>
+						<div style="flex: 1;">
+							<div style="font-size: 13px; font-weight: 600; color: #f59e0b;">{average_count}</div>
+							<div style="font-size: 8px; color: #6b7280;">Average</div>
+						</div>
+						<div style="flex: 1;">
+							<div style="font-size: 13px; font-weight: 600; color: #ef4444;">{needs_improvement}</div>
+							<div style="font-size: 8px; color: #6b7280;">Low</div>
+						</div>
+					</div>
+				</div>
+
+			</div>
+
+			{alerts_html}
+		</div>
+	'''
 
 
 # =============================================================================
