@@ -159,30 +159,27 @@ def _apply_discount(pr, item, eligible_qty):
         return
 
     # Calculate maximum possible discount to prevent negative rates
-    base_discount_cap = base_rate * eligible_qty
     total_discount = 0.0
-
-    # Calculate discount based on pricing rule type
-    if pr.rate_or_discount == "Rate" and pr.rate:
+    if pr.rate_or_discount == "Rate":
         total_discount = (base_rate - flt(pr.rate)) * eligible_qty
-    elif pr.rate_or_discount == "Discount Percentage" and pr.discount_percentage:
+    elif pr.rate_or_discount == "Discount Percentage":
         total_discount = (base_rate * flt(pr.discount_percentage) / 100) * eligible_qty
-    elif pr.rate_or_discount == "Discount Amount" and pr.discount_amount:
+    elif pr.rate_or_discount == "Discount Amount":
         total_discount = flt(pr.discount_amount) * eligible_qty
-
-    # Enforce discount cap
-    total_discount = min(total_discount, base_discount_cap)
     
     # Mathematical accuracy: Set amount first, then derive rate
     # This ensures (rate * qty) exactly matches (base_value - total_discount)
     total_line_value = base_rate * qty
     net_amount = max(total_line_value - total_discount, 0.0)
     
-    item.amount = net_amount
-    item.rate = net_amount / qty
-    item.discount_amount = total_discount
-    item.discount_percentage = (total_discount / total_line_value * 100) if total_line_value else 0.0
-
+    item.update({
+        "amount": net_amount,
+        "rate": net_amount / qty if qty else 0,
+        "discount_amount": total_line_value - net_amount,
+        "discount_percentage": ((total_line_value - net_amount) / total_line_value * 100) if total_line_value else 0,
+        "pricing_rule": pr.name,
+        "pricing_rule_for": pr.rate_or_discount
+    })
 
 def _collect_min_max_rule_items(doc):
     """
