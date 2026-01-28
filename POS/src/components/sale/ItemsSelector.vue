@@ -290,7 +290,7 @@
 					>
 						<!-- Stock Badge - Tap to select, long press to view warehouse availability -->
 						<div
-							v-if="item.is_stock_item || item.is_bundle"
+							v-if="shouldShowStockBadge(item)"
 							@pointerdown="onLongPressStart(item)"
 							@pointerup="onLongPressEnd"
 							@pointercancel="clearLongPress"
@@ -300,20 +300,20 @@
 								'px-2 sm:px-2.5 py-1 sm:py-1 text-[10px] sm:text-xs font-bold',
 								'border-2 border-white cursor-pointer select-none',
 								'hover:scale-110 hover:shadow-xl transition-all duration-200',
-								getStockStatus((item.actual_qty ?? item.stock_qty ?? 0)).color,
-								getStockStatus((item.actual_qty ?? item.stock_qty ?? 0)).textColor
+								getStockStatus(getDisplayStock(item)).color,
+								getStockStatus(getDisplayStock(item)).textColor
 							]"
 							:title="__('Check availability in other warehouses')"
 						>
-							{{ Math.floor((item.actual_qty ?? item.stock_qty ?? 0)) }}
+							{{ getDisplayStock(item) }}
 						</div>
 
 						<!-- Item Image -->
 						<div class="relative aspect-square bg-gray-100 rounded-md mb-1.5 sm:mb-2 overflow-hidden">
-							<!-- Image with conditional blur on hover -->
+							<!-- Image with conditional blur on hover for out-of-stock items -->
 							<div :class="[
 								'w-full h-full transition-all duration-300',
-								(item.is_stock_item || item.is_bundle) && (item.actual_qty ?? item.stock_qty ?? 0) <= 0 ? 'group-hover:blur-sm group-hover:brightness-75' : ''
+								isOutOfStock(item) ? 'group-hover:blur-sm group-hover:brightness-75' : ''
 							]">
 								<LazyImage
 									v-if="item.image"
@@ -358,7 +358,7 @@
 
 							<!-- Info Icon Overlay - Tap to select, long press to show warehouse availability -->
 							<div
-								v-if="(item.is_stock_item || item.is_bundle) && (item.actual_qty ?? item.stock_qty ?? 0) <= 0"
+								v-if="isOutOfStock(item)"
 								@pointerdown="onLongPressStart(item)"
 								@pointerup="onLongPressEnd"
 								@pointercancel="clearLongPress"
@@ -555,7 +555,7 @@
 							<td class="px-2 sm:px-3 py-2 whitespace-nowrap w-[70px] sm:w-[100px]">
 								<!-- Stock Badge - Tap to select, long press to view warehouse availability -->
 								<div
-									v-if="item.is_stock_item || item.is_bundle"
+									v-if="shouldShowStockBadge(item)"
 									@pointerdown="onLongPressStart(item)"
 									@pointerup="onLongPressEnd"
 									@pointercancel="clearLongPress"
@@ -564,15 +564,15 @@
 										'inline-block px-1.5 sm:px-3 py-0.5 sm:py-1.5 rounded-md shadow-sm',
 										'text-[10px] sm:text-sm font-bold cursor-pointer select-none',
 										'hover:scale-105 hover:shadow-md transition-all duration-200',
-										getStockStatus((item.actual_qty ?? item.stock_qty ?? 0)).color,
-										getStockStatus((item.actual_qty ?? item.stock_qty ?? 0)).textColor
+										getStockStatus(getDisplayStock(item)).color,
+										getStockStatus(getDisplayStock(item)).textColor
 									]"
 									:title="__('Check availability in other warehouses')"
 								>
-									{{ Math.floor((item.actual_qty ?? item.stock_qty ?? 0)) }}
+									{{ getDisplayStock(item) }}
 								</div>
 								<span
-									v-else
+									v-else-if="!item.has_variants"
 									class="text-xs sm:text-sm text-gray-400 italic"
 								>
 									{{ __('N/A') }}
@@ -741,7 +741,7 @@ const props = defineProps({
 const emit = defineEmits(["item-selected"])
 
 // Use composables
-const { getStockStatus } = useStock()
+const { getStockStatus, shouldShowStockBadge, getDisplayStock, isOutOfStock } = useStock()
 const settingsStore = usePOSSettingsStore()
 const { showError, showWarning } = useToast()
 
@@ -1135,15 +1135,15 @@ function clearLongPress() {
 function selectItem(item, autoAdd = false) {
 	if (!item) return false
 
-	// Skip stock validation for: variants (template), serial items, batch items (they have own validation)
-	const skipValidation = item.has_variants || item.has_serial_no || item.has_batch_no
-	const isStockTracked = item.is_stock_item || item.is_bundle
-	const qty = Math.floor(item.actual_qty ?? item.stock_qty ?? 0)
+	// Skip stock validation for serial/batch items (they have their own validation dialogs)
+	const hasSpecialTracking = item.has_serial_no || item.has_batch_no
+	const shouldValidateStock = shouldShowStockBadge(item) && !hasSpecialTracking
 
-	if (!skipValidation && isStockTracked && qty <= 0 && settingsStore.shouldEnforceStockValidation()) {
-		showError(item.is_bundle
+	if (shouldValidateStock && getDisplayStock(item) <= 0 && settingsStore.shouldEnforceStockValidation()) {
+		const message = item.is_bundle
 			? __('"{0}" cannot be added to cart. Bundle is out of stock. Allow Negative Stock is disabled.', [item.item_name])
-			: __('"{0}" cannot be added to cart. Item is out of stock. Allow Negative Stock is disabled.', [item.item_name]))
+			: __('"{0}" cannot be added to cart. Item is out of stock. Allow Negative Stock is disabled.', [item.item_name])
+		showError(message)
 		return false
 	}
 
@@ -1401,8 +1401,6 @@ function handleClickOutside(event) {
 		}
 	}
 }
-
-// Check if an item can be added to cart based on stock
 </script>
 
 <style scoped>
