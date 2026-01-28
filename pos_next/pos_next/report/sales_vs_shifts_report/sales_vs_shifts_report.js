@@ -935,13 +935,14 @@ frappe.query_reports["Sales vs Shifts Report"] = {
 	render_custom_chart: function(chart_type) {
 		const filters = frappe.query_report.get_filter_values();
 		const method_base = "pos_next.pos_next.report.sales_vs_shifts_report.sales_vs_shifts_report";
-		const result = frappe.query_report.data || [];
+		// Filter out Total/summary rows once for all charts
+		const result = (frappe.query_report.data || []).filter(d => d.shift_id && d.shift_id !== "Total");
 
 		if (chart_type === "Cashier Comparison") {
 			// Aggregate by cashier
 			const cashierData = {};
 			result.forEach(d => {
-				const cashier = d.cashier || "Unknown";
+				const cashier = d.cashier || d.cashier_id || "Unknown";
 				if (!cashierData[cashier]) {
 					cashierData[cashier] = { sales: 0, invoices: 0, shifts: 0, efficiency: 0 };
 				}

@@ -337,7 +337,7 @@ def get_shift_data(filters):
 	cashier_names = {}
 	if cashier_ids:
 		cashier_names = {
-			u.name: u.full_name
+			u.name: u.full_name or u.name
 			for u in frappe.get_all("User", filters={"name": ["in", cashier_ids]}, fields=["name", "full_name"])
 		}
 
