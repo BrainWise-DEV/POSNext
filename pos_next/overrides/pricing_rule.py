@@ -50,14 +50,6 @@ def apply_price_discount_rule(pricing_rule, item_details, args):
     # For standard pricing rules, use the original implementation
     return _original_apply_price_discount_rule(pricing_rule, item_details, args)
 
-def patch_pricing_rule():
-    """Safely patch the pricing rule module after Frappe is initialized."""
-    try:
-        from erpnext.accounts.doctype.pricing_rule import pricing_rule as pricing_rule_module
-        pricing_rule_module.apply_price_discount_rule = apply_price_discount_rule
-    except Exception:
-        frappe.log_error("Failed to patch pricing rule module for Min/Max discounts")
-
 def apply_min_max_price_discounts(doc, method=None, allowed_rules=None):
     """
     Apply Min/Max pricing rule discounts to document items.

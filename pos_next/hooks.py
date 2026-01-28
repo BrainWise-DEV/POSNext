@@ -5,8 +5,6 @@ app_publisher = "BrainWise"
 app_description = "POS built on ERPNext that brings together real-time billing, stock management, multi-user access, offline mode, and direct ERP integration. Run your store or restaurant with confidence and control, while staying 100% open source."
 app_email = "support@brainwise.me"
 app_license = "agpl-3.0"
-import frappe
-
 # Apps
 # ------------------
 
@@ -138,7 +136,7 @@ fixtures = [
 
 # before_install = "pos_next.install.before_install"
 after_install = "pos_next.install.after_install"
-after_migrate = ["pos_next.install.after_migrate", "pos_next.overrides.pricing_rule.patch_pricing_rule"]
+after_migrate = "pos_next.install.after_migrate"
 
 # Uninstallation
 # ------------
@@ -190,12 +188,6 @@ standard_queries = {
 # DocType Class
 # ---------------
 # Override standard doctype classes
-try:
-    from erpnext.accounts.doctype.pricing_rule import pricing_rule as pricing_rule_module
-    from pos_next.overrides.pricing_rule import apply_price_discount_rule
-    pricing_rule_module.apply_price_discount_rule = apply_price_discount_rule
-except Exception as e:
-    frappe.log_error(frappe.get_traceback(), "Error in pricing rule module")
 override_doctype_class = {
 	"Sales Invoice": "pos_next.overrides.sales_invoice.CustomSalesInvoice"
 }
@@ -239,6 +231,21 @@ doc_events = {
 	},
 	"POS Invoice": {
 		"validate": "pos_next.overrides.pricing_rule.apply_min_max_price_discounts"
+	},
+	"Purchase Order": {
+		"validate": "pos_next.overrides.pricing_rule.apply_min_max_price_discounts"
+	},
+	"Supplier Quotation": {
+		"validate": "pos_next.overrides.pricing_rule.apply_min_max_price_discounts"
+	},
+	"Purchase Receipt": {
+		"validate": "pos_next.overrides.pricing_rule.apply_min_max_price_discounts"
+	},
+	"Purchase Invoice": {
+		"validate": "pos_next.overrides.pricing_rule.apply_min_max_price_discounts"
+	},
+	"Opportunity": {
+		"validate": "pos_next.overrides.pricing_rule.apply_min_max_price_discounts"
 	}
 }
 
@@ -264,7 +271,13 @@ scheduler_events = {
 
 # Overriding Methods
 # ------------------------------
-#
+try:
+    from erpnext.accounts.doctype.pricing_rule import pricing_rule as erpnext_pricing_rule
+    from pos_next.overrides.pricing_rule import apply_price_discount_rule as pos_next_apply_price_discount_rule
+    erpnext_pricing_rule.apply_price_discount_rule = pos_next_apply_price_discount_rule
+except:
+    import frappe
+    frappe.log_error(frappe.get_traceback(), "Pricing Rule Override Error")
 # override_whitelisted_methods = {
 # 	"frappe.desk.doctype.event.event.get_events": "pos_next.event.get_events"
 # }
