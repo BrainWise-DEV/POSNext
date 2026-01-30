@@ -251,12 +251,36 @@ export function printInvoiceCustom(invoiceData) {
 				</div>
 
 				<div class="totals">
-					${invoiceData.total_taxes_and_charges && invoiceData.total_taxes_and_charges > 0 ? `
-					<div class="total-row"><span>${__("Subtotal:")}</span><span>${formatCurrency((invoiceData.grand_total || 0) - (invoiceData.total_taxes_and_charges || 0))}</span></div>
-					<div class="total-row"><span>${__("Tax:")}</span><span>${formatCurrency(invoiceData.total_taxes_and_charges)}</span></div>` : ""}
-					${invoiceData.discount_amount ? `
-					<div class="total-row" style="color: #28a745;"><span>Additional Discount${invoiceData.additional_discount_percentage ? ` (${Number(invoiceData.additional_discount_percentage).toFixed(1)}%)` : ""}:</span><span>-${formatCurrency(Math.abs(invoiceData.discount_amount))}</span></div>` : ""}
-					<div class="total-row grand-total"><span>${__("TOTAL:")}</span><span>${formatCurrency(invoiceData.grand_total)}</span></div>
+					${
+						invoiceData.total_taxes_and_charges &&
+						invoiceData.total_taxes_and_charges > 0
+							? `
+					<div class="total-row">
+						<span>${__('Subtotal:')}</span>
+						<span>${formatCurrency((invoiceData.grand_total || 0) - (invoiceData.total_taxes_and_charges || 0))}</span>
+					</div>
+					<div class="total-row">
+						<span>${__('Tax:')}</span>
+						<span>${formatCurrency(invoiceData.total_taxes_and_charges)}</span>
+					</div>
+					`
+							: ""
+					}
+					${
+						// Document-level discount (discount_amount is the primary field)
+						invoiceData.discount_amount
+							? `
+					<div class="total-row" style="color: #28a745;">
+						<span>Additional Discount${invoiceData.additional_discount_percentage ? ` (${Number(invoiceData.additional_discount_percentage).toFixed(1)}%)` : ""}:</span>
+						<span>-${formatCurrency(Math.abs(invoiceData.discount_amount))}</span>
+					</div>
+					`
+							: ""
+					}
+					<div class="total-row grand-total">
+						<span>${__('TOTAL:')}</span>
+						<span>${formatCurrency(invoiceData.grand_total)}</span>
+					</div>
 				</div>
 
 				${invoiceData.payments && invoiceData.payments.length > 0 ? `

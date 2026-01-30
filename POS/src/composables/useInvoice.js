@@ -839,6 +839,7 @@ export function useInvoice() {
 				amount: p.amount,
 				type: p.type,
 			})),
+			// Document-level discount for coupons and gift cards
 			discount_amount: additionalDiscount.value || 0,
 			coupon_code: couponCode.value,
 			posa_coupon_code: couponCode.value ? couponCode.value.toUpperCase() : null,
@@ -905,6 +906,7 @@ export function useInvoice() {
 						amount: p.amount,
 						type: p.type,
 					})),
+					// Document-level discount for coupons and gift cards
 					discount_amount: additionalDiscount.value || 0,
 					coupon_code: couponCode.value,
 					posa_coupon_code: couponCode.value ? couponCode.value.toUpperCase() : null,

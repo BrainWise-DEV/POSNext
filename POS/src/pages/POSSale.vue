@@ -1975,6 +1975,14 @@ async function handlePaymentCompleted(paymentData) {
 				total_tax: cartStore.totalTax,
 				total_discount: cartStore.totalDiscount,
 				write_off_amount: paymentData.write_off_amount || 0,
+				// Document-level discount for coupons and gift cards
+				discount_amount: cartStore.additionalDiscount || 0,
+				apply_discount_on: cartStore.additionalDiscount > 0 ? "Grand Total" : null,
+				coupon_code: cartStore.couponCode || null,
+				posa_coupon_code: cartStore.couponCode ? cartStore.couponCode.toUpperCase() : null,
+				posa_gift_card_amount_used: cartStore.additionalDiscount || 0,
+				is_pos: 1,
+				update_stock: 1,
 			};
 
 			await offlineStore.saveInvoiceOffline(invoiceData);
