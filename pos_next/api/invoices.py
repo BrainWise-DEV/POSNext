@@ -1768,11 +1768,6 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
         "payments": payments_data,
     }
 
-    # Calculate effective rate using ERPNext's grand_total to include both taxes and discounts
-    # This ensures returns refund exactly what the customer paid
-    total_original_qty = sum(abs(flt(item.get("qty", 0))) for item in return_dict.get("items", []))
-    effective_rate_per_unit = flt(invoice_info.grand_total / total_original_qty) if total_original_qty > 0 else 0
-
     updated_items = []
     for item in return_dict.get("items", []):
         # Get the original item reference (sales_invoice_item points to original item name)
@@ -1793,11 +1788,9 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
             # Set qty to negative of remaining (for return)
             item_copy["qty"] = -remaining_qty
 
-            # Use effective rate calculated from ERPNext's grand_total
-            # This distributes taxes and discounts proportionally across all items
-            item_copy["rate"] = effective_rate_per_unit
-
-            # Recalculate amount based on effective rate
+            # net_rate reflects actual paid price after all discounts (coupons, additional discounts)
+            # rate only includes item-level discounts - fallback if net_rate unavailable
+            item_copy["rate"] = flt(item.get("net_rate") or item.get("rate"))
             item_copy["amount"] = item_copy["rate"] * item_copy["qty"]
 
             updated_items.append(item_copy)
