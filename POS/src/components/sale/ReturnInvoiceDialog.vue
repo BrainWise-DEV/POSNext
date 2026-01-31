@@ -321,28 +321,36 @@
 											/>
 
 											<!-- Item Info -->
-											<div class="flex-1 min-w-0 text-start">
+											<div class="min-w-[140px] max-w-[200px] text-start">
 												<h4 class="text-sm font-bold text-gray-900 truncate">
 													{{ item.item_name }}
 												</h4>
-												<p class="text-xs text-gray-500 mt-0.5">
-													{{ item.item_code }}
-												</p>
-												<p v-if="item.already_returned > 0" class="text-xs text-amber-600 mt-1">
+												<p class="text-xs text-gray-500 mt-0.5">{{ item.item_code }}</p>
+												<p v-if="item.already_returned > 0" class="text-xs text-amber-600 mt-0.5">
 													{{ __('⚠️ {0} already returned', [item.already_returned]) }}
 												</p>
 											</div>
 
 											<!-- Quantity Controls -->
-											<div class="flex items-center gap-3 bg-gray-50 rounded-lg px-3 py-2 border border-gray-200" @click.stop>
-												<span class="text-xs font-medium text-gray-600">{{ __('Return Qty:') }}</span>
+											<div :class="[
+												'flex-1 flex items-center justify-between gap-3 rounded-xl px-4 py-3 border transition-colors',
+												item.selected
+													? 'bg-blue-50 border-blue-200'
+													: 'bg-gray-100 border-gray-200 opacity-60'
+											]" @click.stop>
+												<span :class="['text-sm font-medium', item.selected ? 'text-blue-700' : 'text-gray-400']">{{ __('Return Qty:') }}</span>
 												<div class="flex items-center gap-2">
 													<button
-														@click="decrementReturnQuantity(item)"
+														@click.stop="decrementReturnQuantity(item)"
 														:disabled="!item.selected || item.return_qty <= 1"
-														class="w-6 h-6 rounded-full bg-white border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+														:class="[
+															'w-10 h-10 rounded-full flex items-center justify-center transition-colors',
+															item.selected
+																? 'bg-blue-100 hover:bg-blue-200 active:bg-blue-300 text-blue-700 disabled:opacity-40 disabled:cursor-not-allowed'
+																: 'bg-gray-200 text-gray-400 cursor-not-allowed'
+														]"
 													>
-														<FeatherIcon name="minus" class="w-3 h-3" />
+														<FeatherIcon name="minus" class="w-5 h-5" />
 													</button>
 													<input
 														v-model.number="item.return_qty"
@@ -353,62 +361,83 @@
 														step="1"
 														@change="normalizeItemQuantity(item)"
 														@blur="normalizeItemQuantity(item)"
-														class="w-14 px-2 py-1 border border-gray-300 rounded-lg text-sm text-center font-semibold focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+														:class="[
+															'w-14 h-10 px-1 border rounded-lg text-base text-center font-bold [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none',
+															item.selected
+																? 'border-blue-300 bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500'
+																: 'border-gray-300 bg-gray-50 text-gray-400 cursor-not-allowed'
+														]"
 													/>
 													<button
-														@click="incrementReturnQuantity(item)"
+														@click.stop="incrementReturnQuantity(item)"
 														:disabled="!item.selected || item.return_qty >= item.quantity"
-														class="w-6 h-6 rounded-full bg-white border border-gray-300 flex items-center justify-center text-gray-600 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+														:class="[
+															'w-10 h-10 rounded-full flex items-center justify-center transition-colors',
+															item.selected
+																? 'bg-blue-100 hover:bg-blue-200 active:bg-blue-300 text-blue-700 disabled:opacity-40 disabled:cursor-not-allowed'
+																: 'bg-gray-200 text-gray-400 cursor-not-allowed'
+														]"
 													>
-														<FeatherIcon name="plus" class="w-3 h-3" />
+														<FeatherIcon name="plus" class="w-5 h-5" />
 													</button>
 												</div>
-												<span class="text-xs font-semibold text-gray-700">{{ __('of {0}', [item.quantity], "item qty") }}</span>
+												<span :class="['text-sm font-semibold', item.selected ? 'text-blue-700' : 'text-gray-400']">{{ __('of {0}', [item.quantity], "item qty") }}</span>
 											</div>
 
-											<!-- Rate & Amount -->
-											<div class="text-start min-w-[100px]">
-												<p class="text-sm font-bold text-gray-900">
-													{{ formatCurrency(item.rate * item.return_qty) }}
+											<!-- Total Amount with Price Breakdown -->
+											<div class="text-center min-w-[130px]">
+												<p class="text-lg font-bold text-gray-900">
+													{{ formatCurrency((item.rate_with_tax || item.rate) * item.return_qty) }}
 												</p>
-												<p class="text-xs text-gray-500 mt-0.5">@ {{ formatCurrency(item.rate) }}/{{ item.uom }}</p>
+												<p class="text-sm text-gray-500 flex items-center gap-1 flex-wrap justify-center mt-0.5">
+													<span>@ {{ formatCurrency(item.price_list_rate || item.rate) }}/{{ item.uom }}</span>
+													<span v-if="item.discount_per_unit > 0" class="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">−{{ formatCurrency(item.discount_per_unit) }}</span>
+													<span v-if="item.tax_per_unit > 0" class="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700">+{{ formatCurrency(item.tax_per_unit) }} {{ __('tax') }}</span>
+												</p>
 											</div>
 										</div>
 
 										<!-- Mobile Layout -->
-										<div class="sm:hidden flex flex-col gap-3">
-											<!-- Item Header with Checkbox and Name -->
+										<div class="sm:hidden flex flex-col gap-2">
+											<!-- Item Header with Checkbox, Name and Amount -->
 											<div class="flex items-start gap-3">
 												<input
 													type="checkbox"
 													v-model="item.selected"
 													@click.stop
-													class="h-5 w-5 mt-1 text-blue-600 rounded-md focus:ring-2 focus:ring-blue-500 cursor-pointer flex-shrink-0"
+													class="h-5 w-5 mt-0.5 text-blue-600 rounded-md focus:ring-2 focus:ring-blue-500 cursor-pointer flex-shrink-0"
 												/>
 												<div class="flex-1 min-w-0 text-start">
-													<h4 class="text-sm font-semibold text-gray-900 leading-tight">
-														{{ item.item_name }}
-													</h4>
-													<p class="text-xs text-gray-500 mt-1">
-														{{ item.item_code }}
-													</p>
+													<div class="flex items-start justify-between gap-2">
+														<h4 class="text-sm font-semibold text-gray-900 leading-tight flex-1">
+															{{ item.item_name }}
+														</h4>
+														<p class="text-lg font-bold text-gray-900 flex-shrink-0">
+															{{ formatCurrency((item.rate_with_tax || item.rate) * item.return_qty) }}
+														</p>
+													</div>
+													<div class="flex items-center justify-between mt-1">
+														<p class="text-xs text-gray-500">{{ item.item_code }}</p>
+														<p class="text-sm text-gray-500 flex items-center gap-1 flex-wrap justify-end">
+															<span>@ {{ formatCurrency(item.price_list_rate || item.rate) }}</span>
+															<span v-if="item.discount_per_unit > 0" class="inline-flex items-center px-1 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">−{{ formatCurrency(item.discount_per_unit) }}</span>
+															<span v-if="item.tax_per_unit > 0" class="inline-flex items-center px-1 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700">+{{ formatCurrency(item.tax_per_unit) }}</span>
+														</p>
+													</div>
 													<p v-if="item.already_returned > 0" class="text-xs text-amber-600 mt-1">
 														{{ __('⚠️ {0} already returned', [item.already_returned]) }}
 													</p>
 												</div>
 											</div>
 
-											<!-- Quantity Controls -->
-											<div class="flex flex-col gap-2" @click.stop>
-												<div class="flex items-center justify-between">
-													<span class="text-xs font-medium text-gray-600 text-start">{{ __('Return Qty:') }}</span>
-													<span class="text-xs text-gray-500 text-end">{{ __('of {0}', [item.quantity], "item qty") }}</span>
-												</div>
-												<div class="flex items-center gap-2">
+											<!-- Quantity Controls Row -->
+											<div class="flex items-center gap-3 ml-8" @click.stop>
+												<span class="text-xs font-medium text-gray-600">{{ __('Qty:') }}</span>
+												<div class="flex items-center gap-1.5 flex-1">
 													<button
-														@click="decrementReturnQuantity(item)"
+														@click.stop="decrementReturnQuantity(item)"
 														:disabled="!item.selected || item.return_qty <= 1"
-														class="flex-1 h-10 rounded-lg bg-white border-2 border-gray-300 flex items-center justify-center text-gray-700 active:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed font-bold text-xl"
+														class="w-9 h-9 rounded-lg bg-gray-100 border border-gray-300 flex items-center justify-center text-gray-700 active:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed font-bold text-lg"
 													>
 														−
 													</button>
@@ -421,26 +450,16 @@
 														step="1"
 														@change="normalizeItemQuantity(item)"
 														@blur="normalizeItemQuantity(item)"
-														class="w-16 h-10 px-2 border-2 border-gray-300 rounded-lg text-lg text-center font-bold focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+														class="w-14 h-9 px-2 border border-gray-300 rounded-lg text-base text-center font-bold focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
 													/>
 													<button
-														@click="incrementReturnQuantity(item)"
+														@click.stop="incrementReturnQuantity(item)"
 														:disabled="!item.selected || item.return_qty >= item.quantity"
-														class="flex-1 h-10 rounded-lg bg-white border-2 border-gray-300 flex items-center justify-center text-gray-700 active:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed font-bold text-xl"
+														class="w-9 h-9 rounded-lg bg-gray-100 border border-gray-300 flex items-center justify-center text-gray-700 active:bg-gray-200 disabled:opacity-30 disabled:cursor-not-allowed font-bold text-lg"
 													>
 														+
 													</button>
-												</div>
-											</div>
-
-											<!-- Price -->
-											<div class="flex items-center justify-between px-1 pt-2 border-t border-gray-100">
-												<span class="text-xs text-gray-600 text-start">{{ __('Amount:') }}</span>
-												<div class="text-end">
-													<p class="text-base font-bold text-gray-900">
-														{{ formatCurrency(item.rate * item.return_qty) }}
-													</p>
-													<p class="text-xs text-gray-500">@ {{ formatCurrency(item.rate) }}/{{ item.uom }}</p>
+													<span class="text-xs text-gray-500 ml-1">/ {{ item.quantity }}</span>
 												</div>
 											</div>
 										</div>
@@ -1084,8 +1103,10 @@ const filteredReturnItems = computed(() => {
 
 const hasOpenShift = computed(() => Boolean(props.posOpeningShift))
 
+// Use rate_with_tax (includes tax) for accurate refund calculation
 const returnTotal = computed(() =>
-	round2(selectedItems.value.reduce((sum, item) => sum + item.return_qty * item.rate, 0))
+	round2(selectedItems.value.reduce((sum, item) =>
+		sum + item.return_qty * (item.rate_with_tax || item.rate), 0))
 )
 
 const totalPaymentAmount = computed(() =>

@@ -1626,6 +1626,42 @@ def get_invoice_for_return(invoice_name):
     return invoice_dict
 
 
+def _parse_item_wise_tax_detail(raw_detail):
+    """Parse item_wise_tax_detail from string or dict format."""
+    if not raw_detail:
+        return {}
+    if isinstance(raw_detail, str):
+        return json.loads(raw_detail)
+    return raw_detail
+
+
+def _build_item_tax_map(taxes: list) -> dict:
+    """Build item_code -> tax_amount map from taxes child table.
+
+    Args:
+        taxes: List of tax row dicts containing item_wise_tax_detail
+
+    Returns:
+        Dict mapping item_code to total tax amount (absolute value)
+
+    Note:
+        item_wise_tax_detail format: {"ITEM-CODE": [tax_rate, tax_amount]}
+        Return documents have negative amounts, hence abs() is used.
+    """
+    from collections import defaultdict
+    tax_map = defaultdict(float)
+
+    for tax_row in taxes:
+        try:
+            details = _parse_item_wise_tax_detail(tax_row.get("item_wise_tax_detail"))
+            for item_code, (_, tax_amount) in details.items():
+                tax_map[item_code] += abs(flt(tax_amount))
+        except (json.JSONDecodeError, TypeError, ValueError, KeyError):
+            continue
+
+    return dict(tax_map)
+
+
 @frappe.whitelist()
 def prepare_return_invoice(invoice_name, pos_opening_shift=None):
     """Prepare a return invoice using ERPNext's make_sales_return.
@@ -1669,7 +1705,9 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
             si.paid_amount,
             si.outstanding_amount,
             si.customer,
-            si.customer_name
+            si.customer_name,
+            si.net_total,
+            si.total_taxes_and_charges
         )
         .where(si.name == invoice_name)
     ).run(as_dict=True)
@@ -1766,39 +1804,48 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
         "customer_name": invoice_info.customer_name,
         "posting_date": invoice_info.posting_date,
         "payments": payments_data,
+        "net_total": invoice_info.net_total,
+        "total_taxes_and_charges": invoice_info.total_taxes_and_charges,
     }
 
-    updated_items = []
-    for item in return_dict.get("items", []):
-        # Get the original item reference (sales_invoice_item points to original item name)
-        original_item_ref = item.get("sales_invoice_item") or item.get("item_code")
-        already_returned = returned_qty_map.get(original_item_ref, 0)
+    item_tax_map = _build_item_tax_map(return_dict.get("taxes", []))
 
-        # The qty from make_sales_return is already negative (full original qty negated)
-        # We need to calculate remaining returnable qty
+    def process_return_item(item):
+        """Process single item for return, returns None if not returnable."""
+        item_ref = item.get("sales_invoice_item") or item.get("item_code")
         original_qty = abs(flt(item.get("qty", 0)))
-        remaining_qty = original_qty - already_returned
+        remaining_qty = original_qty - returned_qty_map.get(item_ref, 0)
 
-        if remaining_qty > 0:
-            item_copy = item.copy()
-            # Store quantities for frontend use
-            item_copy["original_qty"] = original_qty
-            item_copy["already_returned"] = already_returned
-            item_copy["remaining_qty"] = remaining_qty
-            # Set qty to negative of remaining (for return)
-            item_copy["qty"] = -remaining_qty
+        if remaining_qty <= 0:
+            return None
 
-            # net_rate reflects actual paid price after all discounts (coupons, additional discounts)
-            # rate only includes item-level discounts - fallback if net_rate unavailable
-            item_copy["rate"] = flt(item.get("net_rate") or item.get("rate"))
-            item_copy["amount"] = item_copy["rate"] * item_copy["qty"]
+        # Get rate breakdown for display
+        price_list_rate = flt(item.get("price_list_rate") or item.get("rate"))
+        net_rate = flt(item.get("net_rate") or item.get("rate"))
+        discount_per_unit = flt(price_list_rate - net_rate, 2)
+        tax_per_unit = flt(item_tax_map.get(item.get("item_code"), 0) / original_qty, 2) if original_qty else 0
 
-            updated_items.append(item_copy)
+        return {
+            **item,
+            "original_qty": original_qty,
+            "already_returned": original_qty - remaining_qty,
+            "remaining_qty": remaining_qty,
+            "qty": -remaining_qty,
+            "price_list_rate": price_list_rate,
+            "rate": net_rate,
+            "discount_per_unit": discount_per_unit,
+            "amount": flt(net_rate * -remaining_qty, 2),
+            "tax_per_unit": tax_per_unit,
+            "rate_with_tax": flt(net_rate + tax_per_unit, 2),
+        }
 
-    return_dict["items"] = updated_items
+    return_dict["items"] = [
+        processed for item in return_dict.get("items", [])
+        if (processed := process_return_item(item)) is not None
+    ]
 
     # Check if all items have been fully returned
-    if not updated_items:
+    if not return_dict["items"]:
         frappe.throw(_("All items from this invoice have already been returned"))
 
     return return_dict
