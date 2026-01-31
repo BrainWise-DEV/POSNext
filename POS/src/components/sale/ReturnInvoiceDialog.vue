@@ -721,7 +721,7 @@
 import { useOffline } from "@/composables/useOffline"
 import { useToast } from "@/composables/useToast"
 import { getPaymentIcon } from "@/utils/payment"
-import { formatCurrency as formatCurrencyUtil } from "@/utils/currency"
+import { formatCurrency as formatCurrencyUtil, round2 } from "@/utils/currency"
 import { getInvoiceStatusColor } from "@/utils/invoice"
 import { Button, Dialog, FeatherIcon, createResource } from "frappe-ui"
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue"
@@ -1085,7 +1085,7 @@ const filteredReturnItems = computed(() => {
 const hasOpenShift = computed(() => Boolean(props.posOpeningShift))
 
 const returnTotal = computed(() =>
-	selectedItems.value.reduce((sum, item) => sum + item.return_qty * item.rate, 0)
+	round2(selectedItems.value.reduce((sum, item) => sum + item.return_qty * item.rate, 0))
 )
 
 const totalPaymentAmount = computed(() =>
@@ -1098,7 +1098,7 @@ const maxRefundableAmount = computed(() => {
 
 	const grandTotal = Math.abs(originalInvoice.value.grand_total) || 1
 	const returnRatio = returnTotal.value / grandTotal
-	return Math.min(returnTotal.value, originalPaidAmount.value * returnRatio)
+	return round2(Math.min(returnTotal.value, originalPaidAmount.value * returnRatio))
 })
 
 const creditAdjustmentAmount = computed(() =>

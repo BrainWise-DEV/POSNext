@@ -4,13 +4,7 @@
  */
 
 import { computed } from "vue"
-
-/**
- * Round to 2 decimal places (avoids floating point issues)
- */
-function round2(val) {
-	return Math.round(val * 100) / 100
-}
+import { round2 } from "@/utils/currency"
 
 /**
  * Create quick amounts suggestions based on remaining amount

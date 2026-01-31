@@ -4,16 +4,7 @@
  */
 
 import { computed } from "vue"
-
-/**
- * Round a number to 2 decimal places
- * Prevents floating point precision issues
- * @param {number} val - Value to round
- * @returns {number} Rounded value
- */
-export function round2(val) {
-	return Number(Number(val).toFixed(2))
-}
+import { round2 } from "@/utils/currency"
 
 /**
  * Create payment calculation computed properties
@@ -74,6 +65,5 @@ export function usePaymentCalculations({ paymentEntries, grandTotal, customerBal
 		remainingAvailableCredit,
 		remainingAmount,
 		changeAmount,
-		round2,
 	}
 }

@@ -515,8 +515,9 @@ def update_invoice(data):
         # ========================================================================
         # DISCOUNT CALCULATION - CRITICAL LOGIC
         # ========================================================================
-        # Problem: Frontend sends rate (discounted) and discount_percentage
-        # Solution: Reverse-calculate price_list_rate (original price) to avoid double discount
+        # Frontend sends: rate (discounted), price_list_rate (original), discount_percentage
+        # Priority: Trust frontend's price_list_rate if provided (avoids rounding errors)
+        # Fallback: Reverse-calculate price_list_rate from rate and discount_percentage
         #
         # Formula: rate = price_list_rate * (1 - discount_percentage/100)
         # Reverse: price_list_rate = rate / (1 - discount_percentage/100)
@@ -524,17 +525,16 @@ def update_invoice(data):
         for item in invoice_doc.get("items", []):
             item_rate = flt(item.rate or 0)
             discount_pct = flt(item.discount_percentage or 0)
+            frontend_price_list_rate = flt(item.get("price_list_rate") or 0)
 
-            # If item has a discount, reverse-calculate the original price_list_rate
-            if discount_pct > 0 and discount_pct < 100:
-                if item_rate > 0:
-                    # Reverse calculation to get original price
-                    item.price_list_rate = item_rate / (1 - discount_pct / 100)
-                elif not item.get("price_list_rate"):
-                    # Fallback: if rate is 0 but discount exists (edge case)
-                    item.price_list_rate = item_rate
-            elif not item.get("price_list_rate"):
-                # No discount or price_list_rate not set - use rate as is
+            # Trust frontend's price_list_rate if provided and valid
+            if frontend_price_list_rate > 0:
+                item.price_list_rate = frontend_price_list_rate
+            # Fallback: reverse-calculate if discount exists but no price_list_rate
+            elif discount_pct > 0 and discount_pct < 100 and item_rate > 0:
+                item.price_list_rate = flt(item_rate / (1 - discount_pct / 100), 2)
+            else:
+                # No discount or price_list_rate - use rate as is
                 item.price_list_rate = item_rate
 
             # Ensure price_list_rate is never less than rate (data integrity)

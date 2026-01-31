@@ -873,7 +873,7 @@
 
 <script setup>
 import { usePOSSettingsStore } from "@/stores/posSettings"
-import { formatCurrency as formatCurrencyUtil, getCurrencySymbol } from "@/utils/currency"
+import { formatCurrency as formatCurrencyUtil, getCurrencySymbol, round2 } from "@/utils/currency"
 import { getPaymentIcon } from "@/utils/payment"
 import { offlineWorker } from "@/utils/offline/workerClient"
 import { logger } from "@/utils/logger"
@@ -1389,9 +1389,6 @@ async function loadPaymentMethods() {
 
 // Currency symbol for display
 const currencySymbol = computed(() => getCurrencySymbol(props.currency))
-
-// Helper to round to 2 decimal places (handles floating-point precision)
-const round2 = (val) => Number(Number(val).toFixed(2))
 
 const totalPaid = computed(() => {
 	const sum = paymentEntries.value.reduce(
