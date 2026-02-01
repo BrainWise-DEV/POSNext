@@ -1819,11 +1819,11 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
         if remaining_qty <= 0:
             return None
 
-        # Get rate breakdown for display
-        price_list_rate = flt(item.get("price_list_rate") or item.get("rate"))
-        net_rate = flt(item.get("net_rate") or item.get("rate"))
-        discount_per_unit = flt(price_list_rate - net_rate, 2)
-        tax_per_unit = flt(item_tax_map.get(item.get("item_code"), 0) / original_qty, 2) if original_qty else 0
+        # Get rate breakdown for display - use 3 decimal precision for rates
+        price_list_rate = flt(item.get("price_list_rate") or item.get("rate"), 3)
+        net_rate = flt(item.get("net_rate") or item.get("rate"), 3)
+        discount_per_unit = flt(price_list_rate - net_rate, 3)
+        tax_per_unit = flt(item_tax_map.get(item.get("item_code"), 0) / original_qty, 3) if original_qty else 0
 
         return {
             **item,
@@ -1834,9 +1834,9 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
             "price_list_rate": price_list_rate,
             "rate": net_rate,
             "discount_per_unit": discount_per_unit,
-            "amount": flt(net_rate * -remaining_qty, 2),
+            "amount": flt(net_rate * -remaining_qty, 3),
             "tax_per_unit": tax_per_unit,
-            "rate_with_tax": flt(net_rate + tax_per_unit, 2),
+            "rate_with_tax": flt(net_rate + tax_per_unit, 3),
         }
 
     return_dict["items"] = [

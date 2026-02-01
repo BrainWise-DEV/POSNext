@@ -873,7 +873,7 @@
 
 <script setup>
 import { usePOSSettingsStore } from "@/stores/posSettings"
-import { formatCurrency as formatCurrencyUtil, getCurrencySymbol, round2 } from "@/utils/currency"
+import { formatCurrency as formatCurrencyUtil, getCurrencySymbol, round3 } from "@/utils/currency"
 import { getPaymentIcon } from "@/utils/payment"
 import { offlineWorker } from "@/utils/offline/workerClient"
 import { logger } from "@/utils/logger"
@@ -1395,38 +1395,38 @@ const totalPaid = computed(() => {
 		(sum, entry) => sum + (entry.amount || 0),
 		0,
 	)
-	return round2(sum)
+	return round3(sum)
 })
 
 const totalAvailableCredit = computed(() => {
 	// Use net_balance: negative means customer has credit, positive means they owe
 	// Return negative of net_balance so positive = credit available, negative = outstanding
-	return round2(-customerBalance.value.net_balance)
+	return round3(-customerBalance.value.net_balance)
 })
 
 // Remaining credit after deducting what's already been applied as payment
 const remainingAvailableCredit = computed(() => {
 	const usedCredit = getMethodTotal('Customer Credit')
 	const remaining = totalAvailableCredit.value - usedCredit
-	return remaining > 0 ? round2(remaining) : 0
+	return remaining > 0 ? round3(remaining) : 0
 })
 
 // Calculate the actual discount amount based on type (percentage or fixed amount)
 const calculatedAdditionalDiscount = computed(() => {
 	if (additionalDiscountType.value === 'percentage') {
-		return round2((props.subtotal * localAdditionalDiscount.value) / 100)
+		return round3((props.subtotal * localAdditionalDiscount.value) / 100)
 	}
-	return round2(localAdditionalDiscount.value)
+	return round3(localAdditionalDiscount.value)
 })
 
 const remainingAmount = computed(() => {
-	const remaining = round2(props.grandTotal) - totalPaid.value
-	return remaining > 0 ? round2(remaining) : 0
+	const remaining = round3(props.grandTotal) - totalPaid.value
+	return remaining > 0 ? round3(remaining) : 0
 })
 
 const changeAmount = computed(() => {
-	const change = totalPaid.value - round2(props.grandTotal)
-	return change > 0 ? round2(change) : 0
+	const change = totalPaid.value - round3(props.grandTotal)
+	return change > 0 ? round3(change) : 0
 })
 
 // ===========================================
@@ -1486,7 +1486,7 @@ const isExactAmountValid = computed(() => {
 	if (hasCashPayment.value && !hasNonCashPayment.value) return true
 
 	// Non-cash or mixed: total paid must not exceed grand total
-	return totalPaid.value <= round2(props.grandTotal)
+	return totalPaid.value <= round3(props.grandTotal)
 })
 
 const canComplete = computed(() => {
@@ -1531,7 +1531,7 @@ const { quickAmounts } = useQuickAmounts(remainingAmount, isLastMethodCash)
 function isQuickAmountDisabled(amount) {
 	return isExactAmountModeActive.value
 		&& !isCashPaymentMethod(lastSelectedMethod.value)
-		&& amount !== round2(remainingAmount.value)
+		&& amount !== round3(remainingAmount.value)
 }
 
 // Preload payment methods when posProfile is set (before dialog opens)
@@ -1640,7 +1640,7 @@ function switchToNextPaymentMethod(partialAmount) {
 	if (nextMethod) {
 		lastSelectedMethod.value = nextMethod
 		// Pre-fill numpad with remaining amount for convenience
-		const newRemaining = round2(remainingAmount.value)
+		const newRemaining = round3(remainingAmount.value)
 		if (newRemaining > 0) {
 			setNumpadValue(newRemaining)
 			// Also set mobile custom amount
@@ -1683,7 +1683,7 @@ function quickAddPayment(method) {
 			})
 			.reduce((sum, entry) => sum + (entry.amount || 0), 0)
 
-		const maxAllowed = round2(props.grandTotal) - currentNonCashTotal
+		const maxAllowed = round3(props.grandTotal) - currentNonCashTotal
 
 		if (maxAllowed <= 0) {
 			showWarning(__('Cannot add more non-cash payments. Use cash for overpayment.'))
@@ -1696,7 +1696,7 @@ function quickAddPayment(method) {
 
 	// For mixed payments in exact amount mode, validate total doesn't exceed grand total
 	if (isExactAmountModeActive.value && hasNonCashPayment.value && isCashPaymentMethod(method)) {
-		const maxAllowed = round2(props.grandTotal) - totalPaid.value
+		const maxAllowed = round3(props.grandTotal) - totalPaid.value
 		if (maxAllowed <= 0) {
 			showInfo(__('Invoice fully paid. No additional payment needed.'))
 			return
@@ -1776,7 +1776,7 @@ function addCustomPayment(method, amount) {
 	if (isExactAmountModeActive.value && !isCashPaymentMethod(method)) {
 		// Calculate the remaining amount after ALL existing payments (cash + non-cash)
 		// Non-cash payments in exact amount mode must equal the remaining balance exactly
-		const maxAllowed = round2(props.grandTotal - totalPaid.value)
+		const maxAllowed = round3(props.grandTotal - totalPaid.value)
 
 		if (maxAllowed <= 0) {
 			showWarning(__('Cannot add more non-cash payments. Use cash for overpayment.'))
@@ -1784,7 +1784,7 @@ function addCustomPayment(method, amount) {
 		}
 
 		// Warn and reject if amount doesn't match exact remaining (use rounded comparison to avoid floating-point issues)
-		if (round2(amt) !== maxAllowed) {
+		if (round3(amt) !== maxAllowed) {
 			showWarning(__('Non-cash payment must equal {0} exactly', [formatCurrency(maxAllowed)]))
 			return
 		}
@@ -1796,8 +1796,8 @@ function addCustomPayment(method, amount) {
 	// For mixed payments in exact amount mode, validate total doesn't exceed grand total
 	if (isExactAmountModeActive.value && hasNonCashPayment.value && isCashPaymentMethod(method)) {
 		const newTotal = totalPaid.value + amt
-		if (newTotal > round2(props.grandTotal)) {
-			showWarning(__('Mixed payment cannot exceed invoice total. Limit: {0}', [formatCurrency(round2(props.grandTotal) - totalPaid.value)]))
+		if (newTotal > round3(props.grandTotal)) {
+			showWarning(__('Mixed payment cannot exceed invoice total. Limit: {0}', [formatCurrency(round3(props.grandTotal) - totalPaid.value)]))
 			return
 		}
 	}

@@ -128,3 +128,22 @@ export function round2(value) {
 	// Fallback for environments where Frappe is not available (e.g., unit tests)
 	return Number(value.toFixed(2))
 }
+
+/**
+ * Round a number to 3 decimal places
+ * Used for rate calculations where higher precision is needed to avoid rounding discrepancies.
+ * Uses Frappe's flt() when available to ensure consistency with backend rounding method.
+ * @param {number} value - The numeric value to round
+ * @returns {number} Rounded value
+ */
+export function round3(value) {
+	if (typeof value !== "number" || isNaN(value)) {
+		return 0
+	}
+	// Use Frappe's flt() for consistent rounding with backend (respects system rounding method)
+	if (typeof window !== "undefined" && typeof window.flt === "function") {
+		return window.flt(value, 3)
+	}
+	// Fallback for environments where Frappe is not available (e.g., unit tests)
+	return Number(value.toFixed(3))
+}

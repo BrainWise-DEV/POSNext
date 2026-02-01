@@ -158,7 +158,7 @@
 </template>
 
 <script setup>
-import { formatCurrency as formatCurrencyUtil, round2 } from "@/utils/currency"
+import { formatCurrency as formatCurrencyUtil, round3 } from "@/utils/currency"
 import { clearAllDrafts, deleteDraft, getAllDrafts } from "@/utils/draftManager"
 import { printInvoiceCustom } from "@/utils/printInvoice"
 import { useToast } from "@/composables/useToast"
@@ -288,7 +288,7 @@ function formatCurrency(amount) {
 
 function calculateTotal(items) {
 	if (!items || items.length === 0) return 0
-	return round2(items.reduce((sum, item) => {
+	return round3(items.reduce((sum, item) => {
 		const qty = item.quantity || item.qty || 1
 		const rate = item.rate || 0
 		return sum + qty * rate
