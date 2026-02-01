@@ -515,8 +515,9 @@ def update_invoice(data):
         # ========================================================================
         # DISCOUNT CALCULATION - CRITICAL LOGIC
         # ========================================================================
-        # Problem: Frontend sends rate (discounted) and discount_percentage
-        # Solution: Reverse-calculate price_list_rate (original price) to avoid double discount
+        # Frontend sends: rate (discounted), price_list_rate (original), discount_percentage
+        # Priority: Trust frontend's price_list_rate if provided (avoids rounding errors)
+        # Fallback: Reverse-calculate price_list_rate from rate and discount_percentage
         #
         # Formula: rate = price_list_rate * (1 - discount_percentage/100)
         # Reverse: price_list_rate = rate / (1 - discount_percentage/100)
@@ -524,17 +525,16 @@ def update_invoice(data):
         for item in invoice_doc.get("items", []):
             item_rate = flt(item.rate or 0)
             discount_pct = flt(item.discount_percentage or 0)
+            frontend_price_list_rate = flt(item.get("price_list_rate") or 0)
 
-            # If item has a discount, reverse-calculate the original price_list_rate
-            if discount_pct > 0 and discount_pct < 100:
-                if item_rate > 0:
-                    # Reverse calculation to get original price
-                    item.price_list_rate = item_rate / (1 - discount_pct / 100)
-                elif not item.get("price_list_rate"):
-                    # Fallback: if rate is 0 but discount exists (edge case)
-                    item.price_list_rate = item_rate
-            elif not item.get("price_list_rate"):
-                # No discount or price_list_rate not set - use rate as is
+            # Trust frontend's price_list_rate if provided and valid
+            if frontend_price_list_rate > 0:
+                item.price_list_rate = frontend_price_list_rate
+            # Fallback: reverse-calculate if discount exists but no price_list_rate
+            elif discount_pct > 0 and discount_pct < 100 and item_rate > 0:
+                item.price_list_rate = flt(item_rate / (1 - discount_pct / 100), 2)
+            else:
+                # No discount or price_list_rate - use rate as is
                 item.price_list_rate = item_rate
 
             # Ensure price_list_rate is never less than rate (data integrity)
@@ -1039,6 +1039,37 @@ def submit_invoice(invoice=None, data=None):
 
         # Auto-set batch numbers for returns
         _auto_set_return_batches(invoice_doc)
+
+        # Handle write-off amount if provided
+        write_off_amount = flt(data.get("write_off_amount") or invoice.get("write_off_amount") or 0)
+        if write_off_amount > 0 and doctype == "Sales Invoice":
+            # Get write-off account and cost center from POS Profile
+            if pos_profile:
+                try:
+                    pos_profile_doc = frappe.get_cached_doc("POS Profile", pos_profile)
+                    write_off_account = pos_profile_doc.write_off_account
+                    write_off_cost_center = pos_profile_doc.write_off_cost_center
+                    write_off_limit = flt(pos_profile_doc.write_off_limit or 0)
+
+                    # Validate write-off amount is within limit
+                    if write_off_limit > 0 and write_off_amount > write_off_limit:
+                        frappe.throw(
+                            _("Write-off amount {0} exceeds limit {1}").format(
+                                write_off_amount, write_off_limit
+                            )
+                        )
+
+                    # Set write-off fields on invoice
+                    if write_off_account:
+                        invoice_doc.write_off_account = write_off_account
+                        invoice_doc.write_off_cost_center = write_off_cost_center
+                        invoice_doc.write_off_amount = write_off_amount
+                        invoice_doc.base_write_off_amount = write_off_amount  # Assuming same currency
+                except Exception as e:
+                    frappe.log_error(
+                        f"Failed to apply write-off from POS Profile {pos_profile}: {e}",
+                        "POS Write-Off Error"
+                    )
 
         # Check if POS Settings allows negative stock
         pos_settings_allow_negative = False
@@ -1626,6 +1657,42 @@ def get_invoice_for_return(invoice_name):
     return invoice_dict
 
 
+def _parse_item_wise_tax_detail(raw_detail):
+    """Parse item_wise_tax_detail from string or dict format."""
+    if not raw_detail:
+        return {}
+    if isinstance(raw_detail, str):
+        return json.loads(raw_detail)
+    return raw_detail
+
+
+def _build_item_tax_map(taxes: list) -> dict:
+    """Build item_code -> tax_amount map from taxes child table.
+
+    Args:
+        taxes: List of tax row dicts containing item_wise_tax_detail
+
+    Returns:
+        Dict mapping item_code to total tax amount (absolute value)
+
+    Note:
+        item_wise_tax_detail format: {"ITEM-CODE": [tax_rate, tax_amount]}
+        Return documents have negative amounts, hence abs() is used.
+    """
+    from collections import defaultdict
+    tax_map = defaultdict(float)
+
+    for tax_row in taxes:
+        try:
+            details = _parse_item_wise_tax_detail(tax_row.get("item_wise_tax_detail"))
+            for item_code, (_, tax_amount) in details.items():
+                tax_map[item_code] += abs(flt(tax_amount))
+        except (json.JSONDecodeError, TypeError, ValueError, KeyError):
+            continue
+
+    return dict(tax_map)
+
+
 @frappe.whitelist()
 def prepare_return_invoice(invoice_name, pos_opening_shift=None):
     """Prepare a return invoice using ERPNext's make_sales_return.
@@ -1669,7 +1736,9 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
             si.paid_amount,
             si.outstanding_amount,
             si.customer,
-            si.customer_name
+            si.customer_name,
+            si.net_total,
+            si.total_taxes_and_charges
         )
         .where(si.name == invoice_name)
     ).run(as_dict=True)
@@ -1766,39 +1835,48 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
         "customer_name": invoice_info.customer_name,
         "posting_date": invoice_info.posting_date,
         "payments": payments_data,
+        "net_total": invoice_info.net_total,
+        "total_taxes_and_charges": invoice_info.total_taxes_and_charges,
     }
 
-    updated_items = []
-    for item in return_dict.get("items", []):
-        # Get the original item reference (sales_invoice_item points to original item name)
-        original_item_ref = item.get("sales_invoice_item") or item.get("item_code")
-        already_returned = returned_qty_map.get(original_item_ref, 0)
+    item_tax_map = _build_item_tax_map(return_dict.get("taxes", []))
 
-        # The qty from make_sales_return is already negative (full original qty negated)
-        # We need to calculate remaining returnable qty
+    def process_return_item(item):
+        """Process single item for return, returns None if not returnable."""
+        item_ref = item.get("sales_invoice_item") or item.get("item_code")
         original_qty = abs(flt(item.get("qty", 0)))
-        remaining_qty = original_qty - already_returned
+        remaining_qty = original_qty - returned_qty_map.get(item_ref, 0)
 
-        if remaining_qty > 0:
-            item_copy = item.copy()
-            # Store quantities for frontend use
-            item_copy["original_qty"] = original_qty
-            item_copy["already_returned"] = already_returned
-            item_copy["remaining_qty"] = remaining_qty
-            # Set qty to negative of remaining (for return)
-            item_copy["qty"] = -remaining_qty
+        if remaining_qty <= 0:
+            return None
 
-            # net_rate reflects actual paid price after all discounts (coupons, additional discounts)
-            # rate only includes item-level discounts - fallback if net_rate unavailable
-            item_copy["rate"] = flt(item.get("net_rate") or item.get("rate"))
-            item_copy["amount"] = item_copy["rate"] * item_copy["qty"]
+        # Get rate breakdown for display - use 3 decimal precision for rates
+        price_list_rate = flt(item.get("price_list_rate") or item.get("rate"), 3)
+        net_rate = flt(item.get("net_rate") or item.get("rate"), 3)
+        discount_per_unit = flt(price_list_rate - net_rate, 3)
+        tax_per_unit = flt(item_tax_map.get(item.get("item_code"), 0) / original_qty, 3) if original_qty else 0
 
-            updated_items.append(item_copy)
+        return {
+            **item,
+            "original_qty": original_qty,
+            "already_returned": original_qty - remaining_qty,
+            "remaining_qty": remaining_qty,
+            "qty": -remaining_qty,
+            "price_list_rate": price_list_rate,
+            "rate": net_rate,
+            "discount_per_unit": discount_per_unit,
+            "amount": flt(net_rate * -remaining_qty, 3),
+            "tax_per_unit": tax_per_unit,
+            "rate_with_tax": flt(net_rate + tax_per_unit, 3),
+        }
 
-    return_dict["items"] = updated_items
+    return_dict["items"] = [
+        processed for item in return_dict.get("items", [])
+        if (processed := process_return_item(item)) is not None
+    ]
 
     # Check if all items have been fully returned
-    if not updated_items:
+    if not return_dict["items"]:
         frappe.throw(_("All items from this invoice have already been returned"))
 
     return return_dict

@@ -4,13 +4,7 @@
  */
 
 import { computed } from "vue"
-
-/**
- * Round to 2 decimal places (avoids floating point issues)
- */
-function round2(val) {
-	return Math.round(val * 100) / 100
-}
+import { round3 } from "@/utils/currency"
 
 /**
  * Create quick amounts suggestions based on remaining amount
@@ -35,7 +29,7 @@ export function useQuickAmounts(remainingAmount, isCash) {
 		const cash = isCash ? isCash.value : true
 		const amounts = new Set()
 		// Cash payments use ceil (physical denominations), non-cash use exact amount
-		const exactAmount = cash ? Math.ceil(remaining) : round2(remaining)
+		const exactAmount = cash ? Math.ceil(remaining) : round3(remaining)
 
 		// Always include the primary amount first
 		amounts.add(exactAmount)

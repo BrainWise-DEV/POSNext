@@ -4,6 +4,7 @@ import { isOffline } from "@/utils/offline"
 import { useSerialNumberStore } from "@/stores/serialNumber"
 import { CoalescingMutex } from "@/utils/mutex"
 import { logger } from "@/utils/logger"
+import { round3 } from "@/utils/currency"
 
 const log = logger.create("Invoice")
 
@@ -139,17 +140,17 @@ export function useInvoice() {
 	const subtotal = computed(() => _cachedSubtotal.value)
 	const totalTax = computed(() => _cachedTotalTax.value)
 	const totalDiscount = computed(
-		() => _cachedTotalDiscount.value + (additionalDiscount.value || 0),
+		() => round3(_cachedTotalDiscount.value + (additionalDiscount.value || 0)),
 	)
 	const grandTotal = computed(() => {
 		const discount = _cachedTotalDiscount.value + (additionalDiscount.value || 0)
 
 		if (taxInclusive.value) {
 			// Tax inclusive: Subtotal already includes tax, so don't add it again
-			return _cachedSubtotal.value - discount
+			return round3(_cachedSubtotal.value - discount)
 		} else {
 			// Tax exclusive: Add tax on top of subtotal
-			return _cachedSubtotal.value + _cachedTotalTax.value - discount
+			return round3(_cachedSubtotal.value + _cachedTotalTax.value - discount)
 		}
 	})
 	const totalPaid = computed(() => _cachedTotalPaid.value)
@@ -423,10 +424,10 @@ export function useInvoice() {
 
 		if (discount.percentage > 0) {
 			// Percentage discount on SUBTOTAL (before tax)
-			return (base * discount.percentage) / 100
+			return round3((base * discount.percentage) / 100)
 		} else if (discount.amount > 0) {
 			// Fixed amount discount
-			return discount.amount
+			return round3(discount.amount)
 		}
 
 		return 0
@@ -562,14 +563,14 @@ export function useInvoice() {
 	function recalculateItem(item) {
 		// Determine the base unit price (original list price)
 		const priceListRate = item.price_list_rate || item.rate
-		const baseAmount = item.quantity * priceListRate
+		const baseAmount = round3(item.quantity * priceListRate)
 
 		// Calculate discount from either percentage or fixed amount
 		let discountAmount = 0
 		if (item.discount_percentage > 0) {
-			discountAmount = (baseAmount * item.discount_percentage) / 100
+			discountAmount = round3((baseAmount * item.discount_percentage) / 100)
 		} else if (item.discount_amount > 0) {
-			discountAmount = item.discount_amount
+			discountAmount = round3(item.discount_amount)
 			// Sync percentage when amount is provided directly
 			item.discount_percentage =
 				baseAmount > 0 ? (discountAmount / baseAmount) * 100 : 0
@@ -583,16 +584,16 @@ export function useInvoice() {
 
 		if (taxInclusive.value && totalTaxRate > 0) {
 			// Tax-inclusive: Work backwards from gross to extract net and tax
-			const grossAmount = baseAmount - discountAmount
-			netAmount = grossAmount / (1 + totalTaxRate / 100)
-			taxAmount = grossAmount - netAmount
+			const grossAmount = round3(baseAmount - discountAmount)
+			netAmount = round3(grossAmount / (1 + totalTaxRate / 100))
+			taxAmount = round3(grossAmount - netAmount)
 		} else {
 			// Tax-exclusive: Calculate tax on top of net amount
-			netAmount = baseAmount - discountAmount
-			taxAmount = (netAmount * totalTaxRate) / 100
+			netAmount = round3(baseAmount - discountAmount)
+			taxAmount = round3((netAmount * totalTaxRate) / 100)
 		}
 
-		// Update item fields
+		// Update item fields with rounded values
 		item.tax_amount = taxAmount
 		item.rate = priceListRate  // Preserve original price for display
 		item.amount = netAmount    // Net amount for backend calculations
@@ -610,10 +611,10 @@ export function useInvoice() {
 
 		if (taxInclusive.value) {
 			// Gross rate: price minus per-unit discount
-			return priceListRate - (discountAmount / qty)
+			return round3(priceListRate - (discountAmount / qty))
 		}
 		// Net rate: total amount divided by quantity
-		return qty > 0 ? (item.amount || 0) / qty : item.rate || 0
+		return qty > 0 ? round3((item.amount || 0) / qty) : item.rate || 0
 	}
 
 	/**
@@ -639,14 +640,14 @@ export function useInvoice() {
 			item_name: item.item_name,
 			qty: item.quantity || item.qty || 1,
 			rate: computeBackendRate(item),
-			price_list_rate: item.price_list_rate || item.rate,
+			price_list_rate: round3(item.price_list_rate || item.rate),
 			uom: item.uom,
 			warehouse: item.warehouse,
 			batch_no: item.batch_no,
 			serial_no: item.serial_no,
 			conversion_factor: item.conversion_factor || 1,
-			discount_percentage: item.discount_percentage || 0,
-			discount_amount: item.discount_amount || 0,
+			discount_percentage: round3(item.discount_percentage || 0),
+			discount_amount: round3(item.discount_amount || 0),
 			pricing_rules: stringifyPricingRules(item.pricing_rules),
 		}))
 	}
@@ -748,7 +749,7 @@ export function useInvoice() {
 		return result?.data || result
 	}
 
-	async function submitInvoice(targetDoctype = "Sales Invoice", deliveryDate = null) {
+	async function submitInvoice(targetDoctype = "Sales Invoice", deliveryDate = null, writeOffAmount = 0) {
 		/**
 		 * Two-step submission process with mutex protection:
 		 * 1. Create/update draft invoice
@@ -758,6 +759,10 @@ export function useInvoice() {
 		 * - Rapid double-clicks on payment buttons
 		 * - Concurrent submissions from multiple UI interactions
 		 * - Credit sales where full amount goes on account
+		 *
+		 * @param {string} targetDoctype - The document type to create (Sales Invoice or Sales Order)
+		 * @param {string|null} deliveryDate - Delivery date for Sales Orders
+		 * @param {number} writeOffAmount - Amount to write off (small remaining balances)
 		 */
 		return await submitMutex.withLock(async () => {
 			// Check if already submitting (belt and suspenders with mutex)
@@ -826,6 +831,7 @@ export function useInvoice() {
 				const submitData = {
 					change_amount:
 						remainingAmount.value < 0 ? Math.abs(remainingAmount.value) : 0,
+					write_off_amount: writeOffAmount || 0,
 				}
 
 				try {

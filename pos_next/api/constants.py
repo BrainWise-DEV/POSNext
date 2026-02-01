@@ -7,6 +7,10 @@ Shared constants for POS Next API modules.
 
 This module contains shared constants, field lists, and default values
 used across multiple API modules to maintain DRY principles.
+
+Note: Some settings are derived from POS Profile as single source of truth:
+- allow_write_off_change: derived from POS Profile (write_off_account + write_off_limit > 0)
+- disable_rounded_total: uses POS Profile value directly
 """
 
 # Fields to fetch from POS Settings
@@ -19,10 +23,8 @@ POS_SETTINGS_FIELDS = [
 	"allow_user_to_edit_item_discount",
 	"use_percentage_discount",
 	"max_discount_allowed",
-	"disable_rounded_total",
 	"allow_credit_sale",
 	"allow_return",
-	"allow_write_off_change",
 	"allow_partial_payment",
 	"use_exact_amount",
 	"decimal_precision",
@@ -43,10 +45,10 @@ DEFAULT_POS_SETTINGS = {
 	"allow_user_to_edit_item_discount": 1,
 	"use_percentage_discount": 0,
 	"max_discount_allowed": 0,
-	"disable_rounded_total": 1,
+	"disable_rounded_total": 0,  # Derived from POS Profile
 	"allow_credit_sale": 0,
 	"allow_return": 0,
-	"allow_write_off_change": 0,
+	"allow_write_off_change": 0,  # Derived from POS Profile
 	"allow_partial_payment": 0,
 	"use_exact_amount": 0,
 	"decimal_precision": "2",
