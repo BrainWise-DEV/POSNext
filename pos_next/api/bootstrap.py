@@ -120,6 +120,7 @@ def get_pos_profile_data(pos_profile):
 		"customer": profile_doc.customer,
 		"write_off_account": profile_doc.write_off_account,
 		"write_off_cost_center": profile_doc.write_off_cost_center,
+		"write_off_limit": profile_doc.write_off_limit or 0,
 		"print_format": profile_doc.get("print_format"),
 		"auto_print": profile_doc.get("print_receipt_on_order_complete", 0),
 		"country": profile_doc.get("country"),
@@ -127,7 +128,13 @@ def get_pos_profile_data(pos_profile):
 
 
 def get_pos_settings(pos_profile):
-	"""Get POS Settings for a given POS Profile"""
+	"""
+	Get POS Settings for a given POS Profile.
+
+	Single source of truth:
+	- allow_write_off_change is derived from POS Profile (write_off_account + write_off_limit)
+	- disable_rounded_total uses POS Profile value directly
+	"""
 	from pos_next.api.constants import POS_SETTINGS_FIELDS, DEFAULT_POS_SETTINGS
 
 	if not pos_profile:
@@ -142,7 +149,19 @@ def get_pos_settings(pos_profile):
 		)
 
 		if not pos_settings:
-			return DEFAULT_POS_SETTINGS.copy()
+			pos_settings = DEFAULT_POS_SETTINGS.copy()
+
+		# Get POS Profile - single source of truth for write-off and rounding
+		profile_doc = frappe.get_doc("POS Profile", pos_profile)
+
+		# Derive allow_write_off_change from POS Profile configuration
+		# Write-off is allowed if account is configured AND limit > 0
+		pos_settings["allow_write_off_change"] = 1 if (
+			profile_doc.write_off_account and (profile_doc.write_off_limit or 0) > 0
+		) else 0
+
+		# Use POS Profile's disable_rounded_total as single source of truth
+		pos_settings["disable_rounded_total"] = profile_doc.disable_rounded_total or 0
 
 		return pos_settings
 	except Exception:

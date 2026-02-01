@@ -403,9 +403,14 @@
 									<div :class="['font-bold text-blue-600', dynamicTextSize.amount]">{{ formatCurrency(totalPaid) }}</div>
 								</div>
 								<!-- Remaining / Change (Right Half) -->
-								<div v-if="remainingAmount > 0" :class="['bg-orange-50 text-center', isCompactMode ? 'p-2' : 'p-3']">
+								<div v-if="remainingAmount > 0 && !applyWriteOff" :class="['bg-orange-50 text-center', isCompactMode ? 'p-2' : 'p-3']">
 									<div class="text-xs font-medium text-orange-600 uppercase tracking-wide mb-1">{{ __('Remaining') }}</div>
 									<div :class="['font-bold text-orange-600', dynamicTextSize.amount]">{{ formatCurrency(remainingAmount) }}</div>
+								</div>
+								<!-- Write-off Applied -->
+								<div v-else-if="applyWriteOff && canWriteOff" :class="['bg-purple-50 text-center', isCompactMode ? 'p-2' : 'p-3']">
+									<div class="text-xs font-medium text-purple-600 uppercase tracking-wide mb-1">{{ __('Write Off') }}</div>
+									<div :class="['font-bold text-purple-600', dynamicTextSize.amount]">{{ formatCurrency(writeOffAmount) }}</div>
 								</div>
 								<div v-else-if="changeAmount > 0 && allowsOverpayment" :class="['bg-green-50 text-center', isCompactMode ? 'p-2' : 'p-3']">
 									<div class="text-xs font-medium text-green-600 uppercase tracking-wide mb-1">{{ __('Change Due') }}</div>
@@ -421,6 +426,47 @@
 										<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
 									</svg>
 									<span :class="['font-bold text-green-600', dynamicTextSize.body]">{{ __('Fully Paid') }}</span>
+								</div>
+							</div>
+						</div>
+
+						<!-- Write-Off Toggle -->
+						<div v-if="canWriteOff" class="border-t border-gray-200 px-4 py-3 bg-white">
+							<div class="flex items-center justify-between mb-1.5">
+								<span class="text-xs font-medium text-gray-500 uppercase tracking-wider">{{ __('Write Off') }}</span>
+								<span class="text-xs text-gray-400">{{ __('Max') }}: {{ formatCurrency(writeOffLimit) }}</span>
+							</div>
+							<div
+								class="relative h-12 rounded-lg overflow-hidden select-none cursor-pointer border"
+								:class="applyWriteOff ? 'bg-teal-500 border-teal-500' : 'bg-gray-100 border-gray-200'"
+								@click="applyWriteOff = !applyWriteOff"
+								style="transition: all 0.25s ease"
+							>
+								<!-- Center Text -->
+								<div class="absolute inset-0 flex items-center justify-center z-10">
+									<span
+										class="text-base font-semibold tracking-wide"
+										:class="applyWriteOff ? 'text-white' : 'text-gray-700'"
+									>
+										{{ formatCurrency(remainingAmount) }}
+									</span>
+								</div>
+
+								<!-- Toggle Handle -->
+								<div
+									class="absolute top-1.5 bottom-1.5 w-11 rounded-md flex items-center justify-center z-20 bg-white border border-gray-200"
+									:style="{
+										left: applyWriteOff ? 'calc(100% - 3rem)' : '0.375rem',
+										transition: 'left 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+										boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+									}"
+								>
+									<svg v-if="applyWriteOff" class="w-5 h-5 text-teal-500" fill="currentColor" viewBox="0 0 20 20">
+										<path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+									</svg>
+									<svg v-else class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+									</svg>
 								</div>
 							</div>
 						</div>
@@ -696,9 +742,9 @@
 
 							<!-- Complete Payment Button -->
 							<button
-								v-if="remainingAmount === 0 && totalPaid > 0"
+								v-if="(remainingAmount === 0 || (applyWriteOff && canWriteOff)) && totalPaid > 0"
 								@click="completePayment"
-								:disabled="isSubmitting"
+								:disabled="isSubmitting || !canComplete"
 								:class="[
 									'w-full font-bold rounded-lg flex items-center justify-center',
 									isSubmitting
@@ -945,6 +991,14 @@ const props = defineProps({
 		default: "Sales Invoice",
 	},
 	isSubmitting: {
+		type: Boolean,
+		default: false,
+	},
+	writeOffLimit: {
+		type: Number,
+		default: 0,
+	},
+	allowWriteOff: {
 		type: Boolean,
 		default: false,
 	},
@@ -1430,6 +1484,114 @@ const changeAmount = computed(() => {
 })
 
 // ===========================================
+// Write-Off Logic
+// When enabled, allows small remaining amounts to be written off
+// ===========================================
+
+// Check if write-off is possible for the current remaining amount
+const canWriteOff = computed(() => {
+	// Write-off is only possible if:
+	// 1. Write-off is allowed (setting enabled and limit > 0)
+	// 2. There is a remaining amount to write off
+	// 3. Remaining amount is within the write-off limit
+	// 4. There is at least one payment entry
+	return props.allowWriteOff &&
+		props.writeOffLimit > 0 &&
+		remainingAmount.value > 0 &&
+		remainingAmount.value <= props.writeOffLimit &&
+		paymentEntries.value.length > 0
+})
+
+// State to track if user wants to write off
+const applyWriteOff = ref(false)
+
+// Slide track ref for write-off slider
+const slideTrack = ref(null)
+
+// Slide position (0-100%)
+const slidePosition = ref(0)
+const isDragging = ref(false)
+
+// Watch applyWriteOff to sync with slidePosition
+watch(applyWriteOff, (newVal) => {
+	if (!isDragging.value) {
+		slidePosition.value = newVal ? 100 : 0
+	}
+})
+
+// Smooth slide to activate write-off
+const startSlide = (e) => {
+	e.preventDefault()
+	const track = slideTrack.value
+	if (!track) return
+
+	isDragging.value = true
+	const rect = track.getBoundingClientRect()
+	const trackWidth = rect.width
+	const handleWidth = 48 // w-12 = 3rem = 48px
+
+	const getX = (event) => {
+		if (event.touches && event.touches.length > 0) {
+			return event.touches[0].clientX - rect.left
+		}
+		return event.clientX - rect.left
+	}
+
+	const startX = getX(e)
+	const startPosition = slidePosition.value
+
+	const onMove = (event) => {
+		event.preventDefault()
+		const currentX = event.touches ? event.touches[0].clientX - rect.left : event.clientX - rect.left
+		const deltaX = currentX - startX
+		const deltaPercent = (deltaX / (trackWidth - handleWidth)) * 100
+
+		let newPosition = startPosition + deltaPercent
+		newPosition = Math.max(0, Math.min(100, newPosition))
+		slidePosition.value = newPosition
+	}
+
+	const onEnd = () => {
+		isDragging.value = false
+
+		// Snap to activated or deactivated based on threshold
+		if (slidePosition.value > 40) {
+			slidePosition.value = 100
+			applyWriteOff.value = true
+		} else {
+			slidePosition.value = 0
+			applyWriteOff.value = false
+		}
+
+		document.removeEventListener('mousemove', onMove)
+		document.removeEventListener('mouseup', onEnd)
+		document.removeEventListener('touchmove', onMove)
+		document.removeEventListener('touchend', onEnd)
+	}
+
+	document.addEventListener('mousemove', onMove)
+	document.addEventListener('mouseup', onEnd)
+	document.addEventListener('touchmove', onMove, { passive: false })
+	document.addEventListener('touchend', onEnd)
+}
+
+// The amount to be written off (0 if not applying write-off)
+const writeOffAmount = computed(() => {
+	if (canWriteOff.value && applyWriteOff.value) {
+		return remainingAmount.value
+	}
+	return 0
+})
+
+// Effective remaining amount after write-off
+const effectiveRemainingAmount = computed(() => {
+	if (applyWriteOff.value && canWriteOff.value) {
+		return 0
+	}
+	return remainingAmount.value
+})
+
+// ===========================================
 // Exact Amount Validation Logic
 // When useExactAmount is enabled:
 // - Cash only: allows overpayment (change)
@@ -1504,12 +1666,19 @@ const canComplete = computed(() => {
 	if (props.allowPartialPayment) {
 		return totalPaid.value > 0 && paymentEntries.value.length > 0
 	}
+
+	// If write-off is applied and covers the remaining amount, can complete
+	if (applyWriteOff.value && canWriteOff.value) {
+		return paymentEntries.value.length > 0
+	}
+
 	// Otherwise require full payment
 	return remainingAmount.value === 0 && paymentEntries.value.length > 0
 })
 
 const paymentButtonText = computed(() => {
-	if (remainingAmount.value === 0) {
+	// Show "Complete Payment" if fully paid or write-off covers remaining
+	if (remainingAmount.value === 0 || (applyWriteOff.value && canWriteOff.value)) {
 		return __("Complete Payment")
 	}
 	if (props.allowPartialPayment && totalPaid.value > 0) {
@@ -1563,12 +1732,15 @@ watch(show, (newVal) => {
 		customerBalance.value = { total_outstanding: 0, total_credit: 0, net_balance: 0 }
 		selectedSalesPersons.value = []
 		salesPersonSearch.value = ''
+		applyWriteOff.value = false // Reset write-off state
 		// Set default delivery date to today for Sales Orders
 		deliveryDate.value = isSalesOrder.value ? today : ""
 
 		// Debug logging
 		log.debug('[PaymentDialog] Dialog opened with props:', {
 			allowCreditSale: props.allowCreditSale,
+			allowWriteOff: props.allowWriteOff,
+			writeOffLimit: props.writeOffLimit,
 			customer: props.customer,
 			company: props.company,
 			posProfile: props.posProfile
@@ -1884,7 +2056,8 @@ function completePayment() {
 		grandTotal: props.grandTotal,
 		allowPartialPayment: props.allowPartialPayment,
 		paymentEntries: paymentEntries.value,
-		salesPersons: selectedSalesPersons.value
+		salesPersons: selectedSalesPersons.value,
+		writeOff: { canWriteOff: canWriteOff.value, applyWriteOff: applyWriteOff.value, writeOffAmount: writeOffAmount.value }
 	})
 
 	if (!canComplete.value) {
@@ -1892,16 +2065,21 @@ function completePayment() {
 		return
 	}
 
-	const isPartial = totalPaid.value < props.grandTotal
+	// Calculate if this is a partial payment (considering write-off)
+	const effectivePaid = totalPaid.value + writeOffAmount.value
+	const isPartial = effectivePaid < props.grandTotal
 
 	const paymentData = {
 		payments: paymentEntries.value,
 		change_amount: changeAmount.value,
 		is_partial_payment: isPartial,
 		paid_amount: totalPaid.value,
-		outstanding_amount: isPartial ? remainingAmount.value : 0,
+		outstanding_amount: isPartial ? (remainingAmount.value - writeOffAmount.value) : 0,
 		sales_team: selectedSalesPersons.value.length > 0 ? selectedSalesPersons.value : null,
 		delivery_date: isSalesOrder.value ? deliveryDate.value : null,
+		// Write-off data
+		write_off_amount: writeOffAmount.value,
+		is_write_off: writeOffAmount.value > 0,
 	}
 
 	log.debug('[PaymentDialog] Emitting payment-completed:', paymentData)

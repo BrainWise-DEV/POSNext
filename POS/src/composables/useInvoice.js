@@ -749,7 +749,7 @@ export function useInvoice() {
 		return result?.data || result
 	}
 
-	async function submitInvoice(targetDoctype = "Sales Invoice", deliveryDate = null) {
+	async function submitInvoice(targetDoctype = "Sales Invoice", deliveryDate = null, writeOffAmount = 0) {
 		/**
 		 * Two-step submission process with mutex protection:
 		 * 1. Create/update draft invoice
@@ -759,6 +759,10 @@ export function useInvoice() {
 		 * - Rapid double-clicks on payment buttons
 		 * - Concurrent submissions from multiple UI interactions
 		 * - Credit sales where full amount goes on account
+		 *
+		 * @param {string} targetDoctype - The document type to create (Sales Invoice or Sales Order)
+		 * @param {string|null} deliveryDate - Delivery date for Sales Orders
+		 * @param {number} writeOffAmount - Amount to write off (small remaining balances)
 		 */
 		return await submitMutex.withLock(async () => {
 			// Check if already submitting (belt and suspenders with mutex)
@@ -827,6 +831,7 @@ export function useInvoice() {
 				const submitData = {
 					change_amount:
 						remainingAmount.value < 0 ? Math.abs(remainingAmount.value) : 0,
+					write_off_amount: writeOffAmount || 0,
 				}
 
 				try {

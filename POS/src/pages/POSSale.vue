@@ -442,6 +442,8 @@
 			:is-offline="offlineStore.isOffline"
 			:allow-partial-payment="posSettingsStore.allowPartialPayment"
 			:allow-credit-sale="posSettingsStore.allowCreditSale"
+			:allow-write-off="posSettingsStore.allowWriteOffChange"
+			:write-off-limit="shiftStore.writeOffLimit"
 			:customer="cartStore.customer"
 			:company="shiftStore.profileCompany"
 			:additional-discount="cartStore.additionalDiscount"
@@ -1843,6 +1845,11 @@ async function handlePaymentCompleted(paymentData) {
 			cartStore.setDeliveryDate(paymentData.delivery_date);
 		}
 
+		// Set write-off amount if provided
+		if (paymentData.write_off_amount && paymentData.write_off_amount > 0) {
+			cartStore.setWriteOffAmount(paymentData.write_off_amount);
+		}
+
 		// Delete draft if it exists (since we're submitting/saving invoice)
 		const draftIdToDelete = cartStore.currentDraftId;
 
@@ -1862,6 +1869,7 @@ async function handlePaymentCompleted(paymentData) {
 				grand_total: cartStore.grandTotal,
 				total_tax: cartStore.totalTax,
 				total_discount: cartStore.totalDiscount,
+				write_off_amount: paymentData.write_off_amount || 0,
 			};
 
 			await offlineStore.saveInvoiceOffline(invoiceData);

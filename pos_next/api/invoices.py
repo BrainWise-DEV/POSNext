@@ -1040,6 +1040,37 @@ def submit_invoice(invoice=None, data=None):
         # Auto-set batch numbers for returns
         _auto_set_return_batches(invoice_doc)
 
+        # Handle write-off amount if provided
+        write_off_amount = flt(data.get("write_off_amount") or invoice.get("write_off_amount") or 0)
+        if write_off_amount > 0 and doctype == "Sales Invoice":
+            # Get write-off account and cost center from POS Profile
+            if pos_profile:
+                try:
+                    pos_profile_doc = frappe.get_cached_doc("POS Profile", pos_profile)
+                    write_off_account = pos_profile_doc.write_off_account
+                    write_off_cost_center = pos_profile_doc.write_off_cost_center
+                    write_off_limit = flt(pos_profile_doc.write_off_limit or 0)
+
+                    # Validate write-off amount is within limit
+                    if write_off_limit > 0 and write_off_amount > write_off_limit:
+                        frappe.throw(
+                            _("Write-off amount {0} exceeds limit {1}").format(
+                                write_off_amount, write_off_limit
+                            )
+                        )
+
+                    # Set write-off fields on invoice
+                    if write_off_account:
+                        invoice_doc.write_off_account = write_off_account
+                        invoice_doc.write_off_cost_center = write_off_cost_center
+                        invoice_doc.write_off_amount = write_off_amount
+                        invoice_doc.base_write_off_amount = write_off_amount  # Assuming same currency
+                except Exception as e:
+                    frappe.log_error(
+                        f"Failed to apply write-off from POS Profile {pos_profile}: {e}",
+                        "POS Write-Off Error"
+                    )
+
         # Check if POS Settings allows negative stock
         pos_settings_allow_negative = False
         if pos_profile:

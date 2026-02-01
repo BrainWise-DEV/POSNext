@@ -20,11 +20,9 @@
   "allow_user_to_edit_item_discount",
   "use_percentage_discount",
   "max_discount_allowed",
-  "disable_rounded_total",
   "column_break_general",
   "allow_credit_sale",
   "allow_return",
-  "allow_write_off_change",
   "allow_partial_payment",
   "use_exact_amount",
   "enable_sales_persons",
@@ -187,13 +185,6 @@
    "precision": "2"
   },
   {
-   "default": "1",
-   "description": "Show exact totals without rounding",
-   "fieldname": "disable_rounded_total",
-   "fieldtype": "Check",
-   "label": "Disable Rounded Total"
-  },
-  {
    "fieldname": "column_break_general",
    "fieldtype": "Column Break"
   },
@@ -210,13 +201,6 @@
    "fieldname": "allow_return",
    "fieldtype": "Check",
    "label": "Allow Return"
-  },
-  {
-   "default": "0",
-   "description": "Write off small change amounts",
-   "fieldname": "allow_write_off_change",
-   "fieldtype": "Check",
-   "label": "Allow Write Off Change"
   },
   {
    "default": "0",
