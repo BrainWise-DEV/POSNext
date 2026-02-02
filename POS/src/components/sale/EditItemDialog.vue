@@ -95,12 +95,18 @@
 									type="number"
 									min="0"
 									step="0.01"
-									:readonly="!settingsStore.allowUserToEditRate"
+									:readonly="!canEditRate"
 									class="w-full h-10 border border-gray-300 rounded-lg ps-16 pe-3 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors"
-									:class="settingsStore.allowUserToEditRate ? 'bg-white' : 'bg-gray-50 cursor-not-allowed'"
+									:class="canEditRate ? 'bg-white' : 'bg-gray-50 cursor-not-allowed'"
+									:title="rateEditDisabledReason"
 									@input="calculateTotals"
 								/>
 							</div>
+							<!-- Compact warning when rate editing disabled due to pricing rules -->
+							<p v-if="hasPricingRules && settingsStore.allowUserToEditRate" class="mt-1 text-xs text-amber-600 flex items-center gap-1">
+								<FeatherIcon name="lock" class="w-3 h-3" />
+								{{ __('Locked (offer applied)') }}
+							</p>
 						</div>
 					</div>
 
@@ -228,7 +234,7 @@ import { usePOSSettingsStore } from "@/stores/posSettings"
 import { useSerialNumberStore } from "@/stores/serialNumber"
 import { getItemStock } from "@/utils/stockValidator"
 import { formatCurrency as formatCurrencyUtil, getCurrencySymbol } from "@/utils/currency"
-import { Button, Dialog } from "frappe-ui"
+import { Button, Dialog, FeatherIcon } from "frappe-ui"
 import { computed, ref, watch } from "vue"
 import SelectInput from "@/components/common/SelectInput.vue"
 
@@ -282,6 +288,32 @@ const availableUoms = computed(() => {
 })
 
 const currencySymbol = computed(() => getCurrencySymbol(props.currency))
+
+// Check if item has pricing rules applied (promotional offers)
+const hasPricingRules = computed(() => {
+	if (!localItem.value) return false
+	return localItem.value.pricing_rules &&
+		Array.isArray(localItem.value.pricing_rules) &&
+		localItem.value.pricing_rules.length > 0
+})
+
+// Rate editing is allowed only if:
+// 1. POS Settings allows rate editing AND
+// 2. Item does NOT have pricing rules (promotional offers) applied
+const canEditRate = computed(() => {
+	return settingsStore.allowUserToEditRate && !hasPricingRules.value
+})
+
+// Tooltip message for why rate editing is disabled
+const rateEditDisabledReason = computed(() => {
+	if (!settingsStore.allowUserToEditRate) {
+		return __('Rate editing is disabled')
+	}
+	if (hasPricingRules.value) {
+		return __('Locked (offer applied)')
+	}
+	return ''
+})
 
 // Options for SelectInput components
 const uomOptions = computed(() => {
