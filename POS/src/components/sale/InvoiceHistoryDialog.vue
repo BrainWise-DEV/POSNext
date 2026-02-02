@@ -150,7 +150,7 @@
 
 <script setup>
 import { useToast } from "@/composables/useToast"
-import { formatCurrency as formatCurrencyUtil } from "@/utils/currency"
+import { DEFAULT_CURRENCY, DEFAULT_LOCALE, formatCurrency as formatCurrencyUtil } from "@/utils/currency"
 import { getInvoiceStatusColor } from "@/utils/invoice"
 import { Button, Dialog, Input, createResource } from "frappe-ui"
 import { computed, ref, watch } from "vue"
@@ -164,7 +164,7 @@ const props = defineProps({
 	posOpeningShift: String,
 	currency: {
 		type: String,
-		default: "USD",
+		default: DEFAULT_CURRENCY,
 	},
 })
 
@@ -322,7 +322,7 @@ function handleReturnCreated(returnInvoice) {
 }
 
 function formatDateTime(date, time) {
-	const dateStr = new Date(date).toLocaleDateString("en-US", {
+	const dateStr = new Date(date).toLocaleDateString(DEFAULT_LOCALE, {
 		month: "short",
 		day: "numeric",
 		year: "numeric",

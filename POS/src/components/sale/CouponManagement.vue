@@ -560,6 +560,7 @@ import AutocompleteSelect from "@/components/common/AutocompleteSelect.vue"
 import { useToast } from "@/composables/useToast"
 import { useCustomerSearchStore } from "@/stores/customerSearch"
 import { usePOSSettingsStore } from "@/stores/posSettings"
+import { DEFAULT_CURRENCY, DEFAULT_LOCALE } from "@/utils/currency"
 import { Badge, Button, Card, FormControl, LoadingIndicator, createResource } from "frappe-ui"
 import { FeatherIcon } from "frappe-ui"
 import { storeToRefs } from "pinia"
@@ -575,7 +576,7 @@ const props = defineProps({
 	company: String,
 	currency: {
 		type: String,
-		default: "USD",
+		default: DEFAULT_CURRENCY,
 	},
 	permissions: {
 		type: Object,
@@ -973,7 +974,7 @@ function populateFormFromCoupon(coupon) {
 function formatDate(dateStr) {
 	if (!dateStr) return ""
 	const date = new Date(dateStr)
-	return date.toLocaleDateString("en-US", {
+	return date.toLocaleDateString(DEFAULT_LOCALE, {
 		month: "short",
 		day: "numeric",
 		year: "numeric",
@@ -981,7 +982,7 @@ function formatDate(dateStr) {
 }
 
 function formatCurrency(amount) {
-	return new Intl.NumberFormat("en-US", {
+	return new Intl.NumberFormat(DEFAULT_LOCALE, {
 		style: "currency",
 		currency: props.currency,
 	}).format(amount || 0)

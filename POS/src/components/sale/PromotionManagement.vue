@@ -709,6 +709,7 @@
 import { usePOSPermissions } from "@/composables/usePermissions"
 import { useToast } from "@/composables/useToast"
 import { useItemSearchStore } from "@/stores/itemSearch"
+import { DEFAULT_CURRENCY, DEFAULT_LOCALE } from "@/utils/currency"
 import { __ } from "@/utils/translation"
 import CouponManagement from "./CouponManagement.vue"
 import SelectInput from "../common/SelectInput.vue"
@@ -742,7 +743,7 @@ const props = defineProps({
 	company: String,
 	currency: {
 		type: String,
-		default: "USD",
+		default: DEFAULT_CURRENCY,
 	},
 })
 
@@ -1389,7 +1390,7 @@ function populateFormFromPromotion(promotion) {
 function formatDate(dateStr) {
 	if (!dateStr) return ""
 	const date = new Date(dateStr)
-	return date.toLocaleDateString("en-US", {
+	return date.toLocaleDateString(DEFAULT_LOCALE, {
 		month: "short",
 		day: "numeric",
 		year: "numeric",

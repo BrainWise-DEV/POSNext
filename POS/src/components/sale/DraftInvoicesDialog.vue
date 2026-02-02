@@ -159,6 +159,8 @@
 
 <script setup>
 import {
+	DEFAULT_CURRENCY,
+	DEFAULT_LOCALE,
 	formatCurrency as formatCurrencyUtil,
 	roundCurrency,
 } from "@/utils/currency"
@@ -176,7 +178,7 @@ const props = defineProps({
 	modelValue: Boolean,
 	currency: {
 		type: String,
-		default: "USD",
+		default: DEFAULT_CURRENCY,
 	},
 })
 
@@ -275,7 +277,7 @@ async function confirmClearAll() {
 
 function formatDateTime(dateStr) {
 	const date = new Date(dateStr)
-	return date.toLocaleString("en-US", {
+	return date.toLocaleString(DEFAULT_LOCALE, {
 		month: "short",
 		day: "numeric",
 		hour: "2-digit",

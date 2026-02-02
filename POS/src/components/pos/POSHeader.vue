@@ -255,6 +255,7 @@ import ActionButton from "@/components/common/ActionButton.vue"
 import StatusBadge from "@/components/common/StatusBadge.vue"
 import UserMenu from "@/components/common/UserMenu.vue"
 import LanguageSwitcher from "@/components/common/LanguageSwitcher.vue"
+import { DEFAULT_LOCALE } from "@/utils/currency"
 import { ref } from "vue"
 import { version } from "../../../package.json"
 
@@ -381,7 +382,7 @@ function formatLastSync() {
 		return __("Never")
 	}
 	const date = new Date(props.cacheStats.lastSync)
-	return date.toLocaleTimeString("en-US", {
+	return date.toLocaleTimeString(DEFAULT_LOCALE, {
 		hour: "2-digit",
 		minute: "2-digit",
 		second: "2-digit",

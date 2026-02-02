@@ -39,6 +39,9 @@ export function getPrecision() {
 // Currency Symbols
 // =============================================================================
 
+export const DEFAULT_CURRENCY = "USD"
+export const DEFAULT_LOCALE = "en-US"
+
 const SYMBOLS = {
 	USD: "$",
 	EUR: "€",
@@ -54,12 +57,12 @@ const SYMBOLS = {
 const _symbolCache = new Map()
 
 function getSymbol(currency) {
-	if (!currency) return "$"
+	if (!currency) return SYMBOLS[DEFAULT_CURRENCY]
 	if (SYMBOLS[currency]) return SYMBOLS[currency]
 	if (_symbolCache.has(currency)) return _symbolCache.get(currency)
 
 	try {
-		const parts = new Intl.NumberFormat("en-US", {
+		const parts = new Intl.NumberFormat(DEFAULT_LOCALE, {
 			style: "currency",
 			currency,
 			currencyDisplay: "narrowSymbol",
@@ -81,7 +84,7 @@ export { getSymbol as getCurrencySymbol }
 
 const _formatterCache = new Map()
 
-function getFormatter(precision, locale = "en-US") {
+function getFormatter(precision, locale = DEFAULT_LOCALE) {
 	const key = `${locale}:${precision}`
 	if (!_formatterCache.has(key)) {
 		_formatterCache.set(
@@ -96,7 +99,7 @@ function getFormatter(precision, locale = "en-US") {
 }
 
 /** Format value as currency string with symbol */
-export function formatCurrency(value, currency = "USD", locale = "en-US") {
+export function formatCurrency(value, currency = DEFAULT_CURRENCY, locale = DEFAULT_LOCALE) {
 	if (typeof value !== "number" || Number.isNaN(value)) return ""
 	const abs = Math.abs(value)
 	const formatted = `${getSymbol(currency)} ${getFormatter(settings.currency, locale).format(abs)}`
@@ -104,7 +107,7 @@ export function formatCurrency(value, currency = "USD", locale = "en-US") {
 }
 
 /** Format value as number string (no symbol) */
-export function formatCurrencyNumber(value, locale = "en-US") {
+export function formatCurrencyNumber(value, locale = DEFAULT_LOCALE) {
 	if (typeof value !== "number" || Number.isNaN(value)) return "0.00"
 	return getFormatter(settings.currency, locale).format(value)
 }

@@ -200,7 +200,7 @@
 
 <script setup>
 import { usePOSOffersStore } from "@/stores/posOffers"
-import { formatCurrency as formatCurrencyUtil } from "@/utils/currency"
+import { DEFAULT_CURRENCY, DEFAULT_LOCALE, formatCurrency as formatCurrencyUtil } from "@/utils/currency"
 import { Button, Dialog } from "frappe-ui"
 import { computed, ref, watch } from "vue"
 
@@ -220,7 +220,7 @@ const props = defineProps({
 	company: String,
 	currency: {
 		type: String,
-		default: "USD",
+		default: DEFAULT_CURRENCY,
 	},
 	appliedOffers: {
 		type: Array,
@@ -268,7 +268,7 @@ function formatCurrency(amount) {
 function formatDate(dateStr) {
 	if (!dateStr) return ""
 	const date = new Date(dateStr)
-	return date.toLocaleDateString("en-US", {
+	return date.toLocaleDateString(DEFAULT_LOCALE, {
 		month: "short",
 		day: "numeric",
 		year: "numeric",

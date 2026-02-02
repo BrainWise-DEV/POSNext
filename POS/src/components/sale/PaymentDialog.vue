@@ -920,6 +920,7 @@
 <script setup>
 import { usePOSSettingsStore } from "@/stores/posSettings"
 import {
+	DEFAULT_CURRENCY,
 	formatCurrency as formatCurrencyUtil,
 	getCurrencySymbol,
 	roundCurrency,
@@ -952,7 +953,7 @@ const props = defineProps({
 	posProfile: String,
 	currency: {
 		type: String,
-		default: "USD",
+		default: DEFAULT_CURRENCY,
 	},
 	isOffline: {
 		type: Boolean,

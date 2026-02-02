@@ -1,4 +1,5 @@
 import { useShift } from "@/composables/useShift"
+import { DEFAULT_CURRENCY, DEFAULT_LOCALE } from "@/utils/currency"
 import { defineStore } from "pinia"
 import { computed, ref } from "vue"
 
@@ -14,7 +15,7 @@ export const usePOSShiftStore = defineStore("posShift", () => {
 	// Computed
 	const profileName = computed(() => currentProfile.value?.name)
 	const profileCurrency = computed(
-		() => currentProfile.value?.currency || "USD",
+		() => currentProfile.value?.currency || DEFAULT_CURRENCY,
 	)
 	const profileWarehouse = computed(() => currentProfile.value?.warehouse)
 	const profileCompany = computed(() => currentProfile.value?.company)
@@ -46,7 +47,7 @@ export const usePOSShiftStore = defineStore("posShift", () => {
 
 	function updateCurrentTime() {
 		const now = new Date()
-		currentTime.value = now.toLocaleTimeString("en-US", { hour12: false })
+		currentTime.value = now.toLocaleTimeString(DEFAULT_LOCALE, { hour12: false })
 	}
 
 	function startTimers() {

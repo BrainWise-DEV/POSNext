@@ -728,6 +728,8 @@ import { useOffline } from "@/composables/useOffline"
 import { useToast } from "@/composables/useToast"
 import { getPaymentIcon } from "@/utils/payment"
 import {
+	DEFAULT_CURRENCY,
+	DEFAULT_LOCALE,
 	formatCurrency as formatCurrencyUtil,
 	roundCurrency,
 } from "@/utils/currency"
@@ -753,7 +755,7 @@ const props = defineProps({
 	modelValue: Boolean,
 	posProfile: String,
 	posOpeningShift: String,
-	currency: { type: String, default: "USD" },
+	currency: { type: String, default: DEFAULT_CURRENCY },
 	preselectedInvoice: { type: Object, default: null },
 })
 
@@ -1598,7 +1600,7 @@ function resetForm() {
 }
 
 // Date formatter instance (reused for performance)
-const dateFormatter = new Intl.DateTimeFormat("en-US", DATE_FORMAT_OPTIONS)
+const dateFormatter = new Intl.DateTimeFormat(DEFAULT_LOCALE, DATE_FORMAT_OPTIONS)
 
 function formatDate(dateStr) {
 	if (!dateStr) return ""
