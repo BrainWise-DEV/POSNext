@@ -278,7 +278,7 @@ import { useToast } from "@/composables/useToast"
 import { usePOSSettingsStore } from "@/stores/posSettings"
 import { useSerialNumberStore } from "@/stores/serialNumber"
 import { getItemStock } from "@/utils/stockValidator"
-import { formatCurrency as formatCurrencyUtil, getCurrencySymbol, round3 } from "@/utils/currency"
+import { formatCurrency as formatCurrencyUtil, getCurrencySymbol, roundCurrency } from "@/utils/currency"
 import { Button, FeatherIcon } from "frappe-ui"
 import { computed, ref, watch } from "vue"
 import SelectInput from "@/components/common/SelectInput.vue"
@@ -534,9 +534,9 @@ function handleDiscountTypeChange() {
 }
 
 function calculateDiscount() {
-	// Round to 2 decimal places to prevent floating point precision issues (e.g., 10.000000000000002)
+	// Round to currency precision to prevent floating point precision issues (e.g., 10.000000000000002)
 	if (discountValue.value !== null && discountValue.value !== undefined && !isNaN(discountValue.value)) {
-		discountValue.value = round3(discountValue.value)
+		discountValue.value = roundCurrency(discountValue.value)
 	}
 
 	if (discountType.value === "percentage") {
@@ -544,15 +544,15 @@ function calculateDiscount() {
 		if (discountValue.value > 100) {
 			discountValue.value = 100
 		}
-		calculatedDiscount.value = round3((calculatedSubtotal.value * discountValue.value) / 100)
+		calculatedDiscount.value = roundCurrency((calculatedSubtotal.value * discountValue.value) / 100)
 	} else {
 		// Ensure amount doesn't exceed subtotal
 		if (discountValue.value > calculatedSubtotal.value) {
-			discountValue.value = round3(calculatedSubtotal.value)
+			discountValue.value = roundCurrency(calculatedSubtotal.value)
 		}
-		calculatedDiscount.value = round3(discountValue.value)
+		calculatedDiscount.value = roundCurrency(discountValue.value)
 	}
-	calculatedTotal.value = round3(calculatedSubtotal.value - calculatedDiscount.value)
+	calculatedTotal.value = roundCurrency(calculatedSubtotal.value - calculatedDiscount.value)
 }
 
 function calculateTotals() {

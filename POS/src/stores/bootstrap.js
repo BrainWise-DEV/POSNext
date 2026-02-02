@@ -112,6 +112,20 @@ export const useBootstrapStore = defineStore("bootstrap", () => {
 	}
 
 	/**
+	 * Get preloaded precision settings or defaults if not available
+	 * Settings from Date and Number Format section in System Settings
+	 * @returns {{ currency: number, float: number, rounding_method: string, number_format: string }}
+	 */
+	function getPreloadedPrecision() {
+		return data.value?.precision || {
+			currency: 2,
+			float: 3,
+			rounding_method: null,
+			number_format: null,
+		}
+	}
+
+	/**
 	 * Check if bootstrap data is available
 	 */
 	function hasBootstrapData() {
@@ -142,6 +156,7 @@ export const useBootstrapStore = defineStore("bootstrap", () => {
 		getPreloadedPOSProfile,
 		getPreloadedPOSSettings,
 		getPreloadedPaymentMethods,
+		getPreloadedPrecision,
 		hasBootstrapData,
 		reset,
 	}

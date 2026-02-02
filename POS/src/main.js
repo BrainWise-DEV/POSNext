@@ -177,10 +177,17 @@ async function initializeApp() {
 
 	if (user) {
 		import("./stores/bootstrap")
-			.then(({ useBootstrapStore }) => {
-				useBootstrapStore().loadInitialData().catch((error) => {
+			.then(async ({ useBootstrapStore }) => {
+				const bootstrapStore = useBootstrapStore()
+				try {
+					await bootstrapStore.loadInitialData()
+					// Initialize precision settings from bootstrap data
+					const { initPrecision } = await import("./utils/currency")
+					initPrecision(bootstrapStore.getPreloadedPrecision())
+					log.debug("Precision settings initialized from bootstrap")
+				} catch (error) {
 					log.debug("Bootstrap preload failed (non-critical)", error)
-				})
+				}
 			})
 			.catch(() => {})
 	}

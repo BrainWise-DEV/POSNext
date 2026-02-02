@@ -4,7 +4,7 @@
  */
 
 import { computed } from "vue"
-import { round3 } from "@/utils/currency"
+import { roundCurrency } from "@/utils/currency"
 
 /**
  * Create quick amounts suggestions based on remaining amount
@@ -29,7 +29,7 @@ export function useQuickAmounts(remainingAmount, isCash) {
 		const cash = isCash ? isCash.value : true
 		const amounts = new Set()
 		// Cash payments use ceil (physical denominations), non-cash use exact amount
-		const exactAmount = cash ? Math.ceil(remaining) : round3(remaining)
+		const exactAmount = cash ? Math.ceil(remaining) : roundCurrency(remaining)
 
 		// Always include the primary amount first
 		amounts.add(exactAmount)

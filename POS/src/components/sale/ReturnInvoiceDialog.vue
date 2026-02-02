@@ -727,7 +727,10 @@
 import { useOffline } from "@/composables/useOffline"
 import { useToast } from "@/composables/useToast"
 import { getPaymentIcon } from "@/utils/payment"
-import { formatCurrency as formatCurrencyUtil, round3 } from "@/utils/currency"
+import {
+	formatCurrency as formatCurrencyUtil,
+	roundCurrency,
+} from "@/utils/currency"
 import { getInvoiceStatusColor } from "@/utils/invoice"
 import { Button, Dialog, FeatherIcon, createResource } from "frappe-ui"
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue"
@@ -759,7 +762,7 @@ const emit = defineEmits(["update:modelValue", "return-created"])
 // Computed getter/setter for v-model pattern (per codebase standard)
 const showDialog = computed({
 	get: () => props.modelValue,
-	set: (val) => emit("update:modelValue", val)
+	set: (val) => emit("update:modelValue", val),
 })
 
 // State
@@ -789,14 +792,18 @@ const originalPaidAmount = ref(0)
 const originalOutstandingAmount = ref(0)
 
 // UI state
-const errorDialog = reactive({ visible: false, title: __("Validation Error"), message: "" })
+const errorDialog = reactive({
+	visible: false,
+	title: __("Validation Error"),
+	message: "",
+})
 const returnModal = reactive({ visible: false })
 const returnExpiredDialog = reactive({
 	visible: false,
 	invoiceName: "",
 	invoiceDate: "",
 	daysSince: 0,
-	allowedDays: 0
+	allowedDays: 0,
 })
 
 // Resource for loading recent invoices (only those with items available for return)
@@ -827,8 +834,8 @@ const searchInvoiceByNumberResource = createResource({
 	onSuccess(data) {
 		if (data && data.length > 0) {
 			// Merge search results with existing invoice list, avoiding duplicates
-			const existingNames = new Set(invoiceList.value.map(inv => inv.name))
-			const newInvoices = data.filter(inv => !existingNames.has(inv.name))
+			const existingNames = new Set(invoiceList.value.map((inv) => inv.name))
+			const newInvoices = data.filter((inv) => !existingNames.has(inv.name))
 			if (newInvoices.length > 0) {
 				// Add to the beginning of the list so they appear first
 				invoiceList.value = [...newInvoices, ...invoiceList.value]
@@ -882,7 +889,9 @@ const fetchInvoiceResource = createResource({
 			const availableItems = data.items.filter((item) => item.remaining_qty > 0)
 
 			if (availableItems.length === 0) {
-				showWarning(__("All items from this invoice have already been returned"))
+				showWarning(
+					__("All items from this invoice have already been returned"),
+				)
 				originalInvoice.value = null
 				preparedReturnDoc.value = null
 				returnItems.value = []
@@ -918,19 +927,29 @@ const fetchInvoiceResource = createResource({
 			returnItems.value.forEach(normalizeItemQuantity)
 
 			// Calculate payment totals from original invoice for refund handling
-			const totalPaidFromPayments = origInvoice.payments?.reduce((sum, p) => sum + Math.abs(p.amount || 0), 0) || 0
-			originalPaidAmount.value = origInvoice.paid_amount || totalPaidFromPayments || 0
+			const totalPaidFromPayments =
+				origInvoice.payments?.reduce(
+					(sum, p) => sum + Math.abs(p.amount || 0),
+					0,
+				) || 0
+			originalPaidAmount.value =
+				origInvoice.paid_amount || totalPaidFromPayments || 0
 			originalOutstandingAmount.value = origInvoice.outstanding_amount || 0
 
 			// Detect credit sale (Pay on Account): no payments recorded OR full amount outstanding.
 			// Credit sales don't require cash refund - they reverse the accounts receivable.
-			const hasNoPayments = !origInvoice.payments || origInvoice.payments.length === 0
-			const isFullyUnpaid = Math.abs(origInvoice.outstanding_amount - origInvoice.grand_total) < 0.01
-			isOriginalCreditSale.value = hasNoPayments || (totalPaidFromPayments < 0.01 && isFullyUnpaid)
+			const hasNoPayments =
+				!origInvoice.payments || origInvoice.payments.length === 0
+			const isFullyUnpaid =
+				Math.abs(origInvoice.outstanding_amount - origInvoice.grand_total) <
+				0.01
+			isOriginalCreditSale.value =
+				hasNoPayments || (totalPaidFromPayments < 0.01 && isFullyUnpaid)
 
 			// Detect partial payment: some amount paid but still has outstanding balance.
 			// Partial payments require proportional refund calculation.
-			isPartiallyPaid.value = originalPaidAmount.value > 0 && originalOutstandingAmount.value > 0
+			isPartiallyPaid.value =
+				originalPaidAmount.value > 0 && originalOutstandingAmount.value > 0
 
 			// Load payment methods if not already loaded
 			if (paymentMethods.value.length === 0 && props.posProfile) {
@@ -946,7 +965,10 @@ const fetchInvoiceResource = createResource({
 		// Close the return modal since we can't proceed
 		returnModal.visible = false
 		// Extract and show the actual error message (e.g., return period expired)
-		const errorMsg = extractErrorMessage(error, __("Failed to load invoice details"))
+		const errorMsg = extractErrorMessage(
+			error,
+			__("Failed to load invoice details"),
+		)
 		showError(errorMsg)
 	},
 })
@@ -975,10 +997,11 @@ const createReturnResource = createResource({
 			update_stock: 1,
 			// Include sales_team from the prepared document.
 			// This ensures sales commission is reversed for the returned items.
-			sales_team: baseDoc.sales_team?.map(member => ({
-				sales_person: member.sales_person,
-				allocated_percentage: member.allocated_percentage || 0,
-			})) || [],
+			sales_team:
+				baseDoc.sales_team?.map((member) => ({
+					sales_person: member.sales_person,
+					allocated_percentage: member.allocated_percentage || 0,
+				})) || [],
 			// Build items array from user's selection with negative quantities for return
 			items: selectedItems.value.map((item) => ({
 				item_code: item.item_code,
@@ -992,12 +1015,13 @@ const createReturnResource = createResource({
 				sales_invoice_item: item.name,
 			})),
 			// Payment amounts are negative for refunds
-			payments: refundPayments.value.map(payment => ({
+			payments: refundPayments.value.map((payment) => ({
 				mode_of_payment: payment.mode_of_payment,
 				amount: -Math.abs(payment.amount),
 			})),
 			remarks:
-				returnReason.value || __('Return against {0}', [originalInvoice.value.name]),
+				returnReason.value ||
+				__("Return against {0}", [originalInvoice.value.name]),
 		}
 
 		// Return in the correct format: invoice as JSON string
@@ -1024,7 +1048,7 @@ const createReturnResource = createResource({
 
 		// Close return modal and go back to invoice list
 		closeReturnModal()
-		showSuccess(__('Return invoice {0} created successfully', [data.name]))
+		showSuccess(__("Return invoice {0} created successfully", [data.name]))
 	},
 	onError(error) {
 		isSubmitting.value = false
@@ -1040,11 +1064,11 @@ onMounted(() => {
 	if (props.posProfile) {
 		loadPaymentMethodsResource.reload()
 	}
-	document.addEventListener('keydown', handleKeyboardShortcuts)
+	document.addEventListener("keydown", handleKeyboardShortcuts)
 })
 
 onUnmounted(() => {
-	document.removeEventListener('keydown', handleKeyboardShortcuts)
+	document.removeEventListener("keydown", handleKeyboardShortcuts)
 	// Clean up any pending debounced search
 	if (serverSearchTimeout) {
 		clearTimeout(serverSearchTimeout)
@@ -1079,7 +1103,11 @@ watch(
 	() => props.preselectedInvoice,
 	(newInvoice, oldInvoice) => {
 		// Only trigger if modelValue is true and we have a new invoice
-		if (props.modelValue && newInvoice?.name && newInvoice.name !== oldInvoice?.name) {
+		if (
+			props.modelValue &&
+			newInvoice?.name &&
+			newInvoice.name !== oldInvoice?.name
+		) {
 			showDialog.value = false
 			checkValidityAndOpenModal(newInvoice.name, true)
 		}
@@ -1087,23 +1115,27 @@ watch(
 )
 
 // Clear search input when expired dialog closes
-watch(() => returnExpiredDialog.visible, (val) => {
-	if (!val) {
-		invoiceListFilter.value = ""
-	}
-})
+watch(
+	() => returnExpiredDialog.visible,
+	(val) => {
+		if (!val) {
+			invoiceListFilter.value = ""
+		}
+	},
+)
 
 // Computed properties
 const selectedItems = computed(() =>
-	returnItems.value.filter(item => item.selected && item.return_qty > 0)
+	returnItems.value.filter((item) => item.selected && item.return_qty > 0),
 )
 
 const filteredReturnItems = computed(() => {
 	if (!itemSearchFilter.value) return returnItems.value
 	const searchTerm = itemSearchFilter.value.toLowerCase()
-	return returnItems.value.filter(item =>
-		item.item_name?.toLowerCase().includes(searchTerm) ||
-		item.item_code?.toLowerCase().includes(searchTerm)
+	return returnItems.value.filter(
+		(item) =>
+			item.item_name?.toLowerCase().includes(searchTerm) ||
+			item.item_code?.toLowerCase().includes(searchTerm),
 	)
 })
 
@@ -1111,36 +1143,60 @@ const hasOpenShift = computed(() => Boolean(props.posOpeningShift))
 
 // Use rate_with_tax (includes tax) for accurate refund calculation
 const returnTotal = computed(() =>
-	round3(selectedItems.value.reduce((sum, item) =>
-		sum + item.return_qty * (item.rate_with_tax || item.rate), 0))
+	roundCurrency(
+		selectedItems.value.reduce(
+			(sum, item) =>
+				sum +
+				roundCurrency(item.return_qty * (item.rate_with_tax || item.rate)),
+			0,
+		),
+	),
 )
 
 const totalPaymentAmount = computed(() =>
-	refundPayments.value.reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0)
+	roundCurrency(
+		refundPayments.value.reduce(
+			(sum, payment) => sum + (Number(payment.amount) || 0),
+			0,
+		),
+	),
 )
 
 const maxRefundableAmount = computed(() => {
 	if (!originalInvoice.value) return 0
-	if (!isPartiallyPaid.value && !isOriginalCreditSale.value) return returnTotal.value
+	if (!isPartiallyPaid.value && !isOriginalCreditSale.value)
+		return returnTotal.value
 
 	const grandTotal = Math.abs(originalInvoice.value.grand_total) || 1
 	const returnRatio = returnTotal.value / grandTotal
-	return round3(Math.min(returnTotal.value, originalPaidAmount.value * returnRatio))
+	return roundCurrency(
+		Math.min(returnTotal.value, originalPaidAmount.value * returnRatio),
+	)
 })
 
 // Amount that goes toward credit balance (for partially paid invoices)
 const creditAdjustmentAmount = computed(() =>
-	isPartiallyPaid.value ? Math.max(0, returnTotal.value - maxRefundableAmount.value) : 0
+	isPartiallyPaid.value
+		? roundCurrency(Math.max(0, returnTotal.value - maxRefundableAmount.value))
+		: 0,
 )
 
 // Summary display helpers for the Return Summary section
-const showPartialBreakdown = computed(() => isPartiallyPaid.value && !isOriginalCreditSale.value)
-const summaryRefundLabel = computed(() => showPartialBreakdown.value ? 'Cash Refund:' : 'Refund Amount:')
-const summaryRefundAmount = computed(() => showPartialBreakdown.value ? maxRefundableAmount.value : returnTotal.value)
+const showPartialBreakdown = computed(
+	() => isPartiallyPaid.value && !isOriginalCreditSale.value,
+)
+const summaryRefundLabel = computed(() =>
+	showPartialBreakdown.value ? "Cash Refund:" : "Refund Amount:",
+)
+const summaryRefundAmount = computed(() =>
+	showPartialBreakdown.value ? maxRefundableAmount.value : returnTotal.value,
+)
 
 // Cache RTL direction check (only needs to run once per session)
-const isRTL = document.documentElement.dir === 'rtl'
-const paymentSelectStyle = { backgroundPosition: isRTL ? 'left 12px center' : 'right 12px center' }
+const isRTL = document.documentElement.dir === "rtl"
+const paymentSelectStyle = {
+	backgroundPosition: isRTL ? "left 12px center" : "right 12px center",
+}
 
 const canCreateReturn = computed(() => {
 	const hasSelectedItems = selectedItems.value.length > 0
@@ -1150,28 +1206,41 @@ const canCreateReturn = computed(() => {
 	const payments = refundPayments.value
 	if (isPartiallyPaid.value) {
 		if (!payments.length) return true
-		const hasValidPayments = payments.every(payment => payment.mode_of_payment && payment.amount >= 0)
-		return hasValidPayments && Math.abs(totalPaymentAmount.value - maxRefundableAmount.value) < 0.01
+		const hasValidPayments = payments.every(
+			(payment) => payment.mode_of_payment && payment.amount >= 0,
+		)
+		return (
+			hasValidPayments &&
+			Math.abs(totalPaymentAmount.value - maxRefundableAmount.value) < 0.01
+		)
 	}
 
 	if (!payments.length) return false
-	const hasValidPayments = payments.every(payment => payment.mode_of_payment && payment.amount > 0)
-	return hasValidPayments && Math.abs(totalPaymentAmount.value - returnTotal.value) < 0.01
+	const hasValidPayments = payments.every(
+		(payment) => payment.mode_of_payment && payment.amount > 0,
+	)
+	return (
+		hasValidPayments &&
+		Math.abs(totalPaymentAmount.value - returnTotal.value) < 0.01
+	)
 })
 
 // Shared filter function to avoid duplicate code
 const filterInvoicesByTerm = (invoices, searchTerm) => {
 	if (!searchTerm) return invoices
 	const term = searchTerm.toLowerCase()
-	return invoices.filter(invoice =>
-		invoice.name.toLowerCase().includes(term) ||
-		invoice.customer_name?.toLowerCase().includes(term) ||
-		invoice.contact_mobile?.toLowerCase().includes(term)
+	return invoices.filter(
+		(invoice) =>
+			invoice.name.toLowerCase().includes(term) ||
+			invoice.customer_name?.toLowerCase().includes(term) ||
+			invoice.contact_mobile?.toLowerCase().includes(term),
 	)
 }
 
 // Memoized search term to avoid recalculating in multiple computeds
-const normalizedSearchTerm = computed(() => invoiceListFilter.value?.trim() || "")
+const normalizedSearchTerm = computed(
+	() => invoiceListFilter.value?.trim() || "",
+)
 
 const filteredInvoiceList = computed(() => {
 	return filterInvoicesByTerm(invoiceList.value, normalizedSearchTerm.value)
@@ -1188,7 +1257,9 @@ let serverSearchTimeout = null
 
 // Helper to check if search term looks like an invoice number
 const looksLikeInvoiceNumber = (term) =>
-	INVOICE_PATTERN.test(term) || INVOICE_FORMAT_PATTERN.test(term) || term.includes('-')
+	INVOICE_PATTERN.test(term) ||
+	INVOICE_FORMAT_PATTERN.test(term) ||
+	term.includes("-")
 
 // Watch for search input changes and auto-search server when no local matches
 watch(normalizedSearchTerm, (searchTerm) => {
@@ -1216,16 +1287,20 @@ watch(normalizedSearchTerm, (searchTerm) => {
 
 // Auto-populate payment amount when return total changes (single payment only)
 watch(returnTotal, (newTotal) => {
-	if (!returnModal.visible || !showDialog.value || isOriginalCreditSale.value) return
+	if (!returnModal.visible || !showDialog.value || isOriginalCreditSale.value)
+		return
 	if (refundPayments.value.length !== 1 || newTotal <= 0) return
 
 	refundPayments.value[0].amount = isPartiallyPaid.value
-		? Number(maxRefundableAmount.value.toFixed(2))
+		? roundCurrency(maxRefundableAmount.value)
 		: newTotal
 })
 
 // Methods
-function extractErrorMessage(error, fallbackMessage = __("Failed to create return invoice")) {
+function extractErrorMessage(
+	error,
+	fallbackMessage = __("Failed to create return invoice"),
+) {
 	if (!error) return fallbackMessage
 	if (error.messages?.length) return error.messages.join(", ")
 
@@ -1244,7 +1319,8 @@ function extractErrorMessage(error, fallbackMessage = __("Failed to create retur
 		if (validationMatch) return validationMatch[1]
 	}
 
-	if (error.httpStatusText && error.httpStatusText !== "Expectation Failed") return error.httpStatusText
+	if (error.httpStatusText && error.httpStatusText !== "Expectation Failed")
+		return error.httpStatusText
 	if (error.message && error.message !== "ValidationError") return error.message
 	return fallbackMessage
 }
@@ -1261,16 +1337,28 @@ function normalizeItemQuantity(item) {
 	const maxQuantity = Number(item.quantity) || 0
 	const currentQuantity = Number(item.return_qty)
 	const validQuantity = Number.isFinite(currentQuantity) ? currentQuantity : 1
-	item.return_qty = Math.max(1, Math.min(validQuantity, maxQuantity || validQuantity))
+	item.return_qty = Math.max(
+		1,
+		Math.min(validQuantity, maxQuantity || validQuantity),
+	)
 }
 
 function validateSelectedItems() {
-	const invalidItems = selectedItems.value.filter(item => item.return_qty > item.quantity)
+	const invalidItems = selectedItems.value.filter(
+		(item) => item.return_qty > item.quantity,
+	)
 	if (!invalidItems.length) return true
 
 	invalidItems.forEach(normalizeItemQuantity)
-	const errorDetails = invalidItems.map(item => __('{0}: maximum {1}', [item.item_name || item.item_code, item.quantity])).join("\n")
-	const errorMessage = __('Adjust return quantities before submitting.\n\n{0}', [errorDetails])
+	const errorDetails = invalidItems
+		.map((item) =>
+			__("{0}: maximum {1}", [item.item_name || item.item_code, item.quantity]),
+		)
+		.join("\n")
+	const errorMessage = __(
+		"Adjust return quantities before submitting.\n\n{0}",
+		[errorDetails],
+	)
 	submitError.value = errorMessage
 	openErrorDialog(errorMessage)
 	return false
@@ -1292,15 +1380,17 @@ function initializePaymentsFromInvoice() {
 
 	const invoicePayments = originalInvoice.value?.payments
 	if (invoicePayments?.length) {
-		refundPayments.value = invoicePayments.map(payment => ({
+		refundPayments.value = invoicePayments.map((payment) => ({
 			mode_of_payment: payment.mode_of_payment,
-			amount: isPartiallyPaid.value ? 0 : Math.abs(payment.amount)
+			amount: isPartiallyPaid.value ? 0 : Math.abs(payment.amount),
 		}))
 	} else {
-		refundPayments.value = [{
-			mode_of_payment: paymentMethods.value[0]?.mode_of_payment || "",
-			amount: 0
-		}]
+		refundPayments.value = [
+			{
+				mode_of_payment: paymentMethods.value[0]?.mode_of_payment || "",
+				amount: 0,
+			},
+		]
 	}
 }
 
@@ -1317,15 +1407,15 @@ const checkInvoiceValidityResource = createResource({
 function handleValidityResponse(validity) {
 	if (validity.valid) return true
 
-	if (validity.error_type === 'return_period_expired') {
+	if (validity.error_type === "return_period_expired") {
 		Object.assign(returnExpiredDialog, {
 			invoiceName: validity.invoice_name,
 			invoiceDate: validity.invoice_date,
 			daysSince: validity.days_since,
 			allowedDays: validity.allowed_days,
-			visible: true
+			visible: true,
 		})
-	} else if (validity.error_type === 'not_found') {
+	} else if (validity.error_type === "not_found") {
 		showError(validity.message || __("Invoice not found"))
 	} else {
 		showError(validity.message || __("Cannot process return for this invoice"))
@@ -1340,7 +1430,7 @@ function openReturnModal(invoice) {
 	submitError.value = ""
 	fetchInvoiceResource.fetch({
 		invoice_name: invoice.name,
-		pos_opening_shift: props.posOpeningShift
+		pos_opening_shift: props.posOpeningShift,
 	})
 	returnModal.visible = true
 }
@@ -1352,11 +1442,13 @@ function openReturnModal(invoice) {
  */
 async function checkValidityAndOpenModal(invoiceName, fallbackOnError = false) {
 	try {
-		const validity = await checkInvoiceValidityResource.fetch({ invoice_name: invoiceName })
+		const validity = await checkInvoiceValidityResource.fetch({
+			invoice_name: invoiceName,
+		})
 		if (handleValidityResponse(validity)) {
 			fetchInvoiceResource.fetch({
 				invoice_name: invoiceName,
-				pos_opening_shift: props.posOpeningShift
+				pos_opening_shift: props.posOpeningShift,
 			})
 			returnModal.visible = true
 		}
@@ -1388,14 +1480,16 @@ function closeReturnModal() {
 }
 
 function selectAllFilteredItems() {
-	filteredReturnItems.value.forEach(item => {
+	filteredReturnItems.value.forEach((item) => {
 		item.selected = true
 		item.return_qty = item.quantity
 	})
 }
 
 function deselectAllItems() {
-	returnItems.value.forEach(item => { item.selected = false })
+	returnItems.value.forEach((item) => {
+		item.selected = false
+	})
 }
 
 function toggleItemSelection(item) {
@@ -1411,15 +1505,20 @@ function handleKeyboardShortcuts(event) {
 	const isModifierPressed = event.ctrlKey || event.metaKey
 
 	// Ctrl/Cmd+A selects all filtered items (respects search filter)
-	if (isModifierPressed && event.key === 'a') {
+	if (isModifierPressed && event.key === "a") {
 		event.preventDefault()
 		selectAllFilteredItems()
 	}
-	if (isModifierPressed && event.key === 'Enter' && canCreateReturn.value && !isSubmitting.value) {
+	if (
+		isModifierPressed &&
+		event.key === "Enter" &&
+		canCreateReturn.value &&
+		!isSubmitting.value
+	) {
 		event.preventDefault()
 		handleCreateReturn()
 	}
-	if (event.key === 'Escape') closeReturnModal()
+	if (event.key === "Escape") closeReturnModal()
 }
 
 function incrementReturnQuantity(item) {
@@ -1543,7 +1642,10 @@ function navigateSuggestion(direction) {
 }
 
 function selectSuggestionOrSearch() {
-	if (selectedSuggestionIndex.value >= 0 && selectedSuggestionIndex.value < searchSuggestions.value.length) {
+	if (
+		selectedSuggestionIndex.value >= 0 &&
+		selectedSuggestionIndex.value < searchSuggestions.value.length
+	) {
 		// Select the highlighted suggestion
 		selectSuggestion(searchSuggestions.value[selectedSuggestionIndex.value])
 	} else if (invoiceListFilter.value?.trim()) {
@@ -1579,7 +1681,7 @@ function clearSearch() {
  * Escape special regex characters in a string
  */
 function escapeRegex(str) {
-	return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+	return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }
 
 /**
@@ -1589,7 +1691,7 @@ function highlightSearchMatch(text, searchTerm) {
 	if (!text || !searchTerm) return text
 	const escaped = escapeRegex(searchTerm.trim())
 	if (!escaped) return text
-	const regex = new RegExp(`(${escaped})`, 'gi')
+	const regex = new RegExp(`(${escaped})`, "gi")
 	return text.replace(regex, '<mark class="search-highlight">$1</mark>')
 }
 </script>

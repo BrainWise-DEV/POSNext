@@ -919,7 +919,11 @@
 
 <script setup>
 import { usePOSSettingsStore } from "@/stores/posSettings"
-import { formatCurrency as formatCurrencyUtil, getCurrencySymbol, round3 } from "@/utils/currency"
+import {
+	formatCurrency as formatCurrencyUtil,
+	getCurrencySymbol,
+	roundCurrency,
+} from "@/utils/currency"
 import { getPaymentIcon } from "@/utils/payment"
 import { offlineWorker } from "@/utils/offline/workerClient"
 import { logger } from "@/utils/logger"
@@ -931,7 +935,7 @@ import { usePaymentNumpad } from "@/composables/usePaymentNumpad"
 import { useResponsivePayment } from "@/composables/useResponsivePayment"
 import { useQuickAmounts } from "@/composables/useQuickAmounts"
 
-const log = logger.create('PaymentDialog')
+const log = logger.create("PaymentDialog")
 const settingsStore = usePOSSettingsStore()
 const { showWarning, showInfo } = useToast()
 
@@ -1004,7 +1008,11 @@ const props = defineProps({
 	},
 })
 
-const emit = defineEmits(["update:modelValue", "payment-completed", "update-additional-discount"])
+const emit = defineEmits([
+	"update:modelValue",
+	"payment-completed",
+	"update-additional-discount",
+])
 
 const show = computed({
 	get: () => props.modelValue,
@@ -1017,11 +1025,20 @@ const lastSelectedMethod = ref(null)
 const customAmount = ref("")
 const paymentEntries = ref([])
 const customerCredit = ref([])
-const customerBalance = ref({ total_outstanding: 0, total_credit: 0, net_balance: 0 })
+const customerBalance = ref({
+	total_outstanding: 0,
+	total_credit: 0,
+	net_balance: 0,
+})
 const loadingCredit = ref(false)
 
 // Wallet state
-const walletInfo = ref({ wallet_enabled: false, wallet_exists: false, wallet_balance: 0, wallet_name: null })
+const walletInfo = ref({
+	wallet_enabled: false,
+	wallet_exists: false,
+	wallet_balance: 0,
+	wallet_name: null,
+})
 const loadingWallet = ref(false)
 const walletPaymentMethods = ref(new Set()) // Set of mode_of_payment names that are wallet payments
 
@@ -1032,7 +1049,7 @@ const isSalesOrder = computed(() => props.targetDoctype === "Sales Order")
 
 // Column refs for height matching
 const rightColumnRef = ref(null)
-const rightColumnMinHeight = ref('auto')
+const rightColumnMinHeight = ref("auto")
 
 // Use responsive payment composable for viewport tracking and dynamic sizing
 const {
@@ -1061,20 +1078,27 @@ function syncColumnHeights() {
 }
 
 // Watch for dialog open to sync heights
-watch(() => props.modelValue, (isOpen) => {
-	if (isOpen) {
-		// Reset min height when dialog opens so we can measure fresh
-		rightColumnMinHeight.value = 'auto'
-		// Small delay to ensure DOM is rendered
-		setTimeout(syncColumnHeights, 100)
-	}
-})
+watch(
+	() => props.modelValue,
+	(isOpen) => {
+		if (isOpen) {
+			// Reset min height when dialog opens so we can measure fresh
+			rightColumnMinHeight.value = "auto"
+			// Small delay to ensure DOM is rendered
+			setTimeout(syncColumnHeights, 100)
+		}
+	},
+)
 
 // Handle Enter key from numpad keyboard input
 function handleNumpadEnter(value) {
 	if (value > 0 && lastSelectedMethod.value) {
 		numpadAddPayment()
-	} else if (remainingAmount.value === 0 && totalPaid.value > 0 && canComplete.value) {
+	} else if (
+		remainingAmount.value === 0 &&
+		totalPaid.value > 0 &&
+		canComplete.value
+	) {
 		// If fully paid and can complete, trigger complete payment
 		completePayment()
 	}
@@ -1094,13 +1118,13 @@ const {
 })
 
 // Mobile custom amount state
-const mobileCustomAmount = ref('')
+const mobileCustomAmount = ref("")
 
 function addMobileCustomPayment() {
 	const amount = Number.parseFloat(mobileCustomAmount.value)
 	if (amount > 0 && lastSelectedMethod.value) {
 		addCustomPayment(lastSelectedMethod.value, amount)
-		mobileCustomAmount.value = ''
+		mobileCustomAmount.value = ""
 	}
 }
 
@@ -1115,7 +1139,7 @@ function numpadAddPayment() {
 const localAdditionalDiscount = ref(0)
 // Initialize discount type from settings (default to percentage if enabled, otherwise amount)
 const additionalDiscountType = ref(
-	settingsStore.usePercentageDiscount ? 'percentage' : 'amount'
+	settingsStore.usePercentageDiscount ? "percentage" : "amount",
 )
 
 const paymentMethodsResource = createResource({
@@ -1142,7 +1166,7 @@ const customerCreditResource = createResource({
 	url: "pos_next.api.credit_sales.get_available_credit",
 	makeParams() {
 		const customerName = props.customer?.name || props.customer
-		log.debug('[PaymentDialog] Fetching credit for customer:', customerName)
+		log.debug("[PaymentDialog] Fetching credit for customer:", customerName)
 		return {
 			customer: customerName,
 			company: props.company,
@@ -1151,10 +1175,13 @@ const customerCreditResource = createResource({
 	},
 	auto: false,
 	onSuccess(data) {
-		log.debug('[PaymentDialog] Customer credit loaded:', data)
+		log.debug("[PaymentDialog] Customer credit loaded:", data)
 		customerCredit.value = data || []
 		loadingCredit.value = false
-		log.debug('[PaymentDialog] Total available credit:', totalAvailableCredit.value)
+		log.debug(
+			"[PaymentDialog] Total available credit:",
+			totalAvailableCredit.value,
+		)
 	},
 	onError(error) {
 		log.error("[PaymentDialog] Error loading customer credit:", error)
@@ -1167,7 +1194,7 @@ const customerBalanceResource = createResource({
 	url: "pos_next.api.credit_sales.get_customer_balance",
 	makeParams() {
 		const customerName = props.customer?.name || props.customer
-		log.debug('[PaymentDialog] Fetching balance for customer:', customerName)
+		log.debug("[PaymentDialog] Fetching balance for customer:", customerName)
 		return {
 			customer: customerName,
 			company: props.company,
@@ -1175,13 +1202,21 @@ const customerBalanceResource = createResource({
 	},
 	auto: false,
 	onSuccess(data) {
-		log.debug('[PaymentDialog] Customer balance loaded:', data)
-		customerBalance.value = data || { total_outstanding: 0, total_credit: 0, net_balance: 0 }
-		log.debug('[PaymentDialog] Net balance:', customerBalance.value.net_balance)
+		log.debug("[PaymentDialog] Customer balance loaded:", data)
+		customerBalance.value = data || {
+			total_outstanding: 0,
+			total_credit: 0,
+			net_balance: 0,
+		}
+		log.debug("[PaymentDialog] Net balance:", customerBalance.value.net_balance)
 	},
 	onError(error) {
 		log.error("[PaymentDialog] Error loading customer balance:", error)
-		customerBalance.value = { total_outstanding: 0, total_credit: 0, net_balance: 0 }
+		customerBalance.value = {
+			total_outstanding: 0,
+			total_credit: 0,
+			net_balance: 0,
+		}
 	},
 })
 
@@ -1190,7 +1225,10 @@ const walletInfoResource = createResource({
 	url: "pos_next.api.wallet.get_wallet_info",
 	makeParams() {
 		const customerName = props.customer?.name || props.customer
-		log.debug('[PaymentDialog] Fetching wallet info for customer:', customerName)
+		log.debug(
+			"[PaymentDialog] Fetching wallet info for customer:",
+			customerName,
+		)
 		return {
 			customer: customerName,
 			company: props.company,
@@ -1199,13 +1237,23 @@ const walletInfoResource = createResource({
 	},
 	auto: false,
 	onSuccess(data) {
-		log.debug('[PaymentDialog] Wallet info loaded:', data)
-		walletInfo.value = data || { wallet_enabled: false, wallet_exists: false, wallet_balance: 0, wallet_name: null }
+		log.debug("[PaymentDialog] Wallet info loaded:", data)
+		walletInfo.value = data || {
+			wallet_enabled: false,
+			wallet_exists: false,
+			wallet_balance: 0,
+			wallet_name: null,
+		}
 		loadingWallet.value = false
 	},
 	onError(error) {
 		log.error("[PaymentDialog] Error loading wallet info:", error)
-		walletInfo.value = { wallet_enabled: false, wallet_exists: false, wallet_balance: 0, wallet_name: null }
+		walletInfo.value = {
+			wallet_enabled: false,
+			wallet_exists: false,
+			wallet_balance: 0,
+			wallet_name: null,
+		}
 		loadingWallet.value = false
 	},
 })
@@ -1218,21 +1266,27 @@ async function identifyWalletPaymentMethods() {
 
 	try {
 		// Single batch API call instead of N individual calls
-		const methodNames = paymentMethods.value.map(m => m.mode_of_payment)
-		const result = await call('pos_next.api.pos_profile.get_wallet_payment_flags', {
-			methods: methodNames
-		})
+		const methodNames = paymentMethods.value.map((m) => m.mode_of_payment)
+		const result = await call(
+			"pos_next.api.pos_profile.get_wallet_payment_flags",
+			{
+				methods: methodNames,
+			},
+		)
 
 		if (result) {
 			for (const [methodName, isWallet] of Object.entries(result)) {
 				if (isWallet) {
 					walletPaymentMethods.value.add(methodName)
-					log.debug('[PaymentDialog] Wallet payment method identified:', methodName)
+					log.debug(
+						"[PaymentDialog] Wallet payment method identified:",
+						methodName,
+					)
 				}
 			}
 		}
 	} catch (error) {
-		log.error('[PaymentDialog] Error checking wallet payment methods:', error)
+		log.error("[PaymentDialog] Error checking wallet payment methods:", error)
 	}
 }
 
@@ -1245,27 +1299,27 @@ function isWalletPaymentMethod(methodName) {
 function isCashPaymentMethod(method) {
 	if (!method) return false
 	// Check by account_type first (most reliable - from linked Account)
-	const accountType = (method.account_type || '').toLowerCase()
-	if (accountType === 'cash') return true
+	const accountType = (method.account_type || "").toLowerCase()
+	if (accountType === "cash") return true
 	// Fallback to Mode of Payment type
-	const type = (method.type || '').toLowerCase()
-	if (type === 'cash') return true
+	const type = (method.type || "").toLowerCase()
+	if (type === "cash") return true
 	// Check by mode_of_payment name as fallback
-	const name = (method.mode_of_payment || '').toLowerCase()
-	return name.includes('cash') || name.includes('نقد') || name.includes('نقدي')
+	const name = (method.mode_of_payment || "").toLowerCase()
+	return name.includes("cash") || name.includes("نقد") || name.includes("نقدي")
 }
 
 // Get available wallet balance for payment (considering already added wallet payments)
 const availableWalletBalance = computed(() => {
 	const totalWalletPayments = paymentEntries.value
-		.filter(p => isWalletPaymentMethod(p.mode_of_payment))
+		.filter((p) => isWalletPaymentMethod(p.mode_of_payment))
 		.reduce((sum, p) => sum + (p.amount || 0), 0)
 	return Math.max(0, walletInfo.value.wallet_balance - totalWalletPayments)
 })
 
 // Filter payment methods - hide wallet methods when loyalty is not enabled
 const filteredPaymentMethods = computed(() => {
-	return paymentMethods.value.filter(method => {
+	return paymentMethods.value.filter((method) => {
 		// If it's a wallet payment method, only show when loyalty/wallet is enabled
 		if (isWalletPaymentMethod(method.mode_of_payment)) {
 			return walletInfo.value.wallet_enabled
@@ -1277,7 +1331,7 @@ const filteredPaymentMethods = computed(() => {
 // Sales Persons state
 const salesPersons = ref([])
 const selectedSalesPersons = ref([])
-const salesPersonSearch = ref('')
+const salesPersonSearch = ref("")
 const loadingSalesPersons = ref(false)
 const salesPersonDropdownOpen = ref(false)
 const salesPersonDropdownRef = ref(null)
@@ -1291,7 +1345,7 @@ const salesPersonsResource = createResource({
 	},
 	auto: false,
 	onSuccess(data) {
-		log.debug('[PaymentDialog] Sales persons loaded:', data)
+		log.debug("[PaymentDialog] Sales persons loaded:", data)
 		salesPersons.value = data?.message || data || []
 		loadingSalesPersons.value = false
 	},
@@ -1304,18 +1358,22 @@ const salesPersonsResource = createResource({
 
 // Computed: Available sales persons (exclude already selected, filter by search)
 const availableSalesPersons = computed(() => {
-	const selectedIds = selectedSalesPersons.value.map(p => p.sales_person)
-	const searchLower = (salesPersonSearch.value || '').toLowerCase()
+	const selectedIds = selectedSalesPersons.value.map((p) => p.sales_person)
+	const searchLower = (salesPersonSearch.value || "").toLowerCase()
 
 	return salesPersons.value
-		.filter(person => {
+		.filter((person) => {
 			// Exclude already selected
 			if (selectedIds.includes(person.name)) {
 				return false
 			}
 			// Filter by search term if provided
 			if (searchLower) {
-				const name = (person.sales_person_name || person.name || '').toLowerCase()
+				const name = (
+					person.sales_person_name ||
+					person.name ||
+					""
+				).toLowerCase()
 				return name.includes(searchLower)
 			}
 			return true
@@ -1325,7 +1383,10 @@ const availableSalesPersons = computed(() => {
 
 // Computed: Total allocation percentage
 const totalSalesAllocation = computed(() => {
-	return selectedSalesPersons.value.reduce((sum, p) => sum + (p.allocated_percentage || 0), 0)
+	return selectedSalesPersons.value.reduce(
+		(sum, p) => sum + (p.allocated_percentage || 0),
+		0,
+	)
 })
 
 // Computed: Validation - sales person is required when enabled
@@ -1342,14 +1403,16 @@ const isSalesPersonValid = computed(() => {
 function addSalesPerson(person) {
 	// For Single mode, replace the existing selection with 100%
 	if (settingsStore.isSingleSalesPerson) {
-		selectedSalesPersons.value = [{
-			sales_person: person.name,
-			sales_person_name: person.sales_person_name || person.name,
-			allocated_percentage: 100,
-			commission_rate: person.commission_rate,
-		}]
+		selectedSalesPersons.value = [
+			{
+				sales_person: person.name,
+				sales_person_name: person.sales_person_name || person.name,
+				allocated_percentage: 100,
+				commission_rate: person.commission_rate,
+			},
+		]
 		// Close dropdown after single selection
-		salesPersonSearch.value = ''
+		salesPersonSearch.value = ""
 		salesPersonDropdownOpen.value = false
 	} else {
 		// For Multiple mode, add to the list and redistribute evenly
@@ -1362,13 +1425,15 @@ function addSalesPerson(person) {
 		// Redistribute commission evenly among all selected
 		redistributeCommission()
 		// Keep dropdown open for multiple selection, just clear search
-		salesPersonSearch.value = ''
+		salesPersonSearch.value = ""
 		// Keep dropdown open so user can continue selecting
 	}
 }
 
 function removeSalesPerson(personName) {
-	const index = selectedSalesPersons.value.findIndex(p => p.sales_person === personName)
+	const index = selectedSalesPersons.value.findIndex(
+		(p) => p.sales_person === personName,
+	)
 	if (index > -1) {
 		selectedSalesPersons.value.splice(index, 1)
 		// Redistribute commission among remaining
@@ -1380,7 +1445,7 @@ function removeSalesPerson(personName) {
 
 function clearSalesPersons() {
 	selectedSalesPersons.value = []
-	salesPersonSearch.value = ''
+	salesPersonSearch.value = ""
 }
 
 // Redistribute commission evenly among all selected sales persons
@@ -1389,7 +1454,7 @@ function redistributeCommission() {
 	if (count === 0) return
 
 	const evenShare = 100 / count
-	selectedSalesPersons.value.forEach(person => {
+	selectedSalesPersons.value.forEach((person) => {
 		person.allocated_percentage = evenShare
 	})
 }
@@ -1422,7 +1487,9 @@ async function loadPaymentMethods() {
 	try {
 		if (props.isOffline) {
 			// Load from cache when offline using worker
-			const cached = await offlineWorker.getCachedPaymentMethods(props.posProfile)
+			const cached = await offlineWorker.getCachedPaymentMethods(
+				props.posProfile,
+			)
 			if (cached && cached.length > 0) {
 				paymentMethods.value = cached
 				if (paymentMethods.value.length > 0) {
@@ -1449,38 +1516,38 @@ const totalPaid = computed(() => {
 		(sum, entry) => sum + (entry.amount || 0),
 		0,
 	)
-	return round3(sum)
+	return roundCurrency(sum)
 })
 
 const totalAvailableCredit = computed(() => {
 	// Use net_balance: negative means customer has credit, positive means they owe
 	// Return negative of net_balance so positive = credit available, negative = outstanding
-	return round3(-customerBalance.value.net_balance)
+	return roundCurrency(-customerBalance.value.net_balance)
 })
 
 // Remaining credit after deducting what's already been applied as payment
 const remainingAvailableCredit = computed(() => {
-	const usedCredit = getMethodTotal('Customer Credit')
+	const usedCredit = getMethodTotal("Customer Credit")
 	const remaining = totalAvailableCredit.value - usedCredit
-	return remaining > 0 ? round3(remaining) : 0
+	return remaining > 0 ? roundCurrency(remaining) : 0
 })
 
 // Calculate the actual discount amount based on type (percentage or fixed amount)
 const calculatedAdditionalDiscount = computed(() => {
-	if (additionalDiscountType.value === 'percentage') {
-		return round3((props.subtotal * localAdditionalDiscount.value) / 100)
+	if (additionalDiscountType.value === "percentage") {
+		return roundCurrency((props.subtotal * localAdditionalDiscount.value) / 100)
 	}
-	return round3(localAdditionalDiscount.value)
+	return roundCurrency(localAdditionalDiscount.value)
 })
 
 const remainingAmount = computed(() => {
-	const remaining = round3(props.grandTotal) - totalPaid.value
-	return remaining > 0 ? round3(remaining) : 0
+	const remaining = roundCurrency(props.grandTotal) - totalPaid.value
+	return remaining > 0 ? roundCurrency(remaining) : 0
 })
 
 const changeAmount = computed(() => {
-	const change = totalPaid.value - round3(props.grandTotal)
-	return change > 0 ? round3(change) : 0
+	const change = totalPaid.value - roundCurrency(props.grandTotal)
+	return change > 0 ? roundCurrency(change) : 0
 })
 
 // ===========================================
@@ -1495,11 +1562,13 @@ const canWriteOff = computed(() => {
 	// 2. There is a remaining amount to write off
 	// 3. Remaining amount is within the write-off limit
 	// 4. There is at least one payment entry
-	return props.allowWriteOff &&
+	return (
+		props.allowWriteOff &&
 		props.writeOffLimit > 0 &&
 		remainingAmount.value > 0 &&
 		remainingAmount.value <= props.writeOffLimit &&
 		paymentEntries.value.length > 0
+	)
 })
 
 // State to track if user wants to write off
@@ -1542,7 +1611,9 @@ const startSlide = (e) => {
 
 	const onMove = (event) => {
 		event.preventDefault()
-		const currentX = event.touches ? event.touches[0].clientX - rect.left : event.clientX - rect.left
+		const currentX = event.touches
+			? event.touches[0].clientX - rect.left
+			: event.clientX - rect.left
 		const deltaX = currentX - startX
 		const deltaPercent = (deltaX / (trackWidth - handleWidth)) * 100
 
@@ -1563,16 +1634,16 @@ const startSlide = (e) => {
 			applyWriteOff.value = false
 		}
 
-		document.removeEventListener('mousemove', onMove)
-		document.removeEventListener('mouseup', onEnd)
-		document.removeEventListener('touchmove', onMove)
-		document.removeEventListener('touchend', onEnd)
+		document.removeEventListener("mousemove", onMove)
+		document.removeEventListener("mouseup", onEnd)
+		document.removeEventListener("touchmove", onMove)
+		document.removeEventListener("touchend", onEnd)
 	}
 
-	document.addEventListener('mousemove', onMove)
-	document.addEventListener('mouseup', onEnd)
-	document.addEventListener('touchmove', onMove, { passive: false })
-	document.addEventListener('touchend', onEnd)
+	document.addEventListener("mousemove", onMove)
+	document.addEventListener("mouseup", onEnd)
+	document.addEventListener("touchmove", onMove, { passive: false })
+	document.addEventListener("touchend", onEnd)
 }
 
 // The amount to be written off (0 if not applying write-off)
@@ -1608,16 +1679,20 @@ const isExactAmountModeActive = computed(() => {
 
 // Check if payment entries contain any cash payments
 const hasCashPayment = computed(() => {
-	return paymentEntries.value.some(entry => {
-		const method = paymentMethods.value.find(m => m.mode_of_payment === entry.mode_of_payment)
+	return paymentEntries.value.some((entry) => {
+		const method = paymentMethods.value.find(
+			(m) => m.mode_of_payment === entry.mode_of_payment,
+		)
 		return isCashPaymentMethod(method)
 	})
 })
 
 // Check if payment entries contain any non-cash payments
 const hasNonCashPayment = computed(() => {
-	return paymentEntries.value.some(entry => {
-		const method = paymentMethods.value.find(m => m.mode_of_payment === entry.mode_of_payment)
+	return paymentEntries.value.some((entry) => {
+		const method = paymentMethods.value.find(
+			(m) => m.mode_of_payment === entry.mode_of_payment,
+		)
 		return method && !isCashPaymentMethod(method) && !entry.is_customer_credit
 	})
 })
@@ -1648,7 +1723,7 @@ const isExactAmountValid = computed(() => {
 	if (hasCashPayment.value && !hasNonCashPayment.value) return true
 
 	// Non-cash or mixed: total paid must not exceed grand total
-	return totalPaid.value <= round3(props.grandTotal)
+	return totalPaid.value <= roundCurrency(props.grandTotal)
 })
 
 const canComplete = computed(() => {
@@ -1678,7 +1753,10 @@ const canComplete = computed(() => {
 
 const paymentButtonText = computed(() => {
 	// Show "Complete Payment" if fully paid or write-off covers remaining
-	if (remainingAmount.value === 0 || (applyWriteOff.value && canWriteOff.value)) {
+	if (
+		remainingAmount.value === 0 ||
+		(applyWriteOff.value && canWriteOff.value)
+	) {
 		return __("Complete Payment")
 	}
 	if (props.allowPartialPayment && totalPaid.value > 0) {
@@ -1691,16 +1769,20 @@ const paymentButtonText = computed(() => {
 // Cash methods show rounded/ceil amounts (physical denominations),
 // non-cash methods show the exact fractional amount
 const isLastMethodCash = computed(() => {
-	return !lastSelectedMethod.value || isCashPaymentMethod(lastSelectedMethod.value)
+	return (
+		!lastSelectedMethod.value || isCashPaymentMethod(lastSelectedMethod.value)
+	)
 })
 const { quickAmounts } = useQuickAmounts(remainingAmount, isLastMethodCash)
 
 // Whether a quick amount button should be disabled in exact-amount mode
 // Non-cash methods can only pay the exact remaining — no rounding allowed
 function isQuickAmountDisabled(amount) {
-	return isExactAmountModeActive.value
-		&& !isCashPaymentMethod(lastSelectedMethod.value)
-		&& amount !== round3(remainingAmount.value)
+	return (
+		isExactAmountModeActive.value &&
+		!isCashPaymentMethod(lastSelectedMethod.value) &&
+		amount !== roundCurrency(remainingAmount.value)
+	)
 }
 
 // Preload payment methods when posProfile is set (before dialog opens)
@@ -1708,7 +1790,10 @@ watch(
 	() => props.posProfile,
 	(newProfile) => {
 		if (newProfile) {
-			log.debug('[PaymentDialog] Preloading payment methods for profile:', newProfile)
+			log.debug(
+				"[PaymentDialog] Preloading payment methods for profile:",
+				newProfile,
+			)
 			loadPaymentMethods()
 			// Also preload sales persons if enabled
 			if (settingsStore.enableSalesPersons && salesPersons.value.length === 0) {
@@ -1717,7 +1802,7 @@ watch(
 			}
 		}
 	},
-	{ immediate: true } // Load immediately if posProfile is already set
+	{ immediate: true }, // Load immediately if posProfile is already set
 )
 
 watch(show, (newVal) => {
@@ -1729,21 +1814,25 @@ watch(show, (newVal) => {
 		mobileCustomAmount.value = ""
 		lastSelectedMethod.value = null
 		customerCredit.value = []
-		customerBalance.value = { total_outstanding: 0, total_credit: 0, net_balance: 0 }
+		customerBalance.value = {
+			total_outstanding: 0,
+			total_credit: 0,
+			net_balance: 0,
+		}
 		selectedSalesPersons.value = []
-		salesPersonSearch.value = ''
+		salesPersonSearch.value = ""
 		applyWriteOff.value = false // Reset write-off state
 		// Set default delivery date to today for Sales Orders
 		deliveryDate.value = isSalesOrder.value ? today : ""
 
 		// Debug logging
-		log.debug('[PaymentDialog] Dialog opened with props:', {
+		log.debug("[PaymentDialog] Dialog opened with props:", {
 			allowCreditSale: props.allowCreditSale,
 			allowWriteOff: props.allowWriteOff,
 			writeOffLimit: props.writeOffLimit,
 			customer: props.customer,
 			company: props.company,
-			posProfile: props.posProfile
+			posProfile: props.posProfile,
 		})
 
 		// Set default payment method if already loaded
@@ -1754,26 +1843,31 @@ watch(show, (newVal) => {
 
 		// Load customer credit and balance if enabled and customer is selected
 		if (props.allowCreditSale && props.customer && props.company) {
-			log.debug('[PaymentDialog] Loading customer credit and balance...')
+			log.debug("[PaymentDialog] Loading customer credit and balance...")
 			loadingCredit.value = true
 			customerCreditResource.fetch()
 			customerBalanceResource.fetch()
 		} else {
-			log.debug('[PaymentDialog] Not loading credit because:', {
+			log.debug("[PaymentDialog] Not loading credit because:", {
 				allowCreditSale: props.allowCreditSale,
 				hasCustomer: !!props.customer,
-				hasCompany: !!props.company
+				hasCompany: !!props.company,
 			})
 		}
 
 		// Load wallet info if customer is selected
 		if (props.customer && props.company) {
-			log.debug('[PaymentDialog] Loading wallet info...')
+			log.debug("[PaymentDialog] Loading wallet info...")
 			loadingWallet.value = true
 			walletInfoResource.fetch()
 		} else {
 			// Reset wallet info only if no customer
-			walletInfo.value = { wallet_enabled: false, wallet_exists: false, wallet_balance: 0, wallet_name: null }
+			walletInfo.value = {
+				wallet_enabled: false,
+				wallet_exists: false,
+				wallet_balance: 0,
+				wallet_name: null,
+			}
 		}
 	}
 })
@@ -1786,24 +1880,30 @@ watch(show, (newVal) => {
 // Select payment method (tap action)
 function selectPaymentMethod(method) {
 	lastSelectedMethod.value = method
-	log.debug('[PaymentDialog] Selected payment method:', method.mode_of_payment)
+	log.debug("[PaymentDialog] Selected payment method:", method.mode_of_payment)
 }
 
 // Helper to get default non-wallet payment method
 function getDefaultNonWalletMethod() {
 	// First try to find the default method that's not a wallet payment
-	const defaultMethod = paymentMethods.value.find(m => m.default && !isWalletPaymentMethod(m.mode_of_payment))
+	const defaultMethod = paymentMethods.value.find(
+		(m) => m.default && !isWalletPaymentMethod(m.mode_of_payment),
+	)
 	if (defaultMethod) return defaultMethod
 
 	// Otherwise, find any non-wallet method (preferably Cash)
-	const cashMethod = paymentMethods.value.find(m =>
-		!isWalletPaymentMethod(m.mode_of_payment) &&
-		(m.mode_of_payment.toLowerCase().includes('cash') || m.type?.toLowerCase() === 'cash')
+	const cashMethod = paymentMethods.value.find(
+		(m) =>
+			!isWalletPaymentMethod(m.mode_of_payment) &&
+			(m.mode_of_payment.toLowerCase().includes("cash") ||
+				m.type?.toLowerCase() === "cash"),
 	)
 	if (cashMethod) return cashMethod
 
 	// Fall back to first non-wallet method
-	return paymentMethods.value.find(m => !isWalletPaymentMethod(m.mode_of_payment))
+	return paymentMethods.value.find(
+		(m) => !isWalletPaymentMethod(m.mode_of_payment),
+	)
 }
 
 // Helper to switch to next payment method after partial wallet payment
@@ -1812,14 +1912,19 @@ function switchToNextPaymentMethod(partialAmount) {
 	if (nextMethod) {
 		lastSelectedMethod.value = nextMethod
 		// Pre-fill numpad with remaining amount for convenience
-		const newRemaining = round3(remainingAmount.value)
+		const newRemaining = roundCurrency(remainingAmount.value)
 		if (newRemaining > 0) {
 			setNumpadValue(newRemaining)
 			// Also set mobile custom amount
 			mobileCustomAmount.value = newRemaining.toFixed(2)
 		}
-		showInfo(__('Points applied: {0}. Please pay remaining {1} with {2}',
-			[formatCurrency(partialAmount), formatCurrency(newRemaining), __(nextMethod.mode_of_payment)]))
+		showInfo(
+			__("Points applied: {0}. Please pay remaining {1} with {2}", [
+				formatCurrency(partialAmount),
+				formatCurrency(newRemaining),
+				__(nextMethod.mode_of_payment),
+			]),
+		)
 	}
 }
 
@@ -1836,7 +1941,7 @@ function quickAddPayment(method) {
 	if (isWalletPaymentMethod(method.mode_of_payment)) {
 		const walletAvailable = availableWalletBalance.value
 		if (walletAvailable <= 0) {
-			showWarning(__('No redeemable points available'))
+			showWarning(__("No redeemable points available"))
 			return
 		}
 		if (amt > walletAvailable) {
@@ -1849,16 +1954,20 @@ function quickAddPayment(method) {
 	// Exact amount validation for non-cash payments
 	if (isExactAmountModeActive.value && !isCashPaymentMethod(method)) {
 		const currentNonCashTotal = paymentEntries.value
-			.filter(entry => {
-				const m = paymentMethods.value.find(pm => pm.mode_of_payment === entry.mode_of_payment)
+			.filter((entry) => {
+				const m = paymentMethods.value.find(
+					(pm) => pm.mode_of_payment === entry.mode_of_payment,
+				)
 				return m && !isCashPaymentMethod(m) && !entry.is_customer_credit
 			})
 			.reduce((sum, entry) => sum + (entry.amount || 0), 0)
 
-		const maxAllowed = round3(props.grandTotal) - currentNonCashTotal
+		const maxAllowed = roundCurrency(props.grandTotal) - currentNonCashTotal
 
 		if (maxAllowed <= 0) {
-			showWarning(__('Cannot add more non-cash payments. Use cash for overpayment.'))
+			showWarning(
+				__("Cannot add more non-cash payments. Use cash for overpayment."),
+			)
 			return
 		}
 
@@ -1867,10 +1976,14 @@ function quickAddPayment(method) {
 	}
 
 	// For mixed payments in exact amount mode, validate total doesn't exceed grand total
-	if (isExactAmountModeActive.value && hasNonCashPayment.value && isCashPaymentMethod(method)) {
-		const maxAllowed = round3(props.grandTotal) - totalPaid.value
+	if (
+		isExactAmountModeActive.value &&
+		hasNonCashPayment.value &&
+		isCashPaymentMethod(method)
+	) {
+		const maxAllowed = roundCurrency(props.grandTotal) - totalPaid.value
 		if (maxAllowed <= 0) {
-			showInfo(__('Invoice fully paid. No additional payment needed.'))
+			showInfo(__("Invoice fully paid. No additional payment needed."))
 			return
 		}
 		// For quick add (long press), use exact remaining to complete payment
@@ -1879,11 +1992,11 @@ function quickAddPayment(method) {
 
 	paymentEntries.value.push({
 		mode_of_payment: method.mode_of_payment,
-		amount: Number.parseFloat(amt.toFixed(2)),
-		type: method.type || __('Cash'),
+		amount: roundCurrency(amt),
+		type: method.type || __("Cash"),
 		is_wallet_payment: isWalletPaymentMethod(method.mode_of_payment),
 	})
-	log.debug('[PaymentDialog] Long press payment added:', method.mode_of_payment)
+	log.debug("[PaymentDialog] Long press payment added:", method.mode_of_payment)
 
 	// If this was a partial wallet payment, switch to another payment method
 	if (isPartialWalletPayment) {
@@ -1919,10 +2032,10 @@ function onPaymentMethodCancel() {
 
 // Add custom amount for a method
 function addCustomPayment(method, amount) {
-	log.debug('[PaymentDialog] Add custom payment:', {
+	log.debug("[PaymentDialog] Add custom payment:", {
 		method: method.mode_of_payment,
 		amount: amount,
-		currentEntries: paymentEntries.value.length
+		currentEntries: paymentEntries.value.length,
 	})
 
 	let amt = Number.parseFloat(amount)
@@ -1934,7 +2047,7 @@ function addCustomPayment(method, amount) {
 	if (isWalletPaymentMethod(method.mode_of_payment)) {
 		const walletAvailable = availableWalletBalance.value
 		if (walletAvailable <= 0) {
-			showWarning(__('No redeemable points available'))
+			showWarning(__("No redeemable points available"))
 			return
 		}
 		if (amt > walletAvailable) {
@@ -1948,16 +2061,22 @@ function addCustomPayment(method, amount) {
 	if (isExactAmountModeActive.value && !isCashPaymentMethod(method)) {
 		// Calculate the remaining amount after ALL existing payments (cash + non-cash)
 		// Non-cash payments in exact amount mode must equal the remaining balance exactly
-		const maxAllowed = round3(props.grandTotal - totalPaid.value)
+		const maxAllowed = roundCurrency(props.grandTotal - totalPaid.value)
 
 		if (maxAllowed <= 0) {
-			showWarning(__('Cannot add more non-cash payments. Use cash for overpayment.'))
+			showWarning(
+				__("Cannot add more non-cash payments. Use cash for overpayment."),
+			)
 			return
 		}
 
 		// Warn and reject if amount doesn't match exact remaining (use rounded comparison to avoid floating-point issues)
-		if (round3(amt) !== maxAllowed) {
-			showWarning(__('Non-cash payment must equal {0} exactly', [formatCurrency(maxAllowed)]))
+		if (roundCurrency(amt) !== maxAllowed) {
+			showWarning(
+				__("Non-cash payment must equal {0} exactly", [
+					formatCurrency(maxAllowed),
+				]),
+			)
 			return
 		}
 
@@ -1966,10 +2085,18 @@ function addCustomPayment(method, amount) {
 	}
 
 	// For mixed payments in exact amount mode, validate total doesn't exceed grand total
-	if (isExactAmountModeActive.value && hasNonCashPayment.value && isCashPaymentMethod(method)) {
+	if (
+		isExactAmountModeActive.value &&
+		hasNonCashPayment.value &&
+		isCashPaymentMethod(method)
+	) {
 		const newTotal = totalPaid.value + amt
-		if (newTotal > round3(props.grandTotal)) {
-			showWarning(__('Mixed payment cannot exceed invoice total. Limit: {0}', [formatCurrency(round3(props.grandTotal) - totalPaid.value)]))
+		if (newTotal > roundCurrency(props.grandTotal)) {
+			showWarning(
+				__("Mixed payment cannot exceed invoice total. Limit: {0}", [
+					formatCurrency(roundCurrency(props.grandTotal) - totalPaid.value),
+				]),
+			)
 			return
 		}
 	}
@@ -1977,11 +2104,11 @@ function addCustomPayment(method, amount) {
 	paymentEntries.value.push({
 		mode_of_payment: method.mode_of_payment,
 		amount: amt,
-		type: method.type || __('Cash'),
+		type: method.type || __("Cash"),
 		is_wallet_payment: isWalletPaymentMethod(method.mode_of_payment),
 	})
 
-	log.debug('[PaymentDialog] Payment added, new entries:', paymentEntries.value)
+	log.debug("[PaymentDialog] Payment added, new entries:", paymentEntries.value)
 	customAmount.value = ""
 
 	// If this was a partial wallet payment, switch to another payment method
@@ -1994,52 +2121,61 @@ function addCustomPayment(method, amount) {
 
 // Apply existing customer credit to payment
 function applyCustomerCredit() {
-	log.debug('[PaymentDialog] Apply customer credit:', {
+	log.debug("[PaymentDialog] Apply customer credit:", {
 		totalCredit: totalAvailableCredit.value,
 		remainingAmount: remainingAmount.value,
-		currentEntries: paymentEntries.value.length
+		currentEntries: paymentEntries.value.length,
 	})
 
 	if (remainingAmount.value === 0 || totalAvailableCredit.value === 0) return
 
 	// Calculate how much credit to apply (min of remaining amount and available credit)
-	const creditToApply = Math.min(remainingAmount.value, totalAvailableCredit.value)
+	const creditToApply = Math.min(
+		remainingAmount.value,
+		totalAvailableCredit.value,
+	)
 
 	// Add credit as a payment entry
 	paymentEntries.value.push({
 		mode_of_payment: "Customer Credit",
-		amount: Number.parseFloat(creditToApply.toFixed(2)),
+		amount: roundCurrency(creditToApply),
 		type: "Credit",
 		is_customer_credit: true,
-		credit_details: customerCredit.value.map(credit => ({
+		credit_details: customerCredit.value.map((credit) => ({
 			...credit,
-			credit_to_redeem: 0  // Will be calculated on backend
-		}))
+			credit_to_redeem: 0, // Will be calculated on backend
+		})),
 	})
 
-	log.debug('[PaymentDialog] Existing credit applied, new entries:', paymentEntries.value)
+	log.debug(
+		"[PaymentDialog] Existing credit applied, new entries:",
+		paymentEntries.value,
+	)
 }
 
 // Add "Pay on Account" - Credit Sale (invoice with outstanding amount)
 function addCreditAccountPayment() {
-	log.debug('[PaymentDialog] Add credit account payment (Pay Later):', {
+	log.debug("[PaymentDialog] Add credit account payment (Pay Later):", {
 		grandTotal: props.grandTotal,
 		currentPaid: totalPaid.value,
-		remainingAmount: remainingAmount.value
+		remainingAmount: remainingAmount.value,
 	})
 
 	// Close dialog and complete as credit sale (0 payment)
 	// The backend will create an invoice with outstanding amount
 	const paymentData = {
-		payments: [],  // No payments - full amount on credit
+		payments: [], // No payments - full amount on credit
 		change_amount: 0,
 		is_partial_payment: false,
-		is_credit_sale: true,  // Mark as credit sale
+		is_credit_sale: true, // Mark as credit sale
 		paid_amount: 0,
 		outstanding_amount: props.grandTotal,
 	}
 
-	log.debug('[PaymentDialog] Emitting credit sale payment-completed:', paymentData)
+	log.debug(
+		"[PaymentDialog] Emitting credit sale payment-completed:",
+		paymentData,
+	)
 	emit("payment-completed", paymentData)
 	show.value = false
 }
@@ -2050,18 +2186,22 @@ function clearAll() {
 }
 
 function completePayment() {
-	log.debug('[PaymentDialog] Complete payment called:', {
+	log.debug("[PaymentDialog] Complete payment called:", {
 		canComplete: canComplete.value,
 		totalPaid: totalPaid.value,
 		grandTotal: props.grandTotal,
 		allowPartialPayment: props.allowPartialPayment,
 		paymentEntries: paymentEntries.value,
 		salesPersons: selectedSalesPersons.value,
-		writeOff: { canWriteOff: canWriteOff.value, applyWriteOff: applyWriteOff.value, writeOffAmount: writeOffAmount.value }
+		writeOff: {
+			canWriteOff: canWriteOff.value,
+			applyWriteOff: applyWriteOff.value,
+			writeOffAmount: writeOffAmount.value,
+		},
 	})
 
 	if (!canComplete.value) {
-		log.warn('[PaymentDialog] Cannot complete - validation failed')
+		log.warn("[PaymentDialog] Cannot complete - validation failed")
 		return
 	}
 
@@ -2074,15 +2214,18 @@ function completePayment() {
 		change_amount: changeAmount.value,
 		is_partial_payment: isPartial,
 		paid_amount: totalPaid.value,
-		outstanding_amount: isPartial ? (remainingAmount.value - writeOffAmount.value) : 0,
-		sales_team: selectedSalesPersons.value.length > 0 ? selectedSalesPersons.value : null,
+		outstanding_amount: isPartial
+			? remainingAmount.value - writeOffAmount.value
+			: 0,
+		sales_team:
+			selectedSalesPersons.value.length > 0 ? selectedSalesPersons.value : null,
 		delivery_date: isSalesOrder.value ? deliveryDate.value : null,
 		// Write-off data
 		write_off_amount: writeOffAmount.value,
 		is_write_off: writeOffAmount.value > 0,
 	}
 
-	log.debug('[PaymentDialog] Emitting payment-completed:', paymentData)
+	log.debug("[PaymentDialog] Emitting payment-completed:", paymentData)
 
 	emit("payment-completed", paymentData)
 
@@ -2100,20 +2243,26 @@ function getMethodTotal(methodName) {
 		.reduce((sum, entry) => sum + (entry.amount || 0), 0)
 }
 
-
 // Additional discount handlers
 function handleAdditionalDiscountChange() {
 	let discountValue = localAdditionalDiscount.value
 	let discountAmount = 0
 
 	// If percentage mode, calculate amount
-	if (additionalDiscountType.value === 'percentage') {
+	if (additionalDiscountType.value === "percentage") {
 		// Validate against max_discount_allowed if configured
-		if (settingsStore.maxDiscountAllowed > 0 && discountValue > settingsStore.maxDiscountAllowed) {
+		if (
+			settingsStore.maxDiscountAllowed > 0 &&
+			discountValue > settingsStore.maxDiscountAllowed
+		) {
 			localAdditionalDiscount.value = settingsStore.maxDiscountAllowed
 			discountValue = settingsStore.maxDiscountAllowed
 			// Show warning toast
-			showWarning(__('Maximum allowed discount is {0}%', [settingsStore.maxDiscountAllowed]))
+			showWarning(
+				__("Maximum allowed discount is {0}%", [
+					settingsStore.maxDiscountAllowed,
+				]),
+			)
 		}
 
 		// Ensure percentage is between 0-100
@@ -2132,19 +2281,25 @@ function handleAdditionalDiscountChange() {
 		if (settingsStore.maxDiscountAllowed > 0 && props.subtotal > 0) {
 			const percentageEquivalent = (discountAmount / props.subtotal) * 100
 			if (percentageEquivalent > settingsStore.maxDiscountAllowed) {
-				const maxAmount = (props.subtotal * settingsStore.maxDiscountAllowed) / 100
+				const maxAmount =
+					(props.subtotal * settingsStore.maxDiscountAllowed) / 100
 				localAdditionalDiscount.value = maxAmount
 				discountAmount = maxAmount
 				// Show warning toast
-				showWarning(__('Maximum allowed discount is {0}% ({1} {2})',
-				[settingsStore.maxDiscountAllowed, props.currency, maxAmount.toFixed(2)]))
+				showWarning(
+					__("Maximum allowed discount is {0}% ({1} {2})", [
+						settingsStore.maxDiscountAllowed,
+						props.currency,
+						maxAmount.toFixed(2),
+					]),
+				)
 			}
 		}
 	}
 
 	// Ensure discount doesn't exceed subtotal
 	if (discountAmount > props.subtotal) {
-		if (additionalDiscountType.value === 'amount') {
+		if (additionalDiscountType.value === "amount") {
 			localAdditionalDiscount.value = props.subtotal
 		}
 		discountAmount = props.subtotal
@@ -2166,13 +2321,13 @@ function handleAdditionalDiscountTypeChange() {
 }
 
 function incrementDiscount() {
-	const step = additionalDiscountType.value === 'percentage' ? 1 : 5
+	const step = additionalDiscountType.value === "percentage" ? 1 : 5
 	localAdditionalDiscount.value = (localAdditionalDiscount.value || 0) + step
 	handleAdditionalDiscountChange()
 }
 
 function decrementDiscount() {
-	const step = additionalDiscountType.value === 'percentage' ? 1 : 5
+	const step = additionalDiscountType.value === "percentage" ? 1 : 5
 	const newValue = (localAdditionalDiscount.value || 0) - step
 	localAdditionalDiscount.value = newValue < 0 ? 0 : newValue
 	handleAdditionalDiscountChange()

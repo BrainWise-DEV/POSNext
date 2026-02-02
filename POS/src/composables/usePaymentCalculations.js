@@ -4,7 +4,7 @@
  */
 
 import { computed } from "vue"
-import { round3 } from "@/utils/currency"
+import { roundCurrency } from "@/utils/currency"
 
 /**
  * Create payment calculation computed properties
@@ -21,7 +21,7 @@ export function usePaymentCalculations({ paymentEntries, grandTotal, customerBal
 	 */
 	const totalPaid = computed(() => {
 		const sum = paymentEntries.value.reduce((acc, entry) => acc + (entry.amount || 0), 0)
-		return round3(sum)
+		return roundCurrency(sum)
 	})
 
 	/**
@@ -31,7 +31,7 @@ export function usePaymentCalculations({ paymentEntries, grandTotal, customerBal
 	const totalAvailableCredit = computed(() => {
 		// Use net_balance: negative means customer has credit, positive means they owe
 		// Return negative of net_balance so positive = credit available, negative = outstanding
-		return round3(-customerBalance.value.net_balance)
+		return roundCurrency(-customerBalance.value.net_balance)
 	})
 
 	/**
@@ -40,23 +40,23 @@ export function usePaymentCalculations({ paymentEntries, grandTotal, customerBal
 	const remainingAvailableCredit = computed(() => {
 		const usedCredit = getMethodTotal("Customer Credit")
 		const remaining = totalAvailableCredit.value - usedCredit
-		return remaining > 0 ? round3(remaining) : 0
+		return remaining > 0 ? roundCurrency(remaining) : 0
 	})
 
 	/**
 	 * Amount still remaining to be paid
 	 */
 	const remainingAmount = computed(() => {
-		const remaining = round3(grandTotal.value) - totalPaid.value
-		return remaining > 0 ? round3(remaining) : 0
+		const remaining = roundCurrency(grandTotal.value) - totalPaid.value
+		return remaining > 0 ? roundCurrency(remaining) : 0
 	})
 
 	/**
 	 * Change amount to return to customer (overpayment)
 	 */
 	const changeAmount = computed(() => {
-		const change = totalPaid.value - round3(grandTotal.value)
-		return change > 0 ? round3(change) : 0
+		const change = totalPaid.value - roundCurrency(grandTotal.value)
+		return change > 0 ? roundCurrency(change) : 0
 	})
 
 	return {
