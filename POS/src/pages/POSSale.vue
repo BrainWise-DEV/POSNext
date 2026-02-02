@@ -553,10 +553,11 @@
 			<InvoiceHistoryDialog
 				v-model="uiStore.showHistoryDialog"
 				:pos-profile="shiftStore.profileName"
+				:pos-opening-shift="shiftStore.currentShift?.name"
 				:currency="shiftStore.profileCurrency"
-				@create-return="handleCreateReturnFromHistory"
 				@view-invoice="handleViewInvoice"
 				@print-invoice="handlePrintInvoice"
+				@return-created="handleReturnCreated"
 			/>
 
 			<!-- Offline Invoices Dialog -->
@@ -2179,11 +2180,6 @@ function handleBatchSerialSelected(batchSerial) {
 			showError(error.message);
 		}
 	}
-}
-
-function handleCreateReturnFromHistory(invoice) {
-	uiStore.showReturnDialog = true;
-	showWarning(__("Creating return for invoice {0}", [invoice.name]));
 }
 
 async function handleCustomerCreated(newCustomer) {

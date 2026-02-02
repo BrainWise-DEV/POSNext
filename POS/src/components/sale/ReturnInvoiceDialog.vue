@@ -1,8 +1,8 @@
 <template>
 	<Dialog
-        v-model="show"
-        :options="{ title: __('Create Return Invoice'), size: '5xl' }"
-    >
+		v-model="showDialog"
+		:options="{ title: __('Create Return Invoice'), size: '5xl' }"
+	>
 		<template #body-content>
 			<div class="flex flex-col gap-4">
 				<!-- Offline Mode Warning -->
@@ -191,7 +191,7 @@
 			</div>
 		</template>
 		<template #actions>
-			<Button variant="subtle" @click="show = false">
+			<Button variant="subtle" @click="showDialog = false">
 				{{ __('Close') }}
 			</Button>
 		</template>
@@ -273,360 +273,360 @@
 
 				<!-- Return Items -->
 				<div v-if="originalInvoice">
-								<div class="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-3 gap-2">
-									<label class="text-sm font-medium text-gray-700 text-start">
-										{{ __('Select Items to Return') }}
-									</label>
-									<div class="flex gap-2 self-end sm:self-auto">
-										<Button size="sm" variant="subtle" @click="selectAllFilteredItems">
-											<span class="text-xs whitespace-nowrap">{{ __('Select All') }}</span>
-										</Button>
-										<Button size="sm" variant="subtle" @click="deselectAllItems">
-											<span class="text-xs whitespace-nowrap">{{ __('Clear All') }}</span>
-										</Button>
+					<div class="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-3 gap-2">
+						<label class="text-sm font-medium text-gray-700 text-start">
+							{{ __('Select Items to Return') }}
+						</label>
+						<div class="flex gap-2 self-end sm:self-auto">
+							<Button size="sm" variant="subtle" @click="selectAllFilteredItems">
+								<span class="text-xs whitespace-nowrap">{{ __('Select All') }}</span>
+							</Button>
+							<Button size="sm" variant="subtle" @click="deselectAllItems">
+								<span class="text-xs whitespace-nowrap">{{ __('Clear All') }}</span>
+							</Button>
+						</div>
+					</div>
+
+					<!-- Search bar for items (shown when more than 7 items) -->
+					<div v-if="returnItems.length > 7" class="mb-3 relative">
+						<input
+							v-model="itemSearchFilter"
+							type="text"
+							:placeholder="__('Search items by name or code...')"
+							class="w-full px-4 py-2.5 ps-10 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+						/>
+						<FeatherIcon name="search" class="absolute start-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+					</div>
+
+					<div class="flex flex-col gap-2 max-h-96 overflow-y-auto pe-2">
+						<div
+							v-for="(item, index) in filteredReturnItems"
+							:key="index"
+							@click="toggleItemSelection(item)"
+							:class="[
+								'bg-white border rounded-lg p-3 transition-all duration-200 cursor-pointer',
+								item.selected
+									? 'border-blue-400 shadow-md bg-blue-50/30'
+									: 'border-gray-200 hover:border-gray-300 hover:shadow-sm'
+							]"
+						>
+							<!-- Desktop Layout -->
+							<div class="hidden sm:flex items-center gap-3">
+								<!-- Checkbox -->
+								<input
+									type="checkbox"
+									v-model="item.selected"
+									@click.stop
+									class="h-4 w-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500 cursor-pointer"
+								/>
+
+								<!-- Item Info -->
+								<div class="flex-1 min-w-0 text-start">
+									<h4 class="text-sm font-bold text-gray-900 truncate">
+										{{ item.item_name }}
+									</h4>
+									<p class="text-xs text-gray-500 mt-0.5">
+										{{ item.item_code }}
+									</p>
+									<p v-if="item.already_returned > 0" class="text-xs text-amber-600 mt-0.5">
+										{{ __('⚠️ {0} already returned', [item.already_returned]) }}
+									</p>
+								</div>
+
+								<!-- Quantity Controls -->
+								<div class="flex items-center gap-2 bg-gray-50 rounded-lg px-3 py-1.5 border border-gray-200" @click.stop>
+									<span class="text-xs font-medium text-gray-600">{{ __('Return Qty:') }}</span>
+									<div class="flex items-center gap-1.5">
+										<button
+											type="button"
+											@click.stop="decrementReturnQuantity(item)"
+											:disabled="!item.selected || item.return_qty <= 1"
+											class="flex-shrink-0 w-8 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-700 font-bold text-lg transition-colors flex items-center justify-center border border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+										>−</button>
+										<input
+											v-model.number="item.return_qty"
+											:max="item.quantity"
+											:disabled="!item.selected"
+											type="number"
+											min="1"
+											step="1"
+											@change="normalizeItemQuantity(item)"
+											@blur="normalizeItemQuantity(item)"
+											class="w-12 px-1 py-1 border border-gray-300 rounded-lg text-sm text-center font-bold focus:ring-2 focus:ring-blue-500 focus:border-blue-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+										/>
+										<button
+											type="button"
+											@click.stop="incrementReturnQuantity(item)"
+											:disabled="!item.selected || item.return_qty >= item.quantity"
+											class="flex-shrink-0 w-8 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-700 font-bold text-lg transition-colors flex items-center justify-center border border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
+										>+</button>
 									</div>
+									<span class="text-xs font-semibold text-gray-700">{{ __('of {0}', [item.quantity], "item qty") }}</span>
 								</div>
 
-								<!-- Search bar for items (shown when more than 7 items) -->
-								<div v-if="returnItems.length > 7" class="mb-3 relative">
-									<input
-										v-model="itemSearchFilter"
-										type="text"
-										:placeholder="__('Search items by name or code...')"
-										class="w-full px-4 py-2.5 ps-10 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-									/>
-									<FeatherIcon name="search" class="absolute start-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+								<!-- Rate & Amount -->
+								<div class="text-center min-w-[100px]">
+									<p class="text-sm font-bold text-gray-900">
+										{{ formatCurrency((item.rate_with_tax || item.rate) * item.return_qty) }}
+									</p>
+									<p class="text-xs text-gray-500 mt-0.5 flex items-center gap-1 flex-wrap justify-center">
+										<span>@ {{ formatCurrency(item.price_list_rate || item.rate) }}/{{ item.uom }}</span>
+										<span v-if="item.discount_per_unit > 0" class="inline-flex items-center px-1 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">−{{ formatCurrency(item.discount_per_unit) }}</span>
+										<span v-if="item.tax_per_unit > 0" class="inline-flex items-center px-1 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700">+{{ formatCurrency(item.tax_per_unit) }}</span>
+									</p>
 								</div>
-
-								<div class="flex flex-col gap-2 max-h-96 overflow-y-auto pe-2">
-									<div
-										v-for="(item, index) in filteredReturnItems"
-										:key="index"
-										@click="toggleItemSelection(item)"
-										:class="[
-											'bg-white border rounded-lg p-3 transition-all duration-200 cursor-pointer',
-											item.selected
-												? 'border-blue-400 shadow-md bg-blue-50/30'
-												: 'border-gray-200 hover:border-gray-300 hover:shadow-sm'
-										]"
-									>
-										<!-- Desktop Layout -->
-										<div class="hidden sm:flex items-center gap-3">
-											<!-- Checkbox -->
-											<input
-												type="checkbox"
-												v-model="item.selected"
-												@click.stop
-												class="h-4 w-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500 cursor-pointer"
-											/>
-
-											<!-- Item Info -->
-											<div class="flex-1 min-w-0 text-start">
-												<h4 class="text-sm font-bold text-gray-900 truncate">
-													{{ item.item_name }}
-												</h4>
-												<p class="text-xs text-gray-500 mt-0.5">
-													{{ item.item_code }}
-												</p>
-												<p v-if="item.already_returned > 0" class="text-xs text-amber-600 mt-0.5">
-													{{ __('⚠️ {0} already returned', [item.already_returned]) }}
-												</p>
-											</div>
-
-											<!-- Quantity Controls -->
-											<div class="flex items-center gap-2 bg-gray-50 rounded-lg px-3 py-1.5 border border-gray-200" @click.stop>
-												<span class="text-xs font-medium text-gray-600">{{ __('Return Qty:') }}</span>
-												<div class="flex items-center gap-1.5">
-													<button
-														type="button"
-														@click.stop="decrementReturnQuantity(item)"
-														:disabled="!item.selected || item.return_qty <= 1"
-														class="flex-shrink-0 w-8 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-700 font-bold text-lg transition-colors flex items-center justify-center border border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
-													>−</button>
-													<input
-														v-model.number="item.return_qty"
-														:max="item.quantity"
-														:disabled="!item.selected"
-														type="number"
-														min="1"
-														step="1"
-														@change="normalizeItemQuantity(item)"
-														@blur="normalizeItemQuantity(item)"
-														class="w-12 px-1 py-1 border border-gray-300 rounded-lg text-sm text-center font-bold focus:ring-2 focus:ring-blue-500 focus:border-blue-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-													/>
-													<button
-														type="button"
-														@click.stop="incrementReturnQuantity(item)"
-														:disabled="!item.selected || item.return_qty >= item.quantity"
-														class="flex-shrink-0 w-8 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-700 font-bold text-lg transition-colors flex items-center justify-center border border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
-													>+</button>
-												</div>
-												<span class="text-xs font-semibold text-gray-700">{{ __('of {0}', [item.quantity], "item qty") }}</span>
-											</div>
-
-											<!-- Rate & Amount -->
-											<div class="text-center min-w-[100px]">
-												<p class="text-sm font-bold text-gray-900">
-													{{ formatCurrency((item.rate_with_tax || item.rate) * item.return_qty) }}
-												</p>
-												<p class="text-xs text-gray-500 mt-0.5 flex items-center gap-1 flex-wrap justify-center">
-													<span>@ {{ formatCurrency(item.price_list_rate || item.rate) }}/{{ item.uom }}</span>
-													<span v-if="item.discount_per_unit > 0" class="inline-flex items-center px-1 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">−{{ formatCurrency(item.discount_per_unit) }}</span>
-													<span v-if="item.tax_per_unit > 0" class="inline-flex items-center px-1 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700">+{{ formatCurrency(item.tax_per_unit) }}</span>
-												</p>
-											</div>
-										</div>
-
-										<!-- Mobile Layout -->
-										<div class="sm:hidden flex flex-col gap-3">
-											<!-- Item Header with Checkbox and Name -->
-											<div class="flex items-start gap-3">
-												<input
-													type="checkbox"
-													v-model="item.selected"
-													@click.stop
-													class="h-5 w-5 mt-1 text-blue-600 rounded-md focus:ring-2 focus:ring-blue-500 cursor-pointer flex-shrink-0"
-												/>
-												<div class="flex-1 min-w-0 text-start">
-													<h4 class="text-sm font-semibold text-gray-900 leading-tight">
-														{{ item.item_name }}
-													</h4>
-													<p class="text-xs text-gray-500 mt-1">
-														{{ item.item_code }}
-													</p>
-													<p v-if="item.already_returned > 0" class="text-xs text-amber-600 mt-1">
-														{{ __('⚠️ {0} already returned', [item.already_returned]) }}
-													</p>
-												</div>
-											</div>
-
-											<!-- Quantity Controls -->
-											<div class="flex flex-col gap-2" @click.stop>
-												<div class="flex items-center justify-between">
-													<span class="text-xs font-medium text-gray-600 text-start">{{ __('Return Qty:') }}</span>
-													<span class="text-xs text-gray-500 text-end">{{ __('of {0}', [item.quantity], "item qty") }}</span>
-												</div>
-												<div class="flex items-center gap-2">
-													<button
-														@click.stop="decrementReturnQuantity(item)"
-														:disabled="!item.selected || item.return_qty <= 1"
-														class="flex-1 h-10 rounded-lg bg-white border-2 border-gray-300 flex items-center justify-center text-gray-700 active:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed font-bold text-xl"
-													>
-														−
-													</button>
-													<input
-														v-model.number="item.return_qty"
-														:max="item.quantity"
-														:disabled="!item.selected"
-														type="number"
-														min="1"
-														step="1"
-														@change="normalizeItemQuantity(item)"
-														@blur="normalizeItemQuantity(item)"
-														class="w-16 h-10 px-2 border-2 border-gray-300 rounded-lg text-lg text-center font-bold focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-													/>
-													<button
-														@click.stop="incrementReturnQuantity(item)"
-														:disabled="!item.selected || item.return_qty >= item.quantity"
-														class="flex-1 h-10 rounded-lg bg-white border-2 border-gray-300 flex items-center justify-center text-gray-700 active:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed font-bold text-xl"
-													>
-														+
-													</button>
-												</div>
-											</div>
-
-											<!-- Price -->
-											<div class="flex items-center justify-between px-1 pt-2 border-t border-gray-100">
-												<span class="text-xs text-gray-600 text-start">{{ __('Amount:') }}</span>
-												<div class="text-end">
-													<p class="text-base font-bold text-gray-900">
-														{{ formatCurrency((item.rate_with_tax || item.rate) * item.return_qty) }}
-													</p>
-													<p class="text-xs text-gray-500 flex items-center gap-1 flex-wrap justify-end">
-														<span>@ {{ formatCurrency(item.price_list_rate || item.rate) }}/{{ item.uom }}</span>
-														<span v-if="item.discount_per_unit > 0" class="inline-flex items-center px-1 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">−{{ formatCurrency(item.discount_per_unit) }}</span>
-														<span v-if="item.tax_per_unit > 0" class="inline-flex items-center px-1 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700">+{{ formatCurrency(item.tax_per_unit) }}</span>
-													</p>
-												</div>
-											</div>
-										</div>
-									</div>
-								</div>
-								<p v-if="returnItems.length === 0" class="text-center py-8 text-gray-500">
-									{{ __('No items available for return') }}
-								</p>
 							</div>
 
-							<!-- Payment Methods Selection -->
-							<div v-if="selectedItems.length > 0">
-								<!-- Credit Sale Return Notice -->
-								<div v-if="isOriginalCreditSale" class="bg-amber-50 rounded-xl p-4 border border-amber-200 mb-4 text-start">
-									<h4 class="text-sm font-bold text-amber-900 mb-1">{{ __('Credit Sale Return') }}</h4>
-									<p class="text-xs text-amber-800">
-										{{ __('This invoice was paid on account (credit sale). The return will reverse the accounts receivable balance. No cash refund will be processed.') }}
-									</p>
-								</div>
-
-								<!-- Partially Paid Invoice Notice -->
-								<div v-if="isPartiallyPaid && !isOriginalCreditSale" class="bg-blue-50 rounded-xl p-4 border border-blue-200 mb-4 text-start">
-									<h4 class="text-sm font-bold text-blue-900 mb-1">{{ __('Partially Paid Invoice') }}</h4>
-									<p class="text-xs text-blue-800 mb-2">
-										{{ __('This invoice was partially paid. The refund will be split proportionally.') }}
-									</p>
-									<div class="flex flex-col gap-1 text-xs">
-										<div class="flex justify-between items-center">
-											<span class="text-blue-700">{{ __('Cash Refund:') }}</span>
-											<span class="font-bold text-blue-900">{{ formatCurrency(maxRefundableAmount) }}</span>
-										</div>
-										<div v-if="creditAdjustmentAmount > 0" class="flex justify-between items-center">
-											<span class="text-blue-700">{{ __('Credit Adjustment:') }}</span>
-											<span class="font-bold text-blue-900">{{ formatCurrency(creditAdjustmentAmount) }}</span>
-										</div>
+							<!-- Mobile Layout -->
+							<div class="sm:hidden flex flex-col gap-3">
+								<!-- Item Header with Checkbox and Name -->
+								<div class="flex items-start gap-3">
+									<input
+										type="checkbox"
+										v-model="item.selected"
+										@click.stop
+										class="h-5 w-5 mt-1 text-blue-600 rounded-md focus:ring-2 focus:ring-blue-500 cursor-pointer flex-shrink-0"
+									/>
+									<div class="flex-1 min-w-0 text-start">
+										<h4 class="text-sm font-semibold text-gray-900 leading-tight">
+											{{ item.item_name }}
+										</h4>
+										<p class="text-xs text-gray-500 mt-1">
+											{{ item.item_code }}
+										</p>
+										<p v-if="item.already_returned > 0" class="text-xs text-amber-600 mt-1">
+											{{ __('⚠️ {0} already returned', [item.already_returned]) }}
+										</p>
 									</div>
 								</div>
 
-								<!-- Regular Payment Methods (only for non-credit sales) -->
-								<div v-if="!isOriginalCreditSale">
-								<div class="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-3 gap-2">
-									<label class="text-sm font-medium text-gray-700 text-start">
-										{{ __('Refund Payment Methods') }}
-									</label>
-									<Button size="sm" variant="subtle" @click="addPaymentRow" class="self-end sm:self-auto">
-										<span class="text-xs">{{ __('+ Add Payment') }}</span>
-									</Button>
-								</div>
-
-								<div class="flex flex-col gap-3">
-									<div
-										v-for="(payment, index) in refundPayments"
-										:key="index"
-										class="bg-white border border-gray-200 rounded-xl p-3 shadow-sm"
-									>
-										<!-- Desktop: Single Row | Mobile: Two Rows -->
-										<div class="flex flex-col sm:flex-row sm:items-center gap-3">
-											<!-- Payment Method -->
-											<div class="flex items-center gap-2 flex-1">
-												<div class="flex-shrink-0 w-10 h-10 rounded-lg bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center text-xl border border-blue-200">
-													{{ payment.mode_of_payment ? getPaymentIcon(payment.mode_of_payment) : '💰' }}
-												</div>
-												<select
-													v-model="payment.mode_of_payment"
-													:style="paymentSelectStyle"
-													class="payment-select flex-1 py-2.5 border border-gray-300 rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white appearance-none cursor-pointer hover:border-gray-400 transition-colors ps-3 pe-10"
-												>
-													<option value="">{{ __('Select method...') }}</option>
-													<option v-for="method in paymentMethods" :key="method.mode_of_payment" :value="method.mode_of_payment">
-														{{ method.mode_of_payment }}
-													</option>
-												</select>
-											</div>
-											<!-- Amount with Counter -->
-											<div class="flex items-center gap-2 flex-1">
-												<button
-													@click="payment.amount = Math.max(0, (payment.amount || 0) - 1)"
-													type="button"
-													class="flex-shrink-0 w-10 h-10 sm:w-9 sm:h-9 rounded-lg bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-700 font-bold text-xl transition-colors flex items-center justify-center border border-gray-300"
-												>−</button>
-												<input
-													:value="payment.amount"
-													@input="payment.amount = parseFloat($event.target.value) || 0"
-													@focus="$event.target.select()"
-													type="text"
-													inputmode="decimal"
-													:placeholder="__('Amount')"
-													class="flex-1 min-w-0 px-3 py-2.5 text-base font-bold text-center border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 hover:border-gray-400 transition-colors"
-												/>
-												<button
-													@click="payment.amount = (payment.amount || 0) + 1"
-													type="button"
-													class="flex-shrink-0 w-10 h-10 sm:w-9 sm:h-9 rounded-lg bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-700 font-bold text-xl transition-colors flex items-center justify-center border border-gray-300"
-												>+</button>
-											</div>
-											<!-- Delete Button -->
-											<button
-												v-if="refundPayments.length > 1"
-												@click="removePaymentRow(index)"
-												class="hidden sm:flex flex-shrink-0 w-9 h-9 items-center justify-center text-red-500 hover:text-red-700 hover:bg-red-50 active:bg-red-100 rounded-lg transition-colors"
-												:title="__('Remove')"
-											>
-												<FeatherIcon name="trash-2" class="w-4 h-4" />
-											</button>
-										</div>
-										<!-- Mobile Delete Button -->
+								<!-- Quantity Controls -->
+								<div class="flex flex-col gap-2" @click.stop>
+									<div class="flex items-center justify-between">
+										<span class="text-xs font-medium text-gray-600 text-start">{{ __('Return Qty:') }}</span>
+										<span class="text-xs text-gray-500 text-end">{{ __('of {0}', [item.quantity], "item qty") }}</span>
+									</div>
+									<div class="flex items-center gap-2">
 										<button
-											v-if="refundPayments.length > 1"
-											@click="removePaymentRow(index)"
-											class="sm:hidden mt-2 w-full py-2 text-sm text-red-600 hover:bg-red-50 active:bg-red-100 rounded-lg transition-colors flex items-center justify-center gap-1"
+											@click.stop="decrementReturnQuantity(item)"
+											:disabled="!item.selected || item.return_qty <= 1"
+											class="flex-1 h-10 rounded-lg bg-white border-2 border-gray-300 flex items-center justify-center text-gray-700 active:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed font-bold text-xl"
 										>
-											<FeatherIcon name="trash-2" class="w-4 h-4" />
-											{{ __('Remove') }}
+											−
+										</button>
+										<input
+											v-model.number="item.return_qty"
+											:max="item.quantity"
+											:disabled="!item.selected"
+											type="number"
+											min="1"
+											step="1"
+											@change="normalizeItemQuantity(item)"
+											@blur="normalizeItemQuantity(item)"
+											class="w-16 h-10 px-2 border-2 border-gray-300 rounded-lg text-lg text-center font-bold focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+										/>
+										<button
+											@click.stop="incrementReturnQuantity(item)"
+											:disabled="!item.selected || item.return_qty >= item.quantity"
+											class="flex-1 h-10 rounded-lg bg-white border-2 border-gray-300 flex items-center justify-center text-gray-700 active:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed font-bold text-xl"
+										>
+											+
 										</button>
 									</div>
 								</div>
 
-								<!-- Payment Summary -->
-								<div class="mt-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
-									<div class="flex items-center justify-between text-sm">
-										<span class="text-gray-600">{{ isPartiallyPaid ? __('Refundable Amount:') : __('Total Refund:') }}</span>
-										<span class="font-bold text-gray-900">{{ formatCurrency(isPartiallyPaid ? maxRefundableAmount : returnTotal) }}</span>
-									</div>
-									<div class="flex items-center justify-between text-sm mt-1">
-										<span class="text-gray-600">{{ __('Payment Total:') }}</span>
-										<span :class="[
-											'font-bold',
-											Math.abs(totalPaymentAmount - (isPartiallyPaid ? maxRefundableAmount : returnTotal)) < 0.01 ? 'text-green-600' : 'text-red-600'
-										]">
-											{{ formatCurrency(totalPaymentAmount) }}
-										</span>
-									</div>
-									<p v-if="Math.abs(totalPaymentAmount - (isPartiallyPaid ? maxRefundableAmount : returnTotal)) >= 0.01" class="mt-2 text-xs text-amber-600 text-start">
-										{{ isPartiallyPaid ? __('⚠️ Payment total must equal refundable amount') : __('⚠️ Payment total must equal refund amount') }}
-									</p>
-								</div>
-								</div>
-							</div>
-
-							<!-- Return Summary -->
-							<div v-if="selectedItems.length > 0" class="bg-gradient-to-br from-red-50 to-orange-50 rounded-xl p-4 sm:p-5 border border-red-200 shadow-sm">
-								<div class="flex items-center gap-2 mb-3">
-									<FeatherIcon name="corner-down-left" class="w-5 h-5 text-red-600 flex-shrink-0" />
-									<h3 class="text-sm font-bold text-gray-900">{{ __('Return Summary') }}</h3>
-								</div>
-								<div class="flex flex-col gap-2">
-									<div class="flex justify-between items-center">
-										<span class="text-sm text-gray-600">{{ __('Items to Return:') }}</span>
-										<span class="px-2 py-1 bg-white rounded-lg text-sm font-bold text-gray-900 border border-red-200">{{ selectedItems.length }}</span>
-									</div>
-									<!-- Breakdown for partially paid invoices -->
-									<template v-if="showPartialBreakdown">
-										<div class="flex justify-between items-center text-sm pt-2 border-t border-red-200">
-											<span class="text-gray-600">{{ __('Return Value:') }}</span>
-											<span class="font-medium text-gray-700">{{ formatCurrency(returnTotal) }}</span>
-										</div>
-										<div class="flex justify-between items-center text-sm">
-											<span class="text-gray-600">{{ __('Credit Adjustment:') }}</span>
-											<span class="font-medium text-gray-700">-{{ formatCurrency(creditAdjustmentAmount) }}</span>
-										</div>
-									</template>
-									<!-- Final refund amount -->
-									<div class="flex justify-between items-center pt-2 border-t border-red-200">
-										<span class="text-sm sm:text-base font-semibold text-gray-700">{{ __(summaryRefundLabel) }}</span>
-										<span class="text-xl sm:text-2xl font-bold text-red-600">{{ formatCurrency(summaryRefundAmount) }}</span>
+								<!-- Price -->
+								<div class="flex items-center justify-between px-1 pt-2 border-t border-gray-100">
+									<span class="text-xs text-gray-600 text-start">{{ __('Amount:') }}</span>
+									<div class="text-end">
+										<p class="text-base font-bold text-gray-900">
+											{{ formatCurrency((item.rate_with_tax || item.rate) * item.return_qty) }}
+										</p>
+										<p class="text-xs text-gray-500 flex items-center gap-1 flex-wrap justify-end">
+											<span>@ {{ formatCurrency(item.price_list_rate || item.rate) }}/{{ item.uom }}</span>
+											<span v-if="item.discount_per_unit > 0" class="inline-flex items-center px-1 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">−{{ formatCurrency(item.discount_per_unit) }}</span>
+											<span v-if="item.tax_per_unit > 0" class="inline-flex items-center px-1 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700">+{{ formatCurrency(item.tax_per_unit) }}</span>
+										</p>
 									</div>
 								</div>
 							</div>
+						</div>
+					</div>
+					<p v-if="returnItems.length === 0" class="text-center py-8 text-gray-500">
+						{{ __('No items available for return') }}
+					</p>
+				</div>
 
-							<!-- Return Reason -->
-							<div v-if="selectedItems.length > 0">
-								<label class="block text-sm font-medium text-gray-700 mb-2 text-start">
-									{{ __('Return Reason') }} <span class="text-gray-400">({{ __('optional') }})</span>
-								</label>
-								<textarea
-									v-model="returnReason"
-									rows="3"
-									:placeholder="__('Enter reason for return (e.g., defective product, wrong item, customer request)...')"
-									class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
-								></textarea>
+				<!-- Payment Methods Selection -->
+				<div v-if="selectedItems.length > 0">
+					<!-- Credit Sale Return Notice -->
+					<div v-if="isOriginalCreditSale" class="bg-amber-50 rounded-xl p-4 border border-amber-200 mb-4 text-start">
+						<h4 class="text-sm font-bold text-amber-900 mb-1">{{ __('Credit Sale Return') }}</h4>
+						<p class="text-xs text-amber-800">
+							{{ __('This invoice was paid on account (credit sale). The return will reverse the accounts receivable balance. No cash refund will be processed.') }}
+						</p>
+					</div>
+
+						<!-- Partially Paid Invoice Notice -->
+					<div v-if="isPartiallyPaid && !isOriginalCreditSale" class="bg-blue-50 rounded-xl p-4 border border-blue-200 mb-4 text-start">
+						<h4 class="text-sm font-bold text-blue-900 mb-1">{{ __('Partially Paid Invoice') }}</h4>
+						<p class="text-xs text-blue-800 mb-2">
+							{{ __('This invoice was partially paid. The refund will be split proportionally.') }}
+						</p>
+						<div class="flex flex-col gap-1 text-xs">
+							<div class="flex justify-between items-center">
+								<span class="text-blue-700">{{ __('Cash Refund:') }}</span>
+								<span class="font-bold text-blue-900">{{ formatCurrency(maxRefundableAmount) }}</span>
+							</div>
+							<div v-if="creditAdjustmentAmount > 0" class="flex justify-between items-center">
+								<span class="text-blue-700">{{ __('Credit Adjustment:') }}</span>
+								<span class="font-bold text-blue-900">{{ formatCurrency(creditAdjustmentAmount) }}</span>
+							</div>
+						</div>
+					</div>
+
+					<!-- Regular Payment Methods (only for non-credit sales) -->
+					<div v-if="!isOriginalCreditSale">
+						<div class="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-3 gap-2">
+							<label class="text-sm font-medium text-gray-700 text-start">
+								{{ __('Refund Payment Methods') }}
+							</label>
+							<Button size="sm" variant="subtle" @click="addPaymentRow" class="self-end sm:self-auto">
+								<span class="text-xs">{{ __('+ Add Payment') }}</span>
+							</Button>
+						</div>
+
+						<div class="flex flex-col gap-3">
+							<div
+								v-for="(payment, index) in refundPayments"
+								:key="index"
+								class="bg-white border border-gray-200 rounded-xl p-3 shadow-sm"
+							>
+								<!-- Desktop: Single Row | Mobile: Two Rows -->
+								<div class="flex flex-col sm:flex-row sm:items-center gap-3">
+									<!-- Payment Method -->
+									<div class="flex items-center gap-2 flex-1">
+										<div class="flex-shrink-0 w-10 h-10 rounded-lg bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center text-xl border border-blue-200">
+											{{ payment.mode_of_payment ? getPaymentIcon(payment.mode_of_payment) : '💰' }}
+										</div>
+										<select
+											v-model="payment.mode_of_payment"
+											:style="paymentSelectStyle"
+											class="payment-select flex-1 py-2.5 border border-gray-300 rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white appearance-none cursor-pointer hover:border-gray-400 transition-colors ps-3 pe-10"
+										>
+											<option value="">{{ __('Select method...') }}</option>
+											<option v-for="method in paymentMethods" :key="method.mode_of_payment" :value="method.mode_of_payment">
+												{{ method.mode_of_payment }}
+											</option>
+										</select>
+									</div>
+									<!-- Amount with Counter -->
+									<div class="flex items-center gap-2 flex-1">
+										<button
+											@click="payment.amount = Math.max(0, (payment.amount || 0) - 1)"
+											type="button"
+											class="flex-shrink-0 w-10 h-10 sm:w-9 sm:h-9 rounded-lg bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-700 font-bold text-xl transition-colors flex items-center justify-center border border-gray-300"
+										>−</button>
+										<input
+											:value="payment.amount"
+											@input="payment.amount = parseFloat($event.target.value) || 0"
+											@focus="$event.target.select()"
+											type="text"
+											inputmode="decimal"
+											:placeholder="__('Amount')"
+											class="flex-1 min-w-0 px-3 py-2.5 text-base font-bold text-center border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 hover:border-gray-400 transition-colors"
+										/>
+										<button
+											@click="payment.amount = (payment.amount || 0) + 1"
+											type="button"
+											class="flex-shrink-0 w-10 h-10 sm:w-9 sm:h-9 rounded-lg bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-700 font-bold text-xl transition-colors flex items-center justify-center border border-gray-300"
+										>+</button>
+									</div>
+									<!-- Delete Button -->
+									<button
+										v-if="refundPayments.length > 1"
+										@click="removePaymentRow(index)"
+										class="hidden sm:flex flex-shrink-0 w-9 h-9 items-center justify-center text-red-500 hover:text-red-700 hover:bg-red-50 active:bg-red-100 rounded-lg transition-colors"
+										:title="__('Remove')"
+									>
+										<FeatherIcon name="trash-2" class="w-4 h-4" />
+									</button>
+								</div>
+								<!-- Mobile Delete Button -->
+								<button
+									v-if="refundPayments.length > 1"
+									@click="removePaymentRow(index)"
+									class="sm:hidden mt-2 w-full py-2 text-sm text-red-600 hover:bg-red-50 active:bg-red-100 rounded-lg transition-colors flex items-center justify-center gap-1"
+								>
+									<FeatherIcon name="trash-2" class="w-4 h-4" />
+									{{ __('Remove') }}
+								</button>
+							</div>
+						</div>
+
+						<!-- Payment Summary -->
+						<div class="mt-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
+							<div class="flex items-center justify-between text-sm">
+								<span class="text-gray-600">{{ isPartiallyPaid ? __('Refundable Amount:') : __('Total Refund:') }}</span>
+								<span class="font-bold text-gray-900">{{ formatCurrency(isPartiallyPaid ? maxRefundableAmount : returnTotal) }}</span>
+							</div>
+							<div class="flex items-center justify-between text-sm mt-1">
+								<span class="text-gray-600">{{ __('Payment Total:') }}</span>
+								<span :class="[
+									'font-bold',
+									Math.abs(totalPaymentAmount - (isPartiallyPaid ? maxRefundableAmount : returnTotal)) < 0.01 ? 'text-green-600' : 'text-red-600'
+								]">
+									{{ formatCurrency(totalPaymentAmount) }}
+								</span>
+							</div>
+							<p v-if="Math.abs(totalPaymentAmount - (isPartiallyPaid ? maxRefundableAmount : returnTotal)) >= 0.01" class="mt-2 text-xs text-amber-600 text-start">
+								{{ isPartiallyPaid ? __('⚠️ Payment total must equal refundable amount') : __('⚠️ Payment total must equal refund amount') }}
+							</p>
+						</div>
+					</div>
+				</div>
+
+				<!-- Return Summary -->
+				<div v-if="selectedItems.length > 0" class="bg-gradient-to-br from-red-50 to-orange-50 rounded-xl p-4 sm:p-5 border border-red-200 shadow-sm">
+					<div class="flex items-center gap-2 mb-3">
+						<FeatherIcon name="corner-down-left" class="w-5 h-5 text-red-600 flex-shrink-0" />
+						<h3 class="text-sm font-bold text-gray-900">{{ __('Return Summary') }}</h3>
+					</div>
+					<div class="flex flex-col gap-2">
+						<div class="flex justify-between items-center">
+							<span class="text-sm text-gray-600">{{ __('Items to Return:') }}</span>
+							<span class="px-2 py-1 bg-white rounded-lg text-sm font-bold text-gray-900 border border-red-200">{{ selectedItems.length }}</span>
+						</div>
+						<!-- Breakdown for partially paid invoices -->
+						<template v-if="showPartialBreakdown">
+							<div class="flex justify-between items-center text-sm pt-2 border-t border-red-200">
+								<span class="text-gray-600">{{ __('Return Value:') }}</span>
+								<span class="font-medium text-gray-700">{{ formatCurrency(returnTotal) }}</span>
+							</div>
+							<div class="flex justify-between items-center text-sm">
+								<span class="text-gray-600">{{ __('Credit Adjustment:') }}</span>
+								<span class="font-medium text-gray-700">-{{ formatCurrency(creditAdjustmentAmount) }}</span>
+							</div>
+						</template>
+						<!-- Final refund amount -->
+						<div class="flex justify-between items-center pt-2 border-t border-red-200">
+							<span class="text-sm sm:text-base font-semibold text-gray-700">{{ __(summaryRefundLabel) }}</span>
+							<span class="text-xl sm:text-2xl font-bold text-red-600">{{ formatCurrency(summaryRefundAmount) }}</span>
+						</div>
+					</div>
+				</div>
+
+				<!-- Return Reason -->
+				<div v-if="selectedItems.length > 0">
+					<label class="block text-sm font-medium text-gray-700 mb-2 text-start">
+						{{ __('Return Reason') }} <span class="text-gray-400">({{ __('optional') }})</span>
+					</label>
+					<textarea
+						v-model="returnReason"
+						rows="3"
+						:placeholder="__('Enter reason for return (e.g., defective product, wrong item, customer request)...')"
+						class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
+					></textarea>
 				</div>
 			</div>
 		</template>
@@ -751,12 +751,18 @@ const props = defineProps({
 	posProfile: String,
 	posOpeningShift: String,
 	currency: { type: String, default: "USD" },
+	preselectedInvoice: { type: Object, default: null },
 })
 
 const emit = defineEmits(["update:modelValue", "return-created"])
 
+// Computed getter/setter for v-model pattern (per codebase standard)
+const showDialog = computed({
+	get: () => props.modelValue,
+	set: (val) => emit("update:modelValue", val)
+})
+
 // State
-const show = ref(props.modelValue)
 const originalInvoice = ref(null)
 // Stores the return document created by ERPNext's make_sales_return().
 // Contains sales_team, taxes, and other child tables copied from the original invoice.
@@ -1050,22 +1056,35 @@ onUnmounted(() => {
 watch(
 	() => props.modelValue,
 	(val) => {
-		show.value = val
 		if (val) {
-			// Auto-load invoices when dialog opens
-			loadInvoicesResource.reload()
+			// If a preselected invoice is provided, skip showing the invoice list dialog
+			// and go directly to the Process Return modal
+			if (props.preselectedInvoice?.name) {
+				// Don't show the main dialog with invoice list - go directly to return modal
+				showDialog.value = false
+				checkValidityAndOpenModal(props.preselectedInvoice.name, true)
+			} else {
+				// Normal flow - show the invoice selection dialog
+				loadInvoicesResource.reload()
+			}
 		} else {
 			resetForm()
 		}
 	},
 )
 
-watch(show, (val) => {
-	emit("update:modelValue", val)
-	if (!val) {
-		resetForm()
-	}
-})
+// Watch for preselectedInvoice changes to handle subsequent return requests
+// This handles the case when the dialog is opened again with a different invoice
+watch(
+	() => props.preselectedInvoice,
+	(newInvoice, oldInvoice) => {
+		// Only trigger if modelValue is true and we have a new invoice
+		if (props.modelValue && newInvoice?.name && newInvoice.name !== oldInvoice?.name) {
+			showDialog.value = false
+			checkValidityAndOpenModal(newInvoice.name, true)
+		}
+	},
+)
 
 // Clear search input when expired dialog closes
 watch(() => returnExpiredDialog.visible, (val) => {
@@ -1109,10 +1128,12 @@ const maxRefundableAmount = computed(() => {
 	return round3(Math.min(returnTotal.value, originalPaidAmount.value * returnRatio))
 })
 
+// Amount that goes toward credit balance (for partially paid invoices)
 const creditAdjustmentAmount = computed(() =>
 	isPartiallyPaid.value ? Math.max(0, returnTotal.value - maxRefundableAmount.value) : 0
 )
 
+// Summary display helpers for the Return Summary section
 const showPartialBreakdown = computed(() => isPartiallyPaid.value && !isOriginalCreditSale.value)
 const summaryRefundLabel = computed(() => showPartialBreakdown.value ? 'Cash Refund:' : 'Refund Amount:')
 const summaryRefundAmount = computed(() => showPartialBreakdown.value ? maxRefundableAmount.value : returnTotal.value)
@@ -1195,7 +1216,7 @@ watch(normalizedSearchTerm, (searchTerm) => {
 
 // Auto-populate payment amount when return total changes (single payment only)
 watch(returnTotal, (newTotal) => {
-	if (!returnModal.visible || !show.value || isOriginalCreditSale.value) return
+	if (!returnModal.visible || !showDialog.value || isOriginalCreditSale.value) return
 	if (refundPayments.value.length !== 1 || newTotal <= 0) return
 
 	refundPayments.value[0].amount = isPartiallyPaid.value
@@ -1361,24 +1382,9 @@ async function searchInvoiceDirectly() {
 
 function closeReturnModal() {
 	returnModal.visible = false
-	originalInvoice.value = null
-	preparedReturnDoc.value = null
-	returnItems.value = []
-	returnReason.value = ""
-	refundPayments.value = []
-	submitError.value = ""
-	itemSearchFilter.value = ""
-	isOriginalCreditSale.value = false
-	isPartiallyPaid.value = false
-	originalPaidAmount.value = 0
-	originalOutstandingAmount.value = 0
-}
-
-function selectAllItems() {
-	returnItems.value.forEach(item => {
-		item.selected = true
-		item.return_qty = item.quantity
-	})
+	resetForm()
+	// Notify parent that the return dialog is closed
+	emit("update:modelValue", false)
 }
 
 function selectAllFilteredItems() {
@@ -1404,9 +1410,10 @@ function handleKeyboardShortcuts(event) {
 
 	const isModifierPressed = event.ctrlKey || event.metaKey
 
+	// Ctrl/Cmd+A selects all filtered items (respects search filter)
 	if (isModifierPressed && event.key === 'a') {
 		event.preventDefault()
-		selectAllItems()
+		selectAllFilteredItems()
 	}
 	if (isModifierPressed && event.key === 'Enter' && canCreateReturn.value && !isSubmitting.value) {
 		event.preventDefault()
@@ -1463,17 +1470,28 @@ async function handleCreateReturn() {
 }
 
 function resetForm() {
+	// Reset invoice and return document state
 	originalInvoice.value = null
+	preparedReturnDoc.value = null
 	returnItems.value = []
 	returnReason.value = ""
 	refundPayments.value = []
+
+	// Reset list and search state
 	invoiceList.value = []
 	invoiceListFilter.value = ""
+	itemSearchFilter.value = ""
+
+	// Reset submission state
 	submitError.value = ""
 	isSubmitting.value = false
+
+	// Reset modal/dialog state
 	returnModal.visible = false
 	errorDialog.visible = false
 	errorDialog.message = ""
+
+	// Reset payment tracking state
 	isOriginalCreditSale.value = false
 	isPartiallyPaid.value = false
 	originalPaidAmount.value = 0
