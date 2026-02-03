@@ -120,7 +120,14 @@ class CustomSalesInvoice(SalesInvoice):
 					)
 
 			if not skip_change_gl_entries:
-				self.make_gle_for_change_amount(gl_entries)
+				if hasattr(self, "get_gle_for_change_amount"):
+					# ERPNext v16+: Method renamed and returns a list of GL entries
+					# that needs to be extended to the main gl_entries list
+					gl_entries.extend(self.get_gle_for_change_amount())
+				else:
+					# ERPNext v15: Method takes gl_entries as parameter
+					# and appends change amount entries directly to it
+					self.make_gle_for_change_amount(gl_entries)
 
 	def get_party_and_party_type_for_pos_gl_entry(self, mode_of_payment, account):
 		"""
