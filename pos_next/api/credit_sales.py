@@ -17,7 +17,18 @@ from frappe.utils import flt, nowdate, today, cint, get_datetime
 @frappe.whitelist()
 def get_customer_balance(customer, company=None):
 	"""
-	Get customer outstanding balance from Sales Invoices.
+	Get customer balance from Sales Invoices.
+
+	Calculates the net balance from:
+	- Regular invoices: Only positive outstanding_amount (what customer owes)
+	- Return invoices: Only negative outstanding_amount (credit added to customer balance)
+
+	Credit ONLY comes from return invoices where "Add to Customer Credit" was selected:
+	- Cash refund given: outstanding_amount = 0 → NOT counted as credit
+	- Added to customer credit: outstanding_amount < 0 → counted as credit
+
+	Note: Negative outstanding on regular invoices (from linked returns) is NOT counted
+	as credit to avoid double-counting - the credit is tracked on the return invoice.
 
 	Args:
 		customer: Customer ID
@@ -26,83 +37,91 @@ def get_customer_balance(customer, company=None):
 	Returns:
 		dict: {
 			'total_outstanding': float (positive = customer owes),
-			'total_credit': float (positive = customer has credit),
+			'total_credit': float (positive = customer has credit from returns),
 			'net_balance': float (positive = customer owes, negative = customer has credit)
 		}
 	"""
 	if not customer:
 		frappe.throw(_("Customer is required"))
 
-	filters = {
-		"customer": customer,
-		"docstatus": 1
-	}
+	try:
+		from frappe.query_builder import DocType
+		from frappe.query_builder.functions import Sum, Abs, Coalesce
+		from pypika import Case
 
-	if company:
-		filters["company"] = company
+		SalesInvoice = DocType("Sales Invoice")
 
-	# Get total outstanding (positive outstanding = customer owes)
-	total_outstanding = frappe.db.sql("""
-		SELECT SUM(outstanding_amount) AS total
-		FROM `tabSales Invoice`
-		WHERE customer = %(customer)s
-			AND docstatus = %(docstatus)s
-			AND outstanding_amount > 0
-			{company_condition}
-	""".format(
-		company_condition="AND company = %(company)s" if company else ""
-	), filters, as_dict=True)
+		# Build base filters
+		base_filters = (
+			(SalesInvoice.customer == customer) &
+			(SalesInvoice.docstatus == 1)
+		)
+		if company:
+			base_filters = base_filters & (SalesInvoice.company == company)
 
-	outstanding = flt(total_outstanding[0].get("total", 0) if total_outstanding else 0)
+		# Query for regular invoices (non-returns)
+		# Only count positive outstanding (what customer owes)
+		# Negative outstanding on regular invoices comes from returns linked to them,
+		# so we don't count it here to avoid double-counting (credit comes from returns only)
+		regular_query = (
+			frappe.qb.from_(SalesInvoice)
+			.select(
+				Coalesce(
+					Sum(
+						Case()
+						.when(SalesInvoice.outstanding_amount > 0, SalesInvoice.outstanding_amount)
+						.else_(0)
+					),
+					0
+				).as_("total_outstanding")
+			)
+			.where(base_filters & (SalesInvoice.is_return == 0))
+		)
 
-	# Get total credit (negative outstanding = customer has credit)
-	total_credit = frappe.db.sql("""
-		SELECT SUM(ABS(outstanding_amount)) AS total
-		FROM `tabSales Invoice`
-		WHERE customer = %(customer)s
-			AND docstatus = %(docstatus)s
-			AND outstanding_amount < 0
-			{company_condition}
-	""".format(
-		company_condition="AND company = %(company)s" if company else ""
-	), filters, as_dict=True)
+		# Query for return invoices
+		# Only count returns where outstanding_amount < 0 (not refunded in cash)
+		# If cash refund was given, outstanding_amount = 0 and should NOT count as credit
+		# If no cash refund (added to customer credit), outstanding_amount < 0
+		return_query = (
+			frappe.qb.from_(SalesInvoice)
+			.select(
+				Coalesce(Sum(Abs(SalesInvoice.outstanding_amount)), 0).as_("return_credit")
+			)
+			.where(
+				base_filters &
+				(SalesInvoice.is_return == 1) &
+				(SalesInvoice.outstanding_amount < 0)
+			)
+		)
 
-	credit = flt(total_credit[0].get("total", 0) if total_credit else 0)
+		# Execute queries
+		regular_result = regular_query.run(as_dict=True)
+		return_result = return_query.run(as_dict=True)
 
-	# Get unallocated advances
-	advance_filters = {
-		"party": customer,
-		"docstatus": 1,
-		"payment_type": "Receive"
-	}
-	if company:
-		advance_filters["company"] = company
+		# Calculate totals
+		total_outstanding = flt(regular_result[0].total_outstanding) if regular_result else 0.0
+		# Credit only comes from return invoices where no cash refund was given
+		total_credit = flt(return_result[0].return_credit) if return_result else 0.0
 
-	advances = frappe.db.sql("""
-		SELECT SUM(unallocated_amount) AS total
-		FROM `tabPayment Entry`
-		WHERE party = %(party)s
-			AND docstatus = %(docstatus)s
-			AND payment_type = %(payment_type)s
-			AND unallocated_amount > 0
-			{company_condition}
-	""".format(
-		company_condition="AND company = %(company)s" if company else ""
-	), advance_filters, as_dict=True)
+		# Net balance: positive = owes, negative = has credit
+		net_balance = total_outstanding - total_credit
 
-	advance_credit = flt(advances[0].get("total", 0) if advances else 0)
+		return {
+			"total_outstanding": total_outstanding,
+			"total_credit": total_credit,
+			"net_balance": net_balance
+		}
 
-	# Total credit includes both negative outstanding and advances
-	total_credit_available = credit + advance_credit
-
-	# Net balance: positive = owes, negative = has credit
-	net_balance = outstanding - total_credit_available
-
-	return {
-		"total_outstanding": outstanding,
-		"total_credit": total_credit_available,
-		"net_balance": net_balance
-	}
+	except Exception as e:
+		frappe.log_error(
+			title="Customer Balance Error",
+			message=f"Customer: {customer}, Company: {company}, Error: {str(e)}\n{frappe.get_traceback()}"
+		)
+		return {
+			"total_outstanding": 0.0,
+			"total_credit": 0.0,
+			"net_balance": 0.0
+		}
 
 
 def check_credit_sale_enabled(pos_profile):
@@ -137,13 +156,16 @@ def get_available_credit(customer, company, pos_profile=None):
 	1. Outstanding invoices with negative outstanding (overpaid/returns)
 	2. Unallocated advance payment entries
 
+	Returns fresh data with modified timestamp for optimistic locking.
+	The frontend should re-fetch before redemption to ensure data is current.
+
 	Args:
 		customer: Customer ID
 		company: Company
 		pos_profile: POS Profile (optional, for checking if feature is enabled)
 
 	Returns:
-		list: Available credit sources with amounts
+		list: Available credit sources with amounts and modified timestamps
 	"""
 	if not customer:
 		frappe.throw(_("Customer is required"))
@@ -158,6 +180,7 @@ def get_available_credit(customer, company, pos_profile=None):
 	total_credit = []
 
 	# Get invoices with negative outstanding (customer has overpaid or returns)
+	# Include modified timestamp for optimistic locking
 	outstanding_invoices = frappe.get_all(
 		"Sales Invoice",
 		filters={
@@ -166,7 +189,7 @@ def get_available_credit(customer, company, pos_profile=None):
 			"customer": customer,
 			"company": company,
 		},
-		fields=["name", "outstanding_amount", "is_return", "posting_date", "grand_total"],
+		fields=["name", "outstanding_amount", "is_return", "posting_date", "grand_total", "modified"],
 		order_by="posting_date desc"
 	)
 
@@ -184,6 +207,7 @@ def get_available_credit(customer, company, pos_profile=None):
 				"posting_date": row.posting_date,
 				"reference_amount": row.grand_total,
 				"credit_to_redeem": 0,  # User will set this
+				"modified": row.modified,  # For optimistic locking
 			})
 
 	# Get unallocated advance payments
@@ -196,7 +220,7 @@ def get_available_credit(customer, company, pos_profile=None):
 			"docstatus": 1,
 			"payment_type": "Receive",
 		},
-		fields=["name", "unallocated_amount", "posting_date", "paid_amount", "mode_of_payment"],
+		fields=["name", "unallocated_amount", "posting_date", "paid_amount", "mode_of_payment", "modified"],
 		order_by="posting_date desc"
 	)
 
@@ -211,6 +235,7 @@ def get_available_credit(customer, company, pos_profile=None):
 			"reference_amount": row.paid_amount,
 			"mode_of_payment": row.mode_of_payment,
 			"credit_to_redeem": 0,  # User will set this
+			"modified": row.modified,  # For optimistic locking
 		})
 
 	return total_credit
@@ -221,6 +246,9 @@ def redeem_customer_credit(invoice_name, customer_credit_dict):
 	"""
 	Redeem customer credit by creating Journal Entries.
 	This allocates credit from previous invoices/advances to the new invoice.
+
+	Uses row-level locking (SELECT FOR UPDATE) to prevent race conditions
+	when multiple users try to redeem the same credit simultaneously.
 
 	Args:
 		invoice_name: Sales Invoice name
@@ -248,7 +276,7 @@ def redeem_customer_credit(invoice_name, customer_credit_dict):
 
 	created_journal_entries = []
 
-	# Process each credit source
+	# Process each credit source with locking to prevent race conditions
 	for credit_row in customer_credit_dict:
 		credit_to_redeem = flt(credit_row.get("credit_to_redeem", 0))
 
@@ -259,6 +287,9 @@ def redeem_customer_credit(invoice_name, customer_credit_dict):
 		credit_origin = credit_row.get("credit_origin")
 
 		if credit_type == "Invoice":
+			# Validate and lock the credit source before creating JE
+			_validate_and_lock_invoice_credit(credit_origin, credit_to_redeem)
+
 			# Create JE to allocate credit from original invoice to new invoice
 			je_name = _create_credit_allocation_journal_entry(
 				invoice_doc,
@@ -268,6 +299,9 @@ def redeem_customer_credit(invoice_name, customer_credit_dict):
 			created_journal_entries.append(je_name)
 
 		elif credit_type == "Advance":
+			# Validate and lock the advance payment before allocation
+			_validate_and_lock_advance_credit(credit_origin, credit_to_redeem)
+
 			# Create Payment Entry to allocate advance payment
 			pe_name = _create_payment_entry_from_advance(
 				invoice_doc,
@@ -277,6 +311,96 @@ def redeem_customer_credit(invoice_name, customer_credit_dict):
 			created_journal_entries.append(pe_name)
 
 	return created_journal_entries
+
+
+def _validate_and_lock_invoice_credit(invoice_name, amount_to_redeem):
+	"""
+	Validate and lock invoice credit using SELECT FOR UPDATE.
+	This prevents race conditions when multiple users try to use the same credit.
+
+	Args:
+		invoice_name: Source invoice name with credit
+		amount_to_redeem: Amount being redeemed
+
+	Raises:
+		frappe.ValidationError: If insufficient credit available
+	"""
+	from frappe.query_builder import DocType
+
+	SalesInvoice = DocType("Sales Invoice")
+
+	# Use SELECT FOR UPDATE to lock the row
+	# This blocks other transactions from reading/modifying until we commit
+	query = (
+		frappe.qb.from_(SalesInvoice)
+		.select(SalesInvoice.name, SalesInvoice.outstanding_amount)
+		.where(
+			(SalesInvoice.name == invoice_name) &
+			(SalesInvoice.docstatus == 1)
+		)
+		.for_update()
+	)
+
+	result = query.run(as_dict=True)
+
+	if not result:
+		frappe.throw(_("Credit source invoice {0} not found or not submitted").format(invoice_name))
+
+	current_outstanding = flt(result[0].outstanding_amount)
+	available_credit = -current_outstanding  # Credit is negative outstanding
+
+	if available_credit < amount_to_redeem:
+		frappe.throw(
+			_("Insufficient credit available from {0}. Available: {1}, Requested: {2}").format(
+				invoice_name,
+				frappe.format_value(available_credit, {"fieldtype": "Currency"}),
+				frappe.format_value(amount_to_redeem, {"fieldtype": "Currency"})
+			)
+		)
+
+
+def _validate_and_lock_advance_credit(payment_entry_name, amount_to_redeem):
+	"""
+	Validate and lock advance payment using SELECT FOR UPDATE.
+	This prevents race conditions when multiple users try to use the same advance.
+
+	Args:
+		payment_entry_name: Payment Entry name with unallocated amount
+		amount_to_redeem: Amount being allocated
+
+	Raises:
+		frappe.ValidationError: If insufficient unallocated amount
+	"""
+	from frappe.query_builder import DocType
+
+	PaymentEntry = DocType("Payment Entry")
+
+	# Use SELECT FOR UPDATE to lock the row
+	query = (
+		frappe.qb.from_(PaymentEntry)
+		.select(PaymentEntry.name, PaymentEntry.unallocated_amount)
+		.where(
+			(PaymentEntry.name == payment_entry_name) &
+			(PaymentEntry.docstatus == 1)
+		)
+		.for_update()
+	)
+
+	result = query.run(as_dict=True)
+
+	if not result:
+		frappe.throw(_("Payment Entry {0} not found or not submitted").format(payment_entry_name))
+
+	available_amount = flt(result[0].unallocated_amount)
+
+	if available_amount < amount_to_redeem:
+		frappe.throw(
+			_("Insufficient unallocated amount in {0}. Available: {1}, Requested: {2}").format(
+				payment_entry_name,
+				frappe.format_value(available_amount, {"fieldtype": "Currency"}),
+				frappe.format_value(amount_to_redeem, {"fieldtype": "Currency"})
+			)
+		)
 
 
 def _create_credit_allocation_journal_entry(invoice_doc, original_invoice_name, amount):

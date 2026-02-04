@@ -237,7 +237,7 @@
 					</div>
 
 					<!-- Outstanding Balance Row (full width, two columns) -->
-					<div v-if="allowCreditSale && totalAvailableCredit !== 0" :class="[
+					<div v-if="customerCreditEnabled && totalAvailableCredit !== 0" :class="[
 						'rounded-lg border p-2 flex items-center justify-between',
 						totalAvailableCredit < 0
 							? 'bg-red-50 border-red-200'
@@ -541,7 +541,7 @@
 							</button>
 							<!-- Credit Balance as Payment Method -->
 							<button
-								v-if="allowCreditSale && (remainingAvailableCredit > 0 || getMethodTotal('Customer Credit') > 0)"
+								v-if="customerCreditEnabled && (remainingAvailableCredit > 0 || getMethodTotal('Customer Credit') > 0)"
 								@click="applyCustomerCredit"
 								:disabled="remainingAmount === 0 || remainingAvailableCredit === 0"
 								:class="[
@@ -967,6 +967,10 @@ const props = defineProps({
 		type: Boolean,
 		default: false,
 	},
+	allowCustomerCreditPayment: {
+		type: Boolean,
+		default: false,
+	},
 	customer: {
 		type: [String, Object],
 		default: null,
@@ -1178,7 +1182,7 @@ const customerCreditResource = createResource({
 	onSuccess(data) {
 		log.debug("[PaymentDialog] Customer credit loaded:", data)
 		customerCredit.value = data || []
-		loadingCredit.value = false
+		// Note: loadingCredit is managed by customerBalanceResource since it provides the net_balance for UI
 		log.debug(
 			"[PaymentDialog] Total available credit:",
 			totalAvailableCredit.value,
@@ -1187,7 +1191,7 @@ const customerCreditResource = createResource({
 	onError(error) {
 		log.error("[PaymentDialog] Error loading customer credit:", error)
 		customerCredit.value = []
-		loadingCredit.value = false
+		// Note: loadingCredit is managed by customerBalanceResource since it provides the net_balance for UI
 	},
 })
 
@@ -1210,6 +1214,7 @@ const customerBalanceResource = createResource({
 			net_balance: 0,
 		}
 		log.debug("[PaymentDialog] Net balance:", customerBalance.value.net_balance)
+		loadingCredit.value = false
 	},
 	onError(error) {
 		log.error("[PaymentDialog] Error loading customer balance:", error)
@@ -1218,6 +1223,7 @@ const customerBalanceResource = createResource({
 			total_credit: 0,
 			net_balance: 0,
 		}
+		loadingCredit.value = false
 	},
 })
 
@@ -1520,6 +1526,13 @@ const totalPaid = computed(() => {
 	return roundCurrency(sum)
 })
 
+// Customer credit payment is enabled if either:
+// - allowCreditSale is enabled (allows going into debt AND using credit)
+// - allowCustomerCreditPayment is enabled (only allows using positive credit)
+const customerCreditEnabled = computed(() => {
+	return props.allowCreditSale || props.allowCustomerCreditPayment
+})
+
 const totalAvailableCredit = computed(() => {
 	// Use net_balance: negative means customer has credit, positive means they owe
 	// Return negative of net_balance so positive = credit available, negative = outstanding
@@ -1806,20 +1819,31 @@ watch(
 	{ immediate: true }, // Load immediately if posProfile is already set
 )
 
+// Pre-fetch customer balance when customer changes (before dialog opens)
+// This ensures data is available immediately when dialog opens
+watch(
+	() => [props.customer, props.company, props.allowCreditSale, props.allowCustomerCreditPayment],
+	([customer, company, allowCreditSale, allowCustomerCreditPayment]) => {
+		const creditEnabled = allowCreditSale || allowCustomerCreditPayment
+		if (creditEnabled && customer && company) {
+			log.debug("[PaymentDialog] Pre-fetching customer balance for:", customer)
+			customerBalanceResource.fetch()
+			customerCreditResource.fetch()
+		}
+	},
+	{ immediate: true },
+)
+
 watch(show, (newVal) => {
 	if (newVal) {
-		// Reset state when dialog opens
+		// Reset state when dialog opens (but NOT customerBalance - it's pre-fetched)
 		paymentEntries.value = []
 		customAmount.value = ""
 		numpadClear()
 		mobileCustomAmount.value = ""
 		lastSelectedMethod.value = null
 		customerCredit.value = []
-		customerBalance.value = {
-			total_outstanding: 0,
-			total_credit: 0,
-			net_balance: 0,
-		}
+		// Note: Don't reset customerBalance here - it's pre-fetched when customer changes
 		selectedSalesPersons.value = []
 		salesPersonSearch.value = ""
 		applyWriteOff.value = false // Reset write-off state
@@ -1829,6 +1853,7 @@ watch(show, (newVal) => {
 		// Debug logging
 		log.debug("[PaymentDialog] Dialog opened with props:", {
 			allowCreditSale: props.allowCreditSale,
+			allowCustomerCreditPayment: props.allowCustomerCreditPayment,
 			allowWriteOff: props.allowWriteOff,
 			writeOffLimit: props.writeOffLimit,
 			customer: props.customer,
@@ -1842,18 +1867,11 @@ watch(show, (newVal) => {
 			lastSelectedMethod.value = defaultMethod || paymentMethods.value[0]
 		}
 
-		// Load customer credit and balance if enabled and customer is selected
-		if (props.allowCreditSale && props.customer && props.company) {
-			log.debug("[PaymentDialog] Loading customer credit and balance...")
-			loadingCredit.value = true
-			customerCreditResource.fetch()
-			customerBalanceResource.fetch()
-		} else {
-			log.debug("[PaymentDialog] Not loading credit because:", {
-				allowCreditSale: props.allowCreditSale,
-				hasCustomer: !!props.customer,
-				hasCompany: !!props.company,
-			})
+		// Customer credit and balance is pre-fetched when customer changes (see watcher above)
+		// Just log for debugging
+		const creditEnabled = props.allowCreditSale || props.allowCustomerCreditPayment
+		if (creditEnabled) {
+			log.debug("[PaymentDialog] Customer credit/balance should be pre-loaded, current balance:", customerBalance.value)
 		}
 
 		// Load wallet info if customer is selected

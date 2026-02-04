@@ -24,6 +24,7 @@ POS_SETTINGS_FIELDS = [
 	"use_percentage_discount",
 	"max_discount_allowed",
 	"allow_credit_sale",
+	"allow_customer_credit_payment",
 	"allow_return",
 	"allow_partial_payment",
 	"use_exact_amount",
@@ -47,6 +48,7 @@ DEFAULT_POS_SETTINGS = {
 	"max_discount_allowed": 0,
 	"disable_rounded_total": 0,  # Derived from POS Profile
 	"allow_credit_sale": 0,
+	"allow_customer_credit_payment": 0,
 	"allow_return": 0,
 	"allow_write_off_change": 0,  # Derived from POS Profile
 	"allow_partial_payment": 0,

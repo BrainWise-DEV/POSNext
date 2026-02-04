@@ -22,6 +22,7 @@
   "max_discount_allowed",
   "column_break_general",
   "allow_credit_sale",
+  "allow_customer_credit_payment",
   "allow_return",
   "allow_partial_payment",
   "use_exact_amount",
@@ -190,10 +191,17 @@
   },
   {
    "default": "0",
-   "description": "Enable sales on credit",
+   "description": "Allow customers to buy on credit (negative balance/debt)",
    "fieldname": "allow_credit_sale",
    "fieldtype": "Check",
    "label": "Allow Credit Sale"
+  },
+  {
+   "default": "0",
+   "description": "Allow customers to use their positive credit balance (from returns/overpayments) as payment",
+   "fieldname": "allow_customer_credit_payment",
+   "fieldtype": "Check",
+   "label": "Allow Customer Credit Payment"
   },
   {
    "default": "0",

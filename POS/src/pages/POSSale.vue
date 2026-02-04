@@ -442,6 +442,7 @@
 			:is-offline="offlineStore.isOffline"
 			:allow-partial-payment="posSettingsStore.allowPartialPayment"
 			:allow-credit-sale="posSettingsStore.allowCreditSale"
+			:allow-customer-credit-payment="posSettingsStore.allowCustomerCreditPayment"
 			:allow-write-off="posSettingsStore.allowWriteOffChange"
 			:write-off-limit="shiftStore.writeOffLimit"
 			:customer="cartStore.customer"

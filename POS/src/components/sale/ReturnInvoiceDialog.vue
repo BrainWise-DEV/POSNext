@@ -467,8 +467,40 @@
 						</p>
 					</div>
 
-						<!-- Partially Paid Invoice Notice -->
-					<div v-if="isPartiallyPaid && !isOriginalCreditSale" class="bg-blue-50 rounded-xl p-4 border border-blue-200 mb-4 text-start">
+					<!-- Add to Customer Credit Option (only for non-credit sales) -->
+					<div v-if="!isOriginalCreditSale" class="bg-emerald-50 rounded-xl p-4 border border-emerald-200 mb-4">
+						<label class="flex items-start gap-3 cursor-pointer">
+							<input
+								type="checkbox"
+								v-model="addToCustomerCredit"
+								class="mt-0.5 w-5 h-5 rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+							/>
+							<div class="flex-1 text-start">
+								<span class="text-sm font-bold text-emerald-900">{{ __('Add to Customer Credit Balance') }}</span>
+								<p class="text-xs text-emerald-700 mt-1">
+									{{ __('Instead of cash refund, add the return amount to customer credit balance for future purchases.') }}
+								</p>
+							</div>
+						</label>
+					</div>
+
+					<!-- Customer Credit Confirmation Notice -->
+					<div v-if="addToCustomerCredit && !isOriginalCreditSale" class="bg-emerald-100 rounded-xl p-4 border border-emerald-300 mb-4 text-start">
+						<div class="flex items-center gap-2 mb-2">
+							<FeatherIcon name="credit-card" class="w-5 h-5 text-emerald-600" />
+							<h4 class="text-sm font-bold text-emerald-900">{{ __('Credit Balance') }}</h4>
+						</div>
+						<p class="text-xs text-emerald-800 mb-2">
+							{{ __('The return amount will be added to the customer credit balance. No cash refund will be given.') }}
+						</p>
+						<div class="flex justify-between items-center text-sm">
+							<span class="text-emerald-700">{{ __('Amount to Credit:') }}</span>
+							<span class="font-bold text-emerald-900">{{ formatCurrency(returnTotal) }}</span>
+						</div>
+					</div>
+
+					<!-- Partially Paid Invoice Notice -->
+					<div v-if="isPartiallyPaid && !isOriginalCreditSale && !addToCustomerCredit" class="bg-blue-50 rounded-xl p-4 border border-blue-200 mb-4 text-start">
 						<h4 class="text-sm font-bold text-blue-900 mb-1">{{ __('Partially Paid Invoice') }}</h4>
 						<p class="text-xs text-blue-800 mb-2">
 							{{ __('This invoice was partially paid. The refund will be split proportionally.') }}
@@ -485,8 +517,8 @@
 						</div>
 					</div>
 
-					<!-- Regular Payment Methods (only for non-credit sales) -->
-					<div v-if="!isOriginalCreditSale">
+					<!-- Regular Payment Methods (only for non-credit sales and not adding to customer credit) -->
+					<div v-if="!isOriginalCreditSale && !addToCustomerCredit">
 						<div class="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-3 gap-2">
 							<label class="text-sm font-medium text-gray-700 text-start">
 								{{ __('Refund Payment Methods') }}
@@ -781,6 +813,8 @@ const invoiceListFilter = ref("")
 const itemSearchFilter = ref("")
 const submitError = ref("")
 const isSubmitting = ref(false)
+// When true, return amount is added to customer credit balance instead of cash refund
+const addToCustomerCredit = ref(false)
 
 // Autocomplete state
 const invoiceSearchInput = ref(null)
@@ -1017,10 +1051,14 @@ const createReturnResource = createResource({
 				sales_invoice_item: item.name,
 			})),
 			// Payment amounts are negative for refunds
-			payments: refundPayments.value.map((payment) => ({
-				mode_of_payment: payment.mode_of_payment,
-				amount: -Math.abs(payment.amount),
-			})),
+			// If addToCustomerCredit is true, send empty payments array so outstanding stays negative
+			// This negative outstanding becomes customer credit balance
+			payments: addToCustomerCredit.value
+				? []
+				: refundPayments.value.map((payment) => ({
+						mode_of_payment: payment.mode_of_payment,
+						amount: -Math.abs(payment.amount),
+				  })),
 			remarks:
 				returnReason.value ||
 				__("Return against {0}", [originalInvoice.value.name]),
@@ -1203,7 +1241,8 @@ const paymentSelectStyle = {
 const canCreateReturn = computed(() => {
 	const hasSelectedItems = selectedItems.value.length > 0
 	if (!hasSelectedItems || !hasOpenShift.value) return false
-	if (isOriginalCreditSale.value) return true
+	// Credit sale returns and "add to customer credit" returns don't need payment validation
+	if (isOriginalCreditSale.value || addToCustomerCredit.value) return true
 
 	const payments = refundPayments.value
 	if (isPartiallyPaid.value) {
@@ -1597,6 +1636,9 @@ function resetForm() {
 	isPartiallyPaid.value = false
 	originalPaidAmount.value = 0
 	originalOutstandingAmount.value = 0
+
+	// Reset customer credit option
+	addToCustomerCredit.value = false
 }
 
 // Date formatter instance (reused for performance)
