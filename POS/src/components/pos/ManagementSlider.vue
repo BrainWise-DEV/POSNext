@@ -52,6 +52,9 @@
 			</div>
 		</button>
 
+		<!-- Spacer to push settings to bottom -->
+		<div class="flex-1"></div>
+
 		<!-- Divider -->
 		<div class="w-8 border-t border-gray-200 my-2"></div>
 
