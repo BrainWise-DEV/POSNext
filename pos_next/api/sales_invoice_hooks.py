@@ -141,3 +141,71 @@ def before_cancel(doc, method=None):
 			alert=True,
 			indicator="orange"
 		)
+
+
+def validate_coupon_on_invoice(doc, method=None):
+	"""
+	Validate coupon code on Sales Invoice (like Sales Order does).
+	This enables native ERPNext coupon validation for Sales Invoice.
+
+	Args:
+		doc: Sales Invoice document
+		method: Hook method name (unused)
+	"""
+	if not doc.coupon_code:
+		return
+
+	try:
+		from erpnext.accounts.doctype.pricing_rule.utils import validate_coupon_code
+		validate_coupon_code(doc.coupon_code)
+	except Exception as e:
+		frappe.log_error(
+			"Coupon Validation Error",
+			f"Invoice: {doc.name}, Coupon: {doc.coupon_code}, Error: {str(e)}"
+		)
+		raise
+
+
+def update_coupon_usage_on_submit(doc, method=None):
+	"""
+	Increment coupon usage counter on submit.
+	This mirrors the behavior in Sales Order for ERPNext coupon tracking.
+
+	Args:
+		doc: Sales Invoice document
+		method: Hook method name (unused)
+	"""
+	if not doc.coupon_code:
+		return
+
+	try:
+		from erpnext.accounts.doctype.pricing_rule.utils import update_coupon_code_count
+		update_coupon_code_count(doc.coupon_code, "used")
+	except Exception as e:
+		frappe.log_error(
+			"Coupon Usage Update Error",
+			f"Invoice: {doc.name}, Coupon: {doc.coupon_code}, Action: used, Error: {str(e)}"
+		)
+		# Don't block invoice submission if coupon update fails
+
+
+def update_coupon_usage_on_cancel(doc, method=None):
+	"""
+	Decrement coupon usage counter on cancel.
+	This mirrors the behavior in Sales Order for ERPNext coupon tracking.
+
+	Args:
+		doc: Sales Invoice document
+		method: Hook method name (unused)
+	"""
+	if not doc.coupon_code:
+		return
+
+	try:
+		from erpnext.accounts.doctype.pricing_rule.utils import update_coupon_code_count
+		update_coupon_code_count(doc.coupon_code, "cancelled")
+	except Exception as e:
+		frappe.log_error(
+			"Coupon Usage Update Error",
+			f"Invoice: {doc.name}, Coupon: {doc.coupon_code}, Action: cancelled, Error: {str(e)}"
+		)

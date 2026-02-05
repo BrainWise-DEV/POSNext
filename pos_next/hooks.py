@@ -97,6 +97,7 @@ fixtures = [
 					"Sales Invoice-posa_pos_opening_shift",
 					"Sales Invoice-posa_is_printed",
 					"Sales Invoice-posa_coupon_code",
+					"Sales Invoice-coupon_code",
 					"Item-custom_company",
 					"POS Profile-posa_cash_mode_of_payment",
 					"POS Profile-posa_allow_delete",
@@ -220,14 +221,22 @@ doc_events = {
 	"Sales Invoice": {
 		"validate": [
 			"pos_next.api.sales_invoice_hooks.validate",
+			"pos_next.api.sales_invoice_hooks.validate_coupon_on_invoice",
 			"pos_next.api.wallet.validate_wallet_payment"
 		],
 		"before_cancel": "pos_next.api.sales_invoice_hooks.before_cancel",
 		"on_submit": [
+			"pos_next.api.sales_invoice_hooks.update_coupon_usage_on_submit",
 			"pos_next.realtime_events.emit_stock_update_event",
-			"pos_next.api.wallet.process_loyalty_to_wallet"
+			"pos_next.api.wallet.process_loyalty_to_wallet",
+			"pos_next.api.gift_cards.create_gift_card_from_invoice",
+			"pos_next.api.gift_cards.process_gift_card_on_submit"
 		],
-		"on_cancel": "pos_next.realtime_events.emit_stock_update_event",
+		"on_cancel": [
+			"pos_next.api.sales_invoice_hooks.update_coupon_usage_on_cancel",
+			"pos_next.realtime_events.emit_stock_update_event",
+			"pos_next.api.gift_cards.process_gift_card_on_cancel"
+		],
 		"after_insert": "pos_next.realtime_events.emit_invoice_created_event"
 	},
 	"POS Invoice": {
