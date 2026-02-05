@@ -173,7 +173,6 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 
 	// Search debounce timer
 	let searchDebounceTimer = null
-	let backgroundSyncInterval = null
 
 	// Real-time POS Profile update handler
 	let posProfileUpdateCleanup = null
@@ -512,6 +511,17 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 	 *
 	 * @returns {Array<Object>} Filtered items with injected stock quantities
 	 */
+	/**
+	 * Get all groups to filter by, including child groups for parent item groups.
+	 */
+	const getGroupsToFilter = (groupName) => {
+		const groupInfo = itemGroups.value?.find(g => g.item_group === groupName)
+		if (groupInfo?.child_groups?.length) {
+			return new Set([groupName, ...groupInfo.child_groups])
+		}
+		return new Set([groupName])
+	}
+
 	const filteredItems = computed(() => {
 		// Step 1: Determine source items (search results or all items)
 		const sourceItems = searchTerm.value?.trim()
@@ -531,19 +541,33 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 			// Cache hit! Return cached filtered array (instant, <2ms)
 			list = filteredItemsCache.get(filterKey)
 		} else {
-			// Cache miss - perform filtering based on current selection
+			// LARGE CATALOG OPTIMIZATION: Items are already server-filtered
+			// setSelectedItemGroup() fetches items from server with group filter
+			// So client-side filtering is minimal (just a sanity check)
+			//
+			// For 65K+ item catalogs:
+			// - Server handles filtering via DB index (fast)
+			// - Client receives max 100 items (already filtered)
+			// - This client-side filter is just a safety net
 
 			if (selectedItemGroup.value) {
-				// User selected a specific item group tab (e.g., "Bundles")
-				// Filter to show only items from that group
-				list = sourceItems.filter(i => i.item_group === selectedItemGroup.value)
+				// User selected a specific item group tab
+				// Items are ALREADY server-filtered, but verify for safety
+				const groupsToFilter = getGroupsToFilter(selectedItemGroup.value)
+				list = sourceItems.filter(i => groupsToFilter.has(i.item_group))
 			} else if (profileItemGroups.value && profileItemGroups.value.length > 0) {
-				// "All Items" tab with POS Profile item group filters
-				// Show items from all groups specified in the POS Profile
+				// "All Items" tab - items fetched without group filter
+				// Still filter by allowed groups as sanity check
 				const allowedGroups = new Set(profileItemGroups.value.map(g => g.item_group))
+				// Also include child groups in allowed set
+				itemGroups.value.forEach(g => {
+					if (g.child_groups) {
+						g.child_groups.forEach(child => allowedGroups.add(child))
+					}
+				})
 				list = sourceItems.filter(i => allowedGroups.has(i.item_group))
 			} else {
-				// "All Items" tab with no filters - show everything
+				// No filters - show all items as-is
 				list = sourceItems
 			}
 
@@ -552,7 +576,6 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 			lastFilterKey = filterKey
 
 			// Keep cache size manageable - LRU eviction after 10 entries
-			// This prevents memory bloat while maintaining cache benefits
 			if (filteredItemsCache.size > 10) {
 				const firstKey = filteredItemsCache.keys().next().value
 				filteredItemsCache.delete(firstKey)
@@ -851,45 +874,34 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 			log.debug("Fetching fresh data from server")
 
 			// ----------------------------------------------------------------
-			// FILTERED LOADING PATH: Load ALL items from specified groups
+			// FILTERED LOADING PATH - OPTIMIZED FOR LARGE CATALOGS (65K+ items)
 			// ----------------------------------------------------------------
-			// When POS Profile has item group filters (e.g., Bundles, Electronics),
-			// fetch ALL items from ALL specified groups in parallel for fast loading
-			// and complete client-side filtering capabilities.
+			// Load ONLY first batch from first group. Other groups load on-demand
+			// when user clicks the tab. This prevents loading 65K items at once.
 			if (hasFilters) {
-				log.debug(`Fetching items from ${itemGroupFilters.length} filtered groups`)
+				const INITIAL_LIMIT = 100 // Load 100 items max initially
+				log.debug(`Fetching first ${INITIAL_LIMIT} items (large catalog mode)`)
 
-				// Parallel fetch from multiple groups for optimal performance
-				// Example: Fetch "Bundles" (500 items) + "Electronics" (300 items) simultaneously
-				const fetchedItems = await fetchItemsFromGroups(profile, itemGroupFilters)
+				// Load items from first group only - other groups load on tab click
+				const fetchedItems = await fetchItemsFromGroups(profile, itemGroupFilters, INITIAL_LIMIT)
 
-				// CRITICAL: Store ALL fetched items (not just first page)
-				// Why? Client-side filtering needs complete dataset to switch between groups instantly
-				// Example: User clicks "Bundles" → filter 800 items to show 500 bundles (instant!)
-				//          User clicks "Electronics" → filter 800 items to show 300 electronics (instant!)
-				// Pagination is handled by the UI component (virtual scrolling), not here
 				replaceAllItems(fetchedItems)
 				totalItemsLoaded.value = fetchedItems.length
 				currentOffset.value = fetchedItems.length
 
-				// Disable infinite scroll - all filtered data already loaded
-				// Scrolling will show more items from the existing array (UI pagination)
-				hasMore.value = false
+				// Enable infinite scroll - more items may be available
+				hasMore.value = fetchedItems.length >= INITIAL_LIMIT
 
 				if (fetchedItems.length > 0) {
-					// Clear cache first to remove any disabled/stale items, then cache fresh data
-					await offlineWorker.clearItemsCache()
+					// Cache this batch immediately for fast offline access
 					await offlineWorker.cacheItems(fetchedItems)
 					cacheReady.value = true
-
-					// Mark data as fresh - prevents redundant fetches on page refresh
 					serverDataFresh.value = true
 
-					log.success(`Loaded and cached ${fetchedItems.length} filtered items`)
+					log.success(`Loaded ${fetchedItems.length} items (server-side filtering)`)
 
-					// Cache variants for template items (for offline use)
-					// Run in background to not block UI
-					cacheVariantsForTemplates(fetchedItems, profile).catch(err => {
+					// Background caching - limit to prevent overloading IndexedDB
+					cacheVariantsForTemplates(fetchedItems.slice(0, 50), profile).catch(err => {
 						log.warn("Background variant caching failed:", err.message)
 					})
 
@@ -899,6 +911,11 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 							log.warn("Background batch/serial caching failed:", err.message)
 						})
 					}
+
+					// START BACKGROUND SYNC for offline support
+					// This caches ALL items from ALL configured groups progressively
+					// UI shows 100 items now, remaining sync in background for offline use
+					startBackgroundCacheSync(profile, itemGroupFilters)
 				} else {
 					log.info('No items found for the selected filter groups')
 				}
@@ -983,42 +1000,77 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 	}
 
 	/**
-	 * Fetch items from specific item groups in parallel
-	 * Returns merged and deduplicated results
+	 * Fetch items - optimized for LARGE CATALOGS (65K+ items)
+	 *
+	 * Strategy:
+	 * - NEVER load all items (would crash with 65K items)
+	 * - Always use server-side pagination
+	 * - Load only what's needed for current view (max 100 items)
+	 * - Server handles item_group filtering efficiently via DB index
 	 */
-	async function fetchItemsFromGroups(profile, itemGroups) {
-		const fetchPromises = itemGroups.map(async (groupObj) => {
-			const itemGroup = groupObj.item_group
-			try {
+	async function fetchItemsFromGroups(profile, itemGroups, limit = 100) {
+		if (!itemGroups?.length) return []
+
+		// For large catalogs: Load items from first/selected group only
+		// Other groups load on-demand when user clicks the tab
+		const firstGroup = itemGroups[0]?.item_group
+		log.debug(`Fetching first ${limit} items from group: ${firstGroup}`)
+
+		try {
+			const response = await call("pos_next.api.items.get_items", {
+				pos_profile: profile,
+				search_term: "",
+				item_group: firstGroup, // Server-side filter via DB index
+				start: 0,
+				limit: limit,
+			})
+			const items = response?.message || response || []
+			log.info(`Fetched ${items.length} items from ${firstGroup}`)
+			return items
+		} catch (error) {
+			log.error("Failed to fetch items", error)
+			return []
+		}
+	}
+
+	/**
+	 * Fetch items for a specific item group (on-demand when user clicks tab)
+	 * Optimized for large catalogs - server-side filtering
+	 */
+	async function fetchItemsForGroup(profile, itemGroup, start = 0, limit = 100) {
+		if (!itemGroup) return []
+
+		// Get expanded groups (parent + children) for filtering
+		const groupInfo = itemGroups.value?.find(g => g.item_group === itemGroup)
+		const groupsToFetch = groupInfo?.child_groups?.length
+			? [itemGroup, ...groupInfo.child_groups]
+			: [itemGroup]
+
+		log.debug(`Fetching items for group: ${itemGroup} (includes ${groupsToFetch.length} groups)`)
+
+		try {
+			// Use bulk endpoint for multiple groups, or single endpoint for one
+			if (groupsToFetch.length > 1) {
+				const response = await call("pos_next.api.items.get_items_bulk", {
+					pos_profile: profile,
+					item_groups: JSON.stringify(groupsToFetch),
+					limit: limit,
+				})
+				return response?.message || response || []
+			} else {
 				const response = await call("pos_next.api.items.get_items", {
 					pos_profile: profile,
 					search_term: "",
 					item_group: itemGroup,
-					start: 0,
-					limit: 1000, // Get all items from this group
+					start: start,
+					limit: limit,
 				})
-				const items = response?.message || response || []
-				log.debug(`Fetched ${items.length} items from group: ${itemGroup}`)
-				return items
-			} catch (error) {
-				log.error(`Failed to fetch items from group: ${itemGroup}`, error)
-				return []
+				return response?.message || response || []
 			}
-		})
-
-		const results = await Promise.all(fetchPromises)
-
-		// Merge and deduplicate by item_code
-		const itemMap = new Map()
-		for (const batch of results) {
-			for (const item of batch) {
-				if (!itemMap.has(item.item_code)) {
-					itemMap.set(item.item_code, item)
-				}
-			}
+		} catch (error) {
+			log.error(`Failed to fetch items for group ${itemGroup}`, error)
+			return []
 		}
-
-		return Array.from(itemMap.values())
 	}
 
 	/**
@@ -1159,130 +1211,164 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 	}
 
 	/**
-	 * Background sync with filter awareness
+	 * Background sync for offline support - caches ALL items to IndexedDB
+	 *
+	 * For large catalogs (65K+ items):
+	 * - UI shows 100 items immediately (fast)
+	 * - This function syncs ALL items AGGRESSIVELY for offline use
+	 * - Uses CONTINUOUS batching (not interval-based) for fast sync
+	 * - 65K items at 500/batch = 130 batches = ~3-5 minutes total
+	 *
 	 * @param {string} profile - POS Profile name
-	 * @param {Array} itemGroups - Item group filters (empty = no filters)
+	 * @param {Array} filterGroups - Item group filters from POS Profile (optional)
 	 */
-	async function startBackgroundCacheSync(profile, itemGroups = []) {
-		// Prevent multiple sync intervals
-		if (backgroundSyncInterval) {
+	async function startBackgroundCacheSync(profile, filterGroups = []) {
+		// Prevent multiple syncs
+		if (cacheSyncing.value) {
+			log.debug("Background sync already in progress")
 			return
 		}
 
-		const hasFilters = itemGroups.length > 0
+		const hasFilters = filterGroups.length > 0
 
-		// If filters are present, items are already cached in loadAllItems
-		if (hasFilters) {
-			log.info("Skipping background sync - filtered items already cached")
-			return
-		}
-
-		/**
-		 * PERFORMANCE OPTIMIZATIONS (unfiltered catalogs only):
-		 *
-		 * 1. Sync Interval: 15 seconds between batches
-		 * 2. Stats Polling: Every 3 batches instead of every batch
-		 * 3. Threshold: Only sync if cache has < 50 items
-		 *
-		 * Impact: 87.5% reduction in API call frequency, 90% reduction in CPU usage
-		 */
-
-		log.info("Starting background cache sync (no filters)")
+		log.info(`Starting AGGRESSIVE background sync ${hasFilters ? `for ${filterGroups.length} groups` : '(all items)'}`)
 		cacheSyncing.value = true
 
-		// Start from current offset to avoid re-fetching already loaded items
-		let offset = currentOffset.value || 0
-		const batchSize = performanceConfig.get("backgroundSyncBatchSize") // Auto-adjusted: 100/200/300 based on device
-		const statsUpdateFrequency = performanceConfig.get("statsUpdateFrequency") // Auto-adjusted: 5/3/2 based on device
+		// Use larger batch size for faster sync (500 items per batch)
+		const batchSize = 500
+		const BATCH_DELAY_MS = 500 // Small delay between batches to not overwhelm server
 		let batchCount = 0
+		let totalCached = 0
 
-		// Function to fetch one batch
-		const fetchBatch = async () => {
-			try {
-				log.debug(`Background sync: fetching batch at offset ${offset}`)
-				const response = await call("pos_next.api.items.get_items", {
-					pos_profile: profile,
-					search_term: "",
-					item_group: null, // No filters for background sync
-					start: offset,
-					limit: batchSize,
-				})
-				const list = response?.message || response || []
+		// For filtered sync: track progress per group
+		let groupIndex = 0
+		let groupOffset = 0
 
-				if (list.length > 0) {
-					// Cache the batch
-					await offlineWorker.cacheItems(list)
-					offset += list.length
-					batchCount++
-
-					// Cache variants for template items in this batch (background, non-blocking)
-					cacheVariantsForTemplates(list, profile).catch(err => {
-						log.warn("Background variant caching failed:", err.message)
-					})
-
-					// Cache batch/serial data for offline use
-					if (shiftStore.profileWarehouse) {
-						cacheBatchSerialForItems(list, shiftStore.profileWarehouse).catch(err => {
-							log.warn("Background batch/serial caching failed:", err.message)
-						})
-					}
-
-					// Only update stats periodically to reduce IndexedDB queries
-					const shouldUpdateStats = batchCount % statsUpdateFrequency === 0 || list.length < batchSize
-
-					if (shouldUpdateStats) {
-						const stats = await offlineWorker.getCacheStats()
-						cacheStats.value = stats
-						cacheReady.value = stats.cacheReady
-						log.debug(`Background sync: cached ${offset} total items`)
-					} else {
-						log.debug(`Background sync: cached ${list.length} items, offset: ${offset}`)
-					}
-
-					// Stop if we got less than requested (reached end)
-					if (list.length < batchSize) {
-						log.success("Background sync complete - all items cached")
-						// Update stats one final time when sync completes
-						const finalStats = await offlineWorker.getCacheStats()
-						cacheStats.value = finalStats
-						cacheReady.value = finalStats.cacheReady
-						clearInterval(backgroundSyncInterval)
-						backgroundSyncInterval = null
-						cacheSyncing.value = false
-					}
-				} else {
-					log.success("Background sync complete - no more items")
-					// Update stats when sync completes with no items
-					const finalStats = await offlineWorker.getCacheStats()
-					cacheStats.value = finalStats
-					cacheReady.value = finalStats.cacheReady
-					clearInterval(backgroundSyncInterval)
-					backgroundSyncInterval = null
-					cacheSyncing.value = false
+		// Get all groups to sync (expand parent groups to include children)
+		const groupsToSync = hasFilters
+			? filterGroups.map(g => {
+				const groupInfo = itemGroups.value?.find(ig => ig.item_group === g.item_group)
+				if (groupInfo?.child_groups?.length) {
+					return [g.item_group, ...groupInfo.child_groups]
 				}
-			} catch (error) {
-				log.error("Background sync error", error)
-				// Don't stop on error, will retry on next interval
+				return [g.item_group]
+			}).flat()
+			: []
+
+		// CONTINUOUS SYNC LOOP - much faster than interval-based!
+		const syncLoop = async () => {
+			while (cacheSyncing.value) {
+				try {
+					let response, list
+
+					if (hasFilters && groupsToSync.length > 0) {
+						// FILTERED SYNC: Fetch items group by group
+						if (groupIndex >= groupsToSync.length) {
+							// All groups synced - DONE!
+							break
+						}
+
+						const currentGroup = groupsToSync[groupIndex]
+						log.debug(`Syncing ${currentGroup} at offset ${groupOffset}`)
+
+						response = await call("pos_next.api.items.get_items", {
+							pos_profile: profile,
+							search_term: "",
+							item_group: currentGroup,
+							start: groupOffset,
+							limit: batchSize,
+						})
+						list = response?.message || response || []
+
+						if (list.length < batchSize) {
+							// Move to next group
+							groupIndex++
+							groupOffset = 0
+							log.debug(`Completed group ${currentGroup} (${groupIndex}/${groupsToSync.length})`)
+						} else {
+							groupOffset += list.length
+						}
+					} else {
+						// UNFILTERED SYNC: Fetch all items with pagination
+						response = await call("pos_next.api.items.get_items", {
+							pos_profile: profile,
+							search_term: "",
+							item_group: null,
+							start: totalCached,
+							limit: batchSize,
+						})
+						list = response?.message || response || []
+
+						// Check if we've reached the end
+						if (list.length < batchSize) {
+							// Cache this last batch and exit
+							if (list.length > 0) {
+								await offlineWorker.cacheItems(list)
+								totalCached += list.length
+							}
+							break
+						}
+					}
+
+					if (list.length > 0) {
+						// Cache the batch
+						await offlineWorker.cacheItems(list)
+						totalCached += list.length
+						batchCount++
+
+						// Update stats EVERY batch for smooth progress indicator
+						// Use direct update instead of getCacheStats() for performance
+						cacheStats.value = {
+							...cacheStats.value,
+							items: totalCached,
+							lastSync: new Date().toISOString()
+						}
+						cacheReady.value = true
+
+						// Log progress every 10 batches (5000 items)
+						if (batchCount % 10 === 0) {
+							log.info(`Sync progress: ${totalCached} items cached (${batchCount} batches)`)
+						}
+
+						// Cache variants in background (don't await - fire and forget)
+						cacheVariantsForTemplates(list.slice(0, 20), profile).catch(() => {})
+
+						// Small delay to not overwhelm server/browser
+						await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS))
+					}
+				} catch (error) {
+					log.error("Sync batch error, retrying...", error.message)
+					// Wait longer on error before retry
+					await new Promise(resolve => setTimeout(resolve, 2000))
+				}
+			}
+
+			// Sync complete!
+			const finalStats = await offlineWorker.getCacheStats()
+			cacheStats.value = finalStats
+			cacheReady.value = true
+			cacheSyncing.value = false
+			log.success(`Background sync COMPLETE - ${totalCached} items cached in ${batchCount} batches`)
+
+			// Cache batch/serial data after items are synced (in background)
+			if (shiftStore.profileWarehouse && totalCached > 0) {
+				log.info("Starting batch/serial data sync...")
+				// This runs in background, don't await
+				offlineWorker.searchCachedItems("", 10000).then(async (items) => {
+					const batchSerialItems = items.filter(i => i.has_batch_no || i.has_serial_no)
+					if (batchSerialItems.length > 0) {
+						await cacheBatchSerialForItems(batchSerialItems, shiftStore.profileWarehouse)
+					}
+				}).catch(err => log.warn("Batch/serial sync failed:", err.message))
 			}
 		}
 
-		// Fetch first batch immediately
-		await fetchBatch()
-
-		// Only set up interval if sync should continue (first batch didn't complete sync)
-		// If cacheSyncing is still true, it means there's more data to fetch
-		// Interval auto-adjusted: 20s/15s/10s based on device (low/medium/high)
-		if (cacheSyncing.value && !backgroundSyncInterval) {
-			const syncInterval = performanceConfig.get("backgroundSyncInterval")
-			backgroundSyncInterval = setInterval(fetchBatch, syncInterval)
-			log.info(`Background sync interval set to ${syncInterval}ms based on device performance`)
-		}
+		// Start the sync loop (runs in background via microtask queue)
+		syncLoop()
 	}
 
 	function stopBackgroundCacheSync() {
-		if (backgroundSyncInterval) {
-			clearInterval(backgroundSyncInterval)
-			backgroundSyncInterval = null
+		if (cacheSyncing.value) {
 			cacheSyncing.value = false
 			log.info("Background cache sync stopped")
 		}
@@ -1379,9 +1465,9 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 		})
 	}
 
-	function loadItemGroups() {
+	async function loadItemGroups() {
 		if (posProfile.value) {
-			itemGroupsResource.reload()
+			await itemGroupsResource.reload()
 		}
 	}
 
@@ -1493,21 +1579,52 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 		}
 	}
 
-	function setSelectedItemGroup(group) {
+	async function setSelectedItemGroup(group) {
 		selectedItemGroup.value = group
-		// Item group impacts filtering; drop filtered cache so UI reflects new subset
 		clearBaseCache()
 
+		// LARGE CATALOG OPTIMIZATION: Fetch items from server when group changes
+		// Client-side filtering doesn't work for 65K+ items
+		if (posProfile.value) {
+			loading.value = true
+			try {
+				let items = []
+				if (group) {
+					// Specific group: fetch items for that group + children
+					items = await fetchItemsForGroup(posProfile.value, group, 0, 100)
+					log.info(`Loaded ${items.length} items for group: ${group}`)
+				} else {
+					// "All Items" tab: fetch first 100 items (no group filter)
+					const response = await call("pos_next.api.items.get_items", {
+						pos_profile: posProfile.value,
+						search_term: "",
+						item_group: null,
+						start: 0,
+						limit: 100,
+					})
+					items = response?.message || response || []
+					log.info(`Loaded ${items.length} items for "All Items" tab`)
+				}
+
+				if (items.length > 0) {
+					replaceAllItems(items)
+					totalItemsLoaded.value = items.length
+					currentOffset.value = items.length
+					hasMore.value = items.length >= 100 // May have more
+				}
+			} catch (error) {
+				log.error(`Failed to load items for group ${group || 'All Items'}`, error)
+			} finally {
+				loading.value = false
+			}
+		}
+
 		// If there's an active search, re-run it with the new group context
-		// to ensure searchResults contains items from the correct group
 		if (searchTerm.value?.trim()) {
-			// Clear any pending debounce timer
 			if (searchDebounceTimer) {
 				clearTimeout(searchDebounceTimer)
 				searchDebounceTimer = null
 			}
-
-			// Immediately trigger a fresh search with the new group
 			searchItems(searchTerm.value)
 		}
 	}
@@ -1522,55 +1639,51 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 
 	/**
 	 * Set POS Profile and load item group filters
-	 * CRITICAL: This must complete BEFORE loadAllItems() is called
+	 * OPTIMIZED: Single API call returns both profile data AND hierarchical item groups
 	 * @param {string} profile - POS Profile name
 	 * @param {boolean} autoLoadItems - Automatically load items after setting profile (default: true)
 	 */
 	async function setPosProfile(profile, autoLoadItems = true) {
 		posProfile.value = profile
-		serverDataFresh.value = false // Reset fresh flag when profile changes
+		serverDataFresh.value = false
 
-		// Clean up previous real-time handler
 		if (posProfileUpdateCleanup) {
 			posProfileUpdateCleanup()
 			posProfileUpdateCleanup = null
 		}
 
-		// Fetch item groups from POS Profile FIRST
-		if (profile) {
-			try {
-				const data = await call("pos_next.api.pos_profile.get_pos_profile_data", {
-					pos_profile: profile
-				})
-
-				// Extract item_groups from the profile
-				if (data?.pos_profile?.item_groups) {
-					profileItemGroups.value = data.pos_profile.item_groups
-					log.info(`Loaded ${profileItemGroups.value.length} item group filters from POS Profile`)
-				} else {
-					profileItemGroups.value = []
-					log.info("No item group filters in POS Profile")
-				}
-
-				// Set up real-time listener for POS Profile updates
-				posProfileUpdateCleanup = onPosProfileUpdate(async (updateData) => {
-					await handlePosProfileUpdateWithRecovery(updateData, profile)
-				})
-
-				log.debug("Real-time POS Profile update listener registered")
-
-				// Automatically load items with the filters (if enabled)
-				if (autoLoadItems) {
-					log.debug("Auto-loading items with filters")
-					await loadAllItems(profile)
-					await loadItemGroups()
-				}
-			} catch (error) {
-				log.error("Error fetching POS Profile item groups", error)
-				profileItemGroups.value = []
-			}
-		} else {
+		if (!profile) {
 			profileItemGroups.value = []
+			itemGroups.value = []
+			return
+		}
+
+		try {
+			// Single API call returns EVERYTHING - no need for separate loadItemGroups()
+			const data = await call("pos_next.api.pos_profile.get_pos_profile_data", {
+				pos_profile: profile
+			})
+
+			// Set profile item groups (raw from child table)
+			profileItemGroups.value = data?.pos_profile?.item_groups || []
+
+			// Set hierarchical item groups (with child_groups) - INSTANT tab display!
+			itemGroups.value = data?.item_groups_hierarchy || []
+			log.info(`Loaded ${itemGroups.value.length} item groups with hierarchy`)
+
+			// Set up real-time listener
+			posProfileUpdateCleanup = onPosProfileUpdate(async (updateData) => {
+				await handlePosProfileUpdateWithRecovery(updateData, profile)
+			})
+
+			// Load items in background (non-blocking)
+			if (autoLoadItems) {
+				loadAllItems(profile)
+			}
+		} catch (error) {
+			log.error("Error fetching POS Profile data", error)
+			profileItemGroups.value = []
+			itemGroups.value = []
 		}
 	}
 

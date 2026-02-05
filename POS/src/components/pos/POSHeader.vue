@@ -122,6 +122,14 @@
 								<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
 								<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
 							</svg>
+							<!-- Sync progress badge (visible during sync) -->
+							<span
+								v-if="cacheSyncing && cacheStats?.items > 0"
+								class="absolute -bottom-1 -end-1 bg-orange-500 text-white text-[8px] font-bold rounded-full px-1 min-w-[20px] h-4 flex items-center justify-center shadow-md animate-pulse"
+								:title="__('Syncing: {0} items', [formatNumber(cacheStats.items)])"
+							>
+								{{ formatCompactNumber(cacheStats.items) }}
+							</span>
 						</button>
 
 						<!-- Tooltip -->
@@ -146,27 +154,35 @@
 									</span>
 								</div>
 
+								<!-- Sync Progress Banner (shown during sync) -->
+								<div v-if="cacheSyncing" class="mb-2 p-2 bg-orange-500/20 rounded-lg">
+									<div class="flex items-center gap-2 mb-1.5">
+										<svg class="w-4 h-4 animate-spin text-orange-400" fill="none" viewBox="0 0 24 24">
+											<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+											<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+										</svg>
+										<span class="text-orange-300 font-semibold text-[11px]">{{ __('Syncing for offline...') }}</span>
+									</div>
+									<div class="text-center">
+										<span class="text-white font-bold text-lg">{{ formatNumber(cacheStats?.items || 0) }}</span>
+										<span class="text-gray-400 text-[10px] ms-1">{{ __('items cached') }}</span>
+									</div>
+									<div class="mt-1.5 text-[9px] text-gray-400 text-center">
+										{{ __('Barcode scanning works for cached items') }}
+									</div>
+								</div>
+
 								<!-- Stats -->
 								<div class="flex flex-col gap-1 sm:gap-1.5 text-[10px] sm:text-xs">
 									<div class="flex items-center justify-between">
 										<span class="text-gray-400">{{ __('Items:') }}</span>
-										<span class="font-semibold">{{ cacheStats?.items || 0 }}</span>
+										<span class="font-semibold">{{ formatNumber(cacheStats?.items || 0) }}</span>
 									</div>
 									<div v-if="cacheStats?.lastSync" class="flex items-center justify-between">
 										<span class="text-gray-400">{{ __('Last Sync:') }}</span>
 										<span class="font-semibold text-[9px] sm:text-[10px]">{{ formatLastSync() }}</span>
 									</div>
-									<div v-if="cacheSyncing" class="flex items-center justify-between">
-										<span class="text-gray-400">{{ __('Status:') }}</span>
-										<span class="text-orange-400 font-semibold flex items-center gap-1">
-											<svg class="w-2.5 h-2.5 sm:w-3 sm:h-3 animate-spin" fill="none" viewBox="0 0 24 24">
-												<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-												<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-											</svg>
-											{{ __('Syncing...') }}
-										</span>
-									</div>
-									<div v-if="stockSyncActive" class="flex items-center justify-between">
+									<div v-if="!cacheSyncing && stockSyncActive" class="flex items-center justify-between">
 										<span class="text-gray-400">{{ __('Auto-Sync:') }}</span>
 										<span class="text-green-400 font-semibold flex items-center gap-1">
 											<div class="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></div>
@@ -397,6 +413,19 @@ function getCacheAriaLabel() {
 		return __("Cache syncing")
 	}
 	return __("Cache ready")
+}
+
+function formatNumber(num) {
+	if (!num) return '0'
+	return num.toLocaleString()
+}
+
+function formatCompactNumber(num) {
+	if (!num) return '0'
+	if (num >= 1000) {
+		return (num / 1000).toFixed(num >= 10000 ? 0 : 1) + 'K'
+	}
+	return num.toString()
 }
 
 // SVG Path Icons
