@@ -933,6 +933,14 @@
 	</div>
 </template>
 
+<script>
+// Module-scoped init guard — prevents redundant heavy initialization
+// when component remounts due to translationVersion changes.
+// Tracks the profile name so a shift change correctly re-initializes.
+let _initializedProfile = null
+let _posInitPromise = null
+</script>
+
 <script setup>
 import ShiftClosingDialog from "@/components/ShiftClosingDialog.vue";
 import ShiftOpeningDialog from "@/components/ShiftOpeningDialog.vue";
@@ -1271,56 +1279,86 @@ onMounted(async () => {
 		// Start timers for current time and shift duration
 		shiftStore.startTimers();
 
-		// Check for existing open shift
+		// Skip heavy initialization if already completed for this profile
+		// (e.g., remount from translationVersion change). Pinia stores are
+		// singletons — their state survives component remounts.
+		const currentProfileName = shiftStore.profileName;
+		if (_initializedProfile && _initializedProfile === currentProfileName) {
+			log.debug("Skipping init — already initialized (remount)");
+			updateLayoutBounds();
+			return;
+		}
+
+		// If another mount is already running init, wait for it instead of duplicating
+		if (_posInitPromise) {
+			log.debug("Init already in progress, waiting...");
+			try {
+				await _posInitPromise;
+			} catch {
+				// Original caller handles errors; this mount just waits
+			}
+			updateLayoutBounds();
+			return;
+		}
+
+		_posInitPromise = initPOS();
+		await _posInitPromise;
+		_posInitPromise = null;
+
+		updateLayoutBounds();
+	} catch (error) {
+		_posInitPromise = null;
+		log.error("Error checking shift:", error);
+	} finally {
+		uiStore.setLoading(false);
+	}
+
+	async function initPOS() {
 		const hasShift = await shiftStore.checkShift();
 
 		if (!hasShift) {
 			uiStore.showOpenShiftDialog = true;
-		} else {
-			// Set POS profile and load tax rules
-			if (shiftStore.currentProfile) {
-				cartStore.posProfile = shiftStore.profileName;
-				cartStore.posOpeningShift = shiftStore.currentShift?.name;
-
-				// Load POS Settings
-				await posSettingsStore.loadSettings(shiftStore.profileName);
-				log.info("POS Settings loaded:", {
-					allowPartialPayment: posSettingsStore.allowPartialPayment,
-					settings: posSettingsStore.settings,
-				});
-
-				// Load tax rules with tax_inclusive setting from POS Settings
-				await cartStore.loadTaxRules(shiftStore.profileName, posSettingsStore.settings);
-
-				// Set default customer from POS Profile if configured
-				await cartStore.setDefaultCustomer();
-
-				// Note: POS Settings already loaded above via posSettingsStore.loadSettings()
-				// No need to call again since settingsStore is an alias to posSettingsStore
-
-				// Set warehouse context in stock store for stock operations
-				if (shiftStore.profileWarehouse) {
-					stockStore.setWarehouse(shiftStore.profileWarehouse);
-
-					// Note: Periodic stock sync will be configured after items load
-					// See watch() on itemStore.allItems below
-				}
-
-				// Pre-load data for offline use
-				if (!offlineStore.isOffline) {
-					await offlineStore.preloadDataForOffline(shiftStore.currentProfile);
-				} else {
-					await offlineStore.checkOfflineCacheAvailability();
-				}
-			}
+			return;
 		}
 
-		updateLayoutBounds();
-		await draftsStore.updateDraftsCount();
-	} catch (error) {
-		log.error("Error checking shift:", error);
-	} finally {
-		uiStore.setLoading(false);
+		if (!shiftStore.currentProfile) return;
+
+		cartStore.posProfile = shiftStore.profileName;
+		cartStore.posOpeningShift = shiftStore.currentShift?.name;
+
+		// Set warehouse context early (synchronous, no API call)
+		if (shiftStore.profileWarehouse) {
+			stockStore.setWarehouse(shiftStore.profileWarehouse);
+		}
+
+		// Fire independent operations in parallel while settings load.
+		// Settings must complete before tax rules, but the rest are independent.
+		const settingsPromise = posSettingsStore.loadSettings(shiftStore.profileName);
+
+		const backgroundOps = Promise.allSettled([
+			cartStore.setDefaultCustomer(),
+			offlineStore.isOffline
+				? offlineStore.checkOfflineCacheAvailability()
+				: offlineStore.preloadDataForOffline(shiftStore.currentProfile),
+			draftsStore.updateDraftsCount(),
+		]);
+
+		// Wait for settings (required for tax rules) + all background ops
+		const [settingsResult] = await Promise.allSettled([settingsPromise, backgroundOps]);
+
+		if (settingsResult.status === "rejected") {
+			log.error("Failed to load POS settings:", settingsResult.reason);
+			return;
+		}
+
+		log.info("POS Settings loaded:", {
+			allowPartialPayment: posSettingsStore.allowPartialPayment,
+		});
+
+		// Load tax rules (depends on settings being loaded)
+		await cartStore.loadTaxRules(shiftStore.profileName, posSettingsStore.settings);
+
+		_initializedProfile = shiftStore.profileName;
 	}
 });
 

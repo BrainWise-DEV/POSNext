@@ -757,24 +757,33 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 			})
 
 			// ====================================================================
-			// STEP 2: Check Cache and Network Status
+			// STEP 2: Check Cache, Network Status, and Item Count — IN PARALLEL
 			// ====================================================================
-			// Get cache statistics with timeout to prevent UI blocking if worker is slow/crashed
-			let stats
-			try {
-				stats = await Promise.race([
-					offlineWorker.getCacheStats(),
-					new Promise((_, reject) => setTimeout(() => reject(new Error('Cache stats timeout')), 3000))
-				])
-			} catch (statsError) {
+			// Fire all checks concurrently to minimize startup latency.
+			// Cache stats and item count are independent — no reason to wait for
+			// one before starting the other.
+			const offline = isOffline()
+
+			const cacheStatsPromise = Promise.race([
+				offlineWorker.getCacheStats(),
+				new Promise((_, reject) => setTimeout(() => reject(new Error('Cache stats timeout')), 3000))
+			]).catch(statsError => {
 				log.warn("Cache stats unavailable, proceeding with defaults:", statsError.message)
-				stats = { items: 0, cacheReady: false, lastSync: null }
-			}
+				return { items: 0, cacheReady: false, lastSync: null }
+			})
+
+			// Start item count fetch early (only used in Strategy C, but cheap to fire now)
+			// Skip when offline — count can't be fetched without network
+			const countPromise = !offline ? call("pos_next.api.items.get_items_count", {
+				pos_profile: profile,
+			}).then(r => r?.message ?? r ?? 0).catch(countErr => {
+				log.warn("Could not fetch item count:", countErr.message)
+				return 0
+			}) : Promise.resolve(0)
+
+			const stats = await cacheStatsPromise
 			cacheStats.value = stats
 			cacheReady.value = stats.cacheReady
-
-			// Determine if we're in offline mode (no network connectivity)
-			const offline = isOffline()
 
 			// ====================================================================
 			// STEP 3: Determine Loading Strategy
@@ -892,16 +901,11 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 			// ----------------------------------------------------------------
 			// Small catalogs (<=500): Load everything, skip background sync
 			// Large catalogs (>500): Load first 100, background sync the rest
-			let totalItemCount = 0
-			try {
-				const countResponse = await call("pos_next.api.items.get_items_count", {
-					pos_profile: profile,
-				})
-				totalItemCount = countResponse?.message ?? countResponse ?? 0
-				totalServerItems.value = totalItemCount
+			// countPromise was already fired in parallel with cache stats above
+			const totalItemCount = await countPromise
+			totalServerItems.value = totalItemCount
+			if (totalItemCount > 0) {
 				log.info(`Total catalog size: ${totalItemCount} items`)
-			} catch (countErr) {
-				log.warn("Could not fetch item count, using default pagination:", countErr.message)
 			}
 
 			// Determine initial load size based on catalog size
@@ -928,8 +932,10 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 				hasMore.value = !isSmallCatalog && fetchedItems.length >= INITIAL_LIMIT
 
 				if (fetchedItems.length > 0) {
-					// Cache this batch immediately for fast offline access
-					await offlineWorker.cacheItems(fetchedItems)
+					// Cache this batch for offline access (non-blocking)
+					offlineWorker.cacheItems(fetchedItems).catch(err => {
+						log.warn("Background item caching failed:", err.message)
+					})
 					cacheReady.value = true
 					serverDataFresh.value = true
 
@@ -985,8 +991,10 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 					// Small catalog: no more items. Large: enable infinite scroll.
 					hasMore.value = totalItemCount > unfilteredLimit
 
-					// Cache this batch (don't clear — background sync fills the rest)
-					await offlineWorker.cacheItems(list)
+					// Cache this batch (non-blocking — background sync fills the rest)
+					offlineWorker.cacheItems(list).catch(err => {
+						log.warn("Background item caching failed:", err.message)
+					})
 
 					// Mark data as fresh
 					serverDataFresh.value = true
