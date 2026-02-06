@@ -1862,23 +1862,15 @@ async function handlePaymentCompleted(paymentData) {
 			return;
 		}
 
-		cartStore.payments = [];
-		if (paymentData.payments && Array.isArray(paymentData.payments)) {
-			paymentData.payments.forEach((p) => {
-				cartStore.payments.push({
-					mode_of_payment: p.mode_of_payment,
-					amount: p.amount,
-					type: p.type,
-				});
-			});
-		}
+		// Batch-assign payments in a single reactive write (avoids per-push reactivity)
+		cartStore.payments = (paymentData.payments || []).map((p) => ({
+			mode_of_payment: p.mode_of_payment,
+			amount: p.amount,
+			type: p.type,
+		}));
 
 		// Store sales team data if provided
-		if (paymentData.sales_team && Array.isArray(paymentData.sales_team)) {
-			cartStore.salesTeam = paymentData.sales_team;
-		} else {
-			cartStore.salesTeam = [];
-		}
+		cartStore.salesTeam = Array.isArray(paymentData.sales_team) ? paymentData.sales_team : [];
 
 		// Set delivery date for Sales Orders
 		if (paymentData.delivery_date) {
@@ -1940,36 +1932,34 @@ async function handlePaymentCompleted(paymentData) {
 				const invoiceTotal = result.grand_total || result.total || 0;
 				const paidAmount = paymentData.paid_amount || invoiceTotal;
 
+				// Close dialog and clear cart immediately for fast UX
 				uiStore.showPaymentDialog = false;
 				cartStore.clearCart();
-				// Reset cart hash after successful payment
 				previousCartHash = "";
 
-				// Delete draft after successful submission
-				if (draftIdToDelete) {
-					draftsStore.deleteDraft(draftIdToDelete);
-				}
-
-				// Refresh stock - Direct API (50-200ms), no Socket.IO lag!
-				await stockStore.refresh(soldItemCodes, shiftStore.profileWarehouse);
-
-				// Refresh invoice history cache in background (non-blocking)
-				loadInvoiceHistoryData().catch((err) =>
-					log.debug("Background invoice cache refresh failed:", err)
-				);
-
+				// Show success / auto-print immediately — don't block on background tasks
 				if (shiftStore.autoPrintEnabled) {
-					try {
-						await handlePrintInvoice({ name: invoiceName });
-						showSuccess(__("Invoice {0} created and sent to printer", [invoiceName]));
-					} catch (error) {
-						log.error("Auto-print error:", error);
-						showWarning(__("Invoice {0} created but print failed", [invoiceName]));
-					}
+					handlePrintInvoice({ name: invoiceName })
+						.then(() => showSuccess(__("Invoice {0} created and sent to printer", [invoiceName])))
+						.catch((error) => {
+							log.error("Auto-print error:", error);
+							showWarning(__("Invoice {0} created but print failed", [invoiceName]));
+						});
 				} else {
 					uiStore.showSuccess(invoiceName, invoiceTotal, paidAmount);
 					showSuccess(__("Invoice {0} created successfully", [invoiceName]));
 				}
+
+				// Background cleanup — all non-blocking, run in parallel
+				if (draftIdToDelete) {
+					draftsStore.deleteDraft(draftIdToDelete);
+				}
+				stockStore.refresh(soldItemCodes, shiftStore.profileWarehouse).catch((err) =>
+					log.debug("Background stock refresh failed:", err)
+				);
+				loadInvoiceHistoryData().catch((err) =>
+					log.debug("Background invoice cache refresh failed:", err)
+				);
 			}
 		}
 	} catch (error) {

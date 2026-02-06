@@ -65,3 +65,4 @@ dev-dist/
 .playwright-mcp/*
 TODO.md
 .claude/settings.json
+pos-loaded.md

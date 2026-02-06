@@ -957,6 +957,7 @@ def submit_invoice(invoice=None, data=None):
 
     try:
         invoice_name = invoice.get("name")
+        freshly_created = False
 
         # Get or create invoice
         if not invoice_name or not frappe.db.exists(doctype, invoice_name):
@@ -967,6 +968,7 @@ def submit_invoice(invoice=None, data=None):
             if not invoice_name:
                 frappe.throw(_("Failed to get invoice name from draft"))
             invoice_doc = frappe.get_doc(doctype, invoice_name)
+            freshly_created = True
         else:
             invoice_doc = frappe.get_doc(doctype, invoice_name)
             invoice_doc.update(invoice)
@@ -982,32 +984,35 @@ def submit_invoice(invoice=None, data=None):
         if invoice_doc.get("is_return") and invoice_doc.get("return_against"):
             invoice_doc.update_outstanding_for_self = 0
 
-        # Copy accounting dimensions from POS Profile if not already set
-        if pos_profile and not invoice_doc.get("branch"):
-            try:
-                pos_profile_doc = frappe.get_cached_doc("POS Profile", pos_profile)
-                if hasattr(pos_profile_doc, "branch") and pos_profile_doc.branch:
-                    invoice_doc.branch = pos_profile_doc.branch
-                    # Also set branch on all items for GL entries
-                    for item in invoice_doc.get("items", []):
-                        if not item.get("branch"):
-                            item.branch = pos_profile_doc.branch
-            except Exception as e:
-                # Branch is optional, log and continue
-                frappe.log_error(
-                    f"Failed to set branch from POS Profile {pos_profile}: {e}",
-                    "POS Profile Branch"
-                )
-
-        # Set accounts for all payment methods before saving
-        if doctype == "Sales Invoice" and hasattr(invoice_doc, "payments"):
-            for payment in invoice_doc.payments:
-                if payment.mode_of_payment:
-                    account_info = get_payment_account(
-                        payment.mode_of_payment, invoice_doc.company
+        # Skip branch and payment account setup if draft was freshly created
+        # by update_invoice — it already handles these
+        if not freshly_created:
+            # Copy accounting dimensions from POS Profile if not already set
+            if pos_profile and not invoice_doc.get("branch"):
+                try:
+                    pos_profile_doc = frappe.get_cached_doc("POS Profile", pos_profile)
+                    if hasattr(pos_profile_doc, "branch") and pos_profile_doc.branch:
+                        invoice_doc.branch = pos_profile_doc.branch
+                        # Also set branch on all items for GL entries
+                        for item in invoice_doc.get("items", []):
+                            if not item.get("branch"):
+                                item.branch = pos_profile_doc.branch
+                except Exception as e:
+                    # Branch is optional, log and continue
+                    frappe.log_error(
+                        f"Failed to set branch from POS Profile {pos_profile}: {e}",
+                        "POS Profile Branch"
                     )
-                    if account_info:
-                        payment.account = account_info.get("account")
+
+            # Set accounts for all payment methods before saving
+            if doctype == "Sales Invoice" and hasattr(invoice_doc, "payments"):
+                for payment in invoice_doc.payments:
+                    if payment.mode_of_payment:
+                        account_info = get_payment_account(
+                            payment.mode_of_payment, invoice_doc.company
+                        )
+                        if account_info:
+                            payment.account = account_info.get("account")
 
         # Handle sales team (multiple sales persons)
         sales_team_data = invoice.get("sales_team") or data.get("sales_team")

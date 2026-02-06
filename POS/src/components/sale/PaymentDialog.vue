@@ -1819,11 +1819,13 @@ watch(
 	{ immediate: true }, // Load immediately if posProfile is already set
 )
 
-// Pre-fetch customer balance when customer changes (before dialog opens)
-// This ensures data is available immediately when dialog opens
+// Pre-fetch customer balance when customer changes, but only when dialog is visible.
+// Skipping fetches when hidden prevents redundant API calls triggered by
+// post-submission cart reset (customer prop changes from clearCart/setDefaultCustomer).
 watch(
 	() => [props.customer, props.company, props.allowCreditSale, props.allowCustomerCreditPayment],
 	([customer, company, allowCreditSale, allowCustomerCreditPayment]) => {
+		if (!show.value) return
 		const creditEnabled = allowCreditSale || allowCustomerCreditPayment
 		if (creditEnabled && customer && company) {
 			log.debug("[PaymentDialog] Pre-fetching customer balance for:", customer)
@@ -1867,11 +1869,13 @@ watch(show, (newVal) => {
 			lastSelectedMethod.value = defaultMethod || paymentMethods.value[0]
 		}
 
-		// Customer credit and balance is pre-fetched when customer changes (see watcher above)
-		// Just log for debugging
+		// Fetch customer balance/credit when dialog opens (the customer watcher
+		// now skips fetches while dialog is hidden to avoid post-submission duplicates)
 		const creditEnabled = props.allowCreditSale || props.allowCustomerCreditPayment
-		if (creditEnabled) {
-			log.debug("[PaymentDialog] Customer credit/balance should be pre-loaded, current balance:", customerBalance.value)
+		if (creditEnabled && props.customer && props.company) {
+			log.debug("[PaymentDialog] Fetching customer balance for:", props.customer)
+			customerBalanceResource.fetch()
+			customerCreditResource.fetch()
 		}
 
 		// Load wallet info if customer is selected

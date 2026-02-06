@@ -788,9 +788,9 @@ export function useInvoice() {
 		writeOffAmount = 0,
 	) {
 		/**
-		 * Two-step submission process with mutex protection:
-		 * 1. Create/update draft invoice
-		 * 2. Validate stock and submit
+		 * Single-step submission with mutex protection:
+		 * Sends all invoice data to submit_invoice which creates the draft
+		 * and submits in one server round-trip.
 		 *
 		 * The mutex prevents duplicate invoice creation from:
 		 * - Rapid double-clicks on payment buttons
@@ -813,8 +813,7 @@ export function useInvoice() {
 			isSubmitting.value = true
 
 			try {
-				// Step 1: Create invoice draft
-				// Use toRaw() to ensure we get current, non-reactive values (prevents stale cached quantities)
+				// Prepare invoice data — use toRaw() for current, non-reactive values
 				const rawItems = toRaw(invoiceItems.value)
 				const rawPayments = toRaw(payments.value)
 				const rawSalesTeam = toRaw(salesTeam.value)
@@ -833,7 +832,7 @@ export function useInvoice() {
 					discount_amount: additionalDiscount.value || 0,
 					coupon_code: couponCode.value,
 					is_pos: 1,
-					update_stock: 1, // Critical: Ensures stock is updated
+					update_stock: 1,
 				}
 
 				if (targetDoctype === "Sales Order" && deliveryDate) {
@@ -848,25 +847,6 @@ export function useInvoice() {
 					}))
 				}
 
-				const draftInvoice = await updateInvoiceResource.submit({
-					data: invoiceData,
-				})
-
-				let invoiceDoc = draftInvoice
-				if (
-					draftInvoice &&
-					typeof draftInvoice === "object" &&
-					"data" in draftInvoice
-				) {
-					invoiceDoc = draftInvoice.data
-				}
-
-				if (!invoiceDoc || !invoiceDoc.name) {
-					throw new Error(
-						"Failed to create draft invoice - no invoice name returned",
-					)
-				}
-
 				const submitData = {
 					change_amount:
 						remainingAmount.value < 0 ? Math.abs(remainingAmount.value) : 0,
@@ -874,8 +854,9 @@ export function useInvoice() {
 				}
 
 				try {
+					// Single API call: submit_invoice creates the draft and submits in one round-trip
 					const result = await submitInvoiceResource.submit({
-						invoice: invoiceDoc,
+						invoice: invoiceData,
 						data: submitData,
 					})
 
@@ -901,29 +882,10 @@ export function useInvoice() {
 				} catch (error) {
 					// Preserve original error object with all its properties
 					console.error("Submit invoice error:", error)
-					console.log(
-						"submitInvoiceResource.error:",
-						submitInvoiceResource.error,
-					)
 
 					// If resource has error data, extract and attach it
 					if (submitInvoiceResource.error) {
 						const resourceError = submitInvoiceResource.error
-						console.log("Resource error details:", {
-							exc_type: resourceError.exc_type,
-							_server_messages: resourceError._server_messages,
-							httpStatus: resourceError.httpStatus,
-							messages: resourceError.messages,
-							messagesContent: JSON.stringify(resourceError.messages),
-							data: resourceError.data,
-							exception: resourceError.exception,
-							keys: Object.keys(resourceError),
-						})
-
-						// The messages array likely contains the detailed error info
-						if (resourceError.messages && resourceError.messages.length > 0) {
-							console.log("First message:", resourceError.messages[0])
-						}
 
 						// Attach all resource error properties to the error
 						error.exc_type = resourceError.exc_type || error.exc_type
@@ -932,8 +894,6 @@ export function useInvoice() {
 						error.messages = resourceError.messages
 						error.exception = resourceError.exception
 						error.data = resourceError.data
-
-						console.log("After attaching, error.messages:", error.messages)
 					}
 
 					throw error
@@ -954,11 +914,9 @@ export function useInvoice() {
 	 * the default customer configured in the POS Profile.
 	 */
 	async function setDefaultCustomer() {
-		// Reset to null first
-		customer.value = null
-
 		// Only fetch default customer if we have a POS Profile
 		if (!posProfile.value) {
+			customer.value = null
 			return
 		}
 
@@ -967,17 +925,21 @@ export function useInvoice() {
 				pos_profile: posProfile.value,
 			})
 
-			// Set the default customer if one is configured
+			// Set the default customer if one is configured, otherwise null.
+			// Single assignment avoids intermediate null→value transitions
+			// that would trigger redundant watcher-based API fetches.
 			if (result && result.customer) {
-				// Create customer object matching the structure from customer selection
 				customer.value = {
 					name: result.customer,
 					customer_name: result.customer_name || result.customer,
 					customer_group: result.customer_group,
 				}
+			} else {
+				customer.value = null
 			}
 		} catch (error) {
 			// Silently fail - default customer is optional
+			customer.value = null
 			console.log("No default customer set in POS Profile")
 		}
 	}
@@ -998,8 +960,10 @@ export function useInvoice() {
 		_cachedTotalDiscount.value = 0
 		_cachedTotalPaid.value = 0
 
-		// Set default customer from POS Profile if available
-		setDefaultCustomer()
+		// Note: Do NOT call setDefaultCustomer() here.
+		// clearCart() is always called after resetInvoice() and handles
+		// setting the default customer. Calling it here too causes duplicate
+		// customer prop changes that trigger redundant API fetches in watchers.
 	}
 
 	/**
