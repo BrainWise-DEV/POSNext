@@ -643,7 +643,11 @@ export function useInvoice() {
 
 		// Update item fields with rounded values
 		item.tax_amount = taxAmount
-		item.rate = priceListRate // Preserve original price for display
+		// For manually edited rates, preserve the edited rate; otherwise use price_list_rate
+		if (!isManuallyEdited) {
+			item.rate = effectiveRate // Preserve original price for display
+		}
+		// If manually edited, item.rate is already set to the edited value
 		item.amount = netAmount // Net amount for backend calculations
 	}
 

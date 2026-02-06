@@ -21,6 +21,7 @@ POS_SETTINGS_FIELDS = [
 	"tax_inclusive",
 	"allow_user_to_edit_additional_discount",
 	"allow_user_to_edit_item_discount",
+	"allow_user_to_edit_rate",
 	"use_percentage_discount",
 	"max_discount_allowed",
 	"allow_credit_sale",
@@ -44,6 +45,7 @@ DEFAULT_POS_SETTINGS = {
 	"tax_inclusive": 0,
 	"allow_user_to_edit_additional_discount": 0,
 	"allow_user_to_edit_item_discount": 1,
+	"allow_user_to_edit_rate": 0,
 	"use_percentage_discount": 0,
 	"max_discount_allowed": 0,
 	"disable_rounded_total": 0,  # Derived from POS Profile
