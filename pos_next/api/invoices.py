@@ -144,6 +144,76 @@ def get_payment_account(mode_of_payment, company):
     )
 
 
+def _get_payment_accounts_batch(payments, company):
+    """
+    Batch-resolve payment accounts for all payment modes in a single query.
+    Returns a dict mapping mode_of_payment -> account.
+    Falls back to get_payment_account() for any modes not found in batch.
+    """
+    if not payments or not company:
+        return {}
+
+    # Collect unique modes that need accounts
+    modes = list({
+        p.get("mode_of_payment") or (p.mode_of_payment if hasattr(p, "mode_of_payment") else "")
+        for p in payments
+        if (p.get("mode_of_payment") if isinstance(p, dict) else getattr(p, "mode_of_payment", ""))
+        and not (p.get("account") if isinstance(p, dict) else getattr(p, "account", ""))
+    })
+
+    if not modes:
+        return {}
+
+    result = {}
+
+    # Batch query: Mode of Payment Account table (most common case)
+    MoPA = frappe.qb.DocType("Mode of Payment Account")
+    batch_rows = (
+        frappe.qb.from_(MoPA)
+        .select(MoPA.parent, MoPA.default_account)
+        .where(MoPA.parent.isin(modes))
+        .where(MoPA.company == company)
+        .where(MoPA.default_account.isnotnull())
+        .run(as_dict=True)
+    )
+
+    for row in batch_rows:
+        if row.default_account:
+            result[row.parent] = row.default_account
+
+    # Fall back per-mode for any that weren't resolved in batch
+    for mode in modes:
+        if mode not in result:
+            try:
+                info = get_payment_account(mode, company)
+                if info:
+                    result[mode] = info.get("account")
+            except Exception as e:
+                frappe.log_error(
+                    f"Failed to get payment account for {mode}: {e}",
+                    "Payment Account Batch Lookup"
+                )
+
+    return result
+
+
+def _apply_payment_accounts(payments, account_map):
+    """Apply resolved accounts from a batch lookup to payment rows."""
+    for payment in payments:
+        mode = payment.get("mode_of_payment") if isinstance(payment, dict) else getattr(payment, "mode_of_payment", "")
+        if not mode:
+            continue
+        existing = payment.get("account") if isinstance(payment, dict) else getattr(payment, "account", "")
+        if existing:
+            continue
+        account = account_map.get(mode)
+        if account:
+            if isinstance(payment, dict):
+                payment["account"] = account
+            else:
+                payment.account = account
+
+
 # ==========================================
 # Stock Validation Functions
 # ==========================================
@@ -169,18 +239,75 @@ def _get_available_stock(item):
 
 
 def _collect_stock_errors(items):
-    """Return list of items exceeding available stock."""
-    errors = []
+    """Return list of items exceeding available stock.
+
+    Uses a single batch query for all non-batch items instead of
+    querying per-item, then falls back to get_batch_qty() only for
+    batch-tracked items.
+    """
+    if not items:
+        return []
+
+    # Separate batch items (need individual lookup) from regular items
+    batch_items = []
+    regular_items = []
+
     for d in items:
         if flt(d.get("qty")) < 0:
             continue
+        if not d.get("item_code") or not d.get("warehouse"):
+            continue
+        if d.get("batch_no"):
+            batch_items.append(d)
+        else:
+            regular_items.append(d)
 
-        available = _get_available_stock(d)
+    # Batch-query stock for all regular items in one SQL
+    stock_map = {}  # (item_code, warehouse) -> actual_qty
+    if regular_items:
+        item_codes = list({d.get("item_code") for d in regular_items})
+        warehouses = list({d.get("warehouse") for d in regular_items})
+
+        Bin = frappe.qb.DocType("Bin")
+        stock_data = (
+            frappe.qb.from_(Bin)
+            .select(Bin.item_code, Bin.warehouse, Bin.actual_qty)
+            .where(Bin.item_code.isin(item_codes))
+            .where(Bin.warehouse.isin(warehouses))
+            .run(as_dict=True)
+        )
+
+        for row in stock_data:
+            stock_map[(row.item_code, row.warehouse)] = flt(row.actual_qty)
+
+    errors = []
+
+    # Check regular items against batch-queried stock
+    for d in regular_items:
+        available = stock_map.get(
+            (d.get("item_code"), d.get("warehouse")), 0
+        )
         requested = flt(
             d.get("stock_qty")
             or (flt(d.get("qty")) * flt(d.get("conversion_factor") or 1))
         )
+        if requested > available:
+            errors.append(
+                {
+                    "item_code": d.get("item_code"),
+                    "warehouse": d.get("warehouse"),
+                    "requested_qty": requested,
+                    "available_qty": available,
+                }
+            )
 
+    # Check batch items individually (batch_qty needs per-batch lookup)
+    for d in batch_items:
+        available = get_batch_qty(d.get("batch_no"), d.get("warehouse")) or 0
+        requested = flt(
+            d.get("stock_qty")
+            or (flt(d.get("qty")) * flt(d.get("conversion_factor") or 1))
+        )
         if requested > available:
             errors.append(
                 {
@@ -194,8 +321,14 @@ def _collect_stock_errors(items):
     return errors
 
 
-def _should_block(pos_profile):
-    """Check if sale should be blocked for insufficient stock."""
+def _should_block(pos_profile, pos_settings_allow_negative=None):
+    """Check if sale should be blocked for insufficient stock.
+
+    Args:
+        pos_profile: POS Profile name
+        pos_settings_allow_negative: Pre-loaded value from POS Settings to
+            avoid a duplicate DB query. Pass None to query on demand.
+    """
     # First check global ERPNext Stock Settings
     allow_negative = cint(
         frappe.db.get_single_value("Stock Settings", "allow_negative_stock") or 0
@@ -205,15 +338,16 @@ def _should_block(pos_profile):
 
     # Check POS Settings for the specific profile
     if pos_profile:
-        # Check if POS Settings allows negative stock
-        pos_settings_allow_negative = cint(
-            frappe.db.get_value(
-                "POS Settings",
-                {"pos_profile": pos_profile},
-                "allow_negative_stock"
-            ) or 0
-        )
-        if pos_settings_allow_negative:
+        # Use pre-loaded value if provided, otherwise query
+        if pos_settings_allow_negative is None:
+            pos_settings_allow_negative = cint(
+                frappe.db.get_value(
+                    "POS Settings",
+                    {"pos_profile": pos_profile},
+                    "allow_negative_stock"
+                ) or 0
+            )
+        if cint(pos_settings_allow_negative):
             return False
 
         # Try to get custom field (may not exist in vanilla ERPNext)
@@ -229,8 +363,14 @@ def _should_block(pos_profile):
     return True
 
 
-def _validate_stock_on_invoice(invoice_doc):
-    """Validate stock availability before submission."""
+def _validate_stock_on_invoice(invoice_doc, pos_settings_allow_negative=None):
+    """Validate stock availability before submission.
+
+    Args:
+        invoice_doc: The invoice document to validate.
+        pos_settings_allow_negative: Pre-loaded value to avoid duplicate
+            POS Settings query. Pass None to query on demand.
+    """
     if invoice_doc.doctype == "Sales Invoice" and not cint(
         getattr(invoice_doc, "update_stock", 0)
     ):
@@ -247,7 +387,7 @@ def _validate_stock_on_invoice(invoice_doc):
     errors = _collect_stock_errors(items_to_check)
 
     # Throw error if stock insufficient and blocking is enabled
-    if errors and _should_block(invoice_doc.pos_profile):
+    if errors and _should_block(invoice_doc.pos_profile, pos_settings_allow_negative):
         frappe.throw(frappe.as_json({"errors": errors}), frappe.ValidationError)
 
 
@@ -460,21 +600,13 @@ def update_invoice(data):
             pos_profile_doc.company if pos_profile_doc else None
         )
 
+        # Batch-resolve payment accounts once for all payments
+        payment_account_map = {}
         if company and invoice_doc.get("payments") and doctype == "Sales Invoice":
-            for payment in invoice_doc.payments:
-                mode_of_payment = payment.get("mode_of_payment")
-                if mode_of_payment and not payment.get("account"):
-                    try:
-                        account_info = get_payment_account(
-                            mode_of_payment, company
-                        )
-                        if account_info:
-                            payment["account"] = account_info.get("account")
-                    except Exception as e:
-                        frappe.log_error(
-                            f"Failed to get payment account for {mode_of_payment}: {e}",
-                            "Payment Account Lookup"
-                        )
+            payment_account_map = _get_payment_accounts_batch(
+                invoice_doc.payments, company
+            )
+            _apply_payment_accounts(invoice_doc.payments, payment_account_map)
 
         # Validate return items if this is a return invoice
         if (data.get("is_return") or invoice_doc.get("is_return")) and invoice_doc.get(
@@ -600,21 +732,13 @@ def update_invoice(data):
         if invoice_doc.base_grand_total is None:
             invoice_doc.base_grand_total = 0.0
 
-        # Set accounts for payment methods before saving
-        for payment in invoice_doc.payments:
-            mode_of_payment = payment.get("mode_of_payment")
-            if mode_of_payment and not payment.get("account"):
-                try:
-                    account_info = get_payment_account(
-                        mode_of_payment, invoice_doc.company
-                    )
-                    if account_info:
-                        payment.account = account_info.get("account")
-                except Exception as e:
-                    frappe.log_error(
-                        f"Failed to get payment account for {mode_of_payment}: {e}",
-                        "Payment Account Lookup"
-                    )
+        # Re-apply payment accounts (handles any payments added by set_missing_values)
+        # Reuse the batch map if company hasn't changed, otherwise re-query
+        if invoice_doc.company and invoice_doc.company != company:
+            payment_account_map = _get_payment_accounts_batch(
+                invoice_doc.payments, invoice_doc.company
+            )
+        _apply_payment_accounts(invoice_doc.payments, payment_account_map)
 
         # For return invoices, ensure payments are negative
         if invoice_doc.get("is_return"):
@@ -1004,15 +1128,12 @@ def submit_invoice(invoice=None, data=None):
                         "POS Profile Branch"
                     )
 
-            # Set accounts for all payment methods before saving
+            # Batch-resolve payment accounts for non-freshly-created invoices
             if doctype == "Sales Invoice" and hasattr(invoice_doc, "payments"):
-                for payment in invoice_doc.payments:
-                    if payment.mode_of_payment:
-                        account_info = get_payment_account(
-                            payment.mode_of_payment, invoice_doc.company
-                        )
-                        if account_info:
-                            payment.account = account_info.get("account")
+                acct_map = _get_payment_accounts_batch(
+                    invoice_doc.payments, invoice_doc.company
+                )
+                _apply_payment_accounts(invoice_doc.payments, acct_map)
 
         # Handle sales team (multiple sales persons)
         sales_team_data = invoice.get("sales_team") or data.get("sales_team")
@@ -1088,8 +1209,9 @@ def submit_invoice(invoice=None, data=None):
             )
 
         # Validate stock availability only if negative stock is not allowed
+        # Pass the already-loaded setting to avoid a duplicate POS Settings query
         if not pos_settings_allow_negative:
-            _validate_stock_on_invoice(invoice_doc)
+            _validate_stock_on_invoice(invoice_doc, pos_settings_allow_negative)
 
         # Save before submit
         invoice_doc.flags.ignore_permissions = True

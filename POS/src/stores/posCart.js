@@ -253,7 +253,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		writeOffAmount.value = amount || 0
 	}
 
-	async function submitInvoice() {
+	async function submitInvoice(paymentOverrides = null) {
 		if (invoiceItems.value.length === 0) {
 			showWarning(__("Cart is empty"))
 			return
@@ -261,6 +261,22 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		if (!customer.value) {
 			showWarning(__("Please select a customer"))
 			return
+		}
+
+		// Cancel any pending/in-flight offer processing to prevent it from
+		// contending with the submission pipeline (debounce timers + queue)
+		debouncedProcessOffers.cancel()
+		offerQueue.cancel()
+
+		// If payment data was passed directly, apply it before submission
+		// to avoid triggering reactive watchers (offer reprocessing)
+		if (paymentOverrides) {
+			if (paymentOverrides.payments) {
+				payments.value = paymentOverrides.payments
+			}
+			if (paymentOverrides.salesTeam !== undefined) {
+				salesTeam.value = paymentOverrides.salesTeam
+			}
 		}
 
 		const result = await baseSubmitInvoice(targetDoctype.value, deliveryDate.value, writeOffAmount.value)

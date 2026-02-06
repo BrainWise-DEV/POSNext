@@ -1862,15 +1862,14 @@ async function handlePaymentCompleted(paymentData) {
 			return;
 		}
 
-		// Batch-assign payments in a single reactive write (avoids per-push reactivity)
-		cartStore.payments = (paymentData.payments || []).map((p) => ({
+		// Prepare payment data without reactive assignment to avoid triggering
+		// offer watchers (subtotal recalculation from payment changes)
+		const mappedPayments = (paymentData.payments || []).map((p) => ({
 			mode_of_payment: p.mode_of_payment,
 			amount: p.amount,
 			type: p.type,
 		}));
-
-		// Store sales team data if provided
-		cartStore.salesTeam = Array.isArray(paymentData.sales_team) ? paymentData.sales_team : [];
+		const mappedSalesTeam = Array.isArray(paymentData.sales_team) ? paymentData.sales_team : [];
 
 		// Set delivery date for Sales Orders
 		if (paymentData.delivery_date) {
@@ -1886,6 +1885,10 @@ async function handlePaymentCompleted(paymentData) {
 		const draftIdToDelete = cartStore.currentDraftId;
 
 		if (offlineStore.isOffline) {
+			// For offline mode, assign reactively since we're not submitting to server
+			cartStore.payments = mappedPayments;
+			cartStore.salesTeam = mappedSalesTeam;
+
 			// Use the same item transformation as online flow for consistency
 			// This ensures rate, discount_percentage, discount_amount, and pricing_rules
 			// are all correctly formatted for ERPNext
@@ -1925,7 +1928,12 @@ async function handlePaymentCompleted(paymentData) {
 			// Get item codes from cart before clearing
 			const soldItemCodes = cartStore.invoiceItems.map((item) => item.item_code);
 
-			const result = await cartStore.submitInvoice();
+			// Pass payment data directly to submitInvoice to bypass reactive assignment
+			// This prevents the offer watcher from firing during the submission pipeline
+			const result = await cartStore.submitInvoice({
+				payments: mappedPayments,
+				salesTeam: mappedSalesTeam,
+			});
 
 			if (result) {
 				const invoiceName = result.name || result.message?.name || __("Unknown");
