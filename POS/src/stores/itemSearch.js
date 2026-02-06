@@ -782,7 +782,12 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 			}) : Promise.resolve(0)
 
 			const stats = await cacheStatsPromise
-			cacheStats.value = stats
+			// Preserve totalServerItems from previous sync (getCacheStats doesn't include it)
+			const prevTotalServerItems = cacheStats.value?.totalServerItems
+			cacheStats.value = {
+				...stats,
+				...(prevTotalServerItems ? { totalServerItems: prevTotalServerItems } : {}),
+			}
 			cacheReady.value = stats.cacheReady
 
 			// ====================================================================
@@ -815,8 +820,8 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 							replaceAllItems(cached)
 							totalItemsLoaded.value = cached.length
 							currentOffset.value = cached.length
-							// Use cache stats for total count (IndexedDB has all items)
-							totalServerItems.value = stats.items
+							// Use server count if available (excludes variants), fallback to IndexedDB count
+							totalServerItems.value = cacheStats.value?.totalServerItems || stats.items
 							hasMore.value = cached.length >= limit
 							log.success(`Loaded ${cached.length} items from cache (offline, total: ${stats.items})`)
 
@@ -874,8 +879,8 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 						replaceAllItems(cached)
 						totalItemsLoaded.value = cached.length
 						currentOffset.value = cached.length
-						// Use cache stats for total count (IndexedDB has all items synced)
-						totalServerItems.value = stats.items
+						// Use server count if available (excludes variants), fallback to IndexedDB count
+						totalServerItems.value = cacheStats.value?.totalServerItems || stats.items
 						hasMore.value = cached.length >= limit
 						loading.value = false
 						log.success(`Loaded ${cached.length} items from cache (total: ${stats.items})`)
