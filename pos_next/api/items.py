@@ -623,8 +623,42 @@ def get_item_variants(template_item, pos_profile):
 		frappe.throw(_("Error fetching item variants: {0}").format(str(e)))
 
 
+def _get_item_group_with_descendants(item_group):
+	"""Get an item group and all its descendants using nested set model."""
+	if not item_group:
+		return []
+
+	ItemGroup = DocType("Item Group")
+
+	# Get lft, rgt for the item group to find descendants
+	group_data = (
+		frappe.qb.from_(ItemGroup)
+		.select(ItemGroup.lft, ItemGroup.rgt, ItemGroup.is_group)
+		.where(ItemGroup.name == item_group)
+		.run(as_dict=True)
+	)
+
+	if not group_data:
+		return [item_group]
+
+	group = group_data[0]
+	if not group.is_group:
+		return [item_group]
+
+	# Get all descendants using lft/rgt range
+	descendants = (
+		frappe.qb.from_(ItemGroup)
+		.select(ItemGroup.name)
+		.where(ItemGroup.lft > group.lft)
+		.where(ItemGroup.rgt < group.rgt)
+		.run(pluck="name")
+	)
+
+	return [item_group] + list(descendants)
+
+
 def _build_item_base_conditions(pos_profile_doc, item_group=None):
-	"""Build reusable SQL conditions for POS item search."""
+	"""Build base SQL conditions for POS item search with hierarchical item group support."""
 	conditions = [
 		"i.disabled = 0",
 		"i.is_sales_item = 1",
@@ -633,12 +667,14 @@ def _build_item_base_conditions(pos_profile_doc, item_group=None):
 	params = []
 
 	if pos_profile_doc.company:
-		conditions.append("(IFNULL(custom_company, '') IN (%s, ''))")
+		conditions.append("IFNULL(i.custom_company, '') IN (%s, '')")
 		params.append(pos_profile_doc.company)
 
 	if item_group:
-		conditions.append("item_group = %s")
-		params.append(item_group)
+		item_groups = _get_item_group_with_descendants(item_group)
+		placeholders = ", ".join(["%s"] * len(item_groups))
+		conditions.append(f"i.item_group IN ({placeholders})")
+		params.extend(item_groups)
 
 	return conditions, params
 
@@ -1289,6 +1325,183 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20)
 
 
 @frappe.whitelist()
+def get_items_bulk(pos_profile, item_groups=None, start=0, limit=2000):
+	"""
+	Fetch items from multiple item groups in a SINGLE query.
+	Eliminates N+1 problem where frontend was making one API call per group.
+
+	Args:
+		pos_profile: POS Profile name
+		item_groups: JSON array of item group names (optional - if empty, fetch all)
+		start: Offset for pagination (default 0)
+		limit: Max items to return (default 2000)
+	"""
+	try:
+		if isinstance(item_groups, str):
+			item_groups = json.loads(item_groups) if item_groups else []
+
+		pos_profile_doc = frappe.get_cached_doc("POS Profile", pos_profile)
+
+		# Build conditions - if item_groups provided, expand all with descendants
+		conditions = [
+			"i.disabled = 0",
+			"i.is_sales_item = 1",
+			"IFNULL(i.variant_of, '') = ''",
+		]
+		params = []
+
+		if pos_profile_doc.company:
+			conditions.append("IFNULL(i.custom_company, '') IN (%s, '')")
+			params.append(pos_profile_doc.company)
+
+		if item_groups:
+			# Expand all groups to include their descendants
+			all_groups = set()
+			for group in item_groups:
+				all_groups.update(_get_item_group_with_descendants(group))
+
+			placeholders = ", ".join(["%s"] * len(all_groups))
+			conditions.append(f"i.item_group IN ({placeholders})")
+			params.extend(all_groups)
+
+		item_columns = ",\n\t".join([f"i.{col}" for col in ITEM_RESULT_FIELDS])
+		group_by_columns = ", ".join([f"i.{col.split(' as ')[0]}" for col in ITEM_RESULT_FIELDS])
+
+		where_clause = " AND ".join(conditions)
+		query = f"""
+			SELECT {item_columns},
+				GROUP_CONCAT(DISTINCT ib.barcode) as barcode,
+				GROUP_CONCAT(DISTINCT ib.uom) as barcode_uoms
+			FROM `tabItem` i
+			LEFT JOIN `tabItem Barcode` ib ON ib.parent = i.name
+			WHERE {where_clause}
+			GROUP BY {group_by_columns}
+			ORDER BY i.item_name ASC
+			LIMIT %s OFFSET %s
+		"""
+		params.append(int(limit))
+		params.append(int(start))
+		items = frappe.db.sql(query, tuple(params), as_dict=1)
+
+		if not items:
+			return []
+
+		# Bulk enrichment (same as get_items)
+		item_codes = [item["item_code"] for item in items]
+		conversion_map = defaultdict(dict)
+		uom_map = {}
+		uom_prices_map = {}
+
+		# UOM conversions
+		if item_codes:
+			conversions = frappe.get_all(
+				"UOM Conversion Detail",
+				filters={"parent": ["in", item_codes]},
+				fields=["parent", "uom", "conversion_factor"],
+			)
+			for row in conversions:
+				uom_map.setdefault(row.parent, []).append(
+					{"uom": row.uom, "conversion_factor": row.conversion_factor}
+				)
+				if row.uom:
+					conversion_map[row.parent][row.uom] = row.conversion_factor
+
+		# Prices
+		price_list = pos_profile_doc.selling_price_list
+		if price_list and item_codes:
+			ItemPrice = DocType("Item Price")
+			prices = (
+				frappe.qb.from_(ItemPrice)
+				.select(ItemPrice.item_code, ItemPrice.uom, ItemPrice.price_list_rate)
+				.where(ItemPrice.price_list == price_list)
+				.where(ItemPrice.item_code.isin(item_codes))
+				.where(ItemPrice.selling == 1)
+				.run(as_dict=True)
+			)
+			for p in prices:
+				uom_prices_map.setdefault(p.item_code, {})[p.uom] = flt(p.price_list_rate)
+
+		# Stock
+		warehouse = pos_profile_doc.warehouse
+		stock_map = {}
+		if warehouse and item_codes:
+			warehouses = [warehouse]
+			if frappe.db.get_value("Warehouse", warehouse, "is_group"):
+				warehouses = frappe.db.get_descendants("Warehouse", warehouse) or []
+
+			Bin = DocType("Bin")
+			stock_data = (
+				frappe.qb.from_(Bin)
+				.select(Bin.item_code, fn.Sum(Bin.actual_qty).as_("qty"))
+				.where(Bin.item_code.isin(item_codes))
+				.where(Bin.warehouse.isin(warehouses))
+				.groupby(Bin.item_code)
+				.run(as_dict=True)
+			)
+			stock_map = {s.item_code: flt(s.qty) for s in stock_data}
+
+		# Enrich items
+		for item in items:
+			item_code = item["item_code"]
+			stock_uom = item.get("stock_uom")
+
+			# Price
+			prices = uom_prices_map.get(item_code, {})
+			item["rate"] = prices.get(stock_uom, 0)
+			item["price_list_rate"] = item["rate"]
+			item["uom"] = stock_uom
+			item["price_uom"] = stock_uom
+			item["conversion_factor"] = 1
+			item["price_list_rate_price_uom"] = item["rate"]
+
+			# Stock
+			item["actual_qty"] = stock_map.get(item_code, 0)
+			item["warehouse"] = warehouse
+
+			# UOMs
+			all_uoms = uom_map.get(item_code, []) or []
+			item["item_uoms"] = [u for u in all_uoms if u.get("uom") != stock_uom]
+			item["uom_prices"] = prices
+
+		return items
+	except Exception as e:
+		frappe.log_error(frappe.get_traceback(), "Get Items Bulk Error")
+		frappe.throw(_("Error fetching items: {0}").format(str(e)))
+
+
+@frappe.whitelist()
+def get_items_count(pos_profile, item_group=None):
+	"""
+	Get total count of POS-eligible items for progress tracking and smart pagination.
+
+	Uses the same filtering logic as get_items (via _build_item_base_conditions)
+	to ensure consistent results. Lightweight — no enrichment, just COUNT.
+
+	Args:
+		pos_profile: POS Profile name
+		item_group: Optional item group filter (expands to descendants)
+
+	Returns:
+		int: Total count of distinct matching items
+	"""
+	try:
+		pos_profile_doc = frappe.get_cached_doc("POS Profile", pos_profile)
+		conditions, params = _build_item_base_conditions(pos_profile_doc, item_group)
+
+		where_clause = " AND ".join(conditions)
+		query = f"""
+			SELECT COUNT(DISTINCT i.name) as total
+			FROM `tabItem` i
+			WHERE {where_clause}
+		"""
+		result = frappe.db.sql(query, tuple(params), as_dict=1)
+		return result[0].total if result else 0
+	except Exception as e:
+		frappe.log_error(frappe.get_traceback(), "Get Items Count Error")
+		frappe.throw(_("Error fetching items count: {0}").format(str(e)))
+
+
+@frappe.whitelist()
 def get_item_details(item_code, pos_profile, customer=None, qty=1, uom=None):  # noqa: ARG001 - customer reserved for future use
 	"""Get detailed item info including price, tax, stock"""
 	try:
@@ -1340,30 +1553,49 @@ def get_item_details(item_code, pos_profile, customer=None, qty=1, uom=None):  #
 
 @frappe.whitelist()
 def get_item_groups(pos_profile):
-	"""Get item groups for filtering"""
+	"""Get item groups configured in POS Profile with hierarchy info for filtering."""
+	cache_key = f"pos_item_groups:{pos_profile}"
+	cached = frappe.cache().get_value(cache_key)
+	if cached:
+		return cached
+
 	try:
-		# Get item groups from POS Profile's item groups table using Query Builder
 		POSItemGroup = DocType("POS Item Group")
-		item_groups = (
+		ItemGroup = DocType("Item Group")
+
+		configured_groups = (
 			frappe.qb.from_(POSItemGroup)
 			.select(POSItemGroup.item_group)
 			.distinct()
 			.where(POSItemGroup.parent == pos_profile)
 			.orderby(POSItemGroup.item_group)
-			.run(as_dict=True)
+			.run(pluck="item_group")
 		)
 
-		# If no item groups defined in POS Profile, get all item groups
-		if not item_groups:
-			item_groups = frappe.get_list(
-				"Item Group",
-				filters={"is_group": 0},
-				fields=["name as item_group"],
-				order_by="name",
-				limit_page_length=50,
+		if not configured_groups:
+			result = (
+				frappe.qb.from_(ItemGroup)
+				.select(ItemGroup.name.as_("item_group"))
+				.where(ItemGroup.is_group == 0)
+				.orderby(ItemGroup.name)
+				.limit(50)
+				.run(as_dict=True)
 			)
+			frappe.cache().set_value(cache_key, result, expires_in_sec=300)
+			return result
 
-		return item_groups
+		result = []
+		for group_name in configured_groups:
+			descendants = _get_item_group_with_descendants(group_name)
+			result.append({
+				"item_group": group_name,
+				"is_group": len(descendants) > 1,
+				"child_groups": descendants[1:] if len(descendants) > 1 else [],
+			})
+
+		frappe.cache().set_value(cache_key, result, expires_in_sec=300)
+		return result
+
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Item Groups Error")
 		frappe.throw(_("Error fetching item groups: {0}").format(str(e)))

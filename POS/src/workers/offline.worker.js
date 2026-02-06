@@ -476,11 +476,11 @@ async function updateLocalStock(items) {
  * @param {number} limit - Max results
  * @returns {Promise<Array>} Matching items
  */
-async function searchCachedItems(searchTerm = "", limit = 50) {
+async function searchCachedItems(searchTerm = "", limit = 50, offset = 0) {
 	const startTime = performance.now()
 
 	// Check cache first (5-10x faster for repeated queries)
-	const cacheKey = `search:${searchTerm}:${limit}`
+	const cacheKey = `search:${searchTerm}:${limit}:${offset}`
 	const cached = getCachedQuery(cacheKey)
 	if (cached) {
 		log.debug("Cache hit for search", { searchTerm })
@@ -490,10 +490,12 @@ async function searchCachedItems(searchTerm = "", limit = 50) {
 	try {
 		const db = await initDB()
 
-		// Empty search - return top N items (excluding disabled items)
+		// Empty search - return top N items sorted alphabetically (excluding disabled items)
 		if (!searchTerm || searchTerm.trim().length === 0) {
 			const results = await db.table("items")
+				.orderBy("item_name")
 				.filter(item => !item.disabled)
+				.offset(offset)
 				.limit(limit)
 				.toArray()
 			cacheQueryResult(cacheKey, results)
@@ -1433,7 +1435,7 @@ self.onmessage = async (event) => {
 				break
 
 			case "SEARCH_ITEMS":
-				result = await searchCachedItems(payload.searchTerm, payload.limit)
+				result = await searchCachedItems(payload.searchTerm, payload.limit, payload.offset || 0)
 				break
 
 			case "SEARCH_CUSTOMERS":

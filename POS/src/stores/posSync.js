@@ -246,10 +246,19 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 	 * Preload data for offline use (payment methods, customers)
 	 * @param {Object} currentProfile - Current POS profile
 	 */
+	let _preloadingProfile = null
 	async function preloadDataForOffline(currentProfile) {
 		if (!currentProfile || isOffline.value) {
 			return
 		}
+
+		// Prevent duplicate concurrent preloads (e.g., from component remounts
+		// triggered by language/translation version changes)
+		if (_preloadingProfile === currentProfile.name) {
+			log.debug('Preload already in progress for this profile, skipping duplicate')
+			return
+		}
+		_preloadingProfile = currentProfile.name
 
 		try {
 			const cacheReady = await checkCacheReady()
@@ -335,6 +344,8 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 		} catch (error) {
 			log.error('Failed to preload offline data', error)
 			showWarning(__("Some data may not be available offline"))
+		} finally {
+			_preloadingProfile = null
 		}
 	}
 

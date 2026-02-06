@@ -402,8 +402,8 @@ class OfflineWorkerClient {
 		return this.sendMessage("SAVE_INVOICE", { invoiceData })
 	}
 
-	async searchCachedItems(searchTerm = "", limit = 50) {
-		return this.sendMessage("SEARCH_ITEMS", { searchTerm, limit })
+	async searchCachedItems(searchTerm = "", limit = 50, offset = 0) {
+		return this.sendMessage("SEARCH_ITEMS", { searchTerm, limit, offset })
 	}
 
 	async searchCachedCustomers(searchTerm = "", limit = 20) {

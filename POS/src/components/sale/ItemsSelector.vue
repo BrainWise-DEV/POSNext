@@ -233,17 +233,17 @@
 			</div>
 		</div>
 
-		<!-- Initial Loading State - Only for first load -->
-		<div v-if="loading && !filteredItems" class="flex-1 flex items-center justify-center p-3">
+		<!-- Initial Loading State - Show spinner while fetching items -->
+		<div v-if="loading && (!filteredItems || filteredItems.length === 0)" class="flex-1 flex items-center justify-center p-3">
 			<div class="text-center py-8">
 				<div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
 				<p class="mt-3 text-xs text-gray-500">{{ __('Loading items...') }}</p>
 			</div>
 		</div>
 
-		<!-- Empty State - Simple, no animation -->
+		<!-- Empty State - Only show when NOT loading and truly no items -->
 		<div
-			v-else-if="(!filteredItems || filteredItems.length === 0)"
+			v-else-if="!loading && (!filteredItems || filteredItems.length === 0)"
 			class="flex-1 flex items-center justify-center p-3"
 		>
 			<div class="text-center py-8">
@@ -278,7 +278,7 @@
 			>
 				<div class="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-1.5 sm:gap-2.5">
 					<div
-						v-for="item in paginatedItems"
+						v-for="item in displayedItems"
 						:key="item.item_code"
 						@touchstart.passive="getOptimizedClickHandler(item).touchstart"
 						@touchmove.passive="getOptimizedClickHandler(item).touchmove"
@@ -393,8 +393,8 @@
 					<p class="ms-2 text-xs text-gray-500">{{ __('Loading more items...') }}</p>
 				</div>
 
-				<!-- End of Results Indicator - Only show on last page or when all items fit in one page -->
-				<div v-else-if="!hasMore && filteredItems.length > 0 && !searchTerm && (currentPage === totalPages || totalPages === 1)" class="flex justify-center items-center py-3">
+				<!-- End of Results Indicator - Show on last page when no more data -->
+				<div v-else-if="filteredItems.length > 0 && !searchTerm && currentPage === totalPages && totalPages >= 1" class="flex justify-center items-center py-3">
 					<p class="text-xs text-gray-400">{{ __('All items loaded') }}</p>
 				</div>
 
@@ -410,8 +410,8 @@
 					<div class="text-[10px] sm:text-xs text-gray-600 order-2 sm:order-1">
 						{{ __('{0} - {1} of {2}', [
 							(((currentPage - 1) * itemsPerPage) + 1),
-							Math.min(currentPage * itemsPerPage, filteredItems.length),
-							filteredItems.length
+							Math.min(currentPage * itemsPerPage, paginationTotal),
+							paginationTotal
 						]) }}
 					</div>
 					<div class="flex items-center gap-1 order-1 sm:order-2">
@@ -427,7 +427,7 @@
 							:aria-label="__('Go to first page')"
 						>
 							<span class="hidden xs:inline">{{ __('First') }}</span>
-							<span class="xs:hidden">«</span>
+							<span class="xs:hidden">&laquo;</span>
 						</button>
 						<button
 							@click="previousPage"
@@ -441,7 +441,7 @@
 							:aria-label="__('Go to previous page')"
 						>
 							<span class="hidden xs:inline">{{ __('Previous') }}</span>
-							<span class="xs:hidden">‹</span>
+							<span class="xs:hidden">&lsaquo;</span>
 						</button>
 						<div class="flex items-center gap-0.5 sm:gap-1">
 							<button
@@ -471,7 +471,7 @@
 							:aria-label="__('Go to next page')"
 						>
 							<span class="hidden xs:inline">{{ __('Next') }}</span>
-							<span class="xs:hidden">›</span>
+							<span class="xs:hidden">&rsaquo;</span>
 						</button>
 						<button
 							@click="goToPage(totalPages)"
@@ -485,7 +485,7 @@
 							:aria-label="__('Go to last page')"
 						>
 							<span class="hidden xs:inline">{{ __('Last') }}</span>
-							<span class="xs:hidden">»</span>
+							<span class="xs:hidden">&raquo;</span>
 						</button>
 					</div>
 				</div>
@@ -499,7 +499,7 @@
 				class="flex-1 overflow-x-auto overflow-y-auto"
 				style="min-height: 0;"
 			>
-				<table v-if="paginatedItems.length > 0" class="min-w-full divide-y divide-gray-200">
+				<table v-if="displayedItems.length > 0" class="min-w-full divide-y divide-gray-200">
 					<thead class="bg-gray-50 sticky top-0 z-10">
 						<tr>
 							<th scope="col" class="px-2 sm:px-3 py-2 sm:py-2.5 text-start text-[10px] sm:text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 w-[50px] sm:w-[60px]">{{ __('Image') }}</th>
@@ -512,7 +512,7 @@
 					</thead>
 					<tbody class="bg-white divide-y divide-gray-200">
 						<tr
-							v-for="item in paginatedItems"
+							v-for="item in displayedItems"
 							:key="item.item_code"
 							@touchstart.passive="getOptimizedClickHandler(item).touchstart"
 							@touchmove.passive="getOptimizedClickHandler(item).touchmove"
@@ -592,8 +592,8 @@
 							</td>
 						</tr>
 
-						<!-- End of Results Indicator Row - Only show on last page or when all items fit in one page -->
-						<tr v-else-if="!hasMore && filteredItems.length > 0 && !searchTerm && (currentPage === totalPages || totalPages === 1)">
+						<!-- End of Results Indicator Row - Show on last page when no more data -->
+						<tr v-else-if="filteredItems.length > 0 && !searchTerm && currentPage === totalPages && totalPages >= 1">
 							<td colspan="6" class="px-2 sm:px-3 py-3 text-center bg-white">
 								<p class="text-xs text-gray-400">{{ __('All items loaded') }}</p>
 							</td>
@@ -615,8 +615,8 @@
 					<div class="text-[10px] sm:text-xs text-gray-600 order-2 sm:order-1">
 						{{ __('{0} - {1} of {2}', [
 							(((currentPage - 1) * itemsPerPage) + 1),
-							Math.min(currentPage * itemsPerPage, filteredItems.length),
-							filteredItems.length
+							Math.min(currentPage * itemsPerPage, paginationTotal),
+							paginationTotal
 						]) }}
 					</div>
 					<div class="flex items-center gap-1 order-1 sm:order-2">
@@ -632,7 +632,7 @@
 							:aria-label="__('Go to first page')"
 						>
 							<span class="hidden xs:inline">{{ __('First') }}</span>
-							<span class="xs:hidden">«</span>
+							<span class="xs:hidden">&laquo;</span>
 						</button>
 						<button
 							@click="previousPage"
@@ -646,7 +646,7 @@
 							:aria-label="__('Go to previous page')"
 						>
 							<span class="hidden xs:inline">{{ __('Previous') }}</span>
-							<span class="xs:hidden">‹</span>
+							<span class="xs:hidden">&lsaquo;</span>
 						</button>
 						<div class="flex items-center gap-0.5 sm:gap-1">
 							<button
@@ -676,7 +676,7 @@
 							:aria-label="__('Go to next page')"
 						>
 							<span class="hidden xs:inline">{{ __('Next') }}</span>
-							<span class="xs:hidden">›</span>
+							<span class="xs:hidden">&rsaquo;</span>
 						</button>
 						<button
 							@click="goToPage(totalPages)"
@@ -690,7 +690,7 @@
 							:aria-label="__('Go to last page')"
 						>
 							<span class="hidden xs:inline">{{ __('Last') }}</span>
-							<span class="xs:hidden">»</span>
+							<span class="xs:hidden">&raquo;</span>
 						</button>
 					</div>
 				</div>
@@ -725,6 +725,7 @@ import {
 	addPassiveListener,
 	runWhenIdle
 } from "@/utils/lowEndOptimizations"
+import { performanceConfig } from "@/utils/performanceConfig"
 
 const props = defineProps({
 	posProfile: String,
@@ -759,6 +760,7 @@ const {
 	cacheStats,
 	sortBy,
 	sortOrder,
+	totalServerItems,
 } = storeToRefs(itemStore)
 
 // Local state
@@ -773,8 +775,8 @@ const userManuallySetView = ref(false) // Track if user manually changed view mo
 const scannerInputDetected = ref(false) // Track if current input is from scanner
 const autoSearchTimer = ref(null) // Timer for auto-search when typing stops
 const lastAutoSwitchCount = ref(0)
-const lastFilterSignature = ref("")
 const showSortDropdown = ref(false) // Sort dropdown visibility
+const skipPageReset = ref(false) // Skip page reset when navigating via pagination
 
 // Warehouse availability dialog state
 const showWarehouseDialog = ref(false)
@@ -789,18 +791,32 @@ const scrollCleanupFns = ref([])
 
 // Pagination state (for client-side display)
 const currentPage = ref(1)
-const itemsPerPage = ref(20)
+const itemsPerPage = ref(performanceConfig.get('itemsPerPage') || 100)
+const lastFilterSignature = ref("")
 
-// Computed paginated items
-// filteredItems is already reactive and includes live stock from stockStore
-const paginatedItems = computed(() => {
+// Computed paginated items — server fetches one page at a time,
+// so filteredItems already contains only the current page's items.
+const displayedItems = computed(() => {
 	if (!filteredItems.value) return []
-	const start = (currentPage.value - 1) * itemsPerPage.value
-	const end = start + itemsPerPage.value
-	return filteredItems.value.slice(start, end)
+	return filteredItems.value
 })
 
+// Total item count for pagination display
+const paginationTotal = computed(() => {
+	if (searchTerm.value?.trim()) return filteredItems.value?.length || 0
+	return totalServerItems.value || filteredItems.value?.length || 0
+})
+
+// Total pages is based on server-side total count (not local array length).
+// During search, fall back to local results since server count is for browsing.
 const totalPages = computed(() => {
+	if (searchTerm.value?.trim()) {
+		// During search, we don't paginate server-side — show all results
+		return 1
+	}
+	if (totalServerItems.value > 0) {
+		return Math.ceil(totalServerItems.value / itemsPerPage.value)
+	}
 	if (!filteredItems.value) return 0
 	return Math.ceil(filteredItems.value.length / itemsPerPage.value)
 })
@@ -881,11 +897,18 @@ watch(
 	{ immediate: true },
 )
 
-// Reset to page 1 when filtered items meaningfully change
+// Reset to page 1 when filtered items meaningfully change (group switch, search, etc.)
+// Skip reset when the change is from pagination navigation (fetchPage)
 watch(
 	filteredItems,
 	(newItems) => {
 		if (!newItems) return
+
+		// Skip page reset for pagination-driven changes
+		if (skipPageReset.value) {
+			skipPageReset.value = false
+			return
+		}
 
 		const itemCount = newItems.length
 		const firstCode = itemCount > 0 ? newItems[0]?.item_code || "" : ""
@@ -922,27 +945,10 @@ watch(
 // Throttle scroll handler for better performance
 let scrollTimeout = null
 
-// Optimized scroll handler using RAF throttling
-const handleScrollRAF = throttleRAF((event) => {
-	const container = event.target
-	const scrollPosition = container.scrollTop + container.clientHeight
-	const scrollHeight = container.scrollHeight
-	const threshold = 200
-
-	const isSearching = searchTerm.value && searchTerm.value.trim().length > 0
-
-	if (
-		!isSearching &&
-		scrollHeight - scrollPosition < threshold &&
-		hasMore.value &&
-		!loadingMore.value &&
-		!loading.value
-	) {
-		// Use runWhenIdle to load more items without blocking scroll
-		runWhenIdle(() => {
-			itemStore.loadMoreItems()
-		}, { timeout: 1000 })
-	}
+// Scroll handler — pagination controls handle page navigation now.
+// Scroll is only used for scrolling within the current page.
+const handleScrollRAF = throttleRAF(() => {
+	// No-op: pagination handles page navigation via goToPage/nextPage/previousPage
 })
 
 function handleScroll(event) {
@@ -1309,22 +1315,28 @@ function setViewMode(mode) {
 	userManuallySetView.value = true
 }
 
-// Pagination functions
+// Pagination functions — each page fetches fresh data from server
 function goToPage(page) {
-	if (page >= 1 && page <= totalPages.value) {
+	if (page >= 1 && page <= totalPages.value && page !== currentPage.value) {
+		skipPageReset.value = true
 		currentPage.value = page
+		itemStore.fetchPage(page)
 	}
 }
 
 function nextPage() {
 	if (currentPage.value < totalPages.value) {
+		skipPageReset.value = true
 		currentPage.value++
+		itemStore.fetchPage(currentPage.value)
 	}
 }
 
 function previousPage() {
 	if (currentPage.value > 1) {
+		skipPageReset.value = true
 		currentPage.value--
+		itemStore.fetchPage(currentPage.value)
 	}
 }
 

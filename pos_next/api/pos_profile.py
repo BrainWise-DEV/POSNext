@@ -30,7 +30,7 @@ def get_pos_profiles():
 
 @frappe.whitelist()
 def get_pos_profile_data(pos_profile):
-	"""Get detailed POS Profile data"""
+	"""Get detailed POS Profile data with hierarchical item groups for instant UI rendering."""
 	if not pos_profile:
 		frappe.throw(_("POS Profile is required"))
 
@@ -49,10 +49,16 @@ def get_pos_profile_data(pos_profile):
 	# Get POS Settings for this profile
 	pos_settings = get_pos_settings(pos_profile)
 
+	# Get hierarchical item groups (with child_groups info) in same call
+	# This eliminates a separate API call to get_item_groups
+	from pos_next.api.items import get_item_groups
+	item_groups_with_hierarchy = get_item_groups(pos_profile)
+
 	return {
 		"pos_profile": profile_doc,
 		"company": company_doc,
 		"pos_settings": pos_settings,
+		"item_groups_hierarchy": item_groups_with_hierarchy,  # NEW: includes child_groups
 		"print_settings": {
 			"auto_print": profile_doc.get("print_receipt_on_order_complete", 0),
 			"print_format": profile_doc.get("print_format"),
