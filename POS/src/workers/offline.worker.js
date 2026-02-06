@@ -1099,13 +1099,17 @@ async function getCacheStats() {
 	try {
 		const db = await initDB()
 
-		const [itemCount, customerCount, queuedInvoices, lastSyncSetting] =
+		const [totalCount, variantCount, customerCount, queuedInvoices, lastSyncSetting] =
 			await Promise.all([
 				db.table("items").count(),
+				// Count variant items (have non-empty variant_of field)
+				db.table("items").where("variant_of").notEqual("").count(),
 				db.table("customers").count(),
 				getOfflineInvoiceCount(),
 				db.table("settings").get("items_last_sync"),
 			])
+		// Exclude variants from display count (they're cached for template item lookups)
+		const itemCount = totalCount - variantCount
 
 		return {
 			items: itemCount,

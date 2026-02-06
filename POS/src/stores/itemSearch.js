@@ -782,7 +782,12 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 			}) : Promise.resolve(0)
 
 			const stats = await cacheStatsPromise
-			cacheStats.value = stats
+			// Preserve totalServerItems from previous sync (getCacheStats doesn't include it)
+			const prevTotalServerItems = cacheStats.value?.totalServerItems
+			cacheStats.value = {
+				...stats,
+				...(prevTotalServerItems ? { totalServerItems: prevTotalServerItems } : {}),
+			}
 			cacheReady.value = stats.cacheReady
 
 			// ====================================================================
@@ -815,8 +820,8 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 							replaceAllItems(cached)
 							totalItemsLoaded.value = cached.length
 							currentOffset.value = cached.length
-							// Use cache stats for total count (IndexedDB has all items)
-							totalServerItems.value = stats.items
+							// Use server count if available (excludes variants), fallback to IndexedDB count
+							totalServerItems.value = cacheStats.value?.totalServerItems || stats.items
 							hasMore.value = cached.length >= limit
 							log.success(`Loaded ${cached.length} items from cache (offline, total: ${stats.items})`)
 
@@ -874,8 +879,8 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 						replaceAllItems(cached)
 						totalItemsLoaded.value = cached.length
 						currentOffset.value = cached.length
-						// Use cache stats for total count (IndexedDB has all items synced)
-						totalServerItems.value = stats.items
+						// Use server count if available (excludes variants), fallback to IndexedDB count
+						totalServerItems.value = cacheStats.value?.totalServerItems || stats.items
 						hasMore.value = cached.length >= limit
 						loading.value = false
 						log.success(`Loaded ${cached.length} items from cache (total: ${stats.items})`)
@@ -899,8 +904,8 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 			// ----------------------------------------------------------------
 			// DYNAMIC PAGINATION: Adapt initial load to catalog size
 			// ----------------------------------------------------------------
-			// Small catalogs (<=500): Load everything, skip background sync
-			// Large catalogs (>500): Load first 100, background sync the rest
+			// Small catalogs (<=1000): Load everything, skip background sync
+			// Large catalogs (>1000): Load first 100, background sync the rest
 			// countPromise was already fired in parallel with cache stats above
 			const totalItemCount = await countPromise
 			totalServerItems.value = totalItemCount
@@ -909,7 +914,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 			}
 
 			// Determine initial load size based on catalog size
-			const SMALL_CATALOG_THRESHOLD = 500
+			const SMALL_CATALOG_THRESHOLD = 1000
 			const isSmallCatalog = totalItemCount > 0 && totalItemCount <= SMALL_CATALOG_THRESHOLD
 			const INITIAL_LIMIT = isSmallCatalog ? totalItemCount : itemsPerPage.value
 
@@ -918,7 +923,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 			// ----------------------------------------------------------------
 			// Load ONLY first batch from first group. Other groups load on-demand
 			// when user clicks the tab. This prevents loading 65K items at once.
-			if (hasFilters) {
+			if (hasFilters && selectedItemGroup.value) {
 				log.debug(`Fetching first ${INITIAL_LIMIT} items (${isSmallCatalog ? 'small catalog — loading all' : 'large catalog mode'})`)
 
 				// Load items from first group only - other groups load on tab click
@@ -1018,7 +1023,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 				// Start background sync for large catalogs to cache ALL items to IndexedDB
 				// Small catalogs already loaded everything
 				if (!isSmallCatalog) {
-					startBackgroundCacheSync(profile, [])
+					startBackgroundCacheSync(profile, [], list.length)
 				}
 			}
 		} catch (error) {
@@ -1306,7 +1311,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 	 * @param {string} profile - POS Profile name
 	 * @param {Array} filterGroups - Item group filters from POS Profile (optional)
 	 */
-	async function startBackgroundCacheSync(profile, filterGroups = []) {
+	async function startBackgroundCacheSync(profile, filterGroups = [], initialOffset = 0) {
 		// Cancel any previous sync and start fresh
 		syncGeneration++
 		const myGeneration = syncGeneration
@@ -1329,6 +1334,9 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 
 		// Track unique items to avoid double-counting from overlapping groups
 		const uniqueItemsSeen = new Set()
+
+		// For unfiltered sync: start from where initial load left off
+		let syncOffset = initialOffset
 
 		// For filtered sync: track progress per group
 		let groupIndex = 0
@@ -1395,15 +1403,19 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 						}
 					} else {
 						// UNFILTERED SYNC: Fetch all items with pagination
+						// Use syncOffset to skip items already loaded in initial fetch
 						response = await call("pos_next.api.items.get_items", {
 							pos_profile: profile,
 							search_term: "",
 							item_group: null,
-							start: uniqueItemsSeen.size,
+							start: syncOffset,
 							limit: batchSize,
 						})
 						if (myGeneration !== syncGeneration) return
 						list = response?.message || response || []
+
+						// Advance offset for next batch
+						syncOffset += list.length
 
 						// Check if we've reached the end
 						if (list.length < batchSize) {
@@ -1432,12 +1444,14 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 						consecutiveErrors = 0 // Reset on success
 
 						// Update stats EVERY batch for smooth progress indicator
+						// Include initialOffset to account for items already loaded before sync
+						const totalCached = initialOffset + uniqueItemsSeen.size
 						const syncProgress = totalServerItems > 0
-							? Math.round((uniqueItemsSeen.size / totalServerItems) * 100)
+							? Math.round((totalCached / totalServerItems) * 100)
 							: null
 						cacheStats.value = {
 							...cacheStats.value,
-							items: uniqueItemsSeen.size,
+							items: totalCached,
 							totalServerItems,
 							syncProgress,
 							lastSync: new Date().toISOString()
@@ -1447,7 +1461,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 						// Log progress every 10 batches (5000 items)
 						if (batchCount % 10 === 0) {
 							const progressStr = syncProgress != null ? ` (${syncProgress}%)` : ''
-							log.info(`Sync progress: ${uniqueItemsSeen.size} items cached${progressStr} (${batchCount} batches)`)
+							log.info(`Sync progress: ${totalCached} items cached${progressStr} (${batchCount} batches)`)
 						}
 
 						// Cache variants in background (don't await - fire and forget)
@@ -1476,17 +1490,18 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 
 			// Sync complete!
 			const finalStats = await offlineWorker.getCacheStats()
+			const finalCached = initialOffset + uniqueItemsSeen.size
 			cacheStats.value = {
 				...finalStats,
 				totalServerItems,
-				syncProgress: totalServerItems > 0 ? Math.round((uniqueItemsSeen.size / totalServerItems) * 100) : null,
+				syncProgress: totalServerItems > 0 ? Math.round((finalCached / totalServerItems) * 100) : null,
 			}
 			cacheReady.value = true
 			cacheSyncing.value = false
-			log.success(`Background sync COMPLETE - ${uniqueItemsSeen.size} unique items cached in ${batchCount} batches`)
+			log.success(`Background sync COMPLETE - ${finalCached} items cached in ${batchCount} batches`)
 
 			// Cache batch/serial data after items are synced (in background)
-			if (shiftStore.profileWarehouse && uniqueItemsSeen.size > 0) {
+			if (shiftStore.profileWarehouse && finalCached > 0) {
 				log.info("Starting batch/serial data sync...")
 				// This runs in background, don't await
 				offlineWorker.searchCachedItems("", 10000).then(async (items) => {
