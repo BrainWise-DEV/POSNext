@@ -346,10 +346,13 @@ class OfflineWorkerClient {
 				return 0
 			case "GET_INVOICES":
 			case "SEARCH_ITEMS":
+			case "SEARCH_ITEMS_BY_GROUP":
 			case "SEARCH_CUSTOMERS":
 			case "GET_PAYMENT_METHODS":
 			case "GET_CACHED_OFFERS":
 				return []
+			case "COUNT_ITEMS_BY_GROUP":
+				return 0
 			case "IS_CACHE_READY":
 				return false
 			case "GET_CACHE_STATS":
@@ -404,6 +407,14 @@ class OfflineWorkerClient {
 
 	async searchCachedItems(searchTerm = "", limit = 50, offset = 0) {
 		return this.sendMessage("SEARCH_ITEMS", { searchTerm, limit, offset })
+	}
+
+	async searchCachedItemsByGroup(itemGroups = [], limit = 50, offset = 0) {
+		return this.sendMessage("SEARCH_ITEMS_BY_GROUP", { itemGroups, limit, offset })
+	}
+
+	async countCachedItemsByGroup(itemGroups = []) {
+		return this.sendMessage("COUNT_ITEMS_BY_GROUP", { itemGroups })
 	}
 
 	async searchCachedCustomers(searchTerm = "", limit = 20) {

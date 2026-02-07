@@ -1149,7 +1149,13 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 			// from cache is instant and doesn't require network round-trips
 			if (isOffline() || cacheReady.value) {
 				try {
-					items = await offlineWorker.searchCachedItems("", pageSize, start)
+					// Use group-aware cache query when a specific group is selected
+					if (selectedItemGroup.value) {
+						const groupsToFilter = Array.from(getGroupsToFilter(selectedItemGroup.value))
+						items = await offlineWorker.searchCachedItemsByGroup(groupsToFilter, pageSize, start)
+					} else {
+						items = await offlineWorker.searchCachedItems("", pageSize, start)
+					}
 				} catch (cacheErr) {
 					log.warn(`Cache fetch failed for page ${page}:`, cacheErr.message)
 					items = []
@@ -1198,9 +1204,15 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 			}
 		} catch (error) {
 			log.error(`Error fetching page ${page}`, error)
-			// Network error — try cache as last resort
+			// Network error — try cache as last resort (group-aware)
 			try {
-				const cached = await offlineWorker.searchCachedItems("", pageSize, start)
+				let cached = []
+				if (selectedItemGroup.value) {
+					const groupsToFilter = Array.from(getGroupsToFilter(selectedItemGroup.value))
+					cached = await offlineWorker.searchCachedItemsByGroup(groupsToFilter, pageSize, start)
+				} else {
+					cached = await offlineWorker.searchCachedItems("", pageSize, start)
+				}
 				if (cached && cached.length > 0) {
 					replaceAllItems(cached)
 					currentOffset.value = start + cached.length
@@ -1359,6 +1371,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 			if (myGeneration !== syncGeneration) return
 			const countResponse = await call("pos_next.api.items.get_items_count", {
 				pos_profile: profile,
+				include_variants: 1,
 			})
 			totalServerItems = countResponse?.message ?? countResponse ?? 0
 			if (myGeneration !== syncGeneration) return
@@ -1389,6 +1402,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 							item_group: currentGroup,
 							start: groupOffset,
 							limit: batchSize,
+							include_variants: 1,
 						})
 						if (myGeneration !== syncGeneration) return
 						list = response?.message || response || []
@@ -1410,6 +1424,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 							item_group: null,
 							start: syncOffset,
 							limit: batchSize,
+							include_variants: 1,
 						})
 						if (myGeneration !== syncGeneration) return
 						list = response?.message || response || []
@@ -1464,8 +1479,8 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 							log.info(`Sync progress: ${totalCached} items cached${progressStr} (${batchCount} batches)`)
 						}
 
-						// Cache variants in background (don't await - fire and forget)
-						cacheVariantsForTemplates(list.slice(0, 20), profile).catch(() => {})
+						// Note: Variants are included in the sync via include_variants=1,
+						// so no need for separate cacheVariantsForTemplates call here
 
 						// Small delay to not overwhelm server/browser
 						await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS))
@@ -1740,7 +1755,64 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 			loading.value = true
 			try {
 				const pageSize = itemsPerPage.value
+				const offline = isOffline()
 
+				// ================================================================
+				// OFFLINE PATH: Load from IndexedDB cache using item_group index
+				// ================================================================
+				if (offline) {
+					try {
+						let items = []
+						let totalCount = 0
+						if (group) {
+							// Get expanded groups (parent + children)
+							const groupsToFilter = Array.from(getGroupsToFilter(group))
+							const [cached, count] = await Promise.all([
+								offlineWorker.searchCachedItemsByGroup(groupsToFilter, pageSize, 0),
+								offlineWorker.countCachedItemsByGroup(groupsToFilter),
+							])
+							items = cached || []
+							totalCount = count || items.length
+						} else {
+							// "All Items" tab — load first page alphabetically
+							const [cached, stats] = await Promise.all([
+								offlineWorker.searchCachedItems("", pageSize, 0),
+								offlineWorker.getCacheStats(),
+							])
+							items = cached || []
+							totalCount = stats?.totalServerItems || stats?.items || items.length
+						}
+
+						if (items.length > 0) {
+							replaceAllItems(items)
+							totalItemsLoaded.value = items.length
+							currentOffset.value = items.length
+							totalServerItems.value = totalCount
+							hasMore.value = items.length >= pageSize
+							log.info(`Loaded ${items.length} cached items for group: ${group || 'All Items'} (offline, total: ${totalCount})`)
+						} else {
+							replaceAllItems([])
+							log.warn(`No cached items for group: ${group || 'All Items'} (offline)`)
+						}
+					} catch (cacheErr) {
+						log.error("Cache load failed for group tab (offline):", cacheErr.message)
+						replaceAllItems([])
+					}
+					loading.value = false
+					// Re-run search with new group context if active
+					if (searchTerm.value?.trim()) {
+						if (searchDebounceTimer) {
+							clearTimeout(searchDebounceTimer)
+							searchDebounceTimer = null
+						}
+						searchItems(searchTerm.value)
+					}
+					return
+				}
+
+				// ================================================================
+				// ONLINE PATH: Fetch from server
+				// ================================================================
 				// Fetch first page + total count in parallel for instant pagination
 				const countPromise = call("pos_next.api.items.get_items_count", {
 					pos_profile: posProfile.value,
@@ -1780,17 +1852,14 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 				} else if (group && cacheSyncing.value) {
 					// Server returned 0 but sync is still caching items — try cache fallback
 					try {
-						const cached = await offlineWorker.searchCachedItems("", 500)
+						const groupsToFilter = Array.from(getGroupsToFilter(group))
+						const cached = await offlineWorker.searchCachedItemsByGroup(groupsToFilter, 500, 0)
 						if (cached && cached.length > 0) {
-							const groupsToFilter = getGroupsToFilter(group)
-							const filtered = cached.filter(i => groupsToFilter.has(i.item_group))
-							if (filtered.length > 0) {
-								replaceAllItems(filtered)
-								totalItemsLoaded.value = filtered.length
-								currentOffset.value = filtered.length
-								hasMore.value = false
-								log.info(`Loaded ${filtered.length} cached items for group: ${group} (sync in progress)`)
-							}
+							replaceAllItems(cached)
+							totalItemsLoaded.value = cached.length
+							currentOffset.value = cached.length
+							hasMore.value = false
+							log.info(`Loaded ${cached.length} cached items for group: ${group} (sync in progress)`)
 						}
 					} catch (cacheErr) {
 						log.warn("Cache fallback for group tab failed:", cacheErr.message)
@@ -1798,6 +1867,35 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 				}
 			} catch (error) {
 				log.error(`Failed to load items for group ${group || 'All Items'}`, error)
+
+				// Network error — try cache as fallback
+				try {
+					const pageSize = itemsPerPage.value
+					let items = []
+					let totalCount = 0
+					if (group) {
+						const groupsToFilter = Array.from(getGroupsToFilter(group))
+						const [cached, count] = await Promise.all([
+							offlineWorker.searchCachedItemsByGroup(groupsToFilter, pageSize, 0),
+							offlineWorker.countCachedItemsByGroup(groupsToFilter),
+						])
+						items = cached || []
+						totalCount = count || items.length
+					} else {
+						items = await offlineWorker.searchCachedItems("", pageSize, 0) || []
+						totalCount = items.length
+					}
+					if (items.length > 0) {
+						replaceAllItems(items)
+						totalItemsLoaded.value = items.length
+						currentOffset.value = items.length
+						totalServerItems.value = totalCount
+						hasMore.value = items.length >= pageSize
+						log.info(`Loaded ${items.length} cached items for group: ${group || 'All Items'} (network error fallback)`)
+					}
+				} catch (cacheErr) {
+					log.warn("Cache fallback after network error failed:", cacheErr.message)
+				}
 			} finally {
 				loading.value = false
 			}

@@ -490,11 +490,12 @@ async function searchCachedItems(searchTerm = "", limit = 50, offset = 0) {
 	try {
 		const db = await initDB()
 
-		// Empty search - return top N items sorted alphabetically (excluding disabled items)
+		// Empty search - return top N items sorted alphabetically
+		// Exclude disabled and variant items (variants are shown via template selector, not in grid)
 		if (!searchTerm || searchTerm.trim().length === 0) {
 			const results = await db.table("items")
 				.orderBy("item_name")
-				.filter(item => !item.disabled)
+				.filter(item => !item.disabled && !item.variant_of)
 				.offset(offset)
 				.limit(limit)
 				.toArray()
@@ -590,6 +591,94 @@ async function searchCachedItems(searchTerm = "", limit = 50, offset = 0) {
 		recordMetric('searchCachedItems', performance.now() - startTime, true)
 		log.error("Error searching cached items", error)
 		return []
+	}
+}
+
+/**
+ * Search cached items filtered by item groups.
+ * Uses the item_group index for efficient lookup.
+ *
+ * @param {string[]} itemGroups - Array of item group names to filter by
+ * @param {number} limit - Max results
+ * @param {number} offset - Offset for pagination
+ * @returns {Promise<Array>} Matching items sorted by item_name
+ */
+async function searchCachedItemsByGroup(itemGroups = [], limit = 50, offset = 0) {
+	const startTime = performance.now()
+
+	if (!itemGroups || itemGroups.length === 0) {
+		return searchCachedItems("", limit, offset)
+	}
+
+	const cacheKey = `group:${itemGroups.sort().join(",")}:${limit}:${offset}`
+	const cached = getCachedQuery(cacheKey)
+	if (cached) {
+		log.debug("Cache hit for group search", { itemGroups })
+		return cached
+	}
+
+	try {
+		const db = await initDB()
+
+		// Use item_group index for efficient lookup
+		// Exclude variant items (variant_of is set) — only show templates + regular items
+		let allResults = []
+		for (const group of itemGroups) {
+			const items = await db.table("items")
+				.where("item_group")
+				.equals(group)
+				.filter(item => !item.disabled && !item.variant_of)
+				.toArray()
+			allResults.push(...items)
+		}
+
+		// Sort by item_name for consistent ordering
+		allResults.sort((a, b) => (a.item_name || "").localeCompare(b.item_name || ""))
+
+		// Apply pagination
+		const paginated = allResults.slice(offset, offset + limit)
+
+		const duration = Math.round(performance.now() - startTime)
+		recordMetric('searchCachedItemsByGroup', duration, false)
+		log.debug(`Group search: ${paginated.length} items from ${itemGroups.length} groups in ${duration}ms`)
+
+		cacheQueryResult(cacheKey, paginated)
+		return paginated
+
+	} catch (error) {
+		recordMetric('searchCachedItemsByGroup', performance.now() - startTime, true)
+		log.error("Error searching cached items by group", error)
+		return []
+	}
+}
+
+/**
+ * Count cached items filtered by item groups.
+ * Uses the item_group index for efficient counting.
+ *
+ * @param {string[]} itemGroups - Array of item group names to count
+ * @returns {Promise<number>} Total count of items in the specified groups
+ */
+async function countCachedItemsByGroup(itemGroups = []) {
+	try {
+		const db = await initDB()
+
+		if (!itemGroups || itemGroups.length === 0) {
+			return await db.table("items").filter(item => !item.disabled && !item.variant_of).count()
+		}
+
+		let total = 0
+		for (const group of itemGroups) {
+			total += await db.table("items")
+				.where("item_group")
+				.equals(group)
+				.filter(item => !item.disabled && !item.variant_of)
+				.count()
+		}
+		return total
+	} catch (error) {
+		log.error("Error counting cached items by group", error)
+		return 0
 	}
 }
 
@@ -1440,6 +1529,14 @@ self.onmessage = async (event) => {
 
 			case "SEARCH_ITEMS":
 				result = await searchCachedItems(payload.searchTerm, payload.limit, payload.offset || 0)
+				break
+
+			case "SEARCH_ITEMS_BY_GROUP":
+				result = await searchCachedItemsByGroup(payload.itemGroups, payload.limit, payload.offset || 0)
+				break
+
+			case "COUNT_ITEMS_BY_GROUP":
+				result = await countCachedItemsByGroup(payload.itemGroups)
 				break
 
 			case "SEARCH_CUSTOMERS":
