@@ -226,13 +226,13 @@
 					<!-- Refresh -->
 					<ActionButton
 						:icon="refreshIcon"
-						:title="isRefreshing ? __('Refreshing...') : __('Refresh Items')"
+						:title="isRefreshing ? __('Refreshing...') : __('Refresh')"
 						@click="$emit('refresh-click')"
 						:class="[
 							'touch-manipulation p-1 sm:p-2',
 							isRefreshing ? 'animate-spin' : ''
 						]"
-						:aria-label="isRefreshing ? __('Refreshing items...') : __('Refresh items list')"
+						:aria-label="isRefreshing ? __('Refreshing...') : __('Refresh items and customers')"
 					/>
 
 					<div class="w-px h-4 sm:h-6 bg-gray-200 hidden md:block"></div>
