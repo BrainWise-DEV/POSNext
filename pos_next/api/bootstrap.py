@@ -43,6 +43,7 @@ def get_initial_data():
 	Returns:
 		dict: {
 			success: bool,
+			site_name: str,
 			locale: str,
 			precision: dict,
 			shift: dict | None,
@@ -59,6 +60,7 @@ def get_initial_data():
 
 	result = {
 		"success": True,
+		"site_name": frappe.local.site,
 		"locale": _get_user_language(),
 		"precision": _get_precision_settings(),
 		"shift": None,

@@ -202,7 +202,12 @@ doc_events = {
 		"validate": "pos_next.validations.validate_item"
 	},
 	"Customer": {
-		"after_insert": "pos_next.api.customers.auto_assign_loyalty_program"
+		"after_insert": [
+			"pos_next.api.customers.auto_assign_loyalty_program",
+			"pos_next.realtime_events.emit_customer_event"
+		],
+		"on_update": "pos_next.realtime_events.emit_customer_event",
+		"on_trash": "pos_next.realtime_events.emit_customer_event"
 	},
 	"Sales Invoice": {
 		"validate": [

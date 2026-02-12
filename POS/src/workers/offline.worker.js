@@ -716,6 +716,25 @@ async function searchCachedCustomers(searchTerm = "", limit = 20) {
 }
 
 /**
+ * Delete customers from cache by their names (primary keys)
+ *
+ * @param {string[]} customerNames - Array of customer names to delete
+ * @returns {Promise<boolean>} Success status
+ */
+async function deleteCustomers(customerNames) {
+	if (!customerNames || customerNames.length === 0) return true
+	try {
+		const db = await initDB()
+		await db.table("customers").bulkDelete(customerNames)
+		log.success(`Deleted ${customerNames.length} customers from cache`)
+		return true
+	} catch (error) {
+		log.error("Error deleting customers from cache", error)
+		throw error
+	}
+}
+
+/**
  * Cache items with transaction batching (10x faster)
  * Uses Dexie transactions for ACID guarantees and batch processing for performance
  *
@@ -1549,6 +1568,10 @@ self.onmessage = async (event) => {
 
 			case "CACHE_CUSTOMERS":
 				result = await cacheCustomersFromServer(payload.customers)
+				break
+
+			case "DELETE_CUSTOMERS":
+				result = await deleteCustomers(payload.customerNames)
 				break
 
 			case "CLEAR_ITEMS_CACHE":

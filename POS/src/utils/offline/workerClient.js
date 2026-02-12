@@ -429,6 +429,10 @@ class OfflineWorkerClient {
 		return this.sendMessage("CACHE_CUSTOMERS", { customers })
 	}
 
+	async deleteCustomers(customerNames) {
+		return this.sendMessage("DELETE_CUSTOMERS", { customerNames })
+	}
+
 	async cachePaymentMethods(paymentMethods) {
 		return this.sendMessage("CACHE_PAYMENT_METHODS", { paymentMethods })
 	}

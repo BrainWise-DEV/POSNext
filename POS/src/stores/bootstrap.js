@@ -84,6 +84,13 @@ export const useBootstrapStore = defineStore("bootstrap", () => {
 	}
 
 	/**
+	 * Get preloaded site name
+	 */
+	function getSiteName() {
+		return data.value?.site_name || null
+	}
+
+	/**
 	 * Get preloaded shift data or null if not available
 	 */
 	function getPreloadedShift() {
@@ -159,5 +166,6 @@ export const useBootstrapStore = defineStore("bootstrap", () => {
 		getPreloadedPrecision,
 		hasBootstrapData,
 		reset,
+		getSiteName,
 	}
 })
