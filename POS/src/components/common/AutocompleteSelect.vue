@@ -38,78 +38,85 @@
 			</div>
 		</div>
 
-		<!-- Dropdown -->
-		<Transition name="dropdown">
-			<div v-if="showDropdown" class="dropdown-menu">
-				<!-- Loading State -->
-				<div v-if="loading" class="dropdown-loading">
-					<div class="loading-spinner"></div>
-					<span>{{ __('Searching...') }}</span>
-				</div>
+		<!-- Dropdown (teleported to body to escape overflow containers) -->
+		<Teleport to="body">
+			<Transition name="dropdown">
+				<div
+					v-if="showDropdown"
+					ref="dropdownRef"
+					class="dropdown-menu"
+					:style="dropdownStyle"
+				>
+					<!-- Loading State -->
+					<div v-if="loading" class="dropdown-loading">
+						<div class="loading-spinner"></div>
+						<span>{{ __('Searching...') }}</span>
+					</div>
 
-				<!-- No Results -->
-				<div v-else-if="filteredOptions.length === 0" class="dropdown-empty">
-					<svg class="empty-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
-					</svg>
-					<span>{{ searchQuery ? __('No results found') : __('No options available') }}</span>
-				</div>
-
-				<!-- Options List -->
-				<div v-else class="dropdown-list">
-					<!-- Clear Selection Option -->
-					<button
-						v-if="!required && modelValue"
-						@click="clearSelection"
-						class="dropdown-item clear-item"
-						type="button"
-					>
-						<svg class="item-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+					<!-- No Results -->
+					<div v-else-if="filteredOptions.length === 0" class="dropdown-empty">
+						<svg class="empty-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
 						</svg>
-						<span>{{ __('Clear selection') }}</span>
-					</button>
+						<span>{{ searchQuery ? __('No results found') : __('No options available') }}</span>
+					</div>
 
-					<!-- Options -->
-					<button
-						v-for="(option, index) in paginatedOptions"
-						:key="option.value"
-						@click="selectOption(option)"
-						:class="['dropdown-item', {
-							active: option.value === modelValue,
-							highlighted: index === highlightedIndex
-						}]"
-						type="button"
-					>
-						<svg v-if="option.value === modelValue" class="item-icon check-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-						</svg>
-						<div class="item-content">
-							<span class="item-label" v-html="highlightMatch(option.label)"></span>
-							<span v-if="option.subtitle" class="item-subtitle">{{ option.subtitle }}</span>
-						</div>
-					</button>
+					<!-- Options List -->
+					<div v-else class="dropdown-list">
+						<!-- Clear Selection Option -->
+						<button
+							v-if="!required && modelValue"
+							@click="clearSelection"
+							class="dropdown-item clear-item"
+							type="button"
+						>
+							<svg class="item-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+							</svg>
+							<span>{{ __('Clear selection') }}</span>
+						</button>
 
-					<!-- Load More -->
-					<button
-						v-if="hasMore"
-						@click="loadMore"
-						class="dropdown-item load-more"
-						type="button"
-					>
-						<svg class="item-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
-						</svg>
-						<span>{{ __('Load more ({0} remaining)', [(filteredOptions.length - displayLimit)]) }}</span>
-					</button>
+						<!-- Options -->
+						<button
+							v-for="(option, index) in paginatedOptions"
+							:key="option.value"
+							@click="selectOption(option)"
+							:class="['dropdown-item', {
+								active: option.value === modelValue,
+								highlighted: index === highlightedIndex
+							}]"
+							type="button"
+						>
+							<svg v-if="option.value === modelValue" class="item-icon check-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+							</svg>
+							<div class="item-content">
+								<span class="item-label" v-html="highlightMatch(option.label)"></span>
+								<span v-if="option.subtitle" class="item-subtitle">{{ option.subtitle }}</span>
+							</div>
+						</button>
+
+						<!-- Load More -->
+						<button
+							v-if="hasMore"
+							@click="loadMore"
+							class="dropdown-item load-more"
+							type="button"
+						>
+							<svg class="item-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+							</svg>
+							<span>{{ __('Load more ({0} remaining)', [(filteredOptions.length - displayLimit)]) }}</span>
+						</button>
+					</div>
 				</div>
-			</div>
-		</Transition>
+			</Transition>
+		</Teleport>
 	</div>
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref, watch } from "vue"
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue"
 
 const props = defineProps({
 	modelValue: {
@@ -151,10 +158,12 @@ const emit = defineEmits(["update:modelValue", "search"])
 
 const containerRef = ref(null)
 const inputRef = ref(null)
+const dropdownRef = ref(null)
 const searchQuery = ref("")
 const showDropdown = ref(false)
 const highlightedIndex = ref(-1)
 const displayLimit = ref(50)
+const dropdownStyle = ref({})
 
 // Find selected option label
 const selectedOption = computed(() => {
@@ -197,9 +206,29 @@ const hasMore = computed(() => {
 	return filteredOptions.value.length > displayLimit.value
 })
 
+function updateDropdownPosition() {
+	if (!containerRef.value) return
+	const rect = containerRef.value.getBoundingClientRect()
+	const spaceBelow = window.innerHeight - rect.bottom
+	const maxHeight = 320
+	const gap = 8
+	// Open above if not enough space below
+	const openAbove = spaceBelow < maxHeight + gap && rect.top > spaceBelow
+	dropdownStyle.value = {
+		position: "fixed",
+		width: `${rect.width}px`,
+		left: `${rect.left}px`,
+		zIndex: 9999,
+		...(openAbove
+			? { bottom: `${window.innerHeight - rect.top + gap}px` }
+			: { top: `${rect.bottom + gap}px` }),
+	}
+}
+
 function handleFocus() {
 	showDropdown.value = true
 	highlightedIndex.value = -1
+	nextTick(updateDropdownPosition)
 	// Select all text for easy replacement
 	if (searchQuery.value) {
 		inputRef.value?.select()
@@ -210,6 +239,7 @@ function handleInput() {
 	showDropdown.value = true
 	highlightedIndex.value = -1
 	displayLimit.value = 50 // Reset pagination
+	nextTick(updateDropdownPosition)
 
 	// Emit search event for async searching
 	if (props.searchable && searchQuery.value.length >= props.minSearchLength) {
@@ -260,6 +290,7 @@ function toggleDropdown() {
 	showDropdown.value = !showDropdown.value
 	if (showDropdown.value) {
 		inputRef.value?.focus()
+		nextTick(updateDropdownPosition)
 	}
 }
 
@@ -291,8 +322,8 @@ function loadMore() {
 }
 
 function scrollToHighlighted() {
-	// Scroll highlighted item into view
-	const dropdown = containerRef.value?.querySelector(".dropdown-list")
+	// Scroll highlighted item into view (dropdown is teleported, use dropdownRef)
+	const dropdown = dropdownRef.value?.querySelector(".dropdown-list")
 	const items = dropdown?.querySelectorAll(
 		".dropdown-item:not(.clear-item):not(.load-more)",
 	)
@@ -314,19 +345,35 @@ function highlightMatch(text) {
 	return text.replace(regex, "<mark>$1</mark>")
 }
 
-// Click outside to close
+// Click outside to close (check both the input container and the teleported dropdown)
+// Uses mousedown so it fires before click handlers that may re-render and remove the target from DOM
 function handleClickOutside(event) {
-	if (containerRef.value && !containerRef.value.contains(event.target)) {
+	const inContainer = containerRef.value?.contains(event.target)
+	const inDropdown = dropdownRef.value?.contains(event.target)
+	if (!inContainer && !inDropdown) {
 		closeDropdown()
 	}
 }
 
+function handleScrollOrResize() {
+	if (showDropdown.value) {
+		updateDropdownPosition()
+	}
+}
+
 onMounted(() => {
-	document.addEventListener("click", handleClickOutside)
+	// Use mousedown instead of click — click fires after re-render which can
+	// remove the target element from DOM, making contains() return false
+	document.addEventListener("mousedown", handleClickOutside)
+	window.addEventListener("resize", handleScrollOrResize)
+	// Listen for scroll on capture phase to catch scrolling in any ancestor
+	window.addEventListener("scroll", handleScrollOrResize, true)
 })
 
 onUnmounted(() => {
-	document.removeEventListener("click", handleClickOutside)
+	document.removeEventListener("mousedown", handleClickOutside)
+	window.removeEventListener("resize", handleScrollOrResize)
+	window.removeEventListener("scroll", handleScrollOrResize, true)
 })
 </script>
 
@@ -412,23 +459,32 @@ onUnmounted(() => {
 	transform: rotate(180deg);
 }
 
-/* Dropdown Menu */
+/* Transitions */
+.dropdown-enter-active,
+.dropdown-leave-active {
+	transition: all 0.2s ease;
+}
+
+.dropdown-enter-from,
+.dropdown-leave-to {
+	opacity: 0;
+	transform: translateY(-8px);
+}
+</style>
+
+<!-- Unscoped styles for teleported dropdown (rendered outside component tree) -->
+<style>
 .dropdown-menu {
-	position: absolute;
-	top: calc(100% + 0.5rem);
-	inset-inline-start: 0;
-	inset-inline-end: 0;
 	max-height: 320px;
 	background: white;
 	border: 1px solid #e5e7eb;
 	border-radius: 10px;
-	box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+	box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
 	overflow: hidden;
-	z-index: 50;
 }
 
-.dropdown-loading,
-.dropdown-empty {
+.dropdown-menu .dropdown-loading,
+.dropdown-menu .dropdown-empty {
 	display: flex;
 	flex-direction: column;
 	align-items: center;
@@ -438,50 +494,50 @@ onUnmounted(() => {
 	color: #6b7280;
 }
 
-.loading-spinner {
+.dropdown-menu .loading-spinner {
 	width: 1.5rem;
 	height: 1.5rem;
 	border: 2px solid #e5e7eb;
 	border-top-color: #6366f1;
 	border-radius: 50%;
-	animation: spin 0.6s linear infinite;
+	animation: autocomplete-spin 0.6s linear infinite;
 }
 
-@keyframes spin {
+@keyframes autocomplete-spin {
 	to { transform: rotate(360deg); }
 }
 
-.empty-icon {
+.dropdown-menu .empty-icon {
 	width: 2rem;
 	height: 2rem;
 	color: #d1d5db;
 }
 
-.dropdown-list {
+.dropdown-menu .dropdown-list {
 	max-height: 320px;
 	overflow-y: auto;
 	overscroll-behavior: contain;
 }
 
 /* Scrollbar */
-.dropdown-list::-webkit-scrollbar {
+.dropdown-menu .dropdown-list::-webkit-scrollbar {
 	width: 6px;
 }
 
-.dropdown-list::-webkit-scrollbar-track {
+.dropdown-menu .dropdown-list::-webkit-scrollbar-track {
 	background: #f3f4f6;
 }
 
-.dropdown-list::-webkit-scrollbar-thumb {
+.dropdown-menu .dropdown-list::-webkit-scrollbar-thumb {
 	background: #d1d5db;
 	border-radius: 3px;
 }
 
-.dropdown-list::-webkit-scrollbar-thumb:hover {
+.dropdown-menu .dropdown-list::-webkit-scrollbar-thumb:hover {
 	background: #9ca3af;
 }
 
-.dropdown-item {
+.dropdown-menu .dropdown-item {
 	width: 100%;
 	display: flex;
 	align-items: center;
@@ -495,52 +551,52 @@ onUnmounted(() => {
 	border-bottom: 1px solid #f3f4f6;
 }
 
-.dropdown-item:last-child {
+.dropdown-menu .dropdown-item:last-child {
 	border-bottom: none;
 }
 
-.dropdown-item:hover,
-.dropdown-item.highlighted {
+.dropdown-menu .dropdown-item:hover,
+.dropdown-menu .dropdown-item.highlighted {
 	background: #f9fafb;
 }
 
-.dropdown-item.active {
+.dropdown-menu .dropdown-item.active {
 	background: #eef2ff;
 	color: #6366f1;
 }
 
-.dropdown-item.clear-item {
+.dropdown-menu .dropdown-item.clear-item {
 	color: #dc2626;
 	border-bottom: 2px solid #fecaca;
 }
 
-.dropdown-item.clear-item:hover {
+.dropdown-menu .dropdown-item.clear-item:hover {
 	background: #fef2f2;
 }
 
-.dropdown-item.load-more {
+.dropdown-menu .dropdown-item.load-more {
 	color: #6366f1;
 	font-weight: 500;
 	justify-content: center;
 	border-top: 2px solid #e0e7ff;
 }
 
-.dropdown-item.load-more:hover {
+.dropdown-menu .dropdown-item.load-more:hover {
 	background: #eef2ff;
 }
 
-.item-icon {
+.dropdown-menu .item-icon {
 	width: 1rem;
 	height: 1rem;
 	flex-shrink: 0;
 	color: #9ca3af;
 }
 
-.item-icon.check-icon {
+.dropdown-menu .item-icon.check-icon {
 	color: #10b981;
 }
 
-.item-content {
+.dropdown-menu .item-content {
 	flex: 1;
 	display: flex;
 	flex-direction: column;
@@ -548,7 +604,7 @@ onUnmounted(() => {
 	min-width: 0;
 }
 
-.item-label {
+.dropdown-menu .item-label {
 	font-size: 0.875rem;
 	color: #111827;
 	white-space: nowrap;
@@ -556,7 +612,7 @@ onUnmounted(() => {
 	text-overflow: ellipsis;
 }
 
-.item-label :deep(mark) {
+.dropdown-menu .item-label mark {
 	background: #fef3c7;
 	color: #92400e;
 	font-weight: 600;
@@ -564,23 +620,11 @@ onUnmounted(() => {
 	border-radius: 2px;
 }
 
-.item-subtitle {
+.dropdown-menu .item-subtitle {
 	font-size: 0.75rem;
 	color: #6b7280;
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
-}
-
-/* Transitions */
-.dropdown-enter-active,
-.dropdown-leave-active {
-	transition: all 0.2s ease;
-}
-
-.dropdown-enter-from,
-.dropdown-leave-to {
-	opacity: 0;
-	transform: translateY(-8px);
 }
 </style>

@@ -553,6 +553,8 @@
 																	:options="freeItemOptions"
 																	:placeholder="__('Search and select item...')"
 																	:required="true"
+																	:loading="freeItemLoading"
+																	@search="searchFreeItems"
 																/>
 															</div>
 														</div>
@@ -676,6 +678,8 @@ import { usePOSPermissions } from "@/composables/usePermissions"
 import { useToast } from "@/composables/useToast"
 import { useItemSearchStore } from "@/stores/itemSearch"
 import { DEFAULT_CURRENCY, DEFAULT_LOCALE } from "@/utils/currency"
+import { call } from "@/utils/apiWrapper"
+import { offlineWorker } from "@/utils/offline/workerClient"
 import { __ } from "@/utils/translation"
 import AutocompleteSelect from "@/components/common/AutocompleteSelect.vue"
 import CouponManagement from "./CouponManagement.vue"
@@ -814,14 +818,56 @@ const searchResults = computed(() => {
 	return filtered.slice(0, 20)
 })
 
-// Computed: Options for free item dropdown
-const freeItemOptions = computed(() => {
-	const allItems = itemSearchStore.allItems || []
-	return allItems.map((item) => ({
+// Free item dropdown: IndexedDB search with API fallback
+const freeItemOptions = ref([])
+const freeItemLoading = ref(false)
+let freeItemSearchTimer = null
+
+function mapItemsToOptions(items) {
+	return (items || []).map((item) => ({
 		value: item.item_code,
 		label: item.item_name || item.item_code,
 		subtitle: item.item_code,
 	}))
+}
+
+async function searchFreeItems(query) {
+	clearTimeout(freeItemSearchTimer)
+	freeItemSearchTimer = setTimeout(async () => {
+		freeItemLoading.value = true
+		try {
+			// Try IndexedDB first (instant, no network)
+			if (itemSearchStore.cacheReady) {
+				const cached = await offlineWorker.searchCachedItems(query || "", 50)
+				if (cached && cached.length > 0) {
+					freeItemOptions.value = mapItemsToOptions(cached)
+					freeItemLoading.value = false
+					return
+				}
+			}
+			// Fallback to API if cache empty or not ready
+			const res = await call(
+				"pos_next.api.items.get_items",
+				{
+					pos_profile: props.posProfile,
+					search_term: query || "",
+					limit: 50,
+				},
+			)
+			freeItemOptions.value = mapItemsToOptions(res?.message || res || [])
+		} catch (e) {
+			console.error("Free item search failed:", e)
+		} finally {
+			freeItemLoading.value = false
+		}
+	}, 300)
+}
+
+// Load initial options when free_item discount type is selected
+watch(() => form.value.discount_type, (type) => {
+	if (type === "free_item" && freeItemOptions.value.length === 0) {
+		searchFreeItems("")
+	}
 })
 
 // Single source of truth for apply_on configuration
