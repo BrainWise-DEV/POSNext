@@ -741,7 +741,7 @@ async function deleteCustomers(customerNames) {
  * @param {Array<Object>} items - Items to cache
  * @returns {Promise<Object>} Result with count and timing
  */
-async function cacheItemsFromServer(items) {
+async function cacheItemsFromServer(items, batchSize) {
 	if (!items || items.length === 0) {
 		return { success: true, count: 0, duration: 0 }
 	}
@@ -752,7 +752,9 @@ async function cacheItemsFromServer(items) {
 		const db = await initDB()
 
 		// Split into batches to prevent memory spikes with large datasets
-		const batches = chunkArray(items, CONFIG.BATCH_SIZE)
+		// Use caller-provided batchSize if given, otherwise default
+		const effectiveBatchSize = batchSize || CONFIG.BATCH_SIZE
+		const batches = chunkArray(items, effectiveBatchSize)
 		let totalProcessed = 0
 
 		// Process all batches in single transaction (ACID + 10x performance boost)
@@ -1563,7 +1565,7 @@ self.onmessage = async (event) => {
 				break
 
 			case "CACHE_ITEMS":
-				result = await cacheItemsFromServer(payload.items)
+				result = await cacheItemsFromServer(payload.items, payload.batchSize)
 				break
 
 			case "CACHE_CUSTOMERS":
