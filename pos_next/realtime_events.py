@@ -183,3 +183,45 @@ def emit_pos_profile_updated_event(doc, method=None):
 			title=_("Real-time POS Profile Update Event Error"),
 			message=f"Failed to emit POS profile update event for {doc.name}: {str(e)}"
 		)
+
+
+def emit_customer_event(doc, method=None):
+	"""
+	Emit real-time customer update event.
+
+	This event notifies all connected POS terminals about customer changes,
+	allowing them to update their local cache immediately.
+
+	Args:
+		doc: Customer document
+		method: Hook method name (after_insert, on_update, on_trash)
+	"""
+	try:
+		action = "update"
+		if method == "after_insert":
+			action = "create"
+		elif method == "on_trash":
+			action = "delete"
+
+		event_data = {
+			"name": doc.name,
+			"customer_name": doc.customer_name,
+			"mobile_no": doc.mobile_no or "",
+			"email_id": doc.email_id or "",
+			"disabled": doc.disabled,
+			"action": action,
+			"timestamp": frappe.utils.now(),
+		}
+		
+		frappe.publish_realtime(
+			event="pos_customer_changed",
+			message=event_data,
+			user=None,  # Broadcast to all users
+			after_commit=True  # Only emit after successful DB commit
+		)
+
+	except Exception as e:
+		frappe.log_error(
+			title=_("Real-time Customer Update Event Error"),
+			message=f"Failed to emit customer update event for {doc.name}: {str(e)}"
+		)

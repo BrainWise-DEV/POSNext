@@ -3,7 +3,7 @@ import { socketio_port } from "../../../../sites/common_site_config.json"
 
 let socket = null
 
-export function initSocket() {
+export function initSocket(siteNameOverride) {
 	// Don't reinitialize if socket already exists
 	if (socket) {
 		console.log("Socket already initialized")
@@ -11,8 +11,9 @@ export function initSocket() {
 	}
 
 	try {
-		// Try to get site name from various sources
+		// Try to get site name from various sources, prioritizing override
 		const siteName =
+			siteNameOverride ||
 			window.site_name ||
 			(window.frappe && window.frappe.boot && window.frappe.boot.sitename) ||
 			window.location.hostname
@@ -47,10 +48,10 @@ export function initSocket() {
 		console.error("Failed to initialize socket:", error)
 		// Return a mock socket object to prevent crashes
 		return {
-			on: () => {},
-			emit: () => {},
-			connect: () => {},
-			disconnect: () => {},
+			on: () => { },
+			emit: () => { },
+			connect: () => { },
+			disconnect: () => { },
 		}
 	}
 }
