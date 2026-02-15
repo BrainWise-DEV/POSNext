@@ -388,7 +388,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * // Result: Cart item gets free_qty = 1 (shown as "2 items + 1 FREE")
 	 */
 	function processFreeItems(freeItems) {
-		// Reset all free quantities
+		// Remove previously auto-added free items (their lifecycle is managed by offers)
+		invoiceItems.value = invoiceItems.value.filter(item => !item.is_free_item)
+
+		// Reset free quantities on remaining (regular) items
 		invoiceItems.value.forEach(item => {
 			item.free_qty = 0
 		})
@@ -398,7 +401,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			return
 		}
 
-		// Match free items to cart items and set free_qty
+		// Match free items to cart items and set free_qty, or add as new free item row
 		for (const freeItem of freeItems) {
 			const freeQty = Number.parseFloat(freeItem.qty) || 0
 			if (freeQty <= 0) continue
@@ -411,6 +414,22 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 			if (cartItem) {
 				cartItem.free_qty = freeQty
+			} else {
+				// Free item doesn't match any cart item — add as a separate free item row
+				invoiceItems.value.push({
+					item_code: freeItem.item_code,
+					item_name: freeItem.item_name || freeItem.item_code,
+					uom: freeItem.uom || freeItem.stock_uom,
+					stock_uom: freeItem.stock_uom || freeItem.uom,
+					quantity: 0,
+					free_qty: freeQty,
+					rate: 0,
+					price_list_rate: 0,
+					discount_amount: 0,
+					discount_percentage: 0,
+					is_free_item: true,
+					pricing_rules: freeItem.pricing_rules || null,
+				})
 			}
 		}
 	}

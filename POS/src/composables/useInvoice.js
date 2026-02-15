@@ -687,24 +687,46 @@ export function useInvoice() {
 	 * @returns {Array} Items formatted for ERPNext Sales Invoice
 	 */
 	function formatItemsForSubmission(items) {
-		return items.map((item) => ({
-			item_code: item.item_code,
-			item_name: item.item_name,
-			qty: item.quantity || item.qty || 1,
-			rate: computeBackendRate(item),
-			price_list_rate: roundCurrency(item.price_list_rate || item.rate),
-			uom: item.uom,
-			warehouse: item.warehouse,
-			batch_no: item.batch_no,
-			serial_no: item.serial_no,
-			conversion_factor: item.conversion_factor || 1,
-			discount_percentage: roundCurrency(item.discount_percentage || 0),
-			discount_amount: roundCurrency(item.discount_amount || 0),
-			pricing_rules: stringifyPricingRules(item.pricing_rules),
-			// Manual rate edit tracking for audit logging
-			is_rate_manually_edited: item.is_rate_manually_edited || 0,
-			original_rate: item.original_rate || null,
-		}))
+		return items.map((item) => {
+			if (item.is_free_item) {
+				return {
+					item_code: item.item_code,
+					item_name: item.item_name,
+					qty: item.free_qty || 0,
+					rate: 0,
+					price_list_rate: 0,
+					uom: item.uom,
+					warehouse: item.warehouse,
+					batch_no: item.batch_no,
+					serial_no: item.serial_no,
+					conversion_factor: item.conversion_factor || 1,
+					discount_percentage: 0,
+					discount_amount: 0,
+					pricing_rules: stringifyPricingRules(item.pricing_rules),
+					is_free_item: 1,
+					is_rate_manually_edited: 0,
+					original_rate: null,
+				}
+			}
+			return {
+				item_code: item.item_code,
+				item_name: item.item_name,
+				qty: item.quantity || item.qty || 1,
+				rate: computeBackendRate(item),
+				price_list_rate: roundCurrency(item.price_list_rate || item.rate),
+				uom: item.uom,
+				warehouse: item.warehouse,
+				batch_no: item.batch_no,
+				serial_no: item.serial_no,
+				conversion_factor: item.conversion_factor || 1,
+				discount_percentage: roundCurrency(item.discount_percentage || 0),
+				discount_amount: roundCurrency(item.discount_amount || 0),
+				pricing_rules: stringifyPricingRules(item.pricing_rules),
+				// Manual rate edit tracking for audit logging
+				is_rate_manually_edited: item.is_rate_manually_edited || 0,
+				original_rate: item.original_rate || null,
+			}
+		})
 	}
 
 	function addPayment(payment) {

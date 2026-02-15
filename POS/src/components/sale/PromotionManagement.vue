@@ -545,49 +545,15 @@
 														/>
 
 														<!-- Free Item Search -->
-														<div v-if="form.discount_type === 'free_item'" class="flex flex-col gap-2">
-															<label class="block text-sm font-medium text-gray-700 text-start">{{ __('Free Item') }}<span class="text-red-500"> *</span></label>
-
-															<!-- Search Input -->
-															<FormControl
-																v-if="!form.free_item"
-																type="text"
-																v-model="freeItemSearch"
-																:placeholder="__('Search item... (min 2 characters)')"
-															>
-																<template #prefix>
-																	<FeatherIcon name="search" class="w-4 h-4 text-gray-500" />
-																</template>
-															</FormControl>
-
-															<!-- Search Results -->
-															<div v-if="freeItemSearchResults.length > 0 && !form.free_item" class="border rounded-lg overflow-hidden">
-																<div class="max-h-40 overflow-y-auto divide-y">
-																	<button
-																		v-for="item in freeItemSearchResults"
-																		:key="item.item_code"
-																		@click="selectFreeItem(item)"
-																		type="button"
-																		class="w-full text-start px-4 py-2 hover:bg-gray-50 transition-colors"
-																	>
-																		<p class="text-sm font-medium text-gray-900">{{ item.item_name }}</p>
-																		<p class="text-xs text-gray-500">{{ item.item_code }}</p>
-																	</button>
-																</div>
-															</div>
-
-															<!-- Selected Free Item -->
-															<div v-if="form.free_item" class="flex items-center gap-2">
-																<Badge variant="subtle" theme="green" size="md">
-																	{{ form.free_item }}
-																	<button
-																		@click="form.free_item = ''"
-																		type="button"
-																		class="ms-2 hover:text-green-900"
-																	>
-																		×
-																	</button>
-																</Badge>
+														<div v-if="form.discount_type === 'free_item'" class="flex flex-col gap-1.5">
+															<label class="block text-xs text-gray-600 text-start">{{ __('Free Item') }}<span class="text-red-500"> *</span></label>
+															<div class="free-item-select">
+																<AutocompleteSelect
+																	v-model="form.free_item"
+																	:options="freeItemOptions"
+																	:placeholder="__('Search and select item...')"
+																	:required="true"
+																/>
 															</div>
 														</div>
 
@@ -711,6 +677,7 @@ import { useToast } from "@/composables/useToast"
 import { useItemSearchStore } from "@/stores/itemSearch"
 import { DEFAULT_CURRENCY, DEFAULT_LOCALE } from "@/utils/currency"
 import { __ } from "@/utils/translation"
+import AutocompleteSelect from "@/components/common/AutocompleteSelect.vue"
 import CouponManagement from "./CouponManagement.vue"
 import SelectInput from "../common/SelectInput.vue"
 import {
@@ -787,7 +754,6 @@ const form = ref({
 const itemGroups = ref([])
 const brands = ref([])
 const itemSearch = ref("")
-const freeItemSearch = ref("")
 const selectedItemGroup = ref("")
 const selectedBrand = ref("")
 
@@ -848,25 +814,14 @@ const searchResults = computed(() => {
 	return filtered.slice(0, 20)
 })
 
-// Computed: Filter cached items for free item selection
-const freeItemSearchResults = computed(() => {
-	if (!freeItemSearch.value || freeItemSearch.value.length < 2) {
-		return []
-	}
-
-	const term = freeItemSearch.value.toLowerCase()
+// Computed: Options for free item dropdown
+const freeItemOptions = computed(() => {
 	const allItems = itemSearchStore.allItems || []
-
-	// Filter items by search term
-	const filtered = allItems.filter(
-		(item) =>
-			item.item_code?.toLowerCase().includes(term) ||
-			item.item_name?.toLowerCase().includes(term) ||
-			item.barcode?.toLowerCase().includes(term),
-	)
-
-	// Limit to 20 results for performance
-	return filtered.slice(0, 20)
+	return allItems.map((item) => ({
+		value: item.item_code,
+		label: item.item_name || item.item_code,
+		subtitle: item.item_code,
+	}))
 })
 
 // Single source of truth for apply_on configuration
@@ -1297,11 +1252,6 @@ function clearAllItems() {
 	form.value.items = []
 }
 
-function selectFreeItem(item) {
-	form.value.free_item = item.item_code
-	freeItemSearch.value = ""
-}
-
 function resetForm() {
 	form.value = {
 		name: "",
@@ -1320,7 +1270,6 @@ function resetForm() {
 		valid_upto: "",
 	}
 	itemSearch.value = ""
-	freeItemSearch.value = ""
 	selectedItemGroup.value = ""
 	selectedBrand.value = ""
 }
@@ -1433,5 +1382,50 @@ function handleCouponSaved(data) {
 .fade-enter-from,
 .fade-leave-to {
 	opacity: 0;
+}
+
+/* Match AutocompleteSelect to Frappe UI FormControl subtle style */
+.free-item-select :deep(.select-input) {
+	height: 1.75rem;
+	padding: 0 0.5rem;
+	padding-inline-end: 4rem;
+	background: var(--surface-gray-2, #f3f4f6);
+	border: 1px solid transparent;
+	border-radius: 0.25rem;
+	font-size: 0.875rem;
+}
+
+.free-item-select :deep(.select-input:hover) {
+	background: var(--surface-gray-3, #e5e7eb);
+	border-color: var(--outline-gray-modals, #d1d5db);
+}
+
+.free-item-select :deep(.select-input:focus) {
+	background: var(--surface-white, #fff);
+	border-color: var(--outline-gray-4, #6b7280);
+	box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.free-item-select :deep(.select-input.has-value) {
+	color: var(--ink-gray-8, #1f272e);
+}
+
+.free-item-select :deep(.select-input.has-icon) {
+	padding-inline-start: 2rem;
+}
+
+.free-item-select :deep(.input-icon) {
+	inset-inline-start: 0.5rem;
+	width: 0.875rem;
+	height: 0.875rem;
+}
+
+.free-item-select :deep(.input-actions) {
+	inset-inline-end: 0.25rem;
+}
+
+.free-item-select :deep(.clear-btn),
+.free-item-select :deep(.dropdown-toggle) {
+	padding: 0.125rem;
 }
 </style>

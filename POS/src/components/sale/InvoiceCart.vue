@@ -665,8 +665,13 @@
 				<div
 					v-for="(item, index) in items"
 					:key="index"
-					@click="openEditDialog(item)"
-					class="bg-white border border-gray-200 rounded-md p-1.5 sm:p-2 hover:border-blue-300 hover:shadow-md transition-all duration-200 active:scale-[0.99] cursor-pointer group"
+					@click="item.is_free_item ? null : openEditDialog(item)"
+					:class="[
+						'rounded-md p-1.5 sm:p-2 transition-all duration-200',
+						item.is_free_item
+							? 'bg-green-50 border border-green-300'
+							: 'bg-white border border-gray-200 hover:border-blue-300 hover:shadow-md active:scale-[0.99] cursor-pointer group'
+					]"
 				>
 					<div class="flex gap-1.5 sm:gap-2">
 						<!-- Item Image Thumbnail -->
@@ -709,9 +714,9 @@
 									>
 										{{ item.item_name }}
 									</h4>
-									<!-- Free Item Badge -->
+									<!-- Free Item Badge (only for regular items with bonus free qty, not for standalone free item rows) -->
 									<span
-										v-if="item.free_qty && item.free_qty > 0"
+										v-if="!item.is_free_item && item.free_qty && item.free_qty > 0"
 										class="inline-flex items-center px-1.5 py-0.5 bg-green-600 text-white rounded-full text-[9px] font-bold flex-shrink-0"
 										:title="__('{0} free item(s) included', [item.free_qty])"
 									>
@@ -752,6 +757,7 @@
 									</div>
 								</div>
 								<button
+									v-if="!item.is_free_item"
 									type="button"
 									@click.stop="$emit('remove-item', item.item_code, item.uom)"
 									class="text-gray-400 hover:text-red-600 active:text-red-700 transition-colors flex-shrink-0 p-0.5 -m-0.5 touch-manipulation active:scale-90"
@@ -778,9 +784,19 @@
 							<div class="flex items-center justify-between gap-1.5">
 								<div class="flex items-center gap-1.5">
 									<!-- Quantity Counter -->
+									<!-- For free items, show static qty badge -->
+									<div
+										v-if="item.is_free_item"
+										class="flex items-center bg-green-100 border border-green-300 rounded px-1.5 h-6 sm:h-7"
+									>
+										<svg class="w-3 h-3 text-green-600 me-0.5" fill="currentColor" viewBox="0 0 20 20">
+											<path fill-rule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clip-rule="evenodd" />
+										</svg>
+										<span class="text-xs sm:text-sm font-bold text-green-700">{{ item.free_qty }} {{ __("FREE") }}</span>
+									</div>
 									<!-- For serial items, show serial badge with edit button -->
 									<div
-										v-if="item.has_serial_no && item.serial_no"
+										v-else-if="item.has_serial_no && item.serial_no"
 										class="flex items-center gap-1"
 										@click.stop
 									>
@@ -989,13 +1005,12 @@
 								<!-- Item Total -->
 								<div class="text-end flex-shrink-0">
 									<div
-										class="text-xs sm:text-sm font-bold text-blue-600 leading-none"
+										:class="[
+											'text-xs sm:text-sm font-bold leading-none',
+											item.is_free_item ? 'text-green-600' : 'text-blue-600'
+										]"
 									>
-										{{
-											formatCurrency(
-												item.amount || item.rate * item.quantity
-											)
-										}}
+										{{ item.is_free_item ? __("FREE") : formatCurrency(item.amount || item.rate * item.quantity) }}
 									</div>
 								</div>
 							</div>
