@@ -1317,7 +1317,23 @@ def submit_invoice(invoice=None, data=None):
         # Submit invoice
         invoice_doc.submit()
         invoice_submitted = True
-
+        # Handle wallet transaction reversal for returns
+        if invoice_doc.get("is_return") and invoice_doc.get("return_against"):
+            try:
+                from pos_next.pos_next.doctype.wallet_transaction.wallet_transaction import reverse_wallet_transactions_for_return
+                reverse_wallet_transactions_for_return(
+                    original_invoice=invoice_doc.return_against,
+                    return_invoice=invoice_doc.name
+                )
+            except Exception as wallet_error:
+                frappe.log_error(
+                    title="Wallet Reversal on Return Error",
+                    message=f"Return Invoice: {invoice_doc.name}, Error: {str(wallet_error)}\n{frappe.get_traceback()}"
+                )
+                frappe.msgprint(
+                    _("Return submitted but wallet reversal failed. Please check manually."),
+                    alert=True, indicator="orange"
+                )
         # Complete the offline sync record
         if sync_record_name:
             _complete_offline_sync(sync_record_name, invoice_doc.name)
