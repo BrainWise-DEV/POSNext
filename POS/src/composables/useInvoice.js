@@ -1,6 +1,6 @@
 import { createResource } from "frappe-ui"
 import { computed, ref, toRaw } from "vue"
-import { isOffline } from "@/utils/offline"
+import { isOffline, getCachedItem } from "@/utils/offline"
 import { useSerialNumberStore } from "@/stores/serialNumber"
 import { CoalescingMutex } from "@/utils/mutex"
 import { logger } from "@/utils/logger"
@@ -101,6 +101,52 @@ export function useInvoice() {
 		url: "pos_next.api.items.get_item_details",
 		auto: false,
 	})
+
+	/**
+	 * Resolve UOM pricing from IndexedDB or server.
+	 * Offline: reads item from IndexedDB for persisted uom_prices and conversion data.
+	 * Online: fetches from server for customer-specific rates.
+	 * @param {Object} item - Item with item_code, rate, price_list_rate
+	 * @param {string} uom - Target UOM
+	 * @param {number} conversionFactor - UOM conversion factor
+	 * @param {number} qty - Quantity for pricing
+	 * @returns {Promise<{rate: number, price_list_rate: number}>}
+	 */
+	async function resolveUomPricing(item, uom, conversionFactor, qty) {
+		// When online, fetch server pricing for customer-specific rates
+		if (!isOffline()) {
+			try {
+				const itemDetails = await getItemDetailsResource.submit({
+					item_code: item.item_code,
+					pos_profile: posProfile.value,
+					customer: customer.value?.name || customer.value,
+					qty,
+					uom,
+				})
+				return {
+					rate: itemDetails.price_list_rate || itemDetails.rate,
+					price_list_rate: itemDetails.price_list_rate,
+				}
+			} catch (err) {
+				log.warn("Server UOM pricing unavailable, resolving from IndexedDB", err)
+			}
+		}
+
+		// Offline: resolve from IndexedDB
+		const cachedItem = await getCachedItem(item.item_code)
+		const source = cachedItem || item
+
+		let rate
+		if (source.uom_prices?.[uom]) {
+			rate = source.uom_prices[uom]
+		} else {
+			const baseRate = source.price_list_rate || source.rate || 0
+			const currentConversion = source.conversion_factor || 1
+			rate = (baseRate / currentConversion) * conversionFactor
+		}
+
+		return { rate, price_list_rate: rate }
+	}
 
 	const getTaxesResource = createResource({
 		url: "pos_next.api.pos_profile.get_taxes",
@@ -1151,6 +1197,7 @@ export function useInvoice() {
 		recalculateItem,
 		rebuildIncrementalCache,
 		formatItemsForSubmission,
+		resolveUomPricing,
 
 		// Resources
 		updateInvoiceResource,

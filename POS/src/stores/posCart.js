@@ -105,6 +105,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		removeDiscount,
 		applyOffersResource,
 		getItemDetailsResource,
+		resolveUomPricing,
 		recalculateItem,
 		rebuildIncrementalCache,
 		formatItemsForSubmission,
@@ -1265,20 +1266,14 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * @param {number} qty - Quantity for pricing
 	 */
 	async function applyUomChange(cartItem, newUom, qty) {
-		const itemDetails = await getItemDetailsResource.submit({
-			item_code: cartItem.item_code,
-			pos_profile: posProfile.value,
-			customer: customer.value?.name || customer.value,
-			qty,
-			uom: newUom,
-		})
-
 		const uomData = cartItem.item_uoms?.find((u) => u.uom === newUom)
+		const conversionFactor = uomData?.conversion_factor || 1
+		const pricing = await resolveUomPricing(cartItem, newUom, conversionFactor, qty)
 
 		cartItem.uom = newUom
-		cartItem.conversion_factor = uomData?.conversion_factor || itemDetails.conversion_factor || 1
-		cartItem.rate = itemDetails.price_list_rate || itemDetails.rate
-		cartItem.price_list_rate = itemDetails.price_list_rate
+		cartItem.conversion_factor = conversionFactor
+		cartItem.rate = pricing.rate
+		cartItem.price_list_rate = pricing.price_list_rate
 	}
 
 	/**
@@ -1721,6 +1716,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		changeItemUOM,
 		updateItemDetails,
 		getItemDetailsResource,
+		resolveUomPricing,
 		recalculateItem,
 		rebuildIncrementalCache,
 		applyOffersResource,
