@@ -774,7 +774,7 @@ const {
 	clearSearchAndResetInput,
 	cleanup: cleanupSearchInput,
 } = useSearchInput({
-	itemStore, filteredItems, onItemFound: selectItem,
+	itemStore, onItemFound: selectItem,
 	showWarning, isAnyDialogOpen,
 })
 

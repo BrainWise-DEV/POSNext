@@ -18,13 +18,12 @@ import { QueuedMutex } from "@/utils/mutex"
  *
  * @param {Object} options
  * @param {Object} options.itemStore          - Pinia item-search store
- * @param {import('vue').Ref} options.filteredItems - ref from storeToRefs
  * @param {(item: Object, autoAdd: boolean) => boolean} options.onItemFound
  *        Component's selectItem(). Returns true if item was accepted.
  * @param {Object} options.showWarning        - useToast().showWarning
  * @param {import('vue').Ref<boolean>} options.isAnyDialogOpen
  */
-export function useSearchInput({ itemStore, filteredItems, onItemFound, showWarning, isAnyDialogOpen }) {
+export function useSearchInput({ itemStore, onItemFound, showWarning, isAnyDialogOpen }) {
 	// --- Reactive state (exposed) ---
 	const searchInputRef = ref(null)
 	const scannerEnabled = ref(false)
@@ -137,10 +136,8 @@ export function useSearchInput({ itemStore, filteredItems, onItemFound, showWarn
 	 * ensures scans execute one at a time so every scan is resolved before
 	 * the next begins, preventing double-adds and lost barcodes.
 	 *
-	 * Lookup order:
-	 *   1. Exact barcode match via `itemStore.searchByBarcode()`
-	 *   2. Fallback: single match in `filteredItems` → auto-select
-	 *   3. Zero or multiple matches → warning toast
+	 * Lookup: exact barcode match via `itemStore.searchByBarcode()`.
+	 * If the barcode is not found, shows a "not found" warning.
 	 *
 	 * @param {string}  barcode      - Pre-captured barcode value
 	 * @param {boolean} forceAutoAdd - When true, item is added without user click
@@ -160,19 +157,11 @@ export function useSearchInput({ itemStore, filteredItems, onItemFound, showWarn
 				console.error("Barcode API error:", error)
 			}
 
-			// Fallback: single match in filtered results → auto-select
-			if (filteredItems.value.length === 1) {
-				onItemFound(filteredItems.value[0], shouldAutoAdd)
-				focusSearchInput()
-			} else if (filteredItems.value.length === 0) {
-				showWarning(__('Item Not Found: No item found with barcode: {0}', [barcode]))
-			} else {
-				if (shouldAutoAdd) {
-					showWarning(__('Multiple Items Found: {0} items match barcode. Please refine search.', [filteredItems.value.length]))
-				} else {
-					showWarning(__('Multiple Items Found: {0} items match. Please select one.', [filteredItems.value.length]))
-				}
-			}
+			// Barcode not found — show clear "not found" message.
+			// Note: we cannot fall back to filteredItems here because
+			// clearSearch() was called before the API request, so
+			// filteredItems would contain ALL cached items (not search results).
+			showWarning(__('Item Not Found: No item found with barcode: {0}', [barcode]))
 			focusSearchInput()
 		})
 	}
