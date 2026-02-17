@@ -7,6 +7,7 @@ from frappe.utils import flt, today
 from erpnext.accounts.general_ledger import make_gl_entries
 from erpnext.controllers.accounts_controller import AccountsController
 from erpnext.accounts.doctype.loyalty_program.loyalty_program import get_loyalty_program_details_with_points
+from pos_next.pos_next.doctype.wallet.wallet import get_or_create_wallet\
 
 class WalletTransaction(AccountsController):
 	def validate(self):
@@ -275,7 +276,6 @@ def credit_loyalty_points_to_wallet(customer, company, loyalty_points, conversio
 		return None
 
 	# Get or create customer wallet
-	from pos_next.pos_next.doctype.wallet.wallet import get_or_create_wallet
 	wallet = get_or_create_wallet(customer, company)
 
 	# Create wallet credit transaction
@@ -329,7 +329,6 @@ def credit_return_to_wallet(return_invoice, amount=None):
         return None
 
     # Get or create customer wallet
-    from pos_next.pos_next.doctype.wallet.wallet import get_or_create_wallet
     wallet = get_or_create_wallet(customer, company)
 
     if not wallet:
