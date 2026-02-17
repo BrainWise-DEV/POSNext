@@ -7,8 +7,7 @@ from frappe.utils import flt, today
 from erpnext.accounts.general_ledger import make_gl_entries
 from erpnext.controllers.accounts_controller import AccountsController
 from erpnext.accounts.doctype.loyalty_program.loyalty_program import get_loyalty_program_details_with_points
-from pos_next.pos_next.doctype.wallet.wallet import get_or_create_wallet\
-
+from pos_next.pos_next.doctype.wallet.wallet import get_or_create_wallet
 class WalletTransaction(AccountsController):
 	def validate(self):
 		self.validate_wallet()
