@@ -215,12 +215,17 @@
 					</div>
 
 					<!-- Printer - Hidden on small screens -->
-					<div class="hidden md:block">
+					<div class="hidden md:block relative">
 						<ActionButton
 							:icon="printerIcon"
-							:title="__('Print Invoice')"
+							:title="silentPrintEnabled ? (qzConnected ? __('Silent Print: Connected') : __('Silent Print: Disconnected')) : __('Print Invoice')"
 							@click="$emit('printer-click')"
 						/>
+						<span
+							v-if="silentPrintEnabled"
+							class="absolute top-0.5 end-0.5 w-2 h-2 rounded-full border border-white"
+							:class="qzConnected ? 'bg-green-500' : 'bg-red-500'"
+						></span>
 					</div>
 
 					<!-- Refresh -->
@@ -357,6 +362,14 @@ const props = defineProps({
 		default: false,
 	},
 	isRefreshing: {
+		type: Boolean,
+		default: false,
+	},
+	silentPrintEnabled: {
+		type: Boolean,
+		default: false,
+	},
+	qzConnected: {
 		type: Boolean,
 		default: false,
 	},
