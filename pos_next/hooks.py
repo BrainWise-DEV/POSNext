@@ -219,6 +219,9 @@ doc_events = {
 	},
 	"POS Profile": {
 		"on_update": "pos_next.realtime_events.emit_pos_profile_updated_event"
+	},
+	"Customer": {
+		"after_insert": "pos_next.api.wallet.create_wallet_on_customer_insert"
 	}
 }
 

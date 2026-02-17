@@ -256,6 +256,20 @@ def get_customer_wallet(customer, company=None):
 	return wallet
 
 
+def create_wallet_on_customer_insert(doc, method=None):
+	"""Hook: after_insert on Customer. Creates a wallet for each active company with a POS Profile."""
+	try:
+		from pos_next.api.pos_profile import get_pos_profiles
+		pos_profiles = get_pos_profiles()
+		company = pos_profiles[0].company
+		get_or_create_wallet(doc.name, company)
+	except Exception:
+		frappe.log_error(
+			f"Failed to auto-create wallet for customer {doc.name} in company {company}",
+			"Wallet Auto-Creation Error"
+		)
+
+
 @frappe.whitelist()
 def get_or_create_wallet(customer, company, pos_settings=None):
 	"""Get existing wallet or create a new one."""
