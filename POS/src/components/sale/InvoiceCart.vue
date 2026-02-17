@@ -1246,6 +1246,7 @@ import { usePOSOffersStore } from "@/stores/posOffers";
 import { useCustomerSearchStore } from "@/stores/customerSearch";
 import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency";
 import { useFormatters } from "@/composables/useFormatters";
+import { useCartSort } from "@/composables/useCartSort";
 import { isOffline } from "@/utils/offline";
 import { offlineWorker } from "@/utils/offline/workerClient";
 import { logger } from "@/utils/logger";
@@ -1352,6 +1353,14 @@ const emit = defineEmits([
 	// "create-sales-order", // () - Create Sales Order // Removed as per instruction
 ]);
 
+// Cart sort composable (must be after defineProps)
+const {
+	cartSortBy, cartSortOrder, showCartSortDropdown,
+	sortedItems,
+	CART_SORT_OPTIONS, CART_SORT_ICONS,
+	toggleCartSortDropdown, handleCartSortToggle, getCartSortLabel, getCartSortIconState,
+} = useCartSort(() => props.items);
+
 /**
  * ============================================================================
  * REACTIVE STATE
@@ -1375,46 +1384,8 @@ const selectedItem = ref(null); // Item being edited
 // UOM dropdown state - tracks which item's UOM dropdown is open (by item_code)
 const openUomDropdown = ref(null);
 
-// Cart sort state
-const cartSortBy = ref(null);
-const cartSortOrder = ref('asc');
-const showCartSortDropdown = ref(false);
+// Cart sort dropdown container (template ref for outside-click detection)
 const cartSortContainer = ref(null);
-
-// Cart sort configuration
-const CART_SORT_OPTIONS = Object.freeze([
-	{
-		field: 'order',
-		label: __('Addition Order'),
-		icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z'
-	},
-	{
-		field: 'name',
-		label: __('Name'),
-		icon: 'M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z'
-	},
-	{
-		field: 'price',
-		label: __('Price'),
-		icon: 'M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z'
-	},
-	{
-		field: 'quantity',
-		label: __('Quantity'),
-		icon: 'M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4'
-	},
-	{
-		field: 'total',
-		label: __('Total'),
-		icon: 'M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z'
-	},
-])
-
-const CART_SORT_ICONS = Object.freeze({
-	ascending: 'M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12',
-	descending: 'M3 4h13M3 8h9m-9 4h9m5-4v12m0 0l-4-4m4 4l4-4',
-	inactive: 'M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4'
-})
 
 /**
  * ============================================================================
@@ -1611,33 +1582,6 @@ const displayGrandTotal = computed(() => {
 	// Always: displaySubtotal + tax - discount
 	// This makes the display consistent and intuitive
 	return displaySubtotal.value + props.taxAmount - props.discountAmount;
-});
-
-const sortedItems = computed(() => {
-	if (!cartSortBy.value || (cartSortBy.value === 'order' && cartSortOrder.value === 'asc')) {
-		return props.items
-	}
-	if (cartSortBy.value === 'order') {
-		return [...props.items].reverse()
-	}
-	const dir = cartSortOrder.value === 'asc' ? 1 : -1
-	return [...props.items].sort((a, b) => {
-		switch (cartSortBy.value) {
-			case 'name':
-				return dir * (a.item_name || '').localeCompare(b.item_name || '')
-			case 'price':
-				return dir * ((a.rate || 0) - (b.rate || 0))
-			case 'quantity':
-				return dir * ((a.quantity || 0) - (b.quantity || 0))
-			case 'total': {
-				const aTotal = a.amount || (a.rate || 0) * (a.quantity || 0)
-				const bTotal = b.amount || (b.rate || 0) * (b.quantity || 0)
-				return dir * (aTotal - bTotal)
-			}
-			default:
-				return 0
-		}
-	})
 });
 
 /**
@@ -1986,43 +1930,6 @@ async function handleUpdateItem(updatedItem) {
 
 function selectDocType(type) {
 	cartStore.setTargetDoctype(type);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Cart Sort Functions
-// ─────────────────────────────────────────────────────────────────────────────
-
-function toggleCartSortDropdown() {
-	showCartSortDropdown.value = !showCartSortDropdown.value;
-}
-
-function handleCartSortToggle(field) {
-	if (!field) {
-		// Clear sorting — return to addition order
-		cartSortBy.value = null;
-		cartSortOrder.value = 'asc';
-		showCartSortDropdown.value = false;
-		return;
-	}
-
-	// If clicking the same field, toggle between asc/desc
-	if (cartSortBy.value === field) {
-		cartSortOrder.value = cartSortOrder.value === 'asc' ? 'desc' : 'asc';
-	} else {
-		// New field — start with ascending
-		cartSortBy.value = field;
-		cartSortOrder.value = 'asc';
-	}
-}
-
-function getCartSortLabel() {
-	const option = CART_SORT_OPTIONS.find(opt => opt.field === cartSortBy.value);
-	return option?.label || cartSortBy.value;
-}
-
-function getCartSortIconState(field) {
-	if (cartSortBy.value !== field) return 'inactive';
-	return cartSortOrder.value === 'asc' ? 'ascending' : 'descending';
 }
 
 /**
