@@ -276,8 +276,9 @@
 							<div
 								v-for="(item, index) in items"
 								:key="index"
-								class="px-3 py-2 hover:bg-gray-50"
+								class="px-3 py-2 hover:bg-gray-50 flex flex-col gap-1"
 							>
+								<!-- Main Item -->
 								<div class="flex items-start justify-between gap-2">
 									<div class="flex-1 min-w-0 text-start">
 										<div class="font-medium text-sm text-gray-900 truncate">{{ item.item_name || item.item_code }}</div>
@@ -287,6 +288,24 @@
 									</div>
 									<div class="text-sm font-semibold text-gray-900 text-end">
 										{{ formatCurrency(item.amount || ((item.qty || item.quantity) * (item.rate || item.price_list_rate))) }}
+									</div>
+								</div>
+
+								<!-- Free Item -->
+								<div v-if="item?.free_qty > 0" class="flex items-start justify-between items-center gap-2 bg-green-50 px-2 py-1 my-2 rounded border border-green-100">
+									<div class="flex-1 min-w-0 text-start">
+										<div class="font-medium text-xs text-green-700 truncate flex items-center gap-1">
+											<svg class="w-3 h-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+												<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+											</svg>
+											{{ item.item_name || item.item_code }} ({{ __('Free') }})
+										</div>
+										<div class="text-[10px] text-green-600 mt-0.5 opacity-80 pl-4">
+											{{ item.free_qty }} {{ item.uom || item.stock_uom }}
+										</div>
+									</div>
+									<div class="text-xs font-bold text-green-700 text-end">
+										{{ formatCurrency(0) }}
 									</div>
 								</div>
 							</div>
