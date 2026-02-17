@@ -362,15 +362,27 @@
 			<div class="flex items-center justify-between mb-1.5">
 				<h2 class="text-xs font-bold text-gray-900">{{ __("Cart Items") }}</h2>
 				<div class="flex items-center gap-1">
+					<!-- Clear Cart Button -->
+					<button
+						@click="$emit('clear-cart')"
+						class="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 transition-colors touch-manipulation"
+						type="button"
+						:title="__('Clear all items')"
+					>
+						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+							<path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V5a2 2 0 00-2-2h-2a2 2 0 00-2 2v2M4 7h16"/>
+						</svg>
+						<span>{{ __("Clear") }}</span>
+					</button>
 					<!-- Sort Dropdown -->
 					<div class="relative" ref="cartSortContainer">
 						<button
 							@click="toggleCartSortDropdown"
 							:class="[
-								'p-1.5 rounded-lg transition-[background-color,box-shadow] duration-75 touch-manipulation border',
+								'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors touch-manipulation',
 								cartSortBy
-									? 'bg-blue-50 border-blue-400 text-blue-700 shadow-sm'
-									: 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50 active:bg-gray-100'
+									? 'text-blue-600 hover:bg-blue-50'
+									: 'text-gray-600 hover:bg-gray-50'
 							]"
 							:title="cartSortBy
 								? (cartSortOrder === 'asc'
@@ -380,9 +392,10 @@
 							:aria-label="__('Sort cart items')"
 							type="button"
 						>
-							<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/>
+							<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+								<path stroke-linecap="round" stroke-linejoin="round" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/>
 							</svg>
+							<span>{{ __("Sort") }}</span>
 						</button>
 
 						<!-- Sort Dropdown Menu -->
@@ -447,29 +460,6 @@
 							</div>
 						</div>
 					</div>
-
-					<!-- Clear Cart Button -->
-					<button
-						@click="$emit('clear-cart')"
-						class="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 transition-colors touch-manipulation"
-						type="button"
-						:title="__('Clear all items')"
-					>
-						<svg
-							class="w-4 h-4"
-							fill="none"
-							stroke="currentColor"
-							viewBox="0 0 24 24"
-							stroke-width="2"
-						>
-							<path
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V5a2 2 0 00-2-2h-2a2 2 0 00-2 2v2M4 7h16"
-							/>
-						</svg>
-						<span>{{ __("Clear") }}</span>
-					</button>
 				</div>
 			</div>
 
