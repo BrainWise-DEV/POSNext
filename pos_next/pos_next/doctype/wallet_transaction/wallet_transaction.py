@@ -479,7 +479,7 @@ def reverse_wallet_transactions_for_return(original_invoice, return_invoice):
                 reverse_amount = flt(points_to_reverse * conversion_factor, 2)
             else:
                 # Non-loyalty credit: proportional fallback
-	            reverse_amount = flt(wt.amount * return_ratio, 2)
+                reverse_amount = flt(wt.amount * return_ratio, 2)
             if reverse_amount <= 0:
                 continue
             

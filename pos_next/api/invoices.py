@@ -1338,12 +1338,15 @@ def submit_invoice(invoice=None, data=None):
                 )
 
             # Credit return amount to customer wallet when "Add to Customer Credit Balance" is enabled
+            # Frontend signals this by sending an empty payments array for the return invoice
+            add_to_customer_balance = not invoice.get("payments")
             try:
                 from pos_next.pos_next.doctype.wallet_transaction.wallet_transaction import credit_return_to_wallet
-                credit_return_to_wallet(
-                    return_invoice=invoice_doc.name,
-                    amount=abs(flt(invoice_doc.grand_total))
-                )
+                if add_to_customer_balance:
+                    credit_return_to_wallet(
+                        return_invoice=invoice_doc.name,
+                        amount=abs(flt(invoice_doc.grand_total))
+                    )
             except Exception as credit_wallet_error:
                 frappe.log_error(
                     title="Wallet Credit on Return Error",
