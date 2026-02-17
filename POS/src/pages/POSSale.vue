@@ -600,7 +600,6 @@
 				v-model="showPOSSettings"
 				:pos-profile="shiftStore.profileName"
 				:current-warehouse="shiftStore.profileWarehouse"
-				@warehouse-changed="handleWarehouseChanged"
 			/>
 
 			<!-- Stock Lookup Dialog (Products Menu) -->

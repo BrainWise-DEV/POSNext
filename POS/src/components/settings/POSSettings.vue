@@ -485,7 +485,7 @@ const props = defineProps({
 	currentWarehouse: String,
 })
 
-const emit = defineEmits(["update:modelValue", "warehouse-changed"])
+const emit = defineEmits(["update:modelValue"])
 
 const show = ref(props.modelValue)
 
@@ -727,10 +727,8 @@ async function saveSettings() {
 
 			if (warehouseResult && warehouseResult.success) {
 				// Add warehouse to new settings for change detection
+				// (detectSettingsChanges below will emit settings:warehouse-changed via event bus)
 				settings.value.warehouse = selectedWarehouse.value
-
-				// Emit event to parent to reload stock with new warehouse
-				emit("warehouse-changed", selectedWarehouse.value)
 			}
 		}
 
