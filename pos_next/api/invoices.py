@@ -2472,6 +2472,7 @@ def apply_offers(invoice_data, selected_offers=None):
                         "base_rate": flt(item.get("rate") or price_list_rate),
                         "discount_percentage": 0,
                         "discount_amount": 0,
+                        "warehouse": item.get("warehouse") or profile.warehouse,
                         "parenttype": invoice.get("doctype") or "Sales Invoice",
                     }
                 )
