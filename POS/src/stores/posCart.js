@@ -672,12 +672,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		return result
 	}
 
-	/**
-	 * Validates applied offers and removes invalid ones when cart changes
-	 * This function is called automatically when items are added/removed or quantities change
-	 * @param {Object} currentProfile - Current POS profile
-	 * @param {AbortSignal} signal - Optional abort signal for cancellation
-	 */
+
 	/**
 	 * Validates applied offers and removes invalid ones when cart changes.
 	 * This function is called from processOffersInternal - it does NOT manage
@@ -784,117 +779,6 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			console.error("Error validating offers:", error)
 			offerProcessingState.value.error = error.message
 			return false
-		}
-	}
-
-	/**
-	 * Automatically applies ALL eligible offers when cart changes.
-	 * This function is called from processOffersInternal - it does NOT check
-	 * @param {Object} currentProfile - Current POS profile
-	 * @param {AbortSignal} signal - Optional abort signal for cancellation
-	 */
-	async function autoApplyEligibleOffers(currentProfile, signal = null) {
-		// Skip if cart is empty or no offers available
-		if (invoiceItems.value.length === 0 || !offersStore.hasFetched) {
-			return
-		}
-
-		// Check for cancellation
-		if (signal?.aborted) return
-
-		try {
-			// Build current cart snapshot
-			const cartSnapshot = buildCartSnapshot()
-			offersStore.updateCartSnapshot(cartSnapshot)
-
-			// Get ALL eligible offers (not just auto-offers)
-			const allEligibleOffers = offersStore.allEligibleOffers
-
-			if (allEligibleOffers.length === 0) {
-				return
-			}
-
-			// Find offers that are not yet applied
-			const appliedOfferCodes = new Set(appliedOffers.value.map(o => o.code))
-			const newOffers = allEligibleOffers.filter(offer =>
-				!appliedOfferCodes.has(offer.name)
-			)
-
-			if (newOffers.length === 0) {
-				return
-			}
-
-			// Check for cancellation before API call
-			if (signal?.aborted) return
-
-			// Apply all new eligible offers in a single batch
-			const existingCodes = appliedOffers.value.map(entry => entry.code)
-			const newOfferCodes = newOffers.map(offer => offer.name)
-			const allCodes = [...existingCodes, ...newOfferCodes]
-
-			const invoiceData = buildOfferEvaluationPayload(currentProfile)
-
-			const response = await applyOffersResource.submit({
-				invoice_data: invoiceData,
-				selected_offers: allCodes,
-			})
-
-			// Check for cancellation after API call
-			if (signal?.aborted) return
-
-			const { items: responseItems, freeItems, appliedRules } =
-				parseOfferResponse(response)
-
-			applyDiscountsFromServer(responseItems)
-			processFreeItems(freeItems)
-			filterActiveOffers(appliedRules)
-
-			// Collect newly applied offers for notification
-			const newlyAppliedOffers = []
-
-			// Add newly applied offers to the list
-			for (const offer of newOffers) {
-				const offerCode = offer.name
-				// Check if the offer was actually applied by ERPNext
-				if (!appliedRules.includes(offerCode)) {
-					continue
-				}
-
-				const offerRuleCodes = appliedRules.filter(ruleName => ruleName === offerCode)
-				appliedOffers.value.push({
-					name: offer.title || offer.name,
-					code: offerCode,
-					offer, // Store full offer object for validation
-					source: "auto",
-					applied: true,
-					rules: offerRuleCodes,
-					min_qty: offer.min_qty,
-					max_qty: offer.max_qty,
-					min_amt: offer.min_amt,
-					max_amt: offer.max_amt,
-				})
-
-				newlyAppliedOffers.push(offer.title || offer.name)
-			}
-
-			offerProcessingState.value.lastProcessedAt = Date.now()
-
-			// Wait for Vue reactivity to propagate before showing toast
-			// This ensures the UI reflects the discount when the toast appears
-			await nextTick()
-
-			// Show consolidated toast for all newly applied offers
-			if (newlyAppliedOffers.length > 0) {
-				if (newlyAppliedOffers.length === 1) {
-					showSuccess(__('Offer applied: {0}', [newlyAppliedOffers[0]]))
-				} else {
-					showSuccess(__('Offers applied: {0}', [newlyAppliedOffers.join(', ')]))
-				}
-			}
-		} catch (error) {
-			if (signal?.aborted) return
-			console.error("Error auto-applying offers:", error)
-			offerProcessingState.value.error = error.message
 		}
 	}
 
@@ -1803,7 +1687,6 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		applyOffer,
 		removeOffer,
 		reapplyOffer,
-		autoApplyEligibleOffers,
 		changeItemUOM,
 		updateItemDetails,
 		getItemDetailsResource,
