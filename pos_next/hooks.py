@@ -1,5 +1,25 @@
 from pos_next.utils import get_build_version
 
+
+def _has_native_coupon_code_field():
+	"""Check if ERPNext has a native coupon_code field on Sales Invoice (v16+)."""
+	try:
+		import json
+		import os
+		si_json_path = os.path.join(
+			os.path.dirname(__file__), "..", "erpnext",
+			"accounts", "doctype", "sales_invoice", "sales_invoice.json"
+		)
+		si_json_path = os.path.normpath(si_json_path)
+		if os.path.exists(si_json_path):
+			with open(si_json_path) as f:
+				meta = json.load(f)
+			return any(f.get("fieldname") == "coupon_code" for f in meta.get("fields", []))
+	except Exception:
+		pass
+	return False
+
+
 app_name = "pos_next"
 app_title = "POS Next"
 app_publisher = "BrainWise"
@@ -86,6 +106,28 @@ doctype_list_js = {"Coupon Code": "public/js/coupon_code_list.js"}
 
 # Fixtures
 # --------
+# Build custom field list dynamically: skip coupon_code on Sales Invoice
+# if ERPNext already has it natively (v16+)
+_custom_field_names = [
+	"Sales Invoice-posa_pos_opening_shift",
+	"Sales Invoice-posa_is_printed",
+	"Sales Invoice-posa_coupon_code",
+	"Item-custom_company",
+	"POS Profile-posa_cash_mode_of_payment",
+	"POS Profile-posa_allow_delete",
+	"POS Profile-posa_block_sale_beyond_available_qty",
+	"Mode of Payment-is_wallet_payment",
+	"Coupon Code-pos_next_section",
+	"Coupon Code-pos_next_gift_card",
+	"Coupon Code-gift_card_amount",
+	"Coupon Code-original_gift_card_amount",
+	"Coupon Code-coupon_code_residual",
+	"Coupon Code-source_invoice",
+	"Coupon Code-referral_code",
+]
+if not _has_native_coupon_code_field():
+	_custom_field_names.insert(3, "Sales Invoice-coupon_code")
+
 fixtures = [
 	{
 		"dt": "Custom Field",
@@ -93,24 +135,7 @@ fixtures = [
 			[
 				"name",
 				"in",
-				[
-					"Sales Invoice-posa_pos_opening_shift",
-					"Sales Invoice-posa_is_printed",
-					"Sales Invoice-posa_coupon_code",
-					"Sales Invoice-coupon_code",
-					"Item-custom_company",
-					"POS Profile-posa_cash_mode_of_payment",
-					"POS Profile-posa_allow_delete",
-					"POS Profile-posa_block_sale_beyond_available_qty",
-					"Mode of Payment-is_wallet_payment",
-					"Coupon Code-pos_next_section",
-					"Coupon Code-pos_next_gift_card",
-					"Coupon Code-gift_card_amount",
-					"Coupon Code-original_gift_card_amount",
-					"Coupon Code-coupon_code_residual",
-					"Coupon Code-source_invoice",
-					"Coupon Code-referral_code"
-				]
+				_custom_field_names,
 			]
 		]
 	},
