@@ -1723,12 +1723,15 @@ function createNewCustomer() {
  * @returns {String} 2-letter initials (uppercase)
  */
 function getInitials(name) {
-	if (!name) return "?";
-	const parts = name.split(" ");
+	if (!name || !name.trim()) return "?";
+	const parts = name.trim().split(/\s+/).filter(Boolean);
+	if (parts.length === 0) return "?";
+	const first = Array.from(parts[0])[0] || "?";
 	if (parts.length >= 2) {
-		return (parts[0][0] + parts[1][0]).toUpperCase();
+		const second = Array.from(parts[1])[0] || "?";
+		return (first + second).toUpperCase();
 	}
-	return name.substring(0, 2).toUpperCase();
+	return Array.from(parts[0]).slice(0, 2).join("").toUpperCase();
 }
 
 /**
