@@ -1494,18 +1494,17 @@ const customerResults = computed(() => {
 	if (searchValue.length < 2) {
 		if (customerSearchFocused.value) {
 			// Get frequent customer IDs from the store
-			const frequentIds = customerSearchStore.frequentCustomers.slice(0, 5);
-			if (frequentIds.length > 0) {
-				// O(1) lookup using pre-computed map instead of O(n) find
-				const frequentCustomers = [];
-				for (const id of frequentIds) {
-					const cust = customerMap.value.get(id);
-					if (cust) frequentCustomers.push(cust);
-				}
-				return frequentCustomers;
-			}
+			// const frequentIds = customerSearchStore.frequentCustomers.slice(0, 5);
+			// if (frequentIds.length > 0) {
+			// 	const frequentCustomers = [];
+			// 	for (const id of frequentIds) {
+			// 		const cust = customerMap.value.get(id);
+			// 		if (cust) frequentCustomers.push(cust);
+			// 	}
+			// 	return frequentCustomers;
+			// }
 			// If no frequent customers, show first 5 from the list
-			return allCustomers.value.slice(0, 5);
+			return allCustomers.value.slice(0, 10);
 		}
 		return [];
 	}
