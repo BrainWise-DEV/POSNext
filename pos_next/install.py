@@ -12,6 +12,7 @@ This module handles post-fixture tasks like setting defaults and clearing cache.
 """
 import frappe
 import logging
+from pos_next.hooks import _has_native_coupon_code_field
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -21,6 +22,9 @@ def after_install():
 	"""Hook that runs after app installation"""
 	try:
 		log_message("POS Next: Running post-install setup", level="info")
+
+		# Ensure coupon_code custom field exists on v15 (native on v16+)
+		ensure_coupon_code_field()
 
 		# Setup default print format for POS Profiles
 		setup_default_print_format()
@@ -43,6 +47,9 @@ def after_install():
 def after_migrate():
 	"""Hook that runs after bench migrate"""
 	try:
+		# Ensure coupon_code custom field exists on v15 (native on v16+)
+		ensure_coupon_code_field(quiet=True)
+
 		# Setup default print format
 		setup_default_print_format(quiet=True)
 
@@ -59,6 +66,38 @@ def after_migrate():
 		)
 		log_message(f"POS Next: Migration error - {str(e)}", level="error")
 		raise
+
+
+def ensure_coupon_code_field(quiet=False):
+	"""Create coupon_code Custom Field on Sales Invoice for ERPNext v15 (not needed on v16+)."""
+	if _has_native_coupon_code_field():
+		if not quiet:
+			log_message("ERPNext has native coupon_code on Sales Invoice, skipping custom field", level="info")
+		return
+
+	if frappe.db.exists("Custom Field", "Sales Invoice-coupon_code"):
+		if not quiet:
+			log_message("Custom Field Sales Invoice-coupon_code already exists", level="info")
+		return
+
+	if not quiet:
+		log_message("Creating coupon_code Custom Field on Sales Invoice (ERPNext v15)", level="info")
+
+	from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
+	create_custom_fields({
+		"Sales Invoice": [
+			{
+				"fieldname": "coupon_code",
+				"fieldtype": "Link",
+				"label": "Coupon Code",
+				"options": "Coupon Code",
+				"insert_after": "additional_discount_percentage",
+				"no_copy": 1,
+				"print_hide": 1,
+				"description": "Coupon Code used for this invoice",
+			}
+		]
+	})
 
 
 def setup_default_print_format(quiet=False):
