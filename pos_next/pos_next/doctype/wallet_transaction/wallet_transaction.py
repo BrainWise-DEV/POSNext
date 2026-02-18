@@ -293,61 +293,61 @@ def credit_loyalty_points_to_wallet(customer, company, loyalty_points, conversio
 	return transaction
 
 def credit_return_to_wallet(return_invoice, amount=None):
-    """
-    Create a Credit wallet transaction when "Add to Customer Credit Balance"
-    is enabled on a return invoice.
+	"""
+	Create a Credit wallet transaction when "Add to Customer Credit Balance"
+	is enabled on a return invoice.
 
-    The return amount is credited to the customer's wallet instead of a cash refund.
-    Works for both full and partial returns — the amount is taken from the
-    return invoice's grand_total (absolute value) or can be explicitly passed.
+	The return amount is credited to the customer's wallet instead of a cash refund.
+	Works for both full and partial returns — the amount is taken from the
+	return invoice's grand_total (absolute value) or can be explicitly passed.
 
-    Args:
-        return_invoice: Return Sales Invoice name (is_return=1)
-        amount: Explicit credit amount (optional). If not provided,
-                uses abs(return_invoice.grand_total).
+	Args:
+		return_invoice: Return Sales Invoice name (is_return=1)
+		amount: Explicit credit amount (optional). If not provided,
+				uses abs(return_invoice.grand_total).
 
-    Returns:
-        Wallet Transaction document or None
-    """
-    return_doc = frappe.get_doc("Sales Invoice", return_invoice)
+	Returns:
+		Wallet Transaction document or None
+	"""
+	return_doc = frappe.get_doc("Sales Invoice", return_invoice)
 
-    if not return_doc.is_return:
-        frappe.log_error(
-            title="Wallet Credit on Return Error",
-            message=f"Invoice {return_invoice} is not a return invoice"
-        )
-        return None
+	if not return_doc.is_return:
+		frappe.log_error(
+			title="Wallet Credit on Return Error",
+			message=f"Invoice {return_invoice} is not a return invoice"
+		)
+		return None
 
-    customer = return_doc.customer
-    company = return_doc.company
+	customer = return_doc.customer
+	company = return_doc.company
 
-    # Determine credit amount: explicit amount or absolute grand_total
-    credit_amount = flt(amount) if amount else abs(flt(return_doc.grand_total))
+	# Determine credit amount: explicit amount or absolute grand_total
+	credit_amount = flt(amount) if amount else abs(flt(return_doc.grand_total))
 
-    if credit_amount <= 0:
-        return None
+	if credit_amount <= 0:
+		return None
 
-    # Get or create customer wallet
-    from pos_next.pos_next.doctype.wallet.wallet import get_or_create_wallet
-    wallet = get_or_create_wallet(customer, company)
+	# Get or create customer wallet
+	from pos_next.pos_next.doctype.wallet.wallet import get_or_create_wallet
+	wallet = get_or_create_wallet(customer, company)
 
-    if not wallet:
-        frappe.log_error(
-            title="Wallet Credit on Return Error",
-            message=f"Could not get or create wallet for customer {customer}, company {company}"
-        )
-        return None
+	if not wallet:
+		frappe.log_error(
+			title="Wallet Credit on Return Error",
+			message=f"Could not get or create wallet for customer {customer}, company {company}"
+		)
+		return None
 
-    # Determine source account — use company's default receivable account for refunds
-    source_account = frappe.get_cached_value("Company", company, "default_receivable_account")
+	# Determine source account — use company's default receivable account for refunds
+	source_account = frappe.get_cached_value("Company", company, "default_receivable_account")
 
-    if not source_account:
-        frappe.log_error(
-            title="Wallet Credit on Return Error",
-            message=f"No default receivable account for company {company}"
-        )
-        return None
-    transaction = frappe.get_doc({
+	if not source_account:
+		frappe.log_error(
+			title="Wallet Credit on Return Error",
+			message=f"No default receivable account for company {company}"
+		)
+		return None
+	transaction = frappe.get_doc({
 		"doctype": "Wallet Transaction",
 		"transaction_type": "Credit",
 		"wallet": wallet["name"],
@@ -364,137 +364,127 @@ def credit_return_to_wallet(return_invoice, amount=None):
 			frappe.format_value(credit_amount, {"fieldtype": "Currency"})
 		)
 	})
-    transaction.flags.ignore_permissions = True
-    transaction.insert(ignore_permissions=True)
-    transaction.submit(ignore_permissions=True)
+	transaction.flags.ignore_permissions = True
+	transaction.insert(ignore_permissions=True)
+	transaction.submit(ignore_permissions=True)
 
-    frappe.msgprint(
+	frappe.msgprint(
 		_("Credited {0} to customer wallet for return {1}").format(
 			frappe.format_value(credit_amount, {"fieldtype": "Currency"}),
 			return_invoice
 		),
 		alert=True, indicator="green"
 	)
-    return transaction
+	return transaction
 
 
 @frappe.whitelist()
 def reverse_wallet_transactions_for_return(original_invoice, return_invoice):
-    """
-    Reverse wallet transactions linked to the original invoice when a return is made.
-    
-    For full returns: Cancel the linked Wallet Transaction(s)
-    For partial returns: Create a proportional Debit transaction to reverse the credit
-    
-    Args:
-        original_invoice: Original Sales Invoice name
-        return_invoice: Return Sales Invoice name (is_return=1)
-    """
-    # Get the return invoice to calculate return ratio
-    return_doc = frappe.get_doc("Sales Invoice", return_invoice)
-    original_doc = frappe.get_doc("Sales Invoice", original_invoice)
-    
-    if not return_doc.is_return or return_doc.return_against != original_invoice:
-        return
-    
-    # Find all submitted Wallet Transactions linked to the original invoice
-    wallet_transactions = frappe.get_all(
-        "Wallet Transaction",
-        filters={
-            "reference_doctype": "Sales Invoice",
-            "reference_name": original_invoice,
-            "docstatus": 1,
-            "transaction_type": ["in", ["Credit", "Loyalty Credit"]]
-        },
-        fields=["name", "wallet", "amount", "transaction_type", "source_type",
-                "source_account", "company", "customer"]
-    )
-    
-    if not wallet_transactions:
-        return
-    
-    # return grand_total is negative, original is positive
-    original_total = abs(flt(original_doc.grand_total))
-    returned_amount = abs(flt(return_doc.grand_total))
+	"""
+	Reverse wallet transactions linked to the original invoice when a return is made.
 
-    if original_total <= 0:
-        return
+	For full returns: Cancel the linked Wallet Transaction(s)
+	For partial returns: Create a proportional Debit transaction to reverse the credit
 
-    # Check if this is a full return
-    return_ratio = flt(returned_amount / original_total, 2)
-    is_full_return = return_ratio >= 0.999  # Allow small rounding tolerance
+	Args:
+		original_invoice: Original Sales Invoice name
+		return_invoice: Return Sales Invoice name (is_return=1)
+	"""
+	# Get the return invoice to calculate return ratio
+	return_doc = frappe.get_doc("Sales Invoice", return_invoice)
+	original_doc = frappe.get_doc("Sales Invoice", original_invoice)
 
-    # Get loyalty program factors using the same function that calculates the original credit
-    # Original: points = eligible_amount / collection_factor, wallet = points * conversion_factor
-    collection_factor = 1.0
-    conversion_factor = 1.0
-    loyalty_program = frappe.db.get_value("Customer", original_doc.customer, "loyalty_program")
+	if not return_doc.is_return or return_doc.return_against != original_invoice:
+		return
 
-    if loyalty_program:
-        conversion_factor = frappe.db.get_value("Loyalty Program", loyalty_program,"conversion_factor") or 1.0
-        collection_factor = frappe.db.get_value("Loyalty Program Collection" ,{"parent":loyalty_program},"collection_factor") or 1.0
+	# Find all submitted Wallet Transactions linked to the original invoice
+	wallet_transactions = frappe.get_all(
+		"Wallet Transaction",
+		filters={
+			"reference_doctype": "Sales Invoice",
+			"reference_name": original_invoice,
+			"docstatus": 1,
+			"transaction_type": ["in", ["Credit", "Loyalty Credit"]]
+		},
+		fields=["name", "wallet", "amount", "transaction_type", "source_type",
+				"source_account", "company", "customer"]
+	)
 
-    for wt in wallet_transactions:
-        if is_full_return:
-            # Full return - cancel the wallet transaction
-            try:
-                wt_doc = frappe.get_doc("Wallet Transaction", wt.name)
-                wt_doc.flags.ignore_permissions = True
-                wt_doc.cancel()
-                frappe.msgprint(
-                    _("Cancelled Wallet Transaction {0} due to full return").format(wt.name),
-                    alert=True, indicator="blue"
-                )
-            except Exception as e:
-                frappe.log_error(
-                    title="Wallet Transaction Cancel on Return Error",
-                    message=f"WT: {wt.name}, Return: {return_invoice}, Error: {str(e)}\n{frappe.get_traceback()}"
-                )
-        else:
-            # Partial return - recalculate reverse amount using the same loyalty formula
-            # points_to_reverse = returned_amount / collection_factor
-            # reverse_amount   = points_to_reverse * conversion_factor
-            if wt.transaction_type == "Loyalty Credit" and loyalty_program:
-                points_to_reverse = flt(returned_amount / collection_factor)
-                reverse_amount = flt(points_to_reverse * conversion_factor, 2)
-            else:
-                # Non-loyalty credit: proportional fallback
-                reverse_amount = flt(wt.amount * return_ratio, 2)
-            if reverse_amount <= 0:
-                continue
-            
-            try:
-                reverse_wt = frappe.get_doc({
-                    "doctype": "Wallet Transaction",
-                    "transaction_type": "Debit",
-                    "wallet": wt.wallet,
-                    "company": wt.company,
-                    "posting_date": today(),
-                    "amount": reverse_amount,
-                    "source_type": "Refund",
-                    "source_account": wt.source_account,
-                    "reference_doctype": "Sales Invoice",
-                    "reference_name": return_invoice,
-                    "remarks": _("Wallet reversal for return {0} against {1}: returned {2}, reversed {3}").format(
-                        return_invoice, original_invoice,
-                        frappe.format_value(returned_amount, {"fieldtype": "Currency"}),
-                        frappe.format_value(reverse_amount, {"fieldtype": "Currency"})
-                    )
-                })
-                reverse_wt.flags.ignore_permissions = True
-                reverse_wt.insert()
-                reverse_wt.submit()
-                
-                frappe.msgprint(
-                    _("Created wallet debit of {0} for partial return {1}").format(
-                        frappe.format_value(reverse_amount, {"fieldtype": "Currency"}),
-                        return_invoice
-                    ),
-                    alert=True, indicator="blue"
-                )
-            except Exception as e:
-                frappe.log_error(
-                    title="Wallet Reversal on Partial Return Error",
-                    message=f"Original WT: {wt.name}, Return: {return_invoice}, "
-                            f"Amount: {reverse_amount}, Error: {str(e)}\n{frappe.get_traceback()}"
-                )
+	if not wallet_transactions:
+		return
+
+	# return grand_total is negative, original is positive
+	original_total = abs(flt(original_doc.grand_total))
+	returned_amount = abs(flt(return_doc.grand_total))
+
+	if original_total <= 0:
+		return
+
+	# Check if this is a full return
+	# Keep full precision for ratio; only round the final reverse_amount
+	return_ratio = returned_amount / original_total
+	is_full_return = return_ratio >= 0.999  # Allow small rounding tolerance
+
+	# Get loyalty program factors using the same function that calculates the original credit
+	# Original: points = eligible_amount / collection_factor, wallet = points * conversion_factor
+	loyalty_program = frappe.db.get_value("Customer", original_doc.customer, "loyalty_program")
+
+	min_spent = 0
+	is_not_loyalty_eligible = False
+	if loyalty_program:
+		min_spent = frappe.db.get_value("Loyalty Program Collection",{"parent": loyalty_program},"min_spent")
+		if min_spent:
+			min_spent = flt(min_spent)
+	inoviced_amount_after_return = flt(original_total) - flt(returned_amount)
+	if min_spent and flt(inoviced_amount_after_return) < flt(min_spent):
+		is_not_loyalty_eligible = True
+	for wt in wallet_transactions:
+		if is_full_return or is_not_loyalty_eligible:
+			# Full return - cancel the wallet transaction
+			try:
+				wt_doc = frappe.get_doc("Wallet Transaction", wt.name)
+				wt_doc.flags.ignore_permissions = True
+				wt_doc.cancel()
+				frappe.msgprint(
+					_("Cancelled Wallet Transaction {0} due to full return").format(wt.name),
+					alert=True, indicator="blue"
+				)
+			except Exception as e:
+				frappe.log_error(
+					title="Wallet Transaction Cancel on Return Error",
+					message=f"WT: {wt.name}, Return: {return_invoice}, Error: {str(e)}\n{frappe.get_traceback()}"
+				)
+		else:
+			reverse_amount = round(flt(wt.amount) * return_ratio, 2)
+			
+			if reverse_amount <= 0:
+				continue
+
+			reverse_wt = frappe.get_doc({
+				"doctype": "Wallet Transaction",
+				"transaction_type": "Debit",
+				"wallet": wt.wallet,
+				"company": wt.company,
+				"posting_date": today(),
+				"amount": reverse_amount,
+				"source_type": "Refund",
+				"source_account": wt.source_account,
+				"reference_doctype": "Sales Invoice",
+				"reference_name": return_invoice,
+				"remarks": _("Wallet reversal for return {0} against {1}: returned {2}, reversed {3}").format(
+					return_invoice, original_invoice,
+					frappe.format_value(returned_amount, {"fieldtype": "Currency"}),
+					frappe.format_value(reverse_amount, {"fieldtype": "Currency"})
+				)
+			})
+			reverse_wt.flags.ignore_permissions = True
+			reverse_wt.insert()
+			reverse_wt.submit()
+
+			frappe.msgprint(
+				_("Created wallet debit of {0} for partial return {1}").format(
+					frappe.format_value(reverse_amount, {"fieldtype": "Currency"}),
+					return_invoice
+				),
+				alert=True, indicator="blue"
+			)
