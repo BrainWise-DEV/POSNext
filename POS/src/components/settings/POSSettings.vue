@@ -413,6 +413,118 @@
 													</button>
 												</div>
 
+												<!-- QZ Certificate Status & Setup -->
+												<div
+													:class="[
+														'p-3 rounded-lg border',
+														qzCertStatus === 'trusted'
+															? 'bg-green-50 border-green-200'
+															: qzCertStatus === 'untrusted'
+																? 'bg-red-50 border-red-200'
+																: 'bg-amber-50 border-amber-200'
+													]"
+												>
+													<div class="flex items-start gap-2">
+														<!-- Icon changes based on status -->
+														<svg
+															class="w-4 h-4 mt-0.5 flex-shrink-0"
+															:class="qzCertStatus === 'trusted' ? 'text-green-600' : qzCertStatus === 'untrusted' ? 'text-red-600' : 'text-amber-600'"
+															fill="none" stroke="currentColor" viewBox="0 0 24 24"
+														>
+															<path v-if="qzCertStatus === 'trusted'" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+															<path v-else stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+														</svg>
+														<div class="flex-1">
+															<!-- Title with inline status badge -->
+															<div class="flex items-center gap-2 mb-1">
+																<p
+																	class="text-xs font-semibold"
+																	:class="qzCertStatus === 'trusted' ? 'text-green-900' : qzCertStatus === 'untrusted' ? 'text-red-900' : 'text-amber-900'"
+																>
+																	{{ __('Silent Print Certificate') }}
+																</p>
+																<span
+																	v-if="qzCertStatus === 'trusted'"
+																	class="inline-flex items-center gap-1 px-1.5 py-0.5 bg-green-100 border border-green-300 rounded-full"
+																>
+																	<span class="w-1.5 h-1.5 bg-green-500 rounded-full"></span>
+																	<span class="text-[10px] font-medium text-green-800">{{ __('Installed') }}</span>
+																</span>
+																<span
+																	v-else-if="qzCertStatus === 'untrusted'"
+																	class="inline-flex items-center gap-1 px-1.5 py-0.5 bg-red-100 border border-red-300 rounded-full"
+																>
+																	<span class="w-1.5 h-1.5 bg-red-500 rounded-full"></span>
+																	<span class="text-[10px] font-medium text-red-800">{{ __('Not Installed') }}</span>
+																</span>
+																<span
+																	v-else
+																	class="inline-flex items-center gap-1 px-1.5 py-0.5 bg-amber-100 border border-amber-300 rounded-full"
+																>
+																	<span class="w-1.5 h-1.5 bg-amber-500 rounded-full"></span>
+																	<span class="text-[10px] font-medium text-amber-800">{{ __('Checking...') }}</span>
+																</span>
+															</div>
+
+															<!-- Status message -->
+															<p
+																v-if="qzCertStatus === 'trusted'"
+																class="text-xs text-green-800 leading-relaxed mb-2"
+															>
+																{{ __('Certificate is installed and signing is active. Print jobs will be sent silently without confirmation dialogs.') }}
+															</p>
+															<p
+																v-else-if="qzCertStatus === 'untrusted'"
+																class="text-xs text-red-800 leading-relaxed mb-2"
+															>
+																{{ __('Certificate is not installed on this machine. Generate a certificate, download it, and import it into QZ Tray.') }}
+															</p>
+															<p
+																v-else
+																class="text-xs text-amber-800 leading-relaxed mb-2"
+															>
+																{{ __('To print without confirmation dialogs, generate a signing certificate and install it on each POS machine.') }}
+															</p>
+
+															<!-- Action buttons -->
+															<div class="flex items-center gap-2 flex-wrap">
+																<button
+																	v-if="qzCertStatus !== 'trusted'"
+																	@click="handleSetupQzCertificate"
+																	:disabled="qzCertLoading"
+																	class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white rounded-md transition-colors bg-amber-600 hover:bg-amber-700 disabled:bg-amber-400"
+																>
+																	<svg v-if="qzCertLoading" class="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+																		<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+																		<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+																	</svg>
+																	<svg v-else class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+																		<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+																	</svg>
+																	{{ __('Generate Certificate') }}
+																</button>
+																<button
+																	v-if="qzCertReady"
+																	@click="handleDownloadQzCertificate"
+																	class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-md transition-colors"
+																>
+																	<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+																		<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+																	</svg>
+																	{{ __('Download Certificate') }}
+																</button>
+															</div>
+
+															<!-- Install instructions (only when cert exists but not trusted yet) -->
+															<p v-if="qzCertReady && qzCertStatus !== 'trusted'" class="text-xs mt-2"
+																:class="qzCertStatus === 'untrusted' ? 'text-red-700' : 'text-amber-700'"
+															>
+																{{ __('Download the certificate and import it into QZ Tray, then restart QZ Tray.') }}
+															</p>
+														</div>
+													</div>
+												</div>
+
 												<!-- Help text -->
 												<div class="p-3 bg-teal-50 border border-teal-200 rounded-lg">
 													<div class="flex items-start gap-2">
@@ -466,14 +578,7 @@ import { offlineWorker } from "@/utils/offline/workerClient"
 import { logger } from "@/utils/logger"
 import { usePOSEvents } from "@/composables/usePOSEvents"
 import TranslatedHTML from "../common/TranslatedHTML.vue"
-import {
-	qzConnected,
-	qzConnecting,
-	connect as qzConnect,
-	findPrinters,
-	getSavedPrinterName,
-	savePrinterName,
-} from "@/utils/qzTray"
+import { useQzTray } from "@/composables/useQzTray"
 
 const log = logger.create('POSSettings')
 const { detectSettingsChanges, updateSettingsSnapshot, emitStockSyncConfigured } = usePOSEvents()
@@ -526,14 +631,22 @@ const stockSyncStatus = ref({
 	running: false
 })
 
-// QZ Tray printer state
-const qzPrinters = ref([])
-const selectedPrinter = ref(getSavedPrinterName())
-const loadingPrinters = ref(false)
-
-const printerOptions = computed(() =>
-	qzPrinters.value.map((p) => ({ label: p, value: p }))
-)
+// QZ Tray composable
+const {
+	qzConnected,
+	qzConnecting,
+	qzCertStatus,
+	printers: qzPrinters,
+	selectedPrinter,
+	loadingPrinters,
+	printerOptions,
+	certLoading: qzCertLoading,
+	certReady: qzCertReady,
+	handleConnect: handleQzConnect,
+	refreshPrinters: handleRefreshPrinters,
+	generateCertificate: handleSetupQzCertificate,
+	downloadCertificate: handleDownloadQzCertificate,
+} = useQzTray()
 
 // Warehouse options
 const warehouseOptions = computed(() => {
@@ -771,39 +884,6 @@ async function saveSettings() {
 		saving.value = false
 	}
 }
-
-// ============================================================================
-// QZ TRAY FUNCTIONS
-// ============================================================================
-
-async function handleQzConnect() {
-	const ok = await qzConnect()
-	if (ok) {
-		await handleRefreshPrinters()
-	}
-}
-
-async function handleRefreshPrinters() {
-	loadingPrinters.value = true
-	try {
-		qzPrinters.value = await findPrinters()
-		// Auto-select if only one printer or restore saved selection
-		const saved = getSavedPrinterName()
-		if (qzPrinters.value.length === 1) {
-			selectedPrinter.value = qzPrinters.value[0]
-			savePrinterName(selectedPrinter.value)
-		} else if (saved && qzPrinters.value.includes(saved)) {
-			selectedPrinter.value = saved
-		}
-	} finally {
-		loadingPrinters.value = false
-	}
-}
-
-// Save printer selection when changed
-watch(selectedPrinter, (name) => {
-	if (name) savePrinterName(name)
-})
 
 // Auto-connect and discover printers when silent_print is toggled on
 watch(

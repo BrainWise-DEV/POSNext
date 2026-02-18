@@ -1,5 +1,6 @@
 import qz from "qz-tray"
 import { ref } from "vue"
+import { call } from "@/utils/apiWrapper"
 import { logger } from "@/utils/logger"
 
 const log = logger.create("QZTray")
@@ -13,6 +14,14 @@ export const qzConnected = ref(false)
 
 /** Whether a connection attempt is in progress */
 export const qzConnecting = ref(false)
+
+/**
+ * Certificate trust status:
+ *   "unknown"   — not yet determined (no connection or no print attempted)
+ *   "trusted"   — cert was provided AND first signing succeeded (silent print)
+ *   "untrusted" — cert or signing failed (dialogs will appear)
+ */
+export const qzCertStatus = ref("unknown")
 
 // ============================================================================
 // localStorage Persistence
@@ -42,18 +51,65 @@ export function savePrinterName(name) {
 
 let _securityInitialized = false
 
+/** Cached certificate text — fetched once, reused for the session */
+let _cachedCert = null
+
+/** Whether the server has a valid cert to provide */
+let _certProvided = false
+
 function setupSecurity() {
 	if (_securityInitialized) return
 	_securityInitialized = true
 
-	qz.security.setCertificatePromise((resolve) => {
-		resolve()
+	// Certificate callback — called once during WebSocket handshake.
+	// Fetches the public cert from the server and caches it.
+	qz.security.setCertificatePromise((resolve, reject) => {
+		if (_cachedCert) {
+			_certProvided = true
+			resolve(_cachedCert)
+			return
+		}
+
+		call("pos_next.api.qz.get_certificate")
+			.then((cert) => {
+				const pem = cert?.message || cert
+				if (pem) {
+					_cachedCert = pem
+					_certProvided = true
+				} else {
+					_certProvided = false
+					qzCertStatus.value = "untrusted"
+				}
+				resolve(pem)
+			})
+			.catch((err) => {
+				log.warn("Could not fetch QZ certificate:", err?.message || err)
+				_certProvided = false
+				qzCertStatus.value = "untrusted"
+				// Resolve empty so QZ falls back to unsigned (shows dialog)
+				resolve()
+			})
 	})
 
+	// Signature callback — called on every print/serial operation.
+	// Sends the message to the server for RSA-SHA512 signing.
 	qz.security.setSignatureAlgorithm("SHA512")
-	qz.security.setSignaturePromise(() => {
-		return (resolve) => {
-			resolve()
+	qz.security.setSignaturePromise((toSign) => {
+		return (resolve, reject) => {
+			call("pos_next.api.qz.sign_message", { message: toSign })
+				.then((sig) => {
+					const signature = sig?.message || sig
+					if (signature && _certProvided) {
+						qzCertStatus.value = "trusted"
+					}
+					resolve(signature)
+				})
+				.catch((err) => {
+					log.warn("Could not sign QZ message:", err?.message || err)
+					qzCertStatus.value = "untrusted"
+					// Resolve empty so QZ falls back to unsigned (shows dialog)
+					resolve()
+				})
 		}
 	})
 }
@@ -94,6 +150,7 @@ async function _doConnect() {
 		log.info("QZ Tray connection closed")
 		qzConnected.value = false
 		qzConnecting.value = false
+		qzCertStatus.value = "unknown"
 	})
 
 	qzConnecting.value = true
@@ -102,6 +159,11 @@ async function _doConnect() {
 		await qz.websocket.connect()
 		qzConnected.value = true
 		log.info("Connected to QZ Tray")
+
+		// Probe trust status — findPrinters triggers the signature callback,
+		// which updates qzCertStatus to "trusted" or "untrusted".
+		qz.printers.find().catch(() => {})
+
 		return true
 	} catch (err) {
 		qzConnected.value = false
