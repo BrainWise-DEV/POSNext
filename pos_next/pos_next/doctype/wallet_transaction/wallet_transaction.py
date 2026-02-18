@@ -7,7 +7,7 @@ from frappe.utils import flt, today
 from erpnext.accounts.general_ledger import make_gl_entries
 from erpnext.controllers.accounts_controller import AccountsController
 from erpnext.accounts.doctype.loyalty_program.loyalty_program import get_loyalty_program_details_with_points
-from pos_next.pos_next.doctype.wallet.wallet import get_or_create_wallet
+
 class WalletTransaction(AccountsController):
 	def validate(self):
 		self.validate_wallet()
@@ -275,6 +275,7 @@ def credit_loyalty_points_to_wallet(customer, company, loyalty_points, conversio
 		return None
 
 	# Get or create customer wallet
+	from pos_next.pos_next.doctype.wallet.wallet import get_or_create_wallet
 	wallet = get_or_create_wallet(customer, company)
 
 	# Create wallet credit transaction
@@ -291,7 +292,6 @@ def credit_loyalty_points_to_wallet(customer, company, loyalty_points, conversio
 
 	return transaction
 
-@frappe.whitelist()
 def credit_return_to_wallet(return_invoice, amount=None):
     """
     Create a Credit wallet transaction when "Add to Customer Credit Balance"
@@ -328,6 +328,7 @@ def credit_return_to_wallet(return_invoice, amount=None):
         return None
 
     # Get or create customer wallet
+    from pos_next.pos_next.doctype.wallet.wallet import get_or_create_wallet
     wallet = get_or_create_wallet(customer, company)
 
     if not wallet:
@@ -346,46 +347,35 @@ def credit_return_to_wallet(return_invoice, amount=None):
             message=f"No default receivable account for company {company}"
         )
         return None
+    transaction = frappe.get_doc({
+		"doctype": "Wallet Transaction",
+		"transaction_type": "Credit",
+		"wallet": wallet["name"],
+		"company": company,
+		"posting_date": today(),
+		"amount": credit_amount,
+		"source_type": "Refund",
+		"source_account": source_account,
+		"reference_doctype": "Sales Invoice",
+		"reference_name": return_invoice,
+		"remarks": _("Return credit to wallet for {0} against {1}: {2}").format(
+			return_invoice,
+			return_doc.return_against or "",
+			frappe.format_value(credit_amount, {"fieldtype": "Currency"})
+		)
+	})
+    transaction.flags.ignore_permissions = True
+    transaction.insert(ignore_permissions=True)
+    transaction.submit(ignore_permissions=True)
 
-    try:
-        transaction = frappe.get_doc({
-            "doctype": "Wallet Transaction",
-            "transaction_type": "Credit",
-            "wallet": wallet["name"],
-            "company": company,
-            "posting_date": today(),
-            "amount": credit_amount,
-            "source_type": "Refund",
-            "source_account": source_account,
-            "reference_doctype": "Sales Invoice",
-            "reference_name": return_invoice,
-            "remarks": _("Return credit to wallet for {0} against {1}: {2}").format(
-                return_invoice,
-                return_doc.return_against or "",
-                frappe.format_value(credit_amount, {"fieldtype": "Currency"})
-            )
-        })
-        transaction.flags.ignore_permissions = True
-        transaction.insert()
-        transaction.submit()
-
-        frappe.msgprint(
-            _("Credited {0} to customer wallet for return {1}").format(
-                frappe.format_value(credit_amount, {"fieldtype": "Currency"}),
-                return_invoice
-            ),
-            alert=True, indicator="green"
-        )
-
-        return transaction
-
-    except Exception as e:
-        frappe.log_error(
-            title="Wallet Credit on Return Error",
-            message=f"Return Invoice: {return_invoice}, Amount: {credit_amount}, "
-                    f"Error: {str(e)}\n{frappe.get_traceback()}"
-        )
-        return None
+    frappe.msgprint(
+		_("Credited {0} to customer wallet for return {1}").format(
+			frappe.format_value(credit_amount, {"fieldtype": "Currency"}),
+			return_invoice
+		),
+		alert=True, indicator="green"
+	)
+    return transaction
 
 
 @frappe.whitelist()
@@ -441,16 +431,8 @@ def reverse_wallet_transactions_for_return(original_invoice, return_invoice):
     loyalty_program = frappe.db.get_value("Customer", original_doc.customer, "loyalty_program")
 
     if loyalty_program:
-        lp_details = get_loyalty_program_details_with_points(
-            original_doc.customer,
-            loyalty_program=loyalty_program,
-            expiry_date=original_doc.posting_date,
-            company=original_doc.company,
-            include_expired_entry=True,
-        )
-        if lp_details:
-            collection_factor = flt(lp_details.collection_factor) or 1.0
-            conversion_factor = flt(lp_details.conversion_factor) or 1.0
+        conversion_factor = frappe.db.get_value("Loyalty Program", loyalty_program,"conversion_factor") or 1.0
+        collection_factor = frappe.db.get_value("Loyalty Program Collection" ,{"parent":loyalty_program},"collection_factor") or 1.0
 
     for wt in wallet_transactions:
         if is_full_return:
