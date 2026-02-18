@@ -292,7 +292,7 @@
 								</div>
 
 								<!-- Free Item -->
-								<div v-if="item?.free_qty > 0" class="flex items-start justify-between items-center gap-2 bg-green-50 px-2 py-1 my-2 rounded border border-green-100">
+								<div v-if="item?.free_qty > 0" class="flex justify-between items-center gap-2 bg-green-50 px-2 py-1 rounded border border-green-100">
 									<div class="flex-1 min-w-0 text-start">
 										<div class="font-medium text-xs text-green-700 truncate flex items-center gap-1">
 											<svg class="w-3 h-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
@@ -300,7 +300,7 @@
 											</svg>
 											{{ item.item_name || item.item_code }} ({{ __('Free') }})
 										</div>
-										<div class="text-[10px] text-green-600 mt-0.5 opacity-80 pl-4">
+										<div class="text-[10px] text-green-600 mt-0.5 opacity-80 ps-4">
 											{{ item.free_qty }} {{ item.uom || item.stock_uom }}
 										</div>
 									</div>
