@@ -931,6 +931,9 @@
 			<!-- Footer -->
 			<POSFooter />
 		</template>
+
+		<!-- Session Lock Screen (outside v-if/v-else so it renders even during loading) -->
+		<SessionLockScreen />
 	</div>
 </template>
 
@@ -946,6 +949,7 @@ let _posInitPromise = null
 import ShiftClosingDialog from "@/components/ShiftClosingDialog.vue";
 import ShiftOpeningDialog from "@/components/ShiftOpeningDialog.vue";
 import ClearCacheOverlay from "@/components/common/ClearCacheOverlay.vue";
+import SessionLockScreen from "@/components/common/SessionLockScreen.vue";
 import LoadingSpinner from "@/components/common/LoadingSpinner.vue";
 import POSFooter from "@/components/common/POSFooter.vue";
 import ManagementSlider from "@/components/pos/ManagementSlider.vue";
@@ -969,6 +973,7 @@ import POSSettings from "@/components/settings/POSSettings.vue";
 import InvoiceManagement from "@/components/invoices/InvoiceManagement.vue";
 import InvoiceDetailDialog from "@/components/invoices/InvoiceDetailDialog.vue";
 import { useRealtimeStock } from "@/composables/useRealtimeStock";
+import { useSessionLock } from "@/composables/useSessionLock";
 import { usePOSEvents } from "@/composables/usePOSEvents";
 import { useLocale } from "@/composables/useLocale";
 import { session } from "@/data/session";
@@ -1011,6 +1016,9 @@ const settingsStore = posSettingsStore;
 
 // Real-time stock updates
 const { onStockUpdate } = useRealtimeStock();
+
+// Session lock (inactivity + tab-refocus)
+const { startActivityTracking, stopActivityTracking } = useSessionLock();
 
 // POS Events system
 const {
@@ -1291,6 +1299,7 @@ onMounted(async () => {
 	// Store cleanup function for unmount
 	onUnmounted(() => {
 		cleanup();
+		stopActivityTracking();
 		qzDisconnect();
 	});
 
@@ -1304,6 +1313,7 @@ onMounted(async () => {
 		const currentProfileName = shiftStore.profileName;
 		if (_initializedProfile && _initializedProfile === currentProfileName) {
 			log.debug("Skipping init — already initialized (remount)");
+			startActivityTracking();
 			updateLayoutBounds();
 			return;
 		}
@@ -1316,6 +1326,7 @@ onMounted(async () => {
 			} catch {
 				// Original caller handles errors; this mount just waits
 			}
+			if (_initializedProfile) startActivityTracking();
 			updateLayoutBounds();
 			return;
 		}
@@ -1323,6 +1334,9 @@ onMounted(async () => {
 		_posInitPromise = initPOS();
 		await _posInitPromise;
 		_posInitPromise = null;
+
+		// Start session lock tracking only after POS is fully ready
+		if (_initializedProfile) startActivityTracking();
 
 		updateLayoutBounds();
 	} catch (error) {
@@ -1674,6 +1688,8 @@ async function handleShiftOpened() {
 		// Load tax rules with tax_inclusive setting
 		await cartStore.loadTaxRules(shiftStore.profileName, posSettingsStore.settings);
 	}
+	// Start session lock tracking now that a shift is open and POS is ready
+	startActivityTracking();
 	showSuccess(__("You can now start making sales"));
 }
 
