@@ -14,19 +14,81 @@ import {
 
 const log = logger.create("useQzTray")
 
+const CERT_READY_KEY = "pos_qz_cert_ready"
+
+// ── Singleton State (shared across all callers) ───────────────────────
+const printers = ref([])
+const selectedPrinter = ref(getSavedPrinterName())
+const loadingPrinters = ref(false)
+const certLoading = ref(false)
+const certReady = ref(_loadCertReady())
+
+const printerOptions = computed(() =>
+	printers.value.map((p) => ({ label: p, value: p }))
+)
+
+// ── localStorage helpers ──────────────────────────────────────────────
+function _loadCertReady() {
+	try {
+		return localStorage.getItem(CERT_READY_KEY) === "1"
+	} catch {
+		return false
+	}
+}
+
+function _saveCertReady(value) {
+	try {
+		if (value) {
+			localStorage.setItem(CERT_READY_KEY, "1")
+		} else {
+			localStorage.removeItem(CERT_READY_KEY)
+		}
+	} catch {
+		// localStorage unavailable
+	}
+}
+
+// ── Smart certificate check ───────────────────────────────────────────
+// Only hits the server when we don't already know the cert exists.
+// Once qzCertStatus becomes "trusted" (from actual QZ handshake),
+// we persist that knowledge so future sessions skip the API call.
+let _certChecked = false
+function _checkCertificateOnce() {
+	if (_certChecked) return
+	_certChecked = true
+
+	// Already confirmed from a previous session — skip API call
+	if (certReady.value) return
+
+	call("pos_next.api.qz.get_certificate")
+		.then((cert) => {
+			if (cert?.message || cert) {
+				certReady.value = true
+				_saveCertReady(true)
+			}
+		})
+		.catch(() => {
+			// Certificate doesn't exist yet — that's fine
+		})
+}
+_checkCertificateOnce()
+
+// Persist printer selection
+watch(selectedPrinter, (name) => {
+	if (name) savePrinterName(name)
+})
+
+// When QZ confirms trust, cache it for future sessions
+watch(qzCertStatus, (status) => {
+	if (status === "trusted") {
+		certReady.value = true
+		_saveCertReady(true)
+	}
+})
+
+// ── Composable ────────────────────────────────────────────────────────
 export function useQzTray() {
 	const { showSuccess, showError } = useToast()
-
-	// ── State ──────────────────────────────────────────────────────────
-	const printers = ref([])
-	const selectedPrinter = ref(getSavedPrinterName())
-	const loadingPrinters = ref(false)
-	const certLoading = ref(false)
-	const certReady = ref(false)
-
-	const printerOptions = computed(() =>
-		printers.value.map((p) => ({ label: p, value: p }))
-	)
 
 	// ── Connection ─────────────────────────────────────────────────────
 	async function handleConnect() {
@@ -60,6 +122,7 @@ export function useQzTray() {
 			const result = await call("pos_next.api.qz.setup_qz_certificate")
 			const data = result?.message || result
 			certReady.value = true
+			_saveCertReady(true)
 			if (data?.status === "exists") {
 				showSuccess(__("Certificate already exists. You can download it below."))
 			} else {
@@ -100,32 +163,13 @@ export function useQzTray() {
 		}
 	}
 
-	async function checkCertificate() {
-		try {
-			const cert = await call("pos_next.api.qz.get_certificate")
-			if (cert?.message || cert) {
-				certReady.value = true
-			}
-		} catch {
-			// Certificate doesn't exist yet — that's fine
-		}
-	}
-
-	// ── Watchers ───────────────────────────────────────────────────────
-	watch(selectedPrinter, (name) => {
-		if (name) savePrinterName(name)
-	})
-
-	// ── Init ───────────────────────────────────────────────────────────
-	checkCertificate()
-
 	return {
 		// Reactive state from qzTray.js
 		qzConnected,
 		qzConnecting,
 		qzCertStatus,
 
-		// Local state
+		// Shared singleton state
 		printers,
 		selectedPrinter,
 		loadingPrinters,
