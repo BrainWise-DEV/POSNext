@@ -3,7 +3,7 @@ name = "pos_next"
 authors = [
     { name = "BrainWise", email = "support@brainwise.me"}
 ]
-description = "“POS built on ERPNext that brings together real-time billing, stock management, multi-user access, offline mode, and direct ERP integration. Run your store or restaurant with confidence and control, while staying 100% open source."
+description = ""POS built on ERPNext that brings together real-time billing, stock management, multi-user access, offline mode, and direct ERP integration. Run your store or restaurant with confidence and control, while staying 100% open source."
 requires-python = ">=3.10"
 readme = "README.md"
 dynamic = ["version"]
@@ -19,6 +19,10 @@ build-backend = "flit_core.buildapi"
 # These dependencies are only installed when developer mode is enabled
 [tool.bench.dev-dependencies]
 # package_name = "~=1.1.0"
+
+[tool.bench.frappe-dependencies]
+frappe = ">=15.0.0,<17.0.0"
+erpnext = ">=15.0.0,<17.0.0"
 
 [tool.ruff]
 line-length = 110
