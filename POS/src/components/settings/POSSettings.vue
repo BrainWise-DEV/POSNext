@@ -578,15 +578,7 @@ import { offlineWorker } from "@/utils/offline/workerClient"
 import { logger } from "@/utils/logger"
 import { usePOSEvents } from "@/composables/usePOSEvents"
 import TranslatedHTML from "../common/TranslatedHTML.vue"
-import {
-	qzConnected,
-	qzConnecting,
-	qzCertStatus,
-	connect as qzConnect,
-	findPrinters,
-	getSavedPrinterName,
-	savePrinterName,
-} from "@/utils/qzTray"
+import { useQzTray } from "@/composables/useQzTray"
 
 const log = logger.create('POSSettings')
 const { detectSettingsChanges, updateSettingsSnapshot, emitStockSyncConfigured } = usePOSEvents()
@@ -639,16 +631,22 @@ const stockSyncStatus = ref({
 	running: false
 })
 
-// QZ Tray printer state
-const qzPrinters = ref([])
-const selectedPrinter = ref(getSavedPrinterName())
-const loadingPrinters = ref(false)
-const qzCertLoading = ref(false)
-const qzCertReady = ref(false)
-
-const printerOptions = computed(() =>
-	qzPrinters.value.map((p) => ({ label: p, value: p }))
-)
+// QZ Tray composable
+const {
+	qzConnected,
+	qzConnecting,
+	qzCertStatus,
+	printers: qzPrinters,
+	selectedPrinter,
+	loadingPrinters,
+	printerOptions,
+	certLoading: qzCertLoading,
+	certReady: qzCertReady,
+	handleConnect: handleQzConnect,
+	refreshPrinters: handleRefreshPrinters,
+	generateCertificate: handleSetupQzCertificate,
+	downloadCertificate: handleDownloadQzCertificate,
+} = useQzTray()
 
 // Warehouse options
 const warehouseOptions = computed(() => {
@@ -887,93 +885,6 @@ async function saveSettings() {
 	}
 }
 
-// ============================================================================
-// QZ TRAY FUNCTIONS
-// ============================================================================
-
-async function handleQzConnect() {
-	const ok = await qzConnect()
-	if (ok) {
-		await handleRefreshPrinters()
-	}
-}
-
-async function handleRefreshPrinters() {
-	loadingPrinters.value = true
-	try {
-		qzPrinters.value = await findPrinters()
-		// Auto-select if only one printer or restore saved selection
-		const saved = getSavedPrinterName()
-		if (qzPrinters.value.length === 1) {
-			selectedPrinter.value = qzPrinters.value[0]
-			savePrinterName(selectedPrinter.value)
-		} else if (saved && qzPrinters.value.includes(saved)) {
-			selectedPrinter.value = saved
-		}
-	} finally {
-		loadingPrinters.value = false
-	}
-}
-
-async function handleSetupQzCertificate() {
-	qzCertLoading.value = true
-	try {
-		const result = await call("pos_next.api.qz.setup_qz_certificate")
-		const data = result?.message || result
-		qzCertReady.value = true
-		if (data?.status === "exists") {
-			showSuccess(__("Certificate already exists. You can download it below."))
-		} else {
-			showSuccess(__("Certificate generated successfully."))
-		}
-	} catch (error) {
-		log.error("Failed to setup QZ certificate:", error)
-		showError(error?.messages?.[0] || error?.message || __("Failed to generate certificate. Are you a System Manager?"))
-	} finally {
-		qzCertLoading.value = false
-	}
-}
-
-async function handleDownloadQzCertificate() {
-	try {
-		const certPem = await call("pos_next.api.qz.get_certificate")
-		const pem = certPem?.message || certPem
-		if (!pem) {
-			showError(__("Certificate not found. Generate it first."))
-			return
-		}
-		const blob = new Blob([pem], { type: "application/x-pem-file" })
-		const url = URL.createObjectURL(blob)
-		const a = document.createElement("a")
-		a.href = url
-		a.download = "override.crt"
-		document.body.appendChild(a)
-		a.click()
-		document.body.removeChild(a)
-		URL.revokeObjectURL(url)
-	} catch (error) {
-		log.error("Failed to download QZ certificate:", error)
-		showError(error?.message || __("Failed to download certificate."))
-	}
-}
-
-// Check if certificate already exists on mount
-async function checkQzCertificate() {
-	try {
-		const cert = await call("pos_next.api.qz.get_certificate")
-		if (cert?.message || cert) {
-			qzCertReady.value = true
-		}
-	} catch {
-		// Certificate doesn't exist yet — that's fine
-	}
-}
-
-// Save printer selection when changed
-watch(selectedPrinter, (name) => {
-	if (name) savePrinterName(name)
-})
-
 // Auto-connect and discover printers when silent_print is toggled on
 watch(
 	() => settings.value.silent_print,
@@ -1088,9 +999,6 @@ watch(stockSyncIntervalSeconds, () => {
 onMounted(async () => {
 	// Load settings
 	loadStockSyncSettings()
-
-	// Check if QZ certificate exists (non-blocking)
-	checkQzCertificate()
 
 	// Update status initially
 	await updateStockSyncStatus()
