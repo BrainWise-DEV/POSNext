@@ -2104,7 +2104,7 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
 
         # Get rate breakdown for display - use 3 decimal precision for rates
         price_list_rate = flt(item.get("price_list_rate") or item.get("rate"), 3)
-        net_rate = flt(item.get("net_rate") or item.get("rate"), 3)
+        net_rate = flt(item.get("rate") or item.get("net_rate"), 3)
         discount_per_unit = flt(price_list_rate - net_rate, 3)
         tax_per_unit = flt(item_tax_map.get(item.get("item_code"), 0) / original_qty, 3) if original_qty else 0
 
