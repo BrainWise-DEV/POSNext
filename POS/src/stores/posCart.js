@@ -1501,7 +1501,6 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			selling_price_list: posProfile.value.selling_price_list,
 			currency: posProfile.value.currency,
 		}
-		// when ANY cart change occurs (items, quantities, prices).
 		try {
 		// 1. Identify invalid offers to remove (client-side check)
 			const invalidOffers = []
@@ -1531,7 +1530,23 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			const newOfferCodes = newOffers.map(o => o.name)
 			const combinedCodes = [...new Set([...validExistingCodes, ...newOfferCodes])]
 
-			if (combinedCodes.length > 0 || invalidOffers.length > 0) {
+			// All applied offers became invalid and no new offers to apply.
+			if (combinedCodes.length === 0 && invalidOffers.length > 0) {
+				suppressOfferReapply.value = true
+				appliedOffers.value = []
+				processFreeItems([])
+				invoiceItems.value.forEach(item => {
+					if (item.pricing_rules && item.pricing_rules.length > 0) {
+						item.discount_percentage = 0
+						item.discount_amount = 0
+						recalculateItem(item)
+					}
+				})
+				rebuildIncrementalCache()
+
+				const names = invalidOffers.map(o => o.name).join(', ')
+				showWarning(__('Offer removed: {0}. Cart no longer meets requirements.', [names]))
+			} else if (combinedCodes.length > 0) {
 				const invoiceData = buildOfferEvaluationPayload(currentProfile)
 				const response = await applyOffersResource.submit({
 					invoice_data: invoiceData,
@@ -1600,16 +1615,16 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			processFreeItems([])
 			rebuildIncrementalCache()
 		}
+			// Update last processed hash on success
+			offerProcessingState.value.lastCartHash = generateCartHash()
+			offerProcessingState.value.lastProcessedAt = Date.now()
+			offerProcessingState.value.retryCount = 0
 		} catch (error) {
 			if (signal?.aborted) return
 			console.error("Error in offer synchronization:", error)
 			offerProcessingState.value.error = error.message
 		}
 
-		// Update last processed hash on success
-		offerProcessingState.value.lastCartHash = generateCartHash()
-		offerProcessingState.value.lastProcessedAt = Date.now()
-		offerProcessingState.value.retryCount = 0
 	}
 
 	/**
