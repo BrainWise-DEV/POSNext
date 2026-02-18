@@ -259,15 +259,25 @@ def get_customer_wallet(customer, company=None):
 def create_wallet_on_customer_insert(doc, method=None):
 	"""Hook: after_insert on Customer. Creates a wallet for each active company with a POS Profile."""
 	try:
-		from pos_next.api.pos_profile import get_pos_profiles
-		pos_profiles = get_pos_profiles()
-		company = pos_profiles[0].company
+		pos_profile = frappe.db.get_value(
+				"POS Opening Shift",
+				{
+					"user": frappe.session.user,
+					"pos_closing_shift": ["is", "not set"],
+					"docstatus": 1,
+					"status": "Open",
+				},
+				["pos_profile"],
+				as_dict=True
+			)
+		if not pos_profile:
+			return
+		company = frappe.db.get_value("POS Profile", pos_profile.pos_profile, "company")
+		if not company:
+			return
 		get_or_create_wallet(doc.name, company)
-	except Exception:
-		frappe.log_error(
-			f"Failed to auto-create wallet for customer {doc.name} in company {company}",
-			"Wallet Auto-Creation Error"
-		)
+	except Exception as e:
+		frappe.log_error(f"Failed to auto-create wallet for customer {doc.name} in company {company}: {e}", "Wallet Auto-Creation Error")
 
 
 @frappe.whitelist()
