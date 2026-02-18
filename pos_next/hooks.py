@@ -6,11 +6,12 @@ def _has_native_coupon_code_field():
 	try:
 		import json
 		import os
+		import importlib
+		erpnext_mod = importlib.import_module("erpnext")
+		erpnext_dir = os.path.dirname(erpnext_mod.__file__)
 		si_json_path = os.path.join(
-			os.path.dirname(__file__), "..", "erpnext",
-			"accounts", "doctype", "sales_invoice", "sales_invoice.json"
+			erpnext_dir, "accounts", "doctype", "sales_invoice", "sales_invoice.json"
 		)
-		si_json_path = os.path.normpath(si_json_path)
 		if os.path.exists(si_json_path):
 			with open(si_json_path) as f:
 				meta = json.load(f)
