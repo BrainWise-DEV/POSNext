@@ -1321,40 +1321,20 @@ def submit_invoice(invoice=None, data=None):
         invoice_submitted = True
         # Handle wallet transaction reversal for returns
         if invoice_doc.get("is_return") and invoice_doc.get("return_against"):
-            try:
-                from pos_next.pos_next.doctype.wallet_transaction.wallet_transaction import reverse_wallet_transactions_for_return
-                reverse_wallet_transactions_for_return(
-                    original_invoice=invoice_doc.return_against,
-                    return_invoice=invoice_doc.name
-                )
-            except Exception as wallet_error:
-                frappe.log_error(
-                    title="Wallet Reversal on Return Error",
-                    message=f"Return Invoice: {invoice_doc.name}, Error: {str(wallet_error)}\n{frappe.get_traceback()}"
-                )
-                frappe.msgprint(
-                    _("Return submitted but wallet reversal failed. Please check manually."),
-                    alert=True, indicator="orange"
-                )
+            from pos_next.pos_next.doctype.wallet_transaction.wallet_transaction import reverse_wallet_transactions_for_return
+            reverse_wallet_transactions_for_return(
+                original_invoice=invoice_doc.return_against,
+                return_invoice=invoice_doc.name
+            )
 
             # Credit return amount to customer wallet when "Add to Customer Credit Balance" is enabled
             # Frontend signals this by sending an empty payments array for the return invoice
             add_to_customer_balance = not invoice.get("payments")
-            try:
+            if add_to_customer_balance:
                 from pos_next.pos_next.doctype.wallet_transaction.wallet_transaction import credit_return_to_wallet
-                if add_to_customer_balance:
-                    credit_return_to_wallet(
-                        return_invoice=invoice_doc.name,
-                        amount=abs(flt(invoice_doc.grand_total))
-                    )
-            except Exception as credit_wallet_error:
-                frappe.log_error(
-                    title="Wallet Credit on Return Error",
-                    message=f"Return Invoice: {invoice_doc.name}, Error: {str(credit_wallet_error)}\n{frappe.get_traceback()}"
-                )
-                frappe.msgprint(
-                    _("Return submitted but wallet credit failed. Please check manually."),
-                    alert=True, indicator="red"
+                credit_return_to_wallet(
+                    return_invoice=invoice_doc.name,
+                    amount=abs(flt(invoice_doc.grand_total))
                 )
         # Complete the offline sync record
         if sync_record_name:
