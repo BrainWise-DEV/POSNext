@@ -1328,8 +1328,7 @@ def submit_invoice(invoice=None, data=None):
             )
 
             # Credit return amount to customer wallet when "Add to Customer Credit Balance" is enabled
-            # Frontend signals this by sending an empty payments array for the return invoice
-            add_to_customer_balance = not invoice.get("payments")
+            add_to_customer_balance = invoice.get("add_to_customer_balance")
             if add_to_customer_balance:
                 from pos_next.pos_next.doctype.wallet_transaction.wallet_transaction import credit_return_to_wallet
                 credit_return_to_wallet(
