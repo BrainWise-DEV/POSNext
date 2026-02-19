@@ -36,6 +36,7 @@
   "hide_expected_amount",
   "display_discount_percentage",
   "display_discount_amount",
+  "show_variants_as_items",
   "section_break_operations",
   "allow_sales_order",
   "allow_select_sales_order",
@@ -291,6 +292,13 @@
    "fieldname": "display_discount_amount",
    "fieldtype": "Check",
    "label": "Display Discount Amount"
+  },
+  {
+   "default": "0",
+   "description": "Show item variants directly in the item grid instead of their template items. When disabled, template items are shown and variants are selected via a variant selector.",
+   "fieldname": "show_variants_as_items",
+   "fieldtype": "Check",
+   "label": "Show Variants as Items"
   },
   {
    "collapsible": 1,
