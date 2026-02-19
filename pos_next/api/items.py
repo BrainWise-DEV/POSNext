@@ -696,7 +696,7 @@ def _get_item_group_with_descendants(item_group):
 	return [item_group] + list(descendants)
 
 
-def _build_item_base_conditions(pos_profile_doc, item_group=None, exclude_variants=True, hide_unavailable=False, warehouse=None):
+def _build_item_base_conditions(pos_profile_doc, item_group=None, exclude_variants=True, exclude_templates=False, hide_unavailable=False, warehouse=None):
 	"""Build base SQL conditions for POS item search with hierarchical item group support.
 
 	Returns:
@@ -711,6 +711,8 @@ def _build_item_base_conditions(pos_profile_doc, item_group=None, exclude_varian
 	]
 	if exclude_variants:
 		conditions.append("IFNULL(i.variant_of, '') = ''")
+	if exclude_templates:
+		conditions.append("i.has_variants = 0")
 
 	where_params = []
 
@@ -735,7 +737,7 @@ def _build_item_base_conditions(pos_profile_doc, item_group=None, exclude_varian
 		wh_placeholders = ", ".join(["%s"] * len(warehouses))
 		extra_joins = f"LEFT JOIN `tabBin` bin ON bin.item_code = i.name AND bin.warehouse IN ({wh_placeholders})"
 		join_params.extend(warehouses)
-		conditions.append("(i.is_stock_item = 0 OR bin.actual_qty > 0)")
+		conditions.append("(i.is_stock_item = 0 OR i.has_variants = 1 OR bin.actual_qty > 0)")
 
 	# Merge: join params come before WHERE params to match SQL placeholder order
 	return conditions, join_params + where_params, extra_joins
@@ -1065,7 +1067,7 @@ def _get_bundle_warehouse_availability_bulk(bundle_codes, warehouses):
 
 
 @frappe.whitelist()
-def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20, include_variants=0):
+def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20, include_variants=0, show_variants_as_items=0):
 	"""Get items for POS with stock, price, and tax details"""
 	try:
 		pos_profile_doc = frappe.get_cached_doc("POS Profile", pos_profile)
@@ -1080,20 +1082,22 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20,
 				# Use the extracted item barcode for searching
 				effective_search_term = resolved_barcode_data["item_barcode"]
 
-		# IMPORTANT: Filtering logic explained:
-		# - Template items (has_variants=1) are shown → users select variants via dialog
-		# - Regular items (has_variants=0, variant_of is null) are shown → direct add to cart
-		# - Variant items (has_variants=0, variant_of is not null) are HIDDEN from main list
-		#   UNLESS include_variants=1 (used by background sync to cache variants for offline)
-
-		# Add company filter - show items for specific company + global items (empty company)
-		# Global items (custom_company is empty) are available to all companies
+		# FILTERING LOGIC:
+		# When show_variants_as_items=1: Variants shown directly in grid, templates excluded
+		# When show_variants_as_items=0 (default): Templates shown, variants hidden from browse
 
 		# Build base conditions
-		exclude_variants = not int(include_variants)
+		show_variants_mode = int(show_variants_as_items)
+		if show_variants_mode:
+			exclude_variants = False
+			exclude_templates = True
+		else:
+			exclude_variants = not int(include_variants)
+			exclude_templates = False
 		hide_unavailable = getattr(pos_profile_doc, "hide_unavailable_items", 0)
 		conditions, params, extra_joins = _build_item_base_conditions(
 			pos_profile_doc, item_group, exclude_variants=exclude_variants,
+			exclude_templates=exclude_templates,
 			hide_unavailable=hide_unavailable, warehouse=pos_profile_doc.warehouse,
 		)
 
@@ -1420,7 +1424,7 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20,
 
 
 @frappe.whitelist()
-def get_items_bulk(pos_profile, item_groups=None, start=0, limit=2000, include_variants=0):
+def get_items_bulk(pos_profile, item_groups=None, start=0, limit=2000, include_variants=0, show_variants_as_items=0):
 	"""
 	Fetch items from multiple item groups in a SINGLE query.
 	Eliminates N+1 problem where frontend was making one API call per group.
@@ -1431,6 +1435,7 @@ def get_items_bulk(pos_profile, item_groups=None, start=0, limit=2000, include_v
 		start: Offset for pagination (default 0)
 		limit: Max items to return (default 2000)
 		include_variants: If 1, include variant items (for offline caching)
+		show_variants_as_items: If 1, show variants directly and exclude templates
 	"""
 	try:
 		if isinstance(item_groups, str):
@@ -1439,10 +1444,17 @@ def get_items_bulk(pos_profile, item_groups=None, start=0, limit=2000, include_v
 		pos_profile_doc = frappe.get_cached_doc("POS Profile", pos_profile)
 
 		# Build base conditions using shared helper
-		exclude_variants = not int(include_variants)
+		show_variants_mode = int(show_variants_as_items)
+		if show_variants_mode:
+			exclude_variants = False
+			exclude_templates = True
+		else:
+			exclude_variants = not int(include_variants)
+			exclude_templates = False
 		hide_unavailable = getattr(pos_profile_doc, "hide_unavailable_items", 0)
 		conditions, params, extra_joins = _build_item_base_conditions(
 			pos_profile_doc, exclude_variants=exclude_variants,
+			exclude_templates=exclude_templates,
 			hide_unavailable=hide_unavailable, warehouse=pos_profile_doc.warehouse,
 		)
 
@@ -1557,9 +1569,9 @@ def get_items_bulk(pos_profile, item_groups=None, start=0, limit=2000, include_v
 			item_code = item["item_code"]
 			stock_uom = item.get("stock_uom")
 
-			# Price
+			# Price: prefer stock_uom, then None/empty UOM (Item Price without UOM)
 			prices = uom_prices_map.get(item_code, {})
-			item["rate"] = prices.get(stock_uom, 0)
+			item["rate"] = flt(prices.get(stock_uom) or prices.get(None) or prices.get("") or 0)
 			item["price_list_rate"] = item["rate"]
 			item["uom"] = stock_uom
 			item["price_uom"] = stock_uom
@@ -1601,7 +1613,7 @@ def get_items_bulk(pos_profile, item_groups=None, start=0, limit=2000, include_v
 
 
 @frappe.whitelist()
-def get_items_count(pos_profile, item_group=None, include_variants=0):
+def get_items_count(pos_profile, item_group=None, include_variants=0, show_variants_as_items=0):
 	"""
 	Get total count of POS-eligible items for progress tracking and smart pagination.
 
@@ -1612,16 +1624,24 @@ def get_items_count(pos_profile, item_group=None, include_variants=0):
 		pos_profile: POS Profile name
 		item_group: Optional item group filter (expands to descendants)
 		include_variants: If 1, include variant items in the count
+		show_variants_as_items: If 1, count variants directly and exclude templates
 
 	Returns:
 		int: Total count of distinct matching items
 	"""
 	try:
 		pos_profile_doc = frappe.get_cached_doc("POS Profile", pos_profile)
-		exclude_variants = not int(include_variants)
+		show_variants_mode = int(show_variants_as_items)
+		if show_variants_mode:
+			exclude_variants = False
+			exclude_templates = True
+		else:
+			exclude_variants = not int(include_variants)
+			exclude_templates = False
 		hide_unavailable = getattr(pos_profile_doc, "hide_unavailable_items", 0)
 		conditions, params, extra_joins = _build_item_base_conditions(
 			pos_profile_doc, item_group, exclude_variants=exclude_variants,
+			exclude_templates=exclude_templates,
 			hide_unavailable=hide_unavailable, warehouse=pos_profile_doc.warehouse,
 		)
 

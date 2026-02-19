@@ -36,6 +36,7 @@ POS_SETTINGS_FIELDS = [
 	"allow_sales_order",
 	"allow_select_sales_order",
 	"create_only_sales_order",
+	"show_variants_as_items",
 ]
 
 # Default POS Settings values
@@ -62,4 +63,5 @@ DEFAULT_POS_SETTINGS = {
 	"allow_sales_order": 0,
 	"allow_select_sales_order": 0,
 	"create_only_sales_order": 0,
+	"show_variants_as_items": 0,
 }

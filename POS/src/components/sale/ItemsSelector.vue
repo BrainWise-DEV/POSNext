@@ -379,6 +379,9 @@
 							<h3 class="text-[10px] sm:text-xs font-semibold text-gray-900 truncate mb-0.5 leading-tight">
 								{{ item.item_name }}
 							</h3>
+							<p v-if="item.attributes" class="text-[8px] sm:text-[9px] text-gray-400 truncate leading-tight">
+								{{ Object.values(item.attributes).join(' / ') }}
+							</p>
 							<p class="text-[9px] sm:text-[10px] text-gray-500 leading-tight">
 									<span class="font-semibold text-blue-600">{{ formatCurrency(item.rate || item.price_list_rate || 0) }}</span>
 									<span class="text-gray-400">/ {{ item.uom || item.stock_uom || __('Nos', null, 'UOM') }}</span>
@@ -544,6 +547,9 @@
 							<td class="px-2 sm:px-3 py-2 max-w-[120px] sm:max-w-[180px] md:max-w-[200px]">
 								<div class="text-xs sm:text-sm font-medium text-gray-900 truncate" :title="item.item_name">
 									{{ item.item_name }}
+								</div>
+								<div v-if="item.attributes" class="text-[8px] sm:text-[9px] text-gray-400 truncate leading-tight">
+									{{ Object.values(item.attributes).join(' / ') }}
 								</div>
 							</td>
 							<td class="hidden sm:table-cell px-2 sm:px-3 py-2 whitespace-nowrap sm:max-w-[150px]">
@@ -1076,7 +1082,7 @@ function clearLongPress() {
 function selectItem(item, autoAdd = false) {
 	if (!item) return false
 
-	// Skip stock validation for: variants (template), serial items, batch items (they have own validation)
+	// Skip stock validation for: template items (no stock), serial items, batch items (they have own validation)
 	const skipValidation = item.has_variants || item.has_serial_no || item.has_batch_no
 	const isStockTracked = item.is_stock_item || item.is_bundle
 	const qty = Math.floor(item.actual_qty ?? item.stock_qty ?? 0)
