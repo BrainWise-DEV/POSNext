@@ -532,6 +532,44 @@ def get_gift_cards_with_balance(customer=None, company=None):
 
 
 # ==========================================
+# Gift Card Lookup Helper
+# ==========================================
+
+def _get_gift_card_coupon(coupon_ref, fields):
+	"""
+	Look up a Coupon Code document by either its document name or its coupon_code field value.
+
+	The `coupon_code` column on Sales Invoice stores the Coupon Code *document name*
+	(e.g. "Gift Card GC-MV2S-Y1G9"), while the `coupon_code` *field* on the Coupon
+	Code doctype holds the short code (e.g. "GC-MV2S-Y1G9").  Both cases must be
+	handled transparently.
+
+	Args:
+		coupon_ref: Document name OR coupon_code field value (case-insensitive).
+		fields: List of fields to return.
+
+	Returns:
+		dict or None
+	"""
+	if not coupon_ref:
+		return None
+
+	# 1. Try by document name first (handles "Gift Card GC-…" style names).
+	coupon = frappe.db.get_value("Coupon Code", coupon_ref, fields, as_dict=True)
+	if coupon:
+		return coupon
+
+	# 2. Fall back to filtering by the coupon_code field value.
+	coupon = frappe.db.get_value(
+		"Coupon Code",
+		{"coupon_code": coupon_ref},
+		fields,
+		as_dict=True
+	)
+	return coupon
+
+
+# ==========================================
 # Gift Card Processing on Invoice Submit
 # ==========================================
 
@@ -569,14 +607,14 @@ def process_gift_card_on_submit(doc, method=None):
 	if not coupon_code:
 		return
 
-	coupon_code = coupon_code.strip().upper()
+	coupon_code = coupon_code.strip()
 
-	# Get the Coupon Code from ERPNext
-	coupon = frappe.db.get_value(
-		"Coupon Code",
-		{"coupon_code": coupon_code},
-		["name", "coupon_type", "pos_next_gift_card", "gift_card_amount", "pricing_rule"],
-		as_dict=True
+	# Get the Coupon Code from ERPNext.
+	# invoice.coupon_code stores the document *name* (e.g. "Gift Card GC-MV2S-Y1G9"),
+	# so we must look up by name first, then fall back to the coupon_code field value.
+	coupon = _get_gift_card_coupon(
+		coupon_code,
+		["name", "coupon_type", "pos_next_gift_card", "gift_card_amount", "pricing_rule"]
 	)
 
 	if not coupon:
@@ -685,15 +723,13 @@ def _process_gift_card_return(return_invoice):
 		if not coupon_code:
 			return
 
-		coupon_code = coupon_code.strip().upper()
+		coupon_code = coupon_code.strip()
 
-		# Get the Coupon Code
-		coupon = frappe.db.get_value(
-			"Coupon Code",
-			{"coupon_code": coupon_code},
+		# Get the Coupon Code (invoice stores the doc *name*, not just the code value).
+		coupon = _get_gift_card_coupon(
+			coupon_code,
 			["name", "coupon_type", "pos_next_gift_card", "gift_card_amount",
-			 "original_gift_card_amount", "pricing_rule"],
-			as_dict=True
+			 "original_gift_card_amount", "pricing_rule"]
 		)
 
 		if not coupon:
@@ -814,15 +850,13 @@ def process_gift_card_on_cancel(doc, method=None):
 	if not coupon_code:
 		return
 
-	coupon_code = coupon_code.strip().upper()
+	coupon_code = coupon_code.strip()
 
-	# Get the Coupon Code
-	coupon = frappe.db.get_value(
-		"Coupon Code",
-		{"coupon_code": coupon_code},
+	# Get the Coupon Code (invoice stores the doc *name*, not just the code value).
+	coupon = _get_gift_card_coupon(
+		coupon_code,
 		["name", "coupon_type", "pos_next_gift_card", "gift_card_amount",
-		 "original_gift_card_amount", "pricing_rule"],
-		as_dict=True
+		 "original_gift_card_amount", "pricing_rule"]
 	)
 
 	if not coupon:
