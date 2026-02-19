@@ -2,6 +2,7 @@ import { ref, readonly } from "vue"
 import { call } from "@/utils/apiWrapper"
 import { userData } from "@/data/user"
 import { usePOSCartStore } from "@/stores/posCart"
+import { offlineState } from "@/utils/offline/offlineState"
 
 // Lock timeout: 5 minutes
 const LOCK_TIMEOUT_MS = 5 * 60 * 1000
@@ -44,6 +45,48 @@ function clearPersistedLock() {
 	} catch {
 		// Ignore
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Cached password hash (offline unlock fallback)
+// ---------------------------------------------------------------------------
+const PASSWORD_HASH_KEY = "pos_session_pwd_hash"
+
+async function hashPassword(password) {
+	const encoded = new TextEncoder().encode(password)
+	const buffer = await crypto.subtle.digest("SHA-256", encoded)
+	return Array.from(new Uint8Array(buffer))
+		.map((b) => b.toString(16).padStart(2, "0"))
+		.join("")
+}
+
+function cachePasswordHash(hash) {
+	try {
+		localStorage.setItem(PASSWORD_HASH_KEY, hash)
+	} catch {
+		// Storage full or unavailable
+	}
+}
+
+function getCachedPasswordHash() {
+	try {
+		return localStorage.getItem(PASSWORD_HASH_KEY)
+	} catch {
+		return null
+	}
+}
+
+function clearCachedPasswordHash() {
+	try {
+		localStorage.removeItem(PASSWORD_HASH_KEY)
+	} catch {
+		// Ignore
+	}
+}
+
+async function cachePasswordHashFromLogin(password) {
+	const hash = await hashPassword(password)
+	cachePasswordHash(hash)
 }
 
 // Module-level singleton state (same pattern as useToast.js)
@@ -109,22 +152,49 @@ function handleVisibilityChange() {
 	}
 }
 
+async function unlockSuccess() {
+	isLocked.value = false
+	lockedUser.value = null
+	isVerifying.value = false
+	clearPersistedLock()
+	// Restart inactivity tracking
+	lastActivityTime = Date.now()
+	resetTimer()
+}
+
 async function unlock(password) {
 	isVerifying.value = true
 	verifyError.value = ""
 
+	// Offline fallback — verify against cached hash
+	if (offlineState.isOffline) {
+		const cachedHash = getCachedPasswordHash()
+		if (!cachedHash) {
+			isVerifying.value = false
+			verifyError.value = __("Cannot verify password offline. No cached credentials available.")
+			return { success: false }
+		}
+		const enteredHash = await hashPassword(password)
+		if (enteredHash === cachedHash) {
+			await unlockSuccess()
+			return { success: true }
+		}
+		isVerifying.value = false
+		verifyError.value = __("Incorrect password")
+		return { success: false }
+	}
+
+	// Online — verify against server
 	try {
 		const res = await call("pos_next.api.auth.verify_session_password", { password })
 		const data = res?.message || res
 
 		if (data?.verified) {
-			isLocked.value = false
-			lockedUser.value = null
-			isVerifying.value = false
-			clearPersistedLock()
-			// Restart inactivity tracking
-			lastActivityTime = Date.now()
-			resetTimer()
+			// Cache hash on successful online unlock
+			const hash = await hashPassword(password)
+			cachePasswordHash(hash)
+
+			await unlockSuccess()
 			return { success: true }
 		}
 
@@ -133,16 +203,28 @@ async function unlock(password) {
 		verifyError.value = data?.message || __("Incorrect password")
 		return { success: false }
 	} catch (error) {
-		isVerifying.value = false
-
 		const httpStatus = error?.status
 
 		// Session expired — 401 or 403 from Frappe's session middleware
 		if (httpStatus === 401 || httpStatus === 403) {
+			isVerifying.value = false
 			return { sessionExpired: true }
 		}
 
-		// Network or other error
+		// Network error — fall back to cached hash
+		const cachedHash = getCachedPasswordHash()
+		if (cachedHash) {
+			const enteredHash = await hashPassword(password)
+			if (enteredHash === cachedHash) {
+				await unlockSuccess()
+				return { success: true }
+			}
+			isVerifying.value = false
+			verifyError.value = __("Incorrect password")
+			return { success: false }
+		}
+
+		isVerifying.value = false
 		verifyError.value = __("Could not verify password. Please try again.")
 		return { success: false }
 	}
@@ -153,6 +235,7 @@ function clearLock() {
 	lockedUser.value = null
 	verifyError.value = ""
 	clearPersistedLock()
+	clearCachedPasswordHash()
 }
 
 function handlePageHide() {
@@ -205,5 +288,6 @@ export function useSessionLock() {
 		clearLock,
 		startActivityTracking,
 		stopActivityTracking,
+		cachePasswordHashFromLogin,
 	}
 }

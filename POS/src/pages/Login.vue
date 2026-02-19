@@ -113,7 +113,7 @@ const router = useRouter()
 const { shiftState } = useShift()
 const cartStore = usePOSCartStore()
 const uiStore = usePOSUIStore()
-const { clearLock } = useSessionLock()
+const { clearLock, cachePasswordHashFromLogin } = useSessionLock()
 
 const loginForm = reactive({
 	email: "",
@@ -182,6 +182,9 @@ watch(
 			} catch (error) {
 				console.error("Failed to initialize CSRF token after login:", error)
 			}
+
+			// Cache password hash for offline session unlock
+			await cachePasswordHashFromLogin(loginForm.password)
 
 			// Show shift opening dialog after successful login
 			showShiftDialog.value = true

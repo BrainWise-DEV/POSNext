@@ -53,6 +53,17 @@
 							<p class="text-sm text-gray-500 mt-1">
 								{{ __('Session Locked') }}
 							</p>
+							<!-- Offline Badge -->
+							<div
+								v-if="isOffline"
+								class="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-100 text-amber-700 text-xs font-medium"
+							>
+								<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 5.636a9 9 0 010 12.728M5.636 18.364a9 9 0 010-12.728" />
+									<line x1="4" y1="4" x2="20" y2="20" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+								</svg>
+								{{ __('Offline') }}
+							</div>
 						</div>
 
 						<!-- Password Form -->
@@ -150,13 +161,31 @@
 </template>
 
 <script setup>
-import { ref, watch, nextTick } from "vue"
+import { ref, watch, nextTick, onMounted, onUnmounted } from "vue"
 import { useSessionLock } from "@/composables/useSessionLock"
 import { usePOSCartStore } from "@/stores/posCart"
 import { usePOSUIStore } from "@/stores/posUI"
 import { session } from "@/data/session"
+import { offlineState } from "@/utils/offline/offlineState"
 
 const { isLocked, isVerifying, verifyError, lockedUser, unlock, clearLock } = useSessionLock()
+
+// Offline state tracking
+const isOffline = ref(offlineState.isOffline)
+let unsubscribeOffline = null
+
+onMounted(() => {
+	unsubscribeOffline = offlineState.subscribe((state) => {
+		isOffline.value = state.isOffline
+	})
+})
+
+onUnmounted(() => {
+	if (unsubscribeOffline) {
+		unsubscribeOffline()
+		unsubscribeOffline = null
+	}
+})
 
 const password = ref("")
 const showPassword = ref(false)
