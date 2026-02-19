@@ -816,6 +816,15 @@ def update_invoice(data):
         # Populate missing fields (company, currency, accounts, etc.)
         invoice_doc.set_missing_values()
 
+        # Re-enforce ignore_pricing_rule after set_missing_values().
+        # ERPNext's set_pos_fields() (called inside set_missing_values when
+        # for_validate=False) overwrites ignore_pricing_rule with the POS
+        # Profile value (default: 0). We always want to skip pricing-rule
+        # recalculation because the POS frontend has already computed the
+        # correct discounts.
+        invoice_doc.ignore_pricing_rule = 1
+        invoice_doc.flags.ignore_pricing_rule = True
+
         # Calculate totals and apply discounts (with rounding disabled)
         invoice_doc.calculate_taxes_and_totals()
 
@@ -1305,6 +1314,11 @@ def submit_invoice(invoice=None, data=None):
             _validate_stock_on_invoice(invoice_doc)
 
         # Save before submit
+        # Re-enforce ignore_pricing_rule so that save() -> validate() does not
+        # call apply_pricing_rule_on_transaction() and overwrite the discount
+        # amount that the POS frontend has already computed and capped.
+        invoice_doc.ignore_pricing_rule = 1
+        invoice_doc.flags.ignore_pricing_rule = True
         invoice_doc.flags.ignore_permissions = True
         frappe.flags.ignore_account_permission = True
         invoice_doc.save()
