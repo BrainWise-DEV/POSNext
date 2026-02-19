@@ -152,7 +152,7 @@ function handleVisibilityChange() {
 	}
 }
 
-async function unlockSuccess() {
+function unlockSuccess() {
 	isLocked.value = false
 	lockedUser.value = null
 	isVerifying.value = false
@@ -162,25 +162,31 @@ async function unlockSuccess() {
 	resetTimer()
 }
 
+async function verifyOfflinePassword(password) {
+	const cachedHash = getCachedPasswordHash()
+	if (!cachedHash) {
+		return { success: false, error: __("Cannot verify password offline. No cached credentials available.") }
+	}
+	const enteredHash = await hashPassword(password)
+	if (enteredHash === cachedHash) {
+		return { success: true }
+	}
+	return { success: false, error: __("Incorrect password") }
+}
+
 async function unlock(password) {
 	isVerifying.value = true
 	verifyError.value = ""
 
 	// Offline fallback — verify against cached hash
 	if (offlineState.isOffline) {
-		const cachedHash = getCachedPasswordHash()
-		if (!cachedHash) {
-			isVerifying.value = false
-			verifyError.value = __("Cannot verify password offline. No cached credentials available.")
-			return { success: false }
-		}
-		const enteredHash = await hashPassword(password)
-		if (enteredHash === cachedHash) {
-			await unlockSuccess()
+		const result = await verifyOfflinePassword(password)
+		if (result.success) {
+			unlockSuccess()
 			return { success: true }
 		}
 		isVerifying.value = false
-		verifyError.value = __("Incorrect password")
+		verifyError.value = result.error
 		return { success: false }
 	}
 
@@ -194,7 +200,7 @@ async function unlock(password) {
 			const hash = await hashPassword(password)
 			cachePasswordHash(hash)
 
-			await unlockSuccess()
+			unlockSuccess()
 			return { success: true }
 		}
 
@@ -212,15 +218,14 @@ async function unlock(password) {
 		}
 
 		// Network error — fall back to cached hash
-		const cachedHash = getCachedPasswordHash()
-		if (cachedHash) {
-			const enteredHash = await hashPassword(password)
-			if (enteredHash === cachedHash) {
-				await unlockSuccess()
-				return { success: true }
-			}
+		const result = await verifyOfflinePassword(password)
+		if (result.success) {
+			unlockSuccess()
+			return { success: true }
+		}
+		if (result.error === __("Incorrect password")) {
 			isVerifying.value = false
-			verifyError.value = __("Incorrect password")
+			verifyError.value = result.error
 			return { success: false }
 		}
 

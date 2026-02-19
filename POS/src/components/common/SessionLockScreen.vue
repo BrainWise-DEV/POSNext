@@ -14,19 +14,7 @@
 						<!-- Lock Icon -->
 						<div class="flex justify-center mb-5">
 							<div class="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center">
-								<svg
-									class="w-8 h-8 text-amber-600"
-									fill="none"
-									stroke="currentColor"
-									viewBox="0 0 24 24"
-								>
-									<path
-										stroke-linecap="round"
-										stroke-linejoin="round"
-										stroke-width="2"
-										d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
-									/>
-								</svg>
+								<FeatherIcon name="lock" class="w-8 h-8 text-amber-600" :stroke-width="2" />
 							</div>
 						</div>
 
@@ -58,10 +46,7 @@
 								v-if="isOffline"
 								class="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-100 text-amber-700 text-xs font-medium"
 							>
-								<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 5.636a9 9 0 010 12.728M5.636 18.364a9 9 0 010-12.728" />
-									<line x1="4" y1="4" x2="20" y2="20" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-								</svg>
+								<FeatherIcon name="wifi-off" class="w-3.5 h-3.5" :stroke-width="2" />
 								{{ __('Offline') }}
 							</div>
 						</div>
@@ -91,25 +76,11 @@
 										tabindex="-1"
 										:aria-label="showPassword ? __('Hide password') : __('Show password')"
 									>
-										<svg
-											v-if="!showPassword"
+										<FeatherIcon
+											:name="showPassword ? 'eye-off' : 'eye'"
 											class="w-4.5 h-4.5"
-											fill="none"
-											stroke="currentColor"
-											viewBox="0 0 24 24"
-										>
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-										</svg>
-										<svg
-											v-else
-											class="w-4.5 h-4.5"
-											fill="none"
-											stroke="currentColor"
-											viewBox="0 0 24 24"
-										>
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.542-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L3 3m6.878 6.878L21 21" />
-										</svg>
+											:stroke-width="2"
+										/>
 									</button>
 								</div>
 								<!-- Error Message -->
@@ -125,10 +96,7 @@
 								class="w-full px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm rounded-lg shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
 							>
 								<span v-if="isVerifying" class="flex items-center justify-center gap-2">
-									<svg class="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-										<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-										<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-									</svg>
+									<FeatherIcon name="loader" class="h-4 w-4 animate-spin" />
 									{{ __('Verifying...') }}
 								</span>
 								<span v-else>{{ __('Unlock') }}</span>
@@ -161,30 +129,15 @@
 </template>
 
 <script setup>
-import { ref, watch, nextTick, onMounted, onUnmounted } from "vue"
+import { ref, watch, nextTick } from "vue"
+import { FeatherIcon } from "frappe-ui"
 import { useSessionLock } from "@/composables/useSessionLock"
+import { useOfflineStatus } from "@/composables/useOfflineStatus"
 import { session } from "@/data/session"
 import { cleanupUserSession } from "@/utils/sessionCleanup"
-import { offlineState } from "@/utils/offline/offlineState"
 
 const { isLocked, isVerifying, verifyError, lockedUser, unlock } = useSessionLock()
-
-// Offline state tracking
-const isOffline = ref(offlineState.isOffline)
-let unsubscribeOffline = null
-
-onMounted(() => {
-	unsubscribeOffline = offlineState.subscribe((state) => {
-		isOffline.value = state.isOffline
-	})
-})
-
-onUnmounted(() => {
-	if (unsubscribeOffline) {
-		unsubscribeOffline()
-		unsubscribeOffline = null
-	}
-})
+const { isOffline } = useOfflineStatus()
 
 const password = ref("")
 const showPassword = ref(false)

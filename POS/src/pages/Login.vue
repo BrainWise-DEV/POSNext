@@ -106,6 +106,9 @@ import { useSessionLock } from "../composables/useSessionLock"
 import { cleanupUserSession } from "../utils/sessionCleanup"
 import { ensureCSRFToken } from "../utils/csrf"
 import { offlineWorker } from "../utils/offline/workerClient"
+import { logger } from "@/utils/logger"
+
+const log = logger.create("Login")
 
 const router = useRouter()
 const { cachePasswordHashFromLogin } = useSessionLock()
@@ -156,7 +159,7 @@ watch(
 		if (isLoggedIn) {
 			// Initialize CSRF token after successful login
 			try {
-				console.log("User logged in, initializing CSRF token...")
+				log.info("User logged in, initializing CSRF token...")
 				await ensureCSRFToken()
 
 				// Sync CSRF token to worker for background API calls
@@ -164,7 +167,7 @@ watch(
 					await offlineWorker.setCSRFToken(window.csrf_token)
 				}
 			} catch (error) {
-				console.error("Failed to initialize CSRF token after login:", error)
+				log.error("Failed to initialize CSRF token after login:", error)
 			}
 
 			// Cache password hash for offline session unlock
