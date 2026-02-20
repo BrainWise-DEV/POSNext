@@ -421,12 +421,16 @@ class OfflineWorkerClient {
 		return this.sendMessage("SEARCH_CUSTOMERS", { searchTerm, limit })
 	}
 
-	async cacheItems(items) {
-		return this.sendMessage("CACHE_ITEMS", { items })
+	async cacheItems(items, batchSize) {
+		return this.sendMessage("CACHE_ITEMS", { items, ...(batchSize ? { batchSize } : {}) })
 	}
 
 	async cacheCustomers(customers) {
 		return this.sendMessage("CACHE_CUSTOMERS", { customers })
+	}
+
+	async deleteCustomers(customerNames) {
+		return this.sendMessage("DELETE_CUSTOMERS", { customerNames })
 	}
 
 	async cachePaymentMethods(paymentMethods) {
@@ -458,6 +462,10 @@ class OfflineWorkerClient {
 
 	async setCSRFToken(token) {
 		return this.sendMessage("SET_CSRF_TOKEN", { token })
+	}
+
+	async setShowVariantsAsItems(value) {
+		return this.sendMessage("SET_SHOW_VARIANTS_AS_ITEMS", { value: Boolean(value) })
 	}
 
 	async updateStockQuantities(stockUpdates) {

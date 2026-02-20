@@ -379,6 +379,9 @@
 							<h3 class="text-[10px] sm:text-xs font-semibold text-gray-900 truncate mb-0.5 leading-tight">
 								{{ item.item_name }}
 							</h3>
+							<p v-if="item.attributes" class="text-[8px] sm:text-[9px] text-gray-400 truncate leading-tight">
+								{{ Object.values(item.attributes).join(' / ') }}
+							</p>
 							<p class="text-[9px] sm:text-[10px] text-gray-500 leading-tight">
 									<span class="font-semibold text-blue-600">{{ formatCurrency(item.rate || item.price_list_rate || 0) }}</span>
 									<span class="text-gray-400">/ {{ item.uom || item.stock_uom || __('Nos', null, 'UOM') }}</span>
@@ -544,6 +547,9 @@
 							<td class="px-2 sm:px-3 py-2 max-w-[120px] sm:max-w-[180px] md:max-w-[200px]">
 								<div class="text-xs sm:text-sm font-medium text-gray-900 truncate" :title="item.item_name">
 									{{ item.item_name }}
+								</div>
+								<div v-if="item.attributes" class="text-[8px] sm:text-[9px] text-gray-400 truncate leading-tight">
+									{{ Object.values(item.attributes).join(' / ') }}
 								</div>
 							</td>
 							<td class="hidden sm:table-cell px-2 sm:px-3 py-2 whitespace-nowrap sm:max-w-[150px]">
@@ -715,6 +721,8 @@ import WarehouseAvailabilityDialog from "@/components/sale/WarehouseAvailability
 import { useItemSearchStore } from "@/stores/itemSearch"
 import { usePOSSettingsStore } from "@/stores/posSettings"
 import { useStock } from "@/composables/useStock"
+import { useDialogState } from "@/composables/useDialogState"
+import { useSearchInput } from "@/composables/useSearchInput"
 import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency"
 import { useToast } from "@/composables/useToast"
 import { storeToRefs } from "pinia"
@@ -745,6 +753,7 @@ const emit = defineEmits(["item-selected"])
 const { getStockStatus } = useStock()
 const settingsStore = usePOSSettingsStore()
 const { showError, showWarning } = useToast()
+const { isAnyDialogOpen } = useDialogState()
 
 // Use Pinia store
 const itemStore = useItemSearchStore()
@@ -763,17 +772,22 @@ const {
 	totalServerItems,
 } = storeToRefs(itemStore)
 
+// Search input composable — owns search/scanner state, timers, concurrency
+const {
+	searchInputRef, scannerEnabled, autoAddEnabled,
+	handleSearchInput, handleKeyDown, handleSearchClick,
+	toggleBarcodeScanner, toggleAutoAdd, focusSearchInput,
+	clearSearchAndResetInput,
+	cleanup: cleanupSearchInput,
+} = useSearchInput({
+	itemStore, onItemFound: selectItem,
+	showWarning, isAnyDialogOpen,
+})
+
 // Local state
 const viewMode = ref("grid")
-const lastKeyTime = ref(0)
-const barcodeBuffer = ref("")
-const searchInputRef = ref(null)
-const scannerEnabled = ref(false)
-const autoAddEnabled = ref(false)
 const itemThreshold = ref(50) // Threshold for auto-switching to list view
 const userManuallySetView = ref(false) // Track if user manually changed view mode
-const scannerInputDetected = ref(false) // Track if current input is from scanner
-const autoSearchTimer = ref(null) // Timer for auto-search when typing stops
 const lastAutoSwitchCount = ref(0)
 const showSortDropdown = ref(false) // Sort dropdown visibility
 const skipPageReset = ref(false) // Skip page reset when navigating via pagination
@@ -1000,84 +1014,11 @@ onUnmounted(() => {
 	// Clear handlers and timers
 	optimizedClickHandlers.clear()
 	clearLongPress()
+	cleanupSearchInput()
 
 	// Remove click outside listener for sort dropdown
 	document.removeEventListener('click', handleClickOutside)
 })
-
-// Handle keydown for barcode scanner detection
-function handleKeyDown(event) {
-	const currentTime = Date.now()
-	const timeDiff = currentTime - lastKeyTime.value
-
-	// If Enter/newline is pressed, trigger barcode search
-	if (event.key === "Enter") {
-		event.preventDefault()
-
-		// Auto-add if Auto-Add mode is enabled (regardless of manual typing vs scanner)
-		if (autoAddEnabled.value) {
-			// Auto-add enabled - add item directly to cart
-			handleBarcodeSearch(true) // Pass true to indicate auto-add
-		} else {
-			// Auto-add disabled - normal search behavior
-			handleBarcodeSearch(false)
-		}
-
-		// Reset detection
-		barcodeBuffer.value = ""
-		scannerInputDetected.value = false
-
-		// Clear auto-search timer since Enter was pressed
-		if (autoSearchTimer.value) {
-			clearTimeout(autoSearchTimer.value)
-			autoSearchTimer.value = null
-		}
-
-		return
-	}
-
-	// Barcode scanners typically input very fast (< 50ms between characters)
-	// If time between keystrokes is very short, it's likely a barcode scanner
-	if (
-		timeDiff < 50 &&
-		event.key.length === 1 &&
-		barcodeBuffer.value.length > 0
-	) {
-		barcodeBuffer.value += event.key
-		scannerInputDetected.value = true // Mark as scanner input
-	} else if (event.key.length === 1) {
-		// Manual typing - reset buffer
-		barcodeBuffer.value = event.key
-		scannerInputDetected.value = false // Mark as manual input
-	}
-
-	lastKeyTime.value = currentTime
-}
-
-// Handle search input with instant reactivity
-function handleSearchInput(event) {
-	const value = event.target.value
-	itemStore.setSearchTerm(value)
-
-	// Clear any existing timer
-	if (autoSearchTimer.value) {
-		clearTimeout(autoSearchTimer.value)
-		autoSearchTimer.value = null
-	}
-
-	// If Auto-Add is enabled and user is typing, automatically trigger search after they stop
-	if (autoAddEnabled.value && value.trim().length > 0) {
-		// Wait 500ms after user stops typing, then auto-search and add
-		autoSearchTimer.value = setTimeout(() => {
-			handleBarcodeSearch(true) // Auto-add mode
-		}, 500) // 500ms delay after typing stops
-	}
-}
-
-// Handle click on search input to clear it
-function handleSearchClick() {
-	itemStore.clearSearch()
-}
 
 // Create optimized click handlers for better touch response
 const optimizedClickHandlers = new Map()
@@ -1141,7 +1082,7 @@ function clearLongPress() {
 function selectItem(item, autoAdd = false) {
 	if (!item) return false
 
-	// Skip stock validation for: variants (template), serial items, batch items (they have own validation)
+	// Skip stock validation for: template items (no stock), serial items, batch items (they have own validation)
 	const skipValidation = item.has_variants || item.has_serial_no || item.has_batch_no
 	const isStockTracked = item.is_stock_item || item.is_bundle
 	const qty = Math.floor(item.actual_qty ?? item.stock_qty ?? 0)
@@ -1167,97 +1108,6 @@ function handleItemClick(itemCode) {
 	selectItem(item)
 }
 
-async function handleBarcodeSearch(forceAutoAdd = false) {
-	const barcode = searchTerm.value.trim()
-
-	if (!barcode) {
-		return
-	}
-
-	// Auto-add if explicitly requested (from scanner newline detection)
-	// OR if both scanner and auto-add modes are enabled
-	const shouldAutoAdd =
-		forceAutoAdd || (scannerEnabled.value && autoAddEnabled.value)
-
-	try {
-		// First try exact barcode lookup via API
-		const item = await itemStore.searchByBarcode(barcode)
-
-		if (item) {
-			// Item found by barcode - validate stock and add to cart
-			if (selectItem(item, shouldAutoAdd)) {
-				itemStore.clearSearch()
-			}
-			return
-		}
-	} catch (error) {
-		console.error("Barcode API error:", error)
-	}
-
-	// Fallback: If only one item matches in filtered results, auto-select it
-	if (filteredItems.value.length === 1) {
-		if (selectItem(filteredItems.value[0], shouldAutoAdd)) {
-			itemStore.clearSearch()
-		}
-	} else if (filteredItems.value.length === 0) {
-		showWarning(__('Item Not Found: No item found with barcode: {0}', [barcode]))
-
-		// If scanner mode is enabled, clear search immediately for next scan
-		if (shouldAutoAdd) {
-			itemStore.clearSearch()
-		}
-	} else {
-		if (shouldAutoAdd) {
-			// In scanner mode, don't show manual selection - just notify
-			showWarning(__('Multiple Items Found: {0} items match barcode. Please refine search.', [filteredItems.value.length]))
-		} else {
-			showWarning(__('Multiple Items Found: {0} items match. Please select one.', [filteredItems.value.length]))
-		}
-	}
-}
-
-function toggleBarcodeScanner() {
-	scannerEnabled.value = !scannerEnabled.value
-
-	if (scannerEnabled.value) {
-		// Auto-enable auto-add when scanner is enabled
-		autoAddEnabled.value = true
-
-		// Focus on search input when enabling scanner
-		const input = searchInputRef.value || document.getElementById("item-search")
-		if (input) {
-			input.focus()
-		}
-	} else {
-		// Disable auto-add when scanner is disabled
-		autoAddEnabled.value = false
-	}
-}
-
-function toggleAutoAdd() {
-	// Auto-add works independently - no need for scanner mode
-	autoAddEnabled.value = !autoAddEnabled.value
-
-	// Auto-enable scanner mode when auto-add is enabled
-	if (autoAddEnabled.value && !scannerEnabled.value) {
-		scannerEnabled.value = true
-	}
-
-	// Clear any pending timer when toggling off
-	if (!autoAddEnabled.value && autoSearchTimer.value) {
-		clearTimeout(autoSearchTimer.value)
-		autoSearchTimer.value = null
-	}
-
-	if (autoAddEnabled.value) {
-		// Focus on search input
-		const input = searchInputRef.value || document.getElementById("item-search")
-		if (input) {
-			input.focus()
-		}
-	}
-}
-
 function formatCurrency(amount) {
 	return formatCurrencyUtil(Number.parseFloat(amount || 0), props.currency)
 }
@@ -1278,6 +1128,7 @@ defineExpose({
 	loadItems: () => itemStore.loadAllItems(props.posProfile),
 	loadItemGroups: () => itemStore.loadItemGroups(),
 	loadMoreItems: () => itemStore.loadMoreItems(),
+	focusSearchInput,
 })
 
 // Watch for view mode changes and rebind scroll listeners

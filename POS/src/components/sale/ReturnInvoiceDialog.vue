@@ -372,7 +372,8 @@
 									<p class="text-xs text-gray-500 mt-0.5 flex items-center gap-1 flex-wrap justify-center">
 										<span>@ {{ formatCurrency(item.price_list_rate || item.rate) }}/{{ item.uom }}</span>
 										<span v-if="item.discount_per_unit > 0" class="inline-flex items-center px-1 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">−{{ formatCurrency(item.discount_per_unit) }}</span>
-										<span v-if="item.tax_per_unit > 0" class="inline-flex items-center px-1 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700">+{{ formatCurrency(item.tax_per_unit) }}</span>
+										<span v-if="item.tax_per_unit > 0 && item.tax_included_in_rate" class="inline-flex items-center px-1 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700">{{ __('incl. {0} tax', [formatCurrency(item.tax_per_unit)]) }}</span>
+										<span v-else-if="item.tax_per_unit > 0" class="inline-flex items-center px-1 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700">+{{ formatCurrency(item.tax_per_unit) }}</span>
 									</p>
 								</div>
 							</div>
@@ -445,7 +446,8 @@
 										<p class="text-xs text-gray-500 flex items-center gap-1 flex-wrap justify-end">
 											<span>@ {{ formatCurrency(item.price_list_rate || item.rate) }}/{{ item.uom }}</span>
 											<span v-if="item.discount_per_unit > 0" class="inline-flex items-center px-1 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">−{{ formatCurrency(item.discount_per_unit) }}</span>
-											<span v-if="item.tax_per_unit > 0" class="inline-flex items-center px-1 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700">+{{ formatCurrency(item.tax_per_unit) }}</span>
+											<span v-if="item.tax_per_unit > 0 && item.tax_included_in_rate" class="inline-flex items-center px-1 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700">{{ __('incl. {0} tax', [formatCurrency(item.tax_per_unit)]) }}</span>
+											<span v-else-if="item.tax_per_unit > 0" class="inline-flex items-center px-1 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700">+{{ formatCurrency(item.tax_per_unit) }}</span>
 										</p>
 									</div>
 								</div>

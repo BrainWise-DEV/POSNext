@@ -1,79 +1,18 @@
 import { call } from "@/utils/apiWrapper"
 import { isOffline } from "@/utils/offline"
 import { offlineWorker } from "@/utils/offline/workerClient"
-import { cacheItems, getCachedVariants, updateItemBatchSerialData } from "@/utils/offline/items"
+import { updateItemBatchSerialData } from "@/utils/offline/items"
 import { performanceConfig } from "@/utils/performanceConfig"
 import { logger } from "@/utils/logger"
 import { createResource } from "frappe-ui"
 import { defineStore } from "pinia"
-import { computed, ref } from "vue"
+import { computed, ref, watch } from "vue"
 import { useStockStore } from "./stock"
+import { usePOSSettingsStore } from "./posSettings"
 import { usePOSShiftStore } from "./posShift"
 import { useRealtimePosProfile } from "@/composables/useRealtimePosProfile"
 
 const log = logger.create('ItemSearch')
-
-/**
- * Fetch and cache variants for all template items
- * This ensures variants are available for offline use
- * @param {Array} items - Items array to check for templates
- * @param {string} posProfile - POS Profile name
- */
-async function cacheVariantsForTemplates(items, posProfile) {
-	if (!items || items.length === 0 || !posProfile) return
-
-	// Find template items (items with has_variants = 1)
-	const templateItems = items.filter(item => item.has_variants)
-
-	if (templateItems.length === 0) {
-		log.debug("No template items found - skipping variant caching")
-		return
-	}
-
-	log.info(`Caching variants for ${templateItems.length} template items`)
-
-	// Fetch variants for each template in parallel (with concurrency limit)
-	const CONCURRENCY_LIMIT = 3
-	const allVariants = []
-
-	for (let i = 0; i < templateItems.length; i += CONCURRENCY_LIMIT) {
-		const batch = templateItems.slice(i, i + CONCURRENCY_LIMIT)
-
-		const batchPromises = batch.map(async (template) => {
-			try {
-				const response = await call("pos_next.api.items.get_item_variants", {
-					template_item: template.item_code,
-					pos_profile: posProfile,
-				})
-				const variants = response?.message || response || []
-
-				if (variants.length > 0) {
-					log.debug(`Fetched ${variants.length} variants for ${template.item_code}`)
-					return variants
-				}
-				return []
-			} catch (error) {
-				log.warn(`Failed to fetch variants for ${template.item_code}:`, error.message)
-				return []
-			}
-		})
-
-		const batchResults = await Promise.all(batchPromises)
-		for (const variants of batchResults) {
-			allVariants.push(...variants)
-		}
-	}
-
-	// Cache all variants in IndexedDB
-	if (allVariants.length > 0) {
-		try {
-			await cacheItems(allVariants)
-			log.success(`Cached ${allVariants.length} variants for offline use`)
-		} catch (error) {
-			log.error("Failed to cache variants:", error)
-		}
-	}
-}
 
 /**
  * Fetch and cache batch/serial data for items with batch or serial tracking
@@ -126,6 +65,15 @@ async function cacheBatchSerialForItems(items, warehouse) {
 export const useItemSearchStore = defineStore("itemSearch", () => {
 	// Get stock store instance
 	const stockStore = useStockStore()
+
+	// Get POS settings store for dynamic show_variants_as_items flag
+	const posSettingsStore = usePOSSettingsStore()
+	const getShowVariantsFlag = () => posSettingsStore.showVariantsAsItems ? 1 : 0
+
+	// Sync show_variants_as_items setting to worker whenever it changes
+	watch(() => posSettingsStore.showVariantsAsItems, (newVal) => {
+		offlineWorker.setShowVariantsAsItems(newVal)
+	}, { immediate: true })
 
 	// Get shift store for warehouse info (for batch/serial caching)
 	const shiftStore = usePOSShiftStore()
@@ -776,6 +724,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 			// Skip when offline — count can't be fetched without network
 			const countPromise = !offline ? call("pos_next.api.items.get_items_count", {
 				pos_profile: profile,
+				show_variants_as_items: getShowVariantsFlag(),
 			}).then(r => r?.message ?? r ?? 0).catch(countErr => {
 				log.warn("Could not fetch item count:", countErr.message)
 				return 0
@@ -824,28 +773,6 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 							totalServerItems.value = cacheStats.value?.totalServerItems || stats.items
 							hasMore.value = cached.length >= limit
 							log.success(`Loaded ${cached.length} items from cache (offline, total: ${stats.items})`)
-
-							// Eager variant verification: Check if template items have cached variants
-							const templateItems = cached.filter(item => item.has_variants)
-							if (templateItems.length > 0) {
-								log.info(`Verifying variants for ${templateItems.length} template items`)
-								const missingVariants = []
-
-								for (const template of templateItems) {
-									const variants = await getCachedVariants(template.item_code)
-									if (!variants || variants.length === 0) {
-										missingVariants.push(template.item_code)
-									} else {
-										log.debug(`Template ${template.item_code} has ${variants.length} cached variants`)
-									}
-								}
-
-								if (missingVariants.length > 0) {
-									log.warn(`${missingVariants.length} template items missing variants in offline cache:`, missingVariants)
-								} else {
-									log.success(`All ${templateItems.length} template items have variants cached`)
-								}
-							}
 						} else {
 							replaceAllItems([])
 							log.warn("No items in cache")
@@ -946,11 +873,6 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 
 					log.success(`Loaded ${fetchedItems.length} items (server-side filtering)`)
 
-					// Background caching - limit to prevent overloading IndexedDB
-					cacheVariantsForTemplates(fetchedItems.slice(0, 50), profile).catch(err => {
-						log.warn("Background variant caching failed:", err.message)
-					})
-
 					// Cache batch/serial data for offline use
 					if (shiftStore.profileWarehouse) {
 						cacheBatchSerialForItems(fetchedItems, shiftStore.profileWarehouse).catch(err => {
@@ -984,6 +906,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 					item_group: null, // No filter - get items from all groups
 					start: 0,
 					limit: unfilteredLimit,
+					show_variants_as_items: getShowVariantsFlag(),
 				})
 				const list = response?.message || response || []
 
@@ -1005,12 +928,6 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 					serverDataFresh.value = true
 
 					log.success(`Loaded ${list.length} items from server`)
-
-					// Cache variants for template items (for offline use)
-					// Run in background to not block UI
-					cacheVariantsForTemplates(list, profile).catch(err => {
-						log.warn("Background variant caching failed:", err.message)
-					})
 
 					// Cache batch/serial data for offline use
 					if (shiftStore.profileWarehouse) {
@@ -1072,6 +989,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 				item_group: firstGroup, // Server-side filter via DB index
 				start: 0,
 				limit: effectiveLimit,
+				show_variants_as_items: getShowVariantsFlag(),
 			})
 			const items = response?.message || response || []
 			log.info(`Fetched ${items.length} items from ${firstGroup}`)
@@ -1107,6 +1025,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 					item_groups: JSON.stringify(groupsToFetch),
 					start: start,
 					limit: effectiveLimit,
+					show_variants_as_items: getShowVariantsFlag(),
 				})
 				return response?.message || response || []
 			} else {
@@ -1116,6 +1035,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 					item_group: itemGroup,
 					start: start,
 					limit: effectiveLimit,
+					show_variants_as_items: getShowVariantsFlag(),
 				})
 				return response?.message || response || []
 			}
@@ -1188,6 +1108,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 					item_group: null,
 					start: start,
 					limit: pageSize,
+					show_variants_as_items: getShowVariantsFlag(),
 				})
 				items = response?.message || response || []
 			}
@@ -1277,6 +1198,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 					item_group: null,
 					start: currentOffset.value,
 					limit: itemsPerPage.value,
+					show_variants_as_items: getShowVariantsFlag(),
 				})
 				list = response?.message || response || []
 			}
@@ -1314,14 +1236,18 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 	/**
 	 * Background sync for offline support - caches ALL items to IndexedDB
 	 *
-	 * For large catalogs (65K+ items):
-	 * - UI shows 100 items immediately (fast)
-	 * - This function syncs ALL items AGGRESSIVELY for offline use
-	 * - Uses CONTINUOUS batching (not interval-based) for fast sync
-	 * - 65K items at 500/batch = 130 batches = ~3-5 minutes total
+	 * Performance optimizations over previous version:
+	 * - Uses `get_items_bulk` instead of `get_items` (no search scoring, no bundle calc)
+	 * - Batch size: 2000 (was 500) → 4x fewer round trips
+	 * - Parallel requests: 3 concurrent (was 1) → 3x throughput
+	 * - Delay: 200ms (was 500ms) between rounds
+	 * - Dynamic IndexedDB batch size based on catalog size
+	 *
+	 * 40K items: ~80 sequential calls × 3s → 20 calls ÷ 3 parallel = 7 rounds ≈ 30-60s
 	 *
 	 * @param {string} profile - POS Profile name
 	 * @param {Array} filterGroups - Item group filters from POS Profile (optional)
+	 * @param {number} initialOffset - Items already loaded before sync started
 	 */
 	async function startBackgroundCacheSync(profile, filterGroups = [], initialOffset = 0) {
 		// Cancel any previous sync and start fresh
@@ -1337,9 +1263,10 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 		log.info(`Starting background sync gen=${myGeneration} ${hasFilters ? `for ${filterGroups.length} groups` : '(all items)'}`)
 		cacheSyncing.value = true
 
-		// Use larger batch size for faster sync (500 items per batch)
-		const batchSize = 500
-		const BATCH_DELAY_MS = 500 // Small delay between batches to not overwhelm server
+		// Tuning knobs
+		const batchSize = 2000
+		const PARALLEL_REQUESTS = Math.min(3, performanceConfig.getRecommendedWorkerCount() + 1)
+		const BATCH_DELAY_MS = 200
 		const MAX_SYNC_RETRIES = 5
 		let batchCount = 0
 		let consecutiveErrors = 0
@@ -1365,124 +1292,161 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 			}))]
 			: []
 
-		// Fetch total item count for progress percentage (Phase 7)
-		let totalServerItems = 0
-		try {
-			if (myGeneration !== syncGeneration) return
-			const countResponse = await call("pos_next.api.items.get_items_count", {
-				pos_profile: profile,
-				include_variants: 1,
-			})
-			totalServerItems = countResponse?.message ?? countResponse ?? 0
-			if (myGeneration !== syncGeneration) return
-			log.info(`Total server items: ${totalServerItems}`)
-		} catch (err) {
-			log.warn("Could not fetch item count for progress tracking:", err.message)
+		// Use already-fetched total from loadAllItems (stored in reactive ref)
+		// Avoids a duplicate get_items_count API call
+		let syncTotalItems = totalServerItems.value || 0
+		log.info(`Total server items (from loadAllItems): ${syncTotalItems}`)
+
+		// Dynamic IndexedDB batch size — larger catalogs benefit from fewer transactions
+		const workerBatchSize = syncTotalItems > 20000 ? 2000
+			: syncTotalItems > 5000 ? 1000
+			: 500
+
+		// Helper: update progress stats
+		const updateProgress = () => {
+			const totalCached = initialOffset + uniqueItemsSeen.size
+			const syncProgress = syncTotalItems > 0
+				? Math.round((totalCached / syncTotalItems) * 100)
+				: null
+			cacheStats.value = {
+				...cacheStats.value,
+				items: totalCached,
+				totalServerItems: syncTotalItems,
+				syncProgress,
+				lastSync: new Date().toISOString()
+			}
+			cacheReady.value = true
+			return { totalCached, syncProgress }
 		}
 
-		// CONTINUOUS SYNC LOOP - much faster than interval-based!
+		// CONTINUOUS SYNC LOOP
 		const syncLoop = async () => {
 			while (myGeneration === syncGeneration) {
 				try {
-					let response, list
-
 					if (hasFilters && groupsToSync.length > 0) {
-						// FILTERED SYNC: Fetch items group by group
+						// ============================================================
+						// FILTERED SYNC: Fetch items group by group using get_items_bulk
+						// Sequential per-group (groups are typically small)
+						// ============================================================
 						if (groupIndex >= groupsToSync.length) {
-							// All groups synced - DONE!
-							break
+							break // All groups synced
 						}
 
 						const currentGroup = groupsToSync[groupIndex]
 						log.debug(`Syncing ${currentGroup} at offset ${groupOffset}`)
 
-						response = await call("pos_next.api.items.get_items", {
+						const response = await call("pos_next.api.items.get_items_bulk", {
 							pos_profile: profile,
-							search_term: "",
-							item_group: currentGroup,
+							item_groups: JSON.stringify([currentGroup]),
 							start: groupOffset,
 							limit: batchSize,
-							include_variants: 1,
+							show_variants_as_items: getShowVariantsFlag(),
+							include_variants: 1, // Always cache variants for offline barcode scanning
 						})
 						if (myGeneration !== syncGeneration) return
-						list = response?.message || response || []
+						const list = response?.message || response || []
+
+						if (list.length > 0) {
+							await offlineWorker.cacheItems(list, workerBatchSize)
+							if (myGeneration !== syncGeneration) return
+							for (const item of list) {
+								if (item.item_code) uniqueItemsSeen.add(item.item_code)
+							}
+							batchCount++
+							consecutiveErrors = 0
+						}
 
 						if (list.length < batchSize) {
-							// Move to next group
 							groupIndex++
 							groupOffset = 0
 							log.debug(`Completed group ${currentGroup} (${groupIndex}/${groupsToSync.length})`)
 						} else {
 							groupOffset += list.length
 						}
-					} else {
-						// UNFILTERED SYNC: Fetch all items with pagination
-						// Use syncOffset to skip items already loaded in initial fetch
-						response = await call("pos_next.api.items.get_items", {
-							pos_profile: profile,
-							search_term: "",
-							item_group: null,
-							start: syncOffset,
-							limit: batchSize,
-							include_variants: 1,
-						})
-						if (myGeneration !== syncGeneration) return
-						list = response?.message || response || []
 
-						// Advance offset for next batch
-						syncOffset += list.length
+						updateProgress()
 
-						// Check if we've reached the end
-						if (list.length < batchSize) {
-							// Cache this last batch and exit
-							if (list.length > 0) {
-								await offlineWorker.cacheItems(list)
-								if (myGeneration !== syncGeneration) return
-								for (const item of list) {
-									if (item.item_code) uniqueItemsSeen.add(item.item_code)
-								}
-							}
-							break
-						}
-					}
-
-					if (list.length > 0) {
-						// Cache the batch
-						await offlineWorker.cacheItems(list)
-						if (myGeneration !== syncGeneration) return
-
-						// Track unique items for accurate progress
-						for (const item of list) {
-							if (item.item_code) uniqueItemsSeen.add(item.item_code)
-						}
-						batchCount++
-						consecutiveErrors = 0 // Reset on success
-
-						// Update stats EVERY batch for smooth progress indicator
-						// Include initialOffset to account for items already loaded before sync
-						const totalCached = initialOffset + uniqueItemsSeen.size
-						const syncProgress = totalServerItems > 0
-							? Math.round((totalCached / totalServerItems) * 100)
-							: null
-						cacheStats.value = {
-							...cacheStats.value,
-							items: totalCached,
-							totalServerItems,
-							syncProgress,
-							lastSync: new Date().toISOString()
-						}
-						cacheReady.value = true
-
-						// Log progress every 10 batches (5000 items)
-						if (batchCount % 10 === 0) {
+						// Log progress every 5 batches
+						if (batchCount % 5 === 0) {
+							const { totalCached, syncProgress } = updateProgress()
 							const progressStr = syncProgress != null ? ` (${syncProgress}%)` : ''
 							log.info(`Sync progress: ${totalCached} items cached${progressStr} (${batchCount} batches)`)
 						}
 
-						// Note: Variants are included in the sync via include_variants=1,
-						// so no need for separate cacheVariantsForTemplates call here
+						await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS))
+					} else {
+						// ============================================================
+						// UNFILTERED SYNC: Parallel fetch using get_items_bulk
+						// Fire PARALLEL_REQUESTS concurrent calls at consecutive offsets
+						// ============================================================
+						const promises = []
+						const offsets = []
 
-						// Small delay to not overwhelm server/browser
+						for (let i = 0; i < PARALLEL_REQUESTS; i++) {
+							const offset = syncOffset + i * batchSize
+							offsets.push(offset)
+							promises.push(
+								call("pos_next.api.items.get_items_bulk", {
+									pos_profile: profile,
+									start: offset,
+									limit: batchSize,
+									show_variants_as_items: getShowVariantsFlag(),
+									include_variants: 1, // Always cache variants for offline barcode scanning
+								}).then(r => r?.message || r || [])
+								.catch(err => {
+									log.warn(`Parallel batch at offset ${offset} failed:`, err.message)
+									return null // Mark as failed, don't break the whole round
+								})
+							)
+						}
+
+						const results = await Promise.allSettled(promises)
+						if (myGeneration !== syncGeneration) return
+
+						// Process results in offset order
+						let anyFailed = false
+						let lastBatchShort = false
+
+						for (let i = 0; i < results.length; i++) {
+							const result = results[i]
+							const list = result.status === 'fulfilled' ? result.value : null
+
+							if (list === null) {
+								anyFailed = true
+								continue
+							}
+
+							if (list.length > 0) {
+								await offlineWorker.cacheItems(list, workerBatchSize)
+								if (myGeneration !== syncGeneration) return
+								for (const item of list) {
+									if (item.item_code) uniqueItemsSeen.add(item.item_code)
+								}
+								batchCount++
+							}
+
+							if (list.length < batchSize) {
+								lastBatchShort = true
+							}
+						}
+
+						// Advance offset by total items requested this round
+						syncOffset += PARALLEL_REQUESTS * batchSize
+						consecutiveErrors = anyFailed ? consecutiveErrors + 1 : 0
+
+						const { totalCached, syncProgress } = updateProgress()
+
+						// Log progress every few rounds
+						if (batchCount % 5 === 0) {
+							const progressStr = syncProgress != null ? ` (${syncProgress}%)` : ''
+							log.info(`Sync progress: ${totalCached} items cached${progressStr} (${batchCount} batches, ${PARALLEL_REQUESTS}x parallel)`)
+						}
+
+						// If any batch returned fewer items than requested, we've reached the end
+						if (lastBatchShort) {
+							break
+						}
+
 						await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS))
 					}
 				} catch (error) {
@@ -1508,17 +1472,16 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 			const finalCached = initialOffset + uniqueItemsSeen.size
 			cacheStats.value = {
 				...finalStats,
-				totalServerItems,
-				syncProgress: totalServerItems > 0 ? Math.round((finalCached / totalServerItems) * 100) : null,
+				totalServerItems: syncTotalItems,
+				syncProgress: syncTotalItems > 0 ? Math.round((finalCached / syncTotalItems) * 100) : null,
 			}
 			cacheReady.value = true
 			cacheSyncing.value = false
-			log.success(`Background sync COMPLETE - ${finalCached} items cached in ${batchCount} batches`)
+			log.success(`Background sync COMPLETE - ${finalCached} items cached in ${batchCount} batches (${PARALLEL_REQUESTS}x parallel)`)
 
 			// Cache batch/serial data after items are synced (in background)
 			if (shiftStore.profileWarehouse && finalCached > 0) {
 				log.info("Starting batch/serial data sync...")
-				// This runs in background, don't await
 				offlineWorker.searchCachedItems("", 10000).then(async (items) => {
 					const batchSerialItems = items.filter(i => i.has_batch_no || i.has_serial_no)
 					if (batchSerialItems.length > 0) {
@@ -1588,6 +1551,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 						item_group: selectedItemGroup.value,
 						start: 0,
 						limit: searchLimit, // Dynamically adjusted based on device performance
+						show_variants_as_items: getShowVariantsFlag(),
 					})
 					const serverResults = response?.message || response || []
 
@@ -1817,6 +1781,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 				const countPromise = call("pos_next.api.items.get_items_count", {
 					pos_profile: posProfile.value,
 					item_group: group || undefined,
+					show_variants_as_items: getShowVariantsFlag(),
 				}).catch(err => {
 					log.warn("Could not fetch item count:", err.message)
 					return 0
@@ -1835,6 +1800,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 						item_group: null,
 						start: 0,
 						limit: pageSize,
+						show_variants_as_items: getShowVariantsFlag(),
 					})
 					items = response?.message || response || []
 					log.info(`Loaded ${items.length} items for "All Items" tab`)
@@ -1926,6 +1892,14 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 	 * @param {boolean} autoLoadItems - Automatically load items after setting profile (default: true)
 	 */
 	async function setPosProfile(profile, autoLoadItems = true) {
+		// Skip re-initialization if same profile is already loaded and initialized
+		// This prevents redundant API calls when mobile tab switching
+		// remounts the ItemsSelector component
+		if (profile && profile === posProfile.value && serverDataFresh.value) {
+			log.debug("setPosProfile skipped — same profile already active", { profile })
+			return
+		}
+
 		posProfile.value = profile
 		serverDataFresh.value = false
 

@@ -136,6 +136,9 @@ def compute_resolved_item_data(
 
     barcode_type = resolved_barcode.get("barcode_type")
     barcode_uom = resolved_barcode.get("uom")
+    # If barcode resolver didn't provide a UOM, fall back to item's stock UOM
+    if not barcode_uom:
+        barcode_uom = item.get("uom")
     uom_prices = item.get("uom_prices", {})
     barcode_uom_price = uom_prices.get(barcode_uom)
     item_uom = item.get("uom")

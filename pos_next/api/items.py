@@ -322,9 +322,17 @@ def search_by_barcode(barcode, pos_profile):
 		if not pos_profile:
 			frappe.throw(_("POS Profile is required"))
 
+		# Try to resolve weighted/priced barcodes if barcode_resolver is available
+		resolved_barcode_data = None
+		effective_barcode = barcode
+		from pos_next.services.barcode import resolve_barcode
+		resolved_barcode_data = resolve_barcode(barcode, pos_profile)
+		if resolved_barcode_data and resolved_barcode_data.get("item_barcode"):
+			effective_barcode = resolved_barcode_data["item_barcode"]
+
 		# Search for item by barcode - also get UOM if barcode has specific UOM
 		barcode_data = frappe.db.get_value(
-			"Item Barcode", {"barcode": barcode}, ["parent", "uom"], as_dict=True
+			"Item Barcode", {"barcode": effective_barcode}, ["parent", "uom"], as_dict=True
 		)
 
 		if barcode_data:
@@ -332,7 +340,7 @@ def search_by_barcode(barcode, pos_profile):
 			barcode_uom = barcode_data.uom
 		else:
 			# Try searching in item code field directly
-			item_code = frappe.db.get_value("Item", {"name": barcode})
+			item_code = frappe.db.get_value("Item", {"name": effective_barcode})
 			barcode_uom = None
 
 		if not item_code:
@@ -376,6 +384,36 @@ def search_by_barcode(barcode, pos_profile):
 			price_list=pos_profile_doc.selling_price_list,
 			company=pos_profile_doc.company,
 		)
+
+		# Ensure warehouse is set on the response (needed for cart/invoice)
+		item_details["warehouse"] = pos_profile_doc.warehouse
+
+		# Build uom_prices map (same pattern as get_items)
+		uom_prices = {}
+		if pos_profile_doc.selling_price_list:
+			ItemPrice = DocType("Item Price")
+			prices = (
+				frappe.qb.from_(ItemPrice)
+				.select(ItemPrice.uom, ItemPrice.price_list_rate)
+				.where(ItemPrice.item_code == item_code)
+				.where(ItemPrice.price_list == pos_profile_doc.selling_price_list)
+				.run(as_dict=True)
+			)
+			for p in prices:
+				if p["uom"]:
+					uom_prices[p["uom"]] = p["price_list_rate"]
+
+		item_details["uom_prices"] = uom_prices
+
+		# Apply resolved barcode data (weighted/priced) to the item details
+		if resolved_barcode_data:
+			from pos_next.services.barcode import compute_resolved_item_data
+			resolved_item_data = compute_resolved_item_data(
+				resolved_barcode_data,
+				item=item_details,
+			)
+			if resolved_item_data:
+				item_details.update(resolved_item_data)
 
 		return item_details
 	except Exception as e:
@@ -658,28 +696,51 @@ def _get_item_group_with_descendants(item_group):
 	return [item_group] + list(descendants)
 
 
-def _build_item_base_conditions(pos_profile_doc, item_group=None, exclude_variants=True):
-	"""Build base SQL conditions for POS item search with hierarchical item group support."""
+def _build_item_base_conditions(pos_profile_doc, item_group=None, exclude_variants=True, exclude_templates=False, hide_unavailable=False, warehouse=None):
+	"""Build base SQL conditions for POS item search with hierarchical item group support.
+
+	Returns:
+		tuple: (conditions, params, extra_joins)
+			- conditions: list of WHERE clause strings
+			- params: list of params in SQL order (JOIN params first, then WHERE params)
+			- extra_joins: SQL JOIN string to insert before WHERE (empty string if none)
+	"""
 	conditions = [
 		"i.disabled = 0",
 		"i.is_sales_item = 1",
 	]
 	if exclude_variants:
 		conditions.append("IFNULL(i.variant_of, '') = ''")
+	if exclude_templates:
+		conditions.append("i.has_variants = 0")
 
-	params = []
+	where_params = []
 
 	if pos_profile_doc.company:
 		conditions.append("IFNULL(i.custom_company, '') IN (%s, '')")
-		params.append(pos_profile_doc.company)
+		where_params.append(pos_profile_doc.company)
 
 	if item_group:
 		item_groups = _get_item_group_with_descendants(item_group)
 		placeholders = ", ".join(["%s"] * len(item_groups))
 		conditions.append(f"i.item_group IN ({placeholders})")
-		params.extend(item_groups)
+		where_params.extend(item_groups)
 
-	return conditions, params
+	extra_joins = ""
+	join_params = []
+
+	if hide_unavailable and warehouse:
+		warehouses = [warehouse]
+		if frappe.db.get_value("Warehouse", warehouse, "is_group"):
+			warehouses = frappe.db.get_descendants("Warehouse", warehouse) or [warehouse]
+
+		wh_placeholders = ", ".join(["%s"] * len(warehouses))
+		extra_joins = f"LEFT JOIN `tabBin` bin ON bin.item_code = i.name AND bin.warehouse IN ({wh_placeholders})"
+		join_params.extend(warehouses)
+		conditions.append("(i.is_stock_item = 0 OR i.has_variants = 1 OR bin.actual_qty > 0)")
+
+	# Merge: join params come before WHERE params to match SQL placeholder order
+	return conditions, join_params + where_params, extra_joins
 
 
 def _calculate_bundle_availability_bulk(bundle_codes, warehouse):
@@ -1006,7 +1067,7 @@ def _get_bundle_warehouse_availability_bulk(bundle_codes, warehouses):
 
 
 @frappe.whitelist()
-def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20, include_variants=0):
+def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20, include_variants=0, show_variants_as_items=0):
 	"""Get items for POS with stock, price, and tax details"""
 	try:
 		pos_profile_doc = frappe.get_cached_doc("POS Profile", pos_profile)
@@ -1021,18 +1082,24 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20,
 				# Use the extracted item barcode for searching
 				effective_search_term = resolved_barcode_data["item_barcode"]
 
-		# IMPORTANT: Filtering logic explained:
-		# - Template items (has_variants=1) are shown → users select variants via dialog
-		# - Regular items (has_variants=0, variant_of is null) are shown → direct add to cart
-		# - Variant items (has_variants=0, variant_of is not null) are HIDDEN from main list
-		#   UNLESS include_variants=1 (used by background sync to cache variants for offline)
-
-		# Add company filter - show items for specific company + global items (empty company)
-		# Global items (custom_company is empty) are available to all companies
+		# FILTERING LOGIC:
+		# When show_variants_as_items=1: Variants shown directly in grid, templates excluded
+		# When show_variants_as_items=0 (default): Templates shown, variants hidden from browse
 
 		# Build base conditions
-		exclude_variants = not int(include_variants)
-		conditions, params = _build_item_base_conditions(pos_profile_doc, item_group, exclude_variants=exclude_variants)
+		show_variants_mode = int(show_variants_as_items)
+		if show_variants_mode:
+			exclude_variants = False
+			exclude_templates = True
+		else:
+			exclude_variants = not int(include_variants)
+			exclude_templates = False
+		hide_unavailable = getattr(pos_profile_doc, "hide_unavailable_items", 0)
+		conditions, params, extra_joins = _build_item_base_conditions(
+			pos_profile_doc, item_group, exclude_variants=exclude_variants,
+			exclude_templates=exclude_templates,
+			hide_unavailable=hide_unavailable, warehouse=pos_profile_doc.warehouse,
+		)
 
 		# Build column list with table alias
 		item_columns = ",\n\t".join([f"i.{col}" for col in ITEM_RESULT_FIELDS])
@@ -1057,7 +1124,7 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20,
 			conditions.append(f"(({word_conditions}) OR {barcode_condition})")
 			params.extend([f"%{word}%" for word in search_words])
 			params.append(effective_search_term)  # For barcode matching
-			
+
 			# Relevance scoring with case-insensitive comparison
 			# Exact barcode match gets highest priority, use MAX() for grouping
 			prefix_pattern = f"{effective_search_term}%"
@@ -1087,15 +1154,15 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20,
 				GROUP_CONCAT(DISTINCT ib.uom) as barcode_uoms
 			FROM `tabItem` i
 			LEFT JOIN `tabItem Barcode` ib ON ib.parent = i.name
+			{extra_joins}
 			WHERE {where_clause}
 			GROUP BY {group_by_columns}
 			ORDER BY {order_by}
 			LIMIT %s OFFSET %s
 		"""
 
-		params.extend(score_params)
-		params.extend([limit, start])
-		items = frappe.db.sql(query, tuple(params), as_dict=1)
+		all_params = params + score_params + [limit, start]
+		items = frappe.db.sql(query, tuple(all_params), as_dict=1)
 
 		# Prepare maps for enrichment
 		item_codes = [item["item_code"] for item in items]
@@ -1340,6 +1407,16 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20,
 			if resolved_item_data:
 				items[0].update(resolved_item_data)
 
+		# Post-filter: hide unavailable bundles
+		# The SQL-level filter exempts non-stock items (is_stock_item=0) since they
+		# have no Bin rows. Bundles are non-stock items whose availability is computed
+		# from component stock. Filter them out here if they have 0 availability.
+		if hide_unavailable and bundle_availability_map:
+			items = [
+				item for item in items
+				if not item.get("is_bundle") or item.get("actual_qty", 0) > 0
+			]
+
 		return items
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Items Error")
@@ -1347,7 +1424,7 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20,
 
 
 @frappe.whitelist()
-def get_items_bulk(pos_profile, item_groups=None, start=0, limit=2000, include_variants=0):
+def get_items_bulk(pos_profile, item_groups=None, start=0, limit=2000, include_variants=0, show_variants_as_items=0):
 	"""
 	Fetch items from multiple item groups in a SINGLE query.
 	Eliminates N+1 problem where frontend was making one API call per group.
@@ -1358,6 +1435,7 @@ def get_items_bulk(pos_profile, item_groups=None, start=0, limit=2000, include_v
 		start: Offset for pagination (default 0)
 		limit: Max items to return (default 2000)
 		include_variants: If 1, include variant items (for offline caching)
+		show_variants_as_items: If 1, show variants directly and exclude templates
 	"""
 	try:
 		if isinstance(item_groups, str):
@@ -1366,8 +1444,19 @@ def get_items_bulk(pos_profile, item_groups=None, start=0, limit=2000, include_v
 		pos_profile_doc = frappe.get_cached_doc("POS Profile", pos_profile)
 
 		# Build base conditions using shared helper
-		exclude_variants = not int(include_variants)
-		conditions, params = _build_item_base_conditions(pos_profile_doc, exclude_variants=exclude_variants)
+		show_variants_mode = int(show_variants_as_items)
+		if show_variants_mode:
+			exclude_variants = False
+			exclude_templates = True
+		else:
+			exclude_variants = not int(include_variants)
+			exclude_templates = False
+		hide_unavailable = getattr(pos_profile_doc, "hide_unavailable_items", 0)
+		conditions, params, extra_joins = _build_item_base_conditions(
+			pos_profile_doc, exclude_variants=exclude_variants,
+			exclude_templates=exclude_templates,
+			hide_unavailable=hide_unavailable, warehouse=pos_profile_doc.warehouse,
+		)
 
 		if item_groups:
 			# Expand all groups to include their descendants
@@ -1389,14 +1478,14 @@ def get_items_bulk(pos_profile, item_groups=None, start=0, limit=2000, include_v
 				GROUP_CONCAT(DISTINCT ib.uom) as barcode_uoms
 			FROM `tabItem` i
 			LEFT JOIN `tabItem Barcode` ib ON ib.parent = i.name
+			{extra_joins}
 			WHERE {where_clause}
 			GROUP BY {group_by_columns}
 			ORDER BY i.item_name ASC
 			LIMIT %s OFFSET %s
 		"""
-		params.append(int(limit))
-		params.append(int(start))
-		items = frappe.db.sql(query, tuple(params), as_dict=1)
+		all_params = params + [int(limit), int(start)]
+		items = frappe.db.sql(query, tuple(all_params), as_dict=1)
 
 		if not items:
 			return []
@@ -1455,6 +1544,13 @@ def get_items_bulk(pos_profile, item_groups=None, start=0, limit=2000, include_v
 			)
 			stock_map = {s.item_code: flt(s.qty) for s in stock_data}
 
+		# Bundle availability
+		bundle_availability_map = {}
+		if item_codes and warehouse:
+			bundle_availability_map = _calculate_bundle_availability_bulk(
+				item_codes, warehouse
+			)
+
 		# Variant attributes (only when variants are included)
 		attributes_map = {}
 		if not exclude_variants:
@@ -1473,18 +1569,26 @@ def get_items_bulk(pos_profile, item_groups=None, start=0, limit=2000, include_v
 			item_code = item["item_code"]
 			stock_uom = item.get("stock_uom")
 
-			# Price
+			# Price: prefer stock_uom, then None/empty UOM (Item Price without UOM)
 			prices = uom_prices_map.get(item_code, {})
-			item["rate"] = prices.get(stock_uom, 0)
+			item["rate"] = flt(prices.get(stock_uom) or prices.get(None) or prices.get("") or 0)
 			item["price_list_rate"] = item["rate"]
 			item["uom"] = stock_uom
 			item["price_uom"] = stock_uom
 			item["conversion_factor"] = 1
 			item["price_list_rate_price_uom"] = item["rate"]
 
-			# Stock
-			item["actual_qty"] = stock_map.get(item_code, 0)
+			# Stock: stock items use Bin, bundles use component-based availability
+			item["actual_qty"] = (
+				stock_map.get(item_code, 0)
+				if item.get("is_stock_item")
+				else bundle_availability_map.get(item_code, 0)
+			)
 			item["warehouse"] = warehouse
+
+			# Bundle marker
+			if item_code in bundle_availability_map:
+				item["is_bundle"] = True
 
 			# UOMs
 			all_uoms = uom_map.get(item_code, []) or []
@@ -1495,6 +1599,13 @@ def get_items_bulk(pos_profile, item_groups=None, start=0, limit=2000, include_v
 			if item.get("variant_of") and item_code in attributes_map:
 				item["attributes"] = attributes_map[item_code]
 
+		# Post-filter: hide unavailable bundles
+		if hide_unavailable and bundle_availability_map:
+			items = [
+				item for item in items
+				if not item.get("is_bundle") or item.get("actual_qty", 0) > 0
+			]
+
 		return items
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Items Bulk Error")
@@ -1502,7 +1613,7 @@ def get_items_bulk(pos_profile, item_groups=None, start=0, limit=2000, include_v
 
 
 @frappe.whitelist()
-def get_items_count(pos_profile, item_group=None, include_variants=0):
+def get_items_count(pos_profile, item_group=None, include_variants=0, show_variants_as_items=0):
 	"""
 	Get total count of POS-eligible items for progress tracking and smart pagination.
 
@@ -1513,19 +1624,32 @@ def get_items_count(pos_profile, item_group=None, include_variants=0):
 		pos_profile: POS Profile name
 		item_group: Optional item group filter (expands to descendants)
 		include_variants: If 1, include variant items in the count
+		show_variants_as_items: If 1, count variants directly and exclude templates
 
 	Returns:
 		int: Total count of distinct matching items
 	"""
 	try:
 		pos_profile_doc = frappe.get_cached_doc("POS Profile", pos_profile)
-		exclude_variants = not int(include_variants)
-		conditions, params = _build_item_base_conditions(pos_profile_doc, item_group, exclude_variants=exclude_variants)
+		show_variants_mode = int(show_variants_as_items)
+		if show_variants_mode:
+			exclude_variants = False
+			exclude_templates = True
+		else:
+			exclude_variants = not int(include_variants)
+			exclude_templates = False
+		hide_unavailable = getattr(pos_profile_doc, "hide_unavailable_items", 0)
+		conditions, params, extra_joins = _build_item_base_conditions(
+			pos_profile_doc, item_group, exclude_variants=exclude_variants,
+			exclude_templates=exclude_templates,
+			hide_unavailable=hide_unavailable, warehouse=pos_profile_doc.warehouse,
+		)
 
 		where_clause = " AND ".join(conditions)
 		query = f"""
 			SELECT COUNT(DISTINCT i.name) as total
 			FROM `tabItem` i
+			{extra_joins}
 			WHERE {where_clause}
 		"""
 		result = frappe.db.sql(query, tuple(params), as_dict=1)

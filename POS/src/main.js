@@ -25,6 +25,7 @@ import {
 import { logger } from "./utils/logger"
 import { offlineWorker } from "./utils/offline/workerClient"
 import translationPlugin from "./utils/translation"
+import { initSocket } from "./socket"
 
 import {
 	Alert,
@@ -185,11 +186,24 @@ async function initializeApp() {
 					const { initPrecision } = await import("./utils/currency")
 					initPrecision(bootstrapStore.getPreloadedPrecision())
 					log.debug("Precision settings initialized from bootstrap")
+
+					// Initialize Socket.IO with correct site name from bootstrap
+					if (typeof window !== "undefined") {
+						if (!window.frappe) window.frappe = {}
+						const siteName = bootstrapStore.getSiteName()
+						window.frappe.realtime = initSocket(siteName)
+
+						// Ensure connection is established
+						if (window.frappe.realtime && typeof window.frappe.realtime.connect === "function") {
+							window.frappe.realtime.connect()
+							log.info("Socket initialized and connecting...", { siteName })
+						}
+					}
 				} catch (error) {
 					log.debug("Bootstrap preload failed (non-critical)", error)
 				}
 			})
-			.catch(() => {})
+			.catch(() => { })
 	}
 
 	// -------------------------------------------------------------------------

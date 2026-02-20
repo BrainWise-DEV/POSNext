@@ -26,6 +26,7 @@
 		"feather-icons": "^4.29.2",
 		"frappe-ui": "^0.1.240",
 		"pinia": "^3.0.4",
+		"qz-tray": "^2.2.5",
 		"socket.io-client": "^4.7.2",
 		"vue": "3.5.13",
 		"vue-router": "^4.5.0"

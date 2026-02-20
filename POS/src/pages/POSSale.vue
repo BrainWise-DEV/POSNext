@@ -24,6 +24,8 @@
 				:cache-stats="itemStore.cacheStats"
 				:stock-sync-active="isStockSyncActive"
 				:is-refreshing="stockStore.refreshing"
+				:silent-print-enabled="posSettingsStore.silentPrint"
+				:qz-connected="qzConnected"
 				@sync-click="handleSyncClick"
 				@printer-click="uiStore.showHistoryDialog = true"
 				@refresh-click="handleRefresh"
@@ -598,7 +600,6 @@
 				v-model="showPOSSettings"
 				:pos-profile="shiftStore.profileName"
 				:current-warehouse="shiftStore.profileWarehouse"
-				@warehouse-changed="handleWarehouseChanged"
 			/>
 
 			<!-- Stock Lookup Dialog (Products Menu) -->
@@ -975,7 +976,9 @@ import { useUserData } from "@/data/user";
 import { parseError } from "@/utils/errorHandler";
 import { offlineWorker } from "@/utils/offline/workerClient";
 import { cacheInvoiceHistory, getCachedInvoiceHistory } from "@/utils/offline/sync";
-import { printInvoice, printInvoiceByName } from "@/utils/printInvoice";
+import { printInvoice, printInvoiceByName, printWithSilentFallback } from "@/utils/printInvoice";
+import { qzConnected, connect as qzConnect, disconnect as qzDisconnect } from "@/utils/qzTray";
+
 import { Button, Dialog, createResource } from "frappe-ui";
 import { call } from "@/utils/apiWrapper";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
@@ -1272,8 +1275,24 @@ onMounted(async () => {
 		await posSettingsStore.reloadSettings();
 	});
 
+	// QZ Tray lifecycle — lazy connect when silent print is enabled
+	watch(
+		() => posSettingsStore.silentPrint,
+		async (enabled) => {
+			if (enabled) {
+				await qzConnect();
+			} else {
+				await qzDisconnect();
+			}
+		},
+		{ immediate: true }
+	);
+
 	// Store cleanup function for unmount
-	onUnmounted(cleanup);
+	onUnmounted(() => {
+		cleanup();
+		qzDisconnect();
+	});
 
 	try {
 		// Start timers for current time and shift duration
@@ -1958,7 +1977,7 @@ async function handlePaymentCompleted(paymentData) {
 					log.debug("Background invoice cache refresh failed:", err)
 				);
 
-				if (shiftStore.autoPrintEnabled) {
+				if (shiftStore.autoPrintEnabled || posSettingsStore.silentPrint) {
 					try {
 						await handlePrintInvoice({ name: invoiceName });
 						showSuccess(__("Invoice {0} created and sent to printer", [invoiceName]));
@@ -2056,20 +2075,16 @@ async function handleOptionSelected(option) {
 			}
 		} else if (option.type === "uom") {
 			const qty = option.quantity || cartStore.pendingItemQty;
-			const itemDetails = await cartStore.getItemDetailsResource.submit({
-				item_code: cartStore.pendingItem.item_code,
-				pos_profile: cartStore.posProfile,
-				customer: cartStore.customer?.name || cartStore.customer,
-				qty: qty,
-				uom: option.uom,
-			});
+			const pricing = await cartStore.resolveUomPricing(
+				cartStore.pendingItem, option.uom, option.conversion_factor, qty
+			);
 
 			const itemToAdd = {
 				...cartStore.pendingItem,
 				uom: option.uom,
 				conversion_factor: option.conversion_factor,
-				rate: itemDetails.price_list_rate || itemDetails.rate,
-				price_list_rate: itemDetails.price_list_rate,
+				rate: pricing.rate,
+				price_list_rate: pricing.price_list_rate,
 			};
 
 			if (itemToAdd.has_batch_no || itemToAdd.has_serial_no) {
@@ -2619,7 +2634,16 @@ function handleViewInvoice(invoice) {
 // Centralized print handler - uses printInvoice.js utilities
 async function handlePrintInvoice(invoiceData) {
 	try {
-		// If invoiceData is a full document with items, use printInvoice directly
+		// Silent print path — send directly to thermal printer via QZ Tray
+		if (posSettingsStore.silentPrint) {
+			const result = await printWithSilentFallback(invoiceData);
+			if (result.method === "browser") {
+				log.info("Used browser print fallback");
+			}
+			return;
+		}
+
+		// Standard browser print path
 		if (invoiceData.items && Array.isArray(invoiceData.items)) {
 			await printInvoice(invoiceData);
 		} else {

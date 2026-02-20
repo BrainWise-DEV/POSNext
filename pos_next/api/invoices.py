@@ -798,6 +798,8 @@ def update_invoice(data):
         if doctype == "Sales Invoice":
             invoice_doc.is_pos = 1
             invoice_doc.update_stock = 1
+            if pos_profile_doc and pos_profile_doc.warehouse:
+                invoice_doc.set_warehouse = pos_profile_doc.warehouse
 
         # ========================================================================
         # ROUNDING CONFIGURATION
@@ -2107,6 +2109,20 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
 
     item_tax_map = _build_item_tax_map(return_dict.get("taxes", []))
 
+    # Check if taxes are inclusive by inspecting the tax rows copied from the original
+    # invoice (immutable after submission, unlike POS Settings which can change later).
+    # Only consider percentage-based taxes (On Net Total, etc.) — Actual charge types
+    # are never inclusive (same logic as sales_invoice_hooks.apply_tax_inclusive).
+    applicable_taxes = [
+        tax for tax in return_dict.get("taxes", [])
+        if tax.get("charge_type") != "Actual"
+    ]
+    tax_inclusive = bool(applicable_taxes) and all(
+        tax.get("included_in_print_rate") for tax in applicable_taxes
+    )
+
+    precision = cint(frappe.get_cached_value("System Settings", None, "currency_precision")) or 2
+
     def process_return_item(item):
         """Process single item for return, returns None if not returnable."""
         item_ref = item.get("sales_invoice_item") or item.get("item_code")
@@ -2116,11 +2132,23 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
         if remaining_qty <= 0:
             return None
 
-        # Get rate breakdown for display - use 3 decimal precision for rates
-        price_list_rate = flt(item.get("price_list_rate") or item.get("rate"), 3)
-        net_rate = flt(item.get("net_rate") or item.get("rate"), 3)
-        discount_per_unit = flt(price_list_rate - net_rate, 3)
-        tax_per_unit = flt(item_tax_map.get(item.get("item_code"), 0) / original_qty, 3) if original_qty else 0
+        # Get rate breakdown for display
+        price_list_rate = flt(item.get("price_list_rate") or item.get("rate"), precision)
+        net_rate = flt(item.get("net_rate") or item.get("rate"), precision)
+        tax_per_unit = flt(item_tax_map.get(item.get("item_code"), 0) / original_qty, precision) if original_qty else 0
+
+        # For inclusive taxes, use the original rate (already includes tax) to prevent
+        # ERPNext from back-calculating and double-reducing the tax.
+        # For exclusive taxes, use net_rate as before.
+        if tax_inclusive:
+            item_rate = flt(item.get("rate"), precision)
+            rate_with_tax = item_rate
+            # Both price_list_rate and rate are tax-inclusive, so discount is their difference
+            discount_per_unit = flt(price_list_rate - item_rate, precision)
+        else:
+            item_rate = net_rate
+            rate_with_tax = flt(net_rate + tax_per_unit, precision)
+            discount_per_unit = flt(price_list_rate - net_rate, precision)
 
         return {
             **item,
@@ -2129,11 +2157,12 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
             "remaining_qty": remaining_qty,
             "qty": -remaining_qty,
             "price_list_rate": price_list_rate,
-            "rate": net_rate,
+            "rate": item_rate,
             "discount_per_unit": discount_per_unit,
-            "amount": flt(net_rate * -remaining_qty, 3),
+            "amount": flt(item_rate * -remaining_qty, precision),
             "tax_per_unit": tax_per_unit,
-            "rate_with_tax": flt(net_rate + tax_per_unit, 3),
+            "rate_with_tax": rate_with_tax,
+            "tax_included_in_rate": tax_inclusive,
         }
 
     return_dict["items"] = [
