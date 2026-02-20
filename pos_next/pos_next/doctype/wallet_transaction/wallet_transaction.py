@@ -6,7 +6,6 @@ from frappe import _
 from frappe.utils import flt, today
 from erpnext.accounts.general_ledger import make_gl_entries
 from erpnext.controllers.accounts_controller import AccountsController
-from erpnext.accounts.doctype.loyalty_program.loyalty_program import get_loyalty_program_details_with_points
 
 class WalletTransaction(AccountsController):
 	def validate(self):
@@ -347,6 +346,23 @@ def credit_return_to_wallet(return_invoice, amount=None):
 			message=f"No default receivable account for company {company}"
 		)
 		return None
+
+	# Idempotency guard: if submit_invoice is retried for the same return invoice,
+	# reuse the existing wallet credit transaction instead of creating duplicates.
+	existing_transaction_name = frappe.db.get_value(
+		"Wallet Transaction",
+		{
+			"reference_doctype": "Sales Invoice",
+			"reference_name": return_invoice,
+			"transaction_type": "Credit",
+			"source_type": "Refund",
+			"docstatus": ["!=", 2],
+		},
+		"name",
+	)
+	if existing_transaction_name:
+		return frappe.get_doc("Wallet Transaction", existing_transaction_name)
+
 	transaction = frappe.get_doc({
 		"doctype": "Wallet Transaction",
 		"transaction_type": "Credit",
@@ -430,16 +446,16 @@ def reverse_wallet_transactions_for_return(original_invoice, return_invoice):
 	loyalty_program = frappe.db.get_value("Customer", original_doc.customer, "loyalty_program")
 
 	min_spent = 0
-	is_not_loyalty_eligible = False
+	loyalty_eligible = False
 	if loyalty_program:
 		min_spent = frappe.db.get_value("Loyalty Program Collection",{"parent": loyalty_program},"min_spent")
 		if min_spent:
 			min_spent = flt(min_spent)
-	inoviced_amount_after_return = flt(original_total) - flt(returned_amount)
-	if min_spent and flt(inoviced_amount_after_return) < flt(min_spent):
-		is_not_loyalty_eligible = True
+	invoiced_amount_after_return = flt(original_total) - flt(returned_amount)
+	if min_spent and flt(invoiced_amount_after_return) < flt(min_spent):
+		loyalty_eligible = True
 	for wt in wallet_transactions:
-		if is_full_return or is_not_loyalty_eligible:
+		if is_full_return or loyalty_eligible:
 			# Full return - cancel the wallet transaction
 			try:
 				wt_doc = frappe.get_doc("Wallet Transaction", wt.name)
@@ -460,31 +476,41 @@ def reverse_wallet_transactions_for_return(original_invoice, return_invoice):
 			if reverse_amount <= 0:
 				continue
 
-			reverse_wt = frappe.get_doc({
-				"doctype": "Wallet Transaction",
-				"transaction_type": "Debit",
-				"wallet": wt.wallet,
-				"company": wt.company,
-				"posting_date": today(),
-				"amount": reverse_amount,
-				"source_type": "Refund",
-				"source_account": wt.source_account,
-				"reference_doctype": "Sales Invoice",
-				"reference_name": return_invoice,
-				"remarks": _("Wallet reversal for return {0} against {1}: returned {2}, reversed {3}").format(
-					return_invoice, original_invoice,
-					frappe.format_value(returned_amount, {"fieldtype": "Currency"}),
-					frappe.format_value(reverse_amount, {"fieldtype": "Currency"})
-				)
-			})
-			reverse_wt.flags.ignore_permissions = True
-			reverse_wt.insert()
-			reverse_wt.submit()
+			try:
+				reverse_wt = frappe.get_doc({
+					"doctype": "Wallet Transaction",
+					"transaction_type": "Debit",
+					"wallet": wt.wallet,
+					"company": wt.company,
+					"posting_date": today(),
+					"amount": reverse_amount,
+					"source_type": "Refund",
+					"source_account": wt.source_account,
+					"reference_doctype": "Sales Invoice",
+					"reference_name": return_invoice,
+					"remarks": _("Wallet reversal for return {0} against {1}: returned {2}, reversed {3}").format(
+						return_invoice, original_invoice,
+						frappe.format_value(returned_amount, {"fieldtype": "Currency"}),
+						frappe.format_value(reverse_amount, {"fieldtype": "Currency"})
+					)
+				})
+				reverse_wt.flags.ignore_permissions = True
+				reverse_wt.insert()
+				reverse_wt.submit()
 
-			frappe.msgprint(
-				_("Created wallet debit of {0} for partial return {1}").format(
-					frappe.format_value(reverse_amount, {"fieldtype": "Currency"}),
-					return_invoice
-				),
-				alert=True, indicator="blue"
-			)
+				frappe.msgprint(
+					_("Created wallet debit of {0} for partial return {1}").format(
+						frappe.format_value(reverse_amount, {"fieldtype": "Currency"}),
+						return_invoice
+					),
+					alert=True, indicator="blue"
+				)
+			except Exception as e:
+				frappe.log_error(
+					title="Wallet Transaction Reverse on Partial Return Error",
+					message=(
+						f"WT: {wt.name}, Return: {return_invoice}, "
+						f"Original: {original_invoice}, Reverse Amount: {reverse_amount}, "
+						f"Error: {str(e)}\n{frappe.get_traceback()}"
+					)
+				)
