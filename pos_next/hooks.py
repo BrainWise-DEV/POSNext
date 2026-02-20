@@ -204,13 +204,11 @@ doc_events = {
 	"Customer": {
 		"after_insert": [
 			"pos_next.api.customers.auto_assign_loyalty_program",
-			"pos_next.realtime_events.emit_customer_event"
+			"pos_next.realtime_events.emit_customer_event",
+			"pos_next.api.wallet.create_wallet_on_customer_insert"
 		],
 		"on_update": "pos_next.realtime_events.emit_customer_event",
 		"on_trash": "pos_next.realtime_events.emit_customer_event"
-	},
-	"Customer": {
-		"after_insert": "pos_next.api.wallet.create_wallet_on_customer_insert"
 	},
 	"Sales Invoice": {
 		"validate": [

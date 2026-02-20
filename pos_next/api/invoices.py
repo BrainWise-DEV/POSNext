@@ -1322,10 +1322,25 @@ def submit_invoice(invoice=None, data=None):
         # Handle wallet transaction reversal for returns
         if invoice_doc.get("is_return") and invoice_doc.get("return_against"):
             from pos_next.pos_next.doctype.wallet_transaction.wallet_transaction import reverse_wallet_transactions_for_return
-            reverse_wallet_transactions_for_return(
-                original_invoice=invoice_doc.return_against,
-                return_invoice=invoice_doc.name
-            )
+            try:
+                reverse_wallet_transactions_for_return(
+                    original_invoice=invoice_doc.return_against,
+                    return_invoice=invoice_doc.name
+                )
+            except Exception as wallet_reversal_error:
+                frappe.log_error(
+                    title="Wallet Reversal Error",
+                    message=(
+                        f"Return invoice: {invoice_doc.name}, "
+                        f"Original invoice: {invoice_doc.return_against}, "
+                        f"Error: {str(wallet_reversal_error)}\n{frappe.get_traceback()}"
+                    )
+                )
+                frappe.msgprint(
+                    _("Return invoice submitted successfully, but wallet reversal failed. Please contact administrator."),
+                    alert=True,
+                    indicator="orange"
+                )
 
             # Credit return amount to customer wallet when "Add to Customer Credit Balance" is enabled
             add_to_customer_balance = invoice.get("add_to_customer_balance")
