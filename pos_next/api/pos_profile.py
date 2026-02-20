@@ -373,6 +373,7 @@ def get_create_pos_profile(*args, **kwargs):
 		- posa_cash_mode_of_payment: Cash payment methods
 		- item_groups: Available item groups
 		- customer_groups: Available customer groups
+		- brands: Available brands
 	"""
 	try:
 		user_company = check_user_company()
@@ -437,7 +438,10 @@ def get_create_pos_profile(*args, **kwargs):
 			"Customer Group",
 			filters={"is_group": 0},
 		)
-		
+		brands = frappe.get_list(
+			"Brand",
+			order_by="name",
+		)
 		data = {
 			"warehouses": warehouses,
 			"customers": customers,
@@ -449,6 +453,7 @@ def get_create_pos_profile(*args, **kwargs):
 			"posa_cash_mode_of_payment": posa_cash_mode_of_payment,
 			"item_groups": item_groups,
 			"customer_groups": customer_groups,
+			"brands": brands,
 			"apply_discount_on_options": [
 				{"value": "Grand Total", "label": "Grand Total"},
 				{"value": "Net Total", "label": "Net Total"},
@@ -479,6 +484,7 @@ def create_pos_profile(*arg ,**parameters):
 		- posa_cash_mode_of_payment: Cash payment method
 		- item_groups: List of item groups (filters)
 		- customer_groups: List of customer groups (filters)
+		- brands: List of brands (filters)
 		- apply_discount_on: Discount application method
 	"""
 
@@ -488,12 +494,14 @@ def create_pos_profile(*arg ,**parameters):
 	applicable_for_users = parameters.pop("applicable_for_users", [])
 	item_groups = parameters.pop("item_groups", [])
 	customer_groups = parameters.pop("customer_groups", [])
+	brands = parameters.pop("brands", [])
 	
 	# parse list parameters
 	payments = _parse_list_parameter(payments, "payments")
 	applicable_for_users = _parse_list_parameter(applicable_for_users, "applicable_for_users")
 	item_groups = _parse_list_parameter(item_groups, "item_groups")
 	customer_groups = _parse_list_parameter(customer_groups, "customer_groups")
+	brands = _parse_list_parameter(brands, "brands")
 	
 	# Get user's company
 	user_company_data = check_user_company()
@@ -541,6 +549,12 @@ def create_pos_profile(*arg ,**parameters):
 			customer_group_name = customer_group if isinstance(customer_group, str) else customer_group.get("customer_group")
 			pos_profile.append("customer_groups", {"customer_group": customer_group_name})
 
+	if isinstance(brands, list) and len(brands) > 0:
+		for brand in brands:
+			brand_name = brand if isinstance(brand, str) else brand.get("brand") or brand.get("name")
+			if brand_name:
+				pos_profile.append("brands", {"brand": brand_name})
+
 	pos_profile.insert()
 	return pos_profile
 
@@ -558,12 +572,14 @@ def update_pos_profile(*args, **parameters):
 	applicable_for_users = parameters.pop("applicable_for_users", None)
 	item_groups = parameters.pop("item_groups", None)
 	customer_groups = parameters.pop("customer_groups", None)
+	brands = parameters.pop("brands", None)
 	pos_profile_name = parameters.pop("pos_profile_name", None)
 	# parse list parameters
 	payments = _parse_list_parameter(payments, "payments")
 	applicable_for_users = _parse_list_parameter(applicable_for_users, "applicable_for_users")
 	item_groups = _parse_list_parameter(item_groups, "item_groups")
 	customer_groups = _parse_list_parameter(customer_groups, "customer_groups")
+	brands = _parse_list_parameter(brands, "brands")
 	
 	pos_profile = frappe.get_doc("POS Profile", pos_profile_name)
 	
@@ -613,6 +629,13 @@ def update_pos_profile(*args, **parameters):
 			customer_group_name = customer_group if isinstance(customer_group, str) else customer_group.get("customer_group") or customer_group.get("name")
 			if customer_group_name:
 				pos_profile.append("customer_groups", {"customer_group": customer_group_name})
+
+	if brands is not None:
+		pos_profile.brands = []
+		for brand in brands:
+			brand_name = brand if isinstance(brand, str) else brand.get("brand") or brand.get("name")
+			if brand_name:
+				pos_profile.append("brands", {"brand": brand_name})
 		
 	pos_profile.save()
 	return pos_profile
