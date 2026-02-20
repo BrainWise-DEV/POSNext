@@ -726,6 +726,16 @@ def _build_item_base_conditions(pos_profile_doc, item_group=None, exclude_varian
 		conditions.append(f"i.item_group IN ({placeholders})")
 		where_params.extend(item_groups)
 
+	allowed_brands = _get_allowed_profile_brands(pos_profile_doc)
+	if allowed_brands:
+		placeholders = ", ".join(["%s"] * len(allowed_brands))
+		conditions.append(f"IFNULL(i.brand, '') IN ({placeholders})")
+		where_params.extend(allowed_brands)
+
+	if brand:
+		conditions.append("i.brand = %s")
+		where_params.append(brand)
+
 	extra_joins = ""
 	join_params = []
 
@@ -1757,6 +1767,47 @@ def get_item_groups(pos_profile):
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Item Groups Error")
 		frappe.throw(_("Error fetching item groups: {0}").format(str(e)))
+
+
+@frappe.whitelist()
+def get_brands(pos_profile):
+	"""Get brands configured in POS Profile for filtering."""
+	cache_key = f"pos_brands:{pos_profile}"
+	cached = frappe.cache().get_value(cache_key)
+	if cached:
+		return cached
+
+	try:
+		POSBrandsDetail = DocType("POS Brands Detail")
+		Brand = DocType("Brand")
+
+		configured_brands = (
+			frappe.qb.from_(POSBrandsDetail)
+			.select(POSBrandsDetail.brand)
+			.distinct()
+			.where(POSBrandsDetail.parent == pos_profile)
+			.orderby(POSBrandsDetail.brand)
+			.run(pluck="brand")
+		)
+
+		if not configured_brands:
+			result = (
+				frappe.qb.from_(Brand)
+				.select(Brand.name.as_("brand"))
+				.orderby(Brand.name)
+				.limit(50)
+				.run(as_dict=True)
+			)
+			frappe.cache().set_value(cache_key, result, expires_in_sec=300)
+			return result
+
+		result = [{"brand": brand_name} for brand_name in configured_brands]
+		frappe.cache().set_value(cache_key, result, expires_in_sec=300)
+		return result
+
+	except Exception as e:
+		frappe.log_error(frappe.get_traceback(), "Get Brands Error")
+		frappe.throw(_("Error fetching brands: {0}").format(str(e)))
 
 
 @frappe.whitelist()
