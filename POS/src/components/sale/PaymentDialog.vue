@@ -276,12 +276,12 @@
 							<div
 								v-for="(item, index) in items"
 								:key="index"
-								class="px-3 py-2 hover:bg-gray-50 flex flex-col gap-1"
+								:class="['px-3 py-2 flex flex-col gap-1', item.is_free_item ? 'bg-green-50' : 'hover:bg-gray-50']"
 							>
 								<!-- Main Item -->
-								<div :class="['flex items-start justify-between gap-2', item.is_free_item ? 'bg-green-50 px-2 py-1 rounded border border-green-100' : '']">
+								<div class="flex items-start justify-between gap-2">
 									<div class="flex-1 min-w-0 text-start">
-										<div :class="['font-medium text-sm truncate', item.is_free_item ? 'text-green-700' : 'text-gray-900']">{{ item.item_name || item.item_code }}<span v-if="item.is_free_item" class="text-[10px] font-bold"> ({{ __('Free') }})</span></div>
+										<div :class="['font-medium text-sm truncate', item.is_free_item ? 'text-green-700' : 'text-gray-900']">{{ item.item_name || item.item_code }}<span v-if="item.is_free_item" class="text-xs font-bold"> ({{ __('Free') }})</span></div>
 										<div class="text-xs text-gray-500 mt-0.5">
 											{{ formatCurrency(item.rate || item.price_list_rate) }} × {{ item.qty || item.quantity }}
 										</div>

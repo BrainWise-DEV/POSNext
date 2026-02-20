@@ -2654,7 +2654,12 @@ def apply_offers(invoice_data, selected_offers=None):
             return {"items": items}
 
         applied_rules = set()
-        free_items = []
+        # Deduplicate free items using a dict keyed by (item_code, pricing_rule).
+        # ERPNext's apply_pricing_rule() returns one result per cart item and for
+        # mixed_conditions rules attaches the same free_item_data to every matching
+        # item's result. ERPNext's own apply_pricing_rule_for_free_items() deduplicates
+        # the same way: {(item_code, pricing_rules): data for data in free_item_data}.
+        free_items_map = {}
 
         for result, item_index in zip(pricing_results, index_map):
             if not result:
@@ -2770,11 +2775,11 @@ def apply_offers(invoice_data, selected_offers=None):
                 free_item_doc.applied_promotional_scheme = rule_map[
                     rule_name
                 ].promotional_scheme
-                free_items.append(free_item_doc)
+                free_items_map[(free_item.get("item_code"), rule_name)] = free_item_doc
 
         return {
             "items": [dict(item) for item in prepared_items],
-            "free_items": [dict(item) for item in free_items],
+            "free_items": [dict(item) for item in free_items_map.values()],
             "applied_pricing_rules": sorted(applied_rules),
         }
     except Exception as e:
