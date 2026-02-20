@@ -2768,6 +2768,10 @@ def apply_offers(invoice_data, selected_offers=None):
                 free_item_doc.applied_promotional_scheme = rule_map[
                     rule_name
                 ].promotional_scheme
+                # ERPNext's free_item_data doesn't include warehouse;
+                # assign POS Profile warehouse so the frontend has it
+                if not free_item_doc.get("warehouse"):
+                    free_item_doc.warehouse = profile.warehouse
                 free_items.append(free_item_doc)
 
         return {
