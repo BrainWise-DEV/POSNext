@@ -30,23 +30,48 @@ ITEM_RESULT_FIELDS = [
 ITEM_RESULT_COLUMNS = ",\n\t".join(ITEM_RESULT_FIELDS)
 
 
+# def get_stock_availability(item_code, warehouse):
+# 	"""Return total available quantity for an item in the given warehouse."""
+# 	if not warehouse:
+# 		return 0.0
+
+# 	warehouses = [warehouse]
+# 	if frappe.db.get_value("Warehouse", warehouse, "is_group"):
+# 		# Include all child warehouses when a group warehouse is set
+# 		warehouses = frappe.db.get_descendants("Warehouse", warehouse) or []
+
+# 	rows = frappe.get_all(
+# 		"Bin",
+# 		fields=["sum(actual_qty) as actual_qty"],
+# 		filters={"item_code": item_code, "warehouse": ["in", warehouses]},
+# 	)
+
+# 	return flt(rows[0].actual_qty) if rows else 0.0
+
+
+from frappe.utils import flt
+
 def get_stock_availability(item_code, warehouse):
 	"""Return total available quantity for an item in the given warehouse."""
 	if not warehouse:
 		return 0.0
 
 	warehouses = [warehouse]
+
 	if frappe.db.get_value("Warehouse", warehouse, "is_group"):
-		# Include all child warehouses when a group warehouse is set
 		warehouses = frappe.db.get_descendants("Warehouse", warehouse) or []
 
-	rows = frappe.get_all(
-		"Bin",
-		fields=["sum(actual_qty) as actual_qty"],
-		filters={"item_code": item_code, "warehouse": ["in", warehouses]},
-	)
+	if not warehouses:
+		return 0.0
 
-	return flt(rows[0].actual_qty) if rows else 0.0
+	rows = frappe.db.sql("""
+		SELECT SUM(actual_qty) as actual_qty
+		FROM `tabBin`
+		WHERE item_code = %s
+		AND warehouse IN %s
+	""", (item_code, tuple(warehouses)), as_dict=True)
+
+	return flt(rows[0].actual_qty) if rows and rows[0].actual_qty else 0.0
 
 
 def get_item_detail(item, doc=None, warehouse=None, price_list=None, company=None):
