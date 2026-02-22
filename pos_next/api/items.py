@@ -697,11 +697,13 @@ def _get_item_group_with_descendants(item_group):
 
 def _get_allowed_profile_brands(pos_profile_doc):
 	"""Get brand names configured in POS Profile brands child table."""
-	return [
-		row.brand
-		for row in (getattr(pos_profile_doc, "brands", None) or [])
-		if getattr(row, "brand", None)
-	]
+	brands = frappe.get_all(
+		"POS Brands Detail",
+		filters={"parent": pos_profile_doc},
+		fields=["brand"],
+		pluck="brand"
+	)
+	return brands
 
 def _build_item_base_conditions(
 	pos_profile_doc, item_group=None, brand=None, exclude_variants=True,
@@ -736,7 +738,7 @@ def _build_item_base_conditions(
 		conditions.append(f"i.item_group IN ({placeholders})")
 		where_params.extend(item_groups)
 
-	allowed_brands = _get_allowed_profile_brands(pos_profile_doc)
+	allowed_brands = _get_allowed_profile_brands(pos_profile_doc.name)
 	if allowed_brands:
 		placeholders = ", ".join(["%s"] * len(allowed_brands))
 		conditions.append(f"IFNULL(i.brand, '') IN ({placeholders})")
