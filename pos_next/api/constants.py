@@ -64,6 +64,6 @@ DEFAULT_POS_SETTINGS = {
 	"allow_sales_order": 0,
 	"allow_select_sales_order": 0,
 	"create_only_sales_order": 0,
-	"enable_session_lock": 1,
+	"enable_session_lock": 0,
 	"session_lock_timeout": 5,
 }

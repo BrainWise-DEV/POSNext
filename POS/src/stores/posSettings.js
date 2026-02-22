@@ -65,7 +65,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		// Sales Persons
 		enable_sales_persons: "Disabled",
 		// Security
-		enable_session_lock: 1,
+		enable_session_lock: 0,
 		session_lock_timeout: 5,
 	})
 
@@ -338,7 +338,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 			allow_negative_stock: 0,
 			enable_sales_persons: "Disabled",
 			// Security
-			enable_session_lock: 1,
+			enable_session_lock: 0,
 			session_lock_timeout: 5,
 		}
 		isLoaded.value = false

@@ -514,7 +514,7 @@
    "label": "Security"
   },
   {
-   "default": "1",
+   "default": "0",
    "description": "Lock the POS screen after a period of inactivity or when the browser tab loses focus",
    "fieldname": "enable_session_lock",
    "fieldtype": "Check",
