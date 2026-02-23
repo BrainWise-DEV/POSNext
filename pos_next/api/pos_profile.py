@@ -361,7 +361,7 @@ def get_sales_persons(pos_profile=None):
 def get_create_pos_profile(*args, **kwargs):
 	"""
 	Get selection data for creating POS Profile
-	
+
 	Returns:
 		- warehouses: Available warehouses for user's company
 		- customers: Available customers
@@ -390,17 +390,17 @@ def get_create_pos_profile(*args, **kwargs):
 			"Customer",
 			filters={"disabled": 0},
 		)
-		
+
 		currencies = frappe.get_list(
 			"Currency",
 			filters={"enabled": 1},
 			fields=["name", "currency_name", "symbol"],
 		)
-		
+
 		payments = frappe.get_list("Mode of Payment")
-		
+
 		posa_cash_mode_of_payment = payments
-	
+
 		write_off_accounts = frappe.get_list(
 			"Account",
 			filters={
@@ -432,12 +432,12 @@ def get_create_pos_profile(*args, **kwargs):
 			"Item Group",
 			filters={"is_group": 0},
 		)
-		
+
 		customer_groups = frappe.get_list(
 			"Customer Group",
 			filters={"is_group": 0},
 		)
-		
+
 		data = {
 			"warehouses": warehouses,
 			"customers": customers,
@@ -455,7 +455,7 @@ def get_create_pos_profile(*args, **kwargs):
 			]
 		}
 		return data
-		
+
 	except Exception as e:
 		frappe.throw(_("Error getting create POS profile: {0}").format(str(e)))
 
@@ -463,7 +463,7 @@ def get_create_pos_profile(*args, **kwargs):
 def create_pos_profile(*arg ,**parameters):
 	"""
 	Create a new POS Profile
-	
+
 	Required fields:
 		- __newname: POS Profile name
 		- currency: Currency code
@@ -472,7 +472,7 @@ def create_pos_profile(*arg ,**parameters):
 		- write_off_account: Account name for write-off
 		- write_off_cost_center: Cost center name
 		- write_off_limit: Write-off limit amount
-	
+
 	Optional fields:
 		- customer: Default customer
 		- applicable_for_users: List of users
@@ -483,22 +483,22 @@ def create_pos_profile(*arg ,**parameters):
 	"""
 
 
-		# Extract list parameters 
+		# Extract list parameters
 	payments = parameters.pop("payments", [])
 	applicable_for_users = parameters.pop("applicable_for_users", [])
 	item_groups = parameters.pop("item_groups", [])
 	customer_groups = parameters.pop("customer_groups", [])
-	
+
 	# parse list parameters
 	payments = _parse_list_parameter(payments, "payments")
 	applicable_for_users = _parse_list_parameter(applicable_for_users, "applicable_for_users")
 	item_groups = _parse_list_parameter(item_groups, "item_groups")
 	customer_groups = _parse_list_parameter(customer_groups, "customer_groups")
-	
+
 	# Get user's company
 	user_company_data = check_user_company()
 	user_company = user_company_data.get("company")
-	
+
 	if not user_company:
 		frappe.throw(_("User must have a company assigned"))
 
@@ -510,7 +510,7 @@ def create_pos_profile(*arg ,**parameters):
 	# Child tables
 	if not payments or len(payments) == 0:
 		frappe.throw(_("At least one payment method is required"))
-	
+
 	for payment in payments:
 		if isinstance(payment, dict):
 			pos_profile.append("payments", {
@@ -544,11 +544,11 @@ def create_pos_profile(*arg ,**parameters):
 	pos_profile.insert()
 	return pos_profile
 
-@frappe.whitelist()		
+@frappe.whitelist()
 def update_pos_profile(*args, **parameters):
 	"""
 		Update an existing POS Profile
-		
+
 		Args:
 			pos_profile: POS Profile name
 			parameters: Update parameters (all optional)
@@ -564,15 +564,15 @@ def update_pos_profile(*args, **parameters):
 	applicable_for_users = _parse_list_parameter(applicable_for_users, "applicable_for_users")
 	item_groups = _parse_list_parameter(item_groups, "item_groups")
 	customer_groups = _parse_list_parameter(customer_groups, "customer_groups")
-	
+
 	pos_profile = frappe.get_doc("POS Profile", pos_profile_name)
-	
+
 	# Update main fields
 	if parameters:
 		pos_profile.update(parameters)
 
 	if payments is not None:
-		pos_profile.payments = []		
+		pos_profile.payments = []
 		for payment in payments:
 			if isinstance(payment, dict):
 				mode_of_payment = payment.get("mode_of_payment")
@@ -584,21 +584,21 @@ def update_pos_profile(*args, **parameters):
 					})
 			elif isinstance(payment, str) and payment:
 				pos_profile.append("payments", {"mode_of_payment": payment})
-					
-	
+
+
 	if applicable_for_users is not None:
 		pos_profile.applicable_for_users = []
 		for user in applicable_for_users:
 			if isinstance(user, dict):
 				user_name = user.get("user") or user.get("name")
-				if user_name:			
+				if user_name:
 					pos_profile.append("applicable_for_users", {
 						"user": user_name,
 						"default": user.get("default", 0)
 					})
 			elif isinstance(user, str):
 				pos_profile.append("applicable_for_users", {"user": user, "default": 0})
-	
+
 	if item_groups is not None:
 		pos_profile.item_groups = []
 		for item_group in item_groups:
@@ -606,22 +606,22 @@ def update_pos_profile(*args, **parameters):
 			if item_group_name:
 				pos_profile.append("item_groups", {"item_group": item_group_name})
 
-	
+
 	if customer_groups is not None:
 		pos_profile.customer_groups = []
 		for customer_group in customer_groups:
 			customer_group_name = customer_group if isinstance(customer_group, str) else customer_group.get("customer_group") or customer_group.get("name")
 			if customer_group_name:
 				pos_profile.append("customer_groups", {"customer_group": customer_group_name})
-		
+
 	pos_profile.save()
 	return pos_profile
-	
+
 @frappe.whitelist()
 def delete_pos_profile(pos_profile):
 	"""
 		Delete a POS Profile
-		
+
 		Args:
 			pos_profile: POS Profile name
 	"""

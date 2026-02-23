@@ -829,7 +829,7 @@ def _calculate_bundle_availability_bulk(bundle_codes, warehouse):
 	# ]
 	pb = DocType("Product Bundle")
 	pbi = DocType("Product Bundle Item")
-	
+
 	bundle_components = (
 		frappe.qb.from_(pb)
 		.inner_join(pbi).on(pbi.parent == pb.name)
@@ -886,7 +886,7 @@ def _calculate_bundle_availability_bulk(bundle_codes, warehouse):
 	#   {"item_code": "KEYBOARD", "available_qty": 100.0}
 	# ]
 	bin = DocType("Bin")
-	
+
 	component_stock = (
 		frappe.qb.from_(bin)
 		.select(
@@ -943,11 +943,11 @@ def _calculate_bundle_availability_bulk(bundle_codes, warehouse):
 def _get_bundle_warehouse_availability_bulk(bundle_codes, warehouses):
 	"""
 	Calculate Product Bundle availability across multiple warehouses efficiently.
-	
+
 	Args:
 		bundle_codes (list): List of bundle item codes
 		warehouses (list): List of warehouse dicts with 'name' key
-		
+
 	Returns:
 		dict: Nested mapping of bundle_code -> warehouse_name -> available_qty
 			  Example: {
@@ -957,15 +957,15 @@ def _get_bundle_warehouse_availability_bulk(bundle_codes, warehouses):
 	"""
 	if not bundle_codes or not warehouses:
 		return {}
-	
+
 	warehouse_names = [w["name"] if isinstance(w, dict) else w for w in warehouses]
-	
+
 	# ===========================================================================
 	# Fetch Bundle Component Definitions (once for all bundles)
 	# ===========================================================================
 	pb = DocType("Product Bundle")
 	pbi = DocType("Product Bundle Item")
-	
+
 	bundle_components = (
 		frappe.qb.from_(pb)
 		.inner_join(pbi).on(pbi.parent == pb.name)
@@ -977,14 +977,14 @@ def _get_bundle_warehouse_availability_bulk(bundle_codes, warehouses):
 		.where(pb.new_item_code.isin(bundle_codes))
 		.run(as_dict=True)
 	)
-	
+
 	if not bundle_components:
 		return {}
 
 	component_codes = list(set(c["component_code"] for c in bundle_components))
 	warehouse_resolution_map = {}
 	all_resolved_warehouses = set()
-	
+
 	for wh_name in warehouse_names:
 		resolved = [wh_name]
 		if frappe.db.get_value("Warehouse", wh_name, "is_group"):
@@ -993,12 +993,12 @@ def _get_bundle_warehouse_availability_bulk(bundle_codes, warehouses):
 				resolved = children
 		warehouse_resolution_map[wh_name] = resolved
 		all_resolved_warehouses.update(resolved)
-	
+
 	# ===========================================================================
 	# Fetch Component Stock Across All Warehouses (single bulk query)
 	# ===========================================================================
 	bin = DocType("Bin")
-	
+
 	component_stock_data = (
 		frappe.qb.from_(bin)
 		.select(
@@ -1011,58 +1011,58 @@ def _get_bundle_warehouse_availability_bulk(bundle_codes, warehouses):
 		.groupby(bin.item_code, bin.warehouse)
 		.run(as_dict=True)
 	)
-	
+
 	# Build lookup: (item_code, warehouse) -> available_qty
 	# For group warehouses, sum stock from all child warehouses
 	component_stock_map = defaultdict(lambda: defaultdict(float))
 	for row in component_stock_data:
 		component_stock_map[row["item_code"]][row["warehouse"]] = flt(row["available_qty"])
-	
+
 	# ===========================================================================
 	# Calculate Bundle Availability Per Warehouse
 	# ===========================================================================
 	# For each bundle and each warehouse, calculate availability
 	# Availability = min(floor(component_available / component_required)) across all components
 	result = defaultdict(dict)
-	
+
 	# Group components by bundle (build once, reuse for all warehouses)
 	bundles_map = defaultdict(list)
 	for comp in bundle_components:
 		bundles_map[comp["bundle_code"]].append(comp)
-	
+
 	# Calculate availability for each bundle in each warehouse
 	for wh_name in warehouse_names:
 		resolved_whs = warehouse_resolution_map[wh_name]
-		
+
 		for bundle_code, components in bundles_map.items():
 			min_possible = None
-			
+
 			for comp in components:
 				component_code = comp["component_code"]
 				required_qty = flt(comp["required_qty"])
-				
+
 				if required_qty <= 0:
 					continue
-				
+
 				# Sum stock across all resolved warehouses (for group warehouse support)
 				total_available = sum(
 					component_stock_map[component_code].get(wh, 0)
 					for wh in resolved_whs
 				)
-				
+
 				# Calculate how many bundles this component can supply
 				possible = int(total_available / required_qty) if required_qty > 0 else 0
-				
+
 				# Track minimum (most constrained component)
 				if min_possible is None:
 					min_possible = possible
 				else:
 					min_possible = min(min_possible, possible)
-			
+
 			# Only include if bundle is available (min_possible > 0)
 			if min_possible is not None and min_possible > 0:
 				result[bundle_code][wh_name] = min_possible
-	
+
 	return dict(result)
 
 

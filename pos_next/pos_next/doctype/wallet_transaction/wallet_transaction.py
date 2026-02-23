@@ -296,10 +296,10 @@ def credit_loyalty_points_to_wallet(customer, company, loyalty_points, conversio
 def reverse_wallet_transactions_for_return(original_invoice, return_invoice):
     """
     Reverse wallet transactions linked to the original invoice when a return is made.
-    
+
     For full returns: Cancel the linked Wallet Transaction(s)
     For partial returns: Create a proportional Debit transaction to reverse the credit
-    
+
     Args:
         original_invoice: Original Sales Invoice name
         return_invoice: Return Sales Invoice name (is_return=1)
@@ -307,10 +307,10 @@ def reverse_wallet_transactions_for_return(original_invoice, return_invoice):
     # Get the return invoice to calculate return ratio
     return_doc = frappe.get_doc("Sales Invoice", return_invoice)
     original_doc = frappe.get_doc("Sales Invoice", original_invoice)
-    
+
     if not return_doc.is_return or return_doc.return_against != original_invoice:
         return
-    
+
     # Find all submitted Wallet Transactions linked to the original invoice
     wallet_transactions = frappe.get_all(
         "Wallet Transaction",
@@ -323,22 +323,22 @@ def reverse_wallet_transactions_for_return(original_invoice, return_invoice):
         fields=["name", "wallet", "amount", "transaction_type", "source_type",
                 "source_account", "company", "customer"]
     )
-    
+
     if not wallet_transactions:
         return
-    
+
     # Calculate return ratio based on grand_total
     # return grand_total is negative, original is positive
     original_total = abs(flt(original_doc.grand_total))
     return_total = abs(flt(return_doc.grand_total))
-    
+
     if original_total <= 0:
         return
-    
+
     # Check if this is a full return (all items returned)
     return_ratio = flt(return_total / original_total, 2)
     is_full_return = return_ratio >= 0.999  # Allow small rounding tolerance
-    
+
     for wt in wallet_transactions:
         if is_full_return:
             # Full return - cancel the wallet transaction
@@ -358,10 +358,10 @@ def reverse_wallet_transactions_for_return(original_invoice, return_invoice):
         else:
             # Partial return - create a proportional debit (reverse) transaction
             reverse_amount = flt(wt.amount * return_ratio, 2)
-            
+
             if reverse_amount <= 0:
                 continue
-            
+
             try:
                 reverse_wt = frappe.get_doc({
                     "doctype": "Wallet Transaction",
@@ -381,7 +381,7 @@ def reverse_wallet_transactions_for_return(original_invoice, return_invoice):
                 reverse_wt.flags.ignore_permissions = True
                 reverse_wt.insert()
                 reverse_wt.submit()
-                
+
                 frappe.msgprint(
                     _("Created wallet debit of {0} for partial return {1}").format(
                         frappe.format_value(reverse_amount, {"fieldtype": "Currency"}),

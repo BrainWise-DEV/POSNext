@@ -212,7 +212,7 @@ def emit_customer_event(doc, method=None):
 			"action": action,
 			"timestamp": frappe.utils.now(),
 		}
-		
+
 		frappe.publish_realtime(
 			event="pos_customer_changed",
 			message=event_data,
