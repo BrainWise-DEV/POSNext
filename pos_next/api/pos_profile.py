@@ -3,10 +3,11 @@
 # For license information, please see license.txt
 
 from __future__ import unicode_literals
+
 import frappe
 from frappe import _
-from pos_next.api.utilities import check_user_company
-from pos_next.api.utilities import _parse_list_parameter
+
+from pos_next.api.utilities import _parse_list_parameter, check_user_company
 
 
 @frappe.whitelist()
@@ -70,7 +71,7 @@ def get_pos_profile_data(pos_profile):
 @frappe.whitelist()
 def get_pos_settings(pos_profile):
 	"""Get POS Settings for a given POS Profile"""
-	from pos_next.api.constants import POS_SETTINGS_FIELDS, DEFAULT_POS_SETTINGS
+	from pos_next.api.constants import DEFAULT_POS_SETTINGS, POS_SETTINGS_FIELDS
 
 	if not pos_profile:
 		return DEFAULT_POS_SETTINGS.copy()

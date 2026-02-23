@@ -79,7 +79,7 @@ Invoices match a shift when:
 
 import frappe
 from frappe import _
-from frappe.utils import flt, cint, time_diff_in_hours, getdate
+from frappe.utils import cint, flt, getdate, time_diff_in_hours
 
 
 def execute(filters=None):

@@ -2,10 +2,10 @@
 # For license information, please see license.txt
 
 import frappe
-from frappe import _
-from frappe.utils import flt, today
 from erpnext.accounts.general_ledger import make_gl_entries
 from erpnext.controllers.accounts_controller import AccountsController
+from frappe import _
+from frappe.utils import flt, today
 
 
 class WalletTransaction(AccountsController):

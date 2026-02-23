@@ -22,7 +22,6 @@ import os
 import frappe
 from frappe import _
 
-
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
@@ -131,11 +130,12 @@ def setup_qz_certificate():
 	qz_dir = _qz_dir()
 	os.makedirs(qz_dir, exist_ok=True)
 
+	from datetime import datetime, timedelta, timezone
+
 	from cryptography import x509
 	from cryptography.hazmat.primitives import hashes, serialization
 	from cryptography.hazmat.primitives.asymmetric import rsa
 	from cryptography.x509.oid import NameOID
-	from datetime import datetime, timedelta, timezone
 
 	# Generate 2048-bit RSA key
 	key = rsa.generate_private_key(public_exponent=65537, key_size=2048)

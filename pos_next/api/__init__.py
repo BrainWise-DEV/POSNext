@@ -4,15 +4,8 @@
 import frappe
 
 # Import API modules to make them accessible
-from . import invoices
-from . import items
-from . import shifts
-from . import pos_profile
-from . import customers
-from . import offers
-from . import promotions
-from . import utilities
-from . import auth
+from . import auth, customers, invoices, items, offers, pos_profile, promotions, shifts, utilities
+
 
 @frappe.whitelist(allow_guest=True)
 def ping():

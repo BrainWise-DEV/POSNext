@@ -11,7 +11,7 @@ Handles credit sale operations including:
 
 import frappe
 from frappe import _
-from frappe.utils import flt, nowdate, today, cint, get_datetime
+from frappe.utils import cint, flt, get_datetime, nowdate, today
 
 
 @frappe.whitelist()
@@ -46,7 +46,7 @@ def get_customer_balance(customer, company=None):
 
 	try:
 		from frappe.query_builder import DocType
-		from frappe.query_builder.functions import Sum, Abs, Coalesce
+		from frappe.query_builder.functions import Abs, Coalesce, Sum
 		from pypika import Case
 
 		SalesInvoice = DocType("Sales Invoice")

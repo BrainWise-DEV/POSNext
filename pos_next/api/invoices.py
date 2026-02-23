@@ -3,13 +3,14 @@
 # For license information, please see license.txt
 
 from __future__ import unicode_literals
-import json
-import frappe
-from frappe import _
-from frappe.utils import flt, cint, nowdate, nowtime, get_datetime, cstr
-from erpnext.stock.doctype.batch.batch import get_batch_qty, get_batch_no
-from erpnext.accounts.doctype.sales_invoice.sales_invoice import get_bank_cash_account
 
+import json
+
+import frappe
+from erpnext.accounts.doctype.sales_invoice.sales_invoice import get_bank_cash_account
+from erpnext.stock.doctype.batch.batch import get_batch_no, get_batch_qty
+from frappe import _
+from frappe.utils import cint, cstr, flt, get_datetime, nowdate, nowtime
 
 # ==========================================
 # Constants for field names (avoid typos and enable refactoring)
@@ -511,8 +512,8 @@ def validate_return_items(original_invoice_name, return_items, doctype="Sales In
     Uses query builder for parameterized queries. Fetches invoice details, original
     item quantities, and already-returned quantities in 3 queries total.
     """
+    from frappe.query_builder.functions import Abs, Sum
     from frappe.utils import date_diff, getdate
-    from frappe.query_builder.functions import Sum, Abs
 
     if isinstance(return_items, str):
         return_items = json.loads(return_items)
@@ -1322,7 +1323,9 @@ def submit_invoice(invoice=None, data=None):
         # Handle wallet transaction reversal for returns
         if invoice_doc.get("is_return") and invoice_doc.get("return_against"):
             try:
-                from pos_next.pos_next.doctype.wallet_transaction.wallet_transaction import reverse_wallet_transactions_for_return
+                from pos_next.pos_next.doctype.wallet_transaction.wallet_transaction import (
+                    reverse_wallet_transactions_for_return,
+                )
                 reverse_wallet_transactions_for_return(
                     original_invoice=invoice_doc.return_against,
                     return_invoice=invoice_doc.name
@@ -1620,8 +1623,8 @@ def get_returnable_invoices(limit=50, pos_profile=None):
     Uses query builder with LEFT JOINs to calculate original and returned quantities
     in a single query. Returns invoices where total_original_qty > total_returned_qty.
     """
-    from frappe.query_builder.functions import Sum, Coalesce, Abs
     from frappe.query_builder import Case
+    from frappe.query_builder.functions import Abs, Coalesce, Sum
     from frappe.utils import add_days, today
 
     # Check return validity days from POS Settings
@@ -1708,8 +1711,8 @@ def search_invoice_by_number(search_term, pos_profile=None):
     Returns:
         List of matching invoices with return availability info (max 10 results)
     """
-    from frappe.query_builder.functions import Sum, Coalesce, Abs
     from frappe.query_builder import Case
+    from frappe.query_builder.functions import Abs, Coalesce, Sum
 
     if not search_term or len(search_term) < 3:
         return []
@@ -1778,7 +1781,7 @@ def check_invoice_return_validity(invoice_name):
     - error_type: 'not_found' or 'return_period_expired' if invalid
     - Additional context (invoice_date, days_since, allowed_days) for expired returns
     """
-    from frappe.utils import date_diff, getdate, formatdate
+    from frappe.utils import date_diff, formatdate, getdate
 
     # Fetch only the fields needed for validation
     si = frappe.qb.DocType("Sales Invoice")
@@ -1831,8 +1834,8 @@ def get_invoice_for_return(invoice_name):
     Returns the full invoice document with each item's qty adjusted to show
     only the remaining returnable quantity (original qty minus already returned).
     """
+    from frappe.query_builder.functions import Abs, Coalesce, Sum
     from frappe.utils import date_diff, getdate
-    from frappe.query_builder.functions import Sum, Abs, Coalesce
 
     # Validate invoice exists and get fields needed for return period check
     si = frappe.qb.DocType("Sales Invoice")
@@ -1972,9 +1975,9 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
             - _original_invoice: Reference data from original invoice (payments, amounts)
             - Each item includes original_qty, already_returned, and remaining_qty
     """
-    from frappe.utils import date_diff, getdate
-    from frappe.query_builder.functions import Sum, Abs, Coalesce
     from erpnext.accounts.doctype.sales_invoice.sales_invoice import make_sales_return
+    from frappe.query_builder.functions import Abs, Coalesce, Sum
+    from frappe.utils import date_diff, getdate
 
     # Validate invoice and get fields needed for return period check
     si = frappe.qb.DocType("Sales Invoice")
@@ -2188,7 +2191,7 @@ def search_invoices_for_return(
 
     Returns invoices with their items adjusted to show remaining returnable quantities.
     """
-    from frappe.query_builder.functions import Sum, Abs, Count
+    from frappe.query_builder.functions import Abs, Count, Sum
 
     page = cint(page) or 1
     page_length = 100

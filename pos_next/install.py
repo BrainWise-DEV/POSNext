@@ -10,8 +10,9 @@ This module relies on Frappe's fixture system for:
 The fixtures are defined in hooks.py and synced automatically during install/migrate.
 This module handles post-fixture tasks like setting defaults and clearing cache.
 """
-import frappe
 import logging
+
+import frappe
 
 # Configure logger
 logger = logging.getLogger(__name__)

@@ -2,10 +2,11 @@
 # Copyright (c) 2025, POS Next and contributors
 # For license information, please see license.txt
 
+import re
+
 import frappe
 from frappe import _
-from frappe.utils import flt, nowdate, getdate, cstr, cint
-import re
+from frappe.utils import cint, cstr, flt, getdate, nowdate
 
 
 def check_promotion_permissions(action="read"):

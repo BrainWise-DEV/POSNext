@@ -6,11 +6,12 @@ BrainWise Branding API
 Provides secure branding configuration and validation endpoints
 """
 
-import frappe
-from frappe import _
-import json
 import base64
 import hashlib
+import json
+
+import frappe
+from frappe import _
 
 
 @frappe.whitelist(allow_guest=False)

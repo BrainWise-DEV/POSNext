@@ -8,7 +8,7 @@ Handles wallet payments, validation, and loyalty points conversion
 
 import frappe
 from frappe import _
-from frappe.utils import flt, cint
+from frappe.utils import cint, flt
 
 
 def validate_wallet_payment(doc, method=None):

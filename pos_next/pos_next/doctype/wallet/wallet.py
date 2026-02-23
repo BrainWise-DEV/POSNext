@@ -2,10 +2,10 @@
 # For license information, please see license.txt
 
 import frappe
+from erpnext.accounts.utils import get_balance_on
 from frappe import _
 from frappe.model.document import Document
 from frappe.utils import flt
-from erpnext.accounts.utils import get_balance_on
 
 
 class Wallet(Document):
