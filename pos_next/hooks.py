@@ -100,35 +100,14 @@ fixtures = [
 					"POS Profile-posa_cash_mode_of_payment",
 					"POS Profile-posa_allow_delete",
 					"POS Profile-posa_block_sale_beyond_available_qty",
-					"Mode of Payment-is_wallet_payment"
-				]
+					"Mode of Payment-is_wallet_payment",
+				],
 			]
-		]
+		],
 	},
-	{
-		"dt": "Print Format",
-		"filters": [
-			[
-				"name",
-				"in",
-				[
-					"POS Next Receipt"
-				]
-			]
-		]
-	},
-    {
-        "dt": "Role",
-        "filters": [
-            ["role_name", "in", ["POSNext Cashier"]]
-        ]
-    },
-    {
-        "dt": "Custom DocPerm",
-        "filters": [
-            ["role", "in", ["POSNext Cashier"]]
-        ]
-    }
+	{"dt": "Print Format", "filters": [["name", "in", ["POS Next Receipt"]]]},
+	{"dt": "Role", "filters": [["role_name", "in", ["POSNext Cashier"]]]},
+	{"dt": "Custom DocPerm", "filters": [["role", "in", ["POSNext Cashier"]]]},
 ]
 
 # Installation
@@ -181,50 +160,42 @@ before_uninstall = "pos_next.uninstall.before_uninstall"
 # Standard Queries
 # ----------------
 # Custom query for company-aware item filtering
-standard_queries = {
-	"Item": "pos_next.validations.item_query"
-}
+standard_queries = {"Item": "pos_next.validations.item_query"}
 
 # DocType Class
 # ---------------
 # Override standard doctype classes
 
-override_doctype_class = {
-	"Sales Invoice": "pos_next.overrides.sales_invoice.CustomSalesInvoice"
-}
+override_doctype_class = {"Sales Invoice": "pos_next.overrides.sales_invoice.CustomSalesInvoice"}
 
 # Document Events
 # ---------------
 # Hook on document methods and events
 
 doc_events = {
-	"Item": {
-		"validate": "pos_next.validations.validate_item"
-	},
+	"Item": {"validate": "pos_next.validations.validate_item"},
 	"Customer": {
 		"after_insert": [
 			"pos_next.api.customers.auto_assign_loyalty_program",
-			"pos_next.realtime_events.emit_customer_event"
+			"pos_next.realtime_events.emit_customer_event",
 		],
 		"on_update": "pos_next.realtime_events.emit_customer_event",
-		"on_trash": "pos_next.realtime_events.emit_customer_event"
+		"on_trash": "pos_next.realtime_events.emit_customer_event",
 	},
 	"Sales Invoice": {
 		"validate": [
 			"pos_next.api.sales_invoice_hooks.validate",
-			"pos_next.api.wallet.validate_wallet_payment"
+			"pos_next.api.wallet.validate_wallet_payment",
 		],
 		"before_cancel": "pos_next.api.sales_invoice_hooks.before_cancel",
 		"on_submit": [
 			"pos_next.realtime_events.emit_stock_update_event",
-			"pos_next.api.wallet.process_loyalty_to_wallet"
+			"pos_next.api.wallet.process_loyalty_to_wallet",
 		],
 		"on_cancel": "pos_next.realtime_events.emit_stock_update_event",
-		"after_insert": "pos_next.realtime_events.emit_invoice_created_event"
+		"after_insert": "pos_next.realtime_events.emit_invoice_created_event",
 	},
-	"POS Profile": {
-		"on_update": "pos_next.realtime_events.emit_pos_profile_updated_event"
-	}
+	"POS Profile": {"on_update": "pos_next.realtime_events.emit_pos_profile_updated_event"},
 }
 
 # Scheduled Tasks
@@ -320,4 +291,6 @@ scheduler_events = {
 # }
 
 
-website_route_rules = [{'from_route': '/pos/<path:app_path>', 'to_route': 'pos'},]
+website_route_rules = [
+	{"from_route": "/pos/<path:app_path>", "to_route": "pos"},
+]

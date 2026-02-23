@@ -21,75 +21,30 @@ def get_columns():
 			"label": _("Item Code"),
 			"fieldtype": "Link",
 			"options": "Item",
-			"width": 130
+			"width": 130,
 		},
-		{
-			"fieldname": "item_name",
-			"label": _("Item Name"),
-			"fieldtype": "Data",
-			"width": 200
-		},
+		{"fieldname": "item_name", "label": _("Item Name"), "fieldtype": "Data", "width": 200},
 		{
 			"fieldname": "item_group",
 			"label": _("Item Group"),
 			"fieldtype": "Link",
 			"options": "Item Group",
-			"width": 130
+			"width": 130,
 		},
-		{
-			"fieldname": "qty_sold",
-			"label": _("Qty Sold"),
-			"fieldtype": "Float",
-			"width": 100
-		},
-		{
-			"fieldname": "total_sales_value",
-			"label": _("Sales Value"),
-			"fieldtype": "Currency",
-			"width": 130
-		},
-		{
-			"fieldname": "avg_selling_rate",
-			"label": _("Avg Rate"),
-			"fieldtype": "Currency",
-			"width": 110
-		},
-		{
-			"fieldname": "current_stock",
-			"label": _("Current Stock"),
-			"fieldtype": "Float",
-			"width": 120
-		},
-		{
-			"fieldname": "days_to_stockout",
-			"label": _("Days to Stockout"),
-			"fieldtype": "Int",
-			"width": 140
-		},
+		{"fieldname": "qty_sold", "label": _("Qty Sold"), "fieldtype": "Float", "width": 100},
+		{"fieldname": "total_sales_value", "label": _("Sales Value"), "fieldtype": "Currency", "width": 130},
+		{"fieldname": "avg_selling_rate", "label": _("Avg Rate"), "fieldtype": "Currency", "width": 110},
+		{"fieldname": "current_stock", "label": _("Current Stock"), "fieldtype": "Float", "width": 120},
+		{"fieldname": "days_to_stockout", "label": _("Days to Stockout"), "fieldtype": "Int", "width": 140},
 		{
 			"fieldname": "stock_depletion_rate",
 			"label": _("Depletion Rate/Day"),
 			"fieldtype": "Float",
-			"width": 150
+			"width": 150,
 		},
-		{
-			"fieldname": "stock_status",
-			"label": _("Stock Status"),
-			"fieldtype": "Data",
-			"width": 120
-		},
-		{
-			"fieldname": "velocity_rank",
-			"label": _("Velocity Rank"),
-			"fieldtype": "Data",
-			"width": 120
-		},
-		{
-			"fieldname": "reorder_level",
-			"label": _("Reorder Level"),
-			"fieldtype": "Float",
-			"width": 120
-		}
+		{"fieldname": "stock_status", "label": _("Stock Status"), "fieldtype": "Data", "width": 120},
+		{"fieldname": "velocity_rank", "label": _("Velocity Rank"), "fieldtype": "Data", "width": 120},
+		{"fieldname": "reorder_level", "label": _("Reorder Level"), "fieldtype": "Float", "width": 120},
 	]
 
 
@@ -108,6 +63,7 @@ def get_data(filters):
 
 	if from_date and to_date:
 		from frappe.utils import date_diff
+
 		date_range_days = date_diff(to_date, from_date) or 1
 	else:
 		date_range_days = 30  # Default to 30 days
@@ -145,18 +101,25 @@ def get_data(filters):
 	for row in data:
 		# Get current stock
 		if warehouse:
-			row.current_stock = flt(frappe.db.get_value(
-				"Bin",
-				{"item_code": row.item_code, "warehouse": warehouse},
-				"actual_qty"
-			) or 0, 2)
+			row.current_stock = flt(
+				frappe.db.get_value("Bin", {"item_code": row.item_code, "warehouse": warehouse}, "actual_qty")
+				or 0,
+				2,
+			)
 		else:
 			# Sum across all warehouses if no specific warehouse
-			row.current_stock = flt(frappe.db.sql("""
+			row.current_stock = flt(
+				frappe.db.sql(
+					"""
 				SELECT SUM(actual_qty)
 				FROM `tabBin`
 				WHERE item_code = %s
-			""", row.item_code)[0][0] or 0, 2)
+			""",
+					row.item_code,
+				)[0][0]
+				or 0,
+				2,
+			)
 
 		# Calculate stock depletion rate (qty sold per day)
 		row.stock_depletion_rate = flt(row.qty_sold / date_range_days, 2)
@@ -245,16 +208,9 @@ def get_chart_data(data):
 	return {
 		"data": {
 			"labels": [row.item_code for row in top_movers],
-			"datasets": [
-				{
-					"name": "Quantity Sold",
-					"values": [row.qty_sold for row in top_movers]
-				}
-			]
+			"datasets": [{"name": "Quantity Sold", "values": [row.qty_sold for row in top_movers]}],
 		},
 		"type": "bar",
 		"colors": ["#2196F3"],
-		"barOptions": {
-			"stacked": False
-		}
+		"barOptions": {"stacked": False},
 	}

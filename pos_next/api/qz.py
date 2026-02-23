@@ -26,6 +26,7 @@ from frappe import _
 # Paths
 # ---------------------------------------------------------------------------
 
+
 def _qz_dir():
 	return frappe.get_site_path("private", "qz")
 
@@ -41,6 +42,7 @@ def _key_path():
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 @frappe.whitelist()
 def get_certificate():
@@ -142,18 +144,22 @@ def setup_qz_certificate():
 
 	# Write private key
 	with open(key_path, "wb") as f:
-		f.write(key.private_bytes(
-			encoding=serialization.Encoding.PEM,
-			format=serialization.PrivateFormat.PKCS8,
-			encryption_algorithm=serialization.NoEncryption(),
-		))
+		f.write(
+			key.private_bytes(
+				encoding=serialization.Encoding.PEM,
+				format=serialization.PrivateFormat.PKCS8,
+				encryption_algorithm=serialization.NoEncryption(),
+			)
+		)
 	os.chmod(key_path, 0o600)
 
 	# Build self-signed certificate (valid ~31 years)
-	subject = issuer = x509.Name([
-		x509.NameAttribute(NameOID.COMMON_NAME, "POS Next QZ Tray Signing"),
-		x509.NameAttribute(NameOID.ORGANIZATION_NAME, frappe.db.get_default("company") or "POS Next"),
-	])
+	subject = issuer = x509.Name(
+		[
+			x509.NameAttribute(NameOID.COMMON_NAME, "POS Next QZ Tray Signing"),
+			x509.NameAttribute(NameOID.ORGANIZATION_NAME, frappe.db.get_default("company") or "POS Next"),
+		]
+	)
 
 	now = datetime.now(timezone.utc)
 	cert = (
@@ -172,9 +178,11 @@ def setup_qz_certificate():
 		f.write(cert.public_bytes(serialization.Encoding.PEM))
 
 	frappe.msgprint(
-		_("QZ Tray certificate generated successfully.<br><br>"
-		  "Download the certificate from POS Settings and import it into "
-		  "QZ Tray on each POS machine, then restart QZ Tray."),
+		_(
+			"QZ Tray certificate generated successfully.<br><br>"
+			"Download the certificate from POS Settings and import it into "
+			"QZ Tray on each POS machine, then restart QZ Tray."
+		),
 		title=_("QZ Certificate Ready"),
 		indicator="green",
 	)

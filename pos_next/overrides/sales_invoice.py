@@ -45,6 +45,7 @@ def _get_post_change_gl_entries_setting():
 	)
 	return cint(result[0][0]) if result else 0
 
+
 class CustomSalesInvoice(SalesInvoice):
 	"""
 	Custom Sales Invoice class that handles wallet payments correctly.

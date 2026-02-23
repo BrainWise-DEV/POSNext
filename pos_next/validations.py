@@ -51,7 +51,7 @@ def item_query(doctype, txt, searchfield, start, page_len, filters):
 	query = f"""
 		SELECT name, item_name, item_group
 		FROM `tabItem`
-		WHERE {' AND '.join(conditions)}
+		WHERE {" AND ".join(conditions)}
 		ORDER BY
 			CASE WHEN name LIKE %s THEN 0 ELSE 1 END,
 			item_name

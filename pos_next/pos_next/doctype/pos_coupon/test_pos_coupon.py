@@ -6,4 +6,4 @@ import unittest
 
 
 class TestPOSCoupon(unittest.TestCase):
-    pass
+	pass

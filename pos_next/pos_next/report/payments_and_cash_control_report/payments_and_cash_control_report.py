@@ -21,70 +21,29 @@ def get_columns():
 			"label": _("Shift"),
 			"fieldtype": "Link",
 			"options": "POS Closing Shift",
-			"width": 150
+			"width": 150,
 		},
 		{
 			"fieldname": "pos_profile",
 			"label": _("POS Profile"),
 			"fieldtype": "Link",
 			"options": "POS Profile",
-			"width": 150
+			"width": 150,
 		},
-		{
-			"fieldname": "cashier",
-			"label": _("Cashier"),
-			"fieldtype": "Link",
-			"options": "User",
-			"width": 150
-		},
-		{
-			"fieldname": "posting_date",
-			"label": _("Date"),
-			"fieldtype": "Date",
-			"width": 100
-		},
-		{
-			"fieldname": "payment_method",
-			"label": _("Payment Method"),
-			"fieldtype": "Data",
-			"width": 130
-		},
+		{"fieldname": "cashier", "label": _("Cashier"), "fieldtype": "Link", "options": "User", "width": 150},
+		{"fieldname": "posting_date", "label": _("Date"), "fieldtype": "Date", "width": 100},
+		{"fieldname": "payment_method", "label": _("Payment Method"), "fieldtype": "Data", "width": 130},
 		{
 			"fieldname": "expected_amount",
 			"label": _("Expected Amount"),
 			"fieldtype": "Currency",
-			"width": 140
+			"width": 140,
 		},
-		{
-			"fieldname": "actual_amount",
-			"label": _("Actual Amount"),
-			"fieldtype": "Currency",
-			"width": 130
-		},
-		{
-			"fieldname": "difference",
-			"label": _("Difference"),
-			"fieldtype": "Currency",
-			"width": 120
-		},
-		{
-			"fieldname": "variance_percentage",
-			"label": _("Variance %"),
-			"fieldtype": "Percent",
-			"width": 100
-		},
-		{
-			"fieldname": "status",
-			"label": _("Status"),
-			"fieldtype": "Data",
-			"width": 100
-		},
-		{
-			"fieldname": "transaction_count",
-			"label": _("Transactions"),
-			"fieldtype": "Int",
-			"width": 110
-		}
+		{"fieldname": "actual_amount", "label": _("Actual Amount"), "fieldtype": "Currency", "width": 130},
+		{"fieldname": "difference", "label": _("Difference"), "fieldtype": "Currency", "width": 120},
+		{"fieldname": "variance_percentage", "label": _("Variance %"), "fieldtype": "Percent", "width": 100},
+		{"fieldname": "status", "label": _("Status"), "fieldtype": "Data", "width": 100},
+		{"fieldname": "transaction_count", "label": _("Transactions"), "fieldtype": "Int", "width": 110},
 	]
 
 
@@ -141,18 +100,21 @@ def get_data(filters):
 			filters={
 				"parenttype": "Sales Invoice",
 				"mode_of_payment": row.payment_method,
-				"parent": ["in", frappe.get_all(
-					"Sales Invoice",
-					filters={
-						"pos_profile": row.pos_profile,
-						"owner": row.cashier,
-						"posting_date": row.posting_date,
-						"docstatus": 1,
-						"is_pos": 1
-					},
-					pluck="name"
-				)]
-			}
+				"parent": [
+					"in",
+					frappe.get_all(
+						"Sales Invoice",
+						filters={
+							"pos_profile": row.pos_profile,
+							"owner": row.cashier,
+							"posting_date": row.posting_date,
+							"docstatus": 1,
+							"is_pos": 1,
+						},
+						pluck="name",
+					),
+				],
+			},
 		)
 
 	return data
@@ -196,12 +158,7 @@ def get_chart_data(data):
 	return {
 		"data": {
 			"labels": list(payment_summary.keys()),
-			"datasets": [
-				{
-					"name": "Total Amount",
-					"values": list(payment_summary.values())
-				}
-			]
+			"datasets": [{"name": "Total Amount", "values": list(payment_summary.values())}],
 		},
-		"type": "pie"
+		"type": "pie",
 	}

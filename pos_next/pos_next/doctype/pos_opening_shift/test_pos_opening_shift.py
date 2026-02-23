@@ -6,4 +6,4 @@ import unittest
 
 
 class TestPOSOpeningShift(unittest.TestCase):
-    pass
+	pass

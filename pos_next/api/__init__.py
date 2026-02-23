@@ -8,5 +8,5 @@ from . import auth, customers, invoices, items, offers, pos_profile, promotions,
 
 @frappe.whitelist(allow_guest=True)
 def ping():
-    """Simple ping endpoint for connectivity checks"""
-    return "pong"
+	"""Simple ping endpoint for connectivity checks"""
+	return "pong"

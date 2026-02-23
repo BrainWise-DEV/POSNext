@@ -25,16 +25,12 @@ def disable_expired_pricing_rules():
 				AND valid_upto < %s
 			""",
 			(today,),
-			as_dict=1
+			as_dict=1,
 		)
 
 		if not expired_rules:
 			frappe.logger().info("No expired pricing rules found")
-			return {
-				"success": True,
-				"disabled_count": 0,
-				"message": "No expired pricing rules to disable"
-			}
+			return {"success": True, "disabled_count": 0, "message": "No expired pricing rules to disable"}
 
 		disabled_count = 0
 		errors = []
@@ -42,18 +38,11 @@ def disable_expired_pricing_rules():
 		for rule in expired_rules:
 			try:
 				# Use SQL update for better performance
-				frappe.db.set_value(
-					"Pricing Rule",
-					rule.name,
-					"disable",
-					1,
-					update_modified=True
-				)
+				frappe.db.set_value("Pricing Rule", rule.name, "disable", 1, update_modified=True)
 				disabled_count += 1
 
 				frappe.logger().info(
-					f"Disabled expired pricing rule: {rule.name} - {rule.title} "
-					f"(expired: {rule.valid_upto})"
+					f"Disabled expired pricing rule: {rule.name} - {rule.title} (expired: {rule.valid_upto})"
 				)
 
 			except Exception as e:
@@ -71,22 +60,11 @@ def disable_expired_pricing_rules():
 
 		frappe.logger().info(summary)
 
-		return {
-			"success": True,
-			"disabled_count": disabled_count,
-			"errors": errors,
-			"message": summary
-		}
+		return {"success": True, "disabled_count": disabled_count, "errors": errors, "message": summary}
 
 	except Exception as e:
-		frappe.log_error(
-			title="Disable Expired Pricing Rules Error",
-			message=frappe.get_traceback()
-		)
-		return {
-			"success": False,
-			"error": str(e)
-		}
+		frappe.log_error(title="Disable Expired Pricing Rules Error", message=frappe.get_traceback())
+		return {"success": False, "error": str(e)}
 
 
 def disable_expired_promotional_schemes():
@@ -101,7 +79,7 @@ def disable_expired_promotional_schemes():
 			return {
 				"success": True,
 				"disabled_count": 0,
-				"message": "Promotional Scheme doctype not available"
+				"message": "Promotional Scheme doctype not available",
 			}
 
 		today = nowdate()
@@ -116,7 +94,7 @@ def disable_expired_promotional_schemes():
 				AND valid_upto < %s
 			""",
 			(today,),
-			as_dict=1
+			as_dict=1,
 		)
 
 		if not expired_schemes:
@@ -124,7 +102,7 @@ def disable_expired_promotional_schemes():
 			return {
 				"success": True,
 				"disabled_count": 0,
-				"message": "No expired promotional schemes to disable"
+				"message": "No expired promotional schemes to disable",
 			}
 
 		disabled_count = 0
@@ -133,18 +111,11 @@ def disable_expired_promotional_schemes():
 		for scheme in expired_schemes:
 			try:
 				# Use SQL update for better performance
-				frappe.db.set_value(
-					"Promotional Scheme",
-					scheme.name,
-					"disable",
-					1,
-					update_modified=True
-				)
+				frappe.db.set_value("Promotional Scheme", scheme.name, "disable", 1, update_modified=True)
 				disabled_count += 1
 
 				frappe.logger().info(
-					f"Disabled expired promotional scheme: {scheme.name} "
-					f"(expired: {scheme.valid_upto})"
+					f"Disabled expired promotional scheme: {scheme.name} (expired: {scheme.valid_upto})"
 				)
 
 			except Exception as e:
@@ -162,22 +133,11 @@ def disable_expired_promotional_schemes():
 
 		frappe.logger().info(summary)
 
-		return {
-			"success": True,
-			"disabled_count": disabled_count,
-			"errors": errors,
-			"message": summary
-		}
+		return {"success": True, "disabled_count": disabled_count, "errors": errors, "message": summary}
 
 	except Exception as e:
-		frappe.log_error(
-			title="Disable Expired Promotional Schemes Error",
-			message=frappe.get_traceback()
-		)
-		return {
-			"success": False,
-			"error": str(e)
-		}
+		frappe.log_error(title="Disable Expired Promotional Schemes Error", message=frappe.get_traceback())
+		return {"success": False, "error": str(e)}
 
 
 def cleanup_expired_promotions():
@@ -194,18 +154,13 @@ def cleanup_expired_promotions():
 	schemes_result = disable_expired_promotional_schemes()
 
 	# Summary log
-	total_disabled = (
-		pricing_result.get("disabled_count", 0) +
-		schemes_result.get("disabled_count", 0)
-	)
+	total_disabled = pricing_result.get("disabled_count", 0) + schemes_result.get("disabled_count", 0)
 
-	frappe.logger().info(
-		f"Cleanup completed: {total_disabled} expired promotion(s) disabled"
-	)
+	frappe.logger().info(f"Cleanup completed: {total_disabled} expired promotion(s) disabled")
 
 	return {
 		"success": True,
 		"pricing_rules": pricing_result,
 		"promotional_schemes": schemes_result,
-		"total_disabled": total_disabled
+		"total_disabled": total_disabled,
 	}

@@ -108,6 +108,7 @@ def get_initial_data():
 # Private Helper Functions
 # =============================================================================
 
+
 def _get_user_language():
 	"""
 	Get user's language preference from User doctype.
@@ -138,7 +139,7 @@ def _get_precision_settings():
 		"System Settings",
 		"System Settings",
 		["currency_precision", "float_precision", "rounding_method", "number_format"],
-		as_dict=True
+		as_dict=True,
 	)
 
 	return {
@@ -202,17 +203,20 @@ def _get_pos_settings(pos_profile_doc):
 		dict: POS Settings with derived values
 	"""
 	try:
-		settings = frappe.db.get_value(
-			"POS Settings",
-			{"pos_profile": pos_profile_doc.name, "enabled": 1},
-			POS_SETTINGS_FIELDS,
-			as_dict=True
-		) or DEFAULT_POS_SETTINGS.copy()
+		settings = (
+			frappe.db.get_value(
+				"POS Settings",
+				{"pos_profile": pos_profile_doc.name, "enabled": 1},
+				POS_SETTINGS_FIELDS,
+				as_dict=True,
+			)
+			or DEFAULT_POS_SETTINGS.copy()
+		)
 
 		# Derive from POS Profile (single source of truth)
-		settings["allow_write_off_change"] = 1 if (
-			pos_profile_doc.write_off_account and (pos_profile_doc.write_off_limit or 0) > 0
-		) else 0
+		settings["allow_write_off_change"] = (
+			1 if (pos_profile_doc.write_off_account and (pos_profile_doc.write_off_limit or 0) > 0) else 0
+		)
 		settings["disable_rounded_total"] = pos_profile_doc.disable_rounded_total or 0
 
 		return settings
@@ -250,7 +254,7 @@ def _get_payment_methods(pos_profile_name):
 				POSPaymentMethod.mode_of_payment,
 				POSPaymentMethod.default,
 				POSPaymentMethod.allow_in_returns,
-				Coalesce(ModeOfPayment.type, "Cash").as_("type")
+				Coalesce(ModeOfPayment.type, "Cash").as_("type"),
 			)
 			.where(POSPaymentMethod.parent == pos_profile_name)
 			.orderby(POSPaymentMethod.idx)

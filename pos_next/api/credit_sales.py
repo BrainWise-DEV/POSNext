@@ -52,10 +52,7 @@ def get_customer_balance(customer, company=None):
 		SalesInvoice = DocType("Sales Invoice")
 
 		# Build base filters
-		base_filters = (
-			(SalesInvoice.customer == customer) &
-			(SalesInvoice.docstatus == 1)
-		)
+		base_filters = (SalesInvoice.customer == customer) & (SalesInvoice.docstatus == 1)
 		if company:
 			base_filters = base_filters & (SalesInvoice.company == company)
 
@@ -72,7 +69,7 @@ def get_customer_balance(customer, company=None):
 						.when(SalesInvoice.outstanding_amount > 0, SalesInvoice.outstanding_amount)
 						.else_(0)
 					),
-					0
+					0,
 				).as_("total_outstanding")
 			)
 			.where(base_filters & (SalesInvoice.is_return == 0))
@@ -84,14 +81,8 @@ def get_customer_balance(customer, company=None):
 		# If no cash refund (added to customer credit), outstanding_amount < 0
 		return_query = (
 			frappe.qb.from_(SalesInvoice)
-			.select(
-				Coalesce(Sum(Abs(SalesInvoice.outstanding_amount)), 0).as_("return_credit")
-			)
-			.where(
-				base_filters &
-				(SalesInvoice.is_return == 1) &
-				(SalesInvoice.outstanding_amount < 0)
-			)
+			.select(Coalesce(Sum(Abs(SalesInvoice.outstanding_amount)), 0).as_("return_credit"))
+			.where(base_filters & (SalesInvoice.is_return == 1) & (SalesInvoice.outstanding_amount < 0))
 		)
 
 		# Execute queries
@@ -109,19 +100,15 @@ def get_customer_balance(customer, company=None):
 		return {
 			"total_outstanding": total_outstanding,
 			"total_credit": total_credit,
-			"net_balance": net_balance
+			"net_balance": net_balance,
 		}
 
 	except Exception as e:
 		frappe.log_error(
 			title="Customer Balance Error",
-			message=f"Customer: {customer}, Company: {company}, Error: {e!s}\n{frappe.get_traceback()}"
+			message=f"Customer: {customer}, Company: {company}, Error: {e!s}\n{frappe.get_traceback()}",
 		)
-		return {
-			"total_outstanding": 0.0,
-			"total_credit": 0.0,
-			"net_balance": 0.0
-		}
+		return {"total_outstanding": 0.0, "total_credit": 0.0, "net_balance": 0.0}
 
 
 def check_credit_sale_enabled(pos_profile):
@@ -139,10 +126,7 @@ def check_credit_sale_enabled(pos_profile):
 
 	# Get POS Settings for the profile
 	pos_settings = frappe.db.get_value(
-		"POS Settings",
-		{"pos_profile": pos_profile},
-		"allow_credit_sale",
-		as_dict=False
+		"POS Settings", {"pos_profile": pos_profile}, "allow_credit_sale", as_dict=False
 	)
 
 	return bool(pos_settings)
@@ -186,7 +170,7 @@ def get_available_credit(customer, company, pos_profile=None):
 			"company": company,
 		},
 		fields=["name", "outstanding_amount", "is_return", "posting_date", "grand_total", "modified"],
-		order_by="posting_date desc"
+		order_by="posting_date desc",
 	)
 
 	for row in outstanding_invoices:
@@ -194,17 +178,19 @@ def get_available_credit(customer, company, pos_profile=None):
 		available_credit = -flt(row.outstanding_amount)
 
 		if available_credit > 0:
-			total_credit.append({
-				"type": "Invoice",
-				"credit_origin": row.name,
-				"total_credit": available_credit,
-				"available_credit": available_credit,
-				"source_type": "Sales Return" if row.is_return else "Sales Invoice",
-				"posting_date": row.posting_date,
-				"reference_amount": row.grand_total,
-				"credit_to_redeem": 0,  # User will set this
-				"modified": row.modified,  # For optimistic locking
-			})
+			total_credit.append(
+				{
+					"type": "Invoice",
+					"credit_origin": row.name,
+					"total_credit": available_credit,
+					"available_credit": available_credit,
+					"source_type": "Sales Return" if row.is_return else "Sales Invoice",
+					"posting_date": row.posting_date,
+					"reference_amount": row.grand_total,
+					"credit_to_redeem": 0,  # User will set this
+					"modified": row.modified,  # For optimistic locking
+				}
+			)
 
 	# Get unallocated advance payments
 	advances = frappe.get_all(
@@ -217,22 +203,24 @@ def get_available_credit(customer, company, pos_profile=None):
 			"payment_type": "Receive",
 		},
 		fields=["name", "unallocated_amount", "posting_date", "paid_amount", "mode_of_payment", "modified"],
-		order_by="posting_date desc"
+		order_by="posting_date desc",
 	)
 
 	for row in advances:
-		total_credit.append({
-			"type": "Advance",
-			"credit_origin": row.name,
-			"total_credit": flt(row.unallocated_amount),
-			"available_credit": flt(row.unallocated_amount),
-			"source_type": "Payment Entry",
-			"posting_date": row.posting_date,
-			"reference_amount": row.paid_amount,
-			"mode_of_payment": row.mode_of_payment,
-			"credit_to_redeem": 0,  # User will set this
-			"modified": row.modified,  # For optimistic locking
-		})
+		total_credit.append(
+			{
+				"type": "Advance",
+				"credit_origin": row.name,
+				"total_credit": flt(row.unallocated_amount),
+				"available_credit": flt(row.unallocated_amount),
+				"source_type": "Payment Entry",
+				"posting_date": row.posting_date,
+				"reference_amount": row.paid_amount,
+				"mode_of_payment": row.mode_of_payment,
+				"credit_to_redeem": 0,  # User will set this
+				"modified": row.modified,  # For optimistic locking
+			}
+		)
 
 	return total_credit
 
@@ -287,11 +275,7 @@ def redeem_customer_credit(invoice_name, customer_credit_dict):
 			_validate_and_lock_invoice_credit(credit_origin, credit_to_redeem)
 
 			# Create JE to allocate credit from original invoice to new invoice
-			je_name = _create_credit_allocation_journal_entry(
-				invoice_doc,
-				credit_origin,
-				credit_to_redeem
-			)
+			je_name = _create_credit_allocation_journal_entry(invoice_doc, credit_origin, credit_to_redeem)
 			created_journal_entries.append(je_name)
 
 		elif credit_type == "Advance":
@@ -299,11 +283,7 @@ def redeem_customer_credit(invoice_name, customer_credit_dict):
 			_validate_and_lock_advance_credit(credit_origin, credit_to_redeem)
 
 			# Create Payment Entry to allocate advance payment
-			pe_name = _create_payment_entry_from_advance(
-				invoice_doc,
-				credit_origin,
-				credit_to_redeem
-			)
+			pe_name = _create_payment_entry_from_advance(invoice_doc, credit_origin, credit_to_redeem)
 			created_journal_entries.append(pe_name)
 
 	return created_journal_entries
@@ -330,10 +310,7 @@ def _validate_and_lock_invoice_credit(invoice_name, amount_to_redeem):
 	query = (
 		frappe.qb.from_(SalesInvoice)
 		.select(SalesInvoice.name, SalesInvoice.outstanding_amount)
-		.where(
-			(SalesInvoice.name == invoice_name) &
-			(SalesInvoice.docstatus == 1)
-		)
+		.where((SalesInvoice.name == invoice_name) & (SalesInvoice.docstatus == 1))
 		.for_update()
 	)
 
@@ -350,7 +327,7 @@ def _validate_and_lock_invoice_credit(invoice_name, amount_to_redeem):
 			_("Insufficient credit available from {0}. Available: {1}, Requested: {2}").format(
 				invoice_name,
 				frappe.format_value(available_credit, {"fieldtype": "Currency"}),
-				frappe.format_value(amount_to_redeem, {"fieldtype": "Currency"})
+				frappe.format_value(amount_to_redeem, {"fieldtype": "Currency"}),
 			)
 		)
 
@@ -375,10 +352,7 @@ def _validate_and_lock_advance_credit(payment_entry_name, amount_to_redeem):
 	query = (
 		frappe.qb.from_(PaymentEntry)
 		.select(PaymentEntry.name, PaymentEntry.unallocated_amount)
-		.where(
-			(PaymentEntry.name == payment_entry_name) &
-			(PaymentEntry.docstatus == 1)
-		)
+		.where((PaymentEntry.name == payment_entry_name) & (PaymentEntry.docstatus == 1))
 		.for_update()
 	)
 
@@ -394,7 +368,7 @@ def _validate_and_lock_advance_credit(payment_entry_name, amount_to_redeem):
 			_("Insufficient unallocated amount in {0}. Available: {1}, Requested: {2}").format(
 				payment_entry_name,
 				frappe.format_value(available_amount, {"fieldtype": "Currency"}),
-				frappe.format_value(amount_to_redeem, {"fieldtype": "Currency"})
+				frappe.format_value(amount_to_redeem, {"fieldtype": "Currency"}),
 			)
 		)
 
@@ -424,48 +398,51 @@ def _create_credit_allocation_journal_entry(invoice_doc, original_invoice_name, 
 	)
 
 	# Create Journal Entry
-	jv_doc = frappe.get_doc({
-		"doctype": "Journal Entry",
-		"voucher_type": "Journal Entry",
-		"posting_date": today(),
-		"company": invoice_doc.company,
-		"user_remark": get_credit_redeem_remark(invoice_doc.name),
-	})
+	jv_doc = frappe.get_doc(
+		{
+			"doctype": "Journal Entry",
+			"voucher_type": "Journal Entry",
+			"posting_date": today(),
+			"company": invoice_doc.company,
+			"user_remark": get_credit_redeem_remark(invoice_doc.name),
+		}
+	)
 
 	# Debit Entry - Original Invoice (reduces outstanding)
 	debit_row = jv_doc.append("accounts", {})
-	debit_row.update({
-		"account": original_invoice.debit_to,
-		"party_type": "Customer",
-		"party": invoice_doc.customer,
-		"reference_type": "Sales Invoice",
-		"reference_name": original_invoice.name,
-		"debit_in_account_currency": amount,
-		"credit_in_account_currency": 0,
-		"cost_center": cost_center,
-	})
+	debit_row.update(
+		{
+			"account": original_invoice.debit_to,
+			"party_type": "Customer",
+			"party": invoice_doc.customer,
+			"reference_type": "Sales Invoice",
+			"reference_name": original_invoice.name,
+			"debit_in_account_currency": amount,
+			"credit_in_account_currency": 0,
+			"cost_center": cost_center,
+		}
+	)
 
 	# Credit Entry - New Invoice (reduces outstanding)
 	credit_row = jv_doc.append("accounts", {})
-	credit_row.update({
-		"account": invoice_doc.debit_to,
-		"party_type": "Customer",
-		"party": invoice_doc.customer,
-		"reference_type": "Sales Invoice",
-		"reference_name": invoice_doc.name,
-		"debit_in_account_currency": 0,
-		"credit_in_account_currency": amount,
-		"cost_center": cost_center,
-	})
+	credit_row.update(
+		{
+			"account": invoice_doc.debit_to,
+			"party_type": "Customer",
+			"party": invoice_doc.customer,
+			"reference_type": "Sales Invoice",
+			"reference_name": invoice_doc.name,
+			"debit_in_account_currency": 0,
+			"credit_in_account_currency": amount,
+			"cost_center": cost_center,
+		}
+	)
 
 	jv_doc.flags.ignore_permissions = True
 	jv_doc.save()
 	jv_doc.submit()
 
-	frappe.msgprint(
-		_("Journal Entry {0} created for credit redemption").format(jv_doc.name),
-		alert=True
-	)
+	frappe.msgprint(_("Journal Entry {0} created for credit redemption").format(jv_doc.name), alert=True)
 
 	return jv_doc.name
 
@@ -488,20 +465,19 @@ def _create_payment_entry_from_advance(invoice_doc, payment_entry_name, amount):
 
 	# Check if already allocated
 	if payment_entry.unallocated_amount < amount:
-		frappe.throw(
-			_("Payment Entry {0} has insufficient unallocated amount").format(
-				payment_entry_name
-			)
-		)
+		frappe.throw(_("Payment Entry {0} has insufficient unallocated amount").format(payment_entry_name))
 
 	# Add reference to invoice
-	payment_entry.append("references", {
-		"reference_doctype": "Sales Invoice",
-		"reference_name": invoice_doc.name,
-		"total_amount": invoice_doc.grand_total,
-		"outstanding_amount": invoice_doc.outstanding_amount,
-		"allocated_amount": amount,
-	})
+	payment_entry.append(
+		"references",
+		{
+			"reference_doctype": "Sales Invoice",
+			"reference_name": invoice_doc.name,
+			"total_amount": invoice_doc.grand_total,
+			"outstanding_amount": invoice_doc.outstanding_amount,
+			"allocated_amount": amount,
+		},
+	)
 
 	# Recalculate unallocated amount
 	payment_entry.set_amounts()
@@ -510,10 +486,7 @@ def _create_payment_entry_from_advance(invoice_doc, payment_entry_name, amount):
 	payment_entry.flags.ignore_validate_update_after_submit = True
 	payment_entry.save()
 
-	frappe.msgprint(
-		_("Payment Entry {0} allocated to invoice").format(payment_entry.name),
-		alert=True
-	)
+	frappe.msgprint(_("Payment Entry {0} allocated to invoice").format(payment_entry.name), alert=True)
 
 	return payment_entry.name
 
@@ -535,12 +508,7 @@ def cancel_credit_journal_entries(invoice_name):
 
 	# Find linked journal entries
 	linked_journal_entries = frappe.get_all(
-		"Journal Entry",
-		filters={
-			"docstatus": 1,
-			"user_remark": remark
-		},
-		pluck="name"
+		"Journal Entry", filters={"docstatus": 1, "user_remark": remark}, pluck="name"
 	)
 
 	cancelled_count = 0
@@ -562,14 +530,12 @@ def cancel_credit_journal_entries(invoice_name):
 			cancelled_count += 1
 		except Exception as e:
 			frappe.log_error(
-				f"Failed to cancel Journal Entry {journal_entry_name}: {e!s}",
-				"Credit Sale JE Cancellation"
+				f"Failed to cancel Journal Entry {journal_entry_name}: {e!s}", "Credit Sale JE Cancellation"
 			)
 
 	if cancelled_count > 0:
 		frappe.msgprint(
-			_("Cancelled {0} credit redemption journal entries").format(cancelled_count),
-			alert=True
+			_("Cancelled {0} credit redemption journal entries").format(cancelled_count), alert=True
 		)
 
 	return cancelled_count
@@ -590,7 +556,8 @@ def get_credit_sale_summary(pos_profile):
 		frappe.throw(_("POS Profile is required"))
 
 	# Get credit sales (outstanding > 0)
-	summary = frappe.db.sql("""
+	summary = frappe.db.sql(
+		"""
 		SELECT
 			COUNT(*) as count,
 			SUM(outstanding_amount) as total_outstanding,
@@ -604,14 +571,12 @@ def get_credit_sale_summary(pos_profile):
 			AND is_pos = 1
 			AND outstanding_amount > 0
 			AND is_return = 0
-	""", {"pos_profile": pos_profile}, as_dict=True)
+	""",
+		{"pos_profile": pos_profile},
+		as_dict=True,
+	)
 
-	return summary[0] if summary else {
-		"count": 0,
-		"total_outstanding": 0,
-		"total_amount": 0,
-		"total_paid": 0
-	}
+	return summary[0] if summary else {"count": 0, "total_outstanding": 0, "total_amount": 0, "total_paid": 0}
 
 
 @frappe.whitelist()
@@ -630,16 +595,14 @@ def get_credit_invoices(pos_profile, limit=100):
 		frappe.throw(_("POS Profile is required"))
 
 	# Check if user has access to this POS Profile
-	has_access = frappe.db.exists(
-		"POS Profile User",
-		{"parent": pos_profile, "user": frappe.session.user}
-	)
+	has_access = frappe.db.exists("POS Profile User", {"parent": pos_profile, "user": frappe.session.user})
 
 	if not has_access and not frappe.has_permission("Sales Invoice", "read"):
 		frappe.throw(_("You don't have access to this POS Profile"))
 
 	# Query for credit invoices
-	invoices = frappe.db.sql("""
+	invoices = frappe.db.sql(
+		"""
 		SELECT
 			name,
 			customer,
@@ -663,9 +626,9 @@ def get_credit_invoices(pos_profile, limit=100):
 			posting_date DESC,
 			posting_time DESC
 		LIMIT %(limit)s
-	""", {
-		"pos_profile": pos_profile,
-		"limit": limit
-	}, as_dict=True)
+	""",
+		{"pos_profile": pos_profile, "limit": limit},
+		as_dict=True,
+	)
 
 	return invoices
