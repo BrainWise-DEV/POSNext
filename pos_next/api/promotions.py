@@ -46,6 +46,9 @@ def get_promotions(pos_profile=None, company=None, include_disabled=False):
 	if not include_disabled:
 		filters["disable"] = 0
 
+	# Only fetch selling promotional schemes (not buying)
+	filters["selling"] = 1
+
 	# Get all promotional schemes
 	schemes = frappe.get_all(
 		"Promotional Scheme",

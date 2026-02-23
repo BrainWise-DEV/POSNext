@@ -1715,19 +1715,46 @@ onUnmounted(() => {
 // Handlers
 async function handleShiftOpened() {
 	uiStore.showOpenShiftDialog = false;
-	if (shiftStore.currentProfile) {
-		cartStore.posProfile = shiftStore.profileName;
-		cartStore.posOpeningShift = shiftStore.currentShift?.name;
-		// Load POS Settings first to get tax_inclusive setting
-		await posSettingsStore.loadSettings(shiftStore.profileName);
-		// Configure session lock from settings
-		configureSessionLock({
-			enabled: posSettingsStore.enableSessionLock,
-			timeoutMinutes: posSettingsStore.sessionLockTimeout,
-		});
-		// Load tax rules with tax_inclusive setting
-		await cartStore.loadTaxRules(shiftStore.profileName, posSettingsStore.settings);
+	if (!shiftStore.currentProfile) return;
+
+	cartStore.posProfile = shiftStore.profileName;
+	cartStore.posOpeningShift = shiftStore.currentShift?.name;
+
+	// Set warehouse context early (synchronous, no API call)
+	if (shiftStore.profileWarehouse) {
+		stockStore.setWarehouse(shiftStore.profileWarehouse);
 	}
+
+	// Mirror initPOS: fire independent operations in parallel while settings load
+	const settingsPromise = posSettingsStore.loadSettings(shiftStore.profileName);
+
+	const backgroundOps = Promise.allSettled([
+		cartStore.setDefaultCustomer(),
+		offlineStore.isOffline
+			? offlineStore.checkOfflineCacheAvailability()
+			: offlineStore.preloadDataForOffline(shiftStore.currentProfile),
+		draftsStore.updateDraftsCount(),
+	]);
+
+	// Wait for settings (required for tax rules) + all background ops
+	const [settingsResult] = await Promise.allSettled([settingsPromise, backgroundOps]);
+
+	if (settingsResult.status === "rejected") {
+		log.error("Failed to load POS settings:", settingsResult.reason);
+		return;
+	}
+
+	// Configure session lock from settings
+	configureSessionLock({
+		enabled: posSettingsStore.enableSessionLock,
+		timeoutMinutes: posSettingsStore.sessionLockTimeout,
+	});
+
+	// Load tax rules (depends on settings being loaded)
+	await cartStore.loadTaxRules(shiftStore.profileName, posSettingsStore.settings);
+
+	_initializedProfile = shiftStore.profileName;
+
 	// Start session lock tracking now that a shift is open and POS is ready
 	startActivityTracking();
 	showSuccess(__("You can now start making sales"));

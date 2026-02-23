@@ -1,79 +1,18 @@
 import { call } from "@/utils/apiWrapper"
 import { isOffline } from "@/utils/offline"
 import { offlineWorker } from "@/utils/offline/workerClient"
-import { cacheItems, getCachedVariants, updateItemBatchSerialData } from "@/utils/offline/items"
+import { updateItemBatchSerialData } from "@/utils/offline/items"
 import { performanceConfig } from "@/utils/performanceConfig"
 import { logger } from "@/utils/logger"
 import { createResource } from "frappe-ui"
 import { defineStore } from "pinia"
-import { computed, ref } from "vue"
+import { computed, ref, watch } from "vue"
 import { useStockStore } from "./stock"
+import { usePOSSettingsStore } from "./posSettings"
 import { usePOSShiftStore } from "./posShift"
 import { useRealtimePosProfile } from "@/composables/useRealtimePosProfile"
 
 const log = logger.create('ItemSearch')
-
-/**
- * Fetch and cache variants for all template items
- * This ensures variants are available for offline use
- * @param {Array} items - Items array to check for templates
- * @param {string} posProfile - POS Profile name
- */
-async function cacheVariantsForTemplates(items, posProfile) {
-	if (!items || items.length === 0 || !posProfile) return
-
-	// Find template items (items with has_variants = 1)
-	const templateItems = items.filter(item => item.has_variants)
-
-	if (templateItems.length === 0) {
-		log.debug("No template items found - skipping variant caching")
-		return
-	}
-
-	log.info(`Caching variants for ${templateItems.length} template items`)
-
-	// Fetch variants for each template in parallel (with concurrency limit)
-	const CONCURRENCY_LIMIT = 3
-	const allVariants = []
-
-	for (let i = 0; i < templateItems.length; i += CONCURRENCY_LIMIT) {
-		const batch = templateItems.slice(i, i + CONCURRENCY_LIMIT)
-
-		const batchPromises = batch.map(async (template) => {
-			try {
-				const response = await call("pos_next.api.items.get_item_variants", {
-					template_item: template.item_code,
-					pos_profile: posProfile,
-				})
-				const variants = response?.message || response || []
-
-				if (variants.length > 0) {
-					log.debug(`Fetched ${variants.length} variants for ${template.item_code}`)
-					return variants
-				}
-				return []
-			} catch (error) {
-				log.warn(`Failed to fetch variants for ${template.item_code}:`, error.message)
-				return []
-			}
-		})
-
-		const batchResults = await Promise.all(batchPromises)
-		for (const variants of batchResults) {
-			allVariants.push(...variants)
-		}
-	}
-
-	// Cache all variants in IndexedDB
-	if (allVariants.length > 0) {
-		try {
-			await cacheItems(allVariants)
-			log.success(`Cached ${allVariants.length} variants for offline use`)
-		} catch (error) {
-			log.error("Failed to cache variants:", error)
-		}
-	}
-}
 
 /**
  * Fetch and cache batch/serial data for items with batch or serial tracking
@@ -126,6 +65,15 @@ async function cacheBatchSerialForItems(items, warehouse) {
 export const useItemSearchStore = defineStore("itemSearch", () => {
 	// Get stock store instance
 	const stockStore = useStockStore()
+
+	// Get POS settings store for dynamic show_variants_as_items flag
+	const posSettingsStore = usePOSSettingsStore()
+	const getShowVariantsFlag = () => posSettingsStore.showVariantsAsItems ? 1 : 0
+
+	// Sync show_variants_as_items setting to worker whenever it changes
+	watch(() => posSettingsStore.showVariantsAsItems, (newVal) => {
+		offlineWorker.setShowVariantsAsItems(newVal)
+	}, { immediate: true })
 
 	// Get shift store for warehouse info (for batch/serial caching)
 	const shiftStore = usePOSShiftStore()
@@ -776,6 +724,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 			// Skip when offline — count can't be fetched without network
 			const countPromise = !offline ? call("pos_next.api.items.get_items_count", {
 				pos_profile: profile,
+				show_variants_as_items: getShowVariantsFlag(),
 			}).then(r => r?.message ?? r ?? 0).catch(countErr => {
 				log.warn("Could not fetch item count:", countErr.message)
 				return 0
@@ -824,28 +773,6 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 							totalServerItems.value = cacheStats.value?.totalServerItems || stats.items
 							hasMore.value = cached.length >= limit
 							log.success(`Loaded ${cached.length} items from cache (offline, total: ${stats.items})`)
-
-							// Eager variant verification: Check if template items have cached variants
-							const templateItems = cached.filter(item => item.has_variants)
-							if (templateItems.length > 0) {
-								log.info(`Verifying variants for ${templateItems.length} template items`)
-								const missingVariants = []
-
-								for (const template of templateItems) {
-									const variants = await getCachedVariants(template.item_code)
-									if (!variants || variants.length === 0) {
-										missingVariants.push(template.item_code)
-									} else {
-										log.debug(`Template ${template.item_code} has ${variants.length} cached variants`)
-									}
-								}
-
-								if (missingVariants.length > 0) {
-									log.warn(`${missingVariants.length} template items missing variants in offline cache:`, missingVariants)
-								} else {
-									log.success(`All ${templateItems.length} template items have variants cached`)
-								}
-							}
 						} else {
 							replaceAllItems([])
 							log.warn("No items in cache")
@@ -946,11 +873,6 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 
 					log.success(`Loaded ${fetchedItems.length} items (server-side filtering)`)
 
-					// Background caching - limit to prevent overloading IndexedDB
-					cacheVariantsForTemplates(fetchedItems.slice(0, 50), profile).catch(err => {
-						log.warn("Background variant caching failed:", err.message)
-					})
-
 					// Cache batch/serial data for offline use
 					if (shiftStore.profileWarehouse) {
 						cacheBatchSerialForItems(fetchedItems, shiftStore.profileWarehouse).catch(err => {
@@ -984,6 +906,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 					item_group: null, // No filter - get items from all groups
 					start: 0,
 					limit: unfilteredLimit,
+					show_variants_as_items: getShowVariantsFlag(),
 				})
 				const list = response?.message || response || []
 
@@ -1005,12 +928,6 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 					serverDataFresh.value = true
 
 					log.success(`Loaded ${list.length} items from server`)
-
-					// Cache variants for template items (for offline use)
-					// Run in background to not block UI
-					cacheVariantsForTemplates(list, profile).catch(err => {
-						log.warn("Background variant caching failed:", err.message)
-					})
 
 					// Cache batch/serial data for offline use
 					if (shiftStore.profileWarehouse) {
@@ -1072,6 +989,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 				item_group: firstGroup, // Server-side filter via DB index
 				start: 0,
 				limit: effectiveLimit,
+				show_variants_as_items: getShowVariantsFlag(),
 			})
 			const items = response?.message || response || []
 			log.info(`Fetched ${items.length} items from ${firstGroup}`)
@@ -1107,6 +1025,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 					item_groups: JSON.stringify(groupsToFetch),
 					start: start,
 					limit: effectiveLimit,
+					show_variants_as_items: getShowVariantsFlag(),
 				})
 				return response?.message || response || []
 			} else {
@@ -1116,6 +1035,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 					item_group: itemGroup,
 					start: start,
 					limit: effectiveLimit,
+					show_variants_as_items: getShowVariantsFlag(),
 				})
 				return response?.message || response || []
 			}
@@ -1188,6 +1108,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 					item_group: null,
 					start: start,
 					limit: pageSize,
+					show_variants_as_items: getShowVariantsFlag(),
 				})
 				items = response?.message || response || []
 			}
@@ -1277,6 +1198,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 					item_group: null,
 					start: currentOffset.value,
 					limit: itemsPerPage.value,
+					show_variants_as_items: getShowVariantsFlag(),
 				})
 				list = response?.message || response || []
 			}
@@ -1418,7 +1340,8 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 							item_groups: JSON.stringify([currentGroup]),
 							start: groupOffset,
 							limit: batchSize,
-							include_variants: 1,
+							show_variants_as_items: getShowVariantsFlag(),
+							include_variants: 1, // Always cache variants for offline barcode scanning
 						})
 						if (myGeneration !== syncGeneration) return
 						const list = response?.message || response || []
@@ -1467,7 +1390,8 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 									pos_profile: profile,
 									start: offset,
 									limit: batchSize,
-									include_variants: 1,
+									show_variants_as_items: getShowVariantsFlag(),
+									include_variants: 1, // Always cache variants for offline barcode scanning
 								}).then(r => r?.message || r || [])
 								.catch(err => {
 									log.warn(`Parallel batch at offset ${offset} failed:`, err.message)
@@ -1627,6 +1551,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 						item_group: selectedItemGroup.value,
 						start: 0,
 						limit: searchLimit, // Dynamically adjusted based on device performance
+						show_variants_as_items: getShowVariantsFlag(),
 					})
 					const serverResults = response?.message || response || []
 
@@ -1856,6 +1781,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 				const countPromise = call("pos_next.api.items.get_items_count", {
 					pos_profile: posProfile.value,
 					item_group: group || undefined,
+					show_variants_as_items: getShowVariantsFlag(),
 				}).catch(err => {
 					log.warn("Could not fetch item count:", err.message)
 					return 0
@@ -1874,6 +1800,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 						item_group: null,
 						start: 0,
 						limit: pageSize,
+						show_variants_as_items: getShowVariantsFlag(),
 					})
 					items = response?.message || response || []
 					log.info(`Loaded ${items.length} items for "All Items" tab`)

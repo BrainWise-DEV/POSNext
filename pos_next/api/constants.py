@@ -38,6 +38,7 @@ POS_SETTINGS_FIELDS = [
 	"create_only_sales_order",
 	"enable_session_lock",
 	"session_lock_timeout",
+	"show_variants_as_items",
 ]
 
 # Default POS Settings values
@@ -66,4 +67,5 @@ DEFAULT_POS_SETTINGS = {
 	"create_only_sales_order": 0,
 	"enable_session_lock": 0,
 	"session_lock_timeout": 5,
+	"show_variants_as_items": 0,
 }

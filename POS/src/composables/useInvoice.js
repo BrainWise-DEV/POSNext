@@ -737,8 +737,8 @@ export function useInvoice() {
 			item_code: item.item_code,
 			item_name: item.item_name,
 			qty: item.quantity || item.qty || 1,
-			rate: computeBackendRate(item),
-			price_list_rate: roundCurrency(item.price_list_rate || item.rate),
+			rate: item.is_free_item ? 0 : computeBackendRate(item),
+			price_list_rate: item.is_free_item ? 0 : roundCurrency(item.price_list_rate || item.rate),
 			uom: item.uom,
 			warehouse: item.warehouse,
 			batch_no: item.batch_no,
@@ -750,6 +750,7 @@ export function useInvoice() {
 			// Manual rate edit tracking for audit logging
 			is_rate_manually_edited: item.is_rate_manually_edited || 0,
 			original_rate: item.original_rate || null,
+			is_free_item: item.is_free_item || 0,
 		}))
 	}
 

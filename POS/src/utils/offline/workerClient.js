@@ -464,6 +464,10 @@ class OfflineWorkerClient {
 		return this.sendMessage("SET_CSRF_TOKEN", { token })
 	}
 
+	async setShowVariantsAsItems(value) {
+		return this.sendMessage("SET_SHOW_VARIANTS_AS_ITEMS", { value: Boolean(value) })
+	}
+
 	async updateStockQuantities(stockUpdates) {
 		return this.sendMessage("UPDATE_STOCK_QUANTITIES", { stockUpdates })
 	}

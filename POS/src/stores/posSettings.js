@@ -34,6 +34,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		hide_expected_amount: 0,
 		display_discount_percentage: 0,
 		display_discount_amount: 0,
+		show_variants_as_items: 0,
 		// Operations
 		allow_sales_order: 0,
 		allow_select_sales_order: 0,
@@ -144,6 +145,9 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	)
 	const displayDiscountAmount = computed(() =>
 		Boolean(settings.value.display_discount_amount),
+	)
+	const showVariantsAsItems = computed(() =>
+		Boolean(settings.value.show_variants_as_items),
 	)
 
 	// Computed - Operations
@@ -315,6 +319,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 			hide_expected_amount: 0,
 			display_discount_percentage: 0,
 			display_discount_amount: 0,
+			show_variants_as_items: 0,
 			allow_sales_order: 0,
 			allow_select_sales_order: 0,
 			create_only_sales_order: 0,
@@ -429,6 +434,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		hideExpectedAmount,
 		displayDiscountPercentage,
 		displayDiscountAmount,
+		showVariantsAsItems,
 
 		// Computed - Operations
 		allowSalesOrder,

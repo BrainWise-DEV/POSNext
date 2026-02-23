@@ -595,9 +595,9 @@ async function loadClosingData() {
 			data.payment_reconciliation = data.payment_reconciliation.map((payment) =>
 				reactive({
 					...payment,
-					closing_amount:
-						payment.closing_amount ?? payment.expected_amount ?? 0,
+					closing_amount: payment.closing_amount ?? null,
 					difference: 0,
+					_touched: false,
 				}),
 			)
 
@@ -628,6 +628,7 @@ function calculateDifference(payment) {
 // New function to handle closing amount updates with proper reactivity
 function updateClosingAmount(payment, value) {
 	payment.closing_amount = value
+	payment._touched = true
 	calculateDifference(payment)
 }
 
@@ -635,9 +636,10 @@ const canSubmit = computed(() => {
 	if (!closingData.value || !closingData.value.payment_reconciliation)
 		return false
 
-	// Check if all closing amounts are filled
+	// Check if all closing amounts have been manually entered
 	return closingData.value.payment_reconciliation.every(
 		(payment) =>
+			payment._touched &&
 			payment.closing_amount !== null &&
 			payment.closing_amount !== undefined &&
 			payment.closing_amount !== "",
