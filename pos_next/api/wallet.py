@@ -257,31 +257,11 @@ def get_customer_wallet(customer, company=None):
 
 
 def create_wallet_on_customer_insert(doc, method=None):
-	"""Hook: after_insert on Customer. Creates a wallet for each active company with a POS Profile."""
-	companies = []
-	try:
-		companies = frappe.get_all(
-			"POS Profile",
-			filters={"disabled": 0},
-			pluck="company"
-		)
-		companies = list(dict.fromkeys([company for company in companies if company]))
-		if not companies:
-			return
-
-		for company in companies:
-			try:
-				get_or_create_wallet(doc.name, company)
-			except Exception as company_error:
-				frappe.log_error(
-					f"Failed to auto-create wallet for customer {doc.name} in company {company}: {company_error}",
-					"Wallet Auto-Creation Error"
-				)
-	except Exception as e:
-		frappe.log_error(
-			f"Failed to auto-create wallets for customer {doc.name}. Companies evaluated: {companies}. Error: {e}",
-			"Wallet Auto-Creation Error"
-		)
+	"""Hook: after_insert on Customer. Creates a wallet for the default company."""
+	company = frappe.get_cached_value("Global Defaults", "Global Defaults", "default_company")
+	if not company:
+		return
+	get_or_create_wallet(doc.name, company)
 
 
 @frappe.whitelist()
