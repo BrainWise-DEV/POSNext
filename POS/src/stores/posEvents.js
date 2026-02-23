@@ -243,6 +243,7 @@ export const usePOSEventsStore = defineStore('posEvents', () => {
 			'use_percentage_discount',
 			'allow_user_to_edit_additional_discount',
 			'allow_user_to_edit_item_discount',
+			'allow_user_to_edit_rate',
 			'disable_rounded_total',
 			'tax_inclusive'
 		]

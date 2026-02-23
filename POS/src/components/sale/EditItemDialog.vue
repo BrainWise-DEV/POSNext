@@ -133,10 +133,18 @@
 																type="number"
 																min="0"
 																step="0.01"
-																readonly
-																class="w-full h-7 border border-gray-300 rounded-lg ps-12 pe-3 text-sm font-semibold bg-gray-50 cursor-not-allowed"
+																:readonly="!canEditRate"
+																:class="canEditRate ? 'bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent' : 'bg-gray-50 cursor-not-allowed'"
+																class="w-full h-7 border border-gray-300 rounded-lg ps-12 pe-3 text-sm font-semibold"
+																:title="rateEditDisabledReason"
+																@input="calculateTotals"
 															/>
 														</div>
+														<!-- Compact warning when rate editing disabled due to pricing rules -->
+														<p v-if="hasPricingRules && settingsStore.allowUserToEditRate" class="mt-1 text-xs text-amber-600 flex items-center gap-1">
+															<FeatherIcon name="lock" class="w-3 h-3" />
+															{{ __('Locked (offer applied)') }}
+														</p>
 													</div>
 												</div>
 
@@ -318,6 +326,7 @@ const isCheckingStock = ref(false)
 const localSerials = ref([]) // List of serial numbers for this item
 const removedSerials = ref([]) // Track serials removed during this edit session
 const originalSerials = ref([]) // Original serials when dialog opened
+const originalPriceListRate = ref(0) // Original price_list_rate when dialog opened (for rate edit validation)
 
 const show = computed({
 	get: () => props.modelValue,
@@ -332,6 +341,30 @@ const availableUoms = computed(() => {
 })
 
 const currencySymbol = computed(() => getCurrencySymbol(props.currency))
+
+// Check if item has pricing rules applied (promotional offers)
+const hasPricingRules = computed(() => {
+	if (!localItem.value) return false
+	return Boolean(localItem.value.pricing_rules) && localItem.value.pricing_rules.length > 0
+})
+
+// Rate editing is allowed only if:
+// 1. POS Settings allows rate editing AND
+// 2. Item does NOT have pricing rules (promotional offers) applied
+const canEditRate = computed(() => {
+	return settingsStore.allowUserToEditRate && !hasPricingRules.value
+})
+
+// Tooltip message for why rate editing is disabled
+const rateEditDisabledReason = computed(() => {
+	if (!settingsStore.allowUserToEditRate) {
+		return __('Rate editing is disabled')
+	}
+	if (hasPricingRules.value) {
+		return __('Locked (offer applied)')
+	}
+	return ''
+})
 
 // Options for SelectInput components
 const uomOptions = computed(() => {
@@ -369,6 +402,8 @@ watch(
 			localQuantity.value = newItem.quantity || 1
 			localUom.value = newItem.uom || newItem.stock_uom || __("Nos")
 			localRate.value = newItem.rate || 0
+			// Store original price_list_rate for rate edit validation
+			originalPriceListRate.value = newItem.price_list_rate || newItem.rate || 0
 			localWarehouse.value =
 				newItem.warehouse || props.warehouses[0]?.name || ""
 
@@ -578,16 +613,52 @@ function formatCurrency(amount) {
 }
 
 function updateItem() {
+	// Check if rate was manually edited
+	const isRateManuallyEdited = localRate.value !== originalPriceListRate.value
+
+	// ========================================================================
+	// RATE EDIT VALIDATION
+	// ========================================================================
+	if (settingsStore.allowUserToEditRate && isRateManuallyEdited) {
+		// Validate rate is positive
+		if (localRate.value <= 0) {
+			showError(__('Rate must be greater than zero'))
+			return
+		}
+
+		// Validate against max discount if rate was reduced
+		const maxDiscount = settingsStore.maxDiscountAllowed
+		if (maxDiscount > 0 && localRate.value < originalPriceListRate.value) {
+			const discountPercent = ((originalPriceListRate.value - localRate.value) / originalPriceListRate.value) * 100
+			const roundedDiscount = Math.round(discountPercent * 100) / 100
+
+			if (roundedDiscount > maxDiscount) {
+				showError(
+					__('Rate reduction of {0}% exceeds maximum allowed discount of {1}%', [
+						roundedDiscount.toFixed(2),
+						maxDiscount
+					])
+				)
+				return
+			}
+		}
+	}
+
 	const updatedItem = {
 		...localItem.value,
 		quantity: localQuantity.value,
 		uom: localUom.value,
 		rate: localRate.value,
+		// Preserve price_list_rate for reference (original price before any manual edits)
+		price_list_rate: originalPriceListRate.value,
 		warehouse: localWarehouse.value,
 		discount_percentage:
 			discountType.value === "percentage" ? discountValue.value : 0,
 		discount_amount:
 			discountType.value === "amount" ? discountValue.value : 0,
+		// Track manual rate edits for audit logging
+		is_rate_manually_edited: isRateManuallyEdited ? 1 : 0,
+		original_rate: isRateManuallyEdited ? originalPriceListRate.value : null,
 	}
 
 	// Update serial numbers if item has serials

@@ -24,6 +24,8 @@
 				:cache-stats="itemStore.cacheStats"
 				:stock-sync-active="isStockSyncActive"
 				:is-refreshing="stockStore.refreshing"
+				:silent-print-enabled="posSettingsStore.silentPrint"
+				:qz-connected="qzConnected"
 				@sync-click="handleSyncClick"
 				@printer-click="uiStore.showHistoryDialog = true"
 				@refresh-click="handleRefresh"
@@ -598,7 +600,6 @@
 				v-model="showPOSSettings"
 				:pos-profile="shiftStore.profileName"
 				:current-warehouse="shiftStore.profileWarehouse"
-				@warehouse-changed="handleWarehouseChanged"
 			/>
 
 			<!-- Stock Lookup Dialog (Products Menu) -->
@@ -933,6 +934,14 @@
 	</div>
 </template>
 
+<script>
+// Module-scoped init guard — prevents redundant heavy initialization
+// when component remounts due to translationVersion changes.
+// Tracks the profile name so a shift change correctly re-initializes.
+let _initializedProfile = null
+let _posInitPromise = null
+</script>
+
 <script setup>
 import ShiftClosingDialog from "@/components/ShiftClosingDialog.vue";
 import ShiftOpeningDialog from "@/components/ShiftOpeningDialog.vue";
@@ -967,7 +976,9 @@ import { useUserData } from "@/data/user";
 import { parseError } from "@/utils/errorHandler";
 import { offlineWorker } from "@/utils/offline/workerClient";
 import { cacheInvoiceHistory, getCachedInvoiceHistory } from "@/utils/offline/sync";
-import { printInvoice, printInvoiceByName } from "@/utils/printInvoice";
+import { printInvoice, printInvoiceByName, printWithSilentFallback } from "@/utils/printInvoice";
+import { qzConnected, connect as qzConnect, disconnect as qzDisconnect } from "@/utils/qzTray";
+
 import { Button, Dialog, createResource } from "frappe-ui";
 import { call } from "@/utils/apiWrapper";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
@@ -1264,63 +1275,109 @@ onMounted(async () => {
 		await posSettingsStore.reloadSettings();
 	});
 
+	// QZ Tray lifecycle — lazy connect when silent print is enabled
+	watch(
+		() => posSettingsStore.silentPrint,
+		async (enabled) => {
+			if (enabled) {
+				await qzConnect();
+			} else {
+				await qzDisconnect();
+			}
+		},
+		{ immediate: true }
+	);
+
 	// Store cleanup function for unmount
-	onUnmounted(cleanup);
+	onUnmounted(() => {
+		cleanup();
+		qzDisconnect();
+	});
 
 	try {
 		// Start timers for current time and shift duration
 		shiftStore.startTimers();
 
-		// Check for existing open shift
+		// Skip heavy initialization if already completed for this profile
+		// (e.g., remount from translationVersion change). Pinia stores are
+		// singletons — their state survives component remounts.
+		const currentProfileName = shiftStore.profileName;
+		if (_initializedProfile && _initializedProfile === currentProfileName) {
+			log.debug("Skipping init — already initialized (remount)");
+			updateLayoutBounds();
+			return;
+		}
+
+		// If another mount is already running init, wait for it instead of duplicating
+		if (_posInitPromise) {
+			log.debug("Init already in progress, waiting...");
+			try {
+				await _posInitPromise;
+			} catch {
+				// Original caller handles errors; this mount just waits
+			}
+			updateLayoutBounds();
+			return;
+		}
+
+		_posInitPromise = initPOS();
+		await _posInitPromise;
+		_posInitPromise = null;
+
+		updateLayoutBounds();
+	} catch (error) {
+		_posInitPromise = null;
+		log.error("Error checking shift:", error);
+	} finally {
+		uiStore.setLoading(false);
+	}
+
+	async function initPOS() {
 		const hasShift = await shiftStore.checkShift();
 
 		if (!hasShift) {
 			uiStore.showOpenShiftDialog = true;
-		} else {
-			// Set POS profile and load tax rules
-			if (shiftStore.currentProfile) {
-				cartStore.posProfile = shiftStore.profileName;
-				cartStore.posOpeningShift = shiftStore.currentShift?.name;
-
-				// Load POS Settings
-				await posSettingsStore.loadSettings(shiftStore.profileName);
-				log.info("POS Settings loaded:", {
-					allowPartialPayment: posSettingsStore.allowPartialPayment,
-					settings: posSettingsStore.settings,
-				});
-
-				// Load tax rules with tax_inclusive setting from POS Settings
-				await cartStore.loadTaxRules(shiftStore.profileName, posSettingsStore.settings);
-
-				// Set default customer from POS Profile if configured
-				await cartStore.setDefaultCustomer();
-
-				// Note: POS Settings already loaded above via posSettingsStore.loadSettings()
-				// No need to call again since settingsStore is an alias to posSettingsStore
-
-				// Set warehouse context in stock store for stock operations
-				if (shiftStore.profileWarehouse) {
-					stockStore.setWarehouse(shiftStore.profileWarehouse);
-
-					// Note: Periodic stock sync will be configured after items load
-					// See watch() on itemStore.allItems below
-				}
-
-				// Pre-load data for offline use
-				if (!offlineStore.isOffline) {
-					await offlineStore.preloadDataForOffline(shiftStore.currentProfile);
-				} else {
-					await offlineStore.checkOfflineCacheAvailability();
-				}
-			}
+			return;
 		}
 
-		updateLayoutBounds();
-		await draftsStore.updateDraftsCount();
-	} catch (error) {
-		log.error("Error checking shift:", error);
-	} finally {
-		uiStore.setLoading(false);
+		if (!shiftStore.currentProfile) return;
+
+		cartStore.posProfile = shiftStore.profileName;
+		cartStore.posOpeningShift = shiftStore.currentShift?.name;
+
+		// Set warehouse context early (synchronous, no API call)
+		if (shiftStore.profileWarehouse) {
+			stockStore.setWarehouse(shiftStore.profileWarehouse);
+		}
+
+		// Fire independent operations in parallel while settings load.
+		// Settings must complete before tax rules, but the rest are independent.
+		const settingsPromise = posSettingsStore.loadSettings(shiftStore.profileName);
+
+		const backgroundOps = Promise.allSettled([
+			cartStore.setDefaultCustomer(),
+			offlineStore.isOffline
+				? offlineStore.checkOfflineCacheAvailability()
+				: offlineStore.preloadDataForOffline(shiftStore.currentProfile),
+			draftsStore.updateDraftsCount(),
+		]);
+
+		// Wait for settings (required for tax rules) + all background ops
+		const [settingsResult] = await Promise.allSettled([settingsPromise, backgroundOps]);
+
+		if (settingsResult.status === "rejected") {
+			log.error("Failed to load POS settings:", settingsResult.reason);
+			return;
+		}
+
+		log.info("POS Settings loaded:", {
+			allowPartialPayment: posSettingsStore.allowPartialPayment,
+		});
+
+		// Load tax rules (depends on settings being loaded)
+		await cartStore.loadTaxRules(shiftStore.profileName, posSettingsStore.settings);
+
+		_initializedProfile = shiftStore.profileName;
 	}
 });
 
@@ -1920,7 +1977,7 @@ async function handlePaymentCompleted(paymentData) {
 					log.debug("Background invoice cache refresh failed:", err)
 				);
 
-				if (shiftStore.autoPrintEnabled) {
+				if (shiftStore.autoPrintEnabled || posSettingsStore.silentPrint) {
 					try {
 						await handlePrintInvoice({ name: invoiceName });
 						showSuccess(__("Invoice {0} created and sent to printer", [invoiceName]));
@@ -2018,20 +2075,16 @@ async function handleOptionSelected(option) {
 			}
 		} else if (option.type === "uom") {
 			const qty = option.quantity || cartStore.pendingItemQty;
-			const itemDetails = await cartStore.getItemDetailsResource.submit({
-				item_code: cartStore.pendingItem.item_code,
-				pos_profile: cartStore.posProfile,
-				customer: cartStore.customer?.name || cartStore.customer,
-				qty: qty,
-				uom: option.uom,
-			});
+			const pricing = await cartStore.resolveUomPricing(
+				cartStore.pendingItem, option.uom, option.conversion_factor, qty
+			);
 
 			const itemToAdd = {
 				...cartStore.pendingItem,
 				uom: option.uom,
 				conversion_factor: option.conversion_factor,
-				rate: itemDetails.price_list_rate || itemDetails.rate,
-				price_list_rate: itemDetails.price_list_rate,
+				rate: pricing.rate,
+				price_list_rate: pricing.price_list_rate,
 			};
 
 			if (itemToAdd.has_batch_no || itemToAdd.has_serial_no) {
@@ -2142,7 +2195,8 @@ async function handleLoadDraft(draft) {
 }
 
 function handleReturnCreated(returnInvoice) {
-	showSuccess(__("Return invoice {0} created successfully", [returnInvoice.name]));
+	// Success message is already shown by ReturnInvoiceDialog
+	log.debug("Return invoice created:", returnInvoice.name)
 }
 
 function handleDiscountApplied(discount) {
@@ -2207,19 +2261,25 @@ async function handleCustomerUpdated(updatedCustomer) {
 
 async function handleRefresh() {
 	try {
-		log.info("Manual stock refresh initiated");
+		log.info("Manual refresh initiated (items, customers, stock)");
 
-		// Refresh stock from server
-		// Note: refresh() now preserves reservations internally
-		await stockStore.refresh(null, shiftStore.profileWarehouse);
+		// Refresh items, customers, and stock in parallel
+		await Promise.all([
+			// Refresh items from server (force server fetch)
+			itemStore.loadAllItems(shiftStore.profileName, true),
+			// Refresh customers from server (force reload)
+			customerSearchStore.loadAllCustomers(shiftStore.profileName, true),
+			// Refresh stock from server (preserves reservations internally)
+			stockStore.refresh(null, shiftStore.profileWarehouse),
+		]);
 
 		// Refresh cache stats to update "Last Updated" timestamp
 		const stats = await offlineWorker.getCacheStats();
 		itemStore.cacheStats = stats;
 
-		log.success("Manual stock refresh completed");
+		log.success("Manual refresh completed (items, customers, stock)");
 	} catch (error) {
-		log.error("Manual stock refresh failed:", error);
+		log.error("Manual refresh failed:", error);
 	}
 }
 
@@ -2574,7 +2634,16 @@ function handleViewInvoice(invoice) {
 // Centralized print handler - uses printInvoice.js utilities
 async function handlePrintInvoice(invoiceData) {
 	try {
-		// If invoiceData is a full document with items, use printInvoice directly
+		// Silent print path — send directly to thermal printer via QZ Tray
+		if (posSettingsStore.silentPrint) {
+			const result = await printWithSilentFallback(invoiceData);
+			if (result.method === "browser") {
+				log.info("Used browser print fallback");
+			}
+			return;
+		}
+
+		// Standard browser print path
 		if (invoiceData.items && Array.isArray(invoiceData.items)) {
 			await printInvoice(invoiceData);
 		} else {

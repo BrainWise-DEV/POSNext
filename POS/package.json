@@ -1,7 +1,7 @@
 {
 	"name": "pos-next-frontend",
 	"private": true,
-	"version": "1.14.0",
+	"version": "1.15.0",
 	"type": "module",
 	"scripts": {
 		"dev": "vite",
@@ -17,12 +17,16 @@
 	},
 	"dependencies": {
 		"@abdulrysr/saudi-riyal-new-symbol-font": "^1.0.8",
+		"@babel/helper-compilation-targets": "^7.28.6",
 		"@pinia/testing": "^1.0.3",
 		"@vue/test-utils": "^2.4.6",
+		"browserslist": "^4.28.1",
+		"core-js-compat": "^3.48.0",
 		"dexie": "^4.2.0",
 		"feather-icons": "^4.29.2",
 		"frappe-ui": "^0.1.240",
-		"pinia": "^3.0.3",
+		"pinia": "^3.0.4",
+		"qz-tray": "^2.2.5",
 		"socket.io-client": "^4.7.2",
 		"vue": "3.5.13",
 		"vue-router": "^4.5.0"
@@ -32,8 +36,8 @@
 		"@iconify-json/lucide": "^1.2.79",
 		"@vitejs/plugin-vue": "^5.1.4",
 		"@vitest/coverage-v8": "^2.1.8",
-		"autoprefixer": "^10.4.2",
-		"baseline-browser-mapping": "^2.9.14",
+		"autoprefixer": "^10.4.24",
+		"baseline-browser-mapping": "^2.9.19",
 		"jsdom": "^25.0.1",
 		"postcss": "^8.4.5",
 		"tailwindcss": "^3.4.15",
@@ -43,5 +47,8 @@
 		"vitest": "^2.1.9",
 		"workbox-build": "^7.3.0",
 		"workbox-window": "^7.3.0"
+	},
+	"resolutions": {
+		"baseline-browser-mapping": "^2.9.19"
 	}
 }

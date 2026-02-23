@@ -2,6 +2,7 @@ import { call } from "@/utils/apiWrapper"
 import { isOffline } from "@/utils/offline"
 import { offlineWorker } from "@/utils/offline/workerClient"
 import { logger } from "@/utils/logger"
+import { useRealtimeCustomers } from "@/composables/useRealtimeCustomers"
 import { defineStore } from "pinia"
 import { computed, ref } from "vue"
 
@@ -19,6 +20,10 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 	// Performance optimization: Pre-computed search indices
 	const searchIndex = ref(new Map())
 	const resultCache = ref(new Map())
+
+	// Sync state
+	const CUSTOMERS_SYNC_KEY = "pos_customers_last_sync"
+	let serverDataFresh = false
 
 	// Ultra-fast search helper - optimized for speed
 	function quickMatch(search, customer) {
@@ -197,14 +202,14 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 			return
 		}
 
-		// Skip if already loaded (unless forceReload)
-		if (!forceReload && allCustomers.value.length > 0) {
+		// Skip if we already have fresh server data this session
+		if (!forceReload && serverDataFresh && allCustomers.value.length > 0) {
 			return
 		}
 
 		loading.value = true
 		try {
-			// Try to get from worker cache first
+			// Step 1: Load from IndexedDB cache (instant display)
 			const cachedCustomers = await offlineWorker.searchCachedCustomers(
 				"",
 				0,
@@ -213,23 +218,51 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 			if (cachedCustomers && cachedCustomers.length > 0) {
 				allCustomers.value = cachedCustomers
 				log.debug(`Loaded ${cachedCustomers.length} customers from cache`)
-			} else if (!isOffline()) {
-				// Fetch from server if cache is empty and online
+			}
+
+			// Step 2: If online, fetch delta from server
+			if (!isOffline()) {
+				const lastSync = forceReload ? null : localStorage.getItem(CUSTOMERS_SYNC_KEY)
+
 				const response = await call("pos_next.api.customers.get_customers", {
 					pos_profile: posProfile,
 					search_term: "",
 					start: 0,
 					limit: 0,
+					modified_since: lastSync,
 				})
-				const list = response?.message || response || []
-				allCustomers.value = list
+				const delta = response?.message || response || []
 
-				// Cache for future use
-				if (list.length) {
-					await offlineWorker.cacheCustomers(list)
+				if (delta.length > 0) {
+					const active = delta.filter((c) => !c.disabled)
+					const disabled = delta.filter((c) => c.disabled)
+
+					// Merge active customers into memory
+					const existingMap = new Map(allCustomers.value.map((c) => [c.name, c]))
+					for (const c of active) {
+						existingMap.set(c.name, c)
+					}
+					// Remove disabled customers from memory
+					for (const c of disabled) {
+						existingMap.delete(c.name)
+					}
+					allCustomers.value = Array.from(existingMap.values())
+
+					// Persist active to IndexedDB
+					if (active.length) {
+						await offlineWorker.cacheCustomers(active)
+					}
+					// Remove disabled from IndexedDB
+					if (disabled.length) {
+						await offlineWorker.deleteCustomers(disabled.map((c) => c.name))
+					}
+
+					log.debug(`Synced ${active.length} active, removed ${disabled.length} disabled customers`)
 				}
-				log.debug(`Loaded ${list.length} customers from server`)
-			} else {
+
+				serverDataFresh = true
+				localStorage.setItem(CUSTOMERS_SYNC_KEY, new Date().toISOString())
+			} else if (allCustomers.value.length === 0) {
 				// Offline and cache is empty
 				log.warn("Offline mode: No cached customers available")
 				allCustomers.value = []
@@ -240,7 +273,9 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 			resultCache.value.clear()
 		} catch (error) {
 			log.error("Error loading customers:", error)
-			allCustomers.value = []
+			if (allCustomers.value.length === 0) {
+				allCustomers.value = []
+			}
 		} finally {
 			loading.value = false
 		}
@@ -266,6 +301,36 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 			log.error("Error caching newly created customer:", error)
 		}
 	}
+
+	// Real-time Push Integration
+	const { onCustomerUpdate } = useRealtimeCustomers()
+	onCustomerUpdate(async (data) => {
+		const { name, action, customer_name, mobile_no, email_id, disabled } = data
+		console.log("Customer update via real-time:", data)
+		if (action === "delete" || disabled) {
+			// Remove from memory
+			allCustomers.value = allCustomers.value.filter((c) => c.name !== name)
+
+			// Remove from IndexedDB
+			await offlineWorker.deleteCustomers([name])
+
+			// Clear search caches
+			searchIndex.value.clear()
+			resultCache.value.clear()
+
+			log.info(`Customer removed/disabled via real-time: ${name}`)
+		} else {
+			// Upsert (Create or Update)
+			const customer = {
+				name,
+				customer_name,
+				mobile_no,
+				email_id,
+				disabled: !!disabled,
+			}
+			await addCustomerToCache(customer)
+		}
+	})
 
 	function setSearchTerm(term) {
 		searchTerm.value = term

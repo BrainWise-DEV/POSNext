@@ -92,6 +92,7 @@ jobs:
           bench get-app erpnext --branch version-15
           bench get-app pos_next $GITHUB_WORKSPACE
           bench setup requirements --dev
+          uv pip install 'setuptools>=71,<82' --python env/bin/python
           bench new-site --db-root-password root --admin-password admin test_site
           bench --site test_site install-app erpnext
           bench --site test_site install-app pos_next
