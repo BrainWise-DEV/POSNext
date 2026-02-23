@@ -65,10 +65,11 @@ export const searchCachedItems = async (searchTerm, limit = 50) => {
 		// Filter and score items
 		const results = allItems
 			.map((item) => {
-				const searchable = `${item.item_code || ""} ${item.item_name || ""} ${item.description || ""}`.toLowerCase();
+				const searchable =
+					`${item.item_code || ""} ${item.item_name || ""} ${item.description || ""}`.toLowerCase();
 
 				// Word-order independent: all words must appear somewhere
-				if (!searchWords.every(word => searchable.includes(word))) return null;
+				if (!searchWords.every((word) => searchable.includes(word))) return null;
 
 				// Score: prefer exact and prefix matches
 				let score = 0;
@@ -109,10 +110,7 @@ export const getCachedVariants = async (templateItemCode) => {
 		if (!templateItemCode) return [];
 
 		// Query items where variant_of equals the template item code
-		const variants = await db.items
-			.where("variant_of")
-			.equals(templateItemCode)
-			.toArray();
+		const variants = await db.items.where("variant_of").equals(templateItemCode).toArray();
 
 		return variants;
 	} catch (error) {
@@ -164,7 +162,9 @@ export const updateItemBatchSerialData = async (batchSerialDataMap) => {
 		});
 
 		await Promise.all(updates);
-		console.log(`Updated batch/serial data for ${Object.keys(batchSerialDataMap).length} items`);
+		console.log(
+			`Updated batch/serial data for ${Object.keys(batchSerialDataMap).length} items`,
+		);
 		return true;
 	} catch (error) {
 		console.error("Error updating batch/serial data:", error);
@@ -214,26 +214,24 @@ export const cacheCustomers = async (customers) => {
 
 // Search cached customers
 export const searchCachedCustomers = async (searchTerm, limit = 20) => {
-        try {
-                if (!searchTerm) {
-                        return limit > 0
-                                ? await db.customers.limit(limit).toArray()
-                                : await db.customers.toArray();
-                }
+	try {
+		if (!searchTerm) {
+			return limit > 0
+				? await db.customers.limit(limit).toArray()
+				: await db.customers.toArray();
+		}
 
 		const term = searchTerm.toLowerCase();
 
-                const query = db.customers
-                        .where("customer_name")
-                        .startsWithIgnoreCase(term)
-                        .or("mobile_no")
-                        .startsWithIgnoreCase(term)
-                        .or("email_id")
-                        .startsWithIgnoreCase(term);
+		const query = db.customers
+			.where("customer_name")
+			.startsWithIgnoreCase(term)
+			.or("mobile_no")
+			.startsWithIgnoreCase(term)
+			.or("email_id")
+			.startsWithIgnoreCase(term);
 
-                const results = await (limit > 0
-                        ? query.limit(limit).toArray()
-                        : query.toArray());
+		const results = await (limit > 0 ? query.limit(limit).toArray() : query.toArray());
 
 		return results;
 	} catch (error) {

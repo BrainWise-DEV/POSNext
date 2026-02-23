@@ -9,8 +9,8 @@
  * @returns {string} Formatted amount with 2 decimal places
  */
 function formatCurrency(amount) {
-	if (amount === null || amount === undefined) return "0.00"
-	return Number.parseFloat(amount).toFixed(2)
+	if (amount === null || amount === undefined) return "0.00";
+	return Number.parseFloat(amount).toFixed(2);
 }
 
 /**
@@ -20,11 +20,11 @@ function formatCurrency(amount) {
  * @returns {string} Formatted quantity
  */
 function formatQuantity(quantity) {
-	if (quantity === null || quantity === undefined) return "0"
-	const num = Number.parseFloat(quantity)
-	if (isNaN(num)) return "0"
+	if (quantity === null || quantity === undefined) return "0";
+	const num = Number.parseFloat(quantity);
+	if (isNaN(num)) return "0";
 	// Round to 4 decimal places and remove trailing zeros
-	return num.toFixed(4).replace(/\.?0+$/, '')
+	return num.toFixed(4).replace(/\.?0+$/, "");
 }
 
 /**
@@ -33,8 +33,8 @@ function formatQuantity(quantity) {
  * @returns {string} Formatted date and time string
  */
 function formatDateTime(datetime) {
-	if (!datetime) return ""
-	return new Date(datetime).toLocaleString()
+	if (!datetime) return "";
+	return new Date(datetime).toLocaleString();
 }
 
 /**
@@ -44,22 +44,22 @@ function formatDateTime(datetime) {
  * @returns {string} Formatted time string (HH:MM)
  */
 function formatTime(time) {
-	if (!time) return ""
+	if (!time) return "";
 
 	// If it's a time string (contains colon), extract HH:MM
-	if (typeof time === 'string' && time.includes(':')) {
-		const parts = time.split(":")
+	if (typeof time === "string" && time.includes(":")) {
+		const parts = time.split(":");
 		if (parts.length >= 2) {
-			return `${parts[0]}:${parts[1]}`
+			return `${parts[0]}:${parts[1]}`;
 		}
-		return time
+		return time;
 	}
 
 	// If it's a Date object or datetime string, convert and format
 	return new Date(time).toLocaleTimeString([], {
 		hour: "2-digit",
 		minute: "2-digit",
-	})
+	});
 }
 
 /**
@@ -68,12 +68,12 @@ function formatTime(time) {
  * @returns {string} Formatted date string
  */
 function formatDate(date) {
-	if (!date) return ""
-	return new Date(date).toLocaleDateString('en-GB', {
-		day: '2-digit',
-		month: '2-digit',
-		year: '2-digit'
-	})
+	if (!date) return "";
+	return new Date(date).toLocaleDateString("en-GB", {
+		day: "2-digit",
+		month: "2-digit",
+		year: "2-digit",
+	});
 }
 
 /**
@@ -83,8 +83,10 @@ function formatDate(date) {
  * @returns {string} Formatted percentage
  */
 function formatPercentage(value, decimals = 2) {
-	if (value === null || value === undefined) return "0%"
-	return `${Number.parseFloat(value).toFixed(decimals).replace(/\.?0+$/, '')}%`
+	if (value === null || value === undefined) return "0%";
+	return `${Number.parseFloat(value)
+		.toFixed(decimals)
+		.replace(/\.?0+$/, "")}%`;
 }
 
 /**
@@ -99,5 +101,5 @@ export function useFormatters() {
 		formatTime,
 		formatDate,
 		formatPercentage,
-	}
+	};
 }

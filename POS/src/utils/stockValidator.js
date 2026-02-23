@@ -3,7 +3,7 @@
  * Checks item stock availability before adding to cart
  */
 
-import { call } from "frappe-ui"
+import { call } from "frappe-ui";
 
 /**
  * Check if item has sufficient stock
@@ -14,19 +14,14 @@ import { call } from "frappe-ui"
  * @param {number} params.actualQty - Actual available quantity from item
  * @returns {Object} - { available: boolean, actualQty: number }
  */
-export function checkStockAvailability({
-	itemCode,
-	qty,
-	warehouse,
-	actualQty = null,
-}) {
+export function checkStockAvailability({ itemCode, qty, warehouse, actualQty = null }) {
 	// If actual quantity is provided (from item data), use it
 	if (actualQty !== null && actualQty !== undefined) {
-		const available = actualQty >= qty
+		const available = actualQty >= qty;
 		return {
 			available,
 			actualQty: actualQty,
-		}
+		};
 	}
 
 	// If no stock data available, allow the transaction
@@ -34,7 +29,7 @@ export function checkStockAvailability({
 	return {
 		available: true,
 		actualQty: qty,
-	}
+	};
 }
 
 /**
@@ -52,12 +47,12 @@ export async function getItemStock(itemCode, warehouse) {
 				warehouse: warehouse,
 			},
 			fieldname: "actual_qty",
-		})
+		});
 
-		return Number.parseFloat(result?.actual_qty || 0)
+		return Number.parseFloat(result?.actual_qty || 0);
 	} catch (error) {
-		console.warn("Failed to fetch stock:", error)
-		return 0
+		console.warn("Failed to fetch stock:", error);
+		return 0;
 	}
 }
 
@@ -70,14 +65,14 @@ export async function getItemStock(itemCode, warehouse) {
  * @returns {string} - Formatted error message
  */
 export function formatStockError(itemName, requested, available, warehouse) {
-	const unit = requested === 1 ? "unit" : "units"
-	const availableUnit = available === 1 ? "unit" : "units"
+	const unit = requested === 1 ? "unit" : "units";
+	const availableUnit = available === 1 ? "unit" : "units";
 
 	if (available === 0) {
-		return `"${itemName}" is out of stock in warehouse "${warehouse}".\n\nPlease check another warehouse or restock this item.`
+		return `"${itemName}" is out of stock in warehouse "${warehouse}".\n\nPlease check another warehouse or restock this item.`;
 	}
 
-	return `Not enough stock for "${itemName}".\n\nYou requested ${requested} ${unit}, but only ${available} ${availableUnit} available in "${warehouse}".\n\nPlease reduce the quantity or check another warehouse.`
+	return `Not enough stock for "${itemName}".\n\nYou requested ${requested} ${unit}, but only ${available} ${availableUnit} available in "${warehouse}".\n\nPlease reduce the quantity or check another warehouse.`;
 }
 
 /**
@@ -87,7 +82,7 @@ export function formatStockError(itemName, requested, available, warehouse) {
  * @returns {Promise<Object>} - { valid: boolean, errors: Array }
  */
 export async function validateCartStock(items, warehouse) {
-	const errors = []
+	const errors = [];
 
 	for (const item of items) {
 		const result = await checkStockAvailability({
@@ -95,7 +90,7 @@ export async function validateCartStock(items, warehouse) {
 			qty: item.quantity,
 			warehouse: item.warehouse || warehouse,
 			uom: item.uom,
-		})
+		});
 
 		if (!result.available) {
 			errors.push({
@@ -110,12 +105,12 @@ export async function validateCartStock(items, warehouse) {
 					result.actualQty,
 					item.warehouse || warehouse,
 				),
-			})
+			});
 		}
 	}
 
 	return {
 		valid: errors.length === 0,
 		errors,
-	}
+	};
 }

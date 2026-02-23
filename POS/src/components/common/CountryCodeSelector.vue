@@ -42,7 +42,12 @@
 				stroke="currentColor"
 				viewBox="0 0 24 24"
 			>
-				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+				<path
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					stroke-width="2"
+					d="M19 9l-7 7-7-7"
+				/>
 			</svg>
 		</button>
 
@@ -91,11 +96,16 @@
 				<!-- Countries List -->
 				<div class="overflow-y-auto max-h-64">
 					<div v-if="loading" class="flex items-center justify-center py-8">
-						<div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+						<div
+							class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"
+						></div>
 					</div>
 
-					<div v-else-if="filteredCountries.length === 0" class="px-4 py-8 text-center text-sm text-gray-500">
-						{{ __('No countries found') }}
+					<div
+						v-else-if="filteredCountries.length === 0"
+						class="px-4 py-8 text-center text-sm text-gray-500"
+					>
+						{{ __("No countries found") }}
 					</div>
 
 					<button
@@ -135,8 +145,8 @@
 </template>
 
 <script setup>
-import { useCountryCodes } from "@/composables/useCountryCodes"
-import { computed, onMounted, ref, watch, nextTick } from "vue"
+import { useCountryCodes } from "@/composables/useCountryCodes";
+import { computed, onMounted, ref, watch, nextTick } from "vue";
 
 const props = defineProps({
 	modelValue: {
@@ -151,9 +161,9 @@ const props = defineProps({
 		type: String,
 		default: "United States", // Default to US
 	},
-})
+});
 
-const emit = defineEmits(["update:modelValue", "country-change"])
+const emit = defineEmits(["update:modelValue", "country-change"]);
 
 const {
 	countries,
@@ -162,70 +172,70 @@ const {
 	findCountryByISD,
 	findCountryByName,
 	findCountryByCode,
-} = useCountryCodes()
+} = useCountryCodes();
 
-const isOpen = ref(false)
-const searchQuery = ref("")
-const selectedCountry = ref(null)
-const selectorRef = ref(null)
-const searchInputRef = ref(null)
-const dropdownPosition = ref("100%")
+const isOpen = ref(false);
+const searchQuery = ref("");
+const selectedCountry = ref(null);
+const selectorRef = ref(null);
+const searchInputRef = ref(null);
+const dropdownPosition = ref("100%");
 
 // Filter countries based on search
 const filteredCountries = computed(() => {
-	if (!searchQuery.value) return countries.value
+	if (!searchQuery.value) return countries.value;
 
-	const query = searchQuery.value.toLowerCase()
+	const query = searchQuery.value.toLowerCase();
 	return countries.value.filter(
 		(country) =>
 			country.name.toLowerCase().includes(query) ||
 			country.isd.includes(query) ||
-			country.code.toLowerCase().includes(query)
-	)
-})
+			country.code.toLowerCase().includes(query),
+	);
+});
 
 // Toggle dropdown
 function toggleDropdown() {
-	if (props.disabled) return
-	isOpen.value = !isOpen.value
+	if (props.disabled) return;
+	isOpen.value = !isOpen.value;
 	if (isOpen.value) {
 		nextTick(() => {
-			searchInputRef.value?.focus()
-		})
+			searchInputRef.value?.focus();
+		});
 	}
 }
 
 // Close dropdown
 function closeDropdown() {
-	isOpen.value = false
-	searchQuery.value = ""
+	isOpen.value = false;
+	searchQuery.value = "";
 }
 
 // Select country
 function selectCountry(country) {
-	selectedCountry.value = country
-	emit("update:modelValue", country.isd)
-	emit("country-change", country)
-	closeDropdown()
+	selectedCountry.value = country;
+	emit("update:modelValue", country.isd);
+	emit("country-change", country);
+	closeDropdown();
 }
 
 // Select first filtered country (when pressing Enter in search)
 function selectFirstFiltered() {
 	if (filteredCountries.value.length > 0) {
-		selectCountry(filteredCountries.value[0])
+		selectCountry(filteredCountries.value[0]);
 	}
 }
 
 // Handle flag image load error
 function handleImageError(event) {
 	// Hide broken image and show emoji fallback
-	event.target.style.display = "none"
+	event.target.style.display = "none";
 }
 
 // Close dropdown when clicking outside
 function handleClickOutside(event) {
 	if (selectorRef.value && !selectorRef.value.contains(event.target)) {
-		closeDropdown()
+		closeDropdown();
 	}
 }
 
@@ -234,44 +244,44 @@ watch(
 	() => props.modelValue,
 	(newValue) => {
 		if (newValue && newValue !== selectedCountry.value?.isd) {
-			const country = findCountryByISD(newValue)
+			const country = findCountryByISD(newValue);
 			if (country) {
-				selectedCountry.value = country
+				selectedCountry.value = country;
 			}
 		}
-	}
-)
+	},
+);
 
 // Initialize
 onMounted(async () => {
-	await loadCountries()
+	await loadCountries();
 
 	// Set initial country
 	if (props.modelValue) {
-		const country = findCountryByISD(props.modelValue)
+		const country = findCountryByISD(props.modelValue);
 		if (country) {
-			selectedCountry.value = country
+			selectedCountry.value = country;
 		}
 	} else if (props.defaultCountry) {
 		// Try to find default country by name or code
 		const country =
-			findCountryByName(props.defaultCountry) || findCountryByCode(props.defaultCountry)
+			findCountryByName(props.defaultCountry) || findCountryByCode(props.defaultCountry);
 		if (country) {
-			selectedCountry.value = country
-			emit("update:modelValue", country.isd)
-			emit("country-change", country)
+			selectedCountry.value = country;
+			emit("update:modelValue", country.isd);
+			emit("country-change", country);
 		}
 	}
 
 	// Add click outside listener
-	document.addEventListener("click", handleClickOutside)
-})
+	document.addEventListener("click", handleClickOutside);
+});
 
 // Cleanup
-import { onBeforeUnmount } from "vue"
+import { onBeforeUnmount } from "vue";
 onBeforeUnmount(() => {
-	document.removeEventListener("click", handleClickOutside)
-})
+	document.removeEventListener("click", handleClickOutside);
+});
 </script>
 
 <style scoped>

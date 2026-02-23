@@ -71,19 +71,38 @@
 					<!-- Two Cards Layout: Customer Card + Document Type Card -->
 					<div class="flex items-stretch gap-2">
 						<!-- Customer Card -->
-						<div class="flex-1 flex items-center gap-1.5 bg-white border border-gray-200 rounded-xl p-1.5 shadow-sm min-w-0">
+						<div
+							class="flex-1 flex items-center gap-1.5 bg-white border border-gray-200 rounded-xl p-1.5 shadow-sm min-w-0"
+						>
 							<!-- Customer Avatar & Info -->
 							<div class="flex items-center gap-2 min-w-0 flex-1 px-1.5 py-1">
-								<div class="w-8 h-8 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center flex-shrink-0">
-									<svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+								<div
+									class="w-8 h-8 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center flex-shrink-0"
+								>
+									<svg
+										class="w-4 h-4 text-white"
+										fill="none"
+										stroke="currentColor"
+										viewBox="0 0 24 24"
+									>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											stroke-width="2"
+											d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+										/>
 									</svg>
 								</div>
 								<div class="min-w-0 flex-1">
-									<p class="text-xs font-semibold text-gray-900 truncate leading-tight">
+									<p
+										class="text-xs font-semibold text-gray-900 truncate leading-tight"
+									>
 										{{ customer.customer_name || customer.name }}
 									</p>
-									<p v-if="customer.mobile_no" class="text-[10px] text-gray-500 truncate leading-tight">
+									<p
+										v-if="customer.mobile_no"
+										class="text-[10px] text-gray-500 truncate leading-tight"
+									>
 										{{ customer.mobile_no }}
 									</p>
 								</div>
@@ -97,8 +116,18 @@
 									class="w-7 h-7 flex items-center justify-center text-blue-500 hover:bg-blue-50 active:bg-blue-100 rounded-lg transition-colors touch-manipulation"
 									:title="__('Edit customer details')"
 								>
-									<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
-										<path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+									<svg
+										class="w-4 h-4"
+										fill="none"
+										stroke="currentColor"
+										viewBox="0 0 24 24"
+										stroke-width="2"
+									>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+										/>
 									</svg>
 								</button>
 								<button
@@ -107,8 +136,18 @@
 									class="w-7 h-7 flex items-center justify-center text-green-600 hover:bg-green-50 active:bg-green-100 rounded-lg transition-colors touch-manipulation"
 									:title="__('Create new customer')"
 								>
-									<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5">
-										<path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+									<svg
+										class="w-4 h-4"
+										fill="none"
+										stroke="currentColor"
+										viewBox="0 0 24 24"
+										stroke-width="2.5"
+									>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											d="M12 4v16m8-8H4"
+										/>
 									</svg>
 								</button>
 								<button
@@ -117,8 +156,18 @@
 									class="w-7 h-7 flex items-center justify-center text-red-500 hover:bg-red-50 active:bg-red-100 rounded-lg transition-colors touch-manipulation"
 									:title="__('Remove customer')"
 								>
-									<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5">
-										<path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+									<svg
+										class="w-4 h-4"
+										fill="none"
+										stroke="currentColor"
+										viewBox="0 0 24 24"
+										stroke-width="2.5"
+									>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											d="M6 18L18 6M6 6l12 12"
+										/>
 									</svg>
 								</button>
 							</div>
@@ -134,13 +183,25 @@
 									type="button"
 									@click="selectDocType('Sales Invoice')"
 									class="px-2.5 py-1.5 text-[11px] font-semibold rounded-md transition-all duration-200 flex items-center gap-1"
-									:class="cartStore.targetDoctype === 'Sales Invoice'
-										? 'bg-white text-blue-600 shadow-sm'
-										: 'text-gray-500 hover:text-gray-700'"
+									:class="
+										cartStore.targetDoctype === 'Sales Invoice'
+											? 'bg-white text-blue-600 shadow-sm'
+											: 'text-gray-500 hover:text-gray-700'
+									"
 									:title="__('Sales Invoice')"
 								>
-									<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+									<svg
+										class="w-3.5 h-3.5"
+										fill="none"
+										stroke="currentColor"
+										viewBox="0 0 24 24"
+									>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											stroke-width="2"
+											d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+										/>
 									</svg>
 									<span>{{ __("Invoice") }}</span>
 								</button>
@@ -148,13 +209,25 @@
 									type="button"
 									@click="selectDocType('Sales Order')"
 									class="px-2.5 py-1.5 text-[11px] font-semibold rounded-md transition-all duration-200 flex items-center gap-1"
-									:class="cartStore.targetDoctype === 'Sales Order'
-										? 'bg-white text-orange-600 shadow-sm'
-										: 'text-gray-500 hover:text-gray-700'"
+									:class="
+										cartStore.targetDoctype === 'Sales Order'
+											? 'bg-white text-orange-600 shadow-sm'
+											: 'text-gray-500 hover:text-gray-700'
+									"
 									:title="__('Sales Order')"
 								>
-									<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+									<svg
+										class="w-3.5 h-3.5"
+										fill="none"
+										stroke="currentColor"
+										viewBox="0 0 24 24"
+									>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											stroke-width="2"
+											d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"
+										/>
 									</svg>
 									<span>{{ __("Order") }}</span>
 								</button>
@@ -240,13 +313,25 @@
 								type="button"
 								@click="selectDocType('Sales Invoice')"
 								class="h-full px-2.5 text-xs font-semibold rounded-lg transition-all duration-200 flex items-center gap-1.5"
-								:class="cartStore.targetDoctype === 'Sales Invoice'
-									? 'bg-white text-blue-600 shadow-sm'
-									: 'text-gray-500 hover:text-gray-700'"
+								:class="
+									cartStore.targetDoctype === 'Sales Invoice'
+										? 'bg-white text-blue-600 shadow-sm'
+										: 'text-gray-500 hover:text-gray-700'
+								"
 								:title="__('Sales Invoice')"
 							>
-								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+								<svg
+									class="w-4 h-4"
+									fill="none"
+									stroke="currentColor"
+									viewBox="0 0 24 24"
+								>
+									<path
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										stroke-width="2"
+										d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+									/>
 								</svg>
 								<span class="hidden sm:inline">{{ __("Invoice") }}</span>
 							</button>
@@ -254,13 +339,25 @@
 								type="button"
 								@click="selectDocType('Sales Order')"
 								class="h-full px-2.5 text-xs font-semibold rounded-lg transition-all duration-200 flex items-center gap-1.5"
-								:class="cartStore.targetDoctype === 'Sales Order'
-									? 'bg-white text-orange-600 shadow-sm'
-									: 'text-gray-500 hover:text-gray-700'"
+								:class="
+									cartStore.targetDoctype === 'Sales Order'
+										? 'bg-white text-orange-600 shadow-sm'
+										: 'text-gray-500 hover:text-gray-700'
+								"
 								:title="__('Sales Order')"
 							>
-								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+								<svg
+									class="w-4 h-4"
+									fill="none"
+									stroke="currentColor"
+									viewBox="0 0 24 24"
+								>
+									<path
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										stroke-width="2"
+										d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"
+									/>
 								</svg>
 								<span class="hidden sm:inline">{{ __("Order") }}</span>
 							</button>
@@ -275,16 +372,25 @@
 				>
 					<!-- Frequent Customers Header (when showing suggestions) -->
 					<div
-						v-if="customerSearchFocused && customerSearch.trim().length < 2 && customerResults.length > 0"
+						v-if="
+							customerSearchFocused &&
+							customerSearch.trim().length < 2 &&
+							customerResults.length > 0
+						"
 						class="px-2 py-1 bg-gray-50 border-b border-gray-200"
 					>
-						<span class="text-[10px] font-medium text-gray-500 uppercase tracking-wide">
-							{{ __('Frequent Customers') }}
+						<span
+							class="text-[10px] font-medium text-gray-500 uppercase tracking-wide"
+						>
+							{{ __("Frequent Customers") }}
 						</span>
 					</div>
 
 					<!-- Customer Results -->
-					<div v-if="customerResults.length > 0" class="max-h-48 overflow-y-auto overscroll-contain">
+					<div
+						v-if="customerResults.length > 0"
+						class="max-h-48 overflow-y-auto overscroll-contain"
+					>
 						<button
 							type="button"
 							v-for="(cust, index) in customerResults"
@@ -292,7 +398,9 @@
 							@mousedown.prevent="selectCustomer(cust)"
 							:class="[
 								'w-full text-start px-2 py-1.5 flex items-center gap-1.5 border-b border-gray-100 last:border-0 touch-manipulation select-none cursor-pointer active:bg-blue-200',
-								index === selectedIndex ? 'bg-blue-100' : 'hover:bg-blue-50 active:bg-blue-100',
+								index === selectedIndex
+									? 'bg-blue-100'
+									: 'hover:bg-blue-50 active:bg-blue-100',
 							]"
 						>
 							<div
@@ -369,8 +477,18 @@
 						type="button"
 						:title="__('Clear all items')"
 					>
-						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
-							<path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V5a2 2 0 00-2-2h-2a2 2 0 00-2 2v2M4 7h16"/>
+						<svg
+							class="w-4 h-4"
+							fill="none"
+							stroke="currentColor"
+							viewBox="0 0 24 24"
+							stroke-width="2"
+						>
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V5a2 2 0 00-2-2h-2a2 2 0 00-2 2v2M4 7h16"
+							/>
 						</svg>
 						<span>{{ __("Clear") }}</span>
 					</button>
@@ -382,18 +500,30 @@
 								'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors touch-manipulation',
 								cartSortBy
 									? 'text-blue-600 hover:bg-blue-50'
-									: 'text-gray-600 hover:bg-gray-50'
+									: 'text-gray-600 hover:bg-gray-50',
 							]"
-							:title="cartSortBy
-								? (cartSortOrder === 'asc'
-									? __('Sorted by {0} A-Z', [getCartSortLabel()])
-									: __('Sorted by {0} Z-A', [getCartSortLabel()]))
-								: __('Sort cart items')"
+							:title="
+								cartSortBy
+									? cartSortOrder === 'asc'
+										? __('Sorted by {0} A-Z', [getCartSortLabel()])
+										: __('Sorted by {0} Z-A', [getCartSortLabel()])
+									: __('Sort cart items')
+							"
 							:aria-label="__('Sort cart items')"
 							type="button"
 						>
-							<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
-								<path stroke-linecap="round" stroke-linejoin="round" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/>
+							<svg
+								class="w-4 h-4"
+								fill="none"
+								stroke="currentColor"
+								viewBox="0 0 24 24"
+								stroke-width="2"
+							>
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"
+								/>
 							</svg>
 							<span>{{ __("Sort") }}</span>
 						</button>
@@ -405,8 +535,10 @@
 							class="absolute end-0 mt-1 w-52 bg-white rounded-lg shadow-xl border border-gray-200 z-[9999]"
 						>
 							<div class="py-2">
-								<div class="px-3 py-2 text-xs font-semibold text-gray-500 uppercase border-b border-gray-100">
-									{{ __('Sort Cart') }}
+								<div
+									class="px-3 py-2 text-xs font-semibold text-gray-500 uppercase border-b border-gray-100"
+								>
+									{{ __("Sort Cart") }}
 								</div>
 								<div class="py-1">
 									<!-- No Sorting (clear) -->
@@ -414,15 +546,27 @@
 										@click="handleCartSortToggle(null)"
 										:class="[
 											'w-full px-3 py-2 text-sm transition-colors flex items-center justify-between group',
-											!cartSortBy ? 'bg-blue-50 text-blue-700' : 'text-gray-700 hover:bg-gray-50'
+											!cartSortBy
+												? 'bg-blue-50 text-blue-700'
+												: 'text-gray-700 hover:bg-gray-50',
 										]"
 										type="button"
 									>
 										<span class="flex items-center gap-2.5">
-											<svg class="w-4 h-4 text-gray-400 group-hover:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+											<svg
+												class="w-4 h-4 text-gray-400 group-hover:text-gray-600"
+												fill="none"
+												stroke="currentColor"
+												viewBox="0 0 24 24"
+											>
+												<path
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													stroke-width="2"
+													d="M6 18L18 6M6 6l12 12"
+												/>
 											</svg>
-											<span>{{ __('No Sorting') }}</span>
+											<span>{{ __("No Sorting") }}</span>
 										</span>
 									</button>
 
@@ -435,25 +579,50 @@
 										@click="handleCartSortToggle(option.field)"
 										:class="[
 											'w-full px-3 py-2 text-sm transition-colors flex items-center justify-between group',
-											cartSortBy === option.field ? 'bg-blue-50 text-blue-700' : 'text-gray-700 hover:bg-gray-50'
+											cartSortBy === option.field
+												? 'bg-blue-50 text-blue-700'
+												: 'text-gray-700 hover:bg-gray-50',
 										]"
 										type="button"
 									>
 										<span class="flex items-center gap-2.5">
-											<svg class="w-4 h-4 text-gray-400 group-hover:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="option.icon"/>
+											<svg
+												class="w-4 h-4 text-gray-400 group-hover:text-gray-600"
+												fill="none"
+												stroke="currentColor"
+												viewBox="0 0 24 24"
+											>
+												<path
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													stroke-width="2"
+													:d="option.icon"
+												/>
 											</svg>
 											<span>{{ option.label }}</span>
 										</span>
 										<!-- Sort direction icon -->
 										<svg
 											class="w-5 h-5"
-											:class="cartSortBy === option.field ? 'text-blue-600' : 'text-gray-300'"
+											:class="
+												cartSortBy === option.field
+													? 'text-blue-600'
+													: 'text-gray-300'
+											"
 											fill="none"
 											stroke="currentColor"
 											viewBox="0 0 24 24"
 										>
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="CART_SORT_ICONS[getCartSortIconState(option.field)]"/>
+											<path
+												stroke-linecap="round"
+												stroke-linejoin="round"
+												stroke-width="2"
+												:d="
+													CART_SORT_ICONS[
+														getCartSortIconState(option.field)
+													]
+												"
+											/>
 										</svg>
 									</button>
 								</div>
@@ -743,13 +912,18 @@
 			<div v-else class="flex flex-col gap-0.5 sm:gap-1">
 				<div
 					v-for="(item, index) in sortedItems"
-					:key="item.item_code + '-' + (item.uom || '') + (item.is_free_item ? '-free' : '')"
+					:key="
+						item.item_code +
+						'-' +
+						(item.uom || '') +
+						(item.is_free_item ? '-free' : '')
+					"
 					@click="item.is_free_item ? null : openEditDialog(item)"
 					:class="[
 						'border rounded-md p-1.5 sm:p-2 transition-all duration-200',
 						item.is_free_item
 							? 'bg-green-50 border-green-300 cursor-default'
-							: 'bg-white border-gray-200 hover:border-blue-300 hover:shadow-md active:scale-[0.99] cursor-pointer group'
+							: 'bg-white border-gray-200 hover:border-blue-300 hover:shadow-md active:scale-[0.99] cursor-pointer group',
 					]"
 				>
 					<div class="flex gap-1.5 sm:gap-2">
@@ -797,7 +971,11 @@
 									<span
 										v-if="item.free_qty && item.free_qty > 0"
 										class="inline-flex items-center px-1.5 py-0.5 bg-green-600 text-white rounded-full text-[9px] font-bold flex-shrink-0"
-										:title="item.is_free_item ? __('Free item') : __('{0} free item(s) included', [item.free_qty])"
+										:title="
+											item.is_free_item
+												? __('Free item')
+												: __('{0} free item(s) included', [item.free_qty])
+										"
 									>
 										<svg
 											class="w-2.5 h-2.5 me-0.5"
@@ -810,7 +988,11 @@
 												clip-rule="evenodd"
 											/>
 										</svg>
-										{{ item.is_free_item ? __("FREE") : __("+{0} FREE", [item.free_qty]) }}
+										{{
+											item.is_free_item
+												? __("FREE")
+												: __("+{0} FREE", [item.free_qty])
+										}}
 									</span>
 									<!-- Discount Badge -->
 									<div
@@ -868,7 +1050,10 @@
 										v-if="item.is_free_item"
 										class="flex items-center bg-green-100 border border-green-300 rounded px-2 h-6 sm:h-7"
 									>
-										<span class="text-xs sm:text-sm font-bold text-green-700">{{ item.quantity }}</span>
+										<span
+											class="text-xs sm:text-sm font-bold text-green-700"
+											>{{ item.quantity }}</span
+										>
 									</div>
 									<!-- For serial items, show serial badge with edit button -->
 									<div
@@ -904,7 +1089,9 @@
 										v-else
 										:class="[
 											'flex items-center bg-gray-50 border rounded overflow-hidden',
-											item.is_resolved_barcode ? 'border-amber-300 bg-amber-50' : 'border-gray-200'
+											item.is_resolved_barcode
+												? 'border-amber-300 bg-amber-50'
+												: 'border-gray-200',
 										]"
 									>
 										<button
@@ -915,10 +1102,14 @@
 												'w-6 h-6 sm:w-7 sm:h-7 flex items-center justify-center font-bold transition-colors touch-manipulation border-e',
 												item.is_resolved_barcode
 													? 'bg-gray-100 text-gray-400 cursor-not-allowed border-amber-300'
-													: 'bg-white hover:bg-gray-100 active:bg-gray-200 text-gray-700 border-gray-200'
+													: 'bg-white hover:bg-gray-100 active:bg-gray-200 text-gray-700 border-gray-200',
 											]"
 											:aria-label="__('Decrease quantity')"
-											:title="item.is_resolved_barcode ? __('Quantity locked (barcode item)') : __('Decrease quantity')"
+											:title="
+												item.is_resolved_barcode
+													? __('Quantity locked (barcode item)')
+													: __('Decrease quantity')
+											"
 										>
 											<svg
 												class="w-3 h-3"
@@ -947,10 +1138,14 @@
 												'w-16 sm:w-20 h-6 sm:h-7 text-center border-0 text-xs sm:text-sm font-bold focus:outline-none',
 												item.is_resolved_barcode
 													? 'bg-amber-50 text-amber-700 cursor-not-allowed'
-													: 'bg-white text-gray-900 focus:ring-2 focus:ring-blue-500'
+													: 'bg-white text-gray-900 focus:ring-2 focus:ring-blue-500',
 											]"
 											:aria-label="__('Quantity')"
-											:title="item.is_resolved_barcode ? __('Quantity locked (barcode item)') : ''"
+											:title="
+												item.is_resolved_barcode
+													? __('Quantity locked (barcode item)')
+													: ''
+											"
 										/>
 										<button
 											type="button"
@@ -960,10 +1155,14 @@
 												'w-6 h-6 sm:w-7 sm:h-7 flex items-center justify-center font-bold transition-colors touch-manipulation border-s',
 												item.is_resolved_barcode
 													? 'bg-gray-100 text-gray-400 cursor-not-allowed border-amber-300'
-													: 'bg-white hover:bg-gray-100 active:bg-gray-200 text-gray-700 border-gray-200'
+													: 'bg-white hover:bg-gray-100 active:bg-gray-200 text-gray-700 border-gray-200',
 											]"
 											:aria-label="__('Increase quantity')"
-											:title="item.is_resolved_barcode ? __('Quantity locked (barcode item)') : __('Increase quantity')"
+											:title="
+												item.is_resolved_barcode
+													? __('Quantity locked (barcode item)')
+													: __('Increase quantity')
+											"
 										>
 											<svg
 												class="w-3 h-3"
@@ -987,7 +1186,9 @@
 											type="button"
 											@click="toggleUomDropdown(item.item_code, item.uom)"
 											:disabled="
-												item.is_resolved_barcode || !item.item_uoms || item.item_uoms.length === 0
+												item.is_resolved_barcode ||
+												!item.item_uoms ||
+												item.item_uoms.length === 0
 											"
 											:class="[
 												'h-6 sm:h-7 text-[10px] sm:text-xs font-bold rounded ps-2 pe-5 transition-all touch-manipulation flex items-center justify-center min-w-[45px]',
@@ -1085,7 +1286,7 @@
 									>
 										{{
 											formatCurrency(
-												item.amount || item.rate * item.quantity
+												item.amount || item.rate * item.quantity,
 											)
 										}}
 									</div>
@@ -1243,7 +1444,6 @@
 			:currency="currency"
 			@update-item="handleUpdateItem"
 		/>
-
 	</div>
 </template>
 
@@ -1368,10 +1568,16 @@ const emit = defineEmits([
 
 // Cart sort composable (must be after defineProps)
 const {
-	cartSortBy, cartSortOrder, showCartSortDropdown,
+	cartSortBy,
+	cartSortOrder,
+	showCartSortDropdown,
 	sortedItems,
-	CART_SORT_OPTIONS, CART_SORT_ICONS,
-	toggleCartSortDropdown, handleCartSortToggle, getCartSortLabel, getCartSortIconState,
+	CART_SORT_OPTIONS,
+	CART_SORT_ICONS,
+	toggleCartSortDropdown,
+	handleCartSortToggle,
+	getCartSortLabel,
+	getCartSortIconState,
 } = useCartSort(() => props.items);
 
 /**
@@ -1463,7 +1669,7 @@ watch(
 		} else {
 			availableGiftCards.value = [];
 		}
-	}
+	},
 );
 
 /**
@@ -1555,7 +1761,7 @@ const totalQuantity = computed(() => {
 	return props.items.reduce((sum, item) => {
 		const qty = item.quantity || 0;
 		// For dedicated free item rows, quantity IS the free qty — don't double-count
-		const freeQty = item.is_free_item ? 0 : (item.free_qty || 0);
+		const freeQty = item.is_free_item ? 0 : item.free_qty || 0;
 		return sum + qty + freeQty;
 	}, 0);
 });
@@ -1841,7 +2047,7 @@ function decrementQuantity(item) {
  * @param {Object} item - Cart item to update
  * @param {String} value - New quantity value from input
  */
-  
+
 function updateQuantity(item, value) {
 	// Prevent editing resolved barcode items
 	if (item.is_resolved_barcode) return;

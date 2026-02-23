@@ -16,31 +16,31 @@ let settings = {
 	float: 3,
 	rounding_method: "Banker's Rounding",
 	number_format: "#,###.##",
-}
+};
 
 /** Initialize settings from bootstrap data */
 export function initPrecision(data) {
-	if (!data) return
+	if (!data) return;
 	settings = {
 		currency: data.currency ?? 2,
 		float: data.float ?? 3,
 		rounding_method: data.rounding_method || "Banker's Rounding",
 		number_format: data.number_format || "#,###.##",
-	}
-	_formatterCache.clear()
+	};
+	_formatterCache.clear();
 }
 
 /** Get current settings */
 export function getPrecision() {
-	return { ...settings }
+	return { ...settings };
 }
 
 // =============================================================================
 // Currency Symbols
 // =============================================================================
 
-export const DEFAULT_CURRENCY = "USD"
-export const DEFAULT_LOCALE = "en-US"
+export const DEFAULT_CURRENCY = "USD";
+export const DEFAULT_LOCALE = "en-US";
 
 const SYMBOLS = {
 	USD: "$",
@@ -52,40 +52,40 @@ const SYMBOLS = {
 	EGP: "E£",
 	SAR: "\u00EA",
 	AED: "د.إ",
-}
+};
 
-const _symbolCache = new Map()
+const _symbolCache = new Map();
 
 function getSymbol(currency) {
-	if (!currency) return SYMBOLS[DEFAULT_CURRENCY]
-	if (SYMBOLS[currency]) return SYMBOLS[currency]
-	if (_symbolCache.has(currency)) return _symbolCache.get(currency)
+	if (!currency) return SYMBOLS[DEFAULT_CURRENCY];
+	if (SYMBOLS[currency]) return SYMBOLS[currency];
+	if (_symbolCache.has(currency)) return _symbolCache.get(currency);
 
 	try {
 		const parts = new Intl.NumberFormat(DEFAULT_LOCALE, {
 			style: "currency",
 			currency,
 			currencyDisplay: "narrowSymbol",
-		}).formatToParts(0)
-		const symbol = parts.find((p) => p.type === "currency")?.value || currency
-		_symbolCache.set(currency, symbol)
-		return symbol
+		}).formatToParts(0);
+		const symbol = parts.find((p) => p.type === "currency")?.value || currency;
+		_symbolCache.set(currency, symbol);
+		return symbol;
 	} catch {
-		_symbolCache.set(currency, currency)
-		return currency
+		_symbolCache.set(currency, currency);
+		return currency;
 	}
 }
 
-export { getSymbol as getCurrencySymbol }
+export { getSymbol as getCurrencySymbol };
 
 // =============================================================================
 // Number Formatting
 // =============================================================================
 
-const _formatterCache = new Map()
+const _formatterCache = new Map();
 
 function getFormatter(precision, locale = DEFAULT_LOCALE) {
-	const key = `${locale}:${precision}`
+	const key = `${locale}:${precision}`;
 	if (!_formatterCache.has(key)) {
 		_formatterCache.set(
 			key,
@@ -93,28 +93,28 @@ function getFormatter(precision, locale = DEFAULT_LOCALE) {
 				minimumFractionDigits: precision,
 				maximumFractionDigits: precision,
 			}),
-		)
+		);
 	}
-	return _formatterCache.get(key)
+	return _formatterCache.get(key);
 }
 
 /** Format value as currency string with symbol */
 export function formatCurrency(value, currency = DEFAULT_CURRENCY, locale = DEFAULT_LOCALE) {
-	if (typeof value !== "number" || Number.isNaN(value)) return ""
-	const abs = Math.abs(value)
-	const formatted = `${getSymbol(currency)} ${getFormatter(settings.currency, locale).format(abs)}`
-	return value < 0 ? `-${formatted}` : formatted
+	if (typeof value !== "number" || Number.isNaN(value)) return "";
+	const abs = Math.abs(value);
+	const formatted = `${getSymbol(currency)} ${getFormatter(settings.currency, locale).format(abs)}`;
+	return value < 0 ? `-${formatted}` : formatted;
 }
 
 /** Format value as number string (no symbol) */
 export function formatCurrencyNumber(value, locale = DEFAULT_LOCALE) {
-	if (typeof value !== "number" || Number.isNaN(value)) return "0.00"
-	return getFormatter(settings.currency, locale).format(value)
+	if (typeof value !== "number" || Number.isNaN(value)) return "0.00";
+	return getFormatter(settings.currency, locale).format(value);
 }
 
 /** Get CSS class for positive/negative values */
 export function getCurrencyClass(value) {
-	return value < 0 ? "text-red-600" : "text-gray-900"
+	return value < 0 ? "text-red-600" : "text-gray-900";
 }
 
 // =============================================================================
@@ -126,26 +126,26 @@ export function getCurrencyClass(value) {
  * Matches frappe _bankers_rounding()
  */
 function bankersRound(num, precision) {
-	const multiplier = 10 ** precision
+	const multiplier = 10 ** precision;
 	// Round to 12 decimal places first to handle floating point errors
-	let shifted = Number((num * multiplier).toFixed(12))
+	let shifted = Number((num * multiplier).toFixed(12));
 
-	if (shifted === 0) return 0
+	if (shifted === 0) return 0;
 
-	const floor = Math.floor(shifted)
-	const decimal = shifted - floor
+	const floor = Math.floor(shifted);
+	const decimal = shifted - floor;
 
 	// Calculate epsilon for this number's magnitude
-	const epsilon = 2 ** (Math.log2(Math.abs(shifted)) - 52)
+	const epsilon = 2 ** (Math.log2(Math.abs(shifted)) - 52);
 
 	if (Math.abs(decimal - 0.5) < epsilon) {
 		// Exactly .5 - round to even
-		shifted = floor % 2 === 0 ? floor : floor + 1
+		shifted = floor % 2 === 0 ? floor : floor + 1;
 	} else {
-		shifted = Math.round(shifted)
+		shifted = Math.round(shifted);
 	}
 
-	return shifted / multiplier
+	return shifted / multiplier;
 }
 
 /**
@@ -153,14 +153,14 @@ function bankersRound(num, precision) {
  * Matches frappe _round_away_from_zero()
  */
 function commercialRound(num, precision) {
-	if (num === 0) return 0
+	if (num === 0) return 0;
 
 	// Calculate epsilon for this number's magnitude
-	const epsilon = 2 ** (Math.log2(Math.abs(num)) - 52)
+	const epsilon = 2 ** (Math.log2(Math.abs(num)) - 52);
 
 	// Add epsilon in the direction of the sign, then round
-	const adjusted = num + Math.sign(num) * epsilon
-	return Number(adjusted.toFixed(precision))
+	const adjusted = num + Math.sign(num) * epsilon;
+	return Number(adjusted.toFixed(precision));
 }
 
 /**
@@ -170,18 +170,18 @@ function commercialRound(num, precision) {
  * @returns {number} Rounded value
  */
 function round(value, precision) {
-	if (typeof value !== "number" || Number.isNaN(value)) return 0
+	if (typeof value !== "number" || Number.isNaN(value)) return 0;
 
 	// Use Frappe's flt() if available in browser context
 	if (typeof window !== "undefined" && typeof window.flt === "function") {
-		return window.flt(value, precision)
+		return window.flt(value, precision);
 	}
 
 	// Apply rounding based on system setting
 	if (settings.rounding_method === "Commercial Rounding") {
-		return commercialRound(value, precision)
+		return commercialRound(value, precision);
 	}
-	return bankersRound(value, precision)
+	return bankersRound(value, precision);
 }
 
 // =============================================================================
@@ -190,20 +190,20 @@ function round(value, precision) {
 
 /** Round to 2 decimal places */
 export function round2(value) {
-	return round(value, 2)
+	return round(value, 2);
 }
 
 /** Round to 3 decimal places */
 export function round3(value) {
-	return round(value, 3)
+	return round(value, 3);
 }
 
 /** Round using system currency precision */
 export function roundCurrency(value) {
-	return round(value, settings.currency)
+	return round(value, settings.currency);
 }
 
 /** Round using system float precision */
 export function roundFloat(value) {
-	return round(value, settings.float)
+	return round(value, settings.float);
 }

@@ -17,41 +17,41 @@
  * @module composables/useRealtimePosProfile
  */
 
-import { logger } from "@/utils/logger"
-import { readonly, ref } from "vue"
+import { logger } from "@/utils/logger";
+import { readonly, ref } from "vue";
 
-const log = logger.create('RealtimePosProfile')
+const log = logger.create("RealtimePosProfile");
 
 // ============================================================================
 // CONSTANTS
 // ============================================================================
 
-const EVENT_NAME = "pos_profile_updated"
-const DEBOUNCE_DELAY_MS = 300 // Prevent rapid-fire updates
-const MAX_RETRY_ATTEMPTS = 3
-const RETRY_DELAY_MS = 1000
+const EVENT_NAME = "pos_profile_updated";
+const DEBOUNCE_DELAY_MS = 300; // Prevent rapid-fire updates
+const MAX_RETRY_ATTEMPTS = 3;
+const RETRY_DELAY_MS = 1000;
 
 // ============================================================================
 // SINGLETON STATE (shared across all component instances)
 // ============================================================================
 
 /** @type {import('vue').Ref<boolean>} */
-const isListening = ref(false)
+const isListening = ref(false);
 
 /** @type {import('vue').Ref<boolean>} */
-const isConnecting = ref(false)
+const isConnecting = ref(false);
 
 /** @type {Set<Function>} Registered event handlers */
-const eventHandlers = new Set()
+const eventHandlers = new Set();
 
 /** @type {Map<string, NodeJS.Timeout>} Debounce timers per profile */
-const debounceTimers = new Map()
+const debounceTimers = new Map();
 
 /** @type {number} Connection retry attempts */
-let retryAttempts = 0
+let retryAttempts = 0;
 
 /** @type {NodeJS.Timeout|null} Retry timer */
-let retryTimer = null
+let retryTimer = null;
 
 // ============================================================================
 // INTERNAL HELPERS
@@ -64,16 +64,16 @@ let retryTimer = null
  */
 function isValidEventPayload(data) {
 	if (!data || typeof data !== "object") {
-		log.warn("Invalid event payload: not an object", { data })
-		return false
+		log.warn("Invalid event payload: not an object", { data });
+		return false;
 	}
 
 	if (!data.pos_profile || typeof data.pos_profile !== "string") {
-		log.warn("Invalid event payload: missing or invalid pos_profile", { data })
-		return false
+		log.warn("Invalid event payload: missing or invalid pos_profile", { data });
+		return false;
 	}
 
-	return true
+	return true;
 }
 
 /**
@@ -84,13 +84,13 @@ function isValidEventPayload(data) {
  */
 async function executeHandlerSafely(handler, data) {
 	try {
-		await Promise.resolve(handler(data))
+		await Promise.resolve(handler(data));
 	} catch (error) {
 		log.error("Handler execution failed", {
 			error: error.message,
 			stack: error.stack,
-			profile: data.pos_profile
-		})
+			profile: data.pos_profile,
+		});
 		// Don't rethrow - isolate handler errors
 	}
 }
@@ -102,42 +102,42 @@ async function executeHandlerSafely(handler, data) {
 function handlePosProfileUpdate(data) {
 	// Validate payload
 	if (!isValidEventPayload(data)) {
-		return
+		return;
 	}
 
-	const { pos_profile, change_type, item_groups, timestamp } = data
+	const { pos_profile, change_type, item_groups, timestamp } = data;
 
 	log.info("POS Profile update received", {
 		profile: pos_profile,
 		changeType: change_type,
 		itemGroupCount: item_groups?.length ?? 0,
 		timestamp,
-		handlerCount: eventHandlers.size
-	})
+		handlerCount: eventHandlers.size,
+	});
 
 	// Debounce updates per profile (prevent rapid-fire changes)
-	const existingTimer = debounceTimers.get(pos_profile)
+	const existingTimer = debounceTimers.get(pos_profile);
 	if (existingTimer) {
-		clearTimeout(existingTimer)
+		clearTimeout(existingTimer);
 	}
 
 	const timer = setTimeout(() => {
-		debounceTimers.delete(pos_profile)
+		debounceTimers.delete(pos_profile);
 
 		// Execute all registered handlers in parallel with error isolation
-		const handlerPromises = Array.from(eventHandlers).map(handler =>
-			executeHandlerSafely(handler, data)
-		)
+		const handlerPromises = Array.from(eventHandlers).map((handler) =>
+			executeHandlerSafely(handler, data),
+		);
 
 		Promise.all(handlerPromises).then(() => {
 			log.debug("All handlers executed", {
 				profile: pos_profile,
-				handlerCount: eventHandlers.size
-			})
-		})
-	}, DEBOUNCE_DELAY_MS)
+				handlerCount: eventHandlers.size,
+			});
+		});
+	}, DEBOUNCE_DELAY_MS);
 
-	debounceTimers.set(pos_profile, timer)
+	debounceTimers.set(pos_profile, timer);
 }
 
 /**
@@ -146,16 +146,16 @@ function handlePosProfileUpdate(data) {
  */
 function isSocketAvailable() {
 	if (typeof window === "undefined") {
-		log.warn("Window object not available (SSR context)")
-		return false
+		log.warn("Window object not available (SSR context)");
+		return false;
 	}
 
 	if (!window.frappe?.realtime) {
-		log.warn("Socket.IO client not initialized (window.frappe.realtime)")
-		return false
+		log.warn("Socket.IO client not initialized (window.frappe.realtime)");
+		return false;
 	}
 
-	return true
+	return true;
 }
 
 /**
@@ -165,49 +165,51 @@ function isSocketAvailable() {
 function startListening() {
 	// Prevent concurrent connection attempts
 	if (isListening.value || isConnecting.value) {
-		log.debug("Already listening or connecting")
-		return
+		log.debug("Already listening or connecting");
+		return;
 	}
 
 	if (!isSocketAvailable()) {
 		// Schedule retry if we haven't exceeded max attempts
 		if (retryAttempts < MAX_RETRY_ATTEMPTS) {
-			retryAttempts++
-			const delay = RETRY_DELAY_MS * retryAttempts
+			retryAttempts++;
+			const delay = RETRY_DELAY_MS * retryAttempts;
 
-			log.info(`Socket unavailable, retrying in ${delay}ms (attempt ${retryAttempts}/${MAX_RETRY_ATTEMPTS})`)
+			log.info(
+				`Socket unavailable, retrying in ${delay}ms (attempt ${retryAttempts}/${MAX_RETRY_ATTEMPTS})`,
+			);
 
 			retryTimer = setTimeout(() => {
-				startListening()
-			}, delay)
+				startListening();
+			}, delay);
 		} else {
-			log.error(`Failed to connect after ${MAX_RETRY_ATTEMPTS} attempts`)
+			log.error(`Failed to connect after ${MAX_RETRY_ATTEMPTS} attempts`);
 		}
-		return
+		return;
 	}
 
 	try {
-		isConnecting.value = true
+		isConnecting.value = true;
 
 		// Subscribe to POS Profile update events
-		window.frappe.realtime.on(EVENT_NAME, handlePosProfileUpdate)
+		window.frappe.realtime.on(EVENT_NAME, handlePosProfileUpdate);
 
-		isListening.value = true
-		isConnecting.value = false
-		retryAttempts = 0 // Reset on success
+		isListening.value = true;
+		isConnecting.value = false;
+		retryAttempts = 0; // Reset on success
 
 		log.success("Started listening to POS Profile updates", {
 			event: EVENT_NAME,
-			handlerCount: eventHandlers.size
-		})
+			handlerCount: eventHandlers.size,
+		});
 	} catch (error) {
-		isConnecting.value = false
-		log.error("Failed to start listening", error)
+		isConnecting.value = false;
+		log.error("Failed to start listening", error);
 
 		// Retry on error
 		if (retryAttempts < MAX_RETRY_ATTEMPTS) {
-			retryAttempts++
-			retryTimer = setTimeout(() => startListening(), RETRY_DELAY_MS)
+			retryAttempts++;
+			retryTimer = setTimeout(() => startListening(), RETRY_DELAY_MS);
 		}
 	}
 }
@@ -218,32 +220,32 @@ function startListening() {
 function stopListening() {
 	// Clear retry timer if pending
 	if (retryTimer) {
-		clearTimeout(retryTimer)
-		retryTimer = null
+		clearTimeout(retryTimer);
+		retryTimer = null;
 	}
 
 	// Clear debounce timers
-	debounceTimers.forEach(timer => clearTimeout(timer))
-	debounceTimers.clear()
+	debounceTimers.forEach((timer) => clearTimeout(timer));
+	debounceTimers.clear();
 
 	if (!isListening.value) {
-		log.debug("Not currently listening")
-		return
+		log.debug("Not currently listening");
+		return;
 	}
 
 	try {
 		if (isSocketAvailable()) {
-			window.frappe.realtime.off(EVENT_NAME, handlePosProfileUpdate)
+			window.frappe.realtime.off(EVENT_NAME, handlePosProfileUpdate);
 		}
 
-		isListening.value = false
-		retryAttempts = 0
+		isListening.value = false;
+		retryAttempts = 0;
 
-		log.info("Stopped listening to POS Profile updates")
+		log.info("Stopped listening to POS Profile updates");
 	} catch (error) {
 		// Ensure state is cleaned up even if unsubscribe fails
-		isListening.value = false
-		log.error("Error while stopping listener", error)
+		isListening.value = false;
+		log.error("Error while stopping listener", error);
 	}
 }
 
@@ -251,10 +253,10 @@ function stopListening() {
  * Force immediate reconnection (useful after network recovery)
  */
 function reconnect() {
-	log.info("Forcing reconnection")
-	stopListening()
-	retryAttempts = 0
-	startListening()
+	log.info("Forcing reconnection");
+	stopListening();
+	retryAttempts = 0;
+	startListening();
 }
 
 // ============================================================================
@@ -286,39 +288,39 @@ export function useRealtimePosProfile() {
 	function onPosProfileUpdate(handler) {
 		// Type validation
 		if (typeof handler !== "function") {
-			throw new TypeError(`Handler must be a function, received: ${typeof handler}`)
+			throw new TypeError(`Handler must be a function, received: ${typeof handler}`);
 		}
 
 		// Prevent duplicate registration
 		if (eventHandlers.has(handler)) {
-			log.warn("Handler already registered (duplicate)")
-			return () => {} // Return no-op cleanup
+			log.warn("Handler already registered (duplicate)");
+			return () => {}; // Return no-op cleanup
 		}
 
-		eventHandlers.add(handler)
+		eventHandlers.add(handler);
 
 		log.debug("Handler registered", {
-			handlerCount: eventHandlers.size
-		})
+			handlerCount: eventHandlers.size,
+		});
 
 		// Auto-start listening when first handler is registered
 		if (eventHandlers.size === 1) {
-			startListening()
+			startListening();
 		}
 
 		// Return cleanup function
 		return () => {
-			eventHandlers.delete(handler)
+			eventHandlers.delete(handler);
 
 			log.debug("Handler unregistered", {
-				handlerCount: eventHandlers.size
-			})
+				handlerCount: eventHandlers.size,
+			});
 
 			// Auto-stop listening when last handler is removed
 			if (eventHandlers.size === 0) {
-				stopListening()
+				stopListening();
 			}
-		}
+		};
 	}
 
 	/**
@@ -326,7 +328,7 @@ export function useRealtimePosProfile() {
 	 * @returns {number}
 	 */
 	function getHandlerCount() {
-		return eventHandlers.size
+		return eventHandlers.size;
 	}
 
 	/**
@@ -334,10 +336,10 @@ export function useRealtimePosProfile() {
 	 */
 	function clearAllHandlers() {
 		log.warn("Clearing all handlers", {
-			count: eventHandlers.size
-		})
-		eventHandlers.clear()
-		stopListening()
+			count: eventHandlers.size,
+		});
+		eventHandlers.clear();
+		stopListening();
 	}
 
 	// Return public API with readonly refs to prevent external mutation
@@ -357,5 +359,5 @@ export function useRealtimePosProfile() {
 		// Utility methods (primarily for debugging/testing)
 		getHandlerCount,
 		clearAllHandlers,
-	}
+	};
 }

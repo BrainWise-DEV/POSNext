@@ -1,4 +1,4 @@
-import { computed, readonly, ref, watch } from "vue"
+import { computed, readonly, ref, watch } from "vue";
 
 /**
  * Global Dialog State Manager
@@ -25,8 +25,8 @@ import { computed, readonly, ref, watch } from "vue"
  */
 
 // Global state - shared across all components
-const activeDialogs = ref(new Set())
-const dialogCounter = ref(0)
+const activeDialogs = ref(new Set());
+const dialogCounter = ref(0);
 
 /**
  * Composable for managing dialog state globally
@@ -40,33 +40,33 @@ const dialogCounter = ref(0)
  */
 export function useDialog(dialogId) {
 	if (!dialogId) {
-		throw new Error("useDialog requires a unique dialogId")
+		throw new Error("useDialog requires a unique dialogId");
 	}
 
-	const isOpen = ref(false)
+	const isOpen = ref(false);
 
 	// Watch for changes and update global state
 	const setOpen = (value) => {
 		if (value && !isOpen.value) {
-			activeDialogs.value.add(dialogId)
-			dialogCounter.value++
+			activeDialogs.value.add(dialogId);
+			dialogCounter.value++;
 		} else if (!value && isOpen.value) {
-			activeDialogs.value.delete(dialogId)
-			dialogCounter.value--
+			activeDialogs.value.delete(dialogId);
+			dialogCounter.value--;
 		}
-		isOpen.value = value
-	}
+		isOpen.value = value;
+	};
 
 	// Computed to track any dialog being open
-	const isAnyDialogOpen = computed(() => dialogCounter.value > 0)
+	const isAnyDialogOpen = computed(() => dialogCounter.value > 0);
 
 	// Cleanup on unmount (automatically handled by Vue)
 	const cleanup = () => {
 		if (isOpen.value) {
-			activeDialogs.value.delete(dialogId)
-			dialogCounter.value--
+			activeDialogs.value.delete(dialogId);
+			dialogCounter.value--;
 		}
-	}
+	};
 
 	return {
 		isOpen: computed({
@@ -79,7 +79,7 @@ export function useDialog(dialogId) {
 		open: () => setOpen(true),
 		close: () => setOpen(false),
 		toggle: () => setOpen(!isOpen.value),
-	}
+	};
 }
 
 /**
@@ -87,14 +87,14 @@ export function useDialog(dialogId) {
  * (e.g., the draggable divider)
  */
 export function useDialogState() {
-	const isAnyDialogOpen = computed(() => dialogCounter.value > 0)
-	const activeCount = computed(() => activeDialogs.value.size)
+	const isAnyDialogOpen = computed(() => dialogCounter.value > 0);
+	const activeCount = computed(() => activeDialogs.value.size);
 
 	return {
 		isAnyDialogOpen: readonly(isAnyDialogOpen),
 		activeCount: readonly(activeCount),
 		activeDialogIds: readonly(computed(() => Array.from(activeDialogs.value))),
-	}
+	};
 }
 
 /**
@@ -106,7 +106,7 @@ export function useDialogState() {
  */
 export function registerDialog(dialogRef, dialogId) {
 	if (!dialogId) {
-		throw new Error("registerDialog requires a unique dialogId")
+		throw new Error("registerDialog requires a unique dialogId");
 	}
 
 	// Watch the ref and update global state
@@ -114,24 +114,24 @@ export function registerDialog(dialogRef, dialogId) {
 		dialogRef,
 		(newValue, oldValue) => {
 			if (newValue && !oldValue) {
-				activeDialogs.value.add(dialogId)
-				dialogCounter.value++
+				activeDialogs.value.add(dialogId);
+				dialogCounter.value++;
 			} else if (!newValue && oldValue) {
-				activeDialogs.value.delete(dialogId)
-				dialogCounter.value--
+				activeDialogs.value.delete(dialogId);
+				dialogCounter.value--;
 			}
 		},
 		{ immediate: false },
-	)
+	);
 
 	// Return the original ref with cleanup
 	dialogRef.cleanup = () => {
-		stopWatch()
+		stopWatch();
 		if (dialogRef.value) {
-			activeDialogs.value.delete(dialogId)
-			dialogCounter.value--
+			activeDialogs.value.delete(dialogId);
+			dialogCounter.value--;
 		}
-	}
+	};
 
-	return dialogRef
+	return dialogRef;
 }

@@ -1,4 +1,4 @@
-import { onBeforeUnmount, onMounted, ref } from "vue"
+import { onBeforeUnmount, onMounted, ref } from "vue";
 
 /**
  * Composable for lazy loading images using Intersection Observer
@@ -13,55 +13,55 @@ export function useLazyLoad(options = {}) {
 	const {
 		rootMargin = "50px", // Start loading 50px before element enters viewport
 		threshold = 0.01, // Trigger when 1% of element is visible
-	} = options
+	} = options;
 
-	const targetRef = ref(null)
-	const isVisible = ref(false)
-	const isLoaded = ref(false)
-	const error = ref(null)
+	const targetRef = ref(null);
+	const isVisible = ref(false);
+	const isLoaded = ref(false);
+	const error = ref(null);
 
-	let observer = null
+	let observer = null;
 
 	onMounted(() => {
-		if (!targetRef.value) return
+		if (!targetRef.value) return;
 
 		// Check if Intersection Observer is supported
 		if (!("IntersectionObserver" in window)) {
 			// Fallback for browsers that don't support Intersection Observer
-			isVisible.value = true
-			return
+			isVisible.value = true;
+			return;
 		}
 
 		observer = new IntersectionObserver(
 			(entries) => {
 				entries.forEach((entry) => {
 					if (entry.isIntersecting && !isVisible.value) {
-						isVisible.value = true
+						isVisible.value = true;
 						// Once loaded, disconnect to save resources
-						observer?.disconnect()
+						observer?.disconnect();
 					}
-				})
+				});
 			},
 			{
 				rootMargin,
 				threshold,
 			},
-		)
+		);
 
-		observer.observe(targetRef.value)
-	})
+		observer.observe(targetRef.value);
+	});
 
 	onBeforeUnmount(() => {
 		if (observer) {
-			observer.disconnect()
-			observer = null
+			observer.disconnect();
+			observer = null;
 		}
-	})
+	});
 
 	return {
 		targetRef,
 		isVisible,
 		isLoaded,
 		error,
-	}
+	};
 }
