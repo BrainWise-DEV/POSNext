@@ -135,7 +135,7 @@ def apply_referral_code(referral_code, referee_customer):
     except Exception as e:
         frappe.log_error(
             title="Referrer Coupon Generation Failed",
-            message=f"Failed to generate referrer coupon: {str(e)}"
+            message=f"Failed to generate referrer coupon: {e!s}"
         )
 
     # Generate Promotional coupon for referee (new customer)
@@ -149,7 +149,7 @@ def apply_referral_code(referral_code, referee_customer):
     except Exception as e:
         frappe.log_error(
             title="Referee Coupon Generation Failed",
-            message=f"Failed to generate referee coupon: {str(e)}"
+            message=f"Failed to generate referee coupon: {e!s}"
         )
         frappe.throw(_("Failed to generate your welcome coupon"))
 

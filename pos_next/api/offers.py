@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright (c) 2025, POS Next and contributors
 # For license information, please see license.txt
 
@@ -47,9 +46,9 @@ class OfferSource:
 @dataclass
 class OfferEligibility:
 	"""Eligibility criteria for an offer"""
-	items: List[str]
-	item_groups: List[str]
-	brands: List[str]
+	items: list[str]
+	item_groups: list[str]
+	brands: list[str]
 
 
 @dataclass
@@ -66,28 +65,28 @@ class Offer:
 	max_qty: float
 	min_amt: float
 	max_amt: float
-	discount_type: Optional[str]
+	discount_type: str | None
 	rate: float
 	discount_amount: float
 	discount_percentage: float
-	valid_from: Optional[str]
-	valid_upto: Optional[str]
+	valid_from: str | None
+	valid_upto: str | None
 	source: str
-	promotional_scheme: Optional[str]
-	promotional_scheme_id: Optional[str]
-	eligible_items: List[str]
-	eligible_item_groups: List[str]
-	eligible_brands: List[str]
+	promotional_scheme: str | None
+	promotional_scheme_id: str | None
+	eligible_items: list[str]
+	eligible_item_groups: list[str]
+	eligible_brands: list[str]
 	# Free item fields for product discounts
-	free_item: Optional[str] = None
+	free_item: str | None = None
 	free_qty: float = 0
-	free_item_uom: Optional[str] = None
+	free_item_uom: str | None = None
 	same_item: int = 0  # 1 if free item should be same as purchased item
 	is_recursive: int = 0  # 1 if offer applies recursively (e.g., buy 2 get 1 free for every 2)
 	recurse_for: float = 0  # Give free item for every N quantity (used when is_recursive=1)
 	apply_recursion_over: float = 0  # Qty for which recursion isn't applicable
 
-	def to_dict(self) -> Dict:
+	def to_dict(self) -> dict:
 		"""Convert to dictionary for API response"""
 		return asdict(self)
 
@@ -100,7 +99,7 @@ class EligibilityFetcher:
 	"""Fetches eligibility criteria for pricing rules/schemes in bulk"""
 
 	@staticmethod
-	def fetch_all(parent_names: List[str]) -> Dict[str, OfferEligibility]:
+	def fetch_all(parent_names: list[str]) -> dict[str, OfferEligibility]:
 		"""
 		Fetch all eligibility criteria for given parent names
 
@@ -129,7 +128,7 @@ class EligibilityFetcher:
 		return eligibility
 
 	@staticmethod
-	def _fetch_items(parent_names: List[str]) -> Dict[str, List[str]]:
+	def _fetch_items(parent_names: list[str]) -> dict[str, list[str]]:
 		"""
 		Fetch item codes for given parents, expanding template items to include variants.
 
@@ -188,7 +187,7 @@ class EligibilityFetcher:
 		return items_map
 
 	@staticmethod
-	def _fetch_item_groups(parent_names: List[str]) -> Dict[str, List[str]]:
+	def _fetch_item_groups(parent_names: list[str]) -> dict[str, list[str]]:
 		"""Fetch item groups for given parents"""
 		results = frappe.db.sql("""
 			SELECT parent, item_group
@@ -202,7 +201,7 @@ class EligibilityFetcher:
 		return groups_map
 
 	@staticmethod
-	def _fetch_brands(parent_names: List[str]) -> Dict[str, List[str]]:
+	def _fetch_brands(parent_names: list[str]) -> dict[str, list[str]]:
 		"""Fetch brands for given parents"""
 		results = frappe.db.sql("""
 			SELECT parent, brand
@@ -220,7 +219,7 @@ class SlabFetcher:
 	"""Fetches discount slabs for promotional schemes"""
 
 	@staticmethod
-	def fetch_price_slabs(scheme_names: List[str]) -> Dict[str, Dict]:
+	def fetch_price_slabs(scheme_names: list[str]) -> dict[str, dict]:
 		"""Fetch first price discount slab for each scheme"""
 		if not scheme_names:
 			return {}
@@ -244,7 +243,7 @@ class SlabFetcher:
 		return slabs_map
 
 	@staticmethod
-	def fetch_product_slabs(scheme_names: List[str]) -> Dict[str, Dict]:
+	def fetch_product_slabs(scheme_names: list[str]) -> dict[str, dict]:
 		"""Fetch first product discount slab for each scheme"""
 		if not scheme_names:
 			return {}
@@ -278,8 +277,8 @@ class OfferBuilder:
 
 	@staticmethod
 	def build_from_scheme_rule(
-		rule: Dict,
-		slab: Dict,
+		rule: dict,
+		slab: dict,
 		eligibility: OfferEligibility
 	) -> Offer:
 		"""Build offer from promotional scheme pricing rule"""
@@ -341,7 +340,7 @@ class OfferBuilder:
 
 	@staticmethod
 	def build_from_standalone_rule(
-		rule: Dict,
+		rule: dict,
 		eligibility: OfferEligibility
 	) -> Offer:
 		"""Build offer from standalone pricing rule"""
@@ -393,7 +392,7 @@ class OfferBuilder:
 # ============================================================================
 
 @frappe.whitelist()
-def get_offers(pos_profile: str) -> List[Dict]:
+def get_offers(pos_profile: str) -> list[dict]:
 	"""
 	Fetch all auto-applicable offers for the POS profile
 
@@ -420,11 +419,11 @@ def get_offers(pos_profile: str) -> List[Dict]:
 		return [offer.to_dict() for offer in offers]
 
 	except Exception as e:
-		frappe.log_error(f"Error fetching offers: {str(e)}", "Offers API")
+		frappe.log_error(f"Error fetching offers: {e!s}", "Offers API")
 		return []
 
 
-def _get_promotional_scheme_offers(company: str, date: str) -> List[Offer]:
+def _get_promotional_scheme_offers(company: str, date: str) -> list[Offer]:
 	"""Fetch offers from promotional schemes"""
 
 	# Fetch pricing rules linked to promotional schemes
@@ -476,7 +475,7 @@ def _get_promotional_scheme_offers(company: str, date: str) -> List[Offer]:
 	return offers
 
 
-def _get_standalone_pricing_rule_offers(company: str, date: str) -> List[Offer]:
+def _get_standalone_pricing_rule_offers(company: str, date: str) -> list[Offer]:
 	"""Fetch offers from standalone pricing rules"""
 
 	# Fetch standalone pricing rules (not linked to schemes)
@@ -523,7 +522,7 @@ def _get_standalone_pricing_rule_offers(company: str, date: str) -> List[Offer]:
 # ============================================================================
 
 @frappe.whitelist()
-def get_active_coupons(customer: str, company: str) -> List[Dict]:
+def get_active_coupons(customer: str, company: str) -> list[dict]:
 	"""Get active gift card coupons for a customer"""
 	if not frappe.db.table_exists("POS Coupon"):
 		return []
@@ -543,7 +542,7 @@ def get_active_coupons(customer: str, company: str) -> List[Dict]:
 
 
 @frappe.whitelist()
-def validate_coupon(coupon_code: str, customer: str, company: str) -> Dict:
+def validate_coupon(coupon_code: str, customer: str, company: str) -> dict:
 	"""Validate a coupon code and return its details"""
 	if not frappe.db.table_exists("POS Coupon"):
 		return {"valid": False, "message": _("Coupons are not enabled")}

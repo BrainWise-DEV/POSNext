@@ -1,8 +1,6 @@
-# -*- coding: utf-8 -*-
 # Copyright (c) 2025, BrainWise and contributors
 # For license information, please see license.txt
 
-from __future__ import unicode_literals
 
 import json
 
@@ -883,7 +881,7 @@ def update_invoice(data):
         invoice_doc.save()
 
         return invoice_doc.as_dict()
-    except Exception as e:
+    except Exception:
         frappe.log_error(frappe.get_traceback(), "Update Invoice Error")
         raise
 
@@ -1034,7 +1032,7 @@ def _complete_offline_sync(sync_record_name, invoice_name):
     except Exception as error:
         frappe.log_error(
             title="Offline Sync Completion Error",
-            message=f"Failed to complete sync record {sync_record_name} for invoice {invoice_name}: {str(error)}"
+            message=f"Failed to complete sync record {sync_record_name} for invoice {invoice_name}: {error!s}"
         )
 
 
@@ -1062,7 +1060,7 @@ def _cleanup_failed_sync(sync_record_name):
     except Exception as error:
         frappe.log_error(
             title="Offline Sync Cleanup Error",
-            message=f"Failed to mark sync record {sync_record_name} as failed: {str(error)}"
+            message=f"Failed to mark sync record {sync_record_name} as failed: {error!s}"
         )
 
 
@@ -1260,7 +1258,7 @@ def submit_invoice(invoice=None, data=None):
                 except Exception as e:
                     frappe.log_error(
                         title="Failed to increment coupon usage",
-                        message=f"Coupon: {coupon_code}, Error: {str(e)}"
+                        message=f"Coupon: {coupon_code}, Error: {e!s}"
                     )
 
         # Auto-set batch numbers for returns
@@ -1333,7 +1331,7 @@ def submit_invoice(invoice=None, data=None):
             except Exception as wallet_error:
                 frappe.log_error(
                     title="Wallet Reversal on Return Error",
-                    message=f"Return Invoice: {invoice_doc.name}, Error: {str(wallet_error)}\n{frappe.get_traceback()}"
+                    message=f"Return Invoice: {invoice_doc.name}, Error: {wallet_error!s}\n{frappe.get_traceback()}"
                 )
                 frappe.msgprint(
                     _("Return submitted but wallet reversal failed. Please check manually."),
@@ -1354,7 +1352,7 @@ def submit_invoice(invoice=None, data=None):
             except Exception as credit_error:
                 frappe.log_error(
                     title="Credit Redemption Error",
-                    message=f"Invoice: {invoice_doc.name}, Error: {str(credit_error)}\n{frappe.get_traceback()}"
+                    message=f"Invoice: {invoice_doc.name}, Error: {credit_error!s}\n{frappe.get_traceback()}"
                 )
                 # Don't fail the entire transaction, just log the error
                 frappe.msgprint(
@@ -1394,7 +1392,7 @@ def submit_invoice(invoice=None, data=None):
 
         return result
 
-    except Exception as e:
+    except Exception:
         frappe.log_error(frappe.get_traceback(), "Submit Invoice Error")
         raise
 
@@ -1600,7 +1598,7 @@ def cleanup_old_drafts(pos_profile=None, max_age_hours=24):
             deleted_count += 1
         except Exception as e:
             frappe.log_error(
-                f"Failed to delete draft {draft['name']}: {str(e)}",
+                f"Failed to delete draft {draft['name']}: {e!s}",
                 "Draft Cleanup Error",
             )
 

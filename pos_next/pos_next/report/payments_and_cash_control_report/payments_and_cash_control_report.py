@@ -93,7 +93,7 @@ def get_data(filters):
 	conditions = get_conditions(filters)
 
 	# Get payment reconciliation details from closing shifts
-	query = """
+	query = f"""
 		SELECT
 			pcs.name as shift,
 			pcs.pos_profile,
@@ -112,7 +112,7 @@ def get_data(filters):
 			{conditions}
 		ORDER BY
 			pcs.period_end_date DESC, pr.mode_of_payment
-	""".format(conditions=conditions)
+	"""
 
 	data = frappe.db.sql(query, filters, as_dict=1)
 

@@ -1129,7 +1129,7 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20,
 			# Relevance scoring with case-insensitive comparison
 			# Exact barcode match gets highest priority, use MAX() for grouping
 			prefix_pattern = f"{effective_search_term}%"
-			relevance = f"""
+			relevance = """
 				MAX(CASE
 					WHEN ib.barcode = %s THEN 1500
 					WHEN ib.barcode LIKE %s THEN 1200
@@ -1661,7 +1661,7 @@ def get_items_count(pos_profile, item_group=None, include_variants=0, show_varia
 
 
 @frappe.whitelist()
-def get_item_details(item_code, pos_profile, customer=None, qty=1, uom=None):  # noqa: ARG001 - customer reserved for future use
+def get_item_details(item_code, pos_profile, customer=None, qty=1, uom=None):
 	"""Get detailed item info including price, tax, stock"""
 	try:
 		# Parse pos_profile if it's a JSON string
@@ -2250,6 +2250,6 @@ def get_batch_serial_data_for_items(item_codes, warehouse):
 
 		return result
 
-	except Exception as e:
+	except Exception:
 		frappe.log_error(frappe.get_traceback(), "Get Batch/Serial Data for Items Error")
 		return {}

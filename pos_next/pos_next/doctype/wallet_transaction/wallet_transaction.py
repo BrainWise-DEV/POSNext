@@ -353,7 +353,7 @@ def reverse_wallet_transactions_for_return(original_invoice, return_invoice):
             except Exception as e:
                 frappe.log_error(
                     title="Wallet Transaction Cancel on Return Error",
-                    message=f"WT: {wt.name}, Return: {return_invoice}, Error: {str(e)}\n{frappe.get_traceback()}"
+                    message=f"WT: {wt.name}, Return: {return_invoice}, Error: {e!s}\n{frappe.get_traceback()}"
                 )
         else:
             # Partial return - create a proportional debit (reverse) transaction
@@ -393,5 +393,5 @@ def reverse_wallet_transactions_for_return(original_invoice, return_invoice):
                 frappe.log_error(
                     title="Wallet Reversal on Partial Return Error",
                     message=f"Original WT: {wt.name}, Return: {return_invoice}, "
-                            f"Amount: {reverse_amount}, Error: {str(e)}\n{frappe.get_traceback()}"
+                            f"Amount: {reverse_amount}, Error: {e!s}\n{frappe.get_traceback()}"
                 )

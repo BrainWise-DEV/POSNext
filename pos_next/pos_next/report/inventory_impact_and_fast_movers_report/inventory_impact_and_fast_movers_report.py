@@ -113,7 +113,7 @@ def get_data(filters):
 		date_range_days = 30  # Default to 30 days
 
 	# Query to get item sales data
-	query = """
+	query = f"""
 		SELECT
 			sii.item_code,
 			sii.item_name,
@@ -137,7 +137,7 @@ def get_data(filters):
 			sii.item_code
 		ORDER BY
 			qty_sold DESC
-	""".format(conditions=conditions)
+	"""
 
 	data = frappe.db.sql(query, filters, as_dict=1)
 

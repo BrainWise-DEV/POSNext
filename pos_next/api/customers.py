@@ -56,7 +56,7 @@ def get_customers(search_term="", pos_profile=None, limit=20, modified_since=Non
         frappe.logger().debug(f"get_customers returned {len(result)} customers")
         return result
     except Exception as e:
-        frappe.logger().error(f"Error in get_customers: {str(e)}")
+        frappe.logger().error(f"Error in get_customers: {e!s}")
         frappe.logger().error(frappe.get_traceback())
         frappe.throw(_("Error fetching customers: {0}").format(str(e)))
 

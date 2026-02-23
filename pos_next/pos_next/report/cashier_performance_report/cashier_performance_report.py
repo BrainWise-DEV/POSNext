@@ -37,7 +37,7 @@ def get_data(filters):
 	"""Get cashier performance data"""
 	conditions = get_conditions(filters)
 
-	query = """
+	query = f"""
 		SELECT
 			si.owner as cashier,
 			COUNT(DISTINCT pcs.name) as shifts_worked,
@@ -57,7 +57,7 @@ def get_data(filters):
 		{conditions}
 		GROUP BY si.owner
 		ORDER BY total_sales DESC
-	""".format(conditions=conditions)
+	"""
 
 	data = frappe.db.sql(query, filters, as_dict=1)
 

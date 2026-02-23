@@ -52,7 +52,7 @@ def get_certificate():
 			title=_("QZ Certificate Missing"),
 		)
 
-	with open(path, "r") as f:
+	with open(path) as f:
 		return f.read()
 
 
@@ -66,7 +66,7 @@ def get_certificate_download():
 			title=_("QZ Certificate Missing"),
 		)
 
-	with open(path, "r") as f:
+	with open(path) as f:
 		pem = f.read()
 
 	company = frappe.db.get_default("company") or ""
