@@ -849,6 +849,11 @@ const SORT_OPTIONS = Object.freeze([
 		icon: 'M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z'
 	},
 	{
+		field: 'brand',
+		label: __('Brand'),
+		icon: 'M20 13V7a2 2 0 00-2-2h-4V3H10v2H6a2 2 0 00-2 2v6M8 21h8a2 2 0 002-2v-5H6v5a2 2 0 002 2z'
+	},
+	{
 		field: 'quantity',
 		label: __('Quantity'),
 		icon: 'M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4'

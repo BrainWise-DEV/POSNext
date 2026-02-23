@@ -95,7 +95,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 	const cartItems = ref([])
 
 	// Sorting state - for user-triggered sorting filters
-	const sortBy = ref(null) // Options: 'name', 'quantity', 'item_group', null (no sorting)
+	const sortBy = ref(null) // Options: 'name', 'quantity', 'item_group', 'brand' null (no sorting)
 	const sortOrder = ref('asc') // Options: 'asc', 'desc'
 
 	// Lazy loading state - dynamically adjusted based on device performance
@@ -563,6 +563,13 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 						const nameA = (a.item_name || '').toLowerCase()
 						const nameB = (b.item_name || '').toLowerCase()
 						compareResult = nameA.localeCompare(nameB)
+						break
+
+					case 'brand':
+						// Sort by brand alphabetically
+						const brandA = (a.brand || '').toLowerCase()
+						const brandB = (b.brand || '').toLowerCase()
+						compareResult = brandA.localeCompare(brandB)
 						break
 
 					case 'quantity':
@@ -1666,7 +1673,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 
 	/**
 	 * Set sorting filter - triggers sorting only when explicitly called
-	 * @param {string} field - Field to sort by: 'name', 'quantity', 'item_group', 'price', 'item_code'
+	 * @param {string} field - Field to sort by: 'name', 'brand', 'quantity', 'item_group', 'price', 'item_code'
 	 * @param {string} order - Sort order: 'asc' or 'desc' (default: 'asc')
 	 */
 	function setSortFilter(field, order = 'asc') {
