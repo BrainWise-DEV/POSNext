@@ -7,6 +7,7 @@ import hmac
 import json
 import secrets
 from datetime import datetime
+from typing import ClassVar
 
 import frappe
 from frappe.model.document import Document
@@ -22,7 +23,7 @@ PROTECTION_PHRASE_HASH = "3ddb5c12a034095ff81a85bbd06623a60e81252c296b747cf9c127
 
 class BrainWiseBranding(Document):
 	# Protected fields that require master key to modify
-	PROTECTED_FIELDS = ['enabled', 'brand_text', 'brand_name', 'brand_url', 'check_interval']
+	PROTECTED_FIELDS: ClassVar[list[str]] = ['enabled', 'brand_text', 'brand_name', 'brand_url', 'check_interval']
 
 	def validate(self):
 		"""Validate before saving - enforce master key requirement"""
@@ -103,7 +104,7 @@ class BrainWiseBranding(Document):
 				key_data = json.loads(self.master_key_provided)
 				master_key = key_data.get("key", "")
 				protection_phrase = key_data.get("phrase", "")
-			except:
+			except (ValueError, json.JSONDecodeError):
 				# If not JSON, treat as plain key
 				master_key = self.master_key_provided
 				protection_phrase = ""
@@ -182,7 +183,7 @@ class BrainWiseBranding(Document):
 
 		try:
 			# Decode stored signature
-			stored = json.loads(base64.b64decode(self.encrypted_signature))
+			json.loads(base64.b64decode(self.encrypted_signature))
 
 			# Check if branding data matches
 			if (client_data.get("brand_name") != self.brand_name or
@@ -307,7 +308,7 @@ def log_client_event(event_type=None, details=None):
 		if isinstance(details, str):
 			try:
 				details = json.loads(details)
-			except:
+			except (ValueError, json.JSONDecodeError):
 				pass
 
 		# Log different event types
@@ -343,7 +344,7 @@ def verify_master_key(master_key_input):
 			key_data = json.loads(master_key_input)
 			master_key = key_data.get("key", "")
 			protection_phrase = key_data.get("phrase", "")
-		except:
+		except (ValueError, json.JSONDecodeError):
 			master_key = master_key_input
 			protection_phrase = ""
 

@@ -149,7 +149,7 @@ def log_client_event(event_type=None, details=None):
 		if isinstance(details, str):
 			try:
 				details = json.loads(details)
-			except:
+			except (ValueError, json.JSONDecodeError):
 				pass
 
 		# Log different event types

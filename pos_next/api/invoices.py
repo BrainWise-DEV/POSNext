@@ -2662,7 +2662,7 @@ def apply_offers(invoice_data, selected_offers=None):
         # the same way: {(item_code, pricing_rules): data for data in free_item_data}.
         free_items_map = {}
 
-        for result, item_index in zip(pricing_results, index_map):
+        for result, item_index in zip(pricing_results, index_map, strict=False):
             if not result:
                 continue
 

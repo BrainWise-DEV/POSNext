@@ -37,15 +37,15 @@ PERFORMANCE METRICS
 
 RATE CALCULATIONS
 -----------------
-- Return Rate: (Returns / Gross Sales) × 100
-- Discount Rate: (Discounts / Gross Sales) × 100
+- Return Rate: (Returns / Gross Sales) * 100
+- Discount Rate: (Discounts / Gross Sales) * 100
 
 EFFICIENCY SCORE (0-100)
 ------------------------
 Base score: 70 points
 
 Factor 1 - Return Rate (-20 to +5):
-  - return_rate > 15%: penalty = min(20, (rate - 15) × 2)
+  - return_rate > 15%: penalty = min(20, (rate - 15) * 2)
   - return_rate ≤ 5%: bonus = +5
 
 Factor 2 - Discount Rate (-10 to +5):
@@ -107,10 +107,8 @@ def get_report_message(data):
 	good_count = len([d for d in data if d.rating == "Good"])
 	average_count = len([d for d in data if d.rating == "Average"])
 	needs_improvement = len([d for d in data if d.rating == "Needs Improvement"])
-	no_sales_count = len([d for d in data if d.gross_sales == 0])
 
 	total_gross = sum(d.gross_sales for d in data)
-	total_net = sum(d.net_sales for d in data)
 	total_returns = sum(d.returns for d in data)
 	total_invoices = sum(d.invoices for d in data)
 

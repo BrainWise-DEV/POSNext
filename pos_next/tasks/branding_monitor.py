@@ -84,7 +84,7 @@ def send_tampering_alert(doc):
 					"for_user": user,
 					"email_content": message
 				}).insert(ignore_permissions=True)
-			except:
+			except Exception:
 				pass
 
 		frappe.db.commit()

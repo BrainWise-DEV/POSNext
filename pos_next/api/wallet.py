@@ -93,7 +93,7 @@ def process_loyalty_to_wallet(doc, method=None):
 		# Create wallet transaction
 		from pos_next.pos_next.doctype.wallet_transaction.wallet_transaction import create_wallet_credit
 
-		transaction = create_wallet_credit(
+		create_wallet_credit(
 			wallet=wallet.name,
 			amount=credit_amount,
 			source_type="Loyalty Program",

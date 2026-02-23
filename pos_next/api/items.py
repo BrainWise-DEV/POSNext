@@ -694,7 +694,7 @@ def _get_item_group_with_descendants(item_group):
 		.run(pluck="name")
 	)
 
-	return [item_group] + list(descendants)
+	return [item_group, *descendants]
 
 
 def _build_item_base_conditions(pos_profile_doc, item_group=None, exclude_variants=True, exclude_templates=False, hide_unavailable=False, warehouse=None):
@@ -1485,7 +1485,7 @@ def get_items_bulk(pos_profile, item_groups=None, start=0, limit=2000, include_v
 			ORDER BY i.item_name ASC
 			LIMIT %s OFFSET %s
 		"""
-		all_params = params + [int(limit), int(start)]
+		all_params = [*params, int(limit), int(start)]
 		items = frappe.db.sql(query, tuple(all_params), as_dict=1)
 
 		if not items:

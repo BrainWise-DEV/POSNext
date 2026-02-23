@@ -361,7 +361,6 @@ def get_cashiers(doctype, txt, searchfield, start, page_len, filters):
 @frappe.whitelist()
 def get_pos_invoices(pos_opening_shift, doctype=None):
     if not doctype:
-        pos_profile = frappe.db.get_value("POS Opening Shift", pos_opening_shift, "pos_profile")
         use_pos_invoice = False
         doctype = "POS Invoice" if use_pos_invoice else "Sales Invoice"
     submit_printed_invoices(pos_opening_shift, doctype)
