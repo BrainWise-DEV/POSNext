@@ -324,7 +324,7 @@ watch(
 		if (val && props.posProfile) {
 			invoicesResource.reload();
 		}
-	},
+	}
 );
 
 watch(show, (val) => {
@@ -345,7 +345,7 @@ const filteredInvoices = computed(() => {
 	return invoices.value.filter(
 		(inv) =>
 			inv.name.toLowerCase().includes(term) ||
-			inv.customer_name?.toLowerCase().includes(term),
+			inv.customer_name?.toLowerCase().includes(term)
 	);
 });
 

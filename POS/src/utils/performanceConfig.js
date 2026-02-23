@@ -29,7 +29,7 @@ function detectPerformanceTier() {
 	const cpuCores = navigator.hardwareConcurrency || 2;
 	const deviceMemory = navigator.deviceMemory || 4; // In GB, fallback to 4GB
 	const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-		navigator.userAgent,
+		navigator.userAgent
 	);
 
 	// Calculate performance score
@@ -170,7 +170,7 @@ class PerformanceConfig {
 		this.cpuCores = navigator.hardwareConcurrency || 2;
 		this.deviceMemory = navigator.deviceMemory || 4;
 		this.isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-			navigator.userAgent,
+			navigator.userAgent
 		);
 
 		// Auto-detect performance tier
@@ -252,7 +252,7 @@ class PerformanceConfig {
 						config: this.config,
 						autoDetected: this.autoDetectedTier,
 					},
-				}),
+				})
 			);
 		}
 
@@ -286,7 +286,7 @@ class PerformanceConfig {
 						config: this.config,
 						autoDetected: this.autoDetectedTier,
 					},
-				}),
+				})
 			);
 		}
 

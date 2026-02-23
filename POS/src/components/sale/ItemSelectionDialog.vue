@@ -245,7 +245,7 @@
 						<p class="text-2xl font-bold text-blue-600">
 							{{
 								formatCurrency(
-									(selectedOption?.rate || options[0]?.rate || 0) * quantity,
+									(selectedOption?.rate || options[0]?.rate || 0) * quantity
 								)
 							}}
 						</p>
@@ -299,7 +299,7 @@
 							:inner="
 								__(
 									'This item template &lt;strong&gt;{0}&lt;strong&gt; has no variants created yet.',
-									[item?.item_name],
+									[item?.item_name]
 								)
 							"
 						/>
@@ -317,7 +317,7 @@
 								:inner="
 									__(
 										'1. Go to &lt;strong&gt;Item Master&lt;strong&gt; → &lt;strong&gt;{0}&lt;strong&gt;',
-										[item?.item_code],
+										[item?.item_code]
 									)
 								"
 							/>
@@ -325,7 +325,7 @@
 								:tag="'li'"
 								:inner="
 									__(
-										'2. Click &lt;strong&gt;&quot;Make Variants&quot;&lt;strong&gt; button',
+										'2. Click &lt;strong&gt;&quot;Make Variants&quot;&lt;strong&gt; button'
 									)
 								"
 							/>
@@ -559,7 +559,7 @@ watch(
 		if (isOpen && props.item) {
 			loadOptions();
 		}
-	},
+	}
 );
 
 // Watch mode and item changes to reload options

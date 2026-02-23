@@ -310,7 +310,7 @@ watch(
 			// Sync with external state
 			appliedDiscount.value = props.appliedCoupon;
 		}
-	},
+	}
 );
 
 watch(show, (val) => {
@@ -322,7 +322,7 @@ watch(
 	() => props.appliedCoupon,
 	(val) => {
 		appliedDiscount.value = val;
-	},
+	}
 );
 
 async function loadGiftCards() {

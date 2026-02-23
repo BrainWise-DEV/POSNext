@@ -25,7 +25,7 @@ export function useShift() {
 				if (data.server_now && data.pos_opening_shift?.period_start_date) {
 					const serverNow = new Date(data.server_now).getTime();
 					const shiftStart = new Date(
-						data.pos_opening_shift.period_start_date,
+						data.pos_opening_shift.period_start_date
 					).getTime();
 					initialElapsedMs = Math.max(0, serverNow - shiftStart);
 				}
@@ -44,7 +44,7 @@ export function useShift() {
 						...data,
 						_initialElapsedMs: initialElapsedMs,
 						_receivedAt: Date.now(),
-					}),
+					})
 				);
 			} else {
 				shiftState.value = {
@@ -112,7 +112,7 @@ export function useShift() {
 					...data,
 					_initialElapsedMs: 0,
 					_receivedAt: Date.now(),
-				}),
+				})
 			);
 		},
 		onError(error) {

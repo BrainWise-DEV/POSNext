@@ -97,8 +97,8 @@
 							autoAddEnabled
 								? 'border-blue-400 bg-blue-50 focus:ring-2 focus:ring-blue-500 focus:border-transparent'
 								: scannerEnabled
-									? 'border-green-400 bg-green-50 focus:ring-2 focus:ring-green-500 focus:border-transparent'
-									: 'border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent',
+								? 'border-green-400 bg-green-50 focus:ring-2 focus:ring-green-500 focus:border-transparent'
+								: 'border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent',
 						]"
 						:aria-label="__('Search items')"
 					/>
@@ -149,8 +149,8 @@
 								autoAddEnabled
 									? __('Auto-Add: ON - Press Enter to add items to cart')
 									: __(
-											'Auto-Add: OFF - Click to enable automatic cart addition on Enter',
-										)
+											'Auto-Add: OFF - Click to enable automatic cart addition on Enter'
+									  )
 							"
 							:aria-label="
 								autoAddEnabled ? __('Disable auto-add') : __('Enable auto-add')
@@ -262,8 +262,7 @@
 						@click.stop
 						class="absolute end-0 mt-1 w-56 bg-white rounded-lg shadow-xl border border-gray-200 z-[9999]"
 						style="
-							box-shadow:
-								0 20px 25px -5px rgba(0, 0, 0, 0.1),
+							box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1),
 								0 10px 10px -5px rgba(0, 0, 0, 0.04);
 						"
 					>
@@ -1193,11 +1192,13 @@ const searchPlaceholder = computed(() => SEARCH_PLACEHOLDERS[searchMode.value]);
 // Tracks: length, item_code, quantity, and amount to detect all cart changes including array replacements
 watch(
 	() =>
-		`${props.cartItems.length}-${props.cartItems.map((i) => `${i.item_code}:${i.quantity || 0}:${i.amount || 0}`).join("|")}`,
+		`${props.cartItems.length}-${props.cartItems
+			.map((i) => `${i.item_code}:${i.quantity || 0}:${i.amount || 0}`)
+			.join("|")}`,
 	() => {
 		itemStore.setCartItems(props.cartItems);
 	},
-	{ immediate: true, flush: "sync" }, // Synchronous to ensure immediate stock updates
+	{ immediate: true, flush: "sync" } // Synchronous to ensure immediate stock updates
 );
 
 watch(
@@ -1207,7 +1208,7 @@ watch(
 			itemStore.setPosProfile(newProfile);
 		}
 	},
-	{ immediate: true },
+	{ immediate: true }
 );
 
 // Reset to page 1 when filtered items meaningfully change (group switch, search, etc.)
@@ -1250,7 +1251,7 @@ watch(
 			lastAutoSwitchCount.value = 0;
 		}
 	},
-	{ immediate: false },
+	{ immediate: false }
 );
 
 // Throttle scroll handler for better performance
@@ -1323,7 +1324,7 @@ function getOptimizedClickHandler(item) {
 			},
 			{
 				feedback: true,
-			},
+			}
 		);
 		optimizedClickHandlers.set(key, handler);
 	}
@@ -1391,12 +1392,12 @@ function selectItem(item, autoAdd = false) {
 			item.is_bundle
 				? __(
 						'"{0}" cannot be added to cart. Bundle is out of stock. Allow Negative Stock is disabled.',
-						[item.item_name],
-					)
+						[item.item_name]
+				  )
 				: __(
 						'"{0}" cannot be added to cart. Item is out of stock. Allow Negative Stock is disabled.',
-						[item.item_name],
-					),
+						[item.item_name]
+				  )
 		);
 		return false;
 	}

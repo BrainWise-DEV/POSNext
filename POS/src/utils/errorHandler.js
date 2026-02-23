@@ -119,7 +119,7 @@ export function parseError(error) {
 		// Parse the message to extract item and quantity information
 		// Example: "1.0 units of Item IPhone 17-WHI needed in Warehouse Goods In Transit - BrD"
 		const match = context.message.match(
-			/(\d+\.?\d*)\s+units?\s+of\s+(?:Item\s+)?(.+?)\s+needed\s+in\s+(?:Warehouse\s+)?(.+?)(?:\s+to complete|$)/i,
+			/(\d+\.?\d*)\s+units?\s+of\s+(?:Item\s+)?(.+?)\s+needed\s+in\s+(?:Warehouse\s+)?(.+?)(?:\s+to complete|$)/i
 		);
 
 		if (match) {
@@ -129,7 +129,7 @@ export function parseError(error) {
 			context.message = `Not enough stock for "${itemName}".\n\nYou need ${qty} ${unit} but the warehouse "${warehouse}" doesn't have enough available.\n\nPlease reduce the quantity or check another warehouse.`;
 		} else if (!context.message || context.message === "An unexpected error occurred") {
 			context.message = __(
-				"Not enough stock available in the warehouse.\n\nPlease reduce the quantity or check stock availability.",
+				"Not enough stock available in the warehouse.\n\nPlease reduce the quantity or check stock availability."
 			);
 		}
 

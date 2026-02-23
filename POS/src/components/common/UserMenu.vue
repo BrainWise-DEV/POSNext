@@ -178,9 +178,9 @@ const Avatar = (props) => {
 						src: props.image,
 						alt: props.name,
 						class: "w-full h-full object-cover",
-					})
+				  })
 				: h("span", { class: "text-sm font-bold text-white" }, props.initials),
-		],
+		]
 	);
 };
 

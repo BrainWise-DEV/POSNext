@@ -278,7 +278,7 @@
 										<p class="text-sm text-gray-600 mb-6">
 											{{
 												__(
-													"Choose a promotion from the list to view and edit, or create a new one to get started",
+													"Choose a promotion from the list to view and edit, or create a new one to get started"
 												)
 											}}
 										</p>
@@ -295,7 +295,7 @@
 										<p v-else class="text-sm text-amber-600">
 											{{
 												__(
-													"You don't have permission to create promotions",
+													"You don't have permission to create promotions"
 												)
 											}}
 										</p>
@@ -349,21 +349,21 @@
 													<span v-if="isCreating">
 														{{
 															__(
-																"Fill in the details to create a new promotional scheme",
+																"Fill in the details to create a new promotional scheme"
 															)
 														}}
 													</span>
 													<span v-else-if="isPricingRule">
 														{{
 															__(
-																"View pricing rule details (read-only)",
+																"View pricing rule details (read-only)"
 															)
 														}}
 													</span>
 													<span v-else>
 														{{
 															__(
-																"Update the promotion details below",
+																"Update the promotion details below"
 															)
 														}}
 													</span>
@@ -547,7 +547,7 @@
 															{{
 																__("Select {0}", [
 																	translateApplyOn(
-																		form.apply_on,
+																		form.apply_on
 																	),
 																])
 															}}
@@ -778,7 +778,7 @@
 																		? __('Discount (%)')
 																		: __('discount ({0})', [
 																				currency,
-																			])
+																		  ])
 																"
 																v-model="form.discount_value"
 																placeholder="0"
@@ -809,7 +809,7 @@
 																	v-model="freeItemSearch"
 																	:placeholder="
 																		__(
-																			'Search item... (min 2 characters)',
+																			'Search item... (min 2 characters)'
 																		)
 																	"
 																>
@@ -837,7 +837,7 @@
 																			:key="item.item_code"
 																			@click="
 																				selectFreeItem(
-																					item,
+																					item
 																				)
 																			"
 																			type="button"
@@ -987,14 +987,14 @@
 										:inner="
 											__(
 												'Are you sure you want to delete &lt;strong&gt;&quot;{0}&quot;&lt;strong&gt;?',
-												[promotionToDelete?.name],
+												[promotionToDelete?.name]
 											)
 										"
 									/>
 									<p class="text-sm text-gray-500">
 										{{
 											__(
-												"This will also delete all associated pricing rules. This action cannot be undone.",
+												"This will also delete all associated pricing rules. This action cannot be undone."
 											)
 										}}
 									</p>
@@ -1115,7 +1115,7 @@ const filteredPromotions = computed(() => {
 	// Filter by search query
 	if (searchQuery.value) {
 		filtered = filtered.filter((p) =>
-			p.name.toLowerCase().includes(searchQuery.value.toLowerCase()),
+			p.name.toLowerCase().includes(searchQuery.value.toLowerCase())
 		);
 	}
 
@@ -1147,7 +1147,7 @@ const searchResults = computed(() => {
 		(item) =>
 			item.item_code?.toLowerCase().includes(term) ||
 			item.item_name?.toLowerCase().includes(term) ||
-			item.barcode?.toLowerCase().includes(term),
+			item.barcode?.toLowerCase().includes(term)
 	);
 
 	// Limit to 20 results for performance
@@ -1168,7 +1168,7 @@ const freeItemSearchResults = computed(() => {
 		(item) =>
 			item.item_code?.toLowerCase().includes(term) ||
 			item.item_name?.toLowerCase().includes(term) ||
-			item.barcode?.toLowerCase().includes(term),
+			item.barcode?.toLowerCase().includes(term)
 	);
 
 	// Limit to 20 results for performance
@@ -1189,12 +1189,12 @@ const applyOnOptions = computed(() =>
 	Object.entries(APPLY_ON_CONFIG).map(([value, config]) => ({
 		label: config.label(),
 		value,
-	})),
+	}))
 );
 
 // Computed: Options for Item Group dropdown
 const itemGroupOptions = computed(() =>
-	itemGroups.value.map((g) => ({ label: g.name, value: g.name })),
+	itemGroups.value.map((g) => ({ label: g.name, value: g.name }))
 );
 
 // Computed: Options for Brand dropdown
@@ -1377,7 +1377,7 @@ watch(
 			loadData();
 			checkPermissions();
 		}
-	},
+	}
 );
 
 watch(show, (val) => {
@@ -1396,7 +1396,7 @@ watch(
 		if (isCreating.value && oldVal && newVal !== oldVal) {
 			form.value.items = [];
 		}
-	},
+	}
 );
 
 onMounted(() => {
@@ -1522,13 +1522,13 @@ function handleSubmit() {
 	// Check for duplicate name when creating
 	if (isCreating.value) {
 		const duplicate = promotions.value.find(
-			(p) => p.name.toLowerCase() === form.value.name.toLowerCase(),
+			(p) => p.name.toLowerCase() === form.value.name.toLowerCase()
 		);
 		if (duplicate) {
 			showWarning(
 				__('Promotion "{0}" already exists. Please use a different name.', [
 					form.value.name,
-				]),
+				])
 			);
 			return;
 		}

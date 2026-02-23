@@ -79,7 +79,7 @@
 														{{
 															formatCurrency(
 																localItem.price_list_rate ||
-																	localItem.rate,
+																	localItem.rate
 															)
 														}}
 														/
@@ -316,8 +316,8 @@
 															:title="
 																localSerials.length <= 1
 																	? __(
-																			'Cannot remove last serial',
-																		)
+																			'Cannot remove last serial'
+																	  )
 																	: __('Remove serial')
 															"
 														>
@@ -633,7 +633,7 @@ watch(
 			calculateTotals();
 		}
 	},
-	{ immediate: true },
+	{ immediate: true }
 );
 
 /**
@@ -728,7 +728,7 @@ async function handleWarehouseChange() {
 				__('"{0}" is not available in warehouse "{1}". Please select another warehouse.', [
 					localItem.value.item_name,
 					localWarehouse.value,
-				]),
+				])
 			);
 		} else if (availableStock < localQuantity.value) {
 			hasStock.value = false;
@@ -738,12 +738,12 @@ async function handleWarehouseChange() {
 					localItem.value.item_name,
 					localWarehouse.value,
 					localQuantity.value,
-				]),
+				])
 			);
 		} else {
 			hasStock.value = true;
 			showSuccess(
-				__('{0} units available in "{1}"', [availableStock, localWarehouse.value]),
+				__('{0} units available in "{1}"', [availableStock, localWarehouse.value])
 			);
 		}
 	} catch (error) {
@@ -776,7 +776,7 @@ function calculateDiscount() {
 			discountValue.value = 100;
 		}
 		calculatedDiscount.value = roundCurrency(
-			(calculatedSubtotal.value * discountValue.value) / 100,
+			(calculatedSubtotal.value * discountValue.value) / 100
 		);
 	} else {
 		// Ensure amount doesn't exceed subtotal
@@ -837,7 +837,7 @@ function updateItem() {
 					__("Rate reduction of {0}% exceeds maximum allowed discount of {1}%", [
 						roundedDiscount.toFixed(2),
 						maxDiscount,
-					]),
+					])
 				);
 				return;
 			}

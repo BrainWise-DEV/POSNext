@@ -253,7 +253,7 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 					}
 
 					log.debug(
-						`Synced ${active.length} active, removed ${disabled.length} disabled customers`,
+						`Synced ${active.length} active, removed ${disabled.length} disabled customers`
 					);
 				}
 
@@ -282,7 +282,7 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 		try {
 			// Add to local array (at the beginning for visibility)
 			const existingWithoutNew = allCustomers.value.filter(
-				(cust) => cust.name !== customer.name,
+				(cust) => cust.name !== customer.name
 			);
 			allCustomers.value = [customer, ...existingWithoutNew];
 
@@ -368,7 +368,7 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 			localStorage.setItem("pos_recent_customers", JSON.stringify(recentSearches.value));
 			localStorage.setItem(
 				"pos_frequent_customers",
-				JSON.stringify(frequentCustomers.value),
+				JSON.stringify(frequentCustomers.value)
 			);
 		} catch (e) {
 			log.warn("Failed to persist customer history:", e);

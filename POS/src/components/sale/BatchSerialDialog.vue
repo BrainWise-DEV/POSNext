@@ -339,7 +339,7 @@ const availableBatches = computed(() => {
 				.filter(
 					(item) =>
 						item.item_code === props.item?.item_code &&
-						item.batch_no === batch.batch_no,
+						item.batch_no === batch.batch_no
 				)
 				.reduce((sum, item) => sum + (item.quantity || 0), 0);
 
@@ -384,7 +384,7 @@ watch(
 		if (val && props.item) {
 			loadBatchesOrSerials();
 		}
-	},
+	}
 );
 
 watch(show, (val) => {
@@ -404,7 +404,7 @@ const filteredSerials = computed(() => {
 	}
 	const query = serialSearchQuery.value.toLowerCase().trim();
 	return availableSerials.value.filter((serial) =>
-		serial.serial_no.toLowerCase().includes(query),
+		serial.serial_no.toLowerCase().includes(query)
 	);
 });
 

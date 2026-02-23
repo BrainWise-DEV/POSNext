@@ -64,7 +64,7 @@ if ("serviceWorker" in navigator) {
 				});
 			});
 		},
-		{ passive: true },
+		{ passive: true }
 	);
 }
 
@@ -221,14 +221,11 @@ async function initializeApp() {
 	// Scheduled CSRF Token Refresh (every 30 minutes)
 	// -------------------------------------------------------------------------
 
-	setInterval(
-		async () => {
-			log.debug("Scheduled CSRF token refresh");
-			await ensureCSRFToken({ forceRefresh: true, silent: true });
-			await syncCSRFTokenToWorker();
-		},
-		30 * 60 * 1000,
-	);
+	setInterval(async () => {
+		log.debug("Scheduled CSRF token refresh");
+		await ensureCSRFToken({ forceRefresh: true, silent: true });
+		await syncCSRFTokenToWorker();
+	}, 30 * 60 * 1000);
 }
 
 initializeApp();

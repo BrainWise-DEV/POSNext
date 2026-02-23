@@ -194,7 +194,7 @@
 							<p class="text-xs text-amber-700 mt-0.5">
 								{{
 									__(
-										"You don't have permission to create customers. Contact your administrator.",
+										"You don't have permission to create customers. Contact your administrator."
 									)
 								}}
 							</p>
@@ -313,7 +313,7 @@ const filteredCountries = computed(() => {
 		(c) =>
 			c.name.toLowerCase().includes(query) ||
 			c.isd.includes(query) ||
-			c.code.toLowerCase().includes(query),
+			c.code.toLowerCase().includes(query)
 	);
 });
 
@@ -377,7 +377,7 @@ const updateTerritoryFromCountry = () => {
 	const fuzzyMatch = territories.value.find(
 		(t) =>
 			t.toLowerCase().includes(country.name.toLowerCase()) ||
-			country.name.toLowerCase().includes(t.toLowerCase()),
+			country.name.toLowerCase().includes(t.toLowerCase())
 	);
 
 	if (fuzzyMatch) {
@@ -455,11 +455,11 @@ const createListResource = (doctype, onSuccess) =>
 
 const customerGroupsResource = createListResource(
 	"Customer Group",
-	(names) => (customerGroups.value = names),
+	(names) => (customerGroups.value = names)
 );
 const territoriesResource = createListResource(
 	"Territory",
-	(names) => (territories.value = names),
+	(names) => (territories.value = names)
 );
 
 const posProfileResource = createResource({
@@ -539,7 +539,7 @@ const resetForm = () => {
 
 watch(
 	() => props.initialName,
-	(name) => name && (customerData.value.customer_name = name),
+	(name) => name && (customerData.value.customer_name = name)
 );
 
 // Pre-fill form when customer prop changes (edit mode)
@@ -564,7 +564,7 @@ watch(
 			}
 		}
 	},
-	{ immediate: true },
+	{ immediate: true }
 );
 
 watch(
@@ -575,7 +575,7 @@ watch(
 			selectedCountryCode.value = code;
 			phoneNumber.value = rest.join("-");
 		}
-	},
+	}
 );
 
 watch(selectedCountryCode, async () => {
@@ -595,7 +595,7 @@ watch(
 	async (isOpen) => {
 		show.value = isOpen;
 		isOpen ? await loadDialogData() : resetForm();
-	},
+	}
 );
 
 watch(show, (val) => emit("update:modelValue", val));

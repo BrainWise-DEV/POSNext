@@ -164,7 +164,7 @@ class NetworkMonitor {
 				// Reschedule with appropriate interval
 				this._scheduleNextPing();
 			},
-			{ passive: true },
+			{ passive: true }
 		);
 	}
 
@@ -196,7 +196,7 @@ class NetworkMonitor {
 		if (offlineState._serverOnline === false) {
 			const backoffInterval = Math.min(
 				CONFIG.INTERVAL_OFFLINE_MS * this._backoffMultiplier,
-				CONFIG.BACKOFF_MAX_MS,
+				CONFIG.BACKOFF_MAX_MS
 			);
 			// Add jitter
 			const jitter = 1 + (Math.random() - 0.5) * 2 * CONFIG.BACKOFF_JITTER;
@@ -298,7 +298,7 @@ class NetworkMonitor {
 			if (this._consecutiveSuccesses >= CONFIG.ONLINE_THRESHOLD) {
 				if (!offlineState._serverOnline) {
 					log.info(
-						`Server online (${CONFIG.ONLINE_THRESHOLD} consecutive successes, latency: ${latency}ms)`,
+						`Server online (${CONFIG.ONLINE_THRESHOLD} consecutive successes, latency: ${latency}ms)`
 					);
 					offlineState.setServerOnline(true);
 					this._broadcastState(offlineState.getState());
@@ -343,7 +343,7 @@ class NetworkMonitor {
 		}
 
 		const avgLatency = Math.round(
-			this._latencyHistory.reduce((a, b) => a + b, 0) / this._latencyHistory.length,
+			this._latencyHistory.reduce((a, b) => a + b, 0) / this._latencyHistory.length
 		);
 
 		let quality = "good";
@@ -410,7 +410,7 @@ class OfflineStateManager {
 				this._networkMonitor.checkNow();
 				this._notifyChange("browser");
 			},
-			{ passive: true },
+			{ passive: true }
 		);
 
 		window.addEventListener(
@@ -420,7 +420,7 @@ class OfflineStateManager {
 				this._browserOnline = false;
 				this._notifyChange("browser");
 			},
-			{ passive: true },
+			{ passive: true }
 		);
 
 		// Also listen for network information changes (if available)
@@ -436,7 +436,7 @@ class OfflineStateManager {
 					// Connection changed - trigger immediate check
 					this._networkMonitor.checkNow();
 				},
-				{ passive: true },
+				{ passive: true }
 			);
 		}
 	}

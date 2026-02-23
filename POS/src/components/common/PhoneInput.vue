@@ -160,7 +160,7 @@ watch(
 		if (newValue !== currentFullValue) {
 			parseIncomingValue(newValue);
 		}
-	},
+	}
 );
 
 // Initialize

@@ -103,7 +103,7 @@ export async function validateCartStock(items, warehouse) {
 					item.item_name,
 					item.quantity,
 					result.actualQty,
-					item.warehouse || warehouse,
+					item.warehouse || warehouse
 				),
 			});
 		}

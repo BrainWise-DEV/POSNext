@@ -723,7 +723,7 @@
 											{{
 												Math.floor(
 													convertToBarcodeUom(warehouse.available_qty) *
-														100,
+														100
 												) / 100
 											}}
 											{{ selectedBarcodeUom }}
@@ -1031,7 +1031,7 @@ watch(
 			isReady.value = false;
 		}
 	},
-	{ immediate: true },
+	{ immediate: true }
 );
 
 function resetSearchState() {
@@ -1337,7 +1337,7 @@ function highlightMatch(text, query) {
 	const regex = new RegExp(`(${escapedQuery})`, "gi");
 	return text.replace(
 		regex,
-		'<mark class="bg-yellow-200 text-yellow-900 rounded px-0.5">$1</mark>',
+		'<mark class="bg-yellow-200 text-yellow-900 rounded px-0.5">$1</mark>'
 	);
 }
 

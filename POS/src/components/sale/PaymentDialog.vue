@@ -505,7 +505,7 @@
 											formatCurrency(
 												item.amount ||
 													(item.qty || item.quantity) *
-														(item.rate || item.price_list_rate),
+														(item.rate || item.price_list_rate)
 											)
 										}}
 									</div>
@@ -1036,10 +1036,10 @@
 											? 'border-amber-500 bg-amber-50 text-amber-700'
 											: 'border-blue-500 bg-blue-50 text-blue-700'
 										: isWalletPaymentMethod(method.mode_of_payment)
-											? availableWalletBalance > 0
-												? 'border-amber-300 bg-amber-50 hover:border-amber-500 hover:bg-amber-100 text-amber-700'
-												: 'border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed opacity-60'
-											: 'border-gray-200 bg-white hover:border-blue-400 hover:bg-blue-50 text-gray-700',
+										? availableWalletBalance > 0
+											? 'border-amber-300 bg-amber-50 hover:border-amber-500 hover:bg-amber-100 text-amber-700'
+											: 'border-gray-200 bg-gray-100 text-gray-400 cursor-not-allowed opacity-60'
+										: 'border-gray-200 bg-white hover:border-blue-400 hover:bg-blue-50 text-gray-700',
 								]"
 							>
 								<span :class="isSmallMobile ? 'text-xs' : 'text-sm lg:text-lg'">{{
@@ -1197,7 +1197,7 @@
 									? __("Exact amount only")
 									: __("Quick amounts for {0}", [
 											__(lastSelectedMethod.mode_of_payment),
-										])
+									  ])
 							}}
 						</div>
 						<div class="grid grid-cols-4 gap-1.5">
@@ -1965,7 +1965,7 @@ watch(
 			// Small delay to ensure DOM is rendered
 			setTimeout(syncColumnHeights, 100);
 		}
-	},
+	}
 );
 
 // Handle Enter key from numpad keyboard input
@@ -2528,7 +2528,7 @@ const isExactAmountModeActive = computed(() => {
 const hasCashPayment = computed(() => {
 	return paymentEntries.value.some((entry) => {
 		const method = paymentMethods.value.find(
-			(m) => m.mode_of_payment === entry.mode_of_payment,
+			(m) => m.mode_of_payment === entry.mode_of_payment
 		);
 		return isCashPaymentMethod(method);
 	});
@@ -2538,7 +2538,7 @@ const hasCashPayment = computed(() => {
 const hasNonCashPayment = computed(() => {
 	return paymentEntries.value.some((entry) => {
 		const method = paymentMethods.value.find(
-			(m) => m.mode_of_payment === entry.mode_of_payment,
+			(m) => m.mode_of_payment === entry.mode_of_payment
 		);
 		return method && !isCashPaymentMethod(method) && !entry.is_customer_credit;
 	});
@@ -2641,7 +2641,7 @@ watch(
 			}
 		}
 	},
-	{ immediate: true }, // Load immediately if posProfile is already set
+	{ immediate: true } // Load immediately if posProfile is already set
 );
 
 // Pre-fetch customer balance when customer changes (before dialog opens)
@@ -2656,7 +2656,7 @@ watch(
 			customerCreditResource.fetch();
 		}
 	},
-	{ immediate: true },
+	{ immediate: true }
 );
 
 watch(show, (newVal) => {
@@ -2698,7 +2698,7 @@ watch(show, (newVal) => {
 		if (creditEnabled) {
 			log.debug(
 				"[PaymentDialog] Customer credit/balance should be pre-loaded, current balance:",
-				customerBalance.value,
+				customerBalance.value
 			);
 		}
 
@@ -2734,7 +2734,7 @@ function selectPaymentMethod(method) {
 function getDefaultNonWalletMethod() {
 	// First try to find the default method that's not a wallet payment
 	const defaultMethod = paymentMethods.value.find(
-		(m) => m.default && !isWalletPaymentMethod(m.mode_of_payment),
+		(m) => m.default && !isWalletPaymentMethod(m.mode_of_payment)
 	);
 	if (defaultMethod) return defaultMethod;
 
@@ -2742,7 +2742,7 @@ function getDefaultNonWalletMethod() {
 	const cashMethod = paymentMethods.value.find(
 		(m) =>
 			!isWalletPaymentMethod(m.mode_of_payment) &&
-			(m.mode_of_payment.toLowerCase().includes("cash") || m.type?.toLowerCase() === "cash"),
+			(m.mode_of_payment.toLowerCase().includes("cash") || m.type?.toLowerCase() === "cash")
 	);
 	if (cashMethod) return cashMethod;
 
@@ -2767,7 +2767,7 @@ function switchToNextPaymentMethod(partialAmount) {
 				formatCurrency(partialAmount),
 				formatCurrency(newRemaining),
 				__(nextMethod.mode_of_payment),
-			]),
+			])
 		);
 	}
 }
@@ -2800,7 +2800,7 @@ function quickAddPayment(method) {
 		const currentNonCashTotal = paymentEntries.value
 			.filter((entry) => {
 				const m = paymentMethods.value.find(
-					(pm) => pm.mode_of_payment === entry.mode_of_payment,
+					(pm) => pm.mode_of_payment === entry.mode_of_payment
 				);
 				return m && !isCashPaymentMethod(m) && !entry.is_customer_credit;
 			})
@@ -2909,7 +2909,7 @@ function addCustomPayment(method, amount) {
 		// Warn and reject if amount doesn't match exact remaining (use rounded comparison to avoid floating-point issues)
 		if (roundCurrency(amt) !== maxAllowed) {
 			showWarning(
-				__("Non-cash payment must equal {0} exactly", [formatCurrency(maxAllowed)]),
+				__("Non-cash payment must equal {0} exactly", [formatCurrency(maxAllowed)])
 			);
 			return;
 		}
@@ -2925,7 +2925,7 @@ function addCustomPayment(method, amount) {
 			showWarning(
 				__("Mixed payment cannot exceed invoice total. Limit: {0}", [
 					formatCurrency(roundCurrency(props.grandTotal) - totalPaid.value),
-				]),
+				])
 			);
 			return;
 		}
@@ -3077,7 +3077,7 @@ function handleAdditionalDiscountChange() {
 			discountValue = settingsStore.maxDiscountAllowed;
 			// Show warning toast
 			showWarning(
-				__("Maximum allowed discount is {0}%", [settingsStore.maxDiscountAllowed]),
+				__("Maximum allowed discount is {0}%", [settingsStore.maxDiscountAllowed])
 			);
 		}
 
@@ -3106,7 +3106,7 @@ function handleAdditionalDiscountChange() {
 						settingsStore.maxDiscountAllowed,
 						props.currency,
 						maxAmount.toFixed(2),
-					]),
+					])
 				);
 			}
 		}
@@ -3156,6 +3156,6 @@ watch(
 			// Only sync when dialog opens, not continuously
 			localAdditionalDiscount.value = props.additionalDiscount || 0;
 		}
-	},
+	}
 );
 </script>

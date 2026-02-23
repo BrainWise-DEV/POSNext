@@ -45,7 +45,7 @@ export function useLazyLoad(options = {}) {
 			{
 				rootMargin,
 				threshold,
-			},
+			}
 		);
 
 		observer.observe(targetRef.value);

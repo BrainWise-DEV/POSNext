@@ -427,7 +427,7 @@ watch(
 	() => props.pendingInvoices,
 	(newInvoices) => {
 		invoices.value = newInvoices;
-	},
+	}
 );
 
 async function loadInvoices() {

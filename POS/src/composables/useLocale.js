@@ -277,7 +277,7 @@ export function useLocale() {
 			// If server returned a different language, switch to it
 			if (serverLocale && serverLocale !== cachedLocale) {
 				log.info(
-					`Server language (${serverLocale}) differs from cached (${cachedLocale}), switching`,
+					`Server language (${serverLocale}) differs from cached (${cachedLocale}), switching`
 				);
 				await changeLocale(serverLocale);
 			}

@@ -121,7 +121,7 @@ export function registerDialog(dialogRef, dialogId) {
 				dialogCounter.value--;
 			}
 		},
-		{ immediate: false },
+		{ immediate: false }
 	);
 
 	// Return the original ref with cleanup

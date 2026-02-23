@@ -126,7 +126,7 @@ function handlePosProfileUpdate(data) {
 
 		// Execute all registered handlers in parallel with error isolation
 		const handlerPromises = Array.from(eventHandlers).map((handler) =>
-			executeHandlerSafely(handler, data),
+			executeHandlerSafely(handler, data)
 		);
 
 		Promise.all(handlerPromises).then(() => {
@@ -176,7 +176,7 @@ function startListening() {
 			const delay = RETRY_DELAY_MS * retryAttempts;
 
 			log.info(
-				`Socket unavailable, retrying in ${delay}ms (attempt ${retryAttempts}/${MAX_RETRY_ATTEMPTS})`,
+				`Socket unavailable, retrying in ${delay}ms (attempt ${retryAttempts}/${MAX_RETRY_ATTEMPTS})`
 			);
 
 			retryTimer = setTimeout(() => {

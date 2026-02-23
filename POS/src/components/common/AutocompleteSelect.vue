@@ -231,7 +231,7 @@ watch(
 			searchQuery.value = "";
 		}
 	},
-	{ immediate: true },
+	{ immediate: true }
 );
 
 // Filter options based on search
@@ -291,7 +291,7 @@ function handleKeydown(e) {
 			e.preventDefault();
 			highlightedIndex.value = Math.min(
 				highlightedIndex.value + 1,
-				paginatedOptions.value.length - 1,
+				paginatedOptions.value.length - 1
 			);
 			scrollToHighlighted();
 			break;

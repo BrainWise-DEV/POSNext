@@ -231,7 +231,7 @@ watch(
 		if (val) {
 			loadDrafts();
 		}
-	},
+	}
 );
 
 watch(show, (val) => {
@@ -329,7 +329,7 @@ function calculateTotal(items) {
 			const qty = item.quantity || item.qty || 1;
 			const rate = item.rate || 0;
 			return sum + roundCurrency(qty * roundCurrency(rate));
-		}, 0),
+		}, 0)
 	);
 }
 </script>

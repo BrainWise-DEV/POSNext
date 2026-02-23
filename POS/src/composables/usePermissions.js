@@ -57,7 +57,7 @@ export function usePermissions() {
 			checks.map(async ({ doctype, permType = "create" }) => {
 				const key = `${doctype}:${permType}`;
 				results[key] = await checkPermission(doctype, permType);
-			}),
+			})
 		);
 
 		return results;

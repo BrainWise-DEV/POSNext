@@ -136,7 +136,7 @@ export function useQzTray() {
 			showError(
 				error?.messages?.[0] ||
 					error?.message ||
-					__("Failed to generate certificate. Are you a System Manager?"),
+					__("Failed to generate certificate. Are you a System Manager?")
 			);
 		} finally {
 			certLoading.value = false;

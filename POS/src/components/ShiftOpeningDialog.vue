@@ -49,7 +49,7 @@
 							<p>
 								{{
 									__(
-										"No POS Profiles available. Please contact your administrator.",
+										"No POS Profiles available. Please contact your administrator."
 									)
 								}}
 							</p>
@@ -153,7 +153,7 @@
 						<p class="text-sm text-gray-500 mb-6">
 							{{
 								__(
-									"You have an open shift. Would you like to resume it or close it and open a new one?",
+									"You have an open shift. Would you like to resume it or close it and open a new one?"
 								)
 							}}
 						</p>
@@ -174,7 +174,7 @@
 									:inner="
 										__('&lt;strong&gt;Opened:&lt;/strong&gt; {0}', [
 											formatDateTime(
-												existingShift.pos_opening_shift?.period_start_date,
+												existingShift.pos_opening_shift?.period_start_date
 											),
 										])
 									"
@@ -297,7 +297,7 @@ const paymentMethods = computed(() => {
 	if (!dialogDataResource.data || !selectedProfile.value) return [];
 
 	return (dialogDataResource.data.payments_method || []).filter(
-		(method) => method.parent === selectedProfile.value.name,
+		(method) => method.parent === selectedProfile.value.name
 	);
 });
 
@@ -313,7 +313,7 @@ watch(
 			resetDialog();
 		}
 	},
-	{ immediate: true },
+	{ immediate: true }
 );
 
 watch(showClosingDialog, (isOpen) => {
@@ -425,7 +425,7 @@ async function handleExistingShiftClosed() {
 
 	if (profileToRestore) {
 		const matchedProfile = profilesResource.data?.find(
-			(profile) => profile.name === profileToRestore,
+			(profile) => profile.name === profileToRestore
 		);
 
 		if (matchedProfile) {

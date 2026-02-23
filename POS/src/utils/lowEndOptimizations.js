@@ -56,7 +56,7 @@ export function runWhenIdle(task, options = {}) {
 				runWhenIdle(task, options);
 			}
 		},
-		{ timeout },
+		{ timeout }
 	);
 }
 

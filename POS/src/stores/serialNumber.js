@@ -129,7 +129,7 @@ export const useSerialNumberStore = defineStore("serialNumber", () => {
 				: serialNumbers
 						.split("\n")
 						.map((s) => s.trim())
-						.filter(Boolean),
+						.filter(Boolean)
 		);
 
 		cached.serials = cached.serials.filter((s) => !serialsToRemove.has(s.serial_no));
@@ -165,7 +165,7 @@ export const useSerialNumberStore = defineStore("serialNumber", () => {
 
 		// Sort serials by serial_no for consistent ordering
 		cached.serials.sort((a, b) =>
-			a.serial_no.localeCompare(b.serial_no, undefined, { numeric: true }),
+			a.serial_no.localeCompare(b.serial_no, undefined, { numeric: true })
 		);
 
 		log.info(`Returned ${serialsToReturn.length} serials for ${itemCode}`);

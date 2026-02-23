@@ -48,7 +48,7 @@ class OfflineWorkerClient {
 			// Create worker using Vite's worker import syntax
 			this.worker = new Worker(
 				new URL("../../workers/offline.worker.js?worker", import.meta.url),
-				{ type: "module" },
+				{ type: "module" }
 			);
 
 			// Handle messages from worker
@@ -81,7 +81,7 @@ class OfflineWorkerClient {
 					window.dispatchEvent(
 						new CustomEvent("offlineStatusChange", {
 							detail: { serverOnline: payload.serverOnline },
-						}),
+						})
 					);
 					return;
 				}
@@ -91,7 +91,7 @@ class OfflineWorkerClient {
 					window.dispatchEvent(
 						new CustomEvent("stockSyncComplete", {
 							detail: payload,
-						}),
+						})
 					);
 					return;
 				}
@@ -101,7 +101,7 @@ class OfflineWorkerClient {
 					window.dispatchEvent(
 						new CustomEvent("stockSyncError", {
 							detail: payload,
-						}),
+						})
 					);
 					return;
 				}
@@ -183,7 +183,7 @@ class OfflineWorkerClient {
 				log.warn("Worker appears unresponsive, attempting recovery");
 				this.handleWorkerCrash(
 					"Worker unresponsive",
-					"No messages received for 2 minutes",
+					"No messages received for 2 minutes"
 				);
 			}
 		}, 60000);
@@ -344,8 +344,8 @@ class OfflineWorkerClient {
 					} else {
 						reject(
 							new Error(
-								`Worker message timeout: ${type} (retries: ${currentRetries})`,
-							),
+								`Worker message timeout: ${type} (retries: ${currentRetries})`
+							)
 						);
 					}
 				}

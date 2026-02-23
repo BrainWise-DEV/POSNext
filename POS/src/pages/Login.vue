@@ -190,7 +190,7 @@ watch(
 			// Show shift opening dialog after successful login
 			showShiftDialog.value = true;
 		}
-	},
+	}
 );
 
 // Watch for dialog being closed via X button (v-model update)

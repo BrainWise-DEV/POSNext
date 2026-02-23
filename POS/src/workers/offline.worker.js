@@ -143,13 +143,13 @@ async function initDB() {
 						log.error("Circuit breaker opened - DB permanently unavailable");
 					}
 					throw new Error(
-						`DB init failed after ${attempt} attempts: ${lastError.message}`,
+						`DB init failed after ${attempt} attempts: ${lastError.message}`
 					);
 				}
 
 				// Exponential backoff before retry
 				await new Promise((resolve) =>
-					setTimeout(resolve, CONFIG.RETRY_DELAY_MS * Math.pow(2, attempt - 1)),
+					setTimeout(resolve, CONFIG.RETRY_DELAY_MS * Math.pow(2, attempt - 1))
 				);
 			}
 		}
@@ -589,8 +589,9 @@ async function searchCachedItems(searchTerm = "", limit = 50, offset = 0) {
 
 		const results = allItems
 			.map((item) => {
-				const searchable =
-					`${item.item_code || ""} ${item.item_name || ""} ${item.description || ""}`.toLowerCase();
+				const searchable = `${item.item_code || ""} ${item.item_name || ""} ${
+					item.description || ""
+				}`.toLowerCase();
 
 				// All words must match
 				if (!searchWords.every((word) => searchable.includes(word))) {
@@ -671,7 +672,7 @@ async function searchCachedItemsByGroup(itemGroups = [], limit = 50, offset = 0)
 		const duration = Math.round(performance.now() - startTime);
 		recordMetric("searchCachedItemsByGroup", duration, false);
 		log.debug(
-			`Group search: ${paginated.length} items from ${itemGroups.length} groups in ${duration}ms`,
+			`Group search: ${paginated.length} items from ${itemGroups.length} groups in ${duration}ms`
 		);
 
 		cacheQueryResult(cacheKey, paginated);
@@ -1056,7 +1057,7 @@ async function removeItemsByGroups(itemGroups) {
 			`Removed ${totalRemoved} items, ${totalPricesRemoved} prices in ${duration}ms`,
 			{
 				groups: itemGroups.length,
-			},
+			}
 		);
 
 		return {
@@ -1436,7 +1437,7 @@ async function performStockSync() {
 			const duration = lastStockSyncTime - startTime;
 
 			log.success(
-				`Stock sync completed: ${result.updated}/${stockUpdates.length} items updated in ${duration}ms`,
+				`Stock sync completed: ${result.updated}/${stockUpdates.length} items updated in ${duration}ms`
 			);
 
 			// Notify main thread about successful sync
@@ -1597,7 +1598,7 @@ self.onmessage = async (event) => {
 				result = await searchCachedItems(
 					payload.searchTerm,
 					payload.limit,
-					payload.offset || 0,
+					payload.offset || 0
 				);
 				break;
 
@@ -1605,7 +1606,7 @@ self.onmessage = async (event) => {
 				result = await searchCachedItemsByGroup(
 					payload.itemGroups,
 					payload.limit,
-					payload.offset || 0,
+					payload.offset || 0
 				);
 				break;
 

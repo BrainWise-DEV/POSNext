@@ -27,7 +27,7 @@
 						<p class="text-xs md:text-sm text-amber-800 font-medium">
 							{{
 								__(
-									"This dialog has been open for over a minute. Please close the shift or close this dialog to resume the shift timer.",
+									"This dialog has been open for over a minute. Please close the shift or close this dialog to resume the shift timer."
 								)
 							}}
 						</p>
@@ -160,7 +160,7 @@
 								<p class="text-xs md:text-sm text-yellow-700 mt-1 md:mt-2">
 									{{
 										__(
-											"No invoices were created. Closing amounts should match opening amounts.",
+											"No invoices were created. Closing amounts should match opening amounts."
 										)
 									}}
 								</p>
@@ -175,7 +175,9 @@
 					>
 						<button
 							@click="showInvoiceDetails = !showInvoiceDetails"
-							:aria-label="`${showInvoiceDetails ? 'Hide' : 'Show'} invoice details for ${invoiceCount} transactions`"
+							:aria-label="`${
+								showInvoiceDetails ? 'Hide' : 'Show'
+							} invoice details for ${invoiceCount} transactions`"
 							:aria-expanded="showInvoiceDetails"
 							class="w-full px-3 py-3 md:px-6 md:py-4 flex items-center justify-between hover:bg-gray-50 transition-colors"
 						>
@@ -511,8 +513,8 @@
 										payment.difference === 0
 											? 'border-green-200 bg-green-50'
 											: payment.difference > 0
-												? 'border-blue-200 bg-blue-50'
-												: 'border-red-200 bg-red-50',
+											? 'border-blue-200 bg-blue-50'
+											: 'border-red-200 bg-red-50',
 									]"
 								>
 									<div
@@ -544,9 +546,9 @@
 															'Expected: &lt;span class=&quot;font-medium&quot;&gt;{0}&lt;/span&gt;',
 															[
 																formatCurrency(
-																	payment.expected_amount,
+																	payment.expected_amount
 																),
-															],
+															]
 														)
 													"
 												/>
@@ -584,7 +586,7 @@
 												{{
 													__("Short {0}", [
 														formatCurrency(
-															Math.abs(payment.difference),
+															Math.abs(payment.difference)
 														),
 													])
 												}}
@@ -769,16 +771,16 @@
 											getTotalDifference === 0
 												? 'text-green-600'
 												: getTotalDifference > 0
-													? 'text-blue-600'
-													: 'text-red-600',
+												? 'text-blue-600'
+												: 'text-red-600',
 										]"
 									>
 										{{
 											getTotalDifference === 0
 												? "✓ "
 												: getTotalDifference > 0
-													? "+"
-													: ""
+												? "+"
+												: ""
 										}}{{ formatCurrency(Math.abs(getTotalDifference)) }}
 									</p>
 								</div>
@@ -1046,7 +1048,7 @@ async function loadClosingData() {
 					closing_amount: payment.closing_amount ?? null,
 					difference: 0,
 					_touched: false,
-				}),
+				})
 			);
 
 			// Calculate initial differences
@@ -1090,7 +1092,7 @@ const canSubmit = computed(() => {
 			payment._touched &&
 			payment.closing_amount !== null &&
 			payment.closing_amount !== undefined &&
-			payment.closing_amount !== "",
+			payment.closing_amount !== ""
 	);
 });
 
@@ -1180,7 +1182,7 @@ const totalTax = computed(() => {
 	if (!closingData.value || !closingData.value.taxes) return 0;
 	return closingData.value.taxes.reduce(
 		(sum, tax) => sum + Number.parseFloat(tax.amount || 0),
-		0,
+		0
 	);
 });
 
@@ -1192,7 +1194,7 @@ const getTotalExpected = computed(() => {
 	if (!closingData.value || !closingData.value.payment_reconciliation) return 0;
 	return closingData.value.payment_reconciliation.reduce(
 		(sum, payment) => sum + Number.parseFloat(payment.expected_amount || 0),
-		0,
+		0
 	);
 });
 
@@ -1200,7 +1202,7 @@ const getTotalActual = computed(() => {
 	if (!closingData.value || !closingData.value.payment_reconciliation) return 0;
 	return closingData.value.payment_reconciliation.reduce(
 		(sum, payment) => sum + Number.parseFloat(payment.closing_amount || 0),
-		0,
+		0
 	);
 });
 

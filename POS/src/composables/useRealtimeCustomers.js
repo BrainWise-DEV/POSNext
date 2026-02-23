@@ -114,7 +114,7 @@ function handleCustomerUpdate(data) {
 
 		// Execute all registered handlers in parallel with error isolation
 		const handlerPromises = Array.from(eventHandlers).map((handler) =>
-			executeHandlerSafely(handler, data),
+			executeHandlerSafely(handler, data)
 		);
 
 		Promise.all(handlerPromises).then(() => {

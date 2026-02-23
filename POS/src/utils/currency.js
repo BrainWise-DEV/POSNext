@@ -92,7 +92,7 @@ function getFormatter(precision, locale = DEFAULT_LOCALE) {
 			new Intl.NumberFormat(locale, {
 				minimumFractionDigits: precision,
 				maximumFractionDigits: precision,
-			}),
+			})
 		);
 	}
 	return _formatterCache.get(key);
@@ -102,7 +102,9 @@ function getFormatter(precision, locale = DEFAULT_LOCALE) {
 export function formatCurrency(value, currency = DEFAULT_CURRENCY, locale = DEFAULT_LOCALE) {
 	if (typeof value !== "number" || Number.isNaN(value)) return "";
 	const abs = Math.abs(value);
-	const formatted = `${getSymbol(currency)} ${getFormatter(settings.currency, locale).format(abs)}`;
+	const formatted = `${getSymbol(currency)} ${getFormatter(settings.currency, locale).format(
+		abs
+	)}`;
 	return value < 0 ? `-${formatted}` : formatted;
 }
 

@@ -1195,15 +1195,15 @@
 												item.is_resolved_barcode
 													? 'bg-amber-100 text-amber-700 border border-amber-300 cursor-not-allowed'
 													: item.item_uoms && item.item_uoms.length > 0
-														? 'bg-blue-500 text-white border border-blue-400 hover:bg-blue-600 active:scale-95 cursor-pointer'
-														: 'bg-gray-100 text-gray-500 border border-gray-200 cursor-not-allowed opacity-60',
+													? 'bg-blue-500 text-white border border-blue-400 hover:bg-blue-600 active:scale-95 cursor-pointer'
+													: 'bg-gray-100 text-gray-500 border border-gray-200 cursor-not-allowed opacity-60',
 											]"
 											:title="
 												item.is_resolved_barcode
 													? __('UOM locked (barcode item)')
 													: item.item_uoms && item.item_uoms.length > 0
-														? __('Click to change unit')
-														: __('Only one unit available')
+													? __('Click to change unit')
+													: __('Only one unit available')
 											"
 										>
 											{{
@@ -1221,8 +1221,8 @@
 												item.is_resolved_barcode
 													? 'text-amber-600'
 													: item.item_uoms && item.item_uoms.length > 0
-														? 'text-white'
-														: 'text-gray-400',
+													? 'text-white'
+													: 'text-gray-400',
 											]"
 											fill="none"
 											stroke="currentColor"
@@ -1286,7 +1286,7 @@
 									>
 										{{
 											formatCurrency(
-												item.amount || item.rate * item.quantity,
+												item.amount || item.rate * item.quantity
 											)
 										}}
 									</div>
@@ -1669,7 +1669,7 @@ watch(
 		} else {
 			availableGiftCards.value = [];
 		}
-	},
+	}
 );
 
 /**

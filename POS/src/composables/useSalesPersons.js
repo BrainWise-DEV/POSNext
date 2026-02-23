@@ -66,7 +66,7 @@ export function useSalesPersons(posProfile) {
 	const totalSalesAllocation = computed(() => {
 		return selectedSalesPersons.value.reduce(
 			(sum, p) => sum + (p.allocated_percentage || 0),
-			0,
+			0
 		);
 	});
 

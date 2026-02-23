@@ -167,7 +167,7 @@
 					<p class="text-sm text-gray-600 mb-6">
 						{{
 							__(
-								"Choose a coupon from the list to view and edit, or create a new one to get started",
+								"Choose a coupon from the list to view and edit, or create a new one to get started"
 							)
 						}}
 					</p>
@@ -487,7 +487,7 @@
 											{{
 												__("{0}% off {1}", [
 													Number(
-														couponDetails.discount_percentage,
+														couponDetails.discount_percentage
 													).toFixed(2),
 													couponDetails.apply_on,
 												])
@@ -668,7 +668,7 @@
 							:inner="
 								__(
 									'Are you sure you want to delete &lt;strong&gt;&quot;{0}&quot;&lt;strong&gt;?',
-									[selectedCoupon?.coupon_code],
+									[selectedCoupon?.coupon_code]
 								)
 							"
 						/>
@@ -774,7 +774,7 @@ const filteredCoupons = computed(() => {
 			(c) =>
 				c.coupon_code?.toLowerCase().includes(term) ||
 				c.coupon_name?.toLowerCase().includes(term) ||
-				c.customer_name?.toLowerCase().includes(term),
+				c.customer_name?.toLowerCase().includes(term)
 		);
 	}
 
@@ -967,7 +967,7 @@ watch(
 			loading.value = true;
 			couponDetailsResource.reload();
 		}
-	},
+	}
 );
 
 onMounted(() => {
@@ -1056,7 +1056,7 @@ function handleToggle() {
 function handleDelete() {
 	if (selectedCoupon.value.used > 0) {
 		showWarning(
-			__("Cannot delete coupon as it has been used {0} times", [selectedCoupon.value.used]),
+			__("Cannot delete coupon as it has been used {0} times", [selectedCoupon.value.used])
 		);
 		return;
 	}

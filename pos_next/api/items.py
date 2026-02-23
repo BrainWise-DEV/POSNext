@@ -1921,7 +1921,7 @@ def _parse_item_codes_param(item_codes):
 			item_codes = json.loads(item_codes)
 		except (json.JSONDecodeError, ValueError):
 			return [item_codes]
-	return list(item_codes) if isinstance(item_codes, (list, tuple)) else [item_codes]
+	return list(item_codes) if isinstance(item_codes, list | tuple) else [item_codes]
 
 
 # =============================================================================

@@ -103,10 +103,10 @@
 										isOfferApplied(offer)
 											? 'bg-green-700 ring-2 ring-green-600'
 											: offer.offer === 'Give Product'
-												? 'bg-purple-600'
-												: offer.discount_percentage
-													? 'bg-orange-600'
-													: 'bg-green-600',
+											? 'bg-purple-600'
+											: offer.discount_percentage
+											? 'bg-orange-600'
+											: 'bg-green-600',
 									]"
 								>
 									<div class="text-lg font-bold">
@@ -249,7 +249,12 @@
 									<div
 										class="bg-green-600 h-2 rounded-full transition-all"
 										:style="{
-											width: `${Math.min((offersStore.cartSnapshot.subtotal / offer.min_amt) * 100, 100)}%`,
+											width: `${Math.min(
+												(offersStore.cartSnapshot.subtotal /
+													offer.min_amt) *
+													100,
+												100
+											)}%`,
 										}"
 									></div>
 								</div>
@@ -366,7 +371,7 @@ watch(
 	(val) => {
 		show.value = val;
 		// No need to load offers - they're already in the store
-	},
+	}
 );
 
 watch(show, (val) => {

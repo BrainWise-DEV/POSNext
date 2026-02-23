@@ -2356,7 +2356,7 @@ def apply_offers(invoice_data, selected_offers=None):
 			except ValueError:
 				selected_offers = [selected_offers]
 
-		if isinstance(selected_offers, (list, tuple, set)):
+		if isinstance(selected_offers, list | tuple | set):
 			selected_offer_names = {cstr(name) for name in selected_offers if cstr(name)}
 		else:
 			selected_offer_names = set()
@@ -2510,7 +2510,7 @@ def apply_offers(invoice_data, selected_offers=None):
 						rules = json.loads(raw_rules)
 					else:
 						rules = [r.strip() for r in raw_rules.split(",") if r.strip()]
-				elif isinstance(raw_rules, (list, tuple, set)):
+				elif isinstance(raw_rules, list | tuple | set):
 					rules = list(raw_rules)
 			raw_rule_names.update(rules)
 
@@ -2580,7 +2580,7 @@ def apply_offers(invoice_data, selected_offers=None):
 						rule_names = json.loads(raw_rules)
 					else:
 						rule_names = [r.strip() for r in raw_rules.split(",") if r.strip()]
-				elif isinstance(raw_rules, (list, tuple, set)):
+				elif isinstance(raw_rules, list | tuple | set):
 					rule_names = list(raw_rules)
 				else:
 					rule_names = []

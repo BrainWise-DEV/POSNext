@@ -187,7 +187,7 @@ export function useInvoice() {
 	const subtotal = computed(() => roundCurrency(_cachedSubtotal.value));
 	const totalTax = computed(() => roundCurrency(_cachedTotalTax.value));
 	const totalDiscount = computed(() =>
-		roundCurrency(_cachedTotalDiscount.value + (additionalDiscount.value || 0)),
+		roundCurrency(_cachedTotalDiscount.value + (additionalDiscount.value || 0))
 	);
 	const grandTotal = computed(() => {
 		const discount = _cachedTotalDiscount.value + (additionalDiscount.value || 0);
@@ -218,7 +218,7 @@ export function useInvoice() {
 	function addItem(item, quantity = 1) {
 		const itemUom = item.uom || item.stock_uom;
 		const existingItem = invoiceItems.value.find(
-			(i) => i.item_code === item.item_code && i.uom === itemUom,
+			(i) => i.item_code === item.item_code && i.uom === itemUom
 		);
 
 		if (existingItem) {
@@ -227,7 +227,7 @@ export function useInvoice() {
 			// IMPORTANT: Calculate oldAmount using same rounding as cache to ensure consistency
 			const oldPriceListRate = existingItem.price_list_rate || existingItem.rate;
 			const oldAmount = roundCurrency(
-				existingItem.quantity * roundCurrency(oldPriceListRate),
+				existingItem.quantity * roundCurrency(oldPriceListRate)
 			);
 			const oldTax = existingItem.tax_amount || 0;
 			const oldDiscount = existingItem.discount_amount || 0;
@@ -292,7 +292,7 @@ export function useInvoice() {
 			// Use rounded price_list_rate for subtotal to match ERPNext
 			const priceListRate = newItem.price_list_rate || newItem.rate;
 			_cachedSubtotal.value += roundCurrency(
-				newItem.quantity * roundCurrency(priceListRate),
+				newItem.quantity * roundCurrency(priceListRate)
 			);
 			_cachedTotalTax.value += newItem.tax_amount || 0;
 			_cachedTotalDiscount.value += newItem.discount_amount || 0;
@@ -310,7 +310,7 @@ export function useInvoice() {
 		let itemToRemove;
 		if (uom) {
 			itemToRemove = invoiceItems.value.find(
-				(i) => i.item_code === itemCode && i.uom === uom,
+				(i) => i.item_code === itemCode && i.uom === uom
 			);
 		} else {
 			itemToRemove = invoiceItems.value.find((i) => i.item_code === itemCode);
@@ -324,7 +324,7 @@ export function useInvoice() {
 				? itemToRemove.rate
 				: itemToRemove.price_list_rate || itemToRemove.rate;
 			_cachedSubtotal.value -= roundCurrency(
-				itemToRemove.quantity * roundCurrency(effectiveRate),
+				itemToRemove.quantity * roundCurrency(effectiveRate)
 			);
 			_cachedTotalTax.value -= itemToRemove.tax_amount || 0;
 			_cachedTotalDiscount.value -= itemToRemove.discount_amount || 0;
@@ -337,7 +337,7 @@ export function useInvoice() {
 
 		if (uom) {
 			invoiceItems.value = invoiceItems.value.filter(
-				(i) => !(i.item_code === itemCode && i.uom === uom),
+				(i) => !(i.item_code === itemCode && i.uom === uom)
 			);
 		} else {
 			invoiceItems.value = invoiceItems.value.filter((i) => i.item_code !== itemCode);
@@ -842,7 +842,7 @@ export function useInvoice() {
 	async function submitInvoice(
 		targetDoctype = "Sales Invoice",
 		deliveryDate = null,
-		writeOffAmount = 0,
+		writeOffAmount = 0
 	) {
 		/**
 		 * Two-step submission process with mutex protection:
@@ -934,7 +934,7 @@ export function useInvoice() {
 
 						// Create a detailed error object
 						const detailedError = new Error(
-							resourceError.message || "Invoice submission failed",
+							resourceError.message || "Invoice submission failed"
 						);
 						detailedError.exc_type = resourceError.exc_type;
 						detailedError._server_messages = resourceError._server_messages;

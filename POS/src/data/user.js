@@ -7,7 +7,7 @@ const getCookie = (key) => {
 		document.cookie
 			.split("; ")
 			.filter(Boolean)
-			.map((c) => c.split("=").map(decodeURIComponent)),
+			.map((c) => c.split("=").map(decodeURIComponent))
 	);
 	return cookies.get(key) || null;
 };

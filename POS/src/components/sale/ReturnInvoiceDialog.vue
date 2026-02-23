@@ -17,7 +17,7 @@
 						<p class="text-xs text-amber-700 mt-1">
 							{{
 								__(
-									"Return invoices cannot be processed while offline. Please connect to the internet to search for invoices and create returns.",
+									"Return invoices cannot be processed while offline. Please connect to the internet to search for invoices and create returns."
 								)
 							}}
 						</p>
@@ -111,7 +111,7 @@
 													v-html="
 														highlightSearchMatch(
 															suggestion.name,
-															invoiceListFilter,
+															invoiceListFilter
 														)
 													"
 												></span>
@@ -129,7 +129,7 @@
 													v-html="
 														highlightSearchMatch(
 															suggestion.customer_name,
-															invoiceListFilter,
+															invoiceListFilter
 														)
 													"
 												></span>
@@ -142,7 +142,7 @@
 														v-html="
 															highlightSearchMatch(
 																suggestion.contact_mobile,
-																invoiceListFilter,
+																invoiceListFilter
 															)
 														"
 													></span
@@ -306,7 +306,7 @@
 								<p class="text-xs text-gray-500 text-center">
 									{{
 										__(
-											"Try a different search term or check the invoice number",
+											"Try a different search term or check the invoice number"
 										)
 									}}
 								</p>
@@ -543,8 +543,7 @@
 									<p class="text-sm font-bold text-gray-900">
 										{{
 											formatCurrency(
-												(item.rate_with_tax || item.rate) *
-													item.return_qty,
+												(item.rate_with_tax || item.rate) * item.return_qty
 											)
 										}}
 									</p>
@@ -668,7 +667,7 @@
 											{{
 												formatCurrency(
 													(item.rate_with_tax || item.rate) *
-														item.return_qty,
+														item.return_qty
 												)
 											}}
 										</p>
@@ -679,7 +678,7 @@
 												>@
 												{{
 													formatCurrency(
-														item.price_list_rate || item.rate,
+														item.price_list_rate || item.rate
 													)
 												}}/{{ item.uom }}</span
 											>
@@ -731,7 +730,7 @@
 						<p class="text-xs text-amber-800">
 							{{
 								__(
-									"This invoice was paid on account (credit sale). The return will reverse the accounts receivable balance. No cash refund will be processed.",
+									"This invoice was paid on account (credit sale). The return will reverse the accounts receivable balance. No cash refund will be processed."
 								)
 							}}
 						</p>
@@ -755,7 +754,7 @@
 								<p class="text-xs text-emerald-700 mt-1">
 									{{
 										__(
-											"Instead of cash refund, add the return amount to customer credit balance for future purchases.",
+											"Instead of cash refund, add the return amount to customer credit balance for future purchases."
 										)
 									}}
 								</p>
@@ -777,7 +776,7 @@
 						<p class="text-xs text-emerald-800 mb-2">
 							{{
 								__(
-									"The return amount will be added to the customer credit balance. No cash refund will be given.",
+									"The return amount will be added to the customer credit balance. No cash refund will be given."
 								)
 							}}
 						</p>
@@ -800,7 +799,7 @@
 						<p class="text-xs text-blue-800 mb-2">
 							{{
 								__(
-									"This invoice was partially paid. The refund will be split proportionally.",
+									"This invoice was partially paid. The refund will be split proportionally."
 								)
 							}}
 						</p>
@@ -881,7 +880,7 @@
 											@click="
 												payment.amount = Math.max(
 													0,
-													(payment.amount || 0) - 1,
+													(payment.amount || 0) - 1
 												)
 											"
 											type="button"
@@ -941,7 +940,7 @@
 								}}</span>
 								<span class="font-bold text-gray-900">{{
 									formatCurrency(
-										isPartiallyPaid ? maxRefundableAmount : returnTotal,
+										isPartiallyPaid ? maxRefundableAmount : returnTotal
 									)
 								}}</span>
 							</div>
@@ -954,7 +953,7 @@
 											totalPaymentAmount -
 												(isPartiallyPaid
 													? maxRefundableAmount
-													: returnTotal),
+													: returnTotal)
 										) < 0.01
 											? 'text-green-600'
 											: 'text-red-600',
@@ -967,7 +966,7 @@
 								v-if="
 									Math.abs(
 										totalPaymentAmount -
-											(isPartiallyPaid ? maxRefundableAmount : returnTotal),
+											(isPartiallyPaid ? maxRefundableAmount : returnTotal)
 									) >= 0.01
 								"
 								class="mt-2 text-xs text-amber-600 text-start"
@@ -1044,7 +1043,7 @@
 						rows="3"
 						:placeholder="
 							__(
-								'Enter reason for return (e.g., defective product, wrong item, customer request)...',
+								'Enter reason for return (e.g., defective product, wrong item, customer request)...'
 							)
 						"
 						class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
@@ -1139,7 +1138,7 @@
 				<p class="text-gray-600 mb-4">
 					{{
 						__(
-							"This invoice cannot be returned because the return period has expired.",
+							"This invoice cannot be returned because the return period has expired."
 						)
 					}}
 				</p>
@@ -1471,7 +1470,7 @@ const createReturnResource = createResource({
 				: refundPayments.value.map((payment) => ({
 						mode_of_payment: payment.mode_of_payment,
 						amount: -Math.abs(payment.amount),
-					})),
+				  })),
 			remarks: returnReason.value || __("Return against {0}", [originalInvoice.value.name]),
 		};
 
@@ -1545,7 +1544,7 @@ watch(
 		} else {
 			resetForm();
 		}
-	},
+	}
 );
 
 // Watch for preselectedInvoice changes to handle subsequent return requests
@@ -1558,7 +1557,7 @@ watch(
 			showDialog.value = false;
 			checkValidityAndOpenModal(newInvoice.name, true);
 		}
-	},
+	}
 );
 
 // Clear search input when expired dialog closes
@@ -1568,12 +1567,12 @@ watch(
 		if (!val) {
 			invoiceListFilter.value = "";
 		}
-	},
+	}
 );
 
 // Computed properties
 const selectedItems = computed(() =>
-	returnItems.value.filter((item) => item.selected && item.return_qty > 0),
+	returnItems.value.filter((item) => item.selected && item.return_qty > 0)
 );
 
 const filteredReturnItems = computed(() => {
@@ -1582,7 +1581,7 @@ const filteredReturnItems = computed(() => {
 	return returnItems.value.filter(
 		(item) =>
 			item.item_name?.toLowerCase().includes(searchTerm) ||
-			item.item_code?.toLowerCase().includes(searchTerm),
+			item.item_code?.toLowerCase().includes(searchTerm)
 	);
 });
 
@@ -1594,15 +1593,15 @@ const returnTotal = computed(() =>
 		selectedItems.value.reduce(
 			(sum, item) =>
 				sum + roundCurrency(item.return_qty * (item.rate_with_tax || item.rate)),
-			0,
-		),
-	),
+			0
+		)
+	)
 );
 
 const totalPaymentAmount = computed(() =>
 	roundCurrency(
-		refundPayments.value.reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0),
-	),
+		refundPayments.value.reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0)
+	)
 );
 
 const maxRefundableAmount = computed(() => {
@@ -1618,16 +1617,16 @@ const maxRefundableAmount = computed(() => {
 const creditAdjustmentAmount = computed(() =>
 	isPartiallyPaid.value
 		? roundCurrency(Math.max(0, returnTotal.value - maxRefundableAmount.value))
-		: 0,
+		: 0
 );
 
 // Summary display helpers for the Return Summary section
 const showPartialBreakdown = computed(() => isPartiallyPaid.value && !isOriginalCreditSale.value);
 const summaryRefundLabel = computed(() =>
-	showPartialBreakdown.value ? "Cash Refund:" : "Refund Amount:",
+	showPartialBreakdown.value ? "Cash Refund:" : "Refund Amount:"
 );
 const summaryRefundAmount = computed(() =>
-	showPartialBreakdown.value ? maxRefundableAmount.value : returnTotal.value,
+	showPartialBreakdown.value ? maxRefundableAmount.value : returnTotal.value
 );
 
 // Cache RTL direction check (only needs to run once per session)
@@ -1646,7 +1645,7 @@ const canCreateReturn = computed(() => {
 	if (isPartiallyPaid.value) {
 		if (!payments.length) return true;
 		const hasValidPayments = payments.every(
-			(payment) => payment.mode_of_payment && payment.amount >= 0,
+			(payment) => payment.mode_of_payment && payment.amount >= 0
 		);
 		return (
 			hasValidPayments &&
@@ -1656,7 +1655,7 @@ const canCreateReturn = computed(() => {
 
 	if (!payments.length) return false;
 	const hasValidPayments = payments.every(
-		(payment) => payment.mode_of_payment && payment.amount > 0,
+		(payment) => payment.mode_of_payment && payment.amount > 0
 	);
 	return hasValidPayments && Math.abs(totalPaymentAmount.value - returnTotal.value) < 0.01;
 });
@@ -1669,7 +1668,7 @@ const filterInvoicesByTerm = (invoices, searchTerm) => {
 		(invoice) =>
 			invoice.name.toLowerCase().includes(term) ||
 			invoice.customer_name?.toLowerCase().includes(term) ||
-			invoice.contact_mobile?.toLowerCase().includes(term),
+			invoice.contact_mobile?.toLowerCase().includes(term)
 	);
 };
 

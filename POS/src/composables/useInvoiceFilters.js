@@ -28,7 +28,7 @@ export function useInvoiceFilters(invoices) {
 				(inv) =>
 					inv.name?.toLowerCase().includes(search) ||
 					inv.customer_name?.toLowerCase().includes(search) ||
-					inv.customer?.toLowerCase().includes(search),
+					inv.customer?.toLowerCase().includes(search)
 			);
 		}
 
@@ -57,7 +57,7 @@ export function useInvoiceFilters(invoices) {
 			result = result.filter(
 				(inv) =>
 					inv.customer === filtersStore.customer ||
-					inv.customer_name === filtersStore.customer,
+					inv.customer_name === filtersStore.customer
 			);
 		}
 
@@ -74,7 +74,7 @@ export function useInvoiceFilters(invoices) {
 				return inv.items.some(
 					(item) =>
 						item.item_name?.toLowerCase().includes(productSearch) ||
-						item.item_code?.toLowerCase().includes(productSearch),
+						item.item_code?.toLowerCase().includes(productSearch)
 				);
 			});
 		}
@@ -206,7 +206,7 @@ export function useInvoiceFilters(invoices) {
 			const hasProduct = invoice.items.some(
 				(item) =>
 					item.item_name?.toLowerCase().includes(productSearch) ||
-					item.item_code?.toLowerCase().includes(productSearch),
+					item.item_code?.toLowerCase().includes(productSearch)
 			);
 			if (!hasProduct) return false;
 		}

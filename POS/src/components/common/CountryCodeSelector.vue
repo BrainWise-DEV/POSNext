@@ -190,7 +190,7 @@ const filteredCountries = computed(() => {
 		(country) =>
 			country.name.toLowerCase().includes(query) ||
 			country.isd.includes(query) ||
-			country.code.toLowerCase().includes(query),
+			country.code.toLowerCase().includes(query)
 	);
 });
 
@@ -249,7 +249,7 @@ watch(
 				selectedCountry.value = country;
 			}
 		}
-	},
+	}
 );
 
 // Initialize

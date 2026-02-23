@@ -275,7 +275,7 @@ function handleKeydown(event) {
 	if (event.key === "ArrowDown") {
 		event.preventDefault();
 		customerStore.setSelectedIndex(
-			Math.min(selectedIndex.value + 1, customers.value.length - 1),
+			Math.min(selectedIndex.value + 1, customers.value.length - 1)
 		);
 	} else if (event.key === "ArrowUp") {
 		event.preventDefault();

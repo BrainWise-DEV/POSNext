@@ -270,7 +270,7 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 			log.info("Loading payment methods for offline use");
 			try {
 				const paymentMethodsData = await cachePaymentMethodsFromServer(
-					currentProfile.name,
+					currentProfile.name
 				);
 
 				if (paymentMethodsData.payment_methods?.length > 0) {
@@ -278,7 +278,7 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 						(method) => ({
 							...method,
 							pos_profile: currentProfile.name,
-						}),
+						})
 					);
 					await offlineWorker.cachePaymentMethods(methodsWithProfile);
 					log.success(`Cached ${methodsWithProfile.length} payment methods`);
@@ -329,21 +329,21 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 					invoices?.length > 0
 						? cacheInvoiceHistory(invoices, currentProfile.name).then(() =>
 								log.success(
-									`Cached ${invoices.length} invoices for offline viewing`,
-								),
-							)
+									`Cached ${invoices.length} invoices for offline viewing`
+								)
+						  )
 						: Promise.resolve(),
 					unpaidInvoices?.length > 0
 						? cacheUnpaidInvoices(unpaidInvoices, currentProfile.name).then(() =>
 								log.success(
-									`Cached ${unpaidInvoices.length} unpaid invoices for offline viewing`,
-								),
-							)
+									`Cached ${unpaidInvoices.length} unpaid invoices for offline viewing`
+								)
+						  )
 						: Promise.resolve(),
 					unpaidSummary
 						? cacheUnpaidSummary(unpaidSummary, currentProfile.name).then(() =>
-								log.debug("Cached unpaid invoice summary"),
-							)
+								log.debug("Cached unpaid invoice summary")
+						  )
 						: Promise.resolve(),
 				]);
 			} catch (error) {

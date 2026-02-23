@@ -83,20 +83,20 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	// Computed - General Settings
 	const isEnabled = computed(() => Boolean(settings.value.enabled));
 	const maxDiscountAllowed = computed(
-		() => Number.parseFloat(settings.value.max_discount_allowed) || 0,
+		() => Number.parseFloat(settings.value.max_discount_allowed) || 0
 	);
 	const usePercentageDiscount = computed(() => Boolean(settings.value.use_percentage_discount));
 	const allowAdditionalDiscount = computed(() =>
-		Boolean(settings.value.allow_user_to_edit_additional_discount),
+		Boolean(settings.value.allow_user_to_edit_additional_discount)
 	);
 	const allowItemDiscount = computed(() =>
-		Boolean(settings.value.allow_user_to_edit_item_discount),
+		Boolean(settings.value.allow_user_to_edit_item_discount)
 	);
 	const allowUserToEditRate = computed(() => Boolean(settings.value.allow_user_to_edit_rate));
 	const disableRoundedTotal = computed(() => Boolean(settings.value.disable_rounded_total));
 	const allowCreditSale = computed(() => Boolean(settings.value.allow_credit_sale));
 	const allowCustomerCreditPayment = computed(() =>
-		Boolean(settings.value.allow_customer_credit_payment),
+		Boolean(settings.value.allow_customer_credit_payment)
 	);
 	const allowReturn = computed(() => Boolean(settings.value.allow_return));
 	const allowWriteOffChange = computed(() => Boolean(settings.value.allow_write_off_change));
@@ -109,7 +109,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	const showCustomerBalance = computed(() => Boolean(settings.value.show_customer_balance));
 	const hideExpectedAmount = computed(() => Boolean(settings.value.hide_expected_amount));
 	const displayDiscountPercentage = computed(() =>
-		Boolean(settings.value.display_discount_percentage),
+		Boolean(settings.value.display_discount_percentage)
 	);
 	const displayDiscountAmount = computed(() => Boolean(settings.value.display_discount_amount));
 	const showVariantsAsItems = computed(() => Boolean(settings.value.show_variants_as_items));
@@ -119,24 +119,24 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	const allowSelectSalesOrder = computed(() => Boolean(settings.value.allow_select_sales_order));
 	const createOnlySalesOrder = computed(() => Boolean(settings.value.create_only_sales_order));
 	const allowReturnWithoutInvoice = computed(() =>
-		Boolean(settings.value.allow_return_without_invoice),
+		Boolean(settings.value.allow_return_without_invoice)
 	);
 	const allowFreeBatchReturn = computed(() => Boolean(settings.value.allow_free_batch_return));
 	const allowPrintDraftInvoices = computed(() =>
-		Boolean(settings.value.allow_print_draft_invoices),
+		Boolean(settings.value.allow_print_draft_invoices)
 	);
 
 	// Computed - Pricing & Display
 	const decimalPrecision = computed(
-		() => Number.parseInt(settings.value.decimal_precision) || 2,
+		() => Number.parseInt(settings.value.decimal_precision) || 2
 	);
 
 	// Computed - Customer Settings
 	const allowCustomerPurchaseOrder = computed(() =>
-		Boolean(settings.value.allow_customer_purchase_order),
+		Boolean(settings.value.allow_customer_purchase_order)
 	);
 	const allowDuplicateCustomerNames = computed(() =>
-		Boolean(settings.value.allow_duplicate_customer_names),
+		Boolean(settings.value.allow_duplicate_customer_names)
 	);
 	const fetchCoupon = computed(() => Boolean(settings.value.fetch_coupon));
 
@@ -147,20 +147,20 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	// Computed - Delivery
 	const useDeliveryCharges = computed(() => Boolean(settings.value.use_delivery_charges));
 	const autoSetDeliveryCharges = computed(() =>
-		Boolean(settings.value.auto_set_delivery_charges),
+		Boolean(settings.value.auto_set_delivery_charges)
 	);
 
 	// Computed - Advanced Settings
 	const useLimitSearch = computed(() => Boolean(settings.value.use_limit_search));
 	const searchLimit = computed(() => Number.parseInt(settings.value.search_limit) || 1000);
 	const allowSubmissionsInBackgroundJob = computed(() =>
-		Boolean(settings.value.allow_submissions_in_background_job),
+		Boolean(settings.value.allow_submissions_in_background_job)
 	);
 	const allowDeleteOfflineInvoice = computed(() =>
-		Boolean(settings.value.allow_delete_offline_invoice),
+		Boolean(settings.value.allow_delete_offline_invoice)
 	);
 	const allowChangePostingDate = computed(() =>
-		Boolean(settings.value.allow_change_posting_date),
+		Boolean(settings.value.allow_change_posting_date)
 	);
 
 	// Computed - Miscellaneous
@@ -172,13 +172,13 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	const salesPersonsMode = computed(() => settings.value.enable_sales_persons || "Disabled");
 	const isSingleSalesPerson = computed(() => settings.value.enable_sales_persons === "Single");
 	const isMultipleSalesPersons = computed(
-		() => settings.value.enable_sales_persons === "Multiple",
+		() => settings.value.enable_sales_persons === "Multiple"
 	);
 
 	// Computed - Security
 	const enableSessionLock = computed(() => Boolean(settings.value.enable_session_lock));
 	const sessionLockTimeout = computed(
-		() => Number.parseInt(settings.value.session_lock_timeout) || 5,
+		() => Number.parseInt(settings.value.session_lock_timeout) || 5
 	);
 
 	// Resource

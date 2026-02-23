@@ -101,7 +101,7 @@ export const initMemoryCache = async () => {
 
 		console.log(`Cache initialized: ${itemsCount} items, ${customersCount} customers`);
 		console.log(
-			`Cache ready: ${memory.cache_ready}, Stock ready: ${memory.stock_cache_ready}`,
+			`Cache ready: ${memory.cache_ready}, Stock ready: ${memory.stock_cache_ready}`
 		);
 
 		return true;

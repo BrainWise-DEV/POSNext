@@ -163,7 +163,7 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 			const eligibleGroups = offer.eligible_item_groups || [];
 			if (eligibleGroups.length > 0) {
 				const hasEligibleGroup = eligibleGroups.some((group) =>
-					cartItemGroups.includes(group),
+					cartItemGroups.includes(group)
 				);
 				if (!hasEligibleGroup) {
 					return {
@@ -178,7 +178,7 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 			const eligibleBrands = offer.eligible_brands || [];
 			if (eligibleBrands.length > 0) {
 				const hasEligibleBrand = eligibleBrands.some((brand) =>
-					cartBrands.includes(brand),
+					cartBrands.includes(brand)
 				);
 				if (!hasEligibleBrand) {
 					return {

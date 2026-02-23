@@ -131,7 +131,7 @@ class LoggerConfig {
 		if (this.enabledNamespaces.size > 0) {
 			localStorage.setItem(
 				"POS_LOG_NAMESPACES_ENABLED",
-				Array.from(this.enabledNamespaces).join(","),
+				Array.from(this.enabledNamespaces).join(",")
 			);
 		} else {
 			localStorage.removeItem("POS_LOG_NAMESPACES_ENABLED");
@@ -140,7 +140,7 @@ class LoggerConfig {
 		if (this.disabledNamespaces.size > 0) {
 			localStorage.setItem(
 				"POS_LOG_NAMESPACES_DISABLED",
-				Array.from(this.disabledNamespaces).join(","),
+				Array.from(this.disabledNamespaces).join(",")
 			);
 		} else {
 			localStorage.removeItem("POS_LOG_NAMESPACES_DISABLED");
@@ -422,7 +422,7 @@ class LoggerManager {
 			"font-weight: bold; color: #9C27B0",
 			"font-weight: normal",
 			"font-weight: bold; color: #607D8B",
-			"font-weight: normal",
+			"font-weight: normal"
 		);
 	}
 }

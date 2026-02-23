@@ -221,9 +221,26 @@ export function printInvoiceCustom(invoiceData) {
 
 				<div class="invoice-info">
 					<div><span>${__("Invoice #:")}</span><span><strong>${invoiceData.name}</strong></span></div>
-					<div><span>${__("Date:")}</span><span>${new Date(invoiceData.posting_date || Date.now()).toLocaleString()}</span></div>
-					${invoiceData.customer_name ? `<div><span>${__("Customer:")}</span><span>${invoiceData.customer_name}</span></div>` : ""}
-					${invoiceData.status === "Partly Paid" || (invoiceData.outstanding_amount && invoiceData.outstanding_amount > 0 && invoiceData.outstanding_amount < invoiceData.grand_total) ? `<div class="partial-status"><span>${__("Status:")}</span><span>${__("PARTIAL PAYMENT")}</span></div>` : ""}
+					<div><span>${__("Date:")}</span><span>${new Date(
+		invoiceData.posting_date || Date.now()
+	).toLocaleString()}</span></div>
+					${
+						invoiceData.customer_name
+							? `<div><span>${__("Customer:")}</span><span>${
+									invoiceData.customer_name
+							  }</span></div>`
+							: ""
+					}
+					${
+						invoiceData.status === "Partly Paid" ||
+						(invoiceData.outstanding_amount &&
+							invoiceData.outstanding_amount > 0 &&
+							invoiceData.outstanding_amount < invoiceData.grand_total)
+							? `<div class="partial-status"><span>${__("Status:")}</span><span>${__(
+									"PARTIAL PAYMENT"
+							  )}</span></div>`
+							: ""
+					}
 				</div>
 
 				<div class="items-table">
@@ -245,8 +262,29 @@ export function printInvoiceCustom(invoiceData) {
 								<span>${qty} × ${formatCurrency(displayRate)}</span>
 								<span><strong>${formatCurrency(subtotal)}</strong></span>
 							</div>
-							${hasDiscount ? `<div class="item-discount"><span>Discount ${item.discount_percentage ? `(${Number(item.discount_percentage).toFixed(2)}%)` : ""}</span><span>-${formatCurrency(item.discount_amount || 0)}</span></div>` : ""}
-							${item.serial_no ? `<div class="item-serials"><div class="item-serials-label">${__("Serial No:")}</div><div class="item-serials-list">${item.serial_no.replace(/\n/g, ", ")}</div></div>` : ""}
+							${
+								hasDiscount
+									? `<div class="item-discount"><span>Discount ${
+											item.discount_percentage
+												? `(${Number(item.discount_percentage).toFixed(
+														2
+												  )}%)`
+												: ""
+									  }</span><span>-${formatCurrency(
+											item.discount_amount || 0
+									  )}</span></div>`
+									: ""
+							}
+							${
+								item.serial_no
+									? `<div class="item-serials"><div class="item-serials-label">${__(
+											"Serial No:"
+									  )}</div><div class="item-serials-list">${item.serial_no.replace(
+											/\n/g,
+											", "
+									  )}</div></div>`
+									: ""
+							}
 						</div>`;
 						})
 						.join("")}
@@ -257,17 +295,32 @@ export function printInvoiceCustom(invoiceData) {
 						invoiceData.total_taxes_and_charges &&
 						invoiceData.total_taxes_and_charges > 0
 							? `
-					<div class="total-row"><span>${__("Subtotal:")}</span><span>${formatCurrency((invoiceData.grand_total || 0) - (invoiceData.total_taxes_and_charges || 0))}</span></div>
-					<div class="total-row"><span>${__("Tax:")}</span><span>${formatCurrency(invoiceData.total_taxes_and_charges)}</span></div>`
+					<div class="total-row"><span>${__("Subtotal:")}</span><span>${formatCurrency(
+									(invoiceData.grand_total || 0) -
+										(invoiceData.total_taxes_and_charges || 0)
+							  )}</span></div>
+					<div class="total-row"><span>${__("Tax:")}</span><span>${formatCurrency(
+									invoiceData.total_taxes_and_charges
+							  )}</span></div>`
 							: ""
 					}
 					${
 						invoiceData.discount_amount
 							? `
-					<div class="total-row" style="color: #28a745;"><span>Additional Discount${invoiceData.additional_discount_percentage ? ` (${Number(invoiceData.additional_discount_percentage).toFixed(1)}%)` : ""}:</span><span>-${formatCurrency(Math.abs(invoiceData.discount_amount))}</span></div>`
+					<div class="total-row" style="color: #28a745;"><span>Additional Discount${
+						invoiceData.additional_discount_percentage
+							? ` (${Number(invoiceData.additional_discount_percentage).toFixed(
+									1
+							  )}%)`
+							: ""
+					}:</span><span>-${formatCurrency(
+									Math.abs(invoiceData.discount_amount)
+							  )}</span></div>`
 							: ""
 					}
-					<div class="total-row grand-total"><span>${__("TOTAL:")}</span><span>${formatCurrency(invoiceData.grand_total)}</span></div>
+					<div class="total-row grand-total"><span>${__("TOTAL:")}</span><span>${formatCurrency(
+		invoiceData.grand_total
+	)}</span></div>
 				</div>
 
 				${
@@ -275,10 +328,35 @@ export function printInvoiceCustom(invoiceData) {
 						? `
 				<div class="payments">
 					<div style="font-weight: bold; margin-bottom: 5px; font-size: 12px;">${__("Payments:")}</div>
-					${invoiceData.payments.map((p) => `<div class="payment-row"><span>${p.mode_of_payment}:</span><span>${formatCurrency(p.amount)}</span></div>`).join("")}
-					<div class="payment-row total-paid"><span>${__("Total Paid:")}</span><span>${formatCurrency(invoiceData.paid_amount || 0)}</span></div>
-					${invoiceData.change_amount && invoiceData.change_amount > 0 ? `<div class="payment-row" style="font-weight: bold; margin-top: 5px;"><span>${__("Change:")}</span><span>${formatCurrency(invoiceData.change_amount)}</span></div>` : ""}
-					${invoiceData.outstanding_amount && invoiceData.outstanding_amount > 0 ? `<div class="outstanding-row"><span>${__("BALANCE DUE:")}</span><span>${formatCurrency(invoiceData.outstanding_amount)}</span></div>` : ""}
+					${invoiceData.payments
+						.map(
+							(p) =>
+								`<div class="payment-row"><span>${
+									p.mode_of_payment
+								}:</span><span>${formatCurrency(p.amount)}</span></div>`
+						)
+						.join("")}
+					<div class="payment-row total-paid"><span>${__("Total Paid:")}</span><span>${formatCurrency(
+								invoiceData.paid_amount || 0
+						  )}</span></div>
+					${
+						invoiceData.change_amount && invoiceData.change_amount > 0
+							? `<div class="payment-row" style="font-weight: bold; margin-top: 5px;"><span>${__(
+									"Change:"
+							  )}</span><span>${formatCurrency(
+									invoiceData.change_amount
+							  )}</span></div>`
+							: ""
+					}
+					${
+						invoiceData.outstanding_amount && invoiceData.outstanding_amount > 0
+							? `<div class="outstanding-row"><span>${__(
+									"BALANCE DUE:"
+							  )}</span><span>${formatCurrency(
+									invoiceData.outstanding_amount
+							  )}</span></div>`
+							: ""
+					}
 				</div>`
 						: ""
 				}
@@ -290,8 +368,12 @@ export function printInvoiceCustom(invoiceData) {
 			</div>
 
 			<div class="no-print" style="text-align: center; margin-top: 20px;">
-				<button onclick="window.print()" style="padding: 10px 20px; font-size: 14px; cursor: pointer;">${__("Print Receipt")}</button>
-				<button onclick="window.close()" style="padding: 10px 20px; font-size: 14px; cursor: pointer; margin-left: 10px;">${__("Close")}</button>
+				<button onclick="window.print()" style="padding: 10px 20px; font-size: 14px; cursor: pointer;">${__(
+					"Print Receipt"
+				)}</button>
+				<button onclick="window.close()" style="padding: 10px 20px; font-size: 14px; cursor: pointer; margin-left: 10px;">${__(
+					"Close"
+				)}</button>
 			</div>
 		</body>
 		</html>`;

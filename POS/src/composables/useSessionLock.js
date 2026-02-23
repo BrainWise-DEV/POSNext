@@ -84,7 +84,7 @@ async function hashPassword(password, existingSalt = null) {
 		encoder.encode(password),
 		"PBKDF2",
 		false,
-		["deriveBits"],
+		["deriveBits"]
 	);
 
 	const bits = await crypto.subtle.deriveBits(
@@ -95,7 +95,7 @@ async function hashPassword(password, existingSalt = null) {
 			hash: "SHA-256",
 		},
 		keyMaterial,
-		256,
+		256
 	);
 
 	return { hash: bytesToHex(new Uint8Array(bits)), salt: bytesToHex(salt) };
@@ -109,7 +109,7 @@ function cachePasswordHash(user, hash, salt) {
 	try {
 		localStorage.setItem(
 			PASSWORD_HASH_KEY,
-			JSON.stringify({ user, hash, salt, ts: Date.now() }),
+			JSON.stringify({ user, hash, salt, ts: Date.now() })
 		);
 	} catch {
 		// Storage full or unavailable

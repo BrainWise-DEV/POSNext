@@ -542,7 +542,7 @@ export const getCachedInvoiceHistory = async (posProfile, options = {}) => {
 		// Apply additional filters
 		if (customer) {
 			invoices = invoices.filter((inv) =>
-				inv.customer?.toLowerCase().includes(customer.toLowerCase()),
+				inv.customer?.toLowerCase().includes(customer.toLowerCase())
 			);
 		}
 

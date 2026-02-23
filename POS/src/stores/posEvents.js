@@ -28,8 +28,8 @@ function generateUUID() {
 		typeof globalThis !== "undefined" && globalThis.crypto
 			? globalThis.crypto
 			: typeof window !== "undefined"
-				? window.crypto
-				: undefined;
+			? window.crypto
+			: undefined;
 
 	if (cryptoSource?.randomUUID) {
 		try {
@@ -46,7 +46,10 @@ function generateUUID() {
 		bytes[8] = (bytes[8] & 0x3f) | 0x80;
 
 		const hex = Array.from(bytes, (byte) => byteToHex[byte]).join("");
-		return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+		return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(
+			16,
+			20
+		)}-${hex.slice(20)}`;
 	}
 
 	return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {

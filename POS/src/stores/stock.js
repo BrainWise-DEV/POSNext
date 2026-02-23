@@ -67,7 +67,7 @@ export const useStockStore = defineStore("stock", () => {
 				qty: item.actual_qty ?? item.stock_qty ?? 0,
 				warehouse: item.warehouse || warehouse.value,
 				ts: Date.now(),
-			}),
+			})
 		);
 
 	// Update reservations from cart
@@ -105,7 +105,7 @@ export const useStockStore = defineStore("stock", () => {
 				qty: stockUpdate.actual_qty ?? stockUpdate.stock_qty,
 				warehouse: stockUpdate.warehouse || warehouse.value,
 				ts: Date.now(),
-			}),
+			})
 		);
 
 	// Refresh stock from server (direct API call)

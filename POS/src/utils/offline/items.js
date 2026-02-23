@@ -65,8 +65,9 @@ export const searchCachedItems = async (searchTerm, limit = 50) => {
 		// Filter and score items
 		const results = allItems
 			.map((item) => {
-				const searchable =
-					`${item.item_code || ""} ${item.item_name || ""} ${item.description || ""}`.toLowerCase();
+				const searchable = `${item.item_code || ""} ${item.item_name || ""} ${
+					item.description || ""
+				}`.toLowerCase();
 
 				// Word-order independent: all words must appear somewhere
 				if (!searchWords.every((word) => searchable.includes(word))) return null;
@@ -163,7 +164,7 @@ export const updateItemBatchSerialData = async (batchSerialDataMap) => {
 
 		await Promise.all(updates);
 		console.log(
-			`Updated batch/serial data for ${Object.keys(batchSerialDataMap).length} items`,
+			`Updated batch/serial data for ${Object.keys(batchSerialDataMap).length} items`
 		);
 		return true;
 	} catch (error) {

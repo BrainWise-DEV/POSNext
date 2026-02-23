@@ -52,11 +52,11 @@
 											? __("{0} invoice - {1} outstanding", [
 													summary.count,
 													formatCurrency(summary.total_outstanding),
-												])
+											  ])
 											: __("{0} invoices - {1} outstanding", [
 													summary.count,
 													formatCurrency(summary.total_outstanding),
-												])
+											  ])
 									}}
 								</div>
 							</div>
@@ -258,7 +258,10 @@
 										<div
 											class="h-full bg-gradient-to-r from-green-500 to-green-600 transition-all duration-300"
 											:style="{
-												width: `${(invoice.paid_amount / invoice.grand_total) * 100}%`,
+												width: `${
+													(invoice.paid_amount / invoice.grand_total) *
+													100
+												}%`,
 											}"
 										></div>
 									</div>
@@ -380,7 +383,7 @@ watch(
 			loadInvoices();
 			loadSummary();
 		}
-	},
+	}
 );
 
 watch(show, (val) => {

@@ -203,7 +203,7 @@
 												<p class="text-xs text-gray-600 mt-0.5">
 													{{
 														__(
-															"Configure warehouse and inventory settings",
+															"Configure warehouse and inventory settings"
 														)
 													}}
 												</p>
@@ -278,7 +278,7 @@
 											:options="warehouseOptions"
 											:description="
 												__(
-													'All stock operations will use this warehouse. Stock quantities will refresh after saving.',
+													'All stock operations will use this warehouse. Stock quantities will refresh after saving.'
 												)
 											"
 										/>
@@ -310,7 +310,7 @@
 												:label="__('Allow Negative Stock')"
 												:description="
 													__(
-														'Enable selling items even when stock reaches zero or below. Integrates with Back Office stock settings.',
+														'Enable selling items even when stock reaches zero or below. Integrates with Back Office stock settings.'
 													)
 												"
 											/>
@@ -334,7 +334,7 @@
 														class="text-xs text-blue-800 leading-relaxed"
 														:inner="
 															__(
-																'&lt;strong&gt;Note:&lt;strong&gt; When enabled, the system will allow sales even when stock quantity is zero or negative. This is useful for handling stock sync delays or backorders. All transactions are tracked in the stock ledger.',
+																'&lt;strong&gt;Note:&lt;strong&gt; When enabled, the system will allow sales even when stock quantity is zero or negative. This is useful for handling stock sync delays or backorders. All transactions are tracked in the stock ledger.'
 															)
 														"
 													/>
@@ -393,7 +393,7 @@
 												:label="__('Enable Automatic Stock Sync')"
 												:description="
 													__(
-														'Periodically sync stock quantities from server in the background (runs in Web Worker)',
+														'Periodically sync stock quantities from server in the background (runs in Web Worker)'
 													)
 												"
 											/>
@@ -408,7 +408,7 @@
 													:label="__('Sync Interval (seconds)')"
 													:description="
 														__(
-															'How often to check server for stock updates (minimum 10 seconds)',
+															'How often to check server for stock updates (minimum 10 seconds)'
 														)
 													"
 													:min="10"
@@ -442,11 +442,11 @@
 																:inner="
 																	stockSyncStatus.enabled
 																		? __(
-																				'&lt;strong&gt;Status:&lt;strong&gt; Running',
-																			)
+																				'&lt;strong&gt;Status:&lt;strong&gt; Running'
+																		  )
 																		: __(
-																				'&lt;strong&gt;Status:&lt;strong&gt; Stopped',
-																			)
+																				'&lt;strong&gt;Status:&lt;strong&gt; Stopped'
+																		  )
 																"
 															/>
 															<TranslatedHTML
@@ -457,7 +457,7 @@
 																		[
 																			stockSyncStatus.itemCount ||
 																				0,
-																		],
+																		]
 																	)
 																"
 															/>
@@ -469,8 +469,8 @@
 																				'&lt;strong&gt;Warehouse:&lt;strong&gt; {0}',
 																				[
 																					stockSyncStatus.warehouse,
-																				],
-																			)
+																				]
+																		  )
 																		: __('Warehouse not set')
 																"
 															/>
@@ -482,13 +482,13 @@
 																				'&lt;strong&gt;Last Sync:&lt;strong&gt; {0}',
 																				[
 																					formatSyncTime(
-																						stockSyncStatus.lastSync,
+																						stockSyncStatus.lastSync
 																					),
-																				],
-																			)
+																				]
+																		  )
 																		: __(
-																				'&lt;strong&gt;Last Sync:&lt;strong&gt; Never',
-																			)
+																				'&lt;strong&gt;Last Sync:&lt;strong&gt; Never'
+																		  )
 																"
 															/>
 														</div>
@@ -527,7 +527,7 @@
 																			((3600 /
 																				stockSyncIntervalSeconds) *
 																				15) /
-																				1024,
+																				1024
 																		),
 																	])
 																}}
@@ -571,7 +571,7 @@
 												<p class="text-xs text-gray-600 mt-0.5">
 													{{
 														__(
-															"Configure pricing, discounts, and sales operations",
+															"Configure pricing, discounts, and sales operations"
 														)
 													}}
 												</p>
@@ -624,7 +624,7 @@
 												:label="__('Tax Inclusive')"
 												:description="
 													__(
-														'When enabled, displayed prices include tax. When disabled, tax is calculated separately. Changes apply immediately to your cart when you save.',
+														'When enabled, displayed prices include tax. When disabled, tax is calculated separately. Changes apply immediately to your cart when you save.'
 													)
 												"
 											/>
@@ -659,7 +659,7 @@
 												:label="__('Allow User To Edit Rate')"
 												:description="
 													__(
-														'Allow editing item rate in cart. Disabled when offers are applied.',
+														'Allow editing item rate in cart. Disabled when offers are applied.'
 													)
 												"
 											/>
@@ -721,7 +721,7 @@
 												:label="__('Silent Print')"
 												:description="
 													__(
-														'Send receipts directly to a thermal printer via QZ Tray (no browser dialog)',
+														'Send receipts directly to a thermal printer via QZ Tray (no browser dialog)'
 													)
 												"
 											/>
@@ -739,8 +739,8 @@
 															qzConnecting
 																? 'bg-yellow-500 animate-pulse'
 																: qzConnected
-																	? 'bg-green-500'
-																	: 'bg-red-500'
+																? 'bg-green-500'
+																: 'bg-red-500'
 														"
 													></div>
 													<span
@@ -749,16 +749,16 @@
 															qzConnecting
 																? 'text-yellow-700'
 																: qzConnected
-																	? 'text-green-700'
-																	: 'text-red-700'
+																? 'text-green-700'
+																: 'text-red-700'
 														"
 													>
 														{{
 															qzConnecting
 																? __("Connecting to QZ Tray...")
 																: qzConnected
-																	? __("QZ Tray Connected")
-																	: __("QZ Tray Not Connected")
+																? __("QZ Tray Connected")
+																: __("QZ Tray Not Connected")
 														}}
 													</span>
 													<button
@@ -781,8 +781,8 @@
 																qzPrinters.length === 0 &&
 																!loadingPrinters
 																	? __(
-																			'No printers found. Is QZ Tray running?',
-																		)
+																			'No printers found. Is QZ Tray running?'
+																	  )
 																	: ''
 															"
 														/>
@@ -821,8 +821,8 @@
 														qzCertStatus === 'trusted'
 															? 'bg-green-50 border-green-200'
 															: qzCertStatus === 'untrusted'
-																? 'bg-red-50 border-red-200'
-																: 'bg-amber-50 border-amber-200',
+															? 'bg-red-50 border-red-200'
+															: 'bg-amber-50 border-amber-200',
 													]"
 												>
 													<div class="flex items-start gap-2">
@@ -833,8 +833,8 @@
 																qzCertStatus === 'trusted'
 																	? 'text-green-600'
 																	: qzCertStatus === 'untrusted'
-																		? 'text-red-600'
-																		: 'text-amber-600'
+																	? 'text-red-600'
+																	: 'text-amber-600'
 															"
 															fill="none"
 															stroke="currentColor"
@@ -866,14 +866,14 @@
 																		qzCertStatus === 'trusted'
 																			? 'text-green-900'
 																			: qzCertStatus ===
-																				  'untrusted'
-																				? 'text-red-900'
-																				: 'text-amber-900'
+																			  'untrusted'
+																			? 'text-red-900'
+																			: 'text-amber-900'
 																	"
 																>
 																	{{
 																		__(
-																			"Silent Print Certificate",
+																			"Silent Print Certificate"
 																		)
 																	}}
 																</p>
@@ -933,7 +933,7 @@
 															>
 																{{
 																	__(
-																		"Certificate is installed and signing is active. Print jobs will be sent silently without confirmation dialogs.",
+																		"Certificate is installed and signing is active. Print jobs will be sent silently without confirmation dialogs."
 																	)
 																}}
 															</p>
@@ -945,7 +945,7 @@
 															>
 																{{
 																	__(
-																		"Certificate is not installed on this machine. Generate a certificate, download it, and import it into QZ Tray.",
+																		"Certificate is not installed on this machine. Generate a certificate, download it, and import it into QZ Tray."
 																	)
 																}}
 															</p>
@@ -955,7 +955,7 @@
 															>
 																{{
 																	__(
-																		"To print without confirmation dialogs, generate a signing certificate and install it on each POS machine.",
+																		"To print without confirmation dialogs, generate a signing certificate and install it on each POS machine."
 																	)
 																}}
 															</p>
@@ -1053,7 +1053,7 @@
 															>
 																{{
 																	__(
-																		"Download the certificate and import it into QZ Tray, then restart QZ Tray.",
+																		"Download the certificate and import it into QZ Tray, then restart QZ Tray."
 																	)
 																}}
 															</p>
@@ -1084,7 +1084,7 @@
 														>
 															{{
 																__(
-																	"QZ Tray must be installed and running on this computer. Download from",
+																	"QZ Tray must be installed and running on this computer. Download from"
 																)
 															}}
 															<a
@@ -1095,7 +1095,7 @@
 															>.
 															{{
 																__(
-																	"If QZ Tray is unavailable, printing will fall back to the browser dialog.",
+																	"If QZ Tray is unavailable, printing will fall back to the browser dialog."
 																)
 															}}
 														</p>
@@ -1299,7 +1299,7 @@ watch(
 		if (val) {
 			loadSettings();
 		}
-	},
+	}
 );
 
 watch(show, (val) => {
@@ -1314,7 +1314,7 @@ watch(
 			selectedWarehouse.value = newWarehouse;
 		}
 	},
-	{ immediate: true },
+	{ immediate: true }
 );
 
 // Watch for tax_inclusive changes to provide immediate feedback
@@ -1332,7 +1332,7 @@ watch(
 			const mode = newValue ? "inclusive" : "exclusive";
 			log.info(`Tax mode toggled to: ${mode}`);
 		}
-	},
+	}
 );
 
 // Methods
@@ -1395,7 +1395,7 @@ async function saveSettings() {
 			{
 				pos_profile: props.posProfile,
 				settings: settings.value,
-			},
+			}
 		);
 
 		if (result) {
@@ -1443,7 +1443,7 @@ async function saveSettings() {
 		let successMessage = __("Settings saved successfully");
 		if (warehouseChanged && taxInclusiveChanged) {
 			successMessage = __(
-				"Settings saved, warehouse updated, and tax mode changed. Cart will be recalculated.",
+				"Settings saved, warehouse updated, and tax mode changed. Cart will be recalculated."
 			);
 		} else if (warehouseChanged) {
 			successMessage = __("Settings saved and warehouse updated. Reloading stock...");
@@ -1469,7 +1469,7 @@ watch(
 		if (enabled) {
 			await handleQzConnect();
 		}
-	},
+	}
 );
 
 // ============================================================================
@@ -1498,7 +1498,7 @@ function saveStockSyncSettings() {
 			JSON.stringify({
 				enabled: stockSyncEnabled.value,
 				intervalSeconds: stockSyncIntervalSeconds.value,
-			}),
+			})
 		);
 	} catch (error) {
 		log.error("Failed to save stock sync settings:", error);

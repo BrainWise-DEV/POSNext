@@ -91,7 +91,7 @@
 														:inner="
 															__(
 																'&lt;strong&gt;POS Profile:&lt;strong&gt; {0}',
-																[currentProfile?.name],
+																[currentProfile?.name]
 															)
 														"
 													/>
@@ -100,7 +100,7 @@
 														:inner="
 															__(
 																'&lt;strong&gt;Company:&lt;strong&gt;',
-																[currentCompany?.name],
+																[currentCompany?.name]
 															)
 														"
 													/>
@@ -111,9 +111,9 @@
 																'&lt;strong&gt;Opened:&lt;strong&gt;',
 																[
 																	formatDateTime(
-																		currentShift?.period_start_date,
+																		currentShift?.period_start_date
 																	),
-																],
+																]
 															)
 														"
 													/>
@@ -165,7 +165,7 @@
 										<p class="text-sm text-yellow-700">
 											{{
 												__(
-													"You need to open a shift before you can start making sales.",
+													"You need to open a shift before you can start making sales."
 												)
 											}}
 										</p>

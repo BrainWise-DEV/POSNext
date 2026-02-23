@@ -174,7 +174,7 @@
 										{{
 											__("Partially Paid ({0})", [
 												unpaidInvoices.filter(
-													(inv) => inv.status === "Partly Paid",
+													(inv) => inv.status === "Partly Paid"
 												).length,
 											])
 										}}
@@ -191,7 +191,7 @@
 										{{
 											__("Unpaid ({0})", [
 												unpaidInvoices.filter(
-													(inv) => inv.status === "Unpaid",
+													(inv) => inv.status === "Unpaid"
 												).length,
 											])
 										}}
@@ -208,7 +208,7 @@
 										{{
 											__("Overdue ({0})", [
 												unpaidInvoices.filter(
-													(inv) => inv.status === "Overdue",
+													(inv) => inv.status === "Overdue"
 												).length,
 											])
 										}}
@@ -228,7 +228,7 @@
 											<div class="text-2xl font-bold text-gray-900 mt-1">
 												{{
 													formatCurrency(
-														filteredUnpaidSummary.total_outstanding,
+														filteredUnpaidSummary.total_outstanding
 													)
 												}}
 											</div>
@@ -245,7 +245,7 @@
 												{{
 													__("{0} paid", [
 														formatCurrency(
-															filteredUnpaidSummary.total_paid,
+															filteredUnpaidSummary.total_paid
 														),
 													])
 												}}
@@ -279,7 +279,7 @@
 										<p class="text-xs text-yellow-700">
 											{{
 												__(
-													"Payments cannot be added while offline. Connect to the internet to add payments.",
+													"Payments cannot be added while offline. Connect to the internet to add payments."
 												)
 											}}
 										</p>
@@ -387,8 +387,8 @@
 													:title="
 														isOffline()
 															? __(
-																	'Payments cannot be added while offline',
-																)
+																	'Payments cannot be added while offline'
+															  )
 															: ''
 													"
 													class="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
@@ -434,7 +434,7 @@
 													<div class="text-lg font-bold text-orange-600">
 														{{
 															formatCurrency(
-																invoice.outstanding_amount,
+																invoice.outstanding_amount
 															)
 														}}
 													</div>
@@ -448,7 +448,11 @@
 												<div
 													class="h-full bg-gradient-to-r from-green-500 to-green-600 transition-all duration-300"
 													:style="{
-														width: `${(invoice.paid_amount / invoice.grand_total) * 100}%`,
+														width: `${
+															(invoice.paid_amount /
+																invoice.grand_total) *
+															100
+														}%`,
 													}"
 												></div>
 											</div>
@@ -502,7 +506,7 @@
 															>
 																{{
 																	formatDate(
-																		payment.posting_date,
+																		payment.posting_date
 																	)
 																}}
 															</span>
@@ -517,7 +521,7 @@
 															>
 																{{
 																	getPaymentSourceLabel(
-																		payment.source,
+																		payment.source
 																	)
 																}}
 															</span>
@@ -673,7 +677,7 @@
 													>
 														{{
 															formatCurrency(
-																invoice.paid_amount || 0,
+																invoice.paid_amount || 0
 															)
 														}}
 													</div>
@@ -687,7 +691,7 @@
 													>
 														{{
 															formatCurrency(
-																invoice.outstanding_amount || 0,
+																invoice.outstanding_amount || 0
 															)
 														}}
 													</div>
@@ -932,7 +936,7 @@
 												<p class="text-sm font-bold text-red-600">
 													-{{
 														formatCurrency(
-															Math.abs(invoice.grand_total),
+															Math.abs(invoice.grand_total)
 														)
 													}}
 												</p>
@@ -1229,7 +1233,7 @@ watch(
 				emit("refresh-history");
 			}
 		}
-	},
+	}
 );
 
 watch(show, (val) => {
@@ -1431,7 +1435,7 @@ function calculateDraftTotal(items) {
 	if (!items || items.length === 0) return 0;
 	return items.reduce(
 		(sum, item) => sum + (item.quantity || item.qty || 0) * (item.rate || 0),
-		0,
+		0
 	);
 }
 

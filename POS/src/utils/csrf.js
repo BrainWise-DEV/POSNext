@@ -200,7 +200,7 @@ export function isCSRFApiError(error) {
 
 	if (Array.isArray(error.messages)) {
 		return error.messages.some(
-			(message) => typeof message === "string" && message.toLowerCase().includes("csrf"),
+			(message) => typeof message === "string" && message.toLowerCase().includes("csrf")
 		);
 	}
 
@@ -227,7 +227,7 @@ export function createCSRFAwareRequest(originalRequest, { silent = false } = {})
 
 				if (!silent) {
 					console.warn(
-						"CSRF token refresh failed; request will reject with original error",
+						"CSRF token refresh failed; request will reject with original error"
 					);
 				}
 			}

@@ -96,7 +96,7 @@
 							<p class="text-xs text-blue-700 mt-1">
 								{{
 									__(
-										"The return amount was added to the customer credit balance. No cash refund was given.",
+										"The return amount was added to the customer credit balance. No cash refund was given."
 									)
 								}}
 							</p>
@@ -168,7 +168,7 @@
 							<p class="text-xs text-amber-700 mt-1">
 								{{
 									__(
-										"This invoice was sold on credit. The customer owes the full amount.",
+										"This invoice was sold on credit. The customer owes the full amount."
 									)
 								}}
 							</p>
@@ -553,7 +553,7 @@ watch(
 		if (val && props.invoiceName) {
 			loadInvoiceDetails();
 		}
-	},
+	}
 );
 
 watch(show, async (val) => {

@@ -37,7 +37,7 @@ const CART_SORT_ICONS = Object.freeze({
 
 // O(1) label lookup instead of .find() per call
 const SORT_LABEL_MAP = Object.freeze(
-	Object.fromEntries(CART_SORT_OPTIONS.map((o) => [o.field, o.label])),
+	Object.fromEntries(CART_SORT_OPTIONS.map((o) => [o.field, o.label]))
 );
 
 /**
@@ -90,7 +90,7 @@ export function useCartSort(itemsGetter) {
 			}
 			prevSnapshot = newSnapshot;
 		},
-		{ immediate: true },
+		{ immediate: true }
 	);
 
 	// ── Computed ─────────────────────────────────────────────────────────

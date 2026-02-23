@@ -178,7 +178,7 @@ const filteredOptions = computed(() => {
 			(opt) =>
 				opt.label?.toLowerCase().includes(query) ||
 				opt.value?.toString().toLowerCase().includes(query) ||
-				opt.subtitle?.toLowerCase().includes(query),
+				opt.subtitle?.toLowerCase().includes(query)
 		);
 	}
 
