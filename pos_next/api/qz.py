@@ -76,7 +76,7 @@ def get_certificate_download():
 
 
 @frappe.whitelist()
-def sign_message(message):
+def sign_message(message: str):
 	"""Sign a message with the private key for QZ Tray.
 
 	Args:
