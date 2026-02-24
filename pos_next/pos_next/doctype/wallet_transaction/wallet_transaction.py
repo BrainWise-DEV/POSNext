@@ -382,7 +382,7 @@ def credit_return_to_wallet(return_invoice, amount=None):
 	})
 	transaction.flags.ignore_permissions = True
 	transaction.insert(ignore_permissions=True)
-	transaction.submit(ignore_permissions=True)
+	transaction.submit()
 
 	frappe.msgprint(
 		_("Credited {0} to customer wallet for return {1}").format(
