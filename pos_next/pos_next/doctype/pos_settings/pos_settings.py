@@ -2,6 +2,7 @@
 # For license information, please see license.txt
 
 import frappe
+from frappe import _
 from frappe.model.document import Document
 from frappe.utils import cint, flt
 
@@ -12,25 +13,29 @@ class POSSettings(Document):
 		# Guard against None values and validate discount percentage
 		max_discount = flt(self.max_discount_allowed)
 		if max_discount < 0 or max_discount > 100:
-			frappe.throw("Max Discount Allowed must be between 0 and 100")
+			frappe.throw(_("Max Discount Allowed must be between 0 and 100"))
 
 		# Guard against None values and validate search limit
 		if self.use_limit_search:
 			search_limit = cint(self.search_limit)
 			if search_limit <= 0:
-				frappe.throw("Search Limit must be greater than 0")
+				frappe.throw(_("Search Limit must be greater than 0"))
 
 		# Validate use_exact_amount cannot be enabled with credit sale or partial payment
 		if cint(self.use_exact_amount):
 			if cint(self.allow_credit_sale):
 				frappe.throw(
-					"'Use Exact Amount for Non-Cash' cannot be enabled together with 'Allow Credit Sale'. "
-					"Please disable Credit Sale first."
+					_(
+						"'Use Exact Amount for Non-Cash' cannot be enabled together with 'Allow Credit Sale'. "
+						"Please disable Credit Sale first."
+					)
 				)
 			if cint(self.allow_partial_payment):
 				frappe.throw(
-					"'Use Exact Amount for Non-Cash' cannot be enabled together with 'Allow Partial Payment'. "
-					"Please disable Partial Payment first."
+					_(
+						"'Use Exact Amount for Non-Cash' cannot be enabled together with 'Allow Partial Payment'. "
+						"Please disable Partial Payment first."
+					)
 				)
 
 	def on_update(self):
@@ -85,7 +90,7 @@ class POSSettings(Document):
 
 
 @frappe.whitelist()
-def get_pos_settings(pos_profile):
+def get_pos_settings(pos_profile: str):
 	"""
 	Get POS Settings for a specific POS Profile.
 
@@ -130,7 +135,7 @@ def create_default_settings(pos_profile):
 
 
 @frappe.whitelist()
-def update_pos_settings(pos_profile, settings):
+def update_pos_settings(pos_profile: str, settings: str):
 	"""Update POS Settings for a POS Profile"""
 	import json
 

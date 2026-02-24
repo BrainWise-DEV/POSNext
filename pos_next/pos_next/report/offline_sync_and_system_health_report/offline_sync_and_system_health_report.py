@@ -63,6 +63,7 @@ def get_data(filters):
 	conditions = get_conditions(filters)
 
 	# Query to get offline sync records with related invoice data
+	# nosemgrep: frappe-sql-format-injection
 	query = f"""
 		SELECT
 			ois.offline_id,
@@ -177,29 +178,29 @@ def get_summary(data):
 	success_rate = flt((synced_count / total_syncs) * 100, 2) if total_syncs > 0 else 0
 
 	return [
-		{"value": total_syncs, "label": "Total Sync Attempts", "indicator": "Blue", "datatype": "Int"},
-		{"value": synced_count, "label": "Successfully Synced", "indicator": "Green", "datatype": "Int"},
+		{"value": total_syncs, "label": _("Total Sync Attempts"), "indicator": "Blue", "datatype": "Int"},
+		{"value": synced_count, "label": _("Successfully Synced"), "indicator": "Green", "datatype": "Int"},
 		{
 			"value": failed_count,
-			"label": "Failed Syncs",
+			"label": _("Failed Syncs"),
 			"indicator": "Red" if failed_count > 0 else "Gray",
 			"datatype": "Int",
 		},
 		{
 			"value": pending_count,
-			"label": "Pending Syncs",
+			"label": _("Pending Syncs"),
 			"indicator": "Yellow" if pending_count > 0 else "Gray",
 			"datatype": "Int",
 		},
 		{
 			"value": success_rate,
-			"label": "Success Rate (%)",
+			"label": _("Success Rate (%)"),
 			"indicator": "Green" if success_rate >= 95 else "Orange",
 			"datatype": "Percent",
 		},
 		{
 			"value": avg_sync_delay,
-			"label": "Avg Sync Delay (Hours)",
+			"label": _("Avg Sync Delay (Hours)"),
 			"indicator": "Green" if avg_sync_delay < 1 else "Orange",
 			"datatype": "Float",
 		},

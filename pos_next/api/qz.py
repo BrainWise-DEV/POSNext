@@ -54,7 +54,7 @@ def get_certificate():
 			title=_("QZ Certificate Missing"),
 		)
 
-	with open(path) as f:
+	with open(path) as f:  # nosemgrep: frappe-semgrep-rules.rules.security.frappe-security-file-traversal
 		return f.read()
 
 

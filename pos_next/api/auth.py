@@ -6,7 +6,7 @@ from frappe.utils.password import check_password
 
 @frappe.whitelist()
 @rate_limit(limit=5, seconds=60)
-def verify_session_password(password=None):
+def verify_session_password(password: str | None = None):
 	"""Verify the current session user's password for session lock re-authentication.
 
 	NOTE: We must NOT raise frappe.AuthenticationError here because Frappe's

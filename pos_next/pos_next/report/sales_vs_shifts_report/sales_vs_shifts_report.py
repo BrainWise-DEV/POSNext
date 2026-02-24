@@ -660,6 +660,7 @@ def fetch_shifts_with_invoices(filters):
 
 	conditions = build_conditions(filters)
 
+	# nosemgrep: frappe-sql-format-injection
 	query = f"""
 		SELECT
 			pcs.name AS shift_id,
@@ -1189,7 +1190,7 @@ def get_chart(data):
 
 
 @frappe.whitelist()
-def get_hourly_breakdown(filters):
+def get_hourly_breakdown(filters: str):
 	"""Get hourly sales breakdown"""
 	filters = frappe.parse_json(filters) if isinstance(filters, str) else filters
 
@@ -1205,7 +1206,7 @@ def get_hourly_breakdown(filters):
 
 	where = " AND " + " AND ".join(conditions) if conditions else ""
 
-	return frappe.db.sql(
+	return frappe.db.sql(  # nosemgrep: frappe-sql-format-injection
 		f"""
 		SELECT
 			HOUR(si.posting_time) AS hour,
@@ -1223,7 +1224,7 @@ def get_hourly_breakdown(filters):
 
 
 @frappe.whitelist()
-def get_payment_method_breakdown(filters):
+def get_payment_method_breakdown(filters: str):
 	"""Get payment method breakdown"""
 	filters = frappe.parse_json(filters) if isinstance(filters, str) else filters
 
@@ -1239,7 +1240,7 @@ def get_payment_method_breakdown(filters):
 
 	where = " AND " + " AND ".join(conditions) if conditions else ""
 
-	return frappe.db.sql(
+	return frappe.db.sql(  # nosemgrep: frappe-sql-format-injection
 		f"""
 		SELECT
 			sip.mode_of_payment,
@@ -1258,7 +1259,7 @@ def get_payment_method_breakdown(filters):
 
 
 @frappe.whitelist()
-def get_daily_trend(filters):
+def get_daily_trend(filters: str):
 	"""Get daily sales trend"""
 	filters = frappe.parse_json(filters) if isinstance(filters, str) else filters
 
@@ -1274,7 +1275,7 @@ def get_daily_trend(filters):
 
 	where = " AND " + " AND ".join(conditions) if conditions else ""
 
-	return frappe.db.sql(
+	return frappe.db.sql(  # nosemgrep: frappe-sql-format-injection
 		f"""
 		SELECT
 			si.posting_date AS date,

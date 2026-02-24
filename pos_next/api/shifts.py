@@ -68,7 +68,7 @@ def get_opening_dialog_data():
 
 
 @frappe.whitelist()
-def check_opening_shift(user=None):
+def check_opening_shift(user: str | None = None):
 	"""Check if user has an open shift"""
 	if not user:
 		user = frappe.session.user
@@ -102,7 +102,7 @@ def check_opening_shift(user=None):
 
 
 @frappe.whitelist()
-def create_opening_shift(pos_profile, company, balance_details):
+def create_opening_shift(pos_profile: str, company: str, balance_details: str):
 	"""Create a new POS Opening Shift"""
 	balance_details = json.loads(balance_details) if isinstance(balance_details, str) else balance_details
 
@@ -146,7 +146,7 @@ def create_opening_shift(pos_profile, company, balance_details):
 
 
 @frappe.whitelist()
-def get_closing_shift_data(opening_shift):
+def get_closing_shift_data(opening_shift: str):
 	"""Get data for closing shift"""
 	from pos_next.pos_next.doctype.pos_closing_shift.pos_closing_shift import make_closing_shift_from_opening
 
@@ -169,7 +169,7 @@ def get_closing_shift_data(opening_shift):
 
 
 @frappe.whitelist()
-def submit_closing_shift(closing_shift):
+def submit_closing_shift(closing_shift: str):
 	"""Submit closing shift"""
 	from pos_next.pos_next.doctype.pos_closing_shift.pos_closing_shift import (
 		submit_closing_shift as submit_shift,

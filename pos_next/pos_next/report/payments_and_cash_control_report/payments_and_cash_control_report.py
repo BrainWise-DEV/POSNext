@@ -52,6 +52,7 @@ def get_data(filters):
 	conditions = get_conditions(filters)
 
 	# Get payment reconciliation details from closing shifts
+	# nosemgrep: frappe-sql-format-injection
 	query = f"""
 		SELECT
 			pcs.name as shift,

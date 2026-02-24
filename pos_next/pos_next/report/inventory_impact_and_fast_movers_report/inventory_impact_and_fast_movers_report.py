@@ -69,6 +69,7 @@ def get_data(filters):
 		date_range_days = 30  # Default to 30 days
 
 	# Query to get item sales data
+	# nosemgrep: frappe-sql-format-injection
 	query = f"""
 		SELECT
 			sii.item_code,

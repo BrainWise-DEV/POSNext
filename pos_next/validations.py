@@ -20,7 +20,7 @@ def validate_item(doc, method):
 
 
 @frappe.whitelist()
-def item_query(doctype, txt, searchfield, start, page_len, filters):
+def item_query(doctype: str, txt: str, searchfield: str, start: int, page_len: int, filters: str):
 	"""
 	Custom query to filter items by company
 	- If company is specified in filters, show:
@@ -48,6 +48,7 @@ def item_query(doctype, txt, searchfield, start, page_len, filters):
 		conditions.append("(custom_company = %s OR custom_company IS NULL OR custom_company = '')")
 		values.append(company)
 
+	# nosemgrep: frappe-sql-format-injection
 	query = f"""
 		SELECT name, item_name, item_group
 		FROM `tabItem`

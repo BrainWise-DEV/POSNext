@@ -15,7 +15,7 @@ from frappe.utils import cint, flt, get_datetime, nowdate, today
 
 
 @frappe.whitelist()
-def get_customer_balance(customer, company=None):
+def get_customer_balance(customer: str, company: str | None = None):
 	"""
 	Get customer balance from Sales Invoices.
 
@@ -133,7 +133,7 @@ def check_credit_sale_enabled(pos_profile):
 
 
 @frappe.whitelist()
-def get_available_credit(customer, company, pos_profile=None):
+def get_available_credit(customer: str, company: str, pos_profile: str | None = None):
 	"""
 	Get list of available credit sources for a customer.
 	Includes:
@@ -226,7 +226,7 @@ def get_available_credit(customer, company, pos_profile=None):
 
 
 @frappe.whitelist()
-def redeem_customer_credit(invoice_name, customer_credit_dict):
+def redeem_customer_credit(invoice_name: str, customer_credit_dict: str):
 	"""
 	Redeem customer credit by creating Journal Entries.
 	This allocates credit from previous invoices/advances to the new invoice.
@@ -497,7 +497,7 @@ def get_credit_redeem_remark(invoice_name):
 
 
 @frappe.whitelist()
-def cancel_credit_journal_entries(invoice_name):
+def cancel_credit_journal_entries(invoice_name: str):
 	"""
 	Cancel journal entries created for credit redemption when invoice is cancelled.
 
@@ -542,7 +542,7 @@ def cancel_credit_journal_entries(invoice_name):
 
 
 @frappe.whitelist()
-def get_credit_sale_summary(pos_profile):
+def get_credit_sale_summary(pos_profile: str):
 	"""
 	Get summary of credit sales for a POS Profile.
 
@@ -580,7 +580,7 @@ def get_credit_sale_summary(pos_profile):
 
 
 @frappe.whitelist()
-def get_credit_invoices(pos_profile, limit=100):
+def get_credit_invoices(pos_profile: str, limit: int = 100):
 	"""
 	Get list of credit sale invoices (with outstanding amount).
 

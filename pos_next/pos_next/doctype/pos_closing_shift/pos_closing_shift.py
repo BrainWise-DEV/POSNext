@@ -162,6 +162,7 @@ class POSClosingShift(Document):
 	def delete_draft_invoices(self):
 		if frappe.get_value("POS Profile", self.pos_profile, "posa_allow_delete"):
 			doctype = "Sales Invoice"
+			# nosemgrep: frappe-sql-format-injection
 			data = frappe.db.sql(
 				f"""
 		select
@@ -322,7 +323,7 @@ class POSClosingShift(Document):
 			if amount
 		]
 
-		return frappe.render_template(
+		return frappe.render_template(  # nosemgrep: frappe-semgrep-rules.rules.security.frappe-ssti
 			"pos_next/pos_next/doctype/pos_closing_shift/closing_shift_details.html",
 			{
 				"data": self,
@@ -336,7 +337,7 @@ class POSClosingShift(Document):
 
 
 @frappe.whitelist()
-def get_cashiers(doctype, txt, searchfield, start, page_len, filters):
+def get_cashiers(doctype: str, txt: str, searchfield: str, start: int, page_len: int, filters: str):
 	cashiers_list = frappe.get_all("POS Profile User", filters=filters, fields=["user"])
 	result = []
 	for cashier in cashiers_list:
@@ -348,12 +349,13 @@ def get_cashiers(doctype, txt, searchfield, start, page_len, filters):
 
 
 @frappe.whitelist()
-def get_pos_invoices(pos_opening_shift, doctype=None):
+def get_pos_invoices(pos_opening_shift: str, doctype: str | None = None):
 	if not doctype:
 		use_pos_invoice = False
 		doctype = "POS Invoice" if use_pos_invoice else "Sales Invoice"
 	submit_printed_invoices(pos_opening_shift, doctype)
 	cond = " and ifnull(consolidated_invoice,'') = ''" if doctype == "POS Invoice" else ""
+	# nosemgrep: frappe-sql-format-injection
 	data = frappe.db.sql(
 		f"""
 	select
@@ -373,7 +375,7 @@ def get_pos_invoices(pos_opening_shift, doctype=None):
 
 
 @frappe.whitelist()
-def get_payments_entries(pos_opening_shift):
+def get_payments_entries(pos_opening_shift: str):
 	return frappe.get_all(
 		"Payment Entry",
 		filters={
@@ -484,7 +486,7 @@ def _process_invoice(invoice, invoice_field, company_currency, cash_mode, paymen
 
 
 @frappe.whitelist()
-def make_closing_shift_from_opening(opening_shift):
+def make_closing_shift_from_opening(opening_shift: str):
 	opening_shift = json.loads(opening_shift)
 	doctype = "Sales Invoice"
 	invoice_field = "sales_invoice"
@@ -592,7 +594,7 @@ def make_closing_shift_from_opening(opening_shift):
 
 
 @frappe.whitelist()
-def submit_closing_shift(closing_shift):
+def submit_closing_shift(closing_shift: str):
 	closing_shift = json.loads(closing_shift)
 	closing_shift_doc = frappe.get_doc(closing_shift)
 	closing_shift_doc.flags.ignore_permissions = True

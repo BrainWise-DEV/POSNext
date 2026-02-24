@@ -64,7 +64,7 @@ class Wallet(Document):
 
 
 @frappe.whitelist()
-def get_customer_wallet(customer, company=None):
+def get_customer_wallet(customer: str, company: str | None = None):
 	"""Get wallet for a customer"""
 	filters = {"customer": customer}
 	if company:
@@ -78,7 +78,9 @@ def get_customer_wallet(customer, company=None):
 
 
 @frappe.whitelist()
-def get_customer_wallet_balance(customer, company=None, exclude_invoice=None):
+def get_customer_wallet_balance(
+	customer: str, company: str | None = None, exclude_invoice: str | None = None
+):
 	"""
 	Get customer's available wallet balance.
 
@@ -157,7 +159,7 @@ def get_pending_wallet_payments(customer, exclude_invoice=None):
 
 
 @frappe.whitelist()
-def create_customer_wallet(customer, company, account=None):
+def create_customer_wallet(customer: str, company: str, account: str | None = None):
 	"""
 	Create a wallet for a customer.
 
@@ -214,7 +216,7 @@ def get_default_wallet_account(company):
 
 
 @frappe.whitelist()
-def get_or_create_wallet(customer, company):
+def get_or_create_wallet(customer: str, company: str):
 	"""Get existing wallet or create a new one"""
 	wallet = get_customer_wallet(customer, company)
 

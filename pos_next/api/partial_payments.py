@@ -742,7 +742,7 @@ def get_partial_payment_details(invoice_name: str) -> dict:
 
 
 @frappe.whitelist()
-def add_payment_to_partial_invoice(invoice_name: str, payments) -> dict:
+def add_payment_to_partial_invoice(invoice_name: str, payments: str) -> dict:
 	"""
 	Add payments to a partially paid invoice via Payment Entry.
 

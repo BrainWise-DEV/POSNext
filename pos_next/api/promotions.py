@@ -33,7 +33,7 @@ def check_promotion_permissions(action="read"):
 
 
 @frappe.whitelist()
-def get_promotions(pos_profile=None, company=None, include_disabled=False):
+def get_promotions(pos_profile: str | None = None, company: str | None = None, include_disabled: int = 0):
 	"""Get all promotional schemes AND standalone pricing rules for POS with simplified structure."""
 	check_promotion_permissions("read")
 
@@ -172,7 +172,7 @@ def get_promotions(pos_profile=None, company=None, include_disabled=False):
 
 
 @frappe.whitelist()
-def get_promotion_details(scheme_name):
+def get_promotion_details(scheme_name: str):
 	"""Get detailed information about a promotional scheme OR standalone pricing rule."""
 	check_promotion_permissions("read")
 
@@ -228,7 +228,7 @@ def get_promotion_details(scheme_name):
 
 
 @frappe.whitelist()
-def create_promotion(data):
+def create_promotion(data: str):
 	"""
 	Create a promotional scheme.
 
@@ -361,7 +361,7 @@ def create_promotion(data):
 
 
 @frappe.whitelist()
-def update_promotion(scheme_name, data):
+def update_promotion(scheme_name: str, data: str):
 	"""
 	Update an existing promotional scheme.
 	Supports updating validity dates, discount values, and slab conditions.
@@ -448,7 +448,7 @@ def update_promotion(scheme_name, data):
 
 
 @frappe.whitelist()
-def toggle_promotion(scheme_name, disable=None):
+def toggle_promotion(scheme_name: str, disable: int = 0):
 	"""Enable or disable a promotional scheme."""
 	check_promotion_permissions("write")
 
@@ -479,7 +479,7 @@ def toggle_promotion(scheme_name, disable=None):
 
 
 @frappe.whitelist()
-def delete_promotion(scheme_name):
+def delete_promotion(scheme_name: str):
 	"""Delete a promotional scheme and its pricing rules."""
 	check_promotion_permissions("delete")
 
@@ -499,7 +499,7 @@ def delete_promotion(scheme_name):
 
 
 @frappe.whitelist()
-def get_item_groups(company=None):
+def get_item_groups(company: str | None = None):
 	"""Get all item groups."""
 	# Item Group is a global doctype, not company-specific
 	# Return all item groups (both parent groups and leaf nodes)
@@ -513,7 +513,7 @@ def get_brands():
 
 
 @frappe.whitelist()
-def search_items(search_term, pos_profile=None, limit=20):
+def search_items(search_term: str, pos_profile: str | None = None, limit: int = 20):
 	"""Search for items."""
 	# Rate limiting: Track API calls per user
 	cache_key = f"search_items_rate_limit:{frappe.session.user}"
@@ -560,7 +560,7 @@ def search_items(search_term, pos_profile=None, limit=20):
 
 
 @frappe.whitelist()
-def get_coupons(company=None, include_disabled=False, coupon_type=None):
+def get_coupons(company: str | None = None, include_disabled: int = 0, coupon_type: str | None = None):
 	"""Get all coupons for the company with enhanced filtering."""
 	check_promotion_permissions("read")
 
@@ -631,7 +631,7 @@ def get_coupons(company=None, include_disabled=False, coupon_type=None):
 
 
 @frappe.whitelist()
-def get_coupon_details(coupon_name):
+def get_coupon_details(coupon_name: str):
 	"""Get detailed information about a specific coupon."""
 	check_promotion_permissions("read")
 
@@ -645,7 +645,7 @@ def get_coupon_details(coupon_name):
 
 
 @frappe.whitelist()
-def create_coupon(data):
+def create_coupon(data: str):
 	"""
 	Create a new coupon.
 
@@ -746,7 +746,7 @@ def create_coupon(data):
 
 
 @frappe.whitelist()
-def update_coupon(coupon_name, data):
+def update_coupon(coupon_name: str, data: str):
 	"""
 	Update an existing coupon.
 	Can update validity dates, usage limits, disabled status, and discount configuration.
@@ -805,7 +805,7 @@ def update_coupon(coupon_name, data):
 
 
 @frappe.whitelist()
-def toggle_coupon(coupon_name, disabled=None):
+def toggle_coupon(coupon_name: str, disabled: int = 0):
 	"""Enable or disable a coupon."""
 	check_promotion_permissions("write")
 
@@ -837,7 +837,7 @@ def toggle_coupon(coupon_name, disabled=None):
 
 
 @frappe.whitelist()
-def delete_coupon(coupon_name):
+def delete_coupon(coupon_name: str):
 	"""Delete a coupon."""
 	check_promotion_permissions("delete")
 
@@ -870,7 +870,7 @@ def delete_coupon(coupon_name):
 
 
 @frappe.whitelist()
-def apply_referral_code(referral_code, customer):
+def apply_referral_code(referral_code: str, customer: str):
 	"""
 	Apply a referral code for a customer - generates coupons for both referrer and referee
 
@@ -898,7 +898,7 @@ def apply_referral_code(referral_code, customer):
 
 
 @frappe.whitelist()
-def get_referral_codes(company=None, include_disabled=False):
+def get_referral_codes(company: str | None = None, include_disabled: int = 0):
 	"""Get all referral codes with optional filters."""
 	filters = {}
 
@@ -935,7 +935,7 @@ def get_referral_codes(company=None, include_disabled=False):
 
 
 @frappe.whitelist()
-def get_referral_details(referral_name):
+def get_referral_details(referral_name: str):
 	"""Get detailed information about a specific referral code."""
 	check_promotion_permissions("read")
 

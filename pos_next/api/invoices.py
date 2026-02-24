@@ -455,7 +455,7 @@ def _auto_set_return_batches(invoice_doc):
 
 
 @frappe.whitelist()
-def validate_cart_items(items, pos_profile=None):
+def validate_cart_items(items: str, pos_profile: str | None = None):
 	"""Validate cart items for available stock.
 
 	Returns a list of item dicts where requested quantity exceeds availability.
@@ -478,7 +478,7 @@ def validate_cart_items(items, pos_profile=None):
 
 
 @frappe.whitelist()
-def validate_return_items(original_invoice_name, return_items, doctype="Sales Invoice"):
+def validate_return_items(original_invoice_name: str, return_items: str, doctype: str = "Sales Invoice"):
 	"""Ensure that return items do not exceed the quantity from the original invoice.
 	Also validates return time frame based on POS Settings.
 
@@ -577,7 +577,7 @@ def validate_return_items(original_invoice_name, return_items, doctype="Sales In
 
 
 @frappe.whitelist()
-def update_invoice(data):
+def update_invoice(data: str):
 	"""Create or update invoice draft (Step 1)."""
 	try:
 		data = json.loads(data) if isinstance(data, str) else data
@@ -644,7 +644,7 @@ def update_invoice(data):
 				doctype=invoice_doc.doctype,
 			)
 			if not validation.get("valid"):
-				frappe.throw(validation.get("message"))
+				frappe.throw(_(validation.get("message")))
 
 		# Ensure customer exists
 		customer_name = invoice_doc.get("customer")
@@ -716,7 +716,7 @@ def update_invoice(data):
 				# Validate manual rate edit against business rules (uses cached settings)
 				validation = validate_manual_rate_edit(item, pos_profile, pos_settings_cache)
 				if not validation.get("valid"):
-					frappe.throw(validation.get("message"))
+					frappe.throw(_(validation.get("message")))
 			else:
 				# NORMAL FLOW: Trust frontend's price_list_rate if provided and valid
 				if frontend_price_list_rate > 0:
@@ -1022,7 +1022,7 @@ def _cleanup_failed_sync(sync_record_name):
 
 
 @frappe.whitelist()
-def check_offline_invoice_synced(offline_id):
+def check_offline_invoice_synced(offline_id: str):
 	"""
 	Check if an offline invoice has already been synced.
 
@@ -1059,7 +1059,7 @@ def check_offline_invoice_synced(offline_id):
 
 
 @frappe.whitelist()
-def submit_invoice(invoice=None, data=None):
+def submit_invoice(invoice: str | None = None, data: str | None = None):
 	"""Submit the invoice (Step 2)."""
 	# Handle different calling conventions
 	if invoice is None:
@@ -1369,7 +1369,7 @@ def submit_invoice(invoice=None, data=None):
 
 
 @frappe.whitelist()
-def get_invoice(invoice_name):
+def get_invoice(invoice_name: str):
 	"""
 	Get a single invoice with all details for POS.
 
@@ -1396,7 +1396,7 @@ def get_invoice(invoice_name):
 
 
 @frappe.whitelist()
-def get_invoices(pos_profile, limit=100):
+def get_invoices(pos_profile: str, limit: int = 100):
 	"""
 	Get list of invoices for a POS Profile.
 
@@ -1478,7 +1478,7 @@ def get_invoices(pos_profile, limit=100):
 
 
 @frappe.whitelist()
-def get_draft_invoices(pos_opening_shift, doctype="Sales Invoice"):
+def get_draft_invoices(pos_opening_shift: str, doctype: str = "Sales Invoice"):
 	"""Get all draft invoices for a POS opening shift."""
 	filters = {
 		"docstatus": 0,
@@ -1507,7 +1507,7 @@ def get_draft_invoices(pos_opening_shift, doctype="Sales Invoice"):
 
 
 @frappe.whitelist()
-def delete_invoice(invoice):
+def delete_invoice(invoice: str):
 	"""Delete draft invoice."""
 	doctype = "Sales Invoice"
 
@@ -1523,7 +1523,7 @@ def delete_invoice(invoice):
 
 
 @frappe.whitelist()
-def cleanup_old_drafts(pos_profile=None, max_age_hours=24):
+def cleanup_old_drafts(pos_profile: str | None = None, max_age_hours: int = 24):
 	"""
 	Clean up old draft invoices to prevent stock reservation issues.
 	Deletes drafts older than max_age_hours (default 24 hours).
@@ -1573,7 +1573,7 @@ def cleanup_old_drafts(pos_profile=None, max_age_hours=24):
 
 
 @frappe.whitelist()
-def get_returnable_invoices(limit=50, pos_profile=None):
+def get_returnable_invoices(limit: int = 50, pos_profile: str | None = None):
 	"""Get list of invoices that have items available for return.
 	Filters by return validity period if configured in POS Settings.
 
@@ -1650,7 +1650,7 @@ def get_returnable_invoices(limit=50, pos_profile=None):
 
 
 @frappe.whitelist()
-def search_invoice_by_number(search_term, pos_profile=None):
+def search_invoice_by_number(search_term: str, pos_profile: str | None = None):
 	"""Search for invoices by invoice number across the entire database.
 	No date restrictions - searches all returnable invoices matching the term.
 
@@ -1727,7 +1727,7 @@ def search_invoice_by_number(search_term, pos_profile=None):
 
 
 @frappe.whitelist()
-def check_invoice_return_validity(invoice_name):
+def check_invoice_return_validity(invoice_name: str):
 	"""Check if an invoice is within the return validity period.
 
 	Returns detailed information for the UI to display, including:
@@ -1778,7 +1778,7 @@ def check_invoice_return_validity(invoice_name):
 
 
 @frappe.whitelist()
-def get_invoice_for_return(invoice_name):
+def get_invoice_for_return(invoice_name: str):
 	"""Get invoice with return tracking - calculates remaining qty for each item.
 	Also validates return validity period based on POS Settings.
 
@@ -1897,7 +1897,7 @@ def _build_item_tax_map(taxes: list) -> dict:
 
 
 @frappe.whitelist()
-def prepare_return_invoice(invoice_name, pos_opening_shift=None):
+def prepare_return_invoice(invoice_name: str, pos_opening_shift: str | None = None):
 	"""Prepare a return invoice using ERPNext's make_sales_return.
 
 	This uses ERPNext's standard return document creation which properly copies
@@ -2105,17 +2105,17 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
 
 @frappe.whitelist()
 def search_invoices_for_return(
-	invoice_name=None,
-	company=None,
-	customer_name=None,
-	customer_id=None,
-	mobile_no=None,
-	from_date=None,
-	to_date=None,
-	min_amount=None,
-	max_amount=None,
-	page=1,
-	doctype="Sales Invoice",
+	invoice_name: str | None = None,
+	company: str | None = None,
+	customer_name: str | None = None,
+	customer_id: str | None = None,
+	mobile_no: str | None = None,
+	from_date: str | None = None,
+	to_date: str | None = None,
+	min_amount: str | None = None,
+	max_amount: str | None = None,
+	page: int = 1,
+	doctype: str = "Sales Invoice",
 ):
 	"""Search for invoices that can be returned with pagination.
 
@@ -2334,7 +2334,7 @@ def search_invoices_for_return(
 
 
 @frappe.whitelist()
-def apply_offers(invoice_data, selected_offers=None):
+def apply_offers(invoice_data: str, selected_offers: str | None = None):
 	"""Calculate and apply promotional offers using ERPNext Pricing Rules.
 
 	Args:

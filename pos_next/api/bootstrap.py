@@ -135,12 +135,7 @@ def _get_precision_settings():
 			number_format: str - Number format pattern (e.g., "#,###.##")
 		}
 	"""
-	settings = frappe.db.get_value(
-		"System Settings",
-		"System Settings",
-		["currency_precision", "float_precision", "rounding_method", "number_format"],
-		as_dict=True,
-	)
+	settings = frappe.get_cached_doc("System Settings")
 
 	return {
 		"currency": int(settings.currency_precision) if settings.currency_precision else 2,

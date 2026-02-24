@@ -139,7 +139,9 @@ def get_wallet_amount_from_payments(payments):
 
 
 @frappe.whitelist()
-def get_customer_wallet_balance(customer, company=None, exclude_invoice=None):
+def get_customer_wallet_balance(
+	customer: str, company: str | None = None, exclude_invoice: str | None = None
+):
 	"""
 	Get customer's available wallet balance.
 
@@ -212,7 +214,7 @@ def get_pending_wallet_payments(customer, exclude_invoice=None):
 
 
 @frappe.whitelist()
-def get_customer_wallet(customer, company=None):
+def get_customer_wallet(customer: str, company: str | None = None):
 	"""Get wallet details for a customer."""
 	filters = {"customer": customer}
 	if company:
@@ -233,7 +235,7 @@ def get_customer_wallet(customer, company=None):
 
 
 @frappe.whitelist()
-def get_or_create_wallet(customer, company, pos_settings=None):
+def get_or_create_wallet(customer: str, company: str, pos_settings: str | None = None):
 	"""Get existing wallet or create a new one."""
 
 	# Check if wallet exists
@@ -319,7 +321,7 @@ def get_pos_settings(pos_profile):
 
 
 @frappe.whitelist()
-def get_wallet_payment_methods(pos_profile):
+def get_wallet_payment_methods(pos_profile: str):
 	"""Get payment methods that are wallet-enabled for a POS profile."""
 	payment_methods = frappe.get_all(
 		"POS Payment Method", filters={"parent": pos_profile}, fields=["mode_of_payment", "default"]
@@ -341,7 +343,7 @@ def get_wallet_payment_methods(pos_profile):
 
 
 @frappe.whitelist()
-def get_wallet_info(customer, company, pos_profile=None):
+def get_wallet_info(customer: str, company: str, pos_profile: str | None = None):
 	"""
 	Get comprehensive wallet information for a customer.
 	Used by POS frontend.
@@ -402,7 +404,7 @@ def get_wallet_info(customer, company, pos_profile=None):
 
 
 @frappe.whitelist()
-def create_manual_wallet_credit(customer, company, amount, remarks=None):
+def create_manual_wallet_credit(customer: str, company: str, amount: str, remarks: str | None = None):
 	"""
 	Create a manual wallet credit (for admin use).
 

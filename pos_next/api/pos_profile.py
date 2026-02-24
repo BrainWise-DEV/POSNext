@@ -28,7 +28,7 @@ def get_pos_profiles():
 
 
 @frappe.whitelist()
-def get_pos_profile_data(pos_profile):
+def get_pos_profile_data(pos_profile: str):
 	"""Get detailed POS Profile data with hierarchical item groups for instant UI rendering."""
 	if not pos_profile:
 		frappe.throw(_("POS Profile is required"))
@@ -65,7 +65,7 @@ def get_pos_profile_data(pos_profile):
 
 
 @frappe.whitelist()
-def get_pos_settings(pos_profile):
+def get_pos_settings(pos_profile: str):
 	"""Get POS Settings for a given POS Profile"""
 	from pos_next.api.constants import DEFAULT_POS_SETTINGS, POS_SETTINGS_FIELDS
 
@@ -88,7 +88,7 @@ def get_pos_settings(pos_profile):
 
 
 @frappe.whitelist()
-def get_payment_methods(pos_profile):
+def get_payment_methods(pos_profile: str):
 	"""Get available payment methods from POS Profile with optimized queries"""
 	try:
 		# Validate pos_profile parameter
@@ -137,7 +137,7 @@ def get_payment_methods(pos_profile):
 
 
 @frappe.whitelist()
-def get_taxes(pos_profile):
+def get_taxes(pos_profile: str):
 	"""Get tax configuration from POS Profile"""
 	try:
 		if not pos_profile:
@@ -175,7 +175,7 @@ def get_taxes(pos_profile):
 
 
 @frappe.whitelist()
-def get_warehouses(pos_profile):
+def get_warehouses(pos_profile: str):
 	"""Get all warehouses for the company in POS Profile"""
 	try:
 		if not pos_profile:
@@ -204,7 +204,7 @@ def get_warehouses(pos_profile):
 
 
 @frappe.whitelist()
-def get_default_customer(pos_profile):
+def get_default_customer(pos_profile: str):
 	"""Get the default customer configured in POS Profile"""
 	try:
 		if not pos_profile:
@@ -229,7 +229,7 @@ def get_default_customer(pos_profile):
 
 
 @frappe.whitelist()
-def update_warehouse(pos_profile, warehouse):
+def update_warehouse(pos_profile: str, warehouse: str):
 	"""Update warehouse in POS Profile"""
 	try:
 		if not pos_profile:
@@ -273,7 +273,7 @@ def update_warehouse(pos_profile, warehouse):
 
 
 @frappe.whitelist()
-def get_wallet_payment_flags(methods):
+def get_wallet_payment_flags(methods: str):
 	"""
 	Get is_wallet_payment flags for multiple payment methods in a single query.
 
@@ -315,7 +315,7 @@ def get_wallet_payment_flags(methods):
 
 
 @frappe.whitelist()
-def get_sales_persons(pos_profile=None):
+def get_sales_persons(pos_profile: str | None = None):
 	"""Get all active individual sales persons (not groups) for POS"""
 	try:
 		filters = {
@@ -614,7 +614,7 @@ def update_pos_profile(*args, **parameters):
 
 
 @frappe.whitelist()
-def delete_pos_profile(pos_profile):
+def delete_pos_profile(pos_profile: str):
 	"""
 	Delete a POS Profile
 

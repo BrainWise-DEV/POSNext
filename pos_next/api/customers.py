@@ -8,7 +8,9 @@ from frappe import _
 
 
 @frappe.whitelist()
-def get_customers(search_term="", pos_profile=None, limit=20, modified_since=None):
+def get_customers(
+	search_term: str = "", pos_profile: str | None = None, limit: int = 20, modified_since: str | None = None
+):
 	"""
 	Search customers for inline customer selection in POS.
 
@@ -62,12 +64,12 @@ def get_customers(search_term="", pos_profile=None, limit=20, modified_since=Non
 
 @frappe.whitelist()
 def create_customer(
-	customer_name,
-	mobile_no=None,
-	email_id=None,
-	customer_group="Individual",
-	territory="All Territories",
-	company=None,
+	customer_name: str,
+	mobile_no: str | None = None,
+	email_id: str | None = None,
+	customer_group: str = "Individual",
+	territory: str = "All Territories",
+	company: str | None = None,
 ):
 	"""
 	Create a new customer from POS.
@@ -184,7 +186,7 @@ def get_default_loyalty_program_from_settings():
 
 
 @frappe.whitelist()
-def get_customer_details(customer):
+def get_customer_details(customer: str):
 	"""
 	Get detailed customer information.
 

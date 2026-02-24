@@ -80,7 +80,9 @@ def get_default_config():
 
 
 @frappe.whitelist(allow_guest=False)
-def validate_branding(client_signature=None, brand_name=None, brand_url=None):
+def validate_branding(
+	client_signature: str | None = None, brand_name: str | None = None, brand_url: str | None = None
+):
 	"""
 	Validate branding integrity from client
 	Logs tampering attempts and validates signatures
@@ -130,7 +132,7 @@ def validate_branding(client_signature=None, brand_name=None, brand_url=None):
 
 
 @frappe.whitelist(allow_guest=False)
-def log_client_event(event_type=None, details=None):
+def log_client_event(event_type: str | None = None, details: str | None = None):
 	"""
 	Log client-side events (clicks, removals, modifications)
 	Used for monitoring branding tampering attempts

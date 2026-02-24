@@ -304,7 +304,7 @@ def get_item_detail(item, doc=None, warehouse=None, price_list=None, company=Non
 
 
 @frappe.whitelist()
-def search_by_barcode(barcode, pos_profile):
+def search_by_barcode(barcode: str, pos_profile: str):
 	"""Search item by barcode"""
 	try:
 		# Parse pos_profile if it's a JSON string
@@ -423,7 +423,7 @@ def search_by_barcode(barcode, pos_profile):
 
 
 @frappe.whitelist()
-def get_item_stock(item_code, warehouse):
+def get_item_stock(item_code: str, warehouse: str):
 	"""Get real-time stock for item"""
 	try:
 		# Get both quantities in a single query (performance optimization)
@@ -453,7 +453,7 @@ def get_item_stock(item_code, warehouse):
 
 
 @frappe.whitelist()
-def get_batch_serial_details(item_code, warehouse):
+def get_batch_serial_details(item_code: str, warehouse: str):
 	"""Get batch/serial number details"""
 	try:
 		# Get both flags in a single query (performance optimization)
@@ -507,7 +507,7 @@ def get_batch_serial_details(item_code, warehouse):
 
 
 @frappe.whitelist()
-def get_item_variants(template_item, pos_profile):
+def get_item_variants(template_item: str, pos_profile: str):
 	"""Get all variants for a template item with prices and stock"""
 	try:
 		pos_profile_doc = frappe.get_cached_doc("POS Profile", pos_profile)
@@ -1055,13 +1055,13 @@ def _get_bundle_warehouse_availability_bulk(bundle_codes, warehouses):
 
 @frappe.whitelist()
 def get_items(
-	pos_profile,
-	search_term=None,
-	item_group=None,
-	start=0,
-	limit=20,
-	include_variants=0,
-	show_variants_as_items=0,
+	pos_profile: str,
+	search_term: str | None = None,
+	item_group: str | None = None,
+	start: int = 0,
+	limit: int = 20,
+	include_variants: int = 0,
+	show_variants_as_items: int = 0,
 ):
 	"""Get items for POS with stock, price, and tax details"""
 	try:
@@ -1420,7 +1420,12 @@ def get_items(
 
 @frappe.whitelist()
 def get_items_bulk(
-	pos_profile, item_groups=None, start=0, limit=2000, include_variants=0, show_variants_as_items=0
+	pos_profile: str,
+	item_groups: str | None = None,
+	start: int = 0,
+	limit: int = 2000,
+	include_variants: int = 0,
+	show_variants_as_items: int = 0,
 ):
 	"""
 	Fetch items from multiple item groups in a SINGLE query.
@@ -1471,6 +1476,7 @@ def get_items_bulk(
 		group_by_columns = ", ".join([f"i.{col.split(' as ')[0]}" for col in ITEM_RESULT_FIELDS])
 
 		where_clause = " AND ".join(conditions)
+		# nosemgrep: frappe-sql-format-injection
 		query = f"""
 			SELECT {item_columns},
 				GROUP_CONCAT(DISTINCT ib.barcode) as barcode,
@@ -1607,7 +1613,12 @@ def get_items_bulk(
 
 
 @frappe.whitelist()
-def get_items_count(pos_profile, item_group=None, include_variants=0, show_variants_as_items=0):
+def get_items_count(
+	pos_profile: str,
+	item_group: str | None = None,
+	include_variants: int = 0,
+	show_variants_as_items: int = 0,
+):
 	"""
 	Get total count of POS-eligible items for progress tracking and smart pagination.
 
@@ -1657,7 +1668,9 @@ def get_items_count(pos_profile, item_group=None, include_variants=0, show_varia
 
 
 @frappe.whitelist()
-def get_item_details(item_code, pos_profile, customer=None, qty=1, uom=None):
+def get_item_details(
+	item_code: str, pos_profile: str, customer: str | None = None, qty: int = 1, uom: str | None = None
+):
 	"""Get detailed item info including price, tax, stock"""
 	try:
 		# Parse pos_profile if it's a JSON string
@@ -1707,7 +1720,7 @@ def get_item_details(item_code, pos_profile, customer=None, qty=1, uom=None):
 
 
 @frappe.whitelist()
-def get_item_groups(pos_profile):
+def get_item_groups(pos_profile: str):
 	"""Get item groups configured in POS Profile with hierarchy info for filtering."""
 	cache_key = f"pos_item_groups:{pos_profile}"
 	cached = frappe.cache().get_value(cache_key)
@@ -1759,7 +1772,7 @@ def get_item_groups(pos_profile):
 
 
 @frappe.whitelist()
-def get_stock_quantities(item_codes, warehouse):
+def get_stock_quantities(item_codes: str, warehouse: str):
 	"""
 	Lightweight endpoint to get only stock quantities for specified items.
 	Used for real-time stock updates after invoice submission.
@@ -1930,7 +1943,9 @@ def _parse_item_codes_param(item_codes):
 
 
 @frappe.whitelist()
-def get_item_warehouse_availability(item_code=None, item_codes=None, company=None):
+def get_item_warehouse_availability(
+	item_code: str | None = None, item_codes: str | None = None, company: str | None = None
+):
 	"""
 	Get stock availability for item(s) across all warehouses.
 	Useful for showing cashiers where out-of-stock items are available.
@@ -2075,7 +2090,7 @@ def get_item_warehouse_availability(item_code=None, item_codes=None, company=Non
 
 
 @frappe.whitelist()
-def get_product_bundle_availability(item_code, warehouse):
+def get_product_bundle_availability(item_code: str, warehouse: str):
 	"""
 	Get Product Bundle availability with detailed component information.
 	Uses available_qty (actual - reserved) to prevent overselling.
@@ -2170,7 +2185,7 @@ def get_product_bundle_availability(item_code, warehouse):
 
 
 @frappe.whitelist()
-def get_batch_serial_data_for_items(item_codes, warehouse):
+def get_batch_serial_data_for_items(item_codes: str, warehouse: str):
 	"""
 	Get batch and serial number data for multiple items (for offline caching).
 

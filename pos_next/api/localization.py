@@ -80,7 +80,7 @@ def get_allowed_locales_from_settings():
 
 
 @frappe.whitelist()
-def change_user_language(locale):
+def change_user_language(locale: str):
 	"""
 	Change the language preference for the current user.
 

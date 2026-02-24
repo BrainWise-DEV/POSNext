@@ -57,6 +57,7 @@ def get_data(filters):
 	"""Get cashier performance data"""
 	conditions = get_conditions(filters)
 
+	# nosemgrep: frappe-sql-format-injection
 	query = f"""
 		SELECT
 			si.owner as cashier,

@@ -182,13 +182,13 @@ class WalletTransaction(AccountsController):
 
 @frappe.whitelist()
 def create_wallet_credit(
-	wallet,
-	amount,
-	source_type="Manual Adjustment",
-	remarks=None,
-	reference_doctype=None,
-	reference_name=None,
-	submit=True,
+	wallet: str,
+	amount: str,
+	source_type: str = "Manual Adjustment",
+	remarks: str | None = None,
+	reference_doctype: str | None = None,
+	reference_name: str | None = None,
+	submit: int = 1,
 ):
 	"""
 	Create a wallet credit transaction.
@@ -242,7 +242,9 @@ def create_wallet_credit(
 
 
 @frappe.whitelist()
-def credit_loyalty_points_to_wallet(customer, company, loyalty_points, conversion_factor=None):
+def credit_loyalty_points_to_wallet(
+	customer: str, company: str, loyalty_points: str, conversion_factor: str | None = None
+):
 	"""
 	Convert loyalty points to wallet credit.
 
@@ -293,7 +295,7 @@ def credit_loyalty_points_to_wallet(customer, company, loyalty_points, conversio
 
 
 @frappe.whitelist()
-def reverse_wallet_transactions_for_return(original_invoice, return_invoice):
+def reverse_wallet_transactions_for_return(original_invoice: str, return_invoice: str):
 	"""
 	Reverse wallet transactions linked to the original invoice when a return is made.
 
