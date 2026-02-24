@@ -1093,7 +1093,7 @@ def _get_bundle_warehouse_availability_bulk(bundle_codes, warehouses):
 
 
 @frappe.whitelist()
-def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20, include_variants=0, show_variants_as_items=0):
+def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20, include_variants=0, show_variants_as_items=0, brand=None):
 	"""Get items for POS with stock, price, and tax details"""
 	try:
 		pos_profile_doc = frappe.get_cached_doc("POS Profile", pos_profile)
@@ -1122,7 +1122,7 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20,
 			exclude_templates = False
 		hide_unavailable = getattr(pos_profile_doc, "hide_unavailable_items", 0)
 		conditions, params, extra_joins = _build_item_base_conditions(
-			pos_profile_doc, item_group, exclude_variants=exclude_variants,
+			pos_profile_doc, item_group, brand, exclude_variants=exclude_variants,
 			exclude_templates=exclude_templates,
 			hide_unavailable=hide_unavailable, warehouse=pos_profile_doc.warehouse,
 		)
@@ -1639,7 +1639,7 @@ def get_items_bulk(pos_profile, item_groups=None, start=0, limit=2000, include_v
 
 
 @frappe.whitelist()
-def get_items_count(pos_profile, item_group=None, include_variants=0, show_variants_as_items=0):
+def get_items_count(pos_profile, item_group=None, brand=None, include_variants=0, show_variants_as_items=0):
 	"""
 	Get total count of POS-eligible items for progress tracking and smart pagination.
 
@@ -1666,7 +1666,7 @@ def get_items_count(pos_profile, item_group=None, include_variants=0, show_varia
 			exclude_templates = False
 		hide_unavailable = getattr(pos_profile_doc, "hide_unavailable_items", 0)
 		conditions, params, extra_joins = _build_item_base_conditions(
-			pos_profile_doc, item_group, exclude_variants=exclude_variants,
+			pos_profile_doc, item_group, brand, exclude_variants=exclude_variants,
 			exclude_templates=exclude_templates,
 			hide_unavailable=hide_unavailable, warehouse=pos_profile_doc.warehouse,
 		)

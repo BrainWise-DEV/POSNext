@@ -201,7 +201,7 @@
 
 								<!-- Sort Options Loop -->
 								<button
-									v-for="option in SORT_OPTIONS"
+									v-for="option in sortOptions"
 									:key="option.field"
 									@click="handleSortToggle(option.field)"
 									:class="[
@@ -844,26 +844,16 @@ const SEARCH_PLACEHOLDERS = Object.freeze({
 })
 
 // Sort configuration
-const SORT_OPTIONS = Object.freeze([
+const BASE_SORT_OPTIONS = Object.freeze([
 	{
 		field: 'name',
 		label: __('Name'),
 		icon: 'M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z'
 	},
 	{
-		field: 'brand',
-		label: __('Brand'),
-		icon: 'M20 13V7a2 2 0 00-2-2h-4V3H10v2H6a2 2 0 00-2 2v6M8 21h8a2 2 0 002-2v-5H6v5a2 2 0 002 2z'
-	},
-	{
 		field: 'quantity',
 		label: __('Quantity'),
 		icon: 'M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4'
-	},
-	{
-		field: 'brand',
-		label: __('Brand'),
-		icon: 'M9 12l2 2 4-4m5.586 1.414l-6.172 6.172a2 2 0 01-2.828 0L3.414 9.414a2 2 0 010-2.828l6.172-6.172a2 2 0 012.828 0l8.172 8.172a2 2 0 010 2.828z'
 	},
 	{
 		field: 'price',
@@ -876,6 +866,19 @@ const SORT_OPTIONS = Object.freeze([
 		icon: 'M7 20l4-16m2 16l4-16M6 9h14M4 15h14'
 	}
 ])
+
+const CONTEXT_SORT_OPTIONS = Object.freeze({
+	brand: {
+		field: 'brand',
+		label: __('Brand'),
+		icon: 'M20 13V7a2 2 0 00-2-2h-4V3H10v2H6a2 2 0 00-2 2v6M8 21h8a2 2 0 002-2v-5H6v5a2 2 0 002 2z'
+	},
+	item_group: {
+		field: 'item_group',
+		label: __('Item Group'),
+		icon: 'M9 12l2 2 4-4m5.586 1.414l-6.172 6.172a2 2 0 01-2.828 0L3.414 9.414a2 2 0 010-2.828l6.172-6.172a2 2 0 012.828 0l8.172 8.172a2 2 0 010 2.828z'
+	},
+})
 
 const SORT_ICONS = Object.freeze({
 	ascending: 'M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12',
@@ -897,6 +900,22 @@ const searchMode = computed(() => {
 
 const searchPlaceholder = computed(() => SEARCH_PLACEHOLDERS[searchMode.value])
 const isBrandSortActive = computed(() => sortBy.value === 'brand')
+const sortOptions = computed(() => {
+	// Context switcher:
+	// - In Item Group mode, offer Brand.
+	// - In Brand mode, offer Item Group.
+	const contextSort = isBrandSortActive.value
+		? CONTEXT_SORT_OPTIONS.item_group
+		: CONTEXT_SORT_OPTIONS.brand
+
+	return [
+		BASE_SORT_OPTIONS[0],
+		contextSort,
+		BASE_SORT_OPTIONS[1],
+		BASE_SORT_OPTIONS[2],
+		BASE_SORT_OPTIONS[3],
+	]
+})
 const activeFilterValue = computed(() => (
 	isBrandSortActive.value ? selectedBrand.value : selectedItemGroup.value
 ))
@@ -1293,8 +1312,9 @@ watch(sortBy, async (newSortBy, oldSortBy) => {
 })
 
 function getSortLabel(sortByValue) {
-	const option = SORT_OPTIONS.find(opt => opt.field === sortByValue)
-	return option?.label || sortByValue
+	return CONTEXT_SORT_OPTIONS[sortByValue]?.label
+		|| BASE_SORT_OPTIONS.find(opt => opt.field === sortByValue)?.label
+		|| sortByValue
 }
 
 function getSortIconState(field) {

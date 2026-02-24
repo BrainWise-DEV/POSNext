@@ -606,13 +606,6 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 						compareResult = groupA.localeCompare(groupB)
 						break
 
-					case 'brand':
-						// Sort by brand alphabetically
-						const brandA = (a.brand || '').toLowerCase()
-						const brandB = (b.brand || '').toLowerCase()
-						compareResult = brandA.localeCompare(brandB)
-						break
-
 					case 'price':
 						// Sort by price_list_rate (standard selling rate)
 						compareResult = (a.price_list_rate ?? 0) - (b.price_list_rate ?? 0)
@@ -1251,7 +1244,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 		try {
 			let list = []
 
-				if (selectedItemGroup.value) {
+			if (selectedItemGroup.value) {
 				// User has a specific group tab selected — fetch more from that group
 				list = await fetchItemsForGroup(
 					posProfile.value,
@@ -1259,14 +1252,14 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 					currentOffset.value,
 					itemsPerPage.value,
 				)
-				} else if (selectedBrand.value) {
-					// User has a specific brand tab selected — fetch more from that brand
-					list = await fetchItemsForBrand(
-						posProfile.value,
-						selectedBrand.value,
-						currentOffset.value,
-						itemsPerPage.value,
-					)
+			} else if (selectedBrand.value) {
+				// User has a specific brand tab selected — fetch more from that brand
+				list = await fetchItemsForBrand(
+					posProfile.value,
+					selectedBrand.value,
+					currentOffset.value,
+					itemsPerPage.value,
+				)
 			} else {
 				// "All Items" tab — fetch next batch without group filter
 				const response = await call("pos_next.api.items.get_items", {
@@ -2093,9 +2086,6 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 			// Set hierarchical item groups (with child_groups) - INSTANT tab display!
 			itemGroups.value = data?.item_groups_hierarchy || []
 			log.info(`Loaded ${itemGroups.value.length} item groups with hierarchy`)
-
-			// Load brands configured for current POS Profile
-			await loadBrands()
 
 			// Cache profile data for offline use (survives component remount)
 			try {
