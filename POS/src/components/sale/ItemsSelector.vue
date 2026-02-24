@@ -4,10 +4,10 @@
 		<div class="px-1.5 sm:px-3 pt-1.5 sm:pt-3 pb-1.5 sm:pb-2 bg-white border-b border-gray-200">
 			<div class="flex items-center gap-1 sm:gap-2 overflow-x-auto pb-1 scrollbar-hide snap-x snap-mandatory">
 				<button
-					@click="itemStore.setSelectedItemGroup(null)"
+					@click="handleAllFilterClick"
 					:class="[
 						'flex items-center px-2 sm:px-3 py-1.5 sm:py-2 rounded-lg text-[10px] sm:text-xs font-medium whitespace-nowrap transition-[background-color,border-color] duration-75 touch-manipulation snap-start flex-shrink-0',
-						!selectedItemGroup
+						!activeFilterValue
 							? 'bg-blue-50 text-blue-600 border-2 border-blue-500 shadow-sm'
 							: 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50 active:bg-gray-100',
 					]"
@@ -15,20 +15,20 @@
 					<svg class="w-3.5 h-3.5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
 					</svg>
-					<span>{{ __('All Items') }}</span>
+					<span>{{ isBrandSortActive ? __('All Brands') : __('All Items') }}</span>
 				</button>
 				<button
-					v-for="group in itemGroups"
-					:key="group.item_group"
-					@click="itemStore.setSelectedItemGroup(group.item_group)"
+					v-for="option in activeFilterOptions"
+					:key="option.value"
+					@click="handleFilterClick(option.value)"
 					:class="[
 						'flex items-center px-2 sm:px-3 py-1.5 sm:py-2 rounded-lg text-[10px] sm:text-xs font-medium whitespace-nowrap transition-[background-color,border-color] duration-75 touch-manipulation snap-start flex-shrink-0',
-						selectedItemGroup === group.item_group
+						activeFilterValue === option.value
 							? 'bg-blue-50 text-blue-600 border-2 border-blue-500 shadow-sm'
 							: 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50 active:bg-gray-100',
 					]"
 				>
-					<span>{{ __(group.item_group) }}</span>
+					<span>{{ __(option.label) }}</span>
 				</button>
 			</div>
 		</div>
@@ -260,9 +260,9 @@
 						d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"
 					/>
 				</svg>
-				<p v-if="searchTerm || selectedItemGroup" class="mt-2 text-xs font-medium text-gray-700">
-					<span v-if="searchTerm && selectedItemGroup">{{ __('No results for {0} in {1}', [searchTerm, selectedItemGroup]) }}</span>
-					<span v-else-if="selectedItemGroup">{{ __('No results in {0}', [selectedItemGroup]) }}</span>
+				<p v-if="searchTerm || selectedFilterLabel" class="mt-2 text-xs font-medium text-gray-700">
+					<span v-if="searchTerm && selectedFilterLabel">{{ __('No results for {0} in {1}', [searchTerm, selectedFilterLabel]) }}</span>
+					<span v-else-if="selectedFilterLabel">{{ __('No results in {0}', [selectedFilterLabel]) }}</span>
 					<span v-else>{{ __('No results for {0}', [searchTerm]) }}</span>
 				</p>
 				<p v-else class="mt-2 text-xs text-gray-500">{{ __('No items available') }}</p>
@@ -761,7 +761,9 @@ const {
 	filteredItems,
 	searchTerm,
 	selectedItemGroup,
+	selectedBrand,
 	itemGroups,
+	brands,
 	loading,
 	loadingMore,
 	hasMore,
@@ -859,9 +861,9 @@ const SORT_OPTIONS = Object.freeze([
 		icon: 'M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4'
 	},
 	{
-		field: 'item_group',
-		label: __('Item Group'),
-		icon: 'M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10'
+		field: 'brand',
+		label: __('Brand'),
+		icon: 'M9 12l2 2 4-4m5.586 1.414l-6.172 6.172a2 2 0 01-2.828 0L3.414 9.414a2 2 0 010-2.828l6.172-6.172a2 2 0 012.828 0l8.172 8.172a2 2 0 010 2.828z'
 	},
 	{
 		field: 'price',
@@ -894,6 +896,16 @@ const searchMode = computed(() => {
 })
 
 const searchPlaceholder = computed(() => SEARCH_PLACEHOLDERS[searchMode.value])
+const isBrandSortActive = computed(() => sortBy.value === 'brand')
+const activeFilterValue = computed(() => (
+	isBrandSortActive.value ? selectedBrand.value : selectedItemGroup.value
+))
+const activeFilterOptions = computed(() => (
+	isBrandSortActive.value
+		? (brands.value || []).map((b) => ({ value: b.brand, label: b.brand }))
+		: (itemGroups.value || []).map((g) => ({ value: g.item_group, label: g.item_group }))
+))
+const selectedFilterLabel = computed(() => selectedBrand.value || selectedItemGroup.value || null)
 
 // Watch for cart items and pos profile changes (optimized - uses length + hash instead of deep watch)
 // Tracks: length, item_code, quantity, and amount to detect all cart changes including array replacements
@@ -1171,6 +1183,22 @@ function setViewMode(mode) {
 	userManuallySetView.value = true
 }
 
+function handleAllFilterClick() {
+	if (isBrandSortActive.value) {
+		itemStore.setSelectedBrand(null)
+		return
+	}
+	itemStore.setSelectedItemGroup(null)
+}
+
+function handleFilterClick(value) {
+	if (isBrandSortActive.value) {
+		itemStore.setSelectedBrand(value)
+		return
+	}
+	itemStore.setSelectedItemGroup(value)
+}
+
 // Pagination functions — each page fetches fresh data from server
 function goToPage(page) {
 	if (page >= 1 && page <= totalPages.value && page !== currentPage.value) {
@@ -1249,6 +1277,20 @@ function handleSortToggle(field) {
 		itemStore.setSortFilter(field, 'asc')
 	}
 }
+
+watch(sortBy, async (newSortBy, oldSortBy) => {
+	if (newSortBy === 'brand') {
+		await itemStore.loadBrands()
+		if (selectedItemGroup.value) {
+			await itemStore.setSelectedItemGroup(null)
+		}
+		return
+	}
+
+	if (oldSortBy === 'brand' && selectedBrand.value) {
+		await itemStore.setSelectedBrand(null)
+	}
+})
 
 function getSortLabel(sortByValue) {
 	const option = SORT_OPTIONS.find(opt => opt.field === sortByValue)
