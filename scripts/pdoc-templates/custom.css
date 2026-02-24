@@ -1,0 +1,119 @@
+/* POS Next API Docs — custom pdoc theme */
+
+:root {
+	--accent: #2563eb;
+	--accent-light: #3b82f6;
+	--sidebar-bg: #f8fafc;
+	--header-bg: #1e293b;
+}
+
+/* Replace pdoc logo area with project title */
+nav.pdoc .logo-area {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	padding: 0.75rem 1rem;
+	margin-bottom: 0.5rem;
+	background: var(--header-bg);
+	border-radius: 6px;
+	text-decoration: none;
+}
+
+nav.pdoc .logo-area .logo-icon {
+	font-size: 1.4rem;
+}
+
+nav.pdoc .logo-area .logo-text {
+	font-size: 1.1rem;
+	font-weight: 700;
+	color: #fff;
+	letter-spacing: -0.01em;
+}
+
+nav.pdoc .logo-area .logo-subtitle {
+	font-size: 0.7rem;
+	color: #94a3b8;
+	display: block;
+	font-weight: 400;
+}
+
+/* Hide default pdoc attribution logo */
+nav.pdoc .attribution {
+	display: none;
+}
+
+/* Sidebar styling */
+nav.pdoc > div {
+	background: var(--sidebar-bg);
+}
+
+nav.pdoc h2 {
+	font-size: 0.85rem;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	color: #64748b;
+	padding: 0.5rem 1rem 0.25rem;
+	margin: 0;
+}
+
+nav.pdoc ul.memberlist a,
+nav.pdoc > div > ul a {
+	padding: 0.25rem 1rem;
+	display: block;
+	border-radius: 4px;
+	transition: background 0.15s;
+}
+
+nav.pdoc ul.memberlist a:hover,
+nav.pdoc > div > ul a:hover {
+	background: #e2e8f0;
+}
+
+/* Function signatures — highlight @frappe.whitelist */
+.decorator-frappe {
+	color: var(--accent);
+	font-weight: 600;
+}
+
+/* Module docstring tables */
+.pdoc .docstring table {
+	width: 100%;
+	border-collapse: collapse;
+	margin: 1rem 0;
+}
+
+.pdoc .docstring table th {
+	background: var(--header-bg);
+	color: #fff;
+	padding: 0.5rem 0.75rem;
+	text-align: left;
+	font-size: 0.85rem;
+}
+
+.pdoc .docstring table td {
+	padding: 0.5rem 0.75rem;
+	border-bottom: 1px solid #e2e8f0;
+}
+
+.pdoc .docstring table tr:hover td {
+	background: #f1f5f9;
+}
+
+/* Better heading hierarchy in main content */
+main.pdoc .modulename {
+	color: var(--header-bg);
+	font-size: 1.6rem;
+	border-bottom: 3px solid var(--accent);
+	padding-bottom: 0.5rem;
+}
+
+/* Section separators between functions */
+main.pdoc > section {
+	border-bottom: 1px solid #e2e8f0;
+	padding-bottom: 1.5rem;
+	margin-bottom: 1.5rem;
+}
+
+main.pdoc > section:last-child {
+	border-bottom: none;
+}

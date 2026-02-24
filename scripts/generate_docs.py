@@ -189,24 +189,7 @@ def install_mocks() -> None:
 
 # Modules to document — the public API surface
 MODULES_TO_DOCUMENT = [
-	"pos_next.api.auth",
-	"pos_next.api.bootstrap",
-	"pos_next.api.branding",
-	"pos_next.api.constants",
-	"pos_next.api.credit_sales",
-	"pos_next.api.customers",
-	"pos_next.api.invoices",
-	"pos_next.api.items",
-	"pos_next.api.localization",
-	"pos_next.api.offers",
-	"pos_next.api.partial_payments",
-	"pos_next.api.pos_profile",
-	"pos_next.api.promotions",
-	"pos_next.api.qz",
-	"pos_next.api.sales_invoice_hooks",
-	"pos_next.api.shifts",
-	"pos_next.api.utilities",
-	"pos_next.api.wallet",
+	"pos_next.api",
 	"pos_next.validations",
 ]
 
@@ -249,10 +232,12 @@ def main() -> None:
 	if failed:
 		print(f"  Skipping {len(failed)} modules that failed to import")
 
-	# Generate HTML
+	# Configure pdoc with custom templates
+	template_dir = project_root / "scripts" / "pdoc-templates"
 	pdoc.render.configure(
 		docformat="google",
 		show_source=True,
+		template_directory=template_dir,
 	)
 
 	pdoc.pdoc(

@@ -1,0 +1,69 @@
+{% if root_module_name %}
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="refresh" content="0; url=./{{ root_module_name.replace(".","/") }}.html"/>
+</head>
+</html>
+{% else %}
+{% extends "frame.html.jinja2" %}
+{% block title %}POS Next API Documentation{% endblock %}
+{% block nav %}
+    <h2>Available Modules</h2>
+    <ul>
+        {% for submodule in all_modules if "._" not in submodule and not submodule.startswith("_") %}
+            <li><a href="{{ submodule.replace(".","/") }}.html">{{ submodule }}</a></li>
+        {% endfor %}
+    </ul>
+{% endblock %}
+{% block content %}
+    <main class="pdoc">
+        <section class="module-info">
+            <h1 class="modulename">POS Next &mdash; API Reference</h1>
+            <div class="docstring">
+                <p>Auto-generated Python API documentation from source code docstrings.</p>
+                <p>Browse the modules in the sidebar or use the search box above to find specific endpoints.</p>
+                <h2>Quick Links</h2>
+                <table>
+                    <thead><tr><th>Module</th><th>Description</th></tr></thead>
+                    <tbody>
+                    {% for submodule in all_modules if "._" not in submodule and not submodule.startswith("_") %}
+                        <tr>
+                            <td><strong><a href="{{ submodule.replace(".","/") }}.html">{{ submodule }}</a></strong></td>
+                            <td>{% if "auth" in submodule %}Authentication and session management
+                            {% elif "bootstrap" in submodule %}Initial data loading for POS startup
+                            {% elif "branding" in submodule %}Custom branding and white-label configuration
+                            {% elif "constants" in submodule %}Shared constants and field name definitions
+                            {% elif "credit_sales" in submodule %}Credit sales and outstanding balance management
+                            {% elif "customers" in submodule %}Customer CRUD and search
+                            {% elif "invoices" in submodule %}Invoice creation, submission, returns, and drafts
+                            {% elif "items" in submodule %}Item search, stock, variants, and bulk fetching
+                            {% elif "localization" in submodule %}Language settings and translations
+                            {% elif "offers" in submodule %}Offer evaluation and application
+                            {% elif "partial_payments" in submodule %}Split/partial payment handling
+                            {% elif "pos_profile" in submodule %}POS Profile configuration and data
+                            {% elif "promotions" in submodule %}Pricing Rules and Promotional Schemes
+                            {% elif "qz" in submodule %}QZ Tray print integration
+                            {% elif "sales_invoice_hooks" in submodule %}Server-side hooks on Sales Invoice events
+                            {% elif "shifts" in submodule %}POS Opening/Closing shift management
+                            {% elif "utilities" in submodule %}Miscellaneous utility endpoints
+                            {% elif "wallet" in submodule %}Digital wallet and loyalty points
+                            {% elif "validations" in submodule %}Server-side validation hooks
+                            {% elif submodule == "pos_next.api" %}API package overview and module index
+                            {% endif %}</td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+                <h2>Endpoint Convention</h2>
+                <p>All public endpoints use <code>@frappe.whitelist()</code> and are callable via:</p>
+                <pre><code>POST /api/method/pos_next.api.&lt;module&gt;.&lt;function&gt;</code></pre>
+            </div>
+        </section>
+    </main>
+    {% if search %}
+        {% include "search.html.jinja2" %}
+    {% endif %}
+{% endblock %}
+{% endif %}
