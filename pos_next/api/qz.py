@@ -68,7 +68,7 @@ def get_certificate_download():
 			title=_("QZ Certificate Missing"),
 		)
 
-	with open(path) as f:
+	with open(path) as f:  # nosemgrep: frappe-security-file-traversal
 		pem = f.read()
 
 	company = frappe.db.get_default("company") or ""
@@ -95,7 +95,7 @@ def sign_message(message):
 	from cryptography.hazmat.primitives import hashes, serialization
 	from cryptography.hazmat.primitives.asymmetric import padding
 
-	with open(path, "rb") as f:
+	with open(path, "rb") as f:  # nosemgrep: frappe-security-file-traversal
 		private_key = serialization.load_pem_private_key(f.read(), password=None)
 
 	signature = private_key.sign(

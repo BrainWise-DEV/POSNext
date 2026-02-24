@@ -61,7 +61,7 @@ class POSSettings(Document):
 			if not current_stock_setting:
 				frappe.db.set_single_value("Stock Settings", "allow_negative_stock", 1, update_modified=False)
 				frappe.msgprint(
-					"Stock Settings 'Allow Negative Stock' has been automatically enabled.",
+					_("Stock Settings 'Allow Negative Stock' has been automatically enabled."),
 					indicator="green",
 					alert=True,
 				)
@@ -83,7 +83,7 @@ class POSSettings(Document):
 						"Stock Settings", "allow_negative_stock", 0, update_modified=False
 					)
 					frappe.msgprint(
-						"Stock Settings 'Allow Negative Stock' has been automatically disabled.",
+						_("Stock Settings 'Allow Negative Stock' has been automatically disabled."),
 						indicator="orange",
 						alert=True,
 					)

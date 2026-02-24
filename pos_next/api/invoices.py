@@ -912,7 +912,7 @@ def _ensure_offline_uniqueness(offline_id, pos_profile=None, customer=None):
 				frappe.throw(
 					_("This invoice is currently being processed. Please wait."),
 					exc=frappe.ValidationError,
-					title="SYNC_IN_PROGRESS",
+					title=_("SYNC_IN_PROGRESS"),
 				)
 
 		# Handle Failed status - allow retry
