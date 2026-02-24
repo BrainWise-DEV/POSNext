@@ -1302,7 +1302,7 @@ def submit_invoice(invoice: str | None = None, data: str | None = None):
 			try:
 				from pos_next.api.credit_sales import redeem_customer_credit
 
-				redeem_customer_credit(invoice_doc.name, customer_credit_dict)
+				redeem_customer_credit(invoice_doc.name, json.dumps(customer_credit_dict) if not isinstance(customer_credit_dict, str) else customer_credit_dict)
 			except Exception as credit_error:
 				frappe.log_error(
 					title="Credit Redemption Error",

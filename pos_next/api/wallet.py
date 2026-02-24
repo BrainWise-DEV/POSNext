@@ -235,7 +235,7 @@ def get_customer_wallet(customer: str, company: str | None = None):
 
 
 @frappe.whitelist()
-def get_or_create_wallet(customer: str, company: str, pos_settings: str | None = None):
+def get_or_create_wallet(customer: str, company: str, pos_settings=None):
 	"""Get existing wallet or create a new one."""
 
 	# Check if wallet exists

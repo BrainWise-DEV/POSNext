@@ -6,6 +6,8 @@ Real-time event handlers for POS Next.
 Emits Socket.IO events when stock-affecting transactions occur.
 """
 
+import json
+
 import frappe
 from frappe import _
 
@@ -58,7 +60,7 @@ def emit_stock_update_event(doc, method=None):
 		for warehouse, codes in item_codes_by_warehouse.items():
 			warehouses.add(warehouse)
 			# Use shared stock utility to keep logic consistent with API responses
-			warehouse_updates = get_stock_quantities(list(codes), warehouse)
+			warehouse_updates = get_stock_quantities(json.dumps(list(codes)), warehouse)
 
 			# Ensure events always have numeric qty fields, even if API returns None
 			for update in warehouse_updates:
