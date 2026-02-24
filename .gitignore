@@ -67,3 +67,6 @@ TODO.md
 .claude/settings.json
 *.jpeg
 missing.txt
+
+# Generated API docs
+docs/_build/

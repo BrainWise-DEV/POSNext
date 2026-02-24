@@ -20,6 +20,12 @@ Welcome to the POS Next documentation directory. This folder contains comprehens
   - Backend API reference
   - Troubleshooting guide
 
+### API Reference (Auto-generated)
+- **[API Docs](https://your-org.github.io/pos_next/)** - Auto-generated Python API reference from docstrings (powered by pdoc)
+  - All `@frappe.whitelist()` endpoints
+  - Function signatures, parameters, and return types
+  - Regenerated on every push to `main`
+
 ### Architecture
 - **[STARTUP_SEQUENCE.md](STARTUP_SEQUENCE.md)** - Application initialization flow
   - PWA service worker registration
@@ -105,6 +111,7 @@ docs/
 
 ## 🔗 External Resources
 
+- [API Reference (GitHub Pages)](https://your-org.github.io/pos_next/) - Auto-generated from docstrings
 - [POS Next Repository](https://github.com/your-org/pos_next)
 - [ERPNext Documentation](https://docs.erpnext.com)
 - [Frappe Framework Documentation](https://frappeframework.com/docs)
