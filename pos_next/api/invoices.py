@@ -640,7 +640,7 @@ def update_invoice(data: str):
 		if (data.get("is_return") or invoice_doc.get("is_return")) and invoice_doc.get("return_against"):
 			validation = validate_return_items(
 				invoice_doc.return_against,
-				[d.as_dict() for d in invoice_doc.items],
+				json.dumps([d.as_dict() for d in invoice_doc.items]),
 				doctype=invoice_doc.doctype,
 			)
 			if not validation.get("valid"):
