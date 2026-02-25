@@ -361,7 +361,12 @@ def credit_return_to_wallet(return_invoice, amount=None):
 		"name",
 	)
 	if existing_transaction_name:
-		return frappe.get_doc("Wallet Transaction", existing_transaction_name)
+		existing_transaction = frappe.get_doc("Wallet Transaction", existing_transaction_name)
+		if existing_transaction.docstatus == 0:
+			# Recover stuck draft created by a crashed prior attempt.
+			existing_transaction.flags.ignore_permissions = True
+			existing_transaction.submit()
+		return existing_transaction
 
 	transaction = frappe.get_doc({
 		"doctype": "Wallet Transaction",
@@ -413,6 +418,11 @@ def reverse_wallet_transactions_for_return(original_invoice, return_invoice):
 	if not return_doc.is_return or return_doc.return_against != original_invoice:
 		return
 
+	existing = frappe.db.exists("Wallet Transaction", {
+    "reference_name": return_invoice, "transaction_type": "Debit", "docstatus": ["!=", 2]
+	})
+	if existing:
+		return
 	# Find all submitted Wallet Transactions linked to the original invoice
 	wallet_transactions = frappe.get_all(
 		"Wallet Transaction",
@@ -446,16 +456,16 @@ def reverse_wallet_transactions_for_return(original_invoice, return_invoice):
 	loyalty_program = frappe.db.get_value("Customer", original_doc.customer, "loyalty_program")
 
 	min_spent = 0
-	loyalty_eligible = False
+	below_min_threshold = False
 	if loyalty_program:
 		min_spent = frappe.db.get_value("Loyalty Program Collection",{"parent": loyalty_program},"min_spent")
 		if min_spent:
 			min_spent = flt(min_spent)
 	invoiced_amount_after_return = flt(original_total) - flt(returned_amount)
 	if min_spent and flt(invoiced_amount_after_return) < flt(min_spent):
-		loyalty_eligible = True
+		below_min_threshold = True
 	for wt in wallet_transactions:
-		if is_full_return or loyalty_eligible:
+		if is_full_return or below_min_threshold:
 			# Full return - cancel the wallet transaction
 			try:
 				wt_doc = frappe.get_doc("Wallet Transaction", wt.name)
@@ -471,7 +481,7 @@ def reverse_wallet_transactions_for_return(original_invoice, return_invoice):
 					message=f"WT: {wt.name}, Return: {return_invoice}, Error: {str(e)}\n{frappe.get_traceback()}"
 				)
 		else:
-			reverse_amount = round(flt(wt.amount) * return_ratio, 2)
+			reverse_amount = flt(wt.amount * return_ratio, 2)
 			
 			if reverse_amount <= 0:
 				continue

@@ -261,11 +261,14 @@ def create_wallet_on_customer_insert(doc, method=None):
 	company = frappe.get_cached_value("Global Defaults", "Global Defaults", "default_company")
 	if not company:
 		return
-	get_or_create_wallet(doc.name, company)
+	try:
+		get_or_create_wallet(doc.name, company)
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), f"Wallet auto-create failed for {doc.name}")
 
 
 @frappe.whitelist()
-def get_or_create_wallet(customer, company, pos_settings=None):
+def get_or_create_wallet(customer, company, pos_settings=None, force_create=False):
 	"""Get existing wallet or create a new one."""
 
 	# Check if wallet exists
@@ -289,7 +292,7 @@ def get_or_create_wallet(customer, company, pos_settings=None):
 		if pos_profile:
 			pos_settings = get_pos_settings(pos_profile)
 
-	if pos_settings and not cint(pos_settings.get("auto_create_wallet")):
+	if not force_create and (not pos_settings or not cint(pos_settings.get("auto_create_wallet"))):
 		return None
 
 	# Get wallet account
@@ -465,8 +468,8 @@ def create_manual_wallet_credit(customer, company, amount, remarks=None):
 	if flt(amount) <= 0:
 		frappe.throw(_("Amount must be greater than zero"))
 
-	# Get or create wallet
-	wallet = get_or_create_wallet(customer, company)
+	# Manual credits should be able to create wallets even when POS auto-create is disabled.
+	wallet = get_or_create_wallet(customer, company, force_create=True)
 
 	if not wallet:
 		frappe.throw(_("Could not create wallet for customer {0}").format(customer))
