@@ -60,6 +60,24 @@ def get_promotions(pos_profile=None, company=None, include_disabled=False):
 		],
 		order_by="modified desc"
 	)
+	filtered_schemes = []
+
+	for scheme in schemes:
+		pos_profiles = frappe.get_all(
+			"Promotion Scheme POS Profile",
+			filters={"parent": scheme["name"]},
+			pluck="pos_profile"
+		)
+
+		scheme["pos_profiles"] = pos_profiles
+
+		if pos_profiles:
+			if pos_profile and pos_profile in pos_profiles:				
+				filtered_schemes.append(scheme)
+		else:
+			filtered_schemes.append(scheme)
+
+	schemes = filtered_schemes
 
 	# Enrich with pricing rules count and details
 	today = getdate(nowdate())
