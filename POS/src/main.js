@@ -229,3 +229,91 @@ async function initializeApp() {
 }
 
 initializeApp()
+
+window.addEventListener('keydown', function (e) {
+
+	const key = e.key.toLowerCase()
+	const active = document.activeElement
+
+	const boxShortcuts = {
+		'o': "View Shift",
+		'd': "Draft Invoices",
+		'i': "Invoice History",
+		'k': "Return Invoice",
+		'p': "Close Shift",
+		'f': "Create Customer"
+	}
+
+	if (e.ctrlKey && boxShortcuts[key]) {
+		e.preventDefault()
+		e.stopPropagation()
+
+		const targetText = boxShortcuts[key]
+
+		console.log(`CTRL + ${key.toUpperCase()} → ${targetText}`)
+
+		setTimeout(() => {
+			const btn = Array.from(document.querySelectorAll("button"))
+				.find(b => b.innerText?.trim() === targetText)
+
+			if (btn) {
+				btn.click()
+			} else {
+				console.log(`${targetText} button not found ❌`)
+			}
+		}, 300)
+
+		return 
+	}
+
+	if (e.ctrlKey && key === 'b') {
+		e.preventDefault()
+
+		const input = document.querySelector('input[placeholder*="Search"]')
+		input?.focus()
+
+		console.log("Item search focused ✅")
+		return
+	}
+
+	if (e.ctrlKey && key === 'u') {
+		e.preventDefault()
+
+		const input = document.querySelector('input[placeholder*="customer"]')
+		input?.focus()
+
+		console.log("Customer search focused ✅")
+		return
+	}
+
+	if (e.ctrlKey && e.shiftKey && key === 'x') {
+		e.preventDefault()
+
+		const btn = Array.from(document.querySelectorAll("button"))
+			.find(b => 
+				b.innerText?.toLowerCase().includes("promotion") ||
+				b.innerText?.toLowerCase().includes("coupon")
+			)
+
+		if (btn) {
+			btn.click()
+			console.log("Promotion popup opened ✅")
+		} else {
+			console.log("Promotion button not found ❌")
+		}
+
+		return
+	}
+
+	if (e.ctrlKey && e.shiftKey && key === 'm') {
+		e.preventDefault()
+
+		const btn = Array.from(document.querySelectorAll("button"))
+			.find(b => b.innerText?.includes("Return"))
+
+		btn?.click()
+		console.log("Return mode activated ✅")
+		return
+	}
+
+}, true)
