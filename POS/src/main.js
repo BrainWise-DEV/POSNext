@@ -235,6 +235,15 @@ window.addEventListener('keydown', function (e) {
 	const key = e.key.toLowerCase()
 	const active = document.activeElement
 
+	//  Prevent shortcuts while typing
+	if (active && (
+		active.tagName === "INPUT" ||
+		active.tagName === "TEXTAREA" ||
+		active.isContentEditable
+	)) {
+		return
+	}
+
 	const boxShortcuts = {
 		'o': "View Shift",
 		'd': "Draft Invoices",
@@ -244,48 +253,42 @@ window.addEventListener('keydown', function (e) {
 		'f': "Create Customer"
 	}
 
+	//  Box Actions
 	if (e.ctrlKey && boxShortcuts[key]) {
 		e.preventDefault()
 		e.stopPropagation()
 
 		const targetText = boxShortcuts[key]
 
-		console.log(`CTRL + ${key.toUpperCase()} → ${targetText}`)
-
 		setTimeout(() => {
 			const btn = Array.from(document.querySelectorAll("button"))
-				.find(b => b.innerText?.trim() === targetText)
+				.find(b => b.innerText?.trim().toLowerCase() === targetText.toLowerCase())
 
-			if (btn) {
-				btn.click()
-			} else {
-				console.log(`${targetText} button not found ❌`)
-			}
+			if (btn) btn.click()
 		}, 300)
 
-		return 
+		return
 	}
 
+	//  Focus Item Search
 	if (e.ctrlKey && key === 'b') {
 		e.preventDefault()
 
 		const input = document.querySelector('input[placeholder*="Search"]')
 		input?.focus()
-
-		console.log("Item search focused ✅")
 		return
 	}
 
+	//  Focus Customer Search
 	if (e.ctrlKey && key === 'u') {
 		e.preventDefault()
 
 		const input = document.querySelector('input[placeholder*="customer"]')
 		input?.focus()
-
-		console.log("Customer search focused ✅")
 		return
 	}
 
+	//  Promotion Popup
 	if (e.ctrlKey && e.shiftKey && key === 'x') {
 		e.preventDefault()
 
@@ -295,24 +298,7 @@ window.addEventListener('keydown', function (e) {
 				b.innerText?.toLowerCase().includes("coupon")
 			)
 
-		if (btn) {
-			btn.click()
-			console.log("Promotion popup opened ✅")
-		} else {
-			console.log("Promotion button not found ❌")
-		}
-
-		return
-	}
-
-	if (e.ctrlKey && e.shiftKey && key === 'm') {
-		e.preventDefault()
-
-		const btn = Array.from(document.querySelectorAll("button"))
-			.find(b => b.innerText?.includes("Return"))
-
-		btn?.click()
-		console.log("Return mode activated ✅")
+		if (btn) btn.click()
 		return
 	}
 
