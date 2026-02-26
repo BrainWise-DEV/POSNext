@@ -87,18 +87,6 @@ _asset_version = get_build_version()
 # Fixtures
 # --------
 fixtures = [
-	{
-		"dt": "Print Format",
-		"filters": [
-			[
-				"name",
-				"in",
-				[
-					"POS Next Receipt"
-				]
-			]
-		]
-	},
     {
         "dt": "Role",
         "filters": [
