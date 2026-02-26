@@ -3,13 +3,14 @@
 
 import json
 from collections import defaultdict
+from functools import lru_cache
 
 import frappe
 from erpnext.stock.doctype.batch.batch import get_batch_qty
 from erpnext.stock.get_item_details import get_item_details as erpnext_get_item_details
 from frappe import _
 from frappe.query_builder import DocType, functions as fn
-from frappe.utils import flt, nowdate
+from frappe.utils import flt, nowdate, cint
 
 ITEM_RESULT_FIELDS = [
 	"name as item_code",
@@ -29,6 +30,36 @@ ITEM_RESULT_FIELDS = [
 ]
 
 ITEM_RESULT_COLUMNS = ",\n\t".join(ITEM_RESULT_FIELDS)
+
+
+@lru_cache(maxsize=1)
+def _item_has_allow_negative_stock_field():
+	"""Check whether Item has allow_negative_stock field."""
+	try:
+		return frappe.get_meta("Item").has_field("allow_negative_stock")
+	except Exception:
+		return False
+
+
+def _get_item_allow_negative_stock_map(item_codes):
+	"""Return map of item_code -> 1 for items that allow negative stock."""
+	if not item_codes or not _item_has_allow_negative_stock_field():
+		return {}
+
+	unique_codes = [code for code in set(item_codes) if code]
+	if not unique_codes:
+		return {}
+
+	Item = DocType("Item")
+	allowed = (
+		frappe.qb.from_(Item)
+		.select(Item.name)
+		.where(Item.name.isin(unique_codes))
+		.where(Item.allow_negative_stock == 1)
+		.run(pluck="name")
+	)
+
+	return {code: 1 for code in (allowed or [])}
 
 
 def get_stock_availability(item_code, warehouse):
@@ -254,10 +285,14 @@ def get_item_detail(item, doc=None, warehouse=None, price_list=None, company=Non
 		doc = frappe._dict({"doctype": "Sales Invoice", "company": company})
 
 	# Fetch all needed Item fields in a single query (performance optimization)
+	item_fields = ["max_discount", "item_group", "brand", "stock_uom"]
+	if _item_has_allow_negative_stock_field():
+		item_fields.append("allow_negative_stock")
+
 	item_data = frappe.db.get_value(
 		"Item",
 		item_code,
-		["max_discount", "item_group", "brand", "stock_uom"],
+		item_fields,
 		as_dict=True
 	) or {}
 
@@ -286,6 +321,7 @@ def get_item_detail(item, doc=None, warehouse=None, price_list=None, company=Non
 	res["serial_no_data"] = serial_no_data
 	res["item_group"] = item_data.get("item_group")
 	res["brand"] = item_data.get("brand")
+	res["allow_negative_stock"] = cint(item_data.get("allow_negative_stock") or 0)
 
 	# Add UOMs data
 	uoms = frappe.get_all(
@@ -555,8 +591,11 @@ def get_item_variants(template_item, pos_profile):
 			)
 			return []
 
-		# Get UOMs for all variants using Query Builder
+		# Item-level negative stock policy map
 		variant_codes = [v["item_code"] for v in variants]
+		allow_negative_map = _get_item_allow_negative_stock_map(variant_codes)
+
+		# Get UOMs for all variants using Query Builder
 		uom_map = {}
 		if variant_codes:
 			UOMConversion = DocType("UOM Conversion Detail")
@@ -632,6 +671,10 @@ def get_item_variants(template_item, pos_profile):
 
 		# Enrich each variant with attributes, price, stock, and UOMs
 		for variant in variants:
+			variant["allow_negative_stock"] = cint(
+				allow_negative_map.get(variant["item_code"], 0)
+			)
+
 			# Get variant attributes from preloaded map
 			variant["attributes"] = attributes_map.get(variant["item_code"], {})
 
@@ -1166,6 +1209,7 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20,
 
 		# Prepare maps for enrichment
 		item_codes = [item["item_code"] for item in items]
+		allow_negative_map = _get_item_allow_negative_stock_map(item_codes)
 		conversion_map = defaultdict(dict)  # parent -> {uom: factor}
 		uom_map = {}  # parent -> [ {uom, conversion_factor}, ... ]
 		uom_prices_map = {}  # item_code -> {uom: price_list_rate}
@@ -1272,6 +1316,9 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20,
 
 		# Enrich items with price, stock, barcode, and UOM data
 		for item in items:
+			item["allow_negative_stock"] = cint(
+				allow_negative_map.get(item["item_code"], 0)
+			)
 			stock_uom = item.get("stock_uom")
 
 			# Use pre-loaded price map instead of per-item queries
@@ -1492,6 +1539,7 @@ def get_items_bulk(pos_profile, item_groups=None, start=0, limit=2000, include_v
 
 		# Bulk enrichment (same as get_items)
 		item_codes = [item["item_code"] for item in items]
+		allow_negative_map = _get_item_allow_negative_stock_map(item_codes)
 		conversion_map = defaultdict(dict)
 		uom_map = {}
 		uom_prices_map = {}
@@ -1567,6 +1615,7 @@ def get_items_bulk(pos_profile, item_groups=None, start=0, limit=2000, include_v
 		# Enrich items
 		for item in items:
 			item_code = item["item_code"]
+			item["allow_negative_stock"] = cint(allow_negative_map.get(item_code, 0))
 			stock_uom = item.get("stock_uom")
 
 			# Price: prefer stock_uom, then None/empty UOM (Item Price without UOM)

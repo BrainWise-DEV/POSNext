@@ -4,6 +4,7 @@
 
 from __future__ import unicode_literals
 import json
+from functools import lru_cache
 import frappe
 from frappe import _
 from frappe.utils import flt, cint, nowdate, nowtime, get_datetime, cstr
@@ -362,6 +363,7 @@ def _get_available_stock(item):
 
 def _collect_stock_errors(items):
     """Return list of items exceeding available stock."""
+    allowed_items = _get_item_negative_stock_allow_set(items)
     errors = []
     for d in items:
         if flt(d.get("qty")) < 0:
@@ -374,6 +376,8 @@ def _collect_stock_errors(items):
         )
 
         if requested > available:
+            if d.get("item_code") in allowed_items:
+                continue
             errors.append(
                 {
                     "item_code": d.get("item_code"),
@@ -384,6 +388,35 @@ def _collect_stock_errors(items):
             )
 
     return errors
+
+
+@lru_cache(maxsize=1)
+def _item_has_allow_negative_stock_field():
+    """Check whether Item has allow_negative_stock field."""
+    try:
+        return frappe.get_meta("Item").has_field("allow_negative_stock")
+    except Exception:
+        return False
+
+
+def _get_item_negative_stock_allow_set(items):
+    """Return item codes that allow negative stock at Item level."""
+    if not items or not _item_has_allow_negative_stock_field():
+        return set()
+
+    item_codes = {d.get("item_code") for d in items if d.get("item_code")}
+    if not item_codes:
+        return set()
+
+    allowed_items = frappe.get_all(
+        "Item",
+        filters={
+            "name": ["in", list(item_codes)],
+            "allow_negative_stock": 1,
+        },
+        pluck="name",
+    )
+    return set(allowed_items or [])
 
 
 def _should_block(pos_profile):

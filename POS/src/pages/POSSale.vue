@@ -1815,6 +1815,7 @@ function handleItemSelected(item, autoAdd = false) {
 	// Product Bundles have calculated stock based on component availability
 	if (
 		settingsStore.shouldEnforceStockValidation() &&
+		!(item.allow_negative_stock === 1 || item.allow_negative_stock === true) &&
 		(item.is_stock_item || item.is_bundle) &&
 		!item.has_serial_no &&
 		!item.has_batch_no &&
@@ -2119,6 +2120,7 @@ async function handleOptionSelected(option) {
 			// Stock validation for variants (same as regular items)
 			if (
 				settingsStore.shouldEnforceStockValidation() &&
+				!(variant.allow_negative_stock === 1 || variant.allow_negative_stock === true) &&
 				variant.is_stock_item &&
 				!variant.has_serial_no &&
 				!variant.has_batch_no
