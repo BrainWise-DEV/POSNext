@@ -1,119 +1,305 @@
-/* POS Next API Docs — custom pdoc theme */
+/* POS Next API Docs — Read the Docs inspired theme
+ *
+ * This overrides pdoc's theme variables and adds RTD-style styling.
+ * IMPORTANT: Do NOT override layout properties (main padding, nav width/position)
+ * — those are handled by pdoc's layout.css using --sidebar-width.
+ */
+
+/* ── Override pdoc theme variables ── */
 
 :root {
-	--accent: #2563eb;
-	--accent-light: #3b82f6;
-	--sidebar-bg: #f8fafc;
-	--header-bg: #1e293b;
+	--pdoc-background: #fcfcfc;
 }
 
-/* Replace pdoc logo area with project title */
+.pdoc {
+	/* Core pdoc theme vars */
+	--text: #404040;
+	--muted: #6c757d;
+	--link: #2980b9;
+	--link-hover: #2471a3;
+	--code: #f8f8f8;
+	--active: #e3f2fd;
+
+	/* Sidebar vars */
+	--accent: #263238;
+	--accent2: #37474f;
+	--nav-hover: rgba(255, 255, 255, 0.1);
+
+	/* Function/class name colors */
+	--name: #333;
+	--def: #2980b9;
+	--annotation: #6c757d;
+}
+
+/* ── Sidebar ── */
+
+nav.pdoc {
+	background-color: #263238 !important;
+	border-right: none !important;
+	box-shadow: none !important;
+}
+
+nav.pdoc > div {
+	background: #263238;
+}
+
+/* Branding area */
 nav.pdoc .logo-area {
-	display: flex;
-	align-items: center;
-	gap: 0.5rem;
-	padding: 0.75rem 1rem;
-	margin-bottom: 0.5rem;
-	background: var(--header-bg);
-	border-radius: 6px;
+	display: block;
+	padding: 1rem var(--pad, 1.25rem);
 	text-decoration: none;
+	border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+	margin-bottom: 0.5rem;
 }
 
 nav.pdoc .logo-area .logo-icon {
-	font-size: 1.4rem;
+	display: none;
 }
 
 nav.pdoc .logo-area .logo-text {
-	font-size: 1.1rem;
+	font-size: 1.3rem;
 	font-weight: 700;
 	color: #fff;
-	letter-spacing: -0.01em;
+	display: block;
 }
 
 nav.pdoc .logo-area .logo-subtitle {
-	font-size: 0.7rem;
-	color: #94a3b8;
+	font-size: 0.75rem;
+	color: #b0bec5;
 	display: block;
 	font-weight: 400;
+	margin-top: 0.15rem;
 }
 
-/* Hide default pdoc attribution logo */
+/* Sidebar headings */
+nav.pdoc h2 {
+	font-size: 0.7rem;
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+	color: #78909c;
+	margin-top: 1rem;
+}
+
+/* Sidebar links */
+nav.pdoc a,
+nav.pdoc a:hover {
+	color: #b0bec5;
+}
+
+nav.pdoc li:hover {
+	background-color: rgba(255, 255, 255, 0.08);
+}
+
+nav.pdoc li:hover > a {
+	color: #fff;
+}
+
+/* Sidebar search */
+nav.pdoc input[type="search"] {
+	border: 1px solid rgba(255, 255, 255, 0.15);
+	border-radius: 3px;
+	background: rgba(255, 255, 255, 0.05);
+	color: #fff;
+	font-size: 0.85rem;
+}
+
+nav.pdoc input[type="search"]::placeholder {
+	color: #78909c;
+}
+
+nav.pdoc input[type="search"]:focus {
+	border-color: #2980b9;
+	outline: none;
+	background: rgba(255, 255, 255, 0.1);
+}
+
+/* Back-to-parent button */
+nav.pdoc .module-list-button {
+	color: #b0bec5 !important;
+	border-color: rgba(255, 255, 255, 0.2) !important;
+}
+
+nav.pdoc .module-list-button:hover {
+	color: #fff !important;
+	border-color: rgba(255, 255, 255, 0.4) !important;
+}
+
+/* Sidebar scrollbar on dark bg */
+nav.pdoc {
+	scrollbar-color: #455a64 transparent;
+}
+
+nav.pdoc::-webkit-scrollbar-thumb {
+	background-color: #455a64;
+}
+
+/* Hide pdoc attribution */
 nav.pdoc .attribution {
 	display: none;
 }
 
-/* Sidebar styling */
-nav.pdoc > div {
-	background: var(--sidebar-bg);
+/* Function markers in nav */
+nav.pdoc .function:after {
+	color: #546e7a;
 }
 
-nav.pdoc h2 {
-	font-size: 0.85rem;
-	text-transform: uppercase;
-	letter-spacing: 0.05em;
-	color: #64748b;
-	padding: 0.5rem 1rem 0.25rem;
-	margin: 0;
+nav.pdoc .class:before {
+	color: #546e7a;
 }
 
-nav.pdoc ul.memberlist a,
-nav.pdoc > div > ul a {
-	padding: 0.25rem 1rem;
-	display: block;
-	border-radius: 4px;
-	transition: background 0.15s;
+/* ── Main content ── */
+
+/* Module title */
+main.pdoc .modulename {
+	font-weight: 700;
+	color: #404040;
+	border-bottom: 2px solid #e1e4e5;
+	padding-bottom: 0.6rem;
 }
 
-nav.pdoc ul.memberlist a:hover,
-nav.pdoc > div > ul a:hover {
-	background: #e2e8f0;
+/* Content line height */
+main.pdoc {
+	line-height: 1.65;
 }
 
-/* Function signatures — highlight @frappe.whitelist */
-.decorator-frappe {
-	color: var(--accent);
+/* ── Attribute blocks (functions, variables) ── */
+
+.pdoc .attr {
+	background-color: #f8f8f8;
+	border: 1px solid #e1e4e5;
+	border-radius: 3px;
+	padding: 0.5rem 0.75rem;
+}
+
+.pdoc .attr:hover {
+	filter: none;
+	border-color: #ccc;
+}
+
+.pdoc .name {
+	color: #333;
+	font-weight: 700;
+}
+
+.pdoc .def {
+	color: #2980b9;
 	font-weight: 600;
 }
 
-/* Module docstring tables */
-.pdoc .docstring table {
+/* Decorators */
+.pdoc .decorator {
+	color: #666;
+	font-size: 0.85em;
+}
+
+/* ── Docstrings ── */
+
+.pdoc .docstring {
+	color: #404040;
+	line-height: 1.65;
+}
+
+.pdoc .docstring h6 {
+	font-size: 0.9rem;
+	font-weight: 700;
+	color: #404040;
+	margin: 1rem 0 0.35rem;
+}
+
+.pdoc .docstring blockquote {
+	border-left: 3px solid #2980b9;
+	padding: 0.25rem 0 0.25rem 1rem;
+	color: #6c757d;
+}
+
+/* Inline code in docstrings */
+.pdoc .docstring code {
+	background: #f8f8f8;
+	border: 1px solid #e1e4e5;
+	padding: 0.15rem 0.35rem;
+	border-radius: 2px;
+	font-size: 0.85em;
+	color: #404040;
+}
+
+/* Code blocks in docstrings */
+.pdoc .docstring pre {
+	background: #f8f8f8;
+	border: 1px solid #e1e4e5;
+	border-radius: 3px;
+	padding: 0.75rem 1rem;
+}
+
+.pdoc .docstring pre code {
+	border: none;
+	padding: 0;
+	background: none;
+}
+
+/* ── Tables — RTD style ── */
+
+.pdoc table {
+	display: table;
 	width: 100%;
 	border-collapse: collapse;
 	margin: 1rem 0;
+	font-size: 0.9rem;
 }
 
-.pdoc .docstring table th {
-	background: var(--header-bg);
+.pdoc table th {
+	background: #263238;
 	color: #fff;
 	padding: 0.5rem 0.75rem;
 	text-align: left;
-	font-size: 0.85rem;
+	font-size: 0.8rem;
+	font-weight: 600;
+	border: 1px solid #263238;
 }
 
-.pdoc .docstring table td {
+.pdoc table td {
 	padding: 0.5rem 0.75rem;
-	border-bottom: 1px solid #e2e8f0;
+	border: 1px solid #e1e4e5;
 }
 
-.pdoc .docstring table tr:hover td {
-	background: #f1f5f9;
+.pdoc table tr:nth-child(even) td {
+	background: #f9f9f9;
 }
 
-/* Better heading hierarchy in main content */
-main.pdoc .modulename {
-	color: var(--header-bg);
-	font-size: 1.6rem;
-	border-bottom: 3px solid var(--accent);
-	padding-bottom: 0.5rem;
+.pdoc table tr:hover td {
+	background: #e3f2fd;
 }
 
-/* Section separators between functions */
-main.pdoc > section {
-	border-bottom: 1px solid #e2e8f0;
-	padding-bottom: 1.5rem;
-	margin-bottom: 1.5rem;
+/* ── Source code blocks ── */
+
+.pdoc .pdoc-code {
+	border: 1px solid #e1e4e5;
+	border-radius: 3px;
 }
 
-main.pdoc > section:last-child {
-	border-bottom: none;
+/* ── View Source toggle ── */
+
+.view-source-button {
+	color: #6c757d !important;
+}
+
+/* ── Permalink anchors ── */
+
+.pdoc .headerlink::before {
+	color: #2980b9;
+}
+
+/* ── Links ── */
+
+.pdoc a {
+	color: #2980b9;
+}
+
+.pdoc a:hover {
+	color: #2471a3;
+}
+
+/* ── Compact variable sections ── */
+
+.pdoc > section:has(.attr.variable) {
+	margin-bottom: 0.5rem;
 }

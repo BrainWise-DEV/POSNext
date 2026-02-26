@@ -110,13 +110,15 @@ def install_mocks() -> None:
 	"""Install frappe & erpnext mocks into sys.modules."""
 	_make_mock_package("frappe", _FRAPPE_SUBMODULES)
 
-	# Make frappe.whitelist() a no-op decorator
+	# Make frappe.whitelist() a decorator that tags functions
 	def _whitelist(methods=None, allow_guest=False, xss_safe=False):
 		def decorator(fn):
+			fn._is_whitelisted = True
 			return fn
 
 		# Allow both @frappe.whitelist and @frappe.whitelist()
 		if callable(methods):
+			methods._is_whitelisted = True
 			return methods
 		return decorator
 
@@ -223,6 +225,29 @@ def main() -> None:
 		except Exception as exc:
 			print(f"WARNING: Could not import {mod_name}: {exc}")
 			failed.append(mod_name)
+
+	# Only show @frappe.whitelist() endpoints in docs.
+	# pdoc uses __all__ to control what's documented.
+	import inspect
+
+	for name, submod in list(sys.modules.items()):
+		is_target = any(name == m or name.startswith(m + ".") for m in successful)
+		if not is_target or submod is None:
+			continue
+		whitelisted = [
+			attr_name
+			for attr_name in dir(submod)
+			if not attr_name.startswith("_")
+			and inspect.isfunction(getattr(submod, attr_name, None))
+			and getattr(getattr(submod, attr_name), "_is_whitelisted", False)
+		]
+		# Also keep submodules so pdoc can navigate into them
+		for attr_name in dir(submod):
+			obj = getattr(submod, attr_name, None)
+			if inspect.ismodule(obj) and not attr_name.startswith("_"):
+				whitelisted.append(attr_name)
+		if whitelisted:
+			submod.__all__ = whitelisted
 
 	if not successful:
 		print("ERROR: No modules could be imported. Check your setup.")

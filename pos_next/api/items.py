@@ -305,7 +305,21 @@ def get_item_detail(item, doc=None, warehouse=None, price_list=None, company=Non
 
 @frappe.whitelist()
 def search_by_barcode(barcode: str, pos_profile: str):
-	"""Search item by barcode"""
+	"""Look up an item by scanning or entering its barcode.
+
+	Searches the Barcode doctype for a matching barcode value and returns
+	the associated item with full pricing, stock, and tax details for the
+	given POS Profile.
+
+	Args:
+		barcode (str): The barcode string to search for (exact match).
+		pos_profile (str): POS Profile name, used to determine the warehouse,
+			price list, and tax configuration.
+
+	Returns:
+		dict: The matching item with enriched details (price, stock, taxes),
+		or an error dict if the barcode is not found.
+	"""
 	try:
 		# Parse pos_profile if it's a JSON string
 		if isinstance(pos_profile, str):
@@ -424,7 +438,20 @@ def search_by_barcode(barcode: str, pos_profile: str):
 
 @frappe.whitelist()
 def get_item_stock(item_code: str, warehouse: str):
-	"""Get real-time stock for item"""
+	"""Get the current stock quantity for an item in a specific warehouse.
+
+	Returns both the actual quantity and the quantity available for sale
+	(accounting for reserved stock).
+
+	Args:
+		item_code (str): The item code to check stock for.
+		warehouse (str): The warehouse to check stock in.
+
+	Returns:
+		dict: Stock information containing:
+			- actual_qty (float): Physical stock in the warehouse.
+			- projected_qty (float): Available for sale (actual minus reserved).
+	"""
 	try:
 		# Get both quantities in a single query (performance optimization)
 		bin_data = (
@@ -454,7 +481,23 @@ def get_item_stock(item_code: str, warehouse: str):
 
 @frappe.whitelist()
 def get_batch_serial_details(item_code: str, warehouse: str):
-	"""Get batch/serial number details"""
+	"""Get batch and serial number information for an item in a warehouse.
+
+	Checks whether the item uses batch tracking, serial numbers, or both,
+	and returns the available batches with their quantities and expiry dates,
+	or available serial numbers.
+
+	Args:
+		item_code (str): The item code to check.
+		warehouse (str): The warehouse to look up batches/serials in.
+
+	Returns:
+		dict: Batch and serial details containing:
+			- has_batch_no (bool): Whether the item uses batch tracking.
+			- has_serial_no (bool): Whether the item uses serial numbers.
+			- batches (list): Available batches with batch_no, qty, expiry_date.
+			- serial_nos (list): Available serial numbers (if applicable).
+	"""
 	try:
 		# Get both flags in a single query (performance optimization)
 		item_flags = (
@@ -508,7 +551,27 @@ def get_batch_serial_details(item_code: str, warehouse: str):
 
 @frappe.whitelist()
 def get_item_variants(template_item: str, pos_profile: str):
-	"""Get all variants for a template item with prices and stock"""
+	"""Get all variants of a template item with their prices and stock levels.
+
+	When a user selects a template item (e.g., "T-Shirt"), this endpoint
+	returns all its variants (e.g., "T-Shirt - Red - Large") with current
+	pricing and stock for the POS Profile's warehouse.
+
+	Each variant includes its item attributes (e.g., Color=Red, Size=Large)
+	so the POS frontend can build a variant selection grid.
+
+	Args:
+		template_item (str): The template item code (the parent item with has_variants=1).
+		pos_profile (str): POS Profile name, used to determine the warehouse and price list.
+
+	Returns:
+		list[dict]: List of variant items, each containing:
+			- item_code, item_name (str): Variant identifiers.
+			- attributes (dict): Attribute key-value pairs (e.g., {"Color": "Red"}).
+			- price_list_rate (float): Price from the POS Profile's price list.
+			- actual_qty (float): Current stock in the warehouse.
+			- stock_uom (str): Unit of measure.
+	"""
 	try:
 		pos_profile_doc = frappe.get_cached_doc("POS Profile", pos_profile)
 
@@ -1063,7 +1126,47 @@ def get_items(
 	include_variants: int = 0,
 	show_variants_as_items: int = 0,
 ):
-	"""Get items for POS with stock, price, and tax details"""
+	"""Fetch items for the POS item grid with stock, pricing, and tax details.
+
+	This is the main item search/browse endpoint. It returns items matching
+	the search criteria, enriched with price list rates, current stock,
+	applicable taxes, and item images. Supports text search, item group
+	filtering, and pagination.
+
+	**Search behavior**: Matches against item_code, item_name, and barcodes.
+	Also supports weighted/priced barcode resolution if configured.
+
+	**Variant handling**: By default, template items are shown and variants
+	are excluded. Set `include_variants=1` to also fetch variants (used for
+	offline caching). Set `show_variants_as_items=1` to show variants directly
+	in the grid instead of templates.
+
+	Args:
+		pos_profile (str): POS Profile name (required). Determines warehouse,
+			price list, item groups, and tax settings.
+		search_term (str | None): Text to search for across item_code, item_name,
+			and barcodes. If None, returns all items.
+		item_group (str | None): Filter by item group. Includes child groups.
+		start (int): Pagination offset. Defaults to 0.
+		limit (int): Maximum items to return. Defaults to 20.
+		include_variants (int): If 1, include variant items alongside templates.
+			Used by the offline sync worker to cache all items.
+		show_variants_as_items (int): If 1, show variants directly in results
+			and exclude template items.
+
+	Returns:
+		list[dict]: Items with enriched details, each containing:
+			- item_code, item_name (str): Item identifiers.
+			- item_group (str): Item category.
+			- price_list_rate (float): Price from the POS Profile's price list.
+			- actual_qty (float): Current stock in the warehouse.
+			- stock_uom (str): Unit of measure.
+			- image (str | None): Item image URL.
+			- has_variants (bool): Whether this is a template item.
+			- variant_of (str | None): Parent template item code (for variants).
+			- item_tax_rate (dict): Applicable tax rates by tax account.
+			- barcodes (list): Associated barcodes.
+	"""
 	try:
 		pos_profile_doc = frappe.get_cached_doc("POS Profile", pos_profile)
 
@@ -1427,17 +1530,31 @@ def get_items_bulk(
 	include_variants: int = 0,
 	show_variants_as_items: int = 0,
 ):
-	"""
-	Fetch items from multiple item groups in a SINGLE query.
-	Eliminates N+1 problem where frontend was making one API call per group.
+	"""Fetch items from multiple item groups in a single batch request.
+
+	Optimized bulk endpoint used primarily by the offline sync worker to
+	download large numbers of items efficiently. Instead of making one API
+	call per item group, the frontend passes all groups at once and this
+	endpoint returns all matching items in a single query.
+
+	Items are enriched with the same pricing, stock, and tax details as
+	`get_items`, but with a higher default limit suitable for caching.
 
 	Args:
-		pos_profile: POS Profile name
-		item_groups: JSON array of item group names (optional - if empty, fetch all)
-		start: Offset for pagination (default 0)
-		limit: Max items to return (default 2000)
-		include_variants: If 1, include variant items (for offline caching)
-		show_variants_as_items: If 1, show variants directly and exclude templates
+		pos_profile (str): POS Profile name (required). Determines warehouse,
+			price list, and tax settings.
+		item_groups (str | None): JSON array of item group names to fetch from.
+			If empty or None, fetches items from all groups configured in the
+			POS Profile.
+		start (int): Pagination offset. Defaults to 0.
+		limit (int): Maximum items to return. Defaults to 2000.
+		include_variants (int): If 1, include variant items alongside templates.
+			Typically set to 1 for offline caching.
+		show_variants_as_items (int): If 1, show variants directly in results
+			and exclude template items.
+
+	Returns:
+		list[dict]: Items with enriched details (same structure as `get_items`).
 	"""
 	try:
 		if isinstance(item_groups, str):

@@ -456,10 +456,30 @@ def _auto_set_return_batches(invoice_doc):
 
 @frappe.whitelist()
 def validate_cart_items(items: str, pos_profile: str | None = None):
-	"""Validate cart items for available stock.
+	"""Validate that all cart items have sufficient stock before checkout.
 
-	Returns a list of item dicts where requested quantity exceeds availability.
-	This can be used on the front-end for pre-submission checks.
+	This is a pre-submission check the POS frontend calls before finalizing
+	an order. It compares requested quantities against actual warehouse stock.
+
+	If stock validation is disabled in POS Settings for the given profile,
+	this endpoint returns an empty list without checking.
+
+	Args:
+		items (str): JSON array of cart item dicts. Each item must include:
+			- item_code (str): The item code.
+			- qty (float): Requested quantity.
+			- warehouse (str): Target warehouse for stock lookup.
+		pos_profile (str | None): POS Profile name. Used to check whether
+			stock validation is enabled. If None or invalid, stock validation
+			is skipped.
+
+	Returns:
+		list: Empty list if all items are in stock, otherwise a list of dicts
+		for items that failed validation, each containing:
+			- item_code (str): The item that failed.
+			- qty (float): Requested quantity.
+			- actual_qty (float): Available stock in the warehouse.
+			- warehouse (str): The warehouse checked.
 	"""
 	if isinstance(items, str):
 		items = json.loads(items)
@@ -479,11 +499,32 @@ def validate_cart_items(items: str, pos_profile: str | None = None):
 
 @frappe.whitelist()
 def validate_return_items(original_invoice_name: str, return_items: str, doctype: str = "Sales Invoice"):
-	"""Ensure that return items do not exceed the quantity from the original invoice.
-	Also validates return time frame based on POS Settings.
+	"""Validate return quantities against the original invoice before processing a return.
 
-	Uses query builder for parameterized queries. Fetches invoice details, original
-	item quantities, and already-returned quantities in 3 queries total.
+	Performs two checks:
+
+	1. **Return period**: If `return_validity_days` is configured in POS Settings,
+	   verifies the original invoice is still within the allowed return window.
+	2. **Quantity limits**: For each item being returned, ensures the return qty
+	   does not exceed the remaining returnable quantity (original qty minus any
+	   quantities already returned in previous return invoices).
+
+	Args:
+		original_invoice_name (str): The Sales Invoice name being returned against.
+		return_items (str): JSON array of items to return. Each item must include:
+			- item_code (str): The item code being returned.
+			- qty (float): The quantity to return (positive number).
+		doctype (str): Document type, defaults to "Sales Invoice".
+
+	Returns:
+		dict: Validation result with the following structure:
+			- valid (bool): True if all validations pass.
+			- message (str): Human-readable error message if valid is False.
+
+		Possible error cases:
+			- Invoice not found.
+			- Return period expired (includes days_since and allowed_days in message).
+			- Return quantity exceeds remaining returnable quantity for an item.
 	"""
 	from frappe.query_builder.functions import Abs, Sum
 	from frappe.utils import date_diff, getdate
@@ -578,7 +619,41 @@ def validate_return_items(original_invoice_name: str, return_items: str, doctype
 
 @frappe.whitelist()
 def update_invoice(data: str):
-	"""Create or update invoice draft (Step 1)."""
+	"""Create or update a draft Sales Invoice (step 1 of the two-step invoice flow).
+
+	This is the first step of the POS checkout process. The frontend sends the
+	full invoice payload (items, customer, payments, etc.) and this endpoint
+	either creates a new draft or updates an existing one.
+
+	**Offline sync handling**: If the payload contains an `offline_id`, this
+	endpoint checks for duplicate submissions and creates a sync tracking record
+	to prevent the same offline invoice from being submitted twice.
+
+	**Business logic**:
+	- Validates manual rate edits against POS Settings (max discount, rate editing allowed).
+	- Standardizes pricing_rules format across different input sources.
+	- Logs manual rate changes for audit trail.
+	- Sets the POS Opening Shift reference on the invoice.
+
+	Args:
+		data (str): JSON string containing the full invoice payload:
+			- doctype (str): Defaults to "Sales Invoice".
+			- pos_profile (str): POS Profile name (required).
+			- customer (str): Customer ID.
+			- items (list): Array of line items, each with item_code, qty, rate, etc.
+			- payments (list): Array of payment entries with mode_of_payment and amount.
+			- name (str | None): Existing invoice name for updates, or None for new drafts.
+			- offline_id (str | None): Unique ID from offline mode to prevent duplicates.
+
+	Returns:
+		dict: Result containing:
+			- name (str): The Sales Invoice document name (e.g., "ACC-SINV-2025-00001").
+			- status (str): "ok" on success.
+
+	Raises:
+		frappe.ValidationError: If rate validation fails or required fields are missing.
+		DuplicateEntryError: If an offline_id has already been synced.
+	"""
 	try:
 		data = json.loads(data) if isinstance(data, str) else data
 
@@ -1023,17 +1098,22 @@ def _cleanup_failed_sync(sync_record_name):
 
 @frappe.whitelist()
 def check_offline_invoice_synced(offline_id: str):
-	"""
-	Check if an offline invoice has already been synced.
+	"""Check whether an offline invoice has already been synced to the server.
 
-	This endpoint is called by the frontend before attempting to sync
-	an offline invoice, preventing duplicate submissions.
+	The POS frontend calls this before attempting to sync an offline-created
+	invoice, preventing duplicate submissions. It looks up the offline_id in
+	the Offline Invoice Sync doctype and also verifies the linked Sales Invoice
+	still exists and is submitted.
 
 	Args:
-	    offline_id: The unique offline ID to check
+		offline_id (str): The unique offline ID assigned by the frontend when
+			the invoice was created in offline mode.
 
 	Returns:
-	    dict with 'synced' (bool) and 'sales_invoice' (str or None)
+		dict: Sync status with the following structure:
+			- synced (bool): True if the invoice was already submitted.
+			- sales_invoice (str | None): The Sales Invoice name if synced,
+			  otherwise None.
 	"""
 	from pos_next.pos_next.doctype.offline_invoice_sync.offline_invoice_sync import (
 		OfflineInvoiceSync,
@@ -1060,7 +1140,40 @@ def check_offline_invoice_synced(offline_id: str):
 
 @frappe.whitelist()
 def submit_invoice(invoice: str | None = None, data: str | None = None):
-	"""Submit the invoice (Step 2)."""
+	"""Submit a draft invoice to finalize the sale (step 2 of the two-step invoice flow).
+
+	This is the second and final step of the POS checkout. It takes a draft
+	invoice (created by `update_invoice`) and submits it, which triggers
+	stock deduction, accounting entries, and payment processing.
+
+	**Two calling conventions**:
+	- `invoice`: Pass the Sales Invoice name of an existing draft.
+	- `data`: Pass the full invoice payload as JSON (used for offline sync
+	  where the draft was created and submitted in one step).
+
+	**Business logic**:
+	- Validates stock availability (if enabled in POS Settings).
+	- Processes payment entries and resolves payment accounts.
+	- Applies loyalty points if configured.
+	- Handles batch/serial number assignment for return invoices.
+	- Completes offline sync tracking if an offline_id is present.
+	- Logs manual rate edits for audit trail after successful submission.
+
+	Args:
+		invoice (str | None): Name of an existing draft Sales Invoice to submit.
+		data (str | None): JSON string with the full invoice payload (alternative
+			to passing `invoice`). Used when the frontend sends everything at once.
+
+	Returns:
+		dict: Result containing:
+			- name (str): The submitted Sales Invoice name.
+			- status (str): "ok" on success.
+			- grand_total (float): Final invoice total.
+			- Additional invoice fields depending on the context.
+
+	Raises:
+		frappe.ValidationError: If stock validation fails or the invoice is invalid.
+	"""
 	# Handle different calling conventions
 	if invoice is None:
 		if data:
@@ -1370,14 +1483,25 @@ def submit_invoice(invoice: str | None = None, data: str | None = None):
 
 @frappe.whitelist()
 def get_invoice(invoice_name: str):
-	"""
-	Get a single invoice with all details for POS.
+	"""Fetch a single Sales Invoice with all its details.
+
+	Returns the complete invoice document including line items, tax breakdowns,
+	payment entries, and all other child tables. Used by the POS frontend to
+	display invoice details or to reload an invoice after submission.
 
 	Args:
-		invoice_name: Sales Invoice name
+		invoice_name (str): The Sales Invoice document name (e.g., "ACC-SINV-2025-00001").
 
 	Returns:
-		Complete invoice document with items and payments
+		dict: The full Sales Invoice document as a dictionary, including:
+			- name, customer, customer_name, posting_date, grand_total, status, etc.
+			- items (list): Line items with item_code, qty, rate, amount.
+			- payments (list): Payment entries with mode_of_payment, amount.
+			- taxes (list): Tax breakdowns.
+
+	Raises:
+		frappe.ValidationError: If invoice_name is empty or does not exist.
+		frappe.PermissionError: If the user lacks read access to the invoice.
 	"""
 	if not invoice_name:
 		frappe.throw(_("Invoice name is required"))
@@ -1397,15 +1521,30 @@ def get_invoice(invoice_name: str):
 
 @frappe.whitelist()
 def get_invoices(pos_profile: str, limit: int = 100):
-	"""
-	Get list of invoices for a POS Profile.
+	"""List recent submitted invoices for a given POS Profile.
+
+	Returns submitted POS invoices sorted by date (newest first), each
+	including its line items. Used for the invoice history view in the
+	POS application.
 
 	Args:
-		pos_profile: POS Profile name
-		limit: Maximum number of invoices to return (default 100)
+		pos_profile (str): POS Profile name to filter invoices by.
+		limit (int): Maximum number of invoices to return. Defaults to 100.
 
 	Returns:
-		List of invoices with details
+		list[dict]: List of invoice summaries, each containing:
+			- name (str): Invoice document name.
+			- customer, customer_name (str): Customer details.
+			- posting_date, posting_time (str): When the invoice was created.
+			- grand_total, paid_amount, outstanding_amount (float): Amounts.
+			- status (str): Invoice status (e.g., "Paid", "Return").
+			- is_return (bool): Whether this is a return/credit note.
+			- return_against (str | None): Original invoice name if this is a return.
+			- items (list): Line items with item_code, item_name, qty, rate, amount.
+
+	Raises:
+		frappe.ValidationError: If pos_profile is empty.
+		frappe.PermissionError: If the user lacks access to the POS Profile.
 	"""
 	if not pos_profile:
 		frappe.throw(_("POS Profile is required"))
@@ -1479,7 +1618,21 @@ def get_invoices(pos_profile: str, limit: int = 100):
 
 @frappe.whitelist()
 def get_draft_invoices(pos_opening_shift: str, doctype: str = "Sales Invoice"):
-	"""Get all draft invoices for a POS opening shift."""
+	"""List all draft (unsaved) invoices for a POS Opening Shift.
+
+	Returns draft invoices belonging to the given shift, allowing the
+	cashier to resume in-progress orders or review pending drafts before
+	closing the shift.
+
+	Args:
+		pos_opening_shift (str): The POS Opening Shift document name.
+		doctype (str): Document type to query. Defaults to "Sales Invoice".
+
+	Returns:
+		list[dict]: List of full draft invoice documents (as dicts), sorted by
+		most recently modified first. Each includes all child tables (items,
+		payments, taxes).
+	"""
 	filters = {
 		"docstatus": 0,
 	}
@@ -1508,7 +1661,20 @@ def get_draft_invoices(pos_opening_shift: str, doctype: str = "Sales Invoice"):
 
 @frappe.whitelist()
 def delete_invoice(invoice: str):
-	"""Delete draft invoice."""
+	"""Permanently delete a draft invoice.
+
+	Only works on draft (docstatus=0) invoices. Submitted invoices cannot
+	be deleted through this endpoint and will raise an error.
+
+	Args:
+		invoice (str): The Sales Invoice document name to delete.
+
+	Returns:
+		str: Confirmation message (e.g., "Invoice ACC-SINV-2025-00001 Deleted").
+
+	Raises:
+		frappe.ValidationError: If the invoice does not exist or is already submitted.
+	"""
 	doctype = "Sales Invoice"
 
 	if not frappe.db.exists(doctype, invoice):
@@ -1524,9 +1690,24 @@ def delete_invoice(invoice: str):
 
 @frappe.whitelist()
 def cleanup_old_drafts(pos_profile: str | None = None, max_age_hours: int = 24):
-	"""
-	Clean up old draft invoices to prevent stock reservation issues.
-	Deletes drafts older than max_age_hours (default 24 hours).
+	"""Remove stale draft invoices that were abandoned.
+
+	Deletes draft invoices that have not been modified for longer than
+	`max_age_hours`. This prevents old abandoned drafts from holding stock
+	reservations indefinitely.
+
+	Can be called manually or scheduled as a periodic cleanup job.
+
+	Args:
+		pos_profile (str | None): If provided, only clean up drafts for this
+			POS Profile. If None, cleans up all draft invoices.
+		max_age_hours (int): Delete drafts older than this many hours.
+			Defaults to 24.
+
+	Returns:
+		dict: Cleanup result with:
+			- deleted (int): Number of drafts successfully deleted.
+			- message (str): Human-readable summary (e.g., "Cleaned up 5 old draft invoices").
 	"""
 	from datetime import datetime, timedelta
 
@@ -1574,11 +1755,30 @@ def cleanup_old_drafts(pos_profile: str | None = None, max_age_hours: int = 24):
 
 @frappe.whitelist()
 def get_returnable_invoices(limit: int = 50, pos_profile: str | None = None):
-	"""Get list of invoices that have items available for return.
-	Filters by return validity period if configured in POS Settings.
+	"""List invoices that still have items available for return.
 
-	Uses query builder with LEFT JOINs to calculate original and returned quantities
-	in a single query. Returns invoices where total_original_qty > total_returned_qty.
+	Fetches submitted POS invoices and calculates how many items have
+	already been returned via previous return invoices. Only invoices
+	where at least one item has remaining returnable quantity are included.
+
+	If `return_validity_days` is configured in POS Settings, only invoices
+	within that time window are returned (e.g., invoices from the last 30 days).
+
+	Args:
+		limit (int): Maximum number of invoices to return. Defaults to 50.
+		pos_profile (str | None): POS Profile name. Used to look up the
+			return validity period from POS Settings.
+
+	Returns:
+		list[dict]: Invoices with return availability, each containing:
+			- name (str): Invoice document name.
+			- customer, customer_name (str): Customer details.
+			- contact_mobile (str): Customer mobile number.
+			- posting_date (str): Invoice date.
+			- grand_total (float): Invoice total.
+			- status (str): Invoice status.
+			- total_original_qty (float): Total items originally sold.
+			- total_returned_qty (float): Total items already returned.
 	"""
 	from frappe.query_builder import Case
 	from frappe.query_builder.functions import Abs, Coalesce, Sum
@@ -1651,18 +1851,28 @@ def get_returnable_invoices(limit: int = 50, pos_profile: str | None = None):
 
 @frappe.whitelist()
 def search_invoice_by_number(search_term: str, pos_profile: str | None = None):
-	"""Search for invoices by invoice number across the entire database.
-	No date restrictions - searches all returnable invoices matching the term.
+	"""Search for a returnable invoice by its invoice number.
 
-	Uses query builder with LEFT JOINs to calculate remaining returnable quantities.
-	Only returns invoices that have items available for return.
+	Performs a partial match (LIKE %term%) on the invoice name across all
+	submitted POS invoices, then filters to only include invoices that have
+	remaining returnable quantities. No date restrictions are applied —
+	this searches the entire invoice history.
 
 	Args:
-	    search_term: Invoice number or partial number to search for (min 3 chars)
-	    pos_profile: Optional POS profile for context (reserved for future use)
+		search_term (str): Invoice number or partial number to search for.
+			Must be at least 3 characters long. Shorter terms return an empty list.
+		pos_profile (str | None): Reserved for future use.
 
 	Returns:
-	    List of matching invoices with return availability info (max 10 results)
+		list[dict]: Up to 10 matching invoices (newest first), each containing:
+			- name (str): Invoice document name.
+			- customer, customer_name (str): Customer details.
+			- contact_mobile (str): Customer mobile number.
+			- posting_date (str): Invoice date.
+			- grand_total (float): Invoice total.
+			- status (str): Invoice status.
+			- total_original_qty (float): Total items originally sold.
+			- total_returned_qty (float): Total items already returned.
 	"""
 	from frappe.query_builder import Case
 	from frappe.query_builder.functions import Abs, Coalesce, Sum
@@ -1728,12 +1938,26 @@ def search_invoice_by_number(search_term: str, pos_profile: str | None = None):
 
 @frappe.whitelist()
 def check_invoice_return_validity(invoice_name: str):
-	"""Check if an invoice is within the return validity period.
+	"""Check whether an invoice is eligible for return.
 
-	Returns detailed information for the UI to display, including:
-	- valid: Boolean indicating if return is allowed
-	- error_type: 'not_found' or 'return_period_expired' if invalid
-	- Additional context (invoice_date, days_since, allowed_days) for expired returns
+	Verifies that the invoice exists and is within the allowed return
+	period (if `return_validity_days` is configured in POS Settings).
+	Returns detailed status information the UI can use to display
+	appropriate messages to the cashier.
+
+	Args:
+		invoice_name (str): The Sales Invoice document name to check.
+
+	Returns:
+		dict: Validity result with the following structure:
+			- valid (bool): True if the invoice can be returned.
+			- error_type (str | None): One of:
+				- "not_found": Invoice does not exist or is not a POS invoice.
+				- "return_period_expired": Invoice is outside the return window.
+				- None: If valid is True.
+			- invoice_date (str | None): The original invoice posting date (if expired).
+			- days_since (int | None): Days elapsed since the invoice (if expired).
+			- allowed_days (int | None): Configured return validity days (if expired).
 	"""
 	from frappe.utils import date_diff, formatdate, getdate
 
@@ -1779,11 +2003,32 @@ def check_invoice_return_validity(invoice_name: str):
 
 @frappe.whitelist()
 def get_invoice_for_return(invoice_name: str):
-	"""Get invoice with return tracking - calculates remaining qty for each item.
-	Also validates return validity period based on POS Settings.
+	"""Fetch an invoice with per-item return availability details.
 
-	Returns the full invoice document with each item's qty adjusted to show
-	only the remaining returnable quantity (original qty minus already returned).
+	Returns the full invoice document, but each item's quantity is adjusted
+	to show only the remaining returnable amount (original qty minus quantities
+	already returned in previous return invoices). Also validates the return
+	period before returning data.
+
+	This is used by the POS return UI to show how many of each item the
+	cashier is allowed to return.
+
+	Args:
+		invoice_name (str): The Sales Invoice document name.
+
+	Returns:
+		dict: The full invoice document (as dict) with modified items. Each item
+		includes additional fields:
+			- qty (float): Adjusted to remaining returnable quantity.
+			- original_qty (float): The quantity originally sold.
+			- already_returned (float): How many were returned in previous returns.
+			- remaining_qty (float): How many can still be returned.
+
+		Items that have been fully returned (remaining_qty = 0) are excluded.
+
+	Raises:
+		frappe.ValidationError: If the invoice does not exist or the return
+			period has expired.
 	"""
 	from frappe.query_builder.functions import Abs, Coalesce, Sum
 	from frappe.utils import date_diff, getdate
@@ -1898,28 +2143,38 @@ def _build_item_tax_map(taxes: list) -> dict:
 
 @frappe.whitelist()
 def prepare_return_invoice(invoice_name: str, pos_opening_shift: str | None = None):
-	"""Prepare a return invoice using ERPNext's make_sales_return.
+	"""Create a return (credit note) invoice against an original sale.
 
-	This uses ERPNext's standard return document creation which properly copies
-	all child tables including:
-	- sales_team: For correct commission reversal on returned items
-	- taxes: For correct tax reversal
-	- Other child tables maintained by ERPNext
+	Uses ERPNext's `make_sales_return` to generate a properly structured
+	return document that copies all child tables from the original invoice
+	(items, taxes, sales_team, etc.), ensuring correct reversal of
+	accounting entries and commissions.
 
-	The function validates:
-	- Invoice exists and is submitted (docstatus = 1)
-	- Invoice is not already a return
-	- Return is within the validity period (if configured in POS Settings)
+	**Validations performed**:
+	- Invoice must exist and be submitted (docstatus = 1).
+	- Invoice must not itself be a return.
+	- Invoice must be within the return validity period (if configured).
+	- Only items with remaining returnable quantities are included.
 
 	Args:
-	    invoice_name: The original Sales Invoice name to create return against
-	    pos_opening_shift: The current POS Opening Shift name
+		invoice_name (str): The original Sales Invoice name to create a return against.
+		pos_opening_shift (str | None): The current POS Opening Shift name. If provided,
+			the return invoice will be linked to this shift.
 
 	Returns:
-	    dict: The prepared return invoice document with:
-	        - items: Only items with remaining_qty > 0 (not fully returned)
-	        - _original_invoice: Reference data from original invoice (payments, amounts)
-	        - Each item includes original_qty, already_returned, and remaining_qty
+		dict: The prepared return invoice document (as dict), containing:
+			- All standard Sales Invoice fields with negated quantities/amounts.
+			- items (list): Only items with remaining_qty > 0, each including:
+				- original_qty (float): Quantity from the original sale.
+				- already_returned (float): Quantity returned in previous returns.
+				- remaining_qty (float): Maximum quantity that can still be returned.
+			- _original_invoice (dict): Reference data from the original invoice:
+				- payments (list): Original payment methods and amounts.
+				- grand_total (float): Original invoice total.
+
+	Raises:
+		frappe.ValidationError: If the invoice is invalid, already a return,
+			fully returned, or outside the return period.
 	"""
 	from erpnext.accounts.doctype.sales_invoice.sales_invoice import make_sales_return
 	from frappe.query_builder.functions import Abs, Coalesce, Sum
@@ -2117,16 +2372,35 @@ def search_invoices_for_return(
 	page: int = 1,
 	doctype: str = "Sales Invoice",
 ):
-	"""Search for invoices that can be returned with pagination.
+	"""Search for returnable invoices with advanced filters and pagination.
 
-	Supports filtering by:
-	- invoice_name: Partial match on invoice number
-	- company: Exact match
-	- customer_name, customer_id, mobile_no: Partial match (OR condition)
-	- from_date, to_date: Date range
-	- min_amount, max_amount: Amount range
+	Provides a flexible search for the return invoice lookup screen.
+	All filters are optional and combined with AND logic (except customer
+	fields which use OR among themselves).
 
-	Returns invoices with their items adjusted to show remaining returnable quantities.
+	Only invoices that still have items available for return are included
+	in the results.
+
+	Args:
+		invoice_name (str | None): Partial match on invoice number (LIKE %term%).
+		company (str | None): Exact match on company name.
+		customer_name (str | None): Partial match on customer name.
+		customer_id (str | None): Partial match on customer ID.
+		mobile_no (str | None): Partial match on contact mobile number.
+			Note: customer_name, customer_id, and mobile_no are combined with OR.
+		from_date (str | None): Only include invoices on or after this date (YYYY-MM-DD).
+		to_date (str | None): Only include invoices on or before this date (YYYY-MM-DD).
+		min_amount (str | None): Minimum grand_total filter.
+		max_amount (str | None): Maximum grand_total filter.
+		page (int): Page number for pagination. Defaults to 1.
+		doctype (str): Document type to search. Defaults to "Sales Invoice".
+
+	Returns:
+		list[dict]: Matching invoices with their items adjusted to show remaining
+		returnable quantities. Each invoice includes standard fields plus:
+			- items (list): Each item has remaining_qty showing how many can be returned.
+			- total_original_qty (float): Sum of all original item quantities.
+			- total_returned_qty (float): Sum of all already-returned quantities.
 	"""
 	from frappe.query_builder.functions import Abs, Count, Sum
 
@@ -2335,13 +2609,31 @@ def search_invoices_for_return(
 
 @frappe.whitelist()
 def apply_offers(invoice_data: str, selected_offers: str | None = None):
-	"""Calculate and apply promotional offers using ERPNext Pricing Rules.
+	"""Evaluate and apply promotional offers (Pricing Rules) to an invoice.
+
+	Takes the current invoice payload, runs it through ERPNext's Pricing Rule
+	engine, and returns the updated item prices and applicable discounts.
+	This allows the POS frontend to show real-time promotional pricing
+	before the invoice is submitted.
 
 	Args:
-	        invoice_data (str | dict): Sales Invoice payload used for offer evaluation.
-	        selected_offers (str | list | None): Optional collection of Pricing Rule names.
-	                When provided, results are filtered to only include these rules.
-	                ERPNext handles all conflict resolution based on priority.
+		invoice_data (str): JSON string of the Sales Invoice payload, including:
+			- items (list): Line items with item_code, qty, rate, etc.
+			- customer (str): Customer for customer-specific pricing rules.
+			- posting_date (str): Date for date-based promotions.
+			- Other standard Sales Invoice fields.
+		selected_offers (str | None): JSON array of Pricing Rule names to apply.
+			If provided, only these specific rules are evaluated. If None,
+			all applicable rules are evaluated and ERPNext resolves conflicts
+			based on priority.
+
+	Returns:
+		dict: Result containing:
+			- items (list): Updated items with applied discounts, including:
+				- pricing_rules (str): Applied Pricing Rule names.
+				- discount_percentage (float): Applied discount.
+				- rate (float): Discounted rate.
+			- offers (list): Details of all evaluated pricing rules.
 	"""
 	try:
 		if isinstance(invoice_data, str):
