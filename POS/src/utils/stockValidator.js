@@ -1,39 +1,54 @@
 /**
  * Stock Validation Utility
- * Checks item stock availability before adding to cart
+ * Single source of truth for stock availability checks.
  */
 
 import { call } from "frappe-ui"
 
 /**
- * Check if item has sufficient stock
- * @param {Object} params - Validation parameters
- * @param {string} params.itemCode - Item code to check
- * @param {number} params.qty - Quantity requested
- * @param {string} params.warehouse - Warehouse to check
- * @param {number} params.actualQty - Actual available quantity from item
- * @returns {Object} - { available: boolean, actualQty: number }
+ * Determine whether an item requires stock validation.
+ * Centralises the skip-logic so every call site uses the same rules.
+ *
+ * @param {Object} item - Item object (from search API or cart)
+ * @returns {boolean} true when stock should be enforced for this item
  */
-export function checkStockAvailability({
-	itemCode,
-	qty,
-	warehouse,
-	actualQty = null,
-}) {
-	// If actual quantity is provided (from item data), use it
-	if (actualQty !== null && actualQty !== undefined) {
-		const available = actualQty >= qty
-		return {
-			available,
-			actualQty: actualQty,
-		}
+export function shouldValidateItemStock(item) {
+	if (!item) return false
+
+	// Non-stock items are never validated
+	if (item.is_stock_item === 0 || item.is_stock_item === false) return false
+
+	// Item-level allow_negative_stock bypasses validation
+	if (item.allow_negative_stock === 1 || item.allow_negative_stock === true) return false
+
+	// Batch / serial items have their own dialog-level validation
+	if (item.has_serial_no || item.has_batch_no) return false
+
+	// Must be a stock item or bundle (or have stock data)
+	const hasStockData = item.actual_qty !== undefined || item.stock_qty !== undefined
+	return !!(item.is_stock_item || item.is_bundle || hasStockData)
+}
+
+/**
+ * Check if the requested quantity exceeds available stock.
+ *
+ * @param {Object}  item       - Item with actual_qty / stock_qty
+ * @param {number}  requestedQty - Total quantity to validate against
+ * @param {string}  [warehouse]  - Warehouse name (for error message)
+ * @returns {{ available: boolean, actualQty: number, error: string|null }}
+ */
+export function checkStockAvailability(item, requestedQty, warehouse) {
+	const actualQty = item.actual_qty ?? item.stock_qty ?? 0
+	const wh = warehouse || item.warehouse || ''
+
+	if (actualQty >= requestedQty) {
+		return { available: true, actualQty, error: null }
 	}
 
-	// If no stock data available, allow the transaction
-	// Backend will validate on submit anyway
 	return {
-		available: true,
-		actualQty: qty,
+		available: false,
+		actualQty,
+		error: formatStockError(item.item_name, requestedQty, actualQty, wh),
 	}
 }
 
@@ -70,52 +85,11 @@ export async function getItemStock(itemCode, warehouse) {
  * @returns {string} - Formatted error message
  */
 export function formatStockError(itemName, requested, available, warehouse) {
+	if (available <= 0) {
+		return `"${itemName}" is out of stock in warehouse "${warehouse}".`
+	}
+
 	const unit = requested === 1 ? "unit" : "units"
 	const availableUnit = available === 1 ? "unit" : "units"
-
-	if (available === 0) {
-		return `"${itemName}" is out of stock in warehouse "${warehouse}".\n\nPlease check another warehouse or restock this item.`
-	}
-
-	return `Not enough stock for "${itemName}".\n\nYou requested ${requested} ${unit}, but only ${available} ${availableUnit} available in "${warehouse}".\n\nPlease reduce the quantity or check another warehouse.`
-}
-
-/**
- * Validate cart items stock before submission
- * @param {Array} items - Cart items
- * @param {string} warehouse - Warehouse to check
- * @returns {Promise<Object>} - { valid: boolean, errors: Array }
- */
-export async function validateCartStock(items, warehouse) {
-	const errors = []
-
-	for (const item of items) {
-		const result = await checkStockAvailability({
-			itemCode: item.item_code,
-			qty: item.quantity,
-			warehouse: item.warehouse || warehouse,
-			uom: item.uom,
-		})
-
-		if (!result.available) {
-			errors.push({
-				itemCode: item.item_code,
-				itemName: item.item_name,
-				requested: item.quantity,
-				available: result.actualQty,
-				warehouse: item.warehouse || warehouse,
-				message: formatStockError(
-					item.item_name,
-					item.quantity,
-					result.actualQty,
-					item.warehouse || warehouse,
-				),
-			})
-		}
-	}
-
-	return {
-		valid: errors.length === 0,
-		errors,
-	}
+	return `Not enough stock for "${itemName}".\n\nYou requested ${requested} ${unit}, but only ${available} ${availableUnit} available in "${warehouse}".`
 }
