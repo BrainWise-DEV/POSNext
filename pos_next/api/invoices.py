@@ -2594,6 +2594,7 @@ def apply_offers(invoice_data, selected_offers=None):
             {
                 "doctype": invoice.get("doctype") or "Sales Invoice",
                 "name": invoice.get("name") or "POS-INVOICE",
+                "is_pos": 1,
                 "company": profile.company,
                 "transaction_date": invoice.get("posting_date") or nowdate(),
                 "posting_date": invoice.get("posting_date") or nowdate(),
