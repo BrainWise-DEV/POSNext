@@ -87,38 +87,6 @@ _asset_version = get_build_version()
 # Fixtures
 # --------
 fixtures = [
-	{
-		"dt": "Custom Field",
-		"filters": [
-			[
-				"name",
-				"in",
-				[
-					"Sales Invoice-posa_pos_opening_shift",
-					"Sales Invoice-posa_is_printed",
-					"Item-custom_company",
-					"POS Profile-posa_cash_mode_of_payment",
-					"POS Profile-posa_allow_delete",
-					"POS Profile-posa_block_sale_beyond_available_qty",
-					"Mode of Payment-is_wallet_payment",
-					"Promotional Scheme-pos_only",
-					"Pricing Rule-pos_only"
-				]
-			]
-		]
-	},
-	{
-		"dt": "Print Format",
-		"filters": [
-			[
-				"name",
-				"in",
-				[
-					"POS Next Receipt"
-				]
-			]
-		]
-	},
     {
         "dt": "Role",
         "filters": [
