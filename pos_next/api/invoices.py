@@ -4,6 +4,7 @@
 
 from __future__ import unicode_literals
 import json
+from functools import lru_cache
 import frappe
 from frappe import _
 from frappe.utils import flt, cint, nowdate, nowtime, get_datetime, cstr
@@ -361,7 +362,11 @@ def _get_available_stock(item):
 
 
 def _collect_stock_errors(items):
-    """Return list of items exceeding available stock."""
+    """Return list of items exceeding available stock.
+
+    Respects per-item allow_negative_stock if the field exists on Item.
+    """
+    allowed_items = _get_item_negative_stock_allow_set(items)
     errors = []
     for d in items:
         if flt(d.get("qty")) < 0:
@@ -374,6 +379,8 @@ def _collect_stock_errors(items):
         )
 
         if requested > available:
+            if d.get("item_code") in allowed_items:
+                continue
             errors.append(
                 {
                     "item_code": d.get("item_code"),
@@ -384,6 +391,31 @@ def _collect_stock_errors(items):
             )
 
     return errors
+
+
+@lru_cache(maxsize=1)
+def _item_has_allow_negative_stock_field():
+    """Check whether Item doctype has an allow_negative_stock field."""
+    try:
+        return frappe.get_meta("Item").has_field("allow_negative_stock")
+    except Exception:
+        return False
+
+
+def _get_item_negative_stock_allow_set(items):
+    """Return set of item codes that allow negative stock at Item level."""
+    if not items or not _item_has_allow_negative_stock_field():
+        return set()
+
+    item_codes = list({d.get("item_code") for d in items if d.get("item_code")})
+    if not item_codes:
+        return set()
+
+    return set(frappe.get_all(
+        "Item",
+        filters={"name": ["in", item_codes], "allow_negative_stock": 1},
+        pluck="name",
+    ) or [])
 
 
 def _should_block(pos_profile):
@@ -875,6 +907,26 @@ def update_invoice(data):
                 # Store coupon code on invoice for tracking
                 invoice_doc.coupon_code = coupon_code
 
+        # Validate stock availability before saving draft
+        # is_stock_item may not be set on unsaved doc items (frontend doesn't send it),
+        # so look it up from Item master
+        if not invoice_doc.get("is_return") and _should_block(pos_profile):
+            item_codes = list({d.item_code for d in invoice_doc.items if d.get("item_code")})
+            if item_codes:
+                stock_item_set = set(frappe.get_all(
+                    "Item",
+                    filters={"name": ["in", item_codes], "is_stock_item": 1},
+                    pluck="name"
+                ))
+                stock_items = [
+                    d.as_dict() for d in invoice_doc.items
+                    if d.get("item_code") in stock_item_set
+                ]
+                if stock_items:
+                    errors = _collect_stock_errors(stock_items)
+                    if errors:
+                        frappe.throw(frappe.as_json({"errors": errors}), frappe.ValidationError)
+
         # Save as draft
         invoice_doc.flags.ignore_permissions = True
         frappe.flags.ignore_account_permission = True
@@ -1296,20 +1348,10 @@ def submit_invoice(invoice=None, data=None):
                         "POS Write-Off Error"
                     )
 
-        # Check if POS Settings allows negative stock
-        pos_settings_allow_negative = False
-        if pos_profile:
-            pos_settings_allow_negative = cint(
-                frappe.db.get_value(
-                    "POS Settings",
-                    {"pos_profile": pos_profile},
-                    "allow_negative_stock"
-                ) or 0
-            )
-
-        # Validate stock availability only if negative stock is not allowed
-        if not pos_settings_allow_negative:
-            _validate_stock_on_invoice(invoice_doc)
+        # Validate stock availability before submission
+        # _validate_stock_on_invoice checks _should_block internally
+        # (global Stock Settings, POS Settings, and POS Profile flags)
+        _validate_stock_on_invoice(invoice_doc)
 
         # Save before submit
         invoice_doc.flags.ignore_permissions = True
@@ -2552,6 +2594,7 @@ def apply_offers(invoice_data, selected_offers=None):
             {
                 "doctype": invoice.get("doctype") or "Sales Invoice",
                 "name": invoice.get("name") or "POS-INVOICE",
+                "is_pos": 1,
                 "company": profile.company,
                 "transaction_date": invoice.get("posting_date") or nowdate(),
                 "posting_date": invoice.get("posting_date") or nowdate(),
