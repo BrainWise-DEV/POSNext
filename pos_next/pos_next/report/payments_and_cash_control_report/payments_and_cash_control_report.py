@@ -136,24 +136,24 @@ def get_data(filters):
 			row.status = "↓ Short"
 
 		# Get transaction count for this payment method in this shift
+		# Uses the Sales Invoice Reference child table (pos_transactions) as the
+		# authoritative link between closing shift and its invoices
+		shift_invoices = frappe.get_all(
+			"Sales Invoice Reference",
+			filters={
+				"parent": row.shift,
+				"parenttype": "POS Closing Shift"
+			},
+			pluck="sales_invoice"
+		)
 		row.transaction_count = frappe.db.count(
 			"Sales Invoice Payment",
 			filters={
 				"parenttype": "Sales Invoice",
 				"mode_of_payment": row.payment_method,
-				"parent": ["in", frappe.get_all(
-					"Sales Invoice",
-					filters={
-						"pos_profile": row.pos_profile,
-						"owner": row.cashier,
-						"posting_date": row.posting_date,
-						"docstatus": 1,
-						"is_pos": 1
-					},
-					pluck="name"
-				)]
+				"parent": ["in", shift_invoices]
 			}
-		)
+		) if shift_invoices else 0
 
 	return data
 
