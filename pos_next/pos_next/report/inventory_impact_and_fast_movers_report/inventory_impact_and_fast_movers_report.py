@@ -94,7 +94,11 @@ def get_columns():
 
 
 def get_data(filters):
-	"""Get inventory impact and fast movers data"""
+	"""Get inventory impact and fast movers data.
+
+	Stock is read from the POS Profile's warehouse so that depletion
+	metrics reflect the actual location that serves this POS counter.
+	"""
 	conditions = get_conditions(filters)
 
 	# Get warehouse from POS Profile if provided
@@ -141,22 +145,15 @@ def get_data(filters):
 
 	data = frappe.db.sql(query, filters, as_dict=1)
 
-	# Get current stock levels and calculate metrics
+	if not data:
+		return []
+
+	# Batch-fetch current stock levels (single query instead of N+1)
+	item_codes = [row.item_code for row in data]
+	stock_map = _get_stock_map(item_codes, warehouse)
+
 	for row in data:
-		# Get current stock
-		if warehouse:
-			row.current_stock = flt(frappe.db.get_value(
-				"Bin",
-				{"item_code": row.item_code, "warehouse": warehouse},
-				"actual_qty"
-			) or 0, 2)
-		else:
-			# Sum across all warehouses if no specific warehouse
-			row.current_stock = flt(frappe.db.sql("""
-				SELECT SUM(actual_qty)
-				FROM `tabBin`
-				WHERE item_code = %s
-			""", row.item_code)[0][0] or 0, 2)
+		row.current_stock = flt(stock_map.get(row.item_code, 0), 2)
 
 		# Calculate stock depletion rate (qty sold per day)
 		row.stock_depletion_rate = flt(row.qty_sold / date_range_days, 2)
@@ -203,6 +200,36 @@ def get_data(filters):
 	return sorted_data
 
 
+def _get_stock_map(item_codes, warehouse=None):
+	"""Fetch current stock for all items in a single query.
+
+	Returns dict {item_code: actual_qty}.
+	When warehouse is specified, returns stock for that warehouse only.
+	Otherwise sums across all warehouses.
+	"""
+	if not item_codes:
+		return {}
+
+	placeholders = ", ".join(["%s"] * len(item_codes))
+
+	if warehouse:
+		rows = frappe.db.sql("""
+			SELECT item_code, actual_qty
+			FROM `tabBin`
+			WHERE item_code IN ({placeholders})
+			AND warehouse = %s
+		""".format(placeholders=placeholders), item_codes + [warehouse], as_dict=1)
+	else:
+		rows = frappe.db.sql("""
+			SELECT item_code, SUM(actual_qty) as actual_qty
+			FROM `tabBin`
+			WHERE item_code IN ({placeholders})
+			GROUP BY item_code
+		""".format(placeholders=placeholders), item_codes, as_dict=1)
+
+	return {row.item_code: flt(row.actual_qty) for row in rows}
+
+
 def get_conditions(filters):
 	"""Build WHERE conditions"""
 	conditions = []
@@ -219,12 +246,10 @@ def get_conditions(filters):
 	if filters.get("shift"):
 		conditions.append("""
 			EXISTS (
-				SELECT 1 FROM `tabPOS Closing Shift` pcs
-				WHERE pcs.name = %(shift)s
-				AND si.owner = pcs.user
-				AND si.pos_profile = pcs.pos_profile
-				AND si.posting_date >= DATE(pcs.period_start_date)
-				AND si.posting_date <= DATE(pcs.period_end_date)
+				SELECT 1 FROM `tabSales Invoice Reference` sir
+				WHERE sir.sales_invoice = si.name
+				AND sir.parent = %(shift)s
+				AND sir.parenttype = 'POS Closing Shift'
 			)
 		""")
 

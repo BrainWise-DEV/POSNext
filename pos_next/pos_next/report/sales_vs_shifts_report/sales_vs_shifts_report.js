@@ -150,16 +150,9 @@ frappe.query_reports["Sales vs Shifts Report"] = {
 	// INVOICE MATCHING LOGIC
 	// -------------------------------------------------------------------------
 	//
-	// Invoices are matched to a shift using OR logic:
-	//   1. posa_pos_opening_shift matches the shift's opening reference
-	//   OR
-	//   2. ALL of these match:
-	//      - pos_profile matches
-	//      - owner (cashier) matches
-	//      - posting_date is within shift period
-	//
-	// This ensures invoices are captured even if the opening shift link is
-	// missing, as long as the profile, cashier, and date align.
+	// Invoices are linked to shifts via the Sales Invoice Reference child table
+	// (pos_transactions) on POS Closing Shift. This is the explicit list stored
+	// at shift-close time — the authoritative source, no fuzzy matching.
 	//
 	// =========================================================================
 
