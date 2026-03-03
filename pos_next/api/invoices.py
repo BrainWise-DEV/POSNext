@@ -2595,6 +2595,7 @@ def apply_offers(invoice_data, selected_offers=None):
                 "doctype": invoice.get("doctype") or "Sales Invoice",
                 "name": invoice.get("name") or "POS-INVOICE",
                 "is_pos": 1,
+                "pos_profile": profile.name,
                 "company": profile.company,
                 "transaction_date": invoice.get("posting_date") or nowdate(),
                 "posting_date": invoice.get("posting_date") or nowdate(),
@@ -2684,32 +2685,6 @@ def apply_offers(invoice_data, selected_offers=None):
 
                 # Include both promotional scheme rules and standalone pricing rules
                 rule_map[record.name] = record
-
-        # Filter by Promotional Scheme POS Profile restriction
-        pos_profile_name = invoice.get("pos_profile")
-        if pos_profile_name and rule_map:
-            scheme_names = {
-                d.promotional_scheme for d in rule_map.values() if d.promotional_scheme
-            }
-            scheme_pos_profiles = {}
-            if scheme_names:
-                rows = frappe.get_all(
-                    "Promotion Scheme POS Profile",
-                    filters={"parent": ["in", list(scheme_names)]},
-                    fields=["parent", "pos_profile"],
-                )
-                for row in rows:
-                    scheme_pos_profiles.setdefault(row.parent, []).append(row.pos_profile)
-
-            rule_map = {
-                name: details
-                for name, details in rule_map.items()
-                if (
-                    not details.promotional_scheme
-                    or not scheme_pos_profiles.get(details.promotional_scheme)
-                    or pos_profile_name in scheme_pos_profiles[details.promotional_scheme]
-                )
-            }
 
         if selected_offer_names:
             # Restrict available rules to the ones explicitly selected from the UI.
