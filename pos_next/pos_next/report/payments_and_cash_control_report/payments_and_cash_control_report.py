@@ -83,6 +83,12 @@ def get_columns(payment_methods):
 				"width": 130
 			},
 			{
+				"fieldname": f"{safe}_expected",
+				"label": _(f"{method} Expected"),
+				"fieldtype": "Currency",
+				"width": 130
+			},
+			{
 				"fieldname": f"{safe}_closing",
 				"label": _(f"{method} Closing"),
 				"fieldtype": "Currency",
@@ -100,6 +106,12 @@ def get_columns(payment_methods):
 		{
 			"fieldname": "total_opening",
 			"label": _("Total Opening"),
+			"fieldtype": "Currency",
+			"width": 130
+		},
+		{
+			"fieldname": "total_expected",
+			"label": _("Total Expected"),
 			"fieldtype": "Currency",
 			"width": 130
 		},
@@ -193,6 +205,7 @@ def get_data(filters):
 				"shift_hours": shift_hours,
 				"total_transactions": transaction_map.get(r.shift, 0),
 				"total_opening": 0,
+				"total_expected": 0,
 				"total_closing": 0,
 				"total_difference": 0,
 			}
@@ -200,13 +213,16 @@ def get_data(filters):
 		row = shifts[r.shift]
 		safe = r.payment_method.lower().replace(" ", "_")
 		opening = flt(r.opening_amount, 2)
+		expected = flt(r.expected_amount, 2)
 		closing = flt(r.closing_amount, 2)
-		diff = flt(closing - opening, 2)
+		diff = flt(closing - expected, 2)
 		row[f"{safe}_opening"] = opening
+		row[f"{safe}_expected"] = expected
 		row[f"{safe}_closing"] = closing
 		row[f"{safe}_diff"] = diff
 
 		row["total_opening"] += opening
+		row["total_expected"] += expected
 		row["total_closing"] += closing
 		row["total_difference"] += diff
 
@@ -215,6 +231,7 @@ def get_data(filters):
 	for shift_name in shift_order:
 		row = shifts[shift_name]
 		row["total_opening"] = flt(row["total_opening"], 2)
+		row["total_expected"] = flt(row["total_expected"], 2)
 		row["total_closing"] = flt(row["total_closing"], 2)
 		row["total_difference"] = flt(row["total_difference"], 2)
 
@@ -287,6 +304,7 @@ def get_chart_data(data, payment_methods):
 
 	labels = [row.get("shift") for row in data]
 	opening_values = [flt(row.get("total_opening", 0), 2) for row in data]
+	expected_values = [flt(row.get("total_expected", 0), 2) for row in data]
 	closing_values = [flt(row.get("total_closing", 0), 2) for row in data]
 	diff_values = [flt(row.get("total_difference", 0), 2) for row in data]
 
@@ -295,11 +313,12 @@ def get_chart_data(data, payment_methods):
 			"labels": labels,
 			"datasets": [
 				{"name": _("Opening"), "values": opening_values},
+				{"name": _("Expected"), "values": expected_values},
 				{"name": _("Closing"), "values": closing_values},
 				{"name": _("Difference"), "values": diff_values},
 			]
 		},
 		"type": "bar",
 		"fieldtype": "Currency",
-		"colors": ["#318AD8", "#48BB74", "#F56B6B"],
+		"colors": ["#318AD8", "#F5A623", "#48BB74", "#F56B6B"],
 	}
