@@ -60,21 +60,24 @@ def get_promotions(pos_profile=None, company=None, include_disabled=False):
 		],
 		order_by="modified desc"
 	)
+	scheme_names = [s["name"] for s in schemes]
+
+	rows = frappe.get_all(
+		"Promotion Scheme POS Profile",
+		filters={"parent": ["in", scheme_names]},
+		fields=["parent", "pos_profile"]
+	)
+
+	scheme_pos_profiles = {}
+	for row in rows:
+		scheme_pos_profiles.setdefault(row.parent, []).append(row.pos_profile)
+
 	filtered_schemes = []
-
 	for scheme in schemes:
-		pos_profiles = frappe.get_all(
-			"Promotion Scheme POS Profile",
-			filters={"parent": scheme["name"]},
-			pluck="pos_profile"
-		)
-
+		pos_profiles = scheme_pos_profiles.get(scheme["name"], [])
 		scheme["pos_profiles"] = pos_profiles
 
-		if pos_profiles:
-			if pos_profile and pos_profile in pos_profiles:				
-				filtered_schemes.append(scheme)
-		else:
+		if not pos_profiles or (pos_profile and pos_profile in pos_profiles):
 			filtered_schemes.append(scheme)
 
 	schemes = filtered_schemes
