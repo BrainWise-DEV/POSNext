@@ -34,6 +34,12 @@ frappe.query_reports["Payments and Cash Control Report"] = {
 			"label": __("Cashier"),
 			"fieldtype": "Link",
 			"options": "User"
+		},
+		{
+			"fieldname": "mode_of_payment",
+			"label": __("Mode of Payment"),
+			"fieldtype": "Link",
+			"options": "Mode of Payment"
 		}
 	]
 };

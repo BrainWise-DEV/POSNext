@@ -294,6 +294,9 @@ def get_conditions(filters):
 	if filters.get("shift"):
 		conditions.append("pcs.name = %(shift)s")
 
+	if filters.get("mode_of_payment"):
+		conditions.append("pr.mode_of_payment = %(mode_of_payment)s")
+
 	return " AND " + " AND ".join(conditions) if conditions else ""
 
 
