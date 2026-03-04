@@ -65,6 +65,9 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		allow_negative_stock: 0,
 		// Sales Persons
 		enable_sales_persons: "Disabled",
+		// Security
+		enable_session_lock: 0,
+		session_lock_timeout: 5,
 	})
 
 	const isLoading = ref(false)
@@ -232,6 +235,14 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		settings.value.enable_sales_persons === "Multiple"
 	)
 
+	// Computed - Security
+	const enableSessionLock = computed(() =>
+		Boolean(settings.value.enable_session_lock),
+	)
+	const sessionLockTimeout = computed(
+		() => Number.parseInt(settings.value.session_lock_timeout) || 5,
+	)
+
 	// Resource
 	const settingsResource = createResource({
 		url: "pos_next.pos_next.doctype.pos_settings.pos_settings.get_pos_settings",
@@ -331,6 +342,9 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 			input_qty: 0,
 			allow_negative_stock: 0,
 			enable_sales_persons: "Disabled",
+			// Security
+			enable_session_lock: 0,
+			session_lock_timeout: 5,
 		}
 		isLoaded.value = false
 	}
@@ -462,6 +476,10 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		salesPersonsMode,
 		isSingleSalesPerson,
 		isMultipleSalesPersons,
+
+		// Computed - Security
+		enableSessionLock,
+		sessionLockTimeout,
 
 		// Actions
 		loadSettings,

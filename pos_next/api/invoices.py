@@ -4,6 +4,7 @@
 
 from __future__ import unicode_literals
 import json
+from functools import lru_cache
 import frappe
 from frappe import _
 from frappe.utils import flt, cint, nowdate, nowtime, get_datetime, cstr
@@ -361,7 +362,11 @@ def _get_available_stock(item):
 
 
 def _collect_stock_errors(items):
-    """Return list of items exceeding available stock."""
+    """Return list of items exceeding available stock.
+
+    Respects per-item allow_negative_stock if the field exists on Item.
+    """
+    allowed_items = _get_item_negative_stock_allow_set(items)
     errors = []
     for d in items:
         if flt(d.get("qty")) < 0:
@@ -374,6 +379,8 @@ def _collect_stock_errors(items):
         )
 
         if requested > available:
+            if d.get("item_code") in allowed_items:
+                continue
             errors.append(
                 {
                     "item_code": d.get("item_code"),
@@ -384,6 +391,31 @@ def _collect_stock_errors(items):
             )
 
     return errors
+
+
+@lru_cache(maxsize=1)
+def _item_has_allow_negative_stock_field():
+    """Check whether Item doctype has an allow_negative_stock field."""
+    try:
+        return frappe.get_meta("Item").has_field("allow_negative_stock")
+    except Exception:
+        return False
+
+
+def _get_item_negative_stock_allow_set(items):
+    """Return set of item codes that allow negative stock at Item level."""
+    if not items or not _item_has_allow_negative_stock_field():
+        return set()
+
+    item_codes = list({d.get("item_code") for d in items if d.get("item_code")})
+    if not item_codes:
+        return set()
+
+    return set(frappe.get_all(
+        "Item",
+        filters={"name": ["in", item_codes], "allow_negative_stock": 1},
+        pluck="name",
+    ) or [])
 
 
 def _should_block(pos_profile):
@@ -661,7 +693,7 @@ def update_invoice(data):
                             mode_of_payment, company
                         )
                         if account_info:
-                            payment["account"] = account_info.get("account")
+                            payment.account = account_info.get("account")
                     except Exception as e:
                         frappe.log_error(
                             f"Failed to get payment account for {mode_of_payment}: {e}",
@@ -798,6 +830,8 @@ def update_invoice(data):
         if doctype == "Sales Invoice":
             invoice_doc.is_pos = 1
             invoice_doc.update_stock = 1
+            if pos_profile_doc and pos_profile_doc.warehouse:
+                invoice_doc.set_warehouse = pos_profile_doc.warehouse
 
         # ========================================================================
         # ROUNDING CONFIGURATION
@@ -872,6 +906,26 @@ def update_invoice(data):
 
                 # Store coupon code on invoice for tracking
                 invoice_doc.coupon_code = coupon_code
+
+        # Validate stock availability before saving draft
+        # is_stock_item may not be set on unsaved doc items (frontend doesn't send it),
+        # so look it up from Item master
+        if not invoice_doc.get("is_return") and _should_block(pos_profile):
+            item_codes = list({d.item_code for d in invoice_doc.items if d.get("item_code")})
+            if item_codes:
+                stock_item_set = set(frappe.get_all(
+                    "Item",
+                    filters={"name": ["in", item_codes], "is_stock_item": 1},
+                    pluck="name"
+                ))
+                stock_items = [
+                    d.as_dict() for d in invoice_doc.items
+                    if d.get("item_code") in stock_item_set
+                ]
+                if stock_items:
+                    errors = _collect_stock_errors(stock_items)
+                    if errors:
+                        frappe.throw(frappe.as_json({"errors": errors}), frappe.ValidationError)
 
         # Save as draft
         invoice_doc.flags.ignore_permissions = True
@@ -1294,20 +1348,10 @@ def submit_invoice(invoice=None, data=None):
                         "POS Write-Off Error"
                     )
 
-        # Check if POS Settings allows negative stock
-        pos_settings_allow_negative = False
-        if pos_profile:
-            pos_settings_allow_negative = cint(
-                frappe.db.get_value(
-                    "POS Settings",
-                    {"pos_profile": pos_profile},
-                    "allow_negative_stock"
-                ) or 0
-            )
-
-        # Validate stock availability only if negative stock is not allowed
-        if not pos_settings_allow_negative:
-            _validate_stock_on_invoice(invoice_doc)
+        # Validate stock availability before submission
+        # _validate_stock_on_invoice checks _should_block internally
+        # (global Stock Settings, POS Settings, and POS Profile flags)
+        _validate_stock_on_invoice(invoice_doc)
 
         # Save before submit
         invoice_doc.flags.ignore_permissions = True
@@ -2550,6 +2594,7 @@ def apply_offers(invoice_data, selected_offers=None):
             {
                 "doctype": invoice.get("doctype") or "Sales Invoice",
                 "name": invoice.get("name") or "POS-INVOICE",
+                "is_pos": 1,
                 "company": profile.company,
                 "transaction_date": invoice.get("posting_date") or nowdate(),
                 "posting_date": invoice.get("posting_date") or nowdate(),
@@ -2652,7 +2697,12 @@ def apply_offers(invoice_data, selected_offers=None):
             return {"items": items}
 
         applied_rules = set()
-        free_items = []
+        # Deduplicate free items using a dict keyed by (item_code, pricing_rule).
+        # ERPNext's apply_pricing_rule() returns one result per cart item and for
+        # mixed_conditions rules attaches the same free_item_data to every matching
+        # item's result. ERPNext's own apply_pricing_rule_for_free_items() deduplicates
+        # the same way: {(item_code, pricing_rules): data for data in free_item_data}.
+        free_items_map = {}
 
         for result, item_index in zip(pricing_results, index_map):
             if not result:
@@ -2768,11 +2818,11 @@ def apply_offers(invoice_data, selected_offers=None):
                 free_item_doc.applied_promotional_scheme = rule_map[
                     rule_name
                 ].promotional_scheme
-                free_items.append(free_item_doc)
+                free_items_map[(free_item.get("item_code"), rule_name)] = free_item_doc
 
         return {
             "items": [dict(item) for item in prepared_items],
-            "free_items": [dict(item) for item in free_items],
+            "free_items": [dict(item) for item in free_items_map.values()],
             "applied_pricing_rules": sorted(applied_rules),
         }
     except Exception as e:

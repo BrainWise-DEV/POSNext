@@ -758,7 +758,7 @@
 </template>
 
 <script setup>
-import { useOffline } from "@/composables/useOffline"
+import { useOfflineStatus } from "@/composables/useOfflineStatus"
 import { useToast } from "@/composables/useToast"
 import { getPaymentIcon } from "@/utils/payment"
 import {
@@ -772,7 +772,7 @@ import { Button, Dialog, FeatherIcon, createResource } from "frappe-ui"
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue"
 
 const { showSuccess, showError, showWarning } = useToast()
-const { isOffline } = useOffline()
+const { isOffline } = useOfflineStatus()
 
 // ============================================
 // Constants (hoisted for performance)

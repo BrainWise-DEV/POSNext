@@ -144,6 +144,26 @@
 						</svg>
 						<span>{{ __("Return Invoice") }}</span>
 					</button>
+					<hr class="my-1 border-gray-100">
+					<button
+						@click="lockSession()"
+						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-amber-50 flex items-center gap-3 transition-colors"
+					>
+						<svg
+							class="w-5 h-5 text-amber-600"
+							fill="none"
+							stroke="currentColor"
+							viewBox="0 0 24 24"
+						>
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								stroke-width="2"
+								d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+							/>
+						</svg>
+						<span>{{ __("Lock Screen") }}</span>
+					</button>
 				</template>
 				<template #additional-actions>
 					<button
@@ -931,14 +951,17 @@
 			<!-- Footer -->
 			<POSFooter />
 		</template>
+
+		<!-- Session Lock Screen (outside v-if/v-else so it renders even during loading) -->
+		<SessionLockScreen />
 	</div>
 </template>
 
 <script>
 // Module-scoped init guard — prevents redundant heavy initialization
 // when component remounts due to translationVersion changes.
-// Tracks the profile name so a shift change correctly re-initializes.
-let _initializedProfile = null
+// Tracks the profile+shift key so a user/shift change correctly re-initializes.
+let _initializedKey = null
 let _posInitPromise = null
 </script>
 
@@ -946,6 +969,7 @@ let _posInitPromise = null
 import ShiftClosingDialog from "@/components/ShiftClosingDialog.vue";
 import ShiftOpeningDialog from "@/components/ShiftOpeningDialog.vue";
 import ClearCacheOverlay from "@/components/common/ClearCacheOverlay.vue";
+import SessionLockScreen from "@/components/common/SessionLockScreen.vue";
 import LoadingSpinner from "@/components/common/LoadingSpinner.vue";
 import POSFooter from "@/components/common/POSFooter.vue";
 import ManagementSlider from "@/components/pos/ManagementSlider.vue";
@@ -969,6 +993,7 @@ import POSSettings from "@/components/settings/POSSettings.vue";
 import InvoiceManagement from "@/components/invoices/InvoiceManagement.vue";
 import InvoiceDetailDialog from "@/components/invoices/InvoiceDetailDialog.vue";
 import { useRealtimeStock } from "@/composables/useRealtimeStock";
+import { useSessionLock } from "@/composables/useSessionLock";
 import { usePOSEvents } from "@/composables/usePOSEvents";
 import { useLocale } from "@/composables/useLocale";
 import { useKeyboardShortcuts } from "@/composables/useKeyboardShortcuts";
@@ -976,6 +1001,7 @@ import { registerDialog } from "@/composables/useDialogState";
 import { session } from "@/data/session";
 import { useUserData } from "@/data/user";
 import { parseError } from "@/utils/errorHandler";
+import { cleanupUserSession } from "@/utils/sessionCleanup";
 import { offlineWorker } from "@/utils/offline/workerClient";
 import { cacheInvoiceHistory, getCachedInvoiceHistory } from "@/utils/offline/sync";
 import { printInvoice, printInvoiceByName, printWithSilentFallback } from "@/utils/printInvoice";
@@ -997,6 +1023,7 @@ import { usePOSShiftStore } from "@/stores/posShift";
 import { usePOSSyncStore } from "@/stores/posSync";
 import { usePOSUIStore } from "@/stores/posUI";
 import { logger } from "@/utils/logger";
+import { shouldValidateItemStock } from "@/utils/stockValidator";
 
 // Initialize stores
 const cartStore = usePOSCartStore();
@@ -1013,6 +1040,9 @@ const settingsStore = posSettingsStore;
 
 // Real-time stock updates
 const { onStockUpdate } = useRealtimeStock();
+
+// Session lock (inactivity + tab-refocus)
+const { lock: lockSession, configure: configureSessionLock, startActivityTracking, stopActivityTracking } = useSessionLock();
 
 // POS Events system
 const {
@@ -1293,6 +1323,12 @@ onMounted(async () => {
 
 		// Reload settings to ensure all computed properties are fresh
 		await posSettingsStore.reloadSettings();
+
+		// Reconfigure session lock in case security settings changed
+		configureSessionLock({
+			enabled: posSettingsStore.enableSessionLock,
+			timeoutMinutes: posSettingsStore.sessionLockTimeout,
+		});
 	});
 
 	// QZ Tray lifecycle — lazy connect when silent print is enabled
@@ -1311,6 +1347,7 @@ onMounted(async () => {
 	// Store cleanup function for unmount
 	onUnmounted(() => {
 		cleanup();
+		stopActivityTracking();
 		qzDisconnect();
 	});
 
@@ -1318,12 +1355,15 @@ onMounted(async () => {
 		// Start timers for current time and shift duration
 		shiftStore.startTimers();
 
-		// Skip heavy initialization if already completed for this profile
+		// Skip heavy initialization if already completed for this profile+shift
 		// (e.g., remount from translationVersion change). Pinia stores are
 		// singletons — their state survives component remounts.
-		const currentProfileName = shiftStore.profileName;
-		if (_initializedProfile && _initializedProfile === currentProfileName) {
+		// We include the shift name in the key so that a different user's shift
+		// (even on the same POS Profile) correctly triggers re-initialization.
+		const currentInitKey = `${shiftStore.profileName}::${shiftStore.currentShift?.name}`;
+		if (_initializedKey && _initializedKey === currentInitKey) {
 			log.debug("Skipping init — already initialized (remount)");
+			startActivityTracking();
 			updateLayoutBounds();
 			return;
 		}
@@ -1336,6 +1376,7 @@ onMounted(async () => {
 			} catch {
 				// Original caller handles errors; this mount just waits
 			}
+			if (_initializedKey) startActivityTracking();
 			updateLayoutBounds();
 			return;
 		}
@@ -1343,6 +1384,9 @@ onMounted(async () => {
 		_posInitPromise = initPOS();
 		await _posInitPromise;
 		_posInitPromise = null;
+
+		// Start session lock tracking only after POS is fully ready
+		if (_initializedKey) startActivityTracking();
 
 		updateLayoutBounds();
 	} catch (error) {
@@ -1394,10 +1438,16 @@ onMounted(async () => {
 			allowPartialPayment: posSettingsStore.allowPartialPayment,
 		});
 
+		// Configure session lock from settings
+		configureSessionLock({
+			enabled: posSettingsStore.enableSessionLock,
+			timeoutMinutes: posSettingsStore.sessionLockTimeout,
+		});
+
 		// Load tax rules (depends on settings being loaded)
 		await cartStore.loadTaxRules(shiftStore.profileName, posSettingsStore.settings);
 
-		_initializedProfile = shiftStore.profileName;
+		_initializedKey = `${shiftStore.profileName}::${shiftStore.currentShift?.name}`;
 	}
 });
 
@@ -1686,26 +1736,60 @@ onUnmounted(() => {
 // Handlers
 async function handleShiftOpened() {
 	uiStore.showOpenShiftDialog = false;
-	if (shiftStore.currentProfile) {
-		cartStore.posProfile = shiftStore.profileName;
-		cartStore.posOpeningShift = shiftStore.currentShift?.name;
-		// Load POS Settings first to get tax_inclusive setting
-		await posSettingsStore.loadSettings(shiftStore.profileName);
-		// Load tax rules with tax_inclusive setting
-		await cartStore.loadTaxRules(shiftStore.profileName, posSettingsStore.settings);
+	if (!shiftStore.currentProfile) return;
+
+	cartStore.posProfile = shiftStore.profileName;
+	cartStore.posOpeningShift = shiftStore.currentShift?.name;
+
+	// Set warehouse context early (synchronous, no API call)
+	if (shiftStore.profileWarehouse) {
+		stockStore.setWarehouse(shiftStore.profileWarehouse);
 	}
+
+	// Mirror initPOS: fire independent operations in parallel while settings load
+	const settingsPromise = posSettingsStore.loadSettings(shiftStore.profileName);
+
+	const backgroundOps = Promise.allSettled([
+		cartStore.setDefaultCustomer(),
+		offlineStore.isOffline
+			? offlineStore.checkOfflineCacheAvailability()
+			: offlineStore.preloadDataForOffline(shiftStore.currentProfile),
+		draftsStore.updateDraftsCount(),
+	]);
+
+	// Wait for settings (required for tax rules) + all background ops
+	const [settingsResult] = await Promise.allSettled([settingsPromise, backgroundOps]);
+
+	if (settingsResult.status === "rejected") {
+		log.error("Failed to load POS settings:", settingsResult.reason);
+		return;
+	}
+
+	// Configure session lock from settings
+	configureSessionLock({
+		enabled: posSettingsStore.enableSessionLock,
+		timeoutMinutes: posSettingsStore.sessionLockTimeout,
+	});
+
+	// Load tax rules (depends on settings being loaded)
+	await cartStore.loadTaxRules(shiftStore.profileName, posSettingsStore.settings);
+
+	_initializedProfile = shiftStore.profileName;
+
+	// Start session lock tracking now that a shift is open and POS is ready
+	startActivityTracking();
 	showSuccess(__("You can now start making sales"));
 }
 
-function handleShiftClosed() {
+async function handleShiftClosed() {
 	uiStore.showCloseShiftDialog = false;
 	showSuccess(__("Shift closed successfully"));
 
 	// Check if logout should happen after closing shift
 	if (logoutAfterClose.value) {
 		logoutAfterClose.value = false;
-		// Clear all dialog states to prevent stale state on next login
-		uiStore.resetAllDialogs();
+		_initializedKey = null;
+		await cleanupUserSession();
 		session.logout.submit();
 	} else {
 		setTimeout(() => {
@@ -1745,31 +1829,18 @@ function handleItemSelected(item, autoAdd = false) {
 		return;
 	}
 
-	// Check stock availability first (before any dialogs)
-	// Skip validation for:
-	// - batch/serial items (they have their own validation in the dialog)
-	// - template items with variants (variants carry their own stock)
-	// Product Bundles have calculated stock based on component availability
-	if (
-		settingsStore.shouldEnforceStockValidation() &&
-		(item.is_stock_item || item.is_bundle) &&
-		!item.has_serial_no &&
-		!item.has_batch_no &&
-		!item.has_variants
-	) {
-		const actualQty = Math.floor(item.actual_qty ?? item.stock_qty ?? 0);
-
+	// Early out-of-stock guard — prevent opening dialogs for zero-stock items
+	// Full qty validation happens in cartStore.addItem()
+	if (!item.has_variants && settingsStore.shouldEnforceStockValidation() && shouldValidateItemStock(item)) {
+		const actualQty = item.actual_qty ?? item.stock_qty ?? 0;
 		if (actualQty <= 0) {
-			showError(
-				item.is_bundle
-					? __(
-							'"{0}" cannot be added to cart. Bundle is out of stock. Allow Negative Stock is disabled.',
-							[item.item_name]
-					  )
-					: __(
-							'"{0}" cannot be added to cart. Item is out of stock. Allow Negative Stock is disabled.',
-							[item.item_name]
-					  )
+			uiStore.showError(
+				__("Insufficient Stock"),
+				__('"{0}" is out of stock in warehouse "{1}".', [
+					item.item_name,
+					item.warehouse || shiftStore.profileWarehouse,
+				]),
+				__("Item: {0}", [item.item_code])
 			);
 			return;
 		}
@@ -2053,17 +2124,18 @@ async function handleOptionSelected(option) {
 		if (option.type === "variant") {
 			const variant = option.data;
 
-			// Stock validation for variants (same as regular items)
-			if (
-				settingsStore.shouldEnforceStockValidation() &&
-				variant.is_stock_item &&
-				!variant.has_serial_no &&
-				!variant.has_batch_no
-			) {
-				const actualQty = Math.floor(variant.actual_qty ?? 0);
+			// Early out-of-stock guard for variants
+			// Full qty validation happens in cartStore.addItem()
+			if (settingsStore.shouldEnforceStockValidation() && shouldValidateItemStock(variant)) {
+				const actualQty = variant.actual_qty ?? 0;
 				if (actualQty <= 0) {
-					showError(
-						__('"{0}" cannot be added to cart. Item is out of stock. Allow Negative Stock is disabled.', [variant.item_name])
+					uiStore.showError(
+						__("Insufficient Stock"),
+						__('"{0}" is out of stock in warehouse "{1}".', [
+							variant.item_name,
+							variant.warehouse || shiftStore.profileWarehouse,
+						]),
+						__("Item: {0}", [variant.item_code])
 					);
 					return;
 				}
@@ -2136,12 +2208,10 @@ function formatCurrency(amount) {
 	return Number.parseFloat(amount || 0).toFixed(2);
 }
 
-function confirmLogout() {
+async function confirmLogout() {
 	logoutAfterClose.value = false;
-	// Clear cart to prevent stale items on next login
-	cartStore.clearCart();
-	// Clear all dialog states to prevent stale state on next login
-	uiStore.resetAllDialogs();
+	_initializedKey = null;
+	await cleanupUserSession();
 	session.logout.submit();
 }
 

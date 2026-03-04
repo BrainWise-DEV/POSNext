@@ -65,4 +65,5 @@ dev-dist/
 .playwright-mcp/*
 TODO.md
 .claude/settings.json
-WhatsApp Image 2026-02-18 at 11.09.47 AM.jpeg
+*.jpeg
+missing.txt

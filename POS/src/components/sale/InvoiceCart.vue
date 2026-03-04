@@ -743,9 +743,14 @@
 			<div v-else class="flex flex-col gap-0.5 sm:gap-1">
 				<div
 					v-for="(item, index) in sortedItems"
-					:key="item.item_code + '-' + (item.uom || '')"
-					@click="openEditDialog(item)"
-					class="bg-white border border-gray-200 rounded-md p-1.5 sm:p-2 hover:border-blue-300 hover:shadow-md transition-all duration-200 active:scale-[0.99] cursor-pointer group"
+					:key="item.item_code + '-' + (item.uom || '') + (item.is_free_item ? '-free' : '')"
+					@click="item.is_free_item ? null : openEditDialog(item)"
+					:class="[
+						'border rounded-md p-1.5 sm:p-2 transition-all duration-200',
+						item.is_free_item
+							? 'bg-green-50 border-green-300 cursor-default'
+							: 'bg-white border-gray-200 hover:border-blue-300 hover:shadow-md active:scale-[0.99] cursor-pointer group'
+					]"
 				>
 					<div class="flex gap-1.5 sm:gap-2">
 						<!-- Item Image Thumbnail -->
@@ -792,7 +797,7 @@
 									<span
 										v-if="item.free_qty && item.free_qty > 0"
 										class="inline-flex items-center px-1.5 py-0.5 bg-green-600 text-white rounded-full text-[9px] font-bold flex-shrink-0"
-										:title="__('{0} free item(s) included', [item.free_qty])"
+										:title="item.is_free_item ? __('Free item') : __('{0} free item(s) included', [item.free_qty])"
 									>
 										<svg
 											class="w-2.5 h-2.5 me-0.5"
@@ -805,7 +810,7 @@
 												clip-rule="evenodd"
 											/>
 										</svg>
-										{{ __("+{0} FREE", [item.free_qty]) }}
+										{{ item.is_free_item ? __("FREE") : __("+{0} FREE", [item.free_qty]) }}
 									</span>
 									<!-- Discount Badge -->
 									<div
@@ -831,6 +836,7 @@
 									</div>
 								</div>
 								<button
+									v-if="!item.is_free_item"
 									type="button"
 									@click.stop="$emit('remove-item', item.item_code, item.uom)"
 									class="text-gray-400 hover:text-red-600 active:text-red-700 transition-colors flex-shrink-0 p-0.5 -m-0.5 touch-manipulation active:scale-90"
@@ -857,9 +863,16 @@
 							<div class="flex items-center justify-between gap-1.5">
 								<div class="flex items-center gap-1.5">
 									<!-- Quantity Counter -->
+									<!-- For free items, show static quantity badge -->
+									<div
+										v-if="item.is_free_item"
+										class="flex items-center bg-green-100 border border-green-300 rounded px-2 h-6 sm:h-7"
+									>
+										<span class="text-xs sm:text-sm font-bold text-green-700">{{ item.quantity }}</span>
+									</div>
 									<!-- For serial items, show serial badge with edit button -->
 									<div
-										v-if="item.has_serial_no && item.serial_no"
+										v-else-if="item.has_serial_no && item.serial_no"
 										class="flex items-center gap-1"
 										@click.stop
 									>
@@ -1541,7 +1554,8 @@ watch(customerResults, () => {
 const totalQuantity = computed(() => {
 	return props.items.reduce((sum, item) => {
 		const qty = item.quantity || 0;
-		const freeQty = item.free_qty || 0;
+		// For dedicated free item rows, quantity IS the free qty — don't double-count
+		const freeQty = item.is_free_item ? 0 : (item.free_qty || 0);
 		return sum + qty + freeQty;
 	}, 0);
 });
