@@ -100,15 +100,19 @@ class WalletTransaction(AccountsController):
 		if self.transaction_type in ["Credit", "Loyalty Credit"]:
 			# Credit to wallet (increase balance)
 			# Debit source account, Credit wallet account (with party)
-			gl_entries.append(
-				self.get_gl_dict({
-					"account": source_account,
-					"debit": amount,
-					"debit_in_account_currency": amount,
-					"cost_center": cost_center,
-					"remarks": self.remarks or _("Wallet Credit: {0}").format(self.name)
-				})
-			)
+			source_gl = {
+				"account": source_account,
+				"debit": amount,
+				"debit_in_account_currency": amount,
+				"cost_center": cost_center,
+				"remarks": self.remarks or _("Wallet Credit: {0}").format(self.name)
+			}
+			# Receivable/Payable accounts require party information
+			source_account_type = frappe.get_cached_value("Account", source_account, "account_type")
+			if source_account_type in ("Receivable", "Payable") and self.customer:
+				source_gl["party_type"] = "Customer"
+				source_gl["party"] = self.customer
+			gl_entries.append(self.get_gl_dict(source_gl))
 			gl_entries.append(
 				self.get_gl_dict({
 					"account": wallet_account,
@@ -135,15 +139,20 @@ class WalletTransaction(AccountsController):
 					"remarks": self.remarks or _("Wallet Debit: {0}").format(self.name)
 				})
 			)
-			gl_entries.append(
-				self.get_gl_dict({
-					"account": source_account,
-					"credit": amount,
-					"credit_in_account_currency": amount,
-					"cost_center": cost_center,
-					"remarks": self.remarks or _("Wallet Debit: {0}").format(self.name)
-				})
-			)
+			debit_source_gl = {
+				"account": source_account,
+				"credit": amount,
+				"credit_in_account_currency": amount,
+				"cost_center": cost_center,
+				"remarks": self.remarks or _("Wallet Debit: {0}").format(self.name)
+			}
+			# Receivable/Payable accounts require party information
+			if not hasattr(self, '_source_account_type'):
+				self._source_account_type = frappe.get_cached_value("Account", source_account, "account_type")
+			if self._source_account_type in ("Receivable", "Payable") and self.customer:
+				debit_source_gl["party_type"] = "Customer"
+				debit_source_gl["party"] = self.customer
+			gl_entries.append(self.get_gl_dict(debit_source_gl))
 
 		return gl_entries
 
@@ -366,7 +375,25 @@ def credit_return_to_wallet(return_invoice, amount=None):
 			# Recover stuck draft created by a crashed prior attempt.
 			existing_transaction.flags.ignore_permissions = True
 			existing_transaction.submit()
-		return existing_transaction
+			return existing_transaction
+
+		if existing_transaction.docstatus == 1:
+			# Check if GL entries exist — a previous attempt may have set docstatus=1
+			# but failed during make_gl_entries(), leaving a broken transaction.
+			has_gl = frappe.db.exists("GL Entry", {"voucher_no": existing_transaction.name})
+			if has_gl:
+				return existing_transaction
+			# No GL entries → broken submission. Cancel and recreate below.
+			try:
+				existing_transaction.flags.ignore_permissions = True
+				existing_transaction.cancel()
+				frappe.db.commit()
+			except Exception:
+				frappe.log_error(
+					title="Wallet Transaction Recovery Error",
+					message=f"Could not cancel broken WT {existing_transaction.name}: {frappe.get_traceback()}"
+				)
+				return None
 
 	transaction = frappe.get_doc({
 		"doctype": "Wallet Transaction",
