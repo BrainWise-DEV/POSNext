@@ -112,7 +112,7 @@ def get_data(filters):
 
 	if from_date and to_date:
 		from frappe.utils import date_diff
-		date_range_days = date_diff(to_date, from_date) or 1
+		date_range_days = max(date_diff(to_date, from_date), 1)
 	else:
 		date_range_days = 30  # Default to 30 days
 
@@ -144,6 +144,12 @@ def get_data(filters):
 	""".format(conditions=conditions)
 
 	data = frappe.db.sql(query, filters, as_dict=1)
+
+	# Include zero stock items (items with no sales in the period)
+	if cint(filters.get("include_zero_stock")):
+		sold_item_codes = {row.item_code for row in data}
+		zero_stock_items = _get_zero_stock_items(filters, warehouse, sold_item_codes)
+		data.extend(zero_stock_items)
 
 	if not data:
 		return []
@@ -181,12 +187,19 @@ def get_data(filters):
 			# Suggest reorder level as 14 days of stock
 			row.reorder_level = flt(row.stock_depletion_rate * 14, 2)
 
+	# Filter by stock status if specified
+	stock_status_filter = filters.get("stock_status")
+	if stock_status_filter:
+		data = [row for row in data if stock_status_filter in row.stock_status]
+
 	# Assign velocity ranks based on quantity sold
 	sorted_data = sorted(data, key=lambda x: x.qty_sold, reverse=True)
-	total_items = len(sorted_data)
+	# Only rank items that actually had sales
+	sold_items = [row for row in sorted_data if row.qty_sold > 0]
+	total_sold = len(sold_items)
 
-	for idx, row in enumerate(sorted_data):
-		percentile = (idx + 1) / total_items * 100
+	for idx, row in enumerate(sold_items):
+		percentile = (idx + 1) / total_sold * 100
 
 		if percentile <= 20:
 			row.velocity_rank = "A - Fast Mover"
@@ -195,6 +208,11 @@ def get_data(filters):
 		elif percentile <= 80:
 			row.velocity_rank = "C - Slow Mover"
 		else:
+			row.velocity_rank = "D - Very Slow"
+
+	# Items with no sales are always "D - Very Slow"
+	for row in sorted_data:
+		if row.qty_sold <= 0:
 			row.velocity_rank = "D - Very Slow"
 
 	return sorted_data
@@ -228,6 +246,67 @@ def _get_stock_map(item_codes, warehouse=None):
 		""".format(placeholders=placeholders), item_codes, as_dict=1)
 
 	return {row.item_code: flt(row.actual_qty) for row in rows}
+
+
+def _get_zero_stock_items(filters, warehouse, sold_item_codes):
+	"""Fetch items that had no sales in the period.
+
+	Respects the POS Profile's allowed item groups when no explicit
+	item_group filter is set.
+	"""
+	conditions = []
+	params = {}
+
+	if filters.get("item_group"):
+		conditions.append("i.item_group = %(item_group)s")
+		params["item_group"] = filters.get("item_group")
+	elif filters.get("pos_profile"):
+		allowed_groups = frappe.db.get_all(
+			"POS Item Group",
+			filters={"parent": filters.get("pos_profile"), "parenttype": "POS Profile"},
+			pluck="item_group",
+		)
+		if allowed_groups:
+			escaped = ", ".join([frappe.db.escape(g) for g in allowed_groups])
+			conditions.append("i.item_group IN ({})".format(escaped))
+		else:
+			# No item groups configured — only include items that have a Bin
+			# in the POS warehouse to avoid returning every item in the system
+			conditions.append("b.item_code IS NOT NULL")
+
+	warehouse_join = ""
+	if warehouse:
+		warehouse_join = "AND b.warehouse = %(warehouse)s"
+		params["warehouse"] = warehouse
+
+	where = (" AND " + " AND ".join(conditions)) if conditions else ""
+
+	query = """
+		SELECT
+			i.item_code,
+			i.item_name,
+			i.item_group,
+			0 as qty_sold,
+			0 as total_sales_value,
+			0 as avg_selling_rate,
+			i.min_order_qty as reorder_level
+		FROM
+			`tabItem` i
+		LEFT JOIN
+			`tabBin` b ON b.item_code = i.name {warehouse_join}
+		WHERE
+			i.disabled = 0
+			AND i.is_sales_item = 1
+			AND i.has_variants = 0
+			{where}
+		GROUP BY
+			i.item_code
+	""".format(warehouse_join=warehouse_join, where=where)
+
+	items = frappe.db.sql(query, params, as_dict=1)
+
+	# Exclude items that already have sales data
+	return [row for row in items if row.item_code not in sold_item_codes]
 
 
 def get_conditions(filters):
