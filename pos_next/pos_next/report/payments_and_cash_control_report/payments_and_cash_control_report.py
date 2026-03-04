@@ -77,6 +77,12 @@ def get_columns(payment_methods):
 		safe = method.lower().replace(" ", "_")
 		columns.extend([
 			{
+				"fieldname": f"{safe}_opening",
+				"label": _(f"{method} Opening"),
+				"fieldtype": "Currency",
+				"width": 130
+			},
+			{
 				"fieldname": f"{safe}_expected",
 				"label": _(f"{method} Expected"),
 				"fieldtype": "Currency",
@@ -97,6 +103,12 @@ def get_columns(payment_methods):
 		])
 
 	columns.extend([
+		{
+			"fieldname": "total_opening",
+			"label": _("Total Opening"),
+			"fieldtype": "Currency",
+			"width": 130
+		},
 		{
 			"fieldname": "total_expected",
 			"label": _("Total Expected"),
@@ -192,6 +204,7 @@ def get_data(filters):
 				"shift_end": r.shift_end,
 				"shift_hours": shift_hours,
 				"total_transactions": transaction_map.get(r.shift, 0),
+				"total_opening": 0,
 				"total_expected": 0,
 				"total_closing": 0,
 				"total_difference": 0,
@@ -199,18 +212,25 @@ def get_data(filters):
 
 		row = shifts[r.shift]
 		safe = r.payment_method.lower().replace(" ", "_")
-		row[f"{safe}_expected"] = flt(r.expected_amount, 2)
-		row[f"{safe}_closing"] = flt(r.closing_amount, 2)
-		row[f"{safe}_diff"] = flt(r.difference, 2)
+		opening = flt(r.opening_amount, 2)
+		expected = flt(r.expected_amount, 2)
+		closing = flt(r.closing_amount, 2)
+		diff = flt(closing - expected, 2)
+		row[f"{safe}_opening"] = opening
+		row[f"{safe}_expected"] = expected
+		row[f"{safe}_closing"] = closing
+		row[f"{safe}_diff"] = diff
 
-		row["total_expected"] += flt(r.expected_amount, 2)
-		row["total_closing"] += flt(r.closing_amount, 2)
-		row["total_difference"] += flt(r.difference, 2)
+		row["total_opening"] += opening
+		row["total_expected"] += expected
+		row["total_closing"] += closing
+		row["total_difference"] += diff
 
 	# Build final data list and determine status
 	data = []
 	for shift_name in shift_order:
 		row = shifts[shift_name]
+		row["total_opening"] = flt(row["total_opening"], 2)
 		row["total_expected"] = flt(row["total_expected"], 2)
 		row["total_closing"] = flt(row["total_closing"], 2)
 		row["total_difference"] = flt(row["total_difference"], 2)
@@ -274,29 +294,34 @@ def get_conditions(filters):
 	if filters.get("shift"):
 		conditions.append("pcs.name = %(shift)s")
 
+	if filters.get("mode_of_payment"):
+		conditions.append("pr.mode_of_payment = %(mode_of_payment)s")
+
 	return " AND " + " AND ".join(conditions) if conditions else ""
 
 
 def get_chart_data(data, payment_methods):
-	"""Generate chart showing payment method breakdown"""
-	if not data or not payment_methods:
+	"""Generate chart showing opening, closing, and difference per shift."""
+	if not data:
 		return None
 
-	# Aggregate expected amounts by payment method across all shifts
-	datasets = []
-	for method in payment_methods:
-		safe = method.lower().replace(" ", "_")
-		values = [flt(row.get(f"{safe}_expected", 0)) for row in data]
-		datasets.append({
-			"name": method,
-			"values": values
-		})
+	labels = [row.get("shift") for row in data]
+	opening_values = [flt(row.get("total_opening", 0), 2) for row in data]
+	expected_values = [flt(row.get("total_expected", 0), 2) for row in data]
+	closing_values = [flt(row.get("total_closing", 0), 2) for row in data]
+	diff_values = [flt(row.get("total_difference", 0), 2) for row in data]
 
 	return {
 		"data": {
-			"labels": [row.get("shift") for row in data],
-			"datasets": datasets
+			"labels": labels,
+			"datasets": [
+				{"name": _("Opening"), "values": opening_values},
+				{"name": _("Expected"), "values": expected_values},
+				{"name": _("Closing"), "values": closing_values},
+				{"name": _("Difference"), "values": diff_values},
+			]
 		},
 		"type": "bar",
-		"barOptions": {"stacked": True}
+		"fieldtype": "Currency",
+		"colors": ["#318AD8", "#F5A623", "#48BB74", "#F56B6B"],
 	}
