@@ -70,13 +70,25 @@
 									</svg>
 									{{ __('Sales Person') }}
 									<span class="text-red-500">*</span>
+									<!-- Refresh: re-fetch sales persons from server -->
+									<button
+										@click.prevent="refreshSalesPersons"
+										class="ms-auto p-0.5 text-purple-500 hover:text-purple-700 rounded hover:bg-purple-100 transition-colors"
+										:class="{ 'animate-spin': loadingSalesPersons }"
+										:title="__('Refresh sales persons')"
+										:disabled="loadingSalesPersons"
+									>
+										<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+										</svg>
+									</button>
 								</label>
 								<div class="relative">
 									<input
 										v-model="salesPersonSearch"
 										type="text"
-										:placeholder="__('Select sales person...')"
-										@focus="salesPersonDropdownOpen = true"
+										:placeholder="loadingSalesPersons ? __('Loading...') : __('Select sales person...')"
+										@focus="onSalesPersonFocus"
 										@blur="handleSalesPersonBlur"
 										class="w-full px-3 py-2 ps-3 pe-8 text-xs border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent bg-white"
 										:class="!isSalesPersonValid ? 'border-red-300' : 'border-purple-300'"
@@ -135,6 +147,18 @@
 									</svg>
 									{{ __('Sales Persons') }}
 									<span class="text-red-500">*</span>
+									<!-- Refresh: re-fetch sales persons from server -->
+									<button
+										@click.prevent="refreshSalesPersons"
+										class="ms-1 p-0.5 text-purple-500 hover:text-purple-700 rounded hover:bg-purple-100 transition-colors"
+										:class="{ 'animate-spin': loadingSalesPersons }"
+										:title="__('Refresh sales persons')"
+										:disabled="loadingSalesPersons"
+									>
+										<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+										</svg>
+									</button>
 								</label>
 								<span v-if="selectedSalesPersons.length > 0" class="text-[10px] text-purple-600">
 									{{ __('Total: {0}%', [Math.round(totalSalesAllocation)]) }}
@@ -146,10 +170,10 @@
 								<input
 									v-model="salesPersonSearch"
 									type="text"
-									:placeholder="selectedSalesPersons.length > 0
+									:placeholder="loadingSalesPersons ? __('Loading...') : (selectedSalesPersons.length > 0
 										? __('Add another...')
-										: __('Select sales person...')"
-									@focus="salesPersonDropdownOpen = true"
+										: __('Select sales person...'))"
+									@focus="onSalesPersonFocus"
 									@blur="handleSalesPersonBlur"
 									class="w-full px-3 py-2 ps-3 pe-8 text-xs border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent bg-white"
 									:class="!isSalesPersonValid ? 'border-red-300' : 'border-purple-300'"
@@ -1372,8 +1396,17 @@ const salesPersonsResource = createResource({
 	auto: false,
 	onSuccess(data) {
 		log.debug("[PaymentDialog] Sales persons loaded:", data)
-		salesPersons.value = data?.message || data || []
+		const persons = data?.message || data || []
+		salesPersons.value = persons
 		loadingSalesPersons.value = false
+		// Cache for offline use
+		if (persons.length > 0 && props.posProfile) {
+			const personsWithProfile = persons.map((p) => ({
+				...p,
+				pos_profile: props.posProfile,
+			}))
+			offlineWorker.cacheSalesPersons(personsWithProfile).catch(() => {})
+		}
 	},
 	onError(error) {
 		log.error("[PaymentDialog] Error loading sales persons:", error)
@@ -1415,10 +1448,15 @@ const totalSalesAllocation = computed(() => {
 	)
 })
 
-// Computed: Validation - sales person is required when enabled
+// Computed: Validation - sales person is required when enabled and online
 const isSalesPersonValid = computed(() => {
 	// If sales persons feature is disabled, always valid
 	if (!settingsStore.enableSalesPersons) {
+		return true
+	}
+	// Skip validation when offline — sales persons can't be fetched,
+	// don't block the sale. Team data is omitted from offline invoices.
+	if (props.isOffline) {
 		return true
 	}
 	// At least one sales person must be selected
@@ -1472,6 +1510,32 @@ function removeSalesPerson(personName) {
 function clearSalesPersons() {
 	selectedSalesPersons.value = []
 	salesPersonSearch.value = ""
+}
+
+// Force re-fetch sales persons — from server when online, from cache when offline
+async function refreshSalesPersons() {
+	if (loadingSalesPersons.value) return
+	loadingSalesPersons.value = true
+	if (props.isOffline) {
+		try {
+			const cached = await offlineWorker.getCachedSalesPersons(props.posProfile)
+			salesPersons.value = cached || []
+		} catch {
+			salesPersons.value = []
+		}
+		loadingSalesPersons.value = false
+	} else {
+		salesPersonsResource.fetch()
+	}
+}
+
+// Auto-retry fetch when dropdown opens and list is empty
+function onSalesPersonFocus() {
+	salesPersonDropdownOpen.value = true
+	// If list is empty and not loading, re-fetch as a safety net
+	if (salesPersons.value.length === 0 && !loadingSalesPersons.value && props.posProfile) {
+		refreshSalesPersons()
+	}
 }
 
 // Redistribute commission evenly among all selected sales persons
@@ -1818,24 +1882,28 @@ function isQuickAmountDisabled(amount) {
 	)
 }
 
-// Preload payment methods when posProfile is set (before dialog opens)
+// Preload payment methods and sales persons when posProfile is set.
+// Watches both posProfile AND enableSalesPersons to fix a race condition:
+// posProfile is available immediately (from shiftStore), but POS settings
+// load asynchronously (from bootstrap/API). When settings load after the
+// posProfile watcher fires, enableSalesPersons is still "Disabled" (default)
+// and the sales persons fetch gets skipped entirely. By watching both
+// dependencies, the fetch triggers as soon as both conditions are met,
+// regardless of which resolves first.
 watch(
-	() => props.posProfile,
-	(newProfile) => {
-		if (newProfile) {
-			log.debug(
-				"[PaymentDialog] Preloading payment methods for profile:",
-				newProfile,
-			)
-			loadPaymentMethods()
-			// Also preload sales persons if enabled
-			if (settingsStore.enableSalesPersons && salesPersons.value.length === 0) {
-				loadingSalesPersons.value = true
-				salesPersonsResource.fetch()
-			}
+	() => [props.posProfile, settingsStore.enableSalesPersons],
+	([newProfile, salesPersonsEnabled]) => {
+		if (!newProfile) return
+
+		// Payment methods have their own internal loading guard
+		loadPaymentMethods()
+
+		// Fetch sales persons only when: feature is enabled, not already loaded, and not in-flight
+		if (salesPersonsEnabled && salesPersons.value.length === 0 && !loadingSalesPersons.value) {
+			refreshSalesPersons()
 		}
 	},
-	{ immediate: true }, // Load immediately if posProfile is already set
+	{ immediate: true },
 )
 
 // Pre-fetch customer balance when customer changes (before dialog opens)

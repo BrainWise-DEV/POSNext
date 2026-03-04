@@ -1654,16 +1654,65 @@ def cleanup_old_drafts(pos_profile=None, max_age_hours=24):
 # ==========================================
 
 
+def _filter_fully_returned(invoices):
+    """Remove invoices where all items have already been returned.
+
+    Uses two targeted queries instead of a 4-table LEFT JOIN to avoid
+    cartesian explosion (SI × SI_Item × Ret_SI × Ret_Item).
+    Only touches the small candidate set passed in.
+    """
+    if not invoices:
+        return []
+
+    from frappe.query_builder.functions import Sum, Abs
+
+    invoice_names = [inv["name"] for inv in invoices]
+
+    # Original qty per invoice
+    si_item = frappe.qb.DocType("Sales Invoice Item")
+    orig_rows = (
+        frappe.qb.from_(si_item)
+        .select(si_item.parent, Sum(si_item.qty).as_("total_original_qty"))
+        .where(si_item.parent.isin(invoice_names))
+        .groupby(si_item.parent)
+    ).run(as_dict=True)
+    orig_map = {r["parent"]: flt(r["total_original_qty"]) for r in orig_rows}
+
+    # Returned qty per original invoice
+    ret_si = frappe.qb.DocType("Sales Invoice")
+    ret_item = frappe.qb.DocType("Sales Invoice Item")
+    ret_rows = (
+        frappe.qb.from_(ret_si)
+        .inner_join(ret_item).on(ret_item.parent == ret_si.name)
+        .select(ret_si.return_against, Sum(Abs(ret_item.qty)).as_("total_returned_qty"))
+        .where(
+            (ret_si.return_against.isin(invoice_names))
+            & (ret_si.docstatus == 1)
+            & (ret_si.is_return == 1)
+        )
+        .groupby(ret_si.return_against)
+    ).run(as_dict=True)
+    ret_map = {r["return_against"]: flt(r["total_returned_qty"]) for r in ret_rows}
+
+    for inv in invoices:
+        inv["total_original_qty"] = orig_map.get(inv["name"], 0)
+        inv["total_returned_qty"] = ret_map.get(inv["name"], 0)
+
+    return [
+        inv for inv in invoices
+        if inv["total_original_qty"] > inv["total_returned_qty"]
+    ]
+
+
 @frappe.whitelist()
 def get_returnable_invoices(limit=50, pos_profile=None):
     """Get list of invoices that have items available for return.
     Filters by return validity period if configured in POS Settings.
 
-    Uses query builder with LEFT JOINs to calculate original and returned quantities
-    in a single query. Returns invoices where total_original_qty > total_returned_qty.
+    Two-step approach for performance:
+    1. Fetch recent POS invoices (fast indexed query, no JOINs)
+    2. Filter out fully-returned ones via _filter_fully_returned
     """
-    from frappe.query_builder.functions import Sum, Coalesce, Abs
-    from frappe.query_builder import Case
     from frappe.utils import add_days, today
 
     # Check return validity days from POS Settings
@@ -1677,62 +1726,37 @@ def get_returnable_invoices(limit=50, pos_profile=None):
             ) or 0
         )
 
-    # Define tables
     si = frappe.qb.DocType("Sales Invoice")
-    si_item = frappe.qb.DocType("Sales Invoice Item")
-    ret_si = frappe.qb.DocType("Sales Invoice").as_("ret_si")
-    ret_item = frappe.qb.DocType("Sales Invoice Item").as_("ret_item")
 
-    # Build query with query builder
+    # Over-fetch to compensate for fully-returned invoices removed in step 2
+    fetch_limit = cint(limit) * 2
+
+    # Step 1: fetch candidates (lightweight, no JOINs)
     query = (
         frappe.qb.from_(si)
-        .left_join(si_item).on(si_item.parent == si.name)
-        .left_join(ret_si).on(
-            (ret_si.return_against == si.name)
-            & (ret_si.docstatus == 1)
-            & (ret_si.is_return == 1)
-        )
-        .left_join(ret_item).on(
-            (ret_item.parent == ret_si.name)
-            & ((ret_item.sales_invoice_item == si_item.name) | (ret_item.item_code == si_item.item_code))
-        )
         .select(
-            si.name,
-            si.customer,
-            si.customer_name,
-            si.contact_mobile,
-            si.posting_date,
-            si.grand_total,
-            si.status,
-            Coalesce(Sum(Case().when(ret_item.qty.isnotnull(), Abs(ret_item.qty)).else_(0)), 0).as_("total_returned_qty"),
-            Coalesce(Sum(Case().when(si_item.qty.isnotnull(), si_item.qty).else_(0)), 0).as_("total_original_qty"),
+            si.name, si.customer, si.customer_name,
+            si.contact_mobile, si.posting_date,
+            si.grand_total, si.status,
         )
         .where(
             (si.docstatus == 1)
             & (si.is_return == 0)
             & (si.is_pos == 1)
         )
-        .groupby(si.name)
         .orderby(si.posting_date, order=frappe.qb.desc)
         .orderby(si.creation, order=frappe.qb.desc)
-        .limit(cint(limit))
+        .limit(fetch_limit)
     )
 
-    # Add date filter if return validity is configured
     if return_validity_days > 0:
         cutoff_date = add_days(today(), -return_validity_days)
         query = query.where(si.posting_date >= cutoff_date)
 
-    # Execute and filter results with HAVING equivalent (post-filter)
-    results = query.run(as_dict=True)
+    candidates = query.run(as_dict=True)
 
-    # Filter: only include invoices where original qty > returned qty
-    returnable_invoices = [
-        inv for inv in results
-        if flt(inv.get("total_original_qty", 0)) > flt(inv.get("total_returned_qty", 0))
-    ]
-
-    return returnable_invoices
+    # Step 2: filter out fully-returned invoices, then trim to requested limit
+    return _filter_fully_returned(candidates)[:cint(limit)]
 
 
 @frappe.whitelist()
@@ -1740,8 +1764,9 @@ def search_invoice_by_number(search_term, pos_profile=None):
     """Search for invoices by invoice number across the entire database.
     No date restrictions - searches all returnable invoices matching the term.
 
-    Uses query builder with LEFT JOINs to calculate remaining returnable quantities.
-    Only returns invoices that have items available for return.
+    Two-step approach for performance:
+    1. Find matching POS invoices by name (fast indexed LIKE query)
+    2. Filter out fully-returned ones via _filter_fully_returned
 
     Args:
         search_term: Invoice number or partial number to search for (min 3 chars)
@@ -1750,43 +1775,22 @@ def search_invoice_by_number(search_term, pos_profile=None):
     Returns:
         List of matching invoices with return availability info (max 10 results)
     """
-    from frappe.query_builder.functions import Sum, Coalesce, Abs
-    from frappe.query_builder import Case
-
     if not search_term or len(search_term) < 3:
         return []
 
-    search_term = cstr(search_term).strip()
-
-    # Define tables
+    # Escape LIKE wildcards in user input to prevent pattern abuse.
+    # frappe.db.escape() returns a quoted string for raw SQL — not usable with
+    # frappe.qb's .like() which parameterizes internally. Manual escaping needed.
+    search_term = cstr(search_term).strip().replace("%", r"\%").replace("_", r"\_")
     si = frappe.qb.DocType("Sales Invoice")
-    si_item = frappe.qb.DocType("Sales Invoice Item")
-    ret_si = frappe.qb.DocType("Sales Invoice").as_("ret_si")
-    ret_item = frappe.qb.DocType("Sales Invoice Item").as_("ret_item")
 
-    # Build query with query builder
-    query = (
+    # Step 1: find matching invoices (lightweight, no JOINs)
+    candidates = (
         frappe.qb.from_(si)
-        .left_join(si_item).on(si_item.parent == si.name)
-        .left_join(ret_si).on(
-            (ret_si.return_against == si.name)
-            & (ret_si.docstatus == 1)
-            & (ret_si.is_return == 1)
-        )
-        .left_join(ret_item).on(
-            (ret_item.parent == ret_si.name)
-            & ((ret_item.sales_invoice_item == si_item.name) | (ret_item.item_code == si_item.item_code))
-        )
         .select(
-            si.name,
-            si.customer,
-            si.customer_name,
-            si.contact_mobile,
-            si.posting_date,
-            si.grand_total,
-            si.status,
-            Coalesce(Sum(Case().when(ret_item.qty.isnotnull(), Abs(ret_item.qty)).else_(0)), 0).as_("total_returned_qty"),
-            Coalesce(Sum(Case().when(si_item.qty.isnotnull(), si_item.qty).else_(0)), 0).as_("total_original_qty"),
+            si.name, si.customer, si.customer_name,
+            si.contact_mobile, si.posting_date,
+            si.grand_total, si.status,
         )
         .where(
             (si.docstatus == 1)
@@ -1794,21 +1798,13 @@ def search_invoice_by_number(search_term, pos_profile=None):
             & (si.is_pos == 1)
             & (si.name.like(f"%{search_term}%"))
         )
-        .groupby(si.name)
         .orderby(si.posting_date, order=frappe.qb.desc)
         .orderby(si.creation, order=frappe.qb.desc)
         .limit(10)
-    )
+    ).run(as_dict=True)
 
-    results = query.run(as_dict=True)
-
-    # Filter: only include invoices where original qty > returned qty
-    matching_invoices = [
-        inv for inv in results
-        if flt(inv.get("total_original_qty", 0)) > flt(inv.get("total_returned_qty", 0))
-    ]
-
-    return matching_invoices
+    # Step 2: filter out fully-returned invoices
+    return _filter_fully_returned(candidates)
 
 
 @frappe.whitelist()
