@@ -337,6 +337,29 @@ def get_payment_account(mode_of_payment, company):
     )
 
 
+def _set_payment_accounts(payments, company):
+    """Set the account for each payment entry that is missing one.
+
+    Uses BaseDocument.set() for assignment which directly writes to __dict__,
+    avoiding potential issues with attribute assignment on child-table Document
+    objects (e.g. 'SalesInvoicePayment' object does not support item assignment).
+    """
+    if not payments or not company:
+        return
+
+    for payment in payments:
+        mode_of_payment = payment.get("mode_of_payment")
+        if not mode_of_payment or payment.get("account"):
+            continue
+        try:
+            account_info = get_payment_account(mode_of_payment, company)
+            if account_info:
+                payment.set("account", account_info.get("account"))
+        except Exception as e:
+            frappe.log_error(
+                f"Failed to get payment account for {mode_of_payment}: {e}",
+                "Payment Account Lookup",
+            )
 # ==========================================
 # Stock Validation Functions
 # ==========================================
@@ -685,20 +708,7 @@ def update_invoice(data):
         )
 
         if company and invoice_doc.get("payments") and doctype == "Sales Invoice":
-            for payment in invoice_doc.payments:
-                mode_of_payment = payment.get("mode_of_payment")
-                if mode_of_payment and not payment.get("account"):
-                    try:
-                        account_info = get_payment_account(
-                            mode_of_payment, company
-                        )
-                        if account_info:
-                            payment.account = account_info.get("account")
-                    except Exception as e:
-                        frappe.log_error(
-                            f"Failed to get payment account for {mode_of_payment}: {e}",
-                            "Payment Account Lookup"
-                        )
+            _set_payment_accounts(invoice_doc.payments, company)
 
         # Validate return items if this is a return invoice
         if (data.get("is_return") or invoice_doc.get("is_return")) and invoice_doc.get(
@@ -858,20 +868,7 @@ def update_invoice(data):
             invoice_doc.base_grand_total = 0.0
 
         # Set accounts for payment methods before saving
-        for payment in invoice_doc.payments:
-            mode_of_payment = payment.get("mode_of_payment")
-            if mode_of_payment and not payment.get("account"):
-                try:
-                    account_info = get_payment_account(
-                        mode_of_payment, invoice_doc.company
-                    )
-                    if account_info:
-                        payment.account = account_info.get("account")
-                except Exception as e:
-                    frappe.log_error(
-                        f"Failed to get payment account for {mode_of_payment}: {e}",
-                        "Payment Account Lookup"
-                    )
+        _set_payment_accounts(invoice_doc.payments, invoice_doc.company)
 
         # For return invoices, ensure payments are negative
         if invoice_doc.get("is_return"):
@@ -1278,13 +1275,7 @@ def submit_invoice(invoice=None, data=None):
 
         # Set accounts for all payment methods before saving
         if doctype == "Sales Invoice" and hasattr(invoice_doc, "payments"):
-            for payment in invoice_doc.payments:
-                if payment.mode_of_payment:
-                    account_info = get_payment_account(
-                        payment.mode_of_payment, invoice_doc.company
-                    )
-                    if account_info:
-                        payment.account = account_info.get("account")
+            _set_payment_accounts(invoice_doc.payments, invoice_doc.company)
 
         # Handle sales team (multiple sales persons)
         sales_team_data = invoice.get("sales_team") or data.get("sales_team")
