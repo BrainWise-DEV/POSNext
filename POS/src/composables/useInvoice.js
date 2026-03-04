@@ -288,6 +288,11 @@ export function useInvoice() {
 				brand: item.brand,
 				// Resolved barcode flag - prevents editing qty/uom/rate for weighted/priced barcodes
 				is_resolved_barcode: item.is_resolved_barcode || false,
+				// Stock validation fields — needed for qty increase checks in cart
+				actual_qty: item.actual_qty ?? 0,
+				is_stock_item: item.is_stock_item ?? 1,
+				is_bundle: item.is_bundle || false,
+				allow_negative_stock: item.allow_negative_stock || 0,
 			}
 			invoiceItems.value.push(newItem)
 			// Recalculate the newly added item to apply taxes

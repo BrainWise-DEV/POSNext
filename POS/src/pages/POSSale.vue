@@ -1021,6 +1021,7 @@ import { usePOSShiftStore } from "@/stores/posShift";
 import { usePOSSyncStore } from "@/stores/posSync";
 import { usePOSUIStore } from "@/stores/posUI";
 import { logger } from "@/utils/logger";
+import { shouldValidateItemStock } from "@/utils/stockValidator";
 
 // Initialize stores
 const cartStore = usePOSCartStore();
@@ -1808,31 +1809,18 @@ function handleItemSelected(item, autoAdd = false) {
 		return;
 	}
 
-	// Check stock availability first (before any dialogs)
-	// Skip validation for:
-	// - batch/serial items (they have their own validation in the dialog)
-	// - template items with variants (variants carry their own stock)
-	// Product Bundles have calculated stock based on component availability
-	if (
-		settingsStore.shouldEnforceStockValidation() &&
-		(item.is_stock_item || item.is_bundle) &&
-		!item.has_serial_no &&
-		!item.has_batch_no &&
-		!item.has_variants
-	) {
-		const actualQty = Math.floor(item.actual_qty ?? item.stock_qty ?? 0);
-
+	// Early out-of-stock guard — prevent opening dialogs for zero-stock items
+	// Full qty validation happens in cartStore.addItem()
+	if (!item.has_variants && settingsStore.shouldEnforceStockValidation() && shouldValidateItemStock(item)) {
+		const actualQty = item.actual_qty ?? item.stock_qty ?? 0;
 		if (actualQty <= 0) {
-			showError(
-				item.is_bundle
-					? __(
-							'"{0}" cannot be added to cart. Bundle is out of stock. Allow Negative Stock is disabled.',
-							[item.item_name]
-					  )
-					: __(
-							'"{0}" cannot be added to cart. Item is out of stock. Allow Negative Stock is disabled.',
-							[item.item_name]
-					  )
+			uiStore.showError(
+				__("Insufficient Stock"),
+				__('"{0}" is out of stock in warehouse "{1}".', [
+					item.item_name,
+					item.warehouse || shiftStore.profileWarehouse,
+				]),
+				__("Item: {0}", [item.item_code])
 			);
 			return;
 		}
@@ -2116,17 +2104,18 @@ async function handleOptionSelected(option) {
 		if (option.type === "variant") {
 			const variant = option.data;
 
-			// Stock validation for variants (same as regular items)
-			if (
-				settingsStore.shouldEnforceStockValidation() &&
-				variant.is_stock_item &&
-				!variant.has_serial_no &&
-				!variant.has_batch_no
-			) {
-				const actualQty = Math.floor(variant.actual_qty ?? 0);
+			// Early out-of-stock guard for variants
+			// Full qty validation happens in cartStore.addItem()
+			if (settingsStore.shouldEnforceStockValidation() && shouldValidateItemStock(variant)) {
+				const actualQty = variant.actual_qty ?? 0;
 				if (actualQty <= 0) {
-					showError(
-						__('"{0}" cannot be added to cart. Item is out of stock. Allow Negative Stock is disabled.', [variant.item_name])
+					uiStore.showError(
+						__("Insufficient Stock"),
+						__('"{0}" is out of stock in warehouse "{1}".', [
+							variant.item_name,
+							variant.warehouse || shiftStore.profileWarehouse,
+						]),
+						__("Item: {0}", [variant.item_code])
 					);
 					return;
 				}

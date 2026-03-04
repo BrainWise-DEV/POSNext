@@ -3,8 +3,8 @@ import { usePOSOffersStore } from "@/stores/posOffers"
 import { usePOSSettingsStore } from "@/stores/posSettings"
 import { parseError } from "@/utils/errorHandler"
 import {
+	shouldValidateItemStock,
 	checkStockAvailability,
-	formatStockError,
 } from "@/utils/stockValidator"
 import { offlineState } from "@/utils/offline/offlineState"
 import { useToast } from "@/composables/useToast"
@@ -95,7 +95,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		isSubmitting,
 		addItem: addItemToInvoice,
 		removeItem,
-		updateItemQuantity,
+		updateItemQuantity: baseUpdateItemQuantity,
 		submitInvoice: baseSubmitInvoice,
 		clearCart: clearInvoiceCart,
 		loadTaxRules,
@@ -172,48 +172,49 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	const hasCustomer = computed(() => !!customer.value)
 
 	// Actions
-	function addItem(item, qty = 1, autoAdd = false, currentProfile = null) {
-		// Check stock availability before adding to cart
-		// Skip validation for batch/serial items - they have their own validation in the dialog
-		// Check for stock items AND Product Bundles (bundles now have calculated stock)
-		// Also check items with actual_qty defined (catches misconfigured items)
-
-		// Determine if this item should be validated for stock
-		// Include: stock items, bundles, OR items with actual_qty defined (catches misconfigured items)
-		// CRITICAL: If is_stock_item is explicitly false/0, we must skip validation even if actual_qty exists
-		const isNonStockItem = item.is_stock_item === 0 || item.is_stock_item === false
-		const hasActualQty = item.actual_qty !== undefined || item.stock_qty !== undefined
-		const shouldValidateStock = !isNonStockItem && (item.is_stock_item || item.is_bundle || hasActualQty)
-
-		if (currentProfile && !autoAdd && settingsStore.shouldEnforceStockValidation() && shouldValidateStock && !item.has_serial_no && !item.has_batch_no) {
+	function addItem(item, qty = 1, _autoAdd = false, currentProfile = null) {
+		if (currentProfile && settingsStore.shouldEnforceStockValidation() && shouldValidateItemStock(item)) {
+			// Account for quantity already in the cart for this item
+			const itemUom = item.uom || item.stock_uom
+			const existing = invoiceItems.value.find(
+				(i) => i.item_code === item.item_code && i.uom === itemUom,
+			)
+			const totalQty = (existing ? existing.quantity : 0) + qty
 			const warehouse = item.warehouse || currentProfile.warehouse
-			const actualQty =
-				item.actual_qty !== undefined ? item.actual_qty : item.stock_qty || 0
 
-			if (warehouse && actualQty !== undefined && actualQty !== null) {
-				const stockCheck = checkStockAvailability({
-					itemCode: item.item_code,
-					qty: qty,
-					warehouse: warehouse,
-					actualQty: actualQty,
-				})
-
-				if (!stockCheck.available) {
-					const itemType = item.is_bundle ? "Bundle" : "Item"
-					const errorMsg = formatStockError(
-						item.item_name,
-						qty,
-						stockCheck.actualQty,
-						warehouse,
-					)
-
-					throw new Error(errorMsg.replace("Item", itemType))
-				}
+			const check = checkStockAvailability(item, totalQty, warehouse)
+			if (!check.available) {
+				throw new Error(check.error)
 			}
 		}
 
-		// Add item to cart - no toast notification for performance
 		addItemToInvoice(item, qty)
+	}
+
+	/**
+	 * Update item quantity with stock validation.
+	 * Wraps useInvoice.updateItemQuantity to enforce stock limits
+	 * when the user clicks +/- or types a new quantity.
+	 */
+	function updateItemQuantity(itemCode, quantity, uom = null) {
+		const item = uom
+			? invoiceItems.value.find((i) => i.item_code === itemCode && i.uom === uom)
+			: invoiceItems.value.find((i) => i.item_code === itemCode)
+
+		if (!item) return baseUpdateItemQuantity(itemCode, quantity, uom)
+
+		const newQty = Number.parseFloat(quantity) || 1
+
+		// Only validate when quantity is increasing
+		if (newQty > item.quantity && settingsStore.shouldEnforceStockValidation() && shouldValidateItemStock(item)) {
+			const check = checkStockAvailability(item, newQty)
+			if (!check.available) {
+				showWarning(check.error)
+				return
+			}
+		}
+
+		baseUpdateItemQuantity(itemCode, quantity, uom)
 	}
 
 	function clearCart() {
@@ -1246,6 +1247,15 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				} catch {
 					// Fallback: just change UOM without rate update
 					cartItem.uom = updates.uom
+				}
+			}
+
+			// Validate stock if quantity is being increased
+			if (updates.quantity !== undefined && updates.quantity > cartItem.quantity
+				&& settingsStore.shouldEnforceStockValidation() && shouldValidateItemStock(cartItem)) {
+				const check = checkStockAvailability(cartItem, updates.quantity)
+				if (!check.available) {
+					throw new Error(check.error)
 				}
 			}
 

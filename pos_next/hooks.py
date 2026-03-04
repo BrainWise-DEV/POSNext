@@ -100,7 +100,9 @@ fixtures = [
 					"POS Profile-posa_cash_mode_of_payment",
 					"POS Profile-posa_allow_delete",
 					"POS Profile-posa_block_sale_beyond_available_qty",
-					"Mode of Payment-is_wallet_payment"
+					"Mode of Payment-is_wallet_payment",
+					"Promotional Scheme-pos_only",
+					"Pricing Rule-pos_only"
 				]
 			]
 		]
@@ -224,6 +226,9 @@ doc_events = {
 	},
 	"POS Profile": {
 		"on_update": "pos_next.realtime_events.emit_pos_profile_updated_event"
+	},
+	"Promotional Scheme": {
+		"on_update": "pos_next.overrides.pricing_rule.sync_pos_only_to_pricing_rules"
 	}
 }
 
