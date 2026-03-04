@@ -971,6 +971,8 @@ import InvoiceDetailDialog from "@/components/invoices/InvoiceDetailDialog.vue";
 import { useRealtimeStock } from "@/composables/useRealtimeStock";
 import { usePOSEvents } from "@/composables/usePOSEvents";
 import { useLocale } from "@/composables/useLocale";
+import { useKeyboardShortcuts } from "@/composables/useKeyboardShortcuts";
+import { registerDialog } from "@/composables/useDialogState";
 import { session } from "@/data/session";
 import { useUserData } from "@/data/user";
 import { parseError } from "@/utils/errorHandler";
@@ -1062,21 +1064,39 @@ function computeCartHash() {
 		.join("|");
 }
 
-// Promotion dialog
-const showPromotionManagement = ref(false);
+// Promotion dialog — registered so isAnyDialogOpen sees it
+const showPromotionManagement = registerDialog(ref(false), "promotionManagement");
 
 // Settings dialog
-const showPOSSettings = ref(false);
+const showPOSSettings = registerDialog(ref(false), "posSettings");
 
 // Stock Lookup dialog (Products menu)
-const showStockLookup = ref(false);
+const showStockLookup = registerDialog(ref(false), "stockLookup");
 
 // Invoice Management dialog
-const showInvoiceManagement = ref(false);
+const showInvoiceManagement = registerDialog(ref(false), "invoiceManagement");
 
 // Invoice Detail dialog
-const showInvoiceDetail = ref(false);
+const showInvoiceDetail = registerDialog(ref(false), "invoiceDetail");
 const selectedInvoiceForView = ref(null);
+
+// ================================
+// Keyboard Shortcuts Registration
+// ================================
+// Must be called after all dialog refs are declared so isLocalOverlayOpen
+// can safely reference them inside the keydown event handler.
+useKeyboardShortcuts({
+	uiStore,
+	shiftStore,
+	editCustomer,
+	// Block shortcuts when local overlays (not tracked by uiStore) are open
+	isLocalOverlayOpen: () =>
+		showPromotionManagement.value ||
+		showPOSSettings.value ||
+		showStockLookup.value ||
+		showInvoiceManagement.value ||
+		showInvoiceDetail.value,
+});
 
 // Invoice history data (used by InvoiceManagement component)
 const invoiceHistoryData = ref([]);
