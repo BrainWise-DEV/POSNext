@@ -207,7 +207,7 @@
 </template>
 
 <script setup>
-import { formatCurrency as formatCurrencyUtil } from "@/utils/currency"
+import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency"
 import { getInvoiceStatusColor } from "@/utils/invoice"
 import PaymentDialog from "@/components/sale/PaymentDialog.vue"
 import { usePOSSettingsStore } from "@/stores/posSettings"
@@ -225,7 +225,7 @@ const props = defineProps({
 	posProfile: String,
 	currency: {
 		type: String,
-		default: "USD",
+		default: DEFAULT_CURRENCY,
 	},
 })
 

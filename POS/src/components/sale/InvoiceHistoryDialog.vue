@@ -107,8 +107,8 @@
 										</svg>
 									</button>
 									<button
-										v-if="invoice.docstatus === 1 && !invoice.is_return"
-										@click="createReturn(invoice)"
+										v-if="canCreateReturn(invoice)"
+										@click="openReturnModal(invoice)"
 										class="p-1.5 hover:bg-orange-50 rounded transition-colors"
 										:title="__('Create Return')"
 									>
@@ -136,23 +136,35 @@
 			</Button>
 		</template>
 	</Dialog>
+
+	<!-- Return Invoice Dialog -->
+	<ReturnInvoiceDialog
+		v-model="showReturnDialog"
+		:pos-profile="posProfile"
+		:pos-opening-shift="posOpeningShift"
+		:currency="currency"
+		:preselected-invoice="selectedInvoiceForReturn"
+		@return-created="handleReturnCreated"
+	/>
 </template>
 
 <script setup>
 import { useToast } from "@/composables/useToast"
-import { formatCurrency as formatCurrencyUtil } from "@/utils/currency"
+import { DEFAULT_CURRENCY, DEFAULT_LOCALE, formatCurrency as formatCurrencyUtil } from "@/utils/currency"
 import { getInvoiceStatusColor } from "@/utils/invoice"
 import { Button, Dialog, Input, createResource } from "frappe-ui"
 import { computed, ref, watch } from "vue"
+import ReturnInvoiceDialog from "./ReturnInvoiceDialog.vue"
 
 const { showError } = useToast()
 
 const props = defineProps({
 	modelValue: Boolean,
 	posProfile: String,
+	posOpeningShift: String,
 	currency: {
 		type: String,
-		default: "USD",
+		default: DEFAULT_CURRENCY,
 	},
 })
 
@@ -160,7 +172,7 @@ function formatCurrency(amount) {
 	return formatCurrencyUtil(Number.parseFloat(amount || 0), props.currency)
 }
 
-const emit = defineEmits(["update:modelValue", "create-return", "view-invoice", "print-invoice"])
+const emit = defineEmits(["update:modelValue", "create-return", "view-invoice", "print-invoice", "return-created"])
 
 const show = ref(props.modelValue)
 const invoices = ref([])
@@ -168,6 +180,13 @@ const searchTerm = ref("")
 const page = ref(0)
 const pageSize = 20
 const hasMore = ref(true)
+
+// Return dialog state
+const showReturnDialog = ref(false)
+const selectedInvoiceForReturn = ref(null)
+
+// Track if we're loading more (appending) vs fresh load (replacing)
+const isLoadingMore = ref(false)
 
 // Create resource for loading invoices
 const invoicesResource = createResource({
@@ -190,25 +209,36 @@ const invoicesResource = createResource({
 				"docstatus",
 				"is_return",
 			],
-			order_by: "creation desc",
-			start: 0,
-			page_length: 100,
+			order_by: "modified desc",
+			start: page.value * pageSize,
+			page_length: pageSize,
 		}
 	},
 	auto: false,
 	onSuccess(data) {
-		console.log("Invoices loaded:", data)
 		if (data && Array.isArray(data)) {
-			// For simplicity, show item count as 0 initially
-			invoices.value = data.map((inv) => ({
+			const newInvoices = data.map((inv) => ({
 				...inv,
 				items_count: 0,
 			}))
+
+			if (isLoadingMore.value) {
+				// Append to existing list
+				invoices.value = [...invoices.value, ...newInvoices]
+			} else {
+				// Replace the list
+				invoices.value = newInvoices
+			}
+
+			// Check if there are more results
+			hasMore.value = data.length === pageSize
+			isLoadingMore.value = false
 		}
 	},
 	onError(error) {
 		console.error("Error loading invoices:", error)
 		showError(__("Failed to load invoices"))
+		isLoadingMore.value = false
 	},
 })
 
@@ -226,6 +256,13 @@ watch(show, (val) => {
 	emit("update:modelValue", val)
 })
 
+// Clear selected invoice when return dialog closes
+watch(showReturnDialog, (val) => {
+	if (!val) {
+		selectedInvoiceForReturn.value = null
+	}
+})
+
 const filteredInvoices = computed(() => {
 	if (!searchTerm.value) return invoices.value
 
@@ -239,13 +276,17 @@ const filteredInvoices = computed(() => {
 
 function loadInvoices() {
 	if (props.posProfile) {
+		// Reset to first page for fresh load
+		page.value = 0
+		isLoadingMore.value = false
 		invoicesResource.reload()
 	}
 }
 
 function loadMore() {
 	page.value++
-	loadInvoices(true)
+	isLoadingMore.value = true
+	invoicesResource.reload()
 }
 
 function searchInvoices() {
@@ -260,13 +301,28 @@ function printInvoice(invoice) {
 	emit("print-invoice", invoice)
 }
 
-function createReturn(invoice) {
-	emit("create-return", invoice)
-	show.value = false
+function canCreateReturn(invoice) {
+	// Can create return if:
+	// 1. Invoice is submitted (docstatus === 1)
+	// 2. Not already a return invoice
+	// 3. Status is not "Credit Note Issued" (already has a return)
+	return invoice.docstatus === 1 && !invoice.is_return && invoice.status !== 'Credit Note Issued'
+}
+
+function openReturnModal(invoice) {
+	selectedInvoiceForReturn.value = invoice
+	showReturnDialog.value = true
+}
+
+function handleReturnCreated(returnInvoice) {
+	// Refresh the invoice list to show updated statuses
+	invoicesResource.reload()
+	// Emit the event to parent
+	emit("return-created", returnInvoice)
 }
 
 function formatDateTime(date, time) {
-	const dateStr = new Date(date).toLocaleDateString("en-US", {
+	const dateStr = new Date(date).toLocaleDateString(DEFAULT_LOCALE, {
 		month: "short",
 		day: "numeric",
 		year: "numeric",

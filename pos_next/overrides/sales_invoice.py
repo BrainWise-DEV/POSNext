@@ -12,6 +12,37 @@ from frappe.utils import cint, flt
 from erpnext.accounts.doctype.sales_invoice.sales_invoice import SalesInvoice
 from erpnext.accounts.utils import get_account_currency
 
+def _get_post_change_gl_entries_setting():
+	"""
+	Get post_change_gl_entries setting compatible with ERPNext v15 and v16.
+
+	- ERPNext v15: Field is in 'Accounts Settings'
+	- ERPNext v16: Field moved to ERPNext's 'POS Settings' (singleton)
+
+	Since pos_next has its own 'POS Settings' doctype (non-singleton) that overrides
+	ERPNext's, we read directly from the Singles table for v16 compatibility.
+
+	Returns:
+		int: 1 if post_change_gl_entries is enabled, 0 otherwise (default: 0)
+	"""
+	# Check if field exists in Accounts Settings schema (v15)
+	meta = frappe.get_meta("Accounts Settings")
+	if meta.has_field("post_change_gl_entries"):
+		value = frappe.db.get_single_value("Accounts Settings", "post_change_gl_entries")
+		return cint(value) if value is not None else 0
+
+	# For v16, read directly from Singles table using Query Builder to avoid ORM issues
+	# ERPNext's POS Settings is a singleton, data stored in Singles table
+	Singles = frappe.qb.DocType("Singles")
+	result = (
+		frappe.qb.from_(Singles)
+		.select(Singles.value)
+		.where(Singles.doctype == "POS Settings")
+		.where(Singles.field == "post_change_gl_entries")
+		.limit(1)
+		.run()
+	)
+	return cint(result[0][0]) if result else 0
 
 class CustomSalesInvoice(SalesInvoice):
 	"""
@@ -31,9 +62,7 @@ class CustomSalesInvoice(SalesInvoice):
 		accounts (like wallet accounts).
 		"""
 		if cint(self.is_pos):
-			skip_change_gl_entries = not cint(
-				frappe.db.get_single_value("Accounts Settings", "post_change_gl_entries")
-			)
+			skip_change_gl_entries = not _get_post_change_gl_entries_setting()
 
 			for payment_mode in self.payments:
 				if skip_change_gl_entries and payment_mode.account == self.account_for_change_amount:
@@ -91,7 +120,14 @@ class CustomSalesInvoice(SalesInvoice):
 					)
 
 			if not skip_change_gl_entries:
-				self.make_gle_for_change_amount(gl_entries)
+				if hasattr(self, "get_gle_for_change_amount"):
+					# ERPNext v16+: Method renamed and returns a list of GL entries
+					# that needs to be extended to the main gl_entries list
+					gl_entries.extend(self.get_gle_for_change_amount())
+				else:
+					# ERPNext v15: Method takes gl_entries as parameter
+					# and appends change amount entries directly to it
+					self.make_gle_for_change_amount(gl_entries)
 
 	def get_party_and_party_type_for_pos_gl_entry(self, mode_of_payment, account):
 		"""

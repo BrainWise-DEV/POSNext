@@ -236,6 +236,7 @@ export default defineConfig({
 			"showdown",
 			"highlight.js/lib/core",
 			"interactjs",
+			"qz-tray",
 		],
 	},
 	server: {

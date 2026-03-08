@@ -1,5 +1,6 @@
 import { defineStore } from "pinia"
 import { computed, ref } from "vue"
+import { DEFAULT_LOCALE } from "@/utils/currency"
 
 /**
  * Invoice Filters Store
@@ -260,7 +261,7 @@ export const useInvoiceFiltersStore = defineStore("invoiceFilters", () => {
 	function formatDateDisplay(dateString) {
 		if (!dateString) return ""
 		const date = new Date(dateString)
-		return date.toLocaleDateString("en-US", {
+		return date.toLocaleDateString(DEFAULT_LOCALE, {
 			month: "short",
 			day: "numeric",
 			year: "numeric",

@@ -158,7 +158,12 @@
 </template>
 
 <script setup>
-import { formatCurrency as formatCurrencyUtil } from "@/utils/currency"
+import {
+	DEFAULT_CURRENCY,
+	DEFAULT_LOCALE,
+	formatCurrency as formatCurrencyUtil,
+	roundCurrency,
+} from "@/utils/currency"
 import { clearAllDrafts, deleteDraft, getAllDrafts } from "@/utils/draftManager"
 import { printInvoiceCustom } from "@/utils/printInvoice"
 import { useToast } from "@/composables/useToast"
@@ -173,7 +178,7 @@ const props = defineProps({
 	modelValue: Boolean,
 	currency: {
 		type: String,
-		default: "USD",
+		default: DEFAULT_CURRENCY,
 	},
 })
 
@@ -222,9 +227,7 @@ function handlePrintDraft(draft) {
 			grand_total: calculateTotal(draft.items),
 			posting_date: draft.created_at,
 			customer_name:
-				draft.customer?.customer_name ||
-				draft.customer?.name ||
-				draft.customer,
+				draft.customer?.customer_name || draft.customer?.name || draft.customer,
 			status: "Draft",
 		}
 		printInvoiceCustom(invoiceData)
@@ -274,7 +277,7 @@ async function confirmClearAll() {
 
 function formatDateTime(dateStr) {
 	const date = new Date(dateStr)
-	return date.toLocaleString("en-US", {
+	return date.toLocaleString(DEFAULT_LOCALE, {
 		month: "short",
 		day: "numeric",
 		hour: "2-digit",
@@ -288,10 +291,12 @@ function formatCurrency(amount) {
 
 function calculateTotal(items) {
 	if (!items || items.length === 0) return 0
-	return items.reduce((sum, item) => {
-		const qty = item.quantity || item.qty || 1
-		const rate = item.rate || 0
-		return sum + qty * rate
-	}, 0)
+	return roundCurrency(
+		items.reduce((sum, item) => {
+			const qty = item.quantity || item.qty || 1
+			const rate = item.rate || 0
+			return sum + roundCurrency(qty * roundCurrency(rate))
+		}, 0),
+	)
 }
 </script>

@@ -18,13 +18,13 @@
   "section_break_general",
   "allow_user_to_edit_additional_discount",
   "allow_user_to_edit_item_discount",
+  "allow_user_to_edit_rate",
   "use_percentage_discount",
   "max_discount_allowed",
-  "disable_rounded_total",
   "column_break_general",
   "allow_credit_sale",
+  "allow_customer_credit_payment",
   "allow_return",
-  "allow_write_off_change",
   "allow_partial_payment",
   "use_exact_amount",
   "enable_sales_persons",
@@ -36,6 +36,7 @@
   "hide_expected_amount",
   "display_discount_percentage",
   "display_discount_amount",
+  "show_variants_as_items",
   "section_break_operations",
   "allow_sales_order",
   "allow_select_sales_order",
@@ -68,6 +69,9 @@
   "section_break_misc",
   "input_qty",
   "allow_negative_stock",
+  "section_break_security",
+  "enable_session_lock",
+  "session_lock_timeout",
   "barcode_tab",
   "barcode_rules"
  ],
@@ -173,6 +177,13 @@
   },
   {
    "default": "0",
+   "description": "Allow user to edit item rate in cart. Rate editing is automatically disabled when promotional offers are applied to an item.",
+   "fieldname": "allow_user_to_edit_rate",
+   "fieldtype": "Check",
+   "label": "Allow User To Edit Rate"
+  },
+  {
+   "default": "0",
    "description": "Show discounts as percentages",
    "fieldname": "use_percentage_discount",
    "fieldtype": "Check",
@@ -187,22 +198,22 @@
    "precision": "2"
   },
   {
-   "default": "1",
-   "description": "Show exact totals without rounding",
-   "fieldname": "disable_rounded_total",
-   "fieldtype": "Check",
-   "label": "Disable Rounded Total"
-  },
-  {
    "fieldname": "column_break_general",
    "fieldtype": "Column Break"
   },
   {
    "default": "0",
-   "description": "Enable sales on credit",
+   "description": "Allow customers to buy on credit (negative balance/debt)",
    "fieldname": "allow_credit_sale",
    "fieldtype": "Check",
    "label": "Allow Credit Sale"
+  },
+  {
+   "default": "0",
+   "description": "Allow customers to use their positive credit balance (from returns/overpayments) as payment",
+   "fieldname": "allow_customer_credit_payment",
+   "fieldtype": "Check",
+   "label": "Allow Customer Credit Payment"
   },
   {
    "default": "0",
@@ -210,13 +221,6 @@
    "fieldname": "allow_return",
    "fieldtype": "Check",
    "label": "Allow Return"
-  },
-  {
-   "default": "0",
-   "description": "Write off small change amounts",
-   "fieldname": "allow_write_off_change",
-   "fieldtype": "Check",
-   "label": "Allow Write Off Change"
   },
   {
    "default": "0",
@@ -291,6 +295,13 @@
    "fieldname": "display_discount_amount",
    "fieldtype": "Check",
    "label": "Display Discount Amount"
+  },
+  {
+   "default": "0",
+   "description": "Show item variants directly in the item grid instead of their template items. When disabled, template items are shown and variants are selected via a variant selector.",
+   "fieldname": "show_variants_as_items",
+   "fieldtype": "Check",
+   "label": "Show Variants as Items"
   },
   {
    "collapsible": 1,
@@ -503,6 +514,27 @@
    "fieldname": "allow_negative_stock",
    "fieldtype": "Check",
    "label": "Allow Negative Stock"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "section_break_security",
+   "fieldtype": "Section Break",
+   "label": "Security"
+  },
+  {
+   "default": "0",
+   "description": "Lock the POS screen after a period of inactivity or when the browser tab loses focus",
+   "fieldname": "enable_session_lock",
+   "fieldtype": "Check",
+   "label": "Enable Session Lock"
+  },
+  {
+   "default": "5",
+   "depends_on": "enable_session_lock",
+   "description": "Minutes of inactivity before the session is locked",
+   "fieldname": "session_lock_timeout",
+   "fieldtype": "Int",
+   "label": "Session Lock Timeout (minutes)"
   },
   {
    "fieldname": "barcode_tab",

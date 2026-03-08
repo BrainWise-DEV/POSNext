@@ -6,6 +6,10 @@ export const shiftState = ref({
 	pos_profile: null,
 	company: null,
 	isOpen: false,
+	/** Initial elapsed ms at the moment shift data was received from server */
+	_initialElapsedMs: 0,
+	/** Local timestamp (Date.now()) when shift data was received */
+	_receivedAt: 0,
 })
 
 export function useShift() {
@@ -15,20 +19,36 @@ export function useShift() {
 		auto: false,
 		onSuccess(data) {
 			if (data) {
+				// Compute initial elapsed time using server timestamps
+				// (avoids timezone mismatch between server and browser)
+				let initialElapsedMs = 0
+				if (data.server_now && data.pos_opening_shift?.period_start_date) {
+					const serverNow = new Date(data.server_now).getTime()
+					const shiftStart = new Date(data.pos_opening_shift.period_start_date).getTime()
+					initialElapsedMs = Math.max(0, serverNow - shiftStart)
+				}
 				shiftState.value = {
 					pos_opening_shift: data.pos_opening_shift,
 					pos_profile: data.pos_profile,
 					company: data.company,
 					isOpen: true,
+					_initialElapsedMs: initialElapsedMs,
+					_receivedAt: Date.now(),
 				}
 				// Store in localStorage for offline support
-				localStorage.setItem("pos_shift_data", JSON.stringify(data))
+				localStorage.setItem("pos_shift_data", JSON.stringify({
+					...data,
+					_initialElapsedMs: initialElapsedMs,
+					_receivedAt: Date.now(),
+				}))
 			} else {
 				shiftState.value = {
 					pos_opening_shift: null,
 					pos_profile: null,
 					company: null,
 					isOpen: false,
+					_initialElapsedMs: 0,
+					_receivedAt: 0,
 				}
 				localStorage.removeItem("pos_shift_data")
 			}
@@ -45,6 +65,8 @@ export function useShift() {
 						pos_profile: data.pos_profile,
 						company: data.company,
 						isOpen: true,
+						_initialElapsedMs: data._initialElapsedMs || 0,
+						_receivedAt: data._receivedAt || Date.now(),
 					}
 				} catch (e) {
 					console.error("Error parsing cached shift data:", e)
@@ -75,9 +97,15 @@ export function useShift() {
 				pos_profile: data.pos_profile,
 				company: data.company,
 				isOpen: true,
+				_initialElapsedMs: 0,
+				_receivedAt: Date.now(),
 			}
 			// Store in localStorage
-			localStorage.setItem("pos_shift_data", JSON.stringify(data))
+			localStorage.setItem("pos_shift_data", JSON.stringify({
+				...data,
+				_initialElapsedMs: 0,
+				_receivedAt: Date.now(),
+			}))
 		},
 		onError(error) {
 			console.error("Error creating opening shift:", error)
@@ -105,6 +133,8 @@ export function useShift() {
 				pos_profile: null,
 				company: null,
 				isOpen: false,
+				_initialElapsedMs: 0,
+				_receivedAt: 0,
 			}
 			localStorage.removeItem("pos_shift_data")
 		},

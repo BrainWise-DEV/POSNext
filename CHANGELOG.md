@@ -7,6 +7,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.15.0] - 2026-02-06
+
+### Added
+- **Customer Credit Balance as Payment Method**
+  - New "Add to Customer Credit Balance" option in return dialog — cashiers can choose between cash refund or adding credit to customer balance
+  - Customer credit payment method — use positive credit balance (from returns/advances) as payment
+  - New `allow_customer_credit_payment` POS Setting to enable credit balance payments
+  - Race condition protection using SELECT FOR UPDATE for concurrent credit redemption
+  - Optimistic locking with modified timestamps to prevent stale credit usage
+  - Return type indicators in Invoice Details: blue "Added to Customer Credit" vs green "Cash Refund"
+  - Separated credit calculation: regular invoice outstanding (debt) vs return invoice credit, preventing double-counting
+
+- **Shift Duration Improvements**
+  - Timezone-safe shift duration calculation — server sends `server_now` timestamp, frontend computes elapsed time without timezone mismatch
+  - Multi-day shift display with proper formatting (e.g., "2 Days 3 Hours 15 Minutes")
+  - Full word time labels on desktop: Hours, Minutes, Seconds with proper singular/plural handling
+  - Shift timer pauses automatically when closing dialog is open
+  - Idle warning when shift closing dialog stays open for over 1 minute
+
+- **Enhanced Mobile Payment UI**
+  - Physical keyboard input support (0-9, decimal, backspace, Enter) for payment numpad
+  - Consistent payment method layout across cash and non-cash payment types
+  - Context-aware quick amounts: ceiling/rounded denominations for cash, exact fractional amounts for non-cash
+  - Quick amounts always visible with proper disabled states
+
+### Changed
+- **Sidebar Navigation**
+  - Settings button moved to bottom of sidebar for better visual hierarchy
+  - Removed empty Dashboard and Reports placeholder components
+
+- **Code Quality**
+  - Centralized `DEFAULT_CURRENCY` and `DEFAULT_LOCALE` constants, eliminating hardcoded "USD" and "en-US" strings
+  - Removed redundant credit sale check from `get_available_credit` API — fetching existing credit no longer requires credit sale to be enabled
+  - Removed duplicate return success message (was showing twice from both dialog and parent)
+
+### Fixed
+- **Returns & Refunds**
+  - Use `net_rate` for accurate return refund calculation, properly accounting for coupon and invoice-level discounts
+  - Display customer name and posting date in return dialog
+  - Calculate effective rate for refunds including taxes and discounts — customers refunded exactly what they paid
+
+- **Monetary Calculations**
+  - Use `roundCurrency` consistently across all payment, return, edit, and draft dialogs
+  - 3-decimal precision (`round3`) for rate calculations preventing floating-point rounding discrepancies
+  - Backend uses `flt(..., 3)` for rate calculations matching frontend precision
+  - Fixed decimal precision issues causing incorrect "PARTIAL PAYMENT" status on fully paid invoices
+
+- **Write-Off Feature**
+  - Implemented write-off for small remaining payment amounts with visual toggle UI
+  - Centralized currency rounding using Frappe's `flt()` as single source of truth
+
+- **Invoice History**
+  - Integrated ReturnInvoiceDialog directly into InvoiceHistoryDialog (no nested modals)
+  - Fixed pagination — "Load More" button now correctly appends results
+  - Changed invoice sorting from creation date to modified date
+  - Added `canCreateReturn()` check to hide return button for fully returned invoices
+
+- **Barcode**
+  - Handle absent barcode UOM price with proper conversion factor calculation
+  - Cache calculated prices for consistency across barcode operations
+
+- **ERPNext v15/v16 Compatibility**
+  - Support both `post_change_gl_entries` field locations (Accounts Settings vs Singles table)
+  - Support both v15 `make_gle_for_change_amount()` and v16 `get_gle_for_change_amount()` methods
+  - Convert `get_stock_availability` from SQL string to Query Builder for Frappe 16
+
+- **Shift Timer**
+  - Fixed negative shift duration (-1 Hours -60 Minutes) caused by timezone mismatch between server and browser
+
+- **Translations**
+  - Added Arabic, Indonesian, and Portuguese translations for all new features
+
 ## [1.14.0] - 2026-01-25
 
 ### Added
@@ -875,7 +947,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Shift management
 - Stock tracking
 
-[Unreleased]: https://github.com/BrainWise-DEV/POSNext/compare/v1.14.0...HEAD
+[Unreleased]: https://github.com/BrainWise-DEV/POSNext/compare/v1.15.0...HEAD
+[1.15.0]: https://github.com/BrainWise-DEV/POSNext/compare/v1.14.0...v1.15.0
 [1.14.0]: https://github.com/BrainWise-DEV/POSNext/compare/v1.13.0...v1.14.0
 [1.13.0]: https://github.com/BrainWise-DEV/POSNext/compare/v1.12.0...v1.13.0
 [1.12.0]: https://github.com/BrainWise-DEV/POSNext/compare/v1.11.0...v1.12.0

@@ -233,17 +233,17 @@
 			</div>
 		</div>
 
-		<!-- Initial Loading State - Only for first load -->
-		<div v-if="loading && !filteredItems" class="flex-1 flex items-center justify-center p-3">
+		<!-- Initial Loading State - Show spinner while fetching items -->
+		<div v-if="loading && (!filteredItems || filteredItems.length === 0)" class="flex-1 flex items-center justify-center p-3">
 			<div class="text-center py-8">
 				<div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
 				<p class="mt-3 text-xs text-gray-500">{{ __('Loading items...') }}</p>
 			</div>
 		</div>
 
-		<!-- Empty State - Simple, no animation -->
+		<!-- Empty State - Only show when NOT loading and truly no items -->
 		<div
-			v-else-if="(!filteredItems || filteredItems.length === 0)"
+			v-else-if="!loading && (!filteredItems || filteredItems.length === 0)"
 			class="flex-1 flex items-center justify-center p-3"
 		>
 			<div class="text-center py-8">
@@ -278,7 +278,7 @@
 			>
 				<div class="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-1.5 sm:gap-2.5">
 					<div
-						v-for="item in paginatedItems"
+						v-for="item in displayedItems"
 						:key="item.item_code"
 						@touchstart.passive="getOptimizedClickHandler(item).touchstart"
 						@touchmove.passive="getOptimizedClickHandler(item).touchmove"
@@ -290,7 +290,7 @@
 					>
 						<!-- Stock Badge - Tap to select, long press to view warehouse availability -->
 						<div
-							v-if="item.is_stock_item || item.is_bundle"
+							v-if="(item.is_stock_item || item.is_bundle) && !item.has_variants"
 							@pointerdown="onLongPressStart(item)"
 							@pointerup="onLongPressEnd"
 							@pointercancel="clearLongPress"
@@ -379,6 +379,9 @@
 							<h3 class="text-[10px] sm:text-xs font-semibold text-gray-900 truncate mb-0.5 leading-tight">
 								{{ item.item_name }}
 							</h3>
+							<p v-if="item.attributes" class="text-[8px] sm:text-[9px] text-gray-400 truncate leading-tight">
+								{{ Object.values(item.attributes).join(' / ') }}
+							</p>
 							<p class="text-[9px] sm:text-[10px] text-gray-500 leading-tight">
 									<span class="font-semibold text-blue-600">{{ formatCurrency(item.rate || item.price_list_rate || 0) }}</span>
 									<span class="text-gray-400">/ {{ item.uom || item.stock_uom || __('Nos', null, 'UOM') }}</span>
@@ -393,8 +396,8 @@
 					<p class="ms-2 text-xs text-gray-500">{{ __('Loading more items...') }}</p>
 				</div>
 
-				<!-- End of Results Indicator - Only show on last page or when all items fit in one page -->
-				<div v-else-if="!hasMore && filteredItems.length > 0 && !searchTerm && (currentPage === totalPages || totalPages === 1)" class="flex justify-center items-center py-3">
+				<!-- End of Results Indicator - Show on last page when no more data -->
+				<div v-else-if="filteredItems.length > 0 && !searchTerm && currentPage === totalPages && totalPages >= 1" class="flex justify-center items-center py-3">
 					<p class="text-xs text-gray-400">{{ __('All items loaded') }}</p>
 				</div>
 
@@ -410,8 +413,8 @@
 					<div class="text-[10px] sm:text-xs text-gray-600 order-2 sm:order-1">
 						{{ __('{0} - {1} of {2}', [
 							(((currentPage - 1) * itemsPerPage) + 1),
-							Math.min(currentPage * itemsPerPage, filteredItems.length),
-							filteredItems.length
+							Math.min(currentPage * itemsPerPage, paginationTotal),
+							paginationTotal
 						]) }}
 					</div>
 					<div class="flex items-center gap-1 order-1 sm:order-2">
@@ -427,7 +430,7 @@
 							:aria-label="__('Go to first page')"
 						>
 							<span class="hidden xs:inline">{{ __('First') }}</span>
-							<span class="xs:hidden">«</span>
+							<span class="xs:hidden">&laquo;</span>
 						</button>
 						<button
 							@click="previousPage"
@@ -441,7 +444,7 @@
 							:aria-label="__('Go to previous page')"
 						>
 							<span class="hidden xs:inline">{{ __('Previous') }}</span>
-							<span class="xs:hidden">‹</span>
+							<span class="xs:hidden">&lsaquo;</span>
 						</button>
 						<div class="flex items-center gap-0.5 sm:gap-1">
 							<button
@@ -471,7 +474,7 @@
 							:aria-label="__('Go to next page')"
 						>
 							<span class="hidden xs:inline">{{ __('Next') }}</span>
-							<span class="xs:hidden">›</span>
+							<span class="xs:hidden">&rsaquo;</span>
 						</button>
 						<button
 							@click="goToPage(totalPages)"
@@ -485,7 +488,7 @@
 							:aria-label="__('Go to last page')"
 						>
 							<span class="hidden xs:inline">{{ __('Last') }}</span>
-							<span class="xs:hidden">»</span>
+							<span class="xs:hidden">&raquo;</span>
 						</button>
 					</div>
 				</div>
@@ -499,7 +502,7 @@
 				class="flex-1 overflow-x-auto overflow-y-auto"
 				style="min-height: 0;"
 			>
-				<table v-if="paginatedItems.length > 0" class="min-w-full divide-y divide-gray-200">
+				<table v-if="displayedItems.length > 0" class="min-w-full divide-y divide-gray-200">
 					<thead class="bg-gray-50 sticky top-0 z-10">
 						<tr>
 							<th scope="col" class="px-2 sm:px-3 py-2 sm:py-2.5 text-start text-[10px] sm:text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 w-[50px] sm:w-[60px]">{{ __('Image') }}</th>
@@ -512,7 +515,7 @@
 					</thead>
 					<tbody class="bg-white divide-y divide-gray-200">
 						<tr
-							v-for="item in paginatedItems"
+							v-for="item in displayedItems"
 							:key="item.item_code"
 							@touchstart.passive="getOptimizedClickHandler(item).touchstart"
 							@touchmove.passive="getOptimizedClickHandler(item).touchmove"
@@ -545,6 +548,9 @@
 								<div class="text-xs sm:text-sm font-medium text-gray-900 truncate" :title="item.item_name">
 									{{ item.item_name }}
 								</div>
+								<div v-if="item.attributes" class="text-[8px] sm:text-[9px] text-gray-400 truncate leading-tight">
+									{{ Object.values(item.attributes).join(' / ') }}
+								</div>
 							</td>
 							<td class="hidden sm:table-cell px-2 sm:px-3 py-2 whitespace-nowrap sm:max-w-[150px]">
 								<div class="text-xs sm:text-sm text-gray-500 truncate" :title="item.item_code">{{ item.item_code }}</div>
@@ -555,7 +561,7 @@
 							<td class="px-2 sm:px-3 py-2 whitespace-nowrap w-[70px] sm:w-[100px]">
 								<!-- Stock Badge - Tap to select, long press to view warehouse availability -->
 								<div
-									v-if="item.is_stock_item || item.is_bundle"
+									v-if="(item.is_stock_item || item.is_bundle) && !item.has_variants"
 									@pointerdown="onLongPressStart(item)"
 									@pointerup="onLongPressEnd"
 									@pointercancel="clearLongPress"
@@ -592,8 +598,8 @@
 							</td>
 						</tr>
 
-						<!-- End of Results Indicator Row - Only show on last page or when all items fit in one page -->
-						<tr v-else-if="!hasMore && filteredItems.length > 0 && !searchTerm && (currentPage === totalPages || totalPages === 1)">
+						<!-- End of Results Indicator Row - Show on last page when no more data -->
+						<tr v-else-if="filteredItems.length > 0 && !searchTerm && currentPage === totalPages && totalPages >= 1">
 							<td colspan="6" class="px-2 sm:px-3 py-3 text-center bg-white">
 								<p class="text-xs text-gray-400">{{ __('All items loaded') }}</p>
 							</td>
@@ -615,8 +621,8 @@
 					<div class="text-[10px] sm:text-xs text-gray-600 order-2 sm:order-1">
 						{{ __('{0} - {1} of {2}', [
 							(((currentPage - 1) * itemsPerPage) + 1),
-							Math.min(currentPage * itemsPerPage, filteredItems.length),
-							filteredItems.length
+							Math.min(currentPage * itemsPerPage, paginationTotal),
+							paginationTotal
 						]) }}
 					</div>
 					<div class="flex items-center gap-1 order-1 sm:order-2">
@@ -632,7 +638,7 @@
 							:aria-label="__('Go to first page')"
 						>
 							<span class="hidden xs:inline">{{ __('First') }}</span>
-							<span class="xs:hidden">«</span>
+							<span class="xs:hidden">&laquo;</span>
 						</button>
 						<button
 							@click="previousPage"
@@ -646,7 +652,7 @@
 							:aria-label="__('Go to previous page')"
 						>
 							<span class="hidden xs:inline">{{ __('Previous') }}</span>
-							<span class="xs:hidden">‹</span>
+							<span class="xs:hidden">&lsaquo;</span>
 						</button>
 						<div class="flex items-center gap-0.5 sm:gap-1">
 							<button
@@ -676,7 +682,7 @@
 							:aria-label="__('Go to next page')"
 						>
 							<span class="hidden xs:inline">{{ __('Next') }}</span>
-							<span class="xs:hidden">›</span>
+							<span class="xs:hidden">&rsaquo;</span>
 						</button>
 						<button
 							@click="goToPage(totalPages)"
@@ -690,7 +696,7 @@
 							:aria-label="__('Go to last page')"
 						>
 							<span class="hidden xs:inline">{{ __('Last') }}</span>
-							<span class="xs:hidden">»</span>
+							<span class="xs:hidden">&raquo;</span>
 						</button>
 					</div>
 				</div>
@@ -715,7 +721,9 @@ import WarehouseAvailabilityDialog from "@/components/sale/WarehouseAvailability
 import { useItemSearchStore } from "@/stores/itemSearch"
 import { usePOSSettingsStore } from "@/stores/posSettings"
 import { useStock } from "@/composables/useStock"
-import { formatCurrency as formatCurrencyUtil } from "@/utils/currency"
+import { useDialogState } from "@/composables/useDialogState"
+import { useSearchInput } from "@/composables/useSearchInput"
+import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency"
 import { useToast } from "@/composables/useToast"
 import { storeToRefs } from "pinia"
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue"
@@ -725,6 +733,8 @@ import {
 	addPassiveListener,
 	runWhenIdle
 } from "@/utils/lowEndOptimizations"
+import { performanceConfig } from "@/utils/performanceConfig"
+import { shouldValidateItemStock } from "@/utils/stockValidator"
 
 const props = defineProps({
 	posProfile: String,
@@ -734,7 +744,7 @@ const props = defineProps({
 	},
 	currency: {
 		type: String,
-		default: "USD",
+		default: DEFAULT_CURRENCY,
 	},
 })
 
@@ -744,6 +754,7 @@ const emit = defineEmits(["item-selected"])
 const { getStockStatus } = useStock()
 const settingsStore = usePOSSettingsStore()
 const { showError, showWarning } = useToast()
+const { isAnyDialogOpen } = useDialogState()
 
 // Use Pinia store
 const itemStore = useItemSearchStore()
@@ -759,22 +770,28 @@ const {
 	cacheStats,
 	sortBy,
 	sortOrder,
+	totalServerItems,
 } = storeToRefs(itemStore)
+
+// Search input composable — owns search/scanner state, timers, concurrency
+const {
+	searchInputRef, scannerEnabled, autoAddEnabled,
+	handleSearchInput, handleKeyDown, handleSearchClick,
+	toggleBarcodeScanner, toggleAutoAdd, focusSearchInput,
+	clearSearchAndResetInput,
+	cleanup: cleanupSearchInput,
+} = useSearchInput({
+	itemStore, onItemFound: selectItem,
+	showWarning, isAnyDialogOpen,
+})
 
 // Local state
 const viewMode = ref("grid")
-const lastKeyTime = ref(0)
-const barcodeBuffer = ref("")
-const searchInputRef = ref(null)
-const scannerEnabled = ref(false)
-const autoAddEnabled = ref(false)
 const itemThreshold = ref(50) // Threshold for auto-switching to list view
 const userManuallySetView = ref(false) // Track if user manually changed view mode
-const scannerInputDetected = ref(false) // Track if current input is from scanner
-const autoSearchTimer = ref(null) // Timer for auto-search when typing stops
 const lastAutoSwitchCount = ref(0)
-const lastFilterSignature = ref("")
 const showSortDropdown = ref(false) // Sort dropdown visibility
+const skipPageReset = ref(false) // Skip page reset when navigating via pagination
 
 // Warehouse availability dialog state
 const showWarehouseDialog = ref(false)
@@ -789,18 +806,32 @@ const scrollCleanupFns = ref([])
 
 // Pagination state (for client-side display)
 const currentPage = ref(1)
-const itemsPerPage = ref(20)
+const itemsPerPage = ref(performanceConfig.get('itemsPerPage') || 100)
+const lastFilterSignature = ref("")
 
-// Computed paginated items
-// filteredItems is already reactive and includes live stock from stockStore
-const paginatedItems = computed(() => {
+// Computed paginated items — server fetches one page at a time,
+// so filteredItems already contains only the current page's items.
+const displayedItems = computed(() => {
 	if (!filteredItems.value) return []
-	const start = (currentPage.value - 1) * itemsPerPage.value
-	const end = start + itemsPerPage.value
-	return filteredItems.value.slice(start, end)
+	return filteredItems.value
 })
 
+// Total item count for pagination display
+const paginationTotal = computed(() => {
+	if (searchTerm.value?.trim()) return filteredItems.value?.length || 0
+	return totalServerItems.value || filteredItems.value?.length || 0
+})
+
+// Total pages is based on server-side total count (not local array length).
+// During search, fall back to local results since server count is for browsing.
 const totalPages = computed(() => {
+	if (searchTerm.value?.trim()) {
+		// During search, we don't paginate server-side — show all results
+		return 1
+	}
+	if (totalServerItems.value > 0) {
+		return Math.ceil(totalServerItems.value / itemsPerPage.value)
+	}
 	if (!filteredItems.value) return 0
 	return Math.ceil(filteredItems.value.length / itemsPerPage.value)
 })
@@ -881,11 +912,18 @@ watch(
 	{ immediate: true },
 )
 
-// Reset to page 1 when filtered items meaningfully change
+// Reset to page 1 when filtered items meaningfully change (group switch, search, etc.)
+// Skip reset when the change is from pagination navigation (fetchPage)
 watch(
 	filteredItems,
 	(newItems) => {
 		if (!newItems) return
+
+		// Skip page reset for pagination-driven changes
+		if (skipPageReset.value) {
+			skipPageReset.value = false
+			return
+		}
 
 		const itemCount = newItems.length
 		const firstCode = itemCount > 0 ? newItems[0]?.item_code || "" : ""
@@ -922,27 +960,10 @@ watch(
 // Throttle scroll handler for better performance
 let scrollTimeout = null
 
-// Optimized scroll handler using RAF throttling
-const handleScrollRAF = throttleRAF((event) => {
-	const container = event.target
-	const scrollPosition = container.scrollTop + container.clientHeight
-	const scrollHeight = container.scrollHeight
-	const threshold = 200
-
-	const isSearching = searchTerm.value && searchTerm.value.trim().length > 0
-
-	if (
-		!isSearching &&
-		scrollHeight - scrollPosition < threshold &&
-		hasMore.value &&
-		!loadingMore.value &&
-		!loading.value
-	) {
-		// Use runWhenIdle to load more items without blocking scroll
-		runWhenIdle(() => {
-			itemStore.loadMoreItems()
-		}, { timeout: 1000 })
-	}
+// Scroll handler — pagination controls handle page navigation now.
+// Scroll is only used for scrolling within the current page.
+const handleScrollRAF = throttleRAF(() => {
+	// No-op: pagination handles page navigation via goToPage/nextPage/previousPage
 })
 
 function handleScroll(event) {
@@ -994,84 +1015,11 @@ onUnmounted(() => {
 	// Clear handlers and timers
 	optimizedClickHandlers.clear()
 	clearLongPress()
+	cleanupSearchInput()
 
 	// Remove click outside listener for sort dropdown
 	document.removeEventListener('click', handleClickOutside)
 })
-
-// Handle keydown for barcode scanner detection
-function handleKeyDown(event) {
-	const currentTime = Date.now()
-	const timeDiff = currentTime - lastKeyTime.value
-
-	// If Enter/newline is pressed, trigger barcode search
-	if (event.key === "Enter") {
-		event.preventDefault()
-
-		// Auto-add if Auto-Add mode is enabled (regardless of manual typing vs scanner)
-		if (autoAddEnabled.value) {
-			// Auto-add enabled - add item directly to cart
-			handleBarcodeSearch(true) // Pass true to indicate auto-add
-		} else {
-			// Auto-add disabled - normal search behavior
-			handleBarcodeSearch(false)
-		}
-
-		// Reset detection
-		barcodeBuffer.value = ""
-		scannerInputDetected.value = false
-
-		// Clear auto-search timer since Enter was pressed
-		if (autoSearchTimer.value) {
-			clearTimeout(autoSearchTimer.value)
-			autoSearchTimer.value = null
-		}
-
-		return
-	}
-
-	// Barcode scanners typically input very fast (< 50ms between characters)
-	// If time between keystrokes is very short, it's likely a barcode scanner
-	if (
-		timeDiff < 50 &&
-		event.key.length === 1 &&
-		barcodeBuffer.value.length > 0
-	) {
-		barcodeBuffer.value += event.key
-		scannerInputDetected.value = true // Mark as scanner input
-	} else if (event.key.length === 1) {
-		// Manual typing - reset buffer
-		barcodeBuffer.value = event.key
-		scannerInputDetected.value = false // Mark as manual input
-	}
-
-	lastKeyTime.value = currentTime
-}
-
-// Handle search input with instant reactivity
-function handleSearchInput(event) {
-	const value = event.target.value
-	itemStore.setSearchTerm(value)
-
-	// Clear any existing timer
-	if (autoSearchTimer.value) {
-		clearTimeout(autoSearchTimer.value)
-		autoSearchTimer.value = null
-	}
-
-	// If Auto-Add is enabled and user is typing, automatically trigger search after they stop
-	if (autoAddEnabled.value && value.trim().length > 0) {
-		// Wait 500ms after user stops typing, then auto-search and add
-		autoSearchTimer.value = setTimeout(() => {
-			handleBarcodeSearch(true) // Auto-add mode
-		}, 500) // 500ms delay after typing stops
-	}
-}
-
-// Handle click on search input to clear it
-function handleSearchClick() {
-	itemStore.clearSearch()
-}
 
 // Create optimized click handlers for better touch response
 const optimizedClickHandlers = new Map()
@@ -1135,16 +1083,13 @@ function clearLongPress() {
 function selectItem(item, autoAdd = false) {
 	if (!item) return false
 
-	// Skip stock validation for: variants (template), serial items, batch items (they have own validation)
-	const skipValidation = item.has_variants || item.has_serial_no || item.has_batch_no
-	const isStockTracked = item.is_stock_item || item.is_bundle
-	const qty = Math.floor(item.actual_qty ?? item.stock_qty ?? 0)
-
-	if (!skipValidation && isStockTracked && qty <= 0 && settingsStore.shouldEnforceStockValidation()) {
-		showError(item.is_bundle
-			? __('"{0}" cannot be added to cart. Bundle is out of stock. Allow Negative Stock is disabled.', [item.item_name])
-			: __('"{0}" cannot be added to cart. Item is out of stock. Allow Negative Stock is disabled.', [item.item_name]))
-		return false
+	// Early out-of-stock guard — full qty validation happens in cartStore.addItem()
+	if (!item.has_variants && settingsStore.shouldEnforceStockValidation() && shouldValidateItemStock(item)) {
+		const qty = item.actual_qty ?? item.stock_qty ?? 0
+		if (qty <= 0) {
+			showError(__('"{0}" is out of stock in warehouse "{1}".', [item.item_name, item.warehouse || '']))
+			return false
+		}
 	}
 
 	emit("item-selected", item, autoAdd)
@@ -1159,97 +1104,6 @@ function handleItemClick(itemCode) {
 	}
 	const item = filteredItems.value.find(i => i.item_code === itemCode)
 	selectItem(item)
-}
-
-async function handleBarcodeSearch(forceAutoAdd = false) {
-	const barcode = searchTerm.value.trim()
-
-	if (!barcode) {
-		return
-	}
-
-	// Auto-add if explicitly requested (from scanner newline detection)
-	// OR if both scanner and auto-add modes are enabled
-	const shouldAutoAdd =
-		forceAutoAdd || (scannerEnabled.value && autoAddEnabled.value)
-
-	try {
-		// First try exact barcode lookup via API
-		const item = await itemStore.searchByBarcode(barcode)
-
-		if (item) {
-			// Item found by barcode - validate stock and add to cart
-			if (selectItem(item, shouldAutoAdd)) {
-				itemStore.clearSearch()
-			}
-			return
-		}
-	} catch (error) {
-		console.error("Barcode API error:", error)
-	}
-
-	// Fallback: If only one item matches in filtered results, auto-select it
-	if (filteredItems.value.length === 1) {
-		if (selectItem(filteredItems.value[0], shouldAutoAdd)) {
-			itemStore.clearSearch()
-		}
-	} else if (filteredItems.value.length === 0) {
-		showWarning(__('Item Not Found: No item found with barcode: {0}', [barcode]))
-
-		// If scanner mode is enabled, clear search immediately for next scan
-		if (shouldAutoAdd) {
-			itemStore.clearSearch()
-		}
-	} else {
-		if (shouldAutoAdd) {
-			// In scanner mode, don't show manual selection - just notify
-			showWarning(__('Multiple Items Found: {0} items match barcode. Please refine search.', [filteredItems.value.length]))
-		} else {
-			showWarning(__('Multiple Items Found: {0} items match. Please select one.', [filteredItems.value.length]))
-		}
-	}
-}
-
-function toggleBarcodeScanner() {
-	scannerEnabled.value = !scannerEnabled.value
-
-	if (scannerEnabled.value) {
-		// Auto-enable auto-add when scanner is enabled
-		autoAddEnabled.value = true
-
-		// Focus on search input when enabling scanner
-		const input = searchInputRef.value || document.getElementById("item-search")
-		if (input) {
-			input.focus()
-		}
-	} else {
-		// Disable auto-add when scanner is disabled
-		autoAddEnabled.value = false
-	}
-}
-
-function toggleAutoAdd() {
-	// Auto-add works independently - no need for scanner mode
-	autoAddEnabled.value = !autoAddEnabled.value
-
-	// Auto-enable scanner mode when auto-add is enabled
-	if (autoAddEnabled.value && !scannerEnabled.value) {
-		scannerEnabled.value = true
-	}
-
-	// Clear any pending timer when toggling off
-	if (!autoAddEnabled.value && autoSearchTimer.value) {
-		clearTimeout(autoSearchTimer.value)
-		autoSearchTimer.value = null
-	}
-
-	if (autoAddEnabled.value) {
-		// Focus on search input
-		const input = searchInputRef.value || document.getElementById("item-search")
-		if (input) {
-			input.focus()
-		}
-	}
 }
 
 function formatCurrency(amount) {
@@ -1272,6 +1126,7 @@ defineExpose({
 	loadItems: () => itemStore.loadAllItems(props.posProfile),
 	loadItemGroups: () => itemStore.loadItemGroups(),
 	loadMoreItems: () => itemStore.loadMoreItems(),
+	focusSearchInput,
 })
 
 // Watch for view mode changes and rebind scroll listeners
@@ -1309,22 +1164,28 @@ function setViewMode(mode) {
 	userManuallySetView.value = true
 }
 
-// Pagination functions
+// Pagination functions — each page fetches fresh data from server
 function goToPage(page) {
-	if (page >= 1 && page <= totalPages.value) {
+	if (page >= 1 && page <= totalPages.value && page !== currentPage.value) {
+		skipPageReset.value = true
 		currentPage.value = page
+		itemStore.fetchPage(page)
 	}
 }
 
 function nextPage() {
 	if (currentPage.value < totalPages.value) {
+		skipPageReset.value = true
 		currentPage.value++
+		itemStore.fetchPage(currentPage.value)
 	}
 }
 
 function previousPage() {
 	if (currentPage.value > 1) {
+		skipPageReset.value = true
 		currentPage.value--
+		itemStore.fetchPage(currentPage.value)
 	}
 }
 

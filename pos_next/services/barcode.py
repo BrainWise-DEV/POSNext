@@ -136,10 +136,20 @@ def compute_resolved_item_data(
 
     barcode_type = resolved_barcode.get("barcode_type")
     barcode_uom = resolved_barcode.get("uom")
+    # If barcode resolver didn't provide a UOM, fall back to item's stock UOM
+    if not barcode_uom:
+        barcode_uom = item.get("uom")
     uom_prices = item.get("uom_prices", {})
     barcode_uom_price = uom_prices.get(barcode_uom)
     item_uom = item.get("uom")
     item_price = item.get("rate")
+    item_name = item.get("item_code")
+    if item_name is None:
+        frappe.log_error(
+            title="Barcode Resolver Error",
+            message=f"Item code is missing in item data: {item}",
+        )
+        return None
 
     integer_value = resolved_barcode.get("integer_value", "0")
     decimal_value = resolved_barcode.get("decimal_value", "0")
@@ -148,7 +158,7 @@ def compute_resolved_item_data(
         uom = barcode_uom
         price = barcode_uom_price
         if barcode_uom not in uom_prices:
-            conversion_factor = get_conversion_factor(item.get("name"), barcode_uom).get("conversion_factor", 1)
+            conversion_factor = get_conversion_factor(item_name, barcode_uom).get("conversion_factor", 1)
             qty *= conversion_factor
             uom = item_uom
             price = item_price
@@ -167,9 +177,11 @@ def compute_resolved_item_data(
             uom = barcode_uom
             qty = encoded_price / price if price and price > 0 else None
         else:
-            conversion_factor = get_conversion_factor(item.get("name"), barcode_uom).get("conversion_factor", 1)
-            uom = item_uom
+            conversion_factor = get_conversion_factor(item_name, barcode_uom).get("conversion_factor", 1)
+            uom = barcode_uom
             price = conversion_factor * item_price
+            # Add the calculated price as this barcode_uom price
+            uom_prices[barcode_uom] = price
             qty = encoded_price / price if price and price > 0 else None
         return {
             "resolved_qty": qty,

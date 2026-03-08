@@ -65,3 +65,5 @@ dev-dist/
 .playwright-mcp/*
 TODO.md
 .claude/settings.json
+*.jpeg
+missing.txt

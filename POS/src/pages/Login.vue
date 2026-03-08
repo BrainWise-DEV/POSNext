@@ -97,21 +97,21 @@
 </template>
 
 <script setup>
-import { usePOSCartStore } from "@/stores/posCart"
-import { usePOSUIStore } from "@/stores/posUI"
 import { FeatherIcon } from "frappe-ui"
 import { onMounted, reactive, ref, watch } from "vue"
 import { useRouter } from "vue-router"
 import ShiftOpeningDialog from "../components/ShiftOpeningDialog.vue"
-import { useShift } from "../composables/useShift"
 import { session } from "../data/session"
+import { useSessionLock } from "../composables/useSessionLock"
+import { cleanupUserSession } from "../utils/sessionCleanup"
 import { ensureCSRFToken } from "../utils/csrf"
 import { offlineWorker } from "../utils/offline/workerClient"
+import { logger } from "@/utils/logger"
+
+const log = logger.create("Login")
 
 const router = useRouter()
-const { shiftState } = useShift()
-const cartStore = usePOSCartStore()
-const uiStore = usePOSUIStore()
+const { cachePasswordHashFromLogin } = useSessionLock()
 
 const loginForm = reactive({
 	email: "",
@@ -122,7 +122,7 @@ const showShiftDialog = ref(false)
 const showPassword = ref(false)
 
 // Reset state when login page mounts
-onMounted(() => {
+onMounted(async () => {
 	// Clear login form
 	loginForm.email = ""
 	loginForm.password = ""
@@ -137,17 +137,7 @@ onMounted(() => {
 	// If user is already logged in (e.g., after successful login), don't clear their session
 	if (!session.isLoggedIn) {
 		showShiftDialog.value = false
-		cartStore.clearCart()
-		uiStore.resetAllDialogs()
-
-		// Clear any stale shift state
-		shiftState.value = {
-			pos_opening_shift: null,
-			pos_profile: null,
-			company: null,
-			isOpen: false,
-		}
-		localStorage.removeItem("pos_shift_data")
+		await cleanupUserSession()
 	}
 })
 
@@ -169,7 +159,7 @@ watch(
 		if (isLoggedIn) {
 			// Initialize CSRF token after successful login
 			try {
-				console.log("User logged in, initializing CSRF token...")
+				log.info("User logged in, initializing CSRF token...")
 				await ensureCSRFToken()
 
 				// Sync CSRF token to worker for background API calls
@@ -177,8 +167,11 @@ watch(
 					await offlineWorker.setCSRFToken(window.csrf_token)
 				}
 			} catch (error) {
-				console.error("Failed to initialize CSRF token after login:", error)
+				log.error("Failed to initialize CSRF token after login:", error)
 			}
+
+			// Cache password hash for offline session unlock
+			await cachePasswordHashFromLogin(loginForm.password)
 
 			// Show shift opening dialog after successful login
 			showShiftDialog.value = true

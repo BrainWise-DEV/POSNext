@@ -93,6 +93,9 @@ def check_opening_shift(user=None):
 	data["pos_opening_shift"] = frappe.get_doc("POS Opening Shift", shift_data["name"])
 	data["pos_profile"] = frappe.get_doc("POS Profile", shift_data["pos_profile"])
 	data["company"] = frappe.get_doc("Company", data["pos_profile"].company)
+	# Include server timestamp so frontend can compute shift duration
+	# without timezone mismatch (period_start_date is in server timezone)
+	data["server_now"] = str(get_datetime())
 
 	return data
 

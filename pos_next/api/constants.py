@@ -7,6 +7,10 @@ Shared constants for POS Next API modules.
 
 This module contains shared constants, field lists, and default values
 used across multiple API modules to maintain DRY principles.
+
+Note: Some settings are derived from POS Profile as single source of truth:
+- allow_write_off_change: derived from POS Profile (write_off_account + write_off_limit > 0)
+- disable_rounded_total: uses POS Profile value directly
 """
 
 # Fields to fetch from POS Settings
@@ -17,12 +21,12 @@ POS_SETTINGS_FIELDS = [
 	"tax_inclusive",
 	"allow_user_to_edit_additional_discount",
 	"allow_user_to_edit_item_discount",
+	"allow_user_to_edit_rate",
 	"use_percentage_discount",
 	"max_discount_allowed",
-	"disable_rounded_total",
 	"allow_credit_sale",
+	"allow_customer_credit_payment",
 	"allow_return",
-	"allow_write_off_change",
 	"allow_partial_payment",
 	"use_exact_amount",
 	"decimal_precision",
@@ -32,6 +36,9 @@ POS_SETTINGS_FIELDS = [
 	"allow_sales_order",
 	"allow_select_sales_order",
 	"create_only_sales_order",
+	"enable_session_lock",
+	"session_lock_timeout",
+	"show_variants_as_items",
 ]
 
 # Default POS Settings values
@@ -41,12 +48,14 @@ DEFAULT_POS_SETTINGS = {
 	"tax_inclusive": 0,
 	"allow_user_to_edit_additional_discount": 0,
 	"allow_user_to_edit_item_discount": 1,
+	"allow_user_to_edit_rate": 0,
 	"use_percentage_discount": 0,
 	"max_discount_allowed": 0,
-	"disable_rounded_total": 1,
+	"disable_rounded_total": 0,  # Derived from POS Profile
 	"allow_credit_sale": 0,
+	"allow_customer_credit_payment": 0,
 	"allow_return": 0,
-	"allow_write_off_change": 0,
+	"allow_write_off_change": 0,  # Derived from POS Profile
 	"allow_partial_payment": 0,
 	"use_exact_amount": 0,
 	"decimal_precision": "2",
@@ -56,4 +65,7 @@ DEFAULT_POS_SETTINGS = {
 	"allow_sales_order": 0,
 	"allow_select_sales_order": 0,
 	"create_only_sales_order": 0,
+	"enable_session_lock": 0,
+	"session_lock_timeout": 5,
+	"show_variants_as_items": 0,
 }

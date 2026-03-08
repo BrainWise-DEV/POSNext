@@ -346,10 +346,13 @@ class OfflineWorkerClient {
 				return 0
 			case "GET_INVOICES":
 			case "SEARCH_ITEMS":
+			case "SEARCH_ITEMS_BY_GROUP":
 			case "SEARCH_CUSTOMERS":
 			case "GET_PAYMENT_METHODS":
 			case "GET_CACHED_OFFERS":
 				return []
+			case "COUNT_ITEMS_BY_GROUP":
+				return 0
 			case "IS_CACHE_READY":
 				return false
 			case "GET_CACHE_STATS":
@@ -402,20 +405,32 @@ class OfflineWorkerClient {
 		return this.sendMessage("SAVE_INVOICE", { invoiceData })
 	}
 
-	async searchCachedItems(searchTerm = "", limit = 50) {
-		return this.sendMessage("SEARCH_ITEMS", { searchTerm, limit })
+	async searchCachedItems(searchTerm = "", limit = 50, offset = 0) {
+		return this.sendMessage("SEARCH_ITEMS", { searchTerm, limit, offset })
+	}
+
+	async searchCachedItemsByGroup(itemGroups = [], limit = 50, offset = 0) {
+		return this.sendMessage("SEARCH_ITEMS_BY_GROUP", { itemGroups, limit, offset })
+	}
+
+	async countCachedItemsByGroup(itemGroups = []) {
+		return this.sendMessage("COUNT_ITEMS_BY_GROUP", { itemGroups })
 	}
 
 	async searchCachedCustomers(searchTerm = "", limit = 20) {
 		return this.sendMessage("SEARCH_CUSTOMERS", { searchTerm, limit })
 	}
 
-	async cacheItems(items) {
-		return this.sendMessage("CACHE_ITEMS", { items })
+	async cacheItems(items, batchSize) {
+		return this.sendMessage("CACHE_ITEMS", { items, ...(batchSize ? { batchSize } : {}) })
 	}
 
 	async cacheCustomers(customers) {
 		return this.sendMessage("CACHE_CUSTOMERS", { customers })
+	}
+
+	async deleteCustomers(customerNames) {
+		return this.sendMessage("DELETE_CUSTOMERS", { customerNames })
 	}
 
 	async cachePaymentMethods(paymentMethods) {
@@ -424,6 +439,14 @@ class OfflineWorkerClient {
 
 	async getCachedPaymentMethods(posProfile) {
 		return this.sendMessage("GET_PAYMENT_METHODS", { posProfile })
+	}
+
+	async cacheSalesPersons(salesPersons) {
+		return this.sendMessage("CACHE_SALES_PERSONS", { salesPersons })
+	}
+
+	async getCachedSalesPersons(posProfile) {
+		return this.sendMessage("GET_SALES_PERSONS", { posProfile })
 	}
 
 	async isCacheReady() {
@@ -447,6 +470,10 @@ class OfflineWorkerClient {
 
 	async setCSRFToken(token) {
 		return this.sendMessage("SET_CSRF_TOKEN", { token })
+	}
+
+	async setShowVariantsAsItems(value) {
+		return this.sendMessage("SET_SHOW_VARIANTS_AS_ITEMS", { value: Boolean(value) })
 	}
 
 	async updateStockQuantities(stockUpdates) {

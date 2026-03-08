@@ -84,6 +84,13 @@ export const useBootstrapStore = defineStore("bootstrap", () => {
 	}
 
 	/**
+	 * Get preloaded site name
+	 */
+	function getSiteName() {
+		return data.value?.site_name || null
+	}
+
+	/**
 	 * Get preloaded shift data or null if not available
 	 */
 	function getPreloadedShift() {
@@ -109,6 +116,20 @@ export const useBootstrapStore = defineStore("bootstrap", () => {
 	 */
 	function getPreloadedPaymentMethods() {
 		return data.value?.payment_methods || []
+	}
+
+	/**
+	 * Get preloaded precision settings or defaults if not available
+	 * Settings from Date and Number Format section in System Settings
+	 * @returns {{ currency: number, float: number, rounding_method: string, number_format: string }}
+	 */
+	function getPreloadedPrecision() {
+		return data.value?.precision || {
+			currency: 2,
+			float: 3,
+			rounding_method: null,
+			number_format: null,
+		}
 	}
 
 	/**
@@ -142,7 +163,9 @@ export const useBootstrapStore = defineStore("bootstrap", () => {
 		getPreloadedPOSProfile,
 		getPreloadedPOSSettings,
 		getPreloadedPaymentMethods,
+		getPreloadedPrecision,
 		hasBootstrapData,
 		reset,
+		getSiteName,
 	}
 })

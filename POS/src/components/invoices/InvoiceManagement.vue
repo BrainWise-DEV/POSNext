@@ -560,7 +560,7 @@ import InvoiceFilters from "@/components/invoices/InvoiceFilters.vue"
 import PaymentDialog from "@/components/sale/PaymentDialog.vue"
 import { useInvoiceFilters } from "@/composables/useInvoiceFilters"
 import { useInvoiceFiltersStore } from "@/stores/invoiceFilters"
-import { formatCurrency as formatCurrencyUtil } from "@/utils/currency"
+import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency"
 import { getInvoiceStatusColor } from "@/utils/invoice"
 import { useFormatters } from "@/composables/useFormatters"
 import { useToast } from "@/composables/useToast"
@@ -584,7 +584,7 @@ const props = defineProps({
 	posProfile: String,
 	currency: {
 		type: String,
-		default: "USD",
+		default: DEFAULT_CURRENCY,
 	},
 	// Pass in data from parent stores
 	historyInvoices: {

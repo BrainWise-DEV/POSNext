@@ -100,7 +100,9 @@ fixtures = [
 					"POS Profile-posa_block_sale_beyond_available_qty",
 					"Mode of Payment-is_wallet_payment",
 					"Pricing Rule-apply_discount_on_price",
-					"Pricing Rule-min_or_max_discount_qty_limit"
+					"Pricing Rule-min_or_max_discount_qty_limit",
+					"Promotional Scheme-pos_only",
+					"Pricing Rule-pos_only"
 				]
 			]
 		]
@@ -201,7 +203,12 @@ doc_events = {
 		"validate": "pos_next.validations.validate_item"
 	},
 	"Customer": {
-		"after_insert": "pos_next.api.customers.auto_assign_loyalty_program"
+		"after_insert": [
+			"pos_next.api.customers.auto_assign_loyalty_program",
+			"pos_next.realtime_events.emit_customer_event"
+		],
+		"on_update": "pos_next.realtime_events.emit_customer_event",
+		"on_trash": "pos_next.realtime_events.emit_customer_event"
 	},
 	"Sales Invoice": {
 		"validate": [
@@ -246,6 +253,9 @@ doc_events = {
 	},
 	"Opportunity": {
 		"validate": "pos_next.overrides.pricing_rule.apply_min_max_price_discounts"
+	},
+	"Promotional Scheme": {
+		"on_update": "pos_next.overrides.pricing_rule.sync_pos_only_to_pricing_rules"
 	}
 }
 
