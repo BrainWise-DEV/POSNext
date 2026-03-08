@@ -99,10 +99,7 @@ fixtures = [
 					"POS Profile-posa_allow_delete",
 					"POS Profile-posa_block_sale_beyond_available_qty",
 					"Mode of Payment-is_wallet_payment",
-					"Pricing Rule-apply_discount_on_price",
-					"Pricing Rule-min_or_max_discount_qty_limit",
-					"Promotional Scheme-pos_only",
-					"Pricing Rule-pos_only"
+					"Promotional Scheme-pos_only"
 				]
 			]
 		]
