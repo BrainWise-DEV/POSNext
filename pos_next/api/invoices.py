@@ -1985,6 +1985,134 @@ def _build_item_tax_map(taxes: list) -> dict:
     return dict(tax_map)
 
 
+def _remap_foreign_payment_modes(payments_data, current_profile, original_profile):
+    """Remap payment modes that don't belong to the current POS profile.
+
+    Cross-branch returns problem:
+        Each POS branch has its own cash Mode of Payment that maps to a
+        dedicated GL cash account (e.g. "Boulaq Cash" -> account 12114,
+        "Cash lebanon" -> account 12123). When a customer returns an invoice
+        that was originally sold at a different branch, ERPNext's
+        make_sales_return() copies the *original* branch's payment modes.
+
+        If we don't remap, two things go wrong:
+        1. GL entries: the refund is posted against the wrong branch's cash
+           account (e.g. crediting Lebanon's cash instead of Boulaq's).
+        2. Shift closing: the foreign mode creates an orphan payment row
+           that doesn't exist in the current profile's opening balance,
+           blocking reconciliation.
+
+    Remapping strategy:
+        Modes are matched by their Mode of Payment *type* field:
+        - Cash -> Cash  (e.g. "Cash lebanon" -> "Boulaq Cash")
+        - Bank -> Bank  (e.g. "Lebanon Visa" -> "Visa")
+        - General -> first available in profile, or cash fallback
+
+        This ensures the GL account matches the physical cash drawer or
+        bank account at the branch where the return is processed.
+
+    Fallback chain for default mode:
+        1. POS Profile.posa_cash_mode_of_payment (explicit cash mode config)
+        2. First mode with type "Cash" in the profile
+        3. First mode in the profile (any type)
+
+    When remapping is skipped (no-op):
+        - Same profile (current == original)
+        - No current_profile provided
+        - All original modes already exist in the current profile
+        - No default_mode could be determined (empty profile)
+
+    Args:
+        payments_data: list of frappe._dict with mode_of_payment, amount, etc.
+                       (from Sales Invoice Payment child table of original invoice)
+        current_profile: POS Profile name where the return is being processed
+        original_profile: POS Profile name where the original sale happened
+
+    Returns:
+        The same payments_data list with mode_of_payment remapped in-place.
+        Shared modes (e.g. "Visa" exists in both profiles) are left unchanged.
+
+    Example:
+        Original invoice (profile "2- Lebanon"):
+            payments = [{"mode_of_payment": "Cash lebanon", "amount": 3240}]
+
+        Current profile "4- Boulaq" has modes:
+            [{"mode_of_payment": "Boulaq Cash", type: "Cash"},
+             {"mode_of_payment": "Visa",        type: "Bank"}]
+
+        After remap:
+            payments = [{"mode_of_payment": "Boulaq Cash", "amount": 3240}]
+
+        "Cash lebanon" (type=Cash) -> "Boulaq Cash" (type=Cash)
+    """
+    if not current_profile or current_profile == original_profile:
+        return payments_data
+
+    # Get current profile's payment modes
+    current_modes = {
+        row.mode_of_payment
+        for row in frappe.get_all(
+            "POS Payment Method",
+            filters={"parent": current_profile, "parenttype": "POS Profile"},
+            fields=["mode_of_payment"],
+        )
+    }
+
+    # Check if any payment needs remapping
+    needs_remap = any(p.mode_of_payment not in current_modes for p in payments_data)
+    if not needs_remap:
+        return payments_data
+
+    # Build type->mode map for the current profile.
+    # Uses setdefault so the first mode of each type wins (matches profile order).
+    mop = frappe.qb.DocType("Mode of Payment")
+    ppm = frappe.qb.DocType("POS Payment Method")
+    current_type_map = {}
+    rows = (
+        frappe.qb.from_(ppm)
+        .inner_join(mop).on(mop.name == ppm.mode_of_payment)
+        .select(ppm.mode_of_payment, mop.type)
+        .where(
+            (ppm.parent == current_profile)
+            & (ppm.parenttype == "POS Profile")
+        )
+    ).run(as_dict=True)
+
+    for row in rows:
+        current_type_map.setdefault(row.type, row.mode_of_payment)
+
+    # Default fallback: posa_cash_mode_of_payment > first Cash type > first mode
+    default_mode = (
+        frappe.db.get_value("POS Profile", current_profile, "posa_cash_mode_of_payment")
+        or current_type_map.get("Cash")
+        or (rows[0].mode_of_payment if rows else None)
+    )
+
+    if not default_mode:
+        return payments_data
+
+    # Fetch the type for each foreign mode in a single query
+    foreign_modes = [p.mode_of_payment for p in payments_data if p.mode_of_payment not in current_modes]
+    foreign_types = {}
+    if foreign_modes:
+        type_rows = frappe.get_all(
+            "Mode of Payment",
+            filters={"name": ["in", foreign_modes]},
+            fields=["name", "type"],
+        )
+        foreign_types = {r.name: r.type for r in type_rows}
+
+    # Remap: foreign Cash -> current Cash, foreign Bank -> current Bank, etc.
+    # If no type match in current profile, fall back to default_mode.
+    for payment in payments_data:
+        if payment.mode_of_payment in current_modes:
+            continue
+        foreign_type = foreign_types.get(payment.mode_of_payment)
+        payment.mode_of_payment = current_type_map.get(foreign_type, default_mode)
+
+    return payments_data
+
+
 @frappe.whitelist()
 def prepare_return_invoice(invoice_name, pos_opening_shift=None):
     """Prepare a return invoice using ERPNext's make_sales_return.
@@ -2116,6 +2244,28 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
         )
         .where(si_payment.parent == invoice_name)
     ).run(as_dict=True)
+
+    # Cross-branch return: remap foreign payment modes to the current profile.
+    #
+    # When the original invoice's POS profile differs from the current shift's
+    # profile, the original payment modes (e.g. "Cash lebanon") won't exist in
+    # the current profile ("4- Boulaq"). _remap_foreign_payment_modes matches
+    # by Mode of Payment type (Cash->Cash, Bank->Bank) so the frontend
+    # pre-fills the correct refund method and the resulting GL entries debit
+    # the correct branch cash/bank account.
+    #
+    # This is the primary fix point (Layer 1). The frontend and closing shift
+    # code have additional safety nets for cases where this remap doesn't run
+    # (e.g. no pos_opening_shift provided) or for already-submitted invoices
+    # with the wrong payment mode.
+    if pos_opening_shift:
+        current_profile = frappe.db.get_value(
+            "POS Opening Shift", pos_opening_shift, "pos_profile"
+        )
+        if current_profile:
+            payments_data = _remap_foreign_payment_modes(
+                payments_data, current_profile, invoice_info.pos_profile
+            )
 
     # Include original invoice data for reference (payments, amounts, etc.)
     return_dict["_original_invoice"] = {

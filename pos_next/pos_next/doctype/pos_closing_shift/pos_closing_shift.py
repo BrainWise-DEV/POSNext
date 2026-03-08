@@ -478,11 +478,40 @@ def _process_invoice(invoice, invoice_field, company_currency, cash_mode, paymen
         _aggregate_tax(taxes, t.account_head, t.rate, tax_amount)
 
     # Process payments
+    #
+    # Cross-branch return safety net (Layer 3):
+    #
+    # Return invoices submitted before the fix in prepare_return_invoice
+    # (Layer 1) may still carry foreign payment modes from the original
+    # invoice's POS profile. For example, a return against a "2- Lebanon"
+    # invoice done at "4- Boulaq" would have "Cash lebanon" as the payment
+    # mode, but "Cash lebanon" doesn't exist in Boulaq's opening balance.
+    #
+    # Without this guard, _aggregate_payment would create a new orphan row
+    # for "Cash lebanon" in the payment_reconciliation table. This causes:
+    # - A payment row the cashier didn't open with and can't reconcile
+    # - Validation errors from hooks that require closing_amount on all rows
+    # - The shift cannot be closed
+    #
+    # Fix: for return invoices only, if the payment mode is not in the set of
+    # known modes (opening balance + modes from previously processed invoices),
+    # remap it to the current profile's cash mode. This is safe because:
+    # - The cashier physically refunded from their own cash drawer
+    # - known_modes is built from the payments list which starts with the
+    #   opening balance (always matches the profile's configured modes)
+    # - Normal (non-return) invoices are never remapped — their modes are
+    #   legitimate and should create new rows if needed
+    known_modes = {pay.mode_of_payment for pay in payments}
     for p in invoice.payments:
         amount = get_base_value(p, "amount", "base_amount", conversion_rate)
-        if p.mode_of_payment == cash_mode:
+        mode = p.mode_of_payment
+
+        if is_return and mode not in known_modes:
+            mode = cash_mode
+
+        if mode == cash_mode:
             amount -= get_base_value(invoice, "change_amount", "base_change_amount", conversion_rate)
-        _aggregate_payment(payments, p.mode_of_payment, amount)
+        _aggregate_payment(payments, mode, amount)
 
     return transaction
 
