@@ -221,6 +221,9 @@ doc_events = {
 	},
 	"POS Profile": {
 		"on_update": "pos_next.realtime_events.emit_pos_profile_updated_event"
+	},
+	"Promotional Scheme": {
+		"on_update": "pos_next.overrides.pricing_rule.sync_pos_only_to_pricing_rules"
 	}
 }
 

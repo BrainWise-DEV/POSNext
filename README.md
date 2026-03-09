@@ -16,6 +16,17 @@
 
 ---
 
+## Branches
+
+| Branch | Stability | Purpose |
+|--------|-----------|---------|
+| [`version-15`](https://github.com/BrainWise-DEV/POSNext/tree/version-15) | **Stable** | Production-ready release for Frappe/ERPNext v15 |
+| [`develop`](https://github.com/BrainWise-DEV/POSNext/tree/develop) | **Unstable** | Active development — may contain breaking changes |
+
+> For production use, always install from the `version-15` branch.
+
+---
+
 ## 🎯 Why POS Next?
 
 POS Next is a **complete rewrite** of the ERPNext POS system, built from the ground up with modern technologies to deliver:
@@ -165,7 +176,7 @@ POS Next is a **complete rewrite** of the ERPNext POS system, built from the gro
 cd ~/frappe-bench
 
 # Get the app from GitHub
-bench get-app https://github.com/BrainWise-DEV/pos_next.git --branch develop
+bench get-app https://github.com/BrainWise-DEV/pos_next.git --branch version-15
 
 # Install on your site
 bench --site [your-site-name] install-app pos_next
@@ -204,7 +215,7 @@ Already have POS Next? Update to the latest version:
 
 ```bash
 cd ~/frappe-bench/apps/pos_next
-git pull origin develop
+git pull origin version-15
 cd ../..
 
 # Apply updates

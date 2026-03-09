@@ -58,6 +58,8 @@ export {
 	cacheCustomersFromServer,
 	cachePaymentMethodsFromServer,
 	getCachedPaymentMethods,
+	cacheSalesPersonsFromServer,
+	getCachedSalesPersons,
 	searchCachedItems,
 	searchCachedCustomers,
 	getCachedItem,

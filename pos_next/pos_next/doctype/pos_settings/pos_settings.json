@@ -69,6 +69,9 @@
   "section_break_misc",
   "input_qty",
   "allow_negative_stock",
+  "section_break_security",
+  "enable_session_lock",
+  "session_lock_timeout",
   "barcode_tab",
   "barcode_rules"
  ],
@@ -511,6 +514,27 @@
    "fieldname": "allow_negative_stock",
    "fieldtype": "Check",
    "label": "Allow Negative Stock"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "section_break_security",
+   "fieldtype": "Section Break",
+   "label": "Security"
+  },
+  {
+   "default": "0",
+   "description": "Lock the POS screen after a period of inactivity or when the browser tab loses focus",
+   "fieldname": "enable_session_lock",
+   "fieldtype": "Check",
+   "label": "Enable Session Lock"
+  },
+  {
+   "default": "5",
+   "depends_on": "enable_session_lock",
+   "description": "Minutes of inactivity before the session is locked",
+   "fieldname": "session_lock_timeout",
+   "fieldtype": "Int",
+   "label": "Session Lock Timeout (minutes)"
   },
   {
    "fieldname": "barcode_tab",

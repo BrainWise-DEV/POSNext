@@ -758,7 +758,7 @@
 </template>
 
 <script setup>
-import { useOffline } from "@/composables/useOffline"
+import { useOfflineStatus } from "@/composables/useOfflineStatus"
 import { useToast } from "@/composables/useToast"
 import { getPaymentIcon } from "@/utils/payment"
 import {
@@ -772,7 +772,7 @@ import { Button, Dialog, FeatherIcon, createResource } from "frappe-ui"
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue"
 
 const { showSuccess, showError, showWarning } = useToast()
-const { isOffline } = useOffline()
+const { isOffline } = useOfflineStatus()
 
 // ============================================
 // Constants (hoisted for performance)
@@ -899,6 +899,16 @@ const loadPaymentMethodsResource = createResource({
 	onSuccess(data) {
 		if (data && data.payments) {
 			paymentMethods.value = data.payments
+			// Re-initialize refund payments now that we know the current
+			// profile's modes. initializePaymentsFromInvoice() may have
+			// already run (from fetchInvoiceResource.onSuccess) before
+			// paymentMethods were loaded — in that case it skipped the
+			// foreign mode remap. Now that modes are available, re-run
+			// to validate and remap any foreign modes from cross-branch
+			// returns. See initializePaymentsFromInvoice() JSDoc for details.
+			if (originalInvoice.value) {
+				initializePaymentsFromInvoice()
+			}
 		}
 	},
 	onError(error) {
@@ -1415,22 +1425,55 @@ function removePaymentRow(paymentIndex) {
 	refundPayments.value.splice(paymentIndex, 1)
 }
 
+/**
+ * Cross-branch return — frontend safety net (Layer 2).
+ *
+ * Pre-fills refund payment rows from the original invoice's payments.
+ * The backend (prepare_return_invoice) already remaps foreign payment modes
+ * by type (Cash→Cash, Bank→Bank) via _remap_foreign_payment_modes. This
+ * function provides a second line of defense: if a mode in the original
+ * invoice doesn't exist in the current POS profile's paymentMethods, it
+ * falls back to the profile's default (first) mode.
+ *
+ * Timing:
+ *   - Called from fetchInvoiceResource.onSuccess (may run before
+ *     paymentMethods are loaded from the async profile fetch).
+ *   - If paymentMethods is empty, we skip the remap and trust the
+ *     backend's remapped values. loadPaymentMethodsResource.onSuccess
+ *     will re-call this function once methods are available.
+ *
+ * The payment mode dropdown (<select>) only shows modes from the current
+ * profile's paymentMethods. A foreign mode would appear as an unselectable
+ * value, so this remap also ensures the dropdown works correctly.
+ */
 function initializePaymentsFromInvoice() {
 	if (isOriginalCreditSale.value) {
 		refundPayments.value = []
 		return
 	}
 
+	const defaultMode = paymentMethods.value[0]?.mode_of_payment || ""
+
 	const invoicePayments = originalInvoice.value?.payments
 	if (invoicePayments?.length) {
+		// Only remap when paymentMethods are loaded. When null (not yet loaded),
+		// the backend has already remapped via _remap_foreign_payment_modes,
+		// so the modes are safe to use as-is.
+		const currentModes = paymentMethods.value.length
+			? new Set(paymentMethods.value.map((m) => m.mode_of_payment))
+			: null
+
 		refundPayments.value = invoicePayments.map((payment) => ({
-			mode_of_payment: payment.mode_of_payment,
+			mode_of_payment:
+				currentModes && !currentModes.has(payment.mode_of_payment)
+					? defaultMode
+					: payment.mode_of_payment,
 			amount: isPartiallyPaid.value ? 0 : Math.abs(payment.amount),
 		}))
 	} else {
 		refundPayments.value = [
 			{
-				mode_of_payment: paymentMethods.value[0]?.mode_of_payment || "",
+				mode_of_payment: defaultMode,
 				amount: 0,
 			},
 		]

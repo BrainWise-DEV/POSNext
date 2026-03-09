@@ -134,27 +134,42 @@ function add_to_pos_payments(d, frm) {
 }
 
 function add_to_payments(d, frm, conversion_rate) {
+        let cash_mode_of_payment = get_value(
+                "POS Profile",
+                frm.doc.pos_profile,
+                "posa_cash_mode_of_payment",
+        );
+        if (!cash_mode_of_payment) {
+                cash_mode_of_payment = "Cash";
+        }
+
+        // Cross-branch return safety net: collect known modes from opening balance
+        // so we can remap foreign payment modes on return invoices.
+        const known_modes = new Set(
+                frm.doc.payment_reconciliation.map((pay) => pay.mode_of_payment),
+        );
+
         d.payments.forEach((p) => {
+                let mode = p.mode_of_payment;
+
+                // Remap foreign modes on return invoices to the profile's cash mode.
+                // Same logic as Layer 3 in _process_invoice (Python).
+                if (d.is_return && !known_modes.has(mode)) {
+                        mode = cash_mode_of_payment;
+                }
+
                 const payment = frm.doc.payment_reconciliation.find(
-                        (pay) => pay.mode_of_payment === p.mode_of_payment,
+                        (pay) => pay.mode_of_payment === mode,
                 );
                 if (payment) {
                         let amount = get_base_value(p, "amount", "base_amount", conversion_rate);
-                        let cash_mode_of_payment = get_value(
-                                "POS Profile",
-                                frm.doc.pos_profile,
-                                "posa_cash_mode_of_payment",
-                        );
-                        if (!cash_mode_of_payment) {
-                                cash_mode_of_payment = "Cash";
-                        }
                         if (payment.mode_of_payment == cash_mode_of_payment) {
                                 amount -= get_base_value(d, "change_amount", "base_change_amount", conversion_rate);
                         }
                         payment.expected_amount += flt(amount);
                 } else {
                         frm.add_child("payment_reconciliation", {
-                                mode_of_payment: p.mode_of_payment,
+                                mode_of_payment: mode,
                                 opening_amount: 0,
                                 expected_amount: get_base_value(
                                         p,

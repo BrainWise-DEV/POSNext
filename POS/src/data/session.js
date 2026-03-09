@@ -3,6 +3,7 @@ import { createResource } from "frappe-ui"
 import { computed, reactive } from "vue"
 
 import { ensureCSRFToken } from "@/utils/csrf"
+import { cleanupUserSession } from "@/utils/sessionCleanup"
 import { userResource, userData } from "./user"
 
 export function sessionUser() {
@@ -44,14 +45,16 @@ export const session = reactive({
 	}),
 	logout: createResource({
 		url: "logout",
-		onSuccess() {
+		async onSuccess() {
+			await cleanupUserSession()
 			userResource.reset()
 			session.user = sessionUser()
 			router.replace({ name: "Login" })
 		},
-		onError(error) {
+		async onError(error) {
 			console.error("Logout error:", error)
 			// Even if logout fails on server, clear local session
+			await cleanupUserSession()
 			userResource.reset()
 			session.user = null
 			router.replace({ name: "Login" })

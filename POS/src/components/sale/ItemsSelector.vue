@@ -734,6 +734,7 @@ import {
 	runWhenIdle
 } from "@/utils/lowEndOptimizations"
 import { performanceConfig } from "@/utils/performanceConfig"
+import { shouldValidateItemStock } from "@/utils/stockValidator"
 
 const props = defineProps({
 	posProfile: String,
@@ -1118,16 +1119,13 @@ function clearLongPress() {
 function selectItem(item, autoAdd = false) {
 	if (!item) return false
 
-	// Skip stock validation for: template items (no stock), serial items, batch items (they have own validation)
-	const skipValidation = item.has_variants || item.has_serial_no || item.has_batch_no
-	const isStockTracked = item.is_stock_item || item.is_bundle
-	const qty = Math.floor(item.actual_qty ?? item.stock_qty ?? 0)
-
-	if (!skipValidation && isStockTracked && qty <= 0 && settingsStore.shouldEnforceStockValidation()) {
-		showError(item.is_bundle
-			? __('"{0}" cannot be added to cart. Bundle is out of stock. Allow Negative Stock is disabled.', [item.item_name])
-			: __('"{0}" cannot be added to cart. Item is out of stock. Allow Negative Stock is disabled.', [item.item_name]))
-		return false
+	// Early out-of-stock guard — full qty validation happens in cartStore.addItem()
+	if (!item.has_variants && settingsStore.shouldEnforceStockValidation() && shouldValidateItemStock(item)) {
+		const qty = item.actual_qty ?? item.stock_qty ?? 0
+		if (qty <= 0) {
+			showError(__('"{0}" is out of stock in warehouse "{1}".', [item.item_name, item.warehouse || '']))
+			return false
+		}
 	}
 
 	emit("item-selected", item, autoAdd)
