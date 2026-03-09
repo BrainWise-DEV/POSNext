@@ -102,7 +102,8 @@ fixtures = [
 					"POS Profile-posa_block_sale_beyond_available_qty",
 					"Mode of Payment-is_wallet_payment",
 					"Promotional Scheme-pos_only",
-					"Pricing Rule-pos_only"
+					"Pricing Rule-pos_only",
+					"POS Profile-custom_brands_table"
 				]
 			]
 		]
