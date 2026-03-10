@@ -1728,6 +1728,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		selectionMode,
 		currentDraftId,
 		offerProcessingState, // Offer processing state for UI feedback
+		restaurantTable,
+		kdsStatus,
 
 		// Computed
 		itemCount,
@@ -1746,6 +1748,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		setDefaultCustomer,
 		setPendingItem,
 		clearPendingItem,
+		setRestaurantTable,
+		setKdsStatus,
 		loadTaxRules,
 		setTaxInclusive,
 		submitInvoice,
