@@ -96,6 +96,11 @@ const filteredTables = computed(() => {
 onMounted(async () => {
 	await restaurantStore.loadTablesAndAreas()
 
+	// If empty from cache, try fetching from network directly
+	if (areas.value.length === 0 || tables.value.length === 0) {
+		await restaurantStore.fetchFromNetwork()
+	}
+
 	if (areas.value.length > 0) {
 		selectedArea.value = restaurantStore.defaultArea || areas.value[0].name
 	}
