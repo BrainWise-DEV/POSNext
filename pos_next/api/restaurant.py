@@ -56,17 +56,25 @@ def get_kds_orders():
 		filters={
 			"docstatus": 0, # Drafts
 			"is_pos": 1,
-			"restaurant_table": ["is", "set"],
+			"restaurant_table": ["!=", ""],
 			"kds_status": ["in", ["Pending", "Preparing", "Ready"]]
 		},
 		fields=["name", "customer", "restaurant_table", "kds_status", "creation", "modified"]
 	)
 
+	# Fallback safety: Check if the custom field actually exists in the DB to prevent 500 errors
+	# if the user hasn't run `bench migrate` yet.
+	has_instructions_field = frappe.db.has_column("Sales Invoice Item", "posa_special_instructions")
+	item_fields = ["item_code", "item_name", "qty", "description"]
+
+	if has_instructions_field:
+		item_fields.append("posa_special_instructions")
+
 	for order in orders:
 		order["items"] = frappe.get_all(
 			"Sales Invoice Item",
 			filters={"parent": order.name},
-			fields=["item_code", "item_name", "qty", "description", "posa_special_instructions"]
+			fields=item_fields
 		)
 
 	return orders
