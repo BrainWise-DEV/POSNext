@@ -58,6 +58,9 @@ const CURRENT_SCHEMA = {
 	// Payment methods cache
 	payment_methods: "&mode_of_payment, pos_profile",
 
+	// Sales persons cache
+	sales_persons: "&name, pos_profile",
+
 	// Payment queue for offline payments
 	payment_queue: "++id, timestamp, synced",
 
@@ -242,6 +245,7 @@ export const clearCachedData = async (options = {}) => {
 		stock: 0,
 		item_prices: 0,
 		payment_methods: 0,
+		sales_persons: 0,
 		invoices: 0,
 		payments: 0,
 		drafts: 0,
@@ -255,6 +259,7 @@ export const clearCachedData = async (options = {}) => {
 		results.stock = await db.stock.clear()
 		results.item_prices = await db.item_prices.clear()
 		results.payment_methods = await db.payment_methods.clear()
+		results.sales_persons = await db.sales_persons.clear()
 
 		// Conditionally clear invoice and payment queues
 		if (!preserveInvoices) {

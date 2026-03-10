@@ -310,6 +310,7 @@ export const clearAllCache = async () => {
 		await db.customers.clear()
 		await db.item_prices.clear()
 		await db.stock.clear()
+		await db.sales_persons.clear()
 
 		// Reset memory
 		memory.items = []
@@ -419,6 +420,61 @@ export async function getCachedPaymentMethods(posProfile) {
 		return methods
 	} catch (error) {
 		console.error("Error getting cached payment methods:", error)
+		return []
+	}
+}
+
+/**
+ * Cache sales persons from server for offline use
+ * @param {string} posProfile - POS Profile name
+ * @returns {Promise<object>} - Result with sales_persons array
+ */
+export async function cacheSalesPersonsFromServer(posProfile) {
+	try {
+		const result = await call("pos_next.api.pos_profile.get_sales_persons", {
+			pos_profile: posProfile,
+		})
+		const salesPersons = result?.message || result || []
+
+		// Add pos_profile to each person for indexing
+		const personsWithProfile = salesPersons.map((person) => ({
+			...person,
+			pos_profile: posProfile,
+		}))
+
+		// Store in IndexedDB
+		await db.sales_persons.bulkPut(personsWithProfile)
+
+		// Update last sync timestamp
+		const timestamp = Date.now()
+		await setSetting("sales_persons_last_sync", timestamp)
+
+		console.log(
+			`Cached ${salesPersons.length} sales persons for ${posProfile}`,
+		)
+
+		return { sales_persons: salesPersons }
+	} catch (error) {
+		console.error("Error caching sales persons:", error)
+		throw error
+	}
+}
+
+/**
+ * Get cached sales persons for a POS Profile
+ * @param {string} posProfile - POS Profile name
+ * @returns {Promise<Array>} - Array of sales persons
+ */
+export async function getCachedSalesPersons(posProfile) {
+	try {
+		const persons = await db.sales_persons
+			.where("pos_profile")
+			.equals(posProfile)
+			.toArray()
+
+		return persons
+	} catch (error) {
+		console.error("Error getting cached sales persons:", error)
 		return []
 	}
 }
