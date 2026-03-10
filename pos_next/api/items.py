@@ -1114,7 +1114,7 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20,
 			search_words = [word.strip() for word in effective_search_term.split() if word.strip()]
 
 			# Word-order independent: all words must appear somewhere in item fields
-			search_text = "CONCAT(COALESCE(i.name, ''), ' ', COALESCE(i.item_name, ''), ' ', COALESCE(i.item_group, ''), ' ', COALESCE(i.description, ''))"
+			search_text = "CONCAT(COALESCE(i.name, ''), ' ', COALESCE(i.item_name, ''), ' ', COALESCE(i.description, ''))"
 			word_conditions = " AND ".join([f"{search_text} LIKE %s"] * len(search_words))
 
 			# Also match if barcode contains the search term

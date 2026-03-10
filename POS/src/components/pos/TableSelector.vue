@@ -76,12 +76,14 @@
 import { ref, computed, onMounted } from "vue"
 import { useRestaurantStore } from "@/stores/restaurant"
 import { usePOSCartStore } from "@/stores/posCart"
+import { usePOSDraftsStore } from "@/stores/posDrafts"
 import { Button, FeatherIcon } from "frappe-ui"
 
 const emit = defineEmits(["table-selected"])
 
 const restaurantStore = useRestaurantStore()
 const cartStore = usePOSCartStore()
+const draftsStore = usePOSDraftsStore()
 
 const selectedArea = ref(null)
 
@@ -107,14 +109,23 @@ onMounted(async () => {
 })
 
 const selectTable = async (table) => {
-	// Set the table in the cart
-	cartStore.setRestaurantTable(table)
+	// Check if this table has an active draft
+	await draftsStore.loadDrafts()
+	const tableDraft = draftsStore.drafts.find(d => d.restaurant_table === table.name)
 
-	// Automatically update table status if it's empty
-	if (table.status === "Empty") {
-		await restaurantStore.updateTableStatus(table.name, "Occupied")
+	if (tableDraft) {
+		// Emit a special event so POSSale can handle draft loading gracefully
+		emit("load-table-draft", tableDraft)
+	} else {
+		// Set the table in the cart
+		cartStore.setRestaurantTable(table)
+
+		// Automatically update table status if it's empty
+		if (table.status === "Empty") {
+			await restaurantStore.updateTableStatus(table.name, "Occupied")
+		}
+
+		emit("table-selected", table)
 	}
-
-	emit("table-selected", table)
 }
 </script>

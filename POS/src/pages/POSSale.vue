@@ -286,7 +286,7 @@
 							style="contain: layout style paint"
 						>
 							<template v-if="restaurantStore.isEnabled && !cartStore.restaurantTable">
-								<TableSelector />
+								<TableSelector @load-table-draft="handleLoadDraft" />
 							</template>
 							<template v-else>
 								<ItemsSelector
@@ -2219,14 +2219,59 @@ function logoutWithCloseShift() {
 }
 
 async function handleSaveDraft() {
+	// If restaurant mode is on, we need to save the draft locally AND push it to the server as a true draft
+	// so the KDS system can see it. But POSNext "Drafts" are usually offline-only until submitted.
+	// Actually, wait, let's just make sure the `kdsStatus` is explicitly saved.
+
 	const savedDraft = await draftsStore.saveDraftInvoice(
 		cartStore.invoiceItems,
 		cartStore.customer,
 		cartStore.posProfile,
 		cartStore.appliedOffers,
-		cartStore.currentDraftId
+		cartStore.currentDraftId,
+		cartStore.restaurantTable?.name,
+		cartStore.kdsStatus
 	);
+
 	if (savedDraft) {
+		// If restaurant table is set, we also need to push this draft to the backend right away
+		// because the KDS API reads directly from the Frappe database (`Sales Invoice` with docstatus=0).
+		if (cartStore.restaurantTable && navigator.onLine) {
+			try {
+				const { useInvoice } = await import("@/composables/useInvoice");
+				const { posOpeningShift, additionalDiscount, payments, salesTeam } = cartStore;
+				// Format items for submission
+				const formattedItems = cartStore.invoiceItems.map(item => ({
+					item_code: item.item_code,
+					item_name: item.item_name,
+					qty: item.quantity,
+					rate: item.rate,
+					uom: item.uom,
+					warehouse: item.warehouse,
+					posa_special_instructions: item.posa_special_instructions || "",
+					discount_amount: item.discount_amount || 0,
+					discount_percentage: item.discount_percentage || 0
+				}));
+
+				const invoiceData = {
+					doctype: "Sales Invoice",
+					pos_profile: cartStore.posProfile,
+					customer: cartStore.customer?.name || cartStore.customer,
+					restaurant_table: cartStore.restaurantTable?.name,
+					kds_status: cartStore.kdsStatus,
+					items: formattedItems,
+					is_pos: 1,
+					docstatus: 0 // Explicitly draft
+				};
+
+				await call("pos_next.api.invoices.update_invoice", { data: invoiceData });
+				// Update table status
+				await restaurantStore.updateTableStatus(cartStore.restaurantTable.name, "Occupied");
+			} catch (error) {
+				console.error("Failed to sync draft to kitchen:", error);
+			}
+		}
+
 		cartStore.clearCart();
 		// Reset cart hash when cart is saved as draft and cleared
 		previousCartHash = "";
@@ -2242,7 +2287,9 @@ async function handleLoadDraft(draft) {
 				cartStore.customer,
 				cartStore.posProfile,
 				cartStore.appliedOffers,
-				cartStore.currentDraftId
+				cartStore.currentDraftId,
+				cartStore.restaurantTable?.name,
+				cartStore.kdsStatus
 			);
 
 			if (!saved) {
@@ -2260,6 +2307,17 @@ async function handleLoadDraft(draft) {
 		cartStore.invoiceItems = draftData.items;
 		cartStore.setCustomer(draftData.customer);
 		cartStore.currentDraftId = draft.draft_id; // Set current draft ID
+
+		if (draftData.restaurant_table) {
+			const tables = restaurantStore.tables;
+			const table = tables.find(t => t.name === draftData.restaurant_table);
+			if (table) {
+				cartStore.setRestaurantTable(table);
+			}
+		}
+		if (draftData.kds_status) {
+			cartStore.setKdsStatus(draftData.kds_status);
+		}
 
 		// Rebuild incremental cache to recalculate totals
 		cartStore.rebuildIncrementalCache();
