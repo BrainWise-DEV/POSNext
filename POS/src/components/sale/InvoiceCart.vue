@@ -1207,10 +1207,10 @@
 				<button
 					type="button"
 					@click="handleProceedToPayment"
-					:disabled="items.length === 0"
+					:disabled="items.length === 0 || (cartStore.restaurantTable && cartStore.hasUnsentChanges)"
 					:class="[
 						'flex-1 py-2.5 px-3 rounded-lg font-bold text-xs text-white transition-all flex items-center justify-center touch-manipulation',
-						items.length === 0
+						items.length === 0 || (cartStore.restaurantTable && cartStore.hasUnsentChanges)
 							? 'bg-gray-300 cursor-not-allowed'
 							: 'bg-blue-600 hover:bg-blue-700 active:bg-blue-800 shadow-lg hover:shadow-xl active:scale-[0.98]',
 					]"
@@ -1261,7 +1261,13 @@
 					type="button"
 					v-if="items.length > 0 && cartStore.restaurantTable"
 					@click="sendToKitchen"
-					class="flex-1 py-2.5 px-2 rounded-lg font-bold text-xs text-white bg-purple-600 hover:bg-purple-700 active:bg-purple-800 shadow-lg hover:shadow-xl transition-all touch-manipulation active:scale-[0.98] flex items-center justify-center"
+					:disabled="!cartStore.hasUnsentChanges"
+					:class="[
+						'flex-1 py-2.5 px-2 rounded-lg font-bold text-xs text-white transition-all touch-manipulation flex items-center justify-center',
+						!cartStore.hasUnsentChanges
+							? 'bg-purple-300 cursor-not-allowed opacity-70'
+							: 'bg-purple-600 hover:bg-purple-700 active:bg-purple-800 shadow-lg hover:shadow-xl active:scale-[0.98]',
+					]"
 					:aria-label="__('Send to Kitchen')"
 				>
 					<svg class="w-4 h-4 me-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>

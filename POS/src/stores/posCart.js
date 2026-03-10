@@ -94,7 +94,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		taxInclusive,
 		isSubmitting,
 		addItem: addItemToInvoice,
-		removeItem,
+		removeItem: baseRemoveItem,
 		updateItemQuantity: baseUpdateItemQuantity,
 		submitInvoice: baseSubmitInvoice,
 		clearCart: clearInvoiceCart,
@@ -189,6 +189,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		}
 
 		addItemToInvoice(item, qty)
+		hasUnsentChanges.value = true
+	}
+
+	function removeItem(itemCode, uom) {
+		baseRemoveItem(itemCode, uom)
+		hasUnsentChanges.value = true
 	}
 
 	/**
@@ -203,6 +209,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 		if (item) {
 			item.posa_special_instructions = instructions
+			hasUnsentChanges.value = true
 		}
 	}
 
@@ -225,6 +232,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		}
 
 		baseUpdateItemQuantity(itemCode, quantity, uom)
+		hasUnsentChanges.value = true
 	}
 
 	function clearCart() {

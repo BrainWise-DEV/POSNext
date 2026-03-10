@@ -2271,6 +2271,7 @@ async function handleSaveDraft() {
 				const invoiceData = {
 					doctype: "Sales Invoice",
 					pos_profile: cartStore.posProfile,
+					posa_pos_opening_shift: cartStore.posOpeningShift,
 					customer: cartStore.customer?.name || cartStore.customer,
 					restaurant_table: cartStore.restaurantTable?.name,
 					kds_status: cartStore.kdsStatus,
@@ -2279,7 +2280,19 @@ async function handleSaveDraft() {
 					docstatus: 0 // Explicitly draft
 				};
 
-				await call("pos_next.api.invoices.update_invoice", { data: invoiceData });
+				// Include name if we are updating an existing draft on the backend
+				if (cartStore.currentDraftId && cartStore.currentDraftId.startsWith('ACC-SINV')) {
+					invoiceData.name = cartStore.currentDraftId;
+				}
+
+				const response = await call("pos_next.api.invoices.update_invoice", { data: invoiceData });
+
+				// Keep local offline draft ID in sync with the newly created backend Draft ID so subsequent updates work
+				if (response && response.name && (!cartStore.currentDraftId || !cartStore.currentDraftId.startsWith('ACC-SINV'))) {
+					// We just created a new draft on the server, update our local copy to use the server's ID
+					await draftsStore.updateDraft(savedDraft.draft_id, { draft_id: response.name });
+				}
+
 				// Update table status
 				await restaurantStore.updateTableStatus(cartStore.restaurantTable.name, "Occupied");
 			} catch (error) {

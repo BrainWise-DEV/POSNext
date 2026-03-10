@@ -36,6 +36,20 @@
 								<p class="text-xs text-gray-400 mt-0.5">
 									{{ formatDateTime(draft.created_at) }}
 								</p>
+
+								<div v-if="draft.restaurant_table" class="mt-1 flex items-center gap-2">
+									<span class="text-[10px] font-bold bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded">
+										Table: {{ draft.restaurant_table }}
+									</span>
+									<span class="text-[10px] font-bold px-1.5 py-0.5 rounded"
+										:class="{
+											'bg-yellow-100 text-yellow-800': draft.kds_status === 'Pending',
+											'bg-blue-100 text-blue-800': draft.kds_status === 'Preparing',
+											'bg-green-100 text-green-800': draft.kds_status === 'Ready'
+										}">
+										KDS: {{ draft.kds_status }}
+									</span>
+								</div>
 							</div>
 							<div class="flex items-center gap-1">
 								<button

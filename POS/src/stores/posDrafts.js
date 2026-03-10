@@ -110,5 +110,6 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 		saveDraftInvoice,
 		loadDraft,
 		deleteDraft: deleteDraftById,
+		updateDraft,
 	}
 })
