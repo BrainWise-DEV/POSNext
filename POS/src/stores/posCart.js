@@ -248,6 +248,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		targetDoctype.value = "Sales Invoice"
 		restaurantTable.value = null
 		kdsStatus.value = "Pending"
+		hasUnsentChanges.value = false
 
 		// Reset offer processing state
 		offerProcessingState.value.lastCartHash = ''
@@ -266,6 +267,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	const writeOffAmount = ref(0)
 	const restaurantTable = ref(null)
 	const kdsStatus = ref("Pending")
+	const hasUnsentChanges = ref(false)
 
 	function setDeliveryDate(date) {
 		deliveryDate.value = date
@@ -1738,6 +1740,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		offerProcessingState, // Offer processing state for UI feedback
 		restaurantTable,
 		kdsStatus,
+		hasUnsentChanges,
 
 		// Computed
 		itemCount,
