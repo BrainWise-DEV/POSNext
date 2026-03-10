@@ -74,8 +74,6 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 
 	async function loadDraft(draft) {
 		try {
-			showSuccess(__("Draft invoice loaded successfully"))
-
 			return {
 				items: draft.items || [],
 				customer: draft.customer,
