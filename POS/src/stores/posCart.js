@@ -196,6 +196,16 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * Wraps useInvoice.updateItemQuantity to enforce stock limits
 	 * when the user clicks +/- or types a new quantity.
 	 */
+	function updateItemInstructions(itemCode, uom, instructions) {
+		const item = uom
+			? invoiceItems.value.find((i) => i.item_code === itemCode && i.uom === uom)
+			: invoiceItems.value.find((i) => i.item_code === itemCode)
+
+		if (item) {
+			item.posa_special_instructions = instructions
+		}
+	}
+
 	function updateItemQuantity(itemCode, quantity, uom = null) {
 		const item = uom
 			? invoiceItems.value.find((i) => i.item_code === itemCode && i.uom === uom)
@@ -344,6 +354,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				uom: item.uom,
 				warehouse: item.warehouse,
 				conversion_factor: item.conversion_factor || 1,
+				posa_special_instructions: item.posa_special_instructions || "",
 				price_list_rate: item.price_list_rate || item.rate,
 				discount_percentage: item.discount_percentage || 0,
 				discount_amount: item.discount_amount || 0,
@@ -1729,6 +1740,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		addItem,
 		removeItem,
 		updateItemQuantity,
+		updateItemInstructions,
 		clearCart,
 		setCustomer,
 		setDefaultCustomer,

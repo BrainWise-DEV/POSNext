@@ -55,7 +55,7 @@ def get_kds_orders():
 		order["items"] = frappe.get_all(
 			"Sales Invoice Item",
 			filters={"parent": order.name},
-			fields=["item_code", "item_name", "qty", "description"]
+			fields=["item_code", "item_name", "qty", "description", "posa_special_instructions"]
 		)
 
 	return orders

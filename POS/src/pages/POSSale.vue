@@ -359,6 +359,7 @@
 								@proceed-to-payment="handleProceedToPayment"
 								@clear-cart="handleClearCart"
 								@save-draft="handleSaveDraft"
+								@open-modifiers="handleOpenModifiers"
 								@apply-coupon="uiStore.showCouponDialog = true"
 								@show-offers="uiStore.showOffersDialog = true"
 								@remove-offer="
@@ -1076,6 +1077,13 @@ const itemsSelectorRef = ref(null);
 const offersDialogRef = ref(null);
 const containerRef = ref(null);
 const dividerRef = ref(null);
+const itemModifiersDialogRef = ref(null);
+
+function handleOpenModifiers(item) {
+	if (itemModifiersDialogRef.value) {
+		itemModifiersDialogRef.value.open(item);
+	}
+}
 const pendingPaymentAfterCustomer = ref(false);
 const logoutAfterClose = ref(false);
 const editCustomer = ref(null); // Customer being edited (null for create mode)

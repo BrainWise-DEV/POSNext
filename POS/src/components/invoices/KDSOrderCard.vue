@@ -44,6 +44,9 @@
 						<div v-if="item.description && item.description !== item.item_name" class="text-xs text-gray-500 mt-1 line-clamp-2">
 							{{ item.description }}
 						</div>
+						<div v-if="item.posa_special_instructions" class="mt-2 text-xs font-bold text-blue-700 bg-blue-50 dark:text-blue-300 dark:bg-blue-900/30 p-2 rounded border border-blue-100 dark:border-blue-800 inline-block">
+							{{ item.posa_special_instructions }}
+						</div>
 					</div>
 					<div class="font-bold text-lg w-8 h-8 flex items-center justify-center rounded-lg bg-gray-100 dark:bg-gray-700">
 						{{ item.qty }}

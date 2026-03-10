@@ -816,6 +816,15 @@
 									>
 										{{ item.item_name }}
 									</h4>
+									<!-- Special Instructions Badge -->
+									<span
+										v-if="item.posa_special_instructions"
+										class="inline-flex items-center px-1.5 py-0.5 bg-blue-100 text-blue-800 rounded-full text-[9px] font-bold flex-shrink-0"
+										:title="item.posa_special_instructions"
+									>
+										<svg class="w-2.5 h-2.5 me-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+										{{ __("Note") }}
+									</span>
 									<!-- Free Item Badge -->
 									<span
 										v-if="item.free_qty && item.free_qty > 0"
@@ -858,6 +867,18 @@
 										}}
 									</div>
 								</div>
+
+								<!-- Add Modifiers Button -->
+								<button
+									v-if="!item.is_free_item && cartStore.restaurantTable"
+									type="button"
+									@click.stop="$emit('open-modifiers', item)"
+									class="text-gray-400 hover:text-blue-600 active:text-blue-700 transition-colors flex-shrink-0 p-0.5 -m-0.5 mr-1 touch-manipulation active:scale-90"
+									:title="__('Add Note / Modifier')"
+								>
+									<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+								</button>
+
 								<button
 									v-if="!item.is_free_item"
 									type="button"

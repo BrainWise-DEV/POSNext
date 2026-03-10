@@ -96,6 +96,9 @@ fixtures = [
 				[
 					"Sales Invoice-posa_pos_opening_shift",
 					"Sales Invoice-posa_is_printed",
+					"Sales Invoice-restaurant_table",
+					"Sales Invoice-kds_status",
+					"Sales Invoice Item-posa_special_instructions",
 					"Item-custom_company",
 					"POS Profile-posa_cash_mode_of_payment",
 					"POS Profile-posa_allow_delete",
