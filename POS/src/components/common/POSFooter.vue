@@ -17,8 +17,8 @@ import { call } from '@/utils/apiWrapper'
 
 // Component state
 const footerText = ref('Powered by')
-const linkText = ref('BrainWise')
-const footerLink = ref('https://nexus.brainwise.me')
+const linkText = ref('Midiya')
+const footerLink = ref('https://midiya.az')
 const footerRoot = ref(null)
 const config = ref({})
 const serverValidationEnabled = ref(true)
@@ -84,8 +84,8 @@ const loadBrandingConfig = async () => {
 		console.error('[BrainWise] Failed to load branding config:', error)
 		// Use fallback values
 		footerText.value = 'Powered by'
-		linkText.value = 'BrainWise'
-		footerLink.value = 'https://nexus.brainwise.me'
+		linkText.value = 'Midiya'
+		footerLink.value = 'https://midiya.az'
 	}
 }
 
@@ -130,8 +130,8 @@ const logClientEvent = async (eventType, details = {}) => {
 const ensureBranding = () => {
 	if (!footerRoot.value) return
 
-	const expectedBrand = atob(config.value._l || btoa('BrainWise'))
-	const expectedUrl = atob(config.value._u || btoa('https://nexus.brainwise.me'))
+	const expectedBrand = atob(config.value._l || btoa('Midiya'))
+	const expectedUrl = atob(config.value._u || btoa('https://midiya.az'))
 	const expectedText = atob(config.value._t || btoa('Powered by'))
 
 	// Check if values have been tampered

@@ -2295,14 +2295,18 @@ async function handleSaveDraft() {
 
 				// Update table status
 				await restaurantStore.updateTableStatus(cartStore.restaurantTable.name, "Occupied");
+				uiStore.showSuccess("Order sent to kitchen!");
 			} catch (error) {
 				console.error("Failed to sync draft to kitchen:", error);
 			}
-		}
 
-		cartStore.clearCart();
-		// Reset cart hash when cart is saved as draft and cleared
-		previousCartHash = "";
+			cartStore.hasUnsentChanges = false;
+			previousCartHash = computeCartHash();
+		} else {
+			cartStore.clearCart();
+			// Reset cart hash when cart is saved as draft and cleared
+			previousCartHash = "";
+		}
 	}
 }
 
