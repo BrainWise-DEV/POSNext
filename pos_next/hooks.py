@@ -219,12 +219,17 @@ doc_events = {
 			"pos_next.api.sales_invoice_hooks.validate",
 			"pos_next.api.wallet.validate_wallet_payment"
 		],
+		"on_update": "pos_next.api.restaurant.on_invoice_update",
 		"before_cancel": "pos_next.api.sales_invoice_hooks.before_cancel",
 		"on_submit": [
 			"pos_next.realtime_events.emit_stock_update_event",
-			"pos_next.api.wallet.process_loyalty_to_wallet"
+			"pos_next.api.wallet.process_loyalty_to_wallet",
+			"pos_next.api.restaurant.on_invoice_update"
 		],
-		"on_cancel": "pos_next.realtime_events.emit_stock_update_event",
+		"on_cancel": [
+			"pos_next.realtime_events.emit_stock_update_event",
+			"pos_next.api.restaurant.on_invoice_update"
+		],
 		"after_insert": "pos_next.realtime_events.emit_invoice_created_event"
 	},
 	"POS Profile": {

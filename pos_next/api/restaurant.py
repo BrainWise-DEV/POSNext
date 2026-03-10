@@ -1,6 +1,17 @@
 import frappe
 from frappe import _
 
+def on_invoice_update(doc, method):
+	"""Update table status based on invoice status."""
+	if doc.get("restaurant_table"):
+		if doc.docstatus == 0:
+			frappe.db.set_value("Restaurant Table", doc.restaurant_table, "status", "Occupied")
+		elif doc.docstatus == 1:
+			frappe.db.set_value("Restaurant Table", doc.restaurant_table, "status", "Cleaning")
+		elif doc.docstatus == 2:
+			frappe.db.set_value("Restaurant Table", doc.restaurant_table, "status", "Empty")
+
+
 @frappe.whitelist()
 def get_tables():
 	"""Fetch all restaurant areas and tables."""
