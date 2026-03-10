@@ -42,6 +42,9 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		allow_return_without_invoice: 0,
 		allow_free_batch_return: 0,
 		allow_print_draft_invoices: 0,
+		// Restaurant
+		enable_restaurant_mode: 0,
+		default_restaurant_area: "",
 		// Pricing & Display
 		decimal_precision: "2",
 		// Customer Settings
@@ -241,6 +244,11 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	)
 	const sessionLockTimeout = computed(
 		() => Number.parseInt(settings.value.session_lock_timeout) || 5,
+	)
+
+	// Computed - Restaurant
+	const enableRestaurantMode = computed(() =>
+		Boolean(settings.value.enable_restaurant_mode),
 	)
 
 	// Resource
@@ -480,6 +488,9 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		// Computed - Security
 		enableSessionLock,
 		sessionLockTimeout,
+
+		// Computed - Restaurant
+		enableRestaurantMode,
 
 		// Actions
 		loadSettings,
