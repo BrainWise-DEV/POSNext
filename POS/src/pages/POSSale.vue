@@ -289,7 +289,18 @@
 								<TableSelector @load-table-draft="handleLoadDraft" />
 							</template>
 							<template v-else>
+								<div v-if="cartStore.restaurantTable" class="bg-blue-50 border-b border-blue-200 px-4 py-2 flex justify-between items-center flex-shrink-0">
+									<div class="flex items-center text-blue-800">
+										<svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+										<span class="text-sm font-bold">Table: {{ cartStore.restaurantTable.table_name }}</span>
+									</div>
+									<button @click="closeTable" class="text-blue-500 hover:text-blue-700 bg-white rounded-full p-1 shadow-sm border border-blue-100 transition-colors">
+										<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+									</button>
+								</div>
+
 								<ItemsSelector
+									class="flex-1 min-h-0"
 									ref="itemsSelectorRef"
 									:pos-profile="shiftStore.profileName"
 									:cart-items="cartStore.invoiceItems"
@@ -1083,6 +1094,10 @@ function handleOpenModifiers(item) {
 	if (itemModifiersDialogRef.value) {
 		itemModifiersDialogRef.value.open(item);
 	}
+}
+
+function closeTable() {
+	cartStore.clearCart();
 }
 const pendingPaymentAfterCustomer = ref(false);
 const logoutAfterClose = ref(false);
@@ -2304,6 +2319,7 @@ async function handleLoadDraft(draft) {
 		}
 
 		const draftData = await draftsStore.loadDraft(draft);
+		cartStore.clearCart(); // Ensure a clean slate
 		cartStore.invoiceItems = draftData.items;
 		cartStore.setCustomer(draftData.customer);
 		cartStore.currentDraftId = draft.draft_id; // Set current draft ID

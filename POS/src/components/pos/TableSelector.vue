@@ -14,6 +14,13 @@
 			<!-- Area Selector -->
 			<div v-if="areas.length > 1" class="flex items-center space-x-2">
 				<Button
+					:variant="selectedArea === 'All' ? 'solid' : 'subtle'"
+					size="sm"
+					@click="selectedArea = 'All'"
+				>
+					{{ __("All") }}
+				</Button>
+				<Button
 					v-for="area in areas"
 					:key="area.name"
 					:variant="selectedArea === area.name ? 'solid' : 'subtle'"
@@ -91,7 +98,7 @@ const areas = computed(() => restaurantStore.areas)
 const tables = computed(() => restaurantStore.tables)
 
 const filteredTables = computed(() => {
-	if (!selectedArea.value) return tables.value
+	if (!selectedArea.value || selectedArea.value === 'All') return tables.value
 	return tables.value.filter(t => t.area === selectedArea.value)
 })
 
@@ -104,11 +111,14 @@ onMounted(async () => {
 	}
 
 	if (areas.value.length > 0) {
-		selectedArea.value = restaurantStore.defaultArea || areas.value[0].name
+		selectedArea.value = 'All'
 	}
 })
 
 const selectTable = async (table) => {
+	// First, ensure cart is clean before entering a new table to avoid product mixups
+	cartStore.clearCart()
+
 	// Check if this table has an active draft
 	await draftsStore.loadDrafts()
 	const tableDraft = draftsStore.drafts.find(d => d.restaurant_table === table.name)
