@@ -14,6 +14,11 @@ const routes = [
 		path: "/account/login",
 		component: () => import("@/pages/Login.vue"),
 	},
+	{
+		name: "KDS",
+		path: "/kds",
+		component: () => import("@/pages/KDS.vue"),
+	},
 	// Catch-all route
 	{
 		path: "/:pathMatch(.*)*",

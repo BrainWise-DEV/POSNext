@@ -81,6 +81,12 @@ const CURRENT_SCHEMA = {
 	// Unpaid invoices cache for offline viewing
 	// Stores invoices with outstanding amounts for partial payment management
 	unpaid_invoices: "&name, pos_profile, outstanding_amount, customer",
+
+	// Restaurant tables cache
+	restaurant_tables: "&name, area, status",
+
+	// Restaurant areas cache
+	restaurant_areas: "&name",
 }
 
 /**

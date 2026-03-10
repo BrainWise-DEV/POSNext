@@ -15,6 +15,7 @@
  */
 
 import { useToast } from "@/composables/useToast"
+import { useRestaurantStore } from "@/stores/restaurant"
 import {
 	cacheCustomersFromServer,
 	cachePaymentMethodsFromServer,
@@ -297,6 +298,13 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 				}
 			} catch (error) {
 				log.error('Failed to load sales persons', error)
+			}
+
+			// Load restaurant tables
+			const restaurantStore = useRestaurantStore()
+			if (restaurantStore.isEnabled) {
+				log.info('Loading restaurant tables for offline use')
+				await restaurantStore.fetchFromNetwork()
 			}
 
 			// Load customers if cache needs refresh

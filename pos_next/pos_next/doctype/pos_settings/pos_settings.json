@@ -73,7 +73,10 @@
   "enable_session_lock",
   "session_lock_timeout",
   "barcode_tab",
-  "barcode_rules"
+  "barcode_rules",
+  "restaurant_tab",
+  "enable_restaurant_mode",
+  "default_restaurant_area"
  ],
  "fields": [
   {
@@ -546,6 +549,26 @@
    "fieldtype": "Table",
    "label": "Barcode Rules",
    "options": "POS Barcode Rules"
+  },
+  {
+   "fieldname": "restaurant_tab",
+   "fieldtype": "Tab Break",
+   "label": "Restaurant"
+  },
+  {
+   "default": "0",
+   "description": "Enable restaurant features like Table Management and KDS.",
+   "fieldname": "enable_restaurant_mode",
+   "fieldtype": "Check",
+   "label": "Enable Restaurant Mode"
+  },
+  {
+   "description": "Default area to display on POS Screen",
+   "fieldname": "default_restaurant_area",
+   "fieldtype": "Link",
+   "label": "Default Restaurant Area",
+   "options": "Restaurant Area",
+   "depends_on": "enable_restaurant_mode"
   }
  ],
  "index_web_pages_for_search": 1,

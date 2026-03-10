@@ -228,6 +228,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		appliedCoupon.value = null
 		currentDraftId.value = null
 		targetDoctype.value = "Sales Invoice"
+		restaurantTable.value = null
+		kdsStatus.value = "Pending"
 
 		// Reset offer processing state
 		offerProcessingState.value.lastCartHash = ''
@@ -244,6 +246,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 	const deliveryDate = ref("")
 	const writeOffAmount = ref(0)
+	const restaurantTable = ref(null)
+	const kdsStatus = ref("Pending")
 
 	function setDeliveryDate(date) {
 		deliveryDate.value = date
@@ -251,6 +255,14 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 	function setWriteOffAmount(amount) {
 		writeOffAmount.value = amount || 0
+	}
+
+	function setRestaurantTable(table) {
+		restaurantTable.value = table
+	}
+
+	function setKdsStatus(status) {
+		kdsStatus.value = status
 	}
 
 	async function submitInvoice() {
@@ -318,6 +330,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			customer:
 				customer.value?.name || customer.value || currentProfile?.customer,
 			company: currentProfile?.company,
+			restaurant_table: restaurantTable.value?.name,
+			kds_status: kdsStatus.value,
 			selling_price_list: currentProfile?.selling_price_list,
 			currency: currentProfile?.currency,
 			discount_amount: additionalDiscount.value || 0,

@@ -285,13 +285,18 @@
 							]"
 							style="contain: layout style paint"
 						>
-							<ItemsSelector
-								ref="itemsSelectorRef"
-								:pos-profile="shiftStore.profileName"
-								:cart-items="cartStore.invoiceItems"
-								:currency="shiftStore.profileCurrency"
-								@item-selected="handleItemSelected"
-							/>
+							<template v-if="restaurantStore.isEnabled && !cartStore.restaurantTable">
+								<TableSelector />
+							</template>
+							<template v-else>
+								<ItemsSelector
+									ref="itemsSelectorRef"
+									:pos-profile="shiftStore.profileName"
+									:cart-items="cartStore.invoiceItems"
+									:currency="shiftStore.profileCurrency"
+									@item-selected="handleItemSelected"
+								/>
+							</template>
 						</div>
 					</keep-alive>
 
@@ -983,6 +988,7 @@ import InvoiceCart from "@/components/sale/InvoiceCart.vue";
 import InvoiceHistoryDialog from "@/components/sale/InvoiceHistoryDialog.vue";
 import ItemSelectionDialog from "@/components/sale/ItemSelectionDialog.vue";
 import ItemsSelector from "@/components/sale/ItemsSelector.vue";
+import TableSelector from "@/components/pos/TableSelector.vue";
 import OffersDialog from "@/components/sale/OffersDialog.vue";
 import OfflineInvoicesDialog from "@/components/sale/OfflineInvoicesDialog.vue";
 import PaymentDialog from "@/components/sale/PaymentDialog.vue";
@@ -1018,6 +1024,7 @@ import { usePOSCartStore } from "@/stores/posCart";
 import { usePOSDraftsStore } from "@/stores/posDrafts";
 import { usePOSSettingsStore } from "@/stores/posSettings";
 import { usePOSShiftStore } from "@/stores/posShift";
+import { useRestaurantStore } from "@/stores/restaurant";
 import { usePOSSyncStore } from "@/stores/posSync";
 import { usePOSUIStore } from "@/stores/posUI";
 import { logger } from "@/utils/logger";
@@ -1026,6 +1033,7 @@ import { shouldValidateItemStock } from "@/utils/stockValidator";
 // Initialize stores
 const cartStore = usePOSCartStore();
 const shiftStore = usePOSShiftStore();
+const restaurantStore = useRestaurantStore();
 const uiStore = usePOSUIStore();
 const offlineStore = usePOSSyncStore();
 const draftsStore = usePOSDraftsStore();

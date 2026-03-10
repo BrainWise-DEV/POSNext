@@ -1,7 +1,17 @@
 import { io } from "socket.io-client"
-import { socketio_port } from "../../../../sites/common_site_config.json"
 
 let socket = null
+let socketio_port = 9000
+
+try {
+	// Dynamically import to prevent build errors if file is missing
+	const config = require("../../../../sites/common_site_config.json")
+	if (config && config.socketio_port) {
+		socketio_port = config.socketio_port
+	}
+} catch (e) {
+	// Default to 9000 if not found
+}
 
 export function initSocket(siteNameOverride) {
 	// Don't reinitialize if socket already exists
