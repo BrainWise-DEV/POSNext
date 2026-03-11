@@ -1702,6 +1702,31 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		}
 	)
 
+	// Broadcast cart state to Customer Facing Display (CFD) using BroadcastChannel
+	const cfdChannel = new BroadcastChannel('pos_cfd_sync')
+
+	watch(
+		[
+			() => invoiceItems.value,
+			grandTotal,
+			totalTax,
+			totalDiscount
+		],
+		() => {
+			cfdChannel.postMessage({
+				type: 'CART_UPDATE',
+				payload: {
+					items: toRaw(invoiceItems.value),
+					grandTotal: grandTotal.value,
+					totalTax: totalTax.value,
+					totalDiscount: totalDiscount.value,
+					currency: posProfile.value?.currency || 'AZN'
+				}
+			})
+		},
+		{ deep: true }
+	)
+
 	return {
 		// State
 		invoiceItems,
