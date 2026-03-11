@@ -944,6 +944,10 @@ def update_invoice(data):
 
             try:
                 frappe.db.set_value(invoice_doc.doctype, invoice_doc.name, update_data)
+                # We must reload the doc here so the `modified` timestamp is synchronized
+                # before we send it back to the frontend, otherwise we get
+                # "Document has been modified" errors on the next save/submit
+                invoice_doc.reload()
             except Exception as inner_e:
                 frappe.log_error(f"Failed to set KDS fields: {inner_e}", "POS KDS Error")
 
