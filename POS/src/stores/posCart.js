@@ -94,7 +94,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		taxInclusive,
 		isSubmitting,
 		addItem: addItemToInvoice,
-		removeItem: baseRemoveItemFromInvoice,
+		removeItem: baseRemoveItem,
 		updateItemQuantity: baseUpdateItemQuantity,
 		submitInvoice: baseSubmitInvoice,
 		clearCart: clearInvoiceCart,
@@ -193,7 +193,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	}
 
 	function removeItem(itemCode, uom) {
-		baseRemoveItemFromInvoice(itemCode, uom)
+		baseRemoveItem(itemCode, uom)
 		hasUnsentChanges.value = true
 		triggerOfferProcessing()
 	}
