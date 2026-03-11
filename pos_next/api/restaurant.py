@@ -52,17 +52,20 @@ def get_kds_orders():
 	# Only fetch submitted invoices or drafts depending on how POS Next saves KDS orders.
 	# Assuming here we fetch draft invoices that have a table and are not delivered.
 	# We remove the database-level filter on restaurant_table to prevent MariaDB NULL issues
+	# We also remove the kds_status filter from SQL because if the user did not run bench migrate,
+	# the column might be completely missing and throw an error, or if it was added but has no default
+	# value it might fail. We handle the filtering safely in Python.
 	raw_orders = frappe.get_all(
 		"Sales Invoice",
 		filters={
 			"docstatus": 0, # Drafts
-			"kds_status": ["in", ["Pending", "Preparing", "Ready"]]
 		},
 		fields=["name", "customer", "restaurant_table", "kds_status", "creation", "modified"]
 	)
 
 	# Filter purely in Python
-	orders = [o for o in raw_orders if o.get("restaurant_table")]
+	valid_statuses = ["Pending", "Preparing", "Ready"]
+	orders = [o for o in raw_orders if o.get("restaurant_table") and o.get("kds_status") in valid_statuses]
 
 	# Fallback safety: Check if the custom field actually exists in the DB to prevent 500 errors
 	# if the user hasn't run `bench migrate` yet.
