@@ -2634,6 +2634,10 @@ def apply_offers(invoice_data, selected_offers=None):
 
         profile = frappe.get_cached_doc("POS Profile", invoice.get("pos_profile"))
 
+        # Respect POS Profile's ignore_pricing_rule setting
+        if profile.ignore_pricing_rule:
+            return {"items": items}
+
         # Batch fetch all item details in a single query (reduces N queries to 1)
         item_codes = list({item.get("item_code") for item in items if item.get("item_code")})
         item_details_map = {}
