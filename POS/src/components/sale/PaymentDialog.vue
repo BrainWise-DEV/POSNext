@@ -956,6 +956,42 @@
 				<!-- End Right Column -->
 			</div>
 			<!-- End Two Column Layout -->
+			</template>
+	</Dialog>
+
+	<!-- Nested Radix Dialog for overpayment confirmation -->
+	<Dialog
+		v-model="overpayConfirmVisible"
+		:options="{ size: 'xs' }"
+	>
+		<template #body>
+			<div class="p-5">
+				<div class="flex items-start gap-3 mb-4">
+					<div class="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 bg-amber-50 border border-amber-200">
+						<svg class="w-5 h-5 text-amber-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+						</svg>
+					</div>
+					<div class="min-w-0">
+						<h3 class="text-sm font-semibold text-gray-900">{{ overpayConfirmTitle }}</h3>
+						<p class="text-sm text-gray-500 mt-1 leading-relaxed">{{ overpayConfirmMessage }}</p>
+					</div>
+				</div>
+				<div class="flex gap-2.5 justify-end">
+					<button
+						@click="resolveOverpayConfirm(false)"
+						class="px-4 py-1.5 rounded-lg border border-gray-300 text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 active:bg-gray-100 transition-colors"
+					>
+						{{ __("Cancel") }}
+					</button>
+					<button
+						@click="resolveOverpayConfirm(true)"
+						class="px-4 py-1.5 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 transition-colors"
+					>
+						{{ __("Continue") }}
+					</button>
+				</div>
+			</div>
 		</template>
 	</Dialog>
 </template>
@@ -2034,6 +2070,24 @@ function switchToNextPaymentMethod(partialAmount) {
 	}
 }
 
+// Consolidate payment entries: if a row with the same mode already exists,
+// add to it instead of creating a duplicate row.
+function _upsertPaymentEntry(method, amt) {
+	const existing = paymentEntries.value.find(
+		(e) => e.mode_of_payment === method.mode_of_payment && !e.is_customer_credit,
+	)
+	if (existing) {
+		existing.amount = roundCurrency((existing.amount || 0) + amt)
+	} else {
+		paymentEntries.value.push({
+			mode_of_payment: method.mode_of_payment,
+			amount: roundCurrency(amt),
+			type: method.type || __("Cash"),
+			is_wallet_payment: isWalletPaymentMethod(method.mode_of_payment),
+		})
+	}
+}
+
 // Quick add payment (long press action)
 function quickAddPayment(method) {
 	if (remainingAmount.value <= 0) return
@@ -2096,12 +2150,7 @@ function quickAddPayment(method) {
 		amt = maxAllowed
 	}
 
-	paymentEntries.value.push({
-		mode_of_payment: method.mode_of_payment,
-		amount: roundCurrency(amt),
-		type: method.type || __("Cash"),
-		is_wallet_payment: isWalletPaymentMethod(method.mode_of_payment),
-	})
+	_upsertPaymentEntry(method, roundCurrency(amt))
 	log.debug("[PaymentDialog] Long press payment added:", method.mode_of_payment)
 
 	// If this was a partial wallet payment, switch to another payment method
@@ -2136,8 +2185,39 @@ function onPaymentMethodCancel() {
 	handlePointerCancel()
 }
 
+// Overpayment confirmation via nested Radix Dialog (no Teleport / pointer-events hacks)
+const overpayConfirmVisible = ref(false)
+const overpayConfirmTitle = ref("")
+const overpayConfirmMessage = ref("")
+let overpayConfirmResolve = null
+
+function showOverpayConfirm({ title, message }) {
+	return new Promise((resolve) => {
+		overpayConfirmTitle.value = title
+		overpayConfirmMessage.value = message
+		overpayConfirmResolve = resolve
+		overpayConfirmVisible.value = true
+	})
+}
+
+function resolveOverpayConfirm(result) {
+	const resolve = overpayConfirmResolve
+	overpayConfirmResolve = null
+	overpayConfirmVisible.value = false
+	resolve?.(result)
+}
+
+// Handle Radix closing the confirm dialog (escape key / outside click)
+watch(overpayConfirmVisible, (visible) => {
+	if (!visible && overpayConfirmResolve) {
+		const resolve = overpayConfirmResolve
+		overpayConfirmResolve = null
+		resolve(false)
+	}
+})
+
 // Add custom amount for a method
-function addCustomPayment(method, amount) {
+async function addCustomPayment(method, amount) {
 	log.debug("[PaymentDialog] Add custom payment:", {
 		method: method.mode_of_payment,
 		amount: amount,
@@ -2207,12 +2287,23 @@ function addCustomPayment(method, amount) {
 		}
 	}
 
-	paymentEntries.value.push({
-		mode_of_payment: method.mode_of_payment,
-		amount: amt,
-		type: method.type || __("Cash"),
-		is_wallet_payment: isWalletPaymentMethod(method.mode_of_payment),
-	})
+	// Block the action when adding this payment would cause a large overpayment.
+	// This catches accidental double-adds (e.g., quick amount tap then numpad add)
+	// that would result in giving back excessive change.
+	if (allowsOverpayment.value && isCashPaymentMethod(method)) {
+		const grandTotal = roundCurrency(props.grandTotal)
+		const newTotal = roundCurrency(totalPaid.value + amt)
+		const overpay = newTotal - grandTotal
+		if (grandTotal > 0 && overpay > 0 && overpay > grandTotal) {
+			const confirmed = await showOverpayConfirm({
+				title: __("Large Overpayment"),
+				message: __("Change due would be {0}. Continue?", [formatCurrency(overpay)]),
+			})
+			if (!confirmed) return
+		}
+	}
+
+	_upsertPaymentEntry(method, amt)
 
 	log.debug("[PaymentDialog] Payment added, new entries:", paymentEntries.value)
 	customAmount.value = ""
