@@ -12,9 +12,10 @@
 							v-model="searchTerm"
 							type="text"
 							:placeholder="__('Search by invoice number or customer...')"
-							@input="searchInvoices"
+							@input="onSearchInput"
 						>
 							<template #prefix>
+								<!-- Search icon -->
 								<svg class="h-4 w-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
 								</svg>
@@ -24,32 +25,80 @@
 					<Button
 						variant="subtle"
 						@click="loadInvoices"
-						:loading="invoicesResource.loading"
+						:loading="invoicesResource.loading && !isLoadingMore"
 						:title="__('Refresh')"
 					>
+						<!-- RotateCcw icon -->
 						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/>
 						</svg>
 					</Button>
 				</div>
 
-				<!-- Invoices List -->
-				<div v-if="invoicesResource.loading" class="text-center py-8">
-					<div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
-					<p class="mt-3 text-xs text-gray-500">{{ __('Loading invoices...') }}</p>
-				</div>
-
-				<div v-else-if="filteredInvoices.length === 0" class="text-center py-8">
-					<svg class="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+				<!-- Error State -->
+				<div
+					v-if="invoicesResource.error && !invoicesResource.loading"
+					class="flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+				>
+					<!-- AlertCircle icon -->
+					<svg class="h-4 w-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
 					</svg>
-					<p class="mt-2 text-sm text-gray-500">{{ __('No invoices found') }}</p>
+					<span>{{ __('Failed to load invoices. Please try again.') }}</span>
+					<Button variant="subtle" size="sm" @click="loadInvoices" class="ml-auto">
+						{{ __('Retry') }}
+					</Button>
 				</div>
 
+				<!-- Skeleton Loaders (initial load only) -->
+				<div v-else-if="invoicesResource.loading && !isLoadingMore" class="flex flex-col gap-2">
+					<div
+						v-for="n in 5"
+						:key="n"
+						class="rounded-lg border border-gray-100 bg-white p-3 animate-pulse"
+					>
+						<div class="flex items-start justify-between gap-3">
+							<div class="flex-1 space-y-2">
+								<div class="flex items-center gap-2">
+									<div class="h-4 w-28 rounded bg-gray-200"></div>
+									<div class="h-4 w-14 rounded-full bg-gray-100"></div>
+								</div>
+								<div class="h-3 w-36 rounded bg-gray-100"></div>
+								<div class="h-3 w-24 rounded bg-gray-100"></div>
+							</div>
+							<div class="flex flex-col items-end gap-2">
+								<div class="h-5 w-20 rounded bg-gray-200"></div>
+								<div class="flex gap-1">
+									<div class="h-7 w-7 rounded bg-gray-100"></div>
+									<div class="h-7 w-7 rounded bg-gray-100"></div>
+									<div class="h-7 w-7 rounded bg-gray-100"></div>
+								</div>
+							</div>
+						</div>
+					</div>
+				</div>
+
+				<!-- Empty State -->
+				<div v-else-if="isEmpty" class="flex flex-col items-center justify-center py-12 text-center">
+					<!-- FileSearch icon -->
+					<svg class="mx-auto h-14 w-14 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+						<circle cx="11" cy="11" r="0" stroke-width="0"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-3-3"/>
+					</svg>
+					<p class="mt-3 text-sm font-semibold text-gray-500">{{ __('No invoices found') }}</p>
+					<p class="mt-1 text-xs text-gray-400">
+						{{ __('Try adjusting your search or refresh the list.') }}
+					</p>
+					<Button variant="subtle" class="mt-4" @click="loadInvoices">
+						{{ __('Refresh') }}
+					</Button>
+				</div>
+
+				<!-- Invoices List -->
 				<div v-else class="flex flex-col gap-2 max-h-96 overflow-y-auto pe-2">
 					<div
-						v-for="invoice in filteredInvoices"
-						:key="invoice.name"
+						v-for="(invoice, index) in invoices"
+						:key="invoice.name + invoice.posting_date"
 						class="bg-white border border-gray-200 rounded-lg p-3 hover:shadow-md transition-all"
 					>
 						<div class="flex items-start justify-between gap-3">
@@ -59,14 +108,14 @@
 									<h4 class="text-sm font-semibold text-gray-900">
 										{{ invoice.name }}
 									</h4>
-									<!-- Show Return badge (red) if it's a return invoice -->
+									<!-- Return badge -->
 									<span
 										v-if="invoice.is_return"
 										class="text-xs px-2 py-0.5 rounded-full font-medium bg-red-100 text-red-800"
 									>
 										{{ __('Return') }}
 									</span>
-									<!-- Otherwise show regular status badge -->
+									<!-- Status badge -->
 									<span
 										v-else
 										:class="[
@@ -87,35 +136,44 @@
 									{{ formatCurrency(invoice.grand_total) }}
 								</p>
 								<div class="flex items-center gap-1 mt-2">
-									<button
+									<Button
+										variant="ghost"
+										theme="blue"
+										size="sm"
 										@click="viewInvoice(invoice)"
-										class="p-1.5 hover:bg-blue-50 rounded transition-colors"
 										:title="__('View Details')"
 									>
+										<!-- Eye icon -->
 										<svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
 											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
 										</svg>
-									</button>
-									<button
+									</Button>
+									<Button
+										variant="ghost"
+										theme="green"
+										size="sm"
 										@click="printInvoice(invoice)"
-										class="p-1.5 hover:bg-green-50 rounded transition-colors"
 										:title="__('Print')"
 									>
+										<!-- Printer icon -->
 										<svg class="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/>
 										</svg>
-									</button>
-									<button
+									</Button>
+									<Button
 										v-if="canCreateReturn(invoice)"
+										variant="ghost"
+										theme="orange"
+										size="sm"
 										@click="openReturnModal(invoice)"
-										class="p-1.5 hover:bg-orange-50 rounded transition-colors"
 										:title="__('Create Return')"
 									>
+										<!-- RotateCcw icon -->
 										<svg class="w-4 h-4 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/>
 										</svg>
-									</button>
+									</Button>
 								</div>
 							</div>
 						</div>
@@ -123,8 +181,12 @@
 				</div>
 
 				<!-- Load More -->
-				<div v-if="hasMore && !invoicesResource.loading" class="text-center">
-					<Button variant="subtle" @click="loadMore">
+				<div v-if="hasMore && !isEmpty && !invoicesResource.error" class="text-center">
+					<Button
+						variant="subtle"
+						@click="loadMore"
+						:loading="isLoadingMore"
+					>
 						{{ __('Load More') }}
 					</Button>
 				</div>
@@ -174,123 +236,89 @@ function formatCurrency(amount) {
 
 const emit = defineEmits(["update:modelValue", "create-return", "view-invoice", "print-invoice", "return-created"])
 
+// ─── State ────────────────────────────────────────────────────────────────────
 const show = ref(props.modelValue)
 const invoices = ref([])
 const searchTerm = ref("")
-const page = ref(0)
-const pageSize = 20
+const offset = ref(0)
+const LIMIT = 20
 const hasMore = ref(true)
+const isLoadingMore = ref(false)
 
 // Return dialog state
 const showReturnDialog = ref(false)
 const selectedInvoiceForReturn = ref(null)
 
-// Track if we're loading more (appending) vs fresh load (replacing)
-const isLoadingMore = ref(false)
+// ─── Computed ─────────────────────────────────────────────────────────────────
+const isEmpty = computed(
+	() => !invoicesResource.loading && !invoicesResource.error && invoices.value.length === 0
+)
 
-// Create resource for loading invoices
+// ─── Debounce utility (no lodash needed) ─────────────────────────────────────
+let _debounceTimer = null
+function debounce(fn, delay) {
+	return (...args) => {
+		clearTimeout(_debounceTimer)
+		_debounceTimer = setTimeout(() => fn(...args), delay)
+	}
+}
+
+// ─── Resource ─────────────────────────────────────────────────────────────────
 const invoicesResource = createResource({
-	url: "frappe.client.get_list",
+	url: "pos_next.api.invoices.get_invoices",
 	makeParams() {
 		return {
-			doctype: "Sales Invoice",
-			filters: {
-				is_pos: 1,
-				...(props.posProfile && { pos_profile: props.posProfile }),
-			},
-			fields: [
-				"name",
-				"customer",
-				"customer_name",
-				"posting_date",
-				"posting_time",
-				"grand_total",
-				"status",
-				"docstatus",
-				"is_return",
-			],
-			order_by: "modified desc",
-			start: page.value * pageSize,
-			page_length: pageSize,
+			pos_profile: props.posProfile,
+			search: searchTerm.value || null,
+			limit: LIMIT,
+			offset: offset.value,
 		}
 	},
 	auto: false,
 	onSuccess(data) {
 		if (data && Array.isArray(data)) {
-			const newInvoices = data.map((inv) => ({
-				...inv,
-				items_count: 0,
-			}))
+			const newInvoices = data.map((inv) => ({ ...inv }))
 
 			if (isLoadingMore.value) {
-				// Append to existing list
-				invoices.value = [...invoices.value, ...newInvoices]
+				// Append, deduplicating by name
+				const existingNames = new Set(invoices.value.map((i) => i.name))
+				const unique = newInvoices.filter((i) => !existingNames.has(i.name))
+				invoices.value = [...invoices.value, ...unique]
 			} else {
-				// Replace the list
 				invoices.value = newInvoices
 			}
 
-			// Check if there are more results
-			hasMore.value = data.length === pageSize
-			isLoadingMore.value = false
+			hasMore.value = data.length === LIMIT
 		}
+		isLoadingMore.value = false
 	},
 	onError(error) {
 		console.error("Error loading invoices:", error)
-		showError(__("Failed to load invoices"))
 		isLoadingMore.value = false
 	},
 })
 
-watch(
-	() => props.modelValue,
-	(val) => {
-		show.value = val
-		if (val && props.posProfile) {
-			invoicesResource.reload()
-		}
-	},
-)
-
-watch(show, (val) => {
-	emit("update:modelValue", val)
-})
-
-// Clear selected invoice when return dialog closes
-watch(showReturnDialog, (val) => {
-	if (!val) {
-		selectedInvoiceForReturn.value = null
-	}
-})
-
-const filteredInvoices = computed(() => {
-	if (!searchTerm.value) return invoices.value
-
-	const term = searchTerm.value.toLowerCase()
-	return invoices.value.filter(
-		(inv) =>
-			inv.name.toLowerCase().includes(term) ||
-			inv.customer_name?.toLowerCase().includes(term),
-	)
-})
-
+// ─── Actions ─────────────────────────────────────────────────────────────────
 function loadInvoices() {
-	if (props.posProfile) {
-		// Reset to first page for fresh load
-		page.value = 0
-		isLoadingMore.value = false
-		invoicesResource.reload()
-	}
+	if (!props.posProfile) return
+	offset.value = 0
+	isLoadingMore.value = false
+	invoicesResource.reload()
 }
 
 function loadMore() {
-	page.value++
+	if (!props.posProfile || !hasMore.value) return
+	offset.value += LIMIT
 	isLoadingMore.value = true
 	invoicesResource.reload()
 }
 
-function searchInvoices() {
-	// Debounced search - already filtered by computed property
+const _debouncedSearch = debounce(() => {
+	loadInvoices()
+}, 300)
+
+function onSearchInput() {
+	_debouncedSearch()
 }
 
 function viewInvoice(invoice) {
@@ -302,11 +330,7 @@ function printInvoice(invoice) {
 }
 
 function canCreateReturn(invoice) {
-	// Can create return if:
-	// 1. Invoice is submitted (docstatus === 1)
-	// 2. Not already a return invoice
-	// 3. Status is not "Credit Note Issued" (already has a return)
-	return invoice.docstatus === 1 && !invoice.is_return && invoice.status !== 'Credit Note Issued'
+	return invoice.docstatus === 1 && !invoice.is_return && invoice.status !== "Credit Note Issued"
 }
 
 function openReturnModal(invoice) {
@@ -315,9 +339,7 @@ function openReturnModal(invoice) {
 }
 
 function handleReturnCreated(returnInvoice) {
-	// Refresh the invoice list to show updated statuses
-	invoicesResource.reload()
-	// Emit the event to parent
+	loadInvoices()
 	emit("return-created", returnInvoice)
 }
 
@@ -332,4 +354,33 @@ function formatDateTime(date, time) {
 	}
 	return dateStr
 }
+
+// ─── Watchers ─────────────────────────────────────────────────────────────────
+watch(
+	() => props.modelValue,
+	(val) => {
+		show.value = val
+		if (val && props.posProfile) {
+			loadInvoices()
+		}
+	},
+)
+
+watch(show, (val) => {
+	emit("update:modelValue", val)
+	// Dialog cleanup: reset state when dialog closes
+	if (!val) {
+		searchTerm.value = ""
+		offset.value = 0
+		invoices.value = []
+		hasMore.value = true
+	}
+})
+
+// Clear selected invoice when return dialog closes
+watch(showReturnDialog, (val) => {
+	if (!val) {
+		selectedInvoiceForReturn.value = null
+	}
+})
 </script>

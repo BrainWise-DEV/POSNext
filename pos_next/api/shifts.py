@@ -182,3 +182,59 @@ def submit_closing_shift(closing_shift):
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Submit Closing Shift Error")
 		frappe.throw(_("Error submitting closing shift: {0}").format(str(e)))
+
+@frappe.whitelist()
+def get_shift_history(filters=None):
+    if isinstance(filters, str):
+        filters = json.loads(filters)
+    
+    conditions = []
+    values = {}
+    
+    if filters:
+        if filters.get('pos_profile'):
+            conditions.append("os.pos_profile = %(pos_profile)s")
+            values['pos_profile'] = filters.get('pos_profile')
+            
+        if filters.get('from_date'):
+            conditions.append("os.posting_date >= %(from_date)s")
+            values['from_date'] = filters.get('from_date')
+            
+        if filters.get('to_date'):
+            conditions.append("os.posting_date <= %(to_date)s")
+            values['to_date'] = filters.get('to_date')
+            
+    where_clause = " AND ".join(conditions)
+    if where_clause:
+        where_clause = " WHERE " + where_clause
+        
+    query = f"""
+        SELECT 
+            os.name as opening_shift_name,
+            cs.name as closing_shift_name,
+            os.posting_date as date,
+            os.pos_profile,
+            os.user as cashier,
+            os.period_start_date as open_time,
+            cs.period_end_date as close_time,
+            (SELECT SUM(amount) FROM `tabPOS Opening Shift Detail` WHERE parent = os.name) as opening_amount,
+            (SELECT SUM(closing_amount) FROM `tabPOS Closing Shift Detail` WHERE parent = cs.name) as closing_amount,
+            cs.grand_total as sales_total,
+            (SELECT SUM(difference) FROM `tabPOS Closing Shift Detail` WHERE parent = cs.name) as difference
+        FROM `tabPOS Opening Shift` os
+        LEFT JOIN `tabPOS Closing Shift` cs ON cs.pos_opening_shift = os.name
+        {where_clause}
+        ORDER BY os.posting_date DESC, os.period_start_date DESC
+    """
+    
+    data = frappe.db.sql(query, values, as_dict=True)
+    
+    # Ensure safe flt values and maintain consistency
+    for row in data:
+        from frappe.utils import flt
+        row.opening_amount = flt(row.opening_amount)
+        row.closing_amount = flt(row.closing_amount)
+        row.sales_total = flt(row.sales_total)
+        row.difference = flt(row.difference)
+        
+    return data

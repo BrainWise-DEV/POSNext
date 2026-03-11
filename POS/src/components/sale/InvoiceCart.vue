@@ -737,6 +737,35 @@
 							__("Create Customer")
 						}}</span>
 					</button>
+
+					<!-- Shift History -->
+					<button
+						type="button"
+						@click="$emit('show-shift-history')"
+						class="flex flex-col items-center justify-center p-3 sm:p-4 bg-white border border-gray-200 rounded-lg hover:border-indigo-300 hover:bg-indigo-50 active:bg-indigo-100 transition-colors shadow-sm hover:shadow touch-manipulation group"
+						:title="__('View shift history')"
+					>
+						<div
+							class="w-9 h-9 sm:w-10 sm:h-10 bg-indigo-50 rounded-full flex items-center justify-center mb-2 group-hover:bg-indigo-100 transition-colors"
+						>
+							<svg
+								class="w-5 h-5 text-indigo-600"
+								fill="none"
+								stroke="currentColor"
+								viewBox="0 0 24 24"
+							>
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"
+								/>
+							</svg>
+						</div>
+						<span class="text-[11px] sm:text-xs font-semibold text-gray-700">{{
+							__("Shift History")
+						}}</span>
+					</button>
 				</div>
 			</div>
 
