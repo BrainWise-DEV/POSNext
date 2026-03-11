@@ -62,8 +62,6 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 
 			await loadDrafts() // Refresh drafts list and count
 
-			showSuccess(__("Invoice saved as draft successfully"))
-
 			return savedDraft
 		} catch (error) {
 			console.error("Error saving draft:", error)
@@ -92,7 +90,6 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 		try {
 			await deleteDraft(draftId)
 			await loadDrafts() // Refresh drafts list and count
-			showSuccess(__("Draft deleted successfully"))
 		} catch (error) {
 			console.error("Error deleting draft:", error)
 			showError(__("Failed to delete draft"))

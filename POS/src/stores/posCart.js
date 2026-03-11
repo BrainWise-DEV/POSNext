@@ -329,7 +329,6 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	function applyDiscountToCart(discount) {
 		applyDiscount(discount)
 		appliedCoupon.value = discount
-		showSuccess(__('{0} applied successfully', [discount.name]))
 	}
 
 	function removeDiscountFromCart() {
@@ -337,7 +336,6 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		appliedOffers.value = []
 		removeDiscount()
 		appliedCoupon.value = null
-		showSuccess(__("Discount has been removed from cart"))
 	}
 
 	function buildOfferEvaluationPayload(currentProfile) {
@@ -629,7 +627,6 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				// Wait for Vue reactivity to propagate before showing toast
 				await nextTick()
 
-				showSuccess(__('{0} applied successfully', [(offer.title || offer.name)]))
 				result = true
 			} catch (error) {
 				if (signal?.aborted) return
@@ -665,7 +662,6 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			processFreeItems([]) // Remove all free items
 			removeDiscount()
 			await nextTick()
-			showSuccess(__("Offer has been removed from cart"))
 			offersDialogRef?.resetApplyingState()
 			return true
 		}
@@ -683,7 +679,6 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			processFreeItems([]) // Remove all free items
 			removeDiscount()
 			await nextTick()
-			showSuccess(__("Offer has been removed from cart"))
 			offersDialogRef?.resetApplyingState()
 			return true
 		}
@@ -721,7 +716,6 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				offerProcessingState.value.lastProcessedAt = Date.now()
 
 				await nextTick()
-				showSuccess(__("Offer has been removed from cart"))
 				offersDialogRef?.resetApplyingState()
 				result = true
 			} catch (error) {
@@ -958,7 +952,6 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			// Rebuild cache after bulk changes
 			if (newlyAppliedOffers.length > 0) {
 				rebuildIncrementalCache()
-				showSuccess(__('Offline: {0} applied', [newlyAppliedOffers.join(', ')]))
 			}
 		} catch (error) {
 			console.error("Error applying offers offline:", error)
@@ -1238,7 +1231,6 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			const existingItem = findItemWithUom(itemCode, newUom, cartItem)
 			if (existingItem) {
 				const totalQty = mergeItems(cartItem, existingItem, cartItem.quantity)
-				showSuccess(__('Merged into {0} (Total: {1})', [newUom, totalQty]))
 				return
 			}
 
@@ -1246,7 +1238,6 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			await applyUomChange(cartItem, newUom, cartItem.quantity)
 			recalculateItem(cartItem)
 			rebuildIncrementalCache()
-			showSuccess(__('Unit changed to {0}', [newUom]))
 		} catch (error) {
 			console.error("Error changing UOM:", error)
 			showError(__("Failed to update UOM. Please try again."))
@@ -1272,7 +1263,6 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				if (existingItem) {
 					const qtyToMerge = updates.quantity ?? cartItem.quantity
 					const totalQty = mergeItems(cartItem, existingItem, qtyToMerge)
-					showSuccess(__('Merged into {0} (Total: {1})', [updates.uom, totalQty]))
 					return true
 				}
 
@@ -1308,7 +1298,6 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 			recalculateItem(cartItem)
 			rebuildIncrementalCache()
-			showSuccess(__('{0} updated', [cartItem.item_name]))
 			return true
 		} catch (error) {
 			console.error("Error updating item:", error)
@@ -1555,11 +1544,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				}
 
 				if (newlyAddedNames.length > 0) {
-					if (newlyAddedNames.length === 1) {
-						showSuccess(__('Offer applied: {0}', [newlyAddedNames[0]]))
-					} else {
-						showSuccess(__('Offers applied: {0}', [newlyAddedNames.join(', ')]))
-					}
+					// Offers applied successfully silently
 				}
 			} else if (invoiceItems.value.length === 0 && appliedOffers.value.length > 0) {
 				// Cart cleared, reset offers

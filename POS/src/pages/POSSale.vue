@@ -1906,7 +1906,6 @@ function handleCustomerSelected(selectedCustomer) {
 	if (selectedCustomer) {
 		cartStore.setCustomer(selectedCustomer);
 		uiStore.showCustomerDialog = false;
-		showSuccess(__("{0} selected", [selectedCustomer.customer_name]));
 
 		if (pendingPaymentAfterCustomer.value) {
 			pendingPaymentAfterCustomer.value = false;
@@ -2125,7 +2124,6 @@ function confirmClearCart() {
 	// Reset cart hash when cart is cleared
 	previousCartHash = "";
 	uiStore.showClearCartDialog = false;
-	showSuccess(__("All items removed from cart"));
 }
 
 async function handleOptionSelected(option) {
@@ -2171,7 +2169,6 @@ async function handleOptionSelected(option) {
 					);
 					uiStore.showItemSelectionDialog = false;
 					cartStore.clearPendingItem();
-					showSuccess(__("{0} added to cart", [variant.item_name]));
 				} catch (error) {
 					showError(error.message);
 				}
@@ -2199,7 +2196,6 @@ async function handleOptionSelected(option) {
 					cartStore.addItem(itemToAdd, qty, false, shiftStore.currentProfile);
 					uiStore.showItemSelectionDialog = false;
 					cartStore.clearPendingItem();
-					showSuccess(__("{0} ({1}) added to cart", [itemToAdd.item_name, option.uom]));
 				} catch (error) {
 					showError(error.message);
 				}
@@ -2295,7 +2291,6 @@ async function handleSaveDraft() {
 
 				// Update table status
 				await restaurantStore.updateTableStatus(cartStore.restaurantTable.name, "Occupied");
-				uiStore.showSuccess("Order sent to kitchen!");
 			} catch (error) {
 				console.error("Failed to sync draft to kitchen:", error);
 			}
