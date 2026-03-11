@@ -57,35 +57,17 @@ let validationTimer = null
 
 // Load branding configuration from backend
 const loadBrandingConfig = async () => {
-	try {
-		const response = await call('pos_next.api.branding.get_branding_config')
+	// Force static values to bypass backend config overwriting
+	footerText.value = 'Powered by'
+	linkText.value = 'Midiya'
+	footerLink.value = 'https://midiya.az'
+	serverValidationEnabled.value = false
 
-		if (response) {
-			config.value = response
-
-			// Decode base64 encoded values
-			footerText.value = atob(response._t || '')
-			linkText.value = atob(response._l || '')
-			footerLink.value = atob(response._u || '')
-			serverValidationEnabled.value = response._v || false
-
-			// Update check interval if provided
-			if (response._i && integrityTimer) {
-				clearInterval(integrityTimer)
-				integrityTimer = setInterval(checkIntegrity, response._i)
-			}
-
-			// Start server validation if enabled
-			if (serverValidationEnabled.value) {
-				startServerValidation()
-			}
-		}
-	} catch (error) {
-		console.error('[BrainWise] Failed to load branding config:', error)
-		// Use fallback values
-		footerText.value = 'Powered by'
-		linkText.value = 'Midiya'
-		footerLink.value = 'https://midiya.az'
+	// Set dummy config values for any style computations
+	config.value = {
+		_l: btoa('Midiya'),
+		_u: btoa('https://midiya.az'),
+		_t: btoa('Powered by')
 	}
 }
 
