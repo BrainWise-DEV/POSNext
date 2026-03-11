@@ -47,11 +47,12 @@ import { Button } from "frappe-ui"
 import KDSOrderCard from "@/components/invoices/KDSOrderCard.vue"
 import { call } from "@/utils/apiWrapper"
 import { useToast } from "@/composables/useToast"
+import { initSocket } from "@/socket"
 
 const { showError } = useToast()
 const orders = ref([])
 const loading = ref(true)
-let pollInterval = null
+let socket = null
 
 const sortedOrders = computed(() => {
 	// Sort by creation time (oldest first)
@@ -76,13 +77,23 @@ async function loadOrders() {
 
 onMounted(() => {
 	loadOrders()
-	// Poll for new orders every 10 seconds
-	pollInterval = setInterval(loadOrders, 10000)
+
+	// Initialize socket for realtime KDS updates
+	socket = initSocket()
+	if (socket) {
+		if (socket.disconnected) {
+			socket.connect()
+		}
+		socket.on("kds_update", () => {
+			console.log("Realtime KDS Update Received")
+			loadOrders()
+		})
+	}
 })
 
 onUnmounted(() => {
-	if (pollInterval) {
-		clearInterval(pollInterval)
+	if (socket) {
+		socket.off("kds_update")
 	}
 })
 </script>

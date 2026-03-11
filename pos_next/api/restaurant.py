@@ -44,6 +44,16 @@ def update_kds_status(invoice_name, status):
 		frappe.throw(_("Invoice {0} not found").format(invoice_name))
 
 	frappe.db.set_value("Sales Invoice", invoice_name, "kds_status", status)
+	frappe.publish_realtime("kds_update")
+	return {"status": "success"}
+
+@frappe.whitelist()
+def broadcast_cfd_update(payload):
+	"""Broadcasts CFD payload to all clients using Frappe Realtime."""
+	if isinstance(payload, str):
+		import json
+		payload = json.loads(payload)
+	frappe.publish_realtime("cfd_update", payload)
 	return {"status": "success"}
 
 @frappe.whitelist()

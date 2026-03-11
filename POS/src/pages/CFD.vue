@@ -83,6 +83,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { initSocket } from "@/socket"
 
 const items = ref([])
 const grandTotal = ref(0)
@@ -107,26 +108,49 @@ function formatCFDCurrency(amount) {
 }
 
 let channel = null
+let socket = null
 
 onMounted(() => {
-	// Initialize BroadcastChannel to listen to cart updates from the main POS window
+	// Initialize BroadcastChannel to listen to cart updates locally (same browser)
 	channel = new BroadcastChannel('pos_cfd_sync')
+
+	const updateFromPayload = (payload) => {
+		items.value = payload.items || []
+		grandTotal.value = payload.grandTotal || 0
+		totalTax.value = payload.totalTax || 0
+		totalDiscount.value = payload.totalDiscount || 0
+		currency.value = payload.currency || 'AZN'
+	}
 
 	channel.onmessage = (event) => {
 		if (event.data && event.data.type === 'CART_UPDATE') {
-			const payload = event.data.payload
-			items.value = payload.items || []
-			grandTotal.value = payload.grandTotal || 0
-			totalTax.value = payload.totalTax || 0
-			totalDiscount.value = payload.totalDiscount || 0
-			currency.value = payload.currency || 'AZN'
+			updateFromPayload(event.data.payload)
 		}
+	}
+
+	// Fallback to socket.io for cross-browser/cross-device updates
+	socket = initSocket()
+	if (socket) {
+		if (socket.disconnected) {
+			socket.connect()
+		}
+		socket.on("cfd_update", (payload) => {
+			if (typeof payload === 'string') {
+				try {
+					payload = JSON.parse(payload)
+				} catch(e){}
+			}
+			updateFromPayload(payload)
+		})
 	}
 })
 
 onBeforeUnmount(() => {
 	if (channel) {
 		channel.close()
+	}
+	if (socket) {
+		socket.off("cfd_update")
 	}
 })
 </script>

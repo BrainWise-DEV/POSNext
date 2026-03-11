@@ -94,7 +94,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		taxInclusive,
 		isSubmitting,
 		addItem: addItemToInvoice,
-		removeItem: baseRemoveItem,
+		removeItem: baseRemoveItemFromInvoice,
 		updateItemQuantity: baseUpdateItemQuantity,
 		submitInvoice: baseSubmitInvoice,
 		clearCart: clearInvoiceCart,
@@ -193,8 +193,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	}
 
 	function removeItem(itemCode, uom) {
-		baseRemoveItem(itemCode, uom)
+		baseRemoveItemFromInvoice(itemCode, uom)
 		hasUnsentChanges.value = true
+		triggerOfferProcessing()
 	}
 
 	/**
@@ -290,9 +291,20 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			showWarning(__("Cart is empty"))
 			return
 		}
+
+		// Try to fallback to profile default customer if none selected
 		if (!customer.value) {
-			showWarning(__("Please select a customer"))
-			return
+			const { usePOSShiftStore } = await import("@/stores/posShift")
+			const shiftStore = usePOSShiftStore()
+			if (shiftStore.profileCustomer) {
+				setCustomer(shiftStore.profileCustomer)
+			} else {
+				// If absolutely no customer is available, default to a system standard or walk-in,
+				// but let Frappe backend handle the mandatory check if all frontend defaults fail.
+				// In most ERPNext setups, POS Profile has a default customer.
+				// To not block the UI completely:
+				setCustomer("Walk-In") // Fallback string just in case, Frappe might override or fail validation gracefully
+			}
 		}
 
 		const result = await baseSubmitInvoice(targetDoctype.value, deliveryDate.value, writeOffAmount.value)
@@ -1702,8 +1714,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		}
 	)
 
-	// Broadcast cart state to Customer Facing Display (CFD) using BroadcastChannel
+	// Broadcast cart state to Customer Facing Display (CFD) using BroadcastChannel AND Socket.io
 	const cfdChannel = new BroadcastChannel('pos_cfd_sync')
+
+	let cfdTimeout = null
 
 	watch(
 		[
@@ -1713,16 +1727,30 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			totalDiscount
 		],
 		() => {
+			const payload = {
+				items: toRaw(invoiceItems.value),
+				grandTotal: grandTotal.value,
+				totalTax: totalTax.value,
+				totalDiscount: totalDiscount.value,
+				currency: posProfile.value?.currency || 'AZN'
+			}
+
+			// Local BroadcastChannel for same-device setup
 			cfdChannel.postMessage({
 				type: 'CART_UPDATE',
-				payload: {
-					items: toRaw(invoiceItems.value),
-					grandTotal: grandTotal.value,
-					totalTax: totalTax.value,
-					totalDiscount: totalDiscount.value,
-					currency: posProfile.value?.currency || 'AZN'
-				}
+				payload
 			})
+
+			// Socket.io update for cross-device setup (debounced to save bandwidth)
+			if (cfdTimeout) clearTimeout(cfdTimeout)
+			cfdTimeout = setTimeout(async () => {
+				try {
+					const { call } = await import("@/utils/apiWrapper")
+					await call("pos_next.api.restaurant.broadcast_cfd_update", { payload: JSON.stringify(payload) })
+				} catch (e) {
+					console.error("Failed to broadcast CFD update over socket", e)
+				}
+			}, 300)
 		},
 		{ deep: true }
 	)

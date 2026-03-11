@@ -948,6 +948,9 @@ def update_invoice(data):
                 # before we send it back to the frontend, otherwise we get
                 # "Document has been modified" errors on the next save/submit
                 invoice_doc.reload()
+
+                # Publish KDS event
+                frappe.publish_realtime("kds_update")
             except Exception as inner_e:
                 frappe.log_error(f"Failed to set KDS fields: {inner_e}", "POS KDS Error")
 
