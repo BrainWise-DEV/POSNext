@@ -405,6 +405,11 @@ def get_offers(pos_profile: str) -> List[Dict]:
 	"""
 	try:
 		profile = frappe.get_doc("POS Profile", pos_profile)
+
+		# Respect POS Profile's ignore_pricing_rule setting
+		if profile.ignore_pricing_rule:
+			return []
+
 		date = nowdate()
 
 		offers = []

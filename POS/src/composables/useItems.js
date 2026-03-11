@@ -67,7 +67,8 @@ export function useItems(posProfile, cartItems = ref([])) {
 				(item) =>
 					item.item_name?.toLowerCase().includes(term) ||
 					item.item_code?.toLowerCase().includes(term) ||
-					item.barcode?.toLowerCase().includes(term),
+					item.barcode?.toLowerCase().includes(term) ||
+					item.item_group?.toLowerCase().includes(term)
 			)
 		}
 

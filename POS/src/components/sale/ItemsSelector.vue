@@ -839,7 +839,7 @@ const totalPages = computed(() => {
 const SEARCH_PLACEHOLDERS = Object.freeze({
 	auto: __("Auto-Add ON - Type or scan barcode"),
 	scanner: __("Scanner ON - Enable Auto for automatic addition"),
-	default: __("Search by item code, name or scan barcode"),
+	default: __("Search by item code, name, item group or scan barcode"),
 })
 
 // Sort configuration

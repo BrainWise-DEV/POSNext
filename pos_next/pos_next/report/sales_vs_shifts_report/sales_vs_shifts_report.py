@@ -71,10 +71,9 @@ RATING LABELS
 
 INVOICE MATCHING
 ----------------
-Invoices match a shift when:
-  1. posa_pos_opening_shift = shift.pos_opening_shift
-  OR
-  2. pos_profile AND owner AND posting_date all match the shift
+Invoices are linked to shifts via the `Sales Invoice Reference` child table
+(pos_transactions) on `POS Closing Shift`. This is the explicit list of invoices
+stored at shift-close time — the authoritative source, no fuzzy matching.
 """
 
 import frappe
@@ -638,7 +637,12 @@ def get_shift_data(filters):
 
 
 def fetch_shifts_with_invoices(filters):
-	"""Fetch shifts with aggregated invoice data in a single query"""
+	"""Fetch shifts with aggregated invoice data in a single query.
+
+	Uses the `Sales Invoice Reference` child table (pos_transactions) on POS Closing Shift
+	as the authoritative link between shifts and invoices. This is the explicit list stored
+	at shift-close time — no fuzzy matching by date/user/profile.
+	"""
 
 	conditions = build_conditions(filters)
 
@@ -661,17 +665,10 @@ def fetch_shifts_with_invoices(filters):
 			COUNT(DISTINCT CASE WHEN si.is_return = 0 THEN si.customer END) AS customers
 
 		FROM `tabPOS Closing Shift` pcs
-		LEFT JOIN `tabSales Invoice` si ON
-			si.docstatus = 1
-			AND si.is_pos = 1
-			AND (
-				si.posa_pos_opening_shift = pcs.pos_opening_shift
-				OR (
-					si.pos_profile = pcs.pos_profile
-					AND si.owner = pcs.user
-					AND si.posting_date BETWEEN DATE(pcs.period_start_date) AND DATE(pcs.period_end_date)
-				)
-			)
+		LEFT JOIN `tabSales Invoice Reference` sir ON sir.parent = pcs.name
+			AND sir.parenttype = 'POS Closing Shift'
+		LEFT JOIN `tabSales Invoice` si ON si.name = sir.sales_invoice
+			AND si.docstatus = 1
 		WHERE pcs.docstatus = 1
 		{conditions}
 		GROUP BY pcs.name
@@ -704,31 +701,10 @@ def build_conditions(filters):
 # =============================================================================
 
 def fetch_payment_data_batch(shifts):
-	"""Fetch payment breakdown for all shifts in one query"""
+	"""Fetch payment breakdown for all shifts"""
 	if not shifts:
 		return {}
 
-	# Build conditions for all shifts
-	shift_conditions = []
-	params = {}
-
-	for i, shift in enumerate(shifts):
-		param_prefix = f"s{i}_"
-		shift_conditions.append(f"""(
-			si.posa_pos_opening_shift = %({param_prefix}pos_opening)s
-			OR (
-				si.pos_profile = %({param_prefix}profile)s
-				AND si.owner = %({param_prefix}cashier)s
-				AND si.posting_date BETWEEN DATE(%({param_prefix}start)s) AND DATE(%({param_prefix}end)s)
-			)
-		)""")
-		params[f"{param_prefix}pos_opening"] = shift.pos_opening_shift
-		params[f"{param_prefix}profile"] = shift.pos_profile
-		params[f"{param_prefix}cashier"] = shift.cashier_id
-		params[f"{param_prefix}start"] = shift.period_start_date
-		params[f"{param_prefix}end"] = shift.period_end_date
-
-	# For simplicity, fetch per-shift (batch would be complex with OR conditions)
 	result = {}
 	for shift in shifts:
 		result[shift.shift_id] = fetch_payment_data_single(shift)
@@ -737,31 +713,22 @@ def fetch_payment_data_batch(shifts):
 
 
 def fetch_payment_data_single(shift):
-	"""Fetch payment data for a single shift"""
+	"""Fetch payment data for a single shift via pos_transactions child table"""
 	query = """
 		SELECT
 			LOWER(sip.mode_of_payment) AS mode,
 			SUM(sip.amount) AS amount
 		FROM `tabSales Invoice Payment` sip
 		INNER JOIN `tabSales Invoice` si ON si.name = sip.parent
-		WHERE si.docstatus = 1 AND si.is_pos = 1 AND si.is_return = 0
-		AND (
-			si.posa_pos_opening_shift = %(pos_opening)s
-			OR (
-				si.pos_profile = %(profile)s
-				AND si.owner = %(cashier)s
-				AND si.posting_date BETWEEN DATE(%(start)s) AND DATE(%(end)s)
-			)
-		)
+		INNER JOIN `tabSales Invoice Reference` sir ON sir.sales_invoice = si.name
+			AND sir.parent = %(shift)s
+			AND sir.parenttype = 'POS Closing Shift'
+		WHERE si.docstatus = 1 AND si.is_return = 0
 		GROUP BY LOWER(sip.mode_of_payment)
 	"""
 
 	payments = frappe.db.sql(query, {
-		"pos_opening": shift.pos_opening_shift,
-		"profile": shift.pos_profile,
-		"cashier": shift.cashier_id,
-		"start": shift.period_start_date,
-		"end": shift.period_end_date
+		"shift": shift.shift_id,
 	}, as_dict=True)
 
 	cash = 0
@@ -784,32 +751,23 @@ def fetch_salesperson_data_batch(shifts):
 
 
 def fetch_salesperson_data_single(shift):
-	"""Fetch sales person data for a single shift"""
+	"""Fetch sales person data for a single shift via pos_transactions child table"""
 	query = """
 		SELECT
 			st.sales_person,
 			SUM(st.allocated_amount) AS contribution
 		FROM `tabSales Team` st
 		INNER JOIN `tabSales Invoice` si ON si.name = st.parent
-		WHERE si.docstatus = 1 AND si.is_pos = 1 AND si.is_return = 0
-		AND (
-			si.posa_pos_opening_shift = %(pos_opening)s
-			OR (
-				si.pos_profile = %(profile)s
-				AND si.owner = %(cashier)s
-				AND si.posting_date BETWEEN DATE(%(start)s) AND DATE(%(end)s)
-			)
-		)
+		INNER JOIN `tabSales Invoice Reference` sir ON sir.sales_invoice = si.name
+			AND sir.parent = %(shift)s
+			AND sir.parenttype = 'POS Closing Shift'
+		WHERE si.docstatus = 1 AND si.is_return = 0
 		GROUP BY st.sales_person
 		ORDER BY contribution DESC
 	"""
 
 	sales_persons = frappe.db.sql(query, {
-		"pos_opening": shift.pos_opening_shift,
-		"profile": shift.pos_profile,
-		"cashier": shift.cashier_id,
-		"start": shift.period_start_date,
-		"end": shift.period_end_date
+		"shift": shift.shift_id,
 	}, as_dict=True)
 
 	if not sales_persons:
@@ -843,30 +801,21 @@ def fetch_peak_hours_batch(shifts):
 
 
 def fetch_peak_hour_single(shift):
-	"""Fetch peak hour for a single shift"""
+	"""Fetch peak hour for a single shift via pos_transactions child table"""
 	query = """
 		SELECT HOUR(si.posting_time) AS hour, SUM(si.grand_total) AS total
 		FROM `tabSales Invoice` si
-		WHERE si.docstatus = 1 AND si.is_pos = 1 AND si.is_return = 0
-		AND (
-			si.posa_pos_opening_shift = %(pos_opening)s
-			OR (
-				si.pos_profile = %(profile)s
-				AND si.owner = %(cashier)s
-				AND si.posting_date BETWEEN DATE(%(start)s) AND DATE(%(end)s)
-			)
-		)
+		INNER JOIN `tabSales Invoice Reference` sir ON sir.sales_invoice = si.name
+			AND sir.parent = %(shift)s
+			AND sir.parenttype = 'POS Closing Shift'
+		WHERE si.docstatus = 1 AND si.is_return = 0
 		GROUP BY HOUR(si.posting_time)
 		ORDER BY total DESC
 		LIMIT 1
 	"""
 
 	result = frappe.db.sql(query, {
-		"pos_opening": shift.pos_opening_shift,
-		"profile": shift.pos_profile,
-		"cashier": shift.cashier_id,
-		"start": shift.period_start_date,
-		"end": shift.period_end_date
+		"shift": shift.shift_id,
 	}, as_dict=True)
 
 	if result and result[0].hour is not None:

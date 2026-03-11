@@ -441,6 +441,14 @@ class OfflineWorkerClient {
 		return this.sendMessage("GET_PAYMENT_METHODS", { posProfile })
 	}
 
+	async cacheSalesPersons(salesPersons) {
+		return this.sendMessage("CACHE_SALES_PERSONS", { salesPersons })
+	}
+
+	async getCachedSalesPersons(posProfile) {
+		return this.sendMessage("GET_SALES_PERSONS", { posProfile })
+	}
+
 	async isCacheReady() {
 		return this.sendMessage("IS_CACHE_READY")
 	}
