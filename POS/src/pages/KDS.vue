@@ -60,7 +60,8 @@ const sortedOrders = computed(() => {
 
 async function loadOrders() {
 	try {
-		const res = await call("pos_next.api.restaurant.get_kds_orders")
+		// Use a cache-busting timestamp to prevent PWA/Browser from serving stale empty responses
+		const res = await call("pos_next.api.restaurant.get_kds_orders", { _: Date.now() })
 
 		if (res) {
 			orders.value = res
