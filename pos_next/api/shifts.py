@@ -6,7 +6,7 @@ from __future__ import unicode_literals
 import json
 import frappe
 from frappe import _
-from frappe.utils import nowdate, nowtime, get_datetime
+from frappe.utils import nowdate, nowtime, get_datetime, flt, cint
 from pos_next.api.utilities import get_wallet_payment_modes
 
 
@@ -183,58 +183,133 @@ def submit_closing_shift(closing_shift):
 		frappe.log_error(frappe.get_traceback(), "Submit Closing Shift Error")
 		frappe.throw(_("Error submitting closing shift: {0}").format(str(e)))
 
+
 @frappe.whitelist()
-def get_shift_history(filters=None):
-    if isinstance(filters, str):
-        filters = json.loads(filters)
-    
-    conditions = []
-    values = {}
-    
-    if filters:
-        if filters.get('pos_profile'):
-            conditions.append("os.pos_profile = %(pos_profile)s")
-            values['pos_profile'] = filters.get('pos_profile')
-            
-        if filters.get('from_date'):
-            conditions.append("os.posting_date >= %(from_date)s")
-            values['from_date'] = filters.get('from_date')
-            
-        if filters.get('to_date'):
-            conditions.append("os.posting_date <= %(to_date)s")
-            values['to_date'] = filters.get('to_date')
-            
-    where_clause = " AND ".join(conditions)
-    if where_clause:
-        where_clause = " WHERE " + where_clause
-        
-    query = f"""
-        SELECT 
-            os.name as opening_shift_name,
-            cs.name as closing_shift_name,
-            os.posting_date as date,
-            os.pos_profile,
-            os.user as cashier,
-            os.period_start_date as open_time,
-            cs.period_end_date as close_time,
-            (SELECT SUM(amount) FROM `tabPOS Opening Shift Detail` WHERE parent = os.name) as opening_amount,
-            (SELECT SUM(closing_amount) FROM `tabPOS Closing Shift Detail` WHERE parent = cs.name) as closing_amount,
-            cs.grand_total as sales_total,
-            (SELECT SUM(difference) FROM `tabPOS Closing Shift Detail` WHERE parent = cs.name) as difference
-        FROM `tabPOS Opening Shift` os
-        LEFT JOIN `tabPOS Closing Shift` cs ON cs.pos_opening_shift = os.name
-        {where_clause}
-        ORDER BY os.posting_date DESC, os.period_start_date DESC
-    """
-    
-    data = frappe.db.sql(query, values, as_dict=True)
-    
-    # Ensure safe flt values and maintain consistency
-    for row in data:
-        from frappe.utils import flt
-        row.opening_amount = flt(row.opening_amount)
-        row.closing_amount = flt(row.closing_amount)
-        row.sales_total = flt(row.sales_total)
-        row.difference = flt(row.difference)
-        
-    return data
+def get_shift_history(filters=None, limit=25, offset=0):
+	"""Return paginated shift history for the current session user only.
+
+	Args:
+		filters: JSON string or dict with optional from_date / to_date.
+		limit:   Page size (default 25, max 100).
+		offset:  Number of records to skip (0-based, for page navigation).
+
+	Returns:
+		{
+		  "rows":   [...],          # Current page rows
+		  "totals": {               # Aggregates across ALL matching rows (no page cap)
+		      "total_shifts":   int,
+		      "total_sales":    float,
+		      "total_cash_diff": float,
+		  }
+		}
+
+	Security: The session user restriction is always enforced server-side.
+	Clients cannot override it by passing filters.
+	"""
+	if not frappe.has_permission("POS Opening Shift", "read"):
+		frappe.throw(_("Insufficient permissions to view shift history"))
+
+	if isinstance(filters, str):
+		filters = json.loads(filters)
+
+	# Clamp page size: minimum 1, maximum 100
+	page_size   = max(1, min(cint(limit) or 25, 100))
+	page_offset = max(0, cint(offset) or 0)
+
+	# Mandatory WHERE conditions — user is always enforced server-side
+	conditions = [
+		"os.docstatus = 1",
+		"os.user = %(session_user)s",
+	]
+	values = {
+		"session_user": frappe.session.user,
+		"limit":        page_size,
+		"offset":       page_offset,
+	}
+
+	if filters:
+		if filters.get("from_date"):
+			conditions.append("os.posting_date >= %(from_date)s")
+			values["from_date"] = filters["from_date"]
+
+		if filters.get("to_date"):
+			conditions.append("os.posting_date <= %(to_date)s")
+			values["to_date"] = filters["to_date"]
+
+	where_clause = "WHERE " + " AND ".join(conditions)
+
+	# ── Rows query (paginated) ────────────────────────────────────────────────
+	# Pre-aggregated LEFT JOINs replace 3 correlated subqueries per row.
+	rows_query = f"""
+		SELECT
+			os.name            AS opening_shift_name,
+			cs.name            AS closing_shift_name,
+			os.posting_date    AS date,
+			os.pos_profile,
+			os.user            AS cashier,
+			os.period_start_date AS open_time,
+			cs.period_end_date   AS close_time,
+			COALESCE(osd.opening_amount, 0) AS opening_amount,
+			COALESCE(csd.closing_amount, 0) AS closing_amount,
+			COALESCE(cs.grand_total,     0) AS sales_total,
+			COALESCE(csd.difference,     0) AS difference
+		FROM `tabPOS Opening Shift` os
+		LEFT JOIN `tabPOS Closing Shift` cs
+			ON cs.pos_opening_shift = os.name
+		LEFT JOIN (
+			SELECT parent, SUM(amount) AS opening_amount
+			FROM `tabPOS Opening Shift Detail`
+			GROUP BY parent
+		) osd ON osd.parent = os.name
+		LEFT JOIN (
+			SELECT
+				parent,
+				SUM(closing_amount) AS closing_amount,
+				SUM(difference)     AS difference
+			FROM `tabPOS Closing Shift Detail`
+			GROUP BY parent
+		) csd ON csd.parent = cs.name
+		{where_clause}
+		ORDER BY os.posting_date DESC, os.period_start_date DESC
+		LIMIT %(limit)s OFFSET %(offset)s
+	"""
+
+	data = frappe.db.sql(rows_query, values, as_dict=True)
+
+	for row in data:
+		row.opening_amount = flt(row.opening_amount)
+		row.closing_amount = flt(row.closing_amount)
+		row.sales_total    = flt(row.sales_total)
+		row.difference     = flt(row.difference)
+
+	# ── Totals query (no LIMIT) ───────────────────────────────────────────────
+	# Runs across the full filter set so summary cards are always accurate
+	# regardless of which page the user is viewing.
+	totals_query = f"""
+		SELECT
+			COUNT(*)                              AS total_shifts,
+			COALESCE(SUM(cs.grand_total),    0)   AS total_sales,
+			COALESCE(SUM(csd_t.difference),  0)   AS total_cash_diff
+		FROM `tabPOS Opening Shift` os
+		LEFT JOIN `tabPOS Closing Shift` cs
+			ON cs.pos_opening_shift = os.name
+		LEFT JOIN (
+			SELECT parent, SUM(difference) AS difference
+			FROM `tabPOS Closing Shift Detail`
+			GROUP BY parent
+		) csd_t ON csd_t.parent = cs.name
+		{where_clause}
+	"""
+	# Exclude pagination keys from totals query values
+	totals_values = {k: v for k, v in values.items() if k not in ("limit", "offset")}
+	totals_row = frappe.db.sql(totals_query, totals_values, as_dict=True)
+	totals = totals_row[0] if totals_row else {}
+
+	return {
+		"rows": data,
+		"totals": {
+			"total_shifts":    int(totals.get("total_shifts",    len(data))),
+			"total_sales":     flt(totals.get("total_sales",     0)),
+			"total_cash_diff": flt(totals.get("total_cash_diff", 0)),
+		},
+	}

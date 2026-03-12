@@ -1392,6 +1392,7 @@ const emit = defineEmits([
 	"show-history", // () - Show invoice history
 	"show-return", // () - Open return invoice dialog
 	"close-shift", // () - Close current shift
+	"show-shift-history", // () - Open shift history dialog
 	// "create-sales-order", // () - Create Sales Order // Removed as per instruction
 ]);
 

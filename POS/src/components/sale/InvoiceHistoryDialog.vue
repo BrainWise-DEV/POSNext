@@ -215,7 +215,7 @@ import { useToast } from "@/composables/useToast"
 import { DEFAULT_CURRENCY, DEFAULT_LOCALE, formatCurrency as formatCurrencyUtil } from "@/utils/currency"
 import { getInvoiceStatusColor } from "@/utils/invoice"
 import { Button, Dialog, Input, createResource } from "frappe-ui"
-import { computed, ref, watch } from "vue"
+import { computed, ref, watch, onUnmounted } from "vue"
 import ReturnInvoiceDialog from "./ReturnInvoiceDialog.vue"
 
 const { showError } = useToast()
@@ -256,6 +256,13 @@ const isEmpty = computed(
 
 // ─── Debounce utility (no lodash needed) ─────────────────────────────────────
 let _debounceTimer = null
+
+// MEDIUM (fix #8): clear pending debounce timer when dialog unmounts to prevent
+// the callback from calling loadInvoices() on a stale/destroyed component.
+onUnmounted(() => {
+	clearTimeout(_debounceTimer)
+})
+
 function debounce(fn, delay) {
 	return (...args) => {
 		clearTimeout(_debounceTimer)
@@ -294,6 +301,9 @@ const invoicesResource = createResource({
 	},
 	onError(error) {
 		console.error("Error loading invoices:", error)
+		// FIX #10: show a toast so the user gets immediate feedback on failure
+		// (the template also shows an inline error state with a Retry button)
+		showError(__("Failed to load invoices. Please try again."))
 		isLoadingMore.value = false
 	},
 })

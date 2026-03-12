@@ -5,37 +5,24 @@
 	>
 		<template #body-content>
 			<div class="flex flex-col gap-6">
-				<!-- Quick Summary Cards -->
+				<!-- Quick Summary Cards — totals come from the server (#11 fix) -->
 				<div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
 					<div class="bg-blue-50 border border-blue-100 rounded-xl p-4 flex flex-col justify-between shadow-sm">
 						<span class="text-xs font-semibold text-blue-600 uppercase tracking-wider">{{ __('Total Sales') }}</span>
-						<span class="text-2xl font-bold text-blue-900 mt-1">{{ formatCurrency(totalGrandTotal) }}</span>
+						<span class="text-2xl font-bold text-blue-900 mt-1">{{ formatCurrency(serverTotals.total_sales) }}</span>
 					</div>
 					<div class="bg-indigo-50 border border-indigo-100 rounded-xl p-4 flex flex-col justify-between shadow-sm">
 						<span class="text-xs font-semibold text-indigo-600 uppercase tracking-wider">{{ __('Total Shifts') }}</span>
-						<span class="text-2xl font-bold text-indigo-900 mt-1">{{ shifts.length }}</span>
+						<span class="text-2xl font-bold text-indigo-900 mt-1">{{ serverTotals.total_shifts }}</span>
 					</div>
-					<div :class="['rounded-xl p-4 flex flex-col justify-between shadow-sm border', totalCashDiff >= 0 ? 'bg-emerald-50 border-emerald-100' : 'bg-rose-50 border-rose-100']">
-						<span :class="['text-xs font-semibold uppercase tracking-wider', totalCashDiff >= 0 ? 'text-emerald-600' : 'text-rose-600']">{{ __('Net Cash Diff') }}</span>
-						<span :class="['text-2xl font-bold mt-1', totalCashDiff >= 0 ? 'text-emerald-900' : 'text-rose-900']">{{ formatCurrency(totalCashDiff) }}</span>
+					<div :class="['rounded-xl p-4 flex flex-col justify-between shadow-sm border', serverTotals.total_cash_diff >= 0 ? 'bg-emerald-50 border-emerald-100' : 'bg-rose-50 border-rose-100']">
+						<span :class="['text-xs font-semibold uppercase tracking-wider', serverTotals.total_cash_diff >= 0 ? 'text-emerald-600' : 'text-rose-600']">{{ __('Net Cash Diff') }}</span>
+						<span :class="['text-2xl font-bold mt-1', serverTotals.total_cash_diff >= 0 ? 'text-emerald-900' : 'text-rose-900']">{{ formatCurrency(serverTotals.total_cash_diff) }}</span>
 					</div>
 				</div>
 
 				<!-- Filters Section -->
 				<div class="flex flex-col sm:flex-row items-end gap-3 bg-gray-50/50 p-4 rounded-xl border border-gray-100">
-					<div class="w-full sm:w-56">
-						<label class="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">{{ __('POS Profile') }}</label>
-						<select
-							v-model="filters.pos_profile"
-							@change="loadShifts"
-							class="w-full h-10 px-3 bg-white border border-gray-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all cursor-pointer shadow-sm"
-						>
-							<option value="">{{ __('All Profiles') }}</option>
-							<option v-for="profile in posProfiles" :key="profile.name" :value="profile.name">
-								{{ profile.name }}
-							</option>
-						</select>
-					</div>
 					<div class="w-full sm:w-44">
 						<label class="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">{{ __('From Date') }}</label>
 						<Input
@@ -128,14 +115,14 @@
 									<th class="px-5 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-widest text-right">{{ __('Closing') }}</th>
 									<th class="px-5 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-widest text-right">{{ __('Sales') }}</th>
 									<th class="px-5 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-widest text-right">{{ __('Cash Diff') }}</th>
+									<th class="px-5 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-widest text-right">{{ __('Actions') }}</th>
 								</tr>
 							</thead>
 							<tbody class="divide-y divide-gray-50 bg-white">
 								<tr 
 									v-for="shift in shifts" 
 									:key="shift.opening_shift_name" 
-									@click="viewShift(shift)"
-									class="hover:bg-blue-50/50 cursor-pointer transition-all duration-200 group relative"
+									class="hover:bg-blue-50/50 transition-all duration-200 group relative"
 								>
 									<td class="px-5 py-4 font-semibold text-gray-900 group-hover:text-blue-700">
 										{{ formatDate(shift.date) }}
@@ -166,9 +153,77 @@
 											{{ formatCurrency(shift.difference) }}
 										</span>
 									</td>
+									<!-- FIX #17: actions column — user can open either Opening or Closing shift -->
+									<td class="px-3 py-4 text-right">
+										<div class="flex items-center justify-end gap-1">
+											<button
+												@click.stop="openShiftDoc(shift, 'opening')"
+												class="text-[10px] font-semibold px-2 py-1 rounded bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors"
+												:title="__('View Opening Shift')"
+											>
+												{{ __('Open') }}
+											</button>
+											<button
+												v-if="shift.closing_shift_name"
+												@click.stop="openShiftDoc(shift, 'closing')"
+												class="text-[10px] font-semibold px-2 py-1 rounded bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors"
+												:title="__('View Closing Shift')"
+											>
+												{{ __('Close') }}
+											</button>
+										</div>
+									</td>
 								</tr>
 							</tbody>
 						</table>
+					</div>
+				</div>
+
+				<!-- Pagination bar (shown when there is more than one page) -->
+				<div
+					v-if="totalPages > 1"
+					class="flex items-center justify-between px-4 py-3 border-t border-gray-100 bg-gray-50/60 rounded-b-xl"
+				>
+					<span class="text-[11px] font-medium text-gray-500 select-none">
+						{{ __('Showing') }}
+						{{ (currentPage - 1) * PAGE_SIZE + 1 }}&ndash;{{ Math.min(currentPage * PAGE_SIZE, serverTotals.total_shifts) }}
+						{{ __('of') }} {{ serverTotals.total_shifts }} {{ __('shifts') }}
+					</span>
+
+					<div class="flex items-center gap-1">
+						<button
+							@click="goToPage(currentPage - 1)"
+							:disabled="currentPage === 1 || shiftsResource.loading"
+							class="w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-white hover:border-blue-300 hover:text-blue-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+						>
+							<svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+						</button>
+
+						<template v-for="page in visiblePages" :key="page">
+							<span
+								v-if="typeof page === 'string'"
+								class="w-8 h-8 flex items-center justify-center text-gray-400 text-xs select-none"
+							>&hellip;</span>
+							<button
+								v-else
+								@click="goToPage(page)"
+								:disabled="shiftsResource.loading"
+								:class="[
+									'w-8 h-8 flex items-center justify-center rounded-lg border text-xs font-semibold transition-colors',
+									page === currentPage
+										? 'bg-blue-600 border-blue-600 text-white shadow-sm'
+										: 'border-gray-200 text-gray-600 hover:bg-white hover:border-blue-300 hover:text-blue-600 disabled:opacity-50',
+								]"
+							>{{ page }}</button>
+						</template>
+
+						<button
+							@click="goToPage(currentPage + 1)"
+							:disabled="currentPage === totalPages || shiftsResource.loading"
+							class="w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-white hover:border-blue-300 hover:text-blue-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+						>
+							<svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"/></svg>
+						</button>
 					</div>
 				</div>
 			</div>
@@ -191,7 +246,6 @@ const { showError } = useToast()
 
 const props = defineProps({
 	modelValue: Boolean,
-	posProfile: String,
 	currency: {
 		type: String,
 		default: DEFAULT_CURRENCY,
@@ -202,99 +256,157 @@ const emit = defineEmits(["update:modelValue"])
 
 const show = ref(props.modelValue)
 const shifts = ref([])
-const posProfiles = ref([])
 
+// Pagination
+const PAGE_SIZE   = 5
+const currentPage = ref(1)
+
+const totalPages = computed(() => {
+	const total = serverTotals.value.total_shifts
+	return total > 0 ? Math.ceil(total / PAGE_SIZE) : 1
+})
+
+// Visible page numbers for the paginator (always shows at most 5 buttons)
+const visiblePages = computed(() => {
+	const total = totalPages.value
+	const cur   = currentPage.value
+	if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1)
+
+	const pages = new Set([1, total])
+	for (let i = Math.max(1, cur - 1); i <= Math.min(total, cur + 1); i++) pages.add(i)
+	if (cur - 2 > 2)     pages.add('..l')
+	if (cur + 2 < total) pages.add('..r')
+	return [...pages].sort((a, b) =>
+		typeof a === 'number' && typeof b === 'number' ? a - b
+		: typeof a === 'number' ? -1 : 1
+	)
+})
+
+// FIX #11: server-side aggregate totals (avoid client-side computation over
+// a LIMIT-truncated page). Initialised to zeros; updated on each successful load.
+const serverTotals = ref({
+	total_sales: 0,
+	total_cash_diff: 0,
+	total_shifts: 0,
+})
+
+// Initialize date filters once on mount; profile + shift loading is deferred
+// to the show-watcher so it only fires when the dialog is actually opened.
 const filters = reactive({
-	pos_profile: props.posProfile,
 	from_date: "",
 	to_date: "",
 })
 
-// Computed totals
-const totalGrandTotal = computed(() => {
-	return shifts.value.reduce((sum, s) => sum + Number.parseFloat(s.sales_total || 0), 0)
-})
-
-const totalCashDiff = computed(() => {
-	return shifts.value.reduce((sum, s) => sum + Number.parseFloat(s.difference || 0), 0)
-})
-
-// Initialize filters and load profiles
 onMounted(() => {
 	const today = new Date()
 	const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1)
-	
+
 	filters.from_date = startOfMonth.toISOString().split('T')[0]
 	filters.to_date = today.toISOString().split('T')[0]
-
-	loadProfiles()
-	if (show.value) {
-		loadShifts()
-	}
 })
 
-async function loadProfiles() {
-	try {
-		const res = await fetch("/api/method/frappe.client.get_list", {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({
-				doctype: "POS Profile",
-				filters: { disabled: 0 },
-				fields: ["name"]
-			})
-		})
-		const data = await res.json()
-		posProfiles.value = data.message || []
-	} catch (e) {
-		console.error("Failed to load profiles", e)
+
+/**
+ * Safely encode a single CSV field per RFC 4180 + OWASP formula-injection rules.
+ *
+ * Rules applied in order:
+ *  1. Coerce to string; null/undefined → empty string.
+ *  2. OWASP formula-injection guard: if the value starts with one of the
+ *     dangerous leading characters (=, +, -, @, TAB, CR) that spreadsheet
+ *     apps treat as formula starters, prepend a single TAB character.
+ *     This breaks the formula trigger while keeping the cell readable.
+ *  3. RFC 4180 quoting: always wrap the field in double-quotes and escape
+ *     any embedded double-quote by doubling it ("").
+ *
+ * @param {*} value - Raw cell value.
+ * @returns {string} - RFC 4180 quoted cell string.
+ */
+function csvEscape(value) {
+	const FORMULA_PREFIX = /^[=+\-@\t\r]/
+	let str = (value == null || value === undefined) ? '' : String(value)
+
+	// Strip bare \r or \r\n inside values; keep \n (will be inside quotes, safe in RFC 4180)
+	str = str.replace(/\r\n?/g, '\n')
+
+	// OWASP: neutralise formula-injection trigger characters at start of cell
+	if (FORMULA_PREFIX.test(str)) {
+		str = '\t' + str
 	}
+
+	// RFC 4180: always quote, escape internal double-quotes by doubling
+	return '"' + str.replace(/"/g, '""') + '"'
 }
 
+/**
+ * Download shift history as a properly encoded CSV file.
+ *
+ * Uses Blob + URL.createObjectURL (best practice):
+ *  - No 2 MB data-URI size cap.
+ *  - Binary-safe: UTF-8 BOM ensures Excel opens with correct encoding
+ *    without requiring a manual import wizard.
+ *  - CRLF line endings (\r\n) per RFC 4180 — required by Excel on Windows.
+ *  - Memory is released immediately via revokeObjectURL after the click.
+ */
 function exportToCSV() {
-	if (shifts.value.length === 0) return
+	if (!shifts.value.length) return
 
 	const headers = [
-		__('Date'), 
-		__('POS Profile'), 
-		__('Cashier'), 
-		__('Open Time'), 
-		__('Close Time'), 
-		__('Opening Amount'), 
-		__('Closing Amount'), 
-		__('Total Sales'), 
-		__('Cash Difference')
+		__('Date'),
+		__('POS Profile'),
+		__('Cashier'),
+		__('Open Time'),
+		__('Close Time'),
+		__('Opening Amount'),
+		__('Closing Amount'),
+		__('Total Sales'),
+		__('Cash Difference'),
 	]
 
+	// Build rows — format display values for readability in the spreadsheet
 	const rows = shifts.value.map(s => [
-		s.date,
-		s.pos_profile,
-		s.cashier,
-		s.open_time,
-		s.close_time || '-',
-		s.opening_amount,
-		s.closing_amount,
-		s.sales_total,
-		s.difference
+		s.date || '',
+		s.pos_profile || '',
+		s.cashier || '',
+		s.open_time  ? formatTime(s.open_time)  : '',
+		s.close_time ? formatTime(s.close_time) : '',
+		s.opening_amount ?? 0,
+		s.closing_amount ?? 0,
+		s.sales_total    ?? 0,
+		s.difference     ?? 0,
 	])
 
-	let csvContent = "data:text/csv;charset=utf-8," 
-		+ headers.join(",") + "\n"
-		+ rows.map(e => e.join(",")).join("\n");
+	// RFC 4180: CRLF between records; header row first
+	const CRLF = '\r\n'
+	const csvLines = [
+		headers.map(csvEscape).join(','),
+		...rows.map(row => row.map(csvEscape).join(',')),
+	].join(CRLF)
 
-	const encodedUri = encodeURI(csvContent);
-	const link = document.createElement("a");
-	link.setAttribute("href", encodedUri);
-	link.setAttribute("download", `POS_Shift_History_${filters.from_date}_to_${filters.to_date}.csv`);
-	document.body.appendChild(link);
-	link.click();
-	document.body.removeChild(link);
+	// UTF-8 BOM (EF BB BF) — tells Excel this is UTF-8, preventing mojibake
+	const BOM = '\uFEFF'
+	const blob = new Blob([BOM + csvLines], { type: 'text/csv;charset=utf-8;' })
+
+	// Create a temporary object URL, trigger download, then revoke immediately
+	const url = URL.createObjectURL(blob)
+	const link = document.createElement('a')
+	link.href = url
+	link.download = `POS_Shift_History_${filters.from_date}_to_${filters.to_date}.csv`
+	link.style.display = 'none'
+	document.body.appendChild(link)
+	link.click()
+	document.body.removeChild(link)
+	// Release the object URL from memory — must happen after the click
+	URL.revokeObjectURL(url)
 }
 
-function viewShift(shift) {
-	const doctype = shift.closing_shift_name ? 'pos-closing-shift' : 'pos-opening-shift'
-	const name = shift.closing_shift_name || shift.opening_shift_name
-	window.open(`/app/${doctype}/${name}`, '_blank')
+// FIX #17: replaced the old viewShift() that always opened the closing shift
+// (if it existed) with openShiftDoc() that lets the user pick explicitly.
+function openShiftDoc(shift, type) {
+	if (type === 'closing' && shift.closing_shift_name) {
+		window.open(`/app/pos-closing-shift/${shift.closing_shift_name}`, '_blank')
+	} else {
+		window.open(`/app/pos-opening-shift/${shift.opening_shift_name}`, '_blank')
+	}
 }
 
 function formatCurrency(amount) {
@@ -345,12 +457,28 @@ const shiftsResource = createResource({
 	url: "pos_next.api.shifts.get_shift_history",
 	makeParams() {
 		return {
-			filters: JSON.stringify(filters)
+			filters: JSON.stringify(filters),
+			limit:  PAGE_SIZE,
+			offset: (currentPage.value - 1) * PAGE_SIZE,
 		}
 	},
 	auto: false,
-	onSuccess(data) {
-		shifts.value = data || []
+	onSuccess(response) {
+		if (response && typeof response === 'object' && !Array.isArray(response) && response.rows) {
+			shifts.value = response.rows || []
+			serverTotals.value = {
+				total_sales:     response.totals?.total_sales     ?? 0,
+				total_cash_diff: response.totals?.total_cash_diff ?? 0,
+				total_shifts:    response.totals?.total_shifts    ?? shifts.value.length,
+			}
+		} else {
+			shifts.value = response || []
+			serverTotals.value = {
+				total_sales:     shifts.value.reduce((s, r) => s + (r.sales_total || 0), 0),
+				total_cash_diff: shifts.value.reduce((s, r) => s + (r.difference  || 0), 0),
+				total_shifts:    shifts.value.length,
+			}
+		}
 	},
 	onError(error) {
 		console.error("Error loading shifts:", error)
@@ -358,12 +486,19 @@ const shiftsResource = createResource({
 	},
 })
 
+// Navigate to a specific page (1-indexed)
+function goToPage(page) {
+	const p = Number(page)
+	if (!Number.isInteger(p) || p < 1 || p > totalPages.value) return
+	currentPage.value = p
+	shiftsResource.reload()
+}
+
 watch(
 	() => props.modelValue,
 	(val) => {
 		show.value = val
-		if (val && props.posProfile) {
-			filters.pos_profile = props.posProfile
+		if (val) {
 			shiftsResource.reload()
 		}
 	},
@@ -373,10 +508,10 @@ watch(show, (val) => {
 	emit("update:modelValue", val)
 })
 
+// loadShifts always returns to page 1 (filter changed)
 function loadShifts() {
-	if (props.posProfile) {
-		shiftsResource.reload()
-	}
+	currentPage.value = 1
+	shiftsResource.reload()
 }
 
 </script>
