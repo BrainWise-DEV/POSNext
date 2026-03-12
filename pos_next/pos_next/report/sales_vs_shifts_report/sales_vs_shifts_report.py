@@ -683,9 +683,9 @@ def build_conditions(filters):
 	conditions = []
 
 	if filters.get("from_date"):
-		conditions.append("pcs.period_start_date >= %(from_date)s")
+		conditions.append("DATE(pcs.period_start_date) >= %(from_date)s")
 	if filters.get("to_date"):
-		conditions.append("pcs.period_end_date <= %(to_date)s")
+		conditions.append("DATE(pcs.period_end_date) <= %(to_date)s")
 	if filters.get("pos_profile"):
 		conditions.append("pcs.pos_profile = %(pos_profile)s")
 	if filters.get("cashier"):
