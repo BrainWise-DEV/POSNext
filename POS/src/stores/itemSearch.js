@@ -1167,7 +1167,6 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 					pos_profile: posProfile.value,
 					search_term: "",
 					item_group: null,
-					brand: undefined,
 					start: start,
 					limit: pageSize,
 					show_variants_as_items: getShowVariantsFlag(),
@@ -1266,7 +1265,6 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 					pos_profile: posProfile.value,
 					search_term: "",
 					item_group: null,
-						brand: undefined,
 					start: currentOffset.value,
 					limit: itemsPerPage.value,
 					show_variants_as_items: getShowVariantsFlag(),
@@ -1860,7 +1858,6 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 				const countPromise = call("pos_next.api.items.get_items_count", {
 					pos_profile: posProfile.value,
 					item_group: group || undefined,
-					brand: undefined,
 					show_variants_as_items: getShowVariantsFlag(),
 				}).catch(err => {
 					log.warn("Could not fetch item count:", err.message)
@@ -1878,7 +1875,6 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 						pos_profile: posProfile.value,
 						search_term: "",
 						item_group: null,
-						brand: undefined,
 						start: 0,
 						limit: pageSize,
 						show_variants_as_items: getShowVariantsFlag(),
@@ -1971,10 +1967,14 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 			const offline = isOffline()
 
 			if (offline) {
-				const cached = await offlineWorker.searchCachedItems("", 5000, 0)
-				const filtered = brand
-					? (cached || []).filter(item => (item.brand || '') === brand)
-					: (cached || [])
+				let filtered = []
+				if (brand) {
+					// Use IndexedDB brand index via worker for efficient offline filtering
+					filtered = await offlineWorker.searchCachedItemsByBrand(brand, 5000, 0)
+				} else {
+					filtered = await offlineWorker.searchCachedItems("", 5000, 0)
+				}
+
 				const pageItems = filtered.slice(0, pageSize)
 
 				replaceAllItems(pageItems)
@@ -2004,7 +2004,6 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 					pos_profile: posProfile.value,
 					search_term: "",
 					item_group: null,
-					brand: undefined,
 					start: 0,
 					limit: pageSize,
 					show_variants_as_items: getShowVariantsFlag(),

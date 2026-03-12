@@ -694,15 +694,48 @@ def _get_item_group_with_descendants(item_group):
 	)
 
 	return [item_group] + list(descendants)
-def _get_allowed_profile_brands(pos_profile):
-	"""Get brand names configured in POS Profile brands child table."""
-	brands = frappe.get_all(
-		"POS Brands Detail",
-		filters={"parent": pos_profile},
-		fields=["brand"],
-		pluck="brand"
+
+
+def _get_pos_profile_configured_brands(pos_profile):
+	"""Get distinct brand names configured on the POS Profile (child table only).
+
+	This is the single source of truth for profile-specific brand configuration and is
+	used by both:
+
+	- `_get_allowed_profile_brands` (to restrict item queries)
+	- `get_brands` (to build the filter list shown in the UI)
+
+	The function is cached per profile to avoid repeated DB hits across calls.
+	"""
+	cache_key = f"pos_profile_brands_raw:{pos_profile}"
+	cached = frappe.cache().get_value(cache_key)
+	if cached is not None:
+		return cached
+
+	POSBrandsDetail = DocType("POS Brands Detail")
+	configured = (
+		frappe.qb.from_(POSBrandsDetail)
+		.select(POSBrandsDetail.brand)
+		.distinct()
+		.where(POSBrandsDetail.parent == pos_profile)
+		.orderby(POSBrandsDetail.brand)
+		.run(pluck="brand")
 	)
-	return brands
+
+	# Store even empty list so we only ever hit the DB once per profile per cache TTL
+	frappe.cache().set_value(cache_key, configured, expires_in_sec=300)
+	return configured or []
+
+
+def _get_allowed_profile_brands(pos_profile):
+	"""Return list of brands that should be enforced in item queries for this profile.
+
+	Behaviour:
+	- If the POS Profile has brands configured in the child table, return that list.
+	- If no brands are configured, return an empty list so that item queries remain
+	  unrestricted by brand (see `get_brands` for UI fallback behaviour).
+	"""
+	return _get_pos_profile_configured_brands(pos_profile)
 
 def _build_item_base_conditions(
 	pos_profile_doc,
@@ -1807,16 +1840,8 @@ def get_brands(pos_profile):
 		return cached
 
 	try:
-		POSBrandsDetail = DocType("POS Brands Detail")
-
-		configured_brands = (
-			frappe.qb.from_(POSBrandsDetail)
-			.select(POSBrandsDetail.brand)
-			.distinct()
-			.where(POSBrandsDetail.parent == pos_profile)
-			.orderby(POSBrandsDetail.brand)
-			.run(pluck="brand")
-		)
+		# Reuse shared helper so profile brand configuration has a single source of truth
+		configured_brands = _get_pos_profile_configured_brands(pos_profile)
 
 		if not configured_brands:
 			# No brands configured on the POS Profile → show all active brands
