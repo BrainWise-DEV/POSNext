@@ -1103,6 +1103,48 @@ async function getCachedPaymentMethods(posProfile) {
 }
 
 // ============================================================================
+// SALES PERSONS CACHE FUNCTIONS
+// ============================================================================
+
+// Cache sales persons for offline use
+async function cacheSalesPersons(salesPersons) {
+	try {
+		const db = await initDB()
+		await db.table("sales_persons").bulkPut(salesPersons)
+
+		await db.table("settings").put({
+			key: "sales_persons_last_sync",
+			value: Date.now(),
+		})
+
+		return { success: true, count: salesPersons.length }
+	} catch (error) {
+		log.error("Error caching sales persons", error)
+		throw error
+	}
+}
+
+// Get cached sales persons for a POS profile
+async function getCachedSalesPersons(posProfile) {
+	try {
+		const db = await initDB()
+
+		if (!posProfile) {
+			return await db.table("sales_persons").toArray()
+		}
+
+		return await db
+			.table("sales_persons")
+			.where("pos_profile")
+			.equals(posProfile)
+			.toArray()
+	} catch (error) {
+		log.error("Error getting cached sales persons", error)
+		return []
+	}
+}
+
+// ============================================================================
 // OFFERS CACHE FUNCTIONS
 // ============================================================================
 
@@ -1618,6 +1660,14 @@ self.onmessage = async (event) => {
 
 			case "GET_PAYMENT_METHODS":
 				result = await getCachedPaymentMethods(payload.posProfile)
+				break
+
+			case "CACHE_SALES_PERSONS":
+				result = await cacheSalesPersons(payload.salesPersons)
+				break
+
+			case "GET_SALES_PERSONS":
+				result = await getCachedSalesPersons(payload.posProfile)
 				break
 
 			case "IS_CACHE_READY":

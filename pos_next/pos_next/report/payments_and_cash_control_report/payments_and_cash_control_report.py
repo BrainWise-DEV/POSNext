@@ -3,19 +3,22 @@
 
 import frappe
 from frappe import _
-from frappe.utils import flt
+from frappe.utils import flt, time_diff_in_hours, get_datetime
 
 
 def execute(filters=None):
-	columns = get_columns()
-	data = get_data(filters)
-	chart = get_chart_data(data)
+	data, payment_methods = get_data(filters)
+	columns = get_columns(payment_methods)
+	chart = get_chart_data(data, payment_methods)
 	return columns, data, None, chart
 
 
-def get_columns():
-	"""Return columns for the report"""
-	return [
+def get_columns(payment_methods):
+	"""Return columns for the report.
+
+	Generates dynamic columns per payment method found in the data.
+	"""
+	columns = [
 		{
 			"fieldname": "shift",
 			"label": _("Shift"),
@@ -44,52 +47,99 @@ def get_columns():
 			"width": 100
 		},
 		{
-			"fieldname": "payment_method",
-			"label": _("Payment Method"),
-			"fieldtype": "Data",
-			"width": 130
-		},
-		{
-			"fieldname": "expected_amount",
-			"label": _("Expected Amount"),
-			"fieldtype": "Currency",
-			"width": 140
-		},
-		{
-			"fieldname": "actual_amount",
-			"label": _("Actual Amount"),
-			"fieldtype": "Currency",
-			"width": 130
-		},
-		{
-			"fieldname": "difference",
-			"label": _("Difference"),
-			"fieldtype": "Currency",
-			"width": 120
-		},
-		{
-			"fieldname": "variance_percentage",
-			"label": _("Variance %"),
-			"fieldtype": "Percent",
+			"fieldname": "shift_start",
+			"label": _("Shift Start"),
+			"fieldtype": "Time",
 			"width": 100
+		},
+		{
+			"fieldname": "shift_end",
+			"label": _("Shift End"),
+			"fieldtype": "Time",
+			"width": 100
+		},
+		{
+			"fieldname": "shift_hours",
+			"label": _("Shift Hours"),
+			"fieldtype": "Float",
+			"width": 90
+		},
+		{
+			"fieldname": "total_transactions",
+			"label": _("Transactions"),
+			"fieldtype": "Int",
+			"width": 100
+		},
+	]
+
+	# Dynamic columns per payment method
+	for method in payment_methods:
+		safe = method.lower().replace(" ", "_")
+		columns.extend([
+			{
+				"fieldname": f"{safe}_opening",
+				"label": _(f"{method} Opening"),
+				"fieldtype": "Currency",
+				"width": 130
+			},
+			{
+				"fieldname": f"{safe}_expected",
+				"label": _(f"{method} Expected"),
+				"fieldtype": "Currency",
+				"width": 130
+			},
+			{
+				"fieldname": f"{safe}_closing",
+				"label": _(f"{method} Closing"),
+				"fieldtype": "Currency",
+				"width": 130
+			},
+			{
+				"fieldname": f"{safe}_diff",
+				"label": _(f"{method} Diff"),
+				"fieldtype": "Currency",
+				"width": 110
+			},
+		])
+
+	columns.extend([
+		{
+			"fieldname": "total_opening",
+			"label": _("Total Opening"),
+			"fieldtype": "Currency",
+			"width": 130
+		},
+		{
+			"fieldname": "total_expected",
+			"label": _("Total Expected"),
+			"fieldtype": "Currency",
+			"width": 130
+		},
+		{
+			"fieldname": "total_closing",
+			"label": _("Total Closing"),
+			"fieldtype": "Currency",
+			"width": 130
+		},
+		{
+			"fieldname": "total_difference",
+			"label": _("Total Difference"),
+			"fieldtype": "Currency",
+			"width": 130
 		},
 		{
 			"fieldname": "status",
 			"label": _("Status"),
 			"fieldtype": "Data",
-			"width": 100
+			"width": 120
 		},
-		{
-			"fieldname": "transaction_count",
-			"label": _("Transactions"),
-			"fieldtype": "Int",
-			"width": 110
-		}
-	]
+	])
+
+	return columns
 
 
 def get_data(filters):
-	"""Get payment reconciliation data"""
+	"""Get payment reconciliation data — one row per shift."""
 	conditions = get_conditions(filters)
 
 	# Get payment reconciliation details from closing shifts
@@ -99,9 +149,14 @@ def get_data(filters):
 			pcs.pos_profile,
 			pcs.user as cashier,
 			DATE(pcs.period_end_date) as posting_date,
+			TIME(pcs.period_start_date) as shift_start,
+			TIME(pcs.period_end_date) as shift_end,
+			pcs.period_start_date as _shift_start_dt,
+			pcs.period_end_date as _shift_end_dt,
 			pr.mode_of_payment as payment_method,
+			pr.opening_amount,
 			pr.expected_amount,
-			pr.closing_amount as actual_amount,
+			pr.closing_amount,
 			pr.difference
 		FROM
 			`tabPOS Closing Shift` pcs
@@ -114,48 +169,110 @@ def get_data(filters):
 			pcs.period_end_date DESC, pr.mode_of_payment
 	""".format(conditions=conditions)
 
-	data = frappe.db.sql(query, filters, as_dict=1)
+	raw = frappe.db.sql(query, filters, as_dict=1)
 
-	# Calculate variance and status for each payment method
-	for row in data:
-		# Calculate variance percentage
-		if row.expected_amount > 0:
-			row.variance_percentage = flt((row.difference / row.expected_amount) * 100, 2)
-		else:
-			row.variance_percentage = 0
+	if not raw:
+		return [], []
 
-		# Determine status
-		abs_difference = abs(row.difference)
-		if abs_difference == 0:
-			row.status = "✓ Balanced"
-		elif abs_difference <= 10:  # Within 10 currency units
-			row.status = "~ Minor Variance"
-		elif row.difference > 0:
-			row.status = "↑ Over"
-		else:
-			row.status = "↓ Short"
+	# Discover payment methods (ordered by first appearance)
+	payment_methods = list(dict.fromkeys(r.payment_method for r in raw))
 
-		# Get transaction count for this payment method in this shift
-		row.transaction_count = frappe.db.count(
-			"Sales Invoice Payment",
-			filters={
-				"parenttype": "Sales Invoice",
-				"mode_of_payment": row.payment_method,
-				"parent": ["in", frappe.get_all(
-					"Sales Invoice",
-					filters={
-						"pos_profile": row.pos_profile,
-						"owner": row.cashier,
-						"posting_date": row.posting_date,
-						"docstatus": 1,
-						"is_pos": 1
-					},
-					pluck="name"
-				)]
+	# Batch-fetch transaction counts per shift (total, not per method)
+	transaction_map = _get_transaction_counts(raw)
+
+	# Pivot: group rows by shift into one row each
+	shifts = {}
+	shift_order = []
+	for r in raw:
+		if r.shift not in shifts:
+			shift_order.append(r.shift)
+			# Calculate shift hours
+			if r._shift_start_dt and r._shift_end_dt:
+				shift_hours = flt(time_diff_in_hours(
+					get_datetime(r._shift_end_dt),
+					get_datetime(r._shift_start_dt)
+				), 1)
+			else:
+				shift_hours = 0
+
+			shifts[r.shift] = {
+				"shift": r.shift,
+				"pos_profile": r.pos_profile,
+				"cashier": r.cashier,
+				"posting_date": r.posting_date,
+				"shift_start": r.shift_start,
+				"shift_end": r.shift_end,
+				"shift_hours": shift_hours,
+				"total_transactions": transaction_map.get(r.shift, 0),
+				"total_opening": 0,
+				"total_expected": 0,
+				"total_closing": 0,
+				"total_difference": 0,
 			}
-		)
 
-	return data
+		row = shifts[r.shift]
+		safe = r.payment_method.lower().replace(" ", "_")
+		opening = flt(r.opening_amount, 2)
+		expected = flt(r.expected_amount, 2)
+		closing = flt(r.closing_amount, 2)
+		diff = flt(closing - expected, 2)
+		row[f"{safe}_opening"] = opening
+		row[f"{safe}_expected"] = expected
+		row[f"{safe}_closing"] = closing
+		row[f"{safe}_diff"] = diff
+
+		row["total_opening"] += opening
+		row["total_expected"] += expected
+		row["total_closing"] += closing
+		row["total_difference"] += diff
+
+	# Build final data list and determine status
+	data = []
+	for shift_name in shift_order:
+		row = shifts[shift_name]
+		row["total_opening"] = flt(row["total_opening"], 2)
+		row["total_expected"] = flt(row["total_expected"], 2)
+		row["total_closing"] = flt(row["total_closing"], 2)
+		row["total_difference"] = flt(row["total_difference"], 2)
+
+		# Determine status based on total difference
+		abs_diff = abs(row["total_difference"])
+		if abs_diff == 0:
+			row["status"] = "✓ Balanced"
+		elif abs_diff <= 10:
+			row["status"] = "~ Minor Variance"
+		elif row["total_difference"] > 0:
+			row["status"] = "↑ Over"
+		else:
+			row["status"] = "↓ Short"
+
+		data.append(row)
+
+	return data, payment_methods
+
+
+def _get_transaction_counts(data):
+	"""Batch-fetch total transaction counts per shift.
+
+	Counts distinct Sales Invoices in each shift.
+	"""
+	shift_names = list({row.shift for row in data})
+	if not shift_names:
+		return {}
+
+	placeholders = ", ".join(["%s"] * len(shift_names))
+
+	rows = frappe.db.sql("""
+		SELECT
+			sir.parent as shift,
+			COUNT(DISTINCT sir.sales_invoice) as cnt
+		FROM `tabSales Invoice Reference` sir
+		WHERE sir.parenttype = 'POS Closing Shift'
+		AND sir.parent IN ({placeholders})
+		GROUP BY sir.parent
+	""".format(placeholders=placeholders), shift_names, as_dict=1)
+
+	return {r.shift: r.cnt for r in rows}
 
 
 def get_conditions(filters):
@@ -177,31 +294,34 @@ def get_conditions(filters):
 	if filters.get("shift"):
 		conditions.append("pcs.name = %(shift)s")
 
+	if filters.get("mode_of_payment"):
+		conditions.append("pr.mode_of_payment = %(mode_of_payment)s")
+
 	return " AND " + " AND ".join(conditions) if conditions else ""
 
 
-def get_chart_data(data):
-	"""Generate chart showing payment method breakdown"""
+def get_chart_data(data, payment_methods):
+	"""Generate chart showing opening, closing, and difference per shift."""
 	if not data:
 		return None
 
-	# Aggregate by payment method
-	payment_summary = {}
-	for row in data:
-		method = row.payment_method
-		if method not in payment_summary:
-			payment_summary[method] = 0
-		payment_summary[method] += row.expected_amount
+	labels = [row.get("shift") for row in data]
+	opening_values = [flt(row.get("total_opening", 0), 2) for row in data]
+	expected_values = [flt(row.get("total_expected", 0), 2) for row in data]
+	closing_values = [flt(row.get("total_closing", 0), 2) for row in data]
+	diff_values = [flt(row.get("total_difference", 0), 2) for row in data]
 
 	return {
 		"data": {
-			"labels": list(payment_summary.keys()),
+			"labels": labels,
 			"datasets": [
-				{
-					"name": "Total Amount",
-					"values": list(payment_summary.values())
-				}
+				{"name": _("Opening"), "values": opening_values},
+				{"name": _("Expected"), "values": expected_values},
+				{"name": _("Closing"), "values": closing_values},
+				{"name": _("Difference"), "values": diff_values},
 			]
 		},
-		"type": "pie"
+		"type": "bar",
+		"fieldtype": "Currency",
+		"colors": ["#318AD8", "#F5A623", "#48BB74", "#F56B6B"],
 	}

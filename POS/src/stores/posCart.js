@@ -1,6 +1,7 @@
 import { useInvoice } from "@/composables/useInvoice"
 import { usePOSOffersStore } from "@/stores/posOffers"
 import { usePOSSettingsStore } from "@/stores/posSettings"
+import { usePOSShiftStore } from "@/stores/posShift"
 import { parseError } from "@/utils/errorHandler"
 import {
 	shouldValidateItemStock,
@@ -1373,6 +1374,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		// Only process offers if we have a POS profile
 		// posProfile.value is the profile NAME (a string), not an object
 		if (!posProfile.value) {
+			return
+		}
+
+		// Skip offer processing if POS Profile has ignore_pricing_rule enabled
+		const shiftStore = usePOSShiftStore()
+		if (shiftStore.currentProfile?.ignore_pricing_rule) {
 			return
 		}
 
