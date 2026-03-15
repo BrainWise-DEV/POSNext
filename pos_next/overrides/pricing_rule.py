@@ -67,28 +67,74 @@ def _add_pos_only_condition(conditions, values, args):
 
 
 def _add_pos_profile_condition(conditions, values, args):
-	"""Filter rules based on Promotion Scheme POS Profile restrictions."""
+	"""Filter rules based on Promotion Scheme POS Profile restrictions.
+	
+	Optimized to avoid correlated subqueries by pre-filtering promotional schemes
+	and using IN clauses. Uses request-level caching to avoid re-querying for
+	each item in the same request.
+	"""
 	pos_profile = args.get("pos_profile")
 	if not pos_profile:
 		return conditions
 
+	# Cache key for request-level caching
+	cache_key = f"_pos_profile_schemes_{pos_profile}"
+	
+	# Check if we've already computed this for this request
+	if not hasattr(frappe.local, cache_key):
+		# Pre-query: Get all promotional schemes that have POS Profile restrictions
+		# (schemes with any rows in the child table)
+		restricted_schemes = frappe.db.sql_list("""
+			SELECT DISTINCT parent
+			FROM `tabPromotion Scheme POS Profile`
+		""")
+		
+		# Pre-query: Get all promotional schemes that allow this specific pos_profile
+		allowed_schemes = frappe.db.sql_list("""
+			SELECT DISTINCT parent
+			FROM `tabPromotion Scheme POS Profile`
+			WHERE pos_profile = %s
+		""", (pos_profile,))
+		
+		# Store in request cache
+		frappe.local[cache_key] = {
+			"restricted": set(restricted_schemes) if restricted_schemes else set(),
+			"allowed": set(allowed_schemes) if allowed_schemes else set()
+		}
+	
+	scheme_data = frappe.local[cache_key]
+	restricted_schemes = scheme_data["restricted"]
+	allowed_schemes = scheme_data["allowed"]
+	
+	# Build condition using IN clauses instead of correlated subqueries
 	# Include rule if:
 	# 1. Rule has no promotional_scheme (standalone rule), OR
 	# 2. Parent scheme has NO rows in Promotion Scheme POS Profile (apply to all), OR
 	# 3. Current pos_profile IS in the scheme's POS Profile list
-	conditions += """ AND (
-		`tabPricing Rule`.promotional_scheme IS NULL
-		OR `tabPricing Rule`.promotional_scheme = ''
-		OR NOT EXISTS (
-			SELECT 1 FROM `tabPromotion Scheme POS Profile`
-			WHERE parent = `tabPricing Rule`.promotional_scheme
-		)
-		OR EXISTS (
-			SELECT 1 FROM `tabPromotion Scheme POS Profile`
-			WHERE parent = `tabPricing Rule`.promotional_scheme
-			AND pos_profile = %(pos_profile)s
-		)
-	)"""
-	values["pos_profile"] = pos_profile
+	if not restricted_schemes:
+		# No schemes have restrictions, so all promotional schemes apply
+		# No additional filtering needed beyond NULL/empty check (which is already handled)
+		# This means all rules are included, so we don't need to add any condition
+		pass
+	else:
+		# Build IN clause for allowed schemes
+		if allowed_schemes:
+			allowed_list = list(allowed_schemes)
+			conditions += """ AND (
+				`tabPricing Rule`.promotional_scheme IS NULL
+				OR `tabPricing Rule`.promotional_scheme = ''
+				OR `tabPricing Rule`.promotional_scheme NOT IN %(restricted_schemes)s
+				OR `tabPricing Rule`.promotional_scheme IN %(allowed_schemes)s
+			)"""
+			values["restricted_schemes"] = list(restricted_schemes)
+			values["allowed_schemes"] = allowed_list
+		else:
+			# No schemes allow this pos_profile, so exclude all restricted schemes
+			conditions += """ AND (
+				`tabPricing Rule`.promotional_scheme IS NULL
+				OR `tabPricing Rule`.promotional_scheme = ''
+				OR `tabPricing Rule`.promotional_scheme NOT IN %(restricted_schemes)s
+			)"""
+			values["restricted_schemes"] = list(restricted_schemes)
 
 	return conditions
