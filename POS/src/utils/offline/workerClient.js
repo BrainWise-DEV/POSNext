@@ -347,6 +347,7 @@ class OfflineWorkerClient {
 			case "GET_INVOICES":
 			case "SEARCH_ITEMS":
 			case "SEARCH_ITEMS_BY_GROUP":
+			case "SEARCH_ITEMS_BY_BRAND":
 			case "SEARCH_CUSTOMERS":
 			case "GET_PAYMENT_METHODS":
 			case "GET_CACHED_OFFERS":
@@ -411,6 +412,10 @@ class OfflineWorkerClient {
 
 	async searchCachedItemsByGroup(itemGroups = [], limit = 50, offset = 0) {
 		return this.sendMessage("SEARCH_ITEMS_BY_GROUP", { itemGroups, limit, offset })
+	}
+
+	async searchCachedItemsByBrand(brand, limit = 50, offset = 0) {
+		return this.sendMessage("SEARCH_ITEMS_BY_BRAND", { brand, limit, offset })
 	}
 
 	async countCachedItemsByGroup(itemGroups = []) {

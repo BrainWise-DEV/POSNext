@@ -337,6 +337,35 @@ def get_payment_account(mode_of_payment, company):
     )
 
 
+def _set_payment_accounts(payments, company):
+    """Set the account for each payment entry that is missing one.
+
+    Handles both Document objects (from invoice_doc.payments) and plain dicts
+    (from frontend data).  Document objects use BaseDocument.set() which writes
+    directly to __dict__, while plain dicts use normal key assignment.
+    """
+    if not payments or not company:
+        return
+
+    for payment in payments:
+        mode_of_payment = payment.get("mode_of_payment")
+        if not mode_of_payment or payment.get("account"):
+            continue
+        try:
+            account_info = get_payment_account(mode_of_payment, company)
+            if account_info:
+                account = account_info.get("account")
+                if hasattr(payment, "set") and callable(payment.set):
+                    payment.set("account", account)
+                else:
+                    payment["account"] = account
+        except Exception as e:
+            frappe.log_error(
+                f"Failed to get payment account for {mode_of_payment}: {e}",
+                "Payment Account Lookup",
+            )
+
+
 # ==========================================
 # Stock Validation Functions
 # ==========================================
@@ -685,20 +714,7 @@ def update_invoice(data):
         )
 
         if company and invoice_doc.get("payments") and doctype == "Sales Invoice":
-            for payment in invoice_doc.payments:
-                mode_of_payment = payment.get("mode_of_payment")
-                if mode_of_payment and not payment.get("account"):
-                    try:
-                        account_info = get_payment_account(
-                            mode_of_payment, company
-                        )
-                        if account_info:
-                            payment.account = account_info.get("account")
-                    except Exception as e:
-                        frappe.log_error(
-                            f"Failed to get payment account for {mode_of_payment}: {e}",
-                            "Payment Account Lookup"
-                        )
+            _set_payment_accounts(invoice_doc.payments, company)
 
         # Validate return items if this is a return invoice
         if (data.get("is_return") or invoice_doc.get("is_return")) and invoice_doc.get(
@@ -858,20 +874,7 @@ def update_invoice(data):
             invoice_doc.base_grand_total = 0.0
 
         # Set accounts for payment methods before saving
-        for payment in invoice_doc.payments:
-            mode_of_payment = payment.get("mode_of_payment")
-            if mode_of_payment and not payment.get("account"):
-                try:
-                    account_info = get_payment_account(
-                        mode_of_payment, invoice_doc.company
-                    )
-                    if account_info:
-                        payment.account = account_info.get("account")
-                except Exception as e:
-                    frappe.log_error(
-                        f"Failed to get payment account for {mode_of_payment}: {e}",
-                        "Payment Account Lookup"
-                    )
+        _set_payment_accounts(invoice_doc.payments, invoice_doc.company)
 
         # For return invoices, ensure payments are negative
         if invoice_doc.get("is_return"):
@@ -1278,13 +1281,7 @@ def submit_invoice(invoice=None, data=None):
 
         # Set accounts for all payment methods before saving
         if doctype == "Sales Invoice" and hasattr(invoice_doc, "payments"):
-            for payment in invoice_doc.payments:
-                if payment.mode_of_payment:
-                    account_info = get_payment_account(
-                        payment.mode_of_payment, invoice_doc.company
-                    )
-                    if account_info:
-                        payment.account = account_info.get("account")
+            _set_payment_accounts(invoice_doc.payments, invoice_doc.company)
 
         # Handle sales team (multiple sales persons)
         sales_team_data = invoice.get("sales_team") or data.get("sales_team")
@@ -1362,22 +1359,56 @@ def submit_invoice(invoice=None, data=None):
         invoice_doc.submit()
         invoice_submitted = True
         # Handle wallet transaction reversal for returns
+        wallet_reversal_ok = False
         if invoice_doc.get("is_return") and invoice_doc.get("return_against"):
+            from pos_next.pos_next.doctype.wallet_transaction.wallet_transaction import reverse_wallet_transactions_for_return
             try:
-                from pos_next.pos_next.doctype.wallet_transaction.wallet_transaction import reverse_wallet_transactions_for_return
                 reverse_wallet_transactions_for_return(
                     original_invoice=invoice_doc.return_against,
                     return_invoice=invoice_doc.name
                 )
-            except Exception as wallet_error:
+                wallet_reversal_ok = True
+            except Exception as wallet_reversal_error:
                 frappe.log_error(
-                    title="Wallet Reversal on Return Error",
-                    message=f"Return Invoice: {invoice_doc.name}, Error: {str(wallet_error)}\n{frappe.get_traceback()}"
+                    title="Wallet Reversal Error",
+                    message=(
+                        f"Return invoice: {invoice_doc.name}, "
+                        f"Original invoice: {invoice_doc.return_against}, "
+                        f"Error: {str(wallet_reversal_error)}\n{frappe.get_traceback()}"
+                    )
                 )
                 frappe.msgprint(
-                    _("Return submitted but wallet reversal failed. Please check manually."),
-                    alert=True, indicator="orange"
+                    _("Return invoice submitted successfully, but wallet reversal failed. Please contact administrator."),
+                    alert=True,
+                    indicator="orange"
                 )
+
+        # Credit return amount to customer wallet when "Add to Customer Credit Balance" is enabled.
+        # Only proceed if the wallet reversal above succeeded (or was not needed) to
+        # avoid double-crediting the customer when reversal fails.
+        if invoice_doc.get("is_return"):
+            add_to_customer_balance = invoice.get("add_to_customer_balance")
+            has_return_against = bool(invoice_doc.get("return_against"))
+            if add_to_customer_balance and (wallet_reversal_ok or not has_return_against):
+                from pos_next.pos_next.doctype.wallet_transaction.wallet_transaction import credit_return_to_wallet
+                try:
+                    credit_return_to_wallet(
+                        return_invoice=invoice_doc.name,
+                        amount=abs(flt(invoice_doc.grand_total))
+                    )
+                except Exception as wallet_credit_error:
+                    frappe.log_error(
+                        title="Wallet Credit on Return Error",
+                        message=(
+                            f"Return invoice: {invoice_doc.name}, "
+                            f"Error: {str(wallet_credit_error)}\n{frappe.get_traceback()}"
+                        )
+                    )
+                    frappe.msgprint(
+                        _("Return submitted but wallet credit failed. Please contact administrator."),
+                        alert=True,
+                        indicator="orange"
+                    )
         # Complete the offline sync record
         if sync_record_name:
             _complete_offline_sync(sync_record_name, invoice_doc.name)

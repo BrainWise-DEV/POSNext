@@ -44,7 +44,8 @@ const CURRENT_SCHEMA = {
 
 	// Items cache with searchable fields
 	// variant_of index allows querying variants by their template item
-	items: "&item_code, item_name, item_group, variant_of, has_variants, *barcodes",
+	// brand index allows efficient brand-based filtering in offline mode
+	items: "&item_code, item_name, item_group, variant_of, has_variants, brand, *barcodes",
 
 	// Customers cache
 	customers: "&name, customer_name, mobile_no, email_id",

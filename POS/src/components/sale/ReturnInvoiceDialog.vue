@@ -1062,6 +1062,8 @@ const createReturnResource = createResource({
 				// Link to original invoice item row for accurate return tracking in ERPNext
 				sales_invoice_item: item.name,
 			})),
+			// Flag to indicate return amount should be added to customer credit balance
+			add_to_customer_balance: addToCustomerCredit.value,
 			// Payment amounts are negative for refunds
 			// If addToCustomerCredit is true, send empty payments array so outstanding stays negative
 			// This negative outstanding becomes customer credit balance

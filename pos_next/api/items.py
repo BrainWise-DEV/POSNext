@@ -696,7 +696,56 @@ def _get_item_group_with_descendants(item_group):
 	return [item_group] + list(descendants)
 
 
-def _build_item_base_conditions(pos_profile_doc, item_group=None, exclude_variants=True, exclude_templates=False, hide_unavailable=False, warehouse=None):
+def _get_pos_profile_configured_brands(pos_profile):
+	"""Get distinct brand names configured on the POS Profile (child table only).
+
+	This is the single source of truth for profile-specific brand configuration and is
+	used by both:
+
+	- `_get_allowed_profile_brands` (to restrict item queries)
+	- `get_brands` (to build the filter list shown in the UI)
+
+	The function is cached per profile to avoid repeated DB hits across calls.
+	"""
+	cache_key = f"pos_profile_brands_raw:{pos_profile}"
+	cached = frappe.cache().get_value(cache_key)
+	if cached is not None:
+		return cached
+
+	POSBrandsDetail = DocType("POS Brands Detail")
+	configured = (
+		frappe.qb.from_(POSBrandsDetail)
+		.select(POSBrandsDetail.brand)
+		.distinct()
+		.where(POSBrandsDetail.parent == pos_profile)
+		.orderby(POSBrandsDetail.brand)
+		.run(pluck="brand")
+	)
+
+	# Store even empty list so we only ever hit the DB once per profile per cache TTL
+	frappe.cache().set_value(cache_key, configured, expires_in_sec=300)
+	return configured or []
+
+
+def _get_allowed_profile_brands(pos_profile):
+	"""Return list of brands that should be enforced in item queries for this profile.
+
+	Behaviour:
+	- If the POS Profile has brands configured in the child table, return that list.
+	- If no brands are configured, return an empty list so that item queries remain
+	  unrestricted by brand (see `get_brands` for UI fallback behaviour).
+	"""
+	return _get_pos_profile_configured_brands(pos_profile)
+
+def _build_item_base_conditions(
+	pos_profile_doc,
+	item_group=None,
+	brand=None,
+	exclude_variants=True,
+	exclude_templates=False,
+	hide_unavailable=False,
+	warehouse=None,
+):
 	"""Build base SQL conditions for POS item search with hierarchical item group support.
 
 	Returns:
@@ -725,6 +774,16 @@ def _build_item_base_conditions(pos_profile_doc, item_group=None, exclude_varian
 		placeholders = ", ".join(["%s"] * len(item_groups))
 		conditions.append(f"i.item_group IN ({placeholders})")
 		where_params.extend(item_groups)
+
+	allowed_brands = _get_allowed_profile_brands(pos_profile_doc.name)
+	if allowed_brands:
+		placeholders = ", ".join(["%s"] * len(allowed_brands))
+		conditions.append(f"i.brand IN ({placeholders})")
+		where_params.extend(allowed_brands)
+
+	if brand:
+		conditions.append("i.brand = %s")
+		where_params.append(brand)
 
 	extra_joins = ""
 	join_params = []
@@ -1067,8 +1126,21 @@ def _get_bundle_warehouse_availability_bulk(bundle_codes, warehouses):
 
 
 @frappe.whitelist()
-def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20, include_variants=0, show_variants_as_items=0):
-	"""Get items for POS with stock, price, and tax details"""
+def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20, include_variants=0, show_variants_as_items=0, brand=None):
+	"""Get items for POS with stock, price, and tax details.
+
+	Filter behaviour:
+	- You may filter by either ``item_group`` (with hierarchical descendants) OR ``brand``.
+	- Providing BOTH ``item_group`` and ``brand`` in the same request is not allowed and will raise a validation error.
+	  This matches the POS frontend behaviour where these filters are mutually exclusive.
+	"""
+	# Enforce the same mutual exclusivity as the frontend:
+	# brand filter and item_group filter cannot be used together.
+	if item_group and brand:
+		frappe.throw(
+			_("You can filter by either Item Group or Brand, not both at the same time."),
+		)
+
 	try:
 		pos_profile_doc = frappe.get_cached_doc("POS Profile", pos_profile)
 
@@ -1096,7 +1168,7 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20,
 			exclude_templates = False
 		hide_unavailable = getattr(pos_profile_doc, "hide_unavailable_items", 0)
 		conditions, params, extra_joins = _build_item_base_conditions(
-			pos_profile_doc, item_group, exclude_variants=exclude_variants,
+			pos_profile_doc, item_group, brand, exclude_variants=exclude_variants,
 			exclude_templates=exclude_templates,
 			hide_unavailable=hide_unavailable, warehouse=pos_profile_doc.warehouse,
 		)
@@ -1613,7 +1685,7 @@ def get_items_bulk(pos_profile, item_groups=None, start=0, limit=2000, include_v
 
 
 @frappe.whitelist()
-def get_items_count(pos_profile, item_group=None, include_variants=0, show_variants_as_items=0):
+def get_items_count(pos_profile, item_group=None, brand=None, include_variants=0, show_variants_as_items=0):
 	"""
 	Get total count of POS-eligible items for progress tracking and smart pagination.
 
@@ -1640,7 +1712,7 @@ def get_items_count(pos_profile, item_group=None, include_variants=0, show_varia
 			exclude_templates = False
 		hide_unavailable = getattr(pos_profile_doc, "hide_unavailable_items", 0)
 		conditions, params, extra_joins = _build_item_base_conditions(
-			pos_profile_doc, item_group, exclude_variants=exclude_variants,
+			pos_profile_doc, item_group, brand, exclude_variants=exclude_variants,
 			exclude_templates=exclude_templates,
 			hide_unavailable=hide_unavailable, warehouse=pos_profile_doc.warehouse,
 		)
@@ -1757,6 +1829,41 @@ def get_item_groups(pos_profile):
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Item Groups Error")
 		frappe.throw(_("Error fetching item groups: {0}").format(str(e)))
+
+
+@frappe.whitelist()
+def get_brands(pos_profile):
+	"""Get brands configured in POS Profile for filtering."""
+	cache_key = f"pos_brands:{pos_profile}"
+	cached = frappe.cache().get_value(cache_key)
+	if cached:
+		return cached
+
+	try:
+		# Reuse shared helper so profile brand configuration has a single source of truth
+		configured_brands = _get_pos_profile_configured_brands(pos_profile)
+
+		if not configured_brands:
+			# No brands configured on the POS Profile → show all active brands
+			# as filter options, while the actual item query remains
+			# unrestricted by brand (since `_get_allowed_profile_brands`
+			# will also see an empty list and skip brand conditions).
+			Brand = DocType("Brand")
+			result = (
+				frappe.qb.from_(Brand)
+				.select(Brand.name.as_("brand"))
+				.orderby(Brand.name)
+				.run(as_dict=True)
+			)
+		else:
+			result = [{"brand": brand_name} for brand_name in configured_brands]
+
+		frappe.cache().set_value(cache_key, result, expires_in_sec=300)
+		return result
+
+	except Exception as e:
+		frappe.log_error(frappe.get_traceback(), "Get Brands Error")
+		frappe.throw(_("Error fetching brands: {0}").format(str(e)))
 
 
 @frappe.whitelist()
