@@ -1984,6 +1984,15 @@ async function handlePaymentCompleted(paymentData) {
 		const draftIdToDelete = cartStore.currentDraftId;
 
 		if (offlineStore.isOffline) {
+			// Guard: Ensure POS Opening Shift is set before saving offline invoice
+			if (!cartStore.posOpeningShift) {
+				uiStore.showError(
+					__("No Active Shift"),
+					__("No active POS Opening Shift. Please close this tab and open a new POS session."),
+				);
+				return;
+			}
+
 			// Use the same item transformation as online flow for consistency
 			// This ensures rate, discount_percentage, discount_amount, and pricing_rules
 			// are all correctly formatted for ERPNext

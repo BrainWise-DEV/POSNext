@@ -850,6 +850,42 @@ def update_invoice(data):
                 invoice_doc.set_warehouse = pos_profile_doc.warehouse
 
         # ========================================================================
+        # POS OPENING SHIFT SAFEGUARD
+        # ========================================================================
+        # Ensure every POS invoice is linked to an opening shift.
+        # If the frontend lost its shift reference (browser refresh, tab crash),
+        # auto-resolve it from the user's current open shift.
+        # ========================================================================
+        if doctype == "Sales Invoice" and not invoice_doc.get("posa_pos_opening_shift"):
+            open_shift = frappe.db.get_value(
+                "POS Opening Shift",
+                {
+                    "user": frappe.session.user,
+                    "pos_profile": pos_profile,
+                    "pos_closing_shift": ["is", "not set"],
+                    "docstatus": 1,
+                    "status": "Open",
+                },
+                "name",
+                order_by="period_start_date desc",
+            )
+            if open_shift:
+                invoice_doc.posa_pos_opening_shift = open_shift
+                frappe.log_error(
+                    title="POS Opening Shift Auto-Resolved",
+                    message=(
+                        f"Invoice {invoice_doc.name or '(new)'} was missing posa_pos_opening_shift. "
+                        f"Auto-resolved to {open_shift} for user {frappe.session.user}."
+                    ),
+                )
+            else:
+                frappe.throw(
+                    _("No active POS Opening Shift found for profile {0}. "
+                      "Please open a new shift before creating invoices.").format(pos_profile),
+                    title=_("Missing POS Opening Shift"),
+                )
+
+        # ========================================================================
         # ROUNDING CONFIGURATION
         # ========================================================================
         # Load rounding preference from POS Settings (use cached value)

@@ -16,16 +16,78 @@ def validate(doc, method=None):
 	Validate hook for Sales Invoice.
 	Apply tax inclusive settings based on POS Profile configuration.
 	Auto-assign loyalty program to customer if enabled.
+	Ensure POS invoices are linked to an opening shift.
 
 	Args:
 		doc: Sales Invoice document
 		method: Hook method name (unused)
 	"""
-	apply_tax_inclusive(doc)
-	auto_assign_loyalty_program_on_invoice(doc)
+	if not doc.is_pos or not doc.pos_profile:
+		return
+
+	validate_pos_opening_shift(doc)
+
+	# Fetch POS Settings once for all downstream validations
+	pos_settings = frappe.db.get_value(
+		"POS Settings",
+		{"pos_profile": doc.pos_profile},
+		["tax_inclusive", "enable_loyalty_program", "default_loyalty_program"],
+		as_dict=True,
+	) or {}
+
+	apply_tax_inclusive(doc, pos_settings)
+	auto_assign_loyalty_program_on_invoice(doc, pos_settings)
 
 
-def apply_tax_inclusive(doc):
+def validate_pos_opening_shift(doc):
+	"""
+	Ensure POS invoices are linked to a POS Opening Shift.
+	This is a backstop for invoices created via desk or any path
+	that bypasses the POS Next frontend/API guards.
+
+	If an opening shift is missing, attempt to auto-resolve from the
+	user's current open shift. If no open shift exists, block submission.
+
+	Args:
+		doc: Sales Invoice document
+	"""
+	if not doc.is_pos or not doc.pos_profile:
+		return
+
+	if doc.get("posa_pos_opening_shift"):
+		return
+
+	# Auto-resolve: find user's current open shift for this profile
+	open_shift = frappe.db.get_value(
+		"POS Opening Shift",
+		{
+			"user": doc.owner,
+			"pos_profile": doc.pos_profile,
+			"pos_closing_shift": ["is", "not set"],
+			"docstatus": 1,
+			"status": "Open",
+		},
+		"name",
+		order_by="period_start_date desc",
+	)
+
+	if open_shift:
+		doc.posa_pos_opening_shift = open_shift
+		frappe.msgprint(
+			_("POS Opening Shift was missing. Auto-linked to {0}.").format(open_shift),
+			alert=True,
+			indicator="orange",
+		)
+	else:
+		frappe.throw(
+			_("This POS invoice is not linked to any POS Opening Shift and no active shift was found "
+			  "for user {0} on profile {1}. "
+			  "Please open a shift before creating POS invoices.").format(doc.owner, doc.pos_profile),
+			title=_("Missing POS Opening Shift"),
+		)
+
+
+def apply_tax_inclusive(doc, pos_settings=None):
 	"""
 	Mark taxes as inclusive based on POS Profile setting.
 
@@ -34,21 +96,12 @@ def apply_tax_inclusive(doc):
 
 	Args:
 		doc: Sales Invoice document
+		pos_settings: Pre-fetched POS Settings dict (avoids redundant DB query)
 	"""
 	if not doc.pos_profile:
 		return
 
-	try:
-		# Get POS Settings for this profile
-		pos_settings = frappe.db.get_value(
-			"POS Settings",
-			{"pos_profile": doc.pos_profile},
-			["tax_inclusive"],
-			as_dict=True
-		)
-		tax_inclusive = pos_settings.get("tax_inclusive", 0) if pos_settings else 0
-	except Exception:
-		tax_inclusive = 0
+	tax_inclusive = cint(pos_settings.get("tax_inclusive")) if pos_settings else 0
 
 	has_changes = False
 	for tax in doc.get("taxes", []):
@@ -72,7 +125,7 @@ def apply_tax_inclusive(doc):
 		doc.calculate_taxes_and_totals()
 
 
-def auto_assign_loyalty_program_on_invoice(doc):
+def auto_assign_loyalty_program_on_invoice(doc, pos_settings=None):
 	"""
 	Auto-assign loyalty program to customer if loyalty is enabled in POS Settings
 	but customer doesn't have a loyalty program yet.
@@ -81,27 +134,20 @@ def auto_assign_loyalty_program_on_invoice(doc):
 
 	Args:
 		doc: Sales Invoice document
+		pos_settings: Pre-fetched POS Settings dict (avoids redundant DB query)
 	"""
 	if not doc.is_pos or not doc.pos_profile or not doc.customer:
 		return
-
-	# Check if customer already has a loyalty program
-	customer_loyalty = frappe.db.get_value("Customer", doc.customer, "loyalty_program")
-	if customer_loyalty:
-		return
-
-	# Get POS Settings
-	pos_settings = frappe.db.get_value(
-		"POS Settings",
-		{"pos_profile": doc.pos_profile},
-		["enable_loyalty_program", "default_loyalty_program"],
-		as_dict=True
-	)
 
 	if not pos_settings:
 		return
 
 	if not cint(pos_settings.get("enable_loyalty_program")):
+		return
+
+	# Check if customer already has a loyalty program
+	customer_loyalty = frappe.db.get_value("Customer", doc.customer, "loyalty_program")
+	if customer_loyalty:
 		return
 
 	loyalty_program = pos_settings.get("default_loyalty_program")

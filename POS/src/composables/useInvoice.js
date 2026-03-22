@@ -825,6 +825,14 @@ export function useInvoice() {
 		 * Save invoice as draft (Step 1)
 		 * This creates the invoice with docstatus=0
 		 */
+		// Guard: Ensure POS Opening Shift is set before creating any invoice
+		if (!posOpeningShift.value) {
+			log.error("Cannot save draft: POS Opening Shift is not set")
+			throw new Error(
+				__("No active POS Opening Shift. Please close this tab and open a new POS session."),
+			)
+		}
+
 		// Use toRaw() to ensure we get current, non-reactive values (prevents stale cached quantities)
 		const rawItems = toRaw(invoiceItems.value)
 		const rawPayments = toRaw(payments.value)
@@ -887,6 +895,14 @@ export function useInvoice() {
 			isSubmitting.value = true
 
 			try {
+				// Guard: Ensure POS Opening Shift is set before submitting
+				if (!posOpeningShift.value) {
+					log.error("Cannot submit invoice: POS Opening Shift is not set")
+					throw new Error(
+						__("No active POS Opening Shift. Please close this tab and open a new POS session."),
+					)
+				}
+
 				// Step 1: Create invoice draft
 				// Use toRaw() to ensure we get current, non-reactive values (prevents stale cached quantities)
 				const rawItems = toRaw(invoiceItems.value)
