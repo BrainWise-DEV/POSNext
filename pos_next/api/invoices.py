@@ -1302,14 +1302,13 @@ def submit_invoice(invoice=None, data=None):
         if coupon_code:
             # Increment usage counter for POS Coupon
             if frappe.db.table_exists("POS Coupon"):
-                try:
-                    from pos_next.pos_next.doctype.pos_coupon.pos_coupon import increment_coupon_usage
-                    increment_coupon_usage(coupon_code)
-                except Exception as e:
-                    frappe.log_error(
-                        title="Failed to increment coupon usage",
-                        message=f"Coupon: {coupon_code}, Error: {str(e)}"
-                    )
+                from pos_next.pos_next.doctype.pos_coupon.pos_coupon import consume_coupon_usage
+
+                consume_coupon_usage(
+                    coupon_code,
+                    customer=invoice_doc.customer,
+                    company=invoice_doc.company,
+                )
 
         # Auto-set batch numbers for returns
         _auto_set_return_batches(invoice_doc)

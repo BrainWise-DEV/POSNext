@@ -176,18 +176,44 @@ def apply_coupon_discount(coupon, cart_total, net_total=None):
     }
 
 
-def increment_coupon_usage(coupon_code):
-    """Increment the usage counter for a coupon"""
+def consume_coupon_usage(coupon_code, customer=None, company=None):
+    """Atomically validate and increment coupon usage within the current transaction."""
+    coupon_code = coupon_code.upper()
+    locked_coupon = frappe.db.sql(
+        """
+        SELECT name
+        FROM `tabPOS Coupon`
+        WHERE coupon_code = %s
+        FOR UPDATE
+        """,
+        (coupon_code,),
+        as_dict=True,
+    )
+
+    if not locked_coupon:
+        frappe.throw(_("Sorry, this coupon code does not exist"))
+
+    coupon_result = check_coupon_code(coupon_code, customer=customer, company=company)
+    if not coupon_result or not coupon_result.get("valid"):
+        frappe.throw(_(coupon_result.get("msg", "Invalid coupon code")))
+
+    coupon = coupon_result["coupon"]
+    updated_used = (coupon.used or 0) + 1
+    frappe.db.set_value("POS Coupon", coupon.name, "used", updated_used, update_modified=False)
+    coupon.used = updated_used
+    return coupon
+
+
+def increment_coupon_usage(coupon_code, customer=None, company=None):
+    """Backward-compatible wrapper around atomic coupon consumption."""
     try:
-        coupon = frappe.get_doc("POS Coupon", {"coupon_code": coupon_code.upper()})
-        coupon.used = (coupon.used or 0) + 1
-        coupon.db_set('used', coupon.used)
-        frappe.db.commit()
+        return consume_coupon_usage(coupon_code, customer=customer, company=company)
     except Exception as e:
         frappe.log_error(
             title="Coupon Usage Increment Failed",
             message=f"Failed to increment usage for coupon {coupon_code}: {str(e)}"
         )
+        raise
 
 
 def decrement_coupon_usage(coupon_code):

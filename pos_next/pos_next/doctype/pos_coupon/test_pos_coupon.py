@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 
 from pos_next.pos_next.doctype.pos_coupon.pos_coupon import (
     _get_customer_coupon_usage_count,
+    consume_coupon_usage,
 )
 
 
@@ -52,4 +53,31 @@ class TestPOSCoupon(unittest.TestCase):
         mock_db.count.assert_called_once_with(
             "Sales Invoice",
             filters={"customer": "Customer A", "coupon_code": "SAVE10", "docstatus": 1},
+        )
+
+    @patch("pos_next.pos_next.doctype.pos_coupon.pos_coupon.check_coupon_code")
+    @patch("pos_next.pos_next.doctype.pos_coupon.pos_coupon.frappe.db")
+    def test_consume_coupon_usage_locks_and_updates_usage(self, mock_db, mock_check_coupon_code):
+        coupon = Mock()
+        coupon.name = "PROMO-0001"
+        coupon.used = 2
+
+        mock_db.sql.return_value = [{"name": coupon.name}]
+        mock_check_coupon_code.return_value = {"valid": True, "coupon": coupon}
+
+        result = consume_coupon_usage("promo10", customer="Customer A", company="Test Co")
+
+        self.assertEqual(result.used, 3)
+        mock_db.sql.assert_called_once()
+        mock_check_coupon_code.assert_called_once_with(
+            "PROMO10",
+            customer="Customer A",
+            company="Test Co",
+        )
+        mock_db.set_value.assert_called_once_with(
+            "POS Coupon",
+            "PROMO-0001",
+            "used",
+            3,
+            update_modified=False,
         )
