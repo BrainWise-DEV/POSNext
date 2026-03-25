@@ -190,7 +190,10 @@ doc_events = {
 			"pos_next.realtime_events.emit_stock_update_event",
 			"pos_next.api.wallet.process_loyalty_to_wallet"
 		],
-		"on_cancel": "pos_next.realtime_events.emit_stock_update_event",
+		"on_cancel": [
+			"pos_next.api.sales_invoice_hooks.on_cancel",
+			"pos_next.realtime_events.emit_stock_update_event",
+		],
 		"after_insert": "pos_next.realtime_events.emit_invoice_created_event"
 	},
 	"POS Profile": {

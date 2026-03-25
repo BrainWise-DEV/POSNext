@@ -141,3 +141,32 @@ def before_cancel(doc, method=None):
 			alert=True,
 			indicator="orange"
 		)
+
+
+def on_cancel(doc, method=None):
+	"""
+	On Cancel hook for Sales Invoice.
+	Roll back coupon usage only after the invoice has cancelled successfully.
+
+	Args:
+		doc: Sales Invoice document
+		method: Hook method name (unused)
+	"""
+	rollback_coupon_usage(doc)
+
+
+def rollback_coupon_usage(doc):
+	"""Restore coupon usage for cancelled invoices that consumed a POS coupon."""
+	coupon_code = doc.get("coupon_code")
+	if not coupon_code or not frappe.db.table_exists("POS Coupon"):
+		return
+
+	try:
+		from pos_next.pos_next.doctype.pos_coupon.pos_coupon import decrement_coupon_usage
+
+		decrement_coupon_usage(coupon_code)
+	except Exception as e:
+		frappe.log_error(
+			title="Coupon Usage Rollback Failed",
+			message=f"Invoice: {doc.name}, Coupon: {coupon_code}, Error: {str(e)}\n{frappe.get_traceback()}",
+		)
