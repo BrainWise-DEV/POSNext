@@ -55,11 +55,7 @@ class CustomSalesInvoice(SalesInvoice):
 
 	def make_pos_gl_entries(self, gl_entries):
 		"""
-		Override to add party information for wallet payment accounts.
-
-		The standard ERPNext implementation doesn't set party_type/party for
-		payment mode accounts, which causes validation errors for Receivable
-		accounts (like wallet accounts).
+		Rebase ERPNext 16 POS GL logic and add wallet-specific party info.
 		"""
 		if cint(self.is_pos):
 			skip_change_gl_entries = not _get_post_change_gl_entries_setting()
@@ -68,9 +64,12 @@ class CustomSalesInvoice(SalesInvoice):
 				if skip_change_gl_entries and payment_mode.account == self.account_for_change_amount:
 					payment_mode.base_amount -= flt(self.change_amount)
 
-				if payment_mode.amount:
+				against_voucher = self.name
+				if self.is_return and self.return_against and not self.update_outstanding_for_self:
+					against_voucher = self.return_against
+
+				if payment_mode.base_amount:
 					# POS, make payment entries
-					# Credit entry to debit_to (customer receivable)
 					gl_entries.append(
 						self.get_gl_dict(
 							{
@@ -82,9 +81,8 @@ class CustomSalesInvoice(SalesInvoice):
 								"credit_in_account_currency": payment_mode.base_amount
 								if self.party_account_currency == self.company_currency
 								else payment_mode.amount,
-								"against_voucher": self.return_against
-								if cint(self.is_return) and self.return_against
-								else self.name,
+								"credit_in_transaction_currency": payment_mode.amount,
+								"against_voucher": against_voucher,
 								"against_voucher_type": self.doctype,
 								"cost_center": self.cost_center,
 							},
@@ -112,6 +110,7 @@ class CustomSalesInvoice(SalesInvoice):
 								"debit_in_account_currency": payment_mode.base_amount
 								if payment_mode_account_currency == self.company_currency
 								else payment_mode.amount,
+								"debit_in_transaction_currency": payment_mode.amount,
 								"cost_center": self.cost_center,
 							},
 							payment_mode_account_currency,
@@ -120,14 +119,7 @@ class CustomSalesInvoice(SalesInvoice):
 					)
 
 			if not skip_change_gl_entries:
-				if hasattr(self, "get_gle_for_change_amount"):
-					# ERPNext v16+: Method renamed and returns a list of GL entries
-					# that needs to be extended to the main gl_entries list
-					gl_entries.extend(self.get_gle_for_change_amount())
-				else:
-					# ERPNext v15: Method takes gl_entries as parameter
-					# and appends change amount entries directly to it
-					self.make_gle_for_change_amount(gl_entries)
+				gl_entries.extend(self.get_gle_for_change_amount())
 
 	def get_party_and_party_type_for_pos_gl_entry(self, mode_of_payment, account):
 		"""
