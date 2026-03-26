@@ -1231,7 +1231,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				throw new Error("Item not found in cart")
 			}
 
-			// Handle UOM change with potential merge
+			// ===== UOM CHANGE FIX =====
 			if (updates.uom && updates.uom !== cartItem.uom) {
 				const existingItem = findItemWithUom(itemCode, updates.uom, cartItem)
 				if (existingItem) {
@@ -1241,38 +1241,74 @@ export const usePOSCartStore = defineStore("posCart", () => {
 					return true
 				}
 
-				// Apply UOM change with new rate
-				try {
-					await applyUomChange(cartItem, updates.uom, updates.quantity ?? cartItem.quantity)
-				} catch {
-					// Fallback: just change UOM without rate update
-					cartItem.uom = updates.uom
+				// DO NOT call applyUomChange
+				// Because dialog already calculated correct rate
+
+				cartItem.uom = updates.uom
+
+				const uomData = cartItem.item_uoms?.find(
+					(u) => u.uom === updates.uom
+				)
+
+				cartItem.conversion_factor =
+					uomData?.conversion_factor || 1
+
+				// TRUST dialog rate
+				if (updates.rate !== undefined) {
+					cartItem.rate = updates.rate
+				}
+
+				if (updates.price_list_rate !== undefined) {
+					cartItem.price_list_rate = updates.price_list_rate
 				}
 			}
 
-			// Validate stock if quantity is being increased
-			if (updates.quantity !== undefined && updates.quantity > cartItem.quantity
-				&& settingsStore.shouldEnforceStockValidation() && shouldValidateItemStock(cartItem)) {
+			// ===== STOCK VALIDATION =====
+			if (
+				updates.quantity !== undefined &&
+				updates.quantity > cartItem.quantity &&
+				settingsStore.shouldEnforceStockValidation() &&
+				shouldValidateItemStock(cartItem)
+			) {
 				const check = checkStockAvailability(cartItem, updates.quantity)
 				if (!check.available) {
 					throw new Error(check.error)
 				}
 			}
 
-			// Apply other updates
-			if (updates.quantity !== undefined) cartItem.quantity = updates.quantity
-			if (updates.warehouse !== undefined) cartItem.warehouse = updates.warehouse
-			if (updates.discount_percentage !== undefined) cartItem.discount_percentage = updates.discount_percentage
-			if (updates.discount_amount !== undefined) cartItem.discount_amount = updates.discount_amount
-			if (updates.rate !== undefined) cartItem.rate = updates.rate
-			if (updates.price_list_rate !== undefined) cartItem.price_list_rate = updates.price_list_rate
-			if (updates.serial_no !== undefined) cartItem.serial_no = updates.serial_no
-			// Track manual rate edits for audit purposes
-			if (updates.is_rate_manually_edited !== undefined) cartItem.is_rate_manually_edited = updates.is_rate_manually_edited
-			if (updates.original_rate !== undefined) cartItem.original_rate = updates.original_rate
+			// ===== APPLY OTHER UPDATES =====
+			if (updates.quantity !== undefined)
+				cartItem.quantity = updates.quantity
 
+			if (updates.warehouse !== undefined)
+				cartItem.warehouse = updates.warehouse
+
+			if (updates.discount_percentage !== undefined)
+				cartItem.discount_percentage = updates.discount_percentage
+
+			if (updates.discount_amount !== undefined)
+				cartItem.discount_amount = updates.discount_amount
+
+			if (updates.rate !== undefined)
+				cartItem.rate = updates.rate
+
+			if (updates.price_list_rate !== undefined)
+				cartItem.price_list_rate = updates.price_list_rate
+
+			if (updates.serial_no !== undefined)
+				cartItem.serial_no = updates.serial_no
+
+			if (updates.is_rate_manually_edited !== undefined)
+				cartItem.is_rate_manually_edited =
+					updates.is_rate_manually_edited
+
+			if (updates.original_rate !== undefined)
+				cartItem.original_rate = updates.original_rate
+
+			// ===== FINAL RECALC =====
 			recalculateItem(cartItem)
 			rebuildIncrementalCache()
+
 			showSuccess(__('{0} updated', [cartItem.item_name]))
 			return true
 		} catch (error) {
