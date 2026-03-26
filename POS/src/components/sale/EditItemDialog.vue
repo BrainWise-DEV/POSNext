@@ -279,6 +279,7 @@
 
 <script setup>
 import { useInvoice } from "@/composables/useInvoice"
+import uomPolicyAdapter from "@/utils/uom_policy_adapter"
 import { useToast } from "@/composables/useToast"
 import { usePOSSettingsStore } from "@/stores/posSettings"
 import { useSerialNumberStore } from "@/stores/serialNumber"
@@ -332,10 +333,21 @@ const show = computed({
 })
 
 const availableUoms = computed(() => {
-	if (!localItem.value || !localItem.value.item_uoms) return []
-	return localItem.value.item_uoms.filter(
-		(u) => u.uom !== localItem.value.stock_uom,
-	)
+	if (!localItem.value) return []
+	return uomPolicyAdapter
+		.filterAllowedItemUoms(localItem.value)
+		.filter((u) => u.uom !== localItem.value.stock_uom)
+})
+
+const selectableUoms = computed(() => {
+	if (!localItem.value) return []
+	return uomPolicyAdapter.buildSelectableUoms(localItem.value)
+})
+
+const isUomLocked = computed(() => {
+	if (!localItem.value) return true
+	if (localItem.value.is_resolved_barcode) return true
+	return uomPolicyAdapter.isUomLocked(localItem.value)
 })
 
 const currencySymbol = computed(() => getCurrencySymbol(props.currency))
@@ -361,13 +373,10 @@ const rateEditDisabledReason = computed(() => {
 
 const uomOptions = computed(() => {
 	if (!localItem.value) return []
-	const options = [{ value: localItem.value.stock_uom, label: localItem.value.stock_uom }]
-	if (availableUoms.value.length > 0) {
-		availableUoms.value.forEach((uomData) => {
-			options.push({ value: uomData.uom, label: uomData.uom })
-		})
-	}
-	return options
+	return selectableUoms.value.map((uomData) => ({
+		value: uomData.uom,
+		label: uomData.uom,
+	}))
 })
 
 const warehouseOptions = computed(() => {
@@ -387,17 +396,22 @@ const discountTypeOptions = computed(() => [
 
 watch(
 	() => props.item,
-	(newItem) => {
+	async (newItem) => {
 		if (newItem) {
-			localItem.value = { ...newItem }
-			localQuantity.value = newItem.quantity || 1
-			localUom.value = newItem.uom || newItem.stock_uom || __("Nos")
-			localRate.value = newItem.rate || 0
-			originalPriceListRate.value = newItem.price_list_rate || newItem.rate || 0
-			localWarehouse.value = newItem.warehouse || props.warehouses[0]?.name || ""
+			await uomPolicyAdapter.ensurePolicyLoaded(newItem)
+			const normalizedItem = await uomPolicyAdapter.normalizeItemAsync({ ...newItem })
 
-			if (newItem.has_serial_no && newItem.serial_no) {
-				const serials = newItem.serial_no.split("\n").filter((s) => s.trim())
+			localItem.value = normalizedItem
+			localQuantity.value = normalizedItem.quantity || 1
+			localUom.value = normalizedItem.uom || normalizedItem.stock_uom || __("Nos")
+			localRate.value = normalizedItem.rate || 0
+			originalPriceListRate.value =
+				normalizedItem.price_list_rate || normalizedItem.rate || 0
+			localWarehouse.value =
+				normalizedItem.warehouse || props.warehouses[0]?.name || ""
+
+			if (normalizedItem.has_serial_no && normalizedItem.serial_no) {
+				const serials = normalizedItem.serial_no.split("\n").filter((s) => s.trim())
 				localSerials.value = [...serials]
 				originalSerials.value = [...serials]
 				removedSerials.value = []
@@ -408,12 +422,18 @@ watch(
 				removedSerials.value = []
 			}
 
-			if (newItem.discount_percentage && newItem.discount_percentage > 0) {
+			if (
+				normalizedItem.discount_percentage &&
+				normalizedItem.discount_percentage > 0
+			) {
 				discountType.value = "percentage"
-				discountValue.value = newItem.discount_percentage
-			} else if (newItem.discount_amount && newItem.discount_amount > 0) {
+				discountValue.value = normalizedItem.discount_percentage
+			} else if (
+				normalizedItem.discount_amount &&
+				normalizedItem.discount_amount > 0
+			) {
 				discountType.value = "amount"
-				discountValue.value = newItem.discount_amount
+				discountValue.value = normalizedItem.discount_amount
 			} else {
 				discountType.value = "percentage"
 				discountValue.value = 0
@@ -487,15 +507,31 @@ async function handleUomChange() {
 		return
 	}
 
-	try {
-		let conversionFactor = 1
+	const applied = uomPolicyAdapter.applySelectedUom(
+		localItem.value,
+		localUom.value,
+	)
 
-		if (localUom.value !== localItem.value.stock_uom) {
-			const uomRow = localItem.value.item_uoms?.find(
-				(u) => u.uom === localUom.value,
-			)
-			conversionFactor = uomRow?.conversion_factor || 1
-		}
+	if (!applied.ok) {
+		const safeUom = applied.safe_uom || uomPolicyAdapter.getDefaultUom(localItem.value)
+		localUom.value = safeUom
+		localItem.value = uomPolicyAdapter.applySafeDefaultUom(localItem.value)
+
+		showError(
+			__('UOM "{0}" is not allowed for item "{1}".', [
+				localUom.value,
+				localItem.value.item_name || localItem.value.item_code,
+			]),
+		)
+		calculateTotals()
+		return
+	}
+
+	try {
+		localItem.value = applied.item
+
+		const uomRow = uomPolicyAdapter.getUomRow(localItem.value, localUom.value)
+		const conversionFactor = uomRow?.conversion_factor || 1
 
 		const pricing = await resolveUomPricing(
 			localItem.value,
@@ -507,12 +543,21 @@ async function handleUomChange() {
 		localRate.value = pricing.rate || pricing.price_list_rate || 0
 		originalPriceListRate.value = pricing.price_list_rate || localRate.value
 
+		localItem.value = {
+			...localItem.value,
+			uom: localUom.value,
+			conversion_factor: conversionFactor,
+			rate: localRate.value,
+			price_list_rate: originalPriceListRate.value,
+		}
+
 		calculateTotals()
 	} catch (err) {
 		console.error("UOM pricing refresh failed:", err)
 		calculateTotals()
 	}
 }
+
 
 async function handleWarehouseChange() {
 	if (!localItem.value || !localWarehouse.value) return
@@ -625,10 +670,21 @@ function updateItem() {
 		}
 	}
 
+	const applied = uomPolicyAdapter.applySelectedUom(localItem.value, localUom.value)
+	if (!applied.ok) {
+		showError(
+			__('UOM "{0}" is not allowed for item "{1}".', [
+				localUom.value,
+				localItem.value.item_name || localItem.value.item_code,
+			]),
+		)
+		return
+	}
+
 	const updatedItem = {
-		...localItem.value,
+		...applied.item,
 		quantity: localQuantity.value,
-		uom: localUom.value,
+		uom: applied.item.uom,
 		rate: localRate.value,
 		price_list_rate: originalPriceListRate.value,
 		warehouse: localWarehouse.value,

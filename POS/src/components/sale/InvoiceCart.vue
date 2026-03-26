@@ -985,43 +985,38 @@
 									<div class="relative group/uom" @click.stop>
 										<button
 											type="button"
-											@click="toggleUomDropdown(item.item_code, item.uom)"
-											:disabled="
-												item.is_resolved_barcode || !item.item_uoms || item.item_uoms.length === 0
-											"
+											@click="toggleUomDropdown(item.item_code, item.uom || item.stock_uom)"
+											:disabled="item.is_resolved_barcode || isUomLocked(item) || !hasSelectableUoms(item)"
 											:class="[
 												'h-6 sm:h-7 text-[10px] sm:text-xs font-bold rounded ps-2 pe-5 transition-all touch-manipulation flex items-center justify-center min-w-[45px]',
 												item.is_resolved_barcode
 													? 'bg-amber-100 text-amber-700 border border-amber-300 cursor-not-allowed'
-													: item.item_uoms && item.item_uoms.length > 0
-														? 'bg-blue-500 text-white border border-blue-400 hover:bg-blue-600 active:scale-95 cursor-pointer'
-														: 'bg-gray-100 text-gray-500 border border-gray-200 cursor-not-allowed opacity-60',
+													: isUomLocked(item) || !hasSelectableUoms(item)
+														? 'bg-gray-100 text-gray-500 border border-gray-200 cursor-not-allowed opacity-60'
+														: 'bg-blue-500 text-white border border-blue-400 hover:bg-blue-600 active:scale-95 cursor-pointer',
 											]"
 											:title="
 												item.is_resolved_barcode
 													? __('UOM locked (barcode item)')
-													: item.item_uoms && item.item_uoms.length > 0
-														? __('Click to change unit')
-														: __('Only one unit available')
+													: isUomLocked(item) || !hasSelectableUoms(item)
+														? __('Only one unit available')
+														: __('Click to change unit')
 											"
 										>
-											{{
-												item.uom ||
-												item.stock_uom ||
-												__("Nos", null, "UOM")
-											}}
+											{{ getCurrentItemUom(item) }}
 										</button>
+
 										<svg
 											:class="[
 												'absolute end-1.5 top-1/2 -translate-y-1/2 w-2.5 h-2.5 pointer-events-none transition-transform',
-												openUomDropdown === `${item.item_code}-${item.uom}`
+												openUomDropdown === `${item.item_code}-${item.uom || item.stock_uom}`
 													? 'rotate-180'
 													: '',
 												item.is_resolved_barcode
 													? 'text-amber-600'
-													: item.item_uoms && item.item_uoms.length > 0
-														? 'text-white'
-														: 'text-gray-400',
+													: isUomLocked(item) || !hasSelectableUoms(item)
+														? 'text-gray-400'
+														: 'text-white',
 											]"
 											fill="none"
 											stroke="currentColor"
@@ -1034,29 +1029,18 @@
 												d="M19 9l-7 7-7-7"
 											/>
 										</svg>
+
 										<div
 											v-if="
-												openUomDropdown ===
-													`${item.item_code}-${item.uom}` &&
-												item.item_uoms &&
-												item.item_uoms.length > 0
+												openUomDropdown === `${item.item_code}-${item.uom || item.stock_uom}` &&
+												!item.is_resolved_barcode &&
+												!isUomLocked(item) &&
+												hasSelectableUoms(item)
 											"
 											class="absolute top-full start-0 mt-0.5 bg-white border border-blue-300 rounded shadow-xl z-50 min-w-full overflow-hidden"
 										>
 											<button
-												type="button"
-												@click="selectUom(item, item.stock_uom)"
-												:class="[
-													'w-full text-start px-2 py-1.5 text-[10px] sm:text-xs font-semibold transition-colors border-b border-gray-100',
-													(item.uom || item.stock_uom) === item.stock_uom
-														? 'bg-blue-50 text-blue-700'
-														: 'text-gray-700 hover:bg-blue-50',
-												]"
-											>
-												{{ item.stock_uom || __("Nos", null, "UOM") }}
-											</button>
-											<button
-												v-for="uomData in item.item_uoms"
+												v-for="uomData in getItemSelectableUoms(item)"
 												:key="uomData.uom"
 												type="button"
 												@click="selectUom(item, uomData.uom)"
@@ -1261,6 +1245,7 @@ import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/
 import { useFormatters } from "@/composables/useFormatters";
 import { useCartSort } from "@/composables/useCartSort";
 import { isOffline } from "@/utils/offline";
+import uomPolicyAdapter from "@/utils/uom_policy_adapter";
 import { offlineWorker } from "@/utils/offline/workerClient";
 import { logger } from "@/utils/logger";
 import { FeatherIcon } from "frappe-ui";
@@ -1884,11 +1869,37 @@ function handleQuantityBlur(item) {
 // UOM (Unit of Measure) Functions
 // ─────────────────────────────────────────────────────────────────────────────
 
+function getItemSelectableUoms(item) {
+	return uomPolicyAdapter.buildSelectableUoms(item || {});
+}
+
+function hasSelectableUoms(item) {
+	return getItemSelectableUoms(item).length > 1;
+}
+
+function isUomLocked(item) {
+	if (item?.is_resolved_barcode) return true;
+	return uomPolicyAdapter.isUomLocked(item);
+}
+
+function getCurrentItemUom(item) {
+	return item?.uom || item?.stock_uom || __("Nos", null, "UOM");
+}
+
 /**
  * Toggle UOM dropdown visibility for an item.
  * Uses unique key combining item_code + uom to handle same item with different UOMs.
  */
 function toggleUomDropdown(itemCode, uom) {
+	const item = props.items.find(
+		(row) => row.item_code === itemCode && (row.uom || row.stock_uom) === uom,
+	);
+
+	if (!item) return;
+	if (item.is_resolved_barcode) return;
+	if (!hasSelectableUoms(item)) return;
+	if (isUomLocked(item)) return;
+
 	const key = `${itemCode}-${uom}`;
 	openUomDropdown.value = openUomDropdown.value === key ? null : key;
 }
@@ -1898,15 +1909,31 @@ function toggleUomDropdown(itemCode, uom) {
  * Handles merging if target UOM already exists in cart
  */
 async function selectUom(item, newUom) {
-	if (item.uom === newUom) {
+	const currentUom = item.uom || item.stock_uom;
+
+	if (currentUom === newUom) {
 		openUomDropdown.value = null;
 		return;
 	}
 
-	const currentUom = item.uom || item.stock_uom;
-	await cartStore.changeItemUOM(item.item_code, newUom, currentUom);
+	const applied = uomPolicyAdapter.applySelectedUom(item, newUom);
+
+	if (!applied.ok) {
+		openUomDropdown.value = null;
+		frappe.msgprint({
+			title: __("UOM Not Allowed"),
+			message: __("UOM {0} is not allowed for item {1}.", [
+				newUom,
+				item.item_code,
+			]),
+			indicator: "red",
+		});
+		return;
+	}
+
+	await cartStore.changeItemUOM(item.item_code, applied.item.uom, currentUom);
 	openUomDropdown.value = null;
-	emit("update-uom", item.item_code, newUom);
+	emit("update-uom", item.item_code, applied.item.uom);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

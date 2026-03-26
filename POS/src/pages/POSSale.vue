@@ -999,6 +999,7 @@ import { useLocale } from "@/composables/useLocale";
 import { session } from "@/data/session";
 import { useUserData } from "@/data/user";
 import { parseError } from "@/utils/errorHandler";
+import uomPolicyAdapter from "@/utils/uom_policy_adapter";
 import { cleanupUserSession } from "@/utils/sessionCleanup";
 import { offlineWorker } from "@/utils/offline/workerClient";
 import { cacheInvoiceHistory, getCachedInvoiceHistory } from "@/utils/offline/sync";
@@ -1778,26 +1779,62 @@ async function handleShiftClosed() {
 	}
 }
 
-function handleItemSelected(item, autoAdd = false) {
+async function handleItemSelected(item, autoAdd = false) {
+	await uomPolicyAdapter.ensurePolicyLoaded(item);
+	item = await uomPolicyAdapter.normalizeItemAsync(item);
+
+	const allowedUoms = uomPolicyAdapter.getAllowedUoms(item);
+
+	if (!allowedUoms.length) {
+		uiStore.showError(
+			__("UOM Error"),
+			__("Item {0} has no allowed UOM.", [item.item_code]),
+			__("Item: {0}", [item.item_code])
+		);
+		return;
+	}
+
 	// Auto-add mode
 	if (autoAdd) {
 		try {
 			// Check if item has resolved barcode data (weighted/priced)
 			if (item.resolved_qty && item.resolved_barcode_type) {
-				// Get the unit price for the resolved UOM from uom_prices, or fall back to item rate
-				const resolvedUom = item.resolved_uom || item.uom;
-				const unitRate = item.uom_prices?.[resolvedUom] || item.rate;
+				const barcodeCheck = await uomPolicyAdapter.validateBarcodeResult(item);
+				if (!barcodeCheck.ok) {
+					uiStore.showError(
+						__("Barcode Not Allowed"),
+						__("UOM {0} is not allowed for item {1}.", [
+							barcodeCheck.uom || item.resolved_uom || item.uom,
+							item.item_code,
+						]),
+						__("Item: {0}", [item.item_code])
+					);
+					return;
+				}
+
+				const validatedItem = barcodeCheck.result || item;
+				const resolvedUom = validatedItem.resolved_uom || validatedItem.uom;
+				const unitRate = validatedItem.uom_prices?.[resolvedUom] || validatedItem.rate;
 
 				const resolvedItem = {
-					...item,
+					...validatedItem,
 					uom: resolvedUom,
 					rate: unitRate,
 					price_list_rate: unitRate,
-					is_resolved_barcode: true, // Mark as readonly
+					is_resolved_barcode: true,
 				};
-				cartStore.addItem(resolvedItem, item.resolved_qty, true, shiftStore.currentProfile);
+
+				await cartStore.addItem(
+					resolvedItem,
+					validatedItem.resolved_qty || item.resolved_qty,
+					true,
+					shiftStore.currentProfile
+				);
 			} else {
-				cartStore.addItem(item, 1, true, shiftStore.currentProfile);
+				if (uomPolicyAdapter.isUomLocked(item)) {
+					item = uomPolicyAdapter.applySafeDefaultUom(item);
+				}
+				await cartStore.addItem(item, 1, true, shiftStore.currentProfile);
 			}
 		} catch (error) {
 			uiStore.showError(
@@ -1834,10 +1871,15 @@ function handleItemSelected(item, autoAdd = false) {
 	}
 
 	// Check for UOMs
-	if (item.item_uoms && item.item_uoms.length > 0) {
+	if (item.item_uoms && item.item_uoms.length > 0 && !uomPolicyAdapter.isUomLocked(item)) {
 		cartStore.setPendingItem(item, 1, "uom");
 		uiStore.showItemSelectionDialog = true;
 		return;
+	}
+
+	// Force safe default UOM when only one UOM is allowed
+	if (uomPolicyAdapter.isUomLocked(item)) {
+		item = uomPolicyAdapter.applySafeDefaultUom(item);
 	}
 
 	// Check for batch/serial
@@ -1849,7 +1891,7 @@ function handleItemSelected(item, autoAdd = false) {
 
 	// Add to cart
 	try {
-		cartStore.addItem(item, 1, false, shiftStore.currentProfile);
+		await cartStore.addItem(item, 1, false, shiftStore.currentProfile);
 	} catch (error) {
 		uiStore.showError(
 			__("Insufficient Stock"),
@@ -2102,7 +2144,9 @@ async function handleOptionSelected(option) {
 
 	try {
 		if (option.type === "variant") {
-			const variant = option.data;
+			let variant = option.data;
+			await uomPolicyAdapter.ensurePolicyLoaded(variant);
+			variant = await uomPolicyAdapter.normalizeItemAsync(variant);
 
 			// Early out-of-stock guard for variants
 			// Full qty validation happens in cartStore.addItem()
@@ -2121,9 +2165,13 @@ async function handleOptionSelected(option) {
 				}
 			}
 
-			if (variant.item_uoms && variant.item_uoms.length > 0) {
+			if (variant.item_uoms && variant.item_uoms.length > 0 && !uomPolicyAdapter.isUomLocked(variant)) {
 				cartStore.setPendingItem(variant, cartStore.pendingItemQty, "uom");
 				return;
+			}
+
+			if (uomPolicyAdapter.isUomLocked(variant)) {
+				variant = uomPolicyAdapter.applySafeDefaultUom(variant);
 			}
 
 			if (variant.has_batch_no || variant.has_serial_no) {
@@ -2132,7 +2180,7 @@ async function handleOptionSelected(option) {
 				uiStore.showBatchSerialDialog = true;
 			} else {
 				try {
-					cartStore.addItem(
+					await cartStore.addItem(
 						variant,
 						cartStore.pendingItemQty,
 						false,
@@ -2147,14 +2195,33 @@ async function handleOptionSelected(option) {
 			}
 		} else if (option.type === "uom") {
 			const qty = option.quantity || cartStore.pendingItemQty;
+
+			const applied = uomPolicyAdapter.applySelectedUom(
+				cartStore.pendingItem,
+				option.uom
+			);
+
+			if (!applied.ok) {
+				frappe.msgprint({
+					title: __("UOM Not Allowed"),
+					message: __("UOM {0} is not allowed for item {1}.", [
+						option.uom,
+						cartStore.pendingItem.item_code,
+					]),
+					indicator: "red",
+				});
+				return;
+			}
+
+			const safeItem = applied.item;
 			const pricing = await cartStore.resolveUomPricing(
-				cartStore.pendingItem, option.uom, option.conversion_factor, qty
+				safeItem, safeItem.uom, safeItem.conversion_factor, qty
 			);
 
 			const itemToAdd = {
-				...cartStore.pendingItem,
-				uom: option.uom,
-				conversion_factor: option.conversion_factor,
+				...safeItem,
+				uom: safeItem.uom,
+				conversion_factor: safeItem.conversion_factor,
 				rate: pricing.rate,
 				price_list_rate: pricing.price_list_rate,
 			};
@@ -2165,10 +2232,10 @@ async function handleOptionSelected(option) {
 				uiStore.showBatchSerialDialog = true;
 			} else {
 				try {
-					cartStore.addItem(itemToAdd, qty, false, shiftStore.currentProfile);
+					await cartStore.addItem(itemToAdd, qty, false, shiftStore.currentProfile);
 					uiStore.showItemSelectionDialog = false;
 					cartStore.clearPendingItem();
-					showSuccess(__("{0} ({1}) added to cart", [itemToAdd.item_name, option.uom]));
+					showSuccess(__("{0} ({1}) added to cart", [itemToAdd.item_name, itemToAdd.uom]));
 				} catch (error) {
 					showError(error.message);
 				}
