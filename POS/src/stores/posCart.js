@@ -173,6 +173,26 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	// Toast composable
 	const { showSuccess, showError, showWarning } = useToast()
 
+	function cleanUiMessage(message, fallback = "") {
+		let text = fallback || ""
+
+		if (typeof message === "string") {
+			text = message
+		} else if (message && typeof message === "object") {
+			text = message.message || message.title || fallback || ""
+		} else if (message !== undefined && message !== null) {
+			text = String(message)
+		}
+
+		text = String(text || "").replace(/^Error:\s*/i, "").trim()
+		return text || fallback
+	}
+
+	function debugError(...args) {
+		if (import.meta.env.DEV) console.error(...args)
+	}
+
+
 	// Computed
 	const itemCount = computed(() => invoiceItems.value.length)
 	const isEmpty = computed(() => invoiceItems.value.length === 0)
@@ -213,14 +233,14 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				const check = checkStockAvailability(item, totalQty, warehouse)
 				if (!check.available) {
 					showWarning(getStockHint(item, check))
-					throw new Error(check.error || getStockHint(item, check))
+					return false
 				}
 			}
 
 			addItemToInvoice(item, qty)
 		} catch (error) {
-			console.error("Error adding item:", error)
-			showError(parseError(error) || __("Failed to add item."))
+			debugError("Error adding item:", error)
+			showWarning(cleanUiMessage(parseError(error)?.message || parseError(error), __("Unable to add item.")))
 			throw error
 		}
 	}
@@ -248,7 +268,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			const check = checkStockAvailability(item, newQty)
 			if (!check.available) {
 				showWarning(getStockHint(item, check))
-				return
+				return false
 			}
 		}
 
@@ -532,7 +552,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 	async function applyOffer(offer, currentProfile, offersDialogRef = null) {
 		if (!offer) {
-			console.error("No offer provided")
+			debugError("No offer provided")
 			offersDialogRef?.resetApplyingState()
 			return false
 		}
@@ -606,7 +626,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 							processFreeItems(rollbackFreeItems)
 							filterActiveOffers(rollbackRules)
 						} catch (rollbackError) {
-							console.error("Error rolling back offers:", rollbackError)
+							debugError("Error rolling back offers:", rollbackError)
 						}
 					}
 
@@ -649,7 +669,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				result = true
 			} catch (error) {
 				if (signal?.aborted) return
-				console.error("Error applying offer:", error)
+				debugError("Error applying offer:", error)
 				offerProcessingState.value.error = error.message
 				showError(__("Failed to apply offer. Please try again."))
 				offersDialogRef?.resetApplyingState()
@@ -744,7 +764,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				result = true
 			} catch (error) {
 				if (signal?.aborted) return
-				console.error("Error removing offer:", error)
+				debugError("Error removing offer:", error)
 				offerProcessingState.value.error = error.message
 				showError(__("Failed to update cart after removing offer."))
 				offersDialogRef?.resetApplyingState()
@@ -868,7 +888,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			return false
 		} catch (error) {
 			if (signal?.aborted) return false
-			console.error("Error validating offers:", error)
+			debugError("Error validating offers:", error)
 			offerProcessingState.value.error = error.message
 			return false
 		}
@@ -990,7 +1010,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				)
 			}
 		} catch (error) {
-			console.error("Error applying offers offline:", error)
+			debugError("Error applying offers offline:", error)
 		}
 	}
 
@@ -1277,12 +1297,17 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			conversion_factor: Number(conversionFactor || 1) || 1,
 		}
 
-		const check = checkStockAvailability(tempItem, qty, tempItem.warehouse)
+		const requiredStockQty =
+			(Number(targetQty || cartItem.quantity || 1) || 1) *
+			(Number(conversionFactor || 1) || 1)
 
-		if (!check.available) {
+		const stockQty =
+			Number(cartItem.actual_qty || cartItem.stock_qty || 0)
+
+		if (requiredStockQty > stockQty) {
 			return {
 				ok: false,
-				message: getStockHint(tempItem, check),
+				message: getStockHint(tempItem),
 			}
 		}
 
@@ -1320,7 +1345,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		)
 
 		if (!stockCheck.ok) {
-			throw new Error(stockCheck.message)
+			throw new Error(cleanUiMessage(stockCheck.message))
 		}
 
 		const pricing = await resolveUomPricing(
@@ -1372,7 +1397,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 				const targetConversionFactor =
 					Number(targetUomRow?.conversion_factor || existingItem.conversion_factor || 1) || 1
+
 				const mergedQty = (existingItem.quantity || 0) + (cartItem.quantity || 0)
+
 				const mergeCheck = validateUomStockBeforeChange(
 					existingItem,
 					safeItem.uom,
@@ -1399,10 +1426,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			recalculateItem(cartItem)
 			rebuildIncrementalCache()
 			showSuccess(__("Unit changed to {0}", [safeItem.uom]))
-		} catch (error) {
-			console.error("Error changing UOM:", error)
-			showError(__("Failed to update UOM. Please try again."))
-		}
+			} catch (error) {
+				debugError("Error changing UOM:", error)
+				showWarning(cleanUiMessage(parseError(error)?.message || parseError(error), __("Unable to update unit.")))
+			}
 	}
 
 	/**
@@ -1456,7 +1483,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				)
 
 				if (!stockCheck.ok) {
-					throw new Error(stockCheck.message)
+					throw new Error(cleanUiMessage(stockCheck.message))
 				}
 
 				const existingItem = findItemWithUom(itemCode, targetUom, cartItem)
@@ -1545,8 +1572,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			showSuccess(__("{0} updated", [cartItem.item_name]))
 			return true
 		} catch (error) {
-			console.error("Error updating item:", error)
-			showError(parseError(error) || __("Failed to update item."))
+			debugError("Error updating item:", error)
+			showWarning(cleanUiMessage(parseError(error)?.message || parseError(error), __("Unable to update item.")))
 			return false
 		}
 	}
@@ -1837,7 +1864,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			offerProcessingState.value.retryCount = 0
 		} catch (error) {
 			if (signal?.aborted) return
-			console.error("Error in offer synchronization:", error)
+			debugError("Error in offer synchronization:", error)
 			offerProcessingState.value.error = error.message
 		}
 	}
@@ -1860,7 +1887,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				await processOffersInternal(signal, currentGen, force)
 			} catch (error) {
 				if (!signal?.aborted) {
-					console.error("Error in offer processing:", error)
+					debugError("Error in offer processing:", error)
 					offerProcessingState.value.error = error.message
 					offerProcessingState.value.retryCount++
 

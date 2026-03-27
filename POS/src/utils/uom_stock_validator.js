@@ -1,3 +1,5 @@
+import { usePOSSettingsStore } from "@/stores/posSettings"
+
 export function get_conversion_factor(item, uom) {
     if (!item?.uom_conversions) return 1;
 
@@ -11,7 +13,13 @@ export function get_available_stock(item) {
 }
 
 export function is_stock_enforced(item) {
-    return !item.sell_out_of_stock;
+    const settingsStore = usePOSSettingsStore()
+
+    if (!settingsStore.shouldEnforceStockValidation()) {
+        return false
+    }
+
+    return !item.sell_out_of_stock
 }
 
 export function is_uom_stock_valid({ item, uom, qty }) {

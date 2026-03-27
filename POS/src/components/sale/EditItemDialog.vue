@@ -159,7 +159,6 @@
 															<span class="text-sm font-semibold text-amber-700">{{ localUom }}</span>
 														</div>
 														<SelectInput v-else v-model="localUom" :options="uomOptions" @change="handleUomChange" />
-										<div v-if="currentUomStockHint" class="mt-1 text-xs text-amber-600">{{ currentUomStockHint }}</div>
 													</div>
 
 													<!-- Warehouse Selector -->
@@ -262,10 +261,10 @@
 									<Button
 										variant="solid"
 										@click="updateItem"
-										:disabled="!hasStock || isCheckingStock"
+										:disabled="(settingsStore.shouldEnforceStockValidation() && !hasStock) || isCheckingStock"
 									>
 										<span v-if="isCheckingStock">{{ __('Checking Stock...') }}</span>
-										<span v-else-if="!hasStock">{{ __('No Stock Available') }}</span>
+										<span v-else-if="settingsStore.shouldEnforceStockValidation() && !hasStock">{{ __('No Stock Available') }}</span>
 										<span v-else>{{ __('Update Item') }}</span>
 									</Button>
 								</div>
@@ -357,8 +356,8 @@ const localUomDisplay = computed(() => {
 	return `${selectedUom} x ${conversionFactor}`
 })
 
-const currentUomStockHint = computed(() => {
-	if (!localItem.value) return ""
+const currentStockCheck = computed(() => {
+	if (!localItem.value) return null
 	const selectedUom = localUom.value || localItem.value.uom || localItem.value.stock_uom
 	const uomRow = uomPolicyAdapter.getUomRow(localItem.value, selectedUom)
 	const conversionFactor = Number(uomRow?.conversion_factor || localItem.value.conversion_factor || 1) || 1
@@ -368,8 +367,36 @@ const currentUomStockHint = computed(() => {
 		conversion_factor: conversionFactor,
 		warehouse: localWarehouse.value || localItem.value.warehouse,
 	}
-	const check = checkStockAvailability(tempItem, Number(localQuantity.value || 1), tempItem.warehouse)
-	return check.available ? "" : getStockHint(tempItem, check)
+	return checkStockAvailability(tempItem, Number(localQuantity.value || 1), tempItem.warehouse)
+})
+
+const currentUomStockHint = computed(() => {
+	if (!localItem.value || !currentStockCheck.value || currentStockCheck.value.available) return ""
+	const selectedUom = localUom.value || localItem.value.uom || localItem.value.stock_uom
+	const uomRow = uomPolicyAdapter.getUomRow(localItem.value, selectedUom)
+	const conversionFactor = Number(uomRow?.conversion_factor || localItem.value.conversion_factor || 1) || 1
+	const tempItem = {
+		...localItem.value,
+		uom: selectedUom,
+		conversion_factor: conversionFactor,
+		warehouse: localWarehouse.value || localItem.value.warehouse,
+	}
+	return getStockHint(tempItem, currentStockCheck.value)
+})
+
+const inlineStockNotice = computed(() => {
+	if (!localItem.value || !currentStockCheck.value || currentStockCheck.value.available) return null
+	const warehouseName = localWarehouse.value || localItem.value.warehouse || __('Default')
+	return {
+		type: settingsStore.shouldEnforceStockValidation() ? 'blocked' : 'allowed',
+		title: settingsStore.shouldEnforceStockValidation()
+			? __('Insufficient stock in "{0}"', [warehouseName])
+			: __('Low stock in "{0}"', [warehouseName]),
+		available: Number(currentStockCheck.value.actual_qty ?? currentStockCheck.value.available_qty ?? currentStockCheck.value.available_stock ?? 0),
+		required: Number(currentStockCheck.value.required_qty ?? currentStockCheck.value.requested_qty ?? currentStockCheck.value.qty_needed ?? (Number(localQuantity.value || 1) * (Number(uomPolicyAdapter.getUomRow(localItem.value, localUom.value || localItem.value.uom || localItem.value.stock_uom)?.conversion_factor || localItem.value.conversion_factor || 1) || 1))),
+		stockUom: localItem.value.stock_uom || localUom.value,
+		showAllowed: !settingsStore.shouldEnforceStockValidation(),
+	}
 })
 
 
@@ -403,11 +430,14 @@ const uomOptions = computed(() => {
 			warehouse: localWarehouse.value || localItem.value.warehouse,
 		}
 		const check = checkStockAvailability(tempItem, Number(localQuantity.value || 1), tempItem.warehouse)
-		const hint = check.available ? "" : getStockHint(tempItem, check)
+		const stockUom = localItem.value.stock_uom || ''
+		const label = uomValue === stockUom || Number(conversionFactor || 1) <= 1
+			? uomValue
+			: `${uomValue} x ${Number(conversionFactor || 1)}`
 		return {
 			value: uomValue,
-			label: hint ? `${uomValue} · ${hint}` : uomValue,
-			disabled: !check.available,
+			label,
+			disabled: settingsStore.shouldEnforceStockValidation() ? !check.available : false,
 		}
 	}
 
@@ -555,7 +585,6 @@ async function handleUomChange() {
 		}
 		const stockCheck = checkStockAvailability(tempItem, Number(localQuantity.value || 1), tempItem.warehouse)
 		if (!stockCheck.available && settingsStore.shouldEnforceStockValidation() && shouldValidateItemStock(localItem.value)) {
-			showWarning(getStockHint(tempItem, stockCheck))
 			localUom.value = localItem.value.uom || localItem.value.stock_uom || __("Nos")
 			calculateTotals()
 			return
@@ -573,7 +602,7 @@ async function handleUomChange() {
 
 		calculateTotals()
 	} catch (err) {
-		console.error("UOM pricing refresh failed:", err)
+		if (import.meta.env.DEV) console.error("UOM pricing refresh failed:", err)
 		calculateTotals()
 	}
 }
@@ -588,32 +617,18 @@ async function handleWarehouseChange() {
 			localWarehouse.value,
 		)
 
-		if (availableStock === 0) {
+		const qty = Number(localQuantity.value || 1)
+		const enforceStock = settingsStore.shouldEnforceStockValidation() && shouldValidateItemStock(localItem.value)
+
+		if (availableStock >= qty) {
+			hasStock.value = true
+		} else if (enforceStock) {
 			hasStock.value = false
-			showError(
-				__('"{0}" is not available in warehouse "{1}". Please select another warehouse.', [
-					localItem.value.item_name,
-					localWarehouse.value,
-				]),
-			)
-		} else if (availableStock < localQuantity.value) {
-			hasStock.value = false
-			showWarning(
-				__('Only {0} units of "{1}" available in "{2}". Current quantity: {3}', [
-					availableStock,
-					localItem.value.item_name,
-					localWarehouse.value,
-					localQuantity.value,
-				]),
-			)
 		} else {
 			hasStock.value = true
-			showSuccess(
-				__("{0} units available in \"{1}\"", [availableStock, localWarehouse.value]),
-			)
 		}
 	} catch (error) {
-		console.error("Error checking warehouse stock:", error)
+		if (import.meta.env.DEV) console.error("Error checking warehouse stock:", error)
 		hasStock.value = true
 	} finally {
 		isCheckingStock.value = false
@@ -701,7 +716,7 @@ function updateItem() {
 	if (settingsStore.shouldEnforceStockValidation() && shouldValidateItemStock(validationItem)) {
 		const stockCheck = checkStockAvailability(validationItem, Number(localQuantity.value || 1), validationItem.warehouse)
 		if (!stockCheck.available) {
-			showError(getStockHint(validationItem, stockCheck))
+			showWarning(getStockHint(validationItem, stockCheck))
 			return
 		}
 	}
