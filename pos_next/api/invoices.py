@@ -163,6 +163,60 @@ def validate_manual_rate_edit(item, pos_profile=None, pos_settings_cache=None):
     return {"valid": True}
 
 
+def _clean_payment_row(payment):
+    """Return a child-row-safe payment dict without parent metadata."""
+    if hasattr(payment, "as_dict"):
+        payment_data = payment.as_dict()
+    elif isinstance(payment, dict):
+        payment_data = dict(payment)
+    else:
+        payment_data = dict(getattr(payment, "__dict__", {}))
+
+    fields_to_strip = {
+        "doctype",
+        "parent",
+        "parentfield",
+        "parenttype",
+        "owner",
+        "creation",
+        "modified",
+        "modified_by",
+        "__last_sync_on",
+        "__unsaved",
+    }
+    return {key: value for key, value in payment_data.items() if key not in fields_to_strip}
+
+
+def _snapshot_invoice_payments(invoice_doc):
+    """Capture the payment rows before ERPNext POS defaults overwrite them."""
+    return [_clean_payment_row(payment) for payment in (invoice_doc.get("payments") or [])]
+
+
+def _restore_invoice_payments(invoice_doc, payments):
+    """Restore exactly the payment rows provided by the POS client."""
+    invoice_doc.set("payments", [])
+    for payment in payments:
+        invoice_doc.append("payments", payment)
+
+
+def _sync_invoice_payment_amounts(invoice_doc):
+    """Recompute payment totals after restoring cashier-entered payment rows."""
+    conversion_rate = flt(invoice_doc.get("conversion_rate")) or 1
+    paid_amount = 0
+    base_paid_amount = 0
+
+    for payment in invoice_doc.get("payments") or []:
+        payment.amount = flt(payment.get("amount") or 0)
+        payment.base_amount = flt(payment.get("base_amount") or 0) or flt(
+            payment.amount * conversion_rate
+        )
+        paid_amount += payment.amount
+        base_paid_amount += payment.base_amount
+
+    invoice_doc.paid_amount = flt(paid_amount)
+    invoice_doc.base_paid_amount = flt(base_paid_amount)
+
+
 def log_manual_rate_edit(item, invoice_name, user=None):
     """
     Create an audit log entry for manual rate edits.
@@ -848,6 +902,9 @@ def update_invoice(data):
             invoice_doc.update_stock = 1
             if pos_profile_doc and pos_profile_doc.warehouse:
                 invoice_doc.set_warehouse = pos_profile_doc.warehouse
+            incoming_payments = _snapshot_invoice_payments(invoice_doc)
+        else:
+            incoming_payments = []
 
         # ========================================================================
         # ROUNDING CONFIGURATION
@@ -866,6 +923,9 @@ def update_invoice(data):
         # Populate missing fields (company, currency, accounts, etc.)
         invoice_doc.set_missing_values()
 
+        if doctype == "Sales Invoice":
+            _restore_invoice_payments(invoice_doc, incoming_payments)
+
         # Calculate totals and apply discounts (with rounding disabled)
         invoice_doc.calculate_taxes_and_totals()
         if invoice_doc.grand_total is None:
@@ -875,6 +935,9 @@ def update_invoice(data):
 
         # Set accounts for payment methods before saving
         _set_payment_accounts(invoice_doc.payments, invoice_doc.company)
+
+        if doctype == "Sales Invoice":
+            _sync_invoice_payment_amounts(invoice_doc)
 
         # For return invoices, ensure payments are negative
         if invoice_doc.get("is_return"):
