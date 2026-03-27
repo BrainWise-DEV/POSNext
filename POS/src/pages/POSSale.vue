@@ -957,7 +957,7 @@
 	</div>
 </template>
 
-<script>
+<script
 // Module-scoped init guard — prevents redundant heavy initialization
 // when component remounts due to translationVersion changes.
 // Tracks the profile+shift key so a user/shift change correctly re-initializes.

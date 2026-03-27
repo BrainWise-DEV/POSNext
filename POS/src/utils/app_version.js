@@ -1,0 +1,1 @@
+export const APP_VERSION = "NoniERP POS - Phase 11"
