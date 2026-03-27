@@ -9,6 +9,7 @@ import {
 } from "@/utils/stockValidator"
 import { offlineState } from "@/utils/offline/offlineState"
 import { useToast } from "@/composables/useToast"
+import { getStockHint } from "@/utils/stock_hint"
 import { defineStore } from "pinia"
 import { computed, nextTick, ref, toRaw, watch } from "vue"
 
@@ -211,7 +212,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 				const check = checkStockAvailability(item, totalQty, warehouse)
 				if (!check.available) {
-					throw new Error(check.error)
+					showWarning(getStockHint(item, check))
+					throw new Error(check.error || getStockHint(item, check))
 				}
 			}
 
@@ -245,7 +247,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		) {
 			const check = checkStockAvailability(item, newQty)
 			if (!check.available) {
-				showWarning(check.error)
+				showWarning(getStockHint(item, check))
 				return
 			}
 		}
@@ -1259,6 +1261,34 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		return targetItem.quantity
 	}
 
+	function validateUomStockBeforeChange(cartItem, targetUom, conversionFactor, targetQty) {
+		if (
+			!settingsStore.shouldEnforceStockValidation() ||
+			!shouldValidateItemStock(cartItem)
+		) {
+			return { ok: true }
+		}
+
+		const qty = Number(targetQty || cartItem.quantity || 1) || 1
+
+		const tempItem = {
+			...cartItem,
+			uom: targetUom,
+			conversion_factor: Number(conversionFactor || 1) || 1,
+		}
+
+		const check = checkStockAvailability(tempItem, qty, tempItem.warehouse)
+
+		if (!check.available) {
+			return {
+				ok: false,
+				message: getStockHint(tempItem, check),
+			}
+		}
+
+		return { ok: true }
+	}
+
 	/**
 	 * Fetch and apply UOM details from server
 	 * @param {Object} cartItem - Cart item to update
@@ -1280,7 +1310,19 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			uomPolicyAdapter.getUomRow(normalizedItem, newUom) ||
 			normalizedItem.item_uoms?.find((u) => u.uom === newUom)
 
-		const conversionFactor = uomData?.conversion_factor || 1
+		const conversionFactor = Number(uomData?.conversion_factor || 1) || 1
+
+		const stockCheck = validateUomStockBeforeChange(
+			cartItem,
+			newUom,
+			conversionFactor,
+			qty,
+		)
+
+		if (!stockCheck.ok) {
+			throw new Error(stockCheck.message)
+		}
+
 		const pricing = await resolveUomPricing(
 			normalizedItem,
 			newUom,
@@ -1324,6 +1366,25 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			// Check for existing item to merge with
 			const existingItem = findItemWithUom(itemCode, safeItem.uom, cartItem)
 			if (existingItem) {
+				const targetUomRow =
+					uomPolicyAdapter.getUomRow(safeItem, safeItem.uom) ||
+					existingItem.item_uoms?.find((u) => u.uom === safeItem.uom)
+
+				const targetConversionFactor =
+					Number(targetUomRow?.conversion_factor || existingItem.conversion_factor || 1) || 1
+				const mergedQty = (existingItem.quantity || 0) + (cartItem.quantity || 0)
+				const mergeCheck = validateUomStockBeforeChange(
+					existingItem,
+					safeItem.uom,
+					targetConversionFactor,
+					mergedQty,
+				)
+
+				if (!mergeCheck.ok) {
+					showWarning(mergeCheck.message)
+					return
+				}
+
 				const totalQty = mergeItems(
 					cartItem,
 					existingItem,
@@ -1378,9 +1439,41 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				const normalizedTarget = applied.item
 				const targetUom = normalizedTarget.uom
 
+				const uomData =
+					uomPolicyAdapter.getUomRow(normalizedTarget, targetUom) ||
+					cartItem.item_uoms?.find((u) => u.uom === targetUom)
+
+				const conversionFactor = Number(uomData?.conversion_factor || 1) || 1
+
+				const targetQty =
+					updates.quantity !== undefined ? updates.quantity : cartItem.quantity
+
+				const stockCheck = validateUomStockBeforeChange(
+					cartItem,
+					targetUom,
+					conversionFactor,
+					targetQty,
+				)
+
+				if (!stockCheck.ok) {
+					throw new Error(stockCheck.message)
+				}
+
 				const existingItem = findItemWithUom(itemCode, targetUom, cartItem)
 				if (existingItem) {
 					const qtyToMerge = updates.quantity ?? cartItem.quantity
+					const mergedQty = (existingItem.quantity || 0) + qtyToMerge
+					const mergeStockCheck = validateUomStockBeforeChange(
+						existingItem,
+						targetUom,
+						conversionFactor,
+						mergedQty,
+					)
+
+					if (!mergeStockCheck.ok) {
+						throw new Error(mergeStockCheck.message)
+					}
+
 					const totalQty = mergeItems(cartItem, existingItem, qtyToMerge)
 					showSuccess(__("Merged into {0} (Total: {1})", [targetUom, totalQty]))
 					return true
@@ -1390,11 +1483,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				// Because dialog already calculated correct rate
 				cartItem.uom = targetUom
 
-				const uomData =
-					uomPolicyAdapter.getUomRow(cartItem, targetUom) ||
-					cartItem.item_uoms?.find((u) => u.uom === targetUom)
-
-				cartItem.conversion_factor = uomData?.conversion_factor || 1
+				cartItem.conversion_factor = conversionFactor
 
 				// TRUST dialog rate
 				if (updates.rate !== undefined) {
@@ -1415,7 +1504,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			) {
 				const check = checkStockAvailability(cartItem, updates.quantity)
 				if (!check.available) {
-					throw new Error(check.error)
+					throw new Error(getStockHint(cartItem, check))
 				}
 			}
 

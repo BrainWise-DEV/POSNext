@@ -1246,6 +1246,8 @@ import { useFormatters } from "@/composables/useFormatters";
 import { useCartSort } from "@/composables/useCartSort";
 import { isOffline } from "@/utils/offline";
 import uomPolicyAdapter from "@/utils/uom_policy_adapter";
+import { checkStockAvailability, shouldValidateItemStock } from "@/utils/stockValidator";
+import { getStockHint } from "@/utils/stock_hint";
 import { offlineWorker } from "@/utils/offline/workerClient";
 import { logger } from "@/utils/logger";
 import { FeatherIcon } from "frappe-ui";
@@ -1873,6 +1875,28 @@ function getItemSelectableUoms(item) {
 	return uomPolicyAdapter.buildSelectableUoms(item || {});
 }
 
+function getUomStockState(item, uomData) {
+	if (!item || !uomData) {
+		return { disabled: false, hint: "" };
+	}
+	if (!settingsStore.shouldEnforceStockValidation() || !shouldValidateItemStock(item)) {
+		return { disabled: false, hint: "" };
+	}
+	const tempItem = {
+		...item,
+		uom: uomData.uom,
+		conversion_factor: Number(uomData.conversion_factor || 1) || 1,
+	};
+	const check = checkStockAvailability(tempItem, Number(item.quantity || 1), item.warehouse);
+	if (check.available) {
+		return { disabled: false, hint: "" };
+	}
+	return {
+		disabled: true,
+		hint: getStockHint(tempItem, check),
+	};
+}
+
 function hasSelectableUoms(item) {
 	return getItemSelectableUoms(item).length > 1;
 }
@@ -1917,6 +1941,17 @@ async function selectUom(item, newUom) {
 	}
 
 	const applied = uomPolicyAdapter.applySelectedUom(item, newUom);
+	const selectedUomData = getItemSelectableUoms(item).find((row) => row.uom === newUom);
+	const stockState = getUomStockState(item, selectedUomData || { uom: newUom, conversion_factor: 1 });
+
+	if (stockState.disabled) {
+		openUomDropdown.value = null;
+		frappe.show_alert({
+			message: stockState.hint,
+			indicator: "orange",
+		});
+		return;
+	}
 
 	if (!applied.ok) {
 		openUomDropdown.value = null;
