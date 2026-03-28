@@ -89,11 +89,14 @@
 								v-for="(option, index) in options"
 								:key="index"
 								@click="selectOption(option)"
-																:class="[
+								:disabled="!isOptionStockValid(option)"
+								:class="[
 									'px-4 py-3 rounded-xl font-bold text-base transition-all touch-manipulation flex flex-col items-center justify-center min-h-[60px]',
-									selectedOption === option
-										? 'bg-blue-600 text-white shadow-lg ring-2 ring-blue-300'
-										: 'bg-gray-100 text-gray-700 hover:bg-gray-200 active:bg-gray-300'
+									!isOptionStockValid(option)
+										? 'bg-gray-100 text-gray-400 opacity-60 cursor-not-allowed'
+										: selectedOption === option
+											? 'bg-blue-600 text-white shadow-lg ring-2 ring-blue-300'
+											: 'bg-gray-100 text-gray-700 hover:bg-gray-200 active:bg-gray-300'
 								]"
 							>
 								<span>{{ option.label }}</span>
@@ -243,7 +246,7 @@
 					variant="solid"
 					theme="blue"
 					@click="confirm"
-					:disabled="!selectedOption"
+					:disabled="!selectedOption || (mode === 'uom' && stockState?.blocked)"
 				>
 					{{ confirmButtonText }}
 				</Button>
@@ -278,6 +281,8 @@ const props = defineProps({
 
 const emit = defineEmits(["update:modelValue", "option-selected"])
 
+const settingsStore = usePOSSettingsStore()
+
 const isOpen = computed({
 	get: () => props.modelValue,
 	set: (value) => emit("update:modelValue", value),
@@ -288,7 +293,6 @@ const options = ref([])
 const selectedOption = ref(null)
 const quantity = ref(1)
 const selectedAttributes = ref({}) // For variant attribute selection
-const posSettings = usePOSSettingsStore()
 
 // Computed properties for dialog customization
 const dialogTitle = computed(() => {
@@ -307,36 +311,16 @@ const confirmButtonText = computed(() => {
 	return props.mode === "variant" ? __("Add to Cart") : __("Add to Cart")
 })
 
-const availableStockQty = computed(() => {
-	if (!props.item) return 0
-	return Number(props.item.actual_qty ?? props.item.stock_qty ?? 0)
-})
-
-const enforceStockValidation = computed(() => {
-	return Boolean(posSettings.shouldEnforceStockValidation?.())
-})
-
-function getRequiredStockQty(option, qty = quantity.value) {
-	const conversionFactor = Number(option?.conversion_factor || 1)
-	const normalizedQty = Number(qty || 1) || 1
-	return normalizedQty * conversionFactor
-}
-
-function isOptionStockValid(option, qty = quantity.value) {
-	if (!option) return false
-	if (!enforceStockValidation.value) return true
-	return getRequiredStockQty(option, qty) <= availableStockQty.value
-}
-
 const stockState = computed(() => {
 	if (props.mode !== "uom" || !selectedOption.value || !props.item) return null
 
-	const availableStock = availableStockQty.value
-	const requiredStockQty = getRequiredStockQty(selectedOption.value)
+	const availableStock = Number(props.item.actual_qty ?? props.item.stock_qty ?? 0)
+	const conversionFactor = Number(selectedOption.value.conversion_factor || 1)
+	const requiredStockQty = (Number(quantity.value || 1) || 1) * conversionFactor
 	const stockUom = props.item.stock_uom || selectedOption.value.uom
-	const stockValid = requiredStockQty <= availableStock
+	const enforceStockValidation = settingsStore.shouldEnforceStockValidation()
 
-	if (stockValid) {
+	if (requiredStockQty <= availableStock) {
 		return null
 	}
 
@@ -344,13 +328,25 @@ const stockState = computed(() => {
 		available: availableStock,
 		required: requiredStockQty,
 		stockUom,
-		title: __("Low stock"),
-		note: enforceStockValidation.value ? __("Cannot sell") : __("Sale allowed"),
-		panelClass: enforceStockValidation.value
-			? "bg-red-50 text-red-700 border border-red-200"
+		blocked: enforceStockValidation,
+		title: enforceStockValidation ? __("Insufficient stock") : __("Low stock"),
+		note: enforceStockValidation ? "" : __("Sale allowed"),
+		panelClass: enforceStockValidation
+			? "bg-orange-50 text-orange-700 border border-orange-200"
 			: "bg-amber-50 text-amber-700 border border-amber-200",
 	}
 })
+
+function isOptionStockValid(option, qty = quantity.value) {
+	if (props.mode !== "uom" || !props.item || !option) return true
+	if (!settingsStore.shouldEnforceStockValidation()) return true
+
+	const availableStock = Number(props.item.actual_qty ?? props.item.stock_qty ?? 0)
+	const conversionFactor = Number(option.conversion_factor || 1)
+	const requiredStockQty = (Number(qty || 1) || 1) * conversionFactor
+
+	return requiredStockQty <= availableStock
+}
 
 /**
  * Validates quantity input ensuring it's a valid positive integer
@@ -534,16 +530,6 @@ async function loadOptions() {
 	}
 }
 
-
-watch([quantity, availableStockQty, enforceStockValidation], () => {
-	if (props.mode !== "uom") return
-	if (!selectedOption.value) return
-	if (isOptionStockValid(selectedOption.value)) return
-
-	const firstValidOption = options.value.find((option) => isOptionStockValid(option))
-	selectedOption.value = firstValidOption || null
-})
-
 // Watch matched variant and auto-select it
 watch(matchedVariant, (variant) => {
 	if (variant) {
@@ -628,6 +614,10 @@ function selectOption(option) {
 
 function confirm() {
 	if (!selectedOption.value) return
+
+	if (props.mode === 'uom' && !isOptionStockValid(selectedOption.value)) {
+		return
+	}
 
 	// Emit first, let parent decide if dialog should close
 	// Parent can keep dialog open by switching mode (variant → UOM)

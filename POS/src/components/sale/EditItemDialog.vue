@@ -66,7 +66,7 @@
 														{{ localItem.item_name }}
 													</h3>
 													<p class="text-sm text-gray-500 truncate">
-														{{ formatCurrency(localRate) }} / {{ localUom || localItem.stock_uom || __('Nos', null, 'UOM') }}
+														{{ formatCurrency(localRate) }} / {{ formatUomLabel(localUom || localItem.stock_uom || __('Nos', null, 'UOM')) }}
 													</p>
 												</div>
 											</div>
@@ -156,7 +156,7 @@
 															<span v-if="localItem?.is_resolved_barcode" class="ms-1 text-xs text-amber-600">({{ __('Locked') }})</span>
 														</label>
 														<div v-if="localItem?.is_resolved_barcode" class="w-full h-10 border border-amber-300 rounded-lg bg-amber-50 flex items-center justify-center">
-															<span class="text-sm font-semibold text-amber-700">{{ localUom }}</span>
+															<span class="text-sm font-semibold text-amber-700">{{ formatUomLabel(localUom) }}</span>
 														</div>
 														<SelectInput v-else v-model="localUom" :options="uomOptions" @change="handleUomChange" />
 													</div>
@@ -254,6 +254,22 @@
 								</div>
 							</div>
 
+									<!-- Stock Status -->
+									<div
+										v-if="stockState"
+										:class="['rounded-lg p-4 text-sm', stockState.panelClass]"
+									>
+										<div class="flex items-start gap-2">
+											<FeatherIcon name="alert-triangle" class="h-4 w-4 mt-0.5 flex-shrink-0" />
+											<div>
+												<p class="font-semibold">{{ stockState.title }}</p>
+												<p class="mt-1">{{ __('Available: {0} {1}', [currentAvailableStock, currentStockUom]) }}</p>
+												<p>{{ __('Required: {0} {1}', [currentRequiredStockQty, currentStockUom]) }}</p>
+												<p class="mt-1">{{ stockState.note }}</p>
+											</div>
+										</div>
+									</div>
+
 							<!-- Actions - matching frappe-ui Dialog style -->
 							<div class="px-4 pb-7 pt-4 sm:px-6">
 								<div class="flex items-center justify-end gap-2">
@@ -264,7 +280,7 @@
 										:disabled="!hasStock || isCheckingStock"
 									>
 										<span v-if="isCheckingStock">{{ __('Checking Stock...') }}</span>
-										<span v-else-if="!hasStock">{{ __('No Stock Available') }}</span>
+										<span v-else-if="!hasStock">{{ settingsStore.shouldEnforceStockValidation() ? __('Cannot Sell') : __('Low Stock') }}</span>
 										<span v-else>{{ __('Update Item') }}</span>
 									</Button>
 								</div>
@@ -325,6 +341,8 @@ const localSerials = ref([])
 const removedSerials = ref([])
 const originalSerials = ref([])
 const originalPriceListRate = ref(0)
+const currentAvailableStock = ref(0)
+const stockValidationMessage = ref("")
 
 const show = computed({
 	get: () => props.modelValue,
@@ -359,12 +377,25 @@ const rateEditDisabledReason = computed(() => {
 	return ""
 })
 
+function getUomConversionFactor(uom) {
+	if (!localItem.value || !uom) return 1
+	if (uom === localItem.value.stock_uom) return 1
+	const uomRow = localItem.value.item_uoms?.find((row) => row.uom === uom)
+	return Number(uomRow?.conversion_factor || 1)
+}
+
+function formatUomLabel(uom) {
+	if (!uom) return ""
+	const factor = getUomConversionFactor(uom)
+	return factor && factor !== 1 ? `${uom} x ${factor}` : uom
+}
+
 const uomOptions = computed(() => {
 	if (!localItem.value) return []
-	const options = [{ value: localItem.value.stock_uom, label: localItem.value.stock_uom }]
+	const options = [{ value: localItem.value.stock_uom, label: formatUomLabel(localItem.value.stock_uom) }]
 	if (availableUoms.value.length > 0) {
 		availableUoms.value.forEach((uomData) => {
-			options.push({ value: uomData.uom, label: uomData.uom })
+			options.push({ value: uomData.uom, label: formatUomLabel(uomData.uom) })
 		})
 	}
 	return options
@@ -378,6 +409,37 @@ const warehouseOptions = computed(() => {
 		}))
 	}
 	return [{ value: localWarehouse.value, label: localWarehouse.value || __('Default') }]
+})
+
+const currentConversionFactor = computed(() => getUomConversionFactor(localUom.value))
+
+const currentRequiredStockQty = computed(() => {
+	return (Number(localQuantity.value || 1) || 1) * currentConversionFactor.value
+})
+
+const currentStockUom = computed(() => {
+	return localItem.value?.stock_uom || localUom.value || __("Nos")
+})
+
+const stockState = computed(() => {
+	if (!localItem.value) return null
+	const availableStock = Number(currentAvailableStock.value || 0)
+	const requiredStockQty = Number(currentRequiredStockQty.value || 0)
+
+	if (requiredStockQty <= availableStock) return null
+
+	const blocked = settingsStore.shouldEnforceStockValidation()
+	return {
+		available: availableStock,
+		required: requiredStockQty,
+		stockUom: currentStockUom.value,
+		blocked,
+		title: blocked ? __("Insufficient stock") : __("Low stock"),
+		note: blocked ? __("Cannot sell") : __("Sale allowed"),
+		panelClass: blocked
+			? "bg-orange-50 text-orange-700 border border-orange-200"
+			: "bg-amber-50 text-amber-700 border border-amber-200",
+	}
 })
 
 const discountTypeOptions = computed(() => [
@@ -419,14 +481,82 @@ watch(
 				discountValue.value = 0
 			}
 
+			currentAvailableStock.value = Number(
+				newItem.actual_qty ?? newItem.stock_qty ?? 0,
+			)
 			hasStock.value = true
 			isCheckingStock.value = false
 
 			calculateTotals()
+			validateCurrentStock()
 		}
 	},
 	{ immediate: true },
 )
+
+
+function validateCurrentStock({ showToast = false } = {}) {
+	if (!localItem.value) {
+		hasStock.value = true
+		stockValidationMessage.value = ""
+		return true
+	}
+
+	const availableStock = Number(currentAvailableStock.value || localItem.value.actual_qty || localItem.value.stock_qty || 0)
+	const requiredStockQty = Number(currentRequiredStockQty.value || 0)
+	const blocked = settingsStore.shouldEnforceStockValidation() && requiredStockQty > availableStock
+	hasStock.value = !blocked
+	stockValidationMessage.value = requiredStockQty > availableStock
+		? (blocked ? __("Cannot sell") : __("Sale allowed"))
+		: ""
+
+	if (showToast && requiredStockQty > availableStock) {
+		const message = __('Available: {0} {1} | Required: {2} {1}', [
+			availableStock,
+			currentStockUom.value,
+			requiredStockQty,
+		])
+		if (blocked) {
+			showError(message)
+		} else {
+			showWarning(message)
+		}
+	}
+
+	return !blocked
+}
+
+async function refreshWarehouseStock() {
+	if (!localItem.value) return
+
+	const warehouse = localWarehouse.value || localItem.value.warehouse
+	if (!warehouse) {
+		currentAvailableStock.value = Number(localItem.value.actual_qty ?? localItem.value.stock_qty ?? 0)
+		validateCurrentStock()
+		return
+	}
+
+	isCheckingStock.value = true
+	try {
+		currentAvailableStock.value = Number(
+			(await getItemStock(localItem.value.item_code, warehouse))
+			?? localItem.value.actual_qty
+			?? localItem.value.stock_qty
+			?? 0,
+		)
+	} catch (error) {
+		console.error('Error checking stock:', error)
+		currentAvailableStock.value = Number(localItem.value.actual_qty ?? localItem.value.stock_qty ?? 0)
+	} finally {
+		isCheckingStock.value = false
+	}
+
+	validateCurrentStock()
+}
+
+function getBlockedQuantity(step = 0) {
+	return Number(localQuantity.value || 0) + Number(step || 0)
+}
 
 function getSmartStep(quantity) {
 	if (quantity === Math.floor(quantity)) {
@@ -452,8 +582,15 @@ function getSmartStep(quantity) {
 
 function incrementQuantity() {
 	const step = getSmartStep(localQuantity.value)
-	localQuantity.value = Math.round((localQuantity.value + step) * 10000) / 10000
+	const nextQty = Math.round((localQuantity.value + step) * 10000) / 10000
+	const previousQty = localQuantity.value
+	localQuantity.value = nextQty
 	calculateTotals()
+	const isValid = validateCurrentStock()
+	if (!isValid) {
+		localQuantity.value = previousQty
+		calculateTotals()
+	}
 }
 
 function decrementQuantity() {
@@ -463,12 +600,14 @@ function decrementQuantity() {
 	if (newQty > 0) {
 		localQuantity.value = newQty
 		calculateTotals()
+		validateCurrentStock()
 	}
 }
 
 function handleQuantityInput() {
 	if (localQuantity.value > 0 && !isNaN(localQuantity.value)) {
 		calculateTotals()
+		validateCurrentStock()
 	}
 }
 
@@ -479,6 +618,7 @@ function handleQuantityBlur() {
 		localQuantity.value = Math.round(localQuantity.value * 10000) / 10000
 	}
 	calculateTotals()
+	validateCurrentStock()
 }
 
 async function handleUomChange() {
@@ -487,15 +627,12 @@ async function handleUomChange() {
 		return
 	}
 
-	try {
-		let conversionFactor = 1
+	const previousUom = localItem.value.uom || localItem.value.stock_uom
+	const previousRate = localRate.value
+	const previousPriceListRate = originalPriceListRate.value
 
-		if (localUom.value !== localItem.value.stock_uom) {
-			const uomRow = localItem.value.item_uoms?.find(
-				(u) => u.uom === localUom.value,
-			)
-			conversionFactor = uomRow?.conversion_factor || 1
-		}
+	try {
+		const conversionFactor = getUomConversionFactor(localUom.value)
 
 		const pricing = await resolveUomPricing(
 			localItem.value,
@@ -508,53 +645,44 @@ async function handleUomChange() {
 		originalPriceListRate.value = pricing.price_list_rate || localRate.value
 
 		calculateTotals()
+		const isValid = validateCurrentStock()
+		if (!isValid) {
+			localUom.value = previousUom
+			localRate.value = previousRate
+			originalPriceListRate.value = previousPriceListRate
+			calculateTotals()
+			validateCurrentStock()
+		}
 	} catch (err) {
 		console.error("UOM pricing refresh failed:", err)
+		localUom.value = previousUom
+		localRate.value = previousRate
+		originalPriceListRate.value = previousPriceListRate
 		calculateTotals()
+		validateCurrentStock()
 	}
 }
 
 async function handleWarehouseChange() {
 	if (!localItem.value || !localWarehouse.value) return
-
-	isCheckingStock.value = true
-	try {
-		const availableStock = await getItemStock(
-			localItem.value.item_code,
-			localWarehouse.value,
-		)
-
-		if (availableStock === 0) {
-			hasStock.value = false
-			showError(
-				__('"{0}" is not available in warehouse "{1}". Please select another warehouse.', [
-					localItem.value.item_name,
-					localWarehouse.value,
-				]),
-			)
-		} else if (availableStock < localQuantity.value) {
-			hasStock.value = false
-			showWarning(
-				__('Only {0} units of "{1}" available in "{2}". Current quantity: {3}', [
-					availableStock,
-					localItem.value.item_name,
-					localWarehouse.value,
-					localQuantity.value,
-				]),
-			)
-		} else {
-			hasStock.value = true
-			showSuccess(
-				__("{0} units available in \"{1}\"", [availableStock, localWarehouse.value]),
-			)
-		}
-	} catch (error) {
-		console.error("Error checking warehouse stock:", error)
-		hasStock.value = true
-	} finally {
-		isCheckingStock.value = false
-	}
+	await refreshWarehouseStock()
+	validateCurrentStock({ showToast: true })
 }
+
+watch([localQuantity, localUom, localWarehouse], async () => {
+	if (!show.value || !localItem.value) return
+	validateCurrentStock()
+})
+
+watch(
+	() => [show.value, localWarehouse.value, localItem.value?.item_code],
+	async ([isOpen, warehouse, itemCode], [prevOpen, prevWarehouse, prevItemCode] = []) => {
+		if (!isOpen || !itemCode) return
+		if (warehouse !== prevWarehouse || itemCode !== prevItemCode || isOpen !== prevOpen) {
+			await refreshWarehouseStock()
+		}
+	},
+)
 
 function handleDiscountTypeChange() {
 	discountValue.value = 0
@@ -599,7 +727,7 @@ function formatCurrency(amount) {
 	return formatCurrencyUtil(Number.parseFloat(amount || 0), props.currency)
 }
 
-function updateItem() {
+async function updateItem() {
 	const isRateManuallyEdited = localRate.value !== originalPriceListRate.value
 
 	if (settingsStore.allowUserToEditRate && isRateManuallyEdited) {
@@ -623,6 +751,11 @@ function updateItem() {
 				return
 			}
 		}
+	}
+
+	const isStockValid = validateCurrentStock({ showToast: true })
+	if (!isStockValid) {
+		return
 	}
 
 	const updatedItem = {

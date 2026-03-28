@@ -1050,7 +1050,7 @@
 													'w-full text-start px-2 py-1.5 text-[10px] sm:text-xs font-semibold transition-colors border-b border-gray-100',
 													(item.uom || item.stock_uom) === item.stock_uom
 														? 'bg-blue-50 text-blue-700'
-														: 'text-gray-700 hover:bg-blue-50',
+														: (!isUomSelectable(item, item.stock_uom) ? 'text-gray-400 bg-gray-50 cursor-not-allowed' : 'text-gray-700 hover:bg-blue-50'),
 												]"
 											>
 												{{ item.stock_uom || __("Nos", null, "UOM") }}
@@ -1060,11 +1060,12 @@
 												:key="uomData.uom"
 												type="button"
 												@click="selectUom(item, uomData.uom)"
+												:disabled="!isUomSelectable(item, uomData.uom)"
 												:class="[
 													'w-full text-start px-2 py-1.5 text-[10px] sm:text-xs font-semibold transition-colors border-b border-gray-100 last:border-0',
 													(item.uom || item.stock_uom) === uomData.uom
 														? 'bg-blue-50 text-blue-700'
-														: 'text-gray-700 hover:bg-blue-50',
+														: (!isUomSelectable(item, uomData.uom) ? 'text-gray-400 bg-gray-50 cursor-not-allowed' : 'text-gray-700 hover:bg-blue-50'),
 												]"
 											>
 												{{ uomData.uom }}
@@ -1260,6 +1261,7 @@ import { useCustomerSearchStore } from "@/stores/customerSearch";
 import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency";
 import { useFormatters } from "@/composables/useFormatters";
 import { useCartSort } from "@/composables/useCartSort";
+import { useToast } from "@/composables/useToast";
 import { isOffline } from "@/utils/offline";
 import { offlineWorker } from "@/utils/offline/workerClient";
 import { logger } from "@/utils/logger";
@@ -1280,6 +1282,7 @@ const settingsStore = usePOSSettingsStore(); // Pinia store for POS settings
 const offersStore = usePOSOffersStore(); // Pinia store for offers/promotions
 const customerSearchStore = useCustomerSearchStore(); // Pinia store for customer search
 const { formatQuantity } = useFormatters(); // Quantity formatting utilities
+const { showError } = useToast();
 
 function handleProceedToPayment() {
 	emit("proceed-to-payment");
@@ -1804,12 +1807,49 @@ function getSmartStep(quantity) {
  *
  * @param {Object} item - Cart item to increment
  */
+
+function getItemConversionFactor(item, targetUom) {
+	if (!item) return 1
+	const effectiveUom = targetUom || item.uom || item.stock_uom
+	if (!effectiveUom || effectiveUom === item.stock_uom) return 1
+	const match = item.item_uoms?.find((u) => u.uom === effectiveUom)
+	return Number(match?.conversion_factor || 1)
+}
+
+function getItemAvailableStock(item) {
+	return Number(item?.actual_qty ?? item?.stock_qty ?? 0)
+}
+
+function validateCartItemStock(item, qty = item?.quantity, targetUom = item?.uom) {
+	if (!settingsStore.shouldEnforceStockValidation()) return true
+	if (!item) return true
+
+	const available = getItemAvailableStock(item)
+	const factor = getItemConversionFactor(item, targetUom)
+	const required = Number(qty || 0) * factor
+
+	if (required <= available) return true
+
+	showError(__('Available: {0} {1} | Required: {2} {1}', [
+		available,
+		item.stock_uom || targetUom || __("Nos", null, "UOM"),
+		required,
+	]))
+	return false
+}
+
+function isUomSelectable(item, targetUom) {
+	if (!settingsStore.shouldEnforceStockValidation()) return true
+	return validateCartItemStock(item, item.quantity, targetUom)
+}
+
 function incrementQuantity(item) {
 	// Prevent editing resolved barcode items
 	if (item.is_resolved_barcode) return;
 
 	const step = getSmartStep(item.quantity);
 	const newQty = Math.round((item.quantity + step) * 10000) / 10000;
+	if (!validateCartItemStock(item, newQty, item.uom)) return;
 	emit("update-quantity", item.item_code, newQty, item.uom);
 }
 
@@ -1855,6 +1895,7 @@ function updateQuantity(item, value) {
 	if (qty <= 0) return emit("remove-item", item.item_code, item.uom);
 
 	// For positive numbers, update quantity immediately (no rounding here while typing)
+	if (!validateCartItemStock(item, qty, item.uom)) return;
 	emit("update-quantity", item.item_code, qty, item.uom);
 }
 
@@ -1874,6 +1915,10 @@ function handleQuantityBlur(item) {
 	} else {
 		// Round to 4 decimal places for consistency
 		const roundedQty = Math.round(item.quantity * 10000) / 10000;
+		if (!validateCartItemStock(item, roundedQty, item.uom)) {
+			emit("update-quantity", item.item_code, item.quantity, item.uom);
+			return;
+		}
 		if (roundedQty !== item.quantity) {
 			emit("update-quantity", item.item_code, roundedQty, item.uom);
 		}
@@ -1899,6 +1944,11 @@ function toggleUomDropdown(itemCode, uom) {
  */
 async function selectUom(item, newUom) {
 	if (item.uom === newUom) {
+		openUomDropdown.value = null;
+		return;
+	}
+
+	if (!validateCartItemStock(item, item.quantity, newUom)) {
 		openUomDropdown.value = null;
 		return;
 	}
