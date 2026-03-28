@@ -129,6 +129,21 @@ class CustomSalesInvoice(SalesInvoice):
 					# and appends change amount entries directly to it
 					self.make_gle_for_change_amount(gl_entries)
 
+	def validate_pos_paid_amount(self):
+		"""
+		Allow pure customer-credit POS sales to submit without a payment row.
+
+		POSNext redeems customer credit after submit through Journal Entries /
+		Payment Entry allocation, so there is no real Mode of Payment row to send.
+		Only bypass the core POS payment-row check when submit_invoice has explicitly
+		marked the document for customer-credit redemption.
+		"""
+		if getattr(self.flags, "pos_next_redeemed_customer_credit", 0):
+			if len(self.payments) == 0 and cint(self.is_pos) and flt(self.grand_total) > 0:
+				return
+
+		super().validate_pos_paid_amount()
+
 	def get_party_and_party_type_for_pos_gl_entry(self, mode_of_payment, account):
 		"""
 		Get party type and party for wallet payment GL entries.
