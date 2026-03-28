@@ -157,6 +157,9 @@ def on_cancel(doc, method=None):
 
 def rollback_coupon_usage(doc):
 	"""Restore coupon usage for cancelled invoices that consumed a POS coupon."""
+	if doc.get("is_return"):
+		return
+
 	coupon_code = doc.get("coupon_code")
 	if not coupon_code or not frappe.db.table_exists("POS Coupon"):
 		return
