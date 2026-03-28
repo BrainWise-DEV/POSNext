@@ -201,8 +201,12 @@ def get_customer_wallet_balance(customer, company=None, exclude_invoice=None):
 		# Negate because negative receivable balance = positive wallet credit
 		wallet_balance = -flt(gl_balance)
 
-		# Subtract pending wallet payments from open POS invoices
-		pending_wallet_amount = get_pending_wallet_payments(customer, exclude_invoice)
+		# Subtract wallet payments only from draft POS invoices in the same company.
+		pending_wallet_amount = get_pending_wallet_payments(
+			customer,
+			exclude_invoice=exclude_invoice,
+			company=company,
+		)
 
 		available_balance = flt(wallet_balance) - flt(pending_wallet_amount)
 
@@ -213,16 +217,18 @@ def get_customer_wallet_balance(customer, company=None, exclude_invoice=None):
 		return 0.0
 
 
-def get_pending_wallet_payments(customer, exclude_invoice=None):
+def get_pending_wallet_payments(customer, exclude_invoice=None, company=None):
 	"""
-	Get total wallet payments from unconsolidated/pending POS invoices.
+	Get total wallet payments from draft POS invoices that still reserve wallet balance.
 	"""
 	filters = {
 		"customer": customer,
-		"docstatus": ["in", [0, 1]],
+		"docstatus": 0,
 		"outstanding_amount": [">", 0],
-		"is_pos": 1
+		"is_pos": 1,
 	}
+	if company:
+		filters["company"] = company
 
 	invoices = frappe.get_all(
 		"Sales Invoice",

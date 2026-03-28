@@ -54,7 +54,7 @@ class Wallet(Document):
 	def get_available_balance(self):
 		"""Get available balance (current balance minus pending wallet payments)"""
 		current = self.get_balance()
-		pending = get_pending_wallet_payments(self.customer)
+		pending = get_pending_wallet_payments(self.customer, company=self.company)
 		available = flt(current) - flt(pending)
 		return available if available > 0 else 0.0
 
@@ -120,8 +120,12 @@ def get_customer_wallet_balance(customer, company=None, exclude_invoice=None):
 		# Negate because negative receivable balance = positive wallet credit
 		wallet_balance = -flt(gl_balance)
 
-		# Subtract pending wallet payments from open POS invoices
-		pending_wallet_amount = get_pending_wallet_payments(customer, exclude_invoice)
+		# Subtract wallet payments only from draft POS invoices in the same company.
+		pending_wallet_amount = get_pending_wallet_payments(
+			customer,
+			exclude_invoice=exclude_invoice,
+			company=company,
+		)
 
 		available_balance = flt(wallet_balance) - flt(pending_wallet_amount)
 
@@ -132,18 +136,20 @@ def get_customer_wallet_balance(customer, company=None, exclude_invoice=None):
 		return 0.0
 
 
-def get_pending_wallet_payments(customer, exclude_invoice=None):
+def get_pending_wallet_payments(customer, exclude_invoice=None, company=None):
 	"""
-	Get total wallet payments from unconsolidated/pending POS invoices.
-	This prevents double-spending of wallet balance.
+	Get total wallet payments from draft POS invoices.
+	This prevents double-spending of wallet balance without double-counting
+	submitted invoices that are already reflected in GL.
 	"""
-	# Get open Sales Invoices (draft or unconsolidated POS invoices)
 	filters = {
 		"customer": customer,
-		"docstatus": ["in", [0, 1]],  # Draft or Submitted
+		"docstatus": 0,
 		"outstanding_amount": [">", 0],
-		"is_pos": 1
+		"is_pos": 1,
 	}
+	if company:
+		filters["company"] = company
 
 	invoices = frappe.get_all(
 		"Sales Invoice",
@@ -157,7 +163,6 @@ def get_pending_wallet_payments(customer, exclude_invoice=None):
 		if exclude_invoice and invoice.name == exclude_invoice:
 			continue
 
-		# Get wallet payments from this invoice
 		payments = frappe.get_all(
 			"Sales Invoice Payment",
 			filters={"parent": invoice.name},
