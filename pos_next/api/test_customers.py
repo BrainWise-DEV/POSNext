@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 
 from pos_next.api.customers import (
     _get_customer_assignment_context,
+    create_customer,
     get_customers,
     get_default_loyalty_program_from_settings,
 )
@@ -71,3 +72,31 @@ class TestCustomersAPI(unittest.TestCase):
 
         self.assertEqual(company, "Company A")
         self.assertEqual(pos_profile, "POS-A")
+
+    @patch("pos_next.api.customers.frappe.flags", new=Mock(pos_next_customer_company=None, pos_next_customer_pos_profile=None))
+    @patch("pos_next.api.customers.frappe.get_doc")
+    @patch("pos_next.api.customers.get_default_loyalty_program_from_settings")
+    @patch("pos_next.api.customers.frappe.has_permission")
+    def test_create_customer_uses_pos_profile_for_loyalty_assignment(
+        self,
+        mock_has_permission,
+        mock_get_loyalty,
+        mock_get_doc,
+    ):
+        mock_has_permission.return_value = True
+        mock_get_loyalty.return_value = "LOYALTY-A"
+
+        customer_doc = Mock()
+        customer_doc.as_dict.return_value = {"name": "CUST-0001", "loyalty_program": "LOYALTY-A"}
+        mock_get_doc.return_value = customer_doc
+
+        result = create_customer(
+            customer_name="John Doe",
+            customer_group="Individual",
+            territory="All Territories",
+            pos_profile="POS-A",
+        )
+
+        mock_get_loyalty.assert_called_once_with(company=None, pos_profile="POS-A")
+        customer_doc.insert.assert_called_once_with()
+        self.assertEqual(result["loyalty_program"], "LOYALTY-A")
