@@ -148,7 +148,7 @@
 						<span>{{ __("Return Invoice") }}</span>
 					</button>
 					<button
-						v-if="canAccessShiftActions"
+						v-if="canAccessShiftActions && canSwitchToDesk"
 						@click="switchToDesk"
 						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-emerald-50 flex items-center gap-3 transition-colors"
 					>
@@ -1044,6 +1044,7 @@ import { usePOSSettingsStore } from "@/stores/posSettings";
 import { usePOSShiftStore } from "@/stores/posShift";
 import { usePOSSyncStore } from "@/stores/posSync";
 import { usePOSUIStore } from "@/stores/posUI";
+import { useBootstrapStore } from "@/stores/bootstrap";
 import { logger } from "@/utils/logger";
 import { shouldValidateItemStock } from "@/utils/stockValidator";
 
@@ -1057,6 +1058,7 @@ const posSettingsStore = usePOSSettingsStore();
 const itemStore = useItemSearchStore();
 const stockStore = useStockStore();
 const customerSearchStore = useCustomerSearchStore();
+const bootstrapStore = useBootstrapStore();
 // Note: settingsStore is an alias to posSettingsStore (same Pinia store singleton)
 const settingsStore = posSettingsStore;
 
@@ -1191,6 +1193,9 @@ const profileWarehouses = computed(() => {
 });
 
 const canAccessShiftActions = computed(() => shiftStore.hasOpenShift);
+
+/** Desk link only for users with the Nexus Pos Manager role (from bootstrap API). */
+const canSwitchToDesk = computed(() => Boolean(bootstrapStore.data?.can_switch_to_desk));
 
 // Resize state
 let resizeState = null;
@@ -2244,7 +2249,7 @@ function openReturnDialog() {
 }
 
 function switchToDesk() {
-	if (!canAccessShiftActions.value || typeof window === "undefined") {
+	if (!canAccessShiftActions.value || !canSwitchToDesk.value || typeof window === "undefined") {
 		return;
 	}
 
