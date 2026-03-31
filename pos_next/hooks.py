@@ -90,7 +90,7 @@ fixtures = [
     {
         "dt": "Role",
         "filters": [
-            ["role_name", "in", ["POSNext Cashier"]]
+            ["role_name", "in", ["POSNext Cashier","Nexus POS Manager"]]
         ]
     },
     {
