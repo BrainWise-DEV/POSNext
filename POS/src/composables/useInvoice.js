@@ -825,6 +825,76 @@ export function useInvoice() {
 		}
 	}
 
+	function serializeInvoicePayments(rawPayments) {
+		return rawPayments
+			.filter((payment) => !payment?.is_customer_credit)
+			.map((payment) => ({
+				mode_of_payment: payment.mode_of_payment,
+				amount: payment.amount,
+				type: payment.type,
+			}))
+	}
+
+	function buildCustomerCreditPayload(rawPayments) {
+		const creditPayments = rawPayments.filter((payment) => payment?.is_customer_credit)
+
+		if (!creditPayments.length) {
+			return {
+				invoicePayments: serializeInvoicePayments(rawPayments),
+				redeemedCustomerCredit: 0,
+				customerCreditDict: [],
+			}
+		}
+
+		const creditSources = new Map()
+		for (const payment of creditPayments) {
+			for (const credit of payment.credit_details || []) {
+				if (!credit?.type || !credit?.credit_origin) continue
+				const key = `${credit.type}:${credit.credit_origin}`
+				if (!creditSources.has(key)) {
+					creditSources.set(key, credit)
+				}
+			}
+		}
+
+		const redeemedCustomerCredit = roundCurrency(
+			creditPayments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0),
+		)
+
+		let remainingCreditToAllocate = redeemedCustomerCredit
+		const customerCreditDict = []
+
+		for (const credit of creditSources.values()) {
+			if (remainingCreditToAllocate <= 0) break
+
+			const availableCredit = roundCurrency(
+				Number(credit.available_credit ?? credit.total_credit ?? 0),
+			)
+			if (availableCredit <= 0) continue
+
+			const creditToRedeem = Math.min(availableCredit, remainingCreditToAllocate)
+			if (creditToRedeem <= 0) continue
+
+			customerCreditDict.push({
+				...credit,
+				credit_to_redeem: roundCurrency(creditToRedeem),
+			})
+			remainingCreditToAllocate = roundCurrency(
+				remainingCreditToAllocate - creditToRedeem,
+			)
+		}
+
+		if (remainingCreditToAllocate > 0.01) {
+			throw new Error("Unable to allocate the selected customer credit")
+		}
+
+		return {
+			invoicePayments: serializeInvoicePayments(rawPayments),
+			redeemedCustomerCredit,
+			customerCreditDict,
+		}
+	}
+
 	async function saveDraft(targetDoctype = "Sales Invoice") {
 		/**
 		 * Save invoice as draft (Step 1)
@@ -833,6 +903,7 @@ export function useInvoice() {
 		// Use toRaw() to ensure we get current, non-reactive values (prevents stale cached quantities)
 		const rawItems = toRaw(invoiceItems.value)
 		const rawPayments = toRaw(payments.value)
+		const { invoicePayments } = buildCustomerCreditPayload(rawPayments)
 
 		const invoiceData = {
 			doctype: targetDoctype,
@@ -840,11 +911,7 @@ export function useInvoice() {
 			posa_pos_opening_shift: posOpeningShift.value,
 			customer: customer.value?.name || customer.value,
 			items: formatItemsForSubmission(rawItems),
-			payments: rawPayments.map((p) => ({
-				mode_of_payment: p.mode_of_payment,
-				amount: p.amount,
-				type: p.type,
-			})),
+			payments: invoicePayments,
 			discount_amount: additionalDiscount.value || 0,
 			coupon_code: couponCode.value,
 			is_pos: 1,
@@ -897,6 +964,11 @@ export function useInvoice() {
 				const rawItems = toRaw(invoiceItems.value)
 				const rawPayments = toRaw(payments.value)
 				const rawSalesTeam = toRaw(salesTeam.value)
+				const {
+					invoicePayments,
+					redeemedCustomerCredit,
+					customerCreditDict,
+				} = buildCustomerCreditPayload(rawPayments)
 
 				const invoiceData = {
 					doctype: targetDoctype,
@@ -904,11 +976,7 @@ export function useInvoice() {
 					posa_pos_opening_shift: posOpeningShift.value,
 					customer: customer.value?.name || customer.value,
 					items: formatItemsForSubmission(rawItems),
-					payments: rawPayments.map((p) => ({
-						mode_of_payment: p.mode_of_payment,
-						amount: p.amount,
-						type: p.type,
-					})),
+					payments: invoicePayments,
 					discount_amount: additionalDiscount.value || 0,
 					coupon_code: couponCode.value,
 					is_pos: 1,
@@ -950,6 +1018,11 @@ export function useInvoice() {
 					change_amount:
 						remainingAmount.value < 0 ? Math.abs(remainingAmount.value) : 0,
 					write_off_amount: writeOffAmount || 0,
+				}
+
+				if (redeemedCustomerCredit > 0 && customerCreditDict.length > 0) {
+					submitData.redeemed_customer_credit = redeemedCustomerCredit
+					submitData.customer_credit_dict = customerCreditDict
 				}
 
 				try {

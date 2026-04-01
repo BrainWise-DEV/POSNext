@@ -1373,6 +1373,12 @@ def submit_invoice(invoice=None, data=None):
         # (global Stock Settings, POS Settings, and POS Profile flags)
         _validate_stock_on_invoice(invoice_doc)
 
+        # Allow pure customer-credit POS sales to submit without a payment row.
+        customer_credit_dict = data.get("customer_credit_dict") or invoice.get("customer_credit_dict")
+        redeemed_customer_credit = data.get("redeemed_customer_credit") or invoice.get("redeemed_customer_credit")
+        if redeemed_customer_credit and not invoice_doc.payments:
+            invoice_doc.flags.pos_next_redeemed_customer_credit = flt(redeemed_customer_credit)
+
         # Save before submit
         invoice_doc.flags.ignore_permissions = True
         frappe.flags.ignore_account_permission = True
@@ -1437,9 +1443,6 @@ def submit_invoice(invoice=None, data=None):
             _complete_offline_sync(sync_record_name, invoice_doc.name)
 
         # Handle credit redemption after successful submission
-        customer_credit_dict = data.get("customer_credit_dict") or invoice.get("customer_credit_dict")
-        redeemed_customer_credit = data.get("redeemed_customer_credit") or invoice.get("redeemed_customer_credit")
-
         if redeemed_customer_credit and customer_credit_dict:
             try:
                 from pos_next.api.credit_sales import redeem_customer_credit
