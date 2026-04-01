@@ -66,6 +66,7 @@ export const useUserData = () => ({
 
 export const userResource = createResource({
 	url: "frappe.auth.get_logged_user",
+	method: "GET",
 	cache: "User",
 	onError(error) {
 		if (error?.exc_type === "AuthenticationError") {
