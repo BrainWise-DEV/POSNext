@@ -623,7 +623,7 @@ async function handleWarehouseChange() {
 		} else {
 			hasStock.value = true
 			showSuccess(
-				__('{0} units available in "{1}"', [availableStock, localWarehouse.value])
+				__('{0} units available in "{1}"', [availableStock, normalizeWarehouseValue(localWarehouse.value)])
 			)
 		}
 	} catch (error) {
@@ -685,6 +685,10 @@ function formatCurrency(amount) {
 }
 
 function updateItem() {
+	const selectedWarehouse = normalizeWarehouseValue(
+		localWarehouse.value || localItem.value?.warehouse,
+	)
+
 	// Check if rate was manually edited
 	const isRateManuallyEdited = localRate.value !== originalPriceListRate.value
 
@@ -723,7 +727,7 @@ function updateItem() {
 		rate: localRate.value,
 		// Preserve price_list_rate for reference (original price before any manual edits)
 		price_list_rate: originalPriceListRate.value,
-		warehouse: localWarehouse.value,
+		warehouse: selectedWarehouse,
 		discount_percentage:
 			discountType.value === "percentage" ? discountValue.value : 0,
 		discount_amount:
