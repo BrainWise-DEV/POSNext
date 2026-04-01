@@ -265,7 +265,7 @@
 									<Button
 										variant="solid"
 										@click="updateItem"
-										:disabled="!hasStock || isCheckingStock"
+										:disabled="isUpdateDisabled"
 									>
 										<span v-if="isCheckingStock">{{ __('Checking Stock...') }}</span>
 										<span v-else-if="!hasStock">{{ __('No Stock Available') }}</span>
@@ -330,6 +330,15 @@ const removedSerials = ref([]) // Track serials removed during this edit session
 const originalSerials = ref([]) // Original serials when dialog opened
 const originalPriceListRate = ref(0) // Original price_list_rate when dialog opened (for rate edit validation)
 
+function normalizeWarehouseValue(value) {
+	if (!value) return ""
+	if (typeof value === "string") return value
+	if (typeof value === "object") {
+		return value.value || value.name || value.label || value.warehouse || ""
+	}
+	return ""
+}
+
 const getItemDetailsResource = createResource({
 	url: "pos_next.api.items.get_item_details",
 	auto: false,
@@ -348,6 +357,21 @@ const availableUoms = computed(() => {
 })
 
 const currencySymbol = computed(() => getCurrencySymbol(props.currency))
+
+const allowNegativeStock = computed(() => Boolean(settingsStore?.settings?.allow_negative_stock))
+
+const isUpdateDisabled = computed(() => {
+	if (isCheckingStock.value) return true
+	if (allowNegativeStock.value) return false
+	return !hasStock.value
+})
+
+const updateButtonLabel = computed(() => {
+	if (isCheckingStock.value) return __('Checking Stock...')
+	if (allowNegativeStock.value) return __('Update Item')
+	if (!hasStock.value) return __('No Stock Available')
+	return __('Update Item')
+})
 
 // Check if item has pricing rules applied (promotional offers)
 const hasPricingRules = computed(() => {
@@ -412,8 +436,9 @@ watch(
 			localRate.value = newItem.rate || 0
 			// Store original price_list_rate for rate edit validation
 			originalPriceListRate.value = newItem.price_list_rate || newItem.rate || 0
-			localWarehouse.value =
+			localWarehouse.value = normalizeWarehouseValue(
 				newItem.warehouse || props.warehouses[0]?.name || ""
+			)
 
 			// Initialize serial numbers
 			if (newItem.has_serial_no && newItem.serial_no) {
@@ -594,41 +619,53 @@ async function handleUomChange(newUom) {
 }
 
 async function handleWarehouseChange() {
-	if (!localItem.value || !localWarehouse.value) return
+	const selectedWarehouse = normalizeWarehouseValue(localWarehouse.value)
+	if (!localItem.value || !selectedWarehouse) return
 
+	localWarehouse.value = selectedWarehouse
 	isCheckingStock.value = true
 	try {
-		// Check stock availability in the new warehouse
 		const availableStock = await getItemStock(
 			localItem.value.item_code,
-			localWarehouse.value,
+			selectedWarehouse,
 		)
 
 		if (availableStock === 0) {
-			hasStock.value = false
-			showError(
-				__('"{0}" is not available in warehouse "{1}". Please select another warehouse.',
-				[localItem.value.item_name, localWarehouse.value])
-			)
+			hasStock.value = allowNegativeStock.value
+			if (allowNegativeStock.value) {
+				showWarning(
+					__('"{0}" is not available in warehouse "{1}", but negative stock is allowed.', [
+						localItem.value.item_name,
+						selectedWarehouse,
+					])
+				)
+			} else {
+				showError(
+					__('"{0}" is not available in warehouse "{1}". Please select another warehouse.', [
+						localItem.value.item_name,
+						selectedWarehouse,
+					])
+				)
+			}
 		} else if (availableStock < localQuantity.value) {
-			hasStock.value = false
+			hasStock.value = allowNegativeStock.value
 			showWarning(
 				__('Only {0} units of "{1}" available in "{2}". Current quantity: {3}', [
 					availableStock,
 					localItem.value.item_name,
-					localWarehouse.value,
+					selectedWarehouse,
 					localQuantity.value
 				])
 			)
 		} else {
 			hasStock.value = true
 			showSuccess(
-				__('{0} units available in "{1}"', [availableStock, normalizeWarehouseValue(localWarehouse.value)])
+				__('{0} units available in "{1}"', [availableStock, selectedWarehouse])
 			)
 		}
 	} catch (error) {
 		console.error("Error checking warehouse stock:", error)
-		hasStock.value = true // Allow update if stock check fails
+		hasStock.value = true
 	} finally {
 		isCheckingStock.value = false
 	}
