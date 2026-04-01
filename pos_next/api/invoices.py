@@ -366,6 +366,80 @@ def _set_payment_accounts(payments, company):
             )
 
 
+def _restore_payment_amounts(invoice_doc, incoming_payments):
+    """Restore POS payment amounts after ERPNext recalculation."""
+    if not incoming_payments:
+        return
+
+    invoice_doc.set("payments", [])
+
+    total_paid = 0.0
+    total_base_paid = 0.0
+
+    for row in incoming_payments:
+        amount = flt(row.get("amount") or 0)
+        base_amount = flt(row.get("base_amount") or amount)
+
+        payment_row = {
+            "mode_of_payment": row.get("mode_of_payment"),
+            "amount": amount,
+            "base_amount": base_amount,
+            "account": row.get("account"),
+        }
+
+        invoice_doc.append("payments", payment_row)
+
+        total_paid += amount
+        total_base_paid += base_amount
+
+    invoice_doc.paid_amount = flt(total_paid)
+    invoice_doc.base_paid_amount = flt(total_base_paid)
+    invoice_doc.outstanding_amount = flt(invoice_doc.grand_total) - flt(total_paid)
+
+
+
+
+def _get_effective_pos_branch(pos_profile):
+    """Resolve branch for POS using custom POS Settings first, then POS Profile."""
+    if not pos_profile:
+        return None
+
+    custom_branch = frappe.db.get_value(
+        "POS Settings",
+        {"pos_profile": pos_profile, "enabled": 1},
+        "custom_branch",
+    )
+    if custom_branch:
+        return custom_branch
+
+    profile_branch = frappe.db.get_value("POS Profile", pos_profile, "branch")
+    if profile_branch:
+        return profile_branch
+
+    return None
+
+
+
+
+def _set_branch_naming_series(invoice_doc, pos_profile=None):
+    """Force naming series from branch before first save."""
+    if invoice_doc.doctype != "Sales Invoice":
+        return
+
+    if invoice_doc.get("name"):
+        return
+
+    branch = invoice_doc.get("branch") or _get_effective_pos_branch(pos_profile)
+    if not branch:
+        return
+
+    branch_abbr = frappe.db.get_value("Branch", branch, "custom_naming_abbr")
+    if not branch_abbr:
+        return
+
+    invoice_doc.naming_series = f"ACC-{branch_abbr}-SINV-.YYYY.-"
+
+
 # ==========================================
 # Stock Validation Functions
 # ==========================================
@@ -670,6 +744,7 @@ def update_invoice(data):
     """Create or update invoice draft (Step 1)."""
     try:
         data = json.loads(data) if isinstance(data, str) else data
+        incoming_payments = [dict(p) for p in (data.get("payments") or [])]
 
         pos_profile = data.get("pos_profile")
         doctype = data.get("doctype", "Sales Invoice")
@@ -873,7 +948,11 @@ def update_invoice(data):
         if invoice_doc.base_grand_total is None:
             invoice_doc.base_grand_total = 0.0
 
-        # Set accounts for payment methods before saving
+        # ERPNext draft recalculation zeroes payment amounts.
+        # Restore raw POS payment values after totals are finalized.
+        _restore_payment_amounts(invoice_doc, incoming_payments)
+
+        # Re-attach accounts after rebuilding payment rows
         _set_payment_accounts(invoice_doc.payments, invoice_doc.company)
 
         # For return invoices, ensure payments are negative
@@ -930,6 +1009,40 @@ def update_invoice(data):
                     if errors:
                         frappe.throw(frappe.as_json({"errors": errors}), frappe.ValidationError)
 
+
+        frappe.log_error(
+            title="POS DEBUG UPDATE_INVOICE PAYMENTS",
+            message=frappe.as_json({
+                "invoice_name": invoice_doc.get("name"),
+                "branch": invoice_doc.get("branch"),
+                "naming_series": invoice_doc.get("naming_series"),
+                "grand_total": invoice_doc.get("grand_total"),
+                "paid_amount": invoice_doc.get("paid_amount"),
+                "base_paid_amount": invoice_doc.get("base_paid_amount"),
+                "outstanding_amount": invoice_doc.get("outstanding_amount"),
+                "payments": [
+                    {
+                        "mode_of_payment": p.get("mode_of_payment"),
+                        "amount": p.get("amount"),
+                        "base_amount": p.get("base_amount"),
+                        "account": p.get("account"),
+                    }
+                    for p in (invoice_doc.get("payments") or [])
+                ]
+            })
+        )
+
+        # HARD FORCE branch + naming just before first save
+        if doctype == "Sales Invoice" and pos_profile:
+            effective_branch = _get_effective_pos_branch(pos_profile)
+            if effective_branch:
+                invoice_doc.branch = effective_branch
+                for item in invoice_doc.get("items", []):
+                    item.branch = effective_branch
+
+            if not invoice_doc.get("name"):
+                _set_branch_naming_series(invoice_doc, pos_profile)                
+        
         # Save as draft
         invoice_doc.flags.ignore_permissions = True
         frappe.flags.ignore_account_permission = True
@@ -1249,7 +1362,39 @@ def submit_invoice(invoice=None, data=None):
             invoice_doc = frappe.get_doc(doctype, invoice_name)
         else:
             invoice_doc = frappe.get_doc(doctype, invoice_name)
-            invoice_doc.update(invoice)
+
+            incoming_payments = invoice.get("payments")
+            incoming_items = invoice.get("items")
+            incoming_taxes = invoice.get("taxes")
+            incoming_sales_team = invoice.get("sales_team")
+
+            scalar_invoice = dict(invoice)
+            scalar_invoice.pop("payments", None)
+            scalar_invoice.pop("items", None)
+            scalar_invoice.pop("taxes", None)
+            scalar_invoice.pop("sales_team", None)
+
+            invoice_doc.update(scalar_invoice)
+
+            if incoming_items is not None:
+                invoice_doc.set("items", [])
+                for row in incoming_items:
+                    invoice_doc.append("items", row)
+
+            if incoming_taxes is not None:
+                invoice_doc.set("taxes", [])
+                for row in incoming_taxes:
+                    invoice_doc.append("taxes", row)
+
+            if incoming_payments is not None:
+                invoice_doc.set("payments", [])
+                for row in incoming_payments:
+                    invoice_doc.append("payments", row)
+
+            if incoming_sales_team is not None:
+                invoice_doc.set("sales_team", [])
+                for row in incoming_sales_team:
+                    invoice_doc.append("sales_team", row)
 
         # Ensure update_stock is set for Sales Invoice
         if doctype == "Sales Invoice":
@@ -1262,21 +1407,19 @@ def submit_invoice(invoice=None, data=None):
         if invoice_doc.get("is_return") and invoice_doc.get("return_against"):
             invoice_doc.update_outstanding_for_self = 0
 
-        # Copy accounting dimensions from POS Profile if not already set
+        # Copy accounting dimensions using custom POS Settings branch first
         if pos_profile and not invoice_doc.get("branch"):
             try:
-                pos_profile_doc = frappe.get_cached_doc("POS Profile", pos_profile)
-                if hasattr(pos_profile_doc, "branch") and pos_profile_doc.branch:
-                    invoice_doc.branch = pos_profile_doc.branch
-                    # Also set branch on all items for GL entries
+                effective_branch = _get_effective_pos_branch(pos_profile)
+                if effective_branch:
+                    invoice_doc.branch = effective_branch
                     for item in invoice_doc.get("items", []):
                         if not item.get("branch"):
-                            item.branch = pos_profile_doc.branch
+                            item.branch = effective_branch
             except Exception as e:
-                # Branch is optional, log and continue
                 frappe.log_error(
-                    f"Failed to set branch from POS Profile {pos_profile}: {e}",
-                    "POS Profile Branch"
+                    f"Failed to set effective branch for POS Profile {pos_profile}: {e}",
+                    "POS Effective Branch"
                 )
 
         # Set accounts for all payment methods before saving
@@ -1349,6 +1492,29 @@ def submit_invoice(invoice=None, data=None):
         # _validate_stock_on_invoice checks _should_block internally
         # (global Stock Settings, POS Settings, and POS Profile flags)
         _validate_stock_on_invoice(invoice_doc)
+
+        frappe.log_error(
+            title="POS DEBUG SUBMIT_INVOICE PAYMENTS",
+            message=frappe.as_json({
+                "invoice_name": invoice_doc.get("name"),
+                "branch": invoice_doc.get("branch"),
+                "naming_series": invoice_doc.get("naming_series"),
+                "grand_total": invoice_doc.get("grand_total"),
+                "paid_amount": invoice_doc.get("paid_amount"),
+                "base_paid_amount": invoice_doc.get("base_paid_amount"),
+                "outstanding_amount": invoice_doc.get("outstanding_amount"),
+                "payments": [
+                    {
+                        "mode_of_payment": p.get("mode_of_payment"),
+                        "amount": p.get("amount"),
+                        "base_amount": p.get("base_amount"),
+                        "account": p.get("account"),
+                    }
+                    for p in (invoice_doc.get("payments") or [])
+                ]
+            })
+        )
+
 
         # Save before submit
         invoice_doc.flags.ignore_permissions = True
