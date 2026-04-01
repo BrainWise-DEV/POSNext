@@ -40,9 +40,6 @@ function getCacheVersion() {
 
 	if (storedHash !== structureHash.toString()) {
 		const newVersion = storedVersion + 1
-		console.log(
-			`Cache structure changed. Upgrading from v${storedVersion} to v${newVersion}`,
-		)
 		localStorage.setItem(
 			"pos_next_cache_structure_hash",
 			structureHash.toString(),
@@ -85,12 +82,9 @@ export const memory = {
 // Initialize memory cache from IndexedDB
 export const initMemoryCache = async () => {
 	try {
-		console.log("Initializing memory cache...")
-
 		// Load cache version
 		const storedVersion = await getSetting("cache_version", CACHE_VERSION)
 		if (storedVersion !== CACHE_VERSION) {
-			console.log("Cache version mismatch, clearing cache...")
 			await clearAllCache()
 			await setSetting("cache_version", CACHE_VERSION)
 			memory.cache_version = CACHE_VERSION
@@ -109,15 +103,8 @@ export const initMemoryCache = async () => {
 		}
 
 		// Load items count (don't load all items into memory, too heavy)
-		const itemsCount = await db.items.count()
-		const customersCount = await db.customers.count()
-
-		console.log(
-			`Cache initialized: ${itemsCount} items, ${customersCount} customers`,
-		)
-		console.log(
-			`Cache ready: ${memory.cache_ready}, Stock ready: ${memory.stock_cache_ready}`,
-		)
+		await db.items.count()
+		await db.customers.count()
 
 		return true
 	} catch (error) {
@@ -160,8 +147,6 @@ export const toggleManualOffline = async () => {
 // Load items from server (returns data for worker to cache)
 export const cacheItemsFromServer = async (posProfile) => {
 	try {
-		console.log("Fetching items from server...")
-
 		const response = await call("pos_next.api.items.get_items", {
 			pos_profile: posProfile,
 			start: 0,
@@ -181,7 +166,6 @@ export const cacheItemsFromServer = async (posProfile) => {
 					: [],
 			}))
 
-			console.log(`Fetched ${processedItems.length} items from server`)
 			return { items: processedItems }
 		}
 
@@ -195,18 +179,15 @@ export const cacheItemsFromServer = async (posProfile) => {
 // Load customers from server (returns data for worker to cache)
 export const cacheCustomersFromServer = async (posProfile) => {
 	try {
-		console.log("Fetching customers from server...")
-
 		const response = await call("pos_next.api.customers.get_customers", {
-                        pos_profile: posProfile,
-                        start: 0,
-                        limit: 0, // Get all customers
-                })
+			pos_profile: posProfile,
+			start: 0,
+			limit: 0, // Get all customers
+		})
 
 		if (response.message && Array.isArray(response.message)) {
 			const customers = response.message
 
-			console.log(`Fetched ${customers.length} customers from server`)
 			return { customers }
 		}
 
@@ -303,8 +284,6 @@ export const needsCacheRefresh = () => {
 // Clear all cached data
 export const clearAllCache = async () => {
 	try {
-		console.log("Clearing all cache...")
-
 		// Clear IndexedDB tables
 		await db.items.clear()
 		await db.customers.clear()
@@ -328,7 +307,6 @@ export const clearAllCache = async () => {
 		await setSetting("cache_ready", false)
 		await setSetting("stock_cache_ready", false)
 
-		console.log("Cache cleared successfully")
 		return true
 	} catch (error) {
 		console.error("Error clearing cache:", error)
@@ -394,10 +372,6 @@ export async function cachePaymentMethodsFromServer(posProfile) {
 		await setSetting("payment_methods_last_sync", timestamp)
 		memory.payment_methods_last_sync = timestamp
 
-		console.log(
-			`Cached ${paymentMethods.length} payment methods for ${posProfile}`,
-		)
-
 		return { payment_methods: paymentMethods }
 	} catch (error) {
 		console.error("Error caching payment methods:", error)
@@ -448,10 +422,6 @@ export async function cacheSalesPersonsFromServer(posProfile) {
 		// Update last sync timestamp
 		const timestamp = Date.now()
 		await setSetting("sales_persons_last_sync", timestamp)
-
-		console.log(
-			`Cached ${salesPersons.length} sales persons for ${posProfile}`,
-		)
 
 		return { sales_persons: salesPersons }
 	} catch (error) {

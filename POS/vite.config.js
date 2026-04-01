@@ -78,7 +78,7 @@ export default defineConfig({
 				theme_color: "#4F46E5",
 				background_color: "#ffffff",
 				display: "standalone",
-				scope: "/assets/pos_next/pos/",
+				scope: "/",
 				start_url: "/pos",
 				icons: [
 					{
