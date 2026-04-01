@@ -241,6 +241,7 @@ import { computed, nextTick, ref, watch } from "vue"
 import TranslatedHTML from "../common/TranslatedHTML.vue"
 import { offlineState } from "@/utils/offline/offlineState"
 import { getCachedVariants, cacheItems } from "@/utils/offline/items"
+import { resolveWarehouseOptions } from "@/utils/pos_connector/branchWarehouseFlow";
 
 const props = defineProps({
 	modelValue: Boolean,
