@@ -23,6 +23,7 @@ ITEM_RESULT_FIELDS = [
 	"item_group",
 	"brand",
 	"has_variants",
+	"variant_of",
 	"custom_company",
 	"disabled",
 ]
@@ -36,21 +37,20 @@ def get_stock_availability(item_code, warehouse):
 		return 0.0
 
 	warehouses = [warehouse]
-
 	if frappe.db.get_value("Warehouse", warehouse, "is_group"):
+		# Include all child warehouses when a group warehouse is set
 		warehouses = frappe.db.get_descendants("Warehouse", warehouse) or []
 
-	if not warehouses:
-		return 0.0
+	Bin = DocType("Bin")
+	result = (
+		frappe.qb.from_(Bin)
+		.select(fn.Sum(Bin.actual_qty).as_("actual_qty"))
+		.where(Bin.item_code == item_code)
+		.where(Bin.warehouse.isin(warehouses))
+		.run(as_dict=True)
+	)
 
-	rows = frappe.db.sql("""
-		SELECT SUM(actual_qty) as actual_qty
-		FROM `tabBin`
-		WHERE item_code = %s
-		AND warehouse IN %s
-	""", (item_code, tuple(warehouses)), as_dict=True)
-
-	return flt(rows[0].actual_qty) if rows and rows[0].actual_qty else 0.0
+	return flt(result[0].actual_qty) if result and result[0].actual_qty else 0.0
 
 
 def get_item_detail(item, doc=None, warehouse=None, price_list=None, company=None):
