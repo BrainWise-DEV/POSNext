@@ -1897,7 +1897,22 @@ function handleItemSelected(item, autoAdd = false) {
 }
 
 async function handleEditItem(updatedItem) {
-	await cartStore.updateItemDetails(updatedItem.item_code, updatedItem);
+	const selectedWarehouse =
+		updatedItem.warehouse ||
+		updatedItem.selected_warehouse ||
+		updatedItem.item_warehouse ||
+		null
+
+	const normalizedItem = {
+		...updatedItem,
+		warehouse: selectedWarehouse,
+		selected_warehouse: selectedWarehouse,
+	}
+
+	await cartStore.updateItemDetails(
+		normalizedItem.item_code,
+		normalizedItem
+	)
 }
 
 function handleAdditionalDiscountUpdate(discountAmount) {
