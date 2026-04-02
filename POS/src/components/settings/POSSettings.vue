@@ -133,9 +133,9 @@
 										<SelectField
 											v-else
 											v-model="selectedWarehouse"
-											:label="__('Active Warehouse')"
+											:label="__('Default Warehouse')"
 											:options="warehouseOptions"
-											:description="__('All stock operations will use this warehouse. Stock quantities will refresh after saving.')"
+											:description="__('This is the default warehouse for new item lines. When multiple warehouses are allowed, items can still be assigned to another allowed warehouse.')"
 										/>
 									</div>
 
@@ -670,7 +670,7 @@ const operationsSubsectionClasses = computed(() => getSubsectionClasses("teal"))
 
 // Resources
 const warehousesResource = createResource({
-	url: "pos_next.api.pos_profile.get_warehouses",
+	url: "pos_next.pos_next.doctype.pos_settings.pos_settings.get_pos_settings",
 	makeParams() {
 		return {
 			pos_profile: props.posProfile,
@@ -678,8 +678,16 @@ const warehousesResource = createResource({
 	},
 	auto: false,
 	onSuccess(data) {
-		const warehouses = data?.message || data || []
-		warehousesList.value = warehouses
+		const settingsData = data?.message || data || {}
+		const available = settingsData.available_warehouses || []
+		warehousesList.value = available.map((name) => ({
+			name,
+			warehouse_name: name,
+		}))
+
+		if (!selectedWarehouse.value) {
+			selectedWarehouse.value = settingsData.default_warehouse || props.currentWarehouse || ""
+		}
 	},
 	onError(error) {
 		warehousesList.value = []
@@ -697,11 +705,16 @@ const settingsResource = createResource({
 		}
 	},
 	onSuccess(data) {
-		if (data) {
-			Object.assign(settings.value, data)
+		const settingsData = data?.message || data || null
+		if (settingsData) {
+			Object.assign(settings.value, settingsData)
 			settings.value.pos_profile = props.posProfile
 			// Store original value
-			originalAllowNegativeStock.value = data.allow_negative_stock
+			originalAllowNegativeStock.value = settingsData.allow_negative_stock
+			// Keep warehouse selector aligned with current shift/profile, otherwise fall back to POS Settings default
+			if (!selectedWarehouse.value) {
+				selectedWarehouse.value = settingsData.default_warehouse || props.currentWarehouse || ""
+			}
 			// Update event system snapshot
 			updateSettingsSnapshot(settings.value)
 		}
@@ -772,15 +785,22 @@ async function loadSettings() {
 
 	try {
 		// Load warehouses first using call API directly
-		const warehousesData = await call(
-			"pos_next.api.pos_profile.get_warehouses",
-			{
-				pos_profile: props.posProfile,
-			},
+		const settingsData = await call(
+			"pos_next.pos_next.doctype.pos_settings.pos_settings.get_pos_settings",
+			{ pos_profile: props.posProfile }
 		)
 
-		// Handle frappe-ui call response format { message: [...] }
-		warehousesList.value = warehousesData?.message || warehousesData || []
+		const settingsPayload = settingsData?.message || settingsData || {}
+		const available = settingsPayload.available_warehouses || []
+
+		warehousesList.value = available.map((name) => ({
+			name,
+			warehouse_name: name,
+		}))
+
+		if (!selectedWarehouse.value) {
+			selectedWarehouse.value = settingsPayload.default_warehouse || ""
+		}
 
 		// Load settings
 		settingsResource.reload()

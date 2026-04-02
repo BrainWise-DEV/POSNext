@@ -87,9 +87,11 @@ def get_pos_settings(pos_profile):
 	"""
 	Get POS Settings for a specific POS Profile.
 
-	Also injects the current global Stock Settings value to show the actual
-	source of truth, preventing confusion when the checkbox appears enabled
-	but the global setting was changed elsewhere.
+	Returns the full POS Settings document, including child tables, and
+	exposes warehouse data needed by POS frontend:
+	- default_warehouse: POS Profile warehouse
+	- available_warehouses: merged unique list of profile warehouse + allowed_warehouses
+	- _global_allow_negative_stock: current Stock Settings value
 	"""
 	from frappe import _
 
@@ -105,25 +107,43 @@ def get_pos_settings(pos_profile):
 	if not has_access and not frappe.has_permission("POS Settings", "read"):
 		frappe.throw(_("You don't have access to this POS Profile"))
 
-	settings = frappe.db.get_value(
-		"POS Settings",
-		{"pos_profile": pos_profile},
-		"*",
-		as_dict=True
-	)
+	settings_name = frappe.db.get_value("POS Settings", {"pos_profile": pos_profile}, "name")
 
 	# If no settings exist, create default settings
-	if not settings:
+	if settings_name:
+		settings = frappe.get_doc("POS Settings", settings_name).as_dict()
+	else:
 		settings = create_default_settings(pos_profile)
 
+	profile_warehouse = frappe.db.get_value("POS Profile", pos_profile, "warehouse")
+
+	available_warehouses = []
+	seen = set()
+
+	def add_warehouse(warehouse):
+		if warehouse and warehouse not in seen:
+			seen.add(warehouse)
+			available_warehouses.append(warehouse)
+
+	# Default POS Profile warehouse first
+	add_warehouse(profile_warehouse)
+
+	# Additional warehouses from POS Settings child table
+	for row in (settings.get("allowed_warehouses") or []):
+		if isinstance(row, dict):
+			add_warehouse(row.get("warehouse"))
+		else:
+			add_warehouse(getattr(row, "warehouse", None))
+
+	settings["default_warehouse"] = profile_warehouse
+	settings["available_warehouses"] = available_warehouses
+
 	# Inject the current global Stock Settings value for transparency
-	# This helps UI reflect the actual state even if multiple POS Settings exist
 	settings["_global_allow_negative_stock"] = cint(
 		frappe.db.get_single_value("Stock Settings", "allow_negative_stock") or 0
 	)
 
 	return settings
-
 
 def create_default_settings(pos_profile):
 	"""Create default POS Settings for a POS Profile"""
