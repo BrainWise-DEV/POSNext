@@ -66,7 +66,7 @@
 														{{ localItem.item_name }}
 													</h3>
 													<p class="text-sm text-gray-500 truncate">
-														{{ formatCurrency(localItem.price_list_rate || localItem.rate) }} / {{ localItem.stock_uom || __('Nos', null, 'UOM') }}
+														{{ formatCurrency(localRate || localItem.price_list_rate || localItem.rate) }} / {{ localUom || localItem.stock_uom || __('Nos', null, 'UOM') }}
 													</p>
 												</div>
 											</div>
@@ -330,6 +330,36 @@ const removedSerials = ref([]) // Track serials removed during this edit session
 const originalSerials = ref([]) // Original serials when dialog opened
 const originalPriceListRate = ref(0) // Original price_list_rate when dialog opened (for rate edit validation)
 
+function getSnapshotUom(item) {
+	return item?.selected_uom || item?.uom || item?.stock_uom || __("Nos", null, "UOM")
+}
+
+function getSnapshotRate(item) {
+	return Number(
+		item?.selected_display_rate ??
+		item?.rate ??
+		item?.price_list_rate ??
+		0
+	) || 0
+}
+
+function getSnapshotQuantity(item) {
+	return Number(
+		item?.selected_qty ??
+		item?.quantity ??
+		1
+	) || 1
+}
+
+function getSnapshotPriceListRate(item) {
+	return Number(
+		item?.price_list_rate ??
+		item?.selected_display_rate ??
+		item?.rate ??
+		0
+	) || 0
+}
+
 function normalizeWarehouseValue(value) {
 	if (!value) return ""
 	if (typeof value === "string") return value
@@ -400,12 +430,31 @@ const rateEditDisabledReason = computed(() => {
 // Options for SelectInput components
 const uomOptions = computed(() => {
 	if (!localItem.value) return []
-	const options = [{ value: localItem.value.stock_uom, label: localItem.value.stock_uom }]
-	if (availableUoms.value.length > 0) {
-		availableUoms.value.forEach(uomData => {
-			options.push({ value: uomData.uom, label: uomData.uom })
+
+	const options = []
+	const seen = new Set()
+
+	const pushOption = (uom, conversionFactor = 1) => {
+		if (!uom || seen.has(uom)) return
+		seen.add(uom)
+
+		options.push({
+			value: uom,
+			label:
+				Number(conversionFactor || 1) > 1
+					? `${uom} x ${Number(conversionFactor || 1)}`
+					: uom,
 		})
 	}
+
+	pushOption(localItem.value.stock_uom, 1)
+
+	if (availableUoms.value.length > 0) {
+		availableUoms.value.forEach(uomData => {
+			pushOption(uomData.uom, uomData.conversion_factor || 1)
+		})
+	}
+
 	return options
 })
 
@@ -431,11 +480,10 @@ watch(
 		if (newItem) {
 			isInitializingItem.value = true
 			localItem.value = { ...newItem }
-			localQuantity.value = newItem.quantity || 1
-			localUom.value = newItem.uom || newItem.stock_uom || __("Nos")
-			localRate.value = newItem.rate || 0
-			// Store original price_list_rate for rate edit validation
-			originalPriceListRate.value = newItem.price_list_rate || newItem.rate || 0
+			localQuantity.value = getSnapshotQuantity(newItem)
+			localUom.value = getSnapshotUom(newItem)
+			localRate.value = getSnapshotRate(newItem)
+			originalPriceListRate.value = getSnapshotPriceListRate(newItem)
 			localWarehouse.value = normalizeWarehouseValue(
 				newItem.warehouse || props.warehouses[0]?.name || ""
 			)
@@ -757,14 +805,34 @@ function updateItem() {
 		}
 	}
 
+	const conversionFactor = getConversionFactorForUom(localUom.value)
+	const availableStockQty =
+		localItem.value?.selected_stock_qty ??
+		localItem.value?.available_stock_qty ??
+		localItem.value?.actual_qty ??
+		localItem.value?.stock_qty ??
+		null
+
 	const updatedItem = {
 		...localItem.value,
 		quantity: localQuantity.value,
 		uom: localUom.value,
+		conversion_factor: conversionFactor,
 		rate: localRate.value,
-		// Preserve price_list_rate for reference (original price before any manual edits)
 		price_list_rate: originalPriceListRate.value,
 		warehouse: selectedWarehouse,
+		selected_uom: localUom.value,
+		selected_uom_label:
+			conversionFactor > 1
+				? `${localUom.value} x ${conversionFactor}`
+				: localUom.value,
+		selected_conversion_factor: conversionFactor,
+		selected_stock_uom: localItem.value?.stock_uom || localUom.value,
+		selected_qty: localQuantity.value,
+		selected_display_rate: localRate.value,
+		selected_display_subtotal: localRate.value * localQuantity.value,
+		selected_stock_uom_qty_required: localQuantity.value * conversionFactor,
+		selected_stock_qty: availableStockQty,
 		discount_percentage:
 			discountType.value === "percentage" ? discountValue.value : 0,
 		discount_amount:

@@ -172,10 +172,47 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	const isEmpty = computed(() => invoiceItems.value.length === 0)
 	const hasCustomer = computed(() => !!customer.value)
 
+	function buildUomSnapshot(item = {}, qty = null) {
+		const quantity = Number(qty ?? item.quantity ?? item.qty ?? 1) || 1
+		const conversionFactor = Number(item.conversion_factor || 1) || 1
+		const rate = Number(item.rate || 0) || 0
+		const stockUom = item.stock_uom || item.uom || ""
+
+		const availableStockQty =
+			item.available_stock_qty ??
+			item.selected_stock_qty ??
+			item.actual_qty ??
+			item.stock_qty ??
+			null
+
+		return {
+			selected_uom: item.uom || stockUom,
+			selected_uom_label:
+				item.selected_uom_label ||
+				(conversionFactor > 1
+					? `${item.uom || stockUom} x ${conversionFactor}`
+					: (item.uom || stockUom)),
+			selected_conversion_factor: conversionFactor,
+			selected_stock_uom: stockUom,
+			selected_qty: quantity,
+			selected_display_rate: rate,
+			selected_display_subtotal: rate * quantity,
+			selected_stock_uom_qty_required:
+				item.required_stock_qty ?? (quantity * conversionFactor),
+			selected_stock_qty: availableStockQty,
+		}
+	}
+
+	function applyUomSnapshot(target, source = {}, qty = null) {
+		Object.assign(target, buildUomSnapshot({ ...target, ...source }, qty))
+		return target
+	}
+
+
+
 	// Actions
 	function addItem(item, qty = 1, _autoAdd = false, currentProfile = null) {
 		if (currentProfile && settingsStore.shouldEnforceStockValidation() && shouldValidateItemStock(item)) {
-			// Account for quantity already in the cart for this item
 			const itemUom = item.uom || item.stock_uom
 			const existing = invoiceItems.value.find(
 				(i) => i.item_code === item.item_code && i.uom === itemUom,
@@ -189,7 +226,14 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			}
 		}
 
-		addItemToInvoice(item, qty)
+		const normalizedItem = {
+			...item,
+			quantity: Number(item.quantity ?? item.qty ?? qty ?? 1) || 1,
+			qty: Number(item.qty ?? item.quantity ?? qty ?? 1) || 1,
+		}
+
+		applyUomSnapshot(normalizedItem, normalizedItem, normalizedItem.quantity)
+		addItemToInvoice(normalizedItem, normalizedItem.quantity)
 	}
 
 	/**
@@ -1180,13 +1224,24 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 */
 	async function applyUomChange(cartItem, newUom, qty) {
 		const uomData = cartItem.item_uoms?.find((u) => u.uom === newUom)
-		const conversionFactor = uomData?.conversion_factor || 1
+		const conversionFactor = Number(uomData?.conversion_factor || 1) || 1
 		const pricing = await resolveUomPricing(cartItem, newUom, conversionFactor, qty)
 
 		cartItem.uom = newUom
 		cartItem.conversion_factor = conversionFactor
 		cartItem.rate = pricing.rate
 		cartItem.price_list_rate = pricing.price_list_rate
+
+		applyUomSnapshot(
+			cartItem,
+			{
+				uom: newUom,
+				conversion_factor: conversionFactor,
+				rate: pricing.rate,
+				price_list_rate: pricing.price_list_rate,
+			},
+			qty,
+		)
 	}
 
 	/**
@@ -1271,6 +1326,29 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			// Track manual rate edits for audit purposes
 			if (updates.is_rate_manually_edited !== undefined) cartItem.is_rate_manually_edited = updates.is_rate_manually_edited
 			if (updates.original_rate !== undefined) cartItem.original_rate = updates.original_rate
+
+			applyUomSnapshot(
+				cartItem,
+				{
+					uom: cartItem.uom,
+					conversion_factor: cartItem.conversion_factor,
+					rate: cartItem.rate,
+					price_list_rate: cartItem.price_list_rate,
+					selected_uom_label:
+						updates.selected_uom_label !== undefined
+							? updates.selected_uom_label
+							: cartItem.selected_uom_label,
+					required_stock_qty:
+						updates.required_stock_qty !== undefined
+							? updates.required_stock_qty
+							: cartItem.required_stock_qty,
+					available_stock_qty:
+						updates.available_stock_qty !== undefined
+							? updates.available_stock_qty
+							: cartItem.available_stock_qty,
+				},
+				updates.quantity ?? cartItem.quantity,
+			)			
 
 			recalculateItem(cartItem)
 			rebuildIncrementalCache()

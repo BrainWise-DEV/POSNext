@@ -18,15 +18,12 @@
 					<p class="text-xs text-gray-600 mb-3 text-start">{{ dialogDescription }}</p>
 				</div>
 
-				<!-- Loading State -->
 				<div v-if="loading" class="flex items-center justify-center py-8">
 					<div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
 					<p class="ms-3 text-sm text-gray-500">{{ __('Loading options...') }}</p>
 				</div>
 
-				<!-- Variant Options with Attribute Selection -->
 				<div v-else-if="mode === 'variant' && options.length > 0" class="flex flex-col gap-4">
-					<!-- Display item image and info - show variant image when selected, otherwise template image -->
 					<div class="flex items-center justify-center mb-4">
 						<img
 							v-if="matchedVariant?.data?.image || item?.image"
@@ -37,7 +34,6 @@
 						/>
 					</div>
 
-					<!-- Group variants by attributes -->
 					<div v-for="(values, attrName) in variantAttributesMap" :key="attrName" class="flex flex-col gap-2">
 						<label class="text-sm font-semibold text-gray-900 text-start block">{{ attrName }}</label>
 						<div class="flex flex-wrap gap-2">
@@ -57,7 +53,6 @@
 						</div>
 					</div>
 
-					<!-- Show selected variant info -->
 					<div v-if="matchedVariant" class="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
 						<div class="flex items-center justify-between">
 							<div>
@@ -67,44 +62,40 @@
 							<div class="text-end">
 								<p class="text-sm font-bold text-blue-600">{{ formatCurrency(matchedVariant.rate || 0) }}</p>
 								<p class="text-xs" :class="(matchedVariant.stock ?? matchedVariant.data?.actual_qty ?? 0) > 0 ? 'text-green-600' : 'text-red-600'">
-									 {{ __('Stock: {0}', [(matchedVariant.stock ?? matchedVariant.data?.actual_qty ?? 0)]) }}
+									{{ __('Stock: {0}', [(matchedVariant.stock ?? matchedVariant.data?.actual_qty ?? 0)]) }}
 								</p>
 							</div>
 						</div>
 					</div>
 
-					<!-- Warning if combination not found -->
 					<div v-else-if="allAttributesSelected" class="mt-4 p-3 bg-orange-50 border border-orange-200 rounded-lg">
 						<p class="text-xs text-orange-700">{{ __('This combination is not available') }}</p>
 					</div>
 				</div>
 
-				<!-- UOM Options (Fast Cashier UI) -->
 				<div v-else-if="mode === 'uom' && options.length > 0" class="flex flex-col gap-4">
-					<!-- UOM Selection Buttons -->
 					<div>
 						<label class="block text-sm font-medium text-gray-700 mb-2 text-start">{{ __('Unit of Measure') }}</label>
 						<div class="grid gap-2" :class="options.length <= 2 ? 'grid-cols-2' : 'grid-cols-3'">
 							<button
-								v-for="(option, index) in options"
-								:key="index"
+								v-for="option in options"
+								:key="option.key"
 								@click="selectOption(option)"
 								:class="[
 									'px-4 py-3 rounded-xl font-bold text-base transition-all touch-manipulation flex flex-col items-center justify-center min-h-[60px]',
-									selectedOption === option
+									isSelectedOption(option)
 										? 'bg-blue-600 text-white shadow-lg ring-2 ring-blue-300'
 										: 'bg-gray-100 text-gray-700 hover:bg-gray-200 active:bg-gray-300'
 								]"
 							>
 								<span>{{ option.label }}</span>
-								<span :class="['text-xs mt-0.5', selectedOption === option ? 'text-blue-100' : 'text-gray-500']">
+								<span :class="['text-xs mt-0.5', isSelectedOption(option) ? 'text-blue-100' : 'text-gray-500']">
 									{{ formatCurrency(option.rate || 0) }}
 								</span>
 							</button>
 						</div>
 					</div>
 
-					<!-- Quantity Control -->
 					<div>
 						<label class="block text-sm font-medium text-gray-700 mb-2 text-start">{{ __('Quantity') }}</label>
 						<div class="w-full h-10 border border-gray-300 rounded-lg bg-white flex items-center overflow-hidden">
@@ -139,7 +130,6 @@
 							</button>
 						</div>
 
-						<!-- Quick Quantity Buttons -->
 						<div class="flex gap-2 mt-3">
 							<button
 								v-for="qty in [1, 5, 10, 20]"
@@ -157,27 +147,37 @@
 						</div>
 					</div>
 
-					<!-- Price Summary -->
 					<div class="bg-blue-50 rounded-xl p-4 flex items-center justify-between">
 						<div>
 							<p class="text-sm text-gray-600">{{ __('Total') }}</p>
-							<p class="text-xs text-gray-500">{{ quantity }} × {{ formatCurrency(selectedOption?.rate || options[0]?.rate || 0) }}</p>
+							<p class="text-xs text-gray-500">
+								{{ quantity }} × {{ formatCurrency(selectedRate) }}
+							</p>
+							<p class="text-xs text-gray-500 mt-1">
+								{{ selectedOptionLabel }}
+							</p>
 						</div>
 						<p class="text-2xl font-bold text-blue-600">
-							{{ formatCurrency((selectedOption?.rate || options[0]?.rate || 0) * quantity) }}
+							{{ formatCurrency(selectedRate * quantity) }}
 						</p>
 					</div>
 
-					<!-- Stock Warning -->
-					<p v-if="stockWarning" class="text-xs text-orange-600 flex items-center justify-center gap-1 bg-orange-50 rounded-lg p-2">
-						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
-						</svg>
-						{{ stockWarning }}
-					</p>
+					<div
+						v-if="stockPanel"
+						:class="[
+							'rounded-lg p-3 text-xs border',
+							stockPanel.blocked
+								? 'bg-orange-50 text-orange-700 border-orange-200'
+								: 'bg-yellow-50 text-yellow-700 border-yellow-200'
+						]"
+					>
+						<div class="font-semibold mb-1">{{ stockPanel.title }}</div>
+						<div>{{ __('Available: {0} {1}', [formatStockNumber(stockPanel.available), stockPanel.stock_uom]) }}</div>
+						<div>{{ __('Required: {0} {1}', [formatStockNumber(stockPanel.required), stockPanel.stock_uom]) }}</div>
+						<div v-if="!stockPanel.blocked" class="mt-1">{{ __('Selling allowed (negative stock enabled)') }}</div>
+					</div>
 				</div>
 
-				<!-- No Options -->
 				<div v-else class="text-center py-8">
 					<div class="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-orange-100 mb-3">
 						<svg class="h-6 w-6 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -191,7 +191,7 @@
 						}}
 					</p>
 					<p v-if="mode === 'variant'" class="text-xs text-gray-500 mt-2">
-						<TranslatedHTML 
+						<TranslatedHTML
 							:inner="__('This item template &lt;strong&gt;{0}&lt;strong&gt; has no variants created yet.', [item?.item_name])"
 						/>
 					</p>
@@ -201,7 +201,7 @@
 					<div v-if="mode === 'variant'" class="mt-4">
 						<p class="text-xs text-gray-600 mb-2">{{ __('To create variants:') }}</p>
 						<ol class="text-xs text-gray-600 text-start max-w-xs mx-auto flex flex-col gap-1">
-							<TranslatedHTML 
+							<TranslatedHTML
 								:tag="'li'"
 								:inner="__('1. Go to &lt;strong&gt;Item Master&lt;strong&gt; → &lt;strong&gt;{0}&lt;strong&gt;', [item?.item_code])"
 							/>
@@ -241,13 +241,13 @@ import { computed, nextTick, ref, watch } from "vue"
 import TranslatedHTML from "../common/TranslatedHTML.vue"
 import { offlineState } from "@/utils/offline/offlineState"
 import { getCachedVariants, cacheItems } from "@/utils/offline/items"
-import { resolveWarehouseOptions } from "@/utils/pos_connector/branchWarehouseFlow";
+import { getUOMPolicy } from "@/utils/pos_connector/uomPolicyAdapter"
 
 const props = defineProps({
 	modelValue: Boolean,
 	item: Object,
 	mode: {
-		type: String, // 'uom' or 'variant'
+		type: String,
 		default: "uom",
 	},
 	posProfile: String,
@@ -268,10 +268,9 @@ const loading = ref(false)
 const options = ref([])
 const selectedOption = ref(null)
 const quantity = ref(1)
-const selectedAttributes = ref({}) // For variant attribute selection
+const selectedAttributes = ref({})
 const quantityInput = ref(null)
 
-// Computed properties for dialog customization
 const dialogTitle = computed(() => {
 	return props.mode === "variant"
 		? __("Select Item Variant")
@@ -285,47 +284,87 @@ const dialogDescription = computed(() => {
 })
 
 const confirmButtonText = computed(() => {
-	return props.mode === "variant" ? __("Add to Cart") : __("Add to Cart")
+	return __("Add to Cart")
 })
 
-// Computed: Stock warning when quantity exceeds available stock
-const stockWarning = computed(() => {
-	if (props.mode !== "uom" || !selectedOption.value) return null
+const currentItem = computed(() => props.item || {})
 
-	const availableStock = selectedOption.value.stock_qty ?? selectedOption.value.actual_qty ?? null
-	if (availableStock === null) return null
+const uomPolicy = computed(() => {
+	return getUOMPolicy(currentItem.value, {})
+})
 
-	if (quantity.value > availableStock) {
-		return __("Requested quantity ({0}) exceeds available stock ({1})", [quantity.value, Math.floor(availableStock)])
+const selectedRate = computed(() => {
+	return Number(selectedOption.value?.rate || 0)
+})
+
+const selectedOptionLabel = computed(() => {
+	if (!selectedOption.value) return ""
+	const uom = selectedOption.value.uom || ""
+	const cf = Number(selectedOption.value.conversion_factor || 1)
+	return cf > 1
+		? `${uom} x ${formatStockNumber(cf)}`
+		: uom
+})
+
+const stockPanel = computed(() => {
+	if (props.mode !== "uom" || !selectedOption.value || !props.item) return null
+
+	const available = extractAvailableStock(props.item, selectedOption.value)
+	if (available === null) return null
+
+	const required = Number(quantity.value || 0) * Number(selectedOption.value.conversion_factor || 1)
+	if (required <= available) return null
+
+	return {
+		blocked: false,
+		title: __("Low stock"),
+		available,
+		required,
+		stock_uom: props.item.stock_uom || selectedOption.value.uom || "",
+	}
+})
+
+function formatStockNumber(value) {
+	const num = Number(value)
+	if (!Number.isFinite(num)) return "0"
+	if (Math.abs(num - Math.round(num)) < 0.0001) {
+		return String(Math.round(num))
+	}
+	return String(Math.round(num * 10000) / 10000)
+}
+
+function extractAvailableStock(item = {}, option = {}) {
+	const candidates = [
+		item.actual_qty,
+		item.stock_qty,
+		option.actual_qty,
+		option.stock_qty,
+	]
+	for (const value of candidates) {
+		const num = Number(value)
+		if (Number.isFinite(num)) return num
 	}
 	return null
-})
+}
 
-/**
- * Validates quantity input ensuring it's a valid positive integer
- */
 function validateQuantity() {
-	// Handle invalid, negative, or decimal values
 	if (!quantity.value || isNaN(quantity.value) || quantity.value < 1) {
 		quantity.value = 1
 	} else {
-		// Round to nearest integer for UOM quantities
 		quantity.value = Math.max(1, Math.round(quantity.value))
 	}
 }
 
-// Quantity counter functions
 function incrementQuantity() {
-	quantity.value = Math.max(1, quantity.value + 1)
+	quantity.value = Math.max(1, Number(quantity.value || 1) + 1)
 }
 
 function decrementQuantity() {
 	if (quantity.value > 1) {
-		quantity.value = quantity.value - 1
+		quantity.value = Number(quantity.value) - 1
 	}
 }
 
-// Computed: Build a map of all available attribute values
 const variantAttributesMap = computed(() => {
 	if (props.mode !== "variant" || options.value.length === 0) return {}
 
@@ -339,7 +378,6 @@ const variantAttributesMap = computed(() => {
 		})
 	})
 
-	// Convert Sets to sorted Arrays
 	const result = {}
 	Object.keys(attrMap).forEach((key) => {
 		result[key] = Array.from(attrMap[key]).sort()
@@ -348,7 +386,6 @@ const variantAttributesMap = computed(() => {
 	return result
 })
 
-// Computed: Check if all attributes are selected
 const allAttributesSelected = computed(() => {
 	const attrKeys = Object.keys(variantAttributesMap.value)
 	return (
@@ -357,7 +394,6 @@ const allAttributesSelected = computed(() => {
 	)
 })
 
-// Computed: Find variant that matches selected attributes
 const matchedVariant = computed(() => {
 	if (!allAttributesSelected.value) return null
 
@@ -368,9 +404,6 @@ const matchedVariant = computed(() => {
 	})
 })
 
-/**
- * Transform raw variant data into option format for the UI
- */
 function mapVariantsToOptions(variants) {
 	return variants.map((v) => ({
 		type: "variant",
@@ -385,9 +418,6 @@ function mapVariantsToOptions(variants) {
 	}))
 }
 
-/**
- * Load variants from IndexedDB cache (for offline mode or API fallback)
- */
 async function loadVariantsFromCache() {
 	try {
 		const cachedVariants = await getCachedVariants(props.item?.item_code)
@@ -400,7 +430,6 @@ async function loadVariantsFromCache() {
 	}
 }
 
-// Resource for fetching variants from API
 const variantsResource = createResource({
 	url: "pos_next.api.items.get_item_variants",
 	makeParams() {
@@ -415,47 +444,50 @@ const variantsResource = createResource({
 		options.value = mapVariantsToOptions(variants)
 		loading.value = false
 
-		// Cache variants for offline use
 		if (variants.length > 0) {
 			cacheItems(variants).catch((err) => console.error("Error caching variants:", err))
 		}
 	},
-	async onError(error) {
-		console.error("Error loading variants:", error)
-		// Try cache as fallback (user might have just gone offline)
+	async onError() {
 		await loadVariantsFromCache()
 	},
 })
 
-// Load options when dialog opens
 watch(
 	() => props.modelValue,
-	(isOpen) => {
-		if (isOpen && props.item) {
+	(opened) => {
+		if (opened && props.item) {
 			loadOptions()
 		}
-		if (isOpen && props.mode === "uom") {
+		if (opened && props.mode === "uom") {
 			nextTick(() => {
-				setTimeout(() => { quantityInput.value?.focus(); quantityInput.value?.select() }, 100)
+				setTimeout(() => {
+					quantityInput.value?.focus()
+					quantityInput.value?.select()
+				}, 100)
 			})
 		}
 	},
 )
 
-// Watch mode and item changes to reload options
 watch([() => props.mode, () => props.item], ([, newItem]) => {
 	if (props.modelValue && newItem) {
 		loadOptions()
 	}
 })
 
-/**
- * Load options based on mode (variant or UOM)
- */
+watch(matchedVariant, (variant) => {
+	if (variant) {
+		selectedOption.value = variant
+	} else if (props.mode === "variant") {
+		selectedOption.value = null
+	}
+})
+
 async function loadOptions() {
 	selectedOption.value = null
-	quantity.value = props.item.resolved_qty || 1
-	selectedAttributes.value = {} // Reset attribute selection
+	quantity.value = Number(props.item?.resolved_qty || 1)
+	selectedAttributes.value = {}
 
 	if (props.mode === "variant") {
 		loading.value = true
@@ -465,89 +497,111 @@ async function loadOptions() {
 		} else {
 			variantsResource.reload()
 		}
-	} else {
-		// Load UOM options
-		options.value = buildUomOptions()
-		if (options.value.length > 0) {
-			// Check if item has a single barcode UOM to auto-select
-			const barcodeUoms = props.item?.barcode_uoms
-				? props.item.barcode_uoms.split(",").filter(Boolean)
-				: []
-
-			if (barcodeUoms.length === 1) {
-				// Find and select the matching UOM option
-				const uom = props.item.resolved_uom || barcodeUoms[0]
-				const matchingOption = options.value.find((opt) => opt.uom === uom)
-				selectedOption.value = matchingOption || options.value[0]
-			} else {
-				// Default to first option (stock UOM)
-				selectedOption.value = options.value[0]
-			}
-		}
-		loading.value = false
+		return
 	}
+
+	options.value = buildUomOptions()
+
+	if (options.value.length > 0) {
+		selectedOption.value = resolveInitialUomOption(options.value)
+	}
+
+	loading.value = false
 }
-
-// Watch matched variant and auto-select it
-watch(matchedVariant, (variant) => {
-	if (variant) {
-		selectedOption.value = variant
-	} else {
-		selectedOption.value = null
-	}
-})
 
 function buildUomOptions() {
 	if (!props.item) return []
 
-	const uomOptions = []
+	const item = props.item
+	const policyOptions = Array.isArray(uomPolicy.value.allowed_uoms) ? uomPolicy.value.allowed_uoms : []
+	const sourceRows = policyOptions.length > 0
+		? policyOptions
+		: [
+			...(item.stock_uom ? [{ uom: item.stock_uom, conversion_factor: 1 }] : []),
+			...(Array.isArray(item.item_uoms) ? item.item_uoms : []),
+		]
 
-	// Stock UOM option
-	uomOptions.push({
-		type: "uom",
-		uom: props.item.stock_uom,
-		conversion_factor: 1,
-		label: props.item.stock_uom,
-		description: __("Stock unit"),
-		rate: getUomPrice(props.item.stock_uom, 1),
-		priceLabel: __('per {0}', [props.item.stock_uom]),
-	})
+	const seen = new Set()
+	const built = []
 
-	// Additional UOMs
-	if (props.item.item_uoms && props.item.item_uoms.length > 0) {
-		props.item.item_uoms.forEach((uomData) => {
-			uomOptions.push({
-				type: "uom",
-				uom: uomData.uom,
-				conversion_factor: uomData.conversion_factor,
-				label: uomData.uom,
-				description: __('1 {0} = {1} {2}', [uomData.uom, uomData.conversion_factor, props.item.stock_uom]),
-				rate: getUomPrice(uomData.uom, uomData.conversion_factor),
-				priceLabel: __('per {0}', [uomData.uom]),
-			})
+	for (const row of sourceRows) {
+		const uom = row?.uom || row?.value || row?.name || null
+		if (!uom || seen.has(uom)) continue
+		seen.add(uom)
+
+		const conversionFactor = Number(row?.conversion_factor || (uom === item.stock_uom ? 1 : 1)) || 1
+		const rate = getUomPrice(uom, conversionFactor)
+
+		built.push({
+			key: `${uom}::${conversionFactor}`,
+			type: "uom",
+			uom,
+			conversion_factor: conversionFactor,
+			label: conversionFactor > 1 ? `${uom} x ${formatStockNumber(conversionFactor)}` : uom,
+			description:
+				conversionFactor > 1
+					? __('1 {0} = {1} {2}', [uom, formatStockNumber(conversionFactor), item.stock_uom])
+					: __("Stock unit"),
+			rate,
+			price_list_rate: rate,
+			priceLabel: __('per {0}', [uom]),
+			stock_uom: item.stock_uom || uom,
+			stock_qty: item.stock_qty,
+			actual_qty: item.actual_qty,
 		})
 	}
 
-	return uomOptions
+	return built
 }
 
 function getUomPrice(uom, conversionFactor) {
 	if (!props.item) return 0
 
-	// Check if we have UOM-specific prices
-	if (props.item.uom_prices && props.item.uom_prices[uom]) {
-		return props.item.uom_prices[uom]
+	if (props.item.uom_prices && props.item.uom_prices[uom] != null) {
+		return Number(props.item.uom_prices[uom]) || 0
 	}
 
-	// Calculate price based on conversion factor
-	// If 1 Gram = 0.001 Kg, then price per Gram = price per Kg * 0.001
-	const baseRate = props.item.rate || 0
-	return baseRate * conversionFactor
+	const itemUomRow = Array.isArray(props.item.item_uoms)
+		? props.item.item_uoms.find((row) => row?.uom === uom)
+		: null
+
+	if (itemUomRow?.price_list_rate != null) {
+		return Number(itemUomRow.price_list_rate) || 0
+	}
+
+	if (itemUomRow?.rate != null) {
+		return Number(itemUomRow.rate) || 0
+	}
+
+	const baseRate = Number(props.item.rate || props.item.price_list_rate || 0)
+	return baseRate * Number(conversionFactor || 1)
+}
+
+function resolveInitialUomOption(uomOptions) {
+	if (!Array.isArray(uomOptions) || !uomOptions.length) return null
+
+	const barcodeUoms = props.item?.barcode_uoms
+		? props.item.barcode_uoms.split(",").map((v) => v.trim()).filter(Boolean)
+		: []
+
+	const preferredUom =
+		props.item?.resolved_uom ||
+		props.item?.uom ||
+		(barcodeUoms.length === 1 ? barcodeUoms[0] : null) ||
+		uomPolicy.value.default_uom ||
+		props.item?.stock_uom ||
+		null
+
+	if (preferredUom) {
+		const matched = uomOptions.find((opt) => opt.uom === preferredUom)
+		if (matched) return matched
+	}
+
+	return uomOptions[0]
 }
 
 function selectAttribute(attributeName, value) {
 	selectedAttributes.value[attributeName] = value
-	// Force reactivity
 	selectedAttributes.value = { ...selectedAttributes.value }
 }
 
@@ -555,16 +609,40 @@ function selectOption(option) {
 	selectedOption.value = option
 }
 
+function isSelectedOption(option) {
+	if (!selectedOption.value || !option) return false
+	return selectedOption.value.uom === option.uom
+		&& Number(selectedOption.value.conversion_factor || 1) === Number(option.conversion_factor || 1)
+}
+
 function confirm() {
-	if (selectedOption.value) {
-		// Emit first, let parent decide if dialog should close
-		// Parent can keep dialog open by switching mode (variant → UOM)
-		const option = { ...selectedOption.value }
-		if (props.mode === "uom") {
-			option.quantity = quantity.value
-		}
-		emit("option-selected", option)
+	if (!selectedOption.value) return
+
+	const option = { ...selectedOption.value }
+
+	if (props.mode === "uom") {
+		const normalizedQuantity = Math.max(1, Math.round(Number(quantity.value || 1)))
+		const conversionFactor = Number(option.conversion_factor || 1)
+		const rate = Number(option.rate || 0)
+
+		emit("option-selected", {
+			...option,
+			quantity: normalizedQuantity,
+			qty: normalizedQuantity,
+			uom: option.uom,
+			conversion_factor: conversionFactor,
+			rate,
+			price_list_rate: Number(option.price_list_rate ?? rate),
+			stock_uom: props.item?.stock_uom || option.stock_uom || option.uom,
+			selected_uom_label: option.label,
+			required_stock_qty: normalizedQuantity * conversionFactor,
+			available_stock_qty: extractAvailableStock(props.item, option),
+			item: props.item,
+		})
+		return
 	}
+
+	emit("option-selected", option)
 }
 
 function cancel() {
