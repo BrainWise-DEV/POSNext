@@ -66,7 +66,7 @@
 														{{ localItem.item_name }}
 													</h3>
 													<p class="text-sm text-gray-500 truncate">
-														{{ formatCurrency(localRate || localItem.price_list_rate || localItem.rate) }} / {{ localUom || localItem.stock_uom || __('Nos', null, 'UOM') }}
+														{{ formatCurrency(localRate || localItem.price_list_rate || localItem.rate) }} / {{ selectedUomDisplayLabel || localUom || localItem.stock_uom || __('Nos', null, 'UOM') }}
 													</p>
 												</div>
 											</div>
@@ -251,6 +251,18 @@
 												<div class="flex items-center justify-between pt-2 border-t border-gray-200">
 													<span class="text-base font-bold text-gray-900">{{ __('Total:') }}</span>
 													<span class="text-lg font-bold text-blue-600">{{ formatCurrency(calculatedTotal) }}</span>
+												</div>
+											</div>
+
+											<div
+												v-if="stockDisplayPanel"
+												class="rounded-lg border border-yellow-200 bg-yellow-50 p-4 text-sm text-yellow-800"
+											>
+												<div class="font-semibold mb-1">{{ stockDisplayPanel.title }}</div>
+												<div>{{ __('Available: {0} {1}', [formatStockNumber(stockDisplayPanel.available), stockDisplayPanel.stockUom]) }}</div>
+												<div>{{ __('Required: {0} {1}', [formatStockNumber(stockDisplayPanel.required), stockDisplayPanel.stockUom]) }}</div>
+												<div v-if="stockDisplayPanel.allowNegative" class="mt-1">
+													{{ __('Selling allowed (negative stock enabled)') }}
 												</div>
 											</div>
 										</div>
@@ -473,6 +485,60 @@ const discountTypeOptions = computed(() => [
 	{ value: 'amount', label: __('Amount') }
 ])
 
+
+const selectedUomDisplayLabel = computed(() => {
+	if (!localItem.value) return localUom.value || ""
+
+	const conversionFactor = Number(
+		localItem.value?.selected_conversion_factor ??
+		localItem.value?.conversion_factor ??
+		getConversionFactorForUom(localUom.value) ??
+		1
+	) || 1
+
+	return localItem.value?.selected_uom_label ||
+		(conversionFactor > 1
+			? `${localUom.value} x ${conversionFactor}`
+			: localUom.value)
+})
+
+const stockDisplayPanel = computed(() => {
+	if (!localItem.value) return null
+
+	const stockUom =
+		localItem.value?.selected_stock_uom ||
+		localItem.value?.stock_uom ||
+		localUom.value ||
+		""
+
+	const conversionFactor = Number(
+		localItem.value?.selected_conversion_factor ??
+		localItem.value?.conversion_factor ??
+		getConversionFactorForUom(localUom.value) ??
+		1
+	) || 1
+
+	const available = Number(
+		localItem.value?.selected_stock_qty ??
+		localItem.value?.available_stock_qty ??
+		localItem.value?.actual_qty ??
+		localItem.value?.stock_qty ??
+		0
+	) || 0
+
+	const required = Number(localQuantity.value || 0) * conversionFactor
+
+	if (required <= available) return null
+
+	return {
+		title: __('Low stock'),
+		available,
+		required,
+		stockUom,
+		allowNegative: allowNegativeStock.value,
+	}
+})
+
 // Initialize local state when item changes
 watch(
 	() => props.item,
@@ -662,6 +728,15 @@ async function handleUomChange(newUom) {
 	localItem.value.conversion_factor = newConversionFactor
 	localItem.value.rate = newRate
 	localItem.value.price_list_rate = newRate
+	localItem.value.selected_uom = selectedUom
+	localItem.value.selected_conversion_factor = newConversionFactor
+	localItem.value.selected_uom_label =
+		newConversionFactor > 1
+			? `${selectedUom} x ${newConversionFactor}`
+			: selectedUom
+	localItem.value.selected_display_rate = newRate
+	localItem.value.selected_stock_uom = localItem.value.stock_uom || selectedUom
+	localItem.value.selected_stock_uom_qty_required = localQuantity.value * newConversionFactor
 
 	calculateTotals()
 }
@@ -749,6 +824,21 @@ function calculateDiscount() {
 
 function calculateTotals() {
 	calculatedSubtotal.value = localRate.value * localQuantity.value
+
+	if (localItem.value) {
+		const conversionFactor = Number(
+			localItem.value?.selected_conversion_factor ??
+			localItem.value?.conversion_factor ??
+			getConversionFactorForUom(localUom.value) ??
+			1
+		) || 1
+
+		localItem.value.selected_qty = localQuantity.value
+		localItem.value.selected_display_rate = localRate.value
+		localItem.value.selected_display_subtotal = calculatedSubtotal.value
+		localItem.value.selected_stock_uom_qty_required = localQuantity.value * conversionFactor
+	}
+
 	calculateDiscount()
 }
 
@@ -764,6 +854,16 @@ function removeSerial(serialNo) {
 		calculateTotals()
 	}
 }
+//stock number formatter
+function formatStockNumber(value) {
+	const num = Number(value)
+	if (!Number.isFinite(num)) return "0"
+	if (Math.abs(num - Math.round(num)) < 0.0001) {
+		return String(Math.round(num))
+	}
+	return String(Math.round(num * 10000) / 10000)
+}
+
 
 function formatCurrency(amount) {
 	return formatCurrencyUtil(Number.parseFloat(amount || 0), props.currency)
