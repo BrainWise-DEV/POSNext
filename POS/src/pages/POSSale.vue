@@ -1145,7 +1145,7 @@ const isStockSyncActive = ref(false);
 const warehousesList = ref([]);
 
 const warehousesResource = createResource({
-	url: "pos_next.api.pos_profile.get_warehouses",
+	url: "pos_next.pos_next.doctype.pos_settings.pos_settings.get_pos_settings",
 	makeParams() {
 		return {
 			pos_profile: shiftStore.profileName,
@@ -1153,8 +1153,13 @@ const warehousesResource = createResource({
 	},
 	auto: false,
 	onSuccess(data) {
-		const warehouses = data?.message || data || [];
-		warehousesList.value = warehouses;
+		const settings = data?.message || data || {};
+		const available = settings.available_warehouses || [];
+
+		warehousesList.value = available.map((warehouse) => ({
+			name: warehouse,
+			warehouse_name: warehouse,
+		}));
 	},
 	onError(error) {
 		log.error("Error loading warehouses:", error);
@@ -1173,7 +1178,7 @@ watch(
 	{ immediate: true }
 );
 
-// Computed for warehouses - returns all warehouses for the company
+// Computed for warehouses - returns only allowed warehouses from POS Settings
 const profileWarehouses = computed(() => {
 	if (warehousesList.value.length > 0) {
 		return warehousesList.value.map((w) => ({
@@ -1181,6 +1186,7 @@ const profileWarehouses = computed(() => {
 			warehouse: w.warehouse_name || w.name,
 		}));
 	}
+
 	// Fallback to profile warehouse if API hasn't loaded yet
 	if (shiftStore.profileWarehouse) {
 		return [
@@ -1190,6 +1196,7 @@ const profileWarehouses = computed(() => {
 			},
 		];
 	}
+
 	return [];
 });
 
