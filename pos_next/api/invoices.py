@@ -921,7 +921,7 @@ def update_invoice(data):
         if doctype == "Sales Invoice":
             invoice_doc.is_pos = 1
             invoice_doc.update_stock = 1
-            if pos_profile_doc and pos_profile_doc.warehouse:
+            if not invoice_doc.get("set_warehouse") and pos_profile_doc and pos_profile_doc.warehouse:
                 invoice_doc.set_warehouse = pos_profile_doc.warehouse
 
         # ========================================================================
@@ -939,6 +939,12 @@ def update_invoice(data):
         invoice_doc.disable_rounded_total = disable_rounded
 
         # Populate missing fields (company, currency, accounts, etc.)
+        incoming_item_warehouses = {
+            d.get("item_code"): d.get("warehouse")
+            for d in (data.get("items") or [])
+            if d.get("item_code") and d.get("warehouse")
+        }      
+
         invoice_doc.set_missing_values()
 
         # Calculate totals and apply discounts (with rounding disabled)
@@ -950,6 +956,11 @@ def update_invoice(data):
 
         # ERPNext draft recalculation zeroes payment amounts.
         # Restore raw POS payment values after totals are finalized.
+        for row in invoice_doc.get("items", []):
+            forced_wh = incoming_item_warehouses.get(row.item_code)
+            if forced_wh:
+                row.warehouse = forced_wh
+
         _restore_payment_amounts(invoice_doc, incoming_payments)
 
         # Re-attach accounts after rebuilding payment rows
