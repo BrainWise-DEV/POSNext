@@ -1,96 +1,106 @@
-export function formatStockQuantity(value) {
-	const num = Number(value)
-	if (!Number.isFinite(num)) return "0"
-	if (Math.abs(num - Math.round(num)) < 0.0001) {
-		return String(Math.round(num))
-	}
-	return String(Math.round(num * 10000) / 10000)
-}
-
-export function extractAvailableStock(item = {}, stockCheck = null) {
-	const candidates = [
-		stockCheck?.available_qty,
-		stockCheck?.actual_qty,
-		stockCheck?.stock_qty,
-		stockCheck?.qty,
-		item?.actual_qty,
-		item?.stock_qty,
-	]
-	for (const candidate of candidates) {
-		const num = Number(candidate)
-		if (Number.isFinite(num)) return num
-	}
-	return 0
-}
-
-export function getStockHint(item = {}, stockCheck = null) {
-	const availableQty = extractAvailableStock(item, stockCheck)
-	const stockUom = item?.stock_uom || item?.uom || ""
-	if (availableQty <= 0) {
-		return stockUom ? `Only 0 ${stockUom} available` : "Out of stock"
-	}
-	return stockUom
-		? `Only ${formatStockQuantity(availableQty)} ${stockUom} available`
-		: `Only ${formatStockQuantity(availableQty)} available`
-}
-
-export function getStockDisplayState({
-	item = {},
-	selectedOption = null,
-	quantity = 1,
-	enforceStockValidation = false,
-	validationResult = null,
-} = {}) {
-	if (!item || !selectedOption) return null
-
-	const selectedUom = selectedOption?.uom || item?.uom || ""
-	const stockUom = item?.stock_uom || selectedUom || ""
-
-	if (validationResult?.reason === "uom_not_allowed") {
-		return {
-			type: "uom_blocked",
-			title: "Not allowed for selling",
-			note: selectedUom
-				? `UOM "${selectedUom}" is not allowed for selling this item`
-				: "This UOM is not allowed for selling this item",
-			blocked: true,
-			available: null,
-			required: null,
-			stockUom,
-			panelClass: "bg-red-50 text-red-700 border border-red-200",
-		}
-	}
-
-	const available = extractAvailableStock(item, validationResult?.stock)
-	const conversionFactor = Number(selectedOption?.conversion_factor || 1)
-	const qty = Number(quantity || 1) || 1
-	const required = qty * conversionFactor
-
-	if (required <= available) {
-		return null
-	}
-
-	if (enforceStockValidation) {
-		return {
-			type: "insufficient_stock",
-			title: "Insufficient stock",
-			note: "",
-			blocked: true,
-			available,
-			required,
-			stockUom,
-			panelClass: "bg-orange-50 text-orange-700 border border-orange-200",
-		}
-	}
+function normalizePolicyRow(row, fallbackStockUom = "") {
+	const uom = row?.uom || row?.value || row?.name || ""
+	if (!uom) return null
 
 	return {
-		type: "low_stock",
-		title: "Low stock",
-		note: "Selling allowed (negative stock enabled)",
-		blocked: false,
-		available,
-		required,
-		stockUom,
-		panelClass: "bg-yellow-50 text-yellow-700 border border-yellow-200",
+		uom,
+		conversion_factor: Number(row?.conversion_factor || (uom === fallbackStockUom ? 1 : 1)) || 1,
+		is_stock_uom: Boolean(row?.is_stock_uom || uom === fallbackStockUom),
+		allow_for_selling:
+			row?.allow_for_selling === undefined ? true : Boolean(row.allow_for_selling),
+		allow_for_buying:
+			row?.allow_for_buying === undefined ? true : Boolean(row.allow_for_buying),
+	}
+}
+
+function dedupeRows(rows = []) {
+	const seen = new Set()
+	const out = []
+
+	for (const row of rows) {
+		if (!row?.uom || seen.has(row.uom)) continue
+		seen.add(row.uom)
+		out.push(row)
+	}
+
+	return out
+}
+
+function buildFallbackAllUoms(item = {}) {
+	const rows = []
+
+	if (item?.stock_uom) {
+		rows.push(
+			normalizePolicyRow(
+				{
+					uom: item.stock_uom,
+					conversion_factor: 1,
+					is_stock_uom: true,
+					allow_for_selling: true,
+					allow_for_buying: true,
+				},
+				item.stock_uom
+			)
+		)
+	}
+
+	if (Array.isArray(item?.item_uoms)) {
+		for (const row of item.item_uoms) {
+			rows.push(normalizePolicyRow(row, item.stock_uom))
+		}
+	}
+
+	return dedupeRows(rows.filter(Boolean))
+}
+
+
+export function getUOMPolicy(item = {}, rawPolicy = {}) {
+	const stockUom = item?.stock_uom || item?.uom || ""
+
+	const rawAllRows = Array.isArray(rawPolicy?.all_uoms) ? rawPolicy.all_uoms : []
+	const normalizedAllRows = dedupeRows(
+		(rawAllRows.length ? rawAllRows : buildFallbackAllUoms(item))
+			.map((row) => normalizePolicyRow(row, stockUom))
+			.filter(Boolean)
+	)
+
+	let allowedRows = Array.isArray(rawPolicy?.allowed_uoms)
+		? rawPolicy.allowed_uoms
+				.map((row) => normalizePolicyRow(row, stockUom))
+				.filter(Boolean)
+		: normalizedAllRows.filter((row) => row.allow_for_selling)
+
+	if (!allowedRows.length && normalizedAllRows.length) {
+		allowedRows = normalizedAllRows.filter((row) => row.allow_for_selling)
+	}
+
+	if (!allowedRows.length && stockUom) {
+		allowedRows = [
+			normalizePolicyRow(
+				{
+					uom: stockUom,
+					conversion_factor: 1,
+					is_stock_uom: true,
+					allow_for_selling: true,
+					allow_for_buying: true,
+				},
+				stockUom
+			),
+		].filter(Boolean)
+	}
+
+	const defaultUom =
+		rawPolicy?.default_uom ||
+		item?.resolved_uom ||
+		allowedRows.find((row) => row.is_stock_uom)?.uom ||
+		allowedRows[0]?.uom ||
+		stockUom ||
+		item?.uom ||
+		null
+
+	return {
+		all_uoms: normalizedAllRows,
+		allowed_uoms: dedupeRows(allowedRows),
+		default_uom: defaultUom,
 	}
 }

@@ -9,7 +9,7 @@ from erpnext.stock.doctype.batch.batch import get_batch_qty
 from erpnext.stock.get_item_details import get_item_details as erpnext_get_item_details
 from frappe import _
 from frappe.query_builder import DocType, functions as fn
-from frappe.utils import flt, nowdate
+from frappe.utils import cint, flt, nowdate
 
 ITEM_RESULT_FIELDS = [
 	"name as item_code",
@@ -29,6 +29,112 @@ ITEM_RESULT_FIELDS = [
 ]
 
 ITEM_RESULT_COLUMNS = ",\n\t".join(ITEM_RESULT_FIELDS)
+
+
+def _to_policy_bool(value):
+	return 1 if cint(value) else 0
+
+
+def get_uom_policy_payloads(item_codes):
+	"""Bulk load synced UOM policy payload for many items at once."""
+	if not item_codes:
+		return {}
+
+	policy_rows = frappe.get_all(
+		"Item UOM Policy",
+		filters={"item_code": ["in", item_codes]},
+		fields=[
+			"item_code",
+			"uom",
+			"conversion_factor",
+			"is_stock_uom",
+			"allow_for_selling",
+			"allow_for_buying",
+		],
+		order_by="item_code asc, is_stock_uom desc, creation asc",
+	)
+
+	policy_map = defaultdict(lambda: {"all_uoms": [], "allowed_uoms": [], "default_uom": None})
+
+	if policy_rows:
+		for row in policy_rows:
+			entry = {
+				"uom": row.uom,
+				"conversion_factor": flt(row.conversion_factor) or 1,
+				"is_stock_uom": _to_policy_bool(row.is_stock_uom),
+				"allow_for_selling": _to_policy_bool(row.allow_for_selling),
+				"allow_for_buying": _to_policy_bool(row.allow_for_buying),
+			}
+			policy_map[row.item_code]["all_uoms"].append(entry)
+
+			if cint(row.allow_for_selling):
+				policy_map[row.item_code]["allowed_uoms"].append(entry)
+
+		for item_code, payload in policy_map.items():
+			default_row = next(
+				(row for row in payload["allowed_uoms"] if cint(row.get("is_stock_uom"))),
+				None,
+			)
+			if not default_row and payload["allowed_uoms"]:
+				default_row = payload["allowed_uoms"][0]
+			elif not default_row and payload["all_uoms"]:
+				default_row = next(
+					(row for row in payload["all_uoms"] if cint(row.get("is_stock_uom"))),
+					payload["all_uoms"][0],
+				)
+
+			payload["default_uom"] = default_row.get("uom") if default_row else None
+
+		return dict(policy_map)
+
+	item_meta = frappe.get_all(
+		"Item",
+		filters={"name": ["in", item_codes]},
+		fields=["name", "stock_uom"],
+	)
+	stock_uom_map = {row.name: row.stock_uom for row in item_meta}
+
+	conversions = frappe.get_all(
+		"UOM Conversion Detail",
+		filters={"parent": ["in", item_codes]},
+		fields=["parent", "uom", "conversion_factor"],
+		order_by="parent asc, idx asc",
+	)
+
+	for item_code in item_codes:
+		stock_uom = stock_uom_map.get(item_code)
+		payload = policy_map[item_code]
+
+		if stock_uom:
+			stock_entry = {
+				"uom": stock_uom,
+				"conversion_factor": 1,
+				"is_stock_uom": 1,
+				"allow_for_selling": 1,
+				"allow_for_buying": 1,
+			}
+			payload["all_uoms"].append(stock_entry)
+			payload["allowed_uoms"].append(stock_entry)
+			payload["default_uom"] = stock_uom
+
+	for row in conversions:
+		item_code = row.parent
+		stock_uom = stock_uom_map.get(item_code)
+
+		if row.uom == stock_uom:
+			continue
+
+		entry = {
+			"uom": row.uom,
+			"conversion_factor": flt(row.conversion_factor) or 1,
+			"is_stock_uom": 0,
+			"allow_for_selling": 1,
+			"allow_for_buying": 1,
+		}
+		policy_map[item_code]["all_uoms"].append(entry)
+		policy_map[item_code]["allowed_uoms"].append(entry)
+
+	return dict(policy_map)
 
 
 def get_stock_availability(item_code, warehouse):
@@ -1238,6 +1344,7 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20,
 
 		# Prepare maps for enrichment
 		item_codes = [item["item_code"] for item in items]
+		uom_policy_map = get_uom_policy_payloads(item_codes)
 		conversion_map = defaultdict(dict)  # parent -> {uom: factor}
 		uom_map = {}  # parent -> [ {uom, conversion_factor}, ... ]
 		uom_prices_map = {}  # item_code -> {uom: price_list_rate}
@@ -1461,6 +1568,14 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20,
 			# Item UOMs (exclude stock UOM to avoid duplicates)
 			all_uoms = uom_map.get(item["item_code"], []) or []
 			item["item_uoms"] = [u for u in all_uoms if u.get("uom") != stock_uom]
+			item["uom_policy"] = uom_policy_map.get(
+				item["item_code"],
+				{
+					"all_uoms": [],
+					"allowed_uoms": [],
+					"default_uom": stock_uom,
+				},
+			)
 
 			# UOM-specific prices map for frontend selector
 			item["uom_prices"] = uom_prices_map.get(item["item_code"], {})
@@ -1564,6 +1679,7 @@ def get_items_bulk(pos_profile, item_groups=None, start=0, limit=2000, include_v
 
 		# Bulk enrichment (same as get_items)
 		item_codes = [item["item_code"] for item in items]
+		uom_policy_map = get_uom_policy_payloads(item_codes)
 		conversion_map = defaultdict(dict)
 		uom_map = {}
 		uom_prices_map = {}
@@ -1665,6 +1781,14 @@ def get_items_bulk(pos_profile, item_groups=None, start=0, limit=2000, include_v
 			# UOMs
 			all_uoms = uom_map.get(item_code, []) or []
 			item["item_uoms"] = [u for u in all_uoms if u.get("uom") != stock_uom]
+			item["uom_policy"] = uom_policy_map.get(
+				item_code,
+				{
+					"all_uoms": [],
+					"allowed_uoms": [],
+					"default_uom": stock_uom,
+				},
+			)
 			item["uom_prices"] = prices
 
 			# Variant attributes
