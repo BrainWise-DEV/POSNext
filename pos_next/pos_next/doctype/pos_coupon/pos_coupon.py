@@ -171,16 +171,47 @@ def increment_coupon_usage(coupon_code):
         )
 
 
+def rollback_coupon_usage(coupon_code):
+    """Atomically decrement coupon usage inside the caller's transaction."""
+    coupon_code = coupon_code.upper()
+    locked_coupon = frappe.db.sql(
+        """
+        SELECT name, used
+        FROM `tabPOS Coupon`
+        WHERE coupon_code = %s
+        FOR UPDATE
+        """,
+        (coupon_code,),
+        as_dict=True,
+    )
+
+    if not locked_coupon:
+        return None
+
+    coupon_row = locked_coupon[0]
+    current_used = flt(coupon_row.get("used") or 0)
+    if current_used <= 0:
+        return coupon_row
+
+    updated_used = current_used - 1
+    frappe.db.set_value(
+        "POS Coupon",
+        coupon_row["name"],
+        "used",
+        updated_used,
+        update_modified=False,
+    )
+    coupon_row["used"] = updated_used
+    return coupon_row
+
+
 def decrement_coupon_usage(coupon_code):
-    """Decrement the usage counter for a coupon (for cancelled invoices)"""
+    """Backward-compatible wrapper around transactional coupon rollback."""
     try:
-        coupon = frappe.get_doc("POS Coupon", {"coupon_code": coupon_code.upper()})
-        if coupon.used and coupon.used > 0:
-            coupon.used = coupon.used - 1
-            coupon.db_set('used', coupon.used)
-            frappe.db.commit()
+        return rollback_coupon_usage(coupon_code)
     except Exception as e:
         frappe.log_error(
             title="Coupon Usage Decrement Failed",
             message=f"Failed to decrement usage for coupon {coupon_code}: {str(e)}"
         )
+        raise
