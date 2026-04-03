@@ -1029,6 +1029,7 @@ import { offlineWorker } from "@/utils/offline/workerClient";
 import { cacheInvoiceHistory, getCachedInvoiceHistory } from "@/utils/offline/sync";
 import { printInvoice, printInvoiceByName, printWithSilentFallback } from "@/utils/printInvoice";
 import { qzConnected, connect as qzConnect, disconnect as qzDisconnect } from "@/utils/qzTray";
+import { getUOMPolicy } from "@/utils/pos_connector/uomPolicyAdapter"
 
 import { Button, Dialog, createResource } from "frappe-ui";
 import { call } from "@/utils/apiWrapper";
@@ -1823,34 +1824,102 @@ async function handleShiftClosed() {
 }
 
 function handleItemSelected(item, autoAdd = false) {
+	const explicitPolicy = item?.uom_policy || item?._uom_policy || {}
+	const uomPolicy = getUOMPolicy(item, explicitPolicy)
+
+	const selectedUom =
+		item?.resolved_uom ||
+		item?.scanned_uom ||
+		item?.barcode_uom ||
+		item?.uom ||
+		null
+
+	function isSellableUom(targetUom) {
+		if (!targetUom) return true
+
+		const allowedUoms = Array.isArray(uomPolicy?.allowed_uoms)
+			? uomPolicy.allowed_uoms
+			: []
+
+		if (allowedUoms.length > 0) {
+			return allowedUoms.some((row) => {
+				const rowUom = row?.uom || row?.value || row?.name || null
+				return rowUom === targetUom
+			})
+		}
+
+		const allRows = Array.isArray(uomPolicy?.all_uoms) ? uomPolicy.all_uoms : []
+		const matchedRow = allRows.find((row) => {
+			const rowUom = row?.uom || row?.value || row?.name || null
+			return rowUom === targetUom
+		})
+
+		if (matchedRow && matchedRow.allow_for_selling !== undefined) {
+			return Boolean(matchedRow.allow_for_selling)
+		}
+
+		return true
+	}
+
 	// Auto-add mode
 	if (autoAdd) {
 		try {
-			// Check if item has resolved barcode data (weighted/priced)
 			if (item.resolved_qty && item.resolved_barcode_type) {
-				// Get the unit price for the resolved UOM from uom_prices, or fall back to item rate
-				const resolvedUom = item.resolved_uom || item.uom;
-				const unitRate = item.uom_prices?.[resolvedUom] || item.rate;
+				const resolvedUom = item.resolved_uom || item.uom
+
+				if (!isSellableUom(resolvedUom)) {
+					uiStore.showError(
+						__("UOM Not Allowed"),
+						__('UOM "{0}" is not allowed to sell for item "{1}".', [
+							resolvedUom,
+							item.item_name || item.item_code,
+						]),
+						__("Item: {0}", [item.item_code])
+					)
+					return
+				}
+
+				const unitRate = item.uom_prices?.[resolvedUom] || item.rate
 
 				const resolvedItem = {
 					...item,
 					uom: resolvedUom,
 					rate: unitRate,
 					price_list_rate: unitRate,
-					is_resolved_barcode: true, // Mark as readonly
-				};
-				cartStore.addItem(resolvedItem, item.resolved_qty, true, shiftStore.currentProfile);
+					is_resolved_barcode: true
+				}
+
+				cartStore.addItem(
+					resolvedItem,
+					item.resolved_qty,
+					true,
+					shiftStore.currentProfile
+				)
 			} else {
-				cartStore.addItem(item, 1, true, shiftStore.currentProfile);
+				const fallbackUom = item.uom || item.stock_uom || null
+
+				if (!isSellableUom(fallbackUom)) {
+					uiStore.showError(
+						__("UOM Not Allowed"),
+						__('UOM "{0}" is not allowed to sell for item "{1}".', [
+							fallbackUom,
+							item.item_name || item.item_code,
+						]),
+						__("Item: {0}", [item.item_code])
+					)
+					return
+				}
+
+				cartStore.addItem(item, 1, true, shiftStore.currentProfile)
 			}
 		} catch (error) {
 			uiStore.showError(
 				__("Insufficient Stock"),
 				error.message,
 				__("Item: {0}", [item.item_code])
-			);
+			)
 		}
-		return;
+		return
 	}
 
 	// Early out-of-stock guard — prevent opening dialogs for zero-stock items
@@ -1879,16 +1948,52 @@ function handleItemSelected(item, autoAdd = false) {
 
 	// Check for UOMs
 	if (item.item_uoms && item.item_uoms.length > 0) {
-		cartStore.setPendingItem(item, 1, "uom");
-		uiStore.showItemSelectionDialog = true;
-		return;
-	}
+		const resolvedUom =
+			item.resolved_uom ||
+			item.barcode_uom ||
+			item.scanned_uom ||
+			null
 
-	// Check for batch/serial
-	if (item.has_batch_no || item.has_serial_no) {
-		cartStore.setPendingItem(item, 1);
-		uiStore.showBatchSerialDialog = true;
-		return;
+		const isResolvedBarcodeItem =
+			Boolean(item.resolved_barcode_type) ||
+			Boolean(resolvedUom)
+
+		if (isResolvedBarcodeItem && resolvedUom) {
+			const unitRate =
+				item.uom_prices?.[resolvedUom] ||
+				item.rate ||
+				item.price_list_rate ||
+				0
+
+			const resolvedItem = {
+				...item,
+				uom: resolvedUom,
+				rate: unitRate,
+				price_list_rate: unitRate,
+				is_resolved_barcode: true,
+			}
+
+			try {
+				cartStore.addItem(resolvedItem, 1, false, shiftStore.currentProfile)
+				showSuccess(
+					__("{0} ({1}) added to cart", [
+						resolvedItem.item_name,
+						resolvedUom,
+					])
+				)
+			} catch (error) {
+				uiStore.showError(
+					__("Insufficient Stock"),
+					error.message,
+					__("Item: {0}", [item.item_code])
+				)
+			}
+			return
+		}
+
+		cartStore.setPendingItem(item, 1, "uom")
+		uiStore.showItemSelectionDialog = true
+		return
 	}
 
 	// Add to cart

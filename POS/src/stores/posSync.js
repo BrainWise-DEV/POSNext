@@ -29,6 +29,7 @@ import { logger } from "@/utils/logger"
 import { offlineState } from "@/utils/offline/offlineState"
 import { offlineWorker } from "@/utils/offline/workerClient"
 import { defineStore } from "pinia"
+import { useItemSearchStore } from "./itemSearch"
 import { computed, ref } from "vue"
 
 const log = logger.create('POSSync')
@@ -52,6 +53,12 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 
 	/** List of pending invoices for display */
 	const pendingInvoicesList = ref([])
+
+	const itemSearchStore = useItemSearchStore()
+
+	const lastItemSyncAt = ref(
+		localStorage.getItem("pos:last_item_policy_sync_at") || null
+	)
 
 	/** Track previous offline state for detecting online/offline transitions */
 	let wasOffline = offlineState.isOffline
@@ -82,6 +89,9 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 			log.info('Transition to online detected, auto-syncing pending invoices')
 			try {
 				await syncPending()
+				await refreshItemPolicyCache({
+					force: true,
+				})
 			} catch (error) {
 				log.error('Auto-sync failed on reconnection', error)
 			}
@@ -109,6 +119,56 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 			pendingInvoicesCount.value = await offlineWorker.getOfflineInvoiceCount()
 		} catch (error) {
 			log.error('Failed to get pending invoice count', error)
+		}
+	}
+
+	function saveLastItemSync(timestamp = null) {
+		const ts = timestamp || new Date().toISOString()
+		lastItemSyncAt.value = ts
+		localStorage.setItem("pos:last_item_policy_sync_at", ts)
+		return ts
+	}
+
+	function isItemPolicySyncStale(maxAgeMs = 5 * 60 * 1000) {
+		if (!lastItemSyncAt.value) return true
+		const parsed = new Date(lastItemSyncAt.value).getTime()
+		if (!parsed) return true
+		return Date.now() - parsed > maxAgeMs
+	}
+
+	async function refreshItemPolicyCache(options = {}) {
+		const { maxAgeMs = 5 * 60 * 1000, force = false } = options
+
+		if (isOffline.value) return false
+		if (!itemSearchStore?.mergeFreshItemsIntoStore) return false
+		if (!itemSearchStore?.posProfile) return false
+
+		const activeProfile =
+			typeof itemSearchStore.posProfile === "object" && "value" in itemSearchStore.posProfile
+				? itemSearchStore.posProfile.value
+				: itemSearchStore.posProfile
+
+		if (!activeProfile) return false
+
+		if (!force && !isItemPolicySyncStale(maxAgeMs)) {
+			return false
+		}
+
+		try {
+			await itemSearchStore.loadAllItems(activeProfile, true)
+
+			const syncTimestamp =
+				typeof itemSearchStore.lastItemPolicySyncAt === "object" && "value" in itemSearchStore.lastItemPolicySyncAt
+					? itemSearchStore.lastItemPolicySyncAt.value
+					: itemSearchStore.lastItemPolicySyncAt
+
+			saveLastItemSync(syncTimestamp || new Date().toISOString())
+
+			log.info("Item policy cache refreshed automatically")
+			return true
+		} catch (error) {
+			log.warn("Item policy cache refresh failed", error.message)
+			return false
 		}
 	}
 
@@ -357,6 +417,10 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 				log.error('Failed to load invoice data for offline', error)
 				// Continue - not critical for POS operation
 			}
+
+			await refreshItemPolicyCache({
+				maxAgeMs: 5 * 60 * 1000,
+			})
 		} catch (error) {
 			log.error('Failed to preload offline data', error)
 			showWarning(__("Some data may not be available offline"))
@@ -408,6 +472,7 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 		pendingInvoicesCount,
 		isSyncing,
 		pendingInvoicesList,
+		lastItemSyncAt,
 
 		// Computed
 		hasPendingInvoices,
@@ -421,5 +486,6 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 		checkOfflineCacheAvailability,
 		checkCacheReady,
 		getCacheStats,
+		refreshItemPolicyCache,
 	}
 })

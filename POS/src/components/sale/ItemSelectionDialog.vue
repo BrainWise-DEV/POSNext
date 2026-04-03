@@ -136,8 +136,8 @@
 									:class="[
 										'text-xs mt-0.5',
 										isSelectedOption(option)
-											? 'text-blue-100'
-											: option.disabled
+											? (option.sell_blocked ? 'text-orange-600' : 'text-blue-100')
+											: option.sell_blocked
 												? 'text-gray-400'
 												: 'text-gray-500'
 									]"
@@ -390,7 +390,15 @@ const confirmButtonText = computed(() => __("Add to Cart"))
 const currentItem = computed(() => stockContextItem.value || props.item || {})
 
 const uomPolicy = computed(() => {
-	return getUOMPolicy(currentItem.value, currentItem.value?._uom_policy || {})
+	const explicitPolicy =
+		currentItem.value?.uom_policy ||
+		currentItem.value?._uom_policy ||
+		props.item?.uom_policy ||
+		props.item?._uom_policy ||
+		{}
+
+	return getUOMPolicy(currentItem.value, explicitPolicy)
+
 })
 
 const selectedRate = computed(() => {
@@ -415,7 +423,7 @@ const selectedOptionSummary = computed(() => {
 const selectedOptionSellBlocked = computed(() => {
 	if (props.mode !== "uom" || !selectedOption.value) return false
 
-	if (selectedOption.value.disabled) return true
+	if (selectedOption.value.sell_blocked) return true
 
 	const allowedUoms = Array.isArray(uomPolicy.value.allowed_uoms)
 		? uomPolicy.value.allowed_uoms
@@ -525,21 +533,22 @@ function getUomButtonClass(option) {
 
 	const isSelected = isSelectedOption(option)
 	const isPending = uomCheckLoading.value && isSelected
+	const isSellBlocked = Boolean(option?.sell_blocked)
 
 	if (isPending) {
 		return `${base} bg-gray-200 text-gray-500 border-gray-300 ring-2 ring-gray-200 opacity-80 cursor-wait`
 	}
 
-	if (isSelected && option.disabled) {
-		return `${base} bg-gray-200 text-gray-500 border-gray-300 ring-2 ring-gray-200`
+	if (isSelected && isSellBlocked) {
+		return `${base} bg-orange-100 text-orange-700 border-orange-300 ring-2 ring-orange-200`
 	}
 
 	if (isSelected) {
 		return `${base} bg-blue-600 text-white shadow-lg border-blue-600 ring-2 ring-blue-300`
 	}
 
-	if (option.disabled) {
-		return `${base} bg-gray-100 text-gray-400 border-gray-200 opacity-70`
+	if (isSellBlocked) {
+		return `${base} bg-white text-gray-700 border-gray-300 hover:border-orange-300 hover:bg-orange-50`
 	}
 
 	return `${base} bg-gray-100 text-gray-700 border-transparent hover:bg-gray-200 active:bg-gray-300`
@@ -800,7 +809,13 @@ async function loadOptions() {
 	selectedOption.value = null
 	quantity.value = Number(props.item?.resolved_qty || 1)
 	selectedAttributes.value = {}
-	stockContextItem.value = props.item ? { ...props.item } : null
+	stockContextItem.value = props.item
+		? {
+				...props.item,
+				uom_policy: props.item?.uom_policy || props.item?._uom_policy || null,
+				_uom_policy: props.item?._uom_policy || props.item?.uom_policy || null,
+		}
+		: null
 	defaultUom.value = props.item?.resolved_uom || props.item?.stock_uom || props.item?.uom || null
 
 	if (props.mode === "variant") {
@@ -864,10 +879,15 @@ function buildUomOptions() {
 		const rowAllowForSelling =
 			row?.allow_for_selling === undefined ? null : Boolean(row.allow_for_selling)
 
+		const hasExplicitPolicy =
+			allPolicyRows.length > 0 || allowedSet.size > 0
+
 		const isAllowed =
 			rowAllowForSelling !== null
 				? rowAllowForSelling
-				: (allowedSet.size === 0 || allowedSet.has(uom))
+				: hasExplicitPolicy
+					? allowedSet.has(uom)
+					: true
 
 		built.push({
 			key: `${uom}::${conversionFactor}`,
@@ -891,7 +911,8 @@ function buildUomOptions() {
 			actual_qty: item.actual_qty,
 			available_stock_qty: item.available_stock_qty,
 			warehouse: item.selected_warehouse || item.warehouse || null,
-			disabled: !isAllowed,
+			disabled: false,
+			sell_blocked: !isAllowed,
 		})
 	}
 
@@ -920,6 +941,23 @@ function getUomPrice(uom, conversionFactor) {
 	}
 
 	const baseRate = Number(item.rate || item.price_list_rate || 0)
+
+	const resolvedUom =
+		item.resolved_uom ||
+		item.scanned_uom ||
+		item.barcode_uom ||
+		item.uom ||
+		null
+
+	if (resolvedUom && resolvedUom === uom) {
+		return baseRate
+	}
+
+	const baseStockUom = item.stock_uom || item.uom || null
+	if (baseStockUom && baseStockUom === uom) {
+		return baseRate
+	}
+
 	return baseRate * Number(conversionFactor || 1)
 }
 
@@ -927,7 +965,7 @@ function resolveInitialUomOption(uomOptions) {
 	if (!Array.isArray(uomOptions) || !uomOptions.length) return null
 
 	const barcodeUoms = currentItem.value?.barcode_uoms
-		? props.item.barcode_uoms.split(",").map((v) => v.trim()).filter(Boolean)
+		? String(currentItem.value.barcode_uoms).split(",").map((v) => v.trim()).filter(Boolean)
 		: []
 
 	const preferredUom =

@@ -482,6 +482,7 @@ def search_by_barcode(barcode, pos_profile):
 		# Include UOM from barcode if available
 		if barcode_uom:
 			item["uom"] = barcode_uom
+			item["barcode_uom"] = barcode_uom
 
 		# Get item details
 		item_details = get_item_detail(
@@ -490,6 +491,11 @@ def search_by_barcode(barcode, pos_profile):
 			price_list=pos_profile_doc.selling_price_list,
 			company=pos_profile_doc.company,
 		)
+		
+		# Include UOM from barcode if available
+		if barcode_uom:
+			item_details["barcode_uom"] = barcode_uom
+			item_details["resolved_uom"] = item_details.get("resolved_uom") or barcode_uom
 
 		# Ensure warehouse is set on the response (needed for cart/invoice)
 		item_details["warehouse"] = pos_profile_doc.warehouse
@@ -510,6 +516,17 @@ def search_by_barcode(barcode, pos_profile):
 					uom_prices[p["uom"]] = p["price_list_rate"]
 
 		item_details["uom_prices"] = uom_prices
+		# Add synced UOM policy payload (same as get_items)
+		uom_policy_map = get_uom_policy_payloads([item_code])
+
+		item_details["uom_policy"] = uom_policy_map.get(
+			item_code,
+			{
+				"all_uoms": [],
+				"allowed_uoms": [],
+				"default_uom": item_doc.stock_uom,
+			},
+		)
 
 		# Apply resolved barcode data (weighted/priced) to the item details
 		if resolved_barcode_data:

@@ -112,6 +112,8 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 	const cacheSyncing = ref(false)
 	const cacheStats = ref({ items: 0, lastSync: null })
 	const serverDataFresh = ref(false) // Track if we have fresh server data in current session
+	const lastItemPolicySyncAt = ref(null)
+	const lastVisibleItemsRefreshAt = ref(null)
 
 	// Performance helpers
 	const allItemsVersion = ref(0)
@@ -432,6 +434,59 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 		searchResultsVersion.value += 1
 		registerItems(next, registeredSearchItems) // Initializes stock in stock store
 		clearBaseCache()
+	}
+
+	function markItemPolicySync(timestamp = null) {
+		const ts = timestamp || new Date().toISOString()
+		lastItemPolicySyncAt.value = ts
+		return ts
+	}
+
+	function markVisibleItemsRefresh(timestamp = null) {
+		const ts = timestamp || new Date().toISOString()
+		lastVisibleItemsRefreshAt.value = ts
+		return ts
+	}
+
+	async function persistFreshItems(items) {
+		if (!Array.isArray(items) || items.length === 0) return
+		try {
+			await offlineWorker.cacheItems(items)
+		} catch (error) {
+			log.warn("Failed to persist fresh items", error.message)
+		}
+	}
+
+	async function mergeFreshItemsIntoStore(items, options = {}) {
+		const { persist = true, markSync = true } = options
+		if (!Array.isArray(items) || items.length === 0) {
+			return { merged: 0, updatedCodes: [] }
+		}
+		let touchedAllItems = false
+		let touchedSearchResults = false
+		let merged = 0
+		const updatedCodes = []
+		stockStore.init(items)
+
+		for (const freshItem of items) {
+			const code = freshItem?.item_code
+			if (!code) continue
+			const bucket = itemRegistry.get(code)
+			if (!bucket || bucket.size === 0) continue
+			bucket.forEach((existingRef) => {
+				Object.assign(existingRef, freshItem)
+				merged += 1
+				if (registeredAllItems.has(existingRef)) touchedAllItems = true
+				if (registeredSearchItems.has(existingRef)) touchedSearchResults = true
+			})
+			updatedCodes.push(code)
+		}
+		if (touchedAllItems) allItemsVersion.value += 1
+		if (touchedSearchResults) searchResultsVersion.value += 1
+		if (touchedAllItems || touchedSearchResults) clearBaseCache()
+		if (persist) await persistFreshItems(items)
+		if (markSync) markItemPolicySync()
+		return { merged, updatedCodes }
 	}
 
 	// ========================================================================
@@ -894,7 +949,10 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 
 				if (fetchedItems.length > 0) {
 					// Cache this batch for offline access (non-blocking)
-					offlineWorker.cacheItems(fetchedItems).catch(err => {
+					mergeFreshItemsIntoStore(fetchedItems, {
+						persist: true,
+						markSync: true,
+					}).catch(err => {
 						log.warn("Background item caching failed:", err.message)
 					})
 					cacheReady.value = true
@@ -949,7 +1007,10 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 					hasMore.value = totalItemCount > unfilteredLimit
 
 					// Cache this batch (non-blocking — background sync fills the rest)
-					offlineWorker.cacheItems(list).catch(err => {
+					mergeFreshItemsIntoStore(list, {
+						persist: true,
+						markSync: true,
+					}).catch(err => {
 						log.warn("Background item caching failed:", err.message)
 					})
 
@@ -1179,8 +1240,11 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 				currentOffset.value = start + items.length
 				totalItemsLoaded.value = items.length
 
-				// Cache for offline
-				await offlineWorker.cacheItems(items)
+				// Refresh + cache latest item payload
+				await mergeFreshItemsIntoStore(items, {
+					persist: true,
+					markSync: true,
+				})
 
 				log.debug(`Fetched page ${page}: ${items.length} items (offset ${start})`)
 			}
@@ -1284,8 +1348,11 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 				// If we got fewer items than requested, we've reached the end
 				hasMore.value = list.length >= itemsPerPage.value
 
-				// Cache new batch for offline support
-				await offlineWorker.cacheItems(list)
+				// Refresh + cache latest item payload
+				await mergeFreshItemsIntoStore(list, {
+					persist: true,
+					markSync: true,
+				})
 
 				log.debug(`Loaded ${list.length} more items, total: ${totalItemsLoaded.value}`)
 			} else {
@@ -1417,6 +1484,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 
 						if (list.length > 0) {
 							await offlineWorker.cacheItems(list, workerBatchSize)
+							await mergeFreshItemsIntoStore(list, { persist: false, markSync: true })
 							if (myGeneration !== syncGeneration) return
 							for (const item of list) {
 								if (item.item_code) uniqueItemsSeen.add(item.item_code)
@@ -1487,6 +1555,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 
 							if (list.length > 0) {
 								await offlineWorker.cacheItems(list, workerBatchSize)
+								await mergeFreshItemsIntoStore(list, { persist: false, markSync: true })
 								if (myGeneration !== syncGeneration) return
 								for (const item of list) {
 									if (item.item_code) uniqueItemsSeen.add(item.item_code)
@@ -1631,7 +1700,10 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 						log.success(`Found ${serverResults.length} items on server`)
 
 						// Cache server results for future searches
-						await offlineWorker.cacheItems(serverResults)
+						await mergeFreshItemsIntoStore(serverResults, {
+							persist: true,
+							markSync: true,
+						})
 
 						// If we didn't resolve with cache, resolve with server results
 						if (!cached || cached.length === 0) {
@@ -1692,7 +1764,20 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 			})
 
 			const item = result?.message || result
-			return item
+			if (!item) {
+				return null
+			}
+
+			setSearchResults([item])
+
+			await mergeFreshItemsIntoStore([item], {
+				persist: true,
+				markSync: true,
+			})
+
+			markVisibleItemsRefresh()
+
+			return searchResults.value?.[0] || item
 		} catch (error) {
 			log.error("Store searchByBarcode error", error)
 			throw error
@@ -2172,6 +2257,8 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 		cacheStats,
 		sortBy,
 		sortOrder,
+		lastItemPolicySyncAt,
+		lastVisibleItemsRefreshAt,
 
 		// ========================================================================
 		// COMPUTED PROPERTIES
@@ -2201,6 +2288,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 		invalidateCache,
 		setSortFilter,
 		clearSortFilter,
+		mergeFreshItemsIntoStore,
 
 		// ========================================================================
 		// STOCK ACTIONS - Delegates to stock store

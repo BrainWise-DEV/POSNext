@@ -717,6 +717,7 @@
 
 <script setup>
 import LazyImage from "@/components/common/LazyImage.vue"
+import { getUOMPolicy } from "@/utils/pos_connector/uomPolicyAdapter"
 import WarehouseAvailabilityDialog from "@/components/sale/WarehouseAvailabilityDialog.vue"
 import { useItemSearchStore } from "@/stores/itemSearch"
 import { usePOSSettingsStore } from "@/stores/posSettings"
@@ -1118,6 +1119,54 @@ function clearLongPress() {
  */
 function selectItem(item, autoAdd = false) {
 	if (!item) return false
+
+	const explicitPolicy = item?.uom_policy || item?._uom_policy || {}
+	const uomPolicy = getUOMPolicy(item, explicitPolicy)
+
+	const selectedUom =
+		item?.resolved_uom ||
+		item?.scanned_uom ||
+		item?.barcode_uom ||
+		item?.uom ||
+		null
+
+	if (selectedUom) {
+		const allowedUoms = Array.isArray(uomPolicy?.allowed_uoms)
+			? uomPolicy.allowed_uoms
+			: []
+
+		let isSellAllowed = true
+
+		if (allowedUoms.length > 0) {
+			isSellAllowed = allowedUoms.some((row) => {
+				const rowUom = row?.uom || row?.value || row?.name || null
+				return rowUom === selectedUom
+			})
+		} else {
+			const allRows = Array.isArray(uomPolicy?.all_uoms)
+				? uomPolicy.all_uoms
+				: []
+
+			const matchedRow = allRows.find((row) => {
+				const rowUom = row?.uom || row?.value || row?.name || null
+				return rowUom === selectedUom
+			})
+
+			if (matchedRow && matchedRow.allow_for_selling !== undefined) {
+				isSellAllowed = Boolean(matchedRow.allow_for_selling)
+			}
+		}
+
+		if (!isSellAllowed) {
+			showWarning(
+				__('UOM "{0}" is not allowed to sell for item "{1}".', [
+					selectedUom,
+					item.item_name || item.item_code,
+				])
+			)
+			return false
+		}
+	}
 
 	// Early out-of-stock guard — full qty validation happens in cartStore.addItem()
 	if (!item.has_variants && settingsStore.shouldEnforceStockValidation() && shouldValidateItemStock(item)) {
