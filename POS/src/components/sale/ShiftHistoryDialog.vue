@@ -250,6 +250,7 @@ const props = defineProps({
 		type: String,
 		default: DEFAULT_CURRENCY,
 	},
+	posProfile: String,
 })
 
 const emit = defineEmits(["update:modelValue"])
@@ -460,6 +461,7 @@ const shiftsResource = createResource({
 			filters: JSON.stringify(filters),
 			limit:  PAGE_SIZE,
 			offset: (currentPage.value - 1) * PAGE_SIZE,
+			pos_profile: props.posProfile,
 		}
 	},
 	auto: false,

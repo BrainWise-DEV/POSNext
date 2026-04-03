@@ -1476,7 +1476,7 @@ def get_invoice(invoice_name):
 
 
 @frappe.whitelist()
-def get_invoices(pos_profile, search=None, limit=20, offset=0, from_date=None, to_date=None):
+def get_invoices(pos_profile, search=None, limit=20, offset=0, from_date=None, to_date=None, include_items=False, docstatus=None):
 	"""
 	Get paginated, server-side filtered list of invoices for a POS Profile.
 
@@ -1502,16 +1502,26 @@ def get_invoices(pos_profile, search=None, limit=20, offset=0, from_date=None, t
 	if not has_access and not frappe.has_permission("Sales Invoice", "read"):
 		frappe.throw(_("You don't have access to this POS Profile"))
 
-	limit = cint(limit) or 20
-	offset = cint(offset) or 0
+	# Clamp page size securely: minimum 1, maximum 100
+	limit = max(1, min(cint(limit) or 20, 100))
+	offset = max(0, cint(offset) or 0)
 
 	# Build WHERE conditions and params
 	conditions = [
 		"pos_profile = %(pos_profile)s",
-		"docstatus = 1",
 		"is_pos = 1",
 	]
 	params = {"pos_profile": pos_profile, "limit": limit, "offset": offset}
+
+	if docstatus is not None:
+		if isinstance(docstatus, (list, tuple)):
+			docstatus_list = [cint(d) for d in docstatus]
+			conditions.append(f"docstatus IN ({','.join(map(str, docstatus_list))})")
+		else:
+			conditions.append("docstatus = %(docstatus)s")
+			params["docstatus"] = cint(docstatus)
+	else:
+		conditions.append("docstatus < 2")
 
 	if search:
 		conditions.append(
@@ -1552,6 +1562,14 @@ def get_invoices(pos_profile, search=None, limit=20, offset=0, from_date=None, t
 			posting_time DESC
 		LIMIT %(limit)s OFFSET %(offset)s
 	""", params, as_dict=True)
+
+	if cint(include_items):
+		for invoice in invoices:
+			invoice.items = frappe.db.sql(
+				"SELECT * FROM `tabSales Invoice Item` WHERE parent = %s",
+				(invoice.name,),
+				as_dict=True
+			)
 
 	return invoices
 

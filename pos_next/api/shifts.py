@@ -185,7 +185,7 @@ def submit_closing_shift(closing_shift):
 
 
 @frappe.whitelist()
-def get_shift_history(filters=None, limit=25, offset=0):
+def get_shift_history(filters=None, limit=25, offset=0, pos_profile=None):
 	"""Return paginated shift history for the current session user only.
 
 	Args:
@@ -235,6 +235,10 @@ def get_shift_history(filters=None, limit=25, offset=0):
 		if filters.get("to_date"):
 			conditions.append("os.posting_date <= %(to_date)s")
 			values["to_date"] = filters["to_date"]
+
+	if pos_profile:
+		conditions.append("os.pos_profile = %(pos_profile)s")
+		values["pos_profile"] = pos_profile
 
 	where_clause = "WHERE " + " AND ".join(conditions)
 
