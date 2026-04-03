@@ -149,13 +149,16 @@
 													<div>
 														<label class="block text-sm font-medium text-gray-700 mb-2 text-start">
                               {{ __('UOM') }}
-                              <span v-if="localItem?.is_resolved_barcode" class="ms-1 text-xs text-amber-600">({{ __('Locked') }})</span>
+                              <span v-if="uomIsLocked" class="ms-1 text-xs text-amber-600">({{ __('Locked') }})</span>
                             </label>
-                            <!-- For resolved barcode items, UOM is read-only -->
-                            <div v-if="localItem?.is_resolved_barcode" class="w-full h-10 border border-amber-300 rounded-lg bg-amber-50 flex items-center justify-center">
-                              <span class="text-sm font-semibold text-amber-700">{{ localUom }}</span>
+                            <div v-if="uomIsLocked" class="w-full h-10 border border-amber-300 rounded-lg bg-amber-50 flex items-center justify-center">
+                              <span class="text-sm font-semibold text-amber-700">{{ selectedUomDisplayLabel || localUom }}</span>
                             </div>
                             <SelectInput v-else v-model="localUom" :options="uomOptions" />
+                            <p v-if="uomLockMessage" class="mt-1 text-xs text-amber-600 flex items-center gap-1">
+                              <FeatherIcon name="lock" class="w-3 h-3" />
+                              {{ uomLockMessage }}
+                            </p>
 													</div>
 
 													<!-- Warehouse Selector -->
@@ -206,13 +209,20 @@
 											<!-- Item Discount Section (only if allowed by POS Profile) -->
 											<div v-if="settingsStore.allowItemDiscount" class="border-t border-gray-200 pt-4">
 												<label class="block text-sm font-medium text-gray-700 mb-3 text-start">{{ __('Item Discount') }}</label>
+												<div v-if="effectiveItemDiscountWarning" class="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+													<div class="flex items-start gap-2">
+														<FeatherIcon name="alert-triangle" class="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
+														<div>{{ effectiveItemDiscountWarning }}</div>
+													</div>
+												</div>
 												<div class="grid grid-cols-2 gap-3">
-													<!-- Discount Type -->
 													<div>
 														<label class="block text-xs text-gray-600 mb-1 text-start">{{ __('Discount Type') }}</label>
-														<SelectInput v-model="discountType" :options="discountTypeOptions" @change="handleDiscountTypeChange" />
+														<div v-if="!canEditItemDiscount" class="w-full h-10 border border-gray-200 rounded-lg bg-gray-100 flex items-center px-3 text-sm text-gray-500">
+															{{ discountType === 'percentage' ? __('Percentage (%)') : __('Amount') }}
+														</div>
+														<SelectInput v-else v-model="discountType" :options="discountTypeOptions" @change="handleDiscountTypeChange" />
 													</div>
-													<!-- Discount Value -->
 													<div>
 														<label class="block text-xs text-gray-600 mb-1 text-start">{{ discountType === 'percentage' ? __('Percentage') : __('Amount') }}</label>
 														<div class="relative">
@@ -222,15 +232,17 @@
 																min="0"
 																:max="discountType === 'percentage' ? 100 : undefined"
 																step="0.01"
-																class="w-full h-7 border border-gray-300 rounded-lg px-3 pe-8 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+																:disabled="!canEditItemDiscount"
+																:class="['w-full h-7 border rounded-lg px-3 pe-8 text-sm', canEditItemDiscount ? 'border-gray-300 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent' : 'border-gray-200 bg-gray-100 text-gray-500 cursor-not-allowed']"
 																@input="calculateDiscount"
 															/>
-															<span class="absolute inset-y-0 end-0 pe-3 flex items-center text-gray-500 text-sm">
+															<span :class="['absolute inset-y-0 end-0 pe-3 flex items-center text-sm', canEditItemDiscount ? 'text-gray-500' : 'text-gray-400']">
 																{{ discountType === 'percentage' ? '%' : '' }}
 															</span>
 														</div>
 													</div>
 												</div>
+												<p v-if="canEditItemDiscount && effectiveMaxDiscountPercent > 0" class="mt-2 text-xs text-gray-600">{{ __('Maximum allowed discount: {0}%', [effectiveMaxDiscountPercent]) }}<span v-if="effectiveMaxDiscountAmount > 0"> ({{ __('Up to {0}', [formatCurrency(effectiveMaxDiscountAmount)]) }})</span></p>
 											</div>
 
 											<!-- Totals -->
@@ -251,7 +263,7 @@
 
 											<div
 												v-if="stockDisplayPanel"
-												class="rounded-lg border border-yellow-200 bg-yellow-50 p-4 text-sm text-yellow-800"
+												class="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-700"
 											>
 												<div class="font-semibold mb-1">{{ stockDisplayPanel.title }}</div>
 												<div>{{ __('Available: {0} {1}', [formatStockNumber(stockDisplayPanel.available), stockDisplayPanel.stockUom]) }}</div>
@@ -291,6 +303,7 @@
 <script setup>
 import { useToast } from "@/composables/useToast"
 import { usePOSSettingsStore } from "@/stores/posSettings"
+import { getItemDiscountPolicy, getDiscountPolicyMessage, applyDiscountPolicy } from "@/utils/pos_connector/discountPolicy"
 import { useSerialNumberStore } from "@/stores/serialNumber"
 import { getItemStock } from "@/utils/stockValidator"
 import { formatCurrency as formatCurrencyUtil, getCurrencySymbol, roundCurrency } from "@/utils/currency"
@@ -437,31 +450,21 @@ const rateEditDisabledReason = computed(() => {
 // Options for SelectInput components
 const uomOptions = computed(() => {
 	if (!localItem.value) return []
-
+	const allowedSet = new Set(getAllowedSellUoms(localItem.value || {}))
 	const options = []
 	const seen = new Set()
-
 	const pushOption = (uom, conversionFactor = 1) => {
 		if (!uom || seen.has(uom)) return
+		if (allowedSet.size > 0 && !allowedSet.has(uom)) return
 		seen.add(uom)
-
 		options.push({
 			value: uom,
-			label:
-				Number(conversionFactor || 1) > 1
-					? `${uom} x ${Number(conversionFactor || 1)}`
-					: uom,
+			label: Number(conversionFactor || 1) > 1 ? `${uom} x ${Number(conversionFactor || 1)}` : uom,
 		})
 	}
-
 	pushOption(localItem.value.stock_uom, 1)
-
-	if (availableUoms.value.length > 0) {
-		availableUoms.value.forEach(uomData => {
-			pushOption(uomData.uom, uomData.conversion_factor || 1)
-		})
-	}
-
+	if (availableUoms.value.length > 0) availableUoms.value.forEach((uomData) => pushOption(uomData.uom, uomData.conversion_factor || 1))
+	if (!seen.has(localUom.value) && localUom.value && isUomAllowed(localItem.value, localUom.value)) pushOption(localUom.value, getConversionFactorForUom(localUom.value))
 	return options
 })
 
@@ -474,11 +477,108 @@ const warehouseOptions = computed(() => {
 	}
 	return [{ value: localWarehouse.value, label: localWarehouse.value || __('Default') }]
 })
+const effectiveRateDiscountPercent = computed(() => {
+	if (!canEditItemDiscount.value) return 0
+	return effectiveMaxDiscountPercent.value
+})
 
 const discountTypeOptions = computed(() => [
 	{ value: 'percentage', label: __('Percentage (%)') },
 	{ value: 'amount', label: __('Amount') }
 ])
+
+function normalizePolicyUomRows(rows = []) {
+	if (!Array.isArray(rows)) return []
+	return rows.map((row) => {
+		if (typeof row === 'string') return { uom: row, allow_for_selling: true }
+		const uom = row?.uom || row?.value || row?.name || null
+		if (!uom) return null
+		return { uom, allow_for_selling: row?.allow_for_selling }
+	}).filter(Boolean)
+}
+
+function getItemUomPolicy(item) {
+	return item?.uom_policy || item?._uom_policy || {}
+}
+
+function getAllowedSellUoms(item) {
+	const explicit = []
+	if (Array.isArray(item?.allowed_uoms)) explicit.push(...item.allowed_uoms)
+	if (Array.isArray(item?.sellable_uoms)) explicit.push(...item.sellable_uoms)
+	if (Array.isArray(item?.allowed_sell_uoms)) explicit.push(...item.allowed_sell_uoms)
+	const normalizedExplicit = normalizePolicyUomRows(explicit)
+	if (normalizedExplicit.length > 0) return [...new Set(normalizedExplicit.map((row) => row.uom).filter(Boolean))]
+	const policy = getItemUomPolicy(item)
+	const normalizedAllowed = normalizePolicyUomRows(policy?.allowed_uoms)
+	if (normalizedAllowed.length > 0) return [...new Set(normalizedAllowed.map((row) => row.uom).filter(Boolean))]
+	const normalizedAll = normalizePolicyUomRows(policy?.all_uoms)
+	if (normalizedAll.length > 0) return [...new Set(normalizedAll.filter((row) => row.allow_for_selling !== false).map((row) => row.uom).filter(Boolean))]
+	return []
+}
+
+function isUomAllowed(item, uom) {
+	if (!item || !uom) return false
+	if (item?.is_resolved_barcode) return uom === (item?.selected_uom || item?.uom || item?.stock_uom)
+	const allowed = getAllowedSellUoms(item)
+	if (allowed.length > 0) return allowed.includes(uom)
+	return true
+}
+
+const itemDiscountPolicy = computed(() => getItemDiscountPolicy(localItem.value || {}))
+const settingsMaxDiscountPercent = computed(() => {
+	const raw = Number(settingsStore.maxDiscountAllowed ?? settingsStore?.settings?.max_discount ?? 0)
+	return Number.isFinite(raw) && raw > 0 ? raw : 0
+})
+const itemMaxDiscountPercent = computed(() => {
+	const raw = Number(itemDiscountPolicy.value?.max_discount || 0)
+	return Number.isFinite(raw) && raw > 0 ? raw : 0
+})
+const effectiveMaxDiscountPercent = computed(() => {
+	const values = [settingsMaxDiscountPercent.value, itemMaxDiscountPercent.value].filter((v) => v > 0)
+	if (!values.length) return 0
+	return Math.min(...values)
+})
+const directDiscountAllowed = computed(() => {
+	const raw = localItem.value?.discount_allowed
+	if (raw === 0 || raw === "0" || raw === false) return false
+	if (raw === 1 || raw === "1" || raw === true) return true
+	return null
+})
+
+const canEditItemDiscount = computed(() => {
+	if (directDiscountAllowed.value !== null) {
+		return directDiscountAllowed.value
+	}
+	return Boolean(itemDiscountPolicy.value?.discount_allowed)
+})
+const itemDiscountWarning = computed(() => getDiscountPolicyMessage(itemDiscountPolicy.value))
+const effectiveItemDiscountWarning = computed(() => {
+	if (!canEditItemDiscount.value) {
+		if (directDiscountAllowed.value === false) {
+			return __('Item has no discount allowed')
+		}
+		return itemDiscountWarning.value || __('Discount is not allowed for this item')
+	}
+	if (effectiveMaxDiscountPercent.value > 0) {
+		return __('Maximum allowed discount is {0}%', [effectiveMaxDiscountPercent.value])
+	}
+	return ''
+})
+const effectiveMaxDiscountAmount = computed(() => {
+	if (effectiveMaxDiscountPercent.value <= 0 || calculatedSubtotal.value <= 0) return 0
+	return roundCurrency((calculatedSubtotal.value * effectiveMaxDiscountPercent.value) / 100)
+})
+const uomIsLocked = computed(() => {
+	if (!localItem.value) return true
+	if (localItem.value?.is_resolved_barcode) return true
+	return uomOptions.value.length <= 1
+})
+const uomLockMessage = computed(() => {
+	if (!localItem.value) return ''
+	if (localItem.value?.is_resolved_barcode) return __('UOM is locked for barcode-resolved item')
+	if (uomOptions.value.length <= 1) return __('Only allowed sell UOM can be used for this item')
+	return ''
+})
 
 
 const selectedUomDisplayLabel = computed(() => {
@@ -499,39 +599,15 @@ const selectedUomDisplayLabel = computed(() => {
 
 const stockDisplayPanel = computed(() => {
 	if (!localItem.value) return null
-
-	const stockUom =
-		localItem.value?.selected_stock_uom ||
-		localItem.value?.stock_uom ||
-		localUom.value ||
-		""
-
-	const conversionFactor = Number(
-		localItem.value?.selected_conversion_factor ??
-		localItem.value?.conversion_factor ??
-		getConversionFactorForUom(localUom.value) ??
-		1
-	) || 1
-
-	const available = Number(
-		localItem.value?.selected_stock_qty ??
-		localItem.value?.available_stock_qty ??
-		localItem.value?.actual_qty ??
-		localItem.value?.stock_qty ??
-		0
-	) || 0
-
+	const stockUom = localItem.value?.selected_stock_uom || localItem.value?.stock_uom || localUom.value || ""
+	const conversionFactor = Number(localItem.value?.selected_conversion_factor ?? localItem.value?.conversion_factor ?? getConversionFactorForUom(localUom.value) ?? 1) || 1
+	const available = Number(localItem.value?.selected_stock_qty ?? localItem.value?.available_stock_qty ?? localItem.value?.actual_qty ?? localItem.value?.stock_qty ?? 0) || 0
 	const required = Number(localQuantity.value || 0) * conversionFactor
-
-	if (required <= available) return null
-
-	return {
-		title: __('Low stock'),
-		available,
-		required,
-		stockUom,
-		allowNegative: allowNegativeStock.value,
+	let message = __('Stock available for this quantity')
+	if (required > available) {
+		message = allowNegativeStock.value ? __('Selling allowed (negative stock enabled)') : __('Insufficient stock for this quantity')
 	}
+	return { title: __('Stock status'), available, required, stockUom, allowNegative: allowNegativeStock.value, message }
 })
 
 // Initialize local state when item changes
@@ -553,9 +629,8 @@ watch(
 			if (newItem.has_serial_no && newItem.serial_no) {
 				const serials = newItem.serial_no.split('\n').filter(s => s.trim())
 				localSerials.value = [...serials]
-				originalSerials.value = [...serials] // Keep original for cancel
-				removedSerials.value = [] // Reset removed serials tracker
-				// For serial items, quantity must match serial count
+				originalSerials.value = [...serials]
+				removedSerials.value = []
 				localQuantity.value = serials.length
 			} else {
 				localSerials.value = []
@@ -575,6 +650,16 @@ watch(
 				discountValue.value = 0
 			}
 
+			// Force reset when item itself says discount is not allowed
+			if (
+				newItem.discount_allowed === 0 ||
+				newItem.discount_allowed === "0" ||
+				newItem.discount_allowed === false
+			) {
+				discountType.value = "percentage"
+				discountValue.value = 0
+			}
+
 			// Reset stock check state
 			hasStock.value = true
 			isCheckingStock.value = false
@@ -585,9 +670,13 @@ watch(
 	},
 	{ immediate: true },
 )
-
 watch(localUom, (newUom, oldUom) => {
 	if (!newUom || newUom === oldUom || isInitializingItem.value) return
+	if (!isUomAllowed(localItem.value, newUom)) {
+		localUom.value = oldUom || localItem.value?.stock_uom || localItem.value?.uom || ''
+		showWarning(__('UOM "{0}" is not allowed to sell for this item', [newUom]))
+		return
+	}
 	handleUomChange(newUom)
 })
 
@@ -789,29 +878,50 @@ async function handleWarehouseChange() {
 	}
 }
 
+function sanitizeDiscountInput({ discount_percentage = 0, discount_amount = 0, subtotal = 0, item = null } = {}) {
+	let sanitized = applyDiscountPolicy(item || localItem.value || {}, { discount_percentage, discount_amount }, { item: item || localItem.value || {}, subtotal })
+	if (!canEditItemDiscount.value) return { discount_percentage: 0, discount_amount: 0 }
+	if (effectiveMaxDiscountPercent.value > 0 && subtotal > 0) {
+		const maxAmount = roundCurrency((subtotal * effectiveMaxDiscountPercent.value) / 100)
+		if (Number(sanitized.discount_percentage || 0) > 0) {
+			sanitized.discount_percentage = Math.min(Number(sanitized.discount_percentage || 0), effectiveMaxDiscountPercent.value)
+			sanitized.discount_amount = 0
+		} else if (Number(sanitized.discount_amount || 0) > 0) {
+			sanitized.discount_amount = Math.min(roundCurrency(Number(sanitized.discount_amount || 0)), maxAmount)
+			sanitized.discount_percentage = 0
+		}
+	}
+	return { discount_percentage: roundCurrency(Number(sanitized.discount_percentage || 0)), discount_amount: roundCurrency(Number(sanitized.discount_amount || 0)) }
+}
+
 function handleDiscountTypeChange() {
-	// Reset discount value when type changes
+	if (!canEditItemDiscount.value) {
+		discountType.value = 'percentage'
+		discountValue.value = 0
+		calculateTotals()
+		return
+	}
 	discountValue.value = 0
 	calculateTotals()
 }
 
 function calculateDiscount() {
-	// Round to currency precision to prevent floating point precision issues (e.g., 10.000000000000002)
+	if (!canEditItemDiscount.value) {
+		discountType.value = 'percentage'
+		discountValue.value = 0
+		calculatedDiscount.value = 0
+		calculatedTotal.value = roundCurrency(calculatedSubtotal.value)
+		return
+	}
 	if (discountValue.value !== null && discountValue.value !== undefined && !isNaN(discountValue.value)) {
 		discountValue.value = roundCurrency(discountValue.value)
 	}
-
-	if (discountType.value === "percentage") {
-		// Ensure percentage doesn't exceed 100
-		if (discountValue.value > 100) {
-			discountValue.value = 100
-		}
+	const sanitized = sanitizeDiscountInput({ discount_percentage: discountType.value === 'percentage' ? discountValue.value : 0, discount_amount: discountType.value === 'amount' ? discountValue.value : 0, subtotal: calculatedSubtotal.value, item: localItem.value })
+	if (discountType.value === 'percentage') {
+		discountValue.value = sanitized.discount_percentage
 		calculatedDiscount.value = roundCurrency((calculatedSubtotal.value * discountValue.value) / 100)
 	} else {
-		// Ensure amount doesn't exceed subtotal
-		if (discountValue.value > calculatedSubtotal.value) {
-			discountValue.value = roundCurrency(calculatedSubtotal.value)
-		}
+		discountValue.value = sanitized.discount_amount
 		calculatedDiscount.value = roundCurrency(discountValue.value)
 	}
 	calculatedTotal.value = roundCurrency(calculatedSubtotal.value - calculatedDiscount.value)
@@ -875,24 +985,34 @@ function updateItem() {
 	// ========================================================================
 	// RATE EDIT VALIDATION
 	// ========================================================================
-	if (settingsStore.allowUserToEditRate && isRateManuallyEdited) {
+	if (isRateManuallyEdited) {
 		// Validate rate is positive
 		if (localRate.value <= 0) {
 			showError(__('Rate must be greater than zero'))
 			return
 		}
 
-		// Validate against max discount if rate was reduced
-		const maxDiscount = settingsStore.maxDiscountAllowed
-		if (maxDiscount > 0 && localRate.value < originalPriceListRate.value) {
-			const discountPercent = ((originalPriceListRate.value - localRate.value) / originalPriceListRate.value) * 100
+		// If item discount is not allowed, do not allow reducing rate below original
+		if (!canEditItemDiscount.value && localRate.value < originalPriceListRate.value) {
+			showError(__('Discount is not allowed for this item'))
+			return
+		}
+
+		// Validate against stricter effective max discount if rate was reduced
+		if (
+			canEditItemDiscount.value &&
+			effectiveRateDiscountPercent.value > 0 &&
+			localRate.value < originalPriceListRate.value
+		) {
+			const discountPercent =
+				((originalPriceListRate.value - localRate.value) / originalPriceListRate.value) * 100
 			const roundedDiscount = Math.round(discountPercent * 100) / 100
 
-			if (roundedDiscount > maxDiscount) {
+			if (roundedDiscount > effectiveRateDiscountPercent.value) {
 				showError(
 					__('Rate reduction of {0}% exceeds maximum allowed discount of {1}%', [
 						roundedDiscount.toFixed(2),
-						maxDiscount
+						effectiveRateDiscountPercent.value
 					])
 				)
 				return
@@ -907,6 +1027,18 @@ function updateItem() {
 		localItem.value?.actual_qty ??
 		localItem.value?.stock_qty ??
 		null
+
+	if (!isUomAllowed(localItem.value, localUom.value)) {
+		showError(__('UOM "{0}" is not allowed to sell for this item', [localUom.value]))
+		return
+	}
+
+	const sanitizedDiscount = sanitizeDiscountInput({
+		discount_percentage: discountType.value === "percentage" ? discountValue.value : 0,
+		discount_amount: discountType.value === "amount" ? discountValue.value : 0,
+		subtotal: localRate.value * localQuantity.value,
+		item: localItem.value,
+	})
 
 	const updatedItem = {
 		...localItem.value,
@@ -928,10 +1060,8 @@ function updateItem() {
 		selected_display_subtotal: localRate.value * localQuantity.value,
 		selected_stock_uom_qty_required: localQuantity.value * conversionFactor,
 		selected_stock_qty: availableStockQty,
-		discount_percentage:
-			discountType.value === "percentage" ? discountValue.value : 0,
-		discount_amount:
-			discountType.value === "amount" ? discountValue.value : 0,
+		discount_percentage: sanitizedDiscount.discount_percentage,
+		discount_amount: sanitizedDiscount.discount_amount,
 		// Track manual rate edits for audit logging
 		is_rate_manually_edited: isRateManuallyEdited ? 1 : 0,
 		original_rate: isRateManuallyEdited ? originalPriceListRate.value : null,
