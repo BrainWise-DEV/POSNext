@@ -10,6 +10,9 @@ from erpnext.stock.get_item_details import get_item_details as erpnext_get_item_
 from frappe import _
 from frappe.query_builder import DocType, functions as fn
 from frappe.utils import cint, flt, nowdate
+from pos_branch_helper.pos_branch_helper.discount_policy.service import (
+    get_item_discount_policy,
+)
 
 ITEM_RESULT_FIELDS = [
 	"name as item_code",
@@ -387,7 +390,18 @@ def get_item_detail(item, doc=None, warehouse=None, price_list=None, company=Non
 	if item.get("is_stock_item") and warehouse:
 		res["actual_qty"] = get_stock_availability(item_code, warehouse)
 
-	res["max_discount"] = item_data.get("max_discount")
+	# Add explicit discount policy for frontend enforcement
+	discount_policy = get_item_discount_policy(item_code) or {}
+
+	res["discount_allowed"] = discount_policy.get("discount_allowed", 1)
+	res["is_discount_locked"] = discount_policy.get("is_discount_locked", 0)
+	res["has_max_discount"] = discount_policy.get("has_max_discount", 0)
+
+	# Keep max_discount authoritative from policy service first
+	res["max_discount"] = discount_policy.get(
+		"max_discount",
+		item_data.get("max_discount", 0),
+	)
 	res["batch_no_data"] = batch_no_data
 	res["serial_no_data"] = serial_no_data
 	res["item_group"] = item_data.get("item_group")
