@@ -814,7 +814,7 @@
 									</span>
 									<!-- Discount Badge -->
 									<div
-										v-if="item.discount_amount && item.discount_amount > 0"
+										v-if="shouldShowDiscountBadge(item)"
 										class="inline-flex items-center px-1.5 py-0.5 bg-gradient-to-r from-red-50 to-orange-50 text-red-700 rounded-full text-[9px] font-bold border border-red-200 flex-shrink-0"
 									>
 										<svg
@@ -976,14 +976,12 @@
 										<button
 											type="button"
 											@click="toggleUomDropdown(item.item_code, item.uom)"
-											:disabled="
-												item.is_resolved_barcode || !item.item_uoms || item.item_uoms.length === 0
-											"
+											:disabled="!canOpenUomDropdown(item)"
 											:class="[
 												'h-6 sm:h-7 text-[10px] sm:text-xs font-bold rounded ps-2 pe-5 transition-all touch-manipulation flex items-center justify-center min-w-[45px]',
 												item.is_resolved_barcode
 													? 'bg-amber-100 text-amber-700 border border-amber-300 cursor-not-allowed'
-													: item.item_uoms && item.item_uoms.length > 0
+													: canOpenUomDropdown(item)
 														? 'bg-blue-500 text-white border border-blue-400 hover:bg-blue-600 active:scale-95 cursor-pointer'
 														: 'bg-gray-100 text-gray-500 border border-gray-200 cursor-not-allowed opacity-60',
 											]"
@@ -1009,7 +1007,7 @@
 													: '',
 												item.is_resolved_barcode
 													? 'text-amber-600'
-													: item.item_uoms && item.item_uoms.length > 0
+													: canOpenUomDropdown(item)
 														? 'text-white'
 														: 'text-gray-400',
 											]"
@@ -1028,36 +1026,20 @@
 											v-if="
 												openUomDropdown ===
 													`${item.item_code}-${item.uom}` &&
-												item.item_uoms &&
-												item.item_uoms.length > 0
+												getAllCartUomOptions(item).length > 0
 											"
 											class="absolute top-full start-0 mt-0.5 bg-white border border-blue-300 rounded shadow-xl z-50 min-w-full overflow-hidden"
 										>
 											<button
+												v-for="(uomOption, optionIndex) in getAllCartUomOptions(item)"
+												:key="uomOption.key || uomOption.uom"
 												type="button"
-												@click="selectUom(item, item.stock_uom)"
-												:class="[
-													'w-full text-start px-2 py-1.5 text-[10px] sm:text-xs font-semibold transition-colors border-b border-gray-100',
-													(item.uom || item.stock_uom) === item.stock_uom
-														? 'bg-blue-50 text-blue-700'
-														: 'text-gray-700 hover:bg-blue-50',
-												]"
+												@click="selectUom(item, uomOption.uom)"
+												:disabled="!isUomOptionAllowed(item, uomOption.uom)"
+												:class="getCartUomOptionClass(item, uomOption, optionIndex, getAllCartUomOptions(item).length)"
+												:title="getCartUomOptionTitle(item, uomOption.uom)"
 											>
-												{{ item.stock_uom || __("Nos", null, "UOM") }}
-											</button>
-											<button
-												v-for="uomData in item.item_uoms"
-												:key="uomData.uom"
-												type="button"
-												@click="selectUom(item, uomData.uom)"
-												:class="[
-													'w-full text-start px-2 py-1.5 text-[10px] sm:text-xs font-semibold transition-colors border-b border-gray-100 last:border-0',
-													(item.uom || item.stock_uom) === uomData.uom
-														? 'bg-blue-50 text-blue-700'
-														: 'text-gray-700 hover:bg-blue-50',
-												]"
-											>
-												{{ uomData.uom }}
+												{{ uomOption.uom }}
 											</button>
 										</div>
 									</div>
@@ -1868,6 +1850,125 @@ function toggleUomDropdown(itemCode, uom) {
 	openUomDropdown.value = openUomDropdown.value === key ? null : key;
 }
 
+function normalizePolicyUomRows(rows = []) {
+	if (!Array.isArray(rows)) return [];
+	return rows
+		.map((row) => {
+			if (typeof row === "string") {
+				return { uom: row, allow_for_selling: true };
+			}
+			const uom = row?.uom || row?.value || row?.name || null;
+			if (!uom) return null;
+			return {
+				uom,
+				allow_for_selling: row?.allow_for_selling,
+			};
+		})
+		.filter(Boolean);
+}
+
+function getItemUomPolicy(item) {
+	return item?.uom_policy || item?._uom_policy || {};
+}
+
+function getAllowedSellUoms(item) {
+	const policy = getItemUomPolicy(item);
+	const normalizedAllowed = normalizePolicyUomRows(policy?.allowed_uoms);
+	if (normalizedAllowed.length > 0) {
+		return [...new Set(normalizedAllowed.map((row) => row.uom).filter(Boolean))];
+	}
+
+	const normalizedAll = normalizePolicyUomRows(policy?.all_uoms);
+	if (normalizedAll.length > 0) {
+		const allowedFromAll = normalizedAll
+			.filter((row) => row.allow_for_selling !== false)
+			.map((row) => row.uom);
+		if (allowedFromAll.length > 0) {
+			return [...new Set(allowedFromAll)];
+		}
+	}
+
+	return [];
+}
+
+function getAllCartUomOptions(item) {
+	const seen = new Set();
+	const options = [];
+
+	const pushUom = (uom) => {
+		if (!uom || seen.has(uom)) return;
+		seen.add(uom);
+		options.push({ key: uom, uom });
+	};
+
+	pushUom(item?.stock_uom || __("Nos", null, "UOM"));
+	if (Array.isArray(item?.item_uoms)) {
+		item.item_uoms.forEach((row) => pushUom(row?.uom));
+	}
+	pushUom(item?.uom);
+
+	return options;
+}
+
+function isUomOptionAllowed(item, uom) {
+	if (!item || !uom) return false;
+	if (item.is_resolved_barcode) return item.uom === uom || item.stock_uom === uom;
+
+	const allowed = getAllowedSellUoms(item);
+	if (allowed.length > 0) {
+		return allowed.includes(uom);
+	}
+
+	return true;
+}
+
+function getAllowedCartUomOptions(item) {
+	return getAllCartUomOptions(item).filter((option) => isUomOptionAllowed(item, option.uom));
+}
+
+function canOpenUomDropdown(item) {
+	if (!item || item.is_resolved_barcode) return false;
+	return getAllowedCartUomOptions(item).length > 1;
+}
+
+function getUomDropdownTitle(item) {
+	if (item?.is_resolved_barcode) return __('UOM locked (barcode item)');
+	const allowedCount = getAllowedCartUomOptions(item).length;
+	if (allowedCount > 1) return __('Click to change unit');
+	return __('Only one sellable unit available');
+}
+
+function getCartUomOptionClass(item, uomOption, optionIndex, optionCount) {
+	const isSelected = (item.uom || item.stock_uom) === uomOption.uom;
+	const isAllowed = isUomOptionAllowed(item, uomOption.uom);
+	const isLast = optionIndex === optionCount - 1;
+
+	return [
+		'w-full text-start px-2 py-1.5 text-[10px] sm:text-xs font-semibold transition-colors border-gray-100',
+		isLast ? 'last:border-0' : 'border-b',
+		isSelected
+			? 'bg-blue-50 text-blue-700'
+			: isAllowed
+				? 'text-gray-700 hover:bg-blue-50 cursor-pointer'
+				: 'bg-gray-50 text-gray-400 cursor-not-allowed opacity-70',
+	];
+}
+
+function getCartUomOptionTitle(item, uom) {
+	if (isUomOptionAllowed(item, uom)) return __('Change unit to {0}', [uom]);
+	return __('UOM "{0}" is not allowed to sell for this item', [uom]);
+}
+
+function shouldShowDiscountBadge(item) {
+	const discountAmount = Number(item?.discount_amount || 0);
+	if (!(discountAmount > 0)) return false;
+
+	if (item?.discount_allowed === 0 || item?.discount_allowed === false) return false;
+	if (item?.is_discount_locked === 1 || item?.is_discount_locked === true) return false;
+
+	return true;
+}
+
 /**
  * Select a UOM from dropdown - changes UOM and closes dropdown
  * Handles merging if target UOM already exists in cart
@@ -1875,6 +1976,10 @@ function toggleUomDropdown(itemCode, uom) {
 async function selectUom(item, newUom) {
 	if (item.uom === newUom) {
 		openUomDropdown.value = null;
+		return;
+	}
+
+	if (!isUomOptionAllowed(item, newUom)) {
 		return;
 	}
 

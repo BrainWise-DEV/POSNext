@@ -209,30 +209,154 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	}
 
 
+	function normalizeUomValue(row) {
+		if (!row) return null
+		if (typeof row === "string") return row.trim() || null
+		return row.uom || row.value || row.name || null
+	}
+
+	function getAllowedSellUoms(item = {}) {
+		const explicitPolicy = item?.uom_policy || item?._uom_policy || {}
+		const allowedRows = Array.isArray(explicitPolicy.allowed_uoms)
+			? explicitPolicy.allowed_uoms
+			: []
+
+		const allRows = Array.isArray(explicitPolicy.all_uoms)
+			? explicitPolicy.all_uoms
+			: []
+
+		const candidates = []
+
+		if (allowedRows.length > 0) {
+			allowedRows.forEach((row) => {
+				const uom = normalizeUomValue(row)
+				if (uom) candidates.push(uom)
+			})
+		} else if (allRows.length > 0) {
+			allRows.forEach((row) => {
+				const uom = normalizeUomValue(row)
+				if (!uom) return
+				if (row.allow_for_selling === undefined || Boolean(row.allow_for_selling)) {
+					candidates.push(uom)
+				}
+			})
+		}
+
+		const fallbackLists = [
+			item.allowed_uoms,
+			item.allowed_sell_uoms,
+			item.sellable_uoms,
+		]
+
+		fallbackLists.forEach((rows) => {
+			if (!Array.isArray(rows)) return
+			rows.forEach((row) => {
+				const uom = normalizeUomValue(row)
+				if (uom) candidates.push(uom)
+			})
+		})
+
+		const fallbackMaps = [item.allowed_uom_map, item.allowed_sell_uom_map]
+		fallbackMaps.forEach((mapping) => {
+			if (!mapping || typeof mapping !== "object") return
+			Object.entries(mapping).forEach(([uom, allowed]) => {
+				if (allowed) candidates.push(uom)
+			})
+		})
+
+		const normalized = [...new Set(candidates.filter(Boolean).map((uom) => String(uom).trim()))]
+		if (normalized.length > 0) return normalized
+
+		return [...new Set([
+			item.resolved_uom,
+			item.scanned_uom,
+			item.barcode_uom,
+			item.uom,
+			item.stock_uom,
+		].filter(Boolean))]
+	}
+
+	function isSellUomAllowed(item = {}, targetUom = null) {
+		if (!targetUom) return true
+		const allowedUoms = getAllowedSellUoms(item)
+		if (!allowedUoms.length) return true
+		return allowedUoms.includes(targetUom)
+	}
+
+	function buildPolicySnapshot(item = {}) {
+		const explicitPolicy = item?.uom_policy || item?._uom_policy || null
+		const allowedSellUoms = getAllowedSellUoms(item)
+
+		return {
+			uom_policy: explicitPolicy,
+			_uom_policy: explicitPolicy,
+			allowed_uoms: allowedSellUoms,
+			allowed_sell_uoms: allowedSellUoms,
+			sellable_uoms: allowedSellUoms,
+			discount_allowed: item.discount_allowed,
+			is_discount_locked: item.is_discount_locked,
+			has_max_discount: item.has_max_discount,
+			max_discount: item.max_discount,
+			is_resolved_barcode: Boolean(item.is_resolved_barcode),
+			resolved_uom: item.resolved_uom || item.uom || item.stock_uom || null,
+			selected_warehouse: item.selected_warehouse || item.warehouse || null,
+			allowed_warehouse_stock: Array.isArray(item.allowed_warehouse_stock)
+				? item.allowed_warehouse_stock
+				: [],
+			available_stock_qty:
+				item.available_stock_qty ??
+				item.selected_stock_qty ??
+				item.actual_qty ??
+				item.stock_qty ??
+				null,
+		}
+	}
+
+	function applyPolicySnapshot(target, source = {}) {
+		Object.assign(target, buildPolicySnapshot({ ...target, ...source }))
+		return target
+	}
+
+	function normalizeCartLine(item = {}, qty = null) {
+		const quantity = Number(item.quantity ?? item.qty ?? qty ?? 1) || 1
+		const normalized = {
+			...item,
+			quantity,
+			qty: quantity,
+		}
+
+		applyPolicySnapshot(normalized, normalized)
+		applyUomSnapshot(normalized, normalized, quantity)
+		return normalized
+	}
+
+
 
 	// Actions
 	function addItem(item, qty = 1, _autoAdd = false, currentProfile = null) {
-		if (currentProfile && settingsStore.shouldEnforceStockValidation() && shouldValidateItemStock(item)) {
-			const itemUom = item.uom || item.stock_uom
-			const existing = invoiceItems.value.find(
-				(i) => i.item_code === item.item_code && i.uom === itemUom,
-			)
-			const totalQty = (existing ? existing.quantity : 0) + qty
-			const warehouse = item.warehouse || currentProfile.warehouse
+		const normalizedItem = normalizeCartLine(item, qty)
+		const itemUom = normalizedItem.uom || normalizedItem.stock_uom
 
-			const check = checkStockAvailability(item, totalQty, warehouse)
+		if (!isSellUomAllowed(normalizedItem, itemUom)) {
+			throw new Error(__("UOM \"{0}\" is not allowed to sell for item \"{1}\".", [
+				itemUom,
+				normalizedItem.item_name || normalizedItem.item_code,
+			]))
+		}
+
+		if (currentProfile && settingsStore.shouldEnforceStockValidation() && shouldValidateItemStock(normalizedItem)) {
+			const existing = invoiceItems.value.find(
+				(i) => i.item_code === normalizedItem.item_code && i.uom === itemUom,
+			)
+			const totalQty = (existing ? existing.quantity : 0) + normalizedItem.quantity
+			const warehouse = normalizedItem.warehouse || currentProfile.warehouse
+
+			const check = checkStockAvailability(normalizedItem, totalQty, warehouse)
 			if (!check.available) {
 				throw new Error(check.error)
 			}
 		}
 
-		const normalizedItem = {
-			...item,
-			quantity: Number(item.quantity ?? item.qty ?? qty ?? 1) || 1,
-			qty: Number(item.qty ?? item.quantity ?? qty ?? 1) || 1,
-		}
-
-		applyUomSnapshot(normalizedItem, normalizedItem, normalizedItem.quantity)
 		addItemToInvoice(normalizedItem, normalizedItem.quantity)
 	}
 
@@ -327,8 +451,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	}
 
 	function setPendingItem(item, qty = 1, mode = "uom") {
-		pendingItem.value = item
-		pendingItemQty.value = qty
+		pendingItem.value = normalizeCartLine(item, qty)
+		pendingItemQty.value = Number(qty ?? item?.quantity ?? item?.qty ?? 1) || 1
 		selectionMode.value = mode
 	}
 
@@ -1209,6 +1333,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * @returns {number} New total quantity
 	 */
 	function mergeItems(sourceItem, targetItem, quantity) {
+		applyPolicySnapshot(targetItem, sourceItem)
 		targetItem.quantity += quantity
 		recalculateItem(targetItem)
 		removeCartItem(sourceItem)
@@ -1255,6 +1380,14 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			const cartItem = findCartItem(itemCode, currentUom)
 			if (!cartItem || cartItem.uom === newUom) return
 
+			if (!isSellUomAllowed(cartItem, newUom)) {
+				showWarning(__("UOM \"{0}\" is not allowed to sell for item \"{1}\".", [
+					newUom,
+					cartItem.item_name || cartItem.item_code,
+				]))
+				return
+			}
+
 			// Check for existing item to merge with
 			const existingItem = findItemWithUom(itemCode, newUom, cartItem)
 			if (existingItem) {
@@ -1287,8 +1420,16 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				throw new Error("Item not found in cart")
 			}
 
+			applyPolicySnapshot(cartItem, cartItem)
+
 			// Handle UOM change with potential merge
 			if (updates.uom && updates.uom !== cartItem.uom) {
+				if (!isSellUomAllowed({ ...cartItem, ...updates }, updates.uom)) {
+					throw new Error(__("UOM \"{0}\" is not allowed to sell for item \"{1}\".", [
+						updates.uom,
+						cartItem.item_name || cartItem.item_code,
+					]))
+				}
 				const existingItem = findItemWithUom(itemCode, updates.uom, cartItem)
 				if (existingItem) {
 					const qtyToMerge = updates.quantity ?? cartItem.quantity
@@ -1327,6 +1468,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			if (updates.is_rate_manually_edited !== undefined) cartItem.is_rate_manually_edited = updates.is_rate_manually_edited
 			if (updates.original_rate !== undefined) cartItem.original_rate = updates.original_rate
 
+			applyPolicySnapshot(cartItem, updates)
 			applyUomSnapshot(
 				cartItem,
 				{
