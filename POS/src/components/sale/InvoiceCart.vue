@@ -902,23 +902,17 @@
 									<!-- For non-serial items, show normal quantity controls -->
 									<div
 										v-else
-										:class="[
-											'flex items-center bg-gray-50 border rounded overflow-hidden',
-											item.is_resolved_barcode ? 'border-amber-300 bg-amber-50' : 'border-gray-200'
-										]"
+										class="flex items-center bg-gray-50 border border-gray-200 rounded overflow-hidden"
 									>
 										<button
 											type="button"
 											@click.stop="decrementQuantity(item)"
-											:disabled="item.is_resolved_barcode"
 											:class="[
 												'w-6 h-6 sm:w-7 sm:h-7 flex items-center justify-center font-bold transition-colors touch-manipulation border-e',
-												item.is_resolved_barcode
-													? 'bg-gray-100 text-gray-400 cursor-not-allowed border-amber-300'
-													: 'bg-white hover:bg-gray-100 active:bg-gray-200 text-gray-700 border-gray-200'
+												'bg-white hover:bg-gray-100 active:bg-gray-200 text-gray-700 border-gray-200'
 											]"
 											:aria-label="__('Decrease quantity')"
-											:title="item.is_resolved_barcode ? __('Quantity locked (barcode item)') : __('Decrease quantity')"
+											:title="__('Decrease quantity')"
 										>
 											<svg
 												class="w-3 h-3"
@@ -934,6 +928,7 @@
 												/>
 											</svg>
 										</button>
+
 										<input
 											:value="formatQuantity(item.quantity)"
 											@click.stop
@@ -942,28 +937,23 @@
 											@keydown.enter="$event.target.blur()"
 											type="text"
 											inputmode="decimal"
-											:disabled="item.is_resolved_barcode"
 											:class="[
 												'w-16 sm:w-20 h-6 sm:h-7 text-center border-0 text-xs sm:text-sm font-bold focus:outline-none',
-												item.is_resolved_barcode
-													? 'bg-amber-50 text-amber-700 cursor-not-allowed'
-													: 'bg-white text-gray-900 focus:ring-2 focus:ring-blue-500'
+												'bg-white text-gray-900 focus:ring-2 focus:ring-blue-500'
 											]"
 											:aria-label="__('Quantity')"
-											:title="item.is_resolved_barcode ? __('Quantity locked (barcode item)') : ''"
+											:title="__('Quantity')"
 										/>
+
 										<button
 											type="button"
 											@click.stop="incrementQuantity(item)"
-											:disabled="item.is_resolved_barcode"
 											:class="[
 												'w-6 h-6 sm:w-7 sm:h-7 flex items-center justify-center font-bold transition-colors touch-manipulation border-s',
-												item.is_resolved_barcode
-													? 'bg-gray-100 text-gray-400 cursor-not-allowed border-amber-300'
-													: 'bg-white hover:bg-gray-100 active:bg-gray-200 text-gray-700 border-gray-200'
+												'bg-white hover:bg-gray-100 active:bg-gray-200 text-gray-700 border-gray-200'
 											]"
 											:aria-label="__('Increase quantity')"
-											:title="item.is_resolved_barcode ? __('Quantity locked (barcode item)') : __('Increase quantity')"
+											:title="__('Increase quantity')"
 										>
 											<svg
 												class="w-3 h-3"
@@ -979,7 +969,7 @@
 												/>
 											</svg>
 										</button>
-									</div>
+									</div>									
 
 									<!-- UOM Selector Dropdown -->
 									<div class="relative group/uom" @click.stop>
@@ -1805,9 +1795,6 @@ function getSmartStep(quantity) {
  * @param {Object} item - Cart item to increment
  */
 function incrementQuantity(item) {
-	// Prevent editing resolved barcode items
-	if (item.is_resolved_barcode) return;
-
 	const step = getSmartStep(item.quantity);
 	const newQty = Math.round((item.quantity + step) * 10000) / 10000;
 	emit("update-quantity", item.item_code, newQty, item.uom);
@@ -1820,14 +1807,10 @@ function incrementQuantity(item) {
  * @param {Object} item - Cart item to decrement
  */
 function decrementQuantity(item) {
-	// Prevent editing resolved barcode items
-	if (item.is_resolved_barcode) return;
-
 	const step = getSmartStep(item.quantity);
 	const newQty = Math.round((item.quantity - step) * 10000) / 10000;
 
 	if (newQty <= 0) {
-		// If quantity would be 0 or negative, remove the item
 		emit("remove-item", item.item_code, item.uom);
 	} else {
 		emit("update-quantity", item.item_code, newQty, item.uom);
@@ -1841,20 +1824,12 @@ function decrementQuantity(item) {
  * @param {Object} item - Cart item to update
  * @param {String} value - New quantity value from input
  */
-  
 function updateQuantity(item, value) {
-	// Prevent editing resolved barcode items
-	if (item.is_resolved_barcode) return;
-
 	const qty = Number.parseFloat(value);
 
-	// If the input isn't a valid number (e.g., user cleared the field), do nothing
 	if (isNaN(qty)) return;
-
-	// If quantity is zero or negative, remove the item from the cart
 	if (qty <= 0) return emit("remove-item", item.item_code, item.uom);
 
-	// For positive numbers, update quantity immediately (no rounding here while typing)
 	emit("update-quantity", item.item_code, qty, item.uom);
 }
 
