@@ -11,6 +11,17 @@ from frappe import _
 from frappe.utils import flt, cint
 
 
+def _is_wallet_payment_mode(mode_of_payment):
+	"""Return whether the mode of payment is configured as a wallet payment."""
+	return cint(
+		frappe.db.get_value(
+			"Mode of Payment",
+			mode_of_payment,
+			"is_wallet_payment",
+		)
+	)
+
+
 def validate_wallet_payment(doc, method=None):
 	"""
 	Validate wallet payment on Sales Invoice.
@@ -150,13 +161,7 @@ def get_wallet_amount_from_payments(payments):
 		if not payment.mode_of_payment:
 			continue
 
-		is_wallet = frappe.db.get_value(
-			"Mode of Payment",
-			payment.mode_of_payment,
-			"is_wallet_payment"
-		)
-
-		if is_wallet:
+		if _is_wallet_payment_mode(payment.mode_of_payment):
 			wallet_amount += flt(payment.amount)
 
 	return wallet_amount
@@ -249,10 +254,7 @@ def get_pending_wallet_payments(customer, exclude_invoice=None, company=None):
 		)
 
 		for payment in payments:
-			is_wallet = frappe.db.get_value(
-				"Mode of Payment", payment.mode_of_payment, "is_wallet_payment"
-			)
-			if is_wallet:
+			if _is_wallet_payment_mode(payment.mode_of_payment):
 				pending_amount += flt(payment.amount)
 
 	return pending_amount

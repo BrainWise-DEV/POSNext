@@ -100,83 +100,31 @@ def get_customer_wallet_balance(customer, company=None, exclude_invoice=None):
 	Returns:
 		float: Available wallet balance
 	"""
-	try:
-		filters = {"customer": customer, "status": "Active"}
-		if company:
-			filters["company"] = company
+	from pos_next.api.wallet import get_customer_wallet_balance as api_get_customer_wallet_balance
 
-		wallet = frappe.db.get_value("Wallet", filters, ["name", "account"], as_dict=True)
-
-		if not wallet:
-			return 0.0
-
-		# Get balance from GL entries
-		gl_balance = get_balance_on(
-			account=wallet.account,
-			party_type="Customer",
-			party=customer
-		)
-
-		# Negate because negative receivable balance = positive wallet credit
-		wallet_balance = -flt(gl_balance)
-
-		# Subtract wallet payments only from draft POS invoices in the same company.
-		pending_wallet_amount = get_pending_wallet_payments(
-			customer,
-			exclude_invoice=exclude_invoice,
-			company=company,
-		)
-
-		available_balance = flt(wallet_balance) - flt(pending_wallet_amount)
-
-		return available_balance if available_balance > 0 else 0.0
-
-	except Exception:
-		frappe.log_error(frappe.get_traceback(), "Wallet Balance Error")
-		return 0.0
+	# Keep a thin wrapper here for backwards compatibility while delegating to the
+	# API implementation so pending-wallet logic stays in one place.
+	return api_get_customer_wallet_balance(
+		customer,
+		company=company,
+		exclude_invoice=exclude_invoice,
+	)
 
 
 def get_pending_wallet_payments(customer, exclude_invoice=None, company=None):
 	"""
 	Get total wallet payments from draft POS invoices.
-	This prevents double-spending of wallet balance without double-counting
-	submitted invoices that are already reflected in GL.
+
+	Keep a wrapper here for backwards compatibility while delegating to the API
+	implementation so the draft/company reservation rules do not diverge.
 	"""
-	filters = {
-		"customer": customer,
-		"docstatus": 0,
-		"outstanding_amount": [">", 0],
-		"is_pos": 1,
-	}
-	if company:
-		filters["company"] = company
+	from pos_next.api.wallet import get_pending_wallet_payments as api_get_pending_wallet_payments
 
-	invoices = frappe.get_all(
-		"Sales Invoice",
-		filters=filters,
-		fields=["name"]
+	return api_get_pending_wallet_payments(
+		customer,
+		exclude_invoice=exclude_invoice,
+		company=company,
 	)
-
-	pending_amount = 0.0
-
-	for invoice in invoices:
-		if exclude_invoice and invoice.name == exclude_invoice:
-			continue
-
-		payments = frappe.get_all(
-			"Sales Invoice Payment",
-			filters={"parent": invoice.name},
-			fields=["mode_of_payment", "amount"]
-		)
-
-		for payment in payments:
-			is_wallet = frappe.db.get_value(
-				"Mode of Payment", payment.mode_of_payment, "is_wallet_payment"
-			)
-			if is_wallet:
-				pending_amount += flt(payment.amount)
-
-	return pending_amount
 
 
 @frappe.whitelist()
