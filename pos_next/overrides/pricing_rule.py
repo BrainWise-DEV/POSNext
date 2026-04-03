@@ -14,6 +14,32 @@ will have these rules excluded from matching.
 import frappe
 
 
+def _has_pos_only_column():
+	"""Check whether the current site's Pricing Rule table has the pos_only column.
+
+	The monkey-patch in __init__.py is process-wide and affects ALL sites on the
+	bench, but only sites with POS Next installed have the pos_only custom field.
+	This guard prevents 'Unknown column' errors on sites that share the bench
+	but don't have POS Next.
+
+	Cached per-site per-worker so the DB introspection runs only once.
+	"""
+	if not hasattr(_has_pos_only_column, "_cache"):
+		_has_pos_only_column._cache = {}
+
+	site = getattr(frappe.local, "site", None)
+	if site in _has_pos_only_column._cache:
+		return _has_pos_only_column._cache[site]
+
+	try:
+		result = frappe.db.has_column("Pricing Rule", "pos_only")
+	except Exception:
+		result = False
+
+	_has_pos_only_column._cache[site] = result
+	return result
+
+
 def sync_pos_only_to_pricing_rules(doc, method=None):
 	"""Sync pos_only from Promotional Scheme to its generated Pricing Rules.
 
@@ -40,6 +66,9 @@ def patch_get_other_conditions(pr_utils):
 
 	def _patched_get_other_conditions(conditions, values, args):
 		conditions = _original_get_other_conditions(conditions, values, args)
+
+		if not _has_pos_only_column():
+			return conditions
 
 		doctype = args.get("doctype", "")
 		# POS Invoice doctype — always POS, all rules apply

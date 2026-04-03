@@ -448,6 +448,20 @@ def _process_invoice(invoice, invoice_field, company_currency, cash_mode, paymen
     base_grand_total = get_base_value(invoice, "grand_total", "base_grand_total", conversion_rate)
     base_net_total = get_base_value(invoice, "net_total", "base_net_total", conversion_rate)
 
+    # Credit returns with no payment rows were added to customer credit —
+    # no money entered or left the drawer.  Skip entirely.
+    if is_return and not invoice.payments:
+        return frappe._dict({
+            invoice_field: invoice.name,
+            "posting_date": invoice.posting_date,
+            "grand_total": 0,
+            "transaction_currency": invoice.get("currency") or company_currency,
+            "transaction_amount": flt(invoice.get("grand_total")),
+            "customer": invoice.customer,
+            "is_return": is_return,
+            "return_against": invoice.get("return_against"),
+        })
+
     # Build transaction record
     transaction = frappe._dict({
         invoice_field: invoice.name,
@@ -478,11 +492,31 @@ def _process_invoice(invoice, invoice_field, company_currency, cash_mode, paymen
         _aggregate_tax(taxes, t.account_head, t.rate, tax_amount)
 
     # Process payments
+    #
+    # Cross-branch return safety net (Layer 3):
+    # Return invoices may carry foreign payment modes from the original
+    # invoice's POS profile.  Remap unknown modes to the cash mode so the
+    # reconciliation table stays clean.
+    known_modes = {pay.mode_of_payment for pay in payments}
+
+    # Aggregate each payment row's amount into the reconciliation buckets.
     for p in invoice.payments:
         amount = get_base_value(p, "amount", "base_amount", conversion_rate)
-        if p.mode_of_payment == cash_mode:
-            amount -= get_base_value(invoice, "change_amount", "base_change_amount", conversion_rate)
-        _aggregate_payment(payments, p.mode_of_payment, amount)
+        mode = p.mode_of_payment
+
+        if is_return and mode not in known_modes:
+            mode = cash_mode
+
+        _aggregate_payment(payments, mode, amount)
+
+    # Subtract change_amount once from the cash mode.  change_amount is an
+    # invoice-level field — the customer overpaid and received change back,
+    # so the drawer's net gain is (sum of cash rows − change).  Handling it
+    # outside the loop avoids double-subtraction when multiple payment rows
+    # share the same cash mode.
+    base_change = get_base_value(invoice, "change_amount", "base_change_amount", conversion_rate)
+    if base_change:
+        _aggregate_payment(payments, cash_mode, -base_change)
 
     return transaction
 

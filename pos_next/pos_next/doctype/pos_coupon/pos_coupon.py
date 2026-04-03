@@ -9,6 +9,9 @@ from frappe.utils import strip, flt
 from frappe.utils import getdate, today
 
 
+ONE_USE_COUPON_DOCTYPES = ("Sales Invoice", "POS Invoice")
+
+
 class POSCoupon(Document):
     def autoname(self):
         self.coupon_name = strip(self.coupon_name)
@@ -101,12 +104,7 @@ def check_coupon_code(coupon_code, customer=None, company=None):
 
     # Check one-time use per customer
     if coupon.one_use and customer:
-        # Check if customer has already used this coupon
-        used_count = frappe.db.count("POS Invoice", filters={
-            "customer": customer,
-            "coupon_code": coupon.coupon_code,
-            "docstatus": 1
-        })
+        used_count = _get_customer_coupon_usage_count(customer, coupon.coupon_code)
         if used_count > 0:
             res["msg"] = _("Sorry, you have already used this coupon code")
             return res
@@ -116,6 +114,27 @@ def check_coupon_code(coupon_code, customer=None, company=None):
     res["valid"] = True
 
     return res
+
+
+def _get_customer_coupon_usage_count(customer, coupon_code):
+    """Count submitted coupon usage across POSNext's actual sales doctypes."""
+    used_count = 0
+
+    for doctype in ONE_USE_COUPON_DOCTYPES:
+        if not frappe.db.table_exists(doctype):
+            continue
+
+        meta = frappe.get_meta(doctype)
+        if not meta.has_field("coupon_code"):
+            continue
+
+        used_count += frappe.db.count(doctype, filters={
+            "customer": customer,
+            "coupon_code": coupon_code,
+            "docstatus": 1,
+        })
+
+    return used_count
 
 
 def apply_coupon_discount(coupon, cart_total, net_total=None):

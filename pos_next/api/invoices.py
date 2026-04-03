@@ -337,6 +337,35 @@ def get_payment_account(mode_of_payment, company):
     )
 
 
+def _set_payment_accounts(payments, company):
+    """Set the account for each payment entry that is missing one.
+
+    Handles both Document objects (from invoice_doc.payments) and plain dicts
+    (from frontend data).  Document objects use BaseDocument.set() which writes
+    directly to __dict__, while plain dicts use normal key assignment.
+    """
+    if not payments or not company:
+        return
+
+    for payment in payments:
+        mode_of_payment = payment.get("mode_of_payment")
+        if not mode_of_payment or payment.get("account"):
+            continue
+        try:
+            account_info = get_payment_account(mode_of_payment, company)
+            if account_info:
+                account = account_info.get("account")
+                if hasattr(payment, "set") and callable(payment.set):
+                    payment.set("account", account)
+                else:
+                    payment["account"] = account
+        except Exception as e:
+            frappe.log_error(
+                f"Failed to get payment account for {mode_of_payment}: {e}",
+                "Payment Account Lookup",
+            )
+
+
 # ==========================================
 # Stock Validation Functions
 # ==========================================
@@ -685,20 +714,7 @@ def update_invoice(data):
         )
 
         if company and invoice_doc.get("payments") and doctype == "Sales Invoice":
-            for payment in invoice_doc.payments:
-                mode_of_payment = payment.get("mode_of_payment")
-                if mode_of_payment and not payment.get("account"):
-                    try:
-                        account_info = get_payment_account(
-                            mode_of_payment, company
-                        )
-                        if account_info:
-                            payment.account = account_info.get("account")
-                    except Exception as e:
-                        frappe.log_error(
-                            f"Failed to get payment account for {mode_of_payment}: {e}",
-                            "Payment Account Lookup"
-                        )
+            _set_payment_accounts(invoice_doc.payments, company)
 
         # Validate return items if this is a return invoice
         if (data.get("is_return") or invoice_doc.get("is_return")) and invoice_doc.get(
@@ -847,8 +863,31 @@ def update_invoice(data):
 
         invoice_doc.disable_rounded_total = disable_rounded
 
-        # Populate missing fields (company, currency, accounts, etc.)
-        invoice_doc.set_missing_values()
+        # ========================================================================
+        # POPULATE MISSING FIELDS — using for_validate=True intentionally
+        # ========================================================================
+        # ERPNext's set_missing_values() calls set_pos_fields() internally.
+        #
+        # With for_validate=False (the default):
+        #   set_pos_fields() -> update_multi_mode_option() which does:
+        #     1. doc.set("payments", [])          — wipes ALL payment rows
+        #     2. Rebuilds payments from POS Profile template with amount=0
+        #   Result: frontend payment amounts are destroyed before the invoice
+        #   is saved, causing invoices to appear unpaid (outstanding = grand_total).
+        #
+        # With for_validate=True:
+        #   set_pos_fields() skips update_multi_mode_option() entirely,
+        #   and only fills in missing fields (debit_to, currency, write_off_account,
+        #   cost_center, etc.) without overwriting values already set.
+        #   Payment accounts are set separately via _set_payment_accounts() below.
+        #
+        # This is safe on all ERPNext versions because POS Next already sets
+        # the fields that for_validate=True skips:
+        #   - ignore_pricing_rule  → set above (line ~752)
+        #   - customer             → sent from frontend
+        #   - tax_category         → sent from frontend or not needed
+        # ========================================================================
+        invoice_doc.set_missing_values(for_validate=True)
 
         # Calculate totals and apply discounts (with rounding disabled)
         invoice_doc.calculate_taxes_and_totals()
@@ -858,20 +897,7 @@ def update_invoice(data):
             invoice_doc.base_grand_total = 0.0
 
         # Set accounts for payment methods before saving
-        for payment in invoice_doc.payments:
-            mode_of_payment = payment.get("mode_of_payment")
-            if mode_of_payment and not payment.get("account"):
-                try:
-                    account_info = get_payment_account(
-                        mode_of_payment, invoice_doc.company
-                    )
-                    if account_info:
-                        payment.account = account_info.get("account")
-                except Exception as e:
-                    frappe.log_error(
-                        f"Failed to get payment account for {mode_of_payment}: {e}",
-                        "Payment Account Lookup"
-                    )
+        _set_payment_accounts(invoice_doc.payments, invoice_doc.company)
 
         # For return invoices, ensure payments are negative
         if invoice_doc.get("is_return"):
@@ -1278,13 +1304,7 @@ def submit_invoice(invoice=None, data=None):
 
         # Set accounts for all payment methods before saving
         if doctype == "Sales Invoice" and hasattr(invoice_doc, "payments"):
-            for payment in invoice_doc.payments:
-                if payment.mode_of_payment:
-                    account_info = get_payment_account(
-                        payment.mode_of_payment, invoice_doc.company
-                    )
-                    if account_info:
-                        payment.account = account_info.get("account")
+            _set_payment_accounts(invoice_doc.payments, invoice_doc.company)
 
         # Handle sales team (multiple sales persons)
         sales_team_data = invoice.get("sales_team") or data.get("sales_team")
@@ -1353,6 +1373,12 @@ def submit_invoice(invoice=None, data=None):
         # (global Stock Settings, POS Settings, and POS Profile flags)
         _validate_stock_on_invoice(invoice_doc)
 
+        # Allow pure customer-credit POS sales to submit without a payment row.
+        customer_credit_dict = data.get("customer_credit_dict") or invoice.get("customer_credit_dict")
+        redeemed_customer_credit = data.get("redeemed_customer_credit") or invoice.get("redeemed_customer_credit")
+        if redeemed_customer_credit and not invoice_doc.payments:
+            invoice_doc.flags.pos_next_redeemed_customer_credit = flt(redeemed_customer_credit)
+
         # Save before submit
         invoice_doc.flags.ignore_permissions = True
         frappe.flags.ignore_account_permission = True
@@ -1362,30 +1388,61 @@ def submit_invoice(invoice=None, data=None):
         invoice_doc.submit()
         invoice_submitted = True
         # Handle wallet transaction reversal for returns
+        wallet_reversal_ok = False
         if invoice_doc.get("is_return") and invoice_doc.get("return_against"):
+            from pos_next.pos_next.doctype.wallet_transaction.wallet_transaction import reverse_wallet_transactions_for_return
             try:
-                from pos_next.pos_next.doctype.wallet_transaction.wallet_transaction import reverse_wallet_transactions_for_return
                 reverse_wallet_transactions_for_return(
                     original_invoice=invoice_doc.return_against,
                     return_invoice=invoice_doc.name
                 )
-            except Exception as wallet_error:
+                wallet_reversal_ok = True
+            except Exception as wallet_reversal_error:
                 frappe.log_error(
-                    title="Wallet Reversal on Return Error",
-                    message=f"Return Invoice: {invoice_doc.name}, Error: {str(wallet_error)}\n{frappe.get_traceback()}"
+                    title="Wallet Reversal Error",
+                    message=(
+                        f"Return invoice: {invoice_doc.name}, "
+                        f"Original invoice: {invoice_doc.return_against}, "
+                        f"Error: {str(wallet_reversal_error)}\n{frappe.get_traceback()}"
+                    )
                 )
                 frappe.msgprint(
-                    _("Return submitted but wallet reversal failed. Please check manually."),
-                    alert=True, indicator="orange"
+                    _("Return invoice submitted successfully, but wallet reversal failed. Please contact administrator."),
+                    alert=True,
+                    indicator="orange"
                 )
+
+        # Credit return amount to customer wallet when "Add to Customer Credit Balance" is enabled.
+        # Only proceed if the wallet reversal above succeeded (or was not needed) to
+        # avoid double-crediting the customer when reversal fails.
+        if invoice_doc.get("is_return"):
+            add_to_customer_balance = invoice.get("add_to_customer_balance")
+            has_return_against = bool(invoice_doc.get("return_against"))
+            if add_to_customer_balance and (wallet_reversal_ok or not has_return_against):
+                from pos_next.pos_next.doctype.wallet_transaction.wallet_transaction import credit_return_to_wallet
+                try:
+                    credit_return_to_wallet(
+                        return_invoice=invoice_doc.name,
+                        amount=abs(flt(invoice_doc.grand_total))
+                    )
+                except Exception as wallet_credit_error:
+                    frappe.log_error(
+                        title="Wallet Credit on Return Error",
+                        message=(
+                            f"Return invoice: {invoice_doc.name}, "
+                            f"Error: {str(wallet_credit_error)}\n{frappe.get_traceback()}"
+                        )
+                    )
+                    frappe.msgprint(
+                        _("Return submitted but wallet credit failed. Please contact administrator."),
+                        alert=True,
+                        indicator="orange"
+                    )
         # Complete the offline sync record
         if sync_record_name:
             _complete_offline_sync(sync_record_name, invoice_doc.name)
 
         # Handle credit redemption after successful submission
-        customer_credit_dict = data.get("customer_credit_dict") or invoice.get("customer_credit_dict")
-        redeemed_customer_credit = data.get("redeemed_customer_credit") or invoice.get("redeemed_customer_credit")
-
         if redeemed_customer_credit and customer_credit_dict:
             try:
                 from pos_next.api.credit_sales import redeem_customer_credit
@@ -1625,7 +1682,7 @@ def delete_invoice(invoice):
 
 
 @frappe.whitelist()
-def cleanup_old_drafts(pos_profile=None, max_age_hours=24):
+def cleanup_old_drafts(pos_profile=None, max_age_hours=48):
     """
     Clean up old draft invoices to prevent stock reservation issues.
     Deletes drafts older than max_age_hours (default 24 hours).
@@ -1637,6 +1694,7 @@ def cleanup_old_drafts(pos_profile=None, max_age_hours=24):
 
     filters = {
         "docstatus": 0,  # Draft only
+        "is_pos": 1,  # Only POS Sales Invoices
         "modified": ["<", cutoff_time.strftime("%Y-%m-%d %H:%M:%S")],
     }
 
@@ -1676,16 +1734,65 @@ def cleanup_old_drafts(pos_profile=None, max_age_hours=24):
 # ==========================================
 
 
+def _filter_fully_returned(invoices):
+    """Remove invoices where all items have already been returned.
+
+    Uses two targeted queries instead of a 4-table LEFT JOIN to avoid
+    cartesian explosion (SI × SI_Item × Ret_SI × Ret_Item).
+    Only touches the small candidate set passed in.
+    """
+    if not invoices:
+        return []
+
+    from frappe.query_builder.functions import Sum, Abs
+
+    invoice_names = [inv["name"] for inv in invoices]
+
+    # Original qty per invoice
+    si_item = frappe.qb.DocType("Sales Invoice Item")
+    orig_rows = (
+        frappe.qb.from_(si_item)
+        .select(si_item.parent, Sum(si_item.qty).as_("total_original_qty"))
+        .where(si_item.parent.isin(invoice_names))
+        .groupby(si_item.parent)
+    ).run(as_dict=True)
+    orig_map = {r["parent"]: flt(r["total_original_qty"]) for r in orig_rows}
+
+    # Returned qty per original invoice
+    ret_si = frappe.qb.DocType("Sales Invoice")
+    ret_item = frappe.qb.DocType("Sales Invoice Item")
+    ret_rows = (
+        frappe.qb.from_(ret_si)
+        .inner_join(ret_item).on(ret_item.parent == ret_si.name)
+        .select(ret_si.return_against, Sum(Abs(ret_item.qty)).as_("total_returned_qty"))
+        .where(
+            (ret_si.return_against.isin(invoice_names))
+            & (ret_si.docstatus == 1)
+            & (ret_si.is_return == 1)
+        )
+        .groupby(ret_si.return_against)
+    ).run(as_dict=True)
+    ret_map = {r["return_against"]: flt(r["total_returned_qty"]) for r in ret_rows}
+
+    for inv in invoices:
+        inv["total_original_qty"] = orig_map.get(inv["name"], 0)
+        inv["total_returned_qty"] = ret_map.get(inv["name"], 0)
+
+    return [
+        inv for inv in invoices
+        if inv["total_original_qty"] > inv["total_returned_qty"]
+    ]
+
+
 @frappe.whitelist()
 def get_returnable_invoices(limit=50, pos_profile=None):
     """Get list of invoices that have items available for return.
     Filters by return validity period if configured in POS Settings.
 
-    Uses query builder with LEFT JOINs to calculate original and returned quantities
-    in a single query. Returns invoices where total_original_qty > total_returned_qty.
+    Two-step approach for performance:
+    1. Fetch recent POS invoices (fast indexed query, no JOINs)
+    2. Filter out fully-returned ones via _filter_fully_returned
     """
-    from frappe.query_builder.functions import Sum, Coalesce, Abs
-    from frappe.query_builder import Case
     from frappe.utils import add_days, today
 
     # Check return validity days from POS Settings
@@ -1699,62 +1806,37 @@ def get_returnable_invoices(limit=50, pos_profile=None):
             ) or 0
         )
 
-    # Define tables
     si = frappe.qb.DocType("Sales Invoice")
-    si_item = frappe.qb.DocType("Sales Invoice Item")
-    ret_si = frappe.qb.DocType("Sales Invoice").as_("ret_si")
-    ret_item = frappe.qb.DocType("Sales Invoice Item").as_("ret_item")
 
-    # Build query with query builder
+    # Over-fetch to compensate for fully-returned invoices removed in step 2
+    fetch_limit = cint(limit) * 2
+
+    # Step 1: fetch candidates (lightweight, no JOINs)
     query = (
         frappe.qb.from_(si)
-        .left_join(si_item).on(si_item.parent == si.name)
-        .left_join(ret_si).on(
-            (ret_si.return_against == si.name)
-            & (ret_si.docstatus == 1)
-            & (ret_si.is_return == 1)
-        )
-        .left_join(ret_item).on(
-            (ret_item.parent == ret_si.name)
-            & ((ret_item.sales_invoice_item == si_item.name) | (ret_item.item_code == si_item.item_code))
-        )
         .select(
-            si.name,
-            si.customer,
-            si.customer_name,
-            si.contact_mobile,
-            si.posting_date,
-            si.grand_total,
-            si.status,
-            Coalesce(Sum(Case().when(ret_item.qty.isnotnull(), Abs(ret_item.qty)).else_(0)), 0).as_("total_returned_qty"),
-            Coalesce(Sum(Case().when(si_item.qty.isnotnull(), si_item.qty).else_(0)), 0).as_("total_original_qty"),
+            si.name, si.customer, si.customer_name,
+            si.contact_mobile, si.posting_date,
+            si.grand_total, si.status,
         )
         .where(
             (si.docstatus == 1)
             & (si.is_return == 0)
             & (si.is_pos == 1)
         )
-        .groupby(si.name)
         .orderby(si.posting_date, order=frappe.qb.desc)
         .orderby(si.creation, order=frappe.qb.desc)
-        .limit(cint(limit))
+        .limit(fetch_limit)
     )
 
-    # Add date filter if return validity is configured
     if return_validity_days > 0:
         cutoff_date = add_days(today(), -return_validity_days)
         query = query.where(si.posting_date >= cutoff_date)
 
-    # Execute and filter results with HAVING equivalent (post-filter)
-    results = query.run(as_dict=True)
+    candidates = query.run(as_dict=True)
 
-    # Filter: only include invoices where original qty > returned qty
-    returnable_invoices = [
-        inv for inv in results
-        if flt(inv.get("total_original_qty", 0)) > flt(inv.get("total_returned_qty", 0))
-    ]
-
-    return returnable_invoices
+    # Step 2: filter out fully-returned invoices, then trim to requested limit
+    return _filter_fully_returned(candidates)[:cint(limit)]
 
 
 @frappe.whitelist()
@@ -1762,8 +1844,9 @@ def search_invoice_by_number(search_term, pos_profile=None):
     """Search for invoices by invoice number across the entire database.
     No date restrictions - searches all returnable invoices matching the term.
 
-    Uses query builder with LEFT JOINs to calculate remaining returnable quantities.
-    Only returns invoices that have items available for return.
+    Two-step approach for performance:
+    1. Find matching POS invoices by name (fast indexed LIKE query)
+    2. Filter out fully-returned ones via _filter_fully_returned
 
     Args:
         search_term: Invoice number or partial number to search for (min 3 chars)
@@ -1772,43 +1855,22 @@ def search_invoice_by_number(search_term, pos_profile=None):
     Returns:
         List of matching invoices with return availability info (max 10 results)
     """
-    from frappe.query_builder.functions import Sum, Coalesce, Abs
-    from frappe.query_builder import Case
-
     if not search_term or len(search_term) < 3:
         return []
 
-    search_term = cstr(search_term).strip()
-
-    # Define tables
+    # Escape LIKE wildcards in user input to prevent pattern abuse.
+    # frappe.db.escape() returns a quoted string for raw SQL — not usable with
+    # frappe.qb's .like() which parameterizes internally. Manual escaping needed.
+    search_term = cstr(search_term).strip().replace("%", r"\%").replace("_", r"\_")
     si = frappe.qb.DocType("Sales Invoice")
-    si_item = frappe.qb.DocType("Sales Invoice Item")
-    ret_si = frappe.qb.DocType("Sales Invoice").as_("ret_si")
-    ret_item = frappe.qb.DocType("Sales Invoice Item").as_("ret_item")
 
-    # Build query with query builder
-    query = (
+    # Step 1: find matching invoices (lightweight, no JOINs)
+    candidates = (
         frappe.qb.from_(si)
-        .left_join(si_item).on(si_item.parent == si.name)
-        .left_join(ret_si).on(
-            (ret_si.return_against == si.name)
-            & (ret_si.docstatus == 1)
-            & (ret_si.is_return == 1)
-        )
-        .left_join(ret_item).on(
-            (ret_item.parent == ret_si.name)
-            & ((ret_item.sales_invoice_item == si_item.name) | (ret_item.item_code == si_item.item_code))
-        )
         .select(
-            si.name,
-            si.customer,
-            si.customer_name,
-            si.contact_mobile,
-            si.posting_date,
-            si.grand_total,
-            si.status,
-            Coalesce(Sum(Case().when(ret_item.qty.isnotnull(), Abs(ret_item.qty)).else_(0)), 0).as_("total_returned_qty"),
-            Coalesce(Sum(Case().when(si_item.qty.isnotnull(), si_item.qty).else_(0)), 0).as_("total_original_qty"),
+            si.name, si.customer, si.customer_name,
+            si.contact_mobile, si.posting_date,
+            si.grand_total, si.status,
         )
         .where(
             (si.docstatus == 1)
@@ -1816,21 +1878,13 @@ def search_invoice_by_number(search_term, pos_profile=None):
             & (si.is_pos == 1)
             & (si.name.like(f"%{search_term}%"))
         )
-        .groupby(si.name)
         .orderby(si.posting_date, order=frappe.qb.desc)
         .orderby(si.creation, order=frappe.qb.desc)
         .limit(10)
-    )
+    ).run(as_dict=True)
 
-    results = query.run(as_dict=True)
-
-    # Filter: only include invoices where original qty > returned qty
-    matching_invoices = [
-        inv for inv in results
-        if flt(inv.get("total_original_qty", 0)) > flt(inv.get("total_returned_qty", 0))
-    ]
-
-    return matching_invoices
+    # Step 2: filter out fully-returned invoices
+    return _filter_fully_returned(candidates)
 
 
 @frappe.whitelist()
@@ -2011,6 +2065,134 @@ def _build_item_tax_map(taxes: list) -> dict:
     return dict(tax_map)
 
 
+def _remap_foreign_payment_modes(payments_data, current_profile, original_profile):
+    """Remap payment modes that don't belong to the current POS profile.
+
+    Cross-branch returns problem:
+        Each POS branch has its own cash Mode of Payment that maps to a
+        dedicated GL cash account (e.g. "Boulaq Cash" -> account 12114,
+        "Cash lebanon" -> account 12123). When a customer returns an invoice
+        that was originally sold at a different branch, ERPNext's
+        make_sales_return() copies the *original* branch's payment modes.
+
+        If we don't remap, two things go wrong:
+        1. GL entries: the refund is posted against the wrong branch's cash
+           account (e.g. crediting Lebanon's cash instead of Boulaq's).
+        2. Shift closing: the foreign mode creates an orphan payment row
+           that doesn't exist in the current profile's opening balance,
+           blocking reconciliation.
+
+    Remapping strategy:
+        Modes are matched by their Mode of Payment *type* field:
+        - Cash -> Cash  (e.g. "Cash lebanon" -> "Boulaq Cash")
+        - Bank -> Bank  (e.g. "Lebanon Visa" -> "Visa")
+        - General -> first available in profile, or cash fallback
+
+        This ensures the GL account matches the physical cash drawer or
+        bank account at the branch where the return is processed.
+
+    Fallback chain for default mode:
+        1. POS Profile.posa_cash_mode_of_payment (explicit cash mode config)
+        2. First mode with type "Cash" in the profile
+        3. First mode in the profile (any type)
+
+    When remapping is skipped (no-op):
+        - Same profile (current == original)
+        - No current_profile provided
+        - All original modes already exist in the current profile
+        - No default_mode could be determined (empty profile)
+
+    Args:
+        payments_data: list of frappe._dict with mode_of_payment, amount, etc.
+                       (from Sales Invoice Payment child table of original invoice)
+        current_profile: POS Profile name where the return is being processed
+        original_profile: POS Profile name where the original sale happened
+
+    Returns:
+        The same payments_data list with mode_of_payment remapped in-place.
+        Shared modes (e.g. "Visa" exists in both profiles) are left unchanged.
+
+    Example:
+        Original invoice (profile "2- Lebanon"):
+            payments = [{"mode_of_payment": "Cash lebanon", "amount": 3240}]
+
+        Current profile "4- Boulaq" has modes:
+            [{"mode_of_payment": "Boulaq Cash", type: "Cash"},
+             {"mode_of_payment": "Visa",        type: "Bank"}]
+
+        After remap:
+            payments = [{"mode_of_payment": "Boulaq Cash", "amount": 3240}]
+
+        "Cash lebanon" (type=Cash) -> "Boulaq Cash" (type=Cash)
+    """
+    if not current_profile or current_profile == original_profile:
+        return payments_data
+
+    # Get current profile's payment modes
+    current_modes = {
+        row.mode_of_payment
+        for row in frappe.get_all(
+            "POS Payment Method",
+            filters={"parent": current_profile, "parenttype": "POS Profile"},
+            fields=["mode_of_payment"],
+        )
+    }
+
+    # Check if any payment needs remapping
+    needs_remap = any(p.mode_of_payment not in current_modes for p in payments_data)
+    if not needs_remap:
+        return payments_data
+
+    # Build type->mode map for the current profile.
+    # Uses setdefault so the first mode of each type wins (matches profile order).
+    mop = frappe.qb.DocType("Mode of Payment")
+    ppm = frappe.qb.DocType("POS Payment Method")
+    current_type_map = {}
+    rows = (
+        frappe.qb.from_(ppm)
+        .inner_join(mop).on(mop.name == ppm.mode_of_payment)
+        .select(ppm.mode_of_payment, mop.type)
+        .where(
+            (ppm.parent == current_profile)
+            & (ppm.parenttype == "POS Profile")
+        )
+    ).run(as_dict=True)
+
+    for row in rows:
+        current_type_map.setdefault(row.type, row.mode_of_payment)
+
+    # Default fallback: posa_cash_mode_of_payment > first Cash type > first mode
+    default_mode = (
+        frappe.db.get_value("POS Profile", current_profile, "posa_cash_mode_of_payment")
+        or current_type_map.get("Cash")
+        or (rows[0].mode_of_payment if rows else None)
+    )
+
+    if not default_mode:
+        return payments_data
+
+    # Fetch the type for each foreign mode in a single query
+    foreign_modes = [p.mode_of_payment for p in payments_data if p.mode_of_payment not in current_modes]
+    foreign_types = {}
+    if foreign_modes:
+        type_rows = frappe.get_all(
+            "Mode of Payment",
+            filters={"name": ["in", foreign_modes]},
+            fields=["name", "type"],
+        )
+        foreign_types = {r.name: r.type for r in type_rows}
+
+    # Remap: foreign Cash -> current Cash, foreign Bank -> current Bank, etc.
+    # If no type match in current profile, fall back to default_mode.
+    for payment in payments_data:
+        if payment.mode_of_payment in current_modes:
+            continue
+        foreign_type = foreign_types.get(payment.mode_of_payment)
+        payment.mode_of_payment = current_type_map.get(foreign_type, default_mode)
+
+    return payments_data
+
+
 @frappe.whitelist()
 def prepare_return_invoice(invoice_name, pos_opening_shift=None):
     """Prepare a return invoice using ERPNext's make_sales_return.
@@ -2142,6 +2324,28 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
         )
         .where(si_payment.parent == invoice_name)
     ).run(as_dict=True)
+
+    # Cross-branch return: remap foreign payment modes to the current profile.
+    #
+    # When the original invoice's POS profile differs from the current shift's
+    # profile, the original payment modes (e.g. "Cash lebanon") won't exist in
+    # the current profile ("4- Boulaq"). _remap_foreign_payment_modes matches
+    # by Mode of Payment type (Cash->Cash, Bank->Bank) so the frontend
+    # pre-fills the correct refund method and the resulting GL entries debit
+    # the correct branch cash/bank account.
+    #
+    # This is the primary fix point (Layer 1). The frontend and closing shift
+    # code have additional safety nets for cases where this remap doesn't run
+    # (e.g. no pos_opening_shift provided) or for already-submitted invoices
+    # with the wrong payment mode.
+    if pos_opening_shift:
+        current_profile = frappe.db.get_value(
+            "POS Opening Shift", pos_opening_shift, "pos_profile"
+        )
+        if current_profile:
+            payments_data = _remap_foreign_payment_modes(
+                payments_data, current_profile, invoice_info.pos_profile
+            )
 
     # Include original invoice data for reference (payments, amounts, etc.)
     return_dict["_original_invoice"] = {
@@ -2509,6 +2713,10 @@ def apply_offers(invoice_data, selected_offers=None):
             return {"items": items}
 
         profile = frappe.get_cached_doc("POS Profile", invoice.get("pos_profile"))
+
+        # Respect POS Profile's ignore_pricing_rule setting
+        if profile.ignore_pricing_rule:
+            return {"items": items}
 
         # Batch fetch all item details in a single query (reduces N queries to 1)
         item_codes = list({item.get("item_code") for item in items if item.get("item_code")})

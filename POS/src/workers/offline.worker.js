@@ -669,6 +669,58 @@ async function searchCachedItemsByGroup(itemGroups = [], limit = 50, offset = 0)
 }
 
 /**
+ * Search cached items filtered by brand.
+ * Uses the brand index for efficient lookup.
+ *
+ * @param {string} brand - Brand name to filter by
+ * @param {number} limit - Max results
+ * @param {number} offset - Offset for pagination
+ * @returns {Promise<Array>} Matching items
+ */
+async function searchCachedItemsByBrand(brand, limit = 50, offset = 0) {
+	const startTime = performance.now()
+
+	if (!brand) {
+		// No brand filter → fall back to generic search
+		return searchCachedItems("", limit, offset)
+	}
+
+	const cacheKey = `brand:${brand}:${limit}:${offset}`
+	const cached = getCachedQuery(cacheKey)
+	if (cached) {
+		log.debug("Cache hit for brand search", { brand })
+		return cached
+	}
+
+	try {
+		const db = await initDB()
+
+		// Use brand index for lookup, then sort and paginate in memory
+		let results = await db.table("items")
+			.where("brand")
+			.equals(brand)
+			.filter(item => shouldShowItem(item))
+			.toArray()
+
+		// Stable ordering by item_name for consistent UI
+		results.sort((a, b) => (a.item_name || "").localeCompare(b.item_name || ""))
+
+		const paginated = results.slice(offset, offset + limit)
+
+		const duration = Math.round(performance.now() - startTime)
+		recordMetric('searchCachedItemsByBrand', duration, false)
+		log.debug(`Brand search: ${paginated.length} items for "${brand}" in ${duration}ms`)
+
+		cacheQueryResult(cacheKey, paginated)
+		return paginated
+	} catch (error) {
+		recordMetric('searchCachedItemsByBrand', performance.now() - startTime, true)
+		log.error("Error searching cached items by brand", error)
+		return []
+	}
+}
+
+/**
  * Count cached items filtered by item groups.
  * Uses the item_group index for efficient counting.
  *
@@ -1098,6 +1150,48 @@ async function getCachedPaymentMethods(posProfile) {
 		return methods
 	} catch (error) {
 		log.error("Error getting cached payment methods", error)
+		return []
+	}
+}
+
+// ============================================================================
+// SALES PERSONS CACHE FUNCTIONS
+// ============================================================================
+
+// Cache sales persons for offline use
+async function cacheSalesPersons(salesPersons) {
+	try {
+		const db = await initDB()
+		await db.table("sales_persons").bulkPut(salesPersons)
+
+		await db.table("settings").put({
+			key: "sales_persons_last_sync",
+			value: Date.now(),
+		})
+
+		return { success: true, count: salesPersons.length }
+	} catch (error) {
+		log.error("Error caching sales persons", error)
+		throw error
+	}
+}
+
+// Get cached sales persons for a POS profile
+async function getCachedSalesPersons(posProfile) {
+	try {
+		const db = await initDB()
+
+		if (!posProfile) {
+			return await db.table("sales_persons").toArray()
+		}
+
+		return await db
+			.table("sales_persons")
+			.where("pos_profile")
+			.equals(posProfile)
+			.toArray()
+	} catch (error) {
+		log.error("Error getting cached sales persons", error)
 		return []
 	}
 }
@@ -1591,6 +1685,9 @@ self.onmessage = async (event) => {
 			case "CACHE_CUSTOMERS":
 				result = await cacheCustomersFromServer(payload.customers)
 				break
+			case "SEARCH_ITEMS_BY_BRAND":
+				result = await searchCachedItemsByBrand(payload.brand, payload.limit, payload.offset || 0)
+				break
 
 			case "DELETE_CUSTOMERS":
 				result = await deleteCustomers(payload.customerNames)
@@ -1618,6 +1715,14 @@ self.onmessage = async (event) => {
 
 			case "GET_PAYMENT_METHODS":
 				result = await getCachedPaymentMethods(payload.posProfile)
+				break
+
+			case "CACHE_SALES_PERSONS":
+				result = await cacheSalesPersons(payload.salesPersons)
+				break
+
+			case "GET_SALES_PERSONS":
+				result = await getCachedSalesPersons(payload.posProfile)
 				break
 
 			case "IS_CACHE_READY":

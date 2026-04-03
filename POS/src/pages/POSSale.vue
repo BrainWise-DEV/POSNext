@@ -27,7 +27,7 @@
 				:silent-print-enabled="posSettingsStore.silentPrint"
 				:qz-connected="qzConnected"
 				@sync-click="handleSyncClick"
-				@printer-click="uiStore.showHistoryDialog = true"
+				@printer-click="openHistoryDialog"
 				@refresh-click="handleRefresh"
 				@clear-cache="handleClearCache"
 				@logout="uiStore.showLogoutDialog = true"
@@ -54,7 +54,8 @@
 						<span>{{ __("View Shift") }}</span>
 					</button>
 					<button
-						@click="uiStore.showDraftDialog = true"
+						v-if="canAccessShiftActions"
+						@click="openDraftDialog"
 						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-purple-50 flex items-center gap-3 transition-colors relative"
 					>
 						<svg
@@ -79,7 +80,8 @@
 						</span>
 					</button>
 					<button
-						@click="uiStore.showHistoryDialog = true"
+						v-if="canAccessShiftActions"
+						@click="openHistoryDialog"
 						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-indigo-50 flex items-center gap-3 transition-colors"
 					>
 						<svg
@@ -145,7 +147,8 @@
 						</span>
 					</button>
 					<button
-						@click="uiStore.showReturnDialog = true"
+						v-if="canAccessShiftActions"
+						@click="openReturnDialog"
 						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-red-50 flex items-center gap-3 transition-colors"
 					>
 						<svg
@@ -163,7 +166,27 @@
 						</svg>
 						<span>{{ __("Return Invoice") }}</span>
 					</button>
-					<hr class="my-1 border-gray-100">
+					<button
+						v-if="canAccessShiftActions && canSwitchToDesk"
+						@click="switchToDesk"
+						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-emerald-50 flex items-center gap-3 transition-colors"
+					>
+						<svg
+							class="w-5 h-5 text-emerald-600"
+							fill="none"
+							stroke="currentColor"
+							viewBox="0 0 24 24"
+						>
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								stroke-width="2"
+								d="M3 7h18M3 12h18M3 17h18"
+							/>
+						</svg>
+						<span>{{ __("Switch To Desk") }}</span>
+					</button>
+					<hr class="my-1 border-gray-100"> 
 					<button
 						@click="lockSession()"
 						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-amber-50 flex items-center gap-3 transition-colors"
@@ -186,6 +209,7 @@
 				</template>
 				<template #additional-actions>
 					<button
+						v-if="canAccessShiftActions"
 						@click="handleCloseShift()"
 						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-orange-50 flex items-center gap-3 transition-colors"
 					>
@@ -523,6 +547,7 @@
 			<DraftInvoicesDialog
 				v-model="uiStore.showDraftDialog"
 				:currency="shiftStore.profileCurrency"
+				:allow-print-draft-invoices="posSettingsStore.allowPrintDraftInvoices"
 				@load-draft="handleLoadDraft"
 				@drafts-updated="draftsStore.updateDraftsCount"
 			/>
@@ -540,6 +565,8 @@
 			<CouponDialog
 				v-model="uiStore.showCouponDialog"
 				:subtotal="cartStore.subtotal"
+				:tax-amount="cartStore.totalTax"
+				:grand-total="cartStore.grandTotal"
 				:items="cartStore.invoiceItems"
 				:pos-profile="shiftStore.profileName"
 				:customer="cartStore.customer?.name || cartStore.customer"
@@ -1048,6 +1075,7 @@ import { usePOSSettingsStore } from "@/stores/posSettings";
 import { usePOSShiftStore } from "@/stores/posShift";
 import { usePOSSyncStore } from "@/stores/posSync";
 import { usePOSUIStore } from "@/stores/posUI";
+import { useBootstrapStore } from "@/stores/bootstrap";
 import { logger } from "@/utils/logger";
 import { shouldValidateItemStock } from "@/utils/stockValidator";
 
@@ -1061,6 +1089,7 @@ const posSettingsStore = usePOSSettingsStore();
 const itemStore = useItemSearchStore();
 const stockStore = useStockStore();
 const customerSearchStore = useCustomerSearchStore();
+const bootstrapStore = useBootstrapStore();
 // Note: settingsStore is an alias to posSettingsStore (same Pinia store singleton)
 const settingsStore = posSettingsStore;
 
@@ -1196,6 +1225,11 @@ const profileWarehouses = computed(() => {
 	}
 	return [];
 });
+
+const canAccessShiftActions = computed(() => shiftStore.hasOpenShift);
+
+/** Desk link only for users with the Nexus POS Manager role (from bootstrap API). */
+const canSwitchToDesk = computed(() => Boolean(bootstrapStore.data?.can_switch_to_desk));
 
 // Resize state
 let resizeState = null;
@@ -1467,7 +1501,12 @@ watch(
 	(value) => {
 		if (value && typeof window !== "undefined") {
 			updateLayoutBounds();
+			return;
 		}
+
+		uiStore.showDraftDialog = false;
+		uiStore.showHistoryDialog = false;
+		uiStore.showReturnDialog = false;
 	}
 );
 
@@ -1987,6 +2026,7 @@ async function handlePaymentCompleted(paymentData) {
 		if (paymentData.payments && Array.isArray(paymentData.payments)) {
 			paymentData.payments.forEach((p) => {
 				cartStore.payments.push({
+					...p,
 					mode_of_payment: p.mode_of_payment,
 					amount: p.amount,
 					type: p.type,
@@ -2212,6 +2252,10 @@ async function handleOptionSelected(option) {
 }
 
 function handleCloseShift() {
+	if (!canAccessShiftActions.value) {
+		return;
+	}
+
 	uiStore.showCloseShiftDialog = true;
 }
 

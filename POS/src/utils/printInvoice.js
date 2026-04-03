@@ -216,7 +216,7 @@ export function printInvoiceCustom(invoiceData) {
 			<div class="receipt">
 				<div class="header">
 					<div class="company-name">${invoiceData.company || "POS Next"}</div>
-					<div style="font-size: 12px;">${__("TAX INVOICE")}</div>
+					<div style="font-size: 12px;">${invoiceData.header || __("TAX INVOICE")}</div>
 				</div>
 
 				<div class="invoice-info">
@@ -269,8 +269,8 @@ export function printInvoiceCustom(invoiceData) {
 				</div>` : ""}
 
 				<div class="footer">
-					<div style="margin-bottom: 5px;">${__("Thank you for your business!")}</div>
-					<div style="font-size: 10px;">Powered by <a href="https://nexus.brainwise.me" target="_blank" style="color: #3b82f6; text-decoration: none; font-weight: 600;">BrainWise</a></div>
+					<div style="margin-bottom: 5px;">${invoiceData.footer || __("Thank you for your business!")}</div>
+					${invoiceData.footer ? "" : `<div style="font-size: 10px;">Powered by <a href="https://nexus.brainwise.me" target="_blank" style="color: #3b82f6; text-decoration: none; font-weight: 600;">BrainWise</a></div>`}
 				</div>
 			</div>
 

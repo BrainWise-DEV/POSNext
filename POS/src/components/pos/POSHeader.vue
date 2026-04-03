@@ -214,8 +214,8 @@
 						</div>
 					</div>
 
-					<!-- Printer - Hidden on small screens -->
-					<div class="hidden md:block relative">
+					<!-- Printer - Visible only while shift is open -->
+					<div v-if="hasOpenShift" class="hidden md:block relative">
 						<ActionButton
 							:icon="printerIcon"
 							:title="silentPrintEnabled ? (qzConnected ? __('Silent Print: Connected') : __('Silent Print: Disconnected')) : __('Print Invoice')"

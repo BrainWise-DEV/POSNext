@@ -18,6 +18,7 @@ import { useToast } from "@/composables/useToast"
 import {
 	cacheCustomersFromServer,
 	cachePaymentMethodsFromServer,
+	cacheSalesPersonsFromServer,
 	syncOfflineInvoices,
 	cacheInvoiceHistory,
 	cacheUnpaidInvoices,
@@ -281,6 +282,21 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 			} catch (error) {
 				log.error('Failed to load payment methods', error)
 				// Continue with other data loading
+			}
+
+			// Cache sales persons for offline use
+			try {
+				const salesPersonsData = await cacheSalesPersonsFromServer(currentProfile.name)
+				if (salesPersonsData.sales_persons?.length > 0) {
+					const personsWithProfile = salesPersonsData.sales_persons.map((person) => ({
+						...person,
+						pos_profile: currentProfile.name,
+					}))
+					await offlineWorker.cacheSalesPersons(personsWithProfile)
+					log.success(`Cached ${personsWithProfile.length} sales persons`)
+				}
+			} catch (error) {
+				log.error('Failed to load sales persons', error)
 			}
 
 			// Load customers if cache needs refresh
