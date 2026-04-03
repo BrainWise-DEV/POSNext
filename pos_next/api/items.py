@@ -10,9 +10,7 @@ from erpnext.stock.get_item_details import get_item_details as erpnext_get_item_
 from frappe import _
 from frappe.query_builder import DocType, functions as fn
 from frappe.utils import cint, flt, nowdate
-from pos_branch_helper.pos_branch_helper.discount_policy.service import (
-    get_item_discount_policy,
-)
+from pos_branch_helper.discount_policy.service import get_item_discount_policy
 
 ITEM_RESULT_FIELDS = [
 	"name as item_code",
@@ -36,6 +34,26 @@ ITEM_RESULT_COLUMNS = ",\n\t".join(ITEM_RESULT_FIELDS)
 
 def _to_policy_bool(value):
 	return 1 if cint(value) else 0
+
+
+def _get_discount_policy_payload(item_code, fallback_max_discount=0):
+	"""Safely resolve discount policy without crashing POS if custom app is unavailable."""
+	try:
+		from pos_branch_helper.discount_policy.service import get_item_discount_policy
+		policy = get_item_discount_policy(item_code) or {}
+		return {
+			"discount_allowed": cint(policy.get("discount_allowed", 1)),
+			"is_discount_locked": cint(policy.get("is_discount_locked", 0)),
+			"has_max_discount": cint(policy.get("has_max_discount", 0)),
+			"max_discount": flt(policy.get("max_discount", fallback_max_discount or 0)),
+		}
+	except Exception:
+		return {
+			"discount_allowed": 1,
+			"is_discount_locked": 0,
+			"has_max_discount": 1 if flt(fallback_max_discount or 0) > 0 else 0,
+			"max_discount": flt(fallback_max_discount or 0),
+		}
 
 
 def get_uom_policy_payloads(item_codes):
@@ -1592,6 +1610,15 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20,
 
 			# Add warehouse to item (needed for stock validation)
 			item["warehouse"] = pos_profile_doc.warehouse
+			# Add discount policy for frontend line-discount enforcement
+			discount_policy = _get_discount_policy_payload(
+				item["item_code"],
+				fallback_max_discount=item.get("max_discount", 0),
+			)
+			item["discount_allowed"] = discount_policy["discount_allowed"]
+			item["is_discount_locked"] = discount_policy["is_discount_locked"]
+			item["has_max_discount"] = discount_policy["has_max_discount"]
+			item["max_discount"] = discount_policy["max_discount"]
 
 			# Barcode
 			# item["barcode"] = barcode_map.get(item["item_code"], "")
@@ -1804,6 +1831,15 @@ def get_items_bulk(pos_profile, item_groups=None, start=0, limit=2000, include_v
 				else bundle_availability_map.get(item_code, 0)
 			)
 			item["warehouse"] = warehouse
+			# Add discount policy for frontend line-discount enforcement
+			discount_policy = _get_discount_policy_payload(
+				item_code,
+				fallback_max_discount=item.get("max_discount", 0),
+			)
+			item["discount_allowed"] = discount_policy["discount_allowed"]
+			item["is_discount_locked"] = discount_policy["is_discount_locked"]
+			item["has_max_discount"] = discount_policy["has_max_discount"]
+			item["max_discount"] = discount_policy["max_discount"]
 
 			# Bundle marker
 			if item_code in bundle_availability_map:
