@@ -986,12 +986,58 @@ def update_invoice(data):
             d.get("item_code"): d.get("warehouse")
             for d in (data.get("items") or [])
             if d.get("item_code") and d.get("warehouse")
-        }      
+        }
+        frappe.log_error(
+            title="POS DEBUG Log 1 BEFORE SANITIZE",
+            message=frappe.as_json({
+                "discount_amount": invoice_doc.discount_amount,
+                "additional_discount_percentage": invoice_doc.additional_discount_percentage,
+                "incoming_payments": incoming_payments,
+                "items": [
+                    {
+                        "item_code": d.item_code,
+                        "amount": d.amount,
+                        "discount_percentage": d.discount_percentage,
+                    }
+                    for d in invoice_doc.items
+                ]
+            })
+        )
+        # FINAL BACKEND SANITIZE
+        # Clear stale document-level discount when cart contains protected items
+        if doctype == "Sales Invoice":
+            protected_items = []
+
+            for row in invoice_doc.get("items", []):
+                policy = _get_item_discount_policy_flags(row.get("item_code"))
+
+                if (
+                    cint(policy.get("discount_allowed")) == 0
+                    or cint(policy.get("is_discount_locked")) == 1
+                ):
+                    protected_items.append(
+                        row.get("item_name") or row.get("item_code")
+                    )
+
+            if protected_items:
+                invoice_doc.discount_amount = 0
+                invoice_doc.additional_discount_percentage = 0
+                invoice_doc.apply_discount_on = "Grand Total"
 
         invoice_doc.set_missing_values()
 
         # Calculate totals and apply discounts (with rounding disabled)
         invoice_doc.calculate_taxes_and_totals()
+        frappe.log_error(
+            title="POS DEBUG Log 2 AFTER TOTALS",
+            message=frappe.as_json({
+                "grand_total": invoice_doc.grand_total,
+                "net_total": invoice_doc.net_total,
+                "discount_amount": invoice_doc.discount_amount,
+                "paid_amount": invoice_doc.paid_amount,
+            })
+        )
+
         if invoice_doc.grand_total is None:
             invoice_doc.grand_total = 0.0
         if invoice_doc.base_grand_total is None:
@@ -1005,6 +1051,21 @@ def update_invoice(data):
                 row.warehouse = forced_wh
 
         _restore_payment_amounts(invoice_doc, incoming_payments)
+        frappe.log_error(
+            title="POS DEBUG Log 3 AFTER PAYMENT RESTORE",
+            message=frappe.as_json({
+                "grand_total": invoice_doc.grand_total,
+                "paid_amount": invoice_doc.paid_amount,
+                "outstanding_amount": invoice_doc.outstanding_amount,
+                "payments": [
+                    {
+                        "mode_of_payment": p.mode_of_payment,
+                        "amount": p.amount,
+                    }
+                    for p in invoice_doc.payments
+                ]
+            })
+        )
 
         # Re-attach accounts after rebuilding payment rows
         _set_payment_accounts(invoice_doc.payments, invoice_doc.company)
@@ -1101,29 +1162,18 @@ def update_invoice(data):
         invoice_doc.flags.ignore_permissions = True
         frappe.flags.ignore_account_permission = True
         invoice_doc.docstatus = 0
-
-        # FINAL BACKEND SANITIZE
-        # Clear stale document-level discount when cart contains protected items
-        if doctype == "Sales Invoice":
-            protected_items = []
-
-            for row in invoice_doc.get("items", []):
-                policy = _get_item_discount_policy_flags(row.get("item_code"))
-
-                if (
-                    cint(policy.get("discount_allowed")) == 0
-                    or cint(policy.get("is_discount_locked")) == 1
-                ):
-                    protected_items.append(
-                        row.get("item_name") or row.get("item_code")
-                    )
-
-            if protected_items:
-                invoice_doc.discount_amount = 0
-                invoice_doc.additional_discount_percentage = 0
-                invoice_doc.apply_discount_on = "Grand Total"
-
         invoice_doc.save()
+        
+        frappe.log_error(
+            title="POS DEBUG Log 4 AFTER SAVE",
+            message=frappe.as_json({
+                "name": invoice_doc.name,
+                "grand_total": invoice_doc.grand_total,
+                "paid_amount": invoice_doc.paid_amount,
+                "outstanding_amount": invoice_doc.outstanding_amount,
+                "status": invoice_doc.status,
+            })
+        )
 
         return invoice_doc.as_dict()
     except Exception as e:
@@ -1568,29 +1618,6 @@ def submit_invoice(invoice=None, data=None):
         # _validate_stock_on_invoice checks _should_block internally
         # (global Stock Settings, POS Settings, and POS Profile flags)
         _validate_stock_on_invoice(invoice_doc)
-
-        frappe.log_error(
-            title="POS DEBUG SUBMIT_INVOICE PAYMENTS",
-            message=frappe.as_json({
-                "invoice_name": invoice_doc.get("name"),
-                "branch": invoice_doc.get("branch"),
-                "naming_series": invoice_doc.get("naming_series"),
-                "grand_total": invoice_doc.get("grand_total"),
-                "paid_amount": invoice_doc.get("paid_amount"),
-                "base_paid_amount": invoice_doc.get("base_paid_amount"),
-                "outstanding_amount": invoice_doc.get("outstanding_amount"),
-                "payments": [
-                    {
-                        "mode_of_payment": p.get("mode_of_payment"),
-                        "amount": p.get("amount"),
-                        "base_amount": p.get("base_amount"),
-                        "account": p.get("account"),
-                    }
-                    for p in (invoice_doc.get("payments") or [])
-                ]
-            })
-        )
-
 
         # Save before submit
         invoice_doc.flags.ignore_permissions = True
