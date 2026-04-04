@@ -632,8 +632,21 @@
 							}}
 						</div>
 						<div class="grid grid-cols-4 gap-1.5">
+							<input
+								ref="desktopAmountInputRef"
+								v-model="desktopAmountInput"
+								type="number"
+								min="0"
+								step="0.01"
+								@keydown.enter.stop.prevent="handleDesktopAmountEnter"
+								:class="[
+									'font-semibold rounded-lg border-2 transition-all text-center',
+									isCompactMode ? 'px-2 py-2 text-sm' : 'px-2 py-2 text-sm',
+									'bg-white border-blue-400 text-gray-700 focus:outline-none focus:border-blue-500'
+								]"
+							/>
 							<button
-								v-for="amount in quickAmounts"
+								v-for="amount in quickAmounts.slice(0, 3)"
 								:key="amount"
 								@click="addCustomPayment(lastSelectedMethod, amount)"
 								:disabled="isQuickAmountDisabled(amount)"
@@ -685,6 +698,7 @@
 										isExactAmountModeActive && !isCashPaymentMethod(lastSelectedMethod) ? 'text-gray-300' : 'text-gray-400'
 									]">{{ currencySymbol }}</span>
 									<input
+										ref="mobileAmountInputRef"
 										v-model="mobileCustomAmount"
 										type="number"
 										inputmode="decimal"
@@ -699,6 +713,7 @@
 												? 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed'
 												: 'bg-white border-gray-200 focus:ring-1 focus:ring-blue-500'
 										]"
+										@keydown.enter.prevent="handleMobileAmountEnter"
 									/>
 								</div>
 								<button
@@ -1178,12 +1193,16 @@ watch(
 function handleNumpadEnter(value) {
 	if (value > 0 && lastSelectedMethod.value) {
 		numpadAddPayment()
+		nextTick(() => {
+			if (remainingAmount.value === 0 && totalPaid.value > 0 && canComplete.value) {
+				completePayment()
+			}
+		})
 	} else if (
 		remainingAmount.value === 0 &&
 		totalPaid.value > 0 &&
 		canComplete.value
 	) {
-		// If fully paid and can complete, trigger complete payment
 		completePayment()
 	}
 }
@@ -1203,12 +1222,43 @@ const {
 
 // Mobile custom amount state
 const mobileCustomAmount = ref("")
+const mobileAmountInputRef = ref(null)
+
+// Desktop quick-amount input (first slot in 4-col grid)
+const desktopAmountInput = ref("")
+const desktopAmountInputRef = ref(null)
 
 function addMobileCustomPayment() {
 	const amount = Number.parseFloat(mobileCustomAmount.value)
 	if (amount > 0 && lastSelectedMethod.value) {
 		addCustomPayment(lastSelectedMethod.value, amount)
 		mobileCustomAmount.value = ""
+	}
+}
+
+async function handleMobileAmountEnter() {
+	const amount = Number.parseFloat(mobileCustomAmount.value)
+	if (amount > 0 && lastSelectedMethod.value) {
+		await addCustomPayment(lastSelectedMethod.value, amount)
+		mobileCustomAmount.value = ""
+		if (canComplete.value && !isSubmitting.value) {
+			completePayment()
+		}
+	} else if (canComplete.value && !isSubmitting.value) {
+		completePayment()
+	}
+}
+
+async function handleDesktopAmountEnter() {
+	const amount = Number.parseFloat(desktopAmountInput.value)
+	if (amount > 0 && lastSelectedMethod.value) {
+		await addCustomPayment(lastSelectedMethod.value, amount)
+		desktopAmountInput.value = ""
+		if (canComplete.value && !isSubmitting.value) {
+			completePayment()
+		}
+	} else if (canComplete.value && !isSubmitting.value) {
+		completePayment()
 	}
 }
 
@@ -1964,6 +2014,7 @@ watch(show, (newVal) => {
 		customAmount.value = ""
 		numpadClear()
 		mobileCustomAmount.value = ""
+		desktopAmountInput.value = ""
 		lastSelectedMethod.value = null
 		customerCredit.value = []
 		// Note: Don't reset customerBalance here - it's pre-fetched when customer changes
@@ -1988,6 +2039,19 @@ watch(show, (newVal) => {
 		if (paymentMethods.value.length > 0 && !lastSelectedMethod.value) {
 			const defaultMethod = paymentMethods.value.find((m) => m.default)
 			lastSelectedMethod.value = defaultMethod || paymentMethods.value[0]
+		}
+
+		// Pre-populate amount fields with grand total so cashier can press Enter immediately
+		if (props.grandTotal > 0) {
+			mobileCustomAmount.value = props.grandTotal.toFixed(2)
+			desktopAmountInput.value = props.grandTotal.toFixed(2)
+			setNumpadValue(props.grandTotal)
+			nextTick(() => {
+				mobileAmountInputRef.value?.focus()
+				mobileAmountInputRef.value?.select()
+				desktopAmountInputRef.value?.focus()
+				desktopAmountInputRef.value?.select()
+			})
 		}
 
 		// Customer credit and balance is pre-fetched when customer changes (see watcher above)
