@@ -483,6 +483,118 @@ def _get_item_discount_policy_flags(item_code):
     return {"discount_allowed": 1, "is_discount_locked": 0}
 
 
+def _allocate_additional_discount_to_discountable_items(invoice_doc):
+    """Distribute document-level additional discount across eligible items only.
+
+    Keeps protected / locked items at full price.
+    Clears invoice-level additional discount after converting it into line discounts.
+    """
+    if not invoice_doc or invoice_doc.doctype != "Sales Invoice":
+        return
+
+    discount_amount = flt(invoice_doc.get("discount_amount") or 0)
+    discount_pct = flt(invoice_doc.get("additional_discount_percentage") or 0)
+
+    if discount_amount <= 0 and discount_pct <= 0:
+        return
+
+    precision = cint(
+        frappe.get_cached_value("System Settings", None, "currency_precision")
+    ) or 2
+
+    eligible_rows = []
+    protected_rows = []
+
+    for row in invoice_doc.get("items", []):
+        qty = flt(row.get("qty") or 0)
+        rate = flt(row.get("rate") or 0)
+        line_total = flt(qty * rate, precision)
+
+        policy = _get_item_discount_policy_flags(row.get("item_code"))
+        is_protected = (
+            cint(policy.get("discount_allowed")) == 0
+            or cint(policy.get("is_discount_locked")) == 1
+        )
+
+        if is_protected or qty <= 0 or rate <= 0 or line_total <= 0:
+            protected_rows.append(row)
+            continue
+
+        eligible_rows.append({
+            "row": row,
+            "qty": qty,
+            "line_total": line_total,
+        })
+
+    if not eligible_rows:
+        invoice_doc.discount_amount = 0
+        invoice_doc.additional_discount_percentage = 0
+        invoice_doc.apply_discount_on = "Grand Total"
+        return
+
+    eligible_total = flt(sum(d["line_total"] for d in eligible_rows), precision)
+
+    if eligible_total <= 0:
+        invoice_doc.discount_amount = 0
+        invoice_doc.additional_discount_percentage = 0
+        invoice_doc.apply_discount_on = "Grand Total"
+        return
+
+    if discount_amount <= 0 and discount_pct > 0:
+        discount_amount = flt(eligible_total * discount_pct / 100.0, precision)
+
+    discount_amount = min(flt(discount_amount, precision), eligible_total)
+
+    if discount_amount <= 0:
+        invoice_doc.discount_amount = 0
+        invoice_doc.additional_discount_percentage = 0
+        invoice_doc.apply_discount_on = "Grand Total"
+        return
+
+    allocated = 0.0
+
+    for idx, entry in enumerate(eligible_rows):
+        row = entry["row"]
+        qty = entry["qty"]
+        line_total = entry["line_total"]
+
+        current_rate = flt(row.get("rate") or 0, precision)
+        price_list_rate = flt(row.get("price_list_rate") or current_rate, precision)
+
+        if idx == len(eligible_rows) - 1:
+            line_share = flt(discount_amount - allocated, precision)
+        else:
+            line_share = flt(discount_amount * line_total / eligible_total, precision)
+            allocated = flt(allocated + line_share, precision)
+
+        per_unit_share = flt(line_share / qty, precision) if qty else 0
+        new_rate = flt(max(0, current_rate - per_unit_share), precision)
+
+        row.price_list_rate = max(price_list_rate, current_rate)
+        row.rate = new_rate
+        row.base_rate = new_rate
+        row.amount = flt(new_rate * qty, precision)
+        row.base_amount = row.amount
+
+        base_price = flt(row.price_list_rate or 0, precision)
+        if base_price > 0:
+            row.discount_percentage = flt(
+                ((base_price - new_rate) / base_price) * 100,
+                precision
+            )
+            row.discount_amount = flt(base_price - new_rate, precision)
+        else:
+            row.discount_percentage = 0
+            row.discount_amount = 0
+
+    for row in protected_rows:
+        row.discount_percentage = flt(row.get("discount_percentage") or 0)
+        row.discount_amount = flt(row.get("discount_amount") or 0)
+
+    invoice_doc.discount_amount = 0
+    invoice_doc.additional_discount_percentage = 0
+    invoice_doc.apply_discount_on = "Grand Total"
+
 # ==========================================
 # Stock Validation Functions
 # ==========================================
@@ -987,57 +1099,17 @@ def update_invoice(data):
             for d in (data.get("items") or [])
             if d.get("item_code") and d.get("warehouse")
         }
-        frappe.log_error(
-            title="POS DEBUG Log 1 BEFORE SANITIZE",
-            message=frappe.as_json({
-                "discount_amount": invoice_doc.discount_amount,
-                "additional_discount_percentage": invoice_doc.additional_discount_percentage,
-                "incoming_payments": incoming_payments,
-                "items": [
-                    {
-                        "item_code": d.item_code,
-                        "amount": d.amount,
-                        "discount_percentage": d.discount_percentage,
-                    }
-                    for d in invoice_doc.items
-                ]
-            })
-        )
         # FINAL BACKEND SANITIZE
-        # Clear stale document-level discount when cart contains protected items
+        # Convert document-level additional discount into line-level discount
+        # before totals are recalculated.
         if doctype == "Sales Invoice":
-            protected_items = []
-
-            for row in invoice_doc.get("items", []):
-                policy = _get_item_discount_policy_flags(row.get("item_code"))
-
-                if (
-                    cint(policy.get("discount_allowed")) == 0
-                    or cint(policy.get("is_discount_locked")) == 1
-                ):
-                    protected_items.append(
-                        row.get("item_name") or row.get("item_code")
-                    )
-
-            if protected_items:
-                invoice_doc.discount_amount = 0
-                invoice_doc.additional_discount_percentage = 0
-                invoice_doc.apply_discount_on = "Grand Total"
+            _allocate_additional_discount_to_discountable_items(invoice_doc)
 
         invoice_doc.set_missing_values()
 
         # Calculate totals and apply discounts (with rounding disabled)
         invoice_doc.calculate_taxes_and_totals()
-        frappe.log_error(
-            title="POS DEBUG Log 2 AFTER TOTALS",
-            message=frappe.as_json({
-                "grand_total": invoice_doc.grand_total,
-                "net_total": invoice_doc.net_total,
-                "discount_amount": invoice_doc.discount_amount,
-                "paid_amount": invoice_doc.paid_amount,
-            })
-        )
-
+        
         if invoice_doc.grand_total is None:
             invoice_doc.grand_total = 0.0
         if invoice_doc.base_grand_total is None:
@@ -1051,22 +1123,7 @@ def update_invoice(data):
                 row.warehouse = forced_wh
 
         _restore_payment_amounts(invoice_doc, incoming_payments)
-        frappe.log_error(
-            title="POS DEBUG Log 3 AFTER PAYMENT RESTORE",
-            message=frappe.as_json({
-                "grand_total": invoice_doc.grand_total,
-                "paid_amount": invoice_doc.paid_amount,
-                "outstanding_amount": invoice_doc.outstanding_amount,
-                "payments": [
-                    {
-                        "mode_of_payment": p.mode_of_payment,
-                        "amount": p.amount,
-                    }
-                    for p in invoice_doc.payments
-                ]
-            })
-        )
-
+        
         # Re-attach accounts after rebuilding payment rows
         _set_payment_accounts(invoice_doc.payments, invoice_doc.company)
 
@@ -1125,27 +1182,7 @@ def update_invoice(data):
                         frappe.throw(frappe.as_json({"errors": errors}), frappe.ValidationError)
 
 
-        frappe.log_error(
-            title="POS DEBUG UPDATE_INVOICE PAYMENTS",
-            message=frappe.as_json({
-                "invoice_name": invoice_doc.get("name"),
-                "branch": invoice_doc.get("branch"),
-                "naming_series": invoice_doc.get("naming_series"),
-                "grand_total": invoice_doc.get("grand_total"),
-                "paid_amount": invoice_doc.get("paid_amount"),
-                "base_paid_amount": invoice_doc.get("base_paid_amount"),
-                "outstanding_amount": invoice_doc.get("outstanding_amount"),
-                "payments": [
-                    {
-                        "mode_of_payment": p.get("mode_of_payment"),
-                        "amount": p.get("amount"),
-                        "base_amount": p.get("base_amount"),
-                        "account": p.get("account"),
-                    }
-                    for p in (invoice_doc.get("payments") or [])
-                ]
-            })
-        )
+        
 
         # HARD FORCE branch + naming just before first save
         if doctype == "Sales Invoice" and pos_profile:
@@ -1164,16 +1201,7 @@ def update_invoice(data):
         invoice_doc.docstatus = 0
         invoice_doc.save()
         
-        frappe.log_error(
-            title="POS DEBUG Log 4 AFTER SAVE",
-            message=frappe.as_json({
-                "name": invoice_doc.name,
-                "grand_total": invoice_doc.grand_total,
-                "paid_amount": invoice_doc.paid_amount,
-                "outstanding_amount": invoice_doc.outstanding_amount,
-                "status": invoice_doc.status,
-            })
-        )
+        
 
         return invoice_doc.as_dict()
     except Exception as e:
