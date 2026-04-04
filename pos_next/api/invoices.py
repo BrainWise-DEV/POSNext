@@ -699,6 +699,94 @@ def _allocate_additional_discount_to_discountable_items(invoice_doc, pos_setting
     invoice_doc.additional_discount_percentage = 0
     invoice_doc.apply_discount_on = "Grand Total"
 
+#helper addition discounted to item
+def _preview_additional_discount(invoice_doc, pos_settings_cache=None):
+    """Preview normalized totals without mutating live payment logic."""
+    preview_doc = frappe.copy_doc(invoice_doc)
+    _allocate_additional_discount_to_discountable_items(preview_doc, pos_settings_cache)
+    preview_doc.set_missing_values()
+    preview_doc.calculate_taxes_and_totals()
+
+    original_grand_total = flt(invoice_doc.get("grand_total") or 0)
+    normalized_grand_total = flt(preview_doc.get("grand_total") or 0)
+    normalized_discount_total = flt(original_grand_total - normalized_grand_total)
+
+    return {
+        "can_apply_document_discount": normalized_discount_total > 0,
+        "normalized_discount_total": normalized_discount_total,
+        "normalized_grand_total": normalized_grand_total,
+    }
+#helper to calculate remaining room only for discountable items, to assist frontend in decision making before submission
+def _get_available_additional_discount_room(invoice_doc, pos_settings_cache=None):
+    precision = cint(
+        frappe.get_cached_value("System Settings", None, "currency_precision")
+    ) or 2
+
+    max_discount_allowed = 0.0
+    if pos_settings_cache:
+        max_discount_allowed = flt(
+            pos_settings_cache.get(FIELD_MAX_DISCOUNT_ALLOWED) or 0
+        )
+
+    if max_discount_allowed <= 0 and invoice_doc.get("pos_profile"):
+        max_discount_allowed = flt(
+            frappe.db.get_value(
+                DOCTYPE_POS_SETTINGS,
+                {"pos_profile": invoice_doc.pos_profile},
+                FIELD_MAX_DISCOUNT_ALLOWED,
+            ) or 0
+        )
+
+    if max_discount_allowed <= 0:
+        return {
+            "available_discount_amount": 0.0,
+            "available_discount_percentage": 0.0,
+        }
+
+    total_room = 0.0
+    subtotal = 0.0
+
+    for row in invoice_doc.get("items", []):
+        qty = flt(row.get("qty") or 0)
+        current_rate = flt(row.get("rate") or 0, precision)
+        price_list_rate = flt(row.get("price_list_rate") or current_rate, precision)
+
+        policy = _get_item_discount_policy_flags(row.get("item_code"))
+        is_protected = (
+            cint(policy.get("discount_allowed")) == 0
+            or cint(policy.get("is_discount_locked")) == 1
+        )
+
+        if is_protected or qty <= 0 or current_rate <= 0 or price_list_rate <= 0:
+            continue
+
+        base_line_total = flt(qty * price_list_rate, precision)
+        current_line_total = flt(qty * current_rate, precision)
+
+        if base_line_total <= 0:
+            continue
+
+        current_discount_amount = flt(base_line_total - current_line_total, precision)
+        max_allowed_discount_amount = flt(
+            base_line_total * max_discount_allowed / 100.0, precision
+        )
+        remaining_room = flt(
+            max_allowed_discount_amount - current_discount_amount, precision
+        )
+
+        if remaining_room > 0:
+            total_room += remaining_room
+
+        subtotal += current_line_total
+
+    available_discount_percentage = 0.0
+    if subtotal > 0:
+        available_discount_percentage = flt((total_room / subtotal) * 100, precision)
+
+    return {
+        "available_discount_amount": flt(total_room, precision),
+        "available_discount_percentage": available_discount_percentage,
+    }
 # ==========================================
 # Stock Validation Functions
 # ==========================================
@@ -997,8 +1085,52 @@ def validate_return_items(original_invoice_name, return_items, doctype="Sales In
 # Invoice Management (Two-Step Flow)
 # ==========================================
 
-
 @frappe.whitelist()
+def preview_additional_discount(data):
+    data = json.loads(data) if isinstance(data, str) else data
+    data.setdefault("doctype", "Sales Invoice")
+
+    invoice_doc = frappe.get_doc(data)
+
+    pos_profile = data.get("pos_profile")
+    pos_settings_cache = None
+
+    if pos_profile:
+        pos_settings_cache = frappe.db.get_value(
+            DOCTYPE_POS_SETTINGS,
+            {"pos_profile": pos_profile},
+            [
+                FIELD_ALLOW_USER_TO_EDIT_RATE,
+                FIELD_MAX_DISCOUNT_ALLOWED,
+                FIELD_ALLOW_NEGATIVE_STOCK,
+            ],
+            as_dict=True,
+        )
+
+    invoice_doc.set_missing_values()
+    invoice_doc.calculate_taxes_and_totals()
+
+    return _preview_additional_discount(invoice_doc, pos_settings_cache)
+    data = json.loads(data) if isinstance(data, str) else data
+    data.setdefault("doctype", "Sales Invoice")
+
+    invoice_doc = frappe.get_doc(data)
+
+    pos_profile = data.get("pos_profile")
+    pos_settings_cache = None
+
+    if pos_profile:
+        pos_settings_cache = frappe.db.get_value(
+            DOCTYPE_POS_SETTINGS,
+            {"pos_profile": pos_profile},
+            [
+                FIELD_ALLOW_USER_TO_EDIT_RATE,
+                FIELD_MAX_DISCOUNT_ALLOWED,
+                FIELD_ALLOW_NEGATIVE_STOCK,
+            ],
+            as_dict=True,
+        )
+
 def update_invoice(data):
     """Create or update invoice draft (Step 1)."""
     try:
