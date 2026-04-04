@@ -1246,6 +1246,8 @@ async function handleMobileAmountEnter() {
 		}
 	} else if (canComplete.value && !isSubmitting.value) {
 		completePayment()
+	} else if (props.allowCreditSale && paymentEntries.value.length === 0) {
+		addCreditAccountPayment()
 	}
 }
 
@@ -1259,6 +1261,8 @@ async function handleDesktopAmountEnter() {
 		}
 	} else if (canComplete.value && !isSubmitting.value) {
 		completePayment()
+	} else if (props.allowCreditSale && paymentEntries.value.length === 0) {
+		addCreditAccountPayment()
 	}
 }
 
