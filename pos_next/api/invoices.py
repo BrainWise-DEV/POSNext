@@ -702,6 +702,7 @@ def _allocate_additional_discount_to_discountable_items(invoice_doc, pos_setting
 #helper addition discounted to item
 def _preview_additional_discount(invoice_doc, pos_settings_cache=None):
     """Preview normalized totals without mutating live payment logic."""
+    room_info = _get_available_additional_discount_room(invoice_doc, pos_settings_cache)
     preview_doc = frappe.copy_doc(invoice_doc)
     _allocate_additional_discount_to_discountable_items(preview_doc, pos_settings_cache)
     preview_doc.set_missing_values()
@@ -709,13 +710,18 @@ def _preview_additional_discount(invoice_doc, pos_settings_cache=None):
 
     original_grand_total = flt(invoice_doc.get("grand_total") or 0)
     normalized_grand_total = flt(preview_doc.get("grand_total") or 0)
-    normalized_discount_total = flt(original_grand_total - normalized_grand_total)
+    normalized_discount_total = flt(
+        original_grand_total - normalized_grand_total
+    )
 
     return {
-        "can_apply_document_discount": normalized_discount_total > 0,
+        "can_apply_document_discount": room_info["available_discount_amount"] > 0,
+        "available_discount_amount": room_info["available_discount_amount"],
+        "available_discount_percentage": room_info["available_discount_percentage"],
         "normalized_discount_total": normalized_discount_total,
         "normalized_grand_total": normalized_grand_total,
     }
+
 #helper to calculate remaining room only for discountable items, to assist frontend in decision making before submission
 def _get_available_additional_discount_room(invoice_doc, pos_settings_cache=None):
     precision = cint(
@@ -1111,25 +1117,7 @@ def preview_additional_discount(data):
     invoice_doc.calculate_taxes_and_totals()
 
     return _preview_additional_discount(invoice_doc, pos_settings_cache)
-    data = json.loads(data) if isinstance(data, str) else data
-    data.setdefault("doctype", "Sales Invoice")
 
-    invoice_doc = frappe.get_doc(data)
-
-    pos_profile = data.get("pos_profile")
-    pos_settings_cache = None
-
-    if pos_profile:
-        pos_settings_cache = frappe.db.get_value(
-            DOCTYPE_POS_SETTINGS,
-            {"pos_profile": pos_profile},
-            [
-                FIELD_ALLOW_USER_TO_EDIT_RATE,
-                FIELD_MAX_DISCOUNT_ALLOWED,
-                FIELD_ALLOW_NEGATIVE_STOCK,
-            ],
-            as_dict=True,
-        )
 
 def update_invoice(data):
     """Create or update invoice draft (Step 1)."""
