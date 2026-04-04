@@ -60,6 +60,7 @@
 														/>
 													</svg>
 												</div>
+
 												<!-- Item Info -->
 												<div class="flex-1 min-w-0">
 													<h3 class="text-base font-semibold text-gray-900 truncate">
@@ -78,14 +79,22 @@
 													<!-- Quantity Control -->
 													<div>
 														<label class="block text-sm font-medium text-gray-700 mb-2 text-start">
-                              {{ __('Quantity') }}
-                            </label>
+															{{ __('Quantity') }}
+														</label>
+
 														<!-- For serial items, quantity is read-only (controlled by serial list) -->
-														<div v-if="localItem?.has_serial_no && localSerials.length > 0" class="w-full h-7 border border-gray-300 rounded-lg bg-gray-50 flex items-center justify-center">
+														<div
+															v-if="localItem?.has_serial_no && localSerials.length > 0"
+															class="w-full h-7 border border-gray-300 rounded-lg bg-gray-50 flex items-center justify-center"
+														>
 															<span class="text-sm font-semibold text-gray-600">{{ localSerials.length }}</span>
 														</div>
+
 														<!-- For non-serial items, show quantity controls -->
-														<div v-else class="w-full h-7 border border-gray-300 rounded-lg bg-white flex items-center overflow-hidden">
+														<div
+															v-else
+															class="w-full h-7 border border-gray-300 rounded-lg bg-white flex items-center overflow-hidden"
+														>
 															<button
 																type="button"
 																@click="decrementQuantity"
@@ -135,8 +144,12 @@
 																@input="calculateTotals"
 															/>
 														</div>
+
 														<!-- Compact warning when rate editing disabled due to pricing rules -->
-														<p v-if="hasPricingRules && settingsStore.allowUserToEditRate" class="mt-1 text-xs text-amber-600 flex items-center gap-1">
+														<p
+															v-if="hasPricingRules && settingsStore.allowUserToEditRate"
+															class="mt-1 text-xs text-amber-600 flex items-center gap-1"
+														>
 															<FeatherIcon name="lock" class="w-3 h-3" />
 															{{ __('Locked (offer applied)') }}
 														</p>
@@ -148,17 +161,16 @@
 													<!-- UOM Selector -->
 													<div>
 														<label class="block text-sm font-medium text-gray-700 mb-2 text-start">
-                              {{ __('UOM') }}
-                              <span v-if="uomIsLocked" class="ms-1 text-xs text-amber-600">({{ __('Locked') }})</span>
-                            </label>
-                            <div v-if="uomIsLocked" class="w-full h-10 border border-amber-300 rounded-lg bg-amber-50 flex items-center justify-center">
-                              <span class="text-sm font-semibold text-amber-700">{{ selectedUomDisplayLabel || localUom }}</span>
-                            </div>
-                            <SelectInput v-else v-model="localUom" :options="uomOptions" />
-                            <p v-if="uomLockMessage" class="mt-1 text-xs text-amber-600 flex items-center gap-1">
-                              <FeatherIcon name="lock" class="w-3 h-3" />
-                              {{ uomLockMessage }}
-                            </p>
+															{{ __('UOM') }}
+															<span v-if="uomIsLocked" class="ms-1 text-xs text-amber-600">({{ __('Locked') }})</span>
+														</label>
+														<div
+															v-if="uomIsLocked"
+															class="w-full h-10 border border-amber-300 rounded-lg bg-amber-50 flex items-center justify-center"
+														>
+															<span class="text-sm font-semibold text-amber-700">{{ selectedUomDisplayLabel || localUom }}</span>
+														</div>
+														<SelectInput v-else v-model="localUom" :options="uomOptions" />
 													</div>
 
 													<!-- Warehouse Selector -->
@@ -179,6 +191,7 @@
 														</span>
 													</label>
 												</div>
+
 												<div class="flex flex-col gap-2 max-h-40 overflow-y-auto">
 													<div
 														v-for="(serial, index) in localSerials"
@@ -209,20 +222,34 @@
 											<!-- Item Discount Section (only if allowed by POS Profile) -->
 											<div v-if="settingsStore.allowItemDiscount" class="border-t border-gray-200 pt-4">
 												<label class="block text-sm font-medium text-gray-700 mb-3 text-start">{{ __('Item Discount') }}</label>
-												<div v-if="effectiveItemDiscountWarning" class="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+
+												<div
+													v-if="effectiveItemDiscountWarning"
+													class="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"
+												>
 													<div class="flex items-start gap-2">
 														<FeatherIcon name="alert-triangle" class="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
 														<div>{{ effectiveItemDiscountWarning }}</div>
 													</div>
 												</div>
+
 												<div class="grid grid-cols-2 gap-3">
 													<div>
 														<label class="block text-xs text-gray-600 mb-1 text-start">{{ __('Discount Type') }}</label>
-														<div v-if="!canEditItemDiscount" class="w-full h-10 border border-gray-200 rounded-lg bg-gray-100 flex items-center px-3 text-sm text-gray-500">
+														<div
+															v-if="!canEditItemDiscount"
+															class="w-full h-10 border border-gray-200 rounded-lg bg-gray-100 flex items-center px-3 text-sm text-gray-500"
+														>
 															{{ discountType === 'percentage' ? __('Percentage (%)') : __('Amount') }}
 														</div>
-														<SelectInput v-else v-model="discountType" :options="discountTypeOptions" @change="handleDiscountTypeChange" />
+														<SelectInput
+															v-else
+															v-model="discountType"
+															:options="discountTypeOptions"
+															@change="handleDiscountTypeChange"
+														/>
 													</div>
+
 													<div>
 														<label class="block text-xs text-gray-600 mb-1 text-start">{{ discountType === 'percentage' ? __('Percentage') : __('Amount') }}</label>
 														<div class="relative">
@@ -242,7 +269,13 @@
 														</div>
 													</div>
 												</div>
-												<p v-if="canEditItemDiscount && effectiveMaxDiscountPercent > 0" class="mt-2 text-xs text-gray-600">{{ __('Maximum allowed discount: {0}%', [effectiveMaxDiscountPercent]) }}<span v-if="effectiveMaxDiscountAmount > 0"> ({{ __('Up to {0}', [formatCurrency(effectiveMaxDiscountAmount)]) }})</span></p>
+
+												<p v-if="canEditItemDiscount && effectiveMaxDiscountPercent > 0" class="mt-2 text-xs text-gray-600">
+													{{ __('Maximum allowed discount: {0}%', [effectiveMaxDiscountPercent]) }}
+													<span v-if="effectiveMaxDiscountAmount > 0">
+														({{ __('Up to {0}', [formatCurrency(effectiveMaxDiscountAmount)]) }})
+													</span>
+												</p>
 											</div>
 
 											<!-- Totals -->
@@ -258,6 +291,22 @@
 												<div class="flex items-center justify-between pt-2 border-t border-gray-200">
 													<span class="text-base font-bold text-gray-900">{{ __('Total:') }}</span>
 													<span class="text-lg font-bold text-blue-600">{{ formatCurrency(calculatedTotal) }}</span>
+												</div>
+											</div>
+
+											<div
+												v-if="allowedSellUomTags.length > 0"
+												class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800"
+											>
+												<div class="flex flex-wrap items-center gap-2">
+													<span class="font-semibold">{{ __('Allowed UOMs:') }}</span>
+													<span
+														v-for="uom in allowedSellUomTags"
+														:key="uom"
+														class="inline-flex items-center rounded-full border border-amber-300 bg-white px-2.5 py-0.5 text-xs font-semibold text-amber-700"
+													>
+														{{ uom }}
+													</span>
 												</div>
 											</div>
 
@@ -303,7 +352,7 @@
 <script setup>
 import { useToast } from "@/composables/useToast"
 import { usePOSSettingsStore } from "@/stores/posSettings"
-import { getItemDiscountPolicy, getDiscountPolicyMessage, applyDiscountPolicy } from "@/utils/pos_connector/discountPolicy"
+import { applyDiscountPolicy } from "@/utils/pos_connector/discountPolicy"
 import { useSerialNumberStore } from "@/stores/serialNumber"
 import { getItemStock } from "@/utils/stockValidator"
 import { formatCurrency as formatCurrencyUtil, getCurrencySymbol, roundCurrency } from "@/utils/currency"
@@ -349,6 +398,10 @@ const localSerials = ref([]) // List of serial numbers for this item
 const removedSerials = ref([]) // Track serials removed during this edit session
 const originalSerials = ref([]) // Original serials when dialog opened
 const originalPriceListRate = ref(0) // Original price_list_rate when dialog opened (for rate edit validation)
+const allowedSellUomTags = computed(() => {
+	if (!localItem.value) return []
+	return getAllowedSellUoms(localItem.value || {})
+})
 
 function getSnapshotUom(item) {
 	return item?.selected_uom || item?.uom || item?.stock_uom || __("Nos", null, "UOM")
@@ -524,13 +577,28 @@ function isUomAllowed(item, uom) {
 	return true
 }
 
-const itemDiscountPolicy = computed(() => getItemDiscountPolicy(localItem.value || {}))
+function resolveInitialSellUom(item) {
+	if (!item) return ""
+	if (item?.is_resolved_barcode) {
+		return item?.selected_uom || item?.uom || item?.stock_uom || ""
+	}
+	const allowedSellUoms = getAllowedSellUoms(item)
+	const requestedUom = item?.selected_uom || item?.uom || item?.stock_uom || ""
+	if (allowedSellUoms.length > 0) {
+		if (requestedUom && allowedSellUoms.includes(requestedUom)) return requestedUom
+		const defaultUom = item?.uom_policy?.default_uom || item?._uom_policy?.default_uom || ""
+		if (defaultUom && allowedSellUoms.includes(defaultUom)) return defaultUom
+		return allowedSellUoms[0]
+	}
+	return requestedUom
+}
+
 const settingsMaxDiscountPercent = computed(() => {
 	const raw = Number(settingsStore.maxDiscountAllowed ?? settingsStore?.settings?.max_discount ?? 0)
 	return Number.isFinite(raw) && raw > 0 ? raw : 0
 })
 const itemMaxDiscountPercent = computed(() => {
-	const raw = Number(itemDiscountPolicy.value?.max_discount || 0)
+	const raw = Number(localItem.value?.max_discount || 0)
 	return Number.isFinite(raw) && raw > 0 ? raw : 0
 })
 const effectiveMaxDiscountPercent = computed(() => {
@@ -538,47 +606,25 @@ const effectiveMaxDiscountPercent = computed(() => {
 	if (!values.length) return 0
 	return Math.min(...values)
 })
-const directDiscountAllowed = computed(() => {
-	const raw = localItem.value?.discount_allowed
-	if (raw === 0 || raw === "0" || raw === false) return false
-	if (raw === 1 || raw === "1" || raw === true) return true
-	return null
-})
-
 const canEditItemDiscount = computed(() => {
-	if (directDiscountAllowed.value !== null) {
-		return directDiscountAllowed.value
-	}
-	return Boolean(itemDiscountPolicy.value?.discount_allowed)
+	const raw = localItem.value?.discount_allowed
+	return raw === 1 || raw === "1" || raw === true
 })
-const itemDiscountWarning = computed(() => getDiscountPolicyMessage(itemDiscountPolicy.value))
 const effectiveItemDiscountWarning = computed(() => {
 	if (!canEditItemDiscount.value) {
-		if (directDiscountAllowed.value === false) {
-			return __('Item has no discount allowed')
-		}
-		return itemDiscountWarning.value || __('Discount is not allowed for this item')
+		return __('Item has no discount allowed')
 	}
 	if (effectiveMaxDiscountPercent.value > 0) {
 		return __('Maximum allowed discount is {0}%', [effectiveMaxDiscountPercent.value])
 	}
 	return ''
 })
-const effectiveMaxDiscountAmount = computed(() => {
-	if (effectiveMaxDiscountPercent.value <= 0 || calculatedSubtotal.value <= 0) return 0
-	return roundCurrency((calculatedSubtotal.value * effectiveMaxDiscountPercent.value) / 100)
-})
 const uomIsLocked = computed(() => {
 	if (!localItem.value) return true
 	if (localItem.value?.is_resolved_barcode) return true
 	return uomOptions.value.length <= 1
 })
-const uomLockMessage = computed(() => {
-	if (!localItem.value) return ''
-	if (localItem.value?.is_resolved_barcode) return __('UOM is locked for barcode-resolved item')
-	if (uomOptions.value.length <= 1) return __('Only allowed sell UOM can be used for this item')
-	return ''
-})
+
 
 
 const selectedUomDisplayLabel = computed(() => {
@@ -616,18 +662,51 @@ watch(
 	(newItem) => {
 		if (newItem) {
 			isInitializingItem.value = true
-			localItem.value = { ...newItem }
-			localQuantity.value = getSnapshotQuantity(newItem)
-			localUom.value = getSnapshotUom(newItem)
-			localRate.value = getSnapshotRate(newItem)
-			originalPriceListRate.value = getSnapshotPriceListRate(newItem)
+			const normalizedItem = { ...newItem }
+			const resolvedInitialUom = resolveInitialSellUom(normalizedItem)
+			const initialConversionFactor = resolvedInitialUom
+				? (resolvedInitialUom === normalizedItem.stock_uom
+					? 1
+					: Number(
+						normalizedItem.item_uoms?.find((row) => row.uom === resolvedInitialUom)?.conversion_factor || 1
+					))
+				: 1
+
+			const initialRate =
+				resolvedInitialUom && normalizedItem.uom_prices?.[resolvedInitialUom] !== undefined
+					? Number(normalizedItem.uom_prices[resolvedInitialUom]) || 0
+					: getSnapshotRate(normalizedItem)
+
+			normalizedItem.uom = resolvedInitialUom || normalizedItem.uom || normalizedItem.stock_uom
+			normalizedItem.selected_uom = resolvedInitialUom || normalizedItem.selected_uom || normalizedItem.uom || normalizedItem.stock_uom
+			normalizedItem.conversion_factor = initialConversionFactor || 1
+			normalizedItem.selected_conversion_factor = initialConversionFactor || 1
+			normalizedItem.selected_uom_label =
+				(initialConversionFactor || 1) > 1
+					? `${normalizedItem.selected_uom} x ${initialConversionFactor}`
+					: normalizedItem.selected_uom
+			normalizedItem.rate = initialRate || normalizedItem.rate
+			normalizedItem.price_list_rate = initialRate || normalizedItem.price_list_rate
+			normalizedItem.selected_display_rate =
+				initialRate || normalizedItem.selected_display_rate || normalizedItem.rate || normalizedItem.price_list_rate
+
+			localItem.value = normalizedItem
+			localQuantity.value = getSnapshotQuantity(normalizedItem)
+			localUom.value = normalizedItem.selected_uom || normalizedItem.uom || normalizedItem.stock_uom || ""
+			localRate.value = Number(
+				normalizedItem.selected_display_rate ??
+				normalizedItem.rate ??
+				normalizedItem.price_list_rate ??
+				0
+			) || 0
+			originalPriceListRate.value = localRate.value
 			localWarehouse.value = normalizeWarehouseValue(
-				newItem.warehouse || props.warehouses[0]?.name || ""
+				normalizedItem.warehouse || props.warehouses[0]?.name || ""
 			)
 
 			// Initialize serial numbers
-			if (newItem.has_serial_no && newItem.serial_no) {
-				const serials = newItem.serial_no.split('\n').filter(s => s.trim())
+			if (normalizedItem.has_serial_no && normalizedItem.serial_no) {
+				const serials = normalizedItem.serial_no.split('\n').filter(s => s.trim())
 				localSerials.value = [...serials]
 				originalSerials.value = [...serials]
 				removedSerials.value = []
@@ -639,28 +718,26 @@ watch(
 			}
 
 			// Initialize discount
-			if (newItem.discount_percentage && newItem.discount_percentage > 0) {
+			if (normalizedItem.discount_percentage && normalizedItem.discount_percentage > 0) {
 				discountType.value = "percentage"
-				discountValue.value = newItem.discount_percentage
-			} else if (newItem.discount_amount && newItem.discount_amount > 0) {
+				discountValue.value = normalizedItem.discount_percentage
+			} else if (normalizedItem.discount_amount && normalizedItem.discount_amount > 0) {
 				discountType.value = "amount"
-				discountValue.value = newItem.discount_amount
+				discountValue.value = normalizedItem.discount_amount
 			} else {
 				discountType.value = "percentage"
 				discountValue.value = 0
 			}
 
-			// Force reset when item itself says discount is not allowed
 			if (
-				newItem.discount_allowed === 0 ||
-				newItem.discount_allowed === "0" ||
-				newItem.discount_allowed === false
+				normalizedItem.discount_allowed === 0 ||
+				normalizedItem.discount_allowed === "0" ||
+				normalizedItem.discount_allowed === false
 			) {
 				discountType.value = "percentage"
 				discountValue.value = 0
 			}
 
-			// Reset stock check state
 			hasStock.value = true
 			isCheckingStock.value = false
 

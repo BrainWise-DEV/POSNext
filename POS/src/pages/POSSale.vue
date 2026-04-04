@@ -1823,6 +1823,25 @@ async function handleShiftClosed() {
 	}
 }
 
+function preserveItemPolicySnapshot(item) {
+	if (!item) return item
+	const explicitPolicy = item?.uom_policy || item?._uom_policy || {}
+	const normalizedPolicy = getUOMPolicy(item, explicitPolicy)
+
+	return {
+		...item,
+		discount_allowed: item?.discount_allowed,
+		is_discount_locked: item?.is_discount_locked,
+		has_max_discount: item?.has_max_discount,
+		max_discount: item?.max_discount,
+		allowed_sell_uoms: Array.isArray(item?.allowed_sell_uoms) ? [...item.allowed_sell_uoms] : [],
+		allowed_buy_uoms: Array.isArray(item?.allowed_buy_uoms) ? [...item.allowed_buy_uoms] : [],
+		uom_policy: normalizedPolicy,
+		item_uoms: Array.isArray(item?.item_uoms) ? [...item.item_uoms] : [],
+		uom_prices: item?.uom_prices ? { ...item.uom_prices } : {},
+	}
+}
+
 function handleItemSelected(item, autoAdd = false) {
 	const explicitPolicy = item?.uom_policy || item?._uom_policy || {}
 	const uomPolicy = getUOMPolicy(item, explicitPolicy)
@@ -1882,7 +1901,7 @@ function handleItemSelected(item, autoAdd = false) {
 				const unitRate = item.uom_prices?.[resolvedUom] || item.rate
 
 				const resolvedItem = {
-					...item,
+					...preserveItemPolicySnapshot(item),
 					uom: resolvedUom,
 					rate: unitRate,
 					price_list_rate: unitRate,
@@ -1910,7 +1929,7 @@ function handleItemSelected(item, autoAdd = false) {
 					return
 				}
 
-				cartStore.addItem(item, 1, true, shiftStore.currentProfile)
+				cartStore.addItem(preserveItemPolicySnapshot(item), 1, true, shiftStore.currentProfile)
 			}
 		} catch (error) {
 			uiStore.showError(
@@ -1941,7 +1960,7 @@ function handleItemSelected(item, autoAdd = false) {
 
 	// Check for variants
 	if (item.has_variants) {
-		cartStore.setPendingItem(item, 1, "variant");
+		cartStore.setPendingItem(preserveItemPolicySnapshot(item), 1, "variant");
 		uiStore.showItemSelectionDialog = true;
 		return;
 	}
@@ -1991,14 +2010,14 @@ function handleItemSelected(item, autoAdd = false) {
 			return
 		}
 
-		cartStore.setPendingItem(item, 1, "uom")
+		cartStore.setPendingItem(preserveItemPolicySnapshot(item), 1, "uom")
 		uiStore.showItemSelectionDialog = true
 		return
 	}
 
 	// Add to cart
 	try {
-		cartStore.addItem(item, 1, false, shiftStore.currentProfile);
+		cartStore.addItem(preserveItemPolicySnapshot(item), 1, false, shiftStore.currentProfile);
 	} catch (error) {
 		uiStore.showError(
 			__("Insufficient Stock"),
@@ -2286,12 +2305,12 @@ async function handleOptionSelected(option) {
 			}
 
 			if (variant.item_uoms && variant.item_uoms.length > 0) {
-				cartStore.setPendingItem(variant, cartStore.pendingItemQty, "uom");
+				cartStore.setPendingItem(preserveItemPolicySnapshot(variant), cartStore.pendingItemQty, "uom");
 				return;
 			}
 
 			if (variant.has_batch_no || variant.has_serial_no) {
-				cartStore.setPendingItem(variant, cartStore.pendingItemQty);
+				cartStore.setPendingItem(preserveItemPolicySnapshot(variant), cartStore.pendingItemQty);
 				uiStore.showItemSelectionDialog = false;
 				uiStore.showBatchSerialDialog = true;
 			} else {
@@ -2316,7 +2335,7 @@ async function handleOptionSelected(option) {
 			);
 
 			const itemToAdd = {
-				...cartStore.pendingItem,
+				...preserveItemPolicySnapshot(cartStore.pendingItem),
 				uom: option.uom,
 				conversion_factor: option.conversion_factor,
 				rate: pricing.rate,
@@ -2329,7 +2348,7 @@ async function handleOptionSelected(option) {
 				uiStore.showBatchSerialDialog = true;
 			} else {
 				try {
-					cartStore.addItem(itemToAdd, qty, false, shiftStore.currentProfile);
+					cartStore.addItem(preserveItemPolicySnapshot(itemToAdd), qty, false, shiftStore.currentProfile);
 					uiStore.showItemSelectionDialog = false;
 					cartStore.clearPendingItem();
 					showSuccess(__("{0} ({1}) added to cart", [itemToAdd.item_name, option.uom]));
@@ -2494,12 +2513,12 @@ function handleBatchSerialSelected(batchSerial) {
 		// Use quantity from batchSerial if provided (for multiple serial numbers), otherwise use pendingItemQty
 		const qty = batchSerial.quantity || cartStore.pendingItemQty;
 		const itemToAdd = {
-			...cartStore.pendingItem,
+			...preserveItemPolicySnapshot(cartStore.pendingItem),
 			quantity: qty,
 			...batchSerial,
 		};
 		try {
-			cartStore.addItem(itemToAdd, qty, false, shiftStore.currentProfile);
+			cartStore.addItem(preserveItemPolicySnapshot(itemToAdd), qty, false, shiftStore.currentProfile);
 			cartStore.clearPendingItem();
 		} catch (error) {
 			showError(error.message);

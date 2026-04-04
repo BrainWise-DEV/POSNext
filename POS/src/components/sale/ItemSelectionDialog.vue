@@ -1026,6 +1026,7 @@ function confirm() {
 
 		emit("option-selected", {
 			...option,
+			...currentItem.value,
 			quantity: normalizedQuantity,
 			qty: normalizedQuantity,
 			uom: option.uom,

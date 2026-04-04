@@ -282,17 +282,26 @@ export function useInvoice() {
 				has_serial_no: item.has_serial_no || 0,
 				batch_no: item.batch_no,
 				serial_no: item.serial_no,
-				item_uoms: item.item_uoms || [], // Available UOMs for this item
-				// Add item_group and brand for offer eligibility checking
+				item_uoms: item.item_uoms || [],
 				item_group: item.item_group,
 				brand: item.brand,
-				// Resolved barcode flag - prevents editing qty/uom/rate for weighted/priced barcodes
 				is_resolved_barcode: item.is_resolved_barcode || false,
-				// Stock validation fields — needed for qty increase checks in cart
 				actual_qty: item.actual_qty ?? 0,
 				is_stock_item: item.is_stock_item ?? 1,
 				is_bundle: item.is_bundle || false,
 				allow_negative_stock: item.allow_negative_stock || 0,
+
+				// Preserve synced policy payload
+				discount_allowed: item.discount_allowed,
+				is_discount_locked: item.is_discount_locked,
+				has_max_discount: item.has_max_discount,
+				max_discount: item.max_discount,
+
+				allowed_sell_uoms: Array.isArray(item.allowed_sell_uoms) ? [...item.allowed_sell_uoms] : [],
+				allowed_buy_uoms: Array.isArray(item.allowed_buy_uoms) ? [...item.allowed_buy_uoms] : [],
+				uom_policy: item.uom_policy || item._uom_policy || null,
+				_uom_policy: item._uom_policy || item.uom_policy || null,
+				uom_prices: item.uom_prices ? { ...item.uom_prices } : {},
 			}
 			invoiceItems.value.push(newItem)
 			// Recalculate the newly added item to apply taxes
