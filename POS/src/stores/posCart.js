@@ -172,6 +172,55 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	const isEmpty = computed(() => invoiceItems.value.length === 0)
 	const hasCustomer = computed(() => !!customer.value)
 
+	const discountEligibleItems = computed(() => {
+		return invoiceItems.value.filter((item) => {
+			if (!item || item.is_free_item) return false
+
+			const qty = Number(item.qty ?? item.quantity ?? 0)
+			if (qty <= 0) return false
+
+			const discountAllowed = item.discount_allowed
+			const isDiscountLocked = item.is_discount_locked
+
+			if (
+				discountAllowed === 0 ||
+				discountAllowed === "0" ||
+				discountAllowed === false
+			) {
+				return false
+			}
+
+			if (
+				isDiscountLocked === 1 ||
+				isDiscountLocked === "1" ||
+				isDiscountLocked === true
+			) {
+				return false
+			}
+
+			return true
+		})
+	})
+
+	const canApplyDocumentDiscount = computed(() => {
+		return discountEligibleItems.value.length > 0
+	})
+
+	function sanitizeDocumentDiscountState() {
+		let safeDiscount = Number(additionalDiscount.value || 0)
+
+		if (!canApplyDocumentDiscount.value) {
+			safeDiscount = 0
+		}
+
+		if (safeDiscount < 0) {
+			safeDiscount = 0
+		}
+
+		additionalDiscount.value = safeDiscount
+		return safeDiscount
+	}
+
 	function buildUomSnapshot(item = {}, qty = null) {
 		const quantity = Number(qty ?? item.quantity ?? item.qty ?? 1) || 1
 		const conversionFactor = Number(item.conversion_factor || 1) || 1
@@ -397,6 +446,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		appliedCoupon.value = null
 		currentDraftId.value = null
 		targetDoctype.value = "Sales Invoice"
+		additionalDiscount.value = 0
 
 		// Reset offer processing state
 		offerProcessingState.value.lastCartHash = ''
@@ -432,8 +482,14 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			return
 		}
 
-		const result = await baseSubmitInvoice(targetDoctype.value, deliveryDate.value, writeOffAmount.value)
-		// Reset write-off amount after successful submission
+		sanitizeDocumentDiscountState()
+
+		const result = await baseSubmitInvoice(
+			targetDoctype.value,
+			deliveryDate.value,
+			writeOffAmount.value
+		)
+
 		if (result) {
 			writeOffAmount.value = 0
 		}
@@ -489,7 +545,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			company: currentProfile?.company,
 			selling_price_list: currentProfile?.selling_price_list,
 			currency: currentProfile?.currency,
-			discount_amount: additionalDiscount.value || 0,
+			discount_amount: sanitizeDocumentDiscountState(),
 			coupon_code: appliedCoupon.value?.name || "",
 			items: rawItems.map((item) => ({
 				item_code: item.item_code,
@@ -1909,6 +1965,26 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		}
 	)
 
+	watch(
+		() => [
+			canApplyDocumentDiscount.value,
+			invoiceItems.value.map((item) =>
+				[
+					item?.item_code || "",
+					item?.uom || "",
+					item?.qty ?? item?.quantity ?? 0,
+					item?.discount_allowed,
+					item?.is_discount_locked,
+					item?.is_free_item ? 1 : 0,
+				].join(":")
+			).join("|"),
+		],
+		() => {
+			sanitizeDocumentDiscountState()
+		},
+		{ immediate: true, flush: "post" },
+	)
+
 	return {
 		// State
 		invoiceItems,
@@ -1935,6 +2011,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		itemCount,
 		isEmpty,
 		hasCustomer,
+		discountEligibleItems,
+		canApplyDocumentDiscount,
 		isProcessingOffers, // True when any offer operation is in progress
 		isSubmitting, // True when invoice submission is in progress (mutex protected)
 
@@ -1943,6 +2021,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		removeItem,
 		updateItemQuantity,
 		clearCart,
+		sanitizeDocumentDiscountState,
 		setCustomer,
 		setDefaultCustomer,
 		setPendingItem,

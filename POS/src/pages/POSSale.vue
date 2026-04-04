@@ -1179,6 +1179,30 @@ watch(
 	{ immediate: true }
 );
 
+watch(
+	() => [
+		cartStore.canApplyDocumentDiscount,
+		cartStore.invoiceItems.map((item) =>
+			[
+				item?.item_code || "",
+				item?.uom || "",
+				item?.qty ?? item?.quantity ?? 0,
+				item?.discount_allowed,
+				item?.is_discount_locked,
+				item?.is_free_item ? 1 : 0,
+			].join(":")
+		).join("|"),
+	],
+	() => {
+		if (typeof cartStore.sanitizeDocumentDiscountState === "function") {
+			cartStore.sanitizeDocumentDiscountState()
+		} else if (typeof cartStore.sanitizeAdditionalDiscount === "function") {
+			cartStore.sanitizeAdditionalDiscount()
+		}
+	},
+	{ immediate: true, flush: "post" }
+)
+
 // Computed for warehouses - returns only allowed warehouses from POS Settings
 const profileWarehouses = computed(() => {
 	if (warehousesList.value.length > 0) {
@@ -2047,11 +2071,21 @@ async function handleEditItem(updatedItem) {
 }
 
 function handleAdditionalDiscountUpdate(discountAmount) {
-	// Update the additional discount value in the cart store
-	cartStore.additionalDiscount = discountAmount;
+	const safeDiscount = Number(discountAmount || 0)
 
-	// Rebuild the cache to recalculate totals
-	cartStore.rebuildIncrementalCache();
+	if (!cartStore.canApplyDocumentDiscount && safeDiscount > 0) {
+		cartStore.additionalDiscount = 0
+	} else {
+		cartStore.additionalDiscount = safeDiscount
+	}
+
+	if (typeof cartStore.sanitizeDocumentDiscountState === "function") {
+		cartStore.sanitizeDocumentDiscountState()
+	} else if (typeof cartStore.sanitizeAdditionalDiscount === "function") {
+		cartStore.sanitizeAdditionalDiscount()
+	}
+
+	cartStore.rebuildIncrementalCache()
 }
 
 function handleCustomerSelected(selectedCustomer) {
@@ -2162,6 +2196,21 @@ async function handlePaymentCompleted(paymentData) {
 		if (paymentData.write_off_amount && paymentData.write_off_amount > 0) {
 			cartStore.setWriteOffAmount(paymentData.write_off_amount);
 		}
+		let safeAdditionalDiscount = 0
+
+		if (typeof cartStore.sanitizeDocumentDiscountState === "function") {
+			safeAdditionalDiscount = cartStore.sanitizeDocumentDiscountState()
+		} else if (typeof cartStore.sanitizeAdditionalDiscount === "function") {
+			safeAdditionalDiscount = cartStore.sanitizeAdditionalDiscount()
+		} else {
+			safeAdditionalDiscount = Number(cartStore.additionalDiscount || 0)
+		}
+
+		if (!cartStore.canApplyDocumentDiscount) {
+			safeAdditionalDiscount = 0
+			cartStore.additionalDiscount = 0
+			cartStore.rebuildIncrementalCache()
+		}
 
 		// Delete draft if it exists (since we're submitting/saving invoice)
 		const draftIdToDelete = cartStore.currentDraftId;
@@ -2182,6 +2231,7 @@ async function handlePaymentCompleted(paymentData) {
 				grand_total: cartStore.grandTotal,
 				total_tax: cartStore.totalTax,
 				total_discount: cartStore.totalDiscount,
+				additional_discount: safeAdditionalDiscount,
 				write_off_amount: paymentData.write_off_amount || 0,
 			};
 
@@ -2463,7 +2513,11 @@ async function handleLoadDraft(draft) {
 		cartStore.invoiceItems = draftData.items;
 		cartStore.setCustomer(draftData.customer);
 		cartStore.currentDraftId = draft.draft_id; // Set current draft ID
-
+		if (typeof cartStore.sanitizeDocumentDiscountState === "function") {
+			cartStore.sanitizeDocumentDiscountState()
+		} else if (typeof cartStore.sanitizeAdditionalDiscount === "function") {
+			cartStore.sanitizeAdditionalDiscount()
+		}
 		// Rebuild incremental cache to recalculate totals
 		cartStore.rebuildIncrementalCache();
 
@@ -2659,6 +2713,12 @@ async function handleEditOfflineInvoice(invoice) {
 					shiftStore.currentProfile
 				);
 			}
+		}
+
+		if (typeof cartStore.sanitizeDocumentDiscountState === "function") {
+			cartStore.sanitizeDocumentDiscountState()
+		} else if (typeof cartStore.sanitizeAdditionalDiscount === "function") {
+			cartStore.sanitizeAdditionalDiscount()
 		}
 
 		// Initialize cart hash for the loaded cart so watchers work correctly

@@ -439,6 +439,49 @@ def _set_branch_naming_series(invoice_doc, pos_profile=None):
 
     invoice_doc.naming_series = f"ACC-{branch_abbr}-SINV-.YYYY.-"
 
+def _get_item_discount_policy_flags(item_code):
+    """Resolve authoritative discount policy for an item."""
+    if not item_code:
+        return {"discount_allowed": 1, "is_discount_locked": 0}
+
+    # Preferred: use custom policy service if available
+    try:
+        from pos_branch_helper.discount_policy.service import get_item_discount_policy
+
+        policy = get_item_discount_policy(item_code) or {}
+        return {
+            "discount_allowed": cint(policy.get("discount_allowed", 1)),
+            "is_discount_locked": cint(policy.get("is_discount_locked", 0)),
+        }
+    except Exception:
+        pass
+
+    # Fallback: direct Item fields if they exist
+    try:
+        meta = frappe.get_meta("Item")
+        has_discount_allowed = meta.has_field("discount_allowed")
+        has_discount_locked = meta.has_field("is_discount_locked")
+
+        if has_discount_allowed or has_discount_locked:
+            values = frappe.db.get_value(
+                "Item",
+                item_code,
+                [
+                    "discount_allowed" if has_discount_allowed else "name",
+                    "is_discount_locked" if has_discount_locked else "name",
+                ],
+                as_dict=True,
+            ) or {}
+
+            return {
+                "discount_allowed": cint(values.get("discount_allowed", 1)),
+                "is_discount_locked": cint(values.get("is_discount_locked", 0)),
+            }
+    except Exception:
+        pass
+
+    return {"discount_allowed": 1, "is_discount_locked": 0}
+
 
 # ==========================================
 # Stock Validation Functions
@@ -1058,6 +1101,28 @@ def update_invoice(data):
         invoice_doc.flags.ignore_permissions = True
         frappe.flags.ignore_account_permission = True
         invoice_doc.docstatus = 0
+
+        # FINAL BACKEND SANITIZE
+        # Clear stale document-level discount when cart contains protected items
+        if doctype == "Sales Invoice":
+            protected_items = []
+
+            for row in invoice_doc.get("items", []):
+                policy = _get_item_discount_policy_flags(row.get("item_code"))
+
+                if (
+                    cint(policy.get("discount_allowed")) == 0
+                    or cint(policy.get("is_discount_locked")) == 1
+                ):
+                    protected_items.append(
+                        row.get("item_name") or row.get("item_code")
+                    )
+
+            if protected_items:
+                invoice_doc.discount_amount = 0
+                invoice_doc.additional_discount_percentage = 0
+                invoice_doc.apply_discount_on = "Grand Total"
+
         invoice_doc.save()
 
         return invoice_doc.as_dict()

@@ -217,6 +217,55 @@ export function useInvoice() {
 		)
 	})
 
+	const discountEligibleItems = computed(() => {
+		return invoiceItems.value.filter((item) => {
+			if (!item || item.is_free_item) return false
+
+			const qty = Number(item.qty ?? item.quantity ?? 0)
+			if (qty <= 0) return false
+
+			const discountAllowed = item.discount_allowed
+			const isDiscountLocked = item.is_discount_locked
+
+			if (
+				discountAllowed === 0 ||
+				discountAllowed === "0" ||
+				discountAllowed === false
+			) {
+				return false
+			}
+
+			if (
+				isDiscountLocked === 1 ||
+				isDiscountLocked === "1" ||
+				isDiscountLocked === true
+			) {
+				return false
+			}
+
+			return true
+		})
+	})
+
+	const canApplyDocumentDiscount = computed(() => {
+		return discountEligibleItems.value.length > 0
+	})
+
+	function sanitizeAdditionalDiscount() {
+		let safeDiscount = Number(additionalDiscount.value || 0)
+
+		if (!canApplyDocumentDiscount.value) {
+			safeDiscount = 0
+		}
+
+		if (safeDiscount < 0) {
+			safeDiscount = 0
+		}
+
+		additionalDiscount.value = safeDiscount
+		return safeDiscount
+	}
+
 	// Actions
 	function addItem(item, quantity = 1) {
 		const itemUom = item.uom || item.stock_uom
@@ -837,6 +886,7 @@ export function useInvoice() {
 		// Use toRaw() to ensure we get current, non-reactive values (prevents stale cached quantities)
 		const rawItems = toRaw(invoiceItems.value)
 		const rawPayments = toRaw(payments.value)
+		const safeAdditionalDiscount = sanitizeAdditionalDiscount()
 
 		const invoiceData = {
 			doctype: targetDoctype,
@@ -849,7 +899,7 @@ export function useInvoice() {
 				amount: p.amount,
 				type: p.type,
 			})),
-			discount_amount: additionalDiscount.value || 0,
+			discount_amount: safeAdditionalDiscount,
 			coupon_code: couponCode.value,
 			is_pos: 1,
 			update_stock: 1,
@@ -874,18 +924,8 @@ export function useInvoice() {
 		 * Two-step submission process with mutex protection:
 		 * 1. Create/update draft invoice
 		 * 2. Validate stock and submit
-		 *
-		 * The mutex prevents duplicate invoice creation from:
-		 * - Rapid double-clicks on payment buttons
-		 * - Concurrent submissions from multiple UI interactions
-		 * - Credit sales where full amount goes on account
-		 *
-		 * @param {string} targetDoctype - The document type to create (Sales Invoice or Sales Order)
-		 * @param {string|null} deliveryDate - Delivery date for Sales Orders
-		 * @param {number} writeOffAmount - Amount to write off (small remaining balances)
 		 */
 		return await submitMutex.withLock(async () => {
-			// Check if already submitting (belt and suspenders with mutex)
 			if (isSubmitting.value) {
 				log.warn(
 					"Invoice submission already in progress, skipping duplicate request",
@@ -897,10 +937,10 @@ export function useInvoice() {
 
 			try {
 				// Step 1: Create invoice draft
-				// Use toRaw() to ensure we get current, non-reactive values (prevents stale cached quantities)
 				const rawItems = toRaw(invoiceItems.value)
 				const rawPayments = toRaw(payments.value)
 				const rawSalesTeam = toRaw(salesTeam.value)
+				const safeAdditionalDiscount = sanitizeAdditionalDiscount()
 
 				const invoiceData = {
 					doctype: targetDoctype,
@@ -913,17 +953,16 @@ export function useInvoice() {
 						amount: p.amount,
 						type: p.type,
 					})),
-					discount_amount: additionalDiscount.value || 0,
+					discount_amount: safeAdditionalDiscount,
 					coupon_code: couponCode.value,
 					is_pos: 1,
-					update_stock: 1, // Critical: Ensures stock is updated
+					update_stock: 1,
 				}
 
 				if (targetDoctype === "Sales Order" && deliveryDate) {
 					invoiceData.delivery_date = deliveryDate
 				}
 
-				// Add sales_team if provided
 				if (rawSalesTeam && rawSalesTeam.length > 0) {
 					invoiceData.sales_team = rawSalesTeam.map((member) => ({
 						sales_person: member.sales_person,
@@ -962,12 +1001,10 @@ export function useInvoice() {
 						data: submitData,
 					})
 
-					// Check if resource has error (frappe-ui pattern)
 					if (submitInvoiceResource.error) {
 						const resourceError = submitInvoiceResource.error
 						console.error("Submit invoice resource error:", resourceError)
 
-						// Create a detailed error object
 						const detailedError = new Error(
 							resourceError.message || "Invoice submission failed",
 						)
@@ -982,53 +1019,32 @@ export function useInvoice() {
 					resetInvoice()
 					return result
 				} catch (error) {
-					// Preserve original error object with all its properties
 					console.error("Submit invoice error:", error)
 					console.log(
 						"submitInvoiceResource.error:",
 						submitInvoiceResource.error,
 					)
 
-					// If resource has error data, extract and attach it
 					if (submitInvoiceResource.error) {
 						const resourceError = submitInvoiceResource.error
-						console.log("Resource error details:", {
-							exc_type: resourceError.exc_type,
-							_server_messages: resourceError._server_messages,
-							httpStatus: resourceError.httpStatus,
-							messages: resourceError.messages,
-							messagesContent: JSON.stringify(resourceError.messages),
-							data: resourceError.data,
-							exception: resourceError.exception,
-							keys: Object.keys(resourceError),
-						})
 
-						// The messages array likely contains the detailed error info
-						if (resourceError.messages && resourceError.messages.length > 0) {
-							console.log("First message:", resourceError.messages[0])
-						}
-
-						// Attach all resource error properties to the error
 						error.exc_type = resourceError.exc_type || error.exc_type
 						error._server_messages = resourceError._server_messages
 						error.httpStatus = resourceError.httpStatus
 						error.messages = resourceError.messages
 						error.exception = resourceError.exception
 						error.data = resourceError.data
-
-						console.log("After attaching, error.messages:", error.messages)
 					}
 
 					throw error
 				}
 			} catch (error) {
-				// Outer catch to ensure error propagates
 				console.error("Submit invoice outer error:", error)
 				throw error
 			} finally {
 				isSubmitting.value = false
 			}
-		}) // End of submitMutex.withLock
+		})
 	}
 
 	/**
@@ -1188,6 +1204,8 @@ export function useInvoice() {
 		totalPaid,
 		remainingAmount,
 		canSubmit,
+		discountEligibleItems,
+		canApplyDocumentDiscount,
 
 		// Actions
 		addItem,
@@ -1198,6 +1216,7 @@ export function useInvoice() {
 		calculateDiscountAmount,
 		applyDiscount,
 		removeDiscount,
+		sanitizeAdditionalDiscount,
 		addPayment,
 		removePayment,
 		updatePayment,

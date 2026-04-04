@@ -341,7 +341,7 @@
 						<!-- Amounts Breakdown -->
 						<div class="border-t border-gray-200 bg-gray-50 px-3 py-2 space-y-1">
 							<!-- Additional Discount Row -->
-							<div v-if="settingsStore.allowAdditionalDiscount" class="pb-1.5 mb-1 border-b border-dashed border-orange-200">
+							<div v-if="settingsStore.allowAdditionalDiscount && canApplyDocumentDiscount" class="pb-1.5 mb-1 border-b border-dashed border-orange-200">
 								<!-- Label with calculated amount -->
 								<div class="flex items-center justify-between gap-2 mb-1.5">
 									<div class="flex items-center gap-1.5 min-w-0">
@@ -902,8 +902,8 @@
 							>
 								.
 							</button>
-							</div>
 						</div>
+					</div>
 
 					<!-- Action Buttons - Below Keypad (Desktop only) -->
 					<div :class="['hidden lg:flex items-center gap-2', isCompactMode ? 'mt-2' : 'mt-4']">
@@ -1225,6 +1225,41 @@ const localAdditionalDiscount = ref(0)
 const additionalDiscountType = ref(
 	settingsStore.usePercentageDiscount ? "percentage" : "amount",
 )
+
+const discountEligibleItems = computed(() => {
+	return (props.items || []).filter((item) => {
+		if (!item) return false
+		if (item.is_free_item) return false
+
+		const qty = Number(item.qty ?? item.quantity ?? 0)
+		if (qty <= 0) return false
+
+		const discountAllowed = item.discount_allowed
+		const isDiscountLocked = item.is_discount_locked
+
+		if (
+			discountAllowed === 0 ||
+			discountAllowed === "0" ||
+			discountAllowed === false
+		) {
+			return false
+		}
+
+		if (
+			isDiscountLocked === 1 ||
+			isDiscountLocked === "1" ||
+			isDiscountLocked === true
+		) {
+			return false
+		}
+
+		return true
+	})
+})
+
+const canApplyDocumentDiscount = computed(() => {
+	return discountEligibleItems.value.length > 0
+})
 
 const paymentMethodsResource = createResource({
 	url: "pos_next.api.pos_profile.get_payment_methods",
@@ -2402,6 +2437,12 @@ function completePayment() {
 		return
 	}
 
+	// Force-clear stale document discount if cart no longer allows it
+	if (!canApplyDocumentDiscount.value && (props.additionalDiscount || localAdditionalDiscount.value || 0) > 0) {
+		localAdditionalDiscount.value = 0
+		emit("update-additional-discount", 0)
+	}
+
 	// Calculate if this is a partial payment (considering write-off)
 	const effectivePaid = totalPaid.value + writeOffAmount.value
 	const isPartial = effectivePaid < props.grandTotal
@@ -2442,6 +2483,12 @@ function getMethodTotal(methodName) {
 
 // Additional discount handlers
 function handleAdditionalDiscountChange() {
+	if (!canApplyDocumentDiscount.value) {
+		localAdditionalDiscount.value = 0
+		emit("update-additional-discount", 0)
+		return
+	}
+
 	let discountValue = localAdditionalDiscount.value
 	let discountAmount = 0
 
@@ -2454,7 +2501,6 @@ function handleAdditionalDiscountChange() {
 		) {
 			localAdditionalDiscount.value = settingsStore.maxDiscountAllowed
 			discountValue = settingsStore.maxDiscountAllowed
-			// Show warning toast
 			showWarning(
 				__("Maximum allowed discount is {0}%", [
 					settingsStore.maxDiscountAllowed,
@@ -2468,13 +2514,10 @@ function handleAdditionalDiscountChange() {
 			discountValue = 100
 		}
 
-		// Convert percentage to amount
 		discountAmount = (props.subtotal * discountValue) / 100
 	} else {
-		// Amount mode
 		discountAmount = discountValue
 
-		// For amount mode, check if it exceeds percentage limit when converted
 		if (settingsStore.maxDiscountAllowed > 0 && props.subtotal > 0) {
 			const percentageEquivalent = (discountAmount / props.subtotal) * 100
 			if (percentageEquivalent > settingsStore.maxDiscountAllowed) {
@@ -2482,7 +2525,6 @@ function handleAdditionalDiscountChange() {
 					(props.subtotal * settingsStore.maxDiscountAllowed) / 100
 				localAdditionalDiscount.value = maxAmount
 				discountAmount = maxAmount
-				// Show warning toast
 				showWarning(
 					__("Maximum allowed discount is {0}% ({1} {2})", [
 						settingsStore.maxDiscountAllowed,
@@ -2494,7 +2536,6 @@ function handleAdditionalDiscountChange() {
 		}
 	}
 
-	// Ensure discount doesn't exceed subtotal
 	if (discountAmount > props.subtotal) {
 		if (additionalDiscountType.value === "amount") {
 			localAdditionalDiscount.value = props.subtotal
@@ -2502,7 +2543,6 @@ function handleAdditionalDiscountChange() {
 		discountAmount = props.subtotal
 	}
 
-	// Ensure non-negative
 	if (discountAmount < 0) {
 		localAdditionalDiscount.value = 0
 		discountAmount = 0
@@ -2536,8 +2576,26 @@ watch(
 	(isOpen) => {
 		if (isOpen) {
 			// Only sync when dialog opens, not continuously
-			localAdditionalDiscount.value = props.additionalDiscount || 0
+			localAdditionalDiscount.value = canApplyDocumentDiscount.value
+				? (props.additionalDiscount || 0)
+				: 0
+
+			if (!canApplyDocumentDiscount.value && (props.additionalDiscount || 0) > 0) {
+				emit("update-additional-discount", 0)
+			}
 		}
 	},
+)
+
+// Clear stale additional discount if cart becomes fully protected
+watch(
+	() => [canApplyDocumentDiscount.value, props.items],
+	([canApply]) => {
+		if (!canApply && localAdditionalDiscount.value > 0) {
+			localAdditionalDiscount.value = 0
+			emit("update-additional-discount", 0)
+		}
+	},
+	{ deep: true }
 )
 </script>
