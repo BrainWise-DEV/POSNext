@@ -10,7 +10,6 @@ from erpnext.stock.get_item_details import get_item_details as erpnext_get_item_
 from frappe import _
 from frappe.query_builder import DocType, functions as fn
 from frappe.utils import cint, flt, nowdate
-from pos_branch_helper.discount_policy.service import get_item_discount_policy
 
 ITEM_RESULT_FIELDS = [
 	"name as item_code",
@@ -157,6 +156,59 @@ def get_uom_policy_payloads(item_codes):
 
 	return dict(policy_map)
 
+def _enrich_item_policy_payload(item, uom_policy_map=None):
+	"""Attach authoritative discount + UOM policy fields to an item payload."""
+	if not item or not item.get("item_code"):
+		return item
+
+	item_code = item["item_code"]
+	stock_uom = item.get("stock_uom") or item.get("uom")
+
+	# ------------------------------------------------------------------
+	# Discount policy
+	# ------------------------------------------------------------------
+	discount_policy = _get_discount_policy_payload(
+		item_code,
+		fallback_max_discount=item.get("max_discount", 0),
+	)
+
+	item["discount_allowed"] = discount_policy["discount_allowed"]
+	item["is_discount_locked"] = discount_policy["is_discount_locked"]
+	item["has_max_discount"] = discount_policy["has_max_discount"]
+	item["max_discount"] = discount_policy["max_discount"]
+
+	# ------------------------------------------------------------------
+	# UOM policy
+	# ------------------------------------------------------------------
+	if uom_policy_map is None:
+		uom_policy_map = get_uom_policy_payloads([item_code])
+
+	uom_policy = uom_policy_map.get(
+		item_code,
+		{
+			"all_uoms": [],
+			"allowed_uoms": [],
+			"default_uom": stock_uom,
+		},
+	)
+
+	item["uom_policy"] = uom_policy
+
+	all_uoms = uom_policy.get("all_uoms") or []
+
+	item["allowed_sell_uoms"] = [
+		row["uom"]
+		for row in all_uoms
+		if cint(row.get("allow_for_selling"))
+	]
+
+	item["allowed_buy_uoms"] = [
+		row["uom"]
+		for row in all_uoms
+		if cint(row.get("allow_for_buying"))
+	]
+
+	return item
 
 def get_stock_availability(item_code, warehouse):
 	"""Return total available quantity for an item in the given warehouse."""
@@ -408,18 +460,6 @@ def get_item_detail(item, doc=None, warehouse=None, price_list=None, company=Non
 	if item.get("is_stock_item") and warehouse:
 		res["actual_qty"] = get_stock_availability(item_code, warehouse)
 
-	# Add explicit discount policy for frontend enforcement
-	discount_policy = get_item_discount_policy(item_code) or {}
-
-	res["discount_allowed"] = discount_policy.get("discount_allowed", 1)
-	res["is_discount_locked"] = discount_policy.get("is_discount_locked", 0)
-	res["has_max_discount"] = discount_policy.get("has_max_discount", 0)
-
-	# Keep max_discount authoritative from policy service first
-	res["max_discount"] = discount_policy.get(
-		"max_discount",
-		item_data.get("max_discount", 0),
-	)
 	res["batch_no_data"] = batch_no_data
 	res["serial_no_data"] = serial_no_data
 	res["item_group"] = item_data.get("item_group")
@@ -438,6 +478,11 @@ def get_item_detail(item, doc=None, warehouse=None, price_list=None, company=Non
 		uoms.append({"uom": stock_uom, "conversion_factor": 1.0})
 
 	res["item_uoms"] = uoms
+	res["item_code"] = res.get("item_code") or item_code
+	res["stock_uom"] = res.get("stock_uom") or item_data.get("stock_uom")
+
+	uom_policy_map = get_uom_policy_payloads([item_code])
+	_enrich_item_policy_payload(res, uom_policy_map)
 
 	return res
 
@@ -548,17 +593,9 @@ def search_by_barcode(barcode, pos_profile):
 					uom_prices[p["uom"]] = p["price_list_rate"]
 
 		item_details["uom_prices"] = uom_prices
-		# Add synced UOM policy payload (same as get_items)
-		uom_policy_map = get_uom_policy_payloads([item_code])
 
-		item_details["uom_policy"] = uom_policy_map.get(
-			item_code,
-			{
-				"all_uoms": [],
-				"allowed_uoms": [],
-				"default_uom": item_doc.stock_uom,
-			},
-		)
+		uom_policy_map = get_uom_policy_payloads([item_code])
+		_enrich_item_policy_payload(item_details, uom_policy_map)
 
 		# Apply resolved barcode data (weighted/priced) to the item details
 		if resolved_barcode_data:
@@ -1610,15 +1647,6 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20,
 
 			# Add warehouse to item (needed for stock validation)
 			item["warehouse"] = pos_profile_doc.warehouse
-			# Add discount policy for frontend line-discount enforcement
-			discount_policy = _get_discount_policy_payload(
-				item["item_code"],
-				fallback_max_discount=item.get("max_discount", 0),
-			)
-			item["discount_allowed"] = discount_policy["discount_allowed"]
-			item["is_discount_locked"] = discount_policy["is_discount_locked"]
-			item["has_max_discount"] = discount_policy["has_max_discount"]
-			item["max_discount"] = discount_policy["max_discount"]
 
 			# Barcode
 			# item["barcode"] = barcode_map.get(item["item_code"], "")
@@ -1626,14 +1654,8 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20,
 			# Item UOMs (exclude stock UOM to avoid duplicates)
 			all_uoms = uom_map.get(item["item_code"], []) or []
 			item["item_uoms"] = [u for u in all_uoms if u.get("uom") != stock_uom]
-			item["uom_policy"] = uom_policy_map.get(
-				item["item_code"],
-				{
-					"all_uoms": [],
-					"allowed_uoms": [],
-					"default_uom": stock_uom,
-				},
-			)
+
+			_enrich_item_policy_payload(item, uom_policy_map)
 
 			# UOM-specific prices map for frontend selector
 			item["uom_prices"] = uom_prices_map.get(item["item_code"], {})
@@ -1831,15 +1853,6 @@ def get_items_bulk(pos_profile, item_groups=None, start=0, limit=2000, include_v
 				else bundle_availability_map.get(item_code, 0)
 			)
 			item["warehouse"] = warehouse
-			# Add discount policy for frontend line-discount enforcement
-			discount_policy = _get_discount_policy_payload(
-				item_code,
-				fallback_max_discount=item.get("max_discount", 0),
-			)
-			item["discount_allowed"] = discount_policy["discount_allowed"]
-			item["is_discount_locked"] = discount_policy["is_discount_locked"]
-			item["has_max_discount"] = discount_policy["has_max_discount"]
-			item["max_discount"] = discount_policy["max_discount"]
 
 			# Bundle marker
 			if item_code in bundle_availability_map:
@@ -1848,14 +1861,9 @@ def get_items_bulk(pos_profile, item_groups=None, start=0, limit=2000, include_v
 			# UOMs
 			all_uoms = uom_map.get(item_code, []) or []
 			item["item_uoms"] = [u for u in all_uoms if u.get("uom") != stock_uom]
-			item["uom_policy"] = uom_policy_map.get(
-				item_code,
-				{
-					"all_uoms": [],
-					"allowed_uoms": [],
-					"default_uom": stock_uom,
-				},
-			)
+
+			_enrich_item_policy_payload(item, uom_policy_map)
+
 			item["uom_prices"] = prices
 
 			# Variant attributes
