@@ -483,11 +483,16 @@ def _get_item_discount_policy_flags(item_code):
     return {"discount_allowed": 1, "is_discount_locked": 0}
 
 
-def _allocate_additional_discount_to_discountable_items(invoice_doc):
-    """Distribute document-level additional discount across eligible items only.
+def _allocate_additional_discount_to_discountable_items(invoice_doc, pos_settings_cache=None):
+    """Distribute document-level additional discount across eligible items only,
+    while enforcing POS Settings max discount ceiling per item.
 
-    Keeps protected / locked items at full price.
-    Clears invoice-level additional discount after converting it into line discounts.
+    Rules:
+    - Existing line discount counts toward the max discount ceiling.
+    - Additional discount can only use the remaining allowed room per item.
+    - Excess requested additional discount is auto-capped.
+    - Protected / locked items remain unchanged.
+    - Invoice-level additional discount fields are cleared after conversion.
     """
     if not invoice_doc or invoice_doc.doctype != "Sales Invoice":
         return
@@ -502,13 +507,30 @@ def _allocate_additional_discount_to_discountable_items(invoice_doc):
         frappe.get_cached_value("System Settings", None, "currency_precision")
     ) or 2
 
+    # Read max discount ceiling from cached POS Settings first, fallback to DB.
+    max_discount_allowed = 0.0
+    if pos_settings_cache:
+        max_discount_allowed = flt(
+            pos_settings_cache.get(FIELD_MAX_DISCOUNT_ALLOWED) or 0
+        )
+
+    if max_discount_allowed <= 0 and invoice_doc.get("pos_profile"):
+        max_discount_allowed = flt(
+            frappe.db.get_value(
+                DOCTYPE_POS_SETTINGS,
+                {"pos_profile": invoice_doc.pos_profile},
+                FIELD_MAX_DISCOUNT_ALLOWED,
+            )
+            or 0
+        )
+
     eligible_rows = []
     protected_rows = []
 
     for row in invoice_doc.get("items", []):
         qty = flt(row.get("qty") or 0)
-        rate = flt(row.get("rate") or 0)
-        line_total = flt(qty * rate, precision)
+        current_rate = flt(row.get("rate") or 0, precision)
+        price_list_rate = flt(row.get("price_list_rate") or current_rate, precision)
 
         policy = _get_item_discount_policy_flags(row.get("item_code"))
         is_protected = (
@@ -516,34 +538,72 @@ def _allocate_additional_discount_to_discountable_items(invoice_doc):
             or cint(policy.get("is_discount_locked")) == 1
         )
 
-        if is_protected or qty <= 0 or rate <= 0 or line_total <= 0:
+        if is_protected or qty <= 0 or current_rate <= 0 or price_list_rate <= 0:
+            protected_rows.append(row)
+            continue
+
+        # Treat price_list_rate as the original/base unit price for ceiling calculation.
+        base_line_total = flt(qty * price_list_rate, precision)
+        current_line_total = flt(qty * current_rate, precision)
+
+        if base_line_total <= 0:
+            protected_rows.append(row)
+            continue
+
+        # Existing effective discount already on the row.
+        current_discount_amount = flt(base_line_total - current_line_total, precision)
+        if current_discount_amount < 0:
+            current_discount_amount = 0
+
+        # Max allowed discount on this row from POS Settings ceiling.
+        max_allowed_discount_amount = flt(
+            base_line_total * max_discount_allowed / 100.0, precision
+        )
+
+        remaining_room = flt(
+            max_allowed_discount_amount - current_discount_amount, precision
+        )
+
+        if remaining_room <= 0:
+            # Item has no remaining room; keep existing line discount unchanged.
             protected_rows.append(row)
             continue
 
         eligible_rows.append({
             "row": row,
             "qty": qty,
-            "line_total": line_total,
+            "price_list_rate": price_list_rate,
+            "current_rate": current_rate,
+            "base_line_total": base_line_total,
+            "current_discount_amount": current_discount_amount,
+            "remaining_room": remaining_room,
+            "weight": current_line_total if current_line_total > 0 else base_line_total,
         })
 
+    # No eligible room anywhere -> just clear invoice-level fields.
     if not eligible_rows:
         invoice_doc.discount_amount = 0
         invoice_doc.additional_discount_percentage = 0
         invoice_doc.apply_discount_on = "Grand Total"
         return
 
-    eligible_total = flt(sum(d["line_total"] for d in eligible_rows), precision)
+    eligible_weight_total = flt(sum(d["weight"] for d in eligible_rows), precision)
 
-    if eligible_total <= 0:
+    if eligible_weight_total <= 0:
         invoice_doc.discount_amount = 0
         invoice_doc.additional_discount_percentage = 0
         invoice_doc.apply_discount_on = "Grand Total"
         return
 
+    # Convert additional discount % into amount using only eligible weight total.
     if discount_amount <= 0 and discount_pct > 0:
-        discount_amount = flt(eligible_total * discount_pct / 100.0, precision)
+        discount_amount = flt(eligible_weight_total * discount_pct / 100.0, precision)
 
-    discount_amount = min(flt(discount_amount, precision), eligible_total)
+    # Hard cap requested amount to total remaining room across all eligible items.
+    total_remaining_room = flt(
+        sum(d["remaining_room"] for d in eligible_rows), precision
+    )
+    discount_amount = min(flt(discount_amount, precision), total_remaining_room)
 
     if discount_amount <= 0:
         invoice_doc.discount_amount = 0
@@ -551,46 +611,90 @@ def _allocate_additional_discount_to_discountable_items(invoice_doc):
         invoice_doc.apply_discount_on = "Grand Total"
         return
 
-    allocated = 0.0
+    # Water-fill distribution with per-item cap.
+    remaining_discount = flt(discount_amount, precision)
+    active_rows = [dict(d, allocated=0.0) for d in eligible_rows]
 
-    for idx, entry in enumerate(eligible_rows):
-        row = entry["row"]
-        qty = entry["qty"]
-        line_total = entry["line_total"]
+    while remaining_discount > 0:
+        open_rows = [
+            d for d in active_rows
+            if flt(d["remaining_room"] - d["allocated"], precision) > 0
+        ]
+        if not open_rows:
+            break
 
-        current_rate = flt(row.get("rate") or 0, precision)
-        price_list_rate = flt(row.get("price_list_rate") or current_rate, precision)
+        open_weight_total = flt(sum(d["weight"] for d in open_rows), precision)
+        if open_weight_total <= 0:
+            break
 
-        if idx == len(eligible_rows) - 1:
-            line_share = flt(discount_amount - allocated, precision)
-        else:
-            line_share = flt(discount_amount * line_total / eligible_total, precision)
-            allocated = flt(allocated + line_share, precision)
+        distributed_this_round = 0.0
 
-        per_unit_share = flt(line_share / qty, precision) if qty else 0
-        new_rate = flt(max(0, current_rate - per_unit_share), precision)
+        for d in open_rows:
+            room_left = flt(d["remaining_room"] - d["allocated"], precision)
+            if room_left <= 0:
+                continue
 
-        row.price_list_rate = max(price_list_rate, current_rate)
+            share = flt(
+                remaining_discount * (d["weight"] / open_weight_total),
+                precision
+            )
+            give = min(share, room_left)
+
+            if give > 0:
+                d["allocated"] = flt(d["allocated"] + give, precision)
+                distributed_this_round = flt(
+                    distributed_this_round + give, precision
+                )
+
+        if distributed_this_round <= 0:
+            break
+
+        remaining_discount = flt(
+            remaining_discount - distributed_this_round, precision
+        )
+
+        # Prevent tiny rounding residue loop
+        if abs(remaining_discount) < (1 / (10 ** precision)):
+            remaining_discount = 0
+
+    # Apply allocated additional discount to each eligible row
+    for d in active_rows:
+        row = d["row"]
+        qty = d["qty"]
+        price_list_rate = d["price_list_rate"]
+        current_discount_amount = d["current_discount_amount"]
+        extra_discount_amount = flt(d["allocated"], precision)
+
+        final_discount_amount = flt(
+            current_discount_amount + extra_discount_amount,
+            precision
+        )
+
+        per_unit_discount = flt(final_discount_amount / qty, precision) if qty else 0
+        new_rate = flt(max(0, price_list_rate - per_unit_discount), precision)
+
+        row.price_list_rate = price_list_rate
         row.rate = new_rate
         row.base_rate = new_rate
         row.amount = flt(new_rate * qty, precision)
         row.base_amount = row.amount
 
-        base_price = flt(row.price_list_rate or 0, precision)
-        if base_price > 0:
+        if price_list_rate > 0:
             row.discount_percentage = flt(
-                ((base_price - new_rate) / base_price) * 100,
+                ((price_list_rate - new_rate) / price_list_rate) * 100,
                 precision
             )
-            row.discount_amount = flt(base_price - new_rate, precision)
+            row.discount_amount = flt(price_list_rate - new_rate, precision)
         else:
             row.discount_percentage = 0
             row.discount_amount = 0
 
+    # Preserve protected rows as-is
     for row in protected_rows:
         row.discount_percentage = flt(row.get("discount_percentage") or 0)
         row.discount_amount = flt(row.get("discount_amount") or 0)
 
+    # Backend becomes source of truth: clear document-level discount after allocation
     invoice_doc.discount_amount = 0
     invoice_doc.additional_discount_percentage = 0
     invoice_doc.apply_discount_on = "Grand Total"
@@ -1103,7 +1207,7 @@ def update_invoice(data):
         # Convert document-level additional discount into line-level discount
         # before totals are recalculated.
         if doctype == "Sales Invoice":
-            _allocate_additional_discount_to_discountable_items(invoice_doc)
+            _allocate_additional_discount_to_discountable_items(invoice_doc, pos_settings_cache)
 
         invoice_doc.set_missing_values()
 
