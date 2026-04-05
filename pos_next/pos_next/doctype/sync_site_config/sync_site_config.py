@@ -1,11 +1,18 @@
 # Copyright (c) 2026, BrainWise and contributors
 # For license information, please see license.txt
 
+import os
 import re
 
 import frappe
 from frappe import _
 from frappe.model.document import Document
+
+
+# Dev escape hatch: set POS_NEXT_SYNC_ALLOW_HTTP=1 in the environment to
+# permit http:// central URLs (for local multi-site bench testing).
+# Never set this in production.
+_ALLOW_HTTP = os.environ.get("POS_NEXT_SYNC_ALLOW_HTTP") == "1"
 
 
 class SyncSiteConfig(Document):
@@ -43,16 +50,19 @@ class SyncSiteConfig(Document):
 			)
 
 	def _validate_https_url(self):
-		"""central_url must use https:// scheme."""
+		"""central_url must use https:// scheme (unless dev bypass is set)."""
 		if self.site_role != "Branch":
 			return
 		if not self.central_url:
 			return
-		if not self.central_url.startswith("https://"):
-			frappe.throw(
-				_("central_url must use https:// scheme, got: {0}").format(self.central_url),
-				title=_("Insecure URL"),
-			)
+		if self.central_url.startswith("https://"):
+			return
+		if _ALLOW_HTTP and self.central_url.startswith("http://"):
+			return
+		frappe.throw(
+			_("central_url must use https:// scheme, got: {0}").format(self.central_url),
+			title=_("Insecure URL"),
+		)
 
 	def _validate_branch_code(self):
 		"""branch_code must match [A-Z0-9]{2,16}."""

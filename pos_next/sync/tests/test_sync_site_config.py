@@ -100,7 +100,11 @@ def test_branch_code_unique():
 
 
 def test_https_enforced():
-	"""central_url must use https:// scheme."""
+	"""central_url must use https:// scheme (unless POS_NEXT_SYNC_ALLOW_HTTP=1)."""
+	import os
+	if os.environ.get("POS_NEXT_SYNC_ALLOW_HTTP") == "1":
+		print("SKIP: test_https_enforced (POS_NEXT_SYNC_ALLOW_HTTP=1 set)")
+		return
 	_cleanup()
 	try:
 		doc = frappe.get_doc({
