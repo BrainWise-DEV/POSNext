@@ -1241,6 +1241,10 @@ async function handleMobileAmountEnter() {
 	if (amount > 0 && lastSelectedMethod.value) {
 		await addCustomPayment(lastSelectedMethod.value, amount)
 		mobileCustomAmount.value = ""
+		nextTick(() => {
+			mobileAmountInputRef.value?.focus()
+			mobileAmountInputRef.value?.select()
+		})
 		if (canComplete.value && !isSubmitting.value) {
 			completePayment()
 		}
@@ -1256,6 +1260,10 @@ async function handleDesktopAmountEnter() {
 	if (amount > 0 && lastSelectedMethod.value) {
 		await addCustomPayment(lastSelectedMethod.value, amount)
 		desktopAmountInput.value = ""
+		nextTick(() => {
+			desktopAmountInputRef.value?.focus()
+			desktopAmountInputRef.value?.select()
+		})
 		if (canComplete.value && !isSubmitting.value) {
 			completePayment()
 		}

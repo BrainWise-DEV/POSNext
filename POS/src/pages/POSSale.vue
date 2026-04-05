@@ -1219,7 +1219,8 @@ onMounted(async () => {
 		// Skip if any dialog is open or if user is typing in an input/textarea
 		if (uiStore.isAnyDialogOpen) return;
 		const tag = document.activeElement?.tagName;
-		if (tag === "INPUT" || tag === "TEXTAREA") return;
+		const isFunctionKey = event.key.startsWith("F") && !isNaN(event.key.slice(1));
+		if (!isFunctionKey && (tag === "INPUT" || tag === "TEXTAREA")) return;
 
 		if (event.key === "F4") {
 			event.preventDefault();
