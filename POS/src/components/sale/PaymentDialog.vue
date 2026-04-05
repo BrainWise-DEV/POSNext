@@ -343,16 +343,28 @@
 							<!-- Additional Discount Row -->
 							<div v-if="settingsStore.allowAdditionalDiscount && canApplyDocumentDiscount" class="pb-1.5 mb-1 border-b border-dashed border-orange-200">
 								<!-- Label with calculated amount -->
-								<div class="flex items-center justify-between gap-2 mb-1.5">
-									<div class="flex items-center gap-1.5 min-w-0">
-										<svg class="w-3.5 h-3.5 text-orange-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/>
-										</svg>
-										<span class="text-xs font-medium text-orange-700">{{ __('Additional Discount') }}</span>
+								<div class="mb-1.5">
+									<div class="flex items-center justify-between gap-2">
+										<div class="flex items-center gap-1.5 min-w-0">
+											<svg class="w-3.5 h-3.5 text-orange-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/>
+											</svg>
+											<span class="text-xs font-medium text-orange-700">
+												{{ __('Additional Discount') }}
+											</span>
+										</div>
+
+										<span v-if="localAdditionalDiscount > 0" class="text-xs font-bold text-red-600">
+											-{{ formatCurrency(calculatedAdditionalDiscount) }}
+										</span>
 									</div>
-									<span v-if="localAdditionalDiscount > 0" class="text-xs font-bold text-red-600">
-										-{{ formatCurrency(calculatedAdditionalDiscount) }}
-									</span>
+
+									<div
+										v-if="availableDiscountHelperText"
+										class="text-[11px] text-orange-600 mt-0.5 pl-5"
+									>
+										{{ availableDiscountHelperText }}
+									</div>
 								</div>
 								<!-- Grid: 1/2 Counter Input, 1/4 Percentage, 1/4 Amount -->
 								<div class="grid grid-cols-4 gap-1.5">
@@ -375,7 +387,7 @@
 											@input="handleAdditionalDiscountChange"
 											:placeholder="additionalDiscountType === 'percentage' ? '0' : '0.00'"
 											min="0"
-											:max="additionalDiscountType === 'percentage' ? 100 : subtotal"
+											:max="additionalDiscountType === 'percentage' ? snapshotAvailableDiscountPercentage : snapshotAvailableDiscountAmount"
 											step="1"
 											class="flex-1 h-9 px-1 text-sm font-semibold text-center bg-transparent border-none focus:outline-none focus:ring-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
 										/>
@@ -426,14 +438,14 @@
 								<span class="font-medium text-gray-900 text-end">{{ formatCurrency(taxAmount) }}</span>
 							</div>
 							<!-- Discount (shows the calculated additional discount amount) -->
-							<div v-if="discountAmount > 0" class="flex items-center justify-between text-sm">
+							<div v-if="visibleDiscountAmount > 0" class="flex items-center justify-between text-sm">
 								<span class="text-gray-600 text-start">{{ __('Discount') }}</span>
-								<span class="font-medium text-red-600 text-end">-{{ formatCurrency(discountAmount) }}</span>
+								<span class="font-medium text-red-600 text-end">-{{ formatCurrency(visibleDiscountAmount) }}</span>
 							</div>
 							<!-- Grand Total -->
 							<div class="flex items-center justify-between pt-2 mt-1 border-t border-gray-300">
 								<span :class="['font-bold text-gray-900 text-start', isCompactMode ? 'text-sm' : 'text-base']">{{ __('Grand Total') }}</span>
-								<span :class="['font-bold text-gray-900 text-end', dynamicTextSize.grandTotal]">{{ formatCurrency(grandTotal) }}</span>
+								<span :class="['font-bold text-gray-900 text-end', dynamicTextSize.grandTotal]">{{ formatCurrency(visibleGrandTotal) }}</span>
 							</div>
 						</div>
 
@@ -446,23 +458,23 @@
 									<div :class="['font-bold text-blue-600', dynamicTextSize.amount]">{{ formatCurrency(totalPaid) }}</div>
 								</div>
 								<!-- Remaining / Change (Right Half) -->
-								<div v-if="remainingAmount > 0 && !applyWriteOff" :class="['bg-orange-50 text-center', isCompactMode ? 'p-2' : 'p-3']">
+								<div v-if="visibleRemainingAmount > 0 && !applyWriteOff" :class="['bg-orange-50 text-center', isCompactMode ? 'p-2' : 'p-3']">
 									<div class="text-xs font-medium text-orange-600 uppercase tracking-wide mb-1">{{ __('Remaining') }}</div>
-									<div :class="['font-bold text-orange-600', dynamicTextSize.amount]">{{ formatCurrency(remainingAmount) }}</div>
+									<div :class="['font-bold text-orange-600', dynamicTextSize.amount]">{{ formatCurrency(visibleRemainingAmount) }}</div>
 								</div>
 								<!-- Write-off Applied -->
 								<div v-else-if="applyWriteOff && canWriteOff" :class="['bg-purple-50 text-center', isCompactMode ? 'p-2' : 'p-3']">
 									<div class="text-xs font-medium text-purple-600 uppercase tracking-wide mb-1">{{ __('Write Off') }}</div>
 									<div :class="['font-bold text-purple-600', dynamicTextSize.amount]">{{ formatCurrency(writeOffAmount) }}</div>
 								</div>
-								<div v-else-if="changeAmount > 0 && allowsOverpayment" :class="['bg-green-50 text-center', isCompactMode ? 'p-2' : 'p-3']">
+								<div v-else-if="visibleChangeAmount > 0 && allowsOverpayment" :class="['bg-green-50 text-center', isCompactMode ? 'p-2' : 'p-3']">
 									<div class="text-xs font-medium text-green-600 uppercase tracking-wide mb-1">{{ __('Change Due') }}</div>
-									<div :class="['font-bold text-green-600', dynamicTextSize.amount]">{{ formatCurrency(changeAmount) }}</div>
+									<div :class="['font-bold text-green-600', dynamicTextSize.amount]">{{ formatCurrency(visibleChangeAmount) }}</div>
 								</div>
 								<!-- Exact Amount Warning (when overpayment not allowed) -->
-								<div v-else-if="changeAmount > 0 && !allowsOverpayment" :class="['bg-red-50 text-center', isCompactMode ? 'p-2' : 'p-3']">
+								<div v-else-if="visibleChangeAmount > 0 && !allowsOverpayment" :class="['bg-red-50 text-center', isCompactMode ? 'p-2' : 'p-3']">
 									<div class="text-xs font-medium text-red-600 uppercase tracking-wide mb-1">{{ __('Overpayment') }}</div>
-									<div :class="['font-bold text-red-600', dynamicTextSize.amount]">{{ formatCurrency(changeAmount) }}</div>
+									<div :class="['font-bold text-red-600', dynamicTextSize.amount]">{{ formatCurrency(visibleChangeAmount) }}</div>
 								</div>
 								<div v-else :class="['bg-green-50 flex flex-col items-center justify-center', isCompactMode ? 'p-2' : 'p-3']">
 									<svg class="w-5 h-5 text-green-600 mb-1" fill="currentColor" viewBox="0 0 20 20">
@@ -1074,6 +1086,14 @@ const props = defineProps({
 		type: Number,
 		default: 0,
 	},
+	availableDiscountAmount: {
+		type: Number,
+		default: 0,
+	},
+	availableDiscountPercentage: {
+		type: Number,
+		default: 0,
+	},
 	targetDoctype: {
 		type: String,
 		default: "Sales Invoice",
@@ -1226,6 +1246,46 @@ const additionalDiscountType = ref(
 	settingsStore.usePercentageDiscount ? "percentage" : "amount",
 )
 
+const snapshotAvailableDiscountAmount = computed(() =>
+	roundCurrency(props.availableDiscountAmount || 0)
+)
+
+const snapshotAvailableDiscountPercentage = computed(() =>
+	roundCurrency(props.availableDiscountPercentage || 0)
+)
+
+const snapshotDiscountBaseTotal = computed(() =>
+	roundCurrency(props.grandTotal || 0)
+)
+
+function clampDiscountAmount(amount) {
+	const normalized = roundCurrency(amount || 0)
+	const maxAmount = snapshotAvailableDiscountAmount.value
+	if (maxAmount <= 0) return 0
+	if (normalized < 0) return 0
+	return normalized > maxAmount ? maxAmount : normalized
+}
+
+function clampDiscountPercentage(percentage) {
+	const normalized = roundCurrency(percentage || 0)
+	const maxPercentage = snapshotAvailableDiscountPercentage.value
+	if (maxPercentage <= 0) return 0
+	if (normalized < 0) return 0
+	return normalized > maxPercentage ? maxPercentage : normalized
+}
+
+function amountToPercentage(amount) {
+	const baseTotal = snapshotDiscountBaseTotal.value
+	if (baseTotal <= 0) return 0
+	return roundCurrency((roundCurrency(amount || 0) / baseTotal) * 100)
+}
+
+function percentageToAmount(percentage) {
+	const baseTotal = snapshotDiscountBaseTotal.value
+	if (baseTotal <= 0) return 0
+	return roundCurrency((baseTotal * roundCurrency(percentage || 0)) / 100)
+}
+
 const discountEligibleItems = computed(() => {
 	return (props.items || []).filter((item) => {
 		if (!item) return false
@@ -1257,8 +1317,41 @@ const discountEligibleItems = computed(() => {
 	})
 })
 
+const availableDiscountHelperText = computed(() => {
+	if (!canApplyDocumentDiscount.value) return ""
+
+	const pct = roundCurrency(props.availableDiscountPercentage || 0)
+	const amt = roundCurrency(props.availableDiscountAmount || 0)
+
+	if (pct <= 0 && amt <= 0) return ""
+
+	return __(
+		"Max discount for eligible items: {0}% • {1}",
+		[
+			pct.toFixed(2),
+			formatCurrency(amt),
+		]
+	)
+})
+
 const canApplyDocumentDiscount = computed(() => {
-	return discountEligibleItems.value.length > 0
+	return (
+		snapshotAvailableDiscountAmount.value > 0 &&
+		snapshotAvailableDiscountPercentage.value > 0
+	)
+})
+
+const discountEligibleSubtotal = computed(() => {
+	return roundCurrency(
+		discountEligibleItems.value.reduce((sum, item) => {
+			const lineAmount = Number(
+				item.amount ??
+				(item.qty ?? item.quantity ?? 0) * (item.rate ?? item.price_list_rate ?? 0) ??
+				0
+			)
+			return sum + lineAmount
+		}, 0)
+	)
 })
 
 const paymentMethodsResource = createResource({
@@ -1702,20 +1795,44 @@ const remainingAvailableCredit = computed(() => {
 
 // Calculate the actual discount amount based on type (percentage or fixed amount)
 const calculatedAdditionalDiscount = computed(() => {
-	if (additionalDiscountType.value === "percentage") {
-		return roundCurrency((props.subtotal * localAdditionalDiscount.value) / 100)
+	if (!canApplyDocumentDiscount.value) {
+		return 0
 	}
-	return roundCurrency(localAdditionalDiscount.value)
+
+	if (additionalDiscountType.value === "percentage") {
+		const clampedPercentage = clampDiscountPercentage(localAdditionalDiscount.value)
+		const calculatedAmount = percentageToAmount(clampedPercentage)
+		return clampDiscountAmount(calculatedAmount)
+	}
+
+	return clampDiscountAmount(localAdditionalDiscount.value)
 })
 
-const remainingAmount = computed(() => {
-	const remaining = roundCurrency(props.grandTotal) - totalPaid.value
+const visibleDiscountAmount = computed(() => {
+	return roundCurrency(calculatedAdditionalDiscount.value || 0)
+})
+
+const visibleGrandTotal = computed(() => {
+	const total = roundCurrency(props.grandTotal) - visibleDiscountAmount.value
+	return total > 0 ? roundCurrency(total) : 0
+})
+
+const visibleRemainingAmount = computed(() => {
+	const remaining = visibleGrandTotal.value - totalPaid.value
 	return remaining > 0 ? roundCurrency(remaining) : 0
 })
 
-const changeAmount = computed(() => {
-	const change = totalPaid.value - roundCurrency(props.grandTotal)
+const visibleChangeAmount = computed(() => {
+	const change = totalPaid.value - visibleGrandTotal.value
 	return change > 0 ? roundCurrency(change) : 0
+})
+
+const remainingAmount = computed(() => {
+	return visibleRemainingAmount.value
+})
+
+const changeAmount = computed(() => {
+	return visibleChangeAmount.value
 })
 
 // ===========================================
@@ -1941,7 +2058,7 @@ const isLastMethodCash = computed(() => {
 		!lastSelectedMethod.value || isCashPaymentMethod(lastSelectedMethod.value)
 	)
 })
-const { quickAmounts } = useQuickAmounts(remainingAmount, isLastMethodCash)
+const { quickAmounts } = useQuickAmounts(visibleRemainingAmount, isLastMethodCash)
 
 // Whether a quick amount button should be disabled in exact-amount mode
 // Non-cash methods can only pay the exact remaining — no rounding allowed
@@ -2452,6 +2569,7 @@ function completePayment() {
 		change_amount: changeAmount.value,
 		is_partial_payment: isPartial,
 		paid_amount: totalPaid.value,
+		additional_discount: roundCurrency(calculatedAdditionalDiscount.value || 0),
 		outstanding_amount: isPartial
 			? remainingAmount.value - writeOffAmount.value
 			: 0,
@@ -2489,71 +2607,38 @@ function handleAdditionalDiscountChange() {
 		return
 	}
 
-	let discountValue = localAdditionalDiscount.value
 	let discountAmount = 0
 
-	// If percentage mode, calculate amount
 	if (additionalDiscountType.value === "percentage") {
-		// Validate against max_discount_allowed if configured
-		if (
-			settingsStore.maxDiscountAllowed > 0 &&
-			discountValue > settingsStore.maxDiscountAllowed
-		) {
-			localAdditionalDiscount.value = settingsStore.maxDiscountAllowed
-			discountValue = settingsStore.maxDiscountAllowed
-			showWarning(
-				__("Maximum allowed discount is {0}%", [
-					settingsStore.maxDiscountAllowed,
-				]),
-			)
-		}
-
-		// Ensure percentage is between 0-100
-		if (discountValue > 100) {
-			localAdditionalDiscount.value = 100
-			discountValue = 100
-		}
-
-		discountAmount = (props.subtotal * discountValue) / 100
+		const clampedPercentage = clampDiscountPercentage(localAdditionalDiscount.value)
+		localAdditionalDiscount.value = clampedPercentage
+		discountAmount = clampDiscountAmount(percentageToAmount(clampedPercentage))
 	} else {
-		discountAmount = discountValue
-
-		if (settingsStore.maxDiscountAllowed > 0 && props.subtotal > 0) {
-			const percentageEquivalent = (discountAmount / props.subtotal) * 100
-			if (percentageEquivalent > settingsStore.maxDiscountAllowed) {
-				const maxAmount =
-					(props.subtotal * settingsStore.maxDiscountAllowed) / 100
-				localAdditionalDiscount.value = maxAmount
-				discountAmount = maxAmount
-				showWarning(
-					__("Maximum allowed discount is {0}% ({1} {2})", [
-						settingsStore.maxDiscountAllowed,
-						props.currency,
-						maxAmount.toFixed(2),
-					]),
-				)
-			}
-		}
+		const clampedAmount = clampDiscountAmount(localAdditionalDiscount.value)
+		localAdditionalDiscount.value = clampedAmount
+		discountAmount = clampedAmount
 	}
 
-	if (discountAmount > props.subtotal) {
-		if (additionalDiscountType.value === "amount") {
-			localAdditionalDiscount.value = props.subtotal
-		}
-		discountAmount = props.subtotal
-	}
-
-	if (discountAmount < 0) {
-		localAdditionalDiscount.value = 0
-		discountAmount = 0
-	}
-
-	emit("update-additional-discount", discountAmount)
+	emit("update-additional-discount", roundCurrency(discountAmount))
 }
 
 function handleAdditionalDiscountTypeChange() {
-	// Don't reset - preserve last value when toggling type
-	// Just recalculate to ensure it's within limits
+	if (!canApplyDocumentDiscount.value) {
+		localAdditionalDiscount.value = 0
+		emit("update-additional-discount", 0)
+		return
+	}
+
+	if (additionalDiscountType.value === "percentage") {
+		localAdditionalDiscount.value = clampDiscountPercentage(
+			amountToPercentage(localAdditionalDiscount.value)
+		)
+	} else {
+		localAdditionalDiscount.value = clampDiscountAmount(
+			percentageToAmount(localAdditionalDiscount.value)
+		)
+	}
+
 	handleAdditionalDiscountChange()
 }
 
@@ -2575,27 +2660,57 @@ watch(
 	() => props.modelValue,
 	(isOpen) => {
 		if (isOpen) {
-			// Only sync when dialog opens, not continuously
-			localAdditionalDiscount.value = canApplyDocumentDiscount.value
-				? (props.additionalDiscount || 0)
-				: 0
+			if (!canApplyDocumentDiscount.value) {
+				localAdditionalDiscount.value = 0
+				if ((props.additionalDiscount || 0) > 0) {
+					emit("update-additional-discount", 0)
+				}
+				return
+			}
 
-			if (!canApplyDocumentDiscount.value && (props.additionalDiscount || 0) > 0) {
-				emit("update-additional-discount", 0)
+			const safeAmount = clampDiscountAmount(props.additionalDiscount || 0)
+			if (additionalDiscountType.value === "percentage") {
+				localAdditionalDiscount.value = clampDiscountPercentage(
+					amountToPercentage(safeAmount)
+				)
+			} else {
+				localAdditionalDiscount.value = safeAmount
 			}
 		}
 	},
 )
 
-// Clear stale additional discount if cart becomes fully protected
+// Clear stale additional discount when frozen snapshot no longer allows it
 watch(
-	() => [canApplyDocumentDiscount.value, props.items],
+	() => [
+		canApplyDocumentDiscount.value,
+		snapshotAvailableDiscountAmount.value,
+		snapshotAvailableDiscountPercentage.value,
+	],
 	([canApply]) => {
-		if (!canApply && localAdditionalDiscount.value > 0) {
-			localAdditionalDiscount.value = 0
-			emit("update-additional-discount", 0)
+		if (!canApply) {
+			if (localAdditionalDiscount.value > 0 || (props.additionalDiscount || 0) > 0) {
+				localAdditionalDiscount.value = 0
+				emit("update-additional-discount", 0)
+			}
+			return
+		}
+
+		if (additionalDiscountType.value === "percentage") {
+			const clampedPercentage = clampDiscountPercentage(localAdditionalDiscount.value)
+			if (clampedPercentage !== localAdditionalDiscount.value) {
+				localAdditionalDiscount.value = clampedPercentage
+				emit("update-additional-discount", roundCurrency(calculatedAdditionalDiscount.value || 0))
+			}
+		} else {
+			const clampedAmount = clampDiscountAmount(localAdditionalDiscount.value)
+			if (clampedAmount !== localAdditionalDiscount.value) {
+				localAdditionalDiscount.value = clampedAmount
+				emit("update-additional-discount", clampedAmount)
+			}
 		}
 	},
-	{ deep: true }
+	{ immediate: true }
 )
+
 </script>
