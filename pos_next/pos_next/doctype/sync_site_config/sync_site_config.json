@@ -1,0 +1,224 @@
+{
+ "actions": [],
+ "autoname": "field:branch_code",
+ "creation": "2026-04-05 00:00:00",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "site_role",
+  "branch_code",
+  "branch",
+  "enabled",
+  "section_break_central",
+  "central_url",
+  "sync_username",
+  "sync_password",
+  "column_break_central",
+  "push_interval_seconds",
+  "pull_masters_interval_seconds",
+  "pull_failover_interval_seconds",
+  "section_break_status",
+  "last_push_at",
+  "last_pull_masters_at",
+  "last_pull_failover_at",
+  "column_break_status",
+  "outbox_depth",
+  "last_sync_error",
+  "section_break_siblings",
+  "sibling_branches",
+  "section_break_central_only",
+  "registered_branch_url",
+  "notes",
+  "section_break_registry",
+  "synced_doctypes"
+ ],
+ "fields": [
+  {
+   "fieldname": "site_role",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Site Role",
+   "options": "Branch\nCentral",
+   "reqd": 1
+  },
+  {
+   "fieldname": "branch_code",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Branch Code",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "branch",
+   "fieldtype": "Link",
+   "label": "Branch",
+   "options": "Branch"
+  },
+  {
+   "default": "1",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled"
+  },
+  {
+   "depends_on": "eval:doc.site_role==\"Branch\"",
+   "fieldname": "section_break_central",
+   "fieldtype": "Section Break",
+   "label": "Central Connection"
+  },
+  {
+   "depends_on": "eval:doc.site_role==\"Branch\"",
+   "fieldname": "central_url",
+   "fieldtype": "Data",
+   "label": "Central URL",
+   "mandatory_depends_on": "eval:doc.site_role==\"Branch\""
+  },
+  {
+   "depends_on": "eval:doc.site_role==\"Branch\"",
+   "fieldname": "sync_username",
+   "fieldtype": "Data",
+   "label": "Sync Username",
+   "mandatory_depends_on": "eval:doc.site_role==\"Branch\""
+  },
+  {
+   "depends_on": "eval:doc.site_role==\"Branch\"",
+   "fieldname": "sync_password",
+   "fieldtype": "Password",
+   "label": "Sync Password",
+   "mandatory_depends_on": "eval:doc.site_role==\"Branch\""
+  },
+  {
+   "fieldname": "column_break_central",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "60",
+   "fieldname": "push_interval_seconds",
+   "fieldtype": "Int",
+   "label": "Push Interval (seconds)"
+  },
+  {
+   "default": "300",
+   "fieldname": "pull_masters_interval_seconds",
+   "fieldtype": "Int",
+   "label": "Pull Masters Interval (seconds)"
+  },
+  {
+   "default": "120",
+   "fieldname": "pull_failover_interval_seconds",
+   "fieldtype": "Int",
+   "label": "Pull Failover Interval (seconds)"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "section_break_status",
+   "fieldtype": "Section Break",
+   "label": "Status"
+  },
+  {
+   "fieldname": "last_push_at",
+   "fieldtype": "Datetime",
+   "label": "Last Push At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_pull_masters_at",
+   "fieldtype": "Datetime",
+   "label": "Last Pull Masters At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_pull_failover_at",
+   "fieldtype": "Datetime",
+   "label": "Last Pull Failover At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_status",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "outbox_depth",
+   "fieldtype": "Int",
+   "label": "Outbox Depth",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_sync_error",
+   "fieldtype": "Small Text",
+   "label": "Last Sync Error",
+   "read_only": 1
+  },
+  {
+   "collapsible": 1,
+   "depends_on": "eval:doc.site_role==\"Branch\"",
+   "fieldname": "section_break_siblings",
+   "fieldtype": "Section Break",
+   "label": "Sibling Branches (Read-Only)"
+  },
+  {
+   "fieldname": "sibling_branches",
+   "fieldtype": "Table",
+   "label": "Sibling Branches",
+   "options": "Sync Sibling Branch",
+   "read_only": 1
+  },
+  {
+   "collapsible": 1,
+   "depends_on": "eval:doc.site_role==\"Central\"",
+   "fieldname": "section_break_central_only",
+   "fieldtype": "Section Break",
+   "label": "Central-Only"
+  },
+  {
+   "fieldname": "registered_branch_url",
+   "fieldtype": "Data",
+   "label": "Registered Branch URL"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "section_break_registry",
+   "fieldtype": "Section Break",
+   "label": "Synced DocTypes Registry"
+  },
+  {
+   "fieldname": "synced_doctypes",
+   "fieldtype": "Table",
+   "label": "Synced DocTypes",
+   "options": "Sync DocType Rule"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-04-05 00:00:00",
+ "modified_by": "Administrator",
+ "module": "POS Next",
+ "name": "Sync Site Config",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
