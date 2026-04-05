@@ -61,6 +61,13 @@
 									>
 										{{ __('{0} failed', [invoice.retry_count]) }}
 									</span>
+									<span
+										v-if="invoice.data?.was_printed"
+										class="text-[10px] sm:text-xs px-2 py-0.5 sm:py-1 bg-amber-100 text-amber-800 rounded-full flex-shrink-0"
+										:title="__('Receipt was printed — customer may hold a physical copy')"
+									>
+										{{ __('Printed') }}
+									</span>
 								</div>
 								<div class="mt-2 flex flex-col gap-1 text-xs sm:text-sm text-gray-600">
 									<div class="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -87,8 +94,15 @@
 							<div class="flex items-center justify-end sm:justify-start gap-1 sm:gap-2">
 								<button
 									@click="editInvoice(invoice)"
-									class="p-1.5 sm:p-2 hover:bg-blue-50 rounded-lg transition-colors touch-manipulation"
-									:title="__('Edit Invoice')"
+									:disabled="isSyncing || invoice.data?.was_printed"
+									class="p-1.5 sm:p-2 hover:bg-blue-50 rounded-lg transition-colors touch-manipulation disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+									:title="
+										invoice.data?.was_printed
+											? __('Printed invoices cannot be edited — use Return to issue a credit note')
+											: isSyncing
+												? __('Sync in progress — editing disabled')
+												: __('Edit Invoice')
+									"
 								>
 									<svg class="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
@@ -105,9 +119,19 @@
 									</svg>
 								</button>
 								<button
+									@click="printInvoice(invoice)"
+									class="p-1.5 sm:p-2 hover:bg-green-50 rounded-lg transition-colors touch-manipulation"
+									:title="invoice.data?.was_printed ? __('Reprint receipt (already printed once)') : __('Print receipt')"
+								>
+									<svg class="w-4 h-4 sm:w-5 sm:h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/>
+									</svg>
+								</button>
+								<button
 									@click="deleteInvoice(invoice)"
-									class="p-1.5 sm:p-2 hover:bg-red-50 rounded-lg transition-colors touch-manipulation"
-									:title="__('Delete')"
+									:disabled="isSyncing"
+									class="p-1.5 sm:p-2 hover:bg-red-50 rounded-lg transition-colors touch-manipulation disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+									:title="isSyncing ? __('Sync in progress — deletion disabled') : __('Delete')"
 								>
 									<svg class="w-4 h-4 sm:w-5 sm:h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
@@ -249,6 +273,7 @@ const emit = defineEmits([
 	"sync-all",
 	"delete-invoice",
 	"edit-invoice",
+	"print-invoice",
 	"refresh",
 ])
 
@@ -312,8 +337,16 @@ function viewDetails(invoice) {
 }
 
 function editInvoice(invoice) {
+	if (props.isSyncing) return
+	if (invoice.data?.was_printed) return
 	emit("edit-invoice", invoice)
 	show.value = false
+}
+
+function printInvoice(invoice) {
+	// Emit the offline_id — the parent's handlePrintInvoice hydrates from
+	// sessionStorage first, then IndexedDB, so reprinting works across reloads.
+	emit("print-invoice", { name: invoice.offline_id })
 }
 
 function syncAll() {
@@ -321,6 +354,7 @@ function syncAll() {
 }
 
 function deleteInvoice(invoice) {
+	if (props.isSyncing) return
 	invoiceToDelete.value = invoice
 	showDeleteConfirm.value = true
 }

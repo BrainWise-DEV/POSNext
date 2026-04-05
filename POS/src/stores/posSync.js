@@ -415,6 +415,7 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 		// Actions
 		saveInvoiceOffline,
 		loadPendingInvoices,
+		updatePendingCount,
 		deleteOfflineInvoice,
 		syncAllPending,
 		preloadDataForOffline,

@@ -117,7 +117,7 @@ export const saveOfflineInvoice = async (invoiceData) => {
  */
 export const getOfflineInvoices = async () => {
 	try {
-		return await db.invoice_queue.filter((inv) => !inv.synced).toArray()
+		return await db.invoice_queue.filter((inv) => !inv.synced && !inv.superseded).toArray()
 	} catch (error) {
 		log.error("Failed to get offline invoices", error)
 		return []
@@ -148,7 +148,7 @@ export const getOfflineInvoiceByOfflineId = async (offlineId) => {
  */
 export const getOfflineInvoiceCount = async () => {
 	try {
-		return await db.invoice_queue.filter((inv) => !inv.synced).count()
+		return await db.invoice_queue.filter((inv) => !inv.synced && !inv.superseded).count()
 	} catch (error) {
 		log.error("Failed to get offline invoice count", error)
 		return 0

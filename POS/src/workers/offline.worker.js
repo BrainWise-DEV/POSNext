@@ -367,7 +367,7 @@ async function getOfflineInvoiceCount() {
 
 		const count = await db
 			.table("invoice_queue")
-			.filter((invoice) => invoice.synced === false)
+			.filter((invoice) => invoice.synced === false && !invoice.superseded)
 			.count()
 		return count
 	} catch (error) {
@@ -395,7 +395,7 @@ async function getOfflineInvoices() {
 
 		const invoices = await db
 			.table("invoice_queue")
-			.filter((invoice) => invoice.synced === false)
+			.filter((invoice) => invoice.synced === false && !invoice.superseded)
 			.toArray()
 		return invoices
 	} catch (error) {
@@ -1366,6 +1366,41 @@ async function deleteOfflineInvoice(id) {
 	}
 }
 
+// Mark an invoice row as superseded by an edit. The row stays in the queue
+// for audit but is excluded from sync and from the pending count.
+async function supersedeOfflineInvoice(id, replacedBy) {
+	try {
+		const db = await initDB()
+		await db.table("invoice_queue").update(id, {
+			superseded: true,
+			replaced_by: replacedBy || null,
+			superseded_at: Date.now(),
+		})
+		return { success: true }
+	} catch (error) {
+		log.error("Error superseding offline invoice", error)
+		throw error
+	}
+}
+
+// Mark a queued offline invoice as printed. Used by the print flow so
+// later edits can warn the cashier that a physical receipt is already out.
+async function markOfflineInvoicePrinted(offlineId) {
+	if (!offlineId) return { success: false }
+	try {
+		const db = await initDB()
+		const row = await db.table("invoice_queue").where("offline_id").equals(offlineId).first()
+		if (!row) return { success: false, reason: "not found" }
+		await db.table("invoice_queue").update(row.id, {
+			data: { ...row.data, was_printed: true, last_printed_at: Date.now() },
+		})
+		return { success: true }
+	} catch (error) {
+		log.error("Error marking offline invoice printed", error)
+		return { success: false, error: String(error) }
+	}
+}
+
 // Update stock quantities in cached items
 async function updateStockQuantities(stockUpdates) {
 	try {
@@ -1735,6 +1770,14 @@ self.onmessage = async (event) => {
 
 			case "DELETE_INVOICE":
 				result = await deleteOfflineInvoice(payload.id)
+				break
+
+			case "MARK_INVOICE_PRINTED":
+				result = await markOfflineInvoicePrinted(payload.offline_id)
+				break
+
+			case "SUPERSEDE_INVOICE":
+				result = await supersedeOfflineInvoice(payload.id, payload.replaced_by)
 				break
 
 			case "SET_SHOW_VARIANTS_AS_ITEMS":

@@ -2,6 +2,7 @@ import { call } from "@/utils/apiWrapper"
 import { logger } from "@/utils/logger"
 import { getOfflineReceiptPayload } from "@/utils/offline/offlineReceiptCache"
 import { getOfflineInvoiceByOfflineId } from "@/utils/offline/sync"
+import { offlineWorker } from "@/utils/offline/workerClient"
 import { printHTML as qzPrintHTML } from "@/utils/qzTray"
 
 const log = logger.create("PrintInvoice")
@@ -32,6 +33,19 @@ function derivePaidAmount(invoiceData) {
 /** Sales Invoices not yet on the server (offline queue / local receipt id). */
 export function isLocalOnlyInvoiceName(name) {
 	return typeof name === "string" && (name.startsWith("OFFLINE-") || name.startsWith("pos_offline_"))
+}
+
+/**
+ * Fire-and-forget: flag the queued invoice as printed so a later edit
+ * can warn the cashier a physical receipt is already in the customer's hands.
+ * Silently no-ops for synced / server-side invoices.
+ */
+function flagOfflineInvoicePrinted(invoiceName) {
+	if (!isLocalOnlyInvoiceName(invoiceName)) return
+	// Don't await — printing should never block on this bookkeeping call.
+	offlineWorker.markOfflineInvoicePrinted(invoiceName).catch((err) => {
+		log.warn("Failed to mark offline invoice printed:", err?.message || err)
+	})
 }
 
 /**
@@ -396,6 +410,7 @@ export async function silentPrintInvoiceFromDoc(invoiceData) {
 	const fullHTML = buildReceiptDocumentHTML(invoiceData, { includeControls: false })
 	await qzPrintHTML(fullHTML)
 	log.info(`Silent print (local receipt) for ${invoiceData?.name}`)
+	flagOfflineInvoicePrinted(invoiceData?.name)
 	return true
 }
 
@@ -466,5 +481,6 @@ export function printInvoiceCustom(invoiceData) {
 	printWindow.onload = () => {
 		setTimeout(() => printWindow.print(), 250)
 	}
+	flagOfflineInvoicePrinted(invoiceData?.name)
 	return true
 }

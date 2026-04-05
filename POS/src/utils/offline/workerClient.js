@@ -466,6 +466,14 @@ class OfflineWorkerClient {
 		return this.sendMessage("DELETE_INVOICE", { id })
 	}
 
+	async markOfflineInvoicePrinted(offlineId) {
+		return this.sendMessage("MARK_INVOICE_PRINTED", { offline_id: offlineId })
+	}
+
+	async supersedeOfflineInvoice(id, replacedBy) {
+		return this.sendMessage("SUPERSEDE_INVOICE", { id, replaced_by: replacedBy })
+	}
+
 	async setManualOffline(value) {
 		// Update centralized offline state immediately for responsive UI
 		offlineState.setManualOffline(value)
