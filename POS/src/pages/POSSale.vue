@@ -479,29 +479,31 @@
 			</div>
 
 			<!-- Payment Dialog -->
-		<PaymentDialog
-			v-model="uiStore.showPaymentDialog"
-			:grand-total="cartStore.grandTotal"
-			:subtotal="cartStore.subtotal"
-			:pos-profile="shiftStore.profileName"
-			:currency="shiftStore.profileCurrency"
-			:is-offline="offlineStore.isOffline"
-			:allow-partial-payment="posSettingsStore.allowPartialPayment"
-			:allow-credit-sale="posSettingsStore.allowCreditSale"
-			:allow-customer-credit-payment="posSettingsStore.allowCustomerCreditPayment"
-			:allow-write-off="posSettingsStore.allowWriteOffChange"
-			:write-off-limit="shiftStore.writeOffLimit"
-			:customer="cartStore.customer"
-			:company="shiftStore.profileCompany"
-			:additional-discount="cartStore.additionalDiscount"
-			:items="cartStore.invoiceItems"
-			:tax-amount="cartStore.totalTax"
-			:discount-amount="cartStore.totalDiscount"
-			:target-doctype="cartStore.targetDoctype"
-			:is-submitting="cartStore.isSubmitting"
-			@payment-completed="handlePaymentCompleted"
-			@update-additional-discount="handleAdditionalDiscountUpdate"
-		/>
+			<PaymentDialog
+				v-model="uiStore.showPaymentDialog"
+				:grand-total="paymentPreview?.normalized_grand_total ?? cartStore.grandTotal"
+				:subtotal="cartStore.subtotal"
+				:pos-profile="shiftStore.profileName"
+				:currency="shiftStore.profileCurrency"
+				:is-offline="offlineStore.isOffline"
+				:allow-partial-payment="posSettingsStore.allowPartialPayment"
+				:allow-credit-sale="posSettingsStore.allowCreditSale"
+				:allow-customer-credit-payment="posSettingsStore.allowCustomerCreditPayment"
+				:allow-write-off="posSettingsStore.allowWriteOffChange"
+				:write-off-limit="shiftStore.writeOffLimit"
+				:customer="cartStore.customer"
+				:company="shiftStore.profileCompany"
+				:additional-discount="cartStore.additionalDiscount"
+				:items="cartStore.invoiceItems"
+				:tax-amount="cartStore.totalTax"
+				:discount-amount="paymentPreview?.normalized_discount_total ?? cartStore.totalDiscount"
+				:available-discount-amount="paymentPreview?.available_discount_amount ?? 0"
+				:available-discount-percentage="paymentPreview?.available_discount_percentage ?? 0"
+				:target-doctype="cartStore.targetDoctype"
+				:is-submitting="cartStore.isSubmitting || loadingPaymentPreview"
+				@payment-completed="handlePaymentCompleted"
+				@update-additional-discount="handleAdditionalDiscountUpdate"
+			/>
 
 			<!-- Customer Selection Dialog -->
 			<CustomerDialog
@@ -1101,6 +1103,8 @@ const logoutAfterClose = ref(false);
 const editCustomer = ref(null); // Customer being edited (null for create mode)
 const showClearCacheDialog = ref(false);
 const clearCacheOverlayRef = ref(null);
+const paymentPreview = ref(null);
+const loadingPaymentPreview = ref(false);
 
 // Debounce timer for offer reapplication
 const offerReapplyTimer = ref(null);
@@ -1637,6 +1641,15 @@ watch(
 	}
 );
 
+watch(
+	() => uiStore.showPaymentDialog,
+	(isOpen) => {
+		if (!isOpen) {
+			resetPaymentPreview();
+		}
+	}
+);
+
 onUnmounted(() => {
 	window.removeEventListener("resize", () => {
 		uiStore.setWindowWidth(window.innerWidth);
@@ -2088,6 +2101,67 @@ function handleAdditionalDiscountUpdate(discountAmount) {
 	cartStore.rebuildIncrementalCache()
 }
 
+function resetPaymentPreview() {
+	paymentPreview.value = null;
+	loadingPaymentPreview.value = false;
+}
+
+function buildPaymentPreviewPayload() {
+	const customerValue = cartStore.customer?.name || cartStore.customer;
+	const preparedItems = cartStore.formatItemsForSubmission(cartStore.invoiceItems);
+
+	return {
+		doctype: "Sales Invoice",
+		pos_profile: cartStore.posProfile,
+		customer: customerValue || shiftStore.profileCustomer,
+		company: shiftStore.profileCompany,
+		currency: shiftStore.profileCurrency,
+		is_pos: 1,
+		update_stock: 1,
+		set_warehouse: shiftStore.profileWarehouse,
+		apply_discount_on: "Net Total",
+		discount_amount: Number(cartStore.additionalDiscount || 0),
+		additional_discount_percentage: 0,
+		items: preparedItems,
+	};
+}
+
+async function fetchFrozenPaymentPreview() {
+	if (offlineStore.isOffline) {
+		resetPaymentPreview();
+		return null;
+	}
+
+	const payload = buildPaymentPreviewPayload();
+	loadingPaymentPreview.value = true;
+
+	try {
+		const result = await call("pos_next.api.invoices.preview_additional_discount", {
+			data: payload,
+		});
+
+		const preview = result?.message || result || {};
+
+		paymentPreview.value = {
+			can_apply_document_discount: Boolean(preview.can_apply_document_discount),
+			available_discount_amount: Number(preview.available_discount_amount || 0),
+			available_discount_percentage: Number(preview.available_discount_percentage || 0),
+			normalized_discount_total: Number(preview.normalized_discount_total || 0),
+			normalized_grand_total: Number(
+				preview.normalized_grand_total || cartStore.grandTotal || 0
+			),
+		};
+
+		return paymentPreview.value;
+	} catch (error) {
+		log.error("Failed to preview additional discount:", error);
+		resetPaymentPreview();
+		return null;
+	} finally {
+		loadingPaymentPreview.value = false;
+	}
+}
+
 function handleCustomerSelected(selectedCustomer) {
 	if (selectedCustomer) {
 		cartStore.setCustomer(selectedCustomer);
@@ -2115,7 +2189,7 @@ function handleEditCustomer(customer) {
 	uiStore.showCreateCustomerDialog = true;
 }
 
-function handleProceedToPayment() {
+async function handleProceedToPayment() {
 	if (cartStore.isEmpty) {
 		showWarning(__("Please add items to cart before proceeding to payment"));
 		return;
@@ -2129,6 +2203,13 @@ function handleProceedToPayment() {
 		return;
 	}
 
+	if (typeof cartStore.sanitizeDocumentDiscountState === "function") {
+		cartStore.sanitizeDocumentDiscountState();
+	} else if (typeof cartStore.sanitizeAdditionalDiscount === "function") {
+		cartStore.sanitizeAdditionalDiscount();
+	}
+
+	await fetchFrozenPaymentPreview();
 	uiStore.showPaymentDialog = true;
 }
 
@@ -2196,14 +2277,18 @@ async function handlePaymentCompleted(paymentData) {
 		if (paymentData.write_off_amount && paymentData.write_off_amount > 0) {
 			cartStore.setWriteOffAmount(paymentData.write_off_amount);
 		}
-		let safeAdditionalDiscount = 0
+		let safeAdditionalDiscount = Number(
+			paymentData.additional_discount ??
+			cartStore.additionalDiscount ??
+			0
+		)
+
+		cartStore.additionalDiscount = safeAdditionalDiscount
 
 		if (typeof cartStore.sanitizeDocumentDiscountState === "function") {
 			safeAdditionalDiscount = cartStore.sanitizeDocumentDiscountState()
 		} else if (typeof cartStore.sanitizeAdditionalDiscount === "function") {
 			safeAdditionalDiscount = cartStore.sanitizeAdditionalDiscount()
-		} else {
-			safeAdditionalDiscount = Number(cartStore.additionalDiscount || 0)
 		}
 
 		if (!cartStore.canApplyDocumentDiscount) {
@@ -2211,7 +2296,7 @@ async function handlePaymentCompleted(paymentData) {
 			cartStore.additionalDiscount = 0
 			cartStore.rebuildIncrementalCache()
 		}
-
+		
 		// Delete draft if it exists (since we're submitting/saving invoice)
 		const draftIdToDelete = cartStore.currentDraftId;
 
