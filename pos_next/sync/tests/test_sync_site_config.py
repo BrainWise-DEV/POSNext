@@ -89,7 +89,9 @@ def test_branch_code_unique():
 		raised = False
 		try:
 			doc2.insert(ignore_permissions=True)
-		except Exception:
+		except frappe.exceptions.DuplicateEntryError:
+			raised = True
+		except frappe.exceptions.UniqueValidationError:
 			raised = True
 		assert raised, "Duplicate branch_code should be rejected"
 		print("PASS: test_branch_code_unique")

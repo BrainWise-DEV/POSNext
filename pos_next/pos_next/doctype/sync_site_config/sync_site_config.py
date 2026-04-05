@@ -26,19 +26,19 @@ class SyncSiteConfig(Document):
 		"""A Branch-role record must be singleton; Central allows many."""
 		if self.site_role != "Branch":
 			return
-		existing = frappe.db.sql(
-			"""
-			SELECT name FROM `tabSync Site Config`
-			WHERE site_role = 'Branch' AND name != %s
-			""",
-			(self.name or "",),
-		)
+		# On insert self.name may not yet be set (before autoname runs);
+		# on update self.name is the existing record's name. Either way,
+		# we look for other Branch rows excluding this exact name.
+		filters = {"site_role": "Branch"}
+		if self.name:
+			filters["name"] = ("!=", self.name)
+		existing = frappe.db.get_value("Sync Site Config", filters, "name")
 		if existing:
 			frappe.throw(
 				_(
 					"Only one Sync Site Config with site_role=Branch is allowed "
 					"per site. Existing record: {0}"
-				).format(existing[0][0]),
+				).format(existing),
 				title=_("Branch Config Already Exists"),
 			)
 
