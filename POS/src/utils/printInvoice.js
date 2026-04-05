@@ -15,6 +15,19 @@ function formatCurrency(amount) {
 	return Number.parseFloat(amount || 0).toFixed(2)
 }
 
+/**
+ * Fall back to summing payment rows when paid_amount is not set —
+ * offline invoices lack paid_amount until server submission.
+ */
+function derivePaidAmount(invoiceData) {
+	if (invoiceData.paid_amount != null) return invoiceData.paid_amount
+	if (!Array.isArray(invoiceData.payments)) return 0
+	return invoiceData.payments.reduce(
+		(sum, p) => sum + (Number.parseFloat(p.amount) || 0),
+		0,
+	)
+}
+
 /** Sales Invoices not yet on the server (offline queue / local receipt id). */
 export function isLocalOnlyInvoiceName(name) {
 	return typeof name === "string" && (name.startsWith("OFFLINE-") || name.startsWith("pos_offline_"))
@@ -63,6 +76,10 @@ const RECEIPT_STYLES = `
 		display: flex; justify-content: space-between; font-size: 13px; font-weight: bold;
 		border: 1px solid #000; padding: 8px; margin-top: 8px; border-radius: 4px;
 	}
+	.offline-badge {
+		text-align: center; font-size: 11px; font-weight: bold;
+		border: 1px dashed #000; padding: 4px; margin-bottom: 10px;
+	}
 	.footer { text-align: center; margin-top: 20px; padding-top: 10px; border-top: 2px dashed #000; font-size: 11px; }
 	@media print {
 		@page { size: 80mm auto; margin: 0; }
@@ -76,14 +93,15 @@ const RECEIPT_STYLES = `
  */
 export function buildReceiptHTML(invoiceData) {
 	const items = invoiceData.items || []
+	const paidAmount = derivePaidAmount(invoiceData)
 	const itemsHtml = items
 		.map((item) => {
 			const hasDiscount =
 				(item.discount_percentage && Number.parseFloat(item.discount_percentage) > 0) ||
 				(item.discount_amount && Number.parseFloat(item.discount_amount) > 0)
 			const isFree = item.is_free_item
-			const qty = item.quantity || item.qty
-			const displayRate = item.price_list_rate || item.rate
+			const qty = item.quantity || item.qty || 0
+			const displayRate = item.price_list_rate || item.rate || 0
 			const subtotal = qty * displayRate
 			return `
 						<div class="item-row">
@@ -105,10 +123,12 @@ export function buildReceiptHTML(invoiceData) {
 					<div style="font-size: 12px;">${invoiceData.header || __("TAX INVOICE")}</div>
 				</div>
 
+				${invoiceData.is_offline ? `<div class="offline-badge">${__("OFFLINE — PENDING SYNC")}</div>` : ""}
+
 				<div class="invoice-info">
 					<div><span>${__("Invoice #:")}</span><span><strong>${invoiceData.name}</strong></span></div>
 					<div><span>${__("Date:")}</span><span>${new Date(invoiceData.posting_date || Date.now()).toLocaleString()}</span></div>
-					${invoiceData.customer_name ? `<div><span>${__("Customer:")}</span><span>${invoiceData.customer_name}</span></div>` : ""}
+					${invoiceData.customer_name || invoiceData.customer ? `<div><span>${__("Customer:")}</span><span>${invoiceData.customer_name || invoiceData.customer}</span></div>` : ""}
 					${(invoiceData.status === "Partly Paid" || (invoiceData.outstanding_amount && invoiceData.outstanding_amount > 0 && invoiceData.outstanding_amount < invoiceData.grand_total)) ? `<div class="partial-status"><span>${__("Status:")}</span><span>${__("PARTIAL PAYMENT")}</span></div>` : ""}
 				</div>
 
@@ -129,7 +149,7 @@ export function buildReceiptHTML(invoiceData) {
 				<div class="payments">
 					<div style="font-weight: bold; margin-bottom: 5px; font-size: 12px;">${__("Payments:")}</div>
 					${invoiceData.payments.map((p) => `<div class="payment-row"><span>${p.mode_of_payment}:</span><span>${formatCurrency(p.amount)}</span></div>`).join("")}
-					<div class="payment-row total-paid"><span>${__("Total Paid:")}</span><span>${formatCurrency(invoiceData.paid_amount || 0)}</span></div>
+					<div class="payment-row total-paid"><span>${__("Total Paid:")}</span><span>${formatCurrency(paidAmount)}</span></div>
 					${invoiceData.change_amount && invoiceData.change_amount > 0 ? `<div class="payment-row" style="font-weight: bold; margin-top: 5px;"><span>${__("Change:")}</span><span>${formatCurrency(invoiceData.change_amount)}</span></div>` : ""}
 					${invoiceData.outstanding_amount && invoiceData.outstanding_amount > 0 ? `<div class="outstanding-row"><span>${__("BALANCE DUE:")}</span><span>${formatCurrency(invoiceData.outstanding_amount)}</span></div>` : ""}
 				</div>` : ""}
@@ -377,12 +397,15 @@ export async function printWithSilentFallback(invoiceData, printFormat = null) {
 // ============================================================================
 
 /**
- * Last-resort receipt renderer. Builds a complete HTML document from the
- * invoice data and writes it into a new window. Only triggered when the
- * browser blocks the /printview popup.
+ * Renders the receipt locally in a popup window. Used offline, for pending
+ * local-only invoices, and as the fallback when /printview is unavailable.
  */
 export function printInvoiceCustom(invoiceData) {
 	const printWindow = window.open("", "_blank", "width=350,height=600")
+	if (!printWindow) {
+		log.error("Cannot open print window — popup blocked.")
+		throw new Error("Popup blocked — check your browser settings.")
+	}
 
 	const printContent = buildReceiptDocumentHTML(invoiceData, { includeControls: true })
 
@@ -391,4 +414,5 @@ export function printInvoiceCustom(invoiceData) {
 	printWindow.onload = () => {
 		setTimeout(() => printWindow.print(), 250)
 	}
+	return true
 }

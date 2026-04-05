@@ -2060,6 +2060,7 @@ async function handlePaymentCompleted(paymentData) {
 			const offlinePrintDoc = {
 				name: offlineReceiptName,
 				doctype: "Sales Invoice",
+				is_offline: true,
 				pos_profile: cartStore.posProfile,
 				posting_date: new Date().toISOString().slice(0, 10),
 				company: shiftStore.profileCompany || undefined,
@@ -2101,7 +2102,7 @@ async function handlePaymentCompleted(paymentData) {
 					);
 				} catch (error) {
 					log.error("Offline auto-print error:", error);
-					uiStore.showSuccess(offlineReceiptName, cartStore.grandTotal, paymentData.paid_amount);
+					uiStore.showSuccess(offlineReceiptName, grandTotal, paymentData.paid_amount);
 					showWarning(
 						__("Invoice {0} saved offline but print failed — open Print from the success dialog", [
 							offlineReceiptName,
@@ -2109,7 +2110,7 @@ async function handlePaymentCompleted(paymentData) {
 					);
 				}
 			} else {
-				uiStore.showSuccess(offlineReceiptName, cartStore.grandTotal, paymentData.paid_amount);
+				uiStore.showSuccess(offlineReceiptName, grandTotal, paymentData.paid_amount);
 				showSuccess(__("Invoice saved offline. Will sync when online"));
 			}
 		} else {
