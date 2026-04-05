@@ -1118,7 +1118,7 @@ def preview_additional_discount(data):
 
     return _preview_additional_discount(invoice_doc, pos_settings_cache)
 
-
+@frappe.whitelist()
 def update_invoice(data):
     """Create or update invoice draft (Step 1)."""
     try:
