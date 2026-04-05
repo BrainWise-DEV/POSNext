@@ -43,6 +43,8 @@ export const usePOSUIStore = defineStore("posUI", () => {
 	const lastInvoiceName = ref("")
 	const lastInvoiceTotal = ref(0)
 	const lastPaidAmount = ref(0)
+	/** Full receipt payload for invoices not yet on the server (offline queue) */
+	const lastOfflinePrintDoc = ref(null)
 
 	// Customer dialog state
 	const initialCustomerName = ref("")
@@ -102,6 +104,14 @@ export const usePOSUIStore = defineStore("posUI", () => {
 		lastInvoiceTotal.value = total
 		lastPaidAmount.value = paidAmount !== null ? paidAmount : total
 		showSuccessDialog.value = true
+	}
+
+	function setLastOfflinePrintDoc(doc) {
+		lastOfflinePrintDoc.value = doc
+	}
+
+	function clearLastOfflinePrintDoc() {
+		lastOfflinePrintDoc.value = null
 	}
 
 	function setInitialCustomerName(name) {
@@ -164,6 +174,7 @@ export const usePOSUIStore = defineStore("posUI", () => {
 		showItemSelectionDialog.value = false
 		showErrorDialog.value = false
 		clearError()
+		lastOfflinePrintDoc.value = null
 	}
 
 	return {
@@ -196,6 +207,7 @@ export const usePOSUIStore = defineStore("posUI", () => {
 		lastInvoiceName,
 		lastInvoiceTotal,
 		lastPaidAmount,
+		lastOfflinePrintDoc,
 		initialCustomerName,
 		mobileActiveTab,
 		windowWidth,
@@ -212,6 +224,8 @@ export const usePOSUIStore = defineStore("posUI", () => {
 		showError,
 		clearError,
 		showSuccess,
+		setLastOfflinePrintDoc,
+		clearLastOfflinePrintDoc,
 		setInitialCustomerName,
 		setLeftPanelWidth,
 		setResizing,

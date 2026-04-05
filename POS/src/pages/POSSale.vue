@@ -1028,8 +1028,14 @@ import { useUserData } from "@/data/user";
 import { parseError } from "@/utils/errorHandler";
 import { cleanupUserSession } from "@/utils/sessionCleanup";
 import { offlineWorker } from "@/utils/offline/workerClient";
+import { cacheOfflineReceiptPayload } from "@/utils/offline/offlineReceiptCache";
 import { cacheInvoiceHistory, getCachedInvoiceHistory } from "@/utils/offline/sync";
-import { printInvoice, printInvoiceByName, printWithSilentFallback } from "@/utils/printInvoice";
+import {
+	hydrateLocalOnlyInvoice,
+	printInvoice,
+	printInvoiceByName,
+	printWithSilentFallback,
+} from "@/utils/printInvoice";
 import { qzConnected, connect as qzConnect, disconnect as qzDisconnect } from "@/utils/qzTray";
 
 import { Button, Dialog, createResource } from "frappe-ui";
@@ -2042,12 +2048,39 @@ async function handlePaymentCompleted(paymentData) {
 				write_off_amount: paymentData.write_off_amount || 0,
 			};
 
+			const offlineReceiptName = `OFFLINE-${Date.now()}`;
+			const paidAmount = paymentData.paid_amount ?? cartStore.grandTotal ?? 0;
+			const grandTotal = cartStore.grandTotal || 0;
+			const customerLabel =
+				cartStore.customer?.customer_name ||
+				cartStore.customer?.name ||
+				customerValue ||
+				shiftStore.profileCustomer;
+
+			const offlinePrintDoc = {
+				name: offlineReceiptName,
+				doctype: "Sales Invoice",
+				pos_profile: cartStore.posProfile,
+				posting_date: new Date().toISOString().slice(0, 10),
+				company: shiftStore.profileCompany || undefined,
+				customer_name: customerLabel,
+				items: preparedItems.map((item) => ({
+					...item,
+					quantity: item.qty ?? item.quantity,
+				})),
+				grand_total: grandTotal,
+				total_taxes_and_charges: cartStore.totalTax,
+				payments: invoiceData.payments,
+				paid_amount: paidAmount,
+				change_amount: paymentData.change_amount || 0,
+				outstanding_amount: Math.max(0, grandTotal - paidAmount),
+				status: Math.max(0, grandTotal - paidAmount) < 0.01 ? "Paid" : "Unpaid",
+				docstatus: 0,
+			};
+			uiStore.setLastOfflinePrintDoc(offlinePrintDoc);
+			cacheOfflineReceiptPayload(offlineReceiptName, offlinePrintDoc);
+
 			await offlineStore.saveInvoiceOffline(invoiceData);
-			uiStore.showSuccess(
-				`OFFLINE-${Date.now()}`,
-				cartStore.grandTotal,
-				paymentData.paid_amount
-			);
 			uiStore.showPaymentDialog = false;
 			cartStore.clearCart();
 			// Reset cart hash after successful payment
@@ -2058,7 +2091,27 @@ async function handlePaymentCompleted(paymentData) {
 				draftsStore.deleteDraft(draftIdToDelete);
 			}
 
-			showSuccess(__("Invoice saved offline. Will sync when online"));
+			if (shiftStore.autoPrintEnabled || posSettingsStore.silentPrint) {
+				try {
+					await handlePrintInvoice({ name: offlineReceiptName });
+					showSuccess(
+						__("Invoice {0} saved offline and sent to printer — will sync when online", [
+							offlineReceiptName,
+						]),
+					);
+				} catch (error) {
+					log.error("Offline auto-print error:", error);
+					uiStore.showSuccess(offlineReceiptName, cartStore.grandTotal, paymentData.paid_amount);
+					showWarning(
+						__("Invoice {0} saved offline but print failed — open Print from the success dialog", [
+							offlineReceiptName,
+						]),
+					);
+				}
+			} else {
+				uiStore.showSuccess(offlineReceiptName, cartStore.grandTotal, paymentData.paid_amount);
+				showSuccess(__("Invoice saved offline. Will sync when online"));
+			}
 		} else {
 			// Get item codes from cart before clearing
 			const soldItemCodes = cartStore.invoiceItems.map((item) => item.item_code);
@@ -2066,6 +2119,7 @@ async function handlePaymentCompleted(paymentData) {
 			const result = await cartStore.submitInvoice();
 
 			if (result) {
+				uiStore.clearLastOfflinePrintDoc();
 				const invoiceName = result.name || result.message?.name || __("Unknown");
 				const invoiceTotal = result.grand_total || result.total || 0;
 				const paidAmount = paymentData.paid_amount || invoiceTotal;
@@ -2780,6 +2834,16 @@ function handleViewInvoice(invoice) {
 // Centralized print handler - uses printInvoice.js utilities
 async function handlePrintInvoice(invoiceData) {
 	try {
+		invoiceData = hydrateLocalOnlyInvoice(invoiceData || {});
+		const offlineSnapshot = uiStore.lastOfflinePrintDoc;
+		if (
+			invoiceData?.name &&
+			offlineSnapshot?.name === invoiceData.name &&
+			offlineSnapshot.items?.length > 0
+		) {
+			invoiceData = offlineSnapshot;
+		}
+
 		// Silent print path — send directly to thermal printer via QZ Tray
 		if (posSettingsStore.silentPrint) {
 			const result = await printWithSilentFallback(invoiceData);

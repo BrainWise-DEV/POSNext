@@ -279,7 +279,9 @@
 import { useFormatters } from "@/composables/useFormatters"
 import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency"
 import { getInvoiceStatusColor } from "@/utils/invoice"
+import { getOfflineReceiptPayload } from "@/utils/offline/offlineReceiptCache"
 import { logger } from "@/utils/logger"
+import { isLocalOnlyInvoiceName } from "@/utils/printInvoice"
 import { Button, Dialog, call } from "frappe-ui"
 import { ref, watch, nextTick, computed } from "vue"
 
@@ -368,6 +370,23 @@ async function loadInvoiceDetails() {
 
 	loading.value = true
 	try {
+		if (isLocalOnlyInvoiceName(props.invoiceName)) {
+			const cached = getOfflineReceiptPayload(props.invoiceName)
+			if (cached) {
+				const result = JSON.parse(JSON.stringify(cached))
+				if (result.items) {
+					result.items = result.items.map((item) => ({
+						...item,
+						quantity: item.quantity ?? item.qty,
+					}))
+				}
+				invoiceData.value = result
+				return
+			}
+			invoiceData.value = null
+			return
+		}
+
 		const result = await call("pos_next.api.invoices.get_invoice", {
 			invoice_name: props.invoiceName,
 		})
