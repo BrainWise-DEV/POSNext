@@ -1,0 +1,48 @@
+{
+ "actions": [],
+ "creation": "2026-04-05 00:00:00",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "branch_code",
+  "branch",
+  "branch_url"
+ ],
+ "fields": [
+  {
+   "fieldname": "branch_code",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Branch Code",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "branch",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Branch",
+   "options": "Branch",
+   "read_only": 1
+  },
+  {
+   "fieldname": "branch_url",
+   "fieldtype": "Data",
+   "label": "Branch URL",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-04-05 00:00:00",
+ "modified_by": "Administrator",
+ "module": "POS Next",
+ "name": "Sync Sibling Branch",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "branch_code",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 0
+}
