@@ -1,0 +1,81 @@
+{
+ "actions": [],
+ "creation": "2026-04-05 00:00:00",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "doctype_name",
+  "direction",
+  "cdc_strategy",
+  "conflict_rule",
+  "priority",
+  "batch_size",
+  "enabled"
+ ],
+ "fields": [
+  {
+   "fieldname": "doctype_name",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "DocType",
+   "options": "DocType",
+   "reqd": 1
+  },
+  {
+   "fieldname": "direction",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Direction",
+   "options": "Central→Branch\nBranch→Central\nBidirectional",
+   "reqd": 1
+  },
+  {
+   "fieldname": "cdc_strategy",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "CDC Strategy",
+   "options": "Outbox\nWatermark",
+   "reqd": 1
+  },
+  {
+   "fieldname": "conflict_rule",
+   "fieldtype": "Select",
+   "label": "Conflict Rule",
+   "options": "Last-Write-Wins\nCentral-Wins\nBranch-Wins\nField-Level-LWW\nManual",
+   "reqd": 1
+  },
+  {
+   "default": "100",
+   "fieldname": "priority",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Priority"
+  },
+  {
+   "default": "100",
+   "fieldname": "batch_size",
+   "fieldtype": "Int",
+   "label": "Batch Size"
+  },
+  {
+   "default": "1",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Enabled"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-04-05 00:00:00",
+ "modified_by": "Administrator",
+ "module": "POS Next",
+ "name": "Sync DocType Rule",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "priority",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 0
+}
