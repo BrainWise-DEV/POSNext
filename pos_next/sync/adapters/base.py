@@ -41,10 +41,12 @@ class BaseSyncAdapter:
 		if frappe.db.exists(self.doctype, name):
 			doc = frappe.get_doc(self.doctype, name)
 			doc.update(payload)
+			_set_sync_flags(doc)
 			doc.save(ignore_permissions=True)
 		else:
 			payload_with_doctype = {"doctype": self.doctype, **payload}
 			doc = frappe.get_doc(payload_with_doctype)
+			_set_sync_flags(doc)
 			doc.insert(ignore_permissions=True)
 		return doc.name
 
@@ -59,3 +61,10 @@ class BaseSyncAdapter:
 	def pre_apply_transform(self, payload):
 		"""Transform payload before apply. Default: identity."""
 		return payload
+
+
+def _set_sync_flags(doc):
+	"""Bypass validations for synced data — it was valid on the source site."""
+	doc.flags.ignore_validate = True
+	doc.flags.ignore_links = True
+	doc.flags.ignore_mandatory = True

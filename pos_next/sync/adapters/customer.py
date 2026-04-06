@@ -39,17 +39,21 @@ class CustomerAdapter(BaseSyncAdapter):
 				return existing
 
 		# Standard upsert by name
+		from pos_next.sync.adapters.base import _set_sync_flags
+
 		if name and frappe.db.exists("Customer", name):
 			doc = frappe.get_doc("Customer", name)
 			for key, val in cleaned.items():
 				if key not in ("doctype", "name") and not isinstance(val, list):
 					doc.set(key, val)
+			_set_sync_flags(doc)
 			doc.save(ignore_permissions=True)
 			return doc.name
 		else:
 			# Customer uses autoname — don't force central's name
 			cleaned.pop("name", None)
 			doc = frappe.get_doc({"doctype": "Customer", **cleaned})
+			_set_sync_flags(doc)
 			doc.insert(ignore_permissions=True)
 			return doc.name
 

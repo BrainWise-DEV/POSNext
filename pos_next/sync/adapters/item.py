@@ -52,15 +52,18 @@ class ItemAdapter(BaseSyncAdapter):
 
 		payload = self.pre_apply_transform(payload)
 
+		from pos_next.sync.adapters.base import _set_sync_flags
+
 		if frappe.db.exists("Item", name):
 			doc = frappe.get_doc("Item", name)
-			# Update simple fields
 			for key, val in payload.items():
 				if not isinstance(val, list) and key not in ("doctype", "name"):
 					doc.set(key, val)
+			_set_sync_flags(doc)
 			doc.save(ignore_permissions=True)
 		else:
 			doc = frappe.get_doc({"doctype": "Item", **payload})
+			_set_sync_flags(doc)
 			doc.insert(ignore_permissions=True)
 		return doc.name
 

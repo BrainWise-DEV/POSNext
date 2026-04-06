@@ -32,6 +32,8 @@ class ItemPriceAdapter(BaseSyncAdapter):
 		if cleaned.get("uom"):
 			filters["uom"] = cleaned["uom"]
 
+		from pos_next.sync.adapters.base import _set_sync_flags
+
 		existing = frappe.db.get_value("Item Price", filters, "name")
 
 		if existing:
@@ -39,12 +41,14 @@ class ItemPriceAdapter(BaseSyncAdapter):
 			for key, val in cleaned.items():
 				if key not in ("doctype", "name") and not isinstance(val, list):
 					doc.set(key, val)
+			_set_sync_flags(doc)
 			doc.save(ignore_permissions=True)
 			return doc.name
 		else:
 			# Remove central's name — let local auto-generate
 			cleaned.pop("name", None)
 			doc = frappe.get_doc({"doctype": "Item Price", **cleaned})
+			_set_sync_flags(doc)
 			doc.insert(ignore_permissions=True)
 			return doc.name
 
