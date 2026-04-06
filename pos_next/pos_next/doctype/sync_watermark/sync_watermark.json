@@ -1,0 +1,30 @@
+{
+ "actions": [],
+ "autoname": "field:doctype_name",
+ "creation": "2026-04-05 00:00:00",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": ["doctype_name", "last_modified", "last_pulled_at", "records_pulled"],
+ "fields": [
+  {"fieldname": "doctype_name", "fieldtype": "Link", "in_list_view": 1, "label": "DocType", "options": "DocType", "reqd": 1, "unique": 1},
+  {"fieldname": "last_modified", "fieldtype": "Datetime", "in_list_view": 1, "label": "Last Modified"},
+  {"fieldname": "last_pulled_at", "fieldtype": "Datetime", "in_list_view": 1, "label": "Last Pulled At"},
+  {"default": "0", "fieldname": "records_pulled", "fieldtype": "Int", "in_list_view": 1, "label": "Records Pulled"}
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-04-05 00:00:00",
+ "modified_by": "Administrator",
+ "module": "POS Next",
+ "name": "Sync Watermark",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {"create": 1, "delete": 1, "read": 1, "report": 1, "role": "System Manager", "write": 1}
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0
+}
