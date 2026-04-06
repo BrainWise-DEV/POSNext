@@ -76,6 +76,11 @@ class SyncSiteConfig(Document):
 				title=_("Invalid Branch Code"),
 			)
 
+	def after_insert(self):
+		"""Seed the synced_doctypes registry with default rules."""
+		from pos_next.sync.seeds import apply_seeds_to_config
+		apply_seeds_to_config(self)
+
 	@frappe.whitelist()
 	def test_connection(self):
 		"""
