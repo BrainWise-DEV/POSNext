@@ -744,7 +744,93 @@ Bench script stands up `branch.test` + `central.test` sites; seed fixtures insta
 
 ---
 
-## 15. Open items for sub-specs
+## 15. Dev Environment Topology
+
+### 15.1 Two-bench setup
+
+Development and integration testing uses two separate Frappe benches on the same machine, each on its own port:
+
+```
+┌─────────────────────────────────────────┐     ┌─────────────────────────────────────────┐
+│  frappe-bench (port 8000)               │     │  frappe-bench-16 (port 8001)            │
+│  Frappe v15 · Python 3.10               │     │  Frappe v16+ · Python 3.14              │
+│                                         │     │                                         │
+│  Site: pos-central                      │     │  Site: dev.pos                           │
+│  Role: CENTRAL                          │     │  Role: BRANCH                            │
+│  ERPNext: v15                           │     │  ERPNext: v16                             │
+│  pos_next: feat/sync-foundation         │     │  pos_next: feat/sync-foundation           │
+│                                         │     │                                         │
+│  Sync Site Config:                      │     │  Sync Site Config:                       │
+│    site_role = Central                  │     │    site_role = Branch                     │
+│    branch_code = CAI                    │     │    branch_code = CAI                      │
+│    registered_branch_url =              │     │    central_url = http://localhost:8000     │
+│      http://localhost:8001              │     │    sync_username = Administrator           │
+└─────────────────────────────────────────┘     └─────────────────────────────────────────┘
+              ▲                                                │
+              │          HTTP (localhost, different ports)      │
+              └────────────────────────────────────────────────┘
+```
+
+**Why two benches, not two sites on one bench:** Different Frappe/ERPNext major versions (v15 vs v16) cannot coexist on a single bench. Two benches also give us separate Redis, separate workers, and separate ports — closer to production topology.
+
+**No Host header routing needed:** Each bench binds a different port (`webserver_port` in `common_site_config.json`), so `http://localhost:8000` always resolves to frappe-bench and `http://localhost:8001` to frappe-bench-16.
+
+**`POS_NEXT_SYNC_ALLOW_HTTP=1`:** Required in dev since transport is `http://localhost`. This env var bypasses the HTTPS enforcement on `central_url` in Sync Site Config validation. Never set in production.
+
+### 15.2 Version-agnostic sync protocol
+
+The sync HTTP API is a **stable contract** independent of Frappe/ERPNext version. The same pos_next codebase runs on both v15 and v16.
+
+**Design principles:**
+
+- **Single codebase:** pos_next already handles v15/v16 differences at runtime (e.g., `fix: support ERPNext v15/v16 change amount GL entry method`). The sync module follows the same pattern — no version-specific forks.
+- **pos_next-owned endpoints:** All sync API lives under `pos_next.sync.api.*`, not Frappe's generic `/api/resource/`. This isolates the protocol from Frappe ORM version differences.
+- **Explicit payload schema:** Adapters serialize using explicit field lists defined by pos_next, not Frappe's `as_dict()`. Internal/version-specific fields are stripped.
+- **Runtime version detection:** Where Frappe/ERPNext field names or behaviors differ between versions, pos_next detects the running version at runtime and adapts (e.g., `hasattr(doc, 'field_v16') or doc.field_v15`).
+
+This means a v15 central can sync with a v16 branch and vice versa — branches in the field may upgrade at different times.
+
+### 15.3 Bootstrap procedure
+
+To set up a new branch site for sync testing:
+
+```bash
+# 1. Ensure the bench has Frappe + ERPNext + pos_next installed
+#    pos_next must be on the feat/sync-foundation branch (or later)
+
+# 2. Run migrate to create Sync DocTypes
+bench --site <site> migrate
+
+# 3. Configure as branch (pointing at central)
+POS_NEXT_SYNC_ALLOW_HTTP=1 bench --site <site> execute \
+  pos_next.sync.tests._setup_multi_site.setup_as_branch
+
+# 4. Configure central to know about this branch
+POS_NEXT_SYNC_ALLOW_HTTP=1 bench --site <central-site> execute \
+  pos_next.sync.tests._setup_multi_site.setup_as_central
+```
+
+Helper functions in `pos_next/sync/tests/_setup_multi_site.py`:
+- `setup_as_branch()` — creates Branch Sync Site Config pointing at `http://localhost:8000`
+- `setup_as_central()` — creates Central Sync Site Config registering branch at `http://localhost:8001`
+- `show_current()` — prints current Sync Site Config state
+- `cleanup()` — removes all Sync Site Config rows
+
+### 15.4 Running both benches
+
+```bash
+# Terminal 1 — Central (port 8000)
+cd /home/ubuntu/frappe-bench && bench start
+
+# Terminal 2 — Branch (port 8001)
+cd /home/ubuntu/frappe-bench-16 && bench start
+```
+
+Both must be running for cross-site sync operations.
+
+---
+
+## 16. Open items for sub-specs
 
 These are intentionally left to per-entity sub-specs:
 
@@ -755,7 +841,7 @@ These are intentionally left to per-entity sub-specs:
 
 ---
 
-## 16. Glossary
+## 17. Glossary
 
 - **Branch:** a branch ERPNext site (on-prem, behind consumer internet).
 - **Central:** the cloud ERPNext site; authoritative for masters, aggregate for transactions.
