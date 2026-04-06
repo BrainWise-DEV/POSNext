@@ -188,7 +188,10 @@ doc_events = {
 			"pos_next.realtime_events.emit_customer_event",
 			"pos_next.api.wallet.create_wallet_on_customer_insert"
 		],
-		"on_update": "pos_next.realtime_events.emit_customer_event",
+		"on_update": [
+			"pos_next.realtime_events.emit_customer_event",
+			"pos_next.sync.hooks_outbox.enqueue_to_outbox",
+		],
 		"on_trash": [
 			"pos_next.realtime_events.emit_customer_event",
 			"pos_next.sync.hooks.write_tombstone_on_trash",
@@ -206,9 +209,14 @@ doc_events = {
 		"before_cancel": "pos_next.api.sales_invoice_hooks.before_cancel",
 		"on_submit": [
 			"pos_next.realtime_events.emit_stock_update_event",
-			"pos_next.api.wallet.process_loyalty_to_wallet"
+			"pos_next.api.wallet.process_loyalty_to_wallet",
+			"pos_next.sync.hooks_outbox.enqueue_to_outbox",
 		],
-		"on_cancel": "pos_next.realtime_events.emit_stock_update_event",
+		"on_cancel": [
+			"pos_next.realtime_events.emit_stock_update_event",
+			"pos_next.sync.hooks_outbox.enqueue_to_outbox",
+		],
+		"on_update_after_submit": "pos_next.sync.hooks_outbox.enqueue_to_outbox",
 		"after_insert": "pos_next.realtime_events.emit_invoice_created_event"
 	},
 	"Payment Entry": {
@@ -216,24 +224,29 @@ doc_events = {
 			"pos_next.sync.hooks_uuid.set_sync_uuid_if_missing",
 			"pos_next.sync.hooks_uuid.set_origin_branch_if_missing",
 		],
+		"on_submit": "pos_next.sync.hooks_outbox.enqueue_to_outbox",
+		"on_cancel": "pos_next.sync.hooks_outbox.enqueue_to_outbox",
 	},
 	"Stock Ledger Entry": {
 		"before_insert": [
 			"pos_next.sync.hooks_uuid.set_sync_uuid_if_missing",
 			"pos_next.sync.hooks_uuid.set_origin_branch_if_missing",
 		],
+		"after_insert": "pos_next.sync.hooks_outbox.enqueue_to_outbox",
 	},
 	"POS Opening Shift": {
 		"before_insert": [
 			"pos_next.sync.hooks_uuid.set_sync_uuid_if_missing",
 			"pos_next.sync.hooks_uuid.set_origin_branch_if_missing",
 		],
+		"on_submit": "pos_next.sync.hooks_outbox.enqueue_to_outbox",
 	},
 	"POS Closing Shift": {
 		"before_insert": [
 			"pos_next.sync.hooks_uuid.set_sync_uuid_if_missing",
 			"pos_next.sync.hooks_uuid.set_origin_branch_if_missing",
 		],
+		"on_submit": "pos_next.sync.hooks_outbox.enqueue_to_outbox",
 	},
 	"POS Profile": {
 		"on_update": "pos_next.realtime_events.emit_pos_profile_updated_event",
@@ -268,6 +281,7 @@ scheduler_events = {
 	"cron": {
 		"* * * * *": [
 			"pos_next.sync.masters_puller.pull_if_due",
+			"pos_next.sync.outbox_drainer.push_if_due",
 		]
 	},
 	"hourly": [
