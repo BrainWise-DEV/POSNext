@@ -40,8 +40,11 @@ class BaseSyncAdapter:
 
 		if frappe.db.exists(self.doctype, name):
 			doc = frappe.get_doc(self.doctype, name)
-			doc.update(payload)
 			_set_sync_flags(doc)
+			# Don't overwrite local modified/modified_by — causes conflict detection
+			for key, val in payload.items():
+				if key not in ("doctype", "name", "modified", "modified_by", "creation", "owner") and not isinstance(val, list):
+					doc.set(key, val)
 			doc.save(ignore_permissions=True)
 		else:
 			payload_with_doctype = {"doctype": self.doctype, **payload}
