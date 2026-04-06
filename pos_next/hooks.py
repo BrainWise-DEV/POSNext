@@ -90,7 +90,7 @@ fixtures = [
 	{
 		"dt": "Role",
 		"filters": [
-			["role_name", "in", ["POSNext Cashier", "Nexus POS Manager"]]
+			["role_name", "in", ["POSNext Cashier", "Nexus POS Manager", "POS Next Sync Agent"]]
 		]
 	},
 	{
@@ -103,12 +103,6 @@ fixtures = [
 		"doctype": "Custom Field",
 		"filters": [
 			["fieldname", "in", ["sync_uuid", "origin_branch", "synced_from_failover"]]
-		]
-	},
-	{
-		"doctype": "Role",
-		"filters": [
-			["role_name", "=", "POS Next Sync Agent"]
 		]
 	},
 ]
