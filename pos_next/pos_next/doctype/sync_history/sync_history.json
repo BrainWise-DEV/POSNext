@@ -1,0 +1,21 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "creation": "2026-04-05 00:00:00",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": ["reference_doctype", "reference_name", "operation", "acked_at", "attempts", "payload_hash"],
+ "fields": [
+  {"fieldname": "reference_doctype", "fieldtype": "Link", "in_list_view": 1, "label": "Reference DocType", "options": "DocType"},
+  {"fieldname": "reference_name", "fieldtype": "Data", "in_list_view": 1, "label": "Reference Name"},
+  {"fieldname": "operation", "fieldtype": "Data", "in_list_view": 1, "label": "Operation"},
+  {"fieldname": "acked_at", "fieldtype": "Datetime", "in_list_view": 1, "label": "Acked At"},
+  {"fieldname": "attempts", "fieldtype": "Int", "label": "Attempts"},
+  {"fieldname": "payload_hash", "fieldtype": "Data", "label": "Payload Hash"}
+ ],
+ "index_web_pages_for_search": 0, "links": [],
+ "modified": "2026-04-05 00:00:00", "modified_by": "Administrator",
+ "module": "POS Next", "name": "Sync History", "owner": "Administrator",
+ "permissions": [{"read": 1, "report": 1, "role": "System Manager"}],
+ "row_format": "Dynamic", "sort_field": "acked_at", "sort_order": "DESC", "states": [], "track_changes": 0
+}

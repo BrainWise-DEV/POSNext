@@ -1,0 +1,22 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "creation": "2026-04-05 00:00:00",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": ["reference_doctype", "reference_name", "operation", "last_error", "attempts", "payload", "moved_at"],
+ "fields": [
+  {"fieldname": "reference_doctype", "fieldtype": "Link", "in_list_view": 1, "label": "Reference DocType", "options": "DocType"},
+  {"fieldname": "reference_name", "fieldtype": "Data", "in_list_view": 1, "label": "Reference Name"},
+  {"fieldname": "operation", "fieldtype": "Data", "in_list_view": 1, "label": "Operation"},
+  {"fieldname": "last_error", "fieldtype": "Small Text", "label": "Last Error"},
+  {"fieldname": "attempts", "fieldtype": "Int", "label": "Attempts"},
+  {"fieldname": "payload", "fieldtype": "Long Text", "label": "Payload"},
+  {"fieldname": "moved_at", "fieldtype": "Datetime", "label": "Moved At"}
+ ],
+ "index_web_pages_for_search": 0, "links": [],
+ "modified": "2026-04-05 00:00:00", "modified_by": "Administrator",
+ "module": "POS Next", "name": "Sync Dead Letter", "owner": "Administrator",
+ "permissions": [{"create": 1, "delete": 1, "read": 1, "report": 1, "role": "System Manager", "write": 1}],
+ "row_format": "Dynamic", "sort_field": "moved_at", "sort_order": "DESC", "states": [], "track_changes": 0
+}

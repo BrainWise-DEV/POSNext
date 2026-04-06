@@ -1,0 +1,24 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "creation": "2026-04-05 00:00:00",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": ["reference_doctype", "reference_name", "status", "incoming_from", "detected_at", "local_payload", "incoming_payload", "resolved_by", "resolution_notes"],
+ "fields": [
+  {"fieldname": "reference_doctype", "fieldtype": "Link", "in_list_view": 1, "label": "Reference DocType", "options": "DocType", "reqd": 1},
+  {"fieldname": "reference_name", "fieldtype": "Data", "in_list_view": 1, "label": "Reference Name", "reqd": 1},
+  {"fieldname": "status", "fieldtype": "Select", "in_list_view": 1, "label": "Status", "options": "pending\nresolved_local\nresolved_incoming\nresolved_merged", "default": "pending"},
+  {"fieldname": "incoming_from", "fieldtype": "Data", "in_list_view": 1, "label": "Incoming From"},
+  {"fieldname": "detected_at", "fieldtype": "Datetime", "label": "Detected At"},
+  {"fieldname": "local_payload", "fieldtype": "Long Text", "label": "Local Payload"},
+  {"fieldname": "incoming_payload", "fieldtype": "Long Text", "label": "Incoming Payload"},
+  {"fieldname": "resolved_by", "fieldtype": "Link", "label": "Resolved By", "options": "User"},
+  {"fieldname": "resolution_notes", "fieldtype": "Text", "label": "Resolution Notes"}
+ ],
+ "index_web_pages_for_search": 0, "links": [],
+ "modified": "2026-04-05 00:00:00", "modified_by": "Administrator",
+ "module": "POS Next", "name": "Sync Conflict", "owner": "Administrator",
+ "permissions": [{"create": 1, "delete": 1, "read": 1, "report": 1, "role": "System Manager", "write": 1}],
+ "row_format": "Dynamic", "sort_field": "detected_at", "sort_order": "DESC", "states": [], "track_changes": 1
+}
