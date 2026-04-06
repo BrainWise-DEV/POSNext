@@ -184,6 +184,10 @@ doc_events = {
 		"validate": "pos_next.validations.validate_item"
 	},
 	"Customer": {
+		"before_insert": [
+			"pos_next.sync.hooks_uuid.set_sync_uuid_if_missing",
+			"pos_next.sync.hooks_uuid.set_origin_branch_if_missing",
+		],
 		"after_insert": [
 			"pos_next.api.customers.auto_assign_loyalty_program",
 			"pos_next.realtime_events.emit_customer_event",
@@ -193,6 +197,10 @@ doc_events = {
 		"on_trash": "pos_next.realtime_events.emit_customer_event"
 	},
 	"Sales Invoice": {
+		"before_insert": [
+			"pos_next.sync.hooks_uuid.set_sync_uuid_if_missing",
+			"pos_next.sync.hooks_uuid.set_origin_branch_if_missing",
+		],
 		"validate": [
 			"pos_next.api.sales_invoice_hooks.validate",
 			"pos_next.api.wallet.validate_wallet_payment"
@@ -204,6 +212,30 @@ doc_events = {
 		],
 		"on_cancel": "pos_next.realtime_events.emit_stock_update_event",
 		"after_insert": "pos_next.realtime_events.emit_invoice_created_event"
+	},
+	"Payment Entry": {
+		"before_insert": [
+			"pos_next.sync.hooks_uuid.set_sync_uuid_if_missing",
+			"pos_next.sync.hooks_uuid.set_origin_branch_if_missing",
+		],
+	},
+	"Stock Ledger Entry": {
+		"before_insert": [
+			"pos_next.sync.hooks_uuid.set_sync_uuid_if_missing",
+			"pos_next.sync.hooks_uuid.set_origin_branch_if_missing",
+		],
+	},
+	"POS Opening Shift": {
+		"before_insert": [
+			"pos_next.sync.hooks_uuid.set_sync_uuid_if_missing",
+			"pos_next.sync.hooks_uuid.set_origin_branch_if_missing",
+		],
+	},
+	"POS Closing Shift": {
+		"before_insert": [
+			"pos_next.sync.hooks_uuid.set_sync_uuid_if_missing",
+			"pos_next.sync.hooks_uuid.set_origin_branch_if_missing",
+		],
 	},
 	"POS Profile": {
 		"on_update": "pos_next.realtime_events.emit_pos_profile_updated_event"
