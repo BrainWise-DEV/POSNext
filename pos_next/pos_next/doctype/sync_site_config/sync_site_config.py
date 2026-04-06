@@ -75,3 +75,35 @@ class SyncSiteConfig(Document):
 				),
 				title=_("Invalid Branch Code"),
 			)
+
+	@frappe.whitelist()
+	def test_connection(self):
+		"""
+		Attempt login against central and return a short status message.
+		Only meaningful on Branch-role configs.
+		"""
+		if self.site_role != "Branch":
+			return {"ok": False, "message": "Test Connection only applies to Branch role"}
+		if not (self.central_url and self.sync_username and self.sync_password):
+			return {"ok": False, "message": "Fill central_url, sync_username, sync_password first"}
+
+		from pos_next.sync.auth import SyncSession
+		from pos_next.sync.exceptions import SyncAuthError, SyncTransportError
+
+		password = self.get_password("sync_password")
+		session = SyncSession(
+			central_url=self.central_url,
+			username=self.sync_username,
+			password=password,
+		)
+		try:
+			session.login()
+		except SyncAuthError as e:
+			return {"ok": False, "message": f"Auth failed: {e}"}
+		except SyncTransportError as e:
+			return {"ok": False, "message": f"Network error: {e}"}
+		except Exception as e:
+			return {"ok": False, "message": f"Unexpected error: {e}"}
+		finally:
+			session.logout()
+		return {"ok": True, "message": f"Connected to {self.central_url} as {self.sync_username}"}
