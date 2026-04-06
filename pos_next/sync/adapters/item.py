@@ -57,10 +57,9 @@ class ItemAdapter(BaseSyncAdapter):
 		if frappe.db.exists("Item", name):
 			doc = frappe.get_doc("Item", name)
 			for key, val in payload.items():
-				if not isinstance(val, list) and key not in ("doctype", "name"):
+				if not isinstance(val, list) and key not in ("doctype", "name", "modified", "modified_by", "creation", "owner"):
 					doc.set(key, val)
-			_set_sync_flags(doc)
-			doc.save(ignore_permissions=True)
+			doc.db_update()
 		else:
 			doc = frappe.get_doc({"doctype": "Item", **payload})
 			_set_sync_flags(doc)

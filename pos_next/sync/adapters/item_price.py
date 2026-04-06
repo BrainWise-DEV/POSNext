@@ -39,13 +39,11 @@ class ItemPriceAdapter(BaseSyncAdapter):
 		if existing:
 			doc = frappe.get_doc("Item Price", existing)
 			for key, val in cleaned.items():
-				if key not in ("doctype", "name") and not isinstance(val, list):
+				if key not in ("doctype", "name", "modified", "modified_by", "creation", "owner") and not isinstance(val, list):
 					doc.set(key, val)
-			_set_sync_flags(doc)
-			doc.save(ignore_permissions=True)
+			doc.db_update()
 			return doc.name
 		else:
-			# Remove central's name — let local auto-generate
 			cleaned.pop("name", None)
 			doc = frappe.get_doc({"doctype": "Item Price", **cleaned})
 			_set_sync_flags(doc)

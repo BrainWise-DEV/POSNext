@@ -44,13 +44,11 @@ class CustomerAdapter(BaseSyncAdapter):
 		if name and frappe.db.exists("Customer", name):
 			doc = frappe.get_doc("Customer", name)
 			for key, val in cleaned.items():
-				if key not in ("doctype", "name") and not isinstance(val, list):
+				if key not in ("doctype", "name", "modified", "modified_by", "creation", "owner") and not isinstance(val, list):
 					doc.set(key, val)
-			_set_sync_flags(doc)
-			doc.save(ignore_permissions=True)
+			doc.db_update()
 			return doc.name
 		else:
-			# Customer uses autoname — don't force central's name
 			cleaned.pop("name", None)
 			doc = frappe.get_doc({"doctype": "Customer", **cleaned})
 			_set_sync_flags(doc)
