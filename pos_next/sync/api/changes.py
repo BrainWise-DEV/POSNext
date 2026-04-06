@@ -4,6 +4,7 @@
 """Central-side API: serve upserts + tombstones since a watermark."""
 
 import frappe
+from pos_next.sync.payload import to_payload
 
 
 @frappe.whitelist()
@@ -11,14 +12,6 @@ def changes_since(doctype, since, limit=100):
 	"""
 	Return records modified after `since` for the given DocType,
 	plus any tombstones recorded after `since`.
-
-	Response shape:
-	{
-	    "upserts": [{...}, ...],
-	    "tombstones": [{"reference_name": ..., "deleted_at": ...}, ...],
-	    "next_since": "2026-04-06 10:00:00",
-	    "has_more": true|false
-	}
 	"""
 	limit = int(limit)
 
@@ -34,38 +27,33 @@ def changes_since(doctype, since, limit=100):
 	has_more = len(records) > limit
 	records = records[:limit]
 
-	# Serialize each record fully (with children)
+	# N+1 is unavoidable here — we need full doc with children for each record.
+	# The adapter's serialize() may need child tables.
 	upserts = []
 	for row in records:
 		try:
 			doc = frappe.get_doc(doctype, row.name)
-			payload = doc.as_dict(convert_dates_to_str=True)
-			upserts.append(payload)
-		except Exception:
-			# Record may have been deleted between listing and fetching
+			upserts.append(to_payload(doc))
+		except frappe.DoesNotExistError:
+			continue
+		except Exception as e:
+			frappe.log_error(f"changes_since serialize {doctype}/{row.name}: {e}", "Sync API")
 			continue
 
-	# Compute next_since from the last upsert's modified
-	next_since = None
-	if upserts:
-		next_since = upserts[-1].get("modified")
+	next_since = upserts[-1].get("modified") if upserts else None
 
-	# Fetch tombstones
+	# Tombstones — bounded by same limit to prevent unbounded response
 	tombstones = frappe.get_all(
 		"Sync Tombstone",
-		filters={
-			"reference_doctype": doctype,
-			"deleted_at": (">", since),
-		},
+		filters={"reference_doctype": doctype, "deleted_at": (">", since)},
 		fields=["reference_name", "deleted_at"],
 		order_by="deleted_at asc",
+		limit_page_length=limit,
 	)
-	# Convert to plain dicts
-	tombstones = [{"reference_name": t.reference_name, "deleted_at": str(t.deleted_at)} for t in tombstones]
 
 	return {
 		"upserts": upserts,
-		"tombstones": tombstones,
+		"tombstones": [{"reference_name": t.reference_name, "deleted_at": str(t.deleted_at)} for t in tombstones],
 		"next_since": next_since,
 		"has_more": has_more,
 	}

@@ -6,6 +6,9 @@
 import frappe
 from pos_next.sync.payload import to_payload
 
+# Fields to skip when setting values on an existing doc during sync upsert
+SKIP_ON_UPSERT = frozenset({"doctype", "name", "modified", "modified_by", "creation", "owner"})
+
 
 class BaseSyncAdapter:
 	"""
@@ -22,8 +25,8 @@ class BaseSyncAdapter:
 	def apply_incoming(self, payload, operation):
 		"""
 		Apply an incoming payload locally. Default implementation:
-		- delete operation → delete local record if exists
-		- insert/update/submit/cancel → upsert
+		- delete → delete local record if exists
+		- insert/update/submit/cancel → upsert via db_update (bypasses hooks)
 
 		Returns the local document name.
 		"""
@@ -38,16 +41,15 @@ class BaseSyncAdapter:
 
 		payload = self.pre_apply_transform(payload)
 
-		if frappe.db.exists(self.doctype, name):
+		try:
 			doc = frappe.get_doc(self.doctype, name)
-			# Use db_update to bypass all hooks/validations — synced data is pre-validated
+			# db_update bypasses all hooks/validations — synced data is pre-validated
 			for key, val in payload.items():
-				if key not in ("doctype", "name", "modified", "modified_by", "creation", "owner") and not isinstance(val, list):
+				if key not in SKIP_ON_UPSERT and not isinstance(val, list):
 					doc.set(key, val)
 			doc.db_update()
-		else:
-			payload_with_doctype = {"doctype": self.doctype, **payload}
-			doc = frappe.get_doc(payload_with_doctype)
+		except frappe.DoesNotExistError:
+			doc = frappe.get_doc({"doctype": self.doctype, **payload})
 			_set_sync_flags(doc)
 			doc.insert(ignore_permissions=True)
 		return doc.name

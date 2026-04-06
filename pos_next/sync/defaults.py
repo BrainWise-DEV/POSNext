@@ -33,3 +33,7 @@ CONFLICT_RULES = {
 }
 CDC_STRATEGIES = {"Outbox", "Watermark"}
 DIRECTIONS = {"Central→Branch", "Branch→Central", "Bidirectional"}
+
+# Direction subsets for filtering rules
+DIRECTIONS_PULL = frozenset({"Central→Branch", "Bidirectional"})
+DIRECTIONS_PUSH = frozenset({"Branch→Central", "Bidirectional"})

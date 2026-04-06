@@ -19,8 +19,16 @@ def set_origin_branch_if_missing(doc, method=None):
 	"""Before-insert hook: set origin_branch to this site's branch_code if empty."""
 	if getattr(doc, "origin_branch", None):
 		return
-	branch_code = frappe.db.get_value(
-		"Sync Site Config", {"site_role": "Branch"}, "branch_code"
-	)
+	branch_code = _get_branch_code()
 	if branch_code:
 		doc.origin_branch = branch_code
+
+
+def _get_branch_code():
+	"""Get this site's branch_code, cached for the process lifetime."""
+	cache_key = "pos_next_branch_code"
+	code = frappe.cache().get_value(cache_key)
+	if code is None:
+		code = frappe.db.get_value("Sync Site Config", {"site_role": "Branch"}, "branch_code") or ""
+		frappe.cache().set_value(cache_key, code, expires_in_sec=300)
+	return code or None

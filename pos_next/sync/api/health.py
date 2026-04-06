@@ -22,7 +22,7 @@ def health():
 		pass
 
 	site_role = frappe.db.get_value(
-		"Sync Site Config", {}, "site_role"
+		"Sync Site Config", {"enabled": 1}, "site_role"
 	) or "unconfigured"
 
 	return {
