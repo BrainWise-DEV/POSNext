@@ -6,3 +6,4 @@
 # Patches added in this section will be executed after doctypes are migrated
 pos_next.patches.v1_7_0.reinstall_workspace
 pos_next.patches.v2_0_0.add_sync_custom_fields
+pos_next.patches.v2_0_0.backfill_sync_uuid
