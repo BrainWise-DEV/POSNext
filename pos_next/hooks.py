@@ -87,18 +87,30 @@ _asset_version = get_build_version()
 # Fixtures
 # --------
 fixtures = [
-    {
-        "dt": "Role",
-        "filters": [
-            ["role_name", "in", ["POSNext Cashier","Nexus POS Manager"]]
-        ]
-    },
-    {
-        "dt": "Custom DocPerm",
-        "filters": [
-            ["role", "in", ["POSNext Cashier"]]
-        ]
-    }
+	{
+		"dt": "Role",
+		"filters": [
+			["role_name", "in", ["POSNext Cashier", "Nexus POS Manager"]]
+		]
+	},
+	{
+		"dt": "Custom DocPerm",
+		"filters": [
+			["role", "in", ["POSNext Cashier"]]
+		]
+	},
+	{
+		"doctype": "Custom Field",
+		"filters": [
+			["fieldname", "in", ["sync_uuid", "origin_branch", "synced_from_failover"]]
+		]
+	},
+	{
+		"doctype": "Role",
+		"filters": [
+			["role_name", "=", "POS Next Sync Agent"]
+		]
+	},
 ]
 
 # Installation
