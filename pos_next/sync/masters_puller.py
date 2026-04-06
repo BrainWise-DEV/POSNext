@@ -10,6 +10,14 @@ from pos_next.sync.defaults import DEFAULT_PULL_MASTERS_INTERVAL_SECONDS, DEFAUL
 from pos_next.sync.payload import compute_hash
 
 
+def _ensure_adapters_loaded():
+	"""Import all adapter modules so they register with the registry."""
+	import pos_next.sync.adapters.item
+	import pos_next.sync.adapters.item_price
+	import pos_next.sync.adapters.customer
+	import pos_next.sync.adapters.generic_master
+
+
 def pull_if_due():
 	"""
 	Scheduler entry point (called every minute).
@@ -26,6 +34,8 @@ def pull_if_due():
 		elapsed = time_diff_in_seconds(now_datetime(), cfg.last_pull_masters_at)
 		if elapsed < interval:
 			return  # Not due yet
+
+	_ensure_adapters_loaded()
 
 	# Build session and run pull
 	try:
