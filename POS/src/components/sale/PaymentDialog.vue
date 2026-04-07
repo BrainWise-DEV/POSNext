@@ -632,21 +632,24 @@
 							}}
 						</div>
 						<div class="grid grid-cols-4 gap-1.5">
-							<input
-								ref="desktopAmountInputRef"
-								v-model="desktopAmountInput"
-								type="number"
-								min="0"
-								step="0.01"
-								@keydown.enter.stop.prevent="handleDesktopAmountEnter"
-								:class="[
-									'font-semibold rounded-lg border-2 transition-all text-center',
-									isCompactMode ? 'px-2 py-2 text-sm' : 'px-2 py-2 text-sm',
-									'bg-white border-blue-400 text-gray-700 focus:outline-none focus:border-blue-500'
-								]"
-							/>
 							<button
-								v-for="amount in quickAmounts.slice(0, 3)"
+								v-if="quickAmounts.length > 0"
+								ref="firstQuickAmountBtnRef"
+								@click="addCustomPayment(lastSelectedMethod, quickAmounts[0])"
+								@keydown.enter.stop.prevent="handleFirstQuickAmountEnter"
+								:disabled="isQuickAmountDisabled(quickAmounts[0])"
+								:class="[
+									'font-semibold rounded-lg border-2 transition-all',
+									isCompactMode ? 'px-2 py-2 text-sm' : 'px-2 py-2 text-sm',
+									isQuickAmountDisabled(quickAmounts[0])
+										? 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed'
+										: 'bg-white border-gray-200 hover:border-blue-400 hover:bg-blue-50 text-gray-700 hover:text-blue-600'
+								]"
+							>
+								{{ formatCurrency(quickAmounts[0]) }}
+							</button>
+							<button
+								v-for="amount in quickAmounts.slice(1)"
 								:key="amount"
 								@click="addCustomPayment(lastSelectedMethod, amount)"
 								:disabled="isQuickAmountDisabled(amount)"
@@ -1224,9 +1227,8 @@ const {
 const mobileCustomAmount = ref("")
 const mobileAmountInputRef = ref(null)
 
-// Desktop quick-amount input (first slot in 4-col grid)
-const desktopAmountInput = ref("")
-const desktopAmountInputRef = ref(null)
+// Desktop first quick-amount button ref (focused on open for Enter-to-pay)
+const firstQuickAmountBtnRef = ref(null)
 
 function addMobileCustomPayment() {
 	const amount = Number.parseFloat(mobileCustomAmount.value)
@@ -1255,22 +1257,11 @@ async function handleMobileAmountEnter() {
 	}
 }
 
-async function handleDesktopAmountEnter() {
-	const amount = Number.parseFloat(desktopAmountInput.value)
-	if (amount > 0 && lastSelectedMethod.value) {
-		await addCustomPayment(lastSelectedMethod.value, amount)
-		desktopAmountInput.value = ""
-		nextTick(() => {
-			desktopAmountInputRef.value?.focus()
-			desktopAmountInputRef.value?.select()
-		})
-		if (canComplete.value && !isSubmitting.value) {
-			completePayment()
-		}
-	} else if (canComplete.value && !isSubmitting.value) {
+async function handleFirstQuickAmountEnter() {
+	if (!lastSelectedMethod.value || !quickAmounts.value?.[0]) return
+	await addCustomPayment(lastSelectedMethod.value, quickAmounts.value[0])
+	if (canComplete.value && !isSubmitting.value) {
 		completePayment()
-	} else if (props.allowCreditSale && paymentEntries.value.length === 0) {
-		addCreditAccountPayment()
 	}
 }
 
@@ -2026,7 +2017,6 @@ watch(show, (newVal) => {
 		customAmount.value = ""
 		numpadClear()
 		mobileCustomAmount.value = ""
-		desktopAmountInput.value = ""
 		lastSelectedMethod.value = null
 		customerCredit.value = []
 		// Note: Don't reset customerBalance here - it's pre-fetched when customer changes
@@ -2053,16 +2043,13 @@ watch(show, (newVal) => {
 			lastSelectedMethod.value = defaultMethod || paymentMethods.value[0]
 		}
 
-		// Pre-populate amount fields with grand total so cashier can press Enter immediately
+		// Pre-populate mobile input and focus first quick-amount button on desktop
 		if (props.grandTotal > 0) {
 			mobileCustomAmount.value = props.grandTotal.toFixed(2)
-			desktopAmountInput.value = props.grandTotal.toFixed(2)
-			setNumpadValue(props.grandTotal)
 			nextTick(() => {
 				mobileAmountInputRef.value?.focus()
 				mobileAmountInputRef.value?.select()
-				desktopAmountInputRef.value?.focus()
-				desktopAmountInputRef.value?.select()
+				firstQuickAmountBtnRef.value?.focus()
 			})
 		}
 
