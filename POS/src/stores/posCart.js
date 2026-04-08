@@ -614,14 +614,18 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 */
 	function processFreeItems(freeItems) {
 		// Reset free_qty on all non-free items
-		invoiceItems.value.forEach(item => {
+		invoiceItems.value.forEach((item) => {
 			if (!item.is_free_item) {
 				item.free_qty = 0
 			}
 		})
 
-		// Remove previously-added free item rows (they'll be re-added below if still valid)
-		invoiceItems.value = invoiceItems.value.filter(item => !item.is_free_item)
+		// Remove previously added free-item rows WITHOUT replacing array reference
+		for (let i = invoiceItems.value.length - 1; i >= 0; i--) {
+			if (invoiceItems.value[i]?.is_free_item) {
+				invoiceItems.value.splice(i, 1)
+			}
+		}
 
 		// Early return if no free items
 		if (!Array.isArray(freeItems) || freeItems.length === 0) {
@@ -635,42 +639,43 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 			const freeUom = freeItem.uom || freeItem.stock_uom
 
-			// Check if this free item matches an existing (non-free) cart item
+			// Same product already in cart -> annotate existing row only
 			const cartItem = invoiceItems.value.find(
-				item => !item.is_free_item &&
+				(item) =>
+					!item.is_free_item &&
 					item.item_code === freeItem.item_code &&
 					(item.uom || item.stock_uom) === freeUom
 			)
 
 			if (cartItem) {
-				// Same item is already in cart — just annotate with free_qty
 				cartItem.free_qty = freeQty
-			} else {
-				// Different product — add a dedicated free item row
-				invoiceItems.value.push({
-					item_code: freeItem.item_code,
-					item_name: freeItem.item_name || freeItem.item_code,
-					rate: 0,
-					price_list_rate: 0,
-					quantity: freeQty,
-					discount_amount: 0,
-					discount_percentage: 0,
-					tax_amount: 0,
-					amount: 0,
-					stock_qty: 0,
-					uom: freeUom,
-					stock_uom: freeItem.stock_uom || freeUom,
-					conversion_factor: freeItem.conversion_factor || 1,
-					is_free_item: 1,
-					free_qty: freeQty,
-					pricing_rules: freeItem.pricing_rules || null,
-				})
+				continue
 			}
+
+			// Different product -> append dedicated free-item row
+			invoiceItems.value.push({
+				item_code: freeItem.item_code,
+				item_name: freeItem.item_name || freeItem.item_code,
+				rate: 0,
+				price_list_rate: 0,
+				quantity: freeQty,
+				qty: freeQty,
+				discount_amount: 0,
+				discount_percentage: 0,
+				tax_amount: 0,
+				amount: 0,
+				stock_qty: 0,
+				uom: freeUom,
+				stock_uom: freeItem.stock_uom || freeUom,
+				conversion_factor: freeItem.conversion_factor || 1,
+				is_free_item: 1,
+				free_qty: freeQty,
+				pricing_rules: freeItem.pricing_rules || null,
+			})
 		}
 
 		rebuildIncrementalCache()
 	}
-
 	/**
 	 * Extracts and normalizes the offer response from backend
 	 *

@@ -2344,9 +2344,23 @@ async function handlePaymentCompleted(paymentData) {
 			const result = await cartStore.submitInvoice();
 
 			if (result) {
-				const invoiceName = result.name || result.message?.name || __("Unknown");
-				const invoiceTotal = result.grand_total || result.total || 0;
-				const paidAmount = paymentData.paid_amount || invoiceTotal;
+				const submittedDoc = result.message || result || {}
+
+				const invoiceName =
+					submittedDoc.name || __("Unknown")
+
+				const invoiceTotal = Number(
+					submittedDoc.grand_total ||
+					submittedDoc.rounded_total ||
+					submittedDoc.total ||
+					0
+				)
+
+				const paidAmount = Number(
+					submittedDoc.paid_amount ||
+					submittedDoc.base_paid_amount ||
+					invoiceTotal
+				)
 
 				uiStore.showPaymentDialog = false;
 				cartStore.clearCart();

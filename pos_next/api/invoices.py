@@ -371,37 +371,81 @@ def _set_payment_accounts(payments, company):
 # This helper restores payment child rows and derived paid fields
 # so final invoice status remains Paid when full payment exists.
 
-def _restore_payment_amounts(invoice_doc, incoming_payments):
-    """Restore POS payment amounts after ERPNext recalculation."""
-    if not incoming_payments:
-        return
+def _normalize_payment_rows(payments):
+    normalized = []
+    for row in payments or []:
+        normalized.append({
+            "mode_of_payment": row.get("mode_of_payment"),
+            "amount": flt(row.get("amount") or 0),
+            "base_amount": flt(row.get("base_amount") or row.get("amount") or 0),
+            "account": row.get("account"),
+        })
+    return normalized
 
-    invoice_doc.set("payments", [])
 
+def _payment_rows_match(invoice_doc, incoming_payments):
+    current = _normalize_payment_rows(invoice_doc.get("payments"))
+    incoming = _normalize_payment_rows(incoming_payments)
+    return current == incoming
+
+
+def _recalculate_paid_fields_from_payments(invoice_doc):
     total_paid = 0.0
     total_base_paid = 0.0
 
-    for row in incoming_payments:
-        amount = flt(row.get("amount") or 0)
-        base_amount = flt(row.get("base_amount") or amount)
-
-        payment_row = {
-            "mode_of_payment": row.get("mode_of_payment"),
-            "amount": amount,
-            "base_amount": base_amount,
-            "account": row.get("account"),
-        }
-
-        invoice_doc.append("payments", payment_row)
-
-        total_paid += amount
-        total_base_paid += base_amount
+    for row in invoice_doc.get("payments") or []:
+        total_paid += flt(row.get("amount") or 0)
+        total_base_paid += flt(row.get("base_amount") or row.get("amount") or 0)
 
     invoice_doc.paid_amount = flt(total_paid)
     invoice_doc.base_paid_amount = flt(total_base_paid)
     invoice_doc.outstanding_amount = flt(invoice_doc.grand_total) - flt(total_paid)
 
 
+def _restore_payment_amounts(invoice_doc, incoming_payments):
+    """Restore POS payment rows only when ERPNext changed them."""
+    if not incoming_payments:
+        return False
+
+    changed = not _payment_rows_match(invoice_doc, incoming_payments)
+
+    if changed:
+        invoice_doc.set("payments", [])
+        for row in _normalize_payment_rows(incoming_payments):
+            invoice_doc.append("payments", row)
+
+        _recalculate_paid_fields_from_payments(invoice_doc)
+
+    return changed
+
+
+def _payment_fields_need_persist(invoice_doc):
+    db_paid = flt(invoice_doc.db_get("paid_amount") or 0)
+    db_base_paid = flt(invoice_doc.db_get("base_paid_amount") or 0)
+    db_outstanding = flt(invoice_doc.db_get("outstanding_amount") or 0)
+
+    return (
+        db_paid != flt(invoice_doc.paid_amount)
+        or db_base_paid != flt(invoice_doc.base_paid_amount)
+        or db_outstanding != flt(invoice_doc.outstanding_amount)
+    )
+
+
+def _persist_payment_fields(invoice_doc):
+    if not _payment_fields_need_persist(invoice_doc):
+        return
+
+    invoice_doc.db_set("paid_amount", invoice_doc.paid_amount, update_modified=False)
+    invoice_doc.db_set(
+        "base_paid_amount",
+        invoice_doc.base_paid_amount,
+        update_modified=False,
+    )
+    invoice_doc.db_set(
+        "outstanding_amount",
+        invoice_doc.outstanding_amount,
+        update_modified=False,
+    )
 
 
 def _get_effective_pos_branch(pos_profile):
@@ -424,8 +468,6 @@ def _get_effective_pos_branch(pos_profile):
     return None
 
 
-
-
 def _set_branch_naming_series(invoice_doc, pos_profile=None):
     """Force naming series from branch before first save."""
     if invoice_doc.doctype != "Sales Invoice":
@@ -443,6 +485,7 @@ def _set_branch_naming_series(invoice_doc, pos_profile=None):
         return
 
     invoice_doc.naming_series = f"ACC-{branch_abbr}-SINV-.YYYY.-"
+
 
 def _get_item_discount_policy_flags(item_code):
     """Resolve authoritative discount policy for an item."""
@@ -1437,16 +1480,11 @@ def update_invoice(data):
 
         # ERPNext save hooks may mutate POS payment rows.
         # Hard restore again after save so frontend gets trusted draft values.
-        _restore_payment_amounts(invoice_doc, incoming_payments)
+        payments_changed = _restore_payment_amounts(invoice_doc, incoming_payments)
         _set_payment_accounts(invoice_doc.payments, invoice_doc.company)
 
-        invoice_doc.db_set("paid_amount", invoice_doc.paid_amount, update_modified=False)
-        invoice_doc.db_set("base_paid_amount", invoice_doc.base_paid_amount, update_modified=False)
-        invoice_doc.db_set(
-            "outstanding_amount",
-            invoice_doc.outstanding_amount,
-            update_modified=False,
-        )
+        if payments_changed:
+            _persist_payment_fields(invoice_doc)
 
         return invoice_doc.as_dict()
 
@@ -1769,10 +1807,7 @@ def submit_invoice(invoice=None, data=None):
         else:
             invoice_doc = frappe.get_doc(doctype, invoice_name)
 
-            incoming_payments = invoice.get("payments")
-            incoming_items = invoice.get("items")
-            incoming_taxes = invoice.get("taxes")
-            incoming_sales_team = invoice.get("sales_team")
+            incoming_payments = [dict(p) for p in (invoice.get("payments") or [])]
 
             scalar_invoice = dict(invoice)
             scalar_invoice.pop("payments", None)
@@ -1781,26 +1816,6 @@ def submit_invoice(invoice=None, data=None):
             scalar_invoice.pop("sales_team", None)
 
             invoice_doc.update(scalar_invoice)
-
-            if incoming_items is not None:
-                invoice_doc.set("items", [])
-                for row in incoming_items:
-                    invoice_doc.append("items", row)
-
-            if incoming_taxes is not None:
-                invoice_doc.set("taxes", [])
-                for row in incoming_taxes:
-                    invoice_doc.append("taxes", row)
-
-            if incoming_payments is not None:
-                invoice_doc.set("payments", [])
-                for row in incoming_payments:
-                    invoice_doc.append("payments", row)
-
-            if incoming_sales_team is not None:
-                invoice_doc.set("sales_team", [])
-                for row in incoming_sales_team:
-                    invoice_doc.append("sales_team", row)
 
         # Ensure update_stock is set for Sales Invoice
         if doctype == "Sales Invoice":
@@ -1905,33 +1920,27 @@ def submit_invoice(invoice=None, data=None):
         invoice_doc.save()
 
         # restore after save
-        _restore_payment_amounts(invoice_doc, incoming_payments)
-        _set_payment_accounts(invoice_doc.payments, invoice_doc.company)
 
-        invoice_doc.db_set("paid_amount", invoice_doc.paid_amount, update_modified=False)
-        invoice_doc.db_set("base_paid_amount", invoice_doc.base_paid_amount, update_modified=False)
-        invoice_doc.db_set(
-            "outstanding_amount",
-            invoice_doc.outstanding_amount,
-            update_modified=False,
-        )
-
-        # submit
         invoice_doc.submit()
 
         # final hard restore after submit
-        _restore_payment_amounts(invoice_doc, incoming_payments)
+        payments_changed = _restore_payment_amounts(invoice_doc, incoming_payments)
         _set_payment_accounts(invoice_doc.payments, invoice_doc.company)
 
-        invoice_doc.db_set("paid_amount", invoice_doc.paid_amount, update_modified=False)
-        invoice_doc.db_set("base_paid_amount", invoice_doc.base_paid_amount, update_modified=False)
-        invoice_doc.db_set(
-            "outstanding_amount",
-            invoice_doc.outstanding_amount,
-            update_modified=False,
-        )
+        if payments_changed or _payment_fields_need_persist(invoice_doc):
+            _recalculate_paid_fields_from_payments(invoice_doc)
+
+            if payments_changed:
+                invoice_doc.flags.ignore_validate_update_after_submit = True
+                invoice_doc.flags.ignore_permissions = True
+                frappe.flags.ignore_account_permission = True
+                invoice_doc.save()
+
+            _persist_payment_fields(invoice_doc)
+
         invoice_doc.set_status(update=True)
         invoice_doc.reload()
+
 
         invoice_submitted = True
 
