@@ -162,6 +162,45 @@ def validate_manual_rate_edit(item, pos_profile=None, pos_settings_cache=None):
 
     return {"valid": True}
 
+def _build_promotion_audit_remark(invoice_doc):
+    lines = []
+
+    for row in invoice_doc.get("items", []):
+        pricing_rules = cstr(row.get("pricing_rules") or "").strip()
+        if not pricing_rules:
+            continue
+
+        if flt(row.get("discount_percentage")) > 0:
+            lines.append(
+                f"- {row.item_code} → {flt(row.discount_percentage)}% ({pricing_rules})"
+            )
+        elif flt(row.get("amount")) == 0 and flt(row.get("qty")) > 0:
+            lines.append(
+                f"- {row.item_code} → Free Qty {flt(row.qty)} ({pricing_rules})"
+            )
+
+    if not lines:
+        return
+
+    block = "System Promotions Applied\n" + "\n".join(lines)
+
+    existing = cstr(invoice_doc.get("remarks") or "").strip()
+
+    # remove placeholder defaults
+    if existing.lower() in ("no remarks", "remarks", "none"):
+        existing = ""
+
+    # replace old promo block safely
+    if "System Promotions Applied" in existing:
+        existing = existing.split("System Promotions Applied")[0].strip()
+
+    final_remarks = block if not existing else f"{existing}\n\n{block}"
+
+    invoice_doc.db_set(
+        "remarks",
+        final_remarks.strip(),
+        update_modified=False,
+    )
 
 def log_manual_rate_edit(item, invoice_name, user=None):
     """
@@ -1935,6 +1974,7 @@ def submit_invoice(invoice=None, data=None):
 
         invoice_doc.set_status(update=True)
         invoice_doc.reload()
+        _build_promotion_audit_remark(invoice_doc)
 
 
         invoice_submitted = True
