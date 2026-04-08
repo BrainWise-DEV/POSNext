@@ -1035,7 +1035,7 @@ import { getUOMPolicy } from "@/utils/pos_connector/uomPolicyAdapter"
 
 import { Button, Dialog, createResource } from "frappe-ui";
 import { call } from "@/utils/apiWrapper";
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch, nextTick } from "vue";
 import { useToast } from "@/composables/useToast";
 
 import { useCustomerSearchStore } from "@/stores/customerSearch";
@@ -2126,6 +2126,18 @@ function buildPaymentPreviewPayload() {
 	};
 }
 
+async function openPaymentDialogWithPreview() {
+	if (typeof cartStore.sanitizeDocumentDiscountState === "function") {
+		cartStore.sanitizeDocumentDiscountState()
+	} else if (typeof cartStore.sanitizeAdditionalDiscount === "function") {
+		cartStore.sanitizeAdditionalDiscount()
+	}
+
+	await fetchFrozenPaymentPreview()
+	await nextTick()
+	uiStore.showPaymentDialog = true
+}
+
 async function fetchFrozenPaymentPreview() {
 	if (offlineStore.isOffline) {
 		resetPaymentPreview();
@@ -2162,18 +2174,18 @@ async function fetchFrozenPaymentPreview() {
 	}
 }
 
-function handleCustomerSelected(selectedCustomer) {
+async function handleCustomerSelected(selectedCustomer) {
 	if (selectedCustomer) {
-		cartStore.setCustomer(selectedCustomer);
-		uiStore.showCustomerDialog = false;
-		showSuccess(__("{0} selected", [selectedCustomer.customer_name]));
+		cartStore.setCustomer(selectedCustomer)
+		uiStore.showCustomerDialog = false
+		showSuccess(__("{0} selected", [selectedCustomer.customer_name]))
 
 		if (pendingPaymentAfterCustomer.value) {
-			pendingPaymentAfterCustomer.value = false;
-			uiStore.showPaymentDialog = true;
+			pendingPaymentAfterCustomer.value = false
+			await openPaymentDialogWithPreview()
 		}
 	} else {
-		cartStore.setCustomer(null);
+		cartStore.setCustomer(null)
 	}
 }
 
@@ -2203,14 +2215,7 @@ async function handleProceedToPayment() {
 		return;
 	}
 
-	if (typeof cartStore.sanitizeDocumentDiscountState === "function") {
-		cartStore.sanitizeDocumentDiscountState();
-	} else if (typeof cartStore.sanitizeAdditionalDiscount === "function") {
-		cartStore.sanitizeAdditionalDiscount();
-	}
-
-	await fetchFrozenPaymentPreview();
-	uiStore.showPaymentDialog = true;
+	await openPaymentDialogWithPreview()
 }
 
 async function handleDeleteFailedInvoice() {
