@@ -1914,13 +1914,8 @@ def submit_invoice(invoice=None, data=None):
         # (global Stock Settings, POS Settings, and POS Profile flags)
         _validate_stock_on_invoice(invoice_doc)
 
-        # Save before submit
         invoice_doc.flags.ignore_permissions = True
         frappe.flags.ignore_account_permission = True
-        invoice_doc.save()
-
-        # restore after save
-
         invoice_doc.submit()
 
         # final hard restore after submit
