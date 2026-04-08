@@ -364,7 +364,12 @@ def _set_payment_accounts(payments, company):
                 f"Failed to get payment account for {mode_of_payment}: {e}",
                 "Payment Account Lookup",
             )
-
+# POS payment rows are authoritative from frontend.
+# ERPNext save/submit hooks may recalculate totals and overwrite
+# paid_amount / outstanding_amount, especially when promotions,
+# free items, or additional discounts modify totals.
+# This helper restores payment child rows and derived paid fields
+# so final invoice status remains Paid when full payment exists.
 
 def _restore_payment_amounts(invoice_doc, incoming_payments):
     """Restore POS payment amounts after ERPNext recalculation."""
@@ -1113,7 +1118,7 @@ def preview_additional_discount(data):
             as_dict=True,
         )
 
-    invoice_doc.set_missing_values()
+    invoice_doc.set_missing_values(for_validate=True)
     invoice_doc.calculate_taxes_and_totals()
 
     return _preview_additional_discount(invoice_doc, pos_settings_cache)
@@ -1121,6 +1126,10 @@ def preview_additional_discount(data):
 @frappe.whitelist()
 def update_invoice(data):
     """Create or update invoice draft (Step 1)."""
+# IMPORTANT:
+# Save hooks can mutate POS payment rows after totals recalculation.
+# Restore immediately after draft save so the frontend receives
+# trusted paid values for the submit step.
     try:
         data = json.loads(data) if isinstance(data, str) else data
         incoming_payments = [dict(p) for p in (data.get("payments") or [])]
@@ -1420,14 +1429,27 @@ def update_invoice(data):
                 _set_branch_naming_series(invoice_doc, pos_profile)                
         
         # Save as draft
+
         invoice_doc.flags.ignore_permissions = True
         frappe.flags.ignore_account_permission = True
         invoice_doc.docstatus = 0
         invoice_doc.save()
-        
-        
+
+        # ERPNext save hooks may mutate POS payment rows.
+        # Hard restore again after save so frontend gets trusted draft values.
+        _restore_payment_amounts(invoice_doc, incoming_payments)
+        _set_payment_accounts(invoice_doc.payments, invoice_doc.company)
+
+        invoice_doc.db_set("paid_amount", invoice_doc.paid_amount, update_modified=False)
+        invoice_doc.db_set("base_paid_amount", invoice_doc.base_paid_amount, update_modified=False)
+        invoice_doc.db_set(
+            "outstanding_amount",
+            invoice_doc.outstanding_amount,
+            update_modified=False,
+        )
 
         return invoice_doc.as_dict()
+
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "Update Invoice Error")
         raise
@@ -1652,6 +1674,11 @@ def check_offline_invoice_synced(offline_id):
 
 @frappe.whitelist()
 def submit_invoice(invoice=None, data=None):
+    # IMPORTANT:
+# ERPNext submit internally recalculates totals and may reset
+# paid_amount/outstanding_amount during GL posting.
+# Final hard restore guarantees POS payment truth after submit,
+# especially for promotional invoices and discount allocations.
     """Submit the invoice (Step 2)."""
     # Handle different calling conventions
     if invoice is None:
@@ -1694,6 +1721,7 @@ def submit_invoice(invoice=None, data=None):
 
     pos_profile = invoice.get("pos_profile")
     doctype = invoice.get("doctype", "Sales Invoice")
+    incoming_payments = [dict(p) for p in (invoice.get("payments") or [])]
 
     # Normalize pricing_rules before processing
     standardize_pricing_rules(invoice.get("items"))
@@ -1876,9 +1904,37 @@ def submit_invoice(invoice=None, data=None):
         frappe.flags.ignore_account_permission = True
         invoice_doc.save()
 
-        # Submit invoice
+        # restore after save
+        _restore_payment_amounts(invoice_doc, incoming_payments)
+        _set_payment_accounts(invoice_doc.payments, invoice_doc.company)
+
+        invoice_doc.db_set("paid_amount", invoice_doc.paid_amount, update_modified=False)
+        invoice_doc.db_set("base_paid_amount", invoice_doc.base_paid_amount, update_modified=False)
+        invoice_doc.db_set(
+            "outstanding_amount",
+            invoice_doc.outstanding_amount,
+            update_modified=False,
+        )
+
+        # submit
         invoice_doc.submit()
+
+        # final hard restore after submit
+        _restore_payment_amounts(invoice_doc, incoming_payments)
+        _set_payment_accounts(invoice_doc.payments, invoice_doc.company)
+
+        invoice_doc.db_set("paid_amount", invoice_doc.paid_amount, update_modified=False)
+        invoice_doc.db_set("base_paid_amount", invoice_doc.base_paid_amount, update_modified=False)
+        invoice_doc.db_set(
+            "outstanding_amount",
+            invoice_doc.outstanding_amount,
+            update_modified=False,
+        )
+        invoice_doc.set_status(update=True)
+        invoice_doc.reload()
+
         invoice_submitted = True
+
         # Handle wallet transaction reversal for returns
         wallet_reversal_ok = False
         if invoice_doc.get("is_return") and invoice_doc.get("return_against"):
