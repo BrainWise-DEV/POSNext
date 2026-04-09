@@ -254,17 +254,20 @@
 										/>
 									</div>
 
-									<FormControl
-										type="select"
-										:label="__('Coupon Type')"
-										v-model="form.coupon_type"
-										:disabled="!isCreating"
-										:options="[
-											{ label: __('Promotional'), value: 'Promotional' },
-											{ label: __('Gift Card'), value: 'Gift Card' }
-										]"
-										required
-									/>
+									<div>
+										<label class="block text-sm font-medium text-gray-700 mb-1.5 text-start">
+											{{ __('Coupon Type') }} <span class="text-red-500">*</span>
+										</label>
+										<select
+											v-model="form.coupon_type"
+											:disabled="!isCreating"
+											class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 disabled:bg-gray-100 disabled:text-gray-500"
+											required
+										>
+											<option value="Promotional">{{ __('Promotional') }}</option>
+											<option value="Gift Card">{{ __('Gift Card') }}</option>
+										</select>
+									</div>
 
 									<FormControl
 										type="text"
@@ -342,27 +345,33 @@
 									<h4 class="text-sm font-semibold text-gray-900">{{ __('Discount Configuration') }}</h4>
 								</div>
 								<div class="grid grid-cols-2 gap-4">
-									<FormControl
-										type="select"
-										:label="__('Discount Type')"
-										v-model="form.discount_type"
-										:options="[
-											{ label: __('Percentage'), value: 'Percentage' },
-											{ label: __('Amount'), value: 'Amount' }
-										]"
-										required
-									/>
+									<div>
+										<label class="block text-sm font-medium text-gray-700 mb-1.5 text-start">
+											{{ __('Discount Type') }} <span class="text-red-500">*</span>
+										</label>
+										<select
+											v-model="form.discount_type"
+											class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
+											required
+										>
+											<option value="Percentage">{{ __('Percentage') }}</option>
+											<option value="Amount">{{ __('Amount') }}</option>
+										</select>
+									</div>
 
-									<FormControl
-										type="select"
-										:label="__('Apply Discount On')"
-										v-model="form.apply_on"
-										:options="[
-											{ label: __('Grand Total'), value: 'Grand Total' },
-											{ label: __('Net Total'), value: 'Net Total' }
-										]"
-										required
-									/>
+									<div>
+										<label class="block text-sm font-medium text-gray-700 mb-1.5 text-start">
+											{{ __('Apply Discount On') }} <span class="text-red-500">*</span>
+										</label>
+										<select
+											v-model="form.apply_on"
+											class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900"
+											required
+										>
+											<option value="Grand Total">{{ __('Grand Total') }}</option>
+											<option value="Net Total">{{ __('Net Total') }}</option>
+										</select>
+									</div>
 
 									<FormControl
 										v-if="form.discount_type === 'Percentage'"
@@ -713,13 +722,16 @@ const campaignsResource = createResource({
 		return {
 			doctype: "Campaign",
 			fields: ["name"],
-			filters: { disabled: 0 },
+			order_by: "name asc",
 			limit_page_length: 999,
 		}
 	},
 	auto: false,
 	onSuccess(data) {
 		campaigns.value = data || []
+	},
+	onError(error) {
+		handleError(error, __("Failed to load campaigns"))
 	},
 })
 
@@ -953,14 +965,14 @@ function resetForm() {
 function populateFormFromCoupon(coupon) {
 	form.value = {
 		coupon_name: coupon.coupon_name || "",
-		coupon_type: coupon.coupon_type || __('Promotional'),
+		coupon_type: coupon.coupon_type || "Promotional",
 		coupon_code: coupon.coupon_code || "",
-		discount_type: coupon.discount_type || __('Percentage'),
+		discount_type: coupon.discount_type || "Percentage",
 		discount_percentage: coupon.discount_percentage || null,
 		discount_amount: coupon.discount_amount || null,
 		min_amount: coupon.min_amount || null,
 		max_amount: coupon.max_amount || null,
-		apply_on: coupon.apply_on || __('Grand Total'),
+		apply_on: coupon.apply_on || "Grand Total",
 		customer: coupon.customer || "",
 		campaign: coupon.campaign || "",
 		valid_from: coupon.valid_from || "",
