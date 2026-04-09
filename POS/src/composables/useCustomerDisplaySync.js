@@ -48,7 +48,7 @@ const notifySaleCompleteResource = createResource({
 /**
  * Build cart data payload for customer display
  */
-function buildCartPayload(cartStore, currency = "EUR") {
+function buildCartPayload(cartStore, currency ) {
 	const items = toRaw(cartStore.invoiceItems).map((item) => ({
 		item_code: item.item_code,
 		item_name: item.item_name,
@@ -150,7 +150,7 @@ export function useCustomerDisplaySync() {
 	 * @param {string} posOpeningEntry - POS Opening Entry name
 	 * @param {string} currency - Currency code
 	 */
-	function enableSync(posOpeningEntry, currency = "EUR") {
+	function enableSync(posOpeningEntry, currency) {
 		if (!posOpeningEntry) {
 			log.warn("Cannot enable sync without POS opening entry")
 			return
@@ -319,7 +319,7 @@ export function useCustomerDisplaySync() {
 	/**
 	 * Manually trigger cart sync
 	 */
-	function forceSync(currency = "EUR") {
+	function forceSync(currency) {
 		syncCartToDisplay(cartStore, currency)
 	}
 

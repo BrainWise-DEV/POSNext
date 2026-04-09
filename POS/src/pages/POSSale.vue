@@ -147,46 +147,69 @@
 						</svg>
 						<span>{{ __("Return Invoice") }}</span>
 					</button>
-					<button
-						v-if="canAccessShiftActions && canSwitchToDesk"
-						@click="switchToDesk"
-						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-emerald-50 flex items-center gap-3 transition-colors"
+				<button
+					v-if="canAccessShiftActions && canSwitchToDesk"
+					@click="switchToDesk"
+					class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-emerald-50 flex items-center gap-3 transition-colors"
+				>
+					<svg
+						class="w-5 h-5 text-emerald-600"
+						fill="none"
+						stroke="currentColor"
+						viewBox="0 0 24 24"
 					>
-						<svg
-							class="w-5 h-5 text-emerald-600"
-							fill="none"
-							stroke="currentColor"
-							viewBox="0 0 24 24"
-						>
-							<path
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								stroke-width="2"
-								d="M3 7h18M3 12h18M3 17h18"
-							/>
-						</svg>
-						<span>{{ __("Switch To Desk") }}</span>
-					</button>
-					<hr class="my-1 border-gray-100"> 
-					<button
-						@click="lockSession()"
-						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-amber-50 flex items-center gap-3 transition-colors"
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							stroke-width="2"
+							d="M3 7h18M3 12h18M3 17h18"
+						/>
+					</svg>
+					<span>{{ __("Switch To Desk") }}</span>
+				</button>
+
+				<button
+					v-if="canAccessShiftActions"
+					@click="window.open('/pos/display', '_blank')"
+					class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-blue-50 flex items-center gap-3 transition-colors"
+				>
+					<svg
+						class="w-5 h-5 text-blue-600"
+						fill="none"
+						stroke="currentColor"
+						viewBox="0 0 24 24"
 					>
-						<svg
-							class="w-5 h-5 text-amber-600"
-							fill="none"
-							stroke="currentColor"
-							viewBox="0 0 24 24"
-						>
-							<path
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								stroke-width="2"
-								d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
-							/>
-						</svg>
-						<span>{{ __("Lock Screen") }}</span>
-					</button>
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							stroke-width="2"
+							d="M9.75 17L15 12l-5.25-5M21 12H3"
+						/>
+					</svg>
+					<span>{{ __("Customer Display") }}</span>
+				</button>
+
+				<hr class="my-1 border-gray-100">
+
+				<button
+					@click="lockSession()"
+					class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-amber-50 flex items-center gap-3 transition-colors"
+				>
+					<svg
+						class="w-5 h-5 text-amber-600"
+						fill="none"
+						stroke="currentColor"
+						viewBox="0 0 24 24"
+					>
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							stroke-width="2"
+							d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+						/>
+					</svg>
+					<span>{{ __("Lock Screen") }}</span>
+				</button>
 				</template>
 				<template #additional-actions>
 					<button
@@ -657,6 +680,49 @@
 				:company="shiftStore.profileCompany"
 			/>
 
+			<!-- Customer Created from Display Dialog -->
+			<Dialog
+				v-model="uiStore.showCustomerCreatedDialog"
+				:options="{ title: __('New Customer'), size: 'sm' }"
+			>
+				<template #body-content>
+					<div class="py-4 text-center">
+						<div class="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-green-100 mb-4">
+							<svg class="h-8 w-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+							</svg>
+						</div>
+						<p class="text-gray-700 text-base mb-2">
+							{{ __("Customer created from display:") }}
+						</p>
+						<p class="font-semibold text-lg text-gray-900">
+							{{ uiStore.customerCreatedData?.customer_name }}
+						</p>
+						<p class="text-sm text-gray-500 mt-1">
+							{{ __("Do you want to select this customer for the current sale?") }}
+						</p>
+					</div>
+				</template>
+				<template #actions>
+					<div class="flex gap-2 w-full">
+						<Button
+							class="flex-1"
+							variant="subtle"
+							@click="uiStore.clearCustomerCreatedNotification()"
+						>
+							{{ __("No") }}
+						</Button>
+						<Button
+							class="flex-1"
+							variant="solid"
+							@click="selectCustomerFromDisplay"
+						>
+							{{ __("Yes, select") }}
+						</Button>
+					</div>
+				</template>
+			</Dialog>
+
 			<!-- Invoice Management -->
 			<InvoiceManagement
 				v-model="showInvoiceManagement"
@@ -1023,6 +1089,7 @@ import { useRealtimeStock } from "@/composables/useRealtimeStock";
 import { useSessionLock } from "@/composables/useSessionLock";
 import { usePOSEvents } from "@/composables/usePOSEvents";
 import { useLocale } from "@/composables/useLocale";
+import { useCustomerDisplaySync } from "@/composables/useCustomerDisplaySync";
 import { session } from "@/data/session";
 import { useUserData } from "@/data/user";
 import { parseError } from "@/utils/errorHandler";
@@ -1068,6 +1135,13 @@ const settingsStore = posSettingsStore;
 
 // Real-time stock updates
 const { onStockUpdate } = useRealtimeStock();
+
+const {
+	enableSync: enableDisplaySync,
+	disableSync: disableDisplaySync,
+	notifySaleComplete,
+	onCustomerCreated,
+} = useCustomerDisplaySync();
 
 // Session lock (inactivity + tab-refocus)
 const { lock: lockSession, configure: configureSessionLock, startActivityTracking, stopActivityTracking } = useSessionLock();
@@ -1394,6 +1468,7 @@ onMounted(async () => {
 
 	// Store cleanup function for unmount
 	onUnmounted(() => {
+		disableDisplaySync();
 		cleanup();
 		stopActivityTracking();
 		qzDisconnect();
@@ -1444,6 +1519,24 @@ onMounted(async () => {
 		uiStore.setLoading(false);
 	}
 
+	async function selectCustomerFromDisplay() {
+		const customerData = uiStore.customerCreatedData;
+		if (!customerData?.name) {
+			uiStore.clearCustomerCreatedNotification();
+			return;
+		}
+
+		try {
+			await cartStore.setCustomer(customerData.name);
+			showSuccess(__("Customer selected successfully"));
+		} catch (error) {
+			log.error("Failed selecting customer from display", error);
+			showError(__("Failed to select customer"));
+		} finally {
+			uiStore.clearCustomerCreatedNotification();
+		}
+	}
+
 	async function initPOS() {
 		const hasShift = await shiftStore.checkShift();
 
@@ -1462,6 +1555,27 @@ onMounted(async () => {
 			stockStore.setWarehouse(shiftStore.profileWarehouse);
 		}
 
+		// Customer display sync
+		if (shiftStore.currentShift?.name) {
+			enableDisplaySync(
+				shiftStore.currentShift.name,
+				shiftStore.currentProfile
+			);
+
+			onCustomerCreated(async (customerData) => {
+				log.info("Customer created from display notification", customerData);
+
+				await customerSearchStore.addCustomerToCache({
+					name: customerData.name,
+					customer_name: customerData.customer_name,
+					mobile_no: customerData.mobile_no || "",
+					email_id: customerData.email || "",
+				});
+
+				uiStore.showCustomerCreatedNotification(customerData);
+			});
+		}
+		
 		// Fire independent operations in parallel while settings load.
 		// Settings must complete before tax rules, but the rest are independent.
 		const settingsPromise = posSettingsStore.loadSettings(shiftStore.profileName);
@@ -1494,7 +1608,12 @@ onMounted(async () => {
 
 		// Load tax rules (depends on settings being loaded)
 		await cartStore.loadTaxRules(shiftStore.profileName, posSettingsStore.settings);
-
+		if (shiftStore.currentShift?.name) {
+			enableDisplaySync(
+				shiftStore.currentShift.name,
+				shiftStore.currentProfile
+			);
+		}
 		_initializedKey = `${shiftStore.profileName}::${shiftStore.currentShift?.name}`;
 	}
 });
@@ -1791,6 +1910,7 @@ async function updatePeriodicStockSyncItems(warehouse) {
 
 // Cleanup event listeners on unmount
 onUnmounted(() => {
+	disableDisplaySync();
 	window.removeEventListener("stockSyncComplete", handleStockSyncComplete);
 	window.removeEventListener("stockSyncError", handleStockSyncError);
 });
@@ -1808,6 +1928,12 @@ async function handleShiftOpened() {
 		stockStore.setWarehouse(shiftStore.profileWarehouse);
 	}
 
+	if (shiftStore.currentShift?.name) {
+		enableDisplaySync(
+			shiftStore.currentShift.name,
+			shiftStore.currentProfile
+		);
+	}
 	// Mirror initPOS: fire independent operations in parallel while settings load
 	const settingsPromise = posSettingsStore.loadSettings(shiftStore.profileName);
 
@@ -1846,6 +1972,7 @@ async function handleShiftOpened() {
 async function handleShiftClosed() {
 	uiStore.showCloseShiftDialog = false;
 	showSuccess(__("Shift closed successfully"));
+	disableDisplaySync();
 
 	// Check if logout should happen after closing shift
 	if (logoutAfterClose.value) {
@@ -1876,6 +2003,24 @@ function preserveItemPolicySnapshot(item) {
 		uom_policy: normalizedPolicy,
 		item_uoms: Array.isArray(item?.item_uoms) ? [...item.item_uoms] : [],
 		uom_prices: item?.uom_prices ? { ...item.uom_prices } : {},
+	}
+}
+
+async function selectCustomerFromDisplay() {
+	const customerData = uiStore.customerCreatedData;
+	if (!customerData?.name) {
+		uiStore.clearCustomerCreatedNotification();
+		return;
+	}
+
+	try {
+		await cartStore.setCustomer(customerData.name);
+		showSuccess(__("Customer selected successfully"));
+	} catch (error) {
+		log.error("Failed selecting customer from display", error);
+		showError(__("Failed to select customer"));
+	} finally {
+		uiStore.clearCustomerCreatedNotification();
 	}
 }
 
@@ -2347,6 +2492,7 @@ async function handlePaymentCompleted(paymentData) {
 			const soldItemCodes = cartStore.invoiceItems.map((item) => item.item_code);
 
 			const result = await cartStore.submitInvoice();
+			notifySaleComplete();
 
 			if (result) {
 				const submittedDoc = result.message || result || {}

@@ -272,7 +272,7 @@ def get_current_cart(pos_opening_entry):
         "total_tax": 0,
         "discount_amount": 0,
         "grand_total": 0,
-        "currency": "EUR",
+        "currency": frappe.defaults.get_global_default("currency") or "MVR",
         "_updated_at": None,
         "_pos_opening_entry": pos_opening_entry
     }
@@ -459,7 +459,7 @@ def clear_cart_cache(pos_opening_entry):
             "total_tax": 0,
             "discount_amount": 0,
             "grand_total": 0,
-            "currency": "EUR",
+            "currency": frappe.defaults.get_global_default("currency") or "MVR",
             "_cleared": True,
             "_updated_at": now(),
             "_pos_opening_entry": pos_opening_entry

@@ -1,0 +1,383 @@
+diff --git a/POS/src/realtime.js b/POS/src/realtime.js
+new file mode 100644
+index 00000000..64fe1c4f
+--- /dev/null
++++ b/POS/src/realtime.js
+@@ -0,0 +1,248 @@
++/**
++ * Frappe Realtime Compatibility Layer
++ *
++ * Creates a window.frappe.realtime interface compatible with Frappe's
++ * Socket.IO implementation. This allows composables that rely on
++ * window.frappe.realtime to work in the standalone POS app.
++ *
++ * Usage:
++ *   import { initRealtime } from './realtime'
++ *   await initRealtime() // Call once at app startup (async)
++ *
++ * Then composables can use:
++ *   window.frappe.realtime.on('event_name', handler)
++ *   window.frappe.realtime.off('event_name', handler)
++ */
++
++import { io } from "socket.io-client"
++import { logger } from "./utils/logger"
++
++const log = logger.create("Realtime")
++
++let socket = null
++let isInitialized = false
++
++/**
++ * Get Socket.IO port from common_site_config.json
++ * Falls back to standard ports if not available
++ */
++function getSocketIOPort() {
++	try {
++		// Try to import from common_site_config.json
++		// This might fail in production builds
++		return null // Will use same port as HTTP
++	} catch {
++		return null
++	}
++}
++
++/**
++ * Get the Frappe site name for Socket.IO namespace
++ * The site name is used as the Socket.IO namespace (e.g., /prod.local)
++ *
++ * Priority:
++ * 1. window.frappe.boot.sitename (set by Frappe)
++ * 2. localStorage cache (frappe_site_name)
++ * 3. API call to get_site_info (and cache result)
++ * 4. Fallback to window.location.hostname
++ */
++async function getSiteName() {
++	// 1. Try to get from window.frappe.boot (set by Frappe)
++	if (window.frappe?.boot?.sitename) {
++		log.debug("Site name from frappe.boot", { sitename: window.frappe.boot.sitename })
++		return window.frappe.boot.sitename
++	}
++
++	// 2. Check localStorage cache
++	const cachedSiteName = localStorage.getItem("frappe_site_name")
++	if (cachedSiteName) {
++		log.debug("Site name from localStorage cache", { sitename: cachedSiteName })
++		return cachedSiteName
++	}
++
++	// 3. Try to fetch from API
++	try {
++		log.debug("Fetching site name from API...")
++		const response = await fetch("/api/method/pos_next.api.utilities.get_site_info", {
++			method: "GET",
++			credentials: "include",
++			headers: {
++				Accept: "application/json",
++			},
++		})
++
++		if (response.ok) {
++			const data = await response.json()
++			if (data.message?.site_name) {
++				const siteName = data.message.site_name
++				localStorage.setItem("frappe_site_name", siteName)
++				log.info("Site name fetched and cached", { sitename: siteName })
++				return siteName
++			}
++		}
++	} catch (error) {
++		log.warn("Could not fetch site name from API", { error: error.message })
++	}
++
++	// 4. Fallback to hostname (works for single-site setups where hostname = site name)
++	const hostname = window.location.hostname
++	log.warn("Using hostname as fallback site name", { hostname })
++	return hostname
++}
++
++/**
++ * Initialize the realtime connection and expose window.frappe.realtime
++ * This function is async because getSiteName() may need to fetch from API
++ */
++export async function initRealtime() {
++	if (isInitialized) {
++		log.debug("Realtime already initialized")
++		return
++	}
++
++	try {
++		// Build Socket.IO URL
++		// Frappe's Socket.IO uses the site name as namespace
++		const host = window.location.hostname
++		const port = window.location.port
++		const protocol = window.location.protocol === "https:" ? "https" : "http"
++
++		// For production, use same origin (Socket.IO connects to same server)
++		// For development with socketio_port, use that port
++		const socketioPort = getSocketIOPort()
++		const url = socketioPort
++			? `${protocol}://${host}:${socketioPort}`
++			: `${protocol}://${host}${port ? `:${port}` : ""}`
++
++		// Get site name dynamically (may involve API call)
++		const siteName = await getSiteName()
++		const namespace = `/${siteName}`
++
++		log.info("Initializing Socket.IO realtime", { url, namespace, siteName })
++
++		socket = io(`${url}${namespace}`, {
++			withCredentials: true,
++			reconnectionAttempts: 5,
++			reconnectionDelay: 1000,
++			reconnectionDelayMax: 5000,
++			timeout: 20000,
++			transports: ["websocket", "polling"],
++		})
++
++		// Connection event handlers
++		socket.on("connect", () => {
++			log.info("Socket.IO connected", { id: socket.id })
++		})
++
++		socket.on("disconnect", (reason) => {
++			log.warn("Socket.IO disconnected", { reason })
++		})
++
++		socket.on("connect_error", (error) => {
++			log.error("Socket.IO connection error", { message: error.message })
++		})
++
++		socket.on("reconnect", (attemptNumber) => {
++			log.info("Socket.IO reconnected", { attempt: attemptNumber })
++		})
++
++		socket.on("reconnect_error", (error) => {
++			log.warn("Socket.IO reconnection error", { message: error.message })
++		})
++
++		// Create Frappe-compatible realtime interface
++		const realtime = {
++			socket: socket,
++
++			/**
++			 * Subscribe to a realtime event
++			 * @param {string} event - Event name
++			 * @param {Function} callback - Event handler
++			 */
++			on(event, callback) {
++				if (!socket) {
++					log.warn("Cannot subscribe - socket not initialized", { event })
++					return
++				}
++				log.debug("Subscribing to event", { event })
++				socket.on(event, callback)
++			},
++
++			/**
++			 * Unsubscribe from a realtime event
++			 * @param {string} event - Event name
++			 * @param {Function} callback - Event handler to remove
++			 */
++			off(event, callback) {
++				if (!socket) {
++					log.warn("Cannot unsubscribe - socket not initialized", { event })
++					return
++				}
++				log.debug("Unsubscribing from event", { event })
++				socket.off(event, callback)
++			},
++
++			/**
++			 * Emit an event to the server
++			 * @param {string} event - Event name
++			 * @param {*} data - Event data
++			 */
++			emit(event, data) {
++				if (!socket) {
++					log.warn("Cannot emit - socket not initialized", { event })
++					return
++				}
++				socket.emit(event, data)
++			},
++
++			/**
++			 * Check if socket is connected
++			 * @returns {boolean}
++			 */
++			get connected() {
++				return socket?.connected || false
++			},
++		}
++
++		// Expose as window.frappe.realtime for compatibility
++		if (!window.frappe) {
++			window.frappe = {}
++		}
++		window.frappe.realtime = realtime
++
++		isInitialized = true
++		log.info("Realtime initialized successfully")
++	} catch (error) {
++		log.error("Failed to initialize realtime", error)
++
++		// Create a no-op realtime to prevent crashes
++		if (!window.frappe) {
++			window.frappe = {}
++		}
++		window.frappe.realtime = {
++			on: () => {},
++			off: () => {},
++			emit: () => {},
++			connected: false,
++		}
++	}
++}
++
++/**
++ * Disconnect and cleanup realtime
++ */
++export function disconnectRealtime() {
++	if (socket) {
++		socket.disconnect()
++		socket = null
++	}
++	isInitialized = false
++	log.info("Realtime disconnected")
++}
++
++/**
++ * Get the raw socket instance (for advanced use)
++ */
++export function getSocket() {
++	return socket
++}
+diff --git a/POS/src/socket.js b/POS/src/socket.js
+index 20e64cad..9087d66f 100644
+--- a/POS/src/socket.js
++++ b/POS/src/socket.js
+@@ -4,33 +4,48 @@ import { socketio_port } from "../../../../sites/common_site_config.json"
+ let socket = null
+ 
+ export function initSocket() {
+-	if (socket) return socket
++	// Don't reinitialize if socket already exists
++	if (socket) {
++		console.log("Socket already initialized")
++		return socket
++	}
+ 
+ 	try {
+-		const host = window.location.hostname
+-		const isLocal =
+-			host === "localhost" ||
+-			host === "127.0.0.1" ||
+-			window.location.protocol === "http:"
++		// Try to get site name from various sources
++		const siteName =
++			window.site_name ||
++			(window.frappe && window.frappe.boot && window.frappe.boot.sitename) ||
++			window.location.hostname
+ 
+-		const port = isLocal ? `:${socketio_port}` : ""
+-		const protocol = isLocal ? "http" : "https"
++		const host = window.location.hostname
++		const port = window.location.port ? `:${socketio_port}` : ""
++		const protocol = port ? "http" : "https"
++		const url = `${protocol}://${host}${port}/${siteName}`
+ 
+-		// Use root domain only — no sitename suffix
+-		const url = `${protocol}://${host}${port}`
++		console.log("Initializing socket (lazy connection):", url)
+ 
+ 		socket = io(url, {
+ 			withCredentials: true,
+ 			reconnectionAttempts: 3,
+-			autoConnect: false,
++			autoConnect: false, // Lazy connect - only connect when explicitly needed
+ 		})
+ 
+-		socket.on("connect_error", () => {})
+-		socket.on("connect", () => {})
++		// Connect with error handling
++		socket.on("connect_error", (error) => {
++			console.warn("Socket connection error:", error.message)
++		})
++
++		socket.on("connect", () => {
++			console.log("Socket connected successfully")
++		})
++
++		// Don't auto-connect - let components connect when they need realtime features
++		// Components can call socket.connect() when they need realtime functionality
+ 
+ 		return socket
+ 	} catch (error) {
+ 		console.error("Failed to initialize socket:", error)
++		// Return a mock socket object to prevent crashes
+ 		return {
+ 			on: () => {},
+ 			emit: () => {},
+@@ -44,9 +59,10 @@ export function disconnectSocket() {
+ 	if (socket) {
+ 		socket.disconnect()
+ 		socket = null
++		console.log("Socket disconnected and cleared")
+ 	}
+ }
+ 
+ export function useSocket() {
+ 	return socket
+-}
+\ No newline at end of file
++}
+diff --git a/pos_next/realtime_events.py b/pos_next/realtime_events.py
+index 1fbd0555..26b8ba66 100644
+--- a/pos_next/realtime_events.py
++++ b/pos_next/realtime_events.py
+@@ -183,45 +183,3 @@ def emit_pos_profile_updated_event(doc, method=None):
+ 			title=_("Real-time POS Profile Update Event Error"),
+ 			message=f"Failed to emit POS profile update event for {doc.name}: {str(e)}"
+ 		)
+-
+-
+-def emit_customer_event(doc, method=None):
+-	"""
+-	Emit real-time customer update event.
+-
+-	This event notifies all connected POS terminals about customer changes,
+-	allowing them to update their local cache immediately.
+-
+-	Args:
+-		doc: Customer document
+-		method: Hook method name (after_insert, on_update, on_trash)
+-	"""
+-	try:
+-		action = "update"
+-		if method == "after_insert":
+-			action = "create"
+-		elif method == "on_trash":
+-			action = "delete"
+-
+-		event_data = {
+-			"name": doc.name,
+-			"customer_name": doc.customer_name,
+-			"mobile_no": doc.mobile_no or "",
+-			"email_id": doc.email_id or "",
+-			"disabled": doc.disabled,
+-			"action": action,
+-			"timestamp": frappe.utils.now(),
+-		}
+-		
+-		frappe.publish_realtime(
+-			event="pos_customer_changed",
+-			message=event_data,
+-			user=None,  # Broadcast to all users
+-			after_commit=True  # Only emit after successful DB commit
+-		)
+-
+-	except Exception as e:
+-		frappe.log_error(
+-			title=_("Real-time Customer Update Event Error"),
+-			message=f"Failed to emit customer update event for {doc.name}: {str(e)}"
+-		)
