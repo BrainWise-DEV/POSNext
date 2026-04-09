@@ -123,11 +123,30 @@ const showCreateCustomer = ref(false)
 
 // Format currency
 function formatCurrency(amount) {
-	const currency = displayStore.cartData.currency || "EUR"
-	return new Intl.NumberFormat("fr-FR", {
-		style: "currency",
-		currency: currency,
-	}).format(amount)
+	const rawCurrency = displayStore.cartData?.currency
+
+	const currency =
+		typeof rawCurrency === "string"
+			? rawCurrency
+			: rawCurrency?.name ||
+			  rawCurrency?.currency ||
+			  rawCurrency?.code ||
+			  null
+
+	const numericAmount = Number(amount || 0)
+
+	if (!currency) {
+		return numericAmount.toFixed(2)
+	}
+
+	try {
+		return new Intl.NumberFormat(undefined, {
+			style: "currency",
+			currency,
+		}).format(numericAmount)
+	} catch {
+		return `${currency} ${numericAmount.toFixed(2)}`
+	}
 }
 
 // Handle profile selection

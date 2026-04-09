@@ -162,32 +162,55 @@ def get_display_settings(pos_profile):
     if not pos_profile:
         frappe.throw(_("POS Profile is required"))
 
-    # Get POS Settings for this profile
-    settings = frappe.db.get_value(
-        "POS Settings",
-        {"pos_profile": pos_profile, "enabled": 1},
-        [
-            "enable_customer_display",
-            "enable_customer_display_account_creation",
-            "customer_display_show_address_fields"
-        ],
-        as_dict=True
-    )
-
-    if not settings:
-        # Return defaults if no settings found
-        return {
-            "enable_customer_display": False,
-            "enable_account_creation": False,
-            "show_address_fields": False
-        }
-
-    return {
-        "enable_customer_display": bool(settings.enable_customer_display),
-        "enable_account_creation": bool(settings.enable_customer_display_account_creation),
-        "show_address_fields": bool(settings.customer_display_show_address_fields)
+    defaults = {
+        "enable_customer_display": False,
+        "enable_account_creation": False,
+        "show_address_fields": False,
     }
 
+    try:
+        meta = frappe.get_meta("POS Settings")
+        fieldnames = {df.fieldname for df in meta.fields}
+
+        filters = {"pos_profile": pos_profile}
+        if "enabled" in fieldnames:
+            filters["enabled"] = 1
+
+        select_fields = []
+        if "enable_customer_display" in fieldnames:
+            select_fields.append("enable_customer_display")
+        if "enable_customer_display_account_creation" in fieldnames:
+            select_fields.append("enable_customer_display_account_creation")
+        if "customer_display_show_address_fields" in fieldnames:
+            select_fields.append("customer_display_show_address_fields")
+
+        if not select_fields:
+            return defaults
+
+        settings = frappe.db.get_value(
+            "POS Settings",
+            filters,
+            select_fields,
+            as_dict=True,
+        )
+
+        if not settings:
+            return defaults
+
+        return {
+            "enable_customer_display": bool(settings.get("enable_customer_display")),
+            "enable_account_creation": bool(
+                settings.get("enable_customer_display_account_creation")
+            ),
+            "show_address_fields": bool(
+                settings.get("customer_display_show_address_fields")
+            ),
+        }
+
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), "Customer Display Settings Error")
+        return defaults
+    
 
 @frappe.whitelist()
 def update_cart_data(pos_opening_entry, cart_data):
@@ -272,7 +295,7 @@ def get_current_cart(pos_opening_entry):
         "total_tax": 0,
         "discount_amount": 0,
         "grand_total": 0,
-        "currency": frappe.defaults.get_global_default("currency") or "MVR",
+        "currency": frappe.defaults.get_global_default("currency"),
         "_updated_at": None,
         "_pos_opening_entry": pos_opening_entry
     }
@@ -459,7 +482,7 @@ def clear_cart_cache(pos_opening_entry):
             "total_tax": 0,
             "discount_amount": 0,
             "grand_total": 0,
-            "currency": frappe.defaults.get_global_default("currency") or "MVR",
+            "currency": frappe.defaults.get_global_default("currency"),
             "_cleared": True,
             "_updated_at": now(),
             "_pos_opening_entry": pos_opening_entry

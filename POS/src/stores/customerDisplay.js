@@ -151,16 +151,16 @@ export const useCustomerDisplayStore = defineStore("customerDisplay", () => {
 
 		try {
 			// Use direct fetch for guest endpoint to avoid CSRF issues
-			const response = await fetch("/api/method/pos_next.api.customer_display.validate_api_key", {
-				method: "POST",
-				headers: {
-					"Content-Type": "application/x-www-form-urlencoded",
-					Accept: "application/json",
+			const response = await fetch(
+				`/api/method/pos_next.api.customer_display.validate_api_key?api_key_string=${encodeURIComponent(key)}`,
+				{
+					method: "GET",
+					credentials: "same-origin",
+					headers: {
+						Accept: "application/json",
+					},
 				},
-				body: new URLSearchParams({
-					api_key_string: key,
-				}),
-			})
+			)
 
 			const data = await response.json()
 

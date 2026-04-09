@@ -167,10 +167,9 @@
 					</svg>
 					<span>{{ __("Switch To Desk") }}</span>
 				</button>
-
 				<button
 					v-if="canAccessShiftActions"
-					@click="window.open('/pos/display', '_blank')"
+					@click="openCustomerDisplay"
 					class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-blue-50 flex items-center gap-3 transition-colors"
 				>
 					<svg
@@ -188,9 +187,7 @@
 					</svg>
 					<span>{{ __("Customer Display") }}</span>
 				</button>
-
 				<hr class="my-1 border-gray-100">
-
 				<button
 					@click="lockSession()"
 					class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-amber-50 flex items-center gap-3 transition-colors"
@@ -214,7 +211,7 @@
 				<template #additional-actions>
 					<button
 						v-if="canAccessShiftActions"
-						@click="handleCloseShift()"
+						@click="handleCloseShift"
 						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-orange-50 flex items-center gap-3 transition-colors"
 					>
 						<svg
@@ -1559,7 +1556,7 @@ onMounted(async () => {
 		if (shiftStore.currentShift?.name) {
 			enableDisplaySync(
 				shiftStore.currentShift.name,
-				shiftStore.currentProfile
+				shiftStore.profileCurrency
 			);
 
 			onCustomerCreated(async (customerData) => {
@@ -1611,7 +1608,7 @@ onMounted(async () => {
 		if (shiftStore.currentShift?.name) {
 			enableDisplaySync(
 				shiftStore.currentShift.name,
-				shiftStore.currentProfile
+				shiftStore.profileCurrency
 			);
 		}
 		_initializedKey = `${shiftStore.profileName}::${shiftStore.currentShift?.name}`;
@@ -1931,7 +1928,7 @@ async function handleShiftOpened() {
 	if (shiftStore.currentShift?.name) {
 		enableDisplaySync(
 			shiftStore.currentShift.name,
-			shiftStore.currentProfile
+			shiftStore.profileCurrency
 		);
 	}
 	// Mirror initPOS: fire independent operations in parallel while settings load
@@ -1962,7 +1959,7 @@ async function handleShiftOpened() {
 	// Load tax rules (depends on settings being loaded)
 	await cartStore.loadTaxRules(shiftStore.profileName, posSettingsStore.settings);
 
-	_initializedProfile = shiftStore.profileName;
+	_initializedKey = `${shiftStore.profileName}::${shiftStore.currentShift?.name}`;
 
 	// Start session lock tracking now that a shift is open and POS is ready
 	startActivityTracking();
@@ -2677,6 +2674,52 @@ function openDraftDialog() {
 	}
 
 	uiStore.showDraftDialog = true;
+}
+
+async function openCustomerDisplay() {
+	if (!canAccessShiftActions.value || typeof window === "undefined") {
+		return
+	}
+
+	const displayUrl = `${window.location.origin}/pos/display`
+	const windowName = "customer_display_window"
+
+	try {
+		if ("getScreenDetails" in window && window.isSecureContext) {
+			const screenDetails = await window.getScreenDetails()
+			const targetScreen =
+				screenDetails.screens.find((screen) => !screen.isPrimary) ||
+				screenDetails.currentScreen
+
+			const features = [
+				"popup=yes",
+				`left=${targetScreen.availLeft}`,
+				`top=${targetScreen.availTop}`,
+				`width=${targetScreen.availWidth}`,
+				`height=${targetScreen.availHeight}`,
+				"resizable=yes",
+				"scrollbars=yes",
+			].join(",")
+
+			const opened = window.open(displayUrl, windowName, features)
+			if (opened) {
+				opened.focus()
+				return
+			}
+		}
+	} catch (error) {
+		console.warn("Second-screen open unavailable, using fallback popup.", error)
+	}
+
+	const fallback = window.open(
+		displayUrl,
+		windowName,
+		"popup=yes,width=1400,height=900,left=100,top=50,resizable=yes,scrollbars=yes"
+	)
+
+	if (fallback) {
+		fallback.focus()
+	}
 }
 
 function openHistoryDialog() {
