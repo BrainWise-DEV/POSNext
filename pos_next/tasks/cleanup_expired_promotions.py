@@ -110,7 +110,7 @@ def disable_expired_promotional_schemes():
 		# Find all active promotional schemes with expired valid_upto dates
 		expired_schemes = frappe.db.sql(
 			"""
-			SELECT name, selling_or_buying, valid_upto
+			SELECT name, valid_upto
 			FROM `tabPromotional Scheme`
 			WHERE disable = 0
 				AND valid_upto IS NOT NULL
