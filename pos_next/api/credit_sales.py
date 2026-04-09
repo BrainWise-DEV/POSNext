@@ -284,7 +284,12 @@ def redeem_customer_credit(invoice_name, customer_credit_dict):
 
 		if credit_type == "Invoice":
 			# Validate and lock the credit source before creating JE
-			_validate_and_lock_invoice_credit(credit_origin, credit_to_redeem)
+			_validate_and_lock_invoice_credit(
+				credit_origin,
+				credit_to_redeem,
+				invoice_doc.customer,
+				invoice_doc.company,
+			)
 
 			# Create JE to allocate credit from original invoice to new invoice
 			je_name = _create_credit_allocation_journal_entry(
@@ -296,7 +301,12 @@ def redeem_customer_credit(invoice_name, customer_credit_dict):
 
 		elif credit_type == "Advance":
 			# Validate and lock the advance payment before allocation
-			_validate_and_lock_advance_credit(credit_origin, credit_to_redeem)
+			_validate_and_lock_advance_credit(
+				credit_origin,
+				credit_to_redeem,
+				invoice_doc.customer,
+				invoice_doc.company,
+			)
 
 			# Create Payment Entry to allocate advance payment
 			pe_name = _create_payment_entry_from_advance(
@@ -309,7 +319,20 @@ def redeem_customer_credit(invoice_name, customer_credit_dict):
 	return created_journal_entries
 
 
-def _validate_and_lock_invoice_credit(invoice_name, amount_to_redeem):
+def _validate_credit_source_ownership(source_name, source_customer, source_company, customer, company):
+	"""Ensure a credit source belongs to the same customer and company as the target invoice."""
+	if source_customer != customer:
+		frappe.throw(
+			_("Credit source {0} does not belong to customer {1}").format(source_name, customer)
+		)
+
+	if source_company != company:
+		frappe.throw(
+			_("Credit source {0} does not belong to company {1}").format(source_name, company)
+		)
+
+
+def _validate_and_lock_invoice_credit(invoice_name, amount_to_redeem, customer, company):
 	"""
 	Validate and lock invoice credit using SELECT FOR UPDATE.
 	This prevents race conditions when multiple users try to use the same credit.
@@ -317,6 +340,8 @@ def _validate_and_lock_invoice_credit(invoice_name, amount_to_redeem):
 	Args:
 		invoice_name: Source invoice name with credit
 		amount_to_redeem: Amount being redeemed
+		customer: Target invoice customer
+		company: Target invoice company
 
 	Raises:
 		frappe.ValidationError: If insufficient credit available
@@ -329,7 +354,12 @@ def _validate_and_lock_invoice_credit(invoice_name, amount_to_redeem):
 	# This blocks other transactions from reading/modifying until we commit
 	query = (
 		frappe.qb.from_(SalesInvoice)
-		.select(SalesInvoice.name, SalesInvoice.outstanding_amount)
+		.select(
+			SalesInvoice.name,
+			SalesInvoice.outstanding_amount,
+			SalesInvoice.customer,
+			SalesInvoice.company,
+		)
 		.where(
 			(SalesInvoice.name == invoice_name) &
 			(SalesInvoice.docstatus == 1)
@@ -341,6 +371,14 @@ def _validate_and_lock_invoice_credit(invoice_name, amount_to_redeem):
 
 	if not result:
 		frappe.throw(_("Credit source invoice {0} not found or not submitted").format(invoice_name))
+
+	_validate_credit_source_ownership(
+		invoice_name,
+		result[0].customer,
+		result[0].company,
+		customer,
+		company,
+	)
 
 	current_outstanding = flt(result[0].outstanding_amount)
 	available_credit = -current_outstanding  # Credit is negative outstanding
@@ -355,7 +393,7 @@ def _validate_and_lock_invoice_credit(invoice_name, amount_to_redeem):
 		)
 
 
-def _validate_and_lock_advance_credit(payment_entry_name, amount_to_redeem):
+def _validate_and_lock_advance_credit(payment_entry_name, amount_to_redeem, customer, company):
 	"""
 	Validate and lock advance payment using SELECT FOR UPDATE.
 	This prevents race conditions when multiple users try to use the same advance.
@@ -363,6 +401,8 @@ def _validate_and_lock_advance_credit(payment_entry_name, amount_to_redeem):
 	Args:
 		payment_entry_name: Payment Entry name with unallocated amount
 		amount_to_redeem: Amount being allocated
+		customer: Target invoice customer
+		company: Target invoice company
 
 	Raises:
 		frappe.ValidationError: If insufficient unallocated amount
@@ -374,7 +414,14 @@ def _validate_and_lock_advance_credit(payment_entry_name, amount_to_redeem):
 	# Use SELECT FOR UPDATE to lock the row
 	query = (
 		frappe.qb.from_(PaymentEntry)
-		.select(PaymentEntry.name, PaymentEntry.unallocated_amount)
+		.select(
+			PaymentEntry.name,
+			PaymentEntry.unallocated_amount,
+			PaymentEntry.party,
+			PaymentEntry.company,
+			PaymentEntry.party_type,
+			PaymentEntry.payment_type,
+		)
 		.where(
 			(PaymentEntry.name == payment_entry_name) &
 			(PaymentEntry.docstatus == 1)
@@ -386,6 +433,19 @@ def _validate_and_lock_advance_credit(payment_entry_name, amount_to_redeem):
 
 	if not result:
 		frappe.throw(_("Payment Entry {0} not found or not submitted").format(payment_entry_name))
+
+	if result[0].party_type != "Customer" or result[0].payment_type != "Receive":
+		frappe.throw(
+			_("Payment Entry {0} is not a valid customer advance").format(payment_entry_name)
+		)
+
+	_validate_credit_source_ownership(
+		payment_entry_name,
+		result[0].party,
+		result[0].company,
+		customer,
+		company,
+	)
 
 	available_amount = flt(result[0].unallocated_amount)
 
@@ -417,6 +477,14 @@ def _create_credit_allocation_journal_entry(invoice_doc, original_invoice_name, 
 	"""
 	# Get original invoice
 	original_invoice = frappe.get_doc("Sales Invoice", original_invoice_name)
+
+	_validate_credit_source_ownership(
+		original_invoice.name,
+		original_invoice.customer,
+		original_invoice.company,
+		invoice_doc.customer,
+		invoice_doc.company,
+	)
 
 	# Get cost center
 	cost_center = invoice_doc.get("cost_center") or frappe.get_cached_value(
@@ -485,6 +553,19 @@ def _create_payment_entry_from_advance(invoice_doc, payment_entry_name, amount):
 	"""
 	# Get payment entry
 	payment_entry = frappe.get_doc("Payment Entry", payment_entry_name)
+
+	if payment_entry.party_type != "Customer" or payment_entry.payment_type != "Receive":
+		frappe.throw(
+			_("Payment Entry {0} is not a valid customer advance").format(payment_entry_name)
+		)
+
+	_validate_credit_source_ownership(
+		payment_entry.name,
+		payment_entry.party,
+		payment_entry.company,
+		invoice_doc.customer,
+		invoice_doc.company,
+	)
 
 	# Check if already allocated
 	if payment_entry.unallocated_amount < amount:

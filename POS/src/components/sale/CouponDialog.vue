@@ -162,6 +162,14 @@ const props = defineProps({
 		required: true,
 		note: __("Cart subtotal BEFORE tax - used for discount calculations"),
 	},
+	taxAmount: {
+		type: Number,
+		default: 0,
+	},
+	grandTotal: {
+		type: Number,
+		default: 0,
+	},
 	items: Array,
 	posProfile: String,
 	customer: String,
@@ -257,6 +265,14 @@ function applyGiftCard(card) {
 	applyCoupon()
 }
 
+function getCouponBaseAmount(coupon) {
+	const grandTotal = Number.parseFloat(props.grandTotal || 0)
+	const taxAmount = Number.parseFloat(props.taxAmount || 0)
+	const netTotal = Math.max(grandTotal - taxAmount, 0)
+
+	return coupon.apply_on === "Grand Total" ? grandTotal : netTotal
+}
+
 async function applyCoupon() {
 	if (!couponCode.value.trim()) {
 		errorMessage.value = __("Please enter a coupon code")
@@ -282,9 +298,10 @@ async function applyCoupon() {
 		}
 
 		const coupon = validationData.coupon
+		const baseAmount = getCouponBaseAmount(coupon)
 
-		// Check minimum amount (on subtotal before tax)
-		if (coupon.min_amount && props.subtotal < coupon.min_amount) {
+		// Check minimum amount on the configured coupon base
+		if (coupon.min_amount && baseAmount < coupon.min_amount) {
 			errorMessage.value = __('This coupon requires a minimum purchase of ', [formatCurrency(coupon.min_amount)])
 			showWarning(errorMessage.value)
 			return
@@ -297,24 +314,25 @@ async function applyCoupon() {
 			amount: coupon.discount_type === "Amount" ? coupon.discount_amount : 0,
 		}
 
-		let discountAmount = calculateDiscountAmount(discountObj, props.subtotal)
+		let discountAmount = calculateDiscountAmount(discountObj, baseAmount)
 
 		// Apply maximum discount limit if specified
 		if (coupon.max_amount && discountAmount > coupon.max_amount) {
 			discountAmount = coupon.max_amount
 		}
 
-		// Clamp discount to subtotal to prevent negative totals
-		discountAmount = Math.min(discountAmount, props.subtotal)
+		// Clamp discount to the selected coupon base to prevent negative totals
+		discountAmount = Math.min(discountAmount, baseAmount)
 
 		appliedDiscount.value = {
 			name: coupon.coupon_name || coupon.coupon_code,
 			code: couponCode.value.toUpperCase(),
-			percentage: coupon.discount_percentage || 0,
+			percentage: coupon.discount_type === "Percentage" ? coupon.discount_percentage : 0,
 			amount: discountAmount,
 			type: coupon.discount_type,
 			coupon: coupon,
 			apply_on: coupon.apply_on,
+			base_amount: baseAmount,
 		}
 
 		emit("discount-applied", appliedDiscount.value)

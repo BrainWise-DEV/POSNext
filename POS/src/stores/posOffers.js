@@ -3,6 +3,7 @@ import { computed, ref } from "vue"
 import { call } from "@/utils/apiWrapper"
 import { isOffline } from "@/utils/offline"
 import { offlineWorker } from "@/utils/offline/workerClient"
+import { usePOSShiftStore } from "@/stores/posShift"
 
 const defaultSnapshot = () => ({
 	subtotal: 0,
@@ -283,6 +284,13 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 	 * @returns {Promise<boolean>} True if offers are available (fetched or cached)
 	 */
 	async function ensureOffersFetched(posProfile) {
+		// Skip fetching offers if POS Profile has ignore_pricing_rule enabled
+		const shiftStore = usePOSShiftStore()
+		if (shiftStore.currentProfile?.ignore_pricing_rule) {
+			hasFetched.value = true
+			return false
+		}
+
 		// If already fetched, return immediately
 		if (hasFetched.value) {
 			return true

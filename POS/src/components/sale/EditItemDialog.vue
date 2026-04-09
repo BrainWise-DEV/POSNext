@@ -160,7 +160,7 @@
                             <div v-if="localItem?.is_resolved_barcode" class="w-full h-10 border border-amber-300 rounded-lg bg-amber-50 flex items-center justify-center">
                               <span class="text-sm font-semibold text-amber-700">{{ localUom }}</span>
                             </div>
-                            <SelectInput v-else v-model="localUom" :options="uomOptions" @change="handleUomChange" />
+                            <SelectInput v-else v-model="localUom" :options="uomOptions" />
 													</div>
 
 													<!-- Warehouse Selector -->
@@ -287,7 +287,7 @@ import { usePOSSettingsStore } from "@/stores/posSettings"
 import { useSerialNumberStore } from "@/stores/serialNumber"
 import { getItemStock } from "@/utils/stockValidator"
 import { formatCurrency as formatCurrencyUtil, getCurrencySymbol, roundCurrency } from "@/utils/currency"
-import { Button, FeatherIcon } from "frappe-ui"
+import { Button, FeatherIcon, createResource } from "frappe-ui"
 import { computed, ref, watch } from "vue"
 import SelectInput from "@/components/common/SelectInput.vue"
 
@@ -323,10 +323,17 @@ const calculatedDiscount = ref(0)
 const calculatedTotal = ref(0)
 const hasStock = ref(true)
 const isCheckingStock = ref(false)
+const isInitializingItem = ref(false)
+const uomRateRequestId = ref(0)
 const localSerials = ref([]) // List of serial numbers for this item
 const removedSerials = ref([]) // Track serials removed during this edit session
 const originalSerials = ref([]) // Original serials when dialog opened
 const originalPriceListRate = ref(0) // Original price_list_rate when dialog opened (for rate edit validation)
+
+const getItemDetailsResource = createResource({
+	url: "pos_next.api.items.get_item_details",
+	auto: false,
+})
 
 const show = computed({
 	get: () => props.modelValue,
@@ -398,6 +405,7 @@ watch(
 	() => props.item,
 	(newItem) => {
 		if (newItem) {
+			isInitializingItem.value = true
 			localItem.value = { ...newItem }
 			localQuantity.value = newItem.quantity || 1
 			localUom.value = newItem.uom || newItem.stock_uom || __("Nos")
@@ -438,10 +446,16 @@ watch(
 			isCheckingStock.value = false
 
 			calculateTotals()
+			isInitializingItem.value = false
 		}
 	},
 	{ immediate: true },
 )
+
+watch(localUom, (newUom, oldUom) => {
+	if (!newUom || newUom === oldUom || isInitializingItem.value) return
+	handleUomChange(newUom)
+})
 
 /**
  * Intelligently determine the step size based on current quantity
@@ -515,9 +529,67 @@ function handleQuantityBlur() {
 	calculateTotals()
 }
 
-function handleUomChange() {
-	// When UOM changes, we need to fetch new rate from server
-	// For now, we'll just recalculate with current rate
+function getConversionFactorForUom(uom) {
+	if (!localItem.value) return 1
+	if (uom === localItem.value.stock_uom) return 1
+	const uomData = localItem.value.item_uoms?.find((itemUom) => itemUom.uom === uom)
+	return uomData?.conversion_factor || 1
+}
+
+async function getRateForUom(uom) {
+	if (!localItem.value) return 0
+
+	// Primary source: fetch exact price_list_rate for selected UOM from backend.
+	const posProfile = settingsStore.settings?.pos_profile || localItem.value.pos_profile
+	if (localItem.value.item_code && posProfile) {
+		try {
+			const itemDetails = await getItemDetailsResource.submit({
+				item_code: localItem.value.item_code,
+				pos_profile: posProfile,
+				qty: localQuantity.value || 1,
+				uom,
+			})
+			const serverRate = Number(itemDetails?.price_list_rate ?? itemDetails?.rate)
+			if (!isNaN(serverRate) && serverRate > 0) {
+				return serverRate
+			}
+		} catch (error) {
+			console.error("Error fetching UOM item price rate:", error)
+		}
+	}
+
+	// Secondary source: preloaded UOM prices on item payload.
+	if (localItem.value.uom_prices?.[uom] !== undefined) {
+		return Number(localItem.value.uom_prices[uom]) || 0
+	}
+
+	// Final fallback: keep current known item rate (no conversion-based pricing).
+	return Number(localItem.value.price_list_rate || localItem.value.rate || localRate.value || 0)
+}
+
+async function handleUomChange(newUom) {
+	const selectedUom = newUom || localUom.value
+	if (!localItem.value || !selectedUom) {
+		calculateTotals()
+		return
+	}
+
+	const requestId = ++uomRateRequestId.value
+	const fetchedRate = await getRateForUom(selectedUom)
+	// Ignore stale responses if user changes UOM repeatedly.
+	if (requestId !== uomRateRequestId.value) return
+
+	const newRate = roundCurrency(fetchedRate)
+	const newConversionFactor = getConversionFactorForUom(selectedUom)
+
+	// Keep local state consistent so update payload has correct UOM pricing metadata.
+	localRate.value = newRate
+	originalPriceListRate.value = newRate
+	localItem.value.uom = selectedUom
+	localItem.value.conversion_factor = newConversionFactor
+	localItem.value.rate = newRate
+	localItem.value.price_list_rate = newRate
+
 	calculateTotals()
 }
 

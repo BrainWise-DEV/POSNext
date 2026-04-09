@@ -347,6 +347,7 @@ class OfflineWorkerClient {
 			case "GET_INVOICES":
 			case "SEARCH_ITEMS":
 			case "SEARCH_ITEMS_BY_GROUP":
+			case "SEARCH_ITEMS_BY_BRAND":
 			case "SEARCH_CUSTOMERS":
 			case "GET_PAYMENT_METHODS":
 			case "GET_CACHED_OFFERS":
@@ -413,6 +414,10 @@ class OfflineWorkerClient {
 		return this.sendMessage("SEARCH_ITEMS_BY_GROUP", { itemGroups, limit, offset })
 	}
 
+	async searchCachedItemsByBrand(brand, limit = 50, offset = 0) {
+		return this.sendMessage("SEARCH_ITEMS_BY_BRAND", { brand, limit, offset })
+	}
+
 	async countCachedItemsByGroup(itemGroups = []) {
 		return this.sendMessage("COUNT_ITEMS_BY_GROUP", { itemGroups })
 	}
@@ -459,6 +464,14 @@ class OfflineWorkerClient {
 
 	async deleteOfflineInvoice(id) {
 		return this.sendMessage("DELETE_INVOICE", { id })
+	}
+
+	async markOfflineInvoicePrinted(offlineId) {
+		return this.sendMessage("MARK_INVOICE_PRINTED", { offline_id: offlineId })
+	}
+
+	async supersedeOfflineInvoice(id, replacedBy) {
+		return this.sendMessage("SUPERSEDE_INVOICE", { id, replaced_by: replacedBy })
 	}
 
 	async setManualOffline(value) {
