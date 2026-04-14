@@ -98,13 +98,7 @@ fixtures = [
 		"filters": [
 			["role", "in", ["POSNext Cashier"]]
 		]
-	},
-	{
-		"doctype": "Custom Field",
-		"filters": [
-			["fieldname", "in", ["sync_uuid", "origin_branch", "synced_from_failover"]]
-		]
-	},
+	}
 ]
 
 # Installation
