@@ -899,19 +899,22 @@ def update_invoice(data):
         # Set accounts for payment methods before saving
         _set_payment_accounts(invoice_doc.payments, invoice_doc.company)
 
-        # For return invoices, ensure payments are negative
-        if invoice_doc.get("is_return"):
-            # Return handling is primarily for Sales Invoice
-            if doctype == "Sales Invoice" and invoice_doc.get("payments"):
+        # Calculate paid_amount and base_paid_amount from payment rows
+        # This applies to both regular and return invoices (required before submission)
+        if doctype == "Sales Invoice" and invoice_doc.get("payments"):
+            # For return invoices, ensure payments are negative
+            if invoice_doc.get("is_return"):
                 for payment in invoice_doc.payments:
                     payment.amount = -abs(payment.amount)
                     if payment.base_amount:
                         payment.base_amount = -abs(payment.base_amount)
 
-                invoice_doc.paid_amount = flt(sum(p.amount for p in invoice_doc.payments))
-                invoice_doc.base_paid_amount = flt(
-                    sum(p.base_amount or 0 for p in invoice_doc.payments)
-                )
+            # Calculate total paid amount from all payment rows
+            # This ensures the invoice is not marked as "Pay on Account" when payments exist
+            invoice_doc.paid_amount = flt(sum(p.amount for p in invoice_doc.payments))
+            invoice_doc.base_paid_amount = flt(
+                sum(p.base_amount or 0 for p in invoice_doc.payments)
+            )
 
         # Validate and track POS Coupon if coupon_code is provided
         coupon_code = data.get("coupon_code")
@@ -1305,6 +1308,22 @@ def submit_invoice(invoice=None, data=None):
         # Set accounts for all payment methods before saving
         if doctype == "Sales Invoice" and hasattr(invoice_doc, "payments"):
             _set_payment_accounts(invoice_doc.payments, invoice_doc.company)
+
+            # Calculate paid_amount and base_paid_amount from payment rows
+            # This ensures the invoice is not marked as "Pay on Account" when payments exist
+            if invoice_doc.get("payments"):
+                # For return invoices, ensure payments are negative
+                if invoice_doc.get("is_return"):
+                    for payment in invoice_doc.payments:
+                        payment.amount = -abs(payment.amount)
+                        if payment.base_amount:
+                            payment.base_amount = -abs(payment.base_amount)
+
+                # Calculate total paid amount from all payment rows
+                invoice_doc.paid_amount = flt(sum(p.amount for p in invoice_doc.payments))
+                invoice_doc.base_paid_amount = flt(
+                    sum(p.base_amount or 0 for p in invoice_doc.payments)
+                )
 
         # Handle sales team (multiple sales persons)
         sales_team_data = invoice.get("sales_team") or data.get("sales_team")
