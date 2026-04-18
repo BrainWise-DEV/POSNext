@@ -17,6 +17,7 @@
     "playwright": "^1.57.0"
   },
   "devDependencies": {
-    "baseline-browser-mapping": "^2.9.14"
+    "baseline-browser-mapping": "^2.9.14",
+    "vite": "^5.4.10"
   }
 }
