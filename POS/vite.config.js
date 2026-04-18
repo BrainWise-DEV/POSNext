@@ -201,7 +201,7 @@ export default defineConfig({
 				clientsClaim: true,
 			},
 			devOptions: {
-				enabled: true,
+				enabled: false,
 				type: "module",
 			},
 		}),
@@ -236,11 +236,29 @@ export default defineConfig({
 			"highlight.js/lib/core",
 			"qz-tray",
 		],
-		exclude: ["frappe-ui"],
+		esbuildOptions: {
+			plugins: [
+				{
+					name: "ignore-virtual-icons",
+					setup(build) {
+						build.onResolve({ filter: /^~icons\// }, () => ({
+							external: true,
+						}))
+					},
+				},
+			],
+		},
 	},
 	server: {
 		allowedHosts: true,
+		host: true,
 		port: 8080,
+		fs: {
+			allow: [path.resolve(__dirname, "../../.."), path.resolve(__dirname, "..")],
+		},
+		warmup: {
+			clientFiles: ["./src/main.js", "./src/pages/POSSale.vue", "./src/pages/Login.vue"],
+		},
 		proxy: {
 			"^/(app|api|assets|files|printview)": {
 				target: "http://127.0.0.1:8000",
