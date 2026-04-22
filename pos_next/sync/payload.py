@@ -22,8 +22,11 @@ META_FIELDS = {
 
 
 def strip_meta(payload):
-	"""Return a copy of payload with server-side meta fields removed."""
-	return {k: v for k, v in payload.items() if k not in META_FIELDS}
+	"""Return a copy of payload with server-side meta fields and client-only __* keys removed."""
+	return {
+		k: v for k, v in payload.items()
+		if k not in META_FIELDS and not k.startswith("__")
+	}
 
 
 def compute_hash(payload):

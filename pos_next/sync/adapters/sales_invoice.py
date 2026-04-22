@@ -14,21 +14,10 @@ class SalesInvoiceAdapter(SubmittableAdapter):
 	doctype = "Sales Invoice"
 
 	def validate_incoming(self, payload):
-		origin_branch = payload.get("origin_branch")
-		if not origin_branch:
-			frappe.log_error(
-				f"Sales Invoice {payload.get('name')} missing origin_branch",
-				"Sync Sales Invoice Adapter",
-			)
-			return
-
-		# Naming series must contain the branch code (e.g. SINV-CAI-.#####)
-		name = payload.get("name", "")
-		naming_series = payload.get("naming_series", "")
-		if naming_series and origin_branch not in naming_series:
+		if not payload.get("origin_branch"):
 			raise SyncValidationError(
-				f"Sales Invoice {name}: naming series '{naming_series}' "
-				f"does not contain origin branch code '{origin_branch}'"
+				f"Sales Invoice {payload.get('name')} missing origin_branch — "
+				"cannot accept invoice with unknown source branch"
 			)
 
 	def pre_apply_transform(self, payload):

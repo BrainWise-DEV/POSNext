@@ -170,7 +170,8 @@ override_doctype_class = {
 doc_events = {
 	"Item": {
 		"validate": "pos_next.validations.validate_item",
-		"on_trash": "pos_next.sync.hooks.write_tombstone_on_trash",
+		"on_update": "pos_next.sync.hooks.notify_branches_of_master_change",
+		"on_trash": "pos_next.sync.hooks.notify_branches_of_master_change",
 	},
 	"Customer": {
 		"before_insert": [
@@ -243,41 +244,88 @@ doc_events = {
 		"on_submit": "pos_next.sync.hooks_outbox.enqueue_to_outbox",
 	},
 	"POS Profile": {
-		"on_update": "pos_next.realtime_events.emit_pos_profile_updated_event",
-		"on_trash": "pos_next.sync.hooks.write_tombstone_on_trash",
+		"on_update": [
+			"pos_next.realtime_events.emit_pos_profile_updated_event",
+			"pos_next.sync.hooks.notify_branches_of_master_change",
+		],
+		"on_trash": "pos_next.sync.hooks.notify_branches_of_master_change",
 	},
 	"Promotional Scheme": {
 		"on_update": "pos_next.overrides.pricing_rule.sync_pos_only_to_pricing_rules"
 	},
-	# Sync tombstone hooks for synced masters
-	"Item Price": {"on_trash": "pos_next.sync.hooks.write_tombstone_on_trash"},
-	"Item Group": {"on_trash": "pos_next.sync.hooks.write_tombstone_on_trash"},
-	"Item Barcode": {"on_trash": "pos_next.sync.hooks.write_tombstone_on_trash"},
-	"UOM": {"on_trash": "pos_next.sync.hooks.write_tombstone_on_trash"},
-	"Price List": {"on_trash": "pos_next.sync.hooks.write_tombstone_on_trash"},
-	"Warehouse": {"on_trash": "pos_next.sync.hooks.write_tombstone_on_trash"},
-	"Mode of Payment": {"on_trash": "pos_next.sync.hooks.write_tombstone_on_trash"},
-	"Company": {"on_trash": "pos_next.sync.hooks.write_tombstone_on_trash"},
-	"Currency": {"on_trash": "pos_next.sync.hooks.write_tombstone_on_trash"},
-	"Branch": {"on_trash": "pos_next.sync.hooks.write_tombstone_on_trash"},
-	"Customer Group": {"on_trash": "pos_next.sync.hooks.write_tombstone_on_trash"},
-	"Sales Person": {"on_trash": "pos_next.sync.hooks.write_tombstone_on_trash"},
-	"Employee": {"on_trash": "pos_next.sync.hooks.write_tombstone_on_trash"},
-	"Sales Taxes and Charges Template": {"on_trash": "pos_next.sync.hooks.write_tombstone_on_trash"},
-	"Item Tax Template": {"on_trash": "pos_next.sync.hooks.write_tombstone_on_trash"},
-	"Loyalty Program": {"on_trash": "pos_next.sync.hooks.write_tombstone_on_trash"},
+	# Sync triggers for synced masters (Central → Branch)
+	"Item Price": {
+		"on_update": "pos_next.sync.hooks.notify_branches_of_master_change",
+		"on_trash": "pos_next.sync.hooks.notify_branches_of_master_change",
+	},
+	"Item Group": {
+		"on_update": "pos_next.sync.hooks.notify_branches_of_master_change",
+		"on_trash": "pos_next.sync.hooks.notify_branches_of_master_change",
+	},
+	"Item Barcode": {
+		"on_update": "pos_next.sync.hooks.notify_branches_of_master_change",
+		"on_trash": "pos_next.sync.hooks.notify_branches_of_master_change",
+	},
+	"UOM": {
+		"on_update": "pos_next.sync.hooks.notify_branches_of_master_change",
+		"on_trash": "pos_next.sync.hooks.notify_branches_of_master_change",
+	},
+	"Price List": {
+		"on_update": "pos_next.sync.hooks.notify_branches_of_master_change",
+		"on_trash": "pos_next.sync.hooks.notify_branches_of_master_change",
+	},
+	"Warehouse": {
+		"on_update": "pos_next.sync.hooks.notify_branches_of_master_change",
+		"on_trash": "pos_next.sync.hooks.notify_branches_of_master_change",
+	},
+	"Mode of Payment": {
+		"on_update": "pos_next.sync.hooks.notify_branches_of_master_change",
+		"on_trash": "pos_next.sync.hooks.notify_branches_of_master_change",
+	},
+	"Company": {
+		"on_update": "pos_next.sync.hooks.notify_branches_of_master_change",
+		"on_trash": "pos_next.sync.hooks.notify_branches_of_master_change",
+	},
+	"Currency": {
+		"on_update": "pos_next.sync.hooks.notify_branches_of_master_change",
+		"on_trash": "pos_next.sync.hooks.notify_branches_of_master_change",
+	},
+	"Branch": {
+		"on_update": "pos_next.sync.hooks.notify_branches_of_master_change",
+		"on_trash": "pos_next.sync.hooks.notify_branches_of_master_change",
+	},
+	"Customer Group": {
+		"on_update": "pos_next.sync.hooks.notify_branches_of_master_change",
+		"on_trash": "pos_next.sync.hooks.notify_branches_of_master_change",
+	},
+	"Sales Person": {
+		"on_update": "pos_next.sync.hooks.notify_branches_of_master_change",
+		"on_trash": "pos_next.sync.hooks.notify_branches_of_master_change",
+	},
+	"Employee": {
+		"on_update": "pos_next.sync.hooks.notify_branches_of_master_change",
+		"on_trash": "pos_next.sync.hooks.notify_branches_of_master_change",
+	},
+	"Sales Taxes and Charges Template": {
+		"on_update": "pos_next.sync.hooks.notify_branches_of_master_change",
+		"on_trash": "pos_next.sync.hooks.notify_branches_of_master_change",
+	},
+	"Item Tax Template": {
+		"on_update": "pos_next.sync.hooks.notify_branches_of_master_change",
+		"on_trash": "pos_next.sync.hooks.notify_branches_of_master_change",
+	},
+	"Loyalty Program": {
+		"on_update": "pos_next.sycnc.hooks.notify_branches_of_master_change",
+		"on_trash": "pos_next.sync.hooks.notify_branches_of_master_change",
+	},
 }
 
 # Scheduled Tasks
 # ---------------
 
+boot_session = ["pos_next.sync.reconnect.on_boot"]
+
 scheduler_events = {
-	"cron": {
-		"* * * * *": [
-			"pos_next.sync.masters_puller.pull_if_due",
-			"pos_next.sync.outbox_drainer.push_if_due",
-		]
-	},
 	"hourly": [
 		"pos_next.tasks.branding_monitor.monitor_branding_integrity",
 	],

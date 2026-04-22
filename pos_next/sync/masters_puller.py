@@ -8,12 +8,11 @@ import pkgutil
 import time
 
 import frappe
-from frappe.utils import now_datetime, time_diff_in_seconds
+from frappe.utils import now_datetime
 
 from pos_next.sync import registry
 from pos_next.sync.defaults import (
 	DEFAULT_BATCH_SIZE,
-	DEFAULT_PULL_MASTERS_INTERVAL_SECONDS,
 	DIRECTIONS_PULL,
 )
 from pos_next.sync.exceptions import SyncUnauthorizedError
@@ -31,41 +30,31 @@ def _ensure_adapters_loaded():
 			importlib.import_module(info.name)
 
 
-def pull_if_due():
-	"""
-	Scheduler entry point (called every minute by cron).
-	Checks if this site is a Branch and if enough time has passed since last pull.
-	"""
+
+def pull_now():
+	"""Background job entry point — triggers a pull immediately."""
 	cfg_name = frappe.db.get_value("Sync Site Config", {"site_role": "Branch", "enabled": 1}, "name")
 	if not cfg_name:
 		return
 
 	cfg = frappe.get_doc("Sync Site Config", cfg_name)
-	interval = cfg.pull_masters_interval_seconds or DEFAULT_PULL_MASTERS_INTERVAL_SECONDS
-
-	if cfg.last_pull_masters_at:
-		elapsed = time_diff_in_seconds(now_datetime(), cfg.last_pull_masters_at)
-		if elapsed < interval:
-			return
-
 	_ensure_adapters_loaded()
 
 	try:
 		from pos_next.sync.transport import build_session_from_config
 		session = build_session_from_config()
-		puller = MastersPuller(session)
+		puller = MastersPuller(session, branch_code=cfg.branch_code)
 		puller.run(cfg)
 	except Exception as e:
-		frappe.db.set_value("Sync Site Config", cfg_name, "last_sync_error", str(e)[:500])
-		frappe.db.commit()
-		_log("pull_masters", "failure", error=str(e))
+		frappe.log_error("Sync Pull", f"pull_now error: {e}")
 
 
 class MastersPuller:
 	"""Pulls master data from central for all Central→Branch DocTypes."""
 
-	def __init__(self, session):
+	def __init__(self, session, branch_code=None):
 		self.session = session
+		self.branch_code = branch_code
 
 	def run(self, cfg):
 		"""Execute a full pull cycle for all enabled Central→Branch rules."""
@@ -131,7 +120,12 @@ class MastersPuller:
 			try:
 				resp = self.session.get(
 					"/api/method/pos_next.sync.api.changes.changes_since",
-					params={"doctype": doctype_name, "since": current_since, "limit": batch_size},
+					params={
+						"doctype": doctype_name,
+						"since": current_since,
+						"limit": batch_size,
+						"branch_code": self.branch_code,
+					},
 				)
 				if resp.status_code != 200:
 					if resp.status_code == 401:

@@ -7,55 +7,15 @@ import json
 from datetime import timedelta
 
 import frappe
-from frappe.utils import now_datetime, time_diff_in_seconds
+from frappe.utils import now_datetime
 
 from pos_next.sync.defaults import (
 	DEFAULT_BATCH_SIZE,
-	DEFAULT_PUSH_INTERVAL_SECONDS,
 	MAX_ATTEMPTS_BEFORE_DEAD,
 )
 from pos_next.sync.exceptions import SyncUnauthorizedError
 from pos_next.sync.masters_puller import _ensure_adapters_loaded
 from pos_next.pos_next.doctype.sync_log.sync_log import SyncLog
-
-
-def push_if_due():
-	"""
-	Scheduler entry point (called every minute by cron).
-	Checks if this site is a Branch and if enough time has passed since last push.
-	"""
-	cfg_name = frappe.db.get_value("Sync Site Config", {"site_role": "Branch", "enabled": 1}, "name")
-	if not cfg_name:
-		return
-
-	cfg = frappe.get_doc("Sync Site Config", cfg_name)
-	interval = cfg.push_interval_seconds or DEFAULT_PUSH_INTERVAL_SECONDS
-
-	if cfg.last_push_at:
-		elapsed = time_diff_in_seconds(now_datetime(), cfg.last_push_at)
-		if elapsed < interval:
-			return
-
-	_ensure_adapters_loaded()
-
-	try:
-		from pos_next.sync.transport import build_session_from_config
-		session = build_session_from_config()
-		drainer = OutboxDrainer(session, branch_code=cfg.branch_code)
-		acked, failed, dead = drainer.drain()
-
-		frappe.db.set_value("Sync Site Config", cfg_name, "last_push_at", now_datetime())
-		frappe.db.commit()
-
-		_log(
-			"push_outbox", "success" if (failed + dead) == 0 else "partial",
-			records_touched=acked + failed + dead,
-			context={"acked": acked, "failed": failed, "dead": dead},
-		)
-	except Exception as e:
-		frappe.db.set_value("Sync Site Config", cfg_name, "last_sync_error", str(e)[:500])
-		frappe.db.commit()
-		_log("push_outbox", "failure", error=str(e))
 
 
 class OutboxDrainer:
@@ -124,8 +84,14 @@ class OutboxDrainer:
 			if resp.status_code != 200:
 				if resp.status_code == 401:
 					raise SyncUnauthorizedError("Central rejected sync API credentials")
+				try:
+					body = resp.json()
+					detail = body.get("exception") or body.get("exc_type") or body.get("message") or ""
+				except Exception:
+					detail = resp
+				error_msg = f"HTTP {resp.status_code}: {resp}"
 				for row in rows:
-					self._mark_failed(row, f"HTTP {resp.status_code}")
+					self._mark_failed(row, error_msg)
 					failed += 1
 				return acked, failed, dead
 
@@ -148,6 +114,20 @@ class OutboxDrainer:
 					self._mark_failed(row, "No result from central")
 					failed += 1
 
+			if resp.json().get("message", {}).get("pull_hint"):
+				frappe.enqueue(
+					"pos_next.sync.masters_puller.pull_now",
+					queue="short",
+					job_id="sync_pull_now",
+					deduplicate=True,
+					enqueue_after_commit=True,
+				)
+
+		except SyncUnauthorizedError as e:
+			for row in rows:
+				self._mark_auth_failed(row, str(e))
+				failed += 1
+			frappe.log_error("Sync Auth", f"Push auth failed for {doctype}: {e}")
 		except Exception as e:
 			for row in rows:
 				self._mark_failed(row, str(e))
@@ -171,6 +151,16 @@ class OutboxDrainer:
 			"next_attempt_at": now_datetime() + timedelta(seconds=backoff_seconds),
 		})
 
+	def _mark_auth_failed(self, row, error):
+		attempts = (row.attempts or 0) + 1
+		backoff_seconds = min(max(300, 2 ** attempts), 3600)
+		frappe.db.set_value("Sync Outbox", row.name, {
+			"sync_status": "failed",
+			"attempts": attempts,
+			"last_error": f"auth_failed: {str(error)[:470]}",
+			"next_attempt_at": now_datetime() + timedelta(seconds=backoff_seconds),
+		})
+
 	def _should_dead_letter(self, row):
 		return (row.attempts or 0) >= MAX_ATTEMPTS_BEFORE_DEAD
 
@@ -186,6 +176,38 @@ class OutboxDrainer:
 			"moved_at": now_datetime(),
 		}).insert(ignore_permissions=True)
 		frappe.delete_doc("Sync Outbox", row.name, ignore_permissions=True, force=True)
+
+
+def drain_outbox():
+	"""Background job entry point outbox immediately"""
+	cfg_name = frappe.db.get_value("Sync Site Config", {"site_role": "Branch", "enabled": 1}, "name")
+	if not cfg_name:
+		return
+	cfg = frappe.get_doc("Sync Site Config", cfg_name)
+	_ensure_adapters_loaded()
+
+	try:
+		from pos_next.sync.transport import build_session_from_config
+		session = build_session_from_config()
+		drainer = OutboxDrainer(session, branch_code=cfg.branch_code)
+		acked, failed, dead = drainer.drain()
+
+		if acked + failed + dead > 0:
+			_log(
+				"push_outbox", "success" if (failed + dead) == 0 else "partial",
+				records_touched=acked + failed + dead,
+				context={"acked": acked, "failed": failed, "dead": dead},
+			)
+		if failed > 0:
+			frappe.enqueue(
+				"pos_next.sync.outbox_drainer.drain_outbox",
+				queue="short",
+				job_id="sync_drain_outbox",
+				deduplicate=True,
+				enqueue_after_commit=True,
+			)
+	except Exception as e:
+		frappe.log_error("Sync Push", f"drain_outbox error: {e}")
 
 
 def _log(operation, status, duration_ms=0, records_touched=0, error=None, context=None):

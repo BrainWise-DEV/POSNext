@@ -7,7 +7,7 @@ import re
 import frappe
 from frappe import _
 from frappe.model.document import Document
-
+from pos_next.sync.exceptions import SyncAuthError
 
 # Dev escape hatch: set POS_NEXT_SYNC_ALLOW_HTTP=1 in the environment to
 # permit http:// central URLs (for local multi-site bench testing).

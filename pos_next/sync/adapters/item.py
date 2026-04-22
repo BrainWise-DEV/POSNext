@@ -28,8 +28,8 @@ class ItemAdapter(BaseSyncAdapter):
 				has_variants = frappe.db.get_value("Item", name, "has_variants")
 				if has_variants and frappe.db.count("Item", {"variant_of": name}) > 0:
 					frappe.log_error(
-						f"Skipping delete of template Item {name}: variants exist",
 						"Sync Item Adapter",
+						f"Skipping delete of template Item {name}: variants exist"
 					)
 					return name
 		return super().apply_incoming(payload, operation)

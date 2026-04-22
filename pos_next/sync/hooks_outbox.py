@@ -72,3 +72,12 @@ def enqueue_to_outbox(doc, method=None):
 		payload=payload,
 		priority=priority,
 	)
+
+	# Trigger immediate background push
+	frappe.enqueue(
+		"pos_next.sync.outbox_drainer.drain_outbox",
+		queue="short",
+		job_id="sync_drain_outbox",
+		deduplicate=True,
+		enqueue_after_commit=True,
+	)

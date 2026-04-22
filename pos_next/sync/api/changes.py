@@ -8,11 +8,14 @@ from pos_next.sync.payload import to_payload
 
 
 @frappe.whitelist()
-def changes_since(doctype, since, limit=100):
+def changes_since(doctype, since, branch_code=None, limit=100):
 	"""
 	Return records modified after `since` for the given DocType,
 	plus any tombstones recorded after `since`.
 	"""
+	if branch_code:
+		_update_branch_pull_stats(branch_code)
+	
 	limit = int(limit)
 
 	# Fetch limit+1 to detect has_more
@@ -37,7 +40,7 @@ def changes_since(doctype, since, limit=100):
 		except frappe.DoesNotExistError:
 			continue
 		except Exception as e:
-			frappe.log_error(f"changes_since serialize {doctype}/{row.name}: {e}", "Sync API")
+			frappe.log_error("Sync API", f"changes_since serialize {doctype}/{row.name}: {e}")
 			continue
 
 	next_since = upserts[-1].get("modified") if upserts else None
@@ -57,3 +60,13 @@ def changes_since(doctype, since, limit=100):
 		"next_since": next_since,
 		"has_more": has_more,
 	}
+
+
+def _update_branch_pull_stats(branch_code):
+	"""Update the last_pull_masters_at timestamp for a specific branch."""
+	from frappe.utils import now_datetime
+	
+	cfg_name = frappe.db.get_value("Sync Site Config", {"branch_code": branch_code, "site_role": "Central"}, "name")
+	if cfg_name:
+		frappe.db.set_value("Sync Site Config", cfg_name, "last_pull_masters_at", now_datetime())
+		frappe.db.commit()
