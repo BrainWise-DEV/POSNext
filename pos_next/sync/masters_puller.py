@@ -16,6 +16,7 @@ from pos_next.sync.defaults import (
 	DEFAULT_PULL_MASTERS_INTERVAL_SECONDS,
 	DIRECTIONS_PULL,
 )
+from pos_next.sync.exceptions import SyncUnauthorizedError
 from pos_next.sync.payload import compute_hash
 from pos_next.pos_next.doctype.sync_log.sync_log import SyncLog
 from pos_next.pos_next.doctype.sync_record_state.sync_record_state import SyncRecordState
@@ -133,6 +134,8 @@ class MastersPuller:
 					params={"doctype": doctype_name, "since": current_since, "limit": batch_size},
 				)
 				if resp.status_code != 200:
+					if resp.status_code == 401:
+						raise SyncUnauthorizedError("Central rejected sync API credentials")
 					total_errors += 1
 					break
 				data = resp.json().get("message", {})
@@ -140,7 +143,7 @@ class MastersPuller:
 					break
 			except Exception as e:
 				total_errors += 1
-				frappe.log_error(f"Pull {doctype_name}: {e}", "MastersPuller")
+				frappe.log_error("MastersPuller", f"Pull {doctype_name}: {e}")
 				break
 
 			# Apply upserts
@@ -150,7 +153,7 @@ class MastersPuller:
 						total_upserted += 1
 				except Exception as e:
 					total_errors += 1
-					frappe.log_error(f"Apply {doctype_name}/{payload.get('name')}: {e}", "MastersPuller")
+					frappe.log_error("MastersPuller", f"Apply {doctype_name}/{payload.get('name')}: {e}")
 
 			# Apply tombstones
 			for tomb in data.get("tombstones", []):
@@ -159,7 +162,7 @@ class MastersPuller:
 					total_deleted += 1
 				except Exception as e:
 					total_errors += 1
-					frappe.log_error(f"Tombstone {doctype_name}/{tomb.get('reference_name')}: {e}", "MastersPuller")
+					frappe.log_error("MastersPuller", f"Tombstone {doctype_name}/{tomb.get('reference_name')}: {e}")
 
 			# Advance watermark and commit the batch
 			next_since = data.get("next_since")

@@ -14,6 +14,7 @@ from pos_next.sync.defaults import (
 	DEFAULT_PUSH_INTERVAL_SECONDS,
 	MAX_ATTEMPTS_BEFORE_DEAD,
 )
+from pos_next.sync.exceptions import SyncUnauthorizedError
 from pos_next.sync.masters_puller import _ensure_adapters_loaded
 from pos_next.pos_next.doctype.sync_log.sync_log import SyncLog
 
@@ -121,6 +122,8 @@ class OutboxDrainer:
 				json={"doctype": doctype, "branch_code": self.branch_code, "records": records},
 			)
 			if resp.status_code != 200:
+				if resp.status_code == 401:
+					raise SyncUnauthorizedError("Central rejected sync API credentials")
 				for row in rows:
 					self._mark_failed(row, f"HTTP {resp.status_code}")
 					failed += 1

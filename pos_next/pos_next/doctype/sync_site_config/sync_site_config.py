@@ -84,31 +84,29 @@ class SyncSiteConfig(Document):
 	@frappe.whitelist()
 	def test_connection(self):
 		"""
-		Attempt login against central and return a short status message.
+		Attempt authenticated API call against central and return a short status message.
 		Only meaningful on Branch-role configs.
 		"""
 		if self.site_role != "Branch":
 			return {"ok": False, "message": "Test Connection only applies to Branch role"}
-		if not (self.central_url and self.sync_username and self.sync_password):
-			return {"ok": False, "message": "Fill central_url, sync_username, sync_password first"}
+		if not (self.central_url and self.sync_api_key and self.sync_api_secret):
+			return {"ok": False, "message": "Fill central_url, sync_api_key, sync_api_secret first"}
 
 		from pos_next.sync.auth import SyncSession
-		from pos_next.sync.exceptions import SyncAuthError, SyncTransportError
+		from pos_next.sync.exceptions import SyncTransportError
 
-		password = self.get_password("sync_password")
+		api_secret = self.get_password("sync_api_secret")
 		session = SyncSession(
 			central_url=self.central_url,
-			username=self.sync_username,
-			password=password,
+			api_key=self.sync_api_key,
+			api_secret=api_secret,
 		)
 		try:
-			session.login()
+			resp = session.get("/api/method/frappe.auth.get_logged_user")
 		except SyncAuthError as e:
 			return {"ok": False, "message": f"Auth failed: {e}"}
 		except SyncTransportError as e:
 			return {"ok": False, "message": f"Network error: {e}"}
 		except Exception as e:
 			return {"ok": False, "message": f"Unexpected error: {e}"}
-		finally:
-			session.logout()
-		return {"ok": True, "message": f"Connected to {self.central_url} as {self.sync_username}"}
+		return {"ok": True, "message": f"Connected to {self.central_url} with API key"}

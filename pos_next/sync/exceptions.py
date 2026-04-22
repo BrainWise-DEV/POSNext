@@ -14,6 +14,11 @@ class SyncAuthError(SyncError):
 	pass
 
 
+class SyncUnauthorizedError(SyncAuthError):
+	"""Central rejected API credentials (HTTP 401)."""
+	pass
+
+
 class SyncTransportError(SyncError):
 	"""HTTP/network-level failure talking to central."""
 	pass

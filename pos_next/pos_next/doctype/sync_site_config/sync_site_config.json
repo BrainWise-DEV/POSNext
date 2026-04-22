@@ -11,8 +11,8 @@
   "enabled",
   "section_break_central",
   "central_url",
-  "sync_username",
-  "sync_password",
+  "sync_api_key",
+  "sync_api_secret",
   "column_break_central",
   "push_interval_seconds",
   "pull_masters_interval_seconds",
@@ -76,16 +76,16 @@
   },
   {
    "depends_on": "eval:doc.site_role==\"Branch\"",
-   "fieldname": "sync_username",
+   "fieldname": "sync_api_key",
    "fieldtype": "Data",
-   "label": "Sync Username",
+   "label": "Sync API Key",
    "mandatory_depends_on": "eval:doc.site_role==\"Branch\""
   },
   {
    "depends_on": "eval:doc.site_role==\"Branch\"",
-   "fieldname": "sync_password",
+   "fieldname": "sync_api_secret",
    "fieldtype": "Password",
-   "label": "Sync Password",
+   "label": "Sync API Secret",
    "mandatory_depends_on": "eval:doc.site_role==\"Branch\""
   },
   {
