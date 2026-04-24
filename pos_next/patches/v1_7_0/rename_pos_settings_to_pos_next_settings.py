@@ -13,6 +13,17 @@ pos_next row in tabDocType and the underlying 'tabPOS Settings' MySQL
 table to 'tabPOS Next Settings', leaving the 'POS Settings' name free
 for ERPNext v16 to install into.
 
+MariaDB 1412 handling
+=====================
+frappe.rename_doc does the parent-table DDL (RENAME TABLE) before
+updating link fields that point at the old doctype name. MariaDB
+invalidates the session's table-metadata cache after the DDL and the
+next UPDATE raises error 1412 ("Table definition has changed, please
+retry transaction"). The DDL itself succeeded — the parent table and
+tabDocType row are already renamed. We swallow 1412, reconnect, and
+manually finish the link-field / dynamic-link / user-settings fixups
+with a fresh session.
+
 Idempotency
 ===========
 Safe to re-run and safe on every entry state:
@@ -26,6 +37,34 @@ Safe to re-run and safe on every entry state:
 """
 
 import frappe
+
+
+def _is_table_def_changed_error(exc: Exception) -> bool:
+	msg = str(exc)
+	return "1412" in msg or "Table definition has changed" in msg
+
+
+def _finish_rename_manually(old: str, new: str) -> None:
+	"""Re-run the post-DDL portion of rename_doc with a fresh connection."""
+	from frappe.model.rename_doc import (
+		get_link_fields,
+		rename_dynamic_links,
+		update_attachments,
+		update_link_field_values,
+		update_user_settings,
+	)
+
+	# Reset the session so the cursor has fresh table metadata after the DDL.
+	frappe.db.commit()
+	frappe.db.close()
+	frappe.db.connect()
+
+	link_fields = get_link_fields(new)
+	update_link_field_values(link_fields, old, new, new)
+	rename_dynamic_links(new, old, new)
+	update_user_settings(old, new, link_fields)
+	update_attachments(new, old, new)
+	frappe.db.commit()
 
 
 def execute():
@@ -67,11 +106,24 @@ def execute():
 		frappe.db.commit()
 		return
 
-	frappe.rename_doc(
-		"DocType",
-		"POS Settings",
-		"POS Next Settings",
-		force=True,
-		show_alert=False,
-	)
+	# Clean transaction state before the DDL-heavy rename.
+	frappe.db.commit()
+
+	try:
+		frappe.rename_doc(
+			"DocType",
+			"POS Settings",
+			"POS Next Settings",
+			force=True,
+			show_alert=False,
+			rebuild_search=False,
+		)
+	except Exception as exc:
+		if not _is_table_def_changed_error(exc):
+			raise
+		# The RENAME TABLE + tabDocType update already succeeded; only the
+		# downstream link-field update tripped on stale session metadata.
+		# Finish manually with a fresh connection.
+		_finish_rename_manually("POS Settings", "POS Next Settings")
+
 	frappe.db.commit()
