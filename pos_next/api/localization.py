@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright (c) 2024, POS Next and contributors
 # For license information, please see license.txt
 
@@ -38,10 +37,7 @@ def get_user_language():
 	# Get user's language preference
 	language = frappe.db.get_value("User", frappe.session.user, "language") or "en"
 
-	return {
-		"success": True,
-		"locale": language.lower()
-	}
+	return {"success": True, "locale": language.lower()}
 
 
 @frappe.whitelist()
@@ -53,10 +49,7 @@ def get_allowed_locales():
 		dict: List of allowed locale codes
 	"""
 	allowed = get_allowed_locales_from_settings()
-	return {
-		"success": True,
-		"locales": list(allowed)
-	}
+	return {"success": True, "locales": list(allowed)}
 
 
 def get_allowed_locales_from_settings():
@@ -67,21 +60,18 @@ def get_allowed_locales_from_settings():
 	Returns:
 		set: Set of allowed locale codes
 	"""
-	default_locales = {'ar', 'en'}
+	default_locales = {"ar", "en"}
 
 	try:
 		# Get the first POS Settings (or we could use a specific one based on user's profile)
 		pos_settings_list = frappe.get_all(
-			"POS Settings",
-			filters={"enabled": 1},
-			fields=["name"],
-			limit=1
+			"POS Next Settings", filters={"enabled": 1}, fields=["name"], limit=1
 		)
 
 		if not pos_settings_list:
 			return default_locales
 
-		pos_settings = frappe.get_doc("POS Settings", pos_settings_list[0].name)
+		pos_settings = frappe.get_doc("POS Next Settings", pos_settings_list[0].name)
 
 		if pos_settings.allowed_locales and len(pos_settings.allowed_locales) > 0:
 			return {row.language.lower() for row in pos_settings.allowed_locales}
@@ -130,11 +120,7 @@ def change_user_language(locale):
 		frappe.db.set_value("User", frappe.session.user, "language", locale)
 		frappe.db.commit()
 
-		return {
-			"success": True,
-			"message": f"Language changed to {locale}",
-			"locale": locale
-		}
+		return {"success": True, "message": f"Language changed to {locale}", "locale": locale}
 	except Exception as e:
-		frappe.log_error(f"Failed to change user language: {str(e)}")
-		frappe.throw(f"Failed to change language: {str(e)}", frappe.ValidationError)
+		frappe.log_error(f"Failed to change user language: {e!s}")
+		frappe.throw(f"Failed to change language: {e!s}", frappe.ValidationError)

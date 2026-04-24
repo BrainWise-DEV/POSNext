@@ -8,9 +8,10 @@ Handles wallet payments that require party information for Receivable accounts.
 """
 
 import frappe
-from frappe.utils import cint, flt
 from erpnext.accounts.doctype.sales_invoice.sales_invoice import SalesInvoice
 from erpnext.accounts.utils import get_account_currency
+from frappe.utils import cint, flt
+
 
 def _get_post_change_gl_entries_setting():
 	"""
@@ -19,8 +20,8 @@ def _get_post_change_gl_entries_setting():
 	- ERPNext v15: Field is in 'Accounts Settings'
 	- ERPNext v16: Field moved to ERPNext's 'POS Settings' (singleton)
 
-	Since pos_next has its own 'POS Settings' doctype (non-singleton) that overrides
-	ERPNext's, we read directly from the Singles table for v16 compatibility.
+	pos_next's per-profile settings now live on 'POS Next Settings' so there
+	is no DocType collision with ERPNext's single 'POS Settings' on v16.
 
 	Returns:
 		int: 1 if post_change_gl_entries is enabled, 0 otherwise (default: 0)
@@ -31,18 +32,10 @@ def _get_post_change_gl_entries_setting():
 		value = frappe.db.get_single_value("Accounts Settings", "post_change_gl_entries")
 		return cint(value) if value is not None else 0
 
-	# For v16, read directly from Singles table using Query Builder to avoid ORM issues
-	# ERPNext's POS Settings is a singleton, data stored in Singles table
-	Singles = frappe.qb.DocType("Singles")
-	result = (
-		frappe.qb.from_(Singles)
-		.select(Singles.value)
-		.where(Singles.doctype == "POS Settings")
-		.where(Singles.field == "post_change_gl_entries")
-		.limit(1)
-		.run()
-	)
-	return cint(result[0][0]) if result else 0
+	# ERPNext v16: read the setting from erpnext's singleton POS Settings.
+	value = frappe.db.get_single_value("POS Settings", "post_change_gl_entries")
+	return cint(value) if value is not None else 0
+
 
 class CustomSalesInvoice(SalesInvoice):
 	"""

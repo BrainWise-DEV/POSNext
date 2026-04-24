@@ -6,9 +6,9 @@ from frappe.model.document import Document
 from frappe.utils import cint, flt
 
 
-class POSSettings(Document):
+class POSNextSettings(Document):
 	def validate(self):
-		"""Validate POS Settings"""
+		"""Validate POS Next Settings"""
 		# Guard against None values and validate discount percentage
 		max_discount = flt(self.max_discount_allowed)
 		if max_discount < 0 or max_discount > 100:
@@ -41,9 +41,9 @@ class POSSettings(Document):
 		"""
 		Synchronize allow_negative_stock with Stock Settings.
 
-		When enabled in POS Settings, it enables the global Stock Settings.
+		When enabled in POS Next Settings, it enables the global Stock Settings.
 		When disabled, it only disables global Stock Settings if no other
-		POS Settings have it enabled.
+		POS Next Settings have it enabled.
 
 		Note: Runs in the same transaction as the save, no manual commits.
 		"""
@@ -58,34 +58,36 @@ class POSSettings(Document):
 				frappe.msgprint(
 					"Stock Settings 'Allow Negative Stock' has been automatically enabled.",
 					indicator="green",
-					alert=True
+					alert=True,
 				)
 		else:
-			# Only disable if no other enabled POS Settings have it enabled
+			# Only disable if no other enabled POS Next Settings have it enabled
 			if current_stock_setting:
 				# Use count for better performance and clarity
 				other_enabled_count = frappe.db.count(
-					"POS Settings",
+					"POS Next Settings",
 					{
 						"allow_negative_stock": 1,
-						"enabled": 1,  # Only check enabled POS Settings
-						"name": ["!=", self.name]
-					}
+						"enabled": 1,  # Only check enabled POS Next Settings
+						"name": ["!=", self.name],
+					},
 				)
 
 				if other_enabled_count == 0:
-					frappe.db.set_single_value("Stock Settings", "allow_negative_stock", 0, update_modified=False)
+					frappe.db.set_single_value(
+						"Stock Settings", "allow_negative_stock", 0, update_modified=False
+					)
 					frappe.msgprint(
 						"Stock Settings 'Allow Negative Stock' has been automatically disabled.",
 						indicator="orange",
-						alert=True
+						alert=True,
 					)
 
 
 @frappe.whitelist()
 def get_pos_settings(pos_profile):
 	"""
-	Get POS Settings for a specific POS Profile.
+	Get POS Next Settings for a specific POS Profile.
 
 	Also injects the current global Stock Settings value to show the actual
 	source of truth, preventing confusion when the checkbox appears enabled
@@ -97,27 +99,19 @@ def get_pos_settings(pos_profile):
 		return None
 
 	# Check if user has access to this POS Profile
-	has_access = frappe.db.exists(
-		"POS Profile User",
-		{"parent": pos_profile, "user": frappe.session.user}
-	)
+	has_access = frappe.db.exists("POS Profile User", {"parent": pos_profile, "user": frappe.session.user})
 
-	if not has_access and not frappe.has_permission("POS Settings", "read"):
+	if not has_access and not frappe.has_permission("POS Next Settings", "read"):
 		frappe.throw(_("You don't have access to this POS Profile"))
 
-	settings = frappe.db.get_value(
-		"POS Settings",
-		{"pos_profile": pos_profile},
-		"*",
-		as_dict=True
-	)
+	settings = frappe.db.get_value("POS Next Settings", {"pos_profile": pos_profile}, "*", as_dict=True)
 
 	# If no settings exist, create default settings
 	if not settings:
 		settings = create_default_settings(pos_profile)
 
 	# Inject the current global Stock Settings value for transparency
-	# This helps UI reflect the actual state even if multiple POS Settings exist
+	# This helps UI reflect the actual state even if multiple POS Next Settings exist
 	settings["_global_allow_negative_stock"] = cint(
 		frappe.db.get_single_value("Stock Settings", "allow_negative_stock") or 0
 	)
@@ -126,8 +120,8 @@ def get_pos_settings(pos_profile):
 
 
 def create_default_settings(pos_profile):
-	"""Create default POS Settings for a POS Profile"""
-	doc = frappe.new_doc("POS Settings")
+	"""Create default POS Next Settings for a POS Profile"""
+	doc = frappe.new_doc("POS Next Settings")
 	doc.pos_profile = pos_profile
 	doc.enabled = 1
 	doc.insert()
@@ -137,31 +131,29 @@ def create_default_settings(pos_profile):
 
 @frappe.whitelist()
 def update_pos_settings(pos_profile, settings):
-	"""Update POS Settings for a POS Profile"""
+	"""Update POS Next Settings for a POS Profile"""
 	import json
+
 	from frappe import _
 
 	if isinstance(settings, str):
 		settings = json.loads(settings)
 
 	# Check if user has access to this POS Profile
-	has_access = frappe.db.exists(
-		"POS Profile User",
-		{"parent": pos_profile, "user": frappe.session.user}
-	)
+	has_access = frappe.db.exists("POS Profile User", {"parent": pos_profile, "user": frappe.session.user})
 
-	if not has_access and not frappe.has_permission("POS Settings", "write"):
+	if not has_access and not frappe.has_permission("POS Next Settings", "write"):
 		frappe.throw(_("You don't have permission to update this POS Profile"))
 
 	# Check if settings exist
-	existing = frappe.db.exists("POS Settings", {"pos_profile": pos_profile})
+	existing = frappe.db.exists("POS Next Settings", {"pos_profile": pos_profile})
 
 	if existing:
-		doc = frappe.get_doc("POS Settings", existing)
+		doc = frappe.get_doc("POS Next Settings", existing)
 		doc.update(settings)
 		doc.save()
 	else:
-		doc = frappe.new_doc("POS Settings")
+		doc = frappe.new_doc("POS Next Settings")
 		doc.pos_profile = pos_profile
 		doc.update(settings)
 		doc.insert()

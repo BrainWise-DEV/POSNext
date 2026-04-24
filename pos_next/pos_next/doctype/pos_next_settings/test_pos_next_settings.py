@@ -5,5 +5,5 @@ import frappe
 from frappe.tests.utils import FrappeTestCase
 
 
-class TestPOSSettings(FrappeTestCase):
+class TestPOSNextSettings(FrappeTestCase):
 	pass

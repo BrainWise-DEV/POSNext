@@ -1,7 +1,7 @@
 // Copyright (c) 2024, BrainWise and contributors
 // For license information, please see license.txt
 
-frappe.ui.form.on("POS Settings", {
+frappe.ui.form.on("POS Next Settings", {
 	refresh(frm) {
 		// Set query for loyalty program filtered by POS Profile company
 		frm.set_query("default_loyalty_program", function () {

@@ -2,10 +2,10 @@
 # For license information, please see license.txt
 
 import frappe
+from erpnext.accounts.utils import get_balance_on
 from frappe import _
 from frappe.model.document import Document
 from frappe.utils import flt
-from erpnext.accounts.utils import get_balance_on
 
 
 class Wallet(Document):
@@ -25,13 +25,14 @@ class Wallet(Document):
 		if not self.is_new():
 			return
 		existing = frappe.db.exists(
-			"Wallet",
-			{"customer": self.customer, "company": self.company, "name": ("!=", self.name)}
+			"Wallet", {"customer": self.customer, "company": self.company, "name": ("!=", self.name)}
 		)
 		if existing:
-			frappe.throw(_("A wallet already exists for customer {0} in company {1}").format(
-				self.customer, self.company
-			))
+			frappe.throw(
+				_("A wallet already exists for customer {0} in company {1}").format(
+					self.customer, self.company
+				)
+			)
 
 	def get_balance(self):
 		"""Get current wallet balance from GL entries.
@@ -43,11 +44,7 @@ class Wallet(Document):
 		if not self.account or not self.customer:
 			return 0.0
 
-		balance = get_balance_on(
-			account=self.account,
-			party_type="Customer",
-			party=self.customer
-		)
+		balance = get_balance_on(account=self.account, party_type="Customer", party=self.customer)
 		# Negate because negative receivable balance = positive wallet credit
 		return -flt(balance)
 
@@ -74,10 +71,7 @@ def get_customer_wallet(customer, company=None):
 		filters["company"] = company
 
 	wallet = frappe.db.get_value(
-		"Wallet",
-		filters,
-		["name", "customer", "company", "account", "status"],
-		as_dict=True
+		"Wallet", filters, ["name", "customer", "company", "account", "status"], as_dict=True
 	)
 
 	return wallet
@@ -111,11 +105,7 @@ def get_customer_wallet_balance(customer, company=None, exclude_invoice=None):
 			return 0.0
 
 		# Get balance from GL entries
-		gl_balance = get_balance_on(
-			account=wallet.account,
-			party_type="Customer",
-			party=customer
-		)
+		gl_balance = get_balance_on(account=wallet.account, party_type="Customer", party=customer)
 
 		# Negate because negative receivable balance = positive wallet credit
 		wallet_balance = -flt(gl_balance)
@@ -142,14 +132,10 @@ def get_pending_wallet_payments(customer, exclude_invoice=None):
 		"customer": customer,
 		"docstatus": ["in", [0, 1]],  # Draft or Submitted
 		"outstanding_amount": [">", 0],
-		"is_pos": 1
+		"is_pos": 1,
 	}
 
-	invoices = frappe.get_all(
-		"Sales Invoice",
-		filters=filters,
-		fields=["name"]
-	)
+	invoices = frappe.get_all("Sales Invoice", filters=filters, fields=["name"])
 
 	pending_amount = 0.0
 
@@ -159,15 +145,11 @@ def get_pending_wallet_payments(customer, exclude_invoice=None):
 
 		# Get wallet payments from this invoice
 		payments = frappe.get_all(
-			"Sales Invoice Payment",
-			filters={"parent": invoice.name},
-			fields=["mode_of_payment", "amount"]
+			"Sales Invoice Payment", filters={"parent": invoice.name}, fields=["mode_of_payment", "amount"]
 		)
 
 		for payment in payments:
-			is_wallet = frappe.db.get_value(
-				"Mode of Payment", payment.mode_of_payment, "is_wallet_payment"
-			)
+			is_wallet = frappe.db.get_value("Mode of Payment", payment.mode_of_payment, "is_wallet_payment")
 			if is_wallet:
 				pending_amount += flt(payment.amount)
 
@@ -199,13 +181,15 @@ def create_customer_wallet(customer, company, account=None):
 	if not account:
 		frappe.throw(_("Please configure a default wallet account for company {0}").format(company))
 
-	wallet = frappe.get_doc({
-		"doctype": "Wallet",
-		"customer": customer,
-		"company": company,
-		"account": account,
-		"status": "Active"
-	})
+	wallet = frappe.get_doc(
+		{
+			"doctype": "Wallet",
+			"customer": customer,
+			"company": company,
+			"account": account,
+			"status": "Active",
+		}
+	)
 	wallet.insert(ignore_permissions=True)
 
 	return wallet
@@ -214,11 +198,7 @@ def create_customer_wallet(customer, company, account=None):
 def get_default_wallet_account(company):
 	"""Get default wallet account for a company"""
 	# Try to get from POS Settings
-	wallet_account = frappe.db.get_value(
-		"POS Settings",
-		{"company": company},
-		"wallet_account"
-	)
+	wallet_account = frappe.db.get_value("POS Next Settings", {"company": company}, "wallet_account")
 
 	if wallet_account:
 		return wallet_account
@@ -226,13 +206,8 @@ def get_default_wallet_account(company):
 	# Fallback: Find a receivable account with 'wallet' in the name
 	wallet_account = frappe.db.get_value(
 		"Account",
-		{
-			"company": company,
-			"account_type": "Receivable",
-			"is_group": 0,
-			"name": ["like", "%wallet%"]
-		},
-		"name"
+		{"company": company, "account_type": "Receivable", "is_group": 0, "name": ["like", "%wallet%"]},
+		"name",
 	)
 
 	return wallet_account
@@ -250,7 +225,7 @@ def get_or_create_wallet(customer, company):
 			"customer": wallet_doc.customer,
 			"company": wallet_doc.company,
 			"account": wallet_doc.account,
-			"status": wallet_doc.status
+			"status": wallet_doc.status,
 		}
 
 	return wallet
