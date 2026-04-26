@@ -170,8 +170,18 @@ override_doctype_class = {
 doc_events = {
 	"Item": {
 		"validate": "pos_next.validations.validate_item",
-		"on_update": "pos_next.sync.hooks.notify_branches_of_master_change",
-		"on_trash": "pos_next.sync.hooks.notify_branches_of_master_change",
+		"before_insert": [
+			"pos_next.sync.hooks_uuid.set_sync_uuid_if_missing",
+			"pos_next.sync.hooks_uuid.set_origin_branch_if_missing",
+		],
+		"on_update": [
+			"pos_next.sync.hooks.notify_branches_of_master_change",
+			"pos_next.sync.hooks_outbox.enqueue_to_outbox",
+		],
+		"on_trash": [
+			"pos_next.sync.hooks.notify_branches_of_master_change",
+			"pos_next.sync.hooks_outbox.enqueue_to_outbox",
+		],
 	},
 	"Customer": {
 		"before_insert": [
@@ -221,13 +231,6 @@ doc_events = {
 		],
 		"on_submit": "pos_next.sync.hooks_outbox.enqueue_to_outbox",
 		"on_cancel": "pos_next.sync.hooks_outbox.enqueue_to_outbox",
-	},
-	"Stock Ledger Entry": {
-		"before_insert": [
-			"pos_next.sync.hooks_uuid.set_sync_uuid_if_missing",
-			"pos_next.sync.hooks_uuid.set_origin_branch_if_missing",
-		],
-		"after_insert": "pos_next.sync.hooks_outbox.enqueue_to_outbox",
 	},
 	"POS Opening Shift": {
 		"before_insert": [

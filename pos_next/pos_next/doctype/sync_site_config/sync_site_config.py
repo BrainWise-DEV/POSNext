@@ -28,6 +28,7 @@ class SyncSiteConfig(Document):
 		self._validate_cardinality()
 		self._validate_https_url()
 		self._validate_branch_code()
+		self._autofill_naming_series_defaults()
 
 	def _validate_cardinality(self):
 		"""A Branch-role record must be singleton; Central allows many."""
@@ -80,6 +81,103 @@ class SyncSiteConfig(Document):
 		"""Seed the synced_doctypes registry with default rules."""
 		from pos_next.sync.seeds import apply_seeds_to_config
 		apply_seeds_to_config(self)
+
+	def on_update(self):
+		"""Push the naming-series fields onto the underlying DocTypes via Property Setter."""
+		if self.site_role == "Branch":
+			self._apply_branch_naming_series()
+
+	# Mapping between this doc's naming-series fields and the target DocType.
+	# Edit/extend here to support new transactional doctypes.
+	_NAMING_SERIES_FIELDS = (
+		("sales_invoice_naming_series",     "Sales Invoice"),
+		("payment_entry_naming_series",     "Payment Entry"),
+		("pos_opening_shift_naming_series", "POS Opening Shift"),
+		("pos_closing_shift_naming_series", "POS Closing Shift"),
+	)
+
+	def _autofill_naming_series_defaults(self):
+		"""
+		Pre-fill blank naming-series fields with sensible branch-prefixed defaults.
+		Runs on every validate so a freshly-created Branch row already shows the
+		patterns the admin can review. Existing values are never overwritten.
+		"""
+		if self.site_role != "Branch" or not self.branch_code:
+			return
+
+		defaults = {
+			"sales_invoice_naming_series":     f"SINV-{self.branch_code}-.YYYY.-.#####",
+			"payment_entry_naming_series":     f"PE-{self.branch_code}-.YYYY.-.#####",
+			"pos_opening_shift_naming_series": f"POS-OS-{self.branch_code}-.YYYY.-.#####",
+			"pos_closing_shift_naming_series": f"POS-CS-{self.branch_code}-.YYYY.-.#####",
+		}
+		for field, default in defaults.items():
+			if not self.get(field):
+				self.set(field, default)
+
+	def _apply_branch_naming_series(self):
+		"""
+		Install each non-blank naming-series field onto the matching DocType.
+		Uses Frappe's standard Property Setter mechanism (same machinery that
+		Customize Form uses), so the pattern shows up in the Sales Invoice etc.
+		`naming_series` dropdown and is set as that DocType's default.
+		"""
+		for field, doctype in self._NAMING_SERIES_FIELDS:
+			pattern = (self.get(field) or "").strip()
+			if not pattern:
+				continue
+			try:
+				_install_naming_series(doctype, pattern, default=True)
+			except Exception as e:
+				frappe.log_error(
+					"Sync Branch Naming Series",
+					f"Failed to install '{pattern}' on {doctype}: {e}",
+				)
+
+
+def _install_naming_series(doctype, series, default=True):
+	"""
+	Append `series` to the doctype's `naming_series` Select options (via
+	Property Setter) and optionally mark it the default.
+	Idempotent: if the series is already present, only the default flag is
+	updated.
+	"""
+	property_name = "options"
+	field = "naming_series"
+
+	ps_name = frappe.db.get_value(
+		"Property Setter",
+		{"doc_type": doctype, "field_name": field, "property": property_name},
+		"name",
+	)
+
+	if ps_name:
+		ps = frappe.get_doc("Property Setter", ps_name)
+		current = (ps.value or "").splitlines()
+		if series not in current:
+			current.append(series)
+			ps.value = "\n".join([s for s in current if s])
+			ps.save(ignore_permissions=True)
+	else:
+		# Read the default options from the meta and prepend our series.
+		meta = frappe.get_meta(doctype)
+		df = meta.get_field(field)
+		default_options = (df.options or "") if df else ""
+		current = default_options.splitlines()
+		if series not in current:
+			current.append(series)
+		frappe.get_doc({
+			"doctype": "Property Setter",
+			"doctype_or_field": "DocField",
+			"doc_type": doctype,
+			"field_name": field,
+			"property": property_name,
+			"property_type": "Text",
+			"value": "\n".join([s for s in current if s]),
+		}).insert(ignore_permissions=True)
+
+	if default:
+		frappe.db.set_default(f"{field}:{doctype}", series)
 
 	@frappe.whitelist()
 	def test_connection(self):

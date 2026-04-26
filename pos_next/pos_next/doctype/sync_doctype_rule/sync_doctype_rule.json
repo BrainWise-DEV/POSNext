@@ -10,7 +10,8 @@
   "conflict_rule",
   "priority",
   "batch_size",
-  "enabled"
+  "enabled",
+  "branch_filter_field"
  ],
  "fields": [
   {
@@ -63,6 +64,12 @@
    "fieldtype": "Check",
    "in_list_view": 1,
    "label": "Enabled"
+  },
+  {
+   "fieldname": "branch_filter_field",
+   "fieldtype": "Data",
+   "label": "Branch Filter Field",
+   "description": "Optional. When set, central's changes_since restricts records returned to a branch to those whose <fieldname> equals the branch_code. Leave blank for global masters."
   }
  ],
  "index_web_pages_for_search": 0,

@@ -45,11 +45,24 @@ def ingest(doctype, branch_code, records):
 				continue
 
 			adapter.validate_incoming(payload)
-			adapter.apply_incoming(payload, operation)
+			local_name = adapter.apply_incoming(payload, operation) or name
 
 			payload_hash = compute_hash(payload)
 			SyncRecordState.upsert(doctype, name, payload_hash, branch_code)
 			frappe.db.commit()
+
+			# When a Bidirectional doctype (e.g. Item) is pushed by one branch,
+			# our adapters use raw SQL, so the doc_event `on_update` hook that
+			# normally fires `notify_branches_of_master_change` does NOT run.
+			# Manually trigger fan-out so the other branches pick this change up.
+			if _is_bidirectional(doctype) and operation != "delete":
+				frappe.enqueue(
+					"pos_next.sync.hooks._enqueue_notify_branches",
+					doctype=doctype,
+					name=local_name,
+					queue="short",
+					enqueue_after_commit=True,
+				)
 
 			results.append({"name": name, "sync_uuid": sync_uuid, "status": "ok"})
 		except Exception as e:
@@ -66,6 +79,15 @@ def ingest(doctype, branch_code, records):
 		"results": results,
 		"pull_hint": pull_hint,
 	}
+
+
+def _is_bidirectional(doctype):
+	"""True if any Sync Site Config rule classifies this doctype as Bidirectional."""
+	return bool(frappe.db.exists("Sync DocType Rule", {
+		"doctype_name": doctype,
+		"direction": "Bidirectional",
+		"enabled": 1,
+	}))
 
 
 def _check_for_master_updates(branch_code):

@@ -12,16 +12,26 @@ def changes_since(doctype, since, branch_code=None, limit=100):
 	"""
 	Return records modified after `since` for the given DocType,
 	plus any tombstones recorded after `since`.
+
+	If the matching Sync DocType Rule has `branch_filter_field` set, only
+	records where that field equals the requesting branch_code are returned.
+	This enforces branch isolation for per-branch masters like Warehouse,
+	POS Profile, Employee.
 	"""
 	if branch_code:
 		_update_branch_pull_stats(branch_code)
-	
+
 	limit = int(limit)
+	branch_filter_field = _get_branch_filter_field(doctype, branch_code)
 
 	# Fetch limit+1 to detect has_more
+	filters = {"modified": (">", since)}
+	if branch_filter_field and branch_code:
+		filters[branch_filter_field] = branch_code
+
 	records = frappe.get_all(
 		doctype,
-		filters={"modified": (">", since)},
+		filters=filters,
 		order_by="modified asc",
 		limit_page_length=limit + 1,
 		fields=["name"],
@@ -60,6 +70,27 @@ def changes_since(doctype, since, branch_code=None, limit=100):
 		"next_since": next_since,
 		"has_more": has_more,
 	}
+
+
+def _get_branch_filter_field(doctype, branch_code):
+	"""
+	Look up the calling branch's Sync DocType Rule for `doctype`. Return the
+	`branch_filter_field` if set, else None (meaning: serve globally).
+	"""
+	if not branch_code:
+		return None
+	cfg_name = frappe.db.get_value(
+		"Sync Site Config",
+		{"branch_code": branch_code, "site_role": "Central"},
+		"name",
+	)
+	if not cfg_name:
+		return None
+	return frappe.db.get_value(
+		"Sync DocType Rule",
+		{"parent": cfg_name, "doctype_name": doctype, "enabled": 1},
+		"branch_filter_field",
+	)
 
 
 def _update_branch_pull_stats(branch_code):

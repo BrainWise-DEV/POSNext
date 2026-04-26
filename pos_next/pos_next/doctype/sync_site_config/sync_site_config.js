@@ -1,8 +1,46 @@
 // Copyright (c) 2026, BrainWise and contributors
 // For license information, please see license.txt
 
+const NAMING_SERIES_PREFIXES = [
+	["sales_invoice_naming_series",     "SINV"],
+	["payment_entry_naming_series",     "PE"],
+	["pos_opening_shift_naming_series", "POS-OS"],
+	["pos_closing_shift_naming_series", "POS-CS"],
+];
+
+function compute_naming_defaults(branch_code) {
+	const defaults = {};
+	for (const [field, prefix] of NAMING_SERIES_PREFIXES) {
+		defaults[field] = `${prefix}-${branch_code}-.YYYY.-.#####`;
+	}
+	return defaults;
+}
+
+function autofill_naming_series(frm) {
+	if (frm.doc.site_role !== "Branch") return;
+	const code = (frm.doc.branch_code || "").trim();
+	if (!code) return;
+
+	const new_defaults = compute_naming_defaults(code);
+	// Track the last code we autofilled for so we can detect "still the
+	// previous default" vs. "admin customized" on subsequent branch_code changes.
+	const old_code = (frm._last_autofill_branch_code || "").trim();
+	const old_defaults = old_code ? compute_naming_defaults(old_code) : {};
+
+	for (const [field, _prefix] of NAMING_SERIES_PREFIXES) {
+		const current = frm.doc[field] || "";
+		const is_blank = !current;
+		const is_old_default = old_code && current === old_defaults[field];
+		if (is_blank || is_old_default) {
+			frm.set_value(field, new_defaults[field]);
+		}
+	}
+	frm._last_autofill_branch_code = code;
+}
+
 frappe.ui.form.on("Sync Site Config", {
 	refresh(frm) {
+		autofill_naming_series(frm);
 		if (frm.doc.site_role === "Branch" && !frm.is_new()) {
 			frm.add_custom_button(__("Test Sync Connection"), () => {
 				frappe.call({
@@ -28,6 +66,14 @@ frappe.ui.form.on("Sync Site Config", {
 		if (!frm.is_new()) {
 			frm.trigger("load_sync_dashboard");
 		}
+	},
+
+	branch_code(frm) {
+		autofill_naming_series(frm);
+	},
+
+	site_role(frm) {
+		autofill_naming_series(frm);
 	},
 
 	load_sync_dashboard(frm) {
