@@ -232,6 +232,38 @@ doc_events = {
 		"on_submit": "pos_next.sync.hooks_outbox.enqueue_to_outbox",
 		"on_cancel": "pos_next.sync.hooks_outbox.enqueue_to_outbox",
 	},
+	"Purchase Receipt": {
+		"before_insert": [
+			"pos_next.sync.hooks_uuid.set_sync_uuid_if_missing",
+			"pos_next.sync.hooks_uuid.set_origin_branch_if_missing",
+		],
+		"on_submit": "pos_next.sync.hooks_outbox.enqueue_to_outbox",
+		"on_cancel": "pos_next.sync.hooks_outbox.enqueue_to_outbox",
+	},
+	"Stock Entry": {
+		"before_insert": [
+			"pos_next.sync.hooks_uuid.set_sync_uuid_if_missing",
+			"pos_next.sync.hooks_uuid.set_origin_branch_if_missing",
+		],
+		"on_submit": "pos_next.sync.hooks_outbox.enqueue_to_outbox",
+		"on_cancel": "pos_next.sync.hooks_outbox.enqueue_to_outbox",
+	},
+	"Stock Reconciliation": {
+		"before_insert": [
+			"pos_next.sync.hooks_uuid.set_sync_uuid_if_missing",
+			"pos_next.sync.hooks_uuid.set_origin_branch_if_missing",
+		],
+		"on_submit": "pos_next.sync.hooks_outbox.enqueue_to_outbox",
+		"on_cancel": "pos_next.sync.hooks_outbox.enqueue_to_outbox",
+	},
+	"Delivery Note": {
+		"before_insert": [
+			"pos_next.sync.hooks_uuid.set_sync_uuid_if_missing",
+			"pos_next.sync.hooks_uuid.set_origin_branch_if_missing",
+		],
+		"on_submit": "pos_next.sync.hooks_outbox.enqueue_to_outbox",
+		"on_cancel": "pos_next.sync.hooks_outbox.enqueue_to_outbox",
+	},
 	"POS Opening Shift": {
 		"before_insert": [
 			"pos_next.sync.hooks_uuid.set_sync_uuid_if_missing",

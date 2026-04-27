@@ -33,6 +33,15 @@ DEFAULT_SYNC_RULES = [
 	# --- Transactions branch → central, Branch-Wins ---
 	{"doctype_name": "POS Opening Shift",   "direction": "Branch→Central", "cdc_strategy": "Outbox", "conflict_rule": "Branch-Wins", "priority":  10, "batch_size":  50},
 	{"doctype_name": "POS Closing Shift",   "direction": "Branch→Central", "cdc_strategy": "Outbox", "conflict_rule": "Branch-Wins", "priority":  20, "batch_size":  50},
+	# Stock-altering docs (priority 30) drain BEFORE Sales Invoice (50) so central's
+	# Bin reflects branch stock movements before any consuming SI lands. If a stock-add
+	# doc is missing on central, the dependent SI will (correctly) hard-fail — that
+	# loud failure is preferred to silent negative-stock accumulation.
+	{"doctype_name": "Purchase Receipt",     "direction": "Branch→Central", "cdc_strategy": "Outbox", "conflict_rule": "Branch-Wins", "priority":  30, "batch_size":  50},
+	{"doctype_name": "Stock Entry",          "direction": "Branch→Central", "cdc_strategy": "Outbox", "conflict_rule": "Branch-Wins", "priority":  30, "batch_size":  50},
+	{"doctype_name": "Stock Reconciliation", "direction": "Branch→Central", "cdc_strategy": "Outbox", "conflict_rule": "Branch-Wins", "priority":  30, "batch_size":  50},
+	# Delivery Note consumes stock like SI but is independent of the SI submit chain.
+	{"doctype_name": "Delivery Note",        "direction": "Branch→Central", "cdc_strategy": "Outbox", "conflict_rule": "Branch-Wins", "priority":  40, "batch_size":  50},
 	{"doctype_name": "Sales Invoice",       "direction": "Branch→Central", "cdc_strategy": "Outbox", "conflict_rule": "Branch-Wins", "priority":  50, "batch_size": 100},
 	{"doctype_name": "Payment Entry",       "direction": "Branch→Central", "cdc_strategy": "Outbox", "conflict_rule": "Branch-Wins", "priority":  50, "batch_size": 100},
 	{"doctype_name": "Offline Invoice Sync","direction": "Branch→Central", "cdc_strategy": "Outbox", "conflict_rule": "Branch-Wins", "priority":  70, "batch_size": 100},

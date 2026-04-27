@@ -17,11 +17,6 @@
   "push_interval_seconds",
   "pull_masters_interval_seconds",
   "pull_failover_interval_seconds",
-  "section_break_naming_series",
-  "sales_invoice_naming_series",
-  "payment_entry_naming_series",
-  "pos_opening_shift_naming_series",
-  "pos_closing_shift_naming_series",
   "section_break_status",
   "last_push_at",
   "last_pull_masters_at",
@@ -117,42 +112,6 @@
   },
   {
    "collapsible": 1,
-   "depends_on": "eval:doc.site_role==\"Branch\"",
-   "fieldname": "section_break_naming_series",
-   "fieldtype": "Section Break",
-   "label": "Branch Naming Series",
-   "description": "Branch-prefixed series installed onto each transactional DocType so names can't collide with central's local series. Edit the patterns to taste; blank means leave that DocType alone."
-  },
-  {
-   "depends_on": "eval:doc.site_role==\"Branch\"",
-   "fieldname": "sales_invoice_naming_series",
-   "fieldtype": "Data",
-   "label": "Sales Invoice Naming Series",
-   "description": "e.g. SINV-CAI-.YYYY.-.##### — .YYYY. and .##### are Frappe naming-series tokens. Saved as the default option for Sales Invoice on this site."
-  },
-  {
-   "depends_on": "eval:doc.site_role==\"Branch\"",
-   "fieldname": "payment_entry_naming_series",
-   "fieldtype": "Data",
-   "label": "Payment Entry Naming Series",
-   "description": "e.g. PE-CAI-.YYYY.-.#####"
-  },
-  {
-   "depends_on": "eval:doc.site_role==\"Branch\"",
-   "fieldname": "pos_opening_shift_naming_series",
-   "fieldtype": "Data",
-   "label": "POS Opening Shift Naming Series",
-   "description": "e.g. POS-OS-CAI-.YYYY.-.#####"
-  },
-  {
-   "depends_on": "eval:doc.site_role==\"Branch\"",
-   "fieldname": "pos_closing_shift_naming_series",
-   "fieldtype": "Data",
-   "label": "POS Closing Shift Naming Series",
-   "description": "e.g. POS-CS-CAI-.YYYY.-.#####"
-  },
-  {
-   "collapsible": 1,
    "fieldname": "section_break_status",
    "fieldtype": "Section Break",
    "label": "Status"
@@ -235,9 +194,8 @@
    "options": "Sync DocType Rule"
   }
  ],
- "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-04-05 00:00:00",
+ "modified": "2026-04-27 10:45:50.455244",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "Sync Site Config",
