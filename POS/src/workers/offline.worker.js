@@ -166,7 +166,32 @@ async function initDB() {
 // Server connectivity state
 let serverOnline = true
 let manualOffline = false
-let csrfToken = null // CSRF token passed from main thread
+let csrfToken = null // CSRF token passed from main thread (web mode)
+let apiBaseUrl = "" // Frappe origin to prepend to /api/* paths (desktop mode)
+let authHeader = null // "token <key>:<secret>" for desktop mode
+
+/**
+ * Compose a fully-qualified URL from a relative API path. In web mode
+ * apiBaseUrl is "" so paths stay same-origin; in desktop mode the
+ * Frappe Cloud origin is prepended.
+ */
+function apiUrl(path) {
+	if (!path) return apiBaseUrl
+	if (/^https?:\/\//i.test(path)) return path
+	const normalized = path.startsWith("/") ? path : `/${path}`
+	return `${apiBaseUrl}${normalized}`
+}
+
+/** Merge our auth headers (CSRF in web, Bearer-style token in desktop) into an extra map. */
+function buildAuthHeaders(extra = {}) {
+	const headers = { ...extra }
+	if (authHeader) {
+		headers["Authorization"] = authHeader
+	} else if (csrfToken) {
+		headers["X-Frappe-CSRF-Token"] = csrfToken
+	}
+	return headers
+}
 
 // Display mode: controlled by POS Settings "Show Variants as Items" (default: off)
 // true = variants shown directly, templates hidden
@@ -333,8 +358,9 @@ async function pingServer() {
 		const controller = new AbortController()
 		const timeoutId = setTimeout(() => controller.abort(), 3000)
 
-		const response = await fetch("/api/method/pos_next.api.ping", {
+		const response = await fetch(apiUrl("/api/method/pos_next.api.ping"), {
 			method: "GET",
+			headers: buildAuthHeaders({ Accept: "application/json" }),
 			signal: controller.signal,
 		})
 
@@ -1476,17 +1502,12 @@ async function fetchStockFromServer() {
 
 		const itemCodes = Array.from(trackedItemCodes)
 
-		const headers = {
+		const headers = buildAuthHeaders({
 			'Content-Type': 'application/json',
 			'Accept': 'application/json'
-		}
+		})
 
-		// Add CSRF token if available
-		if (csrfToken) {
-			headers['X-Frappe-CSRF-Token'] = csrfToken
-		}
-
-		const response = await fetch('/api/method/pos_next.api.items.get_stock_quantities', {
+		const response = await fetch(apiUrl('/api/method/pos_next.api.items.get_stock_quantities'), {
 			method: 'POST',
 			headers,
 			body: JSON.stringify({
@@ -1675,6 +1696,18 @@ self.onmessage = async (event) => {
 			case "SET_CSRF_TOKEN":
 				csrfToken = payload.token
 				result = { success: true }
+				break
+
+			case "SET_API_CONFIG":
+				if (typeof payload.baseUrl === "string") {
+					apiBaseUrl = payload.baseUrl.endsWith("/")
+						? payload.baseUrl.slice(0, -1)
+						: payload.baseUrl
+				}
+				if (Object.prototype.hasOwnProperty.call(payload, "authHeader")) {
+					authHeader = payload.authHeader || null
+				}
+				result = { success: true, baseUrl: apiBaseUrl, hasAuth: Boolean(authHeader) }
 				break
 
 			case "PING_SERVER":

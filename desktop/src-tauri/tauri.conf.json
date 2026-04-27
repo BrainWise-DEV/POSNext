@@ -1,0 +1,65 @@
+{
+	"$schema": "https://schema.tauri.app/config/2",
+	"productName": "POS Next",
+	"version": "0.1.0",
+	"identifier": "com.blazetech.posnext",
+	"build": {
+		"beforeBuildCommand": "yarn --cwd ../../POS build:desktop",
+		"beforeDevCommand": "yarn --cwd ../../POS dev:desktop",
+		"devUrl": "http://localhost:8080",
+		"frontendDist": "../dist-frontend"
+	},
+	"app": {
+		"windows": [
+			{
+				"title": "POS Next",
+				"width": 1280,
+				"height": 800,
+				"minWidth": 1024,
+				"minHeight": 600,
+				"resizable": true,
+				"fullscreen": false,
+				"center": true,
+				"focus": true
+			}
+		],
+		"security": {
+			"csp": null,
+			"capabilities": ["default"]
+		},
+		"withGlobalTauri": true
+	},
+	"bundle": {
+		"active": true,
+		"targets": ["nsis", "msi"],
+		"icon": [
+			"icons/32x32.png",
+			"icons/128x128.png",
+			"icons/128x128@2x.png",
+			"icons/icon.icns",
+			"icons/icon.ico"
+		],
+		"copyright": "Copyright © Blaze Technology Solutions",
+		"category": "Business",
+		"shortDescription": "Point of Sale desktop client",
+		"longDescription": "Offline-capable Point of Sale desktop client that syncs with Frappe Cloud.",
+		"resources": [],
+		"externalBin": [],
+		"windows": {
+			"webviewInstallMode": {
+				"type": "embedBootstrapper"
+			},
+			"nsis": {
+				"installMode": "perMachine"
+			}
+		}
+	},
+	"plugins": {
+		"updater": {
+			"active": false,
+			"endpoints": [],
+			"dialog": false,
+			"pubkey": ""
+		}
+	}
+}

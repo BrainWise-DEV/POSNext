@@ -543,6 +543,13 @@ class OfflineWorkerClient {
 		return this.sendMessage("SET_CSRF_TOKEN", { token })
 	}
 
+	async setApiConfig({ baseUrl, authHeader } = {}) {
+		return this.sendMessage("SET_API_CONFIG", {
+			baseUrl: baseUrl || "",
+			authHeader: authHeader || null,
+		})
+	}
+
 	async setShowVariantsAsItems(value) {
 		return this.sendMessage("SET_SHOW_VARIANTS_AS_ITEMS", {
 			value: Boolean(value),

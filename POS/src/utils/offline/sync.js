@@ -1,6 +1,8 @@
 import { call } from "@/utils/apiWrapper"
 import { logger } from "@/utils/logger"
 import { CoalescingMutex } from "@/utils/mutex"
+import { apiUrl, getAuthHeader, runtimeConfig } from "@/utils/runtimeConfig"
+import { tauriFetch } from "@/utils/desktopTransport"
 import { db } from "./db"
 import { offlineState } from "./offlineState"
 import { removeOfflineReceiptPayload } from "./offlineReceiptCache"
@@ -55,8 +57,13 @@ export const pingServer = async () => {
 			SYNC_CONFIG.PING_TIMEOUT_MS,
 		)
 
-		const response = await fetch("/api/method/pos_next.api.ping", {
+		const fetchFn = runtimeConfig.useRustTransport ? tauriFetch : fetch
+		const headers = { Accept: "application/json" }
+		const auth = getAuthHeader()
+		if (auth) headers.Authorization = auth
+		const response = await fetchFn(apiUrl("/api/method/pos_next.api.ping"), {
 			method: "GET",
+			headers,
 			signal: controller.signal,
 		})
 

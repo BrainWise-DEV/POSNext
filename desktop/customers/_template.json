@@ -1,0 +1,16 @@
+{
+	"$schema": "./_schema.json",
+	"slug": "acme",
+	"productName": "POS Next — Acme",
+	"identifier": "com.blazetech.posnext.acme",
+	"version": "0.1.0",
+	"siteUrl": "https://acme.frappe.cloud",
+	"displayName": "Acme",
+	"logoPath": "../assets/customers/acme/logo.png",
+	"iconDir": "../assets/customers/acme/icons",
+	"updater": {
+		"active": false,
+		"endpoint": "https://updates.example.com/acme/latest.json",
+		"pubkey": ""
+	}
+}

@@ -12,7 +12,7 @@
 
       <div class="bg-white py-8 px-6 shadow rounded-lg">
         <form class="space-y-6" @submit.prevent="submit">
-          <div v-if="session.login.error" class="rounded-md bg-red-50 p-4">
+          <div v-if="(runtimeConfig.isDesktop ? desktopError : session.login.error)" class="rounded-md bg-red-50 p-4">
             <div class="flex">
               <div class="flex-shrink-0">
                 <svg class="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
@@ -24,7 +24,8 @@
                   {{ __('Login Failed') }}
                 </h3>
                 <div class="mt-2 text-sm text-red-700">
-                  <p>{{ session.login.error.messages.join('\n') }}</p>
+                  <p v-if="runtimeConfig.isDesktop">{{ desktopError }}</p>
+                  <p v-else>{{ session.login.error.messages.join('\n') }}</p>
                 </div>
               </div>
             </div>
@@ -38,7 +39,7 @@
               type="text"
               :placeholder="__('Enter your username or email')"
               :label="__('User ID / Email')"
-              :disabled="session.login.loading"
+              :disabled="runtimeConfig.isDesktop ? desktopLoading : session.login.loading"
             />
           </div>
 
@@ -52,14 +53,14 @@
                   name="password"
                   :type="showPassword ? 'text' : 'password'"
                   :placeholder="__('Enter your password')"
-                  :disabled="session.login.loading"
+                  :disabled="runtimeConfig.isDesktop ? desktopLoading : session.login.loading"
                   class="form-input block w-full border-gray-400 placeholder-gray-500 pe-10"
                 />
                 <button
                   type="button"
                   @click="showPassword = !showPassword"
                   class="absolute inset-y-0 end-0 flex items-center pe-3 text-gray-600 hover:text-gray-800 transition-colors focus:outline-none"
-                  :disabled="session.login.loading"
+                  :disabled="runtimeConfig.isDesktop ? desktopLoading : session.login.loading"
                   tabindex="-1"
                   :aria-label="showPassword ? __('Hide password') : __('Show password')"
                 >
@@ -75,12 +76,12 @@
 
           <div>
             <Button
-              :loading="session.login.loading"
+              :loading="runtimeConfig.isDesktop ? desktopLoading : session.login.loading"
               variant="solid"
               class="w-full py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
               type="submit"
             >
-              {{ session.login.loading ? __('Signing in...') : __('Sign in') }}
+              {{ (runtimeConfig.isDesktop ? desktopLoading : session.login.loading) ? __('Signing in...') : __('Sign in') }}
             </Button>
           </div>
         </form>
@@ -107,6 +108,10 @@ import { cleanupUserSession } from "../utils/sessionCleanup"
 import { ensureCSRFToken } from "../utils/csrf"
 import { offlineWorker } from "../utils/offline/workerClient"
 import { logger } from "@/utils/logger"
+import { runtimeConfig, getAuthHeader } from "@/utils/runtimeConfig"
+import { loginAndGenerateKeys, persistApiCredentials } from "@/utils/desktopAuth"
+import { userResource } from "../data/user"
+import { sessionUser } from "../data/session"
 
 const log = logger.create("Login")
 
@@ -120,6 +125,8 @@ const loginForm = reactive({
 
 const showShiftDialog = ref(false)
 const showPassword = ref(false)
+const desktopLoading = ref(false)
+const desktopError = ref(null)
 
 // Reset state when login page mounts
 onMounted(async () => {
@@ -141,8 +148,37 @@ onMounted(async () => {
 	}
 })
 
-function submit() {
+async function submit() {
 	if (!loginForm.email || !loginForm.password) {
+		return
+	}
+
+	if (runtimeConfig.isDesktop) {
+		desktopError.value = null
+		desktopLoading.value = true
+		try {
+			const email = loginForm.email.trim()
+			const { apiKey, apiSecret } = await loginAndGenerateKeys({
+				email,
+				password: loginForm.password,
+			})
+			await persistApiCredentials({ apiKey, apiSecret, userEmail: email })
+			await offlineWorker.setApiConfig({
+				baseUrl: runtimeConfig.baseUrl,
+				authHeader: getAuthHeader(),
+			})
+
+			// Hydrate the user resource so the existing logged-in watcher fires
+			if (!userResource.loading) userResource.fetch()
+			await userResource.promise
+			session.user = sessionUser()
+			log.info("Desktop login complete", { user: session.user })
+		} catch (error) {
+			log.error("Desktop login failed", error)
+			desktopError.value = error?.message || String(error)
+		} finally {
+			desktopLoading.value = false
+		}
 		return
 	}
 
@@ -157,20 +193,21 @@ watch(
 	() => session.isLoggedIn,
 	async (isLoggedIn) => {
 		if (isLoggedIn) {
-			// Initialize CSRF token after successful login
-			try {
-				log.info("User logged in, initializing CSRF token...")
-				await ensureCSRFToken()
+			if (!runtimeConfig.isDesktop) {
+				// Initialize CSRF token after successful login (web only)
+				try {
+					log.info("User logged in, initializing CSRF token...")
+					await ensureCSRFToken()
 
-				// Sync CSRF token to worker for background API calls
-				if (window.csrf_token) {
-					await offlineWorker.setCSRFToken(window.csrf_token)
+					if (window.csrf_token) {
+						await offlineWorker.setCSRFToken(window.csrf_token)
+					}
+				} catch (error) {
+					log.error("Failed to initialize CSRF token after login:", error)
 				}
-			} catch (error) {
-				log.error("Failed to initialize CSRF token after login:", error)
 			}
 
-			// Cache password hash for offline session unlock
+			// Cache password hash for offline session unlock (still useful in desktop mode)
 			await cachePasswordHashFromLogin(loginForm.password)
 
 			// Show shift opening dialog after successful login

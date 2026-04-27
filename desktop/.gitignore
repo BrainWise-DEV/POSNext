@@ -1,0 +1,18 @@
+# Tauri build artefacts
+src-tauri/target/
+src-tauri/gen/
+src-tauri/Cargo.lock
+
+# Per-customer build outputs
+dist/
+src-tauri/tauri.conf.*.json
+
+# Updater signing keys — NEVER commit
+keys/
+*.pem
+*.key
+
+# Per-customer config files (commit only the template)
+customers/*.json
+!customers/_template.json
+dist-frontend/

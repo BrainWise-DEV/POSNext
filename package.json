@@ -7,7 +7,11 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "postinstall": "cd POS && yarn install",
     "dev": "cd POS && yarn dev",
-    "build": "cd POS && yarn build"
+    "build": "cd POS && yarn build",
+    "desktop:dev": "node desktop/scripts/dev-customer.mjs",
+    "desktop:build": "node desktop/scripts/build-customer.mjs",
+    "desktop:build:all": "node desktop/scripts/build-customer.mjs --all",
+    "desktop:publish": "node desktop/scripts/publish-update.mjs"
   },
   "keywords": [],
   "author": "",

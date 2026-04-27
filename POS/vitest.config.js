@@ -7,7 +7,22 @@ export default defineConfig({
 	resolve: {
 		alias: {
 			"@": path.resolve(__dirname, "./src"),
+			// Tauri plugins ship only inside the desktop bundle; under Vitest we
+			// route them at stubs so vite's import-analysis can resolve the path
+			// without the real packages being installed.
+			"@tauri-apps/plugin-http": path.resolve(__dirname, "./tests/stubs/tauri-http.js"),
+			"@tauri-apps/plugin-stronghold": path.resolve(__dirname, "./tests/stubs/tauri-stronghold.js"),
+			"@tauri-apps/plugin-store": path.resolve(__dirname, "./tests/stubs/tauri-store.js"),
+			"@tauri-apps/plugin-updater": path.resolve(__dirname, "./tests/stubs/tauri-updater.js"),
+			"@tauri-apps/plugin-process": path.resolve(__dirname, "./tests/stubs/tauri-process.js"),
+			"@tauri-apps/api/path": path.resolve(__dirname, "./tests/stubs/tauri-path.js"),
 		},
+	},
+	define: {
+		__POS_TARGET__: JSON.stringify("web"),
+		__FRAPPE_BASE_URL__: JSON.stringify(""),
+		__SOCKETIO_PORT__: JSON.stringify(9000),
+		__BUILD_VERSION__: JSON.stringify("test"),
 	},
 	test: {
 		environment: "jsdom",

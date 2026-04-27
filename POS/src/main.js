@@ -26,6 +26,9 @@ import { logger } from "./utils/logger"
 import { offlineWorker } from "./utils/offline/workerClient"
 import translationPlugin from "./utils/translation"
 import { initSocket } from "./socket"
+import { runtimeConfig, getAuthHeader } from "./utils/runtimeConfig"
+import { desktopFrappeRequest } from "./utils/desktopTransport"
+import { restoreApiCredentialsFromStronghold } from "./utils/desktopAuth"
 
 import {
 	Alert,
@@ -50,7 +53,7 @@ const log = logger.create("Main")
 // PWA Service Worker Registration
 // =============================================================================
 
-if ("serviceWorker" in navigator) {
+if (runtimeConfig.hasServiceWorker && "serviceWorker" in navigator) {
 	window.addEventListener(
 		"load",
 		() => {
@@ -100,6 +103,19 @@ async function syncCSRFTokenToWorker() {
 	}
 }
 
+/** Push the desktop API config (baseUrl + Authorization header) into the worker. */
+async function syncApiConfigToWorker() {
+	try {
+		await offlineWorker.setApiConfig({
+			baseUrl: runtimeConfig.baseUrl,
+			authHeader: getAuthHeader(),
+		})
+		log.debug("API config synced to worker")
+	} catch (error) {
+		log.warn("Failed to sync API config to worker", error)
+	}
+}
+
 // =============================================================================
 // Application Initialization
 // =============================================================================
@@ -108,16 +124,22 @@ async function initializeApp() {
 	const app = createApp(App)
 	const pinia = createPinia()
 
-	// Keep worker in sync when CSRF token refreshes
-	onCSRFTokenRefresh((newToken) => {
-		offlineWorker.setCSRFToken(newToken).catch((error) => {
-			log.warn("Failed to sync refreshed CSRF token to worker", error)
+	if (runtimeConfig.isDesktop) {
+		// Route every frappe-ui resource through the Tauri Rust HTTP plugin.
+		// CSRF + cookies don't apply; auth is via API key/secret in Stronghold.
+		setConfig("resourceFetcher", desktopFrappeRequest)
+	} else {
+		// Keep worker in sync when CSRF token refreshes
+		onCSRFTokenRefresh((newToken) => {
+			offlineWorker.setCSRFToken(newToken).catch((error) => {
+				log.warn("Failed to sync refreshed CSRF token to worker", error)
+			})
 		})
-	})
 
-	// Enable automatic CSRF token refresh on 401/403 errors
-	const csrfAwareFrappeRequest = createCSRFAwareRequest(frappeRequest)
-	setConfig("resourceFetcher", csrfAwareFrappeRequest)
+		// Enable automatic CSRF token refresh on 401/403 errors
+		const csrfAwareFrappeRequest = createCSRFAwareRequest(frappeRequest)
+		setConfig("resourceFetcher", csrfAwareFrappeRequest)
+	}
 
 	// Register plugins
 	app.use(pinia)
@@ -136,40 +158,75 @@ async function initializeApp() {
 	})
 
 	// -------------------------------------------------------------------------
-	// Authentication (CSRF + User fetched in parallel for faster startup)
+	// Authentication
+	//   - Web: CSRF + user resource fetched in parallel.
+	//   - Desktop: load API key/secret from Stronghold, then resolve the user
+	//     via the same userResource (which now goes through the desktop transport).
 	// -------------------------------------------------------------------------
 
-	const csrfPromise = (async () => {
-		const existingToken = getCSRFTokenFromCookie()
-		if (existingToken) {
-			log.debug("CSRF token found in cookie")
-			await syncCSRFTokenToWorker()
-			return true
-		}
+	let user = null
 
-		log.debug("Fetching CSRF token...")
+	if (runtimeConfig.isDesktop) {
 		try {
-			await ensureCSRFToken({ silent: true })
-			await syncCSRFTokenToWorker()
-			return true
-		} catch {
-			log.debug("CSRF fetch failed, will retry on first API call")
-			return false
-		}
-	})()
-
-	const userPromise = (async () => {
-		try {
-			if (!userResource.loading) userResource.fetch()
-			await userResource.promise
-			return sessionUser()
+			const restored = await restoreApiCredentialsFromStronghold()
+			if (restored) {
+				log.info("Restored API credentials from Stronghold")
+				await syncApiConfigToWorker()
+			} else {
+				log.info("No stored credentials — login required")
+			}
 		} catch (error) {
-			log.debug("User not logged in", error?.message || "No session")
-			return null
+			log.warn("Stronghold restore failed", error)
 		}
-	})()
 
-	const [, user] = await Promise.all([csrfPromise, userPromise])
+		if (getAuthHeader()) {
+			try {
+				if (!userResource.loading) userResource.fetch()
+				await userResource.promise
+				user = sessionUser()
+			} catch (error) {
+				log.debug(
+					"Desktop user fetch failed (likely invalid creds)",
+					error?.message || error,
+				)
+				user = null
+			}
+		}
+	} else {
+		const csrfPromise = (async () => {
+			const existingToken = getCSRFTokenFromCookie()
+			if (existingToken) {
+				log.debug("CSRF token found in cookie")
+				await syncCSRFTokenToWorker()
+				return true
+			}
+
+			log.debug("Fetching CSRF token...")
+			try {
+				await ensureCSRFToken({ silent: true })
+				await syncCSRFTokenToWorker()
+				return true
+			} catch {
+				log.debug("CSRF fetch failed, will retry on first API call")
+				return false
+			}
+		})()
+
+		const userPromise = (async () => {
+			try {
+				if (!userResource.loading) userResource.fetch()
+				await userResource.promise
+				return sessionUser()
+			} catch (error) {
+				log.debug("User not logged in", error?.message || "No session")
+				return null
+			}
+		})()
+
+		const [, fetchedUser] = await Promise.all([csrfPromise, userPromise])
+		user = fetchedUser
+	}
+
 	session.user = user
 	log.info(`User authenticated: ${session.user}`)
 
@@ -178,6 +235,12 @@ async function initializeApp() {
 	// -------------------------------------------------------------------------
 
 	if (user) {
+		// Make sure the worker can reach the backend before we kick off any
+		// preload (CACHE_ITEMS etc. are no-ops without auth in desktop mode).
+		if (runtimeConfig.isDesktop) {
+			await syncApiConfigToWorker()
+		}
+
 		import("./stores/bootstrap")
 			.then(async ({ useBootstrapStore }) => {
 				const bootstrapStore = useBootstrapStore()
@@ -188,8 +251,9 @@ async function initializeApp() {
 					initPrecision(bootstrapStore.getPreloadedPrecision())
 					log.debug("Precision settings initialized from bootstrap")
 
-					// Initialize Socket.IO with correct site name from bootstrap
-					if (typeof window !== "undefined") {
+					// Initialize Socket.IO with correct site name from bootstrap.
+					// Desktop builds skip realtime entirely (no cookie auth across origins).
+					if (runtimeConfig.hasRealtime && typeof window !== "undefined") {
 						if (!window.frappe) window.frappe = {}
 						const siteName = bootstrapStore.getSiteName()
 						window.frappe.realtime = initSocket(siteName)
@@ -251,17 +315,19 @@ async function initializeApp() {
 	app.mount("#app")
 
 	// -------------------------------------------------------------------------
-	// Scheduled CSRF Token Refresh (every 30 minutes)
+	// Scheduled CSRF Token Refresh (web only — desktop has no CSRF)
 	// -------------------------------------------------------------------------
 
-	setInterval(
-		async () => {
-			log.debug("Scheduled CSRF token refresh")
-			await ensureCSRFToken({ forceRefresh: true, silent: true })
-			await syncCSRFTokenToWorker()
-		},
-		30 * 60 * 1000,
-	)
+	if (!runtimeConfig.isDesktop) {
+		setInterval(
+			async () => {
+				log.debug("Scheduled CSRF token refresh")
+				await ensureCSRFToken({ forceRefresh: true, silent: true })
+				await syncCSRFTokenToWorker()
+			},
+			30 * 60 * 1000,
+		)
+	}
 }
 
 initializeApp()

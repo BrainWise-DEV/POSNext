@@ -1,3 +1,5 @@
+import { runtimeConfig } from "./runtimeConfig"
+
 const CSRF_COOKIE = "csrf_token"
 const CSRF_PLACEHOLDER = "{{ csrf_token }}"
 const CSRF_TOKEN_ENDPOINT = "/api/method/pos_next.api.utilities.get_csrf_token"
@@ -102,6 +104,11 @@ export async function ensureCSRFToken({
 	forceRefresh = false,
 	silent = false,
 } = {}) {
+	// Desktop builds authenticate with API key + secret; CSRF is irrelevant.
+	if (runtimeConfig.isDesktop) {
+		return true
+	}
+
 	if (!forceRefresh) {
 		// Check if we already have a valid token in window.csrf_token
 		if (
@@ -222,6 +229,9 @@ export function createCSRFAwareRequest(
 		try {
 			return await originalRequest.apply(this, args)
 		} catch (error) {
+			if (runtimeConfig.isDesktop) {
+				throw error
+			}
 			if (isCSRFApiError(error)) {
 				if (!silent) {
 					console.warn(

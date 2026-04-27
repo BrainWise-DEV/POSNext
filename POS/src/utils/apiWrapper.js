@@ -1,9 +1,26 @@
 import { call as frappeCall } from "frappe-ui"
 
 import { forceRefreshCSRFToken, isCSRFApiError } from "./csrf"
+import { desktopFrappeRequest } from "./desktopTransport"
+import { runtimeConfig } from "./runtimeConfig"
 
-// Wrapped call function with CSRF auto-refresh
+/**
+ * Frappe whitelisted-method invoker.
+ *
+ *  - Web mode: forwards to `frappe-ui`'s `call`, with CSRF auto-refresh on retry.
+ *  - Desktop mode: routes through `desktopFrappeRequest` (Tauri Rust HTTP +
+ *    `Authorization: token` header). CSRF doesn't apply.
+ */
 export async function call(method, params) {
+	if (runtimeConfig.useRustTransport) {
+		const path = method.startsWith("/") ? method : `/api/method/${method}`
+		return desktopFrappeRequest({
+			url: path,
+			method: "POST",
+			data: params || {},
+		})
+	}
+
 	try {
 		return await frappeCall(method, params)
 	} catch (error) {

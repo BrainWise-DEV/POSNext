@@ -1,0 +1,246 @@
+name: Build desktop installer
+
+# Produces a Windows .exe for one customer. Two ways to trigger:
+#
+# 1. Manual run from the Actions tab (workflow_dispatch). Pick a customer slug;
+#    optionally override the version. Useful for one-off rebuilds.
+#
+# 2. Push a tag named `desktop-v<version>-<slug>` (e.g. `desktop-v1.0.0-acme`).
+#    The workflow extracts both pieces from the tag, builds, and attaches the
+#    installer to a draft GitHub Release.
+#
+# CUSTOMER CONFIG STORAGE
+# -----------------------
+# `desktop/customers/<slug>.json` is gitignored — we don't keep customer URLs in
+# git. Instead, store each customer's JSON config as a GitHub Secret named
+# `CUSTOMER_CONFIG_<SLUG_UPPER>` (e.g. CUSTOMER_CONFIG_ACME). Paste the entire
+# JSON object as the secret value. The workflow writes it to disk before build.
+#
+# Optional secrets per customer (only needed if updater.active is true):
+#   CUSTOMER_UPDATER_KEY_<SLUG_UPPER>      — contents of desktop/keys/<slug>.key
+#   CUSTOMER_UPDATER_KEY_PWD_<SLUG_UPPER>  — passphrase if the key is password-protected
+#
+# CODE SIGNING (optional)
+# -----------------------
+# Add these repo secrets to enable signtool signing of the installer:
+#   WIN_CODESIGN_PFX_BASE64  — base64-encoded .pfx certificate
+#   WIN_CODESIGN_PFX_PWD     — certificate password
+# When unset, the build still succeeds but Windows SmartScreen will warn users.
+
+on:
+  workflow_dispatch:
+    inputs:
+      customer:
+        description: "Customer slug (must have CUSTOMER_CONFIG_<SLUG_UPPER> secret)"
+        required: true
+        type: string
+      version:
+        description: "Override version (defaults to value in customer config)"
+        required: false
+        type: string
+      release:
+        description: "Attach the artifact to a draft GitHub Release"
+        required: false
+        type: boolean
+        default: false
+  push:
+    tags:
+      - "desktop-v*"
+
+concurrency:
+  group: desktop-build-${{ github.event.inputs.customer || github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write  # needed to create the draft release
+
+jobs:
+  build:
+    name: Build ${{ github.event.inputs.customer || github.ref_name }}
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Tag-driven runs need to extract slug + version out of the tag name.
+      # Manual runs use the workflow_dispatch inputs directly.
+      - name: Resolve build parameters
+        id: params
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            tag="${GITHUB_REF_NAME}"
+            # Expected format: desktop-v<version>-<slug>
+            if [[ ! "$tag" =~ ^desktop-v([0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.+-]+)?)-([a-z0-9_-]+)$ ]]; then
+              echo "::error::Tag '$tag' does not match desktop-v<version>-<slug>"
+              exit 1
+            fi
+            echo "customer=${BASH_REMATCH[3]}" >> "$GITHUB_OUTPUT"
+            echo "version=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "customer=${{ github.event.inputs.customer }}" >> "$GITHUB_OUTPUT"
+            echo "version=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+            echo "release=${{ github.event.inputs.release }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compute secret name
+        id: secret_name
+        shell: bash
+        run: |
+          slug_upper=$(echo "${{ steps.params.outputs.customer }}" | tr '[:lower:]' '[:upper:]' | tr '-' '_')
+          echo "slug_upper=${slug_upper}" >> "$GITHUB_OUTPUT"
+          echo "config=CUSTOMER_CONFIG_${slug_upper}" >> "$GITHUB_OUTPUT"
+          echo "key=CUSTOMER_UPDATER_KEY_${slug_upper}" >> "$GITHUB_OUTPUT"
+          echo "key_pwd=CUSTOMER_UPDATER_KEY_PWD_${slug_upper}" >> "$GITHUB_OUTPUT"
+
+      - name: Write customer config from secret
+        id: config
+        shell: bash
+        env:
+          CUSTOMER_CONFIG: ${{ secrets[steps.secret_name.outputs.config] }}
+          OVERRIDE_VERSION: ${{ steps.params.outputs.version }}
+        run: |
+          if [[ -z "$CUSTOMER_CONFIG" ]]; then
+            echo "::error::No secret named ${{ steps.secret_name.outputs.config }} found"
+            exit 1
+          fi
+          mkdir -p desktop/customers
+          cfg_path="desktop/customers/${{ steps.params.outputs.customer }}.json"
+          echo "$CUSTOMER_CONFIG" > "$cfg_path"
+          # Validate parseable JSON before handing to the build script
+          node -e "JSON.parse(require('fs').readFileSync('$cfg_path','utf8'))"
+          # Apply version override if provided
+          if [[ -n "$OVERRIDE_VERSION" ]]; then
+            node -e "
+              const fs=require('fs');
+              const c=JSON.parse(fs.readFileSync('$cfg_path','utf8'));
+              c.version=process.env.OVERRIDE_VERSION;
+              fs.writeFileSync('$cfg_path', JSON.stringify(c,null,2));
+            "
+          fi
+          # Export the resolved version so subsequent steps can name artifacts
+          # consistently (whether or not the dispatch input overrode it).
+          resolved_version=$(node -p "require('./$cfg_path').version")
+          echo "version=${resolved_version}" >> "$GITHUB_OUTPUT"
+          echo "✓ Wrote $cfg_path (version: ${resolved_version})"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: yarn
+          # POS/ has hundreds of deps and a stable lockfile — worth caching.
+          # desktop/ has one dep (@tauri-apps/cli); not worth a separate cache,
+          # and the lockfile may not exist yet on first run.
+          cache-dependency-path: POS/yarn.lock
+
+      - name: Install JS dependencies (POS)
+        shell: bash
+        run: cd POS && yarn install --frozen-lockfile
+
+      - name: Install JS dependencies (desktop)
+        shell: bash
+        run: cd desktop && yarn install
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+          # Bust the cache when the customer or version changes — keeps the
+          # cache focused per-customer rather than mixing artifacts.
+          key: ${{ steps.params.outputs.customer }}-${{ steps.config.outputs.version }}
+
+      # Optional: drop the updater signing key if the customer uses auto-update
+      - name: Restore updater signing key
+        shell: bash
+        env:
+          UPDATER_KEY: ${{ secrets[steps.secret_name.outputs.key] }}
+        run: |
+          if [[ -n "$UPDATER_KEY" ]]; then
+            mkdir -p desktop/keys
+            echo "$UPDATER_KEY" > desktop/keys/${{ steps.params.outputs.customer }}.key
+            echo "✓ Restored updater signing key"
+          else
+            echo "ℹ No updater key for this customer (auto-update disabled)"
+          fi
+
+      # Optional: drop the code-signing certificate if configured
+      - name: Decode code-signing certificate
+        if: env.WIN_CODESIGN_PFX_BASE64 != ''
+        shell: pwsh
+        env:
+          WIN_CODESIGN_PFX_BASE64: ${{ secrets.WIN_CODESIGN_PFX_BASE64 }}
+        run: |
+          $bytes = [Convert]::FromBase64String($env:WIN_CODESIGN_PFX_BASE64)
+          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\codesign.pfx", $bytes)
+          echo "TAURI_SIGNING_CERT=$env:RUNNER_TEMP\codesign.pfx" >> $env:GITHUB_ENV
+
+      - name: Build installer
+        shell: bash
+        env:
+          TAURI_SIGNING_PASSWORD: ${{ secrets.WIN_CODESIGN_PFX_PWD }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets[steps.secret_name.outputs.key_pwd] }}
+        run: |
+          node desktop/scripts/build-customer.mjs ${{ steps.params.outputs.customer }}
+
+      - name: Locate installer artefacts
+        id: artefacts
+        shell: bash
+        run: |
+          # Tauri NSIS / MSI bundles land under target/release/bundle/{nsis,msi}/
+          bundle_dir="desktop/src-tauri/target/release/bundle"
+          if [[ ! -d "$bundle_dir" ]]; then
+            echo "::error::No bundle output at $bundle_dir"
+            exit 1
+          fi
+          mapfile -t setup_files < <(find "$bundle_dir" -type f \( -name "*-setup.exe" -o -name "*.msi" \))
+          if [[ ${#setup_files[@]} -eq 0 ]]; then
+            echo "::error::No installer found under $bundle_dir"
+            ls -R "$bundle_dir"
+            exit 1
+          fi
+          # Stage everything into desktop/dist/<slug>/ so subsequent steps can
+          # publish from a single directory.
+          dist="desktop/dist/${{ steps.params.outputs.customer }}"
+          mkdir -p "$dist"
+          for f in "${setup_files[@]}"; do
+            cp "$f" "$dist/"
+            # Tauri also writes a .sig next to each updater bundle if the
+            # updater key is set — copy those too if present.
+            [[ -f "$f.sig" ]] && cp "$f.sig" "$dist/"
+          done
+          echo "dist=$dist" >> "$GITHUB_OUTPUT"
+          echo "primary=$(basename "${setup_files[0]}")" >> "$GITHUB_OUTPUT"
+          ls -lh "$dist"
+
+      - name: Upload installer as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pos-next-${{ steps.params.outputs.customer }}-${{ steps.config.outputs.version }}
+          path: ${{ steps.artefacts.outputs.dist }}/*
+          retention-days: 30
+          if-no-files-found: error
+
+      # Tag-triggered runs (or manual runs with release=true) attach the
+      # installer to a draft GitHub Release. We use a draft so a human can
+      # review release notes before publishing.
+      - name: Create / update draft release
+        if: steps.params.outputs.release == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          tag_name: ${{ github.event_name == 'push' && github.ref_name || format('desktop-v{0}-{1}', steps.config.outputs.version, steps.params.outputs.customer) }}
+          name: "Desktop ${{ steps.params.outputs.customer }} v${{ steps.config.outputs.version }}"
+          files: ${{ steps.artefacts.outputs.dist }}/*
+          body: |
+            Automated build for **${{ steps.params.outputs.customer }}** at version **${{ steps.config.outputs.version }}**.
+
+            Download `${{ steps.artefacts.outputs.primary }}` and follow the install guide at [desktop/INSTALL.md](../blob/${{ github.sha }}/desktop/INSTALL.md).
