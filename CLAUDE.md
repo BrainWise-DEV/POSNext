@@ -27,10 +27,17 @@ cd POS && yarn lint                # biome check .
 cd POS && yarn lint:fix            # biome check --write .
 cd POS && yarn format
 
-# Frontend tests (Vitest + jsdom). No test files currently exist — infra is wired.
+# Frontend tests (Vitest + jsdom + fake-indexeddb). Specs live under POS/tests/.
 cd POS && yarn test                # watch mode
-cd POS && yarn test:run            # single run
+cd POS && yarn test:run            # single run (39 tests across the offline subsystem)
 cd POS && yarn test:run -- path/to/file.test.js   # single file
+cd POS && yarn test:coverage       # v8 coverage; report under POS/coverage/
+
+# Frontend E2E (Playwright). Auto-starts the Vite dev server (reuses one
+# if already running). Browser binary path: PLAYWRIGHT_BROWSERS_PATH.
+cd POS && yarn e2e                 # headless
+cd POS && yarn e2e:headed          # see the browser
+cd POS && yarn e2e:install         # install chromium binary if missing
 
 # Backend: run from ~/frappe-bench
 bench --site <site> run-tests --app pos_next
@@ -51,7 +58,9 @@ Source maps in production builds are **off by default** — set `POS_NEXT_ENABLE
 
 ### Frontend → Backend integration surface
 
-The frontend does **not** define its own REST routes. It calls whitelisted Frappe methods under `pos_next.api.*` through `frappe-ui`'s `frappeRequest`. See [pos_next/api/](pos_next/api/) for the full surface (bootstrap, invoices, items, offers, customers, shifts, wallet, partial_payments, credit_sales, promotions, branding, localization, qz). Any new frontend capability typically means: add a `@frappe.whitelist()` in `pos_next/api/*.py`, then call it from `POS/src/`.
+The frontend does **not** define its own REST routes. It calls whitelisted Frappe methods under `pos_next.api.*` through `frappe-ui`'s `frappeRequest`. See [pos_next/api/](pos_next/api/) for the full surface (bootstrap, invoices, items, offers, customers, shifts, wallet, partial_payments, credit_sales, promotions, branding, localization, qz, offline_data). Any new frontend capability typically means: add a `@frappe.whitelist()` in `pos_next/api/*.py`, then call it from `POS/src/`.
+
+Reference data for offline use lives in [pos_next/api/offline_data.py](pos_next/api/offline_data.py): `get_taxes`, `get_uoms`, `get_loyalty_programs`, and the one-shot `get_offline_bundle` (taxes + UOMs + loyalty in a single round-trip). Customer enrichment for offline (addresses, loyalty points, wallet balance) and the offline customer-create replay endpoint live in [pos_next/api/customers.py](pos_next/api/customers.py): `get_customers_for_offline`, `get_customer_offline_extras`, `replay_offline_customer` (idempotent on `offline_id`, uses a `pos_next_offline_id` Custom Field on Customer when present).
 
 Server→client realtime uses Socket.IO. Frappe document events in [hooks.py](pos_next/hooks.py) (`doc_events` on `Sales Invoice`, `Customer`, `POS Profile`) fan out through [pos_next/realtime_events.py](pos_next/realtime_events.py) and are consumed by `POS/src/composables/useRealtime*.js` plus `POS/src/socket.js`.
 
@@ -81,12 +90,24 @@ Entry is [POS/src/main.js](POS/src/main.js). Startup sequence (documented in tha
 
 **Composables** in [POS/src/composables/](POS/src/composables/) wrap cross-cutting UX (shift, offline status, payment numpad, session lock, QZ Tray printing, realtime subscriptions). Prefer extending these over inlining logic in `.vue` components.
 
-**Offline support** is the most complex subsystem:
+**Offline support** is the most complex subsystem. See [docs/OFFLINE_DATA_GUIDE.md](docs/OFFLINE_DATA_GUIDE.md) for the full data-side reference and [docs/OFFLINE_SYNC.md](docs/OFFLINE_SYNC.md) for the queue sync state machine.
 
 - A dedicated Web Worker [POS/src/workers/offline.worker.js](POS/src/workers/offline.worker.js) is copied into the build by `vite-plugin-static-copy`. The main thread talks to it via [POS/src/utils/offline/workerClient.js](POS/src/utils/offline/workerClient.js) (RPC, health checks, crash recovery).
-- Persistence uses Dexie/IndexedDB ([POS/src/utils/offline/db.js](POS/src/utils/offline/db.js)), with item caching, queued invoices, receipt cache, and translation cache split into separate modules.
+- Persistence uses Dexie/IndexedDB ([POS/src/utils/offline/db.js](POS/src/utils/offline/db.js)). The schema is **auto-versioned** via a hash of `CURRENT_SCHEMA` — bump the schema by editing that object; Dexie auto-migrates on next load. Tables include items, customers, item_prices, stock, payment_methods, sales_persons, taxes, uoms, item_groups, brands, loyalty_programs, offers, invoice_history, unpaid_invoices, translations, plus the queues `invoice_queue`, `payment_queue`, `customer_queue`, `drafts`, and `settings`.
 - Service-worker runtime caching in [vite.config.js](POS/vite.config.js) uses different strategies per URL (CacheFirst for assets/fonts, StaleWhileRevalidate for `/files/*.{jpg,png,...}` product images, NetworkFirst for `/api/*` with a 10 s timeout). Navigation to `/pos` uses a 3 s NetworkFirst.
+- Item images are also **eagerly pre-downloaded** after item-cache seeding by [POS/src/utils/offline/imagePrefetch.js](POS/src/utils/offline/imagePrefetch.js) (throttled, resumable, cancellable), so the SW image cache covers everything in the catalog, not just what the cashier has viewed.
 - CSRF token is forwarded to the worker on boot and on every refresh; offline invoice submission depends on that sync.
+
+**Offline write queues** — invoices and customers both have idempotent queues:
+
+- `invoice_queue` (in [POS/src/utils/offline/sync.js](POS/src/utils/offline/sync.js)) — `saveOfflineInvoice` records a `stock_delta` so a permanent sync failure or a manual delete can revert the optimistic stock decrement (`revertLocalStockForInvoice`).
+- `customer_queue` (in [POS/src/utils/offline/customerQueue.js](POS/src/utils/offline/customerQueue.js)) — `enqueueOfflineCustomer` writes a placeholder customer row immediately so it's selectable mid-session; `syncOfflineCustomers` (run BEFORE invoice sync in `posSync.syncPending`) replays via `replay_offline_customer`, which is idempotent on `offline_id`.
+
+**Three durability layers protect queued POS data:**
+
+1. **`navigator.storage.persist()`** — [POS/src/utils/offline/persistence.js](POS/src/utils/offline/persistence.js). Asks the browser not to evict our IndexedDB under storage pressure. Fired once on boot from `main.js`.
+2. **Service-worker runtime caches** — covered above; protect assets and opportunistic API responses.
+3. **QZ-Tray on-disk mirror** — [POS/src/utils/offline/diskBackup.js](POS/src/utils/offline/diskBackup.js). Mirrors every queued invoice + customer to JSON files on the host filesystem via QZ Tray's sandbox file API (no certificate elevation needed). `restoreFromDisk()` re-inserts any rows missing from IndexedDB after a "Clear site data" or browser reinstall, and runs automatically 5 s after boot. A "Restore from Disk" button is exposed in the offline-invoices dialog. Best-effort: silently degrades to layers 1 + 2 when QZ isn't running.
 
 **Routing** ([POS/src/router.js](POS/src/router.js)) is minimal — three routes (`POSSale`, `Login`, catch-all) with an auth guard against `session.isLoggedIn`. Production base path is `/pos`.
 
@@ -98,6 +119,9 @@ Entry is [POS/src/main.js](POS/src/main.js). Startup sequence (documented in tha
 - New DocType: `pos_next/pos_next/doctype/<name>/` (follow the existing pattern, including `test_<name>.py`).
 - New Vue view: page in `POS/src/pages/` + route in `router.js`; prefer Pinia store over page-local state for anything shared.
 - New realtime event: emit from a `doc_events` handler in `pos_next/realtime_events.py`, subscribe in a `useRealtime*.js` composable.
+- New offline cache: add a Dexie store to `CURRENT_SCHEMA` in [POS/src/utils/offline/db.js](POS/src/utils/offline/db.js) (auto-versioned), then add a `cacheXFromServer` + `getCachedX` pair to [POS/src/utils/offline/cache.js](POS/src/utils/offline/cache.js) and re-export from [POS/src/utils/offline/index.js](POS/src/utils/offline/index.js). Seed it from `posSync.preloadDataForOffline`.
+- New offline write queue: follow the `customerQueue.js` pattern — write a placeholder/optimistic row + a queue row inside one transaction, drain via a `syncX` function gated by `isOffline()`, replay through an idempotent backend method keyed on `offline_id`, drop the disk mirror via `removeMirroredX` on success.
+- New frontend test: drop a `*.test.js` under [POS/tests/](POS/tests/). [POS/tests/setup.js](POS/tests/setup.js) installs `fake-indexeddb` globally so Dexie works under jsdom; mock `@/utils/apiWrapper` for any code that calls the server.
 
 ## Constraints worth remembering
 

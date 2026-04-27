@@ -36,6 +36,15 @@ Welcome to the POS Next documentation directory. This folder contains comprehens
   - IndexedDB schema
   - Troubleshooting guide
 
+- **[OFFLINE_DATA_GUIDE.md](OFFLINE_DATA_GUIDE.md)** - Offline data subsystem and durability stack
+  - What gets cached (items, customers, taxes, UOMs, loyalty, brands, …)
+  - Customer creation queue (placeholder + idempotent replay)
+  - Optimistic stock decrement + rollback on failure
+  - Three-layer durability: persistent storage, SW cache, QZ-Tray on-disk mirror
+  - Backend offline endpoints reference (`pos_next.api.offline_data`)
+  - Recovery workflows after browser wipe
+  - Vitest + Playwright test layout
+
 - **[PRICING_AND_SUBMISSION.md](PRICING_AND_SUBMISSION.md)** - Pricing and invoice submission flow
   - Rate vs Price List Rate concepts
   - Tax modes (inclusive/exclusive)
@@ -95,6 +104,7 @@ docs/
 ├── LOCALIZATION.md                  # Language settings user guide
 ├── OFFERS_AND_PROMOTIONS.md         # Offers and promotions system
 ├── OFFLINE_SYNC.md                  # Offline invoice sync system
+├── OFFLINE_DATA_GUIDE.md            # Offline data caches + durability layers
 ├── PRICING_AND_SUBMISSION.md        # Pricing and invoice submission flow
 ├── STARTUP_SEQUENCE.md              # Application initialization flow
 ├── VERSION_CONTROL.md               # Comprehensive version control guide
