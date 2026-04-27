@@ -193,20 +193,46 @@ export const cacheItemsFromServer = async (posProfile) => {
 }
 
 // Load customers from server (returns data for worker to cache)
-export const cacheCustomersFromServer = async (posProfile) => {
+// Uses the offline-enriched endpoint that includes addresses, loyalty
+// points, and wallet balance — falls back to the basic endpoint if the
+// backend doesn't have the new method (older deploys).
+export const cacheCustomersFromServer = async (
+	posProfile,
+	{ modifiedSince = null } = {},
+) => {
 	try {
-		console.log("Fetching customers from server...")
+		console.log("Fetching customers (offline payload) from server...")
+
+		try {
+			const response = await call(
+				"pos_next.api.customers.get_customers_for_offline",
+				{
+					pos_profile: posProfile,
+					modified_since: modifiedSince,
+					limit: 0,
+				},
+			)
+			const customers = response?.message ?? response ?? []
+			if (Array.isArray(customers)) {
+				console.log(`Fetched ${customers.length} customers (enriched)`)
+				return { customers }
+			}
+		} catch (enrichedErr) {
+			console.warn(
+				"get_customers_for_offline unavailable, falling back to get_customers",
+				enrichedErr,
+			)
+		}
 
 		const response = await call("pos_next.api.customers.get_customers", {
-                        pos_profile: posProfile,
-                        start: 0,
-                        limit: 0, // Get all customers
-                })
+			pos_profile: posProfile,
+			start: 0,
+			limit: 0,
+		})
 
-		if (response.message && Array.isArray(response.message)) {
-			const customers = response.message
-
-			console.log(`Fetched ${customers.length} customers from server`)
+		const customers = response?.message ?? response ?? []
+		if (Array.isArray(customers)) {
+			console.log(`Fetched ${customers.length} customers (basic)`)
 			return { customers }
 		}
 
@@ -214,6 +240,41 @@ export const cacheCustomersFromServer = async (posProfile) => {
 	} catch (error) {
 		console.error("Error fetching customers from server:", error)
 		throw error
+	}
+}
+
+/**
+ * Refresh extras (addresses, loyalty points, wallet) for a single customer
+ * and patch the cached row. Best-effort — no-op when offline.
+ */
+export const refreshCustomerExtrasFromServer = async (
+	customer,
+	{ company = null } = {},
+) => {
+	if (!customer) return null
+	try {
+		const result = await call(
+			"pos_next.api.customers.get_customer_offline_extras",
+			{
+				customer,
+				company,
+			},
+		)
+		const extras = result?.message ?? result
+		if (!extras || typeof extras !== "object") return null
+
+		const existing = (await db.customers.get(customer)) || { name: customer }
+		const merged = {
+			...existing,
+			addresses: extras.addresses || [],
+			loyalty_points: extras.loyalty_points || 0,
+			wallet_balance: extras.wallet_balance || 0,
+		}
+		await db.customers.put(merged)
+		return merged
+	} catch (error) {
+		console.warn(`Failed to refresh extras for customer ${customer}:`, error)
+		return null
 	}
 }
 
@@ -311,6 +372,11 @@ export const clearAllCache = async () => {
 		await db.item_prices.clear()
 		await db.stock.clear()
 		await db.sales_persons.clear()
+		await db.taxes.clear()
+		await db.uoms.clear()
+		await db.item_groups.clear()
+		await db.brands.clear()
+		await db.loyalty_programs.clear()
 
 		// Reset memory
 		memory.items = []
@@ -449,9 +515,7 @@ export async function cacheSalesPersonsFromServer(posProfile) {
 		const timestamp = Date.now()
 		await setSetting("sales_persons_last_sync", timestamp)
 
-		console.log(
-			`Cached ${salesPersons.length} sales persons for ${posProfile}`,
-		)
+		console.log(`Cached ${salesPersons.length} sales persons for ${posProfile}`)
 
 		return { sales_persons: salesPersons }
 	} catch (error) {
@@ -476,6 +540,227 @@ export async function getCachedSalesPersons(posProfile) {
 	} catch (error) {
 		console.error("Error getting cached sales persons:", error)
 		return []
+	}
+}
+
+/**
+ * Cache Sales Taxes & Charges Templates from server.
+ *
+ * Stores the full child-table breakdown so the frontend can apply taxes
+ * offline. One round-trip; tagged with pos_profile so multiple profiles
+ * can coexist in the same DB.
+ */
+export async function cacheTaxesFromServer(
+	posProfile,
+	{ company = null } = {},
+) {
+	try {
+		const result = await call("pos_next.api.offline_data.get_taxes", {
+			pos_profile: posProfile,
+			company,
+		})
+		const taxes = result?.message ?? result ?? []
+		if (!Array.isArray(taxes)) return { taxes: [] }
+
+		const tagged = taxes.map((t) => ({ ...t, pos_profile: posProfile }))
+		await db.taxes.bulkPut(tagged)
+		await setSetting("taxes_last_sync", Date.now())
+		console.log(`Cached ${tagged.length} tax templates for ${posProfile}`)
+		return { taxes: tagged }
+	} catch (error) {
+		console.error("Error caching taxes:", error)
+		throw error
+	}
+}
+
+export async function getCachedTaxes(posProfile) {
+	try {
+		if (!posProfile) return await db.taxes.toArray()
+		return await db.taxes.where("pos_profile").equals(posProfile).toArray()
+	} catch (error) {
+		console.error("Error reading cached taxes:", error)
+		return []
+	}
+}
+
+/**
+ * Cache UOM list from server.
+ */
+export async function cacheUomsFromServer() {
+	try {
+		const result = await call("pos_next.api.offline_data.get_uoms")
+		const uoms = result?.message ?? result ?? []
+		if (!Array.isArray(uoms)) return { uoms: [] }
+
+		await db.uoms.bulkPut(uoms)
+		await setSetting("uoms_last_sync", Date.now())
+		console.log(`Cached ${uoms.length} UOMs`)
+		return { uoms }
+	} catch (error) {
+		console.error("Error caching UOMs:", error)
+		throw error
+	}
+}
+
+export async function getCachedUoms() {
+	try {
+		return await db.uoms.toArray()
+	} catch (error) {
+		console.error("Error reading cached UOMs:", error)
+		return []
+	}
+}
+
+/**
+ * Cache Loyalty Programs (with collection rules) from server.
+ */
+export async function cacheLoyaltyProgramsFromServer({ company = null } = {}) {
+	try {
+		const result = await call(
+			"pos_next.api.offline_data.get_loyalty_programs",
+			{
+				company,
+			},
+		)
+		const programs = result?.message ?? result ?? []
+		if (!Array.isArray(programs)) return { loyalty_programs: [] }
+
+		await db.loyalty_programs.bulkPut(programs)
+		await setSetting("loyalty_programs_last_sync", Date.now())
+		console.log(`Cached ${programs.length} loyalty programs`)
+		return { loyalty_programs: programs }
+	} catch (error) {
+		console.error("Error caching loyalty programs:", error)
+		throw error
+	}
+}
+
+export async function getCachedLoyaltyPrograms() {
+	try {
+		return await db.loyalty_programs.toArray()
+	} catch (error) {
+		console.error("Error reading cached loyalty programs:", error)
+		return []
+	}
+}
+
+/**
+ * Cache item groups + brands lists from server (for offline filter dropdowns).
+ */
+export async function cacheItemGroupsFromServer(posProfile) {
+	try {
+		const result = await call("pos_next.api.items.get_item_groups", {
+			pos_profile: posProfile,
+		})
+		const groups = result?.message ?? result ?? []
+		if (!Array.isArray(groups)) return { item_groups: [] }
+
+		await db.item_groups.bulkPut(groups)
+		await setSetting("item_groups_last_sync", Date.now())
+		console.log(`Cached ${groups.length} item groups`)
+		return { item_groups: groups }
+	} catch (error) {
+		console.error("Error caching item groups:", error)
+		throw error
+	}
+}
+
+export async function getCachedItemGroups() {
+	try {
+		return await db.item_groups.toArray()
+	} catch (error) {
+		console.error("Error reading cached item groups:", error)
+		return []
+	}
+}
+
+export async function cacheBrandsFromServer(posProfile) {
+	try {
+		const result = await call("pos_next.api.items.get_brands", {
+			pos_profile: posProfile,
+		})
+		const brands = result?.message ?? result ?? []
+		if (!Array.isArray(brands)) return { brands: [] }
+
+		await db.brands.bulkPut(brands)
+		await setSetting("brands_last_sync", Date.now())
+		console.log(`Cached ${brands.length} brands`)
+		return { brands }
+	} catch (error) {
+		console.error("Error caching brands:", error)
+		throw error
+	}
+}
+
+export async function getCachedBrands() {
+	try {
+		return await db.brands.toArray()
+	} catch (error) {
+		console.error("Error reading cached brands:", error)
+		return []
+	}
+}
+
+/**
+ * One-shot reference-data bootstrap: taxes + UOMs + loyalty in a single
+ * round-trip. Falls back to per-endpoint caching if the bundle endpoint
+ * is unavailable (older deploys).
+ */
+export async function cacheOfflineBundleFromServer(
+	posProfile,
+	{ company = null } = {},
+) {
+	try {
+		const result = await call("pos_next.api.offline_data.get_offline_bundle", {
+			pos_profile: posProfile,
+			company,
+		})
+		const bundle = result?.message ?? result ?? {}
+
+		const promises = []
+		if (Array.isArray(bundle.taxes)) {
+			const tagged = bundle.taxes.map((t) => ({
+				...t,
+				pos_profile: posProfile,
+			}))
+			promises.push(db.taxes.bulkPut(tagged))
+		}
+		if (Array.isArray(bundle.uoms)) {
+			promises.push(db.uoms.bulkPut(bundle.uoms))
+		}
+		if (Array.isArray(bundle.loyalty_programs)) {
+			promises.push(db.loyalty_programs.bulkPut(bundle.loyalty_programs))
+		}
+		await Promise.all(promises)
+
+		const now = Date.now()
+		await Promise.all([
+			setSetting("taxes_last_sync", now),
+			setSetting("uoms_last_sync", now),
+			setSetting("loyalty_programs_last_sync", now),
+		])
+
+		return bundle
+	} catch (error) {
+		console.warn(
+			"Bundle endpoint unavailable, falling back to per-endpoint:",
+			error,
+		)
+		// Fallback: call endpoints individually.
+		const [taxes, uoms, loyalty_programs] = await Promise.all([
+			cacheTaxesFromServer(posProfile, { company }).catch(() => ({
+				taxes: [],
+			})),
+			cacheUomsFromServer().catch(() => ({ uoms: [] })),
+			cacheLoyaltyProgramsFromServer({ company }).catch(() => ({
+				loyalty_programs: [],
+			})),
+		])
+		return {
+			taxes: taxes.taxes || [],
+			uoms: uoms.uoms || [],
+			loyalty_programs: loyalty_programs.loyalty_programs || [],
+		}
 	}
 }
 

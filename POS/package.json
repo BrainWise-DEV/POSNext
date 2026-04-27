@@ -13,6 +13,9 @@
 		"test": "vitest",
 		"test:run": "vitest run",
 		"test:coverage": "vitest run --coverage",
+		"e2e": "playwright test",
+		"e2e:headed": "playwright test --headed",
+		"e2e:install": "playwright install chromium",
 		"copy-html-entry": "cp ../pos_next/public/pos/index.html ../pos_next/www/pos.html"
 	},
 	"dependencies": {
@@ -34,6 +37,7 @@
 	"devDependencies": {
 		"@biomejs/biome": "1.9.4",
 		"@iconify-json/lucide": "^1.2.79",
+		"@playwright/test": "^1.59.1",
 		"@vitejs/plugin-vue": "^5.1.4",
 		"@vitest/coverage-v8": "^2.1.8",
 		"autoprefixer": "^10.4.24",

@@ -56,6 +56,7 @@ export {
 	isManualOffline,
 	cacheItemsFromServer,
 	cacheCustomersFromServer,
+	refreshCustomerExtrasFromServer,
 	cachePaymentMethodsFromServer,
 	getCachedPaymentMethods,
 	cacheSalesPersonsFromServer,
@@ -67,4 +68,29 @@ export {
 	needsCacheRefresh,
 	clearAllCache,
 	getCacheStats,
+	cacheTaxesFromServer,
+	getCachedTaxes,
+	cacheUomsFromServer,
+	getCachedUoms,
+	cacheLoyaltyProgramsFromServer,
+	getCachedLoyaltyPrograms,
+	cacheItemGroupsFromServer,
+	getCachedItemGroups,
+	cacheBrandsFromServer,
+	getCachedBrands,
+	cacheOfflineBundleFromServer,
 } from "./cache"
+
+// Offline customer create queue
+export {
+	enqueueOfflineCustomer,
+	getQueuedOfflineCustomers,
+	syncOfflineCustomers,
+} from "./customerQueue"
+
+// Image prefetch for fully-offline image rendering
+export {
+	prefetchItemImages,
+	resetImagePrefetchProgress,
+	cancelImagePrefetch,
+} from "./imagePrefetch"

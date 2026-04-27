@@ -45,7 +45,8 @@ const CURRENT_SCHEMA = {
 	// Items cache with searchable fields
 	// variant_of index allows querying variants by their template item
 	// brand index allows efficient brand-based filtering in offline mode
-	items: "&item_code, item_name, item_group, variant_of, has_variants, brand, *barcodes",
+	items:
+		"&item_code, item_name, item_group, variant_of, has_variants, brand, *barcodes",
 
 	// Customers cache
 	customers: "&name, customer_name, mobile_no, email_id",
@@ -82,6 +83,27 @@ const CURRENT_SCHEMA = {
 	// Unpaid invoices cache for offline viewing
 	// Stores invoices with outstanding amounts for partial payment management
 	unpaid_invoices: "&name, pos_profile, outstanding_amount, customer",
+
+	// Sales Taxes & Charges Templates cache for offline tax calculation
+	// Each row stores the full tax breakdown (taxes child table) as JSON
+	taxes: "&name, pos_profile, company",
+
+	// UOM list for offline dropdowns and conversions
+	uoms: "&name",
+
+	// Item group hierarchy for offline filter dropdowns
+	item_groups: "&name, parent_item_group, is_group",
+
+	// Brand list for offline filter dropdowns
+	brands: "&name",
+
+	// Loyalty Program rules for offline points display
+	// (collection/redemption rates, tiers serialized as JSON)
+	loyalty_programs: "&name",
+
+	// Queue for customers created while offline; replayed on reconnect
+	// offline_id is a UUID for deduplication across syncs
+	customer_queue: "++id, &offline_id, timestamp, synced",
 }
 
 /**
@@ -120,7 +142,9 @@ function getSchemaVersion() {
 	if (storedHash !== schemaHash.toString()) {
 		// Schema changed, increment version
 		const newVersion = storedVersion + 1
-		log.info(`Schema changed detected. Upgrading from v${storedVersion} to v${newVersion}`)
+		log.info(
+			`Schema changed detected. Upgrading from v${storedVersion} to v${newVersion}`,
+		)
 		localStorage.setItem("pos_next_schema_hash", schemaHash.toString())
 		localStorage.setItem("pos_next_schema_version", newVersion.toString())
 		return newVersion
@@ -247,8 +271,14 @@ export const clearCachedData = async (options = {}) => {
 		item_prices: 0,
 		payment_methods: 0,
 		sales_persons: 0,
+		taxes: 0,
+		uoms: 0,
+		item_groups: 0,
+		brands: 0,
+		loyalty_programs: 0,
 		invoices: 0,
 		payments: 0,
+		customer_queue: 0,
 		drafts: 0,
 		settings: 0,
 	}
@@ -261,11 +291,17 @@ export const clearCachedData = async (options = {}) => {
 		results.item_prices = await db.item_prices.clear()
 		results.payment_methods = await db.payment_methods.clear()
 		results.sales_persons = await db.sales_persons.clear()
+		results.taxes = await db.taxes.clear()
+		results.uoms = await db.uoms.clear()
+		results.item_groups = await db.item_groups.clear()
+		results.brands = await db.brands.clear()
+		results.loyalty_programs = await db.loyalty_programs.clear()
 
 		// Conditionally clear invoice and payment queues
 		if (!preserveInvoices) {
 			results.invoices = await db.invoice_queue.clear()
 			results.payments = await db.payment_queue.clear()
+			results.customer_queue = await db.customer_queue.clear()
 		}
 
 		// Conditionally clear drafts
@@ -333,12 +369,12 @@ export const clearBrowserCache = () => {
 		const keysToRemove = []
 		for (let i = 0; i < localStorage.length; i++) {
 			const key = localStorage.key(i)
-			if (key?.startsWith('pos_next_') || key?.startsWith('frappe_')) {
+			if (key?.startsWith("pos_next_") || key?.startsWith("frappe_")) {
 				keysToRemove.push(key)
 			}
 		}
 
-		keysToRemove.forEach(key => {
+		keysToRemove.forEach((key) => {
 			localStorage.removeItem(key)
 			results.localStorage++
 		})
@@ -347,12 +383,12 @@ export const clearBrowserCache = () => {
 		const sessionKeys = []
 		for (let i = 0; i < sessionStorage.length; i++) {
 			const key = sessionStorage.key(i)
-			if (key?.startsWith('pos_next_') || key?.startsWith('frappe_')) {
+			if (key?.startsWith("pos_next_") || key?.startsWith("frappe_")) {
 				sessionKeys.push(key)
 			}
 		}
 
-		sessionKeys.forEach(key => {
+		sessionKeys.forEach((key) => {
 			sessionStorage.removeItem(key)
 			results.sessionStorage++
 		})
