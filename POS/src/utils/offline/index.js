@@ -94,3 +94,23 @@ export {
 	resetImagePrefetchProgress,
 	cancelImagePrefetch,
 } from "./imagePrefetch"
+
+// Browser-level "don't evict me" flag
+export {
+	requestPersistentStorage,
+	ensurePersistentStorage,
+	getPersistenceStatus,
+} from "./persistence"
+
+// QZ-Tray-backed on-disk mirror — survives browser wipes
+export {
+	mirrorOfflineInvoice,
+	mirrorOfflineCustomer,
+	removeMirroredInvoice,
+	removeMirroredCustomer,
+	restoreFromDisk,
+	backfillMirrorFromIndexedDB,
+	isMirrorAvailable,
+	enableDiskMirror,
+	disableDiskMirror,
+} from "./diskBackup"

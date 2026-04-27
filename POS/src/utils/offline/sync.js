@@ -111,10 +111,11 @@ export const saveOfflineInvoice = async (invoiceData) => {
 		}))
 		.filter((d) => d.item_code && d.warehouse && d.qty > 0)
 
+	const timestamp = Date.now()
 	const id = await db.invoice_queue.add({
 		offline_id: offlineId,
 		data: cleanData,
-		timestamp: Date.now(),
+		timestamp,
 		synced: false,
 		retry_count: 0,
 		stock_delta: stockDelta,
@@ -122,6 +123,22 @@ export const saveOfflineInvoice = async (invoiceData) => {
 	})
 
 	await updateLocalStock(cleanData.items)
+
+	// Best-effort mirror to disk via QZ Tray. Doesn't await — the row is
+	// already durable in IndexedDB; disk mirror is bonus protection. If
+	// the mirror fails (QZ not running, etc.) we just log and move on.
+	import("./diskBackup")
+		.then(({ mirrorOfflineInvoice }) =>
+			mirrorOfflineInvoice({
+				id,
+				offline_id: offlineId,
+				data: cleanData,
+				timestamp,
+				retry_count: 0,
+				stock_delta: stockDelta,
+			}),
+		)
+		.catch((err) => log.debug("Disk mirror skipped", err))
 
 	log.info(`Invoice saved to offline queue`, { offline_id: offlineId })
 	return { success: true, id, offline_id: offlineId }
@@ -192,6 +209,14 @@ export const deleteOfflineInvoice = async (id) => {
 			await revertLocalStockForInvoice(row)
 		}
 		await db.invoice_queue.delete(id)
+		// Remove its disk mirror too — best-effort, never fail the delete.
+		if (row?.offline_id) {
+			import("./diskBackup")
+				.then(({ removeMirroredInvoice }) =>
+					removeMirroredInvoice(row.offline_id),
+				)
+				.catch(() => {})
+		}
 		return true
 	} catch (error) {
 		log.error("Failed to delete offline invoice", { id, error })
@@ -279,7 +304,13 @@ const markInvoiceSynced = async (id, serverInvoice, offlineId) => {
 		synced: true,
 		server_invoice: serverInvoice,
 	})
-	if (offlineId) removeOfflineReceiptPayload(offlineId)
+	if (offlineId) {
+		removeOfflineReceiptPayload(offlineId)
+		// Drop the disk mirror — the invoice is now safe on the server.
+		import("./diskBackup")
+			.then(({ removeMirroredInvoice }) => removeMirroredInvoice(offlineId))
+			.catch(() => {})
+	}
 }
 
 /**

@@ -60,7 +60,8 @@ if ("serviceWorker" in navigator) {
 					onNeedRefresh: () => log.info("New content available, reloading..."),
 					onOfflineReady: () => log.info("App ready to work offline"),
 					onRegistered: (reg) => log.info("Service Worker registered", reg),
-					onRegisterError: (err) => log.error("Service Worker registration error", err),
+					onRegisterError: (err) =>
+						log.error("Service Worker registration error", err),
 				})
 			})
 		},
@@ -194,7 +195,10 @@ async function initializeApp() {
 						window.frappe.realtime = initSocket(siteName)
 
 						// Ensure connection is established
-						if (window.frappe.realtime && typeof window.frappe.realtime.connect === "function") {
+						if (
+							window.frappe.realtime &&
+							typeof window.frappe.realtime.connect === "function"
+						) {
 							window.frappe.realtime.connect()
 							log.info("Socket initialized and connecting...", { siteName })
 						}
@@ -203,7 +207,39 @@ async function initializeApp() {
 					log.debug("Bootstrap preload failed (non-critical)", error)
 				}
 			})
-			.catch(() => { })
+			.catch(() => {})
+
+		// Durability layers — both fire-and-forget. Independent of bootstrap.
+		// 1. Ask the browser to keep our IndexedDB even under storage pressure.
+		import("./utils/offline/persistence")
+			.then(({ ensurePersistentStorage }) =>
+				ensurePersistentStorage()
+					.then((status) =>
+						log.info("Persistent storage status", {
+							supported: status.supported,
+							persisted: status.persisted,
+						}),
+					)
+					.catch(() => {}),
+			)
+			.catch(() => {})
+
+		// 2. Restore any QZ-Tray on-disk mirror that survived a browser
+		//    wipe back into IndexedDB. Best-effort — no-op if QZ isn't
+		//    running. Runs after a short delay so QZ has a chance to
+		//    auto-connect from the print path.
+		setTimeout(() => {
+			import("./utils/offline/diskBackup")
+				.then(({ restoreFromDisk }) => restoreFromDisk())
+				.then((res) => {
+					if (res?.ran && (res.invoicesRestored || res.customersRestored)) {
+						log.warn(
+							`Restored from disk mirror: ${res.invoicesRestored} invoices + ${res.customersRestored} customers`,
+						)
+					}
+				})
+				.catch(() => {})
+		}, 5000)
 	}
 
 	// -------------------------------------------------------------------------

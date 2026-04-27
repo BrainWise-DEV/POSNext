@@ -61,6 +61,18 @@ export async function enqueueOfflineCustomer(payload) {
 		})
 	})
 
+	// Best-effort disk mirror via QZ Tray (defense against browser wipe).
+	import("./diskBackup")
+		.then(({ mirrorOfflineCustomer }) =>
+			mirrorOfflineCustomer({
+				offline_id: offlineId,
+				data: payload,
+				timestamp,
+				retry_count: 0,
+			}),
+		)
+		.catch((err) => log.debug("Disk mirror skipped", err))
+
 	log.info(
 		`Enqueued offline customer "${payload.customer_name}" as ${placeholderName}`,
 	)
@@ -143,6 +155,13 @@ export async function syncOfflineCustomers() {
 					wallet_balance: 0,
 				})
 			})
+
+			// Drop the disk mirror — customer is now on the server.
+			import("./diskBackup")
+				.then(({ removeMirroredCustomer }) =>
+					removeMirroredCustomer(row.offline_id),
+				)
+				.catch(() => {})
 
 			if (wasDeduped) deduplicated += 1
 			else success += 1

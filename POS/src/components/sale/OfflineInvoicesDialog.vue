@@ -13,20 +13,36 @@
 							<p class="text-xs sm:text-sm text-gray-600 truncate">{{ __("These invoices will be submitted when you're back online") }}</p>
 						</div>
 					</div>
-					<Button
-						v-if="!isOffline && invoices.length > 0"
-						@click="syncAll"
-						:loading="isSyncing"
-						variant="solid"
-						class="flex-shrink-0 whitespace-nowrap w-full sm:w-auto text-sm"
-					>
-						<template #prefix>
-							<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-							</svg>
-						</template>
-						{{ __('Sync All') }}
-					</Button>
+					<div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 flex-shrink-0">
+						<Button
+							@click="restoreFromDiskMirror"
+							:loading="isRestoring"
+							variant="subtle"
+							class="whitespace-nowrap w-full sm:w-auto text-sm"
+							:title="__('Read any invoices stored on disk by QZ Tray back into the queue. Use this after a browser data wipe.')"
+						>
+							<template #prefix>
+								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M5 6h14a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2zm6 6l2 2 4-4"/>
+								</svg>
+							</template>
+							{{ __('Restore from Disk') }}
+						</Button>
+						<Button
+							v-if="!isOffline && invoices.length > 0"
+							@click="syncAll"
+							:loading="isSyncing"
+							variant="solid"
+							class="whitespace-nowrap w-full sm:w-auto text-sm"
+						>
+							<template #prefix>
+								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+								</svg>
+							</template>
+							{{ __('Sync All') }}
+						</Button>
+					</div>
 				</div>
 
 				<!-- Loading State -->
@@ -244,7 +260,10 @@
 </template>
 
 <script setup>
-import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency"
+import {
+	DEFAULT_CURRENCY,
+	formatCurrency as formatCurrencyUtil,
+} from "@/utils/currency"
 import { Button, Dialog } from "frappe-ui"
 import { computed, ref, watch } from "vue"
 
@@ -275,7 +294,45 @@ const emit = defineEmits([
 	"edit-invoice",
 	"print-invoice",
 	"refresh",
+	"restored-from-disk",
 ])
+
+const isRestoring = ref(false)
+
+async function restoreFromDiskMirror() {
+	if (isRestoring.value) return
+	isRestoring.value = true
+	try {
+		const { restoreFromDisk } = await import("@/utils/offline/diskBackup")
+		const result = await restoreFromDisk()
+		if (!result.ran) {
+			window.alert?.(
+				__(
+					"QZ Tray is not running. Start QZ Tray on this computer to enable disk-mirror restore.",
+				),
+			)
+			return
+		}
+		const summary = __(
+			"Restored from disk: {0} invoices, {1} customers ({2} already in queue).",
+			[
+				result.invoicesRestored,
+				result.customersRestored,
+				result.invoicesSkipped + result.customersSkipped,
+			],
+		)
+		window.alert?.(summary)
+		emit("restored-from-disk", result)
+		emit("refresh")
+	} catch (error) {
+		console.error("Restore from disk failed:", error)
+		window.alert?.(
+			__("Restore from disk failed: {0}", [error?.message || error]),
+		)
+	} finally {
+		isRestoring.value = false
+	}
+}
 
 const show = computed({
 	get: () => props.modelValue,
@@ -297,9 +354,12 @@ watch(show, async (newVal) => {
 })
 
 // Watch for prop changes (e.g., after delete or sync)
-watch(() => props.pendingInvoices, (newInvoices) => {
-	invoices.value = newInvoices
-})
+watch(
+	() => props.pendingInvoices,
+	(newInvoices) => {
+		invoices.value = newInvoices
+	},
+)
 
 async function loadInvoices() {
 	loading.value = true
@@ -324,9 +384,9 @@ function formatDate(timestamp) {
 
 	if (diffInSeconds < 60) return __("Just now")
 	if (diffInSeconds < 3600)
-		return __('{0} minutes ago', [Math.floor(diffInSeconds / 60)])
+		return __("{0} minutes ago", [Math.floor(diffInSeconds / 60)])
 	if (diffInSeconds < 86400)
-		return __('{0} hours ago', [Math.floor(diffInSeconds / 3600)])
+		return __("{0} hours ago", [Math.floor(diffInSeconds / 3600)])
 
 	return date.toLocaleDateString() + " " + date.toLocaleTimeString()
 }
