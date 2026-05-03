@@ -766,7 +766,7 @@ def _build_item_base_conditions(
 	where_params = []
 
 	if pos_profile_doc.company:
-		conditions.append("IFNULL(i.custom_company, '') IN (%s, '')")
+		conditions.append("i.custom_company = %s")
 		where_params.append(pos_profile_doc.company)
 
 	if item_group:
@@ -774,6 +774,20 @@ def _build_item_base_conditions(
 		placeholders = ", ".join(["%s"] * len(item_groups))
 		conditions.append(f"i.item_group IN ({placeholders})")
 		where_params.extend(item_groups)
+	else:
+		# When no specific item_group filter is passed (e.g. "All Items" tab),
+		# still restrict to the item groups configured on the POS Profile.
+		profile_groups = [
+			row.item_group for row in pos_profile_doc.get("item_groups", [])
+		]
+		if profile_groups:
+			all_groups = set()
+			for pg in profile_groups:
+				all_groups.update(_get_item_group_with_descendants(pg))
+			if all_groups:
+				placeholders = ", ".join(["%s"] * len(all_groups))
+				conditions.append(f"i.item_group IN ({placeholders})")
+				where_params.extend(list(all_groups))
 
 	allowed_brands = _get_allowed_profile_brands(pos_profile_doc.name)
 	if allowed_brands:
