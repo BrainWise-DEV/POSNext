@@ -667,9 +667,12 @@ def _get_item_group_with_descendants(item_group):
 	if not item_group:
 		return []
 
-	ItemGroup = DocType("Item Group")
+	cache_key = f"item_group_descendants:{item_group}"
+	cached = frappe.cache().get_value(cache_key)
+	if cached is not None:
+		return cached
 
-	# Get lft, rgt for the item group to find descendants
+	ItemGroup = DocType("Item Group")
 	group_data = (
 		frappe.qb.from_(ItemGroup)
 		.select(ItemGroup.lft, ItemGroup.rgt, ItemGroup.is_group)
@@ -678,22 +681,23 @@ def _get_item_group_with_descendants(item_group):
 	)
 
 	if not group_data:
-		return [item_group]
+		result = [item_group]
+	else:
+		group = group_data[0]
+		if not group.is_group:
+			result = [item_group]
+		else:
+			descendants = (
+				frappe.qb.from_(ItemGroup)
+				.select(ItemGroup.name)
+				.where(ItemGroup.lft > group.lft)
+				.where(ItemGroup.rgt < group.rgt)
+				.run(pluck="name")
+			)
+			result = [item_group] + list(descendants)
 
-	group = group_data[0]
-	if not group.is_group:
-		return [item_group]
-
-	# Get all descendants using lft/rgt range
-	descendants = (
-		frappe.qb.from_(ItemGroup)
-		.select(ItemGroup.name)
-		.where(ItemGroup.lft > group.lft)
-		.where(ItemGroup.rgt < group.rgt)
-		.run(pluck="name")
-	)
-
-	return [item_group] + list(descendants)
+	frappe.cache().set_value(cache_key, result, expires_in_sec=300)
+	return result
 
 
 def _get_pos_profile_configured_brands(pos_profile):
@@ -737,6 +741,26 @@ def _get_allowed_profile_brands(pos_profile):
 	"""
 	return _get_pos_profile_configured_brands(pos_profile)
 
+
+def _get_pos_profile_allowed_item_groups(pos_profile_doc):
+	"""Return the item groups (with descendants) authorised for a POS Profile.
+
+	Empty list means the profile imposes no group restriction.
+	"""
+	cache_key = f"pos_profile_allowed_item_groups:{pos_profile_doc.name}"
+	cached = frappe.cache().get_value(cache_key)
+	if cached is not None:
+		return cached
+
+	result = list(dict.fromkeys(
+		descendant_group
+		for profile_group_row in pos_profile_doc.get("item_groups", [])
+		for descendant_group in _get_item_group_with_descendants(profile_group_row.item_group)
+	))
+	frappe.cache().set_value(cache_key, result, expires_in_sec=300)
+	return result
+
+
 def _build_item_base_conditions(
 	pos_profile_doc,
 	item_group=None,
@@ -769,25 +793,27 @@ def _build_item_base_conditions(
 		conditions.append("i.custom_company = %s")
 		where_params.append(pos_profile_doc.company)
 
+	allowed_item_groups = _get_pos_profile_allowed_item_groups(pos_profile_doc)
+
 	if item_group:
-		item_groups = _get_item_group_with_descendants(item_group)
-		placeholders = ", ".join(["%s"] * len(item_groups))
-		conditions.append(f"i.item_group IN ({placeholders})")
-		where_params.extend(item_groups)
+		# Intersect explicit request with profile scope so a caller cannot reach
+		# items outside the profile's authorised groups.
+		requested_groups = _get_item_group_with_descendants(item_group)
+		if allowed_item_groups:
+			allowed_set = set(allowed_item_groups)
+			effective_groups = [g for g in requested_groups if g in allowed_set]
+		else:
+			effective_groups = requested_groups
 	else:
-		# When no specific item_group filter is passed (e.g. "All Items" tab),
-		# still restrict to the item groups configured on the POS Profile.
-		profile_groups = [
-			row.item_group for row in pos_profile_doc.get("item_groups", [])
-		]
-		if profile_groups:
-			all_groups = set()
-			for pg in profile_groups:
-				all_groups.update(_get_item_group_with_descendants(pg))
-			if all_groups:
-				placeholders = ", ".join(["%s"] * len(all_groups))
-				conditions.append(f"i.item_group IN ({placeholders})")
-				where_params.extend(list(all_groups))
+		effective_groups = allowed_item_groups
+
+	if effective_groups:
+		placeholders = ", ".join(["%s"] * len(effective_groups))
+		conditions.append(f"i.item_group IN ({placeholders})")
+		where_params.extend(effective_groups)
+	elif item_group:
+		# Requested group is outside the profile's authorised scope → match nothing.
+		conditions.append("i.item_group IN (NULL)")
 
 	allowed_brands = _get_allowed_profile_brands(pos_profile_doc.name)
 	if allowed_brands:
@@ -1247,7 +1273,7 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20,
 			LIMIT %s OFFSET %s
 		"""
 
-		all_params = params + score_params + [limit, start]
+		all_params = params + score_params + [int(limit), int(start)]
 		items = frappe.db.sql(query, tuple(all_params), as_dict=1)
 
 		# Prepare maps for enrichment
