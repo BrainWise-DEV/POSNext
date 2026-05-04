@@ -1966,7 +1966,17 @@ watch(show, (newVal) => {
 		mobileCustomAmount.value = ""
 		lastSelectedMethod.value = null
 		customerCredit.value = []
-		// Note: Don't reset customerBalance here - it's pre-fetched when customer changes
+		// Refetch credit sources every time the dialog opens. The pre-fetch
+		// watcher only fires when customer/company changes, so reopening the
+		// dialog for the same customer would otherwise leave credit_details
+		// empty and break "Apply Customer Credit" with an allocation error.
+		// customerBalance is also refetched so the displayed balance reflects
+		// any redemptions made by other cashiers since the last open.
+		const creditEnabled = props.allowCreditSale || props.allowCustomerCreditPayment
+		if (creditEnabled && props.customer && props.company) {
+			customerBalanceResource.fetch()
+			customerCreditResource.fetch()
+		}
 		selectedSalesPersons.value = []
 		salesPersonSearch.value = ""
 		applyWriteOff.value = false // Reset write-off state
@@ -1990,11 +2000,8 @@ watch(show, (newVal) => {
 			lastSelectedMethod.value = defaultMethod || paymentMethods.value[0]
 		}
 
-		// Customer credit and balance is pre-fetched when customer changes (see watcher above)
-		// Just log for debugging
-		const creditEnabled = props.allowCreditSale || props.allowCustomerCreditPayment
 		if (creditEnabled) {
-			log.debug("[PaymentDialog] Customer credit/balance should be pre-loaded, current balance:", customerBalance.value)
+			log.debug("[PaymentDialog] Customer credit/balance refetch triggered, current balance:", customerBalance.value)
 		}
 
 		// Load wallet info if customer is selected

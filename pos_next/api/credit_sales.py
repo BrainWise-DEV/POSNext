@@ -175,8 +175,11 @@ def get_available_credit(customer, company, pos_profile=None):
 
 	total_credit = []
 
-	# Get invoices with negative outstanding (customer has overpaid or returns)
-	# Include modified timestamp for optimistic locking
+	# Get return invoices with negative outstanding (credit added to customer balance).
+	# We restrict to is_return=1 because a return SI also reduces the original
+	# sale's outstanding, so a regular SI with negative outstanding represents the
+	# same money as its linked return — counting both would double the credit.
+	# This matches the logic in get_customer_balance.
 	outstanding_invoices = frappe.get_all(
 		"Sales Invoice",
 		filters={
@@ -184,6 +187,7 @@ def get_available_credit(customer, company, pos_profile=None):
 			"docstatus": 1,
 			"customer": customer,
 			"company": company,
+			"is_return": 1,
 		},
 		fields=["name", "outstanding_amount", "is_return", "posting_date", "grand_total", "modified"],
 		order_by="posting_date desc"
@@ -199,7 +203,7 @@ def get_available_credit(customer, company, pos_profile=None):
 				"credit_origin": row.name,
 				"total_credit": available_credit,
 				"available_credit": available_credit,
-				"source_type": "Sales Return" if row.is_return else "Sales Invoice",
+				"source_type": "Sales Return",
 				"posting_date": row.posting_date,
 				"reference_amount": row.grand_total,
 				"credit_to_redeem": 0,  # User will set this
