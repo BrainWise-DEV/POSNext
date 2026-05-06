@@ -25,3 +25,12 @@ try:
     patch_get_other_conditions(pr_utils)
 except Exception:
     pass
+
+# Patch packed item keying to avoid duplicate Product Bundle rows in Packed Items
+# during repeated save/submit cycles in POS flows.
+try:
+    from erpnext.stock.doctype.packed_item import packed_item as packed_item_module
+    from pos_next.overrides.packed_item import patch_packed_item_keying
+    patch_packed_item_keying(packed_item_module)
+except Exception:
+    pass
