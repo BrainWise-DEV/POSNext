@@ -34,53 +34,24 @@ export function useQuickAmounts(remainingAmount, isCash) {
 		// Always include the primary amount first
 		amounts.add(exactAmount)
 
-		// Determine appropriate denominations based on amount size
-		let denominations
-		if (remaining < 20) {
-			denominations = [5, 10, 20, 50]
-		} else if (remaining < 100) {
-			denominations = [10, 20, 50, 100]
-		} else if (remaining < 500) {
-			denominations = [50, 100, 200, 500]
-		} else if (remaining < 2000) {
-			denominations = [100, 200, 500, 1000]
-		} else {
-			denominations = [500, 1000, 2000, 5000]
+		// Determine a step size based on the remaining amount scale
+		const getSuggestionStep = (value) => {
+			if (value < 50) return 5
+			if (value < 200) return 10
+			if (value < 1000) return 20
+			if (value < 10000) return 100
+			if (value < 50000) return 500
+			return 1000
 		}
 
-		// Minimum gap between suggestions (at least 5% or 5, whichever is larger)
-		const minGap = Math.max(5, exactAmount * 0.05)
+		const step = getSuggestionStep(remaining)
+		let nextAmount = Math.ceil((exactAmount + 1) / step) * step
 
-		// Helper to check if amount is far enough from existing amounts
-		const isFarEnough = (newAmt) => {
-			for (const existing of amounts) {
-				if (Math.abs(newAmt - existing) < minGap) return false
-			}
-			return true
+		while (amounts.size < 4) {
+			amounts.add(nextAmount)
+			nextAmount += step
 		}
 
-		// Add round-up amounts for each denomination
-		for (const denom of denominations) {
-			if (amounts.size >= 4) break
-
-			// Round up to next multiple of this denomination
-			const roundedUp = Math.ceil(remaining / denom) * denom
-
-			// Add if it's meaningfully different from exact amount
-			if (roundedUp > exactAmount && isFarEnough(roundedUp)) {
-				amounts.add(roundedUp)
-			}
-
-			// Also add one step higher for convenience (e.g., 350 when remaining is 299)
-			if (amounts.size < 4) {
-				const oneStepUp = roundedUp + denom
-				if (oneStepUp > exactAmount && isFarEnough(oneStepUp)) {
-					amounts.add(oneStepUp)
-				}
-			}
-		}
-
-		// Convert to array, sort, and limit to 4
 		return Array.from(amounts)
 			.filter((amt) => amt > 0)
 			.sort((a, b) => a - b)
