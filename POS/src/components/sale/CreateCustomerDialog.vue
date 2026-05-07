@@ -98,7 +98,18 @@
 					</label>
 					<Input v-model="customerData.email_id" type="email" :placeholder="__('Enter email address')" />
 				</div>
-
+			<!-- Pincode (Required) -->
+			<div>
+				<label class="block text-start text-sm font-medium text-gray-700 mb-2">
+					{{ __("Pincode") }} <span class="text-red-500">*</span>
+				</label>
+				<Input
+					v-model="customerData.pincode"
+					type="text"
+					:placeholder="__('Enter pincode')"
+					required
+				/>
+			</div>
 				<!-- Customer Group -->
 				<div>
 					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
@@ -159,7 +170,7 @@
 						variant="solid"
 						@click="handleCreate"
 						:loading="createCustomerResource.loading || updateCustomerResource.loading || checkingPermission"
-						:disabled="!customerData.customer_name || !hasPermission"
+						:disabled="!customerData.customer_name || !customerData.pincode || !hasPermission"
 					>
 						{{ isEditMode ? __("Save Changes") : __("Create Customer") }}
 					</Button>
@@ -233,6 +244,7 @@ const customerData = ref({
 	customer_name: "",
 	mobile_no: "",
 	email_id: "",
+	pincode: "",
 	customer_group: "Individual",
 	territory: "All Territories",
 })
@@ -337,6 +349,7 @@ const createCustomerResource = createResource({
 		customer_name: customerData.value.customer_name,
 		mobile_no: customerData.value.mobile_no || "",
 		email_id: customerData.value.email_id || "",
+		custom_pincode: customerData.value.pincode || "",
 		customer_group: customerData.value.customer_group || __("Individual"),
 		territory: customerData.value.territory || __("All Territories"),
 		pos_profile: props.posProfile,
@@ -363,6 +376,7 @@ const updateCustomerResource = createResource({
 			territory: customerData.value.territory || __("All Territories"),
 			mobile_no: customerData.value.mobile_no || "",
 			email_id: customerData.value.email_id || "",
+			custom_pincode: customerData.value.pincode || "",
 		},
 	}),
 	onSuccess: (data) => {
@@ -446,6 +460,9 @@ const handleCreate = async () => {
 	if (!customerData.value.customer_name) {
 		return showError(__("Customer Name is required"))
 	}
+	if (!customerData.value.pincode) {
+		return showError(__("Pincode is required"))
+	}
 	if (isEditMode.value) {
 		await updateCustomerResource.submit()
 	} else {
@@ -458,6 +475,7 @@ const resetForm = () => {
 		customer_name: "",
 		mobile_no: "",
 		email_id: "",
+		pincode: "",
 		customer_group: "Individual",
 		territory: "All Territories",
 	})
@@ -481,6 +499,7 @@ watch(
 		if (customer?.name) {
 			customerData.value.customer_name = customer.customer_name || ""
 			customerData.value.email_id = customer.email_id || ""
+			customerData.value.pincode = customer.custom_pincode || ""
 			customerData.value.customer_group = customer.customer_group || "Individual"
 			customerData.value.territory = customer.territory || "All Territories"
 			// Handle mobile_no with country code
