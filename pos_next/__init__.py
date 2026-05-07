@@ -34,3 +34,14 @@ try:
     patch_packed_item_keying(packed_item_module)
 except Exception:
     pass
+
+# Patch Document.round_floats_in for ERPNext/Frappe compatibility:
+# newer ERPNext may pass do_not_round_fields, while older Frappe
+# only supports fieldnames.
+try:
+    from frappe.model import document as document_module
+    from pos_next.overrides.rounding_compat import patch_round_floats_in_compat
+
+    patch_round_floats_in_compat(document_module)
+except Exception:
+    pass
