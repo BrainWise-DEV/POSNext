@@ -33,13 +33,20 @@ def monitor_branding_integrity():
 
 		# Verify signature integrity
 		if not doc.encrypted_signature:
-			frappe.log_error(title="BrainWise Branding - Missing Signature", message="Branding configuration is missing encrypted signature. Please resave the BrainWise Branding document.")
+			frappe.log_error(
+				title="BrainWise Branding - Missing Signature",
+				message="Branding configuration is missing encrypted signature. Please resave the BrainWise Branding document.",
+			)
 
 		# Log monitoring activity
-		frappe.logger().info(f"BrainWise Branding Monitor - Checked at {now()}, Tampering attempts: {doc.tampering_attempts or 0}")
+		frappe.logger().info(
+			f"BrainWise Branding Monitor - Checked at {now()}, Tampering attempts: {doc.tampering_attempts or 0}"
+		)
 
 	except Exception as e:
-		frappe.log_error(title="BrainWise Branding Monitor Error", message=f"Error running branding monitor: {str(e)}")
+		frappe.log_error(
+			title="BrainWise Branding Monitor Error", message=f"Error running branding monitor: {str(e)}"
+		)
 
 
 def send_tampering_alert(doc):
@@ -47,9 +54,7 @@ def send_tampering_alert(doc):
 	try:
 		# Get all System Managers
 		system_managers = frappe.get_all(
-			"Has Role",
-			filters={"role": "System Manager", "parenttype": "User"},
-			fields=["parent"]
+			"Has Role", filters={"role": "System Manager", "parenttype": "User"}, fields=["parent"]
 		)
 
 		users = [d.parent for d in system_managers]
@@ -61,29 +66,33 @@ def send_tampering_alert(doc):
 		message = f"""
 <h3>BrainWise Branding - Excessive Tampering Detected</h3>
 <p>The BrainWise branding footer has been tampered with <strong>{doc.tampering_attempts}</strong> times.</p>
-<p><strong>Last Validation:</strong> {doc.last_validation or 'Never'}</p>
+<p><strong>Last Validation:</strong> {doc.last_validation or "Never"}</p>
 <p>Please review the Error Log for detailed tampering attempts.</p>
 <p><a href="/app/brainwise-branding">View Branding Configuration</a></p>
 		"""
 
 		for user in users:
 			try:
-				frappe.get_doc({
-					"doctype": "Notification Log",
-					"subject": "BrainWise Branding - Tampering Alert",
-					"type": "Alert",
-					"document_type": "BrainWise Branding",
-					"document_name": doc.name,
-					"for_user": user,
-					"email_content": message
-				}).insert(ignore_permissions=True)
+				frappe.get_doc(
+					{
+						"doctype": "Notification Log",
+						"subject": "BrainWise Branding - Tampering Alert",
+						"type": "Alert",
+						"document_type": "BrainWise Branding",
+						"document_name": doc.name,
+						"for_user": user,
+						"email_content": message,
+					}
+				).insert(ignore_permissions=True)
 			except:
 				pass
 
 		frappe.db.commit()
 
 	except Exception as e:
-		frappe.log_error(title="BrainWise Branding Alert Error", message=f"Error sending tampering alert: {str(e)}")
+		frappe.log_error(
+			title="BrainWise Branding Alert Error", message=f"Error sending tampering alert: {str(e)}"
+		)
 
 
 def reset_tampering_counter():
@@ -104,18 +113,27 @@ def reset_tampering_counter():
 
 		# Log the reset
 		if old_count > 0:
-			frappe.log_error(title="BrainWise Branding - Monthly Counter Reset", message=json.dumps({
-				"previous_count": old_count,
-				"reset_date": now(),
-				"note": "Monthly tampering counter reset"
-			}, indent=2))
+			frappe.log_error(
+				title="BrainWise Branding - Monthly Counter Reset",
+				message=json.dumps(
+					{
+						"previous_count": old_count,
+						"reset_date": now(),
+						"note": "Monthly tampering counter reset",
+					},
+					indent=2,
+				),
+			)
 
 		# Reset counter
 		frappe.db.set_value("BrainWise Branding", doc.name, "tampering_attempts", 0)
 		frappe.db.commit()
 
 	except Exception as e:
-		frappe.log_error(title="BrainWise Branding Counter Reset Error", message=f"Error resetting tampering counter: {str(e)}")
+		frappe.log_error(
+			title="BrainWise Branding Counter Reset Error",
+			message=f"Error resetting tampering counter: {str(e)}",
+		)
 
 
 def validate_all_active_sessions():
@@ -133,15 +151,21 @@ def validate_all_active_sessions():
 			return
 
 		# Get active sessions (sessions from last 24 hours)
-		active_sessions = frappe.db.sql("""
+		active_sessions = frappe.db.sql(
+			"""
 			SELECT user, COUNT(*) as session_count
 			FROM `tabSessions`
 			WHERE TIMESTAMPDIFF(HOUR, lastupdate, NOW()) < 24
 			GROUP BY user
-		""", as_dict=True)
+		""",
+			as_dict=True,
+		)
 
 		if active_sessions:
 			frappe.logger().info(f"BrainWise Branding - Active sessions: {len(active_sessions)}")
 
 	except Exception as e:
-		frappe.log_error(title="BrainWise Branding Session Validation Error", message=f"Error validating active sessions: {str(e)}")
+		frappe.log_error(
+			title="BrainWise Branding Session Validation Error",
+			message=f"Error validating active sessions: {str(e)}",
+		)

@@ -1,6 +1,7 @@
 """
 Uninstallation hooks for POS Next
 """
+
 import frappe
 import logging
 
@@ -114,9 +115,7 @@ def remove_print_formats():
 				if frappe.db.exists("Print Format", format_name):
 					# Check if it's being used by any POS Profile
 					pos_profiles_using = frappe.get_all(
-						"POS Profile",
-						filters={"print_format": format_name},
-						fields=["name"]
+						"POS Profile", filters={"print_format": format_name}, fields=["name"]
 					)
 
 					if pos_profiles_using:
@@ -127,9 +126,17 @@ def remove_print_formats():
 								doc.print_format = ""
 								doc.flags.ignore_permissions = True
 								doc.save()
-								log_message(f"Reset print format for POS Profile: {profile.name}", level="info", indent=2)
+								log_message(
+									f"Reset print format for POS Profile: {profile.name}",
+									level="info",
+									indent=2,
+								)
 							except Exception as e:
-								log_message(f"Error resetting POS Profile {profile.name}: {str(e)}", level="error", indent=2)
+								log_message(
+									f"Error resetting POS Profile {profile.name}: {str(e)}",
+									level="error",
+									indent=2,
+								)
 
 					# Now delete the print format
 					frappe.delete_doc("Print Format", format_name, force=True, ignore_permissions=True)
@@ -160,9 +167,7 @@ def reset_pos_profiles():
 
 		# Find POS Profiles using POS Next print format
 		pos_profiles = frappe.get_all(
-			"POS Profile",
-			filters={"print_format": "POS Next Receipt"},
-			fields=["name"]
+			"POS Profile", filters={"print_format": "POS Next Receipt"}, fields=["name"]
 		)
 
 		if not pos_profiles:
@@ -234,17 +239,19 @@ def get_custom_fields_for_cleanup():
 	custom_fields = []
 
 	# Always safe to remove (POS Next specific)
-	custom_fields.extend([
-		"Sales Invoice-posa_pos_opening_shift",
-		"Sales Invoice-posa_is_printed",
-		"Customer-custom_company",
-		"Supplier-custom_company",
-		"Item Group-custom_company",
-		"Customer Group-custom_company",
-		"Supplier Group-custom_company",
-		"Brand-custom_company",
-		"Price List-custom_company",
-	])
+	custom_fields.extend(
+		[
+			"Sales Invoice-posa_pos_opening_shift",
+			"Sales Invoice-posa_is_printed",
+			"Customer-custom_company",
+			"Supplier-custom_company",
+			"Item Group-custom_company",
+			"Customer Group-custom_company",
+			"Supplier Group-custom_company",
+			"Brand-custom_company",
+			"Price List-custom_company",
+		]
+	)
 
 	# Conditional removal (shared with other apps)
 	nexus_installed = "nexus" in frappe.get_installed_apps()

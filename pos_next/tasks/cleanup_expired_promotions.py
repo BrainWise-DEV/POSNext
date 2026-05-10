@@ -26,7 +26,7 @@ def disable_expired_pricing_rules():
 				AND valid_upto < %s
 			""",
 			(today,),
-			as_dict=1
+			as_dict=1,
 		)
 
 		if not expired_rules:
@@ -39,16 +39,12 @@ def disable_expired_pricing_rules():
 		for rule in expired_rules:
 			try:
 				# Use SQL update for better performance
-				frappe.db.set_value(
-					"Pricing Rule",
-					rule.name,
-					"disable",
-					1,
-					update_modified=True
-				)
+				frappe.db.set_value("Pricing Rule", rule.name, "disable", 1, update_modified=True)
 				disabled_count += 1
 
-				frappe.logger().info(f"Disabled expired pricing rule: {rule.name} - {rule.title} (expired: {rule.valid_upto})")
+				frappe.logger().info(
+					f"Disabled expired pricing rule: {rule.name} - {rule.title} (expired: {rule.valid_upto})"
+				)
 
 			except Exception as e:
 				error_msg = f"Failed to disable pricing rule {rule.name}: {str(e)}"
@@ -81,7 +77,11 @@ def disable_expired_promotional_schemes():
 		# Check if Promotional Scheme doctype exists
 		if not frappe.db.table_exists("Promotional Scheme"):
 			frappe.logger().info("Promotional Scheme doctype does not exist, skipping...")
-			return {"success": True, "disabled_count": 0, "message": "Promotional Scheme doctype not available"}
+			return {
+				"success": True,
+				"disabled_count": 0,
+				"message": "Promotional Scheme doctype not available",
+			}
 
 		today = nowdate()
 
@@ -95,12 +95,16 @@ def disable_expired_promotional_schemes():
 				AND valid_upto < %s
 			""",
 			(today,),
-			as_dict=1
+			as_dict=1,
 		)
 
 		if not expired_schemes:
 			frappe.logger().info("No expired promotional schemes found")
-			return {"success": True, "disabled_count": 0, "message": "No expired promotional schemes to disable"}
+			return {
+				"success": True,
+				"disabled_count": 0,
+				"message": "No expired promotional schemes to disable",
+			}
 
 		disabled_count = 0
 		errors = []
@@ -108,16 +112,12 @@ def disable_expired_promotional_schemes():
 		for scheme in expired_schemes:
 			try:
 				# Use SQL update for better performance
-				frappe.db.set_value(
-					"Promotional Scheme",
-					scheme.name,
-					"disable",
-					1,
-					update_modified=True
-				)
+				frappe.db.set_value("Promotional Scheme", scheme.name, "disable", 1, update_modified=True)
 				disabled_count += 1
 
-				frappe.logger().info(f"Disabled expired promotional scheme: {scheme.name} (expired: {scheme.valid_upto})")
+				frappe.logger().info(
+					f"Disabled expired promotional scheme: {scheme.name} (expired: {scheme.valid_upto})"
+				)
 
 			except Exception as e:
 				error_msg = f"Failed to disable promotional scheme {scheme.name}: {str(e)}"
@@ -155,11 +155,13 @@ def cleanup_expired_promotions():
 	schemes_result = disable_expired_promotional_schemes()
 
 	# Summary log
-	total_disabled = (
-		pricing_result.get("disabled_count", 0) +
-		schemes_result.get("disabled_count", 0)
-	)
+	total_disabled = pricing_result.get("disabled_count", 0) + schemes_result.get("disabled_count", 0)
 
 	frappe.logger().info(f"Cleanup completed: {total_disabled} expired promotion(s) disabled")
 
-	return {"success": True, "pricing_rules": pricing_result, "promotional_schemes": schemes_result, "total_disabled": total_disabled}
+	return {
+		"success": True,
+		"pricing_rules": pricing_result,
+		"promotional_schemes": schemes_result,
+		"total_disabled": total_disabled,
+	}
