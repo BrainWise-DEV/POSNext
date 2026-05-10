@@ -56,6 +56,12 @@ jobs:
 
       - name: Install and run pip-audit
         run: |
+          python -m venv .audit-venv
+          . .audit-venv/bin/activate
+          pip install --upgrade pip
           pip install pip-audit
+          pip install "frappe @ git+https://github.com/frappe/frappe.git@version-15"
+          pip install "erpnext @ git+https://github.com/frappe/erpnext.git@version-15"
           cd ${GITHUB_WORKSPACE}
-          pip-audit --desc on .
+          pip install --no-deps .
+          pip-audit --desc on
