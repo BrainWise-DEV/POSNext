@@ -33,10 +33,7 @@ def before_uninstall():
 
 	except Exception as e:
 		frappe.db.rollback()
-		frappe.log_error(
-			title="POS Next Uninstallation Error",
-			message=frappe.get_traceback()
-		)
+		frappe.log_error(title="POS Next Uninstallation Error", message=frappe.get_traceback())
 		log_message(f"Error during POS Next uninstallation: {str(e)}", level="error")
 		raise
 
@@ -94,10 +91,7 @@ def remove_custom_fields():
 
 	except Exception as e:
 		log_message(f"Error removing custom fields: {str(e)}", level="error")
-		frappe.log_error(
-			title="Custom Fields Removal Error",
-			message=frappe.get_traceback()
-		)
+		frappe.log_error(title="Custom Fields Removal Error", message=frappe.get_traceback())
 
 
 def remove_print_formats():
@@ -154,10 +148,7 @@ def remove_print_formats():
 
 	except Exception as e:
 		log_message(f"Error removing print formats: {str(e)}", level="error")
-		frappe.log_error(
-			title="Print Formats Removal Error",
-			message=frappe.get_traceback()
-		)
+		frappe.log_error(title="Print Formats Removal Error", message=frappe.get_traceback())
 
 
 def reset_pos_profiles():
@@ -196,10 +187,7 @@ def reset_pos_profiles():
 
 	except Exception as e:
 		log_message(f"Error resetting POS Profiles: {str(e)}", level="error")
-		frappe.log_error(
-			title="POS Profile Reset Error",
-			message=frappe.get_traceback()
-		)
+		frappe.log_error(title="POS Profile Reset Error", message=frappe.get_traceback())
 
 
 def log_message(message, level="info", indent=0):

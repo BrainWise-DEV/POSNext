@@ -231,10 +231,7 @@ def get_item_detail(item, doc=None, warehouse=None, price_list=None, company=Non
 			try:
 				exchange_rate = get_exchange_rate(price_list_currency, company_currency, today)
 			except Exception:
-				frappe.log_error(
-					f"Missing exchange rate from {price_list_currency} to {company_currency}",
-					"POS Next",
-				)
+				frappe.log_error(f"Missing exchange rate from {price_list_currency} to {company_currency}", "POS Next")
 
 		item["price_list_currency"] = price_list_currency
 		item["plc_conversion_rate"] = exchange_rate
@@ -1399,10 +1396,7 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20,
 			# Without warehouse, bundles will show as unavailable (qty = 0)
 			has_bundles = frappe.db.exists("Product Bundle", {"new_item_code": ["in", item_codes]})
 			if has_bundles:
-				frappe.log_error(
-					"POS Profile missing warehouse - Product Bundles will show as unavailable",
-					"Bundle Availability Warning"
-				)
+				frappe.log_error("POS Profile missing warehouse - Product Bundles will show as unavailable", "Bundle Availability Warning")
 
 		# Variant attributes (only when variants are included)
 		attributes_map = {}
@@ -2317,16 +2311,10 @@ def get_product_bundle_availability(item_code, warehouse):
 				"is_limiting": (possible == available_qty)  # Mark limiting component
 			})
 
-		return {
-			"available_qty": available_qty,
-			"components": component_details
-		}
+		return {"available_qty": available_qty, "components": component_details}
 
 	except Exception as e:
-		frappe.log_error(
-			frappe.get_traceback(),
-			f"Bundle Availability Error: {item_code} in {warehouse}"
-		)
+		frappe.log_error(frappe.get_traceback(), f"Bundle Availability Error: {item_code} in {warehouse}")
 		frappe.throw(_("Error fetching bundle availability for {0}: {1}").format(item_code, str(e)))
 
 

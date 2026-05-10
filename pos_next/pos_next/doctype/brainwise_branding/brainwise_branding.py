@@ -41,18 +41,15 @@ class BrainWiseBranding(Document):
 					)
 
 				# Log successful modification with master key
-				frappe.log_error(
-					title="BrainWise Branding - Fields Modified with Master Key",
-					message=json.dumps({
-						"user": frappe.session.user,
-						"timestamp": frappe.utils.now(),
-						"ip_address": frappe.local.request_ip if hasattr(frappe.local, 'request_ip') else None,
-						"action": "Protected fields modified with valid master key",
-						"fields_changed": protected_fields_changed,
-						"old_values": {field: self.get_db_value(field) for field in protected_fields_changed},
-						"new_values": {field: self.get(field) for field in protected_fields_changed}
-					}, indent=2, default=str)
-				)
+				frappe.log_error(title="BrainWise Branding - Fields Modified with Master Key", message=json.dumps({
+					"user": frappe.session.user,
+					"timestamp": frappe.utils.now(),
+					"ip_address": frappe.local.request_ip if hasattr(frappe.local, 'request_ip') else None,
+					"action": "Protected fields modified with valid master key",
+					"fields_changed": protected_fields_changed,
+					"old_values": {field: self.get_db_value(field) for field in protected_fields_changed},
+					"new_values": {field: self.get(field) for field in protected_fields_changed}
+				}, indent=2, default=str))
 
 		# Special handling for disabling
 		if not self.enabled and not self.is_new():
@@ -115,28 +112,22 @@ class BrainWiseBranding(Document):
 			# Check if both match
 			if key_hash == MASTER_KEY_HASH and phrase_hash == PROTECTION_PHRASE_HASH:
 				# Log successful master key usage
-				frappe.log_error(
-					title="BrainWise Branding - Master Key Used",
-					message=json.dumps({
-						"user": frappe.session.user,
-						"timestamp": frappe.utils.now(),
-						"ip_address": frappe.local.request_ip if hasattr(frappe.local, 'request_ip') else None,
-						"action": "Master key validated successfully",
-						"enabled_state": self.enabled
-					}, indent=2)
-				)
-				return True
-
-			# Log failed attempt
-			frappe.log_error(
-				title="BrainWise Branding - Invalid Master Key Attempt",
-				message=json.dumps({
+				frappe.log_error(title="BrainWise Branding - Master Key Used", message=json.dumps({
 					"user": frappe.session.user,
 					"timestamp": frappe.utils.now(),
 					"ip_address": frappe.local.request_ip if hasattr(frappe.local, 'request_ip') else None,
-					"action": "Invalid master key provided"
-				}, indent=2)
-			)
+					"action": "Master key validated successfully",
+					"enabled_state": self.enabled
+				}, indent=2))
+				return True
+
+			# Log failed attempt
+			frappe.log_error(title="BrainWise Branding - Invalid Master Key Attempt", message=json.dumps({
+				"user": frappe.session.user,
+				"timestamp": frappe.utils.now(),
+				"ip_address": frappe.local.request_ip if hasattr(frappe.local, 'request_ip') else None,
+				"action": "Invalid master key provided"
+			}, indent=2))
 			return False
 
 		except Exception as e:
@@ -205,10 +196,7 @@ class BrainWiseBranding(Document):
 		self.save(ignore_permissions=True)
 
 		# Create error log
-		frappe.log_error(
-			title="BrainWise Branding Tampering Detected",
-			message=json.dumps(details, indent=2, default=str)
-		)
+		frappe.log_error(title="BrainWise Branding Tampering Detected", message=json.dumps(details, indent=2, default=str))
 
 
 @frappe.whitelist(allow_guest=False)
@@ -354,15 +342,12 @@ def verify_master_key(master_key_input):
 		is_valid = (key_hash == MASTER_KEY_HASH and phrase_hash == PROTECTION_PHRASE_HASH)
 
 		# Log the verification attempt
-		frappe.log_error(
-			title=f"BrainWise Branding - Master Key Verification {'Success' if is_valid else 'Failed'}",
-			message=json.dumps({
-				"user": frappe.session.user,
-				"timestamp": frappe.utils.now(),
-				"result": "valid" if is_valid else "invalid",
-				"ip_address": frappe.local.request_ip if hasattr(frappe.local, 'request_ip') else None
-			}, indent=2)
-		)
+		frappe.log_error(title=f"BrainWise Branding - Master Key Verification {'Success' if is_valid else 'Failed'}", message=json.dumps({
+			"user": frappe.session.user,
+			"timestamp": frappe.utils.now(),
+			"result": "valid" if is_valid else "invalid",
+			"ip_address": frappe.local.request_ip if hasattr(frappe.local, 'request_ip') else None
+		}, indent=2))
 
 		return {
 			"valid": is_valid,
@@ -396,15 +381,12 @@ def generate_new_master_key():
 	phrase_hash = hashlib.sha256(new_phrase.encode()).hexdigest()
 
 	# Log this generation
-	frappe.log_error(
-		title="BrainWise Branding - New Master Key Generated",
-		message=json.dumps({
-			"user": frappe.session.user,
-			"timestamp": frappe.utils.now(),
-			"warning": "New master key generated - previous key is now invalid",
-			"ip_address": frappe.local.request_ip if hasattr(frappe.local, 'request_ip') else None
-		}, indent=2)
-	)
+	frappe.log_error(title="BrainWise Branding - New Master Key Generated", message=json.dumps({
+		"user": frappe.session.user,
+		"timestamp": frappe.utils.now(),
+		"warning": "New master key generated - previous key is now invalid",
+		"ip_address": frappe.local.request_ip if hasattr(frappe.local, 'request_ip') else None
+	}, indent=2))
 
 	return {
 		"master_key": new_key,

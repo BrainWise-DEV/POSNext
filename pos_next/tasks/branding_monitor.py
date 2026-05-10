@@ -33,19 +33,13 @@ def monitor_branding_integrity():
 
 		# Verify signature integrity
 		if not doc.encrypted_signature:
-			frappe.log_error(
-				title="BrainWise Branding - Missing Signature",
-				message="Branding configuration is missing encrypted signature. Please resave the BrainWise Branding document."
-			)
+			frappe.log_error(title="BrainWise Branding - Missing Signature", message="Branding configuration is missing encrypted signature. Please resave the BrainWise Branding document.")
 
 		# Log monitoring activity
 		frappe.logger().info(f"BrainWise Branding Monitor - Checked at {now()}, Tampering attempts: {doc.tampering_attempts or 0}")
 
 	except Exception as e:
-		frappe.log_error(
-			title="BrainWise Branding Monitor Error",
-			message=f"Error running branding monitor: {str(e)}"
-		)
+		frappe.log_error(title="BrainWise Branding Monitor Error", message=f"Error running branding monitor: {str(e)}")
 
 
 def send_tampering_alert(doc):
@@ -89,10 +83,7 @@ def send_tampering_alert(doc):
 		frappe.db.commit()
 
 	except Exception as e:
-		frappe.log_error(
-			title="BrainWise Branding Alert Error",
-			message=f"Error sending tampering alert: {str(e)}"
-		)
+		frappe.log_error(title="BrainWise Branding Alert Error", message=f"Error sending tampering alert: {str(e)}")
 
 
 def reset_tampering_counter():
@@ -113,24 +104,18 @@ def reset_tampering_counter():
 
 		# Log the reset
 		if old_count > 0:
-			frappe.log_error(
-				title="BrainWise Branding - Monthly Counter Reset",
-				message=json.dumps({
-					"previous_count": old_count,
-					"reset_date": now(),
-					"note": "Monthly tampering counter reset"
-				}, indent=2)
-			)
+			frappe.log_error(title="BrainWise Branding - Monthly Counter Reset", message=json.dumps({
+				"previous_count": old_count,
+				"reset_date": now(),
+				"note": "Monthly tampering counter reset"
+			}, indent=2))
 
 		# Reset counter
 		frappe.db.set_value("BrainWise Branding", doc.name, "tampering_attempts", 0)
 		frappe.db.commit()
 
 	except Exception as e:
-		frappe.log_error(
-			title="BrainWise Branding Counter Reset Error",
-			message=f"Error resetting tampering counter: {str(e)}"
-		)
+		frappe.log_error(title="BrainWise Branding Counter Reset Error", message=f"Error resetting tampering counter: {str(e)}")
 
 
 def validate_all_active_sessions():
@@ -156,12 +141,7 @@ def validate_all_active_sessions():
 		""", as_dict=True)
 
 		if active_sessions:
-			frappe.logger().info(
-				f"BrainWise Branding - Active sessions: {len(active_sessions)}"
-			)
+			frappe.logger().info(f"BrainWise Branding - Active sessions: {len(active_sessions)}")
 
 	except Exception as e:
-		frappe.log_error(
-			title="BrainWise Branding Session Validation Error",
-			message=f"Error validating active sessions: {str(e)}"
-		)
+		frappe.log_error(title="BrainWise Branding Session Validation Error", message=f"Error validating active sessions: {str(e)}")

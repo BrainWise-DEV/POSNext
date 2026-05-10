@@ -31,11 +31,7 @@ def disable_expired_pricing_rules():
 
 		if not expired_rules:
 			frappe.logger().info("No expired pricing rules found")
-			return {
-				"success": True,
-				"disabled_count": 0,
-				"message": "No expired pricing rules to disable"
-			}
+			return {"success": True, "disabled_count": 0, "message": "No expired pricing rules to disable"}
 
 		disabled_count = 0
 		errors = []
@@ -52,10 +48,7 @@ def disable_expired_pricing_rules():
 				)
 				disabled_count += 1
 
-				frappe.logger().info(
-					f"Disabled expired pricing rule: {rule.name} - {rule.title} "
-					f"(expired: {rule.valid_upto})"
-				)
+				frappe.logger().info(f"Disabled expired pricing rule: {rule.name} - {rule.title} (expired: {rule.valid_upto})")
 
 			except Exception as e:
 				error_msg = f"Failed to disable pricing rule {rule.name}: {str(e)}"
@@ -72,22 +65,11 @@ def disable_expired_pricing_rules():
 
 		frappe.logger().info(summary)
 
-		return {
-			"success": True,
-			"disabled_count": disabled_count,
-			"errors": errors,
-			"message": summary
-		}
+		return {"success": True, "disabled_count": disabled_count, "errors": errors, "message": summary}
 
 	except Exception as e:
-		frappe.log_error(
-			title="Disable Expired Pricing Rules Error",
-			message=frappe.get_traceback()
-		)
-		return {
-			"success": False,
-			"error": str(e)
-		}
+		frappe.log_error(title="Disable Expired Pricing Rules Error", message=frappe.get_traceback())
+		return {"success": False, "error": str(e)}
 
 
 def disable_expired_promotional_schemes():
@@ -99,11 +81,7 @@ def disable_expired_promotional_schemes():
 		# Check if Promotional Scheme doctype exists
 		if not frappe.db.table_exists("Promotional Scheme"):
 			frappe.logger().info("Promotional Scheme doctype does not exist, skipping...")
-			return {
-				"success": True,
-				"disabled_count": 0,
-				"message": "Promotional Scheme doctype not available"
-			}
+			return {"success": True, "disabled_count": 0, "message": "Promotional Scheme doctype not available"}
 
 		today = nowdate()
 
@@ -122,11 +100,7 @@ def disable_expired_promotional_schemes():
 
 		if not expired_schemes:
 			frappe.logger().info("No expired promotional schemes found")
-			return {
-				"success": True,
-				"disabled_count": 0,
-				"message": "No expired promotional schemes to disable"
-			}
+			return {"success": True, "disabled_count": 0, "message": "No expired promotional schemes to disable"}
 
 		disabled_count = 0
 		errors = []
@@ -143,10 +117,7 @@ def disable_expired_promotional_schemes():
 				)
 				disabled_count += 1
 
-				frappe.logger().info(
-					f"Disabled expired promotional scheme: {scheme.name} "
-					f"(expired: {scheme.valid_upto})"
-				)
+				frappe.logger().info(f"Disabled expired promotional scheme: {scheme.name} (expired: {scheme.valid_upto})")
 
 			except Exception as e:
 				error_msg = f"Failed to disable promotional scheme {scheme.name}: {str(e)}"
@@ -163,22 +134,11 @@ def disable_expired_promotional_schemes():
 
 		frappe.logger().info(summary)
 
-		return {
-			"success": True,
-			"disabled_count": disabled_count,
-			"errors": errors,
-			"message": summary
-		}
+		return {"success": True, "disabled_count": disabled_count, "errors": errors, "message": summary}
 
 	except Exception as e:
-		frappe.log_error(
-			title="Disable Expired Promotional Schemes Error",
-			message=frappe.get_traceback()
-		)
-		return {
-			"success": False,
-			"error": str(e)
-		}
+		frappe.log_error(title="Disable Expired Promotional Schemes Error", message=frappe.get_traceback())
+		return {"success": False, "error": str(e)}
 
 
 def cleanup_expired_promotions():
@@ -200,13 +160,6 @@ def cleanup_expired_promotions():
 		schemes_result.get("disabled_count", 0)
 	)
 
-	frappe.logger().info(
-		f"Cleanup completed: {total_disabled} expired promotion(s) disabled"
-	)
+	frappe.logger().info(f"Cleanup completed: {total_disabled} expired promotion(s) disabled")
 
-	return {
-		"success": True,
-		"pricing_rules": pricing_result,
-		"promotional_schemes": schemes_result,
-		"total_disabled": total_disabled
-	}
+	return {"success": True, "pricing_rules": pricing_result, "promotional_schemes": schemes_result, "total_disabled": total_disabled}

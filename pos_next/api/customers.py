@@ -23,9 +23,7 @@ def get_customers(search_term="", pos_profile=None, limit=20, modified_since=Non
         list: List of customer dictionaries with name, customer_name, mobile_no, email_id, disabled
     """
     try:
-        frappe.logger().debug(
-            f"get_customers called with search_term={search_term}, pos_profile={pos_profile}, limit={limit}, modified_since={modified_since}"
-        )
+        frappe.logger().debug(f"get_customers called with search_term={search_term}, pos_profile={pos_profile}, limit={limit}, modified_since={modified_since}")
 
         filters = {}
         or_filters = []
@@ -190,9 +188,7 @@ def auto_assign_loyalty_program(doc, method=None):
     if loyalty_program:
         # Use db_set to avoid triggering validate hooks again
         doc.db_set("loyalty_program", loyalty_program, update_modified=False)
-        frappe.logger().info(
-            f"Auto-assigned loyalty program '{loyalty_program}' to customer '{doc.name}'"
-        )
+        frappe.logger().info(f"Auto-assigned loyalty program '{loyalty_program}' to customer '{doc.name}'")
 
 
 def _get_customer_assignment_context():
