@@ -106,7 +106,8 @@
    "fieldname": "pos_transactions",
    "fieldtype": "Table",
    "label": "POS Transactions",
-   "options": "Sales Invoice Reference"
+   "options": "Sales Invoice Reference",
+   "read_only": 1
   },
   {
    "fieldname": "section_break_9",
@@ -191,7 +192,8 @@
    "fieldname": "pos_payments",
    "fieldtype": "Table",
    "label": "POS Payments",
-   "options": "POS Payment Entry Reference"
+   "options": "POS Payment Entry Reference",
+   "read_only": 1
   },
   {
    "fieldname": "section_break_if3m1",
@@ -261,6 +263,7 @@
    "write": 1
   }
  ],
+ "row_format": "Dynamic",
  "sort_field": "modified",
  "sort_order": "DESC",
  "states": [],
