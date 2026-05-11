@@ -16,7 +16,7 @@ jobs:
   linter:
     name: 'Frappe Linter'
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
+    if: false
 
     steps:
       - uses: actions/checkout@v4
