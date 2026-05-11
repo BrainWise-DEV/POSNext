@@ -1341,7 +1341,8 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20,
 				.select(
 					ItemPrice.item_code,
 					ItemPrice.uom,
-					ItemPrice.price_list_rate
+					ItemPrice.price_list_rate,
+					ItemPrice.mrp_rate
 				)
 				.where(ItemPrice.item_code.isin(item_codes))
 				.where(ItemPrice.price_list == pos_profile_doc.selling_price_list)
@@ -1350,7 +1351,10 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20,
 				.run(as_dict=True)
 			)
 			for price in prices:
-				uom_prices_map.setdefault(price["item_code"], {})[price["uom"]] = price["price_list_rate"]
+				uom_prices_map.setdefault(price["item_code"], {})[price["uom"]] = {
+					"price_list_rate": price["price_list_rate"],
+					"mrp_rate": price.get("mrp_rate"),
+				}
 
 		# Batch query stock for all items at once using Query Builder
 		stock_map = {}
@@ -1427,13 +1431,21 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20,
 
 			# 1) Try price explicitly for stock UOM (preferred)
 			if stock_uom and stock_uom in item_prices:
-				price_row = {"price_list_rate": item_prices[stock_uom], "uom": stock_uom}
+				price_row = {
+					"price_list_rate": item_prices[stock_uom].get("price_list_rate"),
+					"mrp_rate": item_prices[stock_uom].get("mrp_rate"),
+					"uom": stock_uom,
+				}
 
 			# 2) If not found, try any price for the item (and capture its UOM)
 			elif item_prices:
 				# Get first available price
 				first_uom = next(iter(item_prices.keys()))
-				price_row = {"price_list_rate": item_prices[first_uom], "uom": first_uom}
+				price_row = {
+					"price_list_rate": item_prices[first_uom].get("price_list_rate"),
+					"mrp_rate": item_prices[first_uom].get("mrp_rate"),
+					"uom": first_uom,
+				}
 
 			# 3) If still not found and it's a template, derive min variant price
 			derived_price = None
@@ -1458,35 +1470,40 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20,
 			# Finalize display price & display UOM
 			display_rate = 0.0
 			display_uom = stock_uom
+			display_mrp = 0.0
 
 			if price_row:
 				raw_rate = flt(price_row.get("price_list_rate") or 0)
+				mrp_value = flt(price_row.get("mrp_rate") or 0)
 				price_uom = price_row.get("uom") or stock_uom
 				if price_uom and stock_uom and price_uom != stock_uom:
 					# convert to per-stock-UOM if possible
 					cf = flt(conversion_map[item["item_code"]].get(price_uom) or 0)
 					if cf:
 						display_rate = raw_rate / cf
+						display_mrp = mrp_value / cf
 						display_uom = stock_uom
 					else:
 						# no conversion available: show as is (price UOM)
 						display_rate = raw_rate
+						display_mrp = mrp_value
 						display_uom = price_uom
 				else:
 					display_rate = raw_rate
+					display_mrp = mrp_value
 					display_uom = stock_uom
 			elif derived_price is not None:
 				display_rate = flt(derived_price)
+				display_mrp = 0.0
 				display_uom = stock_uom
 
 			item["rate"] = display_rate
 			item["price_list_rate"] = display_rate
+			item["mrp"] = display_mrp
 			item["uom"] = display_uom
 			item["price_uom"] = display_uom
 			item["conversion_factor"] = 1
 			item["price_list_rate_price_uom"] = display_rate
-
-			# ===================================================================
 			# STOCK QUANTITY ASSIGNMENT: Stock Items vs Product Bundles
 			# ===================================================================
 			# Stock items: Use actual_qty from Bin table (direct stock tracking)
@@ -1663,14 +1680,16 @@ def get_items_bulk(pos_profile, item_groups=None, start=0, limit=2000, include_v
 			ItemPrice = DocType("Item Price")
 			prices = (
 				frappe.qb.from_(ItemPrice)
-				.select(ItemPrice.item_code, ItemPrice.uom, ItemPrice.price_list_rate)
+				.select(ItemPrice.item_code, ItemPrice.uom, ItemPrice.price_list_rate, ItemPrice.mrp_rate)
 				.where(ItemPrice.price_list == price_list)
 				.where(ItemPrice.item_code.isin(item_codes))
-				.where(ItemPrice.selling == 1)
 				.run(as_dict=True)
 			)
 			for p in prices:
-				uom_prices_map.setdefault(p.item_code, {})[p.uom] = flt(p.price_list_rate)
+				uom_prices_map.setdefault(p.item_code, {})[p.uom] = {
+					"price_list_rate": flt(p.price_list_rate),
+					"mrp_rate": flt(p.mrp_rate),
+				}
 
 		# Stock
 		warehouse = pos_profile_doc.warehouse
@@ -1718,8 +1737,15 @@ def get_items_bulk(pos_profile, item_groups=None, start=0, limit=2000, include_v
 
 			# Price: prefer stock_uom, then None/empty UOM (Item Price without UOM)
 			prices = uom_prices_map.get(item_code, {})
-			item["rate"] = flt(prices.get(stock_uom) or prices.get(None) or prices.get("") or 0)
+			price_row = (
+				prices.get(stock_uom)
+				or prices.get(None)
+				or prices.get("")
+				or next(iter(prices.values()), {})
+			)
+			item["rate"] = flt(price_row.get("price_list_rate") or 0)
 			item["price_list_rate"] = item["rate"]
+			item["mrp"] = flt(price_row.get("mrp_rate") or 0)
 			item["uom"] = stock_uom
 			item["price_uom"] = stock_uom
 			item["conversion_factor"] = 1

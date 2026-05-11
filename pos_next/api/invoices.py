@@ -140,8 +140,10 @@ def validate_manual_rate_edit(item, pos_profile=None, pos_settings_cache=None):
             "message": _("POS Settings not found for profile {0}. Cannot validate rate edit.").format(pos_profile)
         }
 
-    # Check if rate editing is allowed
-    if not cint(pos_settings.get(FIELD_ALLOW_USER_TO_EDIT_RATE)):
+    is_stock_item = cint(item.get("is_stock_item") or 0)
+
+    # Check if rate editing is allowed for stock items only
+    if is_stock_item and not cint(pos_settings.get(FIELD_ALLOW_USER_TO_EDIT_RATE)):
         return {
             "valid": False,
             "message": _("Rate editing is not allowed for this POS Profile")

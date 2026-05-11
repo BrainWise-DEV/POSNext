@@ -141,7 +141,7 @@
 															/>
 														</div>
 														<!-- Compact warning when rate editing disabled due to pricing rules -->
-														<p v-if="hasPricingRules && settingsStore.allowUserToEditRate" class="mt-1 text-xs text-amber-600 flex items-center gap-1">
+														<p v-if="hasPricingRules && settingsStore.allowUserToEditRate && localItem?.is_stock_item" class="mt-1 text-xs text-amber-600 flex items-center gap-1">
 															<FeatherIcon name="lock" class="w-3 h-3" />
 															{{ __('Locked (offer applied)') }}
 														</p>
@@ -356,14 +356,16 @@ const hasPricingRules = computed(() => {
 })
 
 // Rate editing is allowed only if:
-// 1. POS Settings allows rate editing AND
-// 2. Item does NOT have pricing rules (promotional offers) applied
+// 1. POS Settings allows rate editing AND no pricing rules applied, OR
+// 2. Item is not a stock item (is_stock_item == 0)
 const canEditRate = computed(() => {
-	return settingsStore.allowUserToEditRate && !hasPricingRules.value
+	return (settingsStore.allowUserToEditRate && !hasPricingRules.value) || !localItem.value?.is_stock_item
 })
 
 // Tooltip message for why rate editing is disabled
 const rateEditDisabledReason = computed(() => {
+	if (canEditRate.value) return ''
+	if (!localItem.value?.is_stock_item) return '' // Should be editable for non-stock items
 	if (!settingsStore.allowUserToEditRate) {
 		return __('Rate editing is disabled')
 	}
@@ -691,7 +693,7 @@ function updateItem() {
 	// ========================================================================
 	// RATE EDIT VALIDATION
 	// ========================================================================
-	if (settingsStore.allowUserToEditRate && isRateManuallyEdited) {
+	if ((settingsStore.allowUserToEditRate || !localItem.is_stock_item) && isRateManuallyEdited) {
 		// Validate rate is positive
 		if (localRate.value <= 0) {
 			showError(__('Rate must be greater than zero'))
