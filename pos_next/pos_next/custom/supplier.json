@@ -1,0 +1,21 @@
+{
+ "custom_fields": [
+  {
+   "dt": "Supplier",
+   "fieldname": "custom_company",
+   "fieldtype": "Link",
+   "insert_after": "supplier_group",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "module": "POS Next",
+   "name": "Supplier-custom_company",
+   "options": "Company",
+   "reqd": 1
+  }
+ ],
+ "custom_perms": [],
+ "doctype": "Supplier",
+ "links": [],
+ "property_setters": [],
+ "sync_on_migrate": 1
+}

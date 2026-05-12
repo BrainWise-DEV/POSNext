@@ -116,16 +116,12 @@ def get_item_detail(item, doc=None, warehouse=None, price_list=None, company=Non
 			  - item_group, brand: For offer eligibility checking
 
 	Example:
-		>>> item = {
-		... 	"item_code": "LAPTOP-001",
-		... 	"has_serial_no": 1,
-		... 	"qty": 1
-		... }
+		>>> item = {"item_code": "LAPTOP-001", "has_serial_no": 1, "qty": 1}
 		>>> details = get_item_detail(
-		... 	item=json.dumps(item),
-		... 	warehouse="Main Store",
-		... 	price_list="Standard Selling",
-		... 	company="My Company"
+		...     item=json.dumps(item),
+		...     warehouse="Main Store",
+		...     price_list="Standard Selling",
+		...     company="My Company",
 		... )
 		>>> print(details["serial_no_data"])
 		[{"serial_no": "SN001"}, {"serial_no": "SN002"}]
@@ -172,19 +168,21 @@ def get_item_detail(item, doc=None, warehouse=None, price_list=None, company=Non
 
 					# Filter 2: Exclude expired batches
 					# Filter 3: Exclude disabled batches
-					is_not_expired = (
-						str(batch_doc.expiry_date) > str(today)
-						or batch_doc.expiry_date in ["", None]
-					)
+					is_not_expired = str(batch_doc.expiry_date) > str(today) or batch_doc.expiry_date in [
+						"",
+						None,
+					]
 					is_enabled = batch_doc.disabled == 0
 
 					if is_not_expired and is_enabled:
-						batch_no_data.append({
-							"batch_no": batch.batch_no,
-							"batch_qty": batch.qty,
-							"expiry_date": batch_doc.expiry_date,
-							"manufacturing_date": batch_doc.manufacturing_date,
-						})
+						batch_no_data.append(
+							{
+								"batch_no": batch.batch_no,
+								"batch_qty": batch.qty,
+								"expiry_date": batch_doc.expiry_date,
+								"manufacturing_date": batch_doc.manufacturing_date,
+							}
+						)
 
 	# ===========================================================================
 	# SERIAL NUMBER TRACKING: Get available serial numbers
@@ -232,8 +230,7 @@ def get_item_detail(item, doc=None, warehouse=None, price_list=None, company=Non
 				exchange_rate = get_exchange_rate(price_list_currency, company_currency, today)
 			except Exception:
 				frappe.log_error(
-					f"Missing exchange rate from {price_list_currency} to {company_currency}",
-					"POS Next",
+					f"Missing exchange rate from {price_list_currency} to {company_currency}", "POS Next"
 				)
 
 		item["price_list_currency"] = price_list_currency
@@ -254,12 +251,12 @@ def get_item_detail(item, doc=None, warehouse=None, price_list=None, company=Non
 		doc = frappe._dict({"doctype": "Sales Invoice", "company": company})
 
 	# Fetch all needed Item fields in a single query (performance optimization)
-	item_data = frappe.db.get_value(
-		"Item",
-		item_code,
-		["max_discount", "item_group", "brand", "stock_uom"],
-		as_dict=True
-	) or {}
+	item_data = (
+		frappe.db.get_value(
+			"Item", item_code, ["max_discount", "item_group", "brand", "stock_uom"], as_dict=True
+		)
+		or {}
+	)
 
 	# Prepare args dict for get_item_details - only include necessary fields
 	args = frappe._dict(
@@ -326,6 +323,7 @@ def search_by_barcode(barcode, pos_profile):
 		resolved_barcode_data = None
 		effective_barcode = barcode
 		from pos_next.services.barcode import resolve_barcode
+
 		resolved_barcode_data = resolve_barcode(barcode, pos_profile)
 		if resolved_barcode_data and resolved_barcode_data.get("item_barcode"):
 			effective_barcode = resolved_barcode_data["item_barcode"]
@@ -408,6 +406,7 @@ def search_by_barcode(barcode, pos_profile):
 		# Apply resolved barcode data (weighted/priced) to the item details
 		if resolved_barcode_data:
 			from pos_next.services.barcode import compute_resolved_item_data
+
 			resolved_item_data = compute_resolved_item_data(
 				resolved_barcode_data,
 				item=item_details,
@@ -426,12 +425,15 @@ def get_item_stock(item_code, warehouse):
 	"""Get real-time stock for item"""
 	try:
 		# Get both quantities in a single query (performance optimization)
-		bin_data = frappe.db.get_value(
-			"Bin",
-			{"item_code": item_code, "warehouse": warehouse},
-			["actual_qty", "reserved_qty"],
-			as_dict=True
-		) or {}
+		bin_data = (
+			frappe.db.get_value(
+				"Bin",
+				{"item_code": item_code, "warehouse": warehouse},
+				["actual_qty", "reserved_qty"],
+				as_dict=True,
+			)
+			or {}
+		)
 
 		stock_qty = flt(bin_data.get("actual_qty", 0))
 		reserved_qty = flt(bin_data.get("reserved_qty", 0))
@@ -453,11 +455,9 @@ def get_batch_serial_details(item_code, warehouse):
 	"""Get batch/serial number details"""
 	try:
 		# Get both flags in a single query (performance optimization)
-		item_flags = frappe.db.get_value(
-			"Item", item_code,
-			["has_batch_no", "has_serial_no"],
-			as_dict=True
-		) or {}
+		item_flags = (
+			frappe.db.get_value("Item", item_code, ["has_batch_no", "has_serial_no"], as_dict=True) or {}
+		)
 
 		has_batch_no = item_flags.get("has_batch_no")
 		has_serial_no = item_flags.get("has_serial_no")
@@ -475,11 +475,7 @@ def get_batch_serial_details(item_code, warehouse):
 			Batch = DocType("Batch")
 			batches = (
 				frappe.qb.from_(Batch)
-				.select(
-					Batch.name.as_("batch_no"),
-					Batch.batch_qty.as_("qty"),
-					Batch.expiry_date
-				)
+				.select(Batch.name.as_("batch_no"), Batch.batch_qty.as_("qty"), Batch.expiry_date)
 				.where(Batch.item == item_code)
 				.where(Batch.batch_qty > 0)
 				.orderby(Batch.expiry_date)
@@ -493,10 +489,7 @@ def get_batch_serial_details(item_code, warehouse):
 			SerialNo = DocType("Serial No")
 			serial_nos = (
 				frappe.qb.from_(SerialNo)
-				.select(
-					SerialNo.name.as_("serial_no"),
-					SerialNo.warehouse
-				)
+				.select(SerialNo.name.as_("serial_no"), SerialNo.warehouse)
 				.where(SerialNo.item_code == item_code)
 				.where(SerialNo.warehouse == warehouse)
 				.where(SerialNo.status == "Active")
@@ -544,9 +537,7 @@ def get_item_variants(template_item, pos_profile):
 		# the profile's POS Settings explicitly opts in.
 		if pos_profile_doc.company:
 			if _pos_settings_allow_global_items(pos_profile_doc.name):
-				query = query.where(
-					fn.Coalesce(Item.custom_company, "").isin([pos_profile_doc.company, ""])
-				)
+				query = query.where(fn.Coalesce(Item.custom_company, "").isin([pos_profile_doc.company, ""]))
 			else:
 				query = query.where(Item.custom_company == pos_profile_doc.company)
 
@@ -566,11 +557,7 @@ def get_item_variants(template_item, pos_profile):
 			UOMConversion = DocType("UOM Conversion Detail")
 			uoms = (
 				frappe.qb.from_(UOMConversion)
-				.select(
-					UOMConversion.parent,
-					UOMConversion.uom,
-					UOMConversion.conversion_factor
-				)
+				.select(UOMConversion.parent, UOMConversion.uom, UOMConversion.conversion_factor)
 				.where(UOMConversion.parent.isin(variant_codes))
 				.orderby(UOMConversion.parent)
 				.orderby(UOMConversion.idx)
@@ -589,11 +576,7 @@ def get_item_variants(template_item, pos_profile):
 			ItemPrice = DocType("Item Price")
 			prices = (
 				frappe.qb.from_(ItemPrice)
-				.select(
-					ItemPrice.item_code,
-					ItemPrice.uom,
-					ItemPrice.price_list_rate
-				)
+				.select(ItemPrice.item_code, ItemPrice.uom, ItemPrice.price_list_rate)
 				.where(ItemPrice.item_code.isin(variant_codes))
 				.where(ItemPrice.price_list == pos_profile_doc.selling_price_list)
 				.orderby(ItemPrice.item_code)
@@ -624,10 +607,7 @@ def get_item_variants(template_item, pos_profile):
 			Bin = DocType("Bin")
 			stocks = (
 				frappe.qb.from_(Bin)
-				.select(
-					Bin.item_code,
-					Bin.actual_qty
-				)
+				.select(Bin.item_code, Bin.actual_qty)
 				.where(Bin.item_code.isin(variant_codes))
 				.where(Bin.warehouse == pos_profile_doc.warehouse)
 				.run(as_dict=True)
@@ -764,11 +744,14 @@ def _pos_settings_allow_global_items(pos_profile_name):
 	if cached is not None:
 		return cached
 
-	value = frappe.db.get_value(
-		"POS Settings",
-		{"pos_profile": pos_profile_name, "enabled": 1},
-		"allow_global_items",
-	) or 0
+	value = (
+		frappe.db.get_value(
+			"POS Settings",
+			{"pos_profile": pos_profile_name, "enabled": 1},
+			"allow_global_items",
+		)
+		or 0
+	)
 	result = int(value)
 	frappe.cache().set_value(cache_key, result, expires_in_sec=300)
 	return result
@@ -784,11 +767,13 @@ def _get_pos_profile_allowed_item_groups(pos_profile_doc):
 	if cached is not None:
 		return cached
 
-	result = list(dict.fromkeys(
-		descendant_group
-		for profile_group_row in pos_profile_doc.get("item_groups", [])
-		for descendant_group in _get_item_group_with_descendants(profile_group_row.item_group)
-	))
+	result = list(
+		dict.fromkeys(
+			descendant_group
+			for profile_group_row in pos_profile_doc.get("item_groups", [])
+			for descendant_group in _get_item_group_with_descendants(profile_group_row.item_group)
+		)
+	)
 	frappe.cache().set_value(cache_key, result, expires_in_sec=300)
 	return result
 
@@ -869,7 +854,9 @@ def _build_item_base_conditions(
 			warehouses = frappe.db.get_descendants("Warehouse", warehouse) or [warehouse]
 
 		wh_placeholders = ", ".join(["%s"] * len(warehouses))
-		extra_joins = f"LEFT JOIN `tabBin` bin ON bin.item_code = i.name AND bin.warehouse IN ({wh_placeholders})"
+		extra_joins = (
+			f"LEFT JOIN `tabBin` bin ON bin.item_code = i.name AND bin.warehouse IN ({wh_placeholders})"
+		)
 		join_params.extend(warehouses)
 		conditions.append("(i.is_stock_item = 0 OR i.has_variants = 1 OR bin.actual_qty > 0)")
 
@@ -963,14 +950,15 @@ def _calculate_bundle_availability_bulk(bundle_codes, warehouse):
 	# ]
 	pb = DocType("Product Bundle")
 	pbi = DocType("Product Bundle Item")
-	
+
 	bundle_components = (
 		frappe.qb.from_(pb)
-		.inner_join(pbi).on(pbi.parent == pb.name)
+		.inner_join(pbi)
+		.on(pbi.parent == pb.name)
 		.select(
 			pb.new_item_code.as_("bundle_code"),
 			pbi.item_code.as_("component_code"),
-			pbi.qty.as_("required_qty")
+			pbi.qty.as_("required_qty"),
 		)
 		.where(pb.new_item_code.isin(bundle_codes))
 		.run(as_dict=True)
@@ -1020,13 +1008,10 @@ def _calculate_bundle_availability_bulk(bundle_codes, warehouse):
 	#   {"item_code": "KEYBOARD", "available_qty": 100.0}
 	# ]
 	bin = DocType("Bin")
-	
+
 	component_stock = (
 		frappe.qb.from_(bin)
-		.select(
-			bin.item_code,
-			fn.Coalesce(fn.Sum(bin.actual_qty - bin.reserved_qty), 0).as_("available_qty")
-		)
+		.select(bin.item_code, fn.Coalesce(fn.Sum(bin.actual_qty - bin.reserved_qty), 0).as_("available_qty"))
 		.where(bin.item_code.isin(component_codes))
 		.where(bin.warehouse.isin(warehouses))
 		.groupby(bin.item_code)
@@ -1077,11 +1062,11 @@ def _calculate_bundle_availability_bulk(bundle_codes, warehouse):
 def _get_bundle_warehouse_availability_bulk(bundle_codes, warehouses):
 	"""
 	Calculate Product Bundle availability across multiple warehouses efficiently.
-	
+
 	Args:
 		bundle_codes (list): List of bundle item codes
 		warehouses (list): List of warehouse dicts with 'name' key
-		
+
 	Returns:
 		dict: Nested mapping of bundle_code -> warehouse_name -> available_qty
 			  Example: {
@@ -1091,34 +1076,35 @@ def _get_bundle_warehouse_availability_bulk(bundle_codes, warehouses):
 	"""
 	if not bundle_codes or not warehouses:
 		return {}
-	
+
 	warehouse_names = [w["name"] if isinstance(w, dict) else w for w in warehouses]
-	
+
 	# ===========================================================================
 	# Fetch Bundle Component Definitions (once for all bundles)
 	# ===========================================================================
 	pb = DocType("Product Bundle")
 	pbi = DocType("Product Bundle Item")
-	
+
 	bundle_components = (
 		frappe.qb.from_(pb)
-		.inner_join(pbi).on(pbi.parent == pb.name)
+		.inner_join(pbi)
+		.on(pbi.parent == pb.name)
 		.select(
 			pb.new_item_code.as_("bundle_code"),
 			pbi.item_code.as_("component_code"),
-			pbi.qty.as_("required_qty")
+			pbi.qty.as_("required_qty"),
 		)
 		.where(pb.new_item_code.isin(bundle_codes))
 		.run(as_dict=True)
 	)
-	
+
 	if not bundle_components:
 		return {}
 
 	component_codes = list(set(c["component_code"] for c in bundle_components))
 	warehouse_resolution_map = {}
 	all_resolved_warehouses = set()
-	
+
 	for wh_name in warehouse_names:
 		resolved = [wh_name]
 		if frappe.db.get_value("Warehouse", wh_name, "is_group"):
@@ -1127,81 +1113,87 @@ def _get_bundle_warehouse_availability_bulk(bundle_codes, warehouses):
 				resolved = children
 		warehouse_resolution_map[wh_name] = resolved
 		all_resolved_warehouses.update(resolved)
-	
+
 	# ===========================================================================
 	# Fetch Component Stock Across All Warehouses (single bulk query)
 	# ===========================================================================
 	bin = DocType("Bin")
-	
+
 	component_stock_data = (
 		frappe.qb.from_(bin)
 		.select(
 			bin.item_code,
 			bin.warehouse,
-			fn.Coalesce(fn.Sum(bin.actual_qty - bin.reserved_qty), 0).as_("available_qty")
+			fn.Coalesce(fn.Sum(bin.actual_qty - bin.reserved_qty), 0).as_("available_qty"),
 		)
 		.where(bin.item_code.isin(component_codes))
 		.where(bin.warehouse.isin(list(all_resolved_warehouses)))
 		.groupby(bin.item_code, bin.warehouse)
 		.run(as_dict=True)
 	)
-	
+
 	# Build lookup: (item_code, warehouse) -> available_qty
 	# For group warehouses, sum stock from all child warehouses
 	component_stock_map = defaultdict(lambda: defaultdict(float))
 	for row in component_stock_data:
 		component_stock_map[row["item_code"]][row["warehouse"]] = flt(row["available_qty"])
-	
+
 	# ===========================================================================
 	# Calculate Bundle Availability Per Warehouse
 	# ===========================================================================
 	# For each bundle and each warehouse, calculate availability
 	# Availability = min(floor(component_available / component_required)) across all components
 	result = defaultdict(dict)
-	
+
 	# Group components by bundle (build once, reuse for all warehouses)
 	bundles_map = defaultdict(list)
 	for comp in bundle_components:
 		bundles_map[comp["bundle_code"]].append(comp)
-	
+
 	# Calculate availability for each bundle in each warehouse
 	for wh_name in warehouse_names:
 		resolved_whs = warehouse_resolution_map[wh_name]
-		
+
 		for bundle_code, components in bundles_map.items():
 			min_possible = None
-			
+
 			for comp in components:
 				component_code = comp["component_code"]
 				required_qty = flt(comp["required_qty"])
-				
+
 				if required_qty <= 0:
 					continue
-				
+
 				# Sum stock across all resolved warehouses (for group warehouse support)
-				total_available = sum(
-					component_stock_map[component_code].get(wh, 0)
-					for wh in resolved_whs
-				)
-				
+				total_available = sum(component_stock_map[component_code].get(wh, 0) for wh in resolved_whs)
+
 				# Calculate how many bundles this component can supply
 				possible = int(total_available / required_qty) if required_qty > 0 else 0
-				
+
 				# Track minimum (most constrained component)
 				if min_possible is None:
 					min_possible = possible
 				else:
 					min_possible = min(min_possible, possible)
-			
+
 			# Only include if bundle is available (min_possible > 0)
 			if min_possible is not None and min_possible > 0:
 				result[bundle_code][wh_name] = min_possible
-	
+
 	return dict(result)
 
 
 @frappe.whitelist()
-def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20, include_variants=0, show_variants_as_items=0, brand=None):
+def get_items(
+	pos_profile,
+	search_term=None,
+	item_group=None,
+	start=0,
+	limit=20,
+	include_variants=0,
+	show_variants_as_items=0,
+	brand=None,
+):
 	"""Get items for POS with stock, price, and tax details.
 
 	Filter behaviour:
@@ -1224,6 +1216,7 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20,
 		effective_search_term = search_term
 		if search_term and len(search_term.strip().split()) == 1:
 			from pos_next.services.barcode import resolve_barcode
+
 			resolved_barcode_data = resolve_barcode(search_term.strip(), pos_profile)
 			if resolved_barcode_data and resolved_barcode_data.get("item_barcode"):
 				# Use the extracted item barcode for searching
@@ -1243,17 +1236,19 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20,
 			exclude_templates = False
 		hide_unavailable = getattr(pos_profile_doc, "hide_unavailable_items", 0)
 		conditions, params, extra_joins = _build_item_base_conditions(
-			pos_profile_doc, item_group, brand, exclude_variants=exclude_variants,
+			pos_profile_doc,
+			item_group,
+			brand,
+			exclude_variants=exclude_variants,
 			exclude_templates=exclude_templates,
-			hide_unavailable=hide_unavailable, warehouse=pos_profile_doc.warehouse,
+			hide_unavailable=hide_unavailable,
+			warehouse=pos_profile_doc.warehouse,
 		)
 
 		# Build column list with table alias
 		item_columns = ",\n\t".join([f"i.{col}" for col in ITEM_RESULT_FIELDS])
 		# For GROUP BY, extract just the column name (before " as " if present)
-		group_by_columns = ", ".join([
-			f"i.{col.split(' as ')[0]}" for col in ITEM_RESULT_FIELDS
-		])
+		group_by_columns = ", ".join([f"i.{col.split(' as ')[0]}" for col in ITEM_RESULT_FIELDS])
 
 		# Add search conditions if search term provided
 		if effective_search_term and effective_search_term.strip():
@@ -1286,7 +1281,14 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20,
 					ELSE 100
 				END)
 			"""
-			score_params = [effective_search_term, prefix_pattern, effective_search_term, effective_search_term, prefix_pattern, prefix_pattern]
+			score_params = [
+				effective_search_term,
+				prefix_pattern,
+				effective_search_term,
+				effective_search_term,
+				prefix_pattern,
+				prefix_pattern,
+			]
 			order_by = f"{relevance} DESC, i.item_name ASC"
 		else:
 			# No search term - simple ordering
@@ -1338,11 +1340,7 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20,
 			ItemPrice = DocType("Item Price")
 			prices = (
 				frappe.qb.from_(ItemPrice)
-				.select(
-					ItemPrice.item_code,
-					ItemPrice.uom,
-					ItemPrice.price_list_rate
-				)
+				.select(ItemPrice.item_code, ItemPrice.uom, ItemPrice.price_list_rate)
 				.where(ItemPrice.item_code.isin(item_codes))
 				.where(ItemPrice.price_list == pos_profile_doc.selling_price_list)
 				.orderby(ItemPrice.item_code)
@@ -1360,10 +1358,7 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20,
 				Bin = DocType("Bin")
 				stocks = (
 					frappe.qb.from_(Bin)
-					.select(
-						Bin.item_code,
-						Bin.actual_qty
-					)
+					.select(Bin.item_code, Bin.actual_qty)
 					.where(Bin.item_code.isin(stock_items))
 					.where(Bin.warehouse == pos_profile_doc.warehouse)
 					.run(as_dict=True)
@@ -1391,8 +1386,7 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20,
 		if item_codes and pos_profile_doc.warehouse:
 			# Bulk calculate availability for all items (bundles auto-detected)
 			bundle_availability_map = _calculate_bundle_availability_bulk(
-				item_codes,
-				pos_profile_doc.warehouse
+				item_codes, pos_profile_doc.warehouse
 			)
 		elif item_codes and not pos_profile_doc.warehouse:
 			# Warning: Bundles require warehouse for component stock lookup
@@ -1401,7 +1395,7 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20,
 			if has_bundles:
 				frappe.log_error(
 					"POS Profile missing warehouse - Product Bundles will show as unavailable",
-					"Bundle Availability Warning"
+					"Bundle Availability Warning",
 				)
 
 		# Variant attributes (only when variants are included)
@@ -1442,7 +1436,8 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20,
 				Item = DocType("Item")
 				variant_prices = (
 					frappe.qb.from_(ItemPrice)
-					.inner_join(Item).on(Item.name == ItemPrice.item_code)
+					.inner_join(Item)
+					.on(Item.name == ItemPrice.item_code)
 					.select(fn.Min(ItemPrice.price_list_rate).as_("min_price"))
 					.where(Item.variant_of == item["item_code"])
 					.where(ItemPrice.price_list == pos_profile_doc.selling_price_list)
@@ -1547,6 +1542,7 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20,
 		# Apply resolved barcode data (weighted/priced) to the first matching item
 		if resolved_barcode_data and items:
 			from pos_next.services.barcode import compute_resolved_item_data
+
 			resolved_item_data = compute_resolved_item_data(
 				resolved_barcode_data,
 				item=items[0],
@@ -1559,10 +1555,7 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20,
 		# have no Bin rows. Bundles are non-stock items whose availability is computed
 		# from component stock. Filter them out here if they have 0 availability.
 		if hide_unavailable and bundle_availability_map:
-			items = [
-				item for item in items
-				if not item.get("is_bundle") or item.get("actual_qty", 0) > 0
-			]
+			items = [item for item in items if not item.get("is_bundle") or item.get("actual_qty", 0) > 0]
 
 		return items
 	except Exception as e:
@@ -1571,7 +1564,9 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20,
 
 
 @frappe.whitelist()
-def get_items_bulk(pos_profile, item_groups=None, start=0, limit=2000, include_variants=0, show_variants_as_items=0):
+def get_items_bulk(
+	pos_profile, item_groups=None, start=0, limit=2000, include_variants=0, show_variants_as_items=0
+):
 	"""
 	Fetch items from multiple item groups in a SINGLE query.
 	Eliminates N+1 problem where frontend was making one API call per group.
@@ -1600,9 +1595,11 @@ def get_items_bulk(pos_profile, item_groups=None, start=0, limit=2000, include_v
 			exclude_templates = False
 		hide_unavailable = getattr(pos_profile_doc, "hide_unavailable_items", 0)
 		conditions, params, extra_joins = _build_item_base_conditions(
-			pos_profile_doc, exclude_variants=exclude_variants,
+			pos_profile_doc,
+			exclude_variants=exclude_variants,
 			exclude_templates=exclude_templates,
-			hide_unavailable=hide_unavailable, warehouse=pos_profile_doc.warehouse,
+			hide_unavailable=hide_unavailable,
+			warehouse=pos_profile_doc.warehouse,
 		)
 
 		if item_groups:
@@ -1694,9 +1691,7 @@ def get_items_bulk(pos_profile, item_groups=None, start=0, limit=2000, include_v
 		# Bundle availability
 		bundle_availability_map = {}
 		if item_codes and warehouse:
-			bundle_availability_map = _calculate_bundle_availability_bulk(
-				item_codes, warehouse
-			)
+			bundle_availability_map = _calculate_bundle_availability_bulk(item_codes, warehouse)
 
 		# Variant attributes (only when variants are included)
 		attributes_map = {}
@@ -1748,10 +1743,7 @@ def get_items_bulk(pos_profile, item_groups=None, start=0, limit=2000, include_v
 
 		# Post-filter: hide unavailable bundles
 		if hide_unavailable and bundle_availability_map:
-			items = [
-				item for item in items
-				if not item.get("is_bundle") or item.get("actual_qty", 0) > 0
-			]
+			items = [item for item in items if not item.get("is_bundle") or item.get("actual_qty", 0) > 0]
 
 		return items
 	except Exception as e:
@@ -1787,9 +1779,13 @@ def get_items_count(pos_profile, item_group=None, brand=None, include_variants=0
 			exclude_templates = False
 		hide_unavailable = getattr(pos_profile_doc, "hide_unavailable_items", 0)
 		conditions, params, extra_joins = _build_item_base_conditions(
-			pos_profile_doc, item_group, brand, exclude_variants=exclude_variants,
+			pos_profile_doc,
+			item_group,
+			brand,
+			exclude_variants=exclude_variants,
 			exclude_templates=exclude_templates,
-			hide_unavailable=hide_unavailable, warehouse=pos_profile_doc.warehouse,
+			hide_unavailable=hide_unavailable,
+			warehouse=pos_profile_doc.warehouse,
 		)
 
 		where_clause = " AND ".join(conditions)
@@ -1892,11 +1888,13 @@ def get_item_groups(pos_profile):
 		result = []
 		for group_name in configured_groups:
 			descendants = _get_item_group_with_descendants(group_name)
-			result.append({
-				"item_group": group_name,
-				"is_group": len(descendants) > 1,
-				"child_groups": descendants[1:] if len(descendants) > 1 else [],
-			})
+			result.append(
+				{
+					"item_group": group_name,
+					"is_group": len(descendants) > 1,
+					"child_groups": descendants[1:] if len(descendants) > 1 else [],
+				}
+			)
 
 		frappe.cache().set_value(cache_key, result, expires_in_sec=300)
 		return result
@@ -1925,10 +1923,7 @@ def get_brands(pos_profile):
 			# will also see an empty list and skip brand conditions).
 			Brand = DocType("Brand")
 			result = (
-				frappe.qb.from_(Brand)
-				.select(Brand.name.as_("brand"))
-				.orderby(Brand.name)
-				.run(as_dict=True)
+				frappe.qb.from_(Brand).select(Brand.name.as_("brand")).orderby(Brand.name).run(as_dict=True)
 			)
 		else:
 			result = [{"brand": brand_name} for brand_name in configured_brands]
@@ -1998,7 +1993,7 @@ def get_stock_quantities(item_codes, warehouse):
 			.select(
 				Bin.item_code,
 				fn.Coalesce(fn.Sum(Bin.actual_qty), 0).as_("actual_qty"),
-				fn.Coalesce(fn.Sum(Bin.reserved_qty), 0).as_("reserved_qty")
+				fn.Coalesce(fn.Sum(Bin.reserved_qty), 0).as_("reserved_qty"),
 			)
 			.where(Bin.item_code.isin(normalized_codes))
 			.where(Bin.warehouse.isin(warehouses))
@@ -2048,6 +2043,7 @@ def get_stock_quantities(item_codes, warehouse):
 # WAREHOUSE AVAILABILITY HELPERS
 # =============================================================================
 
+
 def _get_warehouse_display_name(warehouse_id, warehouse_map, fallback_company=None):
 	"""
 	Get display name for a warehouse with fallback logic.
@@ -2069,7 +2065,9 @@ def _get_warehouse_display_name(warehouse_id, warehouse_map, fallback_company=No
 	return warehouse_id, fallback_company or ""
 
 
-def _build_stock_entry(warehouse_id, actual_qty, reserved_qty, warehouse_map, item_code=None, fallback_company=None):
+def _build_stock_entry(
+	warehouse_id, actual_qty, reserved_qty, warehouse_map, item_code=None, fallback_company=None
+):
 	"""
 	Build a standardized stock entry dict with warehouse details.
 
@@ -2084,7 +2082,7 @@ def _build_stock_entry(warehouse_id, actual_qty, reserved_qty, warehouse_map, it
 		"actual_qty": flt(actual_qty),
 		"reserved_qty": flt(reserved_qty),
 		"available_qty": flt(actual_qty) - flt(reserved_qty),
-		"company": wh_company
+		"company": wh_company,
 	}
 	if item_code:
 		entry["item_code"] = item_code
@@ -2107,6 +2105,7 @@ def _parse_item_codes_param(item_codes):
 # =============================================================================
 # WAREHOUSE AVAILABILITY API
 # =============================================================================
+
 
 @frappe.whitelist()
 def get_item_warehouse_availability(item_code=None, item_codes=None, company=None):
@@ -2165,9 +2164,10 @@ def get_item_warehouse_availability(item_code=None, item_codes=None, company=Non
 			wh_filters["company"] = company
 
 		warehouses = frappe.get_list(
-			"Warehouse", filters=wh_filters,
+			"Warehouse",
+			filters=wh_filters,
 			fields=["name", "warehouse_name", "company"],
-			order_by="warehouse_name"
+			order_by="warehouse_name",
 		)
 		if not warehouses:
 			return []
@@ -2178,11 +2178,12 @@ def get_item_warehouse_availability(item_code=None, item_codes=None, company=Non
 		# ---------------------------------------------------------------------
 		# STEP 3: Separate Product Bundles from regular stock items
 		# ---------------------------------------------------------------------
-		bundle_set = set(frappe.get_all(
-			"Product Bundle",
-			filters={"new_item_code": ["in", items_to_check]},
-			pluck="new_item_code"
-		) or [])
+		bundle_set = set(
+			frappe.get_all(
+				"Product Bundle", filters={"new_item_code": ["in", items_to_check]}, pluck="new_item_code"
+			)
+			or []
+		)
 		regular_items = [i for i in items_to_check if i not in bundle_set]
 
 		result = []
@@ -2197,7 +2198,7 @@ def get_item_warehouse_availability(item_code=None, item_codes=None, company=Non
 				.select(
 					bin_tbl.warehouse,
 					fn.Sum(bin_tbl.actual_qty).as_("actual_qty"),
-					fn.Sum(bin_tbl.reserved_qty).as_("reserved_qty")
+					fn.Sum(bin_tbl.reserved_qty).as_("reserved_qty"),
 				)
 				.where(bin_tbl.item_code.isin(regular_items))
 				.where(bin_tbl.warehouse.isin(warehouse_names))
@@ -2211,10 +2212,16 @@ def get_item_warehouse_availability(item_code=None, item_codes=None, company=Non
 				query = query.groupby(bin_tbl.warehouse)
 
 			for stock in query.run(as_dict=True):
-				result.append(_build_stock_entry(
-					stock.warehouse, stock.actual_qty, stock.reserved_qty,
-					warehouse_map, stock.get("item_code") if include_item_code else None, company
-				))
+				result.append(
+					_build_stock_entry(
+						stock.warehouse,
+						stock.actual_qty,
+						stock.reserved_qty,
+						warehouse_map,
+						stock.get("item_code") if include_item_code else None,
+						company,
+					)
+				)
 
 		# ---------------------------------------------------------------------
 		# STEP 5: Calculate availability for Product Bundles
@@ -2227,10 +2234,16 @@ def get_item_warehouse_availability(item_code=None, item_codes=None, company=Non
 			for bundle_code, wh_qtys in bundle_availability.items():
 				for wh_name, qty in wh_qtys.items():
 					if qty > 0:
-						result.append(_build_stock_entry(
-							wh_name, qty, 0, warehouse_map,
-							bundle_code if include_item_code else None, company
-						))
+						result.append(
+							_build_stock_entry(
+								wh_name,
+								qty,
+								0,
+								warehouse_map,
+								bundle_code if include_item_code else None,
+								company,
+							)
+						)
 
 		return result
 
@@ -2267,7 +2280,8 @@ def get_product_bundle_availability(item_code, warehouse):
 		available_qty = bundle_availability.get(item_code, 0)
 
 		# Get detailed component information with item names (single query with JOIN)
-		components = frappe.db.sql("""
+		components = frappe.db.sql(
+			"""
 			SELECT
 				pbi.item_code,
 				i.item_name,
@@ -2277,7 +2291,10 @@ def get_product_bundle_availability(item_code, warehouse):
 			INNER JOIN `tabItem` i ON i.name = pbi.item_code
 			WHERE pbi.parent = %(bundle)s
 			ORDER BY pbi.idx
-		""", {"bundle": item_code}, as_dict=1)
+		""",
+			{"bundle": item_code},
+			as_dict=1,
+		)
 
 		if not components:
 			return {"available_qty": 0, "components": []}
@@ -2289,14 +2306,18 @@ def get_product_bundle_availability(item_code, warehouse):
 
 		# Get component stock (use available = actual - reserved)
 		component_codes = [c["item_code"] for c in components]
-		stock_data = frappe.db.sql("""
+		stock_data = frappe.db.sql(
+			"""
 			SELECT
 				item_code,
 				COALESCE(SUM(actual_qty - reserved_qty), 0) as available_qty
 			FROM `tabBin`
 			WHERE item_code IN %(items)s AND warehouse IN %(warehouses)s
 			GROUP BY item_code
-		""", {"items": component_codes, "warehouses": warehouses}, as_dict=1)
+		""",
+			{"items": component_codes, "warehouses": warehouses},
+			as_dict=1,
+		)
 
 		component_stock_map = {row["item_code"]: flt(row["available_qty"]) for row in stock_data}
 
@@ -2307,26 +2328,22 @@ def get_product_bundle_availability(item_code, warehouse):
 			required = flt(comp["required_qty"])
 			possible = int(available / required) if required > 0 else 0
 
-			component_details.append({
-				"item_code": comp["item_code"],
-				"item_name": comp["item_name"],
-				"required_qty": required,
-				"available_qty": available,
-				"possible_bundles": possible,
-				"uom": comp["uom"],
-				"is_limiting": (possible == available_qty)  # Mark limiting component
-			})
+			component_details.append(
+				{
+					"item_code": comp["item_code"],
+					"item_name": comp["item_name"],
+					"required_qty": required,
+					"available_qty": available,
+					"possible_bundles": possible,
+					"uom": comp["uom"],
+					"is_limiting": (possible == available_qty),  # Mark limiting component
+				}
+			)
 
-		return {
-			"available_qty": available_qty,
-			"components": component_details
-		}
+		return {"available_qty": available_qty, "components": component_details}
 
 	except Exception as e:
-		frappe.log_error(
-			frappe.get_traceback(),
-			f"Bundle Availability Error: {item_code} in {warehouse}"
-		)
+		frappe.log_error(frappe.get_traceback(), f"Bundle Availability Error: {item_code} in {warehouse}")
 		frappe.throw(_("Error fetching bundle availability for {0}: {1}").format(item_code, str(e)))
 
 
@@ -2396,19 +2413,24 @@ def get_batch_serial_data_for_items(item_codes, warehouse):
 					for batch in batch_list:
 						if batch.qty > 0 and batch.batch_no:
 							batch_doc = frappe.get_cached_doc("Batch", batch.batch_no)
-							is_not_expired = (
-								str(batch_doc.expiry_date) > str(today)
-								or batch_doc.expiry_date in ["", None]
-							)
+							is_not_expired = str(batch_doc.expiry_date) > str(
+								today
+							) or batch_doc.expiry_date in ["", None]
 							is_enabled = batch_doc.disabled == 0
 
 							if is_not_expired and is_enabled:
-								result[item_code]["batch_no_data"].append({
-									"batch_no": batch.batch_no,
-									"batch_qty": batch.qty,
-									"expiry_date": str(batch_doc.expiry_date) if batch_doc.expiry_date else None,
-									"manufacturing_date": str(batch_doc.manufacturing_date) if batch_doc.manufacturing_date else None,
-								})
+								result[item_code]["batch_no_data"].append(
+									{
+										"batch_no": batch.batch_no,
+										"batch_qty": batch.qty,
+										"expiry_date": str(batch_doc.expiry_date)
+										if batch_doc.expiry_date
+										else None,
+										"manufacturing_date": str(batch_doc.manufacturing_date)
+										if batch_doc.manufacturing_date
+										else None,
+									}
+								)
 
 		# Fetch serial data for serial-tracked items in bulk
 		if serial_items:
@@ -2424,10 +2446,12 @@ def get_batch_serial_data_for_items(item_codes, warehouse):
 
 			# Group by item_code
 			for serial in serials:
-				result[serial["item_code"]]["serial_no_data"].append({
-					"serial_no": serial["serial_no"],
-					"warehouse": serial["warehouse"],
-				})
+				result[serial["item_code"]]["serial_no_data"].append(
+					{
+						"serial_no": serial["serial_no"],
+						"warehouse": serial["warehouse"],
+					}
+				)
 
 		return result
 
