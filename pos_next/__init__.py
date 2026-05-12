@@ -26,6 +26,16 @@ try:
 except Exception:
     pass
 
+# Frappe/ERPNext compatibility shim:
+# ERPNext may pass do_not_round_fields to round_floats_in, but older Frappe
+# versions don't accept that kwarg.
+try:
+    from frappe.model.document import Document
+    from pos_next.overrides.frappe_compat import patch_round_floats_in_signature
+    patch_round_floats_in_signature(Document)
+except Exception:
+    pass
+
 # Patch packed item keying to avoid duplicate Product Bundle rows in Packed Items
 # during repeated save/submit cycles in POS flows.
 try:

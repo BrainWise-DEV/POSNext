@@ -499,8 +499,11 @@
 			:discount-amount="cartStore.totalDiscount"
 			:target-doctype="cartStore.targetDoctype"
 			:is-submitting="cartStore.isSubmitting"
+			:applied-offer-count="cartStore.appliedOffers.length"
 			@payment-completed="handlePaymentCompleted"
 			@update-additional-discount="handleAdditionalDiscountUpdate"
+			@show-offers="uiStore.showOffersDialog = true"
+			@show-coupon="uiStore.showCouponDialog = true"
 		/>
 
 			<!-- Customer Selection Dialog -->
