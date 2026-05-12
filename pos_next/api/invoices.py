@@ -276,6 +276,18 @@ def _pricing_rule_to_string(value):
     return ""
 
 
+def _strip_server_managed_fields(payload):
+    """Remove fields that are derived server-side and should not be replayed."""
+    if not isinstance(payload, dict):
+        return payload
+
+    cleaned = dict(payload)
+    # Packed Items are regenerated from Product Bundle definitions during save.
+    # Accepting client-side packed rows can reintroduce duplicates on re-save.
+    cleaned.pop("packed_items", None)
+    return cleaned
+
+
 def get_payment_account(mode_of_payment, company):
     """
     Get account for mode of payment.
@@ -670,6 +682,7 @@ def update_invoice(data):
     """Create or update invoice draft (Step 1)."""
     try:
         data = json.loads(data) if isinstance(data, str) else data
+        data = _strip_server_managed_fields(data)
 
         pos_profile = data.get("pos_profile")
         doctype = data.get("doctype", "Sales Invoice")
@@ -686,6 +699,11 @@ def update_invoice(data):
             invoice_doc.update(data)
         else:
             invoice_doc = frappe.get_doc(data)
+
+        # Important: set before set_missing_values()/pricing/validation paths that may
+        # read linked docs (e.g., Customer) and trigger controller permission checks.
+        invoice_doc.flags.ignore_permissions = True
+        frappe.flags.ignore_account_permission = True
 
         pos_profile_doc = None
         if pos_profile:
@@ -1224,6 +1242,8 @@ def submit_invoice(invoice=None, data=None):
     if not isinstance(data, dict):
         data = {}
 
+    invoice = _strip_server_managed_fields(invoice)
+
     pos_profile = invoice.get("pos_profile")
     doctype = invoice.get("doctype", "Sales Invoice")
 
@@ -1273,6 +1293,10 @@ def submit_invoice(invoice=None, data=None):
         else:
             invoice_doc = frappe.get_doc(doctype, invoice_name)
             invoice_doc.update(invoice)
+
+        # Keep permission bypass consistent for POS API flow.
+        invoice_doc.flags.ignore_permissions = True
+        frappe.flags.ignore_account_permission = True
 
         # Ensure update_stock is set for Sales Invoice
         if doctype == "Sales Invoice":
