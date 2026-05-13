@@ -40,17 +40,16 @@ def item_query(doctype, txt, searchfield, start, page_len, filters):
 	company = filters.get("company") if filters else None
 
 	if company:
-		# Show only items for the selected company
-		conditions.append("custom_company = %s")
+		conditions.append("(custom_company = %s OR custom_company IS NULL OR custom_company = '')")
 		values.append(company)
 	else:
 		user_companies = get_user_companies()
 		if user_companies:
 			placeholders = ", ".join(["%s"] * len(user_companies))
-			conditions.append(f"custom_company IN ({placeholders})")
+			conditions.append(
+				f"(custom_company IN ({placeholders}) OR custom_company IS NULL OR custom_company = '')"
+			)
 			values.extend(user_companies)
-		else:
-			conditions.append("1 = 0")
 
 	query = f"""
 		SELECT name, item_name, item_group

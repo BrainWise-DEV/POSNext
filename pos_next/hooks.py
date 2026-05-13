@@ -137,29 +137,6 @@ before_uninstall = "pos_next.uninstall.before_uninstall"
 # notification_config = "pos_next.notifications.get_notification_config"
 
 # Permissions
-# -----------
-# Permissions evaluated in scripted ways
-
-permission_query_conditions = {
-	"Customer": "pos_next.company_isolation.customer_permission_query_conditions",
-	"Supplier": "pos_next.company_isolation.supplier_permission_query_conditions",
-	"Item Group": "pos_next.company_isolation.item_group_permission_query_conditions",
-	"Customer Group": "pos_next.company_isolation.customer_group_permission_query_conditions",
-	"Supplier Group": "pos_next.company_isolation.supplier_group_permission_query_conditions",
-	"Brand": "pos_next.company_isolation.brand_permission_query_conditions",
-	"Price List": "pos_next.company_isolation.price_list_permission_query_conditions",
-}
-
-has_permission = {
-	"Customer": "pos_next.company_isolation.customer_has_permission",
-	"Supplier": "pos_next.company_isolation.supplier_has_permission",
-	"Item Group": "pos_next.company_isolation.item_group_has_permission",
-	"Customer Group": "pos_next.company_isolation.customer_group_has_permission",
-	"Supplier Group": "pos_next.company_isolation.supplier_group_has_permission",
-	"Brand": "pos_next.company_isolation.brand_has_permission",
-	"Price List": "pos_next.company_isolation.price_list_has_permission",
-}
-
 # Standard Queries
 # ----------------
 # Custom query for company-aware item filtering
