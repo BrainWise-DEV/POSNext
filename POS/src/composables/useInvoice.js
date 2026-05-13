@@ -739,11 +739,15 @@ export function useInvoice() {
 	 * Format cart items for server submission.
 	 * Used by both online and offline flows for consistent formatting.
 	 *
+	 * Legacy carts could mark same-item BOGO only via `free_qty` on the paid line.
+	 * Sales Invoice Item has no `free_qty` field — ERPNext expects a second row with
+	 * is_free_item=1. When there is no matching dedicated free row, synthesize one.
+	 *
 	 * @param {Array} items - Raw cart items
 	 * @returns {Array} Items formatted for ERPNext Sales Invoice
 	 */
 	function formatItemsForSubmission(items) {
-		return items.map((item) => ({
+		const mapRow = (item) => ({
 			item_code: item.item_code,
 			item_name: item.item_name,
 			qty: item.quantity || item.qty || 1,
@@ -753,6 +757,7 @@ export function useInvoice() {
 			warehouse: item.warehouse,
 			batch_no: item.batch_no,
 			serial_no: item.serial_no,
+			use_serial_batch_fields: item.batch_no || item.serial_no ? 1 : 0,
 			conversion_factor: item.conversion_factor || 1,
 			discount_percentage: roundCurrency(item.discount_percentage || 0),
 			discount_amount: roundCurrency(item.discount_amount || 0),
@@ -761,7 +766,44 @@ export function useInvoice() {
 			is_rate_manually_edited: item.is_rate_manually_edited || 0,
 			original_rate: item.original_rate || null,
 			is_free_item: item.is_free_item || 0,
-		}))
+		})
+
+		const out = []
+		for (const item of items) {
+			out.push(mapRow(item))
+			const fq = Number.parseFloat(item.free_qty) || 0
+			if (!item.is_free_item && fq > 0) {
+				const u = item.uom || item.stock_uom
+				const hasDedicatedFree = items.some(
+					(i) =>
+						i.is_free_item &&
+						i.item_code === item.item_code &&
+						(i.uom || i.stock_uom) === u,
+				)
+				if (!hasDedicatedFree) {
+					out.push({
+						item_code: item.item_code,
+						item_name: item.item_name,
+						qty: fq,
+						rate: 0,
+						price_list_rate: 0,
+						uom: item.uom,
+						warehouse: item.warehouse,
+						batch_no: item.batch_no,
+						serial_no: item.serial_no,
+						use_serial_batch_fields: item.batch_no || item.serial_no ? 1 : 0,
+						conversion_factor: item.conversion_factor || 1,
+						discount_percentage: 0,
+						discount_amount: 0,
+						pricing_rules: stringifyPricingRules(item.pricing_rules),
+						is_rate_manually_edited: 0,
+						original_rate: null,
+						is_free_item: 1,
+					})
+				}
+			}
+		}
+		return out
 	}
 
 	function addPayment(payment) {
