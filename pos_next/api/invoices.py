@@ -40,9 +40,13 @@ try:
     from erpnext.accounts.doctype.pricing_rule.utils import (
         get_applied_pricing_rules as erpnext_get_applied_pricing_rules,
     )
+    from erpnext.accounts.doctype.pricing_rule.utils import (
+        apply_pricing_rule_on_transaction as erpnext_apply_pricing_rule_on_transaction,
+    )
 except Exception:  # pragma: no cover - ERPNext not installed in some environments
     erpnext_apply_pricing_rule = None
     erpnext_get_applied_pricing_rules = None
+    erpnext_apply_pricing_rule_on_transaction = None
 
 
 # ==========================================
@@ -2677,6 +2681,114 @@ def search_invoices_for_return(
 # ==========================================
 
 
+def _evaluate_transaction_offers(
+    invoice,
+    profile,
+    pricing_items,
+    customer,
+    customer_group,
+    territory,
+    posting_date,
+    currency,
+    price_list,
+    rule_map,
+    selected_offer_names,
+):
+    """Run ERPNext's transaction-level pricing engine and collect free items.
+
+    ERPNext routes `apply_on = "Transaction"` rules through a different entry
+    point (`apply_pricing_rule_on_transaction`) than the per-item engine. That
+    function mutates a real Sales Invoice document in place — appending free
+    item rows via `doc.append("items", ...)` — so we build a transient,
+    never-saved Sales Invoice document for evaluation only.
+
+    Returns {"free_items": dict keyed by (item_code, rule_name), "applied_rules": set}.
+    """
+    if not erpnext_apply_pricing_rule_on_transaction or not pricing_items:
+        return {"free_items": {}, "applied_rules": set()}
+
+    total_qty = sum(flt(it.qty) for it in pricing_items)
+    total = sum(flt(it.qty) * flt(it.rate) for it in pricing_items)
+    if total <= 0:
+        return {"free_items": {}, "applied_rules": set()}
+
+    doc = frappe.new_doc("Sales Invoice")
+    doc.update(
+        {
+            "is_pos": 1,
+            "company": profile.company,
+            "currency": currency,
+            "conversion_rate": 1,
+            "selling_price_list": price_list,
+            "price_list_currency": currency,
+            "plc_conversion_rate": 1,
+            "customer": customer,
+            "customer_group": customer_group,
+            "territory": territory,
+            "transaction_date": posting_date,
+            "posting_date": posting_date,
+            "pos_profile": invoice.get("pos_profile"),
+            "coupon_code": invoice.get("coupon_code") or None,
+        }
+    )
+    doc.flags.ignore_mandatory = True
+
+    for prep in pricing_items:
+        doc.append(
+            "items",
+            {
+                "item_code": prep.item_code,
+                "item_name": prep.item_name,
+                "item_group": prep.item_group,
+                "brand": prep.brand,
+                "qty": prep.qty,
+                "stock_qty": prep.stock_qty,
+                "conversion_factor": prep.conversion_factor,
+                "uom": prep.uom,
+                "stock_uom": prep.stock_uom,
+                "rate": prep.rate,
+                "price_list_rate": prep.price_list_rate,
+                "base_rate": prep.base_rate,
+                "base_price_list_rate": prep.base_price_list_rate,
+                "amount": flt(prep.rate) * flt(prep.qty),
+                "warehouse": prep.warehouse,
+            },
+        )
+
+    # filter_pricing_rules_for_qty_amount reads these straight off the doc
+    # (erpnext/accounts/doctype/pricing_rule/utils.py:572).
+    doc.total_qty = total_qty
+    doc.total = total
+
+    initial_item_count = len(doc.items)
+    try:
+        erpnext_apply_pricing_rule_on_transaction(doc)
+    except Exception:
+        # A misconfigured transaction-scoped rule must not break the per-item
+        # discounts that have already been computed by the caller.
+        frappe.log_error(
+            frappe.get_traceback(), "POS Apply Offers (Transaction Rules)"
+        )
+        return {"free_items": {}, "applied_rules": set()}
+
+    free_items = {}
+    applied_rules = set()
+    for row in doc.items[initial_item_count:]:
+        if not getattr(row, "is_free_item", 0):
+            continue
+        rule_name = row.get("pricing_rules")
+        if not rule_name or rule_name not in rule_map:
+            continue
+        if selected_offer_names and rule_name not in selected_offer_names:
+            continue
+        fid = frappe._dict(row.as_dict())
+        fid.applied_promotional_scheme = rule_map[rule_name].promotional_scheme
+        free_items[(row.item_code, rule_name)] = fid
+        applied_rules.add(rule_name)
+
+    return {"free_items": free_items, "applied_rules": applied_rules}
+
+
 @frappe.whitelist()
 def apply_offers(invoice_data, selected_offers=None):
     """Calculate and apply promotional offers using ERPNext Pricing Rules.
@@ -2917,6 +3029,32 @@ def apply_offers(invoice_data, selected_offers=None):
                 # Include both promotional scheme rules and standalone pricing rules
                 rule_map[record.name] = record
 
+        # Top up rule_map with transaction-scoped rules. The per-item engine
+        # never surfaces apply_on="Transaction" rules, so without this they
+        # would be dropped at the `if not rule_map: return` check below.
+        # ERPNext's own SQL inside apply_pricing_rule_on_transaction handles
+        # date/currency/pos_only filtering, so a broad superset is sufficient.
+        if erpnext_apply_pricing_rule_on_transaction:
+            txn_rule_records = frappe.get_all(
+                "Pricing Rule",
+                filters={
+                    "disable": 0,
+                    "apply_on": "Transaction",
+                    "company": profile.company,
+                    "selling": 1,
+                    "coupon_code_based": 0,
+                },
+                fields=[
+                    "name",
+                    "promotional_scheme",
+                    "coupon_code_based",
+                    "promotional_scheme_id",
+                    "price_or_product_discount",
+                ],
+            )
+            for record in txn_rule_records:
+                rule_map.setdefault(record.name, record)
+
         if selected_offer_names:
             # Restrict available rules to the ones explicitly selected from the UI.
             rule_map = {
@@ -3051,6 +3189,29 @@ def apply_offers(invoice_data, selected_offers=None):
                     rule_name
                 ].promotional_scheme
                 free_items_map[(free_item.get("item_code"), rule_name)] = free_item_doc
+
+        # Evaluate apply_on="Transaction" rules through ERPNext's separate
+        # transaction-level engine. The per-item engine above does not see
+        # them, so without this step "Entire Transaction" promotional schemes
+        # (free product based on cart total) would never apply.
+        txn_result = _evaluate_transaction_offers(
+            invoice,
+            profile,
+            pricing_items,
+            customer,
+            customer_group,
+            territory,
+            invoice.get("posting_date") or nowdate(),
+            pricing_args.currency,
+            pricing_args.price_list,
+            rule_map,
+            selected_offer_names,
+        )
+        # Per-item results win on collisions because they already carry full
+        # discount metadata from the per-item engine result.
+        for key, free_item_doc in txn_result.get("free_items", {}).items():
+            free_items_map.setdefault(key, free_item_doc)
+        applied_rules.update(txn_result.get("applied_rules", set()))
 
         return {
             "items": [dict(item) for item in prepared_items],
