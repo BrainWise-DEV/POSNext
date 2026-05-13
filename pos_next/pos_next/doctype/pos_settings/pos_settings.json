@@ -69,6 +69,7 @@
   "section_break_misc",
   "input_qty",
   "allow_negative_stock",
+  "allow_global_items",
   "section_break_security",
   "enable_session_lock",
   "session_lock_timeout",
@@ -514,6 +515,13 @@
    "fieldname": "allow_negative_stock",
    "fieldtype": "Check",
    "label": "Allow Negative Stock"
+  },
+  {
+   "default": "0",
+   "description": "When enabled, items with no Company set are visible in this POS (treated as shared/global SKUs). Leave off for strict per-company isolation on multi-company sites.",
+   "fieldname": "allow_global_items",
+   "fieldtype": "Check",
+   "label": "Include Global Items (no Company)"
   },
   {
    "collapsible": 1,

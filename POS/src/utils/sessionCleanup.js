@@ -1,4 +1,5 @@
 import { clearAllDrafts } from "@/utils/draftManager"
+import { clearAllOfflineReceiptPayloads } from "@/utils/offline/offlineReceiptCache"
 import { usePOSCartStore } from "@/stores/posCart"
 import { usePOSUIStore } from "@/stores/posUI"
 import { useSessionLock } from "@/composables/useSessionLock"
@@ -30,6 +31,10 @@ export async function cleanupUserSession() {
 	for (const key of USER_KEYS) {
 		localStorage.removeItem(key)
 	}
+
+	// Clear cashier-specific sessionStorage (offline receipt cache) so the next
+	// user on the same tab can't read the previous user's receipts.
+	clearAllOfflineReceiptPayloads()
 
 	// 2. Clear Pinia stores
 	const cartStore = usePOSCartStore()

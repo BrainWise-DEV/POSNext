@@ -87,42 +87,10 @@ _asset_version = get_build_version()
 # Fixtures
 # --------
 fixtures = [
-	{
-		"dt": "Custom Field",
-		"filters": [
-			[
-				"name",
-				"in",
-				[
-					"Sales Invoice-posa_pos_opening_shift",
-					"Sales Invoice-posa_is_printed",
-					"Item-custom_company",
-					"POS Profile-posa_cash_mode_of_payment",
-					"POS Profile-posa_allow_delete",
-					"POS Profile-posa_block_sale_beyond_available_qty",
-					"Mode of Payment-is_wallet_payment",
-					"Promotional Scheme-pos_only",
-					"Pricing Rule-pos_only"
-				]
-			]
-		]
-	},
-	{
-		"dt": "Print Format",
-		"filters": [
-			[
-				"name",
-				"in",
-				[
-					"POS Next Receipt"
-				]
-			]
-		]
-	},
     {
         "dt": "Role",
         "filters": [
-            ["role_name", "in", ["POSNext Cashier"]]
+            ["role_name", "in", ["POSNext Cashier","Nexus POS Manager"]]
         ]
     },
     {
@@ -172,13 +140,25 @@ before_uninstall = "pos_next.uninstall.before_uninstall"
 # -----------
 # Permissions evaluated in scripted ways
 
-# permission_query_conditions = {
-# 	"Event": "frappe.desk.doctype.event.event.get_permission_query_conditions",
-# }
-#
-# has_permission = {
-# 	"Event": "frappe.desk.doctype.event.event.has_permission",
-# }
+permission_query_conditions = {
+	"Customer": "pos_next.company_isolation.customer_permission_query_conditions",
+	"Supplier": "pos_next.company_isolation.supplier_permission_query_conditions",
+	"Item Group": "pos_next.company_isolation.item_group_permission_query_conditions",
+	"Customer Group": "pos_next.company_isolation.customer_group_permission_query_conditions",
+	"Supplier Group": "pos_next.company_isolation.supplier_group_permission_query_conditions",
+	"Brand": "pos_next.company_isolation.brand_permission_query_conditions",
+	"Price List": "pos_next.company_isolation.price_list_permission_query_conditions",
+}
+
+has_permission = {
+	"Customer": "pos_next.company_isolation.customer_has_permission",
+	"Supplier": "pos_next.company_isolation.supplier_has_permission",
+	"Item Group": "pos_next.company_isolation.item_group_has_permission",
+	"Customer Group": "pos_next.company_isolation.customer_group_has_permission",
+	"Supplier Group": "pos_next.company_isolation.supplier_group_has_permission",
+	"Brand": "pos_next.company_isolation.brand_has_permission",
+	"Price List": "pos_next.company_isolation.price_list_has_permission",
+}
 
 # Standard Queries
 # ----------------
@@ -206,7 +186,8 @@ doc_events = {
 	"Customer": {
 		"after_insert": [
 			"pos_next.api.customers.auto_assign_loyalty_program",
-			"pos_next.realtime_events.emit_customer_event"
+			"pos_next.realtime_events.emit_customer_event",
+			"pos_next.api.wallet.create_wallet_on_customer_insert"
 		],
 		"on_update": "pos_next.realtime_events.emit_customer_event",
 		"on_trash": "pos_next.realtime_events.emit_customer_event"
@@ -226,6 +207,9 @@ doc_events = {
 	},
 	"POS Profile": {
 		"on_update": "pos_next.realtime_events.emit_pos_profile_updated_event"
+	},
+	"POS Settings": {
+		"on_update": "pos_next.api.items.invalidate_pos_settings_cache"
 	},
 	"Promotional Scheme": {
 		"on_update": "pos_next.overrides.pricing_rule.sync_pos_only_to_pricing_rules"

@@ -1,0 +1,21 @@
+{
+ "custom_fields": [
+  {
+   "dt": "Price List",
+   "fieldname": "custom_company",
+   "fieldtype": "Link",
+   "insert_after": "currency",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "module": "POS Next",
+   "name": "Price List-custom_company",
+   "options": "Company",
+   "reqd": 1
+  }
+ ],
+ "custom_perms": [],
+ "doctype": "Price List",
+ "links": [],
+ "property_setters": [],
+ "sync_on_migrate": 1
+}

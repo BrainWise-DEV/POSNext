@@ -28,7 +28,7 @@ def emit_stock_update_event(doc, method=None):
 		return
 
 	# Skip if not a POS invoice (check if field exists first)
-	if hasattr(doc, 'is_pos') and not doc.is_pos:
+	if hasattr(doc, "is_pos") and not doc.is_pos:
 		return
 
 	try:
@@ -79,7 +79,7 @@ def emit_stock_update_event(doc, method=None):
 			"warehouses": list(warehouses),
 			"stock_updates": stock_updates,
 			"timestamp": frappe.utils.now(),
-			"event_type": "cancel" if method == "on_cancel" else "submit"
+			"event_type": "cancel" if method == "on_cancel" else "submit",
 		}
 
 		# Emit event to all connected clients
@@ -89,14 +89,14 @@ def emit_stock_update_event(doc, method=None):
 			event="pos_stock_update",
 			message=event_data,
 			user=None,  # Broadcast to all users
-			after_commit=True  # Only emit after successful DB commit
+			after_commit=True,  # Only emit after successful DB commit
 		)
 
 	except Exception as e:
 		# Log error but don't fail the transaction
 		frappe.log_error(
 			title=_("Real-time Stock Update Event Error"),
-			message=f"Failed to emit stock update event for {doc.name}: {str(e)}"
+			message=f"Failed to emit stock update event for {doc.name}: {str(e)}",
 		)
 
 
@@ -123,17 +123,12 @@ def emit_invoice_created_event(doc, method=None):
 			"timestamp": frappe.utils.now(),
 		}
 
-		frappe.publish_realtime(
-			event="pos_invoice_created",
-			message=event_data,
-			user=None,
-			after_commit=True
-		)
+		frappe.publish_realtime(event="pos_invoice_created", message=event_data, user=None, after_commit=True)
 
 	except Exception as e:
 		frappe.log_error(
 			title=_("Real-time Invoice Created Event Error"),
-			message=f"Failed to emit invoice created event for {doc.name}: {str(e)}"
+			message=f"Failed to emit invoice created event for {doc.name}: {str(e)}",
 		)
 
 
@@ -160,7 +155,7 @@ def emit_pos_profile_updated_event(doc, method=None):
 				"pos_profile": doc.name,
 				"item_groups": current_item_groups,
 				"timestamp": frappe.utils.now(),
-				"change_type": "item_groups_updated"
+				"change_type": "item_groups_updated",
 			}
 
 			# Emit event to all connected clients
@@ -170,18 +165,16 @@ def emit_pos_profile_updated_event(doc, method=None):
 				event="pos_profile_updated",
 				message=event_data,
 				user=None,  # Broadcast to all users
-				after_commit=True  # Only emit after successful DB commit
+				after_commit=True,  # Only emit after successful DB commit
 			)
 
-			frappe.logger().info(
-				f"Emitted pos_profile_updated event for {doc.name} - item groups changed"
-			)
+			frappe.logger().info(f"Emitted pos_profile_updated event for {doc.name} - item groups changed")
 
 	except Exception as e:
 		# Log error but don't fail the transaction
 		frappe.log_error(
 			title=_("Real-time POS Profile Update Event Error"),
-			message=f"Failed to emit POS profile update event for {doc.name}: {str(e)}"
+			message=f"Failed to emit POS profile update event for {doc.name}: {str(e)}",
 		)
 
 
@@ -212,16 +205,16 @@ def emit_customer_event(doc, method=None):
 			"action": action,
 			"timestamp": frappe.utils.now(),
 		}
-		
+
 		frappe.publish_realtime(
 			event="pos_customer_changed",
 			message=event_data,
 			user=None,  # Broadcast to all users
-			after_commit=True  # Only emit after successful DB commit
+			after_commit=True,  # Only emit after successful DB commit
 		)
 
 	except Exception as e:
 		frappe.log_error(
 			title=_("Real-time Customer Update Event Error"),
-			message=f"Failed to emit customer update event for {doc.name}: {str(e)}"
+			message=f"Failed to emit customer update event for {doc.name}: {str(e)}",
 		)

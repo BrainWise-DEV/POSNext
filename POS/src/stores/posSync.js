@@ -180,10 +180,10 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 	 */
 	async function saveInvoiceOffline(invoiceData) {
 		try {
-			await offlineWorker.saveOfflineInvoice(invoiceData)
+			const result = await offlineWorker.saveOfflineInvoice(invoiceData)
 			await updatePendingCount()
 			log.info('Invoice saved offline successfully')
-			return true
+			return result || { success: true }
 		} catch (error) {
 			log.error('Failed to save invoice offline', error)
 			throw error
@@ -415,6 +415,7 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 		// Actions
 		saveInvoiceOffline,
 		loadPendingInvoices,
+		updatePendingCount,
 		deleteOfflineInvoice,
 		syncAllPending,
 		preloadDataForOffline,

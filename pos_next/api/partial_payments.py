@@ -427,30 +427,15 @@ def create_payment_entry(
     if not frappe.db.exists("Mode of Payment", mode_of_payment):
         frappe.throw(_("Mode of Payment {0} does not exist").format(mode_of_payment))
 
-    # Create Payment Entry using ORM
-    pe = frappe.new_doc("Payment Entry")
-    pe.payment_type = "Receive"
-    pe.posting_date = posting_date
-    pe.party_type = "Customer"
-    pe.party = invoice.customer
-    pe.company = invoice.company
-    pe.mode_of_payment = mode_of_payment
+    # Save and submit with proper error handling
+    try:
+        from erpnext.accounts.doctype.payment_entry.payment_entry import get_payment_entry
+        from erpnext.accounts.doctype.sales_invoice.sales_invoice import get_bank_cash_account
 
-    # Set accounts
-    pe.paid_from = invoice.debit_to  # Customer receivable account
-
-    if payment_account:
-        # Validate provided account
-        if not frappe.db.exists("Account", payment_account):
-            frappe.throw(_("Payment account {0} does not exist").format(payment_account))
-        pe.paid_to = payment_account
-    else:
-        # Get account from Mode of Payment using ERPNext standard method
-        try:
-            from erpnext.accounts.doctype.sales_invoice.sales_invoice import (
-                get_bank_cash_account,
-            )
-
+        if payment_account:
+            if not frappe.db.exists("Account", payment_account):
+                frappe.throw(_("Payment account {0} does not exist").format(payment_account))
+        else:
             account_info = get_bank_cash_account(mode_of_payment, invoice.company)
             if not account_info or not account_info.get("account"):
                 frappe.throw(
@@ -458,63 +443,34 @@ def create_payment_entry(
                         mode_of_payment
                     )
                 )
-            pe.paid_to = account_info.get("account")
-        except Exception as e:
-            frappe.log_error(
-                title="Failed to get payment account",
-                message=f"Mode of Payment: {mode_of_payment}, Company: {invoice.company}, Error: {str(e)}"
-            )
-            frappe.throw(
-                _("Could not determine payment account. Please specify payment_account parameter.")
-            )
+            payment_account = account_info.get("account")
 
-    # Set amounts
-    pe.paid_amount = amount
-    pe.received_amount = amount
+        pe = get_payment_entry(
+            "Sales Invoice",
+            invoice_name,
+            party_amount=amount,
+            bank_account=payment_account,
+            reference_date=posting_date,
+        )
+        pe.posting_date = posting_date
+        pe.reference_date = posting_date
+        pe.mode_of_payment = mode_of_payment
 
-    # Set currency
-    pe.paid_from_account_currency = invoice.currency
-    pe.paid_to_account_currency = invoice.currency
+        if reference_no:
+            pe.reference_no = str(reference_no)[:140]
+        else:
+            pe.reference_no = f"POS-{invoice_name}"
 
-    # Set reference
-    if reference_no:
-        pe.reference_no = str(reference_no)[:140]  # Limit length
-    else:
-        pe.reference_no = f"POS-{invoice_name}"
+        if remarks:
+            pe.remarks = str(remarks)[:500]
+        else:
+            pe.remarks = f"Payment for {invoice_name} via POS - {mode_of_payment}"
 
-    pe.reference_date = posting_date
-
-    if remarks:
-        pe.remarks = str(remarks)[:500]  # Limit length for security
-    else:
-        pe.remarks = f"Payment for {invoice_name} via POS - {mode_of_payment}"
-
-    # Link to Sales Invoice
-    pe.append(
-        "references",
-        {
-            "reference_doctype": "Sales Invoice",
-            "reference_name": invoice_name,
-            "total_amount": invoice.grand_total,
-            "outstanding_amount": invoice.outstanding_amount,
-            "allocated_amount": amount,
-        },
-    )
-
-    # Save and submit with proper error handling
-    try:
         # Allow system to create payment entry even if user doesn't have direct permission
         # This is safe because we've already validated invoice access
         pe.flags.ignore_permissions = True
         pe.insert()
-
-        # Validate before submit
-        pe.validate()
-
         pe.submit()
-
-        # Commit immediately to avoid partial state
-        frappe.db.commit()
 
         return pe.name
 
@@ -761,8 +717,8 @@ def add_payment_to_partial_invoice(invoice_name: str, payments) -> Dict:
     Creates proper Payment Entry documents that update Payment Ledger.
     This is the ONLY correct way to add payments after invoice submission.
 
-    Transactional: If any payment fails, all previously created payments are cancelled
-    and the operation is rolled back.
+    Transactional: If any payment fails, the batch is rolled back to a savepoint
+    so no submitted Payment Entry from this request is persisted.
 
     Args:
         invoice_name: Sales Invoice name
@@ -828,10 +784,13 @@ def add_payment_to_partial_invoice(invoice_name: str, payments) -> Dict:
             )
         )
 
-    # Create Payment Entries - with transactional rollback on failure
+    # Create Payment Entries inside one savepoint-backed batch.
     payment_entries_created = []
+    batch_savepoint = "partial_payment_batch"
 
     try:
+        frappe.db.savepoint(batch_savepoint)
+
         for idx, payment in enumerate(payments, 1):
             amount = flt(payment.get("amount", 0))
 
@@ -859,31 +818,11 @@ def add_payment_to_partial_invoice(invoice_name: str, payments) -> Dict:
             payment_entries_created.append(pe_name)
 
     except Exception as e:
-        # Rollback: Cancel all previously created payment entries
-        for pe_name in payment_entries_created:
-            try:
-                pe = frappe.get_doc("Payment Entry", pe_name)
-                if pe.docstatus == 1:  # If submitted
-                    pe.flags.ignore_permissions = True
-                    pe.cancel()
-                    frappe.db.commit()  # Commit cancellation immediately
-                    frappe.msgprint(_("Rolled back Payment Entry {0}").format(pe_name))
-            except Exception as cancel_error:
-                frappe.log_error(
-                    title=f"Failed to rollback Payment Entry {pe_name}",
-                    message=f"Original Error: {str(e)}\nRollback Error: {str(cancel_error)}\n\n{frappe.get_traceback()}",
-                )
-
-        # Log the original error with full context
+        frappe.db.rollback(save_point=batch_savepoint)
         frappe.log_error(
             title=f"Payment Entry Creation Failed for {invoice_name}",
             message=f"Payments: {payments}\nError: {str(e)}\n\n{frappe.get_traceback()}",
         )
-
-        # Rollback any uncommitted database changes
-        frappe.db.rollback()
-
-        # Raise user-friendly error
         frappe.throw(
             _("Failed to create payment entry: {0}. All changes have been rolled back.").format(str(e))
         )

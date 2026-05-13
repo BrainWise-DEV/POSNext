@@ -367,7 +367,7 @@ async function getOfflineInvoiceCount() {
 
 		const count = await db
 			.table("invoice_queue")
-			.filter((invoice) => invoice.synced === false)
+			.filter((invoice) => invoice.synced === false && !invoice.superseded)
 			.count()
 		return count
 	} catch (error) {
@@ -395,7 +395,7 @@ async function getOfflineInvoices() {
 
 		const invoices = await db
 			.table("invoice_queue")
-			.filter((invoice) => invoice.synced === false)
+			.filter((invoice) => invoice.synced === false && !invoice.superseded)
 			.toArray()
 		return invoices
 	} catch (error) {
@@ -664,6 +664,58 @@ async function searchCachedItemsByGroup(itemGroups = [], limit = 50, offset = 0)
 	} catch (error) {
 		recordMetric('searchCachedItemsByGroup', performance.now() - startTime, true)
 		log.error("Error searching cached items by group", error)
+		return []
+	}
+}
+
+/**
+ * Search cached items filtered by brand.
+ * Uses the brand index for efficient lookup.
+ *
+ * @param {string} brand - Brand name to filter by
+ * @param {number} limit - Max results
+ * @param {number} offset - Offset for pagination
+ * @returns {Promise<Array>} Matching items
+ */
+async function searchCachedItemsByBrand(brand, limit = 50, offset = 0) {
+	const startTime = performance.now()
+
+	if (!brand) {
+		// No brand filter → fall back to generic search
+		return searchCachedItems("", limit, offset)
+	}
+
+	const cacheKey = `brand:${brand}:${limit}:${offset}`
+	const cached = getCachedQuery(cacheKey)
+	if (cached) {
+		log.debug("Cache hit for brand search", { brand })
+		return cached
+	}
+
+	try {
+		const db = await initDB()
+
+		// Use brand index for lookup, then sort and paginate in memory
+		let results = await db.table("items")
+			.where("brand")
+			.equals(brand)
+			.filter(item => shouldShowItem(item))
+			.toArray()
+
+		// Stable ordering by item_name for consistent UI
+		results.sort((a, b) => (a.item_name || "").localeCompare(b.item_name || ""))
+
+		const paginated = results.slice(offset, offset + limit)
+
+		const duration = Math.round(performance.now() - startTime)
+		recordMetric('searchCachedItemsByBrand', duration, false)
+		log.debug(`Brand search: ${paginated.length} items for "${brand}" in ${duration}ms`)
+
+		cacheQueryResult(cacheKey, paginated)
+		return paginated
+	} catch (error) {
+		recordMetric('searchCachedItemsByBrand', performance.now() - startTime, true)
+		log.error("Error searching cached items by brand", error)
 		return []
 	}
 }
@@ -1314,6 +1366,41 @@ async function deleteOfflineInvoice(id) {
 	}
 }
 
+// Mark an invoice row as superseded by an edit. The row stays in the queue
+// for audit but is excluded from sync and from the pending count.
+async function supersedeOfflineInvoice(id, replacedBy) {
+	try {
+		const db = await initDB()
+		await db.table("invoice_queue").update(id, {
+			superseded: true,
+			replaced_by: replacedBy || null,
+			superseded_at: Date.now(),
+		})
+		return { success: true }
+	} catch (error) {
+		log.error("Error superseding offline invoice", error)
+		throw error
+	}
+}
+
+// Mark a queued offline invoice as printed. Used by the print flow so
+// later edits can warn the cashier that a physical receipt is already out.
+async function markOfflineInvoicePrinted(offlineId) {
+	if (!offlineId) return { success: false }
+	try {
+		const db = await initDB()
+		const row = await db.table("invoice_queue").where("offline_id").equals(offlineId).first()
+		if (!row) return { success: false, reason: "not found" }
+		await db.table("invoice_queue").update(row.id, {
+			data: { ...row.data, was_printed: true, last_printed_at: Date.now() },
+		})
+		return { success: true }
+	} catch (error) {
+		log.error("Error marking offline invoice printed", error)
+		return { success: false, error: String(error) }
+	}
+}
+
 // Update stock quantities in cached items
 async function updateStockQuantities(stockUpdates) {
 	try {
@@ -1633,6 +1720,9 @@ self.onmessage = async (event) => {
 			case "CACHE_CUSTOMERS":
 				result = await cacheCustomersFromServer(payload.customers)
 				break
+			case "SEARCH_ITEMS_BY_BRAND":
+				result = await searchCachedItemsByBrand(payload.brand, payload.limit, payload.offset || 0)
+				break
 
 			case "DELETE_CUSTOMERS":
 				result = await deleteCustomers(payload.customerNames)
@@ -1680,6 +1770,14 @@ self.onmessage = async (event) => {
 
 			case "DELETE_INVOICE":
 				result = await deleteOfflineInvoice(payload.id)
+				break
+
+			case "MARK_INVOICE_PRINTED":
+				result = await markOfflineInvoicePrinted(payload.offline_id)
+				break
+
+			case "SUPERSEDE_INVOICE":
+				result = await supersedeOfflineInvoice(payload.id, payload.replaced_by)
 				break
 
 			case "SET_SHOW_VARIANTS_AS_ITEMS":
