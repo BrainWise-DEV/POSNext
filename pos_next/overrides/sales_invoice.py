@@ -12,6 +12,47 @@ from frappe.utils import cint, flt
 from erpnext.accounts.doctype.sales_invoice.sales_invoice import SalesInvoice
 from erpnext.accounts.utils import get_account_currency
 
+
+def _find_paid_bundle_row_for_free(si_doc, free_row):
+	"""Pick the paid SI item row whose bundle qty should absorb this free bundle's packed items."""
+	candidates = []
+	for row in si_doc.get("items"):
+		if row.name == free_row.name or cint(row.is_free_item):
+			continue
+		if row.item_code != free_row.item_code:
+			continue
+		if (row.warehouse or "") != (free_row.warehouse or ""):
+			continue
+		candidates.append(row)
+	if not candidates:
+		return None
+	free_idx = free_row.idx or 0
+	before = [r for r in candidates if (r.idx or 0) < free_idx]
+	if before:
+		return max(before, key=lambda r: r.idx or 0)
+	return candidates[0]
+
+
+def _find_matching_packed_item_for_merge(si_doc, paid_row, component_item_code, warehouse):
+	"""Match a packed item on the paid bundle line; prefer same warehouse."""
+	w = warehouse or ""
+	matches = []
+	for pi in si_doc.get("packed_items"):
+		if pi.parent_detail_docname != paid_row.name:
+			continue
+		if pi.parent_item != paid_row.item_code:
+			continue
+		if pi.item_code != component_item_code:
+			continue
+		matches.append(pi)
+	if not matches:
+		return None
+	for pi in matches:
+		if (pi.warehouse or "") == w:
+			return pi
+	return matches[0]
+
+
 def _get_post_change_gl_entries_setting():
 	"""
 	Get post_change_gl_entries setting compatible with ERPNext v15 and v16.
@@ -43,6 +84,7 @@ def _get_post_change_gl_entries_setting():
 		.run()
 	)
 	return cint(result[0][0]) if result else 0
+
 
 class CustomSalesInvoice(SalesInvoice):
 	"""
@@ -161,3 +203,72 @@ class CustomSalesInvoice(SalesInvoice):
 			party_type, party = "Customer", self.customer
 
 		return party_type, party
+
+	def update_packing_list(self):
+		super().update_packing_list()
+		self._combine_packed_qty_for_free_product_bundles()
+		self._set_use_serial_batch_fields_on_packed_items()
+
+	def _set_use_serial_batch_fields_on_packed_items(self):
+		"""
+		Force packed_items for batch/serial-tracked Items to use legacy fields path.
+
+		ERPNext's auto-SBB creation during SLE.on_submit fails to link the bundle
+		because SBB.voucher_detail_no gets remapped to the parent SI Item row name
+		(set_serial_and_batch_values) while validation expects either a matching SLE
+		or a Packed Item with that name. Routing through use_serial_batch_fields=1
+		bypasses the broken auto-creation for the row.
+		"""
+		if not self.get("packed_items"):
+			return
+		for pi in self.get("packed_items"):
+			if pi.get("serial_and_batch_bundle"):
+				continue
+			tracking = frappe.get_cached_value(
+				"Item",
+				pi.item_code,
+				["has_batch_no", "has_serial_no"],
+				as_dict=True,
+			)
+			if not tracking:
+				continue
+			if tracking.has_batch_no or tracking.has_serial_no:
+				pi.use_serial_batch_fields = 1
+
+	def _combine_packed_qty_for_free_product_bundles(self):
+		"""
+		Merge packed_items from free bundle lines into the matching paid bundle line.
+
+		ERPNext builds packed rows per Sales Invoice Item row. For BOGO / pricing-rule
+		free rows, the same product bundle often appears twice (paid + is_free_item).
+		That duplicates component rows. Stock and picking should follow total bundle
+		qty on one set of packed lines tied to the paid row.
+		"""
+		if self.is_return or not self.get("packed_items"):
+			return
+
+		free_bundle_rows = [
+			row
+			for row in self.get("items")
+			if row.item_code and cint(row.is_free_item) and self.has_product_bundle(row.item_code)
+		]
+		if not free_bundle_rows:
+			return
+
+		for free_row in free_bundle_rows:
+			paid_row = _find_paid_bundle_row_for_free(self, free_row)
+			if not paid_row:
+				continue
+
+			to_remove = []
+			for pi in list(self.get("packed_items")):
+				if pi.parent_detail_docname != free_row.name or pi.parent_item != free_row.item_code:
+					continue
+				tgt = _find_matching_packed_item_for_merge(self, paid_row, pi.item_code, pi.warehouse)
+				if tgt:
+					prec = tgt.precision("qty")
+					tgt.qty = flt(flt(tgt.qty) + flt(pi.qty), prec)
+					to_remove.append(pi)
+
+			for pi in to_remove:
+				self.remove(pi)
