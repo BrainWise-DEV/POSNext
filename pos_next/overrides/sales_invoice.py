@@ -207,6 +207,33 @@ class CustomSalesInvoice(SalesInvoice):
 	def update_packing_list(self):
 		super().update_packing_list()
 		self._combine_packed_qty_for_free_product_bundles()
+		self._set_use_serial_batch_fields_on_packed_items()
+
+	def _set_use_serial_batch_fields_on_packed_items(self):
+		"""
+		Force packed_items for batch/serial-tracked Items to use legacy fields path.
+
+		ERPNext's auto-SBB creation during SLE.on_submit fails to link the bundle
+		because SBB.voucher_detail_no gets remapped to the parent SI Item row name
+		(set_serial_and_batch_values) while validation expects either a matching SLE
+		or a Packed Item with that name. Routing through use_serial_batch_fields=1
+		bypasses the broken auto-creation for the row.
+		"""
+		if not self.get("packed_items"):
+			return
+		for pi in self.get("packed_items"):
+			if pi.get("serial_and_batch_bundle"):
+				continue
+			tracking = frappe.get_cached_value(
+				"Item",
+				pi.item_code,
+				["has_batch_no", "has_serial_no"],
+				as_dict=True,
+			)
+			if not tracking:
+				continue
+			if tracking.has_batch_no or tracking.has_serial_no:
+				pi.use_serial_batch_fields = 1
 
 	def _combine_packed_qty_for_free_product_bundles(self):
 		"""
