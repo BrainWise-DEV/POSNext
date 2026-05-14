@@ -10,7 +10,7 @@
    "module": "POS Next",
    "name": "Price List-custom_company",
    "options": "Company",
-   "reqd": 1
+   "reqd": 0
   }
  ],
  "custom_perms": [],
