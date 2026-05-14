@@ -93,32 +93,91 @@ def _resolve_cost_center(company):
 
 
 def _resolve_mode_of_payment(company):
-	"""Find a non-disabled Mode of Payment with an account configured for company.
+	"""Find a Mode of Payment with an account configured for `company`.
 
-	Falls back to 'Cash' or the first available mode, ensuring an account is set.
+	On a fresh CI test_site, no Mode of Payment Account rows exist by default,
+	so we wire one up for Cash pointing at the company's default cash account.
 	"""
-	# Try Cash first
-	if frappe.db.exists("Mode of Payment", "Cash"):
-		has_account = frappe.db.exists(
-			"Mode of Payment Account",
-			{"parent": "Cash", "company": company},
-		)
-		if has_account:
-			return "Cash"
-
-	# Fall back to any mode with an account configured for this company
-	mop = frappe.db.sql(
+	# Already-configured mode for this company wins
+	mop_with_account = frappe.db.sql(
 		"""
 		SELECT DISTINCT parent FROM `tabMode of Payment Account`
 		WHERE company = %s LIMIT 1
 		""",
 		(company,),
 	)
-	return mop[0][0] if mop else "Cash"
+	if mop_with_account:
+		return mop_with_account[0][0]
+
+	# Wire up Cash → company's default cash account
+	if not frappe.db.exists("Mode of Payment", "Cash"):
+		frappe.get_doc(
+			{
+				"doctype": "Mode of Payment",
+				"mode_of_payment": "Cash",
+				"type": "Cash",
+				"enabled": 1,
+			}
+		).insert(ignore_permissions=True)
+
+	default_cash_account = frappe.get_cached_value(
+		"Company", company, "default_cash_account"
+	)
+	if not default_cash_account:
+		# Find any cash-type account for the company
+		default_cash_account = frappe.db.get_value(
+			"Account",
+			{"company": company, "account_type": "Cash", "is_group": 0},
+			"name",
+			order_by="creation asc",
+		)
+	if not default_cash_account:
+		# Last resort: any non-group leaf account on the company
+		default_cash_account = frappe.db.get_value(
+			"Account",
+			{"company": company, "is_group": 0},
+			"name",
+			order_by="creation asc",
+		)
+
+	mop_doc = frappe.get_doc("Mode of Payment", "Cash")
+	mop_doc.append(
+		"accounts",
+		{"company": company, "default_account": default_cash_account},
+	)
+	mop_doc.save(ignore_permissions=True)
+	return "Cash"
+
+
+def _resolve_item_group():
+	"""Pick a non-group Item Group. Same root-vs-leaf gotcha as Customer Group."""
+	for candidate in ("_Test Item Group", "Products"):
+		if frappe.db.exists("Item Group", candidate):
+			ig = frappe.get_cached_doc("Item Group", candidate)
+			if not ig.is_group:
+				return candidate
+	leaf = frappe.db.get_value(
+		"Item Group",
+		{"is_group": 0},
+		"name",
+		order_by="creation asc",
+	)
+	if leaf:
+		return leaf
+	ig = frappe.get_doc(
+		{
+			"doctype": "Item Group",
+			"item_group_name": "_PNXT_TEST_ITEM_GROUP",
+			"parent_item_group": "All Item Groups",
+			"is_group": 0,
+		}
+	).insert(ignore_permissions=True)
+	return ig.name
 
 
 def _ensure_test_items(company, warehouse, price_list):
 	"""Create the three test items with prices and stock if they don't exist."""
+	item_group = _resolve_item_group()
 	for item_code, price in ITEM_PRICES.items():
 		if not frappe.db.exists("Item", item_code):
 			# Insert via frappe.get_doc directly so we can set
@@ -131,9 +190,7 @@ def _ensure_test_items(company, warehouse, price_list):
 					"doctype": "Item",
 					"item_code": item_code,
 					"item_name": item_code.replace("_PNXT_TEST_", ""),
-					"item_group": "Products"
-					if frappe.db.exists("Item Group", "Products")
-					else "All Item Groups",
+					"item_group": item_group,
 					"stock_uom": "Nos",
 					"is_stock_item": 1,
 				}
@@ -178,14 +235,64 @@ def _ensure_test_items(company, warehouse, price_list):
 				frappe.db.rollback()
 
 
+def _resolve_customer_group():
+	"""Pick a non-group Customer Group. 'All Customer Groups' is a group node
+	on stock Frappe/ERPNext installs and Customer.validate rejects it.
+	"""
+	# Prefer ERPNext's standard test fixture when present
+	if frappe.db.exists("Customer Group", "_Test Customer Group"):
+		return "_Test Customer Group"
+	leaf = frappe.db.get_value(
+		"Customer Group",
+		{"is_group": 0},
+		"name",
+		order_by="creation asc",
+	)
+	if leaf:
+		return leaf
+	# Last resort: create a leaf under the root
+	cg = frappe.get_doc(
+		{
+			"doctype": "Customer Group",
+			"customer_group_name": "_PNXT_TEST_CG",
+			"parent_customer_group": "All Customer Groups",
+			"is_group": 0,
+		}
+	).insert(ignore_permissions=True)
+	return cg.name
+
+
+def _resolve_territory():
+	"""Pick a non-group Territory. Same gotcha as Customer Group."""
+	if frappe.db.exists("Territory", "_Test Territory"):
+		return "_Test Territory"
+	leaf = frappe.db.get_value(
+		"Territory",
+		{"is_group": 0},
+		"name",
+		order_by="creation asc",
+	)
+	if leaf:
+		return leaf
+	t = frappe.get_doc(
+		{
+			"doctype": "Territory",
+			"territory_name": "_PNXT_TEST_TERRITORY",
+			"parent_territory": "All Territories",
+			"is_group": 0,
+		}
+	).insert(ignore_permissions=True)
+	return t.name
+
+
 def _ensure_customer():
 	if not frappe.db.exists("Customer", CUSTOMER):
 		frappe.get_doc(
 			{
 				"doctype": "Customer",
 				"customer_name": CUSTOMER,
-				"customer_group": "All Customer Groups",
-				"territory": "All Territories",
+				"customer_group": _resolve_customer_group(),
+				"territory": _resolve_territory(),
 				"customer_type": "Individual",
 			}
 		).insert(ignore_permissions=True)
