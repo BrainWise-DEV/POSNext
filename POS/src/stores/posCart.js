@@ -448,7 +448,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * Extracts and normalizes the offer response from backend
 	 *
 	 * @param {Object} response - Raw API response from backend
-	 * @returns {Object} Normalized response with items, freeItems, and appliedRules
+	 * @returns {Object} Normalized response with items, freeItems, appliedRules,
+	 *                   and headerDiscount (transaction-scope discount).
 	 *
 	 * IMPORTANT: No fallback for appliedRules - we trust the backend's response.
 	 * If backend returns empty applied_pricing_rules, it means NO offers were applied.
@@ -462,8 +463,38 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			freeItems: Array.isArray(payload.free_items) ? payload.free_items : [],
 			// CRITICAL: Only trust explicitly returned rules - NO FALLBACK
 			// If backend doesn't return applied_pricing_rules, NO offers were applied
-			appliedRules: Array.isArray(payload.applied_pricing_rules) ? payload.applied_pricing_rules : []
+			appliedRules: Array.isArray(payload.applied_pricing_rules) ? payload.applied_pricing_rules : [],
+			// Header-level (transaction-scope) discount surfaced by the server when an
+			// apply_on=Transaction Price rule fires. discountAmount is the resolved
+			// SAR amount (already computed from % if the rule is percentage-based).
+			// Zero/empty when no such rule applies.
+			headerDiscount: {
+				discountAmount: Number.parseFloat(payload.discount_amount) || 0,
+				applyDiscountOn: payload.apply_discount_on || null,
+			},
 		}
+	}
+
+	/**
+	 * Apply (or clear) the header-level discount the server surfaced when an
+	 * apply_on=Transaction Price rule fired. ERPNext stores this on the invoice
+	 * header as discount_amount + apply_discount_on; in the cart we mirror it
+	 * via additionalDiscount.value (which is sent back as discount_amount in
+	 * the invoice payload — see useInvoice.js#submitInvoice).
+	 *
+	 * Pass an empty/zero headerDiscount to clear (e.g. when no transaction-level
+	 * rule applies on the current cart).
+	 */
+	function applyHeaderDiscountFromServer(headerDiscount) {
+		if (!headerDiscount) {
+			additionalDiscount.value = 0
+			rebuildIncrementalCache()
+			return
+		}
+
+		const amount = Number.parseFloat(headerDiscount.discountAmount) || 0
+		additionalDiscount.value = amount
+		rebuildIncrementalCache()
 	}
 
 	function getAppliedOfferCodes() {
@@ -527,12 +558,13 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				// Check if cancelled during API call
 				if (signal?.aborted) return
 
-				const { items: responseItems, freeItems, appliedRules } =
+				const { items: responseItems, freeItems, appliedRules, headerDiscount } =
 					parseOfferResponse(response)
 
-				
+
 				applyDiscountsFromServer(responseItems)
 				processFreeItems(freeItems)
+				applyHeaderDiscountFromServer(headerDiscount)
 				filterActiveOffers(appliedRules)
 
 				const offerApplied = appliedRules.includes(offerCode)
@@ -549,10 +581,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 								items: rollbackItems,
 								freeItems: rollbackFreeItems,
 								appliedRules: rollbackRules,
+								headerDiscount: rollbackHeaderDiscount,
 							} = parseOfferResponse(rollbackResponse)
 
 							applyDiscountsFromServer(rollbackItems)
 							processFreeItems(rollbackFreeItems)
+							applyHeaderDiscountFromServer(rollbackHeaderDiscount)
 							filterActiveOffers(rollbackRules)
 						} catch (rollbackError) {
 							console.error("Error rolling back offers:", rollbackError)
@@ -669,12 +703,13 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 				if (signal?.aborted) return
 
-				const { items: responseItems, freeItems, appliedRules } =
+				const { items: responseItems, freeItems, appliedRules, headerDiscount } =
 					parseOfferResponse(response)
 
-				
+
 				applyDiscountsFromServer(responseItems)
 				processFreeItems(freeItems)
+				applyHeaderDiscountFromServer(headerDiscount)
 				filterActiveOffers(appliedRules)
 
 				appliedOffers.value = appliedOffers.value.filter((entry) =>
@@ -782,11 +817,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 					if (signal?.aborted) return false
 
-					const { items: responseItems, freeItems, appliedRules } =
+					const { items: responseItems, freeItems, appliedRules, headerDiscount } =
 						parseOfferResponse(response)
 
 					applyDiscountsFromServer(responseItems)
 					processFreeItems(freeItems)
+					applyHeaderDiscountFromServer(headerDiscount)
 					filterActiveOffers(appliedRules)
 
 					// Update appliedOffers to only include valid ones
@@ -1488,7 +1524,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 			// All applied offers became invalid and no new offers to apply.
 			if (combinedCodes.length === 0 && invalidOffers.length > 0) {
-				
+
 				appliedOffers.value = []
 				processFreeItems([])
 				invoiceItems.value.forEach(item => {
@@ -1498,6 +1534,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 						recalculateItem(item)
 					}
 				})
+				// Also clear any transaction-level header discount the server
+				// previously surfaced — if no offers remain, no header discount applies.
+				applyHeaderDiscountFromServer(null)
 				rebuildIncrementalCache()
 
 				const names = invalidOffers.map(o => o.name).join(', ')
@@ -1512,12 +1551,13 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				// Check for cancellation or stale operation
 				if (signal?.aborted || (generation > 0 && generation < cartGeneration)) return
 
-				const { items: responseItems, freeItems, appliedRules } = parseOfferResponse(response)
+				const { items: responseItems, freeItems, appliedRules, headerDiscount } = parseOfferResponse(response)
 
 				// 4. Update cart items with new discounts
-				
+
 				applyDiscountsFromServer(responseItems)
 				processFreeItems(freeItems)
+				applyHeaderDiscountFromServer(headerDiscount)
 
 				// 5. Update appliedOffers list based on server confirmation
 				const actuallyApplied = new Set(appliedRules)
