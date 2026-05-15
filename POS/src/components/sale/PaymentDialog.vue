@@ -260,6 +260,29 @@
 						</template>
 					</div>
 
+					<!-- Discount Description for Friends and Family -->
+					<div v-if="isFriendsAndFamily" :class="[
+						'rounded-lg border p-2',
+						!discountDescription ? 'bg-red-50 border-red-300' : 'bg-blue-50 border-blue-200'
+					]">
+						<label class="text-xs font-medium text-gray-700 flex items-center gap-1 mb-1">
+							<svg class="w-3.5 h-3.5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+							</svg>
+							{{ __('Discount Reason') }}
+							<span class="text-red-500">*</span>
+						</label>
+						<textarea
+							v-model="discountDescription"
+							placeholder="Enter reason for Friends and Family discount..."
+							class="w-full h-16 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+							:class="{ 'border-red-500 ring-2 ring-red-200': !discountDescription }"
+						/>
+						<p v-if="!discountDescription" class="text-xs text-red-600 mt-1">
+							{{ __('Discount reason is required for Friends and Family customers') }}
+						</p>
+					</div>
+
 					<!-- Outstanding Balance Row (full width, two columns) -->
 					<div v-if="customerCreditEnabled && totalAvailableCredit !== 0" :class="[
 						'rounded-lg border p-2 flex items-center justify-between',
@@ -1131,6 +1154,14 @@ const deliveryDate = ref("")
 const today = new Date().toISOString().split("T")[0]
 const isSalesOrder = computed(() => props.targetDoctype === "Sales Order")
 
+// Check if customer is in Friends and Family group
+const isFriendsAndFamily = computed(() => {
+	console.log(props.customer)
+	const customerObj = typeof props.customer === 'object' ? props.customer : null
+	console.log(customerObj?.customer_group)
+	return customerObj?.customer_group === 'Friends & Family'
+})
+
 // Column refs for height matching
 const rightColumnRef = ref(null)
 const rightColumnMinHeight = ref("auto")
@@ -1149,6 +1180,11 @@ const {
 	mobileButtonSize,
 	dynamicNumpadSize,
 } = useResponsivePayment()
+
+// Currency formatting function
+function formatCurrency(amount) {
+	return formatCurrencyUtil(Number.parseFloat(amount || 0), props.currency)
+}
 
 // Calculate and sync column heights when dialog opens
 function syncColumnHeights() {
@@ -1225,6 +1261,8 @@ const localAdditionalDiscount = ref(0)
 const additionalDiscountType = ref(
 	settingsStore.usePercentageDiscount ? "percentage" : "amount",
 )
+// Discount description for Friends and Family customers
+const discountDescription = ref("")
 
 const paymentMethodsResource = createResource({
 	url: "pos_next.api.pos_profile.get_payment_methods",
@@ -1980,6 +2018,7 @@ watch(show, (newVal) => {
 		selectedSalesPersons.value = []
 		salesPersonSearch.value = ""
 		applyWriteOff.value = false // Reset write-off state
+		discountDescription.value = "" // Reset Friends & Family discount reason on reopen
 		// Set default delivery date to today for Sales Orders
 		deliveryDate.value = isSalesOrder.value ? today : ""
 
@@ -2365,90 +2404,104 @@ function addCreditAccountPayment() {
 		remainingAmount: remainingAmount.value,
 	})
 
-	// Close dialog and complete as credit sale (0 payment)
-	// The backend will create an invoice with outstanding amount
-	const paymentData = {
-		payments: [], // No payments - full amount on credit
-		change_amount: 0,
-		is_partial_payment: false,
-		is_credit_sale: true, // Mark as credit sale
-		paid_amount: 0,
-		outstanding_amount: props.grandTotal,
+	// Validate discount description for Friends and Family customers
+		if (isFriendsAndFamily.value && !discountDescription.value) {
+			showError(__("Discount reason is required for Friends and Family customers"))
+			return
+		}
+
+		// Close dialog and complete as credit sale (0 payment)
+		// The backend will create an invoice with outstanding amount
+		const paymentData = {
+			payments: [], // No payments - full amount on credit
+			change_amount: 0,
+			is_partial_payment: false,
+			is_credit_sale: true, // Mark as credit sale
+			paid_amount: 0,
+			outstanding_amount: props.grandTotal,
+			// Discount description - always send
+			custom_discount_description: discountDescription.value || null,
+		}
+
+		log.debug(
+			"[PaymentDialog] Emitting credit sale payment-completed:",
+			paymentData,
+		)
+		emit("payment-completed", paymentData)
+		show.value = false
 	}
 
-	log.debug(
-		"[PaymentDialog] Emitting credit sale payment-completed:",
-		paymentData,
-	)
-	emit("payment-completed", paymentData)
-	show.value = false
-}
-
-function clearAll() {
-	paymentEntries.value = []
-	customAmount.value = ""
-}
-
-function completePayment() {
-	log.debug("[PaymentDialog] Complete payment called:", {
-		canComplete: canComplete.value,
-		totalPaid: totalPaid.value,
-		grandTotal: props.grandTotal,
-		allowPartialPayment: props.allowPartialPayment,
-		paymentEntries: paymentEntries.value,
-		salesPersons: selectedSalesPersons.value,
-		writeOff: {
-			canWriteOff: canWriteOff.value,
-			applyWriteOff: applyWriteOff.value,
-			writeOffAmount: writeOffAmount.value,
-		},
-	})
-
-	if (!canComplete.value) {
-		log.warn("[PaymentDialog] Cannot complete - validation failed")
-		return
+	function clearAll() {
+		paymentEntries.value = []
+		customAmount.value = ""
 	}
 
-	// Calculate if this is a partial payment (considering write-off)
-	const effectivePaid = totalPaid.value + writeOffAmount.value
-	const isPartial = effectivePaid < props.grandTotal
+	function completePayment() {
+		log.debug("[PaymentDialog] Complete payment called:", {
+			canComplete: canComplete.value,
+			totalPaid: totalPaid.value,
+			grandTotal: props.grandTotal,
+			allowPartialPayment: props.allowPartialPayment,
+			paymentEntries: paymentEntries.value,
+			salesPersons: selectedSalesPersons.value,
+			writeOff: {
+				canWriteOff: canWriteOff.value,
+				applyWriteOff: applyWriteOff.value,
+				writeOffAmount: writeOffAmount.value,
+			},
+		})
 
-	const paymentData = {
-		payments: paymentEntries.value,
-		change_amount: changeAmount.value,
-		is_partial_payment: isPartial,
-		paid_amount: totalPaid.value,
-		outstanding_amount: isPartial
-			? remainingAmount.value - writeOffAmount.value
-			: 0,
-		sales_team:
-			selectedSalesPersons.value.length > 0 ? selectedSalesPersons.value : null,
-		delivery_date: isSalesOrder.value ? deliveryDate.value : null,
-		// Write-off data
-		write_off_amount: writeOffAmount.value,
-		is_write_off: writeOffAmount.value > 0,
+		if (!canComplete.value) {
+			log.warn("[PaymentDialog] Cannot complete - validation failed")
+			return
+		}
+
+		// Validate discount description for Friends and Family customers
+		if (isFriendsAndFamily.value && !discountDescription.value) {
+			showError(__("Discount reason is required for Friends and Family customers"))
+			return
+		}
+
+		// Calculate if this is a partial payment (considering write-off)
+		const effectivePaid = totalPaid.value + writeOffAmount.value
+		const isPartial = effectivePaid < props.grandTotal
+
+		const paymentData = {
+			payments: paymentEntries.value,
+			change_amount: changeAmount.value,
+			is_partial_payment: isPartial,
+			paid_amount: totalPaid.value,
+			outstanding_amount: isPartial
+				? remainingAmount.value - writeOffAmount.value
+				: 0,
+			sales_team:
+				selectedSalesPersons.value.length > 0 ? selectedSalesPersons.value : null,
+			delivery_date: isSalesOrder.value ? deliveryDate.value : null,
+			// Write-off data
+			write_off_amount: writeOffAmount.value,
+			is_write_off: writeOffAmount.value > 0,
+			// Discount description - always send
+			custom_discount_description: discountDescription.value || null,
+		}
+
+		console.log(paymentData)
+
+		log.debug("[PaymentDialog] Emitting payment-completed:", paymentData)
+
+		emit("payment-completed", paymentData)
+
+		show.value = false
 	}
 
-	log.debug("[PaymentDialog] Emitting payment-completed:", paymentData)
+	// Get total amount for a specific payment method
+	function getMethodTotal(methodName) {
+		return paymentEntries.value
+			.filter((entry) => entry.mode_of_payment === methodName)
+			.reduce((sum, entry) => sum + (entry.amount || 0), 0)
+	}
 
-	emit("payment-completed", paymentData)
-
-	show.value = false
-}
-
-function formatCurrency(amount) {
-	return formatCurrencyUtil(Number.parseFloat(amount || 0), props.currency)
-}
-
-// Get total amount for a specific payment method
-function getMethodTotal(methodName) {
-	return paymentEntries.value
-		.filter((entry) => entry.mode_of_payment === methodName)
-		.reduce((sum, entry) => sum + (entry.amount || 0), 0)
-}
-
-// Additional discount handlers
-function handleAdditionalDiscountChange() {
+	// Additional discount handlers
+	function handleAdditionalDiscountChange() {
 	let discountValue = localAdditionalDiscount.value
 	let discountAmount = 0
 

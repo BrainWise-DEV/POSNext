@@ -4,7 +4,7 @@ import { isOffline, getCachedItem } from "@/utils/offline"
 import { useSerialNumberStore } from "@/stores/serialNumber"
 import { CoalescingMutex } from "@/utils/mutex"
 import { logger } from "@/utils/logger"
-import { roundCurrency } from "@/utils/currency"
+import { roundCurrency, roundToNearestZeroOrFive } from "@/utils/currency"
 
 const log = logger.create("Invoice")
 
@@ -28,6 +28,7 @@ export function useInvoice() {
 	const posOpeningShift = ref(null) // POS Opening Shift name
 	const additionalDiscount = ref(0)
 	const couponCode = ref(null)
+	const customDiscountDescription = ref(null) // Discount description for Friends and Family customers
 	const taxRules = ref([]) // Tax rules from POS Profile
 	const taxInclusive = ref(false) // Tax inclusive setting from POS Settings
 
@@ -193,17 +194,25 @@ export function useInvoice() {
 		const discount =
 			_cachedTotalDiscount.value + (additionalDiscount.value || 0)
 
+		let total
 		if (taxInclusive.value) {
 			// Tax inclusive: Subtotal already includes tax, so don't add it again
 			// Use roundCurrency to match ERPNext's currency precision (from System Settings)
-			return roundCurrency(_cachedSubtotal.value - discount)
+			total = roundCurrency(_cachedSubtotal.value - discount)
 		} else {
 			// Tax exclusive: Add tax on top of subtotal
 			// Use roundCurrency to match ERPNext's currency precision (from System Settings)
-			return roundCurrency(
+			total = roundCurrency(
 				_cachedSubtotal.value + _cachedTotalTax.value - discount,
 			)
 		}
+		
+		// If there's a manual discount (additionalDiscount), round to nearest 0 or 5
+		if (additionalDiscount.value && additionalDiscount.value > 0) {
+			total = roundToNearestZeroOrFive(total)
+		}
+		
+		return total
 	})
 	const totalPaid = computed(() => _cachedTotalPaid.value)
 
@@ -983,6 +992,11 @@ export function useInvoice() {
 					update_stock: 1, // Critical: Ensures stock is updated
 				}
 
+				// Add custom discount description if provided (for Friends and Family customers)
+				if (customDiscountDescription.value) {
+					invoiceData.custom_discount_description = customDiscountDescription.value
+				}
+
 				if (targetDoctype === "Sales Order" && deliveryDate) {
 					invoiceData.delivery_date = deliveryDate
 				}
@@ -1018,6 +1032,11 @@ export function useInvoice() {
 					change_amount:
 						remainingAmount.value < 0 ? Math.abs(remainingAmount.value) : 0,
 					write_off_amount: writeOffAmount || 0,
+				}
+
+				// Include custom discount description if provided
+				if (customDiscountDescription.value) {
+					submitData.custom_discount_description = customDiscountDescription.value
 				}
 
 				if (redeemedCustomerCredit > 0 && customerCreditDict.length > 0) {
@@ -1143,6 +1162,7 @@ export function useInvoice() {
 		payments.value = []
 		additionalDiscount.value = 0
 		couponCode.value = null
+		customDiscountDescription.value = null
 
 		// Reset incremental cache
 		_cachedSubtotal.value = 0
@@ -1170,6 +1190,7 @@ export function useInvoice() {
 		payments.value = []
 		additionalDiscount.value = 0
 		couponCode.value = null
+		customDiscountDescription.value = null
 
 		// Reset incremental cache
 		_cachedSubtotal.value = 0
@@ -1245,6 +1266,7 @@ export function useInvoice() {
 		posOpeningShift,
 		additionalDiscount,
 		couponCode,
+		customDiscountDescription,
 		taxRules,
 		taxInclusive,
 		isSubmitting,

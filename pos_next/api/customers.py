@@ -61,7 +61,7 @@ def get_customers(search_term="", pos_profile=None, limit=20, modified_since=Non
             "Customer",
             filters=filters,
             or_filters=or_filters or None,
-            fields=["name", "customer_name", "mobile_no", "email_id", "disabled"],
+            fields=["name", "customer_name", "mobile_no", "email_id", "disabled","customer_group",'custom_pincode'],
             limit=customer_limit,
             order_by="customer_name asc",
         )
