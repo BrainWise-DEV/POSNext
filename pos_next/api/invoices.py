@@ -53,6 +53,156 @@ except Exception:  # pragma: no cover - ERPNext not installed in some environmen
 # Helper Functions
 # ==========================================
 
+# Friends & Family Configuration
+FRIENDS_FAMILY_CUSTOMER_GROUP = "Friends & Family"
+FRIENDS_FAMILY_MARKUP_PERCENTAGE = 7
+
+
+def get_item_buying_rate_from_item_price(item_code, uom=None):
+    """
+    Fetch the buying rate from Item Price using the default buying price list.
+    """
+    buying_price_list = frappe.db.get_value("Buying Settings", None, "buying_price_list")
+    if not buying_price_list:
+        return 0.0
+
+    ItemPrice = frappe.qb.DocType("Item Price")
+    query = (
+        frappe.qb.from_(ItemPrice)
+        .select(ItemPrice.price_list_rate)
+        .where(ItemPrice.item_code == item_code)
+        .where(ItemPrice.price_list == buying_price_list)
+        .where(ItemPrice.buying == 1)
+    )
+    if uom:
+        query = query.where(ItemPrice.uom == uom)
+
+    price_row = query.limit(1).run(as_dict=True)
+    if price_row:
+        return flt(price_row[0].price_list_rate)
+
+    # Fallback: any buying item price for item
+    fallback_price = frappe.db.get_value(
+        "Item Price",
+        {"item_code": item_code, "buying": 1},
+        "price_list_rate"
+    )
+    return flt(fallback_price or 0)
+
+
+def round_to_nearest_zero_or_five(value):
+    """
+    Round a currency value to nearest 0 or 5.
+    Examples:
+    - 123.2 -> 123.0
+    - 123.7 -> 125.0
+    - 123.2 -> 123.0
+    - 123.6 -> 125.0
+    - 124.9 -> 125.0
+    """
+    flt_value = flt(value)
+    remainder = flt_value % 10
+    
+    if remainder < 2.5:
+        return flt(flt_value - remainder)
+    elif remainder < 7.5:
+        return flt(flt_value - remainder + 5)
+    else:
+        return flt(flt_value - remainder + 10)
+
+
+def apply_friends_family_pricing_to_invoice(invoice_doc, customer=None):
+    """
+    Apply Friends & Family pricing to all items in invoice.
+    
+    For customers in "Friends & Family" group:
+    - Set rate as: buying_rate * (1 + 7%)
+    - Round to nearest 0 or 5
+    - Apply discount if applicable
+    
+    This function modifies invoice_doc in-place.
+    
+    Args:
+        invoice_doc: The Sales Invoice document
+        customer: Customer name (optional, will be fetched from invoice if not provided)
+    
+    Returns:
+        bool: True if pricing was applied, False otherwise
+    """
+    if not invoice_doc:
+        return False
+    
+    # Get customer from invoice if not provided
+    if not customer:
+        customer = invoice_doc.get("customer")
+    
+    if not customer:
+        return False
+    
+    try:
+        # Fetch customer group
+        customer_group = frappe.db.get_value("Customer", customer, "customer_group")
+        
+        if not customer_group or customer_group.strip() != FRIENDS_FAMILY_CUSTOMER_GROUP:
+            return False
+        
+        # Apply pricing to each item
+        pricing_applied = False
+        for item in invoice_doc.get("items", []):
+            item_code = item.get("item_code")
+            if not item_code:
+                continue
+            
+            try:
+                item_doc = frappe.get_cached_doc("Item", item_code)
+                buying_uom = item.get("uom") or item_doc.stock_uom
+                buying_rate = get_item_buying_rate_from_item_price(item_code, uom=buying_uom)
+                
+                if buying_rate <= 0:
+                    continue
+                
+                # Calculate Friends & Family rate
+                friends_family_rate = buying_rate * (1 + FRIENDS_FAMILY_MARKUP_PERCENTAGE / 100)
+                
+                # Round F&F rate to nearest 0 or 5
+                friends_family_rate = round_to_nearest_zero_or_five(friends_family_rate)
+                
+                # Get current rate
+                current_rate = flt(item.get("rate") or item.get("price_list_rate") or 0)
+                
+                # Calculate discount if current rate is higher
+                if current_rate > 0:
+                    discount_percentage = max(0, ((current_rate - friends_family_rate) / current_rate) * 100)
+                else:
+                    discount_percentage = 0
+                
+                item.rate = friends_family_rate
+                item.price_list_rate = friends_family_rate
+                
+                # Only set discount if there's actually a discount, otherwise set to 0
+                if discount_percentage > 0:
+                    item.discount_percentage = flt(discount_percentage, 2)
+                else:
+                    item.discount_percentage = 0
+                
+                item.friends_family_pricing_applied = True
+                pricing_applied = True
+                
+            except Exception as e:
+                # Log error but continue with other items
+                frappe.log_error(
+                    title="Friends & Family Item Pricing Error",
+                    message=f"Error applying F&F pricing to {item_code}: {str(e)}"  
+                )
+                return pricing_applied
+    except Exception as e:
+        frappe.log_error(
+            title="Friends & Family Pricing Error",
+            message=f"Error applying F&F pricing to invoice: {str(e)}"  
+        )
+        return False
+
+
 
 def calculate_price_list_rate(item_rate, discount_pct, current_price_list_rate):
     """
@@ -144,8 +294,10 @@ def validate_manual_rate_edit(item, pos_profile=None, pos_settings_cache=None):
             "message": _("POS Settings not found for profile {0}. Cannot validate rate edit.").format(pos_profile)
         }
 
-    # Check if rate editing is allowed
-    if not cint(pos_settings.get(FIELD_ALLOW_USER_TO_EDIT_RATE)):
+    is_stock_item = cint(item.get("is_stock_item") or 0)
+
+    # Check if rate editing is allowed for stock items only
+    if is_stock_item and not cint(pos_settings.get(FIELD_ALLOW_USER_TO_EDIT_RATE)):
         return {
             "valid": False,
             "message": _("Rate editing is not allowed for this POS Profile")
@@ -309,14 +461,14 @@ def get_payment_account(mode_of_payment, company):
     # Try 2: POS Payment Method from POS Profile
     account = frappe.db.sql(
         """
-		SELECT ppm.default_account
-		FROM `tabPOS Payment Method` ppm
-		INNER JOIN `tabPOS Profile` pp ON ppm.parent = pp.name
-		WHERE ppm.mode_of_payment = %s
-		AND pp.company = %s
-		AND ppm.default_account IS NOT NULL
-		LIMIT 1
-	""",
+        SELECT ppm.default_account
+        FROM `tabPOS Payment Method` ppm
+        INNER JOIN `tabPOS Profile` pp ON ppm.parent = pp.name
+        WHERE ppm.mode_of_payment = %s
+        AND pp.company = %s
+        AND ppm.default_account IS NOT NULL
+        LIMIT 1
+    """,
         (mode_of_payment, company),
         as_dict=1,
     )
@@ -774,6 +926,15 @@ def update_invoice(data):
         invoice_doc.ignore_pricing_rule = 1
         invoice_doc.flags.ignore_pricing_rule = True
 
+        # Preserve custom discount description if provided
+        custom_discount_description = data.get("custom_discount_description") 
+        if custom_discount_description:
+            invoice_doc.custom_discount_description = custom_discount_description
+            frappe.log_error(
+                title="Custom Discount Description Set",
+                message=f"Invoice: {invoice_doc.name}, Description: {custom_discount_description}"
+            )
+
         # ========================================================================
         # OPTIMIZATION: Cache POS Settings to avoid repeated DB queries
         # Fetch all needed settings in a single query at the start
@@ -844,6 +1005,11 @@ def update_invoice(data):
                 if flt(item.price_list_rate) < item_rate:
                     item.price_list_rate = item_rate
 
+            # IMPORTANT: If discount_percentage is 0 or not set, make sure to clear it
+            # This prevents unintended discounts from being applied
+            if discount_pct <= 0:
+                item.discount_percentage = 0
+            
             # IMPORTANT: Keep the rate from frontend (do NOT set to 0)
             # ERPNext will recalculate if needed, but preserving frontend rate
             # prevents rounding issues and ensures UI matches invoice
@@ -924,6 +1090,18 @@ def update_invoice(data):
             invoice_doc.grand_total = 0.0
         if invoice_doc.base_grand_total is None:
             invoice_doc.base_grand_total = 0.0
+
+        # Round grand total to nearest 0 or 5 if there's a manual discount (additional_discount)
+        if invoice_doc.get("discount_amount") and flt(invoice_doc.discount_amount) > 0:
+            # Round the grand total to nearest 0 or 5
+            original_total = invoice_doc.grand_total
+            invoice_doc.grand_total = round_to_nearest_zero_or_five(invoice_doc.grand_total)
+            invoice_doc.base_grand_total = invoice_doc.grand_total
+            
+            # Adjust discount_amount to maintain correct math
+            discount_adjustment = flt(original_total - invoice_doc.grand_total)
+            if discount_adjustment != 0:
+                invoice_doc.discount_amount = flt(invoice_doc.discount_amount + discount_adjustment)
 
         # Set accounts for payment methods before saving
         _set_payment_accounts(invoice_doc.payments, invoice_doc.company)
@@ -1341,6 +1519,9 @@ def submit_invoice(invoice=None, data=None):
         if doctype == "Sales Invoice" and hasattr(invoice_doc, "payments"):
             _set_payment_accounts(invoice_doc.payments, invoice_doc.company)
 
+        # Apply Friends & Family pricing if applicable
+        apply_friends_family_pricing_to_invoice(invoice_doc, customer=invoice_doc.get("customer"))
+
         # Handle sales team (multiple sales persons)
         sales_team_data = invoice.get("sales_team") or data.get("sales_team")
         if sales_team_data and isinstance(sales_team_data, list):
@@ -1372,6 +1553,11 @@ def submit_invoice(invoice=None, data=None):
         # Auto-set batch numbers for returns
         _auto_set_return_batches(invoice_doc)
 
+        # Handle custom discount description for Friends and Family customers
+        custom_discount_description = invoice.get("custom_discount_description") or data.get("custom_discount_description")
+        if custom_discount_description:
+            invoice_doc.custom_discount_description = custom_discount_description
+
         # Handle write-off amount if provided
         write_off_amount = flt(data.get("write_off_amount") or invoice.get("write_off_amount") or 0)
         if write_off_amount > 0 and doctype == "Sales Invoice":
@@ -1402,6 +1588,17 @@ def submit_invoice(invoice=None, data=None):
                         f"Failed to apply write-off from POS Profile {pos_profile}: {e}",
                         "POS Write-Off Error"
                     )
+
+        # Apply rounding to grand total if there's a manual discount
+        if invoice_doc.get("discount_amount") and flt(invoice_doc.discount_amount) > 0:
+            original_total = invoice_doc.grand_total
+            invoice_doc.grand_total = round_to_nearest_zero_or_five(invoice_doc.grand_total)
+            invoice_doc.base_grand_total = invoice_doc.grand_total
+            
+            # Adjust discount_amount to maintain correct math
+            discount_adjustment = flt(original_total - invoice_doc.grand_total)
+            if discount_adjustment != 0:
+                invoice_doc.discount_amount = flt(invoice_doc.discount_amount + discount_adjustment)
 
         # Validate stock availability before submission
         # _validate_stock_on_invoice checks _should_block internally
@@ -1542,106 +1739,106 @@ def submit_invoice(invoice=None, data=None):
 
 @frappe.whitelist()
 def get_invoice(invoice_name):
-	"""
-	Get a single invoice with all details for POS.
+    """
+    Get a single invoice with all details for POS.
 
-	Args:
-		invoice_name: Sales Invoice name
+    Args:
+        invoice_name: Sales Invoice name
 
-	Returns:
-		Complete invoice document with items and payments
-	"""
-	if not invoice_name:
-		frappe.throw(_("Invoice name is required"))
+    Returns:
+        Complete invoice document with items and payments
+    """
+    if not invoice_name:
+        frappe.throw(_("Invoice name is required"))
 
-	if not frappe.db.exists("Sales Invoice", invoice_name):
-		frappe.throw(_("Invoice {0} does not exist").format(invoice_name))
+    if not frappe.db.exists("Sales Invoice", invoice_name):
+        frappe.throw(_("Invoice {0} does not exist").format(invoice_name))
 
-	# Check permissions
-	if not frappe.has_permission("Sales Invoice", "read", invoice_name):
-		frappe.throw(_("You don't have permission to view this invoice"))
+    # Check permissions
+    if not frappe.has_permission("Sales Invoice", "read", invoice_name):
+        frappe.throw(_("You don't have permission to view this invoice"))
 
-	# Get invoice document
-	invoice = frappe.get_doc("Sales Invoice", invoice_name)
+    # Get invoice document
+    invoice = frappe.get_doc("Sales Invoice", invoice_name)
 
-	return invoice.as_dict()
+    return invoice.as_dict()
 
 
 @frappe.whitelist()
 def get_invoices(pos_profile, limit=100):
-	"""
-	Get list of invoices for a POS Profile.
+    """
+    Get list of invoices for a POS Profile.
 
-	Args:
-		pos_profile: POS Profile name
-		limit: Maximum number of invoices to return (default 100)
+    Args:
+        pos_profile: POS Profile name
+        limit: Maximum number of invoices to return (default 100)
 
-	Returns:
-		List of invoices with details
-	"""
-	if not pos_profile:
-		frappe.throw(_("POS Profile is required"))
+    Returns:
+        List of invoices with details
+    """
+    if not pos_profile:
+        frappe.throw(_("POS Profile is required"))
 
-	# Check if user has access to this POS Profile
-	has_access = frappe.db.exists(
-		"POS Profile User",
-		{"parent": pos_profile, "user": frappe.session.user}
-	)
+    # Check if user has access to this POS Profile
+    has_access = frappe.db.exists(
+        "POS Profile User",
+        {"parent": pos_profile, "user": frappe.session.user}
+    )
 
-	if not has_access and not frappe.has_permission("Sales Invoice", "read"):
-		frappe.throw(_("You don't have access to this POS Profile"))
+    if not has_access and not frappe.has_permission("Sales Invoice", "read"):
+        frappe.throw(_("You don't have access to this POS Profile"))
 
-	# Query for invoices
-	invoices = frappe.db.sql("""
-		SELECT
-			name,
-			customer,
-			customer_name,
-			posting_date,
-			posting_time,
-			grand_total,
-			paid_amount,
-			outstanding_amount,
-			status,
-			docstatus,
-			is_return,
-			return_against
-		FROM
-			`tabSales Invoice`
-		WHERE
-			pos_profile = %(pos_profile)s
-			AND docstatus = 1
-			AND is_pos = 1
-		ORDER BY
-			posting_date DESC,
-			posting_time DESC
-		LIMIT %(limit)s
-	""", {
-		"pos_profile": pos_profile,
-		"limit": limit
-	}, as_dict=True)
+    # Query for invoices
+    invoices = frappe.db.sql("""
+        SELECT
+            name,
+            customer,
+            customer_name,
+            posting_date,
+            posting_time,
+            grand_total,
+            paid_amount,
+            outstanding_amount,
+            status,
+            docstatus,
+            is_return,
+            return_against
+        FROM
+            `tabSales Invoice`
+        WHERE
+            pos_profile = %(pos_profile)s
+            AND docstatus = 1
+            AND is_pos = 1
+        ORDER BY
+            posting_date DESC,
+            posting_time DESC
+        LIMIT %(limit)s
+    """, {
+        "pos_profile": pos_profile,
+        "limit": limit
+    }, as_dict=True)
 
-	# Load items for each invoice for filtering purposes
-	for invoice in invoices:
-		items = frappe.db.sql("""
-			SELECT
-				item_code,
-				item_name,
-				qty,
-				rate,
-				amount
-			FROM
-				`tabSales Invoice Item`
-			WHERE
-				parent = %(invoice_name)s
-			ORDER BY
-				idx
-		""", {
-			"invoice_name": invoice.name
-		}, as_dict=True)
-		invoice.items = items
+    # Load items for each invoice for filtering purposes
+    for invoice in invoices:
+        items = frappe.db.sql("""
+            SELECT
+                item_code,
+                item_name,
+                qty,
+                rate,
+                amount
+            FROM
+                `tabSales Invoice Item`
+            WHERE
+                parent = %(invoice_name)s
+            ORDER BY
+                idx
+        """, {
+            "invoice_name": invoice.name
+        }, as_dict=True)
+        invoice.items = items
 
-	return invoices
+    return invoices
 
 
 # ==========================================

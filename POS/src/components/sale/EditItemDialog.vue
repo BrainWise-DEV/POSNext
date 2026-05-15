@@ -141,7 +141,7 @@
 															/>
 														</div>
 														<!-- Compact warning when rate editing disabled due to pricing rules -->
-														<p v-if="hasPricingRules && settingsStore.allowUserToEditRate" class="mt-1 text-xs text-amber-600 flex items-center gap-1">
+														<p v-if="hasPricingRules && settingsStore.allowUserToEditRate && localItem?.is_stock_item" class="mt-1 text-xs text-amber-600 flex items-center gap-1">
 															<FeatherIcon name="lock" class="w-3 h-3" />
 															{{ __('Locked (offer applied)') }}
 														</p>
@@ -228,7 +228,8 @@
 																:max="discountType === 'percentage' ? 100 : undefined"
 																step="0.01"
 																class="w-full h-7 border border-gray-300 rounded-lg px-3 pe-8 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-																@input="calculateDiscount"
+																@blur="calculateDiscount"
+																@keydown.enter="$event.target.blur()"
 															/>
 															<span class="absolute inset-y-0 end-0 pe-3 flex items-center text-gray-500 text-sm">
 																{{ discountType === 'percentage' ? '%' : '' }}
@@ -356,14 +357,16 @@ const hasPricingRules = computed(() => {
 })
 
 // Rate editing is allowed only if:
-// 1. POS Settings allows rate editing AND
-// 2. Item does NOT have pricing rules (promotional offers) applied
+// 1. POS Settings allows rate editing AND no pricing rules applied, OR
+// 2. Item is not a stock item (is_stock_item == 0)
 const canEditRate = computed(() => {
-	return settingsStore.allowUserToEditRate && !hasPricingRules.value
+	return (settingsStore.allowUserToEditRate && !hasPricingRules.value) || !localItem.value?.is_stock_item
 })
 
 // Tooltip message for why rate editing is disabled
 const rateEditDisabledReason = computed(() => {
+	if (canEditRate.value) return ''
+	if (!localItem.value?.is_stock_item) return '' // Should be editable for non-stock items
 	if (!settingsStore.allowUserToEditRate) {
 		return __('Rate editing is disabled')
 	}
@@ -441,17 +444,12 @@ watch(
 				discountValue.value = 0
 			}
 
-			// Reset stock check state
-			hasStock.value = true
-			isCheckingStock.value = false
-
 			calculateTotals()
-			isInitializingItem.value = false
+		isInitializingItem.value = false
 		}
 	},
-	{ immediate: true },
+	{ immediate: true }
 )
-
 watch(localUom, (newUom, oldUom) => {
 	if (!newUom || newUom === oldUom || isInitializingItem.value) return
 	handleUomChange(newUom)
@@ -641,25 +639,28 @@ function handleDiscountTypeChange() {
 }
 
 function calculateDiscount() {
-	// Round to currency precision to prevent floating point precision issues (e.g., 10.000000000000002)
-	if (discountValue.value !== null && discountValue.value !== undefined && !isNaN(discountValue.value)) {
-		discountValue.value = roundCurrency(discountValue.value)
-	}
-
 	if (discountType.value === "percentage") {
 		// Ensure percentage doesn't exceed 100
 		if (discountValue.value > 100) {
 			discountValue.value = 100
 		}
-		calculatedDiscount.value = roundCurrency((calculatedSubtotal.value * discountValue.value) / 100)
+		calculatedDiscount.value = roundToNearestFive((calculatedSubtotal.value * discountValue.value) / 100)
 	} else {
 		// Ensure amount doesn't exceed subtotal
 		if (discountValue.value > calculatedSubtotal.value) {
-			discountValue.value = roundCurrency(calculatedSubtotal.value)
+			discountValue.value = roundToNearestFive(calculatedSubtotal.value)
 		}
-		calculatedDiscount.value = roundCurrency(discountValue.value)
+		calculatedDiscount.value = roundToNearestFive(discountValue.value)
 	}
-	calculatedTotal.value = roundCurrency(calculatedSubtotal.value - calculatedDiscount.value)
+	calculatedTotal.value = roundToNearestFive(calculatedSubtotal.value - calculatedDiscount.value)
+}
+
+/**
+ * Round to nearest 0 or 5
+ * Examples: 15521.4 → 15520, 15523 → 15525, 15526 → 15525
+ */
+function roundToNearestFive(value) {
+    return Math.round(value / 5) * 5
 }
 
 function calculateTotals() {
@@ -691,7 +692,7 @@ function updateItem() {
 	// ========================================================================
 	// RATE EDIT VALIDATION
 	// ========================================================================
-	if (settingsStore.allowUserToEditRate && isRateManuallyEdited) {
+	if ((settingsStore.allowUserToEditRate || !localItem.is_stock_item) && isRateManuallyEdited) {
 		// Validate rate is positive
 		if (localRate.value <= 0) {
 			showError(__('Rate must be greater than zero'))
