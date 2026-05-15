@@ -207,3 +207,23 @@ export function roundCurrency(value) {
 export function roundFloat(value) {
 	return round(value, settings.float)
 }
+
+/** Round to nearest 0 or 5
+ * Examples:
+ * - 123.2 -> 123.0
+ * - 123.7 -> 125.0
+ * - 123.6 -> 125.0
+ * - 124.9 -> 125.0
+ */
+export function roundToNearestZeroOrFive(value) {
+	const num = Number(value) || 0
+	const remainder = num % 10
+	
+	if (remainder < 2.5) {
+		return round(num - remainder, settings.currency)
+	} else if (remainder < 7.5) {
+		return round(num - remainder + 5, settings.currency)
+	} else {
+		return round(num - remainder + 10, settings.currency)
+	}
+}

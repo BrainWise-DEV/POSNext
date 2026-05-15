@@ -894,27 +894,15 @@
 								__("Invoice {0} created successfully!", [uiStore.lastInvoiceName])
 							}}
 						</h3>
-						<p class="mt-2 text-sm text-gray-500">
-							{{ __("Paid: {0}", [formatCurrency(uiStore.lastPaidAmount)]) }}
+						<p v-if="uiStore.lastInvoiceMessage" class="mt-2 text-sm text-gray-600">
+							{{ uiStore.lastInvoiceMessage }}
 						</p>
 					</div>
 				</template>
 				<template #actions>
-					<div class="flex gap-2">
+					<div class="flex gap-2 justify-end">
 						<Button variant="subtle" @click="uiStore.showSuccessDialog = false">
 							{{ __("Close") }}
-						</Button>
-						<Button
-							variant="solid"
-							theme="blue"
-							@click="
-								() => {
-									handlePrintInvoice({ name: uiStore.lastInvoiceName });
-									uiStore.showSuccessDialog = false;
-								}
-							"
-						>
-							{{ __("Print Invoice") }}
 						</Button>
 					</div>
 				</template>
@@ -1830,7 +1818,7 @@ async function handleShiftClosed() {
 	}
 }
 
-function handleItemSelected(item, autoAdd = false) {
+async function handleItemSelected(item, autoAdd = false) {
 	// Auto-add mode
 	if (autoAdd) {
 		try {
@@ -1838,13 +1826,33 @@ function handleItemSelected(item, autoAdd = false) {
 			if (item.resolved_qty && item.resolved_barcode_type) {
 				// Get the unit price for the resolved UOM from uom_prices, or fall back to item rate
 				const resolvedUom = item.resolved_uom || item.uom;
-				const unitRate = item.uom_prices?.[resolvedUom] || item.rate;
+				let unitRate = item.uom_prices?.[resolvedUom] || item.rate;
+				let priceListRate = unitRate;
+				
+				// Fetch customer-specific pricing if Friends & Family
+				const originalRate = unitRate;
+				try {
+					const pricing = await cartStore.resolveUomPricing(
+						item,
+						resolvedUom,
+						item.conversion_factor || 1,
+						item.resolved_qty || 1,
+					);
+					unitRate = pricing.rate || unitRate;
+					priceListRate = pricing.price_list_rate || priceListRate;
+					// Show notification if Friends & Family pricing was applied
+					if (cartStore.customer && unitRate < originalRate) {
+						showSuccess(__('Friends & Family Discount applied to {0}', [item.item_name]));
+					}
+				} catch (pricingError) {
+					console.warn("Could not resolve customer-specific pricing for resolved barcode item", pricingError);
+				}
 
 				const resolvedItem = {
 					...item,
 					uom: resolvedUom,
 					rate: unitRate,
-					price_list_rate: unitRate,
+					price_list_rate: priceListRate,
 					is_resolved_barcode: true, // Mark as readonly
 				};
 				cartStore.addItem(resolvedItem, item.resolved_qty, true, shiftStore.currentProfile);
@@ -1901,7 +1909,30 @@ function handleItemSelected(item, autoAdd = false) {
 
 	// Add to cart
 	try {
-		cartStore.addItem(item, 1, false, shiftStore.currentProfile);
+		// Fetch customer-specific pricing if applicable (e.g., Friends & Family)
+		let itemToAdd = item;
+		const originalRate = item.rate || item.price_list_rate;
+		try {
+			const pricing = await cartStore.resolveUomPricing(
+				item,
+				item.uom || item.stock_uom,
+				item.conversion_factor || 1,
+				1,
+			);
+			itemToAdd = {
+				...item,
+				rate: pricing.rate,
+				price_list_rate: pricing.price_list_rate,
+			};
+			// Show notification if Friends & Family pricing was applied
+			if (cartStore.customer && pricing.rate < originalRate) {
+				showSuccess(__('Friends & Family Discount applied to {0}', [item.item_name]));
+			}
+		} catch (pricingError) {
+			console.warn("Could not resolve customer-specific pricing for item", pricingError);
+		}
+		
+		cartStore.addItem(itemToAdd, 1, false, shiftStore.currentProfile);
 	} catch (error) {
 		uiStore.showError(
 			__("Insufficient Stock"),
@@ -2033,6 +2064,11 @@ async function handlePaymentCompleted(paymentData) {
 			cartStore.setWriteOffAmount(paymentData.write_off_amount);
 		}
 
+		// Set discount description for Friends and Family customers
+		if (paymentData.custom_discount_description) {
+			cartStore.customDiscountDescription = paymentData.custom_discount_description;
+		}
+
 		// Delete draft if it exists (since we're submitting/saving invoice)
 		const draftIdToDelete = cartStore.currentDraftId;
 
@@ -2047,6 +2083,7 @@ async function handlePaymentCompleted(paymentData) {
 				posa_pos_opening_shift: cartStore.posOpeningShift,
 				company: shiftStore.profileCompany,
 				customer: customerValue || shiftStore.profileCustomer,
+				custom_discount_description: cartStore.customDiscountDescription,
 				items: preparedItems,
 				payments: JSON.parse(JSON.stringify(cartStore.payments)),
 				sales_team: JSON.parse(JSON.stringify(cartStore.salesTeam || [])),
@@ -2280,8 +2317,24 @@ async function handleOptionSelected(option) {
 				uiStore.showBatchSerialDialog = true;
 			} else {
 				try {
+					let itemToAdd = variant
+					try {
+						const pricing = await cartStore.resolveUomPricing(
+							variant,
+							variant.uom || variant.stock_uom,
+							variant.conversion_factor || 1,
+							cartStore.pendingItemQty,
+						)
+						itemToAdd = {
+							...variant,
+							rate: pricing.rate,
+							price_list_rate: pricing.price_list_rate,
+						}
+					} catch (pricingError) {
+						console.warn("Could not resolve customer-specific pricing for item", pricingError)
+					}
 					cartStore.addItem(
-						variant,
+						itemToAdd,
 						cartStore.pendingItemQty,
 						false,
 						shiftStore.currentProfile
@@ -2366,10 +2419,6 @@ function switchToDesk() {
 	}
 
 	window.location.assign("/app");
-}
-
-function formatCurrency(amount) {
-	return Number.parseFloat(amount || 0).toFixed(2);
 }
 
 async function confirmLogout() {

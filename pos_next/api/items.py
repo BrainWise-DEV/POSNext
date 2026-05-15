@@ -31,6 +31,118 @@ ITEM_RESULT_FIELDS = [
 ITEM_RESULT_COLUMNS = ",\n\t".join(ITEM_RESULT_FIELDS)
 
 
+def get_item_buying_rate_from_item_price(item_code, uom=None):
+	"""
+	Fetch the buying rate from Item Price using the default buying price list.
+	"""
+	buying_price_list = frappe.db.get_value("Buying Settings", None, "buying_price_list")
+	if not buying_price_list:
+		return 0.0
+
+	ItemPrice = frappe.qb.DocType("Item Price")
+	query = (
+		frappe.qb.from_(ItemPrice)
+		.select(ItemPrice.price_list_rate)
+		.where(ItemPrice.item_code == item_code)
+		.where(ItemPrice.price_list == buying_price_list)
+		.where(ItemPrice.buying == 1)
+	)
+	if uom:
+		query = query.where(ItemPrice.uom == uom)
+
+	price_row = query.limit(1).run(as_dict=True)
+	if price_row:
+		return flt(price_row[0].price_list_rate)
+
+	# Fallback: any buying item price for item
+	fallback_price = frappe.db.get_value(
+		"Item Price",
+		{"item_code": item_code, "buying": 1},
+		"price_list_rate"
+	)
+	return flt(fallback_price or 0)
+
+# Friends & Family Discount Configuration
+FRIENDS_FAMILY_CUSTOMER_GROUP = "Friends & Family"
+FRIENDS_FAMILY_MARKUP_PERCENTAGE = 7  # 7% markup on buying rate
+
+
+def apply_friends_family_pricing(item_detail, customer_group=None, item_doc=None):
+	"""
+	Apply special pricing logic for Friends & Family customer group.
+	
+	When customer_group is "Friends & Family":
+	1. Set rate as: buying_rate * (1 + FRIENDS_FAMILY_MARKUP_PERCENTAGE / 100)
+	2. Round to nearest 0 or 5
+	3. Apply appropriate discount
+	
+	Args:
+		item_detail: The item detail dict containing price and rate info
+		customer_group: The customer's group name
+		item_doc: The Item document (optional, can be fetched if needed)
+	
+	Returns:
+		dict: Updated item_detail with Friends & Family pricing applied
+	"""
+	if not customer_group or customer_group.strip() != FRIENDS_FAMILY_CUSTOMER_GROUP:
+		return item_detail
+	
+	try:
+		item_code = item_detail.get("item_code")
+		if not item_code:
+			return item_detail
+		
+		# Fetch item document if not provided
+		if not item_doc:
+			item_doc = frappe.get_cached_doc("Item", item_code)
+		
+		# Get buying rate from item
+		buying_uom = item_detail.get("uom") or item_doc.stock_uom
+		buying_rate = get_item_buying_rate_from_item_price(item_code, uom=buying_uom)
+		
+		if buying_rate <= 0:
+			# If no buying rate available, return original item_detail
+			return item_detail
+		
+		# Calculate Friends & Family rate: buying_rate + 7%
+		friends_family_rate = buying_rate * (1 + FRIENDS_FAMILY_MARKUP_PERCENTAGE / 100)
+		
+		# Round F&F rate to nearest 0 or 5
+		from pos_next.api.invoices import round_to_nearest_zero_or_five
+		friends_family_rate = round_to_nearest_zero_or_five(friends_family_rate)
+		
+		# Get current selling price
+		current_rate = flt(item_detail.get("rate") or item_detail.get("price_list_rate") or 0)
+		
+		# Calculate discount percentage if current rate is higher than F&F rate
+		if current_rate > 0:
+			discount_percentage = max(0, ((current_rate - friends_family_rate) / current_rate) * 100)
+		else:
+			discount_percentage = 0
+		
+		# Update item_detail with Friends & Family pricing
+		item_detail["rate"] = friends_family_rate
+		item_detail["price_list_rate"] = friends_family_rate
+		
+		# Store the discount information
+		if discount_percentage > 0:
+			item_detail["discount_percentage"] = flt(discount_percentage, 2)
+		
+		# Add a flag to indicate this item has Friends & Family pricing applied
+		item_detail["friends_family_pricing_applied"] = True
+		item_detail["friends_family_base_rate"] = buying_rate
+		
+		return item_detail
+		
+	except Exception as e:
+		frappe.log_error(
+			title="Friends & Family Pricing Error",
+			message=f"Error applying F&F pricing: {str(e)}\nItem: {item_detail.get('item_code')}"
+		)
+		# Return original item_detail if error occurs
+		return item_detail
+
+
 def get_stock_availability(item_code, warehouse):
 	"""Return total available quantity for an item in the given warehouse."""
 	if not warehouse:
@@ -1834,7 +1946,18 @@ def get_items_count(pos_profile, item_group=None, brand=None, include_variants=0
 
 @frappe.whitelist()
 def get_item_details(item_code, pos_profile, customer=None, qty=1, uom=None):  # noqa: ARG001 - customer reserved for future use
-	"""Get detailed item info including price, tax, stock"""
+	"""Get detailed item info including price, tax, stock
+	
+	Args:
+		item_code: The item code to fetch details for
+		pos_profile: The POS Profile name
+		customer: Customer name or ID (used to fetch customer group for pricing logic)
+		qty: Quantity (used for pricing calculations)
+		uom: Unit of Measure (optional)
+	
+	Returns:
+		dict: Item details including pricing, stock, batch info, etc.
+	"""
 	try:
 		# Parse pos_profile if it's a JSON string
 		if isinstance(pos_profile, str):
@@ -1871,12 +1994,32 @@ def get_item_details(item_code, pos_profile, customer=None, qty=1, uom=None):  #
 		if uom:
 			item["uom"] = uom
 
-		return get_item_detail(
+		# Get item details
+		item_detail = get_item_detail(
 			item=json.dumps(item),
 			warehouse=pos_profile_doc.warehouse,
 			price_list=pos_profile_doc.selling_price_list,
 			company=pos_profile_doc.company,
 		)
+		
+		# Apply Friends & Family pricing if customer group matches
+		if customer and item_detail:
+			try:
+				customer_group = frappe.db.get_value("Customer", customer, "customer_group")
+				if customer_group:
+					item_detail = apply_friends_family_pricing(
+						item_detail,
+						customer_group=customer_group,
+						item_doc=item_doc
+					)
+			except Exception as e:
+				# Log error but don't fail - just use normal pricing
+				frappe.log_error(
+					title="Customer Group Lookup Error",
+					message=f"Could not fetch customer group for {customer}: {str(e)}"
+				)
+		
+		return item_detail
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Item Details Error")
 		frappe.throw(_("Error fetching item details: {0}").format(str(e)))
