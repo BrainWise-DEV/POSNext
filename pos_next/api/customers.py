@@ -60,7 +60,7 @@ def get_customers(search_term="", pos_profile=None, limit=20, modified_since=Non
 			"Customer",
 			filters=filters,
 			or_filters=or_filters or None,
-			fields=["name", "customer_name", "mobile_no", "email_id", "disabled"],
+			fields=["name", "customer_name", "mobile_no", "email_id", "disabled","customer_group",'custom_pincode'],
 			limit=customer_limit,
 			order_by="customer_name asc",
 		)
@@ -77,6 +77,7 @@ def create_customer(
 	customer_name,
 	mobile_no=None,
 	email_id=None,
+    custom_pincode=None,
 	customer_group="Individual",
 	territory="All Territories",
 	company=None,
@@ -89,6 +90,7 @@ def create_customer(
 	    customer_name (str): Customer name (required)
 	    mobile_no (str): Mobile number (optional)
 	    email_id (str): Email address (optional)
+        custom_pincode (str): Pincode (optional)
 	    customer_group (str): Customer group (default: Individual)
 	    territory (str): Territory (default: All Territories)
 	    company (str): Company (optional, used to auto-assign loyalty program)
@@ -118,6 +120,7 @@ def create_customer(
 			"territory": territory or "All Territories",
 			"mobile_no": mobile_no or "",
 			"email_id": email_id or "",
+            "custom_pincode": custom_pincode or "",
 			"loyalty_program": loyalty_program,
 		}
 	)
