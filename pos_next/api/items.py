@@ -24,7 +24,6 @@ ITEM_RESULT_FIELDS = [
 	"brand",
 	"has_variants",
 	"variant_of",
-	"custom_company",
 	"disabled",
 ]
 
@@ -525,21 +524,12 @@ def get_item_variants(template_item, pos_profile):
 				Item.has_serial_no,
 				Item.item_group,
 				Item.brand,
-				Item.custom_company,
 				Item.variant_of,
 			)
 			.where(Item.variant_of == template_item)
 			.where(Item.disabled == 0)
 			.where(Item.is_sales_item == 1)
 		)
-
-		# Company scope: strict by default; include empty (global) items only if
-		# the profile's POS Settings explicitly opts in.
-		if pos_profile_doc.company:
-			if _pos_settings_allow_global_items(pos_profile_doc.name):
-				query = query.where(fn.Coalesce(Item.custom_company, "").isin([pos_profile_doc.company, ""]))
-			else:
-				query = query.where(Item.custom_company == pos_profile_doc.company)
 
 		variants = query.run(as_dict=True)
 
@@ -726,37 +716,6 @@ def _get_allowed_profile_brands(pos_profile):
 	return _get_pos_profile_configured_brands(pos_profile)
 
 
-def invalidate_pos_settings_cache(doc, method=None):
-	"""Doc-event hook: drop cached `allow_global_items` when POS Settings is saved."""
-	if doc and getattr(doc, "pos_profile", None):
-		frappe.cache().delete_value(f"pos_settings_allow_global_items:{doc.pos_profile}")
-
-
-def _pos_settings_allow_global_items(pos_profile_name):
-	"""Whether the POS Settings row for this profile opts into global items.
-
-	A "global item" is one whose ``custom_company`` is NULL or empty — historically
-	used as a shared SKU across companies. With strict company filtering as the
-	default, these items are hidden unless this flag is enabled.
-	"""
-	cache_key = f"pos_settings_allow_global_items:{pos_profile_name}"
-	cached = frappe.cache().get_value(cache_key)
-	if cached is not None:
-		return cached
-
-	value = (
-		frappe.db.get_value(
-			"POS Settings",
-			{"pos_profile": pos_profile_name, "enabled": 1},
-			"allow_global_items",
-		)
-		or 0
-	)
-	result = int(value)
-	frappe.cache().set_value(cache_key, result, expires_in_sec=300)
-	return result
-
-
 def _get_pos_profile_allowed_item_groups(pos_profile_doc):
 	"""Return the item groups (with descendants) authorised for a POS Profile.
 
@@ -805,13 +764,6 @@ def _build_item_base_conditions(
 		conditions.append("i.has_variants = 0")
 
 	where_params = []
-
-	if pos_profile_doc.company:
-		if _pos_settings_allow_global_items(pos_profile_doc.name):
-			conditions.append("(i.custom_company = %s OR IFNULL(i.custom_company, '') = '')")
-		else:
-			conditions.append("i.custom_company = %s")
-		where_params.append(pos_profile_doc.company)
 
 	allowed_item_groups = _get_pos_profile_allowed_item_groups(pos_profile_doc)
 
