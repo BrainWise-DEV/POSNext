@@ -40,9 +40,13 @@ try:
     from erpnext.accounts.doctype.pricing_rule.utils import (
         get_applied_pricing_rules as erpnext_get_applied_pricing_rules,
     )
+    from erpnext.accounts.doctype.pricing_rule.utils import (
+        apply_pricing_rule_on_transaction as erpnext_apply_pricing_rule_on_transaction,
+    )
 except Exception:  # pragma: no cover - ERPNext not installed in some environments
     erpnext_apply_pricing_rule = None
     erpnext_get_applied_pricing_rules = None
+    erpnext_apply_pricing_rule_on_transaction = None
 
 
 # ==========================================
@@ -426,6 +430,18 @@ def _pricing_rule_to_string(value):
         return ""
 
     return ""
+
+
+def _strip_server_managed_fields(payload):
+    """Remove fields that are derived server-side and should not be replayed."""
+    if not isinstance(payload, dict):
+        return payload
+
+    cleaned = dict(payload)
+    # Packed Items are regenerated from Product Bundle definitions during save.
+    # Accepting client-side packed rows can reintroduce duplicates on re-save.
+    cleaned.pop("packed_items", None)
+    return cleaned
 
 
 def get_payment_account(mode_of_payment, company):
@@ -822,6 +838,7 @@ def update_invoice(data):
     """Create or update invoice draft (Step 1)."""
     try:
         data = json.loads(data) if isinstance(data, str) else data
+        data = _strip_server_managed_fields(data)
 
         pos_profile = data.get("pos_profile")
         doctype = data.get("doctype", "Sales Invoice")
@@ -838,6 +855,11 @@ def update_invoice(data):
             invoice_doc.update(data)
         else:
             invoice_doc = frappe.get_doc(data)
+
+        # Important: set before set_missing_values()/pricing/validation paths that may
+        # read linked docs (e.g., Customer) and trigger controller permission checks.
+        invoice_doc.flags.ignore_permissions = True
+        frappe.flags.ignore_account_permission = True
 
         pos_profile_doc = None
         if pos_profile:
@@ -992,21 +1014,28 @@ def update_invoice(data):
             # ERPNext will recalculate if needed, but preserving frontend rate
             # prevents rounding issues and ensures UI matches invoice
 
-            # Convert pricing_rules from list to comma-separated string
-            # ERPNext expects pricing_rules as a string, not a list
-            pricing_rules = item.get("pricing_rules")
-            if pricing_rules:
-                if isinstance(pricing_rules, list):
-                    item.pricing_rules = ",".join(str(r) for r in pricing_rules)
-                elif isinstance(pricing_rules, str) and pricing_rules.startswith("["):
-                    # Handle JSON string representation of list
-                    try:
-                        rules_list = json.loads(pricing_rules)
-                        if isinstance(rules_list, list):
-                            item.pricing_rules = ",".join(str(r) for r in rules_list)
-                    except (json.JSONDecodeError, TypeError):
-                        # Keep original value - malformed JSON will be handled by standardize_pricing_rules
-                        item.pricing_rules = ""
+            # POS Next computes offers itself (via apply_offers) and sends each
+            # item with discount_percentage / discount_amount / rate already set.
+            # We pair that with invoice_doc.ignore_pricing_rule = 1 so ERPNext's
+            # own pricing engine stays out of the way.
+            #
+            # However, ERPNext's get_pricing_rule_for_item() has a branch that
+            # fires when ignore_pricing_rule=1 AND the doc already exists in DB
+            # AND item.pricing_rules is non-empty — it interprets that as the
+            # user disabling pricing rules on an invoice that previously had
+            # them, calls remove_pricing_rule_for_item(), and silently zeroes
+            # discount_percentage / discount_amount / rate on the next save.
+            # That branch fires on the 2nd save (submit step), producing
+            # "Partly Paid" invoices where the cashier collected the discounted
+            # amount but the saved grand_total reverted to the pre-discount
+            # price. See erpnext/accounts/doctype/pricing_rule/pricing_rule.py
+            # around line 421.
+            #
+            # Clearing item.pricing_rules here avoids that branch entirely. The
+            # discount itself is preserved via the discount_percentage /
+            # discount_amount fields we already set above.
+            if item.get("pricing_rules"):
+                item.pricing_rules = ""
 
         # Set invoice flags BEFORE calculations
         if doctype == "Sales Invoice":
@@ -1402,6 +1431,8 @@ def submit_invoice(invoice=None, data=None):
     if not isinstance(data, dict):
         data = {}
 
+    invoice = _strip_server_managed_fields(invoice)
+
     pos_profile = invoice.get("pos_profile")
     doctype = invoice.get("doctype", "Sales Invoice")
 
@@ -1451,6 +1482,10 @@ def submit_invoice(invoice=None, data=None):
         else:
             invoice_doc = frappe.get_doc(doctype, invoice_name)
             invoice_doc.update(invoice)
+
+        # Keep permission bypass consistent for POS API flow.
+        invoice_doc.flags.ignore_permissions = True
+        frappe.flags.ignore_account_permission = True
 
         # Ensure update_stock is set for Sales Invoice
         if doctype == "Sales Invoice":
@@ -2850,6 +2885,154 @@ def search_invoices_for_return(
 # ==========================================
 
 
+def _evaluate_transaction_offers(
+    invoice,
+    profile,
+    pricing_items,
+    customer,
+    customer_group,
+    territory,
+    posting_date,
+    currency,
+    price_list,
+    rule_map,
+    selected_offer_names,
+):
+    """Run ERPNext's transaction-level pricing engine and collect free items.
+
+    ERPNext routes `apply_on = "Transaction"` rules through a different entry
+    point (`apply_pricing_rule_on_transaction`) than the per-item engine. That
+    function mutates a real Sales Invoice document in place — appending free
+    item rows via `doc.append("items", ...)` — so we build a transient,
+    never-saved Sales Invoice document for evaluation only.
+
+    Returns {"free_items": dict keyed by (item_code, rule_name), "applied_rules": set}.
+    """
+    if not erpnext_apply_pricing_rule_on_transaction or not pricing_items:
+        return {"free_items": {}, "applied_rules": set()}
+
+    total_qty = sum(flt(it.qty) for it in pricing_items)
+    total = sum(flt(it.qty) * flt(it.rate) for it in pricing_items)
+    if total <= 0:
+        return {"free_items": {}, "applied_rules": set()}
+
+    doc = frappe.new_doc("Sales Invoice")
+    doc.update(
+        {
+            "is_pos": 1,
+            "company": profile.company,
+            "currency": currency,
+            "conversion_rate": 1,
+            "selling_price_list": price_list,
+            "price_list_currency": currency,
+            "plc_conversion_rate": 1,
+            "customer": customer,
+            "customer_group": customer_group,
+            "territory": territory,
+            "transaction_date": posting_date,
+            "posting_date": posting_date,
+            "pos_profile": invoice.get("pos_profile"),
+            "coupon_code": invoice.get("coupon_code") or None,
+        }
+    )
+    doc.flags.ignore_mandatory = True
+
+    for prep in pricing_items:
+        doc.append(
+            "items",
+            {
+                "item_code": prep.item_code,
+                "item_name": prep.item_name,
+                "item_group": prep.item_group,
+                "brand": prep.brand,
+                "qty": prep.qty,
+                "stock_qty": prep.stock_qty,
+                "conversion_factor": prep.conversion_factor,
+                "uom": prep.uom,
+                "stock_uom": prep.stock_uom,
+                "rate": prep.rate,
+                "price_list_rate": prep.price_list_rate,
+                "base_rate": prep.base_rate,
+                "base_price_list_rate": prep.base_price_list_rate,
+                "amount": flt(prep.rate) * flt(prep.qty),
+                "warehouse": prep.warehouse,
+            },
+        )
+
+    # filter_pricing_rules_for_qty_amount reads these straight off the doc
+    # (erpnext/accounts/doctype/pricing_rule/utils.py:572).
+    doc.total_qty = total_qty
+    doc.total = total
+
+    initial_item_count = len(doc.items)
+    pre_addl_pct = flt(doc.get("additional_discount_percentage") or 0)
+    pre_discount_amt = flt(doc.get("discount_amount") or 0)
+    try:
+        erpnext_apply_pricing_rule_on_transaction(doc)
+    except Exception:
+        # A misconfigured transaction-scoped rule must not break the per-item
+        # discounts that have already been computed by the caller.
+        frappe.log_error(
+            frappe.get_traceback(), "POS Apply Offers (Transaction Rules)"
+        )
+        return {
+            "free_items": {},
+            "applied_rules": set(),
+            "additional_discount_percentage": 0,
+            "discount_amount": 0,
+            "apply_discount_on": None,
+        }
+
+    free_items = {}
+    applied_rules = set()
+    for row in doc.items[initial_item_count:]:
+        if not getattr(row, "is_free_item", 0):
+            continue
+        rule_name = row.get("pricing_rules")
+        if not rule_name or rule_name not in rule_map:
+            continue
+        if selected_offer_names and rule_name not in selected_offer_names:
+            continue
+        fid = frappe._dict(row.as_dict())
+        fid.applied_promotional_scheme = rule_map[rule_name].promotional_scheme
+        free_items[(row.item_code, rule_name)] = fid
+        applied_rules.add(rule_name)
+
+    # Capture header-level discount that ERPNext's apply_pricing_rule_on_transaction
+    # set on the doc when a Price-type Transaction rule fired. ERPNext writes one of
+    # additional_discount_percentage / discount_amount onto the doc (see
+    # erpnext/accounts/doctype/pricing_rule/utils.py:578-616) but does not surface
+    # which rule fired. We detect "fired" by diffing the doc fields against the
+    # pre-call snapshot and attribute the application to every selected, in-scope
+    # transaction-level Price rule in rule_map. The frontend treats the response
+    # additional_discount_percentage / discount_amount as authoritative for the
+    # header, so attribution mismatches only affect the UI badge, not totals.
+    post_addl_pct = flt(doc.get("additional_discount_percentage") or 0)
+    post_discount_amt = flt(doc.get("discount_amount") or 0)
+    apply_discount_on = doc.get("apply_discount_on") or None
+
+    header_discount_changed = (
+        post_addl_pct != pre_addl_pct or post_discount_amt != pre_discount_amt
+    )
+    if header_discount_changed:
+        for rule_name, details in rule_map.items():
+            if selected_offer_names and rule_name not in selected_offer_names:
+                continue
+            if details.get("price_or_product_discount") != "Price":
+                continue
+            if frappe.db.get_value("Pricing Rule", rule_name, "apply_on") != "Transaction":
+                continue
+            applied_rules.add(rule_name)
+
+    return {
+        "free_items": free_items,
+        "applied_rules": applied_rules,
+        "additional_discount_percentage": post_addl_pct,
+        "discount_amount": post_discount_amt,
+        "apply_discount_on": apply_discount_on,
+    }
+
+
 @frappe.whitelist()
 def apply_offers(invoice_data, selected_offers=None):
     """Calculate and apply promotional offers using ERPNext Pricing Rules.
@@ -3090,6 +3273,32 @@ def apply_offers(invoice_data, selected_offers=None):
                 # Include both promotional scheme rules and standalone pricing rules
                 rule_map[record.name] = record
 
+        # Top up rule_map with transaction-scoped rules. The per-item engine
+        # never surfaces apply_on="Transaction" rules, so without this they
+        # would be dropped at the `if not rule_map: return` check below.
+        # ERPNext's own SQL inside apply_pricing_rule_on_transaction handles
+        # date/currency/pos_only filtering, so a broad superset is sufficient.
+        if erpnext_apply_pricing_rule_on_transaction:
+            txn_rule_records = frappe.get_all(
+                "Pricing Rule",
+                filters={
+                    "disable": 0,
+                    "apply_on": "Transaction",
+                    "company": profile.company,
+                    "selling": 1,
+                    "coupon_code_based": 0,
+                },
+                fields=[
+                    "name",
+                    "promotional_scheme",
+                    "coupon_code_based",
+                    "promotional_scheme_id",
+                    "price_or_product_discount",
+                ],
+            )
+            for record in txn_rule_records:
+                rule_map.setdefault(record.name, record)
+
         if selected_offer_names:
             # Restrict available rules to the ones explicitly selected from the UI.
             rule_map = {
@@ -3225,10 +3434,43 @@ def apply_offers(invoice_data, selected_offers=None):
                 ].promotional_scheme
                 free_items_map[(free_item.get("item_code"), rule_name)] = free_item_doc
 
+        # Evaluate apply_on="Transaction" rules through ERPNext's separate
+        # transaction-level engine. The per-item engine above does not see
+        # them, so without this step "Entire Transaction" promotional schemes
+        # (free product based on cart total) would never apply.
+        txn_result = _evaluate_transaction_offers(
+            invoice,
+            profile,
+            pricing_items,
+            customer,
+            customer_group,
+            territory,
+            invoice.get("posting_date") or nowdate(),
+            pricing_args.currency,
+            pricing_args.price_list,
+            rule_map,
+            selected_offer_names,
+        )
+        # Per-item results win on collisions because they already carry full
+        # discount metadata from the per-item engine result.
+        for key, free_item_doc in txn_result.get("free_items", {}).items():
+            free_items_map.setdefault(key, free_item_doc)
+        applied_rules.update(txn_result.get("applied_rules", set()))
+
         return {
             "items": [dict(item) for item in prepared_items],
             "free_items": [dict(item) for item in free_items_map.values()],
             "applied_pricing_rules": sorted(applied_rules),
+            # Header-level (transaction-scope) discount surfaced from
+            # _evaluate_transaction_offers. Frontend should apply these to the
+            # invoice header (additionalDiscount + apply_discount_on) when
+            # present. Both fields are zero when no transaction-level Price
+            # rule fired.
+            "additional_discount_percentage": flt(
+                txn_result.get("additional_discount_percentage") or 0
+            ),
+            "discount_amount": flt(txn_result.get("discount_amount") or 0),
+            "apply_discount_on": txn_result.get("apply_discount_on"),
         }
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "Apply Offers Error")

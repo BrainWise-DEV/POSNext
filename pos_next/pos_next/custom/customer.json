@@ -1,0 +1,21 @@
+{
+ "custom_fields": [
+  {
+   "dt": "Customer",
+   "fieldname": "custom_company",
+   "fieldtype": "Link",
+   "insert_after": "customer_group",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "module": "POS Next",
+   "name": "Customer-custom_company",
+   "options": "Company",
+   "reqd": 0
+  }
+ ],
+ "custom_perms": [],
+ "doctype": "Customer",
+ "links": [],
+ "property_setters": [],
+ "sync_on_migrate": 1
+}

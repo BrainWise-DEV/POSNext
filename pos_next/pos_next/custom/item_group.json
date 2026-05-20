@@ -1,0 +1,21 @@
+{
+ "custom_fields": [
+  {
+   "dt": "Item Group",
+   "fieldname": "custom_company",
+   "fieldtype": "Link",
+   "insert_after": "parent_item_group",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "module": "POS Next",
+   "name": "Item Group-custom_company",
+   "options": "Company",
+   "reqd": 0
+  }
+ ],
+ "custom_perms": [],
+ "doctype": "Item Group",
+ "links": [],
+ "property_setters": [],
+ "sync_on_migrate": 1
+}

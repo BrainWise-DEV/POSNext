@@ -137,17 +137,6 @@ before_uninstall = "pos_next.uninstall.before_uninstall"
 # notification_config = "pos_next.notifications.get_notification_config"
 
 # Permissions
-# -----------
-# Permissions evaluated in scripted ways
-
-# permission_query_conditions = {
-# 	"Event": "frappe.desk.doctype.event.event.get_permission_query_conditions",
-# }
-#
-# has_permission = {
-# 	"Event": "frappe.desk.doctype.event.event.has_permission",
-# }
-
 # Standard Queries
 # ----------------
 # Custom query for company-aware item filtering

@@ -10,26 +10,21 @@ from frappe import _
 def validate_item(doc, method):
 	"""
 	Validate Item doctype
-	- Allow items with or without company
-	- Items without company are treated as global items (available to all companies)
-	- Explicitly set custom_company to empty string for new global items
+	- Keep custom_company value as provided by user
+	- Do not auto-fill defaults
 	"""
-	# Only set custom_company for new items, don't modify existing items
-	if doc.is_new():
-		if not doc.get("custom_company"):
-			doc.custom_company = ""
+	pass
 
 
 @frappe.whitelist()
 def item_query(doctype, txt, searchfield, start, page_len, filters):
 	"""
 	Custom query to filter items by company
-	- If company is specified in filters, show:
-	  1. Items belonging to that company
-	  2. Global items (where custom_company is empty)
-	- If no company specified, show all items
+	- If company is specified in filters, show matching company items only
+	- If no company is specified, show items based on the current user's allowed companies
 	"""
 	import json
+	from pos_next.company_isolation import get_user_companies
 
 	# Parse filters if it's a string (when called from frontend)
 	if isinstance(filters, str):
@@ -45,9 +40,16 @@ def item_query(doctype, txt, searchfield, start, page_len, filters):
 	company = filters.get("company") if filters else None
 
 	if company:
-		# Show items for specific company + global items
 		conditions.append("(custom_company = %s OR custom_company IS NULL OR custom_company = '')")
 		values.append(company)
+	else:
+		user_companies = get_user_companies()
+		if user_companies:
+			placeholders = ", ".join(["%s"] * len(user_companies))
+			conditions.append(
+				f"(custom_company IN ({placeholders}) OR custom_company IS NULL OR custom_company = '')"
+			)
+			values.extend(user_companies)
 
 	query = f"""
 		SELECT name, item_name, item_group
