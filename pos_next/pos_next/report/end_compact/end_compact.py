@@ -131,9 +131,26 @@ def execute(filters=None):
 				header_row[fn] = ""
 		data.append(header_row)
 
-		all_item_groups = frappe.get_all("Item Group", 
-			fields=["name", "parent_item_group", "is_group"], 
-			order_by="lft asc")
+		# Limit Item Groups to Appliances, Crockery, Thermoware, Bed & Bath, Decor, Plastic and their descendants
+		target_groups = ["APPLIANCES", "CROCKREY", "THERMOWARE", "BED N BATH", "DECOR", "PLASTIC"]
+		
+		# Fetch lft and rgt bounds for these target parent item groups
+		bounds = frappe.get_all("Item Group",
+			filters={"name": ["in", target_groups]},
+			fields=["name", "lft", "rgt"]
+		)
+		
+		if bounds:
+			or_conditions = " OR ".join([f"(lft >= {b.lft} AND rgt <= {b.rgt})" for b in bounds])
+			raw_item_groups = frappe.db.sql(f"""
+				SELECT name, parent_item_group, is_group, lft, rgt
+				FROM `tabItem Group`
+				WHERE {or_conditions}
+				ORDER BY lft asc
+			""", as_dict=1)
+			all_item_groups = [frappe._dict(ig) for ig in raw_item_groups]
+		else:
+			all_item_groups = []
 		
 		first_day = get_first_day(today())
 		
@@ -166,15 +183,22 @@ def execute(filters=None):
 				if ig.parent_item_group in daily_totals: daily_totals[ig.parent_item_group] += daily_totals[ig.name]
 				if ig.parent_item_group in monthly_totals: monthly_totals[ig.parent_item_group] += monthly_totals[ig.name]
 		
-		daily_section_total = round(sum(daily_totals[ig.name] for ig in all_item_groups if not ig.parent_item_group))
-		monthly_section_total = round(sum(monthly_totals[ig.name] for ig in all_item_groups if not ig.parent_item_group))
+		daily_section_total = round(sum(daily_totals[ig.name] for ig in all_item_groups if ig.name in target_groups))
+		monthly_section_total = round(sum(monthly_totals[ig.name] for ig in all_item_groups if ig.name in target_groups))
 
 		levels = {}
 		parent_map = {ig.name: ig.parent_item_group for ig in all_item_groups}
 		def get_level(group_name):
 			if not group_name: return -1
+			if group_name in target_groups:
+				levels[group_name] = 0
+				return 0
 			if group_name in levels: return levels[group_name]
-			level = get_level(parent_map.get(group_name)) + 1
+			parent = parent_map.get(group_name)
+			if not parent:
+				levels[group_name] = 0
+				return 0
+			level = get_level(parent) + 1
 			levels[group_name] = level
 			return level
 
