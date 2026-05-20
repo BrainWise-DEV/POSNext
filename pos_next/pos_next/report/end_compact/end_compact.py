@@ -203,6 +203,9 @@ def execute(filters=None):
 			return level
 
 		for ig in all_item_groups:
+			if ig.name not in target_groups:
+				continue
+				
 			d_val = daily_totals.get(ig.name, 0)
 			m_val = monthly_totals.get(ig.name, 0)
 			d_pct = (d_val / daily_section_total * 100) if daily_section_total else 0
@@ -214,8 +217,8 @@ def execute(filters=None):
 				col3_fn: d_pct,
 				col4_fn: m_val,
 				col5_fn: m_pct,
-				"indent": get_level(ig.name),
-				"is_group": int(ig.is_group or 0),
+				"indent": 0,
+				"is_group": 0,
 				"_is_category_row": True,
 				"_percentage_columns": [col3_fn, col5_fn],
 				"_category_columns": ["mode_of_payment", col2_fn, col3_fn, col4_fn, col5_fn]
