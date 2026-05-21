@@ -183,7 +183,11 @@ def reclaim_pos_settings_doctype(quiet=False):
 		)
 
 	try:
+		# Commit any open transaction first — DROP TABLE is DDL and would
+		# otherwise trigger ImplicitCommitError under Frappe's safety check.
+		frappe.db.commit()
 		frappe.db.sql("DROP TABLE IF EXISTS `tabPOS Settings`")
+		frappe.db.commit()
 		frappe.db.sql("DELETE FROM `tabSingles` WHERE doctype = 'POS Settings'")
 		frappe.db.sql("DELETE FROM `tabDocField` WHERE parent = 'POS Settings'")
 		frappe.db.sql("DELETE FROM `tabDocPerm` WHERE parent = 'POS Settings'")
