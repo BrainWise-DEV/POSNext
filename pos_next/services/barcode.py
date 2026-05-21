@@ -88,21 +88,44 @@ def resolve_barcode(barcode: str, pos_profile: str) -> BarcodeResult | None:
         from barcode_resolver.barcode_resolver.doctype.barcode_rule.utils import (
             resolve_barcode as _resolve_barcode,
         )
-        # get POS Settings
-        pos_settings = frappe.get_doc("POS Settings", {"pos_profile": pos_profile})
-        barcode_rules = [rule.barcode_rule for rule in pos_settings.barcode_rules if not rule.disable]
-        return _resolve_barcode(barcode, barcode_rules)
     except ImportError:
-        # App might have been uninstalled, clear cache and return None
         is_barcode_resolver_available.cache_clear()
         return None
+
+    barcode_rules = _get_barcode_rules_for_profile(pos_profile)
+
+    try:
+        return _resolve_barcode(barcode, barcode_rules)
     except Exception:
-        # Log unexpected errors but don't break POS functionality
         frappe.log_error(
             title="Barcode Resolver Error",
-            message=f"Error resolving barcode: {barcode}",
+            message=f"Error resolving barcode {barcode!r} for profile {pos_profile!r}\n\n{frappe.get_traceback()}",
         )
         return None
+
+
+def _get_barcode_rules_for_profile(pos_profile: str) -> list[str] | None:
+    """Return enabled Barcode Rule names for the given POS Profile.
+
+    Returns None when no per-profile configuration exists, which signals
+    the resolver to consider every active Barcode Rule. This keeps the
+    resolver functional on sites that have not yet migrated to the
+    POS Next `POS Settings` doctype (which adds `pos_profile` +
+    `barcode_rules`).
+    """
+    settings_name = frappe.db.get_value(
+        "POS Settings", {"pos_profile": pos_profile}, "name"
+    )
+    if not settings_name:
+        return None
+
+    try:
+        settings_doc = frappe.get_cached_doc("POS Settings", settings_name)
+    except Exception:
+        return None
+
+    rules_table = getattr(settings_doc, "barcode_rules", None) or []
+    return [row.barcode_rule for row in rules_table if not row.disable]
 
 
 def compute_resolved_item_data(
@@ -151,10 +174,14 @@ def compute_resolved_item_data(
         )
         return None
 
-    integer_value = resolved_barcode.get("integer_value", "0")
-    decimal_value = resolved_barcode.get("decimal_value", "0")
+    # Upstream barcode_resolver returns parsed values directly (qty for weighted,
+    # price for priced) and no longer exposes raw integer/decimal segments.
+    encoded_qty = resolved_barcode.get("qty")
+    encoded_price = resolved_barcode.get("price")
     if barcode_type == BarcodeTypes.WEIGHTED.value:
-        qty = float(f"{integer_value}.{decimal_value}")
+        if encoded_qty is None:
+            return None
+        qty = float(encoded_qty)
         uom = barcode_uom
         price = barcode_uom_price
         if barcode_uom not in uom_prices:
@@ -170,7 +197,9 @@ def compute_resolved_item_data(
             "resolved_barcode_type": barcode_type,
         }
     elif barcode_type == BarcodeTypes.PRICED.value:
-        encoded_price = float(f"{integer_value}.{decimal_value}")
+        if encoded_price is None:
+            return None
+        encoded_price = float(encoded_price)
         if barcode_uom in uom_prices:
             barcode_uom_price = uom_prices.get(barcode_uom)
             price = barcode_uom_price
