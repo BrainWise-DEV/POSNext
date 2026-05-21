@@ -21,11 +21,14 @@ Usage:
 
 from __future__ import annotations
 
+import logging
 from functools import lru_cache
 from typing import List, TypedDict
 
 import frappe
 from erpnext.stock.get_item_details import get_conversion_factor
+
+logger = logging.getLogger(__name__)
 
 
 class BarcodeResult(TypedDict, total=False):
@@ -82,6 +85,7 @@ def resolve_barcode(barcode: str, pos_profile: str) -> BarcodeResult | None:
         ...     print(f"Item: {result['item_barcode']}, Qty: {result['qty']}")
     """
     if not is_barcode_resolver_available():
+        logger.debug("resolve_barcode: barcode_resolver app not installed")
         return None
 
     try:
@@ -89,19 +93,36 @@ def resolve_barcode(barcode: str, pos_profile: str) -> BarcodeResult | None:
             resolve_barcode as _resolve_barcode,
         )
     except ImportError:
+        logger.warning("resolve_barcode: ImportError loading upstream; clearing cache")
         is_barcode_resolver_available.cache_clear()
         return None
 
     barcode_rules = _get_barcode_rules_for_profile(pos_profile)
+    logger.info(
+        "resolve_barcode: barcode=%r profile=%r rules=%s",
+        barcode, pos_profile,
+        "ALL_ACTIVE" if barcode_rules is None else barcode_rules,
+    )
 
     try:
-        return _resolve_barcode(barcode, barcode_rules)
+        result = _resolve_barcode(barcode, barcode_rules)
     except Exception:
         frappe.log_error(
             title="Barcode Resolver Error",
             message=f"Error resolving barcode {barcode!r} for profile {pos_profile!r}\n\n{frappe.get_traceback()}",
         )
+        logger.exception("resolve_barcode: upstream raised for barcode=%r", barcode)
         return None
+
+    if result is None:
+        logger.info("resolve_barcode: no match for barcode=%r", barcode)
+    else:
+        logger.info(
+            "resolve_barcode: matched barcode=%r -> item_code=%s qty=%s price=%s type=%s",
+            barcode, result.get("item_code"), result.get("qty"),
+            result.get("price"), result.get("barcode_type"),
+        )
+    return result
 
 
 def _get_barcode_rules_for_profile(pos_profile: str) -> list[str] | None:
@@ -117,15 +138,28 @@ def _get_barcode_rules_for_profile(pos_profile: str) -> list[str] | None:
         "POS Settings", {"pos_profile": pos_profile}, "name"
     )
     if not settings_name:
+        logger.info(
+            "resolve_barcode: no POS Settings row for profile=%r — falling back to all active rules",
+            pos_profile,
+        )
         return None
 
     try:
         settings_doc = frappe.get_cached_doc("POS Settings", settings_name)
     except Exception:
+        logger.warning(
+            "resolve_barcode: could not load POS Settings %r — falling back",
+            settings_name,
+        )
         return None
 
     rules_table = getattr(settings_doc, "barcode_rules", None) or []
-    return [row.barcode_rule for row in rules_table if not row.disable]
+    enabled = [row.barcode_rule for row in rules_table if not row.disable]
+    logger.debug(
+        "resolve_barcode: profile=%r settings=%r enabled_rules=%s",
+        pos_profile, settings_name, enabled,
+    )
+    return enabled
 
 
 def compute_resolved_item_data(
