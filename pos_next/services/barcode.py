@@ -162,6 +162,36 @@ def _get_barcode_rules_for_profile(pos_profile: str) -> list[str] | None:
     return enabled
 
 
+def _coerce_value(resolved_barcode, field: str) -> float | None:
+    """Pull a numeric value out of the resolver result regardless of upstream shape.
+
+    Newer barcode_resolver versions populate `qty` / `price` directly. Older
+    versions only return `integer_value` and `decimal_value` segments which
+    must be joined as `"<int>.<dec>"`. Supporting both lets us keep working
+    across mixed upstream versions in production.
+    """
+    direct = resolved_barcode.get(field)
+    if direct is not None:
+        try:
+            return float(direct)
+        except (TypeError, ValueError):
+            pass
+
+    if field == "qty" and resolved_barcode.get("barcode_type") != "Weighted":
+        return None
+    if field == "price" and resolved_barcode.get("barcode_type") != "Priced":
+        return None
+
+    integer_value = resolved_barcode.get("integer_value")
+    decimal_value = resolved_barcode.get("decimal_value")
+    if integer_value is None and decimal_value is None:
+        return None
+    try:
+        return float(f"{integer_value or '0'}.{decimal_value or '0'}")
+    except ValueError:
+        return None
+
+
 def compute_resolved_item_data(
     resolved_barcode: BarcodeResult | None,
     item,
@@ -208,12 +238,17 @@ def compute_resolved_item_data(
         )
         return None
 
-    # Upstream barcode_resolver returns parsed values directly (qty for weighted,
-    # price for priced) and no longer exposes raw integer/decimal segments.
-    encoded_qty = resolved_barcode.get("qty")
-    encoded_price = resolved_barcode.get("price")
+    # Older barcode_resolver versions return integer_value/decimal_value segments;
+    # newer versions return parsed qty/price directly. Support both by preferring
+    # the parsed value and falling back to reconstructing from segments.
+    encoded_qty = _coerce_value(resolved_barcode, "qty")
+    encoded_price = _coerce_value(resolved_barcode, "price")
     if barcode_type == BarcodeTypes.WEIGHTED.value:
         if encoded_qty is None:
+            logger.warning(
+                "compute_resolved_item_data: weighted barcode missing qty and segments: %s",
+                resolved_barcode,
+            )
             return None
         qty = float(encoded_qty)
         uom = barcode_uom
@@ -232,6 +267,10 @@ def compute_resolved_item_data(
         }
     elif barcode_type == BarcodeTypes.PRICED.value:
         if encoded_price is None:
+            logger.warning(
+                "compute_resolved_item_data: priced barcode missing price and segments: %s",
+                resolved_barcode,
+            )
             return None
         encoded_price = float(encoded_price)
         if barcode_uom in uom_prices:
