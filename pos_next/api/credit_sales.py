@@ -320,6 +320,47 @@ def redeem_customer_credit(invoice_name, customer_credit_dict):
 			)
 			created_journal_entries.append(pe_name)
 
+	# Recalculate outstanding_amount from GL entries after credit allocation
+	if created_journal_entries:
+		try:
+			from erpnext.accounts.utils import get_outstanding_invoices
+			
+			# Reload invoice to pick up GL changes
+			invoice_doc.reload_doc()
+			
+			# Recalculate outstanding amount using ERPNext standard method
+			# This queries the GL entries directly
+			outstanding = invoice_doc.get_outstanding_amount()
+			
+			# Update the invoice
+			frappe.db.set_value(
+				"Sales Invoice",
+				invoice_name,
+				"outstanding_amount",
+				outstanding
+			)
+			
+			# Also update the status based on new outstanding amount
+			if outstanding <= 0:
+				frappe.db.set_value(
+					"Sales Invoice",
+					invoice_name,
+					"status",
+					"Paid"
+				)
+			else:
+				frappe.db.set_value(
+					"Sales Invoice",
+					invoice_name,
+					"status",
+					"Unpaid"
+				)
+		except Exception as e:
+			frappe.log_error(
+				title="Failed to recalculate outstanding amount",
+				message=f"Invoice: {invoice_name}, Error: {str(e)}\n{frappe.get_traceback()}"
+			)
+
 	return created_journal_entries
 
 
@@ -495,6 +536,15 @@ def _create_credit_allocation_journal_entry(invoice_doc, original_invoice_name, 
 		"Company", invoice_doc.company, "cost_center"
 	)
 
+	# Get receivable account for original invoice
+	original_receivable = frappe.db.get_value(
+		"Account", original_invoice.debit_to, "account_type"
+	)
+	# Get receivable account for new invoice
+	new_receivable = frappe.db.get_value(
+		"Account", invoice_doc.debit_to, "account_type"
+	)
+
 	# Create Journal Entry
 	jv_doc = frappe.get_doc({
 		"doctype": "Journal Entry",
@@ -505,30 +555,38 @@ def _create_credit_allocation_journal_entry(invoice_doc, original_invoice_name, 
 	})
 
 	# Debit Entry - Original Invoice (reduces outstanding)
-	debit_row = jv_doc.append("accounts", {})
-	debit_row.update({
+	debit_entry = {
 		"account": original_invoice.debit_to,
-		"party_type": "Customer",
-		"party": invoice_doc.customer,
 		"reference_type": "Sales Invoice",
 		"reference_name": original_invoice.name,
+		"against_voucher_type": "Sales Invoice",
+		"against_voucher": original_invoice.name,
 		"debit_in_account_currency": amount,
 		"credit_in_account_currency": 0,
 		"cost_center": cost_center,
-	})
+	}
+	if original_receivable in ("Receivable", "Payable"):
+		debit_entry["party_type"] = "Customer"
+		debit_entry["party"] = invoice_doc.customer
+	debit_row = jv_doc.append("accounts", {})
+	debit_row.update(debit_entry)
 
 	# Credit Entry - New Invoice (reduces outstanding)
-	credit_row = jv_doc.append("accounts", {})
-	credit_row.update({
+	credit_entry = {
 		"account": invoice_doc.debit_to,
-		"party_type": "Customer",
-		"party": invoice_doc.customer,
 		"reference_type": "Sales Invoice",
 		"reference_name": invoice_doc.name,
+		"against_voucher_type": "Sales Invoice",
+		"against_voucher": invoice_doc.name,
 		"debit_in_account_currency": 0,
 		"credit_in_account_currency": amount,
 		"cost_center": cost_center,
-	})
+	}
+	if new_receivable in ("Receivable", "Payable"):
+		credit_entry["party_type"] = "Customer"
+		credit_entry["party"] = invoice_doc.customer
+	credit_row = jv_doc.append("accounts", {})
+	credit_row.update(credit_entry)
 
 	jv_doc.flags.ignore_permissions = True
 	jv_doc.save()

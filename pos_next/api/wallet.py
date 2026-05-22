@@ -217,9 +217,12 @@ def get_pending_wallet_payments(customer, exclude_invoice=None):
 	"""
 	Get total wallet payments from unconsolidated/pending POS invoices.
 	"""
+	# Get open Sales Invoices in draft state only.
+	# Submitted invoices already post wallet payments to GL,
+	# so their wallet amounts are not "pending" again.
 	filters = {
 		"customer": customer,
-		"docstatus": ["in", [0, 1]],
+		"docstatus": 0,
 		"outstanding_amount": [">", 0],
 		"is_pos": 1
 	}
@@ -439,33 +442,44 @@ def get_wallet_info(customer, company, pos_profile=None):
 		"loyalty_to_wallet": False
 	}
 
-	# Check if loyalty program is enabled in POS Settings
+	# Check POS Settings for wallet and loyalty support
+	pos_settings = None
 	if pos_profile:
 		pos_settings = get_pos_settings(pos_profile)
 		if pos_settings:
-			result["wallet_enabled"] = cint(pos_settings.get("enable_loyalty_program"))
+			result["wallet_enabled"] = bool(
+				cint(pos_settings.get("enable_loyalty_program")) or
+				cint(pos_settings.get("auto_create_wallet"))
+			)
 			result["wallet_account"] = pos_settings.get("wallet_account")
 			result["auto_create"] = cint(pos_settings.get("auto_create_wallet"))
 			result["loyalty_program"] = pos_settings.get("default_loyalty_program")
 			result["loyalty_to_wallet"] = cint(pos_settings.get("loyalty_to_wallet"))
 
-	if not result["wallet_enabled"]:
-		return result
-
-	# Get wallet details (support both pos_next and wallete status values)
+	# If wallet support is not explicitly enabled by POS settings, still check
+	# for an existing active wallet. This allows previously created wallet credit
+	# balances to surface in the POS payment dialog even when loyalty is disabled.
 	wallet = frappe.db.get_value(
 		"Wallet",
 		{"customer": customer, "company": company, "status": ["in", ["Active", "active"]]},
 		["name", "account"],
-		as_dict=True
+		as_dict=True,
 	)
 
 	if wallet:
 		result["wallet_exists"] = True
 		result["wallet_name"] = wallet.name
 		result["wallet_balance"] = get_customer_wallet_balance(customer, company)
-	elif result["auto_create"]:
-		# Auto-create wallet for customer if enabled
+		result["wallet_enabled"] = True
+
+	if not result["wallet_enabled"]:
+		return result
+
+	if wallet:
+		return result
+
+	# Auto-create wallet for customer if enabled
+	if result["auto_create"]:
 		try:
 			new_wallet = get_or_create_wallet(customer, company, pos_settings)
 			if new_wallet:
