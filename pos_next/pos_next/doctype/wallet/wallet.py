@@ -137,10 +137,12 @@ def get_pending_wallet_payments(customer, exclude_invoice=None):
 	Get total wallet payments from unconsolidated/pending POS invoices.
 	This prevents double-spending of wallet balance.
 	"""
-	# Get open Sales Invoices (draft or unconsolidated POS invoices)
+	# Get open Sales Invoices in draft state only.
+	# Submitted invoices already post wallet payments to GL,
+	# so their wallet amounts are not "pending" again.
 	filters = {
 		"customer": customer,
-		"docstatus": ["in", [0, 1]],  # Draft or Submitted
+		"docstatus": 0,
 		"outstanding_amount": [">", 0],
 		"is_pos": 1
 	}

@@ -10,6 +10,7 @@ from frappe import _
 from frappe.utils import flt, cint, nowdate, nowtime, get_datetime, cstr
 from erpnext.stock.doctype.batch.batch import get_batch_qty, get_batch_no
 from erpnext.accounts.doctype.sales_invoice.sales_invoice import get_bank_cash_account
+from pos_next.api.utilities import is_wallet_payment_mode
 
 
 # ==========================================
@@ -444,6 +445,90 @@ def _strip_server_managed_fields(payload):
     return cleaned
 
 
+def _create_wallet_payment_journal_entry(invoice_doc, payment):
+	"""
+	Create Journal Entry for wallet/customer balance payment.
+	
+	GL Entries:
+	- Debit: debit_to (Customer Receivable Account)
+	- Credit: wallet_account (Customer Credit/Wallet Account)
+	
+	NO invoice reference - the JE just balances the GL accounts without linking to the invoice.
+	This allows the invoice outstanding amount to be calculated correctly from payment rows.
+	
+	Args:
+		invoice_doc: Submitted Sales Invoice document
+		payment: Payment entry with mode_of_payment and account
+	
+	Returns:
+		str: Journal Entry name or None if not a wallet payment
+	"""
+	from frappe.utils import today
+	
+	mode_of_payment = payment.get("mode_of_payment")
+	if not mode_of_payment or not is_wallet_payment_mode(mode_of_payment):
+		return None
+	
+	amount = flt(payment.get("amount", 0))
+	wallet_account = payment.get("account")
+	
+	if amount <= 0 or not wallet_account:
+		return None
+	
+	# Get cost center
+	cost_center = invoice_doc.get("cost_center") or frappe.get_cached_value(
+		"Company", invoice_doc.company, "cost_center"
+	)
+	
+	try:
+		# Create Journal Entry
+		jv_doc = frappe.get_doc({
+			"doctype": "Journal Entry",
+			"voucher_type": "Journal Entry",
+			"posting_date": today(),
+			"company": invoice_doc.company,
+			"user_remark": f"POS wallet payment for invoice {invoice_doc.name}",
+		})
+		
+		# Debit Entry - Debtors account
+		debit_entry = {
+			"account": invoice_doc.debit_to,
+			"debit_in_account_currency": amount,
+			"credit_in_account_currency": 0,
+			"cost_center": cost_center,
+			"party_type": "Customer",
+			"party": invoice_doc.customer,
+		}
+		jv_doc.append("accounts", debit_entry)
+		
+		# Credit Entry - Wallet account
+		credit_entry = {
+			"account": wallet_account,
+			"debit_in_account_currency": 0,
+			"credit_in_account_currency": amount,
+			"cost_center": cost_center,
+		}
+		jv_doc.append("accounts", credit_entry)
+		
+		jv_doc.flags.ignore_permissions = True
+		jv_doc.save()
+		jv_doc.submit()
+		
+		frappe.msgprint(
+			_("Journal Entry {0} created for wallet payment").format(jv_doc.name),
+			alert=True
+		)
+		
+		return jv_doc.name
+		
+	except Exception as e:
+		frappe.log_error(
+			title="Wallet Payment JE Creation Error",
+			message=f"Invoice: {invoice_doc.name}, Payment: {mode_of_payment}, Error: {str(e)}\n{frappe.get_traceback()}"
+		)
+		return None
+
+
 def get_payment_account(mode_of_payment, company):
     """
     Get account for mode of payment.
@@ -505,7 +590,7 @@ def get_payment_account(mode_of_payment, company):
     )
 
 
-def _set_payment_accounts(payments, company):
+def _set_payment_accounts(payments, company, customer=None):
     """Set the account for each payment entry that is missing one.
 
     Handles both Document objects (from invoice_doc.payments) and plain dicts
@@ -517,12 +602,31 @@ def _set_payment_accounts(payments, company):
 
     for payment in payments:
         mode_of_payment = payment.get("mode_of_payment")
-        if not mode_of_payment or payment.get("account"):
+        if not mode_of_payment:
             continue
+
         try:
-            account_info = get_payment_account(mode_of_payment, company)
-            if account_info:
-                account = account_info.get("account")
+            account = None
+
+            if customer and is_wallet_payment_mode(mode_of_payment):
+                wallet_account = frappe.db.get_value(
+                    "Wallet",
+                    {
+                        "customer": customer,
+                        "company": company,
+                        "status": ["in", ["Active", "active"]],
+                    },
+                    "account",
+                )
+                if wallet_account:
+                    account = wallet_account
+
+            if not account:
+                account_info = get_payment_account(mode_of_payment, company)
+                if account_info:
+                    account = account_info.get("account")
+
+            if account:
                 if hasattr(payment, "set") and callable(payment.set):
                     payment.set("account", account)
                 else:
@@ -888,7 +992,7 @@ def update_invoice(data):
         )
 
         if company and invoice_doc.get("payments") and doctype == "Sales Invoice":
-            _set_payment_accounts(invoice_doc.payments, company)
+            _set_payment_accounts(invoice_doc.payments, company, invoice_doc.customer)
 
         # Validate return items if this is a return invoice
         if (data.get("is_return") or invoice_doc.get("is_return")) and invoice_doc.get(
@@ -1104,7 +1208,7 @@ def update_invoice(data):
                 invoice_doc.discount_amount = flt(invoice_doc.discount_amount + discount_adjustment)
 
         # Set accounts for payment methods before saving
-        _set_payment_accounts(invoice_doc.payments, invoice_doc.company)
+        _set_payment_accounts(invoice_doc.payments, invoice_doc.company, invoice_doc.customer)
 
         # For return invoices, ensure payments are negative
         if invoice_doc.get("is_return"):
@@ -1517,7 +1621,11 @@ def submit_invoice(invoice=None, data=None):
 
         # Set accounts for all payment methods before saving
         if doctype == "Sales Invoice" and hasattr(invoice_doc, "payments"):
-            _set_payment_accounts(invoice_doc.payments, invoice_doc.company)
+            _set_payment_accounts(
+                invoice_doc.payments,
+                invoice_doc.company,
+                invoice_doc.customer,
+            )
 
         # Apply Friends & Family pricing if applicable
         apply_friends_family_pricing_to_invoice(invoice_doc, customer=invoice_doc.get("customer"))
@@ -1618,6 +1726,30 @@ def submit_invoice(invoice=None, data=None):
 
         # Submit invoice
         invoice_doc.submit()
+
+        # Create journal entries for wallet/customer balance payments
+        if invoice_doc.get("payments"):
+            for payment in invoice_doc.payments:
+                if is_wallet_payment_mode(payment.get("mode_of_payment")):
+                    try:
+                        _create_wallet_payment_journal_entry(invoice_doc, payment)
+                    except Exception as e:
+                        frappe.log_error(
+                            f"Error creating wallet payment JE for invoice {invoice_doc.name}: {str(e)}",
+                            "POS Wallet Payment JE Error"
+                        )
+
+        # Redeem customer credit if applied as payment
+        if customer_credit_dict and isinstance(customer_credit_dict, list) and len(customer_credit_dict) > 0:
+            from pos_next.api.credit_sales import redeem_customer_credit
+            try:
+                redeem_customer_credit(invoice_doc.name, customer_credit_dict)
+            except Exception as e:
+                frappe.log_error(
+                    f"Error redeeming customer credit for invoice {invoice_doc.name}: {str(e)}",
+                    "POS Credit Redemption Error"
+                )
+
         invoice_submitted = True
         # Handle wallet transaction reversal for returns
         wallet_reversal_ok = False

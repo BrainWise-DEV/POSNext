@@ -283,28 +283,6 @@
 						</p>
 					</div>
 
-					<!-- Outstanding Balance Row (full width, two columns) -->
-					<div v-if="customerCreditEnabled && totalAvailableCredit !== 0" :class="[
-						'rounded-lg border p-2 flex items-center justify-between',
-						totalAvailableCredit < 0
-							? 'bg-red-50 border-red-200'
-							: 'bg-emerald-50 border-emerald-200'
-					]">
-						<span :class="[
-							'text-xs font-semibold',
-							totalAvailableCredit < 0 ? 'text-red-700' : 'text-emerald-700'
-						]">
-							{{ totalAvailableCredit < 0 ? __('Outstanding Balance') : __('Credit Balance') }}
-						</span>
-						<!-- Show remaining credit (after used amount is deducted) for positive balance -->
-						<span :class="[
-							'text-base font-bold',
-							totalAvailableCredit < 0 ? 'text-red-600' : 'text-emerald-600'
-						]">
-							{{ totalAvailableCredit < 0 ? formatCurrency(Math.abs(totalAvailableCredit)) : formatCurrency(remainingAvailableCredit) }}
-						</span>
-					</div>
-
 					<!-- Invoice Summary -->
 					<div class="bg-white rounded-lg border border-gray-200 overflow-hidden flex flex-col flex-1 min-h-0">
 						<!-- Header -->
@@ -621,7 +599,11 @@
 							<div :class="['animate-spin rounded-full border-b-2 border-blue-500', isSmallMobile ? 'h-4 w-4' : 'h-5 w-5']"></div>
 							<span :class="['text-gray-500', isSmallMobile ? 'text-xs' : 'text-sm']">{{ __('Loading...') }}</span>
 						</div>
-						<div v-else-if="filteredPaymentMethods.length > 0" :class="['flex flex-wrap', isSmallMobile ? 'gap-1' : 'gap-1.5 lg:gap-2']">
+						<div v-if="walletInfo.wallet_exists && walletInfo.wallet_balance > 0" class="mb-3 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm font-medium">
+							{{ __('Wallet Balance:') }}
+							<span class="ml-2 font-semibold">{{ formatCurrency(availableWalletBalance) }}</span>
+						</div>
+					<div v-if="filteredPaymentMethods.length > 0" :class="['flex flex-wrap', isSmallMobile ? 'gap-1' : 'gap-1.5 lg:gap-2']">
 							<button
 								v-for="method in filteredPaymentMethods"
 								:key="method.mode_of_payment"
@@ -658,26 +640,7 @@
 								</span>
 							</button>
 							<!-- Credit Balance as Payment Method -->
-							<button
-								v-if="customerCreditEnabled && (remainingAvailableCredit > 0 || getMethodTotal('Customer Credit') > 0)"
-								@click="applyCustomerCredit"
-								:disabled="remainingAmount === 0 || remainingAvailableCredit === 0"
-								:class="[
-									'inline-flex items-center rounded-lg border-2 transition-all font-medium',
-									isSmallMobile ? 'gap-0.5 px-1.5 h-7 text-[10px]' : 'gap-1 lg:gap-2 px-2.5 lg:px-4 h-8 text-xs lg:h-11 lg:text-sm',
-									remainingAmount === 0 || remainingAvailableCredit === 0 ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
-									getMethodTotal('Customer Credit') > 0
-										? 'border-emerald-500 bg-emerald-50 text-emerald-700'
-										: 'border-emerald-300 bg-emerald-50 hover:border-emerald-500 hover:bg-emerald-100 text-emerald-700'
-								]"
-							>
-								<span :class="isSmallMobile ? 'text-xs' : 'text-sm lg:text-lg'">💳</span>
-								<span class="truncate">{{ __('Credit Balance') }}</span>
-								<span v-if="getMethodTotal('Customer Credit') > 0"
-									:class="['font-bold text-emerald-600 bg-emerald-100 rounded', isSmallMobile ? 'text-[8px] px-0.5 py-0.5' : 'text-xs px-1 py-0.5']">
-									{{ formatCurrency(getMethodTotal('Customer Credit')) }}
-								</span>
-							</button>
+
 						</div>
 						<div v-else :class="['text-gray-500', isSmallMobile ? 'text-xs' : 'text-sm']">{{ __('No payment methods available') }}</div>
 
@@ -1505,7 +1468,7 @@ const filteredPaymentMethods = computed(() => {
 	return paymentMethods.value.filter((method) => {
 		// If it's a wallet payment method, only show when loyalty/wallet is enabled
 		if (isWalletPaymentMethod(method.mode_of_payment)) {
-			return walletInfo.value.wallet_enabled
+			return walletInfo.value.wallet_enabled || walletInfo.value.wallet_exists
 		}
 		return true
 	})
