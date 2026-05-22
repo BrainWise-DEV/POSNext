@@ -599,10 +599,27 @@
 							<div :class="['animate-spin rounded-full border-b-2 border-blue-500', isSmallMobile ? 'h-4 w-4' : 'h-5 w-5']"></div>
 							<span :class="['text-gray-500', isSmallMobile ? 'text-xs' : 'text-sm']">{{ __('Loading...') }}</span>
 						</div>
-						<div v-if="walletInfo.wallet_exists && walletInfo.wallet_balance > 0" class="mb-3 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm font-medium">
-							{{ __('Wallet Balance:') }}
-							<span class="ml-2 font-semibold">{{ formatCurrency(availableWalletBalance) }}</span>
+						<!-- Customer Outstanding / Wallet Balance Display -->
+						<div v-if="(customerOutstanding > 0) || (walletInfo.wallet_exists && walletInfo.wallet_balance > 0)" :class="[
+							'mb-3 rounded-lg border p-2 flex items-center justify-between',
+							customerOutstanding > 0
+								? 'bg-red-50 border-red-200'
+								: 'bg-amber-50 border-amber-200'
+						]">
+							<span :class="[
+								'text-xs font-semibold',
+								customerOutstanding > 0 ? 'text-red-700' : 'text-amber-800'
+							]">
+								{{ customerOutstanding > 0 ? __('Outstanding Balance') : __('Wallet Balance') }}
+							</span>
+							<span :class="[
+								'text-base font-bold',
+								customerOutstanding > 0 ? 'text-red-600' : 'text-amber-700'
+							]">
+								{{ customerOutstanding > 0 ? formatCurrency(customerOutstanding) : formatCurrency(availableWalletBalance) }}
+							</span>
 						</div>
+
 					<div v-if="filteredPaymentMethods.length > 0" :class="['flex flex-wrap', isSmallMobile ? 'gap-1' : 'gap-1.5 lg:gap-2']">
 							<button
 								v-for="method in filteredPaymentMethods"
@@ -1712,9 +1729,16 @@ const customerCreditEnabled = computed(() => {
 	return props.allowCreditSale || props.allowCustomerCreditPayment
 })
 
+// Customer Outstanding Amount - positive value means customer owes money
+const customerOutstanding = computed(() => {
+	console.log("Calculating customer outstanding. Customer balance:", customerBalance.value,customerBalance.value.total_outstanding)
+	return roundCurrency(customerBalance.value.total_outstanding || 0)
+})
+
 const totalAvailableCredit = computed(() => {
 	// Use net_balance: negative means customer has credit, positive means they owe
 	// Return negative of net_balance so positive = credit available, negative = outstanding
+	console.log("Calculating total available credit. Customer balance:", customerBalance.value)
 	return roundCurrency(-customerBalance.value.net_balance)
 })
 
@@ -2008,10 +2032,14 @@ watch(
 	() => [props.customer, props.company, props.allowCreditSale, props.allowCustomerCreditPayment],
 	([customer, company, allowCreditSale, allowCustomerCreditPayment]) => {
 		const creditEnabled = allowCreditSale || allowCustomerCreditPayment
-		if (creditEnabled && customer && company) {
+		if (customer && company) {
 			log.debug("[PaymentDialog] Pre-fetching customer balance for:", customer)
+			// Always fetch customer balance to show outstanding even if credit is not enabled
 			customerBalanceResource.fetch()
-			customerCreditResource.fetch()
+			// Only fetch credit details if credit is enabled
+			if (creditEnabled) {
+				customerCreditResource.fetch()
+			}
 		}
 	},
 	{ immediate: true },
@@ -2026,16 +2054,16 @@ watch(show, (newVal) => {
 		mobileCustomAmount.value = ""
 		lastSelectedMethod.value = null
 		customerCredit.value = []
-		// Refetch credit sources every time the dialog opens. The pre-fetch
-		// watcher only fires when customer/company changes, so reopening the
-		// dialog for the same customer would otherwise leave credit_details
-		// empty and break "Apply Customer Credit" with an allocation error.
-		// customerBalance is also refetched so the displayed balance reflects
-		// any redemptions made by other cashiers since the last open.
+		// Refetch balance and credit sources every time the dialog opens to show
+		// current outstanding amount and available credit from other cashiers
 		const creditEnabled = props.allowCreditSale || props.allowCustomerCreditPayment
-		if (creditEnabled && props.customer && props.company) {
+		if (props.customer && props.company) {
+			// Always fetch balance to show outstanding
 			customerBalanceResource.fetch()
-			customerCreditResource.fetch()
+			// Only fetch credit if enabled
+			if (creditEnabled) {
+				customerCreditResource.fetch()
+			}
 		}
 		selectedSalesPersons.value = []
 		salesPersonSearch.value = ""

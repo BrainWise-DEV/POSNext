@@ -86,6 +86,9 @@
 									<p v-if="customer.mobile_no" class="text-[10px] text-gray-500 truncate leading-tight">
 										{{ customer.mobile_no }}
 									</p>
+									<p v-if="customerOutstanding > 0" class="text-[10px] text-orange-600 font-semibold leading-tight">
+										{{ __("Outstanding:") }} {{ formatCurrency(customerOutstanding) }}
+									</p>
 								</div>
 							</div>
 
@@ -1451,6 +1454,35 @@ const giftCardsResource = createResource({
 });
 
 /**
+ * Customer Balance Resource
+ *
+ * Fetches customer outstanding amount and credit balance.
+ * - Fetches when a customer is selected
+ * - Shows customer's outstanding invoices amount
+ * - Used to display "Outstanding: X" in cart header
+ *
+ * @endpoint pos_next.api.credit_sales.get_customer_balance
+ */
+const customerBalanceResource = createResource({
+	url: "pos_next.api.credit_sales.get_customer_balance",
+	makeParams() {
+		return {
+			customer: props.customer?.name || props.customer,
+			company: props.posProfile, // Will get company from profile
+		};
+	},
+	auto: false,
+	onSuccess(data) {
+		log.debug("[InvoiceCart] Customer balance loaded:", data);
+		customerOutstanding.value = data?.total_outstanding || 0;
+	},
+	onError(error) {
+		log.debug("[InvoiceCart] Error loading customer balance:", error);
+		customerOutstanding.value = 0;
+	},
+});
+
+/**
  * Watch for customer changes to load their gift cards.
  * Reloads gift cards resource when customer is selected (and online).
  * Clears gift cards when customer is removed or offline.
@@ -1462,6 +1494,22 @@ watch(
 			giftCardsResource.reload();
 		} else {
 			availableGiftCards.value = [];
+		}
+	}
+);
+
+/**
+ * Watch for customer changes to load their outstanding balance.
+ * Fetches outstanding amount when customer is selected.
+ * Clears outstanding when customer is removed.
+ */
+watch(
+	() => props.customer,
+	(newCustomer) => {
+		if (newCustomer && props.posProfile) {
+			customerBalanceResource.fetch();
+		} else {
+			customerOutstanding.value = 0;
 		}
 	}
 );
@@ -1596,6 +1644,13 @@ const displayGrandTotal = computed(() => {
 	// This makes the display consistent and intuitive
 	return displaySubtotal.value + props.taxAmount - props.discountAmount;
 });
+
+/**
+ * Customer outstanding balance from previous invoices.
+ * Fetched when customer is selected.
+ * @returns {Number} Outstanding amount customer owes
+ */
+const customerOutstanding = ref(0);
 
 /**
  * ============================================================================
