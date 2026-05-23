@@ -235,7 +235,8 @@
 
 <script setup>
 import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency"
-import { Button, Dialog } from "frappe-ui"
+import Dialog from "@/components/common/POSDialog.vue"
+import { Button } from "frappe-ui"
 import { createResource } from "frappe-ui"
 import { computed, nextTick, ref, watch } from "vue"
 import TranslatedHTML from "../common/TranslatedHTML.vue"

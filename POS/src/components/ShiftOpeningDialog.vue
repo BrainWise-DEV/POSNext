@@ -190,7 +190,8 @@
 </template>
 
 <script setup>
-import { Button, Dialog, Input } from "frappe-ui"
+import Dialog from "@/components/common/POSDialog.vue"
+import { Button, Input } from "frappe-ui"
 import { createResource } from "frappe-ui"
 import { computed, ref, watch } from "vue"
 import { useShift } from "../composables/useShift"

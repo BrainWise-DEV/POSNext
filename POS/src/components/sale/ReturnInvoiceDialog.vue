@@ -768,7 +768,8 @@ import {
 	roundCurrency,
 } from "@/utils/currency"
 import { getInvoiceStatusColor } from "@/utils/invoice"
-import { Button, Dialog, FeatherIcon, createResource } from "frappe-ui"
+import Dialog from "@/components/common/POSDialog.vue"
+import { Button, FeatherIcon, createResource } from "frappe-ui"
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue"
 
 const { showSuccess, showError, showWarning } = useToast()

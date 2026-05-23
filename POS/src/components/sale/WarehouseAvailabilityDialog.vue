@@ -499,7 +499,8 @@
  * Translations: All user-facing strings use __() for i18n
  */
 import { ref, computed, watch, nextTick } from 'vue'
-import { call, Dialog } from 'frappe-ui'
+import Dialog from "@/components/common/POSDialog.vue"
+import { call } from 'frappe-ui'
 import { __ } from '@/utils/translation'
 
 const props = defineProps({

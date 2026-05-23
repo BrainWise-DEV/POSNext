@@ -198,7 +198,8 @@
 </template>
 
 <script setup>
-import { Button, Dialog, createResource } from "frappe-ui"
+import Dialog from "@/components/common/POSDialog.vue"
+import { Button, createResource } from "frappe-ui"
 import { computed, ref, watch } from "vue"
 import { useSerialNumberStore } from "@/stores/serialNumber"
 import { usePOSCartStore } from "@/stores/posCart"
