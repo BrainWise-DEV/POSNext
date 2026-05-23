@@ -241,7 +241,9 @@ export async function printHTML(html, printerName, options = {}) {
 
 	const printer = printerName || getSavedPrinterName()
 	if (!printer) {
-		throw new Error("No printer selected. Please select a printer in POS Settings.")
+		throw new Error(
+			"No printer selected. Please select a printer in POS Settings.",
+		)
 	}
 
 	const config = qz.configs.create(printer, {
@@ -271,6 +273,41 @@ export async function printHTML(html, printerName, options = {}) {
 		return true
 	} catch (err) {
 		log.error(`Print failed on "${printer}":`, err?.message || err)
+		throw err
+	}
+}
+
+/**
+ * Send raw printer commands, such as ESC/POS, directly to a printer via QZ Tray.
+ *
+ * @param {string} commands - Rendered printer-native command string
+ * @param {string} [printerName] - Target printer. Falls back to saved printer.
+ * @returns {Promise<boolean>} true if print was dispatched successfully
+ */
+export async function printRawCommands(commands, printerName) {
+	if (!qz.websocket.isActive()) {
+		const ok = await connect()
+		if (!ok) {
+			throw new Error("QZ Tray is not available")
+		}
+	}
+
+	const printer = printerName || getSavedPrinterName()
+	if (!printer) {
+		throw new Error(
+			"No printer selected. Please select a printer in POS Settings.",
+		)
+	}
+
+	const config = qz.configs.create(printer)
+	const data = [commands]
+
+	try {
+		await qz.print(config, data)
+		log.info(`Raw print job sent to "${printer}"`)
+		return true
+	} catch (err) {
+		log.error(`Raw print failed on "${printer}":`, err?.message || err)
 		throw err
 	}
 }

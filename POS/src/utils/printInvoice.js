@@ -3,11 +3,15 @@ import { logger } from "@/utils/logger"
 import { getOfflineReceiptPayload } from "@/utils/offline/offlineReceiptCache"
 import { getOfflineInvoiceByOfflineId } from "@/utils/offline/sync"
 import { offlineWorker } from "@/utils/offline/workerClient"
-import { printHTML as qzPrintHTML } from "@/utils/qzTray"
+import {
+	printHTML as qzPrintHTML,
+	printRawCommands as qzPrintRawCommands,
+} from "@/utils/qzTray"
 
 const log = logger.create("PrintInvoice")
 
 const DEFAULT_PRINT_FORMAT = "POS Next Receipt"
+const printFormatMetaCache = new Map()
 
 // ============================================================================
 // Shared helpers
@@ -277,6 +281,32 @@ async function resolvePrintSettings(posProfile, printFormat, letterhead) {
 	return { printFormat: DEFAULT_PRINT_FORMAT, letterhead }
 }
 
+async function getPrintFormatMeta(printFormat) {
+	if (!printFormat) return null
+	if (printFormatMetaCache.has(printFormat)) {
+		return printFormatMetaCache.get(printFormat)
+	}
+
+	try {
+		const meta = await call("frappe.client.get_value", {
+			doctype: "Print Format",
+			filters: { name: printFormat },
+			fieldname: ["name", "raw_printing"],
+		})
+		printFormatMetaCache.set(printFormat, meta || null)
+		return meta || null
+	} catch (err) {
+		log.warn(`Could not fetch Print Format metadata for ${printFormat}:`, err?.message || err)
+		printFormatMetaCache.set(printFormat, null)
+		return null
+	}
+}
+
+async function isRawPrintFormat(printFormat) {
+	const meta = await getPrintFormatMeta(printFormat)
+	return Boolean(Number.parseInt(meta?.raw_printing || 0, 10))
+}
+
 // ============================================================================
 // Browser printing (opens /printview in a new window)
 // ============================================================================
@@ -290,22 +320,25 @@ export async function printInvoice(invoiceData, printFormat = null, letterhead =
 	try {
 		if (!invoiceData?.name) throw new Error("Invalid invoice data")
 
-		invoiceData = await hydrateLocalOnlyInvoice(invoiceData)
+		const printableInvoice = await hydrateLocalOnlyInvoice(invoiceData)
 
 		// Pending offline / local IDs are not in ERPNext — use embedded receipt HTML.
-		if (isLocalOnlyInvoiceName(invoiceData.name)) {
-			if (invoiceData.items?.length > 0) return printInvoiceCustom(invoiceData)
+		if (isLocalOnlyInvoiceName(printableInvoice.name)) {
+			if (printableInvoice.items?.length > 0) return printInvoiceCustom(printableInvoice)
 			throw new Error(
 				__("This offline receipt is no longer in browser storage. Sync the invoice, then print from history."),
 			)
 		}
 
-		const doctype = invoiceData.doctype || "Sales Invoice"
+		const doctype = printableInvoice.doctype || "Sales Invoice"
 		const format = printFormat || DEFAULT_PRINT_FORMAT
+		if (await isRawPrintFormat(format)) {
+			return rawPrintInvoice(printableInvoice.name, format)
+		}
 
 		const params = new URLSearchParams({
 			doctype,
-			name: invoiceData.name,
+			name: printableInvoice.name,
 			format,
 			no_letterhead: letterhead ? 0 : 1,
 			_lang: "en",
@@ -381,6 +414,10 @@ export async function silentPrintInvoice(invoiceName, printFormat = null) {
 	}
 	const format = printFormat || DEFAULT_PRINT_FORMAT
 
+	if (await isRawPrintFormat(format)) {
+		return rawPrintInvoice(invoiceName, format)
+	}
+
 	const result = await call("frappe.www.printview.get_html_and_style", {
 		doc: "Sales Invoice",
 		name: invoiceName,
@@ -404,6 +441,26 @@ export async function silentPrintInvoice(invoiceName, printFormat = null) {
 }
 
 /**
+ * Fetch server-rendered raw commands and send them directly to QZ Tray.
+ * The selected print format must have Raw Printing enabled in Frappe.
+ */
+export async function rawPrintInvoice(invoiceName, printFormat) {
+	const format = printFormat || DEFAULT_PRINT_FORMAT
+	const result = await call("frappe.www.printview.get_rendered_raw_commands", {
+		doc: "Sales Invoice",
+		name: invoiceName,
+		print_format: format,
+	})
+
+	const rawCommands = result?.raw_commands || result?.message?.raw_commands
+	if (!rawCommands) throw new Error("Failed to get raw print commands from server")
+
+	await qzPrintRawCommands(rawCommands)
+	log.info(`Raw silent print sent for ${invoiceName}`)
+	return true
+}
+
+/**
  * Silent-print a full invoice dict using the same HTML as the offline receipt fallback.
  */
 export async function silentPrintInvoiceFromDoc(invoiceData) {
@@ -420,22 +477,22 @@ export async function silentPrintInvoiceFromDoc(invoiceData) {
  * internally, so no separate connection logic is needed here.
  */
 export async function printWithSilentFallback(invoiceData, printFormat = null) {
-	invoiceData = await hydrateLocalOnlyInvoice(invoiceData)
-	const invoiceName = invoiceData?.name
+	const printableInvoice = await hydrateLocalOnlyInvoice(invoiceData)
+	const invoiceName = printableInvoice?.name
 	if (!invoiceName) throw new Error("Invalid invoice data — missing name")
 
 	if (
 		isLocalOnlyInvoiceName(invoiceName) &&
-		invoiceData.items?.length > 0
+		printableInvoice.items?.length > 0
 	) {
 		try {
-			await silentPrintInvoiceFromDoc(invoiceData)
+			await silentPrintInvoiceFromDoc(printableInvoice)
 			return { method: "silent", success: true }
 		} catch (err) {
 			log.warn("Silent local receipt failed, falling back to browser:", err?.message || err)
 		}
 		try {
-			printInvoiceCustom(invoiceData)
+			printInvoiceCustom(printableInvoice)
 			return { method: "browser", success: true }
 		} catch (err) {
 			log.error("Browser print for local receipt failed:", err)
@@ -443,15 +500,34 @@ export async function printWithSilentFallback(invoiceData, printFormat = null) {
 		}
 	}
 
+	let resolvedPrintFormat = printFormat
 	try {
-		await silentPrintInvoice(invoiceName, printFormat)
+		if (!resolvedPrintFormat) {
+			if (printableInvoice?.pos_profile) {
+				const settings = await resolvePrintSettings(printableInvoice.pos_profile, printFormat, null)
+				resolvedPrintFormat = settings.printFormat
+			} else {
+				const invoiceDoc = await call("pos_next.api.invoices.get_invoice", {
+					invoice_name: invoiceName,
+				})
+				if (invoiceDoc?.pos_profile) {
+					const settings = await resolvePrintSettings(invoiceDoc.pos_profile, printFormat, null)
+					resolvedPrintFormat = settings.printFormat
+				}
+			}
+		}
+
+		await silentPrintInvoice(invoiceName, resolvedPrintFormat)
 		return { method: "silent", success: true }
 	} catch (err) {
 		log.warn("Silent print failed, falling back to browser:", err?.message || err)
 	}
 
 	try {
-		await printInvoiceByName(invoiceName, printFormat)
+		const fallbackFormat = (await isRawPrintFormat(resolvedPrintFormat))
+			? DEFAULT_PRINT_FORMAT
+			: printFormat
+		await printInvoiceByName(invoiceName, fallbackFormat)
 		return { method: "browser", success: true }
 	} catch (err) {
 		log.error("Browser print fallback also failed:", err)
