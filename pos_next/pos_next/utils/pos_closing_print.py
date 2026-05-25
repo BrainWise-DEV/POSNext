@@ -16,18 +16,41 @@ def _as_closing_doc(doc):
 
 
 def _collect_parent_targets(pos_transactions: Iterable) -> set[tuple[str, str]]:
-    targets: set[tuple[str, str]] = set()
+    sales_invoice_targets: set[tuple[str, str]] = set()
+    pos_invoices: set[str] = set()
 
     for row in pos_transactions or []:
         sales_invoice = row.get("sales_invoice")
         pos_invoice = row.get("pos_invoice")
 
         if sales_invoice:
-            targets.add((sales_invoice, "Sales Invoice"))
+            sales_invoice_targets.add((sales_invoice, "Sales Invoice"))
             continue
 
         if pos_invoice:
-            targets.add((pos_invoice, "POS Invoice"))
+            pos_invoices.add(pos_invoice)
+
+    return sales_invoice_targets | _get_pos_invoice_parent_targets(pos_invoices)
+
+
+def _get_pos_invoice_parent_targets(pos_invoices: set[str]) -> set[tuple[str, str]]:
+    if not pos_invoices:
+        return set()
+
+    targets: set[tuple[str, str]] = set()
+    rows = frappe.get_all(
+        "POS Invoice",
+        filters={"name": ["in", list(pos_invoices)]},
+        fields=["name", "consolidated_invoice"],
+        limit_page_length=0,
+    )
+
+    for row in rows:
+        consolidated_invoice = row.get("consolidated_invoice")
+        if consolidated_invoice:
+            targets.add((consolidated_invoice, "Sales Invoice"))
+        else:
+            targets.add((row.get("name"), "POS Invoice"))
 
     return targets
 
