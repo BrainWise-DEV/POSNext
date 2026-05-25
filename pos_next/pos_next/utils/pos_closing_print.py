@@ -87,6 +87,9 @@ def _fetch_items_for_targets(parent_targets: set[tuple[str, str]]) -> list[dict]
 def get_items_sold(doc) -> list[dict]:
 	closing_doc = _as_closing_doc(doc)
 	parent_targets = _collect_parent_targets(closing_doc.get("pos_transactions"))
+	if not parent_targets:
+		return []
+
 	items = _fetch_items_for_targets(parent_targets)
 
 	return [
