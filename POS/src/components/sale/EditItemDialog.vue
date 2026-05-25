@@ -228,7 +228,8 @@
 																:max="discountType === 'percentage' ? 100 : undefined"
 																step="0.01"
 																class="w-full h-7 border border-gray-300 rounded-lg px-3 pe-8 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-																@blur="calculateDiscount"
+																@input="calculateTotals"
+																@blur="handleDiscountBlur"
 																@keydown.enter="$event.target.blur()"
 															/>
 															<span class="absolute inset-y-0 end-0 pe-3 flex items-center text-gray-500 text-sm">
@@ -251,8 +252,18 @@
 												</div>
 												<div class="flex items-center justify-between pt-2 border-t border-gray-200">
 													<span class="text-base font-bold text-gray-900">{{ __('Total:') }}</span>
-													<span class="text-lg font-bold text-blue-600">{{ formatCurrency(calculatedTotal) }}</span>
+													<span
+														:class="isTotalBelowBuyingRate ? 'text-red-600' : 'text-blue-600'"
+														class="text-lg font-bold"
+													>{{ formatCurrency(calculatedTotal) }}</span>
 												</div>
+												<p
+													v-if="isTotalBelowBuyingRate"
+													class="text-xs text-red-600 flex items-start gap-1 pt-1"
+												>
+													<FeatherIcon name="alert-triangle" class="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+													<span>{{ buyingRateValidationMessage }}</span>
+												</p>
 											</div>
 										</div>
 									</div>
@@ -266,10 +277,11 @@
 									<Button
 										variant="solid"
 										@click="updateItem"
-										:disabled="!hasStock || isCheckingStock"
+										:disabled="!canUpdateItem"
 									>
 										<span v-if="isCheckingStock">{{ __('Checking Stock...') }}</span>
 										<span v-else-if="!hasStock">{{ __('No Stock Available') }}</span>
+										<span v-else-if="isTotalBelowBuyingRate">{{ __('Below Buying Rate') }}</span>
 										<span v-else>{{ __('Update Item') }}</span>
 									</Button>
 								</div>
@@ -335,6 +347,13 @@ const getItemDetailsResource = createResource({
 	url: "pos_next.api.items.get_item_details",
 	auto: false,
 })
+
+const getBuyingRateResource = createResource({
+	url: "pos_next.api.items.get_item_buying_rate_from_standard_selling",
+	auto: false,
+})
+
+const buyingRate = ref(0)
 
 const show = computed({
 	get: () => props.modelValue,
@@ -403,6 +422,32 @@ const discountTypeOptions = computed(() => [
 	{ value: 'amount', label: __('Amount') }
 ])
 
+const minimumAllowedTotal = computed(() => {
+	if (!buyingRate.value || buyingRate.value <= 0) return 0
+	return buyingRate.value * localQuantity.value
+})
+
+const isTotalBelowBuyingRate = computed(() => {
+	if (!buyingRate.value || buyingRate.value <= 0) return false
+	return calculatedTotal.value < minimumAllowedTotal.value
+})
+
+const canUpdateItem = computed(() => {
+	return hasStock.value && !isCheckingStock.value && !isTotalBelowBuyingRate.value
+})
+
+const buyingRateValidationMessage = computed(() => {
+	if (!isTotalBelowBuyingRate.value) return ""
+	return __(
+		"Total cannot be less than the cost price ({0} × {1} = {2}).",
+		[
+			formatCurrency(buyingRate.value),
+			localQuantity.value,
+			formatCurrency(minimumAllowedTotal.value),
+		],
+	)
+})
+
 // Initialize local state when item changes
 watch(
 	() => props.item,
@@ -445,7 +490,8 @@ watch(
 			}
 
 			calculateTotals()
-		isInitializingItem.value = false
+			fetchBuyingRate()
+			isInitializingItem.value = false
 		}
 	},
 	{ immediate: true }
@@ -589,6 +635,7 @@ async function handleUomChange(newUom) {
 	localItem.value.price_list_rate = newRate
 
 	calculateTotals()
+	await fetchBuyingRate()
 }
 
 async function handleWarehouseChange() {
@@ -638,6 +685,36 @@ function handleDiscountTypeChange() {
 	calculateTotals()
 }
 
+async function fetchBuyingRate() {
+	if (!localItem.value?.item_code) {
+		buyingRate.value = 0
+		return
+	}
+
+	try {
+		const result = await getBuyingRateResource.submit({
+			item_code: localItem.value.item_code,
+			uom: localUom.value || localItem.value.stock_uom,
+		})
+		const rate = result?.message ?? result
+		buyingRate.value = Number(rate) || 0
+	} catch (error) {
+		console.error("Error fetching buying rate:", error)
+		buyingRate.value = 0
+	}
+}
+
+function notifyIfBelowBuyingRate() {
+	if (isTotalBelowBuyingRate.value) {
+		showWarning(buyingRateValidationMessage.value)
+	}
+}
+
+function handleDiscountBlur() {
+	calculateDiscount()
+	notifyIfBelowBuyingRate()
+}
+
 function calculateDiscount() {
 	if (discountType.value === "percentage") {
 		// Ensure percentage doesn't exceed 100
@@ -668,6 +745,16 @@ function calculateTotals() {
 	calculateDiscount()
 }
 
+watch(calculatedTotal, (newTotal, oldTotal) => {
+	if (
+		buyingRate.value > 0 &&
+		newTotal < minimumAllowedTotal.value &&
+		oldTotal >= minimumAllowedTotal.value
+	) {
+		notifyIfBelowBuyingRate()
+	}
+})
+
 function removeSerial(serialNo) {
 	// Remove from local list
 	const index = localSerials.value.indexOf(serialNo)
@@ -686,6 +773,11 @@ function formatCurrency(amount) {
 }
 
 function updateItem() {
+	if (isTotalBelowBuyingRate.value) {
+		notifyIfBelowBuyingRate()
+		return
+	}
+
 	// Check if rate was manually edited
 	const isRateManuallyEdited = localRate.value !== originalPriceListRate.value
 
@@ -750,6 +842,7 @@ function updateItem() {
 }
 
 function cancel() {
+	buyingRate.value = 0
 	show.value = false
 }
 </script>

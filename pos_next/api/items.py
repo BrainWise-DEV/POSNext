@@ -62,6 +62,159 @@ def get_item_buying_rate_from_item_price(item_code, uom=None):
 	)
 	return flt(fallback_price or 0)
 
+
+STANDARD_BUYING_PRICE_LIST = "Standard Buying"
+STANDARD_SELLING_PRICE_LIST = "Standard Selling"
+
+
+def get_item_msp_mrp_from_item_price(item_code, batch_no=None, uom=None, price_list=None):
+
+	price_list = price_list or STANDARD_SELLING_PRICE_LIST
+	if not item_code:
+		return {"msp": 0.0, "mrp": 0.0}
+
+	def _pick_row(rows):
+		if not rows:
+			return None
+		if uom:
+			for row in rows:
+				if row.get("uom") == uom:
+					return row
+		return rows[0]
+
+	def _fetch(filters):
+		return frappe.get_all(
+			"Item Price",
+			filters=filters,
+			fields=["price_list_rate", "mrp_rate", "uom", "batch_no"],
+			limit=50,
+		)
+
+	base_filters = {"item_code": item_code, "price_list": price_list}
+
+	if batch_no:
+		batch_rows = _fetch({**base_filters, "batch_no": batch_no})
+		row = _pick_row(batch_rows)
+		if row:
+			return {
+				"msp": flt(row.get("price_list_rate")),
+				"mrp": flt(row.get("mrp_rate")),
+			}
+
+	item_rows = [r for r in _fetch(base_filters) if not r.get("batch_no")]
+	row = _pick_row(item_rows)
+	if row:
+		return {
+			"msp": flt(row.get("price_list_rate")),
+			"mrp": flt(row.get("mrp_rate")),
+		}
+
+	return {"msp": 0.0, "mrp": 0.0}
+
+
+def enrich_batch_no_data_with_prices(batch_no_data, item_code, uom=None, price_list=None):
+	if not batch_no_data or not item_code:
+		return batch_no_data
+
+	price_list = price_list or STANDARD_SELLING_PRICE_LIST
+	price_rows = frappe.get_all(
+		"Item Price",
+		filters={"item_code": item_code, "price_list": price_list},
+		fields=["batch_no", "uom", "price_list_rate", "mrp_rate"],
+	)
+
+	default_row = None
+	batch_price_map = {}
+	for row in price_rows:
+		if row.get("batch_no"):
+			batch_price_map[row["batch_no"]] = row
+		elif not default_row or (uom and row.get("uom") == uom):
+			default_row = row
+
+	for batch in batch_no_data:
+		row = batch_price_map.get(batch.get("batch_no")) or default_row
+		if row and uom and row.get("uom") and row.get("uom") != uom:
+			if batch.get("batch_no") not in batch_price_map:
+				row = default_row
+
+		if row:
+			batch["msp"] = flt(row.get("price_list_rate"))
+			batch["mrp"] = flt(row.get("mrp_rate"))
+		else:
+			fallback = get_item_msp_mrp_from_item_price(
+				item_code, batch_no=batch.get("batch_no"), uom=uom, price_list=price_list
+			)
+			batch["msp"] = fallback["msp"]
+			batch["mrp"] = fallback["mrp"]
+
+	return batch_no_data
+
+
+@frappe.whitelist()
+def get_batch_prices_for_item(item_code, batch_nos=None, price_list=None, uom=None):
+
+	if isinstance(batch_nos, str):
+		try:
+			batch_nos = json.loads(batch_nos)
+		except (json.JSONDecodeError, ValueError):
+			batch_nos = [batch_nos] if batch_nos else []
+
+	if not item_code or not batch_nos:
+		return {}
+
+	price_list = price_list or STANDARD_SELLING_PRICE_LIST
+	result = {}
+	for batch_no in batch_nos:
+		if not batch_no:
+			continue
+		result[batch_no] = get_item_msp_mrp_from_item_price(
+			item_code, batch_no=batch_no, uom=uom, price_list=price_list
+		)
+	return result
+
+
+def get_item_rate_from_price_list(item_code, price_list, uom=None, buying_only=False):
+	if not item_code or not price_list:
+		return 0.0
+
+	ItemPrice = frappe.qb.DocType("Item Price")
+	query = (
+		frappe.qb.from_(ItemPrice)
+		.select(ItemPrice.price_list_rate)
+		.where(ItemPrice.item_code == item_code)
+		.where(ItemPrice.price_list == price_list)
+	)
+	if buying_only:
+		query = query.where(ItemPrice.buying == 1)
+	if uom:
+		query = query.where(ItemPrice.uom == uom)
+
+	price_row = query.limit(1).run(as_dict=True)
+	if price_row:
+		return flt(price_row[0].price_list_rate)
+
+	filters = {"item_code": item_code, "price_list": price_list}
+	if buying_only:
+		filters["buying"] = 1
+	fallback_rate = frappe.db.get_value("Item Price", filters, "price_list_rate")
+	return flt(fallback_rate or 0)
+
+
+@frappe.whitelist()
+def get_item_buying_rate_from_standard_selling(item_code, uom=None):
+
+	rate = get_item_buying_rate_from_item_price(item_code, uom=uom)
+	if rate > 0:
+		return rate
+
+	return get_item_rate_from_price_list(
+		item_code,
+		STANDARD_BUYING_PRICE_LIST,
+		uom=uom,
+		buying_only=True,
+	)
+
+
 # Friends & Family Discount Configuration
 FRIENDS_FAMILY_CUSTOMER_GROUP = "Friends & Family"
 FRIENDS_FAMILY_MARKUP_PERCENTAGE = 7  # 7% markup on buying rate
@@ -391,8 +544,20 @@ def get_item_detail(item, doc=None, warehouse=None, price_list=None, company=Non
 		res["actual_qty"] = get_stock_availability(item_code, warehouse)
 
 	res["max_discount"] = item_data.get("max_discount")
-	res["batch_no_data"] = batch_no_data
+	item_uom = item.get("uom") or item_data.get("stock_uom")
+	selling_pl = price_list or STANDARD_SELLING_PRICE_LIST
+	res["batch_no_data"] = enrich_batch_no_data_with_prices(
+		batch_no_data, item_code, uom=item_uom, price_list=selling_pl
+	)
 	res["serial_no_data"] = serial_no_data
+
+	item_prices = get_item_msp_mrp_from_item_price(
+		item_code, uom=item_uom, price_list=selling_pl
+	)
+	if item_prices.get("mrp"):
+		res["mrp"] = item_prices["mrp"]
+	if item_prices.get("msp"):
+		res["msp"] = item_prices["msp"]
 	res["item_group"] = item_data.get("item_group")
 	res["brand"] = item_data.get("brand")
 
@@ -2580,6 +2745,10 @@ def get_batch_serial_data_for_items(item_codes, warehouse):
 
 		# Fetch batch data for batch-tracked items
 		if batch_items:
+			item_uoms = {
+				row["item_code"]: frappe.db.get_value("Item", row["item_code"], "stock_uom")
+				for row in items
+			}
 			for item_code in batch_items:
 				batch_list = get_batch_qty(warehouse=warehouse, item_code=item_code)
 				if batch_list:
@@ -2604,6 +2773,12 @@ def get_batch_serial_data_for_items(item_codes, warehouse):
 										else None,
 									}
 								)
+				enrich_batch_no_data_with_prices(
+					result[item_code]["batch_no_data"],
+					item_code,
+					uom=item_uoms.get(item_code),
+					price_list=STANDARD_SELLING_PRICE_LIST,
+				)
 
 		# Fetch serial data for serial-tracked items in bulk
 		if serial_items:

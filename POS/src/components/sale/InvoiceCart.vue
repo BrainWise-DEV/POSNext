@@ -1075,10 +1075,18 @@
 										</div>
 									</div>
 
-									<!-- Price -->
-									<span class="text-[10px] sm:text-xs font-bold text-gray-700">
-										{{ formatCurrency(item.rate) }}
-									</span>
+									<!-- MRP & MSP -->
+									<div class="flex flex-col items-end leading-tight min-w-0">
+										<span
+											v-if="getItemMrp(item) > 0"
+											class="text-[9px] sm:text-[10px] font-semibold text-gray-500"
+										>
+											{{ __('MRP') }} {{ formatCurrency(getItemMrp(item)) }}
+										</span>
+										<span class="text-[10px] sm:text-xs font-bold text-blue-600">
+											{{ __('MSP') }} {{ formatCurrency(getItemMsp(item)) }}
+										</span>
+									</div>
 								</div>
 
 								<!-- Item Total -->
@@ -1811,6 +1819,19 @@ function getInitials(name) {
  */
 function formatCurrency(amount) {
 	return formatCurrencyUtil(Number.parseFloat(amount || 0), props.currency);
+}
+
+function getItemMrp(item) {
+	return Number.parseFloat(item.mrp) || 0;
+}
+
+function getItemMsp(item) {
+	return (
+		Number.parseFloat(item.msp) ||
+		Number.parseFloat(item.price_list_rate) ||
+		Number.parseFloat(item.rate) ||
+		0
+	);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

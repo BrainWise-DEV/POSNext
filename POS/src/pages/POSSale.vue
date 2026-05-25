@@ -2534,6 +2534,12 @@ function handleBatchSerialSelected(batchSerial) {
 			quantity: qty,
 			...batchSerial,
 		};
+		if (batchSerial.mrp) {
+			itemToAdd.mrp = batchSerial.mrp;
+		}
+		if (batchSerial.msp) {
+			itemToAdd.msp = batchSerial.msp;
+		}
 		try {
 			cartStore.addItem(itemToAdd, qty, false, shiftStore.currentProfile);
 			cartStore.clearPendingItem();

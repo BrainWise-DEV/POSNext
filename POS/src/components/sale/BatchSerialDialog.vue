@@ -47,12 +47,17 @@
 							<div class="flex items-start justify-between">
 								<div class="flex-1">
 									<h4 class="text-sm font-semibold text-gray-900">{{ batch.batch_no }}</h4>
-									<div class="flex items-center gap-3 mt-1">
+									<div class="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
 										<span class="text-xs text-gray-600">
 											{{ __('Qty: {0}', [batch.qty]) }}
 										</span>
 										<span v-if="batch.expiry_date" class="text-xs text-gray-600">
 											{{ __('Exp: {0}', [formatDate(batch.expiry_date)]) }}
+										</span>
+										<span class="text-xs font-semibold text-blue-700">
+											{{ __('MRP: {0}', [formatCurrency(batch.mrp)]) }}
+											<span class="mx-1 text-gray-400">|</span>
+											{{ __('MSP: {0}', [formatCurrency(batch.msp)]) }}
 										</span>
 									</div>
 								</div>
@@ -202,8 +207,12 @@ import { Button, Dialog, createResource } from "frappe-ui"
 import { computed, ref, watch } from "vue"
 import { useSerialNumberStore } from "@/stores/serialNumber"
 import { usePOSCartStore } from "@/stores/posCart"
+import { usePOSShiftStore } from "@/stores/posShift"
+import { formatCurrency as formatCurrencyUtil } from "@/utils/currency"
 import { getCachedBatchData, getCachedSerialData } from "@/utils/offline/items"
 import { isOffline } from "@/utils/offline"
+
+const shiftStore = usePOSShiftStore()
 
 const props = defineProps({
 	modelValue: Boolean,
@@ -249,31 +258,52 @@ const availableBatches = computed(() => {
 	}).filter((batch) => batch.qty > 0) // Only show batches with available qty
 })
 
-// Resource for loading batches with actual stock quantities
 const batchesResource = createResource({
 	url: "pos_next.api.items.get_item_details",
-	makeParams() {
-		return {
-			item_code: props.item?.item_code,
-			pos_profile: props.posProfile,
-		}
-	},
 	auto: false,
-	async onSuccess(data) {
-		if (data && data.batch_no_data && Array.isArray(data.batch_no_data)) {
-			// Store raw warehouse batch data
-			warehouseBatches.value = data.batch_no_data.map((batch) => ({
-				batch_no: batch.batch_no,
-				qty: batch.batch_qty,
-				expiry_date: batch.expiry_date,
-				manufacturing_date: batch.manufacturing_date,
-			}))
-		}
-	},
-	onError(error) {
-		console.error("Error loading batches:", error)
-	},
 })
+
+const batchPricesResource = createResource({
+	url: "pos_next.api.items.get_batch_prices_for_item",
+	auto: false,
+})
+
+function mapWarehouseBatches(batchNoData) {
+	if (!Array.isArray(batchNoData)) return []
+	return batchNoData.map((batch) => ({
+		batch_no: batch.batch_no,
+		qty: batch.batch_qty ?? batch.qty ?? 0,
+		expiry_date: batch.expiry_date,
+		manufacturing_date: batch.manufacturing_date,
+		msp: Number(batch.msp) || 0,
+		mrp: Number(batch.mrp) || 0,
+	}))
+}
+
+async function attachBatchPrices(batches) {
+	if (!batches.length || !props.item?.item_code) return batches
+
+	try {
+		const result = await batchPricesResource.submit({
+			item_code: props.item.item_code,
+			batch_nos: JSON.stringify(batches.map((b) => b.batch_no)),
+			price_list: "Standard Selling",
+			uom: props.item.uom || props.item.stock_uom,
+		})
+		const priceMap = result?.message || result || {}
+		return batches.map((batch) => {
+			const prices = priceMap[batch.batch_no] || {}
+			return {
+				...batch,
+				msp: Number(prices.msp) || batch.msp || 0,
+				mrp: Number(prices.mrp) || batch.mrp || 0,
+			}
+		})
+	} catch (error) {
+		console.error("Error loading batch prices:", error)
+		return batches
+	}
+}
 
 watch(
 	() => props.modelValue,
@@ -322,21 +352,31 @@ const isLoadingSerials = computed(() => serialStore.loading)
 
 async function loadBatchesOrSerials() {
 	if (props.item?.has_batch_no) {
-		// Try cached data first when offline
+		let batches = []
+
 		if (isOffline()) {
 			const cachedBatches = await getCachedBatchData(props.item.item_code)
-			if (cachedBatches && cachedBatches.length > 0) {
-				warehouseBatches.value = cachedBatches.map((batch) => ({
-					batch_no: batch.batch_no,
-					qty: batch.batch_qty,
-					expiry_date: batch.expiry_date,
-					manufacturing_date: batch.manufacturing_date,
-				}))
-				return
+			if (cachedBatches?.length > 0) {
+				batches = mapWarehouseBatches(cachedBatches)
+			}
+		} else {
+			try {
+				const data = await batchesResource.submit({
+					item_code: props.item.item_code,
+					pos_profile: props.posProfile,
+				})
+				const details = data?.message || data
+				batches = mapWarehouseBatches(details?.batch_no_data)
+			} catch (error) {
+				console.error("Error loading batches:", error)
 			}
 		}
-		// Fetch from server when online
-		batchesResource.reload()
+
+		if (batches.length > 0) {
+			warehouseBatches.value = isOffline()
+				? batches
+				: await attachBatchPrices(batches)
+		}
 	} else if (props.item?.has_serial_no) {
 		// Try cached data first when offline
 		if (isOffline()) {
@@ -396,6 +436,12 @@ function handleConfirm() {
 
 	if (props.item?.has_batch_no && selectedBatch.value) {
 		result.batch_no = selectedBatch.value.batch_no
+		result.mrp = selectedBatch.value.mrp || 0
+		result.msp = selectedBatch.value.msp || 0
+		if (selectedBatch.value.msp > 0) {
+			result.rate = selectedBatch.value.msp
+			result.price_list_rate = selectedBatch.value.msp
+		}
 	}
 
 	if (props.item?.has_serial_no) {
@@ -422,5 +468,11 @@ function resetSelection() {
 function formatDate(dateStr) {
 	if (!dateStr) return ""
 	return new Date(dateStr).toLocaleDateString()
+}
+
+const currency = computed(() => shiftStore.profileCurrency || "INR")
+
+function formatCurrency(amount) {
+	return formatCurrencyUtil(Number.parseFloat(amount || 0), currency.value)
 }
 </script>

@@ -229,9 +229,11 @@ export function useInvoice() {
 	// Actions
 	function addItem(item, quantity = 1) {
 		const itemUom = item.uom || item.stock_uom
-		const existingItem = invoiceItems.value.find(
-			(i) => i.item_code === item.item_code && i.uom === itemUom,
-		)
+		const existingItem = invoiceItems.value.find((i) => {
+			if (i.item_code !== item.item_code || i.uom !== itemUom) return false
+			if (item.batch_no) return i.batch_no === item.batch_no
+			return true
+		})
 
 		if (existingItem) {
 			// Store old values before update for incremental cache adjustment
@@ -302,6 +304,12 @@ export function useInvoice() {
 				is_stock_item: item.is_stock_item ?? 1,
 				is_bundle: item.is_bundle || false,
 				allow_negative_stock: item.allow_negative_stock || 0,
+				mrp: Number.parseFloat(item.mrp) || 0,
+				msp:
+					Number.parseFloat(item.msp) ||
+					Number.parseFloat(item.price_list_rate) ||
+					Number.parseFloat(item.rate) ||
+					0,
 			}
 			invoiceItems.value.push(newItem)
 			// Recalculate the newly added item to apply taxes
