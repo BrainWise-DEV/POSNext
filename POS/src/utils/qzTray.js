@@ -300,7 +300,14 @@ export async function printRawCommands(commands, printerName) {
 	}
 
 	const config = qz.configs.create(printer)
-	const data = [commands]
+	const data = [
+		{
+			type: "raw",
+			format: "command",
+			flavor: "plain",
+			data: commands,
+		},
+	]
 
 	try {
 		await qz.print(config, data)

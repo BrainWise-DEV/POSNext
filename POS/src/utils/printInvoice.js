@@ -293,8 +293,9 @@ async function getPrintFormatMeta(printFormat) {
 			filters: { name: printFormat },
 			fieldname: ["name", "raw_printing"],
 		})
-		printFormatMetaCache.set(printFormat, meta || null)
-		return meta || null
+		const normalizedMeta = meta?.message || meta
+		printFormatMetaCache.set(printFormat, normalizedMeta || null)
+		return normalizedMeta || null
 	} catch (err) {
 		log.warn(`Could not fetch Print Format metadata for ${printFormat}:`, err?.message || err)
 		printFormatMetaCache.set(printFormat, null)
@@ -303,8 +304,15 @@ async function getPrintFormatMeta(printFormat) {
 }
 
 async function isRawPrintFormat(printFormat) {
+	if (typeof printFormat === "string" && /esc[\s/-]*pos/i.test(printFormat)) {
+		return true
+	}
 	const meta = await getPrintFormatMeta(printFormat)
-	return Boolean(Number.parseInt(meta?.raw_printing || 0, 10))
+	return Boolean(Number.parseInt(meta?.raw_printing ?? 0, 10))
+}
+
+function containsRawPrinterCommands(value) {
+	return typeof value === "string" && /[\x1b\x1d]/.test(value)
 }
 
 // ============================================================================
@@ -428,6 +436,12 @@ export async function silentPrintInvoice(invoiceName, printFormat = null) {
 	const html = result?.html || result?.message?.html
 	const style = result?.style || result?.message?.style || ""
 	if (!html) throw new Error("Failed to get print HTML from server")
+
+	if (containsRawPrinterCommands(html)) {
+		await qzPrintRawCommands(html)
+		log.info(`Raw print sent from rendered command body for ${invoiceName}`)
+		return true
+	}
 
 	const fullHTML = `<!DOCTYPE html>
 <html>
