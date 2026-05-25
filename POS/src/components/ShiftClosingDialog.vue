@@ -680,8 +680,8 @@ async function submitClosing() {
 		}
 
 		// Submit to server
-		await submitResource.submit({ closing_shift: closingData.value })
-		const closingShiftName = submitResource.data?.name
+		const result = await submitResource.submit({ closing_shift: closingData.value })
+		const closingShiftName = result?.name ?? submitResource.data?.name
 		if (closingShiftName) {
 			try {
 				await printEODReport(closingShiftName)
