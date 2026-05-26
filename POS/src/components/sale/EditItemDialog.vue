@@ -292,6 +292,15 @@
 			</div>
 		</Transition>
 	</Teleport>
+
+	<!-- Manager Approval Dialog for Item Discount -->
+	<ManagerApprovalDialog
+		v-model="showDiscountApproval"
+		approval-type="Item Discount"
+		:amount="pendingDiscountAmount"
+		:reason="`Discount on ${pendingDiscountItem?.item_name || ''}`"
+		@approved="onDiscountApprovalGranted"
+	/>
 </template>
 
 <script setup>
@@ -303,6 +312,7 @@ import { formatCurrency as formatCurrencyUtil, getCurrencySymbol, roundCurrency 
 import { Button, FeatherIcon, createResource } from "frappe-ui"
 import { computed, ref, watch } from "vue"
 import SelectInput from "@/components/common/SelectInput.vue"
+import ManagerApprovalDialog from "@/components/ManagerApprovalDialog.vue"
 
 const { showSuccess, showError, showWarning } = useToast()
 const settingsStore = usePOSSettingsStore()
@@ -338,6 +348,14 @@ const hasStock = ref(true)
 const isCheckingStock = ref(false)
 const isInitializingItem = ref(false)
 const uomRateRequestId = ref(0)
+
+// Manager approval state for item discount
+const showDiscountApproval = ref(false)
+const pendingDiscountAmount = ref(0)
+const pendingDiscountItem = ref(null)
+const discountApprovalPending = ref(false)
+const discountApprovalGranted = ref(false)
+const pendingUpdatedItem = ref(null)
 const localSerials = ref([]) // List of serial numbers for this item
 const removedSerials = ref([]) // Track serials removed during this edit session
 const originalSerials = ref([]) // Original serials when dialog opened
@@ -784,7 +802,7 @@ function updateItem() {
 	// ========================================================================
 	// RATE EDIT VALIDATION
 	// ========================================================================
-	if ((settingsStore.allowUserToEditRate || !localItem.is_stock_item) && isRateManuallyEdited) {
+	if ((settingsStore.allowUserToEditRate || !localItem.value.is_stock_item) && isRateManuallyEdited) {
 		// Validate rate is positive
 		if (localRate.value <= 0) {
 			showError(__('Rate must be greater than zero'))
@@ -819,13 +837,46 @@ function updateItem() {
 		warehouse: localWarehouse.value,
 		discount_percentage:
 			discountType.value === "percentage" ? discountValue.value : 0,
-		discount_amount:
-			discountType.value === "amount" ? discountValue.value : 0,
+		discount_amount: roundToNearestFive(calculatedDiscount.value),
 		// Track manual rate edits for audit logging
 		is_rate_manually_edited: isRateManuallyEdited ? 1 : 0,
 		original_rate: isRateManuallyEdited ? originalPriceListRate.value : null,
 	}
 
+	// Check if discount approval is needed
+	if (needsDiscountApproval(updatedItem)) {
+		// Store pending item and show approval dialog
+		pendingUpdatedItem.value = updatedItem
+		pendingDiscountAmount.value = calculatedDiscount.value
+		pendingDiscountItem.value = localItem.value
+		discountApprovalPending.value = true
+		showDiscountApproval.value = true
+		return
+	}
+
+	// If approval was already granted, proceed with update
+	if (discountApprovalPending.value && !discountApprovalGranted.value) {
+		showError(__('Manager approval required for discount'))
+		return
+	}
+
+	// Proceed with item update
+	proceedWithItemUpdate(updatedItem)
+}
+
+/**
+ * Check if discount needs manager approval
+ */
+function needsDiscountApproval(item) {
+	// Only require approval if there's a discount
+	const hasDiscount = item.discount_percentage > 0 || item.discount_amount > 0
+	return hasDiscount
+}
+
+/**
+ * Proceed with item update after discount approval (if needed)
+ */
+function proceedWithItemUpdate(updatedItem) {
 	// Update serial numbers if item has serials
 	if (localItem.value.has_serial_no) {
 		updatedItem.serial_no = localSerials.value.join('\n')
@@ -839,6 +890,26 @@ function updateItem() {
 
 	emit("update-item", updatedItem)
 	show.value = false
+	
+	// Reset discount approval state
+	discountApprovalPending.value = false
+	discountApprovalGranted.value = false
+	pendingUpdatedItem.value = null
+}
+
+/**
+ * Handle discount approval granted
+ */
+function onDiscountApprovalGranted() {
+	discountApprovalGranted.value = true
+	showSuccess(__('Discount approved. Processing item...'))
+	
+	// Proceed with update after brief delay
+	setTimeout(() => {
+		if (pendingUpdatedItem.value) {
+			proceedWithItemUpdate(pendingUpdatedItem.value)
+		}
+	}, 500)
 }
 
 function cancel() {

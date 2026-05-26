@@ -549,7 +549,7 @@
 											class="payment-select flex-1 py-2.5 border border-gray-300 rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white appearance-none cursor-pointer hover:border-gray-400 transition-colors ps-3 pe-10"
 										>
 											<option value="">{{ __('Select method...') }}</option>
-											<option v-for="method in paymentMethods" :key="method.mode_of_payment" :value="method.mode_of_payment">
+											<option v-for="method in allowedReturnPaymentMethods" :key="method.mode_of_payment" :value="method.mode_of_payment">
 												{{ method.mode_of_payment }}
 											</option>
 										</select>
@@ -755,6 +755,15 @@
 			</div>
 		</template>
 	</Dialog>
+
+	<!-- Manager Approval Dialog for Cash Refunds -->
+	<ManagerApprovalDialog
+		v-model="showManagerApproval"
+		approval-type="Cash Refund"
+		:amount="maxRefundableAmount"
+		:reason="returnReason"
+		@approved="onManagerApproved"
+	/>
 </template>
 
 <script setup>
@@ -770,6 +779,7 @@ import {
 import { getInvoiceStatusColor } from "@/utils/invoice"
 import { Button, Dialog, FeatherIcon, createResource } from "frappe-ui"
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue"
+import ManagerApprovalDialog from "@/components/ManagerApprovalDialog.vue"
 
 const { showSuccess, showError, showWarning } = useToast()
 const { isOffline } = useOfflineStatus()
@@ -843,6 +853,11 @@ const returnExpiredDialog = reactive({
 	daysSince: 0,
 	allowedDays: 0,
 })
+
+// Manager Approval State
+const showManagerApproval = ref(false)
+const isApproved = ref(false)
+const approvalPending = ref(false)
 
 // Resource for loading recent invoices (only those with items available for return)
 const loadInvoicesResource = createResource({
@@ -1307,6 +1322,14 @@ const searchSuggestions = computed(() => {
 	return filteredInvoiceList.value.slice(0, MAX_SUGGESTIONS)
 })
 
+/**
+ * Filter payment methods to only show those allowed for returns
+ * Returns only methods where allow_in_returns = 1
+ */
+const allowedReturnPaymentMethods = computed(() => {
+	return paymentMethods.value.filter((method) => method.allow_in_returns === 1)
+})
+
 // Debounce timer for server search (will be cleaned up on unmount)
 let serverSearchTimeout = null
 
@@ -1634,6 +1657,55 @@ async function handleCreateReturn() {
 		return
 	}
 
+	// Check if cash refund needs manager approval
+	if (needsCashRefundApproval()) {
+		showManagerApproval.value = true
+		approvalPending.value = true
+		return
+	}
+
+	// If we get here, either no approval needed or already approved
+	if (approvalPending.value && !isApproved.value) {
+		submitError.value = __("Manager approval required for this transaction")
+		return
+	}
+
+	await submitReturn()
+}
+
+/**
+ * Check if cash refund amount exceeds approval threshold
+ */
+function needsCashRefundApproval() {
+	// Don't require approval for credit sales or when adding to customer credit
+	if (isOriginalCreditSale.value || addToCustomerCredit.value) {
+		return false
+	}
+
+	// Require approval if any refund payment is cash
+	return refundPayments.value.some(payment => {
+		return payment.mode_of_payment === 'Cash'
+	})
+}
+
+/**
+ * Handle manager approval
+ */
+function onManagerApproved(approvalData) {
+	isApproved.value = true
+	approvalPending.value = false
+	showSuccess(__("Manager approval granted. Processing return..."))
+	
+	// Proceed with submit after a brief delay
+	setTimeout(() => {
+		submitReturn()
+	}, 500)
+}
+
+/**
+ * Submit the return after all validations pass
+ */
+async function submitReturn() {
 	submitError.value = ""
 	isSubmitting.value = true
 
@@ -1645,7 +1717,7 @@ async function handleCreateReturn() {
 			throw result
 		}
 	} catch (error) {
-		console.error("Caught error in handleCreateReturn:", error)
+		console.error("Caught error in submitReturn:", error)
 		if (!submitError.value) {
 			const errorMsg = extractErrorMessage(error)
 			submitError.value = errorMsg

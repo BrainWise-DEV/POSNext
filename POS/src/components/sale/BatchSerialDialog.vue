@@ -208,11 +208,13 @@ import { computed, ref, watch } from "vue"
 import { useSerialNumberStore } from "@/stores/serialNumber"
 import { usePOSCartStore } from "@/stores/posCart"
 import { usePOSShiftStore } from "@/stores/posShift"
+import { useToast } from "@/composables/useToast"
 import { formatCurrency as formatCurrencyUtil } from "@/utils/currency"
 import { getCachedBatchData, getCachedSerialData } from "@/utils/offline/items"
 import { isOffline } from "@/utils/offline"
 
 const shiftStore = usePOSShiftStore()
+const { showError } = useToast()
 
 const props = defineProps({
 	modelValue: Boolean,
@@ -376,6 +378,10 @@ async function loadBatchesOrSerials() {
 			warehouseBatches.value = isOffline()
 				? batches
 				: await attachBatchPrices(batches)
+		} else {
+			// No batches available, show alert and close the dialog
+			showError(__("No batches available for {0}", [props.item?.item_name || props.item?.item_code]))
+			show.value = false
 		}
 	} else if (props.item?.has_serial_no) {
 		// Try cached data first when offline
@@ -391,6 +397,12 @@ async function loadBatchesOrSerials() {
 		// Fetch from store (uses cache if valid)
 		const serials = await serialStore.fetchSerials(props.item.item_code)
 		availableSerials.value = serials
+		
+		// Close dialog if no serials available
+		if (!serials || serials.length === 0) {
+			showError(__("No serial numbers available for {0}", [props.item?.item_name || props.item?.item_code]))
+			show.value = false
+		}
 	}
 }
 
