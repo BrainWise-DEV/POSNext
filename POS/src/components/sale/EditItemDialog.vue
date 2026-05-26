@@ -837,8 +837,7 @@ function updateItem() {
 		warehouse: localWarehouse.value,
 		discount_percentage:
 			discountType.value === "percentage" ? discountValue.value : 0,
-		discount_amount:
-			discountType.value === "amount" ? discountValue.value : 0,
+		discount_amount: roundToNearestFive(calculatedDiscount.value),
 		// Track manual rate edits for audit logging
 		is_rate_manually_edited: isRateManuallyEdited ? 1 : 0,
 		original_rate: isRateManuallyEdited ? originalPriceListRate.value : null,

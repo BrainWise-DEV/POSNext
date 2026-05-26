@@ -681,16 +681,16 @@ export function useInvoice() {
 		const isManuallyEdited = item.is_rate_manually_edited === 1
 		const effectiveRate = isManuallyEdited ? item.rate : (item.price_list_rate || item.rate)
 		const roundedRate = roundCurrency(effectiveRate)
-		const baseAmount = roundCurrency(item.quantity * roundedRate)
+		const baseAmount = roundToNearestZeroOrFive(item.quantity * roundedRate)
 
 		// Calculate discount from either percentage or fixed amount
 		let discountAmount = 0
 		if (item.discount_percentage > 0) {
-			discountAmount = roundCurrency(
+			discountAmount = roundToNearestZeroOrFive(
 				(baseAmount * item.discount_percentage) / 100,
 			)
 		} else if (item.discount_amount > 0) {
-			discountAmount = roundCurrency(item.discount_amount)
+			discountAmount = roundToNearestZeroOrFive(item.discount_amount)
 			// Sync percentage when amount is provided directly
 			item.discount_percentage =
 				baseAmount > 0 ? (discountAmount / baseAmount) * 100 : 0
@@ -705,13 +705,13 @@ export function useInvoice() {
 
 		if (taxInclusive.value && totalTaxRate > 0) {
 			// Tax-inclusive: Work backwards from gross to extract net and tax
-			const grossAmount = roundCurrency(baseAmount - discountAmount)
-			netAmount = roundCurrency(grossAmount / (1 + totalTaxRate / 100))
-			taxAmount = roundCurrency(grossAmount - netAmount)
+			const grossAmount = roundToNearestZeroOrFive(baseAmount - discountAmount)
+			netAmount = roundToNearestZeroOrFive(grossAmount / (1 + totalTaxRate / 100))
+			taxAmount = roundToNearestZeroOrFive(grossAmount - netAmount)
 		} else {
 			// Tax-exclusive: Calculate tax on top of net amount
-			netAmount = roundCurrency(baseAmount - discountAmount)
-			taxAmount = roundCurrency((netAmount * totalTaxRate) / 100)
+			netAmount = roundToNearestZeroOrFive(baseAmount - discountAmount)
+			taxAmount = roundToNearestZeroOrFive((netAmount * totalTaxRate) / 100)
 		}
 
 		// Update item fields with rounded values
