@@ -1049,6 +1049,15 @@
 			</div>
 		</template>
 	</Dialog>
+
+	<!-- Manager Approval Dialog for Additional Discount -->
+	<ManagerApprovalDialog
+		v-model="showAdditionalDiscountApproval"
+		approval-type="Additional Discount"
+		:amount="pendingAdditionalDiscountAmount"
+		reason="Additional bill discount"
+		@approved="onAdditionalDiscountApprovalGranted"
+	/>
 </template>
 
 <script setup>
@@ -1069,6 +1078,7 @@ import { useLongPress } from "@/composables/useLongPress"
 import { usePaymentNumpad } from "@/composables/usePaymentNumpad"
 import { useResponsivePayment } from "@/composables/useResponsivePayment"
 import { useQuickAmounts } from "@/composables/useQuickAmounts"
+import ManagerApprovalDialog from "@/components/ManagerApprovalDialog.vue"
 
 const log = logger.create("PaymentDialog")
 const settingsStore = usePOSSettingsStore()
@@ -1302,6 +1312,12 @@ const additionalDiscountType = ref(
 )
 // Discount description for Friends and Family customers
 const discountDescription = ref("")
+
+// Manager approval state for additional discount
+const showAdditionalDiscountApproval = ref(false)
+const pendingAdditionalDiscountAmount = ref(0)
+const additionalDiscountApprovalPending = ref(false)
+const additionalDiscountApprovalGranted = ref(false)
 
 const paymentMethodsResource = createResource({
 	url: "pos_next.api.pos_profile.get_payment_methods",
@@ -2512,6 +2528,49 @@ function addCreditAccountPayment() {
 			return
 		}
 
+		// Check if additional discount approval is needed
+		if (needsAdditionalDiscountApproval()) {
+			// Store pending payment data and show approval dialog
+			pendingAdditionalDiscountAmount.value = calculatedAdditionalDiscount.value
+			additionalDiscountApprovalPending.value = true
+			showAdditionalDiscountApproval.value = true
+			return
+		}
+
+		// If approval was already granted, proceed with payment
+		if (additionalDiscountApprovalPending.value && !additionalDiscountApprovalGranted.value) {
+			showError(__("Manager approval required for additional discount"))
+			return
+		}
+
+		// Proceed with payment
+		proceedWithPayment()
+	}
+
+	/**
+	 * Check if additional discount needs manager approval
+	 */
+	function needsAdditionalDiscountApproval() {
+		// Only require approval if there's an additional discount and max discount is configured
+		const hasAdditionalDiscount = calculatedAdditionalDiscount.value > 0
+		const needsApproval = settingsStore.maxDiscountAllowed > 0 && hasAdditionalDiscount
+		return needsApproval
+	}
+
+	/**
+	 * Handle additional discount approval granted
+	 */
+	function onAdditionalDiscountApprovalGranted() {
+		additionalDiscountApprovalGranted.value = true
+		showAdditionalDiscountApproval.value = false
+		// Proceed with payment
+		proceedWithPayment()
+	}
+
+	/**
+	 * Proceed with payment after all validations and approvals
+	 */
+	function proceedWithPayment() {
 		// Calculate if this is a partial payment (considering write-off)
 		const effectivePaid = totalPaid.value + writeOffAmount.value
 		const isPartial = effectivePaid < props.grandTotal
@@ -2647,6 +2706,10 @@ watch(
 		if (isOpen) {
 			// Only sync when dialog opens, not continuously
 			localAdditionalDiscount.value = props.additionalDiscount || 0
+		} else {
+			// Reset approval state when dialog closes
+			additionalDiscountApprovalPending.value = false
+			additionalDiscountApprovalGranted.value = false
 		}
 	},
 )

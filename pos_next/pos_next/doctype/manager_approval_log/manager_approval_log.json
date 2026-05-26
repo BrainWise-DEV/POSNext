@@ -29,7 +29,7 @@
    "fieldname": "approval_type",
    "fieldtype": "Select",
    "label": "Approval Type",
-   "options": "\nCash Refund\nItem Discount\nDiscount\nCredit Sale"
+   "options": "\nCash Refund\nItem Discount\nAdditional Discount\nCredit Sale"
   },
   {
    "fieldname": "amount",
@@ -51,7 +51,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-05-26 11:37:54.502447",
+ "modified": "2026-05-26 14:13:09.592958",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "Manager Approval Log",
