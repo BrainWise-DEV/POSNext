@@ -233,10 +233,14 @@ def get_item_detail(item, doc=None, warehouse=None, price_list=None, company=Non
 				)
 
 		item["price_list_currency"] = price_list_currency
+		item["currency"] = company_currency
 		item["plc_conversion_rate"] = exchange_rate
 		item["conversion_rate"] = exchange_rate
 
 		if doc:
+			doc.currency = company_currency
+			doc.posting_date = doc.get("posting_date") or today
+			doc.transaction_date = doc.get("transaction_date") or today
 			doc.price_list_currency = price_list_currency
 			doc.plc_conversion_rate = exchange_rate
 			doc.conversion_rate = exchange_rate
@@ -245,9 +249,17 @@ def get_item_detail(item, doc=None, warehouse=None, price_list=None, company=Non
 	if company:
 		item["company"] = company
 
-	# Create a proper doc structure with company
-	if not doc and company:
-		doc = frappe._dict({"doctype": "Sales Invoice", "company": company})
+		# Create a proper doc structure with company
+		if not doc and company:
+			doc = frappe._dict(
+				{
+					"doctype": "Sales Invoice",
+					"company": company,
+					"currency": item.get("currency"),
+					"posting_date": today,
+					"transaction_date": today,
+				}
+			)
 
 	# Fetch all needed Item fields in a single query (performance optimization)
 	item_data = (
@@ -266,6 +278,9 @@ def get_item_detail(item, doc=None, warehouse=None, price_list=None, company=Non
 			"qty": item.get("qty", 1),
 			"uom": item.get("uom"),  # Include UOM to fetch correct price list rate
 			"selling_price_list": item.get("selling_price_list"),
+			"currency": item.get("currency"),
+			"posting_date": today,
+			"transaction_date": today,
 			"price_list_currency": item.get("price_list_currency"),
 			"plc_conversion_rate": item.get("plc_conversion_rate"),
 			"conversion_rate": item.get("conversion_rate"),
