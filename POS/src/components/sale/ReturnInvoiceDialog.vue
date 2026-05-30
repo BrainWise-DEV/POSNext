@@ -775,6 +775,7 @@ import {
 	DEFAULT_LOCALE,
 	formatCurrency as formatCurrencyUtil,
 	roundCurrency,
+	roundToNearestZeroOrFive,
 } from "@/utils/currency"
 import { getInvoiceStatusColor } from "@/utils/invoice"
 import { Button, Dialog, FeatherIcon, createResource } from "frappe-ui"
@@ -1238,7 +1239,7 @@ const maxRefundableAmount = computed(() => {
 
 	const grandTotal = Math.abs(originalInvoice.value.grand_total) || 1
 	const returnRatio = returnTotal.value / grandTotal
-	return roundCurrency(
+	return roundToNearestZeroOrFive(
 		Math.min(returnTotal.value, originalPaidAmount.value * returnRatio),
 	)
 })
@@ -1246,7 +1247,7 @@ const maxRefundableAmount = computed(() => {
 // Amount that goes toward credit balance (for partially paid invoices)
 const creditAdjustmentAmount = computed(() =>
 	isPartiallyPaid.value
-		? roundCurrency(Math.max(0, returnTotal.value - maxRefundableAmount.value))
+		? roundToNearestZeroOrFive(Math.max(0, returnTotal.value - maxRefundableAmount.value))
 		: 0,
 )
 

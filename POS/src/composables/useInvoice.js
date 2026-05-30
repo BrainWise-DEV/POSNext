@@ -226,6 +226,12 @@ export function useInvoice() {
 		)
 	})
 
+	const hasServiceItems = computed(() => {
+		return invoiceItems.value.some(
+			(item) => item.item_group && item.item_group.toLowerCase() === "service"
+		)
+	})
+
 	// Actions
 	function addItem(item, quantity = 1) {
 		const itemUom = item.uom || item.stock_uom
@@ -983,6 +989,11 @@ export function useInvoice() {
 			invoiceData.transaction_date = today
 		}
 
+		// Set mode of delivery to "Home Delivery" if service items are present
+		if (hasServiceItems.value) {
+			invoiceData.custom_mode_of_delivery = "Home Delivery"
+		}
+
 		const result = await updateInvoiceResource.submit({ data: invoiceData })
 		return result?.data || result
 	}
@@ -1045,6 +1056,11 @@ export function useInvoice() {
 				// Add custom discount description if provided (for Friends and Family customers)
 				if (customDiscountDescription.value) {
 					invoiceData.custom_discount_description = customDiscountDescription.value
+				}
+
+				// Set mode of delivery to "Home Delivery" if service items are present
+				if (hasServiceItems.value) {
+					invoiceData.custom_mode_of_delivery = "Home Delivery"
 				}
 
 				if (targetDoctype === "Sales Order" && deliveryDate) {
@@ -1329,6 +1345,7 @@ export function useInvoice() {
 		totalPaid,
 		remainingAmount,
 		canSubmit,
+		hasServiceItems,
 
 		// Actions
 		addItem,
