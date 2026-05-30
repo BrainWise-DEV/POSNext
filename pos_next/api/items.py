@@ -1805,6 +1805,130 @@ def get_item_details(item_code, pos_profile, customer=None, qty=1, uom=None):  #
 
 
 @frappe.whitelist()
+def get_batch_allocation(item_code, warehouse, qty, posting_date=None, consumed_batches=None):
+	"""Split requested qty across batches using ERPNext Stock Settings (FIFO / Expiry).
+
+	Uses ``get_auto_batch_nos`` and ``get_qty_based_available_batches`` — same path as
+	auto Serial and Batch Bundle creation on outward stock transactions.
+	"""
+	from erpnext.stock.doctype.batch.batch import get_available_batches
+	from erpnext.stock.doctype.serial_and_batch_bundle.serial_and_batch_bundle import (
+		get_auto_batch_nos,
+		get_qty_based_available_batches,
+	)
+	from frappe.utils import now_datetime
+
+	qty = flt(qty)
+	if qty <= 0:
+		return []
+
+	if not item_code or not warehouse:
+		frappe.throw(_("Item Code and Warehouse are required"))
+
+	frappe.has_permission("Item", ptype="read", doc=item_code, throw=True)
+	frappe.has_permission("Warehouse", ptype="read", doc=warehouse, throw=True)
+
+	item = frappe.db.get_value(
+		"Item",
+		item_code,
+		["has_batch_no", "has_serial_no", "disabled"],
+		as_dict=True,
+	)
+	if not item or item.disabled:
+		frappe.throw(_("Invalid Item {0}").format(item_code))
+	if not item.has_batch_no or item.has_serial_no:
+		frappe.throw(_("Batch allocation applies only to batch items without serial numbers"))
+
+	consumed_by_batch = {}
+	if consumed_batches:
+		if isinstance(consumed_batches, str):
+			consumed_batches = json.loads(consumed_batches)
+		if not isinstance(consumed_batches, list):
+			frappe.throw(_("Invalid consumed_batches payload"))
+		for row in consumed_batches:
+			if not isinstance(row, dict):
+				continue
+			batch_no = row.get("batch_no")
+			if not batch_no:
+				continue
+			consumed_by_batch[batch_no] = consumed_by_batch.get(batch_no, 0) + flt(row.get("qty"))
+
+	if not consumed_by_batch:
+		batchwise_qty = get_available_batches(
+			frappe._dict(
+				{
+					"item_code": item_code,
+					"warehouse": warehouse,
+					"qty": qty,
+					"based_on": frappe.db.get_single_value(
+						"Stock Settings", "pick_serial_and_batch_based_on"
+					)
+					or "FIFO",
+					"posting_datetime": now_datetime(),
+				}
+			)
+		)
+		allocated = [
+			frappe._dict({"batch_no": batch_no, "qty": batch_qty})
+			for batch_no, batch_qty in batchwise_qty.items()
+		]
+	else:
+		kwargs = frappe._dict(
+			{
+				"item_code": item_code,
+				"warehouse": warehouse,
+				"qty": 0,
+				"based_on": frappe.db.get_single_value(
+					"Stock Settings", "pick_serial_and_batch_based_on"
+				)
+				or "FIFO",
+				"posting_datetime": now_datetime(),
+			}
+		)
+
+		available_batches = get_auto_batch_nos(kwargs) or []
+		for batch in available_batches:
+			batch.qty = flt(batch.qty) - flt(consumed_by_batch.get(batch.batch_no, 0))
+		precision = frappe.get_precision("Stock Ledger Entry", "actual_qty")
+		available_batches = [d for d in available_batches if flt(d.qty, precision) > 0]
+		allocated = get_qty_based_available_batches(available_batches, qty)
+	if not allocated:
+		frappe.throw(
+			_("Insufficient batch stock for {0} in {1}. Requested {2}.").format(
+				frappe.bold(item_code), frappe.bold(warehouse), frappe.bold(qty)
+			),
+			title=_("Insufficient Stock"),
+		)
+
+	allocated_total = sum(flt(row.qty) for row in allocated)
+	precision = frappe.get_precision("Stock Ledger Entry", "actual_qty")
+	if flt(allocated_total, precision) + 1e-9 < flt(qty, precision):
+		frappe.throw(
+			_("Only {0} available across batches for {1} in {2}. Requested {3}.").format(
+				frappe.bold(allocated_total),
+				frappe.bold(item_code),
+				frappe.bold(warehouse),
+				frappe.bold(qty),
+			),
+			title=_("Insufficient Stock"),
+		)
+
+	segments = []
+	for row in allocated:
+		batch_doc = frappe.get_cached_doc("Batch", row.batch_no)
+		segments.append(
+			{
+				"batch_no": row.batch_no,
+				"qty": flt(row.qty),
+				"expiry_date": batch_doc.expiry_date,
+				"manufacturing_date": batch_doc.manufacturing_date,
+			}
+		)
+
+	return segments
+
+
+@frappe.whitelist()
 def get_item_groups(pos_profile):
 	"""Get item groups configured in POS Profile with hierarchy info for filtering."""
 	cache_key = f"pos_item_groups:{pos_profile}"

@@ -29,8 +29,32 @@
 
 				<!-- Batch Selection -->
 				<div v-if="item?.has_batch_no">
+					<div v-if="requestedQty > 1" class="mb-3 rounded-lg border border-blue-200 bg-blue-50 p-3">
+						<div class="flex flex-wrap items-center justify-between gap-2">
+							<div class="text-sm text-gray-700">
+								<span class="font-medium">{{ __('Requested') }}:</span> {{ requestedQty }}
+								<span class="mx-2 text-gray-400">|</span>
+								<span class="font-medium">{{ __('Available') }}:</span> {{ totalAvailableQty }}
+								<span v-if="availableBatches.length" class="text-gray-500">
+									({{ __("{0} batches", [availableBatches.length]) }})
+								</span>
+							</div>
+							<Button
+								v-if="canAutoAllocate"
+								variant="solid"
+								size="sm"
+								:loading="isAllocating"
+								@click="autoAllocateBatches"
+							>
+								{{ __('Auto Allocate') }}
+							</Button>
+						</div>
+						<p v-if="allocationError" class="mt-2 text-xs text-red-600">{{ allocationError }}</p>
+					</div>
+
 					<label class="block text-sm font-medium text-gray-700 mb-2">
 						{{ __('Select Batch Number') }}
+						<span class="font-normal text-gray-500">({{ __('optional if using Auto Allocate') }})</span>
 					</label>
 					<div class="flex flex-col gap-2 max-h-80 overflow-y-auto">
 						<div
@@ -53,6 +77,9 @@
 										</span>
 										<span v-if="batch.expiry_date" class="text-xs text-gray-600">
 											{{ __('Exp: {0}', [formatDate(batch.expiry_date)]) }}
+										</span>
+										<span v-if="requestedQty > 1 && selectedBatch?.batch_no === batch.batch_no && batch.qty < requestedQty" class="text-xs text-amber-600">
+											{{ __('Max {0} from this batch', [batch.qty]) }}
 										</span>
 									</div>
 								</div>
@@ -188,7 +215,7 @@
 				<Button
 					variant="solid"
 					@click="handleConfirm"
-					:disabled="!isValid"
+					:disabled="!isValid || isAllocating"
 				>
 					{{ __('Confirm') }}
 				</Button>
@@ -198,7 +225,7 @@
 </template>
 
 <script setup>
-import { Button, Dialog, createResource } from "frappe-ui"
+import { Button, Dialog, createResource, call } from "frappe-ui"
 import { computed, ref, watch } from "vue"
 import { useSerialNumberStore } from "@/stores/serialNumber"
 import { usePOSCartStore } from "@/stores/posCart"
@@ -230,6 +257,22 @@ const availableSerials = ref([])
 const selectedBatch = ref(null)
 const selectedSerials = ref([])
 const serialSearchQuery = ref("")
+const isAllocating = ref(false)
+const allocationError = ref("")
+
+const requestedQty = computed(() => Math.max(1, Math.round(Number(props.quantity) || 1)))
+
+const totalAvailableQty = computed(() =>
+	availableBatches.value.reduce((sum, batch) => sum + (batch.qty || 0), 0),
+)
+
+const canAutoAllocate = computed(() => {
+	return (
+		requestedQty.value > 0 &&
+		totalAvailableQty.value >= requestedQty.value &&
+		availableBatches.value.length > 0
+	)
+})
 
 // Computed: Available batches with cart quantities subtracted
 const availableBatches = computed(() => {
@@ -308,7 +351,13 @@ const filteredSerials = computed(() => {
 
 const isValid = computed(() => {
 	if (props.item?.has_batch_no) {
-		return selectedBatch.value !== null
+		if (!selectedBatch.value) {
+			return false
+		}
+		if (requestedQty.value > (selectedBatch.value.qty || 0)) {
+			return false
+		}
+		return true
 	}
 	if (props.item?.has_serial_no) {
 		// Valid if at least one serial is selected
@@ -391,11 +440,62 @@ function clearAllSerials() {
 	selectedSerials.value = []
 }
 
+function getConsumedBatchesFromCart() {
+	return cartStore.invoiceItems
+		.filter(
+			(cartItem) =>
+				cartItem.item_code === props.item?.item_code && cartItem.batch_no,
+		)
+		.map((cartItem) => ({
+			batch_no: cartItem.batch_no,
+			qty: (cartItem.quantity || 0) * (cartItem.conversion_factor || 1),
+		}))
+}
+
+async function autoAllocateBatches() {
+	if (!props.item?.item_code || !props.warehouse) {
+		return
+	}
+
+	allocationError.value = ""
+	isAllocating.value = true
+
+	try {
+		const segments = await call("pos_next.api.items.get_batch_allocation", {
+			item_code: props.item.item_code,
+			warehouse: props.warehouse,
+			qty: requestedQty.value,
+			consumed_batches: getConsumedBatchesFromCart(),
+		})
+
+		if (!segments?.length) {
+			allocationError.value = __("No batches could be allocated for the requested quantity.")
+			return
+		}
+
+		emit("batch-serial-selected", { segments })
+		show.value = false
+	} catch (error) {
+		allocationError.value =
+			error?.messages?.[0] || error?.message || __("Failed to allocate batches.")
+	} finally {
+		isAllocating.value = false
+	}
+}
+
 function handleConfirm() {
 	const result = {}
 
 	if (props.item?.has_batch_no && selectedBatch.value) {
+		if (requestedQty.value > (selectedBatch.value.qty || 0)) {
+			allocationError.value = __(
+				"Requested quantity ({0}) exceeds selected batch quantity ({1}). Use Auto Allocate for multiple batches.",
+				[requestedQty.value, selectedBatch.value.qty || 0],
+			)
+			return
+		}
 		result.batch_no = selectedBatch.value.batch_no
+		result.expiry_date = selectedBatch.value.expiry_date
 	}
 
 	if (props.item?.has_serial_no) {
@@ -416,6 +516,8 @@ function resetSelection() {
 	selectedSerials.value = []
 	serialSearchQuery.value = ""
 	warehouseBatches.value = []
+	allocationError.value = ""
+	isAllocating.value = false
 	// Don't clear availableSerials - it's managed by the store cache
 }
 

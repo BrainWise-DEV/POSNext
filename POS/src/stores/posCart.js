@@ -175,11 +175,17 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	// Actions
 	function addItem(item, qty = 1, _autoAdd = false, currentProfile = null) {
 		if (currentProfile && settingsStore.shouldEnforceStockValidation() && shouldValidateItemStock(item)) {
-			// Account for quantity already in the cart for this item
+			// Account for quantity already in the cart (per batch when batch-tracked)
 			const itemUom = item.uom || item.stock_uom
-			const existing = invoiceItems.value.find(
-				(i) => i.item_code === item.item_code && i.uom === itemUom,
-			)
+			const existing = invoiceItems.value.find((i) => {
+				if (i.item_code !== item.item_code || i.uom !== itemUom) {
+					return false
+				}
+				if (item.has_batch_no || i.has_batch_no) {
+					return (i.batch_no || "") === (item.batch_no || "")
+				}
+				return true
+			})
 			const totalQty = (existing ? existing.quantity : 0) + qty
 			const warehouse = item.warehouse || currentProfile.warehouse
 
@@ -197,12 +203,21 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * Wraps useInvoice.updateItemQuantity to enforce stock limits
 	 * when the user clicks +/- or types a new quantity.
 	 */
-	function updateItemQuantity(itemCode, quantity, uom = null) {
-		const item = uom
-			? invoiceItems.value.find((i) => i.item_code === itemCode && i.uom === uom)
-			: invoiceItems.value.find((i) => i.item_code === itemCode)
+	function updateItemQuantity(itemCode, quantity, uom = null, batchNo = undefined) {
+		const item =
+			uom || batchNo !== undefined
+				? invoiceItems.value.find((i) => {
+						if (i.item_code !== itemCode) return false
+						if (uom && i.uom !== uom) return false
+						if (batchNo !== undefined && batchNo !== null) {
+							return (i.batch_no || "") === (batchNo || "")
+						}
+						if (i.has_batch_no && batchNo === undefined) return false
+						return true
+					})
+				: invoiceItems.value.find((i) => i.item_code === itemCode)
 
-		if (!item) return baseUpdateItemQuantity(itemCode, quantity, uom)
+		if (!item) return baseUpdateItemQuantity(itemCode, quantity, uom, batchNo)
 
 		const newQty = Number.parseFloat(quantity) || 1
 
@@ -215,7 +230,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			}
 		}
 
-		baseUpdateItemQuantity(itemCode, quantity, uom)
+		baseUpdateItemQuantity(itemCode, quantity, uom, batchNo)
 	}
 
 	function clearCart() {

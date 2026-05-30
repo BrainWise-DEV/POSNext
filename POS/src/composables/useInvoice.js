@@ -218,11 +218,21 @@ export function useInvoice() {
 	})
 
 	// Actions
-	function addItem(item, quantity = 1) {
+	function findMatchingCartItem(item) {
 		const itemUom = item.uom || item.stock_uom
-		const existingItem = invoiceItems.value.find(
-			(i) => i.item_code === item.item_code && i.uom === itemUom,
-		)
+		return invoiceItems.value.find((i) => {
+			if (i.item_code !== item.item_code || i.uom !== itemUom) {
+				return false
+			}
+			if (item.has_batch_no || i.has_batch_no) {
+				return (i.batch_no || "") === (item.batch_no || "")
+			}
+			return true
+		})
+	}
+
+	function addItem(item, quantity = 1) {
+		const existingItem = findMatchingCartItem(item)
 
 		if (existingItem) {
 			// Store old values before update for incremental cache adjustment
@@ -316,11 +326,27 @@ export function useInvoice() {
 	 *                            If provided, only removes the item with matching item_code AND uom.
 	 *                            If null, removes the first item matching item_code.
 	 */
-	function removeItem(itemCode, uom = null) {
+	function matchesCartLine(i, itemCode, uom, batchNo) {
+		if (i.item_code !== itemCode) {
+			return false
+		}
+		if (uom && i.uom !== uom) {
+			return false
+		}
+		if (batchNo !== undefined && batchNo !== null) {
+			return (i.batch_no || "") === (batchNo || "")
+		}
+		if (i.has_batch_no && batchNo === undefined) {
+			return false
+		}
+		return true
+	}
+
+	function removeItem(itemCode, uom = null, batchNo = undefined) {
 		let itemToRemove
-		if (uom) {
-			itemToRemove = invoiceItems.value.find(
-				(i) => i.item_code === itemCode && i.uom === uom,
+		if (uom || batchNo !== undefined) {
+			itemToRemove = invoiceItems.value.find((i) =>
+				matchesCartLine(i, itemCode, uom, batchNo),
 			)
 		} else {
 			itemToRemove = invoiceItems.value.find((i) => i.item_code === itemCode)
@@ -343,9 +369,9 @@ export function useInvoice() {
 			}
 		}
 
-		if (uom) {
+		if (uom || batchNo !== undefined) {
 			invoiceItems.value = invoiceItems.value.filter(
-				(i) => !(i.item_code === itemCode && i.uom === uom),
+				(i) => !matchesCartLine(i, itemCode, uom, batchNo),
 			)
 		} else {
 			invoiceItems.value = invoiceItems.value.filter(
@@ -362,11 +388,11 @@ export function useInvoice() {
 	 *                            If provided, only updates the item with matching item_code AND uom.
 	 *                            If null, updates the first item matching item_code.
 	 */
-	function updateItemQuantity(itemCode, quantity, uom = null) {
+	function updateItemQuantity(itemCode, quantity, uom = null, batchNo = undefined) {
 		let item
-		if (uom) {
-			item = invoiceItems.value.find(
-				(i) => i.item_code === itemCode && i.uom === uom,
+		if (uom || batchNo !== undefined) {
+			item = invoiceItems.value.find((i) =>
+				matchesCartLine(i, itemCode, uom, batchNo),
 			)
 		} else {
 			item = invoiceItems.value.find((i) => i.item_code === itemCode)
