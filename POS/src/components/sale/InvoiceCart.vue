@@ -1118,6 +1118,12 @@
 						formatQuantity(totalQuantity)
 					}}</span>
 				</div>
+				<div class="flex items-center justify-between text-xs text-gray-600 mb-0.5">
+					<span class="font-medium">{{ __("Total MRP") }}</span>
+					<span class="font-bold text-gray-900 text-center min-w-[60px]">{{
+						formatCurrency(totalMrp)
+					}}</span>
+				</div>
 				<div class="flex items-center justify-between text-xs text-gray-600">
 					<span class="font-medium">{{ __("Subtotal") }}</span>
 					<span class="font-bold text-gray-900 text-center min-w-[60px]">{{
@@ -1613,6 +1619,19 @@ const totalQuantity = computed(() => {
 		// For dedicated free item rows, quantity IS the free qty — don't double-count
 		const freeQty = item.is_free_item ? 0 : (item.free_qty || 0);
 		return sum + qty + freeQty;
+	}, 0);
+});
+
+/**
+ * Total MRP (Maximum Retail Price) of all items in cart.
+ * Multiplies each item's MRP by its quantity and sums them up.
+ * @returns {Number} Total MRP of all items
+ */
+const totalMrp = computed(() => {
+	return props.items.reduce((sum, item) => {
+		const mrp = Number.parseFloat(item.mrp) || 0;
+		const qty = item.quantity || 0;
+		return sum + (mrp * qty);
 	}, 0);
 });
 
