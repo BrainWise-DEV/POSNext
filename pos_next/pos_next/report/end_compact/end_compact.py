@@ -62,6 +62,9 @@ def execute(filters=None):
 	data = get_data(filters, users)
 	
 	if data:
+		# Filter out rows with zero total
+		data = [row for row in data if row.get("total") and row.get("total") != 0]
+		
 		totals = {}
 		overall_total = 0
 		for col in columns:
@@ -133,6 +136,7 @@ def execute(filters=None):
 
 		# Limit Item Groups to Appliances, Crockery, Thermoware, Bed & Bath, Decor, Plastic and their descendants
 		target_groups = ["APPLIANCES", "CROCKREY", "THERMOWARE", "BED N BATH", "DECOR", "PLASTIC"]
+		target_groups_sorted = sorted(target_groups)  # Sort in ascending order
 		
 		# Fetch lft and rgt bounds for these target parent item groups
 		bounds = frappe.get_all("Item Group",
@@ -151,6 +155,9 @@ def execute(filters=None):
 			all_item_groups = [frappe._dict(ig) for ig in raw_item_groups]
 		else:
 			all_item_groups = []
+		
+		# Use sorted target groups for iteration
+		target_groups = target_groups_sorted
 		
 		first_day = get_first_day(today())
 		
@@ -202,17 +209,14 @@ def execute(filters=None):
 			levels[group_name] = level
 			return level
 
-		for ig in all_item_groups:
-			if ig.name not in target_groups:
-				continue
-				
-			d_val = daily_totals.get(ig.name, 0)
-			m_val = monthly_totals.get(ig.name, 0)
+		for group_name in target_groups:
+			d_val = daily_totals.get(group_name, 0)
+			m_val = monthly_totals.get(group_name, 0)
 			d_pct = (d_val / daily_section_total * 100) if daily_section_total else 0
 			m_pct = (m_val / monthly_section_total * 100) if monthly_section_total else 0
 			
 			row = {
-				"mode_of_payment": ig.name,
+				"mode_of_payment": group_name,
 				col2_fn: d_val,
 				col3_fn: d_pct,
 				col4_fn: m_val,
