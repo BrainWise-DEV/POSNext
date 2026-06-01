@@ -226,15 +226,15 @@ const countrySearchQuery = ref("")
 const dropdownRef = ref(null)
 const countrySearchRef = ref(null)
 
-const customerGroups = ref(["Commercial", "Individual", "Non Profit", "Government"])
-const territories = ref(["All Territories"])
+const customerGroups = ref([])
+const territories = ref([])
 
 const customerData = ref({
 	customer_name: "",
 	mobile_no: "",
 	email_id: "",
-	customer_group: "Individual",
-	territory: "All Territories",
+	customer_group: "",
+	territory: "",
 })
 
 // =============================================================================
@@ -337,8 +337,8 @@ const createCustomerResource = createResource({
 		customer_name: customerData.value.customer_name,
 		mobile_no: customerData.value.mobile_no || "",
 		email_id: customerData.value.email_id || "",
-		customer_group: customerData.value.customer_group || __("Individual"),
-		territory: customerData.value.territory || __("All Territories"),
+		customer_group: customerData.value.customer_group || "",
+		territory: customerData.value.territory || "",
 		pos_profile: props.posProfile,
 	}),
 	onSuccess: (data) => {
@@ -359,8 +359,8 @@ const updateCustomerResource = createResource({
 		name: props.customer?.name,
 		fieldname: {
 			customer_name: customerData.value.customer_name,
-			customer_group: customerData.value.customer_group || __("Individual"),
-			territory: customerData.value.territory || __("All Territories"),
+			customer_group: customerData.value.customer_group || "",
+			territory: customerData.value.territory || "",
 			mobile_no: customerData.value.mobile_no || "",
 			email_id: customerData.value.email_id || "",
 		},
@@ -391,8 +391,19 @@ const createListResource = (doctype, onSuccess) =>
 		onError: (err) => log.error(`Error loading ${doctype}`, err),
 	})
 
-const customerGroupsResource = createListResource("Customer Group", (names) => (customerGroups.value = names))
-const territoriesResource = createListResource("Territory", (names) => (territories.value = names))
+const customerGroupsResource = createListResource("Customer Group", (names) => {
+	customerGroups.value = names
+	if (!customerData.value.customer_group && names.length > 0) {
+		customerData.value.customer_group = names[0]
+	}
+})
+const territoriesResource = createListResource("Territory", (names) => {
+	territories.value = names
+	if (!customerData.value.territory && names.length > 0) {
+		const allTerr = names.find((n) => n === "All Territories")
+		customerData.value.territory = allTerr || names[0]
+	}
+})
 
 const posProfileResource = createResource({
 	url: "frappe.client.get_value",
@@ -458,8 +469,9 @@ const resetForm = () => {
 		customer_name: "",
 		mobile_no: "",
 		email_id: "",
-		customer_group: "Individual",
-		territory: "All Territories",
+		// Default to first loaded group; if list not yet loaded, leave empty
+		customer_group: customerGroups.value[0] || "",
+		territory: territories.value.find((n) => n === "All Territories") || territories.value[0] || "",
 	})
 	selectedCountryCode.value = ""
 	phoneNumber.value = ""
@@ -481,8 +493,12 @@ watch(
 		if (customer?.name) {
 			customerData.value.customer_name = customer.customer_name || ""
 			customerData.value.email_id = customer.email_id || ""
-			customerData.value.customer_group = customer.customer_group || "Individual"
-			customerData.value.territory = customer.territory || "All Territories"
+			customerData.value.customer_group = customer.customer_group || customerGroups.value[0] || ""
+			customerData.value.territory =
+				customer.territory ||
+				territories.value.find((n) => n === "All Territories") ||
+				territories.value[0] ||
+				""
 			// Handle mobile_no with country code
 			if (customer.mobile_no) {
 				customerData.value.mobile_no = customer.mobile_no
