@@ -136,14 +136,6 @@ before_uninstall = "pos_next.uninstall.before_uninstall"
 
 # notification_config = "pos_next.notifications.get_notification_config"
 
-# Permissions
-# Standard Queries
-# ----------------
-# Custom query for company-aware item filtering
-standard_queries = {
-	"Item": "pos_next.validations.item_query"
-}
-
 # DocType Class
 # ---------------
 # Override standard doctype classes
@@ -157,9 +149,6 @@ override_doctype_class = {
 # Hook on document methods and events
 
 doc_events = {
-	"Item": {
-		"validate": "pos_next.validations.validate_item"
-	},
 	"Customer": {
 		"after_insert": [
 			"pos_next.api.customers.auto_assign_loyalty_program",
@@ -184,9 +173,6 @@ doc_events = {
 	},
 	"POS Profile": {
 		"on_update": "pos_next.realtime_events.emit_pos_profile_updated_event"
-	},
-	"POS Settings": {
-		"on_update": "pos_next.api.items.invalidate_pos_settings_cache"
 	},
 	"Promotional Scheme": {
 		"on_update": "pos_next.overrides.pricing_rule.sync_pos_only_to_pricing_rules"
