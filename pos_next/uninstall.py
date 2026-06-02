@@ -50,28 +50,10 @@ def remove_custom_fields():
 		custom_fields = [
 			"Sales Invoice-posa_pos_opening_shift",
 			"Sales Invoice-posa_is_printed",
-			"Customer-custom_company",
-			"Supplier-custom_company",
-			"Item Group-custom_company",
-			"Customer Group-custom_company",
-			"Supplier Group-custom_company",
-			"Brand-custom_company",
-			"Price List-custom_company",
-			# Note: Item-custom_company is shared with Nexus app
-			# Only remove if Nexus is not installed
 		]
 
 		removed_count = 0
 		skipped_count = 0
-
-		# Check if Nexus app is installed
-		nexus_installed = "nexus" in frappe.get_installed_apps()
-
-		# Add Item-custom_company to removal list only if Nexus is not installed
-		if not nexus_installed:
-			custom_fields.append("Item-custom_company")
-		else:
-			log_message("Nexus app detected - preserving Item-custom_company field", level="info", indent=1)
 
 		for field_name in custom_fields:
 			try:
@@ -236,27 +218,10 @@ def get_custom_fields_for_cleanup():
 	Get list of custom fields that can be safely removed
 	Returns list of field names that belong to POS Next
 	"""
-	custom_fields = []
-
-	# Always safe to remove (POS Next specific)
-	custom_fields.extend(
-		[
-			"Sales Invoice-posa_pos_opening_shift",
-			"Sales Invoice-posa_is_printed",
-			"Customer-custom_company",
-			"Supplier-custom_company",
-			"Item Group-custom_company",
-			"Customer Group-custom_company",
-			"Supplier Group-custom_company",
-			"Brand-custom_company",
-			"Price List-custom_company",
-		]
-	)
-
-	# Conditional removal (shared with other apps)
-	nexus_installed = "nexus" in frappe.get_installed_apps()
-	if not nexus_installed:
-		custom_fields.append("Item-custom_company")
+	custom_fields = [
+		"Sales Invoice-posa_pos_opening_shift",
+		"Sales Invoice-posa_is_printed",
+	]
 
 	return custom_fields
 

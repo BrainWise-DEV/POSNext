@@ -21,11 +21,14 @@ Usage:
 
 from __future__ import annotations
 
+import logging
 from functools import lru_cache
 from typing import List, TypedDict
 
 import frappe
 from erpnext.stock.get_item_details import get_conversion_factor
+
+logger = logging.getLogger(__name__)
 
 
 class BarcodeResult(TypedDict, total=False):
@@ -82,26 +85,110 @@ def resolve_barcode(barcode: str, pos_profile: str) -> BarcodeResult | None:
         ...     print(f"Item: {result['item_barcode']}, Qty: {result['qty']}")
     """
     if not is_barcode_resolver_available():
+        logger.debug("resolve_barcode: barcode_resolver app not installed")
         return None
 
     try:
         from barcode_resolver.barcode_resolver.doctype.barcode_rule.utils import (
             resolve_barcode as _resolve_barcode,
         )
-        # get POS Settings
-        pos_settings = frappe.get_doc("POS Settings", {"pos_profile": pos_profile})
-        barcode_rules = [rule.barcode_rule for rule in pos_settings.barcode_rules if not rule.disable]
-        return _resolve_barcode(barcode, barcode_rules)
     except ImportError:
-        # App might have been uninstalled, clear cache and return None
+        logger.warning("resolve_barcode: ImportError loading upstream; clearing cache")
         is_barcode_resolver_available.cache_clear()
         return None
+
+    barcode_rules = _get_barcode_rules_for_profile(pos_profile)
+    logger.info(
+        "resolve_barcode: barcode=%r profile=%r rules=%s",
+        barcode, pos_profile,
+        "ALL_ACTIVE" if barcode_rules is None else barcode_rules,
+    )
+
+    try:
+        result = _resolve_barcode(barcode, barcode_rules)
     except Exception:
-        # Log unexpected errors but don't break POS functionality
         frappe.log_error(
             title="Barcode Resolver Error",
-            message=f"Error resolving barcode: {barcode}",
+            message=f"Error resolving barcode {barcode!r} for profile {pos_profile!r}\n\n{frappe.get_traceback()}",
         )
+        logger.exception("resolve_barcode: upstream raised for barcode=%r", barcode)
+        return None
+
+    if result is None:
+        logger.info("resolve_barcode: no match for barcode=%r", barcode)
+    else:
+        logger.info(
+            "resolve_barcode: matched barcode=%r -> item_code=%s qty=%s price=%s type=%s",
+            barcode, result.get("item_code"), result.get("qty"),
+            result.get("price"), result.get("barcode_type"),
+        )
+    return result
+
+
+def _get_barcode_rules_for_profile(pos_profile: str) -> list[str] | None:
+    """Return enabled Barcode Rule names for the given POS Profile.
+
+    Returns None when no per-profile configuration exists, which signals
+    the resolver to consider every active Barcode Rule. This keeps the
+    resolver functional on sites that have not yet migrated to the
+    POS Next `POS Settings` doctype (which adds `pos_profile` +
+    `barcode_rules`).
+    """
+    settings_name = frappe.db.get_value(
+        "POS Settings", {"pos_profile": pos_profile}, "name"
+    )
+    if not settings_name:
+        logger.info(
+            "resolve_barcode: no POS Settings row for profile=%r — falling back to all active rules",
+            pos_profile,
+        )
+        return None
+
+    try:
+        settings_doc = frappe.get_cached_doc("POS Settings", settings_name)
+    except Exception:
+        logger.warning(
+            "resolve_barcode: could not load POS Settings %r — falling back",
+            settings_name,
+        )
+        return None
+
+    rules_table = getattr(settings_doc, "barcode_rules", None) or []
+    enabled = [row.barcode_rule for row in rules_table if not row.disable]
+    logger.debug(
+        "resolve_barcode: profile=%r settings=%r enabled_rules=%s",
+        pos_profile, settings_name, enabled,
+    )
+    return enabled
+
+
+def _coerce_value(resolved_barcode, field: str) -> float | None:
+    """Pull a numeric value out of the resolver result regardless of upstream shape.
+
+    Newer barcode_resolver versions populate `qty` / `price` directly. Older
+    versions only return `integer_value` and `decimal_value` segments which
+    must be joined as `"<int>.<dec>"`. Supporting both lets us keep working
+    across mixed upstream versions in production.
+    """
+    direct = resolved_barcode.get(field)
+    if direct is not None:
+        try:
+            return float(direct)
+        except (TypeError, ValueError):
+            pass
+
+    if field == "qty" and resolved_barcode.get("barcode_type") != "Weighted":
+        return None
+    if field == "price" and resolved_barcode.get("barcode_type") != "Priced":
+        return None
+
+    integer_value = resolved_barcode.get("integer_value")
+    decimal_value = resolved_barcode.get("decimal_value")
+    if integer_value is None and decimal_value is None:
+        return None
+    try:
+        return float(f"{integer_value or '0'}.{decimal_value or '0'}")
+    except ValueError:
         return None
 
 
@@ -151,10 +238,19 @@ def compute_resolved_item_data(
         )
         return None
 
-    integer_value = resolved_barcode.get("integer_value", "0")
-    decimal_value = resolved_barcode.get("decimal_value", "0")
+    # Older barcode_resolver versions return integer_value/decimal_value segments;
+    # newer versions return parsed qty/price directly. Support both by preferring
+    # the parsed value and falling back to reconstructing from segments.
+    encoded_qty = _coerce_value(resolved_barcode, "qty")
+    encoded_price = _coerce_value(resolved_barcode, "price")
     if barcode_type == BarcodeTypes.WEIGHTED.value:
-        qty = float(f"{integer_value}.{decimal_value}")
+        if encoded_qty is None:
+            logger.warning(
+                "compute_resolved_item_data: weighted barcode missing qty and segments: %s",
+                resolved_barcode,
+            )
+            return None
+        qty = float(encoded_qty)
         uom = barcode_uom
         price = barcode_uom_price
         if barcode_uom not in uom_prices:
@@ -170,7 +266,13 @@ def compute_resolved_item_data(
             "resolved_barcode_type": barcode_type,
         }
     elif barcode_type == BarcodeTypes.PRICED.value:
-        encoded_price = float(f"{integer_value}.{decimal_value}")
+        if encoded_price is None:
+            logger.warning(
+                "compute_resolved_item_data: priced barcode missing price and segments: %s",
+                resolved_barcode,
+            )
+            return None
+        encoded_price = float(encoded_price)
         if barcode_uom in uom_prices:
             barcode_uom_price = uom_prices.get(barcode_uom)
             price = barcode_uom_price

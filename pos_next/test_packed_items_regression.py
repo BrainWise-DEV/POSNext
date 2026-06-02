@@ -120,8 +120,8 @@ class TestPackedItemsNoDuplicates(FrappeTestCase):
 		ctx = _sales_invoice_bundle_context()
 		bundle_code, child_code = self._unique_codes()
 
-		make_item(child_code, {"is_stock_item": 1, "custom_company": ctx.company})
-		bundle_item = make_item(bundle_code, {"is_stock_item": 0, "custom_company": ctx.company})
+		make_item(child_code, {"is_stock_item": 1})
+		bundle_item = make_item(bundle_code, {"is_stock_item": 0})
 		bundle_item.reload()
 		for row in bundle_item.item_defaults:
 			if row.company == ctx.company:
@@ -171,8 +171,8 @@ class TestPackedItemsNoDuplicates(FrappeTestCase):
 		ctx = _sales_invoice_bundle_context()
 		bundle_code, child_code = self._unique_codes()
 
-		make_item(child_code, {"is_stock_item": 1, "custom_company": ctx.company})
-		bundle_item = make_item(bundle_code, {"is_stock_item": 0, "custom_company": ctx.company})
+		make_item(child_code, {"is_stock_item": 1})
+		bundle_item = make_item(bundle_code, {"is_stock_item": 0})
 		bundle_item.reload()
 		for row in bundle_item.item_defaults:
 			if row.company == ctx.company:
