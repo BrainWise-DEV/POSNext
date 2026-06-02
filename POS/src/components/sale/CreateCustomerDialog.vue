@@ -376,6 +376,23 @@ const updateCustomerResource = createResource({
 	},
 })
 
+const sellingSettingsResource = createResource({
+	url: "frappe.client.get_value",
+	makeParams: () => ({
+		doctype: "Selling Settings",
+		fieldname: ["customer_group", "territory"],
+	}),
+	auto: false,
+	onError: (err) => log.error("Error loading Selling Settings", err),
+})
+console.log(sellingSettingsResource);
+
+function pickDefault(settingsValue, list, fallbackFn = null) {
+	if (settingsValue && list.includes(settingsValue)) return settingsValue
+	if (fallbackFn) return fallbackFn(list) || list[0] || ""
+	return list[0] || ""
+}
+
 /** Helper to create list fetch resources */
 const createListResource = (doctype, onSuccess) =>
 	createResource({
@@ -394,14 +411,20 @@ const createListResource = (doctype, onSuccess) =>
 const customerGroupsResource = createListResource("Customer Group", (names) => {
 	customerGroups.value = names
 	if (!customerData.value.customer_group && names.length > 0) {
-		customerData.value.customer_group = names[0]
+		const settingsDefault = sellingSettingsResource.data?.customer_group
+		customerData.value.customer_group = pickDefault(settingsDefault, names)
 	}
 })
+
 const territoriesResource = createListResource("Territory", (names) => {
 	territories.value = names
 	if (!customerData.value.territory && names.length > 0) {
-		const allTerr = names.find((n) => n === "All Territories")
-		customerData.value.territory = allTerr || names[0]
+		const settingsDefault = sellingSettingsResource.data?.territory
+		customerData.value.territory = pickDefault(
+			settingsDefault,
+			names,
+			(list) => list.find((n) => n === "All Territories"),
+		)
 	}
 })
 
@@ -428,9 +451,15 @@ const loadDialogData = async () => {
 	// Lazy load countries (non-blocking)
 	countriesStore.loadCountries()
 
+	await sellingSettingsResource.reload()
+
+	if (!isEditMode.value) {
+		customerData.value.customer_group = ""
+		customerData.value.territory = ""
+	}
+
 	// Load form options
-	await territoriesResource.reload()
-	customerGroupsResource.reload()
+	await Promise.all([territoriesResource.reload(), customerGroupsResource.reload()])
 	checkPermissions()
 
 	// Set country from POS Profile
@@ -465,13 +494,17 @@ const handleCreate = async () => {
 }
 
 const resetForm = () => {
+	const settings = sellingSettingsResource.data || {}
 	Object.assign(customerData.value, {
 		customer_name: "",
 		mobile_no: "",
 		email_id: "",
-		// Default to first loaded group; if list not yet loaded, leave empty
-		customer_group: customerGroups.value[0] || "",
-		territory: territories.value.find((n) => n === "All Territories") || territories.value[0] || "",
+		customer_group: pickDefault(settings.customer_group, customerGroups.value),
+		territory: pickDefault(
+			settings.territory,
+			territories.value,
+			(list) => list.find((n) => n === "All Territories"),
+		),
 	})
 	selectedCountryCode.value = ""
 	phoneNumber.value = ""
@@ -526,7 +559,8 @@ watch(
 	}
 )
 
-watch(selectedCountryCode, async () => {
+watch(selectedCountryCode, async (newVal, oldVal) => {
+	if (!oldVal) return
 	await nextTick()
 	updateTerritoryFromCountry()
 })
