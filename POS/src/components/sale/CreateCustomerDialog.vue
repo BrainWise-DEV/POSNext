@@ -385,7 +385,6 @@ const sellingSettingsResource = createResource({
 	auto: false,
 	onError: (err) => log.error("Error loading Selling Settings", err),
 })
-console.log(sellingSettingsResource);
 
 function pickDefault(settingsValue, list, fallbackFn = null) {
 	if (settingsValue && list.includes(settingsValue)) return settingsValue
@@ -575,19 +574,15 @@ watch(showCountryDropdown, async (isOpen) => {
 watch(
 	() => props.modelValue,
 	async (isOpen) => {
-		show.value = isOpen
 		isOpen ? await loadDialogData() : resetForm()
 	}
 )
-
-watch(show, (val) => emit("update:modelValue", val))
 
 // =============================================================================
 // Lifecycle Hooks
 // =============================================================================
 
 onMounted(() => {
-	loadDialogData()
 	document.addEventListener("click", handleClickOutside)
 })
 
