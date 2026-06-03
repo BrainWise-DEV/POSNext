@@ -226,7 +226,11 @@ scheduler_events = {
 
 # Request Events
 # ----------------
-# before_request = ["pos_next.utils.before_request"]
+before_request = ["pos_next.pos_next.setup.manager_desk.apply_runtime_patches"]
+
+on_session_creation = [
+	"pos_next.pos_next.setup.manager_desk.ensure_manager_crm_roles_on_login",
+]
 # after_request = ["pos_next.utils.after_request"]
 
 # Job Events

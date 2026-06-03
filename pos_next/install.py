@@ -25,6 +25,10 @@ def after_install():
 		# Setup default print format for POS Profiles
 		setup_default_print_format()
 
+		from pos_next.pos_next.setup.manager_desk import setup_manager_desk
+
+		setup_manager_desk()
+
 		# Clear cache to ensure changes take effect
 		frappe.clear_cache()
 		frappe.db.commit()
@@ -43,6 +47,11 @@ def after_install():
 def after_migrate():
 	"""Hook that runs after bench migrate"""
 	try:
+		# Frappe CRM imports helpers missing on Framework < 15.110.
+		from pos_next.pos_next.compat.frappe_delete_doc import ensure_delete_doc_linked_helpers
+
+		ensure_delete_doc_linked_helpers()
+
 		# Reclaim POS Settings if ERPNext re-imported its Single on top of ours.
 		# Must run in after_migrate (not as a one-shot patch) because ERPNext's
 		# doctype sync runs after pos_next's and would overwrite anything we did
@@ -51,6 +60,10 @@ def after_migrate():
 
 		# Setup default print format
 		setup_default_print_format(quiet=True)
+
+		from pos_next.pos_next.setup.manager_desk import setup_manager_desk
+
+		setup_manager_desk(quiet=True)
 
 		# Clear cache
 		frappe.clear_cache()
