@@ -5,8 +5,15 @@ import frappe
 MODULE_PROFILE_NAME = "Nexus POS Manager"
 MANAGER_ROLE = "Nexus POS Manager"
 
-# Frappe CRM (crm/api/session.py) only allows these roles for app + SPA access.
-MANAGER_CRM_ACCESS_ROLES = ("Sales Manager", "Sales User")
+# Frappe CRM app access (crm/api/session.py). Use Sales User only so org_hierarchy
+# limits leads/deals to records the user owns (Sales Manager sees everything).
+MANAGER_CRM_ACCESS_ROLES = ("Sales User",)
+
+# Strip if previously granted — Sales Manager bypasses owner-only CRM filters.
+MANAGER_CRM_ROLES_TO_STRIP = ("Sales Manager",)
+
+# Extra doctypes: standard owner field (not lead_owner / deal_owner).
+MANAGER_CRM_OWNER_SCOPED_DOCTYPES = ("Contact", "CRM Organization")
 
 # ERPNext module names (not display labels). POS Next is required for the POSNext workspace.
 MANAGER_ALLOWED_MODULES = frozenset({
@@ -233,12 +240,19 @@ def setup_manager_module_access_permissions(quiet=False):
 		print(f"[pos_next] Created {created} module/app Custom DocPerm row(s) for {role}")
 
 
-def ensure_manager_crm_roles(user=None, quiet=False):
-	"""Assign Frappe CRM roles to users who have Nexus POS Manager.
+def is_scoped_crm_user(user=None) -> bool:
+	"""Demo managers with owner-only CRM visibility (Sales User, not Sales Manager)."""
+	user = user or frappe.session.user
+	if not user or user in frappe.STANDARD_USERS:
+		return False
+	roles = set(frappe.get_roles(user))
+	if "System Manager" in roles:
+		return False
+	return MANAGER_ROLE in roles and "Sales Manager" not in roles
 
-	Frappe CRM requires System Manager, Sales Manager, or Sales User
-	(see crm.api.session.CRM_ALLOWED_ROLES). We assign Sales Manager + Sales User.
-	"""
+
+def ensure_manager_crm_roles(user=None, quiet=False):
+	"""Assign Sales User for CRM app access; remove Sales Manager (sees all records)."""
 	user = user or frappe.session.user
 	if not user or user in frappe.STANDARD_USERS:
 		return False
@@ -248,17 +262,22 @@ def ensure_manager_crm_roles(user=None, quiet=False):
 
 	user_doc = frappe.get_doc("User", user)
 	existing = {r.role for r in user_doc.roles}
-	added = []
+	changed = False
+
+	for role in MANAGER_CRM_ROLES_TO_STRIP:
+		if role in existing:
+			user_doc.roles = [r for r in user_doc.roles if r.role != role]
+			changed = True
 
 	for role in MANAGER_CRM_ACCESS_ROLES:
-		if role in existing:
+		if role in {r.role for r in user_doc.roles}:
 			continue
 		if not frappe.db.exists("Role", role):
 			continue
 		user_doc.append("roles", {"role": role})
-		added.append(role)
+		changed = True
 
-	if not added:
+	if not changed:
 		return False
 
 	user_doc.flags.ignore_permissions = True
@@ -266,7 +285,7 @@ def ensure_manager_crm_roles(user=None, quiet=False):
 	frappe.clear_cache(user=user)
 
 	if not quiet:
-		print(f"[pos_next] Granted CRM roles {added} to {user}")
+		print(f"[pos_next] CRM roles for {user}: {MANAGER_CRM_ACCESS_ROLES} (owner-scoped)")
 
 	return True
 
@@ -282,7 +301,7 @@ def ensure_manager_crm_roles_on_login(login_manager=None):
 def strip_manager_crm_roles(user, quiet=False):
 	"""Remove CRM roles provisioned for demo managers (on session expiry)."""
 	user_doc = frappe.get_doc("User", user)
-	strip = set(MANAGER_CRM_ACCESS_ROLES)
+	strip = set(MANAGER_CRM_ACCESS_ROLES) | set(MANAGER_CRM_ROLES_TO_STRIP)
 	original = [r.role for r in user_doc.roles]
 	user_doc.roles = [r for r in user_doc.roles if r.role not in strip]
 	if [r.role for r in user_doc.roles] == original:
@@ -295,10 +314,95 @@ def strip_manager_crm_roles(user, quiet=False):
 	return True
 
 
+def get_owner_scoped_permission_query(doctype: str, user=None) -> str:
+	"""Permission query: only documents owned by the user (demo managers)."""
+	if not is_scoped_crm_user(user):
+		return ""
+	user = user or frappe.session.user
+	return f"`tab{doctype}`.`owner` = {frappe.db.escape(user)}"
+
+
+def has_owner_scoped_permission(doc, ptype: str, user=None) -> bool:
+	if not is_scoped_crm_user(user):
+		return True
+	user = user or frappe.session.user
+	return doc.owner == user
+
+
+def get_contact_permission_query(user=None):
+	return get_owner_scoped_permission_query("Contact", user)
+
+
+def get_crm_organization_permission_query(user=None):
+	return get_owner_scoped_permission_query("CRM Organization", user)
+
+
+def _allow_new_crm_record_for_scoped_user(doc, ptype=None, user=None):
+	"""CRM org_hierarchy denies unsaved leads/deals (name is None); scoped users may create."""
+	if not is_scoped_crm_user(user):
+		return None
+	if doc.get("name"):
+		return None
+	if ptype in (None, "read", "create", "write", "print", "email", "share", "report"):
+		return True
+	return None
+
+
+def has_contact_permission(doc, ptype=None, user=None):
+	if not doc.get("name") and is_scoped_crm_user(user):
+		return True
+	return has_owner_scoped_permission(doc, ptype, user)
+
+
+def has_crm_organization_permission(doc, ptype=None, user=None):
+	if not doc.get("name") and is_scoped_crm_user(user):
+		return True
+	return has_owner_scoped_permission(doc, ptype, user)
+
+
+def set_crm_record_owner_on_create(doc, method=None):
+	"""Ensure demo managers own the CRM records they create."""
+	if frappe.flags.in_import or not is_scoped_crm_user():
+		return
+	user = frappe.session.user
+	if doc.doctype == "CRM Lead" and not doc.get("lead_owner"):
+		doc.lead_owner = user
+	elif doc.doctype == "CRM Deal" and not doc.get("deal_owner"):
+		doc.deal_owner = user
+
+
 def setup_manager_app_access(quiet=False):
-	"""CRM/HR app access uses MANAGER_CRM_ACCESS_ROLES assigned on login (see ensure_manager_crm_roles)."""
+	"""CRM access via Sales User (owner-scoped); see ensure_manager_crm_roles."""
 	if not quiet:
-		print("[pos_next] Manager CRM access via Sales Manager + Sales User roles")
+		print("[pos_next] Manager CRM: Sales User only (own leads/deals/contacts)")
+
+
+def patch_crm_owner_permissions():
+	"""Allow scoped demo managers to create leads/deals (unsaved docs have no name)."""
+	try:
+		from crm.permissions import org_hierarchy as oh
+	except ImportError:
+		return
+
+	if getattr(oh, "_pos_next_owner_perm_patched", False):
+		return
+
+	_orig_lead = oh.has_lead_permission
+	_orig_deal = oh.has_deal_permission
+
+	def has_lead_permission(doc, ptype, user):
+		if _allow_new_crm_record_for_scoped_user(doc, ptype, user):
+			return True
+		return _orig_lead(doc, ptype, user)
+
+	def has_deal_permission(doc, ptype, user):
+		if _allow_new_crm_record_for_scoped_user(doc, ptype, user):
+			return True
+		return _orig_deal(doc, ptype, user)
+
+	oh.has_lead_permission = has_lead_permission
+	oh.has_deal_permission = has_deal_permission
+	oh._pos_next_owner_perm_patched = True
 
 
 def apply_runtime_patches():
@@ -306,6 +410,7 @@ def apply_runtime_patches():
 	from pos_next.pos_next.compat.frappe_delete_doc import ensure_delete_doc_linked_helpers
 
 	ensure_delete_doc_linked_helpers()
+	patch_crm_owner_permissions()
 
 
 def setup_manager_doctype_permissions(quiet=False):
