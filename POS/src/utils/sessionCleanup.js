@@ -1,7 +1,9 @@
 import { clearAllDrafts } from "@/utils/draftManager";
 import { clearAllOfflineReceiptPayloads } from "@/utils/offline/offlineReceiptCache";
+import { offlineWorker } from "@/utils/offline/workerClient";
 import { usePOSCartStore } from "@/stores/posCart";
 import { usePOSUIStore } from "@/stores/posUI";
+import { useCustomerSearchStore } from "@/stores/customerSearch";
 import { useSessionLock } from "@/composables/useSessionLock";
 import { shiftState } from "@/composables/useShift";
 
@@ -67,4 +69,13 @@ export async function cleanupUserSession() {
 	} catch (error) {
 		console.error("Failed to clear draft invoices:", error);
 	}
+
+	// 5. Clear cached customers so the next user never sees the previous user's list
+	try {
+		await offlineWorker.clearCustomersCache();
+	} catch (error) {
+		console.error("Failed to clear customers cache:", error);
+	}
+
+	useCustomerSearchStore().resetState();
 }

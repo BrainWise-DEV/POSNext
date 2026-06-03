@@ -7,16 +7,21 @@ from unittest.mock import Mock, patch
 from pos_next.api.customers import (
 	_get_customer_assignment_context,
 	create_customer,
+	get_allowed_customer_names,
 	get_customers,
 	get_default_loyalty_program_from_settings,
+	should_restrict_customers_for_user,
 )
 
 
 class TestCustomersAPI(unittest.TestCase):
+	@patch("pos_next.api.customers.should_restrict_customers_for_user", return_value=False)
 	@patch("pos_next.api.customers.frappe.logger")
 	@patch("pos_next.api.customers.frappe.get_all")
 	@patch("pos_next.api.customers.frappe.db")
-	def test_get_customers_applies_search_term_filters(self, mock_db, mock_get_all, mock_logger):
+	def test_get_customers_applies_search_term_filters(
+		self, mock_db, mock_get_all, mock_logger, _mock_restrict
+	):
 		mock_logger.return_value = Mock()
 		mock_get_all.return_value = []
 
@@ -109,3 +114,56 @@ class TestCustomersAPI(unittest.TestCase):
 		mock_get_loyalty.assert_called_once_with(company=None, pos_profile="POS-A")
 		customer_doc.insert.assert_called_once_with()
 		self.assertEqual(result["loyalty_program"], "LOYALTY-A")
+
+	@patch("pos_next.api.customers.frappe.get_roles", return_value=["POSNext Cashier"])
+	def test_should_restrict_customers_for_cashier(self, _mock_roles):
+		self.assertTrue(should_restrict_customers_for_user("cashier@example.com"))
+
+	@patch("pos_next.api.customers.frappe.get_roles", return_value=["Nexus POS Manager"])
+	def test_should_not_restrict_customers_for_manager(self, _mock_roles):
+		self.assertFalse(should_restrict_customers_for_user("manager@example.com"))
+
+	@patch("pos_next.api.customers.frappe.get_all", return_value=["CUST-OWNED"])
+	@patch(
+		"pos_next.api.customers.frappe.db.get_value",
+		return_value="CUST-DEFAULT",
+	)
+	def test_get_allowed_customer_names_includes_profile_default_and_owned(
+		self, mock_get_value, mock_get_all
+	):
+		allowed = get_allowed_customer_names("POS-A", user="cashier@example.com")
+
+		self.assertEqual(allowed, {"CUST-DEFAULT", "CUST-OWNED"})
+		mock_get_value.assert_called_once_with("POS Profile", "POS-A", "customer")
+		mock_get_all.assert_called_once_with(
+			"Customer", filters={"owner": "cashier@example.com"}, pluck="name"
+		)
+
+	@patch("pos_next.api.customers.should_restrict_customers_for_user", return_value=True)
+	@patch(
+		"pos_next.api.customers.get_allowed_customer_names",
+		return_value={"CUST-DEFAULT", "CUST-OWNED"},
+	)
+	@patch("pos_next.api.customers.frappe.logger")
+	@patch("pos_next.api.customers.frappe.get_all")
+	@patch("pos_next.api.customers.frappe.db")
+	def test_get_customers_scopes_cashier_to_allowed_names(
+		self,
+		mock_db,
+		mock_get_all,
+		mock_logger,
+		_mock_allowed,
+		_mock_restrict,
+	):
+		mock_logger.return_value = Mock()
+		mock_get_all.return_value = []
+
+		get_customers(pos_profile="POS-A", limit=10)
+
+		kwargs = mock_get_all.call_args.kwargs
+		self.assertEqual(kwargs["filters"]["disabled"], 0)
+		self.assertEqual(kwargs["filters"]["name"][0], "in")
+		self.assertCountEqual(
+			kwargs["filters"]["name"][1],
+			["CUST-DEFAULT", "CUST-OWNED"],
+		)

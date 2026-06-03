@@ -194,6 +194,15 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 		return recs;
 	});
 
+	function resetState() {
+		allCustomers.value = []
+		searchTerm.value = ""
+		selectedIndex.value = -1
+		serverDataFresh = false
+		searchIndex.value.clear()
+		resultCache.value.clear()
+	}
+
 	// Actions
 	async function loadAllCustomers(posProfile, forceReload = false) {
 		if (!posProfile) {
@@ -207,17 +216,23 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 
 		loading.value = true;
 		try {
-			// Step 1: Load from IndexedDB cache (instant display)
-			const cachedCustomers = await offlineWorker.searchCachedCustomers("", 0);
+			const isFullSync = forceReload || !localStorage.getItem(CUSTOMERS_SYNC_KEY);
 
-			if (cachedCustomers && cachedCustomers.length > 0) {
-				allCustomers.value = cachedCustomers;
-				log.debug(`Loaded ${cachedCustomers.length} customers from cache`);
+			if (isFullSync) {
+				await offlineWorker.clearCustomersCache();
+				allCustomers.value = [];
+			} else if (!forceReload) {
+				// Delta sync: show cached list while fetching updates
+				const cachedCustomers = await offlineWorker.searchCachedCustomers("", 0);
+				if (cachedCustomers?.length > 0) {
+					allCustomers.value = cachedCustomers;
+					log.debug(`Loaded ${cachedCustomers.length} customers from cache`);
+				}
 			}
 
-			// Step 2: If online, fetch delta from server
+			// Fetch from server (full list or delta)
 			if (!isOffline()) {
-				const lastSync = forceReload ? null : localStorage.getItem(CUSTOMERS_SYNC_KEY);
+				const lastSync = isFullSync ? null : localStorage.getItem(CUSTOMERS_SYNC_KEY);
 
 				const response = await call("pos_next.api.customers.get_customers", {
 					pos_profile: posProfile,
@@ -228,26 +243,29 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 				});
 				const delta = response?.message || response || [];
 
-				if (delta.length > 0) {
+				if (isFullSync) {
+					const active = delta.filter((c) => !c.disabled);
+					allCustomers.value = active;
+					if (active.length) {
+						await offlineWorker.cacheCustomers(active);
+					}
+					log.debug(`Full sync: ${active.length} customers from server`);
+				} else if (delta.length > 0) {
 					const active = delta.filter((c) => !c.disabled);
 					const disabled = delta.filter((c) => c.disabled);
 
-					// Merge active customers into memory
 					const existingMap = new Map(allCustomers.value.map((c) => [c.name, c]));
 					for (const c of active) {
 						existingMap.set(c.name, c);
 					}
-					// Remove disabled customers from memory
 					for (const c of disabled) {
 						existingMap.delete(c.name);
 					}
 					allCustomers.value = Array.from(existingMap.values());
 
-					// Persist active to IndexedDB
 					if (active.length) {
 						await offlineWorker.cacheCustomers(active);
 					}
-					// Remove disabled from IndexedDB
 					if (disabled.length) {
 						await offlineWorker.deleteCustomers(disabled.map((c) => c.name));
 					}
@@ -265,7 +283,6 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 				allCustomers.value = [];
 			}
 
-			// Clear caches when new data is loaded
 			searchIndex.value.clear();
 			resultCache.value.clear();
 		} catch (error) {
@@ -401,6 +418,7 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 		recommendations,
 
 		// Actions
+		resetState,
 		loadAllCustomers,
 		addCustomerToCache,
 		setSearchTerm,
