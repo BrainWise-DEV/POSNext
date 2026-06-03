@@ -1568,19 +1568,23 @@ def get_invoice(invoice_name):
 
 
 @frappe.whitelist()
-def get_invoices(pos_profile, limit=100):
+def get_invoices(pos_profile: str, limit: int = 100, start: int = 0) -> list:
 	"""
 	Get list of invoices for a POS Profile.
 
 	Args:
 		pos_profile: POS Profile name
 		limit: Maximum number of invoices to return (default 100)
+		start: Offset for pagination (default 0)
 
 	Returns:
 		List of invoices with details
 	"""
 	if not pos_profile:
 		frappe.throw(_("POS Profile is required"))
+
+	limit = cint(limit) or 100
+	start = cint(start) or 0
 
 	# Check if user has access to this POS Profile
 	has_access = frappe.db.exists(
@@ -1616,13 +1620,41 @@ def get_invoices(pos_profile, limit=100):
 			posting_date DESC,
 			posting_time DESC
 		LIMIT %(limit)s
+		OFFSET %(start)s
 	""", {
 		"pos_profile": pos_profile,
-		"limit": limit
+		"limit": limit,
+		"start": start
 	}, as_dict=True)
+
+	invoice_names = [invoice.name for invoice in invoices]
+	payments_by_invoice = {}
+	if invoice_names:
+		payments = frappe.db.sql("""
+			SELECT
+				parent,
+				mode_of_payment,
+				amount
+			FROM
+				`tabSales Invoice Payment`
+			WHERE
+				parent IN %(invoice_names)s
+			ORDER BY
+				parent,
+				idx
+		""", {
+			"invoice_names": tuple(invoice_names)
+		}, as_dict=True)
+
+		for payment in payments:
+			payments_by_invoice.setdefault(payment.parent, []).append({
+				"mode_of_payment": payment.mode_of_payment,
+				"amount": payment.amount,
+			})
 
 	# Load items for each invoice for filtering purposes
 	for invoice in invoices:
+		invoice.payments = payments_by_invoice.get(invoice.name, [])
 		items = frappe.db.sql("""
 			SELECT
 				item_code,

@@ -79,6 +79,7 @@
 								</div>
 								<p class="text-xs text-gray-600 text-start">{{ invoice.customer_name }}</p>
 								<p class="text-xs text-gray-500 text-start">{{ formatDateTime(invoice.posting_date, invoice.posting_time) }}</p>
+								<p class="text-xs text-gray-500 text-start">{{ formatPaymentModes(invoice) }}</p>
 							</div>
 
 							<!-- Amount & Actions (End Side) -->
@@ -150,13 +151,18 @@
 
 <script setup>
 import { useToast } from "@/composables/useToast"
-import { DEFAULT_CURRENCY, DEFAULT_LOCALE, formatCurrency as formatCurrencyUtil } from "@/utils/currency"
+import { useFormatters } from "@/composables/useFormatters"
+import {
+	DEFAULT_CURRENCY,
+	formatCurrency as formatCurrencyUtil,
+} from "@/utils/currency"
 import { getInvoiceStatusColor } from "@/utils/invoice"
 import { Button, Dialog, Input, createResource } from "frappe-ui"
 import { computed, ref, watch } from "vue"
 import ReturnInvoiceDialog from "./ReturnInvoiceDialog.vue"
 
 const { showError } = useToast()
+const { formatDate, formatTime } = useFormatters()
 
 const props = defineProps({
 	modelValue: Boolean,
@@ -172,7 +178,13 @@ function formatCurrency(amount) {
 	return formatCurrencyUtil(Number.parseFloat(amount || 0), props.currency)
 }
 
-const emit = defineEmits(["update:modelValue", "create-return", "view-invoice", "print-invoice", "return-created"])
+const emit = defineEmits([
+	"update:modelValue",
+	"create-return",
+	"view-invoice",
+	"print-invoice",
+	"return-created",
+])
 
 const show = ref(props.modelValue)
 const invoices = ref([])
@@ -190,28 +202,12 @@ const isLoadingMore = ref(false)
 
 // Create resource for loading invoices
 const invoicesResource = createResource({
-	url: "frappe.client.get_list",
+	url: "pos_next.api.invoices.get_invoices",
 	makeParams() {
 		return {
-			doctype: "Sales Invoice",
-			filters: {
-				is_pos: 1,
-				...(props.posProfile && { pos_profile: props.posProfile }),
-			},
-			fields: [
-				"name",
-				"customer",
-				"customer_name",
-				"posting_date",
-				"posting_time",
-				"grand_total",
-				"status",
-				"docstatus",
-				"is_return",
-			],
-			order_by: "modified desc",
+			pos_profile: props.posProfile,
 			start: page.value * pageSize,
-			page_length: pageSize,
+			limit: pageSize,
 		}
 	},
 	auto: false,
@@ -269,10 +265,30 @@ const filteredInvoices = computed(() => {
 	const term = searchTerm.value.toLowerCase()
 	return invoices.value.filter(
 		(inv) =>
-			inv.name.toLowerCase().includes(term) ||
+			inv.name?.toLowerCase().includes(term) ||
 			inv.customer_name?.toLowerCase().includes(term),
 	)
 })
+
+function formatPaymentModes(invoice) {
+	const payments = Array.isArray(invoice?.payments) ? invoice.payments : []
+	const validPayments = payments.filter((payment) => payment.mode_of_payment)
+
+	if (validPayments.length === 0) {
+		return __("No payment mode")
+	}
+
+	if (validPayments.length === 1) {
+		return __(validPayments[0].mode_of_payment)
+	}
+
+	return validPayments
+		.map(
+			(payment) =>
+				`${__(payment.mode_of_payment)} ${formatCurrency(Number.parseFloat(payment.amount || 0))}`,
+		)
+		.join(", ")
+}
 
 function loadInvoices() {
 	if (props.posProfile) {
@@ -306,7 +322,11 @@ function canCreateReturn(invoice) {
 	// 1. Invoice is submitted (docstatus === 1)
 	// 2. Not already a return invoice
 	// 3. Status is not "Credit Note Issued" (already has a return)
-	return invoice.docstatus === 1 && !invoice.is_return && invoice.status !== 'Credit Note Issued'
+	return (
+		invoice.docstatus === 1 &&
+		!invoice.is_return &&
+		invoice.status !== "Credit Note Issued"
+	)
 }
 
 function openReturnModal(invoice) {
@@ -322,14 +342,8 @@ function handleReturnCreated(returnInvoice) {
 }
 
 function formatDateTime(date, time) {
-	const dateStr = new Date(date).toLocaleDateString(DEFAULT_LOCALE, {
-		month: "short",
-		day: "numeric",
-		year: "numeric",
-	})
-	if (time) {
-		return `${dateStr} ${time}`
-	}
-	return dateStr
+	const dateStr = formatDate(date)
+	const timeStr = formatTime(time)
+	return [dateStr, timeStr].filter(Boolean).join(" ")
 }
 </script>
