@@ -226,15 +226,15 @@ const countrySearchQuery = ref("")
 const dropdownRef = ref(null)
 const countrySearchRef = ref(null)
 
-const customerGroups = ref(["Commercial", "Individual", "Non Profit", "Government"])
-const territories = ref(["All Territories"])
+const customerGroups = ref([])
+const territories = ref([])
 
 const customerData = ref({
 	customer_name: "",
 	mobile_no: "",
 	email_id: "",
-	customer_group: "Individual",
-	territory: "All Territories",
+	customer_group: "",
+	territory: "",
 })
 
 // =============================================================================
@@ -337,8 +337,8 @@ const createCustomerResource = createResource({
 		customer_name: customerData.value.customer_name,
 		mobile_no: customerData.value.mobile_no || "",
 		email_id: customerData.value.email_id || "",
-		customer_group: customerData.value.customer_group || __("Individual"),
-		territory: customerData.value.territory || __("All Territories"),
+		customer_group: customerData.value.customer_group || "",
+		territory: customerData.value.territory || "",
 		pos_profile: props.posProfile,
 	}),
 	onSuccess: (data) => {
@@ -359,8 +359,8 @@ const updateCustomerResource = createResource({
 		name: props.customer?.name,
 		fieldname: {
 			customer_name: customerData.value.customer_name,
-			customer_group: customerData.value.customer_group || __("Individual"),
-			territory: customerData.value.territory || __("All Territories"),
+			customer_group: customerData.value.customer_group || "",
+			territory: customerData.value.territory || "",
 			mobile_no: customerData.value.mobile_no || "",
 			email_id: customerData.value.email_id || "",
 		},
@@ -375,6 +375,22 @@ const updateCustomerResource = createResource({
 		showError(error.message || __("Failed to update customer"))
 	},
 })
+
+const sellingSettingsResource = createResource({
+	url: "frappe.client.get_value",
+	makeParams: () => ({
+		doctype: "Selling Settings",
+		fieldname: ["customer_group", "territory"],
+	}),
+	auto: false,
+	onError: (err) => log.error("Error loading Selling Settings", err),
+})
+
+function pickDefault(settingsValue, list, fallbackFn = null) {
+	if (settingsValue && list.includes(settingsValue)) return settingsValue
+	if (fallbackFn) return fallbackFn(list) || list[0] || ""
+	return list[0] || ""
+}
 
 /** Helper to create list fetch resources */
 const createListResource = (doctype, onSuccess) =>
@@ -391,8 +407,25 @@ const createListResource = (doctype, onSuccess) =>
 		onError: (err) => log.error(`Error loading ${doctype}`, err),
 	})
 
-const customerGroupsResource = createListResource("Customer Group", (names) => (customerGroups.value = names))
-const territoriesResource = createListResource("Territory", (names) => (territories.value = names))
+const customerGroupsResource = createListResource("Customer Group", (names) => {
+	customerGroups.value = names
+	if (!customerData.value.customer_group && names.length > 0) {
+		const settingsDefault = sellingSettingsResource.data?.customer_group
+		customerData.value.customer_group = pickDefault(settingsDefault, names)
+	}
+})
+
+const territoriesResource = createListResource("Territory", (names) => {
+	territories.value = names
+	if (!customerData.value.territory && names.length > 0) {
+		const settingsDefault = sellingSettingsResource.data?.territory
+		customerData.value.territory = pickDefault(
+			settingsDefault,
+			names,
+			(list) => list.find((n) => n === "All Territories"),
+		)
+	}
+})
 
 const posProfileResource = createResource({
 	url: "frappe.client.get_value",
@@ -417,9 +450,15 @@ const loadDialogData = async () => {
 	// Lazy load countries (non-blocking)
 	countriesStore.loadCountries()
 
+	await sellingSettingsResource.reload()
+
+	if (!isEditMode.value) {
+		customerData.value.customer_group = ""
+		customerData.value.territory = ""
+	}
+
 	// Load form options
-	await territoriesResource.reload()
-	customerGroupsResource.reload()
+	await Promise.all([territoriesResource.reload(), customerGroupsResource.reload()])
 	checkPermissions()
 
 	// Set country from POS Profile
@@ -454,12 +493,17 @@ const handleCreate = async () => {
 }
 
 const resetForm = () => {
+	const settings = sellingSettingsResource.data || {}
 	Object.assign(customerData.value, {
 		customer_name: "",
 		mobile_no: "",
 		email_id: "",
-		customer_group: "Individual",
-		territory: "All Territories",
+		customer_group: pickDefault(settings.customer_group, customerGroups.value),
+		territory: pickDefault(
+			settings.territory,
+			territories.value,
+			(list) => list.find((n) => n === "All Territories"),
+		),
 	})
 	selectedCountryCode.value = ""
 	phoneNumber.value = ""
@@ -481,8 +525,12 @@ watch(
 		if (customer?.name) {
 			customerData.value.customer_name = customer.customer_name || ""
 			customerData.value.email_id = customer.email_id || ""
-			customerData.value.customer_group = customer.customer_group || "Individual"
-			customerData.value.territory = customer.territory || "All Territories"
+			customerData.value.customer_group = customer.customer_group || customerGroups.value[0] || ""
+			customerData.value.territory =
+				customer.territory ||
+				territories.value.find((n) => n === "All Territories") ||
+				territories.value[0] ||
+				""
 			// Handle mobile_no with country code
 			if (customer.mobile_no) {
 				customerData.value.mobile_no = customer.mobile_no
@@ -510,7 +558,8 @@ watch(
 	}
 )
 
-watch(selectedCountryCode, async () => {
+watch(selectedCountryCode, async (newVal, oldVal) => {
+	if (!oldVal) return
 	await nextTick()
 	updateTerritoryFromCountry()
 })
@@ -525,19 +574,15 @@ watch(showCountryDropdown, async (isOpen) => {
 watch(
 	() => props.modelValue,
 	async (isOpen) => {
-		show.value = isOpen
 		isOpen ? await loadDialogData() : resetForm()
 	}
 )
-
-watch(show, (val) => emit("update:modelValue", val))
 
 // =============================================================================
 // Lifecycle Hooks
 // =============================================================================
 
 onMounted(() => {
-	loadDialogData()
 	document.addEventListener("click", handleClickOutside)
 })
 
