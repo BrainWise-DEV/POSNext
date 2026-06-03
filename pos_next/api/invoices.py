@@ -1414,6 +1414,22 @@ def submit_invoice(invoice=None, data=None):
         if redeemed_customer_credit and not invoice_doc.payments:
             invoice_doc.flags.pos_next_redeemed_customer_credit = flt(redeemed_customer_credit)
 
+.
+        is_credit_sale = cint(data.get("is_credit_sale") or invoice.get("is_credit_sale"))
+        if (
+            is_credit_sale
+            and not invoice_doc.payments
+            and flt(invoice_doc.grand_total) > 0
+        ):
+            allow_credit_sale = cint(
+                frappe.db.get_value(
+                    DOCTYPE_POS_SETTINGS, {"pos_profile": pos_profile}, "allow_credit_sale"
+                )
+            )
+            if not allow_credit_sale:
+                frappe.throw(_("Credit sales are not enabled for this POS Profile."))
+            invoice_doc.flags.pos_next_credit_sale = 1
+
         # Save before submit
         invoice_doc.flags.ignore_permissions = True
         frappe.flags.ignore_account_permission = True
