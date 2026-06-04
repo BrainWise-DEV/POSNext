@@ -226,6 +226,7 @@ scheduler_events = {
 
 # Request Events
 # ----------------
+# before_request = ["pos_next.utils.before_request"]
 # after_request = ["pos_next.utils.after_request"]
 
 # Job Events

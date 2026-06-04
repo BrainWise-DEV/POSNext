@@ -43,10 +43,6 @@ def after_install():
 def after_migrate():
 	"""Hook that runs after bench migrate"""
 	try:
-		# Frappe CRM imports helpers missing on Framework < 15.110.
-		from pos_next.pos_next.compat.frappe_delete_doc import ensure_delete_doc_linked_helpers
-
-		ensure_delete_doc_linked_helpers()
 
 		# Reclaim POS Settings if ERPNext re-imported its Single on top of ours.
 		# Must run in after_migrate (not as a one-shot patch) because ERPNext's
