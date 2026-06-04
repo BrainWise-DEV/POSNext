@@ -25,10 +25,6 @@ def after_install():
 		# Setup default print format for POS Profiles
 		setup_default_print_format()
 
-		from pos_next.pos_next.setup.manager_desk import setup_manager_desk
-
-		setup_manager_desk()
-
 		# Clear cache to ensure changes take effect
 		frappe.clear_cache()
 		frappe.db.commit()
@@ -60,10 +56,6 @@ def after_migrate():
 
 		# Setup default print format
 		setup_default_print_format(quiet=True)
-
-		from pos_next.pos_next.setup.manager_desk import setup_manager_desk
-
-		setup_manager_desk(quiet=True)
 
 		# Clear cache
 		frappe.clear_cache()

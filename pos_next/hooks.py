@@ -150,12 +150,6 @@ override_doctype_class = {
 # Hook on document methods and events
 
 doc_events = {
-	"CRM Lead": {
-		"before_insert": "pos_next.pos_next.setup.manager_desk.set_crm_record_owner_on_create",
-	},
-	"CRM Deal": {
-		"before_insert": "pos_next.pos_next.setup.manager_desk.set_crm_record_owner_on_create",
-	},
 	"Customer": {
 		"after_insert": [
 			"pos_next.api.customers.auto_assign_loyalty_program",
@@ -232,21 +226,6 @@ scheduler_events = {
 
 # Request Events
 # ----------------
-before_request = ["pos_next.pos_next.setup.manager_desk.apply_runtime_patches"]
-
-on_session_creation = [
-	"pos_next.pos_next.setup.manager_desk.ensure_manager_crm_roles_on_login",
-]
-
-permission_query_conditions = {
-	"Contact": "pos_next.pos_next.setup.manager_desk.get_contact_permission_query",
-	"CRM Organization": "pos_next.pos_next.setup.manager_desk.get_crm_organization_permission_query",
-}
-
-has_permission = {
-	"Contact": "pos_next.pos_next.setup.manager_desk.has_contact_permission",
-	"CRM Organization": "pos_next.pos_next.setup.manager_desk.has_crm_organization_permission",
-}
 # after_request = ["pos_next.utils.after_request"]
 
 # Job Events
