@@ -361,6 +361,28 @@ export async function printInvoiceByName(invoiceName, printFormat = null, letter
 // Silent printing (QZ Tray — no browser dialog)
 // ============================================================================
 
+export async function silentPrintDoc(doctype, name, printFormat) {
+	const result = await call("frappe.www.printview.get_html_and_style", {
+		doc: doctype,
+		name,
+		print_format: printFormat,
+		no_letterhead: 1,
+	})
+
+	const html = result?.html || result?.message?.html
+	const style = result?.style || result?.message?.style || ""
+	if (!html) throw new Error("Failed to get print HTML from server")
+
+	const fullHTML = `<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><style>${style}</style></head>
+<body>${html}</body>
+</html>`
+
+	await qzPrintHTML(fullHTML)
+	return true
+}
+
 /**
  * Fetch the server-rendered print HTML and send it to a thermal printer
  * via QZ Tray. Uses Frappe's get_html_and_style API which returns the
@@ -381,24 +403,7 @@ export async function silentPrintInvoice(invoiceName, printFormat = null) {
 	}
 	const format = printFormat || DEFAULT_PRINT_FORMAT
 
-	const result = await call("frappe.www.printview.get_html_and_style", {
-		doc: "Sales Invoice",
-		name: invoiceName,
-		print_format: format,
-		no_letterhead: 1,
-	})
-
-	const html = result?.html || result?.message?.html
-	const style = result?.style || result?.message?.style || ""
-	if (!html) throw new Error("Failed to get print HTML from server")
-
-	const fullHTML = `<!DOCTYPE html>
-<html>
-<head><meta charset="UTF-8"><style>${style}</style></head>
-<body>${html}</body>
-</html>`
-
-	await qzPrintHTML(fullHTML)
+	await silentPrintDoc("Sales Invoice", invoiceName, format)
 	log.info(`Silent print sent for ${invoiceName}`)
 	return true
 }
