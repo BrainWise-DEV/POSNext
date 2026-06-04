@@ -79,10 +79,11 @@ _asset_version = get_build_version()
 # ----------
 
 # add methods and filters to jinja environment
-# jinja = {
-# 	"methods": "pos_next.utils.jinja_methods",
-# 	"filters": "pos_next.utils.jinja_filters"
-# }
+jinja = {
+	"methods": [
+		"pos_next.pos_next.utils.pos_closing_print.get_items_sold",
+	]
+}
 
 # Fixtures
 # --------

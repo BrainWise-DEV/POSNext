@@ -24,6 +24,24 @@ frappe.ui.form.on("POS Closing Shift", {
 		if (frm.doc.docstatus === 1) set_html_data(frm);
 	},
 
+	refresh(frm) {
+		if (frm.doc.docstatus !== 1) return;
+
+		frm.add_custom_button(
+			__("Print EOD Report"),
+			() => {
+				frappe.utils.print(
+					frm.doctype,
+					frm.docname,
+					"POS Next EOD Report",
+					frm.doc.letter_head,
+					frm.doc.language || frappe.boot.lang,
+				);
+			},
+			__("Print"),
+		);
+	},
+
 	pos_opening_shift(frm) {
 		if (frm.doc.pos_opening_shift && frm.doc.user) {
 			reset_values(frm);
