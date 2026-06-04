@@ -1414,7 +1414,11 @@ def submit_invoice(invoice=None, data=None):
         if redeemed_customer_credit and not invoice_doc.payments:
             invoice_doc.flags.pos_next_redeemed_customer_credit = flt(redeemed_customer_credit)
 
-.
+        # Allow intentional "Pay on Account" credit sales to submit without a
+        # payment row. The frontend sends is_credit_sale=1 when the cashier puts
+        # the full amount on the customer's account. Only honour it when the POS
+        # Settings for this profile actually permit credit sales, so a tampered
+        # client can't bypass the core payment-row requirement.
         is_credit_sale = cint(data.get("is_credit_sale") or invoice.get("is_credit_sale"))
         if (
             is_credit_sale

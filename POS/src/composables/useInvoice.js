@@ -1066,6 +1066,7 @@ export function useInvoice() {
 				if (redeemedCustomerCredit > 0 && customerCreditDict.length > 0) {
 					submitData.redeemed_customer_credit = redeemedCustomerCredit
 					submitData.customer_credit_dict = customerCreditDict
+				}
 				if (isCreditSale && invoicePayments.length === 0) {
 					submitData.is_credit_sale = 1
 				}
