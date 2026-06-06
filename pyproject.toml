@@ -9,11 +9,7 @@ readme = "README.md"
 dynamic = ["version"]
 dependencies = [
     # "frappe~=15.0.0" # Installed and managed by bench.
-    "erpnext",
-    # pyjwt arrives transitively via frappe. Pin >=2.13.0 to clear PYSEC-2026-175/
-    # 177/178/179 (HMAC key confusion, jku SSRF, unbounded JWKS fetch, detached-JWS
-    # DoS) flagged by the CI pip-audit gate. Not used directly by pos_next.
-    "pyjwt>=2.13.0",
+    "erpnext"
 ]
 
 [build-system]
