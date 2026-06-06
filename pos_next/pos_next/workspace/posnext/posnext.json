@@ -186,11 +186,7 @@
  "owner": "Administrator",
  "public": 1,
  "quick_lists": [],
- "roles": [
-  {
-   "role": "Nexus POS Manager"
-  }
- ],
+ "roles": [],
  "sequence_id": 0.0,
  "shortcuts": [
   {
