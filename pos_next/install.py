@@ -43,6 +43,7 @@ def after_install():
 def after_migrate():
 	"""Hook that runs after bench migrate"""
 	try:
+
 		# Reclaim POS Settings if ERPNext re-imported its Single on top of ours.
 		# Must run in after_migrate (not as a one-shot patch) because ERPNext's
 		# doctype sync runs after pos_next's and would overwrite anything we did
