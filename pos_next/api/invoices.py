@@ -2722,16 +2722,21 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
     def process_return_item(item):
         """Process single item for return, returns None if not returnable."""
         item_ref = item.get("sales_invoice_item") or item.get("item_code")
-        original_qty = abs(flt(item.get("qty", 0)))
-        remaining_qty = original_qty - returned_qty_map.get(item_ref, 0)
+        
+        # ERPNext's make_sales_return calculates the remaining returnable quantity
+        # and sets it as the returned item's negative qty.
+        remaining_qty = abs(flt(item.get("qty", 0)))
 
         if remaining_qty <= 0:
             return None
 
+        already_returned = returned_qty_map.get(item_ref, 0)
+        original_qty = remaining_qty + already_returned
+
         # Get rate breakdown for display
         price_list_rate = flt(item.get("price_list_rate") or item.get("rate"), precision)
         net_rate = flt(item.get("net_rate") or item.get("rate"), precision)
-        tax_per_unit = flt(item_tax_map.get(item.get("item_code"), 0) / original_qty, precision) if original_qty else 0
+        tax_per_unit = flt(item_tax_map.get(item.get("item_code"), 0) / remaining_qty, precision) if remaining_qty else 0
 
         # For inclusive taxes, use the original rate (already includes tax) to prevent
         # ERPNext from back-calculating and double-reducing the tax.
@@ -2749,7 +2754,7 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
         return {
             **item,
             "original_qty": original_qty,
-            "already_returned": original_qty - remaining_qty,
+            "already_returned": already_returned,
             "remaining_qty": remaining_qty,
             "qty": -remaining_qty,
             "price_list_rate": price_list_rate,
