@@ -28,6 +28,9 @@
   },
   {
    "role": "System Manager"
+  },
+  {
+   "role": "Nexus POS Manager"
   }
  ],
  "timeout": 0
