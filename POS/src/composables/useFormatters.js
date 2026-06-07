@@ -22,9 +22,9 @@ function formatCurrency(amount) {
 function formatQuantity(quantity) {
 	if (quantity === null || quantity === undefined) return "0"
 	const num = Number.parseFloat(quantity)
-	if (isNaN(num)) return "0"
+	if (Number.isNaN(num)) return "0"
 	// Round to 4 decimal places and remove trailing zeros
-	return num.toFixed(4).replace(/\.?0+$/, '')
+	return num.toFixed(4).replace(/\.?0+$/, "")
 }
 
 /**
@@ -38,27 +38,34 @@ function formatDateTime(datetime) {
 }
 
 /**
- * Format time to HH:MM only (hours and minutes)
+ * Format time to HH:MM AM/PM only (hours and minutes)
  * Handles both Date objects and time strings (e.g., "15:31:22.975239")
  * @param {string|Date} time - The time to format
- * @returns {string} Formatted time string (HH:MM)
+ * @returns {string} Formatted time string (HH:MM AM/PM)
  */
 function formatTime(time) {
 	if (!time) return ""
 
 	// If it's a time string (contains colon), extract HH:MM
-	if (typeof time === 'string' && time.includes(':')) {
+	if (typeof time === "string" && time.includes(":")) {
 		const parts = time.split(":")
 		if (parts.length >= 2) {
-			return `${parts[0]}:${parts[1]}`
+			const hours = Number.parseInt(parts[0], 10)
+			const minutes = parts[1]
+			if (Number.isNaN(hours)) return time
+
+			const period = hours >= 12 ? "PM" : "AM"
+			const displayHours = hours % 12 || 12
+			return `${displayHours}:${minutes} ${period}`
 		}
 		return time
 	}
 
 	// If it's a Date object or datetime string, convert and format
 	return new Date(time).toLocaleTimeString([], {
-		hour: "2-digit",
+		hour: "numeric",
 		minute: "2-digit",
+		hour12: true,
 	})
 }
 
@@ -69,10 +76,19 @@ function formatTime(time) {
  */
 function formatDate(date) {
 	if (!date) return ""
-	return new Date(date).toLocaleDateString('en-GB', {
-		day: '2-digit',
-		month: '2-digit',
-		year: '2-digit'
+
+	if (typeof date === "string") {
+		const match = date.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+		if (match) {
+			const [, year, month, day] = match
+			return `${day}/${month}/${year.slice(-2)}`
+		}
+	}
+
+	return new Date(date).toLocaleDateString("en-GB", {
+		day: "2-digit",
+		month: "2-digit",
+		year: "2-digit",
 	})
 }
 
@@ -84,7 +100,9 @@ function formatDate(date) {
  */
 function formatPercentage(value, decimals = 2) {
 	if (value === null || value === undefined) return "0%"
-	return `${Number.parseFloat(value).toFixed(decimals).replace(/\.?0+$/, '')}%`
+	return `${Number.parseFloat(value)
+		.toFixed(decimals)
+		.replace(/\.?0+$/, "")}%`
 }
 
 /**
