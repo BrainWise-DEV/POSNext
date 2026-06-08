@@ -1785,13 +1785,15 @@ def get_invoice(invoice_name):
 
 
 @frappe.whitelist()
-def get_invoices(pos_profile, limit=100):
-    """
-    Get list of invoices for a POS Profile.
 
-    Args:
-        pos_profile: POS Profile name
-        limit: Maximum number of invoices to return (default 100)
+def get_invoices(pos_profile: str, limit: int = 100, start: int = 0) -> list:
+	"""
+	Get list of invoices for a POS Profile.
+
+	Args:
+		pos_profile: POS Profile name
+		limit: Maximum number of invoices to return (default 100)
+		start: Offset for pagination (default 0)
 
     Returns:
         List of invoices with details
@@ -1799,65 +1801,95 @@ def get_invoices(pos_profile, limit=100):
     if not pos_profile:
         frappe.throw(_("POS Profile is required"))
 
-    # Check if user has access to this POS Profile
-    has_access = frappe.db.exists(
-        "POS Profile User",
-        {"parent": pos_profile, "user": frappe.session.user}
-    )
+	limit = cint(limit) or 100
+	start = cint(start) or 0
+
+	# Check if user has access to this POS Profile
+	has_access = frappe.db.exists(
+		"POS Profile User",
+		{"parent": pos_profile, "user": frappe.session.user}
+	)
 
     if not has_access and not frappe.has_permission("Sales Invoice", "read"):
         frappe.throw(_("You don't have access to this POS Profile"))
 
-    # Query for invoices
-    invoices = frappe.db.sql("""
-        SELECT
-            name,
-            customer,
-            customer_name,
-            posting_date,
-            posting_time,
-            grand_total,
-            paid_amount,
-            outstanding_amount,
-            status,
-            docstatus,
-            is_return,
-            return_against
-        FROM
-            `tabSales Invoice`
-        WHERE
-            pos_profile = %(pos_profile)s
-            AND docstatus = 1
-            AND is_pos = 1
-        ORDER BY
-            posting_date DESC,
-            posting_time DESC
-        LIMIT %(limit)s
-    """, {
-        "pos_profile": pos_profile,
-        "limit": limit
-    }, as_dict=True)
+	# Query for invoices
+	invoices = frappe.db.sql("""
+		SELECT
+			name,
+			customer,
+			customer_name,
+			posting_date,
+			posting_time,
+			grand_total,
+			paid_amount,
+			outstanding_amount,
+			status,
+			docstatus,
+			is_return,
+			return_against
+		FROM
+			`tabSales Invoice`
+		WHERE
+			pos_profile = %(pos_profile)s
+			AND docstatus = 1
+			AND is_pos = 1
+		ORDER BY
+			posting_date DESC,
+			posting_time DESC
+		LIMIT %(limit)s
+		OFFSET %(start)s
+	""", {
+		"pos_profile": pos_profile,
+		"limit": limit,
+		"start": start
+	}, as_dict=True)
 
-    # Load items for each invoice for filtering purposes
-    for invoice in invoices:
-        items = frappe.db.sql("""
-            SELECT
-                item_code,
-                item_name,
-                qty,
-                rate,
-                amount
-            FROM
-                `tabSales Invoice Item`
-            WHERE
-                parent = %(invoice_name)s
-            ORDER BY
-                idx
-        """, {
-            "invoice_name": invoice.name
-        }, as_dict=True)
-        invoice.items = items
+	invoice_names = [invoice.name for invoice in invoices]
+	payments_by_invoice = {}
+	if invoice_names:
+		payments = frappe.db.sql("""
+			SELECT
+				parent,
+				mode_of_payment,
+				amount
+			FROM
+				`tabSales Invoice Payment`
+			WHERE
+				parent IN %(invoice_names)s
+			ORDER BY
+				parent,
+				idx
+		""", {
+			"invoice_names": tuple(invoice_names)
+		}, as_dict=True)
 
+		for payment in payments:
+			payments_by_invoice.setdefault(payment.parent, []).append({
+				"mode_of_payment": payment.mode_of_payment,
+				"amount": payment.amount,
+			})
+
+	# Load items for each invoice for filtering purposes
+	for invoice in invoices:
+		invoice.payments = payments_by_invoice.get(invoice.name, [])
+		items = frappe.db.sql("""
+			SELECT
+				item_code,
+				item_name,
+				qty,
+				rate,
+				amount
+			FROM
+				`tabSales Invoice Item`
+			WHERE
+				parent = %(invoice_name)s
+			ORDER BY
+				idx
+		""", {
+			"invoice_name": invoice.name
+		}, as_dict=True)
+		invoice.items = items
     return invoices
 
 

@@ -64,4 +64,14 @@ jobs:
           pip install "erpnext @ git+https://github.com/frappe/erpnext.git@version-15"
           cd ${GITHUB_WORKSPACE}
           pip install --no-deps .
-          pip-audit --desc on
+          # The pyjwt advisories below live in PyJWT 2.12.1, which frappe
+          # version-15 hard-pins (PyJWT~=2.12.1, i.e. <2.13). They are fixed in
+          # 2.13.0 but pos_next cannot upgrade a dependency frappe constrains —
+          # this is an upstream-frappe issue, not a pos_next one. Ignore the
+          # specific IDs (NOT the package) so the gate still fails on any NEW
+          # vulnerability; revisit when frappe relaxes its PyJWT pin.
+          pip-audit --desc on \
+            --ignore-vuln PYSEC-2026-175 \
+            --ignore-vuln PYSEC-2026-177 \
+            --ignore-vuln PYSEC-2026-178 \
+            --ignore-vuln PYSEC-2026-179
