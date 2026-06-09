@@ -1,6 +1,7 @@
 {
  "actions": [],
  "allow_rename": 1,
+ "autoname": "field:governorate",
  "creation": "2026-06-09 10:54:57.009043",
  "doctype": "DocType",
  "engine": "InnoDB",
@@ -11,18 +12,23 @@
   {
    "fieldname": "governorate",
    "fieldtype": "Data",
+   "in_filter": 1,
    "in_list_view": 1,
+   "in_preview": 1,
+   "in_standard_filter": 1,
    "label": "Governorate",
-   "reqd": 1
+   "reqd": 1,
+   "unique": 1
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-06-09 10:56:00.364650",
+ "modified": "2026-06-09 12:45:46.769004",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "Governorate",
+ "naming_rule": "By fieldname",
  "owner": "Administrator",
  "permissions": [
   {
@@ -40,7 +46,10 @@
  ],
  "row_format": "Dynamic",
  "rows_threshold_for_grid_search": 20,
+ "show_title_field_in_link": 1,
  "sort_field": "modified",
  "sort_order": "DESC",
- "states": []
+ "states": [],
+ "title_field": "governorate",
+ "translated_doctype": 1
 }

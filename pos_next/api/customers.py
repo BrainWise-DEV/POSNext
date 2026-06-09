@@ -81,6 +81,8 @@ def create_customer(
 	territory=None,
 	company=None,
 	pos_profile=None,
+	custom_governorate=None,
+	custom_district=None,
 ):
 	"""
 	Create a new customer from POS.
@@ -93,6 +95,8 @@ def create_customer(
 	    territory (str): Territory (default: from Selling Settings)
 	    company (str): Company (optional, used to auto-assign loyalty program)
 	    pos_profile (str): POS Profile (optional, preferred for context-aware loyalty assignment)
+	    custom_governorate (str): Governorate (optional)
+	    custom_district (str): District (optional, must belong to the governorate)
 
 	Returns:
 	    dict: Created customer document
@@ -135,6 +139,8 @@ def create_customer(
 			"mobile_no": mobile_no or "",
 			"email_id": email_id or "",
 			"loyalty_program": loyalty_program,
+			"custom_governorate": custom_governorate or None,
+			"custom_district": custom_district or None,
 		}
 	)
 

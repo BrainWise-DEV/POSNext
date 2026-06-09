@@ -1,6 +1,7 @@
 {
  "actions": [],
  "allow_rename": 1,
+ "autoname": "format:{governorate}-{district}",
  "creation": "2026-06-09 10:55:40.584980",
  "doctype": "DocType",
  "engine": "InnoDB",
@@ -36,10 +37,11 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-06-09 11:02:01.069029",
+ "modified": "2026-06-09 12:50:24.717788",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "District",
+ "naming_rule": "Expression (old style)",
  "owner": "Administrator",
  "permissions": [
   {
