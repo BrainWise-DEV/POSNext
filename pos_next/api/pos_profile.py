@@ -6,8 +6,9 @@ from __future__ import unicode_literals
 
 import frappe
 from frappe import _
-from pos_next.api.utilities import check_user_company
-from pos_next.api.utilities import _parse_list_parameter
+from frappe.utils import cint
+
+from pos_next.api.utilities import _parse_list_parameter, check_user_company
 
 
 @frappe.whitelist()
@@ -36,10 +37,7 @@ def get_pos_profile_data(pos_profile):
 		frappe.throw(_("POS Profile is required"))
 
 	# Check if user has access to this POS Profile
-	has_access = frappe.db.exists(
-		"POS Profile User",
-		{"parent": pos_profile, "user": frappe.session.user}
-	)
+	has_access = frappe.db.exists("POS Profile User", {"parent": pos_profile, "user": frappe.session.user})
 
 	if not has_access:
 		frappe.throw(_("You don't have access to this POS Profile"))
@@ -53,6 +51,7 @@ def get_pos_profile_data(pos_profile):
 	# Get hierarchical item groups (with child_groups info) in same call
 	# This eliminates a separate API call to get_item_groups
 	from pos_next.api.items import get_item_groups
+
 	item_groups_with_hierarchy = get_item_groups(pos_profile)
 
 	return {
@@ -64,14 +63,14 @@ def get_pos_profile_data(pos_profile):
 			"auto_print": profile_doc.get("print_receipt_on_order_complete", 0),
 			"print_format": profile_doc.get("print_format"),
 			"letter_head": profile_doc.get("letter_head"),
-		}
+		},
 	}
 
 
 @frappe.whitelist()
 def get_pos_settings(pos_profile):
 	"""Get POS Settings for a given POS Profile"""
-	from pos_next.api.constants import POS_SETTINGS_FIELDS, DEFAULT_POS_SETTINGS
+	from pos_next.api.constants import DEFAULT_POS_SETTINGS, POS_SETTINGS_FIELDS
 
 	if not pos_profile:
 		return DEFAULT_POS_SETTINGS.copy()
@@ -79,10 +78,7 @@ def get_pos_settings(pos_profile):
 	try:
 		# Get POS Settings linked to this POS Profile
 		pos_settings = frappe.db.get_value(
-			"POS Settings",
-			{"pos_profile": pos_profile, "enabled": 1},
-			POS_SETTINGS_FIELDS,
-			as_dict=True
+			"POS Settings", {"pos_profile": pos_profile, "enabled": 1}, POS_SETTINGS_FIELDS, as_dict=True
 		)
 
 		if not pos_settings:
@@ -144,6 +140,45 @@ def get_payment_methods(pos_profile):
 
 
 @frappe.whitelist()
+def get_receivable_accounts(pos_profile):
+	"""Receivable accounts selectable for the "Pay on Receivable Account" feature.
+
+	Lists every enabled, non-group Receivable account for the POS Profile's company,
+	excluding the company default receivable account (already covered by the existing
+	"Pay on Account" button). Returns an empty list when credit sales are not enabled
+	for the profile, so the feature stays hidden behind the same gate.
+	"""
+	if not pos_profile:
+		frappe.throw(_("POS Profile is required"))
+
+	company = frappe.db.get_value("POS Profile", pos_profile, "company")
+	if not company:
+		return []
+
+	allow_credit_sale = cint(
+		frappe.db.get_value("POS Settings", {"pos_profile": pos_profile}, "allow_credit_sale")
+	)
+	if not allow_credit_sale:
+		return []
+
+	default_ar = frappe.get_cached_value("Company", company, "default_receivable_account")
+
+	accounts = frappe.get_all(
+		"Account",
+		filters={
+			"company": company,
+			"account_type": "Receivable",
+			"is_group": 0,
+			"disabled": 0,
+		},
+		fields=["name", "account_name", "account_currency"],
+		order_by="account_name asc",
+	)
+
+	return [a for a in accounts if a.name != default_ar]
+
+
+@frappe.whitelist()
 def get_taxes(pos_profile):
 	"""Get tax configuration from POS Profile"""
 	try:
@@ -200,7 +235,7 @@ def get_warehouses(pos_profile):
 			filters={"company": company, "disabled": 0, "is_group": 0},
 			fields=["name", "warehouse_name"],
 			order_by="warehouse_name",
-			limit_page_length=0
+			limit_page_length=0,
 		)
 
 		# Return warehouses with human-readable names
