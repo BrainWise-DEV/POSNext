@@ -1229,7 +1229,9 @@
 								</span>
 							</button>
 
-							<!-- Receivable Accounts (Pay on Account to a specific receivable) -->
+							<!-- Receivable Accounts: pick the account that holds the unpaid balance
+							     (the invoice's debit_to). Tender cash for the paid part; the rest
+							     stays outstanding on this account. -->
 							<template v-if="receivableAccounts.length > 0">
 								<!-- Divider: a full-width line forces a wrap, then the AR accounts -->
 								<div class="w-full border-t border-gray-200 my-0.5"></div>
@@ -1251,6 +1253,18 @@
 									<span class="truncate max-w-[80px] lg:max-w-none">{{
 										__(acc.account_name || acc.name)
 									}}</span>
+									<!-- Amount that will stay outstanding on this account -->
+									<span
+										v-if="selectedReceivableAccount === acc.name"
+										:class="[
+											'font-bold text-blue-600 bg-blue-100 rounded',
+											isSmallMobile
+												? 'text-[8px] px-0.5 py-0.5'
+												: 'text-xs px-1 py-0.5',
+										]"
+									>
+										{{ formatCurrency(remainingAmount) }}
+									</span>
 								</button>
 							</template>
 						</div>
@@ -1464,7 +1478,7 @@
 
 						<!-- Mobile: Select payment method prompt -->
 						<div
-							v-else-if="!lastSelectedMethod && remainingAmount > 0"
+							v-else-if="!lastSelectedMethod && remainingAmount > 0 && !selectedReceivableAccount"
 							:class="[
 								'bg-blue-50 rounded text-center',
 								isSmallMobile ? 'p-1.5 mb-1' : 'p-2 mb-1.5',
@@ -2091,7 +2105,9 @@ const show = computed({
 const paymentMethods = ref([]);
 const loadingPaymentMethods = ref(false);
 const lastSelectedMethod = ref(null);
-// "Pay on Receivable Account": selectable AR accounts for the invoice's debit_to
+// "Pay on Receivable Account": AR accounts offered as payment options. Selecting one makes
+// it the single active payment way (like Cash); the amount allocated to it becomes the
+// invoice outstanding on that account (its debit_to).
 const receivableAccounts = ref([]);
 const selectedReceivableAccount = ref("");
 const customAmount = ref("");
@@ -2834,12 +2850,9 @@ const canComplete = computed(() => {
 		return false;
 	}
 
-	// "Pay on Receivable Account": with a receivable account chosen and credit sales
-	// enabled, Complete Payment finalizes the sale with the unpaid balance left
-	// outstanding on that account — whether the cashier paid part now (partial) or
-	// nothing at all (full credit). No payment row is required in that case.
+	// "Pay on Receivable Account": the chosen account holds the unpaid balance
 	if (selectedReceivableAccount.value && props.allowCreditSale) {
-		return true;
+		return totalPaid.value <= roundCurrency(props.grandTotal) + 0.01;
 	}
 
 	// If partial payment is allowed, can complete with any amount > 0
@@ -3000,22 +3013,20 @@ watch(show, (newVal) => {
 // Select payment method (tap action)
 function selectPaymentMethod(method) {
 	lastSelectedMethod.value = method;
-	selectedReceivableAccount.value = "";
 	log.debug("[PaymentDialog] Selected payment method:", method.mode_of_payment);
 }
 
 
+// "Pay on Receivable Account": choose the account that holds the unpaid balance (the
+// invoice's debit_to). It's a destination, not a tendered amount — the outstanding is
+// grand_total minus the cash tendered. Tapping again clears it (back to default Debtors).
 function toggleReceivableAccount(acc) {
 	selectedReceivableAccount.value =
 		selectedReceivableAccount.value === acc.name ? "" : acc.name;
-
+	// Drop the active payment-method highlight so only one option looks active at a time.
 	if (selectedReceivableAccount.value) {
 		lastSelectedMethod.value = null;
 	}
-	log.debug(
-		"[PaymentDialog] Receivable account:",
-		selectedReceivableAccount.value || "(default)",
-	);
 }
 
 // Helper to get default non-wallet payment method
@@ -3369,27 +3380,34 @@ function completePayment() {
 		return;
 	}
 
-	// Calculate if this is a partial payment (considering write-off)
+	// "Pay on Receivable Account": the chosen account holds the unpaid balance (the invoice's
+	// debit_to). Tendered payments are real money; whatever is left (grand_total − tendered)
+	// stays outstanding on that account — it is NOT a payment row.
+	const receivableAccount = selectedReceivableAccount.value || null;
+
+	// Partial when the tendered amount (plus write-off) doesn't cover the total.
 	const effectivePaid = totalPaid.value + writeOffAmount.value;
 	const isPartial = effectivePaid < props.grandTotal;
+	const outstanding = isPartial
+		? roundCurrency(props.grandTotal - effectivePaid)
+		: 0;
 
 	const paymentData = {
 		payments: paymentEntries.value,
 		change_amount: changeAmount.value,
 		is_partial_payment: isPartial,
 		paid_amount: totalPaid.value,
-		outstanding_amount: isPartial ? remainingAmount.value - writeOffAmount.value : 0,
+		outstanding_amount: outstanding,
 		sales_team: selectedSalesPersons.value.length > 0 ? selectedSalesPersons.value : null,
 		delivery_date: isSalesOrder.value ? deliveryDate.value : null,
 		// Write-off data
 		write_off_amount: writeOffAmount.value,
 		is_write_off: writeOffAmount.value > 0,
-		// "Pay on Receivable Account": route any outstanding to the chosen AR (else default).
-		// With no payment row it's a full credit sale, so flag it to allow the no-payment
-		// submit (backend re-checks the allow_credit_sale gate).
-		receivable_account: selectedReceivableAccount.value || null,
-		is_credit_sale:
-			!!selectedReceivableAccount.value && paymentEntries.value.length === 0,
+		// Chosen receivable account → invoice debit_to. With no tendered payment it's a
+		// full credit sale, so flag it to allow the no-payment submit (backend re-checks
+		// the allow_credit_sale gate).
+		receivable_account: receivableAccount,
+		is_credit_sale: !!receivableAccount && paymentEntries.value.length === 0,
 	};
 
 	log.debug("[PaymentDialog] Emitting payment-completed:", paymentData);
