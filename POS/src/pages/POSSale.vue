@@ -370,7 +370,8 @@
 								:warehouses="profileWarehouses"
 								@update-quantity="cartStore.updateItemQuantity"
 								@remove-item="
-									(itemCode, uom) => cartStore.removeItem(itemCode, uom)
+									(itemCode, uom, batchNo) =>
+										cartStore.removeItem(itemCode, uom, batchNo)
 								"
 								@select-customer="handleCustomerSelected"
 								@create-customer="handleCreateCustomer"
@@ -2480,6 +2481,39 @@ async function handleApplyOffer(offer) {
 }
 
 function handleBatchSerialSelected(batchSerial) {
+	if (!cartStore.pendingItem) {
+		return;
+	}
+
+	if (batchSerial.segments?.length) {
+		const itemName = cartStore.pendingItem.item_name;
+		try {
+			for (const segment of batchSerial.segments) {
+				const itemToAdd = {
+					...cartStore.pendingItem,
+					batch_no: segment.batch_no,
+					expiry_date: segment.expiry_date,
+				};
+				cartStore.addItem(
+					itemToAdd,
+					segment.qty,
+					false,
+					shiftStore.currentProfile,
+				);
+			}
+			cartStore.clearPendingItem();
+			showSuccess(
+				__("{0} added to cart ({1} batches)", [
+					itemName,
+					batchSerial.segments.length,
+				]),
+			);
+		} catch (error) {
+			showError(error.message);
+		}
+		return;
+	}
+
 	if (cartStore.pendingItem) {
 		// Use quantity from batchSerial if provided (for multiple serial numbers), otherwise use pendingItemQty
 		const qty = batchSerial.quantity || cartStore.pendingItemQty;
