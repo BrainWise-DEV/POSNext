@@ -571,6 +571,7 @@ import {
 import { getInvoiceStatusColor } from "@/utils/invoice"
 import { useFormatters } from "@/composables/useFormatters"
 import { useToast } from "@/composables/useToast"
+import { useShift } from "@/composables/useShift"
 import { Button, call, LoadingIndicator } from "frappe-ui"
 import { computed, onMounted, ref, watch } from "vue"
 import { isOffline } from "@/utils/offline/offlineState"
@@ -584,6 +585,7 @@ import { logger } from "@/utils/logger"
 
 const log = logger.create("InvoiceManagement")
 const { showSuccess, showError } = useToast()
+const { currentShift } = useShift()
 const { formatDate, formatDateTime, formatTime } = useFormatters()
 
 const props = defineProps({
@@ -967,6 +969,7 @@ async function handlePaymentCompleted(paymentData) {
 		await call("pos_next.api.partial_payments.add_payment_to_partial_invoice", {
 			invoice_name: selectedInvoice.value.name,
 			payments: paymentData.payments,
+			pos_opening_shift: currentShift.value?.name,
 		})
 
 		showSuccess(__("Payment added successfully"))

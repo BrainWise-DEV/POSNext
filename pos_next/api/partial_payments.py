@@ -352,6 +352,7 @@ def create_payment_entry(
     reference_no: Optional[str] = None,
     remarks: Optional[str] = None,
     posting_date: Optional[str] = None,
+    pos_opening_shift: Optional[str] = None,
 ) -> str:
     """
     Create a proper Payment Entry that updates Payment Ledger.
@@ -458,6 +459,10 @@ def create_payment_entry(
 
         if reference_no:
             pe.reference_no = str(reference_no)[:140]
+        elif pos_opening_shift:
+            # Tag with the opening shift name so POS shift closing can find
+            # this payment entry during reconciliation.
+            pe.reference_no = str(pos_opening_shift)[:140]
         else:
             pe.reference_no = f"POS-{invoice_name}"
 
@@ -710,7 +715,9 @@ def get_partial_payment_details(invoice_name: str) -> Dict:
 
 
 @frappe.whitelist()
-def add_payment_to_partial_invoice(invoice_name: str, payments) -> Dict:
+def add_payment_to_partial_invoice(
+    invoice_name: str, payments, pos_opening_shift: str = None
+) -> Dict:
     """
     Add payments to a partially paid invoice via Payment Entry.
 
@@ -813,6 +820,7 @@ def add_payment_to_partial_invoice(invoice_name: str, payments) -> Dict:
                 payment_account=payment_account,
                 reference_no=reference_no,
                 remarks=f"POS Payment - {mode_of_payment}",
+                pos_opening_shift=pos_opening_shift,
             )
 
             payment_entries_created.append(pe_name)
