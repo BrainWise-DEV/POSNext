@@ -615,9 +615,9 @@ async function loadClosingData() {
 			data.payment_reconciliation = data.payment_reconciliation.map((payment) =>
 				reactive({
 					...payment,
-					closing_amount: payment.closing_amount ?? null,
+					closing_amount: payment.closing_amount ?? 0,
 					difference: 0,
-					_touched: false,
+					_touched: true,
 				}),
 			)
 
