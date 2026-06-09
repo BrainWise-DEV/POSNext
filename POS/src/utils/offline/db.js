@@ -1,8 +1,8 @@
-import Dexie from "dexie"
-import { logger } from "../logger"
+import Dexie from "dexie";
+import { logger } from "../logger";
 
 /** @type {import('../logger').Logger} */
-const log = logger.create("OfflineDB")
+const log = logger.create("OfflineDB");
 
 /**
  * @fileoverview IndexedDB persistence layer for POS Next offline functionality.
@@ -20,7 +20,7 @@ const log = logger.create("OfflineDB")
  */
 
 /** @type {Dexie} Main database instance */
-export const db = new Dexie("pos_next_offline")
+export const db = new Dexie("pos_next_offline");
 
 /**
  * Database schema definition.
@@ -82,7 +82,7 @@ const CURRENT_SCHEMA = {
 	// Unpaid invoices cache for offline viewing
 	// Stores invoices with outstanding amounts for partial payment management
 	unpaid_invoices: "&name, pos_profile, outstanding_amount, customer",
-}
+};
 
 /**
  * Generates a 32-bit hash of the schema for change detection.
@@ -92,14 +92,14 @@ const CURRENT_SCHEMA = {
  * @private
  */
 function getSchemaHash(schema) {
-	const schemaString = JSON.stringify(schema)
-	let hash = 0
+	const schemaString = JSON.stringify(schema);
+	let hash = 0;
 	for (let i = 0; i < schemaString.length; i++) {
-		const char = schemaString.charCodeAt(i)
-		hash = (hash << 5) - hash + char
-		hash = hash & hash // Convert to 32-bit integer
+		const char = schemaString.charCodeAt(i);
+		hash = (hash << 5) - hash + char;
+		hash = hash & hash; // Convert to 32-bit integer
 	}
-	return Math.abs(hash)
+	return Math.abs(hash);
 }
 
 /**
@@ -111,28 +111,26 @@ function getSchemaHash(schema) {
  * @private
  */
 function getSchemaVersion() {
-	const schemaHash = getSchemaHash(CURRENT_SCHEMA)
-	const storedHash = localStorage.getItem("pos_next_schema_hash")
-	const storedVersion = Number.parseInt(
-		localStorage.getItem("pos_next_schema_version") || "1",
-	)
+	const schemaHash = getSchemaHash(CURRENT_SCHEMA);
+	const storedHash = localStorage.getItem("pos_next_schema_hash");
+	const storedVersion = Number.parseInt(localStorage.getItem("pos_next_schema_version") || "1");
 
 	if (storedHash !== schemaHash.toString()) {
 		// Schema changed, increment version
-		const newVersion = storedVersion + 1
-		log.info(`Schema changed detected. Upgrading from v${storedVersion} to v${newVersion}`)
-		localStorage.setItem("pos_next_schema_hash", schemaHash.toString())
-		localStorage.setItem("pos_next_schema_version", newVersion.toString())
-		return newVersion
+		const newVersion = storedVersion + 1;
+		log.info(`Schema changed detected. Upgrading from v${storedVersion} to v${newVersion}`);
+		localStorage.setItem("pos_next_schema_hash", schemaHash.toString());
+		localStorage.setItem("pos_next_schema_version", newVersion.toString());
+		return newVersion;
 	}
 
-	return storedVersion
+	return storedVersion;
 }
 
 // Apply schema with auto-versioning
-const schemaVersion = getSchemaVersion()
-log.debug(`Initializing database with schema version: ${schemaVersion}`)
-db.version(schemaVersion).stores(CURRENT_SCHEMA)
+const schemaVersion = getSchemaVersion();
+log.debug(`Initializing database with schema version: ${schemaVersion}`);
+db.version(schemaVersion).stores(CURRENT_SCHEMA);
 
 /**
  * Opens the database connection.
@@ -141,14 +139,14 @@ db.version(schemaVersion).stores(CURRENT_SCHEMA)
  */
 export const initDB = async () => {
 	try {
-		await db.open()
-		log.success("POS Next offline database initialized")
-		return true
+		await db.open();
+		log.success("POS Next offline database initialized");
+		return true;
 	} catch (error) {
-		log.error("Failed to initialize offline database:", error)
-		return false
+		log.error("Failed to initialize offline database:", error);
+		return false;
 	}
-}
+};
 
 /**
  * Verifies database health and attempts recovery if needed.
@@ -157,42 +155,39 @@ export const initDB = async () => {
  */
 export const checkDBHealth = async () => {
 	try {
-		await db.settings.get("health_check")
-		return true
+		await db.settings.get("health_check");
+		return true;
 	} catch (error) {
-		log.error("Database health check failed:", error)
+		log.error("Database health check failed:", error);
 
 		// Try to reopen
 		try {
 			if (db.isOpen()) {
-				db.close()
+				db.close();
 			}
-			await db.open()
-			log.info("Database reopened successfully")
-			return true
+			await db.open();
+			log.info("Database reopened successfully");
+			return true;
 		} catch (reopenError) {
-			log.error("Failed to reopen database:", reopenError)
+			log.error("Failed to reopen database:", reopenError);
 
 			// If corrupted, recreate
-			if (
-				reopenError.name === "VersionError" ||
-				reopenError.name === "InvalidStateError"
-			) {
-				log.warn("Database appears corrupted, recreating...")
+			if (reopenError.name === "VersionError" || reopenError.name === "InvalidStateError") {
+				log.warn("Database appears corrupted, recreating...");
 				try {
-					await Dexie.delete("pos_next_offline")
-					await db.open()
-					log.success("Database recreated successfully")
-					return true
+					await Dexie.delete("pos_next_offline");
+					await db.open();
+					log.success("Database recreated successfully");
+					return true;
 				} catch (recreateError) {
-					log.error("Failed to recreate database:", recreateError)
-					return false
+					log.error("Failed to recreate database:", recreateError);
+					return false;
 				}
 			}
-			return false
+			return false;
 		}
 	}
-}
+};
 
 /**
  * Retrieves a setting value from the database.
@@ -202,13 +197,13 @@ export const checkDBHealth = async () => {
  */
 export const getSetting = async (key, defaultValue = null) => {
 	try {
-		const result = await db.settings.get(key)
-		return result ? result.value : defaultValue
+		const result = await db.settings.get(key);
+		return result ? result.value : defaultValue;
 	} catch (error) {
-		log.error(`Error getting setting ${key}:`, error)
-		return defaultValue
+		log.error(`Error getting setting ${key}:`, error);
+		return defaultValue;
 	}
-}
+};
 
 /**
  * Stores a setting value in the database.
@@ -218,11 +213,11 @@ export const getSetting = async (key, defaultValue = null) => {
  */
 export const setSetting = async (key, value) => {
 	try {
-		await db.settings.put({ key, value })
+		await db.settings.put({ key, value });
 	} catch (error) {
-		log.error(`Error setting ${key}:`, error)
+		log.error(`Error setting ${key}:`, error);
 	}
-}
+};
 
 /**
  * Clear all cached data (items, customers, stock, etc.)
@@ -234,11 +229,7 @@ export const setSetting = async (key, value) => {
  * @returns {Promise<Object>} - Status of cleared tables
  */
 export const clearCachedData = async (options = {}) => {
-	const {
-		preserveInvoices = true,
-		preserveDrafts = true,
-		preserveSettings = true,
-	} = options
+	const { preserveInvoices = true, preserveDrafts = true, preserveSettings = true } = options;
 
 	const results = {
 		items: 0,
@@ -251,40 +242,40 @@ export const clearCachedData = async (options = {}) => {
 		payments: 0,
 		drafts: 0,
 		settings: 0,
-	}
+	};
 
 	try {
 		// Always clear these cache tables
-		results.items = await db.items.clear()
-		results.customers = await db.customers.clear()
-		results.stock = await db.stock.clear()
-		results.item_prices = await db.item_prices.clear()
-		results.payment_methods = await db.payment_methods.clear()
-		results.sales_persons = await db.sales_persons.clear()
+		results.items = await db.items.clear();
+		results.customers = await db.customers.clear();
+		results.stock = await db.stock.clear();
+		results.item_prices = await db.item_prices.clear();
+		results.payment_methods = await db.payment_methods.clear();
+		results.sales_persons = await db.sales_persons.clear();
 
 		// Conditionally clear invoice and payment queues
 		if (!preserveInvoices) {
-			results.invoices = await db.invoice_queue.clear()
-			results.payments = await db.payment_queue.clear()
+			results.invoices = await db.invoice_queue.clear();
+			results.payments = await db.payment_queue.clear();
 		}
 
 		// Conditionally clear drafts
 		if (!preserveDrafts) {
-			results.drafts = await db.drafts.clear()
+			results.drafts = await db.drafts.clear();
 		}
 
 		// Conditionally clear settings
 		if (!preserveSettings) {
-			results.settings = await db.settings.clear()
+			results.settings = await db.settings.clear();
 		}
 
-		log.info("Cached data cleared:", results)
-		return { success: true, cleared: results }
+		log.info("Cached data cleared:", results);
+		return { success: true, cleared: results };
 	} catch (error) {
-		log.error("Error clearing cached data:", error)
-		return { success: false, error: error.message, cleared: results }
+		log.error("Error clearing cached data:", error);
+		return { success: false, error: error.message, cleared: results };
 	}
-}
+};
 
 /**
  * NUCLEAR OPTION: Delete entire database and recreate
@@ -293,30 +284,30 @@ export const clearCachedData = async (options = {}) => {
  */
 export const nukeDatabase = async () => {
 	try {
-		log.warn("NUKING DATABASE - All data will be lost!")
+		log.warn("NUKING DATABASE - All data will be lost!");
 
 		// Close database connection
 		if (db.isOpen()) {
-			db.close()
+			db.close();
 		}
 
 		// Delete entire database
-		await Dexie.delete("pos_next_offline")
+		await Dexie.delete("pos_next_offline");
 
 		// Clear localStorage schema tracking
-		localStorage.removeItem("pos_next_schema_hash")
-		localStorage.removeItem("pos_next_schema_version")
+		localStorage.removeItem("pos_next_schema_hash");
+		localStorage.removeItem("pos_next_schema_version");
 
 		// Recreate database
-		await db.open()
+		await db.open();
 
-		log.success("Database nuked and recreated successfully")
-		return true
+		log.success("Database nuked and recreated successfully");
+		return true;
 	} catch (error) {
-		log.error("Error nuking database:", error)
-		return false
+		log.error("Error nuking database:", error);
+		return false;
 	}
-}
+};
 
 /**
  * Clear browser cache and localStorage (POS-specific data only)
@@ -326,44 +317,44 @@ export const clearBrowserCache = () => {
 	const results = {
 		localStorage: 0,
 		sessionStorage: 0,
-	}
+	};
 
 	try {
 		// Clear POS-specific localStorage items
-		const keysToRemove = []
+		const keysToRemove = [];
 		for (let i = 0; i < localStorage.length; i++) {
-			const key = localStorage.key(i)
-			if (key?.startsWith('pos_next_') || key?.startsWith('frappe_')) {
-				keysToRemove.push(key)
+			const key = localStorage.key(i);
+			if (key?.startsWith("pos_next_") || key?.startsWith("frappe_")) {
+				keysToRemove.push(key);
 			}
 		}
 
-		keysToRemove.forEach(key => {
-			localStorage.removeItem(key)
-			results.localStorage++
-		})
+		keysToRemove.forEach((key) => {
+			localStorage.removeItem(key);
+			results.localStorage++;
+		});
 
 		// Clear sessionStorage
-		const sessionKeys = []
+		const sessionKeys = [];
 		for (let i = 0; i < sessionStorage.length; i++) {
-			const key = sessionStorage.key(i)
-			if (key?.startsWith('pos_next_') || key?.startsWith('frappe_')) {
-				sessionKeys.push(key)
+			const key = sessionStorage.key(i);
+			if (key?.startsWith("pos_next_") || key?.startsWith("frappe_")) {
+				sessionKeys.push(key);
 			}
 		}
 
-		sessionKeys.forEach(key => {
-			sessionStorage.removeItem(key)
-			results.sessionStorage++
-		})
+		sessionKeys.forEach((key) => {
+			sessionStorage.removeItem(key);
+			results.sessionStorage++;
+		});
 
-		log.info("Browser cache cleared:", results)
-		return { success: true, cleared: results }
+		log.info("Browser cache cleared:", results);
+		return { success: true, cleared: results };
 	} catch (error) {
-		log.error("Error clearing browser cache:", error)
-		return { success: false, error: error.message, cleared: results }
+		log.error("Error clearing browser cache:", error);
+		return { success: false, error: error.message, cleared: results };
 	}
-}
+};
 
 // Initialize database on import
-initDB()
+initDB();
