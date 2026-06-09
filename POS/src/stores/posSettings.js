@@ -35,6 +35,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		display_discount_percentage: 0,
 		display_discount_amount: 0,
 		show_variants_as_items: 0,
+		cart_lifo: 0,
 		// Operations
 		allow_sales_order: 0,
 		allow_select_sales_order: 0,
@@ -149,6 +150,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	const showVariantsAsItems = computed(() =>
 		Boolean(settings.value.show_variants_as_items),
 	)
+	const cartLifo = computed(() => Boolean(settings.value.cart_lifo))
 
 	// Computed - Operations
 	const allowSalesOrder = computed(() =>
@@ -320,6 +322,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 			display_discount_percentage: 0,
 			display_discount_amount: 0,
 			show_variants_as_items: 0,
+			cart_lifo: 0,
 			allow_sales_order: 0,
 			allow_select_sales_order: 0,
 			create_only_sales_order: 0,
@@ -435,6 +438,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		displayDiscountPercentage,
 		displayDiscountAmount,
 		showVariantsAsItems,
+		cartLifo,
 
 		// Computed - Operations
 		allowSalesOrder,

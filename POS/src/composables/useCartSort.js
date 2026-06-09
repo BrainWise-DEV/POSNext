@@ -49,7 +49,7 @@ const SORT_LABEL_MAP = Object.freeze(
  * @param {() => Array} itemsGetter - Getter (or ref) that returns the raw cart
  *        items array.  Typically `() => props.items`.
  */
-export function useCartSort(itemsGetter) {
+export function useCartSort(itemsGetter, lifoMode = null) {
 	// Normalise getter once — avoid typeof check on every access
 	const getItems = typeof itemsGetter === 'function'
 		? itemsGetter
@@ -100,7 +100,15 @@ export function useCartSort(itemsGetter) {
 		const items = getItems()
 
 		const field = cartSortBy.value
-		if (!field) return items
+		if (!field) {
+			// No explicit sort: honour the LIFO setting (newest added on top)
+			const lifo = lifoMode
+				? typeof lifoMode === 'function'
+					? lifoMode()
+					: lifoMode.value
+				: false
+			return lifo ? [...items].reverse() : items
+		}
 
 		const dir = cartSortOrder.value === 'asc' ? 1 : -1
 
