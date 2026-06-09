@@ -104,6 +104,18 @@ def get_columns(payment_methods):
 
 	columns.extend([
 		{
+			"fieldname": "bank_deposit_amount",
+			"label": _("Bank Deposit Amount"),
+			"fieldtype": "Currency",
+			"width": 140
+		},
+		{
+			"fieldname": "deposit_date",
+			"label": _("Deposit Date"),
+			"fieldtype": "Date",
+			"width": 110
+		},
+		{
 			"fieldname": "total_opening",
 			"label": _("Total Opening"),
 			"fieldtype": "Currency",
@@ -177,8 +189,9 @@ def get_data(filters):
 	# Discover payment methods (ordered by first appearance)
 	payment_methods = list(dict.fromkeys(r.payment_method for r in raw))
 
-	# Batch-fetch transaction counts per shift (total, not per method)
+	# Batch-fetch transaction counts and bank deposit data per shift
 	transaction_map = _get_transaction_counts(raw)
+	bank_deposit_map = _get_bank_deposit_data(raw)
 
 	# Pivot: group rows by shift into one row each
 	shifts = {}
@@ -195,6 +208,7 @@ def get_data(filters):
 			else:
 				shift_hours = 0
 
+			deposit = bank_deposit_map.get(r.shift, {})
 			shifts[r.shift] = {
 				"shift": r.shift,
 				"pos_profile": r.pos_profile,
@@ -204,6 +218,8 @@ def get_data(filters):
 				"shift_end": r.shift_end,
 				"shift_hours": shift_hours,
 				"total_transactions": transaction_map.get(r.shift, 0),
+				"bank_deposit_amount": deposit.get("deposit_amount"),
+				"deposit_date": deposit.get("deposit_date"),
 				"total_opening": 0,
 				"total_expected": 0,
 				"total_closing": 0,
@@ -273,6 +289,32 @@ def _get_transaction_counts(data):
 	""".format(placeholders=placeholders), shift_names, as_dict=1)
 
 	return {r.shift: r.cnt for r in rows}
+
+
+def _get_bank_deposit_data(data):
+	"""Batch-fetch bank deposit amount and date per shift."""
+	shift_names = list({row.shift for row in data})
+	if not shift_names:
+		return {}
+
+	placeholders = ", ".join(["%s"] * len(shift_names))
+
+	rows = frappe.db.sql(
+		"""
+		SELECT
+			pcs.name as shift,
+			bd.deposit_amount,
+			bd.posting_date as deposit_date
+		FROM `tabPOS Closing Shift` pcs
+		INNER JOIN `tabBank Deposits` bd ON bd.name = pcs.custom_bank_deposit
+		WHERE pcs.name IN ({placeholders})
+			AND bd.docstatus = 1
+		""".format(placeholders=placeholders),
+		shift_names,
+		as_dict=1,
+	)
+
+	return {r.shift: r for r in rows}
 
 
 def get_conditions(filters):
