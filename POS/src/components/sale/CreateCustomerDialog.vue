@@ -165,6 +165,41 @@
 						</option>
 					</select>
 				</div>
+
+				<!-- Governorate -->
+				<div>
+					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
+						{{ __("Governorate") }}
+					</label>
+					<select
+						v-model="customerData.custom_governorate"
+						class="w-full px-8 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+					>
+						<option value="">{{ __("Select Governorate") }}</option>
+						<option v-for="gov in governorates" :key="gov" :value="gov">
+							{{ gov }}
+						</option>
+					</select>
+				</div>
+
+				<!-- District (filtered by selected Governorate) -->
+				<div>
+					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
+						{{ __("District") }}
+					</label>
+					<select
+						v-model="customerData.custom_district"
+						:disabled="!customerData.custom_governorate"
+						class="w-full px-8 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
+					>
+						<option value="">
+							{{ customerData.custom_governorate ? __("Select District") : __("Select a governorate first") }}
+						</option>
+						<option v-for="district in districts" :key="district.name" :value="district.name">
+							{{ district.district }}
+						</option>
+					</select>
+				</div>
 			</div>
 		</template>
 
@@ -280,6 +315,9 @@ const countrySearchRef = ref(null);
 
 const customerGroups = ref([]);
 const territories = ref([]);
+const governorates = ref([]);
+const districts = ref([]);
+
 
 const customerData = ref({
 	customer_name: "",
@@ -287,6 +325,8 @@ const customerData = ref({
 	email_id: "",
 	customer_group: "",
 	territory: "",
+	custom_governorate: "",
+	custom_district: "",
 });
 
 // =============================================================================
@@ -398,6 +438,8 @@ const createCustomerResource = createResource({
 		email_id: customerData.value.email_id || "",
 		customer_group: customerData.value.customer_group || "",
 		territory: customerData.value.territory || "",
+		custom_governorate: customerData.value.custom_governorate || "",
+		custom_district: customerData.value.custom_district || "",
 		pos_profile: props.posProfile,
 	}),
 	onSuccess: (data) => {
@@ -422,6 +464,8 @@ const updateCustomerResource = createResource({
 			territory: customerData.value.territory || "",
 			mobile_no: customerData.value.mobile_no || "",
 			email_id: customerData.value.email_id || "",
+			custom_governorate: customerData.value.custom_governorate || "",
+			custom_district: customerData.value.custom_district || "",
 		},
 	}),
 	onSuccess: (data) => {
@@ -484,6 +528,50 @@ const territoriesResource = createListResource("Territory", (names) => {
 	}
 });
 
+const governoratesResource = createListResource("Governorate", (names) => {
+	governorates.value = names
+})
+
+
+const customerLocationResource = createResource({
+	url: "frappe.client.get_value",
+	makeParams: () => ({
+		doctype: "Customer",
+		filters: { name: props.customer?.name },
+		fieldname: ["custom_governorate", "custom_district"],
+	}),
+	auto: false,
+	onSuccess: (data) => {
+		customerData.value.custom_governorate = data?.custom_governorate || ""
+		customerData.value.custom_district = data?.custom_district || ""
+	},
+	onError: (err) => log.error("Error loading customer location", err),
+})
+
+
+const districtsResource = createResource({
+	url: "frappe.client.get_list",
+	makeParams: () => ({
+		doctype: "District",
+		fields: ["name", "district"],
+		filters: { governorate: customerData.value.custom_governorate },
+		limit_page_length: 0,
+		order_by: "district asc",
+	}),
+	auto: false,
+	onSuccess: (data) => {
+		districts.value = data || []
+		// Drop the selected district if it no longer belongs to the governorate
+		if (
+			customerData.value.custom_district &&
+			!districts.value.some((d) => d.name === customerData.value.custom_district)
+		) {
+			customerData.value.custom_district = ""
+		}
+	},
+	onError: (err) => log.error("Error loading Districts", err),
+})
+
 const posProfileResource = createResource({
 	url: "frappe.client.get_value",
 	makeParams: () => ({
@@ -515,7 +603,17 @@ const loadDialogData = async () => {
 	}
 
 	// Load form options
-	await Promise.all([territoriesResource.reload(), customerGroupsResource.reload()]);
+	await Promise.all([
+		territoriesResource.reload(),
+		customerGroupsResource.reload(),
+		governoratesResource.reload(),
+	])
+	if (isEditMode.value && props.customer?.name) {
+		await customerLocationResource.reload();
+	}
+	if (customerData.value.custom_governorate) {
+		await districtsResource.reload();
+	}
 	checkPermissions();
 
 	// Set country from POS Profile
@@ -559,10 +657,13 @@ const resetForm = () => {
 		territory: pickDefault(settings.territory, territories.value, (list) =>
 			list.find((n) => n === "All Territories")
 		),
+		custom_governorate: "",
+		custom_district: "",
 	});
+	districts.value = [];
 	selectedCountryCode.value = "";
 	phoneNumber.value = "";
-};
+}
 
 // =============================================================================
 // Watchers
@@ -585,8 +686,10 @@ watch(
 			customerData.value.territory =
 				customer.territory ||
 				territories.value.find((n) => n === "All Territories") ||
-				territories.value[0] ||
-				"";
+				territories.value[0] ||	"";
+      
+			customerData.value.custom_governorate = customer.custom_governorate || "";
+			customerData.value.custom_district = customer.custom_district || "";
 			// Handle mobile_no with country code
 			if (customer.mobile_no) {
 				customerData.value.mobile_no = customer.mobile_no;
@@ -619,6 +722,19 @@ watch(selectedCountryCode, async (newVal, oldVal) => {
 	await nextTick();
 	updateTerritoryFromCountry();
 });
+
+
+watch(
+	() => customerData.value.custom_governorate,
+	(governorate) => {
+		if (governorate) {
+			districtsResource.reload()
+		} else {
+			districts.value = []
+			customerData.value.custom_district = ""
+		}
+	}
+)
 
 watch(showCountryDropdown, async (isOpen) => {
 	if (isOpen) {
