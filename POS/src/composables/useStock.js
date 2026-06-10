@@ -19,7 +19,7 @@ export function useStock() {
 	 * @returns {Object} Stock status with level, color, textColor, and label
 	 */
 	function getStockStatus(qty, lowStockThreshold = 10) {
-		const quantity = Math.floor(qty !== undefined && qty !== null ? qty : 0)
+		const quantity = Math.floor(qty !== undefined && qty !== null ? qty : 0);
 
 		if (quantity < 0) {
 			return {
@@ -27,7 +27,7 @@ export function useStock() {
 				color: "bg-red-500",
 				textColor: "text-white",
 				label: __("Negative Stock"),
-			}
+			};
 		}
 
 		if (quantity === 0) {
@@ -36,7 +36,7 @@ export function useStock() {
 				color: "bg-red-500",
 				textColor: "text-white",
 				label: __("Out of Stock"),
-			}
+			};
 		}
 
 		if (quantity <= lowStockThreshold) {
@@ -45,7 +45,7 @@ export function useStock() {
 				color: "bg-amber-500",
 				textColor: "text-white",
 				label: __("Low Stock"),
-			}
+			};
 		}
 
 		return {
@@ -53,10 +53,10 @@ export function useStock() {
 			color: "bg-green-500",
 			textColor: "text-white",
 			label: __("In Stock"),
-		}
+		};
 	}
 
 	return {
 		getStockStatus,
-	}
+	};
 }

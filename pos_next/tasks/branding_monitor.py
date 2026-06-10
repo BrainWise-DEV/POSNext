@@ -6,9 +6,10 @@ BrainWise Branding Monitor
 Scheduled task to monitor branding integrity and log suspicious activity
 """
 
-import frappe
-from frappe.utils import now, get_datetime
 import json
+
+import frappe
+from frappe.utils import get_datetime, now
 
 
 def monitor_branding_integrity():
