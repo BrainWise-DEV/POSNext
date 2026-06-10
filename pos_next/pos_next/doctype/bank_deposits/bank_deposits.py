@@ -89,7 +89,8 @@ class BankDeposits(Document):
 @frappe.validate_and_sanitize_search_inputs
 def get_pos_closing_shifts(doctype, txt, searchfield, start, page_len, filters):
 	"""Return submitted, closed POS Closing Shifts without an existing Bank Deposit."""
-	pos_profile = (filters or {}).get("pos_profile")
+	filters = filters or {}
+	pos_profile = filters.get("pos_profile")
 	profile_condition = "AND pcs.pos_profile = %(pos_profile)s" if pos_profile else ""
 
 	return frappe.db.sql(
@@ -102,7 +103,7 @@ def get_pos_closing_shifts(doctype, txt, searchfield, start, page_len, filters):
 			AND pcs.name NOT IN (
 				SELECT bd.pos_closing_shift
 				FROM `tabBank Deposits` bd
-				WHERE bd.docstatus != 2
+				WHERE bd.docstatus = 1
 					AND bd.pos_closing_shift IS NOT NULL
 			)
 			{profile_condition}
