@@ -167,7 +167,7 @@
 						</svg>
 						<span>{{ __("Switch To Desk") }}</span>
 					</button>
-					<hr class="my-1 border-gray-100"> 
+					<hr class="my-1 border-gray-100" />
 					<button
 						@click="lockSession()"
 						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-amber-50 flex items-center gap-3 transition-colors"
@@ -479,32 +479,32 @@
 			</div>
 
 			<!-- Payment Dialog -->
-		<PaymentDialog
-			v-model="uiStore.showPaymentDialog"
-			:grand-total="cartStore.grandTotal"
-			:subtotal="cartStore.subtotal"
-			:pos-profile="shiftStore.profileName"
-			:currency="shiftStore.profileCurrency"
-			:is-offline="offlineStore.isOffline"
-			:allow-partial-payment="posSettingsStore.allowPartialPayment"
-			:allow-credit-sale="posSettingsStore.allowCreditSale"
-			:allow-customer-credit-payment="posSettingsStore.allowCustomerCreditPayment"
-			:allow-write-off="posSettingsStore.allowWriteOffChange"
-			:write-off-limit="shiftStore.writeOffLimit"
-			:customer="cartStore.customer"
-			:company="shiftStore.profileCompany"
-			:additional-discount="cartStore.additionalDiscount"
-			:items="cartStore.invoiceItems"
-			:tax-amount="cartStore.totalTax"
-			:discount-amount="cartStore.totalDiscount"
-			:target-doctype="cartStore.targetDoctype"
-			:is-submitting="cartStore.isSubmitting"
-			:applied-offer-count="cartStore.appliedOffers.length"
-			@payment-completed="handlePaymentCompleted"
-			@update-additional-discount="handleAdditionalDiscountUpdate"
-			@show-offers="uiStore.showOffersDialog = true"
-			@show-coupon="uiStore.showCouponDialog = true"
-		/>
+			<PaymentDialog
+				v-model="uiStore.showPaymentDialog"
+				:grand-total="cartStore.grandTotal"
+				:subtotal="cartStore.subtotal"
+				:pos-profile="shiftStore.profileName"
+				:currency="shiftStore.profileCurrency"
+				:is-offline="offlineStore.isOffline"
+				:allow-partial-payment="posSettingsStore.allowPartialPayment"
+				:allow-credit-sale="posSettingsStore.allowCreditSale"
+				:allow-customer-credit-payment="posSettingsStore.allowCustomerCreditPayment"
+				:allow-write-off="posSettingsStore.allowWriteOffChange"
+				:write-off-limit="shiftStore.writeOffLimit"
+				:customer="cartStore.customer"
+				:company="shiftStore.profileCompany"
+				:additional-discount="cartStore.additionalDiscount"
+				:items="cartStore.invoiceItems"
+				:tax-amount="cartStore.totalTax"
+				:discount-amount="cartStore.totalDiscount"
+				:target-doctype="cartStore.targetDoctype"
+				:is-submitting="cartStore.isSubmitting"
+				:applied-offer-count="cartStore.appliedOffers.length"
+				@payment-completed="handlePaymentCompleted"
+				@update-additional-discount="handleAdditionalDiscountUpdate"
+				@show-offers="uiStore.showOffersDialog = true"
+				@show-coupon="uiStore.showCouponDialog = true"
+			/>
 
 			<!-- Customer Selection Dialog -->
 			<CustomerDialog
@@ -992,8 +992,8 @@
 // Module-scoped init guard — prevents redundant heavy initialization
 // when component remounts due to translationVersion changes.
 // Tracks the profile+shift key so a user/shift change correctly re-initializes.
-let _initializedKey = null
-let _posInitPromise = null
+let _initializedKey = null;
+let _posInitPromise = null;
 </script>
 
 <script setup>
@@ -1079,7 +1079,12 @@ const settingsStore = posSettingsStore;
 const { onStockUpdate } = useRealtimeStock();
 
 // Session lock (inactivity + tab-refocus)
-const { lock: lockSession, configure: configureSessionLock, startActivityTracking, stopActivityTracking } = useSessionLock();
+const {
+	lock: lockSession,
+	configure: configureSessionLock,
+	startActivityTracking,
+	stopActivityTracking,
+} = useSessionLock();
 
 // POS Events system
 const {
@@ -1850,7 +1855,12 @@ function handleItemSelected(item, autoAdd = false) {
 					price_list_rate: unitRate,
 					is_resolved_barcode: true, // Mark as readonly
 				};
-				cartStore.addItem(resolvedItem, item.resolved_qty, true, shiftStore.currentProfile);
+				cartStore.addItem(
+					resolvedItem,
+					item.resolved_qty,
+					true,
+					shiftStore.currentProfile
+				);
 			} else {
 				cartStore.addItem(item, 1, true, shiftStore.currentProfile);
 			}
@@ -1866,7 +1876,11 @@ function handleItemSelected(item, autoAdd = false) {
 
 	// Early out-of-stock guard — prevent opening dialogs for zero-stock items
 	// Full qty validation happens in cartStore.addItem()
-	if (!item.has_variants && settingsStore.shouldEnforceStockValidation() && shouldValidateItemStock(item)) {
+	if (
+		!item.has_variants &&
+		settingsStore.shouldEnforceStockValidation() &&
+		shouldValidateItemStock(item)
+	) {
 		const actualQty = item.actual_qty ?? item.stock_qty ?? 0;
 		if (actualQty <= 0) {
 			uiStore.showError(
@@ -2059,6 +2073,7 @@ async function handlePaymentCompleted(paymentData) {
 				write_off_amount: paymentData.write_off_amount || 0,
 				change_amount: paymentData.change_amount || 0,
 				is_credit_sale: paymentData.is_credit_sale ? 1 : 0,
+				receivable_account: paymentData.receivable_account || null,
 				edited_from: editingOfflineContext?.originalOfflineId || null,
 			};
 
@@ -2075,7 +2090,7 @@ async function handlePaymentCompleted(paymentData) {
 				try {
 					await offlineWorker.supersedeOfflineInvoice(
 						editingOfflineContext.originalQueueId,
-						offlineReceiptName,
+						offlineReceiptName
 					);
 				} catch (err) {
 					log.error("Failed to supersede original offline invoice:", err);
@@ -2128,17 +2143,19 @@ async function handlePaymentCompleted(paymentData) {
 				try {
 					await handlePrintInvoice({ name: offlineReceiptName });
 					showSuccess(
-						__("Invoice {0} saved offline and sent to printer — will sync when online", [
-							offlineReceiptName,
-						]),
+						__(
+							"Invoice {0} saved offline and sent to printer — will sync when online",
+							[offlineReceiptName]
+						)
 					);
 				} catch (error) {
 					log.error("Offline auto-print error:", error);
 					uiStore.showSuccess(offlineReceiptName, grandTotal, paymentData.paid_amount);
 					showWarning(
-						__("Invoice {0} saved offline but print failed — open Print from the success dialog", [
-							offlineReceiptName,
-						]),
+						__(
+							"Invoice {0} saved offline but print failed — open Print from the success dialog",
+							[offlineReceiptName]
+						)
 					);
 				}
 			} else {
@@ -2151,6 +2168,7 @@ async function handlePaymentCompleted(paymentData) {
 
 			const result = await cartStore.submitInvoice({
 				isCreditSale: Boolean(paymentData.is_credit_sale),
+				receivableAccount: paymentData.receivable_account || null,
 			});
 
 			if (result) {
@@ -2165,10 +2183,13 @@ async function handlePaymentCompleted(paymentData) {
 					try {
 						await offlineWorker.supersedeOfflineInvoice(
 							editingOfflineContext.originalQueueId,
-							serverName,
+							serverName
 						);
 					} catch (err) {
-						log.error("Failed to supersede edited offline invoice after online submit:", err);
+						log.error(
+							"Failed to supersede edited offline invoice after online submit:",
+							err
+						);
 					}
 					editingOfflineContext = null;
 					// Refresh pending count so the OfflineInvoicesDialog badge updates.
@@ -2302,7 +2323,10 @@ async function handleOptionSelected(option) {
 		} else if (option.type === "uom") {
 			const qty = option.quantity || cartStore.pendingItemQty;
 			const pricing = await cartStore.resolveUomPricing(
-				cartStore.pendingItem, option.uom, option.conversion_factor, qty
+				cartStore.pendingItem,
+				option.uom,
+				option.conversion_factor,
+				qty
 			);
 
 			const itemToAdd = {
@@ -2456,7 +2480,7 @@ async function handleLoadDraft(draft) {
 
 function handleReturnCreated(returnInvoice) {
 	// Success message is already shown by ReturnInvoiceDialog
-	log.debug("Return invoice created:", returnInvoice.name)
+	log.debug("Return invoice created:", returnInvoice.name);
 }
 
 function handleDiscountApplied(discount) {
@@ -2620,8 +2644,8 @@ async function handleEditOfflineInvoice(invoice) {
 			uiStore.showError(
 				__("Cannot edit printed invoice"),
 				__(
-					"A receipt for this invoice was already printed — the customer may have a physical copy. Use Return Invoice to issue a credit note instead.",
-				),
+					"A receipt for this invoice was already printed — the customer may have a physical copy. Use Return Invoice to issue a credit note instead."
+				)
 			);
 			return;
 		}
