@@ -181,7 +181,8 @@
 
 <script setup>
 import { useCustomerSearchStore } from "@/stores/customerSearch"
-import { Button, Dialog } from "frappe-ui"
+import Dialog from "@/components/common/POSDialog.vue"
+import { Button } from "frappe-ui"
 import { storeToRefs } from "pinia"
 import { computed, nextTick, onMounted, ref, watch } from "vue"
 import CreateCustomerDialog from "./CreateCustomerDialog.vue"

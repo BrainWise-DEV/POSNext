@@ -187,7 +187,8 @@ import { usePOSPermissions } from "@/composables/usePermissions"
 import { useToast } from "@/composables/useToast"
 import { useCountriesStore } from "@/stores/countries"
 import { logger } from "@/utils/logger"
-import { Button, Dialog, Input, createResource } from "frappe-ui"
+import Dialog from "@/components/common/POSDialog.vue"
+import { Button, Input, createResource } from "frappe-ui"
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 
 const log = logger.create("CreateCustomerDialog")

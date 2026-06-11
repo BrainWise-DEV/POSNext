@@ -1042,7 +1042,8 @@ import {
 } from "@/utils/printInvoice";
 import { qzConnected, connect as qzConnect, disconnect as qzDisconnect } from "@/utils/qzTray";
 
-import { Button, Dialog, createResource } from "frappe-ui";
+import Dialog from "@/components/common/POSDialog.vue";
+import { Button, createResource } from "frappe-ui";
 import { call } from "@/utils/apiWrapper";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useToast } from "@/composables/useToast";

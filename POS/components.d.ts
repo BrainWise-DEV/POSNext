@@ -38,6 +38,7 @@ declare module 'vue' {
     PartialPayments: typeof import('./src/components/partials/PartialPayments.vue')['default']
     PaymentDialog: typeof import('./src/components/sale/PaymentDialog.vue')['default']
     PhoneInput: typeof import('./src/components/common/PhoneInput.vue')['default']
+    POSDialog: typeof import('./src/components/common/POSDialog.vue')['default']
     POSFooter: typeof import('./src/components/common/POSFooter.vue')['default']
     POSHeader: typeof import('./src/components/pos/POSHeader.vue')['default']
     POSSettings: typeof import('./src/components/settings/POSSettings.vue')['default']

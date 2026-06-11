@@ -281,7 +281,8 @@ import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/
 import { getInvoiceStatusColor } from "@/utils/invoice"
 import { logger } from "@/utils/logger"
 import { hydrateLocalOnlyInvoice, isLocalOnlyInvoiceName } from "@/utils/printInvoice"
-import { Button, Dialog, call } from "frappe-ui"
+import Dialog from "@/components/common/POSDialog.vue"
+import { Button, call } from "frappe-ui"
 import { ref, watch, nextTick, computed } from "vue"
 
 const log = logger.create('InvoiceDetailDialog')
@@ -411,4 +412,3 @@ function handlePrint() {
 	emit("print-invoice", invoiceData.value)
 }
 </script>
-

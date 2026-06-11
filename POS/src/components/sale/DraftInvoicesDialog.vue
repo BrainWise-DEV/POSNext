@@ -169,7 +169,8 @@ import { clearAllDrafts, deleteDraft, getAllDrafts } from "@/utils/draftManager"
 import { printInvoiceCustom } from "@/utils/printInvoice"
 import { useToast } from "@/composables/useToast"
 import { usePOSShiftStore } from "@/stores/posShift"
-import { Button, Dialog } from "frappe-ui"
+import Dialog from "@/components/common/POSDialog.vue"
+import { Button } from "frappe-ui"
 import { onMounted, ref, watch } from "vue"
 
 const { showSuccess, showError } = useToast()

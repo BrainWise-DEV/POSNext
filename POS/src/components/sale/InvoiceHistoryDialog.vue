@@ -157,7 +157,8 @@ import {
 	formatCurrency as formatCurrencyUtil,
 } from "@/utils/currency"
 import { getInvoiceStatusColor } from "@/utils/invoice"
-import { Button, Dialog, Input, createResource } from "frappe-ui"
+import Dialog from "@/components/common/POSDialog.vue"
+import { Button, Input, createResource } from "frappe-ui"
 import { computed, ref, watch } from "vue"
 import ReturnInvoiceDialog from "./ReturnInvoiceDialog.vue"
 

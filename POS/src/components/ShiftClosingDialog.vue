@@ -518,7 +518,8 @@
 </template>
 
 <script setup>
-import { Button, Dialog, FeatherIcon, Input } from "frappe-ui"
+import Dialog from "@/components/common/POSDialog.vue"
+import { Button, FeatherIcon, Input } from "frappe-ui"
 import { computed, onBeforeUnmount, reactive, ref, watch } from "vue"
 import { storeToRefs } from "pinia"
 import { useShift, shiftState } from "../composables/useShift"

@@ -146,7 +146,8 @@
 
 <script setup>
 import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency"
-import { Button, Dialog, Input, createResource } from "frappe-ui"
+import Dialog from "@/components/common/POSDialog.vue"
+import { Button, Input, createResource } from "frappe-ui"
 import { ref, watch } from "vue"
 import { useInvoice } from "@/composables/useInvoice"
 import { useToast } from "@/composables/useToast"
