@@ -20,16 +20,36 @@ def get_columns():
 		{"fieldname": "cashier_name", "label": _("Cashier Name"), "fieldtype": "Data", "width": 150},
 		{"fieldname": "total_sales", "label": _("Total Sales"), "fieldtype": "Currency", "width": 130},
 		{"fieldname": "invoice_count", "label": _("Invoices"), "fieldtype": "Int", "width": 90},
-		{"fieldname": "average_invoice_value", "label": _("Avg Invoice Value"), "fieldtype": "Currency", "width": 140},
-		{"fieldname": "total_discounts", "label": _("Discounts Given"), "fieldtype": "Currency", "width": 130},
+		{
+			"fieldname": "average_invoice_value",
+			"label": _("Avg Invoice Value"),
+			"fieldtype": "Currency",
+			"width": 140,
+		},
+		{
+			"fieldname": "total_discounts",
+			"label": _("Discounts Given"),
+			"fieldtype": "Currency",
+			"width": 130,
+		},
 		{"fieldname": "discount_percentage", "label": _("Discount %"), "fieldtype": "Percent", "width": 100},
 		{"fieldname": "return_count", "label": _("Returns"), "fieldtype": "Int", "width": 90},
 		{"fieldname": "return_amount", "label": _("Return Amount"), "fieldtype": "Currency", "width": 130},
 		{"fieldname": "return_percentage", "label": _("Return %"), "fieldtype": "Percent", "width": 100},
 		{"fieldname": "net_sales", "label": _("Net Sales"), "fieldtype": "Currency", "width": 130},
 		{"fieldname": "shifts_worked", "label": _("Shifts Worked"), "fieldtype": "Int", "width": 110},
-		{"fieldname": "avg_sales_per_shift", "label": _("Avg Sales/Shift"), "fieldtype": "Currency", "width": 140},
-		{"fieldname": "performance_rating", "label": _("Performance Rating"), "fieldtype": "Data", "width": 140}
+		{
+			"fieldname": "avg_sales_per_shift",
+			"label": _("Avg Sales/Shift"),
+			"fieldtype": "Currency",
+			"width": 140,
+		},
+		{
+			"fieldname": "performance_rating",
+			"label": _("Performance Rating"),
+			"fieldtype": "Data",
+			"width": 140,
+		},
 	]
 
 
@@ -212,8 +232,8 @@ def get_chart_data(data):
 	return {
 		"data": {
 			"labels": [row.get("cashier_name") or row.get("cashier") for row in top_cashiers],
-			"datasets": [{"name": "Total Sales", "values": [row.total_sales for row in top_cashiers]}]
+			"datasets": [{"name": "Total Sales", "values": [row.total_sales for row in top_cashiers]}],
 		},
 		"type": "bar",
-		"colors": ["#4CAF50"]
+		"colors": ["#4CAF50"],
 	}
