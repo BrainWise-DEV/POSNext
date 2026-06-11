@@ -86,6 +86,7 @@ class Offer:
 	is_recursive: int = 0  # 1 if offer applies recursively (e.g., buy 2 get 1 free for every 2)
 	recurse_for: float = 0  # Give free item for every N quantity (used when is_recursive=1)
 	apply_recursion_over: float = 0  # Qty for which recursion isn't applicable
+	one_time_per_customer: int = 0  # 1 if each customer may redeem this offer only once
 
 	def to_dict(self) -> Dict:
 		"""Convert to dictionary for API response"""
@@ -336,7 +337,8 @@ class OfferBuilder:
 			same_item=1 if slab.get("same_item") and not is_price_discount else 0,
 			is_recursive=1 if slab.get("is_recursive") and not is_price_discount else 0,
 			recurse_for=flt(slab.get("recurse_for", 0)) if not is_price_discount else 0,
-			apply_recursion_over=flt(slab.get("apply_recursion_over", 0)) if not is_price_discount else 0
+			apply_recursion_over=flt(slab.get("apply_recursion_over", 0)) if not is_price_discount else 0,
+			one_time_per_customer=1 if rule.get("one_time_per_customer") else 0
 		)
 
 	@staticmethod
@@ -384,7 +386,8 @@ class OfferBuilder:
 			promotional_scheme_id=None,
 			eligible_items=eligible_items,
 			eligible_item_groups=eligible_item_groups,
-			eligible_brands=eligible_brands
+			eligible_brands=eligible_brands,
+			one_time_per_customer=1 if rule.get("one_time_per_customer") else 0
 		)
 
 
@@ -429,6 +432,24 @@ def get_offers(pos_profile: str) -> List[Dict]:
 		return []
 
 
+@frappe.whitelist()
+def get_customer_one_time_redemptions(customer: str) -> List[str]:
+	"""Return the Pricing Rule names a customer has already redeemed once.
+
+	Used by the POS frontend to enforce one-time-per-customer offers OFFLINE:
+	the cart caches this list when a customer is selected (while online) so the
+	offline offer engine can mirror the server-side gate in ``apply_offers``.
+	"""
+	if not customer or not frappe.db.table_exists("One Time Customer Offer Usage"):
+		return []
+
+	return frappe.get_all(
+		"One Time Customer Offer Usage",
+		filters={"customer": customer},
+		pluck="pricing_rule",
+	)
+
+
 def _get_promotional_scheme_offers(company: str, date: str) -> List[Offer]:
 	"""Fetch offers from promotional schemes"""
 
@@ -436,7 +457,7 @@ def _get_promotional_scheme_offers(company: str, date: str) -> List[Offer]:
 	pricing_rules = frappe.db.sql("""
 		SELECT
 			name, title, apply_on, selling, promotional_scheme,
-			promotional_scheme_id, coupon_code_based,
+			promotional_scheme_id, coupon_code_based, one_time_per_customer,
 			price_or_product_discount, priority, valid_from, valid_upto
 		FROM `tabPricing Rule`
 		WHERE
@@ -488,7 +509,7 @@ def _get_standalone_pricing_rule_offers(company: str, date: str) -> List[Offer]:
 	pricing_rules = frappe.db.sql("""
 		SELECT
 			name, title, apply_on, selling,
-			coupon_code_based, price_or_product_discount,
+			coupon_code_based, one_time_per_customer, price_or_product_discount,
 			rate_or_discount, rate, discount_amount, discount_percentage,
 			min_qty, max_qty, min_amt, max_amt,
 			priority, valid_from, valid_upto

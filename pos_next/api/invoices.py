@@ -811,6 +811,8 @@ def update_invoice(data):
         # Formula: rate = price_list_rate * (1 - discount_percentage/100)
         # Reverse: price_list_rate = rate / (1 - discount_percentage/100)
         # ========================================================================
+        # Collect applied pricing rule names before we clear item.pricing_rules
+        applied_rule_names_seen = set()
         for item in invoice_doc.get("items", []):
             item_rate = flt(item.rate or 0)
             discount_pct = flt(item.discount_percentage or 0)
@@ -869,7 +871,32 @@ def update_invoice(data):
             # discount itself is preserved via the discount_percentage /
             # discount_amount fields we already set above.
             if item.get("pricing_rules"):
+                if erpnext_get_applied_pricing_rules:
+                    applied_rule_names_seen.update(
+                        erpnext_get_applied_pricing_rules(item.pricing_rules) or []
+                    )
+                else:
+                    applied_rule_names_seen.update(
+                        r.strip() for r in str(item.pricing_rules).split(",") if r.strip()
+                    )
                 item.pricing_rules = ""
+
+        if doctype == "Sales Invoice":
+            one_time_applied = (
+                frappe.get_all(
+                    "Pricing Rule",
+                    filters={
+                        "name": ["in", list(applied_rule_names_seen)],
+                        "one_time_per_customer": 1,
+                    },
+                    pluck="name",
+                )
+                if applied_rule_names_seen
+                else []
+            )
+            invoice_doc.pos_applied_one_time_rules = (
+                json.dumps(sorted(one_time_applied)) if one_time_applied else ""
+            )
 
         # Set invoice flags BEFORE calculations
         if doctype == "Sales Invoice":
@@ -3107,6 +3134,10 @@ def apply_offers(invoice_data, selected_offers=None):
         # We include BOTH types for POS, but exclude coupon_code_based rules
         # (those require explicit coupon entry and are handled separately).
         #
+        # Walk-in / default customer can't be tracked one-time, so one-time
+        # rules never apply to anonymous sales (see the loop below).
+        default_customer = profile.get("customer")
+
         rule_map = {}
         if raw_rule_names:
             rule_records = frappe.get_all(
@@ -3116,6 +3147,7 @@ def apply_offers(invoice_data, selected_offers=None):
                     "name",
                     "promotional_scheme",
                     "coupon_code_based",
+                    "one_time_per_customer",
                     "promotional_scheme_id",
                     "price_or_product_discount",
                 ],
@@ -3124,6 +3156,18 @@ def apply_offers(invoice_data, selected_offers=None):
                 # Skip coupon-based rules (require explicit coupon code entry)
                 if record.coupon_code_based:
                     continue
+
+                # One-time-per-customer rules: skip for anonymous sales and for
+                # customers who have already redeemed this rule. Dropping the rule
+                # here keeps its discount out of the per-item loop below (which only
+                # applies rules present in rule_map), mirroring the coupon skip above.
+                if record.one_time_per_customer:
+                    if not customer or customer == default_customer:
+                        continue
+                    if frappe.db.exists(
+                        "One Time Customer Offer Usage", f"{customer}::{record.name}"
+                    ):
+                        continue
 
                 # Include both promotional scheme rules and standalone pricing rules
                 rule_map[record.name] = record
