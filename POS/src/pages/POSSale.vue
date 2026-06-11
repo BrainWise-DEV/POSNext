@@ -1897,11 +1897,11 @@ async function handleItemSelected(item, autoAdd = false) {
 	}
 
 	// Check for UOMs
-	if (item.item_uoms && item.item_uoms.length > 0) {
-		cartStore.setPendingItem(item, 1, "uom");
-		uiStore.showItemSelectionDialog = true;
-		return;
-	}
+	// if (item.item_uoms && item.item_uoms.length > 0) {
+	// 	cartStore.setPendingItem(item, 1, "uom");
+	// 	uiStore.showItemSelectionDialog = true;
+	// 	return;
+	// }
 
 	// Check for batch/serial
 	if (item.has_batch_no || item.has_serial_no) {
