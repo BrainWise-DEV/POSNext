@@ -310,9 +310,10 @@ async function attachBatchPrices(batches) {
 watch(
 	() => props.modelValue,
 	(val) => {
-		show.value = val
 		if (val && props.item) {
 			loadBatchesOrSerials()
+		} else {
+			show.value = false
 		}
 	},
 )
@@ -378,10 +379,19 @@ async function loadBatchesOrSerials() {
 			warehouseBatches.value = isOffline()
 				? batches
 				: await attachBatchPrices(batches)
+
+			if (availableBatches.value.length === 1 && !props.item?.has_serial_no) {
+				selectedBatch.value = availableBatches.value[0]
+				handleConfirm()
+				return
+			}
+			
+			show.value = true
 		} else {
 			// No batches available, show alert and close the dialog
 			showError(__("No batches available for {0}", [props.item?.item_name || props.item?.item_code]))
-			show.value = false
+			emit("update:modelValue", false)
+			resetSelection()
 		}
 	} else if (props.item?.has_serial_no) {
 		// Try cached data first when offline
@@ -389,6 +399,7 @@ async function loadBatchesOrSerials() {
 			const cachedSerials = await getCachedSerialData(props.item.item_code)
 			if (cachedSerials && cachedSerials.length > 0) {
 				availableSerials.value = cachedSerials
+				show.value = true
 				return
 			}
 		}
@@ -401,7 +412,10 @@ async function loadBatchesOrSerials() {
 		// Close dialog if no serials available
 		if (!serials || serials.length === 0) {
 			showError(__("No serial numbers available for {0}", [props.item?.item_name || props.item?.item_code]))
-			show.value = false
+			emit("update:modelValue", false)
+			resetSelection()
+		} else {
+			show.value = true
 		}
 	}
 }
@@ -466,7 +480,12 @@ function handleConfirm() {
 	}
 
 	emit("batch-serial-selected", result)
-	show.value = false
+	if (show.value) {
+		show.value = false
+	} else {
+		emit("update:modelValue", false)
+		resetSelection()
+	}
 }
 
 function resetSelection() {
