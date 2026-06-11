@@ -1036,6 +1036,9 @@ onMounted(() => {
 
 	// Add click outside listener for sort dropdown
 	document.addEventListener('click', handleClickOutside)
+	 nextTick(() => {
+        focusSearchInput()
+    })
 })
 
 onUnmounted(() => {
@@ -1133,6 +1136,7 @@ function selectItem(item, autoAdd = false) {
 	}
 
 	emit("item-selected", item, autoAdd)
+	focusSearchInput()
 	return true
 }
 
