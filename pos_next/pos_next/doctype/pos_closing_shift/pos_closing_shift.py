@@ -460,30 +460,50 @@ def _process_invoice(invoice, invoice_field, company_currency, cash_mode, paymen
             "customer": invoice.customer,
             "is_return": is_return,
             "return_against": invoice.get("return_against"),
+            "invoice_total": base_grand_total,
+            "outstanding_amount": 0,
         })
+
+    # Money actually collected on this sale, in company currency.  A pure
+    # Pay-on-Account credit sale has paid_amount == 0; a partial sale carries
+    # only its cash/card down-payment.  Returns keep the full (signed) amount —
+    # the return branch already reflects real refunds via payment rows.
+    base_paid = get_base_value(invoice, "paid_amount", "base_paid_amount", conversion_rate)
+    paid_ratio = (base_paid / base_grand_total) if base_grand_total else 0
+
+    # Collected amount drives the sales summary / per-row totals; the full
+    # invoice value is preserved separately for display and reconciliation.
+    collected = base_grand_total if is_return else base_paid
 
     # Build transaction record
     transaction = frappe._dict({
         invoice_field: invoice.name,
         "posting_date": invoice.posting_date,
-        "grand_total": base_grand_total,
+        "grand_total": collected,
         "transaction_currency": invoice.get("currency") or company_currency,
         "transaction_amount": flt(invoice.get("grand_total")),
         "customer": invoice.customer,
         "is_return": is_return,
         "return_against": invoice.get("return_against") if is_return else None,
+        # Display-only (stripped before the child table set): full invoice
+        # value and the unpaid remainder, used by the closing dialog badge.
+        "invoice_total": base_grand_total,
+        "outstanding_amount": 0 if is_return else (base_grand_total - base_paid),
     })
 
     # Update summary totals
-    summary["grand_total"] += base_grand_total
-    summary["net_total"] += base_net_total
     summary["total_quantity"] += flt(invoice.total_qty)
 
     if is_return:
+        summary["grand_total"] += base_grand_total
+        summary["net_total"] += base_net_total
         summary["returns_total"] += abs(base_grand_total)
         summary["returns_count"] += 1
     else:
-        summary["sales_total"] += base_grand_total
+        # Net Sales == money collected, keeping net proportional to what was paid.
+        summary["grand_total"] += base_paid
+        summary["net_total"] += base_net_total * paid_ratio
+        summary["sales_total"] += base_paid
         summary["sales_count"] += 1
 
     # Process taxes
@@ -590,7 +610,10 @@ def make_closing_shift_from_opening(opening_shift):
 
     # Set child tables (without return info - that's for display only)
     closing_shift.set("pos_transactions", [
-        {k: v for k, v in txn.items() if k not in ("is_return", "return_against")}
+        {
+            k: v for k, v in txn.items()
+            if k not in ("is_return", "return_against", "invoice_total", "outstanding_amount")
+        }
         for txn in pos_transactions
     ])
     closing_shift.set("payment_reconciliation", payments)
