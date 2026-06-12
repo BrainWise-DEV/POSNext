@@ -364,6 +364,11 @@
 												:description="__('Enable partial payment for invoices')"
 											/>
 											<CheckboxField
+												v-model="settings.customer_search_show_all"
+												:label="__('Show All Customers in Search')"
+												:description="__('Show the complete customer list in the cart search dropdown instead of capping results at the first 10-20 matches.')"
+											/>
+											<CheckboxField
 												v-model="settings.silent_print"
 												:label="__('Silent Print')"
 												:description="__('Send receipts directly to a thermal printer via QZ Tray (no browser dialog)')"

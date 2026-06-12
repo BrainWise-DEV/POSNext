@@ -192,6 +192,7 @@
 
 							<!-- Native Input for Instant Search -->
 							<input
+								ref="customerSearchInputRef"
 								id="cart-customer-search"
 								name="cart-customer-search"
 								:value="customerSearch"
@@ -200,12 +201,26 @@
 								@blur="handleSearchBlur"
 								type="text"
 								:placeholder="__('Search or add customer...')"
-								class="w-full h-10 ps-9 pe-3 text-xs border border-gray-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-sm transition-shadow"
+								class="w-full h-10 ps-9 pe-3 md:pe-10 text-xs border border-gray-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-sm transition-shadow"
 								:disabled="!customersLoaded"
 								@keydown="handleKeydown"
 								autocomplete="off"
 								:aria-label="__('Search customer in cart')"
 							/>
+
+							<!-- Clear search button -->
+							<button
+								v-if="customerSearch"
+								type="button"
+								@mousedown.prevent="clearCustomerSearch"
+								class="absolute inset-y-0 end-0 pe-2.5 flex items-center text-gray-400 hover:text-gray-600 cursor-pointer"
+								:title="__('Clear search')"
+								:aria-label="__('Clear search')"
+							>
+								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+									<path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+								</svg>
+							</button>
 						</div>
 
 						<!-- Quick Create Customer Button -->
@@ -270,87 +285,131 @@
 
 				<!-- Customer Dropdown -->
 				<div
-					v-if="customerSearchFocused || customerSearch.trim().length >= 2"
-					class="absolute z-50 mt-0.5 w-full bg-white border border-gray-200 rounded-md shadow-lg max-h-48 overflow-hidden will-change-transform"
+					v-if="customerSearchFocused || searchTokens.length > 0"
+					:class="[
+						'absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-xl overflow-hidden will-change-transform',
+						settingsStore.customerSearchShowAll ? 'max-h-[62vh]' : 'max-h-72',
+					]"
 				>
-					<!-- Frequent Customers Header (when showing suggestions) -->
+					<!-- Header: list label + result count + keyboard hint -->
 					<div
-						v-if="customerSearchFocused && customerSearch.trim().length < 2 && customerResults.length > 0"
-						class="px-2 py-1 bg-gray-50 border-b border-gray-200"
+						v-if="customerResults.length > 0"
+						class="px-3 py-1.5 bg-gray-50 border-b border-gray-200 flex items-center justify-between gap-2"
 					>
-						<span class="text-[10px] font-medium text-gray-500 uppercase tracking-wide">
-							{{ __('Frequent Customers') }}
+						<span class="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">
+							{{ customerDropdownLabel }}
+						</span>
+						<span class="flex items-center gap-2">
+							<span class="text-[10px] font-semibold text-gray-400 tabular-nums">
+								{{ customerResults.length }}
+							</span>
+							<span class="hidden md:flex items-center gap-0.5" dir="ltr">
+								<kbd class="px-1 py-px text-[9px] font-mono text-gray-400 bg-white border border-gray-200 rounded">↑↓</kbd>
+								<kbd class="px-1 py-px text-[9px] font-mono text-gray-400 bg-white border border-gray-200 rounded">↵</kbd>
+							</span>
 						</span>
 					</div>
 
 					<!-- Customer Results -->
-					<div v-if="customerResults.length > 0" class="max-h-48 overflow-y-auto overscroll-contain">
+					<div
+						v-if="customerResults.length > 0"
+						ref="customerResultsListRef"
+						:class="[
+							'overflow-y-auto overscroll-contain',
+							settingsStore.customerSearchShowAll ? 'max-h-[56vh]' : 'max-h-60',
+						]"
+					>
 						<button
 							type="button"
 							v-for="(cust, index) in customerResults"
 							:key="cust.name"
+							:data-idx="index"
 							@mousedown.prevent="selectCustomer(cust)"
+							@mousemove="selectedIndex = index"
 							:class="[
-								'w-full text-start px-2 py-1.5 flex items-center gap-1.5 border-b border-gray-100 last:border-0 touch-manipulation select-none cursor-pointer active:bg-blue-200',
-								index === selectedIndex ? 'bg-blue-100' : 'hover:bg-blue-50 active:bg-blue-100',
+								'w-full text-start px-3 py-2 flex items-center gap-2.5 border-b border-gray-50 last:border-0 touch-manipulation select-none cursor-pointer transition-colors',
+								index === selectedIndex ? 'bg-blue-50' : 'hover:bg-gray-50 active:bg-blue-100',
 							]"
 						>
 							<div
-								class="w-6 h-6 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0 pointer-events-none"
+								:class="[
+									'w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 pointer-events-none',
+									customerAvatarClass(cust),
+								]"
 							>
-								<span class="text-[10px] font-bold text-blue-600">{{
+								<span class="text-[11px] font-bold">{{
 									getInitials(cust.customer_name)
 								}}</span>
 							</div>
 							<div class="flex-1 min-w-0 pointer-events-none">
-								<p class="text-[11px] font-semibold text-gray-900 truncate">
-									{{ cust.customer_name }}
+								<p class="text-[13px] font-semibold text-gray-900 truncate leading-snug">
+									<template v-for="(seg, si) in highlightMatch(cust.customer_name)" :key="si"><mark v-if="seg.hit" class="bg-amber-200/70 text-gray-900 rounded-sm">{{ seg.text }}</mark><template v-else>{{ seg.text }}</template></template>
 								</p>
-								<p v-if="cust.mobile_no" class="text-[9px] text-gray-600">
-									{{ cust.mobile_no }}
+								<p
+									v-if="cust.mobile_no"
+									class="text-[11px] text-gray-500 truncate flex items-center gap-1"
+									dir="ltr"
+								>
+									<svg class="w-3 h-3 flex-shrink-0 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+										<path stroke-linecap="round" stroke-linejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 7V5z" />
+									</svg>
+									<span><template v-for="(seg, si) in highlightMatch(cust.mobile_no)" :key="si"><mark v-if="seg.hit" class="bg-amber-200/70 text-gray-700 rounded-sm">{{ seg.text }}</mark><template v-else>{{ seg.text }}</template></template></span>
 								</p>
 							</div>
+							<!-- Enter hint on the keyboard-selected row -->
+							<svg
+								v-if="index === selectedIndex"
+								class="w-4 h-4 text-blue-400 flex-shrink-0 hidden md:block pointer-events-none"
+								fill="none"
+								stroke="currentColor"
+								viewBox="0 0 24 24"
+								stroke-width="2"
+							>
+								<path stroke-linecap="round" stroke-linejoin="round" d="M9 10l-5 5 5 5" />
+								<path stroke-linecap="round" stroke-linejoin="round" d="M20 4v7a4 4 0 01-4 4H4" />
+							</svg>
 						</button>
 					</div>
 
-					<!-- No Results + Create New Option -->
-					<div v-else-if="customerSearch.trim().length >= 2">
-						<div
-							class="px-2 py-1.5 text-center text-[11px] font-medium text-gray-700 border-b border-gray-100"
-						>
+					<!-- No Results -->
+					<div v-else-if="searchTokens.length > 0" class="px-3 py-5 text-center">
+						<svg class="w-8 h-8 text-gray-300 mx-auto mb-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+							<path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+						</svg>
+						<p class="text-xs font-medium text-gray-600">
 							{{ __('No results for "{0}"', [customerSearch]) }}
-						</div>
+						</p>
 					</div>
 
 					<!-- Create New Customer Option -->
 					<button
 						type="button"
-						v-if="customerSearch.trim().length >= 2"
+						v-if="searchTokens.length > 0"
 						@mousedown.prevent="createNewCustomer"
-						class="w-full text-start px-2 py-1.5 hover:bg-green-50 active:bg-green-100 flex items-center gap-1.5 border-t border-gray-200 touch-manipulation select-none cursor-pointer"
+						class="w-full text-start px-3 py-2 hover:bg-green-50 active:bg-green-100 flex items-center gap-2.5 border-t border-gray-200 touch-manipulation select-none cursor-pointer"
 					>
 						<div
-							class="w-5 h-5 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0 pointer-events-none"
+							class="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0 pointer-events-none"
 						>
 							<svg
-								class="w-3 h-3 text-green-600"
+								class="w-4 h-4 text-green-600"
 								fill="none"
 								stroke="currentColor"
 								viewBox="0 0 24 24"
+								stroke-width="2"
 							>
 								<path
 									stroke-linecap="round"
 									stroke-linejoin="round"
-									stroke-width="2"
 									d="M12 4v16m8-8H4"
 								/>
 							</svg>
 						</div>
 						<div class="flex-1 pointer-events-none">
-							<p class="text-[11px] font-medium text-green-700">
+							<p class="text-xs font-semibold text-green-700">
 								{{ __("Create New Customer") }}
 							</p>
-							<p class="text-[9px] text-green-600">"{{ customerSearch }}"</p>
+							<p class="text-[10px] text-green-600 truncate">"{{ customerSearch }}"</p>
 						</div>
 					</button>
 				</div>
@@ -1260,6 +1319,11 @@ import { useCustomerSearchStore } from "@/stores/customerSearch";
 import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency";
 import { useFormatters } from "@/composables/useFormatters";
 import { useCartSort } from "@/composables/useCartSort";
+import {
+	matchSegments,
+	normalizeSearchText,
+	tokenizeQuery,
+} from "@/utils/searchText";
 import { isOffline } from "@/utils/offline";
 import { offlineWorker } from "@/utils/offline/workerClient";
 import { logger } from "@/utils/logger";
@@ -1383,6 +1447,8 @@ const {
 const customerSearch = ref(""); // Current search query
 const customerSearchContainer = ref(null); // Ref to search container for click-outside detection
 const customerSearchFocused = ref(false); // Track if search input is focused
+const customerSearchInputRef = ref(null); // Ref to the native search input element
+const customerResultsListRef = ref(null); // Ref to the scrollable results list (keyboard nav scroll)
 // Use Pinia store for allCustomers (shared with CustomerDialog, synced on customer creation)
 const allCustomers = computed(() => customerSearchStore.allCustomers);
 const customersLoaded = computed(() => customerSearchStore.allCustomers.length > 0);
@@ -1492,59 +1558,139 @@ const customerMap = computed(() => {
 });
 
 /**
- * Instant customer search results with in-memory filtering.
- *
- * Performs zero-latency filtering on the cached customer list.
- * Searches across customer_name, mobile_no, and customer ID.
- * Returns max 20 results to keep dropdown performant.
- *
- * @returns {Array} Filtered customer objects matching search query
+ * Normalized query tokens for the customer search (Arabic-insensitive).
+ * Search activates from the first typed character.
  */
-const customerResults = computed(() => {
-	const searchValue = customerSearch.value.trim().toLowerCase();
-
-	// When focused with no/short search term, show frequent customers (top 5)
-	if (searchValue.length < 2) {
-		if (customerSearchFocused.value) {
-			// Get frequent customer IDs from the store
-			// const frequentIds = customerSearchStore.frequentCustomers.slice(0, 5);
-			// if (frequentIds.length > 0) {
-			// 	const frequentCustomers = [];
-			// 	for (const id of frequentIds) {
-			// 		const cust = customerMap.value.get(id);
-			// 		if (cust) frequentCustomers.push(cust);
-			// 	}
-			// 	return frequentCustomers;
-			// }
-			// If no frequent customers, show first 5 from the list
-			return allCustomers.value.slice(0, 10);
-		}
-		return [];
-	}
-
-	// Instant in-memory filter
-	return allCustomers.value
-		.filter((cust) => {
-			const name = (cust.customer_name || "").toLowerCase();
-			const mobile = (cust.mobile_no || "").toLowerCase();
-			const id = (cust.name || "").toLowerCase();
-
-			return (
-				name.includes(searchValue) ||
-				mobile.includes(searchValue) ||
-				id.includes(searchValue)
-			);
-		})
-		.slice(0, 20);
-});
+const searchTokens = computed(() => tokenizeQuery(customerSearch.value))
 
 /**
- * Reset keyboard selection index when search results change.
- * Ensures the selection doesn't point to a non-existent result.
+ * Customers with pre-normalized search fields, rebuilt only when the
+ * customer list changes — keeps per-keystroke filtering cheap.
+ */
+const normalizedCustomers = computed(() =>
+	allCustomers.value.map((cust) => ({
+		cust,
+		name: normalizeSearchText(cust.customer_name),
+		mobile: normalizeSearchText(cust.mobile_no),
+		id: normalizeSearchText(cust.name),
+		email: normalizeSearchText(cust.email_id),
+	})),
+)
+
+/**
+ * Instant customer search results with in-memory filtering.
+ *
+ * Zero-latency, Arabic-normalization-aware (hamza/teh-marbuta/diacritics
+ * insensitive, Arabic-Indic digits accepted) multi-word matching across
+ * customer_name, mobile_no, customer ID and email. Results are ranked:
+ * name-prefix > word-start > name-substring > other-field match.
+ *
+ * @returns {Array} Ranked customer objects matching the search query
+ */
+const customerResults = computed(() => {
+	const tokens = searchTokens.value
+	// POS Settings toggle: show the full customer list instead of capping results
+	const showAll = settingsStore.customerSearchShowAll
+
+	// Focused with no query: browse list — top-5 most frequently selected
+	// first, then the remaining customers A-Z (locale-aware for Arabic).
+	if (tokens.length === 0) {
+		if (customerSearchFocused.value) {
+			const top = customerSearchStore.topCustomers
+			const topSet = new Set(top.map((c) => c.name))
+			const rest = allCustomers.value
+				.filter((c) => !topSet.has(c.name))
+				.sort((a, b) =>
+					(a.customer_name || "").localeCompare(b.customer_name || ""),
+				)
+			const ordered = [...top, ...rest]
+			return showAll ? ordered : ordered.slice(0, 10)
+		}
+		return []
+	}
+
+	const scored = []
+	for (const entry of normalizedCustomers.value) {
+		let score = 0
+		let allMatch = true
+		for (const token of tokens) {
+			let tokenScore = 0
+			if (entry.name.startsWith(token)) tokenScore = 4
+			else if (entry.name.includes(` ${token}`)) tokenScore = 3
+			else if (entry.name.includes(token)) tokenScore = 2
+			else if (
+				entry.mobile.includes(token) ||
+				entry.id.includes(token) ||
+				entry.email.includes(token)
+			)
+				tokenScore = 1
+			if (tokenScore === 0) {
+				allMatch = false
+				break
+			}
+			score += tokenScore
+		}
+		if (allMatch) scored.push({ cust: entry.cust, score })
+	}
+	scored.sort((a, b) => b.score - a.score)
+	const matches = scored.map((s) => s.cust)
+	return showAll ? matches : matches.slice(0, 20)
+})
+
+/** Header label for the dropdown list. */
+const customerDropdownLabel = computed(() => {
+	if (searchTokens.value.length > 0) return __("Results")
+	return settingsStore.customerSearchShowAll
+		? __("All Customers")
+		: __("Frequent Customers")
+})
+
+/**
+ * Highlight the matched parts of a result field for rendering.
+ * @param {String} text - original display text
+ * @returns {Array<{text: String, hit: Boolean}>}
+ */
+function highlightMatch(text) {
+	return matchSegments(text || "", searchTokens.value)
+}
+
+// Stable pastel avatar color per customer (hash of the customer ID).
+// Only color families present in the frappe-ui Tailwind preset — emerald,
+// rose, indigo etc. are NOT generated and would render invisible circles.
+const AVATAR_PALETTE = [
+	"bg-blue-100 text-blue-600",
+	"bg-green-100 text-green-600",
+	"bg-violet-100 text-violet-600",
+	"bg-amber-100 text-amber-700",
+	"bg-pink-100 text-pink-600",
+	"bg-cyan-100 text-cyan-700",
+	"bg-orange-100 text-orange-600",
+	"bg-teal-100 text-teal-700",
+]
+function customerAvatarClass(cust) {
+	const key = cust.name || ""
+	let hash = 0
+	for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) >>> 0
+	return AVATAR_PALETTE[hash % AVATAR_PALETTE.length]
+}
+
+/**
+ * When results change: preselect the first result while typing (Enter
+ * selects it immediately), no selection while browsing without a query.
  */
 watch(customerResults, () => {
-	selectedIndex.value = -1;
-});
+	selectedIndex.value =
+		searchTokens.value.length > 0 && customerResults.value.length > 0 ? 0 : -1
+})
+
+/** Keep the keyboard-selected row visible inside the scrollable list. */
+watch(selectedIndex, async () => {
+	if (selectedIndex.value < 0) return
+	await nextTick()
+	customerResultsListRef.value
+		?.querySelector(`[data-idx="${selectedIndex.value}"]`)
+		?.scrollIntoView({ block: "nearest" })
+})
 
 /**
  * Total quantity of all items in cart (including free items).
@@ -1652,25 +1798,49 @@ function handleSearchBlur() {
  * @param {KeyboardEvent} event - Keyboard event from search input
  */
 function handleKeydown(event) {
-	if (customerResults.value.length === 0) return;
+	if (event.key === "Escape") {
+		customerSearch.value = ""
+		customerSearchFocused.value = false
+		// Restore a customer that was temporarily deselected to reveal the input
+		if (previousCustomer.value && !props.customer) {
+			emit("select-customer", previousCustomer.value)
+			previousCustomer.value = null
+		}
+		event.target?.blur?.()
+		return
+	}
+
+	if (customerResults.value.length === 0) return
 
 	if (event.key === "ArrowDown") {
-		event.preventDefault();
-		selectedIndex.value = Math.min(selectedIndex.value + 1, customerResults.value.length - 1);
+		event.preventDefault()
+		selectedIndex.value = Math.min(
+			selectedIndex.value + 1,
+			customerResults.value.length - 1,
+		)
 	} else if (event.key === "ArrowUp") {
-		event.preventDefault();
-		selectedIndex.value = Math.max(selectedIndex.value - 1, -1);
+		event.preventDefault()
+		selectedIndex.value = Math.max(selectedIndex.value - 1, -1)
 	} else if (event.key === "Enter") {
-		event.preventDefault();
-		if (selectedIndex.value >= 0 && selectedIndex.value < customerResults.value.length) {
-			selectCustomer(customerResults.value[selectedIndex.value]);
-		} else if (customerResults.value.length === 1) {
-			// Auto-select if only one result
-			selectCustomer(customerResults.value[0]);
+		event.preventDefault()
+		if (
+			selectedIndex.value >= 0 &&
+			selectedIndex.value < customerResults.value.length
+		) {
+			selectCustomer(customerResults.value[selectedIndex.value])
+		} else if (customerResults.value.length > 0) {
+			// No explicit selection: take the top-ranked result
+			selectCustomer(customerResults.value[0])
 		}
-	} else if (event.key === "Escape") {
-		customerSearch.value = "";
 	}
+}
+
+/**
+ * Clear the search query (× button) keeping focus in the input.
+ */
+function clearCustomerSearch() {
+	customerSearch.value = ""
+	customerSearchInputRef.value?.focus()
 }
 
 /**
