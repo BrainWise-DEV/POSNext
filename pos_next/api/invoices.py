@@ -1717,26 +1717,26 @@ def submit_invoice(invoice=None, data=None):
         # Allow pure customer-credit POS sales to submit without a payment row.
         customer_credit_dict = data.get("customer_credit_dict") or invoice.get("customer_credit_dict")
         redeemed_customer_credit = data.get("redeemed_customer_credit") or invoice.get("redeemed_customer_credit")
-        is_credit_sale = data.get("is_credit_sale") or invoice.get("is_credit_sale")
+        # is_credit_sale = data.get("is_credit_sale") or invoice.get("is_credit_sale")
         
         if redeemed_customer_credit and not invoice_doc.payments:
             invoice_doc.flags.pos_next_redeemed_customer_credit = flt(redeemed_customer_credit)
             
-        if (redeemed_customer_credit or is_credit_sale) and not invoice_doc.payments:
-            # Bypass ERPNext "At least one mode of payment is required for POS invoice" validation
-            # by adding a dummy 0 amount payment row using the profile's default payment method
-            default_mop = frappe.db.get_value("POS Payment Method", {"parent": invoice_doc.pos_profile, "default": 1}, "mode_of_payment")
-            if not default_mop:
-                default_mop = frappe.db.get_value("POS Payment Method", {"parent": invoice_doc.pos_profile}, "mode_of_payment")
+        # if (redeemed_customer_credit or is_credit_sale) and not invoice_doc.payments:
+        #     # Bypass ERPNext "At least one mode of payment is required for POS invoice" validation
+        #     # by adding a dummy 0 amount payment row using the profile's default payment method
+        #     default_mop = frappe.db.get_value("POS Payment Method", {"parent": invoice_doc.pos_profile, "default": 1}, "mode_of_payment")
+        #     if not default_mop:
+        #         default_mop = frappe.db.get_value("POS Payment Method", {"parent": invoice_doc.pos_profile}, "mode_of_payment")
             
-            if default_mop:
-                invoice_doc.append("payments", {
-                    "mode_of_payment": default_mop,
-                    "amount": 0.0,
-                    "default": 1
-                })
-                # Set account for the new dummy payment row
-                _set_payment_accounts(invoice_doc.payments, invoice_doc.company, invoice_doc.customer)
+        #     if default_mop:
+        #         invoice_doc.append("payments", {
+        #             "mode_of_payment": default_mop,
+        #             "amount": 0.0,
+        #             "default": 1
+        #         })
+        #         # Set account for the new dummy payment row
+        #         _set_payment_accounts(invoice_doc.payments, invoice_doc.company, invoice_doc.customer)
 
         # Save before submit
         invoice_doc.flags.ignore_permissions = True
