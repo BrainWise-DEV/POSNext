@@ -296,9 +296,10 @@
 						</div>
 
 						<!-- Promotional offers & coupons (same entry points as cart — usable while paying) -->
-						<div class="px-3 py-2 border-b border-gray-100 bg-gray-50/80 shrink-0">
+						<div v-if="settingsStore.allowPromotionalOffers || settingsStore.allowCoupons" class="px-3 py-2 border-b border-gray-100 bg-gray-50/80 shrink-0">
 							<div class="flex gap-2">
 								<button
+									v-if="settingsStore.allowPromotionalOffers"
 									type="button"
 									@click="emit('show-offers')"
 									class="relative flex-1 flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 hover:border-green-400 hover:from-green-100 hover:to-emerald-100 hover:shadow-sm transition-all min-w-0 touch-manipulation active:scale-[0.98]"
@@ -326,6 +327,7 @@
 									</span>
 								</button>
 								<button
+									v-if="settingsStore.allowCoupons"
 									type="button"
 									@click="emit('show-coupon')"
 									class="relative flex-1 flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg bg-gradient-to-r from-purple-50 to-violet-50 border border-purple-200 hover:border-purple-400 hover:from-purple-100 hover:to-violet-100 hover:shadow-sm transition-all min-w-0 touch-manipulation active:scale-[0.98]"

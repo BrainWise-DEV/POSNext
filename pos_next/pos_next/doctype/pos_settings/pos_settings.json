@@ -403,13 +403,27 @@
    "fieldtype": "Check",
    "label": "Allow Duplicate Customer Names"
   },
-  {
-   "default": "0",
-   "description": "Automatically apply eligible coupons",
-   "fieldname": "fetch_coupon",
-   "fieldtype": "Check",
-   "label": "Auto Fetch Coupon Gifts"
-  },
+   {
+    "default": "0",
+    "description": "Automatically apply eligible coupons",
+    "fieldname": "fetch_coupon",
+    "fieldtype": "Check",
+    "label": "Auto Fetch Coupon Gifts"
+   },
+   {
+    "default": "1",
+    "description": "Allow applying promotional offers on the cart",
+    "fieldname": "allow_promotional_offers",
+    "fieldtype": "Check",
+    "label": "Allow Promotional Offers"
+   },
+   {
+    "default": "1",
+    "description": "Allow applying coupons on the cart",
+    "fieldname": "allow_coupons",
+    "fieldtype": "Check",
+    "label": "Allow Coupons"
+   },
   {
    "collapsible": 1,
    "fieldname": "section_break_printing",

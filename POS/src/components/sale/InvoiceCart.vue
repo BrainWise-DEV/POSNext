@@ -464,9 +464,10 @@
 			</div>
 
 			<!-- Offers & Coupon Buttons -->
-			<div class="flex gap-2">
+			<div v-if="settingsStore.allowPromotionalOffers || settingsStore.allowCoupons" class="flex gap-2">
 				<!-- View All Offers Button -->
 				<button
+					v-if="settingsStore.allowPromotionalOffers"
 					type="button"
 					@click="$emit('show-offers')"
 					class="relative flex-1 flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-lg bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 hover:border-green-400 hover:from-green-100 hover:to-emerald-100 hover:shadow-sm transition-all min-w-0 touch-manipulation active:scale-[0.98]"
@@ -498,6 +499,7 @@
 
 				<!-- Enter Coupon Code Button -->
 				<button
+					v-if="settingsStore.allowCoupons"
 					type="button"
 					@click="$emit('apply-coupon')"
 					class="relative flex-1 flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-lg bg-gradient-to-r from-purple-50 to-violet-50 border border-purple-200 hover:border-purple-400 hover:from-purple-100 hover:to-violet-100 hover:shadow-sm transition-all min-w-0 touch-manipulation active:scale-[0.98]"
