@@ -1843,8 +1843,11 @@ async function handleItemSelected(item, autoAdd = false) {
 					);
 					unitRate = pricing.rate || unitRate;
 					priceListRate = pricing.price_list_rate || priceListRate;
+					item.discount_amount = pricing.discount_amount || 0;
+					item.discount_percentage = pricing.discount_percentage || 0;
+					item.friends_family_pricing_applied = pricing.friends_family_pricing_applied || false;
 					// Show notification if Friends & Family pricing was applied
-					if (cartStore.customer && unitRate < originalRate) {
+					if (cartStore.customer && pricing.friends_family_pricing_applied) {
 						showSuccess(__('Friends & Family Discount applied to {0}', [item.item_name]));
 					}
 				} catch (pricingError) {
@@ -1856,6 +1859,9 @@ async function handleItemSelected(item, autoAdd = false) {
 					uom: resolvedUom,
 					rate: unitRate,
 					price_list_rate: priceListRate,
+					discount_amount: item.discount_amount || 0,
+					discount_percentage: item.discount_percentage || 0,
+					friends_family_pricing_applied: item.friends_family_pricing_applied || false,
 					is_resolved_barcode: true, // Mark as readonly
 				};
 				cartStore.addItem(resolvedItem, item.resolved_qty, true, shiftStore.currentProfile);
@@ -1926,9 +1932,12 @@ async function handleItemSelected(item, autoAdd = false) {
 				...item,
 				rate: pricing.rate,
 				price_list_rate: pricing.price_list_rate,
+				discount_amount: pricing.discount_amount || 0,
+				discount_percentage: pricing.discount_percentage || 0,
+				friends_family_pricing_applied: pricing.friends_family_pricing_applied || false,
 			};
 			// Show notification if Friends & Family pricing was applied
-			if (cartStore.customer && pricing.rate < originalRate) {
+			if (cartStore.customer && pricing.friends_family_pricing_applied) {
 				showSuccess(__('Friends & Family Discount applied to {0}', [item.item_name]));
 			}
 		} catch (pricingError) {
