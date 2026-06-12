@@ -468,20 +468,28 @@ async function loadOptions() {
 		// Load UOM options
 		options.value = buildUomOptions()
 		if (options.value.length > 0) {
-			// Check if item has a single barcode UOM to auto-select
+			// Prefer an explicitly resolved UOM. A scanned barcode carries its own
+			// UOM: search_by_barcode sets item.uom from `Item Barcode.uom` (e.g. a
+			// barcode keyed to "Nos" on a gram-stocked item). Honour that over the
+			// stock UOM. Order: resolved_uom (weighted/priced) -> scanned barcode UOM
+			// -> a sole barcode UOM -> first option (stock UOM).
 			const barcodeUoms = props.item?.barcode_uoms
 				? props.item.barcode_uoms.split(",").filter(Boolean)
 				: []
+			const scannedUom =
+				props.item?.uom && props.item.uom !== props.item.stock_uom
+					? props.item.uom
+					: null
+			const preferredUom =
+				props.item?.resolved_uom ||
+				scannedUom ||
+				(barcodeUoms.length === 1 ? barcodeUoms[0] : null)
 
-			if (barcodeUoms.length === 1) {
-				// Find and select the matching UOM option
-				const uom = props.item.resolved_uom || barcodeUoms[0]
-				const matchingOption = options.value.find((opt) => opt.uom === uom)
-				selectedOption.value = matchingOption || options.value[0]
-			} else {
-				// Default to first option (stock UOM)
-				selectedOption.value = options.value[0]
-			}
+			const matchingOption = preferredUom
+				? options.value.find((opt) => opt.uom === preferredUom)
+				: null
+			// Default to first option (stock UOM) when nothing more specific matches.
+			selectedOption.value = matchingOption || options.value[0]
 		}
 		loading.value = false
 	}
