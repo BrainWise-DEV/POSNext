@@ -265,21 +265,31 @@ def apply_friends_family_pricing(item_detail, customer_group=None, item_doc=None
 		friends_family_rate = round_to_nearest_zero_or_five(friends_family_rate)
 		
 		# Get current selling price
-		current_rate = flt(item_detail.get("rate") or item_detail.get("price_list_rate") or 0)
+		selling_uom = item_detail.get("uom") or item_doc.stock_uom
+		selling_price_list = item_detail.get("selling_price_list") or STANDARD_SELLING_PRICE_LIST
 		
-		# Calculate discount percentage if current rate is higher than F&F rate
-		if current_rate > 0:
-			discount_percentage = max(0, ((current_rate - friends_family_rate) / current_rate) * 100)
-		else:
-			discount_percentage = 0
+		current_rate = get_item_rate_from_price_list(
+			item_code,
+			selling_price_list,
+			uom=selling_uom
+		)
+		
+		if current_rate <= 0:
+			current_rate = flt(item_detail.get("price_list_rate") or item_detail.get("rate") or 0)
+		
+		# Calculate discount amount if current rate is higher than F&F rate
+		discount_amount = 0
+		if current_rate > friends_family_rate:
+			discount_amount = current_rate - friends_family_rate
 		
 		# Update item_detail with Friends & Family pricing
 		item_detail["rate"] = friends_family_rate
-		item_detail["price_list_rate"] = friends_family_rate
+		item_detail["price_list_rate"] = current_rate if current_rate > friends_family_rate else friends_family_rate
 		
 		# Store the discount information
-		if discount_percentage > 0:
-			item_detail["discount_percentage"] = flt(discount_percentage, 2)
+		if discount_amount > 0:
+			item_detail["discount_amount"] = discount_amount
+			item_detail["discount_percentage"] = flt((discount_amount / current_rate) * 100, 2)
 		
 		# Add a flag to indicate this item has Friends & Family pricing applied
 		item_detail["friends_family_pricing_applied"] = True

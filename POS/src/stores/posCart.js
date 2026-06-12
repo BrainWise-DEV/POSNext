@@ -279,8 +279,38 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 
 
-	function setCustomer(selectedCustomer) {
+	async function setCustomer(selectedCustomer) {
 		customer.value = selectedCustomer
+		
+		if (invoiceItems.value && invoiceItems.value.length > 0) {
+			for (const item of invoiceItems.value) {
+				try {
+					const pricing = await resolveUomPricing(
+						item,
+						item.uom,
+						item.conversion_factor || 1,
+						item.quantity
+					)
+					
+					// Apply pricing
+					item.rate = pricing.rate || item.rate
+					item.price_list_rate = pricing.price_list_rate || item.price_list_rate
+					item.discount_amount = pricing.discount_amount || 0
+					item.discount_percentage = pricing.discount_percentage || 0
+					item.friends_family_pricing_applied = pricing.friends_family_pricing_applied || false
+					
+					recalculateItem(item)
+				} catch (e) {
+					console.warn("Could not recalculate item pricing for", item.item_code, e)
+				}
+			}
+			rebuildIncrementalCache()
+			
+			const fnfItems = invoiceItems.value.filter(i => i.friends_family_pricing_applied)
+			if (fnfItems.length > 0) {
+				showSuccess(__('Friends & Family Discount applied to {0} items', [fnfItems.length]))
+			}
+		}
 	}
 
 	function setPendingItem(item, qty = 1, mode = "uom") {
@@ -1254,8 +1284,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 		cartItem.uom = newUom
 		cartItem.conversion_factor = conversionFactor
-		cartItem.rate = pricing.rate
-		cartItem.price_list_rate = pricing.price_list_rate
+		cartItem.rate = pricing.rate || cartItem.rate
+		cartItem.price_list_rate = pricing.price_list_rate || cartItem.price_list_rate
+		cartItem.discount_amount = pricing.discount_amount || 0
+		cartItem.discount_percentage = pricing.discount_percentage || 0
+		cartItem.friends_family_pricing_applied = pricing.friends_family_pricing_applied || false
 	}
 
 	/**

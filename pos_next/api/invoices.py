@@ -169,21 +169,22 @@ def apply_friends_family_pricing_to_invoice(invoice_doc, customer=None):
                 friends_family_rate = round_to_nearest_zero_or_five(friends_family_rate)
                 
                 # Get current rate
-                current_rate = flt(item.get("rate") or item.get("price_list_rate") or 0)
+                current_rate = flt(item.get("price_list_rate") or item.get("rate") or 0)
                 
                 # Calculate discount if current rate is higher
-                if current_rate > 0:
-                    discount_percentage = max(0, ((current_rate - friends_family_rate) / current_rate) * 100)
-                else:
-                    discount_percentage = 0
+                discount_amount = 0
+                if current_rate > friends_family_rate:
+                    discount_amount = current_rate - friends_family_rate
                 
                 item.rate = friends_family_rate
-                item.price_list_rate = friends_family_rate
+                item.price_list_rate = current_rate if current_rate > friends_family_rate else friends_family_rate
                 
                 # Only set discount if there's actually a discount, otherwise set to 0
-                if discount_percentage > 0:
-                    item.discount_percentage = flt(discount_percentage, 2)
+                if discount_amount > 0:
+                    item.discount_amount = discount_amount
+                    item.discount_percentage = flt((discount_amount / current_rate) * 100, 2)
                 else:
+                    item.discount_amount = 0
                     item.discount_percentage = 0
                 
                 item.friends_family_pricing_applied = True
@@ -1716,8 +1717,26 @@ def submit_invoice(invoice=None, data=None):
         # Allow pure customer-credit POS sales to submit without a payment row.
         customer_credit_dict = data.get("customer_credit_dict") or invoice.get("customer_credit_dict")
         redeemed_customer_credit = data.get("redeemed_customer_credit") or invoice.get("redeemed_customer_credit")
+        # is_credit_sale = data.get("is_credit_sale") or invoice.get("is_credit_sale")
+        
         if redeemed_customer_credit and not invoice_doc.payments:
             invoice_doc.flags.pos_next_redeemed_customer_credit = flt(redeemed_customer_credit)
+            
+        # if (redeemed_customer_credit or is_credit_sale) and not invoice_doc.payments:
+        #     # Bypass ERPNext "At least one mode of payment is required for POS invoice" validation
+        #     # by adding a dummy 0 amount payment row using the profile's default payment method
+        #     default_mop = frappe.db.get_value("POS Payment Method", {"parent": invoice_doc.pos_profile, "default": 1}, "mode_of_payment")
+        #     if not default_mop:
+        #         default_mop = frappe.db.get_value("POS Payment Method", {"parent": invoice_doc.pos_profile}, "mode_of_payment")
+            
+        #     if default_mop:
+        #         invoice_doc.append("payments", {
+        #             "mode_of_payment": default_mop,
+        #             "amount": 0.0,
+        #             "default": 1
+        #         })
+        #         # Set account for the new dummy payment row
+        #         _set_payment_accounts(invoice_doc.payments, invoice_doc.company, invoice_doc.customer)
 
         # Save before submit
         invoice_doc.flags.ignore_permissions = True

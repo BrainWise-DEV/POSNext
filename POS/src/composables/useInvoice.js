@@ -125,8 +125,11 @@ export function useInvoice() {
 					uom,
 				})
 				return {
-					rate: itemDetails.price_list_rate || itemDetails.rate,
+					rate: itemDetails.rate,
 					price_list_rate: itemDetails.price_list_rate,
+					discount_amount: itemDetails.discount_amount || 0,
+					discount_percentage: itemDetails.discount_percentage || 0,
+					friends_family_pricing_applied: itemDetails.friends_family_pricing_applied || false,
 				}
 			} catch (err) {
 				log.warn("Server UOM pricing unavailable, resolving from IndexedDB", err)
