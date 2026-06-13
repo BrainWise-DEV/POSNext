@@ -27,11 +27,29 @@
 					? 'bg-purple-100 text-purple-600'
 					: 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
 			]"
-			:title="__('Products')"
+			:title="__('Stock Lookup')"
 		>
-			<FeatherIcon name="package" class="w-5 h-5" />
+			<FeatherIcon name="search" class="w-5 h-5" />
 			<div class="absolute start-full ms-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50">
-				{{ __('Products') }}
+				{{ __('Stock Lookup') }}
+			</div>
+		</button>
+
+		<!-- Product Management -->
+		<button
+			v-if="canAccessProductManagement"
+			@click="handleMenuClick('product-management')"
+			:class="[
+				'w-12 h-12 rounded-lg flex items-center justify-center transition-all relative group',
+				activeMenu === 'product-management'
+					? 'bg-pink-100 text-pink-600'
+					: 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+			]"
+			:title="__('Product Management')"
+		>
+			<FeatherIcon name="box" class="w-5 h-5" />
+			<div class="absolute start-full ms-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50">
+				{{ __('Product Management') }}
 			</div>
 		</button>
 
@@ -82,6 +100,13 @@ import { FeatherIcon } from "frappe-ui"
 import { ref } from "vue"
 
 const emit = defineEmits(["menu-clicked"])
+
+defineProps({
+	canAccessProductManagement: {
+		type: Boolean,
+		default: false,
+	},
+})
 
 const activeMenu = ref("")
 

@@ -108,22 +108,22 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref } from "vue"
 
 defineProps({
 	show: {
 		type: Boolean,
-		default: false
-	}
+		default: false,
+	},
 })
 
-const emit = defineEmits(['cancel', 'confirm'])
+const emit = defineEmits(["cancel", "confirm"])
 
 const isClearing = ref(false)
 
 function handleConfirm() {
 	isClearing.value = true
-	emit('confirm')
+	emit("confirm")
 }
 
 // Reset state when overlay is closed

@@ -250,10 +250,10 @@ export const useInvoiceFiltersStore = defineStore("invoiceFilters", () => {
 			return `${formatDateDisplay(dateFrom.value)} - ${formatDateDisplay(dateTo.value)}`
 		}
 		if (dateFrom.value) {
-			return __('From {0}', [formatDateDisplay(dateFrom.value)])
+			return __("From {0}", [formatDateDisplay(dateFrom.value)])
 		}
 		if (dateTo.value) {
-			return __('Until {0}', [formatDateDisplay(dateTo.value)])
+			return __("Until {0}", [formatDateDisplay(dateTo.value)])
 		}
 		return ""
 	}

@@ -157,7 +157,7 @@ const dropdownPosition = ref({ top: 0, left: 0, width: 0 })
 const searchQuery = ref("")
 
 const selectedLabel = computed(() => {
-	const selected = props.options.find(opt => opt.value === props.modelValue)
+	const selected = props.options.find((opt) => opt.value === props.modelValue)
 	return selected?.label || ""
 })
 
@@ -167,10 +167,11 @@ const filteredOptions = computed(() => {
 	// Apply search filter if searchable and query exists
 	if (props.searchable && searchQuery.value) {
 		const query = searchQuery.value.toLowerCase()
-		result = props.options.filter(opt =>
-			opt.label?.toLowerCase().includes(query) ||
-			opt.value?.toString().toLowerCase().includes(query) ||
-			opt.subtitle?.toLowerCase().includes(query)
+		result = props.options.filter(
+			(opt) =>
+				opt.label?.toLowerCase().includes(query) ||
+				opt.value?.toString().toLowerCase().includes(query) ||
+				opt.subtitle?.toLowerCase().includes(query),
 		)
 	}
 
@@ -261,8 +262,10 @@ function focusPrev(currentIndex) {
 
 // Close on click outside (check both container and teleported dropdown)
 function handleClickOutside(event) {
-	const clickedInContainer = containerRef.value && containerRef.value.contains(event.target)
-	const clickedInDropdown = dropdownRef.value && dropdownRef.value.contains(event.target)
+	const clickedInContainer =
+		containerRef.value && containerRef.value.contains(event.target)
+	const clickedInDropdown =
+		dropdownRef.value && dropdownRef.value.contains(event.target)
 
 	if (!clickedInContainer && !clickedInDropdown) {
 		close()

@@ -48,10 +48,10 @@ export function initSocket(siteNameOverride) {
 		console.error("Failed to initialize socket:", error)
 		// Return a mock socket object to prevent crashes
 		return {
-			on: () => { },
-			emit: () => { },
-			connect: () => { },
-			disconnect: () => { },
+			on: () => {},
+			emit: () => {},
+			connect: () => {},
+			disconnect: () => {},
 		}
 	}
 }

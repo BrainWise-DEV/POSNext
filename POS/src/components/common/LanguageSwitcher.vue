@@ -92,12 +92,13 @@ import { FeatherIcon, LoadingIndicator } from "frappe-ui"
 import { useLocale } from "@/composables/useLocale"
 
 // Locale state from composable
-const { locale, localeConfig, isRTL, supportedLocales, changeLocale } = useLocale()
+const { locale, localeConfig, isRTL, supportedLocales, changeLocale } =
+	useLocale()
 
 // Component state
-const isOpen = ref(false)        // Dropdown visibility
-const isChanging = ref(false)    // Language change in progress
-const dropdownRef = ref(null)    // DOM ref for click-outside detection
+const isOpen = ref(false) // Dropdown visibility
+const isChanging = ref(false) // Language change in progress
+const dropdownRef = ref(null) // DOM ref for click-outside detection
 
 /** Toggles dropdown (disabled while changing language) */
 const toggleDropdown = () => !isChanging.value && (isOpen.value = !isOpen.value)
@@ -120,7 +121,8 @@ const selectLanguage = async (code) => {
 }
 
 /** Closes dropdown when clicking outside the component */
-const handleClickOutside = (e) => dropdownRef.value?.contains(e.target) || (isOpen.value = false)
+const handleClickOutside = (e) =>
+	dropdownRef.value?.contains(e.target) || (isOpen.value = false)
 
 // Event listener lifecycle
 onMounted(() => document.addEventListener("click", handleClickOutside))

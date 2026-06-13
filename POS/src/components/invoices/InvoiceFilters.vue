@@ -251,7 +251,11 @@ const quickDates = [
 		action: () => store.setYesterday(),
 	},
 	{ label: __("This Week"), value: "week", action: () => store.setThisWeek() },
-	{ label: __("This Month"), value: "month", action: () => store.setThisMonth() },
+	{
+		label: __("This Month"),
+		value: "month",
+		action: () => store.setThisMonth(),
+	},
 ]
 
 // Status options (only show meaningful ones)

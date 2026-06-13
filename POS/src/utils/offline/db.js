@@ -45,7 +45,8 @@ const CURRENT_SCHEMA = {
 	// Items cache with searchable fields
 	// variant_of index allows querying variants by their template item
 	// brand index allows efficient brand-based filtering in offline mode
-	items: "&item_code, item_name, item_group, variant_of, has_variants, brand, *barcodes",
+	items:
+		"&item_code, item_name, item_group, variant_of, has_variants, brand, *barcodes",
 
 	// Customers cache
 	customers: "&name, customer_name, mobile_no, email_id",
@@ -120,7 +121,9 @@ function getSchemaVersion() {
 	if (storedHash !== schemaHash.toString()) {
 		// Schema changed, increment version
 		const newVersion = storedVersion + 1
-		log.info(`Schema changed detected. Upgrading from v${storedVersion} to v${newVersion}`)
+		log.info(
+			`Schema changed detected. Upgrading from v${storedVersion} to v${newVersion}`,
+		)
 		localStorage.setItem("pos_next_schema_hash", schemaHash.toString())
 		localStorage.setItem("pos_next_schema_version", newVersion.toString())
 		return newVersion
@@ -333,12 +336,12 @@ export const clearBrowserCache = () => {
 		const keysToRemove = []
 		for (let i = 0; i < localStorage.length; i++) {
 			const key = localStorage.key(i)
-			if (key?.startsWith('pos_next_') || key?.startsWith('frappe_')) {
+			if (key?.startsWith("pos_next_") || key?.startsWith("frappe_")) {
 				keysToRemove.push(key)
 			}
 		}
 
-		keysToRemove.forEach(key => {
+		keysToRemove.forEach((key) => {
 			localStorage.removeItem(key)
 			results.localStorage++
 		})
@@ -347,12 +350,12 @@ export const clearBrowserCache = () => {
 		const sessionKeys = []
 		for (let i = 0; i < sessionStorage.length; i++) {
 			const key = sessionStorage.key(i)
-			if (key?.startsWith('pos_next_') || key?.startsWith('frappe_')) {
+			if (key?.startsWith("pos_next_") || key?.startsWith("frappe_")) {
 				sessionKeys.push(key)
 			}
 		}
 
-		sessionKeys.forEach(key => {
+		sessionKeys.forEach((key) => {
 			sessionStorage.removeItem(key)
 			results.sessionStorage++
 		})

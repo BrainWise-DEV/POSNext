@@ -20,7 +20,7 @@
 import { logger } from "@/utils/logger"
 import { readonly, ref } from "vue"
 
-const log = logger.create('RealtimePosProfile')
+const log = logger.create("RealtimePosProfile")
 
 // ============================================================================
 // CONSTANTS
@@ -89,7 +89,7 @@ async function executeHandlerSafely(handler, data) {
 		log.error("Handler execution failed", {
 			error: error.message,
 			stack: error.stack,
-			profile: data.pos_profile
+			profile: data.pos_profile,
 		})
 		// Don't rethrow - isolate handler errors
 	}
@@ -112,7 +112,7 @@ function handlePosProfileUpdate(data) {
 		changeType: change_type,
 		itemGroupCount: item_groups?.length ?? 0,
 		timestamp,
-		handlerCount: eventHandlers.size
+		handlerCount: eventHandlers.size,
 	})
 
 	// Debounce updates per profile (prevent rapid-fire changes)
@@ -125,14 +125,14 @@ function handlePosProfileUpdate(data) {
 		debounceTimers.delete(pos_profile)
 
 		// Execute all registered handlers in parallel with error isolation
-		const handlerPromises = Array.from(eventHandlers).map(handler =>
-			executeHandlerSafely(handler, data)
+		const handlerPromises = Array.from(eventHandlers).map((handler) =>
+			executeHandlerSafely(handler, data),
 		)
 
 		Promise.all(handlerPromises).then(() => {
 			log.debug("All handlers executed", {
 				profile: pos_profile,
-				handlerCount: eventHandlers.size
+				handlerCount: eventHandlers.size,
 			})
 		})
 	}, DEBOUNCE_DELAY_MS)
@@ -175,7 +175,9 @@ function startListening() {
 			retryAttempts++
 			const delay = RETRY_DELAY_MS * retryAttempts
 
-			log.info(`Socket unavailable, retrying in ${delay}ms (attempt ${retryAttempts}/${MAX_RETRY_ATTEMPTS})`)
+			log.info(
+				`Socket unavailable, retrying in ${delay}ms (attempt ${retryAttempts}/${MAX_RETRY_ATTEMPTS})`,
+			)
 
 			retryTimer = setTimeout(() => {
 				startListening()
@@ -198,7 +200,7 @@ function startListening() {
 
 		log.success("Started listening to POS Profile updates", {
 			event: EVENT_NAME,
-			handlerCount: eventHandlers.size
+			handlerCount: eventHandlers.size,
 		})
 	} catch (error) {
 		isConnecting.value = false
@@ -223,7 +225,7 @@ function stopListening() {
 	}
 
 	// Clear debounce timers
-	debounceTimers.forEach(timer => clearTimeout(timer))
+	debounceTimers.forEach((timer) => clearTimeout(timer))
 	debounceTimers.clear()
 
 	if (!isListening.value) {
@@ -286,7 +288,9 @@ export function useRealtimePosProfile() {
 	function onPosProfileUpdate(handler) {
 		// Type validation
 		if (typeof handler !== "function") {
-			throw new TypeError(`Handler must be a function, received: ${typeof handler}`)
+			throw new TypeError(
+				`Handler must be a function, received: ${typeof handler}`,
+			)
 		}
 
 		// Prevent duplicate registration
@@ -298,7 +302,7 @@ export function useRealtimePosProfile() {
 		eventHandlers.add(handler)
 
 		log.debug("Handler registered", {
-			handlerCount: eventHandlers.size
+			handlerCount: eventHandlers.size,
 		})
 
 		// Auto-start listening when first handler is registered
@@ -311,7 +315,7 @@ export function useRealtimePosProfile() {
 			eventHandlers.delete(handler)
 
 			log.debug("Handler unregistered", {
-				handlerCount: eventHandlers.size
+				handlerCount: eventHandlers.size,
 			})
 
 			// Auto-stop listening when last handler is removed
@@ -334,7 +338,7 @@ export function useRealtimePosProfile() {
 	 */
 	function clearAllHandlers() {
 		log.warn("Clearing all handlers", {
-			count: eventHandlers.size
+			count: eventHandlers.size,
 		})
 		eventHandlers.clear()
 		stopListening()

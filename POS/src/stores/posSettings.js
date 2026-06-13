@@ -77,12 +77,10 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	const enableLoyaltyProgram = computed(() =>
 		Boolean(settings.value.enable_loyalty_program),
 	)
-	const defaultLoyaltyProgram = computed(() =>
-		settings.value.default_loyalty_program || "",
+	const defaultLoyaltyProgram = computed(
+		() => settings.value.default_loyalty_program || "",
 	)
-	const walletAccount = computed(() =>
-		settings.value.wallet_account || "",
-	)
+	const walletAccount = computed(() => settings.value.wallet_account || "")
 	const autoCreateWallet = computed(() =>
 		Boolean(settings.value.auto_create_wallet),
 	)
@@ -183,6 +181,16 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		Boolean(settings.value.allow_duplicate_customer_names),
 	)
 	const fetchCoupon = computed(() => Boolean(settings.value.fetch_coupon))
+	const allowPromotionalOffers = computed(() => {
+		return settings.value.allow_promotional_offers !== undefined
+			? Boolean(settings.value.allow_promotional_offers)
+			: true
+	})
+	const allowCoupons = computed(() => {
+		return settings.value.allow_coupons !== undefined
+			? Boolean(settings.value.allow_coupons)
+			: true
+	})
 
 	// Computed - Printing
 	const allowPrintLastInvoice = computed(() =>
@@ -222,17 +230,17 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	)
 
 	// Computed - Sales Persons
-	const enableSalesPersons = computed(() =>
-		settings.value.enable_sales_persons !== "Disabled"
+	const enableSalesPersons = computed(
+		() => settings.value.enable_sales_persons !== "Disabled",
 	)
-	const salesPersonsMode = computed(() =>
-		settings.value.enable_sales_persons || "Disabled"
+	const salesPersonsMode = computed(
+		() => settings.value.enable_sales_persons || "Disabled",
 	)
-	const isSingleSalesPerson = computed(() =>
-		settings.value.enable_sales_persons === "Single"
+	const isSingleSalesPerson = computed(
+		() => settings.value.enable_sales_persons === "Single",
 	)
-	const isMultipleSalesPersons = computed(() =>
-		settings.value.enable_sales_persons === "Multiple"
+	const isMultipleSalesPersons = computed(
+		() => settings.value.enable_sales_persons === "Multiple",
 	)
 
 	// Computed - Security

@@ -219,7 +219,10 @@
 				style="max-height: calc(100vh - 60px - var(--header-height, 60px))"
 			>
 				<!-- Icon-Only Management Slider - Always Visible -->
-				<ManagementSlider @menu-clicked="handleManagementMenuClick" />
+				<ManagementSlider
+					:can-access-product-management="canAccessProductManagement"
+					@menu-clicked="handleManagementMenuClick"
+				/>
 
 				<!-- Main Content Container -->
 				<div
@@ -646,6 +649,14 @@
 				@promotion-saved="handlePromotionSaved"
 			/>
 
+			<!-- Product Management -->
+			<ProductManagement
+				v-model="showProductManagement"
+				:pos-profile="shiftStore.profileName"
+				:company="shiftStore.profileCompany"
+				:currency="shiftStore.profileCurrency"
+			/>
+
 			<!-- POS Settings -->
 			<POSSettings
 				v-model="showPOSSettings"
@@ -992,8 +1003,8 @@
 // Module-scoped init guard — prevents redundant heavy initialization
 // when component remounts due to translationVersion changes.
 // Tracks the profile+shift key so a user/shift change correctly re-initializes.
-let _initializedKey = null
-let _posInitPromise = null
+const _initializedKey = null
+const _posInitPromise = null
 </script>
 
 <script setup>
@@ -1017,6 +1028,7 @@ import ItemsSelector from "@/components/sale/ItemsSelector.vue";
 import OffersDialog from "@/components/sale/OffersDialog.vue";
 import OfflineInvoicesDialog from "@/components/sale/OfflineInvoicesDialog.vue";
 import PaymentDialog from "@/components/sale/PaymentDialog.vue";
+import ProductManagement from "@/components/sale/ProductManagement.vue";
 import PromotionManagement from "@/components/sale/PromotionManagement.vue";
 import ReturnInvoiceDialog from "@/components/sale/ReturnInvoiceDialog.vue";
 import WarehouseAvailabilityDialog from "@/components/sale/WarehouseAvailabilityDialog.vue";
@@ -1140,6 +1152,10 @@ function computeCartHash() {
 // Promotion dialog
 const showPromotionManagement = ref(false);
 
+// Product Management dialog
+const showProductManagement = ref(false);
+const canAccessProductManagement = ref(false);
+
 // Settings dialog
 const showPOSSettings = ref(false);
 
@@ -1186,10 +1202,21 @@ watch(
 	(newProfile) => {
 		if (newProfile) {
 			warehousesResource.reload();
+			loadProductManagementPermissions();
 		}
 	},
 	{ immediate: true }
 );
+
+async function loadProductManagementPermissions() {
+	try {
+		const result = await call("pos_next.api.product_management.get_product_management_permissions");
+		canAccessProductManagement.value = Boolean(result?.can_access);
+	} catch (error) {
+		log.error("Error loading product management permissions:", error);
+		canAccessProductManagement.value = false;
+	}
+}
 
 // Computed for warehouses - returns all warehouses for the company
 const profileWarehouses = computed(() => {
@@ -2837,6 +2864,8 @@ function restoreBodyStyles() {
 function handleManagementMenuClick(menuItem) {
 	if (menuItem === "promotions") {
 		showPromotionManagement.value = true;
+	} else if (menuItem === "product-management") {
+		showProductManagement.value = true;
 	} else if (menuItem === "settings") {
 		showPOSSettings.value = true;
 	} else if (menuItem === "invoices") {

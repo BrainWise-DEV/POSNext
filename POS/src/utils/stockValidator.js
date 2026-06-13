@@ -19,13 +19,15 @@ export function shouldValidateItemStock(item) {
 	if (item.is_stock_item === 0 || item.is_stock_item === false) return false
 
 	// Item-level allow_negative_stock bypasses validation
-	if (item.allow_negative_stock === 1 || item.allow_negative_stock === true) return false
+	if (item.allow_negative_stock === 1 || item.allow_negative_stock === true)
+		return false
 
 	// Batch / serial items have their own dialog-level validation
 	if (item.has_serial_no || item.has_batch_no) return false
 
 	// Must be a stock item or bundle (or have stock data)
-	const hasStockData = item.actual_qty !== undefined || item.stock_qty !== undefined
+	const hasStockData =
+		item.actual_qty !== undefined || item.stock_qty !== undefined
 	return !!(item.is_stock_item || item.is_bundle || hasStockData)
 }
 
@@ -39,7 +41,7 @@ export function shouldValidateItemStock(item) {
  */
 export function checkStockAvailability(item, requestedQty, warehouse) {
 	const actualQty = item.actual_qty ?? item.stock_qty ?? 0
-	const wh = warehouse || item.warehouse || ''
+	const wh = warehouse || item.warehouse || ""
 
 	if (actualQty >= requestedQty) {
 		return { available: true, actualQty, error: null }

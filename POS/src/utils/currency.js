@@ -99,7 +99,11 @@ function getFormatter(precision, locale = DEFAULT_LOCALE) {
 }
 
 /** Format value as currency string with symbol */
-export function formatCurrency(value, currency = DEFAULT_CURRENCY, locale = DEFAULT_LOCALE) {
+export function formatCurrency(
+	value,
+	currency = DEFAULT_CURRENCY,
+	locale = DEFAULT_LOCALE,
+) {
 	if (typeof value !== "number" || Number.isNaN(value)) return ""
 	const abs = Math.abs(value)
 	const formatted = `${getSymbol(currency)} ${getFormatter(settings.currency, locale).format(abs)}`

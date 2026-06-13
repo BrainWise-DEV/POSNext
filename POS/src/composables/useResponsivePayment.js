@@ -7,8 +7,12 @@ import { ref, computed, onMounted, onUnmounted } from "vue"
 
 export function useResponsivePayment() {
 	// Viewport dimension tracking
-	const viewportWidth = ref(typeof window !== "undefined" ? window.innerWidth : 1200)
-	const viewportHeight = ref(typeof window !== "undefined" ? window.innerHeight : 800)
+	const viewportWidth = ref(
+		typeof window !== "undefined" ? window.innerWidth : 1200,
+	)
+	const viewportHeight = ref(
+		typeof window !== "undefined" ? window.innerHeight : 800,
+	)
 
 	function updateViewportDimensions() {
 		viewportWidth.value = window.innerWidth
@@ -64,10 +68,14 @@ export function useResponsivePayment() {
 	})
 
 	// Check if we're in compact mode (small screens)
-	const isCompactMode = computed(() => viewportHeight.value < 700 || viewportWidth.value < 1024)
+	const isCompactMode = computed(
+		() => viewportHeight.value < 700 || viewportWidth.value < 1024,
+	)
 
 	// Check if we're on a very small mobile screen
-	const isSmallMobile = computed(() => viewportWidth.value < 360 || viewportHeight.value < 600)
+	const isSmallMobile = computed(
+		() => viewportWidth.value < 360 || viewportHeight.value < 600,
+	)
 
 	// Dynamic gap and padding based on screen size
 	const dynamicGap = computed(() => {

@@ -23,7 +23,12 @@ import { QueuedMutex } from "@/utils/mutex"
  * @param {Object} options.showWarning        - useToast().showWarning
  * @param {import('vue').Ref<boolean>} options.isAnyDialogOpen
  */
-export function useSearchInput({ itemStore, onItemFound, showWarning, isAnyDialogOpen }) {
+export function useSearchInput({
+	itemStore,
+	onItemFound,
+	showWarning,
+	isAnyDialogOpen,
+}) {
 	// --- Reactive state (exposed) ---
 	const searchInputRef = ref(null)
 	const scannerEnabled = ref(false)
@@ -31,7 +36,10 @@ export function useSearchInput({ itemStore, onItemFound, showWarning, isAnyDialo
 
 	// --- Internal (non-reactive) ---
 	let autoSearchTimer = null
-	const barcodeQueue = new QueuedMutex({ timeout: 10000, name: "BarcodeSearch" })
+	const barcodeQueue = new QueuedMutex({
+		timeout: 10000,
+		name: "BarcodeSearch",
+	})
 
 	// ---- Timer helpers ----
 
@@ -74,7 +82,8 @@ export function useSearchInput({ itemStore, onItemFound, showWarning, isAnyDialo
 			clearAutoSearchTimer()
 
 			// Snapshot the barcode NOW from the DOM input, before anything overwrites it
-			const barcode = searchInputRef.value?.value?.trim() || itemStore.searchTerm?.trim()
+			const barcode =
+				searchInputRef.value?.value?.trim() || itemStore.searchTerm?.trim()
 			if (barcode) {
 				// Clear input immediately so next scan starts clean
 				itemStore.clearSearch()
@@ -113,7 +122,8 @@ export function useSearchInput({ itemStore, onItemFound, showWarning, isAnyDialo
 		// Auto-add: after user stops typing for 500 ms, trigger barcode search
 		if (autoAddEnabled.value && value.trim().length > 0) {
 			autoSearchTimer = setTimeout(() => {
-				const barcode = searchInputRef.value?.value?.trim() || itemStore.searchTerm?.trim()
+				const barcode =
+					searchInputRef.value?.value?.trim() || itemStore.searchTerm?.trim()
 				if (barcode) {
 					itemStore.clearSearch()
 					if (searchInputRef.value) searchInputRef.value.value = ""
@@ -143,7 +153,8 @@ export function useSearchInput({ itemStore, onItemFound, showWarning, isAnyDialo
 	 * @param {boolean} forceAutoAdd - When true, item is added without user click
 	 */
 	function processBarcodeScan(barcode, forceAutoAdd) {
-		const shouldAutoAdd = forceAutoAdd || (scannerEnabled.value && autoAddEnabled.value)
+		const shouldAutoAdd =
+			forceAutoAdd || (scannerEnabled.value && autoAddEnabled.value)
 
 		barcodeQueue.withLock(async () => {
 			try {
@@ -161,7 +172,9 @@ export function useSearchInput({ itemStore, onItemFound, showWarning, isAnyDialo
 			// Note: we cannot fall back to filteredItems here because
 			// clearSearch() was called before the API request, so
 			// filteredItems would contain ALL cached items (not search results).
-			showWarning(__('Item Not Found: No item found with barcode: {0}', [barcode]))
+			showWarning(
+				__("Item Not Found: No item found with barcode: {0}", [barcode]),
+			)
 			focusSearchInput()
 		})
 	}

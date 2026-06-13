@@ -24,9 +24,15 @@ export const usePOSShiftStore = defineStore("posShift", () => {
 	const autoPrintEnabled = computed(
 		() => currentProfile.value?.print_receipt_on_order_complete,
 	)
-	const writeOffAccount = computed(() => currentProfile.value?.write_off_account)
-	const writeOffCostCenter = computed(() => currentProfile.value?.write_off_cost_center)
-	const writeOffLimit = computed(() => currentProfile.value?.write_off_limit || 0)
+	const writeOffAccount = computed(
+		() => currentProfile.value?.write_off_account,
+	)
+	const writeOffCostCenter = computed(
+		() => currentProfile.value?.write_off_cost_center,
+	)
+	const writeOffLimit = computed(
+		() => currentProfile.value?.write_off_limit || 0,
+	)
 
 	// Actions
 	function updateShiftDuration() {
@@ -54,21 +60,23 @@ export const usePOSShiftStore = defineStore("posShift", () => {
 		const seconds = Math.floor((diff % (1000 * 60)) / 1000)
 
 		if (days > 0) {
-			const dayLabel = days === 1 ? __('Day') : __('Days')
-			const hourLabel = hours === 1 ? __('Hour') : __('Hours')
-			const minLabel = minutes === 1 ? __('Minute') : __('Minutes')
+			const dayLabel = days === 1 ? __("Day") : __("Days")
+			const hourLabel = hours === 1 ? __("Hour") : __("Hours")
+			const minLabel = minutes === 1 ? __("Minute") : __("Minutes")
 			shiftDuration.value = `${days} ${dayLabel} ${hours} ${hourLabel} ${minutes} ${minLabel}`
 		} else {
-			const hourLabel = hours === 1 ? __('Hour') : __('Hours')
-			const minLabel = minutes === 1 ? __('Minute') : __('Minutes')
-			const secLabel = seconds === 1 ? __('Second') : __('Seconds')
+			const hourLabel = hours === 1 ? __("Hour") : __("Hours")
+			const minLabel = minutes === 1 ? __("Minute") : __("Minutes")
+			const secLabel = seconds === 1 ? __("Second") : __("Seconds")
 			shiftDuration.value = `${hours} ${hourLabel} ${minutes} ${minLabel} ${seconds} ${secLabel}`
 		}
 	}
 
 	function updateCurrentTime() {
 		const now = new Date()
-		currentTime.value = now.toLocaleTimeString(DEFAULT_LOCALE, { hour12: false })
+		currentTime.value = now.toLocaleTimeString(DEFAULT_LOCALE, {
+			hour12: false,
+		})
 	}
 
 	function startTimers() {

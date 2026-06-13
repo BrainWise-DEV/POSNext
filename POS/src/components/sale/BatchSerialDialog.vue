@@ -233,20 +233,23 @@ const serialSearchQuery = ref("")
 
 // Computed: Available batches with cart quantities subtracted
 const availableBatches = computed(() => {
-	return warehouseBatches.value.map((batch) => {
-		// Find quantity of this batch already in cart
-		const cartQtyForBatch = cartStore.invoiceItems
-			.filter((item) =>
-				item.item_code === props.item?.item_code &&
-				item.batch_no === batch.batch_no
-			)
-			.reduce((sum, item) => sum + (item.quantity || 0), 0)
+	return warehouseBatches.value
+		.map((batch) => {
+			// Find quantity of this batch already in cart
+			const cartQtyForBatch = cartStore.invoiceItems
+				.filter(
+					(item) =>
+						item.item_code === props.item?.item_code &&
+						item.batch_no === batch.batch_no,
+				)
+				.reduce((sum, item) => sum + (item.quantity || 0), 0)
 
-		return {
-			...batch,
-			qty: Math.max(0, batch.qty - cartQtyForBatch), // Available = warehouse - cart
-		}
-	}).filter((batch) => batch.qty > 0) // Only show batches with available qty
+			return {
+				...batch,
+				qty: Math.max(0, batch.qty - cartQtyForBatch), // Available = warehouse - cart
+			}
+		})
+		.filter((batch) => batch.qty > 0) // Only show batches with available qty
 })
 
 // Resource for loading batches with actual stock quantities
@@ -302,7 +305,7 @@ const filteredSerials = computed(() => {
 	}
 	const query = serialSearchQuery.value.toLowerCase().trim()
 	return availableSerials.value.filter((serial) =>
-		serial.serial_no.toLowerCase().includes(query)
+		serial.serial_no.toLowerCase().includes(query),
 	)
 })
 

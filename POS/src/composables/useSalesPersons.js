@@ -54,7 +54,11 @@ export function useSalesPersons(posProfile) {
 				}
 				// Filter by search term if provided
 				if (searchLower) {
-					const name = (person.sales_person_name || person.name || "").toLowerCase()
+					const name = (
+						person.sales_person_name ||
+						person.name ||
+						""
+					).toLowerCase()
 					return name.includes(searchLower)
 				}
 				return true
@@ -64,7 +68,10 @@ export function useSalesPersons(posProfile) {
 
 	// Computed: Total allocation percentage
 	const totalSalesAllocation = computed(() => {
-		return selectedSalesPersons.value.reduce((sum, p) => sum + (p.allocated_percentage || 0), 0)
+		return selectedSalesPersons.value.reduce(
+			(sum, p) => sum + (p.allocated_percentage || 0),
+			0,
+		)
 	})
 
 	// Computed: Validation - sales person is required when enabled
@@ -127,7 +134,9 @@ export function useSalesPersons(posProfile) {
 	 * @param {string} personName - Name of person to remove
 	 */
 	function removeSalesPerson(personName) {
-		const index = selectedSalesPersons.value.findIndex((p) => p.sales_person === personName)
+		const index = selectedSalesPersons.value.findIndex(
+			(p) => p.sales_person === personName,
+		)
 		if (index > -1) {
 			selectedSalesPersons.value.splice(index, 1)
 			// Redistribute commission among remaining

@@ -24,7 +24,7 @@ const certLoading = ref(false)
 const certReady = ref(_loadCertReady())
 
 const printerOptions = computed(() =>
-	printers.value.map((p) => ({ label: p, value: p }))
+	printers.value.map((p) => ({ label: p, value: p })),
 )
 
 function _buildCertFileName(company) {
@@ -129,7 +129,9 @@ export function useQzTray() {
 			certReady.value = true
 			_saveCertReady(true)
 			if (data?.status === "exists") {
-				showSuccess(__("Certificate already exists. You can download it below."))
+				showSuccess(
+					__("Certificate already exists. You can download it below."),
+				)
 			} else {
 				showSuccess(__("Certificate generated successfully."))
 			}
@@ -137,8 +139,8 @@ export function useQzTray() {
 			log.error("Failed to setup QZ certificate:", error)
 			showError(
 				error?.messages?.[0] ||
-				error?.message ||
-				__("Failed to generate certificate. Are you a System Manager?")
+					error?.message ||
+					__("Failed to generate certificate. Are you a System Manager?"),
 			)
 		} finally {
 			certLoading.value = false

@@ -13,7 +13,7 @@ import { performanceConfig } from "@/utils/performanceConfig"
 import { logger } from "@/utils/logger"
 import { ref } from "vue"
 
-const log = logger.create('RealtimeStock')
+const log = logger.create("RealtimeStock")
 
 // Shared state across all instances
 const isListening = ref(false)

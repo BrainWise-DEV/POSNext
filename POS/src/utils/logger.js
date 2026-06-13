@@ -33,14 +33,14 @@ const LOG_LEVELS = {
  * ANSI color codes for console styling
  */
 const COLORS = {
-	DEBUG: '\x1b[36m', // Cyan
-	INFO: '\x1b[34m', // Blue
-	WARN: '\x1b[33m', // Yellow
-	ERROR: '\x1b[31m', // Red
-	SUCCESS: '\x1b[32m', // Green
-	RESET: '\x1b[0m',
-	BOLD: '\x1b[1m',
-	DIM: '\x1b[2m',
+	DEBUG: "\x1b[36m", // Cyan
+	INFO: "\x1b[34m", // Blue
+	WARN: "\x1b[33m", // Yellow
+	ERROR: "\x1b[31m", // Red
+	SUCCESS: "\x1b[32m", // Green
+	RESET: "\x1b[0m",
+	BOLD: "\x1b[1m",
+	DIM: "\x1b[2m",
 }
 
 /**
@@ -49,15 +49,18 @@ const COLORS = {
 class LoggerConfig {
 	constructor() {
 		// Check if we're in development mode
-		this.isDev = import.meta.env?.DEV || import.meta.env?.MODE === 'development'
+		this.isDev = import.meta.env?.DEV || import.meta.env?.MODE === "development"
 
 		// Check for manual override in localStorage
-		if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
-			const manualLevel = localStorage.getItem('POS_LOG_LEVEL')
-			const manualEnabled = localStorage.getItem('POS_LOGGING_ENABLED')
+		if (typeof window !== "undefined" && typeof localStorage !== "undefined") {
+			const manualLevel = localStorage.getItem("POS_LOG_LEVEL")
+			const manualEnabled = localStorage.getItem("POS_LOGGING_ENABLED")
 
-			this.currentLevel = manualLevel ? LOG_LEVELS[manualLevel.toUpperCase()] : this.getDefaultLevel()
-			this.enabled = manualEnabled !== null ? manualEnabled === 'true' : this.isDev
+			this.currentLevel = manualLevel
+				? LOG_LEVELS[manualLevel.toUpperCase()]
+				: this.getDefaultLevel()
+			this.enabled =
+				manualEnabled !== null ? manualEnabled === "true" : this.isDev
 		} else {
 			this.currentLevel = this.getDefaultLevel()
 			this.enabled = this.isDev
@@ -77,17 +80,22 @@ class LoggerConfig {
 	}
 
 	loadNamespaceConfig() {
-		if (typeof window === 'undefined' || typeof localStorage === 'undefined') return
+		if (typeof window === "undefined" || typeof localStorage === "undefined")
+			return
 
 		try {
-			const enabled = localStorage.getItem('POS_LOG_NAMESPACES_ENABLED')
-			const disabled = localStorage.getItem('POS_LOG_NAMESPACES_DISABLED')
+			const enabled = localStorage.getItem("POS_LOG_NAMESPACES_ENABLED")
+			const disabled = localStorage.getItem("POS_LOG_NAMESPACES_DISABLED")
 
 			if (enabled) {
-				enabled.split(',').forEach(ns => this.enabledNamespaces.add(ns.trim()))
+				enabled
+					.split(",")
+					.forEach((ns) => this.enabledNamespaces.add(ns.trim()))
 			}
 			if (disabled) {
-				disabled.split(',').forEach(ns => this.disabledNamespaces.add(ns.trim()))
+				disabled
+					.split(",")
+					.forEach((ns) => this.disabledNamespaces.add(ns.trim()))
 			}
 		} catch (error) {
 			// Ignore localStorage errors
@@ -95,19 +103,23 @@ class LoggerConfig {
 	}
 
 	setLevel(level) {
-		const levelValue = typeof level === 'string' ? LOG_LEVELS[level.toUpperCase()] : level
+		const levelValue =
+			typeof level === "string" ? LOG_LEVELS[level.toUpperCase()] : level
 		if (levelValue !== undefined) {
 			this.currentLevel = levelValue
-			if (typeof localStorage !== 'undefined') {
-				localStorage.setItem('POS_LOG_LEVEL', Object.keys(LOG_LEVELS)[levelValue])
+			if (typeof localStorage !== "undefined") {
+				localStorage.setItem(
+					"POS_LOG_LEVEL",
+					Object.keys(LOG_LEVELS)[levelValue],
+				)
 			}
 		}
 	}
 
 	setEnabled(enabled) {
 		this.enabled = enabled
-		if (typeof localStorage !== 'undefined') {
-			localStorage.setItem('POS_LOGGING_ENABLED', enabled.toString())
+		if (typeof localStorage !== "undefined") {
+			localStorage.setItem("POS_LOGGING_ENABLED", enabled.toString())
 		}
 	}
 
@@ -124,18 +136,24 @@ class LoggerConfig {
 	}
 
 	saveNamespaceConfig() {
-		if (typeof localStorage === 'undefined') return
+		if (typeof localStorage === "undefined") return
 
 		if (this.enabledNamespaces.size > 0) {
-			localStorage.setItem('POS_LOG_NAMESPACES_ENABLED', Array.from(this.enabledNamespaces).join(','))
+			localStorage.setItem(
+				"POS_LOG_NAMESPACES_ENABLED",
+				Array.from(this.enabledNamespaces).join(","),
+			)
 		} else {
-			localStorage.removeItem('POS_LOG_NAMESPACES_ENABLED')
+			localStorage.removeItem("POS_LOG_NAMESPACES_ENABLED")
 		}
 
 		if (this.disabledNamespaces.size > 0) {
-			localStorage.setItem('POS_LOG_NAMESPACES_DISABLED', Array.from(this.disabledNamespaces).join(','))
+			localStorage.setItem(
+				"POS_LOG_NAMESPACES_DISABLED",
+				Array.from(this.disabledNamespaces).join(","),
+			)
 		} else {
-			localStorage.removeItem('POS_LOG_NAMESPACES_DISABLED')
+			localStorage.removeItem("POS_LOG_NAMESPACES_DISABLED")
 		}
 	}
 
@@ -174,25 +192,25 @@ class Logger {
 	 * Format log message with timestamp and namespace
 	 */
 	format(level, message, ...args) {
-		const timestamp = new Date().toISOString().split('T')[1].split('.')[0]
+		const timestamp = new Date().toISOString().split("T")[1].split(".")[0]
 		const levelName = Object.keys(LOG_LEVELS)[level]
 		const color = COLORS[levelName] || COLORS.RESET
 
-		if (typeof window !== 'undefined') {
+		if (typeof window !== "undefined") {
 			// Browser console with styling
 			return [
 				`%c[${timestamp}] %c${levelName}%c [${this.namespace}]%c ${message}`,
-				'color: gray; font-size: 0.9em',
+				"color: gray; font-size: 0.9em",
 				`${color}; font-weight: bold`,
-				'color: blue; font-weight: bold',
-				'color: inherit',
-				...args
+				"color: blue; font-weight: bold",
+				"color: inherit",
+				...args,
 			]
 		} else {
 			// Node.js/SSR with ANSI colors
 			return [
 				`${COLORS.DIM}[${timestamp}]${COLORS.RESET} ${color}${COLORS.BOLD}${levelName}${COLORS.RESET} ${COLORS.BOLD}[${this.namespace}]${COLORS.RESET} ${message}`,
-				...args
+				...args,
 			]
 		}
 	}
@@ -230,13 +248,13 @@ class Logger {
 
 			// In browser context, formatted[1] and formatted[2] are style strings
 			// In Node.js/SSR/Worker context, formatted[0] is the message and formatted[1+] are args
-			if (typeof window !== 'undefined') {
+			if (typeof window !== "undefined") {
 				// Browser context: modify style strings
-				formatted[1] = formatted[1].replace('INFO', '✓ SUCCESS')
+				formatted[1] = formatted[1].replace("INFO", "✓ SUCCESS")
 				formatted[2] = `${COLORS.SUCCESS}; font-weight: bold`
 			} else {
 				// Node.js/SSR/Worker context: modify the message string
-				formatted[0] = formatted[0].replace('INFO', '✓ SUCCESS')
+				formatted[0] = formatted[0].replace("INFO", "✓ SUCCESS")
 			}
 
 			console.log(...formatted)
@@ -363,7 +381,8 @@ class LoggerManager {
 	 * Show help in console
 	 */
 	help() {
-		console.log(`
+		console.log(
+			`
 %c🔍 POS Logging System Help
 
 %cControl logging globally:%c
@@ -403,17 +422,17 @@ class LoggerManager {
 %cCurrent Config:%c
   ${JSON.stringify(this.getConfig(), null, 2)}
 		`,
-		'font-size: 16px; font-weight: bold',
-		'font-weight: bold; color: #2196F3',
-		'font-weight: normal',
-		'font-weight: bold; color: #4CAF50',
-		'font-weight: normal',
-		'font-weight: bold; color: #FF9800',
-		'font-weight: normal',
-		'font-weight: bold; color: #9C27B0',
-		'font-weight: normal',
-		'font-weight: bold; color: #607D8B',
-		'font-weight: normal'
+			"font-size: 16px; font-weight: bold",
+			"font-weight: bold; color: #2196F3",
+			"font-weight: normal",
+			"font-weight: bold; color: #4CAF50",
+			"font-weight: normal",
+			"font-weight: bold; color: #FF9800",
+			"font-weight: normal",
+			"font-weight: bold; color: #9C27B0",
+			"font-weight: normal",
+			"font-weight: bold; color: #607D8B",
+			"font-weight: normal",
 		)
 	}
 }
@@ -425,13 +444,13 @@ export const logger = new LoggerManager()
 export { LOG_LEVELS }
 
 // Expose to window for console debugging
-if (typeof window !== 'undefined') {
+if (typeof window !== "undefined") {
 	window.posLogger = logger
 }
 
 // Log initialization (only in dev)
 if (logger.config.isDev) {
-	const initLog = logger.create('Logger')
-	initLog.info('Logger initialized', logger.getConfig())
-	initLog.debug('Type posLogger.help() in console for usage guide')
+	const initLog = logger.create("Logger")
+	initLog.info("Logger initialized", logger.getConfig())
+	initLog.debug("Type posLogger.help() in console for usage guide")
 }

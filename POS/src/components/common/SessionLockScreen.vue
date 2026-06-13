@@ -136,7 +136,8 @@ import { useOfflineStatus } from "@/composables/useOfflineStatus"
 import { session } from "@/data/session"
 import { cleanupUserSession } from "@/utils/sessionCleanup"
 
-const { isLocked, isVerifying, verifyError, lockedUser, unlock } = useSessionLock()
+const { isLocked, isVerifying, verifyError, lockedUser, unlock } =
+	useSessionLock()
 const { isOffline } = useOfflineStatus()
 
 const password = ref("")

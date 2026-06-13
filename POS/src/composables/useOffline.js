@@ -113,7 +113,8 @@ export function useOffline() {
 
 		// Update reactive refs
 		isOffline.value = nowOffline
-		connectionQuality.value = state.quality || offlineState.getConnectionQuality()
+		connectionQuality.value =
+			state.quality || offlineState.getConnectionQuality()
 
 		// Detect transition from offline to online
 		if (wasOffline && !nowOffline) {
@@ -138,7 +139,9 @@ export function useOffline() {
 
 	// Handle invoice sync completion
 	const handleInvoicesSynced = () => {
-		console.log("[useOffline] Invoices synced event received, updating count...")
+		console.log(
+			"[useOffline] Invoices synced event received, updating count...",
+		)
 		updatePendingCount()
 	}
 

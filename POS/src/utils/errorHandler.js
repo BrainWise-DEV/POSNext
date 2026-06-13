@@ -65,10 +65,11 @@ export function parseError(error) {
 
 	// Build technical details
 	const detailsParts = []
-	if (error.exc_type) detailsParts.push(__('Type: {0}', [error.exc_type]))
+	if (error.exc_type) detailsParts.push(__("Type: {0}", [error.exc_type]))
 	if (error.httpStatus || error.status)
-		detailsParts.push(__('Status: {0}', [error.httpStatus || error.status]))
-	if (error.exception) detailsParts.push(__('Exception: {0}', [error.exception], "Error"))
+		detailsParts.push(__("Status: {0}", [error.httpStatus || error.status]))
+	if (error.exception)
+		detailsParts.push(__("Exception: {0}", [error.exception], "Error"))
 	context.technicalDetails =
 		detailsParts.length > 0 ? detailsParts.join(" | ") : null
 
@@ -140,8 +141,9 @@ export function parseError(error) {
 			!context.message ||
 			context.message === "An unexpected error occurred"
 		) {
-			context.message =
-				__("Not enough stock available in the warehouse.\n\nPlease reduce the quantity or check stock availability.")
+			context.message = __(
+				"Not enough stock available in the warehouse.\n\nPlease reduce the quantity or check stock availability.",
+			)
 		}
 
 		context.retryable = true
@@ -215,8 +217,9 @@ export function parseError(error) {
 	) {
 		context.type = "warning"
 		context.title = __("Connection Error")
-		context.message =
-			__("Unable to connect to server. Check your internet connection.")
+		context.message = __(
+			"Unable to connect to server. Check your internet connection.",
+		)
 		context.retryable = true
 	}
 	// Duplicate Errors
@@ -242,25 +245,25 @@ export function formatErrorReport(errorContext, additionalInfo = {}) {
 	const lines = [
 		__("Error Report - POS Next"),
 		"=".repeat(40),
-		__('Title: {0}', [errorContext.title]),
-		__('Type: {0}', [errorContext.type]),
-		__('Message: {0}', [errorContext.message]),
+		__("Title: {0}", [errorContext.title]),
+		__("Type: {0}", [errorContext.type]),
+		__("Message: {0}", [errorContext.message]),
 		"",
 	]
 
 	if (errorContext.technicalDetails) {
-		lines.push(__('Technical: {0}', [errorContext.technicalDetails]))
+		lines.push(__("Technical: {0}", [errorContext.technicalDetails]))
 		lines.push("")
 	}
 
 	if (additionalInfo.timestamp) {
-		lines.push(__('Timestamp: {0}', [additionalInfo.timestamp]))
+		lines.push(__("Timestamp: {0}", [additionalInfo.timestamp]))
 	}
 	if (additionalInfo.user) {
-		lines.push(__('User: {0}', [additionalInfo.user]))
+		lines.push(__("User: {0}", [additionalInfo.user]))
 	}
 	if (additionalInfo.posProfile) {
-		lines.push(__('POS Profile: {0}', [additionalInfo.posProfile]))
+		lines.push(__("POS Profile: {0}", [additionalInfo.posProfile]))
 	}
 
 	return lines.join("\n")

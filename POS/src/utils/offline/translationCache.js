@@ -187,7 +187,10 @@ export const translationCache = {
 			await db.translations.delete(normalized)
 			return true
 		} catch (error) {
-			log.error(`Failed to clear translation cache for locale ${normalized}:`, error)
+			log.error(
+				`Failed to clear translation cache for locale ${normalized}:`,
+				error,
+			)
 			return false
 		}
 	},

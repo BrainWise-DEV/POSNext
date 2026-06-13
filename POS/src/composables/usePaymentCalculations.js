@@ -15,12 +15,20 @@ import { roundCurrency } from "@/utils/currency"
  * @param {Function} options.getMethodTotal - Function to get total for a payment method
  * @returns {Object} Computed payment calculations
  */
-export function usePaymentCalculations({ paymentEntries, grandTotal, customerBalance, getMethodTotal }) {
+export function usePaymentCalculations({
+	paymentEntries,
+	grandTotal,
+	customerBalance,
+	getMethodTotal,
+}) {
 	/**
 	 * Total amount paid across all payment entries
 	 */
 	const totalPaid = computed(() => {
-		const sum = paymentEntries.value.reduce((acc, entry) => acc + (entry.amount || 0), 0)
+		const sum = paymentEntries.value.reduce(
+			(acc, entry) => acc + (entry.amount || 0),
+			0,
+		)
 		return roundCurrency(sum)
 	})
 

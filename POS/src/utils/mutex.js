@@ -87,7 +87,11 @@ export class CoalescingMutex {
 	async _executeWithTimeout(fn) {
 		return new Promise((resolve, reject) => {
 			const timeoutId = setTimeout(() => {
-				reject(new Error(`${this._name}: Operation timed out after ${this._timeout}ms`))
+				reject(
+					new Error(
+						`${this._name}: Operation timed out after ${this._timeout}ms`,
+					),
+				)
 			}, this._timeout)
 
 			fn()
@@ -177,7 +181,11 @@ export class QueuedMutex {
 	async _executeWithTimeout(fn) {
 		return new Promise((resolve, reject) => {
 			const timeoutId = setTimeout(() => {
-				reject(new Error(`${this._name}: Operation timed out after ${this._timeout}ms`))
+				reject(
+					new Error(
+						`${this._name}: Operation timed out after ${this._timeout}ms`,
+					),
+				)
 			}, this._timeout)
 
 			fn()

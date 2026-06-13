@@ -134,7 +134,7 @@ export const useCountriesStore = defineStore("countries", () => {
 
 	// Computed
 	const countryNameToISDMap = computed(() =>
-		Object.fromEntries(countries.value.map((c) => [c.name, c.isd]))
+		Object.fromEntries(countries.value.map((c) => [c.name, c.isd])),
 	)
 
 	return {

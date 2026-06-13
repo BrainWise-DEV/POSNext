@@ -498,9 +498,9 @@
  * RTL Support: Fully compatible with right-to-left languages
  * Translations: All user-facing strings use __() for i18n
  */
-import { ref, computed, watch, nextTick } from 'vue'
-import { call, Dialog } from 'frappe-ui'
-import { __ } from '@/utils/translation'
+import { ref, computed, watch, nextTick } from "vue"
+import { call, Dialog } from "frappe-ui"
+import { __ } from "@/utils/translation"
 
 const props = defineProps({
 	modelValue: Boolean,
@@ -509,41 +509,41 @@ const props = defineProps({
 	itemName: String,
 	uom: {
 		type: String,
-		default: 'Nos'
+		default: "Nos",
 	},
 	company: String,
 	currency: {
 		type: String,
-		default: ''
+		default: "",
 	},
 	// For search mode
 	posProfile: String,
 	// Mode: 'item' for single item (default), 'search' for general search
 	mode: {
 		type: String,
-		default: 'item'
-	}
+		default: "item",
+	},
 })
 
-const emit = defineEmits(['update:modelValue', 'close'])
+const emit = defineEmits(["update:modelValue", "close"])
 
 // v-model binding for Dialog
 const show = computed({
 	get: () => props.modelValue,
-	set: (val) => emit('update:modelValue', val)
+	set: (val) => emit("update:modelValue", val),
 })
 
 // Close dialog helper
 function closeDialog() {
-	emit('update:modelValue', false)
-	emit('close')
+	emit("update:modelValue", false)
+	emit("close")
 }
 
 // Determine if we're in search mode
-const isSearchMode = computed(() => props.mode === 'search')
+const isSearchMode = computed(() => props.mode === "search")
 
 // Search state
-const searchQuery = ref('')
+const searchQuery = ref("")
 const searchResults = ref([])
 const searching = ref(false)
 const selectedResultIndex = ref(-1)
@@ -553,12 +553,12 @@ const resultRefs = ref([])
 let searchDebounce = null
 
 // Selected item state (for search mode)
-const selectedItemCode = ref('')
-const selectedItemName = ref('')
-const selectedItemImage = ref('')
-const selectedUom = ref('Nos')
+const selectedItemCode = ref("")
+const selectedItemName = ref("")
+const selectedItemImage = ref("")
+const selectedUom = ref("Nos")
 const selectedItemHasVariants = ref(false)
-const selectedBarcodeUom = ref('') // Single barcode UOM if different from default
+const selectedBarcodeUom = ref("") // Single barcode UOM if different from default
 const selectedItemUoms = ref([]) // Conversion factors for UOMs
 
 // Variant state
@@ -576,27 +576,29 @@ const isReady = ref(false) // Gate to prevent showing content before data is rea
 // Computed display values
 const displayItemName = computed(() => {
 	if (isSearchMode.value) {
-		return selectedItemName.value || ''
+		return selectedItemName.value || ""
 	}
-	return props.itemName || props.itemCode || ''
+	return props.itemName || props.itemCode || ""
 })
 
 const displayUom = computed(() => {
 	if (isSearchMode.value) {
-		return selectedUom.value || 'Nos'
+		return selectedUom.value || "Nos"
 	}
-	return props.uom || 'Nos'
+	return props.uom || "Nos"
 })
 
 const totalAvailable = computed(() => {
 	if (!warehouses.value || warehouses.value.length === 0) return 0
-	return Math.floor(warehouses.value.reduce((sum, w) => sum + (w.available_qty || 0), 0))
+	return Math.floor(
+		warehouses.value.reduce((sum, w) => sum + (w.available_qty || 0), 0),
+	)
 })
 
 // Group warehouses by warehouse name when multiple variants selected
 const groupedWarehouses = computed(() => {
 	if (selectedVariants.value.length <= 1) return {}
-	
+
 	const grouped = {}
 	for (const warehouse of warehouses.value) {
 		const key = warehouse.warehouse || warehouse.warehouse_name
@@ -610,83 +612,87 @@ const groupedWarehouses = computed(() => {
 
 // Helper functions for variant info
 function getVariantName(itemCode) {
-	const variant = variants.value.find(v => v.item_code === itemCode)
+	const variant = variants.value.find((v) => v.item_code === itemCode)
 	return variant ? variant.item_name : itemCode
 }
 
 function getVariantUom(itemCode) {
-	const variant = variants.value.find(v => v.item_code === itemCode)
-	return variant ? (variant.stock_uom || 'Nos') : displayUom.value
+	const variant = variants.value.find((v) => v.item_code === itemCode)
+	return variant ? variant.stock_uom || "Nos" : displayUom.value
 }
 
 // Initialize and load based on mode
-watch(() => props.modelValue, async (newVal) => {
-	if (newVal) {
-		// Set loading immediately to prevent flash of empty content
-		loading.value = true
-		isReady.value = false
-		error.value = null
+watch(
+	() => props.modelValue,
+	async (newVal) => {
+		if (newVal) {
+			// Set loading immediately to prevent flash of empty content
+			loading.value = true
+			isReady.value = false
+			error.value = null
 
-		if (isSearchMode.value) {
-			// Search mode - clear state and focus search
-			resetSearchState()
-			isReady.value = true
-			loading.value = false
-			await nextTick()
-			focusSearch()
-		} else if (props.itemCode) {
-			// Item mode - check if item has variants first
-			// We need to fetch item details to check has_variants
-			try {
-				const itemResponse = await call('pos_next.api.items.get_items', {
-					pos_profile: props.posProfile,
-					search_term: props.itemCode,
-					start: 0,
-					limit: 1
-				})
-				const item = itemResponse?.[0]
-				if (item && item.has_variants) {
-					selectedItemCode.value = props.itemCode
-					selectedItemName.value = props.itemName || props.itemCode
-					selectedItemHasVariants.value = true
-					isReady.value = true
-					await loadVariants()
-				} else {
-					// No variants, directly load availability
+			if (isSearchMode.value) {
+				// Search mode - clear state and focus search
+				resetSearchState()
+				isReady.value = true
+				loading.value = false
+				await nextTick()
+				focusSearch()
+			} else if (props.itemCode) {
+				// Item mode - check if item has variants first
+				// We need to fetch item details to check has_variants
+				try {
+					const itemResponse = await call("pos_next.api.items.get_items", {
+						pos_profile: props.posProfile,
+						search_term: props.itemCode,
+						start: 0,
+						limit: 1,
+					})
+					const item = itemResponse?.[0]
+					if (item && item.has_variants) {
+						selectedItemCode.value = props.itemCode
+						selectedItemName.value = props.itemName || props.itemCode
+						selectedItemHasVariants.value = true
+						isReady.value = true
+						await loadVariants()
+					} else {
+						// No variants, directly load availability
+						isReady.value = true
+						await loadAvailability()
+					}
+				} catch (err) {
+					console.error("Error checking item variants:", err)
+					// Fallback to direct load
 					isReady.value = true
 					await loadAvailability()
 				}
-			} catch (err) {
-				console.error('Error checking item variants:', err)
-				// Fallback to direct load
+			} else {
+				// No item code provided
 				isReady.value = true
-				await loadAvailability()
+				loading.value = false
 			}
 		} else {
-			// No item code provided
-			isReady.value = true
-			loading.value = false
+			// Reset when dialog closes
+			resetSearchState()
+			warehouses.value = []
+			error.value = null
+			isReady.value = false
 		}
-	} else {
-		// Reset when dialog closes
-		resetSearchState()
-		warehouses.value = []
-		error.value = null
-		isReady.value = false
-	}
-}, { immediate: true })
+	},
+	{ immediate: true },
+)
 
 function resetSearchState() {
-	searchQuery.value = ''
+	searchQuery.value = ""
 	searchResults.value = []
 	selectedResultIndex.value = -1
 	showSearchResults.value = false
-	selectedItemCode.value = ''
-	selectedItemName.value = ''
-	selectedItemImage.value = ''
-	selectedUom.value = 'Nos'
+	selectedItemCode.value = ""
+	selectedItemName.value = ""
+	selectedItemImage.value = ""
+	selectedUom.value = "Nos"
 	selectedItemHasVariants.value = false
-	selectedBarcodeUom.value = ''
+	selectedBarcodeUom.value = ""
 	selectedItemUoms.value = []
 	variants.value = []
 	selectedVariants.value = []
@@ -732,11 +738,11 @@ async function performSearch() {
 	}
 
 	try {
-		const response = await call('pos_next.api.items.get_items', {
+		const response = await call("pos_next.api.items.get_items", {
 			pos_profile: props.posProfile,
 			search_term: searchQuery.value,
 			start: 0,
-			limit: 15 // Show more results for better autocomplete
+			limit: 15, // Show more results for better autocomplete
 		})
 
 		searchResults.value = response || []
@@ -746,7 +752,7 @@ async function performSearch() {
 			selectedResultIndex.value = 0
 		}
 	} catch (err) {
-		console.error('Error searching items:', err)
+		console.error("Error searching items:", err)
 		searchResults.value = []
 	} finally {
 		searching.value = false
@@ -765,7 +771,7 @@ function navigateResults(direction) {
 		nextTick(() => {
 			const resultElements = document.querySelectorAll('[ref="resultRefs"]')
 			if (resultElements[newIndex]) {
-				resultElements[newIndex].scrollIntoView({ block: 'nearest' })
+				resultElements[newIndex].scrollIntoView({ block: "nearest" })
 			}
 		})
 	}
@@ -784,20 +790,25 @@ async function selectItem(item) {
 
 	selectedItemCode.value = item.item_code
 	selectedItemName.value = item.item_name
-	selectedItemImage.value = item.image || ''
-	selectedUom.value = item.stock_uom || item.uom || 'Nos'
+	selectedItemImage.value = item.image || ""
+	selectedUom.value = item.stock_uom || item.uom || "Nos"
 	selectedItemHasVariants.value = item.has_variants || false
 	selectedItemUoms.value = item.item_uoms || []
 
 	// Check if barcode_uoms has a single value different from default UOM
-	const barcodeUoms = item.barcode_uoms ? item.barcode_uoms.split(',').map(u => u.trim()).filter(u => u) : []
+	const barcodeUoms = item.barcode_uoms
+		? item.barcode_uoms
+				.split(",")
+				.map((u) => u.trim())
+				.filter((u) => u)
+		: []
 	if (barcodeUoms.length === 1 && barcodeUoms[0] !== selectedUom.value) {
 		selectedBarcodeUom.value = barcodeUoms[0]
 	} else {
-		selectedBarcodeUom.value = ''
+		selectedBarcodeUom.value = ""
 	}
 
-	searchQuery.value = ''
+	searchQuery.value = ""
 	searchResults.value = []
 	showSearchResults.value = false
 	selectedResultIndex.value = -1
@@ -825,7 +836,7 @@ function handleEscape() {
 }
 
 function clearSearch() {
-	searchQuery.value = ''
+	searchQuery.value = ""
 	searchResults.value = []
 	selectedResultIndex.value = -1
 	showSearchResults.value = false
@@ -833,12 +844,12 @@ function clearSearch() {
 }
 
 function clearSelectedItem() {
-	selectedItemCode.value = ''
-	selectedItemName.value = ''
-	selectedItemImage.value = ''
-	selectedUom.value = 'Nos'
+	selectedItemCode.value = ""
+	selectedItemName.value = ""
+	selectedItemImage.value = ""
+	selectedUom.value = "Nos"
 	selectedItemHasVariants.value = false
-	selectedBarcodeUom.value = ''
+	selectedBarcodeUom.value = ""
 	selectedItemUoms.value = []
 	variants.value = []
 	selectedVariants.value = []
@@ -858,7 +869,9 @@ function clearSelectedItem() {
 function convertToBarcodeUom(qty) {
 	if (!selectedBarcodeUom.value || !selectedItemUoms.value.length) return null
 
-	const uomData = selectedItemUoms.value.find(u => u.uom === selectedBarcodeUom.value)
+	const uomData = selectedItemUoms.value.find(
+		(u) => u.uom === selectedBarcodeUom.value,
+	)
 	if (!uomData || !uomData.conversion_factor) return null
 
 	// Convert: stock_qty / conversion_factor = barcode_uom_qty
@@ -866,7 +879,9 @@ function convertToBarcodeUom(qty) {
 }
 
 async function loadVariants() {
-	const templateItem = isSearchMode.value ? selectedItemCode.value : props.itemCode
+	const templateItem = isSearchMode.value
+		? selectedItemCode.value
+		: props.itemCode
 	if (!templateItem || !props.posProfile) return
 
 	loadingVariants.value = true
@@ -876,21 +891,21 @@ async function loadVariants() {
 	error.value = null
 
 	try {
-		const response = await call('pos_next.api.items.get_item_variants', {
+		const response = await call("pos_next.api.items.get_item_variants", {
 			template_item: templateItem,
-			pos_profile: props.posProfile
+			pos_profile: props.posProfile,
 		})
 
 		variants.value = response || []
-		
+
 		// If no variants found, load availability for the template item itself
 		if (variants.value.length === 0) {
 			showVariantSelection.value = false
 			loadAvailability()
 		}
 	} catch (err) {
-		console.error('Error loading variants:', err)
-		error.value = err.message || __('Failed to load variants')
+		console.error("Error loading variants:", err)
+		error.value = err.message || __("Failed to load variants")
 		showVariantSelection.value = false
 	} finally {
 		loadingVariants.value = false
@@ -898,7 +913,9 @@ async function loadVariants() {
 }
 
 function toggleVariantSelection(variant) {
-	const index = selectedVariants.value.findIndex(v => v.item_code === variant.item_code)
+	const index = selectedVariants.value.findIndex(
+		(v) => v.item_code === variant.item_code,
+	)
 	if (index >= 0) {
 		selectedVariants.value.splice(index, 1)
 	} else {
@@ -907,12 +924,12 @@ function toggleVariantSelection(variant) {
 }
 
 function isVariantSelected(variant) {
-	return selectedVariants.value.some(v => v.item_code === variant.item_code)
+	return selectedVariants.value.some((v) => v.item_code === variant.item_code)
 }
 
 function confirmVariantSelection() {
 	if (selectedVariants.value.length === 0) {
-		error.value = __('Please select at least one variant')
+		error.value = __("Please select at least one variant")
 		return
 	}
 	showVariantSelection.value = false
@@ -928,7 +945,9 @@ function deselectAllVariants() {
 }
 
 async function loadAvailability() {
-	const targetItemCode = isSearchMode.value ? selectedItemCode.value : props.itemCode
+	const targetItemCode = isSearchMode.value
+		? selectedItemCode.value
+		: props.itemCode
 
 	if (!targetItemCode) return
 
@@ -939,23 +958,29 @@ async function loadAvailability() {
 	try {
 		// If variants are selected, use item_codes parameter
 		if (selectedVariants.value.length > 0) {
-			const itemCodes = selectedVariants.value.map(v => v.item_code)
-			const response = await call('pos_next.api.items.get_item_warehouse_availability', {
-				item_codes: JSON.stringify(itemCodes),
-				company: props.company
-			})
+			const itemCodes = selectedVariants.value.map((v) => v.item_code)
+			const response = await call(
+				"pos_next.api.items.get_item_warehouse_availability",
+				{
+					item_codes: JSON.stringify(itemCodes),
+					company: props.company,
+				},
+			)
 			warehouses.value = response || []
 		} else {
 			// Single item (backward compatible)
-			const response = await call('pos_next.api.items.get_item_warehouse_availability', {
-				item_code: targetItemCode,
-				company: props.company
-			})
+			const response = await call(
+				"pos_next.api.items.get_item_warehouse_availability",
+				{
+					item_code: targetItemCode,
+					company: props.company,
+				},
+			)
 			warehouses.value = response || []
 		}
 	} catch (err) {
-		console.error('Error loading warehouse availability:', err)
-		error.value = err.message || __('Failed to load warehouse availability')
+		console.error("Error loading warehouse availability:", err)
+		error.value = err.message || __("Failed to load warehouse availability")
 	} finally {
 		loading.value = false
 	}
@@ -970,9 +995,12 @@ async function loadAvailability() {
 function highlightMatch(text, query) {
 	if (!text || !query) return text
 
-	const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-	const regex = new RegExp(`(${escapedQuery})`, 'gi')
-	return text.replace(regex, '<mark class="bg-yellow-200 text-yellow-900 rounded px-0.5">$1</mark>')
+	const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+	const regex = new RegExp(`(${escapedQuery})`, "gi")
+	return text.replace(
+		regex,
+		'<mark class="bg-yellow-200 text-yellow-900 rounded px-0.5">$1</mark>',
+	)
 }
 
 /**
@@ -981,10 +1009,13 @@ function highlightMatch(text, query) {
  * @returns {string} Formatted price
  */
 function formatPrice(price) {
-	if (!price) return ''
+	if (!price) return ""
 	const num = Number(price)
-	if (isNaN(num)) return ''
-	return num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+	if (isNaN(num)) return ""
+	return num.toLocaleString(undefined, {
+		minimumFractionDigits: 2,
+		maximumFractionDigits: 2,
+	})
 }
 </script>
 

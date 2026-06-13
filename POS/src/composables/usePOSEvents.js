@@ -22,8 +22,8 @@
  * ```
  */
 
-import { onUnmounted } from 'vue'
-import { usePOSEventsStore } from '@/stores/posEvents'
+import { onUnmounted } from "vue"
+import { usePOSEventsStore } from "@/stores/posEvents"
 
 export function usePOSEvents() {
 	const eventsStore = usePOSEventsStore()
@@ -60,7 +60,7 @@ export function usePOSEvents() {
 	 * @returns {Function} - Unsubscribe function
 	 */
 	function onSettingsChanged(callback) {
-		return on('settings:changed', callback)
+		return on("settings:changed", callback)
 	}
 
 	/**
@@ -69,7 +69,7 @@ export function usePOSEvents() {
 	 * @returns {Function} - Unsubscribe function
 	 */
 	function onWarehouseChanged(callback) {
-		return on('settings:warehouse-changed', callback)
+		return on("settings:warehouse-changed", callback)
 	}
 
 	/**
@@ -78,7 +78,7 @@ export function usePOSEvents() {
 	 * @returns {Function} - Unsubscribe function
 	 */
 	function onStockPolicyChanged(callback) {
-		return on('settings:stock-policy-changed', callback)
+		return on("settings:stock-policy-changed", callback)
 	}
 
 	/**
@@ -87,7 +87,7 @@ export function usePOSEvents() {
 	 * @returns {Function} - Unsubscribe function
 	 */
 	function onPricingChanged(callback) {
-		return on('settings:pricing-changed', callback)
+		return on("settings:pricing-changed", callback)
 	}
 
 	/**
@@ -96,7 +96,7 @@ export function usePOSEvents() {
 	 * @returns {Function} - Unsubscribe function
 	 */
 	function onSalesOperationsChanged(callback) {
-		return on('settings:sales-operations-changed', callback)
+		return on("settings:sales-operations-changed", callback)
 	}
 
 	/**
@@ -105,7 +105,7 @@ export function usePOSEvents() {
 	 * @returns {Function} - Unsubscribe function
 	 */
 	function onDisplayChanged(callback) {
-		return on('settings:display-changed', callback)
+		return on("settings:display-changed", callback)
 	}
 
 	/**
@@ -114,7 +114,7 @@ export function usePOSEvents() {
 	 * @returns {Function} - Unsubscribe function
 	 */
 	function onStockSyncConfigured(callback) {
-		return on('settings:sync-configured', callback)
+		return on("settings:sync-configured", callback)
 	}
 
 	/**
@@ -123,7 +123,7 @@ export function usePOSEvents() {
 	 * @returns {Function} - Unsubscribe function
 	 */
 	function onStockSyncUpdate(callback) {
-		return on('sync:stock-updated', callback)
+		return on("sync:stock-updated", callback)
 	}
 
 	/**
@@ -132,7 +132,7 @@ export function usePOSEvents() {
 	 * @returns {Function} - Unsubscribe function
 	 */
 	function onAny(callback) {
-		return on('*', callback)
+		return on("*", callback)
 	}
 
 	// ========================================================================
@@ -208,7 +208,7 @@ export function usePOSEvents() {
 	 * Manually unsubscribe all listeners registered by this composable instance
 	 */
 	function unsubscribeAll() {
-		unsubscribers.forEach(unsub => unsub())
+		unsubscribers.forEach((unsub) => unsub())
 		unsubscribers.length = 0
 	}
 

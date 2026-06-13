@@ -7,8 +7,8 @@
  * - Dynamic batch sizes and debounce times
  */
 
-import { logger } from './logger'
-const log = logger.create('PerformanceConfig')
+import { logger } from "./logger"
+const log = logger.create("PerformanceConfig")
 
 /**
  * Device performance tier
@@ -28,9 +28,10 @@ const PERFORMANCE_TIERS = {
 function detectPerformanceTier() {
 	const cpuCores = navigator.hardwareConcurrency || 2
 	const deviceMemory = navigator.deviceMemory || 4 // In GB, fallback to 4GB
-	const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-		navigator.userAgent,
-	)
+	const isMobile =
+		/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+			navigator.userAgent,
+		)
 
 	// Calculate performance score
 	let score = 0
@@ -154,7 +155,7 @@ function getPerformanceConfig(tier) {
 class PerformanceConfig {
 	constructor() {
 		// SSR Safety: Check if running in browser environment
-		if (typeof window === 'undefined' || typeof navigator === 'undefined') {
+		if (typeof window === "undefined" || typeof navigator === "undefined") {
 			// Server-side or non-browser environment - use medium tier defaults
 			this.tier = PERFORMANCE_TIERS.MEDIUM
 			this.config = getPerformanceConfig(this.tier)
@@ -169,9 +170,10 @@ class PerformanceConfig {
 		// Detect device capabilities
 		this.cpuCores = navigator.hardwareConcurrency || 2
 		this.deviceMemory = navigator.deviceMemory || 4
-		this.isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-			navigator.userAgent,
-		)
+		this.isMobile =
+			/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+				navigator.userAgent,
+			)
 
 		// Auto-detect performance tier
 		this.autoDetectedTier = detectPerformanceTier()
@@ -206,13 +208,13 @@ class PerformanceConfig {
 	 * Get stored tier from localStorage
 	 */
 	getStoredTier() {
-		if (typeof window === 'undefined' || !window.localStorage) {
+		if (typeof window === "undefined" || !window.localStorage) {
 			return null
 		}
 		try {
-			return localStorage.getItem('pos_performance_tier')
+			return localStorage.getItem("pos_performance_tier")
 		} catch (error) {
-			log.error('Failed to read performance tier from localStorage', error)
+			log.error("Failed to read performance tier from localStorage", error)
 			return null
 		}
 	}
@@ -225,7 +227,9 @@ class PerformanceConfig {
 		const normalizedTier = tier?.toLowerCase()
 
 		if (!normalizedTier || !PERFORMANCE_TIERS[normalizedTier.toUpperCase()]) {
-			log.error(`Invalid performance tier: ${tier}. Must be one of: low, medium, high`)
+			log.error(
+				`Invalid performance tier: ${tier}. Must be one of: low, medium, high`,
+			)
 			return false
 		}
 
@@ -234,24 +238,26 @@ class PerformanceConfig {
 		this.config = getPerformanceConfig(normalizedTier)
 
 		// Save to localStorage
-		if (typeof window !== 'undefined' && window.localStorage) {
+		if (typeof window !== "undefined" && window.localStorage) {
 			try {
-				localStorage.setItem('pos_performance_tier', normalizedTier)
+				localStorage.setItem("pos_performance_tier", normalizedTier)
 				log.info(`Performance tier set to: ${normalizedTier}`)
 			} catch (error) {
-				log.error('Failed to save performance tier to localStorage', error)
+				log.error("Failed to save performance tier to localStorage", error)
 			}
 		}
 
 		// Emit custom event for reactive updates
-		if (typeof window !== 'undefined') {
-			window.dispatchEvent(new CustomEvent('performanceConfigChanged', {
-				detail: {
-					tier: normalizedTier,
-					config: this.config,
-					autoDetected: this.autoDetectedTier
-				}
-			}))
+		if (typeof window !== "undefined") {
+			window.dispatchEvent(
+				new CustomEvent("performanceConfigChanged", {
+					detail: {
+						tier: normalizedTier,
+						config: this.config,
+						autoDetected: this.autoDetectedTier,
+					},
+				}),
+			)
 		}
 
 		return true
@@ -262,12 +268,12 @@ class PerformanceConfig {
 	 */
 	resetTier() {
 		// Remove from localStorage
-		if (typeof window !== 'undefined' && window.localStorage) {
+		if (typeof window !== "undefined" && window.localStorage) {
 			try {
-				localStorage.removeItem('pos_performance_tier')
-				log.info('Removed manual performance tier override')
+				localStorage.removeItem("pos_performance_tier")
+				log.info("Removed manual performance tier override")
 			} catch (error) {
-				log.error('Failed to remove performance tier from localStorage', error)
+				log.error("Failed to remove performance tier from localStorage", error)
 			}
 		}
 
@@ -276,14 +282,16 @@ class PerformanceConfig {
 		this.config = getPerformanceConfig(this.tier)
 
 		// Emit custom event for reactive updates
-		if (typeof window !== 'undefined') {
-			window.dispatchEvent(new CustomEvent('performanceConfigChanged', {
-				detail: {
-					tier: this.tier,
-					config: this.config,
-					autoDetected: this.autoDetectedTier
-				}
-			}))
+		if (typeof window !== "undefined") {
+			window.dispatchEvent(
+				new CustomEvent("performanceConfigChanged", {
+					detail: {
+						tier: this.tier,
+						config: this.config,
+						autoDetected: this.autoDetectedTier,
+					},
+				}),
+			)
 		}
 
 		return true
@@ -388,7 +396,7 @@ class PerformanceConfig {
 	 * Calculate dynamic batch size based on data size and device capability
 	 */
 	getDynamicBatchSize(dataSize, operation = "default") {
-		let baseBatchSize = this.config.backgroundSyncBatchSize
+		const baseBatchSize = this.config.backgroundSyncBatchSize
 
 		// Adjust based on operation type
 		const operationMultipliers = {
@@ -422,7 +430,7 @@ export const performanceConfig = (() => {
 	try {
 		return new PerformanceConfig()
 	} catch (error) {
-		log.error('Failed to initialize PerformanceConfig, using defaults', error)
+		log.error("Failed to initialize PerformanceConfig, using defaults", error)
 		// Return a safe default config
 		return {
 			tier: PERFORMANCE_TIERS.MEDIUM,

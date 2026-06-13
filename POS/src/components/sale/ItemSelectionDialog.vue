@@ -234,9 +234,11 @@
 </template>
 
 <script setup>
-import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency"
-import { Button, Dialog } from "frappe-ui"
-import { createResource } from "frappe-ui"
+import {
+	DEFAULT_CURRENCY,
+	formatCurrency as formatCurrencyUtil,
+} from "@/utils/currency"
+import { Button, Dialog, createResource } from "frappe-ui"
 import { computed, nextTick, ref, watch } from "vue"
 import TranslatedHTML from "../common/TranslatedHTML.vue"
 import { offlineState } from "@/utils/offline/offlineState"
@@ -291,11 +293,15 @@ const confirmButtonText = computed(() => {
 const stockWarning = computed(() => {
 	if (props.mode !== "uom" || !selectedOption.value) return null
 
-	const availableStock = selectedOption.value.stock_qty ?? selectedOption.value.actual_qty ?? null
+	const availableStock =
+		selectedOption.value.stock_qty ?? selectedOption.value.actual_qty ?? null
 	if (availableStock === null) return null
 
 	if (quantity.value > availableStock) {
-		return __("Requested quantity ({0}) exceeds available stock ({1})", [quantity.value, Math.floor(availableStock)])
+		return __("Requested quantity ({0}) exceeds available stock ({1})", [
+			quantity.value,
+			Math.floor(availableStock),
+		])
 	}
 	return null
 })
@@ -378,7 +384,7 @@ function mapVariantsToOptions(variants) {
 		description: v.item_code,
 		attributes: v.attributes || {},
 		rate: v.rate || v.price_list_rate || 0,
-		priceLabel: __('per {0}', [v.stock_uom]),
+		priceLabel: __("per {0}", [v.stock_uom]),
 		stock: v.actual_qty ?? 0,
 		data: v,
 	}))
@@ -390,7 +396,8 @@ function mapVariantsToOptions(variants) {
 async function loadVariantsFromCache() {
 	try {
 		const cachedVariants = await getCachedVariants(props.item?.item_code)
-		options.value = cachedVariants?.length > 0 ? mapVariantsToOptions(cachedVariants) : []
+		options.value =
+			cachedVariants?.length > 0 ? mapVariantsToOptions(cachedVariants) : []
 	} catch (error) {
 		console.error("Error loading variants from cache:", error)
 		options.value = []
@@ -416,7 +423,9 @@ const variantsResource = createResource({
 
 		// Cache variants for offline use
 		if (variants.length > 0) {
-			cacheItems(variants).catch((err) => console.error("Error caching variants:", err))
+			cacheItems(variants).catch((err) =>
+				console.error("Error caching variants:", err),
+			)
 		}
 	},
 	async onError(error) {
@@ -435,7 +444,10 @@ watch(
 		}
 		if (isOpen && props.mode === "uom") {
 			nextTick(() => {
-				setTimeout(() => { quantityInput.value?.focus(); quantityInput.value?.select() }, 100)
+				setTimeout(() => {
+					quantityInput.value?.focus()
+					quantityInput.value?.select()
+				}, 100)
 			})
 		}
 	},
@@ -509,7 +521,7 @@ function buildUomOptions() {
 		label: props.item.stock_uom,
 		description: __("Stock unit"),
 		rate: getUomPrice(props.item.stock_uom, 1),
-		priceLabel: __('per {0}', [props.item.stock_uom]),
+		priceLabel: __("per {0}", [props.item.stock_uom]),
 	})
 
 	// Additional UOMs
@@ -520,9 +532,13 @@ function buildUomOptions() {
 				uom: uomData.uom,
 				conversion_factor: uomData.conversion_factor,
 				label: uomData.uom,
-				description: __('1 {0} = {1} {2}', [uomData.uom, uomData.conversion_factor, props.item.stock_uom]),
+				description: __("1 {0} = {1} {2}", [
+					uomData.uom,
+					uomData.conversion_factor,
+					props.item.stock_uom,
+				]),
 				rate: getUomPrice(uomData.uom, uomData.conversion_factor),
-				priceLabel: __('per {0}', [uomData.uom]),
+				priceLabel: __("per {0}", [uomData.uom]),
 			})
 		})
 	}

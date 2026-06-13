@@ -872,28 +872,28 @@ const freeItemSearchResults = computed(() => {
 // Single source of truth for apply_on configuration
 // Used by both applyOnOptions dropdown and translateApplyOn function
 const APPLY_ON_CONFIG = {
-	'Item Code': { label: () => __('Specific Items') },
-	'Item Group': { label: () => __('Item Groups') },
-	'Brand': { label: () => __('Brands') },
-	'Transaction': { label: () => __('Entire Transaction') }
+	"Item Code": { label: () => __("Specific Items") },
+	"Item Group": { label: () => __("Item Groups") },
+	Brand: { label: () => __("Brands") },
+	Transaction: { label: () => __("Entire Transaction") },
 }
 
 // Computed: Options for Apply On dropdown
 const applyOnOptions = computed(() =>
 	Object.entries(APPLY_ON_CONFIG).map(([value, config]) => ({
 		label: config.label(),
-		value
-	}))
+		value,
+	})),
 )
 
 // Computed: Options for Item Group dropdown
 const itemGroupOptions = computed(() =>
-	itemGroups.value.map(g => ({ label: g.name, value: g.name }))
+	itemGroups.value.map((g) => ({ label: g.name, value: g.name })),
 )
 
 // Computed: Options for Brand dropdown
 const brandOptions = computed(() =>
-	brands.value.map(b => ({ label: b.name, value: b.name }))
+	brands.value.map((b) => ({ label: b.name, value: b.name })),
 )
 
 // Item Code selection
@@ -902,10 +902,10 @@ const selectedItemCode = ref("")
 // Computed: Options for Item Code dropdown (searchable)
 const itemCodeOptions = computed(() => {
 	const allItems = itemSearchStore.allItems || []
-	return allItems.map(item => ({
+	return allItems.map((item) => ({
 		label: item.item_name,
 		value: item.item_code,
-		subtitle: item.item_code
+		subtitle: item.item_code,
 	}))
 })
 
@@ -972,7 +972,7 @@ const savePromotionResource = createResource({
 	},
 	onError(error) {
 		loading.value = false
-		handleError(error, __('Failed to create promotion'))
+		handleError(error, __("Failed to create promotion"))
 	},
 })
 
@@ -1095,7 +1095,7 @@ watch(
 		if (isCreating.value && oldVal && newVal !== oldVal) {
 			form.value.items = []
 		}
-	}
+	},
 )
 
 onMounted(() => {
@@ -1227,14 +1227,20 @@ function handleSubmit() {
 		)
 		if (duplicate) {
 			showWarning(
-				__('Promotion "{0}" already exists. Please use a different name.', [form.value.name])
+				__('Promotion "{0}" already exists. Please use a different name.', [
+					form.value.name,
+				]),
 			)
 			return
 		}
 	}
 
 	if (form.value.apply_on !== "Transaction" && form.value.items.length === 0) {
-		showWarning(__('Please select at least one {0}', [translateApplyOn(form.value.apply_on)]))
+		showWarning(
+			__("Please select at least one {0}", [
+				translateApplyOn(form.value.apply_on),
+			]),
+		)
 		return
 	}
 
@@ -1262,9 +1268,14 @@ function addItemByCode() {
 	) {
 		// Find the item name from allItems
 		const allItems = itemSearchStore.allItems || []
-		const selectedItem = allItems.find(item => item.item_code === selectedItemCode.value)
+		const selectedItem = allItems.find(
+			(item) => item.item_code === selectedItemCode.value,
+		)
 		const itemName = selectedItem?.item_name || selectedItemCode.value
-		form.value.items.push({ item_code: selectedItemCode.value, item_name: itemName })
+		form.value.items.push({
+			item_code: selectedItemCode.value,
+			item_name: itemName,
+		})
 	}
 	selectedItemCode.value = ""
 }

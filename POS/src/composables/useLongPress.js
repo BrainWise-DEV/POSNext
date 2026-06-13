@@ -12,11 +12,7 @@ import { ref, onUnmounted } from "vue"
  * @returns {Object} - Event handlers and state
  */
 export function useLongPress(options = {}) {
-	const {
-		duration = 500,
-		onTap = null,
-		onLongPress = null,
-	} = options
+	const { duration = 500, onTap = null, onLongPress = null } = options
 
 	// State
 	const isPressed = ref(false)

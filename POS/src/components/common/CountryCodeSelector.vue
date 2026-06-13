@@ -180,7 +180,7 @@ const filteredCountries = computed(() => {
 		(country) =>
 			country.name.toLowerCase().includes(query) ||
 			country.isd.includes(query) ||
-			country.code.toLowerCase().includes(query)
+			country.code.toLowerCase().includes(query),
 	)
 })
 
@@ -239,7 +239,7 @@ watch(
 				selectedCountry.value = country
 			}
 		}
-	}
+	},
 )
 
 // Initialize
@@ -255,7 +255,8 @@ onMounted(async () => {
 	} else if (props.defaultCountry) {
 		// Try to find default country by name or code
 		const country =
-			findCountryByName(props.defaultCountry) || findCountryByCode(props.defaultCountry)
+			findCountryByName(props.defaultCountry) ||
+			findCountryByCode(props.defaultCountry)
 		if (country) {
 			selectedCountry.value = country
 			emit("update:modelValue", country.isd)

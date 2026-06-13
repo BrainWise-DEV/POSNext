@@ -8,14 +8,14 @@
  * - Manual refresh requested
  */
 
-import { defineStore } from 'pinia'
-import { ref } from 'vue'
-import { call } from '@/utils/apiWrapper'
-import { logger } from '@/utils/logger'
+import { defineStore } from "pinia"
+import { ref } from "vue"
+import { call } from "@/utils/apiWrapper"
+import { logger } from "@/utils/logger"
 
-const log = logger.create('SerialNumber')
+const log = logger.create("SerialNumber")
 
-export const useSerialNumberStore = defineStore('serialNumber', () => {
+export const useSerialNumberStore = defineStore("serialNumber", () => {
 	// ========================================================================
 	// STATE
 	// ========================================================================
@@ -73,7 +73,7 @@ export const useSerialNumberStore = defineStore('serialNumber', () => {
 	 */
 	const fetchSerials = async (itemCode, forceRefresh = false) => {
 		if (!itemCode || !currentWarehouse.value) {
-			log.warn('Missing itemCode or warehouse')
+			log.warn("Missing itemCode or warehouse")
 			return []
 		}
 
@@ -86,14 +86,14 @@ export const useSerialNumberStore = defineStore('serialNumber', () => {
 		loading.value = true
 
 		try {
-			const response = await call('frappe.client.get_list', {
-				doctype: 'Serial No',
+			const response = await call("frappe.client.get_list", {
+				doctype: "Serial No",
 				filters: {
 					item_code: itemCode,
 					warehouse: currentWarehouse.value,
-					status: 'Active',
+					status: "Active",
 				},
-				fields: ['name as serial_no', 'warehouse'],
+				fields: ["name as serial_no", "warehouse"],
 				limit_page_length: 500,
 			})
 
@@ -126,11 +126,14 @@ export const useSerialNumberStore = defineStore('serialNumber', () => {
 		const serialsToRemove = new Set(
 			Array.isArray(serialNumbers)
 				? serialNumbers
-				: serialNumbers.split('\n').map(s => s.trim()).filter(Boolean)
+				: serialNumbers
+						.split("\n")
+						.map((s) => s.trim())
+						.filter(Boolean),
 		)
 
 		cached.serials = cached.serials.filter(
-			s => !serialsToRemove.has(s.serial_no)
+			(s) => !serialsToRemove.has(s.serial_no),
 		)
 
 		log.info(`Consumed ${serialsToRemove.size} serials for ${itemCode}`)
@@ -145,22 +148,27 @@ export const useSerialNumberStore = defineStore('serialNumber', () => {
 
 		const serialsToReturn = Array.isArray(serialNumbers)
 			? serialNumbers
-			: serialNumbers.split('\n').map(s => s.trim()).filter(Boolean)
+			: serialNumbers
+					.split("\n")
+					.map((s) => s.trim())
+					.filter(Boolean)
 
 		// Add serials back to cache (avoid duplicates)
-		const existingSerialNos = new Set(cached.serials.map(s => s.serial_no))
+		const existingSerialNos = new Set(cached.serials.map((s) => s.serial_no))
 
 		for (const serialNo of serialsToReturn) {
 			if (!existingSerialNos.has(serialNo)) {
 				cached.serials.push({
 					serial_no: serialNo,
-					warehouse: currentWarehouse.value
+					warehouse: currentWarehouse.value,
 				})
 			}
 		}
 
 		// Sort serials by serial_no for consistent ordering
-		cached.serials.sort((a, b) => a.serial_no.localeCompare(b.serial_no, undefined, { numeric: true }))
+		cached.serials.sort((a, b) =>
+			a.serial_no.localeCompare(b.serial_no, undefined, { numeric: true }),
+		)
 
 		log.info(`Returned ${serialsToReturn.length} serials for ${itemCode}`)
 	}
@@ -174,7 +182,7 @@ export const useSerialNumberStore = defineStore('serialNumber', () => {
 			log.info(`Cache cleared for ${itemCode}`)
 		} else {
 			cache.value.clear()
-			log.info('All cache cleared')
+			log.info("All cache cleared")
 		}
 	}
 
@@ -182,7 +190,7 @@ export const useSerialNumberStore = defineStore('serialNumber', () => {
 	 * Prefetch serials for multiple items (background loading)
 	 */
 	const prefetchSerials = async (itemCodes) => {
-		const codesToFetch = itemCodes.filter(code => !isCacheValid(code))
+		const codesToFetch = itemCodes.filter((code) => !isCacheValid(code))
 
 		if (codesToFetch.length === 0) return
 
@@ -192,7 +200,7 @@ export const useSerialNumberStore = defineStore('serialNumber', () => {
 		const batchSize = 3
 		for (let i = 0; i < codesToFetch.length; i += batchSize) {
 			const batch = codesToFetch.slice(i, i + batchSize)
-			await Promise.all(batch.map(code => fetchSerials(code)))
+			await Promise.all(batch.map((code) => fetchSerials(code)))
 		}
 	}
 

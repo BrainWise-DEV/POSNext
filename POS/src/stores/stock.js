@@ -19,25 +19,25 @@
  * Everything else is just Pinia reactivity doing its job.
  */
 
-import { defineStore } from 'pinia'
-import { ref, onMounted } from 'vue'
-import { call } from '@/utils/apiWrapper'
-import { offlineWorker } from '@/utils/offline/workerClient'
-import { logger } from '@/utils/logger'
-import { usePOSEventsStore } from '@/stores/posEvents'
+import { defineStore } from "pinia"
+import { ref, onMounted } from "vue"
+import { call } from "@/utils/apiWrapper"
+import { offlineWorker } from "@/utils/offline/workerClient"
+import { logger } from "@/utils/logger"
+import { usePOSEventsStore } from "@/stores/posEvents"
 
-const log = logger.create('Stock')
+const log = logger.create("Stock")
 
-export const useStockStore = defineStore('stock', () => {
+export const useStockStore = defineStore("stock", () => {
 	// Get event store instance
 	const eventsStore = usePOSEventsStore()
 	// ========================================================================
 	// STATE - Just 2 Maps, that's it!
 	// ========================================================================
-	const server = ref(new Map())    // item_code -> { qty, warehouse, ts }
-	const reserved = ref(new Map())  // item_code -> qty
-	const warehouse = ref(null)      // Current warehouse
-	const refreshing = ref(false)    // Loading state
+	const server = ref(new Map()) // item_code -> { qty, warehouse, ts }
+	const reserved = ref(new Map()) // item_code -> qty
+	const warehouse = ref(null) // Current warehouse
+	const refreshing = ref(false) // Loading state
 
 	// ========================================================================
 	// GETTERS - Functions that return reactive computed values
@@ -45,7 +45,10 @@ export const useStockStore = defineStore('stock', () => {
 	const getDisplayStock = (itemCode) => {
 		// Always return the actual calculated stock (can be negative)
 		// Display is independent of whether negative stock sales are allowed
-		return (server.value.get(itemCode)?.qty || 0) - (reserved.value.get(itemCode) || 0)
+		return (
+			(server.value.get(itemCode)?.qty || 0) -
+			(reserved.value.get(itemCode) || 0)
+		)
 	}
 
 	const getStockInfo = (itemCode) => ({
@@ -53,7 +56,7 @@ export const useStockStore = defineStore('stock', () => {
 		server: server.value.get(itemCode)?.qty || 0,
 		reserved: reserved.value.get(itemCode) || 0,
 		display: getDisplayStock(itemCode),
-		warehouse: server.value.get(itemCode)?.warehouse || warehouse.value
+		warehouse: server.value.get(itemCode)?.warehouse || warehouse.value,
 	})
 
 	// ========================================================================
@@ -61,13 +64,14 @@ export const useStockStore = defineStore('stock', () => {
 	// ========================================================================
 
 	// Initialize items from server
-	const init = (items) => items?.forEach(item =>
-		server.value.set(item.item_code, {
-			qty: item.actual_qty ?? item.stock_qty ?? 0,
-			warehouse: item.warehouse || warehouse.value,
-			ts: Date.now()
-		})
-	)
+	const init = (items) =>
+		items?.forEach((item) =>
+			server.value.set(item.item_code, {
+				qty: item.actual_qty ?? item.stock_qty ?? 0,
+				warehouse: item.warehouse || warehouse.value,
+				ts: Date.now(),
+			}),
+		)
 
 	// Update reservations from cart
 	const reserve = (cartItems) => {
@@ -78,7 +82,7 @@ export const useStockStore = defineStore('stock', () => {
 			return
 		}
 
-		cartItems.forEach(cartItem => {
+		cartItems.forEach((cartItem) => {
 			// Skip items with missing item_code
 			if (!cartItem?.item_code) return
 
@@ -90,7 +94,7 @@ export const useStockStore = defineStore('stock', () => {
 			const itemCode = cartItem.item_code
 
 			const current = reserved.value.get(itemCode) || 0
-			reserved.value.set(itemCode, current + (quantity * factor))
+			reserved.value.set(itemCode, current + quantity * factor)
 		})
 	}
 
@@ -98,13 +102,14 @@ export const useStockStore = defineStore('stock', () => {
 	// Called by: POSSale.vue:770 (realtime), various refresh flows
 	// Does NOT clear reservations - only updates server stock
 	// Pinia reactivity automatically recalculates display stock
-	const update = (stockUpdates) => stockUpdates?.forEach(stockUpdate =>
-		server.value.set(stockUpdate.item_code, {
-			qty: stockUpdate.actual_qty ?? stockUpdate.stock_qty,
-			warehouse: stockUpdate.warehouse || warehouse.value,
-			ts: Date.now()
-		})
-	)
+	const update = (stockUpdates) =>
+		stockUpdates?.forEach((stockUpdate) =>
+			server.value.set(stockUpdate.item_code, {
+				qty: stockUpdate.actual_qty ?? stockUpdate.stock_qty,
+				warehouse: stockUpdate.warehouse || warehouse.value,
+				ts: Date.now(),
+			}),
+		)
 
 	// Refresh stock from server (direct API call)
 	// Called after invoice submission, manual refresh, or warehouse change
@@ -123,11 +128,11 @@ export const useStockStore = defineStore('stock', () => {
 			if (!codesToRefresh.length) return
 
 			const response = await Promise.race([
-				call('pos_next.api.items.get_stock_quantities', {
+				call("pos_next.api.items.get_stock_quantities", {
 					item_codes: JSON.stringify(codesToRefresh),
-					warehouse: targetWarehouse || warehouse.value
+					warehouse: targetWarehouse || warehouse.value,
 				}),
-				new Promise((_, reject) => setTimeout(reject, 10000))
+				new Promise((_, reject) => setTimeout(reject, 10000)),
 			])
 
 			const stockData = response?.message || response || []
@@ -141,7 +146,7 @@ export const useStockStore = defineStore('stock', () => {
 
 			log.success(`Refreshed ${stockData.length} items`)
 		} catch (error) {
-			log.error('Refresh failed', error)
+			log.error("Refresh failed", error)
 			// Restore reservations even on error
 			reserved.value = reservationSnapshot
 		} finally {
@@ -154,7 +159,7 @@ export const useStockStore = defineStore('stock', () => {
 	// ========================================================================
 
 	// Listen to warehouse changes from settings
-	eventsStore.on('settings:warehouse-changed', async ({ newWarehouse }) => {
+	eventsStore.on("settings:warehouse-changed", async ({ newWarehouse }) => {
 		log.info(`Event received: Warehouse changed to ${newWarehouse}`)
 
 		// Update warehouse
@@ -184,8 +189,11 @@ export const useStockStore = defineStore('stock', () => {
 		reserve,
 		update,
 		refresh,
-		setWarehouse: (targetWarehouse) => warehouse.value = targetWarehouse,
+		setWarehouse: (targetWarehouse) => (warehouse.value = targetWarehouse),
 		clear: () => reserved.value.clear(),
-		reset: () => { server.value.clear(); reserved.value.clear() }
+		reset: () => {
+			server.value.clear()
+			reserved.value.clear()
+		},
 	}
 })

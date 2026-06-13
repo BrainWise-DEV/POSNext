@@ -60,7 +60,8 @@ if ("serviceWorker" in navigator) {
 					onNeedRefresh: () => log.info("New content available, reloading..."),
 					onOfflineReady: () => log.info("App ready to work offline"),
 					onRegistered: (reg) => log.info("Service Worker registered", reg),
-					onRegisterError: (err) => log.error("Service Worker registration error", err),
+					onRegisterError: (err) =>
+						log.error("Service Worker registration error", err),
 				})
 			})
 		},
@@ -194,7 +195,10 @@ async function initializeApp() {
 						window.frappe.realtime = initSocket(siteName)
 
 						// Ensure connection is established
-						if (window.frappe.realtime && typeof window.frappe.realtime.connect === "function") {
+						if (
+							window.frappe.realtime &&
+							typeof window.frappe.realtime.connect === "function"
+						) {
 							window.frappe.realtime.connect()
 							log.info("Socket initialized and connecting...", { siteName })
 						}
@@ -203,7 +207,7 @@ async function initializeApp() {
 					log.debug("Bootstrap preload failed (non-critical)", error)
 				}
 			})
-			.catch(() => { })
+			.catch(() => {})
 	}
 
 	// -------------------------------------------------------------------------

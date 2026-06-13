@@ -1072,7 +1072,7 @@ const createReturnResource = createResource({
 				: refundPayments.value.map((payment) => ({
 						mode_of_payment: payment.mode_of_payment,
 						amount: -Math.abs(payment.amount),
-				  })),
+					})),
 			remarks:
 				returnReason.value ||
 				__("Return against {0}", [originalInvoice.value.name]),
@@ -1689,7 +1689,10 @@ function resetForm() {
 }
 
 // Date formatter instance (reused for performance)
-const dateFormatter = new Intl.DateTimeFormat(DEFAULT_LOCALE, DATE_FORMAT_OPTIONS)
+const dateFormatter = new Intl.DateTimeFormat(
+	DEFAULT_LOCALE,
+	DATE_FORMAT_OPTIONS,
+)
 
 function formatDate(dateStr) {
 	if (!dateStr) return ""

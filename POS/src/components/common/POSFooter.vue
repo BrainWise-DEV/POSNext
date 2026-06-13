@@ -12,39 +12,41 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
-import { call } from '@/utils/apiWrapper'
+import { ref, computed, onMounted, onBeforeUnmount } from "vue"
+import { call } from "@/utils/apiWrapper"
 
 // Component state
-const footerText = ref('Powered by')
-const linkText = ref('BrainWise')
-const footerLink = ref('https://nexus.brainwise.me')
+const footerText = ref("Powered by")
+const linkText = ref("BrainWise")
+const footerLink = ref("https://nexus.brainwise.me")
 const footerRoot = ref(null)
 const config = ref({})
 const serverValidationEnabled = ref(true)
 
 // Dynamic class and style to prevent easy CSS targeting
 const componentId = Math.random().toString(36).substring(7)
-const footerClass = ref(`pos-footer-component pos-footer-component-${componentId}`)
+const footerClass = ref(
+	`pos-footer-component pos-footer-component-${componentId}`,
+)
 const brandSignature = computed(() => `BrainWise-${componentId}`)
 
 const footerStyle = computed(() => ({
-	padding: config.value._s?.p || '12px 20px',
-	backgroundColor: config.value._s?.bg || '#f8f9fa',
-	borderTop: config.value._s?.bt || '1px solid #e0e0e0',
-	textAlign: config.value._s?.ta || 'center',
-	fontSize: config.value._s?.fs || '13px',
-	color: config.value._s?.c || '#6b7280',
+	padding: config.value._s?.p || "12px 20px",
+	backgroundColor: config.value._s?.bg || "#f8f9fa",
+	borderTop: config.value._s?.bt || "1px solid #e0e0e0",
+	textAlign: config.value._s?.ta || "center",
+	fontSize: config.value._s?.fs || "13px",
+	color: config.value._s?.c || "#6b7280",
 	zIndex: config.value._s?.z || 100,
-	userSelect: 'none',
-	WebkitUserSelect: 'none',
-	MozUserSelect: 'none',
-	msUserSelect: 'none',
-	position: 'fixed',
-	bottom: '0',
-	left: '0',
-	right: '0',
-	width: '100%'
+	userSelect: "none",
+	WebkitUserSelect: "none",
+	MozUserSelect: "none",
+	msUserSelect: "none",
+	position: "fixed",
+	bottom: "0",
+	left: "0",
+	right: "0",
+	width: "100%",
 }))
 
 // Protection mechanisms
@@ -58,15 +60,15 @@ let validationTimer = null
 // Load branding configuration from backend
 const loadBrandingConfig = async () => {
 	try {
-		const response = await call('pos_next.api.branding.get_branding_config')
+		const response = await call("pos_next.api.branding.get_branding_config")
 
 		if (response) {
 			config.value = response
 
 			// Decode base64 encoded values
-			footerText.value = atob(response._t || '')
-			linkText.value = atob(response._l || '')
-			footerLink.value = atob(response._u || '')
+			footerText.value = atob(response._t || "")
+			linkText.value = atob(response._l || "")
+			footerLink.value = atob(response._u || "")
 			serverValidationEnabled.value = response._v || false
 
 			// Update check interval if provided
@@ -81,11 +83,11 @@ const loadBrandingConfig = async () => {
 			}
 		}
 	} catch (error) {
-		console.error('[BrainWise] Failed to load branding config:', error)
+		console.error("[BrainWise] Failed to load branding config:", error)
 		// Use fallback values
-		footerText.value = 'Powered by'
-		linkText.value = 'BrainWise'
-		footerLink.value = 'https://nexus.brainwise.me'
+		footerText.value = "Powered by"
+		linkText.value = "BrainWise"
+		footerLink.value = "https://nexus.brainwise.me"
 	}
 }
 
@@ -94,13 +96,13 @@ const validateWithServer = async () => {
 	if (!serverValidationEnabled.value) return
 
 	try {
-		await call('pos_next.api.branding.validate_branding', {
+		await call("pos_next.api.branding.validate_branding", {
 			client_signature: config.value._sig,
 			brand_name: linkText.value,
-			brand_url: footerLink.value
+			brand_url: footerLink.value,
 		})
 	} catch (error) {
-		console.error('[BrainWise] Server validation failed:', error)
+		console.error("[BrainWise] Server validation failed:", error)
 	}
 }
 
@@ -114,53 +116,64 @@ const startServerValidation = () => {
 // Log client-side events to server
 const logClientEvent = async (eventType, details = {}) => {
 	try {
-		await call('pos_next.api.branding.log_client_event', {
+		await call("pos_next.api.branding.log_client_event", {
 			event_type: eventType,
 			details: JSON.stringify({
 				...details,
 				timestamp: Date.now(),
-				component_id: componentId
-			})
+				component_id: componentId,
+			}),
 		})
 	} catch (error) {
-		console.error('[BrainWise] Failed to log event:', error)
+		console.error("[BrainWise] Failed to log event:", error)
 	}
 }
 
 const ensureBranding = () => {
 	if (!footerRoot.value) return
 
-	const expectedBrand = atob(config.value._l || btoa('BrainWise'))
-	const expectedUrl = atob(config.value._u || btoa('https://nexus.brainwise.me'))
-	const expectedText = atob(config.value._t || btoa('Powered by'))
+	const expectedBrand = atob(config.value._l || btoa("BrainWise"))
+	const expectedUrl = atob(
+		config.value._u || btoa("https://nexus.brainwise.me"),
+	)
+	const expectedText = atob(config.value._t || btoa("Powered by"))
 
 	// Check if values have been tampered
 	if (linkText.value !== expectedBrand) {
 		linkText.value = expectedBrand
-		logClientEvent('modification', { field: 'brand_name', attempted_value: linkText.value })
+		logClientEvent("modification", {
+			field: "brand_name",
+			attempted_value: linkText.value,
+		})
 	}
 	if (footerLink.value !== expectedUrl) {
 		footerLink.value = expectedUrl
-		logClientEvent('modification', { field: 'brand_url', attempted_value: footerLink.value })
+		logClientEvent("modification", {
+			field: "brand_url",
+			attempted_value: footerLink.value,
+		})
 	}
 	if (footerText.value !== expectedText) {
 		footerText.value = expectedText
-		logClientEvent('modification', { field: 'brand_text', attempted_value: footerText.value })
+		logClientEvent("modification", {
+			field: "brand_text",
+			attempted_value: footerText.value,
+		})
 	}
 
-	const linkEl = footerRoot.value.querySelector('.footer-link')
+	const linkEl = footerRoot.value.querySelector(".footer-link")
 	if (linkEl) {
 		if (linkEl.textContent.trim() !== expectedBrand) {
 			linkEl.textContent = expectedBrand
 		}
-		if (linkEl.getAttribute('href') !== expectedUrl) {
-			linkEl.setAttribute('href', expectedUrl)
+		if (linkEl.getAttribute("href") !== expectedUrl) {
+			linkEl.setAttribute("href", expectedUrl)
 		}
-		linkEl.setAttribute('rel', 'noopener noreferrer')
-		linkEl.setAttribute('target', '_blank')
+		linkEl.setAttribute("rel", "noopener noreferrer")
+		linkEl.setAttribute("target", "_blank")
 	}
 
-	const textEl = footerRoot.value.querySelector('.footer-text')
+	const textEl = footerRoot.value.querySelector(".footer-text")
 	if (textEl && textEl.textContent.trim() !== expectedText) {
 		textEl.textContent = expectedText
 	}
@@ -168,7 +181,7 @@ const ensureBranding = () => {
 
 const ensureStylePresence = () => {
 	if (!styleElement || !document.head.contains(styleElement)) {
-		styleElement = document.createElement('style')
+		styleElement = document.createElement("style")
 		styleElement.textContent = `
 			.pos-footer-component {
 				pointer-events: auto !important;
@@ -209,11 +222,17 @@ const restoreFooter = () => {
 	const isInDom = document.body.contains(rootEl)
 
 	if (!isInDom) {
-		logClientEvent('removal', { restored: true })
+		logClientEvent("removal", { restored: true })
 
-		const parentTarget = (originalParent && document.contains(originalParent)) ? originalParent : document.body
+		const parentTarget =
+			originalParent && document.contains(originalParent)
+				? originalParent
+				: document.body
 
-		if (originalNextSibling && originalNextSibling.parentNode === parentTarget) {
+		if (
+			originalNextSibling &&
+			originalNextSibling.parentNode === parentTarget
+		) {
 			parentTarget.insertBefore(rootEl, originalNextSibling)
 		} else {
 			parentTarget.appendChild(rootEl)
@@ -226,41 +245,45 @@ const restoreFooter = () => {
 // Track link clicks
 const handleLinkClick = () => {
 	const timestamp = Date.now()
-	sessionStorage.setItem('_bw_lc', timestamp.toString())
-	logClientEvent('link_click', { url: footerLink.value })
+	sessionStorage.setItem("_bw_lc", timestamp.toString())
+	logClientEvent("link_click", { url: footerLink.value })
 }
 
 // Integrity check function
 const checkIntegrity = () => {
-	const elements = document.querySelectorAll('.pos-footer-component')
+	const elements = document.querySelectorAll(".pos-footer-component")
 
 	if (elements.length === 0) {
-		console.warn('[POS System] Footer component integrity check failed')
-		sessionStorage.setItem('_bw_ic', Date.now().toString())
-		logClientEvent('integrity_fail', { reason: 'element_not_found' })
+		console.warn("[POS System] Footer component integrity check failed")
+		sessionStorage.setItem("_bw_ic", Date.now().toString())
+		logClientEvent("integrity_fail", { reason: "element_not_found" })
 		restoreFooter()
 	} else {
 		// Check visibility
-		elements.forEach(el => {
+		elements.forEach((el) => {
 			const style = window.getComputedStyle(el)
-			if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
-				console.warn('[POS System] Footer visibility modified')
-				sessionStorage.setItem('_bw_vc', Date.now().toString())
-				logClientEvent('visibility_change', {
+			if (
+				style.display === "none" ||
+				style.visibility === "hidden" ||
+				style.opacity === "0"
+			) {
+				console.warn("[POS System] Footer visibility modified")
+				sessionStorage.setItem("_bw_vc", Date.now().toString())
+				logClientEvent("visibility_change", {
 					display: style.display,
 					visibility: style.visibility,
-					opacity: style.opacity
+					opacity: style.opacity,
 				})
-				el.style.display = 'flex'
-				el.style.visibility = 'visible'
-				el.style.opacity = '1'
+				el.style.display = "flex"
+				el.style.visibility = "visible"
+				el.style.opacity = "1"
 			}
 			// Ensure position stays fixed
-			if (style.position !== 'fixed') {
-				el.style.position = 'fixed'
-				el.style.bottom = '0'
-				el.style.left = '0'
-				el.style.right = '0'
+			if (style.position !== "fixed") {
+				el.style.position = "fixed"
+				el.style.bottom = "0"
+				el.style.left = "0"
+				el.style.right = "0"
 			}
 		})
 	}
@@ -271,25 +294,29 @@ const checkIntegrity = () => {
 
 // Mutation observer to detect DOM changes
 const observeFooter = () => {
-	if (typeof MutationObserver !== 'undefined') {
+	if (typeof MutationObserver !== "undefined") {
 		const targetNode = document.body
 		const observerConfig = {
 			childList: true,
 			subtree: true,
 			attributes: true,
-			attributeFilter: ['style', 'class']
+			attributeFilter: ["style", "class"],
 		}
 
 		visibilityObserver = new MutationObserver((mutations) => {
 			mutations.forEach((mutation) => {
-				if (mutation.type === 'childList' || mutation.type === 'attributes') {
-					const footerExists = document.querySelector('.pos-footer-component')
+				if (mutation.type === "childList" || mutation.type === "attributes") {
+					const footerExists = document.querySelector(".pos-footer-component")
 					if (!footerExists && mutation.removedNodes.length > 0) {
-						sessionStorage.setItem('_bw_rm', Date.now().toString())
-						logClientEvent('removal', { mutation_type: mutation.type })
+						sessionStorage.setItem("_bw_rm", Date.now().toString())
+						logClientEvent("removal", { mutation_type: mutation.type })
 						restoreFooter()
 					}
-					if (mutation.target && footerRoot.value && mutation.target === footerRoot.value) {
+					if (
+						mutation.target &&
+						footerRoot.value &&
+						mutation.target === footerRoot.value
+					) {
 						ensureBranding()
 					}
 				}
@@ -324,8 +351,8 @@ onMounted(async () => {
 		ensureBranding()
 	}
 
-	if (typeof window !== 'undefined') {
-		window.addEventListener('focus', ensureBranding, { passive: true })
+	if (typeof window !== "undefined") {
+		window.addEventListener("focus", ensureBranding, { passive: true })
 	}
 })
 
@@ -343,8 +370,8 @@ onBeforeUnmount(() => {
 	if (styleElement && document.head.contains(styleElement)) {
 		document.head.removeChild(styleElement)
 	}
-	if (typeof window !== 'undefined') {
-		window.removeEventListener('focus', ensureBranding)
+	if (typeof window !== "undefined") {
+		window.removeEventListener("focus", ensureBranding)
 	}
 })
 </script>

@@ -1,4 +1,10 @@
-import { deleteDraft, getDraftsCount, saveDraft, getAllDrafts, updateDraft } from "@/utils/draftManager"
+import {
+	deleteDraft,
+	getDraftsCount,
+	saveDraft,
+	getAllDrafts,
+	updateDraft,
+} from "@/utils/draftManager"
 import { useToast } from "@/composables/useToast"
 import { defineStore } from "pinia"
 import { ref } from "vue"

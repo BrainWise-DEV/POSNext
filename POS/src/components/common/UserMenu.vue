@@ -128,16 +128,26 @@ import { useLocale } from "@/composables/useLocale"
 
 // Avatar Sub-component
 const Avatar = (props) => {
-	const sizeClass = props.size === 'sm' ? 'w-9 h-9' : 'w-10 h-10'
-	const bgClass = props.image ? 'bg-gray-200' : 'bg-gradient-to-br from-blue-500 to-blue-600'
+	const sizeClass = props.size === "sm" ? "w-9 h-9" : "w-10 h-10"
+	const bgClass = props.image
+		? "bg-gray-200"
+		: "bg-gradient-to-br from-blue-500 to-blue-600"
 
-	return h('div', {
-		class: `${sizeClass} rounded-full flex items-center justify-center shadow-md overflow-hidden flex-shrink-0 ${bgClass}`
-	}, [
-		props.image
-			? h('img', { src: props.image, alt: props.name, class: 'w-full h-full object-cover' })
-			: h('span', { class: 'text-sm font-bold text-white' }, props.initials)
-	])
+	return h(
+		"div",
+		{
+			class: `${sizeClass} rounded-full flex items-center justify-center shadow-md overflow-hidden flex-shrink-0 ${bgClass}`,
+		},
+		[
+			props.image
+				? h("img", {
+						src: props.image,
+						alt: props.name,
+						class: "w-full h-full object-cover",
+					})
+				: h("span", { class: "text-sm font-bold text-white" }, props.initials),
+		],
+	)
 }
 
 const { locale, supportedLocales, changeLocale } = useLocale()
