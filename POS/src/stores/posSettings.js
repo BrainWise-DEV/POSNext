@@ -48,8 +48,8 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		allow_customer_purchase_order: 0,
 		allow_duplicate_customer_names: 0,
 		fetch_coupon: 0,
-		allow_promotional_offers: 1,
-		allow_coupons: 1,
+		allow_promotional_offers: 0,
+		allow_coupons: 0,
 		// Printing
 		allow_print_last_invoice: 0,
 		silent_print: 0,
@@ -186,10 +186,10 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	)
 	const fetchCoupon = computed(() => Boolean(settings.value.fetch_coupon))
 	const allowPromotionalOffers = computed(() => {
-		return settings.value.allow_promotional_offers !== undefined ? Boolean(settings.value.allow_promotional_offers) : true
+		return Number(settings.value.allow_promotional_offers) === 1
 	})
 	const allowCoupons = computed(() => {
-		return settings.value.allow_coupons !== undefined ? Boolean(settings.value.allow_coupons) : true
+		return Number(settings.value.allow_coupons) === 1
 	})
 
 	// Computed - Printing
@@ -338,8 +338,8 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 			allow_customer_purchase_order: 0,
 			allow_duplicate_customer_names: 0,
 			fetch_coupon: 0,
-			allow_promotional_offers: 1,
-			allow_coupons: 1,
+			allow_promotional_offers: 0,
+			allow_coupons: 0,
 			allow_print_last_invoice: 0,
 			silent_print: 0,
 			use_delivery_charges: 0,
