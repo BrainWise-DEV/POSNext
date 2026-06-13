@@ -894,10 +894,7 @@ async function loadUnpaidSummary() {
 	// Load cached summary immediately for instant display
 	try {
 		const cachedSummary = await getCachedUnpaidSummary(props.posProfile)
-		if (
-			cachedSummary &&
-			(cachedSummary.count > 0 || cachedSummary.total_outstanding > 0)
-		) {
+		if (cachedSummary) {
 			unpaidSummary.value = cachedSummary
 			log.debug("Loaded unpaid summary from cache (instant)")
 		}
@@ -920,16 +917,15 @@ async function loadUnpaidSummary() {
 			},
 		)
 
-		unpaidSummary.value = result || {
+		const freshSummary = result || {
 			count: 0,
 			total_outstanding: 0,
 			total_paid: 0,
 		}
+		unpaidSummary.value = freshSummary
 
-		// Cache for offline use
-		if (result) {
-			cacheUnpaidSummary(result, props.posProfile)
-		}
+		// Cache the fresh server summary, including zero values.
+		await cacheUnpaidSummary(freshSummary, props.posProfile)
 	} catch (error) {
 		log.error("Error loading summary:", error)
 		// If we already have cached data, don't show any error - silent fail
