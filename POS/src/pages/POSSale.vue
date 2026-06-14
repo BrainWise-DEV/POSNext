@@ -1003,8 +1003,10 @@
 // Module-scoped init guard — prevents redundant heavy initialization
 // when component remounts due to translationVersion changes.
 // Tracks the profile+shift key so a user/shift change correctly re-initializes.
-const _initializedKey = null
-const _posInitPromise = null
+// biome-ignore lint/style/useConst: Reassigned from script setup lifecycle handlers.
+let _initializedKey = null
+// biome-ignore lint/style/useConst: Reassigned from script setup lifecycle handlers.
+let _posInitPromise = null
 </script>
 
 <script setup>

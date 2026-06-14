@@ -41,6 +41,7 @@
 									type="text"
 									v-model="searchQuery"
 									:placeholder="__('Search products...')"
+									@keydown.enter="refreshProducts"
 								>
 									<template #prefix>
 										<FeatherIcon name="search" class="w-4 h-4 text-gray-500" />
@@ -69,7 +70,7 @@
 									{{ __('Add Product') }}
 								</Button>
 								<Button
-									@click="loadProducts"
+									@click="refreshProducts"
 									variant="outline"
 									class="w-full"
 									:loading="loading"
@@ -94,7 +95,12 @@
 									<div class="text-gray-400 mb-3">
 										<FeatherIcon name="inbox" class="w-12 h-12 mx-auto" />
 									</div>
-									<p class="text-sm font-medium text-gray-900">{{ __('No products found') }}</p>
+									<p class="text-sm font-medium text-gray-900">
+										{{ hasActiveProductFilters ? __('No matching products found') : __('No products found') }}
+									</p>
+									<p v-if="hasActiveProductFilters" class="mt-1 text-xs text-gray-500">
+										{{ __('Adjust the search or item group filter.') }}
+									</p>
 								</div>
 
 								<div v-else class="divide-y">
@@ -123,6 +129,21 @@
 											</div>
 										</div>
 									</button>
+								</div>
+
+								<div v-if="products.length > 0" class="p-3 bg-white border-t">
+									<Button
+										v-if="hasMore"
+										@click="loadMoreProducts"
+										variant="outline"
+										class="w-full"
+										:loading="loadingMore"
+									>
+										{{ __('Load more') }}
+									</Button>
+									<p v-else class="text-xs text-center text-gray-500">
+										{{ __('Showing all products') }}
+									</p>
 								</div>
 							</div>
 						</div>
@@ -193,42 +214,46 @@
 													</div>
 													<div class="flex-1 border border-gray-200 rounded-lg bg-white p-3">
 														<div class="flex flex-wrap gap-2 mb-2">
-														<input 
-															type="file" 
-															accept="image/*" 
-															@change="handleImageSelect"
-															ref="fileInput"
-															class="hidden"
-														/>
-														<Button v-if="form.image" @click="fileInput?.click()" variant="outline">
-															<template #prefix><FeatherIcon name="refresh-cw" class="w-4 h-4" /></template>
-															{{ __('Change') }}
-														</Button>
-														<Button v-else @click="fileInput?.click()" variant="outline">
-															<template #prefix><FeatherIcon name="upload" class="w-4 h-4" /></template>
-															{{ __('Upload') }}
-														</Button>
-														<Button v-if="form.image" @click="clearImage" variant="subtle" theme="red">
-																	<template #prefix><FeatherIcon name="trash-2" class="w-4 h-4" /></template>
-																	{{ __('Remove') }}
-																</Button>
+															<input
+																type="file"
+																accept="image/png,image/jpeg,image/webp,image/gif"
+																@change="handleImageSelect"
+																ref="fileInput"
+																class="hidden"
+															/>
+															<Button v-if="form.image" @click="fileInput?.click()" variant="outline">
+																<template #prefix><FeatherIcon name="refresh-cw" class="w-4 h-4" /></template>
+																{{ __('Change') }}
+															</Button>
+															<Button v-else @click="fileInput?.click()" variant="outline">
+																<template #prefix><FeatherIcon name="upload" class="w-4 h-4" /></template>
+																{{ __('Upload') }}
+															</Button>
+															<Button v-if="form.image" @click="clearImage" variant="subtle" theme="red">
+																<template #prefix><FeatherIcon name="trash-2" class="w-4 h-4" /></template>
+																{{ __('Remove') }}
+															</Button>
 														</div>
-														<p class="text-xs text-gray-500">{{ __('Select an image to upload directly when the product is saved.') }}</p>
+														<p class="text-xs text-gray-500">{{ __('PNG, JPG, GIF, or WebP up to 2 MB. Upload happens when the product is saved.') }}</p>
+														<p v-if="validationErrors.image" class="mt-1 text-xs text-red-600">{{ validationErrors.image }}</p>
 														<div v-if="selectedFile" class="mt-2 text-sm text-blue-600 flex items-center gap-2">
 															<FeatherIcon name="file" class="w-4 h-4" />
-															{{ selectedFile.name }}
+															{{ selectedFile.name }} ({{ formatFileSize(selectedFile.size) }})
 														</div>
 													</div>
 												</div>
 											</div>
 
 											<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-												<FormControl
-													type="text"
-													:label="__('Product Name')"
-													v-model="form.item_name"
-													:required="true"
-												/>
+												<div>
+													<FormControl
+														type="text"
+														:label="__('Product Name')"
+														v-model="form.item_name"
+														:required="true"
+													/>
+													<p v-if="validationErrors.item_name" class="mt-1 text-xs text-red-600">{{ validationErrors.item_name }}</p>
+												</div>
 												<div>
 													<label class="block text-sm font-medium text-gray-700 mb-1.5 text-start">
 														{{ __('Item Group') }} <span class="text-red-500">*</span>
@@ -240,6 +265,7 @@
 														:searchable="true"
 														:search-placeholder="__('Search item groups...')"
 													/>
+													<p v-if="validationErrors.item_group" class="mt-1 text-xs text-red-600">{{ validationErrors.item_group }}</p>
 												</div>
 												<div>
 													<label class="block text-sm font-medium text-gray-700 mb-1.5 text-start">
@@ -252,13 +278,17 @@
 														:searchable="true"
 														:search-placeholder="__('Search UOMs...')"
 													/>
+													<p v-if="validationErrors.stock_uom" class="mt-1 text-xs text-red-600">{{ validationErrors.stock_uom }}</p>
 												</div>
-												<FormControl
-													type="number"
-													:label="priceLabel"
-													v-model="form.price"
-													:required="true"
-												/>
+												<div>
+													<FormControl
+														type="number"
+														:label="priceLabel"
+														v-model="form.price"
+														:required="true"
+													/>
+													<p v-if="validationErrors.price" class="mt-1 text-xs text-red-600">{{ validationErrors.price }}</p>
+												</div>
 											</div>
 
 											<div class="pt-4 border-t">
@@ -305,6 +335,7 @@
 														</Button>
 													</div>
 												</div>
+												<p v-if="validationErrors.uom_conversions" class="mt-2 text-xs text-red-600">{{ validationErrors.uom_conversions }}</p>
 												<p class="mt-2 text-xs text-gray-500">
 													{{ __('Example: if base UOM is Piece, Box factor 12 means 1 Box = 12 Pieces.') }}
 												</p>
@@ -343,11 +374,21 @@ import {
 	FeatherIcon,
 } from "frappe-ui"
 import SelectInput from "@/components/common/SelectInput.vue"
-import { computed, ref, watch } from "vue"
+import { computed, onBeforeUnmount, ref, watch } from "vue"
 import { formatCurrency as formatCurrencyUtil } from "@/utils/currency"
 import { useToast } from "@/composables/useToast"
 import { call } from "@/utils/apiWrapper"
 import { useItemSearchStore } from "@/stores/itemSearch"
+
+const PAGE_SIZE = 20
+const SEARCH_DEBOUNCE_MS = 300
+const MAX_IMAGE_SIZE_BYTES = 2 * 1024 * 1024
+const ALLOWED_IMAGE_TYPES = new Set([
+	"image/gif",
+	"image/jpeg",
+	"image/png",
+	"image/webp",
+])
 
 const props = defineProps({
 	modelValue: Boolean,
@@ -366,8 +407,11 @@ const itemStore = useItemSearchStore()
 // State
 const show = ref(props.modelValue)
 const loading = ref(false)
+const loadingMore = ref(false)
 const saveLoading = ref(false)
 const products = ref([])
+const hasMore = ref(false)
+const productOffset = ref(0)
 const itemGroups = ref([])
 const uoms = ref([])
 const searchQuery = ref("")
@@ -377,11 +421,13 @@ const selectedProduct = ref(null)
 const isCreating = ref(false)
 const selectedFile = ref(null)
 const fileInput = ref(null)
+const validationErrors = ref({})
+let productSearchTimer = null
 
 const form = ref({
 	item_code: "",
 	item_name: "",
-	item_group: "Products",
+	item_group: "",
 	stock_uom: "Nos",
 	price: 0,
 	image: "",
@@ -412,11 +458,12 @@ const priceLabel = computed(() => {
 	return props.currency ? __("Price ({0})", [props.currency]) : __("Price")
 })
 
+const hasActiveProductFilters = computed(() => {
+	return Boolean(searchQuery.value.trim()) || filterGroup.value !== "All"
+})
+
 function formatCurrency(amount) {
-	return formatCurrencyUtil(
-		Number.parseFloat(amount || 0),
-		props.currency,
-	)
+	return formatCurrencyUtil(Number.parseFloat(amount || 0), props.currency)
 }
 
 // Watchers
@@ -425,7 +472,7 @@ watch(
 	(val) => {
 		show.value = val
 		if (val) {
-			loadProducts()
+			refreshProducts()
 			loadItemGroups()
 			loadUOMs()
 		}
@@ -435,12 +482,36 @@ watch(
 watch(show, (val) => {
 	emit("update:modelValue", val)
 	if (!val) {
+		clearProductSearchTimer()
 		returnToList()
 	}
 })
 
 watch([searchQuery, filterGroup], () => {
-	loadProducts()
+	if (show.value) {
+		queueProductsLoad()
+	}
+})
+
+watch(
+	() => form.value.item_name,
+	() => clearValidationError("item_name"),
+)
+watch(
+	() => form.value.item_group,
+	() => clearValidationError("item_group"),
+)
+watch(
+	() => form.value.stock_uom,
+	() => clearValidationError("stock_uom"),
+)
+watch(
+	() => form.value.price,
+	() => clearValidationError("price"),
+)
+
+onBeforeUnmount(() => {
+	clearProductSearchTimer()
 })
 
 // Actions
@@ -458,7 +529,7 @@ function resetForm() {
 	form.value = {
 		item_code: "",
 		item_name: "",
-		item_group: "Products",
+		item_group: getDefaultItemGroup(),
 		stock_uom: "Nos",
 		price: 0,
 		image: "",
@@ -467,6 +538,7 @@ function resetForm() {
 		uom_conversions: [],
 	}
 	selectedFile.value = null
+	validationErrors.value = {}
 	if (fileInput.value) fileInput.value.value = ""
 }
 
@@ -488,6 +560,7 @@ function selectProduct(product) {
 		})),
 	}
 	selectedFile.value = null
+	validationErrors.value = {}
 	if (fileInput.value) fileInput.value.value = ""
 }
 
@@ -497,17 +570,36 @@ function handleCreateNew() {
 	resetForm()
 }
 
+function getDefaultItemGroup() {
+	return rawItemGroupOptions.value[0]?.value || ""
+}
+
 function handleImageSelect(event) {
 	const file = event.target.files?.[0]
-	if (file) {
-		selectedFile.value = file
-		// create preview
-		const reader = new FileReader()
-		reader.onload = (e) => {
-			form.value.image = e.target.result
-		}
-		reader.readAsDataURL(file)
+	clearValidationError("image")
+
+	if (!file) {
+		return
 	}
+
+	const imageError = validateImageFile(file)
+	if (imageError) {
+		selectedFile.value = null
+		validationErrors.value = {
+			...validationErrors.value,
+			image: imageError,
+		}
+		if (fileInput.value) fileInput.value.value = ""
+		showError(imageError)
+		return
+	}
+
+	selectedFile.value = file
+	const reader = new FileReader()
+	reader.onload = (e) => {
+		form.value.image = e.target.result
+	}
+	reader.readAsDataURL(file)
 }
 
 function clearImage() {
@@ -551,6 +643,10 @@ function buildSavedProduct(itemCode) {
 }
 
 function productMatchesCurrentFilters(product) {
+	if (product.disabled) {
+		return false
+	}
+
 	if (filterGroup.value !== "All" && product.item_group !== filterGroup.value) {
 		return false
 	}
@@ -565,7 +661,9 @@ function productMatchesCurrentFilters(product) {
 
 function syncSavedProductToList(itemCode) {
 	const savedProduct = buildSavedProduct(itemCode)
-	const existingIndex = products.value.findIndex((product) => product.name === itemCode)
+	const existingIndex = products.value.findIndex(
+		(product) => product.name === itemCode,
+	)
 
 	if (!productMatchesCurrentFilters(savedProduct)) {
 		if (existingIndex >= 0) {
@@ -582,6 +680,85 @@ function syncSavedProductToList(itemCode) {
 	products.value.unshift(savedProduct)
 }
 
+function clearValidationError(field) {
+	if (!validationErrors.value[field]) return
+	const nextErrors = { ...validationErrors.value }
+	delete nextErrors[field]
+	validationErrors.value = nextErrors
+}
+
+function validateImageFile(file) {
+	if (!ALLOWED_IMAGE_TYPES.has(file.type)) {
+		return __("Image must be PNG, JPG, GIF, or WebP")
+	}
+
+	if (file.size > MAX_IMAGE_SIZE_BYTES) {
+		return __("Image must be 2 MB or smaller")
+	}
+
+	return ""
+}
+
+function formatFileSize(size) {
+	if (size >= 1024 * 1024) {
+		return `${(size / (1024 * 1024)).toFixed(1)} MB`
+	}
+	return `${Math.max(Math.round(size / 1024), 1)} KB`
+}
+
+function validateProductForm() {
+	const errors = {}
+	const itemName = form.value.item_name?.trim()
+	const price = Number(form.value.price)
+
+	if (!itemName) {
+		errors.item_name = __("Product Name is required")
+	}
+
+	if (!form.value.item_group) {
+		errors.item_group = __("Item Group is required")
+	}
+
+	if (!form.value.stock_uom) {
+		errors.stock_uom = __("UOM is required")
+	}
+
+	if (
+		form.value.price === "" ||
+		form.value.price === null ||
+		form.value.price === undefined
+	) {
+		errors.price = __("Price is required")
+	} else if (Number.isNaN(price) || price < 0) {
+		errors.price = __("Price must be zero or greater")
+	}
+
+	const invalidConversion = form.value.uom_conversions.find(
+		(row) => row.uom && Number(row.conversion_factor || 0) <= 0,
+	)
+	if (invalidConversion) {
+		errors.uom_conversions = __(
+			"UOM conversion factor must be greater than zero",
+		)
+	}
+
+	if (selectedFile.value) {
+		const imageError = validateImageFile(selectedFile.value)
+		if (imageError) {
+			errors.image = imageError
+		}
+	}
+
+	validationErrors.value = errors
+
+	if (Object.keys(errors).length > 0) {
+		showError(__("Please fix the highlighted fields"))
+		return false
+	}
+
+	return true
+}
+
 async function uploadImage(itemCode) {
 	if (!selectedFile.value) return form.value.image
 
@@ -593,38 +770,28 @@ async function uploadImage(itemCode) {
 	formData.append("docname", itemCode)
 	formData.append("fieldname", "image")
 
-	try {
-		const response = await fetch("/api/method/upload_file", {
-			method: "POST",
-			headers: {
-				"X-Frappe-CSRF-Token": window.csrf_token,
-			},
-			body: formData,
-		})
-		const data = await response.json()
-		if (data.message?.file_url) {
-			return data.message.file_url
-		}
-	} catch (error) {
-		console.error("Image upload failed", error)
+	const response = await fetch("/api/method/upload_file", {
+		method: "POST",
+		headers: {
+			"X-Frappe-CSRF-Token": window.csrf_token,
+		},
+		body: formData,
+	})
+	const responseData = await response.json().catch(() => ({}))
+
+	if (!response.ok || responseData.exc) {
+		throw new Error(__("Image upload failed"))
 	}
-	return form.value.image
+
+	if (responseData.message?.file_url) {
+		return responseData.message.file_url
+	}
+
+	throw new Error(__("Image upload did not return a file URL"))
 }
 
 async function saveProduct() {
-	if (!form.value.item_name) {
-		showError(__("Product Name is required"))
-		return
-	}
-	if (!form.value.price && form.value.price !== 0) {
-		showError(__("Price is required"))
-		return
-	}
-	const invalidConversion = form.value.uom_conversions.find(
-		(row) => row.uom && Number(row.conversion_factor || 0) <= 0,
-	)
-	if (invalidConversion) {
-		showError(__("UOM conversion factor must be greater than zero"))
+	if (!validateProductForm()) {
 		return
 	}
 
@@ -675,46 +842,96 @@ async function saveProduct() {
 }
 
 // Data loading
-async function loadProducts() {
-	loading.value = true
+function clearProductSearchTimer() {
+	if (productSearchTimer) {
+		clearTimeout(productSearchTimer)
+		productSearchTimer = null
+	}
+}
+
+function queueProductsLoad() {
+	clearProductSearchTimer()
+	productSearchTimer = setTimeout(() => {
+		productSearchTimer = null
+		loadProducts()
+	}, SEARCH_DEBOUNCE_MS)
+}
+
+function refreshProducts() {
+	clearProductSearchTimer()
+	loadProducts()
+}
+
+async function loadProducts({ append = false } = {}) {
+	const nextStart = append ? productOffset.value : 0
+	if (append) {
+		loadingMore.value = true
+	} else {
+		loading.value = true
+	}
+
 	try {
-		const params = { pos_profile: props.posProfile }
-		if (searchQuery.value) params.search_term = searchQuery.value
+		const params = {
+			pos_profile: props.posProfile,
+			start: nextStart,
+			limit: PAGE_SIZE,
+		}
+		const searchTerm = searchQuery.value.trim()
+		if (searchTerm) params.search_term = searchTerm
 		if (filterGroup.value !== "All") params.item_group = filterGroup.value
 
 		const data = await call(
 			"pos_next.api.product_management.get_products",
 			params,
 		)
-		products.value = data || []
+		const page = Array.isArray(data) ? data : []
+		const visibleProducts = page.slice(0, PAGE_SIZE)
+		hasMore.value = page.length > PAGE_SIZE
+		products.value = append
+			? [...products.value, ...visibleProducts]
+			: visibleProducts
+		productOffset.value = nextStart + visibleProducts.length
 	} catch (error) {
 		handleError(error, __("Failed to load products"))
 	} finally {
-		loading.value = false
+		if (append) {
+			loadingMore.value = false
+		} else {
+			loading.value = false
+		}
 	}
+}
+
+async function loadMoreProducts() {
+	if (!hasMore.value || loadingMore.value || loading.value) return
+	await loadProducts({ append: true })
 }
 
 async function loadItemGroups() {
 	try {
-		const data = await call("pos_next.api.promotions.get_item_groups", {
-			company: props.company,
+		const data = await call("pos_next.api.product_management.get_item_groups", {
+			pos_profile: props.posProfile,
 		})
 		itemGroups.value = data || []
+		if (isCreating.value && !form.value.item_group) {
+			form.value.item_group = getDefaultItemGroup()
+		}
 	} catch (error) {
-		console.error("Failed to load item groups", error)
+		handleError(error, __("Failed to load item groups"))
 	}
 }
 
 async function loadUOMs() {
 	try {
-		// Just standard frappe get_all for UOM
-		const response = await fetch(
-			'/api/resource/UOM?limit_page_length=0&fields=["name"]',
-		)
-		const json = await response.json()
-		uoms.value = json.data || []
+		const data = await call("frappe.client.get_list", {
+			doctype: "UOM",
+			fields: ["name"],
+			limit_page_length: 500,
+			order_by: "name asc",
+		})
+		uoms.value = data || []
 	} catch (error) {
-		console.error("Failed to load UOMs", error)
+		handleError(error, __("Failed to load UOMs"))
 	}
 }
 </script>
