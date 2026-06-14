@@ -41,6 +41,7 @@ declare module 'vue' {
     POSFooter: typeof import('./src/components/common/POSFooter.vue')['default']
     POSHeader: typeof import('./src/components/pos/POSHeader.vue')['default']
     POSSettings: typeof import('./src/components/settings/POSSettings.vue')['default']
+    ProductManagement: typeof import('./src/components/sale/ProductManagement.vue')['default']
     PromotionManagement: typeof import('./src/components/sale/PromotionManagement.vue')['default']
     ReturnInvoiceDialog: typeof import('./src/components/sale/ReturnInvoiceDialog.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
