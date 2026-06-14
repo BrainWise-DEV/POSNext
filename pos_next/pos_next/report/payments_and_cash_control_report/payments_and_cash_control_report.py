@@ -118,7 +118,7 @@ def get_data(filters):
 	conditions = get_conditions(filters)
 
 	# Get payment reconciliation details from closing shifts
-	query = """
+	query = f"""
 		SELECT
 			pcs.name as shift,
 			pcs.pos_profile,
@@ -142,7 +142,7 @@ def get_data(filters):
 			{conditions}
 		ORDER BY
 			pcs.period_end_date DESC, pr.mode_of_payment
-	""".format(conditions=conditions)
+	"""
 
 	raw = frappe.db.sql(query, filters, as_dict=1)
 
@@ -241,7 +241,7 @@ def _get_transaction_counts(data):
 	placeholders = ", ".join(["%s"] * len(shift_names))
 
 	rows = frappe.db.sql(
-		"""
+		f"""
 		SELECT
 			sir.parent as shift,
 			COUNT(DISTINCT sir.sales_invoice) as cnt
@@ -249,7 +249,7 @@ def _get_transaction_counts(data):
 		WHERE sir.parenttype = 'POS Closing Shift'
 		AND sir.parent IN ({placeholders})
 		GROUP BY sir.parent
-	""".format(placeholders=placeholders),
+	""",
 		shift_names,
 		as_dict=1,
 	)
@@ -266,7 +266,7 @@ def _get_bank_deposit_data(data):
 	placeholders = ", ".join(["%s"] * len(shift_names))
 
 	rows = frappe.db.sql(
-		"""
+		f"""
 		SELECT
 			pcs.name as shift,
 			bd.deposit_amount,
@@ -275,7 +275,7 @@ def _get_bank_deposit_data(data):
 		INNER JOIN `tabBank Deposits` bd ON bd.name = pcs.custom_bank_deposit
 		WHERE pcs.name IN ({placeholders})
 			AND bd.docstatus = 1
-		""".format(placeholders=placeholders),
+		""",
 		shift_names,
 		as_dict=1,
 	)

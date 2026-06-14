@@ -569,7 +569,7 @@ def reverse_wallet_transactions_for_return(original_invoice, return_invoice):
 			except Exception as e:
 				frappe.log_error(
 					title="Wallet Transaction Cancel on Return Error",
-					message=f"WT: {wt.name}, Return: {return_invoice}, Error: {str(e)}\n{frappe.get_traceback()}",
+					message=f"WT: {wt.name}, Return: {return_invoice}, Error: {e!s}\n{frappe.get_traceback()}",
 				)
 
 		elif reverse_amount > 0:
@@ -613,6 +613,6 @@ def reverse_wallet_transactions_for_return(original_invoice, return_invoice):
 					message=(
 						f"WT: {wt.name}, Return: {return_invoice}, "
 						f"Original: {original_invoice}, Reverse Amount: {reverse_amount}, "
-						f"Error: {str(e)}\n{frappe.get_traceback()}"
+						f"Error: {e!s}\n{frappe.get_traceback()}"
 					),
 				)

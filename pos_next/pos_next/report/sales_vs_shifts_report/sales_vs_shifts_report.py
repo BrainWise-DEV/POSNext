@@ -37,15 +37,15 @@ PERFORMANCE METRICS
 
 RATE CALCULATIONS
 -----------------
-- Return Rate: (Returns / Gross Sales) × 100
-- Discount Rate: (Discounts / Gross Sales) × 100
+- Return Rate: (Returns / Gross Sales) x 100
+- Discount Rate: (Discounts / Gross Sales) x 100
 
 EFFICIENCY SCORE (0-100)
 ------------------------
 Base score: 70 points
 
 Factor 1 - Return Rate (-20 to +5):
-  - return_rate > 15%: penalty = min(20, (rate - 15) × 2)
+  - return_rate > 15%: penalty = min(20, (rate - 15) x 2)
   - return_rate ≤ 5%: bonus = +5
 
 Factor 2 - Discount Rate (-10 to +5):
@@ -106,10 +106,7 @@ def get_report_message(data):
 	good_count = len([d for d in data if d.rating == "Good"])
 	average_count = len([d for d in data if d.rating == "Average"])
 	needs_improvement = len([d for d in data if d.rating == "Needs Improvement"])
-	no_sales_count = len([d for d in data if d.gross_sales == 0])
-
 	total_gross = sum(d.gross_sales for d in data)
-	total_net = sum(d.net_sales for d in data)
 	total_returns = sum(d.returns for d in data)
 	total_invoices = sum(d.invoices for d in data)
 
@@ -666,7 +663,7 @@ def fetch_shifts_with_invoices(filters):
 
 	conditions = build_conditions(filters)
 
-	query = """
+	query = f"""
 		SELECT
 			pcs.name AS shift_id,
 			pcs.pos_profile,
@@ -693,7 +690,7 @@ def fetch_shifts_with_invoices(filters):
 		{conditions}
 		GROUP BY pcs.name
 		ORDER BY pcs.period_start_date DESC
-	""".format(conditions=conditions)
+	"""
 
 	return frappe.db.sql(query, filters, as_dict=True)
 
@@ -1157,7 +1154,7 @@ def get_hourly_breakdown(filters):
 	where = " AND " + " AND ".join(conditions) if conditions else ""
 
 	return frappe.db.sql(
-		"""
+		f"""
 		SELECT
 			HOUR(si.posting_time) AS hour,
 			COUNT(*) AS invoice_count,
@@ -1167,7 +1164,7 @@ def get_hourly_breakdown(filters):
 		{where}
 		GROUP BY HOUR(si.posting_time)
 		ORDER BY hour
-	""".format(where=where),
+	""",
 		filters,
 		as_dict=True,
 	)
@@ -1191,7 +1188,7 @@ def get_payment_method_breakdown(filters):
 	where = " AND " + " AND ".join(conditions) if conditions else ""
 
 	return frappe.db.sql(
-		"""
+		f"""
 		SELECT
 			sip.mode_of_payment,
 			COUNT(DISTINCT si.name) AS transaction_count,
@@ -1202,7 +1199,7 @@ def get_payment_method_breakdown(filters):
 		{where}
 		GROUP BY sip.mode_of_payment
 		ORDER BY total_amount DESC
-	""".format(where=where),
+	""",
 		filters,
 		as_dict=True,
 	)
@@ -1226,7 +1223,7 @@ def get_daily_trend(filters):
 	where = " AND " + " AND ".join(conditions) if conditions else ""
 
 	return frappe.db.sql(
-		"""
+		f"""
 		SELECT
 			si.posting_date AS date,
 			COUNT(*) AS invoice_count,
@@ -1236,7 +1233,7 @@ def get_daily_trend(filters):
 		{where}
 		GROUP BY si.posting_date
 		ORDER BY si.posting_date
-	""".format(where=where),
+	""",
 		filters,
 		as_dict=True,
 	)

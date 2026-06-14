@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright (c) 2024, POS Next and contributors
 # For license information, please see license.txt
 
@@ -121,5 +120,5 @@ def change_user_language(locale):
 
 		return {"success": True, "message": f"Language changed to {locale}", "locale": locale}
 	except Exception as e:
-		frappe.log_error(f"Failed to change user language: {str(e)}")
-		frappe.throw(f"Failed to change language: {str(e)}", frappe.ValidationError)
+		frappe.log_error(f"Failed to change user language: {e!s}")
+		frappe.throw(f"Failed to change language: {e!s}", frappe.ValidationError)

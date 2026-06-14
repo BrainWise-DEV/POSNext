@@ -35,7 +35,7 @@ def after_install():
 	except Exception as e:
 		frappe.db.rollback()
 		frappe.log_error(title="POS Next Installation Error", message=frappe.get_traceback())
-		log_message(f"POS Next: Installation error - {str(e)}", level="error")
+		log_message(f"POS Next: Installation error - {e!s}", level="error")
 		raise
 
 
@@ -59,7 +59,7 @@ def after_migrate():
 	except Exception as e:
 		frappe.db.rollback()
 		frappe.log_error(title="POS Next Migration Error", message=frappe.get_traceback())
-		log_message(f"POS Next: Migration error - {str(e)}", level="error")
+		log_message(f"POS Next: Migration error - {e!s}", level="error")
 		raise
 
 
@@ -95,9 +95,7 @@ def setup_default_print_format(quiet=False):
 						log_message(f"Set default print format for: {profile.name}", level="info", indent=1)
 					updated_count += 1
 				except Exception as e:
-					log_message(
-						f"Error updating POS Profile {profile.name}: {str(e)}", level="error", indent=1
-					)
+					log_message(f"Error updating POS Profile {profile.name}: {e!s}", level="error", indent=1)
 
 			if updated_count > 0 and not quiet:
 				log_message(
@@ -105,7 +103,7 @@ def setup_default_print_format(quiet=False):
 				)
 
 	except Exception as e:
-		log_message(f"Error setting up default print format: {str(e)}", level="error")
+		log_message(f"Error setting up default print format: {e!s}", level="error")
 		frappe.log_error(title="Default Print Format Setup Error", message=frappe.get_traceback())
 
 

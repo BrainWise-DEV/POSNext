@@ -53,9 +53,7 @@ class POSClosingShift(Document):
 		if user:
 			frappe.throw(
 				_(
-					"POS Closing Shift <strong>already exists</strong> against {0} between selected period".format(
-						frappe.bold(self.user)
-					)
+					f"POS Closing Shift <strong>already exists</strong> against {frappe.bold(self.user)} between selected period"
 				),
 				title=_("Invalid Period"),
 			)
@@ -352,7 +350,6 @@ def get_cashiers(doctype, txt, searchfield, start, page_len, filters):
 @frappe.whitelist()
 def get_pos_invoices(pos_opening_shift, doctype=None):
 	if not doctype:
-		pos_profile = frappe.db.get_value("POS Opening Shift", pos_opening_shift, "pos_profile")
 		use_pos_invoice = False
 		doctype = "POS Invoice" if use_pos_invoice else "Sales Invoice"
 	submit_printed_invoices(pos_opening_shift, doctype)
@@ -512,7 +509,7 @@ def _process_invoice(invoice, invoice_field, company_currency, cash_mode, paymen
 
 	# Subtract change_amount once from the cash mode.  change_amount is an
 	# invoice-level field — the customer overpaid and received change back,
-	# so the drawer's net gain is (sum of cash rows − change).  Handling it
+	# so the drawer's net gain is (sum of cash rows - change).  Handling it
 	# outside the loop avoids double-subtraction when multiple payment rows
 	# share the same cash mode.
 	base_change = get_base_value(invoice, "change_amount", "base_change_amount", conversion_rate)

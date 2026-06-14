@@ -173,7 +173,7 @@ def before_cancel(doc, method=None):
 	except Exception as e:
 		frappe.log_error(
 			title="Credit Sale JE Cancellation Error",
-			message=f"Invoice: {doc.name}, Error: {str(e)}\n{frappe.get_traceback()}",
+			message=f"Invoice: {doc.name}, Error: {e!s}\n{frappe.get_traceback()}",
 		)
 		# Don't block invoice cancellation if JE cancellation fails
 		frappe.msgprint(

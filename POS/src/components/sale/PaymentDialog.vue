@@ -602,9 +602,7 @@
 											>
 										</div>
 										<div class="text-xs text-gray-500 mt-0.5">
-											{{
-												formatCurrency(item.rate || item.price_list_rate)
-											}}
+											{{ formatCurrency(item.rate || item.price_list_rate) }}
 											× {{ item.qty || item.quantity }}
 										</div>
 									</div>
