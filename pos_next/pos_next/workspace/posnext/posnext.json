@@ -104,7 +104,7 @@
    "hidden": 0,
    "is_query_report": 0,
    "label": "Shift Management",
-   "link_count": 2,
+   "link_count": 3,
    "link_type": "DocType",
    "onboard": 0,
    "type": "Card Break"
@@ -125,6 +125,16 @@
    "label": "POS Closing Shift",
    "link_count": 0,
    "link_to": "POS Closing Shift",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Bank Deposits",
+   "link_count": 0,
+   "link_to": "Bank Deposits",
    "link_type": "DocType",
    "onboard": 0,
    "type": "Link"
