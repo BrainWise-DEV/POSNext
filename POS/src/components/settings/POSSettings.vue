@@ -326,6 +326,16 @@
 												:label="__('Disable Rounded Total')"
 												:description="__('Show exact totals without rounding')"
 											/>
+											<CheckboxField
+												v-model="settings.allow_promotional_offers"
+												:label="__('Allow Promotional Offers')"
+												:description="__('Show promotional offers button in cart and checkout')"
+											/>
+											<CheckboxField
+												v-model="settings.allow_coupons"
+												:label="__('Allow Coupons')"
+												:description="__('Show coupon code field in cart and checkout')"
+											/>
 										</div>
 									</div>
 
@@ -622,6 +632,8 @@ const settings = ref({
 	silent_print: 0,
 	allow_negative_stock: 0,
 	tax_inclusive: 0,
+	allow_promotional_offers: 1,
+	allow_coupons: 1,
 })
 
 // Stock Sync Settings (localStorage persisted)
