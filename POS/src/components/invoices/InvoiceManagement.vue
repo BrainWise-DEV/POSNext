@@ -835,30 +835,23 @@ async function loadUnpaidInvoices() {
 	// Start loading immediately - show skeleton while fetching
 	loading.value = true
 
-	// Load cached data immediately for instant display
-	try {
-		const cachedInvoices = await getCachedUnpaidInvoices(props.posProfile, {
-			limit: 100,
-		})
-		if (cachedInvoices && cachedInvoices.length > 0) {
-			unpaidInvoices.value = cachedInvoices
-			loading.value = false // Hide skeleton once we have cached data
-			log.debug(
-				"Loaded",
-				cachedInvoices.length,
-				"unpaid invoices from cache (instant)",
-			)
-		}
-	} catch (cacheError) {
-		log.debug("No cached unpaid invoices available")
-	}
-
-	// If offline, we're done - use only cached data
 	if (isOffline()) {
-		log.info("Offline mode - using cached unpaid invoices")
-		loading.value = false
+		try {
+			const cachedInvoices = await getCachedUnpaidInvoices(props.posProfile, {
+				limit: 100,
+			})
+			unpaidInvoices.value = cachedInvoices || []
+			log.info("Offline mode - using cached unpaid invoices")
+		} catch (cacheError) {
+			log.debug("No cached unpaid invoices available")
+		} finally {
+			loading.value = false
+		}
 		return
 	}
+
+	// Avoid flashing stale cached invoices while online; show fresh server state only.
+	unpaidInvoices.value = []
 
 	// Fetch fresh data from server in background
 	try {
@@ -872,14 +865,21 @@ async function loadUnpaidInvoices() {
 
 		unpaidInvoices.value = result || []
 
-		// Cache for offline use
-		if (result && result.length > 0) {
-			cacheUnpaidInvoices(result, props.posProfile)
-		}
+		// Cache the fresh server result, including an empty list, so invoices that
+		// were settled since the last cache refresh do not flash as unpaid offline.
+		await cacheUnpaidInvoices(result || [], props.posProfile)
 	} catch (error) {
 		log.error("Error loading unpaid invoices:", error)
 
-		// If we already have cached data, don't show error
+		const cachedInvoices = await getCachedUnpaidInvoices(props.posProfile, {
+			limit: 100,
+		})
+		if (cachedInvoices && cachedInvoices.length > 0) {
+			unpaidInvoices.value = cachedInvoices
+			return
+		}
+
+		// If no cached fallback is available, show the load error.
 		if (unpaidInvoices.value.length === 0) {
 			showError(error.message || __("Failed to load unpaid invoices"))
 		}
@@ -894,10 +894,7 @@ async function loadUnpaidSummary() {
 	// Load cached summary immediately for instant display
 	try {
 		const cachedSummary = await getCachedUnpaidSummary(props.posProfile)
-		if (
-			cachedSummary &&
-			(cachedSummary.count > 0 || cachedSummary.total_outstanding > 0)
-		) {
+		if (cachedSummary) {
 			unpaidSummary.value = cachedSummary
 			log.debug("Loaded unpaid summary from cache (instant)")
 		}
@@ -920,16 +917,15 @@ async function loadUnpaidSummary() {
 			},
 		)
 
-		unpaidSummary.value = result || {
+		const freshSummary = result || {
 			count: 0,
 			total_outstanding: 0,
 			total_paid: 0,
 		}
+		unpaidSummary.value = freshSummary
 
-		// Cache for offline use
-		if (result) {
-			cacheUnpaidSummary(result, props.posProfile)
-		}
+		// Cache the fresh server summary, including zero values.
+		await cacheUnpaidSummary(freshSummary, props.posProfile)
 	} catch (error) {
 		log.error("Error loading summary:", error)
 		// If we already have cached data, don't show any error - silent fail
