@@ -4,10 +4,10 @@
  * Enhanced with retry logic, graceful degradation, and error recovery
  */
 
-import { logger } from "../logger"
-import { offlineState } from "./offlineState"
+import { logger } from '../logger'
+import { offlineState } from './offlineState'
 
-const log = logger.create("OfflineWorker")
+const log = logger.create('OfflineWorker')
 
 class OfflineWorkerClient {
 	constructor() {
@@ -35,13 +35,9 @@ class OfflineWorkerClient {
 
 		// Check if we've exceeded max init attempts
 		if (this.initAttempts >= this.maxInitAttempts) {
-			log.error(
-				"Max initialization attempts reached, using graceful degradation",
-			)
+			log.error("Max initialization attempts reached, using graceful degradation")
 			this.workerCrashed = true
-			this.rejectAllPending(
-				"Worker failed to initialize after multiple attempts",
-			)
+			this.rejectAllPending("Worker failed to initialize after multiple attempts")
 			return
 		}
 
@@ -68,11 +64,9 @@ class OfflineWorkerClient {
 					// Initialize centralized offline state
 					offlineState.initialize({
 						serverOnline: payload.serverOnline,
-						manualOffline: payload.manualOffline || false,
+						manualOffline: payload.manualOffline || false
 					})
-					log.success("Offline worker ready", {
-						serverOnline: payload.serverOnline,
-					})
+					log.success("Offline worker ready", { serverOnline: payload.serverOnline })
 					return
 				}
 
@@ -81,7 +75,7 @@ class OfflineWorkerClient {
 					// Update centralized offline state (handles window sync and events)
 					offlineState.updateState({
 						serverOnline: payload.serverOnline,
-						manualOffline: payload.manualOffline,
+						manualOffline: payload.manualOffline
 					})
 					// Also emit legacy event for backward compatibility
 					window.dispatchEvent(
@@ -113,12 +107,7 @@ class OfflineWorkerClient {
 				}
 
 				if (id !== undefined && this.pendingMessages.has(id)) {
-					const {
-						resolve,
-						reject,
-						messageType,
-						payload: originalPayload,
-					} = this.pendingMessages.get(id)
+					const { resolve, reject, messageType, payload: originalPayload } = this.pendingMessages.get(id)
 					this.pendingMessages.delete(id)
 
 					if (type === "SUCCESS") {
@@ -130,13 +119,7 @@ class OfflineWorkerClient {
 						const shouldRetry = this.shouldRetryMessage(messageType, payload)
 						if (shouldRetry) {
 							// CRITICAL FIX: Use original payload, not error payload
-							this.retryMessage(
-								id,
-								messageType,
-								originalPayload,
-								resolve,
-								reject,
-							)
+							this.retryMessage(id, messageType, originalPayload, resolve, reject)
 						} else {
 							this.retryAttempts.delete(messageType)
 							reject(new Error(payload.message))
@@ -193,10 +176,7 @@ class OfflineWorkerClient {
 			// If no message received in 2 minutes and we have pending messages, worker might be hung
 			if (timeSinceLastMessage > 120000 && this.pendingMessages.size > 0) {
 				log.warn("Worker appears unresponsive, attempting recovery")
-				this.handleWorkerCrash(
-					"Worker unresponsive",
-					"No messages received for 2 minutes",
-				)
+				this.handleWorkerCrash("Worker unresponsive", "No messages received for 2 minutes")
 			}
 		}, 60000)
 	}
@@ -212,7 +192,7 @@ class OfflineWorkerClient {
 			"Cannot save empty invoice",
 		]
 
-		if (nonRetryableErrors.some((err) => errorPayload.message?.includes(err))) {
+		if (nonRetryableErrors.some(err => errorPayload.message?.includes(err))) {
 			return false
 		}
 
@@ -223,30 +203,16 @@ class OfflineWorkerClient {
 	/**
 	 * Retry a failed message with exponential backoff
 	 */
-	async retryMessage(
-		originalId,
-		messageType,
-		originalPayload,
-		resolve,
-		reject,
-	) {
+	async retryMessage(originalId, messageType, originalPayload, resolve, reject) {
 		const currentRetries = this.retryAttempts.get(messageType) || 0
 		this.retryAttempts.set(messageType, currentRetries + 1)
 
-		const delay =
-			this.retryDelay * Math.pow(this.retryMultiplier, currentRetries)
-		log.info(`Retrying ${messageType} in ${delay}ms`, {
-			attempt: currentRetries + 1,
-			maxRetries: this.maxRetries,
-		})
+		const delay = this.retryDelay * Math.pow(this.retryMultiplier, currentRetries)
+		log.info(`Retrying ${messageType} in ${delay}ms`, { attempt: currentRetries + 1, maxRetries: this.maxRetries })
 
 		setTimeout(async () => {
 			try {
-				const result = await this.sendMessage(
-					messageType,
-					originalPayload,
-					true,
-				)
+				const result = await this.sendMessage(messageType, originalPayload, true)
 				this.retryAttempts.delete(messageType)
 				resolve(result)
 			} catch (error) {
@@ -319,19 +285,13 @@ class OfflineWorkerClient {
 			const maxWaitTime = 5000 // 5 seconds max wait
 			const startTime = Date.now()
 
-			while (
-				!this.ready &&
-				!this.workerCrashed &&
-				Date.now() - startTime < maxWaitTime
-			) {
-				await new Promise((resolve) => setTimeout(resolve, 50))
+			while (!this.ready && !this.workerCrashed && (Date.now() - startTime) < maxWaitTime) {
+				await new Promise(resolve => setTimeout(resolve, 50))
 			}
 
 			// If still not ready after timeout, use fallback
 			if (!this.ready || !this.worker) {
-				log.warn(
-					`Worker not ready after ${maxWaitTime}ms, using fallback for: ${type}`,
-				)
+				log.warn(`Worker not ready after ${maxWaitTime}ms, using fallback for: ${type}`)
 				return this.gracefulFallback(type, payload)
 			}
 		}
@@ -344,7 +304,7 @@ class OfflineWorkerClient {
 				messageType: type,
 				payload,
 				timestamp: Date.now(),
-				retryCount: isRetry ? this.retryAttempts.get(type) || 0 : 0,
+				retryCount: isRetry ? ((this.retryAttempts.get(type) || 0)) : 0
 			})
 
 			try {
@@ -364,18 +324,10 @@ class OfflineWorkerClient {
 					// IMPORTANT: Prevent infinite retries by checking retry flag AND count
 					// Only retry if: not already a retry AND haven't exceeded max retries
 					const currentRetries = messageInfo.retryCount || 0
-					if (
-						!isRetry &&
-						currentRetries < this.maxRetries &&
-						this.shouldRetryMessage(type, { message: "timeout" })
-					) {
+					if (!isRetry && currentRetries < this.maxRetries && this.shouldRetryMessage(type, { message: "timeout" })) {
 						this.retryMessage(id, type, payload, resolve, reject)
 					} else {
-						reject(
-							new Error(
-								`Worker message timeout: ${type} (retries: ${currentRetries})`,
-							),
-						)
+						reject(new Error(`Worker message timeout: ${type} (retries: ${currentRetries})`))
 					}
 				}
 			}, 30000)
@@ -410,7 +362,7 @@ class OfflineWorkerClient {
 					customers: 0,
 					queuedInvoices: 0,
 					cacheReady: false,
-					lastSync: null,
+					lastSync: null
 				}
 			case "PING_SERVER":
 			case "CHECK_OFFLINE":
@@ -459,11 +411,7 @@ class OfflineWorkerClient {
 	}
 
 	async searchCachedItemsByGroup(itemGroups = [], limit = 50, offset = 0) {
-		return this.sendMessage("SEARCH_ITEMS_BY_GROUP", {
-			itemGroups,
-			limit,
-			offset,
-		})
+		return this.sendMessage("SEARCH_ITEMS_BY_GROUP", { itemGroups, limit, offset })
 	}
 
 	async searchCachedItemsByBrand(brand, limit = 50, offset = 0) {
@@ -479,10 +427,7 @@ class OfflineWorkerClient {
 	}
 
 	async cacheItems(items, batchSize) {
-		return this.sendMessage("CACHE_ITEMS", {
-			items,
-			...(batchSize ? { batchSize } : {}),
-		})
+		return this.sendMessage("CACHE_ITEMS", { items, ...(batchSize ? { batchSize } : {}) })
 	}
 
 	async cacheCustomers(customers) {
@@ -526,10 +471,7 @@ class OfflineWorkerClient {
 	}
 
 	async supersedeOfflineInvoice(id, replacedBy) {
-		return this.sendMessage("SUPERSEDE_INVOICE", {
-			id,
-			replaced_by: replacedBy,
-		})
+		return this.sendMessage("SUPERSEDE_INVOICE", { id, replaced_by: replacedBy })
 	}
 
 	async setManualOffline(value) {
@@ -544,9 +486,7 @@ class OfflineWorkerClient {
 	}
 
 	async setShowVariantsAsItems(value) {
-		return this.sendMessage("SET_SHOW_VARIANTS_AS_ITEMS", {
-			value: Boolean(value),
-		})
+		return this.sendMessage("SET_SHOW_VARIANTS_AS_ITEMS", { value: Boolean(value) })
 	}
 
 	async updateStockQuantities(stockUpdates) {
@@ -594,11 +534,7 @@ class OfflineWorkerClient {
 	 * @returns {Promise<Object>} Current configuration
 	 */
 	async configureStockSync({ warehouse, itemCodes, intervalMs }) {
-		return this.sendMessage("CONFIGURE_STOCK_SYNC", {
-			warehouse,
-			itemCodes,
-			intervalMs,
-		})
+		return this.sendMessage("CONFIGURE_STOCK_SYNC", { warehouse, itemCodes, intervalMs })
 	}
 
 	/**

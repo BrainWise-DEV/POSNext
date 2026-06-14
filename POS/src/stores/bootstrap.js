@@ -124,14 +124,12 @@ export const useBootstrapStore = defineStore("bootstrap", () => {
 	 * @returns {{ currency: number, float: number, rounding_method: string, number_format: string }}
 	 */
 	function getPreloadedPrecision() {
-		return (
-			data.value?.precision || {
-				currency: 2,
-				float: 3,
-				rounding_method: null,
-				number_format: null,
-			}
-		)
+		return data.value?.precision || {
+			currency: 2,
+			float: 3,
+			rounding_method: null,
+			number_format: null,
+		}
 	}
 
 	/**

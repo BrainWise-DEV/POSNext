@@ -167,7 +167,7 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 		if (/^\d+$/.test(term)) {
 			recs.push({
 				type: "phone",
-				text: __("Search by phone: {0}", [term]),
+				text: __('Search by phone: {0}', [term]),
 				icon: "📱",
 			})
 		}
@@ -176,7 +176,7 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 		if (term.includes("@")) {
 			recs.push({
 				type: "email",
-				text: __("Search by email: {0}", [term]),
+				text: __('Search by email: {0}', [term]),
 				icon: "✉️",
 			})
 		}
@@ -188,7 +188,7 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 		if (!exactMatch && filteredCustomers.value.length < 5) {
 			recs.push({
 				type: "create",
-				text: __("Create new customer: {0}", [term]),
+				text: __('Create new customer: {0}', [term]),
 				icon: "➕",
 			})
 		}
@@ -210,7 +210,10 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 		loading.value = true
 		try {
 			// Step 1: Load from IndexedDB cache (instant display)
-			const cachedCustomers = await offlineWorker.searchCachedCustomers("", 0)
+			const cachedCustomers = await offlineWorker.searchCachedCustomers(
+				"",
+				0,
+			)
 
 			if (cachedCustomers && cachedCustomers.length > 0) {
 				allCustomers.value = cachedCustomers
@@ -219,9 +222,7 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 
 			// Step 2: If online, fetch delta from server
 			if (!isOffline()) {
-				const lastSync = forceReload
-					? null
-					: localStorage.getItem(CUSTOMERS_SYNC_KEY)
+				const lastSync = forceReload ? null : localStorage.getItem(CUSTOMERS_SYNC_KEY)
 
 				const response = await call("pos_next.api.customers.get_customers", {
 					pos_profile: posProfile,
@@ -237,9 +238,7 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 					const disabled = delta.filter((c) => c.disabled)
 
 					// Merge active customers into memory
-					const existingMap = new Map(
-						allCustomers.value.map((c) => [c.name, c]),
-					)
+					const existingMap = new Map(allCustomers.value.map((c) => [c.name, c]))
 					for (const c of active) {
 						existingMap.set(c.name, c)
 					}
@@ -258,9 +257,7 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 						await offlineWorker.deleteCustomers(disabled.map((c) => c.name))
 					}
 
-					log.debug(
-						`Synced ${active.length} active, removed ${disabled.length} disabled customers`,
-					)
+					log.debug(`Synced ${active.length} active, removed ${disabled.length} disabled customers`)
 				}
 
 				serverDataFresh = true

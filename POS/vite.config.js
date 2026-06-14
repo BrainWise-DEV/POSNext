@@ -19,10 +19,7 @@ function posNextBuildVersionPlugin(version) {
 		name: "pos-next-build-version",
 		apply: "build",
 		async writeBundle() {
-			const versionFile = path.resolve(
-				__dirname,
-				"../pos_next/public/pos/version.json",
-			)
+			const versionFile = path.resolve(__dirname, "../pos_next/public/pos/version.json")
 			await fs.mkdir(path.dirname(versionFile), { recursive: true })
 			await fs.writeFile(
 				versionFile,
@@ -37,9 +34,9 @@ function posNextBuildVersionPlugin(version) {
 						}),
 					},
 					null,
-					2,
+					2
 				),
-				"utf8",
+				"utf8"
 			)
 			console.log(`\n✓ Build version written: ${version}`)
 		},

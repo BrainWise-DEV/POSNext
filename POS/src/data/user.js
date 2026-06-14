@@ -4,10 +4,7 @@ import { computed, reactive } from "vue"
 
 const getCookie = (key) => {
 	const cookies = new Map(
-		document.cookie
-			.split("; ")
-			.filter(Boolean)
-			.map((c) => c.split("=").map(decodeURIComponent)),
+		document.cookie.split("; ").filter(Boolean).map((c) => c.split("=").map(decodeURIComponent))
 	)
 	return cookies.get(key) || null
 }
@@ -31,12 +28,7 @@ export const userData = reactive({
 	},
 
 	getDisplayName() {
-		return (
-			this.fullName ||
-			window.frappe?.session?.user_fullname ||
-			window.frappe?.session?.user ||
-			"User"
-		)
+		return this.fullName || window.frappe?.session?.user_fullname || window.frappe?.session?.user || "User"
 	},
 
 	getImageUrl() {
@@ -45,9 +37,7 @@ export const userData = reactive({
 
 	getInitials() {
 		const parts = this.getDisplayName().split(" ").filter(Boolean)
-		return parts.length >= 2
-			? (parts[0][0] + parts[1][0]).toUpperCase()
-			: this.getDisplayName().substring(0, 2).toUpperCase()
+		return parts.length >= 2 ? (parts[0][0] + parts[1][0]).toUpperCase() : this.getDisplayName().substring(0, 2).toUpperCase()
 	},
 })
 
@@ -56,7 +46,7 @@ userData.refresh()
 
 // Watch for cookie changes (e.g., after login) and auto-refresh
 // This uses MutationObserver to detect document.cookie changes
-if (typeof window !== "undefined") {
+if (typeof window !== 'undefined') {
 	let lastCookie = document.cookie
 	setInterval(() => {
 		if (document.cookie !== lastCookie) {

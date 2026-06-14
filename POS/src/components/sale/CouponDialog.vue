@@ -145,10 +145,7 @@
 </template>
 
 <script setup>
-import {
-	DEFAULT_CURRENCY,
-	formatCurrency as formatCurrencyUtil,
-} from "@/utils/currency"
+import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency"
 import { Button, Dialog, Input, createResource } from "frappe-ui"
 import { ref, watch } from "vue"
 import { useInvoice } from "@/composables/useInvoice"
@@ -291,15 +288,11 @@ async function applyCoupon() {
 		const result = couponResource.data?.message || couponResource.data
 
 		// Handle if result is the actual response object
-		const validationData =
-			typeof result === "object" && result.valid !== undefined
-				? result
-				: couponResource.data
+		const validationData = typeof result === 'object' && result.valid !== undefined ? result : couponResource.data
 
 		if (!validationData || !validationData.valid) {
 			errorMessage.value =
-				validationData?.message ||
-				__("The coupon code you entered is not valid")
+				validationData?.message || __("The coupon code you entered is not valid")
 			showError(errorMessage.value)
 			return
 		}
@@ -309,9 +302,7 @@ async function applyCoupon() {
 
 		// Check minimum amount on the configured coupon base
 		if (coupon.min_amount && baseAmount < coupon.min_amount) {
-			errorMessage.value = __("This coupon requires a minimum purchase of ", [
-				formatCurrency(coupon.min_amount),
-			])
+			errorMessage.value = __('This coupon requires a minimum purchase of ', [formatCurrency(coupon.min_amount)])
 			showWarning(errorMessage.value)
 			return
 		}
@@ -319,8 +310,7 @@ async function applyCoupon() {
 		// Calculate discount on subtotal (before tax) using centralized helper
 		// Transform server coupon format to discount object format
 		const discountObj = {
-			percentage:
-				coupon.discount_type === "Percentage" ? coupon.discount_percentage : 0,
+			percentage: coupon.discount_type === "Percentage" ? coupon.discount_percentage : 0,
 			amount: coupon.discount_type === "Amount" ? coupon.discount_amount : 0,
 		}
 
@@ -337,8 +327,7 @@ async function applyCoupon() {
 		appliedDiscount.value = {
 			name: coupon.coupon_name || coupon.coupon_code,
 			code: couponCode.value.toUpperCase(),
-			percentage:
-				coupon.discount_type === "Percentage" ? coupon.discount_percentage : 0,
+			percentage: coupon.discount_type === "Percentage" ? coupon.discount_percentage : 0,
 			amount: discountAmount,
 			type: coupon.discount_type,
 			coupon: coupon,
@@ -348,9 +337,7 @@ async function applyCoupon() {
 
 		emit("discount-applied", appliedDiscount.value)
 
-		showSuccess(
-			__("{0} applied successfully", [couponCode.value.toUpperCase()]),
-		)
+		showSuccess(__('{0} applied successfully', [couponCode.value.toUpperCase()]))
 
 		errorMessage.value = ""
 	} catch (error) {

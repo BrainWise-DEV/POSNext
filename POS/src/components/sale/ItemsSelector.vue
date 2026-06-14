@@ -718,16 +718,12 @@
 <script setup>
 import LazyImage from "@/components/common/LazyImage.vue"
 import WarehouseAvailabilityDialog from "@/components/sale/WarehouseAvailabilityDialog.vue"
-import { session } from "@/data/session"
 import { useItemSearchStore } from "@/stores/itemSearch"
 import { usePOSSettingsStore } from "@/stores/posSettings"
 import { useStock } from "@/composables/useStock"
 import { useDialogState } from "@/composables/useDialogState"
 import { useSearchInput } from "@/composables/useSearchInput"
-import {
-	DEFAULT_CURRENCY,
-	formatCurrency as formatCurrencyUtil,
-} from "@/utils/currency"
+import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency"
 import { useToast } from "@/composables/useToast"
 import { storeToRefs } from "pinia"
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue"
@@ -735,7 +731,7 @@ import {
 	createOptimizedClickHandler,
 	throttleRAF,
 	addPassiveListener,
-	runWhenIdle,
+	runWhenIdle
 } from "@/utils/lowEndOptimizations"
 import { performanceConfig } from "@/utils/performanceConfig"
 import { shouldValidateItemStock } from "@/utils/stockValidator"
@@ -781,30 +777,20 @@ const {
 
 // Search input composable — owns search/scanner state, timers, concurrency
 const {
-	searchInputRef,
-	scannerEnabled,
-	autoAddEnabled,
-	handleSearchInput,
-	handleKeyDown,
-	handleSearchClick,
-	toggleBarcodeScanner,
-	toggleAutoAdd,
-	focusSearchInput,
+	searchInputRef, scannerEnabled, autoAddEnabled,
+	handleSearchInput, handleKeyDown, handleSearchClick,
+	toggleBarcodeScanner, toggleAutoAdd, focusSearchInput,
 	clearSearchAndResetInput,
 	cleanup: cleanupSearchInput,
 } = useSearchInput({
-	itemStore,
-	onItemFound: selectItem,
-	showWarning,
-	isAnyDialogOpen,
+	itemStore, onItemFound: selectItem,
+	showWarning, isAnyDialogOpen,
 })
 
 // Local state
-const VIEW_MODE_STORAGE_PREFIX = "pos_next_items_view_mode"
-const VALID_VIEW_MODES = new Set(["grid", "list"])
 const viewMode = ref("grid")
 const itemThreshold = ref(50) // Threshold for auto-switching to list view
-const userManuallySetView = ref(false) // Tracks whether user/default preference should block auto-switching
+const userManuallySetView = ref(false) // Track if user manually changed view mode
 const lastAutoSwitchCount = ref(0)
 const showSortDropdown = ref(false) // Sort dropdown visibility
 const skipPageReset = ref(false) // Skip page reset when navigating via pagination
@@ -822,7 +808,7 @@ const scrollCleanupFns = ref([])
 
 // Pagination state (for client-side display)
 const currentPage = ref(1)
-const itemsPerPage = ref(performanceConfig.get("itemsPerPage") || 100)
+const itemsPerPage = ref(performanceConfig.get('itemsPerPage') || 100)
 const lastFilterSignature = ref("")
 
 // Computed paginated items — server fetches one page at a time,
@@ -861,44 +847,44 @@ const SEARCH_PLACEHOLDERS = Object.freeze({
 // Sort configuration
 const BASE_SORT_OPTIONS = Object.freeze([
 	{
-		field: "name",
-		label: __("Name"),
-		icon: "M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z",
+		field: 'name',
+		label: __('Name'),
+		icon: 'M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z'
 	},
 	{
-		field: "quantity",
-		label: __("Quantity"),
-		icon: "M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4",
+		field: 'quantity',
+		label: __('Quantity'),
+		icon: 'M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4'
 	},
 	{
-		field: "price",
-		label: __("Price"),
-		icon: "M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z",
+		field: 'price',
+		label: __('Price'),
+		icon: 'M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z'
 	},
 	{
-		field: "item_code",
-		label: __("Item Code"),
-		icon: "M7 20l4-16m2 16l4-16M6 9h14M4 15h14",
-	},
+		field: 'item_code',
+		label: __('Item Code'),
+		icon: 'M7 20l4-16m2 16l4-16M6 9h14M4 15h14'
+	}
 ])
 
 const CONTEXT_SORT_OPTIONS = Object.freeze({
 	brand: {
-		field: "brand",
-		label: __("Brand"),
-		icon: "M20 13V7a2 2 0 00-2-2h-4V3H10v2H6a2 2 0 00-2 2v6M8 21h8a2 2 0 002-2v-5H6v5a2 2 0 002 2z",
+		field: 'brand',
+		label: __('Brand'),
+		icon: 'M20 13V7a2 2 0 00-2-2h-4V3H10v2H6a2 2 0 00-2 2v6M8 21h8a2 2 0 002-2v-5H6v5a2 2 0 002 2z'
 	},
 	item_group: {
-		field: "item_group",
-		label: __("Item Group"),
-		icon: "M9 12l2 2 4-4m5.586 1.414l-6.172 6.172a2 2 0 01-2.828 0L3.414 9.414a2 2 0 010-2.828l6.172-6.172a2 2 0 012.828 0l8.172 8.172a2 2 0 010 2.828z",
+		field: 'item_group',
+		label: __('Item Group'),
+		icon: 'M9 12l2 2 4-4m5.586 1.414l-6.172 6.172a2 2 0 01-2.828 0L3.414 9.414a2 2 0 010-2.828l6.172-6.172a2 2 0 012.828 0l8.172 8.172a2 2 0 010 2.828z'
 	},
 })
 
 const SORT_ICONS = Object.freeze({
-	ascending: "M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12",
-	descending: "M3 4h13M3 8h9m-9 4h9m5-4v12m0 0l-4-4m4 4l4-4",
-	inactive: "M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4",
+	ascending: 'M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12',
+	descending: 'M3 4h13M3 8h9m-9 4h9m5-4v12m0 0l-4-4m4 4l4-4',
+	inactive: 'M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4'
 })
 
 const searchMode = computed(() => {
@@ -914,7 +900,7 @@ const searchMode = computed(() => {
 })
 
 const searchPlaceholder = computed(() => SEARCH_PLACEHOLDERS[searchMode.value])
-const isBrandSortActive = computed(() => sortBy.value === "brand")
+const isBrandSortActive = computed(() => sortBy.value === 'brand')
 const sortOptions = computed(() => {
 	// Context switcher:
 	// - In Item Group mode, offer Brand.
@@ -931,92 +917,15 @@ const sortOptions = computed(() => {
 		BASE_SORT_OPTIONS[3],
 	]
 })
-const activeFilterValue = computed(() =>
-	isBrandSortActive.value ? selectedBrand.value : selectedItemGroup.value,
-)
-const activeFilterOptions = computed(() =>
+const activeFilterValue = computed(() => (
+	isBrandSortActive.value ? selectedBrand.value : selectedItemGroup.value
+))
+const activeFilterOptions = computed(() => (
 	isBrandSortActive.value
 		? (brands.value || []).map((b) => ({ value: b.brand, label: b.brand }))
-		: (itemGroups.value || []).map((g) => ({
-				value: g.item_group,
-				label: g.item_group,
-			})),
-)
-const selectedFilterLabel = computed(
-	() => selectedBrand.value || selectedItemGroup.value || null,
-)
-
-function getViewModeStorageKey(
-	posProfile = props.posProfile,
-	user = session.user,
-) {
-	return `${VIEW_MODE_STORAGE_PREFIX}:${user || "anonymous"}:${posProfile || "default"}`
-}
-
-function getLegacyViewModeStorageKey(posProfile = props.posProfile) {
-	return `${VIEW_MODE_STORAGE_PREFIX}:${posProfile || "default"}`
-}
-
-function getStoredViewMode(posProfile = props.posProfile) {
-	if (typeof window === "undefined" || !window.localStorage) {
-		return null
-	}
-
-	try {
-		const storedViewMode = window.localStorage.getItem(
-			getViewModeStorageKey(posProfile),
-		)
-		if (VALID_VIEW_MODES.has(storedViewMode)) {
-			return storedViewMode
-		}
-
-		const legacyViewMode = window.localStorage.getItem(
-			getLegacyViewModeStorageKey(posProfile),
-		)
-		return VALID_VIEW_MODES.has(legacyViewMode) ? legacyViewMode : null
-	} catch {
-		return null
-	}
-}
-
-function saveViewModePreference(mode, posProfile = props.posProfile) {
-	if (
-		!VALID_VIEW_MODES.has(mode) ||
-		typeof window === "undefined" ||
-		!window.localStorage
-	) {
-		return
-	}
-
-	try {
-		window.localStorage.setItem(getViewModeStorageKey(posProfile), mode)
-	} catch {
-		// Ignore storage errors; the in-memory view mode still updates.
-	}
-}
-
-function getDefaultViewMode() {
-	return settingsStore.defaultCardView ? "grid" : "list"
-}
-
-function restoreViewModePreference(posProfile = props.posProfile) {
-	const storedViewMode = getStoredViewMode(posProfile)
-	if (storedViewMode) {
-		viewMode.value = storedViewMode
-		userManuallySetView.value = true
-		saveViewModePreference(storedViewMode, posProfile)
-		return true
-	}
-
-	if (settingsStore.isLoaded) {
-		viewMode.value = getDefaultViewMode()
-		userManuallySetView.value = true
-		return true
-	}
-
-	userManuallySetView.value = false
-	return false
-}
+		: (itemGroups.value || []).map((g) => ({ value: g.item_group, label: g.item_group }))
+))
+const selectedFilterLabel = computed(() => selectedBrand.value || selectedItemGroup.value || null)
 
 // Watch for cart items and pos profile changes (optimized - uses length + hash instead of deep watch)
 // Tracks: length, item_code, quantity, and amount to detect all cart changes including array replacements
@@ -1026,32 +935,17 @@ watch(
 	() => {
 		itemStore.setCartItems(props.cartItems)
 	},
-	{ immediate: true, flush: "sync" }, // Synchronous to ensure immediate stock updates
+	{ immediate: true, flush: 'sync' }, // Synchronous to ensure immediate stock updates
 )
 
 watch(
 	() => props.posProfile,
 	(newProfile) => {
 		if (newProfile) {
-			restoreViewModePreference(newProfile)
 			itemStore.setPosProfile(newProfile)
 		}
 	},
 	{ immediate: true },
-)
-
-watch(
-	() => [
-		settingsStore.isLoaded,
-		settingsStore.defaultCardView,
-		props.posProfile,
-		session.user,
-	],
-	() => {
-		if (!getStoredViewMode()) {
-			restoreViewModePreference()
-		}
-	},
 )
 
 // Reset to page 1 when filtered items meaningfully change (group switch, search, etc.)
@@ -1118,26 +1012,26 @@ onMounted(() => {
 
 	// Add passive scroll listeners for better performance
 	// Only bind to the currently active view
-	if (viewMode.value === "grid" && gridScrollContainer.value) {
+	if (viewMode.value === 'grid' && gridScrollContainer.value) {
 		const cleanup = addPassiveListener(
 			gridScrollContainer.value,
-			"scroll",
+			'scroll',
 			handleScroll,
-			{ passive: true },
+			{ passive: true }
 		)
 		scrollCleanupFns.value.push(cleanup)
-	} else if (viewMode.value === "list" && listScrollContainer.value) {
+	} else if (viewMode.value === 'list' && listScrollContainer.value) {
 		const cleanup = addPassiveListener(
 			listScrollContainer.value,
-			"scroll",
+			'scroll',
 			handleScroll,
-			{ passive: true },
+			{ passive: true }
 		)
 		scrollCleanupFns.value.push(cleanup)
 	}
 
 	// Add click outside listener for sort dropdown
-	document.addEventListener("click", handleClickOutside)
+	document.addEventListener('click', handleClickOutside)
 })
 
 onUnmounted(() => {
@@ -1151,7 +1045,7 @@ onUnmounted(() => {
 	}
 
 	// Cleanup passive listeners
-	scrollCleanupFns.value.forEach((cleanup) => cleanup())
+	scrollCleanupFns.value.forEach(cleanup => cleanup())
 	scrollCleanupFns.value = []
 
 	// Clear handlers and timers
@@ -1160,7 +1054,7 @@ onUnmounted(() => {
 	cleanupSearchInput()
 
 	// Remove click outside listener for sort dropdown
-	document.removeEventListener("click", handleClickOutside)
+	document.removeEventListener('click', handleClickOutside)
 })
 
 // Create optimized click handlers for better touch response
@@ -1169,14 +1063,11 @@ const optimizedClickHandlers = new Map()
 function getOptimizedClickHandler(item) {
 	const key = item.item_code
 	if (!optimizedClickHandlers.has(key)) {
-		const handler = createOptimizedClickHandler(
-			() => {
-				handleItemClick(item.item_code)
-			},
-			{
-				feedback: true,
-			},
-		)
+		const handler = createOptimizedClickHandler(() => {
+			handleItemClick(item.item_code)
+		}, {
+			feedback: true
+		})
 		optimizedClickHandlers.set(key, handler)
 	}
 	return optimizedClickHandlers.get(key)
@@ -1229,19 +1120,10 @@ function selectItem(item, autoAdd = false) {
 	if (!item) return false
 
 	// Early out-of-stock guard — full qty validation happens in cartStore.addItem()
-	if (
-		!item.has_variants &&
-		settingsStore.shouldEnforceStockValidation() &&
-		shouldValidateItemStock(item)
-	) {
+	if (!item.has_variants && settingsStore.shouldEnforceStockValidation() && shouldValidateItemStock(item)) {
 		const qty = item.actual_qty ?? item.stock_qty ?? 0
 		if (qty <= 0) {
-			showError(
-				__('"{0}" is out of stock in warehouse "{1}".', [
-					item.item_name,
-					item.warehouse || "",
-				]),
-			)
+			showError(__('"{0}" is out of stock in warehouse "{1}".', [item.item_name, item.warehouse || '']))
 			return false
 		}
 	}
@@ -1256,7 +1138,7 @@ function handleItemClick(itemCode) {
 		itemHandledByLongPress = false
 		return
 	}
-	const item = filteredItems.value.find((i) => i.item_code === itemCode)
+	const item = filteredItems.value.find(i => i.item_code === itemCode)
 	selectItem(item)
 }
 
@@ -1269,8 +1151,8 @@ function showWarehouseAvailability(item) {
 	warehouseDialogItem.value = {
 		itemCode: item.item_code,
 		itemName: item.item_name,
-		uom: item.uom || item.stock_uom || "Nos",
-		company: settingsStore.company,
+		uom: item.uom || item.stock_uom || 'Nos',
+		company: settingsStore.company
 	}
 	showWarehouseDialog.value = true
 }
@@ -1289,24 +1171,24 @@ watch(viewMode, async () => {
 	await nextTick()
 
 	// Clean up existing listeners
-	scrollCleanupFns.value.forEach((cleanup) => cleanup())
+	scrollCleanupFns.value.forEach(cleanup => cleanup())
 	scrollCleanupFns.value = []
 
 	// Rebind listeners to the new active container
-	if (viewMode.value === "grid" && gridScrollContainer.value) {
+	if (viewMode.value === 'grid' && gridScrollContainer.value) {
 		const cleanup = addPassiveListener(
 			gridScrollContainer.value,
-			"scroll",
+			'scroll',
 			handleScroll,
-			{ passive: true },
+			{ passive: true }
 		)
 		scrollCleanupFns.value.push(cleanup)
-	} else if (viewMode.value === "list" && listScrollContainer.value) {
+	} else if (viewMode.value === 'list' && listScrollContainer.value) {
 		const cleanup = addPassiveListener(
 			listScrollContainer.value,
-			"scroll",
+			'scroll',
 			handleScroll,
-			{ passive: true },
+			{ passive: true }
 		)
 		scrollCleanupFns.value.push(cleanup)
 	}
@@ -1314,13 +1196,8 @@ watch(viewMode, async () => {
 
 // View mode functions
 function setViewMode(mode) {
-	if (!VALID_VIEW_MODES.has(mode)) {
-		return
-	}
-
 	viewMode.value = mode
 	userManuallySetView.value = true
-	saveViewModePreference(mode)
 }
 
 function handleAllFilterClick() {
@@ -1410,16 +1287,16 @@ function handleSortToggle(field) {
 
 	// If clicking the same field, toggle between asc/desc
 	if (sortBy.value === field) {
-		const newOrder = sortOrder.value === "asc" ? "desc" : "asc"
+		const newOrder = sortOrder.value === 'asc' ? 'desc' : 'asc'
 		itemStore.setSortFilter(field, newOrder)
 	} else {
 		// New field - start with ascending
-		itemStore.setSortFilter(field, "asc")
+		itemStore.setSortFilter(field, 'asc')
 	}
 }
 
 watch(sortBy, async (newSortBy, oldSortBy) => {
-	if (newSortBy === "brand") {
+	if (newSortBy === 'brand') {
 		await itemStore.loadBrands()
 		if (selectedItemGroup.value) {
 			await itemStore.setSelectedItemGroup(null)
@@ -1427,34 +1304,27 @@ watch(sortBy, async (newSortBy, oldSortBy) => {
 		return
 	}
 
-	if (oldSortBy === "brand" && selectedBrand.value) {
+	if (oldSortBy === 'brand' && selectedBrand.value) {
 		await itemStore.setSelectedBrand(null)
 	}
 })
 
 function getSortLabel(sortByValue) {
-	return (
-		CONTEXT_SORT_OPTIONS[sortByValue]?.label ||
-		BASE_SORT_OPTIONS.find((opt) => opt.field === sortByValue)?.label ||
-		sortByValue
-	)
+	return CONTEXT_SORT_OPTIONS[sortByValue]?.label
+		|| BASE_SORT_OPTIONS.find(opt => opt.field === sortByValue)?.label
+		|| sortByValue
 }
 
 function getSortIconState(field) {
-	if (sortBy.value !== field) return "inactive"
-	return sortOrder.value === "asc" ? "ascending" : "descending"
+	if (sortBy.value !== field) return 'inactive'
+	return sortOrder.value === 'asc' ? 'ascending' : 'descending'
 }
 
 // Close dropdown when clicking outside
 function handleClickOutside(event) {
 	if (showSortDropdown.value) {
-		const dropdown = event.target.closest(".relative")
-		if (
-			!dropdown ||
-			!dropdown
-				.querySelector("button[data-sort-button]")
-				?.contains(event.target)
-		) {
+		const dropdown = event.target.closest('.relative')
+		if (!dropdown || !dropdown.querySelector('button[data-sort-button]')?.contains(event.target)) {
 			showSortDropdown.value = false
 		}
 	}

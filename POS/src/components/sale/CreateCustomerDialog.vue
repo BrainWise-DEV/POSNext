@@ -211,11 +211,7 @@ const props = defineProps({
 	customer: Object, // Customer object for edit mode
 })
 
-const emit = defineEmits([
-	"update:modelValue",
-	"customer-created",
-	"customer-updated",
-])
+const emit = defineEmits(["update:modelValue", "customer-created", "customer-updated"])
 
 // =============================================================================
 // State
@@ -253,9 +249,7 @@ const show = computed({
 const isEditMode = computed(() => !!props.customer?.name)
 
 const currentCountryCode = computed(() => {
-	const country = countriesStore.countries.find(
-		(c) => c.isd === selectedCountryCode.value,
-	)
+	const country = countriesStore.countries.find((c) => c.isd === selectedCountryCode.value)
 	return country?.code.toLowerCase() || "eg"
 })
 
@@ -264,10 +258,7 @@ const filteredCountries = computed(() => {
 
 	const query = countrySearchQuery.value.toLowerCase()
 	return countriesStore.countries.filter(
-		(c) =>
-			c.name.toLowerCase().includes(query) ||
-			c.isd.includes(query) ||
-			c.code.toLowerCase().includes(query),
+		(c) => c.name.toLowerCase().includes(query) || c.isd.includes(query) || c.code.toLowerCase().includes(query)
 	)
 })
 
@@ -285,9 +276,7 @@ const selectCountry = (country) => {
 }
 
 const updateMobileNumber = () => {
-	customerData.value.mobile_no = phoneNumber.value
-		? `${selectedCountryCode.value}-${phoneNumber.value}`
-		: ""
+	customerData.value.mobile_no = phoneNumber.value ? `${selectedCountryCode.value}-${phoneNumber.value}` : ""
 }
 
 const handleClickOutside = (event) => {
@@ -317,9 +306,7 @@ const setCountryFromName = (countryName) => {
 const updateTerritoryFromCountry = () => {
 	if (!territories.value.length) return
 
-	const country = countriesStore.countries.find(
-		(c) => c.isd === selectedCountryCode.value,
-	)
+	const country = countriesStore.countries.find((c) => c.isd === selectedCountryCode.value)
 	if (!country) return
 
 	// Try exact match first
@@ -331,9 +318,7 @@ const updateTerritoryFromCountry = () => {
 
 	// Try fuzzy match
 	const fuzzyMatch = territories.value.find(
-		(t) =>
-			t.toLowerCase().includes(country.name.toLowerCase()) ||
-			country.name.toLowerCase().includes(t.toLowerCase()),
+		(t) => t.toLowerCase().includes(country.name.toLowerCase()) || country.name.toLowerCase().includes(t.toLowerCase())
 	)
 
 	if (fuzzyMatch) {
@@ -434,8 +419,10 @@ const territoriesResource = createListResource("Territory", (names) => {
 	territories.value = names
 	if (!customerData.value.territory && names.length > 0) {
 		const settingsDefault = sellingSettingsResource.data?.territory
-		customerData.value.territory = pickDefault(settingsDefault, names, (list) =>
-			list.find((n) => n === "All Territories"),
+		customerData.value.territory = pickDefault(
+			settingsDefault,
+			names,
+			(list) => list.find((n) => n === "All Territories"),
 		)
 	}
 })
@@ -471,10 +458,7 @@ const loadDialogData = async () => {
 	}
 
 	// Load form options
-	await Promise.all([
-		territoriesResource.reload(),
-		customerGroupsResource.reload(),
-	])
+	await Promise.all([territoriesResource.reload(), customerGroupsResource.reload()])
 	checkPermissions()
 
 	// Set country from POS Profile
@@ -515,8 +499,10 @@ const resetForm = () => {
 		mobile_no: "",
 		email_id: "",
 		customer_group: pickDefault(settings.customer_group, customerGroups.value),
-		territory: pickDefault(settings.territory, territories.value, (list) =>
-			list.find((n) => n === "All Territories"),
+		territory: pickDefault(
+			settings.territory,
+			territories.value,
+			(list) => list.find((n) => n === "All Territories"),
 		),
 	})
 	selectedCountryCode.value = ""
@@ -529,7 +515,7 @@ const resetForm = () => {
 
 watch(
 	() => props.initialName,
-	(name) => name && (customerData.value.customer_name = name),
+	(name) => name && (customerData.value.customer_name = name)
 )
 
 // Pre-fill form when customer prop changes (edit mode)
@@ -539,8 +525,7 @@ watch(
 		if (customer?.name) {
 			customerData.value.customer_name = customer.customer_name || ""
 			customerData.value.email_id = customer.email_id || ""
-			customerData.value.customer_group =
-				customer.customer_group || customerGroups.value[0] || ""
+			customerData.value.customer_group = customer.customer_group || customerGroups.value[0] || ""
 			customerData.value.territory =
 				customer.territory ||
 				territories.value.find((n) => n === "All Territories") ||
@@ -559,7 +544,7 @@ watch(
 			}
 		}
 	},
-	{ immediate: true },
+	{ immediate: true }
 )
 
 watch(
@@ -570,7 +555,7 @@ watch(
 			selectedCountryCode.value = code
 			phoneNumber.value = rest.join("-")
 		}
-	},
+	}
 )
 
 watch(selectedCountryCode, async (newVal, oldVal) => {
@@ -590,7 +575,7 @@ watch(
 	() => props.modelValue,
 	async (isOpen) => {
 		isOpen ? await loadDialogData() : resetForm()
-	},
+	}
 )
 
 // =============================================================================

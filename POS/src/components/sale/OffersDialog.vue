@@ -200,11 +200,7 @@
 
 <script setup>
 import { usePOSOffersStore } from "@/stores/posOffers"
-import {
-	DEFAULT_CURRENCY,
-	DEFAULT_LOCALE,
-	formatCurrency as formatCurrencyUtil,
-} from "@/utils/currency"
+import { DEFAULT_CURRENCY, DEFAULT_LOCALE, formatCurrency as formatCurrencyUtil } from "@/utils/currency"
 import { Button, Dialog } from "frappe-ui"
 import { computed, ref, watch } from "vue"
 

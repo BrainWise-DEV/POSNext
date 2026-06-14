@@ -24,9 +24,7 @@ export function useShift() {
 				let initialElapsedMs = 0
 				if (data.server_now && data.pos_opening_shift?.period_start_date) {
 					const serverNow = new Date(data.server_now).getTime()
-					const shiftStart = new Date(
-						data.pos_opening_shift.period_start_date,
-					).getTime()
+					const shiftStart = new Date(data.pos_opening_shift.period_start_date).getTime()
 					initialElapsedMs = Math.max(0, serverNow - shiftStart)
 				}
 				shiftState.value = {
@@ -38,14 +36,11 @@ export function useShift() {
 					_receivedAt: Date.now(),
 				}
 				// Store in localStorage for offline support
-				localStorage.setItem(
-					"pos_shift_data",
-					JSON.stringify({
-						...data,
-						_initialElapsedMs: initialElapsedMs,
-						_receivedAt: Date.now(),
-					}),
-				)
+				localStorage.setItem("pos_shift_data", JSON.stringify({
+					...data,
+					_initialElapsedMs: initialElapsedMs,
+					_receivedAt: Date.now(),
+				}))
 			} else {
 				shiftState.value = {
 					pos_opening_shift: null,
@@ -106,14 +101,11 @@ export function useShift() {
 				_receivedAt: Date.now(),
 			}
 			// Store in localStorage
-			localStorage.setItem(
-				"pos_shift_data",
-				JSON.stringify({
-					...data,
-					_initialElapsedMs: 0,
-					_receivedAt: Date.now(),
-				}),
-			)
+			localStorage.setItem("pos_shift_data", JSON.stringify({
+				...data,
+				_initialElapsedMs: 0,
+				_receivedAt: Date.now(),
+			}))
 		},
 		onError(error) {
 			console.error("Error creating opening shift:", error)

@@ -296,15 +296,12 @@ const emit = defineEmits([
 
 function handleClearCacheClick() {
 	showCacheTooltip.value = false
-	emit("clear-cache")
+	emit('clear-cache')
 }
 
 function handleBlur(event) {
 	// Don't close if clicking inside the tooltip
-	if (
-		!event.relatedTarget ||
-		!event.currentTarget.parentElement.contains(event.relatedTarget)
-	) {
+	if (!event.relatedTarget || !event.currentTarget.parentElement.contains(event.relatedTarget)) {
 		setTimeout(() => {
 			showCacheTooltip.value = false
 		}, 200)
@@ -432,14 +429,14 @@ function getCacheAriaLabel() {
 }
 
 function formatNumber(num) {
-	if (!num) return "0"
+	if (!num) return '0'
 	return num.toLocaleString()
 }
 
 function formatCompactNumber(num) {
-	if (!num) return "0"
+	if (!num) return '0'
 	if (num >= 1000) {
-		return (num / 1000).toFixed(num >= 10000 ? 0 : 1) + "K"
+		return (num / 1000).toFixed(num >= 10000 ? 0 : 1) + 'K'
 	}
 	return num.toString()
 }

@@ -1628,11 +1628,7 @@ async function refreshSalesPersons() {
 function onSalesPersonFocus() {
 	salesPersonDropdownOpen.value = true
 	// If list is empty and not loading, re-fetch as a safety net
-	if (
-		salesPersons.value.length === 0 &&
-		!loadingSalesPersons.value &&
-		props.posProfile
-	) {
+	if (salesPersons.value.length === 0 && !loadingSalesPersons.value && props.posProfile) {
 		refreshSalesPersons()
 	}
 }
@@ -1998,11 +1994,7 @@ watch(
 		loadPaymentMethods()
 
 		// Fetch sales persons only when: feature is enabled, not already loaded, and not in-flight
-		if (
-			salesPersonsEnabled &&
-			salesPersons.value.length === 0 &&
-			!loadingSalesPersons.value
-		) {
+		if (salesPersonsEnabled && salesPersons.value.length === 0 && !loadingSalesPersons.value) {
 			refreshSalesPersons()
 		}
 	},
@@ -2012,12 +2004,7 @@ watch(
 // Pre-fetch customer balance when customer changes (before dialog opens)
 // This ensures data is available immediately when dialog opens
 watch(
-	() => [
-		props.customer,
-		props.company,
-		props.allowCreditSale,
-		props.allowCustomerCreditPayment,
-	],
+	() => [props.customer, props.company, props.allowCreditSale, props.allowCustomerCreditPayment],
 	([customer, company, allowCreditSale, allowCustomerCreditPayment]) => {
 		const creditEnabled = allowCreditSale || allowCustomerCreditPayment
 		if (creditEnabled && customer && company) {
@@ -2044,8 +2031,7 @@ watch(show, (newVal) => {
 		// empty and break "Apply Customer Credit" with an allocation error.
 		// customerBalance is also refetched so the displayed balance reflects
 		// any redemptions made by other cashiers since the last open.
-		const creditEnabled =
-			props.allowCreditSale || props.allowCustomerCreditPayment
+		const creditEnabled = props.allowCreditSale || props.allowCustomerCreditPayment
 		if (creditEnabled && props.customer && props.company) {
 			customerBalanceResource.fetch()
 			customerCreditResource.fetch()
@@ -2074,10 +2060,7 @@ watch(show, (newVal) => {
 		}
 
 		if (creditEnabled) {
-			log.debug(
-				"[PaymentDialog] Customer credit/balance refetch triggered, current balance:",
-				customerBalance.value,
-			)
+			log.debug("[PaymentDialog] Customer credit/balance refetch triggered, current balance:", customerBalance.value)
 		}
 
 		// Load wallet info if customer is selected
@@ -2157,8 +2140,7 @@ function switchToNextPaymentMethod(partialAmount) {
 // add to it instead of creating a duplicate row.
 function _upsertPaymentEntry(method, amt) {
 	const existing = paymentEntries.value.find(
-		(e) =>
-			e.mode_of_payment === method.mode_of_payment && !e.is_customer_credit,
+		(e) => e.mode_of_payment === method.mode_of_payment && !e.is_customer_credit,
 	)
 	if (existing) {
 		existing.amount = roundCurrency((existing.amount || 0) + amt)
@@ -2381,9 +2363,7 @@ async function addCustomPayment(method, amount) {
 		if (grandTotal > 0 && overpay > 0 && overpay > grandTotal) {
 			const confirmed = await showOverpayConfirm({
 				title: __("Large Overpayment"),
-				message: __("Change due would be {0}. Continue?", [
-					formatCurrency(overpay),
-				]),
+				message: __("Change due would be {0}. Continue?", [formatCurrency(overpay)]),
 			})
 			if (!confirmed) return
 		}

@@ -68,7 +68,7 @@ function bytesToHex(bytes) {
 function hexToBytes(hex) {
 	const bytes = new Uint8Array(hex.length / 2)
 	for (let i = 0; i < hex.length; i += 2) {
-		bytes[i / 2] = Number.parseInt(hex.substring(i, i + 2), 16)
+		bytes[i / 2] = parseInt(hex.substring(i, i + 2), 16)
 	}
 	return bytes
 }
@@ -84,7 +84,7 @@ async function hashPassword(password, existingSalt = null) {
 		encoder.encode(password),
 		"PBKDF2",
 		false,
-		["deriveBits"],
+		["deriveBits"]
 	)
 
 	const bits = await crypto.subtle.deriveBits(
@@ -95,7 +95,7 @@ async function hashPassword(password, existingSalt = null) {
 			hash: "SHA-256",
 		},
 		keyMaterial,
-		256,
+		256
 	)
 
 	return { hash: bytesToHex(new Uint8Array(bits)), salt: bytesToHex(salt) }
@@ -109,7 +109,7 @@ function cachePasswordHash(user, hash, salt) {
 	try {
 		localStorage.setItem(
 			PASSWORD_HASH_KEY,
-			JSON.stringify({ user, hash, salt, ts: Date.now() }),
+			JSON.stringify({ user, hash, salt, ts: Date.now() })
 		)
 	} catch {
 		// Storage full or unavailable
@@ -181,10 +181,7 @@ function checkOfflineAttemptLimit() {
 			// Escalating lockout: doubles each time the limit is hit again
 			// level 1 = 60s, level 2 = 120s, level 3 = 240s, capped at 15 min
 			const level = data.level || 1
-			const lockoutDuration = Math.min(
-				LOCKOUT_MS * Math.pow(2, level - 1),
-				15 * 60 * 1000,
-			)
+			const lockoutDuration = Math.min(LOCKOUT_MS * Math.pow(2, level - 1), 15 * 60 * 1000)
 			const elapsed = Date.now() - data.lastAttempt
 			if (elapsed < lockoutDuration) {
 				const remaining = Math.ceil((lockoutDuration - elapsed) / 1000)
@@ -233,14 +230,7 @@ let inactivityTimer = null
 let lastActivityTime = 0
 let listenersAttached = false
 
-const ACTIVITY_EVENTS = [
-	"mousedown",
-	"mousemove",
-	"keydown",
-	"touchstart",
-	"scroll",
-	"click",
-]
+const ACTIVITY_EVENTS = ["mousedown", "mousemove", "keydown", "touchstart", "scroll", "click"]
 
 function getUserInfo() {
 	return {
@@ -311,20 +301,13 @@ async function verifyOfflinePassword(password) {
 	if (!limit.allowed) {
 		return {
 			success: false,
-			error: __("Too many attempts. Try again in {0} seconds.", [
-				limit.remaining,
-			]),
+			error: __("Too many attempts. Try again in {0} seconds.", [limit.remaining]),
 		}
 	}
 
 	const cached = getCachedPasswordHash()
 	if (!cached) {
-		return {
-			success: false,
-			error: __(
-				"Cannot verify password offline. No cached credentials available.",
-			),
-		}
+		return { success: false, error: __("Cannot verify password offline. No cached credentials available.") }
 	}
 
 	const { hash: enteredHash } = await hashPassword(password, cached.salt)
@@ -345,9 +328,7 @@ async function unlock(password) {
 	const limit = checkOfflineAttemptLimit()
 	if (!limit.allowed) {
 		isVerifying.value = false
-		verifyError.value = __("Too many attempts. Try again in {0} seconds.", [
-			limit.remaining,
-		])
+		verifyError.value = __("Too many attempts. Try again in {0} seconds.", [limit.remaining])
 		return { success: false }
 	}
 
@@ -365,9 +346,7 @@ async function unlock(password) {
 
 	// Online — verify against server
 	try {
-		const res = await call("pos_next.api.auth.verify_session_password", {
-			password,
-		})
+		const res = await call("pos_next.api.auth.verify_session_password", { password })
 		const data = res?.message || res
 
 		if (data?.verified) {
@@ -438,10 +417,7 @@ function startActivityTracking() {
 	if (listenersAttached) return
 
 	for (const event of ACTIVITY_EVENTS) {
-		document.addEventListener(event, resetTimer, {
-			passive: true,
-			capture: true,
-		})
+		document.addEventListener(event, resetTimer, { passive: true, capture: true })
 	}
 	document.addEventListener("visibilitychange", handleVisibilityChange)
 	window.addEventListener("pagehide", handlePageHide)

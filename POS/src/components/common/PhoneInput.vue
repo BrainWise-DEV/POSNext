@@ -85,8 +85,7 @@ const props = defineProps({
 
 const emit = defineEmits(["update:modelValue", "validate"])
 
-const { parsePhoneNumber, formatPhoneNumber, validatePhoneNumber } =
-	useCountryCodes()
+const { parsePhoneNumber, formatPhoneNumber, validatePhoneNumber } = useCountryCodes()
 
 const countryISD = ref("")
 const phoneNumber = ref("")
@@ -157,14 +156,11 @@ watch(
 	() => props.modelValue,
 	(newValue, oldValue) => {
 		// Only parse if value changed externally (not from our own update)
-		const currentFullValue = formatPhoneNumber(
-			countryISD.value,
-			phoneNumber.value,
-		)
+		const currentFullValue = formatPhoneNumber(countryISD.value, phoneNumber.value)
 		if (newValue !== currentFullValue) {
 			parseIncomingValue(newValue)
 		}
-	},
+	}
 )
 
 // Initialize

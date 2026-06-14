@@ -274,36 +274,3 @@ export async function printHTML(html, printerName, options = {}) {
 		throw err
 	}
 }
-
-export async function printRawCommands(rawCommands, printerName) {
-	if (!qz.websocket.isActive()) {
-		const ok = await connect()
-		if (!ok) {
-			throw new Error("QZ Tray is not available")
-		}
-	}
-
-	const printer = printerName || getSavedPrinterName()
-	if (!printer) {
-		throw new Error("No printer selected. Please select a printer in POS Settings.")
-	}
-
-	const config = qz.configs.create(printer)
-	const data = [
-		{
-			type: "raw",
-			format: "command",
-			flavor: "plain",
-			data: rawCommands,
-		},
-	]
-
-	try {
-		await qz.print(config, data)
-		log.info(`Raw print job sent to "${printer}"`)
-		return true
-	} catch (err) {
-		log.error(`Raw print failed on "${printer}":`, err?.message || err)
-		throw err
-	}
-}

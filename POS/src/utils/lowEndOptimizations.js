@@ -5,29 +5,27 @@
  * low-end cashier devices with limited CPU and memory resources.
  */
 
-import { logger } from "./logger"
-const log = logger.create("LowEndOptimizations")
+import { logger } from './logger'
+const log = logger.create('LowEndOptimizations')
 
 /**
  * requestIdleCallback polyfill for browsers that don't support it
  */
-const requestIdleCallback =
-	window.requestIdleCallback ||
-	((cb) => {
-		const start = Date.now()
-		return setTimeout(() => {
-			cb({
-				didTimeout: false,
-				timeRemaining: () => Math.max(0, 50 - (Date.now() - start)),
-			})
-		}, 1)
-	})
+const requestIdleCallback = window.requestIdleCallback || function(cb) {
+	const start = Date.now()
+	return setTimeout(function() {
+		cb({
+			didTimeout: false,
+			timeRemaining: function() {
+				return Math.max(0, 50 - (Date.now() - start))
+			}
+		})
+	}, 1)
+}
 
-const cancelIdleCallback =
-	window.cancelIdleCallback ||
-	((id) => {
-		clearTimeout(id)
-	})
+const cancelIdleCallback = window.cancelIdleCallback || function(id) {
+	clearTimeout(id)
+}
 
 /**
  * Schedule a task to run during browser idle time
@@ -40,22 +38,19 @@ const cancelIdleCallback =
 export function runWhenIdle(task, options = {}) {
 	const { timeout = 2000 } = options
 
-	return requestIdleCallback(
-		(deadline) => {
-			// Only run if we have time remaining or we've hit the timeout
-			if (deadline.timeRemaining() > 0 || deadline.didTimeout) {
-				try {
-					task()
-				} catch (error) {
-					log.error("Error in idle callback", error)
-				}
-			} else {
-				// Reschedule if we don't have time
-				runWhenIdle(task, options)
+	return requestIdleCallback((deadline) => {
+		// Only run if we have time remaining or we've hit the timeout
+		if (deadline.timeRemaining() > 0 || deadline.didTimeout) {
+			try {
+				task()
+			} catch (error) {
+				log.error('Error in idle callback', error)
 			}
-		},
-		{ timeout },
-	)
+		} else {
+			// Reschedule if we don't have time
+			runWhenIdle(task, options)
+		}
+	}, { timeout })
 }
 
 /**
@@ -133,7 +128,7 @@ export function addPassiveListener(element, event, handler, options = {}) {
 	const passiveOptions = {
 		passive: true,
 		capture: false,
-		...options,
+		...options
 	}
 
 	element.addEventListener(event, handler, passiveOptions)
@@ -197,11 +192,11 @@ class DOMBatcher {
 	flush() {
 		// Execute all reads first
 		const reads = this.reads.splice(0)
-		reads.forEach((read) => read())
+		reads.forEach(read => read())
 
 		// Then execute all writes
 		const writes = this.writes.splice(0)
-		writes.forEach((write) => write())
+		writes.forEach(write => write())
 
 		this.scheduled = false
 	}
@@ -241,7 +236,7 @@ export function createOptimizedClickHandler(handler, options = {}) {
 
 			// Visual feedback
 			if (feedback && event.currentTarget) {
-				event.currentTarget.style.opacity = "0.7"
+				event.currentTarget.style.opacity = '0.7'
 			}
 		},
 
@@ -255,7 +250,7 @@ export function createOptimizedClickHandler(handler, options = {}) {
 
 				// Remove feedback if moved
 				if (feedback && event.currentTarget) {
-					event.currentTarget.style.opacity = ""
+					event.currentTarget.style.opacity = ''
 				}
 			}
 		},
@@ -263,7 +258,7 @@ export function createOptimizedClickHandler(handler, options = {}) {
 		touchend: (event) => {
 			// Remove feedback
 			if (feedback && event.currentTarget) {
-				event.currentTarget.style.opacity = ""
+				event.currentTarget.style.opacity = ''
 			}
 
 			// Only trigger if touch was quick and didn't move
@@ -297,7 +292,7 @@ export function createOptimizedClickHandler(handler, options = {}) {
 			requestAnimationFrame(() => {
 				handler(event)
 			})
-		},
+		}
 	}
 
 	// Reset touchHandled flag after GHOST_CLICK_THRESHOLD
@@ -325,7 +320,11 @@ export function createOptimizedClickHandler(handler, options = {}) {
  * @returns {Promise} Promise that resolves when processing complete
  */
 export async function processArrayInChunks(array, processor, options = {}) {
-	const { chunkSize = 50, onProgress = null, signal = null } = options
+	const {
+		chunkSize = 50,
+		onProgress = null,
+		signal = null
+	} = options
 
 	const total = array.length
 	let processed = 0
@@ -333,14 +332,14 @@ export async function processArrayInChunks(array, processor, options = {}) {
 	for (let i = 0; i < total; i += chunkSize) {
 		// Check if cancelled
 		if (signal?.aborted) {
-			throw new Error("Processing cancelled")
+			throw new Error('Processing cancelled')
 		}
 
 		// Process chunk
 		const chunk = array.slice(i, i + chunkSize)
-		await new Promise((resolve) => {
+		await new Promise(resolve => {
 			runWhenIdle(() => {
-				chunk.forEach((item) => processor(item))
+				chunk.forEach(item => processor(item))
 				processed += chunk.length
 
 				if (onProgress) {
@@ -372,7 +371,7 @@ export function isLowEndDevice() {
 	// Check connection speed
 	if (navigator.connection) {
 		const conn = navigator.connection
-		if (conn.effectiveType === "slow-2g" || conn.effectiveType === "2g") {
+		if (conn.effectiveType === 'slow-2g' || conn.effectiveType === '2g') {
 			return true
 		}
 		if (conn.saveData) {
@@ -396,9 +395,9 @@ export function getPerformanceSettings() {
 		debounceDelay: isLowEnd ? 500 : 300,
 		throttleDelay: isLowEnd ? 200 : 100,
 		enableAnimations: !isLowEnd,
-		lazyLoadThreshold: isLowEnd ? "50px" : "200px",
+		lazyLoadThreshold: isLowEnd ? '50px' : '200px',
 		maxVisibleItems: isLowEnd ? 50 : 100,
 	}
 }
 
-log.info("Low-end optimizations loaded", { isLowEnd: isLowEndDevice() })
+log.info('Low-end optimizations loaded', { isLowEnd: isLowEndDevice() })
