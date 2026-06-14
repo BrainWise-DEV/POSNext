@@ -3,7 +3,7 @@
 
 import frappe
 from frappe import _
-from frappe.utils import flt, cint
+from frappe.utils import cint, flt
 
 
 def execute(filters=None):
@@ -21,75 +21,30 @@ def get_columns():
 			"label": _("Item Code"),
 			"fieldtype": "Link",
 			"options": "Item",
-			"width": 130
+			"width": 130,
 		},
-		{
-			"fieldname": "item_name",
-			"label": _("Item Name"),
-			"fieldtype": "Data",
-			"width": 200
-		},
+		{"fieldname": "item_name", "label": _("Item Name"), "fieldtype": "Data", "width": 200},
 		{
 			"fieldname": "item_group",
 			"label": _("Item Group"),
 			"fieldtype": "Link",
 			"options": "Item Group",
-			"width": 130
+			"width": 130,
 		},
-		{
-			"fieldname": "qty_sold",
-			"label": _("Qty Sold"),
-			"fieldtype": "Float",
-			"width": 100
-		},
-		{
-			"fieldname": "total_sales_value",
-			"label": _("Sales Value"),
-			"fieldtype": "Currency",
-			"width": 130
-		},
-		{
-			"fieldname": "avg_selling_rate",
-			"label": _("Avg Rate"),
-			"fieldtype": "Currency",
-			"width": 110
-		},
-		{
-			"fieldname": "current_stock",
-			"label": _("Current Stock"),
-			"fieldtype": "Float",
-			"width": 120
-		},
-		{
-			"fieldname": "days_to_stockout",
-			"label": _("Days to Stockout"),
-			"fieldtype": "Int",
-			"width": 140
-		},
+		{"fieldname": "qty_sold", "label": _("Qty Sold"), "fieldtype": "Float", "width": 100},
+		{"fieldname": "total_sales_value", "label": _("Sales Value"), "fieldtype": "Currency", "width": 130},
+		{"fieldname": "avg_selling_rate", "label": _("Avg Rate"), "fieldtype": "Currency", "width": 110},
+		{"fieldname": "current_stock", "label": _("Current Stock"), "fieldtype": "Float", "width": 120},
+		{"fieldname": "days_to_stockout", "label": _("Days to Stockout"), "fieldtype": "Int", "width": 140},
 		{
 			"fieldname": "stock_depletion_rate",
 			"label": _("Depletion Rate/Day"),
 			"fieldtype": "Float",
-			"width": 150
+			"width": 150,
 		},
-		{
-			"fieldname": "stock_status",
-			"label": _("Stock Status"),
-			"fieldtype": "Data",
-			"width": 120
-		},
-		{
-			"fieldname": "velocity_rank",
-			"label": _("Velocity Rank"),
-			"fieldtype": "Data",
-			"width": 120
-		},
-		{
-			"fieldname": "reorder_level",
-			"label": _("Reorder Level"),
-			"fieldtype": "Float",
-			"width": 120
-		}
+		{"fieldname": "stock_status", "label": _("Stock Status"), "fieldtype": "Data", "width": 120},
+		{"fieldname": "velocity_rank", "label": _("Velocity Rank"), "fieldtype": "Data", "width": 120},
+		{"fieldname": "reorder_level", "label": _("Reorder Level"), "fieldtype": "Float", "width": 120},
 	]
 
 
@@ -112,6 +67,7 @@ def get_data(filters):
 
 	if from_date and to_date:
 		from frappe.utils import date_diff
+
 		date_range_days = max(date_diff(to_date, from_date), 1)
 	else:
 		date_range_days = 30  # Default to 30 days
@@ -231,19 +187,27 @@ def _get_stock_map(item_codes, warehouse=None):
 	placeholders = ", ".join(["%s"] * len(item_codes))
 
 	if warehouse:
-		rows = frappe.db.sql("""
+		rows = frappe.db.sql(
+			"""
 			SELECT item_code, actual_qty
 			FROM `tabBin`
 			WHERE item_code IN ({placeholders})
 			AND warehouse = %s
-		""".format(placeholders=placeholders), item_codes + [warehouse], as_dict=1)
+		""".format(placeholders=placeholders),
+			item_codes + [warehouse],
+			as_dict=1,
+		)
 	else:
-		rows = frappe.db.sql("""
+		rows = frappe.db.sql(
+			"""
 			SELECT item_code, SUM(actual_qty) as actual_qty
 			FROM `tabBin`
 			WHERE item_code IN ({placeholders})
 			GROUP BY item_code
-		""".format(placeholders=placeholders), item_codes, as_dict=1)
+		""".format(placeholders=placeholders),
+			item_codes,
+			as_dict=1,
+		)
 
 	return {row.item_code: flt(row.actual_qty) for row in rows}
 
@@ -349,16 +313,9 @@ def get_chart_data(data):
 	return {
 		"data": {
 			"labels": [row.item_code for row in top_movers],
-			"datasets": [
-				{
-					"name": "Quantity Sold",
-					"values": [row.qty_sold for row in top_movers]
-				}
-			]
+			"datasets": [{"name": "Quantity Sold", "values": [row.qty_sold for row in top_movers]}],
 		},
 		"type": "bar",
 		"colors": ["#2196F3"],
-		"barOptions": {
-			"stacked": False
-		}
+		"barOptions": {"stacked": False},
 	}

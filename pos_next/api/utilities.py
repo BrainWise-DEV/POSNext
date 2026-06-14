@@ -3,8 +3,10 @@
 # For license information, please see license.txt
 
 from __future__ import unicode_literals
-import frappe
+
 import json
+
+import frappe
 from frappe import _
 from frappe.utils import cint
 
@@ -34,10 +36,7 @@ def get_csrf_token():
 	if not csrf_token:
 		frappe.throw(_("Failed to generate CSRF token"), frappe.ValidationError)
 
-	return {
-		"csrf_token": csrf_token,
-		"session_id": frappe.session.sid
-	}
+	return {"csrf_token": csrf_token, "session_id": frappe.session.sid}
 
 
 def _parse_list_parameter(value, param_name="parameter"):
@@ -69,10 +68,7 @@ def check_user_company():
 	user = frappe.session.user
 
 	permission = frappe.db.get_value(
-		"User Permission",
-		{"user": user, "allow": "Company"},
-		["for_value"],
-		as_dict=True
+		"User Permission", {"user": user, "allow": "Company"}, ["for_value"], as_dict=True
 	)
 
 	if permission:
@@ -89,11 +85,7 @@ def get_wallet_payment_modes():
 	Returns:
 		list: List of Mode of Payment names with is_wallet_payment=1
 	"""
-	return frappe.get_all(
-		"Mode of Payment",
-		filters={"is_wallet_payment": 1},
-		pluck="name"
-	)
+	return frappe.get_all("Mode of Payment", filters={"is_wallet_payment": 1}, pluck="name")
 
 
 def is_wallet_payment_mode(mode_of_payment):

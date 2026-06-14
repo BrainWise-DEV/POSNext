@@ -5,7 +5,7 @@
 """Scheduled tasks for POS Next."""
 
 import frappe
-from frappe.utils import nowdate, getdate
+from frappe.utils import getdate, nowdate
 
 
 def disable_expired_pricing_rules():
