@@ -609,8 +609,8 @@
 "{0}: {1} {2}","{0}: {1} {2}",""
 "Nos","قطعة",""
 "Check availability in other warehouses","التحقق من التوفر في مستودعات أخرى",""
-"Check Availability in All Wherehouses","التحقق من التوفر في كل المستودعات",
-"Selected","اختيار",
+"Check Availability in All Wherehouses","التحقق من التوفر في كل المستودعات",""
+"Selected","اختيار",""
 "Check warehouse availability","التحقق من توفر المستودع",""
 "Loading more items...","جاري تحميل المزيد من المنتجات...",""
 "All items loaded","تم تحميل جميع المنتجات",""
@@ -1428,35 +1428,35 @@
 "You are offline","أنت غير متصل بالإنترنت",""
 "Payments cannot be added while offline. Connect to the internet to add payments.","لا يمكن إضافة مدفوعات أثناء عدم الاتصال. اتصل بالإنترنت لإضافة المدفوعات.",""
 "Payments cannot be added while offline","لا يمكن إضافة مدفوعات أثناء عدم الاتصال",""
-Add another...,إضافة المزيد...
-All sales persons selected,تم تحديد كافة المندوبين
-Cannot add more non-cash payments. Use cash for overpayment.,لا يمكن إضافة دفع غير نقدي. يرجى استخدام النقد للمبلغ الزائد.
-Change sales person,تغيير المندوب
-Clear all payments,حذف كافة المدفوعات
-Complete Sales Order,إتمام الطلب
-Credit Balance,الرصيد الدائن
-Custom,مخصص
-Delivery Date,موعد التسليم
-Invoice fully paid. No additional payment needed.,الفاتورة مدفوعة بالكامل. لا يلزم سداد إضافي.
-Mixed payment (cash + non-cash) must equal exact invoice amount. No overpayment allowed.,يجب أن يطابق الدفع المختلط قيمة الفاتورة تماماً. غير مسموح بزيادة المبلغ.
-No items,لا توجد أصناف
-No payment methods available,طرق الدفع غير متاحة
-No sales persons available,قائمة المندوبين فارغة
-Non-cash payment capped to remaining amount: {0},الحد الأقصى للدفع غير النقدي هو المتبقي: {0}
-Non-cash payment must equal exact invoice amount. No overpayment allowed.,يجب أن يطابق الدفع غير النقدي قيمة الفاتورة. الزيادة غير مسموحة.
-Overpayment,مبلغ زائد
-Pay,سداد
-Payment amount is correct,مبلغ السداد صحيح
-Sales person is required,يرجى اختيار المندوب
-Select a payment method,تحديد طريقة الدفع
-Select a payment method to start,يرجى تحديد طريقة دفع للبدء
-Select sales person...,تحديد المندوب...
-Total must equal invoice amount,يجب مطابقة الإجمالي مع قيمة الفاتورة
-Total: {0}%,الإجمالي: {0}%
-Warning: Mixed payment exceeds invoice total. Change not allowed for mixed payments.,تنبيه: الدفع المختلط يتجاوز الفاتورة. لا يوجد باقي للمدفوعات المختلطة.
-comm.,عمولة
-No redeemable points available,لا تتوفر نقاط للاستبدال
-Points applied: {0}. Please pay remaining {1} with {2},تم خصم النقاط: {0}. يرجى سداد المتبقي {1} عبر {2}
+"Add another...","إضافة المزيد..."
+"All sales persons selected","تم تحديد كافة المندوبين"
+"Cannot add more non-cash payments. Use cash for overpayment.","لا يمكن إضافة دفع غير نقدي. يرجى استخدام النقد للمبلغ الزائد."
+"Change sales person","تغيير المندوب"
+"Clear all payments","حذف كافة المدفوعات"
+"Complete Sales Order","إتمام الطلب"
+"Credit Balance","الرصيد الدائن"
+"Custom","مخصص"
+"Delivery Date","موعد التسليم"
+"Invoice fully paid. No additional payment needed.","الفاتورة مدفوعة بالكامل. لا يلزم سداد إضافي."
+"Mixed payment (cash + non-cash) must equal exact invoice amount. No overpayment allowed.","يجب أن يطابق الدفع المختلط قيمة الفاتورة تماماً. غير مسموح بزيادة المبلغ."
+"No items","لا توجد أصناف"
+"No payment methods available","طرق الدفع غير متاحة"
+"No sales persons available","قائمة المندوبين فارغة"
+"Non-cash payment capped to remaining amount: {0}","الحد الأقصى للدفع غير النقدي هو المتبقي: {0}"
+"Non-cash payment must equal exact invoice amount. No overpayment allowed.","يجب أن يطابق الدفع غير النقدي قيمة الفاتورة. الزيادة غير مسموحة."
+"Overpayment","مبلغ زائد"
+"Pay","سداد"
+"Payment amount is correct","مبلغ السداد صحيح"
+"Sales person is required","يرجى اختيار المندوب"
+"Select a payment method","تحديد طريقة الدفع"
+"Select a payment method to start","يرجى تحديد طريقة دفع للبدء"
+"Select sales person...","تحديد المندوب..."
+"Total must equal invoice amount","يجب مطابقة الإجمالي مع قيمة الفاتورة"
+"Total: {0}%","الإجمالي: {0}%"
+"Warning: Mixed payment exceeds invoice total. Change not allowed for mixed payments.","تنبيه: الدفع المختلط يتجاوز الفاتورة. لا يوجد باقي للمدفوعات المختلطة."
+"comm.","عمولة"
+"No redeemable points available","لا تتوفر نقاط للاستبدال"
+"Points applied: {0}. Please pay remaining {1} with {2}","تم خصم النقاط: {0}. يرجى سداد المتبقي {1} عبر {2}"
 "Non-cash payment must equal {0} exactly","يجب أن يطابق الدفع غير النقدي {0} تماماً",""
 "Mixed payment cannot exceed invoice total. Limit: {0}","غير مسموح بتجاوز قيمة الفاتورة في الدفع المختلط. الحد الأقصى: {0}",""
 "Add to Customer Credit Balance","إضافة لرصيد العميل",""
@@ -1560,3 +1560,35 @@ Points applied: {0}. Please pay remaining {1} with {2},تم خصم النقاط:
 "Invoice {0} saved offline and sent to printer — will sync when online","تم حفظ الفاتورة {0} دون اتصال وإرسالها إلى الطابعة — وستتم مزامنتها عند عودة الاتصال",""
 "Invoice {0} saved offline but print failed — open Print from the success dialog","تم حفظ الفاتورة {0} دون اتصال، لكن تعذّرت الطباعة — افتح خيار الطباعة من نافذة النجاح",""
 "Popup blocked — check your browser settings.","تم حظر النافذة المنبثقة — يُرجى التحقق من إعدادات المتصفح.",""
+"Add Product","إضافة منتج",""
+"Add UOM","إضافة وحدة قياس",""
+"All Groups","كل المجموعات",""
+"Change","تغيير",""
+"Choose a product from the list to view or edit its details, or create a new one.","اختر منتجًا من القائمة لعرض تفاصيله أو تعديلها، أو إنشاء منتج جديد.",""
+"Define alternate selling units against the base UOM.","تحديد وحدات بيع بديلة مقابل وحدة القياس الأساسية.",""
+"Example: if base UOM is Piece, Box factor 12 means 1 Box = 12 Pieces.","مثال: إذا كانت وحدة القياس الأساسية هي 'قطعة'، فإن معامل تحويل 'صندوق' 12 يعني أن 1 صندوق = 12 قطعة.",""
+"Factor","معامل التحويل",""
+"Failed to load products","فشل تحميل المنتجات",""
+"Failed to save product","فشل حفظ المنتج",""
+"Maintain Stock","تتبع المخزون",""
+"Manage products for POS","إدارة المنتجات لنقطة البيع",""
+"New Product","منتج جديد",""
+"No alternate UOMs configured.","لم يتم تهيئة وحدات قياس بديلة.",""
+"No products found","لم يتم العثور على منتجات",""
+"Not permitted to read Item","غير مسموح بقراءة الصنف",""
+"Not permitted to {0} Item","غير مسموح بـ {0} الصنف",""
+"Price ({0})","السعر ({0})",""
+"Price is required","السعر مطلوب",""
+"Product Image","صورة المنتج",""
+"Product Management","إدارة المنتجات",""
+"Product Name","اسم المنتج",""
+"Product Name is required","اسم المنتج مطلوب",""
+"Product saved successfully","تم حفظ المنتج بنجاح",""
+"Search UOMs...","البحث في وحدات القياس...",""
+"Search item groups...","البحث في مجموعات الأصناف...",""
+"Select UOM","اختر وحدة القياس",""
+"Select a Product","اختر منتجًا",""
+"Select an image to upload directly when the product is saved.","اختر صورة لرفعها مباشرة عند حفظ المنتج.",""
+"UOM Conversions","تحويلات وحدات القياس",""
+"UOM conversion factor must be greater than zero","يجب أن يكون معامل تحويل وحدة القياس أكبر من الصفر",""
+"View on Desk","عرض في المكتب",""
