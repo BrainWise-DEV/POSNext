@@ -113,17 +113,18 @@ def create_customer(
 	if not resolved_customer_group:
 		resolved_customer_group = frappe.db.get_single_value("Selling Settings", "customer_group")
 	if not resolved_customer_group:
-		resolved_customer_group = frappe.db.get_value(
-			"Customer Group", {"is_group": 0}, "name", order_by="lft"
-		) or "All Customer Groups"
+		resolved_customer_group = (
+			frappe.db.get_value("Customer Group", {"is_group": 0}, "name", order_by="lft")
+			or "All Customer Groups"
+		)
 
 	resolved_territory = territory
 	if not resolved_territory:
 		resolved_territory = frappe.db.get_single_value("Selling Settings", "territory")
 	if not resolved_territory:
-		resolved_territory = frappe.db.get_value(
-			"Territory", {"is_group": 0}, "name", order_by="lft"
-		) or "All Territories"
+		resolved_territory = (
+			frappe.db.get_value("Territory", {"is_group": 0}, "name", order_by="lft") or "All Territories"
+		)
 
 	customer = frappe.get_doc(
 		{

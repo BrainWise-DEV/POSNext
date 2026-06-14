@@ -41,10 +41,7 @@ def apply_tax_inclusive(doc):
 	try:
 		# Get POS Settings for this profile
 		pos_settings = frappe.db.get_value(
-			"POS Settings",
-			{"pos_profile": doc.pos_profile},
-			["tax_inclusive"],
-			as_dict=True
+			"POS Settings", {"pos_profile": doc.pos_profile}, ["tax_inclusive"], as_dict=True
 		)
 		tax_inclusive = pos_settings.get("tax_inclusive", 0) if pos_settings else 0
 	except Exception:
@@ -95,7 +92,7 @@ def auto_assign_loyalty_program_on_invoice(doc):
 		"POS Settings",
 		{"pos_profile": doc.pos_profile},
 		["enable_loyalty_program", "default_loyalty_program"],
-		as_dict=True
+		as_dict=True,
 	)
 
 	if not pos_settings:
@@ -109,13 +106,7 @@ def auto_assign_loyalty_program_on_invoice(doc):
 		return
 
 	# Assign loyalty program to customer
-	frappe.db.set_value(
-		"Customer",
-		doc.customer,
-		"loyalty_program",
-		loyalty_program,
-		update_modified=False
-	)
+	frappe.db.set_value("Customer", doc.customer, "loyalty_program", loyalty_program, update_modified=False)
 
 
 def record_one_time_offer_usage(doc, method=None):
@@ -177,15 +168,16 @@ def before_cancel(doc, method=None):
 	"""
 	try:
 		from pos_next.api.credit_sales import cancel_credit_journal_entries
+
 		cancel_credit_journal_entries(doc.name)
 	except Exception as e:
 		frappe.log_error(
 			title="Credit Sale JE Cancellation Error",
-			message=f"Invoice: {doc.name}, Error: {str(e)}\n{frappe.get_traceback()}"
+			message=f"Invoice: {doc.name}, Error: {str(e)}\n{frappe.get_traceback()}",
 		)
 		# Don't block invoice cancellation if JE cancellation fails
 		frappe.msgprint(
 			_("Warning: Some credit journal entries may not have been cancelled. Please check manually."),
 			alert=True,
-			indicator="orange"
+			indicator="orange",
 		)

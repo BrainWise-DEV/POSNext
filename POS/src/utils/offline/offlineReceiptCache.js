@@ -1,7 +1,7 @@
-import { logger } from "@/utils/logger"
+import { logger } from "@/utils/logger";
 
-const log = logger.create("OfflineReceiptCache")
-const KEY_PREFIX = "pos_next_offline_rcpt:"
+const log = logger.create("OfflineReceiptCache");
+const KEY_PREFIX = "pos_next_offline_rcpt:";
 
 /**
  * Persist a full receipt payload for a synthetic offline invoice id (e.g.
@@ -9,21 +9,21 @@ const KEY_PREFIX = "pos_next_offline_rcpt:"
  * names that are not in the DB yet.
  */
 export function cacheOfflineReceiptPayload(name, doc) {
-	if (typeof sessionStorage === "undefined" || !name || !doc) return
+	if (typeof sessionStorage === "undefined" || !name || !doc) return;
 	try {
-		sessionStorage.setItem(`${KEY_PREFIX}${name}`, JSON.stringify(doc))
+		sessionStorage.setItem(`${KEY_PREFIX}${name}`, JSON.stringify(doc));
 	} catch (e) {
-		log.warn("Could not cache offline receipt:", e)
+		log.warn("Could not cache offline receipt:", e);
 	}
 }
 
 export function getOfflineReceiptPayload(name) {
-	if (typeof sessionStorage === "undefined" || !name) return null
+	if (typeof sessionStorage === "undefined" || !name) return null;
 	try {
-		const raw = sessionStorage.getItem(`${KEY_PREFIX}${name}`)
-		return raw ? JSON.parse(raw) : null
+		const raw = sessionStorage.getItem(`${KEY_PREFIX}${name}`);
+		return raw ? JSON.parse(raw) : null;
 	} catch {
-		return null
+		return null;
 	}
 }
 
@@ -32,11 +32,11 @@ export function getOfflineReceiptPayload(name) {
  * to the server and the server name is available for future lookups.
  */
 export function removeOfflineReceiptPayload(name) {
-	if (typeof sessionStorage === "undefined" || !name) return
+	if (typeof sessionStorage === "undefined" || !name) return;
 	try {
-		sessionStorage.removeItem(`${KEY_PREFIX}${name}`)
+		sessionStorage.removeItem(`${KEY_PREFIX}${name}`);
 	} catch (e) {
-		log.warn("Could not remove offline receipt:", e)
+		log.warn("Could not remove offline receipt:", e);
 	}
 }
 
@@ -45,15 +45,15 @@ export function removeOfflineReceiptPayload(name) {
  * prevent cross-cashier leakage on shared terminals.
  */
 export function clearAllOfflineReceiptPayloads() {
-	if (typeof sessionStorage === "undefined") return
+	if (typeof sessionStorage === "undefined") return;
 	try {
-		const keys = []
+		const keys = [];
 		for (let i = 0; i < sessionStorage.length; i++) {
-			const key = sessionStorage.key(i)
-			if (key?.startsWith(KEY_PREFIX)) keys.push(key)
+			const key = sessionStorage.key(i);
+			if (key?.startsWith(KEY_PREFIX)) keys.push(key);
 		}
-		for (const key of keys) sessionStorage.removeItem(key)
+		for (const key of keys) sessionStorage.removeItem(key);
 	} catch (e) {
-		log.warn("Could not clear offline receipts:", e)
+		log.warn("Could not clear offline receipts:", e);
 	}
 }
