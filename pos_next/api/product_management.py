@@ -67,7 +67,7 @@ def get_products(
 	limit_start = max(cint(start), 0)
 	page_length = min(max(cint(limit) or DEFAULT_PAGE_LENGTH, 1), MAX_PAGE_LENGTH)
 
-	filters = {"is_sales_item": 1, "disabled": 0}
+	filters = {"is_sales_item": 1}
 	allowed_item_groups = _get_pos_profile_allowed_item_groups(pos_profile_doc)
 	or_filters = None
 
