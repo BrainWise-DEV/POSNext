@@ -1,7 +1,10 @@
 <template>
 	<Teleport to="body">
 		<Transition name="overlay">
-			<div v-if="show" class="fixed inset-0 z-[9999] flex items-center justify-center">
+			<div
+				v-if="show"
+				class="fixed inset-0 z-[9999] flex items-center justify-center"
+			>
 				<!-- Backdrop -->
 				<div class="absolute inset-0 bg-black/60 backdrop-blur-sm"></div>
 
@@ -15,9 +18,7 @@
 						>
 							<!-- Icon -->
 							<div class="flex justify-center mb-6">
-								<div
-									class="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center"
-								>
+								<div class="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center">
 									<svg
 										class="w-10 h-10 text-red-600"
 										fill="none"
@@ -36,14 +37,10 @@
 
 							<!-- Title & Message -->
 							<h3 class="text-2xl font-bold text-gray-900 text-center mb-3">
-								{{ __("Clear Cache?") }}
+								{{ __('Clear Cache?') }}
 							</h3>
 							<p class="text-gray-600 text-center mb-8 leading-relaxed">
-								{{
-									__(
-										"This will clear all cached items, customers, and stock data. Invoices and drafts will be preserved."
-									)
-								}}
+								{{ __('This will clear all cached items, customers, and stock data. Invoices and drafts will be preserved.') }}
 							</p>
 
 							<!-- Buttons -->
@@ -52,13 +49,13 @@
 									@click="$emit('cancel')"
 									class="flex-1 px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-xl transition-all active:scale-95"
 								>
-									{{ __("Cancel") }}
+									{{ __('Cancel') }}
 								</button>
 								<button
 									@click="handleConfirm"
 									class="flex-1 px-6 py-3 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-xl transition-all active:scale-95 shadow-lg shadow-red-500/30"
 								>
-									{{ __("Clear Cache") }}
+									{{ __('Clear Cache') }}
 								</button>
 							</div>
 						</div>
@@ -73,9 +70,7 @@
 								<!-- Animated Icon Container -->
 								<div class="relative mb-6">
 									<!-- Outer spinning ring -->
-									<div
-										class="w-24 h-24 rounded-full border-4 border-blue-200 border-t-blue-600 animate-spin"
-									></div>
+									<div class="w-24 h-24 rounded-full border-4 border-blue-200 border-t-blue-600 animate-spin"></div>
 
 									<!-- Inner icon -->
 									<div class="absolute inset-0 flex items-center justify-center">
@@ -84,35 +79,24 @@
 											fill="currentColor"
 											viewBox="0 0 24 24"
 										>
-											<path
-												d="M12 2C8.13 2 5 3.12 5 4.5V7c0 1.38 3.13 2.5 7 2.5S19 8.38 19 7V4.5C19 3.12 15.87 2 12 2zM5 9v3c0 1.38 3.13 2.5 7 2.5s7-1.12 7-2.5V9c0 1.38-3.13 2.5-7 2.5S5 10.38 5 9zm0 5v3c0 1.38 3.13 2.5 7 2.5s7-1.12 7-2.5v-3c0 1.38-3.13 2.5-7 2.5S5 15.38 5 14z"
-											/>
+											<path d="M12 2C8.13 2 5 3.12 5 4.5V7c0 1.38 3.13 2.5 7 2.5S19 8.38 19 7V4.5C19 3.12 15.87 2 12 2zM5 9v3c0 1.38 3.13 2.5 7 2.5s7-1.12 7-2.5V9c0 1.38-3.13 2.5-7 2.5S5 10.38 5 9zm0 5v3c0 1.38 3.13 2.5 7 2.5s7-1.12 7-2.5v-3c0 1.38-3.13 2.5-7 2.5S5 15.38 5 14z"/>
 										</svg>
 									</div>
 								</div>
 
 								<!-- Text -->
 								<h3 class="text-xl font-bold text-gray-900 mb-2">
-									{{ __("Clearing Cache...") }}
+									{{ __('Clearing Cache...') }}
 								</h3>
 								<p class="text-gray-500 text-center">
-									{{ __("Please wait while we clear your cached data") }}
+									{{ __('Please wait while we clear your cached data') }}
 								</p>
 
 								<!-- Progress dots animation -->
 								<div class="flex gap-2 mt-6">
-									<div
-										class="w-2 h-2 bg-blue-600 rounded-full animate-bounce"
-										style="animation-delay: 0ms"
-									></div>
-									<div
-										class="w-2 h-2 bg-blue-600 rounded-full animate-bounce"
-										style="animation-delay: 150ms"
-									></div>
-									<div
-										class="w-2 h-2 bg-blue-600 rounded-full animate-bounce"
-										style="animation-delay: 300ms"
-									></div>
+									<div class="w-2 h-2 bg-blue-600 rounded-full animate-bounce" style="animation-delay: 0ms"></div>
+									<div class="w-2 h-2 bg-blue-600 rounded-full animate-bounce" style="animation-delay: 150ms"></div>
+									<div class="w-2 h-2 bg-blue-600 rounded-full animate-bounce" style="animation-delay: 300ms"></div>
 								</div>
 							</div>
 						</div>
@@ -124,31 +108,31 @@
 </template>
 
 <script setup>
-import { ref } from "vue";
+import { ref } from 'vue'
 
 defineProps({
 	show: {
 		type: Boolean,
-		default: false,
-	},
-});
+		default: false
+	}
+})
 
-const emit = defineEmits(["cancel", "confirm"]);
+const emit = defineEmits(['cancel', 'confirm'])
 
-const isClearing = ref(false);
+const isClearing = ref(false)
 
 function handleConfirm() {
-	isClearing.value = true;
-	emit("confirm");
+	isClearing.value = true
+	emit('confirm')
 }
 
 // Reset state when overlay is closed
 function reset() {
-	isClearing.value = false;
+	isClearing.value = false
 }
 
 // Expose reset method to parent
-defineExpose({ reset });
+defineExpose({ reset })
 </script>
 
 <style scoped>
@@ -185,8 +169,7 @@ defineExpose({ reset });
 
 /* Bounce animation for dots */
 @keyframes bounce {
-	0%,
-	100% {
+	0%, 100% {
 		transform: translateY(0);
 	}
 	50% {

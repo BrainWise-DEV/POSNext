@@ -31,12 +31,15 @@ running site has configured.
 from types import SimpleNamespace
 
 import frappe
-from erpnext.stock.doctype.stock_entry.test_stock_entry import make_stock_entry
 from frappe.tests.utils import FrappeTestCase
-from frappe.utils import add_days, flt, nowdate
+from frappe.utils import flt, nowdate, add_days
 
 import pos_next  # noqa: F401 — ensure app hooks load.
+
+from erpnext.stock.doctype.stock_entry.test_stock_entry import make_stock_entry
+
 from pos_next.api.invoices import apply_offers, submit_invoice, update_invoice
+
 
 ITEM_A = "_PNXT_TEST_ITEM_A"  # Standard Selling: 50
 ITEM_B = "_PNXT_TEST_ITEM_B"  # Standard Selling: 80
@@ -117,7 +120,9 @@ def _resolve_mode_of_payment(company):
 			}
 		).insert(ignore_permissions=True)
 
-	default_cash_account = frappe.get_cached_value("Company", company, "default_cash_account")
+	default_cash_account = frappe.get_cached_value(
+		"Company", company, "default_cash_account"
+	)
 	if not default_cash_account:
 		# Find any cash-type account for the company
 		default_cash_account = frappe.db.get_value(
@@ -326,7 +331,9 @@ def _ensure_pos_profile(company, warehouse, price_list, mode_of_payment):
 			"selling_price_list": price_list,
 			"currency": frappe.get_cached_value("Company", company, "default_currency"),
 			"customer": CUSTOMER,
-			"write_off_account": frappe.get_cached_value("Company", company, "write_off_account"),
+			"write_off_account": frappe.get_cached_value(
+				"Company", company, "write_off_account"
+			),
 			"write_off_cost_center": _resolve_cost_center(company),
 			"ignore_pricing_rule": 0,
 			"disable_rounded_total": 1,
@@ -374,7 +381,9 @@ def _make_rule(title, **fields):
 		"selling": 1,
 		"buying": 0,
 		"company": _resolve_company(),
-		"currency": frappe.get_cached_value("Company", _resolve_company(), "default_currency"),
+		"currency": frappe.get_cached_value(
+			"Company", _resolve_company(), "default_currency"
+		),
 		"valid_from": nowdate(),
 		"priority": "1",
 		"disable": 0,
@@ -488,7 +497,9 @@ def _submit_invoice(ctx, payload, paid_amount):
 	"""Push the payload through update_invoice → submit_invoice and return the final doc."""
 	import json
 
-	payload["payments"] = [{"mode_of_payment": ctx.mode_of_payment, "amount": flt(paid_amount)}]
+	payload["payments"] = [
+		{"mode_of_payment": ctx.mode_of_payment, "amount": flt(paid_amount)}
+	]
 
 	draft = update_invoice(json.dumps(payload))
 	inv_name = draft["name"]
@@ -882,7 +893,9 @@ class TestPromotions(FrappeTestCase):
 		)
 
 		self.assertIn(rule, resp.get("applied_pricing_rules") or [])
-		self.assertAlmostEqual(flt(resp.get("additional_discount_percentage")), 10, places=2)
+		self.assertAlmostEqual(
+			flt(resp.get("additional_discount_percentage")), 10, places=2
+		)
 		self.assertAlmostEqual(flt(resp.get("discount_amount")), 13, places=2)
 		self.assertEqual(resp.get("apply_discount_on"), "Grand Total")
 

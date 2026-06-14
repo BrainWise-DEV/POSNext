@@ -1,14 +1,8 @@
 <template>
 	<div class="autocomplete-select" ref="containerRef">
 		<div class="select-input-wrapper">
-			<svg
-				v-if="icon"
-				class="input-icon"
-				fill="none"
-				stroke="currentColor"
-				viewBox="0 0 24 24"
-			>
-				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="icon" />
+			<svg v-if="icon" class="input-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="icon"/>
 			</svg>
 			<input
 				ref="inputRef"
@@ -22,30 +16,23 @@
 				@keydown="handleKeydown"
 			/>
 			<div class="input-actions">
-				<button v-if="modelValue" @click="clearSelection" class="clear-btn" type="button">
+				<button
+					v-if="modelValue"
+					@click="clearSelection"
+					class="clear-btn"
+					type="button"
+				>
 					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							stroke-width="2"
-							d="M6 18L18 6M6 6l12 12"
-						/>
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
 					</svg>
 				</button>
-				<button @click="toggleDropdown" class="dropdown-toggle" type="button">
-					<svg
-						class="w-4 h-4"
-						:class="{ 'rotate-180': showDropdown }"
-						fill="none"
-						stroke="currentColor"
-						viewBox="0 0 24 24"
-					>
-						<path
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							stroke-width="2"
-							d="M19 9l-7 7-7-7"
-						/>
+				<button
+					@click="toggleDropdown"
+					class="dropdown-toggle"
+					type="button"
+				>
+					<svg class="w-4 h-4" :class="{ 'rotate-180': showDropdown }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
 					</svg>
 				</button>
 			</div>
@@ -57,22 +44,15 @@
 				<!-- Loading State -->
 				<div v-if="loading" class="dropdown-loading">
 					<div class="loading-spinner"></div>
-					<span>{{ __("Searching...") }}</span>
+					<span>{{ __('Searching...') }}</span>
 				</div>
 
 				<!-- No Results -->
 				<div v-else-if="filteredOptions.length === 0" class="dropdown-empty">
 					<svg class="empty-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							stroke-width="2"
-							d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-						/>
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
 					</svg>
-					<span>{{
-						searchQuery ? __("No results found") : __("No options available")
-					}}</span>
+					<span>{{ searchQuery ? __('No results found') : __('No options available') }}</span>
 				</div>
 
 				<!-- Options List -->
@@ -84,20 +64,10 @@
 						class="dropdown-item clear-item"
 						type="button"
 					>
-						<svg
-							class="item-icon"
-							fill="none"
-							stroke="currentColor"
-							viewBox="0 0 24 24"
-						>
-							<path
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								stroke-width="2"
-								d="M6 18L18 6M6 6l12 12"
-							/>
+						<svg class="item-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
 						</svg>
-						<span>{{ __("Clear selection") }}</span>
+						<span>{{ __('Clear selection') }}</span>
 					</button>
 
 					<!-- Options -->
@@ -105,34 +75,18 @@
 						v-for="(option, index) in paginatedOptions"
 						:key="option.value"
 						@click="selectOption(option)"
-						:class="[
-							'dropdown-item',
-							{
-								active: option.value === modelValue,
-								highlighted: index === highlightedIndex,
-							},
-						]"
+						:class="['dropdown-item', {
+							active: option.value === modelValue,
+							highlighted: index === highlightedIndex
+						}]"
 						type="button"
 					>
-						<svg
-							v-if="option.value === modelValue"
-							class="item-icon check-icon"
-							fill="none"
-							stroke="currentColor"
-							viewBox="0 0 24 24"
-						>
-							<path
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								stroke-width="2"
-								d="M5 13l4 4L19 7"
-							/>
+						<svg v-if="option.value === modelValue" class="item-icon check-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
 						</svg>
 						<div class="item-content">
 							<span class="item-label" v-html="highlightMatch(option.label)"></span>
-							<span v-if="option.subtitle" class="item-subtitle">{{
-								option.subtitle
-							}}</span>
+							<span v-if="option.subtitle" class="item-subtitle">{{ option.subtitle }}</span>
 						</div>
 					</button>
 
@@ -143,24 +97,10 @@
 						class="dropdown-item load-more"
 						type="button"
 					>
-						<svg
-							class="item-icon"
-							fill="none"
-							stroke="currentColor"
-							viewBox="0 0 24 24"
-						>
-							<path
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								stroke-width="2"
-								d="M19 9l-7 7-7-7"
-							/>
+						<svg class="item-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
 						</svg>
-						<span>{{
-							__("Load more ({0} remaining)", [
-								filteredOptions.length - displayLimit,
-							])
-						}}</span>
+						<span>{{ __('Load more ({0} remaining)', [(filteredOptions.length - displayLimit)]) }}</span>
 					</button>
 				</div>
 			</div>
@@ -169,7 +109,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue"
 
 const props = defineProps({
 	modelValue: {
@@ -205,187 +145,189 @@ const props = defineProps({
 		type: Number,
 		default: 0,
 	},
-});
+})
 
-const emit = defineEmits(["update:modelValue", "search"]);
+const emit = defineEmits(["update:modelValue", "search"])
 
-const containerRef = ref(null);
-const inputRef = ref(null);
-const searchQuery = ref("");
-const showDropdown = ref(false);
-const highlightedIndex = ref(-1);
-const displayLimit = ref(50);
+const containerRef = ref(null)
+const inputRef = ref(null)
+const searchQuery = ref("")
+const showDropdown = ref(false)
+const highlightedIndex = ref(-1)
+const displayLimit = ref(50)
 
 // Find selected option label
 const selectedOption = computed(() => {
-	return props.options.find((opt) => opt.value === props.modelValue);
-});
+	return props.options.find((opt) => opt.value === props.modelValue)
+})
 
 // Update search query when selection changes
 watch(
 	() => props.modelValue,
 	(newValue) => {
 		if (newValue && selectedOption.value) {
-			searchQuery.value = selectedOption.value.label;
+			searchQuery.value = selectedOption.value.label
 		} else if (!newValue) {
-			searchQuery.value = "";
+			searchQuery.value = ""
 		}
 	},
-	{ immediate: true }
-);
+	{ immediate: true },
+)
 
 // Filter options based on search
 const filteredOptions = computed(() => {
 	if (!searchQuery.value || searchQuery.value === selectedOption.value?.label) {
-		return props.options;
+		return props.options
 	}
 
-	const query = searchQuery.value.toLowerCase();
+	const query = searchQuery.value.toLowerCase()
 	return props.options.filter((option) => {
-		const label = option.label.toLowerCase();
-		const subtitle = option.subtitle?.toLowerCase() || "";
-		return label.includes(query) || subtitle.includes(query);
-	});
-});
+		const label = option.label.toLowerCase()
+		const subtitle = option.subtitle?.toLowerCase() || ""
+		return label.includes(query) || subtitle.includes(query)
+	})
+})
 
 // Paginated options for performance
 const paginatedOptions = computed(() => {
-	return filteredOptions.value.slice(0, displayLimit.value);
-});
+	return filteredOptions.value.slice(0, displayLimit.value)
+})
 
 const hasMore = computed(() => {
-	return filteredOptions.value.length > displayLimit.value;
-});
+	return filteredOptions.value.length > displayLimit.value
+})
 
 function handleFocus() {
-	showDropdown.value = true;
-	highlightedIndex.value = -1;
+	showDropdown.value = true
+	highlightedIndex.value = -1
 	// Select all text for easy replacement
 	if (searchQuery.value) {
-		inputRef.value?.select();
+		inputRef.value?.select()
 	}
 }
 
 function handleInput() {
-	showDropdown.value = true;
-	highlightedIndex.value = -1;
-	displayLimit.value = 50; // Reset pagination
+	showDropdown.value = true
+	highlightedIndex.value = -1
+	displayLimit.value = 50 // Reset pagination
 
 	// Emit search event for async searching
 	if (props.searchable && searchQuery.value.length >= props.minSearchLength) {
-		emit("search", searchQuery.value);
+		emit("search", searchQuery.value)
 	}
 }
 
 function handleKeydown(e) {
 	if (!showDropdown.value) {
 		if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-			showDropdown.value = true;
-			e.preventDefault();
-			return;
+			showDropdown.value = true
+			e.preventDefault()
+			return
 		}
 	}
 
 	switch (e.key) {
 		case "ArrowDown":
-			e.preventDefault();
+			e.preventDefault()
 			highlightedIndex.value = Math.min(
 				highlightedIndex.value + 1,
-				paginatedOptions.value.length - 1
-			);
-			scrollToHighlighted();
-			break;
+				paginatedOptions.value.length - 1,
+			)
+			scrollToHighlighted()
+			break
 		case "ArrowUp":
-			e.preventDefault();
-			highlightedIndex.value = Math.max(highlightedIndex.value - 1, -1);
-			scrollToHighlighted();
-			break;
+			e.preventDefault()
+			highlightedIndex.value = Math.max(highlightedIndex.value - 1, -1)
+			scrollToHighlighted()
+			break
 		case "Enter":
-			e.preventDefault();
+			e.preventDefault()
 			if (highlightedIndex.value >= 0) {
-				selectOption(paginatedOptions.value[highlightedIndex.value]);
+				selectOption(paginatedOptions.value[highlightedIndex.value])
 			}
-			break;
+			break
 		case "Escape":
-			e.preventDefault();
-			closeDropdown();
-			break;
+			e.preventDefault()
+			closeDropdown()
+			break
 		case "Tab":
-			closeDropdown();
-			break;
+			closeDropdown()
+			break
 	}
 }
 
 function toggleDropdown() {
-	showDropdown.value = !showDropdown.value;
+	showDropdown.value = !showDropdown.value
 	if (showDropdown.value) {
-		inputRef.value?.focus();
+		inputRef.value?.focus()
 	}
 }
 
 function selectOption(option) {
-	emit("update:modelValue", option.value);
-	searchQuery.value = option.label;
-	closeDropdown();
-	inputRef.value?.blur();
+	emit("update:modelValue", option.value)
+	searchQuery.value = option.label
+	closeDropdown()
+	inputRef.value?.blur()
 }
 
 function clearSelection() {
-	emit("update:modelValue", "");
-	searchQuery.value = "";
-	showDropdown.value = false;
-	inputRef.value?.focus();
+	emit("update:modelValue", "")
+	searchQuery.value = ""
+	showDropdown.value = false
+	inputRef.value?.focus()
 }
 
 function closeDropdown() {
-	showDropdown.value = false;
-	highlightedIndex.value = -1;
+	showDropdown.value = false
+	highlightedIndex.value = -1
 	// Restore selected option label if exists
 	if (selectedOption.value) {
-		searchQuery.value = selectedOption.value.label;
+		searchQuery.value = selectedOption.value.label
 	}
 }
 
 function loadMore() {
-	displayLimit.value += 50;
+	displayLimit.value += 50
 }
 
 function scrollToHighlighted() {
 	// Scroll highlighted item into view
-	const dropdown = containerRef.value?.querySelector(".dropdown-list");
-	const items = dropdown?.querySelectorAll(".dropdown-item:not(.clear-item):not(.load-more)");
+	const dropdown = containerRef.value?.querySelector(".dropdown-list")
+	const items = dropdown?.querySelectorAll(
+		".dropdown-item:not(.clear-item):not(.load-more)",
+	)
 	if (items && highlightedIndex.value >= 0) {
 		items[highlightedIndex.value]?.scrollIntoView({
 			block: "nearest",
 			behavior: "smooth",
-		});
+		})
 	}
 }
 
 function highlightMatch(text) {
 	if (!searchQuery.value || searchQuery.value === selectedOption.value?.label) {
-		return text;
+		return text
 	}
 
-	const query = searchQuery.value;
-	const regex = new RegExp(`(${query})`, "gi");
-	return text.replace(regex, "<mark>$1</mark>");
+	const query = searchQuery.value
+	const regex = new RegExp(`(${query})`, "gi")
+	return text.replace(regex, "<mark>$1</mark>")
 }
 
 // Click outside to close
 function handleClickOutside(event) {
 	if (containerRef.value && !containerRef.value.contains(event.target)) {
-		closeDropdown();
+		closeDropdown()
 	}
 }
 
 onMounted(() => {
-	document.addEventListener("click", handleClickOutside);
-});
+	document.addEventListener("click", handleClickOutside)
+})
 
 onUnmounted(() => {
-	document.removeEventListener("click", handleClickOutside);
-});
+	document.removeEventListener("click", handleClickOutside)
+})
 </script>
 
 <style scoped>
@@ -506,9 +448,7 @@ onUnmounted(() => {
 }
 
 @keyframes spin {
-	to {
-		transform: rotate(360deg);
-	}
+	to { transform: rotate(360deg); }
 }
 
 .empty-icon {

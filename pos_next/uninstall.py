@@ -2,9 +2,8 @@
 Uninstallation hooks for POS Next
 """
 
-import logging
-
 import frappe
+import logging
 
 # Configure logger
 logger = logging.getLogger(__name__)

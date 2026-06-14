@@ -9,8 +9,12 @@
 			@change="$emit('update:modelValue', $event.target.value)"
 			class="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-transparent bg-white cursor-pointer"
 		>
-			<option value="">{{ __("-- Select --") }}</option>
-			<option v-for="option in options" :key="option.value" :value="option.value">
+			<option value="">{{ __('-- Select --') }}</option>
+			<option
+				v-for="option in options"
+				:key="option.value"
+				:value="option.value"
+			>
 				{{ option.label }}
 			</option>
 		</select>
@@ -21,7 +25,7 @@
 </template>
 
 <script setup>
-import { computed } from "vue";
+import { computed } from "vue"
 
 const props = defineProps({
 	modelValue: {
@@ -40,9 +44,11 @@ const props = defineProps({
 		type: Array,
 		default: () => [],
 	},
-});
+})
 
-defineEmits(["update:modelValue"]);
+defineEmits(["update:modelValue"])
 
-const fieldId = computed(() => `select-${Math.random().toString(36).substr(2, 9)}`);
+const fieldId = computed(
+	() => `select-${Math.random().toString(36).substr(2, 9)}`,
+)
 </script>

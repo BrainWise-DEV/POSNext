@@ -22,12 +22,12 @@
  * ```
  */
 
-import { onUnmounted } from "vue";
-import { usePOSEventsStore } from "@/stores/posEvents";
+import { onUnmounted } from 'vue'
+import { usePOSEventsStore } from '@/stores/posEvents'
 
 export function usePOSEvents() {
-	const eventsStore = usePOSEventsStore();
-	const unsubscribers = [];
+	const eventsStore = usePOSEventsStore()
+	const unsubscribers = []
 
 	/**
 	 * Register event listener with automatic cleanup on component unmount
@@ -36,9 +36,9 @@ export function usePOSEvents() {
 	 * @returns {Function} - Manual unsubscribe function
 	 */
 	function on(eventType, callback) {
-		const unsubscribe = eventsStore.on(eventType, callback);
-		unsubscribers.push(unsubscribe);
-		return unsubscribe;
+		const unsubscribe = eventsStore.on(eventType, callback)
+		unsubscribers.push(unsubscribe)
+		return unsubscribe
 	}
 
 	/**
@@ -47,7 +47,7 @@ export function usePOSEvents() {
 	 * @param {Object} payload - Event payload
 	 */
 	function emit(eventType, payload) {
-		eventsStore.emit(eventType, payload);
+		eventsStore.emit(eventType, payload)
 	}
 
 	// ========================================================================
@@ -60,7 +60,7 @@ export function usePOSEvents() {
 	 * @returns {Function} - Unsubscribe function
 	 */
 	function onSettingsChanged(callback) {
-		return on("settings:changed", callback);
+		return on('settings:changed', callback)
 	}
 
 	/**
@@ -69,7 +69,7 @@ export function usePOSEvents() {
 	 * @returns {Function} - Unsubscribe function
 	 */
 	function onWarehouseChanged(callback) {
-		return on("settings:warehouse-changed", callback);
+		return on('settings:warehouse-changed', callback)
 	}
 
 	/**
@@ -78,7 +78,7 @@ export function usePOSEvents() {
 	 * @returns {Function} - Unsubscribe function
 	 */
 	function onStockPolicyChanged(callback) {
-		return on("settings:stock-policy-changed", callback);
+		return on('settings:stock-policy-changed', callback)
 	}
 
 	/**
@@ -87,7 +87,7 @@ export function usePOSEvents() {
 	 * @returns {Function} - Unsubscribe function
 	 */
 	function onPricingChanged(callback) {
-		return on("settings:pricing-changed", callback);
+		return on('settings:pricing-changed', callback)
 	}
 
 	/**
@@ -96,7 +96,7 @@ export function usePOSEvents() {
 	 * @returns {Function} - Unsubscribe function
 	 */
 	function onSalesOperationsChanged(callback) {
-		return on("settings:sales-operations-changed", callback);
+		return on('settings:sales-operations-changed', callback)
 	}
 
 	/**
@@ -105,7 +105,7 @@ export function usePOSEvents() {
 	 * @returns {Function} - Unsubscribe function
 	 */
 	function onDisplayChanged(callback) {
-		return on("settings:display-changed", callback);
+		return on('settings:display-changed', callback)
 	}
 
 	/**
@@ -114,7 +114,7 @@ export function usePOSEvents() {
 	 * @returns {Function} - Unsubscribe function
 	 */
 	function onStockSyncConfigured(callback) {
-		return on("settings:sync-configured", callback);
+		return on('settings:sync-configured', callback)
 	}
 
 	/**
@@ -123,7 +123,7 @@ export function usePOSEvents() {
 	 * @returns {Function} - Unsubscribe function
 	 */
 	function onStockSyncUpdate(callback) {
-		return on("sync:stock-updated", callback);
+		return on('sync:stock-updated', callback)
 	}
 
 	/**
@@ -132,7 +132,7 @@ export function usePOSEvents() {
 	 * @returns {Function} - Unsubscribe function
 	 */
 	function onAny(callback) {
-		return on("*", callback);
+		return on('*', callback)
 	}
 
 	// ========================================================================
@@ -145,7 +145,7 @@ export function usePOSEvents() {
 	 * @param {Object} oldSettings - Old settings (optional)
 	 */
 	function detectSettingsChanges(newSettings, oldSettings) {
-		eventsStore.detectSettingsChanges(newSettings, oldSettings);
+		eventsStore.detectSettingsChanges(newSettings, oldSettings)
 	}
 
 	/**
@@ -153,7 +153,7 @@ export function usePOSEvents() {
 	 * @param {Object} settings - Current settings
 	 */
 	function updateSettingsSnapshot(settings) {
-		eventsStore.updateSettingsSnapshot(settings);
+		eventsStore.updateSettingsSnapshot(settings)
 	}
 
 	// ========================================================================
@@ -165,7 +165,7 @@ export function usePOSEvents() {
 	 * @param {Object} config - Sync config
 	 */
 	function emitStockSyncConfigured(config) {
-		eventsStore.emitStockSyncConfigured(config);
+		eventsStore.emitStockSyncConfigured(config)
 	}
 
 	/**
@@ -173,7 +173,7 @@ export function usePOSEvents() {
 	 * @param {Object} status - Sync status
 	 */
 	function emitStockSyncStatus(status) {
-		eventsStore.emitStockSyncStatus(status);
+		eventsStore.emitStockSyncStatus(status)
 	}
 
 	// ========================================================================
@@ -185,7 +185,7 @@ export function usePOSEvents() {
 	 * @returns {Array} - Recent events
 	 */
 	function getRecentEvents() {
-		return eventsStore.recentEvents;
+		return eventsStore.recentEvents
 	}
 
 	/**
@@ -194,28 +194,28 @@ export function usePOSEvents() {
 	 * @returns {Array} - Filtered events
 	 */
 	function getEventsByType(eventType) {
-		return eventsStore.getEventsByType(eventType);
+		return eventsStore.getEventsByType(eventType)
 	}
 
 	/**
 	 * Clear event history
 	 */
 	function clearHistory() {
-		eventsStore.clearHistory();
+		eventsStore.clearHistory()
 	}
 
 	/**
 	 * Manually unsubscribe all listeners registered by this composable instance
 	 */
 	function unsubscribeAll() {
-		unsubscribers.forEach((unsub) => unsub());
-		unsubscribers.length = 0;
+		unsubscribers.forEach(unsub => unsub())
+		unsubscribers.length = 0
 	}
 
 	// Auto-cleanup on component unmount
 	onUnmounted(() => {
-		unsubscribeAll();
-	});
+		unsubscribeAll()
+	})
 
 	return {
 		// Core API
@@ -249,5 +249,5 @@ export function usePOSEvents() {
 
 		// Store access (for advanced use)
 		store: eventsStore,
-	};
+	}
 }

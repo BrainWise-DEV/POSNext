@@ -1,14 +1,14 @@
-import path from "node:path";
-import { promises as fs } from "node:fs";
-import vue from "@vitejs/plugin-vue";
-import frappeui from "frappe-ui/vite";
-import { defineConfig } from "vite";
-import { VitePWA } from "vite-plugin-pwa";
-import { viteStaticCopy } from "vite-plugin-static-copy";
+import path from "node:path"
+import { promises as fs } from "node:fs"
+import vue from "@vitejs/plugin-vue"
+import frappeui from "frappe-ui/vite"
+import { defineConfig } from "vite"
+import { VitePWA } from "vite-plugin-pwa"
+import { viteStaticCopy } from "vite-plugin-static-copy"
 
 // Get build version from environment or use timestamp
-const buildVersion = process.env.POS_NEXT_BUILD_VERSION || Date.now().toString();
-const enableSourceMap = process.env.POS_NEXT_ENABLE_SOURCEMAP === "true";
+const buildVersion = process.env.POS_NEXT_BUILD_VERSION || Date.now().toString()
+const enableSourceMap = process.env.POS_NEXT_ENABLE_SOURCEMAP === "true"
 
 /**
  * Vite plugin to write build version to version.json file
@@ -19,8 +19,8 @@ function posNextBuildVersionPlugin(version) {
 		name: "pos-next-build-version",
 		apply: "build",
 		async writeBundle() {
-			const versionFile = path.resolve(__dirname, "../pos_next/public/pos/version.json");
-			await fs.mkdir(path.dirname(versionFile), { recursive: true });
+			const versionFile = path.resolve(__dirname, "../pos_next/public/pos/version.json")
+			await fs.mkdir(path.dirname(versionFile), { recursive: true })
 			await fs.writeFile(
 				versionFile,
 				JSON.stringify(
@@ -37,10 +37,10 @@ function posNextBuildVersionPlugin(version) {
 					2
 				),
 				"utf8"
-			);
-			console.log(`\n✓ Build version written: ${version}`);
+			)
+			console.log(`\n✓ Build version written: ${version}`)
 		},
-	};
+	}
 }
 
 // https://vitejs.dev/config/
@@ -231,7 +231,13 @@ export default defineConfig({
 		__BUILD_VERSION__: JSON.stringify(buildVersion),
 	},
 	optimizeDeps: {
-		include: ["feather-icons", "showdown", "highlight.js/lib/core", "interactjs", "qz-tray"],
+		include: [
+			"feather-icons",
+			"showdown",
+			"highlight.js/lib/core",
+			"interactjs",
+			"qz-tray",
+		],
 	},
 	server: {
 		allowedHosts: true,
@@ -244,13 +250,14 @@ export default defineConfig({
 				secure: false,
 				cookieDomainRewrite: "localhost",
 				router: (req) => {
-					const site_name = req.headers.host.split(":")[0];
+					const site_name = req.headers.host.split(":")[0]
 					// Support both localhost and 127.0.0.1
-					const isLocalhost = site_name === "localhost" || site_name === "127.0.0.1";
-					const targetHost = isLocalhost ? "127.0.0.1" : site_name;
-					return `http://${targetHost}:8000`;
+					const isLocalhost =
+						site_name === "localhost" || site_name === "127.0.0.1"
+					const targetHost = isLocalhost ? "127.0.0.1" : site_name
+					return `http://${targetHost}:8000`
 				},
 			},
 		},
 	},
-});
+})

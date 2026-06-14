@@ -9,8 +9,8 @@
  * @returns {string} Formatted amount with 2 decimal places
  */
 function formatCurrency(amount) {
-	if (amount === null || amount === undefined) return "0.00";
-	return Number.parseFloat(amount).toFixed(2);
+	if (amount === null || amount === undefined) return "0.00"
+	return Number.parseFloat(amount).toFixed(2)
 }
 
 /**
@@ -20,11 +20,11 @@ function formatCurrency(amount) {
  * @returns {string} Formatted quantity
  */
 function formatQuantity(quantity) {
-	if (quantity === null || quantity === undefined) return "0";
-	const num = Number.parseFloat(quantity);
-	if (Number.isNaN(num)) return "0";
+	if (quantity === null || quantity === undefined) return "0"
+	const num = Number.parseFloat(quantity)
+	if (Number.isNaN(num)) return "0"
 	// Round to 4 decimal places and remove trailing zeros
-	return num.toFixed(4).replace(/\.?0+$/, "");
+	return num.toFixed(4).replace(/\.?0+$/, "")
 }
 
 /**
@@ -33,8 +33,8 @@ function formatQuantity(quantity) {
  * @returns {string} Formatted date and time string
  */
 function formatDateTime(datetime) {
-	if (!datetime) return "";
-	return new Date(datetime).toLocaleString();
+	if (!datetime) return ""
+	return new Date(datetime).toLocaleString()
 }
 
 /**
@@ -44,21 +44,21 @@ function formatDateTime(datetime) {
  * @returns {string} Formatted time string (HH:MM AM/PM)
  */
 function formatTime(time) {
-	if (!time) return "";
+	if (!time) return ""
 
 	// If it's a time string (contains colon), extract HH:MM
 	if (typeof time === "string" && time.includes(":")) {
-		const parts = time.split(":");
+		const parts = time.split(":")
 		if (parts.length >= 2) {
-			const hours = Number.parseInt(parts[0], 10);
-			const minutes = parts[1];
-			if (Number.isNaN(hours)) return time;
+			const hours = Number.parseInt(parts[0], 10)
+			const minutes = parts[1]
+			if (Number.isNaN(hours)) return time
 
-			const period = hours >= 12 ? "PM" : "AM";
-			const displayHours = hours % 12 || 12;
-			return `${displayHours}:${minutes} ${period}`;
+			const period = hours >= 12 ? "PM" : "AM"
+			const displayHours = hours % 12 || 12
+			return `${displayHours}:${minutes} ${period}`
 		}
-		return time;
+		return time
 	}
 
 	// If it's a Date object or datetime string, convert and format
@@ -66,7 +66,7 @@ function formatTime(time) {
 		hour: "numeric",
 		minute: "2-digit",
 		hour12: true,
-	});
+	})
 }
 
 /**
@@ -75,13 +75,13 @@ function formatTime(time) {
  * @returns {string} Formatted date string
  */
 function formatDate(date) {
-	if (!date) return "";
+	if (!date) return ""
 
 	if (typeof date === "string") {
-		const match = date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+		const match = date.match(/^(\d{4})-(\d{2})-(\d{2})$/)
 		if (match) {
-			const [, year, month, day] = match;
-			return `${day}/${month}/${year.slice(-2)}`;
+			const [, year, month, day] = match
+			return `${day}/${month}/${year.slice(-2)}`
 		}
 	}
 
@@ -89,7 +89,7 @@ function formatDate(date) {
 		day: "2-digit",
 		month: "2-digit",
 		year: "2-digit",
-	});
+	})
 }
 
 /**
@@ -99,10 +99,10 @@ function formatDate(date) {
  * @returns {string} Formatted percentage
  */
 function formatPercentage(value, decimals = 2) {
-	if (value === null || value === undefined) return "0%";
+	if (value === null || value === undefined) return "0%"
 	return `${Number.parseFloat(value)
 		.toFixed(decimals)
-		.replace(/\.?0+$/, "")}%`;
+		.replace(/\.?0+$/, "")}%`
 }
 
 /**
@@ -117,5 +117,5 @@ export function useFormatters() {
 		formatTime,
 		formatDate,
 		formatPercentage,
-	};
+	}
 }

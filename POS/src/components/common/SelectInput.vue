@@ -13,9 +13,7 @@
 			class="w-full h-7 border border-gray-100 rounded bg-gray-100 hover:border-gray-200 hover:bg-gray-200 px-2 pe-8 text-base text-start transition-colors focus:border-gray-500 focus:outline-none focus:bg-white focus:shadow-sm flex items-center"
 			:class="[selectClass, disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer']"
 		>
-			<span class="truncate" :class="selectedLabel ? 'text-gray-900' : 'text-gray-500'">{{
-				selectedLabel || placeholder
-			}}</span>
+			<span class="truncate" :class="selectedLabel ? 'text-gray-900' : 'text-gray-500'">{{ selectedLabel || placeholder }}</span>
 		</button>
 
 		<!-- Chevron Icon -->
@@ -44,10 +42,7 @@
 					role="listbox"
 				>
 					<!-- Search Input (when searchable) -->
-					<div
-						v-if="searchable"
-						class="p-2 border-b border-gray-100 sticky top-0 bg-white"
-					>
+					<div v-if="searchable" class="p-2 border-b border-gray-100 sticky top-0 bg-white">
 						<div class="relative">
 							<FeatherIcon
 								name="search"
@@ -81,16 +76,14 @@
 							@keydown.escape="close"
 							@keydown.down.prevent="focusNext(index)"
 							@keydown.up.prevent="focusPrev(index)"
-							:ref="(el) => (optionRefs[index] = el)"
+							:ref="el => optionRefs[index] = el"
 							tabindex="0"
 							role="option"
 							:aria-selected="option.value === modelValue"
 							class="px-2 py-1.5 text-base cursor-pointer text-start transition-colors focus:outline-none"
-							:class="
-								option.value === modelValue
-									? 'bg-blue-50 text-blue-700'
-									: 'text-gray-800 hover:bg-gray-100 focus:bg-gray-100'
-							"
+							:class="option.value === modelValue
+								? 'bg-blue-50 text-blue-700'
+								: 'text-gray-800 hover:bg-gray-100 focus:bg-gray-100'"
 						>
 							<div v-if="option.subtitle" class="flex flex-col">
 								<span class="text-sm font-medium">{{ option.label }}</span>
@@ -106,12 +99,12 @@
 </template>
 
 <script setup>
-import { FeatherIcon } from "frappe-ui";
-import { computed, ref, onMounted, onBeforeUnmount, nextTick, watch } from "vue";
+import { FeatherIcon } from "frappe-ui"
+import { computed, ref, onMounted, onBeforeUnmount, nextTick, watch } from "vue"
 
 defineOptions({
 	inheritAttrs: false,
-});
+})
 
 const props = defineProps({
 	modelValue: {
@@ -150,130 +143,129 @@ const props = defineProps({
 		type: Number,
 		default: 50, // Limit displayed options for performance
 	},
-});
+})
 
-const emit = defineEmits(["update:modelValue", "change"]);
+const emit = defineEmits(["update:modelValue", "change"])
 
-const isOpen = ref(false);
-const containerRef = ref(null);
-const triggerRef = ref(null);
-const dropdownRef = ref(null);
-const searchInputRef = ref(null);
-const optionRefs = ref([]);
-const dropdownPosition = ref({ top: 0, left: 0, width: 0 });
-const searchQuery = ref("");
+const isOpen = ref(false)
+const containerRef = ref(null)
+const triggerRef = ref(null)
+const dropdownRef = ref(null)
+const searchInputRef = ref(null)
+const optionRefs = ref([])
+const dropdownPosition = ref({ top: 0, left: 0, width: 0 })
+const searchQuery = ref("")
 
 const selectedLabel = computed(() => {
-	const selected = props.options.find((opt) => opt.value === props.modelValue);
-	return selected?.label || "";
-});
+	const selected = props.options.find(opt => opt.value === props.modelValue)
+	return selected?.label || ""
+})
 
 const filteredOptions = computed(() => {
-	let result = props.options;
+	let result = props.options
 
 	// Apply search filter if searchable and query exists
 	if (props.searchable && searchQuery.value) {
-		const query = searchQuery.value.toLowerCase();
-		result = props.options.filter(
-			(opt) =>
-				opt.label?.toLowerCase().includes(query) ||
-				opt.value?.toString().toLowerCase().includes(query) ||
-				opt.subtitle?.toLowerCase().includes(query)
-		);
+		const query = searchQuery.value.toLowerCase()
+		result = props.options.filter(opt =>
+			opt.label?.toLowerCase().includes(query) ||
+			opt.value?.toString().toLowerCase().includes(query) ||
+			opt.subtitle?.toLowerCase().includes(query)
+		)
 	}
 
 	// Limit displayed options for performance
-	return result.slice(0, props.maxDisplayed);
-});
+	return result.slice(0, props.maxDisplayed)
+})
 
 const dropdownStyle = computed(() => ({
 	top: `${dropdownPosition.value.top}px`,
 	left: `${dropdownPosition.value.left}px`,
 	width: `${dropdownPosition.value.width}px`,
-}));
+}))
 
 function updateDropdownPosition() {
 	if (triggerRef.value) {
-		const rect = triggerRef.value.getBoundingClientRect();
+		const rect = triggerRef.value.getBoundingClientRect()
 		dropdownPosition.value = {
 			top: rect.bottom + 4, // 4px gap below the trigger
 			left: rect.left,
 			width: rect.width,
-		};
+		}
 	}
 }
 
 function toggle() {
-	if (props.disabled) return;
+	if (props.disabled) return
 	if (!isOpen.value) {
-		updateDropdownPosition();
-		isOpen.value = true;
+		updateDropdownPosition()
+		isOpen.value = true
 		// Focus search input when opening if searchable
 		if (props.searchable) {
 			nextTick(() => {
-				searchInputRef.value?.focus();
-			});
+				searchInputRef.value?.focus()
+			})
 		}
 	} else {
-		close();
+		close()
 	}
 }
 
 function close() {
-	isOpen.value = false;
-	searchQuery.value = ""; // Clear search on close
+	isOpen.value = false
+	searchQuery.value = "" // Clear search on close
 }
 
 function openAndFocusFirst() {
 	if (!isOpen.value) {
-		updateDropdownPosition();
-		isOpen.value = true;
+		updateDropdownPosition()
+		isOpen.value = true
 		nextTick(() => {
 			if (optionRefs.value[0]) {
-				optionRefs.value[0].focus();
+				optionRefs.value[0].focus()
 			}
-		});
+		})
 	}
 }
 
 function selectOption(option) {
-	emit("update:modelValue", option.value);
-	emit("change", option.value);
-	close();
+	emit("update:modelValue", option.value)
+	emit("change", option.value)
+	close()
 }
 
 function focusFirstOption() {
 	nextTick(() => {
 		if (optionRefs.value[0]) {
-			optionRefs.value[0].focus();
+			optionRefs.value[0].focus()
 		}
-	});
+	})
 }
 
 function focusNext(currentIndex) {
-	const nextIndex = currentIndex + 1;
+	const nextIndex = currentIndex + 1
 	if (nextIndex < filteredOptions.value.length && optionRefs.value[nextIndex]) {
-		optionRefs.value[nextIndex].focus();
+		optionRefs.value[nextIndex].focus()
 	}
 }
 
 function focusPrev(currentIndex) {
-	const prevIndex = currentIndex - 1;
+	const prevIndex = currentIndex - 1
 	if (prevIndex >= 0 && optionRefs.value[prevIndex]) {
-		optionRefs.value[prevIndex].focus();
+		optionRefs.value[prevIndex].focus()
 	} else if (props.searchable && prevIndex < 0) {
 		// Focus back to search input when going up from first option
-		searchInputRef.value?.focus();
+		searchInputRef.value?.focus()
 	}
 }
 
 // Close on click outside (check both container and teleported dropdown)
 function handleClickOutside(event) {
-	const clickedInContainer = containerRef.value && containerRef.value.contains(event.target);
-	const clickedInDropdown = dropdownRef.value && dropdownRef.value.contains(event.target);
+	const clickedInContainer = containerRef.value && containerRef.value.contains(event.target)
+	const clickedInDropdown = dropdownRef.value && dropdownRef.value.contains(event.target)
 
 	if (!clickedInContainer && !clickedInDropdown) {
-		close();
+		close()
 	}
 }
 
@@ -283,51 +275,51 @@ function handleScroll(event) {
 	if (isOpen.value) {
 		// Don't close if scrolling inside the dropdown
 		if (dropdownRef.value && dropdownRef.value.contains(event.target)) {
-			return;
+			return
 		}
-		close();
+		close()
 	}
 }
 
 // Add scroll listeners to all scrollable ancestors
 function addScrollListeners() {
-	let element = containerRef.value;
+	let element = containerRef.value
 	while (element) {
-		element.addEventListener("scroll", handleScroll, true);
-		element = element.parentElement;
+		element.addEventListener("scroll", handleScroll, true)
+		element = element.parentElement
 	}
-	window.addEventListener("scroll", handleScroll, true);
+	window.addEventListener("scroll", handleScroll, true)
 }
 
 function removeScrollListeners() {
-	let element = containerRef.value;
+	let element = containerRef.value
 	while (element) {
-		element.removeEventListener("scroll", handleScroll, true);
-		element = element.parentElement;
+		element.removeEventListener("scroll", handleScroll, true)
+		element = element.parentElement
 	}
-	window.removeEventListener("scroll", handleScroll, true);
+	window.removeEventListener("scroll", handleScroll, true)
 }
 
 // Watch for dropdown open/close to manage scroll listeners
 watch(isOpen, (newVal) => {
 	if (newVal) {
 		nextTick(() => {
-			updateDropdownPosition();
-			addScrollListeners();
-		});
+			updateDropdownPosition()
+			addScrollListeners()
+		})
 	} else {
-		removeScrollListeners();
+		removeScrollListeners()
 	}
-});
+})
 
 onMounted(() => {
-	document.addEventListener("click", handleClickOutside);
-});
+	document.addEventListener("click", handleClickOutside)
+})
 
 onBeforeUnmount(() => {
-	document.removeEventListener("click", handleClickOutside);
-	removeScrollListeners();
-});
+	document.removeEventListener("click", handleClickOutside)
+	removeScrollListeners()
+})
 </script>
 
 <style scoped>

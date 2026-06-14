@@ -8,8 +8,7 @@ import frappe
 from erpnext.stock.doctype.batch.batch import get_batch_qty
 from erpnext.stock.get_item_details import get_item_details as erpnext_get_item_details
 from frappe import _
-from frappe.query_builder import DocType
-from frappe.query_builder import functions as fn
+from frappe.query_builder import DocType, functions as fn
 from frappe.utils import flt, nowdate
 
 ITEM_RESULT_FIELDS = [

@@ -77,37 +77,28 @@ const controllers = (frm) => {
 		"replace_item",
 		frm.doc.apply_on === "Item Code" &&
 			frm.doc.offer === "Give Product" &&
-			frm.doc.apply_type === "Item Code"
+			frm.doc.apply_type === "Item Code",
 	);
 	frm.toggle_display(
 		"replace_cheapest_item",
 		frm.doc.apply_on === "Item Group" &&
 			frm.doc.offer === "Give Product" &&
-			frm.doc.apply_type === "Item Group"
+			frm.doc.apply_type === "Item Group",
 	);
 
-	frm.toggle_display(
-		"apply_item_code",
-		frm.doc.apply_type === "Item Code" && !frm.doc.replace_item
-	);
-	frm.toggle_reqd(
-		"apply_item_code",
-		frm.doc.apply_type === "Item Code" && !frm.doc.replace_item
-	);
+	frm.toggle_display("apply_item_code", frm.doc.apply_type === "Item Code" && !frm.doc.replace_item);
+	frm.toggle_reqd("apply_item_code", frm.doc.apply_type === "Item Code" && !frm.doc.replace_item);
 
 	frm.toggle_display(
 		"apply_item_group",
-		frm.doc.apply_type === "Item Group" && !frm.doc.replace_cheapest_item
+		frm.doc.apply_type === "Item Group" && !frm.doc.replace_cheapest_item,
 	);
 	frm.toggle_reqd(
 		"apply_item_group",
-		frm.doc.apply_type === "Item Group" && !frm.doc.replace_cheapest_item
+		frm.doc.apply_type === "Item Group" && !frm.doc.replace_cheapest_item,
 	);
 
-	frm.toggle_display(
-		"less_then",
-		frm.doc.apply_type === "Item Group" && !frm.doc.replace_cheapest_item
-	);
+	frm.toggle_display("less_then", frm.doc.apply_type === "Item Group" && !frm.doc.replace_cheapest_item);
 
 	frm.toggle_display("product_discount_scheme_section", frm.doc.offer === "Give Product");
 	frm.toggle_display("given_qty", frm.doc.offer === "Give Product");
@@ -145,12 +136,7 @@ const controllers = (frm) => {
 	}
 
 	if (frm.doc.apply_on === "Transaction") {
-		frm.set_df_property("offer", "options", [
-			"",
-			"Give Product",
-			"Grand Total",
-			"Loyalty Point",
-		]);
+		frm.set_df_property("offer", "options", ["", "Give Product", "Grand Total", "Loyalty Point"]);
 	} else {
 		frm.set_df_property("offer", "options", [
 			"",

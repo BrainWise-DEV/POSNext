@@ -156,26 +156,23 @@ frappe.query_reports["Sales vs Shifts Report"] = {
 	//
 	// =========================================================================
 
-	onload: function (report) {
+	onload: function(report) {
 		// Add "Guide" button with icon
-		report.page.add_inner_button(
-			__("Report Guide"),
-			function () {
-				this.show_report_guide();
-			}.bind(this)
-		);
+		report.page.add_inner_button(__("Report Guide"), function() {
+			this.show_report_guide();
+		}.bind(this));
 	},
 
-	show_report_guide: function () {
+	show_report_guide: function() {
 		const dialog = new frappe.ui.Dialog({
 			title: __("Sales vs Shifts Report Guide"),
 			size: "extra-large",
 			fields: [
 				{
 					fieldtype: "HTML",
-					fieldname: "guide_content",
-				},
-			],
+					fieldname: "guide_content"
+				}
+			]
 		});
 
 		dialog.fields_dict.guide_content.$wrapper.html(this.get_guide_html());
@@ -186,7 +183,7 @@ frappe.query_reports["Sales vs Shifts Report"] = {
 			const tabs = dialog.$wrapper.find(".guide-tab");
 			const contents = dialog.$wrapper.find(".guide-tab-content");
 
-			tabs.on("click", function () {
+			tabs.on("click", function() {
 				const target = $(this).data("tab");
 				tabs.removeClass("active");
 				$(this).addClass("active");
@@ -196,7 +193,7 @@ frappe.query_reports["Sales vs Shifts Report"] = {
 		}, 100);
 	},
 
-	get_guide_html: function () {
+	get_guide_html: function() {
 		return `
 			<style>
 				.guide-container { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
@@ -514,62 +511,61 @@ frappe.query_reports["Sales vs Shifts Report"] = {
 			fieldname: "from_date",
 			label: __("From Date"),
 			fieldtype: "Date",
-			default: frappe.datetime.add_days(frappe.datetime.get_today(), -30),
+			default: frappe.datetime.add_days(frappe.datetime.get_today(), -30)
 		},
 		{
 			fieldname: "to_date",
 			label: __("To Date"),
 			fieldtype: "Date",
-			default: frappe.datetime.get_today(),
+			default: frappe.datetime.get_today()
 		},
 		{
 			fieldname: "pos_profile",
 			label: __("POS Profile"),
 			fieldtype: "Link",
-			options: "POS Profile",
+			options: "POS Profile"
 		},
 		{
 			fieldname: "cashier",
 			label: __("Cashier"),
 			fieldtype: "Link",
-			options: "User",
+			options: "User"
 		},
 		{
 			fieldname: "sales_person",
 			label: __("Sales Person"),
 			fieldtype: "Link",
-			options: "Sales Person",
+			options: "Sales Person"
 		},
 		{
 			fieldname: "shift",
 			label: __("Shift"),
 			fieldtype: "Link",
-			options: "POS Closing Shift",
+			options: "POS Closing Shift"
 		},
 		{
 			fieldname: "chart_type",
 			label: __("Chart View"),
 			fieldtype: "Select",
-			options:
-				"Shift Performance\nCashier Comparison\nHourly Breakdown\nPayment Methods\nDaily Trend",
+			options: "Shift Performance\nCashier Comparison\nHourly Breakdown\nPayment Methods\nDaily Trend",
 			default: "Shift Performance",
-			on_change: function () {
+			on_change: function() {
 				frappe.query_report.refresh();
-			},
-		},
+			}
+		}
 	],
 
-	formatter: function (value, row, column, data, default_formatter) {
+	formatter: function(value, row, column, data, default_formatter) {
 		value = default_formatter(value, row, column, data);
 		if (!data) return value;
 
 		// Rating colors
 		if (column.fieldname === "rating" && data.rating) {
 			const colors = {
-				Excellent: "#28a745",
-				Good: "#17a2b8",
-				Average: "#ffc107",
-				"Needs Improvement": "#dc3545",
+				"Excellent": "#28a745",
+				"Good": "#17a2b8",
+				"Average": "#ffc107",
+				"Needs Improvement": "#dc3545"
 			};
 			const color = colors[data.rating] || "#6c757d";
 			value = `<span style="color: ${color}; font-weight: 600;">${value}</span>`;
@@ -607,26 +603,23 @@ frappe.query_reports["Sales vs Shifts Report"] = {
 		return value;
 	},
 
-	after_datatable_render: function () {
+	after_datatable_render: function() {
 		const chart_type = frappe.query_report.get_filter_value("chart_type");
 		if (chart_type && chart_type !== "Shift Performance") {
 			this.render_custom_chart(chart_type);
 		}
 	},
 
-	render_custom_chart: function (chart_type) {
+	render_custom_chart: function(chart_type) {
 		const filters = frappe.query_report.get_filter_values();
-		const method_base =
-			"pos_next.pos_next.report.sales_vs_shifts_report.sales_vs_shifts_report";
+		const method_base = "pos_next.pos_next.report.sales_vs_shifts_report.sales_vs_shifts_report";
 		// Filter out Total/summary rows once for all charts
-		const result = (frappe.query_report.data || []).filter(
-			(d) => d.shift_id && d.shift_id !== "Total"
-		);
+		const result = (frappe.query_report.data || []).filter(d => d.shift_id && d.shift_id !== "Total");
 
 		if (chart_type === "Cashier Comparison") {
 			// Aggregate by cashier
 			const cashierData = {};
-			result.forEach((d) => {
+			result.forEach(d => {
 				const cashier = d.cashier || d.cashier_id || "Unknown";
 				if (!cashierData[cashier]) {
 					cashierData[cashier] = { sales: 0, invoices: 0, shifts: 0, efficiency: 0 };
@@ -640,10 +633,10 @@ frappe.query_reports["Sales vs Shifts Report"] = {
 			// Sort by sales descending
 			const sorted = Object.entries(cashierData)
 				.map(([name, data]) => ({
-					name: name.split(" ")[0], // First name only
+					name: name.split(' ')[0], // First name only
 					sales: data.sales || 0,
 					invoices: data.invoices || 0,
-					avgEfficiency: data.shifts > 0 ? Math.round(data.efficiency / data.shifts) : 0,
+					avgEfficiency: data.shifts > 0 ? Math.round(data.efficiency / data.shifts) : 0
 				}))
 				.sort((a, b) => b.sales - a.sales)
 				.slice(0, 10);
@@ -655,26 +648,20 @@ frappe.query_reports["Sales vs Shifts Report"] = {
 
 			frappe.query_report.render_chart({
 				data: {
-					labels: sorted.map((d) => d.name),
+					labels: sorted.map(d => d.name),
 					datasets: [
-						{
-							name: __("Net Sales"),
-							values: sorted.map((d) => d.sales),
-							chartType: "bar",
-						},
-						{
-							name: __("Avg Efficiency %"),
-							values: sorted.map((d) => d.avgEfficiency),
-							chartType: "line",
-						},
-					],
+						{ name: __("Net Sales"), values: sorted.map(d => d.sales), chartType: "bar" },
+						{ name: __("Avg Efficiency %"), values: sorted.map(d => d.avgEfficiency), chartType: "line" }
+					]
 				},
 				type: "axis-mixed",
 				colors: ["#28a745", "#5e64ff"],
 				height: 300,
-				barOptions: { spaceRatio: 0.4 },
+				barOptions: { spaceRatio: 0.4 }
 			});
-		} else if (chart_type === "Hourly Breakdown") {
+		}
+
+		else if (chart_type === "Hourly Breakdown") {
 			frappe.call({
 				method: `${method_base}.get_hourly_breakdown`,
 				args: { filters },
@@ -688,9 +675,9 @@ frappe.query_reports["Sales vs Shifts Report"] = {
 					// Only show hours with data, or business hours (6 AM - 11 PM)
 					for (let i = 6; i <= 23; i++) {
 						// Simple hour format: 6, 7, 8... 12, 13... 23
-						const hourLabel = i <= 12 ? `${i}${i < 12 ? "am" : "pm"}` : `${i - 12}pm`;
+						const hourLabel = i <= 12 ? `${i}${i < 12 ? 'am' : 'pm'}` : `${i - 12}pm`;
 						labels.push(hourLabel);
-						const hourData = r.message.find((d) => d.hour === i);
+						const hourData = r.message.find(d => d.hour === i);
 						sales.push(hourData ? hourData.total_sales : 0);
 						invoices.push(hourData ? hourData.invoice_count : 0);
 					}
@@ -700,8 +687,8 @@ frappe.query_reports["Sales vs Shifts Report"] = {
 							labels,
 							datasets: [
 								{ name: __("Sales"), values: sales, chartType: "bar" },
-								{ name: __("Invoices"), values: invoices, chartType: "line" },
-							],
+								{ name: __("Invoices"), values: invoices, chartType: "line" }
+							]
 						},
 						type: "axis-mixed",
 						colors: ["#28a745", "#5e64ff"],
@@ -709,12 +696,14 @@ frappe.query_reports["Sales vs Shifts Report"] = {
 						barOptions: { spaceRatio: 0.5 },
 						axisOptions: {
 							xAxisMode: "tick",
-							xIsSeries: false,
-						},
+							xIsSeries: false
+						}
 					});
-				},
+				}
 			});
-		} else if (chart_type === "Payment Methods") {
+		}
+
+		else if (chart_type === "Payment Methods") {
 			frappe.call({
 				method: `${method_base}.get_payment_method_breakdown`,
 				args: { filters },
@@ -725,39 +714,29 @@ frappe.query_reports["Sales vs Shifts Report"] = {
 					const sorted = r.message.sort((a, b) => b.total_amount - a.total_amount);
 
 					// Short labels for pie chart - just percentage
-					const labels = sorted.map((d) => {
-						const pct = Math.round((d.total_amount / total) * 100);
+					const labels = sorted.map(d => {
+						const pct = Math.round(d.total_amount / total * 100);
 						// Truncate long payment method names
-						const name =
-							d.mode_of_payment.length > 10
-								? d.mode_of_payment.substring(0, 10) + ".."
-								: d.mode_of_payment;
+						const name = d.mode_of_payment.length > 10
+							? d.mode_of_payment.substring(0, 10) + '..'
+							: d.mode_of_payment;
 						return `${name} ${pct}%`;
 					});
 
 					frappe.query_report.render_chart({
 						data: {
 							labels: labels,
-							datasets: [
-								{ name: __("Amount"), values: sorted.map((d) => d.total_amount) },
-							],
+							datasets: [{ name: __("Amount"), values: sorted.map(d => d.total_amount) }]
 						},
 						type: "pie",
-						colors: [
-							"#28a745",
-							"#5e64ff",
-							"#ffc107",
-							"#17a2b8",
-							"#dc3545",
-							"#6f42c1",
-							"#fd7e14",
-							"#20c997",
-						],
-						height: 360,
+						colors: ["#28a745", "#5e64ff", "#ffc107", "#17a2b8", "#dc3545", "#6f42c1", "#fd7e14", "#20c997"],
+						height: 360
 					});
-				},
+				}
 			});
-		} else if (chart_type === "Daily Trend") {
+		}
+
+		else if (chart_type === "Daily Trend") {
 			frappe.call({
 				method: `${method_base}.get_daily_trend`,
 				args: { filters },
@@ -765,38 +744,35 @@ frappe.query_reports["Sales vs Shifts Report"] = {
 					if (!r.message || !r.message.length) return;
 
 					// Calculate moving average (3-day)
-					const sales = r.message.map((d) => d.total_sales);
+					const sales = r.message.map(d => d.total_sales);
 					const movingAvg = sales.map((val, i, arr) => {
 						if (i < 2) return val;
-						return Math.round((arr[i - 2] + arr[i - 1] + val) / 3);
+						return Math.round((arr[i-2] + arr[i-1] + val) / 3);
 					});
 
 					frappe.query_report.render_chart({
 						data: {
-							labels: r.message.map((d) => {
+							labels: r.message.map(d => {
 								const date = new Date(d.date);
-								return date.toLocaleDateString("en-GB", {
-									day: "2-digit",
-									month: "short",
-								});
+								return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
 							}),
 							datasets: [
 								{ name: __("Daily Sales"), values: sales, chartType: "bar" },
-								{ name: __("3-Day Avg"), values: movingAvg, chartType: "line" },
-							],
+								{ name: __("3-Day Avg"), values: movingAvg, chartType: "line" }
+							]
 						},
 						type: "axis-mixed",
 						colors: ["#28a745", "#dc3545"],
 						height: 300,
 						lineOptions: { dotSize: 3 },
-						barOptions: { spaceRatio: 0.4 },
+						barOptions: { spaceRatio: 0.4 }
 					});
-				},
+				}
 			});
 		}
 	},
 
-	get_chart_data: function (columns, result) {
+	get_chart_data: function(columns, result) {
 		const chart_type = frappe.query_report.get_filter_value("chart_type");
 
 		// Custom charts are rendered via after_datatable_render
@@ -810,7 +786,7 @@ frappe.query_reports["Sales vs Shifts Report"] = {
 
 		// Filter out summary rows and rows without dates, then sort and take recent 15
 		const sorted = [...result]
-			.filter((d) => d.shift_date && d.shift_id && d.shift_id !== "Total")
+			.filter(d => d.shift_date && d.shift_id && d.shift_id !== "Total")
 			.sort((a, b) => new Date(a.shift_date) - new Date(b.shift_date))
 			.slice(-15);
 
@@ -819,18 +795,18 @@ frappe.query_reports["Sales vs Shifts Report"] = {
 		}
 
 		// Ensure all values are valid numbers
-		const netSalesValues = sorted.map((d) => parseFloat(d.net_sales) || 0);
-		const efficiencyValues = sorted.map((d) => parseFloat(d.efficiency) || 0);
+		const netSalesValues = sorted.map(d => parseFloat(d.net_sales) || 0);
+		const efficiencyValues = sorted.map(d => parseFloat(d.efficiency) || 0);
 
 		// Don't render chart if all values are zero/invalid
-		if (!netSalesValues.some((v) => v > 0) && !efficiencyValues.some((v) => v > 0)) {
+		if (!netSalesValues.some(v => v > 0) && !efficiencyValues.some(v => v > 0)) {
 			return null;
 		}
 
 		// Build labels: Short date format
-		const labels = sorted.map((d) => {
+		const labels = sorted.map(d => {
 			const date = new Date(d.shift_date);
-			return date.toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
+			return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
 		});
 
 		// For single data point, use bar chart only (line chart needs 2+ points)
@@ -841,13 +817,13 @@ frappe.query_reports["Sales vs Shifts Report"] = {
 					datasets: [
 						{
 							name: __("Net Sales"),
-							values: netSalesValues,
-						},
-					],
+							values: netSalesValues
+						}
+					]
 				},
 				type: "bar",
 				colors: ["#10b981"],
-				height: 280,
+				height: 280
 			};
 		}
 
@@ -859,29 +835,29 @@ frappe.query_reports["Sales vs Shifts Report"] = {
 					{
 						name: __("Net Sales"),
 						values: netSalesValues,
-						chartType: "bar",
+						chartType: "bar"
 					},
 					{
 						name: __("Efficiency %"),
 						values: efficiencyValues,
-						chartType: "line",
-					},
-				],
+						chartType: "line"
+					}
+				]
 			},
 			type: "axis-mixed",
 			colors: ["#10b981", "#6366f1"],
 			height: 280,
 			axisOptions: {
 				xIsSeries: true,
-				xAxisMode: "tick",
+				xAxisMode: "tick"
 			},
 			barOptions: {
-				spaceRatio: 0.5,
+				spaceRatio: 0.5
 			},
 			lineOptions: {
 				dotSize: 6,
-				regionFill: 1,
-			},
+				regionFill: 1
+			}
 		};
-	},
+	}
 };

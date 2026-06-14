@@ -57,8 +57,8 @@
 </template>
 
 <script setup>
-import { computed } from "vue";
-import { useLazyLoad } from "@/composables/useLazyLoad";
+import { computed } from "vue"
+import { useLazyLoad } from "@/composables/useLazyLoad"
 
 const props = defineProps({
 	src: {
@@ -98,31 +98,33 @@ const props = defineProps({
 		type: Boolean,
 		default: true,
 	},
-});
+})
 
-const emit = defineEmits(["load", "error"]);
+const emit = defineEmits(["load", "error"])
 
-const baseContainerClass = "relative overflow-hidden";
+const baseContainerClass = "relative overflow-hidden"
 const containerClasses = computed(() => {
-	const userClasses = props.containerClass?.trim();
-	return userClasses ? `${baseContainerClass} ${userClasses}` : baseContainerClass;
-});
+	const userClasses = props.containerClass?.trim()
+	return userClasses
+		? `${baseContainerClass} ${userClasses}`
+		: baseContainerClass
+})
 
 const { targetRef, isVisible, isLoaded, error } = useLazyLoad({
 	rootMargin: props.rootMargin,
 	threshold: props.threshold,
-});
+})
 
 function handleLoad(event) {
-	error.value = null;
-	isLoaded.value = true;
-	emit("load", event);
+	error.value = null
+	isLoaded.value = true
+	emit("load", event)
 }
 
 function handleError(event) {
-	error.value = event;
-	isLoaded.value = true;
-	emit("error", event);
+	error.value = event
+	isLoaded.value = true
+	emit("error", event)
 }
 </script>
 

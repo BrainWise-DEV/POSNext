@@ -8,4 +8,4 @@ import unittest
 
 
 class TestPOSClosingShift(unittest.TestCase):
-	pass
+    pass

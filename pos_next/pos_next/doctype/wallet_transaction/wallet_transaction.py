@@ -2,13 +2,11 @@
 # For license information, please see license.txt
 
 import frappe
-from erpnext.accounts.general_ledger import make_gl_entries
-from erpnext.controllers.accounts_controller import AccountsController
 from frappe import _
 from frappe.utils import flt, today
-
+from erpnext.accounts.general_ledger import make_gl_entries
+from erpnext.controllers.accounts_controller import AccountsController
 from pos_next.api.wallet import get_or_create_wallet
-
 
 class WalletTransaction(AccountsController):
 	def validate(self):
@@ -33,13 +31,12 @@ class WalletTransaction(AccountsController):
 		# For debit transactions, check if sufficient balance
 		if self.transaction_type == "Debit":
 			from pos_next.pos_next.doctype.wallet.wallet import get_customer_wallet_balance
-
 			balance = get_customer_wallet_balance(self.customer, self.company)
 			if flt(self.amount) > flt(balance):
 				frappe.throw(
 					_("Insufficient wallet balance. Available: {0}, Requested: {1}").format(
 						frappe.format_value(balance, {"fieldtype": "Currency"}),
-						frappe.format_value(self.amount, {"fieldtype": "Currency"}),
+						frappe.format_value(self.amount, {"fieldtype": "Currency"})
 					)
 				)
 
@@ -55,7 +52,10 @@ class WalletTransaction(AccountsController):
 
 	def on_cancel(self):
 		"""Reverse GL entries on cancel"""
-		self.ignore_linked_doctypes = ("GL Entry", "Payment Ledger Entry")
+		self.ignore_linked_doctypes = (
+        "GL Entry",
+		"Payment Ledger Entry"
+    	)
 		self.make_gl_entries(cancel=True)
 		self.update_wallet_balance()
 
@@ -73,7 +73,9 @@ class WalletTransaction(AccountsController):
 				gl_entries,
 				cancel=cancel,
 				update_outstanding="Yes",
-				merge_entries=frappe.db.get_single_value("Accounts Settings", "merge_similar_account_heads"),
+				merge_entries=frappe.db.get_single_value(
+					"Accounts Settings", "merge_similar_account_heads"
+				)
 			)
 
 	def build_gl_entries(self):
@@ -90,7 +92,9 @@ class WalletTransaction(AccountsController):
 		if not source_account:
 			frappe.throw(_("Source account is required for wallet transaction"))
 
-		cost_center = self.cost_center or frappe.get_cached_value("Company", self.company, "cost_center")
+		cost_center = self.cost_center or frappe.get_cached_value(
+			"Company", self.company, "cost_center"
+		)
 
 		amount = flt(self.amount, self.precision("amount"))
 
@@ -102,54 +106,50 @@ class WalletTransaction(AccountsController):
 				"debit": amount,
 				"debit_in_account_currency": amount,
 				"cost_center": cost_center,
-				"remarks": self.remarks or _("Wallet Credit: {0}").format(self.name),
+				"remarks": self.remarks or _("Wallet Credit: {0}").format(self.name)
 			}
 			# Receivable/Payable accounts require party information
-			if not hasattr(self, "_source_account_type"):
+			if not hasattr(self, '_source_account_type'):
 				self._source_account_type = frappe.get_cached_value("Account", source_account, "account_type")
 			if self._source_account_type in ("Receivable", "Payable") and self.customer:
 				source_gl["party_type"] = "Customer"
 				source_gl["party"] = self.customer
 			gl_entries.append(self.get_gl_dict(source_gl))
 			gl_entries.append(
-				self.get_gl_dict(
-					{
-						"account": wallet_account,
-						"party_type": "Customer",
-						"party": self.customer,
-						"credit": amount,
-						"credit_in_account_currency": amount,
-						"cost_center": cost_center,
-						"remarks": self.remarks or _("Wallet Credit: {0}").format(self.name),
-					}
-				)
+				self.get_gl_dict({
+					"account": wallet_account,
+					"party_type": "Customer",
+					"party": self.customer,
+					"credit": amount,
+					"credit_in_account_currency": amount,
+					"cost_center": cost_center,
+					"remarks": self.remarks or _("Wallet Credit: {0}").format(self.name)
+				})
 			)
 
 		elif self.transaction_type == "Debit":
 			# Debit from wallet (decrease balance)
 			# Debit wallet account (with party), Credit source account
 			gl_entries.append(
-				self.get_gl_dict(
-					{
-						"account": wallet_account,
-						"party_type": "Customer",
-						"party": self.customer,
-						"debit": amount,
-						"debit_in_account_currency": amount,
-						"cost_center": cost_center,
-						"remarks": self.remarks or _("Wallet Debit: {0}").format(self.name),
-					}
-				)
+				self.get_gl_dict({
+					"account": wallet_account,
+					"party_type": "Customer",
+					"party": self.customer,
+					"debit": amount,
+					"debit_in_account_currency": amount,
+					"cost_center": cost_center,
+					"remarks": self.remarks or _("Wallet Debit: {0}").format(self.name)
+				})
 			)
 			debit_source_gl = {
 				"account": source_account,
 				"credit": amount,
 				"credit_in_account_currency": amount,
 				"cost_center": cost_center,
-				"remarks": self.remarks or _("Wallet Debit: {0}").format(self.name),
+				"remarks": self.remarks or _("Wallet Debit: {0}").format(self.name)
 			}
 			# Receivable/Payable accounts require party information
-			if not hasattr(self, "_source_account_type"):
+			if not hasattr(self, '_source_account_type'):
 				self._source_account_type = frappe.get_cached_value("Account", source_account, "account_type")
 			if self._source_account_type in ("Receivable", "Payable") and self.customer:
 				debit_source_gl["party_type"] = "Customer"
@@ -169,7 +169,9 @@ class WalletTransaction(AccountsController):
 		if self.source_type == "Loyalty Program":
 			# Get loyalty expense account from loyalty program or company
 			loyalty_account = frappe.db.get_value(
-				"Loyalty Program", {"company": self.company}, "expense_account"
+				"Loyalty Program",
+				{"company": self.company},
+				"expense_account"
 			)
 			if loyalty_account:
 				return loyalty_account
@@ -189,15 +191,8 @@ class WalletTransaction(AccountsController):
 
 
 @frappe.whitelist()
-def create_wallet_credit(
-	wallet,
-	amount,
-	source_type="Manual Adjustment",
-	remarks=None,
-	reference_doctype=None,
-	reference_name=None,
-	submit=True,
-):
+def create_wallet_credit(wallet, amount, source_type="Manual Adjustment", remarks=None,
+						 reference_doctype=None, reference_name=None, submit=True):
 	"""
 	Create a wallet credit transaction.
 
@@ -218,28 +213,34 @@ def create_wallet_credit(
 	# Get source account based on source type
 	source_account = None
 	if source_type == "Loyalty Program":
-		loyalty_program = frappe.db.get_value("Loyalty Program", {"company": wallet_doc.company}, "name")
+		loyalty_program = frappe.db.get_value(
+			"Loyalty Program",
+			{"company": wallet_doc.company},
+			"name"
+		)
 		if loyalty_program:
-			source_account = frappe.db.get_value("Loyalty Program", loyalty_program, "expense_account")
+			source_account = frappe.db.get_value(
+				"Loyalty Program", loyalty_program, "expense_account"
+			)
 
 	if not source_account:
-		source_account = frappe.get_cached_value("Company", wallet_doc.company, "default_expense_account")
+		source_account = frappe.get_cached_value(
+			"Company", wallet_doc.company, "default_expense_account"
+		)
 
-	transaction = frappe.get_doc(
-		{
-			"doctype": "Wallet Transaction",
-			"transaction_type": "Loyalty Credit" if source_type == "Loyalty Program" else "Credit",
-			"wallet": wallet,
-			"company": wallet_doc.company,
-			"posting_date": today(),
-			"amount": amount,
-			"source_type": source_type,
-			"source_account": source_account,
-			"remarks": remarks,
-			"reference_doctype": reference_doctype,
-			"reference_name": reference_name,
-		}
-	)
+	transaction = frappe.get_doc({
+		"doctype": "Wallet Transaction",
+		"transaction_type": "Loyalty Credit" if source_type == "Loyalty Program" else "Credit",
+		"wallet": wallet,
+		"company": wallet_doc.company,
+		"posting_date": today(),
+		"amount": amount,
+		"source_type": source_type,
+		"source_account": source_account,
+		"remarks": remarks,
+		"reference_doctype": reference_doctype,
+		"reference_name": reference_name
+	})
 
 	transaction.insert(ignore_permissions=True)
 
@@ -270,7 +271,9 @@ def credit_loyalty_points_to_wallet(customer, company, loyalty_points, conversio
 	if not conversion_factor:
 		loyalty_program = frappe.db.get_value("Customer", customer, "loyalty_program")
 		if loyalty_program:
-			conversion_factor = frappe.db.get_value("Loyalty Program", loyalty_program, "conversion_factor")
+			conversion_factor = frappe.db.get_value(
+				"Loyalty Program", loyalty_program, "conversion_factor"
+			)
 
 	if not conversion_factor:
 		conversion_factor = 1.0  # Default: 1 point = 1 currency
@@ -290,13 +293,13 @@ def credit_loyalty_points_to_wallet(customer, company, loyalty_points, conversio
 		amount=credit_amount,
 		source_type="Loyalty Program",
 		remarks=_("Loyalty points conversion: {0} points = {1}").format(
-			loyalty_points, frappe.format_value(credit_amount, {"fieldtype": "Currency"})
+			loyalty_points,
+			frappe.format_value(credit_amount, {"fieldtype": "Currency"})
 		),
-		submit=True,
+		submit=True
 	)
 
 	return transaction
-
 
 def credit_return_to_wallet(return_invoice, amount=None):
 	"""
@@ -324,7 +327,8 @@ def credit_return_to_wallet(return_invoice, amount=None):
 
 	if not return_data or not return_data.is_return:
 		frappe.log_error(
-			title="Wallet Credit on Return Error", message=f"Invoice {return_invoice} is not a return invoice"
+			title="Wallet Credit on Return Error",
+			message=f"Invoice {return_invoice} is not a return invoice"
 		)
 		return None
 
@@ -343,7 +347,7 @@ def credit_return_to_wallet(return_invoice, amount=None):
 	if not wallet:
 		frappe.log_error(
 			title="Wallet Credit on Return Error",
-			message=f"Could not get or create wallet for customer {customer}, company {company}",
+			message=f"Could not get or create wallet for customer {customer}, company {company}"
 		)
 		return None
 
@@ -353,7 +357,7 @@ def credit_return_to_wallet(return_invoice, amount=None):
 	if not source_account:
 		frappe.log_error(
 			title="Wallet Credit on Return Error",
-			message=f"No default receivable account for company {company}",
+			message=f"No default receivable account for company {company}"
 		)
 		return None
 
@@ -394,39 +398,37 @@ def credit_return_to_wallet(return_invoice, amount=None):
 			except Exception:
 				frappe.log_error(
 					title="Wallet Transaction Recovery Error",
-					message=f"Could not cancel broken WT {existing_transaction.name}: {frappe.get_traceback()}",
+					message=f"Could not cancel broken WT {existing_transaction.name}: {frappe.get_traceback()}"
 				)
 				return None
 
-	transaction = frappe.get_doc(
-		{
-			"doctype": "Wallet Transaction",
-			"transaction_type": "Credit",
-			"wallet": wallet["name"],
-			"company": company,
-			"posting_date": today(),
-			"amount": credit_amount,
-			"source_type": "Refund",
-			"source_account": source_account,
-			"reference_doctype": "Sales Invoice",
-			"reference_name": return_invoice,
-			"remarks": _("Return credit to wallet for {0} against {1}: {2}").format(
-				return_invoice,
-				return_data.return_against or "",
-				frappe.format_value(credit_amount, {"fieldtype": "Currency"}),
-			),
-		}
-	)
+	transaction = frappe.get_doc({
+		"doctype": "Wallet Transaction",
+		"transaction_type": "Credit",
+		"wallet": wallet["name"],
+		"company": company,
+		"posting_date": today(),
+		"amount": credit_amount,
+		"source_type": "Refund",
+		"source_account": source_account,
+		"reference_doctype": "Sales Invoice",
+		"reference_name": return_invoice,
+		"remarks": _("Return credit to wallet for {0} against {1}: {2}").format(
+			return_invoice,
+			return_data.return_against or "",
+			frappe.format_value(credit_amount, {"fieldtype": "Currency"})
+		)
+	})
 	transaction.flags.ignore_permissions = True
 	transaction.insert(ignore_permissions=True)
 	transaction.submit()
 
 	frappe.msgprint(
 		_("Credited {0} to customer wallet for return {1}").format(
-			frappe.format_value(credit_amount, {"fieldtype": "Currency"}), return_invoice
+			frappe.format_value(credit_amount, {"fieldtype": "Currency"}),
+			return_invoice
 		),
-		alert=True,
-		indicator="green",
+		alert=True, indicator="green"
 	)
 	return transaction
 
@@ -450,16 +452,13 @@ def reverse_wallet_transactions_for_return(original_invoice, return_invoice):
 	if not return_doc.is_return or return_doc.return_against != original_invoice:
 		return
 
-	existing = frappe.db.exists(
-		"Wallet Transaction",
-		{
-			"reference_doctype": "Sales Invoice",
-			"reference_name": return_invoice,
-			"transaction_type": "Debit",
-			"source_type": "Refund",
-			"docstatus": ["!=", 2],
-		},
-	)
+	existing = frappe.db.exists("Wallet Transaction", {
+		"reference_doctype": "Sales Invoice",
+		"reference_name": return_invoice,
+		"transaction_type": "Debit",
+		"source_type": "Refund",
+		"docstatus": ["!=", 2],
+	})
 	if existing:
 		return
 	# Find all submitted Wallet Transactions linked to the original invoice
@@ -469,18 +468,10 @@ def reverse_wallet_transactions_for_return(original_invoice, return_invoice):
 			"reference_doctype": "Sales Invoice",
 			"reference_name": original_invoice,
 			"docstatus": 1,
-			"transaction_type": ["in", ["Credit", "Loyalty Credit"]],
+			"transaction_type": ["in", ["Credit", "Loyalty Credit"]]
 		},
-		fields=[
-			"name",
-			"wallet",
-			"amount",
-			"transaction_type",
-			"source_type",
-			"source_account",
-			"company",
-			"customer",
-		],
+		fields=["name", "wallet", "amount", "transaction_type", "source_type",
+				"source_account", "company", "customer"]
 	)
 
 	if not wallet_transactions:
@@ -563,49 +554,43 @@ def reverse_wallet_transactions_for_return(original_invoice, return_invoice):
 				wt_doc.cancel()
 				frappe.msgprint(
 					_("Cancelled Wallet Transaction {0} due to return").format(wt.name),
-					alert=True,
-					indicator="blue",
+					alert=True, indicator="blue"
 				)
 			except Exception as e:
 				frappe.log_error(
 					title="Wallet Transaction Cancel on Return Error",
-					message=f"WT: {wt.name}, Return: {return_invoice}, Error: {str(e)}\n{frappe.get_traceback()}",
+					message=f"WT: {wt.name}, Return: {return_invoice}, Error: {str(e)}\n{frappe.get_traceback()}"
 				)
 
 		elif reverse_amount > 0:
 			try:
-				reverse_wt = frappe.get_doc(
-					{
-						"doctype": "Wallet Transaction",
-						"transaction_type": "Debit",
-						"wallet": wt.wallet,
-						"company": wt.company,
-						"posting_date": today(),
-						"amount": reverse_amount,
-						"source_type": "Refund",
-						"source_account": wt.source_account,
-						"reference_doctype": "Sales Invoice",
-						"reference_name": return_invoice,
-						"remarks": _(
-							"Wallet reversal for return {0} against {1}: returned {2}, reversed {3}"
-						).format(
-							return_invoice,
-							original_invoice,
-							frappe.format_value(returned_amount, {"fieldtype": "Currency"}),
-							frappe.format_value(reverse_amount, {"fieldtype": "Currency"}),
-						),
-					}
-				)
+				reverse_wt = frappe.get_doc({
+					"doctype": "Wallet Transaction",
+					"transaction_type": "Debit",
+					"wallet": wt.wallet,
+					"company": wt.company,
+					"posting_date": today(),
+					"amount": reverse_amount,
+					"source_type": "Refund",
+					"source_account": wt.source_account,
+					"reference_doctype": "Sales Invoice",
+					"reference_name": return_invoice,
+					"remarks": _("Wallet reversal for return {0} against {1}: returned {2}, reversed {3}").format(
+						return_invoice, original_invoice,
+						frappe.format_value(returned_amount, {"fieldtype": "Currency"}),
+						frappe.format_value(reverse_amount, {"fieldtype": "Currency"})
+					)
+				})
 				reverse_wt.flags.ignore_permissions = True
 				reverse_wt.insert()
 				reverse_wt.submit()
 
 				frappe.msgprint(
 					_("Created wallet debit of {0} for partial return {1}").format(
-						frappe.format_value(reverse_amount, {"fieldtype": "Currency"}), return_invoice
+						frappe.format_value(reverse_amount, {"fieldtype": "Currency"}),
+						return_invoice
 					),
-					alert=True,
-					indicator="blue",
+					alert=True, indicator="blue"
 				)
 			except Exception as e:
 				frappe.log_error(
@@ -614,5 +599,5 @@ def reverse_wallet_transactions_for_return(original_invoice, return_invoice):
 						f"WT: {wt.name}, Return: {return_invoice}, "
 						f"Original: {original_invoice}, Reverse Amount: {reverse_amount}, "
 						f"Error: {str(e)}\n{frappe.get_traceback()}"
-					),
+					)
 				)

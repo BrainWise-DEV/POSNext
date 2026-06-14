@@ -1,5 +1,6 @@
 import frappe
 
+
 CUSTOM_FIELDS = [
 	"Brand-custom_company",
 	"Customer-custom_company",

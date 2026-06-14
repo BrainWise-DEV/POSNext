@@ -1560,8 +1560,3 @@ Points applied: {0}. Please pay remaining {1} with {2},تم خصم النقاط:
 "Invoice {0} saved offline and sent to printer — will sync when online","تم حفظ الفاتورة {0} دون اتصال وإرسالها إلى الطابعة — وستتم مزامنتها عند عودة الاتصال",""
 "Invoice {0} saved offline but print failed — open Print from the success dialog","تم حفظ الفاتورة {0} دون اتصال، لكن تعذّرت الطباعة — افتح خيار الطباعة من نافذة النجاح",""
 "Popup blocked — check your browser settings.","تم حظر النافذة المنبثقة — يُرجى التحقق من إعدادات المتصفح.",""
-"Governorate","المحافظة",""
-"Select Governorate","اختر المحافظة",""
-"District","الحي",""
-"Select District","اختر الحي",""
-"Select a governorate first","اختر المحافظة أولاً",""

@@ -34,7 +34,9 @@ def patch_round_floats_in_signature(document_class):
 			else:
 				fieldnames = [
 					df.fieldname
-					for df in doc.meta.get("fields", {"fieldtype": ["in", ["Currency", "Float", "Percent"]]})
+					for df in doc.meta.get(
+						"fields", {"fieldtype": ["in", ["Currency", "Float", "Percent"]]}
+					)
 					if df.fieldname not in do_not_round_fields
 				]
 

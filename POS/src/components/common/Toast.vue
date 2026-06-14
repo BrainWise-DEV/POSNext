@@ -1,11 +1,14 @@
 <template>
 	<Teleport to="body">
 		<Transition :name="isRTL ? 'toast-slide-rtl' : 'toast-slide-ltr'">
-			<div v-if="showToast && toastNotification" class="fixed top-4 end-4 z-[9999] max-w-md">
+			<div
+				v-if="showToast && toastNotification"
+				class="fixed top-4 end-4 z-[9999] max-w-md"
+			>
 				<div
 					:class="[
 						'rounded-lg shadow-xl p-4 flex items-start gap-3',
-						toastStyles.container,
+						toastStyles.container
 					]"
 				>
 					<div class="flex-shrink-0">
@@ -22,8 +25,14 @@
 							{{ toastNotification.message }}
 						</p>
 					</div>
-					<button @click="hideToast" class="flex-shrink-0">
-						<FeatherIcon name="x" :class="['w-4 h-4', toastStyles.closeColor]" />
+					<button
+						@click="hideToast"
+						class="flex-shrink-0"
+					>
+						<FeatherIcon
+							name="x"
+							:class="['w-4 h-4', toastStyles.closeColor]"
+						/>
 					</button>
 				</div>
 			</div>
@@ -32,13 +41,13 @@
 </template>
 
 <script setup>
-import { computed } from "vue";
-import { useToast } from "@/composables/useToast";
-import { useLocale } from "@/composables/useLocale";
-import { FeatherIcon } from "frappe-ui";
+import { computed } from "vue"
+import { useToast } from "@/composables/useToast"
+import { useLocale } from "@/composables/useLocale"
+import { FeatherIcon } from "frappe-ui"
 
-const { toastNotification, showToast, hideToast } = useToast();
-const { isRTL } = useLocale();
+const { toastNotification, showToast, hideToast } = useToast()
+const { isRTL } = useLocale()
 
 // Toast type to style mapping
 const TOAST_TYPE_STYLES = {
@@ -74,15 +83,15 @@ const TOAST_TYPE_STYLES = {
 		messageColor: "text-blue-700",
 		closeColor: "text-blue-600 hover:text-blue-900",
 	},
-};
+}
 
 // Default styles fallback
-const DEFAULT_STYLES = TOAST_TYPE_STYLES.info;
+const DEFAULT_STYLES = TOAST_TYPE_STYLES.info
 
 const toastStyles = computed(() => {
-	if (!toastNotification.value) return DEFAULT_STYLES;
-	return TOAST_TYPE_STYLES[toastNotification.value.type] || DEFAULT_STYLES;
-});
+	if (!toastNotification.value) return DEFAULT_STYLES
+	return TOAST_TYPE_STYLES[toastNotification.value.type] || DEFAULT_STYLES
+})
 </script>
 
 <style scoped>

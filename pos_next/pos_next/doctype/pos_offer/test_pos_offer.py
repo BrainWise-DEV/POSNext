@@ -8,4 +8,4 @@ import unittest
 
 
 class TestPOSOffer(unittest.TestCase):
-	pass
+    pass

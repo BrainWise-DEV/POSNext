@@ -3,13 +3,10 @@
 # For license information, please see license.txt
 
 from __future__ import unicode_literals
-
 import json
-
 import frappe
 from frappe import _
-from frappe.utils import get_datetime, nowdate, nowtime
-
+from frappe.utils import nowdate, nowtime, get_datetime
 from pos_next.api.utilities import get_wallet_payment_modes
 
 
@@ -111,9 +108,7 @@ def create_opening_shift(pos_profile, company, balance_details):
 	# Check if user already has an open shift
 	existing_shift = check_opening_shift(frappe.session.user)
 	if existing_shift:
-		frappe.throw(
-			_("You already have an open shift: {0}").format(existing_shift["pos_opening_shift"].name)
-		)
+		frappe.throw(_("You already have an open shift: {0}").format(existing_shift["pos_opening_shift"].name))
 
 	new_pos_opening = frappe.get_doc(
 		{
@@ -131,9 +126,10 @@ def create_opening_shift(pos_profile, company, balance_details):
 	# Add balance details - map opening_amount to amount
 	formatted_balance_details = []
 	for detail in balance_details:
-		formatted_balance_details.append(
-			{"mode_of_payment": detail.get("mode_of_payment"), "amount": detail.get("opening_amount", 0)}
-		)
+		formatted_balance_details.append({
+			"mode_of_payment": detail.get("mode_of_payment"),
+			"amount": detail.get("opening_amount", 0)
+		})
 
 	new_pos_opening.set("balance_details", formatted_balance_details)
 	new_pos_opening.insert(ignore_permissions=True)
@@ -173,9 +169,7 @@ def get_closing_shift_data(opening_shift):
 @frappe.whitelist()
 def submit_closing_shift(closing_shift):
 	"""Submit closing shift"""
-	from pos_next.pos_next.doctype.pos_closing_shift.pos_closing_shift import (
-		submit_closing_shift as submit_shift,
-	)
+	from pos_next.pos_next.doctype.pos_closing_shift.pos_closing_shift import submit_closing_shift as submit_shift
 
 	try:
 		# closing_shift is already a JSON string from frontend

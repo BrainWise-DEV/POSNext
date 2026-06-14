@@ -3,7 +3,7 @@
 
 import frappe
 from frappe import _
-from frappe.utils import flt, get_datetime, time_diff_in_hours
+from frappe.utils import flt, time_diff_in_hours, get_datetime
 
 
 def execute(filters=None):
@@ -24,80 +24,81 @@ def get_columns(payment_methods):
 			"label": _("Shift"),
 			"fieldtype": "Link",
 			"options": "POS Closing Shift",
-			"width": 150,
+			"width": 150
 		},
 		{
 			"fieldname": "pos_profile",
 			"label": _("POS Profile"),
 			"fieldtype": "Link",
 			"options": "POS Profile",
-			"width": 150,
+			"width": 150
 		},
-		{"fieldname": "cashier", "label": _("Cashier"), "fieldtype": "Link", "options": "User", "width": 150},
-		{"fieldname": "posting_date", "label": _("Date"), "fieldtype": "Date", "width": 100},
-		{"fieldname": "shift_start", "label": _("Shift Start"), "fieldtype": "Time", "width": 100},
-		{"fieldname": "shift_end", "label": _("Shift End"), "fieldtype": "Time", "width": 100},
-		{"fieldname": "shift_hours", "label": _("Shift Hours"), "fieldtype": "Float", "width": 90},
-		{"fieldname": "total_transactions", "label": _("Transactions"), "fieldtype": "Int", "width": 100},
+		{
+			"fieldname": "cashier",
+			"label": _("Cashier"),
+			"fieldtype": "Link",
+			"options": "User",
+			"width": 150
+		},
+		{
+			"fieldname": "posting_date",
+			"label": _("Date"),
+			"fieldtype": "Date",
+			"width": 100
+		},
+		{
+			"fieldname": "shift_start",
+			"label": _("Shift Start"),
+			"fieldtype": "Time",
+			"width": 100
+		},
+		{
+			"fieldname": "shift_end",
+			"label": _("Shift End"),
+			"fieldtype": "Time",
+			"width": 100
+		},
+		{
+			"fieldname": "shift_hours",
+			"label": _("Shift Hours"),
+			"fieldtype": "Float",
+			"width": 90
+		},
+		{
+			"fieldname": "total_transactions",
+			"label": _("Transactions"),
+			"fieldtype": "Int",
+			"width": 100
+		},
 	]
 
 	# Dynamic columns per payment method
 	for method in payment_methods:
 		safe = method.lower().replace(" ", "_")
-		columns.extend(
-			[
-				{
-					"fieldname": f"{safe}_opening",
-					"label": _(f"{method} Opening"),
-					"fieldtype": "Currency",
-					"width": 130,
-				},
-				{
-					"fieldname": f"{safe}_expected",
-					"label": _(f"{method} Expected"),
-					"fieldtype": "Currency",
-					"width": 130,
-				},
-				{
-					"fieldname": f"{safe}_closing",
-					"label": _(f"{method} Closing"),
-					"fieldtype": "Currency",
-					"width": 130,
-				},
-				{
-					"fieldname": f"{safe}_diff",
-					"label": _(f"{method} Diff"),
-					"fieldtype": "Currency",
-					"width": 110,
-				},
-			]
-		)
-
-	columns.extend(
-		[
+		columns.extend([
 			{
-				"fieldname": "total_opening",
-				"label": _("Total Opening"),
+				"fieldname": f"{safe}_opening",
+				"label": _(f"{method} Opening"),
 				"fieldtype": "Currency",
-				"width": 130,
+				"width": 130
 			},
 			{
-				"fieldname": "total_expected",
-				"label": _("Total Expected"),
+				"fieldname": f"{safe}_expected",
+				"label": _(f"{method} Expected"),
 				"fieldtype": "Currency",
-				"width": 130,
+				"width": 130
 			},
 			{
-				"fieldname": "total_closing",
-				"label": _("Total Closing"),
+				"fieldname": f"{safe}_closing",
+				"label": _(f"{method} Closing"),
 				"fieldtype": "Currency",
-				"width": 130,
+				"width": 130
 			},
 			{
-				"fieldname": "total_difference",
-				"label": _("Total Difference"),
+				"fieldname": f"{safe}_diff",
+				"label": _(f"{method} Diff"),
 				"fieldtype": "Currency",
-				"width": 130,
+				"width": 110
 			},
 		])
 
@@ -144,14 +145,8 @@ def get_columns(payment_methods):
 			"fieldtype": "Data",
 			"width": 120
 		},
-	  {
-      "fieldname": "status",
-      "label": _("Status"),
-      "fieldtype": "Data",
-      "width": 120
-    }
-		]
-	)
+	])
+
 	return columns
 
 
@@ -206,9 +201,10 @@ def get_data(filters):
 			shift_order.append(r.shift)
 			# Calculate shift hours
 			if r._shift_start_dt and r._shift_end_dt:
-				shift_hours = flt(
-					time_diff_in_hours(get_datetime(r._shift_end_dt), get_datetime(r._shift_start_dt)), 1
-				)
+				shift_hours = flt(time_diff_in_hours(
+					get_datetime(r._shift_end_dt),
+					get_datetime(r._shift_start_dt)
+				), 1)
 			else:
 				shift_hours = 0
 
@@ -282,8 +278,7 @@ def _get_transaction_counts(data):
 
 	placeholders = ", ".join(["%s"] * len(shift_names))
 
-	rows = frappe.db.sql(
-		"""
+	rows = frappe.db.sql("""
 		SELECT
 			sir.parent as shift,
 			COUNT(DISTINCT sir.sales_invoice) as cnt
@@ -291,10 +286,7 @@ def _get_transaction_counts(data):
 		WHERE sir.parenttype = 'POS Closing Shift'
 		AND sir.parent IN ({placeholders})
 		GROUP BY sir.parent
-	""".format(placeholders=placeholders),
-		shift_names,
-		as_dict=1,
-	)
+	""".format(placeholders=placeholders), shift_names, as_dict=1)
 
 	return {r.shift: r.cnt for r in rows}
 
@@ -369,7 +361,7 @@ def get_chart_data(data, payment_methods):
 				{"name": _("Expected"), "values": expected_values},
 				{"name": _("Closing"), "values": closing_values},
 				{"name": _("Difference"), "values": diff_values},
-			],
+			]
 		},
 		"type": "bar",
 		"fieldtype": "Currency",

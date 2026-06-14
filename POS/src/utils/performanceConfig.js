@@ -7,8 +7,8 @@
  * - Dynamic batch sizes and debounce times
  */
 
-import { logger } from "./logger";
-const log = logger.create("PerformanceConfig");
+import { logger } from './logger'
+const log = logger.create('PerformanceConfig')
 
 /**
  * Device performance tier
@@ -17,7 +17,7 @@ const PERFORMANCE_TIERS = {
 	LOW: "low",
 	MEDIUM: "medium",
 	HIGH: "high",
-};
+}
 
 /**
  * Detect device performance tier based on:
@@ -26,45 +26,45 @@ const PERFORMANCE_TIERS = {
  * - User agent (mobile vs desktop)
  */
 function detectPerformanceTier() {
-	const cpuCores = navigator.hardwareConcurrency || 2;
-	const deviceMemory = navigator.deviceMemory || 4; // In GB, fallback to 4GB
+	const cpuCores = navigator.hardwareConcurrency || 2
+	const deviceMemory = navigator.deviceMemory || 4 // In GB, fallback to 4GB
 	const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-		navigator.userAgent
-	);
+		navigator.userAgent,
+	)
 
 	// Calculate performance score
-	let score = 0;
+	let score = 0
 
 	// CPU cores scoring
 	if (cpuCores >= 8) {
-		score += 3;
+		score += 3
 	} else if (cpuCores >= 4) {
-		score += 2;
+		score += 2
 	} else {
-		score += 1;
+		score += 1
 	}
 
 	// Memory scoring
 	if (deviceMemory >= 8) {
-		score += 3;
+		score += 3
 	} else if (deviceMemory >= 4) {
-		score += 2;
+		score += 2
 	} else {
-		score += 1;
+		score += 1
 	}
 
 	// Mobile penalty (mobile devices typically have less sustained performance)
 	if (isMobile) {
-		score = Math.max(1, score - 1);
+		score = Math.max(1, score - 1)
 	}
 
 	// Determine tier
 	if (score >= 5) {
-		return PERFORMANCE_TIERS.HIGH;
+		return PERFORMANCE_TIERS.HIGH
 	} else if (score >= 3) {
-		return PERFORMANCE_TIERS.MEDIUM;
+		return PERFORMANCE_TIERS.MEDIUM
 	} else {
-		return PERFORMANCE_TIERS.LOW;
+		return PERFORMANCE_TIERS.LOW
 	}
 }
 
@@ -142,9 +142,9 @@ function getPerformanceConfig(tier) {
 			indexedDBBatchSize: 300, // Larger DB writes
 			cacheWriteDelay: 300, // Faster cache writes
 		},
-	};
+	}
 
-	return configs[tier] || configs[PERFORMANCE_TIERS.MEDIUM];
+	return configs[tier] || configs[PERFORMANCE_TIERS.MEDIUM]
 }
 
 /**
@@ -154,39 +154,39 @@ function getPerformanceConfig(tier) {
 class PerformanceConfig {
 	constructor() {
 		// SSR Safety: Check if running in browser environment
-		if (typeof window === "undefined" || typeof navigator === "undefined") {
+		if (typeof window === 'undefined' || typeof navigator === 'undefined') {
 			// Server-side or non-browser environment - use medium tier defaults
-			this.tier = PERFORMANCE_TIERS.MEDIUM;
-			this.config = getPerformanceConfig(this.tier);
-			this.cpuCores = 4;
-			this.deviceMemory = 4;
-			this.isMobile = false;
-			this.autoDetectedTier = PERFORMANCE_TIERS.MEDIUM;
-			log.info("SSR mode detected, using medium tier defaults");
-			return;
+			this.tier = PERFORMANCE_TIERS.MEDIUM
+			this.config = getPerformanceConfig(this.tier)
+			this.cpuCores = 4
+			this.deviceMemory = 4
+			this.isMobile = false
+			this.autoDetectedTier = PERFORMANCE_TIERS.MEDIUM
+			log.info("SSR mode detected, using medium tier defaults")
+			return
 		}
 
 		// Detect device capabilities
-		this.cpuCores = navigator.hardwareConcurrency || 2;
-		this.deviceMemory = navigator.deviceMemory || 4;
+		this.cpuCores = navigator.hardwareConcurrency || 2
+		this.deviceMemory = navigator.deviceMemory || 4
 		this.isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-			navigator.userAgent
-		);
+			navigator.userAgent,
+		)
 
 		// Auto-detect performance tier
-		this.autoDetectedTier = detectPerformanceTier();
+		this.autoDetectedTier = detectPerformanceTier()
 
 		// Check for manual override in localStorage
-		const manualTier = this.getStoredTier();
+		const manualTier = this.getStoredTier()
 		if (manualTier && PERFORMANCE_TIERS[manualTier.toUpperCase()]) {
-			this.tier = manualTier;
-			log.info(`Using manual performance tier override: ${manualTier}`);
+			this.tier = manualTier
+			log.info(`Using manual performance tier override: ${manualTier}`)
 		} else {
-			this.tier = this.autoDetectedTier;
+			this.tier = this.autoDetectedTier
 		}
 
 		// Get configuration for the selected tier
-		this.config = getPerformanceConfig(this.tier);
+		this.config = getPerformanceConfig(this.tier)
 
 		// Log detected config (only in development)
 		if (import.meta.env?.DEV) {
@@ -198,7 +198,7 @@ class PerformanceConfig {
 				deviceMemory: `${this.deviceMemory}GB`,
 				isMobile: this.isMobile,
 				config: this.config,
-			});
+			})
 		}
 	}
 
@@ -206,14 +206,14 @@ class PerformanceConfig {
 	 * Get stored tier from localStorage
 	 */
 	getStoredTier() {
-		if (typeof window === "undefined" || !window.localStorage) {
-			return null;
+		if (typeof window === 'undefined' || !window.localStorage) {
+			return null
 		}
 		try {
-			return localStorage.getItem("pos_performance_tier");
+			return localStorage.getItem('pos_performance_tier')
 		} catch (error) {
-			log.error("Failed to read performance tier from localStorage", error);
-			return null;
+			log.error('Failed to read performance tier from localStorage', error)
+			return null
 		}
 	}
 
@@ -222,41 +222,39 @@ class PerformanceConfig {
 	 * @param {string} tier - Performance tier (low, medium, high)
 	 */
 	setTier(tier) {
-		const normalizedTier = tier?.toLowerCase();
+		const normalizedTier = tier?.toLowerCase()
 
 		if (!normalizedTier || !PERFORMANCE_TIERS[normalizedTier.toUpperCase()]) {
-			log.error(`Invalid performance tier: ${tier}. Must be one of: low, medium, high`);
-			return false;
+			log.error(`Invalid performance tier: ${tier}. Must be one of: low, medium, high`)
+			return false
 		}
 
 		// Update tier and config
-		this.tier = normalizedTier;
-		this.config = getPerformanceConfig(normalizedTier);
+		this.tier = normalizedTier
+		this.config = getPerformanceConfig(normalizedTier)
 
 		// Save to localStorage
-		if (typeof window !== "undefined" && window.localStorage) {
+		if (typeof window !== 'undefined' && window.localStorage) {
 			try {
-				localStorage.setItem("pos_performance_tier", normalizedTier);
-				log.info(`Performance tier set to: ${normalizedTier}`);
+				localStorage.setItem('pos_performance_tier', normalizedTier)
+				log.info(`Performance tier set to: ${normalizedTier}`)
 			} catch (error) {
-				log.error("Failed to save performance tier to localStorage", error);
+				log.error('Failed to save performance tier to localStorage', error)
 			}
 		}
 
 		// Emit custom event for reactive updates
-		if (typeof window !== "undefined") {
-			window.dispatchEvent(
-				new CustomEvent("performanceConfigChanged", {
-					detail: {
-						tier: normalizedTier,
-						config: this.config,
-						autoDetected: this.autoDetectedTier,
-					},
-				})
-			);
+		if (typeof window !== 'undefined') {
+			window.dispatchEvent(new CustomEvent('performanceConfigChanged', {
+				detail: {
+					tier: normalizedTier,
+					config: this.config,
+					autoDetected: this.autoDetectedTier
+				}
+			}))
 		}
 
-		return true;
+		return true
 	}
 
 	/**
@@ -264,103 +262,101 @@ class PerformanceConfig {
 	 */
 	resetTier() {
 		// Remove from localStorage
-		if (typeof window !== "undefined" && window.localStorage) {
+		if (typeof window !== 'undefined' && window.localStorage) {
 			try {
-				localStorage.removeItem("pos_performance_tier");
-				log.info("Removed manual performance tier override");
+				localStorage.removeItem('pos_performance_tier')
+				log.info('Removed manual performance tier override')
 			} catch (error) {
-				log.error("Failed to remove performance tier from localStorage", error);
+				log.error('Failed to remove performance tier from localStorage', error)
 			}
 		}
 
 		// Restore auto-detected tier
-		this.tier = this.autoDetectedTier;
-		this.config = getPerformanceConfig(this.tier);
+		this.tier = this.autoDetectedTier
+		this.config = getPerformanceConfig(this.tier)
 
 		// Emit custom event for reactive updates
-		if (typeof window !== "undefined") {
-			window.dispatchEvent(
-				new CustomEvent("performanceConfigChanged", {
-					detail: {
-						tier: this.tier,
-						config: this.config,
-						autoDetected: this.autoDetectedTier,
-					},
-				})
-			);
+		if (typeof window !== 'undefined') {
+			window.dispatchEvent(new CustomEvent('performanceConfigChanged', {
+				detail: {
+					tier: this.tier,
+					config: this.config,
+					autoDetected: this.autoDetectedTier
+				}
+			}))
 		}
 
-		return true;
+		return true
 	}
 
 	/**
 	 * Get current performance tier
 	 */
 	getTier() {
-		return this.tier;
+		return this.tier
 	}
 
 	/**
 	 * Get auto-detected tier (before any manual override)
 	 */
 	getAutoDetectedTier() {
-		return this.autoDetectedTier;
+		return this.autoDetectedTier
 	}
 
 	/**
 	 * Check if current tier is manually overridden
 	 */
 	isManualOverride() {
-		return this.tier !== this.autoDetectedTier;
+		return this.tier !== this.autoDetectedTier
 	}
 
 	/**
 	 * Get specific config value
 	 */
 	get(key) {
-		return this.config[key];
+		return this.config[key]
 	}
 
 	/**
 	 * Get all config
 	 */
 	getAll() {
-		return { ...this.config };
+		return { ...this.config }
 	}
 
 	/**
 	 * Get CPU cores
 	 */
 	getCPUCores() {
-		return this.cpuCores;
+		return this.cpuCores
 	}
 
 	/**
 	 * Get device memory in GB
 	 */
 	getDeviceMemory() {
-		return this.deviceMemory;
+		return this.deviceMemory
 	}
 
 	/**
 	 * Check if device is mobile
 	 */
 	isMobileDevice() {
-		return this.isMobile;
+		return this.isMobile
 	}
 
 	/**
 	 * Check if device is low-end
 	 */
 	isLowEnd() {
-		return this.tier === PERFORMANCE_TIERS.LOW;
+		return this.tier === PERFORMANCE_TIERS.LOW
 	}
 
 	/**
 	 * Check if device is high-end
 	 */
 	isHighEnd() {
-		return this.tier === PERFORMANCE_TIERS.HIGH;
+		return this.tier === PERFORMANCE_TIERS.HIGH
 	}
 
 	/**
@@ -368,7 +364,7 @@ class PerformanceConfig {
 	 */
 	getRecommendedWorkerCount() {
 		// Use 50% of available cores, min 1, max 4
-		return Math.max(1, Math.min(4, Math.floor(this.cpuCores / 2)));
+		return Math.max(1, Math.min(4, Math.floor(this.cpuCores / 2)))
 	}
 
 	/**
@@ -378,13 +374,13 @@ class PerformanceConfig {
 	getThrottlingMultiplier() {
 		switch (this.tier) {
 			case PERFORMANCE_TIERS.HIGH:
-				return 1; // No throttling needed
+				return 1 // No throttling needed
 			case PERFORMANCE_TIERS.MEDIUM:
-				return 2; // 2x throttling
+				return 2 // 2x throttling
 			case PERFORMANCE_TIERS.LOW:
-				return 4; // 4x throttling
+				return 4 // 4x throttling
 			default:
-				return 2;
+				return 2
 		}
 	}
 
@@ -392,7 +388,7 @@ class PerformanceConfig {
 	 * Calculate dynamic batch size based on data size and device capability
 	 */
 	getDynamicBatchSize(dataSize, operation = "default") {
-		let baseBatchSize = this.config.backgroundSyncBatchSize;
+		let baseBatchSize = this.config.backgroundSyncBatchSize
 
 		// Adjust based on operation type
 		const operationMultipliers = {
@@ -400,22 +396,22 @@ class PerformanceConfig {
 			sync: 1.0, // Standard for sync
 			cache: 1.5, // Larger for cache writes
 			render: 0.3, // Smaller for rendering
-		};
+		}
 
-		const multiplier = operationMultipliers[operation] || 1.0;
+		const multiplier = operationMultipliers[operation] || 1.0
 
 		// Calculate batch size
-		let batchSize = Math.floor(baseBatchSize * multiplier);
+		let batchSize = Math.floor(baseBatchSize * multiplier)
 
 		// Ensure minimum batch size
-		batchSize = Math.max(10, batchSize);
+		batchSize = Math.max(10, batchSize)
 
 		// Cap based on data size
 		if (dataSize && dataSize < batchSize) {
-			return dataSize;
+			return dataSize
 		}
 
-		return batchSize;
+		return batchSize
 	}
 }
 
@@ -424,9 +420,9 @@ class PerformanceConfig {
  */
 export const performanceConfig = (() => {
 	try {
-		return new PerformanceConfig();
+		return new PerformanceConfig()
 	} catch (error) {
-		log.error("Failed to initialize PerformanceConfig, using defaults", error);
+		log.error('Failed to initialize PerformanceConfig, using defaults', error)
 		// Return a safe default config
 		return {
 			tier: PERFORMANCE_TIERS.MEDIUM,
@@ -451,9 +447,9 @@ export const performanceConfig = (() => {
 			getRecommendedWorkerCount: () => 2,
 			getThrottlingMultiplier: () => 2,
 			getDynamicBatchSize: (dataSize) => Math.min(dataSize || 200, 200),
-		};
+		}
 	}
-})();
+})()
 
 // Export tier constants for comparison
-export { PERFORMANCE_TIERS };
+export { PERFORMANCE_TIERS }

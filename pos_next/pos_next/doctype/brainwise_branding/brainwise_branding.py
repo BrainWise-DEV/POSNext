@@ -1,15 +1,15 @@
 # Copyright (c) 2025, BrainWise and contributors
 # For license information, please see license.txt
 
-import base64
+import frappe
+from frappe.model.document import Document
 import hashlib
 import hmac
 import json
-import secrets
+import base64
 from datetime import datetime
+import secrets
 
-import frappe
-from frappe.model.document import Document
 
 # MASTER KEY HASH - Only the person with the original key can disable branding
 # This hash was created from: secrets.token_urlsafe(32)
