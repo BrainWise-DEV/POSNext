@@ -27,6 +27,12 @@ export const usePOSShiftStore = defineStore("posShift", () => {
 	const writeOffAccount = computed(() => currentProfile.value?.write_off_account)
 	const writeOffCostCenter = computed(() => currentProfile.value?.write_off_cost_center)
 	const writeOffLimit = computed(() => currentProfile.value?.write_off_limit || 0)
+	const allowPosExpense = computed(
+		() => Number(currentProfile.value?.posa_allow_pos_expense || 0) === 1,
+	)
+	const maximumExpenseAmount = computed(
+		() => Number.parseFloat(currentProfile.value?.posa_maximum_expense_amount) || 0,
+	)
 
 	// Actions
 	function updateShiftDuration() {
@@ -109,6 +115,8 @@ export const usePOSShiftStore = defineStore("posShift", () => {
 		writeOffAccount,
 		writeOffCostCenter,
 		writeOffLimit,
+		allowPosExpense,
+		maximumExpenseAmount,
 
 		// Actions
 		updateShiftDuration,

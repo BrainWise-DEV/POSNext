@@ -101,6 +101,8 @@ def get_initial_data():
 		"auto_print": pos_profile.get("print_receipt_on_order_complete", 0),
 		"country": pos_profile.get("country"),
 		"ignore_pricing_rule": pos_profile.ignore_pricing_rule or 0,
+		"posa_allow_pos_expense": pos_profile.get("posa_allow_pos_expense") or 0,
+		"posa_maximum_expense_amount": pos_profile.get("posa_maximum_expense_amount") or 0,
 	}
 
 	result["pos_settings"] = _get_pos_settings(pos_profile)

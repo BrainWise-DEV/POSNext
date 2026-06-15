@@ -680,6 +680,36 @@
 						}}</span>
 					</button>
 
+					<!-- POS Expense -->
+					<button
+						v-if="allowPosExpense"
+						type="button"
+						@click="$emit('show-expense')"
+						class="flex flex-col items-center justify-center p-3 sm:p-4 bg-white border border-gray-200 rounded-lg hover:border-amber-300 hover:bg-amber-50 active:bg-amber-100 transition-colors shadow-sm hover:shadow touch-manipulation group"
+						:title="__('Record POS expense')"
+					>
+						<div
+							class="w-9 h-9 sm:w-10 sm:h-10 bg-amber-50 rounded-full flex items-center justify-center mb-2 group-hover:bg-amber-100 transition-colors"
+						>
+							<svg
+								class="w-5 h-5 text-amber-600"
+								fill="none"
+								stroke="currentColor"
+								viewBox="0 0 24 24"
+							>
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"
+								/>
+							</svg>
+						</div>
+						<span class="text-[11px] sm:text-xs font-semibold text-gray-700">{{
+							__("POS Expense")
+						}}</span>
+					</button>
+
 					<!-- Close Shift -->
 					<button
 						type="button"
@@ -1335,6 +1365,10 @@ const props = defineProps({
 		type: Array,
 		default: () => [],
 	},
+	allowPosExpense: {
+		type: Boolean,
+		default: false,
+	},
 });
 
 /**
@@ -1362,6 +1396,7 @@ const emit = defineEmits([
 	"show-drafts", // () - Show draft/held orders
 	"show-history", // () - Show invoice history
 	"show-return", // () - Open return invoice dialog
+	"show-expense", // () - Open POS expense dialog
 	"close-shift", // () - Close current shift
 	// "create-sales-order", // () - Create Sales Order // Removed as per instruction
 ]);

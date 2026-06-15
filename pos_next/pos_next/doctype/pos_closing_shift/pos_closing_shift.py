@@ -583,10 +583,37 @@ def make_closing_shift_from_opening(opening_shift):
         amount = get_base_value(py, "paid_amount", "base_paid_amount")
         _aggregate_payment(payments, py.mode_of_payment, amount)
 
+    # Process POS Expenses — reduce expected cash per payment mode
+    from pos_next.api.expenses import get_pos_expenses
+
+    pos_expenses_table = []
+    expenses_total = 0
+    expense_by_mode = defaultdict(float)
+
+    for expense in get_pos_expenses(opening_shift.get("name")):
+        expense_amount = flt(expense.amount)
+        expenses_total += expense_amount
+        expense_by_mode[expense.mode_of_payment] += expense_amount
+        pos_expenses_table.append(
+            frappe._dict(
+                {
+                    "expense_account": expense.expense_account,
+                    "amount": expense_amount,
+                    "employee": expense.employee or "",
+                    "remarks": expense.remarks or "",
+                }
+            )
+        )
+        _aggregate_payment(payments, expense.mode_of_payment, -expense_amount)
+
+    for pay in payments:
+        pay.expense_amount = expense_by_mode.get(pay.mode_of_payment, 0)
+
     # Update closing shift with totals
     closing_shift.grand_total = summary["grand_total"]
     closing_shift.net_total = summary["net_total"]
     closing_shift.total_quantity = summary["total_quantity"]
+    closing_shift.total_pos_expenses = expenses_total
 
     # Set child tables (without return info - that's for display only)
     closing_shift.set("pos_transactions", [
@@ -596,6 +623,7 @@ def make_closing_shift_from_opening(opening_shift):
     closing_shift.set("payment_reconciliation", payments)
     closing_shift.set("taxes", taxes)
     closing_shift.set("pos_payments", pos_payments_table)
+    closing_shift.set("pos_expenses", pos_expenses_table)
 
     # Build response with display-only fields
     result = closing_shift.as_dict()
@@ -604,6 +632,9 @@ def make_closing_shift_from_opening(opening_shift):
         "returns_count": summary["returns_count"],
         "sales_total": summary["sales_total"],
         "sales_count": summary["sales_count"],
+        "expenses_total": expenses_total,
+        "expenses_count": len(pos_expenses_table),
+        "pos_expenses": pos_expenses_table,
         "pos_transactions": pos_transactions,  # Include return info for display
     })
 

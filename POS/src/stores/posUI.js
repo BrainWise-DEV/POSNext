@@ -17,6 +17,7 @@ export const usePOSUIStore = defineStore("posUI", () => {
 	const { isOpen: showCloseShiftDialog } = useDialog("closeShift")
 	const { isOpen: showDraftDialog } = useDialog("draft")
 	const { isOpen: showReturnDialog } = useDialog("return")
+	const { isOpen: showExpenseDialog } = useDialog("expense")
 	const { isOpen: showCouponDialog } = useDialog("coupon")
 	const { isOpen: showOffersDialog } = useDialog("offers")
 	const { isOpen: showBatchSerialDialog } = useDialog("batchSerial")
@@ -163,6 +164,7 @@ export const usePOSUIStore = defineStore("posUI", () => {
 		showCloseShiftDialog.value = false
 		showDraftDialog.value = false
 		showReturnDialog.value = false
+		showExpenseDialog.value = false
 		showCouponDialog.value = false
 		showOffersDialog.value = false
 		showBatchSerialDialog.value = false
@@ -187,6 +189,7 @@ export const usePOSUIStore = defineStore("posUI", () => {
 		showCloseShiftDialog,
 		showDraftDialog,
 		showReturnDialog,
+		showExpenseDialog,
 		showCouponDialog,
 		showOffersDialog,
 		showBatchSerialDialog,

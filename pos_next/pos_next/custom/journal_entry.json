@@ -1,0 +1,95 @@
+{
+ "custom_fields": [
+  {
+   "dt": "Journal Entry",
+   "fieldname": "posa_pos_expense_section",
+   "fieldtype": "Section Break",
+   "insert_after": "user_remark",
+   "label": "POS Expense",
+   "depends_on": "eval:doc.posa_is_pos_expense",
+   "module": "POS Next",
+   "name": "Journal Entry-posa_pos_expense_section"
+  },
+  {
+   "dt": "Journal Entry",
+   "fieldname": "posa_is_pos_expense",
+   "fieldtype": "Check",
+   "insert_after": "posa_pos_expense_section",
+   "label": "Is POS Expense",
+   "read_only": 1,
+   "default": "0",
+   "module": "POS Next",
+   "name": "Journal Entry-posa_is_pos_expense"
+  },
+  {
+   "dt": "Journal Entry",
+   "fieldname": "posa_pos_opening_shift",
+   "fieldtype": "Link",
+   "insert_after": "posa_is_pos_expense",
+   "label": "POS Opening Shift",
+   "options": "POS Opening Shift",
+   "read_only": 1,
+   "module": "POS Next",
+   "name": "Journal Entry-posa_pos_opening_shift"
+  },
+  {
+   "dt": "Journal Entry",
+   "fieldname": "posa_pos_profile",
+   "fieldtype": "Link",
+   "insert_after": "posa_pos_opening_shift",
+   "label": "POS Profile",
+   "options": "POS Profile",
+   "read_only": 1,
+   "module": "POS Next",
+   "name": "Journal Entry-posa_pos_profile"
+  },
+  {
+   "dt": "Journal Entry",
+   "fieldname": "posa_expense_account",
+   "fieldtype": "Link",
+   "insert_after": "posa_pos_profile",
+   "label": "Expense Account",
+   "options": "Account",
+   "read_only": 1,
+   "module": "POS Next",
+   "name": "Journal Entry-posa_expense_account"
+  },
+  {
+   "dt": "Journal Entry",
+   "fieldname": "posa_expense_amount",
+   "fieldtype": "Currency",
+   "insert_after": "posa_expense_account",
+   "label": "Expense Amount",
+   "read_only": 1,
+   "module": "POS Next",
+   "name": "Journal Entry-posa_expense_amount"
+  },
+  {
+   "dt": "Journal Entry",
+   "fieldname": "posa_expense_mode_of_payment",
+   "fieldtype": "Link",
+   "insert_after": "posa_expense_amount",
+   "label": "Mode of Payment",
+   "options": "Mode of Payment",
+   "read_only": 1,
+   "module": "POS Next",
+   "name": "Journal Entry-posa_expense_mode_of_payment"
+  },
+  {
+   "dt": "Journal Entry",
+   "fieldname": "posa_expense_employee",
+   "fieldtype": "Link",
+   "insert_after": "posa_expense_mode_of_payment",
+   "label": "Employee",
+   "options": "Employee",
+   "read_only": 1,
+   "module": "POS Next",
+   "name": "Journal Entry-posa_expense_employee"
+  }
+ ],
+ "custom_perms": [],
+ "doctype": "Journal Entry",
+ "links": [],
+ "property_setters": [],
+ "sync_on_migrate": 1
+}
