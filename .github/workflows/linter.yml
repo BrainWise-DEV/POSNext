@@ -59,6 +59,7 @@ jobs:
           python -m venv .audit-venv
           . .audit-venv/bin/activate
           pip install --upgrade pip
+          pip install "tomli>=2.2.1"
           pip install pip-audit
           pip install "frappe @ git+https://github.com/frappe/frappe.git@version-15"
           pip install "erpnext @ git+https://github.com/frappe/erpnext.git@version-15"
@@ -74,4 +75,5 @@ jobs:
             --ignore-vuln PYSEC-2026-175 \
             --ignore-vuln PYSEC-2026-177 \
             --ignore-vuln PYSEC-2026-178 \
-            --ignore-vuln PYSEC-2026-179
+            --ignore-vuln PYSEC-2026-179 \
+            --skip-editable
