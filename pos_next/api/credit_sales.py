@@ -106,7 +106,7 @@ def get_customer_balance(customer, company=None):
 	except Exception as e:
 		frappe.log_error(
 			title="Customer Balance Error",
-			message=f"Customer: {customer}, Company: {company}, Error: {e!s}\n{frappe.get_traceback()}",
+			message=f"Customer: {customer}, Company: {company}, Error: {str(e)}\n{frappe.get_traceback()}",
 		)
 		return {"total_outstanding": 0.0, "total_credit": 0.0, "net_balance": 0.0}
 
@@ -607,7 +607,7 @@ def cancel_credit_journal_entries(invoice_name):
 			cancelled_count += 1
 		except Exception as e:
 			frappe.log_error(
-				f"Failed to cancel Journal Entry {journal_entry_name}: {e!s}",
+				f"Failed to cancel Journal Entry {journal_entry_name}: {str(e)}",
 				"Credit Sale JE Cancellation",
 			)
 

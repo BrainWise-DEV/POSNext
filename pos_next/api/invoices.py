@@ -1,6 +1,7 @@
 # Copyright (c) 2025, BrainWise and contributors
 # For license information, please see license.txt
 
+from __future__ import unicode_literals
 
 import json
 from functools import lru_cache
@@ -347,6 +348,44 @@ def get_payment_account(mode_of_payment, company):
 		).format(mode_of_payment, company),
 		title=_("Missing Account"),
 	)
+
+
+def _validate_receivable_account(account, company, pos_profile):
+	"""Validate a cashier-selected receivable account for "Pay on Receivable Account".
+
+	Ensures the account is a real, enabled, non-group Receivable account belonging to the
+	POS company, and that credit sales are enabled for the profile (the same gate that
+	governs the existing "Pay on Account" button). Raises on any violation so a tampered
+	client cannot force an arbitrary debit_to.
+	"""
+	if not account:
+		return
+
+	if not company:
+		frappe.throw(_("Company is required to set a receivable account"))
+
+	acc = frappe.db.get_value(
+		"Account",
+		account,
+		["company", "account_type", "is_group", "disabled"],
+		as_dict=True,
+	)
+	if not acc:
+		frappe.throw(_("Receivable account {0} does not exist").format(account))
+	if acc.company != company:
+		frappe.throw(_("Receivable account {0} does not belong to company {1}").format(account, company))
+	if acc.account_type != "Receivable":
+		frappe.throw(_("Account {0} is not a Receivable account").format(account))
+	if cint(acc.is_group):
+		frappe.throw(_("Receivable account {0} is a group account").format(account))
+	if cint(acc.disabled):
+		frappe.throw(_("Receivable account {0} is disabled").format(account))
+
+	allow_credit_sale = cint(
+		frappe.db.get_value(DOCTYPE_POS_SETTINGS, {"pos_profile": pos_profile}, "allow_credit_sale")
+	)
+	if not allow_credit_sale:
+		frappe.throw(_("Credit sales are not enabled for this POS Profile."))
 
 
 def _set_payment_accounts(payments, company):

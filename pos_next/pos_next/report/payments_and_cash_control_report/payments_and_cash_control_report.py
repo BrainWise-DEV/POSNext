@@ -152,9 +152,8 @@ def get_data(filters):
 	# Discover payment methods (ordered by first appearance)
 	payment_methods = list(dict.fromkeys(r.payment_method for r in raw))
 
-	# Batch-fetch transaction counts and bank deposit data per shift
+	# Batch-fetch transaction counts per shift (total, not per method)
 	transaction_map = _get_transaction_counts(raw)
-	bank_deposit_map = _get_bank_deposit_data(raw)
 
 	# Pivot: group rows by shift into one row each
 	shifts = {}
@@ -170,7 +169,6 @@ def get_data(filters):
 			else:
 				shift_hours = 0
 
-			deposit = bank_deposit_map.get(r.shift, {})
 			shifts[r.shift] = {
 				"shift": r.shift,
 				"pos_profile": r.pos_profile,
@@ -180,8 +178,6 @@ def get_data(filters):
 				"shift_end": r.shift_end,
 				"shift_hours": shift_hours,
 				"total_transactions": transaction_map.get(r.shift, 0),
-				"bank_deposit_amount": deposit.get("deposit_amount"),
-				"deposit_date": deposit.get("deposit_date"),
 				"total_opening": 0,
 				"total_expected": 0,
 				"total_closing": 0,
@@ -280,7 +276,7 @@ def _get_bank_deposit_data(data):
 		as_dict=1,
 	)
 
-	return {r.shift: r for r in rows}
+	return {r.shift: r.cnt for r in rows}
 
 
 def get_conditions(filters):

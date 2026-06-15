@@ -137,6 +137,45 @@ def get_payment_methods(pos_profile):
 
 
 @frappe.whitelist()
+def get_receivable_accounts(pos_profile):
+	"""Receivable accounts selectable for the "Pay on Receivable Account" feature.
+
+	Lists every enabled, non-group Receivable account for the POS Profile's company,
+	excluding the company default receivable account (already covered by the existing
+	"Pay on Account" button). Returns an empty list when credit sales are not enabled
+	for the profile, so the feature stays hidden behind the same gate.
+	"""
+	if not pos_profile:
+		frappe.throw(_("POS Profile is required"))
+
+	company = frappe.db.get_value("POS Profile", pos_profile, "company")
+	if not company:
+		return []
+
+	allow_credit_sale = cint(
+		frappe.db.get_value("POS Settings", {"pos_profile": pos_profile}, "allow_credit_sale")
+	)
+	if not allow_credit_sale:
+		return []
+
+	default_ar = frappe.get_cached_value("Company", company, "default_receivable_account")
+
+	accounts = frappe.get_all(
+		"Account",
+		filters={
+			"company": company,
+			"account_type": "Receivable",
+			"is_group": 0,
+			"disabled": 0,
+		},
+		fields=["name", "account_name", "account_currency"],
+		order_by="account_name asc",
+	)
+
+	return [a for a in accounts if a.name != default_ar]
+
+
+@frappe.whitelist()
 def get_taxes(pos_profile):
 	"""Get tax configuration from POS Profile"""
 	try:

@@ -2073,6 +2073,7 @@ async function handlePaymentCompleted(paymentData) {
 				write_off_amount: paymentData.write_off_amount || 0,
 				change_amount: paymentData.change_amount || 0,
 				is_credit_sale: paymentData.is_credit_sale ? 1 : 0,
+				receivable_account: paymentData.receivable_account || null,
 				edited_from: editingOfflineContext?.originalOfflineId || null,
 			};
 
@@ -2167,6 +2168,7 @@ async function handlePaymentCompleted(paymentData) {
 
 			const result = await cartStore.submitInvoice({
 				isCreditSale: Boolean(paymentData.is_credit_sale),
+				receivableAccount: paymentData.receivable_account || null,
 			});
 
 			if (result) {

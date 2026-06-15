@@ -14,7 +14,7 @@ from erpnext.stock.doctype.stock_entry.test_stock_entry import make_stock_entry
 from frappe.tests.utils import FrappeTestCase
 from frappe.utils import nowdate
 
-import pos_next
+import pos_next  # noqa: F401 — ensure app hooks run (packed_item keying patch).
 
 
 def _assert_no_duplicate_packed_rows(si):

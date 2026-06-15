@@ -287,18 +287,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			targetDoctype.value,
 			deliveryDate.value,
 			writeOffAmount.value,
-			Boolean(options.isCreditSale)
+			Boolean(options.isCreditSale),
+			options.receivableAccount || null
 		);
 		// Reset write-off amount after successful submission
 		if (result) {
 			writeOffAmount.value = 0;
-
-			// Offline: the server hasn't recorded the redemption yet, so cache it
-			// locally so the next offline sale to this customer can't reuse the
-			// one-time offer. (Online sales are recorded server-side on submit.)
-			if (wasOffline && customerName && oneTimeRuleNames.length) {
-				offersStore.recordOfflineRedemptions(customerName, oneTimeRuleNames);
-			}
 		}
 		return result;
 	}
@@ -309,16 +303,6 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 	function setCustomer(selectedCustomer) {
 		customer.value = selectedCustomer;
-
-		// Refresh the one-time-per-customer offer context. One-time offers only
-		// apply to an identified (non walk-in/default) customer; this loads the
-		// customer's prior redemptions (from server when online, cache offline)
-		// so the offer engine — online and offline — can gate them.
-		const customerName = selectedCustomer?.name || selectedCustomer || null;
-		const shiftStore = usePOSShiftStore();
-		const defaultCustomer = shiftStore.currentProfile?.customer;
-		const isWalkIn = !customerName || customerName === defaultCustomer;
-		offersStore.loadOneTimeContextForCustomer(customerName, { isWalkIn });
 	}
 
 	function setPendingItem(item, qty = 1, mode = "uom") {
