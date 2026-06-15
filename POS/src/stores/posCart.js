@@ -235,6 +235,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 		clearInvoiceCart();
 		customer.value = null;
+		offersStore.clearOneTimeContext();
 		appliedOffers.value = [];
 		appliedCoupon.value = null;
 		currentDraftId.value = null;
@@ -273,6 +274,14 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			showWarning(__("Please select a customer"));
 			return;
 		}
+
+		// Capture one-time offer redemptions before submission can clear the cart.
+		const customerName = customer.value?.name || customer.value || null;
+		const oneTimeRuleNames = appliedOffers.value
+			.filter((o) => o.offer?.one_time_per_customer)
+			.map((o) => o.code)
+			.filter(Boolean);
+		const wasOffline = offlineState.isOffline;
 
 		const result = await baseSubmitInvoice(
 			targetDoctype.value,

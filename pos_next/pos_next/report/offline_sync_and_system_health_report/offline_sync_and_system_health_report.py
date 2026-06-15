@@ -63,7 +63,7 @@ def get_data(filters):
 	conditions = get_conditions(filters)
 
 	# Query to get offline sync records with related invoice data
-	query = """
+	query = f"""
 		SELECT
 			ois.offline_id,
 			ois.sales_invoice,
@@ -83,7 +83,7 @@ def get_data(filters):
 			{conditions}
 		ORDER BY
 			ois.synced_at DESC
-	""".format(conditions=conditions)
+	"""
 
 	data = frappe.db.sql(query, filters, as_dict=1)
 

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright (c) 2025, POS Next and contributors
 # For license information, please see license.txt
 
@@ -296,7 +295,6 @@ def create_promotion(data):
 					scheme.append(applicable_key, {applicable_key: value})
 
 		# Add items/groups/brands based on apply_on
-		apply_on_key = frappe.scrub(data["apply_on"])
 		items_data = data.get("items", [])
 
 		if data["apply_on"] == "Item Code" and items_data:

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright (c) 2025, POS Next and contributors
 # For license information, please see license.txt
 
@@ -47,7 +46,7 @@ def disable_expired_pricing_rules():
 				)
 
 			except Exception as e:
-				error_msg = f"Failed to disable pricing rule {rule.name}: {str(e)}"
+				error_msg = f"Failed to disable pricing rule {rule.name}: {e!s}"
 				frappe.logger().error(error_msg)
 				errors.append(error_msg)
 
@@ -120,7 +119,7 @@ def disable_expired_promotional_schemes():
 				)
 
 			except Exception as e:
-				error_msg = f"Failed to disable promotional scheme {scheme.name}: {str(e)}"
+				error_msg = f"Failed to disable promotional scheme {scheme.name}: {e!s}"
 				frappe.logger().error(error_msg)
 				errors.append(error_msg)
 

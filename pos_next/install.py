@@ -35,7 +35,7 @@ def after_install():
 	except Exception as e:
 		frappe.db.rollback()
 		frappe.log_error(title="POS Next Installation Error", message=frappe.get_traceback())
-		log_message(f"POS Next: Installation error - {str(e)}", level="error")
+		log_message(f"POS Next: Installation error - {e!s}", level="error")
 		raise
 
 
