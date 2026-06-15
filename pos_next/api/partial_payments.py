@@ -82,7 +82,7 @@ def get_payment_history(invoice_name: str, include_metadata: bool = True) -> Dic
 	    }
 
 	Raises:
-	    frappe.DoesNotExistError: If invoice doesn't exist
+	    frappe.DoesNotExistError: If invoice doesn\'t exist
 	"""
 	# Validate and get invoice using ORM
 	if not invoice_name or not isinstance(invoice_name, str):
@@ -375,7 +375,7 @@ def create_payment_entry(
 
 	Raises:
 	    frappe.ValidationError: If validation fails
-	    frappe.DoesNotExistError: If invoice doesn't exist
+	    frappe.DoesNotExistError: If invoice doesn\'t exist
 	    frappe.PermissionError: If user lacks permission
 	"""
 	# Input validation
@@ -649,7 +649,7 @@ def get_partial_payment_details(invoice_name: str) -> Dict:
 	Raises:
 	    frappe.ValidationError: If validation fails
 	    frappe.PermissionError: If user lacks permission
-	    frappe.DoesNotExistError: If invoice doesn't exist
+	    frappe.DoesNotExistError: If invoice doesn\'t exist
 	"""
 	# Input validation
 	if not invoice_name:

@@ -8,13 +8,13 @@ frappe.ui.form.on("Customer", {
 				filters: {
 					governorate: frm.doc.custom_governorate || "",
 				},
-			}
-		})
+			};
+		});
 	},
 
 	custom_governorate(frm) {
 		if (frm.doc.custom_district) {
-			frm.set_value("custom_district", null)
+			frm.set_value("custom_district", null);
 		}
 	},
-})
+});

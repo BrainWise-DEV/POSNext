@@ -193,9 +193,17 @@
 						class="w-full px-8 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
 					>
 						<option value="">
-							{{ customerData.custom_governorate ? __("Select District") : __("Select a governorate first") }}
+							{{
+								customerData.custom_governorate
+									? __("Select District")
+									: __("Select a governorate first")
+							}}
 						</option>
-						<option v-for="district in districts" :key="district.name" :value="district.name">
+						<option
+							v-for="district in districts"
+							:key="district.name"
+							:value="district.name"
+						>
 							{{ district.district }}
 						</option>
 					</select>
@@ -317,7 +325,6 @@ const customerGroups = ref([]);
 const territories = ref([]);
 const governorates = ref([]);
 const districts = ref([]);
-
 
 const customerData = ref({
 	customer_name: "",
@@ -529,9 +536,8 @@ const territoriesResource = createListResource("Territory", (names) => {
 });
 
 const governoratesResource = createListResource("Governorate", (names) => {
-	governorates.value = names
-})
-
+	governorates.value = names;
+});
 
 const customerLocationResource = createResource({
 	url: "frappe.client.get_value",
@@ -542,12 +548,11 @@ const customerLocationResource = createResource({
 	}),
 	auto: false,
 	onSuccess: (data) => {
-		customerData.value.custom_governorate = data?.custom_governorate || ""
-		customerData.value.custom_district = data?.custom_district || ""
+		customerData.value.custom_governorate = data?.custom_governorate || "";
+		customerData.value.custom_district = data?.custom_district || "";
 	},
 	onError: (err) => log.error("Error loading customer location", err),
-})
-
+});
 
 const districtsResource = createResource({
 	url: "frappe.client.get_list",
@@ -560,17 +565,17 @@ const districtsResource = createResource({
 	}),
 	auto: false,
 	onSuccess: (data) => {
-		districts.value = data || []
+		districts.value = data || [];
 		// Drop the selected district if it no longer belongs to the governorate
 		if (
 			customerData.value.custom_district &&
 			!districts.value.some((d) => d.name === customerData.value.custom_district)
 		) {
-			customerData.value.custom_district = ""
+			customerData.value.custom_district = "";
 		}
 	},
 	onError: (err) => log.error("Error loading Districts", err),
-})
+});
 
 const posProfileResource = createResource({
 	url: "frappe.client.get_value",
@@ -607,7 +612,7 @@ const loadDialogData = async () => {
 		territoriesResource.reload(),
 		customerGroupsResource.reload(),
 		governoratesResource.reload(),
-	])
+	]);
 	if (isEditMode.value && props.customer?.name) {
 		await customerLocationResource.reload();
 	}
@@ -663,7 +668,7 @@ const resetForm = () => {
 	districts.value = [];
 	selectedCountryCode.value = "";
 	phoneNumber.value = "";
-}
+};
 
 // =============================================================================
 // Watchers
@@ -686,8 +691,9 @@ watch(
 			customerData.value.territory =
 				customer.territory ||
 				territories.value.find((n) => n === "All Territories") ||
-				territories.value[0] ||	"";
-      
+				territories.value[0] ||
+				"";
+
 			customerData.value.custom_governorate = customer.custom_governorate || "";
 			customerData.value.custom_district = customer.custom_district || "";
 			// Handle mobile_no with country code
@@ -723,18 +729,17 @@ watch(selectedCountryCode, async (newVal, oldVal) => {
 	updateTerritoryFromCountry();
 });
 
-
 watch(
 	() => customerData.value.custom_governorate,
 	(governorate) => {
 		if (governorate) {
-			districtsResource.reload()
+			districtsResource.reload();
 		} else {
-			districts.value = []
-			customerData.value.custom_district = ""
+			districts.value = [];
+			customerData.value.custom_district = "";
 		}
 	}
-)
+);
 
 watch(showCountryDropdown, async (isOpen) => {
 	if (isOpen) {
