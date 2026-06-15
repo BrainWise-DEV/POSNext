@@ -83,11 +83,15 @@ const CURRENT_SCHEMA = {
 	// Stores invoices with outstanding amounts for partial payment management
 	unpaid_invoices: "&name, pos_profile, outstanding_amount, customer",
 
-	// One-time-per-customer offer redemptions cache.
-	// Keyed by customer; `rules` is an array of redeemed Pricing Rule names.
-	// Populated from the server when a customer is selected (online) and
-	// appended to on offline checkout, so the offline offer engine can mirror
-	// the server-side one-time gate in apply_offers.
+	// One-time-per-customer offer redemptions cache. Keyed by customer.
+	// Row shape: { customer, serverRules: string[], offlineRules: { [invoiceId]: string[] } }
+	//   serverRules  — authoritative set from the server (replaced wholesale on
+	//                  each online fetch, so a server-side release self-heals).
+	//   offlineRules — redemptions from not-yet-synced offline sales, keyed by
+	//                  invoice id so a voided offline sale can release just its own.
+	// The effective redeemed set (what the offline gate checks) is the union of
+	// serverRules and every offlineRules entry. Legacy rows store a flat `rules`
+	// array; the helpers read it for backward compatibility.
 	one_time_redemptions: "&customer",
 };
 
@@ -227,7 +231,32 @@ export const setSetting = async (key, value) => {
 };
 
 /**
- * Get the cached one-time-per-customer redeemed Pricing Rule names for a customer.
+ * Normalize a cached row (or undefined) into { serverRules, offlineRules }.
+ * Legacy rows stored a flat `rules` array; treat those as serverRules.
+ */
+const _normalizeRedemptionRow = (row) => {
+	if (!row) return { serverRules: [], offlineRules: {} };
+	const offlineRules = row.offlineRules && typeof row.offlineRules === "object" ? row.offlineRules : {};
+	let serverRules = Array.isArray(row.serverRules) ? row.serverRules : [];
+	// Backward compat: fold a legacy flat `rules` array into serverRules.
+	if (Array.isArray(row.rules)) {
+		serverRules = Array.from(new Set([...serverRules, ...row.rules]));
+	}
+	return { serverRules, offlineRules };
+};
+
+/** The effective redeemed set = serverRules ∪ all offlineRules entries. */
+const _effectiveRedeemed = ({ serverRules, offlineRules }) => {
+	const all = new Set(serverRules);
+	for (const rules of Object.values(offlineRules)) {
+		for (const rule of rules || []) all.add(rule);
+	}
+	return Array.from(all);
+};
+
+/**
+ * Get the effective cached one-time redeemed Pricing Rule names for a customer
+ * (server redemptions plus not-yet-synced offline redemptions).
  * @param {string} customer - Customer name
  * @returns {Promise<string[]>} Redeemed rule names (empty array if none/unknown)
  */
@@ -235,7 +264,7 @@ export const getOneTimeRedemptions = async (customer) => {
 	if (!customer) return [];
 	try {
 		const row = await db.one_time_redemptions.get(customer);
-		return Array.isArray(row?.rules) ? row.rules : [];
+		return _effectiveRedeemed(_normalizeRedemptionRow(row));
 	} catch (error) {
 		log.error(`Error reading one-time redemptions for ${customer}:`, error);
 		return [];
@@ -243,37 +272,90 @@ export const getOneTimeRedemptions = async (customer) => {
 };
 
 /**
- * Replace the cached redeemed rule names for a customer (used after a server fetch).
- * @param {string} customer - Customer name
- * @param {string[]} rules - Redeemed Pricing Rule names
- * @returns {Promise<void>}
+ * Read a customer's redemption row, apply `mutate` to the normalized
+ * { serverRules, offlineRules }, persist it, and return the effective set.
+ * The shared read-mutate-write path for every redemption writer below.
  */
-export const setOneTimeRedemptions = async (customer, rules = []) => {
-	if (!customer) return;
+const _putRedemptionRow = async (customer, mutate) => {
+	const row = _normalizeRedemptionRow(await db.one_time_redemptions.get(customer));
+	mutate(row);
+	await db.one_time_redemptions.put({
+		customer,
+		serverRules: row.serverRules,
+		offlineRules: row.offlineRules,
+	});
+	return _effectiveRedeemed(row);
+};
+
+/**
+ * Replace the authoritative SERVER redemption set for a customer (used after an
+ * online fetch). Preserves not-yet-synced offline redemptions, so a server-side
+ * release self-heals on reconnect without losing offline-only redemptions.
+ * @param {string} customer - Customer name
+ * @param {string[]} serverRules - Redeemed Pricing Rule names from the server
+ * @returns {Promise<string[]>} The effective redeemed set after the update
+ */
+export const setOneTimeRedemptions = async (customer, serverRules = []) => {
+	if (!customer) return [];
 	try {
-		await db.one_time_redemptions.put({ customer, rules: Array.from(new Set(rules)) });
+		return await _putRedemptionRow(customer, (row) => {
+			row.serverRules = Array.from(new Set(serverRules));
+		});
 	} catch (error) {
 		log.error(`Error saving one-time redemptions for ${customer}:`, error);
+		return await getOneTimeRedemptions(customer);
 	}
 };
 
 /**
- * Append redeemed rule names for a customer (used on offline checkout), merging
- * with whatever is already cached.
+ * Record redemptions made during an OFFLINE checkout, keyed by invoice id so a
+ * later void of that invoice can release exactly its own redemptions.
  * @param {string} customer - Customer name
  * @param {string[]} rules - Newly redeemed Pricing Rule names
- * @returns {Promise<string[]>} The merged list of redeemed rule names
+ * @param {string} invoiceId - Offline invoice id these redemptions belong to
+ * @returns {Promise<string[]>} The effective redeemed set after the update
  */
-export const addOneTimeRedemptions = async (customer, rules = []) => {
+export const addOfflineRedemptions = async (customer, rules = [], invoiceId = "_") => {
 	if (!customer || !rules.length) return await getOneTimeRedemptions(customer);
 	try {
-		const existing = await getOneTimeRedemptions(customer);
-		const merged = Array.from(new Set([...existing, ...rules]));
-		await db.one_time_redemptions.put({ customer, rules: merged });
-		return merged;
+		return await _putRedemptionRow(customer, (row) => {
+			const existing = row.offlineRules[invoiceId] || [];
+			row.offlineRules[invoiceId] = Array.from(new Set([...existing, ...rules]));
+		});
 	} catch (error) {
-		log.error(`Error appending one-time redemptions for ${customer}:`, error);
+		log.error(`Error appending offline redemptions for ${customer}:`, error);
 		return await getOneTimeRedemptions(customer);
+	}
+};
+
+/**
+ * Release the offline redemptions recorded for a specific invoice (used when an
+ * offline sale is voided/deleted/superseded before it ever reached the server).
+ * Server redemptions are untouched. If `customer` is unknown, scans all rows.
+ * @param {string} invoiceId - Offline invoice id whose redemptions to release
+ * @param {string} [customer] - Customer name, if known (faster keyed lookup)
+ * @returns {Promise<string[]>} The affected customer's effective set, or [] for a scan
+ */
+export const releaseOfflineRedemptions = async (invoiceId, customer = null) => {
+	if (!invoiceId) return [];
+	try {
+		if (customer) {
+			return await _putRedemptionRow(customer, (row) => {
+				delete row.offlineRules[invoiceId];
+			});
+		}
+		// Unknown customer: scan all rows and drop this invoice's bucket wherever found.
+		for (const raw of await db.one_time_redemptions.toArray()) {
+			if (raw?.offlineRules && invoiceId in raw.offlineRules) {
+				await _putRedemptionRow(raw.customer, (row) => {
+					delete row.offlineRules[invoiceId];
+				});
+			}
+		}
+		return [];
+	} catch (error) {
+		log.error(`Error releasing offline redemptions for invoice ${invoiceId}:`, error);
+		return [];
 	}
 };
 

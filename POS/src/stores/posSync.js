@@ -25,6 +25,7 @@ import {
 	cacheUnpaidSummary,
 } from "@/utils/offline";
 import { call } from "@/utils/apiWrapper";
+import { releaseOfflineRedemptions } from "@/utils/offline/db";
 import { logger } from "@/utils/logger";
 import { offlineState } from "@/utils/offline/offlineState";
 import { offlineWorker } from "@/utils/offline/workerClient";
@@ -146,7 +147,42 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 	 * @param {string} id - Invoice ID to delete
 	 */
 	async function deletePending(id) {
+		// Before removing the queued invoice, release any one-time-per-customer
+		// redemptions it cached locally so a void doesn't permanently block the
+		// customer from the offer (mirrors the server's release on cancel).
+		try {
+			const pending = await getPending();
+			const row = pending.find((inv) => inv.id === id || inv.offline_id === id);
+			const offlineId = row?.offline_id || row?.data?.offline_id;
+			if (offlineId) {
+				await releaseOfflineRedemptions(offlineId, row?.data?.customer || null);
+			}
+		} catch (error) {
+			log.error("Failed to release offline redemptions for deleted invoice", error);
+		}
 		await offlineWorker.deleteOfflineInvoice(id);
+		await updatePendingCount();
+	}
+
+	/**
+	 * Mark a queued offline invoice as superseded (by an edit) and release the
+	 * one-time-per-customer redemptions it cached. The superseded row never syncs,
+	 * so its redemptions must be freed; the replacement records its own. Bundling
+	 * release with supersede here keeps it on a single chokepoint, mirroring delete.
+	 * @param {number} queueId - invoice_queue id of the superseded row
+	 * @param {string} replacedBy - id/name of the replacement invoice (audit trail)
+	 * @param {string} [offlineId] - offline_id of the superseded row (its redemption key)
+	 * @param {string} [customer] - customer of the superseded row, if known
+	 */
+	async function supersedeInvoice(queueId, replacedBy, offlineId = null, customer = null) {
+		await offlineWorker.supersedeOfflineInvoice(queueId, replacedBy);
+		if (offlineId) {
+			try {
+				await releaseOfflineRedemptions(offlineId, customer);
+			} catch (error) {
+				log.error("Failed to release offline redemptions for superseded invoice", error);
+			}
+		}
 		await updatePendingCount();
 	}
 
@@ -426,6 +462,7 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 		loadPendingInvoices,
 		updatePendingCount,
 		deleteOfflineInvoice,
+		supersedeInvoice,
 		syncAllPending,
 		preloadDataForOffline,
 		checkOfflineCacheAvailability,

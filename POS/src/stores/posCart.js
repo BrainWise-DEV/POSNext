@@ -275,14 +275,6 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			return;
 		}
 
-		// Capture one-time offer redemptions before submission can clear the cart.
-		const customerName = customer.value?.name || customer.value || null;
-		const oneTimeRuleNames = appliedOffers.value
-			.filter((o) => o.offer?.one_time_per_customer)
-			.map((o) => o.code)
-			.filter(Boolean);
-		const wasOffline = offlineState.isOffline;
-
 		const result = await baseSubmitInvoice(
 			targetDoctype.value,
 			deliveryDate.value,
@@ -294,7 +286,32 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		if (result) {
 			writeOffAmount.value = 0;
 		}
+		// Online submits record one-time redemptions server-side on submit; the
+		// offline checkout path caches them locally via recordOfflineRedemptionsForSale.
 		return result;
+	}
+
+	/** The Pricing Rule names of the currently-applied one-time-per-customer offers. */
+	function appliedOneTimeRuleNames() {
+		return appliedOffers.value
+			.filter((o) => o.offer?.one_time_per_customer)
+			.map((o) => o.code)
+			.filter(Boolean);
+	}
+
+	/**
+	 * Cache the one-time redemptions for an OFFLINE sale so the next offline sale
+	 * to this customer can't reuse the offer (mirrors the server hook, which only
+	 * runs once the invoice syncs). Keyed by the offline invoice id so a later void
+	 * releases exactly its own redemptions. Call before clearCart().
+	 *
+	 * @param {string} offlineId - The queued invoice's offline_id
+	 */
+	async function recordOfflineRedemptionsForSale(offlineId) {
+		const customerName = customer.value?.name || customer.value || null;
+		const ruleNames = appliedOneTimeRuleNames();
+		if (!customerName || !ruleNames.length) return;
+		await offersStore.recordOfflineRedemptions(customerName, ruleNames, offlineId);
 	}
 
 	async function createSalesOrder() {
@@ -1888,6 +1905,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		loadTaxRules,
 		setTaxInclusive,
 		submitInvoice,
+		recordOfflineRedemptionsForSale,
 		applyDiscountToCart,
 		removeDiscountFromCart,
 		applyOffer,

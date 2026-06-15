@@ -2088,9 +2088,13 @@ async function handlePaymentCompleted(paymentData) {
 			// the original row as superseded (keeps audit trail, excludes from sync).
 			if (editingOfflineContext?.originalQueueId) {
 				try {
-					await offlineWorker.supersedeOfflineInvoice(
+					// Supersede also releases the original's cached one-time
+					// redemptions (it never syncs); the new invoice records its own.
+					await offlineStore.supersedeInvoice(
 						editingOfflineContext.originalQueueId,
-						offlineReceiptName
+						offlineReceiptName,
+						editingOfflineContext.originalOfflineId,
+						customerValue
 					);
 				} catch (err) {
 					log.error("Failed to supersede original offline invoice:", err);
@@ -2129,6 +2133,12 @@ async function handlePaymentCompleted(paymentData) {
 			};
 			uiStore.setLastOfflinePrintDoc(offlinePrintDoc);
 			cacheOfflineReceiptPayload(offlineReceiptName, offlinePrintDoc);
+
+			// Cache one-time-per-customer redemptions locally (keyed by this
+			// offline invoice's id) so the next offline sale to this customer
+			// can't reuse the offer. Must run before clearCart() empties the cart.
+			await cartStore.recordOfflineRedemptionsForSale(offlineReceiptName);
+
 			uiStore.showPaymentDialog = false;
 			cartStore.clearCart();
 			// Reset cart hash after successful payment
@@ -2181,9 +2191,14 @@ async function handlePaymentCompleted(paymentData) {
 				if (editingOfflineContext?.originalQueueId) {
 					const serverName = result.name || result.message?.name || null;
 					try {
-						await offlineWorker.supersedeOfflineInvoice(
+						// Supersede also releases the original's cached one-time
+						// redemptions (it never syncs); the online submit just now
+						// recorded the redemption server-side.
+						await offlineStore.supersedeInvoice(
 							editingOfflineContext.originalQueueId,
-							serverName
+							serverName,
+							editingOfflineContext.originalOfflineId,
+							cartStore.customer?.name || cartStore.customer || null
 						);
 					} catch (err) {
 						log.error(
@@ -2192,8 +2207,6 @@ async function handlePaymentCompleted(paymentData) {
 						);
 					}
 					editingOfflineContext = null;
-					// Refresh pending count so the OfflineInvoicesDialog badge updates.
-					await offlineStore.updatePendingCount();
 				}
 
 				const invoiceName = result.name || result.message?.name || __("Unknown");

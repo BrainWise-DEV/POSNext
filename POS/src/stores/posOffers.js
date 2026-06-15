@@ -6,7 +6,8 @@ import { offlineWorker } from "@/utils/offline/workerClient";
 import {
 	getOneTimeRedemptions,
 	setOneTimeRedemptions,
-	addOneTimeRedemptions,
+	addOfflineRedemptions,
+	releaseOfflineRedemptions,
 } from "@/utils/offline/db";
 import { usePOSShiftStore } from "@/stores/posShift";
 
@@ -82,8 +83,10 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 				});
 				const serverRules = resp?.message || resp || [];
 				if (Array.isArray(serverRules)) {
-					redeemed = Array.from(new Set([...(redeemed || []), ...serverRules]));
-					await setOneTimeRedemptions(customerName, redeemed);
+					// Server is authoritative: replace the cached server set (so a
+					// server-side release self-heals) while preserving not-yet-synced
+					// offline redemptions. The returned effective set is their union.
+					redeemed = await setOneTimeRedemptions(customerName, serverRules);
 				}
 			} catch (error) {
 				// Keep cached redemptions if the server fetch fails.
@@ -96,16 +99,35 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 
 	/**
 	 * Persist one-time rule redemptions made during an offline checkout so the
-	 * next offline sale to the same customer sees them.
+	 * next offline sale to the same customer sees them. Keyed by invoice id so a
+	 * later void of that offline sale can release exactly its own redemptions.
 	 *
 	 * @param {string} customerName
 	 * @param {string[]} ruleNames
+	 * @param {string} invoiceId - The offline invoice id these redemptions belong to
 	 */
-	async function recordOfflineRedemptions(customerName, ruleNames = []) {
+	async function recordOfflineRedemptions(customerName, ruleNames = [], invoiceId = "_") {
 		if (!customerName || !ruleNames.length) return;
-		await addOneTimeRedemptions(customerName, ruleNames);
+		await addOfflineRedemptions(customerName, ruleNames, invoiceId);
 		for (const ruleName of ruleNames) {
 			addRedeemedOneTimeRule(ruleName);
+		}
+	}
+
+	/**
+	 * Release the cached offline redemptions for a voided/deleted offline sale,
+	 * mirroring the server's release_one_time_offer_usage on cancel. Refreshes the
+	 * in-memory gate if the affected customer is currently selected.
+	 *
+	 * @param {string} invoiceId - The offline invoice id whose redemptions to release
+	 * @param {string} [customerName] - Customer name, if known
+	 */
+	async function releaseOfflineRedemptionsForInvoice(invoiceId, customerName = null) {
+		if (!invoiceId) return;
+		const effective = await releaseOfflineRedemptions(invoiceId, customerName);
+		// Refresh the in-memory gate from the set release just returned (no re-read).
+		if (customerName) {
+			redeemedOneTimeRules.value = effective;
 		}
 	}
 
@@ -467,5 +489,6 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 		clearOneTimeContext,
 		loadOneTimeContextForCustomer,
 		recordOfflineRedemptions,
+		releaseOfflineRedemptionsForInvoice,
 	};
 });

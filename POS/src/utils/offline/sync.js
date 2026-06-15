@@ -1,7 +1,7 @@
 import { call } from "@/utils/apiWrapper";
 import { logger } from "@/utils/logger";
 import { CoalescingMutex } from "@/utils/mutex";
-import { db } from "./db";
+import { db, releaseOfflineRedemptions } from "./db";
 import { offlineState } from "./offlineState";
 import { removeOfflineReceiptPayload } from "./offlineReceiptCache";
 import { generateOfflineId } from "./uuid";
@@ -231,13 +231,21 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  * @param {number} id - Invoice queue ID
  * @param {string} serverInvoice - Server invoice name
  * @param {string} [offlineId] - pos_offline_<uuid> cache key to evict
+ * @param {string} [customer] - customer of the invoice (keyed redemption release)
  */
-const markInvoiceSynced = async (id, serverInvoice, offlineId) => {
+const markInvoiceSynced = async (id, serverInvoice, offlineId, customer = null) => {
 	await db.invoice_queue.update(id, {
 		synced: true,
 		server_invoice: serverInvoice,
 	});
-	if (offlineId) removeOfflineReceiptPayload(offlineId);
+	if (offlineId) {
+		removeOfflineReceiptPayload(offlineId);
+		// The server now owns any one-time redemptions this invoice made
+		// (recorded on submit), so drop the offline-bucket entry. A later online
+		// customer-select repopulates it as an authoritative serverRule. Passing
+		// the customer keeps this a keyed single-row write, not a full-table scan.
+		await releaseOfflineRedemptions(offlineId, customer);
+	}
 };
 
 /**
@@ -305,12 +313,13 @@ const syncInvoiceToServer = async (invoice, retryCount = 0) => {
 	const IN_PROGRESS_WAIT_MS = 2000; // Wait 2 seconds between retries
 
 	const offlineId = invoice.offline_id || invoice.data?.offline_id;
+	const customer = invoice.data?.customer || null;
 
 	// Pre-sync deduplication check
 	if (offlineId) {
 		const syncStatus = await checkOfflineIdSynced(offlineId);
 		if (syncStatus.synced) {
-			await markInvoiceSynced(invoice.id, syncStatus.sales_invoice, offlineId);
+			await markInvoiceSynced(invoice.id, syncStatus.sales_invoice, offlineId, customer);
 			log.debug("Invoice already synced, skipping", {
 				id: invoice.id,
 				offline_id: offlineId,
@@ -330,7 +339,7 @@ const syncInvoiceToServer = async (invoice, retryCount = 0) => {
 
 		if (response.message || response.name) {
 			const serverName = response.name || response.message;
-			await markInvoiceSynced(invoice.id, serverName, offlineId);
+			await markInvoiceSynced(invoice.id, serverName, offlineId, customer);
 			log.success("Invoice synced", {
 				id: invoice.id,
 				offline_id: offlineId,
@@ -398,7 +407,8 @@ export const syncOfflineInvoices = async () => {
 					await markInvoiceSynced(
 						invoice.id,
 						invoiceName,
-						invoice.offline_id || invoice.data?.offline_id
+						invoice.offline_id || invoice.data?.offline_id,
+						invoice.data?.customer || null
 					);
 					log.debug("Invoice is duplicate, marked as synced", { id: invoice.id });
 					result.skipped++;
