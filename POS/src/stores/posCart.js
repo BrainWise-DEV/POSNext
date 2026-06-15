@@ -301,8 +301,23 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		return await submitInvoice();
 	}
 
-	function setCustomer(selectedCustomer) {
+	function syncOneTimeContextForCurrentCustomer() {
+		const shiftStore = usePOSShiftStore();
+		const customerName = customer.value?.name || customer.value || null;
+		const defaultCustomer = shiftStore.currentProfile?.customer;
+		const isWalkIn = !customerName || customerName === defaultCustomer;
+
+		return offersStore.loadOneTimeContextForCustomer(customerName, { isWalkIn });
+	}
+
+	async function setCustomer(selectedCustomer) {
 		customer.value = selectedCustomer;
+		await syncOneTimeContextForCurrentCustomer();
+	}
+
+	async function loadDefaultCustomer() {
+		await setDefaultCustomer();
+		await syncOneTimeContextForCurrentCustomer();
 	}
 
 	function setPendingItem(item, qty = 1, mode = "uom") {
@@ -1509,6 +1524,15 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		// Check cancellation after fetch
 		if (signal?.aborted) return;
 
+		// One-time-per-customer eligibility depends on async context (server
+		// redemptions + identified flag). Await here so we never evaluate offers
+		// before the customer gate is ready — setCustomer() alone can lose the
+		// race with the debounced cart/customer watcher below.
+		await syncOneTimeContextForCurrentCustomer();
+
+		// Check cancellation after one-time context fetch
+		if (signal?.aborted) return;
+
 		// Generate current cart hash
 		const currentHash = generateCartHash();
 
@@ -1858,7 +1882,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		updateItemQuantity,
 		clearCart,
 		setCustomer,
-		setDefaultCustomer,
+		setDefaultCustomer: loadDefaultCustomer,
 		setPendingItem,
 		clearPendingItem,
 		loadTaxRules,
