@@ -3,7 +3,7 @@
 
 import frappe
 from frappe import _
-from frappe.utils import flt, time_diff_in_hours, get_datetime
+from frappe.utils import flt, get_datetime, time_diff_in_hours
 
 
 def execute(filters=None):
@@ -24,128 +24,84 @@ def get_columns(payment_methods):
 			"label": _("Shift"),
 			"fieldtype": "Link",
 			"options": "POS Closing Shift",
-			"width": 150
+			"width": 150,
 		},
 		{
 			"fieldname": "pos_profile",
 			"label": _("POS Profile"),
 			"fieldtype": "Link",
 			"options": "POS Profile",
-			"width": 150
+			"width": 150,
 		},
-		{
-			"fieldname": "cashier",
-			"label": _("Cashier"),
-			"fieldtype": "Link",
-			"options": "User",
-			"width": 150
-		},
-		{
-			"fieldname": "posting_date",
-			"label": _("Date"),
-			"fieldtype": "Date",
-			"width": 100
-		},
-		{
-			"fieldname": "shift_start",
-			"label": _("Shift Start"),
-			"fieldtype": "Time",
-			"width": 100
-		},
-		{
-			"fieldname": "shift_end",
-			"label": _("Shift End"),
-			"fieldtype": "Time",
-			"width": 100
-		},
-		{
-			"fieldname": "shift_hours",
-			"label": _("Shift Hours"),
-			"fieldtype": "Float",
-			"width": 90
-		},
-		{
-			"fieldname": "total_transactions",
-			"label": _("Transactions"),
-			"fieldtype": "Int",
-			"width": 100
-		},
+		{"fieldname": "cashier", "label": _("Cashier"), "fieldtype": "Link", "options": "User", "width": 150},
+		{"fieldname": "posting_date", "label": _("Date"), "fieldtype": "Date", "width": 100},
+		{"fieldname": "shift_start", "label": _("Shift Start"), "fieldtype": "Time", "width": 100},
+		{"fieldname": "shift_end", "label": _("Shift End"), "fieldtype": "Time", "width": 100},
+		{"fieldname": "shift_hours", "label": _("Shift Hours"), "fieldtype": "Float", "width": 90},
+		{"fieldname": "total_transactions", "label": _("Transactions"), "fieldtype": "Int", "width": 100},
 	]
 
 	# Dynamic columns per payment method
 	for method in payment_methods:
 		safe = method.lower().replace(" ", "_")
-		columns.extend([
-			{
-				"fieldname": f"{safe}_opening",
-				"label": _(f"{method} Opening"),
-				"fieldtype": "Currency",
-				"width": 130
-			},
-			{
-				"fieldname": f"{safe}_expected",
-				"label": _(f"{method} Expected"),
-				"fieldtype": "Currency",
-				"width": 130
-			},
-			{
-				"fieldname": f"{safe}_closing",
-				"label": _(f"{method} Closing"),
-				"fieldtype": "Currency",
-				"width": 130
-			},
-			{
-				"fieldname": f"{safe}_diff",
-				"label": _(f"{method} Diff"),
-				"fieldtype": "Currency",
-				"width": 110
-			},
-		])
+		columns.extend(
+			[
+				{
+					"fieldname": f"{safe}_opening",
+					"label": _(f"{method} Opening"),
+					"fieldtype": "Currency",
+					"width": 130,
+				},
+				{
+					"fieldname": f"{safe}_expected",
+					"label": _(f"{method} Expected"),
+					"fieldtype": "Currency",
+					"width": 130,
+				},
+				{
+					"fieldname": f"{safe}_closing",
+					"label": _(f"{method} Closing"),
+					"fieldtype": "Currency",
+					"width": 130,
+				},
+				{
+					"fieldname": f"{safe}_diff",
+					"label": _(f"{method} Diff"),
+					"fieldtype": "Currency",
+					"width": 110,
+				},
+			]
+		)
 
-	columns.extend([
-		{
-			"fieldname": "bank_deposit_amount",
-			"label": _("Bank Deposit Amount"),
-			"fieldtype": "Currency",
-			"width": 140
-		},
-		{
-			"fieldname": "deposit_date",
-			"label": _("Deposit Date"),
-			"fieldtype": "Date",
-			"width": 110
-		},
-		{
-			"fieldname": "total_opening",
-			"label": _("Total Opening"),
-			"fieldtype": "Currency",
-			"width": 130
-		},
-		{
-			"fieldname": "total_expected",
-			"label": _("Total Expected"),
-			"fieldtype": "Currency",
-			"width": 130
-		},
-		{
-			"fieldname": "total_closing",
-			"label": _("Total Closing"),
-			"fieldtype": "Currency",
-			"width": 130
-		},
-		{
-			"fieldname": "total_difference",
-			"label": _("Total Difference"),
-			"fieldtype": "Currency",
-			"width": 130
-		},
-		{
-			"fieldname": "status",
-			"label": _("Status"),
-			"fieldtype": "Data",
-			"width": 120
-		},
-	])
+	columns.extend(
+		[
+			{
+				"fieldname": "total_opening",
+				"label": _("Total Opening"),
+				"fieldtype": "Currency",
+				"width": 130,
+			},
+			{
+				"fieldname": "total_expected",
+				"label": _("Total Expected"),
+				"fieldtype": "Currency",
+				"width": 130,
+			},
+			{
+				"fieldname": "total_closing",
+				"label": _("Total Closing"),
+				"fieldtype": "Currency",
+				"width": 130,
+			},
+			{
+				"fieldname": "total_difference",
+				"label": _("Total Difference"),
+				"fieldtype": "Currency",
+				"width": 130,
+			},
+			{"fieldname": "status", "label": _("Status"), "fieldtype": "Data", "width": 120},
+		]
+	)
 
 	return columns
 
@@ -189,9 +145,8 @@ def get_data(filters):
 	# Discover payment methods (ordered by first appearance)
 	payment_methods = list(dict.fromkeys(r.payment_method for r in raw))
 
-	# Batch-fetch transaction counts and bank deposit data per shift
+	# Batch-fetch transaction counts per shift (total, not per method)
 	transaction_map = _get_transaction_counts(raw)
-	bank_deposit_map = _get_bank_deposit_data(raw)
 
 	# Pivot: group rows by shift into one row each
 	shifts = {}
@@ -201,14 +156,12 @@ def get_data(filters):
 			shift_order.append(r.shift)
 			# Calculate shift hours
 			if r._shift_start_dt and r._shift_end_dt:
-				shift_hours = flt(time_diff_in_hours(
-					get_datetime(r._shift_end_dt),
-					get_datetime(r._shift_start_dt)
-				), 1)
+				shift_hours = flt(
+					time_diff_in_hours(get_datetime(r._shift_end_dt), get_datetime(r._shift_start_dt)), 1
+				)
 			else:
 				shift_hours = 0
 
-			deposit = bank_deposit_map.get(r.shift, {})
 			shifts[r.shift] = {
 				"shift": r.shift,
 				"pos_profile": r.pos_profile,
@@ -218,8 +171,6 @@ def get_data(filters):
 				"shift_end": r.shift_end,
 				"shift_hours": shift_hours,
 				"total_transactions": transaction_map.get(r.shift, 0),
-				"bank_deposit_amount": deposit.get("deposit_amount"),
-				"deposit_date": deposit.get("deposit_date"),
 				"total_opening": 0,
 				"total_expected": 0,
 				"total_closing": 0,
@@ -278,7 +229,8 @@ def _get_transaction_counts(data):
 
 	placeholders = ", ".join(["%s"] * len(shift_names))
 
-	rows = frappe.db.sql("""
+	rows = frappe.db.sql(
+		"""
 		SELECT
 			sir.parent as shift,
 			COUNT(DISTINCT sir.sales_invoice) as cnt
@@ -286,35 +238,12 @@ def _get_transaction_counts(data):
 		WHERE sir.parenttype = 'POS Closing Shift'
 		AND sir.parent IN ({placeholders})
 		GROUP BY sir.parent
-	""".format(placeholders=placeholders), shift_names, as_dict=1)
-
-	return {r.shift: r.cnt for r in rows}
-
-
-def _get_bank_deposit_data(data):
-	"""Batch-fetch bank deposit amount and date per shift."""
-	shift_names = list({row.shift for row in data})
-	if not shift_names:
-		return {}
-
-	placeholders = ", ".join(["%s"] * len(shift_names))
-
-	rows = frappe.db.sql(
-		"""
-		SELECT
-			pcs.name as shift,
-			bd.deposit_amount,
-			bd.posting_date as deposit_date
-		FROM `tabPOS Closing Shift` pcs
-		INNER JOIN `tabBank Deposits` bd ON bd.name = pcs.custom_bank_deposit
-		WHERE pcs.name IN ({placeholders})
-			AND bd.docstatus = 1
-		""".format(placeholders=placeholders),
+	""".format(placeholders=placeholders),
 		shift_names,
 		as_dict=1,
 	)
 
-	return {r.shift: r for r in rows}
+	return {r.shift: r.cnt for r in rows}
 
 
 def get_conditions(filters):
@@ -361,7 +290,7 @@ def get_chart_data(data, payment_methods):
 				{"name": _("Expected"), "values": expected_values},
 				{"name": _("Closing"), "values": closing_values},
 				{"name": _("Difference"), "values": diff_values},
-			]
+			],
 		},
 		"type": "bar",
 		"fieldtype": "Currency",
