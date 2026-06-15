@@ -16,7 +16,7 @@
    "hidden": 0,
    "is_query_report": 0,
    "label": "Reports",
-   "link_count": 5,
+   "link_count": 6,
    "link_type": "DocType",
    "onboard": 0,
    "type": "Card Break"
@@ -47,6 +47,16 @@
    "label": "Payments and Cash Control Report",
    "link_count": 0,
    "link_to": "Payments and Cash Control Report",
+   "link_type": "Report",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 1,
+   "label": "POS Expense Report",
+   "link_count": 0,
+   "link_to": "POS Expense Report",
    "link_type": "Report",
    "onboard": 0,
    "type": "Link"
