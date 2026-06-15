@@ -56,7 +56,7 @@ frappe.ui.form.on("Bank Deposits", {
 				if (r.pos_profile && r.pos_profile !== frm.doc.pos_profile) {
 					frm.set_value("pos_profile", r.pos_profile);
 				}
-			},
+			}
 		);
 	},
 });

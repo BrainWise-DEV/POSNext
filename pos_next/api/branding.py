@@ -54,16 +54,16 @@ def get_branding_config():
 
 		return config
 	except Exception as e:
-		frappe.log_error(f"Error fetching branding config: {str(e)}", "BrainWise Branding API")
+		frappe.log_error(f"Error fetching branding config: {e!s}", "BrainWise Branding API")
 		return get_default_config()
 
 
 def get_default_config():
 	"""Return default branding configuration"""
 	return {
-		"_t": base64.b64encode("Powered by".encode()).decode(),
-		"_l": base64.b64encode("BrainWise".encode()).decode(),
-		"_u": base64.b64encode("https://nexus.brainwise.me".encode()).decode(),
+		"_t": base64.b64encode(b"Powered by").decode(),
+		"_l": base64.b64encode(b"BrainWise").decode(),
+		"_u": base64.b64encode(b"https://nexus.brainwise.me").decode(),
 		"_i": 10000,
 		"_v": True,
 		"_c": "pos-footer-component",
@@ -125,7 +125,7 @@ def validate_branding(client_signature=None, brand_name=None, brand_url=None):
 			"message": "Validation successful" if is_valid else "Branding mismatch detected",
 		}
 	except Exception as e:
-		frappe.log_error(f"Error validating branding: {str(e)}", "BrainWise Branding Validation")
+		frappe.log_error(f"Error validating branding: {e!s}", "BrainWise Branding Validation")
 		return {"valid": False, "error": str(e)}
 
 
@@ -149,7 +149,7 @@ def log_client_event(event_type=None, details=None):
 		if isinstance(details, str):
 			try:
 				details = json.loads(details)
-			except:
+			except Exception:
 				pass
 
 		# Log different event types
@@ -179,7 +179,7 @@ def log_client_event(event_type=None, details=None):
 
 		return {"logged": False, "message": f"Unknown event type: {event_type}"}
 	except Exception as e:
-		frappe.log_error(f"Error logging client event: {str(e)}", "BrainWise Branding Event Log")
+		frappe.log_error(f"Error logging client event: {e!s}", "BrainWise Branding Event Log")
 		return {"logged": False, "error": str(e)}
 
 
@@ -197,7 +197,7 @@ def log_tampering_attempt(doc, details):
 			message=json.dumps(details, indent=2, default=str),
 		)
 	except Exception as e:
-		frappe.log_error(f"Error logging tampering: {str(e)}", "BrainWise Branding")
+		frappe.log_error(f"Error logging tampering: {e!s}", "BrainWise Branding")
 
 
 @frappe.whitelist(allow_guest=False)
@@ -220,5 +220,5 @@ def get_tampering_stats():
 			"logging_enabled": doc.log_tampering_attempts,
 		}
 	except Exception as e:
-		frappe.log_error(f"Error getting tampering stats: {str(e)}", "BrainWise Branding Stats")
+		frappe.log_error(f"Error getting tampering stats: {e!s}", "BrainWise Branding Stats")
 		return {"error": str(e)}

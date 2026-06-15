@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright (c) 2025, BrainWise and contributors
 # For license information, please see license.txt
 
@@ -706,10 +705,6 @@ def update_invoice(data):
 		pos_profile = data.get("pos_profile")
 		doctype = data.get("doctype", "Sales Invoice")
 
-		# "Pay on Receivable Account": cashier-selected receivable account for the
-		# invoice's debit_to. Pop it so frappe.get_doc(data) doesn't treat it as a field.
-		receivable_account = data.pop("receivable_account", None)
-
 		# Ensure the document type is set
 		data.setdefault("doctype", doctype)
 
@@ -754,13 +749,6 @@ def update_invoice(data):
 
 		if company and invoice_doc.get("payments") and doctype == "Sales Invoice":
 			_set_payment_accounts(invoice_doc.payments, company)
-
-		# Route the invoice's receivable (debit_to) to the chosen AR account. Set before
-		# save so ERPNext's set_missing_values keeps it (it only defaults debit_to when unset)
-		# and books the outstanding — with party=Customer — on that account.
-		if receivable_account and doctype == "Sales Invoice":
-			_validate_receivable_account(receivable_account, company, pos_profile)
-			invoice_doc.debit_to = receivable_account
 
 		# Validate return items if this is a return invoice
 		if (data.get("is_return") or invoice_doc.get("is_return")) and invoice_doc.get("return_against"):
@@ -827,6 +815,8 @@ def update_invoice(data):
 		# Formula: rate = price_list_rate * (1 - discount_percentage/100)
 		# Reverse: price_list_rate = rate / (1 - discount_percentage/100)
 		# ========================================================================
+		# Collect applied pricing rule names before we clear item.pricing_rules
+		applied_rule_names_seen = set()
 		for item in invoice_doc.get("items", []):
 			item_rate = flt(item.rate or 0)
 			discount_pct = flt(item.discount_percentage or 0)
@@ -885,7 +875,32 @@ def update_invoice(data):
 			# discount itself is preserved via the discount_percentage /
 			# discount_amount fields we already set above.
 			if item.get("pricing_rules"):
+				if erpnext_get_applied_pricing_rules:
+					applied_rule_names_seen.update(
+						erpnext_get_applied_pricing_rules(item.pricing_rules) or []
+					)
+				else:
+					applied_rule_names_seen.update(
+						r.strip() for r in str(item.pricing_rules).split(",") if r.strip()
+					)
 				item.pricing_rules = ""
+
+		if doctype == "Sales Invoice":
+			one_time_applied = (
+				frappe.get_all(
+					"Pricing Rule",
+					filters={
+						"name": ["in", list(applied_rule_names_seen)],
+						"one_time_per_customer": 1,
+					},
+					pluck="name",
+				)
+				if applied_rule_names_seen
+				else []
+			)
+			invoice_doc.pos_applied_one_time_rules = (
+				json.dumps(sorted(one_time_applied)) if one_time_applied else ""
+			)
 
 		# Set invoice flags BEFORE calculations
 		if doctype == "Sales Invoice":
@@ -1002,7 +1017,7 @@ def update_invoice(data):
 		invoice_doc.save()
 
 		return invoice_doc.as_dict()
-	except Exception as e:
+	except Exception:
 		frappe.log_error(frappe.get_traceback(), "Update Invoice Error")
 		raise
 
@@ -1152,7 +1167,7 @@ def _complete_offline_sync(sync_record_name, invoice_name):
 	except Exception as error:
 		frappe.log_error(
 			title="Offline Sync Completion Error",
-			message=f"Failed to complete sync record {sync_record_name} for invoice {invoice_name}: {str(error)}",
+			message=f"Failed to complete sync record {sync_record_name} for invoice {invoice_name}: {error!s}",
 		)
 
 
@@ -1180,7 +1195,7 @@ def _cleanup_failed_sync(sync_record_name):
 	except Exception as error:
 		frappe.log_error(
 			title="Offline Sync Cleanup Error",
-			message=f"Failed to mark sync record {sync_record_name} as failed: {str(error)}",
+			message=f"Failed to mark sync record {sync_record_name} as failed: {error!s}",
 		)
 
 
@@ -1348,14 +1363,6 @@ def submit_invoice(invoice=None, data=None):
 		if doctype == "Sales Invoice" and hasattr(invoice_doc, "payments"):
 			_set_payment_accounts(invoice_doc.payments, invoice_doc.company)
 
-		# "Pay on Receivable Account": defensively re-apply the chosen receivable account
-		# here too, covering offline-sync and edit paths that submit a previously saved
-		# draft. update_invoice already validates/sets it for the normal online flow.
-		receivable_account = data.get("receivable_account") or invoice.get("receivable_account")
-		if receivable_account and doctype == "Sales Invoice":
-			_validate_receivable_account(receivable_account, invoice_doc.company, pos_profile)
-			invoice_doc.debit_to = receivable_account
-
 		# Handle sales team (multiple sales persons)
 		sales_team_data = invoice.get("sales_team") or data.get("sales_team")
 		if sales_team_data and isinstance(sales_team_data, list):
@@ -1385,7 +1392,7 @@ def submit_invoice(invoice=None, data=None):
 				except Exception as e:
 					frappe.log_error(
 						title="Failed to increment coupon usage",
-						message=f"Coupon: {coupon_code}, Error: {str(e)}",
+						message=f"Coupon: {coupon_code}, Error: {e!s}",
 					)
 
 		# Auto-set batch numbers for returns
@@ -1475,7 +1482,7 @@ def submit_invoice(invoice=None, data=None):
 					message=(
 						f"Return invoice: {invoice_doc.name}, "
 						f"Original invoice: {invoice_doc.return_against}, "
-						f"Error: {str(wallet_reversal_error)}\n{frappe.get_traceback()}"
+						f"Error: {wallet_reversal_error!s}\n{frappe.get_traceback()}"
 					),
 				)
 				frappe.msgprint(
@@ -1506,7 +1513,7 @@ def submit_invoice(invoice=None, data=None):
 						title="Wallet Credit on Return Error",
 						message=(
 							f"Return invoice: {invoice_doc.name}, "
-							f"Error: {str(wallet_credit_error)}\n{frappe.get_traceback()}"
+							f"Error: {wallet_credit_error!s}\n{frappe.get_traceback()}"
 						),
 					)
 					frappe.msgprint(
@@ -1527,7 +1534,7 @@ def submit_invoice(invoice=None, data=None):
 			except Exception as credit_error:
 				frappe.log_error(
 					title="Credit Redemption Error",
-					message=f"Invoice: {invoice_doc.name}, Error: {str(credit_error)}\n{frappe.get_traceback()}",
+					message=f"Invoice: {invoice_doc.name}, Error: {credit_error!s}\n{frappe.get_traceback()}",
 				)
 				# Don't fail the entire transaction, just log the error
 				frappe.msgprint(
@@ -1574,7 +1581,7 @@ def submit_invoice(invoice=None, data=None):
 
 		return result
 
-	except Exception as e:
+	except Exception:
 		frappe.log_error(frappe.get_traceback(), "Submit Invoice Error")
 		raise
 
@@ -1814,7 +1821,7 @@ def cleanup_old_drafts(pos_profile=None, max_age_hours=48):
 			deleted_count += 1
 		except Exception as e:
 			frappe.log_error(
-				f"Failed to delete draft {draft['name']}: {str(e)}",
+				f"Failed to delete draft {draft['name']}: {e!s}",
 				"Draft Cleanup Error",
 			)
 
@@ -1833,7 +1840,7 @@ def _filter_fully_returned(invoices):
 	"""Remove invoices where all items have already been returned.
 
 	Uses two targeted queries instead of a 4-table LEFT JOIN to avoid
-	cartesian explosion (SI × SI_Item × Ret_SI × Ret_Item).
+	cartesian explosion (SI x SI_Item x Ret_SI x Ret_Item).
 	Only touches the small candidate set passed in.
 	"""
 	if not invoices:
@@ -2895,7 +2902,7 @@ def apply_offers(invoice_data, selected_offers=None):
 			except ValueError:
 				selected_offers = [selected_offers]
 
-		if isinstance(selected_offers, (list, tuple, set)):
+		if isinstance(selected_offers, list | tuple | set):
 			selected_offer_names = {cstr(name) for name in selected_offers if cstr(name)}
 		else:
 			selected_offer_names = set()
@@ -3054,7 +3061,7 @@ def apply_offers(invoice_data, selected_offers=None):
 						rules = json.loads(raw_rules)
 					else:
 						rules = [r.strip() for r in raw_rules.split(",") if r.strip()]
-				elif isinstance(raw_rules, (list, tuple, set)):
+				elif isinstance(raw_rules, list | tuple | set):
 					rules = list(raw_rules)
 			raw_rule_names.update(rules)
 
@@ -3075,6 +3082,10 @@ def apply_offers(invoice_data, selected_offers=None):
 		# We include BOTH types for POS, but exclude coupon_code_based rules
 		# (those require explicit coupon entry and are handled separately).
 		#
+		# Walk-in / default customer can't be tracked one-time, so one-time
+		# rules never apply to anonymous sales (see the loop below).
+		default_customer = profile.get("customer")
+
 		rule_map = {}
 		if raw_rule_names:
 			rule_records = frappe.get_all(
@@ -3084,6 +3095,7 @@ def apply_offers(invoice_data, selected_offers=None):
 					"name",
 					"promotional_scheme",
 					"coupon_code_based",
+					"one_time_per_customer",
 					"promotional_scheme_id",
 					"price_or_product_discount",
 				],
@@ -3092,6 +3104,16 @@ def apply_offers(invoice_data, selected_offers=None):
 				# Skip coupon-based rules (require explicit coupon code entry)
 				if record.coupon_code_based:
 					continue
+
+				# One-time-per-customer rules: skip for anonymous sales and for
+				# customers who have already redeemed this rule. Dropping the rule
+				# here keeps its discount out of the per-item loop below (which only
+				# applies rules present in rule_map), mirroring the coupon skip above.
+				if record.one_time_per_customer:
+					if not customer or customer == default_customer:
+						continue
+					if frappe.db.exists("One Time Customer Offer Usage", f"{customer}::{record.name}"):
+						continue
 
 				# Include both promotional scheme rules and standalone pricing rules
 				rule_map[record.name] = record
@@ -3137,7 +3159,7 @@ def apply_offers(invoice_data, selected_offers=None):
 		# the same way: {(item_code, pricing_rules): data for data in free_item_data}.
 		free_items_map = {}
 
-		for result, item_index in zip(pricing_results, index_map):
+		for result, item_index in zip(pricing_results, index_map, strict=False):
 			if not result:
 				continue
 
@@ -3150,7 +3172,7 @@ def apply_offers(invoice_data, selected_offers=None):
 						rule_names = json.loads(raw_rules)
 					else:
 						rule_names = [r.strip() for r in raw_rules.split(",") if r.strip()]
-				elif isinstance(raw_rules, (list, tuple, set)):
+				elif isinstance(raw_rules, list | tuple | set):
 					rule_names = list(raw_rules)
 				else:
 					rule_names = []

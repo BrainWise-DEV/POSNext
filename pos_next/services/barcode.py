@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import logging
 from functools import lru_cache
-from typing import List, TypedDict
+from typing import TypedDict
 
 import frappe
 from erpnext.stock.get_item_details import get_conversion_factor

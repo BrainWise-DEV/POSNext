@@ -156,8 +156,12 @@ doc_events = {
 		"on_submit": [
 			"pos_next.realtime_events.emit_stock_update_event",
 			"pos_next.api.wallet.process_loyalty_to_wallet",
+			"pos_next.api.sales_invoice_hooks.record_one_time_offer_usage",
 		],
-		"on_cancel": "pos_next.realtime_events.emit_stock_update_event",
+		"on_cancel": [
+			"pos_next.realtime_events.emit_stock_update_event",
+			"pos_next.api.sales_invoice_hooks.release_one_time_offer_usage",
+		],
 		"after_insert": "pos_next.realtime_events.emit_invoice_created_event",
 	},
 	"POS Profile": {"on_update": "pos_next.realtime_events.emit_pos_profile_updated_event"},
