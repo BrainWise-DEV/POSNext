@@ -315,8 +315,8 @@ export const setOneTimeRedemptions = async (customer, serverRules = []) => {
  * @param {string} invoiceId - Offline invoice id these redemptions belong to
  * @returns {Promise<string[]>} The effective redeemed set after the update
  */
-export const addOfflineRedemptions = async (customer, rules = [], invoiceId = "_") => {
-	if (!customer || !rules.length) return await getOneTimeRedemptions(customer);
+export const addOfflineRedemptions = async (customer, rules = [], invoiceId = null) => {
+	if (!customer || !rules.length || !invoiceId) return await getOneTimeRedemptions(customer);
 	try {
 		return await _putRedemptionRow(customer, (row) => {
 			const existing = row.offlineRules[invoiceId] || [];

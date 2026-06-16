@@ -106,8 +106,8 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 	 * @param {string[]} ruleNames
 	 * @param {string} invoiceId - The offline invoice id these redemptions belong to
 	 */
-	async function recordOfflineRedemptions(customerName, ruleNames = [], invoiceId = "_") {
-		if (!customerName || !ruleNames.length) return;
+	async function recordOfflineRedemptions(customerName, ruleNames = [], invoiceId = null) {
+		if (!customerName || !ruleNames.length || !invoiceId) return;
 		await addOfflineRedemptions(customerName, ruleNames, invoiceId);
 		for (const ruleName of ruleNames) {
 			addRedeemedOneTimeRule(ruleName);
@@ -127,7 +127,7 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 		const effective = await releaseOfflineRedemptions(invoiceId, customerName);
 		// Refresh the in-memory gate from the set release just returned (no re-read).
 		if (customerName) {
-			redeemedOneTimeRules.value = effective;
+			setOneTimeContext({ identified: true, redeemedRules: effective });
 		}
 	}
 

@@ -125,7 +125,13 @@ def record_one_time_offer_usage(doc, method=None):
 	"""
 	import json
 
-	if doc.get("is_return") or not doc.get("customer"):
+	from pos_next.api.invoices import is_one_time_eligible_customer
+
+	default_customer = None
+	if doc.get("pos_profile"):
+		default_customer = frappe.db.get_value("POS Profile", doc.pos_profile, "customer")
+
+	if not is_one_time_eligible_customer(doc.get("customer"), default_customer, doc.get("is_return")):
 		return
 
 	raw = doc.get("pos_applied_one_time_rules")
@@ -140,9 +146,18 @@ def record_one_time_offer_usage(doc, method=None):
 
 	from frappe.utils import now
 
+	max_name_len = 140
 	for rule in rule_names:
 		if not rule:
 			continue
+		composite_len = len(doc.customer) + 1 + len(rule)
+		if composite_len > max_name_len:
+			frappe.log_error(
+				title="One-Time Offer Usage Skipped (Name Too Long)",
+				message=f"customer={doc.customer!r}, rule={rule!r}, len={composite_len}",
+			)
+			continue
+
 		try:
 			frappe.get_doc(
 				{
@@ -153,13 +168,13 @@ def record_one_time_offer_usage(doc, method=None):
 					"redemption_date": now(),
 				}
 			).insert(ignore_permissions=True, ignore_if_duplicate=True)
-		except Exception:
+		except Exception as e:
 			# Recording must never fail the sale. Log and move on.
 			frappe.log_error(
 				title="One-time offer usage recording failed",
 				message=(
 					f"Could not record redemption of {rule!r} for {doc.customer!r} "
-					f"on invoice {doc.name}: {frappe.get_traceback()}"
+					f"on invoice {doc.name}: {e!s}\n{frappe.get_traceback()}"
 				),
 			)
 

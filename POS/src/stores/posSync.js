@@ -14,6 +14,7 @@
  * @module stores/posSync
  */
 
+import { usePOSOffersStore } from "@/stores/posOffers";
 import { useToast } from "@/composables/useToast";
 import {
 	cacheCustomersFromServer,
@@ -25,7 +26,6 @@ import {
 	cacheUnpaidSummary,
 } from "@/utils/offline";
 import { call } from "@/utils/apiWrapper";
-import { releaseOfflineRedemptions } from "@/utils/offline/db";
 import { logger } from "@/utils/logger";
 import { offlineState } from "@/utils/offline/offlineState";
 import { offlineWorker } from "@/utils/offline/workerClient";
@@ -143,7 +143,7 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 	}
 
 	/**
-	 * Delete a pending invoice by ID
+	 * Delete a pending invoice by ID and release any offline one-time redemptions.
 	 * @param {string} id - Invoice ID to delete
 	 */
 	async function deletePending(id) {
@@ -155,7 +155,11 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 			const row = pending.find((inv) => inv.id === id || inv.offline_id === id);
 			const offlineId = row?.offline_id || row?.data?.offline_id;
 			if (offlineId) {
-				await releaseOfflineRedemptions(offlineId, row?.data?.customer || null);
+				const offersStore = usePOSOffersStore();
+				await offersStore.releaseOfflineRedemptionsForInvoice(
+					offlineId,
+					row?.data?.customer || null
+				);
 			}
 		} catch (error) {
 			log.error("Failed to release offline redemptions for deleted invoice", error);
@@ -178,7 +182,8 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 		await offlineWorker.supersedeOfflineInvoice(queueId, replacedBy);
 		if (offlineId) {
 			try {
-				await releaseOfflineRedemptions(offlineId, customer);
+				const offersStore = usePOSOffersStore();
+				await offersStore.releaseOfflineRedemptionsForInvoice(offlineId, customer);
 			} catch (error) {
 				log.error("Failed to release offline redemptions for superseded invoice", error);
 			}

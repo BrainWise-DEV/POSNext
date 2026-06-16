@@ -308,9 +308,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * @param {string} offlineId - The queued invoice's offline_id
 	 */
 	async function recordOfflineRedemptionsForSale(offlineId) {
+		const shiftStore = usePOSShiftStore();
 		const customerName = customer.value?.name || customer.value || null;
+		const defaultCustomer = shiftStore.currentProfile?.customer;
+		const isWalkIn = !customerName || customerName === defaultCustomer;
 		const ruleNames = appliedOneTimeRuleNames();
-		if (!customerName || !ruleNames.length) return;
+		if (isWalkIn || !offlineId || !ruleNames.length) return;
 		await offersStore.recordOfflineRedemptions(customerName, ruleNames, offlineId);
 	}
 
