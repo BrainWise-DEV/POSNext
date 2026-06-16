@@ -128,6 +128,26 @@
 						</span>
 					</button>
 					<button
+						v-if="canRecordPosExpense"
+						@click="openExpenseDialog"
+						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-amber-50 flex items-center gap-3 transition-colors"
+					>
+						<svg
+							class="w-5 h-5 text-amber-600"
+							fill="none"
+							stroke="currentColor"
+							viewBox="0 0 24 24"
+						>
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								stroke-width="2"
+								d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"
+							/>
+						</svg>
+						<span>{{ __("POS Expense") }}</span>
+					</button>
+					<button
 						v-if="canAccessShiftActions"
 						@click="openReturnDialog"
 						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-red-50 flex items-center gap-3 transition-colors"
@@ -394,6 +414,8 @@
 								@show-drafts="openDraftDialog"
 								@show-history="openHistoryDialog"
 								@show-return="openReturnDialog"
+								@show-expense="openExpenseDialog"
+								:allow-pos-expense="canRecordPosExpense"
 								@close-shift="handleCloseShift"
 							/>
 						</div>
@@ -542,6 +564,15 @@
 				:pos-opening-shift="shiftStore.currentShift?.name"
 				:currency="shiftStore.profileCurrency"
 				@return-created="handleReturnCreated"
+			/>
+
+			<!-- POS Expense Dialog -->
+			<ExpenseDialog
+				v-model="uiStore.showExpenseDialog"
+				:pos-profile="shiftStore.profileName"
+				:pos-opening-shift="shiftStore.currentShift?.name"
+				:currency="shiftStore.profileCurrency"
+				:maximum-expense-amount="shiftStore.maximumExpenseAmount"
 			/>
 
 			<!-- Coupon Dialog -->
@@ -1019,6 +1050,7 @@ import OfflineInvoicesDialog from "@/components/sale/OfflineInvoicesDialog.vue";
 import PaymentDialog from "@/components/sale/PaymentDialog.vue";
 import PromotionManagement from "@/components/sale/PromotionManagement.vue";
 import ReturnInvoiceDialog from "@/components/sale/ReturnInvoiceDialog.vue";
+import ExpenseDialog from "@/components/sale/ExpenseDialog.vue";
 import WarehouseAvailabilityDialog from "@/components/sale/WarehouseAvailabilityDialog.vue";
 import POSSettings from "@/components/settings/POSSettings.vue";
 import InvoiceManagement from "@/components/invoices/InvoiceManagement.vue";
@@ -1217,6 +1249,9 @@ const profileWarehouses = computed(() => {
 });
 
 const canAccessShiftActions = computed(() => shiftStore.hasOpenShift);
+const canRecordPosExpense = computed(
+	() => canAccessShiftActions.value && shiftStore.allowPosExpense,
+);
 
 /** Desk link only for users with the Nexus POS Manager role (from bootstrap API). */
 const canSwitchToDesk = computed(() => Boolean(bootstrapStore.data?.can_switch_to_desk));
@@ -2388,6 +2423,14 @@ function openReturnDialog() {
 	}
 
 	uiStore.showReturnDialog = true;
+}
+
+function openExpenseDialog() {
+	if (!canRecordPosExpense.value) {
+		return;
+	}
+
+	uiStore.showExpenseDialog = true;
 }
 
 function switchToDesk() {

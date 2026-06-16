@@ -21,6 +21,9 @@
   "pos_transactions",
   "section_break_9",
   "pos_payments",
+  "section_break_pos_expenses",
+  "pos_expenses",
+  "total_pos_expenses",
   "section_break_if3m1",
   "payment_reconciliation_details",
   "section_break_11",
@@ -192,6 +195,25 @@
    "fieldtype": "Table",
    "label": "POS Payments",
    "options": "POS Payment Entry Reference"
+  },
+  {
+   "fieldname": "section_break_pos_expenses",
+   "fieldtype": "Section Break",
+   "label": "POS Expenses"
+  },
+  {
+   "fieldname": "pos_expenses",
+   "fieldtype": "Table",
+   "label": "POS Expenses",
+   "options": "POS Closing Shift Expense",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "total_pos_expenses",
+   "fieldtype": "Currency",
+   "label": "Total POS Expenses",
+   "read_only": 1
   },
   {
    "fieldname": "section_break_if3m1",
