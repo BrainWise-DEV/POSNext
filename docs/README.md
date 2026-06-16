@@ -45,6 +45,8 @@ Welcome to the POS Next documentation directory. This folder contains comprehens
   - Pricing rules integration
   - Troubleshooting guide
 
+- **[PRINTING.md](PRINTING.md)** - Browser, silent, ESC/POS, and offline receipt printing behavior
+
 ### Version Control
 - **[VERSION_CONTROL.md](VERSION_CONTROL.md)** - Complete guide to the version control system
   - Architecture overview
@@ -96,6 +98,7 @@ docs/
 ├── OFFERS_AND_PROMOTIONS.md         # Offers and promotions system
 ├── OFFLINE_SYNC.md                  # Offline invoice sync system
 ├── PRICING_AND_SUBMISSION.md        # Pricing and invoice submission flow
+├── PRINTING.md                       # Printing paths and ESC/POS limitations
 ├── STARTUP_SEQUENCE.md              # Application initialization flow
 ├── VERSION_CONTROL.md               # Comprehensive version control guide
 ├── QUICKSTART_VERSION.md            # Quick reference guide
