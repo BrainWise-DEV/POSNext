@@ -56,7 +56,7 @@
 						v-if="maximumExpenseAmount > 0"
 						class="mt-1 text-xs text-gray-500 text-start"
 					>
-						{{ __("Maximum allowed: {0}", [formatCurrency(maximumExpenseAmount)]) }}
+						{{ shiftExpenseLimitSummary }}
 					</p>
 				</div>
 
@@ -179,6 +179,35 @@ const maximumExpenseAmount = computed(
 		0,
 )
 
+const shiftExpenseTotal = computed(
+	() => Number.parseFloat(dialogDataResource.data?.shift_expense_total) || 0,
+)
+
+const remainingExpenseAmount = computed(() => {
+	if (maximumExpenseAmount.value <= 0) {
+		return 0
+	}
+
+	const remaining = Number.parseFloat(dialogDataResource.data?.remaining_expense_amount)
+	if (Number.isFinite(remaining)) {
+		return Math.max(0, remaining)
+	}
+
+	return Math.max(0, maximumExpenseAmount.value - shiftExpenseTotal.value)
+})
+
+const shiftExpenseLimitSummary = computed(() => {
+	if (maximumExpenseAmount.value <= 0) {
+		return ""
+	}
+
+	return [
+		__("Shift limit: {0}", { 0: formatCurrency(maximumExpenseAmount.value) }),
+		__("Recorded: {0}", { 0: formatCurrency(shiftExpenseTotal.value) }),
+		__("Remaining: {0}", { 0: formatCurrency(remainingExpenseAmount.value) }),
+	].join(" | ")
+})
+
 const dialogDataResource = createResource({
 	url: "pos_next.api.expenses.get_expense_dialog_data",
 	makeParams() {
@@ -288,10 +317,10 @@ function validateForm() {
 		return __("Amount must be greater than zero")
 	}
 
-	if (maximumExpenseAmount.value > 0 && amount > maximumExpenseAmount.value) {
-		return __("Amount exceeds the maximum allowed expense amount of {0}", [
-			formatCurrency(maximumExpenseAmount.value),
-		])
+	if (maximumExpenseAmount.value > 0 && amount > remainingExpenseAmount.value) {
+		return __("Amount exceeds the remaining shift expense allowance of {0}", {
+			0: formatCurrency(remainingExpenseAmount.value),
+		})
 	}
 
 	if (!form.mode_of_payment) {

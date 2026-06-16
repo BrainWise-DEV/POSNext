@@ -334,7 +334,7 @@
    "creation": "2026-06-14 10:00:00.000000",
    "default": null,
    "depends_on": "eval:doc.posa_allow_pos_expense",
-   "description": "Maximum amount a cashier can spend in a single POS Expense transaction",
+   "description": "Maximum total POS Expense amount allowed per shift session",
    "docstatus": 0,
    "dt": "POS Profile",
    "fetch_from": null,
