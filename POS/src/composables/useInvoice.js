@@ -107,7 +107,7 @@ export function useInvoice() {
 	 * Resolve UOM pricing from IndexedDB or server.
 	 * Offline: reads item from IndexedDB for persisted uom_prices and conversion data.
 	 * Online: fetches from server for customer-specific rates.
-	 * @param {Object} item - Item with item_code, rate, price_list_rate
+	 * @param {Object} item - Item with item_code, rate, price_list_rate, batch_no, warehouse
 	 * @param {string} uom - Target UOM
 	 * @param {number} conversionFactor - UOM conversion factor
 	 * @param {number} qty - Quantity for pricing
@@ -117,13 +117,20 @@ export function useInvoice() {
 		// When online, fetch server pricing for customer-specific rates
 		if (!isOffline()) {
 			try {
-				const itemDetails = await getItemDetailsResource.submit({
+				const params = {
 					item_code: item.item_code,
 					pos_profile: posProfile.value,
 					customer: customer.value?.name || customer.value,
 					qty,
 					uom,
-				})
+				}
+				// Pass batch_no and warehouse so the server can return the
+				// correct batch-specific price (e.g. when 4 batches exist across
+				// different warehouses each with their own Item Price row).
+				if (item.batch_no) params.batch_no = item.batch_no
+				if (item.warehouse) params.warehouse = item.warehouse
+
+				const itemDetails = await getItemDetailsResource.submit(params)
 				return {
 					rate: itemDetails.rate,
 					price_list_rate: itemDetails.price_list_rate,
