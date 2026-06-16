@@ -77,10 +77,12 @@ def create_customer(
 	customer_name,
 	mobile_no=None,
 	email_id=None,
-	customer_group="Individual",
-	territory="All Territories",
+	customer_group=None,
+	territory=None,
 	company=None,
 	pos_profile=None,
+	custom_governorate=None,
+	custom_district=None,
 ):
 	"""
 	Create a new customer from POS.
@@ -89,10 +91,12 @@ def create_customer(
 	    customer_name (str): Customer name (required)
 	    mobile_no (str): Mobile number (optional)
 	    email_id (str): Email address (optional)
-	    customer_group (str): Customer group (default: Individual)
-	    territory (str): Territory (default: All Territories)
+	    customer_group (str): Customer group (default: from Selling Settings)
+	    territory (str): Territory (default: from Selling Settings)
 	    company (str): Company (optional, used to auto-assign loyalty program)
 	    pos_profile (str): POS Profile (optional, preferred for context-aware loyalty assignment)
+	    custom_governorate (str): Governorate (optional)
+	    custom_district (str): District (optional, must belong to the governorate)
 
 	Returns:
 	    dict: Created customer document
@@ -109,16 +113,35 @@ def create_customer(
 		pos_profile=pos_profile,
 	)
 
+	resolved_customer_group = customer_group
+	if not resolved_customer_group:
+		resolved_customer_group = frappe.db.get_single_value("Selling Settings", "customer_group")
+	if not resolved_customer_group:
+		resolved_customer_group = (
+			frappe.db.get_value("Customer Group", {"is_group": 0}, "name", order_by="lft")
+			or "All Customer Groups"
+		)
+
+	resolved_territory = territory
+	if not resolved_territory:
+		resolved_territory = frappe.db.get_single_value("Selling Settings", "territory")
+	if not resolved_territory:
+		resolved_territory = (
+			frappe.db.get_value("Territory", {"is_group": 0}, "name", order_by="lft") or "All Territories"
+		)
+
 	customer = frappe.get_doc(
 		{
 			"doctype": "Customer",
 			"customer_name": customer_name,
 			"customer_type": "Individual",
-			"customer_group": customer_group or "Individual",
-			"territory": territory or "All Territories",
+			"customer_group": resolved_customer_group,
+			"territory": resolved_territory,
 			"mobile_no": mobile_no or "",
 			"email_id": email_id or "",
 			"loyalty_program": loyalty_program,
+			"custom_governorate": custom_governorate or None,
+			"custom_district": custom_district or None,
 		}
 	)
 

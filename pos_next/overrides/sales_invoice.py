@@ -8,9 +8,9 @@ Handles wallet payments that require party information for Receivable accounts.
 """
 
 import frappe
-from frappe.utils import cint, flt
 from erpnext.accounts.doctype.sales_invoice.sales_invoice import SalesInvoice
 from erpnext.accounts.utils import get_account_currency
+from frappe.utils import cint, flt
 
 
 def _find_paid_bundle_row_for_free(si_doc, free_row):
@@ -173,14 +173,21 @@ class CustomSalesInvoice(SalesInvoice):
 
 	def validate_pos_paid_amount(self):
 		"""
-		Allow pure customer-credit POS sales to submit without a payment row.
+		Allow POS sales to submit without a payment row in two cases:
 
-		POSNext redeems customer credit after submit through Journal Entries /
-		Payment Entry allocation, so there is no real Mode of Payment row to send.
-		Only bypass the core POS payment-row check when submit_invoice has explicitly
-		marked the document for customer-credit redemption.
+		1. Pure customer-credit redemption — POSNext redeems existing customer
+		   credit after submit through Journal Entries / Payment Entry allocation,
+		   so there is no real Mode of Payment row to send.
+		2. "Pay on Account" credit sales — the cashier intentionally puts the full
+		   amount on the customer's account, leaving the invoice outstanding.
+
+		Both are only honoured when submit_invoice has explicitly marked the
+		document via the corresponding flag (set after verifying the POS Settings
+		permit the operation), so a tampered client can't bypass the check.
 		"""
-		if getattr(self.flags, "pos_next_redeemed_customer_credit", 0):
+		if getattr(self.flags, "pos_next_redeemed_customer_credit", 0) or getattr(
+			self.flags, "pos_next_credit_sale", 0
+		):
 			if len(self.payments) == 0 and cint(self.is_pos) and flt(self.grand_total) > 0:
 				return
 
