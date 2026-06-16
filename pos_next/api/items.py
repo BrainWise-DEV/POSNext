@@ -2120,7 +2120,7 @@ def get_items_count(pos_profile, item_group=None, brand=None, include_variants=0
 
 
 @frappe.whitelist()
-def get_item_details(item_code, pos_profile, customer=None, qty=1, uom=None):  # noqa: ARG001 - customer reserved for future use
+def get_item_details(item_code, pos_profile, customer=None, qty=1, uom=None, batch_no=None, warehouse=None):
 	"""Get detailed item info including price, tax, stock
 	
 	Args:
@@ -2129,6 +2129,8 @@ def get_item_details(item_code, pos_profile, customer=None, qty=1, uom=None):  #
 		customer: Customer name or ID (used to fetch customer group for pricing logic)
 		qty: Quantity (used for pricing calculations)
 		uom: Unit of Measure (optional)
+		batch_no: Batch number (optional) - used to fetch batch-specific Item Price
+		warehouse: Warehouse (optional) - overrides POS profile default warehouse
 	
 	Returns:
 		dict: Item details including pricing, stock, batch info, etc.
@@ -2155,6 +2157,9 @@ def get_item_details(item_code, pos_profile, customer=None, qty=1, uom=None):  #
 		if not item_doc.is_sales_item:
 			frappe.throw(_("Item {0} is not allowed for sales").format(item_code))
 
+		# Use the item's specific warehouse if provided, otherwise fall back to POS profile warehouse
+		effective_warehouse = warehouse or pos_profile_doc.warehouse
+
 		# Prepare item dict
 		item = {
 			"item_code": item_code,
@@ -2169,13 +2174,35 @@ def get_item_details(item_code, pos_profile, customer=None, qty=1, uom=None):  #
 		if uom:
 			item["uom"] = uom
 
-		# Get item details
+		# Include batch_no if provided so ERPNext fetches the batch-specific price
+		if batch_no:
+			item["batch_no"] = batch_no
+
+		# Get item details using the effective warehouse
 		item_detail = get_item_detail(
 			item=json.dumps(item),
-			warehouse=pos_profile_doc.warehouse,
+			warehouse=effective_warehouse,
 			price_list=pos_profile_doc.selling_price_list,
 			company=pos_profile_doc.company,
 		)
+
+		# If a batch_no was provided, attempt to override the price with the
+		# batch-specific Item Price (if one exists in the price list).
+		# This ensures that when 4 batches have different prices, re-fetching
+		# after customer selection returns the price for the correct batch.
+		if batch_no and item_detail:
+			batch_prices = get_item_msp_mrp_from_item_price(
+				item_code,
+				batch_no=batch_no,
+				uom=uom,
+				price_list=pos_profile_doc.selling_price_list,
+			)
+			# Only override if a batch-specific price was found (msp > 0 means price exists)
+			if batch_prices.get("msp"):
+				item_detail["price_list_rate"] = batch_prices["msp"]
+				item_detail["rate"] = batch_prices["msp"]
+				if batch_prices.get("mrp"):
+					item_detail["mrp"] = batch_prices["mrp"]
 		
 		# Apply Friends & Family pricing if customer group matches
 		if customer and item_detail:
