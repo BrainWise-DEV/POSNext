@@ -21,6 +21,10 @@ def get_expense_dialog_data(pos_profile, pos_opening_shift):
 	maximum_expense_amount = flt(
 		frappe.db.get_value("POS Profile", pos_profile, "posa_maximum_expense_amount")
 	)
+	shift_expense_total = get_shift_expense_total(pos_opening_shift)
+	remaining_expense_amount = _get_remaining_shift_expense_amount(
+		maximum_expense_amount, shift_expense_total
+	)
 
 	from pos_next.api.pos_profile import get_payment_methods
 
@@ -29,6 +33,8 @@ def get_expense_dialog_data(pos_profile, pos_opening_shift):
 		"payment_methods": get_payment_methods(pos_profile),
 		"employees": get_active_employees(company),
 		"maximum_expense_amount": maximum_expense_amount,
+		"shift_expense_total": shift_expense_total,
+		"remaining_expense_amount": remaining_expense_amount,
 	}
 
 
@@ -49,7 +55,7 @@ def create_pos_expense(
 
 	validate_pos_expense_enabled(pos_profile)
 	shift = validate_open_shift(pos_opening_shift, pos_profile)
-	validate_expense_amount(amount, pos_profile)
+	validate_expense_amount(amount, pos_profile, pos_opening_shift)
 	validate_expense_account(expense_account, shift.company)
 	validate_mode_of_payment(mode_of_payment, pos_profile, shift.company)
 	if employee:
@@ -118,21 +124,55 @@ def validate_open_shift(pos_opening_shift, pos_profile):
 	return shift
 
 
-def validate_expense_amount(amount, pos_profile):
+def validate_expense_amount(amount, pos_profile, pos_opening_shift=None):
 	if flt(amount) <= 0:
 		frappe.throw(_("Amount must be greater than zero"))
 
 	maximum_amount = flt(
 		frappe.db.get_value("POS Profile", pos_profile, "posa_maximum_expense_amount")
 	)
-	if maximum_amount > 0 and flt(amount) > maximum_amount:
+	if maximum_amount <= 0:
+		return
+
+	shift_total = get_shift_expense_total(pos_opening_shift) if pos_opening_shift else 0
+	new_shift_total = shift_total + flt(amount)
+	if new_shift_total > maximum_amount:
+		remaining = _get_remaining_shift_expense_amount(maximum_amount, shift_total)
 		frappe.throw(
-			_("Amount {0} exceeds the maximum allowed expense amount of {1}").format(
-				frappe.format_value(amount, {"fieldtype": "Currency"}),
+			_(
+				"This expense would exceed the shift expense limit of {0}. "
+				"Expenses recorded this shift: {1}. Remaining allowance: {2}"
+			).format(
 				frappe.format_value(maximum_amount, {"fieldtype": "Currency"}),
+				frappe.format_value(shift_total, {"fieldtype": "Currency"}),
+				frappe.format_value(remaining, {"fieldtype": "Currency"}),
 			),
-			title=_("Maximum Expense Amount Exceeded"),
+			title=_("Shift Expense Limit Exceeded"),
 		)
+
+
+def get_shift_expense_total(pos_opening_shift):
+	"""Return the total submitted POS expense amount for an opening shift."""
+	if not pos_opening_shift:
+		return 0
+
+	total = frappe.db.sql(
+		"""
+		SELECT COALESCE(SUM(posa_expense_amount), 0)
+		FROM `tabJournal Entry`
+		WHERE posa_is_pos_expense = 1
+		  AND posa_pos_opening_shift = %s
+		  AND docstatus = 1
+		""",
+		pos_opening_shift,
+	)
+	return flt(total[0][0] if total else 0)
+
+
+def _get_remaining_shift_expense_amount(maximum_amount, shift_expense_total):
+	if flt(maximum_amount) <= 0:
+		return 0
+	return max(0, flt(maximum_amount) - flt(shift_expense_total))
 
 
 def validate_expense_account(expense_account, company):

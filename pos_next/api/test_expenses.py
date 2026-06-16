@@ -69,14 +69,40 @@ class TestPOSExpenses(unittest.TestCase):
 
 	@patch("pos_next.api.expenses.frappe.throw", side_effect=_raise_runtime_error)
 	@patch("pos_next.api.expenses.frappe.format_value", side_effect=lambda value, _options: str(value))
+	@patch("pos_next.api.expenses.get_shift_expense_total", return_value=0)
 	@patch("pos_next.api.expenses.frappe.db.get_value")
-	def test_validate_expense_amount_rejects_over_maximum(
-		self, mock_get_value, _mock_format, _mock_throw
+	def test_validate_expense_amount_rejects_over_shift_limit(
+		self, mock_get_value, _mock_shift_total, _mock_format, _mock_throw
 	):
 		mock_get_value.return_value = 100
 
-		with self.assertRaisesRegex(RuntimeError, "exceeds the maximum"):
-			expenses.validate_expense_amount(150, "Test POS Profile")
+		with self.assertRaisesRegex(RuntimeError, "shift expense limit"):
+			expenses.validate_expense_amount(150, "Test POS Profile", "POS-OS-0001")
+
+	@patch("pos_next.api.expenses.frappe.throw", side_effect=_raise_runtime_error)
+	@patch("pos_next.api.expenses.frappe.format_value", side_effect=lambda value, _options: str(value))
+	@patch("pos_next.api.expenses.get_shift_expense_total", return_value=80)
+	@patch("pos_next.api.expenses.frappe.db.get_value")
+	def test_validate_expense_amount_rejects_when_cumulative_exceeds_limit(
+		self, mock_get_value, _mock_shift_total, _mock_format, _mock_throw
+	):
+		mock_get_value.return_value = 100
+
+		with self.assertRaisesRegex(RuntimeError, "shift expense limit"):
+			expenses.validate_expense_amount(30, "Test POS Profile", "POS-OS-0001")
+
+	@patch("pos_next.api.expenses.frappe.db.sql", return_value=((80,),))
+	def test_get_shift_expense_total_sums_submitted_journal_entries(self, mock_sql):
+		total = expenses.get_shift_expense_total("POS-OS-0001")
+
+		self.assertEqual(total, 80)
+		mock_sql.assert_called_once()
+
+	@patch("pos_next.api.expenses.get_shift_expense_total", return_value=0)
+	def test_get_remaining_shift_expense_amount(self, _mock_shift_total):
+		self.assertEqual(expenses._get_remaining_shift_expense_amount(100, 30), 70)
+		self.assertEqual(expenses._get_remaining_shift_expense_amount(100, 120), 0)
+		self.assertEqual(expenses._get_remaining_shift_expense_amount(0, 50), 0)
 
 	@patch("pos_next.api.expenses.frappe.throw", side_effect=_raise_runtime_error)
 	@patch("pos_next.api.expenses.frappe.db.get_value")
