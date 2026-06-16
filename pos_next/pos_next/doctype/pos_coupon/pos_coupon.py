@@ -1,7 +1,6 @@
 # Copyright (c) 2021, Youssef Restom and contributors
 # For license information, please see license.txt
 
-from __future__ import unicode_literals
 
 import frappe
 from frappe import _
@@ -189,7 +188,7 @@ def increment_coupon_usage(coupon_code):
 	except Exception as e:
 		frappe.log_error(
 			title="Coupon Usage Increment Failed",
-			message=f"Failed to increment usage for coupon {coupon_code}: {str(e)}",
+			message=f"Failed to increment usage for coupon {coupon_code}: {e!s}",
 		)
 
 
@@ -204,5 +203,5 @@ def decrement_coupon_usage(coupon_code):
 	except Exception as e:
 		frappe.log_error(
 			title="Coupon Usage Decrement Failed",
-			message=f"Failed to decrement usage for coupon {coupon_code}: {str(e)}",
+			message=f"Failed to decrement usage for coupon {coupon_code}: {e!s}",
 		)

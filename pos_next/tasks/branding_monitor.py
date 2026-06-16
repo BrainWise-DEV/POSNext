@@ -46,7 +46,7 @@ def monitor_branding_integrity():
 
 	except Exception as e:
 		frappe.log_error(
-			title="BrainWise Branding Monitor Error", message=f"Error running branding monitor: {str(e)}"
+			title="BrainWise Branding Monitor Error", message=f"Error running branding monitor: {e!s}"
 		)
 
 
@@ -85,14 +85,14 @@ def send_tampering_alert(doc):
 						"email_content": message,
 					}
 				).insert(ignore_permissions=True)
-			except:
+			except Exception:
 				pass
 
 		frappe.db.commit()
 
 	except Exception as e:
 		frappe.log_error(
-			title="BrainWise Branding Alert Error", message=f"Error sending tampering alert: {str(e)}"
+			title="BrainWise Branding Alert Error", message=f"Error sending tampering alert: {e!s}"
 		)
 
 
@@ -133,7 +133,7 @@ def reset_tampering_counter():
 	except Exception as e:
 		frappe.log_error(
 			title="BrainWise Branding Counter Reset Error",
-			message=f"Error resetting tampering counter: {str(e)}",
+			message=f"Error resetting tampering counter: {e!s}",
 		)
 
 
@@ -168,5 +168,5 @@ def validate_all_active_sessions():
 	except Exception as e:
 		frappe.log_error(
 			title="BrainWise Branding Session Validation Error",
-			message=f"Error validating active sessions: {str(e)}",
+			message=f"Error validating active sessions: {e!s}",
 		)

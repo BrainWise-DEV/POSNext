@@ -3,6 +3,11 @@ import { computed, ref } from "vue";
 import { call } from "@/utils/apiWrapper";
 import { isOffline } from "@/utils/offline";
 import { offlineWorker } from "@/utils/offline/workerClient";
+import {
+	getOneTimeRedemptions,
+	setOneTimeRedemptions,
+	addOneTimeRedemptions,
+} from "@/utils/offline/db";
 import { usePOSShiftStore } from "@/stores/posShift";
 
 const defaultSnapshot = () => ({
@@ -30,6 +35,79 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 	const availableOffers = ref([]);
 	const cartSnapshot = ref(defaultSnapshot());
 	const hasFetched = ref(false);
+
+	// One-time-per-customer context (mirrors the server gate in apply_offers).
+	// `oneTimeCustomerIdentified` is false for the walk-in/default customer;
+	// `redeemedOneTimeRules` holds rule names this customer has already used.
+	const oneTimeCustomerIdentified = ref(false);
+	const redeemedOneTimeRules = ref([]);
+
+	function setOneTimeContext({ identified = false, redeemedRules = [] } = {}) {
+		oneTimeCustomerIdentified.value = !!identified;
+		redeemedOneTimeRules.value = Array.isArray(redeemedRules) ? redeemedRules : [];
+	}
+
+	function addRedeemedOneTimeRule(ruleName) {
+		if (ruleName && !redeemedOneTimeRules.value.includes(ruleName)) {
+			redeemedOneTimeRules.value = [...redeemedOneTimeRules.value, ruleName];
+		}
+	}
+
+	function clearOneTimeContext() {
+		oneTimeCustomerIdentified.value = false;
+		redeemedOneTimeRules.value = [];
+	}
+
+	/**
+	 * Load the one-time-per-customer context for the selected customer.
+	 * Online: fetch redemptions from the server and refresh the offline cache.
+	 * Offline: use whatever is cached (from a prior online select + offline
+	 * checkouts on this device). The walk-in/default customer is never eligible.
+	 *
+	 * @param {string} customerName
+	 * @param {{isWalkIn?: boolean}} opts
+	 */
+	async function loadOneTimeContextForCustomer(customerName, { isWalkIn = false } = {}) {
+		if (!customerName || isWalkIn) {
+			setOneTimeContext({ identified: false, redeemedRules: [] });
+			return;
+		}
+
+		let redeemed = await getOneTimeRedemptions(customerName);
+
+		if (!isOffline()) {
+			try {
+				const resp = await call("pos_next.api.offers.get_customer_one_time_redemptions", {
+					customer: customerName,
+				});
+				const serverRules = resp?.message || resp || [];
+				if (Array.isArray(serverRules)) {
+					redeemed = Array.from(new Set([...(redeemed || []), ...serverRules]));
+					await setOneTimeRedemptions(customerName, redeemed);
+				}
+			} catch (error) {
+				// Keep cached redemptions if the server fetch fails.
+				console.error("Error fetching one-time redemptions:", error);
+			}
+		}
+
+		setOneTimeContext({ identified: true, redeemedRules: redeemed });
+	}
+
+	/**
+	 * Persist one-time rule redemptions made during an offline checkout so the
+	 * next offline sale to the same customer sees them.
+	 *
+	 * @param {string} customerName
+	 * @param {string[]} ruleNames
+	 */
+	async function recordOfflineRedemptions(customerName, ruleNames = []) {
+		if (!customerName || !ruleNames.length) return;
+		await addOneTimeRedemptions(customerName, ruleNames);
+		for (const ruleName of ruleNames) {
+			addRedeemedOneTimeRule(ruleName);
+		}
+	}
 
 	function updateCartSnapshot(snapshot = {}) {
 		const subtotal = Number.parseFloat(snapshot.subtotal) || 0;
@@ -141,6 +219,24 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 				eligible: false,
 				reason: "Cart is empty",
 			};
+		}
+
+		// One-time-per-customer gate (mirrors the server gate in apply_offers):
+		// such offers require an identified (non walk-in) customer and must not
+		// re-apply to a customer who has already redeemed them.
+		if (offer?.one_time_per_customer) {
+			if (!oneTimeCustomerIdentified.value) {
+				return {
+					eligible: false,
+					reason: __("Select a customer to use this one-time offer"),
+				};
+			}
+			if (redeemedOneTimeRules.value.includes(offer.name)) {
+				return {
+					eligible: false,
+					reason: __("This one-time offer has already been used by this customer"),
+				};
+			}
 		}
 
 		// Check item eligibility based on apply_on FIRST
@@ -349,6 +445,8 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 		availableOffers,
 		cartSnapshot,
 		hasFetched,
+		oneTimeCustomerIdentified,
+		redeemedOneTimeRules,
 
 		// Computed
 		allEligibleOffers,
@@ -364,5 +462,10 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 		checkOfferEligibility,
 		getUnlockAmount,
 		ensureOffersFetched,
+		setOneTimeContext,
+		addRedeemedOneTimeRule,
+		clearOneTimeContext,
+		loadOneTimeContextForCustomer,
+		recordOfflineRedemptions,
 	};
 });

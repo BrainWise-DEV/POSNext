@@ -1,12 +1,9 @@
-# -*- coding: utf-8 -*-
 # Copyright (c) 2024, POS Next and contributors
 # For license information, please see license.txt
 
-from __future__ import unicode_literals
 
 import frappe
 from frappe import _
-from frappe.utils import cint
 
 from pos_next.api.utilities import _parse_list_parameter, check_user_company
 
@@ -210,7 +207,7 @@ def get_taxes(pos_profile):
 			)
 
 		return taxes
-	except Exception as e:
+	except Exception:
 		frappe.log_error(frappe.get_traceback(), "Get Taxes Error")
 		# Return empty array instead of throwing - taxes are optional
 		return []
@@ -240,7 +237,7 @@ def get_warehouses(pos_profile):
 
 		# Return warehouses with human-readable names
 		return warehouses
-	except Exception as e:
+	except Exception:
 		frappe.log_error(frappe.get_traceback(), "Get Warehouses Error")
 		return []
 
@@ -265,7 +262,7 @@ def get_default_customer(pos_profile):
 			}
 
 		return {"customer": None}
-	except Exception as e:
+	except Exception:
 		frappe.log_error(frappe.get_traceback(), "Get Default Customer Error")
 		return {"customer": None}
 
@@ -381,7 +378,7 @@ def get_sales_persons(pos_profile=None):
 		)
 
 		return sales_persons
-	except Exception as e:
+	except Exception:
 		frappe.log_error(frappe.get_traceback(), "Get Sales Persons Error")
 		return []
 

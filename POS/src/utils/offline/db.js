@@ -82,6 +82,13 @@ const CURRENT_SCHEMA = {
 	// Unpaid invoices cache for offline viewing
 	// Stores invoices with outstanding amounts for partial payment management
 	unpaid_invoices: "&name, pos_profile, outstanding_amount, customer",
+
+	// One-time-per-customer offer redemptions cache.
+	// Keyed by customer; `rules` is an array of redeemed Pricing Rule names.
+	// Populated from the server when a customer is selected (online) and
+	// appended to on offline checkout, so the offline offer engine can mirror
+	// the server-side one-time gate in apply_offers.
+	one_time_redemptions: "&customer",
 };
 
 /**
@@ -216,6 +223,57 @@ export const setSetting = async (key, value) => {
 		await db.settings.put({ key, value });
 	} catch (error) {
 		log.error(`Error setting ${key}:`, error);
+	}
+};
+
+/**
+ * Get the cached one-time-per-customer redeemed Pricing Rule names for a customer.
+ * @param {string} customer - Customer name
+ * @returns {Promise<string[]>} Redeemed rule names (empty array if none/unknown)
+ */
+export const getOneTimeRedemptions = async (customer) => {
+	if (!customer) return [];
+	try {
+		const row = await db.one_time_redemptions.get(customer);
+		return Array.isArray(row?.rules) ? row.rules : [];
+	} catch (error) {
+		log.error(`Error reading one-time redemptions for ${customer}:`, error);
+		return [];
+	}
+};
+
+/**
+ * Replace the cached redeemed rule names for a customer (used after a server fetch).
+ * @param {string} customer - Customer name
+ * @param {string[]} rules - Redeemed Pricing Rule names
+ * @returns {Promise<void>}
+ */
+export const setOneTimeRedemptions = async (customer, rules = []) => {
+	if (!customer) return;
+	try {
+		await db.one_time_redemptions.put({ customer, rules: Array.from(new Set(rules)) });
+	} catch (error) {
+		log.error(`Error saving one-time redemptions for ${customer}:`, error);
+	}
+};
+
+/**
+ * Append redeemed rule names for a customer (used on offline checkout), merging
+ * with whatever is already cached.
+ * @param {string} customer - Customer name
+ * @param {string[]} rules - Newly redeemed Pricing Rule names
+ * @returns {Promise<string[]>} The merged list of redeemed rule names
+ */
+export const addOneTimeRedemptions = async (customer, rules = []) => {
+	if (!customer || !rules.length) return await getOneTimeRedemptions(customer);
+	try {
+		const existing = await getOneTimeRedemptions(customer);
+		const merged = Array.from(new Set([...existing, ...rules]));
+		await db.one_time_redemptions.put({ customer, rules: merged });
+		return merged;
+	} catch (error) {
+		log.error(`Error appending one-time redemptions for ${customer}:`, error);
+		return await getOneTimeRedemptions(customer);
 	}
 };
 

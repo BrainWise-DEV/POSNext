@@ -63,7 +63,7 @@ def get_data(filters):
 	conditions = get_conditions(filters)
 
 	# Query 1: Invoice aggregates — no JOIN to shifts, so no duplication
-	query = """
+	query = f"""
 		SELECT
 			si.owner as cashier,
 			COALESCE(SUM(CASE WHEN si.is_return = 0 THEN si.grand_total ELSE 0 END), 0) as total_sales,
@@ -77,22 +77,22 @@ def get_data(filters):
 		{conditions}
 		GROUP BY si.owner
 		ORDER BY total_sales DESC
-	""".format(conditions=conditions)
+	"""
 
 	data = frappe.db.sql(query, filters, as_dict=1)
 
 	# Query 2: Shifts worked per cashier via Sales Invoice Reference
 	# Count distinct closing shifts that contain at least one invoice owned by this cashier
 	shift_conditions = _build_shift_conditions(filters)
-	shift_query = """
+	shift_query = f"""
 		SELECT
 			pcs.user as cashier,
 			COUNT(DISTINCT pcs.name) as shifts_worked
 		FROM `tabPOS Closing Shift` pcs
 		WHERE pcs.docstatus = 1
-		{conditions}
+		{shift_conditions}
 		GROUP BY pcs.user
-	""".format(conditions=shift_conditions)
+	"""
 
 	shift_data = frappe.db.sql(shift_query, filters, as_dict=1)
 	shift_map = {row.cashier: row.shifts_worked for row in shift_data}

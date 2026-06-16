@@ -1249,7 +1249,9 @@
 											: 'border-gray-200 bg-white hover:border-blue-400 hover:bg-blue-50 text-gray-700',
 									]"
 								>
-									<span :class="isSmallMobile ? 'text-xs' : 'text-sm lg:text-lg'">🧾</span>
+									<span :class="isSmallMobile ? 'text-xs' : 'text-sm lg:text-lg'"
+										>🧾</span
+									>
 									<span class="truncate max-w-[80px] lg:max-w-none">{{
 										__(acc.account_name || acc.name)
 									}}</span>
@@ -1364,7 +1366,11 @@
 						</div>
 					</div>
 					<div
-						v-else-if="!lastSelectedMethod && remainingAmount > 0 && !selectedReceivableAccount"
+						v-else-if="
+							!lastSelectedMethod &&
+							remainingAmount > 0 &&
+							!selectedReceivableAccount
+						"
 						class="hidden lg:block"
 						:class="[
 							'bg-blue-50 rounded-lg text-center',
@@ -1478,7 +1484,11 @@
 
 						<!-- Mobile: Select payment method prompt -->
 						<div
-							v-else-if="!lastSelectedMethod && remainingAmount > 0 && !selectedReceivableAccount"
+							v-else-if="
+								!lastSelectedMethod &&
+								remainingAmount > 0 &&
+								!selectedReceivableAccount
+							"
 							:class="[
 								'bg-blue-50 rounded text-center',
 								isSmallMobile ? 'p-1.5 mb-1' : 'p-2 mb-1.5',
@@ -3016,13 +3026,11 @@ function selectPaymentMethod(method) {
 	log.debug("[PaymentDialog] Selected payment method:", method.mode_of_payment);
 }
 
-
 // "Pay on Receivable Account": choose the account that holds the unpaid balance (the
 // invoice's debit_to). It's a destination, not a tendered amount — the outstanding is
 // grand_total minus the cash tendered. Tapping again clears it (back to default Debtors).
 function toggleReceivableAccount(acc) {
-	selectedReceivableAccount.value =
-		selectedReceivableAccount.value === acc.name ? "" : acc.name;
+	selectedReceivableAccount.value = selectedReceivableAccount.value === acc.name ? "" : acc.name;
 	// Drop the active payment-method highlight so only one option looks active at a time.
 	if (selectedReceivableAccount.value) {
 		lastSelectedMethod.value = null;
@@ -3388,9 +3396,7 @@ function completePayment() {
 	// Partial when the tendered amount (plus write-off) doesn't cover the total.
 	const effectivePaid = totalPaid.value + writeOffAmount.value;
 	const isPartial = effectivePaid < props.grandTotal;
-	const outstanding = isPartial
-		? roundCurrency(props.grandTotal - effectivePaid)
-		: 0;
+	const outstanding = isPartial ? roundCurrency(props.grandTotal - effectivePaid) : 0;
 
 	const paymentData = {
 		payments: paymentEntries.value,

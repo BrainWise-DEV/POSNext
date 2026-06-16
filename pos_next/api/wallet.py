@@ -108,7 +108,7 @@ def process_loyalty_to_wallet(doc, method=None):
 		# Create wallet transaction
 		from pos_next.pos_next.doctype.wallet_transaction.wallet_transaction import create_wallet_credit
 
-		transaction = create_wallet_credit(
+		create_wallet_credit(
 			wallet=wallet.name,
 			amount=credit_amount,
 			source_type="Loyalty Program",
@@ -133,7 +133,7 @@ def process_loyalty_to_wallet(doc, method=None):
 	except Exception as e:
 		frappe.log_error(
 			title="Loyalty to Wallet Conversion Error",
-			message=f"Invoice: {doc.name}, Error: {str(e)}\n{frappe.get_traceback()}",
+			message=f"Invoice: {doc.name}, Error: {e!s}\n{frappe.get_traceback()}",
 		)
 
 
@@ -334,7 +334,7 @@ def get_or_create_wallet(customer, company, pos_settings=None, force_create=Fals
 		return wallet_doc
 
 	except Exception as e:
-		frappe.log_error(f"Failed to create wallet for {customer}: {str(e)}", "Wallet Creation Error")
+		frappe.log_error(f"Failed to create wallet for {customer}: {e!s}", "Wallet Creation Error")
 		return None
 
 
@@ -434,7 +434,7 @@ def get_wallet_info(customer, company, pos_profile=None):
 		except Exception as e:
 			frappe.log_error(
 				title="Auto-create Wallet Error",
-				message=f"Customer: {customer}, Company: {company}, Error: {str(e)}",
+				message=f"Customer: {customer}, Company: {company}, Error: {e!s}",
 			)
 
 	return result
