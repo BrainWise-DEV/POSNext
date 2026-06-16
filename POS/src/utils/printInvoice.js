@@ -21,17 +21,6 @@ function formatCurrency(amount) {
 	return Number.parseFloat(amount || 0).toFixed(2)
 }
 
-function formatReceiptQty(value) {
-	return Number.parseFloat(value || 0).toFixed(0)
-}
-
-function textLine(value = "", maxLength = null) {
-	const text = String(value ?? "")
-		.replace(/[\r\n]+/g, " ")
-		.trim()
-	return maxLength ? text.slice(0, maxLength) : text
-}
-
 /**
  * Fall back to summing payment rows when paid_amount is not set —
  * offline invoices lack paid_amount until server submission.
@@ -84,7 +73,6 @@ function receiptDocFromQueuedInvoice(offlineId, raw) {
 		doctype: "Sales Invoice",
 		is_offline: true,
 		pos_profile: raw.pos_profile,
-		print_format: raw.print_format,
 		posting_date: raw.posting_date || new Date().toISOString().slice(0, 10),
 		company: raw.company,
 		customer_name: raw.customer,
@@ -342,132 +330,6 @@ export function buildReceiptHTML(invoiceData) {
 			</div>`
 }
 
-export function buildEscPosReceiptCommands(invoiceData) {
-	const items = Array.isArray(invoiceData.items) ? invoiceData.items : []
-	const payments = Array.isArray(invoiceData.payments)
-		? invoiceData.payments
-		: []
-	const paidAmount = derivePaidAmount(invoiceData)
-	const lines = [
-		"\x1B@",
-		"\x1Ba\x01",
-		textLine(invoiceData.company || "POS Next"),
-		textLine(invoiceData.header || __("TAX INVOICE")),
-	]
-
-	if (invoiceData.is_offline) lines.push(__("OFFLINE - PENDING SYNC"))
-
-	lines.push(
-		"\x1Ba\x00",
-		`${__("Invoice:")} ${textLine(invoiceData.name)}`,
-		`${__("Date:")} ${textLine(
-			invoiceData.posting_date || new Date().toISOString().slice(0, 10),
-		)} ${textLine(invoiceData.posting_time || "")}`.trim(),
-	)
-
-	if (invoiceData.customer_name || invoiceData.customer) {
-		lines.push(
-			`${__("Customer:")} ${textLine(
-				invoiceData.customer_name || invoiceData.customer,
-			)}`,
-		)
-	}
-
-	if (
-		invoiceData.status === "Partly Paid" ||
-		(invoiceData.outstanding_amount &&
-			invoiceData.outstanding_amount > 0 &&
-			invoiceData.outstanding_amount < invoiceData.grand_total)
-	) {
-		lines.push(`${__("Status:")} ${__("PARTIAL PAYMENT")}`)
-	}
-
-	lines.push("--------------------------------")
-	for (const item of items) {
-		const qty = item.quantity ?? item.qty ?? 0
-		const displayRate = item.price_list_rate || item.rate || 0
-		const subtotal = qty * displayRate
-		lines.push(
-			`${textLine(item.item_name || item.item_code, 32)}${item.is_free_item ? ` ${__("(FREE)")}` : ""}`,
-		)
-		if (item.is_free_item) {
-			lines.push(`${formatReceiptQty(qty)} x ${__("FREE")}          0.00`)
-		} else {
-			lines.push(
-				`${formatReceiptQty(qty)} x ${formatCurrency(displayRate)}     ${formatCurrency(subtotal)}`,
-			)
-		}
-		if (item.discount_amount) {
-			lines.push(
-				`${__("Discount:")} -${formatCurrency(item.discount_amount || 0)}`,
-			)
-		}
-		if (item.serial_no) {
-			lines.push(
-				`${__("Serial:")} ${textLine(String(item.serial_no).replace(/\n/g, ", "))}`,
-			)
-		}
-	}
-
-	lines.push("--------------------------------")
-	if (
-		invoiceData.total_taxes_and_charges &&
-		invoiceData.total_taxes_and_charges > 0
-	) {
-		lines.push(
-			`${__("Subtotal:")} ${formatCurrency(
-				(invoiceData.grand_total || 0) -
-					(invoiceData.total_taxes_and_charges || 0),
-			)}`,
-			`${__("Tax:")} ${formatCurrency(invoiceData.total_taxes_and_charges)}`,
-		)
-	}
-	if (invoiceData.discount_amount) {
-		const discountLabel = invoiceData.additional_discount_percentage
-			? `${__("Additional Discount")} (${Number(
-					invoiceData.additional_discount_percentage,
-				).toFixed(1)}%)`
-			: __("Additional Discount")
-		lines.push(
-			`${discountLabel}: -${formatCurrency(Math.abs(invoiceData.discount_amount))}`,
-		)
-	}
-
-	lines.push(
-		`\x1B!\x08${__("TOTAL:")} ${formatCurrency(invoiceData.grand_total)}\x1B!\x00`,
-	)
-
-	if (payments.length > 0) {
-		lines.push("--------------------------------", `${__("Payments:")}`)
-		for (const payment of payments) {
-			lines.push(
-				`${textLine(payment.mode_of_payment)}: ${formatCurrency(payment.amount)}`,
-			)
-		}
-		lines.push(`${__("Paid:")} ${formatCurrency(paidAmount)}`)
-		if (invoiceData.change_amount && invoiceData.change_amount > 0) {
-			lines.push(
-				`${__("Change:")} ${formatCurrency(invoiceData.change_amount)}`,
-			)
-		}
-		if (invoiceData.outstanding_amount && invoiceData.outstanding_amount > 0) {
-			lines.push(
-				`${__("BALANCE DUE:")} ${formatCurrency(invoiceData.outstanding_amount)}`,
-			)
-		}
-	}
-
-	lines.push(
-		"--------------------------------",
-		"\x1Ba\x01",
-		textLine(invoiceData.footer || __("Thank you for your business!")),
-	)
-	if (!invoiceData.footer) lines.push("Powered by POS Next")
-	lines.push("", "", "\x1DVA\x00")
-
-	return lines.join("\n")
-}
-
 function buildReceiptDocumentHTML(
 	invoiceData,
 	{ includeControls = false } = {},
@@ -498,31 +360,6 @@ function buildReceiptDocumentHTML(
 		</html>`
 }
 
-function getCachedPosProfilePrintSettings(posProfile, letterhead) {
-	if (
-		!posProfile ||
-		typeof posProfile !== "string" ||
-		typeof localStorage === "undefined"
-	) {
-		return null
-	}
-
-	try {
-		const cachedData = JSON.parse(
-			localStorage.getItem("pos_shift_data") || "null",
-		)
-		const cachedProfile = cachedData?.pos_profile
-		if (cachedProfile?.name !== posProfile) return null
-		return {
-			printFormat: cachedProfile.print_format || DEFAULT_PRINT_FORMAT,
-			letterhead: letterhead || cachedProfile.letter_head || null,
-		}
-	} catch (err) {
-		log.warn("Could not read cached POS Profile print settings:", err)
-		return null
-	}
-}
-
 /**
  * Resolve print format & letterhead from a POS Profile.
  * Returns defaults when the profile lookup fails so callers always get a value.
@@ -537,12 +374,6 @@ async function resolvePrintSettings(posProfile, printFormat, letterhead) {
 	}
 
 	if (posProfile) {
-		const cachedSettings = getCachedPosProfilePrintSettings(
-			posProfile,
-			letterhead,
-		)
-		if (cachedSettings) return cachedSettings
-
 		try {
 			const doc = await call("frappe.client.get", {
 				doctype: "POS Profile",
@@ -598,20 +429,6 @@ async function isRawPrintFormat(printFormat) {
 	return Boolean(Number.parseInt(meta?.raw_printing ?? 0, 10))
 }
 
-async function warnIfOfflineRawPrintFormat(invoiceData, printFormat = null) {
-	const settings = await resolvePrintSettings(
-		invoiceData?.pos_profile,
-		printFormat || invoiceData?.print_format,
-		null,
-	)
-	if (await isRawPrintFormat(settings.printFormat)) {
-		log.warn(
-			"Offline/local-only invoices print as HTML until synced; ESC/POS raw printing requires a server invoice and QZ Tray.",
-		)
-	}
-	return settings
-}
-
 function containsRawPrinterCommands(value) {
 	if (typeof value !== "string") return false
 	return Array.from(value).some((char) => {
@@ -641,7 +458,6 @@ export async function printInvoice(
 
 		// Pending offline / local IDs are not in ERPNext — use embedded receipt HTML.
 		if (isLocalOnlyInvoiceName(printableInvoice.name)) {
-			await warnIfOfflineRawPrintFormat(printableInvoice, printFormat)
 			if (printableInvoice.items?.length > 0)
 				return printInvoiceCustom(printableInvoice)
 			throw new Error(
@@ -773,8 +589,7 @@ export async function silentPrintDoc(doctype, name, printFormat) {
 export async function silentPrintInvoice(invoiceName, printFormat = null) {
 	if (isLocalOnlyInvoiceName(invoiceName)) {
 		const doc = await hydrateLocalOnlyInvoice({ name: invoiceName })
-		if (doc.items?.length > 0)
-			return silentPrintInvoiceFromDoc(doc, printFormat)
+		if (doc.items?.length > 0) return silentPrintInvoiceFromDoc(doc)
 		throw new Error(
 			__(
 				"This offline receipt is no longer in browser storage. Use browser print from the success dialog after checkout.",
@@ -836,24 +651,8 @@ export async function rawPrintInvoice(invoiceName, printFormat) {
 	return true
 }
 
-/** Silent-print a full local invoice dict as raw ESC/POS or HTML via QZ Tray. */
-export async function silentPrintInvoiceFromDoc(
-	invoiceData,
-	printFormat = null,
-) {
-	const settings = await resolvePrintSettings(
-		invoiceData?.pos_profile,
-		printFormat || invoiceData?.print_format,
-		null,
-	)
-	if (await isRawPrintFormat(settings.printFormat)) {
-		const rawCommands = buildEscPosReceiptCommands(invoiceData)
-		await qzPrintRawCommands(rawCommands)
-		log.info(`Raw silent print (local receipt) for ${invoiceData?.name}`)
-		flagOfflineInvoicePrinted(invoiceData?.name)
-		return true
-	}
-
+/** Silent-print a full local invoice dict using the local HTML receipt. */
+export async function silentPrintInvoiceFromDoc(invoiceData) {
 	const fullHTML = buildReceiptDocumentHTML(invoiceData, {
 		includeControls: false,
 	})
@@ -878,7 +677,7 @@ export async function printWithSilentFallback(invoiceData, printFormat = null) {
 		printableInvoice.items?.length > 0
 	) {
 		try {
-			await silentPrintInvoiceFromDoc(printableInvoice, printFormat)
+			await silentPrintInvoiceFromDoc(printableInvoice)
 			return { method: "silent", success: true }
 		} catch (err) {
 			log.warn(

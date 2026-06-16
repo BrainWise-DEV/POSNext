@@ -2061,7 +2061,6 @@ async function handlePaymentCompleted(paymentData) {
 
 			const invoiceData = {
 				pos_profile: cartStore.posProfile,
-				print_format: shiftStore.currentProfile?.print_format || null,
 				posa_pos_opening_shift: cartStore.posOpeningShift,
 				company: shiftStore.profileCompany,
 				customer: customerValue || shiftStore.profileCustomer,
@@ -2112,7 +2111,6 @@ async function handlePaymentCompleted(paymentData) {
 				doctype: "Sales Invoice",
 				is_offline: true,
 				pos_profile: cartStore.posProfile,
-				print_format: invoiceData.print_format,
 				posting_date: new Date().toISOString().slice(0, 10),
 				company: shiftStore.profileCompany || undefined,
 				customer_name: customerLabel,
