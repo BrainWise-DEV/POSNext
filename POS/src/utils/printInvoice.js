@@ -498,6 +498,31 @@ function buildReceiptDocumentHTML(
 		</html>`
 }
 
+function getCachedPosProfilePrintSettings(posProfile, letterhead) {
+	if (
+		!posProfile ||
+		typeof posProfile !== "string" ||
+		typeof localStorage === "undefined"
+	) {
+		return null
+	}
+
+	try {
+		const cachedData = JSON.parse(
+			localStorage.getItem("pos_shift_data") || "null",
+		)
+		const cachedProfile = cachedData?.pos_profile
+		if (cachedProfile?.name !== posProfile) return null
+		return {
+			printFormat: cachedProfile.print_format || DEFAULT_PRINT_FORMAT,
+			letterhead: letterhead || cachedProfile.letter_head || null,
+		}
+	} catch (err) {
+		log.warn("Could not read cached POS Profile print settings:", err)
+		return null
+	}
+}
+
 /**
  * Resolve print format & letterhead from a POS Profile.
  * Returns defaults when the profile lookup fails so callers always get a value.
@@ -512,6 +537,12 @@ async function resolvePrintSettings(posProfile, printFormat, letterhead) {
 	}
 
 	if (posProfile) {
+		const cachedSettings = getCachedPosProfilePrintSettings(
+			posProfile,
+			letterhead,
+		)
+		if (cachedSettings) return cachedSettings
+
 		try {
 			const doc = await call("frappe.client.get", {
 				doctype: "POS Profile",
