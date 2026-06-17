@@ -114,10 +114,14 @@ def record_one_time_offer_usage(doc, method=None):
 
 	The applied one-time rules are read from ``pos_applied_one_time_rules`` (a
 	JSON list stamped by update_invoice before item.pricing_rules is cleared —
-	the cleared field can't be read back here). Inserts a
-	``One Time Customer Offer Usage`` row per (customer, rule); the doctype's
-	composite name ({customer}::{pricing_rule}) makes a duplicate insert raise
-	DuplicateEntryError, so it stays idempotent and race-safe.
+	the cleared field can't be read back here). Inserts one
+	``One Time Customer Offer Usage`` row per (customer, rule).
+
+	Idempotency / race-safety: the doctype's composite name
+	(``{customer}:{pricing_rule}``) makes a duplicate insert a no-op via
+	``ignore_if_duplicate``. Recording must never fail the sale, so any other
+	insert error (e.g. an over-long composite name) is logged and skipped rather
+	than propagated out of on_submit.
 	"""
 	import json
 
@@ -137,6 +141,8 @@ def record_one_time_offer_usage(doc, method=None):
 	from frappe.utils import now
 
 	for rule in rule_names:
+		if not rule:
+			continue
 		try:
 			frappe.get_doc(
 				{
@@ -147,13 +153,25 @@ def record_one_time_offer_usage(doc, method=None):
 					"redemption_date": now(),
 				}
 			).insert(ignore_permissions=True, ignore_if_duplicate=True)
-		except frappe.DuplicateEntryError:
-			# Customer already recorded for this rule — one-time guard intact.
-			pass
+		except Exception:
+			# Recording must never fail the sale. Log and move on.
+			frappe.log_error(
+				title="One-time offer usage recording failed",
+				message=(
+					f"Could not record redemption of {rule!r} for {doc.customer!r} "
+					f"on invoice {doc.name}: {frappe.get_traceback()}"
+				),
+			)
 
 
 def release_one_time_offer_usage(doc, method=None):
-	"""Release one-time redemptions on cancel so the customer can redeem again."""
+	"""Release one-time redemptions on cancel so the customer can redeem again.
+
+	Keyed on ``sales_invoice`` so only the redemptions this invoice created are
+	released. Return/credit-note cancels are a harmless no-op (returns never
+	created usage rows). On amend, ERPNext cancels the original (releasing here)
+	and the amended invoice re-records on its own submit.
+	"""
 	frappe.db.delete("One Time Customer Offer Usage", {"sales_invoice": doc.name})
 
 

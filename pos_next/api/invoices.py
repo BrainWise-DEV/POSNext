@@ -277,6 +277,17 @@ def _pricing_rule_to_string(value):
 	return ""
 
 
+def is_one_time_eligible_customer(customer, default_customer, is_return=False):
+	"""Whether one-time-per-customer offers can be granted/tracked for this sale.
+
+	The single source of truth shared by apply_offers (grant side) and
+	update_invoice (record side) so the two can't drift: a one-time offer needs an
+	identified, non walk-in (non default-customer) customer and is never tracked on
+	a return/credit note.
+	"""
+	return bool(customer) and customer != default_customer and not is_return
+
+
 def _strip_server_managed_fields(payload):
 	"""Remove fields that are derived server-side and should not be replayed."""
 	if not isinstance(payload, dict):
@@ -886,6 +897,13 @@ def update_invoice(data):
 				item.pricing_rules = ""
 
 		if doctype == "Sales Invoice":
+			# Only stamp rules we can actually track: an identified, non walk-in
+			# customer on a non-return sale (see is_one_time_eligible_customer).
+			can_track_one_time = is_one_time_eligible_customer(
+				invoice_doc.get("customer"),
+				pos_profile_doc.customer if pos_profile_doc else None,
+				invoice_doc.get("is_return"),
+			)
 			one_time_applied = (
 				frappe.get_all(
 					"Pricing Rule",
@@ -895,7 +913,7 @@ def update_invoice(data):
 					},
 					pluck="name",
 				)
-				if applied_rule_names_seen
+				if (applied_rule_names_seen and can_track_one_time)
 				else []
 			)
 			invoice_doc.pos_applied_one_time_rules = (
@@ -3086,6 +3104,31 @@ def apply_offers(invoice_data, selected_offers=None):
 		# rules never apply to anonymous sales (see the loop below).
 		default_customer = profile.get("customer")
 
+		# Fetch this customer's already-redeemed one-time rules once (a customer's
+		# redemption history is small and customer-indexed) so the gate below is an
+		# in-memory membership test rather than one exists() query per rule. Filtering
+		# by the pricing_rule field also keeps us immune to the doctype's autoname.
+		one_time_eligible = is_one_time_eligible_customer(customer, default_customer)
+		redeemed_one_time_rules = (
+			set(
+				frappe.get_all(
+					"One Time Customer Offer Usage",
+					filters={"customer": customer},
+					pluck="pricing_rule",
+				)
+			)
+			if one_time_eligible
+			else set()
+		)
+
+		# One-time-per-customer gate shared by the per-item and transaction loops:
+		# drop the rule when the customer is ineligible (walk-in/anonymous) or has
+		# already redeemed it.
+		def _skip_one_time_rule(record):
+			if not record.get("one_time_per_customer"):
+				return False
+			return not one_time_eligible or record.name in redeemed_one_time_rules
+
 		rule_map = {}
 		if raw_rule_names:
 			rule_records = frappe.get_all(
@@ -3105,15 +3148,8 @@ def apply_offers(invoice_data, selected_offers=None):
 				if record.coupon_code_based:
 					continue
 
-				# One-time-per-customer rules: skip for anonymous sales and for
-				# customers who have already redeemed this rule. Dropping the rule
-				# here keeps its discount out of the per-item loop below (which only
-				# applies rules present in rule_map), mirroring the coupon skip above.
-				if record.one_time_per_customer:
-					if not customer or customer == default_customer:
-						continue
-					if frappe.db.exists("One Time Customer Offer Usage", f"{customer}::{record.name}"):
-						continue
+				if _skip_one_time_rule(record):
+					continue
 
 				# Include both promotional scheme rules and standalone pricing rules
 				rule_map[record.name] = record
@@ -3137,11 +3173,14 @@ def apply_offers(invoice_data, selected_offers=None):
 					"name",
 					"promotional_scheme",
 					"coupon_code_based",
+					"one_time_per_customer",
 					"promotional_scheme_id",
 					"price_or_product_discount",
 				],
 			)
 			for record in txn_rule_records:
+				if _skip_one_time_rule(record):
+					continue
 				rule_map.setdefault(record.name, record)
 
 		if selected_offer_names:
