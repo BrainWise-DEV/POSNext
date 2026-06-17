@@ -37,7 +37,8 @@
   "used",
   "one_use",
   "column_break_11",
-  "description"
+  "description",
+  "referral_code"
  ],
  "fields": [
   {
@@ -110,20 +111,20 @@
    "label": "ERPNext Integration"
   },
   {
+   "description": "Linked ERPNext Coupon Code for accounting integration",
    "fieldname": "erpnext_coupon_code",
    "fieldtype": "Link",
    "label": "ERPNext Coupon Code",
    "options": "Coupon Code",
-   "read_only": 1,
-   "description": "Linked ERPNext Coupon Code for accounting integration"
+   "read_only": 1
   },
   {
+   "description": "Auto-generated Pricing Rule for discount application",
    "fieldname": "pricing_rule",
    "fieldtype": "Link",
    "label": "Pricing Rule",
    "options": "Pricing Rule",
-   "read_only": 1,
-   "description": "Auto-generated Pricing Rule for discount application"
+   "read_only": 1
   },
   {
    "fieldname": "referral_code",
@@ -173,10 +174,10 @@
    "precision": "2"
   },
   {
+   "description": "Maximum discount that can be applied",
    "fieldname": "max_amount",
    "fieldtype": "Currency",
    "label": "Maximum Discount Amount",
-   "description": "Maximum discount that can be applied",
    "options": "Company:company:default_currency",
    "precision": "2"
   },
@@ -263,7 +264,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2021-07-30 00:17:17.711972",
+ "modified": "2026-06-03 15:54:12.732125",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Coupon",
@@ -313,14 +314,28 @@
    "print": 1,
    "read": 1,
    "report": 1,
+   "role": "Nexus POS Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
    "role": "Website Manager",
    "share": 1,
    "write": 1
   }
  ],
  "quick_entry": 1,
+ "row_format": "Dynamic",
  "sort_field": "modified",
  "sort_order": "DESC",
+ "states": [],
  "title_field": "coupon_code",
  "track_changes": 1
 }
