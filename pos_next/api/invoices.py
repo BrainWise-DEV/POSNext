@@ -885,16 +885,48 @@ def update_invoice(data):
 			# Clearing item.pricing_rules here avoids that branch entirely. The
 			# discount itself is preserved via the discount_percentage /
 			# discount_amount fields we already set above.
+			item_rule_names = []
 			if item.get("pricing_rules"):
 				if erpnext_get_applied_pricing_rules:
-					applied_rule_names_seen.update(
+					item_rule_names = list(
 						erpnext_get_applied_pricing_rules(item.pricing_rules) or []
 					)
 				else:
-					applied_rule_names_seen.update(
+					item_rule_names = [
 						r.strip() for r in str(item.pricing_rules).split(",") if r.strip()
-					)
+					]
+				applied_rule_names_seen.update(item_rule_names)
 				item.pricing_rules = ""
+			# Stash this line's applied rule names for post-loop scheme stamping.
+			# The cleared field can't be read back, so keep them on the row object.
+			item._applied_rule_names = item_rule_names
+
+		# Stamp each line with a Link to the Promotional Scheme that discounted it
+		# (item.pricing_rules was cleared above to protect the discount). The applied
+		# record is a Pricing Rule; resolve it to its parent promotional_scheme. One
+		# batched query, no per-item queries. Standalone rules (no scheme) stay blank.
+		try:
+			rule_to_scheme = {}
+			if applied_rule_names_seen:
+				rule_to_scheme = {
+					r.name: r.promotional_scheme
+					for r in frappe.get_all(
+						"Pricing Rule",
+						filters={"name": ["in", list(applied_rule_names_seen)]},
+						fields=["name", "promotional_scheme"],
+					)
+					if r.promotional_scheme
+				}
+			for item in invoice_doc.get("items", []):
+				names = getattr(item, "_applied_rule_names", None) or []
+				scheme = next((rule_to_scheme[n] for n in names if n in rule_to_scheme), None)
+				item.pos_applied_promotional_scheme = scheme or None
+		except Exception:
+			# Stamping must never fail the sale.
+			frappe.log_error(
+				title="Applied promotional scheme stamping failed",
+				message=frappe.get_traceback(),
+			)
 
 		if doctype == "Sales Invoice":
 			# Only stamp rules we can actually track: an identified, non walk-in
