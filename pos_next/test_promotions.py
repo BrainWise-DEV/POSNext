@@ -581,6 +581,7 @@ class TestPromotions(FrappeTestCase):
 				],
 			}
 		).insert(ignore_permissions=True)
+		self.addCleanup(frappe.delete_doc, "Promotional Scheme", scheme.name, force=True, ignore_permissions=True)
 
 		scheme_rules = frappe.get_all(
 			"Pricing Rule", filters={"promotional_scheme": scheme.name}, pluck="name"
@@ -600,9 +601,7 @@ class TestPromotions(FrappeTestCase):
 
 		self.assertEqual(line_a.pos_applied_promotional_scheme, scheme.name)
 		self.assertFalse(line_b.pos_applied_promotional_scheme)
-		self.assertEqual((line_a.pricing_rules or ""), "")
-
-		frappe.delete_doc("Promotional Scheme", scheme.name, force=True, ignore_permissions=True)
+		self.assertFalse(line_a.pricing_rules)
 
 	def test_discount_amount(self):
 		"""Fixed-amount discount per line (10 SAR off a 50 SAR item)."""
