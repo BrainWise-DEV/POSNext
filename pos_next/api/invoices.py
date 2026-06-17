@@ -903,12 +903,11 @@ def update_invoice(data):
 			# transient marker is never written to the database.
 			item._applied_rule_names = item_rule_names
 
-		# Stamp each line with a Link to the Promotional Scheme that discounted it
-		# (item.pricing_rules was cleared above to protect the discount). The applied
-		# record is a Pricing Rule; resolve it to its parent promotional_scheme. One
-		# batched query, no per-item queries. Standalone rules (no scheme) stay blank.
-		# The field only exists on Sales Invoice Item, so guard like the block below.
 		if doctype == "Sales Invoice":
+			# Stamp each line with a Link to the Promotional Scheme that discounted it
+			# (item.pricing_rules was cleared above to protect the discount). The applied
+			# record is a Pricing Rule; resolve it to its parent promotional_scheme. One
+			# batched query, no per-item queries. Standalone rules (no scheme) stay blank.
 			try:
 				rule_to_scheme = {}
 				if applied_rule_names_seen:
@@ -933,7 +932,6 @@ def update_invoice(data):
 					message=frappe.get_traceback(),
 				)
 
-		if doctype == "Sales Invoice":
 			# Only stamp rules we can actually track: an identified, non walk-in
 			# customer on a non-return sale (see is_one_time_eligible_customer).
 			can_track_one_time = is_one_time_eligible_customer(
