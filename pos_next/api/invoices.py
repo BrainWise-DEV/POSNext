@@ -885,39 +885,70 @@ def update_invoice(data):
 			# Clearing item.pricing_rules here avoids that branch entirely. The
 			# discount itself is preserved via the discount_percentage /
 			# discount_amount fields we already set above.
+			item_rule_names = []
 			if item.get("pricing_rules"):
 				if erpnext_get_applied_pricing_rules:
-					applied_rule_names_seen.update(
+					item_rule_names = list(
 						erpnext_get_applied_pricing_rules(item.pricing_rules) or []
 					)
 				else:
-					applied_rule_names_seen.update(
+					item_rule_names = [
 						r.strip() for r in str(item.pricing_rules).split(",") if r.strip()
-					)
+					]
+				applied_rule_names_seen.update(item_rule_names)
 				item.pricing_rules = ""
+			# Stash this line's applied rule names for post-loop scheme stamping.
+			# The cleared field can't be read back, so keep them on the row object.
+			# Underscore attrs aren't in the doctype's meta columns, so this
+			# transient marker is never written to the database.
+			item._applied_rule_names = item_rule_names
 
 		if doctype == "Sales Invoice":
-			# Only stamp rules we can actually track: an identified, non walk-in
-			# customer on a non-return sale (see is_one_time_eligible_customer).
+			# Resolve every applied Pricing Rule once: its parent promotional_scheme
+			# (for the per-line scheme Link) and whether it is one-time-per-customer
+			# (for the invoice-level one-time stamp). One query feeds both stamps.
 			can_track_one_time = is_one_time_eligible_customer(
 				invoice_doc.get("customer"),
 				pos_profile_doc.customer if pos_profile_doc else None,
 				invoice_doc.get("is_return"),
 			)
-			one_time_applied = (
+			applied_rules = (
 				frappe.get_all(
 					"Pricing Rule",
-					filters={
-						"name": ["in", list(applied_rule_names_seen)],
-						"one_time_per_customer": 1,
-					},
-					pluck="name",
+					filters={"name": ["in", list(applied_rule_names_seen)]},
+					fields=["name", "promotional_scheme", "one_time_per_customer"],
 				)
-				if (applied_rule_names_seen and can_track_one_time)
+				if applied_rule_names_seen
+				else []
+			)
+
+			# Per-line scheme Link: resolve each rule to its scheme (item.pricing_rules
+			# was cleared above to protect the discount). Stamping must never fail the
+			# sale. Standalone rules (no scheme) leave the line blank.
+			try:
+				rule_to_scheme = {r.name: r.promotional_scheme for r in applied_rules if r.promotional_scheme}
+				for item in invoice_doc.get("items", []):
+					names = item._applied_rule_names or []
+					# If a line carries rules from multiple schemes, the first matched wins.
+					item.pos_applied_promotional_scheme = next(
+						(rule_to_scheme[n] for n in names if n in rule_to_scheme), None
+					)
+			except Exception:
+				# Stamping must never fail the sale.
+				frappe.log_error(
+					title="Applied promotional scheme stamping failed",
+					message=frappe.get_traceback(),
+				)
+
+			# Invoice-level one-time stamp: only rules we can actually track (an
+			# identified, non walk-in customer on a non-return sale).
+			one_time_applied = (
+				sorted(r.name for r in applied_rules if r.one_time_per_customer)
+				if can_track_one_time
 				else []
 			)
 			invoice_doc.pos_applied_one_time_rules = (
-				json.dumps(sorted(one_time_applied)) if one_time_applied else ""
+				json.dumps(one_time_applied) if one_time_applied else ""
 			)
 
 		# Set invoice flags BEFORE calculations
