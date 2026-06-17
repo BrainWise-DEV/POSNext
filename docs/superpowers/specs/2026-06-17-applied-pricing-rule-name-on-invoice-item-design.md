@@ -25,14 +25,17 @@ percentage discount from the same promotional scheme, yet each item row shows
 
 ## Goal
 
-Display, on each Sales Invoice **item line**, the pricing rule(s) that discounted
-that line, formatted as the human-friendly scheme title plus the rule id:
+Display, on each Sales Invoice **item line**, the Promotional Scheme that
+discounted that line, as a **clickable Link** to the Promotional Scheme record.
 
-- Promotional-scheme rule: `<Scheme Title> (<RULE-ID>)`
-- Standalone pricing rule (no scheme): `<RULE-ID>` (fallback to rule id only)
-- Multiple rules on one line: comma-separated.
+- Scheme-based rule: links to the scheme (e.g. `15% Discount Iraq Mall`), which
+  Frappe renders as the scheme name and lets the user click through to it.
+- Standalone pricing rule (no scheme): field stays blank (no scheme to link to).
+- Multiple rules on one line: store the first resolved scheme (single value).
 
-The field is read-only and available to Desk (and print).
+The field is read-only and available to Desk (and print). Because the applied
+record returned by the engine is a *Pricing Rule*, we resolve each applied rule
+to its parent `promotional_scheme` and store that scheme name in the Link.
 
 ## Non-Goals
 
@@ -46,21 +49,21 @@ The field is read-only and available to Desk (and print).
 
 ## Design
 
-### 1. New custom field: `pos_applied_pricing_rules` on Sales Invoice Item
+### 1. New custom field: `pos_applied_promotional_scheme` on Sales Invoice Item
 
 Add via a new managed custom-field file
-`pos_next/pos_next/custom/sales_invoice_item.json`, following the exact shape of
-the existing `pos_next/pos_next/custom/sales_invoice.json` (`sync_on_migrate: 1`).
+`pos_next/pos_next/custom/sales_invoice_item.json`, following the shape of the
+existing `pos_next/pos_next/custom/sales_invoice.json` (`sync_on_migrate: 1`).
 
-Field properties (mirroring the established `pos_applied_one_time_rules`
-conventions, except this one is visible and printable):
+A **Link** field (not text) so the scheme is clickable and navigable in Desk.
 
 | Property | Value |
 |---|---|
 | `dt` | `Sales Invoice Item` |
-| `fieldname` | `pos_applied_pricing_rules` |
-| `fieldtype` | `Small Text` |
-| `label` | `Applied Pricing Rules` |
+| `fieldname` | `pos_applied_promotional_scheme` |
+| `fieldtype` | `Link` |
+| `options` | `Promotional Scheme` |
+| `label` | `Applied Promotional Scheme` |
 | `read_only` | 1 |
 | `no_copy` | 1 |
 | `hidden` | 0 |
@@ -68,10 +71,12 @@ conventions, except this one is visible and printable):
 | `allow_on_submit` | 0 |
 | `in_list_view` | 0 |
 | `module` | `POS Next` |
-| `insert_after` | an existing discount-area field on Sales Invoice Item (e.g. `discount_amount`) |
+| `insert_after` | `discount_amount` |
 
-Exact `insert_after` and `idx` to be finalized against the live Sales Invoice
-Item field order during implementation.
+Note: Promotional Scheme is named by its title (`autoname: Prompt`, no separate
+`title` column on this ERPNext version), so the Link renders the scheme name
+directly. Standalone Pricing Rules have no `promotional_scheme`, so the field is
+left blank for them.
 
 ### 2. Populate during `update_invoice` (server-side)
 
@@ -82,34 +87,24 @@ applied rule names immediately before clearing `item.pricing_rules` (~line
 
 1. **Capture per-item rule names.** Where the code currently does
    `applied_rule_names_seen.update(...)` and then `item.pricing_rules = ""`,
-   also keep the list of rule names for *this item* (e.g. a local
-   `item_rule_names` list per iteration). Continue updating the union
-   `applied_rule_names_seen` as today (still needed for the one-time stamp).
+   also keep the list of rule names for *this item* (a local `item_rule_names`
+   list per iteration). Continue updating the union `applied_rule_names_seen` as
+   today (still needed for the one-time stamp).
 
-2. **Resolve titles in one batched query.** After the loop (alongside the
+2. **Resolve rule → scheme in one batched query.** After the loop (alongside the
    existing one-time stamping block at ~line 899), run a single
-   `frappe.get_all("Pricing Rule", filters={"name": ["in", list(applied_rule_names_seen)]}, fields=["name", "promotional_scheme", "title"])`
-   and build a `name -> display_label` map. The label's friendly portion is
-   chosen by this precedence (first non-empty wins):
-   1. The Promotional Scheme's `title`, if `promotional_scheme` is set and that
-      scheme has a non-empty title.
-   2. The `promotional_scheme` id itself, if set but the scheme has no title.
-   3. The Pricing Rule's own `title`, if set.
-   4. None of the above → no friendly portion.
+   `frappe.get_all("Pricing Rule", filters={"name": ["in", list(applied_rule_names_seen)]}, fields=["name", "promotional_scheme"])`
+   and build a `rule_name -> promotional_scheme` map (only rules whose
+   `promotional_scheme` is set). No second query and no text formatting — the
+   stored value is the scheme name itself.
 
-   Final format: `"{friendly} ({rule_name})"` when a friendly portion exists,
-   otherwise `"{rule_name}"`.
-   - Scheme titles: resolve via one additional batched
-     `frappe.get_all("Promotional Scheme", ...)` keyed by the distinct
-     `promotional_scheme` values (only if any scheme-linked rules exist).
+3. **Stamp each item.** Set `item.pos_applied_promotional_scheme` to the first
+   non-empty resolved scheme among `item_rule_names` (single Link value), or
+   leave it unset/empty when the item had no scheme-based rule.
 
-3. **Stamp each item.** Set
-   `item.pos_applied_pricing_rules = ", ".join(display_label[n] for n in item_rule_names)`
-   (empty string when the item had no applied rules).
-
-Query budget: at most **two** additional `frappe.get_all` calls per invoice
-(one for Pricing Rule, one for Promotional Scheme titles), independent of item
-count. No per-item queries.
+Query budget: **one** additional `frappe.get_all` per invoice, independent of
+item count. No per-item queries. The `_resolve_pricing_rule_labels` text helper
+is NOT used in this design (a Link field renders the scheme natively).
 
 ### Data flow
 
@@ -121,35 +116,33 @@ apply_offers (earlier call)           update_invoice (save path)
                                            ├─ applied_rule_names_seen.update(...)  (existing)
                                            └─ item.pricing_rules = ""    (existing)
                                          after loop:
-                                           ├─ batch-resolve rule -> "Title (RULE-ID)"  (NEW)
-                                           ├─ stamp item.pos_applied_pricing_rules     (NEW)
-                                           └─ stamp invoice.pos_applied_one_time_rules (existing)
+                                           ├─ batch-resolve rule -> promotional_scheme  (NEW)
+                                           ├─ stamp item.pos_applied_promotional_scheme  (NEW)
+                                           └─ stamp invoice.pos_applied_one_time_rules    (existing)
 ```
 
 ### Error handling
 
-- A rule name in `item.pricing_rules` that no longer resolves to a Pricing Rule
-  (deleted rule) falls back to the raw rule id as its label. Never throws.
-- Title resolution failures degrade to rule id; stamping must never fail the
-  sale (consistent with the existing one-time recording philosophy). Wrap the
-  resolution/stamp in a guard that logs and leaves the field empty on error.
+- A rule name with no `promotional_scheme` (standalone rule, or a deleted rule
+  that doesn't resolve) yields no scheme → the Link is left blank. Never throws.
+- The resolve/stamp step must never fail the sale (consistent with the existing
+  one-time recording philosophy). Wrap it in a guard that logs and leaves the
+  field empty on error.
 
 ## Testing
 
-Run on **pos-dev** (has ERPNext data; never `bench run-tests`, use
-`bench execute`):
+Run on **nexus.local** (has ERPNext data) via the existing `test_promotions.py`
+suite, scoped: `bench --site nexus.local run-tests --module pos_next.test_promotions`.
 
 1. **Scheme rule:** Build a cart whose item matches a promotional-scheme price
    rule, run it through the save path, assert the saved item's
-   `pos_applied_pricing_rules == "<Scheme Title> (<RULE-ID>)"`.
+   `pos_applied_promotional_scheme == "<Promotional Scheme name>"`.
 2. **Standalone rule:** Same with a standalone Pricing Rule (no scheme), assert
-   the field equals `"<RULE-ID>"`.
-3. **No rule:** Item with no applied rule → field is empty string.
-4. **Multiple rules on a line:** assert comma-separated labels.
-5. **Deleted rule id:** simulate an unresolved rule name → falls back to id, no
-   exception.
-6. Migration: `bench --site pos-dev migrate` syncs the new custom field;
-   confirm it appears on Sales Invoice Item and is read-only.
+   the field is empty/blank.
+3. **No rule:** Item with no applied rule → field is blank.
+4. Migration: `bench --site nexus.local migrate` syncs the new custom field;
+   confirm it appears on Sales Invoice Item as a read-only Link to Promotional
+   Scheme.
 
 ## Rollout
 
