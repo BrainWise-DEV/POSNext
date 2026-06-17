@@ -899,6 +899,8 @@ def update_invoice(data):
 				item.pricing_rules = ""
 			# Stash this line's applied rule names for post-loop scheme stamping.
 			# The cleared field can't be read back, so keep them on the row object.
+			# Underscore attrs aren't in the doctype's meta columns, so this
+			# transient marker is never written to the database.
 			item._applied_rule_names = item_rule_names
 
 		# Stamp each line with a Link to the Promotional Scheme that discounted it
@@ -920,7 +922,7 @@ def update_invoice(data):
 			for item in invoice_doc.get("items", []):
 				names = getattr(item, "_applied_rule_names", None) or []
 				scheme = next((rule_to_scheme[n] for n in names if n in rule_to_scheme), None)
-				item.pos_applied_promotional_scheme = scheme or None
+				item.pos_applied_promotional_scheme = scheme
 		except Exception:
 			# Stamping must never fail the sale.
 			frappe.log_error(
