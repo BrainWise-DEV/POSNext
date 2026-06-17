@@ -554,6 +554,56 @@ class TestPromotions(FrappeTestCase):
 		self.assertAlmostEqual(flt(final.items[0].discount_percentage), 15, places=2)
 		self.assertAlmostEqual(flt(final.items[0].discount_amount), 7.5, places=2)
 
+	def test_applied_promotional_scheme_stamped(self):
+		"""A line discounted by a Promotional Scheme links to that scheme; an
+		undiscounted line stays blank."""
+		scheme_name = "_PNXT_TEST_Scheme"
+		if frappe.db.exists("Promotional Scheme", scheme_name):
+			frappe.delete_doc("Promotional Scheme", scheme_name, force=True, ignore_permissions=True)
+		scheme = frappe.get_doc(
+			{
+				"doctype": "Promotional Scheme",
+				"__newname": scheme_name,
+				"apply_on": "Item Code",
+				"selling": 1,
+				"company": _resolve_company(),
+				"currency": frappe.get_cached_value("Company", _resolve_company(), "default_currency"),
+				"valid_from": nowdate(),
+				"items": [{"item_code": ITEM_A}],
+				"price_discount_slabs": [
+					{
+						"rule_description": "_PNXT_TEST_Scheme slab",
+						"rate_or_discount": "Discount Percentage",
+						"discount_percentage": 15,
+						"min_qty": 1,
+						"disable": 0,
+					}
+				],
+			}
+		).insert(ignore_permissions=True)
+
+		scheme_rules = frappe.get_all(
+			"Pricing Rule", filters={"promotional_scheme": scheme.name}, pluck="name"
+		)
+		self.assertTrue(scheme_rules, "scheme should generate a Pricing Rule")
+
+		payload = _cart_payload(
+			self.ctx,
+			[_line(self.ctx, ITEM_A, qty=1), _line(self.ctx, ITEM_B, qty=1)],
+		)
+		_apply_offers_and_stamp(payload, scheme_rules)
+		paid = sum(flt(i["rate"]) * flt(i["qty"]) for i in payload["items"])
+		final = _submit_invoice(self.ctx, payload, paid_amount=paid)
+
+		line_a = next(i for i in final.items if i.item_code == ITEM_A)
+		line_b = next(i for i in final.items if i.item_code == ITEM_B)
+
+		self.assertEqual(line_a.pos_applied_promotional_scheme, scheme.name)
+		self.assertFalse(line_b.pos_applied_promotional_scheme)
+		self.assertEqual((line_a.pricing_rules or ""), "")
+
+		frappe.delete_doc("Promotional Scheme", scheme.name, force=True, ignore_permissions=True)
+
 	def test_discount_amount(self):
 		"""Fixed-amount discount per line (10 SAR off a 50 SAR item)."""
 		rule = _make_rule(
