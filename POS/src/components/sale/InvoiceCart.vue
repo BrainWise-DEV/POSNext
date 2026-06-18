@@ -1578,7 +1578,10 @@ const {
 	handleCartSortToggle,
 	getCartSortLabel,
 	getCartSortIconState,
-} = useCartSort(() => props.items);
+} = useCartSort(
+	() => props.items,
+	computed(() => settingsStore.cartLifo),
+);
 
 /**
  * ============================================================================
