@@ -3,7 +3,7 @@
 
 import frappe
 from frappe import _
-from frappe.utils import flt, time_diff_in_hours, get_datetime
+from frappe.utils import flt, get_datetime, time_diff_in_hours
 
 
 def execute(filters=None):
@@ -17,69 +17,44 @@ def execute(filters=None):
 def get_columns():
 	"""Return columns for the report"""
 	return [
-		{
-			"fieldname": "offline_id",
-			"label": _("Offline ID"),
-			"fieldtype": "Data",
-			"width": 180
-		},
+		{"fieldname": "offline_id", "label": _("Offline ID"), "fieldtype": "Data", "width": 180},
 		{
 			"fieldname": "sales_invoice",
 			"label": _("Sales Invoice"),
 			"fieldtype": "Link",
 			"options": "Sales Invoice",
-			"width": 150
+			"width": 150,
 		},
 		{
 			"fieldname": "pos_profile",
 			"label": _("POS Profile"),
 			"fieldtype": "Link",
 			"options": "POS Profile",
-			"width": 130
+			"width": 130,
 		},
 		{
 			"fieldname": "customer",
 			"label": _("Customer"),
 			"fieldtype": "Link",
 			"options": "Customer",
-			"width": 150
+			"width": 150,
 		},
-		{
-			"fieldname": "status",
-			"label": _("Sync Status"),
-			"fieldtype": "Data",
-			"width": 110
-		},
-		{
-			"fieldname": "synced_at",
-			"label": _("Synced At"),
-			"fieldtype": "Datetime",
-			"width": 150
-		},
+		{"fieldname": "status", "label": _("Sync Status"), "fieldtype": "Data", "width": 110},
+		{"fieldname": "synced_at", "label": _("Synced At"), "fieldtype": "Datetime", "width": 150},
 		{
 			"fieldname": "invoice_created_at",
 			"label": _("Invoice Created"),
 			"fieldtype": "Datetime",
-			"width": 150
+			"width": 150,
 		},
 		{
 			"fieldname": "sync_delay_hours",
 			"label": _("Sync Delay (Hours)"),
 			"fieldtype": "Float",
-			"width": 150
+			"width": 150,
 		},
-		{
-			"fieldname": "health_status",
-			"label": _("Health Status"),
-			"fieldtype": "Data",
-			"width": 130
-		},
-		{
-			"fieldname": "error_message",
-			"label": _("Error Message"),
-			"fieldtype": "Text",
-			"width": 200
-		}
+		{"fieldname": "health_status", "label": _("Health Status"), "fieldtype": "Data", "width": 130},
+		{"fieldname": "error_message", "label": _("Error Message"), "fieldtype": "Text", "width": 200},
 	]
 
 
@@ -88,7 +63,7 @@ def get_data(filters):
 	conditions = get_conditions(filters)
 
 	# Query to get offline sync records with related invoice data
-	query = """
+	query = f"""
 		SELECT
 			ois.offline_id,
 			ois.sales_invoice,
@@ -108,7 +83,7 @@ def get_data(filters):
 			{conditions}
 		ORDER BY
 			ois.synced_at DESC
-	""".format(conditions=conditions)
+	"""
 
 	data = frappe.db.sql(query, filters, as_dict=1)
 
@@ -117,11 +92,7 @@ def get_data(filters):
 		# Calculate sync delay
 		if row.synced_at and row.invoice_created_at:
 			row.sync_delay_hours = flt(
-				time_diff_in_hours(
-					get_datetime(row.synced_at),
-					get_datetime(row.invoice_created_at)
-				),
-				2
+				time_diff_in_hours(get_datetime(row.synced_at), get_datetime(row.invoice_created_at)), 2
 			)
 		else:
 			row.sync_delay_hours = None
@@ -132,12 +103,9 @@ def get_data(filters):
 			# Try to get error from error log
 			error_log = frappe.db.get_value(
 				"Error Log",
-				{
-					"reference_doctype": "Offline Invoice Sync",
-					"reference_name": row.offline_id
-				},
+				{"reference_doctype": "Offline Invoice Sync", "reference_name": row.offline_id},
 				"error",
-				order_by="creation desc"
+				order_by="creation desc",
 			)
 			row.error_message = error_log[:200] if error_log else "Sync failed"
 
@@ -200,49 +168,41 @@ def get_summary(data):
 	pending_count = len([d for d in data if d.status == "Pending"])
 
 	# Calculate average sync delay for successful syncs
-	sync_delays = [d.sync_delay_hours for d in data if d.sync_delay_hours is not None and d.status == "Synced"]
+	sync_delays = [
+		d.sync_delay_hours for d in data if d.sync_delay_hours is not None and d.status == "Synced"
+	]
 	avg_sync_delay = flt(sum(sync_delays) / len(sync_delays), 2) if sync_delays else 0
 
 	# Calculate success rate
 	success_rate = flt((synced_count / total_syncs) * 100, 2) if total_syncs > 0 else 0
 
 	return [
-		{
-			"value": total_syncs,
-			"label": "Total Sync Attempts",
-			"indicator": "Blue",
-			"datatype": "Int"
-		},
-		{
-			"value": synced_count,
-			"label": "Successfully Synced",
-			"indicator": "Green",
-			"datatype": "Int"
-		},
+		{"value": total_syncs, "label": "Total Sync Attempts", "indicator": "Blue", "datatype": "Int"},
+		{"value": synced_count, "label": "Successfully Synced", "indicator": "Green", "datatype": "Int"},
 		{
 			"value": failed_count,
 			"label": "Failed Syncs",
 			"indicator": "Red" if failed_count > 0 else "Gray",
-			"datatype": "Int"
+			"datatype": "Int",
 		},
 		{
 			"value": pending_count,
 			"label": "Pending Syncs",
 			"indicator": "Yellow" if pending_count > 0 else "Gray",
-			"datatype": "Int"
+			"datatype": "Int",
 		},
 		{
 			"value": success_rate,
 			"label": "Success Rate (%)",
 			"indicator": "Green" if success_rate >= 95 else "Orange",
-			"datatype": "Percent"
+			"datatype": "Percent",
 		},
 		{
 			"value": avg_sync_delay,
 			"label": "Avg Sync Delay (Hours)",
 			"indicator": "Green" if avg_sync_delay < 1 else "Orange",
-			"datatype": "Float"
-		}
+			"datatype": "Float",
+		},
 	]
 
 
@@ -252,11 +212,7 @@ def get_chart_data(data):
 		return None
 
 	# Count by status
-	status_counts = {
-		"Synced": 0,
-		"Failed": 0,
-		"Pending": 0
-	}
+	status_counts = {"Synced": 0, "Failed": 0, "Pending": 0}
 
 	for row in data:
 		if row.status in status_counts:
@@ -265,13 +221,8 @@ def get_chart_data(data):
 	return {
 		"data": {
 			"labels": list(status_counts.keys()),
-			"datasets": [
-				{
-					"name": "Sync Records",
-					"values": list(status_counts.values())
-				}
-			]
+			"datasets": [{"name": "Sync Records", "values": list(status_counts.values())}],
 		},
 		"type": "donut",
-		"colors": ["#4CAF50", "#f44336", "#FFC107"]
+		"colors": ["#4CAF50", "#f44336", "#FFC107"],
 	}

@@ -100,10 +100,10 @@ jobs:
         env:
           CI: 'Yes'
 
-      # - name: Run Tests
-      #   working-directory: /home/runner/frappe-bench
-      #   run: |
-      #     bench --site test_site set-config allow_tests true
-      #     bench --site test_site run-tests --app pos_next
-      #   env:
-      #     TYPE: server
+      - name: Run Promotion Tests
+        working-directory: /home/runner/frappe-bench
+        run: |
+          bench --site test_site set-config allow_tests true
+          bench --site test_site run-tests --module pos_next.test_promotions
+        env:
+          TYPE: server

@@ -148,7 +148,7 @@
 						<span>{{ __("Return Invoice") }}</span>
 					</button>
 					<button
-						v-if="canAccessShiftActions"
+						v-if="canAccessShiftActions && canSwitchToDesk"
 						@click="switchToDesk"
 						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-emerald-50 flex items-center gap-3 transition-colors"
 					>
@@ -167,7 +167,7 @@
 						</svg>
 						<span>{{ __("Switch To Desk") }}</span>
 					</button>
-					<hr class="my-1 border-gray-100"> 
+					<hr class="my-1 border-gray-100" />
 					<button
 						@click="lockSession()"
 						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-amber-50 flex items-center gap-3 transition-colors"
@@ -479,29 +479,32 @@
 			</div>
 
 			<!-- Payment Dialog -->
-		<PaymentDialog
-			v-model="uiStore.showPaymentDialog"
-			:grand-total="cartStore.grandTotal"
-			:subtotal="cartStore.subtotal"
-			:pos-profile="shiftStore.profileName"
-			:currency="shiftStore.profileCurrency"
-			:is-offline="offlineStore.isOffline"
-			:allow-partial-payment="posSettingsStore.allowPartialPayment"
-			:allow-credit-sale="posSettingsStore.allowCreditSale"
-			:allow-customer-credit-payment="posSettingsStore.allowCustomerCreditPayment"
-			:allow-write-off="posSettingsStore.allowWriteOffChange"
-			:write-off-limit="shiftStore.writeOffLimit"
-			:customer="cartStore.customer"
-			:company="shiftStore.profileCompany"
-			:additional-discount="cartStore.additionalDiscount"
-			:items="cartStore.invoiceItems"
-			:tax-amount="cartStore.totalTax"
-			:discount-amount="cartStore.totalDiscount"
-			:target-doctype="cartStore.targetDoctype"
-			:is-submitting="cartStore.isSubmitting"
-			@payment-completed="handlePaymentCompleted"
-			@update-additional-discount="handleAdditionalDiscountUpdate"
-		/>
+			<PaymentDialog
+				v-model="uiStore.showPaymentDialog"
+				:grand-total="cartStore.grandTotal"
+				:subtotal="cartStore.subtotal"
+				:pos-profile="shiftStore.profileName"
+				:currency="shiftStore.profileCurrency"
+				:is-offline="offlineStore.isOffline"
+				:allow-partial-payment="posSettingsStore.allowPartialPayment"
+				:allow-credit-sale="posSettingsStore.allowCreditSale"
+				:allow-customer-credit-payment="posSettingsStore.allowCustomerCreditPayment"
+				:allow-write-off="posSettingsStore.allowWriteOffChange"
+				:write-off-limit="shiftStore.writeOffLimit"
+				:customer="cartStore.customer"
+				:company="shiftStore.profileCompany"
+				:additional-discount="cartStore.additionalDiscount"
+				:items="cartStore.invoiceItems"
+				:tax-amount="cartStore.totalTax"
+				:discount-amount="cartStore.totalDiscount"
+				:target-doctype="cartStore.targetDoctype"
+				:is-submitting="cartStore.isSubmitting"
+				:applied-offer-count="cartStore.appliedOffers.length"
+				@payment-completed="handlePaymentCompleted"
+				@update-additional-discount="handleAdditionalDiscountUpdate"
+				@show-offers="uiStore.showOffersDialog = true"
+				@show-coupon="uiStore.showCouponDialog = true"
+			/>
 
 			<!-- Customer Selection Dialog -->
 			<CustomerDialog
@@ -545,6 +548,8 @@
 			<CouponDialog
 				v-model="uiStore.showCouponDialog"
 				:subtotal="cartStore.subtotal"
+				:tax-amount="cartStore.totalTax"
+				:grand-total="cartStore.grandTotal"
 				:items="cartStore.invoiceItems"
 				:pos-profile="shiftStore.profileName"
 				:customer="cartStore.customer?.name || cartStore.customer"
@@ -618,6 +623,7 @@
 				@sync-all="handleSyncAll"
 				@delete-invoice="handleDeleteOfflineInvoice"
 				@edit-invoice="handleEditOfflineInvoice"
+				@print-invoice="handlePrintInvoice"
 				@refresh="offlineStore.loadPendingInvoices"
 			/>
 
@@ -986,8 +992,8 @@
 // Module-scoped init guard — prevents redundant heavy initialization
 // when component remounts due to translationVersion changes.
 // Tracks the profile+shift key so a user/shift change correctly re-initializes.
-let _initializedKey = null
-let _posInitPromise = null
+let _initializedKey = null;
+let _posInitPromise = null;
 </script>
 
 <script setup>
@@ -1026,8 +1032,14 @@ import { useUserData } from "@/data/user";
 import { parseError } from "@/utils/errorHandler";
 import { cleanupUserSession } from "@/utils/sessionCleanup";
 import { offlineWorker } from "@/utils/offline/workerClient";
+import { cacheOfflineReceiptPayload } from "@/utils/offline/offlineReceiptCache";
 import { cacheInvoiceHistory, getCachedInvoiceHistory } from "@/utils/offline/sync";
-import { printInvoice, printInvoiceByName, printWithSilentFallback } from "@/utils/printInvoice";
+import {
+	hydrateLocalOnlyInvoice,
+	printInvoice,
+	printInvoiceByName,
+	printWithSilentFallback,
+} from "@/utils/printInvoice";
 import { qzConnected, connect as qzConnect, disconnect as qzDisconnect } from "@/utils/qzTray";
 
 import { Button, Dialog, createResource } from "frappe-ui";
@@ -1045,6 +1057,7 @@ import { usePOSSettingsStore } from "@/stores/posSettings";
 import { usePOSShiftStore } from "@/stores/posShift";
 import { usePOSSyncStore } from "@/stores/posSync";
 import { usePOSUIStore } from "@/stores/posUI";
+import { useBootstrapStore } from "@/stores/bootstrap";
 import { logger } from "@/utils/logger";
 import { shouldValidateItemStock } from "@/utils/stockValidator";
 
@@ -1058,6 +1071,7 @@ const posSettingsStore = usePOSSettingsStore();
 const itemStore = useItemSearchStore();
 const stockStore = useStockStore();
 const customerSearchStore = useCustomerSearchStore();
+const bootstrapStore = useBootstrapStore();
 // Note: settingsStore is an alias to posSettingsStore (same Pinia store singleton)
 const settingsStore = posSettingsStore;
 
@@ -1065,7 +1079,12 @@ const settingsStore = posSettingsStore;
 const { onStockUpdate } = useRealtimeStock();
 
 // Session lock (inactivity + tab-refocus)
-const { lock: lockSession, configure: configureSessionLock, startActivityTracking, stopActivityTracking } = useSessionLock();
+const {
+	lock: lockSession,
+	configure: configureSessionLock,
+	startActivityTracking,
+	stopActivityTracking,
+} = useSessionLock();
 
 // POS Events system
 const {
@@ -1104,6 +1123,12 @@ const offerReapplyTimer = ref(null);
 
 // Performance: Cache previous cart state to avoid unnecessary reapplications
 let previousCartHash = "";
+
+// Tracks the in-flight edit of a queued offline invoice. Set by
+// handleEditOfflineInvoice, consumed by the offline branch of
+// handlePaymentCompleted to supersede the original row, and cleared
+// whenever the edit is abandoned (cart cleared without checkout).
+let editingOfflineContext = null;
 
 // Helper function to compute cart hash
 function computeCartHash() {
@@ -1192,6 +1217,9 @@ const profileWarehouses = computed(() => {
 });
 
 const canAccessShiftActions = computed(() => shiftStore.hasOpenShift);
+
+/** Desk link only for users with the Nexus POS Manager role (from bootstrap API). */
+const canSwitchToDesk = computed(() => Boolean(bootstrapStore.data?.can_switch_to_desk));
 
 // Resize state
 let resizeState = null;
@@ -1827,7 +1855,12 @@ function handleItemSelected(item, autoAdd = false) {
 					price_list_rate: unitRate,
 					is_resolved_barcode: true, // Mark as readonly
 				};
-				cartStore.addItem(resolvedItem, item.resolved_qty, true, shiftStore.currentProfile);
+				cartStore.addItem(
+					resolvedItem,
+					item.resolved_qty,
+					true,
+					shiftStore.currentProfile
+				);
 			} else {
 				cartStore.addItem(item, 1, true, shiftStore.currentProfile);
 			}
@@ -1843,7 +1876,11 @@ function handleItemSelected(item, autoAdd = false) {
 
 	// Early out-of-stock guard — prevent opening dialogs for zero-stock items
 	// Full qty validation happens in cartStore.addItem()
-	if (!item.has_variants && settingsStore.shouldEnforceStockValidation() && shouldValidateItemStock(item)) {
+	if (
+		!item.has_variants &&
+		settingsStore.shouldEnforceStockValidation() &&
+		shouldValidateItemStock(item)
+	) {
 		const actualQty = item.actual_qty ?? item.stock_qty ?? 0;
 		if (actualQty <= 0) {
 			uiStore.showError(
@@ -1988,6 +2025,7 @@ async function handlePaymentCompleted(paymentData) {
 		if (paymentData.payments && Array.isArray(paymentData.payments)) {
 			paymentData.payments.forEach((p) => {
 				cartStore.payments.push({
+					...p,
 					mode_of_payment: p.mode_of_payment,
 					amount: p.amount,
 					type: p.type,
@@ -2024,6 +2062,7 @@ async function handlePaymentCompleted(paymentData) {
 			const invoiceData = {
 				pos_profile: cartStore.posProfile,
 				posa_pos_opening_shift: cartStore.posOpeningShift,
+				company: shiftStore.profileCompany,
 				customer: customerValue || shiftStore.profileCustomer,
 				items: preparedItems,
 				payments: JSON.parse(JSON.stringify(cartStore.payments)),
@@ -2032,14 +2071,64 @@ async function handlePaymentCompleted(paymentData) {
 				total_tax: cartStore.totalTax,
 				total_discount: cartStore.totalDiscount,
 				write_off_amount: paymentData.write_off_amount || 0,
+				change_amount: paymentData.change_amount || 0,
+				is_credit_sale: paymentData.is_credit_sale ? 1 : 0,
+				receivable_account: paymentData.receivable_account || null,
+				edited_from: editingOfflineContext?.originalOfflineId || null,
 			};
 
-			await offlineStore.saveInvoiceOffline(invoiceData);
-			uiStore.showSuccess(
-				`OFFLINE-${Date.now()}`,
-				cartStore.grandTotal,
-				paymentData.paid_amount
-			);
+			// Save to the offline queue first so we can use the worker's
+			// canonical pos_offline_<uuid> id as the cache key — keeping
+			// IndexedDB and sessionStorage aligned on a single identifier.
+			const saveResult = await offlineStore.saveInvoiceOffline(invoiceData);
+			const offlineReceiptName =
+				saveResult?.offline_id || invoiceData.offline_id || `pos_offline_${Date.now()}`;
+
+			// If this checkout was an edit of a previously-queued invoice, mark
+			// the original row as superseded (keeps audit trail, excludes from sync).
+			if (editingOfflineContext?.originalQueueId) {
+				try {
+					await offlineWorker.supersedeOfflineInvoice(
+						editingOfflineContext.originalQueueId,
+						offlineReceiptName
+					);
+				} catch (err) {
+					log.error("Failed to supersede original offline invoice:", err);
+				}
+				editingOfflineContext = null;
+			}
+
+			const paidAmount = paymentData.paid_amount ?? cartStore.grandTotal ?? 0;
+			const grandTotal = cartStore.grandTotal || 0;
+			const customerLabel =
+				cartStore.customer?.customer_name ||
+				cartStore.customer?.name ||
+				customerValue ||
+				shiftStore.profileCustomer;
+
+			const offlinePrintDoc = {
+				name: offlineReceiptName,
+				doctype: "Sales Invoice",
+				is_offline: true,
+				pos_profile: cartStore.posProfile,
+				posting_date: new Date().toISOString().slice(0, 10),
+				company: shiftStore.profileCompany || undefined,
+				customer_name: customerLabel,
+				items: preparedItems.map((item) => ({
+					...item,
+					quantity: item.qty ?? item.quantity,
+				})),
+				grand_total: grandTotal,
+				total_taxes_and_charges: cartStore.totalTax,
+				payments: invoiceData.payments,
+				paid_amount: paidAmount,
+				change_amount: paymentData.change_amount || 0,
+				outstanding_amount: Math.max(0, grandTotal - paidAmount),
+				status: Math.max(0, grandTotal - paidAmount) < 0.01 ? "Paid" : "Unpaid",
+				docstatus: 0,
+			};
+			uiStore.setLastOfflinePrintDoc(offlinePrintDoc);
+			cacheOfflineReceiptPayload(offlineReceiptName, offlinePrintDoc);
 			uiStore.showPaymentDialog = false;
 			cartStore.clearCart();
 			// Reset cart hash after successful payment
@@ -2050,14 +2139,63 @@ async function handlePaymentCompleted(paymentData) {
 				draftsStore.deleteDraft(draftIdToDelete);
 			}
 
-			showSuccess(__("Invoice saved offline. Will sync when online"));
+			if (shiftStore.autoPrintEnabled || posSettingsStore.silentPrint) {
+				try {
+					await handlePrintInvoice({ name: offlineReceiptName });
+					showSuccess(
+						__(
+							"Invoice {0} saved offline and sent to printer — will sync when online",
+							[offlineReceiptName]
+						)
+					);
+				} catch (error) {
+					log.error("Offline auto-print error:", error);
+					uiStore.showSuccess(offlineReceiptName, grandTotal, paymentData.paid_amount);
+					showWarning(
+						__(
+							"Invoice {0} saved offline but print failed — open Print from the success dialog",
+							[offlineReceiptName]
+						)
+					);
+				}
+			} else {
+				uiStore.showSuccess(offlineReceiptName, grandTotal, paymentData.paid_amount);
+				showSuccess(__("Invoice saved offline. Will sync when online"));
+			}
 		} else {
 			// Get item codes from cart before clearing
 			const soldItemCodes = cartStore.invoiceItems.map((item) => item.item_code);
 
-			const result = await cartStore.submitInvoice();
+			const result = await cartStore.submitInvoice({
+				isCreditSale: Boolean(paymentData.is_credit_sale),
+				receivableAccount: paymentData.receivable_account || null,
+			});
 
 			if (result) {
+				uiStore.clearLastOfflinePrintDoc();
+
+				// If this online checkout originated from editing a still-queued
+				// offline invoice, mark the original row as superseded so the
+				// background sync doesn't push it as a duplicate. We pass the
+				// server invoice name as replaced_by for audit trail.
+				if (editingOfflineContext?.originalQueueId) {
+					const serverName = result.name || result.message?.name || null;
+					try {
+						await offlineWorker.supersedeOfflineInvoice(
+							editingOfflineContext.originalQueueId,
+							serverName
+						);
+					} catch (err) {
+						log.error(
+							"Failed to supersede edited offline invoice after online submit:",
+							err
+						);
+					}
+					editingOfflineContext = null;
+					// Refresh pending count so the OfflineInvoicesDialog badge updates.
+					await offlineStore.updatePendingCount();
+				}
+
 				const invoiceName = result.name || result.message?.name || __("Unknown");
 				const invoiceTotal = result.grand_total || result.total || 0;
 				const paidAmount = paymentData.paid_amount || invoiceTotal;
@@ -2098,6 +2236,10 @@ async function handlePaymentCompleted(paymentData) {
 		log.error("Error submitting invoice:", error);
 		uiStore.showPaymentDialog = false;
 
+		// Checkout failed mid-edit — clear the edit context so the NEXT
+		// checkout doesn't supersede the wrong row on a fresh, unrelated sale.
+		editingOfflineContext = null;
+
 		const errorContext = parseError(error);
 		uiStore.showError(
 			errorContext.title || __("Error"),
@@ -2125,6 +2267,7 @@ function confirmClearCart() {
 	cartStore.clearCart();
 	// Reset cart hash when cart is cleared
 	previousCartHash = "";
+	editingOfflineContext = null;
 	uiStore.showClearCartDialog = false;
 	showSuccess(__("All items removed from cart"));
 }
@@ -2180,7 +2323,10 @@ async function handleOptionSelected(option) {
 		} else if (option.type === "uom") {
 			const qty = option.quantity || cartStore.pendingItemQty;
 			const pricing = await cartStore.resolveUomPricing(
-				cartStore.pendingItem, option.uom, option.conversion_factor, qty
+				cartStore.pendingItem,
+				option.uom,
+				option.conversion_factor,
+				qty
 			);
 
 			const itemToAdd = {
@@ -2245,7 +2391,7 @@ function openReturnDialog() {
 }
 
 function switchToDesk() {
-	if (!canAccessShiftActions.value || typeof window === "undefined") {
+	if (!canAccessShiftActions.value || !canSwitchToDesk.value || typeof window === "undefined") {
 		return;
 	}
 
@@ -2334,7 +2480,7 @@ async function handleLoadDraft(draft) {
 
 function handleReturnCreated(returnInvoice) {
 	// Success message is already shown by ReturnInvoiceDialog
-	log.debug("Return invoice created:", returnInvoice.name)
+	log.debug("Return invoice created:", returnInvoice.name);
 }
 
 function handleDiscountApplied(discount) {
@@ -2489,6 +2635,21 @@ async function confirmClearCache() {
 
 async function handleEditOfflineInvoice(invoice) {
 	try {
+		if (offlineStore.isSyncing) {
+			showWarning(__("Cannot edit while syncing — please wait for sync to finish."));
+			return;
+		}
+
+		if (invoice.data?.was_printed) {
+			uiStore.showError(
+				__("Cannot edit printed invoice"),
+				__(
+					"A receipt for this invoice was already printed — the customer may have a physical copy. Use Return Invoice to issue a credit note instead."
+				)
+			);
+			return;
+		}
+
 		cartStore.clearCart();
 
 		const invoiceData = invoice.data;
@@ -2513,7 +2674,12 @@ async function handleEditOfflineInvoice(invoice) {
 		// Initialize cart hash for the loaded cart so watchers work correctly
 		previousCartHash = computeCartHash();
 
-		await offlineStore.deleteOfflineInvoice(invoice.id);
+		// Record the edit source so the next checkout can supersede the
+		// original queue row (preserving audit trail instead of deleting it).
+		editingOfflineContext = {
+			originalQueueId: invoice.id,
+			originalOfflineId: invoice.offline_id,
+		};
 
 		showSuccess(__("Invoice loaded to cart for editing"));
 	} catch (error) {
@@ -2523,6 +2689,10 @@ async function handleEditOfflineInvoice(invoice) {
 
 async function handleDeleteOfflineInvoice(invoiceId) {
 	try {
+		if (offlineStore.isSyncing) {
+			showWarning(__("Cannot delete while syncing — please wait for sync to finish."));
+			return;
+		}
 		await offlineStore.deleteOfflineInvoice(invoiceId);
 	} catch (error) {
 		log.error("Error deleting offline invoice:", error);
@@ -2772,6 +2942,16 @@ function handleViewInvoice(invoice) {
 // Centralized print handler - uses printInvoice.js utilities
 async function handlePrintInvoice(invoiceData) {
 	try {
+		invoiceData = await hydrateLocalOnlyInvoice(invoiceData || {});
+		const offlineSnapshot = uiStore.lastOfflinePrintDoc;
+		if (
+			invoiceData?.name &&
+			offlineSnapshot?.name === invoiceData.name &&
+			offlineSnapshot.items?.length > 0
+		) {
+			invoiceData = offlineSnapshot;
+		}
+
 		// Silent print path — send directly to thermal printer via QZ Tray
 		if (posSettingsStore.silentPrint) {
 			const result = await printWithSilentFallback(invoiceData);

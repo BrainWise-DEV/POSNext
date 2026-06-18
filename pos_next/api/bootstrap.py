@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright (c) 2024, POS Next and contributors
 # For license information, please see license.txt
 
@@ -10,6 +9,7 @@ to initialize the POS application. Instead of making 5+ sequential API calls,
 the frontend fetches everything in one request.
 
 Data Returned:
+    - can_switch_to_desk: True if user has role "Nexus POS Manager" (desk link in POS)
     - locale: User's language preference (e.g., "en", "ar")
     - precision: Number formatting settings from System Settings
         - currency: Decimal places for totals (default: 2)
@@ -29,7 +29,7 @@ from frappe import _
 from frappe.query_builder import DocType
 from frappe.query_builder.functions import Coalesce
 
-from pos_next.api.constants import POS_SETTINGS_FIELDS, DEFAULT_POS_SETTINGS
+from pos_next.api.constants import DEFAULT_POS_SETTINGS, POS_SETTINGS_FIELDS
 
 
 @frappe.whitelist()
@@ -46,6 +46,7 @@ def get_initial_data():
 			site_name: str,
 			locale: str,
 			precision: dict,
+			can_switch_to_desk: bool,
 			shift: dict | None,
 			pos_profile: dict | None,
 			pos_settings: dict | None,
@@ -63,6 +64,7 @@ def get_initial_data():
 		"site_name": frappe.local.site,
 		"locale": _get_user_language(),
 		"precision": _get_precision_settings(),
+		"can_switch_to_desk": "Nexus POS Manager" in frappe.get_roles(),
 		"shift": None,
 		"pos_profile": None,
 		"pos_settings": None,
@@ -110,6 +112,7 @@ def get_initial_data():
 # Private Helper Functions
 # =============================================================================
 
+
 def _get_user_language():
 	"""
 	Get user's language preference from User doctype.
@@ -140,7 +143,7 @@ def _get_precision_settings():
 		"System Settings",
 		"System Settings",
 		["currency_precision", "float_precision", "rounding_method", "number_format"],
-		as_dict=True
+		as_dict=True,
 	)
 
 	return {
@@ -204,17 +207,20 @@ def _get_pos_settings(pos_profile_doc):
 		dict: POS Settings with derived values
 	"""
 	try:
-		settings = frappe.db.get_value(
-			"POS Settings",
-			{"pos_profile": pos_profile_doc.name, "enabled": 1},
-			POS_SETTINGS_FIELDS,
-			as_dict=True
-		) or DEFAULT_POS_SETTINGS.copy()
+		settings = (
+			frappe.db.get_value(
+				"POS Settings",
+				{"pos_profile": pos_profile_doc.name, "enabled": 1},
+				POS_SETTINGS_FIELDS,
+				as_dict=True,
+			)
+			or DEFAULT_POS_SETTINGS.copy()
+		)
 
 		# Derive from POS Profile (single source of truth)
-		settings["allow_write_off_change"] = 1 if (
-			pos_profile_doc.write_off_account and (pos_profile_doc.write_off_limit or 0) > 0
-		) else 0
+		settings["allow_write_off_change"] = (
+			1 if (pos_profile_doc.write_off_account and (pos_profile_doc.write_off_limit or 0) > 0) else 0
+		)
 		settings["disable_rounded_total"] = pos_profile_doc.disable_rounded_total or 0
 
 		return settings
@@ -252,7 +258,7 @@ def _get_payment_methods(pos_profile_name):
 				POSPaymentMethod.mode_of_payment,
 				POSPaymentMethod.default,
 				POSPaymentMethod.allow_in_returns,
-				Coalesce(ModeOfPayment.type, "Cash").as_("type")
+				Coalesce(ModeOfPayment.type, "Cash").as_("type"),
 			)
 			.where(POSPaymentMethod.parent == pos_profile_name)
 			.orderby(POSPaymentMethod.idx)
