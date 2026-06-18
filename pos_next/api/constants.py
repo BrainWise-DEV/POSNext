@@ -39,6 +39,8 @@ POS_SETTINGS_FIELDS = [
 	"enable_session_lock",
 	"session_lock_timeout",
 	"show_variants_as_items",
+	"enable_idle_refocus",
+	"idle_refocus_seconds",
 ]
 
 # Default POS Settings values
@@ -69,4 +71,6 @@ DEFAULT_POS_SETTINGS = {
 	"enable_session_lock": 0,
 	"session_lock_timeout": 5,
 	"show_variants_as_items": 0,
+	"enable_idle_refocus": 1,
+	"idle_refocus_seconds": 3,
 }

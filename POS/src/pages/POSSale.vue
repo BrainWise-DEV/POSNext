@@ -1025,6 +1025,7 @@ import InvoiceManagement from "@/components/invoices/InvoiceManagement.vue";
 import InvoiceDetailDialog from "@/components/invoices/InvoiceDetailDialog.vue";
 import { useRealtimeStock } from "@/composables/useRealtimeStock";
 import { useSessionLock } from "@/composables/useSessionLock";
+import { useIdleRefocus } from "@/composables/useIdleRefocus";
 import { usePOSEvents } from "@/composables/usePOSEvents";
 import { useLocale } from "@/composables/useLocale";
 import { session } from "@/data/session";
@@ -1113,6 +1114,15 @@ const offersDialogRef = ref(null);
 const containerRef = ref(null);
 const dividerRef = ref(null);
 const pendingPaymentAfterCustomer = ref(false);
+
+// Idle auto-refocus: return focus to the item search after configurable idle time.
+// Reactive on settings so toggling/changing the interval takes effect immediately.
+useIdleRefocus({
+	enabled: computed(() => posSettingsStore.idleRefocusEnabled),
+	intervalSeconds: computed(() => posSettingsStore.idleRefocusSeconds),
+	isDialogOpen: computed(() => uiStore.isAnyDialogOpen),
+	onRefocus: () => itemsSelectorRef.value?.focusSearchInput(),
+});
 const logoutAfterClose = ref(false);
 const editCustomer = ref(null); // Customer being edited (null for create mode)
 const showClearCacheDialog = ref(false);
