@@ -1,7 +1,7 @@
-import { createResource } from "frappe-ui"
-import { defineStore } from "pinia"
-import { computed, ref } from "vue"
-import { useBootstrapStore } from "./bootstrap"
+import { createResource } from "frappe-ui";
+import { defineStore } from "pinia";
+import { computed, ref } from "vue";
+import { useBootstrapStore } from "./bootstrap";
 
 export const usePOSSettingsStore = defineStore("posSettings", () => {
 	// State
@@ -70,220 +70,156 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		// Security
 		enable_session_lock: 0,
 		session_lock_timeout: 5,
-	})
+	});
 
-	const isLoading = ref(false)
-	const isLoaded = ref(false)
+	const isLoading = ref(false);
+	const isLoaded = ref(false);
 
 	// Computed - Wallet & Loyalty Settings
-	const enableLoyaltyProgram = computed(() =>
-		Boolean(settings.value.enable_loyalty_program),
-	)
-	const defaultLoyaltyProgram = computed(() =>
-		settings.value.default_loyalty_program || "",
-	)
-	const walletAccount = computed(() =>
-		settings.value.wallet_account || "",
-	)
-	const autoCreateWallet = computed(() =>
-		Boolean(settings.value.auto_create_wallet),
-	)
-	const loyaltyToWallet = computed(() =>
-		Boolean(settings.value.loyalty_to_wallet),
-	)
+	const enableLoyaltyProgram = computed(() => Boolean(settings.value.enable_loyalty_program));
+	const defaultLoyaltyProgram = computed(() => settings.value.default_loyalty_program || "");
+	const walletAccount = computed(() => settings.value.wallet_account || "");
+	const autoCreateWallet = computed(() => Boolean(settings.value.auto_create_wallet));
+	const loyaltyToWallet = computed(() => Boolean(settings.value.loyalty_to_wallet));
 
 	// Computed - General Settings
-	const isEnabled = computed(() => Boolean(settings.value.enabled))
+	const isEnabled = computed(() => Boolean(settings.value.enabled));
 	const maxDiscountAllowed = computed(
-		() => Number.parseFloat(settings.value.max_discount_allowed) || 0,
-	)
-	const usePercentageDiscount = computed(() =>
-		Boolean(settings.value.use_percentage_discount),
-	)
+		() => Number.parseFloat(settings.value.max_discount_allowed) || 0
+	);
+	const usePercentageDiscount = computed(() => Boolean(settings.value.use_percentage_discount));
 	const allowAdditionalDiscount = computed(() =>
-		Boolean(settings.value.allow_user_to_edit_additional_discount),
-	)
+		Boolean(settings.value.allow_user_to_edit_additional_discount)
+	);
 	const allowItemDiscount = computed(() =>
-		Boolean(settings.value.allow_user_to_edit_item_discount),
-	)
-	const allowUserToEditRate = computed(() =>
-		Boolean(settings.value.allow_user_to_edit_rate),
-	)
-	const disableRoundedTotal = computed(() =>
-		Boolean(settings.value.disable_rounded_total),
-	)
-	const allowCreditSale = computed(() =>
-		Boolean(settings.value.allow_credit_sale),
-	)
+		Boolean(settings.value.allow_user_to_edit_item_discount)
+	);
+	const allowUserToEditRate = computed(() => Boolean(settings.value.allow_user_to_edit_rate));
+	const disableRoundedTotal = computed(() => Boolean(settings.value.disable_rounded_total));
+	const allowCreditSale = computed(() => Boolean(settings.value.allow_credit_sale));
 	const allowCustomerCreditPayment = computed(() =>
-		Boolean(settings.value.allow_customer_credit_payment),
-	)
-	const allowReturn = computed(() => Boolean(settings.value.allow_return))
-	const allowWriteOffChange = computed(() =>
-		Boolean(settings.value.allow_write_off_change),
-	)
-	const allowPartialPayment = computed(() =>
-		Boolean(settings.value.allow_partial_payment),
-	)
-	const useExactAmount = computed(() =>
-		Boolean(settings.value.use_exact_amount),
-	)
+		Boolean(settings.value.allow_customer_credit_payment)
+	);
+	const allowReturn = computed(() => Boolean(settings.value.allow_return));
+	const allowWriteOffChange = computed(() => Boolean(settings.value.allow_write_off_change));
+	const allowPartialPayment = computed(() => Boolean(settings.value.allow_partial_payment));
+	const useExactAmount = computed(() => Boolean(settings.value.use_exact_amount));
 
 	// Computed - Display Settings
-	const defaultCardView = computed(() =>
-		Boolean(settings.value.default_card_view),
-	)
-	const displayItemCode = computed(() =>
-		Boolean(settings.value.display_item_code),
-	)
-	const showCustomerBalance = computed(() =>
-		Boolean(settings.value.show_customer_balance),
-	)
-	const hideExpectedAmount = computed(() =>
-		Boolean(settings.value.hide_expected_amount),
-	)
+	const defaultCardView = computed(() => Boolean(settings.value.default_card_view));
+	const displayItemCode = computed(() => Boolean(settings.value.display_item_code));
+	const showCustomerBalance = computed(() => Boolean(settings.value.show_customer_balance));
+	const hideExpectedAmount = computed(() => Boolean(settings.value.hide_expected_amount));
 	const displayDiscountPercentage = computed(() =>
-		Boolean(settings.value.display_discount_percentage),
-	)
-	const displayDiscountAmount = computed(() =>
-		Boolean(settings.value.display_discount_amount),
-	)
-	const showVariantsAsItems = computed(() =>
-		Boolean(settings.value.show_variants_as_items),
-	)
+		Boolean(settings.value.display_discount_percentage)
+	);
+	const displayDiscountAmount = computed(() => Boolean(settings.value.display_discount_amount));
+	const showVariantsAsItems = computed(() => Boolean(settings.value.show_variants_as_items));
 
 	// Computed - Operations
-	const allowSalesOrder = computed(() =>
-		Boolean(settings.value.allow_sales_order),
-	)
-	const allowSelectSalesOrder = computed(() =>
-		Boolean(settings.value.allow_select_sales_order),
-	)
-	const createOnlySalesOrder = computed(() =>
-		Boolean(settings.value.create_only_sales_order),
-	)
+	const allowSalesOrder = computed(() => Boolean(settings.value.allow_sales_order));
+	const allowSelectSalesOrder = computed(() => Boolean(settings.value.allow_select_sales_order));
+	const createOnlySalesOrder = computed(() => Boolean(settings.value.create_only_sales_order));
 	const allowReturnWithoutInvoice = computed(() =>
-		Boolean(settings.value.allow_return_without_invoice),
-	)
-	const allowFreeBatchReturn = computed(() =>
-		Boolean(settings.value.allow_free_batch_return),
-	)
+		Boolean(settings.value.allow_return_without_invoice)
+	);
+	const allowFreeBatchReturn = computed(() => Boolean(settings.value.allow_free_batch_return));
 	const allowPrintDraftInvoices = computed(() =>
-		Boolean(settings.value.allow_print_draft_invoices),
-	)
+		Boolean(settings.value.allow_print_draft_invoices)
+	);
 
 	// Computed - Pricing & Display
 	const decimalPrecision = computed(
-		() => Number.parseInt(settings.value.decimal_precision) || 2,
-	)
+		() => Number.parseInt(settings.value.decimal_precision) || 2
+	);
 
 	// Computed - Customer Settings
 	const allowCustomerPurchaseOrder = computed(() =>
-		Boolean(settings.value.allow_customer_purchase_order),
-	)
+		Boolean(settings.value.allow_customer_purchase_order)
+	);
 	const allowDuplicateCustomerNames = computed(() =>
-		Boolean(settings.value.allow_duplicate_customer_names),
-	)
-	const fetchCoupon = computed(() => Boolean(settings.value.fetch_coupon))
+		Boolean(settings.value.allow_duplicate_customer_names)
+	);
+	const fetchCoupon = computed(() => Boolean(settings.value.fetch_coupon));
 
 	// Computed - Printing
-	const allowPrintLastInvoice = computed(() =>
-		Boolean(settings.value.allow_print_last_invoice),
-	)
-	const silentPrint = computed(() => Boolean(settings.value.silent_print))
+	const allowPrintLastInvoice = computed(() => Boolean(settings.value.allow_print_last_invoice));
+	const silentPrint = computed(() => Boolean(settings.value.silent_print));
 
 	// Computed - Delivery
-	const useDeliveryCharges = computed(() =>
-		Boolean(settings.value.use_delivery_charges),
-	)
+	const useDeliveryCharges = computed(() => Boolean(settings.value.use_delivery_charges));
 	const autoSetDeliveryCharges = computed(() =>
-		Boolean(settings.value.auto_set_delivery_charges),
-	)
+		Boolean(settings.value.auto_set_delivery_charges)
+	);
 
 	// Computed - Advanced Settings
-	const useLimitSearch = computed(() =>
-		Boolean(settings.value.use_limit_search),
-	)
-	const searchLimit = computed(
-		() => Number.parseInt(settings.value.search_limit) || 1000,
-	)
-	const idleRefocusEnabled = computed(() =>
-		Boolean(settings.value.enable_idle_refocus),
-	)
+	const useLimitSearch = computed(() => Boolean(settings.value.use_limit_search));
+	const searchLimit = computed(() => Number.parseInt(settings.value.search_limit) || 1000);
+	const idleRefocusEnabled = computed(() => Boolean(settings.value.enable_idle_refocus));
 	const idleRefocusSeconds = computed(() =>
-		Math.max(1, Number.parseInt(settings.value.idle_refocus_seconds) || 3),
-	)
+		Math.max(1, Number.parseInt(settings.value.idle_refocus_seconds) || 3)
+	);
 	const allowSubmissionsInBackgroundJob = computed(() =>
-		Boolean(settings.value.allow_submissions_in_background_job),
-	)
+		Boolean(settings.value.allow_submissions_in_background_job)
+	);
 	const allowDeleteOfflineInvoice = computed(() =>
-		Boolean(settings.value.allow_delete_offline_invoice),
-	)
+		Boolean(settings.value.allow_delete_offline_invoice)
+	);
 	const allowChangePostingDate = computed(() =>
-		Boolean(settings.value.allow_change_posting_date),
-	)
+		Boolean(settings.value.allow_change_posting_date)
+	);
 
 	// Computed - Miscellaneous
-	const inputQty = computed(() => Boolean(settings.value.input_qty))
-	const allowNegativeStock = computed(() =>
-		Boolean(settings.value.allow_negative_stock),
-	)
+	const inputQty = computed(() => Boolean(settings.value.input_qty));
+	const allowNegativeStock = computed(() => Boolean(settings.value.allow_negative_stock));
 
 	// Computed - Sales Persons
-	const enableSalesPersons = computed(() =>
-		settings.value.enable_sales_persons !== "Disabled"
-	)
-	const salesPersonsMode = computed(() =>
-		settings.value.enable_sales_persons || "Disabled"
-	)
-	const isSingleSalesPerson = computed(() =>
-		settings.value.enable_sales_persons === "Single"
-	)
-	const isMultipleSalesPersons = computed(() =>
-		settings.value.enable_sales_persons === "Multiple"
-	)
+	const enableSalesPersons = computed(() => settings.value.enable_sales_persons !== "Disabled");
+	const salesPersonsMode = computed(() => settings.value.enable_sales_persons || "Disabled");
+	const isSingleSalesPerson = computed(() => settings.value.enable_sales_persons === "Single");
+	const isMultipleSalesPersons = computed(
+		() => settings.value.enable_sales_persons === "Multiple"
+	);
 
 	// Computed - Security
-	const enableSessionLock = computed(() =>
-		Boolean(settings.value.enable_session_lock),
-	)
+	const enableSessionLock = computed(() => Boolean(settings.value.enable_session_lock));
 	const sessionLockTimeout = computed(
-		() => Number.parseInt(settings.value.session_lock_timeout) || 5,
-	)
+		() => Number.parseInt(settings.value.session_lock_timeout) || 5
+	);
 
 	// Resource
 	const settingsResource = createResource({
 		url: "pos_next.pos_next.doctype.pos_settings.pos_settings.get_pos_settings",
 		onSuccess(data) {
 			if (data) {
-				Object.assign(settings.value, data)
-				isLoaded.value = true
+				Object.assign(settings.value, data);
+				isLoaded.value = true;
 			}
-			isLoading.value = false
+			isLoading.value = false;
 		},
 		onError(error) {
-			isLoading.value = false
+			isLoading.value = false;
 		},
-	})
+	});
 
 	// Actions
 	async function loadSettings(posProfile) {
 		if (!posProfile) {
-			return false
+			return false;
 		}
 
-		isLoading.value = true
-		settings.value.pos_profile = posProfile
+		isLoading.value = true;
+		settings.value.pos_profile = posProfile;
 
 		// OPTIMIZATION: Check if bootstrap has preloaded the settings
 		try {
-			const bootstrapStore = useBootstrapStore()
-			const preloadedSettings = bootstrapStore.getPreloadedPOSSettings()
+			const bootstrapStore = useBootstrapStore();
+			const preloadedSettings = bootstrapStore.getPreloadedPOSSettings();
 			if (preloadedSettings && Object.keys(preloadedSettings).length > 0) {
-				Object.assign(settings.value, preloadedSettings)
-				isLoaded.value = true
-				isLoading.value = false
-				return true
+				Object.assign(settings.value, preloadedSettings);
+				isLoaded.value = true;
+				isLoading.value = false;
+				return true;
 			}
 		} catch {
 			// Bootstrap store may not be available, fall through to API call
@@ -291,10 +227,10 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 
 		// Fallback to API call
 		try {
-			await settingsResource.submit({ pos_profile: posProfile })
-			return true
+			await settingsResource.submit({ pos_profile: posProfile });
+			return true;
 		} catch {
-			return false
+			return false;
 		}
 	}
 
@@ -355,8 +291,8 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 			// Security
 			enable_session_lock: 0,
 			session_lock_timeout: 5,
-		}
-		isLoaded.value = false
+		};
+		isLoaded.value = false;
 	}
 
 	/**
@@ -366,10 +302,10 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	 */
 	function validateDiscount(discountPercentage) {
 		if (!isEnabled.value || maxDiscountAllowed.value === 0) {
-			return true // No restriction if settings disabled or max = 0
+			return true; // No restriction if settings disabled or max = 0
 		}
 
-		return discountPercentage <= maxDiscountAllowed.value
+		return discountPercentage <= maxDiscountAllowed.value;
 	}
 
 	/**
@@ -377,7 +313,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	 * @returns {boolean} - True if negative stock is allowed
 	 */
 	function isNegativeStockAllowed() {
-		return isEnabled.value && Boolean(settings.value.allow_negative_stock)
+		return isEnabled.value && Boolean(settings.value.allow_negative_stock);
 	}
 
 	/**
@@ -385,7 +321,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	 * @returns {boolean} - True if stock validation should prevent negative stock
 	 */
 	function shouldEnforceStockValidation() {
-		return isEnabled.value && !Boolean(settings.value.allow_negative_stock)
+		return isEnabled.value && !Boolean(settings.value.allow_negative_stock);
 	}
 
 	/**
@@ -395,17 +331,17 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	 */
 	async function reloadSettings() {
 		if (!settings.value.pos_profile) {
-			return false
+			return false;
 		}
 
-		isLoading.value = true
+		isLoading.value = true;
 
 		try {
 			// Use submit with pos_profile to ensure proper reload
-			await settingsResource.submit({ pos_profile: settings.value.pos_profile })
-			return true
+			await settingsResource.submit({ pos_profile: settings.value.pos_profile });
+			return true;
 		} catch {
-			return false
+			return false;
 		}
 	}
 
@@ -500,5 +436,5 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		validateDiscount,
 		isNegativeStockAllowed,
 		shouldEnforceStockValidation,
-	}
-})
+	};
+});
