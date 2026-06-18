@@ -1564,3 +1564,8 @@ Points applied: {0}. Please pay remaining {1} with {2},تم خصم النقاط:
 "Show the complete customer list in the cart search dropdown instead of capping results at the first 10-20 matches.","عرض قائمة العملاء كاملة في قائمة البحث بدلاً من الاقتصار على أول 10-20 نتيجة.",""
 "All Customers","كل العملاء",""
 "Results","النتائج",""
+"Governorate","المحافظة",""
+"Select Governorate","اختر المحافظة",""
+"District","الحي",""
+"Select District","اختر الحي",""
+"Select a governorate first","اختر المحافظة أولاً",""
