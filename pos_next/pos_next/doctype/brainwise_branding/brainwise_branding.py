@@ -1,15 +1,16 @@
 # Copyright (c) 2025, BrainWise and contributors
 # For license information, please see license.txt
 
-import frappe
-from frappe.model.document import Document
+import base64
 import hashlib
 import hmac
 import json
-import base64
-from datetime import datetime
 import secrets
+from datetime import datetime
+from typing import ClassVar
 
+import frappe
+from frappe.model.document import Document
 
 # MASTER KEY HASH - Only the person with the original key can disable branding
 # This hash was created from: secrets.token_urlsafe(32)
@@ -22,7 +23,7 @@ PROTECTION_PHRASE_HASH = "3ddb5c12a034095ff81a85bbd06623a60e81252c296b747cf9c127
 
 class BrainWiseBranding(Document):
 	# Protected fields that require master key to modify
-	PROTECTED_FIELDS = ["enabled", "brand_text", "brand_name", "brand_url", "check_interval"]
+	PROTECTED_FIELDS: ClassVar = ["enabled", "brand_text", "brand_name", "brand_url", "check_interval"]
 
 	def validate(self):
 		"""Validate before saving - enforce master key requirement"""
@@ -111,7 +112,7 @@ class BrainWiseBranding(Document):
 				key_data = json.loads(self.master_key_provided)
 				master_key = key_data.get("key", "")
 				protection_phrase = key_data.get("phrase", "")
-			except:
+			except Exception:
 				# If not JSON, treat as plain key
 				master_key = self.master_key_provided
 				protection_phrase = ""
@@ -158,7 +159,7 @@ class BrainWiseBranding(Document):
 			return False
 
 		except Exception as e:
-			frappe.log_error(f"Master key validation error: {str(e)}", "BrainWise Branding")
+			frappe.log_error(f"Master key validation error: {e!s}", "BrainWise Branding")
 			return False
 
 	def generate_signature(self):
@@ -192,8 +193,8 @@ class BrainWiseBranding(Document):
 			return False
 
 		try:
-			# Decode stored signature
-			stored = json.loads(base64.b64decode(self.encrypted_signature))
+			# Decode stored signature (validates it is parseable; raises into except)
+			json.loads(base64.b64decode(self.encrypted_signature))
 
 			# Check if branding data matches
 			if (
@@ -204,7 +205,7 @@ class BrainWiseBranding(Document):
 
 			return True
 		except Exception as e:
-			frappe.log_error(f"Branding validation error: {str(e)}", "BrainWise Branding")
+			frappe.log_error(f"Branding validation error: {e!s}", "BrainWise Branding")
 			return False
 
 	def log_tampering(self, details):
@@ -249,12 +250,12 @@ def get_branding_config():
 
 		return config
 	except Exception as e:
-		frappe.log_error(f"Error fetching branding config: {str(e)}", "BrainWise Branding")
+		frappe.log_error(f"Error fetching branding config: {e!s}", "BrainWise Branding")
 		# Return default config even on error
 		return {
-			"_t": base64.b64encode("Powered by".encode()).decode(),
-			"_l": base64.b64encode("BrainWise".encode()).decode(),
-			"_u": base64.b64encode("https://nexus.brainwise.me".encode()).decode(),
+			"_t": base64.b64encode(b"Powered by").decode(),
+			"_l": base64.b64encode(b"BrainWise").decode(),
+			"_u": base64.b64encode(b"https://nexus.brainwise.me").decode(),
 			"_i": 10000,
 			"_v": True,
 			"_e": 1,
@@ -297,7 +298,7 @@ def validate_branding(client_signature=None, brand_name=None, brand_url=None):
 
 		return {"valid": is_valid, "enabled": True, "timestamp": frappe.utils.now()}
 	except Exception as e:
-		frappe.log_error(f"Error validating branding: {str(e)}", "BrainWise Branding")
+		frappe.log_error(f"Error validating branding: {e!s}", "BrainWise Branding")
 		return {"valid": False, "enabled": True, "error": str(e)}
 
 
@@ -314,7 +315,7 @@ def log_client_event(event_type=None, details=None):
 		if isinstance(details, str):
 			try:
 				details = json.loads(details)
-			except:
+			except Exception:
 				pass
 
 		# Log different event types
@@ -331,7 +332,7 @@ def log_client_event(event_type=None, details=None):
 
 		return {"logged": True}
 	except Exception as e:
-		frappe.log_error(f"Error logging client event: {str(e)}", "BrainWise Branding")
+		frappe.log_error(f"Error logging client event: {e!s}", "BrainWise Branding")
 		return {"logged": False, "error": str(e)}
 
 
@@ -352,7 +353,7 @@ def verify_master_key(master_key_input):
 			key_data = json.loads(master_key_input)
 			master_key = key_data.get("key", "")
 			protection_phrase = key_data.get("phrase", "")
-		except:
+		except Exception:
 			master_key = master_key_input
 			protection_phrase = ""
 
@@ -382,7 +383,7 @@ def verify_master_key(master_key_input):
 		}
 
 	except Exception as e:
-		frappe.log_error(f"Master key verification error: {str(e)}", "BrainWise Branding")
+		frappe.log_error(f"Master key verification error: {e!s}", "BrainWise Branding")
 		return {"valid": False, "error": str(e)}
 
 
