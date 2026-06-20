@@ -675,6 +675,26 @@
 				@refresh-history="loadInvoiceHistoryData"
 			/>
 
+			<!-- Credit Sales Summary Dialog -->
+			<CreditSalesSummaryDialog
+				v-model="uiStore.showCreditSalesSummary"
+				:pos-profile="shiftStore.profileName"
+				:currency="shiftStore.profileCurrency"
+				:company="shiftStore.profileCompany"
+				@select-customer="handleCreditSummarySelect"
+			/>
+
+			<!-- Customer Dues Dialog -->
+			<CustomerDuesDialog
+				v-model="showCustomerDues"
+				:customer="customerForDues"
+				:pos-profile="shiftStore.profileName"
+				:currency="shiftStore.profileCurrency"
+				:company="shiftStore.profileCompany"
+				@print-invoice="handlePrintInvoice"
+				@payment-completed="loadInvoiceHistoryData"
+			/>
+
 			<!-- Invoice Detail Dialog -->
 			<InvoiceDetailDialog
 				v-model="showInvoiceDetail"
@@ -1021,6 +1041,8 @@ import PromotionManagement from "@/components/sale/PromotionManagement.vue";
 import ReturnInvoiceDialog from "@/components/sale/ReturnInvoiceDialog.vue";
 import WarehouseAvailabilityDialog from "@/components/sale/WarehouseAvailabilityDialog.vue";
 import POSSettings from "@/components/settings/POSSettings.vue";
+import CreditSalesSummaryDialog from "@/components/customers/CreditSalesSummaryDialog.vue";
+import CustomerDuesDialog from "@/components/customers/CustomerDuesDialog.vue";
 import InvoiceManagement from "@/components/invoices/InvoiceManagement.vue";
 import InvoiceDetailDialog from "@/components/invoices/InvoiceDetailDialog.vue";
 import { useRealtimeStock } from "@/composables/useRealtimeStock";
@@ -1153,6 +1175,9 @@ const showStockLookup = ref(false);
 
 // Invoice Management dialog
 const showInvoiceManagement = ref(false);
+// Customer for the Customer Dues (credit statement) dialog
+const showCustomerDues = ref(false);
+const customerForDues = ref(null);
 
 // Invoice Detail dialog
 const showInvoiceDetail = ref(false);
@@ -2872,7 +2897,16 @@ function handleManagementMenuClick(menuItem) {
 	} else if (menuItem === "products") {
 		// Open Stock Lookup dialog in search mode
 		showStockLookup.value = true;
+	} else if (menuItem === "credit-sales") {
+		uiStore.showCreditSalesSummary = true;
 	}
+}
+
+// Drill from the Credit Sales summary into a customer's account statement.
+// The summary dialog stays open underneath; the statement (z-[300]) covers it.
+function handleCreditSummarySelect(customerId) {
+	customerForDues.value = customerId;
+	showCustomerDues.value = true;
 }
 
 // Load invoice history data
