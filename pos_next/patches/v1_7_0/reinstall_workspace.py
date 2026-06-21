@@ -102,11 +102,14 @@ def _load_workspace_data(workspace_file: Path):
 		)
 		return None
 
-	if not isinstance(workspace_data, list) or not workspace_data:
-		frappe.log_error(
-			title="Invalid Workspace Structure",
-			message=f"Workspace JSON must be a non-empty array: {workspace_file}",
-		)
-		return None
+	if isinstance(workspace_data, dict):
+		return workspace_data
 
-	return workspace_data[0]
+	if isinstance(workspace_data, list) and workspace_data:
+		return workspace_data[0]
+
+	frappe.log_error(
+		title="Invalid Workspace Structure",
+		message=f"Workspace JSON must be an object or non-empty array: {workspace_file}",
+	)
+	return None
