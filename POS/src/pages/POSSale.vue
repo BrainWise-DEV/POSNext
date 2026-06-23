@@ -1036,6 +1036,7 @@ import { cacheOfflineReceiptPayload } from "@/utils/offline/offlineReceiptCache"
 import { cacheInvoiceHistory, getCachedInvoiceHistory } from "@/utils/offline/sync";
 import {
 	hydrateLocalOnlyInvoice,
+	isLocalOnlyInvoiceName,
 	printInvoice,
 	printInvoiceByName,
 	printWithSilentFallback,
@@ -1046,6 +1047,7 @@ import { Button, Dialog, createResource } from "frappe-ui";
 import { call } from "@/utils/apiWrapper";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useToast } from "@/composables/useToast";
+import { useReprintPermission } from "@/composables/useReprintPermission";
 
 import { useCustomerSearchStore } from "@/stores/customerSearch";
 import { useItemSearchStore } from "@/stores/itemSearch";
@@ -1097,6 +1099,8 @@ const {
 
 // Initialize toast
 const { showSuccess, showError, showWarning } = useToast();
+const { isHistoryPrintDisabled, historyPrintTitle, isPrintDisabled, printTitle } =
+	useReprintPermission();
 
 // Initialize logger
 const log = logger.create("POSSale");
@@ -2939,6 +2943,11 @@ function handleViewInvoice(invoice) {
 	showInvoiceDetail.value = true;
 }
 
+function isInvoiceFromHistory(invoiceData) {
+	if (!invoiceData?.name || isLocalOnlyInvoiceName(invoiceData.name)) return false;
+	return invoiceHistoryData.value.some((inv) => inv.name === invoiceData.name);
+}
+
 // Centralized print handler - uses printInvoice.js utilities
 async function handlePrintInvoice(invoiceData) {
 	try {
@@ -2950,6 +2959,15 @@ async function handlePrintInvoice(invoiceData) {
 			offlineSnapshot.items?.length > 0
 		) {
 			invoiceData = offlineSnapshot;
+		}
+
+		if (isInvoiceFromHistory(invoiceData) && isHistoryPrintDisabled()) {
+			showWarning(historyPrintTitle());
+			return;
+		}
+		if (isPrintDisabled(invoiceData)) {
+			showWarning(printTitle(invoiceData));
+			return;
 		}
 
 		// Silent print path — send directly to thermal printer via QZ Tray

@@ -1663,7 +1663,8 @@ def get_invoices(pos_profile: str, limit: int = 100, start: int = 0) -> list:
 			status,
 			docstatus,
 			is_return,
-			return_against
+			return_against,
+			posa_is_printed
 		FROM
 			`tabSales Invoice`
 		WHERE

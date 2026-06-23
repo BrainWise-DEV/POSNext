@@ -65,6 +65,7 @@ def get_initial_data():
 		"locale": _get_user_language(),
 		"precision": _get_precision_settings(),
 		"can_switch_to_desk": "Nexus POS Manager" in frappe.get_roles(),
+		"user_roles": frappe.get_roles(frappe.session.user),
 		"shift": None,
 		"pos_profile": None,
 		"pos_settings": None,
