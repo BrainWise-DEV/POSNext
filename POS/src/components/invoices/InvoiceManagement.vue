@@ -739,10 +739,27 @@
 												</svg>
 												<span>{{ __("View") }}</span>
 											</button>
-											<PrintInvoiceButton
-												:invoice="invoice"
+											<button
 												@click="$emit('print-invoice', invoice)"
-											/>
+												:disabled="isPrintDisabled(invoice)"
+												class="px-3 py-2 text-xs font-semibold text-green-600 bg-green-50 hover:bg-green-100 rounded-lg transition-colors flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-green-50"
+												:title="printTitle(invoice)"
+											>
+												<svg
+													class="w-4 h-4"
+													fill="none"
+													stroke="currentColor"
+													viewBox="0 0 24 24"
+												>
+													<path
+														stroke-linecap="round"
+														stroke-linejoin="round"
+														stroke-width="2"
+														d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"
+													/>
+												</svg>
+												<span>{{ __("Print") }}</span>
+											</button>
 										</div>
 									</div>
 								</div>
@@ -960,10 +977,26 @@
 															/>
 														</svg>
 													</button>
-													<PrintInvoiceButton
-														:invoice="invoice"
+													<button
 														@click="$emit('print-invoice', invoice)"
-													/>
+														:disabled="isPrintDisabled(invoice)"
+														class="p-1.5 hover:bg-green-50 rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+														:title="printTitle(invoice)"
+													>
+														<svg
+															class="w-4 h-4 text-green-600"
+															fill="none"
+															stroke="currentColor"
+															viewBox="0 0 24 24"
+														>
+															<path
+																stroke-linecap="round"
+																stroke-linejoin="round"
+																stroke-width="2"
+																d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"
+															/>
+														</svg>
+													</button>
 												</div>
 											</div>
 										</div>
@@ -995,8 +1028,8 @@
 <script setup>
 import InvoiceFilters from "@/components/invoices/InvoiceFilters.vue";
 import PaymentDialog from "@/components/sale/PaymentDialog.vue";
-import PrintInvoiceButton from "@/components/common/PrintInvoiceButton.vue";
 import { useInvoiceFilters } from "@/composables/useInvoiceFilters";
+import { useReprintPermission } from "@/composables/useReprintPermission";
 import { useInvoiceFiltersStore } from "@/stores/invoiceFilters";
 import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency";
 import { getInvoiceStatusColor } from "@/utils/invoice";
@@ -1015,6 +1048,7 @@ import { logger } from "@/utils/logger";
 
 const log = logger.create("InvoiceManagement");
 const { showSuccess, showError } = useToast();
+const { isPrintDisabled, printTitle } = useReprintPermission();
 const { formatDate, formatDateTime, formatTime } = useFormatters();
 
 const props = defineProps({

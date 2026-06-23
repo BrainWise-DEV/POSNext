@@ -1666,7 +1666,7 @@ def get_invoices(pos_profile: str, limit: int = 100, start: int = 0) -> list:
 			docstatus,
 			is_return,
 			return_against,
-			posa_is_printed
+			1 AS is_printed
 		FROM
 			`tabSales Invoice`
 		WHERE
@@ -1734,8 +1734,6 @@ def get_invoices(pos_profile: str, limit: int = 100, start: int = 0) -> list:
 			as_dict=True,
 		)
 		invoice.items = items
-		# Submitted POS invoices listed here are always reprints.
-		invoice.is_printed = True
 
 	return invoices
 

@@ -145,7 +145,26 @@
 											/>
 										</svg>
 									</button>
-									<PrintInvoiceButton :invoice="invoice" @click="printInvoice(invoice)" />
+									<button
+										@click="printInvoice(invoice)"
+										:disabled="isPrintDisabled(invoice)"
+										class="p-1.5 hover:bg-green-50 rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+										:title="printTitle(invoice)"
+									>
+										<svg
+											class="w-4 h-4 text-green-600"
+											fill="none"
+											stroke="currentColor"
+											viewBox="0 0 24 24"
+										>
+											<path
+												stroke-linecap="round"
+												stroke-linejoin="round"
+												stroke-width="2"
+												d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"
+											/>
+										</svg>
+									</button>
 									<button
 										v-if="canCreateReturn(invoice)"
 										@click="openReturnModal(invoice)"
@@ -199,8 +218,8 @@
 </template>
 
 <script setup>
-import PrintInvoiceButton from "@/components/common/PrintInvoiceButton.vue";
 import { useToast } from "@/composables/useToast";
+import { useReprintPermission } from "@/composables/useReprintPermission";
 import { useFormatters } from "@/composables/useFormatters";
 import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency";
 import { getInvoiceStatusColor } from "@/utils/invoice";
@@ -210,6 +229,7 @@ import ReturnInvoiceDialog from "./ReturnInvoiceDialog.vue";
 
 const { showError } = useToast();
 const { formatDate, formatTime } = useFormatters();
+const { isPrintDisabled, printTitle } = useReprintPermission();
 
 const props = defineProps({
 	modelValue: Boolean,

@@ -21,16 +21,6 @@ export function useReprintPermission() {
 	const userRoles = computed(() => useBootstrapStore().data?.user_roles ?? []);
 	const posProfile = computed(() => usePOSShiftStore().currentProfile);
 
-	const printButtonBase =
-		"inline-flex items-center justify-center p-1.5 rounded-lg border transition-colors";
-
-	function printButtonClass(blocked) {
-		if (blocked) {
-			return `${printButtonBase} text-gray-400 bg-gray-50 border-gray-200 cursor-not-allowed`;
-		}
-		return `${printButtonBase} text-green-600 bg-green-50 border-green-100 hover:bg-green-100`;
-	}
-
 	function isPrintDisabled(invoice) {
 		if (!userLacksReprintRole(userRoles.value, posProfile.value)) return false;
 		return isInvoicePrinted(invoice);
@@ -43,6 +33,5 @@ export function useReprintPermission() {
 	return {
 		isPrintDisabled,
 		printTitle,
-		printButtonClass,
 	};
 }

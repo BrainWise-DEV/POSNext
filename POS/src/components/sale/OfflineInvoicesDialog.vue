@@ -208,7 +208,26 @@
 										/>
 									</svg>
 								</button>
-								<PrintInvoiceButton :invoice="invoice" @click="printInvoice(invoice)" />
+								<button
+									@click="printInvoice(invoice)"
+									:disabled="isPrintDisabled(invoice)"
+									class="p-1.5 sm:p-2 hover:bg-green-50 rounded-lg transition-colors touch-manipulation disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+									:title="printTitle(invoice)"
+								>
+									<svg
+										class="w-4 h-4 sm:w-5 sm:h-5 text-green-600"
+										fill="none"
+										stroke="currentColor"
+										viewBox="0 0 24 24"
+									>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											stroke-width="2"
+											d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"
+										/>
+									</svg>
+								</button>
 								<button
 									@click="deleteInvoice(invoice)"
 									:disabled="isSyncing"
@@ -397,8 +416,8 @@
 </template>
 
 <script setup>
-import PrintInvoiceButton from "@/components/common/PrintInvoiceButton.vue";
 import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency";
+import { useReprintPermission } from "@/composables/useReprintPermission";
 import { Button, Dialog } from "frappe-ui";
 import { computed, ref, watch } from "vue";
 
@@ -421,6 +440,8 @@ const props = defineProps({
 		default: DEFAULT_CURRENCY,
 	},
 });
+
+const { isPrintDisabled, printTitle } = useReprintPermission();
 
 const emit = defineEmits([
 	"update:modelValue",
