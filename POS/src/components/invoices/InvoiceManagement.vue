@@ -740,9 +740,7 @@
 												<span>{{ __("View") }}</span>
 											</button>
 											<PrintInvoiceButton
-												:disabled="historyPrintBlocked"
-												:button-class="printButtonClass(historyPrintBlocked)"
-												:title="historyPrintTitle()"
+												:invoice="invoice"
 												@click="$emit('print-invoice', invoice)"
 											/>
 										</div>
@@ -963,9 +961,7 @@
 														</svg>
 													</button>
 													<PrintInvoiceButton
-														:disabled="historyPrintBlocked"
-														:button-class="printButtonClass(historyPrintBlocked)"
-														:title="historyPrintTitle()"
+														:invoice="invoice"
 														@click="$emit('print-invoice', invoice)"
 													/>
 												</div>
@@ -1000,7 +996,6 @@
 import InvoiceFilters from "@/components/invoices/InvoiceFilters.vue";
 import PaymentDialog from "@/components/sale/PaymentDialog.vue";
 import PrintInvoiceButton from "@/components/common/PrintInvoiceButton.vue";
-import { useReprintPermission } from "@/composables/useReprintPermission";
 import { useInvoiceFilters } from "@/composables/useInvoiceFilters";
 import { useInvoiceFiltersStore } from "@/stores/invoiceFilters";
 import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency";
@@ -1020,7 +1015,6 @@ import { logger } from "@/utils/logger";
 
 const log = logger.create("InvoiceManagement");
 const { showSuccess, showError } = useToast();
-const { historyPrintBlocked, historyPrintTitle, printButtonClass } = useReprintPermission();
 const { formatDate, formatDateTime, formatTime } = useFormatters();
 
 const props = defineProps({

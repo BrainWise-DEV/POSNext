@@ -145,12 +145,7 @@
 											/>
 										</svg>
 									</button>
-									<PrintInvoiceButton
-										:disabled="historyPrintBlocked"
-										:button-class="printButtonClass(historyPrintBlocked)"
-										:title="historyPrintTitle()"
-										@click="printInvoice(invoice)"
-									/>
+									<PrintInvoiceButton :invoice="invoice" @click="printInvoice(invoice)" />
 									<button
 										v-if="canCreateReturn(invoice)"
 										@click="openReturnModal(invoice)"
@@ -205,7 +200,6 @@
 
 <script setup>
 import PrintInvoiceButton from "@/components/common/PrintInvoiceButton.vue";
-import { useReprintPermission } from "@/composables/useReprintPermission";
 import { useToast } from "@/composables/useToast";
 import { useFormatters } from "@/composables/useFormatters";
 import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency";
@@ -215,7 +209,6 @@ import { computed, ref, watch } from "vue";
 import ReturnInvoiceDialog from "./ReturnInvoiceDialog.vue";
 
 const { showError } = useToast();
-const { historyPrintBlocked, historyPrintTitle, printButtonClass } = useReprintPermission();
 const { formatDate, formatTime } = useFormatters();
 
 const props = defineProps({

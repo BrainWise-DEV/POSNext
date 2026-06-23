@@ -19,11 +19,18 @@
 </template>
 
 <script setup>
-defineProps({
-	disabled: { type: Boolean, default: false },
-	buttonClass: { type: String, required: true },
-	title: { type: String, default: "" },
+import { useReprintPermission } from "@/composables/useReprintPermission";
+import { computed } from "vue";
+
+const props = defineProps({
+	invoice: { type: Object, default: null },
 });
 
 defineEmits(["click"]);
+
+const { isPrintDisabled, printTitle, printButtonClass } = useReprintPermission();
+
+const disabled = computed(() => (props.invoice ? isPrintDisabled(props.invoice) : false));
+const title = computed(() => (props.invoice ? printTitle(props.invoice) : __("Print")));
+const buttonClass = computed(() => printButtonClass(disabled.value));
 </script>
