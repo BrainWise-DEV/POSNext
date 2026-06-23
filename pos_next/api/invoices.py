@@ -1619,8 +1619,10 @@ def get_invoice(invoice_name):
 
 	# Get invoice document
 	invoice = frappe.get_doc("Sales Invoice", invoice_name)
-
-	return invoice.as_dict()
+	result = invoice.as_dict()
+	# Submitted invoices in history are always reprints; drafts use posa_is_printed.
+	result["is_printed"] = cint(result.get("posa_is_printed")) == 1 or cint(result.get("docstatus")) == 1
+	return result
 
 
 @frappe.whitelist()
@@ -1663,7 +1665,8 @@ def get_invoices(pos_profile: str, limit: int = 100, start: int = 0) -> list:
 			status,
 			docstatus,
 			is_return,
-			return_against
+			return_against,
+			1 AS is_printed
 		FROM
 			`tabSales Invoice`
 		WHERE

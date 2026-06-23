@@ -3,6 +3,13 @@
  * Common helpers for invoice-related operations across the application
  */
 
+/** Whether a receipt was already printed (server, history, or offline queue). */
+export function isInvoicePrinted(invoice) {
+	if (invoice?.is_printed != null) return Boolean(invoice.is_printed);
+	if (Number(invoice?.posa_is_printed) === 1) return true;
+	return Boolean(invoice?.data?.was_printed);
+}
+
 /**
  * Get the appropriate CSS classes for invoice status badge
  * @param {Object} invoice - Invoice object with status and docstatus fields

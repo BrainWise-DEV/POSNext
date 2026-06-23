@@ -1046,6 +1046,7 @@ import { Button, Dialog, createResource } from "frappe-ui";
 import { call } from "@/utils/apiWrapper";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useToast } from "@/composables/useToast";
+import { useReprintPermission } from "@/composables/useReprintPermission";
 
 import { useCustomerSearchStore } from "@/stores/customerSearch";
 import { useItemSearchStore } from "@/stores/itemSearch";
@@ -1097,6 +1098,7 @@ const {
 
 // Initialize toast
 const { showSuccess, showError, showWarning } = useToast();
+const { isPrintDisabled, printTitle } = useReprintPermission();
 
 // Initialize logger
 const log = logger.create("POSSale");
@@ -2950,6 +2952,11 @@ async function handlePrintInvoice(invoiceData) {
 			offlineSnapshot.items?.length > 0
 		) {
 			invoiceData = offlineSnapshot;
+		}
+
+		if (isPrintDisabled(invoiceData)) {
+			showWarning(printTitle(invoiceData));
+			return;
 		}
 
 		// Silent print path — send directly to thermal printer via QZ Tray

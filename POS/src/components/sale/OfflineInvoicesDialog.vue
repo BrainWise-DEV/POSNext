@@ -210,12 +210,9 @@
 								</button>
 								<button
 									@click="printInvoice(invoice)"
-									class="p-1.5 sm:p-2 hover:bg-green-50 rounded-lg transition-colors touch-manipulation"
-									:title="
-										invoice.data?.was_printed
-											? __('Reprint receipt (already printed once)')
-											: __('Print receipt')
-									"
+									:disabled="isPrintDisabled(invoice)"
+									class="p-1.5 sm:p-2 hover:bg-green-50 rounded-lg transition-colors touch-manipulation disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+									:title="printTitle(invoice)"
 								>
 									<svg
 										class="w-4 h-4 sm:w-5 sm:h-5 text-green-600"
@@ -420,6 +417,7 @@
 
 <script setup>
 import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency";
+import { useReprintPermission } from "@/composables/useReprintPermission";
 import { Button, Dialog } from "frappe-ui";
 import { computed, ref, watch } from "vue";
 
@@ -442,6 +440,8 @@ const props = defineProps({
 		default: DEFAULT_CURRENCY,
 	},
 });
+
+const { isPrintDisabled, printTitle } = useReprintPermission();
 
 const emit = defineEmits([
 	"update:modelValue",

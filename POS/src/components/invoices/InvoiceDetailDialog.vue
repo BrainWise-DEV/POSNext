@@ -465,7 +465,10 @@
 				<Button variant="subtle" @click="show = false">
 					{{ __("Close") }}
 				</Button>
-				<Button @click="handlePrint">
+				<Button
+					@click="handlePrint"
+					:disabled="invoiceData && isPrintDisabled(invoiceData)"
+				>
 					<template #prefix>
 						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 							<path
@@ -485,6 +488,7 @@
 
 <script setup>
 import { useFormatters } from "@/composables/useFormatters";
+import { useReprintPermission } from "@/composables/useReprintPermission";
 import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency";
 import { getInvoiceStatusColor } from "@/utils/invoice";
 import { logger } from "@/utils/logger";
@@ -494,6 +498,7 @@ import { ref, watch, nextTick, computed } from "vue";
 
 const log = logger.create("InvoiceDetailDialog");
 const { formatDate, formatTime } = useFormatters();
+const { isPrintDisabled, printTitle } = useReprintPermission();
 
 const props = defineProps({
 	modelValue: Boolean,

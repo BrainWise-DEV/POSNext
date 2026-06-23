@@ -147,8 +147,9 @@
 									</button>
 									<button
 										@click="printInvoice(invoice)"
-										class="p-1.5 hover:bg-green-50 rounded transition-colors"
-										:title="__('Print')"
+										:disabled="isPrintDisabled(invoice)"
+										class="p-1.5 hover:bg-green-50 rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
+										:title="printTitle(invoice)"
 									>
 										<svg
 											class="w-4 h-4 text-green-600"
@@ -218,6 +219,7 @@
 
 <script setup>
 import { useToast } from "@/composables/useToast";
+import { useReprintPermission } from "@/composables/useReprintPermission";
 import { useFormatters } from "@/composables/useFormatters";
 import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency";
 import { getInvoiceStatusColor } from "@/utils/invoice";
@@ -227,6 +229,7 @@ import ReturnInvoiceDialog from "./ReturnInvoiceDialog.vue";
 
 const { showError } = useToast();
 const { formatDate, formatTime } = useFormatters();
+const { isPrintDisabled, printTitle } = useReprintPermission();
 
 const props = defineProps({
 	modelValue: Boolean,
