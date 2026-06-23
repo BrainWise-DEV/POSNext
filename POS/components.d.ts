@@ -51,7 +51,6 @@ declare module 'vue' {
     SessionLockScreen: typeof import('./src/components/common/SessionLockScreen.vue')['default']
     SettingsSection: typeof import('./src/components/settings/SettingsSection.vue')['default']
     ShiftClosingDialog: typeof import('./src/components/ShiftClosingDialog.vue')['default']
-    ShiftHistoryDialog: typeof import('./src/components/sale/ShiftHistoryDialog.vue')['default']
     ShiftOpeningDialog: typeof import('./src/components/ShiftOpeningDialog.vue')['default']
     StatusBadge: typeof import('./src/components/common/StatusBadge.vue')['default']
     Toast: typeof import('./src/components/common/Toast.vue')['default']
