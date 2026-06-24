@@ -33,7 +33,7 @@
 									ref="invoiceSearchInput"
 									v-model="invoiceListFilter"
 									type="text"
-									:placeholder="isOffline ? __('Search unavailable offline') : __('Search by invoice, customer, or mobile...')"
+									:placeholder="isOffline ? __('Search unavailable offline') : __('Search by invoice, customer, mobile or item code...')"
 									:disabled="isOffline"
 									:class="[
 										'w-full ps-10 pe-10 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500',
@@ -1304,7 +1304,14 @@ const filterInvoicesByTerm = (invoices, searchTerm) => {
 		(invoice) =>
 			invoice.name.toLowerCase().includes(term) ||
 			invoice.customer_name?.toLowerCase().includes(term) ||
-			invoice.contact_mobile?.toLowerCase().includes(term),
+			invoice.contact_mobile?.toLowerCase().includes(term) ||
+			// Search across invoice items by item_code or item_name
+			(Array.isArray(invoice.items) &&
+				invoice.items.some(
+					(item) =>
+						item.item_code?.toLowerCase().includes(term) ||
+						item.item_name?.toLowerCase().includes(term),
+				)),
 	)
 }
 
@@ -1350,12 +1357,11 @@ watch(normalizedSearchTerm, (searchTerm) => {
 
 	// Early exit conditions
 	if (!searchTerm || searchTerm.length < MIN_SERVER_SEARCH_LENGTH) return
-	if (!looksLikeInvoiceNumber(searchTerm)) return
 
 	// Check if we already have this in local results (reuse filtered list)
 	if (filteredInvoiceList.value.length > 0) return
 
-	// Debounce server search
+	// Debounce server search — triggers for both invoice numbers AND item codes
 	serverSearchTimeout = setTimeout(() => {
 		searchInvoiceByNumberResource.submit({
 			search_term: searchTerm,
