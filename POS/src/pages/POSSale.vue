@@ -1909,8 +1909,8 @@ async function handleItemSelected(item, autoAdd = false) {
 	// 	return;
 	// }
 
-	// Check for batch/serial
-	if (item.has_batch_no || item.has_serial_no) {
+	// Check for batch/serial — skip dialog for service/non-stock items (no batches to pick)
+	if ((item.has_batch_no || item.has_serial_no) && item.is_stock_item !== 0) {
 		cartStore.setPendingItem(item, 1);
 		uiStore.showBatchSerialDialog = true;
 		return;
@@ -2323,7 +2323,8 @@ async function handleOptionSelected(option) {
 				return;
 			}
 
-			if (variant.has_batch_no || variant.has_serial_no) {
+			// Skip batch dialog for service/non-stock items
+			if ((variant.has_batch_no || variant.has_serial_no) && variant.is_stock_item !== 0) {
 				cartStore.setPendingItem(variant, cartStore.pendingItemQty);
 				uiStore.showItemSelectionDialog = false;
 				uiStore.showBatchSerialDialog = true;
@@ -2372,7 +2373,8 @@ async function handleOptionSelected(option) {
 				price_list_rate: pricing.price_list_rate,
 			};
 
-			if (itemToAdd.has_batch_no || itemToAdd.has_serial_no) {
+			// Skip batch dialog for service/non-stock items
+			if ((itemToAdd.has_batch_no || itemToAdd.has_serial_no) && itemToAdd.is_stock_item !== 0) {
 				cartStore.setPendingItem(itemToAdd, qty);
 				uiStore.showItemSelectionDialog = false;
 				uiStore.showBatchSerialDialog = true;

@@ -667,11 +667,16 @@ def _collect_stock_errors(items):
     """Return list of items exceeding available stock.
 
     Respects per-item allow_negative_stock if the field exists on Item.
+    Skips service/non-stock items (is_stock_item = 0) entirely.
     """
     allowed_items = _get_item_negative_stock_allow_set(items)
     errors = []
     for d in items:
         if flt(d.get("qty")) < 0:
+            continue
+
+        # Skip non-stock items (e.g. service items) - no batch/bin check needed
+        if cint(d.get("is_stock_item")) == 0:
             continue
 
         available = _get_available_stock(d)
@@ -1916,16 +1921,17 @@ def get_invoice(invoice_name):
 
 
 @frappe.whitelist()
-def get_invoices(pos_profile, limit=100):
+def get_invoices(pos_profile, limit=20, start=0):
     """
     Get list of invoices for a POS Profile.
 
     Args:
         pos_profile: POS Profile name
-        limit: Maximum number of invoices to return (default 100)
+        limit: Maximum number of invoices to return per page (default 20)
+        start: Offset for pagination (default 0)
 
     Returns:
-        List of invoices with details
+        List of invoices with details including items (item_code, item_name)
     """
     if not pos_profile:
         frappe.throw(_("POS Profile is required"))
@@ -1939,7 +1945,10 @@ def get_invoices(pos_profile, limit=100):
     if not has_access and not frappe.has_permission("Sales Invoice", "read"):
         frappe.throw(_("You don't have access to this POS Profile"))
 
-    # Query for invoices
+    limit = int(limit)
+    start = int(start)
+
+    # Query for invoices with pagination
     invoices = frappe.db.sql("""
         SELECT
             name,
@@ -1963,10 +1972,11 @@ def get_invoices(pos_profile, limit=100):
         ORDER BY
             posting_date DESC,
             posting_time DESC
-        LIMIT %(limit)s
+        LIMIT %(limit)s OFFSET %(start)s
     """, {
         "pos_profile": pos_profile,
-        "limit": limit
+        "limit": limit,
+        "start": start,
     }, as_dict=True)
 
     # Load items for each invoice for filtering purposes
@@ -2197,20 +2207,48 @@ def get_returnable_invoices(limit=50, pos_profile=None):
     candidates = query.run(as_dict=True)
 
     # Step 2: filter out fully-returned invoices, then trim to requested limit
-    return _filter_fully_returned(candidates)[:cint(limit)]
+    results = _filter_fully_returned(candidates)[:cint(limit)]
+
+    # Step 3: attach item codes for client-side item-code search
+    _attach_item_codes(results)
+
+    return results
+
+
+def _attach_item_codes(invoices):
+    """Attach a flat list of item codes to each invoice dict (batch query, no N+1)."""
+    if not invoices:
+        return
+    invoice_names = [inv["name"] for inv in invoices]
+    sii = frappe.qb.DocType("Sales Invoice Item")
+    rows = (
+        frappe.qb.from_(sii)
+        .select(sii.parent, sii.item_code, sii.item_name)
+        .where(sii.parent.isin(invoice_names))
+    ).run(as_dict=True)
+
+    # Build a map: invoice_name -> [(item_code, item_name), ...]
+    item_map = {}
+    for row in rows:
+        item_map.setdefault(row["parent"], []).append(
+            {"item_code": row["item_code"], "item_name": row["item_name"]}
+        )
+
+    for inv in invoices:
+        inv["items"] = item_map.get(inv["name"], [])
 
 
 @frappe.whitelist()
 def search_invoice_by_number(search_term, pos_profile=None):
-    """Search for invoices by invoice number across the entire database.
+    """Search for invoices by invoice number OR item code across the entire database.
     No date restrictions - searches all returnable invoices matching the term.
 
     Two-step approach for performance:
-    1. Find matching POS invoices by name (fast indexed LIKE query)
+    1. Find matching POS invoices by name OR by item_code in child table
     2. Filter out fully-returned ones via _filter_fully_returned
 
     Args:
-        search_term: Invoice number or partial number to search for (min 3 chars)
+        search_term: Invoice number, partial number, or item code to search for (min 3 chars)
         pos_profile: Optional POS profile for context (reserved for future use)
 
     Returns:
@@ -2220,32 +2258,64 @@ def search_invoice_by_number(search_term, pos_profile=None):
         return []
 
     # Escape LIKE wildcards in user input to prevent pattern abuse.
-    # frappe.db.escape() returns a quoted string for raw SQL — not usable with
-    # frappe.qb's .like() which parameterizes internally. Manual escaping needed.
     search_term = cstr(search_term).strip().replace("%", r"\%").replace("_", r"\_")
     si = frappe.qb.DocType("Sales Invoice")
+    sii = frappe.qb.DocType("Sales Invoice Item")
 
-    # Step 1: find matching invoices (lightweight, no JOINs)
-    candidates = (
+    base_conditions = (
+        (si.docstatus == 1)
+        & (si.is_return == 0)
+        & (si.is_pos == 1)
+    )
+
+    # Search by invoice name
+    name_candidates = (
         frappe.qb.from_(si)
         .select(
             si.name, si.customer, si.customer_name,
             si.contact_mobile, si.posting_date,
             si.grand_total, si.status,
         )
-        .where(
-            (si.docstatus == 1)
-            & (si.is_return == 0)
-            & (si.is_pos == 1)
-            & (si.name.like(f"%{search_term}%"))
-        )
+        .where(base_conditions & si.name.like(f"%{search_term}%"))
         .orderby(si.posting_date, order=frappe.qb.desc)
         .orderby(si.creation, order=frappe.qb.desc)
         .limit(10)
     ).run(as_dict=True)
 
+    # Search by item_code in Sales Invoice Item (subquery)
+    item_subquery = (
+        frappe.qb.from_(sii)
+        .select(sii.parent)
+        .where(sii.item_code.like(f"%{search_term}%"))
+    )
+    item_candidates = (
+        frappe.qb.from_(si)
+        .select(
+            si.name, si.customer, si.customer_name,
+            si.contact_mobile, si.posting_date,
+            si.grand_total, si.status,
+        )
+        .where(base_conditions & si.name.isin(item_subquery))
+        .orderby(si.posting_date, order=frappe.qb.desc)
+        .orderby(si.creation, order=frappe.qb.desc)
+        .limit(10)
+    ).run(as_dict=True)
+
+    # Merge, deduplicate, keep order (name results first)
+    seen = set()
+    combined = []
+    for inv in name_candidates + item_candidates:
+        if inv["name"] not in seen:
+            seen.add(inv["name"])
+            combined.append(inv)
+
     # Step 2: filter out fully-returned invoices
-    return _filter_fully_returned(candidates)
+    results = _filter_fully_returned(combined[:10])
+
+    # Attach item codes for client-side display / filtering
+    _attach_item_codes(results)
+
+    return results
 
 
 @frappe.whitelist()

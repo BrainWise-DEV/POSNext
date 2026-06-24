@@ -327,7 +327,8 @@ export function useInvoice() {
 					Number.parseFloat(item.rate) ||
 					0,
 			}
-			invoiceItems.value.push(newItem)
+
+			invoiceItems.value.unshift(newItem)
 			// Recalculate the newly added item to apply taxes
 			recalculateItem(newItem)
 
