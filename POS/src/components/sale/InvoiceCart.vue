@@ -862,6 +862,11 @@
 								</button>
 							</div>
 
+							<!-- Item Code -->
+							<p class="text-[10px] text-gray-400 font-mono truncate leading-tight mb-0.5">
+								{{ item.item_code }}
+							</p>
+
 							<!-- Single Row: Quantity Counter, UOM, Price & Total -->
 							<div class="flex items-center justify-between gap-1.5">
 								<div class="flex items-center gap-1.5">
