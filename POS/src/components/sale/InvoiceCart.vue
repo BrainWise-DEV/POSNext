@@ -863,7 +863,7 @@
 							</div>
 
 							<!-- Item Code -->
-							<p class="text-[10px] text-gray-400 font-mono truncate leading-tight mb-0.5">
+							<p class="text-[15px] text-blue-900 font-mono font-bold truncate leading-tight mb-0.5">
 								{{ item.item_code }}
 							</p>
 
