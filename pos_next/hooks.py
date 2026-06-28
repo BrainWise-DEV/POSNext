@@ -48,7 +48,11 @@ _asset_version = get_build_version()
 # page_js = {"page" : "public/js/file.js"}
 
 # include js in doctype views
-doctype_js = {"Customer": "public/js/customer.js"}
+doctype_js = {
+	"Customer": "public/js/customer.js",
+	"Pricing Rule": "public/js/pricing_rule.js",
+	"Promotional Scheme": "public/js/promotional_scheme.js",
+}
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
@@ -151,6 +155,7 @@ doc_events = {
 		"validate": [
 			"pos_next.api.sales_invoice_hooks.validate",
 			"pos_next.api.wallet.validate_wallet_payment",
+			"pos_next.overrides.pricing_rule.apply_min_max_price_discounts",
 		],
 		"before_cancel": "pos_next.api.sales_invoice_hooks.before_cancel",
 		"on_submit": [
@@ -165,7 +170,15 @@ doc_events = {
 		"after_insert": "pos_next.realtime_events.emit_invoice_created_event",
 	},
 	"POS Profile": {"on_update": "pos_next.realtime_events.emit_pos_profile_updated_event"},
-	"Promotional Scheme": {"on_update": "pos_next.overrides.pricing_rule.sync_pos_only_to_pricing_rules"},
+	"Promotional Scheme": {
+		"validate": "pos_next.overrides.pricing_rule.enforce_min_max_pricing_config",
+		"on_update": "pos_next.overrides.pricing_rule.sync_pos_only_to_pricing_rules",
+	},
+	"Pricing Rule": {"validate": "pos_next.overrides.pricing_rule.enforce_min_max_pricing_config"},
+	"Sales Order": {"validate": "pos_next.overrides.pricing_rule.apply_min_max_price_discounts"},
+	"Quotation": {"validate": "pos_next.overrides.pricing_rule.apply_min_max_price_discounts"},
+	"Delivery Note": {"validate": "pos_next.overrides.pricing_rule.apply_min_max_price_discounts"},
+	"POS Invoice": {"validate": "pos_next.overrides.pricing_rule.apply_min_max_price_discounts"},
 }
 
 # Scheduled Tasks

@@ -953,9 +953,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 					);
 				} else if (offer.apply_on === "Item Group") {
 					const eligibleGroups = offer.eligible_item_groups || [];
-					eligibleItems = invoiceItems.value.filter((item) =>
-						eligibleGroups.includes(item.item_group)
-					);
+					eligibleItems = eligibleGroups.includes("All Item Groups")
+						? invoiceItems.value
+						: invoiceItems.value.filter((item) =>
+								eligibleGroups.includes(item.item_group)
+							);
 				} else if (offer.apply_on === "Brand") {
 					const eligibleBrands = offer.eligible_brands || [];
 					eligibleItems = invoiceItems.value.filter((item) =>
