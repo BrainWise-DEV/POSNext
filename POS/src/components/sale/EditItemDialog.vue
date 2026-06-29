@@ -373,7 +373,8 @@
 																"
 																step="0.01"
 																class="w-full h-7 border border-gray-300 rounded-lg px-3 pe-8 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-																@blur="calculateDiscount"
+																@input="calculateTotals"
+																@blur="handleDiscountBlur"
 																@keydown.enter="$event.target.blur()"
 															/>
 															<span
@@ -415,20 +416,20 @@
 														}}</span
 													>
 												</div>
-												<div
-													class="flex items-center justify-between pt-2 border-t border-gray-200"
-												>
+												<div class="flex items-center justify-between pt-2 border-t border-gray-200">
+													<span class="text-base font-bold text-gray-900">{{ __('Total:') }}</span>
 													<span
-														class="text-base font-bold text-gray-900"
-														>{{ __("Total:") }}</span
-													>
-													<span
-														class="text-lg font-bold text-blue-600"
-														>{{
-															formatCurrency(calculatedTotal)
-														}}</span
-													>
+														:class="isTotalBelowBuyingRate ? 'text-red-600' : 'text-blue-600'"
+														class="text-lg font-bold"
+													>{{ formatCurrency(calculatedTotal) }}</span>
 												</div>
+												<p
+													v-if="isTotalBelowBuyingRate"
+													class="text-xs text-red-600 flex items-start gap-1 pt-1"
+												>
+													<FeatherIcon name="alert-triangle" class="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+													<span>{{ buyingRateValidationMessage }}</span>
+												</p>
 											</div>
 										</div>
 									</div>
@@ -444,15 +445,12 @@
 									<Button
 										variant="solid"
 										@click="updateItem"
-										:disabled="!hasStock || isCheckingStock"
+										:disabled="!canUpdateItem"
 									>
-										<span v-if="isCheckingStock">{{
-											__("Checking Stock...")
-										}}</span>
-										<span v-else-if="!hasStock">{{
-											__("No Stock Available")
-										}}</span>
-										<span v-else>{{ __("Update Item") }}</span>
+										<span v-if="isCheckingStock">{{ __('Checking Stock...') }}</span>
+										<span v-else-if="!hasStock">{{ __('No Stock Available') }}</span>
+										<span v-else-if="isTotalBelowBuyingRate">{{ __('Below Buying Rate') }}</span>
+										<span v-else>{{ __('Update Item') }}</span>
 									</Button>
 								</div>
 							</div>
@@ -462,25 +460,31 @@
 			</div>
 		</Transition>
 	</Teleport>
+
+	<!-- Manager Approval Dialog for Item Discount -->
+	<ManagerApprovalDialog
+		v-model="showDiscountApproval"
+		approval-type="Item Discount"
+		:amount="pendingDiscountAmount"
+		:reason="`Discount on ${pendingDiscountItem?.item_name || ''}`"
+		@approved="onDiscountApprovalGranted"
+	/>
 </template>
 
 <script setup>
-import { useToast } from "@/composables/useToast";
-import { usePOSSettingsStore } from "@/stores/posSettings";
-import { useSerialNumberStore } from "@/stores/serialNumber";
-import { getItemStock } from "@/utils/stockValidator";
-import {
-	formatCurrency as formatCurrencyUtil,
-	getCurrencySymbol,
-	roundCurrency,
-} from "@/utils/currency";
-import { Button, FeatherIcon, createResource } from "frappe-ui";
-import { computed, ref, watch } from "vue";
-import SelectInput from "@/components/common/SelectInput.vue";
+import { useToast } from "@/composables/useToast"
+import { usePOSSettingsStore } from "@/stores/posSettings"
+import { useSerialNumberStore } from "@/stores/serialNumber"
+import { getItemStock } from "@/utils/stockValidator"
+import { formatCurrency as formatCurrencyUtil, getCurrencySymbol, roundCurrency } from "@/utils/currency"
+import { Button, FeatherIcon, createResource } from "frappe-ui"
+import { computed, ref, watch } from "vue"
+import SelectInput from "@/components/common/SelectInput.vue"
+import ManagerApprovalDialog from "@/components/ManagerApprovalDialog.vue"
 
-const { showSuccess, showError, showWarning } = useToast();
-const settingsStore = usePOSSettingsStore();
-const serialStore = useSerialNumberStore();
+const { showSuccess, showError, showWarning } = useToast()
+const settingsStore = usePOSSettingsStore()
+const serialStore = useSerialNumberStore()
 
 const props = defineProps({
 	modelValue: Boolean,
@@ -498,29 +502,44 @@ const props = defineProps({
 const emit = defineEmits(["update:modelValue", "update-item"]);
 
 // Local state
-const localItem = ref(null);
-const localQuantity = ref(1);
-const localUom = ref("");
-const localRate = ref(0);
-const localWarehouse = ref("");
-const discountType = ref("percentage");
-const discountValue = ref(0);
-const calculatedSubtotal = ref(0);
-const calculatedDiscount = ref(0);
-const calculatedTotal = ref(0);
-const hasStock = ref(true);
-const isCheckingStock = ref(false);
-const isInitializingItem = ref(false);
-const uomRateRequestId = ref(0);
-const localSerials = ref([]); // List of serial numbers for this item
-const removedSerials = ref([]); // Track serials removed during this edit session
-const originalSerials = ref([]); // Original serials when dialog opened
-const originalPriceListRate = ref(0); // Original price_list_rate when dialog opened (for rate edit validation)
+const localItem = ref(null)
+const localQuantity = ref(1)
+const localUom = ref("")
+const localRate = ref(0)
+const localWarehouse = ref("")
+const discountType = ref("percentage")
+const discountValue = ref(0)
+const calculatedSubtotal = ref(0)
+const calculatedDiscount = ref(0)
+const calculatedTotal = ref(0)
+const hasStock = ref(true)
+const isCheckingStock = ref(false)
+const isInitializingItem = ref(false)
+const uomRateRequestId = ref(0)
+
+// Manager approval state for item discount
+const showDiscountApproval = ref(false)
+const pendingDiscountAmount = ref(0)
+const pendingDiscountItem = ref(null)
+const discountApprovalPending = ref(false)
+const discountApprovalGranted = ref(false)
+const pendingUpdatedItem = ref(null)
+const localSerials = ref([]) // List of serial numbers for this item
+const removedSerials = ref([]) // Track serials removed during this edit session
+const originalSerials = ref([]) // Original serials when dialog opened
+const originalPriceListRate = ref(0) // Original price_list_rate when dialog opened (for rate edit validation)
 
 const getItemDetailsResource = createResource({
 	url: "pos_next.api.items.get_item_details",
 	auto: false,
 });
+
+const getBuyingRateResource = createResource({
+	url: "pos_next.api.items.get_item_buying_rate_from_standard_selling",
+	auto: false,
+})
+
+const buyingRate = ref(0)
 
 const show = computed({
 	get: () => props.modelValue,
@@ -587,6 +606,32 @@ const discountTypeOptions = computed(() => [
 	{ value: "amount", label: __("Amount") },
 ]);
 
+const minimumAllowedTotal = computed(() => {
+	if (!buyingRate.value || buyingRate.value <= 0) return 0
+	return buyingRate.value * localQuantity.value
+})
+
+const isTotalBelowBuyingRate = computed(() => {
+	if (!buyingRate.value || buyingRate.value <= 0) return false
+	return calculatedTotal.value < minimumAllowedTotal.value
+})
+
+const canUpdateItem = computed(() => {
+	return hasStock.value && !isCheckingStock.value && !isTotalBelowBuyingRate.value
+})
+
+const buyingRateValidationMessage = computed(() => {
+	if (!isTotalBelowBuyingRate.value) return ""
+	return __(
+		"Total cannot be less than the cost price ({0} × {1} = {2}).",
+		[
+			formatCurrency(buyingRate.value),
+			localQuantity.value,
+			formatCurrency(minimumAllowedTotal.value),
+		],
+	)
+})
+
 // Initialize local state when item changes
 watch(
 	() => props.item,
@@ -627,12 +672,9 @@ watch(
 				discountValue.value = 0;
 			}
 
-			// Reset stock check state
-			hasStock.value = true;
-			isCheckingStock.value = false;
-
-			calculateTotals();
-			isInitializingItem.value = false;
+			calculateTotals()
+			fetchBuyingRate()
+			isInitializingItem.value = false
 		}
 	},
 	{ immediate: true }
@@ -769,14 +811,15 @@ async function handleUomChange(newUom) {
 	const newConversionFactor = getConversionFactorForUom(selectedUom);
 
 	// Keep local state consistent so update payload has correct UOM pricing metadata.
-	localRate.value = newRate;
-	originalPriceListRate.value = newRate;
-	localItem.value.uom = selectedUom;
-	localItem.value.conversion_factor = newConversionFactor;
-	localItem.value.rate = newRate;
-	localItem.value.price_list_rate = newRate;
+	localRate.value = newRate
+	originalPriceListRate.value = newRate
+	localItem.value.uom = selectedUom
+	localItem.value.conversion_factor = newConversionFactor
+	localItem.value.rate = newRate
+	localItem.value.price_list_rate = newRate
 
-	calculateTotals();
+	calculateTotals()
+	await fetchBuyingRate()
 }
 
 async function handleWarehouseChange() {
@@ -825,6 +868,36 @@ function handleDiscountTypeChange() {
 	calculateTotals();
 }
 
+async function fetchBuyingRate() {
+	if (!localItem.value?.item_code) {
+		buyingRate.value = 0
+		return
+	}
+
+	try {
+		const result = await getBuyingRateResource.submit({
+			item_code: localItem.value.item_code,
+			uom: localUom.value || localItem.value.stock_uom,
+		})
+		const rate = result?.message ?? result
+		buyingRate.value = Number(rate) || 0
+	} catch (error) {
+		console.error("Error fetching buying rate:", error)
+		buyingRate.value = 0
+	}
+}
+
+function notifyIfBelowBuyingRate() {
+	if (isTotalBelowBuyingRate.value) {
+		showWarning(buyingRateValidationMessage.value)
+	}
+}
+
+function handleDiscountBlur() {
+	calculateDiscount()
+	notifyIfBelowBuyingRate()
+}
+
 function calculateDiscount() {
 	// Round to currency precision to prevent floating point precision issues (e.g., 10.000000000000002)
 	if (
@@ -858,6 +931,16 @@ function calculateTotals() {
 	calculateDiscount();
 }
 
+watch(calculatedTotal, (newTotal, oldTotal) => {
+	if (
+		buyingRate.value > 0 &&
+		newTotal < minimumAllowedTotal.value &&
+		oldTotal >= minimumAllowedTotal.value
+	) {
+		notifyIfBelowBuyingRate()
+	}
+})
+
 function removeSerial(serialNo) {
 	// Remove from local list
 	const index = localSerials.value.indexOf(serialNo);
@@ -876,13 +959,18 @@ function formatCurrency(amount) {
 }
 
 function updateItem() {
+	if (isTotalBelowBuyingRate.value) {
+		notifyIfBelowBuyingRate()
+		return
+	}
+
 	// Check if rate was manually edited
 	const isRateManuallyEdited = localRate.value !== originalPriceListRate.value;
 
 	// ========================================================================
 	// RATE EDIT VALIDATION
 	// ========================================================================
-	if ((settingsStore.allowUserToEditRate || !localItem.is_stock_item) && isRateManuallyEdited) {
+	if ((settingsStore.allowUserToEditRate || !localItem.value.is_stock_item) && isRateManuallyEdited) {
 		// Validate rate is positive
 		if (localRate.value <= 0) {
 			showError(__("Rate must be greater than zero"));
@@ -918,12 +1006,46 @@ function updateItem() {
 		price_list_rate: originalPriceListRate.value,
 		warehouse: localWarehouse.value,
 		discount_percentage: discountType.value === "percentage" ? discountValue.value : 0,
-		discount_amount: discountType.value === "amount" ? discountValue.value : 0,
+		discount_amount: roundToNearestFive(calculatedDiscount.value),
 		// Track manual rate edits for audit logging
 		is_rate_manually_edited: isRateManuallyEdited ? 1 : 0,
 		original_rate: isRateManuallyEdited ? originalPriceListRate.value : null,
 	};
 
+	// Check if discount approval is needed
+	if (needsDiscountApproval(updatedItem)) {
+		// Store pending item and show approval dialog
+		pendingUpdatedItem.value = updatedItem
+		pendingDiscountAmount.value = calculatedDiscount.value
+		pendingDiscountItem.value = localItem.value
+		discountApprovalPending.value = true
+		showDiscountApproval.value = true
+		return
+	}
+
+	// If approval was already granted, proceed with update
+	if (discountApprovalPending.value && !discountApprovalGranted.value) {
+		showError(__('Manager approval required for discount'))
+		return
+	}
+
+	// Proceed with item update
+	proceedWithItemUpdate(updatedItem)
+}
+
+/**
+ * Check if discount needs manager approval
+ */
+function needsDiscountApproval(item) {
+	// Only require approval if there's a discount
+	const hasDiscount = item.discount_percentage > 0 || item.discount_amount > 0
+	return hasDiscount
+}
+
+/**
+ * Proceed with item update after discount approval (if needed)
+ */
+function proceedWithItemUpdate(updatedItem) {
 	// Update serial numbers if item has serials
 	if (localItem.value.has_serial_no) {
 		updatedItem.serial_no = localSerials.value.join("\n");
@@ -935,12 +1057,33 @@ function updateItem() {
 		}
 	}
 
-	emit("update-item", updatedItem);
-	show.value = false;
+	emit("update-item", updatedItem)
+	show.value = false
+	
+	// Reset discount approval state
+	discountApprovalPending.value = false
+	discountApprovalGranted.value = false
+	pendingUpdatedItem.value = null
+}
+
+/**
+ * Handle discount approval granted
+ */
+function onDiscountApprovalGranted() {
+	discountApprovalGranted.value = true
+	showSuccess(__('Discount approved. Processing item...'))
+	
+	// Proceed with update after brief delay
+	setTimeout(() => {
+		if (pendingUpdatedItem.value) {
+			proceedWithItemUpdate(pendingUpdatedItem.value)
+		}
+	}, 500)
 }
 
 function cancel() {
-	show.value = false;
+	buyingRate.value = 0
+	show.value = false
 }
 </script>
 

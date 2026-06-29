@@ -8,7 +8,7 @@
 						<Input
 							v-model="searchTerm"
 							type="text"
-							:placeholder="__('Search by invoice number or customer...')"
+							:placeholder="__('Search by invoice number, customer or item code...')"
 							@input="searchInvoices"
 						>
 							<template #prefix>
@@ -265,29 +265,26 @@ const selectedInvoiceForReturn = ref(null);
 const isLoadingMore = ref(false);
 
 // Create resource for loading invoices
+// Uses the custom get_invoices API which returns invoice items (item_code, item_name)
+// so we can filter by item code on the client side.
 const invoicesResource = createResource({
 	url: "pos_next.api.invoices.get_invoices",
 	makeParams() {
 		return {
 			pos_profile: props.posProfile,
-			start: page.value * pageSize,
 			limit: pageSize,
-		};
+			start: page.value * pageSize,
+		}
 	},
 	auto: false,
 	onSuccess(data) {
 		if (data && Array.isArray(data)) {
-			const newInvoices = data.map((inv) => ({
-				...inv,
-				items_count: 0,
-			}));
-
 			if (isLoadingMore.value) {
 				// Append to existing list
-				invoices.value = [...invoices.value, ...newInvoices];
+				invoices.value = [...invoices.value, ...data]
 			} else {
 				// Replace the list
-				invoices.value = newInvoices;
+				invoices.value = data
 			}
 
 			// Check if there are more results
@@ -330,7 +327,14 @@ const filteredInvoices = computed(() => {
 	return invoices.value.filter(
 		(inv) =>
 			inv.name?.toLowerCase().includes(term) ||
-			inv.customer_name?.toLowerCase().includes(term)
+			inv.customer_name?.toLowerCase().includes(term) ||
+			// Search across invoice items by item_code or item_name
+			(Array.isArray(inv.items) &&
+				inv.items.some(
+					(item) =>
+						item.item_code?.toLowerCase().includes(term) ||
+						item.item_name?.toLowerCase().includes(term),
+				)),
 	);
 });
 

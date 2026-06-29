@@ -468,43 +468,6 @@
 						</p>
 					</div>
 
-					<!-- Outstanding Balance Row (full width, two columns) -->
-					<div
-						v-if="customerCreditEnabled && totalAvailableCredit !== 0"
-						:class="[
-							'rounded-lg border p-2 flex items-center justify-between',
-							totalAvailableCredit < 0
-								? 'bg-red-50 border-red-200'
-								: 'bg-emerald-50 border-emerald-200',
-						]"
-					>
-						<span
-							:class="[
-								'text-xs font-semibold',
-								totalAvailableCredit < 0 ? 'text-red-700' : 'text-emerald-700',
-							]"
-						>
-							{{
-								totalAvailableCredit < 0
-									? __("Outstanding Balance")
-									: __("Credit Balance")
-							}}
-						</span>
-						<!-- Show remaining credit (after used amount is deducted) for positive balance -->
-						<span
-							:class="[
-								'text-base font-bold',
-								totalAvailableCredit < 0 ? 'text-red-600' : 'text-emerald-600',
-							]"
-						>
-							{{
-								totalAvailableCredit < 0
-									? formatCurrency(Math.abs(totalAvailableCredit))
-									: formatCurrency(remainingAvailableCredit)
-							}}
-						</span>
-					</div>
-
 					<!-- Invoice Summary -->
 					<div
 						class="bg-white rounded-lg border border-gray-200 overflow-hidden flex flex-col flex-1 min-h-0"
@@ -1136,13 +1099,28 @@
 								>{{ __("Loading...") }}</span
 							>
 						</div>
-						<div
-							v-else-if="filteredPaymentMethods.length > 0"
-							:class="[
-								'flex flex-wrap',
-								isSmallMobile ? 'gap-1' : 'gap-1.5 lg:gap-2',
-							]"
-						>
+						<!-- Customer Outstanding / Wallet Balance Display -->
+						<div v-if="(customerOutstanding > 0) || (walletInfo.wallet_exists && walletInfo.wallet_balance > 0)" :class="[
+							'mb-3 rounded-lg border p-2 flex items-center justify-between',
+							customerOutstanding > 0
+								? 'bg-red-50 border-red-200'
+								: 'bg-amber-50 border-amber-200'
+						]">
+							<span :class="[
+								'text-xs font-semibold',
+								customerOutstanding > 0 ? 'text-red-700' : 'text-amber-800'
+							]">
+								{{ customerOutstanding > 0 ? __('Outstanding Balance') : __('Wallet Balance') }}
+							</span>
+							<span :class="[
+								'text-base font-bold',
+								customerOutstanding > 0 ? 'text-red-600' : 'text-amber-700'
+							]">
+								{{ customerOutstanding > 0 ? formatCurrency(customerOutstanding) : formatCurrency(availableWalletBalance) }}
+							</span>
+						</div>
+
+					<div v-if="filteredPaymentMethods.length > 0" :class="['flex flex-wrap', isSmallMobile ? 'gap-1' : 'gap-1.5 lg:gap-2']">
 							<button
 								v-for="method in filteredPaymentMethods"
 								:key="method.mode_of_payment"
@@ -1214,90 +1192,7 @@
 								</span>
 							</button>
 							<!-- Credit Balance as Payment Method -->
-							<button
-								v-if="
-									customerCreditEnabled &&
-									(remainingAvailableCredit > 0 ||
-										getMethodTotal('Customer Credit') > 0)
-								"
-								@click="applyCustomerCredit"
-								:disabled="remainingAmount === 0 || remainingAvailableCredit === 0"
-								:class="[
-									'inline-flex items-center rounded-lg border-2 transition-all font-medium',
-									isSmallMobile
-										? 'gap-0.5 px-1.5 h-7 text-[10px]'
-										: 'gap-1 lg:gap-2 px-2.5 lg:px-4 h-8 text-xs lg:h-11 lg:text-sm',
-									remainingAmount === 0 || remainingAvailableCredit === 0
-										? 'opacity-50 cursor-not-allowed'
-										: 'cursor-pointer',
-									getMethodTotal('Customer Credit') > 0
-										? 'border-emerald-500 bg-emerald-50 text-emerald-700'
-										: 'border-emerald-300 bg-emerald-50 hover:border-emerald-500 hover:bg-emerald-100 text-emerald-700',
-								]"
-							>
-								<span :class="isSmallMobile ? 'text-xs' : 'text-sm lg:text-lg'"
-									>💳</span
-								>
-								<span class="truncate">{{ __("Credit Balance") }}</span>
-								<span
-									v-if="getMethodTotal('Customer Credit') > 0"
-									:class="[
-										'font-bold text-emerald-600 bg-emerald-100 rounded',
-										isSmallMobile
-											? 'text-[8px] px-0.5 py-0.5'
-											: 'text-xs px-1 py-0.5',
-									]"
-								>
-									{{ formatCurrency(getMethodTotal("Customer Credit")) }}
-								</span>
-							</button>
 
-							<!-- Receivable Accounts: pick the account that holds the unpaid balance
-							     (the invoice's debit_to). Tender cash for the paid part; the rest
-							     stays outstanding on this account. -->
-							<template v-if="receivableAccounts.length > 0">
-								<!-- Divider: a full-width line forces a wrap, then the AR accounts -->
-								<div class="w-full border-t border-gray-200 my-0.5"></div>
-								<button
-									v-for="acc in receivableAccounts"
-									:key="acc.name"
-									@click="toggleReceivableAccount(acc)"
-									:class="[
-										'inline-flex items-center rounded-lg border-2 transition-all font-medium select-none',
-										isSmallMobile
-											? 'gap-0.5 px-1.5 h-7 text-[10px]'
-											: 'gap-1 lg:gap-2 px-2.5 lg:px-4 h-8 text-xs lg:h-11 lg:text-sm',
-										selectedReceivableAccount === acc.name
-											? 'border-blue-500 bg-blue-50 text-blue-700'
-											: 'border-gray-200 bg-white hover:border-blue-400 hover:bg-blue-50 text-gray-700',
-									]"
-								>
-									<span :class="isSmallMobile ? 'text-xs' : 'text-sm lg:text-lg'"
-										>🧾</span
-									>
-									<span class="truncate max-w-[80px] lg:max-w-none">{{
-										__(acc.account_name || acc.name)
-									}}</span>
-									<!-- Amount that will stay outstanding on this account -->
-									<span
-										v-if="selectedReceivableAccount === acc.name"
-										:class="[
-											'font-bold text-blue-600 bg-blue-100 rounded',
-											isSmallMobile
-												? 'text-[8px] px-0.5 py-0.5'
-												: 'text-xs px-1 py-0.5',
-										]"
-									>
-										{{ formatCurrency(remainingAmount) }}
-									</span>
-								</button>
-							</template>
-						</div>
-						<div
-							v-else
-							:class="['text-gray-500', isSmallMobile ? 'text-xs' : 'text-sm']"
-						>
-							{{ __("No payment methods available") }}
 						</div>
 
 						<!-- Exact Amount Mode Info Banner -->
@@ -2019,6 +1914,15 @@
 			</div>
 		</template>
 	</Dialog>
+
+	<!-- Manager Approval Dialog for Additional Discount -->
+	<ManagerApprovalDialog
+		v-model="showAdditionalDiscountApproval"
+		approval-type="Additional Discount"
+		:amount="pendingAdditionalDiscountAmount"
+		reason="Additional bill discount"
+		@approved="onAdditionalDiscountApprovalGranted"
+	/>
 </template>
 
 <script setup>
@@ -2028,21 +1932,22 @@ import {
 	formatCurrency as formatCurrencyUtil,
 	getCurrencySymbol,
 	roundCurrency,
-} from "@/utils/currency";
-import { getPaymentIcon } from "@/utils/payment";
-import { offlineWorker } from "@/utils/offline/workerClient";
-import { logger } from "@/utils/logger";
-import { Dialog, createResource, call } from "frappe-ui";
-import { computed, ref, watch, nextTick } from "vue";
-import { useToast } from "@/composables/useToast";
-import { useLongPress } from "@/composables/useLongPress";
-import { usePaymentNumpad } from "@/composables/usePaymentNumpad";
-import { useResponsivePayment } from "@/composables/useResponsivePayment";
-import { useQuickAmounts } from "@/composables/useQuickAmounts";
+} from "@/utils/currency"
+import { getPaymentIcon } from "@/utils/payment"
+import { offlineWorker } from "@/utils/offline/workerClient"
+import { logger } from "@/utils/logger"
+import { Dialog, createResource, call } from "frappe-ui"
+import { computed, ref, watch, nextTick } from "vue"
+import { useToast } from "@/composables/useToast"
+import { useLongPress } from "@/composables/useLongPress"
+import { usePaymentNumpad } from "@/composables/usePaymentNumpad"
+import { useResponsivePayment } from "@/composables/useResponsivePayment"
+import { useQuickAmounts } from "@/composables/useQuickAmounts"
+import ManagerApprovalDialog from "@/components/ManagerApprovalDialog.vue"
 
-const log = logger.create("PaymentDialog");
-const settingsStore = usePOSSettingsStore();
-const { showWarning, showInfo } = useToast();
+const log = logger.create("PaymentDialog")
+const settingsStore = usePOSSettingsStore()
+const { showWarning, showInfo } = useToast()
 
 const props = defineProps({
 	modelValue: Boolean,
@@ -2264,6 +2169,12 @@ const localAdditionalDiscount = ref(0);
 // Initialize discount type from settings (default to percentage if enabled, otherwise amount)
 const additionalDiscountType = ref(settingsStore.usePercentageDiscount ? "percentage" : "amount");
 
+// Manager approval state for additional discount
+const showAdditionalDiscountApproval = ref(false)
+const pendingAdditionalDiscountAmount = ref(0)
+const additionalDiscountApprovalPending = ref(false)
+const additionalDiscountApprovalGranted = ref(false)
+
 const paymentMethodsResource = createResource({
 	url: "pos_next.api.pos_profile.get_payment_methods",
 	makeParams() {
@@ -2448,7 +2359,7 @@ const filteredPaymentMethods = computed(() => {
 	return paymentMethods.value.filter((method) => {
 		// If it's a wallet payment method, only show when loyalty/wallet is enabled
 		if (isWalletPaymentMethod(method.mode_of_payment)) {
-			return walletInfo.value.wallet_enabled;
+			return walletInfo.value.wallet_enabled || walletInfo.value.wallet_exists
 		}
 		return true;
 	});
@@ -2678,11 +2589,18 @@ const customerCreditEnabled = computed(() => {
 	return props.allowCreditSale || props.allowCustomerCreditPayment;
 });
 
+// Customer Outstanding Amount - positive value means customer owes money
+const customerOutstanding = computed(() => {
+	console.log("Calculating customer outstanding. Customer balance:", customerBalance.value,customerBalance.value.total_outstanding)
+	return roundCurrency(customerBalance.value.total_outstanding || 0)
+})
+
 const totalAvailableCredit = computed(() => {
 	// Use net_balance: negative means customer has credit, positive means they owe
 	// Return negative of net_balance so positive = credit available, negative = outstanding
-	return roundCurrency(-customerBalance.value.net_balance);
-});
+	console.log("Calculating total available credit. Customer balance:", customerBalance.value)
+	return roundCurrency(-customerBalance.value.net_balance)
+})
 
 // Remaining credit after deducting what's already been applied as payment
 const remainingAvailableCredit = computed(() => {
@@ -2973,11 +2891,15 @@ watch(
 watch(
 	() => [props.customer, props.company, props.allowCreditSale, props.allowCustomerCreditPayment],
 	([customer, company, allowCreditSale, allowCustomerCreditPayment]) => {
-		const creditEnabled = allowCreditSale || allowCustomerCreditPayment;
-		if (creditEnabled && customer && company) {
-			log.debug("[PaymentDialog] Pre-fetching customer balance for:", customer);
-			customerBalanceResource.fetch();
-			customerCreditResource.fetch();
+		const creditEnabled = allowCreditSale || allowCustomerCreditPayment
+		if (customer && company) {
+			log.debug("[PaymentDialog] Pre-fetching customer balance for:", customer)
+			// Always fetch customer balance to show outstanding even if credit is not enabled
+			customerBalanceResource.fetch()
+			// Only fetch credit details if credit is enabled
+			if (creditEnabled) {
+				customerCreditResource.fetch()
+			}
 		}
 	},
 	{ immediate: true }
@@ -2986,23 +2908,22 @@ watch(
 watch(show, (newVal) => {
 	if (newVal) {
 		// Reset state when dialog opens (but NOT customerBalance - it's pre-fetched)
-		paymentEntries.value = [];
-		customAmount.value = "";
-		numpadClear();
-		mobileCustomAmount.value = "";
-		lastSelectedMethod.value = null;
-		selectedReceivableAccount.value = "";
-		customerCredit.value = [];
-		// Refetch credit sources every time the dialog opens. The pre-fetch
-		// watcher only fires when customer/company changes, so reopening the
-		// dialog for the same customer would otherwise leave credit_details
-		// empty and break "Apply Customer Credit" with an allocation error.
-		// customerBalance is also refetched so the displayed balance reflects
-		// any redemptions made by other cashiers since the last open.
-		const creditEnabled = props.allowCreditSale || props.allowCustomerCreditPayment;
-		if (creditEnabled && props.customer && props.company) {
-			customerBalanceResource.fetch();
-			customerCreditResource.fetch();
+		paymentEntries.value = []
+		customAmount.value = ""
+		numpadClear()
+		mobileCustomAmount.value = ""
+		lastSelectedMethod.value = null
+		customerCredit.value = []
+		// Refetch balance and credit sources every time the dialog opens to show
+		// current outstanding amount and available credit from other cashiers
+		const creditEnabled = props.allowCreditSale || props.allowCustomerCreditPayment
+		if (props.customer && props.company) {
+			// Always fetch balance to show outstanding
+			customerBalanceResource.fetch()
+			// Only fetch credit if enabled
+			if (creditEnabled) {
+				customerCreditResource.fetch()
+			}
 		}
 		selectedSalesPersons.value = [];
 		salesPersonSearch.value = "";
@@ -3424,40 +3345,102 @@ function completePayment() {
 		return;
 	}
 
-	// "Pay on Receivable Account": the chosen account holds the unpaid balance (the invoice's
-	// debit_to). Tendered payments are real money; whatever is left (grand_total − tendered)
-	// stays outstanding on that account — it is NOT a payment row.
-	const receivableAccount = selectedReceivableAccount.value || null;
+	function completePayment() {
+		log.debug("[PaymentDialog] Complete payment called:", {
+			canComplete: canComplete.value,
+			totalPaid: totalPaid.value,
+			grandTotal: props.grandTotal,
+			allowPartialPayment: props.allowPartialPayment,
+			paymentEntries: paymentEntries.value,
+			salesPersons: selectedSalesPersons.value,
+			writeOff: {
+				canWriteOff: canWriteOff.value,
+				applyWriteOff: applyWriteOff.value,
+				writeOffAmount: writeOffAmount.value,
+			},
+		})
 
-	// Partial when the tendered amount (plus write-off) doesn't cover the total.
-	const effectivePaid = totalPaid.value + writeOffAmount.value;
-	const isPartial = effectivePaid < props.grandTotal;
-	const outstanding = isPartial ? roundCurrency(props.grandTotal - effectivePaid) : 0;
+		if (!canComplete.value) {
+			log.warn("[PaymentDialog] Cannot complete - validation failed")
+			return
+		}
 
-	const paymentData = {
-		payments: paymentEntries.value,
-		change_amount: changeAmount.value,
-		is_partial_payment: isPartial,
-		paid_amount: totalPaid.value,
-		outstanding_amount: outstanding,
-		sales_team: selectedSalesPersons.value.length > 0 ? selectedSalesPersons.value : null,
-		delivery_date: isSalesOrder.value ? deliveryDate.value : null,
-		// Write-off data
-		write_off_amount: writeOffAmount.value,
-		is_write_off: writeOffAmount.value > 0,
-		// Chosen receivable account → invoice debit_to. With no tendered payment it's a
-		// full credit sale, so flag it to allow the no-payment submit (backend re-checks
-		// the allow_credit_sale gate).
-		receivable_account: receivableAccount,
-		is_credit_sale: !!receivableAccount && paymentEntries.value.length === 0,
-	};
+		// Validate discount description for Friends and Family customers
+		if (isFriendsAndFamily.value && !discountDescription.value) {
+			showError(__("Discount reason is required for Friends and Family customers"))
+			return
+		}
 
-	log.debug("[PaymentDialog] Emitting payment-completed:", paymentData);
+		// Check if additional discount approval is needed
+		if (needsAdditionalDiscountApproval()) {
+			// Store pending payment data and show approval dialog
+			pendingAdditionalDiscountAmount.value = calculatedAdditionalDiscount.value
+			additionalDiscountApprovalPending.value = true
+			showAdditionalDiscountApproval.value = true
+			return
+		}
 
-	emit("payment-completed", paymentData);
+		// If approval was already granted, proceed with payment
+		if (additionalDiscountApprovalPending.value && !additionalDiscountApprovalGranted.value) {
+			showError(__("Manager approval required for additional discount"))
+			return
+		}
 
-	show.value = false;
-}
+		// Proceed with payment
+		proceedWithPayment()
+	}
+
+	/**
+	 * Check if additional discount needs manager approval
+	 */
+	function needsAdditionalDiscountApproval() {
+		// Only require approval if there's an additional discount and max discount is configured
+		const hasAdditionalDiscount = calculatedAdditionalDiscount.value > 0
+		const needsApproval = settingsStore.maxDiscountAllowed > 0 && hasAdditionalDiscount
+		return needsApproval
+	}
+
+	/**
+	 * Handle additional discount approval granted
+	 */
+	function onAdditionalDiscountApprovalGranted() {
+		additionalDiscountApprovalGranted.value = true
+		showAdditionalDiscountApproval.value = false
+		// Proceed with payment
+		proceedWithPayment()
+	}
+
+	/**
+	 * Proceed with payment after all validations and approvals
+	 */
+	function proceedWithPayment() {
+		// Calculate if this is a partial payment (considering write-off)
+		const effectivePaid = totalPaid.value + writeOffAmount.value
+		const isPartial = effectivePaid < props.grandTotal
+
+		const paymentData = {
+			payments: paymentEntries.value,
+			change_amount: changeAmount.value,
+			is_partial_payment: isPartial,
+			paid_amount: totalPaid.value,
+			outstanding_amount: isPartial
+				? remainingAmount.value - writeOffAmount.value
+				: 0,
+			sales_team:
+				selectedSalesPersons.value.length > 0 ? selectedSalesPersons.value : null,
+			delivery_date: isSalesOrder.value ? deliveryDate.value : null,
+			// Write-off data
+			write_off_amount: writeOffAmount.value,
+			is_write_off: writeOffAmount.value > 0,
+			// Discount description - always send
+			custom_discount_description: discountDescription.value || null,
+		}
+
+		console.log(paymentData)
+
+		log.debug("[PaymentDialog] Emitting payment-completed:", paymentData)
+
+		emit("payment-completed", paymentData)
 
 function formatCurrency(amount) {
 	return formatCurrencyUtil(Number.parseFloat(amount || 0), props.currency);
@@ -3563,7 +3546,11 @@ watch(
 	(isOpen) => {
 		if (isOpen) {
 			// Only sync when dialog opens, not continuously
-			localAdditionalDiscount.value = props.additionalDiscount || 0;
+			localAdditionalDiscount.value = props.additionalDiscount || 0
+		} else {
+			// Reset approval state when dialog closes
+			additionalDiscountApprovalPending.value = false
+			additionalDiscountApprovalGranted.value = false
 		}
 	}
 );

@@ -708,6 +708,30 @@ const resetForm = () => {
 	phoneNumber.value = "";
 };
 
+/** Populate the form fields from a customer object (edit mode). */
+const populateFromCustomer = (customer) => {
+	if (!customer?.name) return
+	customerData.value.customer_name = customer.customer_name || ""
+	customerData.value.email_id = customer.email_id || ""
+	customerData.value.pincode = customer.custom_pincode || ""
+	customerData.value.customer_group = customer.customer_group || "Individual"
+	customerData.value.territory = customer.territory || "All Territories"
+	// Handle mobile_no with country code
+	if (customer.mobile_no) {
+		customerData.value.mobile_no = customer.mobile_no
+		if (customer.mobile_no.includes("-")) {
+			const [code, ...rest] = customer.mobile_no.split("-")
+			selectedCountryCode.value = code
+			phoneNumber.value = rest.join("-")
+		} else {
+			phoneNumber.value = customer.mobile_no
+		}
+	} else {
+		phoneNumber.value = ""
+		selectedCountryCode.value = ""
+	}
+}
+
 // =============================================================================
 // Watchers
 // =============================================================================
@@ -717,37 +741,11 @@ watch(
 	(name) => name && (customerData.value.customer_name = name)
 );
 
-// Pre-fill form when customer prop changes (edit mode)
+// Pre-fill form when customer prop changes (edit mode).
+// Also called explicitly on dialog open to handle same-reference re-opens.
 watch(
 	() => props.customer,
-	(customer) => {
-		if (customer?.name) {
-			customerData.value.customer_name = customer.customer_name || ""
-			customerData.value.email_id = customer.email_id || ""
-			customerData.value.pincode = customer.custom_pincode || ""
-			customerData.value.customer_group = customer.customer_group || customerGroups.value[0] || ""
-
-			customerData.value.territory =
-				customer.territory ||
-				territories.value.find((n) => n === "All Territories") ||
-				territories.value[0] ||
-				"";
-
-			customerData.value.custom_governorate = customer.custom_governorate || "";
-			customerData.value.custom_district = customer.custom_district || "";
-			// Handle mobile_no with country code
-			if (customer.mobile_no) {
-				customerData.value.mobile_no = customer.mobile_no;
-				if (customer.mobile_no.includes("-")) {
-					const [code, ...rest] = customer.mobile_no.split("-");
-					selectedCountryCode.value = code;
-					phoneNumber.value = rest.join("-");
-				} else {
-					phoneNumber.value = customer.mobile_no;
-				}
-			}
-		}
-	},
+	(customer) => populateFromCustomer(customer),
 	{ immediate: true }
 );
 
@@ -790,7 +788,16 @@ watch(showCountryDropdown, async (isOpen) => {
 watch(
 	() => props.modelValue,
 	async (isOpen) => {
-		isOpen ? await loadDialogData() : resetForm();
+		show.value = isOpen
+		if (isOpen) {
+			// Always re-populate the form on open so edit mode works even when
+			// the same customer object reference is passed a second time
+			// (Vue won't re-fire the props.customer watcher in that case).
+			populateFromCustomer(props.customer)
+			await loadDialogData()
+		} else {
+			resetForm()
+		}
 	}
 );
 

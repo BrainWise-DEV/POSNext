@@ -1326,8 +1326,11 @@ onMounted(() => {
 	}
 
 	// Add click outside listener for sort dropdown
-	document.addEventListener("click", handleClickOutside);
-});
+	document.addEventListener('click', handleClickOutside)
+	 nextTick(() => {
+        focusSearchInput()
+    })
+})
 
 onUnmounted(() => {
 	// Cleanup background sync when component unmounts
@@ -1435,8 +1438,9 @@ function selectItem(item, autoAdd = false) {
 		}
 	}
 
-	emit("item-selected", item, autoAdd);
-	return true;
+	emit("item-selected", item, autoAdd)
+	focusSearchInput()
+	return true
 }
 
 function handleItemClick(itemCode) {

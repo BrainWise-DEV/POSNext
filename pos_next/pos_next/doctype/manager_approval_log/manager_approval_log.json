@@ -1,0 +1,78 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-05-26 11:30:13.487134",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "requesting_user",
+  "manager",
+  "approval_type",
+  "amount",
+  "status",
+  "timestamp"
+ ],
+ "fields": [
+  {
+   "fieldname": "requesting_user",
+   "fieldtype": "Link",
+   "label": "Requesting User",
+   "options": "User"
+  },
+  {
+   "fieldname": "manager",
+   "fieldtype": "Link",
+   "label": "Manager",
+   "options": "User"
+  },
+  {
+   "fieldname": "approval_type",
+   "fieldtype": "Select",
+   "label": "Approval Type",
+   "options": "\nCash Refund\nItem Discount\nAdditional Discount\nCredit Sale"
+  },
+  {
+   "fieldname": "amount",
+   "fieldtype": "Currency",
+   "label": "Amount"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "\nApproved\nRejected"
+  },
+  {
+   "fieldname": "timestamp",
+   "fieldtype": "Datetime",
+   "label": "Timestamp"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-05-26 14:13:09.592958",
+ "modified_by": "Administrator",
+ "module": "POS Next",
+ "name": "Manager Approval Log",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

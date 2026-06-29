@@ -32,6 +32,7 @@ declare module 'vue' {
     LazyImage: typeof import('./src/components/common/LazyImage.vue')['default']
     LoadingSpinner: typeof import('./src/components/common/LoadingSpinner.vue')['default']
     ManagementSlider: typeof import('./src/components/pos/ManagementSlider.vue')['default']
+    ManagerApprovalDialog: typeof import('./src/components/ManagerApprovalDialog.vue')['default']
     NumberField: typeof import('./src/components/settings/NumberField.vue')['default']
     OffersDialog: typeof import('./src/components/sale/OffersDialog.vue')['default']
     OfflineInvoicesDialog: typeof import('./src/components/sale/OfflineInvoicesDialog.vue')['default']

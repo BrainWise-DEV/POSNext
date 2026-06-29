@@ -1848,8 +1848,11 @@ async function handleItemSelected(item, autoAdd = false) {
 					);
 					unitRate = pricing.rate || unitRate;
 					priceListRate = pricing.price_list_rate || priceListRate;
+					item.discount_amount = pricing.discount_amount || 0;
+					item.discount_percentage = pricing.discount_percentage || 0;
+					item.friends_family_pricing_applied = pricing.friends_family_pricing_applied || false;
 					// Show notification if Friends & Family pricing was applied
-					if (cartStore.customer && unitRate < originalRate) {
+					if (cartStore.customer && pricing.friends_family_pricing_applied) {
 						showSuccess(__('Friends & Family Discount applied to {0}', [item.item_name]));
 					}
 				} catch (pricingError) {
@@ -1861,6 +1864,9 @@ async function handleItemSelected(item, autoAdd = false) {
 					uom: resolvedUom,
 					rate: unitRate,
 					price_list_rate: priceListRate,
+					discount_amount: item.discount_amount || 0,
+					discount_percentage: item.discount_percentage || 0,
+					friends_family_pricing_applied: item.friends_family_pricing_applied || false,
 					is_resolved_barcode: true, // Mark as readonly
 				};
 				cartStore.addItem(
@@ -1911,14 +1917,14 @@ async function handleItemSelected(item, autoAdd = false) {
 	}
 
 	// Check for UOMs
-	if (item.item_uoms && item.item_uoms.length > 0) {
-		cartStore.setPendingItem(item, 1, "uom");
-		uiStore.showItemSelectionDialog = true;
-		return;
-	}
+	// if (item.item_uoms && item.item_uoms.length > 0) {
+	// 	cartStore.setPendingItem(item, 1, "uom");
+	// 	uiStore.showItemSelectionDialog = true;
+	// 	return;
+	// }
 
-	// Check for batch/serial
-	if (item.has_batch_no || item.has_serial_no) {
+	// Check for batch/serial — skip dialog for service/non-stock items (no batches to pick)
+	if ((item.has_batch_no || item.has_serial_no) && item.is_stock_item !== 0) {
 		cartStore.setPendingItem(item, 1);
 		uiStore.showBatchSerialDialog = true;
 		return;
@@ -1940,9 +1946,12 @@ async function handleItemSelected(item, autoAdd = false) {
 				...item,
 				rate: pricing.rate,
 				price_list_rate: pricing.price_list_rate,
+				discount_amount: pricing.discount_amount || 0,
+				discount_percentage: pricing.discount_percentage || 0,
+				friends_family_pricing_applied: pricing.friends_family_pricing_applied || false,
 			};
 			// Show notification if Friends & Family pricing was applied
-			if (cartStore.customer && pricing.rate < originalRate) {
+			if (cartStore.customer && pricing.friends_family_pricing_applied) {
 				showSuccess(__('Friends & Family Discount applied to {0}', [item.item_name]));
 			}
 		} catch (pricingError) {
@@ -2338,7 +2347,8 @@ async function handleOptionSelected(option) {
 				return;
 			}
 
-			if (variant.has_batch_no || variant.has_serial_no) {
+			// Skip batch dialog for service/non-stock items
+			if ((variant.has_batch_no || variant.has_serial_no) && variant.is_stock_item !== 0) {
 				cartStore.setPendingItem(variant, cartStore.pendingItemQty);
 				uiStore.showItemSelectionDialog = false;
 				uiStore.showBatchSerialDialog = true;
@@ -2390,7 +2400,8 @@ async function handleOptionSelected(option) {
 				price_list_rate: pricing.price_list_rate,
 			};
 
-			if (itemToAdd.has_batch_no || itemToAdd.has_serial_no) {
+			// Skip batch dialog for service/non-stock items
+			if ((itemToAdd.has_batch_no || itemToAdd.has_serial_no) && itemToAdd.is_stock_item !== 0) {
 				cartStore.setPendingItem(itemToAdd, qty);
 				uiStore.showItemSelectionDialog = false;
 				uiStore.showBatchSerialDialog = true;
@@ -2561,6 +2572,12 @@ function handleBatchSerialSelected(batchSerial) {
 			quantity: qty,
 			...batchSerial,
 		};
+		if (batchSerial.mrp) {
+			itemToAdd.mrp = batchSerial.mrp;
+		}
+		if (batchSerial.msp) {
+			itemToAdd.msp = batchSerial.msp;
+		}
 		try {
 			cartStore.addItem(itemToAdd, qty, false, shiftStore.currentProfile);
 			cartStore.clearPendingItem();

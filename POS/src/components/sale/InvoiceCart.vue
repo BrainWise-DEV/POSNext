@@ -105,6 +105,9 @@
 									>
 										{{ customer.mobile_no }}
 									</p>
+									<p v-if="customerOutstanding > 0" class="text-[10px] text-orange-600 font-semibold leading-tight">
+										{{ __("Outstanding:") }} {{ formatCurrency(customerOutstanding) }}
+									</p>
 								</div>
 							</div>
 
@@ -1041,6 +1044,11 @@
 								</button>
 							</div>
 
+							<!-- Item Code -->
+							<p class="text-[15px] text-blue-900 font-mono font-bold truncate leading-tight mb-0.5">
+								{{ item.item_code }}
+							</p>
+
 							<!-- Single Row: Quantity Counter, UOM, Price & Total -->
 							<div class="flex items-center justify-between gap-1.5">
 								<div class="flex items-center gap-1.5">
@@ -1273,10 +1281,18 @@
 										</div>
 									</div>
 
-									<!-- Price -->
-									<span class="text-[10px] sm:text-xs font-bold text-gray-700">
-										{{ formatCurrency(item.rate) }}
-									</span>
+									<!-- MRP & MSP -->
+									<div class="flex flex-col items-end leading-tight min-w-0">
+										<span
+											v-if="getItemMrp(item) > 0"
+											class="text-[9px] sm:text-[10px] font-semibold text-gray-500"
+										>
+											{{ __('MRP') }} {{ formatCurrency(getItemMrp(item)) }}
+										</span>
+										<span class="text-[10px] sm:text-xs font-bold text-blue-600">
+											{{ __('MSP') }} {{ formatCurrency(getItemMsp(item)) }}
+										</span>
+									</div>
 								</div>
 
 								<!-- Item Total -->
@@ -1306,6 +1322,12 @@
 					<span class="font-medium">{{ __("Total Quantity") }}</span>
 					<span class="font-bold text-gray-900 text-center min-w-[60px]">{{
 						formatQuantity(totalQuantity)
+					}}</span>
+				</div>
+				<div class="flex items-center justify-between text-xs text-gray-600 mb-0.5">
+					<span class="font-medium">{{ __("Total MRP") }}</span>
+					<span class="font-bold text-gray-900 text-center min-w-[60px]">{{
+						formatCurrency(totalMrp)
 					}}</span>
 				</div>
 				<div class="flex items-center justify-between text-xs text-gray-600">
@@ -1657,6 +1679,35 @@ const giftCardsResource = createResource({
 });
 
 /**
+ * Customer Balance Resource
+ *
+ * Fetches customer outstanding amount and credit balance.
+ * - Fetches when a customer is selected
+ * - Shows customer's outstanding invoices amount
+ * - Used to display "Outstanding: X" in cart header
+ *
+ * @endpoint pos_next.api.credit_sales.get_customer_balance
+ */
+const customerBalanceResource = createResource({
+	url: "pos_next.api.credit_sales.get_customer_balance",
+	makeParams() {
+		return {
+			customer: props.customer?.name || props.customer,
+			company: props.posProfile, // Will get company from profile
+		};
+	},
+	auto: false,
+	onSuccess(data) {
+		log.debug("[InvoiceCart] Customer balance loaded:", data);
+		customerOutstanding.value = data?.total_outstanding || 0;
+	},
+	onError(error) {
+		log.debug("[InvoiceCart] Error loading customer balance:", error);
+		customerOutstanding.value = 0;
+	},
+});
+
+/**
  * Watch for customer changes to load their gift cards.
  * Reloads gift cards resource when customer is selected (and online).
  * Clears gift cards when customer is removed or offline.
@@ -1668,6 +1719,22 @@ watch(
 			giftCardsResource.reload();
 		} else {
 			availableGiftCards.value = [];
+		}
+	}
+);
+
+/**
+ * Watch for customer changes to load their outstanding balance.
+ * Fetches outstanding amount when customer is selected.
+ * Clears outstanding when customer is removed.
+ */
+watch(
+	() => props.customer,
+	(newCustomer) => {
+		if (newCustomer && props.posProfile) {
+			customerBalanceResource.fetch();
+		} else {
+			customerOutstanding.value = 0;
 		}
 	}
 );
@@ -1767,6 +1834,19 @@ const totalQuantity = computed(() => {
 });
 
 /**
+ * Total MRP (Maximum Retail Price) of all items in cart.
+ * Multiplies each item's MRP by its quantity and sums them up.
+ * @returns {Number} Total MRP of all items
+ */
+const totalMrp = computed(() => {
+	return props.items.reduce((sum, item) => {
+		const mrp = Number.parseFloat(item.mrp) || 0;
+		const qty = item.quantity || 0;
+		return sum + (mrp * qty);
+	}, 0);
+});
+
+/**
  * Display subtotal adjusted for tax-inclusive mode.
  *
  * When tax is inclusive, the raw subtotal from the store includes tax.
@@ -1802,6 +1882,13 @@ const displayGrandTotal = computed(() => {
 	// This makes the display consistent and intuitive
 	return displaySubtotal.value + props.taxAmount - props.discountAmount;
 });
+
+/**
+ * Customer outstanding balance from previous invoices.
+ * Fetched when customer is selected.
+ * @returns {Number} Outstanding amount customer owes
+ */
+const customerOutstanding = ref(0);
 
 /**
  * ============================================================================
@@ -1962,6 +2049,19 @@ function getInitials(name) {
  */
 function formatCurrency(amount) {
 	return formatCurrencyUtil(Number.parseFloat(amount || 0), props.currency);
+}
+
+function getItemMrp(item) {
+	return Number.parseFloat(item.mrp) || 0;
+}
+
+function getItemMsp(item) {
+	return (
+		Number.parseFloat(item.msp) ||
+		Number.parseFloat(item.price_list_rate) ||
+		Number.parseFloat(item.rate) ||
+		0
+	);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

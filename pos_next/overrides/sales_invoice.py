@@ -85,7 +85,6 @@ def _get_post_change_gl_entries_setting():
 	)
 	return cint(result[0][0]) if result else 0
 
-
 class CustomSalesInvoice(SalesInvoice):
 	"""
 	Custom Sales Invoice class that handles wallet payments correctly.
@@ -94,6 +93,26 @@ class CustomSalesInvoice(SalesInvoice):
 	party information in the GL entry. This override adds party_type and party
 	for wallet payment methods marked with is_wallet_payment.
 	"""
+
+	def validate(self):
+		"""
+		Validate and correct debit_to account if it's not a valid Receivable/Payable account.
+		"""
+		# Check if debit_to is a valid Receivable/Payable account
+		if self.debit_to:
+			debit_to_account_type = frappe.db.get_value(
+				"Account", self.debit_to, "account_type"
+			)
+			# If it's not Receivable/Payable, use the company default
+			if debit_to_account_type not in ("Receivable", "Payable"):
+				correct_account = frappe.db.get_value(
+					"Company", self.company, "default_receivable_account"
+				)
+				if correct_account:
+					self.debit_to = correct_account
+
+		# Call parent validate
+		super().validate()
 
 	def make_pos_gl_entries(self, gl_entries):
 		"""
@@ -106,6 +125,22 @@ class CustomSalesInvoice(SalesInvoice):
 		if cint(self.is_pos):
 			skip_change_gl_entries = not _get_post_change_gl_entries_setting()
 
+			# Ensure debit_to is a valid Receivable account
+			# If it's not Receivable/Payable, try to find the correct one
+			debit_to = self.debit_to
+			debit_to_account_type = frappe.db.get_value(
+				"Account", debit_to, "account_type"
+			)
+			
+			if debit_to_account_type not in ("Receivable", "Payable"):
+				# Try to use company default receivable account
+				correct_account = frappe.db.get_value(
+					"Company", self.company, "default_receivable_account"
+				)
+				if correct_account:
+					debit_to = correct_account
+					debit_to_account_type = "Receivable"
+
 			for payment_mode in self.payments:
 				if skip_change_gl_entries and payment_mode.account == self.account_for_change_amount:
 					payment_mode.base_amount -= flt(self.change_amount)
@@ -113,23 +148,27 @@ class CustomSalesInvoice(SalesInvoice):
 				if payment_mode.amount:
 					# POS, make payment entries
 					# Credit entry to debit_to (customer receivable)
+					credit_entry = {
+						"account": debit_to,
+						"against": payment_mode.account,
+						"credit": payment_mode.base_amount,
+						"credit_in_account_currency": payment_mode.base_amount
+						if self.party_account_currency == self.company_currency
+						else payment_mode.amount,
+						"against_voucher": self.return_against
+						if cint(self.is_return) and self.return_against
+						else self.name,
+						"against_voucher_type": self.doctype,
+						"cost_center": self.cost_center,
+					}
+					# Only set party info if debit_to is a Receivable/Payable account
+					if debit_to_account_type in ("Receivable", "Payable"):
+						credit_entry["party_type"] = "Customer"
+						credit_entry["party"] = self.customer
+
 					gl_entries.append(
 						self.get_gl_dict(
-							{
-								"account": self.debit_to,
-								"party_type": "Customer",
-								"party": self.customer,
-								"against": payment_mode.account,
-								"credit": payment_mode.base_amount,
-								"credit_in_account_currency": payment_mode.base_amount
-								if self.party_account_currency == self.company_currency
-								else payment_mode.amount,
-								"against_voucher": self.return_against
-								if cint(self.is_return) and self.return_against
-								else self.name,
-								"against_voucher_type": self.doctype,
-								"cost_center": self.cost_center,
-							},
+							credit_entry,
 							self.party_account_currency,
 							item=self,
 						)
@@ -143,19 +182,26 @@ class CustomSalesInvoice(SalesInvoice):
 						payment_mode.mode_of_payment, payment_mode.account
 					)
 
+					debit_entry = {
+						"account": payment_mode.account,
+						"against": self.customer,
+						"debit": payment_mode.base_amount,
+						"debit_in_account_currency": payment_mode.base_amount
+						if payment_mode_account_currency == self.company_currency
+						else payment_mode.amount,
+						"cost_center": self.cost_center,
+					}
+					# Only add party info if this is a wallet payment and account is Receivable/Payable
+					payment_mode_account_type = frappe.db.get_value(
+						"Account", payment_mode.account, "account_type"
+					)
+					if party_type and payment_mode_account_type in ("Receivable", "Payable"):
+						debit_entry["party_type"] = party_type
+						debit_entry["party"] = party
+
 					gl_entries.append(
 						self.get_gl_dict(
-							{
-								"account": payment_mode.account,
-								"party_type": party_type,
-								"party": party,
-								"against": self.customer,
-								"debit": payment_mode.base_amount,
-								"debit_in_account_currency": payment_mode.base_amount
-								if payment_mode_account_currency == self.company_currency
-								else payment_mode.amount,
-								"cost_center": self.cost_center,
-							},
+							debit_entry,
 							payment_mode_account_currency,
 							item=self,
 						)

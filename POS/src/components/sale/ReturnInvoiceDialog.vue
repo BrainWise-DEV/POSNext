@@ -42,11 +42,7 @@
 									ref="invoiceSearchInput"
 									v-model="invoiceListFilter"
 									type="text"
-									:placeholder="
-										isOffline
-											? __('Search unavailable offline')
-											: __('Search by invoice, customer, or mobile...')
-									"
+									:placeholder="isOffline ? __('Search unavailable offline') : __('Search by invoice, customer, mobile or item code...')"
 									:disabled="isOffline"
 									:class="[
 										'w-full ps-10 pe-10 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500',
@@ -864,12 +860,8 @@
 											:style="paymentSelectStyle"
 											class="payment-select flex-1 py-2.5 border border-gray-300 rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white appearance-none cursor-pointer hover:border-gray-400 transition-colors ps-3 pe-10"
 										>
-											<option value="">{{ __("Select method...") }}</option>
-											<option
-												v-for="method in paymentMethods"
-												:key="method.mode_of_payment"
-												:value="method.mode_of_payment"
-											>
+											<option value="">{{ __('Select method...') }}</option>
+											<option v-for="method in allowedReturnPaymentMethods" :key="method.mode_of_payment" :value="method.mode_of_payment">
 												{{ method.mode_of_payment }}
 											</option>
 										</select>
@@ -1176,6 +1168,15 @@
 			</div>
 		</template>
 	</Dialog>
+
+	<!-- Manager Approval Dialog for Cash Refunds -->
+	<ManagerApprovalDialog
+		v-model="showManagerApproval"
+		approval-type="Cash Refund"
+		:amount="maxRefundableAmount"
+		:reason="returnReason"
+		@approved="onManagerApproved"
+	/>
 </template>
 
 <script setup>
@@ -1187,10 +1188,12 @@ import {
 	DEFAULT_LOCALE,
 	formatCurrency as formatCurrencyUtil,
 	roundCurrency,
-} from "@/utils/currency";
-import { getInvoiceStatusColor } from "@/utils/invoice";
-import { Button, Dialog, FeatherIcon, createResource } from "frappe-ui";
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
+	roundToNearestZeroOrFive,
+} from "@/utils/currency"
+import { getInvoiceStatusColor } from "@/utils/invoice"
+import { Button, Dialog, FeatherIcon, createResource } from "frappe-ui"
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue"
+import ManagerApprovalDialog from "@/components/ManagerApprovalDialog.vue"
 
 const { showSuccess, showError, showWarning } = useToast();
 const { isOffline } = useOfflineStatus();
@@ -1264,6 +1267,11 @@ const returnExpiredDialog = reactive({
 	daysSince: 0,
 	allowedDays: 0,
 });
+
+// Manager Approval State
+const showManagerApproval = ref(false)
+const isApproved = ref(false)
+const approvalPending = ref(false)
 
 // Resource for loading recent invoices (only those with items available for return)
 const loadInvoicesResource = createResource({
@@ -1617,20 +1625,23 @@ const totalPaymentAmount = computed(() =>
 );
 
 const maxRefundableAmount = computed(() => {
-	if (!originalInvoice.value) return 0;
-	if (!isPartiallyPaid.value && !isOriginalCreditSale.value) return returnTotal.value;
+	if (!originalInvoice.value) return 0
+	if (!isPartiallyPaid.value && !isOriginalCreditSale.value)
+		return returnTotal.value
 
-	const grandTotal = Math.abs(originalInvoice.value.grand_total) || 1;
-	const returnRatio = returnTotal.value / grandTotal;
-	return roundCurrency(Math.min(returnTotal.value, originalPaidAmount.value * returnRatio));
-});
+	const grandTotal = Math.abs(originalInvoice.value.grand_total) || 1
+	const returnRatio = returnTotal.value / grandTotal
+	return roundToNearestZeroOrFive(
+		Math.min(returnTotal.value, originalPaidAmount.value * returnRatio),
+	)
+})
 
 // Amount that goes toward credit balance (for partially paid invoices)
 const creditAdjustmentAmount = computed(() =>
 	isPartiallyPaid.value
-		? roundCurrency(Math.max(0, returnTotal.value - maxRefundableAmount.value))
-		: 0
-);
+		? roundToNearestZeroOrFive(Math.max(0, returnTotal.value - maxRefundableAmount.value))
+		: 0,
+)
 
 // Summary display helpers for the Return Summary section
 const showPartialBreakdown = computed(() => isPartiallyPaid.value && !isOriginalCreditSale.value);
@@ -1680,9 +1691,16 @@ const filterInvoicesByTerm = (invoices, searchTerm) => {
 		(invoice) =>
 			invoice.name.toLowerCase().includes(term) ||
 			invoice.customer_name?.toLowerCase().includes(term) ||
-			invoice.contact_mobile?.toLowerCase().includes(term)
-	);
-};
+			invoice.contact_mobile?.toLowerCase().includes(term) ||
+			// Search across invoice items by item_code or item_name
+			(Array.isArray(invoice.items) &&
+				invoice.items.some(
+					(item) =>
+						item.item_code?.toLowerCase().includes(term) ||
+						item.item_name?.toLowerCase().includes(term),
+				)),
+	)
+}
 
 // Memoized search term to avoid recalculating in multiple computeds
 const normalizedSearchTerm = computed(() => invoiceListFilter.value?.trim() || "");
@@ -1696,6 +1714,14 @@ const searchSuggestions = computed(() => {
 	if (normalizedSearchTerm.value.length < MIN_SEARCH_LENGTH) return [];
 	return filteredInvoiceList.value.slice(0, MAX_SUGGESTIONS);
 });
+
+/**
+ * Filter payment methods to only show those allowed for returns
+ * Returns only methods where allow_in_returns = 1
+ */
+const allowedReturnPaymentMethods = computed(() => {
+	return paymentMethods.value.filter((method) => method.allow_in_returns === 1)
+})
 
 // Debounce timer for server search (will be cleaned up on unmount)
 let serverSearchTimeout = null;
@@ -1713,13 +1739,12 @@ watch(normalizedSearchTerm, (searchTerm) => {
 	}
 
 	// Early exit conditions
-	if (!searchTerm || searchTerm.length < MIN_SERVER_SEARCH_LENGTH) return;
-	if (!looksLikeInvoiceNumber(searchTerm)) return;
+	if (!searchTerm || searchTerm.length < MIN_SERVER_SEARCH_LENGTH) return
 
 	// Check if we already have this in local results (reuse filtered list)
 	if (filteredInvoiceList.value.length > 0) return;
 
-	// Debounce server search
+	// Debounce server search — triggers for both invoice numbers AND item codes
 	serverSearchTimeout = setTimeout(() => {
 		searchInvoiceByNumberResource.submit({
 			search_term: searchTerm,
@@ -2008,8 +2033,57 @@ async function handleCreateReturn() {
 		return;
 	}
 
-	submitError.value = "";
-	isSubmitting.value = true;
+	// Check if cash refund needs manager approval
+	if (needsCashRefundApproval()) {
+		showManagerApproval.value = true
+		approvalPending.value = true
+		return
+	}
+
+	// If we get here, either no approval needed or already approved
+	if (approvalPending.value && !isApproved.value) {
+		submitError.value = __("Manager approval required for this transaction")
+		return
+	}
+
+	await submitReturn()
+}
+
+/**
+ * Check if cash refund amount exceeds approval threshold
+ */
+function needsCashRefundApproval() {
+	// Don't require approval for credit sales or when adding to customer credit
+	if (isOriginalCreditSale.value || addToCustomerCredit.value) {
+		return false
+	}
+
+	// Require approval if any refund payment is cash
+	return refundPayments.value.some(payment => {
+		return payment.mode_of_payment === 'Cash'
+	})
+}
+
+/**
+ * Handle manager approval
+ */
+function onManagerApproved(approvalData) {
+	isApproved.value = true
+	approvalPending.value = false
+	showSuccess(__("Manager approval granted. Processing return..."))
+	
+	// Proceed with submit after a brief delay
+	setTimeout(() => {
+		submitReturn()
+	}, 500)
+}
+
+/**
+ * Submit the return after all validations pass
+ */
+async function submitReturn() {
+	submitError.value = ""
+	isSubmitting.value = true
 
 	try {
 		const result = await createReturnResource.submit();
@@ -2019,7 +2093,7 @@ async function handleCreateReturn() {
 			throw result;
 		}
 	} catch (error) {
-		console.error("Caught error in handleCreateReturn:", error);
+		console.error("Caught error in submitReturn:", error)
 		if (!submitError.value) {
 			const errorMsg = extractErrorMessage(error);
 			submitError.value = errorMsg;

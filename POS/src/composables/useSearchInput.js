@@ -47,7 +47,10 @@ export function useSearchInput({ itemStore, onItemFound, showWarning, isAnyDialo
 	function focusSearchInput() {
 		nextTick(() => {
 			if (searchInputRef.value) {
-				searchInputRef.value.focus();
+				searchInputRef.value.focus()
+				setTimeout(() => {
+					if (searchInputRef.value) searchInputRef.value.focus()
+				}, 50)
 			}
 		});
 	}

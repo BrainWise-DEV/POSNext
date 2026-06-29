@@ -106,7 +106,7 @@ export function useInvoice() {
 	 * Resolve UOM pricing from IndexedDB or server.
 	 * Offline: reads item from IndexedDB for persisted uom_prices and conversion data.
 	 * Online: fetches from server for customer-specific rates.
-	 * @param {Object} item - Item with item_code, rate, price_list_rate
+	 * @param {Object} item - Item with item_code, rate, price_list_rate, batch_no, warehouse
 	 * @param {string} uom - Target UOM
 	 * @param {number} conversionFactor - UOM conversion factor
 	 * @param {number} qty - Quantity for pricing
@@ -116,17 +116,27 @@ export function useInvoice() {
 		// When online, fetch server pricing for customer-specific rates
 		if (!isOffline()) {
 			try {
-				const itemDetails = await getItemDetailsResource.submit({
+				const params = {
 					item_code: item.item_code,
 					pos_profile: posProfile.value,
 					customer: customer.value?.name || customer.value,
 					qty,
 					uom,
-				});
+				}
+				// Pass batch_no and warehouse so the server can return the
+				// correct batch-specific price (e.g. when 4 batches exist across
+				// different warehouses each with their own Item Price row).
+				if (item.batch_no) params.batch_no = item.batch_no
+				if (item.warehouse) params.warehouse = item.warehouse
+
+				const itemDetails = await getItemDetailsResource.submit(params)
 				return {
-					rate: itemDetails.price_list_rate || itemDetails.rate,
+					rate: itemDetails.rate,
 					price_list_rate: itemDetails.price_list_rate,
-				};
+					discount_amount: itemDetails.discount_amount || 0,
+					discount_percentage: itemDetails.discount_percentage || 0,
+					friends_family_pricing_applied: itemDetails.friends_family_pricing_applied || false,
+				}
 			} catch (err) {
 				log.warn("Server UOM pricing unavailable, resolving from IndexedDB", err);
 			}
@@ -215,12 +225,20 @@ export function useInvoice() {
 		);
 	});
 
+	const hasServiceItems = computed(() => {
+		return invoiceItems.value.some(
+			(item) => item.item_group && item.item_group.toLowerCase() === "service"
+		)
+	})
+
 	// Actions
 	function addItem(item, quantity = 1) {
-		const itemUom = item.uom || item.stock_uom;
-		const existingItem = invoiceItems.value.find(
-			(i) => i.item_code === item.item_code && i.uom === itemUom
-		);
+		const itemUom = item.uom || item.stock_uom
+		const existingItem = invoiceItems.value.find((i) => {
+			if (i.item_code !== item.item_code || i.uom !== itemUom) return false
+			if (item.batch_no) return i.batch_no === item.batch_no
+			return true
+		})
 
 		if (existingItem) {
 			// Store old values before update for incremental cache adjustment
@@ -289,8 +307,15 @@ export function useInvoice() {
 				is_stock_item: item.is_stock_item ?? 1,
 				is_bundle: item.is_bundle || false,
 				allow_negative_stock: item.allow_negative_stock || 0,
-			};
-			invoiceItems.value.push(newItem);
+				mrp: Number.parseFloat(item.mrp) || 0,
+				msp:
+					Number.parseFloat(item.msp) ||
+					Number.parseFloat(item.price_list_rate) ||
+					Number.parseFloat(item.rate) ||
+					0,
+			}
+
+			invoiceItems.value.unshift(newItem)
 			// Recalculate the newly added item to apply taxes
 			recalculateItem(newItem);
 
@@ -649,17 +674,19 @@ export function useInvoice() {
 	function recalculateItem(item) {
 		// Determine the base unit price
 		// If rate was manually edited, use the edited rate; otherwise use price_list_rate
-		const isManuallyEdited = item.is_rate_manually_edited === 1;
-		const effectiveRate = isManuallyEdited ? item.rate : item.price_list_rate || item.rate;
-		const roundedRate = roundCurrency(effectiveRate);
-		const baseAmount = roundCurrency(item.quantity * roundedRate);
+		const isManuallyEdited = item.is_rate_manually_edited === 1
+		const effectiveRate = isManuallyEdited ? item.rate : (item.price_list_rate || item.rate)
+		const roundedRate = roundCurrency(effectiveRate)
+		const baseAmount = roundToNearestZeroOrFive(item.quantity * roundedRate)
 
 		// Calculate discount from either percentage or fixed amount
 		let discountAmount = 0;
 		if (item.discount_percentage > 0) {
-			discountAmount = roundCurrency((baseAmount * item.discount_percentage) / 100);
+			discountAmount = roundToNearestZeroOrFive(
+				(baseAmount * item.discount_percentage) / 100,
+			)
 		} else if (item.discount_amount > 0) {
-			discountAmount = roundCurrency(item.discount_amount);
+			discountAmount = roundToNearestZeroOrFive(item.discount_amount)
 			// Sync percentage when amount is provided directly
 			item.discount_percentage = baseAmount > 0 ? (discountAmount / baseAmount) * 100 : 0;
 		}
@@ -673,13 +700,13 @@ export function useInvoice() {
 
 		if (taxInclusive.value && totalTaxRate > 0) {
 			// Tax-inclusive: Work backwards from gross to extract net and tax
-			const grossAmount = roundCurrency(baseAmount - discountAmount);
-			netAmount = roundCurrency(grossAmount / (1 + totalTaxRate / 100));
-			taxAmount = roundCurrency(grossAmount - netAmount);
+			const grossAmount = roundToNearestZeroOrFive(baseAmount - discountAmount)
+			netAmount = roundToNearestZeroOrFive(grossAmount / (1 + totalTaxRate / 100))
+			taxAmount = roundToNearestZeroOrFive(grossAmount - netAmount)
 		} else {
 			// Tax-exclusive: Calculate tax on top of net amount
-			netAmount = roundCurrency(baseAmount - discountAmount);
-			taxAmount = roundCurrency((netAmount * totalTaxRate) / 100);
+			netAmount = roundToNearestZeroOrFive(baseAmount - discountAmount)
+			taxAmount = roundToNearestZeroOrFive((netAmount * totalTaxRate) / 100)
 		}
 
 		// Update item fields with rounded values
@@ -951,8 +978,13 @@ export function useInvoice() {
 			invoiceData.transaction_date = today;
 		}
 
-		const result = await updateInvoiceResource.submit({ data: invoiceData });
-		return result?.data || result;
+		// Set mode of delivery to "Home Delivery" if service items are present
+		if (hasServiceItems.value) {
+			invoiceData.custom_mode_of_delivery = "Home Delivery"
+		}
+
+		const result = await updateInvoiceResource.submit({ data: invoiceData })
+		return result?.data || result
 	}
 
 	async function submitInvoice(
@@ -1015,6 +1047,11 @@ export function useInvoice() {
 				// Add custom discount description if provided (for Friends and Family customers)
 				if (customDiscountDescription.value) {
 					invoiceData.custom_discount_description = customDiscountDescription.value
+				}
+
+				// Set mode of delivery to "Home Delivery" if service items are present
+				if (hasServiceItems.value) {
+					invoiceData.custom_mode_of_delivery = "Home Delivery"
 				}
 
 				if (targetDoctype === "Sales Order" && deliveryDate) {
@@ -1290,6 +1327,7 @@ export function useInvoice() {
 		totalPaid,
 		remainingAmount,
 		canSubmit,
+		hasServiceItems,
 
 		// Actions
 		addItem,
