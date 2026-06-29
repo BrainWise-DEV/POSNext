@@ -10,7 +10,7 @@ dynamic = ["version"]
 dependencies = [
     # "frappe~=15.0.0" # Installed and managed by bench.
     "erpnext",
-    "pypdf>=6.12.0",
+    "pypdf>=6.13.3",
 ]
 
 [build-system]
