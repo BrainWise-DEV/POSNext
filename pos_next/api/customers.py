@@ -6,6 +6,66 @@ Handles customer search, creation, and management for POS operations
 import frappe
 from frappe import _
 
+CASHIER_ROLE = "POSNext Cashier"
+UNRESTRICTED_CUSTOMER_ROLES = frozenset(
+	{
+		"Nexus POS Manager",
+		"Sales Manager",
+		"Sales Master Manager",
+		"System Manager",
+	}
+)
+
+
+def should_restrict_customers_for_user(user=None):
+	"""Cashiers only see the POS profile default customer and customers they created."""
+	user = user or frappe.session.user
+	if not user or user in frappe.STANDARD_USERS:
+		return False
+
+	roles = set(frappe.get_roles(user))
+	if roles & UNRESTRICTED_CUSTOMER_ROLES:
+		return False
+
+	return CASHIER_ROLE in roles
+
+
+def get_allowed_customer_names(pos_profile=None, user=None):
+	"""Default POS profile customer plus customers owned by the current user."""
+	user = user or frappe.session.user
+	allowed = set()
+
+	if pos_profile:
+		default_customer = frappe.db.get_value("POS Profile", pos_profile, "customer")
+		if default_customer:
+			allowed.add(default_customer)
+
+	owned = frappe.get_all("Customer", filters={"owner": user}, pluck="name")
+	allowed.update(owned or [])
+
+	return allowed
+
+
+def _apply_cashier_customer_scope(filters, pos_profile=None):
+	if not should_restrict_customers_for_user():
+		return filters
+
+	allowed = get_allowed_customer_names(pos_profile)
+	if not allowed:
+		filters["name"] = ["in", ["__no_customer__"]]
+	else:
+		filters["name"] = ["in", list(allowed)]
+
+	return filters
+
+
+def _assert_customer_access(customer, pos_profile=None):
+	if not customer or not should_restrict_customers_for_user():
+		return
+
+	if customer not in get_allowed_customer_names(pos_profile):
+		frappe.throw(_("You do not have permission to access this customer"), frappe.PermissionError)
+
 
 @frappe.whitelist()
 def get_customers(search_term="", pos_profile=None, limit=20, modified_since=None):
@@ -45,6 +105,8 @@ def get_customers(search_term="", pos_profile=None, limit=20, modified_since=Non
 			# Full fetch: only active customers
 			filters["disabled"] = 0
 
+		filters = _apply_cashier_customer_scope(filters, pos_profile)
+
 		search_term = (search_term or "").strip()
 		if search_term:
 			like_term = f"%{search_term}%"
@@ -55,7 +117,13 @@ def get_customers(search_term="", pos_profile=None, limit=20, modified_since=Non
 				["Customer", "email_id", "like", like_term],
 			]
 
-		customer_limit = limit if limit not in (None, 0) else frappe.db.count("Customer", filters)
+		if limit not in (None, 0):
+			customer_limit = limit
+		elif should_restrict_customers_for_user():
+			customer_limit = len(get_allowed_customer_names(pos_profile))
+		else:
+			customer_limit = frappe.db.count("Customer", filters)
+
 		result = frappe.get_all(
 			"Customer",
 			filters=filters,
@@ -273,5 +341,12 @@ def get_customer_details(customer):
 	"""
 	if not customer:
 		frappe.throw(_("Customer is required"))
+
+	pos_profile = None
+	form_dict = getattr(frappe.local, "form_dict", None)
+	if form_dict:
+		pos_profile = form_dict.get("pos_profile")
+
+	_assert_customer_access(customer, pos_profile)
 
 	return frappe.get_cached_doc("Customer", customer).as_dict()

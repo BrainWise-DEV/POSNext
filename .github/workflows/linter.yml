@@ -44,26 +44,47 @@ jobs:
 
       - uses: actions/checkout@v4
 
-            
-      - name: Clear pip cache
-        run: rm -rf ~/.cache/pip
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-audit-${{ hashFiles('**/pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-audit-
 
-      
       - name: Install and run pip-audit
+        timeout-minutes: 15
         run: |
           python -m venv .audit-venv
           . .audit-venv/bin/activate
           pip install --upgrade pip
-          pip install "tomli>=2.2.1"
           pip install pip-audit
           pip install "frappe @ git+https://github.com/frappe/frappe.git@version-15"
           pip install "erpnext @ git+https://github.com/frappe/erpnext.git@version-15"
           cd ${GITHUB_WORKSPACE}
           pip install --no-deps .
-          
-          pip-audit --desc on \
-            --ignore-vuln PYSEC-2026-175 \
-            --ignore-vuln PYSEC-2026-177 \
-            --ignore-vuln PYSEC-2026-178 \
-            --ignore-vuln PYSEC-2026-179 \
-            --skip-editable || true
+          pip install --upgrade "pypdf>=6.13.3"
+          # frappe pins tomli~=2.0.1; pip-audit requires tomli>=2.2.1
+          pip install --upgrade "tomli>=2.2.1"
+          # frappe/erpnext/pos-next are git/bench packages and are skipped (not on PyPI).
+          # The advisories below live in frappe version-15 hard-pins that pos_next
+          # cannot upgrade; ignore specific IDs so the gate still fails on new issues.
+          audit_ok=1
+          for i in {1..5}; do
+            if pip-audit --desc on \
+              --ignore-vuln PYSEC-2026-175 \
+              --ignore-vuln PYSEC-2026-177 \
+              --ignore-vuln PYSEC-2026-178 \
+              --ignore-vuln PYSEC-2026-179 \
+              --ignore-vuln GHSA-g75f-g53v-794x \
+              --ignore-vuln GHSA-gj48-438w-jh9v \
+              --ignore-vuln GHSA-8rfp-98v4-mmr6 \
+              --ignore-vuln GHSA-537c-gmf6-5ccf \
+              --ignore-vuln CVE-2025-26240 \
+              --skip-editable; then audit_ok=0; break; fi
+            if [ "$i" -lt 5 ]; then sleep $((2**i)); fi
+          done
+          if [ "$audit_ok" -ne 0 ]; then
+            echo "Vulnerability check failed - see pip-audit output above"
+            exit 1
+          fi
