@@ -75,18 +75,24 @@ export function useSearchInput({ itemStore, onItemFound, showWarning, isAnyDialo
 
 			// Snapshot the barcode NOW from the DOM input, before anything overwrites it
 			const barcode = searchInputRef.value?.value?.trim() || itemStore.searchTerm?.trim();
-			if (barcode) {
-				// Clear input immediately so next scan starts clean
-				itemStore.clearSearch();
-				if (searchInputRef.value) searchInputRef.value.value = "";
+			if (!barcode) return;
 
-				// Queue the search with the captured barcode
-				processBarcodeScan(barcode, autoAddEnabled.value);
+			// If search results are visible, add the first one directly
+			const firstResult = itemStore.filteredItems?.[0];
+			if (firstResult && itemStore.searchTerm) {
+				onItemFound(firstResult, autoAddEnabled.value);
+				clearSearchAndResetInput();
+				focusSearchInput();
+				return;
 			}
+
+			// No search results → fall back to barcode lookup
+			itemStore.clearSearch();
+			if (searchInputRef.value) searchInputRef.value.value = "";
+			processBarcodeScan(barcode, autoAddEnabled.value);
 			return;
 		}
 		// All other keys: no special handling needed.
-		// Dead scanner-speed-detection code removed.
 	}
 
 	/**
