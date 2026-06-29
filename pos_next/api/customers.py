@@ -67,7 +67,7 @@ def get_customers(search_term="", pos_profile=None, limit=20, modified_since=Non
 		frappe.logger().debug(f"get_customers returned {len(result)} customers")
 		return result
 	except Exception as e:
-		frappe.logger().error(f"Error in get_customers: {str(e)}")
+		frappe.logger().error(f"Error in get_customers: {e!s}")
 		frappe.logger().error(frappe.get_traceback())
 		frappe.throw(_("Error fetching customers: {0}").format(str(e)))
 
@@ -82,6 +82,8 @@ def create_customer(
 	territory=None,
 	company=None,
 	pos_profile=None,
+	custom_governorate=None,
+	custom_district=None,
 ):
 	"""
 	Create a new customer from POS.
@@ -95,6 +97,8 @@ def create_customer(
 	    territory (str): Territory (default: from Selling Settings)
 	    company (str): Company (optional, used to auto-assign loyalty program)
 	    pos_profile (str): POS Profile (optional, preferred for context-aware loyalty assignment)
+	    custom_governorate (str): Governorate (optional)
+	    custom_district (str): District (optional, must belong to the governorate)
 
 	Returns:
 	    dict: Created customer document
@@ -115,17 +119,18 @@ def create_customer(
 	if not resolved_customer_group:
 		resolved_customer_group = frappe.db.get_single_value("Selling Settings", "customer_group")
 	if not resolved_customer_group:
-		resolved_customer_group = frappe.db.get_value(
-			"Customer Group", {"is_group": 0}, "name", order_by="lft"
-		) or "All Customer Groups"
+		resolved_customer_group = (
+			frappe.db.get_value("Customer Group", {"is_group": 0}, "name", order_by="lft")
+			or "All Customer Groups"
+		)
 
 	resolved_territory = territory
 	if not resolved_territory:
 		resolved_territory = frappe.db.get_single_value("Selling Settings", "territory")
 	if not resolved_territory:
-		resolved_territory = frappe.db.get_value(
-			"Territory", {"is_group": 0}, "name", order_by="lft"
-		) or "All Territories"
+		resolved_territory = (
+			frappe.db.get_value("Territory", {"is_group": 0}, "name", order_by="lft") or "All Territories"
+		)
 
 	customer = frappe.get_doc(
 		{
@@ -138,6 +143,8 @@ def create_customer(
 			"email_id": email_id or "",
             "custom_pincode": custom_pincode or "",
 			"loyalty_program": loyalty_program,
+			"custom_governorate": custom_governorate or None,
+			"custom_district": custom_district or None,
 		}
 	)
 

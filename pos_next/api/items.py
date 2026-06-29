@@ -8,7 +8,8 @@ import frappe
 from erpnext.stock.doctype.batch.batch import get_batch_qty
 from erpnext.stock.get_item_details import get_item_details as erpnext_get_item_details
 from frappe import _
-from frappe.query_builder import DocType, functions as fn
+from frappe.query_builder import DocType
+from frappe.query_builder import functions as fn
 from frappe.utils import flt, nowdate
 
 ITEM_RESULT_FIELDS = [
@@ -780,7 +781,7 @@ def _get_item_group_with_descendants(item_group):
 				.where(ItemGroup.rgt < group.rgt)
 				.run(pluck="name")
 			)
-			result = [item_group] + list(descendants)
+			result = [item_group, *list(descendants)]
 
 	frappe.cache().set_value(cache_key, result, expires_in_sec=300)
 	return result
@@ -1334,7 +1335,7 @@ def get_items(
 			# Relevance scoring with case-insensitive comparison
 			# Exact barcode match gets highest priority, use MAX() for grouping
 			prefix_pattern = f"{effective_search_term}%"
-			relevance = f"""
+			relevance = """
 				MAX(CASE
 					WHEN ib.barcode = %s THEN 1500
 					WHEN ib.barcode LIKE %s THEN 1200
@@ -1713,7 +1714,7 @@ def get_items_bulk(
 			ORDER BY i.item_name ASC
 			LIMIT %s OFFSET %s
 		"""
-		all_params = params + [int(limit), int(start)]
+		all_params = [*params, int(limit), int(start)]
 		items = frappe.db.sql(query, tuple(all_params), as_dict=1)
 
 		if not items:
@@ -1897,19 +1898,8 @@ def get_items_count(pos_profile, item_group=None, brand=None, include_variants=0
 
 
 @frappe.whitelist()
-def get_item_details(item_code, pos_profile, customer=None, qty=1, uom=None):  # noqa: ARG001 - customer reserved for future use
-	"""Get detailed item info including price, tax, stock
-	
-	Args:
-		item_code: The item code to fetch details for
-		pos_profile: The POS Profile name
-		customer: Customer name or ID (used to fetch customer group for pricing logic)
-		qty: Quantity (used for pricing calculations)
-		uom: Unit of Measure (optional)
-	
-	Returns:
-		dict: Item details including pricing, stock, batch info, etc.
-	"""
+def get_item_details(item_code, pos_profile, customer=None, qty=1, uom=None):
+	"""Get detailed item info including price, tax, stock"""
 	try:
 		# Parse pos_profile if it's a JSON string
 		if isinstance(pos_profile, str):
@@ -2224,7 +2214,7 @@ def _parse_item_codes_param(item_codes):
 			item_codes = json.loads(item_codes)
 		except (json.JSONDecodeError, ValueError):
 			return [item_codes]
-	return list(item_codes) if isinstance(item_codes, (list, tuple)) else [item_codes]
+	return list(item_codes) if isinstance(item_codes, list | tuple) else [item_codes]
 
 
 # =============================================================================
@@ -2580,6 +2570,6 @@ def get_batch_serial_data_for_items(item_codes, warehouse):
 
 		return result
 
-	except Exception as e:
+	except Exception:
 		frappe.log_error(frappe.get_traceback(), "Get Batch/Serial Data for Items Error")
 		return {}

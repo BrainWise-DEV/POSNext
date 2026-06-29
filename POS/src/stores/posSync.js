@@ -14,7 +14,7 @@
  * @module stores/posSync
  */
 
-import { useToast } from "@/composables/useToast"
+import { useToast } from "@/composables/useToast";
 import {
 	cacheCustomersFromServer,
 	cachePaymentMethodsFromServer,
@@ -23,15 +23,15 @@ import {
 	cacheInvoiceHistory,
 	cacheUnpaidInvoices,
 	cacheUnpaidSummary,
-} from "@/utils/offline"
-import { call } from "@/utils/apiWrapper"
-import { logger } from "@/utils/logger"
-import { offlineState } from "@/utils/offline/offlineState"
-import { offlineWorker } from "@/utils/offline/workerClient"
-import { defineStore } from "pinia"
-import { computed, ref } from "vue"
+} from "@/utils/offline";
+import { call } from "@/utils/apiWrapper";
+import { logger } from "@/utils/logger";
+import { offlineState } from "@/utils/offline/offlineState";
+import { offlineWorker } from "@/utils/offline/workerClient";
+import { defineStore } from "pinia";
+import { computed, ref } from "vue";
 
-const log = logger.create('POSSync')
+const log = logger.create("POSSync");
 
 export const usePOSSyncStore = defineStore("posSync", () => {
 	// =========================================================================
@@ -39,28 +39,28 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 	// =========================================================================
 
 	/** Current offline status - synced with offlineState singleton */
-	const isOffline = ref(offlineState.isOffline)
+	const isOffline = ref(offlineState.isOffline);
 
 	/** Number of invoices pending sync */
-	const pendingInvoicesCount = ref(0)
+	const pendingInvoicesCount = ref(0);
 
 	/** Whether a sync operation is in progress */
-	const isSyncing = ref(false)
+	const isSyncing = ref(false);
 
 	/** Current connection quality metrics */
-	const connectionQuality = ref(offlineState.getConnectionQuality())
+	const connectionQuality = ref(offlineState.getConnectionQuality());
 
 	/** List of pending invoices for display */
-	const pendingInvoicesList = ref([])
+	const pendingInvoicesList = ref([]);
 
 	/** Track previous offline state for detecting online/offline transitions */
-	let wasOffline = offlineState.isOffline
+	let wasOffline = offlineState.isOffline;
 
 	// =========================================================================
 	// TOAST NOTIFICATIONS
 	// =========================================================================
 
-	const { showSuccess, showError, showWarning } = useToast()
+	const { showSuccess, showError, showWarning } = useToast();
 
 	// =========================================================================
 	// OFFLINE STATE SUBSCRIPTION
@@ -71,31 +71,31 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 	 * This subscription persists for the app's lifetime since Pinia stores are singletons.
 	 */
 	offlineState.subscribe(async (state) => {
-		const nowOffline = state.isOffline
+		const nowOffline = state.isOffline;
 
 		// Update reactive state
-		isOffline.value = nowOffline
-		connectionQuality.value = state.quality || offlineState.getConnectionQuality()
+		isOffline.value = nowOffline;
+		connectionQuality.value = state.quality || offlineState.getConnectionQuality();
 
 		// Auto-sync when transitioning from offline to online
 		if (wasOffline && !nowOffline) {
-			log.info('Transition to online detected, auto-syncing pending invoices')
+			log.info("Transition to online detected, auto-syncing pending invoices");
 			try {
-				await syncPending()
+				await syncPending();
 			} catch (error) {
-				log.error('Auto-sync failed on reconnection', error)
+				log.error("Auto-sync failed on reconnection", error);
 			}
 		}
 
-		wasOffline = nowOffline
-	})
+		wasOffline = nowOffline;
+	});
 
 	// =========================================================================
 	// COMPUTED
 	// =========================================================================
 
 	/** Whether there are any pending invoices to sync */
-	const hasPendingInvoices = computed(() => pendingInvoicesCount.value > 0)
+	const hasPendingInvoices = computed(() => pendingInvoicesCount.value > 0);
 
 	// =========================================================================
 	// INTERNAL HELPERS
@@ -106,9 +106,9 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 	 */
 	async function updatePendingCount() {
 		try {
-			pendingInvoicesCount.value = await offlineWorker.getOfflineInvoiceCount()
+			pendingInvoicesCount.value = await offlineWorker.getOfflineInvoiceCount();
 		} catch (error) {
-			log.error('Failed to get pending invoice count', error)
+			log.error("Failed to get pending invoice count", error);
 		}
 	}
 
@@ -118,19 +118,19 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 	 */
 	async function syncPending() {
 		if (isOffline.value) {
-			throw new Error("Cannot sync while offline")
+			throw new Error("Cannot sync while offline");
 		}
 
-		isSyncing.value = true
+		isSyncing.value = true;
 		try {
-			const result = await syncOfflineInvoices()
-			await updatePendingCount()
-			return result
+			const result = await syncOfflineInvoices();
+			await updatePendingCount();
+			return result;
 		} catch (error) {
-			log.error('Failed to sync invoices', error)
-			throw error
+			log.error("Failed to sync invoices", error);
+			throw error;
 		} finally {
-			isSyncing.value = false
+			isSyncing.value = false;
 		}
 	}
 
@@ -138,7 +138,7 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 	 * Get all pending invoices from the worker
 	 */
 	async function getPending() {
-		return await offlineWorker.getOfflineInvoices()
+		return await offlineWorker.getOfflineInvoices();
 	}
 
 	/**
@@ -146,8 +146,8 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 	 * @param {string} id - Invoice ID to delete
 	 */
 	async function deletePending(id) {
-		await offlineWorker.deleteOfflineInvoice(id)
-		await updatePendingCount()
+		await offlineWorker.deleteOfflineInvoice(id);
+		await updatePendingCount();
 	}
 
 	/**
@@ -158,15 +158,15 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 	async function cacheData(items, customers) {
 		try {
 			if (items?.length > 0) {
-				await offlineWorker.cacheItems(items)
+				await offlineWorker.cacheItems(items);
 			}
 			if (customers?.length > 0) {
-				await offlineWorker.cacheCustomers(customers)
+				await offlineWorker.cacheCustomers(customers);
 			}
-			return true
+			return true;
 		} catch (error) {
-			log.error('Failed to cache data', error)
-			return false
+			log.error("Failed to cache data", error);
+			return false;
 		}
 	}
 
@@ -180,13 +180,13 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 	 */
 	async function saveInvoiceOffline(invoiceData) {
 		try {
-			const result = await offlineWorker.saveOfflineInvoice(invoiceData)
-			await updatePendingCount()
-			log.info('Invoice saved offline successfully')
-			return result || { success: true }
+			const result = await offlineWorker.saveOfflineInvoice(invoiceData);
+			await updatePendingCount();
+			log.info("Invoice saved offline successfully");
+			return result || { success: true };
 		} catch (error) {
-			log.error('Failed to save invoice offline', error)
-			throw error
+			log.error("Failed to save invoice offline", error);
+			throw error;
 		}
 	}
 
@@ -195,10 +195,10 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 	 */
 	async function loadPendingInvoices() {
 		try {
-			pendingInvoicesList.value = await getPending()
+			pendingInvoicesList.value = await getPending();
 		} catch (error) {
-			log.error('Failed to load pending invoices', error)
-			pendingInvoicesList.value = []
+			log.error("Failed to load pending invoices", error);
+			pendingInvoicesList.value = [];
 		}
 	}
 
@@ -208,13 +208,13 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 	 */
 	async function deleteOfflineInvoice(invoiceId) {
 		try {
-			await deletePending(invoiceId)
-			await loadPendingInvoices()
-			showSuccess(__("Offline invoice deleted successfully"))
+			await deletePending(invoiceId);
+			await loadPendingInvoices();
+			showSuccess(__("Offline invoice deleted successfully"));
 		} catch (error) {
-			log.error('Failed to delete offline invoice', error)
-			showError(error.message || __("Failed to delete offline invoice"))
-			throw error
+			log.error("Failed to delete offline invoice", error);
+			showError(error.message || __("Failed to delete offline invoice"));
+			throw error;
 		}
 	}
 
@@ -224,22 +224,22 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 	 */
 	async function syncAllPending() {
 		if (isOffline.value) {
-			showWarning(__("Cannot sync while offline"))
-			return { success: 0, failed: 0, errors: [] }
+			showWarning(__("Cannot sync while offline"));
+			return { success: 0, failed: 0, errors: [] };
 		}
 
 		try {
-			const result = await syncPending()
+			const result = await syncPending();
 
 			if (result.success > 0) {
-				showSuccess(__('{0} invoice(s) synced successfully', [result.success]))
-				await loadPendingInvoices()
+				showSuccess(__("{0} invoice(s) synced successfully", [result.success]));
+				await loadPendingInvoices();
 			}
 
-			return result
+			return result;
 		} catch (error) {
-			log.error('Sync all pending failed', error)
-			throw error
+			log.error("Sync all pending failed", error);
+			throw error;
 		}
 	}
 
@@ -247,121 +247,130 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 	 * Preload data for offline use (payment methods, customers)
 	 * @param {Object} currentProfile - Current POS profile
 	 */
-	let _preloadingProfile = null
+	let _preloadingProfile = null;
 	async function preloadDataForOffline(currentProfile) {
 		if (!currentProfile || isOffline.value) {
-			return
+			return;
 		}
 
 		// Prevent duplicate concurrent preloads (e.g., from component remounts
 		// triggered by language/translation version changes)
 		if (_preloadingProfile === currentProfile.name) {
-			log.debug('Preload already in progress for this profile, skipping duplicate')
-			return
+			log.debug("Preload already in progress for this profile, skipping duplicate");
+			return;
 		}
-		_preloadingProfile = currentProfile.name
+		_preloadingProfile = currentProfile.name;
 
 		try {
-			const cacheReady = await checkCacheReady()
-			const stats = await getCacheStats()
-			const needsRefresh = !stats.lastSync || Date.now() - stats.lastSync > 24 * 60 * 60 * 1000
+			const cacheReady = await checkCacheReady();
+			const stats = await getCacheStats();
+			const needsRefresh =
+				!stats.lastSync || Date.now() - stats.lastSync > 24 * 60 * 60 * 1000;
 
 			// Always load payment methods for reliable offline support
-			log.info('Loading payment methods for offline use')
+			log.info("Loading payment methods for offline use");
 			try {
-				const paymentMethodsData = await cachePaymentMethodsFromServer(currentProfile.name)
+				const paymentMethodsData = await cachePaymentMethodsFromServer(
+					currentProfile.name
+				);
 
 				if (paymentMethodsData.payment_methods?.length > 0) {
-					const methodsWithProfile = paymentMethodsData.payment_methods.map((method) => ({
-						...method,
-						pos_profile: currentProfile.name,
-					}))
-					await offlineWorker.cachePaymentMethods(methodsWithProfile)
-					log.success(`Cached ${methodsWithProfile.length} payment methods`)
+					const methodsWithProfile = paymentMethodsData.payment_methods.map(
+						(method) => ({
+							...method,
+							pos_profile: currentProfile.name,
+						})
+					);
+					await offlineWorker.cachePaymentMethods(methodsWithProfile);
+					log.success(`Cached ${methodsWithProfile.length} payment methods`);
 				}
 			} catch (error) {
-				log.error('Failed to load payment methods', error)
+				log.error("Failed to load payment methods", error);
 				// Continue with other data loading
 			}
 
 			// Cache sales persons for offline use
 			try {
-				const salesPersonsData = await cacheSalesPersonsFromServer(currentProfile.name)
+				const salesPersonsData = await cacheSalesPersonsFromServer(currentProfile.name);
 				if (salesPersonsData.sales_persons?.length > 0) {
 					const personsWithProfile = salesPersonsData.sales_persons.map((person) => ({
 						...person,
 						pos_profile: currentProfile.name,
-					}))
-					await offlineWorker.cacheSalesPersons(personsWithProfile)
-					log.success(`Cached ${personsWithProfile.length} sales persons`)
+					}));
+					await offlineWorker.cacheSalesPersons(personsWithProfile);
+					log.success(`Cached ${personsWithProfile.length} sales persons`);
 				}
 			} catch (error) {
-				log.error('Failed to load sales persons', error)
+				log.error("Failed to load sales persons", error);
 			}
 
 			// Load customers if cache needs refresh
 			if (!cacheReady || needsRefresh) {
-				showSuccess(__("Loading customers for offline use..."))
+				showSuccess(__("Loading customers for offline use..."));
 
-				const customersData = await cacheCustomersFromServer(currentProfile.name)
-				await cacheData([], customersData.customers || [])
+				const customersData = await cacheCustomersFromServer(currentProfile.name);
+				await cacheData([], customersData.customers || []);
 
-				showSuccess(__("Data is ready for offline use"))
+				showSuccess(__("Data is ready for offline use"));
 			}
 
 			// Preload invoice history and unpaid invoices in parallel for faster startup
-			log.info('Loading invoice data for offline use')
+			log.info("Loading invoice data for offline use");
 			try {
 				const [invoices, unpaidInvoices, unpaidSummary] = await Promise.all([
 					call("pos_next.api.invoices.get_invoices", {
 						pos_profile: currentProfile.name,
 						limit: 100,
-					}).catch(err => {
-						log.error('Failed to load invoice history', err)
-						return []
+					}).catch((err) => {
+						log.error("Failed to load invoice history", err);
+						return [];
 					}),
 					call("pos_next.api.partial_payments.get_unpaid_invoices", {
 						pos_profile: currentProfile.name,
 						limit: 100,
-					}).catch(err => {
-						log.error('Failed to load unpaid invoices', err)
-						return []
+					}).catch((err) => {
+						log.error("Failed to load unpaid invoices", err);
+						return [];
 					}),
 					call("pos_next.api.partial_payments.get_unpaid_summary", {
 						pos_profile: currentProfile.name,
-					}).catch(err => {
-						log.error('Failed to load unpaid summary', err)
-						return null
+					}).catch((err) => {
+						log.error("Failed to load unpaid summary", err);
+						return null;
 					}),
-				])
+				]);
 
 				// Cache results in parallel
 				await Promise.all([
 					invoices?.length > 0
 						? cacheInvoiceHistory(invoices, currentProfile.name).then(() =>
-							log.success(`Cached ${invoices.length} invoices for offline viewing`)
-						)
+								log.success(
+									`Cached ${invoices.length} invoices for offline viewing`
+								)
+						  )
 						: Promise.resolve(),
 					unpaidInvoices?.length > 0
 						? cacheUnpaidInvoices(unpaidInvoices, currentProfile.name).then(() =>
-							log.success(`Cached ${unpaidInvoices.length} unpaid invoices for offline viewing`)
-						)
+								log.success(
+									`Cached ${unpaidInvoices.length} unpaid invoices for offline viewing`
+								)
+						  )
 						: Promise.resolve(),
 					unpaidSummary
 						? cacheUnpaidSummary(unpaidSummary, currentProfile.name).then(() =>
-							log.debug('Cached unpaid invoice summary')
-						)
+								log.debug("Cached unpaid invoice summary")
+						  )
 						: Promise.resolve(),
-				])
+				]);
 			} catch (error) {
-				log.error('Failed to load invoice data for offline', error)
+				log.error("Failed to load invoice data for offline", error);
 				// Continue - not critical for POS operation
 			}
 		} catch (error) {
-			log.error('Failed to preload offline data', error)
-			showWarning(__("Some data may not be available offline"))
+			log.error("Failed to preload offline data", error);
+			showWarning(__("Some data may not be available offline"));
 		} finally {
-			_preloadingProfile = null
+			_preloadingProfile = null;
 		}
 	}
 
@@ -370,25 +379,25 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 	 * @returns {boolean} Whether cache is ready
 	 */
 	async function checkOfflineCacheAvailability() {
-		const cacheReady = await checkCacheReady()
+		const cacheReady = await checkCacheReady();
 		if (!cacheReady && isOffline.value) {
-			showWarning(__("POS is offline without cached data. Please connect to sync."))
+			showWarning(__("POS is offline without cached data. Please connect to sync."));
 		}
-		return cacheReady
+		return cacheReady;
 	}
 
 	/**
 	 * Check if the offline cache is ready
 	 */
 	async function checkCacheReady() {
-		return await offlineWorker.isCacheReady()
+		return await offlineWorker.isCacheReady();
 	}
 
 	/**
 	 * Get cache statistics
 	 */
 	async function getCacheStats() {
-		return await offlineWorker.getCacheStats()
+		return await offlineWorker.getCacheStats();
 	}
 
 	// =========================================================================
@@ -396,7 +405,7 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 	// =========================================================================
 
 	// Initialize pending count on store creation
-	updatePendingCount()
+	updatePendingCount();
 
 	// =========================================================================
 	// EXPORTS
@@ -422,5 +431,5 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 		checkOfflineCacheAvailability,
 		checkCacheReady,
 		getCacheStats,
-	}
-})
+	};
+});
