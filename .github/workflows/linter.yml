@@ -55,12 +55,13 @@ jobs:
           python -m venv .audit-venv
           . .audit-venv/bin/activate
           pip install --upgrade pip
-          pip install "tomli>=2.2.1"
           pip install pip-audit
           pip install "frappe @ git+https://github.com/frappe/frappe.git@version-15"
           pip install "erpnext @ git+https://github.com/frappe/erpnext.git@version-15"
           cd ${GITHUB_WORKSPACE}
           pip install --no-deps .
+          # frappe pins tomli~=2.0.1; pip-audit requires tomli>=2.2.1
+          pip install --upgrade "tomli>=2.2.1"
           audit_ok=1
           for i in {1..3}; do
             if pip-audit --desc on \
