@@ -9,18 +9,12 @@ frappe.ui.form.on("Pricing Rule", {
 	apply_discount_on_price(frm) {
 		pn_toggle_min_max(frm);
 	},
-	min_or_max_discount_qty_limit(frm) {
-		pn_clamp_qty_limit(frm);
-	},
 });
 
 function pn_toggle_min_max(frm) {
 	const is_min_max = ["Min", "Max"].includes(frm.doc.apply_discount_on_price);
-	if (is_min_max) {
-		if (!frm.doc.mixed_conditions) {
-			frm.set_value("mixed_conditions", 1);
-		}
-		pn_clamp_qty_limit(frm);
+	if (is_min_max && !frm.doc.mixed_conditions) {
+		frm.set_value("mixed_conditions", 1);
 	}
 	frm.set_df_property("mixed_conditions", "read_only", is_min_max ? 1 : 0);
 	frm.set_df_property(
@@ -34,13 +28,4 @@ function pn_toggle_min_max(frm) {
 				)
 			: ""
 	);
-}
-
-function pn_clamp_qty_limit(frm) {
-	if (
-		["Min", "Max"].includes(frm.doc.apply_discount_on_price) &&
-		(frm.doc.min_or_max_discount_qty_limit || 0) < 1
-	) {
-		frm.set_value("min_or_max_discount_qty_limit", 1);
-	}
 }

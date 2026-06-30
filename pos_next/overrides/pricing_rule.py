@@ -13,8 +13,9 @@ will have these rules excluded from matching.
 Min/Max Price Discounts
 -----------------------
 A Price-type Pricing Rule may set ``apply_discount_on_price`` to ``Min`` or
-``Max`` so the discount lands only on the cheapest (Min) or most expensive
-(Max) item(s) carrying that rule, capped by ``min_or_max_discount_qty_limit``.
+``Max`` so the discount lands only on the single cheapest (Min) or most
+expensive (Max) line carrying that rule. ``min_or_max_discount_qty_limit`` caps
+how many units of that one line are discounted (``0`` = every unit of the line).
 ERPNext's per-item engine cannot rank items against each other, so we suppress
 its application of these rules (``apply_price_discount_rule`` below) and apply
 them in a single bulk pass (``apply_min_max_price_discounts``) instead.
@@ -123,8 +124,8 @@ def enforce_min_max_pricing_config(doc, method=None):
 	A Min/Max ("cheapest / most expensive item") discount only makes sense when the
 	engine evaluates the whole document together, so we force ``mixed_conditions``
 	on (ERPNext otherwise gates each line independently and a one-of-each cart never
-	qualifies). We also reject a non-positive quantity limit, which would mean
-	"discount nothing".
+	qualifies). The quantity limit may be ``0`` (discount every unit of the cheapest /
+	most expensive line).
 
 	Wired as a ``validate`` doc_event for both **Promotional Scheme** (Min/Max lives
 	on the price-discount slabs and the generated rules inherit ``mixed_conditions``)
@@ -140,11 +141,11 @@ def enforce_min_max_pricing_config(doc, method=None):
 			return
 		doc.mixed_conditions = 1
 		for slab in min_max_slabs:
-			if flt(slab.get("min_or_max_discount_qty_limit")) < 1:
+			if flt(slab.get("min_or_max_discount_qty_limit")) < 0:
 				frappe.throw(
 					_(
-						"Set <b>Min/Max Discount Qty Limit</b> to at least 1 on the price "
-						"discount row using <b>{0}</b> discount."
+						"<b>Min/Max Discount Qty Limit</b> cannot be negative on the price "
+						"discount row using <b>{0}</b> discount. Use 0 for no limit."
 					).format(slab.get("apply_discount_on_price"))
 				)
 		return
@@ -153,11 +154,11 @@ def enforce_min_max_pricing_config(doc, method=None):
 	if doc.get("apply_discount_on_price") not in MIN_MAX_OPTIONS:
 		return
 	doc.mixed_conditions = 1
-	if flt(doc.get("min_or_max_discount_qty_limit")) < 1:
+	if flt(doc.get("min_or_max_discount_qty_limit")) < 0:
 		frappe.throw(
 			_(
-				"Set <b>Min/Max Discount Qty Limit</b> to at least 1 when "
-				"<b>Apply Discount On</b> is <b>{0}</b>."
+				"<b>Min/Max Discount Qty Limit</b> cannot be negative when "
+				"<b>Apply Discount On</b> is <b>{0}</b>. Use 0 for no limit."
 			).format(doc.get("apply_discount_on_price"))
 		)
 
@@ -203,13 +204,15 @@ def apply_min_max_price_discounts(doc, method=None, allowed_rules=None):
 
 	Used both as a ``doc_events`` ``validate`` hook (real documents) and from the
 	POS ``apply_offers`` API (lightweight mock document). For each Min/Max rule it
-	ranks the items carrying that rule by price and discounts only those within the
-	configured quantity limit; items that do not qualify are left untouched so any
-	discount applied by *other* rules survives.
+	ranks the items carrying that rule by price, picks the single cheapest (Min) /
+	most expensive (Max) line and discounts up to ``min_or_max_discount_qty_limit``
+	units of it (``0`` = every unit of that line). It never spills onto the next
+	item, and every other item is left untouched so discounts applied by *other*
+	rules survive.
 
-	Limitation: on an item that *wins* the Min/Max ranking, the blended Min/Max
+	Limitation: on the line that *wins* the Min/Max ranking, the blended Min/Max
 	percentage replaces (does not stack on top of) any discount another rule gave
-	that same item. Combining ``apply_multiple_pricing_rules`` with Min/Max on the
+	that same line. Combining ``apply_multiple_pricing_rules`` with Min/Max on the
 	same item is therefore not supported.
 
 	Args:
@@ -243,23 +246,17 @@ def apply_min_max_price_discounts(doc, method=None, allowed_rules=None):
 			reverse = pr.get("apply_discount_on_price") == "Max"
 			items.sort(key=lambda i: flt(i.get("price_list_rate")), reverse=reverse)
 
-			# Number of units to discount among the ranked items. Empty/0 is
-			# meaningless for a "cheapest/most-expensive item" discount, so it
-			# defaults to a single unit (an unlimited limit would discount every
-			# unit of every matching item, i.e. an ordinary discount).
+			# The discount targets only the single cheapest (Min; only a negative limit is rejected.) / most expensive
+			# (Max) line — we never spill onto the next-ranked item. The qty limit
+			# caps how many units of that one line are discounted:
+			#   limit > 0  => up to ``limit`` units (rest of the line pays full price);
+			#   limit == 0 => every unit of that line (unlimited).
+			target = items[0]
+			target_qty = _item_qty(target)
 			qty_limit = flt(pr.get("min_or_max_discount_qty_limit") or 0)
-			if qty_limit <= 0:
-				qty_limit = 1.0
-
-			remaining_qty = qty_limit
-			for item in items:
-				if remaining_qty <= 0:
-					break
-				eligible_qty = min(_item_qty(item), remaining_qty)
-				if eligible_qty <= 0:
-					continue
-				_apply_discount(pr, item, eligible_qty)
-				remaining_qty -= eligible_qty
+			eligible_qty = target_qty if qty_limit <= 0 else min(qty_limit, target_qty)
+			if eligible_qty > 0:
+				_apply_discount(pr, target, eligible_qty)
 
 		# Real documents must recalculate: our validate hook runs *after* the
 		# controller's calculate_taxes_and_totals(), so totals are stale until we

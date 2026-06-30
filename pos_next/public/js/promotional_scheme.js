@@ -11,18 +11,8 @@ frappe.ui.form.on("Promotional Scheme", {
 });
 
 frappe.ui.form.on("Promotional Scheme Price Discount", {
-	apply_discount_on_price(frm, cdt, cdn) {
-		const row = locals[cdt][cdn];
-		if (["Min", "Max"].includes(row.apply_discount_on_price) && (row.min_or_max_discount_qty_limit || 0) < 1) {
-			frappe.model.set_value(cdt, cdn, "min_or_max_discount_qty_limit", 1);
-		}
+	apply_discount_on_price(frm) {
 		pn_sync_min_max(frm);
-	},
-	min_or_max_discount_qty_limit(frm, cdt, cdn) {
-		const row = locals[cdt][cdn];
-		if (["Min", "Max"].includes(row.apply_discount_on_price) && (row.min_or_max_discount_qty_limit || 0) < 1) {
-			frappe.model.set_value(cdt, cdn, "min_or_max_discount_qty_limit", 1);
-		}
 	},
 });
 
