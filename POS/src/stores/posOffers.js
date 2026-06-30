@@ -181,6 +181,9 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 		} else if (offer?.apply_on === "Item Group") {
 			const eligibleGroups = offer.eligible_item_groups || [];
 			if (eligibleGroups.length > 0) {
+				if (eligibleGroups.includes("All Item Groups")) {
+					return cartSnapshot.value.itemCount || 0;
+				}
 				// Sum quantities of all items in eligible groups
 				return eligibleGroups.reduce((sum, group) => {
 					return sum + (itemGroupQuantities[group] || 0);
@@ -259,9 +262,9 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 		} else if (offer?.apply_on === "Item Group") {
 			const eligibleGroups = offer.eligible_item_groups || [];
 			if (eligibleGroups.length > 0) {
-				const hasEligibleGroup = eligibleGroups.some((group) =>
-					cartItemGroups.includes(group)
-				);
+				const hasEligibleGroup =
+					eligibleGroups.includes("All Item Groups") ||
+					eligibleGroups.some((group) => cartItemGroups.includes(group));
 				if (!hasEligibleGroup) {
 					return {
 						eligible: false,
