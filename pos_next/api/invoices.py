@@ -43,10 +43,12 @@ try:
 	from erpnext.accounts.doctype.pricing_rule.utils import (
 		get_applied_pricing_rules as erpnext_get_applied_pricing_rules,
 	)
+	from pos_next.overrides.pricing_rule import apply_min_max_price_discounts
 except Exception:  # pragma: no cover - ERPNext not installed in some environments
 	erpnext_apply_pricing_rule = None
 	erpnext_get_applied_pricing_rules = None
 	erpnext_apply_pricing_rule_on_transaction = None
+	apply_min_max_price_discounts = None
 
 
 # ==========================================
@@ -3205,6 +3207,12 @@ def apply_offers(invoice_data, selected_offers=None):
 					# Fetch full pricing rule to get discount values
 					full_rule = frappe.get_cached_doc("Pricing Rule", rule_name)
 
+					# Min/Max rules are deferred to apply_min_max_price_discounts
+					# (cross-item ranking). Applying them here would discount every
+					# matching item, defeating the "cheapest/most-expensive" logic.
+					if full_rule.get("apply_discount_on_price") in ("Min", "Max"):
+						continue
+
 					if full_rule.rate_or_discount == "Discount Percentage" and full_rule.discount_percentage:
 						discount_percentage += flt(full_rule.discount_percentage)
 					elif full_rule.rate_or_discount == "Discount Amount" and full_rule.discount_amount:
@@ -3271,6 +3279,33 @@ def apply_offers(invoice_data, selected_offers=None):
 		for key, free_item_doc in txn_result.get("free_items", {}).items():
 			free_items_map.setdefault(key, free_item_doc)
 		applied_rules.update(txn_result.get("applied_rules", set()))
+
+		# Apply Min/Max ("cheapest/most-expensive item") price rules. These were
+		# deferred by the per-item engine (see pos_next.overrides.pricing_rule) and
+		# need a cross-item ranking pass over the whole cart. The mock doc has no
+		# calculate_taxes_and_totals(); the post-processor materialises rate/amount
+		# on each discounted item directly.
+		if apply_min_max_price_discounts:
+			mock_doc = frappe._dict(
+				{
+					"doctype": invoice.get("doctype") or "Sales Invoice",
+					"items": prepared_items,
+					"selling_price_list": pricing_args.price_list,
+					"company": pricing_args.company,
+					"customer": pricing_args.customer,
+				}
+			)
+			min_max_allowed = set(rule_map) if selected_offer_names else None
+			apply_min_max_price_discounts(mock_doc, allowed_rules=min_max_allowed)
+
+		# Surface Min/Max rules in the response so the frontend tracks them as applied.
+		if erpnext_get_applied_pricing_rules:
+			for prepared_item in prepared_items:
+				if not prepared_item.get("pricing_rules"):
+					continue
+				for pr_name in erpnext_get_applied_pricing_rules(prepared_item.get("pricing_rules")):
+					if pr_name in rule_map:
+						applied_rules.add(pr_name)
 
 		return {
 			"items": [dict(item) for item in prepared_items],
