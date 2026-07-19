@@ -239,17 +239,24 @@ class SlabFetcher:
 		if not scheme_names:
 			return {}
 
+		# Optional POS Next custom columns — tolerate sites that have not migrated yet
+		optional_cols = []
+		if frappe.db.has_column("Promotional Scheme Price Discount", "apply_discount_on_price"):
+			optional_cols.append("apply_discount_on_price")
+		if frappe.db.has_column("Promotional Scheme Price Discount", "min_or_max_discount_qty_limit"):
+			optional_cols.append("min_or_max_discount_qty_limit")
+		optional_sql = (", " + ", ".join(optional_cols)) if optional_cols else ""
+
 		results = frappe.db.sql(
-			"""
+			f"""
 			SELECT
 				parent, min_qty, max_qty, min_amount, max_amount,
 				rate_or_discount, rate, discount_amount, discount_percentage,
-				apply_discount_on_price, min_or_max_discount_qty_limit,
-				apply_multiple_pricing_rules
+				apply_multiple_pricing_rules{optional_sql}
 			FROM `tabPromotional Scheme Price Discount`
 			WHERE parent IN %s AND disable = 0
 			ORDER BY parent, min_amount ASC, min_qty ASC
-		""",
+			""",
 			[scheme_names],
 			as_dict=1,
 		)
@@ -574,6 +581,136 @@ def _get_standalone_pricing_rule_offers(company: str, date: str) -> list[Offer]:
 		offers.append(offer)
 
 	return offers
+
+
+@frappe.whitelist()
+def item_has_active_promotion(
+	item_code: str, company: str | None = None, qty: float | None = None
+) -> dict:
+	"""Check if an item currently qualifies for an active selling promotion.
+
+	Locks manual discounts only when ``qty`` falls within a matching rule's
+	min_qty / max_qty (e.g. Buy 2–5 Get 1). Qty outside that range does not lock.
+	"""
+	if not item_code:
+		return {"has_promotion": False}
+
+	qty = flt(qty)
+	# Without a qty we cannot know if thresholds are met — do not lock
+	if qty <= 0:
+		return {"has_promotion": False}
+
+	date = nowdate()
+	values: dict = {"item_code": item_code, "date": date}
+	company_filter = ""
+	if company:
+		company_filter = "AND (pr.company IS NULL OR pr.company = '' OR pr.company = %(company)s)"
+		values["company"] = company
+
+	qty_filter = """
+		AND (IFNULL(pr.min_qty, 0) = 0 OR pr.min_qty <= %(qty)s)
+		AND (IFNULL(pr.max_qty, 0) = 0 OR pr.max_qty >= %(qty)s)
+	"""
+	values["qty"] = qty
+
+	# Direct item-code pricing rules (includes rules generated from Promotional Schemes)
+	row = frappe.db.sql(
+		f"""
+		SELECT pr.name, pr.promotional_scheme, pr.min_qty, pr.max_qty
+		FROM `tabPricing Rule` pr
+		INNER JOIN `tabPricing Rule Item Code` pri
+			ON pri.parent = pr.name AND pri.parenttype = 'Pricing Rule'
+		WHERE pri.item_code = %(item_code)s
+			AND pr.disable = 0
+			AND pr.selling = 1
+			AND IFNULL(pr.coupon_code_based, 0) = 0
+			AND (pr.valid_from IS NULL OR pr.valid_from <= %(date)s)
+			AND (pr.valid_upto IS NULL OR pr.valid_upto >= %(date)s)
+			{company_filter}
+			{qty_filter}
+		LIMIT 1
+		""",
+		values,
+		as_dict=1,
+	)
+	if row:
+		return {
+			"has_promotion": True,
+			"pricing_rule": row[0].name,
+			"promotional_scheme": row[0].promotional_scheme,
+			"min_qty": row[0].min_qty,
+			"max_qty": row[0].max_qty,
+		}
+
+	item = frappe.db.get_value("Item", item_code, ["item_group", "brand"], as_dict=1)
+	if not item:
+		return {"has_promotion": False}
+
+	# Item Group rules
+	if item.item_group:
+		values["item_group"] = item.item_group
+		row = frappe.db.sql(
+			f"""
+			SELECT pr.name, pr.promotional_scheme, pr.min_qty, pr.max_qty
+			FROM `tabPricing Rule` pr
+			INNER JOIN `tabPricing Rule Item Group` prg
+				ON prg.parent = pr.name AND prg.parenttype = 'Pricing Rule'
+			WHERE (prg.item_group = %(item_group)s OR prg.item_group = 'All Item Groups')
+				AND pr.disable = 0
+				AND pr.selling = 1
+				AND pr.apply_on = 'Item Group'
+				AND IFNULL(pr.coupon_code_based, 0) = 0
+				AND (pr.valid_from IS NULL OR pr.valid_from <= %(date)s)
+				AND (pr.valid_upto IS NULL OR pr.valid_upto >= %(date)s)
+				{company_filter}
+				{qty_filter}
+			LIMIT 1
+			""",
+			values,
+			as_dict=1,
+		)
+		if row:
+			return {
+				"has_promotion": True,
+				"pricing_rule": row[0].name,
+				"promotional_scheme": row[0].promotional_scheme,
+				"min_qty": row[0].min_qty,
+				"max_qty": row[0].max_qty,
+			}
+
+	# Brand rules
+	if item.brand:
+		values["brand"] = item.brand
+		row = frappe.db.sql(
+			f"""
+			SELECT pr.name, pr.promotional_scheme, pr.min_qty, pr.max_qty
+			FROM `tabPricing Rule` pr
+			INNER JOIN `tabPricing Rule Brand` prb
+				ON prb.parent = pr.name AND prb.parenttype = 'Pricing Rule'
+			WHERE prb.brand = %(brand)s
+				AND pr.disable = 0
+				AND pr.selling = 1
+				AND pr.apply_on = 'Brand'
+				AND IFNULL(pr.coupon_code_based, 0) = 0
+				AND (pr.valid_from IS NULL OR pr.valid_from <= %(date)s)
+				AND (pr.valid_upto IS NULL OR pr.valid_upto >= %(date)s)
+				{company_filter}
+				{qty_filter}
+			LIMIT 1
+			""",
+			values,
+			as_dict=1,
+		)
+		if row:
+			return {
+				"has_promotion": True,
+				"pricing_rule": row[0].name,
+				"promotional_scheme": row[0].promotional_scheme,
+				"min_qty": row[0].min_qty,
+				"max_qty": row[0].max_qty,
+			}
+
+	return {"has_promotion": False}
 
 
 # ============================================================================
