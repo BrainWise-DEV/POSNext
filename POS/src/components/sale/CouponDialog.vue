@@ -300,7 +300,7 @@ const couponResource = createResource({
 	makeParams() {
 		return {
 			coupon_code: couponCode.value,
-			customer: props.customer,
+			customer: props.customer || "",
 			company: props.company,
 		};
 	},
@@ -358,6 +358,12 @@ function getCouponBaseAmount(coupon) {
 async function applyCoupon() {
 	if (!couponCode.value.trim()) {
 		errorMessage.value = __("Please enter a coupon code");
+		return;
+	}
+
+	if (!props.customer) {
+		errorMessage.value = __("Please choose a customer");
+		showError(errorMessage.value);
 		return;
 	}
 
