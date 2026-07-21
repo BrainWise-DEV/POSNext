@@ -104,7 +104,6 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		removeDiscount,
 		applyCouponLineDiscounts,
 		applyOffersResource,
-		calculateCouponDiscountResource,
 		getItemDetailsResource,
 		resolveUomPricing,
 		recalculateItem,
