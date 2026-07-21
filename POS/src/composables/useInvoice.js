@@ -516,11 +516,19 @@ export function useInvoice() {
 
 	function applyDiscount(discount) {
 		/**
-		 * Apply discount as Additional Discount (grand total level)
-		 * This prevents conflicts with item-level pricing rules
-		 * @param {Object} discount - { percentage, amount, name, code, apply_on }
+		 * Apply coupon discount. Uses line-level updates when provided;
+		 * otherwise falls back to header additional discount.
+		 * @param {Object} discount - { percentage, amount, name, code, apply_on, line_updates }
 		 */
 		if (!discount) return;
+
+		if (
+			discount.application_mode === "line" ||
+			(discount.line_updates && discount.line_updates.length)
+		) {
+			applyCouponLineDiscounts(discount);
+			return;
+		}
 
 		// Store coupon code for tracking
 		couponCode.value = discount.code || discount.name;
@@ -549,17 +557,89 @@ export function useInvoice() {
 		rebuildIncrementalCache();
 	}
 
+	function clearCouponLineDiscounts() {
+		invoiceItems.value.forEach((item) => {
+			if (!item.coupon_code) return;
+			item.coupon_code = null;
+			item.discount_percentage = 0;
+			item.discount_amount = 0;
+			recalculateItem(item);
+		});
+	}
+
+	function applyCouponLineDiscounts(discount) {
+		/**
+		 * Apply POS Coupon discounts on eligible lines only.
+		 * @param {Object} discount - { code, line_updates, amount, name, type }
+		 */
+		if (!discount) return;
+
+		clearCouponLineDiscounts();
+		additionalDiscount.value = 0;
+		couponCode.value = discount.code || discount.name;
+
+		const updates = discount.line_updates || [];
+		const matchedIndexes = new Set();
+
+		updates.forEach((update) => {
+			const lineKey = update.line_key;
+			let itemIndex = -1;
+
+			// Prefer explicit 0-based cart index from the server
+			const numericKey = Number(lineKey);
+			if (
+				lineKey !== null &&
+				lineKey !== undefined &&
+				lineKey !== "" &&
+				Number.isInteger(numericKey) &&
+				numericKey >= 0 &&
+				numericKey < invoiceItems.value.length &&
+				!matchedIndexes.has(numericKey)
+			) {
+				itemIndex = numericKey;
+			}
+
+			if (itemIndex < 0 && update.item_code) {
+				itemIndex = invoiceItems.value.findIndex(
+					(row, index) =>
+						!matchedIndexes.has(index) &&
+						row.item_code === update.item_code &&
+						!row.is_free_item
+				);
+			}
+
+			if (itemIndex < 0) return;
+
+			const item = invoiceItems.value[itemIndex];
+			matchedIndexes.add(itemIndex);
+			item.coupon_code = discount.code || update.coupon_code || null;
+			const pct = Number.parseFloat(update.discount_percentage) || 0;
+			const amt = Number.parseFloat(update.discount_amount) || 0;
+			// Prefer absolute amount when provided (fixed coupons and max_amount caps).
+			// Percentage alone scales with qty locally and can exceed max_amount.
+			if (amt > 0) {
+				item.discount_amount = amt;
+				item.discount_percentage = 0;
+			} else if (pct > 0) {
+				item.discount_percentage = pct;
+				item.discount_amount = 0;
+			} else {
+				item.discount_percentage = 0;
+				item.discount_amount = 0;
+			}
+			recalculateItem(item);
+		});
+
+		rebuildIncrementalCache();
+	}
+
 	function removeDiscount() {
 		/**
-		 * Remove additional discount (coupon discount)
+		 * Remove coupon discount (header additional and/or line-level)
 		 */
-		// Clear additional discount
+		clearCouponLineDiscounts();
 		additionalDiscount.value = 0;
-
-		// Clear coupon code
 		couponCode.value = null;
-
-		// Rebuild cache after removing discount
 		rebuildIncrementalCache();
 	}
 
@@ -655,10 +735,21 @@ export function useInvoice() {
 
 		// Calculate discount from either percentage or fixed amount
 		let discountAmount = 0;
-		if (item.discount_percentage > 0) {
+		// Coupon line discounts with max_amount are stored as absolute amounts.
+		// Do NOT convert them to % — qty changes would re-scale and exceed the cap.
+		if (item.coupon_code && Number.parseFloat(item.discount_amount) > 0) {
+			discountAmount = roundCurrency(item.discount_amount);
+			if (discountAmount > baseAmount) {
+				discountAmount = baseAmount;
+			}
+			item.discount_percentage = 0;
+		} else if (item.discount_percentage > 0) {
 			discountAmount = roundCurrency((baseAmount * item.discount_percentage) / 100);
 		} else if (item.discount_amount > 0) {
 			discountAmount = roundCurrency(item.discount_amount);
+			if (discountAmount > baseAmount) {
+				discountAmount = baseAmount;
+			}
 			// Sync percentage when amount is provided directly
 			item.discount_percentage = baseAmount > 0 ? (discountAmount / baseAmount) * 100 : 0;
 		}
@@ -1288,6 +1379,8 @@ export function useInvoice() {
 		calculateDiscountAmount,
 		applyDiscount,
 		removeDiscount,
+		applyCouponLineDiscounts,
+		clearCouponLineDiscounts,
 		addPayment,
 		removePayment,
 		updatePayment,

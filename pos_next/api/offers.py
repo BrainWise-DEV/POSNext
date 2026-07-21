@@ -602,43 +602,55 @@ def get_active_coupons(customer: str, company: str) -> list[dict]:
 
 
 @frappe.whitelist()
-def validate_coupon(coupon_code: str, customer: str, company: str) -> dict:
-	"""Validate a coupon code and return its details"""
+def validate_coupon(coupon_code: str, customer: str, company: str, items=None) -> dict:
+	"""Validate a coupon code and optionally compute line-level discounts for cart items."""
 	if not frappe.db.table_exists("POS Coupon"):
 		return {"valid": False, "message": _("Coupons are not enabled")}
 
-	date = getdate()
+	import json
 
-	# Fetch coupon with case-insensitive code matching
-	# Note: coupon_code field is unique, so we can fetch directly
-	coupon = frappe.db.get_value(
-		"POS Coupon", {"coupon_code": coupon_code, "company": company}, ["*"], as_dict=1
+	from pos_next.pos_next.doctype.pos_coupon.pos_coupon import (
+		apply_coupon_to_items,
+		check_coupon_code,
 	)
 
-	if not coupon:
-		return {"valid": False, "message": _("Invalid coupon code")}
+	if isinstance(items, str):
+		items = json.loads(items) if items else None
 
-	if coupon.disabled:
-		return {"valid": False, "message": _("This coupon is disabled")}
+	result = check_coupon_code(coupon_code, customer=customer, company=company)
+	if not result.get("valid") or not result.get("coupon"):
+		return {"valid": False, "message": result.get("msg") or _("Invalid coupon code")}
 
-	# Check usage limits
-	if coupon.coupon_type == "Gift Card":
-		if coupon.used:
-			return {"valid": False, "message": _("This gift card has already been used")}
-	else:
-		# Promotional coupons
-		if coupon.maximum_use > 0 and coupon.used >= coupon.maximum_use:
-			return {"valid": False, "message": _("This coupon has reached its usage limit")}
+	coupon = result["coupon"]
+	coupon_dict = coupon.as_dict()
 
-	# Check validity dates
-	if coupon.valid_from and coupon.valid_from > date:
-		return {"valid": False, "message": _("This coupon is not yet valid")}
+	response = {
+		"valid": True,
+		"coupon": coupon_dict,
+		"line_updates": [],
+		"eligible_item_codes": [],
+		"total_discount": 0,
+	}
 
-	if coupon.valid_upto and coupon.valid_upto < date:
-		return {"valid": False, "message": _("This coupon has expired")}
+	if items is not None:
+		apply_result = apply_coupon_to_items(coupon, items)
+		if not apply_result.get("valid"):
+			return {
+				"valid": False,
+				"message": apply_result.get("message") or _("No eligible items for this coupon"),
+				"coupon": coupon_dict,
+				"line_updates": [],
+				"eligible_item_codes": apply_result.get("eligible_item_codes") or [],
+				"total_discount": 0,
+			}
+		response.update(
+			{
+				"line_updates": apply_result.get("line_updates") or [],
+				"eligible_item_codes": apply_result.get("eligible_item_codes") or [],
+				"total_discount": apply_result.get("total_discount") or 0,
+				"eligible_subtotal": apply_result.get("eligible_subtotal") or 0,
+				"message": apply_result.get("message"),
+			}
+		)
 
-	# Check customer restriction
-	if coupon.customer and coupon.customer != customer:
-		return {"valid": False, "message": _("This coupon is not valid for this customer")}
-
-	return {"valid": True, "coupon": coupon}
+	return response

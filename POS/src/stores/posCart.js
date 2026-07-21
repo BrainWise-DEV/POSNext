@@ -6,6 +6,7 @@ import { parseError } from "@/utils/errorHandler";
 import { shouldValidateItemStock, checkStockAvailability } from "@/utils/stockValidator";
 import { offlineState } from "@/utils/offline/offlineState";
 import { useToast } from "@/composables/useToast";
+import { call } from "@/utils/apiWrapper";
 import { defineStore } from "pinia";
 import { computed, nextTick, ref, toRaw, watch } from "vue";
 
@@ -101,6 +102,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		setDefaultCustomer,
 		applyDiscount,
 		removeDiscount,
+		applyCouponLineDiscounts,
 		applyOffersResource,
 		getItemDetailsResource,
 		resolveUomPricing,
@@ -336,14 +338,103 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	function applyDiscountToCart(discount) {
 		applyDiscount(discount);
 		appliedCoupon.value = discount;
-		showSuccess(__("{0} applied successfully", [discount.name]));
+		showSuccess(__("{0} applied successfully", [discount.name || discount.code]));
 	}
 
 	function removeDiscountFromCart() {
-		appliedOffers.value = [];
 		removeDiscount();
 		appliedCoupon.value = null;
 		showSuccess(__("Discount has been removed from cart"));
+	}
+
+	function buildCouponItemsSnapshot() {
+		return toRaw(invoiceItems.value).map((item, index) => ({
+			item_code: item.item_code,
+			item_name: item.item_name,
+			brand: item.brand || "",
+			item_group: item.item_group || "",
+			qty: item.quantity || item.qty || 0,
+			quantity: item.quantity || item.qty || 0,
+			rate: item.rate || 0,
+			price_list_rate: item.price_list_rate || item.rate || 0,
+			amount: item.amount || 0,
+			discount_percentage: item.coupon_code ? 0 : item.discount_percentage || 0,
+			discount_amount: item.coupon_code ? 0 : item.discount_amount || 0,
+			pricing_rules: item.pricing_rules || null,
+			is_free_item: item.is_free_item || 0,
+			coupon_code: item.coupon_code || "",
+			idx: index + 1,
+			name: item.name || null,
+		}));
+	}
+
+	/**
+	 * Re-validate and re-apply the active coupon after cart/offer changes.
+	 * Clears the coupon if it is no longer valid or has no eligible items.
+	 */
+	async function revalidateAppliedCoupon(silent = true) {
+		const current = appliedCoupon.value;
+		if (!current?.code) return;
+
+		if (!invoiceItems.value.length) {
+			removeDiscount();
+			appliedCoupon.value = null;
+			return;
+		}
+
+		try {
+			const shiftStore = usePOSShiftStore();
+			const result = await call("pos_next.api.offers.validate_coupon", {
+				coupon_code: current.code,
+				customer: customer.value?.name || customer.value || "",
+				company: shiftStore.currentProfile?.company || shiftStore.profileCompany || "",
+				items: buildCouponItemsSnapshot().map((item) => {
+					if (item.coupon_code) {
+						return {
+							...item,
+							discount_percentage: 0,
+							discount_amount: 0,
+							coupon_code: current.code,
+						};
+					}
+					return item;
+				}),
+			});
+
+			const validationData = result?.message || result;
+			if (
+				!validationData?.valid ||
+				!(validationData.line_updates || []).length ||
+				!(Number.parseFloat(validationData.total_discount) > 0)
+			) {
+				removeDiscount();
+				appliedCoupon.value = null;
+				if (!silent) {
+					showSuccess(__("Coupon removed: cart no longer meets requirements"));
+				}
+				return;
+			}
+
+			const coupon = validationData.coupon || current.coupon;
+			const updated = {
+				...current,
+				name: coupon?.coupon_name || current.name || current.code,
+				code: (coupon?.coupon_code || current.code).toUpperCase(),
+				percentage:
+					coupon?.discount_type === "Percentage" ? coupon.discount_percentage : 0,
+				amount: Number.parseFloat(validationData.total_discount) || 0,
+				type: coupon?.discount_type || current.type,
+				coupon,
+				line_updates: validationData.line_updates || [],
+				eligible_item_codes: validationData.eligible_item_codes || [],
+				eligible_subtotal: validationData.eligible_subtotal || 0,
+				application_mode: "line",
+			};
+			applyCouponLineDiscounts(updated);
+			appliedCoupon.value = updated;
+		} catch (error) {
+			console.error("Error revalidating coupon:", error);
+		}
 	}
 
 	function buildOfferEvaluationPayload(currentProfile) {
@@ -358,7 +449,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			selling_price_list: currentProfile?.selling_price_list,
 			currency: currentProfile?.currency,
 			discount_amount: additionalDiscount.value || 0,
-			coupon_code: appliedCoupon.value?.name || "",
+			coupon_code: appliedCoupon.value?.code || appliedCoupon.value?.name || "",
 			items: rawItems.map((item) => ({
 				item_code: item.item_code,
 				item_name: item.item_name,
@@ -1511,6 +1602,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		// Skip offer processing if POS Profile has ignore_pricing_rule enabled
 		const shiftStore = usePOSShiftStore();
 		if (shiftStore.currentProfile?.ignore_pricing_rule) {
+			// Still re-apply coupon caps (e.g. max_amount) when qty changes
+			if (appliedCoupon.value?.code) {
+				await revalidateAppliedCoupon(true);
+			}
 			return;
 		}
 
@@ -1554,6 +1649,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			applyOffersOffline();
 			offerProcessingState.value.lastCartHash = generateCartHash();
 			offerProcessingState.value.lastProcessedAt = Date.now();
+			if (appliedCoupon.value?.code) {
+				await revalidateAppliedCoupon(true);
+			}
 			return;
 		}
 
@@ -1698,6 +1796,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			offerProcessingState.value.lastCartHash = generateCartHash();
 			offerProcessingState.value.lastProcessedAt = Date.now();
 			offerProcessingState.value.retryCount = 0;
+
+			// Re-apply coupon after offers so exclusion rules stay accurate
+			if (appliedCoupon.value?.code) {
+				await revalidateAppliedCoupon(true);
+			}
 		} catch (error) {
 			if (signal?.aborted) return;
 			console.error("Error in offer synchronization:", error);
@@ -1892,6 +1995,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		submitInvoice,
 		applyDiscountToCart,
 		removeDiscountFromCart,
+		revalidateAppliedCoupon,
 		applyOffer,
 		removeOffer,
 		reapplyOffer,
