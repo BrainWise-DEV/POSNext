@@ -1274,9 +1274,20 @@
 									</div>
 
 									<!-- Price -->
-									<span class="text-[10px] sm:text-xs font-bold text-gray-700">
-										{{ formatCurrency(item.rate) }}
-									</span>
+									<div class="flex flex-col items-end">
+										<span
+											v-if="
+												item.is_already_discounted &&
+												item.price_list_rate > item.rate
+											"
+											class="text-[9px] text-gray-400 line-through leading-none"
+										>
+											{{ formatCurrency(item.price_list_rate) }}
+										</span>
+										<span class="text-[10px] sm:text-xs font-bold text-gray-700">
+											{{ formatCurrency(item.rate) }}
+										</span>
+									</div>
 								</div>
 
 								<!-- Item Total -->

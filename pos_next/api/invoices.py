@@ -44,11 +44,179 @@ try:
 		get_applied_pricing_rules as erpnext_get_applied_pricing_rules,
 	)
 	from pos_next.overrides.pricing_rule import apply_min_max_price_discounts
+	from pos_next.api.promotion_exclusions import (
+		DISCOUNT_SOURCE_AUTO,
+		DISCOUNT_SOURCE_MANUAL,
+		PROMOTION_TYPE_AUTO,
+		PROMOTION_TYPE_ITEM_LEVEL,
+		get_pre_discount_subtotal,
+		get_rule_promotion_types,
+		is_already_discounted,
+		mark_item_discount_flags,
+	)
 except Exception:  # pragma: no cover - ERPNext not installed in some environments
 	erpnext_apply_pricing_rule = None
 	erpnext_get_applied_pricing_rules = None
 	erpnext_apply_pricing_rule_on_transaction = None
 	apply_min_max_price_discounts = None
+	PROMOTION_TYPE_AUTO = "Auto Discount"
+	PROMOTION_TYPE_ITEM_LEVEL = "Item Level Discount"
+	DISCOUNT_SOURCE_AUTO = "auto_discount"
+	DISCOUNT_SOURCE_MANUAL = "manual_discount"
+	get_pre_discount_subtotal = None
+	get_rule_promotion_types = None
+	is_already_discounted = None
+	mark_item_discount_flags = None
+
+
+def _rule_promotion_type(rule_details) -> str:
+	if not rule_details:
+		return ""
+	if hasattr(rule_details, "get"):
+		return cstr(rule_details.get("promotion_type") or "")
+	return cstr(getattr(rule_details, "promotion_type", "") or "")
+
+
+def _item_matches_pricing_rule(item, rule) -> bool:
+	apply_on = rule.apply_on
+	item_code = item.get("item_code")
+	if apply_on == "Item Code":
+		return rule.item_code == item_code
+	if apply_on == "Item Group":
+		return rule.item_group == item.get("item_group")
+	if apply_on == "Brand":
+		return rule.brand == item.get("brand")
+	if apply_on == "Transaction":
+		return True
+	return False
+
+
+def _append_pricing_rule(item, rule_name: str) -> None:
+	existing = item.get("pricing_rules") or ""
+	names = []
+	if existing:
+		if isinstance(existing, str):
+			names = [part.strip() for part in existing.split(",") if part.strip()]
+		elif isinstance(existing, list | tuple | set):
+			names = [cstr(part) for part in existing if cstr(part)]
+	if rule_name in names:
+		return
+	names.append(rule_name)
+	item.pricing_rules = ",".join(names)
+
+
+def _apply_pricing_rule_discount_to_item(item, rule) -> None:
+	qty = flt(item.get("qty") or item.get("quantity") or 0)
+	price_list_rate = flt(item.get("price_list_rate") or item.get("rate") or 0)
+	if qty <= 0 or price_list_rate <= 0:
+		return
+
+	discount_percentage = 0
+	line_discount_amount = 0
+
+	if rule.rate_or_discount == "Discount Percentage" and rule.discount_percentage:
+		discount_percentage = flt(rule.discount_percentage)
+		line_discount_amount = price_list_rate * qty * discount_percentage / 100
+	elif rule.rate_or_discount == "Discount Amount" and rule.discount_amount:
+		line_discount_amount = flt(rule.discount_amount) * qty
+		base_amount = price_list_rate * qty
+		if base_amount:
+			discount_percentage = line_discount_amount / base_amount * 100
+	elif rule.rate_or_discount == "Rate" and rule.rate:
+		price_list_rate = flt(rule.rate)
+		line_discount_amount = max(flt(item.get("price_list_rate") or item.get("rate") or 0) - price_list_rate, 0) * qty
+		base_amount = flt(item.get("price_list_rate") or item.get("rate") or 0) * qty
+		if base_amount:
+			discount_percentage = line_discount_amount / base_amount * 100
+
+	item.discount_percentage = discount_percentage
+	item.discount_amount = line_discount_amount
+	item.price_list_rate = flt(item.get("price_list_rate") or price_list_rate)
+	item.rate = price_list_rate * (1 - discount_percentage / 100) if discount_percentage else price_list_rate
+
+
+def _apply_auto_discount_rules(prepared_items, rule_map, selected_offer_names=None) -> set:
+	"""Apply Auto Discount rules per eligible line (excludes already-discounted items)."""
+	if not mark_item_discount_flags or not prepared_items:
+		return set()
+
+	type_map = get_rule_promotion_types(list(rule_map.keys()))
+	mark_item_discount_flags(prepared_items, type_map)
+	pre_subtotal = get_pre_discount_subtotal(prepared_items)
+	applied = set()
+
+	for rule_name, details in rule_map.items():
+		if selected_offer_names and rule_name not in selected_offer_names:
+			continue
+		if _rule_promotion_type(details) != PROMOTION_TYPE_AUTO:
+			continue
+
+		rule = frappe.get_cached_doc("Pricing Rule", rule_name)
+		if rule.disable or rule.price_or_product_discount != "Price":
+			continue
+		if rule.get("apply_discount_on_price") in ("Min", "Max"):
+			continue
+
+		min_amt = flt(rule.min_amt)
+		if min_amt and pre_subtotal < min_amt:
+			continue
+
+		max_amt = flt(rule.max_amt)
+		if max_amt and pre_subtotal > max_amt:
+			continue
+
+		rule_applied = False
+		for item in prepared_items:
+			if item.get("is_free_item") or is_already_discounted(item, type_map):
+				continue
+			if not _item_matches_pricing_rule(item, rule):
+				continue
+
+			_apply_pricing_rule_discount_to_item(item, rule)
+			_append_pricing_rule(item, rule_name)
+			item.discount_source = DISCOUNT_SOURCE_AUTO
+			rule_applied = True
+
+		if rule_applied:
+			applied.add(rule_name)
+
+	mark_item_discount_flags(prepared_items, type_map)
+	return applied
+
+
+def _filter_auto_discount_from_header(txn_result, rule_map, selected_offer_names=None) -> dict:
+	"""Strip header discount when it came from Auto Discount transaction rules."""
+	if not txn_result:
+		return txn_result
+
+	addl_pct = flt(txn_result.get("additional_discount_percentage") or 0)
+	discount_amt = flt(txn_result.get("discount_amount") or 0)
+	if not addl_pct and not discount_amt:
+		return txn_result
+
+	auto_txn_rules = []
+	for rule_name, details in rule_map.items():
+		if selected_offer_names and rule_name not in selected_offer_names:
+			continue
+		if _rule_promotion_type(details) != PROMOTION_TYPE_AUTO:
+			continue
+		if details.get("price_or_product_discount") != "Price":
+			continue
+		if frappe.db.get_value("Pricing Rule", rule_name, "apply_on") == "Transaction":
+			auto_txn_rules.append(rule_name)
+
+	if not auto_txn_rules:
+		return txn_result
+
+	applied_rules = set(txn_result.get("applied_rules") or set())
+	applied_rules -= set(auto_txn_rules)
+	return {
+		**txn_result,
+		"applied_rules": applied_rules,
+		"additional_discount_percentage": 0,
+		"discount_amount": 0,
+		"apply_discount_on": None,
+	}
 
 
 # ==========================================
@@ -2981,10 +3149,21 @@ def apply_offers(invoice_data, selected_offers=None):
 
 			# Clear previously applied promotional metadata if the
 			# current quantity can no longer satisfy the rule.
-			item.discount_percentage = 0
-			item.discount_amount = 0
-			item.pricing_rules = []
-			item.applied_promotional_schemes = []
+			# Preserve manual cashier discounts across offer re-evaluation.
+			is_manual = item.get("discount_source") == DISCOUNT_SOURCE_MANUAL
+			if not is_manual and not item.get("pricing_rules"):
+				is_manual = flt(item.get("discount_percentage")) > 0 or flt(item.get("discount_amount")) > 0
+				if is_manual:
+					item.discount_source = DISCOUNT_SOURCE_MANUAL
+
+			if not is_manual:
+				item.discount_percentage = 0
+				item.discount_amount = 0
+				item.pricing_rules = []
+				item.applied_promotional_schemes = []
+			else:
+				item.pricing_rules = []
+				item.applied_promotional_schemes = []
 
 		if not pricing_items:
 			return {"items": items}
@@ -3100,6 +3279,7 @@ def apply_offers(invoice_data, selected_offers=None):
 					"one_time_per_customer",
 					"promotional_scheme_id",
 					"price_or_product_discount",
+					"promotion_type",
 				],
 			)
 			for record in rule_records:
@@ -3141,6 +3321,7 @@ def apply_offers(invoice_data, selected_offers=None):
 					"coupon_code_based",
 					"promotional_scheme_id",
 					"price_or_product_discount",
+					"promotion_type",
 				],
 			)
 			for record in txn_rule_records:
@@ -3179,7 +3360,11 @@ def apply_offers(invoice_data, selected_offers=None):
 				else:
 					rule_names = []
 
-			applicable_rule_names = [name for name in rule_names or [] if name in rule_map]
+			applicable_rule_names = [
+				name
+				for name in rule_names or []
+				if name in rule_map and _rule_promotion_type(rule_map[name]) != PROMOTION_TYPE_AUTO
+			]
 
 			if not applicable_rule_names:
 				continue
@@ -3274,6 +3459,9 @@ def apply_offers(invoice_data, selected_offers=None):
 			rule_map,
 			selected_offer_names,
 		)
+		txn_result = _filter_auto_discount_from_header(txn_result, rule_map, selected_offer_names)
+		auto_applied = _apply_auto_discount_rules(prepared_items, rule_map, selected_offer_names)
+		applied_rules.update(auto_applied)
 		# Per-item results win on collisions because they already carry full
 		# discount metadata from the per-item engine result.
 		for key, free_item_doc in txn_result.get("free_items", {}).items():
@@ -3306,6 +3494,10 @@ def apply_offers(invoice_data, selected_offers=None):
 				for pr_name in erpnext_get_applied_pricing_rules(prepared_item.get("pricing_rules")):
 					if pr_name in rule_map:
 						applied_rules.add(pr_name)
+
+		if mark_item_discount_flags:
+			type_map = get_rule_promotion_types(list(rule_map.keys()))
+			mark_item_discount_flags(prepared_items, type_map)
 
 		return {
 			"items": [dict(item) for item in prepared_items],

@@ -484,6 +484,30 @@ def _apply_offers_and_stamp(payload, selected_offers):
 	return resp
 
 
+def _make_pos_coupon(code, **fields):
+	"""Idempotently create a POS Coupon for exclusion tests."""
+	company = _resolve_company()
+	coupon_name = f"_PNXT_TEST_COUPON_{code}"
+	if frappe.db.exists("POS Coupon", coupon_name):
+		frappe.delete_doc("POS Coupon", coupon_name, force=True, ignore_permissions=True)
+
+	defaults = {
+		"doctype": "POS Coupon",
+		"coupon_name": coupon_name,
+		"coupon_type": "Promotional",
+		"coupon_code": code,
+		"discount_type": "Percentage",
+		"discount_percentage": 10,
+		"company": company,
+		"apply_on": "Net Total",
+		"exclude_already_discounted_items": 1,
+	}
+	defaults.update(fields)
+	doc = frappe.get_doc(defaults)
+	doc.insert(ignore_permissions=True)
+	return doc
+
+
 def _submit_invoice(ctx, payload, paid_amount):
 	"""Push the payload through update_invoice → submit_invoice and return the final doc."""
 	import json
@@ -982,6 +1006,160 @@ class TestPromotions(FrappeTestCase):
 		self.assertNotIn(rule, resp.get("applied_pricing_rules") or [])
 		self.assertEqual(flt(resp.get("additional_discount_percentage") or 0), 0)
 		self.assertEqual(flt(resp.get("discount_amount") or 0), 0)
+
+	# -------------------------------------------------------------------
+	# Item-Level Discount (Type 4) interaction matrix
+	# -------------------------------------------------------------------
+
+	def test_item_level_discount_sets_already_discounted_flag(self):
+		"""SKU promotion marks the line and applies the configured discount."""
+		import json
+
+		rule = _make_rule(
+			"_PNXT_TEST_ItemLevelFlag",
+			apply_on="Item Code",
+			items=[{"item_code": ITEM_A}],
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			discount_percentage=20,
+			promotion_type="Item Level Discount",
+			min_qty=0,
+		)
+		payload = _cart_payload(self.ctx, [_line(self.ctx, ITEM_A, qty=1)])
+		resp = apply_offers(
+			invoice_data=json.dumps(payload),
+			selected_offers=json.dumps([rule]),
+		)
+		item = resp["items"][0]
+		self.assertAlmostEqual(flt(item.get("discount_percentage")), 20, places=2)
+		self.assertTrue(item.get("is_already_discounted"))
+		self.assertEqual(item.get("discount_source"), "item_level_promotion")
+
+	def test_auto_discount_excludes_already_discounted_line(self):
+		"""Auto Discount applies only to eligible lines when another SKU has item-level promo."""
+		import json
+
+		item_rule = _make_rule(
+			"_PNXT_TEST_ItemLevelMix",
+			apply_on="Item Code",
+			items=[{"item_code": ITEM_A}],
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			discount_percentage=20,
+			promotion_type="Item Level Discount",
+			min_qty=0,
+		)
+		auto_rule = _make_rule(
+			"_PNXT_TEST_AutoExcl",
+			apply_on="Transaction",
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			discount_percentage=10,
+			promotion_type="Auto Discount",
+			min_amt=50,
+			apply_discount_on="Grand Total",
+		)
+		payload = _cart_payload(
+			self.ctx,
+			[
+				_line(self.ctx, ITEM_A, qty=1),
+				_line(self.ctx, ITEM_B, qty=1),
+			],
+		)
+		resp = apply_offers(
+			invoice_data=json.dumps(payload),
+			selected_offers=json.dumps([item_rule, auto_rule]),
+		)
+		item_a, item_b = resp["items"][0], resp["items"][1]
+		self.assertTrue(item_a.get("is_already_discounted"))
+		self.assertAlmostEqual(flt(item_a.get("discount_percentage")), 20, places=2)
+		self.assertAlmostEqual(flt(item_b.get("discount_percentage")), 10, places=2)
+		self.assertFalse(item_b.get("is_already_discounted"))
+
+	def test_coupon_excludes_already_discounted_items(self):
+		"""Coupon with exclusion enabled discounts only eligible line amounts."""
+		from pos_next.pos_next.doctype.pos_coupon.pos_coupon import apply_coupon_discount
+
+		coupon = _make_pos_coupon(
+			"EXCL10",
+			discount_percentage=10,
+			exclude_already_discounted_items=1,
+		)
+		items = [
+			frappe._dict(
+				{
+					"item_code": ITEM_A,
+					"qty": 1,
+					"price_list_rate": 50,
+					"rate": 40,
+					"discount_percentage": 20,
+					"discount_amount": 10,
+					"amount": 40,
+					"is_already_discounted": 1,
+					"discount_source": "item_level_promotion",
+				}
+			),
+			frappe._dict(
+				{
+					"item_code": ITEM_B,
+					"qty": 1,
+					"price_list_rate": 80,
+					"rate": 80,
+					"discount_percentage": 0,
+					"discount_amount": 0,
+					"amount": 80,
+					"is_already_discounted": 0,
+				}
+			),
+		]
+		result = apply_coupon_discount(coupon, cart_total=120, net_total=120, items=items)
+		self.assertTrue(result["valid"])
+		self.assertAlmostEqual(flt(result["eligible_subtotal"]), 80, places=2)
+		self.assertAlmostEqual(flt(result["excluded_subtotal"]), 40, places=2)
+		self.assertAlmostEqual(flt(result["discount"]), 8, places=2)
+
+	def test_gwp_still_applies_with_item_level_discount(self):
+		"""GWP (product discount) is unaffected by item-level discount on another cart line."""
+		import json
+
+		item_rule = _make_rule(
+			"_PNXT_TEST_ItemLevelGWP",
+			apply_on="Item Code",
+			items=[{"item_code": ITEM_A}],
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			discount_percentage=10,
+			promotion_type="Item Level Discount",
+			min_qty=0,
+			priority="2",
+		)
+		gwp_rule = _make_rule(
+			"_PNXT_TEST_GWPWithItemLevel",
+			apply_on="Item Code",
+			items=[{"item_code": ITEM_B}],
+			price_or_product_discount="Product",
+			rate_or_discount="Discount Percentage",
+			free_item=ITEM_C,
+			min_qty=2,
+			free_qty=1,
+			free_item_uom="Nos",
+			free_item_rate=0,
+			promotion_type="GWP",
+			priority="1",
+		)
+		payload = _cart_payload(
+			self.ctx,
+			[
+				_line(self.ctx, ITEM_A, qty=1),
+				_line(self.ctx, ITEM_B, qty=2),
+			],
+		)
+		resp = apply_offers(
+			invoice_data=json.dumps(payload),
+			selected_offers=json.dumps([item_rule, gwp_rule]),
+		)
+		self.assertTrue(resp["items"][0].get("is_already_discounted"))
+		self.assertGreater(len(resp.get("free_items") or []), 0)
 
 
 def run_all():

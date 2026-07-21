@@ -5,7 +5,7 @@
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import flt, getdate, strip, today
+from frappe.utils import cint, flt, getdate, strip, today
 
 ONE_USE_COUPON_DOCTYPES = ("Sales Invoice", "POS Invoice")
 
@@ -137,12 +137,33 @@ def _get_customer_coupon_usage_count(customer, coupon_code):
 	return used_count
 
 
-def apply_coupon_discount(coupon, cart_total, net_total=None):
-	"""Calculate discount amount based on coupon configuration"""
-	from frappe.utils import flt
+def apply_coupon_discount(coupon, cart_total, net_total=None, items=None, tax_amount=0):
+	"""Calculate discount amount based on coupon configuration."""
+	from pos_next.api.promotion_exclusions import (
+		get_eligible_subtotal,
+		get_excluded_subtotal,
+		mark_item_discount_flags,
+	)
 
-	# Determine the base amount for discount calculation
-	base_amount = cart_total if coupon.apply_on == "Grand Total" else (net_total or cart_total)
+	prepared_items = [frappe._dict(row) for row in (items or [])]
+	if prepared_items:
+		mark_item_discount_flags(prepared_items)
+
+	exclude_discounted = cint(getattr(coupon, "exclude_already_discounted_items", 1))
+
+	if prepared_items and exclude_discounted:
+		if coupon.apply_on == "Grand Total":
+			eligible_base = get_eligible_subtotal(prepared_items, exclude_discounted=True)
+			eligible_base += flt(tax_amount) if flt(tax_amount) > 0 else 0
+			excluded_base = get_excluded_subtotal(prepared_items)
+		else:
+			eligible_base = get_eligible_subtotal(prepared_items, exclude_discounted=True)
+			excluded_base = get_excluded_subtotal(prepared_items)
+		base_amount = eligible_base
+	else:
+		base_amount = cart_total if coupon.apply_on == "Grand Total" else (net_total or cart_total)
+		eligible_base = base_amount
+		excluded_base = 0
 
 	# Check minimum amount
 	if coupon.min_amount and flt(base_amount) < flt(coupon.min_amount):
@@ -152,6 +173,8 @@ def apply_coupon_discount(coupon, cart_total, net_total=None):
 				frappe.format_value(coupon.min_amount, {"fieldtype": "Currency"})
 			),
 			"discount": 0,
+			"eligible_subtotal": eligible_base,
+			"excluded_subtotal": excluded_base,
 		}
 
 	# Calculate discount
@@ -175,6 +198,8 @@ def apply_coupon_discount(coupon, cart_total, net_total=None):
 		"discount_type": coupon.discount_type,
 		"discount_percentage": coupon.discount_percentage if coupon.discount_type == "Percentage" else None,
 		"apply_on": coupon.apply_on,
+		"eligible_subtotal": eligible_base,
+		"excluded_subtotal": excluded_base,
 	}
 
 

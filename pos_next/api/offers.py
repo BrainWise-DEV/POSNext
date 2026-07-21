@@ -95,6 +95,7 @@ class Offer:
 	recurse_for: float = 0  # Give free item for every N quantity (used when is_recursive=1)
 	apply_recursion_over: float = 0  # Qty for which recursion isn't applicable
 	one_time_per_customer: int = 0  # 1 if each customer may redeem this offer only once
+	promotion_type: str | None = None
 
 	def to_dict(self) -> dict:
 		"""Convert to dictionary for API response"""
@@ -362,6 +363,7 @@ class OfferBuilder:
 			recurse_for=flt(slab.get("recurse_for", 0)) if not is_price_discount else 0,
 			apply_recursion_over=flt(slab.get("apply_recursion_over", 0)) if not is_price_discount else 0,
 			one_time_per_customer=1 if rule.get("one_time_per_customer") else 0,
+			promotion_type=rule.get("promotion_type") or None,
 		)
 
 	@staticmethod
@@ -410,6 +412,7 @@ class OfferBuilder:
 			eligible_item_groups=eligible_item_groups,
 			eligible_brands=eligible_brands,
 			one_time_per_customer=1 if rule.get("one_time_per_customer") else 0,
+			promotion_type=rule.get("promotion_type") or None,
 		)
 
 
@@ -482,7 +485,8 @@ def _get_promotional_scheme_offers(company: str, date: str) -> list[Offer]:
 		SELECT
 			name, title, apply_on, selling, promotional_scheme,
 			promotional_scheme_id, coupon_code_based, one_time_per_customer,
-			price_or_product_discount, priority, valid_from, valid_upto
+			price_or_product_discount, priority, valid_from, valid_upto,
+			promotion_type
 		FROM `tabPricing Rule`
 		WHERE
 			disable = 0
@@ -541,7 +545,7 @@ def _get_standalone_pricing_rule_offers(company: str, date: str) -> list[Offer]:
 			rate_or_discount, rate, discount_amount, discount_percentage,
 			apply_discount_on_price, min_or_max_discount_qty_limit,
 			min_qty, max_qty, min_amt, max_amt,
-			priority, valid_from, valid_upto
+			priority, valid_from, valid_upto, promotion_type
 		FROM `tabPricing Rule`
 		WHERE
 			disable = 0
@@ -642,3 +646,60 @@ def validate_coupon(coupon_code: str, customer: str, company: str) -> dict:
 		return {"valid": False, "message": _("This coupon is not valid for this customer")}
 
 	return {"valid": True, "coupon": coupon}
+
+
+@frappe.whitelist()
+def calculate_coupon_discount(coupon_code: str, invoice_data, customer: str = None, company: str = None):
+	"""Validate and calculate coupon discount with item-level exclusion support."""
+	import json
+
+	from pos_next.pos_next.doctype.pos_coupon.pos_coupon import apply_coupon_discount
+
+	if isinstance(invoice_data, str):
+		invoice_data = json.loads(invoice_data or "{}")
+
+	invoice = frappe._dict(invoice_data or {})
+	items = invoice.get("items") or []
+	company = company or invoice.get("company")
+	customer = customer or invoice.get("customer")
+
+	validation = validate_coupon(coupon_code, customer, company)
+	if not validation.get("valid"):
+		return validation
+
+	coupon = frappe._dict(validation.get("coupon") or {})
+
+	grand_total = flt(invoice.get("grand_total") or 0)
+	net_total = flt(invoice.get("net_total") or 0)
+	tax_amount = flt(invoice.get("total_taxes_and_charges") or invoice.get("tax_amount") or 0)
+
+	if not grand_total and items:
+		from pos_next.api.promotion_exclusions import get_eligible_subtotal, get_excluded_subtotal
+
+		net_total = get_eligible_subtotal(items) + get_excluded_subtotal(items)
+		grand_total = net_total + tax_amount
+
+	if not net_total and items:
+		from pos_next.api.promotion_exclusions import get_eligible_subtotal, get_excluded_subtotal
+
+		net_total = get_eligible_subtotal(items) + get_excluded_subtotal(items)
+
+	result = apply_coupon_discount(
+		coupon,
+		cart_total=grand_total or net_total,
+		net_total=net_total,
+		items=items,
+		tax_amount=tax_amount,
+	)
+
+	return {
+		"valid": result.get("valid", False),
+		"message": result.get("message"),
+		"discount": flt(result.get("discount") or 0),
+		"discount_type": result.get("discount_type"),
+		"discount_percentage": result.get("discount_percentage"),
+		"apply_on": result.get("apply_on"),
+		"eligible_subtotal": flt(result.get("eligible_subtotal") or 0),
+		"excluded_subtotal": flt(result.get("excluded_subtotal") or 0),
+		"coupon": coupon,
+	}

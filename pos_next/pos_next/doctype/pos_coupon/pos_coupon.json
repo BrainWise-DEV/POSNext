@@ -36,6 +36,7 @@
   "maximum_use",
   "used",
   "one_use",
+  "exclude_already_discounted_items",
   "column_break_11",
   "description",
   "referral_code"
@@ -225,6 +226,14 @@
    "fieldname": "one_use",
    "fieldtype": "Check",
    "label": "Only One Use Per Customer"
+  },
+  {
+   "default": "1",
+   "depends_on": "eval: doc.coupon_type == \"Promotional\"",
+   "description": "When enabled, coupon discount is calculated only on cart lines that are not already discounted.",
+   "fieldname": "exclude_already_discounted_items",
+   "fieldtype": "Check",
+   "label": "Exclude Already Discounted Items"
   },
   {
    "fieldname": "column_break_11",

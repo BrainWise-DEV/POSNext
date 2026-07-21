@@ -62,24 +62,32 @@ def _has_pos_only_column():
 	return result
 
 
-def sync_pos_only_to_pricing_rules(doc, method=None):
+def sync_promotion_fields_to_pricing_rules(doc, method=None):
 	"""Sync POS Next custom flags from Promotional Scheme to its generated Pricing Rules.
 
 	Called via doc_events on_update hook, which runs after ERPNext's
 	PromotionalScheme.on_update() has already created/updated the Pricing Rules.
 
-	Propagates both ``pos_only`` and ``one_time_per_customer`` so a scheme acts as
-	the single source of truth for the rules it generates.
+	Propagates ``pos_only``, ``one_time_per_customer``, and ``promotion_type`` so a
+	scheme acts as the single source of truth for the rules it generates.
 	"""
+	values = {
+		"pos_only": doc.get("pos_only") or 0,
+		"one_time_per_customer": doc.get("one_time_per_customer") or 0,
+	}
+	if frappe.db.has_column("Pricing Rule", "promotion_type"):
+		values["promotion_type"] = doc.get("promotion_type") or ""
+
 	frappe.db.set_value(
 		"Pricing Rule",
 		{"promotional_scheme": doc.name},
-		{
-			"pos_only": doc.get("pos_only") or 0,
-			"one_time_per_customer": doc.get("one_time_per_customer") or 0,
-		},
+		values,
 		update_modified=False,
 	)
+
+
+# Backwards-compatible alias for any external references.
+sync_pos_only_to_pricing_rules = sync_promotion_fields_to_pricing_rules
 
 
 def patch_get_other_conditions(pr_utils):

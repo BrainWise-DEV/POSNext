@@ -559,7 +559,7 @@
 										</div>
 									</div>
 								</div>
-								<div class="mt-4">
+								<div class="mt-4 flex flex-col gap-2">
 									<label class="flex items-center gap-2">
 										<input
 											type="checkbox"
@@ -568,6 +568,19 @@
 										/>
 										<span class="text-sm text-gray-700">{{
 											__("Only One Use Per Customer")
+										}}</span>
+									</label>
+									<label
+										v-if="form.coupon_type === 'Promotional'"
+										class="flex items-center gap-2"
+									>
+										<input
+											type="checkbox"
+											v-model="form.exclude_already_discounted_items"
+											class="rounded border-gray-300"
+										/>
+										<span class="text-sm text-gray-700">{{
+											__("Exclude Already Discounted Items")
 										}}</span>
 									</label>
 								</div>
@@ -760,6 +773,7 @@ const form = ref({
 	valid_upto: "",
 	maximum_use: null,
 	one_use: 0,
+	exclude_already_discounted_items: 1,
 	company: props.company,
 });
 
@@ -898,6 +912,7 @@ const updateCouponResource = createResource({
 				valid_upto: form.value.valid_upto,
 				maximum_use: form.value.maximum_use,
 				one_use: form.value.one_use,
+				exclude_already_discounted_items: form.value.exclude_already_discounted_items,
 			}),
 		};
 	},
@@ -1115,6 +1130,7 @@ function populateFormFromCoupon(coupon) {
 		valid_upto: coupon.valid_upto || "",
 		maximum_use: coupon.maximum_use || null,
 		one_use: coupon.one_use || 0,
+		exclude_already_discounted_items: coupon.exclude_already_discounted_items ?? 1,
 		company: coupon.company || props.company,
 	};
 }

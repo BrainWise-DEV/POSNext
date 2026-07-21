@@ -99,6 +99,20 @@
 											{ label: __('Disabled Only'), value: 'disabled' },
 										]"
 									/>
+
+									<FormControl
+										type="select"
+										v-model="filterPromotionType"
+										:options="[
+											{ label: __('All Types'), value: 'all' },
+											{
+												label: __('Item Level Discount'),
+												value: PROMOTION_TYPE_ITEM_LEVEL,
+											},
+											{ label: __('Auto Discount'), value: PROMOTION_TYPE_AUTO },
+											{ label: __('GWP'), value: PROMOTION_TYPE_GWP },
+										]"
+									/>
 								</div>
 
 								<!-- Create New Button -->
@@ -245,9 +259,19 @@
 												</Badge>
 											</div>
 											<div class="flex items-center justify-between text-xs">
-												<Badge variant="subtle">
-													{{ translateApplyOn(promotion.apply_on) }}
-												</Badge>
+												<div class="flex items-center gap-1">
+													<Badge variant="subtle">
+														{{ translateApplyOn(promotion.apply_on) }}
+													</Badge>
+													<Badge
+														v-if="promotion.promotion_type"
+														variant="subtle"
+														theme="orange"
+														size="sm"
+													>
+														{{ promotion.promotion_type }}
+													</Badge>
+												</div>
 												<span class="text-gray-500">
 													{{
 														promotion.valid_upto
@@ -499,6 +523,30 @@
 															/>
 														</div>
 
+														<div class="col-span-3">
+															<label
+																class="block text-sm font-medium text-gray-700 mb-1.5 text-start"
+															>
+																{{ __("Promotion Type") }}
+															</label>
+															<SelectInput
+																v-model="form.promotion_type"
+																:disabled="!isCreating || isPricingRule"
+																:options="promotionTypeOptions"
+																:placeholder="__('Select promotion type')"
+															/>
+															<p
+																v-if="isItemLevelPromotionType"
+																class="text-xs text-amber-700 mt-1"
+															>
+																{{
+																	__(
+																		"SKU discount — excluded from Auto Discount; coupons may exclude"
+																	)
+																}}
+															</p>
+														</div>
+
 														<FormControl
 															type="date"
 															:label="__('Valid From')"
@@ -523,7 +571,9 @@
 															<SelectInput
 																v-model="form.apply_on"
 																:disabled="
-																	!isCreating || isPricingRule
+																	!isCreating ||
+																	isPricingRule ||
+																	isItemLevelPromotionType
 																"
 																:options="applyOnOptions"
 																:placeholder="__('Select option')"
@@ -734,7 +784,7 @@
 															>
 															<div class="grid grid-cols-3 gap-3">
 																<button
-																	v-for="type in discountTypes"
+																	v-for="type in availableDiscountTypes"
 																	:key="type.value"
 																	@click="
 																		form.discount_type =
@@ -899,6 +949,7 @@
 															/>
 
 															<FormControl
+																v-if="!isItemLevelPromotionType"
 																type="number"
 																:label="__('Minimum Quantity')"
 																v-model="form.min_qty"
@@ -907,6 +958,7 @@
 															/>
 
 															<FormControl
+																v-if="!isItemLevelPromotionType"
 																type="number"
 																:label="__('Maximum Quantity')"
 																v-model="form.max_qty"
@@ -915,6 +967,7 @@
 															/>
 
 															<FormControl
+																v-if="!isItemLevelPromotionType"
 																type="number"
 																:label="
 																	__('Minimum Amount ({0})', [
@@ -1070,11 +1123,25 @@ const activeTab = ref("promotions"); // Tab state: 'promotions' or 'coupons'
 const promotions = ref([]);
 const searchQuery = ref("");
 const filterStatus = ref("all");
+const filterPromotionType = ref("all");
+
+// Promotion types
+const PROMOTION_TYPE_ITEM_LEVEL = "Item Level Discount";
+const PROMOTION_TYPE_AUTO = "Auto Discount";
+const PROMOTION_TYPE_GWP = "GWP";
+
+const promotionTypeOptions = [
+	{ label: __("Legacy / Unclassified"), value: "" },
+	{ label: __("Item Level Discount"), value: PROMOTION_TYPE_ITEM_LEVEL },
+	{ label: __("Auto Discount"), value: PROMOTION_TYPE_AUTO },
+	{ label: __("GWP"), value: PROMOTION_TYPE_GWP },
+];
 
 // Form state
 const form = ref({
 	name: "",
 	company: props.company,
+	promotion_type: "",
 	apply_on: "Item Group",
 	discount_type: "percentage",
 	discount_value: 0,
@@ -1130,7 +1197,31 @@ const filteredPromotions = computed(() => {
 		filtered = filtered.filter((p) => p.status === "Disabled");
 	}
 
+	if (filterPromotionType.value !== "all") {
+		filtered = filtered.filter(
+			(p) => (p.promotion_type || "") === filterPromotionType.value
+		);
+	}
+
 	return filtered;
+});
+
+const isItemLevelPromotionType = computed(
+	() => form.value.promotion_type === PROMOTION_TYPE_ITEM_LEVEL
+);
+
+const isAutoPromotionType = computed(() => form.value.promotion_type === PROMOTION_TYPE_AUTO);
+
+const isGwpPromotionType = computed(() => form.value.promotion_type === PROMOTION_TYPE_GWP);
+
+const availableDiscountTypes = computed(() => {
+	if (isItemLevelPromotionType.value || isAutoPromotionType.value) {
+		return discountTypes.filter((t) => t.value !== "free_item");
+	}
+	if (isGwpPromotionType.value) {
+		return discountTypes.filter((t) => t.value === "free_item");
+	}
+	return discountTypes;
 });
 
 // Computed: Filter cached items based on search term
@@ -1287,6 +1378,7 @@ const updatePromotionResource = createResource({
 			data: JSON.stringify({
 				valid_from: form.value.valid_from,
 				valid_upto: form.value.valid_upto,
+				promotion_type: form.value.promotion_type,
 				min_qty: form.value.min_qty,
 				max_qty: form.value.max_qty,
 				min_amt: form.value.min_amt,
@@ -1395,6 +1487,29 @@ watch(
 	(newVal, oldVal) => {
 		if (isCreating.value && oldVal && newVal !== oldVal) {
 			form.value.items = [];
+		}
+	}
+);
+
+watch(
+	() => form.value.promotion_type,
+	(type) => {
+		if (!isCreating.value) return;
+		if (type === PROMOTION_TYPE_ITEM_LEVEL) {
+			form.value.apply_on = "Item Code";
+			form.value.min_qty = 0;
+			form.value.min_amt = 0;
+			form.value.max_qty = 0;
+			form.value.max_amt = 0;
+			if (form.value.discount_type === "free_item") {
+				form.value.discount_type = "percentage";
+			}
+		} else if (type === PROMOTION_TYPE_AUTO) {
+			if (form.value.discount_type === "free_item") {
+				form.value.discount_type = "percentage";
+			}
+		} else if (type === PROMOTION_TYPE_GWP) {
+			form.value.discount_type = "free_item";
 		}
 	}
 );
@@ -1604,6 +1719,7 @@ function resetForm() {
 	form.value = {
 		name: "",
 		company: props.company,
+		promotion_type: "",
 		apply_on: "Item Group",
 		discount_type: "percentage",
 		discount_value: 0,
@@ -1630,6 +1746,7 @@ function populateFormFromPromotion(promotion) {
 	// Basic fields
 	form.value.name = promotion.name;
 	form.value.company = promotion.company;
+	form.value.promotion_type = promotion.promotion_type || "";
 	form.value.apply_on = promotion.apply_on;
 	form.value.valid_from = promotion.valid_from || "";
 	form.value.valid_upto = promotion.valid_upto || "";

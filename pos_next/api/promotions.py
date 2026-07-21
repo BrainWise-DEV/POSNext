@@ -32,6 +32,42 @@ def check_promotion_permissions(action="read"):
 			frappe.throw(_("You don't have permission to delete promotions"), frappe.PermissionError)
 
 
+PROMOTION_TYPE_ITEM_LEVEL = "Item Level Discount"
+PROMOTION_TYPE_AUTO = "Auto Discount"
+PROMOTION_TYPE_GWP = "GWP"
+
+
+def _normalize_promotion_type(value):
+	return cstr(value or "").strip() or None
+
+
+def _apply_promotion_type_constraints(data):
+	"""Enforce field constraints based on promotion_type."""
+	promotion_type = _normalize_promotion_type(data.get("promotion_type"))
+	if not promotion_type:
+		return data
+
+	if promotion_type == PROMOTION_TYPE_ITEM_LEVEL:
+		data["apply_on"] = "Item Code"
+		data["min_qty"] = 0
+		data["min_amt"] = 0
+		data["max_qty"] = 0
+		data["max_amt"] = 0
+		data["pos_only"] = 1
+		if data.get("discount_type") == "free_item":
+			frappe.throw(_("Item Level Discount cannot grant free items"))
+		if not data.get("items"):
+			frappe.throw(_("Please select at least one item for Item Level Discount"))
+	elif promotion_type == PROMOTION_TYPE_GWP:
+		if data.get("discount_type") not in (None, "free_item"):
+			data["discount_type"] = "free_item"
+	elif promotion_type == PROMOTION_TYPE_AUTO:
+		if data.get("discount_type") == "free_item":
+			frappe.throw(_("Auto Discount cannot grant free items"))
+
+	return data
+
+
 @frappe.whitelist()
 def get_promotions(pos_profile=None, company=None, include_disabled=False):
 	"""Get all promotional schemes AND standalone pricing rules for POS with simplified structure."""
@@ -67,6 +103,8 @@ def get_promotions(pos_profile=None, company=None, include_disabled=False):
 			"company",
 			"mixed_conditions",
 			"is_cumulative",
+			"promotion_type",
+			"pos_only",
 		],
 		order_by="modified desc",
 	)
@@ -265,6 +303,8 @@ def create_promotion(data):
 	if not data.get("apply_on"):
 		frappe.throw(_("Apply On is required"))
 
+	data = _apply_promotion_type_constraints(data)
+
 	try:
 		# Create promotional scheme
 		scheme = frappe.new_doc("Promotional Scheme")
@@ -279,8 +319,11 @@ def create_promotion(data):
 				"valid_upto": data.get("valid_upto"),
 				"mixed_conditions": cint(data.get("mixed_conditions", 0)),
 				"is_cumulative": cint(data.get("is_cumulative", 0)),
+				"pos_only": cint(data.get("pos_only", 0)),
 			}
 		)
+		if data.get("promotion_type") and hasattr(scheme, "promotion_type"):
+			scheme.promotion_type = data.get("promotion_type")
 
 		# Set applicable for
 		if data.get("applicable_for"):
@@ -386,6 +429,8 @@ def update_promotion(scheme_name, data):
 			scheme.valid_upto = data["valid_upto"]
 		if "disable" in data:
 			scheme.disable = cint(data["disable"])
+		if "promotion_type" in data and hasattr(scheme, "promotion_type"):
+			scheme.promotion_type = data.get("promotion_type") or ""
 
 		# Update discount values in slabs
 		if (
@@ -726,6 +771,9 @@ def create_coupon(data):
 				"valid_upto": data.get("valid_upto"),
 				"maximum_use": cint(data.get("maximum_use", 0)) or None,
 				"one_use": cint(data.get("one_use", 0)),
+				"exclude_already_discounted_items": cint(
+					data.get("exclude_already_discounted_items", 1)
+				),
 				"campaign": data.get("campaign"),
 			}
 		)
@@ -789,6 +837,8 @@ def update_coupon(coupon_name, data):
 			coupon.maximum_use = cint(data["maximum_use"]) or None
 		if "one_use" in data:
 			coupon.one_use = cint(data["one_use"])
+		if "exclude_already_discounted_items" in data:
+			coupon.exclude_already_discounted_items = cint(data["exclude_already_discounted_items"])
 		if "disabled" in data:
 			coupon.disabled = cint(data["disabled"])
 		if "description" in data:

@@ -307,6 +307,11 @@ const couponResource = createResource({
 	auto: false,
 });
 
+const calculateCouponResource = createResource({
+	url: "pos_next.api.offers.calculate_coupon_discount",
+	auto: false,
+});
+
 watch(
 	() => props.modelValue,
 	(val) => {
@@ -355,6 +360,36 @@ function getCouponBaseAmount(coupon) {
 	return coupon.apply_on === "Grand Total" ? grandTotal : netTotal;
 }
 
+function buildCouponInvoicePayload() {
+	const items = (props.items || []).map((item) => ({
+		item_code: item.item_code,
+		qty: item.quantity || item.qty,
+		rate: item.rate,
+		uom: item.uom,
+		price_list_rate: item.price_list_rate || item.rate,
+		discount_percentage: item.discount_percentage || 0,
+		discount_amount: item.discount_amount || 0,
+		pricing_rules: item.pricing_rules || "",
+		is_already_discounted: item.is_already_discounted || 0,
+		discount_source: item.discount_source || "",
+		amount: item.amount,
+		item_group: item.item_group,
+		brand: item.brand,
+		is_free_item: item.is_free_item || 0,
+	}));
+
+	return {
+		company: props.company,
+		customer: props.customer,
+		pos_profile: props.posProfile,
+		grand_total: Number.parseFloat(props.grandTotal || 0),
+		net_total: Number.parseFloat(props.subtotal || 0),
+		total_taxes_and_charges: Number.parseFloat(props.taxAmount || 0),
+		tax_amount: Number.parseFloat(props.taxAmount || 0),
+		items,
+	};
+}
+
 async function applyCoupon() {
 	if (!couponCode.value.trim()) {
 		errorMessage.value = __("Please enter a coupon code");
@@ -365,51 +400,27 @@ async function applyCoupon() {
 	errorMessage.value = "";
 
 	try {
-		await couponResource.reload();
-		// Frappe wraps response in { message: {...} }
-		const result = couponResource.data?.message || couponResource.data;
+		const calcResponse = await calculateCouponResource.submit({
+			coupon_code: couponCode.value,
+			invoice_data: JSON.stringify(buildCouponInvoicePayload()),
+			customer: props.customer,
+			company: props.company,
+		});
 
-		// Handle if result is the actual response object
-		const validationData =
-			typeof result === "object" && result.valid !== undefined
-				? result
-				: couponResource.data;
+		const calcData = calcResponse?.message || calcResponse;
 
-		if (!validationData || !validationData.valid) {
+		if (!calcData || !calcData.valid) {
 			errorMessage.value =
-				validationData?.message || __("The coupon code you entered is not valid");
+				calcData?.message || __("The coupon code you entered is not valid");
 			showError(errorMessage.value);
 			return;
 		}
 
-		const coupon = validationData.coupon;
-		const baseAmount = getCouponBaseAmount(coupon);
-
-		// Check minimum amount on the configured coupon base
-		if (coupon.min_amount && baseAmount < coupon.min_amount) {
-			errorMessage.value = __("This coupon requires a minimum purchase of ", [
-				formatCurrency(coupon.min_amount),
-			]);
-			showWarning(errorMessage.value);
-			return;
-		}
-
-		// Calculate discount on subtotal (before tax) using centralized helper
-		// Transform server coupon format to discount object format
-		const discountObj = {
-			percentage: coupon.discount_type === "Percentage" ? coupon.discount_percentage : 0,
-			amount: coupon.discount_type === "Amount" ? coupon.discount_amount : 0,
-		};
-
-		let discountAmount = calculateDiscountAmount(discountObj, baseAmount);
-
-		// Apply maximum discount limit if specified
-		if (coupon.max_amount && discountAmount > coupon.max_amount) {
-			discountAmount = coupon.max_amount;
-		}
-
-		// Clamp discount to the selected coupon base to prevent negative totals
-		discountAmount = Math.min(discountAmount, baseAmount);
+		const coupon = calcData.coupon;
+		const discountAmount = Number.parseFloat(calcData.discount) || 0;
+		const baseAmount =
+			Number.parseFloat(calcData.eligible_subtotal) ||
+			getCouponBaseAmount(coupon);
 
 		appliedDiscount.value = {
 			name: coupon.coupon_name || coupon.coupon_code,
@@ -420,6 +431,8 @@ async function applyCoupon() {
 			coupon: coupon,
 			apply_on: coupon.apply_on,
 			base_amount: baseAmount,
+			eligible_subtotal: calcData.eligible_subtotal,
+			excluded_subtotal: calcData.excluded_subtotal,
 		};
 
 		emit("discount-applied", appliedDiscount.value);
