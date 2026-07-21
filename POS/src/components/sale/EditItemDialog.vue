@@ -418,6 +418,13 @@
 												</p>
 											</div>
 
+											<div
+												v-else-if="isItemLevelPromotion"
+												class="border-t border-gray-200 pt-4 text-xs text-amber-700"
+											>
+												{{ __("SKU promotion applied — discount is locked") }}
+											</div>
+
 											<!-- Totals -->
 											<div
 												class="bg-gray-50 rounded-lg p-4 flex flex-col gap-2"
@@ -457,13 +464,6 @@
 														}}</span
 													>
 												</div>
-											</div>
-
-											<div
-												v-else-if="isItemLevelPromotion"
-												class="border-t border-gray-200 pt-4 text-xs text-amber-700"
-											>
-												{{ __("SKU promotion applied — discount is locked") }}
 											</div>
 										</div>
 									</div>
