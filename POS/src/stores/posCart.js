@@ -104,6 +104,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		removeDiscount,
 		applyCouponLineDiscounts,
 		applyOffersResource,
+		calculateCouponDiscountResource,
 		getItemDetailsResource,
 		resolveUomPricing,
 		recalculateItem,
@@ -362,6 +363,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			discount_amount: item.coupon_code ? 0 : item.discount_amount || 0,
 			pricing_rules: item.pricing_rules || null,
 			is_free_item: item.is_free_item || 0,
+			is_already_discounted: item.is_already_discounted || 0,
+			discount_source: item.discount_source || "",
 			coupon_code: item.coupon_code || "",
 			idx: index + 1,
 			name: item.name || null,
@@ -461,6 +464,13 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				price_list_rate: item.price_list_rate || item.rate,
 				discount_percentage: item.discount_percentage || 0,
 				discount_amount: item.discount_amount || 0,
+				pricing_rules: item.pricing_rules || "",
+				is_already_discounted: item.is_already_discounted || 0,
+				discount_source: item.discount_source || "",
+				item_group: item.item_group,
+				brand: item.brand,
+				amount: item.amount,
+				is_free_item: item.is_free_item || 0,
 			})),
 		};
 	}
@@ -496,6 +506,13 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				hasDiscounts = discountPct > 0 || discountAmt > 0;
 			}
 			// Otherwise preserve existing manual discount
+
+			if (serverItem.is_already_discounted !== undefined) {
+				item.is_already_discounted = serverItem.is_already_discounted ? 1 : 0;
+			}
+			if (serverItem.discount_source !== undefined) {
+				item.discount_source = serverItem.discount_source || "";
+			}
 
 			recalculateItem(item);
 		});
@@ -1115,12 +1132,22 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		let applied = false;
 
 		for (const item of eligibleItems) {
+			if (offer.promotion_type === "Auto Discount" && item.is_already_discounted) {
+				continue;
+			}
+
 			// Only apply if no existing pricing rule
 			if (item.pricing_rules && item.pricing_rules.length > 0) continue;
 
 			if (discountType === "Discount Percentage" && discountPercentage > 0) {
 				item.discount_percentage = discountPercentage;
 				item.pricing_rules = [offer.name];
+				if (offer.promotion_type === "Item Level Discount") {
+					item.is_already_discounted = 1;
+					item.discount_source = "item_level_promotion";
+				} else if (offer.promotion_type === "Auto Discount") {
+					item.discount_source = "auto_discount";
+				}
 				recalculateItem(item);
 				applied = true;
 			} else if (discountType === "Discount Amount" && discountAmount > 0) {
@@ -1494,6 +1521,22 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				cartItem.is_rate_manually_edited = updates.is_rate_manually_edited;
 			if (updates.original_rate !== undefined)
 				cartItem.original_rate = updates.original_rate;
+
+			const hasManualDiscount =
+				((Number.parseFloat(updates.discount_percentage) || 0) > 0 ||
+					(Number.parseFloat(updates.discount_amount) || 0) > 0) &&
+				!hasPricingRules(cartItem.pricing_rules);
+			if (hasManualDiscount) {
+				cartItem.discount_source = "manual_discount";
+				cartItem.is_already_discounted = 1;
+			} else if (
+				updates.discount_percentage === 0 &&
+				updates.discount_amount === 0 &&
+				!hasPricingRules(cartItem.pricing_rules)
+			) {
+				cartItem.discount_source = "";
+				cartItem.is_already_discounted = 0;
+			}
 
 			recalculateItem(cartItem);
 			rebuildIncrementalCache();

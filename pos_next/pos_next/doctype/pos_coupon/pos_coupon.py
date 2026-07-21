@@ -230,22 +230,31 @@ def get_coupon_eligible_items(coupon, items):
 	Return cart items that pass exclusion rules and scope checks.
 
 	Exclusion rules:
-	1. Already discounted / pricing-rule / manual under-list rate
+	1. Already discounted lines (when exclude_already_discounted_items is enabled)
 	2-3. Free items and promo-trigger lines (pricing_rules / is_free_item)
 	4. Excluded brands
 	"""
 	if not items:
 		return []
 
+	from pos_next.api.promotion_exclusions import is_already_discounted, mark_item_discount_flags
+
+	exclude_discounted = cint(getattr(coupon, "exclude_already_discounted_items", 1))
+	prepared_items = [frappe._dict(row) for row in items]
+	if exclude_discounted:
+		mark_item_discount_flags(prepared_items)
+
 	excluded_brands = _get_excluded_brands(coupon)
 	eligible = []
 
-	for index, raw in enumerate(items):
+	for index, raw in enumerate(prepared_items):
 		item = raw if isinstance(raw, dict) else dict(raw)
 		# Skip free items and promo-linked lines
 		if cint(item.get("is_free_item") or 0):
 			continue
-		if _item_already_discounted(item):
+		if exclude_discounted and (
+			is_already_discounted(item) or _item_already_discounted(item)
+		):
 			# Allow re-evaluating lines already tagged with this same coupon
 			existing_coupon = (item.get("coupon_code") or "").upper()
 			this_code = (coupon.coupon_code or "").upper()
@@ -392,12 +401,33 @@ def apply_coupon_to_items(coupon, items):
 	}
 
 
-def apply_coupon_discount(coupon, cart_total, net_total=None):
+def apply_coupon_discount(coupon, cart_total, net_total=None, items=None, tax_amount=0):
 	"""Calculate discount amount based on coupon configuration (legacy cart-level helper)."""
-	from frappe.utils import flt
+	from pos_next.api.promotion_exclusions import (
+		get_eligible_subtotal,
+		get_excluded_subtotal,
+		mark_item_discount_flags,
+	)
 
-	# Determine the base amount for discount calculation
-	base_amount = cart_total if coupon.apply_on == "Grand Total" else (net_total or cart_total)
+	prepared_items = [frappe._dict(row) for row in (items or [])]
+	if prepared_items:
+		mark_item_discount_flags(prepared_items)
+
+	exclude_discounted = cint(getattr(coupon, "exclude_already_discounted_items", 1))
+
+	if prepared_items and exclude_discounted:
+		if coupon.apply_on == "Grand Total":
+			eligible_base = get_eligible_subtotal(prepared_items, exclude_discounted=True)
+			eligible_base += flt(tax_amount) if flt(tax_amount) > 0 else 0
+			excluded_base = get_excluded_subtotal(prepared_items)
+		else:
+			eligible_base = get_eligible_subtotal(prepared_items, exclude_discounted=True)
+			excluded_base = get_excluded_subtotal(prepared_items)
+		base_amount = eligible_base
+	else:
+		base_amount = cart_total if coupon.apply_on == "Grand Total" else (net_total or cart_total)
+		eligible_base = base_amount
+		excluded_base = 0
 
 	# Check minimum amount
 	if coupon.min_amount and flt(base_amount) < flt(coupon.min_amount):
@@ -407,6 +437,8 @@ def apply_coupon_discount(coupon, cart_total, net_total=None):
 				frappe.format_value(coupon.min_amount, {"fieldtype": "Currency"})
 			),
 			"discount": 0,
+			"eligible_subtotal": eligible_base,
+			"excluded_subtotal": excluded_base,
 		}
 
 	# Calculate discount
@@ -430,6 +462,8 @@ def apply_coupon_discount(coupon, cart_total, net_total=None):
 		"discount_type": coupon.discount_type,
 		"discount_percentage": coupon.discount_percentage if coupon.discount_type == "Percentage" else None,
 		"apply_on": coupon.apply_on,
+		"eligible_subtotal": eligible_base,
+		"excluded_subtotal": excluded_base,
 	}
 
 

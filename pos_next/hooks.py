@@ -172,7 +172,7 @@ doc_events = {
 	"POS Profile": {"on_update": "pos_next.realtime_events.emit_pos_profile_updated_event"},
 	"Promotional Scheme": {
 		"validate": "pos_next.overrides.pricing_rule.enforce_min_max_pricing_config",
-		"on_update": "pos_next.overrides.pricing_rule.sync_pos_only_to_pricing_rules",
+		"on_update": "pos_next.overrides.pricing_rule.sync_promotion_fields_to_pricing_rules",
 	},
 	"Pricing Rule": {"validate": "pos_next.overrides.pricing_rule.enforce_min_max_pricing_config"},
 	"Sales Order": {"validate": "pos_next.overrides.pricing_rule.apply_min_max_price_discounts"},

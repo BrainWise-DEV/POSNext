@@ -97,6 +97,11 @@ export function useInvoice() {
 		auto: false,
 	});
 
+	const calculateCouponDiscountResource = createResource({
+		url: "pos_next.api.offers.calculate_coupon_discount",
+		auto: false,
+	});
+
 	const getItemDetailsResource = createResource({
 		url: "pos_next.api.items.get_item_details",
 		auto: false,
@@ -288,6 +293,8 @@ export function useInvoice() {
 				is_stock_item: item.is_stock_item ?? 1,
 				is_bundle: item.is_bundle || false,
 				allow_negative_stock: item.allow_negative_stock || 0,
+				is_already_discounted: item.is_already_discounted || 0,
+				discount_source: item.discount_source || "",
 			};
 			invoiceItems.value.push(newItem);
 			// Recalculate the newly added item to apply taxes
@@ -1402,6 +1409,7 @@ export function useInvoice() {
 		submitInvoiceResource,
 		validateCartItemsResource,
 		applyOffersResource,
+		calculateCouponDiscountResource,
 		getItemDetailsResource,
 		getTaxesResource,
 	};

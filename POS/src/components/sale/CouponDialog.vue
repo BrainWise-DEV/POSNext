@@ -321,6 +321,8 @@ function buildCartItemsSnapshot() {
 		discount_amount: item.discount_amount || 0,
 		pricing_rules: item.pricing_rules || null,
 		is_free_item: item.is_free_item || 0,
+		is_already_discounted: item.is_already_discounted || 0,
+		discount_source: item.discount_source || "",
 		coupon_code: item.coupon_code || "",
 		idx: index + 1,
 		name: item.name || null,

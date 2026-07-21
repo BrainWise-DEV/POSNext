@@ -340,7 +340,7 @@
 
 											<!-- Item Discount Section (only if allowed by POS Profile) -->
 											<div
-												v-if="settingsStore.allowItemDiscount"
+												v-if="canEditItemDiscount"
 												class="border-t border-gray-200 pt-4"
 											>
 												<label
@@ -457,6 +457,13 @@
 														}}</span
 													>
 												</div>
+											</div>
+
+											<div
+												v-else-if="isItemLevelPromotion"
+												class="border-t border-gray-200 pt-4 text-xs text-amber-700"
+											>
+												{{ __("SKU promotion applied — discount is locked") }}
 											</div>
 										</div>
 									</div>
@@ -647,6 +654,14 @@ const hasPricingRules = computed(() => {
 		offersStore.availableOffers,
 		localQuantity.value
 	);
+});
+
+const isItemLevelPromotion = computed(() => {
+	return localItem.value?.discount_source === "item_level_promotion";
+});
+
+const canEditItemDiscount = computed(() => {
+	return settingsStore.allowItemDiscount && !isItemLevelPromotion.value;
 });
 
 // Rate editing is allowed only if:
@@ -1083,6 +1098,14 @@ function updateItem() {
 		warehouse: localWarehouse.value,
 		discount_percentage: discountPercentage,
 		discount_amount: discountAmount,
+		discount_source:
+			(discountPercentage > 0 || discountAmount > 0) && !isItemLevelPromotion.value
+				? "manual_discount"
+				: localItem.value.discount_source || "",
+		is_already_discounted:
+			(discountPercentage > 0 || discountAmount > 0) && !isItemLevelPromotion.value
+				? 1
+				: localItem.value.is_already_discounted || 0,
 		// Track manual rate edits for audit logging
 		is_rate_manually_edited: isRateManuallyEdited ? 1 : 0,
 		original_rate: isRateManuallyEdited ? originalPriceListRate.value : null,
