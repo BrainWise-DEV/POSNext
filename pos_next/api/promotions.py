@@ -599,6 +599,19 @@ def get_coupons(company=None, include_disabled=False, coupon_type=None):
 	if has_disabled_field:
 		fields.append("disabled")
 
+	optional_fields = (
+		"maximum_use_per_customer",
+		"discount_type",
+		"discount_percentage",
+		"discount_amount",
+		"apply_scope",
+		"applicable_brand",
+		"applicable_item_group",
+	)
+	for fieldname in optional_fields:
+		if frappe.db.has_column("POS Coupon", fieldname):
+			fields.append(fieldname)
+
 	coupons = frappe.get_all("POS Coupon", filters=filters, fields=fields, order_by="modified desc")
 
 	# Enrich with status
@@ -720,15 +733,24 @@ def create_coupon(data):
 				"min_amount": flt(data.get("min_amount")) if data.get("min_amount") else None,
 				"max_amount": flt(data.get("max_amount")) if data.get("max_amount") else None,
 				"apply_on": data.get("apply_on", "Grand Total"),
+				"apply_scope": data.get("apply_scope") or "All Eligible Items",
+				"applicable_brand": data.get("applicable_brand"),
+				"applicable_item_group": data.get("applicable_item_group"),
 				"company": data.get("company"),
 				"customer": data.get("customer"),
 				"valid_from": data.get("valid_from"),
 				"valid_upto": data.get("valid_upto"),
 				"maximum_use": cint(data.get("maximum_use", 0)) or None,
 				"one_use": cint(data.get("one_use", 0)),
+				"maximum_use_per_customer": cint(data.get("maximum_use_per_customer", 0)) or 0,
 				"campaign": data.get("campaign"),
 			}
 		)
+
+		for brand in data.get("excluded_brands") or []:
+			brand_name = brand.get("brand") if isinstance(brand, dict) else brand
+			if brand_name:
+				coupon.append("excluded_brands", {"brand": brand_name})
 
 		coupon.insert()
 
@@ -779,6 +801,18 @@ def update_coupon(coupon_name, data):
 			coupon.max_amount = flt(data["max_amount"]) if data["max_amount"] else None
 		if "apply_on" in data:
 			coupon.apply_on = data["apply_on"]
+		if "apply_scope" in data:
+			coupon.apply_scope = data["apply_scope"] or "All Eligible Items"
+		if "applicable_brand" in data:
+			coupon.applicable_brand = data["applicable_brand"]
+		if "applicable_item_group" in data:
+			coupon.applicable_item_group = data["applicable_item_group"]
+		if "excluded_brands" in data:
+			coupon.set("excluded_brands", [])
+			for brand in data.get("excluded_brands") or []:
+				brand_name = brand.get("brand") if isinstance(brand, dict) else brand
+				if brand_name:
+					coupon.append("excluded_brands", {"brand": brand_name})
 
 		# Update validity and usage fields
 		if "valid_from" in data:
@@ -789,6 +823,8 @@ def update_coupon(coupon_name, data):
 			coupon.maximum_use = cint(data["maximum_use"]) or None
 		if "one_use" in data:
 			coupon.one_use = cint(data["one_use"])
+		if "maximum_use_per_customer" in data:
+			coupon.maximum_use_per_customer = cint(data["maximum_use_per_customer"]) or 0
 		if "disabled" in data:
 			coupon.disabled = cint(data["disabled"])
 		if "description" in data:

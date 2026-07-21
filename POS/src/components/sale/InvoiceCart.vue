@@ -1012,7 +1012,7 @@
 										</svg>
 										{{
 											__("{0}%", [
-												Number(item.discount_percentage).toFixed(0),
+												Number(getItemDiscountPercent(item)).toFixed(0),
 											])
 										}}
 									</div>
@@ -1951,6 +1951,22 @@ function getInitials(name) {
 		return (first + second).toUpperCase();
 	}
 	return Array.from(parts[0]).slice(0, 2).join("").toUpperCase();
+}
+
+/**
+ * Effective discount % for badges. Coupon max_amount caps are stored as
+ * absolute amounts (discount_percentage=0), so derive % from amount/base.
+ */
+function getItemDiscountPercent(item) {
+	const pct = Number.parseFloat(item?.discount_percentage) || 0;
+	if (pct > 0) return pct;
+	const discountAmount = Number.parseFloat(item?.discount_amount) || 0;
+	if (discountAmount <= 0) return 0;
+	const qty = Number.parseFloat(item?.quantity || item?.qty) || 0;
+	const rate = Number.parseFloat(item?.price_list_rate || item?.rate) || 0;
+	const base = qty * rate;
+	if (base <= 0) return 0;
+	return (discountAmount / base) * 100;
 }
 
 /**

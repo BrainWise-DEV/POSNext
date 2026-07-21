@@ -30,12 +30,18 @@
   "min_amount",
   "max_amount",
   "apply_on",
+  "scope_section",
+  "apply_scope",
+  "applicable_brand",
+  "applicable_item_group",
+  "excluded_brands",
   "uses",
   "valid_from",
   "valid_upto",
   "maximum_use",
   "used",
   "one_use",
+  "maximum_use_per_customer",
   "column_break_11",
   "description",
   "referral_code"
@@ -190,6 +196,42 @@
    "reqd": 1
   },
   {
+   "fieldname": "scope_section",
+   "fieldtype": "Section Break",
+   "label": "Scope and Exclusions"
+  },
+  {
+   "default": "All Eligible Items",
+   "description": "Restrict coupon to all eligible items, a specific brand, or an Item Group (collection)",
+   "fieldname": "apply_scope",
+   "fieldtype": "Select",
+   "label": "Apply Scope",
+   "options": "All Eligible Items\nBrand\nItem Group"
+  },
+  {
+   "depends_on": "eval:doc.apply_scope=='Brand'",
+   "fieldname": "applicable_brand",
+   "fieldtype": "Link",
+   "label": "Applicable Brand",
+   "mandatory_depends_on": "eval:doc.apply_scope=='Brand'",
+   "options": "Brand"
+  },
+  {
+   "depends_on": "eval:doc.apply_scope=='Item Group'",
+   "description": "Item Group used as Collection scope",
+   "fieldname": "applicable_item_group",
+   "fieldtype": "Link",
+   "label": "Applicable Collection",
+   "mandatory_depends_on": "eval:doc.apply_scope=='Item Group'",
+   "options": "Item Group"
+  },
+  {
+   "fieldname": "excluded_brands",
+   "fieldtype": "Table",
+   "label": "Excluded Brands",
+   "options": "POS Coupon Excluded Brand"
+  },
+  {
    "fieldname": "uses",
    "fieldtype": "Section Break",
    "label": "Validity and Usage"
@@ -225,6 +267,13 @@
    "fieldname": "one_use",
    "fieldtype": "Check",
    "label": "Only One Use Per Customer"
+  },
+  {
+   "default": "0",
+   "description": "Max redemptions per customer. 0 = unlimited. If Only One Use Per Customer is checked and this is 0, treated as 1.",
+   "fieldname": "maximum_use_per_customer",
+   "fieldtype": "Int",
+   "label": "Uses Per Customer"
   },
   {
    "fieldname": "column_break_11",
