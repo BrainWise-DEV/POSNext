@@ -823,15 +823,39 @@ def calculate_coupon_discount(coupon_code: str, invoice_data, customer: str = No
 	tax_amount = flt(invoice.get("total_taxes_and_charges") or invoice.get("tax_amount") or 0)
 
 	if not grand_total and items:
-		from pos_next.api.promotion_exclusions import get_eligible_subtotal, get_excluded_subtotal
+		from pos_next.api.promotion_exclusions import (
+			PROMOTION_TARGET_COUPON,
+			get_eligible_subtotal,
+			get_excluded_subtotal,
+		)
+		from pos_next.pos_next.doctype.pos_coupon.pos_coupon import _get_excluded_brands
 
-		net_total = get_eligible_subtotal(items) + get_excluded_subtotal(items)
+		excluded_brands = _get_excluded_brands(coupon)
+		subtotal_kwargs = {
+			"promotion_target": PROMOTION_TARGET_COUPON,
+			"excluded_brands": excluded_brands,
+		}
+		net_total = get_eligible_subtotal(items, **subtotal_kwargs) + get_excluded_subtotal(
+			items, **subtotal_kwargs
+		)
 		grand_total = net_total + tax_amount
 
 	if not net_total and items:
-		from pos_next.api.promotion_exclusions import get_eligible_subtotal, get_excluded_subtotal
+		from pos_next.api.promotion_exclusions import (
+			PROMOTION_TARGET_COUPON,
+			get_eligible_subtotal,
+			get_excluded_subtotal,
+		)
+		from pos_next.pos_next.doctype.pos_coupon.pos_coupon import _get_excluded_brands
 
-		net_total = get_eligible_subtotal(items) + get_excluded_subtotal(items)
+		excluded_brands = _get_excluded_brands(coupon)
+		subtotal_kwargs = {
+			"promotion_target": PROMOTION_TARGET_COUPON,
+			"excluded_brands": excluded_brands,
+		}
+		net_total = get_eligible_subtotal(items, **subtotal_kwargs) + get_excluded_subtotal(
+			items, **subtotal_kwargs
+		)
 
 	result = apply_coupon_discount(
 		coupon,

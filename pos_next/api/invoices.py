@@ -47,11 +47,12 @@ try:
 	from pos_next.api.promotion_exclusions import (
 		DISCOUNT_SOURCE_AUTO,
 		DISCOUNT_SOURCE_MANUAL,
+		PROMOTION_TARGET_AUTO,
 		PROMOTION_TYPE_AUTO,
 		PROMOTION_TYPE_ITEM_LEVEL,
 		get_pre_discount_subtotal,
 		get_rule_promotion_types,
-		is_already_discounted,
+		is_eligible_for_promotion,
 		mark_item_discount_flags,
 	)
 except Exception:  # pragma: no cover - ERPNext not installed in some environments
@@ -65,7 +66,7 @@ except Exception:  # pragma: no cover - ERPNext not installed in some environmen
 	DISCOUNT_SOURCE_MANUAL = "manual_discount"
 	get_pre_discount_subtotal = None
 	get_rule_promotion_types = None
-	is_already_discounted = None
+	is_eligible_for_promotion = None
 	mark_item_discount_flags = None
 
 
@@ -167,7 +168,9 @@ def _apply_auto_discount_rules(prepared_items, rule_map, selected_offer_names=No
 
 		rule_applied = False
 		for item in prepared_items:
-			if item.get("is_free_item") or is_already_discounted(item, type_map):
+			if item.get("is_free_item") or not is_eligible_for_promotion(
+				item, PROMOTION_TARGET_AUTO, rule_type_map=type_map
+			):
 				continue
 			if not _item_matches_pricing_rule(item, rule):
 				continue

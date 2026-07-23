@@ -57,13 +57,14 @@ class POSCoupon(Document):
 				frappe.throw(_("Valid From date cannot be after Valid Until date"))
 
 		# Scope validations
-		apply_scope = self.apply_scope or "All Eligible Items"
+		apply_scope = getattr(self, "apply_scope", None) or "All Eligible Items"
 		if apply_scope == "Brand" and not self.applicable_brand:
 			frappe.throw(_("Applicable Brand is required when Apply Scope is Brand"))
 		if apply_scope == "Item Group" and not self.applicable_item_group:
 			frappe.throw(_("Applicable Collection is required when Apply Scope is Item Group"))
 
-		if self.maximum_use_per_customer and cint(self.maximum_use_per_customer) < 0:
+		maximum_use_per_customer = getattr(self, "maximum_use_per_customer", None)
+		if maximum_use_per_customer and cint(maximum_use_per_customer) < 0:
 			frappe.throw(_("Uses Per Customer cannot be negative"))
 
 
@@ -158,32 +159,63 @@ def _get_customer_coupon_usage_count(customer, coupon_code):
 	return used_count
 
 
-def _has_pricing_rules(item):
-	"""True when the line already has offer/pricing-rule linkage."""
-	pricing_rules = item.get("pricing_rules")
-	if not pricing_rules:
-		return False
-	if isinstance(pricing_rules, str):
-		return bool(pricing_rules.strip())
-	if isinstance(pricing_rules, (list, tuple)):
-		return len(pricing_rules) > 0
-	return True
+def get_coupon_eligible_items(coupon, items):
+	"""
+	Return cart items that pass exclusion rules and scope checks.
 
+	Uses the Promotion Interaction Matrix for discount/coupon eligibility.
+	"""
+	if not items:
+		return []
 
-def _item_already_discounted(item):
-	"""Exclusion: item already has another discount applied."""
-	if flt(item.get("discount_percentage") or 0) > 0:
-		return True
-	if flt(item.get("discount_amount") or 0) > 0:
-		return True
-	if _has_pricing_rules(item):
-		return True
-	# Manual rate below list price
-	price_list_rate = flt(item.get("price_list_rate") or 0)
-	rate = flt(item.get("rate") or 0)
-	if price_list_rate > 0 and rate > 0 and rate < price_list_rate:
-		return True
-	return False
+	from pos_next.api.promotion_exclusions import (
+		PROMOTION_TARGET_COUPON,
+		get_rule_promotion_types,
+		is_eligible_for_promotion,
+		mark_item_discount_flags,
+		_parse_pricing_rules,
+	)
+
+	exclude_discounted = cint(getattr(coupon, "exclude_already_discounted_items", 1))
+	prepared_items = [frappe._dict(row) for row in items]
+	all_rule_names: list[str] = []
+	for item in prepared_items:
+		all_rule_names.extend(_parse_pricing_rules(item.get("pricing_rules")))
+	type_map = get_rule_promotion_types(list(set(all_rule_names)))
+
+	if exclude_discounted:
+		mark_item_discount_flags(prepared_items, type_map)
+
+	excluded_brands = _get_excluded_brands(coupon)
+	eligible = []
+
+	for index, raw in enumerate(prepared_items):
+		item = raw if isinstance(raw, dict) else dict(raw)
+		if cint(item.get("is_free_item") or 0):
+			continue
+		if not is_eligible_for_promotion(
+			item,
+			PROMOTION_TARGET_COUPON,
+			rule_type_map=type_map,
+			excluded_brands=excluded_brands,
+			exclude_discounted=exclude_discounted,
+		):
+			# Allow re-evaluating lines already tagged with this same coupon
+			existing_coupon = (item.get("coupon_code") or "").upper()
+			this_code = (coupon.coupon_code or "").upper()
+			if not (existing_coupon and this_code and existing_coupon == this_code):
+				continue
+		if not _item_matches_scope(coupon, item):
+			continue
+
+		item = dict(item)
+		item["_line_key"] = _item_line_key(item, index)
+		item["_base_amount"] = _item_base_amount(item)
+		if flt(item["_base_amount"]) <= 0:
+			continue
+		eligible.append(item)
+
+	return eligible
 
 
 def _get_excluded_brands(coupon):
@@ -225,54 +257,42 @@ def _item_base_amount(item):
 	return rate * qty
 
 
-def get_coupon_eligible_items(coupon, items):
-	"""
-	Return cart items that pass exclusion rules and scope checks.
-
-	Exclusion rules:
-	1. Already discounted lines (when exclude_already_discounted_items is enabled)
-	2-3. Free items and promo-trigger lines (pricing_rules / is_free_item)
-	4. Excluded brands
-	"""
-	if not items:
-		return []
-
-	from pos_next.api.promotion_exclusions import is_already_discounted, mark_item_discount_flags
-
-	exclude_discounted = cint(getattr(coupon, "exclude_already_discounted_items", 1))
-	prepared_items = [frappe._dict(row) for row in items]
-	if exclude_discounted:
-		mark_item_discount_flags(prepared_items)
+def _coupon_rejection_message(coupon, items) -> str:
+	"""Explain why no cart lines qualify for this coupon."""
+	from pos_next.api.promotion_exclusions import (
+		PROMOTION_TARGET_COUPON,
+		classify_item_state,
+		is_coupon_broad_discounted,
+	)
 
 	excluded_brands = _get_excluded_brands(coupon)
-	eligible = []
+	reasons: list[str] = []
 
-	for index, raw in enumerate(prepared_items):
-		item = raw if isinstance(raw, dict) else dict(raw)
-		# Skip free items and promo-linked lines
+	for item in items or []:
 		if cint(item.get("is_free_item") or 0):
 			continue
-		if exclude_discounted and (
-			is_already_discounted(item) or _item_already_discounted(item)
+		code = item.get("item_code") or _("Item")
+		brand = item.get("brand")
+		if brand and brand in excluded_brands:
+			reasons.append(_("Item {0} is excluded (brand {1})").format(code, brand))
+			continue
+		if cint(getattr(coupon, "exclude_already_discounted_items", 1)) and is_coupon_broad_discounted(
+			item
 		):
-			# Allow re-evaluating lines already tagged with this same coupon
-			existing_coupon = (item.get("coupon_code") or "").upper()
-			this_code = (coupon.coupon_code or "").upper()
-			if not (existing_coupon and this_code and existing_coupon == this_code):
-				continue
-		if item.get("brand") and item.get("brand") in excluded_brands:
+			reasons.append(_("Item {0} is already discounted").format(code))
 			continue
-		if not _item_matches_scope(coupon, item):
-			continue
+		state = classify_item_state(
+			item,
+			excluded_brands=excluded_brands,
+			target=PROMOTION_TARGET_COUPON,
+			exclude_discounted=cint(getattr(coupon, "exclude_already_discounted_items", 1)),
+		)
+		if state == "excluded_brand":
+			reasons.append(_("Item {0} is excluded (brand {1})").format(code, brand or ""))
 
-		item = dict(item)
-		item["_line_key"] = _item_line_key(item, index)
-		item["_base_amount"] = _item_base_amount(item)
-		if flt(item["_base_amount"]) <= 0:
-			continue
-		eligible.append(item)
-
-	return eligible
+	if reasons:
+		return "; ".join(reasons[:3])
+	return _("No eligible items for this coupon")
 
 
 def apply_coupon_to_items(coupon, items):
@@ -285,7 +305,7 @@ def apply_coupon_to_items(coupon, items):
 	if not eligible:
 		return {
 			"valid": False,
-			"message": _("No eligible items for this coupon"),
+			"message": _coupon_rejection_message(coupon, items),
 			"eligible_item_codes": [],
 			"line_updates": [],
 			"total_discount": 0,
@@ -404,25 +424,32 @@ def apply_coupon_to_items(coupon, items):
 def apply_coupon_discount(coupon, cart_total, net_total=None, items=None, tax_amount=0):
 	"""Calculate discount amount based on coupon configuration (legacy cart-level helper)."""
 	from pos_next.api.promotion_exclusions import (
+		PROMOTION_TARGET_COUPON,
 		get_eligible_subtotal,
 		get_excluded_subtotal,
 		mark_item_discount_flags,
 	)
 
 	prepared_items = [frappe._dict(row) for row in (items or [])]
+	excluded_brands = _get_excluded_brands(coupon)
 	if prepared_items:
 		mark_item_discount_flags(prepared_items)
 
 	exclude_discounted = cint(getattr(coupon, "exclude_already_discounted_items", 1))
 
 	if prepared_items and exclude_discounted:
+		subtotal_kwargs = {
+			"exclude_discounted": True,
+			"promotion_target": PROMOTION_TARGET_COUPON,
+			"excluded_brands": excluded_brands,
+		}
 		if coupon.apply_on == "Grand Total":
-			eligible_base = get_eligible_subtotal(prepared_items, exclude_discounted=True)
+			eligible_base = get_eligible_subtotal(prepared_items, **subtotal_kwargs)
 			eligible_base += flt(tax_amount) if flt(tax_amount) > 0 else 0
-			excluded_base = get_excluded_subtotal(prepared_items)
+			excluded_base = get_excluded_subtotal(prepared_items, **subtotal_kwargs)
 		else:
-			eligible_base = get_eligible_subtotal(prepared_items, exclude_discounted=True)
-			excluded_base = get_excluded_subtotal(prepared_items)
+			eligible_base = get_eligible_subtotal(prepared_items, **subtotal_kwargs)
+			excluded_base = get_excluded_subtotal(prepared_items, **subtotal_kwargs)
 		base_amount = eligible_base
 	else:
 		base_amount = cart_total if coupon.apply_on == "Grand Total" else (net_total or cart_total)

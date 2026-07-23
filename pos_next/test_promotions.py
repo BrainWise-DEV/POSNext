@@ -29,6 +29,7 @@ running site has configured.
 """
 
 from types import SimpleNamespace
+import unittest
 
 import frappe
 from erpnext.stock.doctype.stock_entry.test_stock_entry import make_stock_entry
@@ -41,6 +42,11 @@ from pos_next.api.invoices import apply_offers, submit_invoice, update_invoice
 ITEM_A = "_PNXT_TEST_ITEM_A"  # Standard Selling: 50
 ITEM_B = "_PNXT_TEST_ITEM_B"  # Standard Selling: 80
 ITEM_C = "_PNXT_TEST_ITEM_C"  # Standard Selling: 20
+
+# Real-site matrix QA item (brainwise.dev / manual POS testing)
+MATRIX_ITEM_14214 = "14214"
+MATRIX_COMPANION_14214 = "4124124"
+MATRIX_TEST_BRAND_14214 = "MatrixTest"
 
 ITEM_PRICES = {ITEM_A: 50.0, ITEM_B: 80.0, ITEM_C: 20.0}
 
@@ -500,6 +506,7 @@ def _make_pos_coupon(code, **fields):
 		"discount_percentage": 10,
 		"company": company,
 		"apply_on": "Net Total",
+		"apply_scope": "All Eligible Items",
 		"exclude_already_discounted_items": 1,
 	}
 	defaults.update(fields)
@@ -1118,6 +1125,97 @@ class TestPromotions(FrappeTestCase):
 		self.assertAlmostEqual(flt(result["excluded_subtotal"]), 40, places=2)
 		self.assertAlmostEqual(flt(result["discount"]), 8, places=2)
 
+	def test_matrix_engine_classify_states(self):
+		"""Unit tests for Promotion Interaction Matrix state classification."""
+		from pos_next.api.promotion_exclusions import (
+			ITEM_STATE_ALREADY_DISCOUNTED,
+			ITEM_STATE_ELIGIBLE,
+			ITEM_STATE_EXCLUDED_BRAND,
+			PROMOTION_TARGET_AUTO,
+			PROMOTION_TARGET_COUPON,
+			classify_item_state,
+			is_eligible_for_promotion,
+		)
+
+		discounted = frappe._dict({"is_already_discounted": 1, "brand": "Nike"})
+		self.assertEqual(
+			classify_item_state(discounted, target=PROMOTION_TARGET_AUTO),
+			ITEM_STATE_ALREADY_DISCOUNTED,
+		)
+		self.assertFalse(
+			is_eligible_for_promotion(discounted, PROMOTION_TARGET_AUTO)
+		)
+		self.assertFalse(
+			is_eligible_for_promotion(discounted, PROMOTION_TARGET_COUPON)
+		)
+
+		excluded_brand_item = frappe._dict(
+			{"brand": "BrandX", "price_list_rate": 100, "rate": 100}
+		)
+		self.assertEqual(
+			classify_item_state(
+				excluded_brand_item,
+				excluded_brands={"BrandX"},
+				target=PROMOTION_TARGET_COUPON,
+			),
+			ITEM_STATE_EXCLUDED_BRAND,
+		)
+		self.assertTrue(
+			is_eligible_for_promotion(
+				excluded_brand_item,
+				PROMOTION_TARGET_AUTO,
+				excluded_brands={"BrandX"},
+			)
+		)
+		self.assertFalse(
+			is_eligible_for_promotion(
+				excluded_brand_item,
+				PROMOTION_TARGET_COUPON,
+				excluded_brands={"BrandX"},
+			)
+		)
+
+		normal_item = frappe._dict(
+			{"brand": "BrandA", "price_list_rate": 100, "rate": 100}
+		)
+		self.assertEqual(
+			classify_item_state(normal_item, target=PROMOTION_TARGET_COUPON),
+			ITEM_STATE_ELIGIBLE,
+		)
+		self.assertTrue(
+			is_eligible_for_promotion(normal_item, PROMOTION_TARGET_COUPON)
+		)
+
+	def test_matrix_auto_discount_allows_excluded_brand_line(self):
+		"""Excluded brand (coupon) × Auto Discount = eligible per interaction matrix."""
+		import json
+
+		auto_rule = _make_rule(
+			"_PNXT_TEST_AutoExcludedBrand",
+			apply_on="Transaction",
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			discount_percentage=10,
+			promotion_type="Auto Discount",
+			min_amt=50,
+			apply_discount_on="Grand Total",
+		)
+		line_a = _line(self.ctx, ITEM_A, qty=1)
+		line_a["brand"] = "ExcludedBrand"
+		payload = _cart_payload(
+			self.ctx,
+			[
+				line_a,
+				_line(self.ctx, ITEM_B, qty=1),
+			],
+		)
+		resp = apply_offers(
+			invoice_data=json.dumps(payload),
+			selected_offers=json.dumps([auto_rule]),
+		)
+		item_a = resp["items"][0]
+		self.assertAlmostEqual(flt(item_a.get("discount_percentage")), 10, places=2)
+
 	def test_gwp_still_applies_with_item_level_discount(self):
 		"""GWP (product discount) is unaffected by item-level discount on another cart line."""
 		import json
@@ -1152,6 +1250,204 @@ class TestPromotions(FrappeTestCase):
 			[
 				_line(self.ctx, ITEM_A, qty=1),
 				_line(self.ctx, ITEM_B, qty=2),
+			],
+		)
+		resp = apply_offers(
+			invoice_data=json.dumps(payload),
+			selected_offers=json.dumps([item_rule, gwp_rule]),
+		)
+		self.assertTrue(resp["items"][0].get("is_already_discounted"))
+		self.assertGreater(len(resp.get("free_items") or []), 0)
+
+
+class TestPromotionMatrix14214(FrappeTestCase):
+	"""Promotion Interaction Matrix tests using real item 14214 (when present on site)."""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		if not frappe.db.exists("Item", MATRIX_ITEM_14214):
+			raise unittest.SkipTest(f"Item {MATRIX_ITEM_14214} not on this site")
+		cls.ctx = _ctx()
+
+	@classmethod
+	def tearDownClass(cls):
+		for title in (
+			"_MATRIX_TEST_14214_ItemLevel",
+			"_MATRIX_TEST_14214_Auto",
+			"_MATRIX_TEST_14214_GWP",
+		):
+			existing = frappe.db.get_value("Pricing Rule", {"title": title}, "name")
+			if existing:
+				frappe.delete_doc("Pricing Rule", existing, force=True, ignore_permissions=True)
+		if frappe.db.exists("POS Coupon", "_MATRIX_TEST_14214_Coupon"):
+			frappe.delete_doc("POS Coupon", "_MATRIX_TEST_14214_Coupon", force=True, ignore_permissions=True)
+		super().tearDownClass()
+
+	def _item_rate(self, item_code: str) -> float:
+		rate = frappe.db.get_value(
+			"Item Price",
+			{"item_code": item_code, "price_list": self.ctx.price_list, "selling": 1},
+			"price_list_rate",
+		)
+		return flt(rate) or ITEM_PRICES.get(item_code) or 1000
+
+	def _line_14214(self, item_code: str, qty=1, **extra):
+		line = _line(self.ctx, item_code, qty=qty, price_list_rate=self._item_rate(item_code))
+		line.update(extra)
+		return line
+
+	def test_14214_item_level_marks_already_discounted(self):
+		"""Matrix row: Already discounted — item-level promo on 14214."""
+		import json
+
+		rule = _make_rule(
+			"_MATRIX_TEST_14214_ItemLevel",
+			apply_on="Item Code",
+			items=[{"item_code": MATRIX_ITEM_14214}],
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			discount_percentage=20,
+			promotion_type="Item Level Discount",
+			min_qty=0,
+		)
+		payload = _cart_payload(self.ctx, [self._line_14214(MATRIX_ITEM_14214)])
+		resp = apply_offers(
+			invoice_data=json.dumps(payload),
+			selected_offers=json.dumps([rule]),
+		)
+		item = resp["items"][0]
+		self.assertEqual(item.get("item_code"), MATRIX_ITEM_14214)
+		self.assertAlmostEqual(flt(item.get("discount_percentage")), 20, places=2)
+		self.assertTrue(item.get("is_already_discounted"))
+
+	def test_14214_auto_discount_skips_discounted_companion(self):
+		"""Matrix: 14214 already discounted, companion gets auto discount."""
+		import json
+
+		item_rule = _make_rule(
+			"_MATRIX_TEST_14214_ItemLevel",
+			apply_on="Item Code",
+			items=[{"item_code": MATRIX_ITEM_14214}],
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			discount_percentage=20,
+			promotion_type="Item Level Discount",
+			min_qty=0,
+		)
+		auto_rule = _make_rule(
+			"_MATRIX_TEST_14214_Auto",
+			apply_on="Transaction",
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			discount_percentage=10,
+			promotion_type="Auto Discount",
+			min_amt=1000,
+			apply_discount_on="Grand Total",
+		)
+		companion = MATRIX_COMPANION_14214
+		if not frappe.db.exists("Item", companion):
+			companion = ITEM_B
+		payload = _cart_payload(
+			self.ctx,
+			[
+				self._line_14214(MATRIX_ITEM_14214),
+				self._line_14214(companion),
+			],
+		)
+		resp = apply_offers(
+			invoice_data=json.dumps(payload),
+			selected_offers=json.dumps([item_rule, auto_rule]),
+		)
+		item_14214, item_other = resp["items"][0], resp["items"][1]
+		self.assertTrue(item_14214.get("is_already_discounted"))
+		self.assertAlmostEqual(flt(item_14214.get("discount_percentage")), 20, places=2)
+		self.assertAlmostEqual(flt(item_other.get("discount_percentage")), 10, places=2)
+		self.assertFalse(item_other.get("is_already_discounted"))
+
+	def test_14214_coupon_excludes_discounted_line(self):
+		"""Matrix: coupon excludes already-discounted 14214, discounts companion."""
+		from pos_next.pos_next.doctype.pos_coupon.pos_coupon import apply_coupon_discount
+
+		coupon = _make_pos_coupon(
+			"MAT14214",
+			coupon_name="_MATRIX_TEST_14214_Coupon",
+			exclude_already_discounted_items=1,
+		)
+		rate_14214 = self._item_rate(MATRIX_ITEM_14214)
+		companion = MATRIX_COMPANION_14214 if frappe.db.exists("Item", MATRIX_COMPANION_14214) else ITEM_B
+		rate_companion = self._item_rate(companion)
+		items = [
+			frappe._dict(
+				{
+					"item_code": MATRIX_ITEM_14214,
+					"qty": 1,
+					"price_list_rate": rate_14214,
+					"rate": rate_14214 * 0.8,
+					"discount_percentage": 20,
+					"amount": rate_14214 * 0.8,
+					"is_already_discounted": 1,
+					"discount_source": "item_level_promotion",
+				}
+			),
+			frappe._dict(
+				{
+					"item_code": companion,
+					"qty": 1,
+					"price_list_rate": rate_companion,
+					"rate": rate_companion,
+					"discount_percentage": 0,
+					"amount": rate_companion,
+					"is_already_discounted": 0,
+				}
+			),
+		]
+		result = apply_coupon_discount(
+			coupon,
+			cart_total=rate_14214 * 0.8 + rate_companion,
+			net_total=rate_14214 * 0.8 + rate_companion,
+			items=items,
+		)
+		self.assertTrue(result["valid"])
+		self.assertAlmostEqual(flt(result["eligible_subtotal"]), rate_companion, places=2)
+		self.assertAlmostEqual(flt(result["discount"]), rate_companion * 0.1, places=2)
+
+	def test_14214_gwp_stacks_with_item_level_on_other_line(self):
+		"""Matrix: GWP still applies when 14214 has item-level discount on another line."""
+		import json
+
+		companion = MATRIX_COMPANION_14214 if frappe.db.exists("Item", MATRIX_COMPANION_14214) else ITEM_B
+		free_item = ITEM_C if frappe.db.exists("Item", ITEM_C) else MATRIX_ITEM_14214
+		item_rule = _make_rule(
+			"_MATRIX_TEST_14214_ItemLevel",
+			apply_on="Item Code",
+			items=[{"item_code": MATRIX_ITEM_14214}],
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			discount_percentage=10,
+			promotion_type="Item Level Discount",
+			min_qty=0,
+			priority="2",
+		)
+		gwp_rule = _make_rule(
+			"_MATRIX_TEST_14214_GWP",
+			apply_on="Item Code",
+			items=[{"item_code": companion}],
+			price_or_product_discount="Product",
+			rate_or_discount="Discount Percentage",
+			free_item=free_item,
+			min_qty=2,
+			free_qty=1,
+			free_item_uom="Nos",
+			free_item_rate=0,
+			promotion_type="GWP",
+			priority="1",
+		)
+		payload = _cart_payload(
+			self.ctx,
+			[
+				self._line_14214(MATRIX_ITEM_14214, qty=1),
+				self._line_14214(companion, qty=2),
 			],
 		)
 		resp = apply_offers(

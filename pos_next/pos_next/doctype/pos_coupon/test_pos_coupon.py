@@ -139,6 +139,31 @@ class TestPOSCoupon(unittest.TestCase):
 		eligible = get_coupon_eligible_items(coupon, items)
 		self.assertEqual([i["item_code"] for i in eligible], ["A"])
 
+	def test_matrix_coupon_excludes_excluded_brand(self):
+		"""Excluded brand × Coupon = excluded per Promotion Interaction Matrix."""
+		coupon = _coupon(excluded_brands=[{"brand": "BrandX"}])
+		items = [
+			{
+				"item_code": "Eligible",
+				"brand": "BrandA",
+				"item_group": "Group1",
+				"qty": 1,
+				"price_list_rate": 100,
+				"rate": 100,
+			},
+			{
+				"item_code": "Excluded",
+				"brand": "BrandX",
+				"item_group": "Group1",
+				"qty": 1,
+				"price_list_rate": 100,
+				"rate": 100,
+			},
+		]
+
+		eligible = get_coupon_eligible_items(coupon, items)
+		self.assertEqual([i["item_code"] for i in eligible], ["Eligible"])
+
 	def test_scope_brand_and_item_group(self):
 		brand_coupon = _coupon(apply_scope="Brand", applicable_brand="Nike")
 		group_coupon = _coupon(apply_scope="Item Group", applicable_item_group="Shoes")

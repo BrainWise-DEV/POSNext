@@ -4,8 +4,9 @@
 """Shared promotion exclusion helpers for POS Next.
 
 Item-Level Discount (Type 4) and manual cashier discounts mark cart lines as
-``already discounted``. Auto Discount (Type 3) and Coupon (Type 5) consult these
-flags before applying additional discounts. GWP (Types 1–2) is unaffected.
+``already discounted``. Auto Discount (Type 3) and Coupon (Type 5) consult the
+Promotion Interaction Matrix before applying additional discounts. GWP (Types 1–2)
+is unaffected.
 """
 
 from __future__ import annotations
@@ -18,6 +19,36 @@ from frappe.utils import cstr, flt
 PROMOTION_TYPE_ITEM_LEVEL = "Item Level Discount"
 PROMOTION_TYPE_AUTO = "Auto Discount"
 PROMOTION_TYPE_GWP = "GWP"
+
+PROMOTION_TARGET_GWP = "gwp"
+PROMOTION_TARGET_AUTO = "auto_discount"
+PROMOTION_TARGET_COUPON = "coupon"
+
+ITEM_STATE_ALREADY_DISCOUNTED = "already_discounted"
+ITEM_STATE_EXCLUDED_BRAND = "excluded_brand"
+ITEM_STATE_ELIGIBLE = "eligible"
+# Phase 2 stubs — detection not wired yet
+ITEM_STATE_XY_TRIGGER = "xy_trigger"
+ITEM_STATE_ROUTINE_TRIGGER = "routine_trigger"
+
+INTERACTION_MATRIX: dict[tuple[str, str], bool] = {
+	(ITEM_STATE_ALREADY_DISCOUNTED, PROMOTION_TARGET_GWP): True,
+	(ITEM_STATE_ALREADY_DISCOUNTED, PROMOTION_TARGET_AUTO): False,
+	(ITEM_STATE_ALREADY_DISCOUNTED, PROMOTION_TARGET_COUPON): False,
+	(ITEM_STATE_EXCLUDED_BRAND, PROMOTION_TARGET_GWP): True,
+	(ITEM_STATE_EXCLUDED_BRAND, PROMOTION_TARGET_AUTO): True,
+	(ITEM_STATE_EXCLUDED_BRAND, PROMOTION_TARGET_COUPON): False,
+	(ITEM_STATE_ELIGIBLE, PROMOTION_TARGET_GWP): True,
+	(ITEM_STATE_ELIGIBLE, PROMOTION_TARGET_AUTO): True,
+	(ITEM_STATE_ELIGIBLE, PROMOTION_TARGET_COUPON): True,
+	# Phase 2 — XY / Routine trigger rows
+	(ITEM_STATE_XY_TRIGGER, PROMOTION_TARGET_GWP): True,
+	(ITEM_STATE_XY_TRIGGER, PROMOTION_TARGET_AUTO): False,
+	(ITEM_STATE_XY_TRIGGER, PROMOTION_TARGET_COUPON): False,
+	(ITEM_STATE_ROUTINE_TRIGGER, PROMOTION_TARGET_GWP): True,
+	(ITEM_STATE_ROUTINE_TRIGGER, PROMOTION_TARGET_AUTO): False,
+	(ITEM_STATE_ROUTINE_TRIGGER, PROMOTION_TARGET_COUPON): False,
+}
 
 DISCOUNT_SOURCE_ITEM_LEVEL = "item_level_promotion"
 DISCOUNT_SOURCE_MANUAL = "manual_discount"
@@ -88,7 +119,7 @@ def has_manual_item_discount(item) -> bool:
 
 
 def is_already_discounted(item, rule_type_map: dict[str, str] | None = None) -> bool:
-	"""Whether the line should be excluded from Auto Discount and Coupon stacking."""
+	"""Whether the line is excluded from Auto Discount (narrow Type 4 + manual)."""
 	if item.get("is_already_discounted"):
 		return True
 	if item.get("is_free_item"):
@@ -96,6 +127,99 @@ def is_already_discounted(item, rule_type_map: dict[str, str] | None = None) -> 
 	if has_item_level_promotion_rule(item, rule_type_map):
 		return True
 	return has_manual_item_discount(item)
+
+
+def is_coupon_broad_discounted(item, rule_type_map: dict[str, str] | None = None) -> bool:
+	"""Broader discount detection for Coupon (includes auto-discount pricing rules)."""
+	if is_already_discounted(item, rule_type_map):
+		return True
+	if item.get("is_free_item"):
+		return False
+	if flt(item.get("discount_percentage") or 0) > 0:
+		return True
+	if flt(item.get("discount_amount") or 0) > 0:
+		return True
+	if _parse_pricing_rules(item.get("pricing_rules")):
+		return True
+	price_list_rate = flt(item.get("price_list_rate") or 0)
+	rate = flt(item.get("rate") or 0)
+	if price_list_rate > 0 and rate > 0 and rate < price_list_rate:
+		return True
+	return False
+
+
+def classify_item_state(
+	item,
+	*,
+	rule_type_map: dict[str, str] | None = None,
+	excluded_brands: set[str] | frozenset[str] | None = None,
+	target: str = PROMOTION_TARGET_AUTO,
+	exclude_discounted: bool = True,
+) -> str:
+	"""Return the item's primary state for Promotion Interaction Matrix lookup."""
+	if item.get("is_free_item"):
+		return ITEM_STATE_ELIGIBLE
+
+	brand_exclusions = excluded_brands or frozenset()
+
+	if exclude_discounted:
+		if target == PROMOTION_TARGET_COUPON:
+			if is_coupon_broad_discounted(item, rule_type_map):
+				return ITEM_STATE_ALREADY_DISCOUNTED
+		elif is_already_discounted(item, rule_type_map):
+			return ITEM_STATE_ALREADY_DISCOUNTED
+
+	if target == PROMOTION_TARGET_COUPON:
+		brand = item.get("brand")
+		if brand and brand in brand_exclusions:
+			return ITEM_STATE_EXCLUDED_BRAND
+
+	return ITEM_STATE_ELIGIBLE
+
+
+def is_eligible_for_promotion(
+	item,
+	target: str,
+	*,
+	rule_type_map: dict[str, str] | None = None,
+	excluded_brands: set[str] | frozenset[str] | None = None,
+	exclude_discounted: bool = True,
+) -> bool:
+	"""Whether a cart line may receive the given promotion target per the matrix."""
+	if item.get("is_free_item"):
+		return False
+	if target == PROMOTION_TARGET_GWP:
+		return True
+
+	state = classify_item_state(
+		item,
+		rule_type_map=rule_type_map,
+		excluded_brands=excluded_brands,
+		target=target,
+		exclude_discounted=exclude_discounted,
+	)
+	return INTERACTION_MATRIX.get((state, target), True)
+
+
+def filter_items_for_promotion(
+	items,
+	target: str,
+	*,
+	rule_type_map: dict[str, str] | None = None,
+	excluded_brands: set[str] | frozenset[str] | None = None,
+	exclude_discounted: bool = True,
+):
+	return [
+		item
+		for item in (items or [])
+		if is_eligible_for_promotion(
+			item,
+			target,
+			rule_type_map=rule_type_map,
+			excluded_brands=excluded_brands,
+			exclude_discounted=exclude_discounted,
+		)
+	]
 
 
 def get_line_net_amount(item) -> float:
@@ -133,19 +257,67 @@ def get_pre_discount_subtotal(items) -> float:
 	return total
 
 
-def filter_eligible_items(items, *, exclude_discounted: bool = True, rule_type_map: dict[str, str] | None = None):
+def filter_eligible_items(
+	items,
+	*,
+	exclude_discounted: bool = True,
+	rule_type_map: dict[str, str] | None = None,
+	promotion_target: str | None = None,
+	excluded_brands: set[str] | frozenset[str] | None = None,
+):
+	if promotion_target:
+		return filter_items_for_promotion(
+			items,
+			promotion_target,
+			rule_type_map=rule_type_map,
+			excluded_brands=excluded_brands,
+			exclude_discounted=exclude_discounted,
+		)
 	if not exclude_discounted:
 		return list(items or [])
 	return [item for item in (items or []) if not is_already_discounted(item, rule_type_map)]
 
 
-def get_eligible_subtotal(items, *, exclude_discounted: bool = True, rule_type_map: dict[str, str] | None = None) -> float:
-	eligible = filter_eligible_items(items, exclude_discounted=exclude_discounted, rule_type_map=rule_type_map)
+def get_eligible_subtotal(
+	items,
+	*,
+	exclude_discounted: bool = True,
+	rule_type_map: dict[str, str] | None = None,
+	promotion_target: str | None = None,
+	excluded_brands: set[str] | frozenset[str] | None = None,
+) -> float:
+	eligible = filter_eligible_items(
+		items,
+		exclude_discounted=exclude_discounted,
+		rule_type_map=rule_type_map,
+		promotion_target=promotion_target,
+		excluded_brands=excluded_brands,
+	)
 	return sum(get_line_net_amount(item) for item in eligible)
 
 
-def get_excluded_subtotal(items, *, rule_type_map: dict[str, str] | None = None) -> float:
-	excluded = [item for item in (items or []) if is_already_discounted(item, rule_type_map)]
+def get_excluded_subtotal(
+	items,
+	*,
+	rule_type_map: dict[str, str] | None = None,
+	promotion_target: str | None = None,
+	excluded_brands: set[str] | frozenset[str] | None = None,
+	exclude_discounted: bool = True,
+) -> float:
+	if promotion_target:
+		eligible_keys = {
+			id(item)
+			for item in filter_items_for_promotion(
+				items,
+				promotion_target,
+				rule_type_map=rule_type_map,
+				excluded_brands=excluded_brands,
+				exclude_discounted=exclude_discounted,
+			)
+		}
+		excluded = [item for item in (items or []) if id(item) not in eligible_keys and not item.get("is_free_item")]
+	else:
+		excluded = [item for item in (items or []) if is_already_discounted(item, rule_type_map)]
 	return sum(get_line_net_amount(item) for item in excluded)
 
 

@@ -232,6 +232,7 @@
 
 <script setup>
 import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency";
+import { call } from "@/utils/apiWrapper";
 import { Button, Dialog, Input, createResource } from "frappe-ui";
 import { ref, watch } from "vue";
 import { useToast } from "@/composables/useToast";
@@ -291,19 +292,16 @@ const giftCardsResource = createResource({
 	},
 });
 
-// Resource to validate coupon
-const couponResource = createResource({
-	url: "pos_next.api.offers.validate_coupon",
-	makeParams() {
-		return {
-			coupon_code: couponCode.value,
-			customer: props.customer,
-			company: props.company,
-			items: buildCartItemsSnapshot(),
-		};
-	},
-	auto: false,
-});
+// Resource to validate coupon — use call() in applyCoupon for reliable response parsing
+
+function unwrapCouponValidation(raw) {
+	if (!raw) return null;
+	if (raw.valid !== undefined) return raw;
+	if (raw.message?.valid !== undefined) return raw.message;
+	if (typeof raw.message === "object" && raw.message) return raw.message;
+	if (typeof raw.message === "string") return { valid: false, message: raw.message };
+	return raw;
+}
 
 function buildCartItemsSnapshot() {
 	const items = props.items || [];
@@ -385,17 +383,15 @@ async function applyCoupon() {
 	errorMessage.value = "";
 
 	try {
-		await couponResource.reload();
-		// Frappe wraps response in { message: {...} }
-		const result = couponResource.data?.message || couponResource.data;
+		const result = await call("pos_next.api.offers.validate_coupon", {
+			coupon_code: couponCode.value,
+			customer: props.customer,
+			company: props.company,
+			items: buildCartItemsSnapshot(),
+		});
+		const validationData = unwrapCouponValidation(result);
 
-		// Handle if result is the actual response object
-		const validationData =
-			typeof result === "object" && result.valid !== undefined
-				? result
-				: couponResource.data;
-
-		if (!validationData || !validationData.valid) {
+		if (!validationData || validationData.valid !== true) {
 			errorMessage.value =
 				validationData?.message || __("The coupon code you entered is not valid");
 			showError(errorMessage.value);
