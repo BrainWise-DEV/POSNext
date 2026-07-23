@@ -126,6 +126,69 @@ def patch_get_other_conditions(pr_utils):
 # ---------------------------------------------------------------------------
 
 
+def validate_unique_promotion_type_per_item(doc, method=None):
+	"""Block duplicate promotion_type for the same item on active Promotional Schemes."""
+	if doc.doctype != "Promotional Scheme":
+		return
+	if doc.get("disable"):
+		return
+	if not frappe.db.has_column("Promotional Scheme", "promotion_type"):
+		return
+
+	promotion_type = (doc.get("promotion_type") or "").strip()
+	if not promotion_type:
+		return
+	if doc.get("apply_on") != "Item Code":
+		return
+
+	item_codes = list({row.item_code for row in (doc.get("items") or []) if row.get("item_code")})
+	if not item_codes:
+		return
+
+	scheme = frappe.qb.DocType("Promotional Scheme")
+	item_table = frappe.qb.DocType("Pricing Rule Item Code")
+
+	query = (
+		frappe.qb.from_(scheme)
+		.join(item_table)
+		.on(item_table.parent == scheme.name)
+		.select(scheme.name, item_table.item_code)
+		.where(scheme.disable == 0)
+		.where(scheme.promotion_type == promotion_type)
+		.where(scheme.company == doc.company)
+		.where(scheme.apply_on == "Item Code")
+		.where(item_table.item_code.isin(item_codes))
+	)
+
+	if doc.name and not doc.is_new():
+		query = query.where(scheme.name != doc.name)
+
+	conflicts = query.run(as_dict=True)
+	if not conflicts:
+		return
+
+	seen = set()
+	lines = []
+	for row in conflicts:
+		key = (row.item_code, row.name)
+		if key in seen:
+			continue
+		seen.add(key)
+		lines.append(
+			_("{0} already has promotion type {1} in scheme {2}").format(
+				frappe.bold(row.item_code),
+				frappe.bold(promotion_type),
+				frappe.bold(row.name),
+			)
+		)
+
+	frappe.throw(
+		_("A promotion with the same type already exists for the following item(s):<br><br>")
+		+ "<br>".join(lines),
+		title=_("Duplicate Promotion"),
+	)
+
+
 def enforce_min_max_pricing_config(doc, method=None):
 	"""Validate-time guard for Min/Max price rules.
 
