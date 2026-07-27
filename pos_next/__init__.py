@@ -42,9 +42,18 @@ except Exception:
 try:
 	from erpnext.accounts.doctype.promotional_scheme import promotional_scheme as _promotional_scheme
 
-	for _min_max_field in ("apply_discount_on_price", "min_or_max_discount_qty_limit"):
-		if _min_max_field not in _promotional_scheme.price_discount_fields:
-			_promotional_scheme.price_discount_fields.append(_min_max_field)
+	# Slab-level fields ERPNext must copy onto each generated Pricing Rule.
+	# Child-table rows (the per-scope percentages) are NOT covered here — ERPNext
+	# copies only {apply_on: value, uom} for those, so they are synced separately
+	# in pos_next.overrides.pricing_rule.sync_promotion_fields_to_pricing_rules.
+	for _pos_next_slab_field in (
+		"apply_discount_on_price",
+		"min_or_max_discount_qty_limit",
+		"max_accumulated_discount_percentage",
+		"min_scopes_required",
+	):
+		if _pos_next_slab_field not in _promotional_scheme.price_discount_fields:
+			_promotional_scheme.price_discount_fields.append(_pos_next_slab_field)
 except Exception:
 	if frappe:
 		frappe.log_error(frappe.get_traceback(), "Promotional Scheme Field Patch Error")

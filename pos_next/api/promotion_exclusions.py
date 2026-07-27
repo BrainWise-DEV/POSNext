@@ -27,6 +27,10 @@ PROMOTION_TARGET_COUPON = "coupon"
 ITEM_STATE_ALREADY_DISCOUNTED = "already_discounted"
 ITEM_STATE_EXCLUDED_BRAND = "excluded_brand"
 ITEM_STATE_ELIGIBLE = "eligible"
+# An Item Level Discount running in Accumulative mode. Unlike a plain item-level
+# promotion it is designed to stack with Auto Discount — the two percentages sum
+# on the same line — while still shutting coupons out.
+ITEM_STATE_ACCUMULATIVE = "accumulative"
 # Phase 2 stubs — detection not wired yet
 ITEM_STATE_XY_TRIGGER = "xy_trigger"
 ITEM_STATE_ROUTINE_TRIGGER = "routine_trigger"
@@ -41,6 +45,9 @@ INTERACTION_MATRIX: dict[tuple[str, str], bool] = {
 	(ITEM_STATE_ELIGIBLE, PROMOTION_TARGET_GWP): True,
 	(ITEM_STATE_ELIGIBLE, PROMOTION_TARGET_AUTO): True,
 	(ITEM_STATE_ELIGIBLE, PROMOTION_TARGET_COUPON): True,
+	(ITEM_STATE_ACCUMULATIVE, PROMOTION_TARGET_GWP): True,
+	(ITEM_STATE_ACCUMULATIVE, PROMOTION_TARGET_AUTO): True,
+	(ITEM_STATE_ACCUMULATIVE, PROMOTION_TARGET_COUPON): False,
 	# Phase 2 — XY / Routine trigger rows
 	(ITEM_STATE_XY_TRIGGER, PROMOTION_TARGET_GWP): True,
 	(ITEM_STATE_XY_TRIGGER, PROMOTION_TARGET_AUTO): False,
@@ -51,6 +58,7 @@ INTERACTION_MATRIX: dict[tuple[str, str], bool] = {
 }
 
 DISCOUNT_SOURCE_ITEM_LEVEL = "item_level_promotion"
+DISCOUNT_SOURCE_ACCUMULATIVE = "accumulative_promotion"
 DISCOUNT_SOURCE_MANUAL = "manual_discount"
 DISCOUNT_SOURCE_AUTO = "auto_discount"
 DISCOUNT_SOURCE_GWP = "gwp"
@@ -118,8 +126,21 @@ def has_manual_item_discount(item) -> bool:
 	return not has_rules and (discount_pct > 0 or discount_amt > 0)
 
 
+def is_accumulative_line(item) -> bool:
+	"""Whether an Accumulative rule has claimed this line.
+
+	Set by the accumulative pass in :mod:`pos_next.promotions.engine`, which runs
+	before the Auto Discount pass so the flag is in place by the time the matrix
+	is consulted.
+	"""
+	return bool(item.get("is_accumulative_discount"))
+
+
 def is_already_discounted(item, rule_type_map: dict[str, str] | None = None) -> bool:
 	"""Whether the line is excluded from Auto Discount (narrow Type 4 + manual)."""
+	if is_accumulative_line(item):
+		# Accumulative deliberately stacks with Auto Discount — see the matrix.
+		return False
 	if item.get("is_already_discounted"):
 		return True
 	if item.get("is_free_item"):
@@ -131,6 +152,9 @@ def is_already_discounted(item, rule_type_map: dict[str, str] | None = None) -> 
 
 def is_coupon_broad_discounted(item, rule_type_map: dict[str, str] | None = None) -> bool:
 	"""Broader discount detection for Coupon (includes auto-discount pricing rules)."""
+	if is_accumulative_line(item):
+		# Stacks with Auto Discount but never with a coupon.
+		return True
 	if is_already_discounted(item, rule_type_map):
 		return True
 	if item.get("is_free_item"):
@@ -159,6 +183,11 @@ def classify_item_state(
 	"""Return the item's primary state for Promotion Interaction Matrix lookup."""
 	if item.get("is_free_item"):
 		return ITEM_STATE_ELIGIBLE
+
+	# Checked before the discounted/brand states: an accumulative line is
+	# discounted, but the matrix treats it differently from a plain one.
+	if is_accumulative_line(item):
+		return ITEM_STATE_ACCUMULATIVE
 
 	brand_exclusions = excluded_brands or frozenset()
 
@@ -334,7 +363,12 @@ def mark_item_discount_flags(items, rule_type_map: dict[str, str] | None = None)
 			item.is_already_discounted = 0
 			continue
 
-		if has_item_level_promotion_rule(item, type_map):
+		if is_accumulative_line(item):
+			# Discounted for reporting and for coupons, but the matrix still lets
+			# Auto Discount through — see ITEM_STATE_ACCUMULATIVE.
+			item.is_already_discounted = 1
+			item.discount_source = DISCOUNT_SOURCE_ACCUMULATIVE
+		elif has_item_level_promotion_rule(item, type_map):
 			item.is_already_discounted = 1
 			item.discount_source = DISCOUNT_SOURCE_ITEM_LEVEL
 		elif has_manual_item_discount(item):

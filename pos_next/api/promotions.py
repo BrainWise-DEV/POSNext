@@ -37,8 +37,15 @@ PROMOTION_TYPE_AUTO = "Auto Discount"
 PROMOTION_TYPE_GWP = "GWP"
 
 
+ACCUMULATIVE_MODE = "Accumulative"
+
+
 def _normalize_promotion_type(value):
 	return cstr(value or "").strip() or None
+
+
+def _is_accumulative(data) -> bool:
+	return cstr(data.get("apply_discount_on_price") or "").strip() == ACCUMULATIVE_MODE
 
 
 def _apply_promotion_type_constraints(data):
@@ -48,16 +55,24 @@ def _apply_promotion_type_constraints(data):
 		return data
 
 	if promotion_type == PROMOTION_TYPE_ITEM_LEVEL:
-		data["apply_on"] = "Item Code"
-		data["min_qty"] = 0
-		data["min_amt"] = 0
-		data["max_qty"] = 0
-		data["max_amt"] = 0
 		data["pos_only"] = 1
 		if data.get("discount_type") == "free_item":
 			frappe.throw(_("Item Level Discount cannot grant free items"))
-		if not data.get("items"):
-			frappe.throw(_("Please select at least one item for Item Level Discount"))
+
+		# An Accumulative rule is an Item Level Discount that sums per-scope
+		# percentages, so it must keep its Item Group / Brand scoping and any
+		# cart threshold. Only plain item-level promotions get pinned to
+		# individual item codes.
+		if not _is_accumulative(data):
+			data["apply_on"] = "Item Code"
+			data["min_qty"] = 0
+			data["min_amt"] = 0
+			data["max_qty"] = 0
+			data["max_amt"] = 0
+			if not data.get("items"):
+				frappe.throw(_("Please select at least one item for Item Level Discount"))
+		elif not data.get("items"):
+			frappe.throw(_("Please select at least one scope row for an Accumulative discount"))
 	elif promotion_type == PROMOTION_TYPE_GWP:
 		if data.get("discount_type") not in (None, "free_item"):
 			data["discount_type"] = "free_item"
@@ -368,6 +383,16 @@ def create_promotion(data):
 			else:
 				slab.rate_or_discount = "Discount Amount"
 				slab.discount_amount = flt(data.get("discount_value", 0))
+
+			# Cross-cart mode (Min / Max / Accumulative) and its config, when the
+			# caller supplies them. The per-scope percentages themselves live on
+			# the items/item_groups/brands rows and are configured in desk.
+			if data.get("apply_discount_on_price") and hasattr(slab, "apply_discount_on_price"):
+				slab.apply_discount_on_price = data["apply_discount_on_price"]
+				slab.max_accumulated_discount_percentage = flt(
+					data.get("max_accumulated_discount_percentage", 0)
+				)
+				slab.min_scopes_required = cint(data.get("min_scopes_required", 1))
 
 			if data.get("priority"):
 				slab.priority = cstr(data["priority"])

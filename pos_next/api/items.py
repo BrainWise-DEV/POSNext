@@ -12,6 +12,12 @@ from frappe.query_builder import DocType
 from frappe.query_builder import functions as fn
 from frappe.utils import flt, nowdate
 
+# Item group tree resolution is shared with the promotion engine, which matches
+# Pricing Rule item_groups rows against cart lines by lineage.
+from pos_next.promotions.scope import (
+	get_item_group_with_descendants as _get_item_group_with_descendants,
+)
+
 ITEM_RESULT_FIELDS = [
 	"name as item_code",
 	"item_name",
@@ -635,44 +641,6 @@ def get_item_variants(template_item, pos_profile):
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Item Variants Error")
 		frappe.throw(_("Error fetching item variants: {0}").format(str(e)))
-
-
-def _get_item_group_with_descendants(item_group):
-	"""Get an item group and all its descendants using nested set model."""
-	if not item_group:
-		return []
-
-	cache_key = f"item_group_descendants:{item_group}"
-	cached = frappe.cache().get_value(cache_key)
-	if cached is not None:
-		return cached
-
-	ItemGroup = DocType("Item Group")
-	group_data = (
-		frappe.qb.from_(ItemGroup)
-		.select(ItemGroup.lft, ItemGroup.rgt, ItemGroup.is_group)
-		.where(ItemGroup.name == item_group)
-		.run(as_dict=True)
-	)
-
-	if not group_data:
-		result = [item_group]
-	else:
-		group = group_data[0]
-		if not group.is_group:
-			result = [item_group]
-		else:
-			descendants = (
-				frappe.qb.from_(ItemGroup)
-				.select(ItemGroup.name)
-				.where(ItemGroup.lft > group.lft)
-				.where(ItemGroup.rgt < group.rgt)
-				.run(pluck="name")
-			)
-			result = [item_group, *list(descendants)]
-
-	frappe.cache().set_value(cache_key, result, expires_in_sec=300)
-	return result
 
 
 def _get_pos_profile_configured_brands(pos_profile):

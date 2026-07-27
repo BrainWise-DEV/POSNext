@@ -15,6 +15,13 @@ import frappe
 from frappe import _
 from frappe.utils import cint, flt, getdate, nowdate
 
+from pos_next.promotions.scope import (
+	APPLY_ON_CHILD_DOCTYPE,
+	SCOPE_PERCENTAGE_FIELD,
+	get_item_group_with_descendants,
+	get_scope_config,
+)
+
 # ============================================================================
 # Constants
 # ============================================================================
@@ -96,6 +103,16 @@ class Offer:
 	apply_recursion_over: float = 0  # Qty for which recursion isn't applicable
 	one_time_per_customer: int = 0  # 1 if each customer may redeem this offer only once
 	promotion_type: str | None = None
+	# Accumulative discounts. `accumulative_scopes` is a list of
+	# {values: [...], discount_percentage: n} — one entry per scope row, with
+	# item groups pre-expanded to descendants and template items to variants so
+	# the offline engine can match by plain lookup instead of walking trees.
+	# The line discount is the sum of every entry represented in the cart,
+	# capped by `max_accumulated_discount_percentage`.
+	accumulative_scope_field: str | None = None
+	accumulative_scopes: list[dict] | None = None
+	max_accumulated_discount_percentage: float = 0
+	min_scopes_required: int = 1
 
 	def to_dict(self) -> dict:
 		"""Convert to dictionary for API response"""
@@ -196,7 +213,15 @@ class EligibilityFetcher:
 
 	@staticmethod
 	def _fetch_item_groups(parent_names: list[str]) -> dict[str, list[str]]:
-		"""Fetch item groups for given parents"""
+		"""Fetch item groups for given parents, expanded to include descendants.
+
+		Item groups match by lineage everywhere on the server — ERPNext's engine and
+		``promotions/scope.py`` both treat a rule on ``Electronics`` as covering an
+		item in ``Electronics > Phones``. The client, however, compares a cart line's
+		``item_group`` against this list with a plain ``includes()``. Returning only
+		the literal rows would make the client judge such an offer ineligible and
+		never send it, even though the server would have applied it.
+		"""
 		results = frappe.db.sql(
 			"""
 			SELECT parent, item_group
@@ -207,9 +232,12 @@ class EligibilityFetcher:
 			as_dict=1,
 		)
 
-		groups_map = {}
+		groups_map: dict[str, list[str]] = {}
 		for row in results:
-			groups_map.setdefault(row["parent"], []).append(row["item_group"])
+			expanded = groups_map.setdefault(row["parent"], [])
+			for group in get_item_group_with_descendants(row["item_group"]):
+				if group not in expanded:
+					expanded.append(group)
 		return groups_map
 
 	@staticmethod
@@ -229,6 +257,108 @@ class EligibilityFetcher:
 		for row in results:
 			brands_map.setdefault(row["parent"], []).append(row["brand"])
 		return brands_map
+
+
+class AccumulativeFetcher:
+	"""Fetches Accumulative config so the offline engine can reproduce it.
+
+	Both scheme-generated and standalone offers are Pricing Rules, so one batch
+	lookup keyed by rule name covers both. Scope values are expanded here — item
+	groups to their descendants, template items to their variants — which keeps
+	the client a plain lookup with no tree walking.
+	"""
+
+	MODE = "Accumulative"
+
+	@staticmethod
+	def fetch(rule_names: list[str]) -> dict[str, dict]:
+		"""Return ``{rule_name: {field, scopes, cap, min_scopes}}`` for Accumulative rules."""
+		if not rule_names:
+			return {}
+		if not frappe.db.has_column("Pricing Rule", "apply_discount_on_price"):
+			return {}
+		if not frappe.db.has_column("Pricing Rule", "min_scopes_required"):
+			return {}
+
+		rules = frappe.get_all(
+			"Pricing Rule",
+			filters={
+				"name": ["in", rule_names],
+				"apply_discount_on_price": AccumulativeFetcher.MODE,
+			},
+			fields=[
+				"name",
+				"apply_on",
+				"max_accumulated_discount_percentage",
+				"min_scopes_required",
+			],
+		)
+		if not rules:
+			return {}
+
+		by_apply_on: dict[str, list[str]] = {}
+		for rule in rules:
+			if get_scope_config(rule.apply_on):
+				by_apply_on.setdefault(rule.apply_on, []).append(rule.name)
+
+		rows_by_rule = AccumulativeFetcher._fetch_scope_rows(by_apply_on)
+
+		config = {}
+		for rule in rules:
+			scopes = rows_by_rule.get(rule.name)
+			if not scopes:
+				continue
+			_, row_field = get_scope_config(rule.apply_on)
+			config[rule.name] = {
+				"field": row_field,
+				"scopes": scopes,
+				"cap": flt(rule.max_accumulated_discount_percentage),
+				"min_scopes": max(cint(rule.min_scopes_required) or 1, 1),
+			}
+		return config
+
+	@staticmethod
+	def _fetch_scope_rows(by_apply_on: dict[str, list[str]]) -> dict[str, list[dict]]:
+		rows_by_rule: dict[str, list[dict]] = {}
+
+		for apply_on, names in by_apply_on.items():
+			child_doctype = APPLY_ON_CHILD_DOCTYPE[apply_on]
+			if not frappe.db.has_column(child_doctype, SCOPE_PERCENTAGE_FIELD):
+				continue
+			_, row_field = get_scope_config(apply_on)
+
+			rows = frappe.get_all(
+				child_doctype,
+				filters={"parent": ["in", names], "parenttype": "Pricing Rule"},
+				fields=["parent", row_field, SCOPE_PERCENTAGE_FIELD],
+				order_by="idx asc",
+			)
+
+			for row in rows:
+				percentage = flt(row.get(SCOPE_PERCENTAGE_FIELD))
+				value = row.get(row_field)
+				if percentage <= 0 or not value:
+					continue
+				rows_by_rule.setdefault(row["parent"], []).append(
+					{
+						"values": AccumulativeFetcher._expand(row_field, value),
+						"discount_percentage": percentage,
+					}
+				)
+
+		return rows_by_rule
+
+	@staticmethod
+	def _expand(row_field: str, value: str) -> list[str]:
+		"""Every cart value this scope row covers."""
+		if row_field == "item_group":
+			return list(get_item_group_with_descendants(value))
+		if row_field == "item_code":
+			variants = frappe.get_all(
+				"Item", filters={"variant_of": value, "disabled": 0}, pluck="name"
+			)
+			return [value, *variants]
+		return [value]
 
 
 class SlabFetcher:
@@ -458,6 +588,8 @@ def get_offers(pos_profile: str) -> list[dict]:
 		standalone_offers = _get_standalone_pricing_rule_offers(profile.company, date)
 		offers.extend(standalone_offers)
 
+		_attach_accumulative_config(offers)
+
 		return [offer.to_dict() for offer in offers]
 
 	except Exception as e:
@@ -481,6 +613,31 @@ def get_customer_one_time_redemptions(customer: str) -> list[str]:
 		filters={"customer": customer},
 		pluck="pricing_rule",
 	)
+
+
+def _attach_accumulative_config(offers: list[Offer]) -> None:
+	"""Stamp Accumulative scope data onto the offers that use it.
+
+	Done as one batch pass over both offer sources rather than inside each
+	builder, since scheme-generated and standalone offers are both Pricing Rules
+	and share the same lookup.
+	"""
+	if not offers:
+		return
+
+	config = AccumulativeFetcher.fetch([offer.name for offer in offers])
+	if not config:
+		return
+
+	for offer in offers:
+		entry = config.get(offer.name)
+		if not entry:
+			continue
+		offer.apply_discount_on_price = AccumulativeFetcher.MODE
+		offer.accumulative_scope_field = entry["field"]
+		offer.accumulative_scopes = entry["scopes"]
+		offer.max_accumulated_discount_percentage = entry["cap"]
+		offer.min_scopes_required = entry["min_scopes"]
 
 
 def _get_promotional_scheme_offers(company: str, date: str) -> list[Offer]:

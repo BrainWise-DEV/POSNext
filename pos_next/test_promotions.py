@@ -38,10 +38,16 @@ from frappe.utils import add_days, flt, nowdate
 
 import pos_next  # noqa: F401 — ensure app hooks load.
 from pos_next.api.invoices import apply_offers, submit_invoice, update_invoice
+from pos_next.promotions import engine
+from pos_next.promotions.scope import get_scope_keys, item_matches_rule_scope
 
 ITEM_A = "_PNXT_TEST_ITEM_A"  # Standard Selling: 50
 ITEM_B = "_PNXT_TEST_ITEM_B"  # Standard Selling: 80
 ITEM_C = "_PNXT_TEST_ITEM_C"  # Standard Selling: 20
+
+TEST_BRAND = "_PNXT_TEST_BRAND"  # stamped onto ITEM_C only
+TEST_PARENT_GROUP = "_PNXT_TEST_PARENT_GROUP"  # is_group=1
+TEST_CHILD_GROUP = "_PNXT_TEST_CHILD_GROUP"  # leaf under TEST_PARENT_GROUP
 
 # Real-site matrix QA item (brainwise.dev / manual POS testing)
 MATRIX_ITEM_14214 = "14214"
@@ -174,6 +180,52 @@ def _resolve_item_group():
 		}
 	).insert(ignore_permissions=True)
 	return ig.name
+
+
+def _ensure_test_brand():
+	"""Create a Brand and stamp it on ITEM_C so Brand-scoped rules have a target.
+
+	Only ITEM_C carries it, which gives every Brand test a built-in negative case
+	(ITEM_A / ITEM_B must stay untouched).
+	"""
+	if not frappe.db.exists("Brand", TEST_BRAND):
+		frappe.get_doc({"doctype": "Brand", "brand": TEST_BRAND}).insert(ignore_permissions=True)
+
+	if frappe.db.get_value("Item", ITEM_C, "brand") != TEST_BRAND:
+		frappe.db.set_value("Item", ITEM_C, "brand", TEST_BRAND)
+		frappe.clear_document_cache("Item", ITEM_C)
+
+	return TEST_BRAND
+
+
+def _ensure_group_tree():
+	"""Create a parent Item Group with one leaf child.
+
+	Item groups match by lineage, so a rule on the parent must also cover items
+	sitting in the child. Nothing is filed under the child — the tree itself is
+	what the scope helpers are asserted against.
+	"""
+	if not frappe.db.exists("Item Group", TEST_PARENT_GROUP):
+		frappe.get_doc(
+			{
+				"doctype": "Item Group",
+				"item_group_name": TEST_PARENT_GROUP,
+				"parent_item_group": "All Item Groups",
+				"is_group": 1,
+			}
+		).insert(ignore_permissions=True)
+
+	if not frappe.db.exists("Item Group", TEST_CHILD_GROUP):
+		frappe.get_doc(
+			{
+				"doctype": "Item Group",
+				"item_group_name": TEST_CHILD_GROUP,
+				"parent_item_group": TEST_PARENT_GROUP,
+				"is_group": 0,
+			}
+		).insert(ignore_permissions=True)
+
+	return TEST_PARENT_GROUP, TEST_CHILD_GROUP
 
 
 def _ensure_test_items(company, warehouse, price_list):
@@ -1458,6 +1510,856 @@ class TestPromotionMatrix14214(FrappeTestCase):
 		self.assertGreater(len(resp.get("free_items") or []), 0)
 
 
+class TestPricingRuleScope(FrappeTestCase):
+	"""Scope resolution for Pricing Rules — `pos_next.promotions.scope`.
+
+	Pricing Rule keeps its targets in the ``items`` / ``item_groups`` / ``brands``
+	child tables. It has **no** scalar ``item_code`` / ``item_group`` / ``brand``
+	field, so reading one raises AttributeError — which is exactly what the old
+	`_item_matches_pricing_rule` did, taking the whole cart's offers down with it.
+	"""
+
+	def test_pricing_rule_has_no_scalar_scope_fields(self):
+		"""Pins the reason the child-table helpers exist."""
+		rule_name = _make_rule(
+			"_PNXT_TEST_ScopeNoScalar",
+			apply_on="Item Code",
+			items=[{"item_code": ITEM_A}],
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			discount_percentage=5,
+		)
+		rule = frappe.get_cached_doc("Pricing Rule", rule_name)
+
+		for fieldname in ("item_code", "item_group", "brand"):
+			with self.assertRaises(AttributeError):
+				getattr(rule, fieldname)
+
+		# The helper reads the child table instead, so it works regardless.
+		self.assertTrue(item_matches_rule_scope({"item_code": ITEM_A}, rule))
+		self.assertFalse(item_matches_rule_scope({"item_code": ITEM_B}, rule))
+
+	def test_item_group_scope_expands_to_descendants(self):
+		"""A rule on a parent group covers items filed under its children."""
+		parent, child = _ensure_group_tree()
+		rule = frappe._dict(
+			{"apply_on": "Item Group", "item_groups": [frappe._dict({"item_group": parent})]}
+		)
+
+		keys = get_scope_keys(rule)
+		self.assertIn(parent, keys)
+		self.assertIn(child, keys)
+
+		self.assertTrue(item_matches_rule_scope({"item_group": child}, rule))
+		self.assertTrue(item_matches_rule_scope({"item_group": parent}, rule))
+		self.assertFalse(item_matches_rule_scope({"item_group": "All Item Groups"}, rule))
+
+	def test_item_code_and_brand_scopes_match_exactly(self):
+		"""Item codes and brands are exact matches — no tree walking."""
+		code_rule = frappe._dict(
+			{"apply_on": "Item Code", "items": [frappe._dict({"item_code": ITEM_A})]}
+		)
+		self.assertEqual(get_scope_keys(code_rule), {ITEM_A})
+		self.assertTrue(item_matches_rule_scope({"item_code": ITEM_A}, code_rule))
+		self.assertFalse(item_matches_rule_scope({"item_code": ITEM_B}, code_rule))
+
+		brand_rule = frappe._dict(
+			{"apply_on": "Brand", "brands": [frappe._dict({"brand": TEST_BRAND})]}
+		)
+		self.assertTrue(item_matches_rule_scope({"brand": TEST_BRAND}, brand_rule))
+		self.assertFalse(item_matches_rule_scope({"brand": "Some Other Brand"}, brand_rule))
+
+	def test_transaction_scope_matches_every_line_and_empty_scope_matches_none(self):
+		txn_rule = frappe._dict({"apply_on": "Transaction"})
+		self.assertTrue(item_matches_rule_scope({"item_code": ITEM_A}, txn_rule))
+		self.assertEqual(get_scope_keys(txn_rule), set())
+
+		# Scope table empty, and a line missing the attribute entirely.
+		empty_rule = frappe._dict({"apply_on": "Item Group", "item_groups": []})
+		self.assertFalse(item_matches_rule_scope({"item_group": TEST_CHILD_GROUP}, empty_rule))
+
+		group_rule = frappe._dict(
+			{"apply_on": "Item Group", "item_groups": [frappe._dict({"item_group": TEST_PARENT_GROUP})]}
+		)
+		self.assertFalse(item_matches_rule_scope({"item_code": ITEM_A}, group_rule))
+
+
+class TestAutoDiscountScopes(FrappeTestCase):
+	"""Auto Discount rules across every apply_on scope.
+
+	Every pre-existing Auto Discount test used ``apply_on="Transaction"``, which
+	short-circuits scope matching before it touches a child table — so the
+	Item Code / Item Group / Brand paths had no coverage at all.
+
+	These also cover the catalog backfill: the cart payload carries no
+	``item_group`` / ``brand``, so a rule scoped to either only matches if
+	``apply_offers`` enriches the line from the Item record first.
+	"""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		cls.ctx = _ctx()
+		_ensure_test_brand()
+
+	def tearDown(self):
+		super().tearDown()
+		for rule_name in frappe.get_all(
+			"Pricing Rule",
+			filters={"title": ["like", "_PNXT_TEST_%"]},
+			pluck="name",
+		):
+			try:
+				frappe.db.set_value("Pricing Rule", rule_name, "disable", 1)
+			except Exception:
+				pass
+		frappe.db.commit()
+
+	def _run(self, rule_name, lines):
+		import json
+
+		payload = _cart_payload(self.ctx, lines)
+		return apply_offers(
+			invoice_data=json.dumps(payload),
+			selected_offers=json.dumps([rule_name]),
+		)
+
+	def test_auto_discount_apply_on_item_code(self):
+		"""Regression: this used to raise AttributeError and fail the whole cart."""
+		rule = _make_rule(
+			"_PNXT_TEST_AutoScopeItemCode",
+			apply_on="Item Code",
+			items=[{"item_code": ITEM_A}],
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			discount_percentage=10,
+			promotion_type="Auto Discount",
+			min_qty=0,
+		)
+		resp = self._run(rule, [_line(self.ctx, ITEM_A), _line(self.ctx, ITEM_B)])
+
+		item_a, item_b = resp["items"][0], resp["items"][1]
+		self.assertAlmostEqual(flt(item_a.get("discount_percentage")), 10, places=2)
+		self.assertAlmostEqual(flt(item_b.get("discount_percentage")), 0, places=2)
+		self.assertIn(rule, resp.get("applied_pricing_rules") or [])
+
+	def test_auto_discount_apply_on_item_group(self):
+		"""Item Group scope, with item_group backfilled from the Item record."""
+		item_group = _resolve_item_group()
+		rule = _make_rule(
+			"_PNXT_TEST_AutoScopeItemGroup",
+			apply_on="Item Group",
+			item_groups=[{"item_group": item_group}],
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			discount_percentage=10,
+			promotion_type="Auto Discount",
+			min_qty=0,
+		)
+		line = _line(self.ctx, ITEM_A)
+		self.assertNotIn("item_group", line)  # the cart never sends it
+
+		resp = self._run(rule, [line])
+		self.assertAlmostEqual(flt(resp["items"][0].get("discount_percentage")), 10, places=2)
+		self.assertEqual(resp["items"][0].get("item_group"), item_group)
+
+	def test_auto_discount_apply_on_brand(self):
+		"""Brand scope discounts only the branded line; brand is backfilled too."""
+		rule = _make_rule(
+			"_PNXT_TEST_AutoScopeBrand",
+			apply_on="Brand",
+			brands=[{"brand": TEST_BRAND}],
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			discount_percentage=25,
+			promotion_type="Auto Discount",
+			min_qty=0,
+		)
+		line_c = _line(self.ctx, ITEM_C)
+		self.assertNotIn("brand", line_c)
+
+		resp = self._run(rule, [_line(self.ctx, ITEM_A), line_c])
+
+		item_a, item_c = resp["items"][0], resp["items"][1]
+		self.assertAlmostEqual(flt(item_c.get("discount_percentage")), 25, places=2)
+		self.assertEqual(item_c.get("brand"), TEST_BRAND)
+		self.assertAlmostEqual(flt(item_a.get("discount_percentage")), 0, places=2)
+
+	def test_auto_discount_item_group_matches_descendant_items(self):
+		"""A rule on an ancestor group covers items filed further down the tree."""
+		item_group = _resolve_item_group()
+		ancestor = frappe.db.get_value("Item Group", item_group, "parent_item_group")
+		if not ancestor:
+			self.skipTest(f"{item_group} has no parent group to scope the rule to")
+
+		rule = _make_rule(
+			"_PNXT_TEST_AutoScopeGroupTree",
+			apply_on="Item Group",
+			item_groups=[{"item_group": ancestor}],
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			discount_percentage=10,
+			promotion_type="Auto Discount",
+			min_qty=0,
+		)
+		resp = self._run(rule, [_line(self.ctx, ITEM_A)])
+		self.assertAlmostEqual(flt(resp["items"][0].get("discount_percentage")), 10, places=2)
+
+
+class TestDiscountPipeline(FrappeTestCase):
+	"""The per-line accumulator in `pos_next.promotions.engine`.
+
+	Passes contribute *named parts* instead of assigning discount_percentage, so
+	two different passes sum on one line while a repeat contribution from the
+	same pass replaces its earlier value.
+	"""
+
+	def _line_dict(self, price=100.0, qty=1):
+		return frappe._dict(
+			{"item_code": ITEM_A, "qty": qty, "price_list_rate": price, "rate": price}
+		)
+
+	def test_parts_from_different_sources_sum(self):
+		item = self._line_dict()
+		engine.begin_line_discounts([item])
+		engine.add_line_part(item, engine.PART_AUTO_DISCOUNT, 10)
+		engine.add_line_part(item, engine.PART_ACCUMULATIVE, 8)
+		engine.finalize_line_discounts([item])
+
+		self.assertAlmostEqual(flt(item.discount_percentage), 18, places=4)
+		self.assertAlmostEqual(flt(item.rate), 82, places=4)
+		self.assertAlmostEqual(flt(item.discount_amount), 18, places=4)
+
+	def test_same_source_replaces_rather_than_accumulates(self):
+		item = self._line_dict()
+		engine.begin_line_discounts([item])
+		engine.add_line_part(item, engine.PART_AUTO_DISCOUNT, 10)
+		engine.add_line_part(item, engine.PART_AUTO_DISCOUNT, 25)
+		engine.finalize_line_discounts([item])
+
+		self.assertAlmostEqual(flt(item.discount_percentage), 25, places=4)
+
+	def test_baseline_from_earlier_engine_pass_is_preserved(self):
+		"""Whatever ERPNext's per-item engine wrote is the floor, not overwritten."""
+		item = self._line_dict()
+		item.discount_percentage = 5  # as if the ERPNext pass had set it
+		engine.begin_line_discounts([item])
+		engine.add_line_part(item, engine.PART_AUTO_DISCOUNT, 10)
+		engine.finalize_line_discounts([item])
+
+		self.assertAlmostEqual(flt(item.discount_percentage), 15, places=4)
+
+	def test_untouched_lines_are_left_exactly_as_found(self):
+		item = self._line_dict()
+		item.discount_percentage = 7
+		item.rate = 93
+		engine.begin_line_discounts([item])
+		engine.finalize_line_discounts([item])
+
+		self.assertAlmostEqual(flt(item.discount_percentage), 7, places=4)
+		self.assertAlmostEqual(flt(item.rate), 93, places=4)
+
+	def test_total_is_clamped_and_cap_resolver_is_honoured(self):
+		item = self._line_dict()
+		engine.begin_line_discounts([item])
+		engine.add_line_part(item, engine.PART_AUTO_DISCOUNT, 80)
+		engine.add_line_part(item, engine.PART_ACCUMULATIVE, 60)
+		engine.finalize_line_discounts([item])
+		self.assertAlmostEqual(flt(item.discount_percentage), 100, places=4)
+
+		capped = self._line_dict()
+		engine.begin_line_discounts([capped])
+		engine.add_line_part(capped, engine.PART_AUTO_DISCOUNT, 40)
+		engine.finalize_line_discounts([capped], cap_resolver=lambda _item: 15)
+		self.assertAlmostEqual(flt(capped.discount_percentage), 15, places=4)
+
+	def test_bookkeeping_keys_never_survive_finalize(self):
+		"""The accumulator's scratch keys must not leak into the API response."""
+		item = self._line_dict()
+		engine.begin_line_discounts([item])
+		engine.add_line_part(item, engine.PART_AUTO_DISCOUNT, 10)
+		engine.finalize_line_discounts([item])
+
+		self.assertNotIn("_pos_discount_parts", item)
+		self.assertNotIn("_pos_discount_base", item)
+
+	def test_rate_rule_lands_exactly_on_the_target_rate(self):
+		"""A `Rate` rule should price the line at rule.rate, not discount it twice."""
+		item = self._line_dict(price=100.0, qty=2)
+		rule = frappe._dict({"rate_or_discount": "Rate", "rate": 80})
+
+		pct = engine.pricing_rule_line_percentage(item, rule)
+		engine.begin_line_discounts([item])
+		engine.add_line_part(item, engine.PART_AUTO_DISCOUNT, pct)
+		engine.finalize_line_discounts([item])
+
+		self.assertAlmostEqual(flt(item.rate), 80, places=4)
+
+
+class TestDiscountPipelineIdempotency(FrappeTestCase):
+	"""Running apply_offers twice over the same cart must not compound discounts."""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		cls.ctx = _ctx()
+
+	def tearDown(self):
+		super().tearDown()
+		for rule_name in frappe.get_all(
+			"Pricing Rule",
+			filters={"title": ["like", "_PNXT_TEST_%"]},
+			pluck="name",
+		):
+			try:
+				frappe.db.set_value("Pricing Rule", rule_name, "disable", 1)
+			except Exception:
+				pass
+		frappe.db.commit()
+
+	def test_repeated_apply_offers_is_stable(self):
+		import json
+
+		rule = _make_rule(
+			"_PNXT_TEST_PipelineIdempotent",
+			apply_on="Item Code",
+			items=[{"item_code": ITEM_A}],
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			discount_percentage=10,
+			promotion_type="Auto Discount",
+			min_qty=0,
+		)
+
+		seen = []
+		for _ in range(3):
+			payload = _cart_payload(self.ctx, [_line(self.ctx, ITEM_A)])
+			resp = apply_offers(
+				invoice_data=json.dumps(payload),
+				selected_offers=json.dumps([rule]),
+			)
+			seen.append(
+				(
+					flt(resp["items"][0].get("discount_percentage")),
+					flt(resp["items"][0].get("rate")),
+				)
+			)
+
+		self.assertEqual(len(set(seen)), 1, f"discount drifted across runs: {seen}")
+		self.assertAlmostEqual(seen[0][0], 10, places=2)
+
+
+class TestAccumulativeDiscount(FrappeTestCase):
+	"""Accumulative discounts — sum the percentage of every scope present in the cart.
+
+	A rule lists scopes (item codes, item groups or brands), each with its own
+	``pos_discount_percentage``. Every scope represented in the cart contributes,
+	and the total lands uniformly on each eligible line — so a cart spanning more
+	scopes earns a larger discount on everything in it.
+	"""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		cls.ctx = _ctx()
+		_ensure_test_brand()
+
+	def tearDown(self):
+		super().tearDown()
+		for rule_name in frappe.get_all(
+			"Pricing Rule",
+			filters={"title": ["like", "_PNXT_TEST_%"]},
+			pluck="name",
+		):
+			try:
+				frappe.db.set_value("Pricing Rule", rule_name, "disable", 1)
+			except Exception:
+				pass
+		frappe.db.commit()
+
+	def _accumulative_rule(self, title, **fields):
+		"""Build an Accumulative rule; callers supply the scope table themselves."""
+		defaults = {
+			"apply_on": "Item Code",
+			"rate_or_discount": "Discount Percentage",
+			"price_or_product_discount": "Price",
+			"discount_percentage": 0,
+			"apply_discount_on_price": "Accumulative",
+			"promotion_type": "Item Level Discount",
+			"min_qty": 0,
+		}
+		defaults.update(fields)
+		return _make_rule(title, **defaults)
+
+	def _run(self, rules, lines):
+		import json
+
+		payload = _cart_payload(self.ctx, lines)
+		return apply_offers(
+			invoice_data=json.dumps(payload),
+			selected_offers=json.dumps(rules if isinstance(rules, list) else [rules]),
+		)
+
+	def test_single_scope_earns_only_its_own_percentage(self):
+		rule = self._accumulative_rule(
+			"_PNXT_TEST_AccumOneScope",
+			items=[
+				{"item_code": ITEM_A, "pos_discount_percentage": 5},
+				{"item_code": ITEM_B, "pos_discount_percentage": 3},
+			],
+		)
+		resp = self._run(rule, [_line(self.ctx, ITEM_A)])
+		self.assertAlmostEqual(flt(resp["items"][0].get("discount_percentage")), 5, places=2)
+
+	def test_two_scopes_present_sum_and_apply_to_every_line(self):
+		"""The headline behaviour: 5% + 3% = 8% on *both* lines, not 5% and 3%."""
+		rule = self._accumulative_rule(
+			"_PNXT_TEST_AccumTwoScopes",
+			items=[
+				{"item_code": ITEM_A, "pos_discount_percentage": 5},
+				{"item_code": ITEM_B, "pos_discount_percentage": 3},
+			],
+		)
+		resp = self._run(rule, [_line(self.ctx, ITEM_A), _line(self.ctx, ITEM_B)])
+
+		for item in resp["items"][:2]:
+			self.assertAlmostEqual(flt(item.get("discount_percentage")), 8, places=2)
+
+	def test_absent_scope_contributes_nothing(self):
+		rule = self._accumulative_rule(
+			"_PNXT_TEST_AccumAbsentScope",
+			items=[
+				{"item_code": ITEM_A, "pos_discount_percentage": 5},
+				{"item_code": ITEM_B, "pos_discount_percentage": 3},
+				{"item_code": ITEM_C, "pos_discount_percentage": 40},
+			],
+		)
+		resp = self._run(rule, [_line(self.ctx, ITEM_A), _line(self.ctx, ITEM_B)])
+		self.assertAlmostEqual(flt(resp["items"][0].get("discount_percentage")), 8, places=2)
+
+	def test_accumulates_across_item_groups(self):
+		parent, child = _ensure_group_tree()
+		item_group = _resolve_item_group()
+		rule = self._accumulative_rule(
+			"_PNXT_TEST_AccumItemGroup",
+			apply_on="Item Group",
+			item_groups=[
+				{"item_group": item_group, "pos_discount_percentage": 5},
+				{"item_group": parent, "pos_discount_percentage": 3},
+			],
+		)
+		# Only `item_group` is represented; the parent tree holds no cart lines.
+		resp = self._run(rule, [_line(self.ctx, ITEM_A)])
+		self.assertAlmostEqual(flt(resp["items"][0].get("discount_percentage")), 5, places=2)
+		self.assertNotEqual(child, item_group)
+
+	def test_accumulates_across_brands(self):
+		rule = self._accumulative_rule(
+			"_PNXT_TEST_AccumBrand",
+			apply_on="Brand",
+			brands=[{"brand": TEST_BRAND, "pos_discount_percentage": 12}],
+		)
+		resp = self._run(rule, [_line(self.ctx, ITEM_C)])
+		self.assertAlmostEqual(flt(resp["items"][0].get("discount_percentage")), 12, places=2)
+
+	def test_auto_discount_stacks_on_top_of_accumulative(self):
+		"""The interaction you asked for: 8% accumulative + 10% auto = 18%."""
+		accum = self._accumulative_rule(
+			"_PNXT_TEST_AccumStackBase",
+			items=[
+				{"item_code": ITEM_A, "pos_discount_percentage": 5},
+				{"item_code": ITEM_B, "pos_discount_percentage": 3},
+			],
+		)
+		auto = _make_rule(
+			"_PNXT_TEST_AccumStackAuto",
+			apply_on="Transaction",
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			discount_percentage=10,
+			promotion_type="Auto Discount",
+			min_qty=0,
+			apply_discount_on="Grand Total",
+		)
+		resp = self._run([accum, auto], [_line(self.ctx, ITEM_A), _line(self.ctx, ITEM_B)])
+
+		for item in resp["items"][:2]:
+			self.assertAlmostEqual(flt(item.get("discount_percentage")), 18, places=2)
+
+	def test_plain_item_level_discount_still_blocks_auto_discount(self):
+		"""Only Accumulative stacks — an ordinary item-level promo must not."""
+		item_level = _make_rule(
+			"_PNXT_TEST_AccumControlItemLevel",
+			apply_on="Item Code",
+			items=[{"item_code": ITEM_A}],
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			discount_percentage=5,
+			promotion_type="Item Level Discount",
+			min_qty=0,
+		)
+		auto = _make_rule(
+			"_PNXT_TEST_AccumControlAuto",
+			apply_on="Transaction",
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			discount_percentage=10,
+			promotion_type="Auto Discount",
+			min_qty=0,
+			apply_discount_on="Grand Total",
+		)
+		resp = self._run([item_level, auto], [_line(self.ctx, ITEM_A)])
+		self.assertAlmostEqual(flt(resp["items"][0].get("discount_percentage")), 5, places=2)
+
+	def test_rule_cap_limits_the_sum(self):
+		rule = self._accumulative_rule(
+			"_PNXT_TEST_AccumCapped",
+			items=[
+				{"item_code": ITEM_A, "pos_discount_percentage": 30},
+				{"item_code": ITEM_B, "pos_discount_percentage": 30},
+			],
+			max_accumulated_discount_percentage=25,
+		)
+		resp = self._run(rule, [_line(self.ctx, ITEM_A), _line(self.ctx, ITEM_B)])
+		self.assertAlmostEqual(flt(resp["items"][0].get("discount_percentage")), 25, places=2)
+
+	def test_item_max_discount_clamps_the_line(self):
+		"""ERPNext's own item ceiling wins — validate_max_discount would throw otherwise."""
+		frappe.db.set_value("Item", ITEM_A, "max_discount", 6)
+		frappe.clear_document_cache("Item", ITEM_A)
+		self.addCleanup(frappe.clear_document_cache, "Item", ITEM_A)
+		self.addCleanup(frappe.db.set_value, "Item", ITEM_A, "max_discount", 0)
+
+		rule = self._accumulative_rule(
+			"_PNXT_TEST_AccumItemMax",
+			items=[
+				{"item_code": ITEM_A, "pos_discount_percentage": 5},
+				{"item_code": ITEM_B, "pos_discount_percentage": 3},
+			],
+		)
+		resp = self._run(rule, [_line(self.ctx, ITEM_A), _line(self.ctx, ITEM_B)])
+
+		self.assertAlmostEqual(flt(resp["items"][0].get("discount_percentage")), 6, places=2)
+		# ITEM_B has no ceiling, so it keeps the full accumulated total.
+		self.assertAlmostEqual(flt(resp["items"][1].get("discount_percentage")), 8, places=2)
+
+	def test_min_scopes_required_gates_the_discount(self):
+		rule = self._accumulative_rule(
+			"_PNXT_TEST_AccumMinScopes",
+			items=[
+				{"item_code": ITEM_A, "pos_discount_percentage": 5},
+				{"item_code": ITEM_B, "pos_discount_percentage": 3},
+			],
+			min_scopes_required=2,
+		)
+		alone = self._run(rule, [_line(self.ctx, ITEM_A)])
+		self.assertAlmostEqual(flt(alone["items"][0].get("discount_percentage")), 0, places=2)
+
+		both = self._run(rule, [_line(self.ctx, ITEM_A), _line(self.ctx, ITEM_B)])
+		self.assertAlmostEqual(flt(both["items"][0].get("discount_percentage")), 8, places=2)
+
+	def test_line_is_flagged_accumulative_for_the_matrix(self):
+		rule = self._accumulative_rule(
+			"_PNXT_TEST_AccumFlag",
+			items=[{"item_code": ITEM_A, "pos_discount_percentage": 5}],
+		)
+		resp = self._run(rule, [_line(self.ctx, ITEM_A)])
+		item = resp["items"][0]
+		self.assertTrue(item.get("is_accumulative_discount"))
+		self.assertEqual(item.get("discount_source"), "accumulative_promotion")
+
+	def test_promotional_scheme_saves_and_applies(self):
+		"""Regression: ERPNext strips per-row percentages from the generated rule.
+
+		It rebuilds the rule's scope table as {item_code, uom} and saves it during
+		the scheme's own on_update — before sync_scope_percentages_to_pricing_rules
+		runs. Validating that copy rejected every accumulative scheme with
+		"Set Discount % on at least one Item Code row".
+		"""
+		import json
+
+		scheme_name = "_PNXT_TEST_AccumScheme"
+		if frappe.db.exists("Promotional Scheme", scheme_name):
+			frappe.delete_doc("Promotional Scheme", scheme_name, force=True, ignore_permissions=True)
+		self.addCleanup(
+			lambda: frappe.db.exists("Promotional Scheme", scheme_name)
+			and frappe.delete_doc(
+				"Promotional Scheme", scheme_name, force=True, ignore_permissions=True
+			)
+		)
+
+		scheme = frappe.get_doc(
+			{
+				"doctype": "Promotional Scheme",
+				"name": scheme_name,
+				"company": _resolve_company(),
+				"apply_on": "Item Code",
+				"selling": 1,
+				"buying": 0,
+				"valid_from": nowdate(),
+				"promotion_type": "Item Level Discount",
+				"items": [
+					{"item_code": ITEM_A, "pos_discount_percentage": 5},
+					{"item_code": ITEM_B, "pos_discount_percentage": 3},
+				],
+				"price_discount_slabs": [
+					{
+						"rule_description": "Accumulative scheme",
+						"min_qty": 0,
+						"rate_or_discount": "Discount Percentage",
+						"discount_percentage": 0,
+						"apply_discount_on_price": "Accumulative",
+						"min_scopes_required": 1,
+					}
+				],
+			}
+		)
+		scheme.insert(ignore_permissions=True)
+
+		rules = frappe.get_all("Pricing Rule", filters={"promotional_scheme": scheme.name}, pluck="name")
+		self.assertTrue(rules, "scheme generated no pricing rules")
+
+		generated = frappe.get_doc("Pricing Rule", rules[0])
+		self.assertEqual(generated.get("apply_discount_on_price"), "Accumulative")
+		# The on_update sync must have restored what ERPNext dropped.
+		self.assertEqual(
+			{row.item_code: flt(row.get("pos_discount_percentage")) for row in generated.items},
+			{ITEM_A: 5.0, ITEM_B: 3.0},
+		)
+
+		payload = _cart_payload(self.ctx, [_line(self.ctx, ITEM_A), _line(self.ctx, ITEM_B)])
+		resp = apply_offers(
+			invoice_data=json.dumps(payload),
+			selected_offers=json.dumps(rules),
+		)
+		for item in resp["items"][:2]:
+			self.assertAlmostEqual(flt(item.get("discount_percentage")), 8, places=2)
+
+	def test_rule_level_percentage_is_ignored(self):
+		"""Regression: a rule-level discount_percentage used to stack underneath.
+
+		ERPNext's per-item engine applied the rule's own 10%, which became the
+		pipeline baseline, and the accumulated 8% landed on top for 18%. Every
+		cross-cart mode now defers, so only the per-scope total counts.
+		"""
+		rule = self._accumulative_rule(
+			"_PNXT_TEST_AccumIgnoresRulePct",
+			items=[
+				{"item_code": ITEM_A, "pos_discount_percentage": 5},
+				{"item_code": ITEM_B, "pos_discount_percentage": 3},
+			],
+			discount_percentage=10,
+		)
+		resp = self._run(rule, [_line(self.ctx, ITEM_A), _line(self.ctx, ITEM_B)])
+
+		for item in resp["items"][:2]:
+			self.assertAlmostEqual(flt(item.get("discount_percentage")), 8, places=2)
+
+	def test_standalone_rule_without_percentages_is_still_rejected(self):
+		"""The guard must survive the scheme-generated exemption."""
+		with self.assertRaises(frappe.ValidationError):
+			self._accumulative_rule(
+				"_PNXT_TEST_AccumStandaloneNoPct",
+				items=[{"item_code": ITEM_A}],
+			)
+
+	def test_coupons_are_still_blocked_on_an_accumulative_line(self):
+		from pos_next.api.promotion_exclusions import (
+			PROMOTION_TARGET_AUTO,
+			PROMOTION_TARGET_COUPON,
+			is_eligible_for_promotion,
+		)
+
+		line = frappe._dict({"item_code": ITEM_A, "qty": 1, "is_accumulative_discount": 1})
+		self.assertTrue(is_eligible_for_promotion(line, PROMOTION_TARGET_AUTO))
+		self.assertFalse(is_eligible_for_promotion(line, PROMOTION_TARGET_COUPON))
+
+
+class TestAccumulativeValidation(FrappeTestCase):
+	"""Config guards on Pricing Rules using the Accumulative mode."""
+
+	def tearDown(self):
+		super().tearDown()
+		for rule_name in frappe.get_all(
+			"Pricing Rule", filters={"title": ["like", "_PNXT_TEST_%"]}, pluck="name"
+		):
+			try:
+				frappe.db.set_value("Pricing Rule", rule_name, "disable", 1)
+			except Exception:
+				pass
+		frappe.db.commit()
+
+	def test_transaction_scope_is_rejected(self):
+		with self.assertRaises(frappe.ValidationError):
+			_make_rule(
+				"_PNXT_TEST_AccumBadScope",
+				apply_on="Transaction",
+				rate_or_discount="Discount Percentage",
+				price_or_product_discount="Price",
+				apply_discount_on_price="Accumulative",
+			)
+
+	def test_scope_rows_without_a_percentage_are_rejected(self):
+		with self.assertRaises(frappe.ValidationError):
+			_make_rule(
+				"_PNXT_TEST_AccumNoPct",
+				apply_on="Item Code",
+				items=[{"item_code": ITEM_A}],
+				rate_or_discount="Discount Percentage",
+				price_or_product_discount="Price",
+				apply_discount_on_price="Accumulative",
+			)
+
+	def test_wrong_promotion_type_is_rejected(self):
+		with self.assertRaises(frappe.ValidationError):
+			_make_rule(
+				"_PNXT_TEST_AccumBadType",
+				apply_on="Item Code",
+				items=[{"item_code": ITEM_A, "pos_discount_percentage": 5}],
+				rate_or_discount="Discount Percentage",
+				price_or_product_discount="Price",
+				apply_discount_on_price="Accumulative",
+				promotion_type="GWP",
+			)
+
+	def test_valid_rule_gets_mixed_conditions_and_pos_only_forced(self):
+		name = _make_rule(
+			"_PNXT_TEST_AccumForced",
+			apply_on="Item Code",
+			items=[{"item_code": ITEM_A, "pos_discount_percentage": 5}],
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			apply_discount_on_price="Accumulative",
+			promotion_type="Item Level Discount",
+		)
+		doc = frappe.get_doc("Pricing Rule", name)
+		self.assertTrue(doc.mixed_conditions)
+		self.assertTrue(doc.pos_only)
+
+
+class TestAccumulativeOfflinePayload(FrappeTestCase):
+	"""`get_offers` must ship enough for the offline engine to reproduce the math.
+
+	Scope values are expanded server-side so `computeAccumulativeDiscount` in
+	posCart.js can match with a plain lookup instead of walking the group tree.
+	"""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		cls.ctx = _ctx()
+
+	def tearDown(self):
+		super().tearDown()
+		for rule_name in frappe.get_all(
+			"Pricing Rule", filters={"title": ["like", "_PNXT_TEST_%"]}, pluck="name"
+		):
+			try:
+				frappe.db.set_value("Pricing Rule", rule_name, "disable", 1)
+			except Exception:
+				pass
+		frappe.db.commit()
+
+	def _offers_by_name(self):
+		from pos_next.api.offers import get_offers
+
+		return {offer["name"]: offer for offer in get_offers(self.ctx.pos_profile)}
+
+	def test_payload_carries_expanded_scopes_and_config(self):
+		parent, child = _ensure_group_tree()
+		leaf = _resolve_item_group()
+
+		rule = _make_rule(
+			"_PNXT_TEST_AccumPayload",
+			apply_on="Item Group",
+			item_groups=[
+				{"item_group": parent, "pos_discount_percentage": 5},
+				{"item_group": leaf, "pos_discount_percentage": 3},
+			],
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			discount_percentage=0,
+			apply_discount_on_price="Accumulative",
+			promotion_type="Item Level Discount",
+			min_qty=0,
+			max_accumulated_discount_percentage=20,
+			min_scopes_required=2,
+		)
+
+		payload = self._offers_by_name().get(rule)
+		self.assertIsNotNone(payload, "accumulative rule missing from get_offers")
+
+		self.assertEqual(payload["apply_discount_on_price"], "Accumulative")
+		self.assertEqual(payload["accumulative_scope_field"], "item_group")
+		self.assertAlmostEqual(flt(payload["max_accumulated_discount_percentage"]), 20, places=2)
+		self.assertEqual(int(payload["min_scopes_required"]), 2)
+
+		scopes = payload["accumulative_scopes"] or []
+		self.assertEqual(len(scopes), 2)
+
+		parent_scope = next(s for s in scopes if parent in (s["values"] or []))
+		self.assertAlmostEqual(flt(parent_scope["discount_percentage"]), 5, places=2)
+		# Pre-expanded: the client never has to resolve the tree itself.
+		self.assertIn(child, parent_scope["values"])
+
+	def test_zero_percentage_rows_are_omitted(self):
+		leaf = _resolve_item_group()
+		rule = _make_rule(
+			"_PNXT_TEST_AccumPayloadZero",
+			apply_on="Item Group",
+			item_groups=[
+				{"item_group": leaf, "pos_discount_percentage": 4},
+				{"item_group": _ensure_group_tree()[0], "pos_discount_percentage": 0},
+			],
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			discount_percentage=0,
+			apply_discount_on_price="Accumulative",
+			promotion_type="Item Level Discount",
+			min_qty=0,
+		)
+
+		payload = self._offers_by_name().get(rule)
+		self.assertIsNotNone(payload)
+		self.assertEqual(len(payload["accumulative_scopes"] or []), 1)
+
+	def test_eligible_item_groups_are_expanded_to_descendants(self):
+		"""The client matches item_group with a plain includes(), so the server
+		must hand it the whole subtree — otherwise a rule on a parent group is
+		judged ineligible and never sent, though the server would apply it."""
+		parent, child = _ensure_group_tree()
+		rule = _make_rule(
+			"_PNXT_TEST_EligibleGroupTree",
+			apply_on="Item Group",
+			item_groups=[{"item_group": parent}],
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			discount_percentage=10,
+			min_qty=0,
+		)
+
+		payload = self._offers_by_name().get(rule)
+		self.assertIsNotNone(payload)
+		self.assertIn(parent, payload["eligible_item_groups"])
+		self.assertIn(child, payload["eligible_item_groups"])
+
+	def test_ordinary_offers_carry_no_accumulative_data(self):
+		rule = _make_rule(
+			"_PNXT_TEST_AccumPayloadPlain",
+			apply_on="Item Code",
+			items=[{"item_code": ITEM_A}],
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			discount_percentage=10,
+			min_qty=0,
+		)
+
+		payload = self._offers_by_name().get(rule)
+		self.assertIsNotNone(payload)
+		self.assertIsNone(payload["accumulative_scopes"])
+		self.assertIsNone(payload["accumulative_scope_field"])
+
+
 def run_all():
 	"""Run every test in TestPromotions via unittest. Returns the unittest result.
 
@@ -1469,7 +2371,19 @@ def run_all():
 	import unittest
 
 	loader = unittest.TestLoader()
-	suite = loader.loadTestsFromTestCase(TestPromotions)
+	suite = unittest.TestSuite(
+		loader.loadTestsFromTestCase(case)
+		for case in (
+			TestPromotions,
+			TestPricingRuleScope,
+			TestAutoDiscountScopes,
+			TestDiscountPipeline,
+			TestDiscountPipelineIdempotency,
+			TestAccumulativeDiscount,
+			TestAccumulativeValidation,
+			TestAccumulativeOfflinePayload,
+		)
+	)
 	runner = unittest.TextTestRunner(verbosity=2)
 	result = runner.run(suite)
 	return {
