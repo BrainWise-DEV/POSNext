@@ -496,13 +496,27 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			const serverItem = serverItems[index] || {};
 			const discountPct = Number.parseFloat(serverItem.discount_percentage) || 0;
 			const discountAmt = Number.parseFloat(serverItem.discount_amount) || 0;
+			const gwpFreeQty = Number.parseFloat(serverItem.gwp_free_qty) || 0;
 
 			// Only update if server applied a pricing rule or discount
-			if (hasPricingRules(serverItem.pricing_rules) || discountPct > 0 || discountAmt > 0) {
-				item.discount_percentage = discountPct;
-				item.discount_amount = discountAmt;
+			if (
+				hasPricingRules(serverItem.pricing_rules) ||
+				discountPct > 0 ||
+				discountAmt > 0 ||
+				gwpFreeQty > 0
+			) {
+				// GWP and fixed-amount discounts: keep exact amount, not % (avoids rounding drift)
+				if (gwpFreeQty > 0 || discountAmt > 0) {
+					item.discount_amount = discountAmt;
+					item.discount_percentage = 0;
+					item.gwp_free_qty = gwpFreeQty;
+				} else {
+					item.discount_percentage = discountPct;
+					item.discount_amount = 0;
+					item.gwp_free_qty = 0;
+				}
 				item.pricing_rules = serverItem.pricing_rules;
-				hasDiscounts = discountPct > 0 || discountAmt > 0;
+				hasDiscounts = discountPct > 0 || discountAmt > 0 || gwpFreeQty > 0;
 			}
 			// Otherwise preserve existing manual discount
 
@@ -543,13 +557,29 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		// Remove previously-added free item rows (they'll be re-added below if still valid)
 		invoiceItems.value = invoiceItems.value.filter((item) => !item.is_free_item);
 
+		const gwpOfferRules = new Set(
+			appliedOffers.value
+				.filter((entry) => entry.offer?.promotion_type === "GWP")
+				.flatMap((entry) => entry.rules || [entry.code])
+		);
+
+		const filteredFreeItems = (Array.isArray(freeItems) ? freeItems : []).filter(
+			(freeItem) => {
+				const ruleName = freeItem.pricing_rules;
+				if (!ruleName || gwpOfferRules.size === 0) {
+					return true;
+				}
+				return !gwpOfferRules.has(ruleName);
+			}
+		);
+
 		// Early return if no free items
-		if (!Array.isArray(freeItems) || freeItems.length === 0) {
+		if (filteredFreeItems.length === 0) {
 			rebuildIncrementalCache();
 			return;
 		}
 
-		for (const freeItem of freeItems) {
+		for (const freeItem of filteredFreeItems) {
 			const freeQty = Number.parseFloat(freeItem.qty) || 0;
 			if (freeQty <= 0) continue;
 
@@ -1265,6 +1295,123 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		return applied;
 	}
 
+	function shouldAggregateGwpQty(offer) {
+		if (offer.apply_on === "Item Group") return true;
+		if (offer.apply_on === "Item Code" && (offer.eligible_items?.length || 0) > 1) {
+			return true;
+		}
+		return false;
+	}
+
+	function getGwpSlabFreeQty(slabFreeQty, totalQty, minQty, maxQty) {
+		const total = Number.parseFloat(totalQty) || 0;
+		const min = Number.parseFloat(minQty) || 0;
+		const max = Number.parseFloat(maxQty) || 0;
+		if (min > 0 && total < min) return 0;
+		if (max > 0 && total > max) return 0;
+
+		const free = Number.parseFloat(slabFreeQty) || 0;
+		if (free <= 0 || total <= 0) return 0;
+		return Math.min(free, total);
+	}
+
+	function distributeGwpFreeUnitsForBasis(
+		lineQuantities,
+		linePrices,
+		totalFreeUnits,
+		paidQtyBasis
+	) {
+		const expensiveFirst = (paidQtyBasis || "Max Qty") === "Min Qty";
+		const totalFree = Math.round(Number.parseFloat(totalFreeUnits) || 0);
+		if (totalFree <= 0) return lineQuantities.map(() => 0);
+
+		const quantities = lineQuantities.map((q) => Math.round(Number.parseFloat(q) || 0));
+		const prices = linePrices.map((p) => Number.parseFloat(p) || 0);
+		if (quantities.reduce((sum, q) => sum + q, 0) <= 0) {
+			return quantities.map(() => 0);
+		}
+
+		const result = quantities.map(() => 0);
+		let remaining = totalFree;
+		const indices = quantities
+			.map((_, index) => index)
+			.sort((a, b) => {
+				if (prices[a] !== prices[b]) {
+					return expensiveFirst ? prices[b] - prices[a] : prices[a] - prices[b];
+				}
+				return a - b;
+			});
+
+		for (const index of indices) {
+			if (remaining <= 0) break;
+			const take = Math.min(quantities[index], remaining);
+			result[index] = take;
+			remaining -= take;
+		}
+		return result;
+	}
+
+	function stampOfferOnItem(item, offerName) {
+		const prArr = Array.isArray(item.pricing_rules)
+			? [...item.pricing_rules]
+			: item.pricing_rules
+			? String(item.pricing_rules)
+					.split(",")
+					.map((s) => s.trim())
+					.filter(Boolean)
+			: [];
+		if (!prArr.includes(offerName)) prArr.push(offerName);
+		item.pricing_rules = prArr;
+	}
+
+	function applyOfflineManyItemsGwp(offer, eligibleItems) {
+		const totalQty = eligibleItems.reduce((sum, item) => sum + (item.quantity || 0), 0);
+		const totalFree = getGwpSlabFreeQty(
+			offer.free_qty,
+			totalQty,
+			offer.min_qty,
+			offer.max_qty
+		);
+		if (totalFree <= 0) return false;
+
+		const lineQtys = eligibleItems.map((item) => item.quantity || 0);
+		const linePrices = eligibleItems.map(
+			(item) => item.price_list_rate || item.rate || 0
+		);
+		const freePerLine = distributeGwpFreeUnitsForBasis(
+			lineQtys,
+			linePrices,
+			totalFree,
+			offer.gwp_paid_qty_basis
+		);
+		let applied = false;
+
+		eligibleItems.forEach((item, index) => {
+			stampOfferOnItem(item, offer.name);
+			const lineFree = freePerLine[index] || 0;
+			if (lineFree <= 0) return;
+			if (applyGwpDiscountToItem(item, lineFree)) {
+				applied = true;
+			}
+		});
+
+		return applied;
+	}
+
+	function applyGwpDiscountToItem(item, freeQty) {
+		const priceListRate = item.price_list_rate || item.rate || 0;
+		const lineDiscount = freeQty * priceListRate;
+		if (lineDiscount <= 0) return false;
+
+		item.discount_amount = lineDiscount;
+		item.discount_percentage = 0;
+		item.gwp_free_qty = freeQty;
+		item.free_qty = freeQty;
+		item.discount_source = "gwp";
+		recalculateItem(item);
+		return true;
+	}
+
 	/**
 	 * Apply free item (product discount) offer offline
 	 * Handles: same_item (free item = purchased item) or specific free_item
@@ -1281,15 +1428,39 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 */
 	function applyOfflineFreeItem(offer, eligibleItems) {
 		const freeQty = Number.parseFloat(offer.free_qty) || 0;
-		const sameItem = offer.same_item === 1;
-		const isRecursive = offer.is_recursive === 1;
+		const isGwp = offer.promotion_type === "GWP";
+		const isAggregateGwp = isGwp && shouldAggregateGwpQty(offer);
+		const isRecursive = !isGwp && offer.is_recursive === 1;
 		const recurseFor = Number.parseFloat(offer.recurse_for) || 0;
 		const applyRecursionOver = Number.parseFloat(offer.apply_recursion_over) || 0;
 		const freeItemCode = offer.free_item;
 
+		if (isGwp) {
+			if (isAggregateGwp) {
+				return applyOfflineManyItemsGwp(offer, eligibleItems);
+			}
+			if (freeQty <= 0) return false;
+			let applied = false;
+			for (const item of eligibleItems) {
+				const lineFree = getGwpSlabFreeQty(
+					freeQty,
+					item.quantity || 0,
+					offer.min_qty,
+					offer.max_qty
+				);
+				if (lineFree <= 0) continue;
+				if (applyGwpDiscountToItem(item, lineFree)) {
+					stampOfferOnItem(item, offer.name);
+					applied = true;
+				}
+			}
+			return applied;
+		}
+
 		if (freeQty <= 0) return false;
 
 		let applied = false;
+		const sameItem = offer.same_item === 1;
 
 		if (sameItem) {
 			// Free item is the same as the purchased item
@@ -1318,6 +1489,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				if (freeItemsToGive <= 0) {
 					continue;
 				}
+
 				const uomKey = item.uom || item.stock_uom;
 				const existingFreeRow = invoiceItems.value.find(
 					(r) =>
@@ -1364,26 +1536,48 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			}
 		} else if (freeItemCode) {
 			// Free item is a specific different item
+			let freeItemsToGive = freeQty;
+
+			if (isRecursive && recurseFor > 0) {
+				const totalEligibleQty = eligibleItems.reduce(
+					(sum, item) => sum + (item.quantity || 0),
+					0
+				);
+				const effectiveQty = Math.max(0, totalEligibleQty - applyRecursionOver);
+				const multiplier = Math.floor(effectiveQty / recurseFor);
+				freeItemsToGive = multiplier * freeQty;
+			} else if (!isRecursive && offer.min_qty > 0) {
+				const totalEligibleQty = eligibleItems.reduce(
+					(sum, item) => sum + (item.quantity || 0),
+					0
+				);
+				freeItemsToGive = totalEligibleQty >= offer.min_qty ? freeQty : 0;
+			}
+
+			if (freeItemsToGive > 0 && isGwp) {
+				for (const item of eligibleItems) {
+					if (applyGwpDiscountToItem(item, freeItemsToGive)) {
+						const prArr = Array.isArray(item.pricing_rules)
+							? [...item.pricing_rules]
+							: item.pricing_rules
+							? String(item.pricing_rules)
+									.split(",")
+									.map((s) => s.trim())
+									.filter(Boolean)
+							: [];
+						if (!prArr.includes(offer.name)) prArr.push(offer.name);
+						item.pricing_rules = prArr;
+						applied = true;
+					}
+				}
+			}
+
 			// Find if the free item is already in the cart
 			const freeItemInCart = invoiceItems.value.find(
 				(item) => item.item_code === freeItemCode
 			);
 
 			if (freeItemInCart) {
-				// Calculate free qty (same recursive logic applies)
-				let freeItemsToGive = freeQty;
-
-				if (isRecursive && recurseFor > 0) {
-					// Calculate based on total eligible quantity
-					const totalEligibleQty = eligibleItems.reduce(
-						(sum, item) => sum + (item.quantity || 0),
-						0
-					);
-					const effectiveQty = Math.max(0, totalEligibleQty - applyRecursionOver);
-					const multiplier = Math.floor(effectiveQty / recurseFor);
-					freeItemsToGive = multiplier * freeQty;
-				}
-
 				// Mark existing cart item as having free quantity
 				if (
 					freeItemsToGive > 0 &&

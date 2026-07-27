@@ -111,9 +111,13 @@
 								>
 									<div class="text-lg font-bold">
 										<span v-if="offer.discount_percentage">{{
-											__("{0}% OFF", [
-												Number(offer.discount_percentage).toFixed(2),
-											])
+											offer.promotion_type === 'GWP'
+												? __("{0}% per free items", [
+														Number(offer.discount_percentage).toFixed(2),
+												  ])
+												: __("{0}% OFF", [
+														Number(offer.discount_percentage).toFixed(2),
+												  ])
 										}}</span>
 										<span v-else-if="offer.discount_amount">{{
 											__("{0} OFF", [formatCurrency(offer.discount_amount)])
@@ -125,7 +129,11 @@
 									v-if="offer.offer === 'Give Product'"
 									class="text-xs bg-purple-100 text-purple-700 px-3 py-1 rounded-full font-semibold"
 								>
-									{{ __("+ Free Item") }}
+									{{
+										offer.promotion_type === 'GWP'
+											? __("+ {0} Free", [offer.free_qty || 1])
+											: __("+ Free Item")
+									}}
 								</div>
 							</div>
 

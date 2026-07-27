@@ -11,13 +11,40 @@ const PN_SCOPE_TABLE_BY_APPLY_ON = {
 	Brand: "brands",
 };
 
+const PROMOTION_TYPE_GWP = "GWP";
+
+const GWP_HIDDEN_PRODUCT_FIELDS = [
+	"same_item",
+	"free_item",
+	"free_item_uom",
+	"free_item_rate",
+	"round_free_qty",
+	"is_recursive",
+	"recurse_for",
+	"apply_recursion_over",
+];
+
 frappe.ui.form.on("Promotional Scheme", {
 	refresh(frm) {
 		pn_sync_min_max(frm);
 		pn_sync_accumulative(frm);
+		pn_toggle_gwp_fields(frm);
+	},
+	promotion_type(frm) {
+		pn_toggle_gwp_fields(frm);
 	},
 	apply_on(frm) {
 		pn_sync_accumulative(frm);
+		pn_toggle_gwp_fields(frm);
+	},
+	mixed_conditions(frm) {
+		pn_toggle_gwp_fields(frm);
+	},
+	items_add(frm) {
+		pn_toggle_gwp_fields(frm);
+	},
+	items_remove(frm) {
+		pn_toggle_gwp_fields(frm);
 	},
 	price_discount_slabs_remove(frm) {
 		pn_sync_min_max(frm);
@@ -31,6 +58,68 @@ frappe.ui.form.on("Promotional Scheme Price Discount", {
 		pn_sync_accumulative(frm);
 	},
 });
+
+frappe.ui.form.on("Promotional Scheme Product Discount", {
+	product_discount_slabs_add(frm) {
+		pn_toggle_gwp_fields(frm);
+	},
+	form_rendered(frm, cdt, cdn) {
+		pn_toggle_gwp_product_row(frm, cdt, cdn);
+	},
+});
+
+function pn_toggle_gwp_fields(frm) {
+	const is_gwp = frm.doc.promotion_type === PROMOTION_TYPE_GWP;
+
+	frm.toggle_display("price_discount_slabs", !is_gwp);
+
+	const product_grid = frm.fields_dict.product_discount_slabs?.grid;
+	if (!product_grid) {
+		return;
+	}
+
+	if (is_gwp) {
+		pn_sync_gwp_mixed_conditions(frm);
+	}
+
+	(frm.doc.product_discount_slabs || []).forEach((row) => {
+		pn_toggle_gwp_product_row(frm, "Promotional Scheme Product Discount", row.name);
+	});
+
+	if (is_gwp) {
+		product_grid.refresh();
+	}
+}
+
+function pn_toggle_gwp_product_row(frm, cdt, cdn) {
+	const is_gwp = frm.doc.promotion_type === PROMOTION_TYPE_GWP;
+	const grid = frm.fields_dict.product_discount_slabs?.grid;
+	if (!grid || !locals[cdt]?.[cdn]) {
+		return;
+	}
+
+	for (const fieldname of GWP_HIDDEN_PRODUCT_FIELDS) {
+		grid.toggle_display(fieldname, !is_gwp, cdn);
+	}
+	grid.toggle_display("gwp_paid_qty_basis", is_gwp, cdn);
+	grid.toggle_display("free_qty", true, cdn);
+}
+
+function pn_scheme_aggregates_gwp(frm) {
+	return (
+		frm.doc.apply_on === "Item Group" ||
+		(frm.doc.apply_on === "Item Code" && (frm.doc.items || []).length > 1)
+	);
+}
+
+function pn_sync_gwp_mixed_conditions(frm) {
+	if (!pn_scheme_aggregates_gwp(frm)) {
+		return;
+	}
+	if (!frm.doc.mixed_conditions) {
+		frm.set_value("mixed_conditions", 1);
+	}
+}
 
 function pn_sync_min_max(frm) {
 	const has_min_max = (frm.doc.price_discount_slabs || []).some((row) =>

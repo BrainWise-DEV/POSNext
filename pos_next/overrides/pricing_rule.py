@@ -85,6 +85,7 @@ def sync_promotion_fields_to_pricing_rules(doc, method=None):
 
 	Propagates ``pos_only``, ``one_time_per_customer``, and ``promotion_type`` so a
 	scheme acts as the single source of truth for the rules it generates.
+	Also syncs GWP slab field ``gwp_paid_qty_basis``.
 	"""
 	values = {
 		"pos_only": doc.get("pos_only") or 0,
@@ -101,6 +102,18 @@ def sync_promotion_fields_to_pricing_rules(doc, method=None):
 	)
 
 	sync_scope_percentages_to_pricing_rules(doc)
+
+	if frappe.db.has_column("Pricing Rule", "gwp_paid_qty_basis"):
+		for slab in doc.get("product_discount_slabs") or []:
+			frappe.db.set_value(
+				"Pricing Rule",
+				{"promotional_scheme_id": slab.name},
+				{
+					"gwp_paid_qty_basis": slab.get("gwp_paid_qty_basis") or "Max Qty",
+					"same_item": 1,
+				},
+				update_modified=False,
+			)
 
 
 def sync_scope_percentages_to_pricing_rules(doc):
@@ -268,20 +281,25 @@ def enforce_cross_cart_pricing_config(doc, method=None):
 			for slab in (doc.get("price_discount_slabs") or [])
 			if slab.get("apply_discount_on_price") in CROSS_CART_MODES
 		]
-		if not slabs:
-			return
+		if slabs:
+			doc.mixed_conditions = 1
+			for slab in slabs:
+				mode = slab.get("apply_discount_on_price")
+				if mode in MIN_MAX_OPTIONS:
+					_validate_min_max_qty_limit(slab.get("min_or_max_discount_qty_limit"), mode, on_slab=True)
+				else:
+					_validate_accumulative_slab(slab)
 
-		doc.mixed_conditions = 1
-		for slab in slabs:
-			mode = slab.get("apply_discount_on_price")
-			if mode in MIN_MAX_OPTIONS:
-				_validate_min_max_qty_limit(slab.get("min_or_max_discount_qty_limit"), mode, on_slab=True)
-			else:
-				_validate_accumulative_slab(slab)
+			if any(s.get("apply_discount_on_price") == ACCUMULATIVE_MODE for s in slabs):
+				_validate_accumulative_scope(doc)
+				doc.pos_only = 1
 
-		if any(s.get("apply_discount_on_price") == ACCUMULATIVE_MODE for s in slabs):
-			_validate_accumulative_scope(doc)
-			doc.pos_only = 1
+		many_items_gwp = (
+			doc.get("apply_on") == "Item Group"
+			or (doc.get("apply_on") == "Item Code" and len(doc.get("items") or []) > 1)
+		) and doc.get("promotion_type") == "GWP" and (doc.get("product_discount_slabs") or [])
+		if many_items_gwp:
+			doc.mixed_conditions = 1
 		return
 
 	# Pricing Rule

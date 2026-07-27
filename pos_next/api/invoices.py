@@ -14,6 +14,7 @@ from frappe.utils import cint, cstr, flt, get_datetime, nowdate, nowtime
 
 from pos_next.promotions.engine import (
 	CROSS_CART_MODES,
+	append_pricing_rule,
 	filter_auto_discount_from_header,
 	rule_promotion_type,
 	run_line_discount_passes,
@@ -52,11 +53,22 @@ try:
 	)
 	from pos_next.overrides.pricing_rule import apply_min_max_price_discounts
 	from pos_next.api.promotion_exclusions import (
+		DISCOUNT_SOURCE_AUTO,
+		DISCOUNT_SOURCE_GWP,
 		DISCOUNT_SOURCE_MANUAL,
 		PROMOTION_TYPE_AUTO,
 		PROMOTION_TYPE_ITEM_LEVEL,
 		get_rule_promotion_types,
 		mark_item_discount_flags,
+	)
+	from pos_next.api.gwp import (
+		GWP_BASIS_MAX,
+		PROMOTION_TYPE_GWP,
+		calculate_gwp_discount_amount,
+		distribute_gwp_free_units_for_basis,
+		get_gwp_slab_free_qty,
+		item_matches_pricing_rule_apply_on,
+		should_aggregate_gwp_quantities,
 	)
 except Exception:  # pragma: no cover - ERPNext not installed in some environments
 	erpnext_apply_pricing_rule = None
@@ -65,9 +77,147 @@ except Exception:  # pragma: no cover - ERPNext not installed in some environmen
 	apply_min_max_price_discounts = None
 	PROMOTION_TYPE_AUTO = "Auto Discount"
 	PROMOTION_TYPE_ITEM_LEVEL = "Item Level Discount"
+	PROMOTION_TYPE_GWP = "GWP"
+	calculate_gwp_discount_amount = None
+	get_gwp_slab_free_qty = None
+	distribute_gwp_free_units_for_basis = None
+	should_aggregate_gwp_quantities = None
+	item_matches_pricing_rule_apply_on = None
+	GWP_BASIS_MAX = "Max Qty"
+	DISCOUNT_SOURCE_AUTO = "auto_discount"
+	DISCOUNT_SOURCE_GWP = "gwp"
 	DISCOUNT_SOURCE_MANUAL = "manual_discount"
 	get_rule_promotion_types = None
 	mark_item_discount_flags = None
+
+
+
+def _item_matches_pricing_rule(item, rule) -> bool:
+	if not item_matches_pricing_rule_apply_on:
+		return False
+	return item_matches_pricing_rule_apply_on(item, rule)
+
+
+def _item_matches_gwp_rule(item, full_rule) -> bool:
+	return not item.get("is_free_item") and _item_matches_pricing_rule(item, full_rule)
+
+
+def _item_pricing_rule_names(item) -> list[str]:
+	raw_rules = item.get("pricing_rules") or ""
+	if erpnext_get_applied_pricing_rules:
+		return erpnext_get_applied_pricing_rules(raw_rules)
+	if isinstance(raw_rules, str):
+		if raw_rules.startswith("["):
+			return json.loads(raw_rules)
+		return [part.strip() for part in raw_rules.split(",") if part.strip()]
+	if isinstance(raw_rules, list | tuple | set):
+		return [cstr(part) for part in raw_rules if cstr(part)]
+	return []
+
+
+def _stamp_gwp_line_discount(item_doc, line_free_qty, price_list_rate) -> None:
+	line_free_qty = flt(line_free_qty)
+	purchased_qty = flt(item_doc.get("qty") or item_doc.get("quantity") or 0)
+	price_list_rate = flt(price_list_rate)
+	line_discount = calculate_gwp_discount_amount(line_free_qty, price_list_rate)
+	if line_discount <= 0 or purchased_qty <= 0:
+		return
+
+	item_doc.discount_amount = line_discount
+	item_doc.discount_percentage = 0
+	item_doc.gwp_free_qty = line_free_qty
+	item_doc.free_qty = line_free_qty
+	item_doc.discount_source = DISCOUNT_SOURCE_GWP
+	item_doc.rate = flt(price_list_rate - (line_discount / purchased_qty))
+
+
+def _apply_gwp_line_discounts(prepared_items, free_items_map, rule_map) -> None:
+	"""Apply GWP line discounts from slab free_qty and paid-qty basis.
+
+	Multi-item / item-group: total qty must fall between min_qty and max_qty;
+	free_qty is discounted on cheapest (Max basis) or most expensive (Min basis) lines.
+	Single item code: free_qty applies on that line when qty is in range.
+	"""
+	if not calculate_gwp_discount_amount or not get_gwp_slab_free_qty:
+		return
+
+	gwp_rule_names = [
+		name for name, details in rule_map.items() if rule_promotion_type(details) == PROMOTION_TYPE_GWP
+	]
+
+	for rule_name in gwp_rule_names:
+		full_rule = frappe.get_cached_doc("Pricing Rule", rule_name)
+		if full_rule.price_or_product_discount != "Product":
+			continue
+
+		for key in list(free_items_map.keys()):
+			if key[1] == rule_name:
+				free_items_map.pop(key, None)
+
+		scheme_item_count = len(full_rule.get("items") or [])
+		aggregate = should_aggregate_gwp_quantities(full_rule.apply_on, scheme_item_count)
+		paid_qty_basis = full_rule.get("gwp_paid_qty_basis") or GWP_BASIS_MAX
+		slab_free_qty = flt(full_rule.free_qty or 0)
+
+		if aggregate:
+			matching_lines = [
+				item_doc
+				for item_doc in prepared_items
+				if _item_matches_gwp_rule(item_doc, full_rule)
+			]
+			if not matching_lines:
+				continue
+
+			line_qtys = [
+				flt(item_doc.get("qty") or item_doc.get("quantity") or 0) for item_doc in matching_lines
+			]
+			line_prices = [
+				flt(item_doc.get("price_list_rate") or item_doc.get("rate") or 0)
+				for item_doc in matching_lines
+			]
+			total_qty = sum(line_qtys)
+			total_free = get_gwp_slab_free_qty(
+				slab_free_qty, total_qty, full_rule.min_qty, full_rule.max_qty
+			)
+			if total_free <= 0:
+				continue
+
+			free_per_line = distribute_gwp_free_units_for_basis(
+				line_qtys, line_prices, total_free, paid_qty_basis
+			)
+			for item_doc, line_free in zip(matching_lines, free_per_line, strict=False):
+				append_pricing_rule(item_doc, rule_name)
+				if line_free <= 0:
+					continue
+				price_list_rate = flt(
+					item_doc.get("price_list_rate") or item_doc.get("rate") or 0
+				)
+				_stamp_gwp_line_discount(item_doc, line_free, price_list_rate)
+			continue
+
+		if slab_free_qty <= 0:
+			continue
+
+		for item_doc in prepared_items:
+			if item_doc.get("is_free_item"):
+				continue
+			if not _item_matches_gwp_rule(item_doc, full_rule) and rule_name not in _item_pricing_rule_names(
+				item_doc
+			):
+				continue
+
+			line_qty = flt(item_doc.get("qty") or item_doc.get("quantity") or 0)
+			line_free = get_gwp_slab_free_qty(
+				slab_free_qty, line_qty, full_rule.min_qty, full_rule.max_qty
+			)
+			if line_free <= 0:
+				continue
+
+			price_list_rate = flt(
+				item_doc.get("price_list_rate") or item_doc.get("rate") or 0
+			)
+			_stamp_gwp_line_discount(item_doc, line_free, price_list_rate)
+			append_pricing_rule(item_doc, rule_name)
 
 
 # ==========================================
@@ -867,8 +1017,22 @@ def update_invoice(data):
 					# No discount or price_list_rate - use rate as is
 					item.price_list_rate = item_rate
 
+				frontend_discount_amount = flt(item.get("discount_amount") or 0)
+				qty = flt(item.get("qty") or 1)
+				if (
+					frontend_discount_amount > 0
+					and flt(item.price_list_rate) > 0
+					and qty > 0
+				):
+					base_amount = flt(item.price_list_rate) * qty
+					item.discount_percentage = min(
+						100, (frontend_discount_amount / base_amount) * 100
+					)
+					item.discount_amount = frontend_discount_amount
+					item.rate = flt(item.price_list_rate) * (1 - item.discount_percentage / 100)
+					item_rate = flt(item.rate or 0)
 				# Ensure price_list_rate is never less than rate (data integrity)
-				if flt(item.price_list_rate) < item_rate:
+				elif flt(item.price_list_rate) < item_rate:
 					item.price_list_rate = item_rate
 
 			# IMPORTANT: Keep the rate from frontend (do NOT set to 0)
@@ -2965,6 +3129,11 @@ def apply_offers(invoice_data, selected_offers=None):
 
 			# Use batch-fetched item details
 			cached = item_details_map.get(item_code)
+			if cached:
+				item.item_name = item.get("item_name") or cached.item_name
+				item.item_group = item.get("item_group") or cached.item_group
+				item.brand = item.get("brand") or cached.brand
+				item.stock_uom = item.get("stock_uom") or cached.stock_uom
 
 			# Backfill catalog attributes onto the line itself. The cart payload
 			# carries no item_group / brand, and rule scope matching reads them
@@ -3086,7 +3255,7 @@ def apply_offers(invoice_data, selected_offers=None):
 		# See: erpnext/accounts/doctype/pricing_rule/utils.py -> get_qty_and_rate_for_mixed_conditions()
 		pricing_results = erpnext_apply_pricing_rule(pricing_args, doc=pricing_args) or []
 
-		if not pricing_results:
+		if not pricing_results and not selected_offer_names:
 			return {"items": items}
 
 		raw_rule_names = set()
@@ -3191,6 +3360,25 @@ def apply_offers(invoice_data, selected_offers=None):
 		if selected_offer_names:
 			# Restrict available rules to the ones explicitly selected from the UI.
 			rule_map = {name: details for name, details in rule_map.items() if name in selected_offer_names}
+			missing_selected = selected_offer_names - set(rule_map.keys())
+			if missing_selected:
+				extra_records = frappe.get_all(
+					"Pricing Rule",
+					filters={"name": ["in", list(missing_selected)]},
+					fields=[
+						"name",
+						"promotional_scheme",
+						"coupon_code_based",
+						"one_time_per_customer",
+						"promotional_scheme_id",
+						"price_or_product_discount",
+						"promotion_type",
+					],
+				)
+				for record in extra_records:
+					if record.coupon_code_based:
+						continue
+					rule_map[record.name] = record
 
 		if not rule_map:
 			return {"items": items}
@@ -3302,6 +3490,8 @@ def apply_offers(invoice_data, selected_offers=None):
 				rule_name = free_item.get("pricing_rules")
 				if not rule_name or rule_name not in rule_map:
 					continue
+				if rule_promotion_type(rule_map[rule_name]) == PROMOTION_TYPE_GWP:
+					continue
 				free_item_doc = frappe._dict(free_item)
 				free_item_doc.applied_promotional_scheme = rule_map[rule_name].promotional_scheme
 				free_items_map[(free_item.get("item_code"), rule_name)] = free_item_doc
@@ -3333,6 +3523,8 @@ def apply_offers(invoice_data, selected_offers=None):
 		for key, free_item_doc in txn_result.get("free_items", {}).items():
 			free_items_map.setdefault(key, free_item_doc)
 		applied_rules.update(txn_result.get("applied_rules", set()))
+
+		_apply_gwp_line_discounts(prepared_items, free_items_map, rule_map)
 
 		# Apply Min/Max ("cheapest/most-expensive item") price rules. These were
 		# deferred by the per-item engine (see pos_next.overrides.pricing_rule) and

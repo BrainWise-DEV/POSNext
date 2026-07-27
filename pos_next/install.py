@@ -51,6 +51,8 @@ def after_migrate():
 		# Setup default print format
 		setup_default_print_format(quiet=True)
 
+		remove_retired_gwp_custom_fields(quiet=True)
+
 		# Clear cache
 		frappe.clear_cache()
 		frappe.db.commit()
@@ -61,6 +63,24 @@ def after_migrate():
 		frappe.log_error(title="POS Next Migration Error", message=frappe.get_traceback())
 		log_message(f"POS Next: Migration error - {str(e)}", level="error")
 		raise
+
+
+def remove_retired_gwp_custom_fields(quiet=False):
+	"""Drop removed GWP custom fields after schema simplification."""
+	retired = [
+		("Promotional Scheme Product Discount", "gwp_eligibility_scope"),
+		("Pricing Rule", "gwp_eligibility_scope"),
+	]
+	for doctype, fieldname in retired:
+		custom_field_name = f"{doctype}-{fieldname}"
+		if not frappe.db.exists("Custom Field", custom_field_name):
+			continue
+		try:
+			frappe.delete_doc("Custom Field", custom_field_name, ignore_permissions=True)
+			if not quiet:
+				log_message(f"Removed retired custom field: {custom_field_name}", level="info")
+		except Exception as e:
+			log_message(f"Could not remove {custom_field_name}: {e}", level="warning")
 
 
 def setup_default_print_format(quiet=False):

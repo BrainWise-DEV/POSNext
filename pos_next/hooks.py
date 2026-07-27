@@ -135,7 +135,10 @@ before_uninstall = "pos_next.uninstall.before_uninstall"
 # ---------------
 # Override standard doctype classes
 
-override_doctype_class = {"Sales Invoice": "pos_next.overrides.sales_invoice.CustomSalesInvoice"}
+override_doctype_class = {
+	"Sales Invoice": "pos_next.overrides.sales_invoice.CustomSalesInvoice",
+	"Pricing Rule": "pos_next.overrides.custom_pricing_rule.CustomPricingRule",
+}
 
 # Document Events
 # ---------------

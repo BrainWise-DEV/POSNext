@@ -409,6 +409,8 @@ def create_promotion(data):
 			slab.free_qty = flt(data.get("free_qty", 1))
 			slab.free_item_uom = data.get("free_item_uom")
 			slab.same_item = cint(data.get("same_item", 0))
+			if hasattr(slab, "gwp_paid_qty_basis"):
+				slab.gwp_paid_qty_basis = data.get("gwp_paid_qty_basis") or "Max Qty"
 
 			if data.get("priority"):
 				slab.priority = cstr(data["priority"])
@@ -505,6 +507,8 @@ def update_promotion(scheme_name, data):
 					slab.min_amount = flt(data["min_amt"])
 				if "max_amt" in data:
 					slab.max_amount = flt(data["max_amt"])
+				if "gwp_paid_qty_basis" in data and hasattr(slab, "gwp_paid_qty_basis"):
+					slab.gwp_paid_qty_basis = data.get("gwp_paid_qty_basis") or "Max Qty"
 
 		# Save
 		scheme.save()

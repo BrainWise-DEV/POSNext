@@ -21,6 +21,7 @@ from pos_next.promotions.scope import (
 	get_item_group_with_descendants,
 	get_scope_config,
 )
+from pos_next.api.gwp import PROMOTION_TYPE_GWP, calculate_gwp_discount_percentage
 
 # ============================================================================
 # Constants
@@ -113,6 +114,7 @@ class Offer:
 	accumulative_scopes: list[dict] | None = None
 	max_accumulated_discount_percentage: float = 0
 	min_scopes_required: int = 1
+	gwp_paid_qty_basis: str | None = None
 
 	def to_dict(self) -> dict:
 		"""Convert to dictionary for API response"""
@@ -406,13 +408,18 @@ class SlabFetcher:
 		if not scheme_names:
 			return {}
 
+		optional_cols = []
+		if frappe.db.has_column("Promotional Scheme Product Discount", "gwp_paid_qty_basis"):
+			optional_cols.append("gwp_paid_qty_basis")
+		optional_sql = (", " + ", ".join(optional_cols)) if optional_cols else ""
+
 		results = frappe.db.sql(
-			"""
+			f"""
 			SELECT
 				parent, min_qty, max_qty, min_amount, max_amount,
 				apply_multiple_pricing_rules,
 				free_item, free_qty, free_item_uom, same_item, is_recursive,
-				recurse_for, apply_recursion_over
+				recurse_for, apply_recursion_over{optional_sql}
 			FROM `tabPromotional Scheme Product Discount`
 			WHERE parent IN %s AND disable = 0
 			ORDER BY parent, min_amount ASC, min_qty ASC
@@ -462,6 +469,13 @@ class OfferBuilder:
 
 		# Determine offer type
 		is_price_discount = rule.get("price_or_product_discount") == DiscountType.PRICE
+		promotion_type = rule.get("promotion_type") or None
+		gwp_discount_percentage = 0
+		if promotion_type == PROMOTION_TYPE_GWP and not is_price_discount:
+			gwp_discount_percentage = calculate_gwp_discount_percentage(
+				flt(slab.get("free_qty", 0)),
+				flt(slab.get("min_qty", 0)),
+			)
 
 		return Offer(
 			name=rule["name"],
@@ -478,7 +492,11 @@ class OfferBuilder:
 			discount_type=slab.get("rate_or_discount") if is_price_discount else None,
 			rate=flt(slab.get("rate", 0)) if is_price_discount else 0,
 			discount_amount=flt(slab.get("discount_amount", 0)) if is_price_discount else 0,
-			discount_percentage=flt(slab.get("discount_percentage", 0)) if is_price_discount else 0,
+			discount_percentage=(
+				flt(slab.get("discount_percentage", 0))
+				if is_price_discount
+				else gwp_discount_percentage
+			),
 			apply_discount_on_price=(slab.get("apply_discount_on_price") if is_price_discount else None),
 			min_or_max_discount_qty_limit=(
 				cint(slab.get("min_or_max_discount_qty_limit", 0)) if is_price_discount else 0
@@ -500,7 +518,8 @@ class OfferBuilder:
 			recurse_for=flt(slab.get("recurse_for", 0)) if not is_price_discount else 0,
 			apply_recursion_over=flt(slab.get("apply_recursion_over", 0)) if not is_price_discount else 0,
 			one_time_per_customer=1 if rule.get("one_time_per_customer") else 0,
-			promotion_type=rule.get("promotion_type") or None,
+			promotion_type=promotion_type,
+			gwp_paid_qty_basis=slab.get("gwp_paid_qty_basis"),
 		)
 
 	@staticmethod

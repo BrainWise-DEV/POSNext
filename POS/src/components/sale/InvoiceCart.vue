@@ -967,14 +967,14 @@
 									>
 										{{ item.item_name }}
 									</h4>
-									<!-- Free Item Badge -->
+									<!-- GWP / Free Item Badge -->
 									<span
-										v-if="item.free_qty && item.free_qty > 0"
+										v-if="getGwpFreeQty(item) > 0"
 										class="inline-flex items-center px-1.5 py-0.5 bg-green-600 text-white rounded-full text-[9px] font-bold flex-shrink-0"
 										:title="
-											item.is_free_item
-												? __('Free item')
-												: __('{0} free item(s) included', [item.free_qty])
+											isGwpItem(item)
+												? __('{0} free items', [getGwpFreeQty(item)])
+												: __('{0} free item(s) included', [getGwpFreeQty(item)])
 										"
 									>
 										<svg
@@ -989,14 +989,20 @@
 											/>
 										</svg>
 										{{
-											item.is_free_item
+											isGwpItem(item)
+												? __("{0} free items", [getGwpFreeQty(item)])
+												: item.is_free_item
 												? __("FREE")
-												: __("+{0} FREE", [item.free_qty])
+												: __("+{0} FREE", [getGwpFreeQty(item)])
 										}}
 									</span>
-									<!-- Discount Badge -->
+									<!-- Discount Badge (non-GWP only) -->
 									<div
-										v-if="item.discount_amount && item.discount_amount > 0"
+										v-if="
+											!isGwpItem(item) &&
+											item.discount_amount &&
+											item.discount_amount > 0
+										"
 										class="inline-flex items-center px-1.5 py-0.5 bg-gradient-to-r from-red-50 to-orange-50 text-red-700 rounded-full text-[9px] font-bold border border-red-200 flex-shrink-0"
 									>
 										<svg
@@ -1331,7 +1337,7 @@
 			<div v-if="items.length > 0" class="mb-1.5">
 				<!-- Discount Display - Highlighted -->
 				<div
-					v-if="discountAmount > 0"
+					v-if="displayDiscountAmount > 0"
 					class="flex items-center justify-between mb-0.5 bg-red-50 rounded px-1.5 py-1 -mx-0.5"
 				>
 					<div class="flex items-center gap-1">
@@ -1349,7 +1355,7 @@
 						<span class="text-xs font-bold text-red-700">{{ __("Discount") }}</span>
 					</div>
 					<span class="text-sm font-extrabold text-red-600 text-center min-w-[60px]">{{
-						formatCurrency(discountAmount)
+						formatCurrency(displayDiscountAmount)
 					}}</span>
 				</div>
 
@@ -1809,9 +1815,20 @@ const displaySubtotal = computed(() => {
  * @returns {Number} Grand total amount to display
  */
 const displayGrandTotal = computed(() => {
-	// Always: displaySubtotal + tax - discount
-	// This makes the display consistent and intuitive
-	return displaySubtotal.value + props.taxAmount - props.discountAmount;
+	return displaySubtotal.value + props.taxAmount - displayDiscountAmount.value;
+});
+
+/**
+ * Sum line discounts directly from cart items for instant, exact footer display.
+ * Avoids waiting on incremental cache updates after offer application.
+ */
+const displayDiscountAmount = computed(() => {
+	const lineDiscounts = props.items.reduce(
+		(sum, item) => sum + (Number.parseFloat(item.discount_amount) || 0),
+		0
+	);
+	// Fall back to store total when items haven't been stamped yet (e.g. header coupon)
+	return lineDiscounts > 0 ? lineDiscounts : props.discountAmount;
 });
 
 /**
@@ -1968,6 +1985,16 @@ function getInitials(name) {
  * Effective discount % for badges. Coupon max_amount caps are stored as
  * absolute amounts (discount_percentage=0), so derive % from amount/base.
  */
+function isGwpItem(item) {
+	return item?.discount_source === "gwp" || Number.parseFloat(item?.gwp_free_qty) > 0;
+}
+
+function getGwpFreeQty(item) {
+	const gwpQty = Number.parseFloat(item?.gwp_free_qty) || 0;
+	if (gwpQty > 0) return gwpQty;
+	return Number.parseFloat(item?.free_qty) || 0;
+}
+
 function getItemDiscountPercent(item) {
 	const pct = Number.parseFloat(item?.discount_percentage) || 0;
 	if (pct > 0) return pct;

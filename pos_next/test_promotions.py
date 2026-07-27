@@ -731,6 +731,43 @@ class TestPromotions(FrappeTestCase):
 		self.assertEqual(len(free_lines), 1)
 		self.assertEqual(free_lines[0].item_code, ITEM_C)
 
+	def test_gwp_many_items_max_basis(self):
+		"""Buy 4 across two items; 2 free on cheapest lines when Max basis."""
+		rule = _make_rule(
+			"_PNXT_TEST_GWP_ManyMax",
+			apply_on="Item Code",
+			mixed_conditions=1,
+			items=[{"item_code": ITEM_A}, {"item_code": ITEM_B}],
+			price_or_product_discount="Product",
+			rate_or_discount="Discount Percentage",
+			same_item=1,
+			min_qty=4,
+			max_qty=4,
+			free_qty=2,
+			gwp_paid_qty_basis="Max Qty",
+			promotion_type="GWP",
+		)
+		payload = _cart_payload(
+			self.ctx,
+			[
+				_line(self.ctx, ITEM_A, qty=2),
+				_line(self.ctx, ITEM_B, qty=2),
+			],
+		)
+		_apply_offers_and_stamp(payload, [rule])
+		final = _submit_invoice(self.ctx, payload, paid_amount=160)
+
+		self.assertEqual(final.status, "Paid")
+		self.assertAlmostEqual(flt(final.grand_total), 160, places=2)
+
+		by_code = {it.item_code: it for it in final.items if not it.is_free_item}
+		line_a = by_code[ITEM_A]
+		self.assertAlmostEqual(
+			flt(line_a.discount_amount) * flt(line_a.qty), 100, places=2
+		)
+		self.assertAlmostEqual(flt(by_code[ITEM_B].discount_amount), 0, places=2)
+		self.assertEqual(len([it for it in final.items if it.is_free_item]), 0)
+
 	def test_transaction_level_discount(self):
 		"""10% off entire cart when total ≥ 100; cart of 130 → grand_total 117."""
 		rule = _make_rule(
@@ -1309,7 +1346,8 @@ class TestPromotions(FrappeTestCase):
 			selected_offers=json.dumps([item_rule, gwp_rule]),
 		)
 		self.assertTrue(resp["items"][0].get("is_already_discounted"))
-		self.assertGreater(len(resp.get("free_items") or []), 0)
+		item_b = next(it for it in resp["items"] if it.get("item_code") == ITEM_B)
+		self.assertGreater(flt(item_b.get("gwp_free_qty") or item_b.get("discount_amount") or 0), 0)
 
 
 class TestPromotionMatrix14214(FrappeTestCase):
@@ -1507,7 +1545,10 @@ class TestPromotionMatrix14214(FrappeTestCase):
 			selected_offers=json.dumps([item_rule, gwp_rule]),
 		)
 		self.assertTrue(resp["items"][0].get("is_already_discounted"))
-		self.assertGreater(len(resp.get("free_items") or []), 0)
+		companion_line = next(it for it in resp["items"] if it.get("item_code") == companion)
+		self.assertGreater(
+			flt(companion_line.get("gwp_free_qty") or companion_line.get("discount_amount") or 0), 0
+		)
 
 
 class TestPricingRuleScope(FrappeTestCase):

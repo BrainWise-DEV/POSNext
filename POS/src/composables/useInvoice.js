@@ -742,9 +742,17 @@ export function useInvoice() {
 
 		// Calculate discount from either percentage or fixed amount
 		let discountAmount = 0;
+		// GWP: exact discount = free_qty * unit_price (no percentage rounding)
+		const gwpFreeQty = Number.parseFloat(item.gwp_free_qty) || 0;
+		if (item.discount_source === "gwp" && gwpFreeQty > 0) {
+			discountAmount = roundCurrency(gwpFreeQty * roundedRate);
+			if (discountAmount > baseAmount) {
+				discountAmount = baseAmount;
+			}
+			item.discount_percentage = baseAmount > 0 ? (discountAmount / baseAmount) * 100 : 0;
 		// Coupon line discounts with max_amount are stored as absolute amounts.
 		// Do NOT convert them to % — qty changes would re-scale and exceed the cap.
-		if (item.coupon_code && Number.parseFloat(item.discount_amount) > 0) {
+		} else if (item.coupon_code && Number.parseFloat(item.discount_amount) > 0) {
 			discountAmount = roundCurrency(item.discount_amount);
 			if (discountAmount > baseAmount) {
 				discountAmount = baseAmount;

@@ -777,7 +777,7 @@
 
 													<div class="flex flex-col gap-4">
 														<!-- Discount Type Selection -->
-														<div>
+														<div v-if="!isGwpPromotionType">
 															<label
 																class="block text-sm font-medium text-gray-700 mb-3 text-start"
 																>{{ __("Discount Type") }}</label
@@ -938,7 +938,8 @@
 															<FormControl
 																v-if="
 																	form.discount_type ===
-																	'free_item'
+																		'free_item' ||
+																	isGwpPromotionType
 																"
 																type="number"
 																:label="__('Free Quantity')"
@@ -947,6 +948,51 @@
 																:disabled="isPricingRule"
 																required
 															/>
+
+															<div
+																v-if="isGwpPromotionType"
+																class="col-span-3 rounded-lg border border-purple-200 bg-purple-50 px-4 py-3"
+															>
+																<p
+																	class="text-xs font-medium text-purple-800"
+																>
+																	{{
+																		__(
+																			"Discount per Free Items"
+																		)
+																	}}
+																</p>
+																<p
+																	class="text-lg font-bold text-purple-900 mt-1"
+																>
+																	{{
+																		gwpDiscountPreview > 0
+																			? __(
+																					"{0}% (based on {1} free / {2} purchased)",
+																					[
+																						gwpDiscountPreview.toFixed(
+																							2
+																						),
+																						form.free_qty ||
+																							0,
+																						gwpReferenceQty,
+																					]
+																			  )
+																			: __(
+																					"Set minimum quantity and free quantity to preview"
+																			  )
+																	}}
+																</p>
+																<p
+																	class="text-xs text-purple-700 mt-1"
+																>
+																	{{
+																		__(
+																			"At checkout the discount is recalculated dynamically as free quantity divided by purchased quantity."
+																		)
+																	}}
+																</p>
+															</div>
 
 															<FormControl
 																v-if="!isItemLevelPromotionType"
@@ -1213,6 +1259,22 @@ const isItemLevelPromotionType = computed(
 const isAutoPromotionType = computed(() => form.value.promotion_type === PROMOTION_TYPE_AUTO);
 
 const isGwpPromotionType = computed(() => form.value.promotion_type === PROMOTION_TYPE_GWP);
+
+function calculateGwpDiscountPercentage(freeQty, purchasedQty) {
+	const purchased = Number.parseFloat(purchasedQty) || 0;
+	const free = Number.parseFloat(freeQty) || 0;
+	if (purchased <= 0 || free <= 0) return 0;
+	return Math.min(100, (free / purchased) * 100);
+}
+
+const gwpReferenceQty = computed(() => {
+	const minQty = Number.parseFloat(form.value.min_qty) || 0;
+	return minQty > 0 ? minQty : 0;
+});
+
+const gwpDiscountPreview = computed(() =>
+	calculateGwpDiscountPercentage(form.value.free_qty, gwpReferenceQty.value)
+);
 
 const availableDiscountTypes = computed(() => {
 	if (isItemLevelPromotionType.value || isAutoPromotionType.value) {
