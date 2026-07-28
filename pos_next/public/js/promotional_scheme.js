@@ -33,6 +33,9 @@ frappe.ui.form.on("Promotional Scheme", {
 	promotion_type(frm) {
 		pn_toggle_gwp_fields(frm);
 	},
+	pos_is_accumulative(frm) {
+		pn_sync_accumulative(frm);
+	},
 	apply_on(frm) {
 		pn_sync_accumulative(frm);
 		pn_toggle_gwp_fields(frm);
@@ -143,35 +146,35 @@ function pn_sync_min_max(frm) {
 }
 
 /**
- * Accumulative schemes take their percentage from the per-scope rows.
+ * Presentation only — the server owns the data.
  *
- * The price discount slab itself stays visible — ERPNext generates no Pricing
- * Rule without one, and the slab is where the mode, the cap and Min Scopes
- * Required live. Only its discount-value fields are hidden, and the product
- * (free item) slabs go away since an Item Level Discount cannot grant them.
+ * `pos_is_accumulative` is an authoring control. `normalize_accumulative_scheme`
+ * projects it onto the canonical slab on every validate, so this function sets no
+ * value the server does not also set; it just gets the irrelevant controls out of
+ * the way. Anything enforced here is enforced there too, which is what keeps a
+ * scheme built via the API as correct as one built in this form.
+ *
+ * The price discount slab is hidden rather than removed: ERPNext generates no
+ * Pricing Rule from an empty child table, so the server keeps exactly one row
+ * alive behind the scenes.
  */
 function pn_sync_accumulative(frm) {
-	const slabs = frm.doc.price_discount_slabs || [];
-	const is_accumulative = slabs.some((row) => row.apply_discount_on_price === "Accumulative");
+	const is_accumulative = !!frm.doc.pos_is_accumulative;
+
+	frm.toggle_display("price_discount_slabs", !is_accumulative);
+	// Free items and Accumulative are mutually exclusive.
+	frm.toggle_display("product_discount_slabs", !is_accumulative);
 
 	if (is_accumulative) {
-		for (const row of slabs) {
-			if (row.apply_discount_on_price !== "Accumulative") continue;
-			// ERPNext needs a rate_or_discount to generate a Price rule at all.
-			if (row.rate_or_discount !== "Discount Percentage") {
-				frappe.model.set_value(row.doctype, row.name, "rate_or_discount", "Discount Percentage");
-			}
-			for (const fieldname of ["rate", "discount_amount", "discount_percentage"]) {
-				if (row[fieldname]) {
-					frappe.model.set_value(row.doctype, row.name, fieldname, 0);
-				}
-			}
-		}
 		if (!frm.doc.mixed_conditions) {
 			frm.set_value("mixed_conditions", 1);
 		}
+		if (!frm.doc.min_scopes_required) {
+			frm.set_value("min_scopes_required", 1);
+		}
 	}
 
+	// Mirrors the server, which pins these on the slab it maintains.
 	const slab_grid = frm.fields_dict.price_discount_slabs?.grid;
 	if (slab_grid) {
 		for (const fieldname of PN_SLAB_DISCOUNT_FIELDS) {
@@ -179,9 +182,6 @@ function pn_sync_accumulative(frm) {
 			slab_grid.update_docfield_property(fieldname, "in_list_view", is_accumulative ? 0 : 1);
 		}
 	}
-
-	// Free items and Accumulative are mutually exclusive.
-	frm.set_df_property("product_discount_slabs", "hidden", is_accumulative ? 1 : 0);
 
 	pn_toggle_scope_percentage(frm, is_accumulative);
 }

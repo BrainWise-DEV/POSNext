@@ -2278,6 +2278,140 @@ class TestAccumulativeValidation(FrappeTestCase):
 		self.assertTrue(doc.pos_only)
 
 
+class TestAccumulativeSchemeCheckbox(FrappeTestCase):
+	"""`pos_is_accumulative` is an authoring control; the slab stays canonical.
+
+	The checkbox hides the price discount table, so the server must materialise
+	the single slab ERPNext needs — an empty child table generates no Pricing Rule
+	at all and the scheme would save clean while discounting nothing.
+	"""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		cls.ctx = _ctx()
+
+	def _scheme_doc(self, name, **overrides):
+		if frappe.db.exists("Promotional Scheme", name):
+			frappe.delete_doc("Promotional Scheme", name, force=True, ignore_permissions=True)
+		self.addCleanup(
+			lambda: frappe.db.exists("Promotional Scheme", name)
+			and frappe.delete_doc("Promotional Scheme", name, force=True, ignore_permissions=True)
+		)
+		payload = {
+			"doctype": "Promotional Scheme",
+			"name": name,
+			"company": _resolve_company(),
+			"apply_on": "Item Code",
+			"selling": 1,
+			"buying": 0,
+			"valid_from": nowdate(),
+			"promotion_type": "Item Level Discount",
+			"pos_is_accumulative": 1,
+			"min_scopes_required": 1,
+			"items": [
+				{"item_code": ITEM_A, "pos_discount_percentage": 5},
+				{"item_code": ITEM_B, "pos_discount_percentage": 3},
+			],
+		}
+		payload.update(overrides)
+		return frappe.get_doc(payload)
+
+	def test_checkbox_alone_materialises_the_slab_and_generates_a_rule(self):
+		"""No slab supplied at all — the API path a form would never exercise."""
+		scheme = self._scheme_doc("_PNXT_TEST_AccumCheckbox")
+		self.assertFalse(scheme.get("price_discount_slabs"))
+		scheme.insert(ignore_permissions=True)
+
+		slabs = scheme.get("price_discount_slabs") or []
+		self.assertEqual(len(slabs), 1, "server must maintain exactly one slab")
+		self.assertEqual(slabs[0].apply_discount_on_price, "Accumulative")
+		self.assertEqual(slabs[0].rate_or_discount, "Discount Percentage")
+		self.assertTrue(slabs[0].rule_description, "slab's only reqd field must be injected")
+		self.assertTrue(scheme.mixed_conditions)
+		self.assertTrue(scheme.pos_only)
+
+		rules = frappe.get_all("Pricing Rule", filters={"promotional_scheme": scheme.name}, pluck="name")
+		self.assertEqual(len(rules), 1, "an empty slab table would have generated nothing")
+		self.assertEqual(
+			frappe.db.get_value("Pricing Rule", rules[0], "apply_discount_on_price"), "Accumulative"
+		)
+
+	def test_parent_config_is_projected_onto_the_generated_rule(self):
+		scheme = self._scheme_doc(
+			"_PNXT_TEST_AccumCheckboxCfg",
+			min_qty=2,
+			min_amount=50,
+			max_accumulated_discount_percentage=25,
+			min_scopes_required=2,
+		)
+		scheme.insert(ignore_permissions=True)
+
+		rule = frappe.get_doc(
+			"Pricing Rule",
+			frappe.get_all("Pricing Rule", filters={"promotional_scheme": scheme.name}, pluck="name")[0],
+		)
+		self.assertAlmostEqual(flt(rule.min_qty), 2, places=2)
+		self.assertAlmostEqual(flt(rule.min_amt), 50, places=2)
+		self.assertAlmostEqual(flt(rule.max_accumulated_discount_percentage), 25, places=2)
+		self.assertEqual(int(rule.min_scopes_required), 2)
+
+	def test_toggling_off_and_on_keeps_exactly_one_slab(self):
+		"""Idempotency: repeated saves must not append a slab (or a Pricing Rule) each time."""
+		scheme = self._scheme_doc("_PNXT_TEST_AccumCheckboxToggle")
+		scheme.insert(ignore_permissions=True)
+
+		for _ in range(3):
+			scheme.reload()
+			scheme.save(ignore_permissions=True)
+
+		scheme.reload()
+		self.assertEqual(len(scheme.get("price_discount_slabs") or []), 1)
+		self.assertEqual(
+			len(frappe.get_all("Pricing Rule", filters={"promotional_scheme": scheme.name})), 1
+		)
+
+	def test_accumulative_and_min_max_together_are_rejected(self):
+		"""The checkbox re-admits a state the single Select made impossible."""
+		scheme = self._scheme_doc(
+			"_PNXT_TEST_AccumCheckboxConflict",
+			price_discount_slabs=[
+				{
+					"rule_description": "min/max row",
+					"rate_or_discount": "Discount Percentage",
+					"discount_percentage": 10,
+					"apply_discount_on_price": "Min",
+				}
+			],
+		)
+		with self.assertRaises(frappe.ValidationError):
+			scheme.insert(ignore_permissions=True)
+
+	def test_multiple_slabs_are_rejected(self):
+		"""Several rows would generate several identical rules -> conflict at the till."""
+		scheme = self._scheme_doc(
+			"_PNXT_TEST_AccumCheckboxMultiSlab",
+			price_discount_slabs=[
+				{"rule_description": "a", "rate_or_discount": "Discount Percentage", "min_qty": 1},
+				{"rule_description": "b", "rate_or_discount": "Discount Percentage", "min_qty": 5},
+			],
+		)
+		with self.assertRaises(frappe.ValidationError):
+			scheme.insert(ignore_permissions=True)
+
+	def test_discount_applies_end_to_end_from_the_checkbox(self):
+		import json
+
+		scheme = self._scheme_doc("_PNXT_TEST_AccumCheckboxApply")
+		scheme.insert(ignore_permissions=True)
+		rules = frappe.get_all("Pricing Rule", filters={"promotional_scheme": scheme.name}, pluck="name")
+
+		payload = _cart_payload(self.ctx, [_line(self.ctx, ITEM_A), _line(self.ctx, ITEM_B)])
+		resp = apply_offers(invoice_data=json.dumps(payload), selected_offers=json.dumps(rules))
+		for item in resp["items"][:2]:
+			self.assertAlmostEqual(flt(item.get("discount_percentage")), 8, places=2)
+
+
 class TestAccumulativeOfflinePayload(FrappeTestCase):
 	"""`get_offers` must ship enough for the offline engine to reproduce the math.
 
@@ -2422,6 +2556,7 @@ def run_all():
 			TestDiscountPipelineIdempotency,
 			TestAccumulativeDiscount,
 			TestAccumulativeValidation,
+			TestAccumulativeSchemeCheckbox,
 			TestAccumulativeOfflinePayload,
 		)
 	)
