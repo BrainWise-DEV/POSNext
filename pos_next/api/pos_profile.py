@@ -4,6 +4,7 @@
 
 import frappe
 from frappe import _
+from frappe.utils import cint
 
 from pos_next.api.utilities import _parse_list_parameter, check_user_company
 
