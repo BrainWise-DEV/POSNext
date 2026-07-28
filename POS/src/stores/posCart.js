@@ -483,6 +483,43 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		return typeof value === "string" && value.trim().length > 0;
 	}
 
+	const OFFER_DISCOUNT_SOURCES = new Set([
+		"gwp",
+		"accumulative_promotion",
+		"item_level_promotion",
+		"auto_discount",
+	]);
+
+	function itemHasOfferDiscount(item) {
+		if (item.discount_source === "manual_discount") return false;
+		if (Number.parseFloat(item.gwp_free_qty) > 0) return true;
+		if (hasPricingRules(item.pricing_rules)) return true;
+		return Boolean(item.discount_source && OFFER_DISCOUNT_SOURCES.has(item.discount_source));
+	}
+
+	function clearOfferDiscountFromItem(item) {
+		if (item.discount_source === "manual_discount") return;
+
+		item.discount_percentage = 0;
+		item.discount_amount = 0;
+		item.gwp_free_qty = 0;
+		item.free_qty = 0;
+		item.pricing_rules = [];
+		item.discount_source = "";
+		item.is_already_discounted = 0;
+		item.is_accumulative_discount = 0;
+		recalculateItem(item);
+	}
+
+	function clearAllOfferDiscounts() {
+		invoiceItems.value.forEach((item) => {
+			if (!item.is_free_item) {
+				clearOfferDiscountFromItem(item);
+			}
+		});
+		rebuildIncrementalCache();
+	}
+
 	/**
 	 * Sync discounts from server response to cart items.
 	 * Server returns items in same order as sent (handles duplicate SKUs).
@@ -498,13 +535,13 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			const discountAmt = Number.parseFloat(serverItem.discount_amount) || 0;
 			const gwpFreeQty = Number.parseFloat(serverItem.gwp_free_qty) || 0;
 
-			// Only update if server applied a pricing rule or discount
-			if (
+			const serverHasOfferDiscount =
 				hasPricingRules(serverItem.pricing_rules) ||
 				discountPct > 0 ||
 				discountAmt > 0 ||
-				gwpFreeQty > 0
-			) {
+				gwpFreeQty > 0;
+
+			if (serverHasOfferDiscount) {
 				// GWP and fixed-amount discounts: keep exact amount, not % (avoids rounding drift)
 				if (gwpFreeQty > 0 || discountAmt > 0) {
 					item.discount_amount = discountAmt;
@@ -517,6 +554,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				}
 				item.pricing_rules = serverItem.pricing_rules;
 				hasDiscounts = discountPct > 0 || discountAmt > 0 || gwpFreeQty > 0;
+			} else if (itemHasOfferDiscount(item)) {
+				clearOfferDiscountFromItem(item);
 			}
 			// Otherwise preserve existing manual discount
 
@@ -834,7 +873,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 			appliedOffers.value = [];
 			processFreeItems([]); // Remove all free items
+			clearAllOfferDiscounts();
 			removeDiscount();
+			applyHeaderDiscountFromServer(null);
 			await nextTick();
 			showSuccess(__("Offer has been removed from cart"));
 			offersDialogRef?.resetApplyingState();
@@ -850,7 +891,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 			appliedOffers.value = [];
 			processFreeItems([]); // Remove all free items
+			clearAllOfferDiscounts();
 			removeDiscount();
+			applyHeaderDiscountFromServer(null);
 			await nextTick();
 			showSuccess(__("Offer has been removed from cart"));
 			offersDialogRef?.resetApplyingState();
@@ -970,17 +1013,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 					// All offers invalid - clear everything
 					appliedOffers.value = [];
 					processFreeItems([]);
-
-					// Reset all item rates to original (remove discounts)
-					invoiceItems.value.forEach((item) => {
-						if (item.pricing_rules && item.pricing_rules.length > 0) {
-							item.discount_percentage = 0;
-							item.discount_amount = 0;
-							item.pricing_rules = [];
-							recalculateItem(item);
-						}
-					});
-					rebuildIncrementalCache();
+					clearAllOfferDiscounts();
+					applyHeaderDiscountFromServer(null);
 				} else {
 					// Reapply only valid offers
 					const invoiceData = buildOfferEvaluationPayload(currentProfile);
@@ -2032,17 +2066,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			if (combinedCodes.length === 0 && invalidOffers.length > 0) {
 				appliedOffers.value = [];
 				processFreeItems([]);
-				invoiceItems.value.forEach((item) => {
-					if (item.pricing_rules && item.pricing_rules.length > 0) {
-						item.discount_percentage = 0;
-						item.discount_amount = 0;
-						recalculateItem(item);
-					}
-				});
+				clearAllOfferDiscounts();
 				// Also clear any transaction-level header discount the server
 				// previously surfaced — if no offers remain, no header discount applies.
 				applyHeaderDiscountFromServer(null);
-				rebuildIncrementalCache();
 
 				const names = invalidOffers.map((o) => o.name).join(", ");
 				showWarning(__("Offer removed: {0}. Cart no longer meets requirements.", [names]));
