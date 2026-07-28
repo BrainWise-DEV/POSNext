@@ -390,11 +390,15 @@ def search_by_barcode(barcode, pos_profile):
 		uom_prices = {}
 		if pos_profile_doc.selling_price_list:
 			ItemPrice = DocType("Item Price")
+			today = nowdate()
 			prices = (
 				frappe.qb.from_(ItemPrice)
 				.select(ItemPrice.uom, ItemPrice.price_list_rate)
 				.where(ItemPrice.item_code == item_code)
 				.where(ItemPrice.price_list == pos_profile_doc.selling_price_list)
+				.where(ItemPrice.valid_from.isnull() | (ItemPrice.valid_from <= today))
+				.where(ItemPrice.valid_upto.isnull() | (ItemPrice.valid_upto >= today))
+				.orderby(ItemPrice.valid_from)
 				.run(as_dict=True)
 			)
 			for p in prices:
@@ -565,13 +569,17 @@ def get_item_variants(template_item, pos_profile):
 		uom_prices_map = {}
 		if variant_codes:
 			ItemPrice = DocType("Item Price")
+			today = nowdate()
 			prices = (
 				frappe.qb.from_(ItemPrice)
 				.select(ItemPrice.item_code, ItemPrice.uom, ItemPrice.price_list_rate)
 				.where(ItemPrice.item_code.isin(variant_codes))
 				.where(ItemPrice.price_list == pos_profile_doc.selling_price_list)
+				.where(ItemPrice.valid_from.isnull() | (ItemPrice.valid_from <= today))
+				.where(ItemPrice.valid_upto.isnull() | (ItemPrice.valid_upto >= today))
 				.orderby(ItemPrice.item_code)
 				.orderby(ItemPrice.uom)
+				.orderby(ItemPrice.valid_from)
 				.run(as_dict=True)
 			)
 			for price in prices:
@@ -1291,13 +1299,17 @@ def get_items(
 		# UOM-specific prices - batch query ALL prices for all items using Query Builder
 		if item_codes:
 			ItemPrice = DocType("Item Price")
+			today = nowdate()
 			prices = (
 				frappe.qb.from_(ItemPrice)
 				.select(ItemPrice.item_code, ItemPrice.uom, ItemPrice.price_list_rate)
 				.where(ItemPrice.item_code.isin(item_codes))
 				.where(ItemPrice.price_list == pos_profile_doc.selling_price_list)
+				.where(ItemPrice.valid_from.isnull() | (ItemPrice.valid_from <= today))
+				.where(ItemPrice.valid_upto.isnull() | (ItemPrice.valid_upto >= today))
 				.orderby(ItemPrice.item_code)
 				.orderby(ItemPrice.uom)
+				.orderby(ItemPrice.valid_from)
 				.run(as_dict=True)
 			)
 			for price in prices:
@@ -1387,6 +1399,7 @@ def get_items(
 			if not price_row and item.get("has_variants"):
 				ItemPrice = DocType("Item Price")
 				Item = DocType("Item")
+				today = nowdate()
 				variant_prices = (
 					frappe.qb.from_(ItemPrice)
 					.inner_join(Item)
@@ -1394,6 +1407,8 @@ def get_items(
 					.select(fn.Min(ItemPrice.price_list_rate).as_("min_price"))
 					.where(Item.variant_of == item["item_code"])
 					.where(ItemPrice.price_list == pos_profile_doc.selling_price_list)
+					.where(ItemPrice.valid_from.isnull() | (ItemPrice.valid_from <= today))
+					.where(ItemPrice.valid_upto.isnull() | (ItemPrice.valid_upto >= today))
 					.where(Item.disabled == 0)
 					.run(as_dict=True)
 				)
@@ -1611,12 +1626,16 @@ def get_items_bulk(
 		price_list = pos_profile_doc.selling_price_list
 		if price_list and item_codes:
 			ItemPrice = DocType("Item Price")
+			today = nowdate()
 			prices = (
 				frappe.qb.from_(ItemPrice)
 				.select(ItemPrice.item_code, ItemPrice.uom, ItemPrice.price_list_rate)
 				.where(ItemPrice.price_list == price_list)
 				.where(ItemPrice.item_code.isin(item_codes))
 				.where(ItemPrice.selling == 1)
+				.where(ItemPrice.valid_from.isnull() | (ItemPrice.valid_from <= today))
+				.where(ItemPrice.valid_upto.isnull() | (ItemPrice.valid_upto >= today))
+				.orderby(ItemPrice.valid_from)
 				.run(as_dict=True)
 			)
 			for p in prices:
