@@ -44,6 +44,7 @@ from pos_next.api.promotion_exclusions import (
 	mark_item_discount_flags,
 )
 from pos_next.promotions.scope import (
+	APPLY_ON_TRANSACTION,
 	get_item_group_with_descendants,
 	get_scope_config,
 	get_scope_keys,
@@ -95,6 +96,17 @@ def add_line_part(item, source: str, percentage) -> None:
 
 def get_line_parts(item) -> dict:
 	return item.get(_PARTS_ATTR) or {}
+
+
+def get_line_baseline(item) -> float:
+	"""The discount ERPNext's per-item engine already put on this line.
+
+	Non-zero means another Pricing Rule claimed the line. Auto Discount rules are
+	filtered out of those engine results and arrive as a *part* instead, so they
+	never show up here — which is what lets Auto Discount stack while a targeted
+	rule takes precedence.
+	"""
+	return flt(item.get(_BASE_ATTR) or 0)
 
 
 def get_line_total_percentage(item) -> float:
@@ -265,33 +277,9 @@ def apply_auto_discount_rules(items, rule_map, selected_offer_names=None, type_m
 		type_map = get_rule_promotion_types(list(rule_map.keys()))
 
 	mark_item_discount_flags(items, type_map)
-	pre_subtotal = get_pre_discount_subtotal(items)
 	applied = set()
 
-	for rule_name, details in rule_map.items():
-		if selected_offer_names and rule_name not in selected_offer_names:
-			continue
-		if rule_promotion_type(details) != PROMOTION_TYPE_AUTO:
-			continue
-
-		rule = frappe.get_cached_doc("Pricing Rule", rule_name)
-		if rule.disable or rule.price_or_product_discount != "Price":
-			continue
-		if rule.get("apply_discount_on_price") in MIN_MAX_OPTIONS:
-			continue
-
-		min_amt = flt(rule.min_amt)
-		if min_amt and pre_subtotal < min_amt:
-			continue
-
-		max_amt = flt(rule.max_amt)
-		if max_amt and pre_subtotal > max_amt:
-			continue
-
-		# Expand the rule's scope once — item group rows resolve through the
-		# nested set, which we don't want to repeat for every cart line.
-		scope_keys = get_scope_keys(rule)
-
+	for rule_name, rule, scope_keys in _iter_applicable_auto_rules(items, rule_map, selected_offer_names):
 		rule_applied = False
 		for item in items:
 			if item.get("is_free_item") or not is_eligible_for_promotion(
@@ -314,6 +302,77 @@ def apply_auto_discount_rules(items, rule_map, selected_offer_names=None, type_m
 			applied.add(rule_name)
 
 	return applied
+
+
+def _iter_applicable_auto_rules(items, rule_map, selected_offer_names=None):
+	"""Yield ``(rule_name, rule, scope_keys)`` for Auto Discount rules the cart passes.
+
+	Only the document-level gates are checked here (type, state, cart amount) —
+	per-line matching stays with the caller. Shared so the accumulative pass can
+	find out which lines a targeted Auto Discount will claim *before* it runs,
+	without duplicating this filter.
+	"""
+	pre_subtotal = get_pre_discount_subtotal(items)
+
+	for rule_name, details in (rule_map or {}).items():
+		if selected_offer_names and rule_name not in selected_offer_names:
+			continue
+		if rule_promotion_type(details) != PROMOTION_TYPE_AUTO:
+			continue
+
+		rule = frappe.get_cached_doc("Pricing Rule", rule_name)
+		if rule.disable or rule.price_or_product_discount != "Price":
+			continue
+		if rule.get("apply_discount_on_price") in MIN_MAX_OPTIONS:
+			continue
+
+		min_amt = flt(rule.min_amt)
+		if min_amt and pre_subtotal < min_amt:
+			continue
+
+		max_amt = flt(rule.max_amt)
+		if max_amt and pre_subtotal > max_amt:
+			continue
+
+		# Expand the rule's scope once — item group rows resolve through the
+		# nested set, which we don't want to repeat for every cart line.
+		yield rule_name, rule, get_scope_keys(rule)
+
+
+def get_targeted_auto_discount_lines(items, rule_map, selected_offer_names=None, type_map=None) -> set:
+	"""``id()`` of every line a *scoped* Auto Discount rule will claim.
+
+	Specificity decides precedence. A ``Transaction`` Auto Discount is a cart-level
+	reward, orthogonal to rewarding a varied basket, so it stacks on top of the
+	accumulated total. An Auto Discount naming an item code, group or brand is a
+	competing decision about that line's price, so it wins outright and the line
+	drops out of the accumulative pass entirely — as recipient *and* as a scope
+	contributor for everyone else.
+	"""
+	if not items or not rule_map:
+		return set()
+
+	if type_map is None:
+		type_map = get_rule_promotion_types(list(rule_map.keys()))
+
+	claimed = set()
+	for _rule_name, rule, scope_keys in _iter_applicable_auto_rules(
+		items, rule_map, selected_offer_names
+	):
+		if rule.get("apply_on") == APPLY_ON_TRANSACTION:
+			continue
+		for item in items:
+			if item.get("is_free_item"):
+				continue
+			if not is_eligible_for_promotion(item, PROMOTION_TARGET_AUTO, rule_type_map=type_map):
+				continue
+			if not item_matches_rule_scope(item, rule, scope_keys=scope_keys):
+				continue
+			if pricing_rule_line_percentage(item, rule) <= 0:
+				continue
+			claimed.add(id(item))
+
+	return claimed
 
 
 def get_accumulative_rule_names(rule_names) -> set[str]:
@@ -364,7 +423,9 @@ def _scope_row_keys(row_field: str, value: str) -> set[str]:
 	return {value}
 
 
-def apply_accumulative_discount_rules(items, rule_map, selected_offer_names=None, type_map=None) -> set:
+def apply_accumulative_discount_rules(
+	items, rule_map, selected_offer_names=None, type_map=None, excluded_lines=None
+) -> set:
 	"""Accumulative rules — sum the percentages of every scope row present in the cart.
 
 	A rule lists scopes (item codes, item groups or brands) each carrying its own
@@ -377,6 +438,13 @@ def apply_accumulative_discount_rules(items, rule_map, selected_offer_names=None
 	cashier discount, or a different item-level promotion) therefore cannot
 	inflate the total for everyone else.
 
+	Precedence: a line claimed by a rule that targets it keeps that rule's
+	percentage alone, rather than having the accumulated total added on top. That
+	covers both routes a competing rule can arrive by — the pipeline baseline
+	(ERPNext's per-item engine) and ``excluded_lines`` (a scoped Auto Discount,
+	which is applied as a part). Only a ``Transaction`` Auto Discount stacks,
+	because a cart-level reward does not compete with rewarding a varied basket.
+
 	Contributes to ``PART_ACCUMULATIVE`` and flags the line so the matrix lets
 	Auto Discount stack on top; the two percentages sum at finalize.
 	"""
@@ -386,6 +454,7 @@ def apply_accumulative_discount_rules(items, rule_map, selected_offer_names=None
 	if type_map is None:
 		type_map = get_rule_promotion_types(list(rule_map.keys()))
 
+	excluded = excluded_lines if excluded_lines is not None else set()
 	pre_subtotal = get_pre_discount_subtotal(items)
 	applied = set()
 
@@ -416,6 +485,10 @@ def apply_accumulative_discount_rules(items, rule_map, selected_offer_names=None
 			item
 			for item in items
 			if not item.get("is_free_item")
+			# A rule that targets this line wins outright — the accumulative
+			# percentage does not pile on top of it.
+			and get_line_baseline(item) <= 0
+			and id(item) not in excluded
 			and is_eligible_for_promotion(item, PROMOTION_TARGET_AUTO, rule_type_map=type_map)
 			and item_matches_rule_scope(item, rule, scope_keys=get_scope_keys(rule))
 		]
@@ -513,8 +586,19 @@ def run_line_discount_passes(items, rule_map, selected_offer_names=None, cap_res
 	begin_line_discounts(items)
 	mark_item_discount_flags(items, type_map)
 
-	applied = apply_accumulative_discount_rules(
+	# Worked out before the accumulative pass so a line a targeted Auto Discount
+	# will claim neither receives the accumulated total nor contributes its scope
+	# to the other lines.
+	targeted = get_targeted_auto_discount_lines(
 		items, rule_map, selected_offer_names=selected_offer_names, type_map=type_map
+	)
+
+	applied = apply_accumulative_discount_rules(
+		items,
+		rule_map,
+		selected_offer_names=selected_offer_names,
+		type_map=type_map,
+		excluded_lines=targeted,
 	)
 	applied |= apply_auto_discount_rules(
 		items, rule_map, selected_offer_names=selected_offer_names, type_map=type_map

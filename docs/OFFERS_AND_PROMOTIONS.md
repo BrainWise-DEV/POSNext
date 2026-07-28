@@ -161,6 +161,31 @@ Rules of thumb:
 
 - A scope row counts only when a line that will **actually receive** the discount
   matches it. A line excluded by the matrix cannot inflate everyone else's total.
+- **A rule that targets a line wins outright.** That line keeps *only* that rule's
+  percentage — the accumulated total is not added on top — and it stops
+  contributing its scope to everyone else. Precedence is decided by **scope
+  specificity**, not by promotion type:
+
+  | Competing rule | Against Accumulative |
+  |---|---|
+  | Any rule scoped to Item Code / Item Group / Brand | **Wins outright** |
+  | `Transaction` Auto Discount (cart-level) | **Stacks** — the two sum |
+
+  A cart-level reward is orthogonal to rewarding a varied basket, so it adds. A
+  rule naming an item, group or brand is a competing decision about that line's
+  price, so it replaces.
+
+  ```
+  Accumulative:   Products 5%, Demo Item Group 5%
+  Auto Discount:  SKU009 (Item Code) 15%
+
+  SKU009          -> 15%   (its own rule; the 5% does not pile on)
+  other Products  -> 5%    (Demo Item Group contributes nothing — no line takes it)
+  ```
+
+  Two competing routes exist and both are covered: a non-Auto rule lands in the
+  pipeline *baseline*, while a scoped Auto Discount arrives as a *part*. The
+  accumulative pass checks each — see `get_targeted_auto_discount_lines`.
 - The total is additive on list price, never compounded.
 - Each line is capped by the rule's ceiling *and* by that Item's own `max_discount`.
 - Don't list a group and its own ancestor on one rule — a line inside both counts twice.
