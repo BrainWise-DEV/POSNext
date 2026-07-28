@@ -174,6 +174,7 @@ doc_events = {
 	},
 	"POS Profile": {"on_update": "pos_next.realtime_events.emit_pos_profile_updated_event"},
 	"Promotional Scheme": {
+		"before_validate": "pos_next.overrides.pricing_rule.normalize_accumulative_scheme",
 		"validate": [
 			"pos_next.overrides.pricing_rule.enforce_cross_cart_pricing_config",
 			"pos_next.overrides.pricing_rule.validate_unique_promotion_type_per_item",

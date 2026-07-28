@@ -263,6 +263,103 @@ def validate_unique_promotion_type_per_item(doc, method=None):
 	)
 
 
+# Slab fields an Accumulative scheme authors on the parent instead. Parent
+# fieldname -> slab fieldname (they differ for the amount pair).
+ACCUMULATIVE_PARENT_TO_SLAB = {
+	"min_qty": "min_qty",
+	"max_qty": "max_qty",
+	"min_amount": "min_amount",
+	"max_amount": "max_amount",
+	"max_accumulated_discount_percentage": "max_accumulated_discount_percentage",
+	"min_scopes_required": "min_scopes_required",
+}
+
+
+def normalize_accumulative_scheme(doc, method=None):
+	"""Derive the canonical price discount slab from the parent's accumulative config.
+
+	``pos_is_accumulative`` is an *authoring* control only. ``apply_discount_on_price``
+	on the generated Pricing Rule stays the single source of truth for the engine,
+	the offer payload and the interaction matrix — this function projects the
+	checkbox onto it. Running on every ``validate`` means the two can never drift,
+	and a scheme created through the API, a fixture or ``create_promotion`` ends up
+	exactly as correct as one built in the form.
+
+	ERPNext generates Pricing Rules *from the slabs* (``get_pricing_rules`` skips an
+	empty child table), so a hidden slab table must still contain a row or the
+	scheme would save clean and silently discount nothing.
+
+	Wired to ``before_validate``: ERPNext's own ``PromotionalScheme.validate()``
+	rejects a scheme with no discount slabs, and that class method runs ahead of
+	every hooked ``validate``, so the row must already exist by then.
+	"""
+	if doc.doctype != "Promotional Scheme":
+		return
+	if not frappe.db.has_column("Promotional Scheme", "pos_is_accumulative"):
+		return
+	if not doc.get("pos_is_accumulative"):
+		return
+
+	slab = _resolve_accumulative_slab(doc)
+
+	# Injected because each value is *true* for this mode, not to dodge validation:
+	# it is a price discount, expressed as a percentage, whose percentage lives on
+	# the scope rows. rule_description is the slab's only mandatory field.
+	slab.apply_discount_on_price = ACCUMULATIVE_MODE
+	slab.rate_or_discount = "Discount Percentage"
+	slab.rate = 0
+	slab.discount_amount = 0
+	slab.discount_percentage = 0
+	if not slab.get("rule_description"):
+		slab.rule_description = _("Accumulative discount")
+
+	for parent_field, slab_field in ACCUMULATIVE_PARENT_TO_SLAB.items():
+		slab.set(slab_field, doc.get(parent_field) or 0)
+
+	if flt(slab.min_scopes_required) < 1:
+		slab.min_scopes_required = 1
+
+	doc.mixed_conditions = 1
+	doc.pos_only = 1
+	if not doc.get("promotion_type"):
+		doc.promotion_type = PROMOTION_TYPE_ITEM_LEVEL
+
+
+def _resolve_accumulative_slab(doc):
+	"""The one price discount row an Accumulative scheme owns, created if absent.
+
+	Kept to exactly one row: several would generate several identical Pricing
+	Rules, which ERPNext then reports as a MultiplePricingRuleConflict at the till.
+	"""
+	slabs = doc.get("price_discount_slabs") or []
+
+	conflicting = [s for s in slabs if s.get("apply_discount_on_price") in MIN_MAX_OPTIONS]
+	if conflicting:
+		frappe.throw(
+			_(
+				"A scheme cannot be <b>Accumulative</b> and use a <b>Min/Max</b> discount at "
+				"the same time. Remove the Min/Max price discount row, or clear "
+				"<b>Accumulative Discount</b>."
+			),
+			title=_("Conflicting Discount Modes"),
+		)
+
+	if len(slabs) > 1:
+		frappe.throw(
+			_(
+				"An <b>Accumulative</b> scheme uses a single price discount row, but this "
+				"scheme has {0}. Remove the extra rows — the qty and amount limits are set "
+				"on the scheme itself."
+			).format(len(slabs)),
+			title=_("Too Many Price Discount Rows"),
+		)
+
+	if slabs:
+		return slabs[0]
+
+	return doc.append("price_discount_slabs", {})
+
+
 def enforce_cross_cart_pricing_config(doc, method=None):
 	"""Validate-time guard for every cross-cart price mode.
 
