@@ -233,6 +233,7 @@
 <script setup>
 import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency";
 import { call } from "@/utils/apiWrapper";
+import { unwrapCouponValidation } from "@/utils/invoice";
 import { Button, Dialog, Input, createResource } from "frappe-ui";
 import { ref, watch } from "vue";
 import { useToast } from "@/composables/useToast";
@@ -293,15 +294,6 @@ const giftCardsResource = createResource({
 });
 
 // Resource to validate coupon — use call() in applyCoupon for reliable response parsing
-
-function unwrapCouponValidation(raw) {
-	if (!raw) return null;
-	if (raw.valid !== undefined) return raw;
-	if (raw.message?.valid !== undefined) return raw.message;
-	if (typeof raw.message === "object" && raw.message) return raw.message;
-	if (typeof raw.message === "string") return { valid: false, message: raw.message };
-	return raw;
-}
 
 function buildCartItemsSnapshot() {
 	const items = props.items || [];

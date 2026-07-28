@@ -70,3 +70,19 @@ export function getInvoiceStatusTheme(status) {
 
 	return "gray";
 }
+
+/**
+ * Normalize validate_coupon API responses from frappe-ui call().
+ * Success payloads include both `valid: true` and `message: "Coupon applied successfully"`,
+ * so `result?.message || result` would incorrectly treat the string as the payload.
+ * @param {*} raw
+ * @returns {object|null}
+ */
+export function unwrapCouponValidation(raw) {
+	if (!raw) return null;
+	if (raw.valid !== undefined) return raw;
+	if (raw.message?.valid !== undefined) return raw.message;
+	if (typeof raw.message === "object" && raw.message) return raw.message;
+	if (typeof raw.message === "string") return { valid: false, message: raw.message };
+	return raw;
+}

@@ -3,6 +3,7 @@ import { usePOSOffersStore } from "@/stores/posOffers";
 import { usePOSSettingsStore } from "@/stores/posSettings";
 import { usePOSShiftStore } from "@/stores/posShift";
 import { parseError } from "@/utils/errorHandler";
+import { unwrapCouponValidation } from "@/utils/invoice";
 import { shouldValidateItemStock, checkStockAvailability } from "@/utils/stockValidator";
 import { offlineState } from "@/utils/offline/offlineState";
 import { useToast } from "@/composables/useToast";
@@ -410,7 +411,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				}),
 			});
 
-			const validationData = result?.message || result;
+			const validationData = unwrapCouponValidation(result);
 			if (
 				!validationData?.valid ||
 				!(validationData.line_updates || []).length ||
