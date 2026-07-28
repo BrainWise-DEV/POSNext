@@ -2196,6 +2196,140 @@ class TestAccumulativeDiscount(FrappeTestCase):
 		for item in resp["items"][:2]:
 			self.assertAlmostEqual(flt(item.get("discount_percentage")), 8, places=2)
 
+	def test_targeted_rule_wins_outright_over_accumulative(self):
+		"""A rule aimed at one item replaces the accumulated total on that line.
+
+		Regression: the targeted 15% landed in the pipeline baseline and the
+		accumulated 5% piled on top for 20%. Other lines keep accumulating.
+		"""
+		accum = self._accumulative_rule(
+			"_PNXT_TEST_AccumPrecedence",
+			apply_on="Item Group",
+			item_groups=[{"item_group": _resolve_item_group(), "pos_discount_percentage": 5}],
+			priority="1",
+		)
+		targeted = _make_rule(
+			"_PNXT_TEST_AccumPrecedenceTargeted",
+			apply_on="Item Code",
+			items=[{"item_code": ITEM_A}],
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			discount_percentage=15,
+			min_qty=0,
+			priority="5",
+		)
+		resp = self._run([accum, targeted], [_line(self.ctx, ITEM_A), _line(self.ctx, ITEM_B)])
+
+		item_a, item_b = resp["items"][0], resp["items"][1]
+		self.assertAlmostEqual(flt(item_a.get("discount_percentage")), 15, places=2)
+		self.assertAlmostEqual(flt(item_b.get("discount_percentage")), 5, places=2)
+
+	def test_item_scoped_auto_discount_wins_outright(self):
+		"""Regression: a targeted Auto Discount stacked instead of replacing.
+
+		It reaches the line as a pipeline *part*, not the baseline, so the earlier
+		baseline check could not see it — 5% + 15% came out as 20%.
+		"""
+		accum = self._accumulative_rule(
+			"_PNXT_TEST_AccumVsScopedAuto",
+			apply_on="Item Group",
+			item_groups=[{"item_group": _resolve_item_group(), "pos_discount_percentage": 5}],
+			priority="1",
+		)
+		scoped_auto = _make_rule(
+			"_PNXT_TEST_AccumVsScopedAutoRule",
+			apply_on="Item Code",
+			items=[{"item_code": ITEM_A}],
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			discount_percentage=15,
+			promotion_type="Auto Discount",
+			min_qty=0,
+			priority="5",
+		)
+		resp = self._run([accum, scoped_auto], [_line(self.ctx, ITEM_A), _line(self.ctx, ITEM_B)])
+
+		self.assertAlmostEqual(flt(resp["items"][0].get("discount_percentage")), 15, places=2)
+		self.assertAlmostEqual(flt(resp["items"][1].get("discount_percentage")), 5, places=2)
+
+	def test_transaction_auto_discount_still_stacks(self):
+		"""The counterpart: a cart-level Auto Discount is orthogonal and still sums."""
+		accum = self._accumulative_rule(
+			"_PNXT_TEST_AccumVsTxnAuto",
+			apply_on="Item Group",
+			item_groups=[{"item_group": _resolve_item_group(), "pos_discount_percentage": 5}],
+			priority="1",
+		)
+		txn_auto = _make_rule(
+			"_PNXT_TEST_AccumVsTxnAutoRule",
+			apply_on="Transaction",
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			discount_percentage=10,
+			promotion_type="Auto Discount",
+			min_qty=0,
+			apply_discount_on="Grand Total",
+			priority="7",
+		)
+		resp = self._run([accum, txn_auto], [_line(self.ctx, ITEM_B)])
+		self.assertAlmostEqual(flt(resp["items"][0].get("discount_percentage")), 15, places=2)
+
+	def test_scoped_auto_line_does_not_contribute_its_scope(self):
+		"""A line a scoped Auto Discount claims drops out of the accumulation entirely."""
+		accum = self._accumulative_rule(
+			"_PNXT_TEST_AccumScopedAutoScope",
+			items=[
+				{"item_code": ITEM_A, "pos_discount_percentage": 5},
+				{"item_code": ITEM_B, "pos_discount_percentage": 3},
+			],
+			priority="1",
+		)
+		scoped_auto = _make_rule(
+			"_PNXT_TEST_AccumScopedAutoScopeRule",
+			apply_on="Item Code",
+			items=[{"item_code": ITEM_A}],
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			discount_percentage=15,
+			promotion_type="Auto Discount",
+			min_qty=0,
+			priority="5",
+		)
+		resp = self._run([accum, scoped_auto], [_line(self.ctx, ITEM_A), _line(self.ctx, ITEM_B)])
+
+		self.assertAlmostEqual(flt(resp["items"][0].get("discount_percentage")), 15, places=2)
+		# ITEM_A's scope contributes nothing: no line is left to receive it.
+		self.assertAlmostEqual(flt(resp["items"][1].get("discount_percentage")), 3, places=2)
+
+	def test_targeted_line_does_not_contribute_its_scope(self):
+		"""A line that keeps its own rule cannot inflate everyone else's total."""
+		parent = _resolve_item_group()
+		accum = self._accumulative_rule(
+			"_PNXT_TEST_AccumPrecedenceScope",
+			items=[
+				{"item_code": ITEM_A, "pos_discount_percentage": 5},
+				{"item_code": ITEM_B, "pos_discount_percentage": 3},
+			],
+			priority="1",
+		)
+		targeted = _make_rule(
+			"_PNXT_TEST_AccumPrecedenceScopeTargeted",
+			apply_on="Item Code",
+			items=[{"item_code": ITEM_A}],
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			discount_percentage=15,
+			min_qty=0,
+			priority="5",
+		)
+		resp = self._run([accum, targeted], [_line(self.ctx, ITEM_A), _line(self.ctx, ITEM_B)])
+
+		# ITEM_A keeps its own 15%; ITEM_B accumulates only its own scope (3%),
+		# because ITEM_A's scope has no line left that would actually receive it.
+		self.assertAlmostEqual(flt(resp["items"][0].get("discount_percentage")), 15, places=2)
+		self.assertAlmostEqual(flt(resp["items"][1].get("discount_percentage")), 3, places=2)
+		self.assertNotEqual(parent, None)
+
 	def test_standalone_rule_without_percentages_is_still_rejected(self):
 		"""The guard must survive the scheme-generated exemption."""
 		with self.assertRaises(frappe.ValidationError):
