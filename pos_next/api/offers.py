@@ -617,7 +617,7 @@ def get_offers(pos_profile: str) -> list[dict]:
 
 
 @frappe.whitelist()
-def get_customer_one_time_redemptions(customer: str) -> list[str]:
+def get_customer_one_time_redemptions(customer: str | None = None) -> list[str]:
 	"""Return the Pricing Rule names a customer has already redeemed once.
 
 	Used by the POS frontend to enforce one-time-per-customer offers OFFLINE:
@@ -899,8 +899,11 @@ def item_has_active_promotion(
 
 
 @frappe.whitelist()
-def get_active_coupons(customer: str, company: str) -> list[dict]:
+def get_active_coupons(customer: str | None = None, company: str | None = None) -> list[dict]:
 	"""Get active gift card coupons for a customer"""
+	if not customer or not company:
+		return []
+
 	if not frappe.db.table_exists("POS Coupon"):
 		return []
 
@@ -919,8 +922,15 @@ def get_active_coupons(customer: str, company: str) -> list[dict]:
 
 
 @frappe.whitelist()
-def validate_coupon(coupon_code: str, customer: str, company: str, items=None) -> dict:
+def validate_coupon(
+	coupon_code: str, customer: str | None = None, company: str | None = None, items=None
+) -> dict:
 	"""Validate a coupon code and optionally compute line-level discounts for cart items."""
+	if not customer:
+		return {"valid": False, "message": _("Customer is required")}
+	if not company:
+		return {"valid": False, "message": _("Company is required")}
+
 	if not frappe.db.table_exists("POS Coupon"):
 		return {"valid": False, "message": _("Coupons are not enabled")}
 
@@ -974,7 +984,9 @@ def validate_coupon(coupon_code: str, customer: str, company: str, items=None) -
 
 
 @frappe.whitelist()
-def calculate_coupon_discount(coupon_code: str, invoice_data, customer: str = None, company: str = None):
+def calculate_coupon_discount(
+	coupon_code: str, invoice_data, customer: str | None = None, company: str | None = None
+):
 	"""Validate and calculate coupon discount with item-level exclusion support."""
 	import json
 

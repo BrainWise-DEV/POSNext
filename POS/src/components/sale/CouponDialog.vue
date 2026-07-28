@@ -379,6 +379,12 @@ async function applyCoupon() {
 		return;
 	}
 
+	if (!props.customer || !props.company) {
+		errorMessage.value = __("Please select a customer before applying a coupon");
+		showWarning(errorMessage.value);
+		return;
+	}
+
 	applying.value = true;
 	errorMessage.value = "";
 

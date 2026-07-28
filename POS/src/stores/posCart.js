@@ -384,11 +384,18 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			return;
 		}
 
+		const customerName = customer.value?.name || customer.value;
+		if (!customerName) {
+			removeDiscount();
+			appliedCoupon.value = null;
+			return;
+		}
+
 		try {
 			const shiftStore = usePOSShiftStore();
 			const result = await call("pos_next.api.offers.validate_coupon", {
 				coupon_code: current.code,
-				customer: customer.value?.name || customer.value || "",
+				customer: customerName,
 				company: shiftStore.currentProfile?.company || shiftStore.profileCompany || "",
 				items: buildCouponItemsSnapshot().map((item) => {
 					if (item.coupon_code) {

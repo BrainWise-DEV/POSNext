@@ -1540,6 +1540,7 @@ const props = defineProps({
 		default: 0,
 	},
 	posProfile: String,
+	company: String,
 	currency: {
 		type: String,
 		default: DEFAULT_CURRENCY,
@@ -1662,9 +1663,10 @@ if (props.posProfile) {
 const giftCardsResource = createResource({
 	url: "pos_next.api.offers.get_active_coupons",
 	makeParams() {
+		const customerName = props.customer?.name || props.customer;
 		return {
-			customer: props.customer?.name || props.customer,
-			company: props.posProfile, // Will get company from profile
+			customer: customerName,
+			company: props.company,
 		};
 	},
 	auto: false,
@@ -1681,7 +1683,8 @@ const giftCardsResource = createResource({
 watch(
 	() => props.customer,
 	(newCustomer) => {
-		if (newCustomer && props.posProfile && !isOffline()) {
+		const customerName = newCustomer?.name || newCustomer;
+		if (customerName && props.company && !isOffline()) {
 			giftCardsResource.reload();
 		} else {
 			availableGiftCards.value = [];
