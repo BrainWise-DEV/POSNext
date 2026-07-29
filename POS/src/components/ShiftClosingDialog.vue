@@ -1005,7 +1005,7 @@ const { getClosingShiftData, submitClosingShift } = useShift();
 const { formatCurrency, formatQuantity, formatDateTime, formatTime } = useFormatters();
 const { showSuccess, showWarning } = useToast();
 const posSettingsStore = usePOSSettingsStore();
-const { hideExpectedAmount } = storeToRefs(posSettingsStore);
+const { hideExpectedAmount, silentPrint } = storeToRefs(posSettingsStore);
 
 const shiftStore = usePOSShiftStore();
 
@@ -1135,7 +1135,9 @@ async function submitClosing() {
 		// Submit to server
 		const result = await submitResource.submit({ closing_shift: closingData.value });
 		const closingShiftName = result?.name ?? submitResource.data?.name;
-		if (closingShiftName) {
+		// EOD report goes to a thermal printer via QZ Tray — only attempt it
+		// when silent printing is enabled, otherwise there is no printer to hit
+		if (closingShiftName && silentPrint.value) {
 			try {
 				await printEODReport(closingShiftName);
 				eodPrintFailed.value = null;
