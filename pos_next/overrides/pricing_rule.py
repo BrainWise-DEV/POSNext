@@ -103,15 +103,20 @@ def sync_promotion_fields_to_pricing_rules(doc, method=None):
 
 	sync_scope_percentages_to_pricing_rules(doc)
 
+	# GWP rules discount the purchased line(s), so same_item must stay 1.
+	# Non-GWP product discounts must keep the slab's same_item / free_item as configured.
 	if frappe.db.has_column("Pricing Rule", "gwp_paid_qty_basis"):
+		is_gwp = doc.get("promotion_type") == "GWP"
 		for slab in doc.get("product_discount_slabs") or []:
+			values = {
+				"gwp_paid_qty_basis": slab.get("gwp_paid_qty_basis") or "Max Qty",
+			}
+			if is_gwp:
+				values["same_item"] = 1
 			frappe.db.set_value(
 				"Pricing Rule",
 				{"promotional_scheme_id": slab.name},
-				{
-					"gwp_paid_qty_basis": slab.get("gwp_paid_qty_basis") or "Max Qty",
-					"same_item": 1,
-				},
+				values,
 				update_modified=False,
 			)
 
