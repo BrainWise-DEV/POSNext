@@ -15,6 +15,7 @@ from frappe.utils import cint, cstr, flt, get_datetime, nowdate, nowtime
 from pos_next.promotions.engine import (
 	CROSS_CART_MODES,
 	append_pricing_rule,
+	build_matrix_type_map,
 	filter_auto_discount_from_header,
 	rule_promotion_type,
 	run_line_discount_passes,
@@ -3554,8 +3555,11 @@ def apply_offers(invoice_data, selected_offers=None):
 						applied_rules.add(pr_name)
 
 		if mark_item_discount_flags:
-			type_map = get_rule_promotion_types(list(rule_map.keys()))
-			mark_item_discount_flags(prepared_items, type_map)
+			# Same neutralised view the pipeline used. With the raw map an
+			# Accumulative rule reads as a plain Item Level Discount, so a line it
+			# merely *matched* without discounting (an unpriced one, say) would be
+			# stamped is_already_discounted and lose its coupon eligibility.
+			mark_item_discount_flags(prepared_items, build_matrix_type_map(rule_map))
 
 		return {
 			"items": [dict(item) for item in prepared_items],

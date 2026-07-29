@@ -416,6 +416,18 @@ def build_matrix_type_map(rule_map) -> dict:
 	}
 
 
+def is_discountable_line(item) -> bool:
+	"""Whether a percentage discount can produce anything on this line.
+
+	An item with no price in the document's price list yields 0.00 however large
+	the percentage, so claiming it would flag it as discounted, block coupons from
+	it, and let it contribute its scope to everyone else while receiving nothing.
+	"""
+	qty = flt(item.get("qty") or item.get("quantity") or 0)
+	price_list_rate = flt(item.get("price_list_rate") or item.get("rate") or 0)
+	return qty > 0 and price_list_rate > 0
+
+
 def _scope_row_keys(row_field: str, value: str) -> set[str]:
 	"""Every cart value this scope row covers (item groups include descendants)."""
 	if row_field == "item_group":
@@ -485,6 +497,9 @@ def apply_accumulative_discount_rules(
 			item
 			for item in items
 			if not item.get("is_free_item")
+			# An unpriced line cannot be discounted, so it must not be claimed
+			# either — see is_discountable_line.
+			and is_discountable_line(item)
 			# A rule that targets this line wins outright — the accumulative
 			# percentage does not pile on top of it.
 			and get_line_baseline(item) <= 0

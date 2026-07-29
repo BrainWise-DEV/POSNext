@@ -161,9 +161,10 @@ function pn_sync_min_max(frm) {
 function pn_sync_accumulative(frm) {
 	const is_accumulative = !!frm.doc.pos_is_accumulative;
 
-	frm.toggle_display("price_discount_slabs", !is_accumulative);
+
+	pn_toggle_field_with_section(frm, "price_discount_slabs", !is_accumulative);
 	// Free items and Accumulative are mutually exclusive.
-	frm.toggle_display("product_discount_slabs", !is_accumulative);
+	pn_toggle_field_with_section(frm, "product_discount_slabs", !is_accumulative);
 
 	if (is_accumulative) {
 		if (!frm.doc.mixed_conditions) {
@@ -184,6 +185,35 @@ function pn_sync_accumulative(frm) {
 	}
 
 	pn_toggle_scope_percentage(frm, is_accumulative);
+}
+
+/**
+ * The Section Break a field sits under, resolved from the meta.
+ *
+ * Looked up rather than hardcoded — ERPNext's section names here are generated
+ * (`section_break_14`) and would silently stop matching if they were renumbered.
+ */
+function pn_section_of(frm, fieldname) {
+	let section = null;
+	for (const df of frm.meta?.fields || []) {
+		if (df.fieldtype === "Section Break") {
+			section = df.fieldname;
+		}
+		if (df.fieldname === fieldname) {
+			return section;
+		}
+	}
+	return null;
+}
+
+/** Toggle a field together with the section that holds its heading. */
+function pn_toggle_field_with_section(frm, fieldname, show) {
+	frm.toggle_display(fieldname, show);
+
+	const section = pn_section_of(frm, fieldname);
+	if (section) {
+		frm.toggle_display(section, show);
+	}
 }
 
 /** Surface Discount % on the scope grid only where it means something. */

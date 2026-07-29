@@ -2224,6 +2224,36 @@ class TestAccumulativeDiscount(FrappeTestCase):
 		self.assertAlmostEqual(flt(item_a.get("discount_percentage")), 15, places=2)
 		self.assertAlmostEqual(flt(item_b.get("discount_percentage")), 5, places=2)
 
+	def test_unpriced_line_is_not_claimed_or_counted(self):
+		"""A line with no price yields 0.00 whatever the percentage.
+
+		Regression: such lines were flagged is_already_discounted / carried the
+		rule name / showed discount_source=accumulative_promotion while displaying
+		0%, which also blocked coupons and let them contribute their scope.
+		"""
+		rule = self._accumulative_rule(
+			"_PNXT_TEST_AccumUnpriced",
+			items=[
+				{"item_code": ITEM_A, "pos_discount_percentage": 5},
+				{"item_code": ITEM_C, "pos_discount_percentage": 7},
+			],
+		)
+		unpriced = _line(self.ctx, ITEM_C)
+		unpriced["rate"] = 0
+		unpriced["price_list_rate"] = 0
+
+		resp = self._run(rule, [_line(self.ctx, ITEM_A), unpriced])
+		priced_line, unpriced_line = resp["items"][0], resp["items"][1]
+
+		# ITEM_C contributes nothing, so ITEM_A accumulates its own 5% only.
+		self.assertAlmostEqual(flt(priced_line.get("discount_percentage")), 5, places=2)
+
+		self.assertAlmostEqual(flt(unpriced_line.get("discount_percentage")), 0, places=2)
+		self.assertFalse(unpriced_line.get("is_accumulative_discount"))
+		self.assertNotEqual(unpriced_line.get("discount_source"), "accumulative_promotion")
+		# Not flagged as discounted, so a coupon can still reach the line.
+		self.assertFalse(unpriced_line.get("is_already_discounted"))
+
 	def test_item_scoped_auto_discount_wins_outright(self):
 		"""Regression: a targeted Auto Discount stacked instead of replacing.
 
