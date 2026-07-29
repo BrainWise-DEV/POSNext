@@ -146,9 +146,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	/**
 	 * Generates a comprehensive hash of the current cart state.
 	 * Used to detect ANY change that might affect offer eligibility.
+	 *
+	 * Free-item rows are omitted so applying/removing product-discount gifts
+	 * does not look like a purchase-qty change and re-enter offer processing.
 	 */
 	function generateCartHash() {
-		const items = invoiceItems.value;
+		const items = invoiceItems.value.filter((item) => !item.is_free_item);
 		const parts = [
 			// Item details: code, quantity, uom, discount
 			items
@@ -157,7 +160,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 						`${i.item_code}:${i.quantity}:${i.uom || ""}:${i.discount_percentage || 0}`
 				)
 				.join("|"),
-			// Total item count
+			// Total paid item count
 			items.length.toString(),
 			// Subtotal (rounded to avoid floating point issues)
 			Math.round((subtotal.value || 0) * 100).toString(),
@@ -1132,26 +1135,27 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				// Find eligible items based on offer.apply_on
 				let eligibleItems = [];
 
+				// Exclude free-item rows — they are the gift, not purchase qty
+				const paidItems = invoiceItems.value.filter((item) => !item.is_free_item);
+
 				if (offer.apply_on === "Item Code") {
 					const eligibleCodes = offer.eligible_items || [];
-					eligibleItems = invoiceItems.value.filter((item) =>
+					eligibleItems = paidItems.filter((item) =>
 						eligibleCodes.includes(item.item_code)
 					);
 				} else if (offer.apply_on === "Item Group") {
 					const eligibleGroups = offer.eligible_item_groups || [];
 					eligibleItems = eligibleGroups.includes("All Item Groups")
-						? invoiceItems.value
-						: invoiceItems.value.filter((item) =>
-								eligibleGroups.includes(item.item_group)
-							);
+						? paidItems
+						: paidItems.filter((item) => eligibleGroups.includes(item.item_group));
 				} else if (offer.apply_on === "Brand") {
 					const eligibleBrands = offer.eligible_brands || [];
-					eligibleItems = invoiceItems.value.filter((item) =>
+					eligibleItems = paidItems.filter((item) =>
 						eligibleBrands.includes(item.brand)
 					);
 				} else if (offer.apply_on === "Transaction") {
-					// Transaction-level discount applies to all items
-					eligibleItems = invoiceItems.value;
+					// Transaction-level discount applies to all paid items
+					eligibleItems = paidItems;
 				}
 
 				if (eligibleItems.length === 0) continue;
@@ -1641,10 +1645,15 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	}
 
 	/**
-	 * Builds cart snapshot for offer validation
+	 * Builds cart snapshot for offer validation.
+	 *
+	 * Free-item rows (is_free_item) are excluded: min_qty/max_qty refer to
+	 * purchased qty only. Counting free gifts would break slabs where
+	 * min_qty === max_qty (e.g. buy exactly 2 get 1 free → qty becomes 3 →
+	 * offer removed → re-applied in a loop).
 	 */
 	function buildCartSnapshot() {
-		const items = invoiceItems.value;
+		const items = invoiceItems.value.filter((item) => !item.is_free_item);
 		const totalQty = items.reduce((sum, item) => sum + (item.quantity || 0), 0);
 		const itemCodes = items.map((item) => item.item_code);
 		const itemGroups = items.map((item) => item.item_group).filter(Boolean);
@@ -1894,27 +1903,28 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	function syncOfferSnapshot() {
 		// Only sync if values are initialized
 		if (subtotal.value !== undefined && invoiceItems.value) {
-			// Create hash for item codes and quantities to detect actual changes
-			const currentHash = invoiceItems.value
+			// Paid lines only — free gifts must not inflate min_qty/max_qty checks
+			const paidItems = invoiceItems.value.filter((item) => !item.is_free_item);
+
+			// Create hash for paid item codes and quantities to detect actual changes
+			const currentHash = paidItems
 				.map((item) => `${item.item_code}:${item.quantity}`)
 				.join(",");
 
 			// Only recalculate expensive operations if items actually changed
 			if (currentHash !== previousItemCodesHash) {
-				cachedItemCodes = invoiceItems.value.map((item) => item.item_code);
+				cachedItemCodes = paidItems.map((item) => item.item_code);
 				cachedItemGroups = [
-					...new Set(invoiceItems.value.map((item) => item.item_group).filter(Boolean)),
+					...new Set(paidItems.map((item) => item.item_group).filter(Boolean)),
 				];
-				cachedBrands = [
-					...new Set(invoiceItems.value.map((item) => item.brand).filter(Boolean)),
-				];
+				cachedBrands = [...new Set(paidItems.map((item) => item.brand).filter(Boolean))];
 
 				// Build quantity maps for accurate offer validation
 				cachedItemQuantities = {};
 				cachedItemGroupQuantities = {};
 				cachedBrandQuantities = {};
 
-				for (const item of invoiceItems.value) {
+				for (const item of paidItems) {
 					const qty = item.quantity || 0;
 
 					if (item.item_code) {
@@ -1934,8 +1944,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				previousItemCodesHash = currentHash;
 			}
 
-			// Calculate total quantity (sum of all item quantities, not line count)
-			const totalQty = invoiceItems.value.reduce((sum, item) => {
+			// Calculate total paid quantity (sum of quantities, not line count)
+			const totalQty = paidItems.reduce((sum, item) => {
 				return sum + (item.quantity || 0);
 			}, 0);
 
@@ -2277,13 +2287,15 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 	// Watch for ANY cart changes that might affect offer eligibility
 	// This includes: items, quantities, customer, subtotal, etc.
+	// Free-item rows are ignored — they are outcomes of offers, not purchase input.
 	watch(
 		[
-			// Watch item count (additions/removals)
-			() => invoiceItems.value.length,
-			// Watch item details (quantity, code, uom changes)
+			// Watch paid item count (additions/removals)
+			() => invoiceItems.value.filter((item) => !item.is_free_item).length,
+			// Watch paid item details (quantity, code, uom changes)
 			() =>
 				invoiceItems.value
+					.filter((item) => !item.is_free_item)
 					.map(
 						(item) =>
 							`${item.item_code}:${item.quantity}:${item.uom || ""}:${
@@ -2298,7 +2310,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		],
 		(_newVals, oldVals) => {
 			// Skip if this is initial render with empty cart
-			if (!oldVals && invoiceItems.value.length === 0) {
+			if (!oldVals && invoiceItems.value.filter((item) => !item.is_free_item).length === 0) {
 				return;
 			}
 
