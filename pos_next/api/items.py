@@ -31,6 +31,18 @@ ITEM_RESULT_FIELDS = [
 ITEM_RESULT_COLUMNS = ",\n\t".join(ITEM_RESULT_FIELDS)
 
 
+def get_item_result_fields():
+	"""Item columns for POS item queries, including site-specific optional fields.
+
+	``custom_sku`` is a site-level custom field (not part of the app), so it is
+	only selected when it actually exists on Item to keep the SQL valid everywhere.
+	"""
+	fields = list(ITEM_RESULT_FIELDS)
+	if frappe.get_meta("Item").has_field("custom_sku"):
+		fields.append("custom_sku")
+	return fields
+
+
 def get_stock_availability(item_code, warehouse):
 	"""Return total available quantity for an item in the given warehouse."""
 	if not warehouse:
@@ -1199,9 +1211,10 @@ def get_items(
 		)
 
 		# Build column list with table alias
-		item_columns = ",\n\t".join([f"i.{col}" for col in ITEM_RESULT_FIELDS])
+		result_fields = get_item_result_fields()
+		item_columns = ",\n\t".join([f"i.{col}" for col in result_fields])
 		# For GROUP BY, extract just the column name (before " as " if present)
-		group_by_columns = ", ".join([f"i.{col.split(' as ')[0]}" for col in ITEM_RESULT_FIELDS])
+		group_by_columns = ", ".join([f"i.{col.split(' as ')[0]}" for col in result_fields])
 
 		# Add search conditions if search term provided
 		if effective_search_term and effective_search_term.strip():
@@ -1565,8 +1578,9 @@ def get_items_bulk(
 			conditions.append(f"i.item_group IN ({placeholders})")
 			params.extend(all_groups)
 
-		item_columns = ",\n\t".join([f"i.{col}" for col in ITEM_RESULT_FIELDS])
-		group_by_columns = ", ".join([f"i.{col.split(' as ')[0]}" for col in ITEM_RESULT_FIELDS])
+		result_fields = get_item_result_fields()
+		item_columns = ",\n\t".join([f"i.{col}" for col in result_fields])
+		group_by_columns = ", ".join([f"i.{col.split(' as ')[0]}" for col in result_fields])
 
 		where_clause = " AND ".join(conditions)
 		query = f"""
