@@ -71,7 +71,13 @@ try:
 		item_matches_pricing_rule_apply_on,
 		should_aggregate_gwp_quantities,
 	)
-except Exception:  # pragma: no cover - ERPNext not installed in some environments
+except Exception as _pricing_import_error:  # pragma: no cover - ERPNext not installed in some environments
+	import traceback
+
+	frappe.log_error(
+		title="POS Next pricing imports failed",
+		message=traceback.format_exc(),
+	)
 	erpnext_apply_pricing_rule = None
 	erpnext_get_applied_pricing_rules = None
 	erpnext_apply_pricing_rule_on_transaction = None
@@ -84,7 +90,7 @@ except Exception:  # pragma: no cover - ERPNext not installed in some environmen
 	distribute_gwp_free_units_for_basis = None
 	should_aggregate_gwp_quantities = None
 	item_matches_pricing_rule_apply_on = None
-	GWP_BASIS_MAX = "Max Qty"
+	GWP_BASIS_MAX = "Max Price"
 	DISCOUNT_SOURCE_AUTO = "auto_discount"
 	DISCOUNT_SOURCE_GWP = "gwp"
 	DISCOUNT_SOURCE_MANUAL = "manual_discount"
@@ -136,7 +142,7 @@ def _apply_gwp_line_discounts(prepared_items, free_items_map, rule_map) -> None:
 	"""Apply GWP line discounts from slab free_qty and paid-qty basis.
 
 	Multi-item / item-group: total qty must fall between min_qty and max_qty;
-	free_qty is discounted on cheapest (Max basis) or most expensive (Min basis) lines.
+	free_qty is discounted on cheapest (Max Price basis) or most expensive (Min Price basis) lines.
 	Single item code: free_qty applies on that line when qty is in range.
 	"""
 	if not calculate_gwp_discount_amount or not get_gwp_slab_free_qty:

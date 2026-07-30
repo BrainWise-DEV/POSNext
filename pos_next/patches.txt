@@ -7,3 +7,4 @@
 pos_next.patches.v1_7_0.reinstall_workspace
 pos_next.patches.v2_0_0.remove_custom_company_fields
 pos_next.patches.v2_1_0.lift_accumulative_config_to_scheme
+pos_next.patches.v2_2_0.rename_gwp_paid_qty_basis_options

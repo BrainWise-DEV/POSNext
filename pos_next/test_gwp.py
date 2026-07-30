@@ -13,6 +13,7 @@ from pos_next.api.gwp import (
 	get_gwp_slab_free_qty,
 	is_gwp_total_qty_eligible,
 	item_matches_pricing_rule_apply_on,
+	normalize_gwp_paid_qty_basis,
 	should_aggregate_gwp_quantities,
 )
 
@@ -44,6 +45,11 @@ class TestGwpDiscount(unittest.TestCase):
 			distribute_gwp_free_units_for_basis([2, 2], [50, 80], 2, GWP_BASIS_MIN),
 			[0, 2],
 		)
+
+	def test_normalize_legacy_basis_labels(self):
+		self.assertEqual(normalize_gwp_paid_qty_basis("Min Qty"), GWP_BASIS_MIN)
+		self.assertEqual(normalize_gwp_paid_qty_basis("Max Qty"), GWP_BASIS_MAX)
+		self.assertEqual(normalize_gwp_paid_qty_basis(None), GWP_BASIS_MAX)
 
 	def test_distribute_by_price_expensive_first(self):
 		self.assertEqual(

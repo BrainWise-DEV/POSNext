@@ -1367,7 +1367,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		totalFreeUnits,
 		paidQtyBasis
 	) {
-		const expensiveFirst = (paidQtyBasis || "Max Qty") === "Min Qty";
+		const basis = paidQtyBasis || "Max Price";
+		const expensiveFirst = basis === "Min Price" || basis === "Min Qty";
 		const totalFree = Math.round(Number.parseFloat(totalFreeUnits) || 0);
 		if (totalFree <= 0) return lineQuantities.map(() => 0);
 

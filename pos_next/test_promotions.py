@@ -744,7 +744,7 @@ class TestPromotions(FrappeTestCase):
 			min_qty=4,
 			max_qty=4,
 			free_qty=2,
-			gwp_paid_qty_basis="Max Qty",
+			gwp_paid_qty_basis="Max Price",
 			promotion_type="GWP",
 		)
 		payload = _cart_payload(

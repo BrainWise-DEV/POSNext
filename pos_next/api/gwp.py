@@ -13,8 +13,14 @@ except Exception:  # pragma: no cover - ERPNext not installed in some environmen
 
 PROMOTION_TYPE_GWP = "GWP"
 
-GWP_BASIS_MIN = "Min Qty"
-GWP_BASIS_MAX = "Max Qty"
+GWP_BASIS_MIN = "Min Price"
+GWP_BASIS_MAX = "Max Price"
+
+# Legacy option labels kept for cached offers / unmigrated rows.
+_LEGACY_GWP_BASIS = {
+	"Min Qty": GWP_BASIS_MIN,
+	"Max Qty": GWP_BASIS_MAX,
+}
 
 
 def _row_value(row, fieldname: str):
@@ -126,13 +132,19 @@ def get_gwp_slab_free_qty(slab_free_qty, total_qty, min_qty, max_qty):
 	return min(free_qty, total_qty)
 
 
+def normalize_gwp_paid_qty_basis(paid_qty_basis):
+	"""Return the canonical basis value, accepting legacy Min/Max Qty labels."""
+	basis = (paid_qty_basis or GWP_BASIS_MAX).strip()
+	return _LEGACY_GWP_BASIS.get(basis, basis)
+
+
 def distribute_gwp_free_units_for_basis(line_quantities, line_prices, total_free_units, paid_qty_basis):
 	"""Allocate free units by price tier.
 
-	Max Qty basis: discount on cheapest lines (customer pays expensive items).
-	Min Qty basis: discount on most expensive lines (customer pays cheaper items).
+	Max Price basis: discount on cheapest lines (customer pays expensive items).
+	Min Price basis: discount on most expensive lines (customer pays cheaper items).
 	"""
-	basis = (paid_qty_basis or GWP_BASIS_MAX).strip()
+	basis = normalize_gwp_paid_qty_basis(paid_qty_basis)
 	expensive_first = basis == GWP_BASIS_MIN
 	return distribute_gwp_free_units_by_price(
 		line_quantities,
