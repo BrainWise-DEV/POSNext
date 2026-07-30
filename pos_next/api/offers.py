@@ -511,7 +511,10 @@ class OfferBuilder:
 			eligible_brands=eligible_brands,
 			# Free item fields for product discounts
 			free_item=slab.get("free_item") if not is_price_discount else None,
-			free_qty=flt(slab.get("free_qty", 0)) if not is_price_discount else 0,
+			free_qty=(
+				flt(slab.get("free_qty", 0)) if not is_price_discount and flt(slab.get("free_qty", 0)) > 0
+				else (1 if not is_price_discount and slab.get("is_recursive") else 0)
+			) if not is_price_discount else 0,
 			free_item_uom=slab.get("free_item_uom") if not is_price_discount else None,
 			same_item=1 if slab.get("same_item") and not is_price_discount else 0,
 			is_recursive=1 if slab.get("is_recursive") and not is_price_discount else 0,

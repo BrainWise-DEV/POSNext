@@ -1,6 +1,10 @@
 # Copyright (c) 2026, POS Next and contributors
 # For license information, please see license.txt
 
+"""Gift-with-purchase (GWP) quantity and discount helpers."""
+
+import math
+
 from frappe.utils import cstr, flt
 
 try:
@@ -129,7 +133,7 @@ def get_gwp_slab_free_qty(slab_free_qty, total_qty, min_qty, max_qty):
 	total_qty = flt(total_qty)
 	if free_qty <= 0 or total_qty <= 0:
 		return 0
-	return min(free_qty, total_qty)
+	return max(0, int(math.floor(min(free_qty, total_qty))))
 
 
 def normalize_gwp_paid_qty_basis(paid_qty_basis):

@@ -452,7 +452,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 	function buildOfferEvaluationPayload(currentProfile) {
 		// Use toRaw() to ensure we get current, non-reactive values (prevents stale cached quantities)
-		const rawItems = toRaw(invoiceItems.value);
+		const rawItems = toRaw(invoiceItems.value).filter((item) => !item.is_free_item);
 
 		return {
 			doctype: "Sales Invoice",
@@ -541,7 +541,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		let hasDiscounts = false;
 
 		invoiceItems.value.forEach((item, index) => {
-			const serverItem = serverItems[index] || {};
+			if (item.is_free_item) return;
+
+			const paidIndex = invoiceItems.value
+				.slice(0, index + 1)
+				.filter((row) => !row.is_free_item).length - 1;
+			const serverItem = serverItems[paidIndex] || {};
 			const discountPct = Number.parseFloat(serverItem.discount_percentage) || 0;
 			const discountAmt = Number.parseFloat(serverItem.discount_amount) || 0;
 			const gwpFreeQty = Number.parseFloat(serverItem.gwp_free_qty) || 0;
@@ -596,6 +601,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * @param {Array} freeItems - Array of free items from backend (e.g., [{item_code, qty, uom, item_name}])
 	 * @returns {void}
 	 */
+	/** Whole units only — free gift qty is always floored (never decimal). */
+	function floorFreeItemQty(qty) {
+		return Math.max(0, Math.floor(Number.parseFloat(qty) || 0));
+	}
+
 	function processFreeItems(freeItems) {
 		// Reset free_qty on all non-free items
 		invoiceItems.value.forEach((item) => {
@@ -630,7 +640,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		}
 
 		for (const freeItem of filteredFreeItems) {
-			const freeQty = Number.parseFloat(freeItem.qty) || 0;
+			const freeQty = floorFreeItemQty(freeItem.qty);
 			if (freeQty <= 0) continue;
 
 			const freeUom = freeItem.uom || freeItem.stock_uom;
@@ -1473,6 +1483,78 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * @param {Array} eligibleItems - Items eligible for the free item
 	 * @returns {boolean} True if free item was applied
 	 */
+	function upsertOfflineFreeItemRow({
+		itemCode,
+		itemName,
+		freeItemsToGive: rawFreeItemsToGive,
+		uomKey,
+		stockUom,
+		conversionFactor,
+		warehouse,
+		offerName,
+	}) {
+		const freeItemsToGive = floorFreeItemQty(rawFreeItemsToGive);
+		if (freeItemsToGive <= 0) return;
+
+		const existingFreeRow = invoiceItems.value.find(
+			(r) =>
+				r.is_free_item &&
+				r.item_code === itemCode &&
+				(r.uom || r.stock_uom) === uomKey
+		);
+		if (existingFreeRow) {
+			existingFreeRow.quantity = freeItemsToGive;
+			existingFreeRow.free_qty = freeItemsToGive;
+			const pr = existingFreeRow.pricing_rules;
+			const prArr = Array.isArray(pr)
+				? [...pr]
+				: pr
+				? String(pr)
+						.split(",")
+						.map((s) => s.trim())
+						.filter(Boolean)
+				: [];
+			if (!prArr.includes(offerName)) prArr.push(offerName);
+			existingFreeRow.pricing_rules = prArr;
+			return;
+		}
+
+		invoiceItems.value.push({
+			item_code: itemCode,
+			item_name: itemName || itemCode,
+			rate: 0,
+			price_list_rate: 0,
+			quantity: freeItemsToGive,
+			discount_amount: 0,
+			discount_percentage: 0,
+			tax_amount: 0,
+			amount: 0,
+			stock_qty: 0,
+			uom: uomKey,
+			stock_uom: stockUom || uomKey,
+			conversion_factor: conversionFactor || 1,
+			is_free_item: 1,
+			free_qty: freeItemsToGive,
+			pricing_rules: [offerName],
+			warehouse,
+		});
+	}
+
+	function computeRecursiveFreeQty(lineQty, effectiveFreeQty, recurseFor, applyRecursionOver) {
+		// Mirror ERPNext with round_free_qty: floor eligible qty before multiplying.
+		let freeItemsToGive = floorFreeItemQty(effectiveFreeQty);
+		if (!recurseFor || recurseFor <= 0) {
+			return freeItemsToGive;
+		}
+
+		const effectiveQty = Math.max(0, lineQty - applyRecursionOver);
+		if (effectiveQty > 0) {
+			const multiplier = Math.floor(effectiveQty / recurseFor);
+			freeItemsToGive = multiplier * freeItemsToGive;
+		}
+		return floorFreeItemQty(freeItemsToGive);
+	}
+
 	function applyOfflineFreeItem(offer, eligibleItems) {
 		const freeQty = Number.parseFloat(offer.free_qty) || 0;
 		const isGwp = offer.promotion_type === "GWP";
@@ -1481,6 +1563,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		const recurseFor = Number.parseFloat(offer.recurse_for) || 0;
 		const applyRecursionOver = Number.parseFloat(offer.apply_recursion_over) || 0;
 		const freeItemCode = offer.free_item;
+		// ERPNext treats free_qty=0 as 1 for product (non-GWP) discounts.
+		const effectiveFreeQty = freeQty > 0 ? freeQty : 1;
 
 		if (isGwp) {
 			if (isAggregateGwp) {
@@ -1504,7 +1588,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			return applied;
 		}
 
-		if (freeQty <= 0) return false;
+		if (!offer.same_item && !freeItemCode) return false;
 
 		let applied = false;
 		const sameItem = offer.same_item === 1;
@@ -1513,21 +1597,20 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			// Free item is the same as the purchased item
 			// E.g., "Buy 2 Get 1 Free" - the free item is the same item
 			for (const item of eligibleItems) {
-				let freeItemsToGive = freeQty;
+				let freeItemsToGive = effectiveFreeQty;
 
 				if (isRecursive && recurseFor > 0) {
-					// Recursive: for every recurseFor quantity, give freeQty free
-					// Formula: floor((qty - apply_recursion_over) / recurse_for) * free_qty
-					// E.g., Buy 2 Get 1 Free: recurse_for=2, free_qty=1
-					//   For 6 items: floor((6-0)/2) * 1 = 3 free items
-					const effectiveQty = Math.max(0, item.quantity - applyRecursionOver);
-					const multiplier = Math.floor(effectiveQty / recurseFor);
-					freeItemsToGive = multiplier * freeQty;
+					freeItemsToGive = computeRecursiveFreeQty(
+						item.quantity || 0,
+						effectiveFreeQty,
+						recurseFor,
+						applyRecursionOver
+					);
 				} else if (!isRecursive && offer.min_qty > 0) {
 					// Non-recursive: just check if min_qty is met, give freeQty once
 					// E.g., Buy 2 Get 1 Free (non-recursive): for 6 items, still give 1 free
 					if (item.quantity >= offer.min_qty) {
-						freeItemsToGive = freeQty;
+						freeItemsToGive = effectiveFreeQty;
 					} else {
 						freeItemsToGive = 0;
 					}
@@ -1538,108 +1621,56 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				}
 
 				const uomKey = item.uom || item.stock_uom;
-				const existingFreeRow = invoiceItems.value.find(
-					(r) =>
-						r.is_free_item &&
-						r.item_code === item.item_code &&
-						(r.uom || r.stock_uom) === uomKey
-				);
-				if (existingFreeRow) {
-					existingFreeRow.quantity = freeItemsToGive;
-					existingFreeRow.free_qty = freeItemsToGive;
-					const pr = existingFreeRow.pricing_rules;
-					const prArr = Array.isArray(pr)
-						? [...pr]
-						: pr
-						? String(pr)
-								.split(",")
-								.map((s) => s.trim())
-								.filter(Boolean)
-						: [];
-					if (!prArr.includes(offer.name)) prArr.push(offer.name);
-					existingFreeRow.pricing_rules = prArr;
-				} else {
-					invoiceItems.value.push({
-						item_code: item.item_code,
-						item_name: item.item_name || item.item_code,
-						rate: 0,
-						price_list_rate: 0,
-						quantity: freeItemsToGive,
-						discount_amount: 0,
-						discount_percentage: 0,
-						tax_amount: 0,
-						amount: 0,
-						stock_qty: 0,
-						uom: uomKey,
-						stock_uom: item.stock_uom || uomKey,
-						conversion_factor: item.conversion_factor || 1,
-						is_free_item: 1,
-						free_qty: freeItemsToGive,
-						pricing_rules: [offer.name],
-						warehouse: item.warehouse,
-					});
-				}
+				upsertOfflineFreeItemRow({
+					itemCode: item.item_code,
+					itemName: item.item_name,
+					freeItemsToGive,
+					uomKey,
+					stockUom: item.stock_uom || uomKey,
+					conversionFactor: item.conversion_factor,
+					warehouse: item.warehouse,
+					offerName: offer.name,
+				});
 				applied = true;
 			}
 		} else if (freeItemCode) {
 			// Free item is a specific different item
-			let freeItemsToGive = freeQty;
+			const totalEligibleQty = eligibleItems.reduce(
+				(sum, item) => sum + (item.quantity || 0),
+				0
+			);
+			let freeItemsToGive = effectiveFreeQty;
 
 			if (isRecursive && recurseFor > 0) {
-				const totalEligibleQty = eligibleItems.reduce(
-					(sum, item) => sum + (item.quantity || 0),
-					0
+				freeItemsToGive = computeRecursiveFreeQty(
+					totalEligibleQty,
+					effectiveFreeQty,
+					recurseFor,
+					applyRecursionOver
 				);
-				const effectiveQty = Math.max(0, totalEligibleQty - applyRecursionOver);
-				const multiplier = Math.floor(effectiveQty / recurseFor);
-				freeItemsToGive = multiplier * freeQty;
 			} else if (!isRecursive && offer.min_qty > 0) {
-				const totalEligibleQty = eligibleItems.reduce(
-					(sum, item) => sum + (item.quantity || 0),
-					0
-				);
-				freeItemsToGive = totalEligibleQty >= offer.min_qty ? freeQty : 0;
+				freeItemsToGive = totalEligibleQty >= offer.min_qty ? effectiveFreeQty : 0;
 			}
 
-			if (freeItemsToGive > 0 && isGwp) {
-				for (const item of eligibleItems) {
-					if (applyGwpDiscountToItem(item, freeItemsToGive)) {
-						const prArr = Array.isArray(item.pricing_rules)
-							? [...item.pricing_rules]
-							: item.pricing_rules
-							? String(item.pricing_rules)
-									.split(",")
-									.map((s) => s.trim())
-									.filter(Boolean)
-							: [];
-						if (!prArr.includes(offer.name)) prArr.push(offer.name);
-						item.pricing_rules = prArr;
-						applied = true;
-					}
-				}
+			if (freeItemsToGive > 0) {
+				const referenceItem = eligibleItems[0];
+				const uomKey =
+					offer.free_item_uom ||
+					referenceItem?.uom ||
+					referenceItem?.stock_uom ||
+					"Nos";
+				upsertOfflineFreeItemRow({
+					itemCode: freeItemCode,
+					itemName: freeItemCode,
+					freeItemsToGive,
+					uomKey,
+					stockUom: uomKey,
+					conversionFactor: 1,
+					warehouse: referenceItem?.warehouse,
+					offerName: offer.name,
+				});
+				applied = true;
 			}
-
-			// Find if the free item is already in the cart
-			const freeItemInCart = invoiceItems.value.find(
-				(item) => item.item_code === freeItemCode
-			);
-
-			if (freeItemInCart) {
-				// Mark existing cart item as having free quantity
-				if (
-					freeItemsToGive > 0 &&
-					(!freeItemInCart.free_qty || freeItemInCart.free_qty === 0)
-				) {
-					freeItemInCart.free_qty = freeItemsToGive;
-					freeItemInCart.pricing_rules = freeItemInCart.pricing_rules || [];
-					if (!freeItemInCart.pricing_rules.includes(offer.name)) {
-						freeItemInCart.pricing_rules.push(offer.name);
-					}
-					applied = true;
-				}
-			}
-			// Note: We don't add new items to cart offline - that would require
-			// fetching item details. The free item will be added when back online.
 		}
 
 		return applied;
@@ -2043,12 +2074,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		}
 
 		// === ONLINE MODE ===
-		// Get current profile from posProfile
+		const profileDoc = shiftStore.currentProfile;
 		const currentProfile = {
 			customer: customer.value?.name || customer.value,
-			company: posProfile.value.company,
-			selling_price_list: posProfile.value.selling_price_list,
-			currency: posProfile.value.currency,
+			company: profileDoc?.company || shiftStore.profileCompany,
+			selling_price_list: profileDoc?.selling_price_list,
+			currency: profileDoc?.currency || shiftStore.profileCurrency,
 		};
 		try {
 			// 1. Identify invalid offers to remove (client-side check)

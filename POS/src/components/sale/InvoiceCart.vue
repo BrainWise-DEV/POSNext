@@ -912,11 +912,18 @@
 			<div v-else class="flex flex-col gap-0.5 sm:gap-1">
 				<div
 					v-for="(item, index) in displayCartItems"
-					:key="item.item_code + '-' + (item.uom || '')"
+					:key="
+						item.item_code +
+						'-' +
+						(item.uom || '') +
+						(item.is_free_item ? '-free' : '')
+					"
 					@click="openEditDialog(item)"
 					:class="[
 						'border rounded-md p-1.5 sm:p-2 transition-all duration-200',
-						'bg-white border-gray-200 hover:border-blue-300 hover:shadow-md active:scale-[0.99] cursor-pointer group',
+						item.is_free_item || item._isStandaloneFreeRow
+							? 'bg-green-50 border-green-200 hover:border-green-300'
+							: 'bg-white border-gray-200 hover:border-blue-300 hover:shadow-md active:scale-[0.99] cursor-pointer group',
 					]"
 				>
 					<div class="flex gap-1.5 sm:gap-2">
@@ -1582,9 +1589,13 @@ function cartLineKey(item) {
 const displayCartItems = computed(() => {
 	const items = sortedItems.value;
 	const freeQtyByKey = new Map();
+	const paidKeys = new Set();
 
 	for (const item of items) {
-		if (!item.is_free_item) continue;
+		if (!item.is_free_item) {
+			paidKeys.add(cartLineKey(item));
+			continue;
+		}
 		const key = cartLineKey(item);
 		freeQtyByKey.set(
 			key,
@@ -1600,6 +1611,16 @@ const displayCartItems = computed(() => {
 			bundledFreeQty > 0 ? { ...item, _bundledFreeQty: bundledFreeQty } : item
 		);
 	}
+
+	// Different-item product discounts add dedicated is_free_item rows (e.g. buy A get B).
+	// Those rows are not bundled onto a paid line — show them as their own cart lines.
+	for (const item of items) {
+		if (!item.is_free_item) continue;
+		const key = cartLineKey(item);
+		if (paidKeys.has(key)) continue;
+		merged.push({ ...item, _isStandaloneFreeRow: true });
+	}
+
 	return merged;
 });
 
@@ -2007,6 +2028,9 @@ function hasBundledSameItemFree(item) {
 }
 
 function getDisplayFreeQty(item) {
+	if (item?.is_free_item || item?._isStandaloneFreeRow) {
+		return Number.parseFloat(item.quantity) || 0;
+	}
 	const bundled = Number.parseFloat(item?._bundledFreeQty) || 0;
 	if (bundled > 0) return bundled;
 	return getGwpFreeQty(item);

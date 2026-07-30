@@ -4,6 +4,7 @@
 from __future__ import unicode_literals
 
 import json
+import math
 from functools import lru_cache
 
 import frappe
@@ -122,8 +123,13 @@ def _item_pricing_rule_names(item) -> list[str]:
 	return []
 
 
+def _floor_free_item_qty(qty) -> int:
+	"""Free gift lines are always whole units (floor, never round up)."""
+	return max(0, int(math.floor(flt(qty))))
+
+
 def _stamp_gwp_line_discount(item_doc, line_free_qty, price_list_rate) -> None:
-	line_free_qty = flt(line_free_qty)
+	line_free_qty = _floor_free_item_qty(line_free_qty)
 	purchased_qty = flt(item_doc.get("qty") or item_doc.get("quantity") or 0)
 	price_list_rate = flt(price_list_rate)
 	line_discount = calculate_gwp_discount_amount(line_free_qty, price_list_rate)
@@ -3131,7 +3137,7 @@ def apply_offers(invoice_data, selected_offers=None):
 			item_code = item.get("item_code")
 			qty = flt(item.get("qty") or item.get("quantity") or 0)
 
-			if not item_code or qty <= 0:
+			if not item_code or qty <= 0 or item.get("is_free_item"):
 				continue
 
 			# Use batch-fetched item details
@@ -3500,6 +3506,7 @@ def apply_offers(invoice_data, selected_offers=None):
 				if rule_promotion_type(rule_map[rule_name]) == PROMOTION_TYPE_GWP:
 					continue
 				free_item_doc = frappe._dict(free_item)
+				free_item_doc.qty = _floor_free_item_qty(free_item_doc.get("qty"))
 				free_item_doc.applied_promotional_scheme = rule_map[rule_name].promotional_scheme
 				free_items_map[(free_item.get("item_code"), rule_name)] = free_item_doc
 
@@ -3528,6 +3535,7 @@ def apply_offers(invoice_data, selected_offers=None):
 		# Per-item results win on collisions because they already carry full
 		# discount metadata from the per-item engine result.
 		for key, free_item_doc in txn_result.get("free_items", {}).items():
+			free_item_doc.qty = _floor_free_item_qty(free_item_doc.get("qty"))
 			free_items_map.setdefault(key, free_item_doc)
 		applied_rules.update(txn_result.get("applied_rules", set()))
 
@@ -3566,6 +3574,9 @@ def apply_offers(invoice_data, selected_offers=None):
 			# merely *matched* without discounting (an unpriced one, say) would be
 			# stamped is_already_discounted and lose its coupon eligibility.
 			mark_item_discount_flags(prepared_items, build_matrix_type_map(rule_map))
+
+		for free_item_doc in free_items_map.values():
+			free_item_doc.qty = _floor_free_item_qty(free_item_doc.get("qty"))
 
 		return {
 			"items": [dict(item) for item in prepared_items],
