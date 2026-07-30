@@ -545,6 +545,13 @@
 								{{ item.item_name }}
 							</h3>
 							<p
+								v-if="settingsStore.displayItemSku && item.custom_sku"
+								class="text-[8px] sm:text-[9px] text-gray-400 truncate leading-tight"
+								:title="item.custom_sku"
+							>
+								{{ item.custom_sku }}
+							</p>
+							<p
 								v-if="item.attributes"
 								class="text-[8px] sm:text-[9px] text-gray-400 truncate leading-tight"
 							>
@@ -723,6 +730,13 @@
 								{{ __("Code") }}
 							</th>
 							<th
+								v-if="settingsStore.displayItemSku"
+								scope="col"
+								class="hidden sm:table-cell px-2 sm:px-3 py-2 sm:py-2.5 text-start text-[10px] sm:text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 sm:max-w-[150px]"
+							>
+								{{ __("SKU") }}
+							</th>
+							<th
 								scope="col"
 								class="px-2 sm:px-3 py-2 sm:py-2.5 text-start text-[10px] sm:text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 w-[70px] sm:w-[100px]"
 							>
@@ -820,6 +834,17 @@
 									:title="item.item_code"
 								>
 									{{ item.item_code }}
+								</div>
+							</td>
+							<td
+								v-if="settingsStore.displayItemSku"
+								class="hidden sm:table-cell px-2 sm:px-3 py-2 whitespace-nowrap sm:max-w-[150px]"
+							>
+								<div
+									class="text-xs sm:text-sm text-gray-500 truncate"
+									:title="item.custom_sku"
+								>
+									{{ item.custom_sku || "-" }}
 								</div>
 							</td>
 							<td class="px-2 sm:px-3 py-2 whitespace-nowrap w-[70px] sm:w-[100px]">

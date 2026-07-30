@@ -31,6 +31,7 @@
   "section_break_display",
   "default_card_view",
   "display_item_code",
+  "display_item_sku",
   "show_customer_balance",
   "column_break_display",
   "hide_expected_amount",
@@ -263,6 +264,13 @@
    "fieldname": "display_item_code",
    "fieldtype": "Check",
    "label": "Display Item Code"
+  },
+  {
+   "default": "0",
+   "description": "Show the item's SKU (custom_sku field on Item) in the POS item list",
+   "fieldname": "display_item_sku",
+   "fieldtype": "Check",
+   "label": "Display Item SKU"
   },
   {
    "default": "0",
