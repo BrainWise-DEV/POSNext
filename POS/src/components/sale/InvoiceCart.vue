@@ -911,19 +911,12 @@
 
 			<div v-else class="flex flex-col gap-0.5 sm:gap-1">
 				<div
-					v-for="(item, index) in sortedItems"
-					:key="
-						item.item_code +
-						'-' +
-						(item.uom || '') +
-						(item.is_free_item ? '-free' : '')
-					"
-					@click="item.is_free_item ? null : openEditDialog(item)"
+					v-for="(item, index) in displayCartItems"
+					:key="item.item_code + '-' + (item.uom || '')"
+					@click="openEditDialog(item)"
 					:class="[
 						'border rounded-md p-1.5 sm:p-2 transition-all duration-200',
-						item.is_free_item
-							? 'bg-green-50 border-green-300 cursor-default'
-							: 'bg-white border-gray-200 hover:border-blue-300 hover:shadow-md active:scale-[0.99] cursor-pointer group',
+						'bg-white border-gray-200 hover:border-blue-300 hover:shadow-md active:scale-[0.99] cursor-pointer group',
 					]"
 				>
 					<div class="flex gap-1.5 sm:gap-2">
@@ -969,13 +962,9 @@
 									</h4>
 									<!-- GWP / Free Item Badge -->
 									<span
-										v-if="getGwpFreeQty(item) > 0"
+										v-if="getDisplayFreeQty(item) > 0"
 										class="inline-flex items-center px-1.5 py-0.5 bg-green-600 text-white rounded-full text-[9px] font-bold flex-shrink-0"
-										:title="
-											isGwpItem(item)
-												? __('{0} free items', [getGwpFreeQty(item)])
-												: __('{0} free item(s) included', [getGwpFreeQty(item)])
-										"
+										:title="formatFreeItemBadgeText(getDisplayFreeQty(item))"
 									>
 										<svg
 											class="w-2.5 h-2.5 me-0.5"
@@ -988,18 +977,13 @@
 												clip-rule="evenodd"
 											/>
 										</svg>
-										{{
-											isGwpItem(item)
-												? __("{0} free items", [getGwpFreeQty(item)])
-												: item.is_free_item
-												? __("FREE")
-												: __("+{0} FREE", [getGwpFreeQty(item)])
-										}}
+										{{ formatFreeItemBadgeText(getDisplayFreeQty(item)) }}
 									</span>
-									<!-- Discount Badge (non-GWP only) -->
+									<!-- Discount Badge (hide when same-item free gift is bundled on this line) -->
 									<div
 										v-if="
 											!isGwpItem(item) &&
+											!hasBundledSameItemFree(item) &&
 											item.discount_amount &&
 											item.discount_amount > 0
 										"
@@ -1024,7 +1008,6 @@
 									</div>
 								</div>
 								<button
-									v-if="!item.is_free_item"
 									type="button"
 									@click.stop="$emit('remove-item', item.item_code, item.uom)"
 									class="text-gray-400 hover:text-red-600 active:text-red-700 transition-colors flex-shrink-0 p-0.5 -m-0.5 touch-manipulation active:scale-90"
@@ -1051,19 +1034,9 @@
 							<div class="flex items-center justify-between gap-1.5">
 								<div class="flex items-center gap-1.5">
 									<!-- Quantity Counter -->
-									<!-- For free items, show static quantity badge -->
-									<div
-										v-if="item.is_free_item"
-										class="flex items-center bg-green-100 border border-green-300 rounded px-2 h-6 sm:h-7"
-									>
-										<span
-											class="text-xs sm:text-sm font-bold text-green-700"
-											>{{ item.quantity }}</span
-										>
-									</div>
 									<!-- For serial items, show serial badge with edit button -->
 									<div
-										v-else-if="item.has_serial_no && item.serial_no"
+										v-if="item.has_serial_no && item.serial_no"
 										class="flex items-center gap-1"
 										@click.stop
 									>
@@ -1132,7 +1105,7 @@
 											</svg>
 										</button>
 										<input
-											:value="formatQuantity(item.quantity)"
+											:value="formatQuantity(getDisplayQuantity(item))"
 											@click.stop
 											@input="updateQuantity(item, $event.target.value)"
 											@blur="handleQuantityBlur(item)"
@@ -1599,8 +1572,39 @@ const {
 } = useCartSort(() => props.items);
 
 /**
- * ============================================================================
- * REACTIVE STATE
+ * Display-only merge: hide matching same-item free rows and show one combined line.
+ * Cart data stays unchanged for offers and invoicing.
+ */
+function cartLineKey(item) {
+	return `${item.item_code}\0${item.uom || item.stock_uom || ""}`;
+}
+
+const displayCartItems = computed(() => {
+	const items = sortedItems.value;
+	const freeQtyByKey = new Map();
+
+	for (const item of items) {
+		if (!item.is_free_item) continue;
+		const key = cartLineKey(item);
+		freeQtyByKey.set(
+			key,
+			(freeQtyByKey.get(key) || 0) + (Number.parseFloat(item.quantity) || 0)
+		);
+	}
+
+	const merged = [];
+	for (const item of items) {
+		if (item.is_free_item) continue;
+		const bundledFreeQty = freeQtyByKey.get(cartLineKey(item)) || 0;
+		merged.push(
+			bundledFreeQty > 0 ? { ...item, _bundledFreeQty: bundledFreeQty } : item
+		);
+	}
+	return merged;
+});
+
+/**
+ * Reactive State
  * ============================================================================
  */
 // Customer search state
@@ -1998,6 +2002,38 @@ function getGwpFreeQty(item) {
 	return Number.parseFloat(item?.free_qty) || 0;
 }
 
+function hasBundledSameItemFree(item) {
+	return (Number.parseFloat(item?._bundledFreeQty) || 0) > 0;
+}
+
+function getDisplayFreeQty(item) {
+	const bundled = Number.parseFloat(item?._bundledFreeQty) || 0;
+	if (bundled > 0) return bundled;
+	return getGwpFreeQty(item);
+}
+
+function getDisplayQuantity(item) {
+	const bundled = Number.parseFloat(item?._bundledFreeQty) || 0;
+	if (bundled > 0) {
+		return (Number.parseFloat(item.quantity) || 0) + bundled;
+	}
+	return item.quantity || 0;
+}
+
+function formatFreeItemBadgeText(freeQty) {
+	const count = Number.parseFloat(freeQty) || 0;
+	if (count === 1) return __("1 free item");
+	return __("{0} free items", [count]);
+}
+
+function resolvePaidQuantityFromDisplay(item, displayQty) {
+	const bundled = Number.parseFloat(item?._bundledFreeQty) || 0;
+	if (bundled > 0) {
+		return Math.max(0, displayQty - bundled);
+	}
+	return displayQty;
+}
+
 function getItemDiscountPercent(item) {
 	const pct = Number.parseFloat(item?.discount_percentage) || 0;
 	if (pct > 0) return pct;
@@ -2071,9 +2107,9 @@ function incrementQuantity(item) {
 	// Prevent editing resolved barcode items
 	if (item.is_resolved_barcode) return;
 
-	const step = getSmartStep(item.quantity);
-	const newQty = Math.round((item.quantity + step) * 10000) / 10000;
-	emit("update-quantity", item.item_code, newQty, item.uom);
+	const step = getSmartStep(getDisplayQuantity(item));
+	const newPaidQty = Math.round((item.quantity + step) * 10000) / 10000;
+	emit("update-quantity", item.item_code, newPaidQty, item.uom);
 }
 
 /**
@@ -2086,14 +2122,14 @@ function decrementQuantity(item) {
 	// Prevent editing resolved barcode items
 	if (item.is_resolved_barcode) return;
 
-	const step = getSmartStep(item.quantity);
-	const newQty = Math.round((item.quantity - step) * 10000) / 10000;
+	const step = getSmartStep(getDisplayQuantity(item));
+	const newPaidQty = Math.round((item.quantity - step) * 10000) / 10000;
 
-	if (newQty <= 0) {
+	if (newPaidQty <= 0) {
 		// If quantity would be 0 or negative, remove the item
 		emit("remove-item", item.item_code, item.uom);
 	} else {
-		emit("update-quantity", item.item_code, newQty, item.uom);
+		emit("update-quantity", item.item_code, newPaidQty, item.uom);
 	}
 }
 
@@ -2109,16 +2145,18 @@ function updateQuantity(item, value) {
 	// Prevent editing resolved barcode items
 	if (item.is_resolved_barcode) return;
 
-	const qty = Number.parseFloat(value);
+	const displayQty = Number.parseFloat(value);
 
 	// If the input isn't a valid number (e.g., user cleared the field), do nothing
-	if (isNaN(qty)) return;
+	if (isNaN(displayQty)) return;
+
+	const paidQty = resolvePaidQuantityFromDisplay(item, displayQty);
 
 	// If quantity is zero or negative, remove the item from the cart
-	if (qty <= 0) return emit("remove-item", item.item_code, item.uom);
+	if (paidQty <= 0) return emit("remove-item", item.item_code, item.uom);
 
-	// For positive numbers, update quantity immediately (no rounding here while typing)
-	emit("update-quantity", item.item_code, qty, item.uom);
+	// For positive numbers, update paid quantity (free row stays separate in data)
+	emit("update-quantity", item.item_code, paidQty, item.uom);
 }
 
 /**
