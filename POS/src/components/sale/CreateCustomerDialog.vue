@@ -9,7 +9,7 @@
 		<template #body-content>
 			<div class="flex flex-col gap-6">
 				<!-- Customer Name (Required) -->
-				<div>
+				<div v-if="!magentoLoyaltyAvailable">
 					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
 						{{ __("Customer Name") }} <span class="text-red-500">*</span>
 					</label>
@@ -20,6 +20,44 @@
 						required
 					/>
 				</div>
+
+				<template v-else>
+					<div class="grid grid-cols-2 gap-4">
+						<div>
+							<label class="block text-start text-sm font-medium text-gray-700 mb-2">
+								{{ __("First Name") }} <span class="text-red-500">*</span>
+							</label>
+							<Input
+								v-model="customerData.custom_first_name"
+								type="text"
+								:placeholder="__('First name')"
+								required
+							/>
+						</div>
+						<div>
+							<label class="block text-start text-sm font-medium text-gray-700 mb-2">
+								{{ __("Last Name") }} <span class="text-red-500">*</span>
+							</label>
+							<Input
+								v-model="customerData.custom_last_name"
+								type="text"
+								:placeholder="__('Last name')"
+								required
+							/>
+						</div>
+					</div>
+					<div>
+						<label class="block text-start text-sm font-medium text-gray-700 mb-2">
+							{{ __("Customer Name") }}
+						</label>
+						<Input
+							:model-value="computedCustomerName"
+							type="text"
+							disabled
+							:placeholder="__('Auto-generated from first and last name')"
+						/>
+					</div>
+				</template>
 
 				<!-- Mobile Number with Country Code Selector -->
 				<div>
@@ -282,6 +320,7 @@
 import { usePOSPermissions } from "@/composables/usePermissions";
 import { useToast } from "@/composables/useToast";
 import { useCountriesStore } from "@/stores/countries";
+import { usePOSSettingsStore } from "@/stores/posSettings";
 import { logger } from "@/utils/logger";
 import { Button, Dialog, Input, createResource } from "frappe-ui";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
@@ -293,6 +332,7 @@ const log = logger.create("CreateCustomerDialog");
 // =============================================================================
 
 const countriesStore = useCountriesStore();
+const posSettingsStore = usePOSSettingsStore();
 const { canCreateCustomer } = usePOSPermissions();
 const { showSuccess, showError } = useToast();
 
@@ -335,6 +375,8 @@ const customerData = ref({
 	territory: "",
 	custom_governorate: "",
 	custom_district: "",
+	custom_first_name: "",
+	custom_last_name: "",
 });
 
 // =============================================================================
@@ -347,6 +389,14 @@ const show = computed({
 });
 
 const isEditMode = computed(() => !!props.customer?.name);
+
+const magentoLoyaltyAvailable = computed(() => posSettingsStore.magentoLoyaltyAvailable);
+
+const computedCustomerName = computed(() => {
+	const first = (customerData.value.custom_first_name || "").trim();
+	const last = (customerData.value.custom_last_name || "").trim();
+	return [first, last].filter(Boolean).join(" ");
+});
 
 const currentCountryCode = computed(() => {
 	const country = countriesStore.countries.find((c) => c.isd === selectedCountryCode.value);
@@ -441,13 +491,18 @@ const updateTerritoryFromCountry = () => {
 const createCustomerResource = createResource({
 	url: "pos_next.api.customers.create_customer",
 	makeParams: () => ({
-		customer_name: customerData.value.customer_name,
+		customer_name: magentoLoyaltyAvailable.value
+			? computedCustomerName.value
+			: customerData.value.customer_name,
 		mobile_no: customerData.value.mobile_no || "",
 		email_id: customerData.value.email_id || "",
 		customer_group: customerData.value.customer_group || "",
 		territory: customerData.value.territory || "",
 		custom_governorate: customerData.value.custom_governorate || "",
 		custom_district: customerData.value.custom_district || "",
+		custom_first_name: customerData.value.custom_first_name || "",
+		custom_last_name: customerData.value.custom_last_name || "",
+		custom_is_publish: 1,
 		pos_profile: props.posProfile,
 	}),
 	onSuccess: (data) => {
@@ -643,7 +698,14 @@ const checkPermissions = async () => {
 };
 
 const handleCreate = async () => {
-	if (!customerData.value.customer_name) {
+	if (magentoLoyaltyAvailable.value) {
+		if (!customerData.value.custom_first_name?.trim()) {
+			return showError(__("First Name is required"));
+		}
+		if (!customerData.value.custom_last_name?.trim()) {
+			return showError(__("Last Name is required"));
+		}
+	} else if (!customerData.value.customer_name) {
 		return showError(__("Customer Name is required"));
 	}
 	if (!phoneNumber.value) {
@@ -668,6 +730,8 @@ const resetForm = () => {
 		),
 		custom_governorate: "",
 		custom_district: "",
+		custom_first_name: "",
+		custom_last_name: "",
 	});
 	districts.value = [];
 	selectedCountryCode.value = "";

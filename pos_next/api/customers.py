@@ -6,6 +6,8 @@ Handles customer search, creation, and management for POS operations
 import frappe
 from frappe import _
 
+from pos_next.services.miraaya_loyalty import is_miraaya_loyalty_available
+
 
 @frappe.whitelist()
 def get_customers(search_term="", pos_profile=None, limit=20, modified_since=None):
@@ -83,6 +85,9 @@ def create_customer(
 	pos_profile=None,
 	custom_governorate=None,
 	custom_district=None,
+	custom_first_name=None,
+	custom_last_name=None,
+	custom_is_publish=1,
 ):
 	"""
 	Create a new customer from POS.
@@ -97,6 +102,9 @@ def create_customer(
 	    pos_profile (str): POS Profile (optional, preferred for context-aware loyalty assignment)
 	    custom_governorate (str): Governorate (optional)
 	    custom_district (str): District (optional, must belong to the governorate)
+	    custom_first_name (str): First name for Magento sync (required when masar_miraaya installed)
+	    custom_last_name (str): Last name for Magento sync (required when masar_miraaya installed)
+	    custom_is_publish (int): Publish customer to Magento (default 1)
 
 	Returns:
 	    dict: Created customer document
@@ -107,6 +115,12 @@ def create_customer(
 
 	if not customer_name:
 		frappe.throw(_("Customer name is required"))
+
+	if is_miraaya_loyalty_available():
+		if not (custom_first_name or "").strip():
+			frappe.throw(_("First name is required"))
+		if not (custom_last_name or "").strip():
+			frappe.throw(_("Last name is required"))
 
 	loyalty_program = get_default_loyalty_program_from_settings(
 		company=company,
@@ -144,6 +158,16 @@ def create_customer(
 			"custom_district": custom_district or None,
 		}
 	)
+
+	if is_miraaya_loyalty_available():
+		customer_fields = {}
+		if frappe.get_meta("Customer").has_field("custom_first_name"):
+			customer_fields["custom_first_name"] = (custom_first_name or "").strip()
+		if frappe.get_meta("Customer").has_field("custom_last_name"):
+			customer_fields["custom_last_name"] = (custom_last_name or "").strip()
+		if frappe.get_meta("Customer").has_field("custom_is_publish"):
+			customer_fields["custom_is_publish"] = int(custom_is_publish or 0)
+		customer.update(customer_fields)
 
 	frappe.flags.pos_next_customer_company = company
 	frappe.flags.pos_next_customer_pos_profile = pos_profile

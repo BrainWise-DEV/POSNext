@@ -223,6 +223,10 @@ def _get_pos_settings(pos_profile_doc):
 		)
 		settings["disable_rounded_total"] = pos_profile_doc.disable_rounded_total or 0
 
+		from pos_next.api.pos_profile import _is_magento_loyalty_available
+
+		settings["magento_loyalty_available"] = _is_magento_loyalty_available(pos_profile_doc.name)
+
 		return settings
 	except Exception:
 		frappe.log_error(frappe.get_traceback(), "Get POS Settings Error")

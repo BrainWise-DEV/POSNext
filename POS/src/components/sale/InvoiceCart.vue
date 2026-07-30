@@ -105,6 +105,16 @@
 									>
 										{{ customer.mobile_no }}
 									</p>
+									<p
+										v-if="customerLpInfo.wallet_enabled"
+										class="text-[10px] text-amber-600 font-medium truncate leading-tight"
+									>
+										{{ __("LP") }}:
+										{{ formatCurrency(customerLpInfo.balance_iqd) }}
+										<span v-if="customerLpInfo.balance_points">
+											({{ customerLpInfo.balance_points }} {{ __("pts") }})
+										</span>
+									</p>
 								</div>
 							</div>
 
@@ -1700,6 +1710,38 @@ const giftCardsResource = createResource({
 	},
 });
 
+const customerLpInfo = ref({
+	wallet_enabled: false,
+	balance_points: 0,
+	balance_iqd: 0,
+});
+
+const customerLpResource = createResource({
+	url: "pos_next.api.magento_loyalty.get_lp_balance_for_customer",
+	makeParams() {
+		const customerName = props.customer?.name || props.customer;
+		return {
+			customer: customerName,
+			pos_profile: props.posProfile,
+		};
+	},
+	auto: false,
+	onSuccess(data) {
+		customerLpInfo.value = data || {
+			wallet_enabled: false,
+			balance_points: 0,
+			balance_iqd: 0,
+		};
+	},
+	onError() {
+		customerLpInfo.value = {
+			wallet_enabled: false,
+			balance_points: 0,
+			balance_iqd: 0,
+		};
+	},
+});
+
 /**
  * Watch for customer changes to load their gift cards.
  * Reloads gift cards resource when customer is selected (and online).
@@ -1713,6 +1755,16 @@ watch(
 			giftCardsResource.reload();
 		} else {
 			availableGiftCards.value = [];
+		}
+
+		if (customerName && props.posProfile && !isOffline()) {
+			customerLpResource.reload();
+		} else {
+			customerLpInfo.value = {
+				wallet_enabled: false,
+				balance_points: 0,
+				balance_iqd: 0,
+			};
 		}
 	}
 );

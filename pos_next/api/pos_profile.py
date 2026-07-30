@@ -82,10 +82,17 @@ def get_pos_settings(pos_profile):
 		if not pos_settings:
 			return DEFAULT_POS_SETTINGS.copy()
 
+		pos_settings["magento_loyalty_available"] = _is_magento_loyalty_available(pos_profile)
 		return pos_settings
 	except Exception:
 		frappe.log_error(frappe.get_traceback(), "Get POS Settings Error")
 		return DEFAULT_POS_SETTINGS.copy()
+
+
+def _is_magento_loyalty_available(pos_profile):
+	from pos_next.services.miraaya_loyalty import is_magento_loyalty_mode
+
+	return is_magento_loyalty_mode(pos_profile)
 
 
 @frappe.whitelist()

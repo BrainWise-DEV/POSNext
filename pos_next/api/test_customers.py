@@ -4,6 +4,8 @@
 import unittest
 from unittest.mock import Mock, patch
 
+import frappe
+
 from pos_next.api.customers import (
 	_get_customer_assignment_context,
 	create_customer,
@@ -86,8 +88,75 @@ class TestCustomersAPI(unittest.TestCase):
 	@patch("pos_next.api.customers.frappe.get_doc")
 	@patch("pos_next.api.customers.get_default_loyalty_program_from_settings")
 	@patch("pos_next.api.customers.frappe.has_permission")
+	@patch("pos_next.api.customers.is_miraaya_loyalty_available", return_value=True)
+	def test_create_customer_requires_magento_names_when_miraaya_installed(
+		self,
+		_mock_miraaya,
+		mock_has_permission,
+		mock_get_loyalty,
+		mock_get_doc,
+	):
+		mock_has_permission.return_value = True
+		mock_get_loyalty.return_value = "LOYALTY-A"
+
+		with self.assertRaises(frappe.ValidationError):
+			create_customer(
+				customer_name="John Doe",
+				customer_group="Individual",
+				territory="All Territories",
+				pos_profile="POS-A",
+			)
+
+	@patch(
+		"pos_next.api.customers.frappe.flags",
+		new=Mock(pos_next_customer_company=None, pos_next_customer_pos_profile=None),
+	)
+	@patch("pos_next.api.customers.frappe.get_doc")
+	@patch("pos_next.api.customers.get_default_loyalty_program_from_settings")
+	@patch("pos_next.api.customers.frappe.has_permission")
+	@patch("pos_next.api.customers.is_miraaya_loyalty_available", return_value=True)
+	def test_create_customer_sets_magento_fields_when_miraaya_installed(
+		self,
+		_mock_miraaya,
+		mock_has_permission,
+		mock_get_loyalty,
+		mock_get_doc,
+	):
+		mock_has_permission.return_value = True
+		mock_get_loyalty.return_value = "LOYALTY-A"
+
+		customer_doc = Mock()
+		customer_doc.as_dict.return_value = {"name": "CUST-0001"}
+		mock_get_doc.return_value = customer_doc
+
+		with patch("pos_next.api.customers.frappe.get_meta") as mock_get_meta:
+			meta = Mock()
+			meta.has_field.return_value = True
+			mock_get_meta.return_value = meta
+
+			create_customer(
+				customer_name="John Doe",
+				custom_first_name="John",
+				custom_last_name="Doe",
+				customer_group="Individual",
+				territory="All Territories",
+				pos_profile="POS-A",
+			)
+
+		customer_doc.update.assert_called_once()
+		customer_doc.insert.assert_called_once_with()
+
+	@patch(
+		"pos_next.api.customers.frappe.flags",
+		new=Mock(pos_next_customer_company=None, pos_next_customer_pos_profile=None),
+	)
+	@patch("pos_next.api.customers.frappe.get_doc")
+	@patch("pos_next.api.customers.get_default_loyalty_program_from_settings")
+	@patch("pos_next.api.customers.frappe.has_permission")
+	@patch("pos_next.api.customers.is_miraaya_loyalty_available", return_value=False)
 	def test_create_customer_uses_pos_profile_for_loyalty_assignment(
 		self,
+		_mock_miraaya,
 		mock_has_permission,
 		mock_get_loyalty,
 		mock_get_doc,
