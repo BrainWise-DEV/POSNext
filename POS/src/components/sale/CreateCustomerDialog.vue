@@ -293,7 +293,7 @@
 							updateCustomerResource.loading ||
 							checkingPermission
 						"
-						:disabled="!customerData.customer_name || !phoneNumber || !hasPermission"
+						:disabled="!canSubmitCustomer"
 					>
 						{{ isEditMode ? __("Save Changes") : __("Create Customer") }}
 					</Button>
@@ -397,6 +397,17 @@ const computedCustomerName = computed(() => {
 	const last = (customerData.value.custom_last_name || "").trim();
 	return [first, last].filter(Boolean).join(" ");
 });
+
+const hasValidCustomerName = computed(() => {
+	if (magentoLoyaltyAvailable.value) {
+		return Boolean(computedCustomerName.value);
+	}
+	return Boolean((customerData.value.customer_name || "").trim());
+});
+
+const canSubmitCustomer = computed(
+	() => hasValidCustomerName.value && Boolean(phoneNumber.value) && hasPermission.value
+);
 
 const currentCountryCode = computed(() => {
 	const country = countriesStore.countries.find((c) => c.isd === selectedCountryCode.value);
