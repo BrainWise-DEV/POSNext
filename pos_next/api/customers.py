@@ -160,19 +160,27 @@ def create_customer(
 	)
 
 	if is_miraaya_loyalty_available():
+		publish_to_magento = int(custom_is_publish or 0)
 		customer_fields = {}
 		if frappe.get_meta("Customer").has_field("custom_first_name"):
 			customer_fields["custom_first_name"] = (custom_first_name or "").strip()
 		if frappe.get_meta("Customer").has_field("custom_last_name"):
 			customer_fields["custom_last_name"] = (custom_last_name or "").strip()
 		if frappe.get_meta("Customer").has_field("custom_is_publish"):
-			customer_fields["custom_is_publish"] = int(custom_is_publish or 0)
+			# Defer Magento sync until after insert creates the primary Contact
+			# (masar_miraaya validate runs before ERPNext creates Contact/email).
+			customer_fields["custom_is_publish"] = 0
 		customer.update(customer_fields)
+	else:
+		publish_to_magento = False
 
 	frappe.flags.pos_next_customer_company = company
 	frappe.flags.pos_next_customer_pos_profile = pos_profile
 	try:
 		customer.insert()
+		if publish_to_magento and frappe.get_meta("Customer").has_field("custom_is_publish"):
+			customer.custom_is_publish = 1
+			customer.save()
 	finally:
 		frappe.flags.pos_next_customer_company = None
 		frappe.flags.pos_next_customer_pos_profile = None

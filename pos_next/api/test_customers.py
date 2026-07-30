@@ -37,14 +37,14 @@ class TestCustomersAPI(unittest.TestCase):
 			],
 		)
 
-	@patch("pos_next.api.customers.frappe.db")
-	def test_get_default_loyalty_program_from_settings_uses_explicit_pos_profile(self, mock_db):
-		mock_db.get_value.return_value = "LOYALTY-A"
+	@patch("pos_next.api.customers.frappe.db.get_value")
+	def test_get_default_loyalty_program_from_settings_uses_explicit_pos_profile(self, mock_get_value):
+		mock_get_value.return_value = "LOYALTY-A"
 
 		result = get_default_loyalty_program_from_settings(pos_profile="POS-A")
 
 		self.assertEqual(result, "LOYALTY-A")
-		mock_db.get_value.assert_called_once_with(
+		mock_get_value.assert_called_once_with(
 			"POS Settings",
 			{"enabled": 1, "pos_profile": "POS-A"},
 			"default_loyalty_program",
@@ -138,6 +138,7 @@ class TestCustomersAPI(unittest.TestCase):
 				customer_name="John Doe",
 				custom_first_name="John",
 				custom_last_name="Doe",
+				email_id="john@example.com",
 				customer_group="Individual",
 				territory="All Territories",
 				pos_profile="POS-A",
@@ -145,6 +146,7 @@ class TestCustomersAPI(unittest.TestCase):
 
 		customer_doc.update.assert_called_once()
 		customer_doc.insert.assert_called_once_with()
+		customer_doc.save.assert_called_once_with()
 
 	@patch(
 		"pos_next.api.customers.frappe.flags",
