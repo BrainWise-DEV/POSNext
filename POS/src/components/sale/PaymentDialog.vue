@@ -3423,10 +3423,6 @@ function proceedWithPayment() {
 	emit("payment-completed", paymentData)
 }
 
-function formatCurrency(amount) {
-	return formatCurrencyUtil(Number.parseFloat(amount || 0), props.currency);
-}
-
 // Get total amount for a specific payment method
 function getMethodTotal(methodName) {
 	return paymentEntries.value
