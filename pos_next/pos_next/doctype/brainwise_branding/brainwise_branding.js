@@ -1,8 +1,8 @@
 // Copyright (c) 2025, BrainWise and contributors
 // For license information, please see license.txt
 
-frappe.ui.form.on('BrainWise Branding', {
-	refresh: function(frm) {
+frappe.ui.form.on("BrainWise Branding", {
+	refresh: function (frm) {
 		// Add custom buttons and UI elements
 		add_master_key_controls(frm);
 
@@ -13,103 +13,143 @@ frappe.ui.form.on('BrainWise Branding', {
 		add_security_indicators(frm);
 	},
 
-	master_key_provided: function(frm) {
+	master_key_provided: function (frm) {
 		// When master key is entered, unlock the protected fields
 		if (frm.doc.master_key_provided) {
 			unlock_protected_fields(frm);
-			frm.dashboard.add_comment('Master key detected. Protected fields are now editable.', 'blue', true);
+			frm.dashboard.add_comment(
+				"Master key detected. Protected fields are now editable.",
+				"blue",
+				true
+			);
 		}
 	},
 
-	enabled: function(frm) {
+	enabled: function (frm) {
 		// When trying to disable, show warning
 		if (!frm.doc.enabled) {
 			frappe.msgprint({
-				title: __('Master Key Required'),
-				indicator: 'red',
-				message: __('To disable branding, you must provide the Master Key in JSON format: <code>{"key": "...", "phrase": "..."}</code>')
+				title: __("Master Key Required"),
+				indicator: "red",
+				message: __(
+					'To disable branding, you must provide the Master Key in JSON format: <code>{"key": "...", "phrase": "..."}</code>'
+				),
 			});
 		}
-	}
+	},
 });
 
 function add_master_key_controls(frm) {
 	// Add verify key button
-	frm.add_custom_button(__('Verify Master Key'), function() {
-		verify_master_key(frm);
-	}, __('Actions'));
+	frm.add_custom_button(
+		__("Verify Master Key"),
+		function () {
+			verify_master_key(frm);
+		},
+		__("Actions")
+	);
 
 	// Add help button
-	frm.add_custom_button(__('Master Key Help'), function() {
-		show_master_key_help();
-	}, __('Help'));
+	frm.add_custom_button(
+		__("Master Key Help"),
+		function () {
+			show_master_key_help();
+		},
+		__("Help")
+	);
 
 	// Add tampering stats button (System Manager only)
-	if (frappe.user.has_role('System Manager')) {
-		frm.add_custom_button(__('View Tampering Stats'), function() {
-			show_tampering_stats();
-		}, __('Security'));
+	if (frappe.user.has_role("System Manager")) {
+		frm.add_custom_button(
+			__("View Tampering Stats"),
+			function () {
+				show_tampering_stats();
+			},
+			__("Security")
+		);
 	}
 }
 
 function update_field_permissions(frm) {
 	// Protected fields
-	const protected_fields = ['enabled', 'brand_text', 'brand_name', 'brand_url', 'check_interval'];
+	const protected_fields = [
+		"enabled",
+		"brand_text",
+		"brand_name",
+		"brand_url",
+		"check_interval",
+	];
 
 	// If master key is not provided, ensure fields are read-only
 	if (!frm.doc.master_key_provided) {
-		protected_fields.forEach(field => {
-			frm.set_df_property(field, 'read_only', 1);
+		protected_fields.forEach((field) => {
+			frm.set_df_property(field, "read_only", 1);
 		});
 	}
 }
 
 function unlock_protected_fields(frm) {
 	// Temporarily unlock protected fields when master key is provided
-	const protected_fields = ['enabled', 'brand_text', 'brand_name', 'brand_url', 'check_interval'];
+	const protected_fields = [
+		"enabled",
+		"brand_text",
+		"brand_name",
+		"brand_url",
+		"check_interval",
+	];
 
-	protected_fields.forEach(field => {
-		frm.set_df_property(field, 'read_only', 0);
+	protected_fields.forEach((field) => {
+		frm.set_df_property(field, "read_only", 0);
 	});
 
-	frappe.show_alert({
-		message: __('Protected fields unlocked. You can now make changes.'),
-		indicator: 'green'
-	}, 5);
+	frappe.show_alert(
+		{
+			message: __("Protected fields unlocked. You can now make changes."),
+			indicator: "green",
+		},
+		5
+	);
 }
 
 function verify_master_key(frm) {
 	if (!frm.doc.master_key_provided) {
 		frappe.msgprint({
-			title: __('No Master Key Provided'),
-			indicator: 'red',
-			message: __('Please enter the Master Key in the field above to verify.')
+			title: __("No Master Key Provided"),
+			indicator: "red",
+			message: __("Please enter the Master Key in the field above to verify."),
 		});
 		return;
 	}
 
 	frappe.call({
-		method: 'pos_next.pos_next.doctype.brainwise_branding.brainwise_branding.verify_master_key',
+		method: "pos_next.pos_next.doctype.brainwise_branding.brainwise_branding.verify_master_key",
 		args: {
-			master_key_input: frm.doc.master_key_provided
+			master_key_input: frm.doc.master_key_provided,
 		},
-		callback: function(r) {
+		callback: function (r) {
 			if (r.message && r.message.valid) {
-				frappe.show_alert({
-					message: __('✅ Master Key is VALID! You can now modify protected fields.'),
-					indicator: 'green'
-				}, 10);
+				frappe.show_alert(
+					{
+						message: __(
+							"✅ Master Key is VALID! You can now modify protected fields."
+						),
+						indicator: "green",
+					},
+					10
+				);
 
 				// Unlock fields
 				unlock_protected_fields(frm);
 			} else {
 				frappe.msgprint({
-					title: __('Invalid Master Key'),
-					indicator: 'red',
-					message: __('The master key you provided is invalid. Please check and try again.<br><br>Format: <code>{"key": "...", "phrase": "..."}</code>')
+					title: __("Invalid Master Key"),
+					indicator: "red",
+					message: __(
+						'The master key you provided is invalid. Please check and try again.<br><br>Format: <code>{"key": "...", "phrase": "..."}</code>'
+					),
 				});
 			}
-		}
+		},
 	});
 }
 
@@ -156,16 +196,16 @@ function show_master_key_help() {
 	`;
 
 	frappe.msgprint({
-		title: __('Master Key Help'),
+		title: __("Master Key Help"),
 		message: help_html,
-		wide: true
+		wide: true,
 	});
 }
 
 function show_tampering_stats() {
 	frappe.call({
-		method: 'pos_next.api.branding.get_tampering_stats',
-		callback: function(r) {
+		method: "pos_next.api.branding.get_tampering_stats",
+		callback: function (r) {
 			if (r.message) {
 				const stats = r.message;
 				const stats_html = `
@@ -178,7 +218,11 @@ function show_tampering_stats() {
 							</tr>
 							<tr>
 								<td>Branding Enabled</td>
-								<td>${stats.enabled ? '<span class="indicator green">Yes</span>' : '<span class="indicator red">No</span>'}</td>
+								<td>${
+									stats.enabled
+										? '<span class="indicator green">Yes</span>'
+										: '<span class="indicator red">No</span>'
+								}</td>
 							</tr>
 							<tr>
 								<td>Total Tampering Attempts</td>
@@ -186,15 +230,23 @@ function show_tampering_stats() {
 							</tr>
 							<tr>
 								<td>Last Validation</td>
-								<td>${stats.last_validation || 'Never'}</td>
+								<td>${stats.last_validation || "Never"}</td>
 							</tr>
 							<tr>
 								<td>Server Validation</td>
-								<td>${stats.server_validation ? '<span class="indicator green">Enabled</span>' : '<span class="indicator orange">Disabled</span>'}</td>
+								<td>${
+									stats.server_validation
+										? '<span class="indicator green">Enabled</span>'
+										: '<span class="indicator orange">Disabled</span>'
+								}</td>
 							</tr>
 							<tr>
 								<td>Logging Enabled</td>
-								<td>${stats.logging_enabled ? '<span class="indicator green">Yes</span>' : '<span class="indicator orange">No</span>'}</td>
+								<td>${
+									stats.logging_enabled
+										? '<span class="indicator green">Yes</span>'
+										: '<span class="indicator orange">No</span>'
+								}</td>
 							</tr>
 						</table>
 						<p class="text-muted">View detailed logs in <a href="/app/error-log?title=BrainWise%20Branding">Error Log</a></p>
@@ -202,28 +254,31 @@ function show_tampering_stats() {
 				`;
 
 				frappe.msgprint({
-					title: __('Security Statistics'),
+					title: __("Security Statistics"),
 					message: stats_html,
-					wide: true
+					wide: true,
 				});
 			}
-		}
+		},
 	});
 }
 
 function add_security_indicators(frm) {
 	// Add security indicator to dashboard
 	if (frm.doc.enabled) {
-		frm.dashboard.add_indicator(__('Branding Active'), 'green');
+		frm.dashboard.add_indicator(__("Branding Active"), "green");
 	} else {
-		frm.dashboard.add_indicator(__('Branding Disabled'), 'red');
+		frm.dashboard.add_indicator(__("Branding Disabled"), "red");
 	}
 
 	// Add tampering indicator if there are attempts
 	if (frm.doc.tampering_attempts > 0) {
-		frm.dashboard.add_indicator(__('Tampering Attempts: {0}', [frm.doc.tampering_attempts]), 'orange');
+		frm.dashboard.add_indicator(
+			__("Tampering Attempts: {0}", [frm.doc.tampering_attempts]),
+			"orange"
+		);
 	}
 
 	// Add protection indicator
-	frm.dashboard.add_indicator(__('🔒 Master Key Protected'), 'blue');
+	frm.dashboard.add_indicator(__("🔒 Master Key Protected"), "blue");
 }

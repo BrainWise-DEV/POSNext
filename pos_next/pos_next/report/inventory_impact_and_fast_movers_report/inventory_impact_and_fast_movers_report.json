@@ -10,7 +10,7 @@
  "idx": 0,
  "is_standard": "Yes",
  "letter_head": null,
- "modified": "2026-01-27 22:04:37.395507",
+ "modified": "2026-06-03 15:54:14.923464",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "Inventory Impact and Fast Movers Report",
@@ -31,6 +31,9 @@
   },
   {
    "role": "System Manager"
+  },
+  {
+   "role": "Nexus POS Manager"
   }
  ],
  "timeout": 0

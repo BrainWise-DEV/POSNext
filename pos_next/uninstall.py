@@ -2,8 +2,9 @@
 Uninstallation hooks for POS Next
 """
 
-import frappe
 import logging
+
+import frappe
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -35,7 +36,7 @@ def before_uninstall():
 	except Exception as e:
 		frappe.db.rollback()
 		frappe.log_error(title="POS Next Uninstallation Error", message=frappe.get_traceback())
-		log_message(f"Error during POS Next uninstallation: {str(e)}", level="error")
+		log_message(f"Error during POS Next uninstallation: {e!s}", level="error")
 		raise
 
 
@@ -50,28 +51,10 @@ def remove_custom_fields():
 		custom_fields = [
 			"Sales Invoice-posa_pos_opening_shift",
 			"Sales Invoice-posa_is_printed",
-			"Customer-custom_company",
-			"Supplier-custom_company",
-			"Item Group-custom_company",
-			"Customer Group-custom_company",
-			"Supplier Group-custom_company",
-			"Brand-custom_company",
-			"Price List-custom_company",
-			# Note: Item-custom_company is shared with Nexus app
-			# Only remove if Nexus is not installed
 		]
 
 		removed_count = 0
 		skipped_count = 0
-
-		# Check if Nexus app is installed
-		nexus_installed = "nexus" in frappe.get_installed_apps()
-
-		# Add Item-custom_company to removal list only if Nexus is not installed
-		if not nexus_installed:
-			custom_fields.append("Item-custom_company")
-		else:
-			log_message("Nexus app detected - preserving Item-custom_company field", level="info", indent=1)
 
 		for field_name in custom_fields:
 			try:
@@ -83,7 +66,7 @@ def remove_custom_fields():
 					log_message(f"Custom Field not found: {field_name}", level="info", indent=1)
 					skipped_count += 1
 			except Exception as e:
-				log_message(f"Error removing custom field {field_name}: {str(e)}", level="error", indent=1)
+				log_message(f"Error removing custom field {field_name}: {e!s}", level="error", indent=1)
 
 		if removed_count > 0:
 			log_message(f"Removed {removed_count} custom field(s)", level="success")
@@ -91,7 +74,7 @@ def remove_custom_fields():
 			log_message(f"Skipped {skipped_count} field(s) (already removed or not found)", level="info")
 
 	except Exception as e:
-		log_message(f"Error removing custom fields: {str(e)}", level="error")
+		log_message(f"Error removing custom fields: {e!s}", level="error")
 		frappe.log_error(title="Custom Fields Removal Error", message=frappe.get_traceback())
 
 
@@ -105,6 +88,7 @@ def remove_print_formats():
 		# List of print formats to remove
 		print_formats = [
 			"POS Next Receipt",
+			"POS Next EOD Report",
 		]
 
 		removed_count = 0
@@ -133,7 +117,7 @@ def remove_print_formats():
 								)
 							except Exception as e:
 								log_message(
-									f"Error resetting POS Profile {profile.name}: {str(e)}",
+									f"Error resetting POS Profile {profile.name}: {e!s}",
 									level="error",
 									indent=2,
 								)
@@ -146,7 +130,7 @@ def remove_print_formats():
 					log_message(f"Print Format not found: {format_name}", level="info", indent=1)
 					skipped_count += 1
 			except Exception as e:
-				log_message(f"Error removing print format {format_name}: {str(e)}", level="error", indent=1)
+				log_message(f"Error removing print format {format_name}: {e!s}", level="error", indent=1)
 
 		if removed_count > 0:
 			log_message(f"Removed {removed_count} print format(s)", level="success")
@@ -154,7 +138,7 @@ def remove_print_formats():
 			log_message(f"Skipped {skipped_count} format(s) (already removed or not found)", level="info")
 
 	except Exception as e:
-		log_message(f"Error removing print formats: {str(e)}", level="error")
+		log_message(f"Error removing print formats: {e!s}", level="error")
 		frappe.log_error(title="Print Formats Removal Error", message=frappe.get_traceback())
 
 
@@ -185,13 +169,13 @@ def reset_pos_profiles():
 				log_message(f"Reset POS Profile: {profile.name}", level="info", indent=1)
 				reset_count += 1
 			except Exception as e:
-				log_message(f"Error resetting POS Profile {profile.name}: {str(e)}", level="error", indent=1)
+				log_message(f"Error resetting POS Profile {profile.name}: {e!s}", level="error", indent=1)
 
 		if reset_count > 0:
 			log_message(f"Reset {reset_count} POS Profile(s)", level="success")
 
 	except Exception as e:
-		log_message(f"Error resetting POS Profiles: {str(e)}", level="error")
+		log_message(f"Error resetting POS Profiles: {e!s}", level="error")
 		frappe.log_error(title="POS Profile Reset Error", message=frappe.get_traceback())
 
 
@@ -236,27 +220,10 @@ def get_custom_fields_for_cleanup():
 	Get list of custom fields that can be safely removed
 	Returns list of field names that belong to POS Next
 	"""
-	custom_fields = []
-
-	# Always safe to remove (POS Next specific)
-	custom_fields.extend(
-		[
-			"Sales Invoice-posa_pos_opening_shift",
-			"Sales Invoice-posa_is_printed",
-			"Customer-custom_company",
-			"Supplier-custom_company",
-			"Item Group-custom_company",
-			"Customer Group-custom_company",
-			"Supplier Group-custom_company",
-			"Brand-custom_company",
-			"Price List-custom_company",
-		]
-	)
-
-	# Conditional removal (shared with other apps)
-	nexus_installed = "nexus" in frappe.get_installed_apps()
-	if not nexus_installed:
-		custom_fields.append("Item-custom_company")
+	custom_fields = [
+		"Sales Invoice-posa_pos_opening_shift",
+		"Sales Invoice-posa_is_printed",
+	]
 
 	return custom_fields
 
@@ -274,4 +241,4 @@ def validate_uninstall():
 		return True, "Safe to uninstall"
 
 	except Exception as e:
-		return False, f"Validation error: {str(e)}"
+		return False, f"Validation error: {e!s}"

@@ -6,16 +6,15 @@
 from types import SimpleNamespace
 
 import frappe
-from frappe.tests.utils import FrappeTestCase
-from frappe.utils import nowdate
-
-import pos_next  # noqa: F401 — ensure app hooks run (packed_item keying patch).
-
 from erpnext.accounts.doctype.sales_invoice.test_sales_invoice import create_sales_invoice
 from erpnext.selling.doctype.product_bundle.test_product_bundle import make_product_bundle
 from erpnext.stock.doctype.item.test_item import make_item
 from erpnext.stock.doctype.packed_item import packed_item as packed_item_module
 from erpnext.stock.doctype.stock_entry.test_stock_entry import make_stock_entry
+from frappe.tests.utils import FrappeTestCase
+from frappe.utils import nowdate
+
+import pos_next  # noqa: F401 — ensure app hooks run (packed_item keying patch).
 
 
 def _assert_no_duplicate_packed_rows(si):
@@ -120,8 +119,8 @@ class TestPackedItemsNoDuplicates(FrappeTestCase):
 		ctx = _sales_invoice_bundle_context()
 		bundle_code, child_code = self._unique_codes()
 
-		make_item(child_code, {"is_stock_item": 1, "custom_company": ctx.company})
-		bundle_item = make_item(bundle_code, {"is_stock_item": 0, "custom_company": ctx.company})
+		make_item(child_code, {"is_stock_item": 1})
+		bundle_item = make_item(bundle_code, {"is_stock_item": 0})
 		bundle_item.reload()
 		for row in bundle_item.item_defaults:
 			if row.company == ctx.company:
@@ -171,8 +170,8 @@ class TestPackedItemsNoDuplicates(FrappeTestCase):
 		ctx = _sales_invoice_bundle_context()
 		bundle_code, child_code = self._unique_codes()
 
-		make_item(child_code, {"is_stock_item": 1, "custom_company": ctx.company})
-		bundle_item = make_item(bundle_code, {"is_stock_item": 0, "custom_company": ctx.company})
+		make_item(child_code, {"is_stock_item": 1})
+		bundle_item = make_item(bundle_code, {"is_stock_item": 0})
 		bundle_item.reload()
 		for row in bundle_item.item_defaults:
 			if row.company == ctx.company:

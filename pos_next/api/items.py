@@ -8,7 +8,8 @@ import frappe
 from erpnext.stock.doctype.batch.batch import get_batch_qty
 from erpnext.stock.get_item_details import get_item_details as erpnext_get_item_details
 from frappe import _
-from frappe.query_builder import DocType, functions as fn
+from frappe.query_builder import DocType
+from frappe.query_builder import functions as fn
 from frappe.utils import flt, nowdate
 
 ITEM_RESULT_FIELDS = [
@@ -24,7 +25,6 @@ ITEM_RESULT_FIELDS = [
 	"brand",
 	"has_variants",
 	"variant_of",
-	"custom_company",
 	"disabled",
 ]
 
@@ -812,21 +812,12 @@ def get_item_variants(template_item, pos_profile):
 				Item.has_serial_no,
 				Item.item_group,
 				Item.brand,
-				Item.custom_company,
 				Item.variant_of,
 			)
 			.where(Item.variant_of == template_item)
 			.where(Item.disabled == 0)
 			.where(Item.is_sales_item == 1)
 		)
-
-		# Company scope: strict by default; include empty (global) items only if
-		# the profile's POS Settings explicitly opts in.
-		if pos_profile_doc.company:
-			if _pos_settings_allow_global_items(pos_profile_doc.name):
-				query = query.where(fn.Coalesce(Item.custom_company, "").isin([pos_profile_doc.company, ""]))
-			else:
-				query = query.where(Item.custom_company == pos_profile_doc.company)
 
 		variants = query.run(as_dict=True)
 
@@ -965,7 +956,7 @@ def _get_item_group_with_descendants(item_group):
 				.where(ItemGroup.rgt < group.rgt)
 				.run(pluck="name")
 			)
-			result = [item_group] + list(descendants)
+			result = [item_group, *list(descendants)]
 
 	frappe.cache().set_value(cache_key, result, expires_in_sec=300)
 	return result
@@ -1011,37 +1002,6 @@ def _get_allowed_profile_brands(pos_profile):
 	  unrestricted by brand (see `get_brands` for UI fallback behaviour).
 	"""
 	return _get_pos_profile_configured_brands(pos_profile)
-
-
-def invalidate_pos_settings_cache(doc, method=None):
-	"""Doc-event hook: drop cached `allow_global_items` when POS Settings is saved."""
-	if doc and getattr(doc, "pos_profile", None):
-		frappe.cache().delete_value(f"pos_settings_allow_global_items:{doc.pos_profile}")
-
-
-def _pos_settings_allow_global_items(pos_profile_name):
-	"""Whether the POS Settings row for this profile opts into global items.
-
-	A "global item" is one whose ``custom_company`` is NULL or empty — historically
-	used as a shared SKU across companies. With strict company filtering as the
-	default, these items are hidden unless this flag is enabled.
-	"""
-	cache_key = f"pos_settings_allow_global_items:{pos_profile_name}"
-	cached = frappe.cache().get_value(cache_key)
-	if cached is not None:
-		return cached
-
-	value = (
-		frappe.db.get_value(
-			"POS Settings",
-			{"pos_profile": pos_profile_name, "enabled": 1},
-			"allow_global_items",
-		)
-		or 0
-	)
-	result = int(value)
-	frappe.cache().set_value(cache_key, result, expires_in_sec=300)
-	return result
 
 
 def _get_pos_profile_allowed_item_groups(pos_profile_doc):
@@ -1092,13 +1052,6 @@ def _build_item_base_conditions(
 		conditions.append("i.has_variants = 0")
 
 	where_params = []
-
-	if pos_profile_doc.company:
-		if _pos_settings_allow_global_items(pos_profile_doc.name):
-			conditions.append("(i.custom_company = %s OR IFNULL(i.custom_company, '') = '')")
-		else:
-			conditions.append("i.custom_company = %s")
-		where_params.append(pos_profile_doc.company)
 
 	allowed_item_groups = _get_pos_profile_allowed_item_groups(pos_profile_doc)
 
@@ -1557,7 +1510,7 @@ def get_items(
 			# Relevance scoring with case-insensitive comparison
 			# Exact barcode match gets highest priority, use MAX() for grouping
 			prefix_pattern = f"{effective_search_term}%"
-			relevance = f"""
+			relevance = """
 				MAX(CASE
 					WHEN ib.barcode = %s THEN 1500
 					WHEN ib.barcode LIKE %s THEN 1200
@@ -1936,7 +1889,7 @@ def get_items_bulk(
 			ORDER BY i.item_name ASC
 			LIMIT %s OFFSET %s
 		"""
-		all_params = params + [int(limit), int(start)]
+		all_params = [*params, int(limit), int(start)]
 		items = frappe.db.sql(query, tuple(all_params), as_dict=1)
 
 		if not items:
@@ -2474,7 +2427,7 @@ def _parse_item_codes_param(item_codes):
 			item_codes = json.loads(item_codes)
 		except (json.JSONDecodeError, ValueError):
 			return [item_codes]
-	return list(item_codes) if isinstance(item_codes, (list, tuple)) else [item_codes]
+	return list(item_codes) if isinstance(item_codes, list | tuple) else [item_codes]
 
 
 # =============================================================================
@@ -2840,6 +2793,6 @@ def get_batch_serial_data_for_items(item_codes, warehouse):
 
 		return result
 
-	except Exception as e:
+	except Exception:
 		frappe.log_error(frappe.get_traceback(), "Get Batch/Serial Data for Items Error")
 		return {}
