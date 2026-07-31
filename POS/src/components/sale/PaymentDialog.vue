@@ -3338,109 +3338,90 @@ function completePayment() {
 			applyWriteOff: applyWriteOff.value,
 			writeOffAmount: writeOffAmount.value,
 		},
-	});
+	})
 
 	if (!canComplete.value) {
-		log.warn("[PaymentDialog] Cannot complete - validation failed");
-		return;
+		log.warn("[PaymentDialog] Cannot complete - validation failed")
+		return
 	}
 
-	function completePayment() {
-		log.debug("[PaymentDialog] Complete payment called:", {
-			canComplete: canComplete.value,
-			totalPaid: totalPaid.value,
-			grandTotal: props.grandTotal,
-			allowPartialPayment: props.allowPartialPayment,
-			paymentEntries: paymentEntries.value,
-			salesPersons: selectedSalesPersons.value,
-			writeOff: {
-				canWriteOff: canWriteOff.value,
-				applyWriteOff: applyWriteOff.value,
-				writeOffAmount: writeOffAmount.value,
-			},
-		})
-
-		if (!canComplete.value) {
-			log.warn("[PaymentDialog] Cannot complete - validation failed")
-			return
-		}
-
-		// Validate discount description for Friends and Family customers
-		if (isFriendsAndFamily.value && !discountDescription.value) {
-			showError(__("Discount reason is required for Friends and Family customers"))
-			return
-		}
-
-		// Check if additional discount approval is needed
-		if (needsAdditionalDiscountApproval()) {
-			// Store pending payment data and show approval dialog
-			pendingAdditionalDiscountAmount.value = calculatedAdditionalDiscount.value
-			additionalDiscountApprovalPending.value = true
-			showAdditionalDiscountApproval.value = true
-			return
-		}
-
-		// If approval was already granted, proceed with payment
-		if (additionalDiscountApprovalPending.value && !additionalDiscountApprovalGranted.value) {
-			showError(__("Manager approval required for additional discount"))
-			return
-		}
-
-		// Proceed with payment
-		proceedWithPayment()
+	// Validate discount description for Friends and Family customers
+	if (isFriendsAndFamily.value && !discountDescription.value) {
+		showError(__("Discount reason is required for Friends and Family customers"))
+		return
 	}
 
-	/**
-	 * Check if additional discount needs manager approval
-	 */
-	function needsAdditionalDiscountApproval() {
-		// Only require approval if there's an additional discount and max discount is configured
-		const hasAdditionalDiscount = calculatedAdditionalDiscount.value > 0
-		const needsApproval = settingsStore.maxDiscountAllowed > 0 && hasAdditionalDiscount
-		return needsApproval
+	// Check if additional discount approval is needed
+	if (needsAdditionalDiscountApproval()) {
+		// Store pending payment data and show approval dialog
+		pendingAdditionalDiscountAmount.value = calculatedAdditionalDiscount.value
+		additionalDiscountApprovalPending.value = true
+		showAdditionalDiscountApproval.value = true
+		return
 	}
 
-	/**
-	 * Handle additional discount approval granted
-	 */
-	function onAdditionalDiscountApprovalGranted() {
-		additionalDiscountApprovalGranted.value = true
-		showAdditionalDiscountApproval.value = false
-		// Proceed with payment
-		proceedWithPayment()
+	// If approval was already granted, proceed with payment
+	if (additionalDiscountApprovalPending.value && !additionalDiscountApprovalGranted.value) {
+		showError(__("Manager approval required for additional discount"))
+		return
 	}
 
-	/**
-	 * Proceed with payment after all validations and approvals
-	 */
-	function proceedWithPayment() {
-		// Calculate if this is a partial payment (considering write-off)
-		const effectivePaid = totalPaid.value + writeOffAmount.value
-		const isPartial = effectivePaid < props.grandTotal
+	// Proceed with payment
+	proceedWithPayment()
+}
 
-		const paymentData = {
-			payments: paymentEntries.value,
-			change_amount: changeAmount.value,
-			is_partial_payment: isPartial,
-			paid_amount: totalPaid.value,
-			outstanding_amount: isPartial
-				? remainingAmount.value - writeOffAmount.value
-				: 0,
-			sales_team:
-				selectedSalesPersons.value.length > 0 ? selectedSalesPersons.value : null,
-			delivery_date: isSalesOrder.value ? deliveryDate.value : null,
-			// Write-off data
-			write_off_amount: writeOffAmount.value,
-			is_write_off: writeOffAmount.value > 0,
-			// Discount description - always send
-			custom_discount_description: discountDescription.value || null,
-		}
+/**
+ * Check if additional discount needs manager approval
+ */
+function needsAdditionalDiscountApproval() {
+	// Only require approval if there's an additional discount and max discount is configured
+	const hasAdditionalDiscount = calculatedAdditionalDiscount.value > 0
+	const needsApproval = settingsStore.maxDiscountAllowed > 0 && hasAdditionalDiscount
+	return needsApproval
+}
 
-		console.log(paymentData)
+/**
+ * Handle additional discount approval granted
+ */
+function onAdditionalDiscountApprovalGranted() {
+	additionalDiscountApprovalGranted.value = true
+	showAdditionalDiscountApproval.value = false
+	// Proceed with payment
+	proceedWithPayment()
+}
 
-		log.debug("[PaymentDialog] Emitting payment-completed:", paymentData)
+/**
+ * Proceed with payment after all validations and approvals
+ */
+function proceedWithPayment() {
+	// Calculate if this is a partial payment (considering write-off)
+	const effectivePaid = totalPaid.value + writeOffAmount.value
+	const isPartial = effectivePaid < props.grandTotal
 
-		emit("payment-completed", paymentData)
+	const paymentData = {
+		payments: paymentEntries.value,
+		change_amount: changeAmount.value,
+		is_partial_payment: isPartial,
+		paid_amount: totalPaid.value,
+		outstanding_amount: isPartial
+			? remainingAmount.value - writeOffAmount.value
+			: 0,
+		sales_team:
+			selectedSalesPersons.value.length > 0 ? selectedSalesPersons.value : null,
+		delivery_date: isSalesOrder.value ? deliveryDate.value : null,
+		// Write-off data
+		write_off_amount: writeOffAmount.value,
+		is_write_off: writeOffAmount.value > 0,
+		// Discount description - always send
+		custom_discount_description: discountDescription.value || null,
+	}
+
+	console.log(paymentData)
+
+	log.debug("[PaymentDialog] Emitting payment-completed:", paymentData)
+
+	emit("payment-completed", paymentData)
+}
 
 function formatCurrency(amount) {
 	return formatCurrencyUtil(Number.parseFloat(amount || 0), props.currency);
