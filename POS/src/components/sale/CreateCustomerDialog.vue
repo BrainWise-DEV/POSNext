@@ -712,29 +712,6 @@ const resetForm = () => {
 	phoneNumber.value = "";
 };
 
-/** Populate the form fields from a customer object (edit mode). */
-const populateFromCustomer = (customer) => {
-	if (!customer?.name) return
-	customerData.value.customer_name = customer.customer_name || ""
-	customerData.value.email_id = customer.email_id || ""
-	customerData.value.pincode = customer.custom_pincode || ""
-	customerData.value.customer_group = customer.customer_group || "Individual"
-	customerData.value.territory = customer.territory || "All Territories"
-	// Handle mobile_no with country code
-	if (customer.mobile_no) {
-		customerData.value.mobile_no = customer.mobile_no
-		if (customer.mobile_no.includes("-")) {
-			const [code, ...rest] = customer.mobile_no.split("-")
-			selectedCountryCode.value = code
-			phoneNumber.value = rest.join("-")
-		} else {
-			phoneNumber.value = customer.mobile_no
-		}
-	} else {
-		phoneNumber.value = ""
-		selectedCountryCode.value = ""
-	}
-}
 
 // =============================================================================
 // Watchers
