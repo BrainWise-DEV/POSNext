@@ -1070,7 +1070,6 @@ async function loadClosingData() {
 					...payment,
 					closing_amount: payment.closing_amount ?? 0,
 					difference: 0,
-<<<<<<< HEAD
 					_touched: true,
 				})
 			);
