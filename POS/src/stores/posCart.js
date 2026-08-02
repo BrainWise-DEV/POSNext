@@ -2273,6 +2273,47 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		triggerOfferProcessing(true);
 	}
 
+	/** Fingerprint of what each line is currently discounted by. */
+	function discountFingerprint() {
+		return invoiceItems.value
+			.map((item) => `${item.item_code}:${item.discount_percentage || 0}:${item.rate || 0}`)
+			.join("|");
+	}
+
+	/**
+	 * Re-evaluate offers now and resolve once finished.
+	 *
+	 * Offers are otherwise only reprocessed when the cart changes, so a cart left
+	 * open keeps a time-limited offer past the end of its window. Call this before
+	 * taking payment so the total is correct before money changes hands.
+	 *
+	 * @returns {Promise<boolean>} true if any line's discount changed
+	 */
+	async function revalidateOffers() {
+		if (isEmpty.value) return false;
+
+		debouncedProcessOffers.cancel();
+		offerQueue.cancel();
+
+		offerProcessingState.value.lastCartHash = "";
+		offerProcessingState.value.error = null;
+		offerProcessingState.value.retryCount = 0;
+
+		const before = discountFingerprint();
+		const generation = ++cartGeneration;
+
+		await offerQueue.enqueue(async (signal) => {
+			try {
+				offerProcessingState.value.isProcessing = true;
+				await processOffersInternal(signal, generation, true);
+			} finally {
+				offerProcessingState.value.isProcessing = false;
+			}
+		});
+
+		return before !== discountFingerprint();
+	}
+
 	/**
 	 * Calculate dynamic debounce delay based on cart size.
 	 * Small carts (1-3 items): 100ms - fast response
@@ -2439,5 +2480,6 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			offerQueue.cancel();
 		},
 		forceRefreshOffers, // Force reprocess offers from scratch
+		revalidateOffers, // Awaitable reprocess — use before taking payment
 	};
 });

@@ -32,6 +32,14 @@ from erpnext.accounts.doctype.pricing_rule.pricing_rule import (
 )
 from erpnext.accounts.doctype.pricing_rule.utils import get_applied_pricing_rules
 
+from pos_next.promotions.schedule import (
+	FROM_TIME_FIELD,
+	MIDNIGHT,
+	TO_TIME_FIELD,
+	build_sql_predicate,
+	resolve_moment,
+	schedule_fields_available,
+)
 from pos_next.promotions.scope import (
 	APPLY_ON_CHILD_DOCTYPE,
 	SCOPE_PERCENTAGE_FIELD,
@@ -93,6 +101,10 @@ def sync_promotion_fields_to_pricing_rules(doc, method=None):
 	}
 	if frappe.db.has_column("Pricing Rule", "promotion_type"):
 		values["promotion_type"] = doc.get("promotion_type") or ""
+
+	if schedule_fields_available():
+		values[FROM_TIME_FIELD] = doc.get(FROM_TIME_FIELD) or MIDNIGHT
+		values[TO_TIME_FIELD] = doc.get(TO_TIME_FIELD) or MIDNIGHT
 
 	frappe.db.set_value(
 		"Pricing Rule",
@@ -181,6 +193,12 @@ def patch_get_other_conditions(pr_utils):
 
 	def _patched_get_other_conditions(conditions, values, args):
 		conditions = _original_get_other_conditions(conditions, values, args)
+
+		
+		if schedule_fields_available():
+			conditions += " " + build_sql_predicate(
+				"`tabPricing Rule`", values, when=resolve_moment(args)
+			)
 
 		if not _has_pos_only_column():
 			return conditions
