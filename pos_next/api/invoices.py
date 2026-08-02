@@ -21,6 +21,11 @@ from pos_next.promotions.engine import (
 	rule_promotion_type,
 	run_line_discount_passes,
 )
+from pos_next.promotions.schedule import (
+	filter_rules_by_schedule,
+	get_inactive_rules,
+	resolve_moment,
+)
 
 # ==========================================
 # Constants for field names (avoid typos and enable refactoring)
@@ -1082,6 +1087,26 @@ def update_invoice(data):
 						r.strip() for r in str(item.pricing_rules).split(",") if r.strip()
 					)
 				item.pricing_rules = ""
+
+
+		if applied_rule_names_seen:
+			inactive = get_inactive_rules(
+				applied_rule_names_seen,
+				when=resolve_moment(
+					{
+						"posting_date": invoice_doc.get("posting_date"),
+						"posting_time": invoice_doc.get("posting_time"),
+					}
+				),
+			)
+			if inactive:
+				frappe.throw(
+					_(
+						"These offers are outside their active hours and can no longer be "
+						"applied: {0}. Refresh the cart and try again."
+					).format(", ".join(sorted(inactive))),
+					title=_("Offer No Longer Active"),
+				)
 
 		if doctype == "Sales Invoice":
 			one_time_applied = (
@@ -3265,6 +3290,10 @@ def apply_offers(invoice_data, selected_offers=None):
 				"company": profile.company,
 				"transaction_date": invoice.get("posting_date") or nowdate(),
 				"posting_date": invoice.get("posting_date") or nowdate(),
+				# Lets the engine's schedule gate judge the sale at the time it
+				# happened rather than the time it is processed — an offline sale
+				# synced hours later must keep the discount it earned.
+				"posting_time": invoice.get("posting_time") or nowtime(),
 				"currency": invoice.get("currency") or profile.get("currency") or company_currency,
 				"conversion_rate": flt(invoice.get("conversion_rate") or 1) or 1,
 				"plc_conversion_rate": flt(invoice.get("plc_conversion_rate") or 1) or 1,
@@ -3275,6 +3304,8 @@ def apply_offers(invoice_data, selected_offers=None):
 				"items": pricing_items,
 			}
 		)
+
+		schedule_moment = resolve_moment(pricing_args)
 
 		# Call ERPNext pricing engine - it handles all conflicts based on priority
 		#
@@ -3413,6 +3444,8 @@ def apply_offers(invoice_data, selected_offers=None):
 					if record.coupon_code_based:
 						continue
 					rule_map[record.name] = record
+
+		rule_map = filter_rules_by_schedule(rule_map, when=schedule_moment)
 
 		if not rule_map:
 			return {"items": items}

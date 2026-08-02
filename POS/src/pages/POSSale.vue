@@ -1968,7 +1968,7 @@ function handleEditCustomer(customer) {
 	uiStore.showCreateCustomerDialog = true;
 }
 
-function handleProceedToPayment() {
+async function handleProceedToPayment() {
 	if (cartStore.isEmpty) {
 		showWarning(__("Please add items to cart before proceeding to payment"));
 		return;
@@ -1980,6 +1980,15 @@ function handleProceedToPayment() {
 		uiStore.showCustomerDialog = true;
 		pendingPaymentAfterCustomer.value = true;
 		return;
+	}
+
+	try {
+		const changed = await cartStore.revalidateOffers();
+		if (changed) {
+			showWarning(__("Offers were updated. please review the total before taking payment"));
+		}
+	} catch (error) {
+		console.error("Failed to revalidate offers before payment:", error);
 	}
 
 	uiStore.showPaymentDialog = true;

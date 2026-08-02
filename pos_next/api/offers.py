@@ -15,6 +15,7 @@ import frappe
 from frappe import _
 from frappe.utils import cint, flt, getdate, nowdate
 
+from pos_next.promotions.schedule import SCHEDULE_FIELDS, to_client_payload as schedule_payload
 from pos_next.promotions.scope import (
 	APPLY_ON_CHILD_DOCTYPE,
 	SCOPE_PERCENTAGE_FIELD,
@@ -104,6 +105,7 @@ class Offer:
 	apply_recursion_over: float = 0  # Qty for which recursion isn't applicable
 	one_time_per_customer: int = 0  # 1 if each customer may redeem this offer only once
 	promotion_type: str | None = None
+	schedule: dict | None = None
 	# Accumulative discounts. `accumulative_scopes` is a list of
 	# {values: [...], discount_percentage: n} — one entry per scope row, with
 	# item groups pre-expanded to descendants and template items to variants so
@@ -611,6 +613,7 @@ def get_offers(pos_profile: str) -> list[dict]:
 		offers.extend(standalone_offers)
 
 		_attach_accumulative_config(offers)
+		_attach_schedule(offers)
 
 		return [offer.to_dict() for offer in offers]
 
@@ -660,6 +663,30 @@ def _attach_accumulative_config(offers: list[Offer]) -> None:
 		offer.accumulative_scopes = entry["scopes"]
 		offer.max_accumulated_discount_percentage = entry["cap"]
 		offer.min_scopes_required = entry["min_scopes"]
+
+
+def _attach_schedule(offers: list[Offer]) -> None:
+	"""Stamp each offer's hour window so the cart can judge it without the server.
+
+	Read from the generated Pricing Rule, which is what the engine gates on.
+	"""
+	if not offers:
+		return
+	if not frappe.db.has_column("Pricing Rule", SCHEDULE_FIELDS[0]):
+		return
+
+	windows = {
+		row["name"]: row
+		for row in frappe.get_all(
+			"Pricing Rule",
+			filters={"name": ["in", [offer.name for offer in offers]]},
+			fields=["name", *SCHEDULE_FIELDS],
+		)
+	}
+	for offer in offers:
+		row = windows.get(offer.name)
+		if row:
+			offer.schedule = schedule_payload(row)
 
 
 def _get_promotional_scheme_offers(company: str, date: str) -> list[Offer]:
