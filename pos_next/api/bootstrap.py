@@ -229,6 +229,10 @@ def _get_pos_settings(pos_profile_doc):
 
 		settings["magento_loyalty_available"] = _is_magento_loyalty_available(pos_profile_doc.name)
 
+		from pos_next.services.miraaya_loyalty import is_miraaya_loyalty_available
+
+		settings["miraaya_installed"] = is_miraaya_loyalty_available()
+
 		return settings
 	except Exception:
 		frappe.log_error(frappe.get_traceback(), "Get POS Settings Error")

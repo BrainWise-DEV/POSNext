@@ -79,4 +79,6 @@ DEFAULT_POS_SETTINGS = {
 	"wallet_account": "",
 	"auto_create_wallet": 1,
 	"loyalty_to_wallet": 1,
+	"magento_loyalty_available": 0,
+	"miraaya_installed": 0,
 }

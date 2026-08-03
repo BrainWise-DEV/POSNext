@@ -116,6 +116,12 @@ def get_pos_settings(pos_profile):
 		frappe.db.get_single_value("Stock Settings", "allow_negative_stock") or 0
 	)
 
+	from pos_next.api.pos_profile import _is_magento_loyalty_available
+	from pos_next.services.miraaya_loyalty import is_miraaya_loyalty_available
+
+	settings["magento_loyalty_available"] = _is_magento_loyalty_available(pos_profile)
+	settings["miraaya_installed"] = is_miraaya_loyalty_available()
+
 	return settings
 
 

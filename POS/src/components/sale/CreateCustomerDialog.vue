@@ -9,7 +9,7 @@
 		<template #body-content>
 			<div class="flex flex-col gap-6">
 				<!-- Customer Name (Required) -->
-				<div v-if="!magentoLoyaltyAvailable">
+				<div v-if="!miraayaCustomerSync">
 					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
 						{{ __("Customer Name") }} <span class="text-red-500">*</span>
 					</label>
@@ -161,11 +161,13 @@
 				<div>
 					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
 						{{ __("Email") }}
+						<span v-if="miraayaCustomerSync" class="text-red-500">*</span>
 					</label>
 					<Input
 						v-model="customerData.email_id"
 						type="email"
 						:placeholder="__('Enter email address')"
+						:required="miraayaCustomerSync"
 					/>
 				</div>
 
@@ -390,7 +392,7 @@ const show = computed({
 
 const isEditMode = computed(() => !!props.customer?.name);
 
-const magentoLoyaltyAvailable = computed(() => posSettingsStore.magentoLoyaltyAvailable);
+const miraayaCustomerSync = computed(() => posSettingsStore.miraayaInstalled);
 
 const computedCustomerName = computed(() => {
 	const first = (customerData.value.custom_first_name || "").trim();
@@ -399,14 +401,25 @@ const computedCustomerName = computed(() => {
 });
 
 const hasValidCustomerName = computed(() => {
-	if (magentoLoyaltyAvailable.value) {
+	if (miraayaCustomerSync.value) {
 		return Boolean(computedCustomerName.value);
 	}
 	return Boolean((customerData.value.customer_name || "").trim());
 });
 
+const hasValidEmail = computed(() => {
+	if (!miraayaCustomerSync.value) {
+		return true;
+	}
+	return Boolean((customerData.value.email_id || "").trim());
+});
+
 const canSubmitCustomer = computed(
-	() => hasValidCustomerName.value && Boolean(phoneNumber.value) && hasPermission.value
+	() =>
+		hasValidCustomerName.value &&
+		hasValidEmail.value &&
+		Boolean(phoneNumber.value) &&
+		hasPermission.value
 );
 
 const currentCountryCode = computed(() => {
@@ -502,7 +515,7 @@ const updateTerritoryFromCountry = () => {
 const createCustomerResource = createResource({
 	url: "pos_next.api.customers.create_customer",
 	makeParams: () => ({
-		customer_name: magentoLoyaltyAvailable.value
+		customer_name: miraayaCustomerSync.value
 			? computedCustomerName.value
 			: customerData.value.customer_name,
 		mobile_no: customerData.value.mobile_no || "",
@@ -709,12 +722,15 @@ const checkPermissions = async () => {
 };
 
 const handleCreate = async () => {
-	if (magentoLoyaltyAvailable.value) {
+	if (miraayaCustomerSync.value) {
 		if (!customerData.value.custom_first_name?.trim()) {
 			return showError(__("First Name is required"));
 		}
 		if (!customerData.value.custom_last_name?.trim()) {
 			return showError(__("Last Name is required"));
+		}
+		if (!customerData.value.email_id?.trim()) {
+			return showError(__("Email is required"));
 		}
 	} else if (!customerData.value.customer_name) {
 		return showError(__("Customer Name is required"));
