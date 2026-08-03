@@ -1,13 +1,7 @@
 # Copyright (c) 2026, BrainWise and contributors
 # For license information, please see license.txt
 
-"""Tests for `pos_next.promotions.schedule`.
-
-The load-bearing one is `test_sql_and_python_agree`: the window exists in two
-forms — a Python check and a SQL fragment ERPNext's engine runs — and they must
-answer identically or a promotion applies in the cart but not on the invoice
-(or the reverse). Everything else here is a semantic pin.
-"""
+"""Tests for `pos_next.promotions.schedule`."""
 
 from datetime import datetime, time
 import unittest
@@ -17,61 +11,115 @@ from frappe.tests.utils import FrappeTestCase
 
 import pos_next  # noqa: F401 — ensure app hooks load.
 from pos_next.promotions.schedule import (
-	build_sql_predicate,
-	get_window,
-	has_schedule,
+	get_period,
+	has_time_bound,
 	is_active_at,
 	normalize_schedule_fields,
 	parse_time,
-	time_matches,
+	resolve_moment,
 	to_client_payload,
 )
 
+# 2026-08-03 is the reference "today"; 08-04 is "tomorrow".
+TODAY = "2026-08-03"
+TOMORROW = "2026-08-04"
 
-def _rule(**schedule):
+
+def _rule(**fields):
 	"""A plain dict standing in for a Pricing Rule — the helpers only use .get()."""
-	return frappe._dict(schedule)
+	return frappe._dict(fields)
 
 
-def _at(hour, minute=0):
-	return datetime(2026, 8, 3, hour, minute)
+def _at(day, hour, minute=0, second=0):
+	return datetime(2026, 8, day, hour, minute, second)
 
 
-class TestScheduleSemantics(FrappeTestCase):
-	def test_no_window_is_always_active(self):
-		rule = _rule()
-		self.assertFalse(has_schedule(rule))
-		self.assertIsNone(to_client_payload(rule))
-		for hour in (0, 9, 23):
-			self.assertTrue(is_active_at(rule, _at(hour)))
+class TestSchedulePeriod(FrappeTestCase):
+	"""The times bound one continuous span, they do not repeat every day."""
 
-	def test_simple_window(self):
-		rule = _rule(pos_active_from_time="18:00:00", pos_active_to_time="20:00:00")
-		self.assertFalse(is_active_at(rule, _at(17, 59)))
-		self.assertTrue(is_active_at(rule, _at(18)))
-		self.assertTrue(is_active_at(rule, _at(19)))
-		self.assertTrue(is_active_at(rule, _at(20)))
-		self.assertFalse(is_active_at(rule, _at(20, 1)))
+	def test_valid_until_tomorrow_stays_live_through_tonight(self):
+		"""The case that exposed the daily-window mistake.
 
-	def test_window_wrapping_past_midnight(self):
-		"""22:00 -> 02:00 is a union, not a range — the classic off-by-a-day bug."""
-		rule = _rule(pos_active_from_time="22:00:00", pos_active_to_time="02:00:00")
-		self.assertTrue(is_active_at(rule, _at(22)))
-		self.assertTrue(is_active_at(rule, _at(23, 59)))
-		self.assertTrue(is_active_at(rule, _at(0, 30)))
-		self.assertTrue(is_active_at(rule, _at(2)))
-		self.assertFalse(is_active_at(rule, _at(3)))
-		self.assertFalse(is_active_at(rule, _at(12)))
+		Ends tomorrow at 01:08:46, so 02:08 *today* is still inside the period —
+		a daily window would have called this expired.
+		"""
+		rule = _rule(
+			valid_from=TODAY,
+			valid_upto=TOMORROW,
+			pos_active_from_time="00:00:00",
+			pos_active_to_time="01:08:46",
+		)
+		self.assertTrue(is_active_at(rule, _at(3, 2, 8, 46)))
+		self.assertTrue(is_active_at(rule, _at(3, 14)))
+		self.assertTrue(is_active_at(rule, _at(3, 23, 59)))
+		self.assertTrue(is_active_at(rule, _at(4, 1, 8, 46)))
+		self.assertFalse(is_active_at(rule, _at(4, 1, 8, 47)))
+		self.assertFalse(is_active_at(rule, _at(4, 9)))
 
-	def test_equal_times_mean_all_day(self):
-		"""Never-active would silently kill the promotion; validation catches the typo."""
-		rule = _rule(pos_active_from_time="18:00:00", pos_active_to_time="18:00:00")
-		for hour in (0, 6, 18, 23):
-			self.assertTrue(is_active_at(rule, _at(hour)))
+	def test_start_time_narrows_only_the_first_day(self):
+		rule = _rule(
+			valid_from=TODAY,
+			valid_upto=TOMORROW,
+			pos_active_from_time="18:00:00",
+			pos_active_to_time="00:00:00",
+		)
+		self.assertFalse(is_active_at(rule, _at(3, 17, 59)))
+		self.assertTrue(is_active_at(rule, _at(3, 18)))
+		# The next day is not narrowed by the start time.
+		self.assertTrue(is_active_at(rule, _at(4, 9)))
+		self.assertTrue(is_active_at(rule, _at(4, 23, 59, 59)))
+		self.assertFalse(is_active_at(rule, _at(5, 0)))
 
-	def test_a_half_configured_window_does_not_restrict(self):
-		self.assertTrue(is_active_at(_rule(pos_active_from_time="18:00:00"), _at(3)))
-		self.assertTrue(is_active_at(_rule(pos_active_to_time="20:00:00"), _at(3)))
+	def test_midnight_end_time_keeps_the_last_day_whole(self):
+		"""valid_upto is inclusive in ERPNext; 00:00:00 must not truncate it."""
+		rule = _rule(valid_from=TODAY, valid_upto=TODAY, pos_active_to_time="00:00:00")
+		self.assertTrue(is_active_at(rule, _at(3, 0)))
+		self.assertTrue(is_active_at(rule, _at(3, 23, 59, 59)))
+		self.assertFalse(is_active_at(rule, _at(4, 0)))
+
+	def test_open_ended_period(self):
+		self.assertTrue(is_active_at(_rule(), _at(3, 3)))
+		self.assertTrue(is_active_at(_rule(valid_from=TODAY), _at(9, 3)))
+		self.assertFalse(is_active_at(_rule(valid_from=TOMORROW), _at(3, 3)))
+		self.assertTrue(is_active_at(_rule(valid_upto=TOMORROW), _at(1, 3)))
+
+	def test_get_period_endpoints(self):
+		start, end = get_period(
+			_rule(
+				valid_from=TODAY,
+				valid_upto=TOMORROW,
+				pos_active_from_time="09:30:00",
+				pos_active_to_time="01:08:46",
+			)
+		)
+		self.assertEqual(start, datetime(2026, 8, 3, 9, 30))
+		self.assertEqual(end, datetime(2026, 8, 4, 1, 8, 46))
+
+	def test_has_time_bound(self):
+		self.assertFalse(has_time_bound(_rule(valid_from=TODAY, valid_upto=TOMORROW)))
+		self.assertFalse(
+			has_time_bound(
+				_rule(valid_from=TODAY, pos_active_from_time="00:00:00", valid_upto=TOMORROW)
+			)
+		)
+		self.assertTrue(
+			has_time_bound(_rule(valid_from=TODAY, pos_active_from_time="09:00:00"))
+		)
+		# A time without its date narrows nothing.
+		self.assertFalse(has_time_bound(_rule(pos_active_to_time="09:00:00")))
+
+	def test_client_payload(self):
+		rule = _rule(
+			valid_from=TODAY,
+			valid_upto=TOMORROW,
+			pos_active_from_time="00:00:00",
+			pos_active_to_time="01:08:46",
+		)
+		self.assertEqual(
+			to_client_payload(rule),
+			{"start": "2026-08-03 00:00:00", "end": "2026-08-04 01:08:46"},
+		)
+		self.assertIsNone(to_client_payload(_rule(valid_from=TODAY, valid_upto=TOMORROW)))
 
 	def test_parse_time_tolerates_every_shape(self):
 		from datetime import timedelta
@@ -82,179 +130,60 @@ class TestScheduleSemantics(FrappeTestCase):
 		self.assertIsNone(parse_time(None))
 		self.assertIsNone(parse_time(""))
 
-	def test_client_payload_round_trip(self):
-		rule = _rule(pos_active_from_time="18:00:00", pos_active_to_time="02:00:00")
-		payload = to_client_payload(rule)
-		self.assertEqual(payload["from_time"], "18:00:00")
-		self.assertEqual(payload["to_time"], "02:00:00")
-
-		start, end = get_window(rule)
-		self.assertTrue(time_matches(start, end, time(23, 0)))
-		self.assertTrue(time_matches(start, end, time(1, 0)))
-		self.assertFalse(time_matches(start, end, time(12, 0)))
-
-
-class TestScheduleSqlMatchesPython(FrappeTestCase):
-	"""The SQL and Python forms must never disagree."""
-
-	WINDOWS = [
-		("_PNXT_SCHED_None", {}),
-		(
-			"_PNXT_SCHED_Day",
-			{"pos_active_from_time": "09:00:00", "pos_active_to_time": "17:00:00"},
-		),
-		(
-			"_PNXT_SCHED_Evening",
-			{"pos_active_from_time": "18:00:00", "pos_active_to_time": "20:00:00"},
-		),
-		(
-			"_PNXT_SCHED_Overnight",
-			{"pos_active_from_time": "22:00:00", "pos_active_to_time": "02:00:00"},
-		),
-		(
-			"_PNXT_SCHED_AllDayEqual",
-			{"pos_active_from_time": "12:00:00", "pos_active_to_time": "12:00:00"},
-		),
-		(
-			"_PNXT_SCHED_EarlyMorning",
-			{"pos_active_from_time": "00:00:00", "pos_active_to_time": "06:00:00"},
-		),
-	]
-
-	@classmethod
-	def setUpClass(cls):
-		super().setUpClass()
-		company = frappe.defaults.get_global_default("company") or frappe.db.get_value(
-			"Company", {}, "name"
+	def test_resolve_moment_prefers_the_documents_own_stamp(self):
+		"""An offline sale is judged when it happened, not when it synced."""
+		self.assertEqual(
+			resolve_moment({"posting_date": TODAY, "posting_time": "11:30:00"}),
+			datetime(2026, 8, 3, 11, 30),
 		)
-		cls.names = []
-		for title, schedule in cls.WINDOWS:
-			existing = frappe.db.get_value("Pricing Rule", {"title": title}, "name")
-			if existing:
-				frappe.delete_doc("Pricing Rule", existing, force=True, ignore_permissions=True)
-			doc = frappe.get_doc(
-				{
-					"doctype": "Pricing Rule",
-					"title": title,
-					# Transaction scope needs no child rows — this suite is about
-					# *when* a rule runs, not what it targets.
-					"apply_on": "Transaction",
-					"price_or_product_discount": "Price",
-					"rate_or_discount": "Discount Percentage",
-					"discount_percentage": 5,
-					"selling": 1,
-					"company": company,
-					"currency": frappe.get_cached_value("Company", company, "default_currency"),
-					**schedule,
-				}
-			).insert(ignore_permissions=True)
-			cls.names.append(doc.name)
-		frappe.db.commit()
-
-	@classmethod
-	def tearDownClass(cls):
-		for name in cls.names:
-			try:
-				frappe.delete_doc("Pricing Rule", name, force=True, ignore_permissions=True)
-			except Exception:
-				pass
-		frappe.db.commit()
-		super().tearDownClass()
-
-	def _sql_active(self, when):
-		values = {"names": tuple(self.names)}
-		predicate = build_sql_predicate("`tabPricing Rule`", values, when=when)
-		rows = frappe.db.sql(
-			f"select name from `tabPricing Rule` where name in %(names)s {predicate}",
-			values,
-			pluck=True,
-		)
-		return set(rows)
-
-	def test_sql_and_python_agree(self):
-		"""Across every window x a full sweep of the day, half-hour by half-hour."""
-		docs = {name: frappe.get_doc("Pricing Rule", name) for name in self.names}
-		checked = 0
-
-		for hour in range(24):
-			for minute in (0, 30):
-				when = _at(hour, minute)
-				sql_active = self._sql_active(when)
-				python_active = {name for name, doc in docs.items() if is_active_at(doc, when)}
-				self.assertEqual(
-					python_active,
-					sql_active,
-					f"SQL and Python disagree at {when:%H:%M}: "
-					f"python-only={sorted(python_active - sql_active)} "
-					f"sql-only={sorted(sql_active - python_active)}",
-				)
-				checked += 1
-
-		self.assertEqual(checked, 48, "sweep did not cover the full day")
+		self.assertIsInstance(resolve_moment({"posting_date": TODAY}), datetime)
+		self.assertIsInstance(resolve_moment(None), datetime)
 
 
-class TestScheduleDefaults(FrappeTestCase):
-	"""Midnight-to-midnight is the unset state, and the normalizer keeps it that way.
+class TestScheduleNormalizer(FrappeTestCase):
+	"""Frappe fills every Time field on a new document with nowtime()."""
 
-	Frappe's `create_new.py` assigns `nowtime()` to every Time field on a new
-	document — unconditionally, ignoring the field default. Left alone a new rule
-	would carry a sliver of a window and silently never apply.
-	"""
+	def _doc(self, **fields):
+		doc = frappe._dict(doctype="Pricing Rule", **fields)
+		doc.set = lambda k, v: doc.__setitem__(k, v)
+		return doc
 
-	def test_midnight_pair_is_unrestricted(self):
-		rule = _rule(pos_active_from_time="00:00:00", pos_active_to_time="00:00:00")
-		self.assertFalse(has_schedule(rule))
-		self.assertIsNone(to_client_payload(rule))
-		for hour in (0, 9, 17, 23):
-			self.assertTrue(is_active_at(rule, _at(hour)))
-
-	def test_equal_times_are_unrestricted(self):
-		rule = _rule(pos_active_from_time="13:00:00", pos_active_to_time="13:00:00")
-		self.assertFalse(has_schedule(rule))
-		self.assertTrue(is_active_at(rule, _at(3)))
-
-	def test_normalizer_resets_the_time_autofill(self):
-		doc = frappe._dict(
-			doctype="Pricing Rule",
+	def test_resets_the_time_autofill(self):
+		doc = self._doc(
 			__islocal=1,
-			valid_from="2026-08-01",
-			valid_upto="2026-08-31",
+			valid_from=TODAY,
+			valid_upto=TOMORROW,
 			pos_active_from_time="17:55:49.316312",
 			pos_active_to_time="17:55:49.316355",
 		)
-		doc.set = lambda k, v: doc.__setitem__(k, v)
 		normalize_schedule_fields(doc)
 		self.assertEqual(doc["pos_active_from_time"], "00:00:00")
 		self.assertEqual(doc["pos_active_to_time"], "00:00:00")
-		self.assertFalse(has_schedule(doc))
+		self.assertFalse(has_time_bound(doc))
 
-	def test_normalizer_keeps_a_real_window(self):
-		doc = frappe._dict(
-			doctype="Pricing Rule",
+	def test_keeps_a_real_configuration(self):
+		doc = self._doc(
 			__islocal=1,
-			valid_from="2026-08-01",
-			valid_upto="2026-08-31",
-			pos_active_from_time="11:00:00",
-			pos_active_to_time="12:05:38",
+			valid_from=TODAY,
+			valid_upto=TOMORROW,
+			pos_active_from_time="00:00:00",
+			pos_active_to_time="01:08:46",
 		)
-		doc.set = lambda k, v: doc.__setitem__(k, v)
 		normalize_schedule_fields(doc)
-		self.assertEqual(doc["pos_active_from_time"], "11:00:00")
-		self.assertTrue(has_schedule(doc))
+		self.assertEqual(doc["pos_active_to_time"], "01:08:46")
+		self.assertTrue(has_time_bound(doc))
 
-	def test_normalizer_clears_a_time_whose_date_is_blank(self):
-		"""The field is hidden without its date, so it must not stay enforced."""
-		doc = frappe._dict(
-			doctype="Pricing Rule",
+	def test_clears_a_time_whose_date_is_blank(self):
+		"""The field is hidden without its date, so it must not stay in force."""
+		doc = self._doc(
 			valid_from=None,
-			valid_upto="2026-08-31",
+			valid_upto=TOMORROW,
 			pos_active_from_time="11:00:00",
-			pos_active_to_time="12:05:38",
+			pos_active_to_time="01:08:46",
 		)
-		doc.set = lambda k, v: doc.__setitem__(k, v)
 		normalize_schedule_fields(doc)
 		self.assertEqual(doc["pos_active_from_time"], "00:00:00")
-		self.assertEqual(doc["pos_active_to_time"], "12:05:38")
+		self.assertEqual(doc["pos_active_to_time"], "01:08:46")
 
 
 def run_all():
@@ -262,7 +191,7 @@ def run_all():
 	loader = unittest.TestLoader()
 	suite = unittest.TestSuite(
 		loader.loadTestsFromTestCase(case)
-		for case in (TestScheduleSemantics, TestScheduleDefaults, TestScheduleSqlMatchesPython)
+		for case in (TestSchedulePeriod, TestScheduleNormalizer)
 	)
 	result = unittest.TextTestRunner(verbosity=2).run(suite)
 	return {

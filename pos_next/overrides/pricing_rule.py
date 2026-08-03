@@ -36,8 +36,6 @@ from pos_next.promotions.schedule import (
 	FROM_TIME_FIELD,
 	MIDNIGHT,
 	TO_TIME_FIELD,
-	build_sql_predicate,
-	resolve_moment,
 	schedule_fields_available,
 )
 from pos_next.promotions.scope import (
@@ -193,12 +191,6 @@ def patch_get_other_conditions(pr_utils):
 
 	def _patched_get_other_conditions(conditions, values, args):
 		conditions = _original_get_other_conditions(conditions, values, args)
-
-		
-		if schedule_fields_available():
-			conditions += " " + build_sql_predicate(
-				"`tabPricing Rule`", values, when=resolve_moment(args)
-			)
 
 		if not _has_pos_only_column():
 			return conditions
