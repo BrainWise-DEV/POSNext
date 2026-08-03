@@ -794,14 +794,24 @@
 									formatCurrency(taxAmount)
 								}}</span>
 							</div>
-							<!-- Discount (shows the calculated additional discount amount) -->
+							<!-- Coupon Discount -->
 							<div
-								v-if="discountAmount > 0"
+								v-if="displayCouponDiscount > 0"
+								class="flex items-center justify-between text-sm"
+							>
+								<span class="text-gray-600 text-start">{{ couponDiscountLabel }}</span>
+								<span class="font-medium text-purple-600 text-end"
+									>-{{ formatCurrency(displayCouponDiscount) }}</span
+								>
+							</div>
+							<!-- Discount (non-coupon: item-level pricing rules, manual additional discount) -->
+							<div
+								v-if="displayOtherDiscount > 0"
 								class="flex items-center justify-between text-sm"
 							>
 								<span class="text-gray-600 text-start">{{ __("Discount") }}</span>
 								<span class="font-medium text-red-600 text-end"
-									>-{{ formatCurrency(discountAmount) }}</span
+									>-{{ formatCurrency(displayOtherDiscount) }}</span
 								>
 							</div>
 							<!-- Grand Total -->
@@ -1996,6 +2006,16 @@ const props = defineProps({
 		type: Number,
 		default: 0,
 	},
+	/** Currently applied coupon ({ name, code, ... }), if any. */
+	appliedCoupon: {
+		type: Object,
+		default: null,
+	},
+	/** Portion of discountAmount attributable to appliedCoupon. */
+	couponDiscountAmount: {
+		type: Number,
+		default: 0,
+	},
 	company: {
 		type: String,
 		default: "",
@@ -2615,6 +2635,24 @@ const calculatedAdditionalDiscount = computed(() => {
 		return roundCurrency((props.subtotal * localAdditionalDiscount.value) / 100);
 	}
 	return roundCurrency(localAdditionalDiscount.value);
+});
+
+// Portion of discountAmount attributable to the applied coupon — shown as its
+// own "Coupon Discount" line. Clamped to discountAmount so it can never exceed
+// the real total (e.g. if a manual discount edit has since superseded it).
+const displayCouponDiscount = computed(() => {
+	if (!props.appliedCoupon) return 0;
+	return Math.min(Math.max(props.couponDiscountAmount || 0, 0), props.discountAmount || 0);
+});
+
+// Remaining discount not attributable to the coupon (item-level/manual).
+const displayOtherDiscount = computed(() => {
+	return Math.max((props.discountAmount || 0) - displayCouponDiscount.value, 0);
+});
+
+const couponDiscountLabel = computed(() => {
+	const code = props.appliedCoupon?.code || props.appliedCoupon?.name;
+	return code ? __("Coupon Discount ({0})", [code]) : __("Coupon Discount");
 });
 
 const remainingAmount = computed(() => {

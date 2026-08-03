@@ -1340,9 +1340,35 @@
 
 			<!-- Summary Details (continued) -->
 			<div v-if="items.length > 0" class="mb-1.5">
-				<!-- Discount Display - Highlighted -->
+				<!-- Coupon Discount Display - Highlighted (purple, matches Coupon button branding) -->
 				<div
-					v-if="discountAmount > 0"
+					v-if="displayCouponDiscount > 0"
+					class="flex items-center justify-between mb-0.5 bg-purple-50 rounded px-1.5 py-1 -mx-0.5"
+				>
+					<div class="flex items-center gap-1">
+						<svg
+							class="w-3.5 h-3.5 text-purple-600"
+							fill="currentColor"
+							viewBox="0 0 20 20"
+						>
+							<path
+								fill-rule="evenodd"
+								d="M4 2a2 2 0 00-2 2v11a3 3 0 106 0V4a2 2 0 00-2-2H4zm1 14a1 1 0 100-2 1 1 0 000 2zm5-1.757l4.9-4.9a2 2 0 000-2.828L13.485 5.1a2 2 0 00-2.828 0L10 5.757v8.486zM16 18H9.071l6-6H16a2 2 0 012 2v2a2 2 0 01-2 2z"
+								clip-rule="evenodd"
+							/>
+						</svg>
+						<span class="text-xs font-bold text-purple-700">{{
+							couponDiscountLabel
+						}}</span>
+					</div>
+					<span class="text-sm font-extrabold text-purple-600 text-center min-w-[60px]">{{
+						formatCurrency(displayCouponDiscount)
+					}}</span>
+				</div>
+
+				<!-- Discount Display - Highlighted (non-coupon discount: item-level/manual) -->
+				<div
+					v-if="displayOtherDiscount > 0"
 					class="flex items-center justify-between mb-0.5 bg-red-50 rounded px-1.5 py-1 -mx-0.5"
 				>
 					<div class="flex items-center gap-1">
@@ -1360,7 +1386,7 @@
 						<span class="text-xs font-bold text-red-700">{{ __("Discount") }}</span>
 					</div>
 					<span class="text-sm font-extrabold text-red-600 text-center min-w-[60px]">{{
-						formatCurrency(discountAmount)
+						formatCurrency(displayOtherDiscount)
 					}}</span>
 				</div>
 
@@ -1520,6 +1546,8 @@ function handleProceedToPayment() {
  * @prop {String} posProfile - Current POS Profile name
  * @prop {String} currency - Currency code for formatting (e.g., "USD", "EUR")
  * @prop {Array} appliedOffers - List of currently applied promotional offers
+ * @prop {Object} appliedCoupon - Currently applied coupon ({ name, code, ... }), if any
+ * @prop {Number} couponDiscountAmount - Portion of discountAmount attributable to appliedCoupon
  * @prop {Array} warehouses - Available warehouses for item selection
  */
 const props = defineProps({
@@ -1552,6 +1580,14 @@ const props = defineProps({
 	appliedOffers: {
 		type: Array,
 		default: () => [],
+	},
+	appliedCoupon: {
+		type: Object,
+		default: null,
+	},
+	couponDiscountAmount: {
+		type: Number,
+		default: 0,
 	},
 	warehouses: {
 		type: Array,
@@ -1881,6 +1917,36 @@ const displayGrandTotal = computed(() => {
 	// Always: displaySubtotal + tax - discount
 	// This makes the display consistent and intuitive
 	return displaySubtotal.value + props.taxAmount - props.discountAmount;
+});
+
+/**
+ * Portion of discountAmount attributable to the applied coupon, shown as its
+ * own "Coupon Discount" line so customers can see why the total dropped.
+ * Clamped to discountAmount so a stale/out-of-sync coupon amount (e.g. a
+ * manual discount override) can never make the split exceed the real total.
+ * @returns {Number} Coupon discount amount to display (0 if no coupon applied)
+ */
+const displayCouponDiscount = computed(() => {
+	if (!props.appliedCoupon) return 0;
+	return Math.min(Math.max(props.couponDiscountAmount || 0, 0), props.discountAmount || 0);
+});
+
+/**
+ * Remaining discount not attributable to the coupon (item-level pricing
+ * rules, manual additional discount, etc.) — shown as the generic "Discount" line.
+ * @returns {Number} Non-coupon discount amount to display
+ */
+const displayOtherDiscount = computed(() => {
+	return Math.max((props.discountAmount || 0) - displayCouponDiscount.value, 0);
+});
+
+/**
+ * Label for the coupon discount line, e.g. "Coupon Discount (SAVE100)".
+ * @returns {String}
+ */
+const couponDiscountLabel = computed(() => {
+	const code = props.appliedCoupon?.code || props.appliedCoupon?.name;
+	return code ? __("Coupon Discount ({0})", [code]) : __("Coupon Discount");
 });
 
 /**
