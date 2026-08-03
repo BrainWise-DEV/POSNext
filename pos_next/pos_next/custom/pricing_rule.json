@@ -96,7 +96,7 @@
    "insert_after": "pos_only",
    "is_system_generated": 0,
    "is_virtual": 0,
-   "label": "One Time Per Customer",
+   "label": "",
    "length": 0,
    "mandatory_depends_on": null,
    "module": null,
