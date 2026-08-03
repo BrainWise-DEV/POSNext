@@ -541,6 +541,7 @@
 									<InvoiceFilters
 										:unique-customers="invoiceFilters.uniqueCustomers.value"
 										:unique-products="invoiceFilters.uniqueProducts.value"
+										:unique-payment-modes="invoiceFilters.uniquePaymentModes.value"
 										:filter-stats="invoiceFilters.filterStats.value"
 									/>
 								</div>

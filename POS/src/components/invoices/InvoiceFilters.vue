@@ -119,6 +119,24 @@
 					{{ status.label }}
 				</button>
 
+				<!-- Payment Mode Chips -->
+				<button
+					v-for="mode in props.uniquePaymentModes"
+					:key="mode.value"
+					@click="togglePaymentMode(mode.value)"
+					:class="['filter-chip', { active: store.paymentMode === mode.value }]"
+				>
+					<svg class="chip-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							stroke-width="2"
+							d="M3 10h18M7 15h1m4 0h5M5 6h14a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2z"
+						/>
+					</svg>
+					{{ mode.label }}
+				</button>
+
 				<!-- More Filters Button -->
 				<button
 					@click="showAdvanced = !showAdvanced"
@@ -373,6 +391,10 @@ const props = defineProps({
 		type: Array,
 		default: () => [],
 	},
+	uniquePaymentModes: {
+		type: Array,
+		default: () => [],
+	},
 	filterStats: {
 		type: Object,
 		default: null,
@@ -421,6 +443,14 @@ function toggleStatus(status) {
 		store.status = "";
 	} else {
 		store.status = status;
+	}
+}
+
+function togglePaymentMode(mode) {
+	if (store.paymentMode === mode) {
+		store.paymentMode = "";
+	} else {
+		store.paymentMode = mode;
 	}
 }
 
