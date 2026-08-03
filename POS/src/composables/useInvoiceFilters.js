@@ -2,6 +2,14 @@ import { useInvoiceFiltersStore } from "@/stores/invoiceFilters";
 import { computed } from "vue";
 
 /**
+ * True if any payment row on the invoice uses the given mode of payment.
+ */
+export function invoiceHasPaymentMode(invoice, mode) {
+	if (!Array.isArray(invoice.payments)) return false;
+	return invoice.payments.some((payment) => payment.mode_of_payment === mode);
+}
+
+/**
  * Invoice Filters Composable
  *
  * Provides filtering logic for invoice lists
@@ -79,6 +87,12 @@ export function useInvoiceFilters(invoices) {
 			});
 		}
 
+		// Apply payment mode filter - matches if ANY payment row on the invoice
+		// uses the selected mode (e.g. an invoice paid with Cash + UPI matches both)
+		if (filtersStore.paymentMode) {
+			result = result.filter((inv) => invoiceHasPaymentMode(inv, filtersStore.paymentMode));
+		}
+
 		return result;
 	});
 
@@ -116,6 +130,25 @@ export function useInvoiceFilters(invoices) {
 		});
 
 		return Array.from(statuses).sort();
+	});
+
+	/**
+	 * Get unique payment modes actually used across the invoices, for the filter dropdown
+	 */
+	const uniquePaymentModes = computed(() => {
+		if (!Array.isArray(invoices.value)) return [];
+
+		const modes = new Set();
+		invoices.value.forEach((inv) => {
+			if (!Array.isArray(inv.payments)) return;
+			inv.payments.forEach((payment) => {
+				if (payment.mode_of_payment) modes.add(payment.mode_of_payment);
+			});
+		});
+
+		return Array.from(modes)
+			.sort()
+			.map((mode) => ({ value: mode, label: mode }));
 	});
 
 	/**
@@ -211,6 +244,11 @@ export function useInvoiceFilters(invoices) {
 			if (!hasProduct) return false;
 		}
 
+		// Payment mode
+		if (filtersStore.paymentMode) {
+			if (!invoiceHasPaymentMode(invoice, filtersStore.paymentMode)) return false;
+		}
+
 		return true;
 	}
 
@@ -233,6 +271,7 @@ export function useInvoiceFilters(invoices) {
 		uniqueCustomers,
 		uniqueProducts,
 		uniqueStatuses,
+		uniquePaymentModes,
 		filterStats,
 
 		// Helper functions

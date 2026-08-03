@@ -15,6 +15,7 @@ export const useInvoiceFiltersStore = defineStore("invoiceFilters", () => {
 	const customer = ref("");
 	const status = ref("");
 	const product = ref("");
+	const paymentMode = ref("");
 	const searchTerm = ref("");
 
 	// UI state
@@ -29,6 +30,7 @@ export const useInvoiceFiltersStore = defineStore("invoiceFilters", () => {
 		if (customer.value) count++;
 		if (status.value) count++;
 		if (product.value) count++;
+		if (paymentMode.value) count++;
 		return count;
 	});
 
@@ -68,6 +70,14 @@ export const useInvoiceFiltersStore = defineStore("invoiceFilters", () => {
 				type: "product",
 				label: product.value,
 				value: product.value,
+			});
+		}
+
+		if (paymentMode.value) {
+			summary.push({
+				type: "paymentMode",
+				label: paymentMode.value,
+				value: paymentMode.value,
 			});
 		}
 
@@ -142,6 +152,10 @@ export const useInvoiceFiltersStore = defineStore("invoiceFilters", () => {
 		product.value = "";
 	}
 
+	function clearPaymentModeFilter() {
+		paymentMode.value = "";
+	}
+
 	function clearSearchTerm() {
 		searchTerm.value = "";
 	}
@@ -152,6 +166,7 @@ export const useInvoiceFiltersStore = defineStore("invoiceFilters", () => {
 		customer.value = "";
 		status.value = "";
 		product.value = "";
+		paymentMode.value = "";
 		searchTerm.value = "";
 	}
 
@@ -169,6 +184,9 @@ export const useInvoiceFiltersStore = defineStore("invoiceFilters", () => {
 			case "product":
 				clearProductFilter();
 				break;
+			case "paymentMode":
+				clearPaymentModeFilter();
+				break;
 		}
 	}
 
@@ -181,6 +199,7 @@ export const useInvoiceFiltersStore = defineStore("invoiceFilters", () => {
 			customer: customer.value,
 			status: status.value,
 			product: product.value,
+			paymentMode: paymentMode.value,
 			createdAt: new Date().toISOString(),
 		};
 
@@ -205,6 +224,7 @@ export const useInvoiceFiltersStore = defineStore("invoiceFilters", () => {
 			customer.value = preset.customer;
 			status.value = preset.status;
 			product.value = preset.product;
+			paymentMode.value = preset.paymentMode || "";
 			currentFilterName.value = name;
 		}
 	}
@@ -274,6 +294,7 @@ export const useInvoiceFiltersStore = defineStore("invoiceFilters", () => {
 		customer,
 		status,
 		product,
+		paymentMode,
 		searchTerm,
 		showFilters,
 		savedFilters,
@@ -298,6 +319,7 @@ export const useInvoiceFiltersStore = defineStore("invoiceFilters", () => {
 		clearCustomerFilter,
 		clearStatusFilter,
 		clearProductFilter,
+		clearPaymentModeFilter,
 		clearSearchTerm,
 		clearAllFilters,
 		clearFilter,

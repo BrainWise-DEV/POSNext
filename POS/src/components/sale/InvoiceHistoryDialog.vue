@@ -45,6 +45,24 @@
 					</Button>
 				</div>
 
+				<!-- Payment Mode Filter Chips (dynamically generated from the loaded invoices) -->
+				<div v-if="uniquePaymentModes.length > 0" class="flex items-center gap-2 flex-wrap">
+					<button
+						v-for="mode in uniquePaymentModes"
+						:key="mode"
+						type="button"
+						@click="togglePaymentMode(mode)"
+						:class="[
+							'px-3 py-1 rounded-full text-xs font-medium border transition-colors',
+							paymentMode === mode
+								? 'bg-blue-600 border-blue-600 text-white'
+								: 'bg-white border-gray-300 text-gray-700 hover:border-blue-300 hover:bg-blue-50',
+						]"
+					>
+						{{ __(mode) }}
+					</button>
+				</div>
+
 				<!-- Invoices List -->
 				<div v-if="invoicesResource.loading" class="text-center py-8">
 					<div
@@ -219,6 +237,7 @@
 <script setup>
 import { useToast } from "@/composables/useToast";
 import { useFormatters } from "@/composables/useFormatters";
+import { invoiceHasPaymentMode } from "@/composables/useInvoiceFilters";
 import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency";
 import { getInvoiceStatusColor } from "@/utils/invoice";
 import { Button, Dialog, Input, createResource } from "frappe-ui";
@@ -253,6 +272,7 @@ const emit = defineEmits([
 const show = ref(props.modelValue);
 const invoices = ref([]);
 const searchTerm = ref("");
+const paymentMode = ref("");
 const page = ref(0);
 const pageSize = 20;
 const hasMore = ref(true);
@@ -321,22 +341,46 @@ watch(showReturnDialog, (val) => {
 });
 
 const filteredInvoices = computed(() => {
-	if (!searchTerm.value) return invoices.value;
+	let result = invoices.value;
 
-	const term = searchTerm.value.toLowerCase();
-	return invoices.value.filter(
-		(inv) =>
-			inv.name?.toLowerCase().includes(term) ||
-			inv.customer_name?.toLowerCase().includes(term) ||
-			// Search across invoice items by item_code or item_name
-			(Array.isArray(inv.items) &&
-				inv.items.some(
-					(item) =>
-						item.item_code?.toLowerCase().includes(term) ||
-						item.item_name?.toLowerCase().includes(term),
-				)),
-	);
+	if (searchTerm.value) {
+		const term = searchTerm.value.toLowerCase();
+		result = result.filter(
+			(inv) =>
+				inv.name?.toLowerCase().includes(term) ||
+				inv.customer_name?.toLowerCase().includes(term) ||
+				// Search across invoice items by item_code or item_name
+				(Array.isArray(inv.items) &&
+					inv.items.some(
+						(item) =>
+							item.item_code?.toLowerCase().includes(term) ||
+							item.item_name?.toLowerCase().includes(term),
+					)),
+		);
+	}
+
+	if (paymentMode.value) {
+		result = result.filter((inv) => invoiceHasPaymentMode(inv, paymentMode.value));
+	}
+
+	return result;
 });
+
+// Payment modes actually used across the currently loaded invoices, for the filter chips
+const uniquePaymentModes = computed(() => {
+	const modes = new Set();
+	invoices.value.forEach((inv) => {
+		if (!Array.isArray(inv.payments)) return;
+		inv.payments.forEach((payment) => {
+			if (payment.mode_of_payment) modes.add(payment.mode_of_payment);
+		});
+	});
+	return Array.from(modes).sort();
+});
+
+function togglePaymentMode(mode) {
+	paymentMode.value = paymentMode.value === mode ? "" : mode;
+}
 
 function formatPaymentModes(invoice) {
 	const payments = Array.isArray(invoice?.payments) ? invoice.payments : [];
