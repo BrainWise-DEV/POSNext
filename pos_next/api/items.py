@@ -1529,11 +1529,13 @@ def get_items(
 				prefix_pattern,
 				prefix_pattern,
 			]
-			order_by = f"{relevance} DESC, i.item_name ASC"
+			# order_by = f"{relevance} DESC, i.item_name ASC"
+			order_by = f"{relevance} DESC, MIN(CAST(ib.barcode AS UNSIGNED)) ASC"
 		else:
 			# No search term - simple ordering
 			score_params = []
-			order_by = "i.item_name ASC"
+			# order_by = "i.item_name ASC"
+			order_by = "MIN(CAST(ib.barcode AS UNSIGNED)) ASC"
 
 		where_clause = " AND ".join(conditions)
 
