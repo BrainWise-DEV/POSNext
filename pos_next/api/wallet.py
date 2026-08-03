@@ -149,17 +149,43 @@ def get_wallet_amount_from_payments(payments):
 	Calculate total wallet payment amount from invoice payments.
 	"""
 	wallet_amount = 0.0
+	if not payments:
+		return wallet_amount
 
+	wallet_modes = _get_wallet_payment_modes()
 	for payment in payments:
-		if not payment.mode_of_payment:
+		mode_of_payment = payment.get("mode_of_payment") if isinstance(payment, dict) else payment.mode_of_payment
+		if not mode_of_payment:
 			continue
 
-		is_wallet = frappe.db.get_value("Mode of Payment", payment.mode_of_payment, "is_wallet_payment")
-
-		if is_wallet:
-			wallet_amount += flt(payment.amount)
+		if wallet_modes.get(mode_of_payment):
+			amount = payment.get("amount") if isinstance(payment, dict) else payment.amount
+			wallet_amount += flt(amount)
 
 	return wallet_amount
+
+
+def get_wallet_amount_for_sales_invoice(invoice_name, payments=None):
+	"""Return wallet/LP payment total for a submitted Sales Invoice."""
+	if payments is None:
+		payments = frappe.get_all(
+			"Sales Invoice Payment",
+			filters={"parent": invoice_name},
+			fields=["mode_of_payment", "amount"],
+		)
+	return get_wallet_amount_from_payments(payments)
+
+
+def _get_wallet_payment_modes():
+	"""Return a cached map of wallet-enabled Mode of Payment names."""
+	modes = frappe.cache().get_value("pos_next_wallet_payment_modes")
+	if modes is None:
+		modes = {
+			row.name: 1
+			for row in frappe.get_all("Mode of Payment", filters={"is_wallet_payment": 1}, fields=["name"])
+		}
+		frappe.cache().set_value("pos_next_wallet_payment_modes", modes)
+	return modes
 
 
 @frappe.whitelist()

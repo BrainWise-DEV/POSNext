@@ -6,7 +6,11 @@ from unittest.mock import Mock, patch
 
 import frappe
 
-from pos_next.api.magento_loyalty import add_magento_lp_on_submit, redeem_magento_lp_after_submit
+from pos_next.api.magento_loyalty import (
+	add_magento_lp_on_submit,
+	redeem_magento_lp_after_submit,
+	redeem_magento_lp_for_invoice,
+)
 from pos_next.api.wallet import get_customer_wallet_balance, get_wallet_info, validate_wallet_payment
 
 
@@ -81,6 +85,7 @@ class TestMagentoLoyalty(unittest.TestCase):
 		doc.pos_profile = "POS-1"
 		doc.name = "SINV-1"
 		doc.grand_total = 100
+		doc.get = Mock(side_effect=lambda key, default=None: {"payments": []}.get(key, default))
 
 		add_magento_lp_on_submit(doc)
 
@@ -90,9 +95,45 @@ class TestMagentoLoyalty(unittest.TestCase):
 	@patch("pos_next.api.magento_loyalty.is_magento_loyalty_mode", return_value=True)
 	@patch("pos_next.api.magento_loyalty.add_lp_points")
 	@patch("pos_next.api.magento_loyalty._has_field", return_value=True)
+	@patch("pos_next.api.magento_loyalty.frappe.db.get_value", return_value=None)
+	@patch("pos_next.api.magento_loyalty.get_wallet_amount_from_payments", return_value=40)
+	@patch("pos_next.api.magento_loyalty.frappe.db.set_value")
+	def test_add_magento_lp_on_submit_excludes_wallet_payments(
+		self,
+		mock_set_value,
+		_mock_wallet_amount,
+		_mock_get_value,
+		_mock_has_field,
+		mock_add_lp_points,
+		_mock_mode,
+	):
+		mock_add_lp_points.return_value = {
+			"transaction_id": "TXN-ADD-1",
+			"points_added": 6,
+			"value_iqd": 60,
+		}
+
+		doc = Mock()
+		doc.is_pos = 1
+		doc.is_return = 0
+		doc.customer = "CUST-1"
+		doc.pos_profile = "POS-1"
+		doc.name = "SINV-1"
+		doc.grand_total = 100
+		doc.get = Mock(return_value=[])
+
+		add_magento_lp_on_submit(doc)
+
+		mock_add_lp_points.assert_called_once_with("CUST-1", 60)
+
+	@patch("pos_next.api.magento_loyalty.is_magento_loyalty_mode", return_value=True)
+	@patch("pos_next.api.magento_loyalty.add_lp_points")
+	@patch("pos_next.api.magento_loyalty._has_field", return_value=True)
 	@patch("pos_next.api.magento_loyalty.frappe.db.get_value", return_value="TXN-EXISTING")
+	@patch("pos_next.api.magento_loyalty.get_wallet_amount_from_payments", return_value=0)
 	def test_add_magento_lp_on_submit_is_idempotent(
 		self,
+		_mock_wallet_amount,
 		_mock_get_value,
 		_mock_has_field,
 		mock_add_lp_points,
@@ -105,6 +146,7 @@ class TestMagentoLoyalty(unittest.TestCase):
 		doc.pos_profile = "POS-1"
 		doc.name = "SINV-1"
 		doc.grand_total = 100
+		doc.get = Mock(return_value=[])
 
 		add_magento_lp_on_submit(doc)
 
@@ -112,7 +154,7 @@ class TestMagentoLoyalty(unittest.TestCase):
 
 	@patch("pos_next.api.magento_loyalty.is_magento_loyalty_mode", return_value=True)
 	@patch("pos_next.api.magento_loyalty.redeem_lp_points")
-	@patch("pos_next.api.magento_loyalty.get_wallet_amount_from_payments", return_value=25)
+	@patch("pos_next.api.magento_loyalty.get_wallet_amount_for_sales_invoice", return_value=25)
 	@patch("pos_next.api.magento_loyalty._has_field", return_value=True)
 	@patch("pos_next.api.magento_loyalty.frappe.db.get_value", return_value=None)
 	@patch("pos_next.api.magento_loyalty.frappe.db.set_value")
@@ -133,9 +175,9 @@ class TestMagentoLoyalty(unittest.TestCase):
 		invoice_doc.customer = "CUST-1"
 		invoice_doc.pos_profile = "POS-1"
 		invoice_doc.name = "SINV-1"
-		invoice_doc.payments = []
+		invoice_doc.get = Mock(return_value=[])
 
-		redeem_magento_lp_after_submit(invoice_doc)
+		redeem_magento_lp_for_invoice(invoice_doc)
 
 		mock_redeem_lp_points.assert_called_once_with("CUST-1", 25)
 		mock_set_value.assert_called_once()

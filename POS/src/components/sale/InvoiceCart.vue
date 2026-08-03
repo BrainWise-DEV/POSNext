@@ -1769,6 +1769,20 @@ watch(
 	}
 );
 
+// Refresh Magento LP balance after a completed sale when the cart is cleared
+// but the same customer stays selected (watch on customer alone won't re-fire).
+watch(
+	() => props.items?.length ?? 0,
+	(newLen, oldLen) => {
+		if (oldLen > 0 && newLen === 0) {
+			const customerName = props.customer?.name || props.customer;
+			if (customerName && props.posProfile && !isOffline()) {
+				customerLpResource.reload();
+			}
+		}
+	}
+);
+
 /**
  * ============================================================================
  * COMPUTED PROPERTIES
