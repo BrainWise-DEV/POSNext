@@ -2076,12 +2076,22 @@ function getGwpFreeQty(item) {
 }
 
 function hasBundledSameItemFree(item) {
-	return (Number.parseFloat(item?._bundledFreeQty) || 0) > 0;
+	if (item?.is_free_item || item?._isStandaloneFreeRow) {
+		return false;
+	}
+	const bundled = Number.parseFloat(item?._bundledFreeQty) || 0;
+	if (bundled > 0) return true;
+	return (
+		item?.discount_source === "free_item" && (Number.parseFloat(item?.free_qty) || 0) > 0
+	);
 }
 
 function getDisplayFreeQty(item) {
 	if (item?.is_free_item || item?._isStandaloneFreeRow) {
 		return Number.parseFloat(item.quantity) || 0;
+	}
+	if (item?.discount_source === "free_item") {
+		return Number.parseFloat(item?.free_qty) || 0;
 	}
 	const bundled = Number.parseFloat(item?._bundledFreeQty) || 0;
 	if (bundled > 0) return bundled;
@@ -2089,6 +2099,9 @@ function getDisplayFreeQty(item) {
 }
 
 function getDisplayQuantity(item) {
+	if (item?.discount_source === "free_item" && (Number.parseFloat(item?.free_qty) || 0) > 0) {
+		return item.quantity || 0;
+	}
 	const bundled = Number.parseFloat(item?._bundledFreeQty) || 0;
 	if (bundled > 0) {
 		return (Number.parseFloat(item.quantity) || 0) + bundled;
@@ -2103,6 +2116,12 @@ function formatFreeItemBadgeText(freeQty) {
 }
 
 function resolvePaidQuantityFromDisplay(item, displayQty) {
+	if (item?.discount_source === "free_item") {
+		const freeQty = Number.parseFloat(item?.free_qty) || 0;
+		if (freeQty > 0) {
+			return Math.max(0, displayQty - freeQty);
+		}
+	}
 	const bundled = Number.parseFloat(item?._bundledFreeQty) || 0;
 	if (bundled > 0) {
 		return Math.max(0, displayQty - bundled);

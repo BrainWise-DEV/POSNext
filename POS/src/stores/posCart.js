@@ -496,6 +496,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 	const OFFER_DISCOUNT_SOURCES = new Set([
 		"gwp",
+		"free_item",
 		"accumulative_promotion",
 		"item_level_promotion",
 		"auto_discount",
@@ -504,6 +505,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	function itemHasOfferDiscount(item) {
 		if (item.discount_source === "manual_discount") return false;
 		if (Number.parseFloat(item.gwp_free_qty) > 0) return true;
+		if (item.discount_source === "free_item" && Number.parseFloat(item.free_qty) > 0) {
+			return true;
+		}
 		if (hasPricingRules(item.pricing_rules)) return true;
 		return Boolean(item.discount_source && OFFER_DISCOUNT_SOURCES.has(item.discount_source));
 	}
@@ -550,26 +554,39 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			const discountPct = Number.parseFloat(serverItem.discount_percentage) || 0;
 			const discountAmt = Number.parseFloat(serverItem.discount_amount) || 0;
 			const gwpFreeQty = Number.parseFloat(serverItem.gwp_free_qty) || 0;
+			const bundledFreeQty = Number.parseFloat(serverItem.free_qty) || 0;
 
 			const serverHasOfferDiscount =
 				hasPricingRules(serverItem.pricing_rules) ||
 				discountPct > 0 ||
 				discountAmt > 0 ||
-				gwpFreeQty > 0;
+				gwpFreeQty > 0 ||
+				(serverItem.discount_source === "free_item" && bundledFreeQty > 0);
 
 			if (serverHasOfferDiscount) {
-				// GWP and fixed-amount discounts: keep exact amount, not % (avoids rounding drift)
-				if (gwpFreeQty > 0 || discountAmt > 0) {
+				// GWP and bundled same-item free: keep exact amount, not % (avoids rounding drift)
+				if (gwpFreeQty > 0 || serverItem.discount_source === "free_item") {
 					item.discount_amount = discountAmt;
 					item.discount_percentage = 0;
 					item.gwp_free_qty = gwpFreeQty;
+					item.free_qty = serverItem.discount_source === "free_item" ? bundledFreeQty : 0;
+				} else if (discountAmt > 0) {
+					item.discount_amount = discountAmt;
+					item.discount_percentage = 0;
+					item.gwp_free_qty = 0;
+					item.free_qty = 0;
 				} else {
 					item.discount_percentage = discountPct;
 					item.discount_amount = 0;
 					item.gwp_free_qty = 0;
+					item.free_qty = 0;
 				}
 				item.pricing_rules = serverItem.pricing_rules;
-				hasDiscounts = discountPct > 0 || discountAmt > 0 || gwpFreeQty > 0;
+				hasDiscounts =
+					discountPct > 0 ||
+					discountAmt > 0 ||
+					gwpFreeQty > 0 ||
+					(serverItem.discount_source === "free_item" && bundledFreeQty > 0);
 			} else if (itemHasOfferDiscount(item)) {
 				clearOfferDiscountFromItem(item);
 			}
@@ -592,11 +609,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	/**
 	 * Processes free items from backend offer response.
 	 *
-	 * ERPNext represents product discounts as separate SI rows: paid line(s) plus
-	 * one or more rows with is_free_item=1 (see pricing_rule tests for same_item).
-	 * We always add a dedicated free row so formatItemsForSubmission sends qty > 0
-	 * for stock and accounting; annotating only free_qty on the paid line never
-	 * reaches Sales Invoice Item (there is no free_qty field server-side).
+	 * ERPNext represents product discounts as separate SI rows for different-item
+	 * gifts. Same-item free gifts are bundled onto the paid line (qty stays 4,
+	 * one unit discounted) so the cashier does not see an extra cart row.
 	 *
 	 * @param {Array} freeItems - Array of free items from backend (e.g., [{item_code, qty, uom, item_name}])
 	 * @returns {void}
@@ -652,6 +667,15 @@ export const usePOSCartStore = defineStore("posCart", () => {
 					item.item_code === freeItem.item_code &&
 					(item.uom || item.stock_uom) === freeUom
 			);
+
+			if (cartItem) {
+				applyBundledSameItemFreeDiscount(
+					cartItem,
+					freeQty,
+					freeItem.pricing_rules || null
+				);
+				continue;
+			}
 
 			const cf = freeItem.conversion_factor || cartItem?.conversion_factor || 1;
 			invoiceItems.value.push({
@@ -1469,6 +1493,24 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		return true;
 	}
 
+	function applyBundledSameItemFreeDiscount(item, freeQty, offerName) {
+		const priceListRate = item.price_list_rate || item.rate || 0;
+		const lineFree = floorFreeItemQty(freeQty);
+		const lineDiscount = lineFree * priceListRate;
+		if (lineFree <= 0 || lineDiscount <= 0) return false;
+
+		item.discount_amount = lineDiscount;
+		item.discount_percentage = 0;
+		item.gwp_free_qty = 0;
+		item.free_qty = lineFree;
+		item.discount_source = "free_item";
+		if (offerName) {
+			stampOfferOnItem(item, offerName);
+		}
+		recalculateItem(item);
+		return true;
+	}
+
 	/**
 	 * Apply free item (product discount) offer offline
 	 * Handles: same_item (free item = purchased item) or specific free_item
@@ -1620,18 +1662,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 					continue;
 				}
 
-				const uomKey = item.uom || item.stock_uom;
-				upsertOfflineFreeItemRow({
-					itemCode: item.item_code,
-					itemName: item.item_name,
-					freeItemsToGive,
-					uomKey,
-					stockUom: item.stock_uom || uomKey,
-					conversionFactor: item.conversion_factor,
-					warehouse: item.warehouse,
-					offerName: offer.name,
-				});
-				applied = true;
+				if (applyBundledSameItemFreeDiscount(item, freeItemsToGive, offer.name)) {
+					applied = true;
+				}
 			}
 		} else if (freeItemCode) {
 			// Free item is a specific different item

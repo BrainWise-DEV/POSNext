@@ -62,6 +62,7 @@ DISCOUNT_SOURCE_ACCUMULATIVE = "accumulative_promotion"
 DISCOUNT_SOURCE_MANUAL = "manual_discount"
 DISCOUNT_SOURCE_AUTO = "auto_discount"
 DISCOUNT_SOURCE_GWP = "gwp"
+DISCOUNT_SOURCE_FREE_ITEM = "free_item"
 DISCOUNT_SOURCE_LEGACY = "pricing_rule"
 
 

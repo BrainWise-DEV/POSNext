@@ -61,6 +61,7 @@ try:
 	from pos_next.overrides.pricing_rule import apply_min_max_price_discounts
 	from pos_next.api.promotion_exclusions import (
 		DISCOUNT_SOURCE_AUTO,
+		DISCOUNT_SOURCE_FREE_ITEM,
 		DISCOUNT_SOURCE_GWP,
 		DISCOUNT_SOURCE_MANUAL,
 		PROMOTION_TYPE_AUTO,
@@ -99,6 +100,7 @@ except Exception as _pricing_import_error:  # pragma: no cover - ERPNext not ins
 	GWP_BASIS_MAX = "Max Price"
 	DISCOUNT_SOURCE_AUTO = "auto_discount"
 	DISCOUNT_SOURCE_GWP = "gwp"
+	DISCOUNT_SOURCE_FREE_ITEM = "free_item"
 	DISCOUNT_SOURCE_MANUAL = "manual_discount"
 	get_rule_promotion_types = None
 	mark_item_discount_flags = None
@@ -147,6 +149,62 @@ def _stamp_gwp_line_discount(item_doc, line_free_qty, price_list_rate) -> None:
 	item_doc.free_qty = line_free_qty
 	item_doc.discount_source = DISCOUNT_SOURCE_GWP
 	item_doc.rate = flt(price_list_rate - (line_discount / purchased_qty))
+
+
+def _stamp_bundled_same_item_free_discount(item_doc, line_free_qty, price_list_rate) -> None:
+	"""Apply same-item free gift on the purchased line (1 of N units free, no extra row)."""
+	line_free_qty = _floor_free_item_qty(line_free_qty)
+	purchased_qty = flt(item_doc.get("qty") or item_doc.get("quantity") or 0)
+	price_list_rate = flt(price_list_rate)
+	line_discount = calculate_gwp_discount_amount(line_free_qty, price_list_rate)
+	if line_discount <= 0 or purchased_qty <= 0:
+		return
+
+	item_doc.discount_amount = line_discount
+	item_doc.discount_percentage = 0
+	item_doc.gwp_free_qty = 0
+	item_doc.free_qty = line_free_qty
+	item_doc.discount_source = DISCOUNT_SOURCE_FREE_ITEM
+	item_doc.rate = flt(price_list_rate - (line_discount / purchased_qty))
+
+
+def _apply_bundled_same_item_free_discounts(prepared_items, free_items_map, rule_map) -> None:
+	"""Bundle non-GWP same-item free gifts onto the paid line instead of a separate row."""
+	if not calculate_gwp_discount_amount:
+		return
+
+	for key in list(free_items_map.keys()):
+		item_code, rule_name = key
+		if rule_name not in rule_map:
+			continue
+		if rule_promotion_type(rule_map[rule_name]) == PROMOTION_TYPE_GWP:
+			continue
+
+		full_rule = frappe.get_cached_doc("Pricing Rule", rule_name)
+		if full_rule.price_or_product_discount != "Product" or not full_rule.same_item:
+			continue
+
+		free_item_doc = free_items_map.pop(key)
+		free_qty = _floor_free_item_qty(free_item_doc.get("qty"))
+		if free_qty <= 0:
+			continue
+
+		for item_doc in prepared_items:
+			if item_doc.get("is_free_item"):
+				continue
+			if item_doc.get("item_code") != item_code:
+				continue
+			if not _item_matches_gwp_rule(item_doc, full_rule) and rule_name not in _item_pricing_rule_names(
+				item_doc
+			):
+				continue
+
+			price_list_rate = flt(
+				item_doc.get("price_list_rate") or item_doc.get("rate") or 0
+			)
+			_stamp_bundled_same_item_free_discount(item_doc, free_qty, price_list_rate)
+			append_pricing_rule(item_doc, rule_name)
+			break
 
 
 def _apply_gwp_line_discounts(prepared_items, free_items_map, rule_map) -> None:
@@ -3593,6 +3651,7 @@ def apply_offers(invoice_data, selected_offers=None):
 			free_items_map.setdefault(key, free_item_doc)
 		applied_rules.update(txn_result.get("applied_rules", set()))
 
+		_apply_bundled_same_item_free_discounts(prepared_items, free_items_map, rule_map)
 		_apply_gwp_line_discounts(prepared_items, free_items_map, rule_map)
 
 		# Apply Min/Max ("cheapest/most-expensive item") price rules. These were

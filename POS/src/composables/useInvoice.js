@@ -749,7 +749,17 @@ export function useInvoice() {
 			if (discountAmount > baseAmount) {
 				discountAmount = baseAmount;
 			}
-			item.discount_percentage = baseAmount > 0 ? (discountAmount / baseAmount) * 100 : 0;
+			// Keep exact amount; do not derive % (e.g. 1/3 → 33.33% rounds wrong).
+			item.discount_percentage = 0;
+		} else if (item.discount_source === "free_item") {
+			const bundledFreeQty = Number.parseFloat(item.free_qty) || 0;
+			if (bundledFreeQty > 0) {
+				discountAmount = roundCurrency(bundledFreeQty * roundedRate);
+				if (discountAmount > baseAmount) {
+					discountAmount = baseAmount;
+				}
+				item.discount_percentage = 0;
+			}
 		// Coupon line discounts with max_amount are stored as absolute amounts.
 		// Do NOT convert them to % — qty changes would re-scale and exceed the cap.
 		} else if (item.coupon_code && Number.parseFloat(item.discount_amount) > 0) {
@@ -837,10 +847,10 @@ export function useInvoice() {
 	 * @returns {Array} Items formatted for ERPNext Sales Invoice
 	 */
 	function formatItemsForSubmission(items) {
-		const mapRow = (item) => ({
+		const mapRow = (item, qtyOverride = null) => ({
 			item_code: item.item_code,
 			item_name: item.item_name,
-			qty: item.quantity || item.qty || 1,
+			qty: qtyOverride ?? item.quantity ?? item.qty ?? 1,
 			rate: item.is_free_item ? 0 : computeBackendRate(item),
 			price_list_rate: item.is_free_item
 				? 0
@@ -862,9 +872,20 @@ export function useInvoice() {
 
 		const out = [];
 		for (const item of items) {
-			out.push(mapRow(item));
 			const fq = Number.parseFloat(item.free_qty) || 0;
-			if (!item.is_free_item && fq > 0) {
+			const bundledSameItemFree =
+				!item.is_free_item && fq > 0 && item.discount_source === "free_item";
+			const lineQty = item.quantity || item.qty || 1;
+			const paidQty = bundledSameItemFree ? Math.max(0, lineQty - fq) : lineQty;
+
+			if (item.is_free_item) {
+				out.push(mapRow(item));
+				continue;
+			}
+
+			out.push(mapRow(item, paidQty));
+
+			if (fq > 0) {
 				const u = item.uom || item.stock_uom;
 				const hasDedicatedFree = items.some(
 					(i) =>

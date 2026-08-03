@@ -508,8 +508,31 @@ def _apply_offers_and_stamp(payload, selected_offers):
 				"discount_percentage": discount_percentage,
 				"discount_amount": per_line_discount,
 				"pricing_rules": ri.get("pricing_rules") or "",
+				"discount_source": ri.get("discount_source") or "",
+				"free_qty": flt(ri.get("free_qty") or 0),
+				"gwp_free_qty": flt(ri.get("gwp_free_qty") or 0),
 			}
 		)
+
+		fq = flt(ri.get("free_qty") or 0)
+		if ri.get("discount_source") == "free_item" and fq > 0:
+			total_qty = flt(target.get("qty") or 1)
+			target["qty"] = max(0, total_qty - fq)
+			payload["items"].append(
+				{
+					"item_code": target.get("item_code"),
+					"qty": fq,
+					"rate": 0,
+					"price_list_rate": 0,
+					"uom": target.get("uom") or target.get("stock_uom") or "Nos",
+					"warehouse": target.get("warehouse"),
+					"conversion_factor": target.get("conversion_factor") or 1,
+					"discount_percentage": 0,
+					"discount_amount": 0,
+					"pricing_rules": ri.get("pricing_rules") or "",
+					"is_free_item": 1,
+				}
+			)
 
 	for fi in resp.get("free_items") or []:
 		payload["items"].append(
@@ -677,7 +700,7 @@ class TestPromotions(FrappeTestCase):
 		self.assertAlmostEqual(flt(final.items[0].rate), 30, places=2)
 
 	def test_free_same_item(self):
-		"""Buy 2 get 1 free where free = bought item."""
+		"""Buy 2 get 1 free where free = bought item (bundled on the paid line)."""
 		rule = _make_rule(
 			"_PNXT_TEST_FreeSame",
 			apply_on="Item Code",
@@ -691,7 +714,10 @@ class TestPromotions(FrappeTestCase):
 			free_item_rate=0,
 		)
 		payload = _cart_payload(self.ctx, [_line(self.ctx, ITEM_A, qty=2)])
-		_apply_offers_and_stamp(payload, [rule])
+		resp = _apply_offers_and_stamp(payload, [rule])
+		self.assertEqual(resp.get("free_items"), [])
+		self.assertEqual(flt(resp["items"][0].get("free_qty")), 1)
+
 		final = _submit_invoice(self.ctx, payload, paid_amount=100)
 
 		self.assertEqual(final.status, "Paid")
@@ -700,7 +726,7 @@ class TestPromotions(FrappeTestCase):
 		paid_lines = [it for it in final.items if not it.is_free_item]
 		free_lines = [it for it in final.items if it.is_free_item]
 		self.assertEqual(len(paid_lines), 1)
-		self.assertAlmostEqual(flt(paid_lines[0].qty), 2, places=2)
+		self.assertAlmostEqual(flt(paid_lines[0].qty), 1, places=2)
 		self.assertEqual(len(free_lines), 1)
 		self.assertEqual(free_lines[0].item_code, ITEM_A)
 		self.assertAlmostEqual(flt(free_lines[0].qty), 1, places=2)

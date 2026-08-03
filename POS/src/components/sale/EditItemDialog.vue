@@ -750,7 +750,14 @@ watch(
 			}
 
 			// Initialize discount
-			if (newItem.discount_percentage && newItem.discount_percentage > 0) {
+			const usesExactPromoDiscount =
+				(newItem.discount_source === "free_item" ||
+					newItem.discount_source === "gwp") &&
+				Number(newItem.discount_amount) > 0;
+			if (usesExactPromoDiscount) {
+				discountType.value = "amount";
+				discountValue.value = newItem.discount_amount;
+			} else if (newItem.discount_percentage && newItem.discount_percentage > 0) {
 				discountType.value = "percentage";
 				discountValue.value = newItem.discount_percentage;
 			} else if (newItem.discount_amount && newItem.discount_amount > 0) {
