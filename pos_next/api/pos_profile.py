@@ -362,12 +362,18 @@ def get_sales_persons(pos_profile=None):
 			"is_group": 0,  # Only get individual sales persons, not group nodes
 		}
 
-		# If company is specified via POS Profile, filter by company (if Sales Person has company field)
 		if pos_profile:
-			company = frappe.db.get_value("POS Profile", pos_profile, "company")
-			# Check if Sales Person doctype has a company field
-			if frappe.db.has_column("Sales Person", "company") and company:
-				filters["company"] = company
+			profile_company, profile_warehouse = frappe.db.get_value(
+				"POS Profile", pos_profile, ["company", "warehouse"]
+			)
+
+			# If company is specified via POS Profile, filter by company (if Sales Person has company field)
+			if frappe.db.has_column("Sales Person", "company") and profile_company:
+				filters["company"] = profile_company
+
+			# Scope to sales persons tagged to this POS Profile's store (custom_outlet -> Warehouse)
+			if frappe.db.has_column("Sales Person", "custom_outlet") and profile_warehouse:
+				filters["custom_outlet"] = profile_warehouse
 
 		sales_persons = frappe.get_list(
 			"Sales Person",
