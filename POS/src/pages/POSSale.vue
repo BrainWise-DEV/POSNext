@@ -367,6 +367,8 @@
 								:pos-profile="shiftStore.profileName"
 								:currency="shiftStore.profileCurrency"
 								:applied-offers="cartStore.appliedOffers"
+								:applied-coupon="cartStore.appliedCoupon"
+								:coupon-discount-amount="cartStore.couponDiscountAmount"
 								:warehouses="profileWarehouses"
 								@update-quantity="cartStore.updateItemQuantity"
 								@remove-item="
@@ -497,6 +499,8 @@
 				:items="cartStore.invoiceItems"
 				:tax-amount="cartStore.totalTax"
 				:discount-amount="cartStore.totalDiscount"
+				:applied-coupon="cartStore.appliedCoupon"
+				:coupon-discount-amount="cartStore.couponDiscountAmount"
 				:target-doctype="cartStore.targetDoctype"
 				:is-submitting="cartStore.isSubmitting"
 				:applied-offer-count="cartStore.appliedOffers.length"
@@ -1973,6 +1977,15 @@ async function handleEditItem(updatedItem) {
 }
 
 function handleAdditionalDiscountUpdate(discountAmount) {
+	// Manual edits share the same additionalDiscount bucket a coupon writes to.
+	// If the user changes the amount away from what the coupon applied, the
+	// coupon no longer accounts for it — clear the attribution so the cart
+	// doesn't keep showing a stale "Coupon Discount" label.
+	if (cartStore.appliedCoupon && Math.abs(discountAmount - cartStore.couponDiscountAmount) > 0.001) {
+		cartStore.appliedCoupon = null;
+		cartStore.couponDiscountAmount = 0;
+	}
+
 	// Update the additional discount value in the cart store
 	cartStore.additionalDiscount = discountAmount;
 

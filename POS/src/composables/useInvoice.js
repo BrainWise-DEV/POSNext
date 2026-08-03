@@ -4,7 +4,7 @@ import { isOffline, getCachedItem } from "@/utils/offline";
 import { useSerialNumberStore } from "@/stores/serialNumber";
 import { CoalescingMutex } from "@/utils/mutex";
 import { logger } from "@/utils/logger";
-import { roundCurrency } from "@/utils/currency";
+import { roundCurrency, roundToNearestZeroOrFive } from "@/utils/currency";
 
 const log = logger.create("Invoice");
 
@@ -573,6 +573,9 @@ export function useInvoice() {
 
 		// Rebuild cache after applying additional discount
 		rebuildIncrementalCache();
+
+		// Return the final clamped amount so callers can attribute it (e.g. coupon display)
+		return discountAmount;
 	}
 
 	function removeDiscount() {

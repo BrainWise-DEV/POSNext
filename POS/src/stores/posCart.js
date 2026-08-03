@@ -118,6 +118,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	const pendingItemQty = ref(1);
 	const appliedOffers = ref([]);
 	const appliedCoupon = ref(null);
+	// Portion of additionalDiscount attributable to appliedCoupon, so the UI can
+	// show it as "Coupon Discount" instead of lumping it into the generic Discount line.
+	const couponDiscountAmount = ref(0);
 	const selectionMode = ref("uom"); // 'uom' or 'variant'
 	const currentDraftId = ref(null);
 	const targetDoctype = ref("Sales Invoice");
@@ -239,6 +242,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		offersStore.clearOneTimeContext();
 		appliedOffers.value = [];
 		appliedCoupon.value = null;
+		couponDiscountAmount.value = 0;
 		currentDraftId.value = null;
 		targetDoctype.value = "Sales Invoice";
 
@@ -364,8 +368,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 	// Discount & Offer Management
 	function applyDiscountToCart(discount) {
-		applyDiscount(discount);
+		const appliedAmount = applyDiscount(discount);
 		appliedCoupon.value = discount;
+		couponDiscountAmount.value = appliedAmount || 0;
 		showSuccess(__("{0} applied successfully", [discount.name]));
 	}
 
@@ -373,6 +378,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		appliedOffers.value = [];
 		removeDiscount();
 		appliedCoupon.value = null;
+		couponDiscountAmount.value = 0;
 		showSuccess(__("Discount has been removed from cart"));
 	}
 
@@ -728,6 +734,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			appliedOffers.value = [];
 			processFreeItems([]); // Remove all free items
 			removeDiscount();
+			// removeDiscount() zeroes the shared additionalDiscount bucket, so any
+			// coupon attribution tracked on top of it is no longer valid — clear it
+			// to avoid a stale "Coupon Discount" label once the amount is gone.
+			appliedCoupon.value = null;
+			couponDiscountAmount.value = 0;
 			await nextTick();
 			showSuccess(__("Offer has been removed from cart"));
 			offersDialogRef?.resetApplyingState();
@@ -744,6 +755,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			appliedOffers.value = [];
 			processFreeItems([]); // Remove all free items
 			removeDiscount();
+			// removeDiscount() zeroes the shared additionalDiscount bucket, so any
+			// coupon attribution tracked on top of it is no longer valid — clear it
+			// to avoid a stale "Coupon Discount" label once the amount is gone.
+			appliedCoupon.value = null;
+			couponDiscountAmount.value = 0;
 			await nextTick();
 			showSuccess(__("Offer has been removed from cart"));
 			offersDialogRef?.resetApplyingState();
@@ -1901,6 +1917,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		pendingItemQty,
 		appliedOffers,
 		appliedCoupon,
+		couponDiscountAmount,
 		selectionMode,
 		currentDraftId,
 		offerProcessingState, // Offer processing state for UI feedback
