@@ -714,6 +714,24 @@ def _ensure_invoice_customer(invoice_doc, pos_profile=None):
 	)
 
 
+def _apply_pos_item_accounting_dimensions(invoice_doc):
+	"""Stamp POS customer (and header dimensions) on each Sales Invoice Item row."""
+	if invoice_doc.doctype != "Sales Invoice" or not cint(invoice_doc.get("is_pos")):
+		return
+
+	item_meta = frappe.get_meta("Sales Invoice Item", cached=True)
+	if not item_meta.has_field("customer"):
+		return
+
+	customer = invoice_doc.get("customer")
+	if not customer:
+		return
+
+	for item in invoice_doc.get("items") or []:
+		if not item.get("customer"):
+			item.customer = customer
+
+
 def _validate_customer_for_receivable_payments(invoice_doc):
 	"""Require a customer when any payment mode uses a Receivable account."""
 	if not invoice_doc.get("payments") or invoice_doc.get("customer"):
@@ -1072,6 +1090,7 @@ def update_invoice(data):
 
 		if doctype == "Sales Invoice":
 			_ensure_invoice_customer(invoice_doc, pos_profile)
+			_apply_pos_item_accounting_dimensions(invoice_doc)
 
 		if company and invoice_doc.get("payments") and doctype == "Sales Invoice":
 			_set_payment_accounts(invoice_doc.payments, company)
@@ -1375,6 +1394,7 @@ def update_invoice(data):
 		# Save as draft
 		if doctype == "Sales Invoice":
 			_ensure_invoice_customer(invoice_doc, pos_profile)
+			_apply_pos_item_accounting_dimensions(invoice_doc)
 
 		invoice_doc.flags.ignore_permissions = True
 		frappe.flags.ignore_account_permission = True
@@ -1704,6 +1724,7 @@ def submit_invoice(invoice=None, data=None):
 		if doctype == "Sales Invoice":
 			invoice_doc.update_stock = 1
 			_ensure_invoice_customer(invoice_doc, pos_profile)
+			_apply_pos_item_accounting_dimensions(invoice_doc)
 
 		# For return invoices, set update_outstanding_for_self = 0
 		# This ensures the GL entry's against_voucher points to the original invoice,
@@ -1834,6 +1855,7 @@ def submit_invoice(invoice=None, data=None):
 		frappe.flags.ignore_account_permission = True
 		if doctype == "Sales Invoice":
 			_ensure_invoice_customer(invoice_doc, pos_profile)
+			_apply_pos_item_accounting_dimensions(invoice_doc)
 		invoice_doc.save()
 
 		# Submit invoice
