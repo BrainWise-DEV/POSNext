@@ -8,6 +8,93 @@ from frappe import _
 
 from pos_next.services.miraaya_loyalty import is_miraaya_loyalty_available
 
+MAGENTO_EMAIL_FIELDS = ("custom_email", "email", "email_id")
+
+
+def _set_customer_magento_email_fields(customer_name: str, email_id: str) -> None:
+	"""Populate Customer email fields that masar_miraaya may read for Magento sync."""
+	email_id = (email_id or "").strip()
+	if not email_id:
+		return
+
+	meta = frappe.get_meta("Customer")
+	for fieldname in MAGENTO_EMAIL_FIELDS:
+		if meta.has_field(fieldname):
+			frappe.db.set_value("Customer", customer_name, fieldname, email_id, update_modified=False)
+
+
+def _ensure_customer_primary_contact_email(
+	customer,
+	email_id: str,
+	mobile_no: str | None = None,
+	first_name: str | None = None,
+	last_name: str | None = None,
+) -> None:
+	"""Ensure the customer's primary Contact exists and has the Magento email."""
+	from erpnext.selling.doctype.customer.customer import make_contact
+
+	email_id = (email_id or "").strip()
+	if not email_id:
+		return
+
+	contact_name = frappe.db.get_value("Customer", customer.name, "customer_primary_contact")
+	if contact_name:
+		contact = frappe.get_doc("Contact", contact_name)
+		existing_emails = {(row.email_id or "").strip().lower() for row in contact.email_ids}
+		contact_updated = False
+		if email_id.lower() not in existing_emails:
+			contact.add_email(email_id, is_primary=1)
+			contact_updated = True
+		if first_name and not (contact.first_name or "").strip():
+			contact.first_name = first_name.strip()
+			contact_updated = True
+		if last_name and not (contact.last_name or "").strip():
+			contact.last_name = last_name.strip()
+			contact_updated = True
+		if contact_updated:
+			contact.save(ignore_permissions=True)
+		return
+
+	customer.email_id = email_id
+	if mobile_no:
+		customer.mobile_no = mobile_no
+	if first_name:
+		customer.first_name = first_name.strip()
+	if last_name:
+		customer.last_name = last_name.strip()
+
+	contact = make_contact(customer)
+	frappe.db.set_value(
+		"Customer",
+		customer.name,
+		"customer_primary_contact",
+		contact.name,
+		update_modified=False,
+	)
+
+
+def _prepare_customer_for_magento_publish(
+	customer,
+	email_id: str,
+	mobile_no: str | None = None,
+	first_name: str | None = None,
+	last_name: str | None = None,
+) -> None:
+	"""Make sure email is on Customer + Contact before masar_miraaya validate runs."""
+	email_id = (email_id or "").strip()
+	if not email_id:
+		frappe.throw(_("Email is required for Magento customer sync"))
+
+	_ensure_customer_primary_contact_email(
+		customer,
+		email_id=email_id,
+		mobile_no=mobile_no,
+		first_name=first_name,
+		last_name=last_name,
+	)
+	_set_customer_magento_email_fields(customer.name, email_id)
+	customer.reload()
+
 
 @frappe.whitelist()
 def get_customers(search_term="", pos_profile=None, limit=20, modified_since=None):
@@ -121,6 +208,8 @@ def create_customer(
 			frappe.throw(_("First name is required"))
 		if not (custom_last_name or "").strip():
 			frappe.throw(_("Last name is required"))
+		if not (email_id or "").strip():
+			frappe.throw(_("Email is required for Magento customer sync"))
 
 	loyalty_program = get_default_loyalty_program_from_settings(
 		company=company,
@@ -179,6 +268,13 @@ def create_customer(
 	try:
 		customer.insert()
 		if publish_to_magento and frappe.get_meta("Customer").has_field("custom_is_publish"):
+			_prepare_customer_for_magento_publish(
+				customer,
+				email_id=email_id,
+				mobile_no=mobile_no,
+				first_name=custom_first_name,
+				last_name=custom_last_name,
+			)
 			customer.custom_is_publish = 1
 			customer.save()
 	finally:
