@@ -19,9 +19,14 @@ export function useInvoice() {
 	// Serial Number Store for returning serials when items are removed
 	const serialStore = useSerialNumberStore();
 
+	function resolveCustomerName() {
+		return customer.value?.name || customer.value || defaultCustomerName.value || null;
+	}
+
 	// State
 	const invoiceItems = ref([]);
 	const customer = ref(null);
+	const defaultCustomerName = ref(null);
 	const payments = ref([]);
 	const salesTeam = ref([]); // Sales team for Sales Invoice
 	const posProfile = ref(null);
@@ -124,7 +129,7 @@ export function useInvoice() {
 				const itemDetails = await getItemDetailsResource.submit({
 					item_code: item.item_code,
 					pos_profile: posProfile.value,
-					customer: customer.value?.name || customer.value,
+					customer: resolveCustomerName(),
 					qty,
 					uom,
 				});
@@ -1062,7 +1067,7 @@ export function useInvoice() {
 			doctype: targetDoctype,
 			pos_profile: posProfile.value,
 			posa_pos_opening_shift: posOpeningShift.value,
-			customer: customer.value?.name || customer.value,
+			customer: resolveCustomerName(),
 			items: formatItemsForSubmission(rawItems),
 			payments: invoicePayments,
 			discount_amount: additionalDiscount.value || 0,
@@ -1124,7 +1129,7 @@ export function useInvoice() {
 					doctype: targetDoctype,
 					pos_profile: posProfile.value,
 					posa_pos_opening_shift: posOpeningShift.value,
-					customer: customer.value?.name || customer.value,
+					customer: resolveCustomerName(),
 					items: formatItemsForSubmission(rawItems),
 					payments: invoicePayments,
 					discount_amount: additionalDiscount.value || 0,
@@ -1252,10 +1257,19 @@ export function useInvoice() {
 	 * Sets the default customer from POS Profile if available.
 	 * This is called when resetting/clearing the cart to auto-select
 	 * the default customer configured in the POS Profile.
+	 *
+	 * @param {string|null} profileCustomer - Optional customer from the active shift profile (sync seed)
 	 */
-	async function setDefaultCustomer() {
-		// Reset to null first
+	async function setDefaultCustomer(profileCustomer = null) {
 		customer.value = null;
+		defaultCustomerName.value = profileCustomer || null;
+
+		if (profileCustomer) {
+			customer.value = {
+				name: profileCustomer,
+				customer_name: profileCustomer,
+			};
+		}
 
 		// Only fetch default customer if we have a POS Profile
 		if (!posProfile.value) {
@@ -1269,6 +1283,7 @@ export function useInvoice() {
 
 			// Set the default customer if one is configured
 			if (result && result.customer) {
+				defaultCustomerName.value = result.customer;
 				// Create customer object matching the structure from customer selection
 				customer.value = {
 					name: result.customer,

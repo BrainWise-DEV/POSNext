@@ -664,6 +664,82 @@ def _set_payment_accounts(payments, company):
 			)
 
 
+def _validate_payment_account_not_debit_to(invoice_doc):
+	"""Reject payment modes mapped to the same account as the invoice receivable."""
+	if not invoice_doc.get("payments"):
+		return
+
+	debit_to = invoice_doc.get("debit_to")
+	if not debit_to and invoice_doc.get("customer") and invoice_doc.get("company"):
+		from erpnext.accounts.party import get_party_account
+
+		debit_to = get_party_account("Customer", invoice_doc.customer, invoice_doc.company)
+
+	if not debit_to:
+		return
+
+	for payment in invoice_doc.payments:
+		if not payment.get("account") or not flt(payment.get("amount")):
+			continue
+		if payment.account == debit_to:
+			frappe.throw(
+				_(
+					"Mode of Payment {0} uses account {1}, which is the same as the invoice receivable account. "
+					"Please set a Cash or Bank account on the Mode of Payment."
+				).format(payment.mode_of_payment, debit_to),
+				title=_("Invalid Payment Account"),
+			)
+
+
+def _ensure_invoice_customer(invoice_doc, pos_profile=None):
+	"""Ensure POS Sales Invoice has a customer for Receivable GL entries (debit_to).
+
+	Falls back to the POS Profile default customer when the cashier did not
+	select one explicitly.
+	"""
+	from pos_next.overrides.sales_invoice import _resolve_pos_customer
+
+	customer = _resolve_pos_customer(invoice_doc)
+	if customer:
+		invoice_doc.customer = customer
+		if not invoice_doc.get("customer_name"):
+			invoice_doc.customer_name = frappe.db.get_value("Customer", customer, "customer_name")
+		return
+
+	frappe.throw(
+		_(
+			"Customer is required. Please select a customer or configure a default customer in POS Profile."
+		),
+		title=_("Customer Required"),
+	)
+
+
+def _validate_customer_for_receivable_payments(invoice_doc):
+	"""Require a customer when any payment mode uses a Receivable account."""
+	if not invoice_doc.get("payments") or invoice_doc.get("customer"):
+		return
+
+	company = invoice_doc.get("company")
+	for payment in invoice_doc.payments:
+		account = payment.get("account")
+		if not account and payment.get("mode_of_payment") and company:
+			try:
+				account_info = get_payment_account(payment.mode_of_payment, company)
+				account = account_info.get("account") if account_info else None
+			except Exception:
+				continue
+
+		if not account:
+			continue
+
+		account_type = frappe.get_cached_value("Account", account, "account_type")
+		if account_type == "Receivable":
+			frappe.throw(
+				_("Customer is required when paying with {0}").format(payment.get("mode_of_payment")),
+				title=_("Customer Required"),
+			)
+
+
 # ==========================================
 # Stock Validation Functions
 # ==========================================
@@ -994,8 +1070,13 @@ def update_invoice(data):
 
 		company = invoice_doc.get("company") or (pos_profile_doc.company if pos_profile_doc else None)
 
+		if doctype == "Sales Invoice":
+			_ensure_invoice_customer(invoice_doc, pos_profile)
+
 		if company and invoice_doc.get("payments") and doctype == "Sales Invoice":
 			_set_payment_accounts(invoice_doc.payments, company)
+			_validate_customer_for_receivable_payments(invoice_doc)
+			_validate_payment_account_not_debit_to(invoice_doc)
 
 		# Validate return items if this is a return invoice
 		if (data.get("is_return") or invoice_doc.get("is_return")) and invoice_doc.get("return_against"):
@@ -1292,6 +1373,9 @@ def update_invoice(data):
 						frappe.throw(frappe.as_json({"errors": errors}), frappe.ValidationError)
 
 		# Save as draft
+		if doctype == "Sales Invoice":
+			_ensure_invoice_customer(invoice_doc, pos_profile)
+
 		invoice_doc.flags.ignore_permissions = True
 		frappe.flags.ignore_account_permission = True
 		invoice_doc.docstatus = 0
@@ -1607,7 +1691,10 @@ def submit_invoice(invoice=None, data=None):
 			invoice_doc = frappe.get_doc(doctype, invoice_name)
 		else:
 			invoice_doc = frappe.get_doc(doctype, invoice_name)
+			existing_customer = invoice_doc.customer
 			invoice_doc.update(invoice)
+			if not invoice_doc.get("customer") and existing_customer:
+				invoice_doc.customer = existing_customer
 
 		# Keep permission bypass consistent for POS API flow.
 		invoice_doc.flags.ignore_permissions = True
@@ -1616,6 +1703,7 @@ def submit_invoice(invoice=None, data=None):
 		# Ensure update_stock is set for Sales Invoice
 		if doctype == "Sales Invoice":
 			invoice_doc.update_stock = 1
+			_ensure_invoice_customer(invoice_doc, pos_profile)
 
 		# For return invoices, set update_outstanding_for_self = 0
 		# This ensures the GL entry's against_voucher points to the original invoice,
@@ -1643,6 +1731,8 @@ def submit_invoice(invoice=None, data=None):
 		# Set accounts for all payment methods before saving
 		if doctype == "Sales Invoice" and hasattr(invoice_doc, "payments"):
 			_set_payment_accounts(invoice_doc.payments, invoice_doc.company)
+			_validate_customer_for_receivable_payments(invoice_doc)
+			_validate_payment_account_not_debit_to(invoice_doc)
 
 		# Handle sales team (multiple sales persons)
 		sales_team_data = invoice.get("sales_team") or data.get("sales_team")
@@ -1735,11 +1825,15 @@ def submit_invoice(invoice=None, data=None):
 			)
 			if not allow_credit_sale:
 				frappe.throw(_("Credit sales are not enabled for this POS Profile."))
+			if not invoice_doc.get("customer"):
+				frappe.throw(_("Customer is required for credit sales"), title=_("Customer Required"))
 			invoice_doc.flags.pos_next_credit_sale = 1
 
 		# Save before submit
 		invoice_doc.flags.ignore_permissions = True
 		frappe.flags.ignore_account_permission = True
+		if doctype == "Sales Invoice":
+			_ensure_invoice_customer(invoice_doc, pos_profile)
 		invoice_doc.save()
 
 		# Submit invoice

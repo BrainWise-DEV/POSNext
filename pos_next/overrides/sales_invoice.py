@@ -8,6 +8,7 @@ Handles wallet payments that require party information for Receivable accounts.
 """
 
 import frappe
+from frappe import _
 from erpnext.accounts.doctype.sales_invoice.sales_invoice import SalesInvoice
 from erpnext.accounts.utils import get_account_currency
 from frappe.utils import cint, flt
@@ -86,6 +87,21 @@ def _get_post_change_gl_entries_setting():
 	return cint(result[0][0]) if result else 0
 
 
+def _resolve_pos_customer(invoice_doc):
+	"""Return a valid Customer name for POS invoices, or None."""
+	customer = (invoice_doc.get("customer") or "").strip()
+	if customer and frappe.db.exists("Customer", customer):
+		return customer
+
+	pos_profile = invoice_doc.get("pos_profile")
+	if pos_profile:
+		default_customer = frappe.db.get_value("POS Profile", pos_profile, "customer")
+		if default_customer and frappe.db.exists("Customer", default_customer):
+			return default_customer
+
+	return None
+
+
 class CustomSalesInvoice(SalesInvoice):
 	"""
 	Custom Sales Invoice class that handles wallet payments correctly.
@@ -95,9 +111,30 @@ class CustomSalesInvoice(SalesInvoice):
 	for wallet payment methods marked with is_wallet_payment.
 	"""
 
+	def validate(self):
+		if cint(self.is_pos):
+			self._ensure_pos_customer()
+			self._validate_pos_payment_accounts()
+		super().validate()
+
+	def _ensure_pos_customer(self):
+		"""POS invoices always need a customer for Receivable GL entries (debit_to)."""
+		customer = _resolve_pos_customer(self)
+		if not customer:
+			frappe.throw(
+				_(
+					"Customer is required. Please select a customer or configure a default customer in POS Profile."
+				),
+				title=_("Customer Required"),
+			)
+
+		self.customer = customer
+		if not self.customer_name:
+			self.customer_name = frappe.db.get_value("Customer", customer, "customer_name")
+
 	def make_pos_gl_entries(self, gl_entries):
 		"""
-		Override to add party information for wallet payment accounts.
+		Override to add party information for wallet / receivable payment accounts.
 
 		The standard ERPNext implementation doesn't set party_type/party for
 		payment mode accounts, which causes validation errors for Receivable
@@ -110,66 +147,81 @@ class CustomSalesInvoice(SalesInvoice):
 				if skip_change_gl_entries and payment_mode.account == self.account_for_change_amount:
 					payment_mode.base_amount -= flt(self.change_amount)
 
-				if payment_mode.amount:
-					# POS, make payment entries
-					# Credit entry to debit_to (customer receivable)
-					gl_entries.append(
-						self.get_gl_dict(
-							{
-								"account": self.debit_to,
-								"party_type": "Customer",
-								"party": self.customer,
-								"against": payment_mode.account,
-								"credit": payment_mode.base_amount,
-								"credit_in_account_currency": payment_mode.base_amount
-								if self.party_account_currency == self.company_currency
-								else payment_mode.amount,
-								"against_voucher": self.return_against
-								if cint(self.is_return) and self.return_against
-								else self.name,
-								"against_voucher_type": self.doctype,
-								"cost_center": self.cost_center,
-							},
-							self.party_account_currency,
-							item=self,
-						)
-					)
+				against_voucher = self.name
+				if self.is_return and self.return_against and not self.update_outstanding_for_self:
+					against_voucher = self.return_against
 
-					# Debit entry to payment mode account
-					payment_mode_account_currency = get_account_currency(payment_mode.account)
+				payment_amount = flt(payment_mode.base_amount) or flt(payment_mode.amount)
+				if not payment_amount:
+					continue
 
-					# Get party info for wallet payments
-					party_type, party = self.get_party_and_party_type_for_pos_gl_entry(
-						payment_mode.mode_of_payment, payment_mode.account
+				# Credit customer receivable (payment received against the invoice)
+				gl_entries.append(
+					self.get_gl_dict(
+						{
+							"account": self.debit_to,
+							"party_type": "Customer",
+							"party": self.customer,
+							"against": payment_mode.account,
+							"credit": payment_amount,
+							"credit_in_account_currency": payment_amount
+							if self.party_account_currency == self.company_currency
+							else payment_mode.amount,
+							"against_voucher": against_voucher,
+							"against_voucher_type": self.doctype,
+							"cost_center": self.cost_center,
+						},
+						self.party_account_currency,
+						item=self,
 					)
+				)
 
-					gl_entries.append(
-						self.get_gl_dict(
-							{
-								"account": payment_mode.account,
-								"party_type": party_type,
-								"party": party,
-								"against": self.customer,
-								"debit": payment_mode.base_amount,
-								"debit_in_account_currency": payment_mode.base_amount
-								if payment_mode_account_currency == self.company_currency
-								else payment_mode.amount,
-								"cost_center": self.cost_center,
-							},
-							payment_mode_account_currency,
-							item=self,
-						)
+				# Debit the payment-mode account (Cash/Bank/another Receivable, etc.)
+				payment_mode_account_currency = get_account_currency(payment_mode.account)
+				party_type, party = self.get_party_and_party_type_for_pos_gl_entry(
+					payment_mode.mode_of_payment, payment_mode.account
+				)
+
+				gl_entries.append(
+					self.get_gl_dict(
+						{
+							"account": payment_mode.account,
+							"party_type": party_type,
+							"party": party,
+							"against": self.customer,
+							"debit": payment_amount,
+							"debit_in_account_currency": payment_amount
+							if payment_mode_account_currency == self.company_currency
+							else payment_mode.amount,
+							"cost_center": self.cost_center,
+						},
+						payment_mode_account_currency,
+						item=self,
 					)
+				)
 
 			if not skip_change_gl_entries:
 				if hasattr(self, "get_gle_for_change_amount"):
-					# ERPNext v16+: Method renamed and returns a list of GL entries
-					# that needs to be extended to the main gl_entries list
 					gl_entries.extend(self.get_gle_for_change_amount())
 				else:
-					# ERPNext v15: Method takes gl_entries as parameter
-					# and appends change amount entries directly to it
 					self.make_gle_for_change_amount(gl_entries)
+
+	def _validate_pos_payment_accounts(self):
+		"""Payment modes must not post to the same account as debit_to."""
+		if not self.payments or not self.debit_to:
+			return
+
+		for payment in self.payments:
+			if not payment.account or not flt(payment.amount):
+				continue
+			if payment.account == self.debit_to:
+				frappe.throw(
+					_(
+						"Mode of Payment {0} uses account {1}, which is the same as the invoice receivable account. "
+						"Please set a Cash or Bank account on the Mode of Payment."
+					).format(payment.mode_of_payment, self.debit_to),
+					title=_("Invalid Payment Account"),
+				)
 
 	def validate_pos_paid_amount(self):
 		"""
@@ -195,18 +247,23 @@ class CustomSalesInvoice(SalesInvoice):
 
 	def get_party_and_party_type_for_pos_gl_entry(self, mode_of_payment, account):
 		"""
-		Get party type and party for wallet payment GL entries.
+		Get party type and party for POS payment GL entries.
 
-		For wallet payments (Mode of Payment with is_wallet_payment=1),
-		returns Customer as party_type and the invoice customer as party.
-		For regular payments, returns empty strings.
+		ERPNext requires party on GL entries against Receivable/Payable accounts.
+		Wallet modes and any payment mode linked to a Receivable account need the
+		invoice customer as party.
 		"""
+		party_type, party = "", ""
+
+		if not account or not self.customer:
+			return party_type, party
+
 		is_wallet_mode_of_payment = frappe.db.get_value(
 			"Mode of Payment", mode_of_payment, "is_wallet_payment"
 		)
+		account_type = frappe.get_cached_value("Account", account, "account_type")
 
-		party_type, party = "", ""
-		if is_wallet_mode_of_payment:
+		if is_wallet_mode_of_payment or account_type == "Receivable":
 			party_type, party = "Customer", self.customer
 
 		return party_type, party
