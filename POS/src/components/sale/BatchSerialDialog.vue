@@ -301,7 +301,7 @@ import { Button, Dialog, createResource } from "frappe-ui";
 import { computed, ref, watch } from "vue";
 import { useSerialNumberStore } from "@/stores/serialNumber";
 import { usePOSCartStore } from "@/stores/posCart";
-import { getCachedBatchData, getCachedSerialData } from "@/utils/offline/items";
+import { getCachedBatchData, getCachedSerialData, persistItemBatchSerialData, consumeCachedBatchQty } from "@/utils/offline/items";
 import { isOffline } from "@/utils/offline";
 
 const props = defineProps({
@@ -370,6 +370,13 @@ const batchesResource = createResource({
 				expiry_date: batch.expiry_date,
 				manufacturing_date: batch.manufacturing_date,
 			}));
+
+			// Persist for offline batch selection
+			if (props.item?.item_code) {
+				persistItemBatchSerialData(props.item.item_code, {
+					batch_no_data: data.batch_no_data,
+				}).catch(() => {});
+			}
 		}
 	},
 	onError(error) {
@@ -436,6 +443,8 @@ async function loadBatchesOrSerials() {
 				}));
 				return;
 			}
+			warehouseBatches.value = [];
+			return;
 		}
 		// Fetch from server when online
 		batchesResource.reload();
@@ -447,6 +456,14 @@ async function loadBatchesOrSerials() {
 				availableSerials.value = cachedSerials;
 				return;
 			}
+			// Fallback to in-memory cache from a prior online session
+			const memorySerials = serialStore.getSerials(props.item.item_code);
+			if (memorySerials.length > 0) {
+				availableSerials.value = memorySerials;
+				return;
+			}
+			availableSerials.value = [];
+			return;
 		}
 		// Set warehouse in store
 		serialStore.setWarehouse(props.warehouse);
@@ -496,6 +513,11 @@ function handleConfirm() {
 
 	if (props.item?.has_batch_no && selectedBatch.value) {
 		result.batch_no = selectedBatch.value.batch_no;
+		consumeCachedBatchQty(
+			props.item.item_code,
+			selectedBatch.value.batch_no,
+			props.quantity || 1
+		).catch(() => {});
 	}
 
 	if (props.item?.has_serial_no) {

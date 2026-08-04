@@ -146,6 +146,42 @@ export const getCachedSerialData = async (itemCode) => {
 	}
 };
 
+function parseSerialNumbers(serialNumbers) {
+	if (!serialNumbers) return [];
+	return Array.isArray(serialNumbers)
+		? serialNumbers
+		: String(serialNumbers)
+				.split("\n")
+				.map((s) => s.trim())
+				.filter(Boolean);
+}
+
+// Persist batch/serial data for a single cached item (partial updates supported)
+export const persistItemBatchSerialData = async (itemCode, data) => {
+	try {
+		if (!itemCode || !data) return false;
+
+		const update = {};
+		if (data.batch_no_data !== undefined) update.batch_no_data = data.batch_no_data;
+		if (data.serial_no_data !== undefined) update.serial_no_data = data.serial_no_data;
+
+		if (Object.keys(update).length === 0) return false;
+
+		const item = await db.items.get(itemCode);
+		if (!item) {
+			// Item not in cache yet — store batch/serial data so offline selection still works
+			await db.items.put({ item_code: itemCode, ...update });
+			return true;
+		}
+
+		await db.items.update(itemCode, update);
+		return true;
+	} catch (error) {
+		console.error("Error persisting item batch/serial data:", error);
+		return false;
+	}
+};
+
 // Update batch/serial data for items in cache
 export const updateItemBatchSerialData = async (batchSerialDataMap) => {
 	try {
@@ -153,13 +189,10 @@ export const updateItemBatchSerialData = async (batchSerialDataMap) => {
 
 		// Update each item with its batch/serial data
 		const updates = Object.entries(batchSerialDataMap).map(async ([itemCode, data]) => {
-			const item = await db.items.get(itemCode);
-			if (item) {
-				await db.items.update(itemCode, {
-					batch_no_data: data.batch_no_data || [],
-					serial_no_data: data.serial_no_data || [],
-				});
-			}
+			await persistItemBatchSerialData(itemCode, {
+				batch_no_data: data.batch_no_data || [],
+				serial_no_data: data.serial_no_data || [],
+			});
 		});
 
 		await Promise.all(updates);
@@ -170,6 +203,70 @@ export const updateItemBatchSerialData = async (batchSerialDataMap) => {
 	} catch (error) {
 		console.error("Error updating batch/serial data:", error);
 		return false;
+	}
+};
+
+// Remove consumed serial numbers from offline cache
+export const consumeCachedSerials = async (itemCode, serialNumbers) => {
+	try {
+		if (!itemCode) return;
+
+		const serials = await getCachedSerialData(itemCode);
+		if (!serials.length) return;
+
+		const toRemove = new Set(parseSerialNumbers(serialNumbers));
+		const remaining = serials.filter((s) => !toRemove.has(s.serial_no));
+
+		await persistItemBatchSerialData(itemCode, { serial_no_data: remaining });
+	} catch (error) {
+		console.error("Error consuming cached serials:", error);
+	}
+};
+
+// Return serial numbers to offline cache (e.g. item removed from cart)
+export const returnCachedSerials = async (itemCode, serialNumbers) => {
+	try {
+		if (!itemCode) return;
+
+		const serials = await getCachedSerialData(itemCode);
+		const toReturn = parseSerialNumbers(serialNumbers);
+		if (!toReturn.length) return;
+
+		const existing = new Set(serials.map((s) => s.serial_no));
+		const warehouse = serials[0]?.warehouse;
+		const added = toReturn
+			.filter((serialNo) => !existing.has(serialNo))
+			.map((serial_no) => ({ serial_no, warehouse }));
+
+		if (!added.length) return;
+
+		const merged = [...serials, ...added].sort((a, b) =>
+			a.serial_no.localeCompare(b.serial_no, undefined, { numeric: true })
+		);
+
+		await persistItemBatchSerialData(itemCode, { serial_no_data: merged });
+	} catch (error) {
+		console.error("Error returning cached serials:", error);
+	}
+};
+
+// Decrease batch quantity in offline cache after selection/sale
+export const consumeCachedBatchQty = async (itemCode, batchNo, qty) => {
+	try {
+		if (!itemCode || !batchNo || !qty) return;
+
+		const batches = await getCachedBatchData(itemCode);
+		if (!batches.length) return;
+
+		const updated = batches.map((batch) =>
+			batch.batch_no === batchNo
+				? { ...batch, batch_qty: Math.max(0, (batch.batch_qty || 0) - qty) }
+				: batch
+		);
+
+		await persistItemBatchSerialData(itemCode, { batch_no_data: updated });
+	} catch (error) {
+		console.error("Error consuming cached batch qty:", error);
 	}
 };
 
