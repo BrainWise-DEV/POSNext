@@ -367,12 +367,13 @@
 								:pos-profile="shiftStore.profileName"
 								:currency="shiftStore.profileCurrency"
 								:applied-offers="cartStore.appliedOffers"
-								:applied-coupon="cartStore.appliedCoupon"
+								:applied-coupons="cartStore.appliedCoupons"
 								:coupon-discount-amount="cartStore.couponDiscountAmount"
 								:warehouses="profileWarehouses"
 								@update-quantity="cartStore.updateItemQuantity"
 								@remove-item="
-									(itemCode, uom) => cartStore.removeItem(itemCode, uom)
+									(itemCode, uom, batchNo) =>
+										cartStore.removeItem(itemCode, uom, batchNo)
 								"
 								@select-customer="handleCustomerSelected"
 								@create-customer="handleCreateCustomer"
@@ -499,7 +500,7 @@
 				:items="cartStore.invoiceItems"
 				:tax-amount="cartStore.totalTax"
 				:discount-amount="cartStore.totalDiscount"
-				:applied-coupon="cartStore.appliedCoupon"
+				:applied-coupons="cartStore.appliedCoupons"
 				:coupon-discount-amount="cartStore.couponDiscountAmount"
 				:target-doctype="cartStore.targetDoctype"
 				:is-submitting="cartStore.isSubmitting"
@@ -559,7 +560,7 @@
 				:customer="cartStore.customer?.name || cartStore.customer"
 				:company="shiftStore.profileCompany"
 				:currency="shiftStore.profileCurrency"
-				:applied-coupon="cartStore.appliedCoupon"
+				:applied-coupons="cartStore.appliedCoupons"
 				@discount-applied="handleDiscountApplied"
 				@discount-removed="handleDiscountRemoved"
 			/>
@@ -1973,16 +1974,24 @@ async function handleItemSelected(item, autoAdd = false) {
 }
 
 async function handleEditItem(updatedItem) {
-	await cartStore.updateItemDetails(updatedItem.item_code, updatedItem);
+	await cartStore.updateItemDetails(
+		updatedItem.item_code,
+		updatedItem,
+		updatedItem.uom,
+		updatedItem.batch_no
+	);
 }
 
 function handleAdditionalDiscountUpdate(discountAmount) {
-	// Manual edits share the same additionalDiscount bucket a coupon writes to.
-	// If the user changes the amount away from what the coupon applied, the
-	// coupon no longer accounts for it — clear the attribution so the cart
-	// doesn't keep showing a stale "Coupon Discount" label.
-	if (cartStore.appliedCoupon && Math.abs(discountAmount - cartStore.couponDiscountAmount) > 0.001) {
-		cartStore.appliedCoupon = null;
+	// Manual edits share the same additionalDiscount bucket coupons write to.
+	// If the user changes the amount away from what the applied coupon(s)
+	// contributed, they no longer account for it — clear the attribution so
+	// the cart doesn't keep showing a stale "Coupon Discount" label.
+	if (
+		cartStore.appliedCoupons.length > 0 &&
+		Math.abs(discountAmount - cartStore.couponDiscountAmount) > 0.001
+	) {
+		cartStore.appliedCoupons = [];
 		cartStore.couponDiscountAmount = 0;
 	}
 
@@ -2557,12 +2566,13 @@ function handleReturnCreated(returnInvoice) {
 }
 
 function handleDiscountApplied(discount) {
+	// Keep the dialog open after applying — coupons can be stacked, so the
+	// user may want to enter another code right away.
 	cartStore.applyDiscountToCart(discount);
-	uiStore.showCouponDialog = false;
 }
 
-function handleDiscountRemoved() {
-	cartStore.removeDiscountFromCart();
+function handleDiscountRemoved(coupon) {
+	cartStore.removeDiscountFromCart(coupon);
 }
 
 async function handleApplyOffer(offer) {

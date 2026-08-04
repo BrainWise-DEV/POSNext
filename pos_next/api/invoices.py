@@ -1248,25 +1248,37 @@ def update_invoice(data):
                     sum(p.base_amount or 0 for p in invoice_doc.payments)
                 )
 
-        # Validate and track POS Coupon if coupon_code is provided
-        coupon_code = data.get("coupon_code")
-        if coupon_code:
-            # Validate POS Coupon exists and is valid
+        # Validate and track POS Coupon(s) if coupon_code is provided.
+        # Multiple stacked coupons arrive as one comma-separated string
+        # (e.g. "SAVE20,WELCOME10") so a single coupon still round-trips as a
+        # plain code with no wire format change.
+        coupon_code_raw = data.get("coupon_code")
+        if coupon_code_raw:
             if frappe.db.table_exists("POS Coupon"):
-                from pos_next.pos_next.doctype.pos_coupon.pos_coupon import check_coupon_code
-
-                coupon_result = check_coupon_code(
-                    coupon_code,
-                    customer=invoice_doc.customer,
-                    company=invoice_doc.company
+                from pos_next.pos_next.doctype.pos_coupon.pos_coupon import (
+                    check_coupon_code,
+                    parse_coupon_codes,
                 )
 
-                if not coupon_result or not coupon_result.get("valid"):
-                    error_msg = coupon_result.get("msg", "Invalid coupon code") if coupon_result else "Invalid coupon code"
-                    frappe.throw(_(error_msg))
+                coupon_codes = parse_coupon_codes(coupon_code_raw)
+                for code in coupon_codes:
+                    coupon_result = check_coupon_code(
+                        code,
+                        customer=invoice_doc.customer,
+                        company=invoice_doc.company
+                    )
 
-                # Store coupon code on invoice for tracking
-                invoice_doc.coupon_code = coupon_code
+                    if not coupon_result or not coupon_result.get("valid"):
+                        error_msg = coupon_result.get("msg", "Invalid coupon code") if coupon_result else "Invalid coupon code"
+                        frappe.throw(_(error_msg))
+
+                # `coupon_code` is a single-value field on some target doctypes
+                # (e.g. POS Invoice's core "Coupon Code" link). It can only ever
+                # hold one value, so only set it for the common single-coupon
+                # case. Usage for every stacked coupon is still tracked
+                # per-code on submit via increment_coupon_usage().
+                if len(coupon_codes) == 1:
+                    invoice_doc.coupon_code = coupon_codes[0]
 
         # Validate stock availability before saving draft
         # is_stock_item may not be set on unsaved doc items (frontend doesn't send it),
@@ -1665,19 +1677,25 @@ def submit_invoice(invoice=None, data=None):
                         "allocated_percentage": member.get("allocated_percentage", 0),
                     })
 
-        # Handle POS Coupon if coupon_code is provided
-        coupon_code = invoice.get("coupon_code") or data.get("coupon_code")
-        if coupon_code:
-            # Increment usage counter for POS Coupon
+        # Handle POS Coupon(s) if coupon_code is provided. Multiple stacked
+        # coupons arrive as one comma-separated string; increment usage for
+        # every one of them independently so a failure on one code doesn't
+        # block the others.
+        coupon_code_raw = invoice.get("coupon_code") or data.get("coupon_code")
+        if coupon_code_raw:
             if frappe.db.table_exists("POS Coupon"):
-                try:
-                    from pos_next.pos_next.doctype.pos_coupon.pos_coupon import increment_coupon_usage
-                    increment_coupon_usage(coupon_code)
-                except Exception as e:
-                    frappe.log_error(
-                        title="Failed to increment coupon usage",
-                        message=f"Coupon: {coupon_code}, Error: {str(e)}"
-                    )
+                from pos_next.pos_next.doctype.pos_coupon.pos_coupon import (
+                    increment_coupon_usage,
+                    parse_coupon_codes,
+                )
+                for code in parse_coupon_codes(coupon_code_raw):
+                    try:
+                        increment_coupon_usage(code)
+                    except Exception as e:
+                        frappe.log_error(
+                            title="Failed to increment coupon usage",
+                            message=f"Coupon: {code}, Error: {e!s}"
+                        )
 
         # Auto-set batch numbers for returns
         _auto_set_return_batches(invoice_doc)
@@ -1978,13 +1996,7 @@ def get_invoices(pos_profile, limit=20, start=0):
     start = cint(start) or 0
 
     # Check if user has access to this POS Profile
-    has_access = frappe.db.exists(
-        "POS Profile User",
-        {
-            "parent": pos_profile,
-            "user": frappe.session.user,
-        },
-    )
+    has_access = frappe.db.exists("POS Profile User", {"parent": pos_profile, "user": frappe.session.user})
 
     if not has_access and not frappe.has_permission("Sales Invoice", "read"):
         frappe.throw(_("You don't have access to this POS Profile"))
@@ -2042,6 +2054,34 @@ def get_invoices(pos_profile, limit=20, start=0):
             "invoice_name": invoice.name
         }, as_dict=True)
         invoice.items = items
+
+    # Load payment modes for all invoices in one batch query, for the payment mode filter
+    invoice_names = [invoice.name for invoice in invoices]
+    payments_by_invoice = {}
+    if invoice_names:
+        payment_rows = frappe.db.sql("""
+            SELECT
+                parent,
+                mode_of_payment,
+                amount
+            FROM
+                `tabSales Invoice Payment`
+            WHERE
+                parent IN %(invoice_names)s
+            ORDER BY
+                parent, idx
+        """, {
+            "invoice_names": invoice_names
+        }, as_dict=True)
+
+        for row in payment_rows:
+            payments_by_invoice.setdefault(row.parent, []).append({
+                "mode_of_payment": row.mode_of_payment,
+                "amount": row.amount,
+            })
+
+    for invoice in invoices:
+        invoice.payments = payments_by_invoice.get(invoice.name, [])
 
     return invoices
 
@@ -3172,7 +3212,10 @@ def _evaluate_transaction_offers(
 			"transaction_date": posting_date,
 			"posting_date": posting_date,
 			"pos_profile": invoice.get("pos_profile"),
-			"coupon_code": invoice.get("coupon_code") or None,
+			# When multiple coupons are stacked, coupon_code arrives as a
+			# comma-separated string. Only the first code is relevant here
+			# since ERPNext's own transaction pricing engine matches on one.
+			"coupon_code": (invoice.get("coupon_code") or "").split(",")[0].strip() or None,
 		}
 	)
 	doc.flags.ignore_mandatory = True

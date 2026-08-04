@@ -919,6 +919,8 @@
 						item.item_code +
 						'-' +
 						(item.uom || '') +
+						'-' +
+						(item.batch_no || '') +
 						(item.is_free_item ? '-free' : '')
 					"
 					@click="item.is_free_item ? null : openEditDialog(item)"
@@ -970,6 +972,26 @@
 									>
 										{{ item.item_name }}
 									</h4>
+									<!-- Batch Split Badge: shown when this item's quantity was
+									     auto-split across more than one batch -->
+									<span
+										v-if="item.has_batch_no && getBatchSplitInfo(item)"
+										class="inline-flex items-center px-1.5 py-0.5 bg-purple-50 text-purple-700 rounded-full text-[9px] font-bold border border-purple-200 flex-shrink-0"
+										:title="
+											__('Batch {0}', [item.batch_no]) +
+											' — ' +
+											__('split across {0} batches', [
+												getBatchSplitInfo(item).total,
+											])
+										"
+									>
+										{{
+											__("Batch {0}/{1}", [
+												getBatchSplitInfo(item).position,
+												getBatchSplitInfo(item).total,
+											])
+										}}
+									</span>
 									<!-- Free Item Badge -->
 									<span
 										v-if="item.free_qty && item.free_qty > 0"
@@ -1023,7 +1045,9 @@
 								<button
 									v-if="!item.is_free_item"
 									type="button"
-									@click.stop="$emit('remove-item', item.item_code, item.uom)"
+									@click.stop="
+										$emit('remove-item', item.item_code, item.uom, item.batch_no)
+									"
 									class="text-gray-400 hover:text-red-600 active:text-red-700 transition-colors flex-shrink-0 p-0.5 -m-0.5 touch-manipulation active:scale-90"
 									:aria-label="__('Remove {0}', [item.item_name])"
 									:title="__('Remove item')"
@@ -1192,15 +1216,22 @@
 									<div class="relative group/uom" @click.stop>
 										<button
 											type="button"
-											@click="toggleUomDropdown(item.item_code, item.uom)"
+											@click="
+												toggleUomDropdown(
+													item.item_code,
+													item.uom,
+													item.batch_no
+												)
+											"
 											:disabled="
 												item.is_resolved_barcode ||
+												item.has_batch_no ||
 												!item.item_uoms ||
 												item.item_uoms.length === 0
 											"
 											:class="[
 												'h-6 sm:h-7 text-[10px] sm:text-xs font-bold rounded ps-2 pe-5 transition-all touch-manipulation flex items-center justify-center min-w-[45px]',
-												item.is_resolved_barcode
+												item.is_resolved_barcode || item.has_batch_no
 													? 'bg-amber-100 text-amber-700 border border-amber-300 cursor-not-allowed'
 													: item.item_uoms && item.item_uoms.length > 0
 													? 'bg-blue-500 text-white border border-blue-400 hover:bg-blue-600 active:scale-95 cursor-pointer'
@@ -1209,6 +1240,8 @@
 											:title="
 												item.is_resolved_barcode
 													? __('UOM locked (barcode item)')
+													: item.has_batch_no
+													? __('UOM locked (batch-tracked item)')
 													: item.item_uoms && item.item_uoms.length > 0
 													? __('Click to change unit')
 													: __('Only one unit available')
@@ -1223,10 +1256,11 @@
 										<svg
 											:class="[
 												'absolute end-1.5 top-1/2 -translate-y-1/2 w-2.5 h-2.5 pointer-events-none transition-transform',
-												openUomDropdown === `${item.item_code}-${item.uom}`
+												openUomDropdown ===
+												`${item.item_code}-${item.uom}-${item.batch_no || ''}`
 													? 'rotate-180'
 													: '',
-												item.is_resolved_barcode
+												item.is_resolved_barcode || item.has_batch_no
 													? 'text-amber-600'
 													: item.item_uoms && item.item_uoms.length > 0
 													? 'text-white'
@@ -1246,7 +1280,7 @@
 										<div
 											v-if="
 												openUomDropdown ===
-													`${item.item_code}-${item.uom}` &&
+													`${item.item_code}-${item.uom}-${item.batch_no || ''}` &&
 												item.item_uoms &&
 												item.item_uoms.length > 0
 											"
@@ -1546,8 +1580,8 @@ function handleProceedToPayment() {
  * @prop {String} posProfile - Current POS Profile name
  * @prop {String} currency - Currency code for formatting (e.g., "USD", "EUR")
  * @prop {Array} appliedOffers - List of currently applied promotional offers
- * @prop {Object} appliedCoupon - Currently applied coupon ({ name, code, ... }), if any
- * @prop {Number} couponDiscountAmount - Portion of discountAmount attributable to appliedCoupon
+ * @prop {Array} appliedCoupons - Every coupon currently stacked on the cart ({ name, code, ... })
+ * @prop {Number} couponDiscountAmount - Portion of discountAmount attributable to appliedCoupons
  * @prop {Array} warehouses - Available warehouses for item selection
  */
 const props = defineProps({
@@ -1581,9 +1615,9 @@ const props = defineProps({
 		type: Array,
 		default: () => [],
 	},
-	appliedCoupon: {
-		type: Object,
-		default: null,
+	appliedCoupons: {
+		type: Array,
+		default: () => [],
 	},
 	couponDiscountAmount: {
 		type: Number,
@@ -1602,8 +1636,8 @@ const props = defineProps({
  * Events emitted to parent component for cart operations
  */
 const emit = defineEmits([
-	"update-quantity", // (itemCode, newQty, uom?) - Update item quantity
-	"remove-item", // (itemCode, uom?) - Remove item from cart
+	"update-quantity", // (itemCode, newQty, uom?, batchNo?) - Update item quantity
+	"remove-item", // (itemCode, uom?, batchNo?) - Remove item from cart
 	"select-customer", // (customer) - Select/change customer
 	"edit-customer", // (customer) - Open edit customer dialog
 	"create-customer", // (searchText) - Open create customer dialog
@@ -1920,19 +1954,19 @@ const displayGrandTotal = computed(() => {
 });
 
 /**
- * Portion of discountAmount attributable to the applied coupon, shown as its
- * own "Coupon Discount" line so customers can see why the total dropped.
- * Clamped to discountAmount so a stale/out-of-sync coupon amount (e.g. a
- * manual discount override) can never make the split exceed the real total.
+ * Portion of discountAmount attributable to the applied coupon(s), shown as
+ * one combined "Coupon Discount" line so customers can see why the total
+ * dropped. Clamped to discountAmount so a stale/out-of-sync coupon amount
+ * (e.g. a manual discount override) can never make the split exceed the real total.
  * @returns {Number} Coupon discount amount to display (0 if no coupon applied)
  */
 const displayCouponDiscount = computed(() => {
-	if (!props.appliedCoupon) return 0;
+	if (!props.appliedCoupons.length) return 0;
 	return Math.min(Math.max(props.couponDiscountAmount || 0, 0), props.discountAmount || 0);
 });
 
 /**
- * Remaining discount not attributable to the coupon (item-level pricing
+ * Remaining discount not attributable to coupons (item-level pricing
  * rules, manual additional discount, etc.) — shown as the generic "Discount" line.
  * @returns {Number} Non-coupon discount amount to display
  */
@@ -1941,12 +1975,13 @@ const displayOtherDiscount = computed(() => {
 });
 
 /**
- * Label for the coupon discount line, e.g. "Coupon Discount (SAVE100)".
+ * Label for the coupon discount line, e.g. "Coupon Discount (SAVE100)" or,
+ * when multiple coupons are stacked, "Coupon Discount (SAVE100, WELCOME10)".
  * @returns {String}
  */
 const couponDiscountLabel = computed(() => {
-	const code = props.appliedCoupon?.code || props.appliedCoupon?.name;
-	return code ? __("Coupon Discount ({0})", [code]) : __("Coupon Discount");
+	const codes = props.appliedCoupons.map((c) => c.code || c.name).filter(Boolean);
+	return codes.length ? __("Coupon Discount ({0})", [codes.join(", ")]) : __("Coupon Discount");
 });
 
 /**
@@ -2130,6 +2165,28 @@ function getItemMsp(item) {
 	);
 }
 
+/**
+ * When a batch-tracked item's quantity has been auto-split across multiple
+ * batches, returns this row's position among its sibling batch rows (e.g.
+ * "Batch 1/2") so the cashier can see the rows are linked to the same item.
+ * Returns null when the item isn't split (only one batch row in the cart).
+ *
+ * @param {Object} item
+ * @returns {{position: number, total: number}|null}
+ */
+function getBatchSplitInfo(item) {
+	if (!item.has_batch_no) return null;
+	const siblings = props.items
+		.filter((i) => i.item_code === item.item_code && i.has_batch_no)
+		.slice()
+		.sort((a, b) => (a.batch_no || "").localeCompare(b.batch_no || ""));
+
+	if (siblings.length < 2) return null;
+
+	const position = siblings.findIndex((i) => i.batch_no === item.batch_no) + 1;
+	return { position, total: siblings.length };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Quantity Control Functions
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2182,7 +2239,7 @@ function incrementQuantity(item) {
 
 	const step = getSmartStep(item.quantity);
 	const newQty = Math.round((item.quantity + step) * 10000) / 10000;
-	emit("update-quantity", item.item_code, newQty, item.uom);
+	emit("update-quantity", item.item_code, newQty, item.uom, item.batch_no);
 }
 
 /**
@@ -2200,9 +2257,9 @@ function decrementQuantity(item) {
 
 	if (newQty <= 0) {
 		// If quantity would be 0 or negative, remove the item
-		emit("remove-item", item.item_code, item.uom);
+		emit("remove-item", item.item_code, item.uom, item.batch_no);
 	} else {
-		emit("update-quantity", item.item_code, newQty, item.uom);
+		emit("update-quantity", item.item_code, newQty, item.uom, item.batch_no);
 	}
 }
 
@@ -2224,10 +2281,10 @@ function updateQuantity(item, value) {
 	if (isNaN(qty)) return;
 
 	// If quantity is zero or negative, remove the item from the cart
-	if (qty <= 0) return emit("remove-item", item.item_code, item.uom);
+	if (qty <= 0) return emit("remove-item", item.item_code, item.uom, item.batch_no);
 
 	// For positive numbers, update quantity immediately (no rounding here while typing)
-	emit("update-quantity", item.item_code, qty, item.uom);
+	emit("update-quantity", item.item_code, qty, item.uom, item.batch_no);
 }
 
 /**
@@ -2242,12 +2299,12 @@ function handleQuantityBlur(item) {
 	// When user leaves the input field, round and validate
 	if (!item.quantity || item.quantity <= 0) {
 		// If quantity is 0 or invalid, remove the item
-		emit("remove-item", item.item_code, item.uom);
+		emit("remove-item", item.item_code, item.uom, item.batch_no);
 	} else {
 		// Round to 4 decimal places for consistency
 		const roundedQty = Math.round(item.quantity * 10000) / 10000;
 		if (roundedQty !== item.quantity) {
-			emit("update-quantity", item.item_code, roundedQty, item.uom);
+			emit("update-quantity", item.item_code, roundedQty, item.uom, item.batch_no);
 		}
 	}
 }
@@ -2260,8 +2317,8 @@ function handleQuantityBlur(item) {
  * Toggle UOM dropdown visibility for an item.
  * Uses unique key combining item_code + uom to handle same item with different UOMs.
  */
-function toggleUomDropdown(itemCode, uom) {
-	const key = `${itemCode}-${uom}`;
+function toggleUomDropdown(itemCode, uom, batchNo = null) {
+	const key = `${itemCode}-${uom}-${batchNo || ""}`;
 	openUomDropdown.value = openUomDropdown.value === key ? null : key;
 }
 
@@ -2276,7 +2333,7 @@ async function selectUom(item, newUom) {
 	}
 
 	const currentUom = item.uom || item.stock_uom;
-	await cartStore.changeItemUOM(item.item_code, newUom, currentUom);
+	await cartStore.changeItemUOM(item.item_code, newUom, currentUom, item.batch_no);
 	openUomDropdown.value = null;
 	emit("update-uom", item.item_code, newUom);
 }
@@ -2304,10 +2361,11 @@ function openEditDialog(item) {
  * @param {Object} updatedItem - Updated item data from dialog
  */
 async function handleUpdateItem(updatedItem) {
-	// Get the original UOM from selectedItem (before any changes)
+	// Get the original UOM/batch from selectedItem (before any changes)
 	const originalUom = selectedItem.value?.uom || selectedItem.value?.stock_uom;
-	// Use store method to update item, passing original UOM to identify correct item
-	await cartStore.updateItemDetails(updatedItem.item_code, updatedItem, originalUom);
+	const originalBatchNo = selectedItem.value?.batch_no;
+	// Use store method to update item, passing original UOM/batch to identify correct item
+	await cartStore.updateItemDetails(updatedItem.item_code, updatedItem, originalUom, originalBatchNo);
 	// Also emit for parent component compatibility
 	emit("edit-item", updatedItem);
 }

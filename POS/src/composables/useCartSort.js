@@ -61,7 +61,7 @@ export function useCartSort(itemsGetter) {
 	// ── Addition-order tracking ─────────────────────────────────────────
 	const lastTouched = reactive(new Map());
 	let touchSeq = 0;
-	const itemKey = (item) => `${item.item_code}\0${item.uom || ""}`;
+	const itemKey = (item) => `${item.item_code}\0${item.uom || ""}\0${item.batch_no || ""}`;
 
 	// Cached previous snapshot avoids re-parsing the prev string every tick
 	let prevSnapshot = new Map();
@@ -70,7 +70,9 @@ export function useCartSort(itemsGetter) {
 		() => {
 			// Build signature string — Vue compares by identity (cheap shallow watch)
 			const items = getItems() || [];
-			return items.map((i) => `${i.item_code}\0${i.uom || ""}:${i.quantity}`).join("|");
+			return items
+				.map((i) => `${i.item_code}\0${i.uom || ""}\0${i.batch_no || ""}:${i.quantity}`)
+				.join("|");
 		},
 		(cur) => {
 			const newSnapshot = new Map();

@@ -2006,12 +2006,12 @@ const props = defineProps({
 		type: Number,
 		default: 0,
 	},
-	/** Currently applied coupon ({ name, code, ... }), if any. */
-	appliedCoupon: {
-		type: Object,
-		default: null,
+	/** Every coupon currently stacked on the cart ({ name, code, ... }). */
+	appliedCoupons: {
+		type: Array,
+		default: () => [],
 	},
-	/** Portion of discountAmount attributable to appliedCoupon. */
+	/** Portion of discountAmount attributable to appliedCoupons. */
 	couponDiscountAmount: {
 		type: Number,
 		default: 0,
@@ -2095,11 +2095,12 @@ const isSalesOrder = computed(() => props.targetDoctype === "Sales Order");
 
 // Check if customer is in Friends and Family group
 const isFriendsAndFamily = computed(() => {
-	console.log(props.customer)
 	const customerObj = typeof props.customer === 'object' ? props.customer : null
-	console.log(customerObj?.customer_group)
 	return customerObj?.customer_group === 'Friends & Family'
 })
+
+// Reason the cashier enters for a Friends and Family discount (required, see completePayment())
+const discountDescription = ref("")
 
 // Column refs for height matching
 const rightColumnRef = ref(null);
@@ -2637,22 +2638,22 @@ const calculatedAdditionalDiscount = computed(() => {
 	return roundCurrency(localAdditionalDiscount.value);
 });
 
-// Portion of discountAmount attributable to the applied coupon — shown as its
-// own "Coupon Discount" line. Clamped to discountAmount so it can never exceed
-// the real total (e.g. if a manual discount edit has since superseded it).
+// Portion of discountAmount attributable to the applied coupon(s) — shown as
+// one combined "Coupon Discount" line. Clamped to discountAmount so it can
+// never exceed the real total (e.g. if a manual discount edit has since superseded it).
 const displayCouponDiscount = computed(() => {
-	if (!props.appliedCoupon) return 0;
+	if (!props.appliedCoupons.length) return 0;
 	return Math.min(Math.max(props.couponDiscountAmount || 0, 0), props.discountAmount || 0);
 });
 
-// Remaining discount not attributable to the coupon (item-level/manual).
+// Remaining discount not attributable to coupons (item-level/manual).
 const displayOtherDiscount = computed(() => {
 	return Math.max((props.discountAmount || 0) - displayCouponDiscount.value, 0);
 });
 
 const couponDiscountLabel = computed(() => {
-	const code = props.appliedCoupon?.code || props.appliedCoupon?.name;
-	return code ? __("Coupon Discount ({0})", [code]) : __("Coupon Discount");
+	const codes = props.appliedCoupons.map((c) => c.code || c.name).filter(Boolean);
+	return codes.length ? __("Coupon Discount ({0})", [codes.join(", ")]) : __("Coupon Discount");
 });
 
 const remainingAmount = computed(() => {
@@ -3566,6 +3567,7 @@ watch(
 			// Reset approval state when dialog closes
 			additionalDiscountApprovalPending.value = false
 			additionalDiscountApprovalGranted.value = false
+			discountDescription.value = ""
 		}
 	}
 );

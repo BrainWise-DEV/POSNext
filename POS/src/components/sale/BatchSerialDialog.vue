@@ -309,6 +309,7 @@ import { useToast } from "@/composables/useToast"
 import { formatCurrency as formatCurrencyUtil } from "@/utils/currency"
 import { getCachedBatchData, getCachedSerialData } from "@/utils/offline/items"
 import { isOffline } from "@/utils/offline"
+import { sortBatchesFifo, mapWarehouseBatches } from "@/utils/batchAllocator"
 
 const shiftStore = usePOSShiftStore()
 const { showError } = useToast()
@@ -370,18 +371,6 @@ const batchPricesResource = createResource({
 	auto: false,
 })
 
-function mapWarehouseBatches(batchNoData) {
-	if (!Array.isArray(batchNoData)) return []
-	return batchNoData.map((batch) => ({
-		batch_no: batch.batch_no,
-		qty: batch.batch_qty ?? batch.qty ?? 0,
-		expiry_date: batch.expiry_date,
-		manufacturing_date: batch.manufacturing_date,
-		msp: Number(batch.msp) || 0,
-		mrp: Number(batch.mrp) || 0,
-	}))
-}
-
 async function attachBatchPrices(batches) {
 	if (!batches.length || !props.item?.item_code) return batches
 
@@ -389,7 +378,7 @@ async function attachBatchPrices(batches) {
 		const result = await batchPricesResource.submit({
 			item_code: props.item.item_code,
 			batch_nos: JSON.stringify(batches.map((b) => b.batch_no)),
-			price_list: "Standard Selling",
+			price_list: shiftStore.currentProfile?.selling_price_list || "Standard Selling",
 			uom: props.item.uom || props.item.stock_uom,
 		})
 		const priceMap = result?.message || result || {}
@@ -566,6 +555,11 @@ function handleConfirm() {
 			result.rate = selectedBatch.value.msp
 			result.price_list_rate = selectedBatch.value.msp
 		}
+		// Net-available qty for the chosen batch, and the full FIFO-sorted
+		// batch list, so the cart can auto-split overflow onto the next
+		// batch(es) if the cashier later raises this line's quantity.
+		result.actual_batch_qty = selectedBatch.value.qty || 0
+		result.available_batches = sortBatchesFifo(warehouseBatches.value)
 	}
 
 	if (props.item?.has_serial_no) {
