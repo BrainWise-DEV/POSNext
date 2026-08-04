@@ -1759,13 +1759,36 @@ def submit_invoice(invoice=None, data=None):
         #         _set_payment_accounts(invoice_doc.payments, invoice_doc.company, invoice_doc.customer)
 
         # Save before submit
+        # invoice_doc.flags.ignore_permissions = True
+        # frappe.flags.ignore_account_permission = True
+        # invoice_doc.save()
+
+        # Submit invoice
+        # invoice_doc.submit()
+        # Submit invoice
+        # Save before submit
         invoice_doc.flags.ignore_permissions = True
         frappe.flags.ignore_account_permission = True
         invoice_doc.save()
+        try:
+            invoice_doc.submit()
 
-        # Submit invoice
-        invoice_doc.submit()
-
+            invoice_submitted = True
+        except Exception:
+            frappe.db.rollback()
+            if (
+                doctype == "Sales Invoice"
+                and invoice_doc.name
+                and frappe.db.exists("Sales Invoice", invoice_doc.name)
+            ):
+                frappe.delete_doc(
+                    "Sales Invoice",
+                    invoice_doc.name,
+                    force=True,
+                    ignore_permissions=True,
+                )
+                frappe.db.commit()
+            raise
         # Create journal entries for wallet/customer balance payments
         if invoice_doc.get("payments"):
             for payment in invoice_doc.payments:
@@ -1951,11 +1974,17 @@ def get_invoices(pos_profile, limit=20, start=0):
     if not pos_profile:
         frappe.throw(_("POS Profile is required"))
 
-	limit = cint(limit) or 100
-	start = cint(start) or 0
+    limit = cint(limit) or 100
+    start = cint(start) or 0
 
-	# Check if user has access to this POS Profile
-	has_access = frappe.db.exists("POS Profile User", {"parent": pos_profile, "user": frappe.session.user})
+    # Check if user has access to this POS Profile
+    has_access = frappe.db.exists(
+        "POS Profile User",
+        {
+            "parent": pos_profile,
+            "user": frappe.session.user,
+        },
+    )
 
     if not has_access and not frappe.has_permission("Sales Invoice", "read"):
         frappe.throw(_("You don't have access to this POS Profile"))

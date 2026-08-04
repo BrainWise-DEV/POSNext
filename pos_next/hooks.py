@@ -49,9 +49,10 @@ _asset_version = get_build_version()
 
 # include js in doctype views
 doctype_js = {
-	"Customer": "public/js/customer.js",
-	"Pricing Rule": "public/js/pricing_rule.js",
-	"Promotional Scheme": "public/js/promotional_scheme.js",
+    "Customer": "public/js/customer.js",
+    "Pricing Rule": "public/js/pricing_rule.js",
+    "Promotional Scheme": "public/js/promotional_scheme.js",
+    "Payment Entry": "public/js/payment_entry.js",
 }
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
@@ -156,6 +157,7 @@ doc_events = {
 			"pos_next.api.sales_invoice_hooks.validate",
 			"pos_next.api.wallet.validate_wallet_payment",
 			"pos_next.overrides.pricing_rule.apply_min_max_price_discounts",
+            "pos_next.overrides.sales_invoice_shift.set_opening_shift",
 		],
 		"before_cancel": "pos_next.api.sales_invoice_hooks.before_cancel",
 		"on_submit": [
