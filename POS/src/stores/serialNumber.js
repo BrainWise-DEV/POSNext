@@ -11,6 +11,11 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import { call } from "@/utils/apiWrapper";
+import {
+	consumeCachedSerials,
+	persistItemBatchSerialData,
+	returnCachedSerials,
+} from "@/utils/offline/items";
 import { logger } from "@/utils/logger";
 
 const log = logger.create("SerialNumber");
@@ -107,6 +112,10 @@ export const useSerialNumberStore = defineStore("serialNumber", () => {
 			});
 
 			log.success(`Loaded ${serials.length} serials for ${itemCode}`);
+
+			// Persist for offline batch/serial selection
+			persistItemBatchSerialData(itemCode, { serial_no_data: serials }).catch(() => {});
+
 			return serials;
 		} catch (error) {
 			log.error(`Failed to fetch serials for ${itemCode}`, error);
@@ -133,6 +142,8 @@ export const useSerialNumberStore = defineStore("serialNumber", () => {
 		);
 
 		cached.serials = cached.serials.filter((s) => !serialsToRemove.has(s.serial_no));
+
+		consumeCachedSerials(itemCode, serialNumbers).catch(() => {});
 
 		log.info(`Consumed ${serialsToRemove.size} serials for ${itemCode}`);
 	};
@@ -167,6 +178,8 @@ export const useSerialNumberStore = defineStore("serialNumber", () => {
 		cached.serials.sort((a, b) =>
 			a.serial_no.localeCompare(b.serial_no, undefined, { numeric: true })
 		);
+
+		returnCachedSerials(itemCode, serialNumbers).catch(() => {});
 
 		log.info(`Returned ${serialsToReturn.length} serials for ${itemCode}`);
 	};
