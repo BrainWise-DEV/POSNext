@@ -10,7 +10,10 @@ import frappe
 from frappe import _
 from frappe.utils import cint, flt
 
-from pos_next.services.miraaya_loyalty import get_lp_balance, is_magento_loyalty_mode
+from pos_next.integrations.registry import (
+	get_external_loyalty_balance,
+	is_external_loyalty_mode,
+)
 
 
 def validate_wallet_payment(doc, method=None):
@@ -47,7 +50,7 @@ def process_loyalty_to_wallet(doc, method=None):
 	Convert earned loyalty points to wallet balance after invoice submission.
 	Called during on_submit hook.
 	"""
-	if is_magento_loyalty_mode(doc.pos_profile):
+	if is_external_loyalty_mode(doc.pos_profile):
 		return
 
 	if not doc.is_pos or doc.is_return:
@@ -208,9 +211,9 @@ def get_customer_wallet_balance(customer, company=None, exclude_invoice=None, po
 	Returns:
 		float: Available wallet balance
 	"""
-	if is_magento_loyalty_mode(pos_profile):
+	if is_external_loyalty_mode(pos_profile):
 		try:
-			balance = get_lp_balance(customer)
+			balance = get_external_loyalty_balance(customer)
 			return flt(balance.get("balance_iqd")) if balance else 0.0
 		except Exception:
 			frappe.log_error(frappe.get_traceback(), "Magento LP Balance Error")
@@ -305,7 +308,7 @@ def create_wallet_on_customer_insert(doc, method=None):
 	if not pos_profile:
 		return
 
-	if is_magento_loyalty_mode(pos_profile):
+	if is_external_loyalty_mode(pos_profile):
 		return
 
 	pos_settings = get_pos_settings(pos_profile)
@@ -458,11 +461,11 @@ def get_wallet_info(customer, company, pos_profile=None):
 	if not result["wallet_enabled"]:
 		return result
 
-	if is_magento_loyalty_mode(pos_profile):
+	if is_external_loyalty_mode(pos_profile):
 		result["magento_loyalty"] = True
 		result["wallet_exists"] = True
 		try:
-			balance = get_lp_balance(customer)
+			balance = get_external_loyalty_balance(customer)
 			result["wallet_balance"] = flt(balance.get("balance_iqd"))
 			result["balance_points"] = flt(balance.get("balance_points"))
 		except Exception as exc:

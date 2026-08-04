@@ -2230,14 +2230,14 @@ def submit_invoice(invoice=None, data=None):
 		invoice_doc.submit()
 		invoice_submitted = True
 
-		from pos_next.services.miraaya_loyalty import is_magento_loyalty_mode
+		from pos_next.integrations.registry import is_external_loyalty_mode
 
-		magento_loyalty_mode = is_magento_loyalty_mode(pos_profile)
+		external_loyalty_mode = is_external_loyalty_mode(pos_profile)
 
 		# Handle wallet transaction reversal for returns
 		wallet_reversal_ok = False
 		if (
-			not magento_loyalty_mode
+			not external_loyalty_mode
 			and invoice_doc.get("is_return")
 			and invoice_doc.get("return_against")
 		):
@@ -2270,7 +2270,7 @@ def submit_invoice(invoice=None, data=None):
 		# Credit return amount to customer wallet when "Add to Customer Credit Balance" is enabled.
 		# Only proceed if the wallet reversal above succeeded (or was not needed) to
 		# avoid double-crediting the customer when reversal fails.
-		if invoice_doc.get("is_return") and not magento_loyalty_mode:
+		if invoice_doc.get("is_return") and not external_loyalty_mode:
 			add_to_customer_balance = invoice.get("add_to_customer_balance")
 			has_return_against = bool(invoice_doc.get("return_against"))
 			if add_to_customer_balance and (wallet_reversal_ok or not has_return_against):
@@ -2317,18 +2317,6 @@ def submit_invoice(invoice=None, data=None):
 					),
 					alert=True,
 					indicator="orange",
-				)
-
-		# Handle Magento LP redemption after successful submission
-		if not invoice_doc.get("is_return"):
-			try:
-				from pos_next.api.magento_loyalty import redeem_magento_lp_after_submit
-
-				redeem_magento_lp_after_submit(invoice_doc)
-			except Exception as lp_redeem_error:
-				frappe.log_error(
-					title="Magento LP Redeem Error",
-					message=f"Invoice: {invoice_doc.name}, Error: {lp_redeem_error!s}\n{frappe.get_traceback()}",
 				)
 
 		# Log manual rate edits for audit trail (only after successful submission)

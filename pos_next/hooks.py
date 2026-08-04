@@ -166,8 +166,6 @@ doc_events = {
 		"on_submit": [
 			"pos_next.realtime_events.emit_stock_update_event",
 			"pos_next.api.wallet.process_loyalty_to_wallet",
-			"pos_next.api.magento_loyalty.redeem_magento_lp_on_submit",
-			"pos_next.api.magento_loyalty.add_magento_lp_on_submit",
 			"pos_next.api.sales_invoice_hooks.record_one_time_offer_usage",
 		],
 		"on_cancel": [
@@ -289,6 +287,13 @@ scheduler_events = {
 # default_log_clearing_doctypes = {
 # 	"Logging DocType Name": 30  # days to retain logs
 # }
+
+# Extension points consumed by POS Next, implemented by optional apps
+pos_next_loyalty_provider = []
+pos_next_bootstrap_settings = []
+pos_next_customer_validators = []
+pos_next_customer_prepare = []
+pos_next_customer_after_insert = []
 
 
 website_route_rules = [
