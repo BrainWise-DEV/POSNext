@@ -27,7 +27,11 @@ export function useInvoice() {
 	const posProfile = ref(null);
 	const posOpeningShift = ref(null); // POS Opening Shift name
 	const additionalDiscount = ref(0);
-	const couponCode = ref(null);
+	// Codes of every coupon currently stacked into additionalDiscount.
+	// Kept as a list (instead of a single code) so multiple coupons can be
+	// applied at once; sent to the backend joined by comma.
+	const couponCode = ref([]);
+	const customDiscountDescription = ref(null); // Friends & Family custom discount note
 	const taxRules = ref([]); // Tax rules from POS Profile
 	const taxInclusive = ref(false); // Tax inclusive setting from POS Settings
 
@@ -295,6 +299,9 @@ export function useInvoice() {
 				has_batch_no: item.has_batch_no || 0,
 				has_serial_no: item.has_serial_no || 0,
 				batch_no: item.batch_no,
+				// Full batch list for this item, used to auto-split quantity across
+				// batches if this line's qty is later raised above actual_batch_qty
+				available_batches: item.available_batches || null,
 				serial_no: item.serial_no,
 				item_uoms: item.item_uoms || [], // Available UOMs for this item
 				// Add item_group and brand for offer eligibility checking
@@ -331,21 +338,31 @@ export function useInvoice() {
 	}
 
 	/**
+	 * Matches a cart row by item_code, optionally narrowed by uom and/or
+	 * batch_no. batch_no must be checked whenever provided so that two rows
+	 * for the same item_code+uom on different batches (from auto-split)
+	 * don't get confused with one another.
+	 */
+	function matchesCartRow(row, itemCode, uom, batchNo) {
+		if (row.item_code !== itemCode) return false;
+		if (uom && row.uom !== uom) return false;
+		if (batchNo && row.batch_no !== batchNo) return false;
+		return true;
+	}
+
+	/**
 	 * Removes an item from the invoice
 	 * @param {string} itemCode - The item code to remove
 	 * @param {string|null} uom - Optional UOM to match when same item exists with different UOMs.
 	 *                            If provided, only removes the item with matching item_code AND uom.
 	 *                            If null, removes the first item matching item_code.
+	 * @param {string|null} batchNo - Optional batch_no to match when the same item+uom exists
+	 *                            across multiple batches (e.g. after an auto-split).
 	 */
-	function removeItem(itemCode, uom = null) {
-		let itemToRemove;
-		if (uom) {
-			itemToRemove = invoiceItems.value.find(
-				(i) => i.item_code === itemCode && i.uom === uom
-			);
-		} else {
-			itemToRemove = invoiceItems.value.find((i) => i.item_code === itemCode);
-		}
+	function removeItem(itemCode, uom = null, batchNo = null) {
+		const itemToRemove = invoiceItems.value.find((i) =>
+			matchesCartRow(i, itemCode, uom, batchNo)
+		);
 
 		if (itemToRemove) {
 			// Update cache incrementally (subtract removed item values)
@@ -366,13 +383,9 @@ export function useInvoice() {
 			}
 		}
 
-		if (uom) {
-			invoiceItems.value = invoiceItems.value.filter(
-				(i) => !(i.item_code === itemCode && i.uom === uom)
-			);
-		} else {
-			invoiceItems.value = invoiceItems.value.filter((i) => i.item_code !== itemCode);
-		}
+		invoiceItems.value = invoiceItems.value.filter(
+			(i) => !matchesCartRow(i, itemCode, uom, batchNo)
+		);
 	}
 
 	/**
@@ -382,14 +395,11 @@ export function useInvoice() {
 	 * @param {string|null} uom - Optional UOM to match when same item exists with different UOMs.
 	 *                            If provided, only updates the item with matching item_code AND uom.
 	 *                            If null, updates the first item matching item_code.
+	 * @param {string|null} batchNo - Optional batch_no to match when the same item+uom exists
+	 *                            across multiple batches (e.g. after an auto-split).
 	 */
-	function updateItemQuantity(itemCode, quantity, uom = null) {
-		let item;
-		if (uom) {
-			item = invoiceItems.value.find((i) => i.item_code === itemCode && i.uom === uom);
-		} else {
-			item = invoiceItems.value.find((i) => i.item_code === itemCode);
-		}
+	function updateItemQuantity(itemCode, quantity, uom = null, batchNo = null) {
+		let item = invoiceItems.value.find((i) => matchesCartRow(i, itemCode, uom, batchNo));
 
 		if (item) {
 			// Store old values before update for incremental cache adjustment
@@ -542,14 +552,21 @@ export function useInvoice() {
 
 	function applyDiscount(discount) {
 		/**
-		 * Apply discount as Additional Discount (grand total level)
-		 * This prevents conflicts with item-level pricing rules
-		 * @param {Object} discount - { percentage, amount, name, code, apply_on }
+		 * Apply discount as Additional Discount (grand total level).
+		 * This prevents conflicts with item-level pricing rules.
+		 *
+		 * Coupons STACK: this adds the new coupon's amount on top of whatever
+		 * is already in additionalDiscount (e.g. from previously applied
+		 * coupons) instead of replacing it. Each coupon's own amount is
+		 * calculated independently against the original total by the caller
+		 * (see CouponDialog's getCouponBaseAmount) — this function just adds
+		 * that already-computed amount into the shared bucket.
+		 *
+		 * @param {Object} discount - { percentage, amount, name, code, apply_on, base_amount }
 		 */
 		if (!discount) return;
 
-		// Store coupon code for tracking
-		couponCode.value = discount.code || discount.name;
+		const code = discount.code || discount.name;
 
 		const baseAmount =
 			typeof discount.base_amount === "number" ? discount.base_amount : subtotal.value;
@@ -567,9 +584,14 @@ export function useInvoice() {
 			discountAmount = 0;
 		}
 
-		// Apply discount as Additional Discount on grand total
-		// This preserves item-level pricing rules while applying coupon discount
-		additionalDiscount.value = discountAmount;
+		// Add to the existing discount instead of overwriting it, so multiple
+		// coupons can be stacked together.
+		additionalDiscount.value = roundCurrency((additionalDiscount.value || 0) + discountAmount);
+
+		// Track this coupon's code (case-insensitive de-dup) for the backend payload
+		if (code && !couponCode.value.some((c) => c.toLowerCase() === code.toLowerCase())) {
+			couponCode.value = [...couponCode.value, code];
+		}
 
 		// Rebuild cache after applying additional discount
 		rebuildIncrementalCache();
@@ -578,15 +600,32 @@ export function useInvoice() {
 		return discountAmount;
 	}
 
-	function removeDiscount() {
+	function removeDiscount(discount = null) {
 		/**
-		 * Remove additional discount (coupon discount)
+		 * Remove a coupon discount.
+		 * @param {Object|null} discount - The specific coupon to remove ({ code, name, amount }).
+		 *   Omit to clear every stacked coupon and zero out the discount entirely.
 		 */
-		// Clear additional discount
-		additionalDiscount.value = 0;
+		if (!discount) {
+			additionalDiscount.value = 0;
+			couponCode.value = [];
+			rebuildIncrementalCache();
+			return;
+		}
 
-		// Clear coupon code
-		couponCode.value = null;
+		const code = discount.code || discount.name;
+		const amount = discount.amount || 0;
+
+		// Subtract just this coupon's share; clamp so float drift can't push
+		// the bucket negative.
+		additionalDiscount.value = Math.max(
+			0,
+			roundCurrency((additionalDiscount.value || 0) - amount)
+		);
+
+		if (code) {
+			couponCode.value = couponCode.value.filter((c) => c.toLowerCase() !== code.toLowerCase());
+		}
 
 		// Rebuild cache after removing discount
 		rebuildIncrementalCache();
@@ -970,7 +1009,9 @@ export function useInvoice() {
 			items: formatItemsForSubmission(rawItems),
 			payments: invoicePayments,
 			discount_amount: additionalDiscount.value || 0,
-			coupon_code: couponCode.value,
+			// Multiple stacked coupons are sent as one comma-separated string;
+			// a single coupon (or none) round-trips exactly as before.
+			coupon_code: couponCode.value.join(","),
 			is_pos: 1,
 			update_stock: 1,
 		};
@@ -1037,7 +1078,9 @@ export function useInvoice() {
 					items: formatItemsForSubmission(rawItems),
 					payments: invoicePayments,
 					discount_amount: additionalDiscount.value || 0,
-					coupon_code: couponCode.value,
+					// Multiple stacked coupons are sent as one comma-separated string;
+					// a single coupon (or none) round-trips exactly as before.
+					coupon_code: couponCode.value.join(","),
 					is_pos: 1,
 					update_stock: 1, // Critical: Ensures stock is updated
 				};
@@ -1214,7 +1257,8 @@ export function useInvoice() {
 		invoiceItems.value = [];
 		payments.value = [];
 		additionalDiscount.value = 0;
-		couponCode.value = null;
+		couponCode.value = [];
+		customDiscountDescription.value = null;
 
 		// Reset incremental cache
 		_cachedSubtotal.value = 0;
@@ -1241,7 +1285,8 @@ export function useInvoice() {
 		invoiceItems.value = [];
 		payments.value = [];
 		additionalDiscount.value = 0;
-		couponCode.value = null;
+		couponCode.value = [];
+		customDiscountDescription.value = null;
 
 		// Reset incremental cache
 		_cachedSubtotal.value = 0;

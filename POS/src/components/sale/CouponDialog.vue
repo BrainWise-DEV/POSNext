@@ -21,16 +21,91 @@
 								{{ __("Have a coupon code?") }}
 							</p>
 							<p class="text-xs text-blue-700 mt-0.5">
-								{{ __("Enter your promotional or gift card code below") }}
+								{{ __("Enter your promotional or gift card code below. You can apply more than one.") }}
 							</p>
 						</div>
 					</div>
 				</div>
 
-				<!-- Coupon Code Input -->
-				<div v-if="!appliedDiscount">
+				<!-- Applied Coupons - one card per stacked coupon, each removable on its own -->
+				<div v-if="appliedCoupons.length > 0" class="flex flex-col gap-2">
+					<div class="flex items-center justify-between">
+						<label class="block text-sm font-medium text-gray-700 text-start">
+							{{ __("Applied Coupons ({0})", [appliedCoupons.length]) }}
+						</label>
+						<button
+							v-if="appliedCoupons.length > 1"
+							type="button"
+							class="text-xs font-medium text-red-600 hover:text-red-700"
+							@click="removeAllCoupons"
+						>
+							{{ __("Remove All") }}
+						</button>
+					</div>
+
+					<div
+						v-for="coupon in appliedCoupons"
+						:key="coupon.code || coupon.name"
+						class="bg-green-50 border-2 border-green-500 rounded-lg p-3"
+					>
+						<div class="flex items-center justify-between gap-3">
+							<div class="flex items-center gap-2 min-w-0">
+								<div
+									class="w-7 h-7 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0"
+								>
+									<svg
+										class="w-4 h-4 text-green-600"
+										fill="currentColor"
+										viewBox="0 0 20 20"
+									>
+										<path
+											fill-rule="evenodd"
+											d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+											clip-rule="evenodd"
+										/>
+									</svg>
+								</div>
+								<div class="min-w-0">
+									<p class="text-sm font-bold text-gray-900 truncate">
+										{{ coupon.code || coupon.name }}
+									</p>
+									<p class="text-xs text-green-700 font-medium">
+										-{{ formatCurrency(coupon.amount) }}
+									</p>
+								</div>
+							</div>
+							<button
+								type="button"
+								class="text-gray-400 hover:text-red-600 flex-shrink-0 p-1"
+								:aria-label="__('Remove {0}', [coupon.code || coupon.name])"
+								@click="removeCoupon(coupon)"
+							>
+								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										stroke-width="2"
+										d="M6 18L18 6M6 6l12 12"
+									/>
+								</svg>
+							</button>
+						</div>
+					</div>
+
+					<!-- Combined total, only useful once 2+ coupons are stacked -->
+					<div
+						v-if="appliedCoupons.length > 1"
+						class="flex justify-between items-center px-1 text-sm"
+					>
+						<span class="text-gray-600">{{ __("Total Coupon Discount") }}</span>
+						<span class="font-bold text-green-600">-{{ formatCurrency(totalCouponDiscount) }}</span>
+					</div>
+				</div>
+
+				<!-- Coupon Code Input - always available so more coupons can be stacked -->
+				<div>
 					<label class="block text-sm font-medium text-gray-700 mb-2 text-start">
-						{{ __("Coupon Code") }}
+						{{ appliedCoupons.length > 0 ? __("Add Another Coupon") : __("Coupon Code") }}
 					</label>
 					<div class="flex gap-2">
 						<Input
@@ -66,8 +141,8 @@
 					<p class="text-xs text-gray-500 mt-1">{{ __("Code is case-insensitive") }}</p>
 				</div>
 
-				<!-- My Gift Cards -->
-				<div v-if="giftCards.length > 0 && !appliedDiscount">
+				<!-- My Gift Cards - already-applied cards are hidden from this list -->
+				<div v-if="availableGiftCards.length > 0">
 					<label class="block text-sm font-medium text-gray-700 mb-2 text-start">
 						<div class="flex items-center gap-2">
 							<svg
@@ -82,12 +157,12 @@
 									clip-rule="evenodd"
 								/>
 							</svg>
-							<span>{{ __("My Gift Cards ({0})", [giftCards.length]) }}</span>
+							<span>{{ __("My Gift Cards ({0})", [availableGiftCards.length]) }}</span>
 						</div>
 					</label>
 					<div class="flex flex-col gap-2 max-h-60 overflow-y-auto pe-1">
 						<div
-							v-for="card in giftCards"
+							v-for="card in availableGiftCards"
 							:key="card.coupon_code"
 							@click="applyGiftCard(card)"
 							class="bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-lg p-3 cursor-pointer hover:shadow-md hover:border-purple-400 transition-all"
@@ -139,47 +214,6 @@
 					</div>
 				</div>
 
-				<!-- Applied Coupon Preview -->
-				<div
-					v-if="appliedDiscount"
-					class="bg-green-50 border-2 border-green-500 rounded-lg p-4"
-				>
-					<div class="flex items-center gap-2 mb-3">
-						<div
-							class="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center"
-						>
-							<svg
-								class="w-5 h-5 text-green-600"
-								fill="currentColor"
-								viewBox="0 0 20 20"
-							>
-								<path
-									fill-rule="evenodd"
-									d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-									clip-rule="evenodd"
-								/>
-							</svg>
-						</div>
-						<h4 class="text-sm font-bold text-green-900">
-							{{ __("Coupon Applied Successfully!") }}
-						</h4>
-					</div>
-					<div class="bg-white rounded-lg p-3">
-						<div class="flex justify-between items-center mb-2">
-							<span class="text-xs text-gray-600">{{ __("Coupon Code") }}</span>
-							<span class="text-sm font-bold text-gray-900">{{
-								appliedDiscount.code
-							}}</span>
-						</div>
-						<div class="flex justify-between items-center">
-							<span class="text-xs text-gray-600">{{ __("Discount Amount") }}</span>
-							<span class="text-lg font-bold text-green-600">
-								-{{ formatCurrency(appliedDiscount.amount) }}
-							</span>
-						</div>
-					</div>
-				</div>
-
 				<!-- Error Message -->
 				<div v-if="errorMessage" class="bg-red-50 border border-red-200 rounded-lg p-3">
 					<div class="flex items-start gap-2">
@@ -200,31 +234,10 @@
 			</div>
 		</template>
 		<template #actions>
-			<div class="flex justify-between items-center w-full gap-2">
-				<Button
-					v-if="appliedDiscount"
-					variant="subtle"
-					theme="red"
-					@click="removeDiscount"
-					class="flex-shrink-0"
-				>
-					<template #prefix>
-						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								stroke-width="2"
-								d="M6 18L18 6M6 6l12 12"
-							/>
-						</svg>
-					</template>
-					{{ __("Remove") }}
+			<div class="flex justify-end w-full">
+				<Button variant="subtle" @click="show = false">
+					{{ __("Close") }}
 				</Button>
-				<div class="flex gap-2 ms-auto">
-					<Button variant="subtle" @click="show = false">
-						{{ __("Close") }}
-					</Button>
-				</div>
 			</div>
 		</template>
 	</Dialog>
@@ -233,13 +246,13 @@
 <script setup>
 import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency";
 import { Button, Dialog, Input, createResource } from "frappe-ui";
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { useInvoice } from "@/composables/useInvoice";
 import { useToast } from "@/composables/useToast";
 
 // Get calculateDiscountAmount helper from composable
 const { calculateDiscountAmount } = useInvoice();
-const { showSuccess, showError, showWarning } = useToast();
+const { showError, showWarning } = useToast();
 
 const props = defineProps({
 	modelValue: Boolean,
@@ -264,9 +277,11 @@ const props = defineProps({
 		type: String,
 		default: DEFAULT_CURRENCY,
 	},
-	appliedCoupon: {
-		type: Object,
-		default: null,
+	// Every coupon currently stacked on the cart. Each entry: { name, code,
+	// percentage, amount, type, coupon, apply_on, base_amount }.
+	appliedCoupons: {
+		type: Array,
+		default: () => [],
 	},
 });
 
@@ -275,9 +290,20 @@ const emit = defineEmits(["update:modelValue", "discount-applied", "discount-rem
 const show = ref(props.modelValue);
 const couponCode = ref("");
 const giftCards = ref([]);
-const appliedDiscount = ref(null);
 const applying = ref(false);
 const errorMessage = ref("");
+
+// Gift cards the customer already applied shouldn't be offered again.
+const availableGiftCards = computed(() => {
+	const appliedCodes = new Set(
+		props.appliedCoupons.map((c) => (c.code || c.name || "").toUpperCase())
+	);
+	return giftCards.value.filter((card) => !appliedCodes.has((card.coupon_code || "").toUpperCase()));
+});
+
+const totalCouponDiscount = computed(() =>
+	props.appliedCoupons.reduce((sum, c) => sum + (Number.parseFloat(c.amount) || 0), 0)
+);
 
 // Resource to load gift cards
 const giftCardsResource = createResource({
@@ -315,8 +341,6 @@ watch(
 			loadGiftCards();
 			errorMessage.value = "";
 			couponCode.value = "";
-			// Sync with external state
-			appliedDiscount.value = props.appliedCoupon;
 		}
 	}
 );
@@ -324,14 +348,6 @@ watch(
 watch(show, (val) => {
 	emit("update:modelValue", val);
 });
-
-// Watch for external coupon removal
-watch(
-	() => props.appliedCoupon,
-	(val) => {
-		appliedDiscount.value = val;
-	}
-);
 
 async function loadGiftCards() {
 	if (!props.customer || !props.company) return;
@@ -347,17 +363,41 @@ function applyGiftCard(card) {
 	applyCoupon();
 }
 
-function getCouponBaseAmount(coupon) {
-	const grandTotal = Number.parseFloat(props.grandTotal || 0);
-	const taxAmount = Number.parseFloat(props.taxAmount || 0);
-	const netTotal = Math.max(grandTotal - taxAmount, 0);
+function isAlreadyApplied(code) {
+	const normalized = code.trim().toUpperCase();
+	return props.appliedCoupons.some(
+		(c) => (c.code || c.name || "").toUpperCase() === normalized
+	);
+}
 
-	return coupon.apply_on === "Grand Total" ? grandTotal : netTotal;
+function getCouponBaseAmount(coupon) {
+	// Every coupon is calculated independently against the ORIGINAL
+	// (undiscounted) total, not against whatever's left after previously
+	// applied coupons. So "30% off + 20% off" on a 1000 bill is 300 + 200 =
+	// 500 off, never 300 + 20%-of-700.
+	//
+	// props.grandTotal already has every currently-applied coupon's amount
+	// subtracted out of it, so add that back to recover the pre-coupon
+	// baseline. taxAmount is unaffected by coupons (it's computed purely
+	// from item rows), so it needs no adjustment.
+	const originalGrandTotal =
+		Number.parseFloat(props.grandTotal || 0) + totalCouponDiscount.value;
+	const taxAmount = Number.parseFloat(props.taxAmount || 0);
+	const originalNetTotal = Math.max(originalGrandTotal - taxAmount, 0);
+
+	return coupon.apply_on === "Grand Total" ? originalGrandTotal : originalNetTotal;
 }
 
 async function applyCoupon() {
-	if (!couponCode.value.trim()) {
+	const enteredCode = couponCode.value.trim();
+	if (!enteredCode) {
 		errorMessage.value = __("Please enter a coupon code");
+		return;
+	}
+
+	if (isAlreadyApplied(enteredCode)) {
+		errorMessage.value = __("This coupon is already applied");
+		showWarning(errorMessage.value);
 		return;
 	}
 
@@ -411,9 +451,17 @@ async function applyCoupon() {
 		// Clamp discount to the selected coupon base to prevent negative totals
 		discountAmount = Math.min(discountAmount, baseAmount);
 
-		appliedDiscount.value = {
+		// Since every coupon is calculated independently against the original
+		// total, stacking several large percentage coupons could otherwise add
+		// up to more than the bill itself. Cap this coupon to whatever
+		// headroom is left after coupons already applied, so the combined
+		// discount can never exceed the original total (grand total can't go negative).
+		const remainingHeadroom = Math.max(baseAmount - totalCouponDiscount.value, 0);
+		discountAmount = Math.min(discountAmount, remainingHeadroom);
+
+		const appliedDiscount = {
 			name: coupon.coupon_name || coupon.coupon_code,
-			code: couponCode.value.toUpperCase(),
+			code: enteredCode.toUpperCase(),
 			percentage: coupon.discount_type === "Percentage" ? coupon.discount_percentage : 0,
 			amount: discountAmount,
 			type: coupon.discount_type,
@@ -422,10 +470,13 @@ async function applyCoupon() {
 			base_amount: baseAmount,
 		};
 
-		emit("discount-applied", appliedDiscount.value);
+		// The cart store shows the "applied successfully" toast once it
+		// actually accepts the coupon (it may still reject a duplicate).
+		emit("discount-applied", appliedDiscount);
 
-		showSuccess(__("{0} applied successfully", [couponCode.value.toUpperCase()]));
-
+		// Clear the input so the next coupon can be typed straight away, but
+		// keep the dialog open so multiple coupons can be added in one go.
+		couponCode.value = "";
 		errorMessage.value = "";
 	} catch (error) {
 		console.error("Error applying coupon:", error);
@@ -436,10 +487,12 @@ async function applyCoupon() {
 	}
 }
 
-function removeDiscount() {
-	appliedDiscount.value = null;
-	emit("discount-removed");
-	showSuccess(__("Discount has been removed"));
+function removeCoupon(coupon) {
+	emit("discount-removed", coupon);
+}
+
+function removeAllCoupons() {
+	emit("discount-removed", null);
 }
 
 function formatCurrency(amount) {

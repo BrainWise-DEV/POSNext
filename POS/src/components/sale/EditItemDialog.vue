@@ -103,7 +103,8 @@
 															{{ __("Quantity") }}
 															<span
 																v-if="
-																	localItem?.is_resolved_barcode
+																	localItem?.is_resolved_barcode ||
+																	localItem?.has_batch_no
 																"
 																class="ms-1 text-xs text-amber-600"
 																>({{ __("Locked") }})</span
@@ -128,6 +129,23 @@
 																localItem?.is_resolved_barcode
 															"
 															class="w-full h-10 border border-amber-300 rounded-lg bg-amber-50 flex items-center justify-center"
+														>
+															<span
+																class="text-sm font-semibold text-amber-700"
+																>{{ localQuantity }}</span
+															>
+														</div>
+														<!-- For batch-tracked items, quantity is read-only here —
+														     use the +/- on the cart row instead, which
+														     auto-splits across batches when needed. -->
+														<div
+															v-else-if="localItem?.has_batch_no"
+															class="w-full h-10 border border-amber-300 rounded-lg bg-amber-50 flex items-center justify-center"
+															:title="
+																__(
+																	'Adjust quantity from the cart row — it will auto-split across batches if needed.'
+																)
+															"
 														>
 															<span
 																class="text-sm font-semibold text-amber-700"
@@ -219,7 +237,8 @@
 															{{ __("UOM") }}
 															<span
 																v-if="
-																	localItem?.is_resolved_barcode
+																	localItem?.is_resolved_barcode ||
+																	localItem?.has_batch_no
 																"
 																class="ms-1 text-xs text-amber-600"
 																>({{ __("Locked") }})</span
@@ -228,6 +247,17 @@
 														<!-- For resolved barcode items, UOM is read-only -->
 														<div
 															v-if="localItem?.is_resolved_barcode"
+															class="w-full h-10 border border-amber-300 rounded-lg bg-amber-50 flex items-center justify-center"
+														>
+															<span
+																class="text-sm font-semibold text-amber-700"
+																>{{ localUom }}</span
+															>
+														</div>
+														<!-- For batch-tracked items, UOM is locked to avoid
+														     merging separate batch rows into one. -->
+														<div
+															v-else-if="localItem?.has_batch_no"
 															class="w-full h-10 border border-amber-300 rounded-lg bg-amber-50 flex items-center justify-center"
 														>
 															<span

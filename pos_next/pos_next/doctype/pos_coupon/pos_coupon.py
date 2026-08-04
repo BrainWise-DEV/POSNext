@@ -113,6 +113,29 @@ def check_coupon_code(coupon_code, customer=None, company=None):
 	return res
 
 
+def parse_coupon_codes(coupon_code_value):
+	"""Split a coupon code field into a clean list of codes.
+
+	The POS frontend can stack multiple coupons on one cart and sends them as a
+	single comma-separated string (e.g. "SAVE20,WELCOME10") so the field stays a
+	plain string on the wire. This also transparently handles the common single
+	coupon case (no comma) and blank/None input.
+	"""
+	if not coupon_code_value:
+		return []
+
+	seen = set()
+	codes = []
+	for raw_code in str(coupon_code_value).split(","):
+		code = raw_code.strip()
+		if not code or code.upper() in seen:
+			continue
+		seen.add(code.upper())
+		codes.append(code)
+
+	return codes
+
+
 def _get_customer_coupon_usage_count(customer, coupon_code):
 	"""Count submitted coupon usage across POSNext's actual sales doctypes."""
 	used_count = 0

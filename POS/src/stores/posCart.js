@@ -4,7 +4,9 @@ import { usePOSSettingsStore } from "@/stores/posSettings";
 import { usePOSShiftStore } from "@/stores/posShift";
 import { parseError } from "@/utils/errorHandler";
 import { shouldValidateItemStock, checkStockAvailability } from "@/utils/stockValidator";
+import { allocateQuantity, fetchBatchesForItem } from "@/utils/batchAllocator";
 import { offlineState } from "@/utils/offline/offlineState";
+import { roundCurrency } from "@/utils/currency";
 import { useToast } from "@/composables/useToast";
 import { defineStore } from "pinia";
 import { computed, nextTick, ref, toRaw, watch } from "vue";
@@ -117,9 +119,13 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	const pendingItem = ref(null);
 	const pendingItemQty = ref(1);
 	const appliedOffers = ref([]);
-	const appliedCoupon = ref(null);
-	// Portion of additionalDiscount attributable to appliedCoupon, so the UI can
-	// show it as "Coupon Discount" instead of lumping it into the generic Discount line.
+	// Multiple coupons can be stacked on the same cart. Each entry has the
+	// same shape as before ({ name, code, percentage, amount, type, coupon,
+	// apply_on, base_amount }) — `amount` is that coupon's own contribution.
+	const appliedCoupons = ref([]);
+	// Combined discount from every applied coupon (sum of appliedCoupons[].amount),
+	// so the UI can show it as "Coupon Discount" instead of lumping it into the
+	// generic Discount line.
 	const couponDiscountAmount = ref(0);
 	const selectionMode = ref("uom"); // 'uom' or 'variant'
 	const currentDraftId = ref(null);
@@ -206,15 +212,29 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * Update item quantity with stock validation.
 	 * Wraps useInvoice.updateItemQuantity to enforce stock limits
 	 * when the user clicks +/- or types a new quantity.
+	 *
+	 * @param {string} itemCode
+	 * @param {number} quantity
+	 * @param {string|null} uom
+	 * @param {string|null} batchNo - Row to target when the same item+uom exists
+	 *        across multiple batches (e.g. after an auto-split).
 	 */
-	function updateItemQuantity(itemCode, quantity, uom = null) {
-		const item = uom
-			? invoiceItems.value.find((i) => i.item_code === itemCode && i.uom === uom)
-			: invoiceItems.value.find((i) => i.item_code === itemCode);
+	function updateItemQuantity(itemCode, quantity, uom = null, batchNo = null) {
+		const item = invoiceItems.value.find(
+			(i) =>
+				i.item_code === itemCode &&
+				(!uom || i.uom === uom) &&
+				(!batchNo || i.batch_no === batchNo)
+		);
 
-		if (!item) return baseUpdateItemQuantity(itemCode, quantity, uom);
+		if (!item) return baseUpdateItemQuantity(itemCode, quantity, uom, batchNo);
 
 		const newQty = Number.parseFloat(quantity) || 1;
+
+		if (item.has_batch_no) {
+			handleBatchQuantityUpdate(item, newQty);
+			return;
+		}
 
 		// Only validate when quantity is increasing
 		if (
@@ -229,7 +249,128 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			}
 		}
 
-		baseUpdateItemQuantity(itemCode, quantity, uom);
+		baseUpdateItemQuantity(itemCode, quantity, uom, batchNo);
+	}
+
+	// Generation counter guarding the async batch-availability fetch below —
+	// if the cashier triggers a second split attempt before the first
+	// resolves, the stale response is discarded rather than applied.
+	let batchSplitGeneration = 0;
+
+	/**
+	 * Handle a quantity change for a batch-tracked cart row. If the new
+	 * quantity still fits the row's own batch, it's just resized. If it
+	 * exceeds it, fetch fresh batch availability and auto-split the overflow
+	 * into additional row(s) on the next available batch(es) — so a cashier
+	 * can never end up with more quantity on one batch than actually exists,
+	 * and checkout doesn't fail on a negative-batch-qty error.
+	 *
+	 * @param {Object} item - the cart row being resized
+	 * @param {number} newQty - requested new total quantity for this line
+	 */
+	async function handleBatchQuantityUpdate(item, newQty) {
+		// Decreasing, or still within this row's last-known batch capacity —
+		// no split needed, no network round-trip needed.
+		if (newQty <= item.quantity || newQty <= (item.actual_batch_qty || 0)) {
+			baseUpdateItemQuantity(item.item_code, newQty, item.uom, item.batch_no);
+			return;
+		}
+
+		const generation = ++batchSplitGeneration;
+
+		let freshBatches = null;
+		try {
+			const shiftStore = usePOSShiftStore();
+			freshBatches = await fetchBatchesForItem({
+				itemCode: item.item_code,
+				posProfile: posProfile.value,
+				priceList: shiftStore.currentProfile?.selling_price_list || "Standard Selling",
+				uom: item.uom,
+			});
+		} catch (error) {
+			console.error("Error refreshing batch availability:", error);
+		}
+
+		// A newer split request has since started — discard this stale one.
+		if (generation !== batchSplitGeneration) return;
+
+		if (!freshBatches || !freshBatches.length) {
+			freshBatches = item.available_batches || [];
+		}
+
+		if (!freshBatches.length) {
+			// No batch data available at all (offline, fetch failed, nothing
+			// cached) — fall back to the old behavior: just resize.
+			baseUpdateItemQuantity(item.item_code, newQty, item.uom, item.batch_no);
+			return;
+		}
+
+		const { allocations, shortfall } = allocateQuantity({
+			item,
+			requestedQty: newQty,
+			freshBatches,
+			invoiceItems: invoiceItems.value,
+		});
+
+		if (!allocations.length) {
+			showWarning(__('"{0}" is out of stock across all its batches.', [item.item_name]));
+			return;
+		}
+
+		const [first, ...rest] = allocations;
+
+		if (first.batch_no === item.batch_no) {
+			// Common case: the row's own batch still covers (part of) the request.
+			item.actual_batch_qty = first.qty;
+			baseUpdateItemQuantity(item.item_code, first.qty, item.uom, item.batch_no);
+		} else {
+			// Rare: the originally-selected batch has since sold out elsewhere.
+			// Replace the row via the existing cache-safe remove/add path rather
+			// than mutating rate/price on it directly (which would desync the
+			// incremental subtotal/tax cache).
+			removeItem(item.item_code, item.uom, item.batch_no);
+			addItemToInvoice(
+				{
+					...item,
+					batch_no: first.batch_no,
+					actual_batch_qty: first.qty,
+					rate: first.msp > 0 ? first.msp : item.rate,
+					price_list_rate: first.mrp > 0 ? first.mrp : item.price_list_rate,
+					msp: first.msp || item.msp,
+					mrp: first.mrp || item.mrp,
+				},
+				first.qty
+			);
+		}
+
+		for (const entry of rest) {
+			addItemToInvoice(
+				{
+					...item,
+					batch_no: entry.batch_no,
+					actual_batch_qty: entry.qty,
+					rate: entry.msp > 0 ? entry.msp : item.rate,
+					price_list_rate: entry.mrp > 0 ? entry.mrp : item.price_list_rate,
+					msp: entry.msp || item.msp,
+					mrp: entry.mrp || item.mrp,
+				},
+				entry.qty
+			);
+		}
+
+		if (rest.length > 0) {
+			const summary = allocations.map((a) => `${a.batch_no} × ${a.qty}`).join(", ");
+			showSuccess(__("Split across {0} batches: {1}", [allocations.length, summary]));
+		}
+
+		if (shortfall > 0) {
+			showWarning(
+				__('Only {0} units of "{1}" available across all batches. Quantity capped at {0}.', [
+					newQty - shortfall,
+					item.item_name,
+				])
+			);
+		}
 	}
 
 	function clearCart() {
@@ -241,7 +382,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		customer.value = null;
 		offersStore.clearOneTimeContext();
 		appliedOffers.value = [];
-		appliedCoupon.value = null;
+		appliedCoupons.value = [];
 		couponDiscountAmount.value = 0;
 		currentDraftId.value = null;
 		targetDoctype.value = "Sales Invoice";
@@ -366,20 +507,56 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		selectionMode.value = "uom";
 	}
 
-	// Discount & Offer Management
+	// Discount & Coupon Management
+	// Multiple coupons can be applied to the same cart; each new one stacks
+	// its discount on top of the ones already applied.
 	function applyDiscountToCart(discount) {
-		const appliedAmount = applyDiscount(discount);
-		appliedCoupon.value = discount;
-		couponDiscountAmount.value = appliedAmount || 0;
+		const normalizedCode = (discount.code || discount.name || "").toUpperCase();
+
+		// Guard against applying the same coupon twice (e.g. double-click,
+		// or re-entering a code that's already active).
+		const alreadyApplied = appliedCoupons.value.some(
+			(c) => (c.code || c.name || "").toUpperCase() === normalizedCode
+		);
+		if (alreadyApplied) {
+			showWarning(__("{0} is already applied", [discount.name]));
+			return;
+		}
+
+		// applyDiscount() adds this coupon's amount on top of the existing
+		// additionalDiscount bucket rather than replacing it.
+		const appliedAmount = applyDiscount(discount) || 0;
+		appliedCoupons.value = [...appliedCoupons.value, { ...discount, amount: appliedAmount }];
+		couponDiscountAmount.value = roundCurrency(couponDiscountAmount.value + appliedAmount);
 		showSuccess(__("{0} applied successfully", [discount.name]));
 	}
 
-	function removeDiscountFromCart() {
-		appliedOffers.value = [];
-		removeDiscount();
-		appliedCoupon.value = null;
-		couponDiscountAmount.value = 0;
-		showSuccess(__("Discount has been removed from cart"));
+	// Removes a single coupon. Called with no argument to clear every applied
+	// coupon at once (also used internally when offers are cleared, since
+	// offers and coupons share the same additionalDiscount bucket).
+	function removeDiscountFromCart(coupon = null) {
+		if (!coupon || appliedCoupons.value.length <= 1) {
+			// Removing the only (or an unspecified) coupon clears everything.
+			// Mirrors removeOffer()'s symmetric behavior of dropping the coupon
+			// once offers hit zero — here, dropping offers once coupons hit zero.
+			appliedOffers.value = [];
+			removeDiscount();
+			appliedCoupons.value = [];
+			couponDiscountAmount.value = 0;
+			showSuccess(__("Discount has been removed from cart"));
+			return;
+		}
+
+		removeDiscount(coupon);
+		const normalizedCode = (coupon.code || coupon.name || "").toUpperCase();
+		appliedCoupons.value = appliedCoupons.value.filter(
+			(c) => (c.code || c.name || "").toUpperCase() !== normalizedCode
+		);
+		couponDiscountAmount.value = Math.max(
+			0,
+			roundCurrency(couponDiscountAmount.value - (coupon.amount || 0))
+		);
+		showSuccess(__("{0} removed", [coupon.name || coupon.code]));
 	}
 
 	function buildOfferEvaluationPayload(currentProfile) {
@@ -394,7 +571,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			selling_price_list: currentProfile?.selling_price_list,
 			currency: currentProfile?.currency,
 			discount_amount: additionalDiscount.value || 0,
-			coupon_code: appliedCoupon.value?.name || "",
+			coupon_code: appliedCoupons.value.map((c) => c.name || c.code).join(","),
 			items: rawItems.map((item) => ({
 				item_code: item.item_code,
 				item_name: item.item_name,
@@ -737,7 +914,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			// removeDiscount() zeroes the shared additionalDiscount bucket, so any
 			// coupon attribution tracked on top of it is no longer valid — clear it
 			// to avoid a stale "Coupon Discount" label once the amount is gone.
-			appliedCoupon.value = null;
+			appliedCoupons.value = [];
 			couponDiscountAmount.value = 0;
 			await nextTick();
 			showSuccess(__("Offer has been removed from cart"));
@@ -758,7 +935,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			// removeDiscount() zeroes the shared additionalDiscount bucket, so any
 			// coupon attribution tracked on top of it is no longer valid — clear it
 			// to avoid a stale "Coupon Discount" label once the amount is gone.
-			appliedCoupon.value = null;
+			appliedCoupons.value = [];
 			couponDiscountAmount.value = 0;
 			await nextTick();
 			showSuccess(__("Offer has been removed from cart"));
@@ -1287,14 +1464,19 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	}
 
 	/**
-	 * Find a cart item by item_code and optionally by UOM
+	 * Find a cart item by item_code and optionally by UOM/batch_no
 	 * @param {string} itemCode - Item code to find
 	 * @param {string|null} uom - Optional UOM to match
+	 * @param {string|null} batchNo - Optional batch_no to match when the same item+uom
+	 *        exists across multiple batches (e.g. after an auto-split)
 	 * @returns {Object|undefined} Cart item or undefined
 	 */
-	function findCartItem(itemCode, uom = null) {
+	function findCartItem(itemCode, uom = null, batchNo = null) {
 		return invoiceItems.value.find(
-			(item) => item.item_code === itemCode && (!uom || item.uom === uom)
+			(item) =>
+				item.item_code === itemCode &&
+				(!uom || item.uom === uom) &&
+				(!batchNo || item.batch_no === batchNo)
 		);
 	}
 
@@ -1362,10 +1544,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * @param {string} itemCode - Item code
 	 * @param {string} newUom - New UOM to change to
 	 * @param {string|null} currentUom - Current UOM (required when same item has multiple UOMs)
+	 * @param {string|null} batchNo - Optional batch_no to target the right row after an auto-split
 	 */
-	async function changeItemUOM(itemCode, newUom, currentUom = null) {
+	async function changeItemUOM(itemCode, newUom, currentUom = null, batchNo = null) {
 		try {
-			const cartItem = findCartItem(itemCode, currentUom);
+			const cartItem = findCartItem(itemCode, currentUom, batchNo);
 			if (!cartItem || cartItem.uom === newUom) return;
 
 			// Check for existing item to merge with
@@ -1392,10 +1575,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * @param {string} itemCode - Item code
 	 * @param {Object} updates - Updated details
 	 * @param {string|null} currentUom - Current UOM (required when same item has multiple UOMs)
+	 * @param {string|null} batchNo - Optional batch_no to target the right row after an auto-split
 	 */
-	async function updateItemDetails(itemCode, updates, currentUom = null) {
+	async function updateItemDetails(itemCode, updates, currentUom = null, batchNo = null) {
 		try {
-			const cartItem = findCartItem(itemCode, currentUom);
+			const cartItem = findCartItem(itemCode, currentUom, batchNo);
 			if (!cartItem) {
 				throw new Error("Item not found in cart");
 			}
@@ -1916,7 +2100,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		pendingItem,
 		pendingItemQty,
 		appliedOffers,
-		appliedCoupon,
+		appliedCoupons,
 		couponDiscountAmount,
 		selectionMode,
 		currentDraftId,
@@ -1935,7 +2119,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		updateItemQuantity,
 		clearCart,
 		setCustomer,
-		setDefaultCustomer: loadDefaultCustomer,
+		setDefaultCustomer,
 		setPendingItem,
 		clearPendingItem,
 		loadTaxRules,
