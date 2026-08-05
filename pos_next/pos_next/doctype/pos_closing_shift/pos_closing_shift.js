@@ -17,7 +17,7 @@ frappe.ui.form.on("POS Closing Shift", {
 		});
 
 		frm.set_query("pos_opening_shift", function (doc) {
-			return { filters: { status: "Open", docstatus: 1 } };
+			return { filters: { status: "Open", docstatus: 1 , user: frappe.session.user } };
 		});
 
 		if (frm.doc.docstatus === 0)
