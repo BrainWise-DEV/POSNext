@@ -3179,6 +3179,9 @@ def _evaluate_transaction_offers(
 	if not erpnext_apply_pricing_rule_on_transaction or not pricing_items:
 		return {"free_items": {}, "applied_rules": set()}
 
+	# `pricing_items` carry net (post item-discount) rates by the time the caller
+	# reaches this point, so `total` is the discounted subtotal — the same basis
+	# ERPNext's desk flow uses for transaction-scoped rules.
 	total_qty = sum(flt(it.qty) for it in pricing_items)
 	total = sum(flt(it.qty) * flt(it.rate) for it in pricing_items)
 	if total <= 0:
@@ -3738,37 +3741,10 @@ def apply_offers(invoice_data, selected_offers=None):
 				free_item_doc.applied_promotional_scheme = rule_map[rule_name].promotional_scheme
 				free_items_map[(free_item.get("item_code"), rule_name)] = free_item_doc
 
-		# Evaluate apply_on="Transaction" rules through ERPNext's separate
-		# transaction-level engine. The per-item engine above does not see
-		# them, so without this step "Entire Transaction" promotional schemes
-		# (free product based on cart total) would never apply.
-		txn_result = _evaluate_transaction_offers(
-			invoice,
-			profile,
-			pricing_items,
-			customer,
-			customer_group,
-			territory,
-			invoice.get("posting_date") or nowdate(),
-			pricing_args.currency,
-			pricing_args.price_list,
-			rule_map,
-			selected_offer_names,
-		)
-		txn_result = filter_auto_discount_from_header(txn_result, rule_map, selected_offer_names)
 		# Line-level discount passes, in order, through the shared accumulator so
 		# they compose instead of overwriting each other. See
 		# pos_next.promotions.engine.
 		applied_rules.update(run_line_discount_passes(prepared_items, rule_map, selected_offer_names))
-		# Per-item results win on collisions because they already carry full
-		# discount metadata from the per-item engine result.
-		for key, free_item_doc in txn_result.get("free_items", {}).items():
-			free_item_doc.qty = _floor_free_item_qty(free_item_doc.get("qty"))
-			free_items_map.setdefault(key, free_item_doc)
-		applied_rules.update(txn_result.get("applied_rules", set()))
-
-		_apply_bundled_same_item_free_discounts(prepared_items, free_items_map, rule_map)
-		_apply_gwp_line_discounts(prepared_items, free_items_map, rule_map)
 
 		# Apply Min/Max ("cheapest/most-expensive item") price rules. These were
 		# deferred by the per-item engine (see pos_next.overrides.pricing_rule) and
@@ -3796,6 +3772,60 @@ def apply_offers(invoice_data, selected_offers=None):
 				for pr_name in erpnext_get_applied_pricing_rules(prepared_item.get("pricing_rules")):
 					if pr_name in rule_map:
 						applied_rules.add(pr_name)
+
+		# Fold the item-level discounts decided above back into `pricing_items`
+		# before the transaction-scoped engine runs. `pricing_items` was built
+		# pre-discount (rate == list rate, discount fields zeroed) to feed the
+		# per-item engine; leaving it that way makes the transaction engine see
+		# the *gross* cart total, which both lets min_amt-gated rules fire on a
+		# cart that never reached the threshold and sizes their percentage off
+		# the undiscounted base.
+		#
+		# `price_list_rate` x `discount_percentage` is the only basis every
+		# discount path agrees on: the per-item loop leaves `rate` at the
+		# incoming list rate (the frontend derives the net rate itself) and
+		# records `discount_amount` as a line total, while _materialize_rate in
+		# the Min/Max pass writes `discount_amount` per unit. All of them, though,
+		# leave `price_list_rate` and `discount_percentage` consistent.
+		for pricing_item, item_index in zip(pricing_items, index_map, strict=False):
+			prepared_item = prepared_items[item_index]
+			list_rate = flt(prepared_item.get("price_list_rate")) or flt(pricing_item.price_list_rate)
+			discount_pct = flt(prepared_item.get("discount_percentage") or 0)
+			net_rate = list_rate * (1 - discount_pct / 100.0) if list_rate else flt(pricing_item.rate)
+
+			pricing_item.price_list_rate = list_rate
+			pricing_item.base_price_list_rate = list_rate
+			pricing_item.rate = net_rate
+			pricing_item.base_rate = net_rate
+			pricing_item.discount_percentage = discount_pct
+
+		# Evaluate apply_on="Transaction" rules through ERPNext's separate
+		# transaction-level engine. The per-item engine above does not see
+		# them, so without this step "Entire Transaction" promotional schemes
+		# (free product based on cart total) would never apply.
+		txn_result = _evaluate_transaction_offers(
+			invoice,
+			profile,
+			pricing_items,
+			customer,
+			customer_group,
+			territory,
+			invoice.get("posting_date") or nowdate(),
+			pricing_args.currency,
+			pricing_args.price_list,
+			rule_map,
+			selected_offer_names,
+		)
+		txn_result = filter_auto_discount_from_header(txn_result, rule_map, selected_offer_names)
+		# Per-item results win on collisions because they already carry full
+		# discount metadata from the per-item engine result.
+		for key, free_item_doc in txn_result.get("free_items", {}).items():
+			free_item_doc.qty = _floor_free_item_qty(free_item_doc.get("qty"))
+			free_items_map.setdefault(key, free_item_doc)
+		applied_rules.update(txn_result.get("applied_rules", set()))
+
+		_apply_bundled_same_item_free_discounts(prepared_items, free_items_map, rule_map)
+		_apply_gwp_line_discounts(prepared_items, free_items_map, rule_map)
 
 		if mark_item_discount_flags:
 			# Same neutralised view the pipeline used. With the raw map an
