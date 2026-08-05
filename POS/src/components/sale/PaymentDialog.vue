@@ -2353,6 +2353,28 @@ function isWalletPaymentMethod(methodName) {
 	return walletPaymentMethods.value.has(methodName);
 }
 
+// Check if a payment method is Credit Balance or Customer Credit
+function isCreditBalanceMethod(method) {
+	if (!method) return false;
+	const name = (typeof method === "string" ? method : method.mode_of_payment || "").toLowerCase();
+	const methodName = typeof method === "string" ? method : method.mode_of_payment;
+	if (isWalletPaymentMethod(methodName)) {
+		return true;
+	}
+	if (
+		name.includes("credit balance") ||
+		name.includes("customer credit") ||
+		name.includes("saldo kredit") ||
+		name.includes("wallet balance")
+	) {
+		return true;
+	}
+	if (typeof method === "object" && (method.is_customer_credit || method.type === "Credit")) {
+		return true;
+	}
+	return false;
+}
+
 // Check if a payment method is a cash payment (allows overpayment/change)
 function isCashPaymentMethod(method) {
 	if (!method) return false;
@@ -2813,6 +2835,21 @@ const hasNonCashPayment = computed(() => {
 	});
 });
 
+// Check if payment entries contain any Credit Balance payments
+const hasCreditBalancePayment = computed(() => {
+	return paymentEntries.value.some((entry) => {
+		const method = paymentMethods.value.find(
+			(m) => m.mode_of_payment === entry.mode_of_payment
+		);
+		return (
+			entry.is_customer_credit ||
+			entry.is_wallet_payment ||
+			(method && isCreditBalanceMethod(method)) ||
+			isCreditBalanceMethod(entry.mode_of_payment)
+		);
+	});
+});
+
 // Check if current payment scenario allows overpayment (change)
 const allowsOverpayment = computed(() => {
 	// If exact amount mode is not active, allow overpayment
@@ -2891,13 +2928,33 @@ const isLastMethodCash = computed(() => {
 });
 const { quickAmounts } = useQuickAmounts(remainingAmount, isLastMethodCash);
 
-// Whether a quick amount button should be disabled in exact-amount mode
-// Non-cash methods can only pay the exact remaining — no rounding allowed
+// Whether a quick amount button should be disabled
 function isQuickAmountDisabled(amount) {
+	const remaining = roundCurrency(remainingAmount.value);
+	const method = lastSelectedMethod.value;
+
+	// If Credit Balance payment method is selected or Credit Balance has been used in split payment
+	if (method && (isCreditBalanceMethod(method) || hasCreditBalancePayment.value)) {
+		let maxAllowed = remaining;
+		if (isCreditBalanceMethod(method)) {
+			const available = isWalletPaymentMethod(method.mode_of_payment)
+				? availableWalletBalance.value
+				: (remainingAvailableCredit.value > 0 ? remainingAvailableCredit.value : totalAvailableCredit.value);
+			maxAllowed = roundCurrency(Math.min(remaining, available > 0 ? available : remaining));
+		}
+		return roundCurrency(amount) > maxAllowed;
+	}
+
+	// For pure Cash payment (no Credit Balance used): allow amounts greater than remaining (for cash change)
+	if (method && isCashPaymentMethod(method) && !hasCreditBalancePayment.value && !isExactAmountModeActive.value) {
+		return false;
+	}
+
+	// For other non-cash methods when exact amount mode is active
 	return (
 		isExactAmountModeActive.value &&
-		!isCashPaymentMethod(lastSelectedMethod.value) &&
-		amount !== roundCurrency(remainingAmount.value)
+		!isCashPaymentMethod(method) &&
+		amount !== remaining
 	);
 }
 
@@ -3102,8 +3159,21 @@ function quickAddPayment(method) {
 	let amt = remainingAmount.value;
 	let isPartialWalletPayment = false;
 
-	// Wallet payment validation: limit to available balance
-	if (isWalletPaymentMethod(method.mode_of_payment)) {
+	// Credit Balance / Customer Credit / Wallet payment validation
+	if (isCreditBalanceMethod(method)) {
+		const available = isWalletPaymentMethod(method.mode_of_payment)
+			? availableWalletBalance.value
+			: (remainingAvailableCredit.value > 0 ? remainingAvailableCredit.value : totalAvailableCredit.value);
+		const maxAllowed = roundCurrency(Math.min(remainingAmount.value, available > 0 ? available : remainingAmount.value));
+		if (maxAllowed <= 0) {
+			showWarning(__("No credit balance available for this customer"));
+			return;
+		}
+		amt = maxAllowed;
+		if (available > 0 && available < remainingAmount.value) {
+			isPartialWalletPayment = true;
+		}
+	} else if (isWalletPaymentMethod(method.mode_of_payment)) {
 		const walletAvailable = availableWalletBalance.value;
 		if (walletAvailable <= 0) {
 			showWarning(__("No redeemable points available"));
@@ -3228,15 +3298,65 @@ async function addCustomPayment(method, amount) {
 
 	let isPartialWalletPayment = false;
 
-	// Wallet payment validation: limit to available balance
-	if (isWalletPaymentMethod(method.mode_of_payment)) {
+	const remaining = roundCurrency(props.grandTotal - totalPaid.value);
+	if (remaining <= 0) {
+		showWarning(__("Invoice is already fully paid"));
+		return;
+	}
+
+	// Rule 1: Credit Balance payment method selected -> cannot exceed remaining grand total OR available credit
+	if (isCreditBalanceMethod(method)) {
+		const available = isWalletPaymentMethod(method.mode_of_payment)
+			? availableWalletBalance.value
+			: (remainingAvailableCredit.value > 0 ? remainingAvailableCredit.value : totalAvailableCredit.value);
+
+		const maxAllowed = roundCurrency(Math.min(remaining, available > 0 ? available : remaining));
+
+		if (maxAllowed <= 0) {
+			showWarning(__("No credit balance available for this customer"));
+			return;
+		}
+
+		if (roundCurrency(amt) > maxAllowed) {
+			if (roundCurrency(amt) > remaining) {
+				showWarning(
+					__("Credit balance payment cannot exceed remaining grand total ({0})", [
+						formatCurrency(remaining),
+					])
+				);
+			} else if (available > 0 && roundCurrency(amt) > available) {
+				showWarning(
+					__("Credit balance payment limited to available balance ({0})", [
+						formatCurrency(available),
+					])
+				);
+			}
+			amt = maxAllowed;
+		}
+
+		if (available > 0 && available < remaining) {
+			isPartialWalletPayment = true;
+		}
+	}
+	// Rule 2: Mixed payment with Credit Balance -> total paid cannot exceed invoice grand total
+	else if (hasCreditBalancePayment.value) {
+		if (roundCurrency(amt) > remaining) {
+			showWarning(
+				__("Mixed payment with Credit Balance cannot exceed invoice total ({0})", [
+					formatCurrency(remaining),
+				])
+			);
+			amt = remaining;
+		}
+	}
+	// Rule 3: Pure Wallet Payment (loyalty points, etc.)
+	else if (isWalletPaymentMethod(method.mode_of_payment)) {
 		const walletAvailable = availableWalletBalance.value;
 		if (walletAvailable <= 0) {
 			showWarning(__("No redeemable points available"));
 			return;
 		}
 		if (amt > walletAvailable) {
-			// Limit payment to available redeemable points
 			amt = walletAvailable;
 			isPartialWalletPayment = true;
 		}
