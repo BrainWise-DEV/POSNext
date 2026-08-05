@@ -567,11 +567,23 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 			if (serverHasOfferDiscount) {
 				// GWP and bundled same-item free: keep exact amount, not % (avoids rounding drift)
-				if (gwpFreeQty > 0 || serverItem.discount_source === "free_item") {
+				if (
+					gwpFreeQty > 0 ||
+					serverItem.discount_source === "free_item" ||
+					bundledFreeQty > 0
+				) {
 					item.discount_amount = discountAmt;
 					item.discount_percentage = 0;
 					item.gwp_free_qty = gwpFreeQty;
-					item.free_qty = serverItem.discount_source === "free_item" ? bundledFreeQty : 0;
+					item.free_qty =
+						serverItem.discount_source === "free_item" || bundledFreeQty > 0
+							? bundledFreeQty
+							: 0;
+					// Always stamp free_item when qty is bundled so the cart
+					// shows "N free items" instead of a derived "%".
+					if (bundledFreeQty > 0) {
+						item.discount_source = "free_item";
+					}
 				} else if (discountAmt > 0) {
 					item.discount_amount = discountAmt;
 					item.discount_percentage = 0;
@@ -598,7 +610,22 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				item.is_already_discounted = serverItem.is_already_discounted ? 1 : 0;
 			}
 			if (serverItem.discount_source !== undefined) {
-				item.discount_source = serverItem.discount_source || "";
+				// Do not let a blank/legacy source wipe a bundled free-item stamp.
+				if (
+					Number.parseFloat(item.free_qty) > 0 &&
+					item.discount_source === "free_item" &&
+					!serverItem.discount_source
+				) {
+					// keep free_item
+				} else if (
+					Number.parseFloat(item.free_qty) > 0 &&
+					(serverItem.discount_source === "pricing_rule" ||
+						serverItem.discount_source === "legacy")
+				) {
+					item.discount_source = "free_item";
+				} else {
+					item.discount_source = serverItem.discount_source || "";
+				}
 			}
 
 			recalculateItem(item);
@@ -624,11 +651,19 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	}
 
 	function processFreeItems(freeItems) {
-		// Reset free_qty on all non-free items
+		// Reset free_qty on paid lines that are NOT already carrying a
+		// server-bundled same-item free discount. applyDiscountsFromServer
+		// stamps free_qty + discount_source=free_item first; wiping those
+		// here would drop the "N free items" badge and fall back to "%".
 		invoiceItems.value.forEach((item) => {
-			if (!item.is_free_item) {
-				item.free_qty = 0;
+			if (item.is_free_item) return;
+			if (
+				item.discount_source === "free_item" &&
+				Number.parseFloat(item.free_qty) > 0
+			) {
+				return;
 			}
+			item.free_qty = 0;
 		});
 
 		// Remove previously-added free item rows (they'll be re-added below if still valid)
@@ -1379,10 +1414,16 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 	function shouldAggregateGwpQty(offer) {
 		if (offer.apply_on === "Item Group") return true;
+		if (offer.apply_on === "Brand") return true;
 		if (offer.apply_on === "Item Code" && (offer.eligible_items?.length || 0) > 1) {
 			return true;
 		}
 		return false;
+	}
+
+	/** Product recursive free: aggregate Item Group / Brand only — never Item Code. */
+	function shouldAggregateProductFreeQty(offer) {
+		return offer.apply_on === "Item Group" || offer.apply_on === "Brand";
 	}
 
 	function getGwpSlabFreeQty(slabFreeQty, totalQty, minQty, maxQty) {
@@ -1584,19 +1625,53 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		});
 	}
 
-	function computeRecursiveFreeQty(lineQty, effectiveFreeQty, recurseFor, applyRecursionOver) {
-		// Mirror ERPNext with round_free_qty: floor eligible qty before multiplying.
+	function computeAdditionalRecursiveFreeQty(
+		lineQty,
+		effectiveFreeQty,
+		recurseFor,
+		applyRecursionOver
+	) {
+		// ERPNext-style: extra free units for every recurseFor purchased.
 		let freeItemsToGive = floorFreeItemQty(effectiveFreeQty);
 		if (!recurseFor || recurseFor <= 0) {
 			return freeItemsToGive;
 		}
 
 		const effectiveQty = Math.max(0, lineQty - applyRecursionOver);
-		if (effectiveQty > 0) {
-			const multiplier = Math.floor(effectiveQty / recurseFor);
-			freeItemsToGive = multiplier * freeItemsToGive;
+		if (effectiveQty <= 0) return 0;
+		const multiplier = Math.floor(effectiveQty / recurseFor);
+		return floorFreeItemQty(multiplier * freeItemsToGive);
+	}
+
+	function computeIncludedRecursiveFreeQty(
+		lineQty,
+		effectiveFreeQty,
+		recurseFor,
+		applyRecursionOver
+	) {
+		// Same-item bundled: buy recurseFor get freeQty free from purchased units.
+		// Cycle = recurseFor + freeQty (e.g. buy 2 get 1 → every 3, 1 is free).
+		// qty 2 → 0 free; qty 3 → 1 free; qty 6 → 2 free.
+		const freePerCycle = floorFreeItemQty(effectiveFreeQty) || 1;
+		if (!recurseFor || recurseFor <= 0) {
+			return Math.min(freePerCycle, floorFreeItemQty(lineQty));
 		}
-		return floorFreeItemQty(freeItemsToGive);
+
+		const effectiveQty = Math.max(0, lineQty - applyRecursionOver);
+		if (effectiveQty <= 0) return 0;
+		const cycle = recurseFor + freePerCycle;
+		if (cycle <= 0) return 0;
+		const multiplier = Math.floor(effectiveQty / cycle);
+		return floorFreeItemQty(multiplier * freePerCycle);
+	}
+
+	function isQtyInOfferRange(qty, minQty, maxQty) {
+		const total = Number.parseFloat(qty) || 0;
+		const min = Number.parseFloat(minQty) || 0;
+		const max = Number.parseFloat(maxQty) || 0;
+		if (min > 0 && total < min) return false;
+		if (max > 0 && total > max) return false;
+		return true;
 	}
 
 	function applyOfflineFreeItem(offer, eligibleItems) {
@@ -1607,8 +1682,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		const recurseFor = Number.parseFloat(offer.recurse_for) || 0;
 		const applyRecursionOver = Number.parseFloat(offer.apply_recursion_over) || 0;
 		const freeItemCode = offer.free_item;
+		const sameItem = offer.same_item === 1;
 		// ERPNext treats free_qty=0 as 1 for product (non-GWP) discounts.
 		const effectiveFreeQty = freeQty > 0 ? freeQty : 1;
+		// Same-item: always per line. Aggregate only other free-item + group/brand.
+		const shouldAggregate =
+			!isGwp && isRecursive && !sameItem && shouldAggregateProductFreeQty(offer);
 
 		if (isGwp) {
 			if (isAggregateGwp) {
@@ -1632,20 +1711,22 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			return applied;
 		}
 
-		if (!offer.same_item && !freeItemCode) return false;
+		if (!sameItem && !freeItemCode) return false;
 
 		let applied = false;
-		const sameItem = offer.same_item === 1;
 
 		if (sameItem) {
-			// Free item is the same as the purchased item
-			// E.g., "Buy 2 Get 1 Free" - the free item is the same item
+			// Each line that meets min_qty gets free units from itself.
 			for (const item of eligibleItems) {
 				let freeItemsToGive = effectiveFreeQty;
+				const lineQty = item.quantity || 0;
 
 				if (isRecursive && recurseFor > 0) {
-					freeItemsToGive = computeRecursiveFreeQty(
-						item.quantity || 0,
+					if (!isQtyInOfferRange(lineQty, offer.min_qty, offer.max_qty)) {
+						continue;
+					}
+					freeItemsToGive = computeIncludedRecursiveFreeQty(
+						lineQty,
 						effectiveFreeQty,
 						recurseFor,
 						applyRecursionOver
@@ -1653,7 +1734,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				} else if (!isRecursive && offer.min_qty > 0) {
 					// Non-recursive: just check if min_qty is met, give freeQty once
 					// E.g., Buy 2 Get 1 Free (non-recursive): for 6 items, still give 1 free
-					if (item.quantity >= offer.min_qty) {
+					if (lineQty >= offer.min_qty) {
 						freeItemsToGive = effectiveFreeQty;
 					} else {
 						freeItemsToGive = 0;
@@ -1669,42 +1750,93 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				}
 			}
 		} else if (freeItemCode) {
-			// Free item is a specific different item
-			const totalEligibleQty = eligibleItems.reduce(
-				(sum, item) => sum + (item.quantity || 0),
-				0
-			);
-			let freeItemsToGive = effectiveFreeQty;
-
-			if (isRecursive && recurseFor > 0) {
-				freeItemsToGive = computeRecursiveFreeQty(
-					totalEligibleQty,
-					effectiveFreeQty,
-					recurseFor,
-					applyRecursionOver
+			// Other free item: Item Group/Brand aggregate qty; Item Code is per line
+			// (3 laptops → 1 gift + 3 mice → 1 gift = 2), then sum into one free row.
+			if (shouldAggregate) {
+				const totalEligibleQty = eligibleItems.reduce(
+					(sum, item) => sum + (item.quantity || 0),
+					0
 				);
-			} else if (!isRecursive && offer.min_qty > 0) {
-				freeItemsToGive = totalEligibleQty >= offer.min_qty ? effectiveFreeQty : 0;
-			}
+				let freeItemsToGive = effectiveFreeQty;
 
-			if (freeItemsToGive > 0) {
-				const referenceItem = eligibleItems[0];
-				const uomKey =
-					offer.free_item_uom ||
-					referenceItem?.uom ||
-					referenceItem?.stock_uom ||
-					"Nos";
-				upsertOfflineFreeItemRow({
-					itemCode: freeItemCode,
-					itemName: freeItemCode,
-					freeItemsToGive,
-					uomKey,
-					stockUom: uomKey,
-					conversionFactor: 1,
-					warehouse: referenceItem?.warehouse,
-					offerName: offer.name,
-				});
-				applied = true;
+				if (isRecursive && recurseFor > 0) {
+					if (!isQtyInOfferRange(totalEligibleQty, offer.min_qty, offer.max_qty)) {
+						return false;
+					}
+					freeItemsToGive = computeAdditionalRecursiveFreeQty(
+						totalEligibleQty,
+						effectiveFreeQty,
+						recurseFor,
+						applyRecursionOver
+					);
+				} else if (!isRecursive && offer.min_qty > 0) {
+					freeItemsToGive =
+						totalEligibleQty >= offer.min_qty ? effectiveFreeQty : 0;
+				}
+
+				if (freeItemsToGive > 0) {
+					const referenceItem = eligibleItems[0];
+					const uomKey =
+						offer.free_item_uom ||
+						referenceItem?.uom ||
+						referenceItem?.stock_uom ||
+						"Nos";
+					upsertOfflineFreeItemRow({
+						itemCode: freeItemCode,
+						itemName: freeItemCode,
+						freeItemsToGive,
+						uomKey,
+						stockUom: uomKey,
+						conversionFactor: 1,
+						warehouse: referenceItem?.warehouse,
+						offerName: offer.name,
+					});
+					applied = true;
+				}
+			} else {
+				let totalFree = 0;
+				let referenceItem = eligibleItems[0];
+				for (const item of eligibleItems) {
+					const lineQty = item.quantity || 0;
+					let freeItemsToGive = effectiveFreeQty;
+
+					if (isRecursive && recurseFor > 0) {
+						if (!isQtyInOfferRange(lineQty, offer.min_qty, offer.max_qty)) {
+							continue;
+						}
+						freeItemsToGive = computeAdditionalRecursiveFreeQty(
+							lineQty,
+							effectiveFreeQty,
+							recurseFor,
+							applyRecursionOver
+						);
+					} else if (!isRecursive && offer.min_qty > 0) {
+						freeItemsToGive = lineQty >= offer.min_qty ? effectiveFreeQty : 0;
+					}
+
+					if (freeItemsToGive <= 0) continue;
+					totalFree += freeItemsToGive;
+					referenceItem = item;
+				}
+
+				if (totalFree > 0) {
+					const uomKey =
+						offer.free_item_uom ||
+						referenceItem?.uom ||
+						referenceItem?.stock_uom ||
+						"Nos";
+					upsertOfflineFreeItemRow({
+						itemCode: freeItemCode,
+						itemName: freeItemCode,
+						freeItemsToGive: totalFree,
+						uomKey,
+						stockUom: uomKey,
+						conversionFactor: 1,
+						warehouse: referenceItem?.warehouse,
+						offerName: offer.name,
+					});
+					applied = true;
+				}
 			}
 		}
 

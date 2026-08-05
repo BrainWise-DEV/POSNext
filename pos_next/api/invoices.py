@@ -18,6 +18,7 @@ from pos_next.promotions.engine import (
 	append_pricing_rule,
 	build_matrix_type_map,
 	filter_auto_discount_from_header,
+	remove_pricing_rule,
 	rule_promotion_type,
 	run_line_discount_passes,
 )
@@ -78,6 +79,10 @@ try:
 		item_matches_pricing_rule_apply_on,
 		should_aggregate_gwp_quantities,
 	)
+	from pos_next.api.product_free import (
+		compute_product_recursive_free_qty,
+		should_aggregate_product_quantities,
+	)
 except Exception as _pricing_import_error:  # pragma: no cover - ERPNext not installed in some environments
 	import traceback
 
@@ -97,6 +102,8 @@ except Exception as _pricing_import_error:  # pragma: no cover - ERPNext not ins
 	distribute_gwp_free_units_for_basis = None
 	should_aggregate_gwp_quantities = None
 	item_matches_pricing_rule_apply_on = None
+	compute_product_recursive_free_qty = None
+	should_aggregate_product_quantities = None
 	GWP_BASIS_MAX = "Max Price"
 	DISCOUNT_SOURCE_AUTO = "auto_discount"
 	DISCOUNT_SOURCE_GWP = "gwp"
@@ -167,6 +174,184 @@ def _stamp_bundled_same_item_free_discount(item_doc, line_free_qty, price_list_r
 	item_doc.discount_source = DISCOUNT_SOURCE_FREE_ITEM
 	item_doc.rate = flt(price_list_rate - (line_discount / purchased_qty))
 
+
+def _make_free_item_doc(item_code, qty, rule_name, full_rule, promotional_scheme=None):
+	"""Build a free-item payload for ``free_items_map``."""
+	item_data = frappe.get_cached_value(
+		"Item", item_code, ["item_name", "description", "stock_uom"], as_dict=1
+	) or {}
+	uom = full_rule.free_item_uom or item_data.get("stock_uom") or "Nos"
+	return frappe._dict(
+		{
+			"item_code": item_code,
+			"item_name": item_data.get("item_name") or item_code,
+			"description": item_data.get("description"),
+			"qty": _floor_free_item_qty(qty),
+			"pricing_rules": rule_name,
+			"rate": flt(full_rule.free_item_rate or 0),
+			"price_list_rate": flt(full_rule.free_item_rate or 0),
+			"is_free_item": 1,
+			"uom": uom,
+			"stock_uom": item_data.get("stock_uom") or uom,
+			"applied_promotional_scheme": promotional_scheme,
+		}
+	)
+
+
+def _recompute_recursive_product_free_items(prepared_items, free_items_map, rule_map, applied_rules=None) -> None:
+	"""Recompute recursive product discounts with POS Next rules.
+
+	1. Same-item frees are always evaluated per cart line: each SKU that meets
+	   min_qty gets free units from itself (no Min/Max Price redistribution).
+
+	2. Other free-item + Item Group / Brand aggregates purchased qty. ERPNext
+	   cannot do this for recursive rules (``mixed_conditions`` + ``is_recursive``
+	   is rejected). Item Code other-item scopes evaluate each line alone and
+	   sum free gifts.
+
+	3. Same-item free qty uses the included cycle
+	   (recurse_for + free_qty; qty 3 → 1 free / pay 2). Bundled on the paid
+	   line as amount discount + free badge — no percentage.
+
+	4. When free qty is 0, strip the rule from lines / applied_rules so the UI
+	   does not show "Applied" without a discount (e.g. qty 2 with min_qty 2
+	   but cycle needs 3).
+	"""
+	if not compute_product_recursive_free_qty or not should_aggregate_product_quantities:
+		return
+
+	recursive_rule_names = []
+	for rule_name, details in rule_map.items():
+		if rule_promotion_type(details) == PROMOTION_TYPE_GWP:
+			continue
+		full_rule = frappe.get_cached_doc("Pricing Rule", rule_name)
+		if full_rule.price_or_product_discount != "Product":
+			continue
+		if not cint(full_rule.is_recursive):
+			continue
+		recursive_rule_names.append(rule_name)
+
+	if not recursive_rule_names:
+		return
+
+	# Drop ERPNext free rows for these rules — quantities / aggregation are wrong.
+	for key in list(free_items_map.keys()):
+		if key[1] in recursive_rule_names:
+			free_items_map.pop(key, None)
+
+	for rule_name in recursive_rule_names:
+		full_rule = frappe.get_cached_doc("Pricing Rule", rule_name)
+		scheme_item_count = len(full_rule.get("items") or [])
+		same_item = cint(full_rule.same_item)
+		# Same-item: always per line (each SKU that meets min_qty gets its own free).
+		# Never dump free units onto cheapest/most-expensive via Min/Max Price basis.
+		# Other free item + Item Group/Brand: still aggregate purchased qty.
+		aggregate = (
+			should_aggregate_product_quantities(full_rule.apply_on, scheme_item_count)
+			and not same_item
+		)
+		slab_free = flt(full_rule.free_qty) or 1
+		recurse_for = flt(full_rule.recurse_for)
+		apply_over = flt(full_rule.apply_recursion_over)
+		promotional_scheme = rule_map[rule_name].get("promotional_scheme")
+
+		matching_lines = [
+			item_doc
+			for item_doc in prepared_items
+			if _item_matches_gwp_rule(item_doc, full_rule)
+		]
+		if not matching_lines:
+			continue
+
+		def _clear_rule_application():
+			for item_doc in matching_lines:
+				remove_pricing_rule(item_doc, rule_name)
+				# Avoid "Applied" / pricing_rule badge with zero free units.
+				if not (item_doc.get("pricing_rules") or "").strip():
+					if item_doc.get("discount_source") in (None, "", "pricing_rule", DISCOUNT_SOURCE_FREE_ITEM):
+						item_doc.discount_source = None
+						item_doc.free_qty = 0
+			if applied_rules is not None:
+				applied_rules.discard(rule_name)
+
+		if aggregate:
+			# Other free item + Item Group/Brand: aggregate purchased qty.
+			line_qtys = [
+				flt(item_doc.get("qty") or item_doc.get("quantity") or 0)
+				for item_doc in matching_lines
+			]
+			total_qty = sum(line_qtys)
+			free_total = compute_product_recursive_free_qty(
+				total_qty,
+				slab_free,
+				recurse_for,
+				apply_over,
+				same_item=False,
+				is_recursive=True,
+				min_qty=full_rule.min_qty,
+				max_qty=full_rule.max_qty,
+			)
+			if free_total <= 0:
+				_clear_rule_application()
+				continue
+
+			free_item_code = full_rule.free_item
+			if not free_item_code:
+				_clear_rule_application()
+				continue
+
+			for item_doc in matching_lines:
+				append_pricing_rule(item_doc, rule_name)
+
+			free_items_map[(free_item_code, rule_name)] = _make_free_item_doc(
+				free_item_code,
+				free_total,
+				rule_name,
+				full_rule,
+				promotional_scheme,
+			)
+			continue
+
+		# Per-line: same-item always; Item Code other-item also.
+		# Each line that meets min_qty earns free from itself / its own gift count.
+		line_gave_free = False
+		for item_doc in matching_lines:
+			line_qty = flt(item_doc.get("qty") or item_doc.get("quantity") or 0)
+			free_total = compute_product_recursive_free_qty(
+				line_qty,
+				slab_free,
+				recurse_for,
+				apply_over,
+				same_item=bool(same_item),
+				is_recursive=True,
+				min_qty=full_rule.min_qty,
+				max_qty=full_rule.max_qty,
+			)
+			if free_total <= 0:
+				remove_pricing_rule(item_doc, rule_name)
+				continue
+
+			append_pricing_rule(item_doc, rule_name)
+			gift_code = item_doc.item_code if same_item else full_rule.free_item
+			if not gift_code:
+				remove_pricing_rule(item_doc, rule_name)
+				continue
+
+			existing = free_items_map.get((gift_code, rule_name))
+			if existing:
+				existing.qty = _floor_free_item_qty(flt(existing.get("qty")) + free_total)
+			else:
+				free_items_map[(gift_code, rule_name)] = _make_free_item_doc(
+					gift_code,
+					free_total,
+					rule_name,
+					full_rule,
+					promotional_scheme,
+				)
+			line_gave_free = True
+
+		if not line_gave_free and applied_rules is not None:
+			applied_rules.discard(rule_name)
 
 def _apply_bundled_same_item_free_discounts(prepared_items, free_items_map, rule_map) -> None:
 	"""Bundle non-GWP same-item free gifts onto the paid line instead of a separate row."""
@@ -3745,6 +3930,18 @@ def apply_offers(invoice_data, selected_offers=None):
 		# they compose instead of overwriting each other. See
 		# pos_next.promotions.engine.
 		applied_rules.update(run_line_discount_passes(prepared_items, rule_map, selected_offer_names))
+		# Per-item results win on collisions because they already carry full
+		# discount metadata from the per-item engine result.
+		for key, free_item_doc in txn_result.get("free_items", {}).items():
+			free_item_doc.qty = _floor_free_item_qty(free_item_doc.get("qty"))
+			free_items_map.setdefault(key, free_item_doc)
+		applied_rules.update(txn_result.get("applied_rules", set()))
+
+		_recompute_recursive_product_free_items(
+			prepared_items, free_items_map, rule_map, applied_rules
+		)
+		_apply_bundled_same_item_free_discounts(prepared_items, free_items_map, rule_map)
+		_apply_gwp_line_discounts(prepared_items, free_items_map, rule_map)
 
 		# Apply Min/Max ("cheapest/most-expensive item") price rules. These were
 		# deferred by the per-item engine (see pos_next.overrides.pricing_rule) and
