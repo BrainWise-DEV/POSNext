@@ -310,7 +310,7 @@ const { showSuccess, showError } = useToast();
 const props = defineProps({
 	modelValue: Boolean,
 	posProfile: String,
-	initialName: String,
+	initialName: [String, Object],
 	customer: Object, // Customer object for edit mode
 });
 
@@ -718,8 +718,18 @@ const resetForm = () => {
 // =============================================================================
 
 watch(
-	() => props.initialName,
-	(name) => name && (customerData.value.customer_name = name)
+    () => props.initialName,
+    (value) => {
+        if (!value) return;
+
+        if (typeof value === "object") {
+            customerData.value.customer_name = value.customer_name || "";
+            phoneNumber.value = value.mobile_no || "";
+            updateMobileNumber();
+        } else {
+            customerData.value.customer_name = value;
+        }
+    }
 );
 
 // Pre-fill form when customer prop changes (edit mode).

@@ -2110,12 +2110,22 @@ async function clearCustomer() {
  * Pre-fills the new customer name with the search query.
  */
 function createNewCustomer() {
-	const searchValue = customerSearch.value;
-	// Close dropdown immediately
-	customerSearch.value = "";
-	customerSearchFocused.value = false;
-	// Emit event to open customer creation dialog
-	emit("create-customer", searchValue);
+    const searchValue = customerSearch.value.trim();
+
+    customerSearch.value = "";
+    customerSearchFocused.value = false;
+
+    if (/^\d+$/.test(searchValue)) {
+        emit("create-customer", {
+            customer_name: "",
+            mobile_no: searchValue,
+        });
+    } else {
+        emit("create-customer", {
+            customer_name: searchValue,
+            mobile_no: "",
+        });
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
