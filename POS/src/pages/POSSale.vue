@@ -2017,10 +2017,10 @@ function handleCustomerSelected(selectedCustomer) {
 	}
 }
 
-function handleCreateCustomer(searchValue) {
-	editCustomer.value = null; // Clear edit mode
-	uiStore.setInitialCustomerName(searchValue || "");
-	uiStore.showCreateCustomerDialog = true;
+function handleCreateCustomer(data) {
+    editCustomer.value = null;
+    uiStore.setInitialCustomerName(data);
+    uiStore.showCreateCustomerDialog = true;
 }
 
 function handleEditCustomer(customer) {
