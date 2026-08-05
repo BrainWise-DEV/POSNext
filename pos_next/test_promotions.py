@@ -1130,6 +1130,151 @@ class TestPromotions(FrappeTestCase):
 		self.assertEqual(flt(resp.get("discount_amount") or 0), 0)
 
 	# -------------------------------------------------------------------
+	# Transaction-scoped rules must key off the *discounted* subtotal
+	# -------------------------------------------------------------------
+
+	def test_txn_rule_min_amt_uses_discounted_subtotal(self):
+		"""A cart pushed below min_amt by item discounts must not fire the rule.
+
+		ITEM_A(50) + ITEM_B(80) grosses 130, but a 50% item rule on ITEM_A drops
+		the real subtotal to 105. A min_amt=120 transaction rule therefore must
+		not fire — this is what ERPNext's desk flow does, since it gates on the
+		post-discount `doc.total`.
+		"""
+		item_rule = _make_rule(
+			"_PNXT_TEST_TxnBaseItemDisc",
+			apply_on="Item Code",
+			items=[{"item_code": ITEM_A}],
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			discount_percentage=50,
+		)
+		txn_rule = _make_rule(
+			"_PNXT_TEST_TxnBaseAboveGross",
+			apply_on="Transaction",
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			discount_percentage=10,
+			min_amt=120,
+			apply_discount_on="Grand Total",
+		)
+		payload = _cart_payload(
+			self.ctx,
+			[_line(self.ctx, ITEM_A, qty=1), _line(self.ctx, ITEM_B, qty=1)],
+		)
+		import json
+
+		resp = apply_offers(
+			invoice_data=json.dumps(payload),
+			selected_offers=json.dumps([item_rule, txn_rule]),
+		)
+
+		self.assertIn(item_rule, resp.get("applied_pricing_rules") or [])
+		self.assertNotIn(
+			txn_rule,
+			resp.get("applied_pricing_rules") or [],
+			msg=(
+				"Transaction rule fired on the gross 130 instead of the discounted "
+				"105 — pricing_items was not synced with item-level discounts."
+			),
+		)
+		self.assertEqual(flt(resp.get("discount_amount") or 0), 0)
+
+	def test_txn_rule_percentage_uses_discounted_subtotal(self):
+		"""When the rule legitimately fires, its base is the discounted subtotal.
+
+		Same cart as above (gross 130, discounted 105) with min_amt=100, so the
+		rule qualifies. 10% must come off 105 (= 10.5), not off 130 (= 13).
+		"""
+		item_rule = _make_rule(
+			"_PNXT_TEST_TxnPctItemDisc",
+			apply_on="Item Code",
+			items=[{"item_code": ITEM_A}],
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			discount_percentage=50,
+		)
+		txn_rule = _make_rule(
+			"_PNXT_TEST_TxnPctBase",
+			apply_on="Transaction",
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			discount_percentage=10,
+			min_amt=100,
+			apply_discount_on="Grand Total",
+		)
+		payload = _cart_payload(
+			self.ctx,
+			[_line(self.ctx, ITEM_A, qty=1), _line(self.ctx, ITEM_B, qty=1)],
+		)
+		import json
+
+		resp = apply_offers(
+			invoice_data=json.dumps(payload),
+			selected_offers=json.dumps([item_rule, txn_rule]),
+		)
+
+		self.assertIn(txn_rule, resp.get("applied_pricing_rules") or [])
+		self.assertAlmostEqual(
+			flt(resp.get("discount_amount")),
+			10.5,
+			places=2,
+			msg="Transaction discount was sized off the gross total, not the discounted subtotal.",
+		)
+
+	def test_txn_rule_base_includes_min_max_discounts(self):
+		"""Min/Max discounts must land in the base before transaction rules run.
+
+		The Min rule discounts the cheapest line (ITEM_A 50 -> 25), taking the
+		cart from 130 to 105. A min_amt=120 transaction rule must therefore not
+		fire. This only holds if the Min/Max pass runs *before* the
+		transaction-scoped engine.
+		"""
+		min_rule = _make_rule(
+			"_PNXT_TEST_TxnBaseMinRule",
+			apply_on="Item Code",
+			items=[{"item_code": ITEM_A}, {"item_code": ITEM_B}],
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			discount_percentage=50,
+			apply_discount_on_price="Min",
+		)
+		txn_rule = _make_rule(
+			"_PNXT_TEST_TxnBaseAfterMinMax",
+			apply_on="Transaction",
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			discount_percentage=10,
+			min_amt=120,
+			apply_discount_on="Grand Total",
+		)
+		payload = _cart_payload(
+			self.ctx,
+			[_line(self.ctx, ITEM_A, qty=1), _line(self.ctx, ITEM_B, qty=1)],
+		)
+		import json
+
+		resp = apply_offers(
+			invoice_data=json.dumps(payload),
+			selected_offers=json.dumps([min_rule, txn_rule]),
+		)
+
+		# The Min rule discounted only the cheapest line.
+		by_code = {it.get("item_code"): it for it in resp["items"]}
+		self.assertAlmostEqual(flt(by_code[ITEM_A].get("discount_percentage")), 50, places=2)
+		self.assertEqual(flt(by_code[ITEM_B].get("discount_percentage") or 0), 0)
+
+		self.assertNotIn(
+			txn_rule,
+			resp.get("applied_pricing_rules") or [],
+			msg=(
+				"Transaction rule fired on 130 — the Min/Max pass still runs after "
+				"the transaction engine, so its discount is missing from the base."
+			),
+		)
+		self.assertEqual(flt(resp.get("discount_amount") or 0), 0)
+
+	# -------------------------------------------------------------------
 	# Item-Level Discount (Type 4) interaction matrix
 	# -------------------------------------------------------------------
 
