@@ -2095,18 +2095,16 @@ function hasBundledSameItemFree(item) {
 	}
 	const bundled = Number.parseFloat(item?._bundledFreeQty) || 0;
 	if (bundled > 0) return true;
-	return (
-		item?.discount_source === "free_item" && (Number.parseFloat(item?.free_qty) || 0) > 0
-	);
+	if ((Number.parseFloat(item?.free_qty) || 0) > 0) return true;
+	return item?.discount_source === "free_item";
 }
 
 function getDisplayFreeQty(item) {
 	if (item?.is_free_item || item?._isStandaloneFreeRow) {
 		return Number.parseFloat(item.quantity) || 0;
 	}
-	if (item?.discount_source === "free_item") {
-		return Number.parseFloat(item?.free_qty) || 0;
-	}
+	const freeQty = Number.parseFloat(item?.free_qty) || 0;
+	if (freeQty > 0) return freeQty;
 	const bundled = Number.parseFloat(item?._bundledFreeQty) || 0;
 	if (bundled > 0) return bundled;
 	return getGwpFreeQty(item);

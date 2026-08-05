@@ -226,6 +226,23 @@ def append_pricing_rule(item, rule_name: str) -> None:
 	item.pricing_rules = ",".join(names)
 
 
+def remove_pricing_rule(item, rule_name: str) -> None:
+	"""Remove a rule name from the line's comma-separated ``pricing_rules``."""
+	existing = item.get("pricing_rules") or ""
+	if not existing:
+		return
+	if isinstance(existing, str):
+		names = [part.strip() for part in existing.split(",") if part.strip()]
+	elif isinstance(existing, list | tuple | set):
+		names = [cstr(part) for part in existing if cstr(part)]
+	else:
+		return
+	if rule_name not in names:
+		return
+	names = [name for name in names if name != rule_name]
+	item.pricing_rules = ",".join(names)
+
+
 def pricing_rule_line_percentage(item, rule) -> float:
 	"""The discount percentage ``rule`` grants this line, as a percentage of list price.
 

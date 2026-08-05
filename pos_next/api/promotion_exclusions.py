@@ -364,6 +364,21 @@ def mark_item_discount_flags(items, rule_type_map: dict[str, str] | None = None)
 			item.is_already_discounted = 0
 			continue
 
+		# Preserve bundled free-item / GWP stamps so the POS cart can show
+		# "N free items" instead of falling back to a derived "%".
+		existing_source = item.get("discount_source")
+		if existing_source in (DISCOUNT_SOURCE_FREE_ITEM, DISCOUNT_SOURCE_GWP):
+			item.is_already_discounted = 1
+			continue
+		if flt(item.get("free_qty")) > 0:
+			item.discount_source = DISCOUNT_SOURCE_FREE_ITEM
+			item.is_already_discounted = 1
+			continue
+		if flt(item.get("gwp_free_qty")) > 0:
+			item.discount_source = DISCOUNT_SOURCE_GWP
+			item.is_already_discounted = 1
+			continue
+
 		if is_accumulative_line(item):
 			# Discounted for reporting and for coupons, but the matrix still lets
 			# Auto Discount through — see ITEM_STATE_ACCUMULATIVE.

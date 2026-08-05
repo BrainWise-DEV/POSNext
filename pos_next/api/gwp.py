@@ -37,14 +37,12 @@ def _pricing_rule_apply_on_values(rule) -> set[str]:
 	"""Return normalized apply-on values from a Pricing Rule document."""
 	apply_on = cstr(_row_value(rule, "apply_on")).strip()
 	if apply_on == "Item Code":
-		if _row_value(rule, "mixed_conditions"):
-			return {
-				cstr(_row_value(row, "item_code"))
-				for row in (_row_value(rule, "items") or [])
-				if cstr(_row_value(row, "item_code"))
-			}
-		item_code = _row_value(rule, "item_code")
-		return {cstr(item_code)} if item_code else set()
+		# Pricing Rule has no scalar item_code — targets live on the items child table.
+		return {
+			cstr(_row_value(row, "item_code"))
+			for row in (_row_value(rule, "items") or [])
+			if cstr(_row_value(row, "item_code"))
+		}
 
 	if apply_on == "Item Group":
 		values: set[str] = set()
