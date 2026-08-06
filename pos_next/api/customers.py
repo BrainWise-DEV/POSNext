@@ -103,7 +103,11 @@ def _finalize_magento_customer_registration(
 	first_name: str | None = None,
 	last_name: str | None = None,
 ) -> None:
-	"""Persist Magento registration without re-running masar_miraaya Customer validate."""
+	"""Persist Magento registration without Customer.save().
+
+	Old masar_miraaya validate calls create_new_customer whenever
+	custom_is_publish=1 on save. Using db.set_value avoids that second Magento call.
+	"""
 	resolved_email = (magento_registration.get("email") or email_id or "").strip()
 	if resolved_email:
 		_prepare_customer_for_magento_publish(
@@ -293,8 +297,12 @@ def create_customer(
 	frappe.flags.pos_next_customer_company = company
 	frappe.flags.pos_next_customer_pos_profile = pos_profile
 	try:
+		# Insert with custom_is_publish=0 so old masar_miraaya validate does NOT
+		# call create_new_customer (which would duplicate Magento create).
 		customer.insert()
 		if publish_to_magento and frappe.get_meta("Customer").has_field("custom_is_publish"):
+			# Sole Magento create path — register_customer_pos (POST).
+			# Persist publish/id with db.set_value so Customer.validate never runs.
 			magento_registration = register_customer_pos(
 				customer=customer.name,
 				firstname=custom_first_name,
