@@ -3930,18 +3930,6 @@ def apply_offers(invoice_data, selected_offers=None):
 		# they compose instead of overwriting each other. See
 		# pos_next.promotions.engine.
 		applied_rules.update(run_line_discount_passes(prepared_items, rule_map, selected_offer_names))
-		# Per-item results win on collisions because they already carry full
-		# discount metadata from the per-item engine result.
-		for key, free_item_doc in txn_result.get("free_items", {}).items():
-			free_item_doc.qty = _floor_free_item_qty(free_item_doc.get("qty"))
-			free_items_map.setdefault(key, free_item_doc)
-		applied_rules.update(txn_result.get("applied_rules", set()))
-
-		_recompute_recursive_product_free_items(
-			prepared_items, free_items_map, rule_map, applied_rules
-		)
-		_apply_bundled_same_item_free_discounts(prepared_items, free_items_map, rule_map)
-		_apply_gwp_line_discounts(prepared_items, free_items_map, rule_map)
 
 		# Apply Min/Max ("cheapest/most-expensive item") price rules. These were
 		# deferred by the per-item engine (see pos_next.overrides.pricing_rule) and
@@ -3978,17 +3966,22 @@ def apply_offers(invoice_data, selected_offers=None):
 		# cart that never reached the threshold and sizes their percentage off
 		# the undiscounted base.
 		#
-		# `price_list_rate` x `discount_percentage` is the only basis every
-		# discount path agrees on: the per-item loop leaves `rate` at the
-		# incoming list rate (the frontend derives the net rate itself) and
-		# records `discount_amount` as a line total, while _materialize_rate in
-		# the Min/Max pass writes `discount_amount` per unit. All of them, though,
-		# leave `price_list_rate` and `discount_percentage` consistent.
+		# Prefer `discount_percentage` when set. Same-item free gifts stamp an
+		# absolute `discount_amount` with percentage 0 — convert that to a net
+		# rate so transaction min_amt rules still see the post-discount total.
 		for pricing_item, item_index in zip(pricing_items, index_map, strict=False):
 			prepared_item = prepared_items[item_index]
 			list_rate = flt(prepared_item.get("price_list_rate")) or flt(pricing_item.price_list_rate)
 			discount_pct = flt(prepared_item.get("discount_percentage") or 0)
-			net_rate = list_rate * (1 - discount_pct / 100.0) if list_rate else flt(pricing_item.rate)
+			line_qty = flt(prepared_item.get("qty") or prepared_item.get("quantity") or pricing_item.qty or 0)
+			discount_amt = flt(prepared_item.get("discount_amount") or 0)
+
+			if discount_pct:
+				net_rate = list_rate * (1 - discount_pct / 100.0) if list_rate else flt(pricing_item.rate)
+			elif discount_amt and line_qty:
+				net_rate = max(0, list_rate - (discount_amt / line_qty))
+			else:
+				net_rate = list_rate if list_rate else flt(pricing_item.rate)
 
 			pricing_item.price_list_rate = list_rate
 			pricing_item.base_price_list_rate = list_rate
@@ -4021,6 +4014,11 @@ def apply_offers(invoice_data, selected_offers=None):
 			free_items_map.setdefault(key, free_item_doc)
 		applied_rules.update(txn_result.get("applied_rules", set()))
 
+		# Recursive product free must run after per-item + txn free rows are
+		# collected, then bundle same-item gifts / apply GWP line discounts.
+		_recompute_recursive_product_free_items(
+			prepared_items, free_items_map, rule_map, applied_rules
+		)
 		_apply_bundled_same_item_free_discounts(prepared_items, free_items_map, rule_map)
 		_apply_gwp_line_discounts(prepared_items, free_items_map, rule_map)
 
