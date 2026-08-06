@@ -1087,51 +1087,50 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 			// If any offers are invalid, remove them and reapply remaining
 			if (invalidOffers.length > 0) {
-				const validOfferCodes = appliedOffers.value
-					.filter((o) => !invalidOffers.find((inv) => inv.code === o.code))
-					.map((o) => o.code);
+				const candidateCodes = [
+					...new Set([
+						...appliedOffers.value.map((o) => o.code),
+						...offersStore.allEligibleOffers.map((o) => o.name),
+					]),
+				];
 
-				if (validOfferCodes.length === 0) {
-					// All offers invalid - clear everything
-					appliedOffers.value = [];
-					processFreeItems([]);
-					clearAllOfferDiscounts();
-					applyHeaderDiscountFromServer(null);
-				} else {
-					// Reapply only valid offers
-					const invoiceData = buildOfferEvaluationPayload(currentProfile);
-					const response = await applyOffersResource.submit({
-						invoice_data: invoiceData,
-						selected_offers: validOfferCodes,
-					});
+				const invoiceData = buildOfferEvaluationPayload(currentProfile);
+				const response = await applyOffersResource.submit({
+					invoice_data: invoiceData,
+					selected_offers: candidateCodes,
+				});
 
-					if (signal?.aborted) return false;
+				if (signal?.aborted) return false;
 
-					const {
-						items: responseItems,
-						freeItems,
-						appliedRules,
-						headerDiscount,
-					} = parseOfferResponse(response);
+				const {
+					items: responseItems,
+					freeItems,
+					appliedRules,
+					headerDiscount,
+				} = parseOfferResponse(response);
 
-					applyDiscountsFromServer(responseItems);
-					processFreeItems(freeItems);
-					applyHeaderDiscountFromServer(headerDiscount);
-					filterActiveOffers(appliedRules);
+				applyDiscountsFromServer(responseItems);
+				processFreeItems(freeItems);
+				applyHeaderDiscountFromServer(headerDiscount);
+				filterActiveOffers(appliedRules);
 
-					// Update appliedOffers to only include valid ones
-					appliedOffers.value = appliedOffers.value.filter((entry) =>
-						appliedRules.includes(entry.code)
-					);
-				}
+				const removedNames = appliedOffers.value
+					.filter((entry) => !appliedRules.includes(entry.code))
+					.map((entry) => entry.name);
+				appliedOffers.value = appliedOffers.value.filter((entry) =>
+					appliedRules.includes(entry.code)
+				);
+
+				// The server kept everything the client doubted — nothing to report.
+				if (removedNames.length === 0) return false;
 
 				// Wait for Vue to update before showing toast
 				await nextTick();
 
-				// Show warning about removed offers
-				const offerNames = invalidOffers.map((o) => o.name).join(", ");
 				showWarning(
-					__("Offer removed: {0}. Cart no longer meets requirements.", [offerNames])
+					__("Offer removed: {0}. Cart no longer meets requirements.", [
+						removedNames.join(", "),
+					])
 				);
 				return true;
 			}
@@ -2316,48 +2315,31 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			currency: profileDoc?.currency || shiftStore.profileCurrency,
 		};
 		try {
-			// 1. Identify invalid offers to remove (client-side check)
-			const invalidOffers = [];
 
-			for (const entry of appliedOffers.value) {
-				if (entry.offer) {
-					const { eligible } = offersStore.checkOfferEligibility(entry.offer);
-					if (!eligible) invalidOffers.push(entry);
+			if (invoiceItems.value.length === 0) {
+				if (appliedOffers.value.length > 0) {
+					appliedOffers.value = [];
+					processFreeItems([]);
+					clearAllOfferDiscounts();
+					applyHeaderDiscountFromServer(null);
+					rebuildIncrementalCache();
 				}
+				offerProcessingState.value.lastCartHash = generateCartHash();
+				offerProcessingState.value.lastProcessedAt = Date.now();
+				return;
 			}
 
-			// 2. Identify new eligible offers to apply (client-side check)
 			const allEligibleOffers = offersStore.allEligibleOffers;
 			const currentAppliedCodes = new Set(appliedOffers.value.map((o) => o.code));
 			const newOffers = allEligibleOffers.filter(
 				(offer) => !currentAppliedCodes.has(offer.name)
 			);
-
-			// 3. Determine if we need to call the server
-			// We MUST hit the server if:
-			// - We have applied offers
-			// - We have new auto-offers to apply
-			// - We have invalid offers to remove
-			const invalidCodes = new Set(invalidOffers.map((o) => o.code));
-			const validExistingCodes = appliedOffers.value
-				.filter((o) => !invalidCodes.has(o.code))
-				.map((o) => o.code);
-
 			const newOfferCodes = newOffers.map((o) => o.name);
-			const combinedCodes = [...new Set([...validExistingCodes, ...newOfferCodes])];
+			const combinedCodes = [
+				...new Set([...appliedOffers.value.map((o) => o.code), ...newOfferCodes]),
+			];
 
-			// All applied offers became invalid and no new offers to apply.
-			if (combinedCodes.length === 0 && invalidOffers.length > 0) {
-				appliedOffers.value = [];
-				processFreeItems([]);
-				clearAllOfferDiscounts();
-				// Also clear any transaction-level header discount the server
-				// previously surfaced — if no offers remain, no header discount applies.
-				applyHeaderDiscountFromServer(null);
-
-				const names = invalidOffers.map((o) => o.name).join(", ");
-				showWarning(__("Offer removed: {0}. Cart no longer meets requirements.", [names]));
-			} else if (combinedCodes.length > 0) {
+			if (combinedCodes.length > 0) {
 				const invoiceData = buildOfferEvaluationPayload(currentProfile);
 				const response = await applyOffersResource.submit({
 					invoice_data: invoiceData,
@@ -2384,14 +2366,15 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				const actuallyApplied = new Set(appliedRules);
 				const nextAppliedOffers = [];
 				const newlyAddedNames = [];
+				const removedNames = [];
 
-				// Handle existing ones
+				// Handle existing ones. The server's verdict is the only input —
+				// an offer it did not return has genuinely lapsed.
 				for (const entry of appliedOffers.value) {
-					if (
-						!invalidOffers.find((inv) => inv.code === entry.code) &&
-						actuallyApplied.has(entry.code)
-					) {
+					if (actuallyApplied.has(entry.code)) {
 						nextAppliedOffers.push(entry);
+					} else {
+						removedNames.push(entry.name);
 					}
 				}
 
@@ -2417,10 +2400,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				appliedOffers.value = nextAppliedOffers;
 
 				// 6. UI Feedback
-				if (invalidOffers.length > 0) {
-					const names = invalidOffers.map((o) => o.name).join(", ");
+				if (removedNames.length > 0) {
 					showWarning(
-						__("Offer removed: {0}. Cart no longer meets requirements.", [names])
+						__("Offer removed: {0}. Cart no longer meets requirements.", [
+							removedNames.join(", "),
+						])
 					);
 				}
 
@@ -2431,11 +2415,6 @@ export const usePOSCartStore = defineStore("posCart", () => {
 						showSuccess(__("Offers applied: {0}", [newlyAddedNames.join(", ")]));
 					}
 				}
-			} else if (invoiceItems.value.length === 0 && appliedOffers.value.length > 0) {
-				// Cart cleared, reset offers
-				appliedOffers.value = [];
-				processFreeItems([]);
-				rebuildIncrementalCache();
 			}
 			// Update last processed hash on success
 			offerProcessingState.value.lastCartHash = generateCartHash();
