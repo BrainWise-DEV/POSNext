@@ -53,6 +53,10 @@ def _call_miraaya(method: str, **kwargs) -> dict[str, Any]:
 		return fn(**kwargs) or {}
 	except frappe.ValidationError:
 		raise
+	except (frappe.QueryTimeoutError, frappe.QueryDeadlockError):
+		# DB lock contention (e.g. API History naming) — let callers soft-handle
+		logger.exception("masar_miraaya call timed out on DB lock: %s", method)
+		raise
 	except Exception as exc:
 		logger.exception("masar_miraaya call failed: %s", method)
 		frappe.throw(_("Magento loyalty request failed: {0}").format(exc))
