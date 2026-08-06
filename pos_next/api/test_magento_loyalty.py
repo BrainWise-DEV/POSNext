@@ -153,6 +153,49 @@ class TestMagentoLoyalty(unittest.TestCase):
 		mock_add_lp_points.assert_not_called()
 
 	@patch("pos_next.api.magento_loyalty.is_magento_loyalty_mode", return_value=True)
+	@patch("pos_next.api.magento_loyalty.add_lp_points")
+	@patch("pos_next.api.magento_loyalty._has_field", return_value=True)
+	@patch("pos_next.api.magento_loyalty.frappe.db.get_value", return_value=None)
+	@patch("pos_next.api.magento_loyalty.get_wallet_amount_from_payments", return_value=0)
+	@patch("pos_next.api.magento_loyalty.frappe.db.set_value")
+	@patch("pos_next.api.magento_loyalty.frappe.log_error")
+	def test_add_magento_lp_on_submit_skips_null_update_on_failure(
+		self,
+		mock_log_error,
+		mock_set_value,
+		_mock_wallet_amount,
+		_mock_get_value,
+		_mock_has_field,
+		mock_add_lp_points,
+		_mock_mode,
+	):
+		"""Soft Magento failure must not write NULL into NOT NULL LP columns."""
+		mock_add_lp_points.return_value = {
+			"success": False,
+			"customer_id": 86469,
+			"value_iqd": 4000.0,
+			"points_added": None,
+			"balance_points": None,
+			"transaction_id": None,
+			"created": None,
+			"message": "Error adding customer loyalty points",
+		}
+
+		doc = Mock()
+		doc.is_pos = 1
+		doc.is_return = 0
+		doc.customer = "CUST-1"
+		doc.pos_profile = "POS-1"
+		doc.name = "SINV-1"
+		doc.grand_total = 4000
+		doc.get = Mock(return_value=[])
+
+		add_magento_lp_on_submit(doc)
+
+		mock_set_value.assert_not_called()
+		mock_log_error.assert_called_once()
+
+	@patch("pos_next.api.magento_loyalty.is_magento_loyalty_mode", return_value=True)
 	@patch("pos_next.api.magento_loyalty.redeem_lp_points")
 	@patch("pos_next.api.magento_loyalty.get_wallet_amount_for_sales_invoice", return_value=25)
 	@patch("pos_next.api.magento_loyalty._has_field", return_value=True)
