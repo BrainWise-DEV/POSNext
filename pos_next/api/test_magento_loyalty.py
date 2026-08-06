@@ -87,6 +87,7 @@ class TestMagentoLoyalty(unittest.TestCase):
 		self.assertEqual(kwargs["invoice_name"], "SINV-1")
 		self.assertEqual(kwargs["customer"], "CUST-1")
 		self.assertEqual(kwargs["value_iqd"], 100)
+		self.assertEqual(kwargs["job_id"], "add_magento_lp_SINV-1")
 		self.assertTrue(kwargs["enqueue_after_commit"])
 		self.assertTrue(kwargs["deduplicate"])
 

@@ -111,16 +111,9 @@ class TestCustomersAPI(unittest.TestCase):
 				pos_profile="POS-A",
 			)
 
-	@patch(
-		"pos_next.api.customers.frappe.flags",
-		new=Mock(
-			pos_next_customer_company=None,
-			pos_next_customer_pos_profile=None,
-			skip_magento_customer_sync=False,
-		),
-	)
 	@patch("pos_next.api.customers.register_customer_pos")
 	@patch("pos_next.api.customers._prepare_customer_for_magento_publish")
+	@patch("pos_next.api.customers.frappe.db.set_value")
 	@patch("pos_next.api.customers.frappe.get_doc")
 	@patch("pos_next.api.customers.get_default_loyalty_program_from_settings")
 	@patch("pos_next.api.customers.frappe.has_permission")
@@ -131,6 +124,7 @@ class TestCustomersAPI(unittest.TestCase):
 		mock_has_permission,
 		mock_get_loyalty,
 		mock_get_doc,
+		mock_set_value,
 		mock_prepare_magento,
 		mock_register,
 	):
@@ -139,6 +133,7 @@ class TestCustomersAPI(unittest.TestCase):
 		mock_register.return_value = {"customer_id": 12345, "email": "john@example.com"}
 
 		customer_doc = Mock()
+		customer_doc.name = "CUST-0001"
 		customer_doc.as_dict.return_value = {"name": "CUST-0001"}
 		customer_doc.reload = Mock()
 		mock_get_doc.return_value = customer_doc
@@ -161,19 +156,17 @@ class TestCustomersAPI(unittest.TestCase):
 		customer_doc.update.assert_called_once()
 		customer_doc.insert.assert_called_once_with()
 		mock_register.assert_called_once()
-		self.assertEqual(customer_doc.custom_customer_id, 12345)
-		customer_doc.save.assert_called_once_with()
+		mock_set_value.assert_called_once_with(
+			"Customer",
+			"CUST-0001",
+			{"custom_is_publish": 1, "custom_customer_id": 12345},
+			update_modified=False,
+		)
+		customer_doc.save.assert_not_called()
 
-	@patch(
-		"pos_next.api.customers.frappe.flags",
-		new=Mock(
-			pos_next_customer_company=None,
-			pos_next_customer_pos_profile=None,
-			skip_magento_customer_sync=False,
-		),
-	)
 	@patch("pos_next.api.customers.register_customer_pos")
 	@patch("pos_next.api.customers._prepare_customer_for_magento_publish")
+	@patch("pos_next.api.customers.frappe.db.set_value")
 	@patch("pos_next.api.customers.frappe.get_doc")
 	@patch("pos_next.api.customers.get_default_loyalty_program_from_settings")
 	@patch("pos_next.api.customers.frappe.has_permission")
@@ -184,6 +177,7 @@ class TestCustomersAPI(unittest.TestCase):
 		mock_has_permission,
 		mock_get_loyalty,
 		mock_get_doc,
+		mock_set_value,
 		mock_prepare_magento,
 		mock_register,
 	):
@@ -195,6 +189,7 @@ class TestCustomersAPI(unittest.TestCase):
 		}
 
 		customer_doc = Mock()
+		customer_doc.name = "CUST-0001"
 		customer_doc.as_dict.return_value = {"name": "CUST-0001"}
 		customer_doc.reload = Mock()
 		mock_get_doc.return_value = customer_doc
@@ -216,13 +211,20 @@ class TestCustomersAPI(unittest.TestCase):
 
 		mock_register.assert_called_once()
 		self.assertEqual(mock_register.call_args.kwargs["email"], None)
-		self.assertEqual(customer_doc.custom_customer_id, 999)
-		# Second prepare call applies Magento-assigned/default email
-		self.assertGreaterEqual(mock_prepare_magento.call_count, 2)
-		self.assertEqual(
-			mock_prepare_magento.call_args_list[-1].kwargs["email_id"],
-			"201099988877@pos.customer",
+		mock_set_value.assert_called_once_with(
+			"Customer",
+			"CUST-0001",
+			{"custom_is_publish": 1, "custom_customer_id": 999},
+			update_modified=False,
 		)
+		mock_prepare_magento.assert_called_once_with(
+			customer_doc,
+			email_id="201099988877@pos.customer",
+			mobile_no="+20-1099988877",
+			first_name="John",
+			last_name="Doe",
+		)
+		customer_doc.save.assert_not_called()
 
 	@patch("pos_next.api.customers.frappe.get_meta")
 	@patch("pos_next.api.customers.frappe.db.set_value")

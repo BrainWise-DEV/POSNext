@@ -95,6 +95,34 @@ def _prepare_customer_for_magento_publish(
 	customer.reload()
 
 
+def _finalize_magento_customer_registration(
+	customer,
+	magento_registration: dict,
+	email_id: str | None = None,
+	mobile_no: str | None = None,
+	first_name: str | None = None,
+	last_name: str | None = None,
+) -> None:
+	"""Persist Magento registration without re-running masar_miraaya Customer validate."""
+	resolved_email = (magento_registration.get("email") or email_id or "").strip()
+	if resolved_email:
+		_prepare_customer_for_magento_publish(
+			customer,
+			email_id=resolved_email,
+			mobile_no=mobile_no,
+			first_name=first_name,
+			last_name=last_name,
+		)
+
+	update_fields = {"custom_is_publish": 1}
+	customer_id = magento_registration.get("customer_id")
+	if customer_id:
+		update_fields["custom_customer_id"] = customer_id
+
+	frappe.db.set_value("Customer", customer.name, update_fields, update_modified=False)
+	customer.reload()
+
+
 @frappe.whitelist()
 def get_customers(search_term="", pos_profile=None, limit=20, modified_since=None):
 	"""
@@ -267,13 +295,6 @@ def create_customer(
 	try:
 		customer.insert()
 		if publish_to_magento and frappe.get_meta("Customer").has_field("custom_is_publish"):
-			_prepare_customer_for_magento_publish(
-				customer,
-				email_id=email_id,
-				mobile_no=mobile_no,
-				first_name=custom_first_name,
-				last_name=custom_last_name,
-			)
 			magento_registration = register_customer_pos(
 				customer=customer.name,
 				firstname=custom_first_name,
@@ -281,24 +302,14 @@ def create_customer(
 				phone=mobile_no,
 				email=email_id,
 			) or {}
-			if magento_registration.get("customer_id"):
-				customer.custom_customer_id = magento_registration["customer_id"]
-			# Magento/register may assign a default email when POS left it blank
-			resolved_email = (magento_registration.get("email") or email_id or "").strip()
-			if resolved_email:
-				_prepare_customer_for_magento_publish(
-					customer,
-					email_id=resolved_email,
-					mobile_no=mobile_no,
-					first_name=custom_first_name,
-					last_name=custom_last_name,
-				)
-			customer.custom_is_publish = 1
-			frappe.flags.skip_magento_customer_sync = True
-			try:
-				customer.save()
-			finally:
-				frappe.flags.skip_magento_customer_sync = False
+			_finalize_magento_customer_registration(
+				customer,
+				magento_registration,
+				email_id=email_id,
+				mobile_no=mobile_no,
+				first_name=custom_first_name,
+				last_name=custom_last_name,
+			)
 	finally:
 		frappe.flags.pos_next_customer_company = None
 		frappe.flags.pos_next_customer_pos_profile = None

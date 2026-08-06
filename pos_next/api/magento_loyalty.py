@@ -137,7 +137,7 @@ def add_magento_lp_on_submit(doc, method=None):
 		invoice_name=doc.name,
 		customer=doc.customer,
 		value_iqd=value_iqd,
-		job_name=f"add_magento_lp_{doc.name}",
+		job_id=f"add_magento_lp_{doc.name}",
 		enqueue_after_commit=True,
 		deduplicate=True,
 	)
