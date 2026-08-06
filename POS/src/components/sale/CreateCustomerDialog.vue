@@ -157,17 +157,15 @@
 					</div>
 				</div>
 
-				<!-- Email -->
+				<!-- Email (optional; Magento sync uses a default if blank) -->
 				<div>
 					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
 						{{ __("Email") }}
-						<span v-if="miraayaCustomerSync" class="text-red-500">*</span>
 					</label>
 					<Input
 						v-model="customerData.email_id"
 						type="email"
-						:placeholder="__('Enter email address')"
-						:required="miraayaCustomerSync"
+						:placeholder="__('Enter email address (optional)')"
 					/>
 				</div>
 
@@ -407,19 +405,8 @@ const hasValidCustomerName = computed(() => {
 	return Boolean((customerData.value.customer_name || "").trim());
 });
 
-const hasValidEmail = computed(() => {
-	if (!miraayaCustomerSync.value) {
-		return true;
-	}
-	return Boolean((customerData.value.email_id || "").trim());
-});
-
 const canSubmitCustomer = computed(
-	() =>
-		hasValidCustomerName.value &&
-		hasValidEmail.value &&
-		Boolean(phoneNumber.value) &&
-		hasPermission.value
+	() => hasValidCustomerName.value && Boolean(phoneNumber.value) && hasPermission.value
 );
 
 const currentCountryCode = computed(() => {
@@ -728,9 +715,6 @@ const handleCreate = async () => {
 		}
 		if (!customerData.value.custom_last_name?.trim()) {
 			return showError(__("Last Name is required"));
-		}
-		if (!customerData.value.email_id?.trim()) {
-			return showError(__("Email is required"));
 		}
 	} else if (!customerData.value.customer_name) {
 		return showError(__("Customer Name is required"));

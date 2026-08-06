@@ -7,8 +7,10 @@ from unittest.mock import Mock, patch
 import frappe
 
 from pos_next.api.customers import (
+	_generate_default_magento_email,
 	_get_customer_assignment_context,
 	_prepare_customer_for_magento_publish,
+	_publish_customer_to_magento,
 	_set_customer_magento_email_fields,
 	create_customer,
 	get_customers,
@@ -104,7 +106,7 @@ class TestCustomersAPI(unittest.TestCase):
 		with self.assertRaises(frappe.ValidationError):
 			create_customer(
 				customer_name="John Doe",
-				custom_first_name="John",
+				custom_first_name="",
 				custom_last_name="Doe",
 				customer_group="Individual",
 				territory="All Territories",
@@ -115,7 +117,7 @@ class TestCustomersAPI(unittest.TestCase):
 		"pos_next.api.customers.frappe.flags",
 		new=Mock(pos_next_customer_company=None, pos_next_customer_pos_profile=None),
 	)
-	@patch("pos_next.api.customers._prepare_customer_for_magento_publish")
+	@patch("pos_next.api.customers._publish_customer_to_magento")
 	@patch("pos_next.api.customers.frappe.get_doc")
 	@patch("pos_next.api.customers.get_default_loyalty_program_from_settings")
 	@patch("pos_next.api.customers.frappe.has_permission")
@@ -126,7 +128,7 @@ class TestCustomersAPI(unittest.TestCase):
 		mock_has_permission,
 		mock_get_loyalty,
 		mock_get_doc,
-		mock_prepare_magento,
+		mock_publish_magento,
 	):
 		mock_has_permission.return_value = True
 		mock_get_loyalty.return_value = "LOYALTY-A"
@@ -153,8 +155,83 @@ class TestCustomersAPI(unittest.TestCase):
 
 		customer_doc.update.assert_called_once()
 		customer_doc.insert.assert_called_once_with()
-		mock_prepare_magento.assert_called_once()
-		customer_doc.save.assert_called_once_with()
+		mock_publish_magento.assert_called_once()
+
+	@patch(
+		"pos_next.api.customers.frappe.flags",
+		new=Mock(pos_next_customer_company=None, pos_next_customer_pos_profile=None),
+	)
+	@patch("pos_next.api.customers._publish_customer_to_magento")
+	@patch("pos_next.api.customers.frappe.get_doc")
+	@patch("pos_next.api.customers.get_default_loyalty_program_from_settings")
+	@patch("pos_next.api.customers.frappe.has_permission")
+	@patch("pos_next.api.customers.is_miraaya_loyalty_available", return_value=True)
+	def test_create_customer_uses_default_email_when_missing(
+		self,
+		_mock_miraaya,
+		mock_has_permission,
+		mock_get_loyalty,
+		mock_get_doc,
+		mock_publish_magento,
+	):
+		mock_has_permission.return_value = True
+		mock_get_loyalty.return_value = "LOYALTY-A"
+
+		customer_doc = Mock()
+		customer_doc.as_dict.return_value = {"name": "CUST-0001"}
+		mock_get_doc.return_value = customer_doc
+
+		with patch("pos_next.api.customers.frappe.get_meta") as mock_get_meta:
+			meta = Mock()
+			meta.has_field.return_value = True
+			mock_get_meta.return_value = meta
+
+			create_customer(
+				customer_name="John Doe",
+				custom_first_name="John",
+				custom_last_name="Doe",
+				mobile_no="+20-1012345678",
+				customer_group="Individual",
+				territory="All Territories",
+				pos_profile="POS-A",
+			)
+
+		kwargs = mock_get_doc.call_args.args[0]
+		self.assertEqual(kwargs["email_id"], "201012345678@pos.customer")
+		mock_publish_magento.assert_called_once()
+		self.assertEqual(mock_publish_magento.call_args.kwargs["email_id"], "201012345678@pos.customer")
+
+	def test_generate_default_magento_email_from_mobile(self):
+		self.assertEqual(
+			_generate_default_magento_email(mobile_no="+20-1012345678"),
+			"201012345678@pos.customer",
+		)
+
+	@patch("pos_next.api.customers._prepare_customer_for_magento_publish")
+	@patch("pos_next.api.customers.frappe.log_error")
+	def test_publish_customer_to_magento_retries_with_default_email(
+		self,
+		mock_log_error,
+		mock_prepare,
+	):
+		customer = Mock()
+		customer.name = "CUST-0001"
+		customer.customer_name = "John Doe"
+		customer.save = Mock(side_effect=[Exception("Magento reject"), None])
+
+		_publish_customer_to_magento(
+			customer,
+			email_id="taken@example.com",
+			mobile_no="+20-1012345678",
+			first_name="John",
+			last_name="Doe",
+		)
+
+		self.assertEqual(mock_prepare.call_count, 2)
+		self.assertEqual(mock_prepare.call_args_list[0].kwargs["email_id"], "taken@example.com")
+		self.assertEqual(mock_prepare.call_args_list[1].kwargs["email_id"], "201012345678@pos.customer")
+		self.assertEqual(customer.save.call_count, 2)
+		mock_log_error.assert_called_once()
 
 	@patch("pos_next.api.customers.frappe.get_meta")
 	@patch("pos_next.api.customers.frappe.db.set_value")
@@ -195,18 +272,50 @@ class TestCustomersAPI(unittest.TestCase):
 		customer.name = "CUST-0001"
 		customer.reload = Mock()
 
-		_prepare_customer_for_magento_publish(
+		used_email = _prepare_customer_for_magento_publish(
 			customer,
 			email_id="john@example.com",
 			first_name="John",
 			last_name="Doe",
 		)
 
+		self.assertEqual(used_email, "john@example.com")
 		contact.add_email.assert_called_once_with("john@example.com", is_primary=1)
 		contact.save.assert_called_once_with(ignore_permissions=True)
 		mock_set_email_fields.assert_called_once_with("CUST-0001", "john@example.com")
 		customer.reload.assert_called_once_with()
 
+	@patch("pos_next.api.customers.frappe.get_doc")
+	@patch("pos_next.api.customers.frappe.db.get_value", return_value="CONTACT-1")
+	@patch("pos_next.api.customers._set_customer_magento_email_fields")
+	def test_prepare_customer_for_magento_publish_defaults_missing_email(
+		self,
+		mock_set_email_fields,
+		_mock_get_value,
+		mock_get_doc,
+	):
+		contact = Mock()
+		contact.email_ids = []
+		contact.first_name = "John"
+		contact.last_name = "Doe"
+		mock_get_doc.return_value = contact
+
+		customer = Mock()
+		customer.name = "CUST-0001"
+		customer.customer_name = "John Doe"
+		customer.reload = Mock()
+
+		used_email = _prepare_customer_for_magento_publish(
+			customer,
+			email_id="",
+			mobile_no="+20-1012345678",
+			first_name="John",
+			last_name="Doe",
+		)
+
+		self.assertEqual(used_email, "201012345678@pos.customer")
+		contact.add_email.assert_called_once_with("201012345678@pos.customer", is_primary=1)
+		mock_set_email_fields.assert_called_once_with("CUST-0001", "201012345678@pos.customer")
 	@patch(
 		"pos_next.api.customers.frappe.flags",
 		new=Mock(pos_next_customer_company=None, pos_next_customer_pos_profile=None),

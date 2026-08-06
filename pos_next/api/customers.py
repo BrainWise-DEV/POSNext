@@ -3,12 +3,37 @@ POS Next Customer API
 Handles customer search, creation, and management for POS operations
 """
 
+import re
+
 import frappe
 from frappe import _
 
 from pos_next.services.miraaya_loyalty import is_miraaya_loyalty_available
 
 MAGENTO_EMAIL_FIELDS = ("custom_email", "email", "email_id")
+DEFAULT_MAGENTO_EMAIL_DOMAIN = "pos.customer"
+
+
+def _generate_default_magento_email(mobile_no: str | None = None, customer_name: str | None = None) -> str:
+	"""Build a unique placeholder email when none is provided for Magento sync."""
+	digits = re.sub(r"\D", "", mobile_no or "")
+	if digits:
+		return f"{digits}@{DEFAULT_MAGENTO_EMAIL_DOMAIN}"
+
+	slug = re.sub(r"[^a-z0-9]+", "", (customer_name or "customer").lower()) or "customer"
+	return f"{slug}.{frappe.generate_hash(length=6)}@{DEFAULT_MAGENTO_EMAIL_DOMAIN}"
+
+
+def _resolve_magento_email(
+	email_id: str | None = None,
+	mobile_no: str | None = None,
+	customer_name: str | None = None,
+) -> str:
+	"""Use provided email, otherwise generate a default Magento-safe email."""
+	email_id = (email_id or "").strip()
+	if email_id:
+		return email_id
+	return _generate_default_magento_email(mobile_no=mobile_no, customer_name=customer_name)
 
 
 def _set_customer_magento_email_fields(customer_name: str, email_id: str) -> None:
@@ -75,15 +100,20 @@ def _ensure_customer_primary_contact_email(
 
 def _prepare_customer_for_magento_publish(
 	customer,
-	email_id: str,
+	email_id: str | None = None,
 	mobile_no: str | None = None,
 	first_name: str | None = None,
 	last_name: str | None = None,
-) -> None:
-	"""Make sure email is on Customer + Contact before masar_miraaya validate runs."""
-	email_id = (email_id or "").strip()
-	if not email_id:
-		frappe.throw(_("Email is required for Magento customer sync"))
+) -> str:
+	"""Make sure email is on Customer + Contact before masar_miraaya validate runs.
+
+	Returns the email used (provided or generated default).
+	"""
+	email_id = _resolve_magento_email(
+		email_id=email_id,
+		mobile_no=mobile_no,
+		customer_name=getattr(customer, "customer_name", None) or customer.name,
+	)
 
 	_ensure_customer_primary_contact_email(
 		customer,
@@ -94,7 +124,50 @@ def _prepare_customer_for_magento_publish(
 	)
 	_set_customer_magento_email_fields(customer.name, email_id)
 	customer.reload()
+	return email_id
 
+
+def _publish_customer_to_magento(
+	customer,
+	email_id: str | None = None,
+	mobile_no: str | None = None,
+	first_name: str | None = None,
+	last_name: str | None = None,
+) -> None:
+	"""Publish customer to Magento; on failure retry once with a default email."""
+	resolved_email = _resolve_magento_email(
+		email_id=email_id,
+		mobile_no=mobile_no,
+		customer_name=getattr(customer, "customer_name", None) or customer.name,
+	)
+	default_email = _generate_default_magento_email(
+		mobile_no=mobile_no,
+		customer_name=getattr(customer, "customer_name", None) or customer.name,
+	)
+
+	def _save_with_email(email: str) -> None:
+		_prepare_customer_for_magento_publish(
+			customer,
+			email_id=email,
+			mobile_no=mobile_no,
+			first_name=first_name,
+			last_name=last_name,
+		)
+		customer.custom_is_publish = 1
+		customer.save()
+
+	try:
+		_save_with_email(resolved_email)
+	except Exception:
+		# Magento often rejects duplicates/invalid emails — fall back to a generated one.
+		if resolved_email.lower() == default_email.lower():
+			raise
+
+		frappe.log_error(
+			title="Magento customer publish failed; retrying with default email",
+			message=frappe.get_traceback(),
+		)
+		_save_with_email(default_email)
 
 @frappe.whitelist()
 def get_customers(search_term="", pos_profile=None, limit=20, modified_since=None):
@@ -208,8 +281,13 @@ def create_customer(
 			frappe.throw(_("First name is required"))
 		if not (custom_last_name or "").strip():
 			frappe.throw(_("Last name is required"))
-		if not (email_id or "").strip():
-			frappe.throw(_("Email is required for Magento customer sync"))
+
+	# Magento sync needs an email; generate a default when the POS user leaves it blank.
+	if is_miraaya_loyalty_available() and not (email_id or "").strip():
+		email_id = _generate_default_magento_email(
+			mobile_no=mobile_no,
+			customer_name=customer_name,
+		)
 
 	loyalty_program = get_default_loyalty_program_from_settings(
 		company=company,
@@ -268,21 +346,18 @@ def create_customer(
 	try:
 		customer.insert()
 		if publish_to_magento and frappe.get_meta("Customer").has_field("custom_is_publish"):
-			_prepare_customer_for_magento_publish(
+			_publish_customer_to_magento(
 				customer,
 				email_id=email_id,
 				mobile_no=mobile_no,
 				first_name=custom_first_name,
 				last_name=custom_last_name,
 			)
-			customer.custom_is_publish = 1
-			customer.save()
 	finally:
 		frappe.flags.pos_next_customer_company = None
 		frappe.flags.pos_next_customer_pos_profile = None
 
 	return customer.as_dict()
-
 
 def get_default_loyalty_program(company):
 	"""
