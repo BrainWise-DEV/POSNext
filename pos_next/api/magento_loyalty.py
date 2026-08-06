@@ -138,15 +138,37 @@ def add_magento_lp_on_submit(doc, method=None):
 			title="Magento LP Add Points Error",
 			message=f"Invoice: {doc.name}, Error: {exc!s}\n{frappe.get_traceback()}",
 		)
+		frappe.msgprint(
+			_("Invoice submitted successfully but loyalty points could not be added. Please contact administrator."),
+			alert=True,
+			indicator="orange",
+		)
+		return
+
+	# Magento / masar may return a soft failure instead of raising
+	if result.get("success") is False:
+		frappe.log_error(
+			title="Magento LP Add Points Failed",
+			message=f"Invoice: {doc.name}, Value IQD: {value_iqd}, Result: {result}",
+		)
+		frappe.msgprint(
+			_("Invoice submitted successfully but loyalty points could not be added. Please contact administrator."),
+			alert=True,
+			indicator="orange",
+		)
 		return
 
 	updates = {}
-	if _has_field("Sales Invoice", "custom_lp_add_transaction_id"):
-		updates["custom_lp_add_transaction_id"] = result.get("transaction_id")
-	if _has_field("Sales Invoice", "custom_lp_points_added"):
-		updates["custom_lp_points_added"] = result.get("points_added")
+	transaction_id = result.get("transaction_id")
+	points_added = result.get("points_added")
+
+	# Only persist non-null values — custom_lp_points_added is NOT NULL in MariaDB
+	if _has_field("Sales Invoice", "custom_lp_add_transaction_id") and transaction_id:
+		updates["custom_lp_add_transaction_id"] = transaction_id
+	if _has_field("Sales Invoice", "custom_lp_points_added") and points_added is not None:
+		updates["custom_lp_points_added"] = flt(points_added)
 	if _has_field("Sales Invoice", "custom_lp_value_iqd"):
-		updates["custom_lp_value_iqd"] = result.get("value_iqd") or value_iqd
+		updates["custom_lp_value_iqd"] = flt(result.get("value_iqd") or value_iqd)
 
 	if updates:
 		frappe.db.set_value("Sales Invoice", doc.name, updates, update_modified=False)
