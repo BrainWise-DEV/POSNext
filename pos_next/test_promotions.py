@@ -1275,6 +1275,146 @@ class TestPromotions(FrappeTestCase):
 		self.assertEqual(flt(resp.get("discount_amount") or 0), 0)
 
 	# -------------------------------------------------------------------
+	# Transaction-scoped Price rules must honour the cashier's selection
+	# -------------------------------------------------------------------
+
+	def test_txn_price_rule_not_selected_yields_no_header_discount(self):
+		"""An unselected transaction Price rule must not discount the header.
+
+		ERPNext's apply_pricing_rule_on_transaction runs its own SQL over every
+		enabled transaction rule and never consults `selected_offers`. Free item
+		rows coming back from it are filtered against the selection, so without
+		the same filter on the header the two halves of one scheme disagree —
+		and a rule the UI never offered can still discount the sale.
+		"""
+		import json
+
+		txn_rule = _make_rule(
+			"_PNXT_TEST_TxnUnselectedPrice",
+			apply_on="Transaction",
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			discount_percentage=25,
+			apply_discount_on="Grand Total",
+		)
+		other_rule = _make_rule(
+			"_PNXT_TEST_TxnUnselectedOther",
+			apply_on="Item Code",
+			items=[{"item_code": ITEM_A}],
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			discount_percentage=10,
+		)
+		payload = _cart_payload(
+			self.ctx,
+			[_line(self.ctx, ITEM_A, qty=1), _line(self.ctx, ITEM_B, qty=1)],
+		)
+
+		resp = apply_offers(
+			invoice_data=json.dumps(payload),
+			# Deliberately omits txn_rule.
+			selected_offers=json.dumps([other_rule]),
+		)
+
+		self.assertNotIn(txn_rule, resp.get("applied_pricing_rules") or [])
+		self.assertEqual(
+			flt(resp.get("discount_amount") or 0),
+			0,
+			msg=(
+				"An unselected transaction Price rule still pushed its discount onto "
+				"the header — ERPNext's own SQL bypassed the selection filter."
+			),
+		)
+		self.assertEqual(flt(resp.get("additional_discount_percentage") or 0), 0)
+
+	def test_txn_price_rule_selected_still_applies(self):
+		"""The selection filter must not suppress a legitimately chosen rule."""
+		import json
+
+		txn_rule = _make_rule(
+			"_PNXT_TEST_TxnSelectedPrice",
+			apply_on="Transaction",
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			discount_percentage=25,
+			apply_discount_on="Grand Total",
+		)
+		payload = _cart_payload(
+			self.ctx,
+			[_line(self.ctx, ITEM_A, qty=1), _line(self.ctx, ITEM_B, qty=1)],
+		)
+
+		resp = apply_offers(
+			invoice_data=json.dumps(payload),
+			selected_offers=json.dumps([txn_rule]),
+		)
+
+		self.assertIn(txn_rule, resp.get("applied_pricing_rules") or [])
+		# 25% of the undiscounted 130 cart.
+		self.assertAlmostEqual(flt(resp.get("discount_amount")), 32.5, places=2)
+
+	def test_txn_free_item_and_header_discount_share_one_gate(self):
+		"""Both halves of a transaction scheme respond to selection alike.
+
+		Mirrors a Promotional Scheme that carries a price slab and a product
+		slab: selecting neither must apply neither, selecting both must apply
+		both. The regression this guards is the asymmetric case — free item
+		suppressed while the header discount goes through anyway.
+		"""
+		import json
+
+		price_rule = _make_rule(
+			"_PNXT_TEST_TxnPairPrice",
+			apply_on="Transaction",
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			discount_percentage=25,
+			apply_discount_on="Grand Total",
+		)
+		product_rule = _make_rule(
+			"_PNXT_TEST_TxnPairProduct",
+			apply_on="Transaction",
+			price_or_product_discount="Product",
+			free_item=ITEM_C,
+			free_qty=1,
+		)
+		# Something real to select instead, so `rule_map` stays non-empty and
+		# apply_offers reaches the transaction engine at all — selecting only a
+		# name that does not exist short-circuits before it. Scoped to an item
+		# the cart does not contain, and gated behind an unreachable min_qty, so
+		# it cannot perturb the totals under test.
+		decoy_rule = _make_rule(
+			"_PNXT_TEST_TxnPairDecoy",
+			apply_on="Item Code",
+			items=[{"item_code": ITEM_C}],
+			rate_or_discount="Discount Percentage",
+			price_or_product_discount="Price",
+			discount_percentage=10,
+			min_qty=5,
+		)
+		payload = _cart_payload(
+			self.ctx,
+			[_line(self.ctx, ITEM_A, qty=1), _line(self.ctx, ITEM_B, qty=1)],
+		)
+
+		neither = apply_offers(
+			invoice_data=json.dumps(payload),
+			selected_offers=json.dumps([decoy_rule]),
+		)
+		self.assertEqual(flt(neither.get("discount_amount") or 0), 0)
+		self.assertEqual(neither.get("free_items") or [], [])
+
+		both = apply_offers(
+			invoice_data=json.dumps(payload),
+			selected_offers=json.dumps([price_rule, product_rule]),
+		)
+		self.assertAlmostEqual(flt(both.get("discount_amount")), 32.5, places=2)
+		self.assertEqual(
+			[f.get("item_code") for f in both.get("free_items") or []],
+			[ITEM_C],
+		)
+
+	# -------------------------------------------------------------------
 	# Item-Level Discount (Type 4) interaction matrix
 	# -------------------------------------------------------------------
 

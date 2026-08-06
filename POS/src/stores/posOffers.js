@@ -20,6 +20,14 @@ const defaultSnapshot = () => ({
 	itemQuantities: {}, // { item_code: qty }
 	itemGroupQuantities: {}, // { item_group: qty }
 	brandQuantities: {}, // { brand: qty }
+	// Amount basis for min_amt/max_amt validation. The server does NOT use one
+	// figure for every offer — see getEligibleItemAmount:
+	//   apply_on = "Transaction"  -> netSubtotal (cart, after item discounts)
+	//   apply_on = Item/Group/Brand -> gross amount of the matching lines only
+	netSubtotal: 0,
+	itemAmounts: {}, // { item_code: qty * price_list_rate }
+	itemGroupAmounts: {}, // { item_group: qty * price_list_rate }
+	brandAmounts: {}, // { brand: qty * price_list_rate }
 });
 
 function getDiscountSortValue(offer) {
@@ -130,8 +138,22 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 				? snapshot.brandQuantities
 				: {};
 
+		// Amount maps mirroring the server's min_amt/max_amt bases.
+		const asAmountMap = (value) =>
+			value && typeof value === "object" ? value : {};
+		const netSubtotal = Number.isFinite(Number.parseFloat(snapshot.netSubtotal))
+			? Number.parseFloat(snapshot.netSubtotal)
+			: subtotal;
+		const itemAmounts = asAmountMap(snapshot.itemAmounts);
+		const itemGroupAmounts = asAmountMap(snapshot.itemGroupAmounts);
+		const brandAmounts = asAmountMap(snapshot.brandAmounts);
+
 		cartSnapshot.value = {
 			subtotal,
+			netSubtotal,
+			itemAmounts,
+			itemGroupAmounts,
+			brandAmounts,
 			itemCount,
 			itemCodes,
 			itemGroups,
@@ -205,12 +227,65 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 	}
 
 	/**
+	 * Resolves the amount an offer's min_amt/max_amt must be compared against.
+	 *
+	 * The server uses two different bases depending on the rule's scope, so a
+	 * single cart figure cannot mirror it:
+	 *
+	 * - apply_on = "Transaction" -> ERPNext gates on `doc.total`
+	 *   (apply_pricing_rule_on_transaction), i.e. the whole cart AFTER
+	 *   item-level discounts. Comparing the gross subtotal here rejects offers
+	 *   the server would grant.
+	 * - apply_on = Item Code / Item Group / Brand -> ERPNext gates on
+	 *   `qty * price_list_rate` of the MATCHING lines only (filter_pricing_rules),
+	 *   at list price, ignoring discounts other rules put on those lines.
+	 *   Comparing the whole cart here accepts offers the server would reject.
+	 *
+	 * This is the amount-side counterpart of getEligibleItemQuantity.
+	 *
+	 * @param {Object} offer - The offer to check
+	 * @returns {number} Amount to compare against min_amt / max_amt
+	 */
+	function getEligibleItemAmount(offer) {
+		const itemAmounts = cartSnapshot.value.itemAmounts || {};
+		const itemGroupAmounts = cartSnapshot.value.itemGroupAmounts || {};
+		const brandAmounts = cartSnapshot.value.brandAmounts || {};
+		const sumOver = (keys, map) => keys.reduce((sum, key) => sum + (map[key] || 0), 0);
+
+		if (offer?.apply_on === "Item Code") {
+			const eligibleItems = offer.eligible_items || [];
+			if (eligibleItems.length > 0) {
+				return sumOver(eligibleItems, itemAmounts);
+			}
+		} else if (offer?.apply_on === "Item Group") {
+			const eligibleGroups = offer.eligible_item_groups || [];
+			if (eligibleGroups.length > 0) {
+				if (eligibleGroups.includes("All Item Groups")) {
+					return cartSnapshot.value.subtotal || 0;
+				}
+				return sumOver(eligibleGroups, itemGroupAmounts);
+			}
+		} else if (offer?.apply_on === "Brand") {
+			const eligibleBrands = offer.eligible_brands || [];
+			if (eligibleBrands.length > 0) {
+				return sumOver(eligibleBrands, brandAmounts);
+			}
+		} else if (offer?.apply_on === "Transaction") {
+			// Post-item-discount cart total — what `doc.total` carries server-side.
+			return cartSnapshot.value.netSubtotal || 0;
+		}
+
+		// Offers without usable scope metadata: fall back to the gross cart
+		// subtotal, the pre-existing behaviour for every offer.
+		return cartSnapshot.value.subtotal || 0;
+	}
+
+	/**
 	 * Checks if an offer is eligible based on current cart state
 	 * @param {Object} offer - The offer to check
 	 * @returns {Object} {eligible: boolean, reason: string|null}
 	 */
 	function checkOfferEligibility(offer) {
-		const subtotal = cartSnapshot.value.subtotal || 0;
 		const itemCount = cartSnapshot.value.itemCount || 0;
 		const cartItemCodes = cartSnapshot.value.itemCodes || [];
 		const cartItemGroups = cartSnapshot.value.itemGroups || [];
@@ -309,16 +384,19 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 			};
 		}
 
-		// Check minimum amount (still uses total subtotal)
-		if (offer?.min_amt && subtotal < offer.min_amt) {
+		// Check min/max amount against the same basis the server uses for this
+		// offer's scope — net cart total for Transaction rules, gross amount of
+		// the matching lines otherwise. See getEligibleItemAmount.
+		const eligibleAmount = getEligibleItemAmount(offer);
+
+		if (offer?.min_amt && eligibleAmount < offer.min_amt) {
 			return {
 				eligible: false,
 				reason: __("Minimum cart value of {0} required", [offer.min_amt]),
 			};
 		}
 
-		// Check maximum amount (still uses total subtotal)
-		if (offer?.max_amt && subtotal > offer.max_amt) {
+		if (offer?.max_amt && eligibleAmount > offer.max_amt) {
 			return {
 				eligible: false,
 				reason: __("Maximum cart value exceeded ({0})", [offer.max_amt]),
@@ -359,9 +437,11 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 	const autoEligibleCount = computed(() => autoEligibleOffers.value.length);
 
 	function getUnlockAmount(offer) {
-		const subtotal = cartSnapshot.value.subtotal || 0;
-		if (offer?.min_amt && subtotal < offer.min_amt) {
-			return offer.min_amt - subtotal;
+		// Same basis as the eligibility gate, or the prompt would ask for an
+		// amount that does not actually unlock the offer.
+		const eligibleAmount = getEligibleItemAmount(offer);
+		if (offer?.min_amt && eligibleAmount < offer.min_amt) {
+			return offer.min_amt - eligibleAmount;
 		}
 		return 0;
 	}
@@ -463,6 +543,7 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 		setAvailableOffers,
 		clearOffers,
 		checkOfferEligibility,
+		getEligibleItemAmount,
 		getUnlockAmount,
 		ensureOffersFetched,
 		setOneTimeContext,

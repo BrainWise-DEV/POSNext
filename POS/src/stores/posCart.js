@@ -1851,6 +1851,33 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * min_qty === max_qty (e.g. buy exactly 2 get 1 free → qty becomes 3 →
 	 * offer removed → re-applied in a loop).
 	 */
+	/**
+	 * Gross and net amount of a single cart line, on the same basis the server
+	 * uses when gating min_amt/max_amt.
+	 *
+	 * Mirrors buildOfferEvaluationPayload (which sends
+	 * `price_list_rate: item.price_list_rate || item.rate`) and the net-rate
+	 * derivation in pos_next.api.invoices.apply_offers, which folds item
+	 * discounts back into the pricing items as
+	 * `price_list_rate * (1 - discount_percentage / 100)` before handing the
+	 * cart total to ERPNext's transaction engine. Deriving net from
+	 * discount_percentage rather than discount_amount keeps the two sides in
+	 * step: per-unit vs. line-total conventions differ across discount paths,
+	 * but every path leaves price_list_rate and discount_percentage consistent.
+	 */
+	function offerLineAmounts(item) {
+		const qty = item.quantity || 0;
+		const listRate = Number.parseFloat(item.price_list_rate || item.rate) || 0;
+		const gross = qty * listRate;
+		const discountPct = Number.parseFloat(item.discount_percentage) || 0;
+		return { gross, net: gross * (1 - discountPct / 100) };
+	}
+
+	/** Cart total after item-level discounts — the server's `doc.total`. */
+	function offerNetSubtotal(items) {
+		return items.reduce((sum, item) => sum + offerLineAmounts(item).net, 0);
+	}
+
 	function buildCartSnapshot() {
 		const items = invoiceItems.value.filter((item) => !item.is_free_item);
 		const totalQty = items.reduce((sum, item) => sum + (item.quantity || 0), 0);
@@ -1865,24 +1892,33 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		const itemGroupQuantities = {};
 		// brandQuantities: { brand: total_qty } - quantity per brand
 		const brandQuantities = {};
+		// Gross line amounts (qty * price_list_rate) per scope, for min_amt/max_amt
+		const itemAmounts = {};
+		const itemGroupAmounts = {};
+		const brandAmounts = {};
 
 		for (const item of items) {
 			const qty = item.quantity || 0;
+			const { gross } = offerLineAmounts(item);
 
 			// Aggregate by item code
 			if (item.item_code) {
 				itemQuantities[item.item_code] = (itemQuantities[item.item_code] || 0) + qty;
+				itemAmounts[item.item_code] = (itemAmounts[item.item_code] || 0) + gross;
 			}
 
 			// Aggregate by item group
 			if (item.item_group) {
 				itemGroupQuantities[item.item_group] =
 					(itemGroupQuantities[item.item_group] || 0) + qty;
+				itemGroupAmounts[item.item_group] =
+					(itemGroupAmounts[item.item_group] || 0) + gross;
 			}
 
 			// Aggregate by brand
 			if (item.brand) {
 				brandQuantities[item.brand] = (brandQuantities[item.brand] || 0) + qty;
+				brandAmounts[item.brand] = (brandAmounts[item.brand] || 0) + gross;
 			}
 		}
 
@@ -1896,6 +1932,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			itemQuantities,
 			itemGroupQuantities,
 			brandQuantities,
+			// Amount bases for min_amt/max_amt validation
+			netSubtotal: offerNetSubtotal(items),
+			itemAmounts,
+			itemGroupAmounts,
+			brandAmounts,
 		};
 	}
 
@@ -2098,6 +2139,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	let cachedItemQuantities = {};
 	let cachedItemGroupQuantities = {};
 	let cachedBrandQuantities = {};
+	let cachedItemAmounts = {};
+	let cachedItemGroupAmounts = {};
+	let cachedBrandAmounts = {};
 
 	function syncOfferSnapshot() {
 		// Only sync if values are initialized
@@ -2105,9 +2149,15 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			// Paid lines only — free gifts must not inflate min_qty/max_qty checks
 			const paidItems = invoiceItems.value.filter((item) => !item.is_free_item);
 
-			// Create hash for paid item codes and quantities to detect actual changes
+			// Create hash for paid item codes and quantities to detect actual changes.
+			// price_list_rate is part of the key because the cached amount maps
+			// below are money, not just counts — a price list change with an
+			// otherwise identical cart must invalidate them.
 			const currentHash = paidItems
-				.map((item) => `${item.item_code}:${item.quantity}`)
+				.map(
+					(item) =>
+						`${item.item_code}:${item.quantity}:${item.price_list_rate || item.rate}`
+				)
 				.join(",");
 
 			// Only recalculate expensive operations if items actually changed
@@ -2122,21 +2172,31 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				cachedItemQuantities = {};
 				cachedItemGroupQuantities = {};
 				cachedBrandQuantities = {};
+				cachedItemAmounts = {};
+				cachedItemGroupAmounts = {};
+				cachedBrandAmounts = {};
 
 				for (const item of paidItems) {
 					const qty = item.quantity || 0;
+					const { gross } = offerLineAmounts(item);
 
 					if (item.item_code) {
 						cachedItemQuantities[item.item_code] =
 							(cachedItemQuantities[item.item_code] || 0) + qty;
+						cachedItemAmounts[item.item_code] =
+							(cachedItemAmounts[item.item_code] || 0) + gross;
 					}
 					if (item.item_group) {
 						cachedItemGroupQuantities[item.item_group] =
 							(cachedItemGroupQuantities[item.item_group] || 0) + qty;
+						cachedItemGroupAmounts[item.item_group] =
+							(cachedItemGroupAmounts[item.item_group] || 0) + gross;
 					}
 					if (item.brand) {
 						cachedBrandQuantities[item.brand] =
 							(cachedBrandQuantities[item.brand] || 0) + qty;
+						cachedBrandAmounts[item.brand] =
+							(cachedBrandAmounts[item.brand] || 0) + gross;
 					}
 				}
 
@@ -2157,6 +2217,13 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				itemQuantities: cachedItemQuantities,
 				itemGroupQuantities: cachedItemGroupQuantities,
 				brandQuantities: cachedBrandQuantities,
+				// Recomputed every sync, not cached with the maps above: item
+				// discounts change without any item/qty/price change (the server
+				// stamps them back onto the cart after apply_offers).
+				netSubtotal: offerNetSubtotal(paidItems),
+				itemAmounts: cachedItemAmounts,
+				itemGroupAmounts: cachedItemGroupAmounts,
+				brandAmounts: cachedBrandAmounts,
 			});
 		}
 	}

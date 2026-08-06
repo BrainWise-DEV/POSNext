@@ -3466,6 +3466,7 @@ def _evaluate_transaction_offers(
 	apply_discount_on = doc.get("apply_discount_on") or None
 
 	header_discount_changed = post_addl_pct != pre_addl_pct or post_discount_amt != pre_discount_amt
+	header_rules = set()
 	if header_discount_changed:
 		for rule_name, details in rule_map.items():
 			if selected_offer_names and rule_name not in selected_offer_names:
@@ -3474,7 +3475,26 @@ def _evaluate_transaction_offers(
 				continue
 			if frappe.db.get_value("Pricing Rule", rule_name, "apply_on") != "Transaction":
 				continue
-			applied_rules.add(rule_name)
+			header_rules.add(rule_name)
+
+	# Both halves of a transaction-scoped scheme must honour the same gate.
+	# apply_pricing_rule_on_transaction runs its own SQL over every enabled
+	# transaction rule and never consults `rule_map` or the cashier's
+	# selection. The free item rows it appends are filtered against both above,
+	# so leaving the header discount unfiltered lets one half of a scheme apply
+	# while the other is suppressed — and lets a Pricing Rule the UI cannot even
+	# offer (an orphan left behind by a deleted Promotional Scheme slab, say)
+	# silently discount the sale.
+	#
+	# Coupon-driven rules are exempt: they are gated by the coupon code itself
+	# and are deliberately kept out of `rule_map` (the top-up filters on
+	# coupon_code_based = 0), so an empty `header_rules` says nothing about them.
+	if header_discount_changed and not header_rules and not invoice.get("coupon_code"):
+		post_addl_pct = 0.0
+		post_discount_amt = 0.0
+		apply_discount_on = None
+	else:
+		applied_rules.update(header_rules)
 
 	return {
 		"free_items": free_items,
