@@ -5,8 +5,7 @@ Handles customer search, creation, and management for POS operations
 
 import frappe
 from frappe import _
-from masar_miraaya.api import register_customer_pos
-from pos_next.services.miraaya_loyalty import is_miraaya_loyalty_available
+from pos_next.services.miraaya_loyalty import is_miraaya_loyalty_available, register_customer_pos
 
 MAGENTO_EMAIL_FIELDS = ("custom_email", "email", "email_id")
 

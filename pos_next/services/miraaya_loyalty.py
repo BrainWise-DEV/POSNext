@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 GET_BALANCE_METHOD = "masar_miraaya.api.get_customer_lp_balance"
 ADD_POINTS_METHOD = "masar_miraaya.api.add_customer_lp_points"
 REDEEM_POINTS_METHOD = "masar_miraaya.api.redeem_customer_lp_points"
+REGISTER_CUSTOMER_POS_METHOD = "masar_miraaya.api.register_customer_pos"
 
 
 @lru_cache(maxsize=1)
@@ -80,6 +81,24 @@ def add_lp_points(customer: str, value_iqd: float) -> dict[str, Any]:
 def redeem_lp_points(customer: str, value_iqd: float) -> dict[str, Any]:
 	"""Redeem loyalty points in Magento for a wallet/LP payment."""
 	return _call_miraaya(REDEEM_POINTS_METHOD, customer=customer, value_iqd=flt(value_iqd))
+
+
+def register_customer_pos(
+	customer: str,
+	firstname: str | None = None,
+	lastname: str | None = None,
+	phone: str | None = None,
+	email: str | None = None,
+) -> dict[str, Any]:
+	"""Register a POS customer in Magento via masar_miraaya."""
+	return _call_miraaya(
+		REGISTER_CUSTOMER_POS_METHOD,
+		customer=customer,
+		firstname=firstname,
+		lastname=lastname,
+		phone=phone,
+		email=email,
+	)
 
 
 def customer_has_magento_id(customer: str) -> bool:

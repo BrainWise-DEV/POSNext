@@ -16,6 +16,7 @@ from pos_next.services.miraaya_loyalty import (
 	is_magento_loyalty_mode,
 	is_miraaya_loyalty_available,
 	redeem_lp_points,
+	register_customer_pos,
 )
 
 __all__ = [
@@ -26,5 +27,6 @@ __all__ = [
 	"is_magento_loyalty_mode",
 	"is_miraaya_loyalty_available",
 	"redeem_lp_points",
+	"register_customer_pos",
 	"resolve_barcode",
 ]
