@@ -116,7 +116,7 @@ def redeem_magento_lp_after_submit(invoice_doc):
 
 
 def add_magento_lp_on_submit(doc, method=None):
-	"""Earn Magento LP after a POS invoice is submitted."""
+	"""Enqueue Magento LP earn after a POS invoice is submitted."""
 	if not doc.is_pos or doc.is_return or not doc.customer:
 		return
 
@@ -131,17 +131,30 @@ def add_magento_lp_on_submit(doc, method=None):
 		if frappe.db.get_value("Sales Invoice", doc.name, "custom_lp_add_transaction_id"):
 			return
 
+	frappe.enqueue(
+		process_add_magento_lp_for_invoice,
+		queue="short",
+		invoice_name=doc.name,
+		customer=doc.customer,
+		value_iqd=value_iqd,
+		job_name=f"add_magento_lp_{doc.name}",
+		enqueue_after_commit=True,
+		deduplicate=True,
+	)
+
+
+def process_add_magento_lp_for_invoice(invoice_name, customer, value_iqd):
+	"""Background job: call Magento API and persist LP fields on Sales Invoice."""
+	if _has_field("Sales Invoice", "custom_lp_add_transaction_id"):
+		if frappe.db.get_value("Sales Invoice", invoice_name, "custom_lp_add_transaction_id"):
+			return
+
 	try:
-		result = add_lp_points(doc.customer, value_iqd)
+		result = add_lp_points(customer, value_iqd)
 	except Exception as exc:
 		frappe.log_error(
 			title="Magento LP Add Points Error",
-			message=f"Invoice: {doc.name}, Error: {exc!s}\n{frappe.get_traceback()}",
-		)
-		frappe.msgprint(
-			_("Invoice submitted successfully but loyalty points could not be added. Please contact administrator."),
-			alert=True,
-			indicator="orange",
+			message=f"Invoice: {invoice_name}, Error: {exc!s}\n{frappe.get_traceback()}",
 		)
 		return
 
@@ -149,12 +162,7 @@ def add_magento_lp_on_submit(doc, method=None):
 	if result.get("success") is False:
 		frappe.log_error(
 			title="Magento LP Add Points Failed",
-			message=f"Invoice: {doc.name}, Value IQD: {value_iqd}, Result: {result}",
-		)
-		frappe.msgprint(
-			_("Invoice submitted successfully but loyalty points could not be added. Please contact administrator."),
-			alert=True,
-			indicator="orange",
+			message=f"Invoice: {invoice_name}, Value IQD: {value_iqd}, Result: {result}",
 		)
 		return
 
@@ -171,4 +179,4 @@ def add_magento_lp_on_submit(doc, method=None):
 		updates["custom_lp_value_iqd"] = flt(result.get("value_iqd") or value_iqd)
 
 	if updates:
-		frappe.db.set_value("Sales Invoice", doc.name, updates, update_modified=False)
+		frappe.db.set_value("Sales Invoice", invoice_name, updates, update_modified=False)

@@ -8,6 +8,7 @@ import frappe
 
 from pos_next.api.magento_loyalty import (
 	add_magento_lp_on_submit,
+	process_add_magento_lp_for_invoice,
 	redeem_magento_lp_after_submit,
 	redeem_magento_lp_for_invoice,
 )
@@ -60,11 +61,41 @@ class TestMagentoLoyalty(unittest.TestCase):
 					validate_wallet_payment(doc)
 
 	@patch("pos_next.api.magento_loyalty.is_magento_loyalty_mode", return_value=True)
+	@patch("pos_next.api.magento_loyalty.frappe.enqueue")
+	@patch("pos_next.api.magento_loyalty._has_field", return_value=True)
+	@patch("pos_next.api.magento_loyalty.frappe.db.get_value", return_value=None)
+	def test_add_magento_lp_on_submit_enqueues_job(
+		self,
+		_mock_get_value,
+		_mock_has_field,
+		mock_enqueue,
+		_mock_mode,
+	):
+		doc = Mock()
+		doc.is_pos = 1
+		doc.is_return = 0
+		doc.customer = "CUST-1"
+		doc.pos_profile = "POS-1"
+		doc.name = "SINV-1"
+		doc.grand_total = 100
+		doc.get = Mock(side_effect=lambda key, default=None: {"payments": []}.get(key, default))
+
+		add_magento_lp_on_submit(doc)
+
+		mock_enqueue.assert_called_once()
+		_, kwargs = mock_enqueue.call_args
+		self.assertEqual(kwargs["invoice_name"], "SINV-1")
+		self.assertEqual(kwargs["customer"], "CUST-1")
+		self.assertEqual(kwargs["value_iqd"], 100)
+		self.assertTrue(kwargs["enqueue_after_commit"])
+		self.assertTrue(kwargs["deduplicate"])
+
+	@patch("pos_next.api.magento_loyalty.is_magento_loyalty_mode", return_value=True)
 	@patch("pos_next.api.magento_loyalty.add_lp_points")
 	@patch("pos_next.api.magento_loyalty._has_field", return_value=True)
 	@patch("pos_next.api.magento_loyalty.frappe.db.get_value", return_value=None)
 	@patch("pos_next.api.magento_loyalty.frappe.db.set_value")
-	def test_add_magento_lp_on_submit_stores_transaction(
+	def test_process_add_magento_lp_for_invoice_stores_transaction(
 		self,
 		mock_set_value,
 		_mock_get_value,
@@ -78,41 +109,24 @@ class TestMagentoLoyalty(unittest.TestCase):
 			"value_iqd": 100,
 		}
 
-		doc = Mock()
-		doc.is_pos = 1
-		doc.is_return = 0
-		doc.customer = "CUST-1"
-		doc.pos_profile = "POS-1"
-		doc.name = "SINV-1"
-		doc.grand_total = 100
-		doc.get = Mock(side_effect=lambda key, default=None: {"payments": []}.get(key, default))
-
-		add_magento_lp_on_submit(doc)
+		process_add_magento_lp_for_invoice("SINV-1", "CUST-1", 100)
 
 		mock_add_lp_points.assert_called_once_with("CUST-1", 100)
 		mock_set_value.assert_called_once()
 
 	@patch("pos_next.api.magento_loyalty.is_magento_loyalty_mode", return_value=True)
-	@patch("pos_next.api.magento_loyalty.add_lp_points")
+	@patch("pos_next.api.magento_loyalty.frappe.enqueue")
 	@patch("pos_next.api.magento_loyalty._has_field", return_value=True)
 	@patch("pos_next.api.magento_loyalty.frappe.db.get_value", return_value=None)
 	@patch("pos_next.api.magento_loyalty.get_wallet_amount_from_payments", return_value=40)
-	@patch("pos_next.api.magento_loyalty.frappe.db.set_value")
 	def test_add_magento_lp_on_submit_excludes_wallet_payments(
 		self,
-		mock_set_value,
 		_mock_wallet_amount,
 		_mock_get_value,
 		_mock_has_field,
-		mock_add_lp_points,
+		mock_enqueue,
 		_mock_mode,
 	):
-		mock_add_lp_points.return_value = {
-			"transaction_id": "TXN-ADD-1",
-			"points_added": 6,
-			"value_iqd": 60,
-		}
-
 		doc = Mock()
 		doc.is_pos = 1
 		doc.is_return = 0
@@ -124,10 +138,11 @@ class TestMagentoLoyalty(unittest.TestCase):
 
 		add_magento_lp_on_submit(doc)
 
-		mock_add_lp_points.assert_called_once_with("CUST-1", 60)
+		_, kwargs = mock_enqueue.call_args
+		self.assertEqual(kwargs["value_iqd"], 60)
 
 	@patch("pos_next.api.magento_loyalty.is_magento_loyalty_mode", return_value=True)
-	@patch("pos_next.api.magento_loyalty.add_lp_points")
+	@patch("pos_next.api.magento_loyalty.frappe.enqueue")
 	@patch("pos_next.api.magento_loyalty._has_field", return_value=True)
 	@patch("pos_next.api.magento_loyalty.frappe.db.get_value", return_value="TXN-EXISTING")
 	@patch("pos_next.api.magento_loyalty.get_wallet_amount_from_payments", return_value=0)
@@ -136,7 +151,7 @@ class TestMagentoLoyalty(unittest.TestCase):
 		_mock_wallet_amount,
 		_mock_get_value,
 		_mock_has_field,
-		mock_add_lp_points,
+		mock_enqueue,
 		_mock_mode,
 	):
 		doc = Mock()
@@ -150,24 +165,20 @@ class TestMagentoLoyalty(unittest.TestCase):
 
 		add_magento_lp_on_submit(doc)
 
-		mock_add_lp_points.assert_not_called()
+		mock_enqueue.assert_not_called()
 
-	@patch("pos_next.api.magento_loyalty.is_magento_loyalty_mode", return_value=True)
 	@patch("pos_next.api.magento_loyalty.add_lp_points")
 	@patch("pos_next.api.magento_loyalty._has_field", return_value=True)
 	@patch("pos_next.api.magento_loyalty.frappe.db.get_value", return_value=None)
-	@patch("pos_next.api.magento_loyalty.get_wallet_amount_from_payments", return_value=0)
 	@patch("pos_next.api.magento_loyalty.frappe.db.set_value")
 	@patch("pos_next.api.magento_loyalty.frappe.log_error")
-	def test_add_magento_lp_on_submit_skips_null_update_on_failure(
+	def test_process_add_magento_lp_for_invoice_skips_null_update_on_failure(
 		self,
 		mock_log_error,
 		mock_set_value,
-		_mock_wallet_amount,
 		_mock_get_value,
 		_mock_has_field,
 		mock_add_lp_points,
-		_mock_mode,
 	):
 		"""Soft Magento failure must not write NULL into NOT NULL LP columns."""
 		mock_add_lp_points.return_value = {
@@ -181,16 +192,7 @@ class TestMagentoLoyalty(unittest.TestCase):
 			"message": "Error adding customer loyalty points",
 		}
 
-		doc = Mock()
-		doc.is_pos = 1
-		doc.is_return = 0
-		doc.customer = "CUST-1"
-		doc.pos_profile = "POS-1"
-		doc.name = "SINV-1"
-		doc.grand_total = 4000
-		doc.get = Mock(return_value=[])
-
-		add_magento_lp_on_submit(doc)
+		process_add_magento_lp_for_invoice("SINV-1", "CUST-1", 4000)
 
 		mock_set_value.assert_not_called()
 		mock_log_error.assert_called_once()
