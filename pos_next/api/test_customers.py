@@ -83,6 +83,9 @@ class TestCustomersAPI(unittest.TestCase):
 		"pos_next.api.customers.frappe.flags",
 		new=Mock(pos_next_customer_company=None, pos_next_customer_pos_profile=None),
 	)
+	@patch("pos_next.api.customers.after_customer_insert")
+	@patch("pos_next.api.customers.prepare_customer_doc", return_value=False)
+	@patch("pos_next.api.customers.validate_customer_create")
 	@patch("pos_next.api.customers.frappe.get_doc")
 	@patch("pos_next.api.customers.get_default_loyalty_program_from_settings")
 	@patch("pos_next.api.customers.frappe.has_permission")
@@ -91,6 +94,9 @@ class TestCustomersAPI(unittest.TestCase):
 		mock_has_permission,
 		mock_get_loyalty,
 		mock_get_doc,
+		_mock_validate,
+		_mock_prepare,
+		_mock_after_insert,
 	):
 		mock_has_permission.return_value = True
 		mock_get_loyalty.return_value = "LOYALTY-A"

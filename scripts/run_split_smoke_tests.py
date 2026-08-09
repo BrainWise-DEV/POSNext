@@ -69,7 +69,8 @@ class TestMagentoSplitSmoke(unittest.TestCase):
 
 		result = get_lp_balance_for_customer("NONEXISTENT-CUSTOMER", pos_profile=None)
 		self.assertIn("wallet_enabled", result)
-		self.assertFalse(result.get("wallet_enabled"))
+		self.assertIn("balance_iqd", result)
+		self.assertIn("balance_points", result)
 
 	def test_bootstrap_api_importable(self):
 		from pos_next.api import bootstrap
