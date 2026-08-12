@@ -2043,6 +2043,12 @@ def submit_invoice(invoice=None, data=None):
 			_apply_pos_item_accounting_dimensions(invoice_doc)
 		invoice_doc.save()
 
+		from pos_next.authorization.gate import TOKEN_FLAG
+
+		invoice_doc.flags[TOKEN_FLAG] = invoice.get("authorization_token") or data.get(
+			"authorization_token"
+		)
+
 		# Submit invoice
 		invoice_doc.submit()
 		invoice_submitted = True

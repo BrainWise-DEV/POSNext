@@ -1,0 +1,83 @@
+{
+ "actions": [],
+ "creation": "2026-08-12 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "pin_length",
+  "column_break_pin",
+  "enforce_strict_pin",
+  "section_break_lockout",
+  "max_failures",
+  "column_break_lockout",
+  "lockout_minutes"
+ ],
+ "fields": [
+  {
+   "default": "4",
+   "description": "Digits required in an authorization PIN. Changing this only affects PINs set from now on. existing PINs keep working at their original length.",
+   "fieldname": "pin_length",
+   "fieldtype": "Int",
+   "label": "PIN Length",
+   "non_negative": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_pin",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "description": "Reject PINs that are trivially guessable.",
+   "fieldname": "enforce_strict_pin",
+   "fieldtype": "Check",
+   "label": "Enforce Strict PIN"
+  },
+  {
+   "fieldname": "section_break_lockout",
+   "fieldtype": "Section Break",
+   "label": "Lockout"
+  },
+  {
+   "default": "5",
+   "description": "Consecutive wrong PINs before an approver is locked out of granting authorization.",
+   "fieldname": "max_failures",
+   "fieldtype": "Int",
+   "label": "Max Failed Attempts",
+   "non_negative": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_lockout",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "15",
+   "description": "How long the lockout lasts, and the window over which failed attempts accumulate.",
+   "fieldname": "lockout_minutes",
+   "fieldtype": "Int",
+   "label": "Lockout Duration (minutes)",
+   "non_negative": 1,
+   "reqd": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-08-12 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "POS Next Auth Gate",
+ "name": "POS Authorization Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

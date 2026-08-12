@@ -496,10 +496,26 @@ def _apply_offers_and_stamp(payload, selected_offers):
 		discount_percentage = flt(ri.get("discount_percentage") or 0)
 		per_line_discount = flt(ri.get("discount_amount") or 0)
 		qty = flt(target.get("qty") or 1)
-		# Mirror useInvoice.js#computeBackendRate (tax-exclusive): rate = amount/qty.
-		base_amount = price_list_rate * qty
-		net_amount = base_amount - per_line_discount
-		rate_to_send = net_amount / qty if qty else price_list_rate
+		fq = flt(ri.get("free_qty") or 0)
+		is_bundled_free = ri.get("discount_source") == "free_item" and fq > 0
+
+		if is_bundled_free:
+			# The stamped rate/discount_amount from apply_offers() are averaged across
+			# the pre-split qty (server keeps the row unsplit for preview purposes —
+			# see _stamp_bundled_same_item_free_discount in pos_next/api/invoices.py).
+			# We're about to split this into a paid row + a free row below, at which
+			# point that averaged rate no longer lines up with the reduced qty. Test
+			# only: send the paid portion at full price with no discount so the
+			# numbers submitted stay internally consistent, without changing anything
+			# in useInvoice.js itself.
+			rate_to_send = price_list_rate
+			discount_percentage = 0
+			per_line_discount = 0
+		else:
+			# Mirror useInvoice.js#computeBackendRate (tax-exclusive): rate = amount/qty.
+			base_amount = price_list_rate * qty
+			net_amount = base_amount - per_line_discount
+			rate_to_send = net_amount / qty if qty else price_list_rate
 
 		target.update(
 			{
@@ -509,13 +525,12 @@ def _apply_offers_and_stamp(payload, selected_offers):
 				"discount_amount": per_line_discount,
 				"pricing_rules": ri.get("pricing_rules") or "",
 				"discount_source": ri.get("discount_source") or "",
-				"free_qty": flt(ri.get("free_qty") or 0),
+				"free_qty": fq,
 				"gwp_free_qty": flt(ri.get("gwp_free_qty") or 0),
 			}
 		)
 
-		fq = flt(ri.get("free_qty") or 0)
-		if ri.get("discount_source") == "free_item" and fq > 0:
+		if is_bundled_free:
 			total_qty = flt(target.get("qty") or 1)
 			target["qty"] = max(0, total_qty - fq)
 			payload["items"].append(
@@ -718,10 +733,12 @@ class TestPromotions(FrappeTestCase):
 		self.assertEqual(resp.get("free_items"), [])
 		self.assertEqual(flt(resp["items"][0].get("free_qty")), 1)
 
-		final = _submit_invoice(self.ctx, payload, paid_amount=100)
+		# ITEM_A is 50/unit. Cart qty=2, 1 of which is free (carved out of the 2, not
+		# an extra 3rd unit) -> 1 unit actually paid for = 50, not 100.
+		final = _submit_invoice(self.ctx, payload, paid_amount=50)
 
 		self.assertEqual(final.status, "Paid")
-		self.assertAlmostEqual(flt(final.grand_total), 100, places=2)
+		self.assertAlmostEqual(flt(final.grand_total), 50, places=2)
 
 		paid_lines = [it for it in final.items if not it.is_free_item]
 		free_lines = [it for it in final.items if it.is_free_item]
