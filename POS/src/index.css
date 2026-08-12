@@ -7,6 +7,7 @@
 	--z-dialog-overlay: 400;
 	--z-dialog-content: 500;
 	--z-dropdown: 10000;
+	--z-authorization: 10010;
 }
 
 /* Apply Saudi Riyal symbol font to body for currency support */
