@@ -138,3 +138,58 @@ class TestRuleResolution(FrappeTestCase):
 		rule.enabled = 0
 		rule.save(ignore_permissions=True)
 		self.assertIsNone(policy.resolve_rule(DUMMY_ACTION, None))
+
+
+class TestRuleUniqueness(FrappeTestCase):
+	"""Two enabled rules must never compete for the same (action, POS Profile) —
+	resolve_rule() above would otherwise pick between them by whichever was modified
+	most recently, silently, with the "losing" rule still showing Enabled in the desk.
+	"""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		make_role(ROLE)
+
+	def setUp(self):
+		frappe.set_user("Administrator")
+		frappe.db.delete("POS Authorization Rule", {"action": DUMMY_ACTION})
+
+	def _rule(self, pos_profile=None, enabled=1):
+		# ignore_links=True: these are fixture profile names, not real POS Profile
+		# records — irrelevant to the uniqueness check itself, which only compares the
+		# stored string.
+		doc = frappe.get_doc(
+			{
+				"doctype": "POS Authorization Rule",
+				"action": DUMMY_ACTION,
+				"enabled": enabled,
+				"pos_profile": pos_profile,
+				"approvers": [{"approver_type": "Role", "role": ROLE}],
+			}
+		)
+		doc.insert(ignore_permissions=True, ignore_links=True)
+		return doc
+
+	def test_two_enabled_rules_for_the_same_specific_profile_is_rejected(self):
+		self._rule(pos_profile="_PNXT_BRANCH_A")
+		with self.assertRaises(frappe.ValidationError):
+			self._rule(pos_profile="_PNXT_BRANCH_A")
+
+	def test_two_enabled_catch_all_rules_is_rejected(self):
+		self._rule(pos_profile=None)
+		with self.assertRaises(frappe.ValidationError):
+			self._rule(pos_profile=None)
+
+	def test_enabled_rules_for_different_profiles_are_both_allowed(self):
+		self._rule(pos_profile="_PNXT_BRANCH_A")
+		self._rule(pos_profile="_PNXT_BRANCH_B")  # must not raise
+
+	def test_a_disabled_rule_does_not_block_a_new_enabled_one(self):
+		self._rule(pos_profile="_PNXT_BRANCH_A", enabled=0)
+		self._rule(pos_profile="_PNXT_BRANCH_A")  # must not raise
+
+	def test_resaving_the_same_rule_does_not_self_conflict(self):
+		rule = self._rule(pos_profile="_PNXT_BRANCH_A")
+		rule.allow_self_approval = 0
+		rule.save(ignore_permissions=True)  # must not raise

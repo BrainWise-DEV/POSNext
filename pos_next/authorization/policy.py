@@ -51,6 +51,34 @@ def resolve_rule(action_name: str, pos_profile: str | None = None):
 	return frappe.get_cached_doc(RULE_DOCTYPE, chosen[0].name)
 
 
+def validate_uniqueness(rule) -> None:
+	"""Reject a rule that duplicates another already-enabled one for the same action
+	and POS Profile (including two catch-all rules, both with a blank POS Profile).
+	"""
+	if not rule.get("enabled"):
+		return
+
+	own_profile = rule.get("pos_profile") or None
+
+	others = frappe.get_all(
+		RULE_DOCTYPE,
+		filters={"action": rule.action, "enabled": 1, "name": ("!=", rule.name or "")},
+		fields=["name", "pos_profile"],
+	)
+	conflict = next((r for r in others if (r.pos_profile or None) == own_profile), None)
+	if not conflict:
+		return
+
+	scope = own_profile or _("every POS Profile")
+	frappe.throw(
+		_(
+			"{0} already gates {1} for {2}. Disable it first, or edit it directly instead "
+			"of creating a duplicate"
+		).format(frappe.bold(conflict.name), frappe.bold(rule.action), frappe.bold(scope)),
+		title=_("Duplicate Rule"),
+	)
+
+
 def eligible_approvers(rule, context: dict | None = None) -> set[str]:
 	"""Every enabled user admitted by any row of ``rule``."""
 	users: set[str] = set()

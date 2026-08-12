@@ -9,11 +9,11 @@ from pos_next.authorization import policy, registry
 
 
 class POSAuthorizationRule(Document):
-
 	def validate(self):
 		self.validate_action()
 		policy.validate_approvers(self)
 		policy.validate_conditions(self)
+		policy.validate_uniqueness(self)
 
 	def validate_action(self):
 		if not self.action:
