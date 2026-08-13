@@ -28,7 +28,18 @@ frappe.query_reports["Inventory Impact and Fast Movers Report"] = {
 			label: __("POS Profile"),
 			fieldtype: "Link",
 			options: "POS Profile",
-			reqd: 1,
+		},
+		{
+			fieldname: "warehouse",
+			label: __("Warehouse"),
+			fieldtype: "Link",
+			options: "Warehouse",
+		},
+		{
+			fieldname: "group_by_pos_profile",
+			label: __("Group by POS Profile"),
+			fieldtype: "Check",
+			default: 0,
 		},
 		{
 			fieldname: "item_group",

@@ -1,65 +1,88 @@
 # Copyright (c) 2026, BrainWise and contributors
 # For license information, please see license.txt
 
+from collections import defaultdict
+
 import frappe
 from frappe import _
 from frappe.utils import cint, flt
 
 
 def execute(filters=None):
-	columns = get_columns()
-	data = get_data(filters)
-	chart = get_chart_data(data)
+	filters = filters or {}
+	group_by_pos_profile = cint(filters.get("group_by_pos_profile"))
+	columns = get_columns(group_by_pos_profile)
+	data = get_data(filters, group_by_pos_profile)
+	chart = get_chart_data(data, group_by_pos_profile)
 	return columns, data, None, chart
 
 
-def get_columns():
+def get_columns(group_by_pos_profile=0):
 	"""Return columns for the report"""
-	return [
-		{
-			"fieldname": "item_code",
-			"label": _("Item Code"),
-			"fieldtype": "Link",
-			"options": "Item",
-			"width": 130,
-		},
-		{"fieldname": "item_name", "label": _("Item Name"), "fieldtype": "Data", "width": 200},
-		{
-			"fieldname": "item_group",
-			"label": _("Item Group"),
-			"fieldtype": "Link",
-			"options": "Item Group",
-			"width": 130,
-		},
-		{"fieldname": "qty_sold", "label": _("Qty Sold"), "fieldtype": "Float", "width": 100},
-		{"fieldname": "total_sales_value", "label": _("Sales Value"), "fieldtype": "Currency", "width": 130},
-		{"fieldname": "avg_selling_rate", "label": _("Avg Rate"), "fieldtype": "Currency", "width": 110},
-		{"fieldname": "current_stock", "label": _("Current Stock"), "fieldtype": "Float", "width": 120},
-		{"fieldname": "days_to_stockout", "label": _("Days to Stockout"), "fieldtype": "Int", "width": 140},
-		{
-			"fieldname": "stock_depletion_rate",
-			"label": _("Depletion Rate/Day"),
-			"fieldtype": "Float",
-			"width": 150,
-		},
-		{"fieldname": "stock_status", "label": _("Stock Status"), "fieldtype": "Data", "width": 120},
-		{"fieldname": "velocity_rank", "label": _("Velocity Rank"), "fieldtype": "Data", "width": 120},
-		{"fieldname": "reorder_level", "label": _("Reorder Level"), "fieldtype": "Float", "width": 120},
-	]
+	columns = []
+
+	if group_by_pos_profile:
+		columns.append(
+			{
+				"fieldname": "pos_profile",
+				"label": _("POS Profile"),
+				"fieldtype": "Link",
+				"options": "POS Profile",
+				"width": 150,
+			}
+		)
+
+	columns.extend(
+		[
+			{
+				"fieldname": "item_code",
+				"label": _("Item Code"),
+				"fieldtype": "Link",
+				"options": "Item",
+				"width": 130,
+			},
+			{"fieldname": "item_name", "label": _("Item Name"), "fieldtype": "Data", "width": 200},
+			{
+				"fieldname": "item_group",
+				"label": _("Item Group"),
+				"fieldtype": "Link",
+				"options": "Item Group",
+				"width": 130,
+			},
+			{"fieldname": "qty_sold", "label": _("Qty Sold"), "fieldtype": "Float", "width": 100},
+			{
+				"fieldname": "total_sales_value",
+				"label": _("Sales Value"),
+				"fieldtype": "Currency",
+				"width": 130,
+			},
+			{"fieldname": "avg_selling_rate", "label": _("Avg Rate"), "fieldtype": "Currency", "width": 110},
+			{"fieldname": "current_stock", "label": _("Current Stock"), "fieldtype": "Float", "width": 120},
+			{"fieldname": "days_to_stockout", "label": _("Days to Stockout"), "fieldtype": "Int", "width": 140},
+			{
+				"fieldname": "stock_depletion_rate",
+				"label": _("Depletion Rate/Day"),
+				"fieldtype": "Float",
+				"width": 150,
+			},
+			{"fieldname": "stock_status", "label": _("Stock Status"), "fieldtype": "Data", "width": 120},
+			{"fieldname": "velocity_rank", "label": _("Velocity Rank"), "fieldtype": "Data", "width": 120},
+			{"fieldname": "reorder_level", "label": _("Reorder Level"), "fieldtype": "Float", "width": 120},
+		]
+	)
+
+	return columns
 
 
-def get_data(filters):
+def get_data(filters, group_by_pos_profile=0):
 	"""Get inventory impact and fast movers data.
 
-	Stock is read from the POS Profile's warehouse so that depletion
-	metrics reflect the actual location that serves this POS counter.
+	Stock is read from the warehouse filter when set, otherwise from each
+	POS Profile's warehouse so depletion metrics match the serving location.
 	"""
 	conditions = get_conditions(filters)
 
-	# Get warehouse from POS Profile if provided
-	warehouse = None
-	if filters.get("pos_profile"):
-		warehouse = frappe.db.get_value("POS Profile", filters.get("pos_profile"), "warehouse")
+	warehouse = _resolve_warehouse(filters, group_by_pos_profile)
 
 	# Calculate date range for depletion rate
 	from_date = filters.get("from_date")
@@ -72,9 +95,12 @@ def get_data(filters):
 	else:
 		date_range_days = 30  # Default to 30 days
 
-	# Query to get item sales data
+	pos_profile_select = "si.pos_profile," if group_by_pos_profile else ""
+	group_by_clause = "sii.item_code, si.pos_profile" if group_by_pos_profile else "sii.item_code"
+
 	query = f"""
 		SELECT
+			{pos_profile_select}
 			sii.item_code,
 			sii.item_name,
 			i.item_group,
@@ -94,7 +120,7 @@ def get_data(filters):
 			AND si.is_return = 0
 			{conditions}
 		GROUP BY
-			sii.item_code
+			{group_by_clause}
 		ORDER BY
 			qty_sold DESC
 	"""
@@ -103,20 +129,21 @@ def get_data(filters):
 
 	# Include zero stock items (items with no sales in the period)
 	if cint(filters.get("include_zero_stock")):
-		sold_item_codes = {row.item_code for row in data}
-		zero_stock_items = _get_zero_stock_items(filters, warehouse, sold_item_codes)
+		if group_by_pos_profile:
+			sold_keys = {(row.item_code, row.pos_profile) for row in data}
+		else:
+			sold_keys = {row.item_code for row in data}
+		zero_stock_items = _get_zero_stock_items(
+			filters, warehouse, sold_keys, group_by_pos_profile
+		)
 		data.extend(zero_stock_items)
 
 	if not data:
 		return []
 
-	# Batch-fetch current stock levels (single query instead of N+1)
-	item_codes = [row.item_code for row in data]
-	stock_map = _get_stock_map(item_codes, warehouse)
+	_set_current_stock(data, filters, warehouse, group_by_pos_profile)
 
 	for row in data:
-		row.current_stock = flt(stock_map.get(row.item_code, 0), 2)
-
 		# Calculate stock depletion rate (qty sold per day)
 		row.stock_depletion_rate = flt(row.qty_sold / date_range_days, 2)
 
@@ -148,30 +175,58 @@ def get_data(filters):
 	if stock_status_filter:
 		data = [row for row in data if stock_status_filter in row.stock_status]
 
-	# Assign velocity ranks based on quantity sold
-	sorted_data = sorted(data, key=lambda x: x.qty_sold, reverse=True)
-	# Only rank items that actually had sales
-	sold_items = [row for row in sorted_data if row.qty_sold > 0]
-	total_sold = len(sold_items)
+	return _assign_velocity_ranks(data, group_by_pos_profile)
 
-	for idx, row in enumerate(sold_items):
-		percentile = (idx + 1) / total_sold * 100
 
-		if percentile <= 20:
-			row.velocity_rank = "A - Fast Mover"
-		elif percentile <= 50:
-			row.velocity_rank = "B - Medium Mover"
-		elif percentile <= 80:
-			row.velocity_rank = "C - Slow Mover"
-		else:
-			row.velocity_rank = "D - Very Slow"
+def _resolve_warehouse(filters, group_by_pos_profile):
+	"""Warehouse used for stock when not grouping per POS Profile warehouse."""
+	if filters.get("warehouse"):
+		return filters.get("warehouse")
 
-	# Items with no sales are always "D - Very Slow"
-	for row in sorted_data:
-		if row.qty_sold <= 0:
-			row.velocity_rank = "D - Very Slow"
+	# When grouping by POS Profile, stock is resolved per profile warehouse
+	if group_by_pos_profile:
+		return None
 
-	return sorted_data
+	if filters.get("pos_profile"):
+		return frappe.db.get_value("POS Profile", filters.get("pos_profile"), "warehouse")
+
+	return None
+
+
+def _set_current_stock(data, filters, warehouse, group_by_pos_profile):
+	"""Attach current_stock to each row.
+
+	Grouped rows use the POS Profile warehouse unless a warehouse filter is set.
+	Ungrouped rows use the resolved warehouse, or all warehouses combined.
+	"""
+	item_codes = list({row.item_code for row in data})
+
+	if group_by_pos_profile and not filters.get("warehouse"):
+		profile_names = list({row.pos_profile for row in data if row.pos_profile})
+		profile_warehouse_map = _get_profile_warehouse_map(profile_names)
+		warehouses = list({wh for wh in profile_warehouse_map.values() if wh})
+		stock_map = _get_stock_map_by_warehouse(item_codes, warehouses)
+
+		for row in data:
+			wh = profile_warehouse_map.get(row.pos_profile)
+			row.current_stock = flt(stock_map.get((row.item_code, wh), 0), 2)
+		return
+
+	stock_map = _get_stock_map(item_codes, warehouse)
+	for row in data:
+		row.current_stock = flt(stock_map.get(row.item_code, 0), 2)
+
+
+def _get_profile_warehouse_map(profile_names):
+	if not profile_names:
+		return {}
+
+	rows = frappe.db.get_all(
+		"POS Profile",
+		filters={"name": ["in", profile_names]},
+		fields=["name", "warehouse"],
+	)
+	return {row.name: row.warehouse for row in rows}
 
 
 def _get_stock_map(item_codes, warehouse=None):
@@ -212,12 +267,75 @@ def _get_stock_map(item_codes, warehouse=None):
 	return {row.item_code: flt(row.actual_qty) for row in rows}
 
 
-def _get_zero_stock_items(filters, warehouse, sold_item_codes):
+def _get_stock_map_by_warehouse(item_codes, warehouses):
+	"""Fetch current stock keyed by (item_code, warehouse)."""
+	if not item_codes or not warehouses:
+		return {}
+
+	item_placeholders = ", ".join(["%s"] * len(item_codes))
+	wh_placeholders = ", ".join(["%s"] * len(warehouses))
+
+	rows = frappe.db.sql(
+		f"""
+		SELECT item_code, warehouse, actual_qty
+		FROM `tabBin`
+		WHERE item_code IN ({item_placeholders})
+		AND warehouse IN ({wh_placeholders})
+	""",
+		[*item_codes, *warehouses],
+		as_dict=1,
+	)
+
+	return {(row.item_code, row.warehouse): flt(row.actual_qty) for row in rows}
+
+
+def _get_zero_stock_items(filters, warehouse, sold_keys, group_by_pos_profile=0):
 	"""Fetch items that had no sales in the period.
 
 	Respects the POS Profile's allowed item groups when no explicit
 	item_group filter is set.
+	When grouping by POS Profile, returns one row per (item, pos_profile).
 	"""
+	if group_by_pos_profile:
+		return _get_zero_stock_items_grouped(filters, sold_keys)
+
+	conditions, params = _zero_stock_item_conditions(filters)
+	return _query_zero_stock_items(conditions, params, warehouse, sold_keys)
+
+
+def _get_zero_stock_items_grouped(filters, sold_keys):
+	"""Zero-stock items as one row per POS Profile."""
+	profiles = _get_pos_profiles_for_zero_stock(filters)
+	rows = []
+
+	for profile in profiles:
+		profile_filters = dict(filters)
+		profile_filters["pos_profile"] = profile.name
+		warehouse = filters.get("warehouse") or profile.warehouse
+		conditions, params = _zero_stock_item_conditions(profile_filters)
+		items = _query_zero_stock_items(
+			conditions,
+			params,
+			warehouse,
+			sold_keys,
+			pos_profile=profile.name,
+		)
+		rows.extend(items)
+
+	return rows
+
+
+def _get_pos_profiles_for_zero_stock(filters):
+	profile_filters = {"disabled": 0}
+	if filters.get("pos_profile"):
+		profile_filters["name"] = filters.get("pos_profile")
+	if filters.get("warehouse"):
+		profile_filters["warehouse"] = filters.get("warehouse")
+
+	return frappe.db.get_all("POS Profile", filters=profile_filters, fields=["name", "warehouse"])
+
+
+def _zero_stock_item_conditions(filters):
 	conditions = []
 	params = {}
 
@@ -238,10 +356,15 @@ def _get_zero_stock_items(filters, warehouse, sold_item_codes):
 			# in the POS warehouse to avoid returning every item in the system
 			conditions.append("b.item_code IS NOT NULL")
 
+	return conditions, params
+
+
+def _query_zero_stock_items(conditions, params, warehouse, sold_keys, pos_profile=None):
 	warehouse_join = ""
+	query_params = dict(params)
 	if warehouse:
 		warehouse_join = "AND b.warehouse = %(warehouse)s"
-		params["warehouse"] = warehouse
+		query_params["warehouse"] = warehouse
 
 	where = (" AND " + " AND ".join(conditions)) if conditions else ""
 
@@ -267,10 +390,19 @@ def _get_zero_stock_items(filters, warehouse, sold_item_codes):
 			i.item_code
 	"""
 
-	items = frappe.db.sql(query, params, as_dict=1)
+	items = frappe.db.sql(query, query_params, as_dict=1)
 
-	# Exclude items that already have sales data
-	return [row for row in items if row.item_code not in sold_item_codes]
+	result = []
+	for row in items:
+		if pos_profile:
+			row.pos_profile = pos_profile
+			if (row.item_code, pos_profile) in sold_keys:
+				continue
+		elif row.item_code in sold_keys:
+			continue
+		result.append(row)
+
+	return result
 
 
 def get_conditions(filters):
@@ -285,6 +417,9 @@ def get_conditions(filters):
 
 	if filters.get("pos_profile"):
 		conditions.append("si.pos_profile = %(pos_profile)s")
+
+	if filters.get("warehouse"):
+		conditions.append("sii.warehouse = %(warehouse)s")
 
 	if filters.get("shift"):
 		conditions.append("""
@@ -302,7 +437,49 @@ def get_conditions(filters):
 	return " AND " + " AND ".join(conditions) if conditions else ""
 
 
-def get_chart_data(data):
+def _assign_velocity_ranks(data, group_by_pos_profile):
+	"""Assign velocity ranks based on quantity sold.
+
+	When grouped by POS Profile, ranks are calculated within each profile.
+	"""
+	if group_by_pos_profile:
+		grouped = defaultdict(list)
+		for row in data:
+			grouped[row.pos_profile].append(row)
+
+		ranked = []
+		for rows in grouped.values():
+			ranked.extend(_rank_rows(rows))
+		return ranked
+
+	return _rank_rows(data)
+
+
+def _rank_rows(data):
+	sorted_data = sorted(data, key=lambda x: x.qty_sold, reverse=True)
+	sold_items = [row for row in sorted_data if row.qty_sold > 0]
+	total_sold = len(sold_items)
+
+	for idx, row in enumerate(sold_items):
+		percentile = (idx + 1) / total_sold * 100
+
+		if percentile <= 20:
+			row.velocity_rank = "A - Fast Mover"
+		elif percentile <= 50:
+			row.velocity_rank = "B - Medium Mover"
+		elif percentile <= 80:
+			row.velocity_rank = "C - Slow Mover"
+		else:
+			row.velocity_rank = "D - Very Slow"
+
+	for row in sorted_data:
+		if row.qty_sold <= 0:
+			row.velocity_rank = "D - Very Slow"
+
+	return sorted_data
+
+
+def get_chart_data(data, group_by_pos_profile=0):
 	"""Generate chart for top movers"""
 	if not data:
 		return None
@@ -310,9 +487,14 @@ def get_chart_data(data):
 	# Top 15 fast movers
 	top_movers = data[:15]
 
+	if group_by_pos_profile:
+		labels = [f"{row.item_code} ({row.pos_profile or ''})" for row in top_movers]
+	else:
+		labels = [row.item_code for row in top_movers]
+
 	return {
 		"data": {
-			"labels": [row.item_code for row in top_movers],
+			"labels": labels,
 			"datasets": [{"name": "Quantity Sold", "values": [row.qty_sold for row in top_movers]}],
 		},
 		"type": "bar",
