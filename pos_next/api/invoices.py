@@ -4121,18 +4121,6 @@ def apply_offers(invoice_data, selected_offers=None):
 		# they compose instead of overwriting each other. See
 		# pos_next.promotions.engine.
 		applied_rules.update(run_line_discount_passes(prepared_items, rule_map, selected_offer_names))
-		# Per-item results win on collisions because they already carry full
-		# discount metadata from the per-item engine result.
-		for key, free_item_doc in txn_result.get("free_items", {}).items():
-			free_item_doc.qty = _floor_free_item_qty(free_item_doc.get("qty"))
-			free_items_map.setdefault(key, free_item_doc)
-		applied_rules.update(txn_result.get("applied_rules", set()))
-
-		_recompute_recursive_product_free_items(
-			prepared_items, free_items_map, rule_map, applied_rules
-		)
-		_apply_bundled_same_item_free_discounts(prepared_items, free_items_map, rule_map)
-		_apply_gwp_line_discounts(prepared_items, free_items_map, rule_map)
 
 		# Apply Min/Max ("cheapest/most-expensive item") price rules. These were
 		# deferred by the per-item engine (see pos_next.overrides.pricing_rule) and
