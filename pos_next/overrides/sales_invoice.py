@@ -117,6 +117,14 @@ class CustomSalesInvoice(SalesInvoice):
 			self._validate_pos_payment_accounts()
 		super().validate()
 
+	def on_submit(self):
+		# Re-align after fetch_from so ERPNext's loyalty branch does not run on a
+		# credit note whose original invoice has no loyalty_program.
+		from pos_next.api.sales_invoice_hooks import sync_return_loyalty_program
+
+		sync_return_loyalty_program(self)
+		super().on_submit()
+
 	def _ensure_pos_customer(self):
 		"""POS invoices always need a customer for Receivable GL entries (debit_to)."""
 		customer = _resolve_pos_customer(self)
@@ -267,6 +275,23 @@ class CustomSalesInvoice(SalesInvoice):
 			party_type, party = "Customer", self.customer
 
 		return party_type, party
+
+	def make_loyalty_point_entry(self):
+		"""Skip ERPNext loyalty ledger when this invoice has no program.
+
+		Return invoices copy-map with no_copy on loyalty_program, then fetch the
+		customer's current program. ERPNext then recalculates points on the
+		original invoice. If that original has loyalty_program=None,
+		get_loyalty_program_details_with_points does get_doc("Loyalty Program", None).
+		"""
+		if not self.loyalty_program:
+			return
+		return super().make_loyalty_point_entry()
+
+	def set_loyalty_program_tier(self):
+		if not self.loyalty_program:
+			return
+		return super().set_loyalty_program_tier()
 
 	def update_packing_list(self):
 		super().update_packing_list()

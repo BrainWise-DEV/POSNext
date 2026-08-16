@@ -16,6 +16,7 @@ def validate(doc, method=None):
 	Validate hook for Sales Invoice.
 	Apply tax inclusive settings based on POS Profile configuration.
 	Auto-assign loyalty program to customer if enabled.
+	Keep return invoices aligned with the original invoice's loyalty program.
 
 	Args:
 		doc: Sales Invoice document
@@ -23,6 +24,7 @@ def validate(doc, method=None):
 	"""
 	apply_tax_inclusive(doc)
 	auto_assign_loyalty_program_on_invoice(doc)
+	sync_return_loyalty_program(doc)
 
 
 def apply_tax_inclusive(doc):
@@ -75,16 +77,28 @@ def auto_assign_loyalty_program_on_invoice(doc):
 	but customer doesn't have a loyalty program yet.
 
 	This ensures customers created before loyalty was enabled can still earn points.
+	The invoice itself must also carry loyalty_program — ERPNext's on_submit
+	checks the invoice field, not the customer.
 
 	Args:
 		doc: Sales Invoice document
 	"""
+	if doc.get("is_return"):
+		return
+
 	if not doc.is_pos or not doc.pos_profile or not doc.customer:
+		return
+
+	from pos_next.services.miraaya_loyalty import is_magento_loyalty_mode
+
+	if is_magento_loyalty_mode(doc.pos_profile):
 		return
 
 	# Check if customer already has a loyalty program
 	customer_loyalty = frappe.db.get_value("Customer", doc.customer, "loyalty_program")
 	if customer_loyalty:
+		if not doc.loyalty_program:
+			doc.loyalty_program = customer_loyalty
 		return
 
 	# Get POS Settings
@@ -105,8 +119,26 @@ def auto_assign_loyalty_program_on_invoice(doc):
 	if not loyalty_program:
 		return
 
-	# Assign loyalty program to customer
+	# Assign loyalty program to customer and this invoice
 	frappe.db.set_value("Customer", doc.customer, "loyalty_program", loyalty_program, update_modified=False)
+	if not doc.loyalty_program:
+		doc.loyalty_program = loyalty_program
+
+
+def sync_return_loyalty_program(doc):
+	"""Keep credit notes on the original invoice's loyalty program.
+
+	Sales Invoice.loyalty_program is no_copy and fetch_from customer.loyalty_program.
+	If the customer was enrolled after the original invoice was submitted, the
+	credit note would pick up that program and ERPNext would recalculate loyalty
+	on an original invoice whose loyalty_program is empty — raising
+	DoesNotExistError: Loyalty Program None not found.
+	"""
+	if not doc.get("is_return") or not doc.get("return_against"):
+		return
+
+	original_program = frappe.db.get_value("Sales Invoice", doc.return_against, "loyalty_program")
+	doc.loyalty_program = original_program or None
 
 
 def record_one_time_offer_usage(doc, method=None):
