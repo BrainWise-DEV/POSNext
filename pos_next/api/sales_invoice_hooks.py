@@ -89,9 +89,9 @@ def auto_assign_loyalty_program_on_invoice(doc):
 	if not doc.is_pos or not doc.pos_profile or not doc.customer:
 		return
 
-	from pos_next.services.miraaya_loyalty import is_magento_loyalty_mode
+	from pos_next.integrations.registry import is_external_loyalty_mode
 
-	if is_magento_loyalty_mode(doc.pos_profile):
+	if is_external_loyalty_mode(doc.pos_profile):
 		return
 
 	# Check if customer already has a loyalty program

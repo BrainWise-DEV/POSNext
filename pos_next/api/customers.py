@@ -5,128 +5,12 @@ Handles customer search, creation, and management for POS operations
 
 import frappe
 from frappe import _
-from pos_next.services.miraaya_loyalty import is_miraaya_loyalty_available, register_customer_pos
 
-MAGENTO_EMAIL_FIELDS = ("custom_email", "email", "email_id")
-
-
-def _set_customer_magento_email_fields(customer_name: str, email_id: str) -> None:
-	"""Populate Customer email fields that masar_miraaya may read for Magento sync."""
-	email_id = (email_id or "").strip()
-	if not email_id:
-		return
-
-	meta = frappe.get_meta("Customer")
-	for fieldname in MAGENTO_EMAIL_FIELDS:
-		if meta.has_field(fieldname):
-			frappe.db.set_value("Customer", customer_name, fieldname, email_id, update_modified=False)
-
-
-def _ensure_customer_primary_contact_email(
-	customer,
-	email_id: str,
-	mobile_no: str | None = None,
-	first_name: str | None = None,
-	last_name: str | None = None,
-) -> None:
-	"""Ensure the customer's primary Contact exists and has the Magento email."""
-	from erpnext.selling.doctype.customer.customer import make_contact
-
-	email_id = (email_id or "").strip()
-	if not email_id:
-		return
-
-	contact_name = frappe.db.get_value("Customer", customer.name, "customer_primary_contact")
-	if contact_name:
-		contact = frappe.get_doc("Contact", contact_name)
-		existing_emails = {(row.email_id or "").strip().lower() for row in contact.email_ids}
-		contact_updated = False
-		if email_id.lower() not in existing_emails:
-			contact.add_email(email_id, is_primary=1)
-			contact_updated = True
-		if first_name and not (contact.first_name or "").strip():
-			contact.first_name = first_name.strip()
-			contact_updated = True
-		if last_name and not (contact.last_name or "").strip():
-			contact.last_name = last_name.strip()
-			contact_updated = True
-		if contact_updated:
-			contact.save(ignore_permissions=True)
-		return
-
-	customer.email_id = email_id
-	if mobile_no:
-		customer.mobile_no = mobile_no
-	if first_name:
-		customer.first_name = first_name.strip()
-	if last_name:
-		customer.last_name = last_name.strip()
-
-	contact = make_contact(customer)
-	frappe.db.set_value(
-		"Customer",
-		customer.name,
-		"customer_primary_contact",
-		contact.name,
-		update_modified=False,
-	)
-
-
-def _prepare_customer_for_magento_publish(
-	customer,
-	email_id: str,
-	mobile_no: str | None = None,
-	first_name: str | None = None,
-	last_name: str | None = None,
-) -> None:
-	"""Make sure email is on Customer + Contact before masar_miraaya validate runs."""
-	email_id = (email_id or "").strip()
-	# if not email_id:
-	# 	frappe.throw(_("Email is required for Magento customer sync"))
-
-	_ensure_customer_primary_contact_email(
-		customer,
-		email_id=email_id,
-		mobile_no=mobile_no,
-		first_name=first_name,
-		last_name=last_name,
-	)
-	_set_customer_magento_email_fields(customer.name, email_id)
-	customer.reload()
-
-
-def _finalize_magento_customer_registration(
-	customer,
-	magento_registration: dict,
-	email_id: str | None = None,
-	mobile_no: str | None = None,
-	first_name: str | None = None,
-	last_name: str | None = None,
-) -> None:
-	"""Persist Magento registration without Customer.save().
-
-	Old masar_miraaya validate calls create_new_customer whenever
-	custom_is_publish=1 on save. Using db.set_value avoids that second Magento call.
-	"""
-	resolved_email = (magento_registration.get("email") or email_id or "").strip()
-	if resolved_email:
-		_prepare_customer_for_magento_publish(
-			customer,
-			email_id=resolved_email,
-			mobile_no=mobile_no,
-			first_name=first_name,
-			last_name=last_name,
-		)
-
-	update_fields = {"custom_is_publish": 1}
-	customer_id = magento_registration.get("customer_id")
-	if customer_id:
-		update_fields["custom_customer_id"] = customer_id
-
-	frappe.db.set_value("Customer", customer.name, update_fields, update_modified=False)
-	customer.reload()
-
-
+from pos_next.integrations.registry import (
+	after_customer_insert,
+	prepare_customer_doc,
+	validate_customer_create,
+)
 @frappe.whitelist()
 def get_customers(search_term="", pos_profile=None, limit=20, modified_since=None):
 	"""
@@ -234,13 +118,12 @@ def create_customer(
 	if not customer_name:
 		frappe.throw(_("Customer name is required"))
 
-	if is_miraaya_loyalty_available():
-		if not (custom_first_name or "").strip():
-			frappe.throw(_("First name is required"))
-		if not (custom_last_name or "").strip():
-			frappe.throw(_("Last name is required"))
-		# if not (email_id or "").strip():
-		# 	frappe.throw(_("Email is required for Magento customer sync"))
+	validate_customer_create(
+		customer_name=customer_name,
+		email_id=email_id,
+		custom_first_name=custom_first_name,
+		custom_last_name=custom_last_name,
+	)
 
 	loyalty_program = get_default_loyalty_program_from_settings(
 		company=company,
@@ -279,44 +162,25 @@ def create_customer(
 		}
 	)
 
-	if is_miraaya_loyalty_available():
-		publish_to_magento = int(custom_is_publish or 0)
-		customer_fields = {}
-		if frappe.get_meta("Customer").has_field("custom_first_name"):
-			customer_fields["custom_first_name"] = (custom_first_name or "").strip()
-		if frappe.get_meta("Customer").has_field("custom_last_name"):
-			customer_fields["custom_last_name"] = (custom_last_name or "").strip()
-		if frappe.get_meta("Customer").has_field("custom_is_publish"):
-			# Defer Magento sync until after insert creates the primary Contact
-			# (masar_miraaya validate runs before ERPNext creates Contact/email).
-			customer_fields["custom_is_publish"] = 0
-		customer.update(customer_fields)
-	else:
-		publish_to_magento = False
+	publish_to_magento = prepare_customer_doc(
+		customer,
+		custom_first_name=custom_first_name,
+		custom_last_name=custom_last_name,
+		custom_is_publish=custom_is_publish,
+	)
 
 	frappe.flags.pos_next_customer_company = company
 	frappe.flags.pos_next_customer_pos_profile = pos_profile
 	try:
-		# Insert with custom_is_publish=0 so old masar_miraaya validate does NOT
-		# call create_new_customer (which would duplicate Magento create).
 		customer.insert()
-		if publish_to_magento and frappe.get_meta("Customer").has_field("custom_is_publish"):
-			# Sole Magento create path — register_customer_pos (POST).
-			# Persist publish/id with db.set_value so Customer.validate never runs.
-			magento_registration = register_customer_pos(
-				customer=customer.name,
-				firstname=custom_first_name,
-				lastname=custom_last_name,
-				phone=mobile_no,
-				email=email_id,
-			) or {}
-			_finalize_magento_customer_registration(
+		if publish_to_magento:
+			after_customer_insert(
 				customer,
-				magento_registration,
 				email_id=email_id,
 				mobile_no=mobile_no,
-				first_name=custom_first_name,
-				last_name=custom_last_name,
+				custom_first_name=custom_first_name,
+				custom_last_name=custom_last_name,
+				custom_is_publish=custom_is_publish,
 			)
 	finally:
 		frappe.flags.pos_next_customer_company = None
