@@ -994,6 +994,177 @@ def _collect_stock_errors(items):
 	return errors
 
 
+def _item_is_stock_item(item_code):
+	"""Return True when Item is stock-tracked (not a service / non-stock gift)."""
+	if not item_code:
+		return False
+	return cint(frappe.get_cached_value("Item", item_code, "is_stock_item"))
+
+
+def _paid_stock_demand_by_item_warehouse(paid_items, default_warehouse):
+	"""Sum stock qty of non-free lines, keyed by (item_code, warehouse)."""
+	demand = {}
+	for item in paid_items or []:
+		if item.get("is_free_item"):
+			continue
+		item_code = item.get("item_code")
+		if not item_code:
+			continue
+		warehouse = item.get("warehouse") or default_warehouse
+		qty = flt(item.get("stock_qty") or 0)
+		if not qty:
+			qty = flt(item.get("qty") or item.get("quantity") or 0) * flt(
+				item.get("conversion_factor") or 1
+			)
+		if qty <= 0:
+			continue
+		key = (item_code, warehouse)
+		demand[key] = demand.get(key, 0) + qty
+	return demand
+
+
+def _free_item_requested_stock_qty(free_item_doc):
+	qty = flt(free_item_doc.get("qty") or free_item_doc.get("quantity") or 0)
+	return qty * flt(free_item_doc.get("conversion_factor") or 1)
+
+
+def _filter_out_of_stock_free_items(
+	free_items_map,
+	warehouse,
+	paid_items,
+	pos_profile,
+	rule_map=None,
+	applied_rules=None,
+	prepared_items=None,
+):
+	"""Drop free gifts that cannot be fulfilled from warehouse stock.
+
+	Paid lines of the same SKU consume stock first. If remaining qty cannot
+	cover the gift, it is omitted so checkout of paid items can continue.
+	"""
+	skipped = []
+	if not free_items_map:
+		return skipped
+	if not _should_block(pos_profile):
+		return skipped
+
+	allowed_negative = _get_item_negative_stock_allow_set(
+		[{"item_code": doc.get("item_code")} for doc in free_items_map.values()]
+		+ [{"item_code": item.get("item_code")} for item in (paid_items or [])]
+	)
+	paid_demand = _paid_stock_demand_by_item_warehouse(paid_items, warehouse)
+	leftover = {}
+	skipped_rule_names = set()
+
+	for key in list(free_items_map.keys()):
+		free_doc = free_items_map[key]
+		item_code = free_doc.get("item_code")
+		if not item_code or not _item_is_stock_item(item_code):
+			continue
+		if item_code in allowed_negative:
+			continue
+
+		item_warehouse = free_doc.get("warehouse") or warehouse
+		requested = _free_item_requested_stock_qty(free_doc)
+		if requested <= 0:
+			continue
+
+		stock_key = (item_code, item_warehouse)
+		if stock_key not in leftover:
+			available = _get_available_stock(
+				{
+					"item_code": item_code,
+					"warehouse": item_warehouse,
+					"batch_no": free_doc.get("batch_no"),
+				}
+			)
+			leftover[stock_key] = available - paid_demand.get(stock_key, 0)
+
+		if leftover[stock_key] < requested:
+			free_items_map.pop(key, None)
+			skipped.append(
+				{
+					"item_code": item_code,
+					"item_name": free_doc.get("item_name") or item_code,
+					"warehouse": item_warehouse,
+				}
+			)
+			rule_name = key[1] if isinstance(key, tuple) and len(key) > 1 else free_doc.get("pricing_rules")
+			if rule_name:
+				skipped_rule_names.add(rule_name)
+			continue
+
+		leftover[stock_key] -= requested
+
+	if applied_rules is not None and skipped_rule_names:
+		remaining_free_rules = {key[1] for key in free_items_map if isinstance(key, tuple) and len(key) > 1}
+		for rule_name in skipped_rule_names:
+			if rule_name in remaining_free_rules:
+				continue
+			is_product = False
+			if rule_map and rule_name in rule_map:
+				is_product = (rule_map[rule_name].get("price_or_product_discount") or "") == "Product"
+			else:
+				is_product = (
+					frappe.get_cached_value("Pricing Rule", rule_name, "price_or_product_discount") == "Product"
+				)
+			if not is_product:
+				continue
+			applied_rules.discard(rule_name)
+			if prepared_items:
+				for item_doc in prepared_items:
+					remove_pricing_rule(item_doc, rule_name)
+
+	return skipped
+
+
+def _free_item_row_names_blocked_by_stock(invoice_doc, errors):
+	"""Return child-row names of free items (or free bundles) that failed stock check."""
+	error_codes = {err.get("item_code") for err in (errors or []) if err.get("item_code")}
+	if not error_codes:
+		return set()
+
+	free_rows = [row for row in invoice_doc.get("items") or [] if cint(row.get("is_free_item"))]
+	if not free_rows:
+		return set()
+
+	free_names = {row.name for row in free_rows if row.name}
+	remove_names = set()
+
+	for row in free_rows:
+		if row.get("item_code") in error_codes and row.name:
+			remove_names.add(row.name)
+
+	for packed in invoice_doc.get("packed_items") or []:
+		if packed.get("item_code") not in error_codes:
+			continue
+		parent_name = packed.get("parent_detail_docname")
+		if parent_name in free_names:
+			remove_names.add(parent_name)
+
+	return remove_names
+
+
+def _strip_out_of_stock_free_items_from_invoice(invoice_doc, errors):
+	"""Remove OOS free-item rows so paid items can still be submitted."""
+	remove_names = _free_item_row_names_blocked_by_stock(invoice_doc, errors)
+	if not remove_names:
+		return []
+
+	removed_codes = []
+	for row in list(invoice_doc.get("items") or []):
+		if row.name in remove_names:
+			removed_codes.append(row.get("item_code") or row.name)
+			invoice_doc.remove(row)
+
+	if invoice_doc.get("packed_items"):
+		for packed in list(invoice_doc.packed_items):
+			if packed.get("parent_detail_docname") in remove_names:
+				invoice_doc.remove(packed)
+
+	return removed_codes
+
+
 @lru_cache(maxsize=1)
 def _item_has_allow_negative_stock_field():
 	"""Check whether Item doctype has an allow_negative_stock field."""
@@ -1048,23 +1219,29 @@ def _should_block(pos_profile):
 	return True
 
 
+def _stock_items_to_check(invoice_doc):
+	items_to_check = [d.as_dict() for d in invoice_doc.items if d.get("is_stock_item")]
+	if hasattr(invoice_doc, "packed_items"):
+		items_to_check.extend([d.as_dict() for d in invoice_doc.packed_items])
+	return items_to_check
+
+
 def _validate_stock_on_invoice(invoice_doc):
-	"""Validate stock availability before submission."""
+	"""Validate stock availability before submission.
+
+	Out-of-stock free gifts are stripped instead of blocking checkout so paid
+	items can still be submitted.
+	"""
 	if invoice_doc.doctype == "Sales Invoice" and not cint(getattr(invoice_doc, "update_stock", 0)):
 		return
 
-	# Collect all stock items to check
-	items_to_check = [d.as_dict() for d in invoice_doc.items if d.get("is_stock_item")]
+	errors = _collect_stock_errors(_stock_items_to_check(invoice_doc))
+	if not errors or not _should_block(invoice_doc.pos_profile):
+		return
 
-	# Include packed items if present
-	if hasattr(invoice_doc, "packed_items"):
-		items_to_check.extend([d.as_dict() for d in invoice_doc.packed_items])
-
-	# Check for stock errors
-	errors = _collect_stock_errors(items_to_check)
-
-	# Throw error if stock insufficient and blocking is enabled
-	if errors and _should_block(invoice_doc.pos_profile):
+	_strip_out_of_stock_free_items_from_invoice(invoice_doc, errors)
+	errors = _collect_stock_errors(_stock_items_to_check(invoice_doc))
+	if errors:
 		frappe.throw(frappe.as_json({"errors": errors}), frappe.ValidationError)
 
 
@@ -4058,9 +4235,20 @@ def apply_offers(invoice_data, selected_offers=None):
 		for free_item_doc in free_items_map.values():
 			free_item_doc.qty = _floor_free_item_qty(free_item_doc.get("qty"))
 
+		skipped_free_items = _filter_out_of_stock_free_items(
+			free_items_map,
+			profile.warehouse,
+			prepared_items,
+			invoice.get("pos_profile"),
+			rule_map=rule_map,
+			applied_rules=applied_rules,
+			prepared_items=prepared_items,
+		)
+
 		return {
 			"items": [dict(item) for item in prepared_items],
 			"free_items": [dict(item) for item in free_items_map.values()],
+			"skipped_free_items": skipped_free_items,
 			"applied_pricing_rules": sorted(applied_rules),
 			# Header-level (transaction-scope) discount surfaced from
 			# _evaluate_transaction_offers. Frontend should apply these to the

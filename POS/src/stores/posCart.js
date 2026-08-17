@@ -7,6 +7,7 @@ import { unwrapCouponValidation } from "@/utils/invoice";
 import { shouldValidateItemStock, checkStockAvailability } from "@/utils/stockValidator";
 import { offlineState } from "@/utils/offline/offlineState";
 import { useToast } from "@/composables/useToast";
+import { useStockStore } from "@/stores/stock";
 import { call } from "@/utils/apiWrapper";
 import { defineStore } from "pinia";
 import { computed, nextTick, ref, toRaw, watch } from "vue";
@@ -114,6 +115,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 	const offersStore = usePOSOffersStore();
 	const settingsStore = usePOSSettingsStore();
+	const stockStore = useStockStore();
+	const FREE_ITEM_OUT_OF_STOCK_MSG = __("sorry free item is out of stock");
+	let lastSkippedFreeKey = "";
 
 	// Additional cart state
 	const pendingItem = ref(null);
@@ -246,6 +250,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		appliedCoupon.value = null;
 		currentDraftId.value = null;
 		targetDoctype.value = "Sales Invoice";
+		lastSkippedFreeKey = "";
 
 		// Reset offer processing state
 		offerProcessingState.value.lastCartHash = "";
@@ -278,6 +283,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		}
 		if (!customer.value) {
 			showWarning(__("Please select a customer"));
+			return;
+		}
+
+		dropOutOfStockFreeItems();
+		if (invoiceItems.value.length === 0) {
+			showWarning(__("Cart is empty"));
 			return;
 		}
 
@@ -650,7 +661,59 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		return Math.max(0, Math.floor(Number.parseFloat(qty) || 0));
 	}
 
-	function processFreeItems(freeItems) {
+	function reportSkippedFreeItems(codes) {
+		const key = [...new Set((codes || []).filter(Boolean))].sort().join(",");
+		if (!key) {
+			lastSkippedFreeKey = "";
+			return;
+		}
+		if (key === lastSkippedFreeKey) return;
+		lastSkippedFreeKey = key;
+		showWarning(FREE_ITEM_OUT_OF_STOCK_MSG);
+	}
+
+	function isFreeItemOutOfStock(itemCode, requestedQty) {
+		if (!itemCode || !settingsStore.shouldEnforceStockValidation()) return false;
+		if (!stockStore.server?.has(itemCode)) return false;
+
+		const requested = Number.parseFloat(requestedQty) || 0;
+		if (requested <= 0) return false;
+
+		const serverQty = stockStore.getStockInfo(itemCode).server || 0;
+		const paidQty = invoiceItems.value
+			.filter((item) => !item.is_free_item && item.item_code === itemCode)
+			.reduce(
+				(sum, item) =>
+					sum + (Number(item.quantity) || 0) * (Number(item.conversion_factor) || 1),
+				0
+			);
+		return serverQty - paidQty < requested;
+	}
+
+	function dropOutOfStockFreeItems() {
+		if (!settingsStore.shouldEnforceStockValidation()) return false;
+
+		const skippedCodes = [];
+		const kept = invoiceItems.value.filter((item) => {
+			if (!item.is_free_item) return true;
+			const requested =
+				(Number(item.quantity) || 0) * (Number(item.conversion_factor) || 1);
+			if (isFreeItemOutOfStock(item.item_code, requested)) {
+				skippedCodes.push(item.item_code);
+				return false;
+			}
+			return true;
+		});
+
+		if (skippedCodes.length === 0) return false;
+
+		invoiceItems.value = kept;
+		rebuildIncrementalCache();
+		reportSkippedFreeItems(skippedCodes);
+		return true;
+	}
+
+	function processFreeItems(freeItems, skippedFromServer = []) {
 		// Reset free_qty on paid lines that are NOT already carrying a
 		// server-bundled same-item free discount. applyDiscountsFromServer
 		// stamps free_qty + discount_source=free_item first; wiping those
@@ -668,6 +731,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 		// Remove previously-added free item rows (they'll be re-added below if still valid)
 		invoiceItems.value = invoiceItems.value.filter((item) => !item.is_free_item);
+
+		const skippedCodes = (Array.isArray(skippedFromServer) ? skippedFromServer : [])
+			.map((entry) => (typeof entry === "string" ? entry : entry?.item_code))
+			.filter(Boolean);
 
 		const gwpOfferRules = new Set(
 			appliedOffers.value
@@ -688,6 +755,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		// Early return if no free items
 		if (filteredFreeItems.length === 0) {
 			rebuildIncrementalCache();
+			reportSkippedFreeItems(skippedCodes);
 			return;
 		}
 
@@ -715,6 +783,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			}
 
 			const cf = freeItem.conversion_factor || cartItem?.conversion_factor || 1;
+			const requestedStockQty = freeQty * (Number(cf) || 1);
+			if (isFreeItemOutOfStock(freeItem.item_code, requestedStockQty)) {
+				skippedCodes.push(freeItem.item_code);
+				continue;
+			}
+
 			invoiceItems.value.push({
 				item_code: freeItem.item_code,
 				item_name: freeItem.item_name || cartItem?.item_name || freeItem.item_code,
@@ -737,6 +811,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		}
 
 		rebuildIncrementalCache();
+		reportSkippedFreeItems(skippedCodes);
 	}
 
 	/**
@@ -756,6 +831,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		return {
 			items: Array.isArray(payload.items) ? payload.items : [],
 			freeItems: Array.isArray(payload.free_items) ? payload.free_items : [],
+			skippedFreeItems: Array.isArray(payload.skipped_free_items)
+				? payload.skipped_free_items
+				: [],
 			// CRITICAL: Only trust explicitly returned rules - NO FALLBACK
 			// If backend doesn't return applied_pricing_rules, NO offers were applied
 			appliedRules: Array.isArray(payload.applied_pricing_rules)
@@ -858,12 +936,13 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				const {
 					items: responseItems,
 					freeItems,
+					skippedFreeItems,
 					appliedRules,
 					headerDiscount,
 				} = parseOfferResponse(response);
 
 				applyDiscountsFromServer(responseItems);
-				processFreeItems(freeItems);
+				processFreeItems(freeItems, skippedFreeItems);
 				applyHeaderDiscountFromServer(headerDiscount);
 				filterActiveOffers(appliedRules);
 
@@ -880,12 +959,13 @@ export const usePOSCartStore = defineStore("posCart", () => {
 							const {
 								items: rollbackItems,
 								freeItems: rollbackFreeItems,
+								skippedFreeItems: rollbackSkippedFreeItems,
 								appliedRules: rollbackRules,
 								headerDiscount: rollbackHeaderDiscount,
 							} = parseOfferResponse(rollbackResponse);
 
 							applyDiscountsFromServer(rollbackItems);
-							processFreeItems(rollbackFreeItems);
+							processFreeItems(rollbackFreeItems, rollbackSkippedFreeItems);
 							applyHeaderDiscountFromServer(rollbackHeaderDiscount);
 							filterActiveOffers(rollbackRules);
 						} catch (rollbackError) {
@@ -893,7 +973,13 @@ export const usePOSCartStore = defineStore("posCart", () => {
 						}
 					}
 
-					showWarning(__("Your cart doesn't meet the requirements for this offer."));
+					if (skippedFreeItems.length) {
+						reportSkippedFreeItems(
+							skippedFreeItems.map((entry) => entry.item_code || entry)
+						);
+					} else {
+						showWarning(__("Your cart doesn't meet the requirements for this offer."));
+					}
 					offersDialogRef?.resetApplyingState();
 					result = false;
 					return;
@@ -1003,12 +1089,13 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				const {
 					items: responseItems,
 					freeItems,
+					skippedFreeItems,
 					appliedRules,
 					headerDiscount,
 				} = parseOfferResponse(response);
 
 				applyDiscountsFromServer(responseItems);
-				processFreeItems(freeItems);
+				processFreeItems(freeItems, skippedFreeItems);
 				applyHeaderDiscountFromServer(headerDiscount);
 				filterActiveOffers(appliedRules);
 
@@ -1105,12 +1192,13 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				const {
 					items: responseItems,
 					freeItems,
+					skippedFreeItems,
 					appliedRules,
 					headerDiscount,
 				} = parseOfferResponse(response);
 
 				applyDiscountsFromServer(responseItems);
-				processFreeItems(freeItems);
+				processFreeItems(freeItems, skippedFreeItems);
 				applyHeaderDiscountFromServer(headerDiscount);
 				filterActiveOffers(appliedRules);
 
@@ -1578,7 +1666,13 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		offerName,
 	}) {
 		const freeItemsToGive = floorFreeItemQty(rawFreeItemsToGive);
-		if (freeItemsToGive <= 0) return;
+		if (freeItemsToGive <= 0) return false;
+
+		const requestedStockQty = freeItemsToGive * (Number(conversionFactor) || 1);
+		if (isFreeItemOutOfStock(itemCode, requestedStockQty)) {
+			reportSkippedFreeItems([itemCode]);
+			return false;
+		}
 
 		const existingFreeRow = invoiceItems.value.find(
 			(r) =>
@@ -1600,7 +1694,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				: [];
 			if (!prArr.includes(offerName)) prArr.push(offerName);
 			existingFreeRow.pricing_rules = prArr;
-			return;
+			return true;
 		}
 
 		invoiceItems.value.push({
@@ -1622,6 +1716,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			pricing_rules: [offerName],
 			warehouse,
 		});
+		return true;
 	}
 
 	function computeAdditionalRecursiveFreeQty(
@@ -1780,17 +1875,18 @@ export const usePOSCartStore = defineStore("posCart", () => {
 						referenceItem?.uom ||
 						referenceItem?.stock_uom ||
 						"Nos";
-					upsertOfflineFreeItemRow({
-						itemCode: freeItemCode,
-						itemName: freeItemCode,
-						freeItemsToGive,
-						uomKey,
-						stockUom: uomKey,
-						conversionFactor: 1,
-						warehouse: referenceItem?.warehouse,
-						offerName: offer.name,
-					});
-					applied = true;
+					applied = Boolean(
+						upsertOfflineFreeItemRow({
+							itemCode: freeItemCode,
+							itemName: freeItemCode,
+							freeItemsToGive,
+							uomKey,
+							stockUom: uomKey,
+							conversionFactor: 1,
+							warehouse: referenceItem?.warehouse,
+							offerName: offer.name,
+						})
+					);
 				}
 			} else {
 				let totalFree = 0;
@@ -1824,17 +1920,18 @@ export const usePOSCartStore = defineStore("posCart", () => {
 						referenceItem?.uom ||
 						referenceItem?.stock_uom ||
 						"Nos";
-					upsertOfflineFreeItemRow({
-						itemCode: freeItemCode,
-						itemName: freeItemCode,
-						freeItemsToGive: totalFree,
-						uomKey,
-						stockUom: uomKey,
-						conversionFactor: 1,
-						warehouse: referenceItem?.warehouse,
-						offerName: offer.name,
-					});
-					applied = true;
+					applied = Boolean(
+						upsertOfflineFreeItemRow({
+							itemCode: freeItemCode,
+							itemName: freeItemCode,
+							freeItemsToGive: totalFree,
+							uomKey,
+							stockUom: uomKey,
+							conversionFactor: 1,
+							warehouse: referenceItem?.warehouse,
+							offerName: offer.name,
+						})
+					);
 				}
 			}
 		}
@@ -2352,6 +2449,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				const {
 					items: responseItems,
 					freeItems,
+					skippedFreeItems,
 					appliedRules,
 					headerDiscount,
 				} = parseOfferResponse(response);
@@ -2359,7 +2457,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				// 4. Update cart items with new discounts
 
 				applyDiscountsFromServer(responseItems);
-				processFreeItems(freeItems);
+				processFreeItems(freeItems, skippedFreeItems);
 				applyHeaderDiscountFromServer(headerDiscount);
 
 				// 5. Update appliedOffers list based on server confirmation
@@ -2694,5 +2792,6 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		},
 		forceRefreshOffers, // Force reprocess offers from scratch
 		revalidateOffers, // Awaitable reprocess — use before taking payment
+		dropOutOfStockFreeItems,
 	};
 });

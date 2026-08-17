@@ -1991,6 +1991,12 @@ async function handleProceedToPayment() {
 		console.error("Failed to revalidate offers before payment:", error);
 	}
 
+	cartStore.dropOutOfStockFreeItems();
+	if (cartStore.isEmpty) {
+		showWarning(__("Please add items to cart before proceeding to payment"));
+		return;
+	}
+
 	uiStore.showPaymentDialog = true;
 }
 
