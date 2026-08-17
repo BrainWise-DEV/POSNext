@@ -99,7 +99,7 @@ class TestAutoAssignLoyaltyProgramOnInvoice(unittest.TestCase):
 		mock_frappe.db.get_value.assert_not_called()
 		self.assertIsNone(doc.loyalty_program)
 
-	@patch("pos_next.services.miraaya_loyalty.is_magento_loyalty_mode", return_value=True)
+	@patch("pos_next.integrations.registry.is_external_loyalty_mode", return_value=True)
 	@patch("pos_next.api.sales_invoice_hooks.frappe")
 	def test_skips_magento_loyalty_mode(self, mock_frappe, _mock_magento):
 		doc = _invoice()
@@ -108,7 +108,7 @@ class TestAutoAssignLoyaltyProgramOnInvoice(unittest.TestCase):
 
 		mock_frappe.db.get_value.assert_not_called()
 
-	@patch("pos_next.services.miraaya_loyalty.is_magento_loyalty_mode", return_value=False)
+	@patch("pos_next.integrations.registry.is_external_loyalty_mode", return_value=False)
 	@patch("pos_next.api.sales_invoice_hooks.frappe")
 	def test_stamps_invoice_when_customer_already_enrolled(self, mock_frappe, _mock_magento):
 		mock_frappe.db.get_value.return_value = "LP-CUSTOMER"
