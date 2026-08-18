@@ -332,6 +332,14 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 
 const log = logger.create("CreateCustomerDialog");
 
+function defaultPosEmail(email, mobile) {
+	const trimmed = (email || "").trim();
+	if (trimmed) return trimmed;
+	const digits = String(mobile || "").replace(/\D/g, "");
+	return `pos.${digits || "customer"}@pos.miraaya`;
+}
+
+
 // =============================================================================
 // Composables & Stores
 // =============================================================================
@@ -517,7 +525,9 @@ const createCustomerResource = createResource({
 				? computedCustomerName.value
 				: customerData.value.customer_name,
 			mobile_no: customerData.value.mobile_no || "",
-			email_id: customerData.value.email_id || "",
+			email_id: miraayaCustomerSync.value
+				? defaultPosEmail(customerData.value.email_id, customerData.value.mobile_no)
+				: customerData.value.email_id || "",
 			customer_group: customerData.value.customer_group || "",
 			territory: customerData.value.territory || "",
 			custom_governorate: customerData.value.custom_governorate || "",
