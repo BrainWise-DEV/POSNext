@@ -1,7 +1,12 @@
 // Copyright (c) 2026, BrainWise and contributors
 // For license information, please see license.txt
 
-
+// Frappe concatenates every app's doctype_js into one Function. Yield to
+// posnext_promotions when it owns the authorization APIs.
+(function () {
+	if (frappe.boot && (frappe.boot.posnext_promotions_auth || frappe.boot.posnext_promotions)) {
+		return;
+	}
 
 frappe.ui.form.on("User", {
 	refresh(frm) {
@@ -113,3 +118,4 @@ function remove_pin(frm) {
 		}
 	);
 }
+})();

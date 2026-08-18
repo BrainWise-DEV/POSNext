@@ -1,6 +1,14 @@
 // Copyright (c) 2026, BrainWise and contributors
 // For license information, please see license.txt
 
+// Frappe concatenates every app's doctype_js into one Function. Yield to
+// posnext_promotions when it is installed so the two copies do not redeclare
+// const or double-bind handlers.
+(function () {
+	if (frappe.boot && frappe.boot.posnext_promotions) {
+		return;
+	}
+
 // Slab fields an Accumulative scheme does not use — its percentage comes from
 // the per-scope rows instead.
 const PN_SLAB_DISCOUNT_FIELDS = ["rate_or_discount", "rate", "discount_amount", "discount_percentage"];
@@ -244,3 +252,4 @@ function pn_toggle_scope_percentage(frm, is_accumulative) {
 			: ""
 	);
 }
+})();
