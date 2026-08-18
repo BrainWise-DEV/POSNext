@@ -73,13 +73,26 @@
 								class="flex items-center gap-1 w-24 ps-2 pe-1 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white hover:bg-gray-50"
 							>
 								<img
+									v-if="currentCountryCode"
 									:src="`https://flagcdn.com/h24/${currentCountryCode}.png`"
 									:alt="currentCountryCode"
 									class="w-6 h-auto rounded-sm"
 									@error="handleFlagError"
 								/>
+								<svg
+									v-else
+									class="w-4 h-4 text-gray-400"
+									fill="currentColor"
+									viewBox="0 0 20 20"
+								>
+									<path
+										fill-rule="evenodd"
+										d="M10 18a8 8 0 100-16 8 8 0 000 16zM4.332 8.027a6.012 6.012 0 011.912-2.706C6.512 5.73 6.974 6 7.5 6A1.5 1.5 0 019 7.5V8a2 2 0 004 0 2 2 0 011.523-1.943A5.977 5.977 0 0116 10c0 .34-.028.675-.083 1H15a2 2 0 00-2 2v2.197A5.973 5.973 0 0110 16v-2a2 2 0 00-2-2 2 2 0 01-2-2 2 2 0 00-1.668-1.973z"
+										clip-rule="evenodd"
+									/>
+								</svg>
 								<span class="flex-1 text-start">{{
-									selectedCountryCode || "+20"
+									selectedCountryCode || "+"
 								}}</span>
 								<svg
 									class="w-4 h-4 text-gray-400"
@@ -316,6 +329,7 @@
  *
  * Features:
  * - Country code selector with flag icons and search
+ * - Default mobile ISD from POS Profile country (Company.country)
  * - Auto-sets territory based on selected country
  * - Permission checking before allowing creation
  * - Lazy loads countries data when dialog opens (not on app startup)
@@ -323,8 +337,10 @@
 
 import { usePOSPermissions } from "@/composables/usePermissions";
 import { useToast } from "@/composables/useToast";
+import { useBootstrapStore } from "@/stores/bootstrap";
 import { useCountriesStore } from "@/stores/countries";
 import { usePOSSettingsStore } from "@/stores/posSettings";
+import { usePOSShiftStore } from "@/stores/posShift";
 import { isMagentoAppInstalled } from "@/utils/magento";
 import { logger } from "@/utils/logger";
 import { Button, Dialog, Input, createResource } from "frappe-ui";
@@ -346,6 +362,8 @@ function defaultPosEmail(email, mobile) {
 
 const countriesStore = useCountriesStore();
 const posSettingsStore = usePOSSettingsStore();
+const shiftStore = usePOSShiftStore();
+const bootstrapStore = useBootstrapStore();
 const { canCreateCustomer } = usePOSPermissions();
 const { showSuccess, showError } = useToast();
 
@@ -374,6 +392,8 @@ const showCountryDropdown = ref(false);
 const countrySearchQuery = ref("");
 const dropdownRef = ref(null);
 const countrySearchRef = ref(null);
+/** Ensures POS Profile default ISD is applied only once per dialog open */
+const defaultCountryApplied = ref(false);
 
 const customerGroups = ref([]);
 const territories = ref([]);
@@ -429,7 +449,7 @@ const canSubmitCustomer = computed(
 
 const currentCountryCode = computed(() => {
 	const country = countriesStore.countries.find((c) => c.isd === selectedCountryCode.value);
-	return country?.code.toLowerCase() || "eg";
+	return country?.code.toLowerCase() || "";
 });
 
 const filteredCountries = computed(() => {
@@ -455,6 +475,8 @@ const selectCountry = (country) => {
 	showCountryDropdown.value = false;
 	countrySearchQuery.value = "";
 	updateMobileNumber();
+	// Manual pick only — do not auto-change territory on open/default
+	updateTerritoryFromCountry();
 };
 
 const updateMobileNumber = () => {
@@ -470,20 +492,81 @@ const handleClickOutside = (event) => {
 	}
 };
 
-const setCountryFromName = (countryName) => {
-	if (!countryName) {
-		selectedCountryCode.value = "+20";
+/** Resolve ISD from country name, ISO code, or ISD itself. */
+const resolveCountryIsd = (value) => {
+	if (!value) return null;
+
+	const byName = countriesStore.countryNameToISDMap[value];
+	if (byName) return byName;
+
+	const byCode = countriesStore.findCountryByCode(value);
+	if (byCode?.isd) return byCode.isd;
+
+	const byIsd = countriesStore.findCountryByISD(value);
+	if (byIsd?.isd) return byIsd.isd;
+
+	if (String(value).startsWith("+")) return value;
+
+	return null;
+};
+
+/** Set selectedCountryCode from POS Profile country / country code (once). */
+const setCountryFromProfileValue = (profileCountry) => {
+	const isd = resolveCountryIsd(profileCountry);
+	if (!isd) {
+		log.warn(`Country "${profileCountry}" not found in countries list`);
+		return false;
+	}
+	selectedCountryCode.value = isd;
+	log.info(`Set country code to ${isd} for ${profileCountry}`);
+	return true;
+};
+
+/** POS Profile country (Company → country), from shift/bootstrap or API. */
+const resolvePosProfileCountry = async () => {
+	const fromShift = shiftStore.currentProfile?.country;
+	if (fromShift) return fromShift;
+
+	const fromBootstrap = bootstrapStore.getPreloadedPOSProfile()?.country;
+	if (fromBootstrap) return fromBootstrap;
+
+	if (!props.posProfile) return null;
+
+	try {
+		const data = await posProfileResource.reload();
+		return data?.country || null;
+	} catch (err) {
+		log.error("Error loading POS Profile country", err);
+		return null;
+	}
+};
+
+/**
+ * Apply default mobile ISD once when opening Create Customer.
+ * Does nothing in edit mode, and never re-applies after open / user pick.
+ */
+const applyDefaultCountryCode = async () => {
+	if (isEditMode.value || defaultCountryApplied.value || selectedCountryCode.value) {
+		defaultCountryApplied.value = true;
 		return;
 	}
 
-	const isd = countriesStore.countryNameToISDMap[countryName];
-	if (isd) {
-		selectedCountryCode.value = isd;
-		log.info(`Set country code to ${isd} for ${countryName}`);
-	} else {
-		log.warn(`Country "${countryName}" not found`);
-		selectedCountryCode.value = "+20";
+	await countriesStore.loadCountries();
+
+	if (selectedCountryCode.value) {
+		defaultCountryApplied.value = true;
+		return;
 	}
+
+	const profileCountry = await resolvePosProfileCountry();
+
+	if (selectedCountryCode.value) {
+		defaultCountryApplied.value = true;
+		return;
+	}
+
+	setCountryFromProfileValue(profileCountry);
+	defaultCountryApplied.value = true;
 };
 
 /** Auto-set territory based on selected country (exact or fuzzy match) */
@@ -686,11 +769,7 @@ const posProfileResource = createResource({
 		fieldname: ["country"],
 	}),
 	auto: false,
-	onSuccess: (data) => setCountryFromName(data?.country || "Egypt"),
-	onError: (err) => {
-		log.error("Error loading POS Profile", err);
-		selectedCountryCode.value = "+20";
-	},
+	onError: (err) => log.error("Error loading POS Profile", err),
 });
 
 // =============================================================================
@@ -722,12 +801,8 @@ const loadDialogData = async () => {
 	}
 	checkPermissions();
 
-	// Set country from POS Profile
-	if (props.posProfile) {
-		await posProfileResource.reload();
-	} else {
-		selectedCountryCode.value = "+20";
-	}
+	// Default mobile country code from POS Profile → Company country
+	await applyDefaultCountryCode();
 };
 
 const checkPermissions = async () => {
@@ -781,6 +856,7 @@ const resetForm = () => {
 	districts.value = [];
 	selectedCountryCode.value = "";
 	phoneNumber.value = "";
+	defaultCountryApplied.value = false;
 };
 
 // =============================================================================
