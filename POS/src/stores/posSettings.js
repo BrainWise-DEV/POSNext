@@ -14,6 +14,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		wallet_account: "",
 		auto_create_wallet: 1,
 		loyalty_to_wallet: 1,
+		magento_loyalty_available: 0,
 		// General Settings
 		max_discount_allowed: 0,
 		use_percentage_discount: 0,
@@ -79,6 +80,9 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	const walletAccount = computed(() => settings.value.wallet_account || "");
 	const autoCreateWallet = computed(() => Boolean(settings.value.auto_create_wallet));
 	const loyaltyToWallet = computed(() => Boolean(settings.value.loyalty_to_wallet));
+	const magentoLoyaltyAvailable = computed(() =>
+		Boolean(settings.value.magento_loyalty_available)
+	);
 
 	// Computed - General Settings
 	const isEnabled = computed(() => Boolean(settings.value.enabled));
@@ -238,6 +242,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 			wallet_account: "",
 			auto_create_wallet: 1,
 			loyalty_to_wallet: 1,
+			magento_loyalty_available: 0,
 			// General Settings
 			max_discount_allowed: 0,
 			use_percentage_discount: 0,
@@ -349,6 +354,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		walletAccount,
 		autoCreateWallet,
 		loyaltyToWallet,
+		magentoLoyaltyAvailable,
 
 		// Computed - General Settings
 		isEnabled,

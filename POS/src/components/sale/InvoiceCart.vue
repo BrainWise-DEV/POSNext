@@ -105,6 +105,16 @@
 									>
 										{{ customer.mobile_no }}
 									</p>
+									<p
+										v-if="customerLpInfo.wallet_enabled"
+										class="text-[10px] text-amber-600 font-medium truncate leading-tight"
+									>
+										{{ __("LP") }}:
+										{{ formatCurrency(customerLpInfo.balance_iqd) }}
+										<span v-if="customerLpInfo.balance_points">
+											({{ customerLpInfo.balance_points }} {{ __("pts") }})
+										</span>
+									</p>
 								</div>
 							</div>
 
@@ -1460,6 +1470,7 @@ import { useCustomerSearchStore } from "@/stores/customerSearch";
 import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency";
 import { useFormatters } from "@/composables/useFormatters";
 import { useCartSort } from "@/composables/useCartSort";
+import { isMagentoAppInstalled } from "@/utils/magento";
 import { isOffline } from "@/utils/offline";
 import { offlineWorker } from "@/utils/offline/workerClient";
 import { logger } from "@/utils/logger";
@@ -1656,6 +1667,55 @@ const giftCardsResource = createResource({
 	},
 });
 
+const customerLpInfo = ref({
+	wallet_enabled: false,
+	balance_points: 0,
+	balance_iqd: 0,
+});
+
+const customerLpResource = createResource({
+	url: "magento_integration.api.magento_loyalty.get_lp_balance_for_customer",
+	makeParams() {
+		const customerName = props.customer?.name || props.customer;
+		return {
+			customer: customerName,
+			pos_profile: props.posProfile,
+		};
+	},
+	auto: false,
+	onSuccess(data) {
+		customerLpInfo.value = data || {
+			wallet_enabled: false,
+			balance_points: 0,
+			balance_iqd: 0,
+		};
+	},
+	onError() {
+		customerLpInfo.value = {
+			wallet_enabled: false,
+			balance_points: 0,
+			balance_iqd: 0,
+		};
+	},
+});
+
+function magentoLpEnabled() {
+	return isMagentoAppInstalled() || Boolean(settingsStore.magentoLoyaltyAvailable);
+}
+
+function reloadCustomerLp() {
+	const customerName = props.customer?.name || props.customer;
+	if (magentoLpEnabled() && customerName && props.posProfile && !isOffline()) {
+		customerLpResource.reload();
+	} else {
+		customerLpInfo.value = {
+			wallet_enabled: false,
+			balance_points: 0,
+			balance_iqd: 0,
+		};
+	}
+}
+
 /**
  * Watch for customer changes to load their gift cards.
  * Reloads gift cards resource when customer is selected (and online).
@@ -1668,6 +1728,17 @@ watch(
 			giftCardsResource.reload();
 		} else {
 			availableGiftCards.value = [];
+		}
+		reloadCustomerLp();
+	},
+	{ immediate: true }
+);
+
+watch(
+	() => props.items?.length ?? 0,
+	(newLen, oldLen) => {
+		if (oldLen > 0 && newLen === 0) {
+			reloadCustomerLp();
 		}
 	}
 );

@@ -1173,6 +1173,9 @@
 									]"
 								>
 									{{ formatCurrency(availableWalletBalance) }}
+									<span v-if="walletInfo.balance_points">
+										({{ walletInfo.balance_points }} {{ __("pts") }})
+									</span>
 								</span>
 								<!-- Payment Amount Badge -->
 								<span
@@ -2136,6 +2139,8 @@ const walletInfo = ref({
 	wallet_exists: false,
 	wallet_balance: 0,
 	wallet_name: null,
+	balance_points: 0,
+	magento_loyalty: false,
 });
 const loadingWallet = ref(false);
 const walletPaymentMethods = ref(new Set()); // Set of mode_of_payment names that are wallet payments
@@ -2339,6 +2344,8 @@ const walletInfoResource = createResource({
 			wallet_exists: false,
 			wallet_balance: 0,
 			wallet_name: null,
+			balance_points: 0,
+			magento_loyalty: false,
 		};
 		loadingWallet.value = false;
 	},
@@ -2349,6 +2356,8 @@ const walletInfoResource = createResource({
 			wallet_exists: false,
 			wallet_balance: 0,
 			wallet_name: null,
+			balance_points: 0,
+			magento_loyalty: false,
 		};
 		loadingWallet.value = false;
 	},
@@ -3010,6 +3019,8 @@ watch(show, (newVal) => {
 				wallet_exists: false,
 				wallet_balance: 0,
 				wallet_name: null,
+				balance_points: 0,
+				magento_loyalty: false,
 			};
 		}
 	}
