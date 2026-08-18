@@ -132,7 +132,7 @@
 										@click="selectCountry(country)"
 										class="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-gray-50 transition-colors text-start"
 										:class="{
-											'bg-blue-50': selectedCountryCode === country.isd,
+											'bg-blue-50': isSelectedCountry(country),
 										}"
 									>
 										<img
@@ -336,6 +336,7 @@
  */
 
 import { usePOSPermissions } from "@/composables/usePermissions";
+import { shiftState } from "@/composables/useShift";
 import { useToast } from "@/composables/useToast";
 import { useBootstrapStore } from "@/stores/bootstrap";
 import { useCountriesStore } from "@/stores/countries";
@@ -387,6 +388,7 @@ const emit = defineEmits(["update:modelValue", "customer-created", "customer-upd
 const hasPermission = ref(true);
 const checkingPermission = ref(false);
 const selectedCountryCode = ref("");
+const selectedCountryName = ref("");
 const phoneNumber = ref("");
 const showCountryDropdown = ref(false);
 const countrySearchQuery = ref("");
@@ -448,6 +450,10 @@ const canSubmitCustomer = computed(
 );
 
 const currentCountryCode = computed(() => {
+	const byName = selectedCountryName.value
+		? countriesStore.findCountryByName(selectedCountryName.value)
+		: null;
+	if (byName?.code) return byName.code.toLowerCase();
 	const country = countriesStore.countries.find((c) => c.isd === selectedCountryCode.value);
 	return country?.code.toLowerCase() || "";
 });
@@ -470,8 +476,14 @@ const filteredCountries = computed(() => {
 
 const handleFlagError = (e) => (e.target.style.display = "none");
 
+const isSelectedCountry = (country) => {
+	if (selectedCountryName.value) return country.name === selectedCountryName.value;
+	return country.isd === selectedCountryCode.value;
+};
+
 const selectCountry = (country) => {
 	selectedCountryCode.value = country.isd;
+	selectedCountryName.value = country.name || "";
 	showCountryDropdown.value = false;
 	countrySearchQuery.value = "";
 	updateMobileNumber();
@@ -518,35 +530,48 @@ const setCountryFromProfileValue = (profileCountry) => {
 		return false;
 	}
 	selectedCountryCode.value = isd;
+	const matched = countriesStore.findCountryByName(profileCountry);
+	selectedCountryName.value = matched?.name || profileCountry || "";
 	log.info(`Set country code to ${isd} for ${profileCountry}`);
 	return true;
 };
 
+/** POS Profile / Company country already in memory (no network). */
+const resolvePosProfileCountrySync = () =>
+	shiftStore.currentProfile?.country ||
+	bootstrapStore.getPreloadedPOSProfile()?.country ||
+	shiftState.value.company?.country ||
+	null;
+
 /** POS Profile country (Company → country), from shift/bootstrap or API. */
 const resolvePosProfileCountry = async () => {
-	const fromShift = shiftStore.currentProfile?.country;
-	if (fromShift) return fromShift;
-
-	const fromBootstrap = bootstrapStore.getPreloadedPOSProfile()?.country;
-	if (fromBootstrap) return fromBootstrap;
+	const cached = resolvePosProfileCountrySync();
+	if (cached) return cached;
 
 	if (!props.posProfile) return null;
 
 	try {
 		const data = await posProfileResource.reload();
-		return data?.country || null;
+		return data?.country || shiftState.value.company?.country || null;
 	} catch (err) {
 		log.error("Error loading POS Profile country", err);
-		return null;
+		return shiftState.value.company?.country || null;
 	}
 };
 
 /**
  * Apply default mobile ISD once when opening Create Customer.
+ * Uses in-memory POS Profile / Company country — never Egypt/US fallbacks.
  * Does nothing in edit mode, and never re-applies after open / user pick.
  */
 const applyDefaultCountryCode = async () => {
 	if (isEditMode.value || defaultCountryApplied.value || selectedCountryCode.value) {
+		defaultCountryApplied.value = true;
+		return;
+	}
+
+	const cachedCountry = resolvePosProfileCountrySync();
+	if (countriesStore.loaded && cachedCountry && setCountryFromProfileValue(cachedCountry)) {
 		defaultCountryApplied.value = true;
 		return;
 	}
@@ -777,8 +802,8 @@ const posProfileResource = createResource({
 // =============================================================================
 
 const loadDialogData = async () => {
-	// Lazy load countries (non-blocking)
-	countriesStore.loadCountries();
+	// Default ISD first so the dialog never paints Egypt/+20 then swaps
+	const countryPromise = applyDefaultCountryCode();
 
 	await sellingSettingsResource.reload();
 
@@ -789,6 +814,7 @@ const loadDialogData = async () => {
 
 	// Load form options
 	await Promise.all([
+		countryPromise,
 		territoriesResource.reload(),
 		customerGroupsResource.reload(),
 		governoratesResource.reload(),
@@ -800,9 +826,6 @@ const loadDialogData = async () => {
 		await districtsResource.reload();
 	}
 	checkPermissions();
-
-	// Default mobile country code from POS Profile → Company country
-	await applyDefaultCountryCode();
 };
 
 const checkPermissions = async () => {
@@ -855,6 +878,7 @@ const resetForm = () => {
 	});
 	districts.value = [];
 	selectedCountryCode.value = "";
+	selectedCountryName.value = "";
 	phoneNumber.value = "";
 	defaultCountryApplied.value = false;
 };
@@ -911,6 +935,8 @@ watch(
 				if (customer.mobile_no.includes("-")) {
 					const [code, ...rest] = customer.mobile_no.split("-");
 					selectedCountryCode.value = code;
+					selectedCountryName.value =
+						countriesStore.findCountryByISD(code)?.name || "";
 					phoneNumber.value = rest.join("-");
 				} else {
 					phoneNumber.value = customer.mobile_no;
@@ -924,9 +950,11 @@ watch(
 watch(
 	() => customerData.value.mobile_no,
 	(value) => {
+		if (!isEditMode.value) return;
 		if (value?.includes("-")) {
 			const [code, ...rest] = value.split("-");
 			selectedCountryCode.value = code;
+			selectedCountryName.value = countriesStore.findCountryByISD(code)?.name || "";
 			phoneNumber.value = rest.join("-");
 		}
 	}
@@ -960,7 +988,11 @@ watch(showCountryDropdown, async (isOpen) => {
 watch(
 	() => props.modelValue,
 	async (isOpen) => {
-		isOpen ? await loadDialogData() : resetForm();
+		if (!isOpen) {
+			resetForm();
+			return;
+		}
+		await loadDialogData();
 	}
 );
 
@@ -970,6 +1002,8 @@ watch(
 
 onMounted(() => {
 	document.addEventListener("click", handleClickOutside);
+	// Preload country ISD map so Create Customer opens on the profile country, not a flash
+	countriesStore.loadCountries();
 });
 
 onBeforeUnmount(() => {
