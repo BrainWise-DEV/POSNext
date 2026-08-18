@@ -4,7 +4,7 @@
  */
 export function isMagentoAppInstalled() {
 	try {
-		return Boolean(window.frappe?.boot?.magento_integration);
+		return Boolean(window.frappe?.boot?.magento_integration || window.magento_integration);
 	} catch {
 		return false;
 	}

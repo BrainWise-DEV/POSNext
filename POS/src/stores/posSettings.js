@@ -15,6 +15,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		auto_create_wallet: 1,
 		loyalty_to_wallet: 1,
 		magento_loyalty_available: 0,
+		miraaya_installed: 0,
 		// General Settings
 		max_discount_allowed: 0,
 		use_percentage_discount: 0,
@@ -83,6 +84,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	const magentoLoyaltyAvailable = computed(() =>
 		Boolean(settings.value.magento_loyalty_available)
 	);
+	const miraayaInstalled = computed(() => Boolean(settings.value.miraaya_installed));
 
 	// Computed - General Settings
 	const isEnabled = computed(() => Boolean(settings.value.enabled));
@@ -243,6 +245,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 			auto_create_wallet: 1,
 			loyalty_to_wallet: 1,
 			magento_loyalty_available: 0,
+			miraaya_installed: 0,
 			// General Settings
 			max_discount_allowed: 0,
 			use_percentage_discount: 0,
@@ -355,6 +358,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		autoCreateWallet,
 		loyaltyToWallet,
 		magentoLoyaltyAvailable,
+		miraayaInstalled,
 
 		// Computed - General Settings
 		isEnabled,
