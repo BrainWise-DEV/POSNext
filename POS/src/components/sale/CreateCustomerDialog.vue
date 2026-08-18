@@ -9,7 +9,7 @@
 		<template #body-content>
 			<div class="flex flex-col gap-6">
 				<!-- Customer Name (Required) -->
-				<div>
+				<div v-if="!miraayaCustomerSync">
 					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
 						{{ __("Customer Name") }} <span class="text-red-500">*</span>
 					</label>
@@ -20,6 +20,44 @@
 						required
 					/>
 				</div>
+
+				<template v-else>
+					<div class="grid grid-cols-2 gap-4">
+						<div>
+							<label class="block text-start text-sm font-medium text-gray-700 mb-2">
+								{{ __("First Name") }} <span class="text-red-500">*</span>
+							</label>
+							<Input
+								v-model="customerData.custom_first_name"
+								type="text"
+								:placeholder="__('First name')"
+								required
+							/>
+						</div>
+						<div>
+							<label class="block text-start text-sm font-medium text-gray-700 mb-2">
+								{{ __("Last Name") }} <span class="text-red-500">*</span>
+							</label>
+							<Input
+								v-model="customerData.custom_last_name"
+								type="text"
+								:placeholder="__('Last name')"
+								required
+							/>
+						</div>
+					</div>
+					<div>
+						<label class="block text-start text-sm font-medium text-gray-700 mb-2">
+							{{ __("Customer Name") }}
+						</label>
+						<Input
+							:model-value="computedCustomerName"
+							type="text"
+							disabled
+							:placeholder="__('Auto-generated from first and last name')"
+						/>
+					</div>
+				</template>
 
 				<!-- Mobile Number with Country Code Selector -->
 				<div>
@@ -35,13 +73,26 @@
 								class="flex items-center gap-1 w-24 ps-2 pe-1 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white hover:bg-gray-50"
 							>
 								<img
+									v-if="currentCountryCode"
 									:src="`https://flagcdn.com/h24/${currentCountryCode}.png`"
 									:alt="currentCountryCode"
 									class="w-6 h-auto rounded-sm"
 									@error="handleFlagError"
 								/>
+								<svg
+									v-else
+									class="w-4 h-4 text-gray-400"
+									fill="currentColor"
+									viewBox="0 0 20 20"
+								>
+									<path
+										fill-rule="evenodd"
+										d="M10 18a8 8 0 100-16 8 8 0 000 16zM4.332 8.027a6.012 6.012 0 011.912-2.706C6.512 5.73 6.974 6 7.5 6A1.5 1.5 0 019 7.5V8a2 2 0 004 0 2 2 0 011.523-1.943A5.977 5.977 0 0116 10c0 .34-.028.675-.083 1H15a2 2 0 00-2 2v2.197A5.973 5.973 0 0110 16v-2a2 2 0 00-2-2 2 2 0 01-2-2 2 2 0 00-1.668-1.973z"
+										clip-rule="evenodd"
+									/>
+								</svg>
 								<span class="flex-1 text-start">{{
-									selectedCountryCode || "+20"
+									selectedCountryCode || "+"
 								}}</span>
 								<svg
 									class="w-4 h-4 text-gray-400"
@@ -119,7 +170,7 @@
 					</div>
 				</div>
 
-				<!-- Email -->
+				<!-- Email (optional; Magento sync uses a default if blank) -->
 				<div>
 					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
 						{{ __("Email") }}
@@ -127,7 +178,7 @@
 					<Input
 						v-model="customerData.email_id"
 						type="email"
-						:placeholder="__('Enter email address')"
+						:placeholder="__('Enter email address (optional)')"
 					/>
 				</div>
 
@@ -255,7 +306,7 @@
 							updateCustomerResource.loading ||
 							checkingPermission
 						"
-						:disabled="!customerData.customer_name || !phoneNumber || !hasPermission"
+						:disabled="!canSubmitCustomer"
 					>
 						{{ isEditMode ? __("Save Changes") : __("Create Customer") }}
 					</Button>
@@ -274,6 +325,7 @@
  *
  * Features:
  * - Country code selector with flag icons and search
+ * - Default mobile ISD from POS Profile country (Company.country)
  * - Auto-sets territory based on selected country
  * - Permission checking before allowing creation
  * - Lazy loads countries data when dialog opens (not on app startup)
@@ -281,7 +333,10 @@
 
 import { usePOSPermissions } from "@/composables/usePermissions";
 import { useToast } from "@/composables/useToast";
+import { useBootstrapStore } from "@/stores/bootstrap";
 import { useCountriesStore } from "@/stores/countries";
+import { usePOSSettingsStore } from "@/stores/posSettings";
+import { usePOSShiftStore } from "@/stores/posShift";
 import { logger } from "@/utils/logger";
 import { Button, Dialog, Input, createResource } from "frappe-ui";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
@@ -293,6 +348,9 @@ const log = logger.create("CreateCustomerDialog");
 // =============================================================================
 
 const countriesStore = useCountriesStore();
+const posSettingsStore = usePOSSettingsStore();
+const shiftStore = usePOSShiftStore();
+const bootstrapStore = useBootstrapStore();
 const { canCreateCustomer } = usePOSPermissions();
 const { showSuccess, showError } = useToast();
 
@@ -321,6 +379,8 @@ const showCountryDropdown = ref(false);
 const countrySearchQuery = ref("");
 const dropdownRef = ref(null);
 const countrySearchRef = ref(null);
+/** Ensures POS Profile default ISD is applied only once per dialog open */
+const defaultCountryApplied = ref(false);
 
 const customerGroups = ref([]);
 const territories = ref([]);
@@ -335,6 +395,8 @@ const customerData = ref({
 	territory: "",
 	custom_governorate: "",
 	custom_district: "",
+	custom_first_name: "",
+	custom_last_name: "",
 });
 
 // =============================================================================
@@ -348,9 +410,28 @@ const show = computed({
 
 const isEditMode = computed(() => !!props.customer?.name);
 
+const miraayaCustomerSync = computed(() => posSettingsStore.miraayaInstalled);
+
+const computedCustomerName = computed(() => {
+	const first = (customerData.value.custom_first_name || "").trim();
+	const last = (customerData.value.custom_last_name || "").trim();
+	return [first, last].filter(Boolean).join(" ");
+});
+
+const hasValidCustomerName = computed(() => {
+	if (miraayaCustomerSync.value) {
+		return Boolean(computedCustomerName.value);
+	}
+	return Boolean((customerData.value.customer_name || "").trim());
+});
+
+const canSubmitCustomer = computed(
+	() => hasValidCustomerName.value && Boolean(phoneNumber.value) && hasPermission.value
+);
+
 const currentCountryCode = computed(() => {
 	const country = countriesStore.countries.find((c) => c.isd === selectedCountryCode.value);
-	return country?.code.toLowerCase() || "eg";
+	return country?.code.toLowerCase() || "";
 });
 
 const filteredCountries = computed(() => {
@@ -376,6 +457,8 @@ const selectCountry = (country) => {
 	showCountryDropdown.value = false;
 	countrySearchQuery.value = "";
 	updateMobileNumber();
+	// Manual pick only — do not auto-change territory on open/default
+	updateTerritoryFromCountry();
 };
 
 const updateMobileNumber = () => {
@@ -391,20 +474,83 @@ const handleClickOutside = (event) => {
 	}
 };
 
-const setCountryFromName = (countryName) => {
-	if (!countryName) {
-		selectedCountryCode.value = "+20";
+/** Resolve ISD from country name, ISO code, or ISD itself. */
+const resolveCountryIsd = (value) => {
+	if (!value) return null;
+
+	const byName = countriesStore.countryNameToISDMap[value];
+	if (byName) return byName;
+
+	const byCode = countriesStore.findCountryByCode(value);
+	if (byCode?.isd) return byCode.isd;
+
+	const byIsd = countriesStore.findCountryByISD(value);
+	if (byIsd?.isd) return byIsd.isd;
+
+	// Value may already be an ISD like "+20"
+	if (String(value).startsWith("+")) return value;
+
+	return null;
+};
+
+/** Set selectedCountryCode from POS Profile country / country code (once). */
+const setCountryFromProfileValue = (profileCountry) => {
+	const isd = resolveCountryIsd(profileCountry);
+	if (!isd) {
+		log.warn(`Country "${profileCountry}" not found in countries list`);
+		return false;
+	}
+	selectedCountryCode.value = isd;
+	log.info(`Set country code to ${isd} for ${profileCountry}`);
+	return true;
+};
+
+/** POS Profile country (Company → country), from shift/bootstrap or API. */
+const resolvePosProfileCountry = async () => {
+	const fromShift = shiftStore.currentProfile?.country;
+	if (fromShift) return fromShift;
+
+	const fromBootstrap = bootstrapStore.getPreloadedPOSProfile()?.country;
+	if (fromBootstrap) return fromBootstrap;
+
+	if (!props.posProfile) return null;
+
+	try {
+		const data = await posProfileResource.reload();
+		return data?.country || null;
+	} catch (err) {
+		log.error("Error loading POS Profile country", err);
+		return null;
+	}
+};
+
+/**
+ * Apply default mobile ISD once when opening Create Customer.
+ * Does nothing in edit mode, and never re-applies after open / user pick.
+ */
+const applyDefaultCountryCode = async () => {
+	if (isEditMode.value || defaultCountryApplied.value || selectedCountryCode.value) {
+		defaultCountryApplied.value = true;
 		return;
 	}
 
-	const isd = countriesStore.countryNameToISDMap[countryName];
-	if (isd) {
-		selectedCountryCode.value = isd;
-		log.info(`Set country code to ${isd} for ${countryName}`);
-	} else {
-		log.warn(`Country "${countryName}" not found`);
-		selectedCountryCode.value = "+20";
+	await countriesStore.loadCountries();
+
+	// Bail if cashier already picked a code while countries were loading
+	if (selectedCountryCode.value) {
+		defaultCountryApplied.value = true;
+		return;
 	}
+
+	const profileCountry = await resolvePosProfileCountry();
+
+	if (selectedCountryCode.value) {
+		defaultCountryApplied.value = true;
+		return;
+	}
+
+	setCountryFromProfileValue(profileCountry);
+	defaultCountryApplied.value = true;
 };
 
 /** Auto-set territory based on selected country (exact or fuzzy match) */
@@ -441,13 +587,18 @@ const updateTerritoryFromCountry = () => {
 const createCustomerResource = createResource({
 	url: "pos_next.api.customers.create_customer",
 	makeParams: () => ({
-		customer_name: customerData.value.customer_name,
+		customer_name: miraayaCustomerSync.value
+			? computedCustomerName.value
+			: customerData.value.customer_name,
 		mobile_no: customerData.value.mobile_no || "",
 		email_id: customerData.value.email_id || "",
 		customer_group: customerData.value.customer_group || "",
 		territory: customerData.value.territory || "",
 		custom_governorate: customerData.value.custom_governorate || "",
 		custom_district: customerData.value.custom_district || "",
+		custom_first_name: customerData.value.custom_first_name || "",
+		custom_last_name: customerData.value.custom_last_name || "",
+		custom_is_publish: 1,
 		pos_profile: props.posProfile,
 	}),
 	onSuccess: (data) => {
@@ -586,11 +737,7 @@ const posProfileResource = createResource({
 		fieldname: ["country"],
 	}),
 	auto: false,
-	onSuccess: (data) => setCountryFromName(data?.country || "Egypt"),
-	onError: (err) => {
-		log.error("Error loading POS Profile", err);
-		selectedCountryCode.value = "+20";
-	},
+	onError: (err) => log.error("Error loading POS Profile", err),
 });
 
 // =============================================================================
@@ -598,9 +745,6 @@ const posProfileResource = createResource({
 // =============================================================================
 
 const loadDialogData = async () => {
-	// Lazy load countries (non-blocking)
-	countriesStore.loadCountries();
-
 	await sellingSettingsResource.reload();
 
 	if (!isEditMode.value) {
@@ -608,8 +752,9 @@ const loadDialogData = async () => {
 		customerData.value.territory = "";
 	}
 
-	// Load form options
+	// Load form options + countries (awaited so ISD map is ready before default)
 	await Promise.all([
+		countriesStore.loadCountries(),
 		territoriesResource.reload(),
 		customerGroupsResource.reload(),
 		governoratesResource.reload(),
@@ -622,12 +767,8 @@ const loadDialogData = async () => {
 	}
 	checkPermissions();
 
-	// Set country from POS Profile
-	if (props.posProfile) {
-		await posProfileResource.reload();
-	} else {
-		selectedCountryCode.value = "+20";
-	}
+	// Default mobile country code from POS Profile → Company country
+	await applyDefaultCountryCode();
 };
 
 const checkPermissions = async () => {
@@ -643,7 +784,14 @@ const checkPermissions = async () => {
 };
 
 const handleCreate = async () => {
-	if (!customerData.value.customer_name) {
+	if (miraayaCustomerSync.value) {
+		if (!customerData.value.custom_first_name?.trim()) {
+			return showError(__("First Name is required"));
+		}
+		if (!customerData.value.custom_last_name?.trim()) {
+			return showError(__("Last Name is required"));
+		}
+	} else if (!customerData.value.customer_name) {
 		return showError(__("Customer Name is required"));
 	}
 	if (!phoneNumber.value) {
@@ -668,10 +816,13 @@ const resetForm = () => {
 		),
 		custom_governorate: "",
 		custom_district: "",
+		custom_first_name: "",
+		custom_last_name: "",
 	});
 	districts.value = [];
 	selectedCountryCode.value = "";
 	phoneNumber.value = "";
+	defaultCountryApplied.value = false;
 };
 
 // =============================================================================
@@ -719,19 +870,13 @@ watch(
 watch(
 	() => customerData.value.mobile_no,
 	(value) => {
-		if (value?.includes("-")) {
-			const [code, ...rest] = value.split("-");
-			selectedCountryCode.value = code;
-			phoneNumber.value = rest.join("-");
-		}
+		// Only sync from stored mobile when editing; never overwrite create-mode default
+		if (!isEditMode.value || !value?.includes("-")) return;
+		const [code, ...rest] = value.split("-");
+		selectedCountryCode.value = code;
+		phoneNumber.value = rest.join("-");
 	}
 );
-
-watch(selectedCountryCode, async (newVal, oldVal) => {
-	if (!oldVal) return;
-	await nextTick();
-	updateTerritoryFromCountry();
-});
 
 watch(
 	() => customerData.value.custom_governorate,

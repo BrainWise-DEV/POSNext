@@ -1,3 +1,4 @@
+import { promoApi } from "@/utils/promoApi";
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { call } from "@/utils/apiWrapper";
@@ -77,7 +78,7 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 
 		if (!isOffline()) {
 			try {
-				const resp = await call("pos_next.api.offers.get_customer_one_time_redemptions", {
+				const resp = await call(promoApi.getCustomerOneTimeRedemptions(), {
 					customer: customerName,
 				});
 				const serverRules = resp?.message || resp || [];
@@ -416,7 +417,7 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 				}
 
 				// Online: fetch from API
-				const response = await call("pos_next.api.offers.get_offers", {
+				const response = await call(promoApi.getOffers(), {
 					pos_profile: posProfile,
 				});
 

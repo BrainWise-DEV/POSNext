@@ -4,6 +4,7 @@
 
 import frappe
 from frappe import _
+from frappe.utils import cint
 
 from pos_next.api.utilities import _parse_list_parameter, check_user_company
 
@@ -81,6 +82,9 @@ def get_pos_settings(pos_profile):
 		if not pos_settings:
 			return DEFAULT_POS_SETTINGS.copy()
 
+		from pos_next.integrations.registry import extend_bootstrap_settings
+
+		extend_bootstrap_settings(pos_settings, pos_profile)
 		return pos_settings
 	except Exception:
 		frappe.log_error(frappe.get_traceback(), "Get POS Settings Error")

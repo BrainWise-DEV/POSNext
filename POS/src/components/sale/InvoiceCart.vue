@@ -105,6 +105,16 @@
 									>
 										{{ customer.mobile_no }}
 									</p>
+									<p
+										v-if="customerLpInfo.wallet_enabled"
+										class="text-[10px] text-amber-600 font-medium truncate leading-tight"
+									>
+										{{ __("LP") }}:
+										{{ formatCurrency(customerLpInfo.balance_iqd) }}
+										<span v-if="customerLpInfo.balance_points">
+											({{ customerLpInfo.balance_points }} {{ __("pts") }})
+										</span>
+									</p>
 								</div>
 							</div>
 
@@ -911,18 +921,18 @@
 
 			<div v-else class="flex flex-col gap-0.5 sm:gap-1">
 				<div
-					v-for="(item, index) in sortedItems"
+					v-for="(item, index) in displayCartItems"
 					:key="
 						item.item_code +
 						'-' +
 						(item.uom || '') +
 						(item.is_free_item ? '-free' : '')
 					"
-					@click="item.is_free_item ? null : openEditDialog(item)"
+					@click="openEditDialog(item)"
 					:class="[
 						'border rounded-md p-1.5 sm:p-2 transition-all duration-200',
-						item.is_free_item
-							? 'bg-green-50 border-green-300 cursor-default'
+						item.is_free_item || item._isStandaloneFreeRow
+							? 'bg-green-50 border-green-200 hover:border-green-300'
 							: 'bg-white border-gray-200 hover:border-blue-300 hover:shadow-md active:scale-[0.99] cursor-pointer group',
 					]"
 				>
@@ -967,15 +977,11 @@
 									>
 										{{ item.item_name }}
 									</h4>
-									<!-- Free Item Badge -->
+									<!-- GWP / Free Item Badge -->
 									<span
-										v-if="item.free_qty && item.free_qty > 0"
+										v-if="getDisplayFreeQty(item) > 0"
 										class="inline-flex items-center px-1.5 py-0.5 bg-green-600 text-white rounded-full text-[9px] font-bold flex-shrink-0"
-										:title="
-											item.is_free_item
-												? __('Free item')
-												: __('{0} free item(s) included', [item.free_qty])
-										"
+										:title="formatFreeItemBadgeText(getDisplayFreeQty(item))"
 									>
 										<svg
 											class="w-2.5 h-2.5 me-0.5"
@@ -988,15 +994,16 @@
 												clip-rule="evenodd"
 											/>
 										</svg>
-										{{
-											item.is_free_item
-												? __("FREE")
-												: __("+{0} FREE", [item.free_qty])
-										}}
+										{{ formatFreeItemBadgeText(getDisplayFreeQty(item)) }}
 									</span>
-									<!-- Discount Badge -->
+									<!-- Discount Badge (hide when same-item free gift is bundled on this line) -->
 									<div
-										v-if="item.discount_amount && item.discount_amount > 0"
+										v-if="
+											!isGwpItem(item) &&
+											!hasBundledSameItemFree(item) &&
+											item.discount_amount &&
+											item.discount_amount > 0
+										"
 										class="inline-flex items-center px-1.5 py-0.5 bg-gradient-to-r from-red-50 to-orange-50 text-red-700 rounded-full text-[9px] font-bold border border-red-200 flex-shrink-0"
 									>
 										<svg
@@ -1012,13 +1019,12 @@
 										</svg>
 										{{
 											__("{0}%", [
-												Number(item.discount_percentage).toFixed(0),
+												Number(getItemDiscountPercent(item)).toFixed(0),
 											])
 										}}
 									</div>
 								</div>
 								<button
-									v-if="!item.is_free_item"
 									type="button"
 									@click.stop="$emit('remove-item', item.item_code, item.uom)"
 									class="text-gray-400 hover:text-red-600 active:text-red-700 transition-colors flex-shrink-0 p-0.5 -m-0.5 touch-manipulation active:scale-90"
@@ -1045,19 +1051,9 @@
 							<div class="flex items-center justify-between gap-1.5">
 								<div class="flex items-center gap-1.5">
 									<!-- Quantity Counter -->
-									<!-- For free items, show static quantity badge -->
-									<div
-										v-if="item.is_free_item"
-										class="flex items-center bg-green-100 border border-green-300 rounded px-2 h-6 sm:h-7"
-									>
-										<span
-											class="text-xs sm:text-sm font-bold text-green-700"
-											>{{ item.quantity }}</span
-										>
-									</div>
 									<!-- For serial items, show serial badge with edit button -->
 									<div
-										v-else-if="item.has_serial_no && item.serial_no"
+										v-if="item.has_serial_no && item.serial_no"
 										class="flex items-center gap-1"
 										@click.stop
 									>
@@ -1126,7 +1122,7 @@
 											</svg>
 										</button>
 										<input
-											:value="formatQuantity(item.quantity)"
+											:value="formatQuantity(getDisplayQuantity(item))"
 											@click.stop
 											@input="updateQuantity(item, $event.target.value)"
 											@blur="handleQuantityBlur(item)"
@@ -1274,9 +1270,20 @@
 									</div>
 
 									<!-- Price -->
-									<span class="text-[10px] sm:text-xs font-bold text-gray-700">
-										{{ formatCurrency(item.rate) }}
-									</span>
+									<div class="flex flex-col items-end">
+										<span
+											v-if="
+												item.is_already_discounted &&
+												item.price_list_rate > item.rate
+											"
+											class="text-[9px] text-gray-400 line-through leading-none"
+										>
+											{{ formatCurrency(item.price_list_rate) }}
+										</span>
+										<span class="text-[10px] sm:text-xs font-bold text-gray-700">
+											{{ formatCurrency(item.rate) }}
+										</span>
+									</div>
 								</div>
 
 								<!-- Item Total -->
@@ -1320,7 +1327,7 @@
 			<div v-if="items.length > 0" class="mb-1.5">
 				<!-- Discount Display - Highlighted -->
 				<div
-					v-if="discountAmount > 0"
+					v-if="displayDiscountAmount > 0"
 					class="flex items-center justify-between mb-0.5 bg-red-50 rounded px-1.5 py-1 -mx-0.5"
 				>
 					<div class="flex items-center gap-1">
@@ -1338,7 +1345,7 @@
 						<span class="text-xs font-bold text-red-700">{{ __("Discount") }}</span>
 					</div>
 					<span class="text-sm font-extrabold text-red-600 text-center min-w-[60px]">{{
-						formatCurrency(discountAmount)
+						formatCurrency(displayDiscountAmount)
 					}}</span>
 				</div>
 
@@ -1453,6 +1460,7 @@
  * IMPORTS
  * ============================================================================
  */
+import { isMagentoAppInstalled, promoApi } from "@/utils/promoApi";
 import { usePOSCartStore } from "@/stores/posCart";
 import { usePOSSettingsStore } from "@/stores/posSettings";
 import { usePOSOffersStore } from "@/stores/posOffers";
@@ -1523,6 +1531,7 @@ const props = defineProps({
 		default: 0,
 	},
 	posProfile: String,
+	company: String,
 	currency: {
 		type: String,
 		default: DEFAULT_CURRENCY,
@@ -1581,8 +1590,53 @@ const {
 } = useCartSort(() => props.items);
 
 /**
- * ============================================================================
- * REACTIVE STATE
+ * Display-only merge: hide matching same-item free rows and show one combined line.
+ * Cart data stays unchanged for offers and invoicing.
+ */
+function cartLineKey(item) {
+	return `${item.item_code}\0${item.uom || item.stock_uom || ""}`;
+}
+
+const displayCartItems = computed(() => {
+	const items = sortedItems.value;
+	const freeQtyByKey = new Map();
+	const paidKeys = new Set();
+
+	for (const item of items) {
+		if (!item.is_free_item) {
+			paidKeys.add(cartLineKey(item));
+			continue;
+		}
+		const key = cartLineKey(item);
+		freeQtyByKey.set(
+			key,
+			(freeQtyByKey.get(key) || 0) + (Number.parseFloat(item.quantity) || 0)
+		);
+	}
+
+	const merged = [];
+	for (const item of items) {
+		if (item.is_free_item) continue;
+		const bundledFreeQty = freeQtyByKey.get(cartLineKey(item)) || 0;
+		merged.push(
+			bundledFreeQty > 0 ? { ...item, _bundledFreeQty: bundledFreeQty } : item
+		);
+	}
+
+	// Different-item product discounts add dedicated is_free_item rows (e.g. buy A get B).
+	// Those rows are not bundled onto a paid line — show them as their own cart lines.
+	for (const item of items) {
+		if (!item.is_free_item) continue;
+		const key = cartLineKey(item);
+		if (paidKeys.has(key)) continue;
+		merged.push({ ...item, _isStandaloneFreeRow: true });
+	}
+
+	return merged;
+});
+
+/**
+ * Reactive State
  * ============================================================================
  */
 // Customer search state
@@ -1643,16 +1697,49 @@ if (props.posProfile) {
  * @endpoint pos_next.api.offers.get_active_coupons
  */
 const giftCardsResource = createResource({
-	url: "pos_next.api.offers.get_active_coupons",
+	url: promoApi.getActiveCoupons(),
 	makeParams() {
+		const customerName = props.customer?.name || props.customer;
 		return {
-			customer: props.customer?.name || props.customer,
-			company: props.posProfile, // Will get company from profile
+			customer: customerName,
+			company: props.company,
 		};
 	},
 	auto: false,
 	onSuccess(data) {
 		availableGiftCards.value = data?.message || data || [];
+	},
+});
+
+const customerLpInfo = ref({
+	wallet_enabled: false,
+	balance_points: 0,
+	balance_iqd: 0,
+});
+
+const customerLpResource = createResource({
+	url: "magento_integration.api.magento_loyalty.get_lp_balance_for_customer",
+	makeParams() {
+		const customerName = props.customer?.name || props.customer;
+		return {
+			customer: customerName,
+			pos_profile: props.posProfile,
+		};
+	},
+	auto: false,
+	onSuccess(data) {
+		customerLpInfo.value = data || {
+			wallet_enabled: false,
+			balance_points: 0,
+			balance_iqd: 0,
+		};
+	},
+	onError() {
+		customerLpInfo.value = {
+			wallet_enabled: false,
+			balance_points: 0,
+			balance_iqd: 0,
+		};
 	},
 });
 
@@ -1664,10 +1751,35 @@ const giftCardsResource = createResource({
 watch(
 	() => props.customer,
 	(newCustomer) => {
-		if (newCustomer && props.posProfile && !isOffline()) {
+		const customerName = newCustomer?.name || newCustomer;
+		if (customerName && props.company && !isOffline()) {
 			giftCardsResource.reload();
 		} else {
 			availableGiftCards.value = [];
+		}
+
+		if (isMagentoAppInstalled() && customerName && props.posProfile && !isOffline()) {
+			customerLpResource.reload();
+		} else {
+			customerLpInfo.value = {
+				wallet_enabled: false,
+				balance_points: 0,
+				balance_iqd: 0,
+			};
+		}
+	}
+);
+
+// Refresh Magento LP balance after a completed sale when the cart is cleared
+// but the same customer stays selected (watch on customer alone won't re-fire).
+watch(
+	() => props.items?.length ?? 0,
+	(newLen, oldLen) => {
+		if (oldLen > 0 && newLen === 0) {
+			const customerName = props.customer?.name || props.customer;
+			if (isMagentoAppInstalled() && customerName && props.posProfile && !isOffline()) {
+				customerLpResource.reload();
+			}
 		}
 	}
 );
@@ -1798,9 +1910,20 @@ const displaySubtotal = computed(() => {
  * @returns {Number} Grand total amount to display
  */
 const displayGrandTotal = computed(() => {
-	// Always: displaySubtotal + tax - discount
-	// This makes the display consistent and intuitive
-	return displaySubtotal.value + props.taxAmount - props.discountAmount;
+	return displaySubtotal.value + props.taxAmount - displayDiscountAmount.value;
+});
+
+/**
+ * Sum line discounts directly from cart items for instant, exact footer display.
+ * Avoids waiting on incremental cache updates after offer application.
+ */
+const displayDiscountAmount = computed(() => {
+	const lineDiscounts = props.items.reduce(
+		(sum, item) => sum + (Number.parseFloat(item.discount_amount) || 0),
+		0
+	);
+	// Fall back to store total when items haven't been stamped yet (e.g. header coupon)
+	return lineDiscounts > 0 ? lineDiscounts : props.discountAmount;
 });
 
 /**
@@ -1954,6 +2077,84 @@ function getInitials(name) {
 }
 
 /**
+ * Effective discount % for badges. Coupon max_amount caps are stored as
+ * absolute amounts (discount_percentage=0), so derive % from amount/base.
+ */
+function isGwpItem(item) {
+	return item?.discount_source === "gwp" || Number.parseFloat(item?.gwp_free_qty) > 0;
+}
+
+function getGwpFreeQty(item) {
+	const gwpQty = Number.parseFloat(item?.gwp_free_qty) || 0;
+	if (gwpQty > 0) return gwpQty;
+	return Number.parseFloat(item?.free_qty) || 0;
+}
+
+function hasBundledSameItemFree(item) {
+	if (item?.is_free_item || item?._isStandaloneFreeRow) {
+		return false;
+	}
+	const bundled = Number.parseFloat(item?._bundledFreeQty) || 0;
+	if (bundled > 0) return true;
+	if ((Number.parseFloat(item?.free_qty) || 0) > 0) return true;
+	return item?.discount_source === "free_item";
+}
+
+function getDisplayFreeQty(item) {
+	if (item?.is_free_item || item?._isStandaloneFreeRow) {
+		return Number.parseFloat(item.quantity) || 0;
+	}
+	const freeQty = Number.parseFloat(item?.free_qty) || 0;
+	if (freeQty > 0) return freeQty;
+	const bundled = Number.parseFloat(item?._bundledFreeQty) || 0;
+	if (bundled > 0) return bundled;
+	return getGwpFreeQty(item);
+}
+
+function getDisplayQuantity(item) {
+	if (item?.discount_source === "free_item" && (Number.parseFloat(item?.free_qty) || 0) > 0) {
+		return item.quantity || 0;
+	}
+	const bundled = Number.parseFloat(item?._bundledFreeQty) || 0;
+	if (bundled > 0) {
+		return (Number.parseFloat(item.quantity) || 0) + bundled;
+	}
+	return item.quantity || 0;
+}
+
+function formatFreeItemBadgeText(freeQty) {
+	const count = Number.parseFloat(freeQty) || 0;
+	if (count === 1) return __("1 free item");
+	return __("{0} free items", [count]);
+}
+
+function resolvePaidQuantityFromDisplay(item, displayQty) {
+	if (item?.discount_source === "free_item") {
+		const freeQty = Number.parseFloat(item?.free_qty) || 0;
+		if (freeQty > 0) {
+			return Math.max(0, displayQty - freeQty);
+		}
+	}
+	const bundled = Number.parseFloat(item?._bundledFreeQty) || 0;
+	if (bundled > 0) {
+		return Math.max(0, displayQty - bundled);
+	}
+	return displayQty;
+}
+
+function getItemDiscountPercent(item) {
+	const pct = Number.parseFloat(item?.discount_percentage) || 0;
+	if (pct > 0) return pct;
+	const discountAmount = Number.parseFloat(item?.discount_amount) || 0;
+	if (discountAmount <= 0) return 0;
+	const qty = Number.parseFloat(item?.quantity || item?.qty) || 0;
+	const rate = Number.parseFloat(item?.price_list_rate || item?.rate) || 0;
+	const base = qty * rate;
+	if (base <= 0) return 0;
+	return (discountAmount / base) * 100;
+}
+
+/**
  * Format a numeric amount as currency string.
  * Uses the component's currency prop for formatting.
  *
@@ -2014,9 +2215,9 @@ function incrementQuantity(item) {
 	// Prevent editing resolved barcode items
 	if (item.is_resolved_barcode) return;
 
-	const step = getSmartStep(item.quantity);
-	const newQty = Math.round((item.quantity + step) * 10000) / 10000;
-	emit("update-quantity", item.item_code, newQty, item.uom);
+	const step = getSmartStep(getDisplayQuantity(item));
+	const newPaidQty = Math.round((item.quantity + step) * 10000) / 10000;
+	emit("update-quantity", item.item_code, newPaidQty, item.uom);
 }
 
 /**
@@ -2029,14 +2230,14 @@ function decrementQuantity(item) {
 	// Prevent editing resolved barcode items
 	if (item.is_resolved_barcode) return;
 
-	const step = getSmartStep(item.quantity);
-	const newQty = Math.round((item.quantity - step) * 10000) / 10000;
+	const step = getSmartStep(getDisplayQuantity(item));
+	const newPaidQty = Math.round((item.quantity - step) * 10000) / 10000;
 
-	if (newQty <= 0) {
+	if (newPaidQty <= 0) {
 		// If quantity would be 0 or negative, remove the item
 		emit("remove-item", item.item_code, item.uom);
 	} else {
-		emit("update-quantity", item.item_code, newQty, item.uom);
+		emit("update-quantity", item.item_code, newPaidQty, item.uom);
 	}
 }
 
@@ -2052,16 +2253,18 @@ function updateQuantity(item, value) {
 	// Prevent editing resolved barcode items
 	if (item.is_resolved_barcode) return;
 
-	const qty = Number.parseFloat(value);
+	const displayQty = Number.parseFloat(value);
 
 	// If the input isn't a valid number (e.g., user cleared the field), do nothing
-	if (isNaN(qty)) return;
+	if (isNaN(displayQty)) return;
+
+	const paidQty = resolvePaidQuantityFromDisplay(item, displayQty);
 
 	// If quantity is zero or negative, remove the item from the cart
-	if (qty <= 0) return emit("remove-item", item.item_code, item.uom);
+	if (paidQty <= 0) return emit("remove-item", item.item_code, item.uom);
 
-	// For positive numbers, update quantity immediately (no rounding here while typing)
-	emit("update-quantity", item.item_code, qty, item.uom);
+	// For positive numbers, update paid quantity (free row stays separate in data)
+	emit("update-quantity", item.item_code, paidQty, item.uom);
 }
 
 /**

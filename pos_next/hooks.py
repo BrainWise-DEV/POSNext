@@ -274,6 +274,15 @@ scheduler_events = {
 # }
 
 
+
+# Extension points consumed by POS Next, implemented by optional apps
+pos_next_loyalty_provider = []
+pos_next_bootstrap_settings = []
+pos_next_customer_validators = []
+pos_next_customer_prepare = []
+pos_next_customer_after_insert = []
+
+
 website_route_rules = [
 	{"from_route": "/pos/<path:app_path>", "to_route": "pos"},
 ]

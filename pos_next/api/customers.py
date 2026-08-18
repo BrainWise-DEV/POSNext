@@ -6,7 +6,11 @@ Handles customer search, creation, and management for POS operations
 import frappe
 from frappe import _
 
-
+from pos_next.integrations.registry import (
+	after_customer_insert,
+	prepare_customer_doc,
+	validate_customer_create,
+)
 @frappe.whitelist()
 def get_customers(search_term="", pos_profile=None, limit=20, modified_since=None):
 	"""
@@ -83,6 +87,9 @@ def create_customer(
 	pos_profile=None,
 	custom_governorate=None,
 	custom_district=None,
+	custom_first_name=None,
+	custom_last_name=None,
+	custom_is_publish=1,
 ):
 	"""
 	Create a new customer from POS.
@@ -97,6 +104,9 @@ def create_customer(
 	    pos_profile (str): POS Profile (optional, preferred for context-aware loyalty assignment)
 	    custom_governorate (str): Governorate (optional)
 	    custom_district (str): District (optional, must belong to the governorate)
+	    custom_first_name (str): First name for Magento sync (required when masar_miraaya installed)
+	    custom_last_name (str): Last name for Magento sync (required when masar_miraaya installed)
+	    custom_is_publish (int): Publish customer to Magento (default 1)
 
 	Returns:
 	    dict: Created customer document
@@ -107,6 +117,13 @@ def create_customer(
 
 	if not customer_name:
 		frappe.throw(_("Customer name is required"))
+
+	validate_customer_create(
+		customer_name=customer_name,
+		email_id=email_id,
+		custom_first_name=custom_first_name,
+		custom_last_name=custom_last_name,
+	)
 
 	loyalty_program = get_default_loyalty_program_from_settings(
 		company=company,
@@ -145,10 +162,26 @@ def create_customer(
 		}
 	)
 
+	publish_to_magento = prepare_customer_doc(
+		customer,
+		custom_first_name=custom_first_name,
+		custom_last_name=custom_last_name,
+		custom_is_publish=custom_is_publish,
+	)
+
 	frappe.flags.pos_next_customer_company = company
 	frappe.flags.pos_next_customer_pos_profile = pos_profile
 	try:
 		customer.insert()
+		if publish_to_magento:
+			after_customer_insert(
+				customer,
+				email_id=email_id,
+				mobile_no=mobile_no,
+				custom_first_name=custom_first_name,
+				custom_last_name=custom_last_name,
+				custom_is_publish=custom_is_publish,
+			)
 	finally:
 		frappe.flags.pos_next_customer_company = None
 		frappe.flags.pos_next_customer_pos_profile = None

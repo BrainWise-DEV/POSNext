@@ -116,6 +116,10 @@ def get_pos_settings(pos_profile):
 		frappe.db.get_single_value("Stock Settings", "allow_negative_stock") or 0
 	)
 
+	from pos_next.integrations.registry import extend_bootstrap_settings
+
+	extend_bootstrap_settings(settings, pos_profile)
+
 	return settings
 
 

@@ -10,6 +10,11 @@ import frappe
 from frappe import _
 from frappe.utils import cint, flt
 
+from pos_next.integrations.registry import (
+	get_external_loyalty_balance,
+	is_external_loyalty_mode,
+)
+
 
 def validate_wallet_payment(doc, method=None):
 	"""
@@ -26,7 +31,9 @@ def validate_wallet_payment(doc, method=None):
 		return
 
 	# Get customer wallet balance
-	wallet_balance = get_customer_wallet_balance(doc.customer, doc.company, exclude_invoice=doc.name)
+	wallet_balance = get_customer_wallet_balance(
+		doc.customer, doc.company, exclude_invoice=doc.name, pos_profile=doc.pos_profile
+	)
 
 	if wallet_amount > wallet_balance:
 		frappe.throw(
@@ -43,6 +50,9 @@ def process_loyalty_to_wallet(doc, method=None):
 	Convert earned loyalty points to wallet balance after invoice submission.
 	Called during on_submit hook.
 	"""
+	if is_external_loyalty_mode(doc.pos_profile):
+		return
+
 	if not doc.is_pos or doc.is_return:
 		return
 
@@ -142,21 +152,47 @@ def get_wallet_amount_from_payments(payments):
 	Calculate total wallet payment amount from invoice payments.
 	"""
 	wallet_amount = 0.0
+	if not payments:
+		return wallet_amount
 
+	wallet_modes = _get_wallet_payment_modes()
 	for payment in payments:
-		if not payment.mode_of_payment:
+		mode_of_payment = payment.get("mode_of_payment") if isinstance(payment, dict) else payment.mode_of_payment
+		if not mode_of_payment:
 			continue
 
-		is_wallet = frappe.db.get_value("Mode of Payment", payment.mode_of_payment, "is_wallet_payment")
-
-		if is_wallet:
-			wallet_amount += flt(payment.amount)
+		if wallet_modes.get(mode_of_payment):
+			amount = payment.get("amount") if isinstance(payment, dict) else payment.amount
+			wallet_amount += flt(amount)
 
 	return wallet_amount
 
 
+def get_wallet_amount_for_sales_invoice(invoice_name, payments=None):
+	"""Return wallet/LP payment total for a submitted Sales Invoice."""
+	if payments is None:
+		payments = frappe.get_all(
+			"Sales Invoice Payment",
+			filters={"parent": invoice_name},
+			fields=["mode_of_payment", "amount"],
+		)
+	return get_wallet_amount_from_payments(payments)
+
+
+def _get_wallet_payment_modes():
+	"""Return a cached map of wallet-enabled Mode of Payment names."""
+	modes = frappe.cache().get_value("pos_next_wallet_payment_modes")
+	if modes is None:
+		modes = {
+			row.name: 1
+			for row in frappe.get_all("Mode of Payment", filters={"is_wallet_payment": 1}, fields=["name"])
+		}
+		frappe.cache().set_value("pos_next_wallet_payment_modes", modes)
+	return modes
+
+
 @frappe.whitelist()
-def get_customer_wallet_balance(customer, company=None, exclude_invoice=None):
+def get_customer_wallet_balance(customer, company=None, exclude_invoice=None, pos_profile=None):
 	"""
 	Get customer's available wallet balance.
 
@@ -164,14 +200,25 @@ def get_customer_wallet_balance(customer, company=None, exclude_invoice=None):
 	- Negative GL balance = customer has credit (we owe them) = positive wallet balance
 	- Positive GL balance = customer owes us = no wallet balance
 
+	When masar_miraaya is active, returns Magento LP balance (balance_iqd).
+
 	Args:
 		customer: Customer ID
 		company: Company (optional)
 		exclude_invoice: Invoice name to exclude from pending calculations
+		pos_profile: POS Profile (optional, used for Magento loyalty mode)
 
 	Returns:
 		float: Available wallet balance
 	"""
+	if is_external_loyalty_mode(pos_profile):
+		try:
+			balance = get_external_loyalty_balance(customer)
+			return flt(balance.get("balance_iqd")) if balance else 0.0
+		except Exception:
+			frappe.log_error(frappe.get_traceback(), "Magento LP Balance Error")
+			return 0.0
+
 	try:
 		from erpnext.accounts.utils import get_balance_on
 
@@ -259,6 +306,9 @@ def create_wallet_on_customer_insert(doc, method=None):
 	# Only auto-create wallets when a POS profile with auto_create_wallet exists
 	pos_profile = frappe.db.get_value("POS Profile", {"company": company, "disabled": 0}, "name")
 	if not pos_profile:
+		return
+
+	if is_external_loyalty_mode(pos_profile):
 		return
 
 	pos_settings = get_pos_settings(pos_profile)
@@ -394,6 +444,8 @@ def get_wallet_info(customer, company, pos_profile=None):
 		"auto_create": False,
 		"loyalty_program": None,
 		"loyalty_to_wallet": False,
+		"balance_points": 0.0,
+		"magento_loyalty": False,
 	}
 
 	# Check if loyalty program is enabled in POS Settings
@@ -409,6 +461,20 @@ def get_wallet_info(customer, company, pos_profile=None):
 	if not result["wallet_enabled"]:
 		return result
 
+	if is_external_loyalty_mode(pos_profile):
+		result["magento_loyalty"] = True
+		result["wallet_exists"] = True
+		try:
+			balance = get_external_loyalty_balance(customer)
+			result["wallet_balance"] = flt(balance.get("balance_iqd"))
+			result["balance_points"] = flt(balance.get("balance_points"))
+		except Exception as exc:
+			frappe.log_error(
+				title="Magento LP Balance Error",
+				message=f"Customer: {customer}, Error: {exc!s}\n{frappe.get_traceback()}",
+			)
+		return result
+
 	# Get wallet details (support both pos_next and wallete status values)
 	wallet = frappe.db.get_value(
 		"Wallet",
@@ -420,7 +486,9 @@ def get_wallet_info(customer, company, pos_profile=None):
 	if wallet:
 		result["wallet_exists"] = True
 		result["wallet_name"] = wallet.name
-		result["wallet_balance"] = get_customer_wallet_balance(customer, company)
+		result["wallet_balance"] = get_customer_wallet_balance(
+			customer, company, pos_profile=pos_profile
+		)
 	elif result["auto_create"]:
 		# Auto-create wallet for customer if enabled
 		try:

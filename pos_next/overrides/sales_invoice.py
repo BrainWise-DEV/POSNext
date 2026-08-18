@@ -8,49 +8,12 @@ Handles wallet payments that require party information for Receivable accounts.
 """
 
 import frappe
+from frappe import _
 from erpnext.accounts.doctype.sales_invoice.sales_invoice import SalesInvoice
 from erpnext.accounts.utils import get_account_currency
 from frappe.utils import cint, flt
 
 
-def _find_paid_bundle_row_for_free(si_doc, free_row):
-	"""Pick the paid SI item row whose bundle qty should absorb this free bundle's packed items."""
-	candidates = []
-	for row in si_doc.get("items"):
-		if row.name == free_row.name or cint(row.is_free_item):
-			continue
-		if row.item_code != free_row.item_code:
-			continue
-		if (row.warehouse or "") != (free_row.warehouse or ""):
-			continue
-		candidates.append(row)
-	if not candidates:
-		return None
-	free_idx = free_row.idx or 0
-	before = [r for r in candidates if (r.idx or 0) < free_idx]
-	if before:
-		return max(before, key=lambda r: r.idx or 0)
-	return candidates[0]
-
-
-def _find_matching_packed_item_for_merge(si_doc, paid_row, component_item_code, warehouse):
-	"""Match a packed item on the paid bundle line; prefer same warehouse."""
-	w = warehouse or ""
-	matches = []
-	for pi in si_doc.get("packed_items"):
-		if pi.parent_detail_docname != paid_row.name:
-			continue
-		if pi.parent_item != paid_row.item_code:
-			continue
-		if pi.item_code != component_item_code:
-			continue
-		matches.append(pi)
-	if not matches:
-		return None
-	for pi in matches:
-		if (pi.warehouse or "") == w:
-			return pi
-	return matches[0]
 
 
 def _get_post_change_gl_entries_setting():
@@ -86,6 +49,21 @@ def _get_post_change_gl_entries_setting():
 	return cint(result[0][0]) if result else 0
 
 
+def _resolve_pos_customer(invoice_doc):
+	"""Return a valid Customer name for POS invoices, or None."""
+	customer = (invoice_doc.get("customer") or "").strip()
+	if customer and frappe.db.exists("Customer", customer):
+		return customer
+
+	pos_profile = invoice_doc.get("pos_profile")
+	if pos_profile:
+		default_customer = frappe.db.get_value("POS Profile", pos_profile, "customer")
+		if default_customer and frappe.db.exists("Customer", default_customer):
+			return default_customer
+
+	return None
+
+
 class CustomSalesInvoice(SalesInvoice):
 	"""
 	Custom Sales Invoice class that handles wallet payments correctly.
@@ -95,9 +73,38 @@ class CustomSalesInvoice(SalesInvoice):
 	for wallet payment methods marked with is_wallet_payment.
 	"""
 
+	def validate(self):
+		if cint(self.is_pos):
+			self._ensure_pos_customer()
+			self._validate_pos_payment_accounts()
+		super().validate()
+
+	def on_submit(self):
+		# Re-align after fetch_from so ERPNext's loyalty branch does not run on a
+		# credit note whose original invoice has no loyalty_program.
+		from pos_next.api.sales_invoice_hooks import sync_return_loyalty_program
+
+		sync_return_loyalty_program(self)
+		super().on_submit()
+
+	def _ensure_pos_customer(self):
+		"""POS invoices always need a customer for Receivable GL entries (debit_to)."""
+		customer = _resolve_pos_customer(self)
+		if not customer:
+			frappe.throw(
+				_(
+					"Customer is required. Please select a customer or configure a default customer in POS Profile."
+				),
+				title=_("Customer Required"),
+			)
+
+		self.customer = customer
+		if not self.customer_name:
+			self.customer_name = frappe.db.get_value("Customer", customer, "customer_name")
+
 	def make_pos_gl_entries(self, gl_entries):
 		"""
-		Override to add party information for wallet payment accounts.
+		Override to add party information for wallet / receivable payment accounts.
 
 		The standard ERPNext implementation doesn't set party_type/party for
 		payment mode accounts, which causes validation errors for Receivable
@@ -110,66 +117,81 @@ class CustomSalesInvoice(SalesInvoice):
 				if skip_change_gl_entries and payment_mode.account == self.account_for_change_amount:
 					payment_mode.base_amount -= flt(self.change_amount)
 
-				if payment_mode.amount:
-					# POS, make payment entries
-					# Credit entry to debit_to (customer receivable)
-					gl_entries.append(
-						self.get_gl_dict(
-							{
-								"account": self.debit_to,
-								"party_type": "Customer",
-								"party": self.customer,
-								"against": payment_mode.account,
-								"credit": payment_mode.base_amount,
-								"credit_in_account_currency": payment_mode.base_amount
-								if self.party_account_currency == self.company_currency
-								else payment_mode.amount,
-								"against_voucher": self.return_against
-								if cint(self.is_return) and self.return_against
-								else self.name,
-								"against_voucher_type": self.doctype,
-								"cost_center": self.cost_center,
-							},
-							self.party_account_currency,
-							item=self,
-						)
-					)
+				against_voucher = self.name
+				if self.is_return and self.return_against and not self.update_outstanding_for_self:
+					against_voucher = self.return_against
 
-					# Debit entry to payment mode account
-					payment_mode_account_currency = get_account_currency(payment_mode.account)
+				payment_amount = flt(payment_mode.base_amount) or flt(payment_mode.amount)
+				if not payment_amount:
+					continue
 
-					# Get party info for wallet payments
-					party_type, party = self.get_party_and_party_type_for_pos_gl_entry(
-						payment_mode.mode_of_payment, payment_mode.account
+				# Credit customer receivable (payment received against the invoice)
+				gl_entries.append(
+					self.get_gl_dict(
+						{
+							"account": self.debit_to,
+							"party_type": "Customer",
+							"party": self.customer,
+							"against": payment_mode.account,
+							"credit": payment_amount,
+							"credit_in_account_currency": payment_amount
+							if self.party_account_currency == self.company_currency
+							else payment_mode.amount,
+							"against_voucher": against_voucher,
+							"against_voucher_type": self.doctype,
+							"cost_center": self.cost_center,
+						},
+						self.party_account_currency,
+						item=self,
 					)
+				)
 
-					gl_entries.append(
-						self.get_gl_dict(
-							{
-								"account": payment_mode.account,
-								"party_type": party_type,
-								"party": party,
-								"against": self.customer,
-								"debit": payment_mode.base_amount,
-								"debit_in_account_currency": payment_mode.base_amount
-								if payment_mode_account_currency == self.company_currency
-								else payment_mode.amount,
-								"cost_center": self.cost_center,
-							},
-							payment_mode_account_currency,
-							item=self,
-						)
+				# Debit the payment-mode account (Cash/Bank/another Receivable, etc.)
+				payment_mode_account_currency = get_account_currency(payment_mode.account)
+				party_type, party = self.get_party_and_party_type_for_pos_gl_entry(
+					payment_mode.mode_of_payment, payment_mode.account
+				)
+
+				gl_entries.append(
+					self.get_gl_dict(
+						{
+							"account": payment_mode.account,
+							"party_type": party_type,
+							"party": party,
+							"against": self.customer,
+							"debit": payment_amount,
+							"debit_in_account_currency": payment_amount
+							if payment_mode_account_currency == self.company_currency
+							else payment_mode.amount,
+							"cost_center": self.cost_center,
+						},
+						payment_mode_account_currency,
+						item=self,
 					)
+				)
 
 			if not skip_change_gl_entries:
 				if hasattr(self, "get_gle_for_change_amount"):
-					# ERPNext v16+: Method renamed and returns a list of GL entries
-					# that needs to be extended to the main gl_entries list
 					gl_entries.extend(self.get_gle_for_change_amount())
 				else:
-					# ERPNext v15: Method takes gl_entries as parameter
-					# and appends change amount entries directly to it
 					self.make_gle_for_change_amount(gl_entries)
+
+	def _validate_pos_payment_accounts(self):
+		"""Payment modes must not post to the same account as debit_to."""
+		if not self.payments or not self.debit_to:
+			return
+
+		for payment in self.payments:
+			if not payment.account or not flt(payment.amount):
+				continue
+			if payment.account == self.debit_to:
+				frappe.throw(
+					_(
+						"Mode of Payment {0} uses account {1}, which is the same as the invoice receivable account. "
+						"Please set a Cash or Bank account on the Mode of Payment."
+					).format(payment.mode_of_payment, self.debit_to),
+					title=_("Invalid Payment Account"),
+				)
 
 	def validate_pos_paid_amount(self):
 		"""
@@ -195,25 +217,46 @@ class CustomSalesInvoice(SalesInvoice):
 
 	def get_party_and_party_type_for_pos_gl_entry(self, mode_of_payment, account):
 		"""
-		Get party type and party for wallet payment GL entries.
+		Get party type and party for POS payment GL entries.
 
-		For wallet payments (Mode of Payment with is_wallet_payment=1),
-		returns Customer as party_type and the invoice customer as party.
-		For regular payments, returns empty strings.
+		ERPNext requires party on GL entries against Receivable/Payable accounts.
+		Wallet modes and any payment mode linked to a Receivable account need the
+		invoice customer as party.
 		"""
+		party_type, party = "", ""
+
+		if not account or not self.customer:
+			return party_type, party
+
 		is_wallet_mode_of_payment = frappe.db.get_value(
 			"Mode of Payment", mode_of_payment, "is_wallet_payment"
 		)
+		account_type = frappe.get_cached_value("Account", account, "account_type")
 
-		party_type, party = "", ""
-		if is_wallet_mode_of_payment:
+		if is_wallet_mode_of_payment or account_type == "Receivable":
 			party_type, party = "Customer", self.customer
 
 		return party_type, party
 
+	def make_loyalty_point_entry(self):
+		"""Skip ERPNext loyalty ledger when this invoice has no program.
+
+		Return invoices copy-map with no_copy on loyalty_program, then fetch the
+		customer's current program. ERPNext then recalculates points on the
+		original invoice. If that original has loyalty_program=None,
+		get_loyalty_program_details_with_points does get_doc("Loyalty Program", None).
+		"""
+		if not self.loyalty_program:
+			return
+		return super().make_loyalty_point_entry()
+
+	def set_loyalty_program_tier(self):
+		if not self.loyalty_program:
+			return
+		return super().set_loyalty_program_tier()
+
 	def update_packing_list(self):
 		super().update_packing_list()
-		self._combine_packed_qty_for_free_product_bundles()
 		self._set_use_serial_batch_fields_on_packed_items()
 
 	def _set_use_serial_batch_fields_on_packed_items(self):
@@ -242,40 +285,3 @@ class CustomSalesInvoice(SalesInvoice):
 			if tracking.has_batch_no or tracking.has_serial_no:
 				pi.use_serial_batch_fields = 1
 
-	def _combine_packed_qty_for_free_product_bundles(self):
-		"""
-		Merge packed_items from free bundle lines into the matching paid bundle line.
-
-		ERPNext builds packed rows per Sales Invoice Item row. For BOGO / pricing-rule
-		free rows, the same product bundle often appears twice (paid + is_free_item).
-		That duplicates component rows. Stock and picking should follow total bundle
-		qty on one set of packed lines tied to the paid row.
-		"""
-		if self.is_return or not self.get("packed_items"):
-			return
-
-		free_bundle_rows = [
-			row
-			for row in self.get("items")
-			if row.item_code and cint(row.is_free_item) and self.has_product_bundle(row.item_code)
-		]
-		if not free_bundle_rows:
-			return
-
-		for free_row in free_bundle_rows:
-			paid_row = _find_paid_bundle_row_for_free(self, free_row)
-			if not paid_row:
-				continue
-
-			to_remove = []
-			for pi in list(self.get("packed_items")):
-				if pi.parent_detail_docname != free_row.name or pi.parent_item != free_row.item_code:
-					continue
-				tgt = _find_matching_packed_item_for_merge(self, paid_row, pi.item_code, pi.warehouse)
-				if tgt:
-					prec = tgt.precision("qty")
-					tgt.qty = flt(flt(tgt.qty) + flt(pi.qty), prec)
-					to_remove.append(pi)
-
-			for pi in to_remove:
-				self.remove(pi)

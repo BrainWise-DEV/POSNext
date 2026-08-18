@@ -12,6 +12,7 @@
  */
 
 import { call } from "@/utils/apiWrapper";
+import { isAuthGateInstalled, promoApi } from "@/utils/promoApi";
 import { logger } from "@/utils/logger";
 import { defineStore } from "pinia";
 import { ref } from "vue";
@@ -57,6 +58,21 @@ export const useBootstrapStore = defineStore("bootstrap", () => {
 			const result = await call("pos_next.api.bootstrap.get_initial_data", {});
 
 			if (result?.success) {
+				if (isAuthGateInstalled()) {
+					const profileName = result.pos_profile?.name || result.pos_profile;
+					try {
+						if (profileName) {
+							result.authorization_policy = await call(promoApi.getAuthorizationPolicy(), {
+								pos_profile: profileName,
+							});
+						}
+						const pinInfo = await call(promoApi.hasAuthorizationPin(), {});
+						result.authorization_pin_length =
+							pinInfo?.pin_length || result.authorization_pin_length || 4;
+					} catch (authErr) {
+						log.warn("Promotions auth overlay failed", authErr);
+					}
+				}
 				data.value = result;
 				loaded.value = true;
 				log.success("Bootstrap data loaded", {
