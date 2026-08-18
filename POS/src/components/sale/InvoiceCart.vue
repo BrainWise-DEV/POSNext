@@ -1460,6 +1460,7 @@
  * IMPORTS
  * ============================================================================
  */
+import { promoApi } from "@/utils/promoApi";
 import { usePOSCartStore } from "@/stores/posCart";
 import { usePOSSettingsStore } from "@/stores/posSettings";
 import { usePOSOffersStore } from "@/stores/posOffers";
@@ -1696,7 +1697,7 @@ if (props.posProfile) {
  * @endpoint pos_next.api.offers.get_active_coupons
  */
 const giftCardsResource = createResource({
-	url: "pos_next.api.offers.get_active_coupons",
+	url: promoApi.getActiveCoupons(),
 	makeParams() {
 		const customerName = props.customer?.name || props.customer;
 		return {

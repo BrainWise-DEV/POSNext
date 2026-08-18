@@ -807,6 +807,7 @@
 </template>
 
 <script setup>
+import { promoApi } from "@/utils/promoApi";
 import AutocompleteSelect from "@/components/common/AutocompleteSelect.vue";
 import { useToast } from "@/composables/useToast";
 import { useCustomerSearchStore } from "@/stores/customerSearch";
@@ -964,7 +965,7 @@ const customerOptions = computed(() => {
 
 // Resources
 const couponsResource = createResource({
-	url: "pos_next.api.promotions.get_coupons",
+	url: promoApi.getCoupons(),
 	makeParams() {
 		return {
 			company: props.company,
@@ -983,7 +984,7 @@ const couponsResource = createResource({
 });
 
 const couponDetailsResource = createResource({
-	url: "pos_next.api.promotions.get_coupon_details",
+	url: promoApi.getCouponDetails(),
 	makeParams() {
 		return { coupon_name: selectedCoupon.value?.name };
 	},
@@ -1016,7 +1017,7 @@ const campaignsResource = createResource({
 });
 
 const brandsResource = createResource({
-	url: "pos_next.api.promotions.get_brands",
+	url: promoApi.getBrands(),
 	auto: false,
 	onSuccess(data) {
 		brands.value = data || [];
@@ -1024,7 +1025,7 @@ const brandsResource = createResource({
 });
 
 const itemGroupsResource = createResource({
-	url: "pos_next.api.promotions.get_item_groups",
+	url: promoApi.getItemGroups(),
 	makeParams() {
 		return { company: props.company };
 	},
@@ -1035,7 +1036,7 @@ const itemGroupsResource = createResource({
 });
 
 const createCouponResource = createResource({
-	url: "pos_next.api.promotions.create_coupon",
+	url: promoApi.createCoupon(),
 	makeParams() {
 		return { data: JSON.stringify(form.value) };
 	},
@@ -1055,7 +1056,7 @@ const createCouponResource = createResource({
 });
 
 const updateCouponResource = createResource({
-	url: "pos_next.api.promotions.update_coupon",
+	url: promoApi.updateCoupon(),
 	makeParams() {
 		return {
 			coupon_name: selectedCoupon.value?.name,
@@ -1095,7 +1096,7 @@ const updateCouponResource = createResource({
 });
 
 const toggleCouponResource = createResource({
-	url: "pos_next.api.promotions.toggle_coupon",
+	url: promoApi.toggleCoupon(),
 	makeParams() {
 		return { coupon_name: selectedCoupon.value?.name };
 	},
@@ -1117,7 +1118,7 @@ const toggleCouponResource = createResource({
 });
 
 const deleteCouponResource = createResource({
-	url: "pos_next.api.promotions.delete_coupon",
+	url: promoApi.deleteCoupon(),
 	makeParams() {
 		return { coupon_name: selectedCoupon.value?.name };
 	},

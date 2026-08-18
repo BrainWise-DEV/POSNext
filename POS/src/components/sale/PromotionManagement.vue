@@ -1119,6 +1119,7 @@
 </template>
 
 <script setup>
+import { promoApi } from "@/utils/promoApi";
 import { usePOSPermissions } from "@/composables/usePermissions";
 import { useToast } from "@/composables/useToast";
 import { useItemSearchStore } from "@/stores/itemSearch";
@@ -1368,7 +1369,7 @@ const itemCodeOptions = computed(() => {
 
 // Resources
 const promotionsResource = createResource({
-	url: "pos_next.api.promotions.get_promotions",
+	url: promoApi.getPromotions(),
 	makeParams() {
 		return {
 			pos_profile: props.posProfile,
@@ -1384,7 +1385,7 @@ const promotionsResource = createResource({
 });
 
 const itemGroupsResource = createResource({
-	url: "pos_next.api.promotions.get_item_groups",
+	url: promoApi.getItemGroups(),
 	makeParams() {
 		return { company: props.company };
 	},
@@ -1399,7 +1400,7 @@ const itemGroupsResource = createResource({
 });
 
 const brandsResource = createResource({
-	url: "pos_next.api.promotions.get_brands",
+	url: promoApi.getBrands(),
 	auto: false,
 	onSuccess(data) {
 		brands.value = data || [];
@@ -1411,7 +1412,7 @@ const brandsResource = createResource({
 });
 
 const savePromotionResource = createResource({
-	url: "pos_next.api.promotions.create_promotion",
+	url: promoApi.createPromotion(),
 	makeParams() {
 		return { data: JSON.stringify(form.value) };
 	},
@@ -1433,7 +1434,7 @@ const savePromotionResource = createResource({
 });
 
 const updatePromotionResource = createResource({
-	url: "pos_next.api.promotions.update_promotion",
+	url: promoApi.updatePromotion(),
 	makeParams() {
 		return {
 			scheme_name: form.value.name,
@@ -1468,7 +1469,7 @@ const updatePromotionResource = createResource({
 });
 
 const toggleResource = createResource({
-	url: "pos_next.api.promotions.toggle_promotion",
+	url: promoApi.togglePromotion(),
 	auto: false,
 	onSuccess() {
 		showSuccess(__("Promotion status updated successfully"));
@@ -1480,7 +1481,7 @@ const toggleResource = createResource({
 });
 
 const deleteResource = createResource({
-	url: "pos_next.api.promotions.delete_promotion",
+	url: promoApi.deletePromotion(),
 	auto: false,
 	onSuccess(data) {
 		const responseData = data?.message || data;
@@ -1505,7 +1506,7 @@ const deleteResource = createResource({
 });
 
 const promotionDetailsResource = createResource({
-	url: "pos_next.api.promotions.get_promotion_details",
+	url: promoApi.getPromotionDetails(),
 	makeParams() {
 		return {
 			scheme_name: selectedPromotion.value?.name,

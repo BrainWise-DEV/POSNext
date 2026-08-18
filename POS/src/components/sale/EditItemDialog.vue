@@ -500,6 +500,7 @@
 </template>
 
 <script setup>
+import { promoApi } from "@/utils/promoApi";
 import { useToast } from "@/composables/useToast";
 import { usePOSSettingsStore } from "@/stores/posSettings";
 import { usePOSOffersStore } from "@/stores/posOffers";
@@ -611,7 +612,7 @@ async function checkItemPromotion(itemCode, qty) {
 
 	try {
 		const company = shiftStore.currentProfile?.company || shiftStore.profileCompany;
-		const resp = await call("pos_next.api.offers.item_has_active_promotion", {
+		const resp = await call(promoApi.itemHasActivePromotion(), {
 			item_code: itemCode,
 			company: company || undefined,
 			qty: quantity,

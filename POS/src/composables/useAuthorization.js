@@ -1,3 +1,4 @@
+import { promoApi } from "@/utils/promoApi";
 import { call } from "@/utils/apiWrapper";
 import { useBootstrapStore } from "@/stores/bootstrap";
 import { logger } from "@/utils/logger";
@@ -71,7 +72,7 @@ export function useAuthorization() {
 export function useAuthorizationDialog() {
 	async function loadAuthorizers() {
 		try {
-			return await call("pos_next.api.authorization.get_authorizers", {
+			return await call(promoApi.getAuthorizers(), {
 				action: state.action,
 				pos_profile: state.context?.pos_profile,
 				context: JSON.stringify(state.context || {}),
@@ -83,7 +84,7 @@ export function useAuthorizationDialog() {
 	}
 
 	async function requestGrant(approver, pin) {
-		return await call("pos_next.api.authorization.request_grant", {
+		return await call(promoApi.requestGrant(), {
 			action: state.action,
 			approver,
 			pin,

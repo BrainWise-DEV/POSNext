@@ -1,3 +1,4 @@
+import { promoApi } from "@/utils/promoApi";
 import { createResource } from "frappe-ui";
 import { computed, ref, toRaw } from "vue";
 import { isOffline, getCachedItem } from "@/utils/offline";
@@ -87,7 +88,7 @@ export function useInvoice() {
 	});
 
 	const applyOffersResource = createResource({
-		url: "pos_next.api.invoices.apply_offers",
+		url: promoApi.applyOffers(),
 		makeParams({ invoice_data, selected_offers }) {
 			const params = {
 				invoice_data: JSON.stringify(invoice_data),
@@ -103,7 +104,7 @@ export function useInvoice() {
 	});
 
 	const calculateCouponDiscountResource = createResource({
-		url: "pos_next.api.offers.calculate_coupon_discount",
+		url: promoApi.calculateCouponDiscount(),
 		auto: false,
 	});
 

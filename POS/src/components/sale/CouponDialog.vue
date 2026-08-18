@@ -231,6 +231,7 @@
 </template>
 
 <script setup>
+import { promoApi } from "@/utils/promoApi";
 import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency";
 import { call } from "@/utils/apiWrapper";
 import { unwrapCouponValidation } from "@/utils/invoice";
@@ -280,7 +281,7 @@ const errorMessage = ref("");
 
 // Resource to load gift cards
 const giftCardsResource = createResource({
-	url: "pos_next.api.offers.get_active_coupons",
+	url: promoApi.getActiveCoupons(),
 	makeParams() {
 		return {
 			customer: props.customer,
@@ -381,7 +382,7 @@ async function applyCoupon() {
 	errorMessage.value = "";
 
 	try {
-		const result = await call("pos_next.api.offers.validate_coupon", {
+		const result = await call(promoApi.validateCoupon(), {
 			coupon_code: couponCode.value,
 			customer: props.customer,
 			company: props.company,

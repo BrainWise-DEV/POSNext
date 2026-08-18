@@ -1,3 +1,4 @@
+import { promoApi } from "@/utils/promoApi";
 import { useInvoice } from "@/composables/useInvoice";
 import { usePOSOffersStore } from "@/stores/posOffers";
 import { usePOSSettingsStore } from "@/stores/posSettings";
@@ -410,7 +411,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 		try {
 			const shiftStore = usePOSShiftStore();
-			const result = await call("pos_next.api.offers.validate_coupon", {
+			const result = await call(promoApi.validateCoupon(), {
 				coupon_code: current.code,
 				customer: customerName,
 				company: shiftStore.currentProfile?.company || shiftStore.profileCompany || "",
