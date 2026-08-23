@@ -55,6 +55,7 @@ ACCUMULATIVE_MODE = "Accumulative"
 CROSS_CART_MODES = (*MIN_MAX_OPTIONS, ACCUMULATIVE_MODE)
 
 PROMOTION_TYPE_ITEM_LEVEL = "Item Level Discount"
+PROMOTION_TYPE_GIFT_POOL = "Gift Pool"
 
 
 def _has_pos_only_column():
@@ -340,6 +341,127 @@ def normalize_accumulative_scheme(doc, method=None):
 	doc.pos_only = 1
 	if not doc.get("promotion_type"):
 		doc.promotion_type = PROMOTION_TYPE_ITEM_LEVEL
+
+
+def normalize_gift_pool_scheme(doc, method=None):
+	"""Pin Gift Pool schemes to Item Group product discounts.
+
+	ERPNext only generates a Pricing Rule from a product/price slab, so this
+	keeps exactly one product-discount row whose ``free_item`` is the first
+	pool SKU. ``apply_offers`` ignores that single free item and grants from
+	the ordered pool instead.
+	"""
+	if doc.doctype != "Promotional Scheme":
+		return
+	if cstr(doc.get("promotion_type") or "") != PROMOTION_TYPE_GIFT_POOL:
+		return
+
+	from pos_next.api.gift_pool import group_gift_pool_free_qty, group_gift_pool_items
+
+	doc.apply_on = "Item Group"
+	doc.mixed_conditions = 1
+	doc.pos_only = 1
+	doc.selling = 1
+	if doc.get("pos_is_accumulative"):
+		doc.pos_is_accumulative = 0
+
+	pools = group_gift_pool_items(doc.get("gift_pool_items") or [])
+	first_free_item = next((codes[0] for codes in pools.values() if codes), None)
+	first_free_qty = next(iter(group_gift_pool_free_qty(doc.get("gift_pool_items") or []).values()), 1)
+
+	_sync_gift_pool_scheme_item_groups(doc, list(pools.keys()))
+
+	slab = _resolve_gift_pool_slab(doc)
+	slab.rule_description = slab.get("rule_description") or _("Gift Pool")
+	if not flt(slab.min_qty):
+		slab.min_qty = 1
+	slab.free_qty = first_free_qty
+	slab.same_item = 0
+	slab.free_item_rate = 0
+	if first_free_item:
+		slab.free_item = first_free_item
+
+
+def _resolve_gift_pool_slab(doc):
+	"""The one product discount row a Gift Pool scheme owns, created if absent."""
+	slabs = doc.get("product_discount_slabs") or []
+	if len(slabs) > 1:
+		frappe.throw(
+			_(
+				"A <b>Gift Pool</b> scheme uses a single product discount row, but this "
+				"scheme has {0}. Remove the extra rows."
+			).format(len(slabs)),
+			title=_("Too Many Product Discount Rows"),
+		)
+	if slabs:
+		return slabs[0]
+	return doc.append("product_discount_slabs", {})
+
+
+def _sync_gift_pool_scheme_item_groups(doc, item_groups):
+	"""Keep apply-on Item Groups in lockstep with the Gift Pool rows.
+
+	The Item Groups table is hidden on Gift Pool schemes; ERPNext still needs
+	it to generate the Pricing Rule scope.
+	"""
+	desired = [cstr(group) for group in (item_groups or []) if cstr(group)]
+	current = [
+		cstr(row.get("item_group"))
+		for row in (doc.get("item_groups") or [])
+		if cstr(row.get("item_group"))
+	]
+	if current == desired:
+		return
+	doc.set("item_groups", [])
+	for group in desired:
+		doc.append("item_groups", {"item_group": group})
+
+
+def validate_gift_pool_scheme(doc, method=None):
+	"""Authoring guards for Gift Pool: pool membership, no overlapping groups."""
+	if doc.doctype != "Promotional Scheme":
+		return
+	if cstr(doc.get("promotion_type") or "") != PROMOTION_TYPE_GIFT_POOL:
+		return
+	if doc.get("disable"):
+		return
+
+	from pos_next.api.gift_pool import (
+		expanded_groups,
+		group_gift_pool_items,
+		item_belongs_to_item_group,
+	)
+
+	pools = group_gift_pool_items(doc.get("gift_pool_items") or [])
+	if not pools:
+		frappe.throw(
+			_("Add at least one <b>free item</b> to the Gift Pool."),
+			title=_("Gift Pool"),
+		)
+
+	scheme_groups = list(pools.keys())
+	expanded_by_group = {group: expanded_groups(group) for group in scheme_groups}
+	for i, group_a in enumerate(scheme_groups):
+		for group_b in scheme_groups[i + 1 :]:
+			if expanded_by_group[group_a] & expanded_by_group[group_b]:
+				frappe.throw(
+					_(
+						"Gift Pool item groups <b>{0}</b> and <b>{1}</b> overlap. "
+						"Each group needs its own pool, so pick groups that do not contain each other."
+					).format(group_a, group_b),
+					title=_("Overlapping Item Groups"),
+				)
+
+	for item_group, item_codes in pools.items():
+		for item_code in item_codes:
+			if not item_belongs_to_item_group(item_code, item_group):
+				frappe.throw(
+					_(
+						"<b>{0}</b> is not in item group <b>{1}</b>. "
+						"Gift Pool free items must belong to the same group."
+					).format(item_code, item_group),
+					title=_("Gift Pool"),
+				)
 
 
 def _resolve_accumulative_slab(doc):

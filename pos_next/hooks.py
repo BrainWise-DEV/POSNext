@@ -179,10 +179,12 @@ doc_events = {
 		"before_validate": [
 			"pos_next.promotions.schedule.normalize_schedule_fields",
 			"pos_next.overrides.pricing_rule.normalize_accumulative_scheme",
+			"pos_next.overrides.pricing_rule.normalize_gift_pool_scheme",
 		],
 		"validate": [
 			"pos_next.overrides.pricing_rule.enforce_cross_cart_pricing_config",
 			"pos_next.overrides.pricing_rule.validate_unique_promotion_type_per_item",
+			"pos_next.overrides.pricing_rule.validate_gift_pool_scheme",
 		],
 		"on_update": "pos_next.overrides.pricing_rule.sync_promotion_fields_to_pricing_rules",
 	},

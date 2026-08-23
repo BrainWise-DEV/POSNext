@@ -23,6 +23,7 @@ from pos_next.promotions.scope import (
 	get_scope_config,
 )
 from pos_next.api.gwp import PROMOTION_TYPE_GWP, calculate_gwp_discount_percentage
+from pos_next.api.gift_pool import PROMOTION_TYPE_GIFT_POOL
 
 # ============================================================================
 # Constants
@@ -117,6 +118,7 @@ class Offer:
 	max_accumulated_discount_percentage: float = 0
 	min_scopes_required: int = 1
 	gwp_paid_qty_basis: str | None = None
+	gift_pool_items: list[dict] | None = None
 
 	def to_dict(self) -> dict:
 		"""Convert to dictionary for API response"""
@@ -614,6 +616,7 @@ def get_offers(pos_profile: str) -> list[dict]:
 
 		_attach_accumulative_config(offers)
 		_attach_schedule(offers)
+		_attach_gift_pool_config(offers)
 
 		return [offer.to_dict() for offer in offers]
 
@@ -687,6 +690,46 @@ def _attach_schedule(offers: list[Offer]) -> None:
 		row = windows.get(offer.name)
 		if row:
 			offer.schedule = schedule_payload(row)
+
+
+def _attach_gift_pool_config(offers: list[Offer]) -> None:
+	"""Stamp ordered free-item pools onto Gift Pool offers for the POS cart."""
+	scheme_names = [
+		offer.promotional_scheme
+		for offer in offers
+		if offer.promotion_type == PROMOTION_TYPE_GIFT_POOL and offer.promotional_scheme
+	]
+	if not scheme_names:
+		return
+	if not frappe.db.exists("DocType", "POS Gift Pool Item"):
+		return
+
+	rows = frappe.get_all(
+		"POS Gift Pool Item",
+		filters={"parent": ["in", scheme_names], "parenttype": "Promotional Scheme"},
+		fields=["parent", "item_group", "item_code", "item_name", "idx", "free_qty"]
+		if frappe.db.has_column("POS Gift Pool Item", "free_qty")
+		else ["parent", "item_group", "item_code", "item_name", "idx"],
+		order_by="idx asc",
+	)
+	expanded_cache: dict[str, list[str]] = {}
+	by_scheme: dict[str, list[dict]] = {}
+	for row in rows:
+		item_group = row.item_group
+		if item_group not in expanded_cache:
+			expanded_cache[item_group] = get_item_group_with_descendants(item_group)
+		by_scheme.setdefault(row.parent, []).append(
+			{
+				"item_group": item_group,
+				"item_code": row.item_code,
+				"item_name": row.item_name,
+				"free_qty": row.get("free_qty") or 1,
+				"matching_item_groups": expanded_cache[item_group],
+			}
+		)
+	for offer in offers:
+		if offer.promotional_scheme in by_scheme:
+			offer.gift_pool_items = by_scheme[offer.promotional_scheme]
 
 
 def _get_promotional_scheme_offers(company: str, date: str) -> list[Offer]:

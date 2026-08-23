@@ -301,7 +301,7 @@
    "name": "Pricing Rule-custom_promotion_type",
    "no_copy": 0,
    "non_negative": 0,
-   "options": "\nItem Level Discount\nAuto Discount\nGWP",
+   "options": "\nItem Level Discount\nAuto Discount\nGWP\nGift Pool",
    "owner": "Administrator",
    "permlevel": 0,
    "placeholder": null,

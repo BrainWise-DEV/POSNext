@@ -37,6 +37,7 @@ def check_promotion_permissions(action="read"):
 PROMOTION_TYPE_ITEM_LEVEL = "Item Level Discount"
 PROMOTION_TYPE_AUTO = "Auto Discount"
 PROMOTION_TYPE_GWP = "GWP"
+PROMOTION_TYPE_GIFT_POOL = "Gift Pool"
 
 
 ACCUMULATIVE_MODE = "Accumulative"
@@ -78,6 +79,24 @@ def _apply_promotion_type_constraints(data):
 	elif promotion_type == PROMOTION_TYPE_GWP:
 		if data.get("discount_type") not in (None, "free_item"):
 			data["discount_type"] = "free_item"
+	elif promotion_type == PROMOTION_TYPE_GIFT_POOL:
+		data["apply_on"] = "Item Group"
+		data["discount_type"] = "free_item"
+		data["pos_only"] = 1
+		data["mixed_conditions"] = 1
+		if not data.get("gift_pool_items"):
+			frappe.throw(_("Please choose at least one free item for Gift Pool"))
+		if not data.get("items"):
+			seen = set()
+			derived = []
+			for row in data.get("gift_pool_items") or []:
+				item_group = row.get("item_group")
+				if item_group and item_group not in seen:
+					seen.add(item_group)
+					derived.append({"item_group": item_group})
+			data["items"] = derived
+		if not data.get("items"):
+			frappe.throw(_("Please select at least one item group for Gift Pool"))
 	elif promotion_type == PROMOTION_TYPE_AUTO:
 		if data.get("discount_type") == "free_item":
 			frappe.throw(_("Auto Discount cannot grant free items"))
@@ -367,6 +386,20 @@ def create_promotion(data):
 			for item in items_data:
 				scheme.append("brands", {"brand": item.get("brand"), "uom": item.get("uom")})
 
+		if hasattr(scheme, "gift_pool_items"):
+			for row in data.get("gift_pool_items") or []:
+				item_code = row.get("item_code")
+				item_group = row.get("item_group")
+				if item_code and item_group:
+					scheme.append(
+						"gift_pool_items",
+						{
+							"item_group": item_group,
+							"item_code": item_code,
+							"free_qty": row.get("free_qty") or 1,
+						},
+					)
+
 		# Add discount slab
 		discount_type = data.get("discount_type", "percentage")
 
@@ -460,6 +493,21 @@ def update_promotion(scheme_name, data):
 			scheme.disable = cint(data["disable"])
 		if "promotion_type" in data and hasattr(scheme, "promotion_type"):
 			scheme.promotion_type = data.get("promotion_type") or ""
+
+		if "gift_pool_items" in data and hasattr(scheme, "gift_pool_items"):
+			scheme.set("gift_pool_items", [])
+			for row in data.get("gift_pool_items") or []:
+				item_code = row.get("item_code")
+				item_group = row.get("item_group")
+				if item_code and item_group:
+					scheme.append(
+						"gift_pool_items",
+						{
+							"item_group": item_group,
+							"item_code": item_code,
+							"free_qty": row.get("free_qty") or 1,
+						},
+					)
 
 		# Update discount values in slabs
 		if (

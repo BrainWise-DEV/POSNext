@@ -111,6 +111,7 @@
 											},
 											{ label: __('Auto Discount'), value: PROMOTION_TYPE_AUTO },
 											{ label: __('GWP'), value: PROMOTION_TYPE_GWP },
+											{ label: __('Gift Pool'), value: PROMOTION_TYPE_GIFT_POOL },
 										]"
 									/>
 								</div>
@@ -545,6 +546,16 @@
 																	)
 																}}
 															</p>
+															<p
+																v-else-if="isGiftPoolPromotionType"
+																class="text-xs text-emerald-700 mt-1"
+															>
+																{{
+																	__(
+																		"Buy any item in a group (except pool items) and get Free Qty units spread across that group's pool items."
+																	)
+																}}
+															</p>
 														</div>
 
 														<FormControl
@@ -573,7 +584,8 @@
 																:disabled="
 																	!isCreating ||
 																	isPricingRule ||
-																	isItemLevelPromotionType
+																	isItemLevelPromotionType ||
+																	isGiftPoolPromotionType
 																"
 																:options="applyOnOptions"
 																:placeholder="__('Select option')"
@@ -584,7 +596,7 @@
 											</Card>
 
 											<!-- Item Selection Card -->
-											<Card v-if="form.apply_on !== 'Transaction'">
+											<Card v-if="form.apply_on !== 'Transaction' && !isGiftPoolPromotionType">
 												<div class="p-5">
 													<div class="flex items-center gap-2 mb-4">
 														<FeatherIcon
@@ -754,8 +766,180 @@
 												</div>
 											</Card>
 
+											<!-- Gift Pool free items: one ordered list per selected item group -->
+											<Card v-if="isGiftPoolPromotionType">
+												<div class="p-5">
+													<div class="flex items-center gap-2 mb-2">
+														<FeatherIcon
+															name="gift"
+															class="w-4 h-4 text-emerald-600"
+														/>
+														<h4
+															class="text-sm font-semibold text-gray-900"
+														>
+															{{ __("Gift Pool Free Items") }}
+														</h4>
+														<Badge
+															variant="subtle"
+															theme="red"
+															size="sm"
+															>{{ __("Required") }}</Badge
+														>
+													</div>
+													<p class="text-xs text-gray-600 mb-4">
+														{{
+															__(
+																"For each item group, choose free items and set Free Qty as the total free units (default 1). They are given in list order across those item codes — not one per paid unit."
+															)
+														}}
+													</p>
+													<div class="flex flex-col gap-3 mb-4">
+														<SelectInput
+															v-model="selectedItemGroup"
+															:disabled="!isCreating"
+															@change="addItemGroup"
+															:options="itemGroupOptions"
+															:placeholder="__('Select Item Group')"
+														/>
+														<div
+															v-if="giftPoolGroups.length > 0"
+															class="flex flex-wrap gap-2 items-center"
+														>
+															<Badge
+																v-for="group in giftPoolGroups"
+																:key="group"
+																variant="subtle"
+																theme="green"
+															>
+																{{ group }}
+																<button
+																	v-if="isCreating"
+																	@click="removeGiftPoolGroup(group)"
+																	class="ms-1 hover:text-green-900"
+																	type="button"
+																>
+																	×
+																</button>
+															</Badge>
+														</div>
+													</div>
+													<div
+														v-if="!giftPoolGroups.length"
+														class="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2"
+													>
+														{{
+															__(
+																"Select at least one item group, then add free items."
+															)
+														}}
+													</div>
+													<div
+														v-else
+														class="flex flex-col gap-5"
+													>
+														<div
+															v-for="group in giftPoolGroups"
+															:key="group"
+															class="border border-gray-200 rounded-lg p-3 flex flex-col gap-3"
+														>
+															<div
+																class="flex items-center justify-between gap-3"
+															>
+																<p
+																	class="text-sm font-medium text-gray-900"
+																>
+																	{{ group }}
+																</p>
+																<FormControl
+																	type="number"
+																	:label="__('Free Qty')"
+																	:model-value="
+																		giftPoolFreeQty(group)
+																	"
+																	:disabled="!isCreating"
+																	min="1"
+																	class="w-28"
+																	@update:model-value="
+																		(qty) =>
+																			setGiftPoolFreeQty(
+																				group,
+																				qty
+																			)
+																	"
+																/>
+															</div>
+															<SelectInput
+																:model-value="
+																	giftPoolItemsForGroup(
+																		group
+																	).map((row) => row.item_code)
+																"
+																:disabled="!isCreating"
+																multiple
+																@update:model-value="
+																	(codes) =>
+																		setGiftPoolItemsForGroup(
+																			group,
+																			codes
+																		)
+																"
+																:options="giftPoolItemOptions(group)"
+																:placeholder="
+																	__('Select free items')
+																"
+																:searchable="true"
+																:searchPlaceholder="
+																	__('Search items...')
+																"
+																:noResultsText="
+																	__('No items in this group')
+																"
+																:maxDisplayed="30"
+															/>
+															<div
+																v-if="
+																	giftPoolItemsForGroup(group)
+																		.length
+																"
+																class="flex flex-wrap gap-2 items-center"
+															>
+																<Badge
+																	v-for="(
+																		row, index
+																	) in giftPoolItemsForGroup(
+																		group
+																	)"
+																	:key="row.item_code"
+																	variant="subtle"
+																	theme="green"
+																>
+																	{{ index + 1 }}.
+																	{{
+																		row.item_name ||
+																		row.item_code
+																	}}
+																	<button
+																		v-if="isCreating"
+																		@click="
+																			removeGiftPoolItem(
+																				group,
+																				row.item_code
+																			)
+																		"
+																		class="ms-1 hover:text-green-900"
+																		type="button"
+																	>
+																		×
+																	</button>
+																</Badge>
+															</div>
+														</div>
+													</div>
+												</div>
+											</Card>
+
 											<!-- Discount Details Card -->
-											<Card>
+											<Card v-if="!isGiftPoolPromotionType">
 												<div class="p-5">
 													<div class="flex items-center gap-2 mb-4">
 														<FeatherIcon
@@ -1175,12 +1359,14 @@ const filterPromotionType = ref("all");
 const PROMOTION_TYPE_ITEM_LEVEL = "Item Level Discount";
 const PROMOTION_TYPE_AUTO = "Auto Discount";
 const PROMOTION_TYPE_GWP = "GWP";
+const PROMOTION_TYPE_GIFT_POOL = "Gift Pool";
 
 const promotionTypeOptions = [
 	{ label: __("Legacy / Unclassified"), value: "" },
 	{ label: __("Item Level Discount"), value: PROMOTION_TYPE_ITEM_LEVEL },
 	{ label: __("Auto Discount"), value: PROMOTION_TYPE_AUTO },
 	{ label: __("GWP"), value: PROMOTION_TYPE_GWP },
+	{ label: __("Gift Pool"), value: PROMOTION_TYPE_GIFT_POOL },
 ];
 
 // Form state
@@ -1193,6 +1379,7 @@ const form = ref({
 	discount_value: 0,
 	free_item: "",
 	free_qty: 1,
+	gift_pool_items: [],
 	items: [],
 	min_qty: 0,
 	max_qty: 0,
@@ -1209,6 +1396,8 @@ const itemSearch = ref("");
 const freeItemSearch = ref("");
 const selectedItemGroup = ref("");
 const selectedBrand = ref("");
+const selectedGiftPoolItem = ref({});
+const giftPoolFreeQtyByGroup = ref({});
 
 // Discount types
 const discountTypes = [
@@ -1259,6 +1448,18 @@ const isItemLevelPromotionType = computed(
 const isAutoPromotionType = computed(() => form.value.promotion_type === PROMOTION_TYPE_AUTO);
 
 const isGwpPromotionType = computed(() => form.value.promotion_type === PROMOTION_TYPE_GWP);
+
+const isGiftPoolPromotionType = computed(
+	() => form.value.promotion_type === PROMOTION_TYPE_GIFT_POOL
+);
+
+const giftPoolGroups = computed(() => {
+	const fromItems = (form.value.items || []).map((row) => row.item_group).filter(Boolean);
+	const fromPool = (form.value.gift_pool_items || [])
+		.map((row) => row.item_group)
+		.filter(Boolean);
+	return [...new Set([...fromItems, ...fromPool])];
+});
 
 function calculateGwpDiscountPercentage(freeQty, purchasedQty) {
 	const purchased = Number.parseFloat(purchasedQty) || 0;
@@ -1448,6 +1649,7 @@ const updatePromotionResource = createResource({
 				discount_value: form.value.discount_value,
 				free_item: form.value.free_item,
 				free_qty: form.value.free_qty,
+				gift_pool_items: form.value.gift_pool_items,
 			}),
 		};
 	},
@@ -1572,6 +1774,12 @@ watch(
 			}
 		} else if (type === PROMOTION_TYPE_GWP) {
 			form.value.discount_type = "free_item";
+		} else if (type === PROMOTION_TYPE_GIFT_POOL) {
+			form.value.apply_on = "Item Group";
+			form.value.discount_type = "free_item";
+			form.value.gift_pool_items = [];
+			selectedGiftPoolItem.value = {};
+			giftPoolFreeQtyByGroup.value = {};
 		}
 	}
 );
@@ -1711,7 +1919,18 @@ function handleSubmit() {
 		}
 	}
 
-	if (form.value.apply_on !== "Transaction" && form.value.items.length === 0) {
+	if (isGiftPoolPromotionType.value) {
+		if (!form.value.gift_pool_items.length) {
+			showWarning(__("Please choose at least one free item"));
+			return;
+		}
+		const groups = [
+			...new Set(
+				form.value.gift_pool_items.map((row) => row.item_group).filter(Boolean)
+			),
+		];
+		form.value.items = groups.map((item_group) => ({ item_group }));
+	} else if (form.value.apply_on !== "Transaction" && form.value.items.length === 0) {
 		showWarning(__("Please select at least one {0}", [translateApplyOn(form.value.apply_on)]));
 		return;
 	}
@@ -1753,6 +1972,16 @@ function addItemGroup() {
 		!form.value.items.some((i) => i.item_group === selectedItemGroup.value)
 	) {
 		form.value.items.push({ item_group: selectedItemGroup.value });
+		selectedGiftPoolItem.value = {
+			...selectedGiftPoolItem.value,
+			[selectedItemGroup.value]: "",
+		};
+		if (!giftPoolFreeQtyByGroup.value[selectedItemGroup.value]) {
+			giftPoolFreeQtyByGroup.value = {
+				...giftPoolFreeQtyByGroup.value,
+				[selectedItemGroup.value]: 1,
+			};
+		}
 	}
 	selectedItemGroup.value = "";
 }
@@ -1765,11 +1994,104 @@ function addBrand() {
 }
 
 function removeItem(index) {
+	const removed = form.value.items[index];
 	form.value.items.splice(index, 1);
+	if (removed?.item_group) {
+		form.value.gift_pool_items = form.value.gift_pool_items.filter(
+			(row) => row.item_group !== removed.item_group
+		);
+		const next = { ...selectedGiftPoolItem.value };
+		delete next[removed.item_group];
+		selectedGiftPoolItem.value = next;
+		const qtyNext = { ...giftPoolFreeQtyByGroup.value };
+		delete qtyNext[removed.item_group];
+		giftPoolFreeQtyByGroup.value = qtyNext;
+	}
 }
 
 function clearAllItems() {
 	form.value.items = [];
+	form.value.gift_pool_items = [];
+	selectedGiftPoolItem.value = {};
+	giftPoolFreeQtyByGroup.value = {};
+}
+
+function giftPoolItemsForGroup(itemGroup) {
+	return (form.value.gift_pool_items || []).filter((row) => row.item_group === itemGroup);
+}
+
+function giftPoolFreeQty(itemGroup) {
+	const fromMap = Number(giftPoolFreeQtyByGroup.value[itemGroup]);
+	if (fromMap > 0) {
+		return fromMap;
+	}
+	const qty = Number(giftPoolItemsForGroup(itemGroup)[0]?.free_qty);
+	return qty > 0 ? qty : 1;
+}
+
+function setGiftPoolFreeQty(itemGroup, qty) {
+	const next = Math.max(1, Math.floor(Number(qty) || 1));
+	giftPoolFreeQtyByGroup.value = {
+		...giftPoolFreeQtyByGroup.value,
+		[itemGroup]: next,
+	};
+	form.value.gift_pool_items = (form.value.gift_pool_items || []).map((row) =>
+		row.item_group === itemGroup ? { ...row, free_qty: next } : row
+	);
+}
+
+function giftPoolItemOptions(itemGroup) {
+	const allItems = itemSearchStore.allItems || [];
+	return allItems
+		.filter((item) => item.item_group === itemGroup)
+		.map((item) => ({
+			label: item.item_name || item.item_code,
+			value: item.item_code,
+			subtitle: item.item_code,
+		}));
+}
+
+function setGiftPoolItemsForGroup(itemGroup, selectedCodes) {
+	const selected = Array.isArray(selectedCodes) ? selectedCodes.filter(Boolean) : [];
+	const selectedSet = new Set(selected);
+	const kept = (form.value.gift_pool_items || []).filter(
+		(row) => row.item_group !== itemGroup || selectedSet.has(row.item_code)
+	);
+	const alreadyInGroup = new Set(
+		kept.filter((row) => row.item_group === itemGroup).map((row) => row.item_code)
+	);
+	const allItems = itemSearchStore.allItems || [];
+	for (const itemCode of selected) {
+		if (alreadyInGroup.has(itemCode)) continue;
+		const item = allItems.find((row) => row.item_code === itemCode);
+		kept.push({
+			item_group: itemGroup,
+			item_code: itemCode,
+			item_name: item?.item_name || itemCode,
+			free_qty: giftPoolFreeQty(itemGroup),
+		});
+		alreadyInGroup.add(itemCode);
+	}
+	form.value.gift_pool_items = kept;
+}
+
+function removeGiftPoolItem(itemGroup, itemCode) {
+	form.value.gift_pool_items = form.value.gift_pool_items.filter(
+		(row) => !(row.item_group === itemGroup && row.item_code === itemCode)
+	);
+}
+
+function removeGiftPoolGroup(itemGroup) {
+	form.value.items = form.value.items.filter((row) => row.item_group !== itemGroup);
+	form.value.gift_pool_items = form.value.gift_pool_items.filter(
+		(row) => row.item_group !== itemGroup
+	);
+	const next = { ...selectedGiftPoolItem.value };
+	delete next[itemGroup];
+	selectedGiftPoolItem.value = next;
+	const qtyNext = { ...giftPoolFreeQtyByGroup.value };
+	delete qtyNext[itemGroup];
+	giftPoolFreeQtyByGroup.value = qtyNext;
 }
 
 function selectFreeItem(item) {
@@ -1787,6 +2109,7 @@ function resetForm() {
 		discount_value: 0,
 		free_item: "",
 		free_qty: 1,
+		gift_pool_items: [],
 		items: [],
 		min_qty: 0,
 		max_qty: 0,
@@ -1799,6 +2122,8 @@ function resetForm() {
 	freeItemSearch.value = "";
 	selectedItemGroup.value = "";
 	selectedBrand.value = "";
+	selectedGiftPoolItem.value = {};
+	giftPoolFreeQtyByGroup.value = {};
 }
 
 function populateFormFromPromotion(promotion) {
@@ -1829,6 +2154,22 @@ function populateFormFromPromotion(promotion) {
 			brand: brand.brand,
 			uom: brand.uom,
 		}));
+	}
+
+	if (promotion.gift_pool_items?.length) {
+		form.value.gift_pool_items = promotion.gift_pool_items.map((row) => ({
+			item_group: row.item_group,
+			item_code: row.item_code,
+			item_name: row.item_name || row.item_code,
+			free_qty: Number(row.free_qty) > 0 ? Number(row.free_qty) : 1,
+		}));
+		const qtyByGroup = {};
+		for (const row of form.value.gift_pool_items) {
+			if (row.item_group && !qtyByGroup[row.item_group]) {
+				qtyByGroup[row.item_group] = row.free_qty;
+			}
+		}
+		giftPoolFreeQtyByGroup.value = qtyByGroup;
 	}
 
 	// Populate discount details from slabs

@@ -1768,9 +1768,80 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		return true;
 	}
 
+	function applyOfflineGiftPool(offer, eligibleItems) {
+		const poolRows = Array.isArray(offer.gift_pool_items) ? offer.gift_pool_items : [];
+		if (!poolRows.length) return false;
+
+		const pools = {};
+		for (const row of poolRows) {
+			const group = row.item_group;
+			const code = row.item_code;
+			if (!group || !code) continue;
+			if (!pools[group]) pools[group] = [];
+			if (!pools[group].includes(code)) pools[group].push(code);
+		}
+
+		let applied = false;
+		const referenceItem = eligibleItems[0];
+		const uomKey = referenceItem?.uom || referenceItem?.stock_uom || "Nos";
+
+		for (const [itemGroup, poolCodes] of Object.entries(pools)) {
+			const poolSet = new Set(poolCodes);
+			const sample = poolRows.find((row) => row.item_group === itemGroup);
+			const groupSet = new Set(
+				sample?.matching_item_groups?.length
+					? sample.matching_item_groups
+					: [itemGroup]
+			);
+			const paidItems = eligibleItems.filter(
+				(item) => groupSet.has(item.item_group) && !poolSet.has(item.item_code)
+			);
+			const paidQty = paidItems.reduce(
+				(sum, item) => sum + (floorFreeItemQty(item.quantity || item.qty || 0) || 0),
+				0
+			);
+			if (paidQty <= 0) continue;
+
+			const giftQty = Math.max(1, Number(sample?.free_qty) || 1);
+			const counts = {};
+			for (let i = 0; i < giftQty; i++) {
+				const giftCode = poolCodes[i % poolCodes.length];
+				counts[giftCode] = (counts[giftCode] || 0) + 1;
+			}
+
+			for (const item of paidItems) {
+				stampOfferOnItem(item, offer.name);
+			}
+
+			for (const [giftCode, giftQty] of Object.entries(counts)) {
+				const poolRow = poolRows.find((row) => row.item_code === giftCode);
+				if (
+					upsertOfflineFreeItemRow({
+						itemCode: giftCode,
+						itemName: poolRow?.item_name || giftCode,
+						freeItemsToGive: giftQty,
+						uomKey,
+						stockUom: uomKey,
+						conversionFactor: 1,
+						warehouse: referenceItem?.warehouse,
+						offerName: offer.name,
+					})
+				) {
+					applied = true;
+				}
+			}
+		}
+
+		return applied;
+	}
+
 	function applyOfflineFreeItem(offer, eligibleItems) {
 		const freeQty = Number.parseFloat(offer.free_qty) || 0;
 		const isGwp = offer.promotion_type === "GWP";
+		const isGiftPool = offer.promotion_type === "Gift Pool";
+		if (isGiftPool) {
+			return applyOfflineGiftPool(offer, eligibleItems);
+		}
 		const isAggregateGwp = isGwp && shouldAggregateGwpQty(offer);
 		const isRecursive = !isGwp && offer.is_recursive === 1;
 		const recurseFor = Number.parseFloat(offer.recurse_for) || 0;
