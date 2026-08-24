@@ -1,3 +1,4 @@
+import { isPromotionsAppInstalled } from "@/utils/promoApi";
 import { useInvoice } from "@/composables/useInvoice";
 import { usePOSOffersStore } from "@/stores/posOffers";
 import { usePOSSettingsStore } from "@/stores/posSettings";
@@ -1051,6 +1052,113 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	}
 
 	/**
+	 * Apply Gift Pool product discount offline: paid items in a group grant
+	 * free_qty units spread across that group's pool SKUs.
+	 */
+	function applyOfflineGiftPool(offer, eligibleItems) {
+		const poolRows = Array.isArray(offer.gift_pool_items) ? offer.gift_pool_items : [];
+		if (!poolRows.length) return false;
+
+		const pools = {};
+		for (const row of poolRows) {
+			const group = row.item_group;
+			const code = row.item_code;
+			if (!group || !code) continue;
+			if (!pools[group]) pools[group] = [];
+			if (!pools[group].includes(code)) pools[group].push(code);
+		}
+
+		let applied = false;
+		const referenceItem = eligibleItems[0];
+		const uomKey = referenceItem?.uom || referenceItem?.stock_uom || "Nos";
+
+		for (const [itemGroup, poolCodes] of Object.entries(pools)) {
+			const poolSet = new Set(poolCodes);
+			const sample = poolRows.find((row) => row.item_group === itemGroup);
+			const groupSet = new Set(
+				sample?.matching_item_groups?.length ? sample.matching_item_groups : [itemGroup]
+			);
+			const paidItems = eligibleItems.filter(
+				(item) => groupSet.has(item.item_group) && !poolSet.has(item.item_code)
+			);
+			const paidQty = paidItems.reduce(
+				(sum, item) => sum + (Math.floor(item.quantity || item.qty || 0) || 0),
+				0
+			);
+			if (paidQty <= 0) continue;
+
+			const giftQty = Math.max(1, Number(sample?.free_qty) || 1);
+			const counts = {};
+			for (let i = 0; i < giftQty; i++) {
+				const giftCode = poolCodes[i % poolCodes.length];
+				counts[giftCode] = (counts[giftCode] || 0) + 1;
+			}
+
+			for (const item of paidItems) {
+				const pr = item.pricing_rules;
+				const prArr = Array.isArray(pr)
+					? [...pr]
+					: pr
+						? String(pr)
+								.split(",")
+								.map((s) => s.trim())
+								.filter(Boolean)
+						: [];
+				if (!prArr.includes(offer.name)) prArr.push(offer.name);
+				item.pricing_rules = prArr;
+			}
+
+			for (const [giftCode, freeItemsToGive] of Object.entries(counts)) {
+				const poolRow = poolRows.find((row) => row.item_code === giftCode);
+				const existingFreeRow = invoiceItems.value.find(
+					(r) =>
+						r.is_free_item &&
+						r.item_code === giftCode &&
+						(r.uom || r.stock_uom) === uomKey
+				);
+				if (existingFreeRow) {
+					existingFreeRow.quantity = freeItemsToGive;
+					existingFreeRow.free_qty = freeItemsToGive;
+					const pr = existingFreeRow.pricing_rules;
+					const prArr = Array.isArray(pr)
+						? [...pr]
+						: pr
+							? String(pr)
+									.split(",")
+									.map((s) => s.trim())
+									.filter(Boolean)
+							: [];
+					if (!prArr.includes(offer.name)) prArr.push(offer.name);
+					existingFreeRow.pricing_rules = prArr;
+				} else {
+					invoiceItems.value.push({
+						item_code: giftCode,
+						item_name: poolRow?.item_name || giftCode,
+						rate: 0,
+						price_list_rate: 0,
+						quantity: freeItemsToGive,
+						discount_amount: 0,
+						discount_percentage: 0,
+						tax_amount: 0,
+						amount: 0,
+						stock_qty: 0,
+						uom: uomKey,
+						stock_uom: uomKey,
+						conversion_factor: 1,
+						is_free_item: 1,
+						free_qty: freeItemsToGive,
+						pricing_rules: [offer.name],
+						warehouse: referenceItem?.warehouse,
+					});
+				}
+				applied = true;
+			}
+		}
+
+		return applied;
+	}
+
+	/**
 	 * Apply free item (product discount) offer offline
 	 * Handles: same_item (free item = purchased item) or specific free_item
 	 *
@@ -1065,6 +1173,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * @returns {boolean} True if free item was applied
 	 */
 	function applyOfflineFreeItem(offer, eligibleItems) {
+		if (isPromotionsAppInstalled() && offer.promotion_type === "Gift Pool") {
+			return applyOfflineGiftPool(offer, eligibleItems);
+		}
 		const freeQty = Number.parseFloat(offer.free_qty) || 0;
 		const sameItem = offer.same_item === 1;
 		const isRecursive = offer.is_recursive === 1;

@@ -445,6 +445,7 @@ def get_wallet_info(customer, company, pos_profile=None):
 		"loyalty_program": None,
 		"loyalty_to_wallet": False,
 		"balance_points": 0.0,
+		"balance_iqd": 0.0,
 		"magento_loyalty": False,
 	}
 
@@ -467,10 +468,11 @@ def get_wallet_info(customer, company, pos_profile=None):
 		try:
 			balance = get_external_loyalty_balance(customer)
 			result["wallet_balance"] = flt(balance.get("balance_iqd"))
+			result["balance_iqd"] = result["wallet_balance"]
 			result["balance_points"] = flt(balance.get("balance_points"))
 		except Exception as exc:
 			frappe.log_error(
-				title="Magento LP Balance Error",
+				title="External Loyalty Balance Error",
 				message=f"Customer: {customer}, Error: {exc!s}\n{frappe.get_traceback()}",
 			)
 		return result
@@ -505,6 +507,7 @@ def get_wallet_info(customer, company, pos_profile=None):
 				message=f"Customer: {customer}, Company: {company}, Error: {e!s}",
 			)
 
+	result["balance_iqd"] = flt(result.get("wallet_balance"))
 	return result
 
 

@@ -9,7 +9,7 @@
 		<template #body-content>
 			<div class="flex flex-col gap-6">
 				<!-- Customer Name (Required) -->
-				<div v-if="!miraayaCustomerSync">
+				<div v-if="!requiresSplitCustomerName">
 					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
 						{{ __("Customer Name") }} <span class="text-red-500">*</span>
 					</label>
@@ -410,7 +410,7 @@ const show = computed({
 
 const isEditMode = computed(() => !!props.customer?.name);
 
-const miraayaCustomerSync = computed(() => posSettingsStore.miraayaInstalled);
+const requiresSplitCustomerName = computed(() => Boolean(posSettingsStore.miraayaInstalled));
 
 const computedCustomerName = computed(() => {
 	const first = (customerData.value.custom_first_name || "").trim();
@@ -419,7 +419,7 @@ const computedCustomerName = computed(() => {
 });
 
 const hasValidCustomerName = computed(() => {
-	if (miraayaCustomerSync.value) {
+	if (requiresSplitCustomerName.value) {
 		return Boolean(computedCustomerName.value);
 	}
 	return Boolean((customerData.value.customer_name || "").trim());
@@ -587,7 +587,7 @@ const updateTerritoryFromCountry = () => {
 const createCustomerResource = createResource({
 	url: "pos_next.api.customers.create_customer",
 	makeParams: () => ({
-		customer_name: miraayaCustomerSync.value
+		customer_name: requiresSplitCustomerName.value
 			? computedCustomerName.value
 			: customerData.value.customer_name,
 		mobile_no: customerData.value.mobile_no || "",
@@ -784,7 +784,7 @@ const checkPermissions = async () => {
 };
 
 const handleCreate = async () => {
-	if (miraayaCustomerSync.value) {
+	if (requiresSplitCustomerName.value) {
 		if (!customerData.value.custom_first_name?.trim()) {
 			return showError(__("First Name is required"));
 		}

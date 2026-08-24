@@ -1460,7 +1460,7 @@
  * IMPORTS
  * ============================================================================
  */
-import { isMagentoAppInstalled, promoApi } from "@/utils/promoApi";
+import { promoApi } from "@/utils/promoApi";
 import { usePOSCartStore } from "@/stores/posCart";
 import { usePOSSettingsStore } from "@/stores/posSettings";
 import { usePOSOffersStore } from "@/stores/posOffers";
@@ -1718,20 +1718,22 @@ const customerLpInfo = ref({
 });
 
 const customerLpResource = createResource({
-	url: "magento_integration.api.magento_loyalty.get_lp_balance_for_customer",
+	url: "pos_next.api.wallet.get_wallet_info",
 	makeParams() {
 		const customerName = props.customer?.name || props.customer;
 		return {
 			customer: customerName,
+			company: props.company,
 			pos_profile: props.posProfile,
 		};
 	},
 	auto: false,
 	onSuccess(data) {
-		customerLpInfo.value = data || {
-			wallet_enabled: false,
-			balance_points: 0,
-			balance_iqd: 0,
+		const payload = data?.message || data || {};
+		customerLpInfo.value = {
+			wallet_enabled: Boolean(payload.wallet_enabled),
+			balance_points: Number(payload.balance_points) || 0,
+			balance_iqd: Number(payload.balance_iqd ?? payload.wallet_balance) || 0,
 		};
 	},
 	onError() {
@@ -1758,7 +1760,7 @@ watch(
 			availableGiftCards.value = [];
 		}
 
-		if (isMagentoAppInstalled() && customerName && props.posProfile && !isOffline()) {
+		if (customerName && props.company && props.posProfile && !isOffline()) {
 			customerLpResource.reload();
 		} else {
 			customerLpInfo.value = {
@@ -1770,14 +1772,14 @@ watch(
 	}
 );
 
-// Refresh Magento LP balance after a completed sale when the cart is cleared
+// Refresh wallet / LP balance after a completed sale when the cart is cleared
 // but the same customer stays selected (watch on customer alone won't re-fire).
 watch(
 	() => props.items?.length ?? 0,
 	(newLen, oldLen) => {
 		if (oldLen > 0 && newLen === 0) {
 			const customerName = props.customer?.name || props.customer;
-			if (isMagentoAppInstalled() && customerName && props.posProfile && !isOffline()) {
+			if (customerName && props.company && props.posProfile && !isOffline()) {
 				customerLpResource.reload();
 			}
 		}

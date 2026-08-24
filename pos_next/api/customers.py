@@ -162,7 +162,7 @@ def create_customer(
 		}
 	)
 
-	publish_to_magento = prepare_customer_doc(
+	sync_external_customer = prepare_customer_doc(
 		customer,
 		custom_first_name=custom_first_name,
 		custom_last_name=custom_last_name,
@@ -173,7 +173,7 @@ def create_customer(
 	frappe.flags.pos_next_customer_pos_profile = pos_profile
 	try:
 		customer.insert()
-		if publish_to_magento:
+		if sync_external_customer:
 			after_customer_insert(
 				customer,
 				email_id=email_id,

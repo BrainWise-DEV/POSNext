@@ -32,6 +32,8 @@ from erpnext.accounts.doctype.pricing_rule.pricing_rule import (
 )
 from erpnext.accounts.doctype.pricing_rule.utils import get_applied_pricing_rules
 
+from pos_next.optional_apps import promotions_installed
+
 # Values of the ``apply_discount_on_price`` custom field that trigger ranking.
 MIN_MAX_OPTIONS = ("Min", "Max")
 
@@ -71,6 +73,8 @@ def sync_pos_only_to_pricing_rules(doc, method=None):
 	Propagates both ``pos_only`` and ``one_time_per_customer`` so a scheme acts as
 	the single source of truth for the rules it generates.
 	"""
+	if promotions_installed():
+		return
 	frappe.db.set_value(
 		"Pricing Rule",
 		{"promotional_scheme": doc.name},
@@ -131,6 +135,9 @@ def enforce_min_max_pricing_config(doc, method=None):
 	on the price-discount slabs and the generated rules inherit ``mixed_conditions``)
 	and **Pricing Rule** (standalone or scheme-generated).
 	"""
+	if promotions_installed():
+		return
+
 	if doc.doctype == "Promotional Scheme":
 		min_max_slabs = [
 			slab
@@ -221,6 +228,9 @@ def apply_min_max_price_discounts(doc, method=None, allowed_rules=None):
 		allowed_rules: Optional iterable of rule names; when given, only those rules
 			are applied (used by the POS UI to honour explicitly selected offers).
 	"""
+	if promotions_installed():
+		return
+
 	try:
 		rule_items, pricing_rules = _collect_min_max_rule_items(doc)
 		if not rule_items:

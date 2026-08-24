@@ -54,12 +54,12 @@ def validate_customer_create(**kwargs):
 
 
 def prepare_customer_doc(customer, **kwargs):
-	publish_to_magento = False
+	sync_external_customer = False
 	for method_path in frappe.get_hooks("pos_next_customer_prepare") or []:
 		result = frappe.get_attr(method_path)(customer, **kwargs)
 		if result:
-			publish_to_magento = True
-	return publish_to_magento
+			sync_external_customer = True
+	return sync_external_customer
 
 
 def after_customer_insert(customer, **kwargs):
