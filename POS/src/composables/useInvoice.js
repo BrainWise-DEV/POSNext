@@ -219,7 +219,8 @@ export function useInvoice() {
 	function addItem(item, quantity = 1) {
 		const itemUom = item.uom || item.stock_uom;
 		const existingItem = invoiceItems.value.find(
-			(i) => i.item_code === item.item_code && i.uom === itemUom
+			(i) =>
+				!i.is_free_item && i.item_code === item.item_code && i.uom === itemUom
 		);
 
 		if (existingItem) {
@@ -285,7 +286,9 @@ export function useInvoice() {
 				// Resolved barcode flag - prevents editing qty/uom/rate for weighted/priced barcodes
 				is_resolved_barcode: item.is_resolved_barcode || false,
 				// Stock validation fields — needed for qty increase checks in cart
-				actual_qty: item.actual_qty ?? 0,
+				// Prefer Bin qty (original_stock). Grid actual_qty is remaining after cart reserve.
+				actual_qty: item.original_stock ?? item.actual_qty ?? 0,
+				original_stock: item.original_stock ?? item.actual_qty ?? 0,
 				is_stock_item: item.is_stock_item ?? 1,
 				is_bundle: item.is_bundle || false,
 				allow_negative_stock: item.allow_negative_stock || 0,

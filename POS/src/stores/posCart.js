@@ -4,7 +4,12 @@ import { usePOSOffersStore } from "@/stores/posOffers";
 import { usePOSSettingsStore } from "@/stores/posSettings";
 import { usePOSShiftStore } from "@/stores/posShift";
 import { parseError } from "@/utils/errorHandler";
-import { shouldValidateItemStock, checkStockAvailability } from "@/utils/stockValidator";
+import {
+	shouldValidateItemStock,
+	checkStockAvailability,
+	getCartStockQtyForItem,
+	rowStockQty,
+} from "@/utils/stockValidator";
 import { offlineState } from "@/utils/offline/offlineState";
 import { useToast } from "@/composables/useToast";
 import { defineStore } from "pinia";
@@ -182,12 +187,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			settingsStore.shouldEnforceStockValidation() &&
 			shouldValidateItemStock(item)
 		) {
-			// Account for quantity already in the cart for this item
-			const itemUom = item.uom || item.stock_uom;
-			const existing = invoiceItems.value.find(
-				(i) => i.item_code === item.item_code && i.uom === itemUom
-			);
-			const totalQty = (existing ? existing.quantity : 0) + qty;
+			// Only this SKU (paid + free rows of the same item). A free gift of a
+			// different product must not inflate requested qty (Iphone 17 x6 +
+			// Aqua Water free x1 is 6 phones, not 7).
+			const totalQty =
+				getCartStockQtyForItem(invoiceItems.value, item.item_code) + rowStockQty(item, qty);
 			const warehouse = item.warehouse || currentProfile.warehouse;
 
 			const check = checkStockAvailability(item, totalQty, warehouse);
@@ -219,7 +223,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			settingsStore.shouldEnforceStockValidation() &&
 			shouldValidateItemStock(item)
 		) {
-			const check = checkStockAvailability(item, newQty);
+			const otherLinesQty =
+				getCartStockQtyForItem(invoiceItems.value, item.item_code) - rowStockQty(item);
+			const totalQty = otherLinesQty + rowStockQty(item, newQty);
+			const check = checkStockAvailability(item, totalQty);
 			if (!check.available) {
 				showWarning(check.error);
 				return;
@@ -1492,7 +1499,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				settingsStore.shouldEnforceStockValidation() &&
 				shouldValidateItemStock(cartItem)
 			) {
-				const check = checkStockAvailability(cartItem, updates.quantity);
+				const otherLinesQty =
+					getCartStockQtyForItem(invoiceItems.value, cartItem.item_code) -
+					rowStockQty(cartItem);
+				const totalQty = otherLinesQty + rowStockQty(cartItem, updates.quantity);
+				const check = checkStockAvailability(cartItem, totalQty);
 				if (!check.available) {
 					throw new Error(check.error);
 				}
