@@ -564,7 +564,9 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 			// Get original server stock (without reservations)
 			const originalStock = stockStore.server.get(item.item_code)?.qty || 0;
 
-			// Return item with updated stock quantities
+			// Return item with updated stock quantities.
+			// actual_qty/stock_qty are DISPLAY remaining (server - cart reserved).
+			// original_stock is warehouse on-hand and must be used for total-qty checks.
 			return {
 				...item,
 				actual_qty: displayStock,

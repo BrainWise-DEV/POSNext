@@ -30,15 +30,31 @@ export function shouldValidateItemStock(item) {
 }
 
 /**
+ * Warehouse on-hand qty for validation.
+ *
+ * Catalog items overwrite `actual_qty` with display remaining
+ * (server stock minus cart reservations). `original_stock` is the
+ * unreduced warehouse qty and must be preferred when present.
+ *
+ * @param {Object} item
+ * @returns {number}
+ */
+export function getWarehouseQty(item) {
+	if (!item) return 0;
+	const qty = item.original_stock ?? item.actual_qty ?? item.stock_qty ?? 0;
+	return Number(qty) || 0;
+}
+
+/**
  * Check if the requested quantity exceeds available stock.
  *
- * @param {Object}  item       - Item with actual_qty / stock_qty
+ * @param {Object}  item       - Item with original_stock / actual_qty / stock_qty
  * @param {number}  requestedQty - Total quantity to validate against
  * @param {string}  [warehouse]  - Warehouse name (for error message)
  * @returns {{ available: boolean, actualQty: number, error: string|null }}
  */
 export function checkStockAvailability(item, requestedQty, warehouse) {
-	const actualQty = item.actual_qty ?? item.stock_qty ?? 0;
+	const actualQty = getWarehouseQty(item);
 	const wh = warehouse || item.warehouse || "";
 
 	if (actualQty >= requestedQty) {

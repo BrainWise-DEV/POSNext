@@ -3,7 +3,8 @@ import { usePOSOffersStore } from "@/stores/posOffers";
 import { usePOSSettingsStore } from "@/stores/posSettings";
 import { usePOSShiftStore } from "@/stores/posShift";
 import { parseError } from "@/utils/errorHandler";
-import { shouldValidateItemStock, checkStockAvailability } from "@/utils/stockValidator";
+import { useStockStore } from "@/stores/stock";
+import { shouldValidateItemStock, checkStockAvailability, getWarehouseQty } from "@/utils/stockValidator";
 import { offlineState } from "@/utils/offline/offlineState";
 import { useToast } from "@/composables/useToast";
 import { defineStore } from "pinia";
@@ -169,6 +170,37 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	// Toast composable
 	const { showSuccess, showError, showWarning } = useToast();
 
+	/**
+	 * Warehouse on-hand qty. Catalog items set actual_qty to display remaining
+	 * (server minus cart reservations), so prefer the stock store / original_stock.
+	 */
+	function resolveWarehouseQty(item) {
+		const stockStore = useStockStore();
+		if (item?.item_code && stockStore.server.has(item.item_code)) {
+			return Number(stockStore.server.get(item.item_code)?.qty) || 0;
+		}
+		return getWarehouseQty(item);
+	}
+
+	function getCartStockQty(itemCode, skipItem = null) {
+		return invoiceItems.value.reduce((sum, cartItem) => {
+			if (cartItem.item_code !== itemCode || cartItem === skipItem) return sum;
+			return (
+				sum +
+				(Number(cartItem.quantity) || 0) * (Number(cartItem.conversion_factor) || 1)
+			);
+		}, 0);
+	}
+
+	function assertStockAvailable(item, requestedStockQty, warehouse) {
+		const warehouseQty = resolveWarehouseQty(item);
+		return checkStockAvailability(
+			{ ...item, actual_qty: warehouseQty, original_stock: warehouseQty },
+			requestedStockQty,
+			warehouse || item.warehouse || ""
+		);
+	}
+
 	// Computed
 	const itemCount = computed(() => invoiceItems.value.length);
 	const isEmpty = computed(() => invoiceItems.value.length === 0);
@@ -181,15 +213,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			settingsStore.shouldEnforceStockValidation() &&
 			shouldValidateItemStock(item)
 		) {
-			// Account for quantity already in the cart for this item
-			const itemUom = item.uom || item.stock_uom;
-			const existing = invoiceItems.value.find(
-				(i) => i.item_code === item.item_code && i.uom === itemUom
-			);
-			const totalQty = (existing ? existing.quantity : 0) + qty;
+			// Compare full cart demand (all UOMs, stock units) to warehouse on-hand.
+			// Do not use catalog actual_qty: that value is remaining after reservations.
+			const addStockQty = (Number(qty) || 0) * (Number(item.conversion_factor) || 1);
+			const totalStockQty = getCartStockQty(item.item_code) + addStockQty;
 			const warehouse = item.warehouse || currentProfile.warehouse;
-
-			const check = checkStockAvailability(item, totalQty, warehouse);
+			const check = assertStockAvailable(item, totalStockQty, warehouse);
 			if (!check.available) {
 				throw new Error(check.error);
 			}
@@ -218,7 +247,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			settingsStore.shouldEnforceStockValidation() &&
 			shouldValidateItemStock(item)
 		) {
-			const check = checkStockAvailability(item, newQty);
+			const newStockQty = newQty * (Number(item.conversion_factor) || 1);
+			const requestedStockQty = getCartStockQty(itemCode, item) + newStockQty;
+			const check = assertStockAvailable(item, requestedStockQty);
 			if (!check.available) {
 				showWarning(check.error);
 				return;
@@ -1381,7 +1412,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				settingsStore.shouldEnforceStockValidation() &&
 				shouldValidateItemStock(cartItem)
 			) {
-				const check = checkStockAvailability(cartItem, updates.quantity);
+				const newStockQty =
+					updates.quantity * (Number(cartItem.conversion_factor) || 1);
+				const requestedStockQty = getCartStockQty(cartItem.item_code, cartItem) + newStockQty;
+				const check = assertStockAvailable(cartItem, requestedStockQty);
 				if (!check.available) {
 					throw new Error(check.error);
 				}
