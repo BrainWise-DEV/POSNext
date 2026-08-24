@@ -308,7 +308,8 @@
   }
  ],
  "index_web_pages_for_search": 1,
- "modified": "2021-07-25 17:09:55.634113",
+ "links": [],
+ "modified": "2026-06-03 15:54:12.013952",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Offer",
@@ -355,6 +356,18 @@
    "print": 1,
    "read": 1,
    "report": 1,
+   "role": "Nexus POS Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
    "role": "Sales Master Manager",
    "share": 1,
    "write": 1
@@ -381,9 +394,11 @@
    "write": 1
   }
  ],
+ "row_format": "Dynamic",
  "show_name_in_global_search": 1,
  "show_preview_popup": 1,
  "sort_field": "modified",
  "sort_order": "DESC",
+ "states": [],
  "track_changes": 1
 }
