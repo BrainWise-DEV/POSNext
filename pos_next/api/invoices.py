@@ -1690,9 +1690,11 @@ def get_invoices(pos_profile: str, search=None, limit: int = 20, offset=0, from_
 		params["to_date"] = to_date
 
 	where_clause = " AND ".join(conditions)
+	params["limit"] = limit
+	params["offset"] = offset
 
-	invoices = frappe.db.sql(f
-		"""
+	invoices = frappe.db.sql(
+		f"""
 		SELECT
 			name,
 			customer,
@@ -1714,9 +1716,9 @@ def get_invoices(pos_profile: str, search=None, limit: int = 20, offset=0, from_
 			posting_date DESC,
 			posting_time DESC
 		LIMIT %(limit)s
-		OFFSET %(start)s
+		OFFSET %(offset)s
 	""",
-		{"pos_profile": pos_profile, "limit": limit, "start": start},
+		params,
 		as_dict=True,
 	)
 

@@ -2401,6 +2401,38 @@ function navigateToShiftHistory() {
 	showShiftHistoryDialog.value = true;
 }
 
+function openDraftDialog() {
+	if (!canAccessShiftActions.value) {
+		return;
+	}
+
+	uiStore.showDraftDialog = true;
+}
+
+function openHistoryDialog() {
+	if (!canAccessShiftActions.value) {
+		return;
+	}
+
+	uiStore.showHistoryDialog = true;
+}
+
+function openReturnDialog() {
+	if (!canAccessShiftActions.value) {
+		return;
+	}
+
+	uiStore.showReturnDialog = true;
+}
+
+function switchToDesk() {
+	if (!canAccessShiftActions.value || !canSwitchToDesk.value || typeof window === "undefined") {
+		return;
+	}
+
+	window.location.assign("/app");
+}
+
 function formatCurrency(amount) {
 	return Number.parseFloat(amount || 0).toFixed(2);
 }

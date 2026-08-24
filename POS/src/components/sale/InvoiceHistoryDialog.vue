@@ -47,7 +47,7 @@
 				<!-- Invoices List -->
 				<div v-else class="flex flex-col gap-2 max-h-96 overflow-y-auto pe-2">
 					<div
-						v-for="(invoice, index) in invoices"
+						v-for="(invoice, index) in filteredInvoices"
 						:key="invoice.name + invoice.posting_date"
 						class="bg-white border border-gray-200 rounded-lg p-3 hover:shadow-md transition-all"
 					>
@@ -163,6 +163,7 @@
 </template>
 
 <script setup>
+import { useFormatters } from "@/composables/useFormatters"
 import { useToast } from "@/composables/useToast"
 import { DEFAULT_CURRENCY, DEFAULT_LOCALE, formatCurrency as formatCurrencyUtil } from "@/utils/currency"
 import { getInvoiceStatusColor } from "@/utils/invoice"
@@ -214,25 +215,10 @@ const invoicesResource = createResource({
 	url: "pos_next.api.invoices.get_invoices",
 	makeParams() {
 		return {
-			doctype: "Sales Invoice",
-			filters: {
-				is_pos: 1,
-				...(props.posProfile && { pos_profile: props.posProfile }),
-			},
-			fields: [
-				"name",
-				"customer",
-				"customer_name",
-				"posting_date",
-				"posting_time",
-				"grand_total",
-				"status",
-				"docstatus",
-				"is_return",
-			],
-			order_by: "modified desc",
-			start: page.value * pageSize,
-			page_length: pageSize,
+			pos_profile: props.posProfile,
+			search: searchTerm.value || undefined,
+			limit: pageSize,
+			offset: page.value * pageSize,
 		}
 	},
 	auto: false,
@@ -269,13 +255,20 @@ watch(
 	(val) => {
 		show.value = val
 		if (val && props.posProfile) {
-			invoicesResource.reload()
+			loadInvoices()
 		}
 	},
 )
 
 watch(show, (val) => {
 	emit("update:modelValue", val)
+	// Dialog cleanup: reset state when dialog closes
+	if (!val) {
+		searchTerm.value = ""
+		page.value = 0
+		invoices.value = []
+		hasMore.value = true
+	}
 })
 
 // Clear selected invoice when return dialog closes
@@ -309,6 +302,14 @@ function loadMore() {
 	page.value++
 	isLoadingMore.value = true
 	invoicesResource.reload()
+}
+
+function debounce(fn, wait) {
+	let timer
+	return (...args) => {
+		clearTimeout(timer)
+		timer = setTimeout(() => fn(...args), wait)
+	}
 }
 
 const _debouncedSearch = debounce(() => {
@@ -353,32 +354,23 @@ function formatDateTime(date, time) {
 	return [dateStr, timeStr].filter(Boolean).join(" ");
 }
 
-// ─── Watchers ─────────────────────────────────────────────────────────────────
-watch(
-	() => props.modelValue,
-	(val) => {
-		show.value = val
-		if (val && props.posProfile) {
-			loadInvoices()
-		}
-	},
-)
+function formatPaymentModes(invoice) {
+	const payments = Array.isArray(invoice?.payments) ? invoice.payments : []
+	const validPayments = payments.filter((payment) => payment.mode_of_payment)
 
-watch(show, (val) => {
-	emit("update:modelValue", val)
-	// Dialog cleanup: reset state when dialog closes
-	if (!val) {
-		searchTerm.value = ""
-		offset.value = 0
-		invoices.value = []
-		hasMore.value = true
+	if (validPayments.length === 0) {
+		return __("No payment mode")
 	}
-})
 
-// Clear selected invoice when return dialog closes
-watch(showReturnDialog, (val) => {
-	if (!val) {
-		selectedInvoiceForReturn.value = null
+	if (validPayments.length === 1) {
+		return __(validPayments[0].mode_of_payment)
 	}
-})
+
+	return validPayments
+		.map(
+			(payment) =>
+				`${__(payment.mode_of_payment)} ${formatCurrency(Number.parseFloat(payment.amount || 0))}`,
+		)
+		.join(", ")
+}
 </script>

@@ -277,10 +277,12 @@ const visiblePages = computed(() => {
 	for (let i = Math.max(1, cur - 1); i <= Math.min(total, cur + 1); i++) pages.add(i)
 	if (cur - 2 > 2)     pages.add('..l')
 	if (cur + 2 < total) pages.add('..r')
-	return [...pages].sort((a, b) =>
-		typeof a === 'number' && typeof b === 'number' ? a - b
-		: typeof a === 'number' ? -1 : 1
-	)
+	return [...pages].sort((a, b) => {
+		if (typeof a === 'number' && typeof b === 'number') return a - b
+		if (typeof a === 'number') return -1
+		if (typeof b === 'number') return 1
+		return a === b ? 0 : a === '..l' ? -1 : 1
+	})
 })
 
 // FIX #11: server-side aggregate totals (avoid client-side computation over
