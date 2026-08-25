@@ -106,6 +106,8 @@ def get_initial_data():
 
 	result["pos_settings"] = _get_pos_settings(pos_profile)
 	result["payment_methods"] = _get_payment_methods(pos_profile_name)
+	result["authorization_policy"] = _get_authorization_policy(pos_profile_name)
+	result["authorization_pin_length"] = _get_authorization_pin_length()
 
 	return result
 
@@ -113,6 +115,26 @@ def get_initial_data():
 # =============================================================================
 # Private Helper Functions
 # =============================================================================
+
+
+def _get_authorization_policy(pos_profile_name):
+	try:
+		from pos_next.api.authorization import get_authorization_policy
+
+		return get_authorization_policy(pos_profile_name)
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "Get Authorization Policy Error")
+		return {}
+
+
+def _get_authorization_pin_length():
+	try:
+		from pos_next.authorization import pin as pin_store
+
+		return pin_store.pin_length()
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "Get Authorization PIN Length Error")
+		return 4
 
 
 def _get_user_language():

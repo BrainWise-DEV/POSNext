@@ -52,6 +52,7 @@ doctype_js = {
 	"Customer": "public/js/customer.js",
 	"Pricing Rule": "public/js/pricing_rule.js",
 	"Promotional Scheme": "public/js/promotional_scheme.js",
+	"User": "public/js/user.js",
 }
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
@@ -157,6 +158,7 @@ doc_events = {
 			"pos_next.api.wallet.validate_wallet_payment",
 			"pos_next.overrides.pricing_rule.apply_min_max_price_discounts",
 		],
+		"before_submit": "pos_next.authorization.gate.enforce_document",
 		"before_cancel": "pos_next.api.sales_invoice_hooks.before_cancel",
 		"on_submit": [
 			"pos_next.realtime_events.emit_stock_update_event",
