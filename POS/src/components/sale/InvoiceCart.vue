@@ -1025,6 +1025,7 @@
 									</div>
 								</div>
 								<button
+									v-if="!isLockedFreeRow(item)"
 									type="button"
 									@click.stop="$emit('remove-item', item.item_code, item.uom)"
 									class="text-gray-400 hover:text-red-600 active:text-red-700 transition-colors flex-shrink-0 p-0.5 -m-0.5 touch-manipulation active:scale-90"
@@ -1093,7 +1094,7 @@
 										<button
 											type="button"
 											@click.stop="decrementQuantity(item)"
-											:disabled="item.is_resolved_barcode"
+											:disabled="item.is_resolved_barcode || isLockedFreeRow(item)"
 											:class="[
 												'w-6 h-6 sm:w-7 sm:h-7 flex items-center justify-center font-bold transition-colors touch-manipulation border-e',
 												item.is_resolved_barcode
@@ -1129,7 +1130,7 @@
 											@keydown.enter="$event.target.blur()"
 											type="text"
 											inputmode="decimal"
-											:disabled="item.is_resolved_barcode"
+											:disabled="item.is_resolved_barcode || isLockedFreeRow(item)"
 											:class="[
 												'w-16 sm:w-20 h-6 sm:h-7 text-center border-0 text-xs sm:text-sm font-bold focus:outline-none',
 												item.is_resolved_barcode
@@ -1146,7 +1147,7 @@
 										<button
 											type="button"
 											@click.stop="incrementQuantity(item)"
-											:disabled="item.is_resolved_barcode"
+											:disabled="item.is_resolved_barcode || isLockedFreeRow(item)"
 											:class="[
 												'w-6 h-6 sm:w-7 sm:h-7 flex items-center justify-center font-bold transition-colors touch-manipulation border-s',
 												item.is_resolved_barcode
@@ -1183,6 +1184,7 @@
 											@click="toggleUomDropdown(item.item_code, item.uom)"
 											:disabled="
 												item.is_resolved_barcode ||
+												isLockedFreeRow(item) ||
 												!item.item_uoms ||
 												item.item_uoms.length === 0
 											"
@@ -1590,48 +1592,19 @@ const {
 } = useCartSort(() => props.items);
 
 /**
- * Display-only merge: hide matching same-item free rows and show one combined line.
- * Cart data stays unchanged for offers and invoicing.
+ * Display cart lines as stored. Same-SKU GWP free gifts are their own row
+ * with a free-item badge (buy 2 get 1 free → 2 paid + 1 free after 3 scans).
  */
-function cartLineKey(item) {
-	return `${item.item_code}\0${item.uom || item.stock_uom || ""}`;
-}
-
 const displayCartItems = computed(() => {
 	const items = sortedItems.value;
-	const freeQtyByKey = new Map();
-	const paidKeys = new Set();
-
-	for (const item of items) {
-		if (!item.is_free_item) {
-			paidKeys.add(cartLineKey(item));
-			continue;
-		}
-		const key = cartLineKey(item);
-		freeQtyByKey.set(
-			key,
-			(freeQtyByKey.get(key) || 0) + (Number.parseFloat(item.quantity) || 0)
-		);
-	}
-
 	const merged = [];
 	for (const item of items) {
-		if (item.is_free_item) continue;
-		const bundledFreeQty = freeQtyByKey.get(cartLineKey(item)) || 0;
-		merged.push(
-			bundledFreeQty > 0 ? { ...item, _bundledFreeQty: bundledFreeQty } : item
-		);
+		if (item.is_free_item) {
+			merged.push({ ...item, _isStandaloneFreeRow: true });
+			continue;
+		}
+		merged.push(item);
 	}
-
-	// Different-item product discounts add dedicated is_free_item rows (e.g. buy A get B).
-	// Those rows are not bundled onto a paid line — show them as their own cart lines.
-	for (const item of items) {
-		if (!item.is_free_item) continue;
-		const key = cartLineKey(item);
-		if (paidKeys.has(key)) continue;
-		merged.push({ ...item, _isStandaloneFreeRow: true });
-	}
-
 	return merged;
 });
 
@@ -2082,6 +2055,10 @@ function getInitials(name) {
  * Effective discount % for badges. Coupon max_amount caps are stored as
  * absolute amounts (discount_percentage=0), so derive % from amount/base.
  */
+function isLockedFreeRow(item) {
+	return Boolean(item?.is_free_item || item?._isStandaloneFreeRow);
+}
+
 function isGwpItem(item) {
 	return item?.discount_source === "gwp" || Number.parseFloat(item?.gwp_free_qty) > 0;
 }
@@ -2214,8 +2191,7 @@ function getSmartStep(quantity) {
  * @param {Object} item - Cart item to increment
  */
 function incrementQuantity(item) {
-	// Prevent editing resolved barcode items
-	if (item.is_resolved_barcode) return;
+	if (item.is_resolved_barcode || isLockedFreeRow(item)) return;
 
 	const step = getSmartStep(getDisplayQuantity(item));
 	const newPaidQty = Math.round((item.quantity + step) * 10000) / 10000;
@@ -2229,8 +2205,7 @@ function incrementQuantity(item) {
  * @param {Object} item - Cart item to decrement
  */
 function decrementQuantity(item) {
-	// Prevent editing resolved barcode items
-	if (item.is_resolved_barcode) return;
+	if (item.is_resolved_barcode || isLockedFreeRow(item)) return;
 
 	const step = getSmartStep(getDisplayQuantity(item));
 	const newPaidQty = Math.round((item.quantity - step) * 10000) / 10000;
@@ -2253,7 +2228,7 @@ function decrementQuantity(item) {
 
 function updateQuantity(item, value) {
 	// Prevent editing resolved barcode items
-	if (item.is_resolved_barcode) return;
+	if (item.is_resolved_barcode || isLockedFreeRow(item)) return;
 
 	const displayQty = Number.parseFloat(value);
 
@@ -2278,6 +2253,7 @@ function updateQuantity(item, value) {
  * @param {Object} item - Cart item that lost focus
  */
 function handleQuantityBlur(item) {
+	if (isLockedFreeRow(item)) return;
 	// When user leaves the input field, round and validate
 	if (!item.quantity || item.quantity <= 0) {
 		// If quantity is 0 or invalid, remove the item

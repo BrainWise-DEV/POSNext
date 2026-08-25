@@ -378,6 +378,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				price_list_rate: item.price_list_rate || item.rate,
 				discount_percentage: item.discount_percentage || 0,
 				discount_amount: item.discount_amount || 0,
+				is_free_item: item.is_free_item || 0,
 			})),
 		};
 	}
@@ -410,6 +411,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				item.discount_percentage = discountPct;
 				item.discount_amount = discountAmt;
 				item.pricing_rules = serverItem.pricing_rules;
+				item.discount_source = serverItem.discount_source || item.discount_source;
+				item.free_qty = Number.parseFloat(serverItem.free_qty) || 0;
+				item.gwp_free_qty = Number.parseFloat(serverItem.gwp_free_qty) || 0;
 				hasDiscounts = discountPct > 0 || discountAmt > 0;
 			}
 			// Otherwise preserve existing manual discount
@@ -434,17 +438,26 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * @returns {void}
 	 */
 	function processFreeItems(freeItems) {
-		// Reset free_qty on all non-free items
+		// Restore qty previously carved into same-SKU free rows, then rebuild.
+		invoiceItems.value.forEach((item) => {
+			if (!item.is_free_item || Number(item.gwp_same_item_row) !== 1) return;
+			const freeQty = Number.parseFloat(item.quantity) || 0;
+			if (freeQty <= 0) return;
+			const paid = findPaidCartItem(item.item_code, item.uom || item.stock_uom);
+			if (paid) {
+				paid.quantity = (Number.parseFloat(paid.quantity) || 0) + freeQty;
+				recalculateItem(paid);
+			}
+		});
+
 		invoiceItems.value.forEach((item) => {
 			if (!item.is_free_item) {
 				item.free_qty = 0;
 			}
 		});
 
-		// Remove previously-added free item rows (they'll be re-added below if still valid)
 		invoiceItems.value = invoiceItems.value.filter((item) => !item.is_free_item);
 
-		// Early return if no free items
 		if (!Array.isArray(freeItems) || freeItems.length === 0) {
 			rebuildIncrementalCache();
 			return;
@@ -455,14 +468,16 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			if (freeQty <= 0) continue;
 
 			const freeUom = freeItem.uom || freeItem.stock_uom;
+			const cartItem = findPaidCartItem(freeItem.item_code, freeUom);
 
-			// Check if this free item matches an existing (non-free) cart item
-			const cartItem = invoiceItems.value.find(
-				(item) =>
-					!item.is_free_item &&
-					item.item_code === freeItem.item_code &&
-					(item.uom || item.stock_uom) === freeUom
-			);
+			// Same SKU (GWP buy 2 get 1): split scanned units. Qty 3 → 2 paid + 1 free.
+			// Never auto-add a 4th unit on top of the 3 already in the cart.
+			const paidQty = cartItem ? Number.parseFloat(cartItem.quantity) || 0 : 0;
+			const carveFromPaid = Boolean(cartItem && paidQty > freeQty);
+			if (carveFromPaid) {
+				cartItem.quantity = paidQty - freeQty;
+				recalculateItem(cartItem);
+			}
 
 			const cf = freeItem.conversion_factor || cartItem?.conversion_factor || 1;
 			invoiceItems.value.push({
@@ -476,17 +491,31 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				tax_amount: 0,
 				amount: 0,
 				stock_qty: 0,
-				uom: freeUom,
-				stock_uom: freeItem.stock_uom || freeUom,
+				uom: cartItem?.uom || freeUom,
+				stock_uom: cartItem?.stock_uom || freeItem.stock_uom || freeUom,
 				conversion_factor: cf,
 				is_free_item: 1,
 				free_qty: freeQty,
+				discount_source: freeItem.discount_source || (carveFromPaid ? "gwp" : "free_item"),
+				gwp_same_item_row: carveFromPaid ? 1 : 0,
 				pricing_rules: freeItem.pricing_rules || null,
 				warehouse: freeItem.warehouse || cartItem?.warehouse,
+				image: cartItem?.image,
 			});
 		}
 
 		rebuildIncrementalCache();
+	}
+
+	function findPaidCartItem(itemCode, uom) {
+		if (!itemCode) return null;
+		const paid = invoiceItems.value.filter((item) => !item.is_free_item && item.item_code === itemCode);
+		if (!paid.length) return null;
+		if (uom) {
+			const matchedUom = paid.find((item) => (item.uom || item.stock_uom) === uom);
+			if (matchedUom) return matchedUom;
+		}
+		return paid[0];
 	}
 
 	/**
@@ -1166,6 +1195,97 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	}
 
 	/**
+	 * Offline GWP for a single SKU: cashier must scan paid + free units.
+	 * Buy 2 get 1 free needs qty 3, then splits 1 unit onto a free row.
+	 */
+	function applyOfflineGwpSameItem(offer, eligibleItems) {
+		const freeQty = Math.floor(Number.parseFloat(offer.free_qty) || 0);
+		const minQty = Number.parseFloat(offer.min_qty) || 0;
+		const maxQty = Number.parseFloat(offer.max_qty) || 0;
+		if (freeQty <= 0) return false;
+
+		const paidItems = eligibleItems.filter((item) => !item.is_free_item);
+		const codes = [...new Set(paidItems.map((item) => item.item_code).filter(Boolean))];
+		if (codes.length !== 1) {
+			return false;
+		}
+
+		const itemCode = codes[0];
+		const matching = invoiceItems.value.filter(
+			(item) => item.item_code === itemCode && !item.is_free_item
+		);
+		const existingFree = invoiceItems.value.filter(
+			(item) => item.item_code === itemCode && item.is_free_item
+		);
+		const totalQty = [...matching, ...existingFree].reduce(
+			(sum, item) => sum + (Math.floor(item.quantity || item.qty || 0) || 0),
+			0
+		);
+		const paidAfterFree = totalQty - freeQty;
+		if (totalQty < minQty + freeQty || paidAfterFree <= 0) return false;
+		if (minQty > 0 && paidAfterFree < minQty) return false;
+		if (maxQty > 0 && paidAfterFree > maxQty) return false;
+
+		const referenceItem = matching[0];
+		if (!referenceItem) return false;
+		const uomKey = referenceItem.uom || referenceItem.stock_uom;
+		if ((Number.parseFloat(referenceItem.quantity) || 0) > freeQty) {
+			referenceItem.quantity = (Number.parseFloat(referenceItem.quantity) || 0) - freeQty;
+			recalculateItem(referenceItem);
+		}
+
+		for (const item of matching) {
+			const pr = item.pricing_rules;
+			const prArr = Array.isArray(pr)
+				? [...pr]
+				: pr
+					? String(pr)
+							.split(",")
+							.map((s) => s.trim())
+							.filter(Boolean)
+					: [];
+			if (!prArr.includes(offer.name)) prArr.push(offer.name);
+			item.pricing_rules = prArr;
+		}
+
+		const existingFreeRow = invoiceItems.value.find(
+			(r) =>
+				r.is_free_item &&
+				r.item_code === itemCode &&
+				(r.uom || r.stock_uom) === uomKey
+		);
+		if (existingFreeRow) {
+			existingFreeRow.quantity = freeQty;
+			existingFreeRow.free_qty = freeQty;
+			existingFreeRow.gwp_same_item_row = 1;
+			existingFreeRow.discount_source = "gwp";
+		} else {
+			invoiceItems.value.push({
+				item_code: itemCode,
+				item_name: referenceItem.item_name || itemCode,
+				rate: 0,
+				price_list_rate: 0,
+				quantity: freeQty,
+				discount_amount: 0,
+				discount_percentage: 0,
+				tax_amount: 0,
+				amount: 0,
+				stock_qty: 0,
+				uom: uomKey,
+				stock_uom: referenceItem.stock_uom || uomKey,
+				conversion_factor: referenceItem.conversion_factor || 1,
+				is_free_item: 1,
+				free_qty: freeQty,
+				discount_source: "gwp",
+				gwp_same_item_row: 1,
+				pricing_rules: [offer.name],
+				warehouse: referenceItem.warehouse,
+			});
+		}
+		return true;
+	}
+
+	/**
 	 * Apply free item (product discount) offer offline
 	 * Handles: same_item (free item = purchased item) or specific free_item
 	 *
@@ -1182,6 +1302,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	function applyOfflineFreeItem(offer, eligibleItems) {
 		if (isPromotionsAppInstalled() && offer.promotion_type === "Gift Pool") {
 			return applyOfflineGiftPool(offer, eligibleItems);
+		}
+		if (isPromotionsAppInstalled() && offer.promotion_type === "GWP") {
+			return applyOfflineGwpSameItem(offer, eligibleItems);
 		}
 		const freeQty = Number.parseFloat(offer.free_qty) || 0;
 		const sameItem = offer.same_item === 1;
