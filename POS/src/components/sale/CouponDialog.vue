@@ -300,7 +300,7 @@ const couponResource = createResource({
 	makeParams() {
 		return {
 			coupon_code: couponCode.value,
-			customer: props.customer || "",
+			customer: props.customer,
 			company: props.company,
 		};
 	},
