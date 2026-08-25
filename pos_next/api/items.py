@@ -13,11 +13,13 @@ from frappe.query_builder import functions as fn
 from frappe.query_builder.functions import IfNull
 from frappe.utils import flt, getdate, nowdate
 
+
 # Item group tree resolution is shared with the promotion engine, which matches
 # Pricing Rule item_groups rows against cart lines by lineage.
 from pos_next.promotions.scope import (
 	get_item_group_with_descendants as _get_item_group_with_descendants,
 )
+
 
 ITEM_RESULT_FIELDS = [
 	"name as item_code",

@@ -365,6 +365,7 @@ async function applyCoupon() {
 		return;
 	}
 
+
 	if (!props.items?.length) {
 		errorMessage.value = __("Add items to the cart before applying a coupon");
 		showWarning(errorMessage.value);
@@ -374,6 +375,7 @@ async function applyCoupon() {
 	if (!props.customer || !props.company) {
 		errorMessage.value = __("Please select a customer before applying a coupon");
 		showWarning(errorMessage.value);
+
 		return;
 	}
 
