@@ -1,4 +1,5 @@
 import { promoApi } from "@/utils/promoApi";
+import { loadOfferStrategyPlugins } from "@/utils/offerStrategies";
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { call } from "@/utils/apiWrapper";
@@ -379,6 +380,8 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 	 * @returns {Promise<boolean>} True if offers are available (fetched or cached)
 	 */
 	async function ensureOffersFetched(posProfile) {
+		await loadOfferStrategyPlugins();
+
 		// Skip fetching offers if POS Profile has ignore_pricing_rule enabled
 		const shiftStore = usePOSShiftStore();
 		if (shiftStore.currentProfile?.ignore_pricing_rule) {

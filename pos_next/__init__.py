@@ -90,3 +90,15 @@ try:
 	patch_round_floats_in_compat(document_module)
 except Exception:
 	pass
+
+# Stop `bench run-tests` from wiping a working site's Item Prices. ERPNext's
+# before_tests hook deletes the whole table with raw SQL and commits, leaving no
+# Deleted Document trail. Opt in per site with `preserve_item_prices_in_tests`.
+try:
+	from erpnext.setup import utils as _erpnext_setup_utils
+
+	from pos_next.overrides.test_setup_compat import patch_before_tests
+
+	patch_before_tests(_erpnext_setup_utils)
+except Exception:
+	pass

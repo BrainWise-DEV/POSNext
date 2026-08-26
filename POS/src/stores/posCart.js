@@ -1,4 +1,10 @@
 import { isPromotionsAppInstalled } from "@/utils/promoApi";
+import {
+	allowsAutoDiscountStacking,
+	getStrategyForOffer,
+	loadOfferStrategyPlugins,
+	offerStrategyOrder,
+} from "@/utils/offerStrategies";
 import { useInvoice } from "@/composables/useInvoice";
 import { usePOSOffersStore } from "@/stores/posOffers";
 import { usePOSSettingsStore } from "@/stores/posSettings";
@@ -378,6 +384,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				price_list_rate: item.price_list_rate || item.rate,
 				discount_percentage: item.discount_percentage || 0,
 				discount_amount: item.discount_amount || 0,
+				pricing_rules: item.pricing_rules || "",
+				is_already_discounted: item.is_already_discounted || 0,
+				discount_source: item.discount_source || "",
+				item_group: item.item_group,
+				brand: item.brand,
+				amount: item.amount,
 				is_free_item: item.is_free_item || 0,
 			})),
 		};
@@ -417,6 +429,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				hasDiscounts = discountPct > 0 || discountAmt > 0;
 			}
 			// Otherwise preserve existing manual discount
+
+			if (serverItem.is_already_discounted !== undefined) {
+				item.is_already_discounted = serverItem.is_already_discounted ? 1 : 0;
+			}
+			item.is_accumulative_discount =
+				serverItem.discount_source === "accumulative_promotion" ? 1 : 0;
 
 			recalculateItem(item);
 		});
@@ -877,6 +895,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 							item.discount_percentage = 0;
 							item.discount_amount = 0;
 							item.pricing_rules = [];
+							item.is_already_discounted = 0;
+							item.is_accumulative_discount = 0;
 							recalculateItem(item);
 						}
 					});
@@ -976,7 +996,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 			const newlyAppliedOffers = [];
 
-			for (const offer of newOffers) {
+			const orderedOffers = [...newOffers].sort(
+				(a, b) => offerStrategyOrder(b) - offerStrategyOrder(a)
+			);
+
+			for (const offer of orderedOffers) {
 				// Determine offer type: "Item Price" (discount) or "Give Product" (free item)
 				const isProductDiscount = offer.offer === "Give Product";
 
@@ -1053,6 +1077,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * @returns {boolean} True if discount was applied
 	 */
 	function applyOfflinePriceDiscount(offer, eligibleItems) {
+		const strategy = getStrategyForOffer(offer);
+		if (strategy) {
+			return strategy.apply(offer, eligibleItems, { recalculateItem });
+		}
+
 		const discountType = offer.discount_type || offer.rate_or_discount;
 		const discountPercentage = Number.parseFloat(offer.discount_percentage) || 0;
 		const discountAmount = Number.parseFloat(offer.discount_amount) || 0;
@@ -1061,12 +1090,27 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		let applied = false;
 
 		for (const item of eligibleItems) {
+			const stacks =
+				offer.promotion_type === "Auto Discount" && allowsAutoDiscountStacking(item);
+
+			if (offer.promotion_type === "Auto Discount" && item.is_already_discounted && !stacks) {
+				continue;
+			}
+
 			// Only apply if no existing pricing rule
-			if (item.pricing_rules && item.pricing_rules.length > 0) continue;
+			if (item.pricing_rules && item.pricing_rules.length > 0 && !stacks) continue;
 
 			if (discountType === "Discount Percentage" && discountPercentage > 0) {
-				item.discount_percentage = discountPercentage;
-				item.pricing_rules = [offer.name];
+				if (stacks) {
+					const base = Number.parseFloat(item.discount_percentage) || 0;
+					const itemMax = Number.parseFloat(item.max_discount) || 0;
+					const total = base + discountPercentage;
+					item.discount_percentage = Math.min(total, itemMax > 0 ? itemMax : 100, 100);
+					item.pricing_rules = [...(item.pricing_rules || []), offer.name];
+				} else {
+					item.discount_percentage = discountPercentage;
+					item.pricing_rules = [offer.name];
+				}
 				recalculateItem(item);
 				applied = true;
 			} else if (discountType === "Discount Amount" && discountAmount > 0) {
@@ -1849,6 +1893,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 					if (item.pricing_rules && item.pricing_rules.length > 0) {
 						item.discount_percentage = 0;
 						item.discount_amount = 0;
+						item.is_already_discounted = 0;
+						item.is_accumulative_discount = 0;
 						recalculateItem(item);
 					}
 				});
