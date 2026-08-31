@@ -75,6 +75,10 @@ const CURRENT_SCHEMA = {
 	// Indexed by name (unique), filterable by pos_profile
 	offers: "&name, pos_profile, apply_on, valid_upto",
 
+	// POS Package definitions cache for offline package selection and pricing.
+	// parent_item is indexed so the item grid can resolve a tapped item to its package.
+	packages: "&name, pos_profile, parent_item, valid_upto",
+
 	// Invoice history cache for offline viewing
 	// Stores submitted invoices for offline access
 	invoice_history: "&name, pos_profile, posting_date, customer",
