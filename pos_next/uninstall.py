@@ -6,6 +6,13 @@ import logging
 
 import frappe
 
+from pos_next.price_group_ownership import (
+	ITEM_PRICE_OWNER_FIELD,
+	PRICE_LIST_OWNER_FIELD,
+	PROFILE_OWNER_FIELD,
+	PROFILE_PREVIOUS_PRICE_LIST_FIELD,
+)
+
 # Configure logger
 logger = logging.getLogger(__name__)
 
@@ -51,6 +58,10 @@ def remove_custom_fields():
 		custom_fields = [
 			"Sales Invoice-posa_pos_opening_shift",
 			"Sales Invoice-posa_is_printed",
+			f"Price List-{PRICE_LIST_OWNER_FIELD}",
+			f"Item Price-{ITEM_PRICE_OWNER_FIELD}",
+			f"POS Profile-{PROFILE_OWNER_FIELD}",
+			f"POS Profile-{PROFILE_PREVIOUS_PRICE_LIST_FIELD}",
 		]
 
 		removed_count = 0
@@ -223,6 +234,10 @@ def get_custom_fields_for_cleanup():
 	custom_fields = [
 		"Sales Invoice-posa_pos_opening_shift",
 		"Sales Invoice-posa_is_printed",
+		f"Price List-{PRICE_LIST_OWNER_FIELD}",
+		f"Item Price-{ITEM_PRICE_OWNER_FIELD}",
+		f"POS Profile-{PROFILE_OWNER_FIELD}",
+		f"POS Profile-{PROFILE_PREVIOUS_PRICE_LIST_FIELD}",
 	]
 
 	return custom_fields
