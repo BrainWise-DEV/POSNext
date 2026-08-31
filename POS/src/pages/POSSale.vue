@@ -391,6 +391,7 @@
 								@remove-item="
 									(itemCode, uom) => cartStore.removeItem(itemCode, uom)
 								"
+								@remove-package="cartStore.removePackage"
 								@select-customer="handleCustomerSelected"
 								@create-customer="handleCreateCustomer"
 								@edit-customer="handleEditCustomer"
@@ -610,6 +611,15 @@
 				:warehouse="shiftStore.profileWarehouse"
 				:pos-profile="cartStore.posProfile"
 				@batch-serial-selected="handleBatchSerialSelected"
+			/>
+
+			<!-- POS Package Selection Dialog -->
+			<PackageSelectionDialog
+				v-model="uiStore.showPackageDialog"
+				:pkg="selectedPackage"
+				:pos-profile="shiftStore.profileName"
+				:currency="shiftStore.profileCurrency"
+				@package-selected="handlePackageSelected"
 			/>
 
 			<!-- Generic Item Selection Dialog -->
@@ -1044,6 +1054,7 @@ import ItemSelectionDialog from "@/components/sale/ItemSelectionDialog.vue";
 import ItemsSelector from "@/components/sale/ItemsSelector.vue";
 import OffersDialog from "@/components/sale/OffersDialog.vue";
 import OfflineInvoicesDialog from "@/components/sale/OfflineInvoicesDialog.vue";
+import PackageSelectionDialog from "@/components/sale/PackageSelectionDialog.vue";
 import PaymentDialog from "@/components/sale/PaymentDialog.vue";
 import PromotionManagement from "@/components/sale/PromotionManagement.vue";
 import ReturnInvoiceDialog from "@/components/sale/ReturnInvoiceDialog.vue";
@@ -1081,6 +1092,7 @@ import { useStockStore } from "@/stores/stock";
 // Pinia Stores
 import { usePOSCartStore } from "@/stores/posCart";
 import { usePOSDraftsStore } from "@/stores/posDrafts";
+import { usePOSPackagesStore } from "@/stores/posPackages";
 import { usePOSSettingsStore } from "@/stores/posSettings";
 import { usePOSShiftStore } from "@/stores/posShift";
 import { usePOSSyncStore } from "@/stores/posSync";
@@ -1096,6 +1108,7 @@ const uiStore = usePOSUIStore();
 const offlineStore = usePOSSyncStore();
 const draftsStore = usePOSDraftsStore();
 const posSettingsStore = usePOSSettingsStore();
+const packagesStore = usePOSPackagesStore();
 const itemStore = useItemSearchStore();
 const stockStore = useStockStore();
 const customerSearchStore = useCustomerSearchStore();
@@ -1143,6 +1156,7 @@ const dividerRef = ref(null);
 const pendingPaymentAfterCustomer = ref(false);
 const logoutAfterClose = ref(false);
 const editCustomer = ref(null); // Customer being edited (null for create mode)
+const selectedPackage = ref(null); // POS Package awaiting option selection
 const showClearCacheDialog = ref(false);
 const clearCacheOverlayRef = ref(null);
 
@@ -1490,6 +1504,7 @@ onMounted(async () => {
 				? offlineStore.checkOfflineCacheAvailability()
 				: offlineStore.preloadDataForOffline(shiftStore.currentProfile),
 			draftsStore.updateDraftsCount(),
+			packagesStore.ensurePackagesFetched(shiftStore.profileName),
 		]);
 
 		// Wait for settings (required for tax rules) + all background ops
@@ -1826,6 +1841,7 @@ async function handleShiftOpened() {
 			? offlineStore.checkOfflineCacheAvailability()
 			: offlineStore.preloadDataForOffline(shiftStore.currentProfile),
 		draftsStore.updateDraftsCount(),
+		packagesStore.ensurePackagesFetched(shiftStore.profileName),
 	]);
 
 	// Wait for settings (required for tax rules) + all background ops
@@ -1870,6 +1886,15 @@ async function handleShiftClosed() {
 }
 
 function handleItemSelected(item, autoAdd = false) {
+	// Packages always open their picker — even under auto-add / barcode scan,
+	// since the customer still has to choose the optional items.
+	const pkg = packagesStore.getPackageForItem(item.item_code);
+	if (pkg) {
+		selectedPackage.value = pkg;
+		uiStore.showPackageDialog = true;
+		return;
+	}
+
 	// Auto-add mode
 	if (autoAdd) {
 		try {
@@ -1956,6 +1981,17 @@ function handleItemSelected(item, autoAdd = false) {
 			error.message,
 			__("Item: {0}", [item.item_code])
 		);
+	}
+}
+
+function handlePackageSelected({ quote, pkg }) {
+	try {
+		cartStore.addPackage(quote, pkg, shiftStore.currentProfile);
+		showSuccess(__("{0} added to cart", [pkg.package_name]));
+	} catch (error) {
+		uiStore.showError(__("Insufficient Stock"), error.message, __("Package: {0}", [pkg.package_name]));
+	} finally {
+		selectedPackage.value = null;
 	}
 }
 

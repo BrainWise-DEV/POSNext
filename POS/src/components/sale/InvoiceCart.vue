@@ -940,19 +940,24 @@
 
 			<div v-else class="flex flex-col gap-0.5 sm:gap-1">
 				<div
-					v-for="(item, index) in sortedItems"
+					v-for="(item, index) in topLevelItems"
 					:key="
+						item.package_instance ||
 						item.item_code +
-						'-' +
-						(item.uom || '') +
-						(item.is_free_item ? '-free' : '')
+							'-' +
+							(item.uom || '') +
+							(item.is_free_item ? '-free' : '')
 					"
-					@click="item.is_free_item ? null : openEditDialog(item)"
+					@click="
+						item.is_free_item || item.package_instance ? null : openEditDialog(item)
+					"
 					:class="[
 						'border rounded-md p-1.5 sm:p-2 transition-all duration-200',
-						item.is_free_item
-							? 'bg-green-50 border-green-300 cursor-default'
-							: 'bg-white border-gray-200 hover:border-blue-300 hover:shadow-md active:scale-[0.99] cursor-pointer group',
+						item.package_instance
+							? 'bg-blue-50/50 border-blue-300 cursor-default'
+							: item.is_free_item
+								? 'bg-green-50 border-green-300 cursor-default'
+								: 'bg-white border-gray-200 hover:border-blue-300 hover:shadow-md active:scale-[0.99] cursor-pointer group',
 					]"
 				>
 					<div class="flex gap-1.5 sm:gap-2">
@@ -991,6 +996,12 @@
 							<!-- Header: Item Name, Badges & Delete -->
 							<div class="flex items-start justify-between gap-0.5 mb-0.5">
 								<div class="flex items-center gap-1.5 flex-1 min-w-0">
+									<span
+										v-if="item.package_instance"
+										class="inline-flex items-center px-1.5 py-0.5 bg-blue-600 text-white rounded-full text-[9px] font-bold flex-shrink-0"
+									>
+										{{ __("PACKAGE") }}
+									</span>
 									<h4
 										class="text-xs sm:text-sm font-extrabold text-gray-900 truncate leading-tight"
 									>
@@ -1047,7 +1058,29 @@
 									</div>
 								</div>
 								<button
-									v-if="!item.is_free_item"
+									v-if="item.package_instance"
+									type="button"
+									@click.stop="$emit('remove-package', item.package_instance)"
+									class="text-gray-400 hover:text-red-600 active:text-red-700 transition-colors flex-shrink-0 p-0.5 -m-0.5 touch-manipulation active:scale-90"
+									:aria-label="__('Remove {0}', [item.item_name])"
+									:title="__('Remove package')"
+								>
+									<svg
+										class="h-4 w-4"
+										fill="none"
+										stroke="currentColor"
+										viewBox="0 0 24 24"
+									>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											stroke-width="2"
+											d="M6 18L18 6M6 6l12 12"
+										/>
+									</svg>
+								</button>
+								<button
+									v-else-if="!item.is_free_item"
 									type="button"
 									@click.stop="$emit('remove-item', item.item_code, item.uom)"
 									class="text-gray-400 hover:text-red-600 active:text-red-700 transition-colors flex-shrink-0 p-0.5 -m-0.5 touch-manipulation active:scale-90"
@@ -1075,8 +1108,17 @@
 								<div class="flex items-center gap-1.5">
 									<!-- Quantity Counter -->
 									<!-- For free items, show static quantity badge -->
+									<!-- Package parents are priced as a unit — qty is fixed at 1 -->
 									<div
-										v-if="item.is_free_item"
+										v-if="item.package_instance"
+										class="flex items-center bg-blue-100 border border-blue-300 rounded px-2 h-6 sm:h-7"
+									>
+										<span class="text-xs sm:text-sm font-bold text-blue-700">{{
+											item.quantity
+										}}</span>
+									</div>
+									<div
+										v-else-if="item.is_free_item"
 										class="flex items-center bg-green-100 border border-green-300 rounded px-2 h-6 sm:h-7"
 									>
 										<span
@@ -1323,6 +1365,36 @@
 							</div>
 						</div>
 					</div>
+
+					<!-- Package contents: read-only, priced inside the package total -->
+					<ul
+						v-if="item.package_instance"
+						class="mt-1.5 ps-2 border-s-2 border-blue-200 flex flex-col gap-0.5"
+					>
+						<li
+							v-for="component in packageComponents(item.package_instance)"
+							:key="component.item_code + '-' + (component.uom || '')"
+							class="flex items-center gap-1.5 text-[10px] sm:text-xs text-gray-600"
+						>
+							<svg
+								class="w-3 h-3 text-blue-400 flex-shrink-0"
+								fill="currentColor"
+								viewBox="0 0 20 20"
+							>
+								<path
+									fill-rule="evenodd"
+									d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+									clip-rule="evenodd"
+								/>
+							</svg>
+							<span class="flex-1 truncate">{{
+								component.item_name || component.item_code
+							}}</span>
+							<span class="font-semibold text-gray-500 flex-shrink-0"
+								>x{{ formatQuantity(component.quantity) }}</span
+							>
+						</li>
+					</ul>
 				</div>
 			</div>
 		</div>
@@ -1487,6 +1559,7 @@ import { usePOSSettingsStore } from "@/stores/posSettings";
 import { usePOSOffersStore } from "@/stores/posOffers";
 import { useCustomerSearchStore } from "@/stores/customerSearch";
 import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency";
+import { PACKAGE_ITEM_ROLE } from "@/utils/packageQuote";
 import { useFormatters } from "@/composables/useFormatters";
 import { useCartSort } from "@/composables/useCartSort";
 import { isOffline } from "@/utils/offline";
@@ -1575,6 +1648,7 @@ const props = defineProps({
 const emit = defineEmits([
 	"update-quantity", // (itemCode, newQty, uom?) - Update item quantity
 	"remove-item", // (itemCode, uom?) - Remove item from cart
+	"remove-package", // (packageInstance) - Remove a package and its component rows
 	"select-customer", // (customer) - Select/change customer
 	"edit-customer", // (customer) - Open edit customer dialog
 	"create-customer", // (searchText) - Open create customer dialog
@@ -1609,6 +1683,21 @@ const {
 	getCartSortLabel,
 	getCartSortIconState,
 } = useCartSort(() => props.items);
+
+/**
+ * Cart rows to render at the top level.
+ * Package component rows are excluded — they render nested under their parent.
+ */
+const topLevelItems = computed(() =>
+	sortedItems.value.filter((item) => item.package_role !== PACKAGE_ITEM_ROLE)
+);
+
+/** Component rows belonging to a package instance, in cart order. */
+function packageComponents(instance) {
+	return props.items.filter(
+		(item) => item.package_instance === instance && item.package_role === PACKAGE_ITEM_ROLE
+	);
+}
 
 /**
  * ============================================================================

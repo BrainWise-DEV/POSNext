@@ -1,8 +1,10 @@
 import { useInvoice } from "@/composables/useInvoice";
+import { useItemSearchStore } from "@/stores/itemSearch";
 import { usePOSOffersStore } from "@/stores/posOffers";
 import { usePOSSettingsStore } from "@/stores/posSettings";
 import { usePOSShiftStore } from "@/stores/posShift";
 import { parseError } from "@/utils/errorHandler";
+import { PACKAGE_ROLE } from "@/utils/packageQuote";
 import { shouldValidateItemStock, checkStockAvailability } from "@/utils/stockValidator";
 import { offlineState } from "@/utils/offline/offlineState";
 import { useToast } from "@/composables/useToast";
@@ -92,6 +94,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		taxInclusive,
 		isSubmitting,
 		addItem: addItemToInvoice,
+		addPackage: addPackageToInvoice,
+		removePackage,
 		removeItem,
 		updateItemQuantity: baseUpdateItemQuantity,
 		submitInvoice: baseSubmitInvoice,
@@ -196,6 +200,43 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		}
 
 		addItemToInvoice(item, qty);
+	}
+
+	/**
+	 * Add a priced package to the cart, validating stock on its component items.
+	 *
+	 * @param {Object} quote - Result from `posPackages.quote()`
+	 * @param {Object} pkg - Package definition
+	 * @param {Object|null} currentProfile - POS Profile, used for stock validation
+	 * @returns {string} Package instance id
+	 * @throws {Error} When a component item lacks stock
+	 */
+	function addPackage(quote, pkg, currentProfile = null) {
+		const warehouse = currentProfile?.warehouse || null;
+
+		if (currentProfile && settingsStore.shouldEnforceStockValidation()) {
+			const itemsStore = useItemSearchStore();
+
+			// Components of the same code can appear twice (an included item and a
+			// chosen option), so validate against the package's combined demand.
+			const demand = new Map();
+			for (const line of quote.lines) {
+				if (line.role === PACKAGE_ROLE) continue;
+				demand.set(line.item_code, (demand.get(line.item_code) || 0) + line.qty);
+			}
+
+			for (const [itemCode, qty] of demand) {
+				const catalogItem = itemsStore.allItems.find((i) => i.item_code === itemCode);
+				if (!catalogItem || !shouldValidateItemStock(catalogItem)) continue;
+
+				const check = checkStockAvailability(catalogItem, qty, warehouse);
+				if (!check.available) {
+					throw new Error(check.error);
+				}
+			}
+		}
+
+		return addPackageToInvoice(quote, pkg, { warehouse });
 	}
 
 	/**
@@ -1880,6 +1921,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 		// Actions
 		addItem,
+		addPackage,
+		removePackage,
 		removeItem,
 		updateItemQuantity,
 		clearCart,
