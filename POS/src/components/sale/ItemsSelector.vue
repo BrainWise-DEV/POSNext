@@ -539,6 +539,12 @@
 
 						<!-- Item Details -->
 						<div class="min-w-0">
+							<span
+								v-if="isPackageItem(item.item_code)"
+								class="inline-block mb-0.5 px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 text-[8px] sm:text-[9px] font-bold uppercase tracking-wide"
+							>
+								{{ __("Package") }}
+							</span>
 							<h3
 								class="text-[10px] sm:text-xs font-semibold text-gray-900 truncate mb-0.5 leading-tight"
 							>
@@ -803,6 +809,12 @@
 									class="text-xs sm:text-sm font-medium text-gray-900 truncate"
 									:title="item.item_name"
 								>
+									<span
+										v-if="isPackageItem(item.item_code)"
+										class="me-1 px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 text-[9px] font-bold uppercase tracking-wide"
+									>
+										{{ __("Package") }}
+									</span>
 									{{ item.item_name }}
 								</div>
 								<div
@@ -1009,6 +1021,7 @@
 import LazyImage from "@/components/common/LazyImage.vue";
 import WarehouseAvailabilityDialog from "@/components/sale/WarehouseAvailabilityDialog.vue";
 import { useItemSearchStore } from "@/stores/itemSearch";
+import { usePOSPackagesStore } from "@/stores/posPackages";
 import { usePOSSettingsStore } from "@/stores/posSettings";
 import { useStock } from "@/composables/useStock";
 import { useDialogState } from "@/composables/useDialogState";
@@ -1043,6 +1056,7 @@ const emit = defineEmits(["item-selected"]);
 // Use composables
 const { getStockStatus } = useStock();
 const settingsStore = usePOSSettingsStore();
+const packagesStore = usePOSPackagesStore();
 const { showError, showWarning } = useToast();
 const { isAnyDialogOpen } = useDialogState();
 
@@ -1352,6 +1366,10 @@ onUnmounted(() => {
 // Create optimized click handlers for better touch response
 const optimizedClickHandlers = new Map();
 
+function isPackageItem(itemCode) {
+	return packagesStore.isPackageItem(itemCode);
+}
+
 function getOptimizedClickHandler(item) {
 	const key = item.item_code;
 	if (!optimizedClickHandlers.has(key)) {
@@ -1414,8 +1432,9 @@ function clearLongPress() {
 function selectItem(item, autoAdd = false) {
 	if (!item) return false;
 
-	// Early out-of-stock guard — full qty validation happens in cartStore.addItem()
+	// Packages are non-stock parents; their component stock is checked on add.
 	if (
+		!isPackageItem(item.item_code) &&
 		!item.has_variants &&
 		settingsStore.shouldEnforceStockValidation() &&
 		shouldValidateItemStock(item)

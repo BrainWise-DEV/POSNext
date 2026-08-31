@@ -18,6 +18,51 @@ import frappe
 # Configure logger
 logger = logging.getLogger(__name__)
 
+# Custom Fields live here, not in fixtures: hooks.py:fixtures exports only Role /
+# Custom DocPerm, and pos_next/pos_next/custom/*.json is never applied.
+CUSTOM_FIELDS = {
+	"Sales Invoice Item": [
+		{
+			"fieldname": "pos_package",
+			"label": "POS Package",
+			"fieldtype": "Link",
+			"options": "POS Package",
+			"insert_after": "item_name",
+			"read_only": 1,
+			"no_copy": 0,
+			"print_hide": 1,
+			"description": "Package this row belongs to.",
+		},
+		{
+			"fieldname": "pos_package_instance",
+			"label": "POS Package Instance",
+			"fieldtype": "Data",
+			"insert_after": "pos_package",
+			"read_only": 1,
+			"print_hide": 1,
+			"description": "Groups the package line with its component rows.",
+		},
+		{
+			"fieldname": "pos_package_role",
+			"label": "POS Package Role",
+			"fieldtype": "Select",
+			"options": "\nPackage\nPackage Item",
+			"insert_after": "pos_package_instance",
+			"read_only": 1,
+			"print_hide": 1,
+		},
+		{
+			"fieldname": "pos_package_snapshot",
+			"label": "POS Package Snapshot",
+			"fieldtype": "Long Text",
+			"insert_after": "pos_package_role",
+			"read_only": 1,
+			"print_hide": 1,
+			"description": "Selected options at the time of sale (JSON).",
+		},
+	],
+}
+
 
 def after_install():
 	"""Hook that runs after app installation"""
@@ -26,6 +71,8 @@ def after_install():
 
 		# Setup default print format for POS Profiles
 		setup_default_print_format()
+
+		sync_custom_fields()
 
 		# Clear cache to ensure changes take effect
 		frappe.clear_cache()
@@ -50,6 +97,8 @@ def after_migrate():
 
 		# Setup default print format
 		setup_default_print_format(quiet=True)
+
+		sync_custom_fields(quiet=True)
 
 		# Clear cache
 		frappe.clear_cache()
@@ -107,6 +156,21 @@ def setup_default_print_format(quiet=False):
 	except Exception as e:
 		log_message(f"Error setting up default print format: {str(e)}", level="error")
 		frappe.log_error(title="Default Print Format Setup Error", message=frappe.get_traceback())
+
+
+def sync_custom_fields(quiet=False):
+	"""Upsert CUSTOM_FIELDS. Idempotent — safe on every migrate."""
+	from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
+
+	try:
+		create_custom_fields(CUSTOM_FIELDS, ignore_validate=True, update=True)
+		if not quiet:
+			total = sum(len(fields) for fields in CUSTOM_FIELDS.values())
+			log_message(f"Synced {total} custom field(s)", level="success")
+	except Exception as e:
+		log_message(f"Error syncing custom fields: {e!s}", level="error")
+		frappe.log_error(title="POS Next Custom Field Sync Error", message=frappe.get_traceback())
+		raise
 
 
 def log_message(message, level="info", indent=0):

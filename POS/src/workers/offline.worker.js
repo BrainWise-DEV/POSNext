@@ -1317,6 +1317,104 @@ async function clearOffersCache(posProfile = null) {
 	}
 }
 
+/**
+ * Cache POS Package definitions for offline selection and pricing.
+ *
+ * @param {Array} packages - Packages from pos_next.api.packages.get_packages
+ * @param {string} posProfile - POS Profile name to associate with packages
+ * @returns {Promise<{success: boolean, count: number}>}
+ */
+async function cachePackages(packages, posProfile) {
+	try {
+		if (!Array.isArray(packages) || !posProfile) {
+			return { success: false, count: 0 };
+		}
+
+		const db = await initDB();
+
+		const packagesWithProfile = packages.map((pkg) => ({
+			...pkg,
+			pos_profile: posProfile,
+			_cached_at: Date.now(),
+		}));
+
+		await db.transaction("rw", db.table("packages"), async () => {
+			await db.table("packages").where("pos_profile").equals(posProfile).delete();
+			if (packagesWithProfile.length > 0) {
+				await db.table("packages").bulkPut(packagesWithProfile);
+			}
+		});
+
+		await db.table("settings").put({
+			key: `packages_last_sync_${posProfile}`,
+			value: Date.now(),
+		});
+
+		log.success(`Cached ${packages.length} packages for profile ${posProfile}`);
+		return { success: true, count: packages.length };
+	} catch (error) {
+		log.error("Error caching packages", error);
+		return { success: false, count: 0, error: error.message };
+	}
+}
+
+/**
+ * Get cached POS Packages for a profile, dropping expired ones.
+ *
+ * @param {string} posProfile - POS Profile name
+ * @returns {Promise<Array>} Cached package definitions still in their validity window
+ */
+async function getCachedPackages(posProfile) {
+	try {
+		if (!posProfile) {
+			return [];
+		}
+
+		const db = await initDB();
+		const today = new Date().toISOString().split("T")[0];
+
+		const allPackages = await db
+			.table("packages")
+			.where("pos_profile")
+			.equals(posProfile)
+			.toArray();
+
+		const validPackages = allPackages.filter((pkg) => {
+			if (pkg.valid_from && pkg.valid_from > today) return false;
+			if (pkg.valid_upto && pkg.valid_upto < today) return false;
+			return true;
+		});
+
+		log.info(`Retrieved ${validPackages.length} cached packages for profile ${posProfile}`);
+		return validPackages;
+	} catch (error) {
+		log.error("Error getting cached packages", error);
+		return [];
+	}
+}
+
+/**
+ * Clear cached POS Packages.
+ * @param {string|null} posProfile - Profile to clear, or null for all
+ * @returns {Promise<{success: boolean}>}
+ */
+async function clearPackagesCache(posProfile = null) {
+	try {
+		const db = await initDB();
+
+		if (posProfile) {
+			await db.table("packages").where("pos_profile").equals(posProfile).delete();
+		} else {
+			await db.table("packages").clear();
+		}
+
+		return { success: true };
+	} catch (error) {
+		log.error("Error clearing packages cache", error);
+		return { success: false, error: error.message };
+	}
+}
+
 // Check if cache is ready
 async function isCacheReady() {
 	try {
@@ -1873,6 +1971,19 @@ self.onmessage = async (event) => {
 
 			case "CLEAR_OFFERS_CACHE":
 				result = await clearOffersCache(payload.posProfile);
+				break;
+
+			// ===== PACKAGE CACHE OPERATIONS =====
+			case "CACHE_PACKAGES":
+				result = await cachePackages(payload.packages, payload.posProfile);
+				break;
+
+			case "GET_CACHED_PACKAGES":
+				result = await getCachedPackages(payload.posProfile);
+				break;
+
+			case "CLEAR_PACKAGES_CACHE":
+				result = await clearPackagesCache(payload.posProfile);
 				break;
 
 			default:

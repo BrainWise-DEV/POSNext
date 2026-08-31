@@ -5,6 +5,7 @@ import { useSerialNumberStore } from "@/stores/serialNumber";
 import { CoalescingMutex } from "@/utils/mutex";
 import { logger } from "@/utils/logger";
 import { roundCurrency } from "@/utils/currency";
+import { PACKAGE_ROLE } from "@/utils/packageQuote";
 
 const log = logger.create("Invoice");
 
@@ -214,12 +215,32 @@ export function useInvoice() {
 		);
 	});
 
+	/**
+	 * Find a cart row that a standalone item may merge into or be edited through.
+	 *
+	 * Package rows are excluded: each package instance owns its lines, so a loose
+	 * item of the same code must never merge into (or be edited via) a package.
+	 *
+	 * @param {string} itemCode
+	 * @param {string|null} uom - Match UOM too when provided
+	 * @returns {Object|undefined}
+	 */
+	function findStandaloneItem(itemCode, uom = null) {
+		return invoiceItems.value.find(
+			(i) =>
+				i.item_code === itemCode &&
+				!i.package_instance &&
+				(uom === null || i.uom === uom)
+		);
+	}
+
 	// Actions
 	function addItem(item, quantity = 1) {
 		const itemUom = item.uom || item.stock_uom;
-		const existingItem = invoiceItems.value.find(
-			(i) => i.item_code === item.item_code && i.uom === itemUom
-		);
+		// Never merge: each package instance owns its own lines.
+		const existingItem = item.package_instance
+			? null
+			: findStandaloneItem(item.item_code, itemUom);
 
 		if (existingItem) {
 			// Store old values before update for incremental cache adjustment
@@ -288,6 +309,12 @@ export function useInvoice() {
 				is_stock_item: item.is_stock_item ?? 1,
 				is_bundle: item.is_bundle || false,
 				allow_negative_stock: item.allow_negative_stock || 0,
+				// POS Package linkage — groups a package line with its component rows
+				package_instance: item.package_instance || null,
+				package_name: item.package_name || null,
+				package_role: item.package_role || null,
+				package_label: item.package_label || null,
+				package_snapshot: item.package_snapshot || null,
 			};
 			invoiceItems.value.push(newItem);
 			// Recalculate the newly added item to apply taxes
@@ -312,14 +339,7 @@ export function useInvoice() {
 	 *                            If null, removes the first item matching item_code.
 	 */
 	function removeItem(itemCode, uom = null) {
-		let itemToRemove;
-		if (uom) {
-			itemToRemove = invoiceItems.value.find(
-				(i) => i.item_code === itemCode && i.uom === uom
-			);
-		} else {
-			itemToRemove = invoiceItems.value.find((i) => i.item_code === itemCode);
-		}
+		const itemToRemove = findStandaloneItem(itemCode, uom);
 
 		if (itemToRemove) {
 			// Update cache incrementally (subtract removed item values)
@@ -338,15 +358,69 @@ export function useInvoice() {
 			if (itemToRemove.serial_no && itemToRemove.has_serial_no) {
 				serialStore.returnSerials(itemCode, itemToRemove.serial_no);
 			}
+
+			// Match the historical contract: without a UOM this drops every
+			// standalone row for the code (paid + its free BOGO row).
+			invoiceItems.value = invoiceItems.value.filter(
+				(i) =>
+					i.package_instance ||
+					i.item_code !== itemCode ||
+					(uom !== null && i.uom !== uom)
+			);
+		}
+	}
+
+	/**
+	 * Add a priced package to the cart as one parent line plus its component lines.
+	 *
+	 * Every line carries the same `package_instance`, which keeps the group
+	 * together in the cart and lets the server re-price it on validate.
+	 *
+	 * @param {Object} quote - Result from `posPackages.quote()`
+	 * @param {Object} pkg - Package definition
+	 * @param {Object} context - `{ warehouse }` applied to component rows
+	 * @returns {string} The generated package instance id
+	 */
+	function addPackage(quote, pkg, { warehouse = null } = {}) {
+		const instance = `pkg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+		for (const line of quote.lines) {
+			const isParent = line.role === PACKAGE_ROLE;
+			addItem(
+				{
+					item_code: line.item_code,
+					item_name: line.item_name,
+					rate: line.rate,
+					price_list_rate: line.rate,
+					uom: line.uom,
+					stock_uom: line.uom,
+					warehouse: isParent ? null : warehouse,
+					// The parent is always non-stock; components carry the real
+					// Item flag so non-stock components (e.g. vouchers) are not
+					// stock-validated and do not expect a warehouse.
+					is_stock_item: isParent ? 0 : (line.is_stock_item ?? 1),
+					package_instance: instance,
+					package_name: pkg.name,
+					package_role: line.role,
+					package_label: pkg.package_name,
+					package_snapshot: isParent ? quote.snapshot : null,
+				},
+				line.qty
+			);
 		}
 
-		if (uom) {
-			invoiceItems.value = invoiceItems.value.filter(
-				(i) => !(i.item_code === itemCode && i.uom === uom)
-			);
-		} else {
-			invoiceItems.value = invoiceItems.value.filter((i) => i.item_code !== itemCode);
-		}
+		return instance;
+	}
+
+	/**
+	 * Remove a whole package (parent line and every component) from the cart.
+	 * @param {string} instance - Package instance id
+	 */
+	function removePackage(instance) {
+		if (!instance) return;
+
+		invoiceItems.value = invoiceItems.value.filter((i) => i.package_instance !== instance);
+		rebuildIncrementalCache();
 	}
 
 	/**
@@ -358,12 +432,7 @@ export function useInvoice() {
 	 *                            If null, updates the first item matching item_code.
 	 */
 	function updateItemQuantity(itemCode, quantity, uom = null) {
-		let item;
-		if (uom) {
-			item = invoiceItems.value.find((i) => i.item_code === itemCode && i.uom === uom);
-		} else {
-			item = invoiceItems.value.find((i) => i.item_code === itemCode);
-		}
+		const item = findStandaloneItem(itemCode, uom);
 
 		if (item) {
 			// Store old values before update for incremental cache adjustment
@@ -408,7 +477,7 @@ export function useInvoice() {
 	}
 
 	function updateItemRate(itemCode, rate, isManualEdit = false) {
-		const item = invoiceItems.value.find((i) => i.item_code === itemCode);
+		const item = findStandaloneItem(itemCode);
 		if (item) {
 			// Store old values before update for incremental cache adjustment
 			// Use effective rate (manually edited rate or price_list_rate)
@@ -450,7 +519,7 @@ export function useInvoice() {
 	}
 
 	function updateItemDiscount(itemCode, discountPercentage) {
-		const item = invoiceItems.value.find((i) => i.item_code === itemCode);
+		const item = findStandaloneItem(itemCode);
 		if (item) {
 			// Validate discount percentage (0-100)
 			let validDiscount = Number.parseFloat(discountPercentage) || 0;
@@ -752,6 +821,14 @@ export function useInvoice() {
 			is_rate_manually_edited: item.is_rate_manually_edited || 0,
 			original_rate: item.original_rate || null,
 			is_free_item: item.is_free_item || 0,
+			// POS Package linkage — the server re-quotes from the snapshot and
+			// overrides these rates, so the payload can never set its own price.
+			pos_package: item.package_name || null,
+			pos_package_instance: item.package_instance || null,
+			pos_package_role: item.package_role || null,
+			pos_package_snapshot: item.package_snapshot
+				? JSON.stringify(item.package_snapshot)
+				: null,
 		});
 
 		const out = [];
@@ -1281,6 +1358,8 @@ export function useInvoice() {
 
 		// Actions
 		addItem,
+		addPackage,
+		removePackage,
 		removeItem,
 		updateItemQuantity,
 		updateItemRate,

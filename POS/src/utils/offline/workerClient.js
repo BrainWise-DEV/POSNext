@@ -604,6 +604,34 @@ class OfflineWorkerClient {
 		return this.sendMessage("CLEAR_OFFERS_CACHE", { posProfile });
 	}
 
+	/**
+	 * Cache POS Package definitions for offline selection and pricing
+	 * @param {Array} packages - Packages from pos_next.api.packages.get_packages
+	 * @param {string} posProfile - POS Profile name to associate with packages
+	 * @returns {Promise<{success: boolean, count: number}>}
+	 */
+	async cachePackages(packages, posProfile) {
+		return this.sendMessage("CACHE_PACKAGES", { packages, posProfile });
+	}
+
+	/**
+	 * Get cached POS Packages for a profile
+	 * @param {string} posProfile - POS Profile name
+	 * @returns {Promise<Array>} Cached packages (excluding expired)
+	 */
+	async getCachedPackages(posProfile) {
+		return this.sendMessage("GET_CACHED_PACKAGES", { posProfile });
+	}
+
+	/**
+	 * Clear cached POS Packages
+	 * @param {string} posProfile - POS Profile name (optional, clears all if not provided)
+	 * @returns {Promise<{success: boolean}>}
+	 */
+	async clearPackagesCache(posProfile = null) {
+		return this.sendMessage("CLEAR_PACKAGES_CACHE", { posProfile });
+	}
+
 	terminate() {
 		// Stop health check
 		if (this.healthCheckInterval) {
