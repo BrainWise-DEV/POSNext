@@ -155,6 +155,7 @@ doc_events = {
 		"validate": [
 			"pos_next.api.sales_invoice_hooks.validate",
 			"pos_next.api.wallet.validate_wallet_payment",
+			"pos_next.api.packages.validate_invoice_packages",
 			"pos_next.overrides.pricing_rule.apply_min_max_price_discounts",
 		],
 		"before_cancel": "pos_next.api.sales_invoice_hooks.before_cancel",

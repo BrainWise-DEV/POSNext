@@ -51,6 +51,10 @@ def remove_custom_fields():
 		custom_fields = [
 			"Sales Invoice-posa_pos_opening_shift",
 			"Sales Invoice-posa_is_printed",
+			"Sales Invoice Item-pos_package",
+			"Sales Invoice Item-pos_package_instance",
+			"Sales Invoice Item-pos_package_role",
+			"Sales Invoice Item-pos_package_snapshot",
 		]
 
 		removed_count = 0
@@ -223,6 +227,10 @@ def get_custom_fields_for_cleanup():
 	custom_fields = [
 		"Sales Invoice-posa_pos_opening_shift",
 		"Sales Invoice-posa_is_printed",
+		"Sales Invoice Item-pos_package",
+		"Sales Invoice Item-pos_package_instance",
+		"Sales Invoice Item-pos_package_role",
+		"Sales Invoice Item-pos_package_snapshot",
 	]
 
 	return custom_fields
