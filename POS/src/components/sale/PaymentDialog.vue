@@ -1347,7 +1347,7 @@
 									  ])
 							}}
 						</div>
-						<div class="grid grid-cols-4 gap-1.5">
+						<div v-if="!isIDRCash" class="grid grid-cols-4 gap-1.5">
 							<button
 								v-for="amount in quickAmounts"
 								:key="amount"
@@ -1362,6 +1362,29 @@
 								]"
 							>
 								{{ formatCurrency(amount) }}
+							</button>
+						</div>
+						<!-- Cash denominations row (IDR only): Pas + banknote face values -->
+						<div v-if="isIDRCash" class="grid grid-cols-7 gap-1.5">
+							<button
+								@click="addCustomPayment(lastSelectedMethod, remainingAmount)"
+								:class="[
+									'font-semibold rounded-lg border-2 px-2 py-2 text-sm transition-all',
+									'bg-green-50 border-green-200 hover:border-green-400 hover:bg-green-100 text-green-700',
+								]"
+							>
+								{{ __("Pas") }}
+							</button>
+							<button
+								v-for="amount in CASH_DENOMINATIONS"
+								:key="amount"
+								@click="addCustomPayment(lastSelectedMethod, amount)"
+								:class="[
+									'font-semibold rounded-lg border-2 px-2 py-2 text-sm transition-all',
+									'bg-white border-gray-200 hover:border-blue-400 hover:bg-blue-50 text-gray-700 hover:text-blue-600',
+								]"
+							>
+								{{ denomLabel(amount) }}
 							</button>
 						</div>
 					</div>
@@ -1394,6 +1417,7 @@
 						>
 							<!-- Quick Amounts Row (4 columns, responsive sizing) -->
 							<div
+								v-if="!isIDRCash"
 								class="grid grid-cols-4"
 								:class="isSmallMobile ? 'gap-0.5' : 'gap-1'"
 							>
@@ -1411,6 +1435,35 @@
 									]"
 								>
 									{{ formatCurrency(amount) }}
+								</button>
+							</div>
+							<!-- Cash denominations row (IDR only): Pas + banknote face values (mobile) -->
+							<div
+								v-if="isIDRCash"
+								class="grid grid-cols-7"
+								:class="isSmallMobile ? 'gap-0.5' : 'gap-1'"
+							>
+								<button
+									@click="addCustomPayment(lastSelectedMethod, remainingAmount)"
+									:class="[
+										'font-semibold rounded border transition-colors',
+										isSmallMobile ? 'py-1 text-[10px]' : 'py-1.5 text-xs',
+										'bg-green-50 border-green-200 text-green-700 active:bg-green-100 active:border-green-400',
+									]"
+								>
+									{{ __("Pas") }}
+								</button>
+								<button
+									v-for="amount in CASH_DENOMINATIONS"
+									:key="amount"
+									@click="addCustomPayment(lastSelectedMethod, amount)"
+									:class="[
+										'font-semibold rounded border transition-colors',
+										isSmallMobile ? 'py-1 text-[10px]' : 'py-1.5 text-xs',
+										'bg-white border-gray-200 text-gray-700 active:bg-blue-50 active:border-blue-400',
+									]"
+								>
+									{{ denomLabel(amount) }}
 								</button>
 							</div>
 
@@ -2897,6 +2950,18 @@ const isLastMethodCash = computed(() => {
 	return !lastSelectedMethod.value || isCashPaymentMethod(lastSelectedMethod.value);
 });
 const { quickAmounts } = useQuickAmounts(remainingAmount, isLastMethodCash);
+
+// Cash denomination quick buttons (IDR only): fixed banknote face values + "Pas" (exact)
+const CASH_DENOMINATIONS = [2000, 5000, 10000, 20000, 50000, 100000];
+const isIDRCash = computed(() => {
+	return (
+		isCashPaymentMethod(lastSelectedMethod.value) &&
+		(props.currency || "").toUpperCase() === "IDR"
+	);
+});
+function denomLabel(amount) {
+	return amount >= 1000 ? `${amount / 1000}K` : `${amount}`;
+}
 
 // Whether a quick amount button should be disabled in exact-amount mode
 // Non-cash methods can only pay the exact remaining — no rounding allowed
