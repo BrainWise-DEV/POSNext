@@ -15,6 +15,13 @@ import logging
 
 import frappe
 
+from pos_next.price_group_ownership import (
+	ITEM_PRICE_OWNER_FIELD,
+	PRICE_LIST_OWNER_FIELD,
+	PROFILE_OWNER_FIELD,
+	PROFILE_PREVIOUS_PRICE_LIST_FIELD,
+)
+
 # Configure logger
 logger = logging.getLogger(__name__)
 
@@ -73,6 +80,7 @@ def after_install():
 		setup_default_print_format()
 
 		sync_custom_fields()
+		ensure_price_group_custom_fields()
 
 		# Clear cache to ensure changes take effect
 		frappe.clear_cache()
@@ -99,6 +107,7 @@ def after_migrate():
 		setup_default_print_format(quiet=True)
 
 		sync_custom_fields(quiet=True)
+		ensure_price_group_custom_fields(quiet=True)
 
 		# Clear cache
 		frappe.clear_cache()
@@ -171,6 +180,91 @@ def sync_custom_fields(quiet=False):
 		log_message(f"Error syncing custom fields: {e!s}", level="error")
 		frappe.log_error(title="POS Next Custom Field Sync Error", message=frappe.get_traceback())
 		raise
+
+
+PRICE_GROUP_CUSTOM_FIELDS = {
+	"Price List": [
+		{
+			"fieldname": PRICE_LIST_OWNER_FIELD,
+			"label": "Price Group",
+			"fieldtype": "Link",
+			"options": "Price Group",
+			"insert_after": "price_list_name",
+			"read_only": 1,
+			"no_copy": 1,
+		}
+	],
+	"Item Price": [
+		{
+			"fieldname": ITEM_PRICE_OWNER_FIELD,
+			"label": "Price Group",
+			"fieldtype": "Link",
+			"options": "Price Group",
+			"insert_after": "price_list",
+			"read_only": 1,
+			"no_copy": 1,
+		}
+	],
+	"POS Profile": [
+		{
+			"fieldname": PROFILE_OWNER_FIELD,
+			"label": "Price Group",
+			"fieldtype": "Link",
+			"options": "Price Group",
+			"insert_after": "selling_price_list",
+			"read_only": 1,
+			"no_copy": 1,
+		},
+		{
+			"fieldname": PROFILE_PREVIOUS_PRICE_LIST_FIELD,
+			"label": "Previous Price List",
+			"fieldtype": "Link",
+			"options": "Price List",
+			"insert_after": PROFILE_OWNER_FIELD,
+			"read_only": 1,
+			"no_copy": 1,
+		},
+	],
+}
+
+
+def ensure_price_group_custom_fields(quiet=False):
+	"""Create the Price Group ownership Custom Fields when missing.
+
+	`hooks.py:fixtures` exports only Role and Custom DocPerm, so these fields cannot ship
+	as a fixture and must be upserted here on every install and migrate.
+
+	Validation is NOT suppressed: `CustomField.validate` computes `idx` from `insert_after`
+	and runs `check_fieldname_conflicts`. Skipping it would leave every field at `idx = 0`
+	and hide a genuine fieldname collision.
+	"""
+	created = 0
+	for dt, fields in PRICE_GROUP_CUSTOM_FIELDS.items():
+		if not frappe.db.exists("DocType", dt):
+			log_message(f"DocType {dt} missing, skipping its Price Group fields", level="warning")
+			continue
+		for df in fields:
+			cf_name = f"{dt}-{df['fieldname']}"
+			if frappe.db.exists("Custom Field", cf_name):
+				continue
+			doc = frappe.get_doc(
+				{
+					"doctype": "Custom Field",
+					"dt": dt,
+					"permlevel": 0,
+					"hidden": 0,
+					"is_system_generated": 0,
+					"module": "POS Next",
+					**df,
+				}
+			)
+			doc.insert(ignore_permissions=True)
+			created += 1
+			if not quiet:
+				log_message(f"Created Custom Field: {cf_name}", level="info", indent=1)
+
+	if created and not quiet:
+		log_message(f"Created {created} Price Group custom field(s)", level="success")
 
 
 def log_message(message, level="info", indent=0):
