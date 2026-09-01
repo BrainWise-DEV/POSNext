@@ -23,7 +23,7 @@ const log = logger.create("POSPackages");
 
 export const usePOSPackagesStore = defineStore("posPackages", () => {
 	const packages = ref([]);
-	const hasFetched = ref(false);
+	const fetchedProfile = ref(null);
 	const isLoading = ref(false);
 
 	let fetchPromise = null;
@@ -54,7 +54,7 @@ export const usePOSPackagesStore = defineStore("posPackages", () => {
 
 	function clearPackages() {
 		packages.value = [];
-		hasFetched.value = false;
+		fetchedProfile.value = null;
 		fetchPromise = null;
 	}
 
@@ -67,9 +67,12 @@ export const usePOSPackagesStore = defineStore("posPackages", () => {
 	 * @returns {Promise<boolean>} True when packages are available
 	 */
 	async function ensurePackagesFetched(posProfile, force = false) {
-		if (hasFetched.value && !force) return packages.value.length > 0;
-		if (fetchPromise) return fetchPromise;
 		if (!posProfile) return false;
+
+		// Keyed by profile: a shift switch must not keep showing the previous
+		// outlet's packages, which the server would then reject at checkout.
+		if (fetchedProfile.value === posProfile && !force) return packages.value.length > 0;
+		if (fetchPromise) return fetchPromise;
 
 		isLoading.value = true;
 		fetchPromise = (async () => {
@@ -77,7 +80,7 @@ export const usePOSPackagesStore = defineStore("posPackages", () => {
 				if (isOffline()) {
 					const cached = await offlineWorker.getCachedPackages(posProfile);
 					setPackages(cached || []);
-					hasFetched.value = true;
+					fetchedProfile.value = posProfile;
 					return packages.value.length > 0;
 				}
 
@@ -86,7 +89,7 @@ export const usePOSPackagesStore = defineStore("posPackages", () => {
 				});
 				const list = response?.message || response || [];
 				setPackages(list);
-				hasFetched.value = true;
+				fetchedProfile.value = posProfile;
 
 				offlineWorker.cachePackages(list, posProfile).catch((error) => {
 					log.warn("Failed to cache packages for offline use", error);
@@ -95,7 +98,9 @@ export const usePOSPackagesStore = defineStore("posPackages", () => {
 				return list.length > 0;
 			} catch (error) {
 				log.error("Failed to load packages", error);
-				hasFetched.value = true;
+				// Do not cache the failure against this profile: a retry must be
+				// able to load the real list instead of showing an empty catalog.
+				setPackages([]);
 				return false;
 			} finally {
 				isLoading.value = false;
@@ -138,14 +143,26 @@ export const usePOSPackagesStore = defineStore("posPackages", () => {
 				snapshot: result.snapshot,
 			};
 		} catch (error) {
-			log.warn("Server quote failed, using local quote", error);
-			return local;
+			// The server rejected this package (expired, wrong outlet, edited
+			// definition). Falling back to the local price would quote the
+			// customer an amount that the invoice will refuse at checkout.
+			log.error("Server rejected the package quote", error);
+
+			return {
+				valid: false,
+				error:
+					error?.message ||
+					__("This package is no longer available. Please reload the POS."),
+				total: 0,
+				lines: [],
+				snapshot: null,
+			};
 		}
 	}
 
 	return {
 		packages,
-		hasFetched,
+		fetchedProfile,
 		isLoading,
 		packagesByParentItem,
 		packageItemCodes,
