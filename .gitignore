@@ -65,5 +65,6 @@ dev-dist/
 .playwright-mcp/*
 TODO.md
 .claude/settings.json
+.omo/
 *.jpeg
 missing.txt
