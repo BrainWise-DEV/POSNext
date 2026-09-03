@@ -1220,6 +1220,12 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 				// Cache for offline
 				await offlineWorker.cacheItems(items);
 
+				if (shiftStore.profileWarehouse) {
+					cacheBatchSerialForItems(items, shiftStore.profileWarehouse).catch((err) => {
+						log.warn("Background batch/serial caching failed:", err.message);
+					});
+				}
+
 				log.debug(`Fetched page ${page}: ${items.length} items (offset ${start})`);
 			}
 		} catch (error) {
@@ -1328,6 +1334,12 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 
 				// Cache new batch for offline support
 				await offlineWorker.cacheItems(list);
+
+				if (shiftStore.profileWarehouse) {
+					cacheBatchSerialForItems(list, shiftStore.profileWarehouse).catch((err) => {
+						log.warn("Background batch/serial caching failed:", err.message);
+					});
+				}
 
 				log.debug(`Loaded ${list.length} more items, total: ${totalItemsLoaded.value}`);
 			} else {
@@ -1708,6 +1720,15 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 
 						// Cache server results for future searches
 						await offlineWorker.cacheItems(serverResults);
+
+						if (shiftStore.profileWarehouse) {
+							cacheBatchSerialForItems(
+								serverResults,
+								shiftStore.profileWarehouse
+							).catch((err) => {
+								log.warn("Background batch/serial caching failed:", err.message);
+							});
+						}
 
 						// If we didn't resolve with cache, resolve with server results
 						if (!cached || cached.length === 0) {
