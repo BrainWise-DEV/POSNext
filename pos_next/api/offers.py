@@ -602,10 +602,13 @@ def get_active_coupons(customer: str, company: str) -> list[dict]:
 
 
 @frappe.whitelist()
-def validate_coupon(coupon_code: str, customer: str, company: str) -> dict:
+def validate_coupon(coupon_code: str, company: str, customer: str | None = None) -> dict:
 	"""Validate a coupon code and return its details"""
 	if not frappe.db.table_exists("POS Coupon"):
 		return {"valid": False, "message": _("Coupons are not enabled")}
+
+	if not customer:
+		return {"valid": False, "message": _("Please choose a customer")}
 
 	date = getdate()
 
