@@ -725,6 +725,24 @@
 													)
 												"
 											/>
+											<CheckboxField
+												v-model="settings.enable_idle_refocus"
+												:label="__('Auto-Focus Item Search When Idle')"
+												:description="__('Automatically return focus to the item search input after a period of inactivity')"
+											/>
+											<div
+												v-if="settings.enable_idle_refocus"
+												class="ps-6 flex flex-col gap-3 border-s-2 border-blue-200"
+											>
+												<NumberField
+													v-model="settings.idle_refocus_seconds"
+													:label="__('Idle Time Before Refocus (seconds)')"
+													:description="__('Seconds of inactivity before focus returns to the item search input')"
+													:min="1"
+													:max="120"
+													:step="1"
+												/>
+											</div>
 
 											<!-- QZ Tray Printer Settings (shown when silent print is enabled) -->
 											<div
@@ -1195,6 +1213,8 @@ const settings = ref({
 	allow_write_off_change: 0,
 	allow_partial_payment: 0,
 	silent_print: 0,
+	enable_idle_refocus: 1,
+	idle_refocus_seconds: 3,
 	allow_negative_stock: 0,
 	tax_inclusive: 0,
 });
