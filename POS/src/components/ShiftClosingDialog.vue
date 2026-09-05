@@ -247,6 +247,16 @@
 											>
 												{{ __("Return") }}
 											</span>
+											<span
+												v-else-if="invoice.outstanding_amount > 0"
+												class="px-1.5 py-0.5 text-xs font-medium bg-amber-100 text-amber-800 rounded"
+											>
+												{{
+													Number(invoice.grand_total) > 0
+														? __("Partially Paid")
+														: __("On Account")
+												}}
+											</span>
 										</div>
 										<span
 											:class="[
@@ -258,6 +268,16 @@
 										>
 											{{ formatCurrency(invoice.grand_total) }}
 										</span>
+									</div>
+									<div
+										v-if="invoice.outstanding_amount > 0"
+										class="text-xs text-amber-700 mb-1"
+									>
+										{{
+											__("Unpaid: {0}", [
+												formatCurrency(invoice.outstanding_amount),
+											])
+										}}
 									</div>
 									<div
 										class="flex justify-between items-center text-xs text-gray-600"
@@ -346,6 +366,16 @@
 													{{ __("Return") }}
 												</span>
 												<span
+													v-else-if="invoice.outstanding_amount > 0"
+													class="px-2 py-1 text-xs font-medium bg-amber-100 text-amber-800 rounded"
+												>
+													{{
+														Number(invoice.grand_total) > 0
+															? __("Partially Paid")
+															: __("On Account")
+													}}
+												</span>
+												<span
 													v-else
 													class="px-2 py-1 text-xs font-medium bg-green-100 text-green-800 rounded"
 												>
@@ -373,6 +403,18 @@
 												>
 													{{ formatCurrency(invoice.grand_total) }}
 												</span>
+												<div
+													v-if="invoice.outstanding_amount > 0"
+													class="text-xs text-amber-700"
+												>
+													{{
+														__("Unpaid: {0}", [
+															formatCurrency(
+																invoice.outstanding_amount
+															),
+														])
+													}}
+												</div>
 											</td>
 										</tr>
 									</tbody>
