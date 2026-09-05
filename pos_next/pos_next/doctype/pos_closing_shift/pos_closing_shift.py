@@ -465,7 +465,11 @@ def _process_invoice(invoice, invoice_field, company_currency, cash_mode, paymen
 	# Pay-on-Account credit sale has paid_amount == 0; a partial sale carries
 	# only its cash/card down-payment.  Returns keep the full (signed) amount —
 	# the return branch already reflects real refunds via payment rows.
-	base_paid = get_base_value(invoice, "paid_amount", "base_paid_amount", conversion_rate)
+	# paid_amount is the raw tendered total, so change given back to the
+	# customer (e.g. a $20 bill on a $15.50 sale) must be netted out — it
+	# never stayed in the drawer.
+	base_change = get_base_value(invoice, "change_amount", "base_change_amount", conversion_rate)
+	base_paid = get_base_value(invoice, "paid_amount", "base_paid_amount", conversion_rate) - base_change
 	paid_ratio = (base_paid / base_grand_total) if base_grand_total else 0
 
 	# Collected amount drives the sales summary / per-row totals; the full
@@ -505,9 +509,12 @@ def _process_invoice(invoice, invoice_field, company_currency, cash_mode, paymen
 		summary["sales_total"] += base_paid
 		summary["sales_count"] += 1
 
-	# Process taxes
+	# Process taxes — scaled by the same paid ratio as net_total so that
+	# grand_total stays consistent with net_total + taxes for partial/credit
+	# sales (returns keep the full tax amount, matching the return branch above).
+	tax_ratio = 1 if is_return else paid_ratio
 	for t in invoice.taxes:
-		tax_amount = get_base_value(t, "tax_amount", "base_tax_amount", conversion_rate)
+		tax_amount = get_base_value(t, "tax_amount", "base_tax_amount", conversion_rate) * tax_ratio
 		_aggregate_tax(taxes, t.account_head, t.rate, tax_amount)
 
 	# Process payments
@@ -532,8 +539,7 @@ def _process_invoice(invoice, invoice_field, company_currency, cash_mode, paymen
 	# invoice-level field — the customer overpaid and received change back,
 	# so the drawer's net gain is (sum of cash rows - change).  Handling it
 	# outside the loop avoids double-subtraction when multiple payment rows
-	# share the same cash mode.
-	base_change = get_base_value(invoice, "change_amount", "base_change_amount", conversion_rate)
+	# share the same cash mode. (base_change computed above, reused here.)
 	if base_change:
 		_aggregate_payment(payments, cash_mode, -base_change)
 
