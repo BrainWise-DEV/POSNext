@@ -34,8 +34,7 @@ def _reinstall_workspace_from_file(workspace_file: Path):
 	workspace_name = workspace_data.get("name") or workspace_data.get("label")
 	if not workspace_name:
 		frappe.log_error(
-			title="Workspace Migration Failed",
-			message=f"Workspace in {workspace_file} has no name or label"
+			title="Workspace Migration Failed", message=f"Workspace in {workspace_file} has no name or label"
 		)
 		return
 
@@ -58,8 +57,7 @@ def _remove_workspace(workspace_name: str):
 		frappe.logger().info(f"Removed workspace: {workspace_name}")
 	except Exception:
 		frappe.log_error(
-			title=f"Failed to Remove Workspace: {workspace_name}",
-			message=frappe.get_traceback()
+			title=f"Failed to Remove Workspace: {workspace_name}", message=frappe.get_traceback()
 		)
 
 
@@ -76,8 +74,7 @@ def _install_workspace(workspace_data: dict, workspace_name: str):
 		frappe.logger().info(f"Successfully installed workspace: {workspace_name}")
 	except Exception:
 		frappe.log_error(
-			title=f"Workspace Installation Failed: {workspace_name}",
-			message=frappe.get_traceback()
+			title=f"Workspace Installation Failed: {workspace_name}", message=frappe.get_traceback()
 		)
 
 
@@ -92,8 +89,7 @@ def _load_workspace_data(workspace_file: Path):
 	"""
 	if not workspace_file.exists():
 		frappe.log_error(
-			title="Workspace File Not Found",
-			message=f"Expected workspace file at: {workspace_file}"
+			title="Workspace File Not Found", message=f"Expected workspace file at: {workspace_file}"
 		)
 		return None
 
@@ -102,14 +98,14 @@ def _load_workspace_data(workspace_file: Path):
 	except json.JSONDecodeError:
 		frappe.log_error(
 			title="Invalid Workspace JSON",
-			message=f"Failed to parse: {workspace_file}\n\n{frappe.get_traceback()}"
+			message=f"Failed to parse: {workspace_file}\n\n{frappe.get_traceback()}",
 		)
 		return None
 
 	if not isinstance(workspace_data, list) or not workspace_data:
 		frappe.log_error(
 			title="Invalid Workspace Structure",
-			message=f"Workspace JSON must be a non-empty array: {workspace_file}"
+			message=f"Workspace JSON must be a non-empty array: {workspace_file}",
 		)
 		return None
 

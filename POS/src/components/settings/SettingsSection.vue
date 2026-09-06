@@ -12,12 +12,20 @@
 				<h2 class="text-base font-semibold text-gray-900">{{ title }}</h2>
 			</div>
 			<svg
-				:class="['w-4 h-4 text-gray-400 transition-transform', isCollapsed ? '' : 'transform rotate-180']"
+				:class="[
+					'w-4 h-4 text-gray-400 transition-transform',
+					isCollapsed ? '' : 'transform rotate-180',
+				]"
 				fill="none"
 				stroke="currentColor"
 				viewBox="0 0 24 24"
 			>
-				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+				<path
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					stroke-width="2"
+					d="M19 9l-7 7-7-7"
+				/>
 			</svg>
 		</button>
 		<div v-else class="px-5 py-3 border-b border-gray-100">
@@ -35,7 +43,7 @@
 </template>
 
 <script setup>
-import { h, ref } from "vue"
+import { h, ref } from "vue";
 
 const props = defineProps({
 	title: {
@@ -54,9 +62,9 @@ const props = defineProps({
 		type: Boolean,
 		default: false,
 	},
-})
+});
 
-const isCollapsed = ref(props.collapsed)
+const isCollapsed = ref(props.collapsed);
 
 // Icon mapping
 const icons = {
@@ -171,9 +179,9 @@ const icons = {
 				d: "M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4",
 			}),
 		]),
-}
+};
 
 function getIcon(iconName) {
-	return icons[iconName] || icons["settings"]
+	return icons[iconName] || icons["settings"];
 }
 </script>

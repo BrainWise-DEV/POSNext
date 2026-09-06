@@ -1,32 +1,32 @@
-import { ref, computed, onMounted } from "vue"
-import { translationVersion } from "../utils/translation"
-import { call } from "../utils/apiWrapper"
-import { offlineState } from "../utils/offline/offlineState"
-import { logger } from "../utils/logger"
-import { useBootstrapStore } from "../stores/bootstrap"
+import { ref, computed, onMounted } from "vue";
+import { translationVersion } from "../utils/translation";
+import { call } from "../utils/apiWrapper";
+import { offlineState } from "../utils/offline/offlineState";
+import { logger } from "../utils/logger";
+import { useBootstrapStore } from "../stores/bootstrap";
 
-const log = logger.create("Locale")
+const log = logger.create("Locale");
 
 // Reactive locale state (shared across all components)
-const currentLocale = ref("en")
-const currentDir = ref("ltr")
-const allowedLocales = ref(null) // null = not fetched yet, array = fetched from server
-const PREFARED_LANGUAGE_KEY = "pos_next_language"
-const ALLOWED_LOCALES_KEY = "pos_next_allowed_locales"
+const currentLocale = ref("en");
+const currentDir = ref("ltr");
+const allowedLocales = ref(null); // null = not fetched yet, array = fetched from server
+const PREFARED_LANGUAGE_KEY = "pos_next_language";
+const ALLOWED_LOCALES_KEY = "pos_next_allowed_locales";
 
 /** Track if initial language fetch from server has been attempted */
-let serverLanguageFetched = false
+let serverLanguageFetched = false;
 
 // Get flag URL from flagcdn.com
 function getFlagUrl(countryCode) {
-	if (!countryCode) return null
-	return `https://flagcdn.com/h24/${countryCode.toLowerCase()}.png`
+	if (!countryCode) return null;
+	return `https://flagcdn.com/h24/${countryCode.toLowerCase()}.png`;
 }
 
 // Get flag SVG URL from flagcdn.com
 function getFlagUrlSvg(countryCode) {
-	if (!countryCode) return null
-	return `https://flagcdn.com/${countryCode.toLowerCase()}.svg`
+	if (!countryCode) return null;
+	return `https://flagcdn.com/${countryCode.toLowerCase()}.svg`;
 }
 
 // Supported languages configuration
@@ -54,8 +54,8 @@ export const SUPPORTED_LOCALES = {
 		nativeName: "Portugues (Brasil)",
 		countryCode: "br",
 		dir: "ltr",
-	}
-}
+	},
+};
 
 /**
  * Fetch allowed locales from POS Settings
@@ -64,16 +64,16 @@ export const SUPPORTED_LOCALES = {
  */
 async function fetchAllowedLocalesFromServer() {
 	try {
-		const response = await call("pos_next.api.localization.get_allowed_locales", {})
+		const response = await call("pos_next.api.localization.get_allowed_locales", {});
 		if (response?.locales && Array.isArray(response.locales)) {
 			// Cache for offline use
-			localStorage.setItem(ALLOWED_LOCALES_KEY, JSON.stringify(response.locales))
-			return response.locales
+			localStorage.setItem(ALLOWED_LOCALES_KEY, JSON.stringify(response.locales));
+			return response.locales;
 		}
 	} catch (error) {
-		log.warn("Failed to fetch allowed locales from server", error)
+		log.warn("Failed to fetch allowed locales from server", error);
 	}
-	return null
+	return null;
 }
 
 /**
@@ -82,14 +82,14 @@ async function fetchAllowedLocalesFromServer() {
  */
 function getCachedAllowedLocales() {
 	try {
-		const cached = localStorage.getItem(ALLOWED_LOCALES_KEY)
+		const cached = localStorage.getItem(ALLOWED_LOCALES_KEY);
 		if (cached) {
-			return JSON.parse(cached)
+			return JSON.parse(cached);
 		}
 	} catch (error) {
-		log.warn("Failed to parse cached allowed locales", error)
+		log.warn("Failed to parse cached allowed locales", error);
 	}
-	return null
+	return null;
 }
 
 /**
@@ -100,28 +100,28 @@ function getCachedAllowedLocales() {
 async function fetchLanguageFromServer() {
 	// OPTIMIZATION: Check if bootstrap has preloaded the locale
 	try {
-		const bootstrapStore = useBootstrapStore()
-		const preloadedLocale = bootstrapStore.getPreloadedLocale()
+		const bootstrapStore = useBootstrapStore();
+		const preloadedLocale = bootstrapStore.getPreloadedLocale();
 		if (preloadedLocale && SUPPORTED_LOCALES[preloadedLocale]) {
-			log.info(`Using preloaded language from bootstrap: ${preloadedLocale}`)
-			return preloadedLocale
+			log.info(`Using preloaded language from bootstrap: ${preloadedLocale}`);
+			return preloadedLocale;
 		}
 	} catch (error) {
 		// Bootstrap store may not be available yet, fall through to API call
-		log.debug("Bootstrap store not available, fetching language from API")
+		log.debug("Bootstrap store not available, fetching language from API");
 	}
 
 	// Fallback to direct API call
 	try {
-		const response = await call("pos_next.api.localization.get_user_language", {})
+		const response = await call("pos_next.api.localization.get_user_language", {});
 		if (response?.locale && SUPPORTED_LOCALES[response.locale]) {
-			log.info(`Fetched language from server: ${response.locale}`)
-			return response.locale
+			log.info(`Fetched language from server: ${response.locale}`);
+			return response.locale;
 		}
 	} catch (error) {
-		log.warn("Failed to fetch language from server", error)
+		log.warn("Failed to fetch language from server", error);
 	}
-	return null
+	return null;
 }
 
 /**
@@ -132,26 +132,26 @@ async function fetchLanguageFromServer() {
 function detectCachedLanguage() {
 	// 1. Check Frappe boot data (user's saved preference)
 	if (typeof window !== "undefined" && window.frappe?.boot?.lang) {
-		const lang = window.frappe.boot.lang.toLowerCase()
+		const lang = window.frappe.boot.lang.toLowerCase();
 		if (SUPPORTED_LOCALES[lang]) {
-			return lang
+			return lang;
 		}
 	}
 
 	// 2. Check localStorage
-	const stored = localStorage.getItem(PREFARED_LANGUAGE_KEY)
+	const stored = localStorage.getItem(PREFARED_LANGUAGE_KEY);
 	if (stored && SUPPORTED_LOCALES[stored]) {
-		return stored
+		return stored;
 	}
 
 	// 3. Check browser language
-	const browserLang = navigator.language.split("-")[0].toLowerCase()
+	const browserLang = navigator.language.split("-")[0].toLowerCase();
 	if (SUPPORTED_LOCALES[browserLang]) {
-		return browserLang
+		return browserLang;
 	}
 
 	// 4. Default to English
-	return "en"
+	return "en";
 }
 
 /**
@@ -160,17 +160,17 @@ function detectCachedLanguage() {
  */
 export function useLocale() {
 	// Computed properties
-	const locale = computed(() => currentLocale.value)
-	const dir = computed(() => currentDir.value)
-	const isRTL = computed(() => currentDir.value === "rtl")
+	const locale = computed(() => currentLocale.value);
+	const dir = computed(() => currentDir.value);
+	const isRTL = computed(() => currentDir.value === "rtl");
 	const localeConfig = computed(() => {
-		const config = SUPPORTED_LOCALES[locale.value] || SUPPORTED_LOCALES.en
+		const config = SUPPORTED_LOCALES[locale.value] || SUPPORTED_LOCALES.en;
 		return {
 			...config,
 			flagUrl: getFlagUrl(config.countryCode),
 			flagUrlSvg: getFlagUrlSvg(config.countryCode),
-		}
-	})
+		};
+	});
 
 	/**
 	 * Change application language
@@ -179,46 +179,46 @@ export function useLocale() {
 	 */
 	async function changeLocale(newLocale) {
 		if (!SUPPORTED_LOCALES[newLocale]) {
-			console.warn(`Locale ${newLocale} not supported`)
-			return
+			console.warn(`Locale ${newLocale} not supported`);
+			return;
 		}
 
-		const config = SUPPORTED_LOCALES[newLocale]
+		const config = SUPPORTED_LOCALES[newLocale];
 
 		// Update reactive refs
-		currentLocale.value = newLocale
-		currentDir.value = config.dir
+		currentLocale.value = newLocale;
+		currentDir.value = config.dir;
 
 		// Update document attributes
-		document.documentElement.setAttribute("dir", config.dir)
-		document.documentElement.setAttribute("lang", newLocale)
+		document.documentElement.setAttribute("dir", config.dir);
+		document.documentElement.setAttribute("lang", newLocale);
 
 		// Toggle RTL class for CSS
 		if (config.dir === "rtl") {
-			document.documentElement.classList.add("rtl")
+			document.documentElement.classList.add("rtl");
 		} else {
-			document.documentElement.classList.remove("rtl")
+			document.documentElement.classList.remove("rtl");
 		}
 
 		// Store preference in localStorage
-		localStorage.setItem(PREFARED_LANGUAGE_KEY, newLocale)
+		localStorage.setItem(PREFARED_LANGUAGE_KEY, newLocale);
 
 		// Update Frappe user settings first (this changes the user's language in Frappe)
 		try {
 			await call("pos_next.api.localization.change_user_language", {
 				locale: newLocale,
-			})
+			});
 		} catch (error) {
-			console.error("Failed to save language preference to Frappe:", error)
+			console.error("Failed to save language preference to Frappe:", error);
 		}
 
 		// Fetch new translations dynamically (no page reload needed)
 		// The API returns translations based on the user's current Frappe language setting
 		if (typeof window !== "undefined" && window.$changeLanguage) {
 			try {
-				await window.$changeLanguage(newLocale)
+				await window.$changeLanguage(newLocale);
 			} catch (error) {
-				console.error("Failed to load translations:", error)
+				console.error("Failed to load translations:", error);
 			}
 		}
 	}
@@ -228,21 +228,21 @@ export function useLocale() {
 	 * @param {string} locale - Language code to apply
 	 */
 	function applyLocale(locale) {
-		const config = SUPPORTED_LOCALES[locale]
-		if (!config) return
+		const config = SUPPORTED_LOCALES[locale];
+		if (!config) return;
 
-		currentLocale.value = locale
-		currentDir.value = config.dir
+		currentLocale.value = locale;
+		currentDir.value = config.dir;
 
 		// Set document attributes
 		if (typeof document !== "undefined") {
-			document.documentElement.setAttribute("dir", config.dir)
-			document.documentElement.setAttribute("lang", locale)
+			document.documentElement.setAttribute("dir", config.dir);
+			document.documentElement.setAttribute("lang", locale);
 
 			if (config.dir === "rtl") {
-				document.documentElement.classList.add("rtl")
+				document.documentElement.classList.add("rtl");
 			} else {
-				document.documentElement.classList.remove("rtl")
+				document.documentElement.classList.remove("rtl");
 			}
 		}
 	}
@@ -253,44 +253,46 @@ export function useLocale() {
 	 */
 	async function initLocale() {
 		// First, apply cached language immediately (prevents flicker)
-		const cachedLocale = detectCachedLanguage()
-		applyLocale(cachedLocale)
+		const cachedLocale = detectCachedLanguage();
+		applyLocale(cachedLocale);
 
 		// Load cached allowed locales first for immediate display
-		const cachedAllowed = getCachedAllowedLocales()
+		const cachedAllowed = getCachedAllowedLocales();
 		if (cachedAllowed) {
-			allowedLocales.value = cachedAllowed
+			allowedLocales.value = cachedAllowed;
 		}
 
 		// If online and haven't fetched from server yet, get server language
 		if (!offlineState.isOffline && !serverLanguageFetched) {
-			serverLanguageFetched = true
+			serverLanguageFetched = true;
 
 			// Fetch allowed locales from server
-			const serverAllowed = await fetchAllowedLocalesFromServer()
+			const serverAllowed = await fetchAllowedLocalesFromServer();
 			if (serverAllowed) {
-				allowedLocales.value = serverAllowed
+				allowedLocales.value = serverAllowed;
 			}
 
-			const serverLocale = await fetchLanguageFromServer()
+			const serverLocale = await fetchLanguageFromServer();
 
 			// If server returned a different language, switch to it
 			if (serverLocale && serverLocale !== cachedLocale) {
-				log.info(`Server language (${serverLocale}) differs from cached (${cachedLocale}), switching`)
-				await changeLocale(serverLocale)
+				log.info(
+					`Server language (${serverLocale}) differs from cached (${cachedLocale}), switching`
+				);
+				await changeLocale(serverLocale);
 			}
 		}
 	}
 
 	// Auto-initialize on first mount
 	onMounted(() => {
-		initLocale()
-	})
+		initLocale();
+	});
 
 	// Build supported locales with flag URLs, filtered by allowed locales from POS Settings
 	const supportedLocales = computed(() => {
-		const result = {}
-		const allowed = allowedLocales.value
+		const result = {};
+		const allowed = allowedLocales.value;
 
 		for (const [code, config] of Object.entries(SUPPORTED_LOCALES)) {
 			// If allowed locales are set, filter by them; otherwise show all
@@ -299,11 +301,11 @@ export function useLocale() {
 					...config,
 					flagUrl: getFlagUrl(config.countryCode),
 					flagUrlSvg: getFlagUrlSvg(config.countryCode),
-				}
+				};
 			}
 		}
-		return result
-	})
+		return result;
+	});
 
 	return {
 		locale,
@@ -314,5 +316,5 @@ export function useLocale() {
 		changeLocale,
 		initLocale,
 		translationVersion, // Used to trigger re-renders when translations change
-	}
+	};
 }

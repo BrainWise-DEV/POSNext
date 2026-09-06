@@ -4,7 +4,12 @@
 		<div class="search-section">
 			<div class="search-bar">
 				<svg class="search-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+					<path
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						stroke-width="2"
+						d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+					/>
 				</svg>
 				<input
 					v-model="store.searchTerm"
@@ -18,7 +23,12 @@
 					class="clear-search"
 				>
 					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							stroke-width="2"
+							d="M6 18L18 6M6 6l12 12"
+						/>
 					</svg>
 				</button>
 			</div>
@@ -33,7 +43,12 @@
 					:class="['filter-chip', { active: isDatePresetActive(preset.value) }]"
 				>
 					<svg class="chip-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							stroke-width="2"
+							d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
+						/>
 					</svg>
 					{{ preset.label }}
 				</button>
@@ -45,17 +60,61 @@
 					@click="toggleStatus(status.value)"
 					:class="['filter-chip', { active: store.status === status.value }]"
 				>
-					<svg v-if="status.value === 'Paid'" class="chip-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+					<svg
+						v-if="status.value === 'Paid'"
+						class="chip-icon"
+						fill="none"
+						stroke="currentColor"
+						viewBox="0 0 24 24"
+					>
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							stroke-width="2"
+							d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+						/>
 					</svg>
-					<svg v-else-if="status.value === 'Unpaid'" class="chip-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+					<svg
+						v-else-if="status.value === 'Unpaid'"
+						class="chip-icon"
+						fill="none"
+						stroke="currentColor"
+						viewBox="0 0 24 24"
+					>
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							stroke-width="2"
+							d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+						/>
 					</svg>
-					<svg v-else-if="status.value === 'Partly Paid'" class="chip-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+					<svg
+						v-else-if="status.value === 'Partly Paid'"
+						class="chip-icon"
+						fill="none"
+						stroke="currentColor"
+						viewBox="0 0 24 24"
+					>
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							stroke-width="2"
+							d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+						/>
 					</svg>
-					<svg v-else-if="status.value === 'Overdue'" class="chip-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+					<svg
+						v-else-if="status.value === 'Overdue'"
+						class="chip-icon"
+						fill="none"
+						stroke="currentColor"
+						viewBox="0 0 24 24"
+					>
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							stroke-width="2"
+							d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+						/>
 					</svg>
 					{{ status.label }}
 				</button>
@@ -63,13 +122,24 @@
 				<!-- More Filters Button -->
 				<button
 					@click="showAdvanced = !showAdvanced"
-					:class="['filter-chip', 'more-btn', { active: showAdvanced || hasAdvancedFilters }]"
+					:class="[
+						'filter-chip',
+						'more-btn',
+						{ active: showAdvanced || hasAdvancedFilters },
+					]"
 				>
 					<svg class="chip-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/>
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							stroke-width="2"
+							d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"
+						/>
 					</svg>
-					{{ __('More') }}
-					<span v-if="hasAdvancedFilters" class="count-badge">{{ advancedFiltersCount }}</span>
+					{{ __("More") }}
+					<span v-if="hasAdvancedFilters" class="count-badge">{{
+						advancedFiltersCount
+					}}</span>
 				</button>
 			</div>
 		</div>
@@ -78,10 +148,14 @@
 		<Transition name="fade">
 			<div v-if="store.hasActiveFilters" class="active-summary">
 				<div class="summary-content">
-					<TranslatedHTML 
+					<TranslatedHTML
 						class="summary-text"
-						:inner="__('&lt;strong&gt;{0}&lt;/strong&gt; of &lt;strong&gt;{1}&lt;/strong&gt; invoice(s)', 
-							[(filterStats?.filtered || 0), (filterStats?.total || 0)]) "
+						:inner="
+							__(
+								'&lt;strong&gt;{0}&lt;/strong&gt; of &lt;strong&gt;{1}&lt;/strong&gt; invoice(s)',
+								[filterStats?.filtered || 0, filterStats?.total || 0]
+							)
+						"
 					/>
 					<div class="active-pills">
 						<button
@@ -91,14 +165,24 @@
 							class="active-pill"
 						>
 							{{ filter.label }}
-							<svg class="w-3 h-3 ms-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+							<svg
+								class="w-3 h-3 ms-1"
+								fill="none"
+								stroke="currentColor"
+								viewBox="0 0 24 24"
+							>
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M6 18L18 6M6 6l12 12"
+								/>
 							</svg>
 						</button>
 					</div>
 				</div>
 				<button @click="store.clearAllFilters()" class="clear-all">
-					{{ __('Clear all') }}
+					{{ __("Clear all") }}
 				</button>
 			</div>
 		</Transition>
@@ -110,10 +194,20 @@
 				<div class="filter-row">
 					<div class="filter-field">
 						<label class="field-label">
-							<svg class="label-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+							<svg
+								class="label-icon"
+								fill="none"
+								stroke="currentColor"
+								viewBox="0 0 24 24"
+							>
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+								/>
 							</svg>
-							{{ __('Customer') }}
+							{{ __("Customer") }}
 						</label>
 						<AutocompleteSelect
 							v-model="store.customer"
@@ -125,10 +219,20 @@
 
 					<div class="filter-field">
 						<label class="field-label">
-							<svg class="label-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
+							<svg
+								class="label-icon"
+								fill="none"
+								stroke="currentColor"
+								viewBox="0 0 24 24"
+							>
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"
+								/>
 							</svg>
-							{{ __('Product') }}
+							{{ __("Product") }}
 						</label>
 						<AutocompleteSelect
 							v-model="store.product"
@@ -143,30 +247,42 @@
 				<div class="filter-row">
 					<div class="filter-field">
 						<label class="field-label">
-							<svg class="label-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+							<svg
+								class="label-icon"
+								fill="none"
+								stroke="currentColor"
+								viewBox="0 0 24 24"
+							>
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
+								/>
 							</svg>
-							{{ __('From Date') }}
+							{{ __("From Date") }}
 						</label>
-						<input
-							v-model="store.dateFrom"
-							type="date"
-							class="field-input"
-						/>
+						<input v-model="store.dateFrom" type="date" class="field-input" />
 					</div>
 
 					<div class="filter-field">
 						<label class="field-label">
-							<svg class="label-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+							<svg
+								class="label-icon"
+								fill="none"
+								stroke="currentColor"
+								viewBox="0 0 24 24"
+							>
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
+								/>
 							</svg>
-							{{ __('To Date') }}
+							{{ __("To Date") }}
 						</label>
-						<input
-							v-model="store.dateTo"
-							type="date"
-							class="field-input"
-						/>
+						<input v-model="store.dateTo" type="date" class="field-input" />
 					</div>
 				</div>
 
@@ -181,15 +297,20 @@
 					/>
 					<button @click="saveFilters" :disabled="!saveFilterName" class="save-btn">
 						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								stroke-width="2"
+								d="M5 13l4 4L19 7"
+							/>
 						</svg>
-						{{ __('Save') }}
+						{{ __("Save") }}
 					</button>
 				</div>
 
 				<!-- Saved Filters -->
 				<div v-if="store.savedFilters.length > 0" class="saved-filters">
-					<div class="saved-header">{{ __('Saved Filters') }}</div>
+					<div class="saved-header">{{ __("Saved Filters") }}</div>
 					<div class="saved-list">
 						<button
 							v-for="preset in store.savedFilters"
@@ -197,16 +318,36 @@
 							@click="loadSavedFilter(preset.name)"
 							class="saved-item"
 						>
-							<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"/>
+							<svg
+								class="w-4 h-4"
+								fill="none"
+								stroke="currentColor"
+								viewBox="0 0 24 24"
+							>
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"
+								/>
 							</svg>
 							{{ preset.name }}
 							<span
 								@click.stop="deleteSavedFilter(preset.name)"
 								class="delete-saved"
 							>
-								<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+								<svg
+									class="w-3 h-3"
+									fill="none"
+									stroke="currentColor"
+									viewBox="0 0 24 24"
+								>
+									<path
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										stroke-width="2"
+										d="M6 18L18 6M6 6l12 12"
+									/>
 								</svg>
 							</span>
 						</button>
@@ -218,10 +359,10 @@
 </template>
 
 <script setup>
-import AutocompleteSelect from "@/components/common/AutocompleteSelect.vue"
-import { useInvoiceFiltersStore } from "@/stores/invoiceFilters"
-import { computed, ref } from "vue"
-import TranslatedHTML from "../common/TranslatedHTML.vue"
+import AutocompleteSelect from "@/components/common/AutocompleteSelect.vue";
+import { useInvoiceFiltersStore } from "@/stores/invoiceFilters";
+import { computed, ref } from "vue";
+import TranslatedHTML from "../common/TranslatedHTML.vue";
 
 const props = defineProps({
 	uniqueCustomers: {
@@ -236,11 +377,11 @@ const props = defineProps({
 		type: Object,
 		default: null,
 	},
-})
+});
 
-const store = useInvoiceFiltersStore()
-const showAdvanced = ref(false)
-const saveFilterName = ref("")
+const store = useInvoiceFiltersStore();
+const showAdvanced = ref(false);
+const saveFilterName = ref("");
 
 // Quick date presets (simplified)
 const quickDates = [
@@ -252,7 +393,7 @@ const quickDates = [
 	},
 	{ label: __("This Week"), value: "week", action: () => store.setThisWeek() },
 	{ label: __("This Month"), value: "month", action: () => store.setThisMonth() },
-]
+];
 
 // Status options (only show meaningful ones)
 const statusOptions = [
@@ -260,85 +401,85 @@ const statusOptions = [
 	{ label: __("Unpaid"), value: "Unpaid" },
 	{ label: __("Partial"), value: "Partly Paid" },
 	{ label: __("Overdue"), value: "Overdue" },
-]
+];
 
 // Advanced filters (customer, product, custom date)
 const hasAdvancedFilters = computed(() => {
-	return !!(store.customer || store.product || (store.dateFrom && store.dateTo))
-})
+	return !!(store.customer || store.product || (store.dateFrom && store.dateTo));
+});
 
 const advancedFiltersCount = computed(() => {
-	let count = 0
-	if (store.customer) count++
-	if (store.product) count++
-	if (store.dateFrom && store.dateTo) count++
-	return count
-})
+	let count = 0;
+	if (store.customer) count++;
+	if (store.product) count++;
+	if (store.dateFrom && store.dateTo) count++;
+	return count;
+});
 
 function toggleStatus(status) {
 	if (store.status === status) {
-		store.status = ""
+		store.status = "";
 	} else {
-		store.status = status
+		store.status = status;
 	}
 }
 
 function isDatePresetActive(preset) {
-	const today = new Date()
-	today.setHours(0, 0, 0, 0)
+	const today = new Date();
+	today.setHours(0, 0, 0, 0);
 
-	let fromDate, toDate
+	let fromDate, toDate;
 
 	switch (preset) {
 		case "today":
-			fromDate = toDate = formatDateForInput(today)
-			break
+			fromDate = toDate = formatDateForInput(today);
+			break;
 		case "yesterday":
-			const yesterday = new Date(today)
-			yesterday.setDate(yesterday.getDate() - 1)
-			fromDate = toDate = formatDateForInput(yesterday)
-			break
+			const yesterday = new Date(today);
+			yesterday.setDate(yesterday.getDate() - 1);
+			fromDate = toDate = formatDateForInput(yesterday);
+			break;
 		case "week":
-			const weekStart = new Date(today)
-			weekStart.setDate(today.getDate() - today.getDay())
-			fromDate = formatDateForInput(weekStart)
-			toDate = formatDateForInput(today)
-			break
+			const weekStart = new Date(today);
+			weekStart.setDate(today.getDate() - today.getDay());
+			fromDate = formatDateForInput(weekStart);
+			toDate = formatDateForInput(today);
+			break;
 		case "month":
-			const monthStart = new Date(today.getFullYear(), today.getMonth(), 1)
-			fromDate = formatDateForInput(monthStart)
-			toDate = formatDateForInput(today)
-			break
+			const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+			fromDate = formatDateForInput(monthStart);
+			toDate = formatDateForInput(today);
+			break;
 		default:
-			return false
+			return false;
 	}
 
-	return store.dateFrom === fromDate && store.dateTo === toDate
+	return store.dateFrom === fromDate && store.dateTo === toDate;
 }
 
 function formatDateForInput(date) {
-	const year = date.getFullYear()
-	const month = String(date.getMonth() + 1).padStart(2, "0")
-	const day = String(date.getDate()).padStart(2, "0")
-	return `${year}-${month}-${day}`
+	const year = date.getFullYear();
+	const month = String(date.getMonth() + 1).padStart(2, "0");
+	const day = String(date.getDate()).padStart(2, "0");
+	return `${year}-${month}-${day}`;
 }
 
 function saveFilters() {
 	if (saveFilterName.value && store.hasActiveFilters) {
-		store.saveCurrentFilters(saveFilterName.value)
-		saveFilterName.value = ""
-		showAdvanced.value = false
+		store.saveCurrentFilters(saveFilterName.value);
+		saveFilterName.value = "";
+		showAdvanced.value = false;
 	}
 }
 
 function loadSavedFilter(name) {
-	store.loadFilterPreset(name)
-	showAdvanced.value = false
+	store.loadFilterPreset(name);
+	showAdvanced.value = false;
 }
 
 function deleteSavedFilter(name) {
 	if (confirm(__('Delete "{0}"?', [name]))) {
-		store.deleteFilterPreset(name)
+		store.deleteFilterPreset(name);
 	}
 }
 </script>

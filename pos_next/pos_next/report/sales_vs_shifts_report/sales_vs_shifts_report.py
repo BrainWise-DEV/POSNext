@@ -37,15 +37,15 @@ PERFORMANCE METRICS
 
 RATE CALCULATIONS
 -----------------
-- Return Rate: (Returns / Gross Sales) × 100
-- Discount Rate: (Discounts / Gross Sales) × 100
+- Return Rate: (Returns / Gross Sales) x 100
+- Discount Rate: (Discounts / Gross Sales) x 100
 
 EFFICIENCY SCORE (0-100)
 ------------------------
 Base score: 70 points
 
 Factor 1 - Return Rate (-20 to +5):
-  - return_rate > 15%: penalty = min(20, (rate - 15) × 2)
+  - return_rate > 15%: penalty = min(20, (rate - 15) x 2)
   - return_rate ≤ 5%: bonus = +5
 
 Factor 2 - Discount Rate (-10 to +5):
@@ -78,7 +78,7 @@ stored at shift-close time — the authoritative source, no fuzzy matching.
 
 import frappe
 from frappe import _
-from frappe.utils import flt, cint, time_diff_in_hours, getdate
+from frappe.utils import cint, flt, getdate, time_diff_in_hours
 
 
 def execute(filters=None):
@@ -106,15 +106,16 @@ def get_report_message(data):
 	good_count = len([d for d in data if d.rating == "Good"])
 	average_count = len([d for d in data if d.rating == "Average"])
 	needs_improvement = len([d for d in data if d.rating == "Needs Improvement"])
-	no_sales_count = len([d for d in data if d.gross_sales == 0])
-
 	total_gross = sum(d.gross_sales for d in data)
-	total_net = sum(d.net_sales for d in data)
 	total_returns = sum(d.returns for d in data)
 	total_invoices = sum(d.invoices for d in data)
 
 	# Average efficiency only from shifts with sales (0% from no-sales shifts would skew it)
-	avg_efficiency = sum(d.efficiency for d in shifts_with_sales) / shifts_with_sales_count if shifts_with_sales_count else 0
+	avg_efficiency = (
+		sum(d.efficiency for d in shifts_with_sales) / shifts_with_sales_count
+		if shifts_with_sales_count
+		else 0
+	)
 	avg_return_rate = (total_returns / total_gross * 100) if total_gross else 0
 	avg_ticket = total_gross / total_invoices if total_invoices else 0
 
@@ -143,21 +144,21 @@ def get_report_message(data):
 	# Build alert if needed
 	alerts_html = ""
 	if avg_return_rate > 10:
-		alerts_html += f'''
+		alerts_html += f"""
 			<div class="svs-banner__alert svs-banner__alert--warning">
 				<span class="svs-banner__alert-icon">⚠️</span>
 				<span class="svs-banner__alert-text" style="color: #991b1b;"><strong>High return rate:</strong> {avg_return_rate:.1f}% — Review return patterns and product issues</span>
 			</div>
-		'''
+		"""
 	if needs_improvement > total_shifts * 0.3:
-		alerts_html += f'''
+		alerts_html += f"""
 			<div class="svs-banner__alert svs-banner__alert--info" style="margin-top: {'8px' if avg_return_rate > 10 else ''}">
 				<span class="svs-banner__alert-icon">💡</span>
 				<span class="svs-banner__alert-text" style="color: #92400e;"><strong>{needs_improvement} shifts</strong> need improvement — Consider additional training</span>
 			</div>
-		'''
+		"""
 
-	return f'''
+	return f"""
 		<style>
 			.svs-banner {{
 				background: #ffffff;
@@ -540,47 +541,60 @@ def get_report_message(data):
 
 			{alerts_html}
 		</div>
-	'''
+	"""
 
 
 # =============================================================================
 # COLUMNS
 # =============================================================================
 
+
 def get_columns():
 	return [
 		# Shift Identity
-		{"fieldname": "shift_id", "label": _("Shift ID"), "fieldtype": "Link", "options": "POS Closing Shift", "width": 120},
+		{
+			"fieldname": "shift_id",
+			"label": _("Shift ID"),
+			"fieldtype": "Link",
+			"options": "POS Closing Shift",
+			"width": 120,
+		},
 		{"fieldname": "shift_date", "label": _("Date"), "fieldtype": "Date", "width": 100},
 		{"fieldname": "shift_start", "label": _("Start"), "fieldtype": "Data", "width": 70},
 		{"fieldname": "shift_end", "label": _("End"), "fieldtype": "Data", "width": 70},
 		{"fieldname": "duration_hrs", "label": _("Hours"), "fieldtype": "Float", "precision": 1, "width": 70},
-
 		# People
-		{"fieldname": "pos_profile", "label": _("POS Profile"), "fieldtype": "Link", "options": "POS Profile", "width": 120},
+		{
+			"fieldname": "pos_profile",
+			"label": _("POS Profile"),
+			"fieldtype": "Link",
+			"options": "POS Profile",
+			"width": 120,
+		},
 		{"fieldname": "cashier", "label": _("Cashier"), "fieldtype": "Data", "width": 120},
 		{"fieldname": "sales_person", "label": _("Sales Person"), "fieldtype": "Data", "width": 120},
-
 		# Sales Metrics
 		{"fieldname": "gross_sales", "label": _("Gross Sales"), "fieldtype": "Currency", "width": 110},
 		{"fieldname": "returns", "label": _("Returns"), "fieldtype": "Currency", "width": 100},
 		{"fieldname": "net_sales", "label": _("Net Sales"), "fieldtype": "Currency", "width": 110},
 		{"fieldname": "discounts", "label": _("Discounts"), "fieldtype": "Currency", "width": 100},
-
 		# Volume Metrics
 		{"fieldname": "invoices", "label": _("Invoices"), "fieldtype": "Int", "width": 80},
 		{"fieldname": "qty_sold", "label": _("Items"), "fieldtype": "Int", "width": 70},
 		{"fieldname": "customers", "label": _("Customers"), "fieldtype": "Int", "width": 90},
-
 		# Payment Breakdown
 		{"fieldname": "cash", "label": _("Cash"), "fieldtype": "Currency", "width": 100},
 		{"fieldname": "non_cash", "label": _("Non-Cash"), "fieldtype": "Currency", "width": 100},
-
 		# Performance Metrics
 		{"fieldname": "avg_ticket", "label": _("Avg Ticket"), "fieldtype": "Currency", "width": 100},
 		{"fieldname": "sales_per_hour", "label": _("Sales/Hr"), "fieldtype": "Currency", "width": 100},
-		{"fieldname": "invoices_per_hour", "label": _("Inv/Hr"), "fieldtype": "Float", "precision": 1, "width": 70},
-
+		{
+			"fieldname": "invoices_per_hour",
+			"label": _("Inv/Hr"),
+			"fieldtype": "Float",
+			"precision": 1,
+			"width": 70,
+		},
 		# Analysis
 		{"fieldname": "peak_hour", "label": _("Peak Hour"), "fieldtype": "Data", "width": 90},
 		{"fieldname": "return_rate", "label": _("Return %"), "fieldtype": "Percent", "width": 80},
@@ -593,6 +607,7 @@ def get_columns():
 # =============================================================================
 # DATA FETCHING
 # =============================================================================
+
 
 def get_shift_data(filters):
 	"""Fetch and process shift data with all metrics"""
@@ -618,7 +633,9 @@ def get_shift_data(filters):
 	if cashier_ids:
 		cashier_names = {
 			u.name: u.full_name or u.name
-			for u in frappe.get_all("User", filters={"name": ["in", cashier_ids]}, fields=["name", "full_name"])
+			for u in frappe.get_all(
+				"User", filters={"name": ["in", cashier_ids]}, fields=["name", "full_name"]
+			)
 		}
 
 	# Calculate dataset statistics for relative efficiency scoring
@@ -646,7 +663,7 @@ def fetch_shifts_with_invoices(filters):
 
 	conditions = build_conditions(filters)
 
-	query = """
+	query = f"""
 		SELECT
 			pcs.name AS shift_id,
 			pcs.pos_profile,
@@ -673,7 +690,7 @@ def fetch_shifts_with_invoices(filters):
 		{conditions}
 		GROUP BY pcs.name
 		ORDER BY pcs.period_start_date DESC
-	""".format(conditions=conditions)
+	"""
 
 	return frappe.db.sql(query, filters, as_dict=True)
 
@@ -699,6 +716,7 @@ def build_conditions(filters):
 # =============================================================================
 # BATCH DATA FETCHING
 # =============================================================================
+
 
 def fetch_payment_data_batch(shifts):
 	"""Fetch payment breakdown for all shifts"""
@@ -727,9 +745,13 @@ def fetch_payment_data_single(shift):
 		GROUP BY LOWER(sip.mode_of_payment)
 	"""
 
-	payments = frappe.db.sql(query, {
-		"shift": shift.shift_id,
-	}, as_dict=True)
+	payments = frappe.db.sql(
+		query,
+		{
+			"shift": shift.shift_id,
+		},
+		as_dict=True,
+	)
 
 	cash = 0
 	non_cash = 0
@@ -766,9 +788,13 @@ def fetch_salesperson_data_single(shift):
 		ORDER BY contribution DESC
 	"""
 
-	sales_persons = frappe.db.sql(query, {
-		"shift": shift.shift_id,
-	}, as_dict=True)
+	sales_persons = frappe.db.sql(
+		query,
+		{
+			"shift": shift.shift_id,
+		},
+		as_dict=True,
+	)
 
 	if not sales_persons:
 		return {"names": "", "contribution": 0}
@@ -814,9 +840,13 @@ def fetch_peak_hour_single(shift):
 		LIMIT 1
 	"""
 
-	result = frappe.db.sql(query, {
-		"shift": shift.shift_id,
-	}, as_dict=True)
+	result = frappe.db.sql(
+		query,
+		{
+			"shift": shift.shift_id,
+		},
+		as_dict=True,
+	)
 
 	if result and result[0].hour is not None:
 		h = cint(result[0].hour)
@@ -828,19 +858,24 @@ def fetch_peak_hour_single(shift):
 # DATA ENRICHMENT
 # =============================================================================
 
+
 def enrich_shift_data(shift, payment_data, salesperson_data, peak_hour_data, cashier_names, stats):
 	"""Add computed fields to shift data"""
 
 	# Time fields
 	if shift.period_start_date:
 		shift.shift_date = getdate(shift.period_start_date)
-		shift.shift_start = shift.period_start_date.strftime("%H:%M") if hasattr(shift.period_start_date, 'strftime') else ""
+		shift.shift_start = (
+			shift.period_start_date.strftime("%H:%M") if hasattr(shift.period_start_date, "strftime") else ""
+		)
 	else:
 		shift.shift_date = None
 		shift.shift_start = ""
 
 	if shift.period_end_date:
-		shift.shift_end = shift.period_end_date.strftime("%H:%M") if hasattr(shift.period_end_date, 'strftime') else ""
+		shift.shift_end = (
+			shift.period_end_date.strftime("%H:%M") if hasattr(shift.period_end_date, "strftime") else ""
+		)
 	else:
 		shift.shift_end = ""
 
@@ -898,6 +933,7 @@ def enrich_shift_data(shift, payment_data, salesperson_data, peak_hour_data, cas
 # EFFICIENCY CALCULATION
 # =============================================================================
 
+
 def calculate_statistics(shifts):
 	"""Calculate dataset statistics for relative comparisons"""
 	active_shifts = [s for s in shifts if s.gross_sales > 0]
@@ -914,16 +950,15 @@ def calculate_statistics(shifts):
 	# Average invoices per hour (only for shifts with duration)
 	shifts_with_duration = [s for s in active_shifts if s.period_start_date and s.period_end_date]
 	if shifts_with_duration:
-		total_hours = sum(time_diff_in_hours(s.period_end_date, s.period_start_date) for s in shifts_with_duration)
+		total_hours = sum(
+			time_diff_in_hours(s.period_end_date, s.period_start_date) for s in shifts_with_duration
+		)
 		total_inv = sum(s.invoices for s in shifts_with_duration)
 		avg_inv_per_hour = total_inv / total_hours if total_hours > 0 else 0
 	else:
 		avg_inv_per_hour = 0
 
-	return {
-		"avg_ticket": avg_ticket,
-		"avg_invoices_per_hour": avg_inv_per_hour
-	}
+	return {"avg_ticket": avg_ticket, "avg_invoices_per_hour": avg_inv_per_hour}
 
 
 def calculate_efficiency(shift, stats):
@@ -989,6 +1024,7 @@ def get_rating(efficiency, gross_sales):
 # SUMMARY
 # =============================================================================
 
+
 def get_summary(data):
 	"""Generate report summary cards"""
 	if not data:
@@ -1008,7 +1044,11 @@ def get_summary(data):
 	# Average efficiency only from shifts with sales (0% from no-sales shifts would skew it)
 	shifts_with_sales = [d for d in data if d.gross_sales > 0]
 	shifts_with_sales_count = len(shifts_with_sales)
-	avg_efficiency = sum(d.efficiency for d in shifts_with_sales) / shifts_with_sales_count if shifts_with_sales_count else 0
+	avg_efficiency = (
+		sum(d.efficiency for d in shifts_with_sales) / shifts_with_sales_count
+		if shifts_with_sales_count
+		else 0
+	)
 	avg_ticket = total_gross / total_invoices if total_invoices else 0
 
 	excellent = len([d for d in data if d.rating == "Excellent"])
@@ -1026,8 +1066,18 @@ def get_summary(data):
 		{"value": total_non_cash, "label": _("Non-Cash"), "datatype": "Currency", "indicator": "Purple"},
 		{"value": total_returns, "label": _("Returns"), "datatype": "Currency", "indicator": "Red"},
 		{"value": total_discounts, "label": _("Discounts"), "datatype": "Currency", "indicator": "Orange"},
-		{"value": avg_efficiency, "label": _("Avg Efficiency"), "datatype": "Percent",
-		 "indicator": "Green" if avg_efficiency >= 90 else "Blue" if avg_efficiency >= 75 else "Orange" if avg_efficiency >= 60 else "Red"},
+		{
+			"value": avg_efficiency,
+			"label": _("Avg Efficiency"),
+			"datatype": "Percent",
+			"indicator": "Green"
+			if avg_efficiency >= 90
+			else "Blue"
+			if avg_efficiency >= 75
+			else "Orange"
+			if avg_efficiency >= 60
+			else "Red",
+		},
 		{"value": excellent + good, "label": _("High Performers"), "datatype": "Int", "indicator": "Green"},
 	]
 
@@ -1035,6 +1085,7 @@ def get_summary(data):
 # =============================================================================
 # CHART
 # =============================================================================
+
 
 def get_chart(data):
 	"""Generate default chart - Sales performance by shift with efficiency overlay"""
@@ -1050,7 +1101,7 @@ def get_chart(data):
 	# Build labels: Short date format
 	labels = []
 	for d in recent:
-		if hasattr(d.shift_date, 'strftime'):
+		if hasattr(d.shift_date, "strftime"):
 			labels.append(d.shift_date.strftime("%d %b"))
 		else:
 			labels.append(d.shift_id[:8] if d.shift_id else "-")
@@ -1069,29 +1120,21 @@ def get_chart(data):
 		"data": {
 			"labels": labels,
 			"datasets": [
-				{
-					"name": _("Net Sales"),
-					"values": net_sales_values
-				},
-				{
-					"name": _("Returns"),
-					"values": returns_values
-				}
-			]
+				{"name": _("Net Sales"), "values": net_sales_values},
+				{"name": _("Returns"), "values": returns_values},
+			],
 		},
 		"type": "bar",
 		"colors": ["#10b981", "#ef4444"],
 		"height": 280,
-		"barOptions": {
-			"spaceRatio": 0.4,
-			"stacked": False
-		}
+		"barOptions": {"spaceRatio": 0.4, "stacked": False},
 	}
 
 
 # =============================================================================
 # API ENDPOINTS FOR CHARTS
 # =============================================================================
+
 
 @frappe.whitelist()
 def get_hourly_breakdown(filters):
@@ -1110,7 +1153,8 @@ def get_hourly_breakdown(filters):
 
 	where = " AND " + " AND ".join(conditions) if conditions else ""
 
-	return frappe.db.sql("""
+	return frappe.db.sql(
+		f"""
 		SELECT
 			HOUR(si.posting_time) AS hour,
 			COUNT(*) AS invoice_count,
@@ -1120,7 +1164,10 @@ def get_hourly_breakdown(filters):
 		{where}
 		GROUP BY HOUR(si.posting_time)
 		ORDER BY hour
-	""".format(where=where), filters, as_dict=True)
+	""",
+		filters,
+		as_dict=True,
+	)
 
 
 @frappe.whitelist()
@@ -1140,7 +1187,8 @@ def get_payment_method_breakdown(filters):
 
 	where = " AND " + " AND ".join(conditions) if conditions else ""
 
-	return frappe.db.sql("""
+	return frappe.db.sql(
+		f"""
 		SELECT
 			sip.mode_of_payment,
 			COUNT(DISTINCT si.name) AS transaction_count,
@@ -1151,7 +1199,10 @@ def get_payment_method_breakdown(filters):
 		{where}
 		GROUP BY sip.mode_of_payment
 		ORDER BY total_amount DESC
-	""".format(where=where), filters, as_dict=True)
+	""",
+		filters,
+		as_dict=True,
+	)
 
 
 @frappe.whitelist()
@@ -1171,7 +1222,8 @@ def get_daily_trend(filters):
 
 	where = " AND " + " AND ".join(conditions) if conditions else ""
 
-	return frappe.db.sql("""
+	return frappe.db.sql(
+		f"""
 		SELECT
 			si.posting_date AS date,
 			COUNT(*) AS invoice_count,
@@ -1181,4 +1233,7 @@ def get_daily_trend(filters):
 		{where}
 		GROUP BY si.posting_date
 		ORDER BY si.posting_date
-	""".format(where=where), filters, as_dict=True)
+	""",
+		filters,
+		as_dict=True,
+	)

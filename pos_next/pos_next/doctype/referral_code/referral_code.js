@@ -38,7 +38,8 @@ frappe.ui.form.on("Referral Code", {
 		let referral_name = frm.doc.referral_name;
 		let referral_code;
 		if (!referral_name) {
-			frm.doc.referral_name = frm.doc.party + Math.random().toString(5).substring(2, 5).toUpperCase();
+			frm.doc.referral_name =
+				frm.doc.party + Math.random().toString(5).substring(2, 5).toUpperCase();
 			referral_code = Math.random().toString(12).substring(2, 12).toUpperCase();
 		} else {
 			referral_name = referral_name.replace(/\s/g, "");

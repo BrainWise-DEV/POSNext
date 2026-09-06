@@ -1,54 +1,54 @@
-import { createResource } from "frappe-ui"
-import { computed, ref, toRaw } from "vue"
-import { isOffline, getCachedItem } from "@/utils/offline"
-import { useSerialNumberStore } from "@/stores/serialNumber"
-import { CoalescingMutex } from "@/utils/mutex"
-import { logger } from "@/utils/logger"
-import { roundCurrency } from "@/utils/currency"
+import { createResource } from "frappe-ui";
+import { computed, ref, toRaw } from "vue";
+import { isOffline, getCachedItem } from "@/utils/offline";
+import { useSerialNumberStore } from "@/stores/serialNumber";
+import { CoalescingMutex } from "@/utils/mutex";
+import { logger } from "@/utils/logger";
+import { roundCurrency } from "@/utils/currency";
 
-const log = logger.create("Invoice")
+const log = logger.create("Invoice");
 
 // Shared mutex for invoice submission across all useInvoice instances
 // This prevents duplicate invoice creation from rapid clicks or concurrent submissions
 const submitMutex = new CoalescingMutex({
 	timeout: 60000,
 	name: "InvoiceSubmit",
-})
+});
 
 export function useInvoice() {
 	// Serial Number Store for returning serials when items are removed
-	const serialStore = useSerialNumberStore()
+	const serialStore = useSerialNumberStore();
 
 	// State
-	const invoiceItems = ref([])
-	const customer = ref(null)
-	const payments = ref([])
-	const salesTeam = ref([]) // Sales team for Sales Invoice
-	const posProfile = ref(null)
-	const posOpeningShift = ref(null) // POS Opening Shift name
-	const additionalDiscount = ref(0)
-	const couponCode = ref(null)
-	const taxRules = ref([]) // Tax rules from POS Profile
-	const taxInclusive = ref(false) // Tax inclusive setting from POS Settings
+	const invoiceItems = ref([]);
+	const customer = ref(null);
+	const payments = ref([]);
+	const salesTeam = ref([]); // Sales team for Sales Invoice
+	const posProfile = ref(null);
+	const posOpeningShift = ref(null); // POS Opening Shift name
+	const additionalDiscount = ref(0);
+	const couponCode = ref(null);
+	const taxRules = ref([]); // Tax rules from POS Profile
+	const taxInclusive = ref(false); // Tax inclusive setting from POS Settings
 
 	// Submission state - prevents duplicate submissions
-	const isSubmitting = ref(false)
+	const isSubmitting = ref(false);
 
 	// Performance: Incrementally maintained aggregates (updated on add/remove/change)
 	// This avoids O(n) array reductions on every reactive change
-	const _cachedSubtotal = ref(0)
-	const _cachedTotalTax = ref(0)
-	const _cachedTotalDiscount = ref(0)
-	const _cachedTotalPaid = ref(0)
+	const _cachedSubtotal = ref(0);
+	const _cachedTotalTax = ref(0);
+	const _cachedTotalDiscount = ref(0);
+	const _cachedTotalPaid = ref(0);
 
 	// Resources
 	const updateInvoiceResource = createResource({
 		url: "pos_next.api.invoices.update_invoice",
 		makeParams(params) {
-			return { data: JSON.stringify(params.data) }
+			return { data: JSON.stringify(params.data) };
 		},
 		auto: false,
-	})
+	});
 
 	const submitInvoiceResource = createResource({
 		url: "pos_next.api.invoices.submit_invoice",
@@ -56,19 +56,19 @@ export function useInvoice() {
 			return {
 				invoice: JSON.stringify(params.invoice),
 				data: JSON.stringify(params.data || {}),
-			}
+			};
 		},
 		auto: false,
 		onError(error) {
 			// Store the full error details for later access
-			console.error("submitInvoiceResource onError:", error)
+			console.error("submitInvoiceResource onError:", error);
 
 			// Attach the resource's error data to the error object
 			if (submitInvoiceResource.error) {
-				error.resourceError = submitInvoiceResource.error
+				error.resourceError = submitInvoiceResource.error;
 			}
 		},
-	})
+	});
 
 	const validateCartItemsResource = createResource({
 		url: "pos_next.api.invoices.validate_cart_items",
@@ -76,31 +76,31 @@ export function useInvoice() {
 			return {
 				items: JSON.stringify(items),
 				pos_profile: pos_profile,
-			}
+			};
 		},
 		auto: false,
-	})
+	});
 
 	const applyOffersResource = createResource({
 		url: "pos_next.api.invoices.apply_offers",
 		makeParams({ invoice_data, selected_offers }) {
 			const params = {
 				invoice_data: JSON.stringify(invoice_data),
-			}
+			};
 
 			if (selected_offers && selected_offers.length) {
-				params.selected_offers = JSON.stringify(selected_offers)
+				params.selected_offers = JSON.stringify(selected_offers);
 			}
 
-			return params
+			return params;
 		},
 		auto: false,
-	})
+	});
 
 	const getItemDetailsResource = createResource({
 		url: "pos_next.api.items.get_item_details",
 		auto: false,
-	})
+	});
 
 	/**
 	 * Resolve UOM pricing from IndexedDB or server.
@@ -122,49 +122,49 @@ export function useInvoice() {
 					customer: customer.value?.name || customer.value,
 					qty,
 					uom,
-				})
+				});
 				return {
 					rate: itemDetails.price_list_rate || itemDetails.rate,
 					price_list_rate: itemDetails.price_list_rate,
-				}
+				};
 			} catch (err) {
-				log.warn("Server UOM pricing unavailable, resolving from IndexedDB", err)
+				log.warn("Server UOM pricing unavailable, resolving from IndexedDB", err);
 			}
 		}
 
 		// Offline: resolve from IndexedDB
-		const cachedItem = await getCachedItem(item.item_code)
-		const source = cachedItem || item
+		const cachedItem = await getCachedItem(item.item_code);
+		const source = cachedItem || item;
 
-		let rate
+		let rate;
 		if (source.uom_prices?.[uom]) {
-			rate = source.uom_prices[uom]
+			rate = source.uom_prices[uom];
 		} else {
-			const baseRate = source.price_list_rate || source.rate || 0
-			const currentConversion = source.conversion_factor || 1
-			rate = (baseRate / currentConversion) * conversionFactor
+			const baseRate = source.price_list_rate || source.rate || 0;
+			const currentConversion = source.conversion_factor || 1;
+			rate = (baseRate / currentConversion) * conversionFactor;
 		}
 
-		return { rate, price_list_rate: rate }
+		return { rate, price_list_rate: rate };
 	}
 
 	const getTaxesResource = createResource({
 		url: "pos_next.api.pos_profile.get_taxes",
 		auto: false,
-	})
+	});
 
 	const getDefaultCustomerResource = createResource({
 		url: "pos_next.api.pos_profile.get_default_customer",
 		makeParams({ pos_profile }) {
-			return { pos_profile }
+			return { pos_profile };
 		},
 		auto: false,
-	})
+	});
 
 	const cleanupDraftsResource = createResource({
 		url: "pos_next.api.invoices.cleanup_old_drafts",
 		auto: false,
-	})
+	});
 
 	// ========================================================================
 	// COMPUTED TOTALS - IMPORTANT: Subtotal uses price_list_rate (original price)
@@ -184,82 +184,77 @@ export function useInvoice() {
 	// This ensures tax is not double-counted in inclusive mode!
 	// ========================================================================
 	// Use roundCurrency for monetary totals to match ERPNext's currency precision (from System Settings)
-	const subtotal = computed(() => roundCurrency(_cachedSubtotal.value))
-	const totalTax = computed(() => roundCurrency(_cachedTotalTax.value))
+	const subtotal = computed(() => roundCurrency(_cachedSubtotal.value));
+	const totalTax = computed(() => roundCurrency(_cachedTotalTax.value));
 	const totalDiscount = computed(() =>
-		roundCurrency(_cachedTotalDiscount.value + (additionalDiscount.value || 0)),
-	)
+		roundCurrency(_cachedTotalDiscount.value + (additionalDiscount.value || 0))
+	);
 	const grandTotal = computed(() => {
-		const discount =
-			_cachedTotalDiscount.value + (additionalDiscount.value || 0)
+		const discount = _cachedTotalDiscount.value + (additionalDiscount.value || 0);
 
 		if (taxInclusive.value) {
 			// Tax inclusive: Subtotal already includes tax, so don't add it again
 			// Use roundCurrency to match ERPNext's currency precision (from System Settings)
-			return roundCurrency(_cachedSubtotal.value - discount)
+			return roundCurrency(_cachedSubtotal.value - discount);
 		} else {
 			// Tax exclusive: Add tax on top of subtotal
 			// Use roundCurrency to match ERPNext's currency precision (from System Settings)
-			return roundCurrency(
-				_cachedSubtotal.value + _cachedTotalTax.value - discount,
-			)
+			return roundCurrency(_cachedSubtotal.value + _cachedTotalTax.value - discount);
 		}
-	})
-	const totalPaid = computed(() => _cachedTotalPaid.value)
+	});
+	const totalPaid = computed(() => _cachedTotalPaid.value);
 
 	const remainingAmount = computed(() => {
-		return grandTotal.value - totalPaid.value
-	})
+		return grandTotal.value - totalPaid.value;
+	});
 
 	const canSubmit = computed(() => {
 		return (
 			invoiceItems.value.length > 0 && remainingAmount.value <= 0.01 // Allow small rounding differences
-		)
-	})
+		);
+	});
 
 	// Actions
 	function addItem(item, quantity = 1) {
-		const itemUom = item.uom || item.stock_uom
+		const itemUom = item.uom || item.stock_uom;
 		const existingItem = invoiceItems.value.find(
-			(i) => i.item_code === item.item_code && i.uom === itemUom,
-		)
+			(i) => i.item_code === item.item_code && i.uom === itemUom
+		);
 
 		if (existingItem) {
 			// Store old values before update for incremental cache adjustment
 			// Use price_list_rate for subtotal calculations (before discount)
 			// IMPORTANT: Calculate oldAmount using same rounding as cache to ensure consistency
-			const oldPriceListRate = existingItem.price_list_rate || existingItem.rate
+			const oldPriceListRate = existingItem.price_list_rate || existingItem.rate;
 			const oldAmount = roundCurrency(
-				existingItem.quantity * roundCurrency(oldPriceListRate),
-			)
-			const oldTax = existingItem.tax_amount || 0
-			const oldDiscount = existingItem.discount_amount || 0
+				existingItem.quantity * roundCurrency(oldPriceListRate)
+			);
+			const oldTax = existingItem.tax_amount || 0;
+			const oldDiscount = existingItem.discount_amount || 0;
 
 			// For serial items, merge the serial numbers
 			if (existingItem.has_serial_no && item.serial_no) {
 				const existingSerials = existingItem.serial_no
 					? existingItem.serial_no.split("\n").filter((s) => s.trim())
-					: []
-				const newSerials = item.serial_no.split("\n").filter((s) => s.trim())
+					: [];
+				const newSerials = item.serial_no.split("\n").filter((s) => s.trim());
 				// Combine serials (avoid duplicates)
-				const allSerials = [...new Set([...existingSerials, ...newSerials])]
-				existingItem.serial_no = allSerials.join("\n")
+				const allSerials = [...new Set([...existingSerials, ...newSerials])];
+				existingItem.serial_no = allSerials.join("\n");
 				// For serial items, quantity must match serial count
-				existingItem.quantity = allSerials.length
+				existingItem.quantity = allSerials.length;
 			} else {
-				existingItem.quantity += quantity
+				existingItem.quantity += quantity;
 			}
-			recalculateItem(existingItem)
+			recalculateItem(existingItem);
 
 			// Update cache incrementally (new values - old values)
 			// Use rounded price_list_rate for subtotal to match ERPNext
-			const priceListRate = existingItem.price_list_rate || existingItem.rate
+			const priceListRate = existingItem.price_list_rate || existingItem.rate;
 			_cachedSubtotal.value +=
-				roundCurrency(existingItem.quantity * roundCurrency(priceListRate)) -
-				oldAmount
-			_cachedTotalTax.value += (existingItem.tax_amount || 0) - oldTax
-			_cachedTotalDiscount.value +=
-				(existingItem.discount_amount || 0) - oldDiscount
+				roundCurrency(existingItem.quantity * roundCurrency(priceListRate)) - oldAmount;
+			_cachedTotalTax.value += (existingItem.tax_amount || 0) - oldTax;
+			_cachedTotalDiscount.value += (existingItem.discount_amount || 0) - oldDiscount;
 		} else {
 			const newItem = {
 				item_code: item.item_code,
@@ -293,19 +288,19 @@ export function useInvoice() {
 				is_stock_item: item.is_stock_item ?? 1,
 				is_bundle: item.is_bundle || false,
 				allow_negative_stock: item.allow_negative_stock || 0,
-			}
-			invoiceItems.value.push(newItem)
+			};
+			invoiceItems.value.push(newItem);
 			// Recalculate the newly added item to apply taxes
-			recalculateItem(newItem)
+			recalculateItem(newItem);
 
 			// Update cache incrementally (add new item values)
 			// Use rounded price_list_rate for subtotal to match ERPNext
-			const priceListRate = newItem.price_list_rate || newItem.rate
+			const priceListRate = newItem.price_list_rate || newItem.rate;
 			_cachedSubtotal.value += roundCurrency(
-				newItem.quantity * roundCurrency(priceListRate),
-			)
-			_cachedTotalTax.value += newItem.tax_amount || 0
-			_cachedTotalDiscount.value += newItem.discount_amount || 0
+				newItem.quantity * roundCurrency(priceListRate)
+			);
+			_cachedTotalTax.value += newItem.tax_amount || 0;
+			_cachedTotalDiscount.value += newItem.discount_amount || 0;
 		}
 	}
 
@@ -317,40 +312,40 @@ export function useInvoice() {
 	 *                            If null, removes the first item matching item_code.
 	 */
 	function removeItem(itemCode, uom = null) {
-		let itemToRemove
+		let itemToRemove;
 		if (uom) {
 			itemToRemove = invoiceItems.value.find(
-				(i) => i.item_code === itemCode && i.uom === uom,
-			)
+				(i) => i.item_code === itemCode && i.uom === uom
+			);
 		} else {
-			itemToRemove = invoiceItems.value.find((i) => i.item_code === itemCode)
+			itemToRemove = invoiceItems.value.find((i) => i.item_code === itemCode);
 		}
 
 		if (itemToRemove) {
 			// Update cache incrementally (subtract removed item values)
 			// Use effective rate (manually edited rate or price_list_rate)
-			const isManuallyEdited = itemToRemove.is_rate_manually_edited === 1
-			const effectiveRate = isManuallyEdited ? itemToRemove.rate : (itemToRemove.price_list_rate || itemToRemove.rate)
+			const isManuallyEdited = itemToRemove.is_rate_manually_edited === 1;
+			const effectiveRate = isManuallyEdited
+				? itemToRemove.rate
+				: itemToRemove.price_list_rate || itemToRemove.rate;
 			_cachedSubtotal.value -= roundCurrency(
-				itemToRemove.quantity * roundCurrency(effectiveRate),
-			)
-			_cachedTotalTax.value -= itemToRemove.tax_amount || 0
-			_cachedTotalDiscount.value -= itemToRemove.discount_amount || 0
+				itemToRemove.quantity * roundCurrency(effectiveRate)
+			);
+			_cachedTotalTax.value -= itemToRemove.tax_amount || 0;
+			_cachedTotalDiscount.value -= itemToRemove.discount_amount || 0;
 
 			// Return serial numbers back to cache if item has serials
 			if (itemToRemove.serial_no && itemToRemove.has_serial_no) {
-				serialStore.returnSerials(itemCode, itemToRemove.serial_no)
+				serialStore.returnSerials(itemCode, itemToRemove.serial_no);
 			}
 		}
 
 		if (uom) {
 			invoiceItems.value = invoiceItems.value.filter(
-				(i) => !(i.item_code === itemCode && i.uom === uom),
-			)
+				(i) => !(i.item_code === itemCode && i.uom === uom)
+			);
 		} else {
-			invoiceItems.value = invoiceItems.value.filter(
-				(i) => i.item_code !== itemCode,
-			)
+			invoiceItems.value = invoiceItems.value.filter((i) => i.item_code !== itemCode);
 		}
 	}
 
@@ -363,127 +358,123 @@ export function useInvoice() {
 	 *                            If null, updates the first item matching item_code.
 	 */
 	function updateItemQuantity(itemCode, quantity, uom = null) {
-		let item
+		let item;
 		if (uom) {
-			item = invoiceItems.value.find(
-				(i) => i.item_code === itemCode && i.uom === uom,
-			)
+			item = invoiceItems.value.find((i) => i.item_code === itemCode && i.uom === uom);
 		} else {
-			item = invoiceItems.value.find((i) => i.item_code === itemCode)
+			item = invoiceItems.value.find((i) => i.item_code === itemCode);
 		}
 
 		if (item) {
 			// Store old values before update for incremental cache adjustment
 			// Use effective rate (manually edited rate or price_list_rate)
-			const isManuallyEdited = item.is_rate_manually_edited === 1
-			const effectiveRate = isManuallyEdited ? item.rate : (item.price_list_rate || item.rate)
-			const oldAmount = roundCurrency(
-				item.quantity * roundCurrency(effectiveRate),
-			)
-			const oldTax = item.tax_amount || 0
-			const oldDiscount = item.discount_amount || 0
-			const oldQuantity = item.quantity
+			const isManuallyEdited = item.is_rate_manually_edited === 1;
+			const effectiveRate = isManuallyEdited ? item.rate : item.price_list_rate || item.rate;
+			const oldAmount = roundCurrency(item.quantity * roundCurrency(effectiveRate));
+			const oldTax = item.tax_amount || 0;
+			const oldDiscount = item.discount_amount || 0;
+			const oldQuantity = item.quantity;
 
-			const newQuantity = Number.parseFloat(quantity) || 1
+			const newQuantity = Number.parseFloat(quantity) || 1;
 
 			// Handle serial number items - adjust serials when quantity changes
 			if (item.has_serial_no && item.serial_no) {
-				const serialList = item.serial_no.split("\n").filter((s) => s.trim())
+				const serialList = item.serial_no.split("\n").filter((s) => s.trim());
 
 				if (newQuantity < oldQuantity) {
 					// Quantity decreased - return excess serials to cache
-					const serialsToReturn = serialList.slice(newQuantity)
-					const serialsToKeep = serialList.slice(0, newQuantity)
+					const serialsToReturn = serialList.slice(newQuantity);
+					const serialsToKeep = serialList.slice(0, newQuantity);
 
 					if (serialsToReturn.length > 0) {
-						serialStore.returnSerials(itemCode, serialsToReturn)
-						item.serial_no = serialsToKeep.join("\n")
+						serialStore.returnSerials(itemCode, serialsToReturn);
+						item.serial_no = serialsToKeep.join("\n");
 					}
 				}
 				// Note: Increasing quantity for serial items requires selecting new serials
 				// which should be handled by reopening the serial dialog
 			}
 
-			item.quantity = newQuantity
-			recalculateItem(item)
+			item.quantity = newQuantity;
+			recalculateItem(item);
 
 			// Update cache incrementally (new values - old values)
 			// Use effective rate for manually edited items
 			_cachedSubtotal.value +=
-				roundCurrency(item.quantity * roundCurrency(effectiveRate)) - oldAmount
-			_cachedTotalTax.value += (item.tax_amount || 0) - oldTax
-			_cachedTotalDiscount.value += (item.discount_amount || 0) - oldDiscount
+				roundCurrency(item.quantity * roundCurrency(effectiveRate)) - oldAmount;
+			_cachedTotalTax.value += (item.tax_amount || 0) - oldTax;
+			_cachedTotalDiscount.value += (item.discount_amount || 0) - oldDiscount;
 		}
 	}
 
 	function updateItemRate(itemCode, rate, isManualEdit = false) {
-		const item = invoiceItems.value.find((i) => i.item_code === itemCode)
+		const item = invoiceItems.value.find((i) => i.item_code === itemCode);
 		if (item) {
 			// Store old values before update for incremental cache adjustment
 			// Use effective rate (manually edited rate or price_list_rate)
-			const wasManuallyEdited = item.is_rate_manually_edited === 1
-			const oldEffectiveRate = wasManuallyEdited ? item.rate : (item.price_list_rate || item.rate)
-			const oldAmount = roundCurrency(
-				item.quantity * roundCurrency(oldEffectiveRate),
-			)
-			const oldTax = item.tax_amount || 0
-			const oldDiscount = item.discount_amount || 0
+			const wasManuallyEdited = item.is_rate_manually_edited === 1;
+			const oldEffectiveRate = wasManuallyEdited
+				? item.rate
+				: item.price_list_rate || item.rate;
+			const oldAmount = roundCurrency(item.quantity * roundCurrency(oldEffectiveRate));
+			const oldTax = item.tax_amount || 0;
+			const oldDiscount = item.discount_amount || 0;
 
-			const newRate = Number.parseFloat(rate) || 0
+			const newRate = Number.parseFloat(rate) || 0;
 
 			// Update rate but PRESERVE price_list_rate (original catalog price)
 			// This maintains auditability - we can always see the original price
-			item.rate = newRate
+			item.rate = newRate;
 			// price_list_rate is NOT updated - it remains the original catalog price
 
 			// Track manual rate edits for audit purposes
-			const originalPriceListRate = item.price_list_rate || oldEffectiveRate
+			const originalPriceListRate = item.price_list_rate || oldEffectiveRate;
 			if (isManualEdit && newRate !== originalPriceListRate) {
-				item.is_rate_manually_edited = 1
-				item.original_rate = originalPriceListRate
+				item.is_rate_manually_edited = 1;
+				item.original_rate = originalPriceListRate;
 			}
 
-			recalculateItem(item)
+			recalculateItem(item);
 
 			// Update cache incrementally (new values - old values)
 			// Use the new rate for manually edited items
-			const isNowManuallyEdited = item.is_rate_manually_edited === 1
-			const newEffectiveRate = isNowManuallyEdited ? item.rate : (item.price_list_rate || item.rate)
+			const isNowManuallyEdited = item.is_rate_manually_edited === 1;
+			const newEffectiveRate = isNowManuallyEdited
+				? item.rate
+				: item.price_list_rate || item.rate;
 			_cachedSubtotal.value +=
-				roundCurrency(item.quantity * roundCurrency(newEffectiveRate)) - oldAmount
-			_cachedTotalTax.value += (item.tax_amount || 0) - oldTax
-			_cachedTotalDiscount.value += (item.discount_amount || 0) - oldDiscount
+				roundCurrency(item.quantity * roundCurrency(newEffectiveRate)) - oldAmount;
+			_cachedTotalTax.value += (item.tax_amount || 0) - oldTax;
+			_cachedTotalDiscount.value += (item.discount_amount || 0) - oldDiscount;
 		}
 	}
 
 	function updateItemDiscount(itemCode, discountPercentage) {
-		const item = invoiceItems.value.find((i) => i.item_code === itemCode)
+		const item = invoiceItems.value.find((i) => i.item_code === itemCode);
 		if (item) {
 			// Validate discount percentage (0-100)
-			let validDiscount = Number.parseFloat(discountPercentage) || 0
-			if (validDiscount < 0) validDiscount = 0
-			if (validDiscount > 100) validDiscount = 100
+			let validDiscount = Number.parseFloat(discountPercentage) || 0;
+			if (validDiscount < 0) validDiscount = 0;
+			if (validDiscount > 100) validDiscount = 100;
 
 			// Store old values before update for incremental cache adjustment
 			// Use effective rate (manually edited rate or price_list_rate)
-			const isManuallyEdited = item.is_rate_manually_edited === 1
-			const effectiveRate = isManuallyEdited ? item.rate : (item.price_list_rate || item.rate)
-			const oldAmount = roundCurrency(
-				item.quantity * roundCurrency(effectiveRate),
-			)
-			const oldTax = item.tax_amount || 0
-			const oldDiscount = item.discount_amount || 0
+			const isManuallyEdited = item.is_rate_manually_edited === 1;
+			const effectiveRate = isManuallyEdited ? item.rate : item.price_list_rate || item.rate;
+			const oldAmount = roundCurrency(item.quantity * roundCurrency(effectiveRate));
+			const oldTax = item.tax_amount || 0;
+			const oldDiscount = item.discount_amount || 0;
 
-			item.discount_percentage = validDiscount
-			item.discount_amount = 0 // Let recalculateItem compute it
-			recalculateItem(item)
+			item.discount_percentage = validDiscount;
+			item.discount_amount = 0; // Let recalculateItem compute it
+			recalculateItem(item);
 
 			// Update cache incrementally (new values - old values)
 			// Use effective rate for manually edited items
 			_cachedSubtotal.value +=
-				roundCurrency(item.quantity * roundCurrency(effectiveRate)) - oldAmount
-			_cachedTotalTax.value += (item.tax_amount || 0) - oldTax
-			_cachedTotalDiscount.value += (item.discount_amount || 0) - oldDiscount
+				roundCurrency(item.quantity * roundCurrency(effectiveRate)) - oldAmount;
+			_cachedTotalTax.value += (item.tax_amount || 0) - oldTax;
+			_cachedTotalDiscount.value += (item.discount_amount || 0) - oldDiscount;
 		}
 	}
 
@@ -508,19 +499,19 @@ export function useInvoice() {
 		 * @param {Number} baseAmount - Base amount to calculate on (defaults to subtotal)
 		 * @returns {Number} Calculated discount amount
 		 */
-		if (!discount) return 0
+		if (!discount) return 0;
 
-		const base = baseAmount !== null ? baseAmount : subtotal.value
+		const base = baseAmount !== null ? baseAmount : subtotal.value;
 
 		if (discount.percentage > 0) {
 			// Percentage discount on SUBTOTAL (before tax)
-			return roundCurrency((base * discount.percentage) / 100)
+			return roundCurrency((base * discount.percentage) / 100);
 		} else if (discount.amount > 0) {
 			// Fixed amount discount
-			return roundCurrency(discount.amount)
+			return roundCurrency(discount.amount);
 		}
 
-		return 0
+		return 0;
 	}
 
 	function applyDiscount(discount) {
@@ -529,35 +520,33 @@ export function useInvoice() {
 		 * This prevents conflicts with item-level pricing rules
 		 * @param {Object} discount - { percentage, amount, name, code, apply_on }
 		 */
-		if (!discount) return
+		if (!discount) return;
 
 		// Store coupon code for tracking
-		couponCode.value = discount.code || discount.name
+		couponCode.value = discount.code || discount.name;
 
 		const baseAmount =
-			typeof discount.base_amount === "number"
-				? discount.base_amount
-				: subtotal.value
+			typeof discount.base_amount === "number" ? discount.base_amount : subtotal.value;
 
 		// Use centralized calculation to handle percentage/amount and clamping
-		let discountAmount = calculateDiscountAmount(discount, baseAmount)
+		let discountAmount = calculateDiscountAmount(discount, baseAmount);
 
 		// Clamp discount to the same base the coupon was calculated against
 		if (discountAmount > baseAmount) {
-			discountAmount = baseAmount
+			discountAmount = baseAmount;
 		}
 
 		// Ensure non-negative
 		if (discountAmount < 0) {
-			discountAmount = 0
+			discountAmount = 0;
 		}
 
 		// Apply discount as Additional Discount on grand total
 		// This preserves item-level pricing rules while applying coupon discount
-		additionalDiscount.value = discountAmount
+		additionalDiscount.value = discountAmount;
 
 		// Rebuild cache after applying additional discount
-		rebuildIncrementalCache()
+		rebuildIncrementalCache();
 	}
 
 	function removeDiscount() {
@@ -565,46 +554,46 @@ export function useInvoice() {
 		 * Remove additional discount (coupon discount)
 		 */
 		// Clear additional discount
-		additionalDiscount.value = 0
+		additionalDiscount.value = 0;
 
 		// Clear coupon code
-		couponCode.value = null
+		couponCode.value = null;
 
 		// Rebuild cache after removing discount
-		rebuildIncrementalCache()
+		rebuildIncrementalCache();
 	}
 
 	// Performance: Cache tax calculation to avoid repeated loops
-	let cachedTaxRate = 0
-	let taxRulesCacheKey = ""
+	let cachedTaxRate = 0;
+	let taxRulesCacheKey = "";
 
 	function calculateTotalTaxRate() {
 		// Create cache key from tax rules
-		const currentKey = JSON.stringify(taxRules.value)
+		const currentKey = JSON.stringify(taxRules.value);
 
 		// Return cached value if tax rules haven't changed
 		if (currentKey === taxRulesCacheKey && cachedTaxRate !== 0) {
-			return cachedTaxRate
+			return cachedTaxRate;
 		}
 
 		// Calculate total tax rate
-		let totalRate = 0
+		let totalRate = 0;
 		if (taxRules.value && taxRules.value.length > 0) {
 			for (const taxRule of taxRules.value) {
 				if (
 					taxRule.charge_type === "On Net Total" ||
 					taxRule.charge_type === "On Previous Row Total"
 				) {
-					totalRate += taxRule.rate || 0
+					totalRate += taxRule.rate || 0;
 				}
 			}
 		}
 
 		// Cache the result
-		cachedTaxRate = totalRate
-		taxRulesCacheKey = currentKey
+		cachedTaxRate = totalRate;
+		taxRulesCacheKey = currentKey;
 
-		return totalRate
+		return totalRate;
 	}
 
 	function rebuildIncrementalCache() {
@@ -612,24 +601,22 @@ export function useInvoice() {
 		 * Rebuild cache from scratch - used when bulk operations modify all items
 		 * (e.g., loading tax rules, applying discounts to all items)
 		 */
-		_cachedSubtotal.value = 0
-		_cachedTotalTax.value = 0
-		_cachedTotalDiscount.value = 0
+		_cachedSubtotal.value = 0;
+		_cachedTotalTax.value = 0;
+		_cachedTotalDiscount.value = 0;
 
 		for (const item of invoiceItems.value) {
 			// Use manually edited rate if set, otherwise use price_list_rate
-			const isManuallyEdited = item.is_rate_manually_edited === 1
-			const effectiveRate = isManuallyEdited ? item.rate : (item.price_list_rate || item.rate)
-			_cachedSubtotal.value += roundCurrency(
-				item.quantity * roundCurrency(effectiveRate),
-			)
-			_cachedTotalTax.value += item.tax_amount || 0
-			_cachedTotalDiscount.value += item.discount_amount || 0
+			const isManuallyEdited = item.is_rate_manually_edited === 1;
+			const effectiveRate = isManuallyEdited ? item.rate : item.price_list_rate || item.rate;
+			_cachedSubtotal.value += roundCurrency(item.quantity * roundCurrency(effectiveRate));
+			_cachedTotalTax.value += item.tax_amount || 0;
+			_cachedTotalDiscount.value += item.discount_amount || 0;
 		}
 
-		_cachedTotalPaid.value = 0
+		_cachedTotalPaid.value = 0;
 		for (const payment of payments.value) {
-			_cachedTotalPaid.value += payment.amount || 0
+			_cachedTotalPaid.value += payment.amount || 0;
 		}
 	}
 
@@ -661,50 +648,47 @@ export function useInvoice() {
 	function recalculateItem(item) {
 		// Determine the base unit price
 		// If rate was manually edited, use the edited rate; otherwise use price_list_rate
-		const isManuallyEdited = item.is_rate_manually_edited === 1
-		const effectiveRate = isManuallyEdited ? item.rate : (item.price_list_rate || item.rate)
-		const roundedRate = roundCurrency(effectiveRate)
-		const baseAmount = roundCurrency(item.quantity * roundedRate)
+		const isManuallyEdited = item.is_rate_manually_edited === 1;
+		const effectiveRate = isManuallyEdited ? item.rate : item.price_list_rate || item.rate;
+		const roundedRate = roundCurrency(effectiveRate);
+		const baseAmount = roundCurrency(item.quantity * roundedRate);
 
 		// Calculate discount from either percentage or fixed amount
-		let discountAmount = 0
+		let discountAmount = 0;
 		if (item.discount_percentage > 0) {
-			discountAmount = roundCurrency(
-				(baseAmount * item.discount_percentage) / 100,
-			)
+			discountAmount = roundCurrency((baseAmount * item.discount_percentage) / 100);
 		} else if (item.discount_amount > 0) {
-			discountAmount = roundCurrency(item.discount_amount)
+			discountAmount = roundCurrency(item.discount_amount);
 			// Sync percentage when amount is provided directly
-			item.discount_percentage =
-				baseAmount > 0 ? (discountAmount / baseAmount) * 100 : 0
+			item.discount_percentage = baseAmount > 0 ? (discountAmount / baseAmount) * 100 : 0;
 		}
-		item.discount_amount = discountAmount
+		item.discount_amount = discountAmount;
 
 		// Calculate tax based on inclusive/exclusive mode
 		// Use currency precision for all monetary calculations to match ERPNext
-		const totalTaxRate = calculateTotalTaxRate()
-		let netAmount = 0
-		let taxAmount = 0
+		const totalTaxRate = calculateTotalTaxRate();
+		let netAmount = 0;
+		let taxAmount = 0;
 
 		if (taxInclusive.value && totalTaxRate > 0) {
 			// Tax-inclusive: Work backwards from gross to extract net and tax
-			const grossAmount = roundCurrency(baseAmount - discountAmount)
-			netAmount = roundCurrency(grossAmount / (1 + totalTaxRate / 100))
-			taxAmount = roundCurrency(grossAmount - netAmount)
+			const grossAmount = roundCurrency(baseAmount - discountAmount);
+			netAmount = roundCurrency(grossAmount / (1 + totalTaxRate / 100));
+			taxAmount = roundCurrency(grossAmount - netAmount);
 		} else {
 			// Tax-exclusive: Calculate tax on top of net amount
-			netAmount = roundCurrency(baseAmount - discountAmount)
-			taxAmount = roundCurrency((netAmount * totalTaxRate) / 100)
+			netAmount = roundCurrency(baseAmount - discountAmount);
+			taxAmount = roundCurrency((netAmount * totalTaxRate) / 100);
 		}
 
 		// Update item fields with rounded values
-		item.tax_amount = taxAmount
+		item.tax_amount = taxAmount;
 		// For manually edited rates, preserve the edited rate; otherwise use price_list_rate
 		if (!isManuallyEdited) {
-			item.rate = effectiveRate // Preserve original price for display
+			item.rate = effectiveRate; // Preserve original price for display
 		}
 		// If manually edited, item.rate is already set to the edited value
-		item.amount = netAmount // Net amount for backend calculations
+		item.amount = netAmount; // Net amount for backend calculations
 	}
 
 	/**
@@ -713,16 +697,16 @@ export function useInvoice() {
 	 * - Tax-exclusive: net rate (amount / qty, after discount)
 	 */
 	function computeBackendRate(item) {
-		const qty = item.quantity || item.qty || 1
-		const priceListRate = item.price_list_rate || item.rate || 0
-		const discountAmount = item.discount_amount || 0
+		const qty = item.quantity || item.qty || 1;
+		const priceListRate = item.price_list_rate || item.rate || 0;
+		const discountAmount = item.discount_amount || 0;
 
 		if (taxInclusive.value) {
 			// Gross rate: price minus per-unit discount
-			return roundCurrency(priceListRate - discountAmount / qty)
+			return roundCurrency(priceListRate - discountAmount / qty);
 		}
 		// Net rate: total amount divided by quantity
-		return qty > 0 ? roundCurrency((item.amount || 0) / qty) : item.rate || 0
+		return qty > 0 ? roundCurrency((item.amount || 0) / qty) : item.rate || 0;
 	}
 
 	/**
@@ -730,9 +714,9 @@ export function useInvoice() {
 	 * Handles: array, string, or empty value.
 	 */
 	function stringifyPricingRules(pricingRules) {
-		if (!pricingRules) return ""
-		if (Array.isArray(pricingRules)) return pricingRules.join(",")
-		return String(pricingRules)
+		if (!pricingRules) return "";
+		if (Array.isArray(pricingRules)) return pricingRules.join(",");
+		return String(pricingRules);
 	}
 
 	/**
@@ -752,7 +736,9 @@ export function useInvoice() {
 			item_name: item.item_name,
 			qty: item.quantity || item.qty || 1,
 			rate: item.is_free_item ? 0 : computeBackendRate(item),
-			price_list_rate: item.is_free_item ? 0 : roundCurrency(item.price_list_rate || item.rate),
+			price_list_rate: item.is_free_item
+				? 0
+				: roundCurrency(item.price_list_rate || item.rate),
 			uom: item.uom,
 			warehouse: item.warehouse,
 			batch_no: item.batch_no,
@@ -766,20 +752,20 @@ export function useInvoice() {
 			is_rate_manually_edited: item.is_rate_manually_edited || 0,
 			original_rate: item.original_rate || null,
 			is_free_item: item.is_free_item || 0,
-		})
+		});
 
-		const out = []
+		const out = [];
 		for (const item of items) {
-			out.push(mapRow(item))
-			const fq = Number.parseFloat(item.free_qty) || 0
+			out.push(mapRow(item));
+			const fq = Number.parseFloat(item.free_qty) || 0;
 			if (!item.is_free_item && fq > 0) {
-				const u = item.uom || item.stock_uom
+				const u = item.uom || item.stock_uom;
 				const hasDedicatedFree = items.some(
 					(i) =>
 						i.is_free_item &&
 						i.item_code === item.item_code &&
-						(i.uom || i.stock_uom) === u,
-				)
+						(i.uom || i.stock_uom) === u
+				);
 				if (!hasDedicatedFree) {
 					out.push({
 						item_code: item.item_code,
@@ -799,42 +785,42 @@ export function useInvoice() {
 						is_rate_manually_edited: 0,
 						original_rate: null,
 						is_free_item: 1,
-					})
+					});
 				}
 			}
 		}
-		return out
+		return out;
 	}
 
 	function addPayment(payment) {
-		const amount = Number.parseFloat(payment.amount) || 0
+		const amount = Number.parseFloat(payment.amount) || 0;
 		payments.value.push({
 			mode_of_payment: payment.mode_of_payment,
 			amount: amount,
 			type: payment.type,
-		})
+		});
 		// Update cache incrementally
-		_cachedTotalPaid.value += amount
+		_cachedTotalPaid.value += amount;
 	}
 
 	function removePayment(index) {
 		if (payments.value[index]) {
 			// Update cache incrementally (subtract removed payment)
-			_cachedTotalPaid.value -= payments.value[index].amount || 0
+			_cachedTotalPaid.value -= payments.value[index].amount || 0;
 		}
-		payments.value.splice(index, 1)
+		payments.value.splice(index, 1);
 	}
 
 	function updatePayment(index, amount) {
 		if (payments.value[index]) {
 			// Store old value before update for incremental cache adjustment
-			const oldAmount = payments.value[index].amount || 0
-			const newAmount = Number.parseFloat(amount) || 0
+			const oldAmount = payments.value[index].amount || 0;
+			const newAmount = Number.parseFloat(amount) || 0;
 
-			payments.value[index].amount = newAmount
+			payments.value[index].amount = newAmount;
 
 			// Update cache incrementally (new value - old value)
-			_cachedTotalPaid.value += newAmount - oldAmount
+			_cachedTotalPaid.value += newAmount - oldAmount;
 		}
 	}
 
@@ -844,7 +830,7 @@ export function useInvoice() {
 		 * Returns array of errors if stock is insufficient
 		 */
 		// Use toRaw() to ensure we get current, non-reactive values (prevents stale cached quantities)
-		const rawItems = toRaw(invoiceItems.value)
+		const rawItems = toRaw(invoiceItems.value);
 
 		const items = rawItems.map((item) => ({
 			item_code: item.item_code,
@@ -853,17 +839,17 @@ export function useInvoice() {
 			conversion_factor: item.conversion_factor || 1,
 			stock_qty: item.quantity * (item.conversion_factor || 1),
 			is_stock_item: item.is_stock_item !== false, // default to true
-		}))
+		}));
 
 		try {
 			const result = await validateCartItemsResource.submit({
 				items: items,
 				pos_profile: posProfile.value,
-			})
-			return result || []
+			});
+			return result || [];
 		} catch (error) {
-			console.error("Stock validation error:", error)
-			return []
+			console.error("Stock validation error:", error);
+			return [];
 		}
 	}
 
@@ -874,67 +860,65 @@ export function useInvoice() {
 				mode_of_payment: payment.mode_of_payment,
 				amount: payment.amount,
 				type: payment.type,
-			}))
+			}));
 	}
 
 	function buildCustomerCreditPayload(rawPayments) {
-		const creditPayments = rawPayments.filter((payment) => payment?.is_customer_credit)
+		const creditPayments = rawPayments.filter((payment) => payment?.is_customer_credit);
 
 		if (!creditPayments.length) {
 			return {
 				invoicePayments: serializeInvoicePayments(rawPayments),
 				redeemedCustomerCredit: 0,
 				customerCreditDict: [],
-			}
+			};
 		}
 
-		const creditSources = new Map()
+		const creditSources = new Map();
 		for (const payment of creditPayments) {
 			for (const credit of payment.credit_details || []) {
-				if (!credit?.type || !credit?.credit_origin) continue
-				const key = `${credit.type}:${credit.credit_origin}`
+				if (!credit?.type || !credit?.credit_origin) continue;
+				const key = `${credit.type}:${credit.credit_origin}`;
 				if (!creditSources.has(key)) {
-					creditSources.set(key, credit)
+					creditSources.set(key, credit);
 				}
 			}
 		}
 
 		const redeemedCustomerCredit = roundCurrency(
-			creditPayments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0),
-		)
+			creditPayments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0)
+		);
 
-		let remainingCreditToAllocate = redeemedCustomerCredit
-		const customerCreditDict = []
+		let remainingCreditToAllocate = redeemedCustomerCredit;
+		const customerCreditDict = [];
 
 		for (const credit of creditSources.values()) {
-			if (remainingCreditToAllocate <= 0) break
+			if (remainingCreditToAllocate <= 0) break;
 
 			const availableCredit = roundCurrency(
-				Number(credit.available_credit ?? credit.total_credit ?? 0),
-			)
-			if (availableCredit <= 0) continue
+				Number(credit.available_credit ?? credit.total_credit ?? 0)
+			);
+			if (availableCredit <= 0) continue;
 
-			const creditToRedeem = Math.min(availableCredit, remainingCreditToAllocate)
-			if (creditToRedeem <= 0) continue
+			const creditToRedeem = Math.min(availableCredit, remainingCreditToAllocate);
+			if (creditToRedeem <= 0) continue;
 
 			customerCreditDict.push({
 				...credit,
 				credit_to_redeem: roundCurrency(creditToRedeem),
-			})
-			remainingCreditToAllocate = roundCurrency(
-				remainingCreditToAllocate - creditToRedeem,
-			)
+			});
+			remainingCreditToAllocate = roundCurrency(remainingCreditToAllocate - creditToRedeem);
 		}
 
 		if (remainingCreditToAllocate > 0.01) {
-			throw new Error("Unable to allocate the selected customer credit")
+			throw new Error("Unable to allocate the selected customer credit");
 		}
 
 		return {
 			invoicePayments: serializeInvoicePayments(rawPayments),
 			redeemedCustomerCredit,
 			customerCreditDict,
-		}
+		};
 	}
 
 	async function saveDraft(targetDoctype = "Sales Invoice") {
@@ -943,9 +927,9 @@ export function useInvoice() {
 		 * This creates the invoice with docstatus=0
 		 */
 		// Use toRaw() to ensure we get current, non-reactive values (prevents stale cached quantities)
-		const rawItems = toRaw(invoiceItems.value)
-		const rawPayments = toRaw(payments.value)
-		const { invoicePayments } = buildCustomerCreditPayload(rawPayments)
+		const rawItems = toRaw(invoiceItems.value);
+		const rawPayments = toRaw(payments.value);
+		const { invoicePayments } = buildCustomerCreditPayload(rawPayments);
 
 		const invoiceData = {
 			doctype: targetDoctype,
@@ -958,16 +942,16 @@ export function useInvoice() {
 			coupon_code: couponCode.value,
 			is_pos: 1,
 			update_stock: 1,
-		}
+		};
 
 		if (targetDoctype === "Sales Order") {
-			const today = new Date().toISOString().split("T")[0]
-			invoiceData.delivery_date = today
-			invoiceData.transaction_date = today
+			const today = new Date().toISOString().split("T")[0];
+			invoiceData.delivery_date = today;
+			invoiceData.transaction_date = today;
 		}
 
-		const result = await updateInvoiceResource.submit({ data: invoiceData })
-		return result?.data || result
+		const result = await updateInvoiceResource.submit({ data: invoiceData });
+		return result?.data || result;
 	}
 
 	async function submitInvoice(
@@ -975,6 +959,7 @@ export function useInvoice() {
 		deliveryDate = null,
 		writeOffAmount = 0,
 		isCreditSale = false,
+		receivableAccount = null
 	) {
 		/**
 		 * Two-step submission process with mutex protection:
@@ -993,25 +978,20 @@ export function useInvoice() {
 		return await submitMutex.withLock(async () => {
 			// Check if already submitting (belt and suspenders with mutex)
 			if (isSubmitting.value) {
-				log.warn(
-					"Invoice submission already in progress, skipping duplicate request",
-				)
-				return null
+				log.warn("Invoice submission already in progress, skipping duplicate request");
+				return null;
 			}
 
-			isSubmitting.value = true
+			isSubmitting.value = true;
 
 			try {
 				// Step 1: Create invoice draft
 				// Use toRaw() to ensure we get current, non-reactive values (prevents stale cached quantities)
-				const rawItems = toRaw(invoiceItems.value)
-				const rawPayments = toRaw(payments.value)
-				const rawSalesTeam = toRaw(salesTeam.value)
-				const {
-					invoicePayments,
-					redeemedCustomerCredit,
-					customerCreditDict,
-				} = buildCustomerCreditPayload(rawPayments)
+				const rawItems = toRaw(invoiceItems.value);
+				const rawPayments = toRaw(payments.value);
+				const rawSalesTeam = toRaw(salesTeam.value);
+				const { invoicePayments, redeemedCustomerCredit, customerCreditDict } =
+					buildCustomerCreditPayload(rawPayments);
 
 				const invoiceData = {
 					doctype: targetDoctype,
@@ -1024,10 +1004,15 @@ export function useInvoice() {
 					coupon_code: couponCode.value,
 					is_pos: 1,
 					update_stock: 1, // Critical: Ensures stock is updated
+				};
+
+				// "Pay on Receivable Account": route the invoice's debit_to to a chosen AR
+				if (receivableAccount) {
+					invoiceData.receivable_account = receivableAccount;
 				}
 
 				if (targetDoctype === "Sales Order" && deliveryDate) {
-					invoiceData.delivery_date = deliveryDate
+					invoiceData.delivery_date = deliveryDate;
 				}
 
 				// Add sales_team if provided
@@ -1035,78 +1020,68 @@ export function useInvoice() {
 					invoiceData.sales_team = rawSalesTeam.map((member) => ({
 						sales_person: member.sales_person,
 						allocated_percentage: member.allocated_percentage || 0,
-					}))
+					}));
 				}
 
 				const draftInvoice = await updateInvoiceResource.submit({
 					data: invoiceData,
-				})
+				});
 
-				let invoiceDoc = draftInvoice
-				if (
-					draftInvoice &&
-					typeof draftInvoice === "object" &&
-					"data" in draftInvoice
-				) {
-					invoiceDoc = draftInvoice.data
+				let invoiceDoc = draftInvoice;
+				if (draftInvoice && typeof draftInvoice === "object" && "data" in draftInvoice) {
+					invoiceDoc = draftInvoice.data;
 				}
 
 				if (!invoiceDoc || !invoiceDoc.name) {
-					throw new Error(
-						"Failed to create draft invoice - no invoice name returned",
-					)
+					throw new Error("Failed to create draft invoice - no invoice name returned");
 				}
 
 				const submitData = {
-					change_amount:
-						remainingAmount.value < 0 ? Math.abs(remainingAmount.value) : 0,
+					change_amount: remainingAmount.value < 0 ? Math.abs(remainingAmount.value) : 0,
 					write_off_amount: writeOffAmount || 0,
-				}
+				};
 
 				if (redeemedCustomerCredit > 0 && customerCreditDict.length > 0) {
-					submitData.redeemed_customer_credit = redeemedCustomerCredit
-					submitData.customer_credit_dict = customerCreditDict
+					submitData.redeemed_customer_credit = redeemedCustomerCredit;
+					submitData.customer_credit_dict = customerCreditDict;
 				}
 				if (isCreditSale && invoicePayments.length === 0) {
-					submitData.is_credit_sale = 1
+					submitData.is_credit_sale = 1;
 				}
 
 				try {
 					const result = await submitInvoiceResource.submit({
 						invoice: invoiceDoc,
 						data: submitData,
-					})
+					});
 
 					// Check if resource has error (frappe-ui pattern)
 					if (submitInvoiceResource.error) {
-						const resourceError = submitInvoiceResource.error
-						console.error("Submit invoice resource error:", resourceError)
+						const resourceError = submitInvoiceResource.error;
+						console.error("Submit invoice resource error:", resourceError);
 
 						// Create a detailed error object
 						const detailedError = new Error(
-							resourceError.message || "Invoice submission failed",
-						)
-						detailedError.exc_type = resourceError.exc_type
-						detailedError._server_messages = resourceError._server_messages
-						detailedError.httpStatus = resourceError.httpStatus
-						detailedError.messages = resourceError.messages
+							resourceError.message || "Invoice submission failed"
+						);
+						detailedError.exc_type = resourceError.exc_type;
+						detailedError._server_messages = resourceError._server_messages;
+						detailedError.httpStatus = resourceError.httpStatus;
+						detailedError.messages = resourceError.messages;
 
-						throw detailedError
+						throw detailedError;
 					}
 
-					resetInvoice()
-					return result
+					resetInvoice();
+					return result;
 				} catch (error) {
 					// Preserve original error object with all its properties
-					console.error("Submit invoice error:", error)
-					console.log(
-						"submitInvoiceResource.error:",
-						submitInvoiceResource.error,
-					)
+					console.error("Submit invoice error:", error);
+					console.log("submitInvoiceResource.error:", submitInvoiceResource.error);
 
 					// If resource has error data, extract and attach it
 					if (submitInvoiceResource.error) {
-						const resourceError = submitInvoiceResource.error
+						const resourceError = submitInvoiceResource.error;
 						console.log("Resource error details:", {
 							exc_type: resourceError.exc_type,
 							_server_messages: resourceError._server_messages,
@@ -1116,34 +1091,34 @@ export function useInvoice() {
 							data: resourceError.data,
 							exception: resourceError.exception,
 							keys: Object.keys(resourceError),
-						})
+						});
 
 						// The messages array likely contains the detailed error info
 						if (resourceError.messages && resourceError.messages.length > 0) {
-							console.log("First message:", resourceError.messages[0])
+							console.log("First message:", resourceError.messages[0]);
 						}
 
 						// Attach all resource error properties to the error
-						error.exc_type = resourceError.exc_type || error.exc_type
-						error._server_messages = resourceError._server_messages
-						error.httpStatus = resourceError.httpStatus
-						error.messages = resourceError.messages
-						error.exception = resourceError.exception
-						error.data = resourceError.data
+						error.exc_type = resourceError.exc_type || error.exc_type;
+						error._server_messages = resourceError._server_messages;
+						error.httpStatus = resourceError.httpStatus;
+						error.messages = resourceError.messages;
+						error.exception = resourceError.exception;
+						error.data = resourceError.data;
 
-						console.log("After attaching, error.messages:", error.messages)
+						console.log("After attaching, error.messages:", error.messages);
 					}
 
-					throw error
+					throw error;
 				}
 			} catch (error) {
 				// Outer catch to ensure error propagates
-				console.error("Submit invoice outer error:", error)
-				throw error
+				console.error("Submit invoice outer error:", error);
+				throw error;
 			} finally {
-				isSubmitting.value = false
+				isSubmitting.value = false;
 			}
-		}) // End of submitMutex.withLock
+		}); // End of submitMutex.withLock
 	}
 
 	/**
@@ -1153,17 +1128,17 @@ export function useInvoice() {
 	 */
 	async function setDefaultCustomer() {
 		// Reset to null first
-		customer.value = null
+		customer.value = null;
 
 		// Only fetch default customer if we have a POS Profile
 		if (!posProfile.value) {
-			return
+			return;
 		}
 
 		try {
 			const result = await getDefaultCustomerResource.submit({
 				pos_profile: posProfile.value,
-			})
+			});
 
 			// Set the default customer if one is configured
 			if (result && result.customer) {
@@ -1172,11 +1147,11 @@ export function useInvoice() {
 					name: result.customer,
 					customer_name: result.customer_name || result.customer,
 					customer_group: result.customer_group,
-				}
+				};
 			}
 		} catch (error) {
 			// Silently fail - default customer is optional
-			console.log("No default customer set in POS Profile")
+			console.log("No default customer set in POS Profile");
 		}
 	}
 
@@ -1185,19 +1160,19 @@ export function useInvoice() {
 	 * If a POS Profile is active and has a default customer, it will be pre-selected.
 	 */
 	function resetInvoice() {
-		invoiceItems.value = []
-		payments.value = []
-		additionalDiscount.value = 0
-		couponCode.value = null
+		invoiceItems.value = [];
+		payments.value = [];
+		additionalDiscount.value = 0;
+		couponCode.value = null;
 
 		// Reset incremental cache
-		_cachedSubtotal.value = 0
-		_cachedTotalTax.value = 0
-		_cachedTotalDiscount.value = 0
-		_cachedTotalPaid.value = 0
+		_cachedSubtotal.value = 0;
+		_cachedTotalTax.value = 0;
+		_cachedTotalDiscount.value = 0;
+		_cachedTotalPaid.value = 0;
 
 		// Set default customer from POS Profile if available
-		setDefaultCustomer()
+		setDefaultCustomer();
 	}
 
 	/**
@@ -1208,23 +1183,23 @@ export function useInvoice() {
 		// Return all serial numbers back to cache before clearing
 		for (const item of invoiceItems.value) {
 			if (item.has_serial_no && item.serial_no) {
-				serialStore.returnSerials(item.item_code, item.serial_no)
+				serialStore.returnSerials(item.item_code, item.serial_no);
 			}
 		}
 
-		invoiceItems.value = []
-		payments.value = []
-		additionalDiscount.value = 0
-		couponCode.value = null
+		invoiceItems.value = [];
+		payments.value = [];
+		additionalDiscount.value = 0;
+		couponCode.value = null;
 
 		// Reset incremental cache
-		_cachedSubtotal.value = 0
-		_cachedTotalTax.value = 0
-		_cachedTotalDiscount.value = 0
-		_cachedTotalPaid.value = 0
+		_cachedSubtotal.value = 0;
+		_cachedTotalTax.value = 0;
+		_cachedTotalDiscount.value = 0;
+		_cachedTotalPaid.value = 0;
 
 		// Set default customer from POS Profile if available
-		setDefaultCustomer()
+		setDefaultCustomer();
 
 		// Cleanup old draft invoices (older than 1 hour) in background
 		// Skip if offline to avoid network errors
@@ -1233,10 +1208,10 @@ export function useInvoice() {
 				await cleanupDraftsResource.submit({
 					pos_profile: posProfile.value,
 					max_age_hours: 1,
-				})
+				});
 			} catch (error) {
 				// Silent fail - don't block cart clearing
-				console.warn("Failed to cleanup old drafts:", error)
+				console.warn("Failed to cleanup old drafts:", error);
 			}
 		}
 	}
@@ -1246,25 +1221,25 @@ export function useInvoice() {
 		 * Load tax rules from POS Profile and tax inclusive setting from POS Settings
 		 */
 		try {
-			const result = await getTaxesResource.submit({ pos_profile: profileName })
-			taxRules.value = result?.data || result || []
+			const result = await getTaxesResource.submit({ pos_profile: profileName });
+			taxRules.value = result?.data || result || [];
 
 			// Load tax inclusive setting from POS Settings if provided
 			if (posSettings && posSettings.tax_inclusive !== undefined) {
-				taxInclusive.value = posSettings.tax_inclusive || false
+				taxInclusive.value = posSettings.tax_inclusive || false;
 			}
 
 			// Recalculate all items with new tax rules and tax inclusive setting
-			invoiceItems.value.forEach((item) => recalculateItem(item))
+			invoiceItems.value.forEach((item) => recalculateItem(item));
 
 			// Rebuild cache after bulk operation
-			rebuildIncrementalCache()
+			rebuildIncrementalCache();
 
-			return taxRules.value
+			return taxRules.value;
 		} catch (error) {
-			console.error("Error loading tax rules:", error)
-			taxRules.value = []
-			return []
+			console.error("Error loading tax rules:", error);
+			taxRules.value = [];
+			return [];
 		}
 	}
 
@@ -1272,13 +1247,13 @@ export function useInvoice() {
 		/**
 		 * Set tax inclusive mode and recalculate all items
 		 */
-		taxInclusive.value = value
+		taxInclusive.value = value;
 
 		// Recalculate all items with new tax inclusive setting
-		invoiceItems.value.forEach((item) => recalculateItem(item))
+		invoiceItems.value.forEach((item) => recalculateItem(item));
 
 		// Rebuild cache after bulk operation
-		rebuildIncrementalCache()
+		rebuildIncrementalCache();
 	}
 
 	return {
@@ -1336,5 +1311,5 @@ export function useInvoice() {
 		applyOffersResource,
 		getItemDetailsResource,
 		getTaxesResource,
-	}
+	};
 }

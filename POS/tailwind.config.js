@@ -1,4 +1,4 @@
-import frappeUIPreset from "frappe-ui/tailwind"
+import frappeUIPreset from "frappe-ui/tailwind";
 
 export default {
 	presets: [frappeUIPreset],
@@ -11,4 +11,4 @@ export default {
 		extend: {},
 	},
 	plugins: [],
-}
+};
