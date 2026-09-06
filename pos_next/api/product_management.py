@@ -1,4 +1,5 @@
 import json
+
 import frappe
 from frappe import _
 from frappe.model.naming import make_autoname
@@ -6,10 +7,28 @@ from frappe.utils import cint, flt
 
 from pos_next.api.items import _get_pos_profile_allowed_item_groups
 
-
 DEFAULT_PAGE_LENGTH = 20
 MAX_PAGE_LENGTH = 100
 POS_ITEM_CODE_SERIES = "POS-ITEM-.#####"
+ALLOWED_IMAGE_PREFIXES = ("/files/", "/private/files/")
+
+
+def _validate_pos_profile_access(pos_profile: str) -> None:
+	"""Ensure the session user may act through this POS Profile.
+
+	Every endpoint here scopes what the caller can read or change to the
+	profile's allowed item groups, so an unvalidated profile name would let a
+	caller pick any profile — including one with no group restriction at all,
+	which disables the scoping entirely. Mirrors the check used in
+	`api/invoices.py` and `api/credit_sales.py`.
+	"""
+	if not pos_profile:
+		frappe.throw(_("POS Profile is required"))
+
+	is_assigned = frappe.db.exists("POS Profile User", {"parent": pos_profile, "user": frappe.session.user})
+	# Users who can administer POS Profiles are not constrained by them.
+	if not is_assigned and not frappe.has_permission("POS Profile", "write"):
+		frappe.throw(_("You don't have access to this POS Profile"))
 
 
 @frappe.whitelist()
@@ -29,13 +48,20 @@ def get_product_management_permissions() -> dict:
 		"read_item_price": can_read_price,
 		"create_item_price": can_create_price,
 		"write_item_price": can_write_price,
-		"can_access": can_read_item and can_read_price and (can_create_item or can_write_item) and (can_create_price or can_write_price),
+		"can_access": can_read_item
+		and can_read_price
+		and (can_create_item or can_write_item)
+		and (can_create_price or can_write_price),
 	}
 
 
 @frappe.whitelist()
 def get_item_groups(pos_profile: str) -> list:
 	"""Get leaf item groups allowed for product management in this POS Profile."""
+	if not frappe.has_permission("Item", "read"):
+		frappe.throw(_("Not permitted to read Item"))
+
+	_validate_pos_profile_access(pos_profile)
 	pos_profile_doc = frappe.get_cached_doc("POS Profile", pos_profile)
 	allowed_item_groups = _get_pos_profile_allowed_item_groups(pos_profile_doc)
 
@@ -63,6 +89,7 @@ def get_products(
 	if not frappe.has_permission("Item", "read"):
 		frappe.throw(_("Not permitted to read Item"))
 
+	_validate_pos_profile_access(pos_profile)
 	pos_profile_doc = frappe.get_cached_doc("POS Profile", pos_profile)
 	limit_start = max(cint(start), 0)
 	page_length = min(max(cint(limit) or DEFAULT_PAGE_LENGTH, 1), MAX_PAGE_LENGTH)
@@ -159,6 +186,7 @@ def save_product(pos_profile: str, data: str) -> dict:
 	if not frappe.has_permission("Item", permission_type):
 		frappe.throw(_("Not permitted to {0} Item").format(permission_type))
 
+	_validate_pos_profile_access(pos_profile)
 	pos_profile_doc = frappe.get_cached_doc("POS Profile", pos_profile)
 	allowed_item_groups = _get_pos_profile_allowed_item_groups(pos_profile_doc)
 	if allowed_item_groups and item_group not in allowed_item_groups:
@@ -173,6 +201,11 @@ def save_product(pos_profile: str, data: str) -> dict:
 		item.is_stock_item = 1
 	else:
 		item = frappe.get_doc("Item", data.get("item_code"))
+		# The incoming group is checked above, but the item's *existing* group
+		# must be in scope too — otherwise an item can be pulled out of a
+		# group this profile is not allowed to touch and into one it is.
+		if allowed_item_groups and item.item_group not in allowed_item_groups:
+			frappe.throw(_("This product belongs to an Item Group not allowed for this POS Profile"))
 
 	item.item_name = item_name
 
@@ -183,8 +216,15 @@ def save_product(pos_profile: str, data: str) -> dict:
 	if "is_stock_item" in data:
 		item.is_stock_item = 1 if data.get("is_stock_item") else 0
 
-	if "image" in data and not str(data.get("image") or "").startswith("data:"):
-		item.image = data.get("image") or ""
+	if "image" in data:
+		image = str(data.get("image") or "")
+		# The client sends a data: URI while a new file is pending upload; the
+		# real path is set afterwards. Anything else must be a Frappe file path
+		# so an arbitrary external URL cannot be rendered by the POS.
+		if not image.startswith("data:"):
+			if image and not image.startswith(ALLOWED_IMAGE_PREFIXES):
+				frappe.throw(_("Invalid image path"))
+			item.image = image
 
 	item.disabled = data.get("disabled", 0)
 	_save_uom_conversions(item, data.get("uom_conversions") or [])
@@ -219,8 +259,9 @@ def save_product(pos_profile: str, data: str) -> dict:
 			price_doc.selling = 1
 			price_doc.save()
 
-	frappe.db.commit()
-
+	# No explicit frappe.db.commit() — the framework commits at the end of a
+	# successful request and rolls back on exception. Committing here would
+	# defeat that rollback and also commit unrelated pending work.
 	return {"item_code": item.name}
 
 
