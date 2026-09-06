@@ -24,7 +24,7 @@
 				<!-- Mobile Number with Country Code Selector -->
 				<div>
 					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
-						{{ __("Mobile Number") }}
+						{{ __("Mobile Number") }} <span class="text-red-500">*</span>
 					</label>
 					<div class="flex gap-2">
 						<!-- Country Code Dropdown -->
@@ -114,6 +114,7 @@
 							:placeholder="__('Enter phone number')"
 							class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-start"
 							@input="updateMobileNumber"
+							required
 						/>
 					</div>
 				</div>
@@ -254,7 +255,7 @@
 							updateCustomerResource.loading ||
 							checkingPermission
 						"
-						:disabled="!customerData.customer_name || !hasPermission"
+						:disabled="!customerData.customer_name || !phoneNumber || !hasPermission"
 					>
 						{{ isEditMode ? __("Save Changes") : __("Create Customer") }}
 					</Button>
@@ -644,6 +645,9 @@ const checkPermissions = async () => {
 const handleCreate = async () => {
 	if (!customerData.value.customer_name) {
 		return showError(__("Customer Name is required"));
+	}
+	if (!phoneNumber.value) {
+		return showError(__("Mobile Number is required"));
 	}
 	if (isEditMode.value) {
 		await updateCustomerResource.submit();

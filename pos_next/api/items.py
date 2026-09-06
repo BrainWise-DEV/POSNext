@@ -10,7 +10,8 @@ from erpnext.stock.get_item_details import get_item_details as erpnext_get_item_
 from frappe import _
 from frappe.query_builder import DocType
 from frappe.query_builder import functions as fn
-from frappe.utils import flt, nowdate
+from frappe.query_builder.functions import IfNull
+from frappe.utils import flt, getdate, nowdate
 
 ITEM_RESULT_FIELDS = [
 	"name as item_code",
@@ -29,6 +30,71 @@ ITEM_RESULT_FIELDS = [
 ]
 
 ITEM_RESULT_COLUMNS = ",\n\t".join(ITEM_RESULT_FIELDS)
+
+
+def _get_item_price_transaction_date(transaction_date=None):
+	return getdate(transaction_date or nowdate())
+
+
+def _item_price_validity_conditions(ItemPrice, transaction_date=None):
+	"""Match ERPNext get_item_price: only prices valid on transaction_date."""
+	date = _get_item_price_transaction_date(transaction_date)
+	return (
+		(IfNull(ItemPrice.valid_from, "2000-01-01") <= date)
+		& (IfNull(ItemPrice.valid_upto, "2500-12-31") >= date)
+	)
+
+
+def _fetch_uom_prices_map(item_codes, price_list, transaction_date=None, selling=None):
+	"""Batch-fetch UOM prices valid on transaction_date (latest valid_from wins per UOM)."""
+	if not item_codes or not price_list:
+		return {}
+
+	ItemPrice = DocType("Item Price")
+	query = (
+		frappe.qb.from_(ItemPrice)
+		.select(ItemPrice.item_code, ItemPrice.uom, ItemPrice.price_list_rate)
+		.where(ItemPrice.item_code.isin(item_codes))
+		.where(ItemPrice.price_list == price_list)
+		.where(_item_price_validity_conditions(ItemPrice, transaction_date))
+		.orderby(ItemPrice.item_code)
+		.orderby(ItemPrice.valid_from, order=frappe.qb.desc)
+		.orderby(ItemPrice.uom)
+	)
+	if selling:
+		query = query.where(ItemPrice.selling == 1)
+
+	uom_prices_map = {}
+	for price in query.run(as_dict=True):
+		item_prices = uom_prices_map.setdefault(price["item_code"], {})
+		uom_key = price["uom"] or ""
+		if uom_key not in item_prices:
+			item_prices[uom_key] = price["price_list_rate"]
+	return uom_prices_map
+
+
+def _fetch_item_uom_prices(item_code, price_list, transaction_date=None):
+	"""Fetch UOM prices for one item valid on transaction_date."""
+	if not item_code or not price_list:
+		return {}
+
+	ItemPrice = DocType("Item Price")
+	prices = (
+		frappe.qb.from_(ItemPrice)
+		.select(ItemPrice.uom, ItemPrice.price_list_rate)
+		.where(ItemPrice.item_code == item_code)
+		.where(ItemPrice.price_list == price_list)
+		.where(_item_price_validity_conditions(ItemPrice, transaction_date))
+		.orderby(ItemPrice.valid_from, order=frappe.qb.desc)
+		.orderby(ItemPrice.uom)
+		.run(as_dict=True)
+	)
+	uom_prices = {}
+	for row in prices:
+		uom_key = row["uom"] or ""
+		if uom_key not in uom_prices:
+			uom_prices[uom_key] = row["price_list_rate"]
+	return uom_prices
 
 
 def get_stock_availability(item_code, warehouse):
@@ -387,19 +453,10 @@ def search_by_barcode(barcode, pos_profile):
 		item_details["warehouse"] = pos_profile_doc.warehouse
 
 		# Build uom_prices map (same pattern as get_items)
-		uom_prices = {}
-		if pos_profile_doc.selling_price_list:
-			ItemPrice = DocType("Item Price")
-			prices = (
-				frappe.qb.from_(ItemPrice)
-				.select(ItemPrice.uom, ItemPrice.price_list_rate)
-				.where(ItemPrice.item_code == item_code)
-				.where(ItemPrice.price_list == pos_profile_doc.selling_price_list)
-				.run(as_dict=True)
-			)
-			for p in prices:
-				if p["uom"]:
-					uom_prices[p["uom"]] = p["price_list_rate"]
+		uom_prices = _fetch_item_uom_prices(
+			item_code,
+			pos_profile_doc.selling_price_list,
+		)
 
 		item_details["uom_prices"] = uom_prices
 
@@ -561,23 +618,11 @@ def get_item_variants(template_item, pos_profile):
 					{"uom": uom["uom"], "conversion_factor": uom["conversion_factor"]}
 				)
 
-		# Get all UOM-specific prices for variants using Query Builder
-		uom_prices_map = {}
-		if variant_codes:
-			ItemPrice = DocType("Item Price")
-			prices = (
-				frappe.qb.from_(ItemPrice)
-				.select(ItemPrice.item_code, ItemPrice.uom, ItemPrice.price_list_rate)
-				.where(ItemPrice.item_code.isin(variant_codes))
-				.where(ItemPrice.price_list == pos_profile_doc.selling_price_list)
-				.orderby(ItemPrice.item_code)
-				.orderby(ItemPrice.uom)
-				.run(as_dict=True)
-			)
-			for price in prices:
-				if price["item_code"] not in uom_prices_map:
-					uom_prices_map[price["item_code"]] = {}
-				uom_prices_map[price["item_code"]][price["uom"]] = price["price_list_rate"]
+		# Get all UOM-specific prices for variants (valid on today's date)
+		uom_prices_map = _fetch_uom_prices_map(
+			variant_codes,
+			pos_profile_doc.selling_price_list,
+		)
 
 		# Get all variant attributes in a single query (performance optimization)
 		attributes_map = {}
@@ -1270,7 +1315,6 @@ def get_items(
 		item_codes = [item["item_code"] for item in items]
 		conversion_map = defaultdict(dict)  # parent -> {uom: factor}
 		uom_map = {}  # parent -> [ {uom, conversion_factor}, ... ]
-		uom_prices_map = {}  # item_code -> {uom: price_list_rate}
 
 		# UOM conversions (both list & map for quick lookup)
 		if item_codes:
@@ -1288,20 +1332,11 @@ def get_items(
 				if row.uom:
 					conversion_map[row.parent][row.uom] = row.conversion_factor
 
-		# UOM-specific prices - batch query ALL prices for all items using Query Builder
-		if item_codes:
-			ItemPrice = DocType("Item Price")
-			prices = (
-				frappe.qb.from_(ItemPrice)
-				.select(ItemPrice.item_code, ItemPrice.uom, ItemPrice.price_list_rate)
-				.where(ItemPrice.item_code.isin(item_codes))
-				.where(ItemPrice.price_list == pos_profile_doc.selling_price_list)
-				.orderby(ItemPrice.item_code)
-				.orderby(ItemPrice.uom)
-				.run(as_dict=True)
-			)
-			for price in prices:
-				uom_prices_map.setdefault(price["item_code"], {})[price["uom"]] = price["price_list_rate"]
+		# UOM-specific prices - only rows valid for today (latest valid_from per UOM)
+		uom_prices_map = _fetch_uom_prices_map(
+			item_codes,
+			pos_profile_doc.selling_price_list,
+		)
 
 		# Batch query stock for all items at once using Query Builder
 		stock_map = {}
@@ -1395,6 +1430,7 @@ def get_items(
 					.where(Item.variant_of == item["item_code"])
 					.where(ItemPrice.price_list == pos_profile_doc.selling_price_list)
 					.where(Item.disabled == 0)
+					.where(_item_price_validity_conditions(ItemPrice))
 					.run(as_dict=True)
 				)
 				derived_price = (
@@ -1591,7 +1627,6 @@ def get_items_bulk(
 		item_codes = [item["item_code"] for item in items]
 		conversion_map = defaultdict(dict)
 		uom_map = {}
-		uom_prices_map = {}
 
 		# UOM conversions
 		if item_codes:
@@ -1607,20 +1642,13 @@ def get_items_bulk(
 				if row.uom:
 					conversion_map[row.parent][row.uom] = row.conversion_factor
 
-		# Prices
+		# Prices (valid on today's date only)
 		price_list = pos_profile_doc.selling_price_list
-		if price_list and item_codes:
-			ItemPrice = DocType("Item Price")
-			prices = (
-				frappe.qb.from_(ItemPrice)
-				.select(ItemPrice.item_code, ItemPrice.uom, ItemPrice.price_list_rate)
-				.where(ItemPrice.price_list == price_list)
-				.where(ItemPrice.item_code.isin(item_codes))
-				.where(ItemPrice.selling == 1)
-				.run(as_dict=True)
-			)
-			for p in prices:
-				uom_prices_map.setdefault(p.item_code, {})[p.uom] = flt(p.price_list_rate)
+		uom_prices_map = _fetch_uom_prices_map(
+			item_codes,
+			price_list,
+			selling=1,
+		)
 
 		# Stock
 		warehouse = pos_profile_doc.warehouse

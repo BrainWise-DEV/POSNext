@@ -361,6 +361,12 @@ async function applyCoupon() {
 		return;
 	}
 
+	if (!props.customer) {
+		errorMessage.value = __("Please choose a customer");
+		showError(errorMessage.value);
+		return;
+	}
+
 	applying.value = true;
 	errorMessage.value = "";
 
