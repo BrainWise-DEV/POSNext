@@ -1475,10 +1475,34 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	}
 
 	/**
-	 * Builds cart snapshot for offer validation
+	 * Gross and net amount of a single cart line, on the same basis the server
+	 * uses when gating min_amt/max_amt.
+	 *
+	 * Mirrors buildOfferEvaluationPayload (which sends
+	 * `price_list_rate: item.price_list_rate || item.rate`) and the net-rate
+	 * derivation in apply_offers, which folds item discounts back into the
+	 * pricing items as `price_list_rate * (1 - discount_percentage / 100)`
+	 * before handing the cart total to ERPNext's transaction engine.
+	 */
+	function offerLineAmounts(item) {
+		const qty = item.quantity || 0;
+		const listRate = Number.parseFloat(item.price_list_rate || item.rate) || 0;
+		const gross = qty * listRate;
+		const discountPct = Number.parseFloat(item.discount_percentage) || 0;
+		return { gross, net: gross * (1 - discountPct / 100) };
+	}
+
+	/** Cart total after item-level discounts — the server's `doc.total`. */
+	function offerNetSubtotal(items) {
+		return items.reduce((sum, item) => sum + offerLineAmounts(item).net, 0);
+	}
+
+	/**
+	 * Builds cart snapshot for offer validation.
+	 * Paid lines only — free gifts must not inflate min_qty/max_qty/min_amt checks.
 	 */
 	function buildCartSnapshot() {
-		const items = invoiceItems.value;
+		const items = invoiceItems.value.filter((item) => !item.is_free_item);
 		const totalQty = items.reduce((sum, item) => sum + (item.quantity || 0), 0);
 		const itemCodes = items.map((item) => item.item_code);
 		const itemGroups = items.map((item) => item.item_group).filter(Boolean);
@@ -1491,24 +1515,33 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		const itemGroupQuantities = {};
 		// brandQuantities: { brand: total_qty } - quantity per brand
 		const brandQuantities = {};
+		// Gross line amounts (qty * price_list_rate) per scope, for min_amt/max_amt
+		const itemAmounts = {};
+		const itemGroupAmounts = {};
+		const brandAmounts = {};
 
 		for (const item of items) {
 			const qty = item.quantity || 0;
+			const { gross } = offerLineAmounts(item);
 
 			// Aggregate by item code
 			if (item.item_code) {
 				itemQuantities[item.item_code] = (itemQuantities[item.item_code] || 0) + qty;
+				itemAmounts[item.item_code] = (itemAmounts[item.item_code] || 0) + gross;
 			}
 
 			// Aggregate by item group
 			if (item.item_group) {
 				itemGroupQuantities[item.item_group] =
 					(itemGroupQuantities[item.item_group] || 0) + qty;
+				itemGroupAmounts[item.item_group] =
+					(itemGroupAmounts[item.item_group] || 0) + gross;
 			}
 
 			// Aggregate by brand
 			if (item.brand) {
 				brandQuantities[item.brand] = (brandQuantities[item.brand] || 0) + qty;
+				brandAmounts[item.brand] = (brandAmounts[item.brand] || 0) + gross;
 			}
 		}
 
@@ -1518,10 +1551,15 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			itemCodes: [...new Set(itemCodes)],
 			itemGroups: [...new Set(itemGroups)],
 			brands: [...new Set(brands)],
-			// New: quantity maps for accurate min_qty/max_qty validation
+			// Quantity maps for accurate min_qty/max_qty validation
 			itemQuantities,
 			itemGroupQuantities,
 			brandQuantities,
+			// Amount bases for min_amt/max_amt validation
+			netSubtotal: offerNetSubtotal(items),
+			itemAmounts,
+			itemGroupAmounts,
+			brandAmounts,
 		};
 	}
 
@@ -1712,52 +1750,74 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	let cachedItemQuantities = {};
 	let cachedItemGroupQuantities = {};
 	let cachedBrandQuantities = {};
+	let cachedItemAmounts = {};
+	let cachedItemGroupAmounts = {};
+	let cachedBrandAmounts = {};
 
 	function syncOfferSnapshot() {
 		// Only sync if values are initialized
 		if (subtotal.value !== undefined && invoiceItems.value) {
-			// Create hash for item codes and quantities to detect actual changes
-			const currentHash = invoiceItems.value
-				.map((item) => `${item.item_code}:${item.quantity}`)
+			// Paid lines only — free gifts must not inflate min_qty/max_qty checks
+			const paidItems = invoiceItems.value.filter((item) => !item.is_free_item);
+
+			// Create hash for paid item codes and quantities to detect actual changes.
+			// price_list_rate is part of the key because the cached amount maps
+			// below are money, not just counts — a price list change with an
+			// otherwise identical cart must invalidate them.
+			const currentHash = paidItems
+				.map(
+					(item) =>
+						`${item.item_code}:${item.quantity}:${item.price_list_rate || item.rate}`
+				)
 				.join(",");
 
 			// Only recalculate expensive operations if items actually changed
 			if (currentHash !== previousItemCodesHash) {
-				cachedItemCodes = invoiceItems.value.map((item) => item.item_code);
+				cachedItemCodes = paidItems.map((item) => item.item_code);
 				cachedItemGroups = [
-					...new Set(invoiceItems.value.map((item) => item.item_group).filter(Boolean)),
+					...new Set(paidItems.map((item) => item.item_group).filter(Boolean)),
 				];
 				cachedBrands = [
-					...new Set(invoiceItems.value.map((item) => item.brand).filter(Boolean)),
+					...new Set(paidItems.map((item) => item.brand).filter(Boolean)),
 				];
 
 				// Build quantity maps for accurate offer validation
 				cachedItemQuantities = {};
 				cachedItemGroupQuantities = {};
 				cachedBrandQuantities = {};
+				cachedItemAmounts = {};
+				cachedItemGroupAmounts = {};
+				cachedBrandAmounts = {};
 
-				for (const item of invoiceItems.value) {
+				for (const item of paidItems) {
 					const qty = item.quantity || 0;
+					const { gross } = offerLineAmounts(item);
 
 					if (item.item_code) {
 						cachedItemQuantities[item.item_code] =
 							(cachedItemQuantities[item.item_code] || 0) + qty;
+						cachedItemAmounts[item.item_code] =
+							(cachedItemAmounts[item.item_code] || 0) + gross;
 					}
 					if (item.item_group) {
 						cachedItemGroupQuantities[item.item_group] =
 							(cachedItemGroupQuantities[item.item_group] || 0) + qty;
+						cachedItemGroupAmounts[item.item_group] =
+							(cachedItemGroupAmounts[item.item_group] || 0) + gross;
 					}
 					if (item.brand) {
 						cachedBrandQuantities[item.brand] =
 							(cachedBrandQuantities[item.brand] || 0) + qty;
+						cachedBrandAmounts[item.brand] =
+							(cachedBrandAmounts[item.brand] || 0) + gross;
 					}
 				}
 
 				previousItemCodesHash = currentHash;
 			}
 
-			// Calculate total quantity (sum of all item quantities, not line count)
-			const totalQty = invoiceItems.value.reduce((sum, item) => {
+			// Calculate total quantity (sum of all paid item quantities, not line count)
+			const totalQty = paidItems.reduce((sum, item) => {
 				return sum + (item.quantity || 0);
 			}, 0);
 
@@ -1770,6 +1830,13 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				itemQuantities: cachedItemQuantities,
 				itemGroupQuantities: cachedItemGroupQuantities,
 				brandQuantities: cachedBrandQuantities,
+				// Recomputed every sync, not cached with the maps above: item
+				// discounts change without any item/qty/price change (the server
+				// stamps them back onto the cart after apply_offers).
+				netSubtotal: offerNetSubtotal(paidItems),
+				itemAmounts: cachedItemAmounts,
+				itemGroupAmounts: cachedItemGroupAmounts,
+				brandAmounts: cachedBrandAmounts,
 			});
 		}
 	}

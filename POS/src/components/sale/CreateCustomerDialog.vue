@@ -426,7 +426,11 @@ const hasValidCustomerName = computed(() => {
 });
 
 const canSubmitCustomer = computed(
-	() => hasValidCustomerName.value && Boolean(phoneNumber.value) && hasPermission.value
+	() =>
+		hasValidCustomerName.value &&
+		Boolean(phoneNumber.value) &&
+		Boolean(selectedCountryCode.value) &&
+		hasPermission.value
 );
 
 const currentCountryCode = computed(() => {
@@ -461,10 +465,17 @@ const selectCountry = (country) => {
 	updateTerritoryFromCountry();
 };
 
+const DEFAULT_MOBILE_ISD = "+20";
+
 const updateMobileNumber = () => {
-	customerData.value.mobile_no = phoneNumber.value
+	if (!phoneNumber.value) {
+		customerData.value.mobile_no = "";
+		return;
+	}
+	// Never persist a leading "-" when ISD is still unresolved
+	customerData.value.mobile_no = selectedCountryCode.value
 		? `${selectedCountryCode.value}-${phoneNumber.value}`
-		: "";
+		: phoneNumber.value;
 };
 
 const handleClickOutside = (event) => {
@@ -549,7 +560,15 @@ const applyDefaultCountryCode = async () => {
 		return;
 	}
 
-	setCountryFromProfileValue(profileCountry);
+	const applied = setCountryFromProfileValue(profileCountry);
+	if (!applied && !selectedCountryCode.value) {
+		const fallback =
+			resolveCountryIsd(DEFAULT_MOBILE_ISD) ||
+			countriesStore.countries[0]?.isd ||
+			DEFAULT_MOBILE_ISD;
+		selectedCountryCode.value = fallback;
+		log.warn(`Falling back to default ISD ${fallback}`);
+	}
 	defaultCountryApplied.value = true;
 };
 
@@ -608,7 +627,12 @@ const createCustomerResource = createResource({
 	},
 	onError: (error) => {
 		log.error("Error creating customer", error);
-		showError(error.message || __("Failed to create customer"));
+		const message =
+			error?.messages?.[0] ||
+			error?.message ||
+			(typeof error === "string" ? error : null) ||
+			__("Failed to create customer");
+		showError(message);
 	},
 });
 

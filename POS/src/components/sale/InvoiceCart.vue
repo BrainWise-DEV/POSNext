@@ -1897,8 +1897,10 @@ const displayDiscountAmount = computed(() => {
 		(sum, item) => sum + (Number.parseFloat(item.discount_amount) || 0),
 		0
 	);
-	// Fall back to store total when items haven't been stamped yet (e.g. header coupon)
-	return lineDiscounts > 0 ? lineDiscounts : props.discountAmount;
+	const storeDiscount = Number.parseFloat(props.discountAmount) || 0;
+	// Prefer the larger value: store total includes header/additional discounts;
+	// line sum is fresher when offer stamps land before the incremental cache.
+	return Math.max(lineDiscounts, storeDiscount);
 });
 
 /**
