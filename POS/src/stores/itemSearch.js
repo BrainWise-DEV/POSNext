@@ -442,9 +442,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 	function upsertItemInList(listRef, versionRef, registrySet, updatedItem) {
 		if (!updatedItem?.item_code) return;
 
-		const index = listRef.value.findIndex(
-			(item) => item.item_code === updatedItem.item_code,
-		);
+		const index = listRef.value.findIndex((item) => item.item_code === updatedItem.item_code);
 
 		if (index >= 0) {
 			Object.assign(listRef.value[index], updatedItem);
@@ -476,21 +474,15 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 			});
 
 			const list = items?.message || items || [];
-			const updatedItem =
-				list.find((item) => item.item_code === itemCode) || list[0];
+			const updatedItem = list.find((item) => item.item_code === itemCode) || list[0];
 			if (!updatedItem) return null;
 
-			upsertItemInList(
-				allItems,
-				allItemsVersion,
-				registeredAllItems,
-				updatedItem,
-			);
+			upsertItemInList(allItems, allItemsVersion, registeredAllItems, updatedItem);
 			upsertItemInList(
 				searchResults,
 				searchResultsVersion,
 				registeredSearchItems,
-				updatedItem,
+				updatedItem
 			);
 
 			offlineWorker.cacheItems([updatedItem]).catch((error) => {
@@ -650,43 +642,47 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 				let compareResult = 0;
 
 				switch (sortBy.value) {
-					case "name":
+					case "name": {
 						// Sort by item_name alphabetically
 						const nameA = (a.item_name || "").toLowerCase();
 						const nameB = (b.item_name || "").toLowerCase();
 						compareResult = nameA.localeCompare(nameB);
 						break;
+					}
 
-					case "brand":
+					case "brand": {
 						// Sort by brand alphabetically
 						const brandA = (a.brand || "").toLowerCase();
 						const brandB = (b.brand || "").toLowerCase();
 						compareResult = brandA.localeCompare(brandB);
 						break;
+					}
 
 					case "quantity":
 						// Sort by stock quantity
 						compareResult = (a.actual_qty ?? 0) - (b.actual_qty ?? 0);
 						break;
 
-					case "item_group":
+					case "item_group": {
 						// Sort by item_group alphabetically
 						const groupA = (a.item_group || "").toLowerCase();
 						const groupB = (b.item_group || "").toLowerCase();
 						compareResult = groupA.localeCompare(groupB);
 						break;
+					}
 
 					case "price":
 						// Sort by price_list_rate (standard selling rate)
 						compareResult = (a.price_list_rate ?? 0) - (b.price_list_rate ?? 0);
 						break;
 
-					case "item_code":
+					case "item_code": {
 						// Sort by item_code alphabetically
 						const codeA = (a.item_code || "").toLowerCase();
 						const codeB = (b.item_code || "").toLowerCase();
 						compareResult = codeA.localeCompare(codeB);
 						break;
+					}
 
 					default:
 						// No sorting
