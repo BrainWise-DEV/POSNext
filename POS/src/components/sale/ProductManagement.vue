@@ -254,304 +254,330 @@
 								</div>
 
 								<!-- Form Content -->
-								<div class="flex-1 overflow-y-auto p-6">
-									<div class="max-w-2xl">
-										<div class="space-y-6">
-											<!-- Image Upload -->
-											<div>
-												<label
-													class="block text-sm font-medium text-gray-700 mb-2"
-													>{{ __("Product Image") }}</label
+								<div class="flex-1 overflow-y-auto">
+									<div class="mx-auto w-full max-w-[1400px] p-6">
+										<!--
+											Two-column workspace. Below lg it collapses to one column with
+											the image on top; the grid handles RTL on its own, so the image
+											sits on the end side in both directions.
+										-->
+										<div
+											class="grid items-start gap-8 xl:grid-cols-[minmax(0,1fr)_minmax(300px,380px)] min-[1536px]:grid-cols-[minmax(0,1fr)_minmax(340px,460px)]"
+										>
+											<!-- ============ IMAGE PANEL ============ -->
+											<aside
+										class="order-first w-full max-w-[320px] xl:order-none xl:max-w-none xl:sticky xl:top-0"
+									>
+												<input
+													type="file"
+													accept="image/png,image/jpeg,image/webp,image/gif"
+													@change="handleImageSelect"
+													ref="fileInput"
+													class="hidden"
+												/>
+
+												<!-- The image is the click target and the drop zone -->
+												<button
+													type="button"
+													@click="fileInput?.click()"
+													@dragenter.prevent="isDraggingImage = true"
+													@dragover.prevent="isDraggingImage = true"
+													@dragleave.prevent="isDraggingImage = false"
+													@drop.prevent="handleImageDrop"
+													:class="[
+														'group relative block w-full aspect-square overflow-hidden rounded-xl border-2 transition-colors',
+														isDraggingImage
+															? 'border-blue-500 border-solid bg-blue-50'
+															: form.image
+																? 'border-solid border-gray-200 bg-gray-50'
+																: 'border-dashed border-gray-300 bg-gray-50 hover:border-blue-400 hover:bg-blue-50/40',
+													]"
+													:aria-label="form.image ? __('Change product image') : __('Upload product image')"
 												>
-												<div class="flex items-start gap-4">
+													<img
+														v-if="form.image"
+														:src="form.image"
+														alt=""
+														class="h-full w-full object-contain"
+													/>
 													<div
-														class="w-32 h-32 flex-shrink-0 bg-gray-100 border border-gray-200 rounded-lg overflow-hidden relative"
+														v-else
+														class="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center"
 													>
-														<img
-															v-if="form.image"
-															:src="form.image"
-															class="w-full h-full object-cover"
-														/>
-														<FeatherIcon
-															v-else
-															name="image"
-															class="w-8 h-8 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-gray-400"
-														/>
-													</div>
-													<div
-														class="flex-1 border border-gray-200 rounded-lg bg-white p-3"
-													>
-														<div class="flex flex-wrap gap-2 mb-2">
-															<input
-																type="file"
-																accept="image/png,image/jpeg,image/webp,image/gif"
-																@change="handleImageSelect"
-																ref="fileInput"
-																class="hidden"
-															/>
-															<Button
-																v-if="form.image"
-																@click="fileInput?.click()"
-																variant="outline"
-															>
-																<template #prefix
-																	><FeatherIcon
-																		name="refresh-cw"
-																		class="w-4 h-4"
-																/></template>
-																{{ __("Change") }}
-															</Button>
-															<Button
-																v-else
-																@click="fileInput?.click()"
-																variant="outline"
-															>
-																<template #prefix
-																	><FeatherIcon
-																		name="upload"
-																		class="w-4 h-4"
-																/></template>
-																{{ __("Upload") }}
-															</Button>
-															<Button
-																v-if="form.image"
-																@click="clearImage"
-																variant="subtle"
-																theme="red"
-															>
-																<template #prefix
-																	><FeatherIcon
-																		name="trash-2"
-																		class="w-4 h-4"
-																/></template>
-																{{ __("Remove") }}
-															</Button>
-														</div>
-														<p class="text-xs text-gray-500">
-															{{
-																__(
-																	"PNG, JPG, GIF, or WebP up to 2 MB. Upload happens when the product is saved."
-																)
-															}}
-														</p>
-														<p
-															v-if="validationErrors.image"
-															class="mt-1 text-xs text-red-600"
-														>
-															{{ validationErrors.image }}
-														</p>
 														<div
-															v-if="selectedFile"
-															class="mt-2 text-sm text-blue-600 flex items-center gap-2"
+															class="flex h-16 w-16 items-center justify-center rounded-full bg-white text-gray-400 shadow-sm group-hover:text-blue-500"
 														>
-															<FeatherIcon
-																name="file"
-																class="w-4 h-4"
-															/>
-															{{ selectedFile.name }} ({{
-																formatFileSize(selectedFile.size)
-															}})
+															<FeatherIcon name="image" class="h-8 w-8" />
+														</div>
+														<div>
+															<p class="text-sm font-medium text-gray-700">
+																{{ __("Add a product image") }}
+															</p>
+															<p class="mt-1 text-xs text-gray-500">
+																{{ __("Click to browse or drop a file here") }}
+															</p>
 														</div>
 													</div>
-												</div>
-											</div>
 
-											<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-												<div>
-													<FormControl
-														type="text"
-														:label="__('Product Name')"
-														v-model="form.item_name"
-														:required="true"
-													/>
-													<p
-														v-if="validationErrors.item_name"
-														class="mt-1 text-xs text-red-600"
+													<!-- Hover affordance once an image exists -->
+													<div
+														v-if="form.image"
+														class="absolute inset-0 flex items-center justify-center bg-gray-900/0 opacity-0 transition group-hover:bg-gray-900/40 group-hover:opacity-100"
 													>
-														{{ validationErrors.item_name }}
-													</p>
-												</div>
-												<div>
-													<label
-														class="block text-sm font-medium text-gray-700 mb-1.5 text-start"
-													>
-														{{ __("Item Group") }}
-														<span class="text-red-500">*</span>
-													</label>
-													<SelectInput
-														v-model="form.item_group"
-														:options="rawItemGroupOptions"
-														:placeholder="__('Select Item Group')"
-														:searchable="true"
-														:search-placeholder="
-															__('Search item groups...')
-														"
-													/>
-													<p
-														v-if="validationErrors.item_group"
-														class="mt-1 text-xs text-red-600"
-													>
-														{{ validationErrors.item_group }}
-													</p>
-												</div>
-												<div>
-													<label
-														class="block text-sm font-medium text-gray-700 mb-1.5 text-start"
-													>
-														{{ __("UOM") }}
-														<span class="text-red-500">*</span>
-													</label>
-													<SelectInput
-														v-model="form.stock_uom"
-														:options="uomOptions"
-														:placeholder="__('Select UOM')"
-														:searchable="true"
-														:search-placeholder="__('Search UOMs...')"
-													/>
-													<p
-														v-if="validationErrors.stock_uom"
-														class="mt-1 text-xs text-red-600"
-													>
-														{{ validationErrors.stock_uom }}
-													</p>
-												</div>
-												<div>
-													<FormControl
-														type="number"
-														:label="priceLabel"
-														v-model="form.price"
-														:required="true"
-													/>
-													<p
-														v-if="validationErrors.price"
-														class="mt-1 text-xs text-red-600"
-													>
-														{{ validationErrors.price }}
-													</p>
-												</div>
-											</div>
-
-											<div class="pt-4 border-t">
-												<div
-													class="flex items-center justify-between mb-3"
-												>
-													<div>
-														<h4
-															class="text-sm font-semibold text-gray-900"
+														<span
+															class="flex items-center gap-2 rounded-lg bg-white/95 px-3 py-2 text-sm font-medium text-gray-800 shadow"
 														>
-															{{ __("UOM Conversions") }}
-														</h4>
-														<p class="text-xs text-gray-500 mt-0.5">
-															{{
-																__(
-																	"Define alternate selling units against the base UOM."
-																)
-															}}
-														</p>
+															<FeatherIcon name="refresh-cw" class="h-4 w-4" />
+															{{ __("Change") }}
+														</span>
 													</div>
-													<Button
-														@click="addUomConversion"
-														variant="outline"
-													>
-														<template #prefix
-															><FeatherIcon
-																name="plus"
-																class="w-4 h-4"
-														/></template>
-														{{ __("Add UOM") }}
+												</button>
+
+												<div class="mt-3 flex flex-wrap items-center gap-2">
+													<Button @click="fileInput?.click()" variant="outline">
+														<template #prefix>
+															<FeatherIcon
+																:name="form.image ? 'refresh-cw' : 'upload'"
+																class="h-4 w-4"
+															/>
+														</template>
+														{{ form.image ? __("Change") : __("Upload") }}
+													</Button>
+													<Button v-if="form.image" @click="clearImage" variant="subtle" theme="red">
+														<template #prefix>
+															<FeatherIcon name="trash-2" class="h-4 w-4" />
+														</template>
+														{{ __("Remove") }}
 													</Button>
 												</div>
 
-												<div
-													v-if="form.uom_conversions.length === 0"
-													class="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-500"
-												>
-													{{ __("No alternate UOMs configured.") }}
-												</div>
-												<div v-else class="space-y-2">
-													<div
-														v-for="(
-															row, index
-														) in form.uom_conversions"
-														:key="index"
-														class="grid grid-cols-[1fr_9rem_auto] gap-3 items-end rounded-lg border border-gray-200 p-3 bg-gray-50"
-													>
-														<div>
-															<label
-																class="block text-xs font-medium text-gray-600 mb-1.5 text-start"
-																>{{ __("UOM") }}</label
-															>
-															<SelectInput
-																v-model="row.uom"
-																:options="uomOptions"
-																:placeholder="__('Select UOM')"
-																:searchable="true"
-																:search-placeholder="
-																	__('Search UOMs...')
-																"
-															/>
-														</div>
-														<FormControl
-															type="number"
-															:label="__('Factor')"
-															v-model="row.conversion_factor"
-														/>
-														<Button
-															@click="removeUomConversion(index)"
-															variant="subtle"
-															theme="red"
-														>
-															<template #prefix
-																><FeatherIcon
-																	name="trash-2"
-																	class="w-4 h-4"
-															/></template>
-															{{ __("Remove") }}
-														</Button>
-													</div>
-												</div>
 												<p
-													v-if="validationErrors.uom_conversions"
-													class="mt-2 text-xs text-red-600"
+													v-if="selectedFile"
+													class="mt-2 flex items-center gap-2 text-sm text-blue-600"
 												>
-													{{ validationErrors.uom_conversions }}
+													<FeatherIcon name="file" class="h-4 w-4 flex-shrink-0" />
+													<span class="truncate"
+														>{{ selectedFile.name }} ({{ formatFileSize(selectedFile.size) }})</span
+													>
+												</p>
+												<p v-if="validationErrors.image" class="mt-2 text-xs text-red-600">
+													{{ validationErrors.image }}
 												</p>
 												<p class="mt-2 text-xs text-gray-500">
 													{{
 														__(
-															"Example: if base UOM is Piece, Box factor 12 means 1 Box = 12 Pieces."
+															"PNG, JPG, GIF, or WebP up to 2 MB. Upload happens when the product is saved."
 														)
 													}}
 												</p>
-											</div>
+											</aside>
 
-											<div class="pt-4 border-t">
-												<div class="flex flex-col gap-3">
-													<label
-														class="flex items-center gap-2 cursor-pointer"
+											<!-- ============ FIELDS ============ -->
+											<div class="min-w-0 space-y-8">
+												<!-- Details -->
+												<section>
+													<h4
+														class="mb-4 text-xs font-semibold uppercase tracking-wide text-gray-500"
 													>
-														<input
-															type="checkbox"
-															v-model="form.is_stock_item"
-															class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-														/>
-														<span class="text-sm text-gray-700">{{
-															__("Maintain Stock")
-														}}</span>
-													</label>
-													<label
-														class="flex items-center gap-2 cursor-pointer"
+														{{ __("Details") }}
+													</h4>
+													<div class="space-y-5">
+														<div>
+															<FormControl
+																type="text"
+																:label="__('Product Name')"
+																v-model="form.item_name"
+																:required="true"
+															/>
+															<p
+																v-if="validationErrors.item_name"
+																class="mt-1 text-xs text-red-600"
+															>
+																{{ validationErrors.item_name }}
+															</p>
+														</div>
+
+														<div class="grid grid-cols-1 gap-5 min-[1536px]:grid-cols-2">
+															<div>
+																<label
+																	class="mb-1.5 block text-start text-sm font-medium text-gray-700"
+																>
+																	{{ __("Item Group") }}
+																	<span class="text-red-500">*</span>
+																</label>
+																<SelectInput
+																	v-model="form.item_group"
+																	:options="rawItemGroupOptions"
+																	:placeholder="__('Select Item Group')"
+																	:searchable="true"
+																	:search-placeholder="__('Search item groups...')"
+																/>
+																<p
+																	v-if="validationErrors.item_group"
+																	class="mt-1 text-xs text-red-600"
+																>
+																	{{ validationErrors.item_group }}
+																</p>
+															</div>
+															<div>
+																<label
+																	class="mb-1.5 block text-start text-sm font-medium text-gray-700"
+																>
+																	{{ __("UOM") }}
+																	<span class="text-red-500">*</span>
+																</label>
+																<SelectInput
+																	v-model="form.stock_uom"
+																	:options="uomOptions"
+																	:placeholder="__('Select UOM')"
+																	:searchable="true"
+																	:search-placeholder="__('Search UOMs...')"
+																/>
+																<p
+																	v-if="validationErrors.stock_uom"
+																	class="mt-1 text-xs text-red-600"
+																>
+																	{{ validationErrors.stock_uom }}
+																</p>
+															</div>
+															<div>
+																<FormControl
+																	type="number"
+																	:label="priceLabel"
+																	v-model="form.price"
+																	:required="true"
+																/>
+																<p
+																	v-if="validationErrors.price"
+																	class="mt-1 text-xs text-red-600"
+																>
+																	{{ validationErrors.price }}
+																</p>
+															</div>
+														</div>
+													</div>
+												</section>
+
+												<!-- UOM Conversions -->
+												<section class="border-t pt-6">
+													<div class="mb-4 flex flex-wrap items-start justify-between gap-3">
+														<div>
+															<h4
+																class="text-xs font-semibold uppercase tracking-wide text-gray-500"
+															>
+																{{ __("UOM Conversions") }}
+															</h4>
+															<p class="mt-1 text-xs text-gray-500">
+																{{ __("Define alternate selling units against the base UOM.") }}
+															</p>
+														</div>
+														<Button @click="addUomConversion" variant="outline">
+															<template #prefix>
+																<FeatherIcon name="plus" class="h-4 w-4" />
+															</template>
+															{{ __("Add UOM") }}
+														</Button>
+													</div>
+
+													<div
+														v-if="form.uom_conversions.length === 0"
+														class="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-500"
 													>
-														<input
-															type="checkbox"
-															v-model="form.disabled"
-															class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-														/>
-														<span class="text-sm text-gray-700">{{
-															__("Disabled")
-														}}</span>
-													</label>
-												</div>
+														{{ __("No alternate UOMs configured.") }}
+													</div>
+													<div v-else class="space-y-2">
+														<div
+															v-for="(row, index) in form.uom_conversions"
+															:key="index"
+															class="grid grid-cols-[minmax(0,1fr)_8rem_auto] items-end gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3"
+														>
+															<div class="min-w-0">
+																<label
+																	class="mb-1.5 block text-start text-xs font-medium text-gray-600"
+																	>{{ __("UOM") }}</label
+																>
+																<SelectInput
+																	v-model="row.uom"
+																	:options="uomOptions"
+																	:placeholder="__('Select UOM')"
+																	:searchable="true"
+																	:search-placeholder="__('Search UOMs...')"
+																/>
+															</div>
+															<FormControl
+																type="number"
+																:label="__('Factor')"
+																v-model="row.conversion_factor"
+															/>
+															<Button
+																@click="removeUomConversion(index)"
+																variant="subtle"
+																theme="red"
+																:aria-label="__('Remove')"
+															>
+																<FeatherIcon name="trash-2" class="h-4 w-4" />
+															</Button>
+														</div>
+													</div>
+													<p
+														v-if="validationErrors.uom_conversions"
+														class="mt-2 text-xs text-red-600"
+													>
+														{{ validationErrors.uom_conversions }}
+													</p>
+													<p class="mt-2 text-xs text-gray-500">
+														{{
+															__(
+																"Example: if base UOM is Piece, Box factor 12 means 1 Box = 12 Pieces."
+															)
+														}}
+													</p>
+												</section>
+
+												<!-- Options -->
+												<section class="border-t pt-6">
+													<h4
+														class="mb-4 text-xs font-semibold uppercase tracking-wide text-gray-500"
+													>
+														{{ __("Options") }}
+													</h4>
+													<div class="grid grid-cols-1 gap-3 min-[1536px]:grid-cols-2">
+														<label
+															class="flex cursor-pointer items-start gap-3 rounded-lg border border-gray-200 p-3 transition-colors hover:border-gray-300 hover:bg-gray-50"
+														>
+															<input
+																type="checkbox"
+																v-model="form.is_stock_item"
+																class="mt-0.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+															/>
+															<span class="text-start">
+																<span class="block text-sm font-medium text-gray-800">{{
+																	__("Maintain Stock")
+																}}</span>
+																<span class="mt-0.5 block text-xs text-gray-500">{{
+																	__("Track quantity on hand for this product.")
+																}}</span>
+															</span>
+														</label>
+														<label
+															class="flex cursor-pointer items-start gap-3 rounded-lg border border-gray-200 p-3 transition-colors hover:border-gray-300 hover:bg-gray-50"
+														>
+															<input
+																type="checkbox"
+																v-model="form.disabled"
+																class="mt-0.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+															/>
+															<span class="text-start">
+																<span class="block text-sm font-medium text-gray-800">{{
+																	__("Disabled")
+																}}</span>
+																<span class="mt-0.5 block text-xs text-gray-500">{{
+																	__("Hide this product from the POS.")
+																}}</span>
+															</span>
+														</label>
+													</div>
+												</section>
 											</div>
 										</div>
 									</div>
@@ -610,6 +636,7 @@ const selectedProduct = ref(null);
 const isCreating = ref(false);
 const selectedFile = ref(null);
 const fileInput = ref(null);
+const isDraggingImage = ref(false);
 const validationErrors = ref({});
 let productSearchTimer = null;
 
@@ -760,13 +787,9 @@ function getDefaultItemGroup() {
 	return rawItemGroupOptions.value[0]?.value || "";
 }
 
-function handleImageSelect(event) {
-	const file = event.target.files?.[0];
+function acceptImageFile(file) {
 	clearValidationError("image");
-
-	if (!file) {
-		return;
-	}
+	if (!file) return;
 
 	const imageError = validateImageFile(file);
 	if (imageError) {
@@ -786,6 +809,15 @@ function handleImageSelect(event) {
 		form.value.image = e.target.result;
 	};
 	reader.readAsDataURL(file);
+}
+
+function handleImageSelect(event) {
+	acceptImageFile(event.target.files?.[0]);
+}
+
+function handleImageDrop(event) {
+	isDraggingImage.value = false;
+	acceptImageFile(event.dataTransfer?.files?.[0]);
 }
 
 function clearImage() {
