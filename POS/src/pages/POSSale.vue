@@ -1248,7 +1248,9 @@ watch(
 
 async function loadProductManagementPermissions() {
 	try {
-		const result = await call("pos_next.api.product_management.get_product_management_permissions");
+		const result = await call(
+			"pos_next.api.product_management.get_product_management_permissions"
+		);
 		canAccessProductManagement.value = Boolean(result?.can_access);
 	} catch (error) {
 		log.error("Error loading product management permissions:", error);

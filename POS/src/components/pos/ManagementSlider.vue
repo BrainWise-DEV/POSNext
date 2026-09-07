@@ -22,7 +22,7 @@
 			</div>
 		</button>
 
-		<!-- Products -->
+		<!-- Stock Lookup -->
 		<button
 			@click="handleMenuClick('products')"
 			:class="[
