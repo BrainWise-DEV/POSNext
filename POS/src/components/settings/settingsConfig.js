@@ -19,7 +19,7 @@ export const icons = {
 	tag: "M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z",
 	info: "M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z",
 	warning: "M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z",
-}
+};
 
 // Theme Configurations for Section Headers
 export const sectionThemes = {
@@ -37,7 +37,7 @@ export const sectionThemes = {
 		badgeBg: "bg-green-100",
 		badgeColor: "text-green-700",
 	},
-}
+};
 
 // Theme Configurations for Subsections
 export const subsectionThemes = {
@@ -61,13 +61,13 @@ export const subsectionThemes = {
 		border: "border-teal-200",
 		iconColor: "text-teal-600",
 	},
-}
+};
 
 /**
  * Helper function to get section header classes
  */
 export function getSectionHeaderClasses(theme) {
-	const config = sectionThemes[theme] || sectionThemes.purple
+	const config = sectionThemes[theme] || sectionThemes.purple;
 	return {
 		header: `px-6 py-4 bg-gradient-to-r ${config.headerGradient} border-b border-gray-200`,
 		iconContainer: `p-2 ${config.iconBg} rounded-lg`,
@@ -75,16 +75,16 @@ export function getSectionHeaderClasses(theme) {
 		badge: `flex items-center space-x-2 px-3 py-1.5 ${config.badgeBg} rounded-full`,
 		badgeIcon: `w-4 h-4 ${config.iconColor}`,
 		badgeText: `text-xs font-semibold ${config.badgeColor}`,
-	}
+	};
 }
 
 /**
  * Helper function to get subsection classes
  */
 export function getSubsectionClasses(theme) {
-	const config = subsectionThemes[theme] || subsectionThemes.gray
+	const config = subsectionThemes[theme] || subsectionThemes.gray;
 	return {
 		container: `bg-gradient-to-br ${config.gradient} rounded-lg p-5 border ${config.border}`,
 		icon: `w-5 h-5 ${config.iconColor}`,
-	}
+	};
 }

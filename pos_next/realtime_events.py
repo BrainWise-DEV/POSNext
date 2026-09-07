@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright (c) 2024, POS Next and contributors
 # For license information, please see license.txt
 
@@ -96,7 +95,7 @@ def emit_stock_update_event(doc, method=None):
 		# Log error but don't fail the transaction
 		frappe.log_error(
 			title=_("Real-time Stock Update Event Error"),
-			message=f"Failed to emit stock update event for {doc.name}: {str(e)}",
+			message=f"Failed to emit stock update event for {doc.name}: {e!s}",
 		)
 
 
@@ -128,7 +127,7 @@ def emit_invoice_created_event(doc, method=None):
 	except Exception as e:
 		frappe.log_error(
 			title=_("Real-time Invoice Created Event Error"),
-			message=f"Failed to emit invoice created event for {doc.name}: {str(e)}",
+			message=f"Failed to emit invoice created event for {doc.name}: {e!s}",
 		)
 
 
@@ -174,7 +173,7 @@ def emit_pos_profile_updated_event(doc, method=None):
 		# Log error but don't fail the transaction
 		frappe.log_error(
 			title=_("Real-time POS Profile Update Event Error"),
-			message=f"Failed to emit POS profile update event for {doc.name}: {str(e)}",
+			message=f"Failed to emit POS profile update event for {doc.name}: {e!s}",
 		)
 
 
@@ -216,5 +215,5 @@ def emit_customer_event(doc, method=None):
 	except Exception as e:
 		frappe.log_error(
 			title=_("Real-time Customer Update Event Error"),
-			message=f"Failed to emit customer update event for {doc.name}: {str(e)}",
+			message=f"Failed to emit customer update event for {doc.name}: {e!s}",
 		)

@@ -2,42 +2,42 @@
 // For license information, please see license.txt
 
 frappe.query_reports["Offline Sync and System Health Report"] = {
-	"filters": [
+	filters: [
 		{
-			"fieldname": "from_date",
-			"label": __("From Date"),
-			"fieldtype": "Date",
-			"default": frappe.datetime.add_days(frappe.datetime.get_today(), -7),
-			"reqd": 0
+			fieldname: "from_date",
+			label: __("From Date"),
+			fieldtype: "Date",
+			default: frappe.datetime.add_days(frappe.datetime.get_today(), -7),
+			reqd: 0,
 		},
 		{
-			"fieldname": "to_date",
-			"label": __("To Date"),
-			"fieldtype": "Date",
-			"default": frappe.datetime.get_today(),
-			"reqd": 0
+			fieldname: "to_date",
+			label: __("To Date"),
+			fieldtype: "Date",
+			default: frappe.datetime.get_today(),
+			reqd: 0,
 		},
 		{
-			"fieldname": "pos_profile",
-			"label": __("POS Profile"),
-			"fieldtype": "Link",
-			"options": "POS Profile"
+			fieldname: "pos_profile",
+			label: __("POS Profile"),
+			fieldtype: "Link",
+			options: "POS Profile",
 		},
 		{
-			"fieldname": "status",
-			"label": __("Sync Status"),
-			"fieldtype": "Select",
-			"options": "\nPending\nSynced\nFailed",
-			"default": ""
+			fieldname: "status",
+			label: __("Sync Status"),
+			fieldtype: "Select",
+			options: "\nPending\nSynced\nFailed",
+			default: "",
 		},
 		{
-			"fieldname": "user",
-			"label": __("User"),
-			"fieldtype": "Link",
-			"options": "User"
-		}
+			fieldname: "user",
+			label: __("User"),
+			fieldtype: "Link",
+			options: "User",
+		},
 	],
-	"formatter": function(value, row, column, data, default_formatter) {
+	formatter: function (value, row, column, data, default_formatter) {
 		value = default_formatter(value, row, column, data);
 
 		if (column.fieldname == "health_status") {
@@ -61,5 +61,5 @@ frappe.query_reports["Offline Sync and System Health Report"] = {
 		}
 
 		return value;
-	}
+	},
 };
