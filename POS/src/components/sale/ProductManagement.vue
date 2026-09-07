@@ -7,12 +7,14 @@
 			@click.self="handleClose"
 		>
 			<!-- Main Container -->
-			<div class="fixed inset-0 flex items-center justify-center p-4">
+			<div class="fixed inset-0 flex items-center justify-center sm:p-4">
 				<div
-					class="w-full h-full max-w-[95vw] max-h-[95vh] bg-white rounded-lg shadow-2xl overflow-hidden flex flex-col"
+					class="w-full h-full bg-white shadow-2xl overflow-hidden flex flex-col sm:max-w-[95vw] sm:max-h-[95vh] sm:rounded-lg"
 				>
 					<!-- Header -->
-					<div class="flex items-center justify-between px-6 py-4 border-b">
+					<div
+						class="flex items-center justify-between gap-3 border-b px-4 py-3 sm:px-6 sm:py-4"
+					>
 						<div class="flex items-center gap-3">
 							<FeatherIcon name="box" class="w-5 h-5 text-gray-700" />
 							<div>
@@ -36,7 +38,16 @@
 					<!-- Content: Split Layout -->
 					<div class="flex-1 flex overflow-hidden">
 						<!-- LEFT SIDE: Product List & Navigation -->
-						<div class="w-80 flex-shrink-0 border-e bg-gray-50 flex flex-col">
+						<!--
+							Below md the list and the form show one at a time (master-detail);
+							320px of list plus a form does not fit on a phone.
+						-->
+						<div
+							:class="[
+								'w-full md:w-80 flex-shrink-0 border-e bg-gray-50 flex-col',
+								isFormOpen ? 'hidden md:flex' : 'flex',
+							]"
+						>
 							<!-- Search & Filter -->
 							<div class="p-4 bg-white border-b flex flex-col gap-3">
 								<FormControl
@@ -185,7 +196,12 @@
 						</div>
 
 						<!-- RIGHT SIDE: Details / Edit Form -->
-						<div class="flex-1 flex flex-col bg-white overflow-hidden relative">
+						<div
+							:class="[
+								'flex-1 flex-col bg-white overflow-hidden relative',
+								isFormOpen ? 'flex' : 'hidden md:flex',
+							]"
+						>
 							<!-- Empty State -->
 							<div
 								v-if="!selectedProduct && !isCreating"
@@ -214,10 +230,25 @@
 							<template v-else>
 								<!-- Top Action Bar -->
 								<div
-									class="px-6 py-4 border-b flex items-center justify-between bg-white z-10"
+									class="flex flex-wrap items-center justify-between gap-3 border-b bg-white px-4 py-3 sm:px-6 sm:py-4 z-10"
 								>
-									<div class="flex items-center gap-3">
-										<h3 class="text-lg font-semibold text-gray-900">
+									<div class="flex min-w-0 items-center gap-2">
+										<!-- The list is hidden behind the form below md, so
+										     mobile needs an explicit way back to it. -->
+										<button
+											type="button"
+											@click="returnToList"
+											class="-ms-1 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-800 md:hidden"
+											:aria-label="__('Back to products')"
+										>
+											<FeatherIcon
+												name="arrow-left"
+												class="h-5 w-5 rtl:rotate-180"
+											/>
+										</button>
+										<h3
+											class="truncate text-base font-semibold text-gray-900 sm:text-lg"
+										>
 											{{
 												isCreating
 													? __("New Product")
@@ -255,7 +286,7 @@
 
 								<!-- Form Content -->
 								<div class="flex-1 overflow-y-auto">
-									<div class="mx-auto w-full max-w-[1400px] p-6">
+									<div class="mx-auto w-full max-w-[1400px] p-4 sm:p-6">
 										<!--
 											Two-column workspace. Below lg it collapses to one column with
 											the image on top; the grid handles RTL on its own, so the image
@@ -266,11 +297,11 @@
 										>
 											<!-- ============ IMAGE PANEL ============ -->
 											<aside
-										class="order-first w-full max-w-[320px] xl:order-none xl:max-w-none xl:sticky xl:top-0"
-									>
+												class="order-first w-full max-w-[320px] xl:order-none xl:max-w-none xl:sticky xl:top-0"
+											>
 												<input
 													type="file"
-													accept="image/png,image/jpeg,image/webp,image/gif"
+													:accept="imageAccept"
 													@change="handleImageSelect"
 													ref="fileInput"
 													class="hidden"
@@ -289,10 +320,14 @@
 														isDraggingImage
 															? 'border-blue-500 border-solid bg-blue-50'
 															: form.image
-																? 'border-solid border-gray-200 bg-gray-50'
-																: 'border-dashed border-gray-300 bg-gray-50 hover:border-blue-400 hover:bg-blue-50/40',
+															? 'border-solid border-gray-200 bg-gray-50'
+															: 'border-dashed border-gray-300 bg-gray-50 hover:border-blue-400 hover:bg-blue-50/40',
 													]"
-													:aria-label="form.image ? __('Change product image') : __('Upload product image')"
+													:aria-label="
+														form.image
+															? __('Change product image')
+															: __('Upload product image')
+													"
 												>
 													<img
 														v-if="form.image"
@@ -307,14 +342,23 @@
 														<div
 															class="flex h-16 w-16 items-center justify-center rounded-full bg-white text-gray-400 shadow-sm group-hover:text-blue-500"
 														>
-															<FeatherIcon name="image" class="h-8 w-8" />
+															<FeatherIcon
+																name="image"
+																class="h-8 w-8"
+															/>
 														</div>
 														<div>
-															<p class="text-sm font-medium text-gray-700">
+															<p
+																class="text-sm font-medium text-gray-700"
+															>
 																{{ __("Add a product image") }}
 															</p>
 															<p class="mt-1 text-xs text-gray-500">
-																{{ __("Click to browse or drop a file here") }}
+																{{
+																	__(
+																		"Click to browse or drop a file here"
+																	)
+																}}
 															</p>
 														</div>
 													</div>
@@ -327,25 +371,49 @@
 														<span
 															class="flex items-center gap-2 rounded-lg bg-white/95 px-3 py-2 text-sm font-medium text-gray-800 shadow"
 														>
-															<FeatherIcon name="refresh-cw" class="h-4 w-4" />
+															<FeatherIcon
+																name="refresh-cw"
+																class="h-4 w-4"
+															/>
 															{{ __("Change") }}
 														</span>
 													</div>
 												</button>
 
-												<div class="mt-3 flex flex-wrap items-center gap-2">
-													<Button @click="fileInput?.click()" variant="outline">
+												<div
+													class="mt-3 flex flex-wrap items-center gap-2"
+												>
+													<Button
+														@click="fileInput?.click()"
+														variant="outline"
+													>
 														<template #prefix>
 															<FeatherIcon
-																:name="form.image ? 'refresh-cw' : 'upload'"
+																:name="
+																	form.image
+																		? 'refresh-cw'
+																		: 'upload'
+																"
 																class="h-4 w-4"
 															/>
 														</template>
-														{{ form.image ? __("Change") : __("Upload") }}
+														{{
+															form.image
+																? __("Change")
+																: __("Upload")
+														}}
 													</Button>
-													<Button v-if="form.image" @click="clearImage" variant="subtle" theme="red">
+													<Button
+														v-if="form.image"
+														@click="clearImage"
+														variant="subtle"
+														theme="red"
+													>
 														<template #prefix>
-															<FeatherIcon name="trash-2" class="h-4 w-4" />
+															<FeatherIcon
+																name="trash-2"
+																class="h-4 w-4"
+															/>
 														</template>
 														{{ __("Remove") }}
 													</Button>
@@ -355,18 +423,46 @@
 													v-if="selectedFile"
 													class="mt-2 flex items-center gap-2 text-sm text-blue-600"
 												>
-													<FeatherIcon name="file" class="h-4 w-4 flex-shrink-0" />
+													<FeatherIcon
+														name="file"
+														class="h-4 w-4 flex-shrink-0"
+													/>
 													<span class="truncate"
-														>{{ selectedFile.name }} ({{ formatFileSize(selectedFile.size) }})</span
+														>{{ selectedFile.name }} ({{
+															formatFileSize(selectedFile.size)
+														}})</span
 													>
 												</p>
-												<p v-if="validationErrors.image" class="mt-2 text-xs text-red-600">
+												<p
+													v-if="validationErrors.image"
+													class="mt-2 text-xs text-red-600"
+												>
 													{{ validationErrors.image }}
 												</p>
-												<p class="mt-2 text-xs text-gray-500">
+												<p
+													v-if="imagesDisabledBySite"
+													class="mt-2 text-xs text-amber-700"
+												>
 													{{
 														__(
-															"PNG, JPG, GIF, or WebP up to 2 MB. Upload happens when the product is saved."
+															"No image file types are currently allowed. Add an image extension under Allowed File Extensions in System Settings."
+														)
+													}}
+												</p>
+												<p v-else class="mt-2 text-xs text-gray-500">
+													{{
+														__(
+															"Allowed file types: {0} — up to {1}.",
+															[
+																allowedExtensionsLabel,
+																maxImageSizeLabel,
+															]
+														)
+													}}
+													<br />
+													{{
+														__(
+															"These are configurable in System Settings. Upload happens when the product is saved."
 														)
 													}}
 												</p>
@@ -397,26 +493,38 @@
 															</p>
 														</div>
 
-														<div class="grid grid-cols-1 gap-5 min-[1536px]:grid-cols-2">
+														<div
+															class="grid grid-cols-1 gap-5 min-[1536px]:grid-cols-2"
+														>
 															<div>
 																<label
 																	class="mb-1.5 block text-start text-sm font-medium text-gray-700"
 																>
 																	{{ __("Item Group") }}
-																	<span class="text-red-500">*</span>
+																	<span class="text-red-500"
+																		>*</span
+																	>
 																</label>
 																<SelectInput
 																	v-model="form.item_group"
 																	:options="rawItemGroupOptions"
-																	:placeholder="__('Select Item Group')"
+																	:placeholder="
+																		__('Select Item Group')
+																	"
 																	:searchable="true"
-																	:search-placeholder="__('Search item groups...')"
+																	:search-placeholder="
+																		__('Search item groups...')
+																	"
 																/>
 																<p
-																	v-if="validationErrors.item_group"
+																	v-if="
+																		validationErrors.item_group
+																	"
 																	class="mt-1 text-xs text-red-600"
 																>
-																	{{ validationErrors.item_group }}
+																	{{
+																		validationErrors.item_group
+																	}}
 																</p>
 															</div>
 															<div>
@@ -424,20 +532,28 @@
 																	class="mb-1.5 block text-start text-sm font-medium text-gray-700"
 																>
 																	{{ __("UOM") }}
-																	<span class="text-red-500">*</span>
+																	<span class="text-red-500"
+																		>*</span
+																	>
 																</label>
 																<SelectInput
 																	v-model="form.stock_uom"
 																	:options="uomOptions"
 																	:placeholder="__('Select UOM')"
 																	:searchable="true"
-																	:search-placeholder="__('Search UOMs...')"
+																	:search-placeholder="
+																		__('Search UOMs...')
+																	"
 																/>
 																<p
-																	v-if="validationErrors.stock_uom"
+																	v-if="
+																		validationErrors.stock_uom
+																	"
 																	class="mt-1 text-xs text-red-600"
 																>
-																	{{ validationErrors.stock_uom }}
+																	{{
+																		validationErrors.stock_uom
+																	}}
 																</p>
 															</div>
 															<div>
@@ -460,7 +576,9 @@
 
 												<!-- UOM Conversions -->
 												<section class="border-t pt-6">
-													<div class="mb-4 flex flex-wrap items-start justify-between gap-3">
+													<div
+														class="mb-4 flex flex-wrap items-start justify-between gap-3"
+													>
 														<div>
 															<h4
 																class="text-xs font-semibold uppercase tracking-wide text-gray-500"
@@ -468,12 +586,22 @@
 																{{ __("UOM Conversions") }}
 															</h4>
 															<p class="mt-1 text-xs text-gray-500">
-																{{ __("Define alternate selling units against the base UOM.") }}
+																{{
+																	__(
+																		"Define alternate selling units against the base UOM."
+																	)
+																}}
 															</p>
 														</div>
-														<Button @click="addUomConversion" variant="outline">
+														<Button
+															@click="addUomConversion"
+															variant="outline"
+														>
 															<template #prefix>
-																<FeatherIcon name="plus" class="h-4 w-4" />
+																<FeatherIcon
+																	name="plus"
+																	class="h-4 w-4"
+																/>
 															</template>
 															{{ __("Add UOM") }}
 														</Button>
@@ -487,7 +615,9 @@
 													</div>
 													<div v-else class="space-y-2">
 														<div
-															v-for="(row, index) in form.uom_conversions"
+															v-for="(
+																row, index
+															) in form.uom_conversions"
 															:key="index"
 															class="grid grid-cols-[minmax(0,1fr)_8rem_auto] items-end gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3"
 														>
@@ -501,7 +631,9 @@
 																	:options="uomOptions"
 																	:placeholder="__('Select UOM')"
 																	:searchable="true"
-																	:search-placeholder="__('Search UOMs...')"
+																	:search-placeholder="
+																		__('Search UOMs...')
+																	"
 																/>
 															</div>
 															<FormControl
@@ -515,7 +647,10 @@
 																theme="red"
 																:aria-label="__('Remove')"
 															>
-																<FeatherIcon name="trash-2" class="h-4 w-4" />
+																<FeatherIcon
+																	name="trash-2"
+																	class="h-4 w-4"
+																/>
 															</Button>
 														</div>
 													</div>
@@ -541,7 +676,9 @@
 													>
 														{{ __("Options") }}
 													</h4>
-													<div class="grid grid-cols-1 gap-3 min-[1536px]:grid-cols-2">
+													<div
+														class="grid grid-cols-1 gap-3 min-[1536px]:grid-cols-2"
+													>
 														<label
 															class="flex cursor-pointer items-start gap-3 rounded-lg border border-gray-200 p-3 transition-colors hover:border-gray-300 hover:bg-gray-50"
 														>
@@ -551,12 +688,20 @@
 																class="mt-0.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
 															/>
 															<span class="text-start">
-																<span class="block text-sm font-medium text-gray-800">{{
-																	__("Maintain Stock")
-																}}</span>
-																<span class="mt-0.5 block text-xs text-gray-500">{{
-																	__("Track quantity on hand for this product.")
-																}}</span>
+																<span
+																	class="block text-sm font-medium text-gray-800"
+																	>{{
+																		__("Maintain Stock")
+																	}}</span
+																>
+																<span
+																	class="mt-0.5 block text-xs text-gray-500"
+																	>{{
+																		__(
+																			"Track quantity on hand for this product."
+																		)
+																	}}</span
+																>
 															</span>
 														</label>
 														<label
@@ -568,12 +713,18 @@
 																class="mt-0.5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
 															/>
 															<span class="text-start">
-																<span class="block text-sm font-medium text-gray-800">{{
-																	__("Disabled")
-																}}</span>
-																<span class="mt-0.5 block text-xs text-gray-500">{{
-																	__("Hide this product from the POS.")
-																}}</span>
+																<span
+																	class="block text-sm font-medium text-gray-800"
+																	>{{ __("Disabled") }}</span
+																>
+																<span
+																	class="mt-0.5 block text-xs text-gray-500"
+																	>{{
+																		__(
+																			"Hide this product from the POS."
+																		)
+																	}}</span
+																>
 															</span>
 														</label>
 													</div>
@@ -602,8 +753,16 @@ import { useItemSearchStore } from "@/stores/itemSearch";
 
 const PAGE_SIZE = 20;
 const SEARCH_DEBOUNCE_MS = 300;
-const MAX_IMAGE_SIZE_BYTES = 2 * 1024 * 1024;
-const ALLOWED_IMAGE_TYPES = new Set(["image/gif", "image/jpeg", "image/png", "image/webp"]);
+
+// Upload rules belong to the site, not to this screen — see
+// get_product_image_settings(). This is only the fallback used before the
+// first fetch resolves, or if it fails.
+const DEFAULT_IMAGE_SETTINGS = {
+	extensions: ["JPG", "JPEG", "PNG", "GIF", "WEBP"],
+	mime_types: ["image/gif", "image/jpeg", "image/png", "image/webp"],
+	max_file_size: 25 * 1024 * 1024,
+	restricted_by_system_settings: false,
+};
 
 const props = defineProps({
 	modelValue: Boolean,
@@ -637,6 +796,28 @@ const isCreating = ref(false);
 const selectedFile = ref(null);
 const fileInput = ref(null);
 const isDraggingImage = ref(false);
+const imageSettings = ref({ ...DEFAULT_IMAGE_SETTINGS });
+
+/** Drives the mobile master-detail swap: list, or form, never both. */
+const isFormOpen = computed(() => Boolean(selectedProduct.value) || isCreating.value);
+
+const allowedExtensions = computed(() => imageSettings.value.extensions || []);
+const imagesDisabledBySite = computed(() => allowedExtensions.value.length === 0);
+
+/** `accept` for the picker: MIME types plus dotted extensions, since browsers
+ *  differ on which they match. */
+const imageAccept = computed(() =>
+	[
+		...(imageSettings.value.mime_types || []),
+		...allowedExtensions.value.map((ext) => `.${ext.toLowerCase()}`),
+	].join(",")
+);
+
+const maxImageSizeLabel = computed(() => formatFileSize(imageSettings.value.max_file_size || 0));
+
+const allowedExtensionsLabel = computed(() =>
+	allowedExtensions.value.map((ext) => ext.toUpperCase()).join(", ")
+);
 const validationErrors = ref({});
 let productSearchTimer = null;
 
@@ -688,6 +869,7 @@ watch(
 			refreshProducts();
 			loadItemGroups();
 			loadUOMs();
+			loadImageSettings();
 		}
 	}
 );
@@ -904,12 +1086,20 @@ function clearValidationError(field) {
 }
 
 function validateImageFile(file) {
-	if (!ALLOWED_IMAGE_TYPES.has(file.type)) {
-		return __("Image must be PNG, JPG, GIF, or WebP");
+	if (imagesDisabledBySite.value) {
+		return __("No image file types are allowed by System Settings.");
 	}
 
-	if (file.size > MAX_IMAGE_SIZE_BYTES) {
-		return __("Image must be 2 MB or smaller");
+	// Match on extension, not MIME type: browsers report inconsistent types for
+	// the same file, and the server validates on extension too.
+	const extension = (file.name.split(".").pop() || "").toUpperCase();
+	if (!allowedExtensions.value.includes(extension)) {
+		return __("Image must be one of: {0}", [allowedExtensionsLabel.value]);
+	}
+
+	const maxBytes = imageSettings.value.max_file_size || 0;
+	if (maxBytes && file.size > maxBytes) {
+		return __("Image must be {0} or smaller", [maxImageSizeLabel.value]);
 	}
 
 	return "";
@@ -1123,6 +1313,17 @@ async function loadItemGroups() {
 		}
 	} catch (error) {
 		handleError(error, __("Failed to load item groups"));
+	}
+}
+
+async function loadImageSettings() {
+	try {
+		const data = await call("pos_next.api.product_management.get_product_image_settings");
+		if (data) imageSettings.value = data;
+	} catch (error) {
+		// Non-fatal: fall back to defaults so the screen still works. The server
+		// validates on upload regardless.
+		console.warn("Failed to load image settings, using defaults", error);
 	}
 }
 

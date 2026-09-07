@@ -2,10 +2,23 @@ import json
 
 import frappe
 from frappe import _
+from frappe.core.api.file import get_max_file_size
 from frappe.model.naming import make_autoname
-from frappe.utils import cint, flt
+from frappe.utils import cint, cstr, flt
 
 from pos_next.api.items import _get_pos_profile_allowed_item_groups
+
+# Image types this screen can render. The site's own allowed_file_extensions
+# list covers every file type (CSV, PDF, ...), so it is intersected with this
+# rather than used directly — a PDF is a valid attachment but not a product
+# image.
+SUPPORTED_IMAGE_TYPES = {
+	"JPG": "image/jpeg",
+	"JPEG": "image/jpeg",
+	"PNG": "image/png",
+	"GIF": "image/gif",
+	"WEBP": "image/webp",
+}
 
 DEFAULT_PAGE_LENGTH = 20
 MAX_PAGE_LENGTH = 100
@@ -52,6 +65,39 @@ def get_product_management_permissions() -> dict:
 		and can_read_price
 		and (can_create_item or can_write_item)
 		and (can_create_price or can_write_price),
+	}
+
+
+@frappe.whitelist()
+def get_product_image_settings() -> dict:
+	"""Report the site's own upload limits so the client matches the server.
+
+	Both values come from System Settings:
+
+	- `allowed_file_extensions` is newline-separated, uppercase and without
+	  dots. Empty means the site imposes no restriction, in which case every
+	  image type this screen supports is offered.
+	- `max_file_size` is stored in MB; get_max_file_size() resolves it to
+	  bytes, falling back to site_config and then to Frappe's 25 MB default.
+
+	Hardcoding these client-side lets the picker accept a file the server will
+	then reject, so they are read rather than assumed.
+	"""
+	allowed = cstr(frappe.get_system_settings("allowed_file_extensions") or "").strip()
+
+	if allowed:
+		site_extensions = {line.strip().upper().lstrip(".") for line in allowed.splitlines() if line.strip()}
+		extensions = [ext for ext in SUPPORTED_IMAGE_TYPES if ext in site_extensions]
+		restricted = True
+	else:
+		extensions = list(SUPPORTED_IMAGE_TYPES)
+		restricted = False
+
+	return {
+		"extensions": extensions,
+		"mime_types": sorted({SUPPORTED_IMAGE_TYPES[ext] for ext in extensions}),
+		"max_file_size": get_max_file_size(),
+		"restricted_by_system_settings": restricted,
 	}
 
 

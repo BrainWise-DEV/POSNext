@@ -11,6 +11,7 @@ from pos_next.api.product_management import (
 	_save_uom_conversions,
 	_validate_pos_profile_access,
 	get_item_groups,
+	get_product_image_settings,
 	save_product,
 )
 
@@ -166,3 +167,64 @@ class TestSaveUomConversions(unittest.TestCase):
 
 		item.set.assert_called_once_with("uoms", [])
 		self.assertEqual(item.appended, [{"uom": "Box", "conversion_factor": 12.0}])
+
+
+class TestProductImageSettings(unittest.TestCase):
+	"""The client must mirror the server's upload rules, or the file picker
+	accepts files that File.validate_file_extension() then rejects."""
+
+	def _settings(self, allowed, max_mb=2):
+		def get_system_settings(key):
+			return {"allowed_file_extensions": allowed, "max_file_size": max_mb}[key]
+
+		return get_system_settings
+
+	@patch("pos_next.api.product_management.frappe.get_system_settings")
+	def test_empty_setting_means_no_restriction(self, mock_settings):
+		"""Frappe treats a blank list as 'allow everything', not 'allow nothing'."""
+		mock_settings.side_effect = self._settings("")
+
+		result = get_product_image_settings()
+
+		self.assertEqual(sorted(result["extensions"]), ["GIF", "JPEG", "JPG", "PNG", "WEBP"])
+		self.assertFalse(result["restricted_by_system_settings"])
+
+	@patch("pos_next.api.product_management.frappe.get_system_settings")
+	def test_site_restriction_is_intersected_with_image_types(self, mock_settings):
+		"""A site allowing JPG/PNG/CSV must offer JPG and PNG only — never CSV."""
+		mock_settings.side_effect = self._settings("JPG\nPNG\nCSV")
+
+		result = get_product_image_settings()
+
+		self.assertEqual(sorted(result["extensions"]), ["JPG", "PNG"])
+		self.assertEqual(result["mime_types"], ["image/jpeg", "image/png"])
+		self.assertTrue(result["restricted_by_system_settings"])
+
+	@patch("pos_next.api.product_management.frappe.get_system_settings")
+	def test_no_image_types_allowed_returns_empty(self, mock_settings):
+		"""A site that allows only documents can't accept product images at all;
+		the screen needs to say so rather than fail at upload time."""
+		mock_settings.side_effect = self._settings("PDF\nCSV")
+
+		result = get_product_image_settings()
+
+		self.assertEqual(result["extensions"], [])
+		self.assertEqual(result["mime_types"], [])
+		self.assertTrue(result["restricted_by_system_settings"])
+
+	@patch("pos_next.api.product_management.frappe.get_system_settings")
+	def test_tolerates_messy_operator_input(self, mock_settings):
+		"""System Settings uppercases on save, but site_config edits and older
+		rows can carry lowercase, leading dots and stray whitespace."""
+		mock_settings.side_effect = self._settings("  jpg \n.WEBP\n\n png ")
+
+		result = get_product_image_settings()
+
+		self.assertEqual(sorted(result["extensions"]), ["JPG", "PNG", "WEBP"])
+
+	@patch("pos_next.api.product_management.frappe.get_system_settings")
+	def test_max_file_size_is_reported_in_bytes(self, mock_settings):
+		"""System Settings stores MB; the client compares against File.size."""
+		mock_settings.side_effect = self._settings("", max_mb=7)
+
+		self.assertEqual(get_product_image_settings()["max_file_size"], 7 * 1024 * 1024)
