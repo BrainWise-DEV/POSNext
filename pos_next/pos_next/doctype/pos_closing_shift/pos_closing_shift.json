@@ -28,6 +28,8 @@
   "section_break_13",
   "grand_total",
   "net_total",
+  "collected_amount",
+  "outstanding_total",
   "total_quantity",
   "column_break_16",
   "taxes",
@@ -151,6 +153,22 @@
    "read_only": 1
   },
   {
+   "default": "0",
+   "description": "Money actually taken during the shift. Excludes amounts put on customer account.",
+   "fieldname": "collected_amount",
+   "fieldtype": "Currency",
+   "label": "Collected Amount",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "description": "Invoiced value still owed by customers at the end of the shift.",
+   "fieldname": "outstanding_total",
+   "fieldtype": "Currency",
+   "label": "Outstanding Total",
+   "read_only": 1
+  },
+  {
    "fieldname": "total_quantity",
    "fieldtype": "Float",
    "label": "Total Quantity",
@@ -200,7 +218,7 @@
  ],
  "is_submittable": 1,
  "links": [],
- "modified": "2026-06-03 15:54:11.316195",
+ "modified": "2026-09-06 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Closing Shift",
