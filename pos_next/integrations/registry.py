@@ -63,5 +63,12 @@ def prepare_customer_doc(customer, **kwargs):
 
 
 def after_customer_insert(customer, **kwargs):
+	# Best-effort: customer.insert() already succeeded; do not roll it back.
 	for method_path in frappe.get_hooks("pos_next_customer_after_insert") or []:
-		frappe.get_attr(method_path)(customer, **kwargs)
+		try:
+			frappe.get_attr(method_path)(customer, **kwargs)
+		except Exception:
+			frappe.log_error(
+				frappe.get_traceback(),
+				f"Customer after_insert hook failed: {method_path}",
+			)
