@@ -101,6 +101,32 @@ class TestPOSExpenses(unittest.TestCase):
 		with self.assertRaisesRegex(RuntimeError, "shift expense limit"):
 			expenses.validate_expense_amount(30, "Test POS Profile", "POS-OS-0001")
 
+	@patch("pos_next.api.expenses.get_shift_expense_total", return_value=0)
+	@patch("pos_next.api.expenses.frappe.db.get_value")
+	def test_validate_expense_amount_locks_opening_shift_before_total(
+		self, mock_get_value, mock_shift_total
+	):
+		"""Serialize check+insert: FOR UPDATE on the shift before reading the SUM."""
+		mock_get_value.side_effect = [100, "POS-OS-0001"]
+
+		expenses.validate_expense_amount(50, "Test POS Profile", "POS-OS-0001")
+
+		self.assertEqual(
+			mock_get_value.call_args_list,
+			[
+				unittest.mock.call(
+					"POS Profile", "Test POS Profile", "posa_maximum_expense_amount"
+				),
+				unittest.mock.call(
+					"POS Opening Shift",
+					"POS-OS-0001",
+					"name",
+					for_update=True,
+				),
+			],
+		)
+		mock_shift_total.assert_called_once_with("POS-OS-0001")
+
 	@patch("pos_next.api.expenses.frappe.db.sql", return_value=((80,),))
 	def test_get_shift_expense_total_sums_submitted_journal_entries(self, mock_sql):
 		total = expenses.get_shift_expense_total("POS-OS-0001")

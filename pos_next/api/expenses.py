@@ -140,7 +140,20 @@ def validate_expense_amount(amount, pos_profile, pos_opening_shift=None):
 			title=_("Expense Limit Not Configured"),
 		)
 
-	shift_total = get_shift_expense_total(pos_opening_shift) if pos_opening_shift else 0
+	# Lock the opening shift so concurrent create_pos_expense calls serialize:
+	# both would otherwise read the same SUM, pass the limit, and both commit.
+	# Held until request commit (after JE insert/submit in the same transaction).
+	if pos_opening_shift:
+		frappe.db.get_value(
+			"POS Opening Shift",
+			pos_opening_shift,
+			"name",
+			for_update=True,
+		)
+		shift_total = get_shift_expense_total(pos_opening_shift)
+	else:
+		shift_total = 0
+
 	new_shift_total = shift_total + flt(amount)
 	if new_shift_total > maximum_amount:
 		remaining = _get_remaining_shift_expense_amount(maximum_amount, shift_total)
