@@ -15,6 +15,7 @@ import {
 	getCartStockQtyForItem,
 	rowStockQty,
 } from "@/utils/stockValidator";
+import { syncCartFreeItems } from "@/utils/gwpSameItemFreeRows";
 import { offlineState } from "@/utils/offline/offlineState";
 import { useToast } from "@/composables/useToast";
 import { defineStore } from "pinia";
@@ -456,83 +457,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 */
 	function processFreeItems(freeItems) {
 		// Restore qty previously carved into same-SKU free rows, then rebuild.
-		invoiceItems.value.forEach((item) => {
-			if (!item.is_free_item || Number(item.gwp_same_item_row) !== 1) return;
-			const freeQty = Number.parseFloat(item.quantity) || 0;
-			if (freeQty <= 0) return;
-			const paid = findPaidCartItem(item.item_code, item.uom || item.stock_uom);
-			if (paid) {
-				paid.quantity = (Number.parseFloat(paid.quantity) || 0) + freeQty;
-				recalculateItem(paid);
-			}
+		// See syncCartFreeItems — gwp_same_item_row is client-only; skipping this
+		// undercharges scanned units.
+		invoiceItems.value = syncCartFreeItems(invoiceItems.value, freeItems, {
+			recalculateItem,
 		});
-
-		invoiceItems.value.forEach((item) => {
-			if (!item.is_free_item) {
-				item.free_qty = 0;
-			}
-		});
-
-		invoiceItems.value = invoiceItems.value.filter((item) => !item.is_free_item);
-
-		if (!Array.isArray(freeItems) || freeItems.length === 0) {
-			rebuildIncrementalCache();
-			return;
-		}
-
-		for (const freeItem of freeItems) {
-			const freeQty = Number.parseFloat(freeItem.qty) || 0;
-			if (freeQty <= 0) continue;
-
-			const freeUom = freeItem.uom || freeItem.stock_uom;
-			const cartItem = findPaidCartItem(freeItem.item_code, freeUom);
-
-			// Same SKU (GWP buy 2 get 1): split scanned units. Qty 3 → 2 paid + 1 free.
-			// Never auto-add a 4th unit on top of the 3 already in the cart.
-			const paidQty = cartItem ? Number.parseFloat(cartItem.quantity) || 0 : 0;
-			const carveFromPaid = Boolean(cartItem && paidQty > freeQty);
-			if (carveFromPaid) {
-				cartItem.quantity = paidQty - freeQty;
-				recalculateItem(cartItem);
-			}
-
-			const cf = freeItem.conversion_factor || cartItem?.conversion_factor || 1;
-			invoiceItems.value.push({
-				item_code: freeItem.item_code,
-				item_name: freeItem.item_name || cartItem?.item_name || freeItem.item_code,
-				rate: 0,
-				price_list_rate: 0,
-				quantity: freeQty,
-				discount_amount: 0,
-				discount_percentage: 0,
-				tax_amount: 0,
-				amount: 0,
-				stock_qty: 0,
-				uom: cartItem?.uom || freeUom,
-				stock_uom: cartItem?.stock_uom || freeItem.stock_uom || freeUom,
-				conversion_factor: cf,
-				is_free_item: 1,
-				free_qty: freeQty,
-				discount_source: freeItem.discount_source || (carveFromPaid ? "gwp" : "free_item"),
-				gwp_same_item_row: carveFromPaid ? 1 : 0,
-				pricing_rules: freeItem.pricing_rules || null,
-				warehouse: freeItem.warehouse || cartItem?.warehouse,
-				image: cartItem?.image,
-			});
-		}
-
 		rebuildIncrementalCache();
-	}
-
-	function findPaidCartItem(itemCode, uom) {
-		if (!itemCode) return null;
-		const paid = invoiceItems.value.filter((item) => !item.is_free_item && item.item_code === itemCode);
-		if (!paid.length) return null;
-		if (uom) {
-			const matchedUom = paid.find((item) => (item.uom || item.stock_uom) === uom);
-			if (matchedUom) return matchedUom;
-		}
-		return paid[0];
 	}
 
 	/**
