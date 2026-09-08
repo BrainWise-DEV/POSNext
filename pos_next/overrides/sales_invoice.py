@@ -121,8 +121,9 @@ class CustomSalesInvoice(SalesInvoice):
 				if self.is_return and self.return_against and not self.update_outstanding_for_self:
 					against_voucher = self.return_against
 
-				payment_amount = flt(payment_mode.base_amount) or flt(payment_mode.amount)
-				if not payment_amount:
+				# Gate and post on base_amount (company currency) only — never fall
+				# back to amount (transaction currency) for credit/debit GL fields.
+				if not flt(payment_mode.base_amount):
 					continue
 
 				# Credit customer receivable (payment received against the invoice)
@@ -133,10 +134,11 @@ class CustomSalesInvoice(SalesInvoice):
 							"party_type": "Customer",
 							"party": self.customer,
 							"against": payment_mode.account,
-							"credit": payment_amount,
-							"credit_in_account_currency": payment_amount
+							"credit": payment_mode.base_amount,
+							"credit_in_account_currency": payment_mode.base_amount
 							if self.party_account_currency == self.company_currency
 							else payment_mode.amount,
+							"credit_in_transaction_currency": payment_mode.amount,
 							"against_voucher": against_voucher,
 							"against_voucher_type": self.doctype,
 							"cost_center": self.cost_center,
@@ -159,10 +161,11 @@ class CustomSalesInvoice(SalesInvoice):
 							"party_type": party_type,
 							"party": party,
 							"against": self.customer,
-							"debit": payment_amount,
-							"debit_in_account_currency": payment_amount
+							"debit": payment_mode.base_amount,
+							"debit_in_account_currency": payment_mode.base_amount
 							if payment_mode_account_currency == self.company_currency
 							else payment_mode.amount,
+							"debit_in_transaction_currency": payment_mode.amount,
 							"cost_center": self.cost_center,
 						},
 						payment_mode_account_currency,
