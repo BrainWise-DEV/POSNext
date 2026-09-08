@@ -1349,7 +1349,23 @@
 						</div>
 						<div class="grid grid-cols-4 gap-1.5">
 							<button
-								v-for="amount in quickAmounts"
+								v-if="quickAmounts.length > 0"
+								ref="firstQuickAmountBtnRef"
+								@click="addCustomPayment(lastSelectedMethod, quickAmounts[0])"
+								@keydown.enter.stop.prevent="handleFirstQuickAmountEnter"
+								:disabled="isQuickAmountDisabled(quickAmounts[0])"
+								:class="[
+									'font-semibold rounded-lg border-2 transition-all',
+									isCompactMode ? 'px-2 py-2 text-sm' : 'px-2 py-2 text-sm',
+									isQuickAmountDisabled(quickAmounts[0])
+										? 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed'
+										: 'bg-white border-gray-200 hover:border-blue-400 hover:bg-blue-50 text-gray-700 hover:text-blue-600'
+								]"
+							>
+								{{ formatCurrency(quickAmounts[0]) }}
+							</button>
+							<button
+								v-for="amount in quickAmounts.slice(1)"
 								:key="amount"
 								@click="addCustomPayment(lastSelectedMethod, amount)"
 								:disabled="isQuickAmountDisabled(amount)"
@@ -1429,6 +1445,7 @@
 										>{{ currencySymbol }}</span
 									>
 									<input
+										ref="mobileAmountInputRef"
 										v-model="mobileCustomAmount"
 										type="number"
 										inputmode="decimal"
@@ -1454,6 +1471,7 @@
 												? 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed'
 												: 'bg-white border-gray-200 focus:ring-1 focus:ring-blue-500',
 										]"
+										@keydown.enter.prevent="handleMobileAmountEnter"
 									/>
 								</div>
 								<button
@@ -2207,12 +2225,43 @@ const { numpadDisplay, numpadValue, numpadInput, numpadBackspace, numpadClear, s
 
 // Mobile custom amount state
 const mobileCustomAmount = ref("");
+const mobileAmountInputRef = ref(null);
+
+// Desktop first quick-amount button ref (focused on open for Enter-to-pay)
+const firstQuickAmountBtnRef = ref(null);
 
 function addMobileCustomPayment() {
 	const amount = Number.parseFloat(mobileCustomAmount.value);
 	if (amount > 0 && lastSelectedMethod.value) {
 		addCustomPayment(lastSelectedMethod.value, amount);
 		mobileCustomAmount.value = "";
+	}
+}
+
+async function handleMobileAmountEnter() {
+	const amount = Number.parseFloat(mobileCustomAmount.value)
+	if (amount > 0 && lastSelectedMethod.value) {
+		await addCustomPayment(lastSelectedMethod.value, amount)
+		mobileCustomAmount.value = ""
+		nextTick(() => {
+			mobileAmountInputRef.value?.focus()
+			mobileAmountInputRef.value?.select()
+		})
+		if (canComplete.value && !isSubmitting.value) {
+			completePayment()
+		}
+	} else if (canComplete.value && !isSubmitting.value) {
+		completePayment()
+	} else if (props.allowCreditSale && paymentEntries.value.length === 0) {
+		addCreditAccountPayment()
+	}
+}
+
+async function handleFirstQuickAmountEnter() {
+	if (!lastSelectedMethod.value || !quickAmounts.value?.[0]) return
+	await addCustomPayment(lastSelectedMethod.value, quickAmounts.value[0])
+	if (canComplete.value && !isSubmitting.value) {
+		completePayment()
 	}
 }
 
@@ -2989,6 +3038,16 @@ watch(show, (newVal) => {
 		if (paymentMethods.value.length > 0 && !lastSelectedMethod.value) {
 			const defaultMethod = paymentMethods.value.find((m) => m.default);
 			lastSelectedMethod.value = defaultMethod || paymentMethods.value[0];
+		}
+
+		// Pre-populate mobile input and focus first quick-amount button on desktop
+		if (props.grandTotal > 0) {
+			mobileCustomAmount.value = props.grandTotal.toFixed(2);
+			nextTick(() => {
+				mobileAmountInputRef.value?.focus();
+				mobileAmountInputRef.value?.select();
+				firstQuickAmountBtnRef.value?.focus();
+			});
 		}
 
 		if (creditEnabled) {
