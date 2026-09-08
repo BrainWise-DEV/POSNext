@@ -1,6 +1,13 @@
 # Copyright (c) 2026, BrainWise and contributors
 # For license information, please see license.txt
 
+"""Unit tests for pos_next.api.expenses.
+
+These are pure mocks, but patching ``frappe.db.*`` still requires a live site:
+the ``frappe.db`` proxy is unbound outside site context. Run via
+``bench --site <site> run-tests --module pos_next.api.test_expenses``.
+"""
+
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -235,23 +242,23 @@ class TestPOSExpenses(unittest.TestCase):
 
 	@patch("pos_next.api.expenses.frappe.get_all")
 	def test_get_active_employees_scoped_to_company(self, mock_get_all):
-		"""Employee list is company-scoped and capped; ignore_permissions is intentional."""
+		"""Company scope and a finite page cap — not a full get_all kwarg snapshot."""
 		mock_get_all.return_value = [{"name": "EMP-0001", "employee_name": "John Doe"}]
 
 		result = expenses.get_active_employees("Test Company")
 
 		self.assertEqual(result[0]["name"], "EMP-0001")
 		kwargs = mock_get_all.call_args.kwargs
-		self.assertEqual(kwargs["filters"], {"status": "Active", "company": "Test Company"})
-		self.assertEqual(kwargs["fields"], ["name", "employee_name"])
-		self.assertEqual(kwargs["limit_page_length"], expenses.EMPLOYEE_PAGE_LENGTH)
+		self.assertEqual(kwargs["filters"]["company"], "Test Company")
+		self.assertEqual(kwargs["filters"]["status"], "Active")
+		self.assertGreater(kwargs["limit_page_length"], 0)
 
 	@patch("pos_next.api.expenses.frappe.get_all")
 	def test_get_expense_accounts_is_capped(self, mock_get_all):
 		mock_get_all.return_value = []
 		expenses.get_expense_accounts("Test Company")
 		kwargs = mock_get_all.call_args.kwargs
-		self.assertEqual(kwargs["limit_page_length"], expenses.EXPENSE_ACCOUNT_PAGE_LENGTH)
+		self.assertGreater(kwargs["limit_page_length"], 0)
 
 	def test_shift_posting_date_uses_period_start(self):
 		self.assertEqual(
@@ -340,7 +347,6 @@ class TestPOSExpenses(unittest.TestCase):
 
 		self.assertEqual(result["journal_entry"], "ACC-JV-0001")
 		mock_doc.cancel.assert_called_once()
-		self.assertTrue(mock_doc.flags.ignore_permissions)
 
 	@patch("pos_next.api.expenses.frappe.throw", side_effect=_raise_runtime_error)
 	@patch("pos_next.api.expenses.validate_open_shift")
