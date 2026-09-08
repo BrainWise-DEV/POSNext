@@ -3,6 +3,7 @@
 
 import frappe
 from frappe import _
+from frappe.core.doctype.user_permission.user_permission import get_permitted_documents
 from frappe.utils import flt
 
 
@@ -96,9 +97,7 @@ def get_data(filters):
 	conditions = ["je.posa_is_pos_expense = 1", "je.docstatus = 1"]
 	values = {}
 
-	if filters.get("company"):
-		conditions.append("je.company = %(company)s")
-		values["company"] = filters["company"]
+	apply_company_scope(filters, conditions, values)
 
 	if filters.get("from_date"):
 		conditions.append("je.posting_date >= %(from_date)s")
@@ -153,3 +152,22 @@ def get_data(filters):
 		row.amount = flt(row.amount)
 
 	return rows
+
+
+def apply_company_scope(filters, conditions, values):
+	"""Require a company and restrict to the user's permitted companies.
+
+	Raw SQL bypasses ORM User Permissions, so Company restrictions must be
+	applied explicitly here.
+	"""
+	company = filters.get("company") or frappe.defaults.get_user_default("Company")
+	if not company:
+		frappe.throw(_("{0} is mandatory").format(_("Company")))
+
+	permitted_companies = get_permitted_documents("Company")
+	if permitted_companies and company not in permitted_companies:
+		frappe.throw(_("Not permitted to access Company {0}").format(frappe.bold(company)))
+
+	conditions.append("je.company = %(company)s")
+	values["company"] = company
+	filters["company"] = company

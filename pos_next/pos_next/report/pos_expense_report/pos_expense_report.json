@@ -24,16 +24,10 @@
    "role": "Accounts Manager"
   },
   {
-   "role": "Sales Manager"
-  },
-  {
    "role": "System Manager"
   },
   {
    "role": "Nexus POS Manager"
-  },
-  {
-   "role": "POSNext Cashier"
   }
  ],
  "timeout": 0

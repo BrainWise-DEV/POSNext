@@ -21,6 +21,7 @@ frappe.query_reports["POS Expense Report"] = {
 			fieldtype: "Link",
 			options: "Company",
 			default: frappe.defaults.get_user_default("Company"),
+			reqd: 1,
 		},
 		{
 			fieldname: "pos_profile",
