@@ -91,10 +91,17 @@ def patch_get_other_conditions(pr_utils):
 
 	No Frappe hook exists for non-whitelisted module-level functions,
 	so monkey-patching is the only option for this SQL condition injection.
+
+	Installed unconditionally at import; ownership is decided per call via
+	:func:`promotions_installed` so multi-tenant workers are not frozen to the
+	first site that warmed the process.
 	"""
 	_original_get_other_conditions = pr_utils.get_other_conditions
 
 	def _patched_get_other_conditions(conditions, values, args):
+		if promotions_installed():
+			return _original_get_other_conditions(conditions, values, args)
+
 		conditions = _original_get_other_conditions(conditions, values, args)
 
 		if not _has_pos_only_column():
@@ -115,6 +122,22 @@ def patch_get_other_conditions(pr_utils):
 		return conditions
 
 	pr_utils.get_other_conditions = _patched_get_other_conditions
+
+
+def patch_apply_price_discount_rule(pricing_rule_module):
+	"""Install :func:`apply_price_discount_rule` on ERPNext's pricing_rule module.
+
+	Captures whatever is currently bound so a later ``posnext_promotions`` patch
+	(or an earlier one we wrap) stays reachable when that app owns the site.
+	"""
+	_previous = pricing_rule_module.apply_price_discount_rule
+
+	def _patched(pricing_rule, item_details, args):
+		if promotions_installed():
+			return _previous(pricing_rule, item_details, args)
+		return apply_price_discount_rule(pricing_rule, item_details, args)
+
+	pricing_rule_module.apply_price_discount_rule = _patched
 
 
 # ---------------------------------------------------------------------------
@@ -180,6 +203,9 @@ def apply_price_discount_rule(pricing_rule, item_details, args):
 	margin handling) so nothing else downstream changes.
 
 	All non-Min/Max rules fall through to ERPNext's original implementation.
+
+	Installed via :func:`patch_apply_price_discount_rule`, which skips this body
+	when ``posnext_promotions`` owns the current site.
 	"""
 	if (pricing_rule.get("apply_discount_on_price") or "") in MIN_MAX_OPTIONS:
 		# Keep parity with the original function's side effects.
