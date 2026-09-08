@@ -178,21 +178,22 @@
 
 <script setup>
 import AutocompleteSelect from "@/components/common/AutocompleteSelect.vue"
-import { useFormatters } from "@/composables/useFormatters"
 import { useOfflineStatus } from "@/composables/useOfflineStatus"
 import { useToast } from "@/composables/useToast"
+import { usePOSShiftStore } from "@/stores/posShift"
+import { formatCurrency as formatCurrencyUtil } from "@/utils/currency"
 import { parseError } from "@/utils/errorHandler"
 import { Button, Dialog, FeatherIcon, Input, createResource } from "frappe-ui"
 import { computed, reactive, ref, watch } from "vue"
+
+const shiftStore = usePOSShiftStore()
 
 const props = defineProps({
 	modelValue: Boolean,
 	posProfile: String,
 	posOpeningShift: String,
-	currency: {
-		type: String,
-		default: "USD",
-	},
+	/** Prefer passing explicitly; falls back to the open shift's POS Profile currency. */
+	currency: String,
 	maximumExpenseAmount: {
 		type: Number,
 		default: 0,
@@ -201,9 +202,14 @@ const props = defineProps({
 
 const emit = defineEmits(["update:modelValue", "expense-created", "expense-cancelled"])
 
-const { formatCurrency } = useFormatters()
 const { showSuccess } = useToast()
 const { isOffline } = useOfflineStatus()
+
+const currency = computed(() => props.currency || shiftStore.profileCurrency)
+
+function formatCurrency(amount) {
+	return formatCurrencyUtil(Number.parseFloat(amount || 0), currency.value)
+}
 
 const form = reactive({
 	expense_account: "",
