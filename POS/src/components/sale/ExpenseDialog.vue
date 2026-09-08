@@ -29,15 +29,18 @@
 					<AutocompleteSelect
 						v-model="form.expense_account"
 						:options="expenseAccountOptions"
+						:loading="accountSearchLoading"
 						:placeholder="__('Search expense account...')"
+						:min-search-length="0"
 						icon="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"
 						required
+						@search="handleExpenseAccountSearch"
 					/>
 					<p
-						v-if="expenseAccountOptions.length === 0"
+						v-if="expenseAccountOptions.length === 0 && !accountSearchLoading"
 						class="mt-1 text-xs text-amber-700 text-start"
 					>
-						{{ __("No expense accounts found for this company.") }}
+						{{ __("No expense accounts found. Try a different search.") }}
 					</p>
 				</div>
 
@@ -67,10 +70,13 @@
 					<AutocompleteSelect
 						v-model="form.mode_of_payment"
 						:options="paymentMethodOptions"
-						:placeholder="__('Search payment method...')"
+						:placeholder="__('Search cash payment method...')"
 						icon="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"
 						required
 					/>
+					<p class="mt-1 text-xs text-gray-500 text-start">
+						{{ __("Only cash drawer modes are allowed for POS expenses.") }}
+					</p>
 				</div>
 
 				<div>
@@ -98,6 +104,48 @@
 				</div>
 
 				<div
+					v-if="recordedExpenses.length"
+					class="rounded-lg border border-gray-200 overflow-hidden"
+				>
+					<div class="px-3 py-2 bg-gray-50 border-b border-gray-200 text-start">
+						<p class="text-sm font-medium text-gray-800">
+							{{ __("Expenses this shift") }}
+						</p>
+					</div>
+					<ul class="divide-y divide-gray-100">
+						<li
+							v-for="expense in recordedExpenses"
+							:key="expense.journal_entry"
+							class="flex items-start justify-between gap-3 px-3 py-2 text-start"
+						>
+							<div class="min-w-0 flex-1">
+								<p class="text-sm font-medium text-gray-900 truncate">
+									{{ expense.expense_account }}
+								</p>
+								<p class="text-xs text-gray-500">
+									{{ formatCurrency(expense.amount) }}
+									<span v-if="expense.mode_of_payment">
+										· {{ expense.mode_of_payment }}
+									</span>
+								</p>
+								<p v-if="expense.remarks" class="text-xs text-gray-400 truncate">
+									{{ expense.remarks }}
+								</p>
+							</div>
+							<Button
+								variant="subtle"
+								size="sm"
+								:loading="cancellingExpense === expense.journal_entry"
+								:disabled="isOffline || cancelResource.loading || submitResource.loading"
+								@click="cancelExpense(expense.journal_entry)"
+							>
+								{{ __("Cancel") }}
+							</Button>
+						</li>
+					</ul>
+				</div>
+
+				<div
 					v-if="validationError"
 					class="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700 text-start"
 				>
@@ -110,15 +158,15 @@
 			<div class="flex justify-end gap-2 w-full">
 				<Button
 					variant="subtle"
-					:disabled="submitResource.loading"
+					:disabled="submitResource.loading || cancelResource.loading"
 					@click="open = false"
 				>
-					{{ __("Cancel") }}
+					{{ __("Close") }}
 				</Button>
 				<Button
 					variant="solid"
 					:loading="submitResource.loading"
-					:disabled="dialogDataResource.loading || isOffline"
+					:disabled="dialogDataResource.loading || isOffline || cancelResource.loading"
 					@click="submitExpense"
 				>
 					{{ __("Submit") }}
@@ -151,7 +199,7 @@ const props = defineProps({
 	},
 })
 
-const emit = defineEmits(["update:modelValue", "expense-created"])
+const emit = defineEmits(["update:modelValue", "expense-created", "expense-cancelled"])
 
 const { formatCurrency } = useFormatters()
 const { showSuccess } = useToast()
@@ -166,6 +214,10 @@ const form = reactive({
 })
 
 const validationError = ref("")
+const searchedAccounts = ref(null)
+const accountSearchLoading = ref(false)
+const cancellingExpense = ref("")
+let accountSearchTimer = null
 
 const open = computed({
 	get: () => props.modelValue,
@@ -223,6 +275,27 @@ const dialogDataResource = createResource({
 	},
 })
 
+const accountSearchQuery = ref("")
+
+const accountSearchResource = createResource({
+	url: "pos_next.api.expenses.search_expense_accounts",
+	makeParams() {
+		return {
+			pos_profile: props.posProfile,
+			pos_opening_shift: props.posOpeningShift,
+			txt: accountSearchQuery.value || "",
+		}
+	},
+	auto: false,
+	onSuccess(data) {
+		searchedAccounts.value = data || []
+		accountSearchLoading.value = false
+	},
+	onError() {
+		accountSearchLoading.value = false
+	},
+})
+
 const submitResource = createResource({
 	url: "pos_next.api.expenses.create_pos_expense",
 	makeParams() {
@@ -237,13 +310,30 @@ const submitResource = createResource({
 		}
 	},
 	auto: false,
-	onSuccess(data) {
+	async onSuccess(data) {
 		showSuccess(data?.message || __("POS Expense recorded successfully"))
 		emit("expense-created", data)
-		open.value = false
 		resetForm()
+		await dialogDataResource.reload()
+		searchedAccounts.value = null
 	},
 	onError(error) {
+		const parsed = parseError(normalizeSubmitError(error))
+		validationError.value = parsed.message
+	},
+})
+
+const cancelResource = createResource({
+	url: "pos_next.api.expenses.cancel_pos_expense",
+	auto: false,
+	async onSuccess(data) {
+		showSuccess(data?.message || __("POS Expense cancelled"))
+		emit("expense-cancelled", data)
+		cancellingExpense.value = ""
+		await dialogDataResource.reload()
+	},
+	onError(error) {
+		cancellingExpense.value = ""
 		const parsed = parseError(normalizeSubmitError(error))
 		validationError.value = parsed.message
 	},
@@ -260,13 +350,18 @@ function normalizeSubmitError(error) {
 	return error || {}
 }
 
-const expenseAccountOptions = computed(() =>
-	(dialogDataResource.data?.expense_accounts || []).map((account) => ({
+const expenseAccountOptions = computed(() => {
+	const accounts =
+		searchedAccounts.value !== null
+			? searchedAccounts.value
+			: dialogDataResource.data?.expense_accounts || []
+
+	return accounts.map((account) => ({
 		label: account.account_name || account.name,
 		subtitle: account.account_name ? account.name : "",
 		value: account.name,
-	})),
-)
+	}))
+})
 
 const paymentMethodOptions = computed(() =>
 	(dialogDataResource.data?.payment_methods || []).map((method) => ({
@@ -283,9 +378,12 @@ const employeeOptions = computed(() =>
 	})),
 )
 
+const recordedExpenses = computed(() => dialogDataResource.data?.expenses || [])
+
 watch(open, async (isOpen) => {
 	if (!isOpen) {
 		validationError.value = ""
+		searchedAccounts.value = null
 		return
 	}
 
@@ -295,6 +393,7 @@ watch(open, async (isOpen) => {
 	}
 
 	resetForm()
+	searchedAccounts.value = null
 	await dialogDataResource.submit()
 })
 
@@ -305,6 +404,26 @@ function resetForm() {
 	form.employee = ""
 	form.remarks = ""
 	validationError.value = ""
+}
+
+function handleExpenseAccountSearch(query) {
+	if (accountSearchTimer) {
+		clearTimeout(accountSearchTimer)
+	}
+
+	accountSearchTimer = setTimeout(async () => {
+		if (!props.posProfile || !props.posOpeningShift) {
+			return
+		}
+
+		accountSearchQuery.value = query || ""
+		accountSearchLoading.value = true
+		try {
+			await accountSearchResource.submit()
+		} catch {
+			accountSearchLoading.value = false
+		}
+	}, 250)
 }
 
 function validateForm() {
@@ -352,6 +471,30 @@ async function submitExpense() {
 	try {
 		await submitResource.submit()
 	} catch (error) {
+		const parsed = parseError(normalizeSubmitError(error))
+		validationError.value = parsed.message
+	}
+}
+
+async function cancelExpense(journalEntry) {
+	if (isOffline.value) {
+		validationError.value = __(
+			"POS expenses cannot be cancelled while offline. Please connect to the internet and try again.",
+		)
+		return
+	}
+
+	validationError.value = ""
+	cancellingExpense.value = journalEntry
+
+	try {
+		await cancelResource.submit({
+			journal_entry: journalEntry,
+			pos_opening_shift: props.posOpeningShift,
+			pos_profile: props.posProfile,
+		})
+	} catch (error) {
+		cancellingExpense.value = ""
 		const parsed = parseError(normalizeSubmitError(error))
 		validationError.value = parsed.message
 	}

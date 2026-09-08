@@ -133,13 +133,16 @@ def get_data(filters):
 			je.posa_pos_opening_shift AS pos_opening_shift,
 			je.posa_pos_profile AS pos_profile,
 			je.posa_expense_account AS expense_account,
-			je.posa_expense_amount AS amount,
+			COALESCE(SUM(jea.credit), 0) AS amount,
 			je.posa_expense_mode_of_payment AS mode_of_payment,
 			je.posa_expense_employee AS employee,
 			je.user_remark AS remarks,
 			je.owner AS created_by
 		FROM `tabJournal Entry` je
+		INNER JOIN `tabJournal Entry Account` jea
+			ON jea.parent = je.name AND jea.credit > 0
 		WHERE {" AND ".join(conditions)}
+		GROUP BY je.name
 		ORDER BY je.posting_date DESC, je.creation DESC
 		""",
 		values,
