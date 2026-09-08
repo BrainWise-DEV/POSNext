@@ -50,10 +50,22 @@ def _get_post_change_gl_entries_setting():
 
 
 def _resolve_pos_customer(invoice_doc):
-	"""Return a valid Customer name for POS invoices, or None."""
+	"""Return a valid Customer name for POS invoices, or None.
+
+	Falls back to the POS Profile default customer only when the invoice
+	customer was blank. A non-empty customer that does not exist must fail
+	loudly so revenue is not silently reattributed to the walk-in party.
+	"""
 	customer = (invoice_doc.get("customer") or "").strip()
-	if customer and frappe.db.exists("Customer", customer):
-		return customer
+	if customer:
+		if frappe.db.exists("Customer", customer):
+			return customer
+		frappe.throw(
+			_("Customer {0} does not exist. Please select a valid customer.").format(
+				frappe.bold(customer)
+			),
+			title=_("Invalid Customer"),
+		)
 
 	pos_profile = invoice_doc.get("pos_profile")
 	if pos_profile:
