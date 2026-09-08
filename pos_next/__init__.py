@@ -25,6 +25,30 @@ try:
 except Exception:
 	pass
 
+
+try:
+	from erpnext.accounts.doctype.pricing_rule import pricing_rule as _erpnext_pricing_rule
+
+	from pos_next.overrides.pricing_rule import (
+		apply_price_discount_rule as _pos_next_apply_price_discount_rule,
+	)
+
+	_erpnext_pricing_rule.apply_price_discount_rule = _pos_next_apply_price_discount_rule
+except Exception:
+	if frappe:
+		frappe.log_error(frappe.get_traceback(), "Pricing Rule Override Error")
+
+
+try:
+	from erpnext.accounts.doctype.promotional_scheme import promotional_scheme as _promotional_scheme
+
+	for _min_max_field in ("apply_discount_on_price", "min_or_max_discount_qty_limit"):
+		if _min_max_field not in _promotional_scheme.price_discount_fields:
+			_promotional_scheme.price_discount_fields.append(_min_max_field)
+except Exception:
+	if frappe:
+		frappe.log_error(frappe.get_traceback(), "Promotional Scheme Field Patch Error")
+
 # Frappe/ERPNext compatibility shim:
 # ERPNext may pass do_not_round_fields to round_floats_in, but older Frappe
 # versions don't accept that kwarg.
