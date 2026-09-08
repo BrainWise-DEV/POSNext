@@ -537,6 +537,11 @@
 										<th
 											class="px-4 py-3 text-start text-xs font-medium text-gray-500 uppercase"
 										>
+											{{ __("Journal Entry") }}
+										</th>
+										<th
+											class="px-4 py-3 text-start text-xs font-medium text-gray-500 uppercase"
+										>
 											{{ __("Expense Account") }}
 										</th>
 										<th
@@ -559,8 +564,11 @@
 								<tbody class="divide-y divide-gray-200">
 									<tr
 										v-for="(expense, idx) in closingData.pos_expenses"
-										:key="idx"
+										:key="expense.journal_entry || idx"
 									>
+										<td class="px-4 py-3 text-sm text-gray-900 text-start">
+											{{ expense.journal_entry || __("N/A") }}
+										</td>
 										<td class="px-4 py-3 text-sm text-gray-900 text-start">
 											{{ expense.expense_account }}
 										</td>

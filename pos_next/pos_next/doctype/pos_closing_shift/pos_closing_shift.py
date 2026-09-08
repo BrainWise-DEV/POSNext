@@ -639,6 +639,7 @@ def make_closing_shift_from_opening(opening_shift):
 		pos_expenses_table.append(
 			frappe._dict(
 				{
+					"journal_entry": expense.journal_entry,
 					"expense_account": expense.expense_account,
 					"amount": expense_amount,
 					"employee": expense.employee or "",
