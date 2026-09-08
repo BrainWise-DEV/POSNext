@@ -1,16 +1,22 @@
 # Copyright (c) 2026, BrainWise and contributors
 # For license information, please see license.txt
 
-"""Unit tests for pos_next.api.expenses.
+"""Tests for pos_next.api.expenses.
 
-These are pure mocks, but patching ``frappe.db.*`` still requires a live site:
-the ``frappe.db`` proxy is unbound outside site context. Run via
-``bench --site <site> run-tests --module pos_next.api.test_expenses``.
+Unit tests are pure mocks, but patching ``frappe.db.*`` still requires a live
+site: the ``frappe.db`` proxy is unbound outside site context. The Journal Entry
+integration class builds a real submitted JE on ``_Test Company``.
+
+Run via ``bench --site <site> run-tests --module pos_next.api.test_expenses``.
 """
 
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
+
+import frappe
+from frappe.tests.utils import FrappeTestCase
+from frappe.utils import flt
 
 from pos_next.api import expenses
 
@@ -387,3 +393,95 @@ class TestPOSExpenses(unittest.TestCase):
 		sql = mock_sql.call_args.args[0]
 		self.assertIn("SUM(jea.credit)", sql)
 		self.assertNotIn("posa_expense_amount", sql)
+
+
+class TestPOSExpenseJournalEntry(FrappeTestCase):
+	"""Real Journal Entry insert/submit for the POS expense builder.
+
+	One integration test covers debit/credit balance, cost center on both rows,
+	payment-account resolution (M3), shift posting date (M5), and exchange-rate /
+	base amounts (M7).
+	"""
+
+	COMPANY = "_Test Company"
+	EXPENSE_ACCOUNT = "Travel Expenses - _TC"
+	COST_CENTER = "Main - _TC"
+	MODE_OF_PAYMENT = "Cash"
+	PROFILE = "_PNXT_TEST_POS_PROFILE__Test Company"
+	PERIOD_START = "2026-09-08 22:00:00"
+	AMOUNT = 50
+
+	def tearDown(self):
+		frappe.db.rollback()
+		super().tearDown()
+
+	def _make_opening_shift(self):
+		shift = frappe.get_doc(
+			{
+				"doctype": "POS Opening Shift",
+				"period_start_date": self.PERIOD_START,
+				"posting_date": "2026-09-08",
+				"company": self.COMPANY,
+				"pos_profile": self.PROFILE,
+				"user": frappe.session.user,
+				"balance_details": [
+					{"mode_of_payment": self.MODE_OF_PAYMENT, "amount": 0}
+				],
+			}
+		)
+		shift.insert()
+		return shift
+
+	def test_create_expense_journal_entry_balances_rows_and_shift_fields(self):
+		# M3: resolve the configured MoP cash ledger — no arbitrary Cash/Bank fallback.
+		payment_account = expenses._resolve_payment_account(self.MODE_OF_PAYMENT, self.COMPANY)
+		self.assertEqual(payment_account, "Cash - _TC")
+
+		shift = self._make_opening_shift()
+		# Ensure the profile cost center matches what the JE rows should carry.
+		frappe.db.set_value("POS Profile", self.PROFILE, "cost_center", self.COST_CENTER)
+
+		je_name = expenses._create_expense_journal_entry(
+			company=self.COMPANY,
+			expense_account=self.EXPENSE_ACCOUNT,
+			payment_account=payment_account,
+			amount=self.AMOUNT,
+			cost_center=self.COST_CENTER,
+			pos_opening_shift=shift.name,
+			pos_profile=self.PROFILE,
+			mode_of_payment=self.MODE_OF_PAYMENT,
+			employee=None,
+			remarks="Integration test fuel",
+			period_start_date=shift.period_start_date,
+		)
+		jv = frappe.get_doc("Journal Entry", je_name)
+
+		self.assertEqual(jv.docstatus, 1)
+		# M5: overnight shift posts to the shift start date, not "today".
+		self.assertEqual(str(jv.posting_date), "2026-09-08")
+		self.assertEqual(jv.posa_is_pos_expense, 1)
+		self.assertEqual(jv.posa_pos_opening_shift, shift.name)
+		self.assertEqual(jv.posa_pos_profile, self.PROFILE)
+		self.assertEqual(jv.posa_expense_account, self.EXPENSE_ACCOUNT)
+		self.assertEqual(flt(jv.posa_expense_amount), self.AMOUNT)
+		self.assertEqual(jv.posa_expense_mode_of_payment, self.MODE_OF_PAYMENT)
+
+		self.assertEqual(len(jv.accounts), 2)
+		debit_row = next(row for row in jv.accounts if flt(row.debit) > 0)
+		credit_row = next(row for row in jv.accounts if flt(row.credit) > 0)
+
+		self.assertEqual(debit_row.account, self.EXPENSE_ACCOUNT)
+		self.assertEqual(credit_row.account, payment_account)
+		self.assertEqual(flt(debit_row.debit), self.AMOUNT)
+		self.assertEqual(flt(credit_row.credit), self.AMOUNT)
+		self.assertEqual(flt(debit_row.debit), flt(credit_row.credit))
+		self.assertEqual(debit_row.cost_center, self.COST_CENTER)
+		self.assertEqual(credit_row.cost_center, self.COST_CENTER)
+
+		# M7: company-currency debit/credit and exchange_rate are set explicitly.
+		self.assertEqual(flt(debit_row.exchange_rate), 1)
+		self.assertEqual(flt(credit_row.exchange_rate), 1)
+		self.assertEqual(flt(debit_row.debit_in_account_currency), self.AMOUNT)
+		self.assertEqual(flt(credit_row.credit_in_account_currency), self.AMOUNT)
+		self.assertEqual(flt(debit_row.credit), 0)
+		self.assertEqual(flt(credit_row.debit), 0)

@@ -591,12 +591,25 @@ def _create_expense_journal_entry(
 	posting_date = _shift_posting_date(period_start_date)
 	base_amount = flt(amount)
 
+	expense_amounts = _account_row_amounts(
+		expense_account, base_amount, company, posting_date, is_debit=True
+	)
+	payment_amounts = _account_row_amounts(
+		payment_account, base_amount, company, posting_date, is_debit=False
+	)
+	company_currency = frappe.get_cached_value("Company", company, "default_currency")
+	multi_currency = int(
+		expense_amounts["account_currency"] != company_currency
+		or payment_amounts["account_currency"] != company_currency
+	)
+
 	jv_doc = frappe.get_doc(
 		{
 			"doctype": "Journal Entry",
 			"voucher_type": "Journal Entry",
 			"posting_date": posting_date,
 			"company": company,
+			"multi_currency": multi_currency,
 			"user_remark": user_remark,
 			"posa_is_pos_expense": 1,
 			"posa_pos_opening_shift": pos_opening_shift,
@@ -609,19 +622,11 @@ def _create_expense_journal_entry(
 	)
 
 	expense_row = jv_doc.append("accounts", {})
-	expense_row.update(
-		_account_row_amounts(
-			expense_account, base_amount, company, posting_date, is_debit=True
-		)
-	)
+	expense_row.update(expense_amounts)
 	expense_row.cost_center = cost_center
 
 	payment_row = jv_doc.append("accounts", {})
-	payment_row.update(
-		_account_row_amounts(
-			payment_account, base_amount, company, posting_date, is_debit=False
-		)
-	)
+	payment_row.update(payment_amounts)
 	payment_row.cost_center = cost_center
 
 	jv_doc.flags.ignore_permissions = True
