@@ -76,8 +76,11 @@ class CustomSalesInvoice(SalesInvoice):
 	def validate(self):
 		if cint(self.is_pos):
 			self._ensure_pos_customer()
-			self._validate_pos_payment_accounts()
 		super().validate()
+		# debit_to is set in ERPNext validate (set_missing_values / validate_debit_to_acc);
+		# POS clients do not send it, so this must run after super().
+		if cint(self.is_pos):
+			self._validate_pos_payment_accounts()
 
 	def on_submit(self):
 		# Re-align after fetch_from so ERPNext's loyalty branch does not run on a
