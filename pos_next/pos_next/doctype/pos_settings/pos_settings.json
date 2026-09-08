@@ -62,6 +62,8 @@
   "section_break_advanced",
   "use_limit_search",
   "search_limit",
+  "enable_idle_refocus",
+  "idle_refocus_seconds",
   "column_break_advanced",
   "allow_submissions_in_background_job",
   "allow_delete_offline_invoice",
@@ -469,6 +471,21 @@
    "fieldname": "search_limit",
    "fieldtype": "Int",
    "label": "Search Limit Number"
+  },
+  {
+   "default": "1",
+   "description": "Automatically return focus to the item search input after a period of inactivity",
+   "fieldname": "enable_idle_refocus",
+   "fieldtype": "Check",
+   "label": "Auto-Focus Item Search When Idle"
+  },
+  {
+   "default": "3",
+   "depends_on": "enable_idle_refocus",
+   "description": "Seconds of inactivity before focus returns to the item search input",
+   "fieldname": "idle_refocus_seconds",
+   "fieldtype": "Int",
+   "label": "Idle Time Before Refocus (seconds)"
   },
   {
    "fieldname": "column_break_advanced",
