@@ -220,13 +220,8 @@ def _resolve_leaf_territory(territory=None):
 	]
 	for name in candidates:
 		# Territory allows selecting group nodes in some setups; prefer leaves.
+		# Non-leaf / missing names fall through to the next candidate or fallback.
 		if _is_leaf_territory(name):
-			return name
-		# Keep an existing non-empty territory if the leaf check failed only
-		# because the record is missing (avoid wiping a valid leaf passed in).
-		if name and frappe.db.exists("Territory", name) and not _is_leaf_territory(name):
-			continue
-		if name and frappe.db.exists("Territory", name):
 			return name
 
 	leaf = frappe.db.get_value("Territory", {"is_group": 0}, "name", order_by="lft")
