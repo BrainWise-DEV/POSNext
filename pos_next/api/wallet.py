@@ -179,16 +179,27 @@ def get_wallet_amount_for_sales_invoice(invoice_name, payments=None):
 	return get_wallet_amount_from_payments(payments)
 
 
+WALLET_PAYMENT_MODES_CACHE_KEY = "pos_next_wallet_payment_modes"
+WALLET_PAYMENT_MODES_CACHE_TTL = 300  # safety net; cleared on Mode of Payment change
+
+
 def _get_wallet_payment_modes():
 	"""Return a cached map of wallet-enabled Mode of Payment names."""
-	modes = frappe.cache().get_value("pos_next_wallet_payment_modes")
+	modes = frappe.cache().get_value(WALLET_PAYMENT_MODES_CACHE_KEY)
 	if modes is None:
 		modes = {
 			row.name: 1
 			for row in frappe.get_all("Mode of Payment", filters={"is_wallet_payment": 1}, fields=["name"])
 		}
-		frappe.cache().set_value("pos_next_wallet_payment_modes", modes)
+		frappe.cache().set_value(
+			WALLET_PAYMENT_MODES_CACHE_KEY, modes, expires_in_sec=WALLET_PAYMENT_MODES_CACHE_TTL
+		)
 	return modes
+
+
+def clear_wallet_payment_modes_cache(doc=None, method=None):
+	"""Invalidate wallet Mode of Payment cache when MoP docs change."""
+	frappe.cache().delete_value(WALLET_PAYMENT_MODES_CACHE_KEY)
 
 
 @frappe.whitelist()
