@@ -85,9 +85,16 @@ class TestNoPromotionsImport(unittest.TestCase):
 		promo_mgmt = (POS_NEXT_APP / "POS" / "src" / "components" / "sale" / "PromotionManagement.vue").read_text()
 		self.assertIn("isPromotionsAppInstalled", promo_mgmt)
 		self.assertIn("Gift Pool", promo_mgmt)
+		# Product types (Gift Pool / GWP) register via the strategy plugin seam —
+		# posCart must not hardcode them; the host only loads plugins when the
+		# satellite is installed.
+		offer_strategies = (POS_NEXT_APP / "POS" / "src" / "utils" / "offerStrategies.js").read_text()
+		self.assertIn("isPromotionsAppInstalled", offer_strategies)
+		self.assertIn("registerProductOfferStrategy", offer_strategies)
 		pos_cart = (POS_NEXT_APP / "POS" / "src" / "stores" / "posCart.js").read_text()
-		self.assertIn("isPromotionsAppInstalled", pos_cart)
-		self.assertIn("Gift Pool", pos_cart)
+		self.assertIn("getProductStrategyForOffer", pos_cart)
+		self.assertNotIn("applyOfflineGiftPool", pos_cart)
+		self.assertNotIn('promotion_type === "Gift Pool"', pos_cart)
 
 	def test_customer_create_uses_bootstrap_flag(self):
 		dialog = (POS_NEXT_APP / "POS" / "src" / "components" / "sale" / "CreateCustomerDialog.vue").read_text()

@@ -1,8 +1,7 @@
-import { isPromotionsAppInstalled } from "@/utils/promoApi";
 import {
 	allowsAutoDiscountStacking,
+	getProductStrategyForOffer,
 	getStrategyForOffer,
-	loadOfferStrategyPlugins,
 	offerStrategyOrder,
 } from "@/utils/offerStrategies";
 import { useInvoice } from "@/composables/useInvoice";
@@ -1132,206 +1131,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	}
 
 	/**
-	 * Apply Gift Pool product discount offline: paid items in a group grant
-	 * free_qty units spread across that group's pool SKUs.
-	 */
-	function applyOfflineGiftPool(offer, eligibleItems) {
-		const poolRows = Array.isArray(offer.gift_pool_items) ? offer.gift_pool_items : [];
-		if (!poolRows.length) return false;
-
-		const pools = {};
-		for (const row of poolRows) {
-			const group = row.item_group;
-			const code = row.item_code;
-			if (!group || !code) continue;
-			if (!pools[group]) pools[group] = [];
-			if (!pools[group].includes(code)) pools[group].push(code);
-		}
-
-		let applied = false;
-		const referenceItem = eligibleItems[0];
-		const uomKey = referenceItem?.uom || referenceItem?.stock_uom || "Nos";
-
-		for (const [itemGroup, poolCodes] of Object.entries(pools)) {
-			const poolSet = new Set(poolCodes);
-			const sample = poolRows.find((row) => row.item_group === itemGroup);
-			const groupSet = new Set(
-				sample?.matching_item_groups?.length ? sample.matching_item_groups : [itemGroup]
-			);
-			const paidItems = eligibleItems.filter(
-				(item) => groupSet.has(item.item_group) && !poolSet.has(item.item_code)
-			);
-			const paidQty = paidItems.reduce(
-				(sum, item) => sum + (Math.floor(item.quantity || item.qty || 0) || 0),
-				0
-			);
-			if (paidQty <= 0) continue;
-
-			const giftQty = Math.max(1, Number(sample?.free_qty) || 1);
-			const counts = {};
-			for (let i = 0; i < giftQty; i++) {
-				const giftCode = poolCodes[i % poolCodes.length];
-				counts[giftCode] = (counts[giftCode] || 0) + 1;
-			}
-
-			for (const item of paidItems) {
-				const pr = item.pricing_rules;
-				const prArr = Array.isArray(pr)
-					? [...pr]
-					: pr
-						? String(pr)
-								.split(",")
-								.map((s) => s.trim())
-								.filter(Boolean)
-						: [];
-				if (!prArr.includes(offer.name)) prArr.push(offer.name);
-				item.pricing_rules = prArr;
-			}
-
-			for (const [giftCode, freeItemsToGive] of Object.entries(counts)) {
-				const poolRow = poolRows.find((row) => row.item_code === giftCode);
-				const existingFreeRow = invoiceItems.value.find(
-					(r) =>
-						r.is_free_item &&
-						r.item_code === giftCode &&
-						(r.uom || r.stock_uom) === uomKey
-				);
-				if (existingFreeRow) {
-					existingFreeRow.quantity = freeItemsToGive;
-					existingFreeRow.free_qty = freeItemsToGive;
-					const pr = existingFreeRow.pricing_rules;
-					const prArr = Array.isArray(pr)
-						? [...pr]
-						: pr
-							? String(pr)
-									.split(",")
-									.map((s) => s.trim())
-									.filter(Boolean)
-							: [];
-					if (!prArr.includes(offer.name)) prArr.push(offer.name);
-					existingFreeRow.pricing_rules = prArr;
-				} else {
-					invoiceItems.value.push({
-						item_code: giftCode,
-						item_name: poolRow?.item_name || giftCode,
-						rate: 0,
-						price_list_rate: 0,
-						quantity: freeItemsToGive,
-						discount_amount: 0,
-						discount_percentage: 0,
-						tax_amount: 0,
-						amount: 0,
-						stock_qty: 0,
-						uom: uomKey,
-						stock_uom: uomKey,
-						conversion_factor: 1,
-						is_free_item: 1,
-						free_qty: freeItemsToGive,
-						pricing_rules: [offer.name],
-						warehouse: referenceItem?.warehouse,
-					});
-				}
-				applied = true;
-			}
-		}
-
-		return applied;
-	}
-
-	/**
-	 * Offline GWP for a single SKU: cashier must scan paid + free units.
-	 * Buy 2 get 1 free needs qty 3, then splits 1 unit onto a free row.
-	 */
-	function applyOfflineGwpSameItem(offer, eligibleItems) {
-		const freeQty = Math.floor(Number.parseFloat(offer.free_qty) || 0);
-		const minQty = Number.parseFloat(offer.min_qty) || 0;
-		const maxQty = Number.parseFloat(offer.max_qty) || 0;
-		if (freeQty <= 0) return false;
-
-		const paidItems = eligibleItems.filter((item) => !item.is_free_item);
-		const codes = [...new Set(paidItems.map((item) => item.item_code).filter(Boolean))];
-		if (codes.length !== 1) {
-			return false;
-		}
-
-		const itemCode = codes[0];
-		const matching = invoiceItems.value.filter(
-			(item) => item.item_code === itemCode && !item.is_free_item
-		);
-		const existingFree = invoiceItems.value.filter(
-			(item) => item.item_code === itemCode && item.is_free_item
-		);
-		const totalQty = [...matching, ...existingFree].reduce(
-			(sum, item) => sum + (Math.floor(item.quantity || item.qty || 0) || 0),
-			0
-		);
-		const paidAfterFree = totalQty - freeQty;
-		if (totalQty < minQty + freeQty || paidAfterFree <= 0) return false;
-		if (minQty > 0 && paidAfterFree < minQty) return false;
-		if (maxQty > 0 && paidAfterFree > maxQty) return false;
-
-		const referenceItem = matching[0];
-		if (!referenceItem) return false;
-		const uomKey = referenceItem.uom || referenceItem.stock_uom;
-		if ((Number.parseFloat(referenceItem.quantity) || 0) > freeQty) {
-			referenceItem.quantity = (Number.parseFloat(referenceItem.quantity) || 0) - freeQty;
-			recalculateItem(referenceItem);
-		}
-
-		for (const item of matching) {
-			const pr = item.pricing_rules;
-			const prArr = Array.isArray(pr)
-				? [...pr]
-				: pr
-					? String(pr)
-							.split(",")
-							.map((s) => s.trim())
-							.filter(Boolean)
-					: [];
-			if (!prArr.includes(offer.name)) prArr.push(offer.name);
-			item.pricing_rules = prArr;
-		}
-
-		const existingFreeRow = invoiceItems.value.find(
-			(r) =>
-				r.is_free_item &&
-				r.item_code === itemCode &&
-				(r.uom || r.stock_uom) === uomKey
-		);
-		if (existingFreeRow) {
-			existingFreeRow.quantity = freeQty;
-			existingFreeRow.free_qty = freeQty;
-			existingFreeRow.gwp_same_item_row = 1;
-			existingFreeRow.discount_source = "gwp";
-		} else {
-			invoiceItems.value.push({
-				item_code: itemCode,
-				item_name: referenceItem.item_name || itemCode,
-				rate: 0,
-				price_list_rate: 0,
-				quantity: freeQty,
-				discount_amount: 0,
-				discount_percentage: 0,
-				tax_amount: 0,
-				amount: 0,
-				stock_qty: 0,
-				uom: uomKey,
-				stock_uom: referenceItem.stock_uom || uomKey,
-				conversion_factor: referenceItem.conversion_factor || 1,
-				is_free_item: 1,
-				free_qty: freeQty,
-				discount_source: "gwp",
-				gwp_same_item_row: 1,
-				pricing_rules: [offer.name],
-				warehouse: referenceItem.warehouse,
-			});
-		}
-		return true;
-	}
-
-	/**
 	 * Apply free item (product discount) offer offline
 	 * Handles: same_item (free item = purchased item) or specific free_item
+	 *
+	 * Satellite product types (Gift Pool, GWP) register via offerStrategies —
+	 * this host only owns the plain free-item paths.
 	 *
 	 * Recursive logic:
 	 * - recurse_for: Give free item for every N quantity
@@ -1344,11 +1148,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * @returns {boolean} True if free item was applied
 	 */
 	function applyOfflineFreeItem(offer, eligibleItems) {
-		if (isPromotionsAppInstalled() && offer.promotion_type === "Gift Pool") {
-			return applyOfflineGiftPool(offer, eligibleItems);
-		}
-		if (isPromotionsAppInstalled() && offer.promotion_type === "GWP") {
-			return applyOfflineGwpSameItem(offer, eligibleItems);
+		const strategy = getProductStrategyForOffer(offer);
+		if (strategy) {
+			return strategy.apply(offer, eligibleItems, {
+				recalculateItem,
+				invoiceItems: invoiceItems.value,
+			});
 		}
 		const freeQty = Number.parseFloat(offer.free_qty) || 0;
 		const sameItem = offer.same_item === 1;

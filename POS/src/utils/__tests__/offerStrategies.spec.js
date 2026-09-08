@@ -3,9 +3,12 @@ import {
 	allowsAutoDiscountStacking,
 	clearOfferStrategies,
 	getOfferStrategy,
+	getProductOfferStrategy,
+	getProductStrategyForOffer,
 	getStrategyForOffer,
 	offerStrategyOrder,
 	registerOfferStrategy,
+	registerProductOfferStrategy,
 } from "@/utils/offerStrategies";
 
 /**
@@ -19,6 +22,8 @@ describe("offer strategy registry", () => {
 	it("resolves nothing when no app has registered", () => {
 		expect(getOfferStrategy("Accumulative")).toBeUndefined();
 		expect(getStrategyForOffer({ apply_discount_on_price: "Accumulative" })).toBeUndefined();
+		expect(getProductOfferStrategy("Gift Pool")).toBeUndefined();
+		expect(getProductStrategyForOffer({ promotion_type: "Gift Pool" })).toBeUndefined();
 		expect(offerStrategyOrder({ apply_discount_on_price: "Accumulative" })).toBe(0);
 		expect(allowsAutoDiscountStacking({ is_accumulative_discount: 1 })).toBe(false);
 	});
@@ -32,17 +37,29 @@ describe("offer strategy registry", () => {
 		expect(getStrategyForOffer({})).toBeUndefined();
 	});
 
+	it("resolves a registered product strategy by promotion_type", () => {
+		const strategy = { order: 50, apply: () => true };
+		registerProductOfferStrategy("Gift Pool", strategy);
+
+		expect(getProductStrategyForOffer({ promotion_type: "Gift Pool" })).toBe(strategy);
+		expect(getProductStrategyForOffer({ promotion_type: "GWP" })).toBeUndefined();
+		expect(getProductStrategyForOffer({})).toBeUndefined();
+	});
+
 	it("orders strategy-backed offers ahead of plain ones", () => {
 		registerOfferStrategy("Accumulative", { order: 100, apply: () => true });
+		registerProductOfferStrategy("Gift Pool", { order: 50, apply: () => true });
 
 		const offers = [
 			{ name: "plain" },
 			{ name: "accum", apply_discount_on_price: "Accumulative" },
+			{ name: "pool", promotion_type: "Gift Pool" },
 			{ name: "other", apply_discount_on_price: "Min" },
 		];
 		const ordered = [...offers].sort((a, b) => offerStrategyOrder(b) - offerStrategyOrder(a));
 
 		expect(ordered[0].name).toBe("accum");
+		expect(ordered[1].name).toBe("pool");
 	});
 
 	it("delegates the Auto Discount stacking decision to the strategy", () => {
@@ -60,8 +77,11 @@ describe("offer strategy registry", () => {
 
 		registerOfferStrategy("Accumulative", { order: 1 }); // no apply()
 		registerOfferStrategy("", { apply: () => true });
+		registerProductOfferStrategy("Gift Pool", { order: 1 }); // no apply()
+		registerProductOfferStrategy("", { apply: () => true });
 
 		expect(getOfferStrategy("Accumulative")).toBeUndefined();
+		expect(getProductOfferStrategy("Gift Pool")).toBeUndefined();
 		expect(warn).toHaveBeenCalled();
 		warn.mockRestore();
 	});
