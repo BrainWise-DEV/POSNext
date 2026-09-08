@@ -130,7 +130,7 @@
 							</div>
 
 							<!-- Pay Due button -->
-							<div class="flex justify-end" v-if="statement.summary.total_outstanding > 0">
+							<div class="flex justify-end" v-if="statement.summary.net_balance > 0">
 								<button
 									type="button"
 									@click="openLumpSumPayment"
@@ -141,7 +141,7 @@
 									<svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"/>
 									</svg>
-									{{ __('Pay Due ({0})', [formatCurrency(statement.summary.total_outstanding)]) }}
+									{{ __('Pay Due ({0})', [formatCurrency(statement.summary.net_balance)]) }}
 								</button>
 							</div>
 
@@ -363,8 +363,8 @@
 	<!-- Lump-sum PaymentDialog -->
 	<PaymentDialog
 		v-model="showLumpSumPayment"
-		:grand-total="statement?.summary.total_outstanding || 0"
-		:subtotal="statement?.summary.total_outstanding || 0"
+		:grand-total="statement?.summary.net_balance || 0"
+		:subtotal="statement?.summary.net_balance || 0"
 		:customer="customerName || customer"
 		:pos-profile="posProfile"
 		:currency="currency"

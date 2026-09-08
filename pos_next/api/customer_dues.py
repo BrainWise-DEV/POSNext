@@ -198,103 +198,91 @@ def get_credit_customers_summary(pos_profile=None, company=None):
 	if not company and pos_profile:
 		company = frappe.db.get_value("POS Profile", pos_profile, "company")
 
-	try:
-		from frappe.query_builder import DocType
-		from frappe.query_builder.functions import Abs, Coalesce, Sum
-		from pypika import Case
+	from frappe.query_builder import DocType
+	from frappe.query_builder.functions import Abs, Coalesce, Sum
+	from pypika import Case
 
-		SalesInvoice = DocType("Sales Invoice")
+	SalesInvoice = DocType("Sales Invoice")
 
-		base_filters = SalesInvoice.docstatus == 1
-		if company:
-			base_filters = base_filters & (SalesInvoice.company == company)
+	base_filters = SalesInvoice.docstatus == 1
+	if company:
+		base_filters = base_filters & (SalesInvoice.company == company)
 
-		# Regular invoices: positive outstanding (what customer owes) + due count
-		regular_query = (
-			frappe.qb.from_(SalesInvoice)
-			.select(
-				SalesInvoice.customer,
-				SalesInvoice.customer_name,
-				Coalesce(
-					Sum(
-						Case()
-						.when(SalesInvoice.outstanding_amount > 0, SalesInvoice.outstanding_amount)
-						.else_(0)
-					),
-					0,
-				).as_("total_outstanding"),
-				Coalesce(
-					Sum(Case().when(SalesInvoice.outstanding_amount > 0, 1).else_(0)),
-					0,
-				).as_("due_count"),
+	# Regular invoices: positive outstanding (what customer owes) + due count
+	regular_query = (
+		frappe.qb.from_(SalesInvoice)
+		.select(
+			SalesInvoice.customer,
+			SalesInvoice.customer_name,
+			Coalesce(
+				Sum(
+					Case()
+					.when(SalesInvoice.outstanding_amount > 0, SalesInvoice.outstanding_amount)
+					.else_(0)
+				),
+				0,
+			).as_("total_outstanding"),
+			Coalesce(
+				Sum(Case().when(SalesInvoice.outstanding_amount > 0, 1).else_(0)),
+				0,
+			).as_("due_count"),
+		)
+		.where(base_filters & (SalesInvoice.is_return == 0))
+		.groupby(SalesInvoice.customer, SalesInvoice.customer_name)
+	)
+
+	# Return invoices: only negative outstanding counts as credit (no cash refund)
+	return_query = (
+		frappe.qb.from_(SalesInvoice)
+		.select(
+			SalesInvoice.customer,
+			Coalesce(Sum(Abs(SalesInvoice.outstanding_amount)), 0).as_("total_credit"),
+		)
+		.where(
+			base_filters
+			& (SalesInvoice.is_return == 1)
+			& (SalesInvoice.outstanding_amount < 0)
+		)
+		.groupby(SalesInvoice.customer)
+	)
+
+	regular_rows = regular_query.run(as_dict=True)
+	return_rows = return_query.run(as_dict=True)
+
+	credit_by_customer = {r.customer: flt(r.total_credit) for r in return_rows}
+
+	customers = []
+	for r in regular_rows:
+		total_outstanding = flt(r.total_outstanding)
+		total_credit = credit_by_customer.get(r.customer, 0.0)
+		net_balance = total_outstanding - total_credit
+		if net_balance > 0:
+			customers.append(
+				{
+					"customer": r.customer,
+					"customer_name": r.customer_name or r.customer,
+					"total_outstanding": total_outstanding,
+					"total_credit": total_credit,
+					"net_balance": net_balance,
+					"due_count": int(r.due_count or 0),
+				}
 			)
-			.where(base_filters & (SalesInvoice.is_return == 0))
-			.groupby(SalesInvoice.customer, SalesInvoice.customer_name)
-		)
 
-		# Return invoices: only negative outstanding counts as credit (no cash refund)
-		return_query = (
-			frappe.qb.from_(SalesInvoice)
-			.select(
-				SalesInvoice.customer,
-				Coalesce(Sum(Abs(SalesInvoice.outstanding_amount)), 0).as_("total_credit"),
-			)
-			.where(
-				base_filters
-				& (SalesInvoice.is_return == 1)
-				& (SalesInvoice.outstanding_amount < 0)
-			)
-			.groupby(SalesInvoice.customer)
-		)
+	customers.sort(key=lambda c: c["net_balance"], reverse=True)
 
-		regular_rows = regular_query.run(as_dict=True)
-		return_rows = return_query.run(as_dict=True)
+	net_total = sum(c["net_balance"] for c in customers)
 
-		credit_by_customer = {r.customer: flt(r.total_credit) for r in return_rows}
+	currency = (
+		(frappe.db.get_value("Company", company, "default_currency") if company else None)
+		or frappe.db.get_default("currency")
+		or "USD"
+	)
 
-		customers = []
-		for r in regular_rows:
-			total_outstanding = flt(r.total_outstanding)
-			total_credit = credit_by_customer.get(r.customer, 0.0)
-			net_balance = total_outstanding - total_credit
-			if net_balance > 0:
-				customers.append(
-					{
-						"customer": r.customer,
-						"customer_name": r.customer_name or r.customer,
-						"total_outstanding": total_outstanding,
-						"total_credit": total_credit,
-						"net_balance": net_balance,
-						"due_count": int(r.due_count or 0),
-					}
-				)
-
-		customers.sort(key=lambda c: c["net_balance"], reverse=True)
-
-		net_total = sum(c["net_balance"] for c in customers)
-
-		currency = (
-			(frappe.db.get_value("Company", company, "default_currency") if company else None)
-			or frappe.db.get_default("currency")
-			or "USD"
-		)
-
-		return {
-			"customers": customers,
-			"totals": {"net_balance": net_total, "customer_count": len(customers)},
-			"currency": currency,
-		}
-
-	except Exception:
-		frappe.log_error(
-			title="Credit Customers Summary Error",
-			message=f"pos_profile: {pos_profile}, company: {company}\n{frappe.get_traceback()}",
-		)
-		return {
-			"customers": [],
-			"totals": {"net_balance": 0.0, "customer_count": 0},
-			"currency": "USD",
-		}
+	return {
+		"customers": customers,
+		"totals": {"net_balance": net_total, "customer_count": len(customers)},
+		"currency": currency,
+	}
 
 
 @frappe.whitelist()
@@ -403,7 +391,6 @@ def pay_customer_due(
 					amount=alloc_amount,
 					mode_of_payment=mode,
 					payment_account=account,
-					pos_opening_shift=pos_opening_shift,
 				)
 				allocations.append(
 					{"invoice": inv_name, "mode_of_payment": mode, "amount": alloc_amount}
