@@ -16,6 +16,7 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 	const selectedIndex = ref(-1);
 	const recentSearches = ref([]);
 	const frequentCustomers = ref([]);
+	const customerCounts = ref({});
 
 	// Performance optimization: Pre-computed search indices
 	const searchIndex = ref(new Map());
@@ -194,6 +195,25 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 		return recs;
 	});
 
+	// Top 5 customer objects by selection frequency, resolved against the
+	// current (group-filtered) allCustomers so we never surface a stale ID.
+	// Tie-break alphabetically for deterministic ordering.
+	const topCustomers = computed(() => {
+		const counts = customerCounts.value
+		const byId = new Map(allCustomers.value.map((c) => [c.name, c]))
+		return Object.keys(counts)
+			.filter((id) => counts[id] > 0 && byId.has(id))
+			.sort(
+				(a, b) =>
+					counts[b] - counts[a] ||
+					(byId.get(a).customer_name || "").localeCompare(
+						byId.get(b).customer_name || "",
+					),
+			)
+			.slice(0, 5)
+			.map((id) => byId.get(id))
+	})
+
 	// Actions
 	async function loadAllCustomers(posProfile, forceReload = false) {
 		if (!posProfile) {
@@ -363,12 +383,22 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 		}
 		frequentCustomers.value = [customerId, ...frequentCustomers.value].slice(0, 20);
 
+		// Track per-customer selection frequency (immutable update for reactivity)
+		customerCounts.value = {
+			...customerCounts.value,
+			[customerId]: (customerCounts.value[customerId] || 0) + 1,
+		}
+
 		// Persist to localStorage
 		try {
 			localStorage.setItem("pos_recent_customers", JSON.stringify(recentSearches.value));
 			localStorage.setItem(
 				"pos_frequent_customers",
 				JSON.stringify(frequentCustomers.value)
+			);
+			localStorage.setItem(
+				"pos_customer_counts",
+				JSON.stringify(customerCounts.value)
 			);
 		} catch (e) {
 			log.warn("Failed to persist customer history:", e);
@@ -379,9 +409,11 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 		try {
 			const recent = localStorage.getItem("pos_recent_customers");
 			const frequent = localStorage.getItem("pos_frequent_customers");
+			const counts = localStorage.getItem("pos_customer_counts");
 
 			if (recent) recentSearches.value = JSON.parse(recent);
 			if (frequent) frequentCustomers.value = JSON.parse(frequent);
+			if (counts) customerCounts.value = JSON.parse(counts);
 		} catch (e) {
 			log.warn("Failed to load customer history:", e);
 		}
@@ -395,10 +427,12 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 		selectedIndex,
 		recentSearches,
 		frequentCustomers,
+		customerCounts,
 
 		// Getters
 		filteredCustomers,
 		recommendations,
+		topCustomers,
 
 		// Actions
 		loadAllCustomers,
