@@ -132,7 +132,13 @@ def validate_expense_amount(amount, pos_profile, pos_opening_shift=None):
 		frappe.db.get_value("POS Profile", pos_profile, "posa_maximum_expense_amount")
 	)
 	if maximum_amount <= 0:
-		return
+		frappe.throw(
+			_(
+				"Maximum Expense Amount is not configured on POS Profile {0}. "
+				"Set a positive limit before recording expenses."
+			).format(pos_profile),
+			title=_("Expense Limit Not Configured"),
+		)
 
 	shift_total = get_shift_expense_total(pos_opening_shift) if pos_opening_shift else 0
 	new_shift_total = shift_total + flt(amount)

@@ -317,7 +317,13 @@ function validateForm() {
 		return __("Amount must be greater than zero")
 	}
 
-	if (maximumExpenseAmount.value > 0 && amount > remainingExpenseAmount.value) {
+	if (maximumExpenseAmount.value <= 0) {
+		return __(
+			"Maximum Expense Amount is not configured on this POS Profile. Set a positive limit before recording expenses.",
+		)
+	}
+
+	if (amount > remainingExpenseAmount.value) {
 		return __("Amount exceeds the remaining shift expense allowance of {0}", {
 			0: formatCurrency(remainingExpenseAmount.value),
 		})

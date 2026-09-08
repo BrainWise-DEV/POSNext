@@ -68,6 +68,16 @@ class TestPOSExpenses(unittest.TestCase):
 			expenses.validate_expense_amount(0, "Test POS Profile")
 
 	@patch("pos_next.api.expenses.frappe.throw", side_effect=_raise_runtime_error)
+	@patch("pos_next.api.expenses.frappe.db.get_value")
+	def test_validate_expense_amount_rejects_unconfigured_limit(
+		self, mock_get_value, _mock_throw
+	):
+		mock_get_value.return_value = 0
+
+		with self.assertRaisesRegex(RuntimeError, "not configured"):
+			expenses.validate_expense_amount(50, "Test POS Profile")
+
+	@patch("pos_next.api.expenses.frappe.throw", side_effect=_raise_runtime_error)
 	@patch("pos_next.api.expenses.frappe.format_value", side_effect=lambda value, _options: str(value))
 	@patch("pos_next.api.expenses.get_shift_expense_total", return_value=0)
 	@patch("pos_next.api.expenses.frappe.db.get_value")
