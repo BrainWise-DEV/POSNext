@@ -1,12 +1,25 @@
 # Copyright (c) 2020, Youssef Restom and Contributors
 # See license.txt
 
+"""Tests for POS Closing Shift invoice aggregation and the expense reconciliation seam.
+
+Run via::
+
+	bench --site <site> run-tests --module pos_next.pos_next.doctype.pos_closing_shift.test_pos_closing_shift
+"""
+
+import json
 import unittest
 
 import frappe
+from frappe.tests.utils import FrappeTestCase
+from frappe.utils import flt
 
-from pos_next.pos_next.doctype.pos_closing_shift.pos_closing_shift import _process_invoice
-
+from pos_next.api import expenses
+from pos_next.pos_next.doctype.pos_closing_shift.pos_closing_shift import (
+	_process_invoice,
+	make_closing_shift_from_opening,
+)
 
 def _invoice(
 	name,
@@ -293,3 +306,121 @@ class TestPOSClosingShift(unittest.TestCase):
 		vat = next(t for t in taxes if t.account_head == "VAT - T")
 		self.assertEqual(vat.amount, 1)
 		self.assertEqual(summary["net_total"] + vat.amount, summary["grand_total"])
+
+
+class TestClosingShiftExpenseAggregation(FrappeTestCase):
+	"""T4 — expenses meet payment_reconciliation and total_pos_expenses.
+
+	Also guards H4's desync: a JE cancelled while the shift is still open must
+	drop out of closing totals so drawer maths and the audit child table agree.
+	"""
+
+	COMPANY = "_Test Company"
+	EXPENSE_ACCOUNT = "Travel Expenses - _TC"
+	COST_CENTER = "Main - _TC"
+	MODE_OF_PAYMENT = "Cash"
+	PROFILE = "_PNXT_TEST_POS_PROFILE__Test Company"
+	PERIOD_START = "2026-09-08 22:00:00"
+	OPENING_AMOUNT = 100
+	EXPENSE_AMOUNT = 30
+
+	def tearDown(self):
+		frappe.db.rollback()
+		super().tearDown()
+
+	def _make_opening_shift(self):
+		shift = frappe.get_doc(
+			{
+				"doctype": "POS Opening Shift",
+				"period_start_date": self.PERIOD_START,
+				"posting_date": "2026-09-08",
+				"company": self.COMPANY,
+				"pos_profile": self.PROFILE,
+				"user": frappe.session.user,
+				"balance_details": [
+					{"mode_of_payment": self.MODE_OF_PAYMENT, "amount": self.OPENING_AMOUNT}
+				],
+			}
+		)
+		shift.insert()
+		shift.submit()
+		return shift
+
+	def _create_expense(self, shift, amount, remarks="Fuel"):
+		frappe.db.set_value("POS Profile", self.PROFILE, "cost_center", self.COST_CENTER)
+		payment_account = expenses._resolve_payment_account(self.MODE_OF_PAYMENT, self.COMPANY)
+		return expenses._create_expense_journal_entry(
+			company=self.COMPANY,
+			expense_account=self.EXPENSE_ACCOUNT,
+			payment_account=payment_account,
+			amount=amount,
+			cost_center=self.COST_CENTER,
+			pos_opening_shift=shift.name,
+			pos_profile=self.PROFILE,
+			mode_of_payment=self.MODE_OF_PAYMENT,
+			employee=None,
+			remarks=remarks,
+			period_start_date=shift.period_start_date,
+		)
+
+	def _closing_from(self, shift):
+		opening_json = json.dumps(frappe.get_doc("POS Opening Shift", shift.name).as_dict(), default=str)
+		return make_closing_shift_from_opening(opening_json)
+
+	def _cash_row(self, closing):
+		return next(p for p in closing["payment_reconciliation"] if p["mode_of_payment"] == self.MODE_OF_PAYMENT)
+
+	def test_expenses_reduce_expected_and_drive_totals(self):
+		"""Submitted expenses land in pos_expenses, total_pos_expenses, and expected cash."""
+		shift = self._make_opening_shift()
+		je_name = self._create_expense(shift, self.EXPENSE_AMOUNT)
+
+		closing = self._closing_from(shift)
+
+		self.assertEqual(flt(closing["total_pos_expenses"]), self.EXPENSE_AMOUNT)
+		self.assertEqual(flt(closing["expenses_total"]), self.EXPENSE_AMOUNT)
+		self.assertEqual(closing["expenses_count"], 1)
+
+		self.assertEqual(len(closing["pos_expenses"]), 1)
+		row = closing["pos_expenses"][0]
+		self.assertEqual(row["journal_entry"], je_name)
+		self.assertEqual(row["expense_account"], self.EXPENSE_ACCOUNT)
+		self.assertEqual(flt(row["amount"]), self.EXPENSE_AMOUNT)
+		self.assertEqual(flt(row["amount"]), flt(closing["total_pos_expenses"]))
+
+		cash = self._cash_row(closing)
+		self.assertEqual(flt(cash["opening_amount"]), self.OPENING_AMOUNT)
+		self.assertEqual(flt(cash["expected_amount"]), self.OPENING_AMOUNT - self.EXPENSE_AMOUNT)
+
+	def test_cancelled_expense_excluded_while_shift_open(self):
+		"""H4 seam: cancel before close → closing no longer counts the JE."""
+		shift = self._make_opening_shift()
+		je_name = self._create_expense(shift, self.EXPENSE_AMOUNT)
+
+		# Sanity: expense is present before cancel.
+		before = self._closing_from(shift)
+		self.assertEqual(flt(before["total_pos_expenses"]), self.EXPENSE_AMOUNT)
+		self.assertEqual(flt(self._cash_row(before)["expected_amount"]), self.OPENING_AMOUNT - self.EXPENSE_AMOUNT)
+
+		frappe.get_doc("Journal Entry", je_name).cancel()
+
+		after = self._closing_from(shift)
+		self.assertEqual(flt(after["total_pos_expenses"]), 0)
+		self.assertEqual(flt(after["expenses_total"]), 0)
+		self.assertEqual(after["expenses_count"], 0)
+		self.assertEqual(after["pos_expenses"], [])
+		self.assertEqual(flt(self._cash_row(after)["expected_amount"]), self.OPENING_AMOUNT)
+
+	def test_multiple_expenses_sum_into_reconciliation(self):
+		"""Two submitted expenses aggregate into one total and one expected reduction."""
+		shift = self._make_opening_shift()
+		self._create_expense(shift, 20, remarks="Fuel")
+		self._create_expense(shift, 15, remarks="Parking")
+
+		closing = self._closing_from(shift)
+
+		self.assertEqual(flt(closing["total_pos_expenses"]), 35)
+		self.assertEqual(closing["expenses_count"], 2)
+		self.assertEqual(len(closing["pos_expenses"]), 2)
+		self.assertEqual(sum(flt(r["amount"]) for r in closing["pos_expenses"]), 35)
+		self.assertEqual(flt(self._cash_row(closing)["expected_amount"]), self.OPENING_AMOUNT - 35)
