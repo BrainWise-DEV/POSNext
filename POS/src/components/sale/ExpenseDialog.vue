@@ -211,7 +211,7 @@ const emit = defineEmits(["update:modelValue", "expense-created", "expense-cance
 const { showSuccess } = useToast()
 const { isOffline } = useOfflineStatus()
 
-/** Prefer API company_currency; prop/bootstrap next; never profile selling currency alone. */
+/** Prefer dialog API company_currency; then prop / shiftStore (Company.default_currency); never profile selling currency alone. */
 const currency = computed(
 	() =>
 		dialogDataResource.data?.company_currency ||
