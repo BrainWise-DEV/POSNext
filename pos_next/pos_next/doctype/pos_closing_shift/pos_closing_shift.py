@@ -350,7 +350,6 @@ def get_cashiers(doctype, txt, searchfield, start, page_len, filters):
 @frappe.whitelist()
 def get_pos_invoices(pos_opening_shift, doctype=None):
 	if not doctype:
-		pos_profile = frappe.db.get_value("POS Opening Shift", pos_opening_shift, "pos_profile")
 		use_pos_invoice = False
 		doctype = "POS Invoice" if use_pos_invoice else "Sales Invoice"
 	submit_printed_invoices(pos_opening_shift, doctype)
@@ -456,8 +455,27 @@ def _process_invoice(invoice, invoice_field, company_currency, cash_mode, paymen
 				"customer": invoice.customer,
 				"is_return": is_return,
 				"return_against": invoice.get("return_against"),
+				"collected_amount": 0,
+				"outstanding_amount": 0,
 			}
 		)
+
+	# Money actually collected on this sale, in company currency.  A pure
+	# Pay-on-Account credit sale has paid_amount == 0; a partial sale carries
+	# only its cash/card down-payment.  Returns keep the full (signed) amount —
+	# the return branch already reflects real refunds via payment rows.
+	# paid_amount is the raw tendered total, so change given back to the
+	# customer (e.g. a $20 bill on a $15.50 sale) must be netted out — it
+	# never stayed in the drawer.
+	base_change = get_base_value(invoice, "change_amount", "base_change_amount", conversion_rate)
+	base_paid = get_base_value(invoice, "paid_amount", "base_paid_amount", conversion_rate) - base_change
+
+	# Cash-basis figures are tracked alongside the accrual ones rather than
+	# replacing them: grand_total / net_total / taxes stay invoiced so they
+	# keep tying to the GL and to every existing report, while
+	# collected_amount / outstanding_total answer "what is in the drawer".
+	collected = base_grand_total if is_return else base_paid
+	outstanding = 0 if is_return else (base_grand_total - base_paid)
 
 	# Build transaction record
 	transaction = frappe._dict(
@@ -470,6 +488,11 @@ def _process_invoice(invoice, invoice_field, company_currency, cash_mode, paymen
 			"customer": invoice.customer,
 			"is_return": is_return,
 			"return_against": invoice.get("return_against") if is_return else None,
+			# Display-only (stripped before the child table set): what was
+			# actually taken on this invoice and what is still owed, used by
+			# the closing dialog badge.
+			"collected_amount": collected,
+			"outstanding_amount": outstanding,
 		}
 	)
 
@@ -477,6 +500,8 @@ def _process_invoice(invoice, invoice_field, company_currency, cash_mode, paymen
 	summary["grand_total"] += base_grand_total
 	summary["net_total"] += base_net_total
 	summary["total_quantity"] += flt(invoice.total_qty)
+	summary["collected_total"] += collected
+	summary["outstanding_total"] += outstanding
 
 	if is_return:
 		summary["returns_total"] += abs(base_grand_total)
@@ -485,7 +510,10 @@ def _process_invoice(invoice, invoice_field, company_currency, cash_mode, paymen
 		summary["sales_total"] += base_grand_total
 		summary["sales_count"] += 1
 
-	# Process taxes
+	# Process taxes — full invoiced amount, never scaled.  Tax is posted to the
+	# GL in full when the invoice is submitted regardless of what the customer
+	# paid, so scaling it here would make this table impossible to reconcile
+	# against the VAT accounts.
 	for t in invoice.taxes:
 		tax_amount = get_base_value(t, "tax_amount", "base_tax_amount", conversion_rate)
 		_aggregate_tax(taxes, t.account_head, t.rate, tax_amount)
@@ -512,8 +540,7 @@ def _process_invoice(invoice, invoice_field, company_currency, cash_mode, paymen
 	# invoice-level field — the customer overpaid and received change back,
 	# so the drawer's net gain is (sum of cash rows - change).  Handling it
 	# outside the loop avoids double-subtraction when multiple payment rows
-	# share the same cash mode.
-	base_change = get_base_value(invoice, "change_amount", "base_change_amount", conversion_rate)
+	# share the same cash mode. (base_change computed above, reused here.)
 	if base_change:
 		_aggregate_payment(payments, cash_mode, -base_change)
 
@@ -558,6 +585,8 @@ def make_closing_shift_from_opening(opening_shift):
 		"returns_count": 0,
 		"sales_total": 0,
 		"sales_count": 0,
+		"collected_total": 0,
+		"outstanding_total": 0,
 	}
 
 	# Add opening balances to payments
@@ -600,12 +629,18 @@ def make_closing_shift_from_opening(opening_shift):
 	closing_shift.grand_total = summary["grand_total"]
 	closing_shift.net_total = summary["net_total"]
 	closing_shift.total_quantity = summary["total_quantity"]
+	closing_shift.collected_amount = summary["collected_total"]
+	closing_shift.outstanding_total = summary["outstanding_total"]
 
 	# Set child tables (without return info - that's for display only)
 	closing_shift.set(
 		"pos_transactions",
 		[
-			{k: v for k, v in txn.items() if k not in ("is_return", "return_against")}
+			{
+				k: v
+				for k, v in txn.items()
+				if k not in ("is_return", "return_against", "collected_amount", "outstanding_amount")
+			}
 			for txn in pos_transactions
 		],
 	)
