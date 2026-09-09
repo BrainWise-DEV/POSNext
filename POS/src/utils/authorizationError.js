@@ -1,12 +1,11 @@
 const AUTHORIZATION_TITLE = "Authorization Required";
 
-/**
- * Whether a server error is the gate refusing an unauthorized action.
- * @param {unknown} error Error thrown by a resource submit.
- * @returns {boolean}
- */
-export function isAuthorizationError(error) {
-	if (!error || typeof error !== "object") return false;
+/** Frappe's own wording when @rate_limit refuses a PIN submission (429). */
+const RATE_LIMIT_PHRASE = "hit the rate limit";
+
+/** Every string a Frappe error may carry its message in. */
+function errorTexts(error) {
+	if (!error || typeof error !== "object") return [];
 
 	const parts = [];
 
@@ -26,5 +25,24 @@ export function isAuthorizationError(error) {
 	if (error.message) parts.push(String(error.message));
 	if (typeof error.exc === "string") parts.push(error.exc);
 
-	return parts.some((text) => text.includes(AUTHORIZATION_TITLE));
+	return parts;
+}
+
+/**
+ * Whether a server error is the gate refusing an unauthorized action.
+ * @param {unknown} error Error thrown by a resource submit.
+ * @returns {boolean}
+ */
+export function isAuthorizationError(error) {
+	return errorTexts(error).some((text) => text.includes(AUTHORIZATION_TITLE));
+}
+
+/**
+ * @param {unknown} error Error thrown by requestGrant.
+ * @returns {boolean}
+ */
+export function isRateLimitError(error) {
+	if (error?.exc_type === "RateLimitExceededError") return true;
+	if (Number(error?.httpStatus ?? error?.status) === 429) return true;
+	return errorTexts(error).some((text) => text.includes(RATE_LIMIT_PHRASE));
 }

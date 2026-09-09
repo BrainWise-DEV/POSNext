@@ -90,10 +90,17 @@ def get_authorization_readiness(action: str, pos_profile: str | None = None) -> 
 		"missing_pin": sorted(candidates - with_pin),
 	}
 
+RATE_LIMIT_PER_MINUTE = 20
+
 
 @frappe.whitelist()
-@rate_limit(limit=5, seconds=60)
+@rate_limit(key="approver", limit=RATE_LIMIT_PER_MINUTE, seconds=60, ip_based=True)
 def request_grant(action: str, approver: str, pin: str, context=None) -> dict:
+
+	approver = (approver or "").strip()
+	if not approver:
+		return {"authorized": False, "message": _("Select an approver")}
+
 	action_def = registry.get(action)
 	if not action_def:
 		return {"authorized": False, "message": _("Unknown authorization action")}

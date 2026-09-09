@@ -123,6 +123,7 @@
 
 <script setup>
 import { useAuthorizationDialog } from "@/composables/useAuthorization";
+import { isRateLimitError } from "@/utils/authorizationError";
 import { buildAuthorizationSummary } from "@/utils/authorizationSummary";
 import { computed, nextTick, ref, watch } from "vue";
 import { FocusScope } from "reka-ui";
@@ -187,7 +188,9 @@ async function onApprove() {
 		}
 		errorMessage.value = result?.message || __("Authorization failed");
 	} catch (error) {
-		errorMessage.value = error?.message || __("Authorization failed");
+		errorMessage.value = isRateLimitError(error)
+			? __("Too many PIN attempts just now. Wait a moment and try again.")
+			: error?.message || __("Authorization failed");
 	} finally {
 		verifying.value = false;
 		pin.value = "";
