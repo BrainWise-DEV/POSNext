@@ -47,13 +47,16 @@
 				<div>
 					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
 						{{ __("Amount") }} <span class="text-red-500">*</span>
+						<span v-if="currency" class="text-gray-500 font-normal">
+							({{ currency }})
+						</span>
 					</label>
 					<Input
 						v-model="form.amount"
 						type="number"
 						min="0"
 						step="0.01"
-						:placeholder="__('Enter amount')"
+						:placeholder="amountPlaceholder"
 					/>
 					<p
 						v-if="maximumExpenseAmount > 0"
@@ -181,7 +184,7 @@ import AutocompleteSelect from "@/components/common/AutocompleteSelect.vue"
 import { useOfflineStatus } from "@/composables/useOfflineStatus"
 import { useToast } from "@/composables/useToast"
 import { usePOSShiftStore } from "@/stores/posShift"
-import { formatCurrency as formatCurrencyUtil } from "@/utils/currency"
+import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency"
 import { parseError } from "@/utils/errorHandler"
 import { Button, Dialog, FeatherIcon, Input, createResource } from "frappe-ui"
 import { computed, reactive, ref, watch } from "vue"
@@ -192,7 +195,10 @@ const props = defineProps({
 	modelValue: Boolean,
 	posProfile: String,
 	posOpeningShift: String,
-	/** Prefer passing explicitly; falls back to the open shift's POS Profile currency. */
+	/**
+	 * Company.default_currency for the shift's company.
+	 * Must match the JE booking basis — not POS Profile.currency.
+	 */
 	currency: String,
 	maximumExpenseAmount: {
 		type: Number,
@@ -205,7 +211,20 @@ const emit = defineEmits(["update:modelValue", "expense-created", "expense-cance
 const { showSuccess } = useToast()
 const { isOffline } = useOfflineStatus()
 
-const currency = computed(() => props.currency || shiftStore.profileCurrency)
+/** Prefer API company_currency; prop/bootstrap next; never profile selling currency alone. */
+const currency = computed(
+	() =>
+		dialogDataResource.data?.company_currency ||
+		props.currency ||
+		shiftStore.companyCurrency ||
+		DEFAULT_CURRENCY,
+)
+
+const amountPlaceholder = computed(() =>
+	currency.value
+		? __("Enter amount in {0}", { 0: currency.value })
+		: __("Enter amount"),
+)
 
 function formatCurrency(amount) {
 	return formatCurrencyUtil(Number.parseFloat(amount || 0), currency.value)

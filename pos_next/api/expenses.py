@@ -29,6 +29,7 @@ def get_expense_dialog_data(pos_profile, pos_opening_shift):
 	shift = validate_open_shift(pos_opening_shift, pos_profile)
 
 	company = shift.company
+	company_currency = frappe.get_cached_value("Company", company, "default_currency")
 	maximum_expense_amount = flt(
 		frappe.db.get_value("POS Profile", pos_profile, "posa_maximum_expense_amount")
 	)
@@ -42,6 +43,7 @@ def get_expense_dialog_data(pos_profile, pos_opening_shift):
 		"payment_methods": get_cash_payment_methods(pos_profile),
 		"employees": get_active_employees(company),
 		"expenses": get_pos_expenses(pos_opening_shift),
+		"company_currency": company_currency,
 		"maximum_expense_amount": maximum_expense_amount,
 		"shift_expense_total": shift_expense_total,
 		"remaining_expense_amount": remaining_expense_amount,
@@ -66,7 +68,11 @@ def create_pos_expense(
 	employee=None,
 	remarks=None,
 ):
-	"""Create and submit a Journal Entry for a POS expense."""
+	"""Create and submit a Journal Entry for a POS expense.
+
+	``amount`` is company currency (Company.default_currency), matching
+	``posa_maximum_expense_amount`` and the JE debit/credit columns.
+	"""
 	amount = flt(amount)
 	remarks = (remarks or "").strip()
 	expense_account = _coerce_account_name(expense_account)
@@ -205,12 +211,21 @@ def validate_open_shift(pos_opening_shift, pos_profile):
 
 
 def validate_expense_amount(amount, pos_profile, pos_opening_shift=None):
+	"""Validate amount and shift limit in company currency.
+
+	The cashier-typed amount, ``posa_maximum_expense_amount``, and JE debit/credit
+	all share Company.default_currency — not POS Profile.currency.
+	"""
 	if flt(amount) <= 0:
 		frappe.throw(_("Amount must be greater than zero"))
 
-	maximum_amount = flt(
-		frappe.db.get_value("POS Profile", pos_profile, "posa_maximum_expense_amount")
+	profile = frappe.db.get_value(
+		"POS Profile",
+		pos_profile,
+		["posa_maximum_expense_amount", "company"],
+		as_dict=True,
 	)
+	maximum_amount = flt(profile.posa_maximum_expense_amount if profile else 0)
 	if maximum_amount <= 0:
 		frappe.throw(
 			_(
@@ -218,6 +233,12 @@ def validate_expense_amount(amount, pos_profile, pos_opening_shift=None):
 				"Set a positive limit before recording expenses."
 			).format(pos_profile),
 			title=_("Expense Limit Not Configured"),
+		)
+
+	company_currency = None
+	if profile and profile.company:
+		company_currency = frappe.get_cached_value(
+			"Company", profile.company, "default_currency"
 		)
 
 	# Lock the opening shift so concurrent create_pos_expense calls serialize:
@@ -237,14 +258,15 @@ def validate_expense_amount(amount, pos_profile, pos_opening_shift=None):
 	new_shift_total = shift_total + flt(amount)
 	if new_shift_total > maximum_amount:
 		remaining = _get_remaining_shift_expense_amount(maximum_amount, shift_total)
+		currency_df = {"fieldtype": "Currency", "options": company_currency}
 		frappe.throw(
 			_(
 				"This expense would exceed the shift expense limit of {0}. "
 				"Expenses recorded this shift: {1}. Remaining allowance: {2}"
 			).format(
-				frappe.format_value(maximum_amount, {"fieldtype": "Currency"}),
-				frappe.format_value(shift_total, {"fieldtype": "Currency"}),
-				frappe.format_value(remaining, {"fieldtype": "Currency"}),
+				frappe.format_value(maximum_amount, currency_df),
+				frappe.format_value(shift_total, currency_df),
+				frappe.format_value(remaining, currency_df),
 			),
 			title=_("Shift Expense Limit Exceeded"),
 		)

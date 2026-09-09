@@ -594,7 +594,7 @@
 				v-model="uiStore.showExpenseDialog"
 				:pos-profile="shiftStore.profileName"
 				:pos-opening-shift="shiftStore.currentShift?.name"
-				:currency="shiftStore.profileCurrency"
+				:currency="shiftStore.companyCurrency"
 				:maximum-expense-amount="shiftStore.maximumExpenseAmount"
 				@expense-created="handleExpenseCreated"
 				@expense-cancelled="handleExpenseCancelled"

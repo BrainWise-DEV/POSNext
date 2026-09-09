@@ -15,6 +15,10 @@ export const usePOSShiftStore = defineStore("posShift", () => {
 	// Computed
 	const profileName = computed(() => currentProfile.value?.name);
 	const profileCurrency = computed(() => currentProfile.value?.currency || DEFAULT_CURRENCY);
+	/** Company.default_currency — basis for POS expense amounts and shift limits. */
+	const companyCurrency = computed(
+		() => currentProfile.value?.company_currency || profileCurrency.value,
+	);
 	const profileWarehouse = computed(() => currentProfile.value?.warehouse);
 	const profileCompany = computed(() => currentProfile.value?.company);
 	const profileCustomer = computed(() => currentProfile.value?.customer);
@@ -103,6 +107,7 @@ export const usePOSShiftStore = defineStore("posShift", () => {
 		// Computed
 		profileName,
 		profileCurrency,
+		companyCurrency,
 		profileWarehouse,
 		profileCompany,
 		profileCustomer,

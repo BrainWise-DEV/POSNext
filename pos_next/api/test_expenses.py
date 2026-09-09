@@ -87,7 +87,9 @@ class TestPOSExpenses(unittest.TestCase):
 	def test_validate_expense_amount_rejects_unconfigured_limit(
 		self, mock_get_value, _mock_throw
 	):
-		mock_get_value.return_value = 0
+		mock_get_value.return_value = SimpleNamespace(
+			posa_maximum_expense_amount=0, company="Test Company"
+		)
 
 		with self.assertRaisesRegex(RuntimeError, "not configured"):
 			expenses.validate_expense_amount(50, "Test POS Profile")
@@ -95,11 +97,14 @@ class TestPOSExpenses(unittest.TestCase):
 	@patch("pos_next.api.expenses.frappe.throw", side_effect=_raise_runtime_error)
 	@patch("pos_next.api.expenses.frappe.format_value", side_effect=lambda value, _options: str(value))
 	@patch("pos_next.api.expenses.get_shift_expense_total", return_value=0)
+	@patch("pos_next.api.expenses.frappe.get_cached_value", return_value="USD")
 	@patch("pos_next.api.expenses.frappe.db.get_value")
 	def test_validate_expense_amount_rejects_over_shift_limit(
-		self, mock_get_value, _mock_shift_total, _mock_format, _mock_throw
+		self, mock_get_value, _mock_cached, _mock_shift_total, _mock_format, _mock_throw
 	):
-		mock_get_value.return_value = 100
+		mock_get_value.return_value = SimpleNamespace(
+			posa_maximum_expense_amount=100, company="Test Company"
+		)
 
 		with self.assertRaisesRegex(RuntimeError, "shift expense limit"):
 			expenses.validate_expense_amount(150, "Test POS Profile", "POS-OS-0001")
@@ -107,22 +112,29 @@ class TestPOSExpenses(unittest.TestCase):
 	@patch("pos_next.api.expenses.frappe.throw", side_effect=_raise_runtime_error)
 	@patch("pos_next.api.expenses.frappe.format_value", side_effect=lambda value, _options: str(value))
 	@patch("pos_next.api.expenses.get_shift_expense_total", return_value=80)
+	@patch("pos_next.api.expenses.frappe.get_cached_value", return_value="USD")
 	@patch("pos_next.api.expenses.frappe.db.get_value")
 	def test_validate_expense_amount_rejects_when_cumulative_exceeds_limit(
-		self, mock_get_value, _mock_shift_total, _mock_format, _mock_throw
+		self, mock_get_value, _mock_cached, _mock_shift_total, _mock_format, _mock_throw
 	):
-		mock_get_value.return_value = 100
+		mock_get_value.return_value = SimpleNamespace(
+			posa_maximum_expense_amount=100, company="Test Company"
+		)
 
 		with self.assertRaisesRegex(RuntimeError, "shift expense limit"):
 			expenses.validate_expense_amount(30, "Test POS Profile", "POS-OS-0001")
 
 	@patch("pos_next.api.expenses.get_shift_expense_total", return_value=0)
+	@patch("pos_next.api.expenses.frappe.get_cached_value", return_value="USD")
 	@patch("pos_next.api.expenses.frappe.db.get_value")
 	def test_validate_expense_amount_locks_opening_shift_before_total(
-		self, mock_get_value, mock_shift_total
+		self, mock_get_value, _mock_cached, mock_shift_total
 	):
 		"""Serialize check+insert: FOR UPDATE on the shift before reading the SUM."""
-		mock_get_value.side_effect = [100, "POS-OS-0001"]
+		mock_get_value.side_effect = [
+			SimpleNamespace(posa_maximum_expense_amount=100, company="Test Company"),
+			"POS-OS-0001",
+		]
 
 		expenses.validate_expense_amount(50, "Test POS Profile", "POS-OS-0001")
 
@@ -130,7 +142,10 @@ class TestPOSExpenses(unittest.TestCase):
 			mock_get_value.call_args_list,
 			[
 				unittest.mock.call(
-					"POS Profile", "Test POS Profile", "posa_maximum_expense_amount"
+					"POS Profile",
+					"Test POS Profile",
+					["posa_maximum_expense_amount", "company"],
+					as_dict=True,
 				),
 				unittest.mock.call(
 					"POS Opening Shift",
@@ -157,6 +172,38 @@ class TestPOSExpenses(unittest.TestCase):
 		self.assertEqual(expenses._get_remaining_shift_expense_amount(100, 30), 70)
 		self.assertEqual(expenses._get_remaining_shift_expense_amount(100, 120), 0)
 		self.assertEqual(expenses._get_remaining_shift_expense_amount(0, 50), 0)
+
+	@patch("pos_next.api.expenses.get_pos_expenses", return_value=[])
+	@patch("pos_next.api.expenses.get_active_employees", return_value=[])
+	@patch("pos_next.api.expenses.get_cash_payment_methods", return_value=[])
+	@patch("pos_next.api.expenses.get_expense_accounts", return_value=[])
+	@patch("pos_next.api.expenses.get_shift_expense_total", return_value=25)
+	@patch("pos_next.api.expenses.frappe.get_cached_value", return_value="EUR")
+	@patch("pos_next.api.expenses.frappe.db.get_value", return_value=100)
+	@patch("pos_next.api.expenses.validate_open_shift")
+	@patch("pos_next.api.expenses.validate_pos_expense_enabled")
+	def test_get_expense_dialog_data_returns_company_currency(
+		self,
+		_mock_enabled,
+		mock_validate_shift,
+		_mock_get_value,
+		_mock_cached,
+		_mock_shift_total,
+		_mock_accounts,
+		_mock_methods,
+		_mock_employees,
+		_mock_expenses,
+	):
+		"""Dialog amounts share Company.default_currency with JE booking (not profile currency)."""
+		mock_validate_shift.return_value = SimpleNamespace(company="Test Company")
+
+		data = expenses.get_expense_dialog_data("Test POS Profile", "POS-OS-0001")
+
+		self.assertEqual(data["company_currency"], "EUR")
+		self.assertEqual(data["maximum_expense_amount"], 100)
+		self.assertEqual(data["shift_expense_total"], 25)
+		self.assertEqual(data["remaining_expense_amount"], 75)
+		_mock_cached.assert_called_once_with("Company", "Test Company", "default_currency")
 
 	@patch("pos_next.api.expenses.frappe.throw", side_effect=_raise_runtime_error)
 	@patch("pos_next.api.expenses.frappe.db.get_value")
