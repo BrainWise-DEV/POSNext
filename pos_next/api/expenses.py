@@ -18,7 +18,6 @@ import frappe
 from frappe import _
 from frappe.utils import cint, cstr, flt, getdate, today
 
-
 EXPENSE_ACCOUNT_PAGE_LENGTH = 50
 EMPLOYEE_PAGE_LENGTH = 200
 
@@ -483,7 +482,7 @@ def get_expense_accounts(company, txt=None, limit=None):
 		# Narrow by name / account_name while keeping expense-type filter.
 		# db.sql bypasses DocType permissions (same intentional till access as get_all below).
 		return frappe.db.sql(
-			"""
+			f"""
 			SELECT name, account_name
 			FROM `tabAccount`
 			WHERE company = %(company)s
@@ -492,8 +491,8 @@ def get_expense_accounts(company, txt=None, limit=None):
 			  AND (account_type = 'Expense' OR root_type = 'Expense')
 			  AND (name LIKE %(txt)s OR account_name LIKE %(txt)s)
 			ORDER BY name
-			LIMIT {limit}
-			""".format(limit=cint(limit)),
+			LIMIT {cint(limit)}
+			""",
 			{
 				"company": company,
 				"txt": f"%{txt}%",
