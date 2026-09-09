@@ -16,6 +16,21 @@
 					</p>
 				</div>
 
+				<dl
+					v-if="summaryRows.length"
+					class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 border-b border-gray-200 bg-gray-50 px-5 py-3 text-sm dark:border-gray-700 dark:bg-gray-900/40"
+				>
+					<template v-for="row in summaryRows" :key="row.key">
+						<dt class="text-gray-500 dark:text-gray-400">{{ row.label }}</dt>
+						<dd
+							class="text-end font-medium text-gray-900 break-all dark:text-gray-100"
+							:data-test="`auth-summary-${row.key}`"
+						>
+							{{ row.value }}
+						</dd>
+					</template>
+				</dl>
+
 				<div class="space-y-4 px-5 py-4">
 					<div v-if="loading" class="py-6 text-center text-sm text-gray-500">
 						{{ __("Loading approvers…") }}
@@ -108,6 +123,7 @@
 
 <script setup>
 import { useAuthorizationDialog } from "@/composables/useAuthorization";
+import { buildAuthorizationSummary } from "@/utils/authorizationSummary";
 import { computed, nextTick, ref, watch } from "vue";
 import { FocusScope } from "reka-ui";
 
@@ -128,6 +144,7 @@ const loading = ref(false);
 const verifying = ref(false);
 const pinInput = ref(null);
 const pinLength = ref(getPinLength());
+const summaryRows = computed(() => buildAuthorizationSummary(state));
 
 const canApprove = computed(
 	() => Boolean(approver.value) && pin.value.length === pinLength.value && !verifying.value

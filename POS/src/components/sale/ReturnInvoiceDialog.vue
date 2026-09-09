@@ -1180,6 +1180,7 @@
 
 <script setup>
 import { useAuthorization } from "@/composables/useAuthorization";
+import { isAuthorizationError } from "@/utils/authorizationError";
 import { useOfflineStatus } from "@/composables/useOfflineStatus";
 import { useToast } from "@/composables/useToast";
 import { getPaymentIcon } from "@/utils/payment";
@@ -2045,16 +2046,37 @@ async function handleCreateReturn() {
 	isSubmitting.value = true;
 
 	try {
-		const result = await createReturnResource.submit();
-
-		// Check if result contains an error (HTTP 417 might return error in response body)
-		if (result && result.exc) {
-			throw result;
-		}
+		await submitReturnOnce();
 	} catch (error) {
-		console.error("Caught error in handleCreateReturn:", error);
+		let failure = error;
+
+		if (isAuthorizationError(failure) && !authorizationToken.value) {
+			try {
+				const retryGrant = await requireAuthorization(
+					action,
+					{
+						pos_profile: props.posProfile,
+						return_against: returnAgainst,
+						customer: preparedReturnDoc.value?.customer || originalInvoice.value?.customer,
+						amount: returnTotal.value,
+					},
+					{ force: true }
+				);
+
+				if (!retryGrant) return;
+				if (retryGrant.grant_token) {
+					authorizationToken.value = retryGrant.grant_token;
+					await submitReturnOnce();
+					return;
+				}
+			} catch (retryError) {
+				failure = retryError;
+			}
+		}
+
+		console.error("Caught error in handleCreateReturn:", failure);
 		if (!submitError.value) {
-			const errorMsg = extractErrorMessage(error);
+			const errorMsg = extractErrorMessage(failure);
 			submitError.value = errorMsg;
 			openErrorDialog(errorMsg);
 		}
@@ -2062,6 +2084,15 @@ async function handleCreateReturn() {
 		isSubmitting.value = false;
 		authorizationToken.value = null;
 	}
+}
+
+async function submitReturnOnce() {
+	const result = await createReturnResource.submit();
+
+	if (result && result.exc) {
+		throw result;
+	}
+	return result;
 }
 
 function resetForm() {

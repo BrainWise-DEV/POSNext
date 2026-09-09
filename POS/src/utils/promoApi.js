@@ -9,22 +9,12 @@ export function isPromotionsAppInstalled() {
 	return Boolean(window.frappe?.boot?.posnext_promotions);
 }
 
-export function isAuthGateInstalled() {
-	return Boolean(
-		window.frappe?.boot?.posnext_promotions_auth || window.frappe?.boot?.posnext_promotions,
-	);
-}
-
 export function isMagentoAppInstalled() {
 	return Boolean(window.frappe?.boot?.magento_integration);
 }
 
 function promoOrPos(promoPath, posPath) {
 	return isPromotionsAppInstalled() ? promoPath : posPath;
-}
-
-function authOrPos(promoPath, posPath) {
-	return isAuthGateInstalled() ? promoPath : posPath;
 }
 
 export const promoApi = {
@@ -99,24 +89,8 @@ export const promoApi = {
 		promoOrPos("posnext_promotions.api.promotions.toggle_coupon", "pos_next.api.promotions.toggle_coupon"),
 	deleteCoupon: () =>
 		promoOrPos("posnext_promotions.api.promotions.delete_coupon", "pos_next.api.promotions.delete_coupon"),
-	getAuthorizers: () =>
-		authOrPos(
-			"posnext_promotions.api.authorization.get_authorizers",
-			"pos_next.api.authorization.get_authorizers",
-		),
-	requestGrant: () =>
-		authOrPos(
-			"posnext_promotions.api.authorization.request_grant",
-			"pos_next.api.authorization.request_grant",
-		),
-	getAuthorizationPolicy: () =>
-		authOrPos(
-			"posnext_promotions.api.authorization.get_authorization_policy",
-			"pos_next.api.authorization.get_authorization_policy",
-		),
-	hasAuthorizationPin: () =>
-		authOrPos(
-			"posnext_promotions.api.authorization.has_authorization_pin",
-			"pos_next.api.authorization.has_authorization_pin",
-		),
+	getAuthorizers: () => "pos_next.api.authorization.get_authorizers",
+	requestGrant: () => "pos_next.api.authorization.request_grant",
+	getAuthorizationPolicy: () => "pos_next.api.authorization.get_authorization_policy",
+	hasAuthorizationPin: () => "pos_next.api.authorization.has_authorization_pin",
 };

@@ -3,6 +3,7 @@ import { call } from "@/utils/apiWrapper";
 import { useBootstrapStore } from "@/stores/bootstrap";
 import { logger } from "@/utils/logger";
 import { reactive } from "vue";
+export { isAuthorizationError } from "@/utils/authorizationError";
 
 const log = logger.create("Authorization");
 
@@ -45,12 +46,14 @@ export function useAuthorization() {
 	 * @param {object} context Passed to the server to bind the grant. Include every value
 	 *   the action's binding uses — for returns that is pos_profile, return_against or
 	 *   customer, and amount.
+	 * @param {object} [options]
+	 * @param {boolean} [options.force] 
 	 * @returns {Promise<object|null>} The grant, or null when the user cancelled.
 	 *   Returns a stub grant with no token when the action is not gated, so callers can
 	 *   treat "not required" and "approved" the same way.
 	 */
-	async function requireAuthorization(action, context = {}) {
-		if (!isAuthorizationRequired(action)) {
+	async function requireAuthorization(action, context = {}, { force = false } = {}) {
+		if (!force && !isAuthorizationRequired(action)) {
 			return { grant_token: null, required: false };
 		}
 
