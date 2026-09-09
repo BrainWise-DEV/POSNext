@@ -43,10 +43,12 @@ try:
 	from erpnext.accounts.doctype.pricing_rule.utils import (
 		get_applied_pricing_rules as erpnext_get_applied_pricing_rules,
 	)
+	from pos_next.overrides.pricing_rule import apply_min_max_price_discounts
 except Exception:  # pragma: no cover - ERPNext not installed in some environments
 	erpnext_apply_pricing_rule = None
 	erpnext_get_applied_pricing_rules = None
 	erpnext_apply_pricing_rule_on_transaction = None
+	apply_min_max_price_discounts = None
 
 
 # ==========================================
@@ -1624,17 +1626,22 @@ def get_invoice(invoice_name):
 
 
 @frappe.whitelist()
-def get_invoices(pos_profile: str, limit: int = 100, start: int = 0) -> list:
+def get_invoices(pos_profile: str, search=None, limit: int = 20, offset=0, from_date=None, to_date=None, include_items=False, docstatus=None, start: int = 0) -> list:
 	"""
-	Get list of invoices for a POS Profile.
+	Get paginated, server-side filtered list of invoices for a POS Profile.
 
 	Args:
 		pos_profile: POS Profile name
+		search: Optional search term matched against invoice name or customer_name
+		limit: Page size (default 20)
+		offset: Number of records to skip for pagination (default 0)
+		from_date: Optional start date filter (YYYY-MM-DD)
+		to_date: Optional end date filter (YYYY-MM-DD)
 		limit: Maximum number of invoices to return (default 100)
 		start: Offset for pagination (default 0)
 
 	Returns:
-		List of invoices with details
+		List of invoice dicts with basic fields (no per-invoice item loading)
 	"""
 	if not pos_profile:
 		frappe.throw(_("POS Profile is required"))
@@ -1642,15 +1649,52 @@ def get_invoices(pos_profile: str, limit: int = 100, start: int = 0) -> list:
 	limit = cint(limit) or 100
 	start = cint(start) or 0
 
-	# Check if user has access to this POS Profile
+	# Permission check
 	has_access = frappe.db.exists("POS Profile User", {"parent": pos_profile, "user": frappe.session.user})
-
 	if not has_access and not frappe.has_permission("Sales Invoice", "read"):
 		frappe.throw(_("You don't have access to this POS Profile"))
 
-	# Query for invoices
+	# Clamp page size securely: minimum 1, maximum 100
+	limit = max(1, min(cint(limit) or 20, 100))
+	offset = max(0, cint(offset) or 0)
+
+	# Build WHERE conditions and params
+	conditions = [
+		"pos_profile = %(pos_profile)s",
+		"is_pos = 1",
+	]
+	params = {"pos_profile": pos_profile, "limit": limit, "offset": offset}
+
+	if docstatus is not None:
+		if isinstance(docstatus, (list, tuple)):
+			docstatus_list = [cint(d) for d in docstatus]
+			conditions.append(f"docstatus IN ({','.join(map(str, docstatus_list))})")
+		else:
+			conditions.append("docstatus = %(docstatus)s")
+			params["docstatus"] = cint(docstatus)
+	else:
+		conditions.append("docstatus < 2")
+
+	if search:
+		conditions.append(
+			"(name LIKE %(search)s OR customer_name LIKE %(search)s OR customer LIKE %(search)s)"
+		)
+		params["search"] = f"%{cstr(search)}%"
+
+	if from_date:
+		conditions.append("posting_date >= %(from_date)s")
+		params["from_date"] = from_date
+
+	if to_date:
+		conditions.append("posting_date <= %(to_date)s")
+		params["to_date"] = to_date
+
+	where_clause = " AND ".join(conditions)
+	params["limit"] = limit
+	params["offset"] = offset
+
 	invoices = frappe.db.sql(
-		"""
+		f"""
 		SELECT
 			name,
 			customer,
@@ -1667,16 +1711,14 @@ def get_invoices(pos_profile: str, limit: int = 100, start: int = 0) -> list:
 		FROM
 			`tabSales Invoice`
 		WHERE
-			pos_profile = %(pos_profile)s
-			AND docstatus = 1
-			AND is_pos = 1
+			{where_clause}
 		ORDER BY
 			posting_date DESC,
 			posting_time DESC
 		LIMIT %(limit)s
-		OFFSET %(start)s
+		OFFSET %(offset)s
 	""",
-		{"pos_profile": pos_profile, "limit": limit, "start": start},
+		params,
 		as_dict=True,
 	)
 
@@ -3205,6 +3247,12 @@ def apply_offers(invoice_data, selected_offers=None):
 					# Fetch full pricing rule to get discount values
 					full_rule = frappe.get_cached_doc("Pricing Rule", rule_name)
 
+					# Min/Max rules are deferred to apply_min_max_price_discounts
+					# (cross-item ranking). Applying them here would discount every
+					# matching item, defeating the "cheapest/most-expensive" logic.
+					if full_rule.get("apply_discount_on_price") in ("Min", "Max"):
+						continue
+
 					if full_rule.rate_or_discount == "Discount Percentage" and full_rule.discount_percentage:
 						discount_percentage += flt(full_rule.discount_percentage)
 					elif full_rule.rate_or_discount == "Discount Amount" and full_rule.discount_amount:
@@ -3271,6 +3319,33 @@ def apply_offers(invoice_data, selected_offers=None):
 		for key, free_item_doc in txn_result.get("free_items", {}).items():
 			free_items_map.setdefault(key, free_item_doc)
 		applied_rules.update(txn_result.get("applied_rules", set()))
+
+		# Apply Min/Max ("cheapest/most-expensive item") price rules. These were
+		# deferred by the per-item engine (see pos_next.overrides.pricing_rule) and
+		# need a cross-item ranking pass over the whole cart. The mock doc has no
+		# calculate_taxes_and_totals(); the post-processor materialises rate/amount
+		# on each discounted item directly.
+		if apply_min_max_price_discounts:
+			mock_doc = frappe._dict(
+				{
+					"doctype": invoice.get("doctype") or "Sales Invoice",
+					"items": prepared_items,
+					"selling_price_list": pricing_args.price_list,
+					"company": pricing_args.company,
+					"customer": pricing_args.customer,
+				}
+			)
+			min_max_allowed = set(rule_map) if selected_offer_names else None
+			apply_min_max_price_discounts(mock_doc, allowed_rules=min_max_allowed)
+
+		# Surface Min/Max rules in the response so the frontend tracks them as applied.
+		if erpnext_get_applied_pricing_rules:
+			for prepared_item in prepared_items:
+				if not prepared_item.get("pricing_rules"):
+					continue
+				for pr_name in erpnext_get_applied_pricing_rules(prepared_item.get("pricing_rules")):
+					if pr_name in rule_map:
+						applied_rules.add(pr_name)
 
 		return {
 			"items": [dict(item) for item in prepared_items],
