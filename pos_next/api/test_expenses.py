@@ -215,13 +215,12 @@ class TestPOSExpenses(unittest.TestCase):
 		)
 
 	@patch("pos_next.api.expenses.frappe.throw", side_effect=_raise_runtime_error)
-	@patch("pos_next.api.expenses.frappe.db.sql", return_value=[])
 	@patch("pos_next.api.expenses.frappe.db.get_value", return_value=None)
 	def test_resolve_payment_account_throws_informative_error(
-		self, _mock_get_value, _mock_sql, _mock_throw
+		self, _mock_get_value, _mock_throw
 	):
 		with self.assertRaisesRegex(RuntimeError, "Please set default Cash account"):
-			expenses._resolve_payment_account("Cash", "Test Company", "Test POS Profile")
+			expenses._resolve_payment_account("Cash", "Test Company")
 
 	def test_coerce_account_name_handles_dict_and_string(self):
 		self.assertEqual(expenses._coerce_account_name({"account": "Cash - TC"}), "Cash - TC")

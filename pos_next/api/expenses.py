@@ -324,7 +324,7 @@ def validate_mode_of_payment(mode_of_payment, pos_profile, company):
 			)
 		)
 
-	payment_account = _resolve_payment_account(mode_of_payment, company, pos_profile)
+	payment_account = _resolve_payment_account(mode_of_payment, company)
 	account_type = frappe.db.get_value("Account", payment_account, "account_type")
 	if account_type != "Cash":
 		frappe.throw(
@@ -363,12 +363,13 @@ def _ensure_account_name(account, label):
 	return account_name
 
 
-def _resolve_payment_account(mode_of_payment, company, pos_profile=None):
+def _resolve_payment_account(mode_of_payment, company):
 	"""Return the configured cash/bank account for a mode of payment.
 
-	Only uses Mode of Payment Account and (optionally) the POS Profile's
-	payment-method default_account. Does not fall back to an arbitrary
-	company Cash/Bank ledger.
+	Only uses Mode of Payment Account. POS Payment Method has no default_account
+	field (ERPNext v15), and get_cash_payment_methods already filters modes via
+	that join — so profile fallbacks here can only fire on the misconfig path.
+	Does not fall back to an arbitrary company Cash/Bank ledger.
 	"""
 	account = frappe.db.get_value(
 		"Mode of Payment Account",
@@ -377,32 +378,6 @@ def _resolve_payment_account(mode_of_payment, company, pos_profile=None):
 	)
 	if account:
 		return account
-
-	if pos_profile:
-		account = frappe.db.get_value(
-			"POS Payment Method",
-			{"parent": pos_profile, "mode_of_payment": mode_of_payment},
-			"default_account",
-		)
-		if account:
-			return account
-
-	# Broader profile fallback when pos_profile was not passed
-	account_rows = frappe.db.sql(
-		"""
-		SELECT ppm.default_account
-		FROM `tabPOS Payment Method` ppm
-		INNER JOIN `tabPOS Profile` pp ON ppm.parent = pp.name
-		WHERE ppm.mode_of_payment = %s
-		  AND pp.company = %s
-		  AND ppm.default_account IS NOT NULL
-		  AND ppm.default_account != ''
-		LIMIT 1
-		""",
-		(mode_of_payment, company),
-	)
-	if account_rows and account_rows[0][0]:
-		return account_rows[0][0]
 
 	frappe.throw(
 		_(
