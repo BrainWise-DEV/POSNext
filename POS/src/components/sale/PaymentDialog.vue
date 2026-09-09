@@ -511,6 +511,12 @@
 							<div v-if="customer" class="text-gray-600 text-xs mt-0.5 text-start">
 								{{ customer?.customer_name || customer?.name || customer }}
 							</div>
+							<div
+								v-else-if="requiresCustomerForPayment"
+								class="text-amber-700 text-xs mt-0.5 text-start font-medium"
+							>
+								{{ __("Customer required for this payment method") }}
+							</div>
 						</div>
 
 						<!-- Promotional offers & coupons (same entry points as cart — usable while paying) -->
@@ -1173,6 +1179,12 @@
 									]"
 								>
 									{{ formatCurrency(availableWalletBalance) }}
+									<span
+										v-if="walletInfo.balance_points"
+										class="ms-0.5"
+									>
+										({{ walletInfo.balance_points }} {{ __("pts") }})
+									</span>
 								</span>
 								<!-- Payment Amount Badge -->
 								<span
@@ -2136,6 +2148,8 @@ const walletInfo = ref({
 	wallet_exists: false,
 	wallet_balance: 0,
 	wallet_name: null,
+	balance_points: 0,
+	magento_loyalty: false,
 });
 const loadingWallet = ref(false);
 const walletPaymentMethods = ref(new Set()); // Set of mode_of_payment names that are wallet payments
@@ -2339,6 +2353,8 @@ const walletInfoResource = createResource({
 			wallet_exists: false,
 			wallet_balance: 0,
 			wallet_name: null,
+			balance_points: 0,
+			magento_loyalty: false,
 		};
 		loadingWallet.value = false;
 	},
@@ -2398,6 +2414,30 @@ function isCashPaymentMethod(method) {
 	const name = (method.mode_of_payment || "").toLowerCase();
 	return name.includes("cash") || name.includes("نقد") || name.includes("نقدي");
 }
+
+// Check if a payment method posts to a Receivable account (requires customer)
+function isReceivablePaymentMethod(method) {
+	if (!method) return false;
+	return (method.account_type || "").toLowerCase() === "receivable";
+}
+
+function getCustomerName() {
+	if (!props.customer) return "";
+	if (typeof props.customer === "string") return props.customer;
+	return props.customer?.name || props.customer?.customer_name || "";
+}
+
+const requiresCustomerForPayment = computed(() => {
+	if (selectedReceivableAccount.value) return true;
+	return paymentEntries.value.some((entry) => {
+		const method = paymentMethods.value.find(
+			(m) => m.mode_of_payment === entry.mode_of_payment,
+		);
+		return isReceivablePaymentMethod(method);
+	});
+});
+
+const hasCustomerForPayment = computed(() => !!getCustomerName());
 
 // Get available wallet balance for payment (considering already added wallet payments)
 const availableWalletBalance = computed(() => {
@@ -2855,6 +2895,11 @@ const canComplete = computed(() => {
 		return false;
 	}
 
+	// Receivable payment modes require a customer on the invoice
+	if (requiresCustomerForPayment.value && !hasCustomerForPayment.value) {
+		return false;
+	}
+
 	// Check exact amount validation
 	if (!isExactAmountValid.value) {
 		return false;
@@ -3030,6 +3075,10 @@ function selectPaymentMethod(method) {
 // invoice's debit_to). It's a destination, not a tendered amount — the outstanding is
 // grand_total minus the cash tendered. Tapping again clears it (back to default Debtors).
 function toggleReceivableAccount(acc) {
+	if (!hasCustomerForPayment.value) {
+		showWarning(__("Please select a customer before paying on account"));
+		return;
+	}
 	selectedReceivableAccount.value = selectedReceivableAccount.value === acc.name ? "" : acc.name;
 	// Drop the active payment-method highlight so only one option looks active at a time.
 	if (selectedReceivableAccount.value) {
@@ -3082,6 +3131,13 @@ function switchToNextPaymentMethod(partialAmount) {
 // Consolidate payment entries: if a row with the same mode already exists,
 // add to it instead of creating a duplicate row.
 function _upsertPaymentEntry(method, amt) {
+	if (isReceivablePaymentMethod(method) && !hasCustomerForPayment.value) {
+		showWarning(
+			__("Please select a customer before paying with {0}", [method.mode_of_payment]),
+		);
+		return;
+	}
+
 	const existing = paymentEntries.value.find(
 		(e) => e.mode_of_payment === method.mode_of_payment && !e.is_customer_credit
 	);

@@ -1,9 +1,21 @@
+import {
+	allowsAutoDiscountStacking,
+	getProductStrategyForOffer,
+	getStrategyForOffer,
+	offerStrategyOrder,
+} from "@/utils/offerStrategies";
 import { useInvoice } from "@/composables/useInvoice";
 import { usePOSOffersStore } from "@/stores/posOffers";
 import { usePOSSettingsStore } from "@/stores/posSettings";
 import { usePOSShiftStore } from "@/stores/posShift";
 import { parseError } from "@/utils/errorHandler";
-import { shouldValidateItemStock, checkStockAvailability } from "@/utils/stockValidator";
+import {
+	shouldValidateItemStock,
+	checkStockAvailability,
+	getCartStockQtyForItem,
+	rowStockQty,
+} from "@/utils/stockValidator";
+import { syncCartFreeItems } from "@/utils/gwpSameItemFreeRows";
 import { offlineState } from "@/utils/offline/offlineState";
 import { useToast } from "@/composables/useToast";
 import { defineStore } from "pinia";
@@ -181,12 +193,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			settingsStore.shouldEnforceStockValidation() &&
 			shouldValidateItemStock(item)
 		) {
-			// Account for quantity already in the cart for this item
-			const itemUom = item.uom || item.stock_uom;
-			const existing = invoiceItems.value.find(
-				(i) => i.item_code === item.item_code && i.uom === itemUom
-			);
-			const totalQty = (existing ? existing.quantity : 0) + qty;
+			// Only this SKU (paid + free rows of the same item). A free gift of a
+			// different product must not inflate requested qty (Iphone 17 x6 +
+			// Aqua Water free x1 is 6 phones, not 7).
+			const totalQty =
+				getCartStockQtyForItem(invoiceItems.value, item.item_code) + rowStockQty(item, qty);
 			const warehouse = item.warehouse || currentProfile.warehouse;
 
 			const check = checkStockAvailability(item, totalQty, warehouse);
@@ -218,7 +229,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			settingsStore.shouldEnforceStockValidation() &&
 			shouldValidateItemStock(item)
 		) {
-			const check = checkStockAvailability(item, newQty);
+			const otherLinesQty =
+				getCartStockQtyForItem(invoiceItems.value, item.item_code) - rowStockQty(item);
+			const totalQty = otherLinesQty + rowStockQty(item, newQty);
+			const check = checkStockAvailability(item, totalQty);
 			if (!check.available) {
 				showWarning(check.error);
 				return;
@@ -370,6 +384,13 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				price_list_rate: item.price_list_rate || item.rate,
 				discount_percentage: item.discount_percentage || 0,
 				discount_amount: item.discount_amount || 0,
+				pricing_rules: item.pricing_rules || "",
+				is_already_discounted: item.is_already_discounted || 0,
+				discount_source: item.discount_source || "",
+				item_group: item.item_group,
+				brand: item.brand,
+				amount: item.amount,
+				is_free_item: item.is_free_item || 0,
 			})),
 		};
 	}
@@ -402,9 +423,18 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				item.discount_percentage = discountPct;
 				item.discount_amount = discountAmt;
 				item.pricing_rules = serverItem.pricing_rules;
+				item.discount_source = serverItem.discount_source || item.discount_source;
+				item.free_qty = Number.parseFloat(serverItem.free_qty) || 0;
+				item.gwp_free_qty = Number.parseFloat(serverItem.gwp_free_qty) || 0;
 				hasDiscounts = discountPct > 0 || discountAmt > 0;
 			}
 			// Otherwise preserve existing manual discount
+
+			if (serverItem.is_already_discounted !== undefined) {
+				item.is_already_discounted = serverItem.is_already_discounted ? 1 : 0;
+			}
+			item.is_accumulative_discount =
+				serverItem.discount_source === "accumulative_promotion" ? 1 : 0;
 
 			recalculateItem(item);
 		});
@@ -426,58 +456,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * @returns {void}
 	 */
 	function processFreeItems(freeItems) {
-		// Reset free_qty on all non-free items
-		invoiceItems.value.forEach((item) => {
-			if (!item.is_free_item) {
-				item.free_qty = 0;
-			}
+		// Restore qty previously carved into same-SKU free rows, then rebuild.
+		// See syncCartFreeItems — gwp_same_item_row is client-only; skipping this
+		// undercharges scanned units.
+		invoiceItems.value = syncCartFreeItems(invoiceItems.value, freeItems, {
+			recalculateItem,
 		});
-
-		// Remove previously-added free item rows (they'll be re-added below if still valid)
-		invoiceItems.value = invoiceItems.value.filter((item) => !item.is_free_item);
-
-		// Early return if no free items
-		if (!Array.isArray(freeItems) || freeItems.length === 0) {
-			rebuildIncrementalCache();
-			return;
-		}
-
-		for (const freeItem of freeItems) {
-			const freeQty = Number.parseFloat(freeItem.qty) || 0;
-			if (freeQty <= 0) continue;
-
-			const freeUom = freeItem.uom || freeItem.stock_uom;
-
-			// Check if this free item matches an existing (non-free) cart item
-			const cartItem = invoiceItems.value.find(
-				(item) =>
-					!item.is_free_item &&
-					item.item_code === freeItem.item_code &&
-					(item.uom || item.stock_uom) === freeUom
-			);
-
-			const cf = freeItem.conversion_factor || cartItem?.conversion_factor || 1;
-			invoiceItems.value.push({
-				item_code: freeItem.item_code,
-				item_name: freeItem.item_name || cartItem?.item_name || freeItem.item_code,
-				rate: 0,
-				price_list_rate: 0,
-				quantity: freeQty,
-				discount_amount: 0,
-				discount_percentage: 0,
-				tax_amount: 0,
-				amount: 0,
-				stock_qty: 0,
-				uom: freeUom,
-				stock_uom: freeItem.stock_uom || freeUom,
-				conversion_factor: cf,
-				is_free_item: 1,
-				free_qty: freeQty,
-				pricing_rules: freeItem.pricing_rules || null,
-				warehouse: freeItem.warehouse || cartItem?.warehouse,
-			});
-		}
-
 		rebuildIncrementalCache();
 	}
 
@@ -840,6 +824,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 							item.discount_percentage = 0;
 							item.discount_amount = 0;
 							item.pricing_rules = [];
+							item.is_already_discounted = 0;
+							item.is_accumulative_discount = 0;
 							recalculateItem(item);
 						}
 					});
@@ -939,7 +925,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 			const newlyAppliedOffers = [];
 
-			for (const offer of newOffers) {
+			const orderedOffers = [...newOffers].sort(
+				(a, b) => offerStrategyOrder(b) - offerStrategyOrder(a)
+			);
+
+			for (const offer of orderedOffers) {
 				// Determine offer type: "Item Price" (discount) or "Give Product" (free item)
 				const isProductDiscount = offer.offer === "Give Product";
 
@@ -1016,6 +1006,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * @returns {boolean} True if discount was applied
 	 */
 	function applyOfflinePriceDiscount(offer, eligibleItems) {
+		const strategy = getStrategyForOffer(offer);
+		if (strategy) {
+			return strategy.apply(offer, eligibleItems, { recalculateItem });
+		}
+
 		const discountType = offer.discount_type || offer.rate_or_discount;
 		const discountPercentage = Number.parseFloat(offer.discount_percentage) || 0;
 		const discountAmount = Number.parseFloat(offer.discount_amount) || 0;
@@ -1024,12 +1019,27 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		let applied = false;
 
 		for (const item of eligibleItems) {
+			const stacks =
+				offer.promotion_type === "Auto Discount" && allowsAutoDiscountStacking(item);
+
+			if (offer.promotion_type === "Auto Discount" && item.is_already_discounted && !stacks) {
+				continue;
+			}
+
 			// Only apply if no existing pricing rule
-			if (item.pricing_rules && item.pricing_rules.length > 0) continue;
+			if (item.pricing_rules && item.pricing_rules.length > 0 && !stacks) continue;
 
 			if (discountType === "Discount Percentage" && discountPercentage > 0) {
-				item.discount_percentage = discountPercentage;
-				item.pricing_rules = [offer.name];
+				if (stacks) {
+					const base = Number.parseFloat(item.discount_percentage) || 0;
+					const itemMax = Number.parseFloat(item.max_discount) || 0;
+					const total = base + discountPercentage;
+					item.discount_percentage = Math.min(total, itemMax > 0 ? itemMax : 100, 100);
+					item.pricing_rules = [...(item.pricing_rules || []), offer.name];
+				} else {
+					item.discount_percentage = discountPercentage;
+					item.pricing_rules = [offer.name];
+				}
 				recalculateItem(item);
 				applied = true;
 			} else if (discountType === "Discount Amount" && discountAmount > 0) {
@@ -1054,6 +1064,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * Apply free item (product discount) offer offline
 	 * Handles: same_item (free item = purchased item) or specific free_item
 	 *
+	 * Satellite product types (Gift Pool, GWP) register via offerStrategies —
+	 * this host only owns the plain free-item paths.
+	 *
 	 * Recursive logic:
 	 * - recurse_for: Give free item for every N quantity
 	 * - apply_recursion_over: Qty for which recursion isn't applicable
@@ -1065,6 +1078,13 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * @returns {boolean} True if free item was applied
 	 */
 	function applyOfflineFreeItem(offer, eligibleItems) {
+		const strategy = getProductStrategyForOffer(offer);
+		if (strategy) {
+			return strategy.apply(offer, eligibleItems, {
+				recalculateItem,
+				invoiceItems: invoiceItems.value,
+			});
+		}
 		const freeQty = Number.parseFloat(offer.free_qty) || 0;
 		const sameItem = offer.same_item === 1;
 		const isRecursive = offer.is_recursive === 1;
@@ -1190,10 +1210,34 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	}
 
 	/**
-	 * Builds cart snapshot for offer validation
+	 * Gross and net amount of a single cart line, on the same basis the server
+	 * uses when gating min_amt/max_amt.
+	 *
+	 * Mirrors buildOfferEvaluationPayload (which sends
+	 * `price_list_rate: item.price_list_rate || item.rate`) and the net-rate
+	 * derivation in apply_offers, which folds item discounts back into the
+	 * pricing items as `price_list_rate * (1 - discount_percentage / 100)`
+	 * before handing the cart total to ERPNext's transaction engine.
+	 */
+	function offerLineAmounts(item) {
+		const qty = item.quantity || 0;
+		const listRate = Number.parseFloat(item.price_list_rate || item.rate) || 0;
+		const gross = qty * listRate;
+		const discountPct = Number.parseFloat(item.discount_percentage) || 0;
+		return { gross, net: gross * (1 - discountPct / 100) };
+	}
+
+	/** Cart total after item-level discounts — the server's `doc.total`. */
+	function offerNetSubtotal(items) {
+		return items.reduce((sum, item) => sum + offerLineAmounts(item).net, 0);
+	}
+
+	/**
+	 * Builds cart snapshot for offer validation.
+	 * Paid lines only — free gifts must not inflate min_qty/max_qty/min_amt checks.
 	 */
 	function buildCartSnapshot() {
-		const items = invoiceItems.value;
+		const items = invoiceItems.value.filter((item) => !item.is_free_item);
 		const totalQty = items.reduce((sum, item) => sum + (item.quantity || 0), 0);
 		const itemCodes = items.map((item) => item.item_code);
 		const itemGroups = items.map((item) => item.item_group).filter(Boolean);
@@ -1206,24 +1250,33 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		const itemGroupQuantities = {};
 		// brandQuantities: { brand: total_qty } - quantity per brand
 		const brandQuantities = {};
+		// Gross line amounts (qty * price_list_rate) per scope, for min_amt/max_amt
+		const itemAmounts = {};
+		const itemGroupAmounts = {};
+		const brandAmounts = {};
 
 		for (const item of items) {
 			const qty = item.quantity || 0;
+			const { gross } = offerLineAmounts(item);
 
 			// Aggregate by item code
 			if (item.item_code) {
 				itemQuantities[item.item_code] = (itemQuantities[item.item_code] || 0) + qty;
+				itemAmounts[item.item_code] = (itemAmounts[item.item_code] || 0) + gross;
 			}
 
 			// Aggregate by item group
 			if (item.item_group) {
 				itemGroupQuantities[item.item_group] =
 					(itemGroupQuantities[item.item_group] || 0) + qty;
+				itemGroupAmounts[item.item_group] =
+					(itemGroupAmounts[item.item_group] || 0) + gross;
 			}
 
 			// Aggregate by brand
 			if (item.brand) {
 				brandQuantities[item.brand] = (brandQuantities[item.brand] || 0) + qty;
+				brandAmounts[item.brand] = (brandAmounts[item.brand] || 0) + gross;
 			}
 		}
 
@@ -1233,10 +1286,15 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			itemCodes: [...new Set(itemCodes)],
 			itemGroups: [...new Set(itemGroups)],
 			brands: [...new Set(brands)],
-			// New: quantity maps for accurate min_qty/max_qty validation
+			// Quantity maps for accurate min_qty/max_qty validation
 			itemQuantities,
 			itemGroupQuantities,
 			brandQuantities,
+			// Amount bases for min_amt/max_amt validation
+			netSubtotal: offerNetSubtotal(items),
+			itemAmounts,
+			itemGroupAmounts,
+			brandAmounts,
 		};
 	}
 
@@ -1381,7 +1439,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				settingsStore.shouldEnforceStockValidation() &&
 				shouldValidateItemStock(cartItem)
 			) {
-				const check = checkStockAvailability(cartItem, updates.quantity);
+				const otherLinesQty =
+					getCartStockQtyForItem(invoiceItems.value, cartItem.item_code) -
+					rowStockQty(cartItem);
+				const totalQty = otherLinesQty + rowStockQty(cartItem, updates.quantity);
+				const check = checkStockAvailability(cartItem, totalQty);
 				if (!check.available) {
 					throw new Error(check.error);
 				}
@@ -1423,52 +1485,74 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	let cachedItemQuantities = {};
 	let cachedItemGroupQuantities = {};
 	let cachedBrandQuantities = {};
+	let cachedItemAmounts = {};
+	let cachedItemGroupAmounts = {};
+	let cachedBrandAmounts = {};
 
 	function syncOfferSnapshot() {
 		// Only sync if values are initialized
 		if (subtotal.value !== undefined && invoiceItems.value) {
-			// Create hash for item codes and quantities to detect actual changes
-			const currentHash = invoiceItems.value
-				.map((item) => `${item.item_code}:${item.quantity}`)
+			// Paid lines only — free gifts must not inflate min_qty/max_qty checks
+			const paidItems = invoiceItems.value.filter((item) => !item.is_free_item);
+
+			// Create hash for paid item codes and quantities to detect actual changes.
+			// price_list_rate is part of the key because the cached amount maps
+			// below are money, not just counts — a price list change with an
+			// otherwise identical cart must invalidate them.
+			const currentHash = paidItems
+				.map(
+					(item) =>
+						`${item.item_code}:${item.quantity}:${item.price_list_rate || item.rate}`
+				)
 				.join(",");
 
 			// Only recalculate expensive operations if items actually changed
 			if (currentHash !== previousItemCodesHash) {
-				cachedItemCodes = invoiceItems.value.map((item) => item.item_code);
+				cachedItemCodes = paidItems.map((item) => item.item_code);
 				cachedItemGroups = [
-					...new Set(invoiceItems.value.map((item) => item.item_group).filter(Boolean)),
+					...new Set(paidItems.map((item) => item.item_group).filter(Boolean)),
 				];
 				cachedBrands = [
-					...new Set(invoiceItems.value.map((item) => item.brand).filter(Boolean)),
+					...new Set(paidItems.map((item) => item.brand).filter(Boolean)),
 				];
 
 				// Build quantity maps for accurate offer validation
 				cachedItemQuantities = {};
 				cachedItemGroupQuantities = {};
 				cachedBrandQuantities = {};
+				cachedItemAmounts = {};
+				cachedItemGroupAmounts = {};
+				cachedBrandAmounts = {};
 
-				for (const item of invoiceItems.value) {
+				for (const item of paidItems) {
 					const qty = item.quantity || 0;
+					const { gross } = offerLineAmounts(item);
 
 					if (item.item_code) {
 						cachedItemQuantities[item.item_code] =
 							(cachedItemQuantities[item.item_code] || 0) + qty;
+						cachedItemAmounts[item.item_code] =
+							(cachedItemAmounts[item.item_code] || 0) + gross;
 					}
 					if (item.item_group) {
 						cachedItemGroupQuantities[item.item_group] =
 							(cachedItemGroupQuantities[item.item_group] || 0) + qty;
+						cachedItemGroupAmounts[item.item_group] =
+							(cachedItemGroupAmounts[item.item_group] || 0) + gross;
 					}
 					if (item.brand) {
 						cachedBrandQuantities[item.brand] =
 							(cachedBrandQuantities[item.brand] || 0) + qty;
+						cachedBrandAmounts[item.brand] =
+							(cachedBrandAmounts[item.brand] || 0) + gross;
 					}
 				}
 
 				previousItemCodesHash = currentHash;
 			}
 
-			// Calculate total quantity (sum of all item quantities, not line count)
-			const totalQty = invoiceItems.value.reduce((sum, item) => {
+			// Calculate total quantity (sum of all paid item quantities, not line count)
+			const totalQty = paidItems.reduce((sum, item) => {
 				return sum + (item.quantity || 0);
 			}, 0);
 
@@ -1481,6 +1565,13 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				itemQuantities: cachedItemQuantities,
 				itemGroupQuantities: cachedItemGroupQuantities,
 				brandQuantities: cachedBrandQuantities,
+				// Recomputed every sync, not cached with the maps above: item
+				// discounts change without any item/qty/price change (the server
+				// stamps them back onto the cart after apply_offers).
+				netSubtotal: offerNetSubtotal(paidItems),
+				itemAmounts: cachedItemAmounts,
+				itemGroupAmounts: cachedItemGroupAmounts,
+				brandAmounts: cachedBrandAmounts,
 			});
 		}
 	}
@@ -1604,6 +1695,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 					if (item.pricing_rules && item.pricing_rules.length > 0) {
 						item.discount_percentage = 0;
 						item.discount_amount = 0;
+						item.is_already_discounted = 0;
+						item.is_accumulative_discount = 0;
 						recalculateItem(item);
 					}
 				});

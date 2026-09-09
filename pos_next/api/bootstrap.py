@@ -28,6 +28,7 @@ import frappe
 from frappe import _
 from frappe.query_builder import DocType
 from frappe.query_builder.functions import Coalesce
+from frappe.utils import get_system_timezone
 
 from pos_next.api.constants import DEFAULT_POS_SETTINGS, POS_SETTINGS_FIELDS
 
@@ -64,6 +65,7 @@ def get_initial_data():
 		"site_name": frappe.local.site,
 		"locale": _get_user_language(),
 		"precision": _get_precision_settings(),
+		"system_timezone": get_system_timezone(),
 		"can_switch_to_desk": "Nexus POS Manager" in frappe.get_roles(),
 		"shift": None,
 		"pos_profile": None,
@@ -104,6 +106,8 @@ def get_initial_data():
 
 	result["pos_settings"] = _get_pos_settings(pos_profile)
 	result["payment_methods"] = _get_payment_methods(pos_profile_name)
+	result["authorization_policy"] = _get_authorization_policy(pos_profile_name)
+	result["authorization_pin_length"] = _get_authorization_pin_length()
 
 	return result
 
@@ -111,6 +115,26 @@ def get_initial_data():
 # =============================================================================
 # Private Helper Functions
 # =============================================================================
+
+
+def _get_authorization_policy(pos_profile_name):
+	try:
+		from pos_next.api.authorization import get_authorization_policy
+
+		return get_authorization_policy(pos_profile_name)
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "Get Authorization Policy Error")
+		return {}
+
+
+def _get_authorization_pin_length():
+	try:
+		from pos_next.authorization import pin as pin_store
+
+		return pin_store.pin_length()
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "Get Authorization PIN Length Error")
+		return 4
 
 
 def _get_user_language():
@@ -222,6 +246,10 @@ def _get_pos_settings(pos_profile_doc):
 			1 if (pos_profile_doc.write_off_account and (pos_profile_doc.write_off_limit or 0) > 0) else 0
 		)
 		settings["disable_rounded_total"] = pos_profile_doc.disable_rounded_total or 0
+
+		from pos_next.integrations.registry import extend_bootstrap_settings
+
+		extend_bootstrap_settings(settings, pos_profile_doc.name)
 
 		return settings
 	except Exception:
