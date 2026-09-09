@@ -5,7 +5,8 @@
 
 Unit tests are pure mocks, but patching ``frappe.db.*`` still requires a live
 site: the ``frappe.db`` proxy is unbound outside site context. The Journal Entry
-integration class builds a real submitted JE on ``_Test Company``.
+integration class builds fixtures in ``setUpClass`` (company / accounts / cost
+center / POS Profile) then submits a real JE.
 
 Run via ``bench --site <site> run-tests --module pos_next.api.test_expenses``.
 """
@@ -449,13 +450,21 @@ class TestPOSExpenseJournalEntry(FrappeTestCase):
 	base amounts (M7).
 	"""
 
-	COMPANY = "_Test Company"
-	EXPENSE_ACCOUNT = "Travel Expenses - _TC"
-	COST_CENTER = "Main - _TC"
-	MODE_OF_PAYMENT = "Cash"
-	PROFILE = "_PNXT_TEST_POS_PROFILE__Test Company"
 	PERIOD_START = "2026-09-08 22:00:00"
 	AMOUNT = 50
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		from pos_next.expense_test_fixtures import ensure_pos_expense_fixtures
+
+		fx = ensure_pos_expense_fixtures()
+		cls.COMPANY = fx.company
+		cls.EXPENSE_ACCOUNT = fx.expense_account
+		cls.COST_CENTER = fx.cost_center
+		cls.MODE_OF_PAYMENT = fx.mode_of_payment
+		cls.PROFILE = fx.pos_profile
+		cls.PAYMENT_ACCOUNT = fx.payment_account
 
 	def tearDown(self):
 		frappe.db.rollback()
@@ -481,11 +490,9 @@ class TestPOSExpenseJournalEntry(FrappeTestCase):
 	def test_create_expense_journal_entry_balances_rows_and_shift_fields(self):
 		# M3: resolve the configured MoP cash ledger — no arbitrary Cash/Bank fallback.
 		payment_account = expenses._resolve_payment_account(self.MODE_OF_PAYMENT, self.COMPANY)
-		self.assertEqual(payment_account, "Cash - _TC")
+		self.assertEqual(payment_account, self.PAYMENT_ACCOUNT)
 
 		shift = self._make_opening_shift()
-		# Ensure the profile cost center matches what the JE rows should carry.
-		frappe.db.set_value("POS Profile", self.PROFILE, "cost_center", self.COST_CENTER)
 
 		je_name = expenses._create_expense_journal_entry(
 			company=self.COMPANY,

@@ -315,14 +315,21 @@ class TestClosingShiftExpenseAggregation(FrappeTestCase):
 	drop out of closing totals so drawer maths and the audit child table agree.
 	"""
 
-	COMPANY = "_Test Company"
-	EXPENSE_ACCOUNT = "Travel Expenses - _TC"
-	COST_CENTER = "Main - _TC"
-	MODE_OF_PAYMENT = "Cash"
-	PROFILE = "_PNXT_TEST_POS_PROFILE__Test Company"
 	PERIOD_START = "2026-09-08 22:00:00"
 	OPENING_AMOUNT = 100
 	EXPENSE_AMOUNT = 30
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		from pos_next.expense_test_fixtures import ensure_pos_expense_fixtures
+
+		fx = ensure_pos_expense_fixtures()
+		cls.COMPANY = fx.company
+		cls.EXPENSE_ACCOUNT = fx.expense_account
+		cls.COST_CENTER = fx.cost_center
+		cls.MODE_OF_PAYMENT = fx.mode_of_payment
+		cls.PROFILE = fx.pos_profile
 
 	def tearDown(self):
 		frappe.db.rollback()
@@ -347,7 +354,6 @@ class TestClosingShiftExpenseAggregation(FrappeTestCase):
 		return shift
 
 	def _create_expense(self, shift, amount, remarks="Fuel"):
-		frappe.db.set_value("POS Profile", self.PROFILE, "cost_center", self.COST_CENTER)
 		payment_account = expenses._resolve_payment_account(self.MODE_OF_PAYMENT, self.COMPANY)
 		return expenses._create_expense_journal_entry(
 			company=self.COMPANY,
