@@ -161,7 +161,7 @@ def request_grant(action: str, approver: str, pin: str, context=None) -> dict:
 	return {
 		"authorized": True,
 		"grant_token": token,
-		"expires_in": grants.GRANT_TTL,
+		"expires_in": grants.ttl_seconds(),
 		"approved_by": approver,
 	}
 
