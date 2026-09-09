@@ -187,7 +187,7 @@ import { usePOSShiftStore } from "@/stores/posShift"
 import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency"
 import { parseError } from "@/utils/errorHandler"
 import { Button, Dialog, FeatherIcon, Input, createResource } from "frappe-ui"
-import { computed, reactive, ref, watch } from "vue"
+import { computed, onUnmounted, reactive, ref, watch } from "vue"
 
 const shiftStore = usePOSShiftStore()
 
@@ -450,6 +450,8 @@ function handleExpenseAccountSearch(query) {
 		}
 	}, 250)
 }
+
+onUnmounted(() => clearTimeout(accountSearchTimer))
 
 function validateForm() {
 	if (!form.expense_account) {
