@@ -146,23 +146,57 @@ export const getCachedSerialData = async (itemCode) => {
 	}
 };
 
+export function parseSerialNumbers(serialNumbers) {
+	if (!serialNumbers) return [];
+	return Array.isArray(serialNumbers)
+		? serialNumbers
+		: String(serialNumbers)
+				.split("\n")
+				.map((s) => s.trim())
+				.filter(Boolean);
+}
+
+// Persist batch/serial data for a single cached item (partial updates supported)
+export const persistItemBatchSerialData = async (itemCode, data) => {
+	try {
+		if (!itemCode || !data) return false;
+
+		const update = {};
+		if (data.batch_no_data !== undefined) update.batch_no_data = data.batch_no_data;
+		if (data.serial_no_data !== undefined) update.serial_no_data = data.serial_no_data;
+
+		if (Object.keys(update).length === 0) return false;
+
+		return await db.transaction("rw", db.items, async () => {
+			const item = await db.items.get(itemCode);
+			if (!item) {
+				// Avoid phantom rows (no item_name/barcodes) that blank the product grid
+				return false;
+			}
+
+			await db.items.update(itemCode, update);
+			return true;
+		});
+	} catch (error) {
+		console.error("Error persisting item batch/serial data:", error);
+		return false;
+	}
+};
+
 // Update batch/serial data for items in cache
 export const updateItemBatchSerialData = async (batchSerialDataMap) => {
 	try {
 		if (!batchSerialDataMap || Object.keys(batchSerialDataMap).length === 0) return;
 
-		// Update each item with its batch/serial data
-		const updates = Object.entries(batchSerialDataMap).map(async ([itemCode, data]) => {
-			const item = await db.items.get(itemCode);
-			if (item) {
-				await db.items.update(itemCode, {
+		await db.transaction("rw", db.items, async () => {
+			for (const [itemCode, data] of Object.entries(batchSerialDataMap)) {
+				await persistItemBatchSerialData(itemCode, {
 					batch_no_data: data.batch_no_data || [],
 					serial_no_data: data.serial_no_data || [],
 				});
 			}
 		});
 
-		await Promise.all(updates);
 		console.log(
 			`Updated batch/serial data for ${Object.keys(batchSerialDataMap).length} items`
 		);
@@ -170,6 +204,60 @@ export const updateItemBatchSerialData = async (batchSerialDataMap) => {
 	} catch (error) {
 		console.error("Error updating batch/serial data:", error);
 		return false;
+	}
+};
+
+// Remove consumed serial numbers from offline cache
+export const consumeCachedSerials = async (itemCode, serialNumbers) => {
+	try {
+		if (!itemCode) return;
+
+		await db.transaction("rw", db.items, async () => {
+			const item = await db.items.get(itemCode);
+			const serials = item?.serial_no_data || [];
+			if (!serials.length) return;
+
+			const toRemove = new Set(parseSerialNumbers(serialNumbers));
+			const remaining = serials.filter((s) => !toRemove.has(s.serial_no));
+
+			await db.items.update(itemCode, { serial_no_data: remaining });
+		});
+	} catch (error) {
+		console.error("Error consuming cached serials:", error);
+	}
+};
+
+// Return serial numbers to offline cache (e.g. item removed from cart)
+export const returnCachedSerials = async (itemCode, serialNumbers, warehouse = null) => {
+	try {
+		if (!itemCode) return;
+
+		await db.transaction("rw", db.items, async () => {
+			const item = await db.items.get(itemCode);
+			if (!item) return;
+
+			const serials = item.serial_no_data || [];
+			const toReturn = parseSerialNumbers(serialNumbers);
+			if (!toReturn.length) return;
+
+			const scopedWarehouse = warehouse || serials[0]?.warehouse;
+			if (!scopedWarehouse) return;
+
+			const existing = new Set(serials.map((s) => s.serial_no));
+			const added = toReturn
+				.filter((serialNo) => !existing.has(serialNo))
+				.map((serial_no) => ({ serial_no, warehouse: scopedWarehouse }));
+
+			if (!added.length) return;
+
+			const merged = [...serials, ...added].sort((a, b) =>
+				a.serial_no.localeCompare(b.serial_no, undefined, { numeric: true })
+			);
+
+			await db.items.update(itemCode, { serial_no_data: merged });
+		});
+	} catch (error) {
+		console.error("Error returning cached serials:", error);
 	}
 };
 
