@@ -250,26 +250,6 @@ export const returnCachedSerials = async (itemCode, serialNumbers) => {
 	}
 };
 
-// Decrease batch quantity in offline cache after selection/sale
-export const consumeCachedBatchQty = async (itemCode, batchNo, qty) => {
-	try {
-		if (!itemCode || !batchNo || !qty) return;
-
-		const batches = await getCachedBatchData(itemCode);
-		if (!batches.length) return;
-
-		const updated = batches.map((batch) =>
-			batch.batch_no === batchNo
-				? { ...batch, batch_qty: Math.max(0, (batch.batch_qty || 0) - qty) }
-				: batch
-		);
-
-		await persistItemBatchSerialData(itemCode, { batch_no_data: updated });
-	} catch (error) {
-		console.error("Error consuming cached batch qty:", error);
-	}
-};
-
 // Get item with price
 export const getItemWithPrice = async (itemCode, priceList) => {
 	try {
