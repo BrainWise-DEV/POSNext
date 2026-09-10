@@ -456,12 +456,6 @@ async function loadBatchesOrSerials() {
 				availableSerials.value = cachedSerials;
 				return;
 			}
-			// Fallback to in-memory cache from a prior online session
-			const memorySerials = serialStore.getSerials(props.item.item_code);
-			if (memorySerials.length > 0) {
-				availableSerials.value = memorySerials;
-				return;
-			}
 			availableSerials.value = [];
 			return;
 		}
