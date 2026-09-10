@@ -167,15 +167,17 @@ export const persistItemBatchSerialData = async (itemCode, data) => {
 
 		if (Object.keys(update).length === 0) return false;
 
-		const item = await db.items.get(itemCode);
-		if (!item) {
-			// Item not in cache yet — store batch/serial data so offline selection still works
-			await db.items.put({ item_code: itemCode, ...update });
-			return true;
-		}
+		return await db.transaction("rw", db.items, async () => {
+			const item = await db.items.get(itemCode);
+			if (!item) {
+				// Item not in cache yet — store batch/serial data so offline selection still works
+				await db.items.put({ item_code: itemCode, ...update });
+				return true;
+			}
 
-		await db.items.update(itemCode, update);
-		return true;
+			await db.items.update(itemCode, update);
+			return true;
+		});
 	} catch (error) {
 		console.error("Error persisting item batch/serial data:", error);
 		return false;
@@ -187,15 +189,15 @@ export const updateItemBatchSerialData = async (batchSerialDataMap) => {
 	try {
 		if (!batchSerialDataMap || Object.keys(batchSerialDataMap).length === 0) return;
 
-		// Update each item with its batch/serial data
-		const updates = Object.entries(batchSerialDataMap).map(async ([itemCode, data]) => {
-			await persistItemBatchSerialData(itemCode, {
-				batch_no_data: data.batch_no_data || [],
-				serial_no_data: data.serial_no_data || [],
-			});
+		await db.transaction("rw", db.items, async () => {
+			for (const [itemCode, data] of Object.entries(batchSerialDataMap)) {
+				await persistItemBatchSerialData(itemCode, {
+					batch_no_data: data.batch_no_data || [],
+					serial_no_data: data.serial_no_data || [],
+				});
+			}
 		});
 
-		await Promise.all(updates);
 		console.log(
 			`Updated batch/serial data for ${Object.keys(batchSerialDataMap).length} items`
 		);
@@ -211,13 +213,16 @@ export const consumeCachedSerials = async (itemCode, serialNumbers) => {
 	try {
 		if (!itemCode) return;
 
-		const serials = await getCachedSerialData(itemCode);
-		if (!serials.length) return;
+		await db.transaction("rw", db.items, async () => {
+			const item = await db.items.get(itemCode);
+			const serials = item?.serial_no_data || [];
+			if (!serials.length) return;
 
-		const toRemove = new Set(parseSerialNumbers(serialNumbers));
-		const remaining = serials.filter((s) => !toRemove.has(s.serial_no));
+			const toRemove = new Set(parseSerialNumbers(serialNumbers));
+			const remaining = serials.filter((s) => !toRemove.has(s.serial_no));
 
-		await persistItemBatchSerialData(itemCode, { serial_no_data: remaining });
+			await db.items.update(itemCode, { serial_no_data: remaining });
+		});
 	} catch (error) {
 		console.error("Error consuming cached serials:", error);
 	}
@@ -228,23 +233,28 @@ export const returnCachedSerials = async (itemCode, serialNumbers) => {
 	try {
 		if (!itemCode) return;
 
-		const serials = await getCachedSerialData(itemCode);
-		const toReturn = parseSerialNumbers(serialNumbers);
-		if (!toReturn.length) return;
+		await db.transaction("rw", db.items, async () => {
+			const item = await db.items.get(itemCode);
+			if (!item) return;
 
-		const existing = new Set(serials.map((s) => s.serial_no));
-		const warehouse = serials[0]?.warehouse;
-		const added = toReturn
-			.filter((serialNo) => !existing.has(serialNo))
-			.map((serial_no) => ({ serial_no, warehouse }));
+			const serials = item.serial_no_data || [];
+			const toReturn = parseSerialNumbers(serialNumbers);
+			if (!toReturn.length) return;
 
-		if (!added.length) return;
+			const existing = new Set(serials.map((s) => s.serial_no));
+			const warehouse = serials[0]?.warehouse;
+			const added = toReturn
+				.filter((serialNo) => !existing.has(serialNo))
+				.map((serial_no) => ({ serial_no, warehouse }));
 
-		const merged = [...serials, ...added].sort((a, b) =>
-			a.serial_no.localeCompare(b.serial_no, undefined, { numeric: true })
-		);
+			if (!added.length) return;
 
-		await persistItemBatchSerialData(itemCode, { serial_no_data: merged });
+			const merged = [...serials, ...added].sort((a, b) =>
+				a.serial_no.localeCompare(b.serial_no, undefined, { numeric: true })
+			);
+
+			await db.items.update(itemCode, { serial_no_data: merged });
+		});
 	} catch (error) {
 		console.error("Error returning cached serials:", error);
 	}
