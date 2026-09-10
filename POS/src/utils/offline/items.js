@@ -170,9 +170,8 @@ export const persistItemBatchSerialData = async (itemCode, data) => {
 		return await db.transaction("rw", db.items, async () => {
 			const item = await db.items.get(itemCode);
 			if (!item) {
-				// Item not in cache yet — store batch/serial data so offline selection still works
-				await db.items.put({ item_code: itemCode, ...update });
-				return true;
+				// Avoid phantom rows (no item_name/barcodes) that blank the product grid
+				return false;
 			}
 
 			await db.items.update(itemCode, update);
@@ -229,7 +228,7 @@ export const consumeCachedSerials = async (itemCode, serialNumbers) => {
 };
 
 // Return serial numbers to offline cache (e.g. item removed from cart)
-export const returnCachedSerials = async (itemCode, serialNumbers) => {
+export const returnCachedSerials = async (itemCode, serialNumbers, warehouse = null) => {
 	try {
 		if (!itemCode) return;
 
@@ -241,11 +240,13 @@ export const returnCachedSerials = async (itemCode, serialNumbers) => {
 			const toReturn = parseSerialNumbers(serialNumbers);
 			if (!toReturn.length) return;
 
+			const scopedWarehouse = warehouse || serials[0]?.warehouse;
+			if (!scopedWarehouse) return;
+
 			const existing = new Set(serials.map((s) => s.serial_no));
-			const warehouse = serials[0]?.warehouse;
 			const added = toReturn
 				.filter((serialNo) => !existing.has(serialNo))
-				.map((serial_no) => ({ serial_no, warehouse }));
+				.map((serial_no) => ({ serial_no, warehouse: scopedWarehouse }));
 
 			if (!added.length) return;
 

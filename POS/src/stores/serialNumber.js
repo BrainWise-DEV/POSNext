@@ -179,7 +179,7 @@ export const useSerialNumberStore = defineStore("serialNumber", () => {
 			a.serial_no.localeCompare(b.serial_no, undefined, { numeric: true })
 		);
 
-		returnCachedSerials(itemCode, serialNumbers).catch(() => {});
+		returnCachedSerials(itemCode, serialNumbers, currentWarehouse.value).catch(() => {});
 
 		log.info(`Returned ${serialsToReturn.length} serials for ${itemCode}`);
 	};
