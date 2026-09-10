@@ -301,7 +301,11 @@ import { Button, Dialog, createResource } from "frappe-ui";
 import { computed, ref, watch } from "vue";
 import { useSerialNumberStore } from "@/stores/serialNumber";
 import { usePOSCartStore } from "@/stores/posCart";
-import { getCachedBatchData, getCachedSerialData, persistItemBatchSerialData } from "@/utils/offline/items";
+import {
+	getCachedBatchData,
+	getCachedSerialData,
+	persistItemBatchSerialData,
+} from "@/utils/offline/items";
 import { isOffline } from "@/utils/offline";
 
 const props = defineProps({
