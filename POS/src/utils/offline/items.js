@@ -146,7 +146,7 @@ export const getCachedSerialData = async (itemCode) => {
 	}
 };
 
-function parseSerialNumbers(serialNumbers) {
+export function parseSerialNumbers(serialNumbers) {
 	if (!serialNumbers) return [];
 	return Array.isArray(serialNumbers)
 		? serialNumbers
