@@ -21,6 +21,7 @@ from pos_next.pos_next.doctype.pos_closing_shift.pos_closing_shift import (
 	make_closing_shift_from_opening,
 )
 
+
 def _invoice(
 	name,
 	grand_total,
