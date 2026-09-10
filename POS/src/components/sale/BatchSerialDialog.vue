@@ -301,7 +301,7 @@ import { Button, Dialog, createResource } from "frappe-ui";
 import { computed, ref, watch } from "vue";
 import { useSerialNumberStore } from "@/stores/serialNumber";
 import { usePOSCartStore } from "@/stores/posCart";
-import { getCachedBatchData, getCachedSerialData, persistItemBatchSerialData, consumeCachedBatchQty } from "@/utils/offline/items";
+import { getCachedBatchData, getCachedSerialData, persistItemBatchSerialData } from "@/utils/offline/items";
 import { isOffline } from "@/utils/offline";
 
 const props = defineProps({
@@ -513,11 +513,6 @@ function handleConfirm() {
 
 	if (props.item?.has_batch_no && selectedBatch.value) {
 		result.batch_no = selectedBatch.value.batch_no;
-		consumeCachedBatchQty(
-			props.item.item_code,
-			selectedBatch.value.batch_no,
-			props.quantity || 1
-		).catch(() => {});
 	}
 
 	if (props.item?.has_serial_no) {
