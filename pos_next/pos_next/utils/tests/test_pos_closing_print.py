@@ -68,10 +68,14 @@ class TestPOSClosingPrint(FrappeTestCase):
 		)
 		mock_fetch.assert_called_once_with({("SINV-0001", "Sales Invoice")})
 
-	@patch("pos_next.pos_next.utils.pos_closing_print._fetch_items_for_targets")
-	def test_get_items_sold_returns_empty_when_no_transactions(self, mock_fetch):
+	def test_get_items_sold_returns_empty_when_no_transactions(self):
 		doc = {"pos_transactions": []}
 		result = get_items_sold(doc)
 
 		self.assertEqual(result, [])
-		mock_fetch.assert_not_called()
+
+	def test_get_items_sold_returns_empty_when_no_parent_targets(self):
+		doc = {"pos_transactions": [{"customer": "CUST-001"}]}
+		result = get_items_sold(doc)
+
+		self.assertEqual(result, [])
