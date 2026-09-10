@@ -18,7 +18,7 @@
 				:user-image="userImage"
 				:is-offline="offlineStore.isOffline"
 				:is-syncing="offlineStore.isSyncing"
-				:pending-invoices-count="offlineStore.pendingInvoicesCount"
+				:pending-invoices-count="offlineStore.totalPendingCount"
 				:is-any-dialog-open="uiStore.isAnyDialogOpen"
 				:cache-syncing="itemStore.cacheSyncing"
 				:cache-stats="itemStore.cacheStats"
@@ -1556,7 +1556,10 @@ onMounted(async () => {
 			cartStore.setDefaultCustomer(),
 			offlineStore.isOffline
 				? offlineStore.checkOfflineCacheAvailability()
-				: offlineStore.preloadDataForOffline(shiftStore.currentProfile),
+				: offlineStore.preloadDataForOffline(
+						shiftStore.currentProfile,
+						shiftStore.currentShift?.name,
+					),
 			draftsStore.updateDraftsCount(),
 		]);
 
@@ -1892,7 +1895,10 @@ async function handleShiftOpened() {
 		cartStore.setDefaultCustomer(),
 		offlineStore.isOffline
 			? offlineStore.checkOfflineCacheAvailability()
-			: offlineStore.preloadDataForOffline(shiftStore.currentProfile),
+			: offlineStore.preloadDataForOffline(
+					shiftStore.currentProfile,
+					shiftStore.currentShift?.name,
+				),
 		draftsStore.updateDraftsCount(),
 	]);
 
@@ -2827,7 +2833,12 @@ async function handleSyncClick() {
 		return;
 	}
 
-	showSuccess(__("No pending invoices to sync"));
+	if (offlineStore.hasPendingExpenses) {
+		await handleSyncAll();
+		return;
+	}
+
+	showSuccess(__("No pending documents to sync"));
 }
 
 async function handleSyncAll() {
@@ -2847,19 +2858,26 @@ async function handleSyncAll() {
 		if (result.failed > 0 && result.errors && result.errors.length > 0) {
 			const firstError = result.errors[0];
 			const errorContext = parseError(firstError.error);
+			const label =
+				firstError.customer ||
+				firstError.offlineId ||
+				firstError.expenseId ||
+				firstError.invoiceId ||
+				__("document");
 
 			uiStore.showError(
 				errorContext.title,
 				__(
-					"Failed to sync invoice for {0}\n\n${1}\n\nYou can delete this invoice from the offline queue if you don't need it.",
-					[firstError.customer, errorContext.message]
+					"Failed to sync {0}\n\n{1}\n\nYou can review or remove it from the offline queue if needed.",
+					[label, errorContext.message]
 				),
-				errorContext.technicalDetails || __("Invoice ID: {0}", [firstError.invoiceId]),
+				errorContext.technicalDetails ||
+					__("Queue ID: {0}", [firstError.invoiceId || firstError.expenseId || ""]),
 				"sync",
-				{ failedInvoiceId: firstError.invoiceId }
+				{ failedInvoiceId: firstError.invoiceId, failedExpenseId: firstError.expenseId }
 			);
 		} else if (result.failed > 0) {
-			showWarning(__("{0} invoice(s) failed to sync", [result.failed]));
+			showWarning(__("{0} document(s) failed to sync", [result.failed]));
 		}
 	} catch (error) {
 		log.error("Sync error:", error);

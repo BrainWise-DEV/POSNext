@@ -179,6 +179,11 @@ class TestPOSExpenses(unittest.TestCase):
 	@patch("pos_next.api.expenses.get_cash_payment_methods", return_value=[])
 	@patch("pos_next.api.expenses.get_expense_accounts", return_value=[])
 	@patch("pos_next.api.expenses.get_shift_expense_total", return_value=25)
+	@patch(
+		"pos_next.api.expenses.get_pos_expense_cancel_permissions",
+		return_value={"allow_cancel": 1, "can_cancel": 1},
+	)
+	@patch("frappe.core.api.file.get_max_file_size", return_value=10485760)
 	@patch("pos_next.api.expenses.frappe.get_cached_value", return_value="EUR")
 	@patch("pos_next.api.expenses.frappe.db.get_value", return_value=100)
 	@patch("pos_next.api.expenses.validate_open_shift")
@@ -189,6 +194,8 @@ class TestPOSExpenses(unittest.TestCase):
 		mock_validate_shift,
 		_mock_get_value,
 		_mock_cached,
+		_mock_max_file,
+		_mock_cancel_perms,
 		_mock_shift_total,
 		_mock_accounts,
 		_mock_methods,
@@ -204,8 +211,13 @@ class TestPOSExpenses(unittest.TestCase):
 		self.assertEqual(data["maximum_expense_amount"], 100)
 		self.assertEqual(data["shift_expense_total"], 25)
 		self.assertEqual(data["remaining_expense_amount"], 75)
+		self.assertEqual(data["allow_cancel"], 1)
+		self.assertEqual(data["can_cancel"], 1)
+		self.assertEqual(data["max_file_size"], 10485760)
 		_mock_cached.assert_called_once_with("Company", "Test Company", "default_currency")
-
+		_mock_accounts.assert_called_once_with(
+			"Test Company", pos_profile="Test POS Profile"
+		)
 	@patch("pos_next.api.expenses.frappe.throw", side_effect=_raise_runtime_error)
 	@patch("pos_next.api.expenses.frappe.db.get_value")
 	def test_validate_expense_account_rejects_non_expense(self, mock_get_value, _mock_throw):
@@ -220,6 +232,62 @@ class TestPOSExpenses(unittest.TestCase):
 
 		with self.assertRaisesRegex(RuntimeError, "must be an expense account"):
 			expenses.validate_expense_account("Cash - TC", "Test Company")
+
+	@patch("pos_next.api.expenses.frappe.throw", side_effect=_raise_runtime_error)
+	@patch(
+		"pos_next.api.expenses.get_allowed_expense_account_names",
+		return_value=["Travel Expenses - TC"],
+	)
+	@patch("pos_next.api.expenses.frappe.db.get_value")
+	def test_validate_expense_account_rejects_non_whitelisted(
+		self, mock_get_value, _mock_allowed, _mock_throw
+	):
+		mock_get_value.return_value = SimpleNamespace(
+			name="Office Rent - TC",
+			company="Test Company",
+			is_group=0,
+			disabled=0,
+			account_type="Expense Account",
+			root_type="Expense",
+		)
+
+		with self.assertRaisesRegex(RuntimeError, "is not allowed for POS Profile"):
+			expenses.validate_expense_account(
+				"Office Rent - TC", "Test Company", pos_profile="Test POS Profile"
+			)
+
+	@patch(
+		"pos_next.api.expenses.get_allowed_expense_account_names",
+		return_value=["Travel Expenses - TC"],
+	)
+	@patch("pos_next.api.expenses.frappe.db.get_value")
+	def test_validate_expense_account_allows_whitelisted(
+		self, mock_get_value, _mock_allowed
+	):
+		mock_get_value.return_value = SimpleNamespace(
+			name="Travel Expenses - TC",
+			company="Test Company",
+			is_group=0,
+			disabled=0,
+			account_type="Expense Account",
+			root_type="Expense",
+		)
+		expenses.validate_expense_account(
+			"Travel Expenses - TC", "Test Company", pos_profile="Test POS Profile"
+		)
+
+	@patch("pos_next.api.expenses.frappe.db.sql", return_value=[])
+	@patch(
+		"pos_next.api.expenses.get_allowed_expense_account_names",
+		return_value=["Travel Expenses - TC"],
+	)
+	def test_get_expense_accounts_applies_whitelist(self, _mock_allowed, mock_sql):
+		expenses.get_expense_accounts(
+			"Test Company", pos_profile="Test POS Profile", txt="Travel"
+		)
+		params = mock_sql.call_args.args[1]
+		self.assertEqual(params["allowed"], ("Travel Expenses - TC",))
+		self.assertIn("AND name IN %(allowed)s", mock_sql.call_args.args[0])
 
 	@patch("pos_next.api.expenses._resolve_payment_account", side_effect=_raise_runtime_error)
 	@patch("pos_next.api.expenses.frappe.get_all", return_value=["row-1"])
@@ -365,9 +433,26 @@ class TestPOSExpenses(unittest.TestCase):
 			"2026-09-08 22:00:00",
 		)
 		self.assertEqual(mock_create_je.call_args.kwargs["payment_account"], "Cash - TC")
+		self.assertEqual(mock_create_je.call_args.kwargs["remarks"], "Fuel")
+		_mock_validate_account.assert_called_once_with(
+			"Travel Expenses - TC", "Test Company", pos_profile="Test POS Profile"
+		)
+
+	@patch("pos_next.api.expenses.frappe.throw", side_effect=_raise_runtime_error)
+	def test_create_pos_expense_requires_remarks(self, _mock_throw):
+		with self.assertRaisesRegex(RuntimeError, "Remarks are required"):
+			expenses.create_pos_expense(
+				"POS-OS-0001",
+				"Test POS Profile",
+				"Travel Expenses - TC",
+				50,
+				"Cash",
+				remarks="   ",
+			)
 
 	@patch("pos_next.api.expenses.frappe.has_permission", return_value=False)
 	@patch("pos_next.api.expenses.frappe.get_doc")
+	@patch("pos_next.api.expenses.validate_pos_expense_cancel_permission")
 	@patch("pos_next.api.expenses.validate_open_shift")
 	@patch("pos_next.api.expenses.validate_pos_expense_enabled")
 	@patch("pos_next.api.expenses.frappe.db.get_value")
@@ -378,6 +463,7 @@ class TestPOSExpenses(unittest.TestCase):
 		mock_get_value,
 		_mock_validate_enabled,
 		_mock_validate_shift,
+		mock_validate_cancel,
 		mock_get_doc,
 		_mock_has_permission,
 	):
@@ -400,6 +486,67 @@ class TestPOSExpenses(unittest.TestCase):
 
 		self.assertEqual(result["journal_entry"], "ACC-JV-0001")
 		mock_doc.cancel.assert_called_once()
+		mock_validate_cancel.assert_called_once_with(
+			"Test POS Profile", "cashier@example.com", "ACC-JV-0001"
+		)
+
+	@patch("pos_next.api.expenses.frappe.throw", side_effect=_raise_runtime_error)
+	def test_validate_expense_attachment_filename_rejects_exe(self, _mock_throw):
+		with self.assertRaisesRegex(RuntimeError, "File type not allowed"):
+			expenses._validate_expense_attachment_filename("malware.exe")
+
+	def test_validate_expense_attachment_filename_allows_pdf(self):
+		expenses._validate_expense_attachment_filename("receipt.PDF")
+
+	@patch("pos_next.api.expenses.frappe.throw", side_effect=_raise_runtime_error)
+	@patch("frappe.core.api.file.get_max_file_size", return_value=10)
+	@patch("pos_next.api.expenses.frappe.get_request_header", return_value=None)
+	def test_read_uploaded_file_capped_rejects_oversized(
+		self, _mock_header, _mock_max, _mock_throw
+	):
+		stream = SimpleNamespace(read=unittest.mock.Mock(side_effect=[b"0123456789AB", b""]))
+		with self.assertRaisesRegex(RuntimeError, "File size exceeded"):
+			expenses._read_uploaded_file_capped(stream, chunk_size=4)
+
+	@patch("pos_next.api.expenses.frappe.throw", side_effect=_raise_runtime_error)
+	@patch("frappe.core.api.file.get_max_file_size", return_value=100)
+	@patch("pos_next.api.expenses.frappe.get_request_header", return_value=None)
+	def test_read_uploaded_file_capped_rejects_empty(self, _mock_header, _mock_max, _mock_throw):
+		# Empty stream yields b""; attach_pos_expense_file rejects falsy content.
+		stream = SimpleNamespace(read=unittest.mock.Mock(return_value=b""))
+		self.assertEqual(expenses._read_uploaded_file_capped(stream), b"")
+
+	@patch(
+		"pos_next.api.expenses.get_pos_expense_cancel_roles",
+		return_value=[],
+	)
+	@patch("pos_next.api.expenses.frappe.db.get_value", return_value=1)
+	def test_get_pos_expense_cancel_permissions_empty_roles_allows_dialog(
+		self, _mock_get_value, _mock_roles
+	):
+		perms = expenses.get_pos_expense_cancel_permissions("Test POS Profile")
+		self.assertEqual(perms, {"allow_cancel": 1, "can_cancel": 1})
+
+	@patch("pos_next.api.expenses.frappe.throw", side_effect=_raise_runtime_error)
+	@patch("pos_next.api.expenses.validate_open_shift")
+	@patch("pos_next.api.expenses.validate_pos_expense_enabled")
+	@patch("pos_next.api.expenses.frappe.db.get_value")
+	def test_cancel_pos_expense_rejects_when_allow_cancel_off(
+		self, mock_get_value, _mock_enabled, _mock_shift, _mock_throw
+	):
+		mock_get_value.side_effect = [
+			SimpleNamespace(
+				name="ACC-JV-0001",
+				docstatus=1,
+				posa_is_pos_expense=1,
+				posa_pos_opening_shift="POS-OS-0001",
+				posa_pos_profile="Test POS Profile",
+				owner="cashier@example.com",
+			),
+			0,  # posa_allow_cancel_pos_expense
+		]
+		with self.assertRaisesRegex(RuntimeError, "not allowed for this POS Profile"):
+			expenses.cancel_pos_expense("ACC-JV-0001", "POS-OS-0001", "Test POS Profile")
 
 	@patch("pos_next.api.expenses.frappe.throw", side_effect=_raise_runtime_error)
 	@patch("pos_next.api.expenses.validate_open_shift")
@@ -418,6 +565,114 @@ class TestPOSExpenses(unittest.TestCase):
 		)
 		with self.assertRaisesRegex(RuntimeError, "not a POS expense"):
 			expenses.cancel_pos_expense("ACC-JV-0001", "POS-OS-0001", "Test POS Profile")
+
+	@patch("pos_next.api.expenses.frappe.throw", side_effect=_raise_runtime_error)
+	@patch("pos_next.api.expenses.validate_open_shift")
+	@patch("pos_next.api.expenses.validate_pos_expense_enabled")
+	@patch("pos_next.api.expenses.frappe.db.get_value")
+	def test_attach_pos_expense_file_rejects_non_pos_expense(
+		self, mock_get_value, _mock_enabled, _mock_shift, _mock_throw
+	):
+		mock_get_value.return_value = SimpleNamespace(
+			name="ACC-JV-0001",
+			docstatus=1,
+			posa_is_pos_expense=0,
+			posa_pos_opening_shift="POS-OS-0001",
+			posa_pos_profile="Test POS Profile",
+			owner="cashier@example.com",
+		)
+		with self.assertRaisesRegex(RuntimeError, "not a POS expense"):
+			expenses.attach_pos_expense_file(
+				"ACC-JV-0001", "POS-OS-0001", "Test POS Profile"
+			)
+
+	@patch("pos_next.api.expenses.frappe.throw", side_effect=_raise_runtime_error)
+	@patch("pos_next.api.expenses.validate_open_shift")
+	@patch("pos_next.api.expenses.validate_pos_expense_enabled")
+	@patch("pos_next.api.expenses._get_submitted_pos_expense_for_shift")
+	def test_attach_pos_expense_file_requires_multipart_file(
+		self, _mock_je, _mock_enabled, _mock_shift, _mock_throw
+	):
+		frappe.local.request = SimpleNamespace(files={})
+		with self.assertRaisesRegex(RuntimeError, "File is required"):
+			expenses.attach_pos_expense_file(
+				"ACC-JV-0001", "POS-OS-0001", "Test POS Profile"
+			)
+
+	@patch("pos_next.api.expenses.frappe.throw", side_effect=_raise_runtime_error)
+	@patch(
+		"pos_next.api.expenses.get_pos_expense_cancel_permissions",
+		return_value={"allow_cancel": 0, "can_cancel": 0},
+	)
+	def test_validate_pos_expense_cancel_permission_requires_allow_cancel(
+		self, _mock_perms, _mock_throw
+	):
+		with self.assertRaisesRegex(RuntimeError, "not allowed for this POS Profile"):
+			expenses.validate_pos_expense_cancel_permission(
+				"Test POS Profile", "cashier@example.com", "ACC-JV-0001"
+			)
+
+	@patch("pos_next.api.expenses.frappe.throw", side_effect=_raise_runtime_error)
+	@patch("pos_next.api.expenses.frappe.get_roles", return_value=["Sales User"])
+	@patch(
+		"pos_next.api.expenses.get_pos_expense_cancel_roles",
+		return_value=["Accounts Manager"],
+	)
+	@patch(
+		"pos_next.api.expenses.get_pos_expense_cancel_permissions",
+		return_value={"allow_cancel": 1, "can_cancel": 0},
+	)
+	def test_validate_pos_expense_cancel_permission_requires_role(
+		self, _mock_perms, _mock_roles, _mock_get_roles, _mock_throw
+	):
+		with self.assertRaisesRegex(RuntimeError, "not allowed to cancel"):
+			expenses.validate_pos_expense_cancel_permission(
+				"Test POS Profile", "other@example.com", "ACC-JV-0001"
+			)
+
+	@patch("pos_next.api.expenses.frappe.has_permission", return_value=False)
+	@patch("pos_next.api.expenses.frappe.throw", side_effect=_raise_runtime_error)
+	@patch("pos_next.api.expenses.frappe.session")
+	@patch(
+		"pos_next.api.expenses.get_pos_expense_cancel_roles",
+		return_value=[],
+	)
+	@patch(
+		"pos_next.api.expenses.get_pos_expense_cancel_permissions",
+		return_value={"allow_cancel": 1, "can_cancel": 1},
+	)
+	def test_validate_pos_expense_cancel_permission_owner_fallback(
+		self, _mock_perms, _mock_roles, mock_session, _mock_throw, _mock_has_permission
+	):
+		mock_session.user = "cashier@example.com"
+		with self.assertRaisesRegex(RuntimeError, "only cancel POS expenses you created"):
+			expenses.validate_pos_expense_cancel_permission(
+				"Test POS Profile", "other@example.com", "ACC-JV-0001"
+			)
+
+	@patch("pos_next.api.expenses.frappe.get_roles", return_value=["Accounts Manager"])
+	@patch(
+		"pos_next.api.expenses.get_pos_expense_cancel_roles",
+		return_value=["Accounts Manager"],
+	)
+	@patch("pos_next.api.expenses.frappe.db.get_value", return_value=1)
+	def test_get_pos_expense_cancel_permissions_with_matching_role(
+		self, _mock_get_value, _mock_roles, _mock_get_roles
+	):
+		perms = expenses.get_pos_expense_cancel_permissions("Test POS Profile")
+		self.assertEqual(perms, {"allow_cancel": 1, "can_cancel": 1})
+
+	@patch("pos_next.api.expenses.frappe.get_roles", return_value=["Sales User"])
+	@patch(
+		"pos_next.api.expenses.get_pos_expense_cancel_roles",
+		return_value=["Accounts Manager"],
+	)
+	@patch("pos_next.api.expenses.frappe.db.get_value", return_value=1)
+	def test_get_pos_expense_cancel_permissions_without_matching_role(
+		self, _mock_get_value, _mock_roles, _mock_get_roles
+	):
+		perms = expenses.get_pos_expense_cancel_permissions("Test POS Profile")
+		self.assertEqual(perms, {"allow_cancel": 1, "can_cancel": 0})
 
 	@patch("pos_next.api.expenses.frappe.db.sql")
 	def test_get_pos_expenses_reads_credit_amounts(self, mock_sql):
@@ -440,7 +695,6 @@ class TestPOSExpenses(unittest.TestCase):
 		sql = mock_sql.call_args.args[0]
 		self.assertIn("SUM(jea.credit)", sql)
 		self.assertNotIn("posa_expense_amount", sql)
-
 
 class TestPOSExpenseJournalEntry(FrappeTestCase):
 	"""Real Journal Entry insert/submit for the POS expense builder.
@@ -538,3 +792,461 @@ class TestPOSExpenseJournalEntry(FrappeTestCase):
 		self.assertEqual(flt(credit_row.credit_in_account_currency), self.AMOUNT)
 		self.assertEqual(flt(debit_row.credit), 0)
 		self.assertEqual(flt(credit_row.debit), 0)
+
+	def test_create_expense_journal_entry_keeps_attachment(self):
+		payment_account = expenses._resolve_payment_account(self.MODE_OF_PAYMENT, self.COMPANY)
+		shift = self._make_opening_shift()
+		shift.submit()
+
+		je_name = expenses._create_expense_journal_entry(
+			company=self.COMPANY,
+			expense_account=self.EXPENSE_ACCOUNT,
+			payment_account=payment_account,
+			amount=self.AMOUNT,
+			cost_center=self.COST_CENTER,
+			pos_opening_shift=shift.name,
+			pos_profile=self.PROFILE,
+			mode_of_payment=self.MODE_OF_PAYMENT,
+			employee=None,
+			remarks="Receipt attached",
+			period_start_date=shift.period_start_date,
+		)
+
+		from io import BytesIO
+
+		from werkzeug.datastructures import FileStorage
+
+		uploaded = FileStorage(
+			stream=BytesIO(b"fuel receipt"),
+			filename="pos-expense-receipt.txt",
+			content_type="text/plain",
+		)
+		frappe.local.request = SimpleNamespace(
+			files={"file": uploaded},
+			host="localhost",
+			scheme="http",
+			headers={},
+		)
+
+		# Profile must allow expenses for the attach gate.
+		frappe.db.set_value("POS Profile", self.PROFILE, "posa_allow_pos_expense", 1)
+
+		result = expenses.attach_pos_expense_file(je_name, shift.name, self.PROFILE)
+
+		self.assertTrue(result["name"])
+		self.assertTrue(
+			frappe.db.exists(
+				"File",
+				{
+					"name": result["name"],
+					"attached_to_doctype": "Journal Entry",
+					"attached_to_name": je_name,
+				},
+			)
+		)
+		self.assertEqual(
+			frappe.db.get_value("Journal Entry", je_name, "user_remark"),
+			"Receipt attached",
+		)
+
+
+class TestOfflineExpenseDedup(unittest.TestCase):
+	"""Unit / mock tests for offline_id reservation and check API."""
+
+	@patch("pos_next.api.expenses.frappe.throw", side_effect=_raise_runtime_error)
+	def test_create_pos_expense_requires_remarks_without_offline_id(self, _mock_throw):
+		with self.assertRaisesRegex(RuntimeError, "Remarks are required"):
+			expenses.create_pos_expense(
+				"POS-OS-0001",
+				"Test POS Profile",
+				"Travel Expenses - TC",
+				50,
+				"Cash",
+				remarks="",
+			)
+
+	@patch("pos_next.api.expenses._cleanup_failed_offline_expense_sync")
+	@patch("pos_next.api.expenses._complete_offline_expense_sync")
+	@patch("pos_next.api.expenses._create_expense_journal_entry", return_value="ACC-JV-OFF-1")
+	@patch("pos_next.api.expenses.validate_employee")
+	@patch(
+		"pos_next.api.expenses.validate_mode_of_payment",
+		return_value="Cash - TC",
+	)
+	@patch("pos_next.api.expenses.validate_expense_account")
+	@patch("pos_next.api.expenses.validate_expense_amount")
+	@patch("pos_next.api.expenses.validate_open_shift")
+	@patch("pos_next.api.expenses.validate_pos_expense_enabled")
+	@patch("pos_next.api.expenses._ensure_offline_expense_uniqueness")
+	@patch("pos_next.api.expenses.frappe.db.get_value", return_value="Main - TC")
+	def test_create_with_offline_id_completes_sync_record(
+		self,
+		_mock_db,
+		mock_ensure,
+		_mock_enabled,
+		mock_shift,
+		_mock_amount,
+		_mock_account,
+		_mock_mode,
+		_mock_employee,
+		_mock_create,
+		mock_complete,
+		_mock_cleanup,
+	):
+		mock_ensure.return_value = {
+			"already_synced": False,
+			"sync_record_name": "OES-0001",
+		}
+		mock_shift.return_value = SimpleNamespace(
+			company="Test Company",
+			period_start_date="2026-09-08 22:00:00",
+		)
+
+		result = expenses.create_pos_expense(
+			"POS-OS-0001",
+			"Test POS Profile",
+			"Travel Expenses - TC",
+			50,
+			"Cash",
+			remarks="Offline fuel",
+			offline_id="pos_expense_test-1",
+		)
+
+		self.assertEqual(result["journal_entry"], "ACC-JV-OFF-1")
+		self.assertEqual(result["offline_id"], "pos_expense_test-1")
+		mock_complete.assert_called_once_with("OES-0001", "ACC-JV-OFF-1")
+
+	@patch("pos_next.api.expenses._create_expense_journal_entry")
+	@patch("pos_next.api.expenses._ensure_offline_expense_uniqueness")
+	def test_create_with_duplicate_offline_id_returns_existing_je(
+		self, mock_ensure, mock_create
+	):
+		mock_ensure.return_value = {
+			"already_synced": True,
+			"expense_data": {
+				"name": "ACC-JV-EXISTING",
+				"journal_entry": "ACC-JV-EXISTING",
+				"amount": 50,
+				"duplicate_prevented": True,
+				"offline_id": "pos_expense_dup",
+			},
+		}
+
+		result = expenses.create_pos_expense(
+			"POS-OS-0001",
+			"Test POS Profile",
+			"Travel Expenses - TC",
+			50,
+			"Cash",
+			remarks="Dup",
+			offline_id="pos_expense_dup",
+		)
+
+		self.assertEqual(result["journal_entry"], "ACC-JV-EXISTING")
+		self.assertTrue(result["duplicate_prevented"])
+		mock_create.assert_not_called()
+
+	@patch("pos_next.api.expenses.frappe.throw", side_effect=_raise_runtime_error)
+	@patch("pos_next.api.expenses.frappe.db.get_value")
+	def test_create_offline_id_in_progress_throws(self, mock_get_value, _mock_throw):
+		mock_get_value.return_value = frappe._dict(
+			name="OES-PENDING",
+			journal_entry="",
+			status="Pending",
+			modified=frappe.utils.now_datetime(),
+		)
+
+		with self.assertRaisesRegex(RuntimeError, "currently being processed"):
+			expenses._ensure_offline_expense_uniqueness(
+				"pos_expense_in_progress",
+				pos_profile="Test POS Profile",
+				pos_opening_shift="POS-OS-0001",
+			)
+
+	@patch("pos_next.api.expenses.validate_expense_amount", side_effect=_raise_runtime_error)
+	@patch("pos_next.api.expenses.validate_open_shift")
+	@patch("pos_next.api.expenses.validate_pos_expense_enabled")
+	@patch("pos_next.api.expenses._ensure_offline_expense_uniqueness")
+	@patch("pos_next.api.expenses._cleanup_failed_offline_expense_sync")
+	@patch("pos_next.api.expenses.frappe.throw", side_effect=_raise_runtime_error)
+	def test_create_still_enforces_shift_limit_with_offline_id(
+		self,
+		_mock_throw,
+		mock_cleanup,
+		mock_ensure,
+		_mock_enabled,
+		mock_shift,
+		_mock_amount,
+	):
+		mock_ensure.return_value = {
+			"already_synced": False,
+			"sync_record_name": "OES-LIMIT",
+		}
+		mock_shift.return_value = SimpleNamespace(
+			company="Test Company",
+			period_start_date="2026-09-08 22:00:00",
+		)
+
+		with self.assertRaises(RuntimeError):
+			expenses.create_pos_expense(
+				"POS-OS-0001",
+				"Test POS Profile",
+				"Travel Expenses - TC",
+				99999,
+				"Cash",
+				remarks="Over limit",
+				offline_id="pos_expense_limit",
+			)
+
+		mock_cleanup.assert_called_once_with("OES-LIMIT")
+
+	@patch("pos_next.api.expenses.validate_expense_account", side_effect=_raise_runtime_error)
+	@patch("pos_next.api.expenses.validate_expense_amount")
+	@patch("pos_next.api.expenses.validate_open_shift")
+	@patch("pos_next.api.expenses.validate_pos_expense_enabled")
+	@patch("pos_next.api.expenses._ensure_offline_expense_uniqueness")
+	@patch("pos_next.api.expenses._cleanup_failed_offline_expense_sync")
+	@patch("pos_next.api.expenses.frappe.throw", side_effect=_raise_runtime_error)
+	def test_create_still_enforces_account_whitelist_with_offline_id(
+		self,
+		_mock_throw,
+		mock_cleanup,
+		mock_ensure,
+		_mock_enabled,
+		mock_shift,
+		_mock_amount,
+		_mock_account,
+	):
+		mock_ensure.return_value = {
+			"already_synced": False,
+			"sync_record_name": "OES-ACCT",
+		}
+		mock_shift.return_value = SimpleNamespace(
+			company="Test Company",
+			period_start_date="2026-09-08 22:00:00",
+		)
+
+		with self.assertRaises(RuntimeError):
+			expenses.create_pos_expense(
+				"POS-OS-0001",
+				"Test POS Profile",
+				"Not Allowed - TC",
+				50,
+				"Cash",
+				remarks="Bad account",
+				offline_id="pos_expense_acct",
+			)
+
+		mock_cleanup.assert_called_once_with("OES-ACCT")
+
+	@patch(
+		"pos_next.pos_next.doctype.offline_expense_sync.offline_expense_sync.OfflineExpenseSync.is_synced"
+	)
+	@patch("pos_next.api.expenses.frappe.db.exists", return_value=True)
+	@patch("pos_next.api.expenses.frappe.db.get_value", return_value=1)
+	def test_check_offline_expense_synced_true(self, _mock_get, _mock_exists, mock_is_synced):
+		mock_is_synced.return_value = {
+			"synced": True,
+			"journal_entry": "ACC-JV-1",
+			"status": "Synced",
+		}
+		result = expenses.check_offline_expense_synced("pos_expense_ok")
+		self.assertTrue(result["synced"])
+		self.assertEqual(result["journal_entry"], "ACC-JV-1")
+
+	@patch(
+		"pos_next.pos_next.doctype.offline_expense_sync.offline_expense_sync.OfflineExpenseSync.is_synced"
+	)
+	def test_check_offline_expense_synced_false(self, mock_is_synced):
+		mock_is_synced.return_value = {
+			"synced": False,
+			"journal_entry": None,
+			"status": None,
+		}
+		result = expenses.check_offline_expense_synced("pos_expense_missing")
+		self.assertFalse(result["synced"])
+
+
+class TestOfflineExpenseJournalEntry(FrappeTestCase):
+	"""Integration: real JE + Offline Expense Sync + File attach."""
+
+	PERIOD_START = "2026-09-08 22:00:00"
+	AMOUNT = 25
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		from pos_next.expense_test_fixtures import ensure_pos_expense_fixtures
+
+		fx = ensure_pos_expense_fixtures()
+		cls.COMPANY = fx.company
+		cls.EXPENSE_ACCOUNT = fx.expense_account
+		cls.COST_CENTER = fx.cost_center
+		cls.MODE_OF_PAYMENT = fx.mode_of_payment
+		cls.PROFILE = fx.pos_profile
+		cls.PAYMENT_ACCOUNT = fx.payment_account
+		frappe.db.set_value("POS Profile", cls.PROFILE, "posa_allow_pos_expense", 1)
+		frappe.db.set_value("POS Profile", cls.PROFILE, "posa_maximum_expense_amount", 10000)
+		# Ensure allowed account whitelist is empty (= all expense accounts) or includes ours
+		frappe.db.commit()
+
+	def tearDown(self):
+		frappe.db.rollback()
+		super().tearDown()
+
+	def _make_opening_shift(self):
+		shift = frappe.get_doc(
+			{
+				"doctype": "POS Opening Shift",
+				"period_start_date": self.PERIOD_START,
+				"posting_date": "2026-09-08",
+				"company": self.COMPANY,
+				"pos_profile": self.PROFILE,
+				"user": frappe.session.user,
+				"balance_details": [
+					{"mode_of_payment": self.MODE_OF_PAYMENT, "amount": 0}
+				],
+			}
+		)
+		shift.insert()
+		shift.submit()
+		return shift
+
+	def test_offline_expense_sync_creates_balanced_je(self):
+		shift = self._make_opening_shift()
+		offline_id = f"pos_expense_it_{frappe.generate_hash(length=8)}"
+
+		result = expenses.create_pos_expense(
+			shift.name,
+			self.PROFILE,
+			self.EXPENSE_ACCOUNT,
+			self.AMOUNT,
+			self.MODE_OF_PAYMENT,
+			remarks="Offline integration fuel",
+			offline_id=offline_id,
+		)
+
+		je_name = result["journal_entry"]
+		jv = frappe.get_doc("Journal Entry", je_name)
+		self.assertEqual(jv.docstatus, 1)
+		self.assertEqual(jv.posa_is_pos_expense, 1)
+		debit = sum(flt(r.debit) for r in jv.accounts)
+		credit = sum(flt(r.credit) for r in jv.accounts)
+		self.assertEqual(debit, credit)
+		self.assertEqual(debit, self.AMOUNT)
+
+		sync = frappe.db.get_value(
+			"Offline Expense Sync",
+			{"offline_id": offline_id},
+			["status", "journal_entry"],
+			as_dict=True,
+		)
+		self.assertEqual(sync.status, "Synced")
+		self.assertEqual(sync.journal_entry, je_name)
+
+	def test_attach_after_offline_create(self):
+		shift = self._make_opening_shift()
+		offline_id = f"pos_expense_att_{frappe.generate_hash(length=8)}"
+		result = expenses.create_pos_expense(
+			shift.name,
+			self.PROFILE,
+			self.EXPENSE_ACCOUNT,
+			self.AMOUNT,
+			self.MODE_OF_PAYMENT,
+			remarks="Attach after offline",
+			offline_id=offline_id,
+		)
+		je_name = result["journal_entry"]
+
+		from io import BytesIO
+
+		from werkzeug.datastructures import FileStorage
+
+		uploaded = FileStorage(
+			stream=BytesIO(b"offline receipt"),
+			filename="offline-expense.txt",
+			content_type="text/plain",
+		)
+		frappe.local.request = SimpleNamespace(
+			files={"file": uploaded},
+			host="localhost",
+			scheme="http",
+			headers={},
+		)
+
+		attach = expenses.attach_pos_expense_file(je_name, shift.name, self.PROFILE)
+		self.assertTrue(
+			frappe.db.exists(
+				"File",
+				{
+					"name": attach["name"],
+					"attached_to_doctype": "Journal Entry",
+					"attached_to_name": je_name,
+				},
+			)
+		)
+
+		# Idempotent retry: same name+size returns existing File, no duplicate.
+		frappe.local.request = SimpleNamespace(
+			files={
+				"file": FileStorage(
+					stream=BytesIO(b"offline receipt"),
+					filename="offline-expense.txt",
+					content_type="text/plain",
+				)
+			},
+			host="localhost",
+			scheme="http",
+			headers={},
+		)
+		again = expenses.attach_pos_expense_file(je_name, shift.name, self.PROFILE)
+		self.assertEqual(again["name"], attach["name"])
+		self.assertTrue(again.get("already_attached"))
+		self.assertEqual(
+			frappe.db.count(
+				"File",
+				{
+					"attached_to_doctype": "Journal Entry",
+					"attached_to_name": je_name,
+					"file_name": "offline-expense.txt",
+				},
+			),
+			1,
+		)
+
+	def test_duplicate_offline_id_does_not_double_cash(self):
+		shift = self._make_opening_shift()
+		offline_id = f"pos_expense_dd_{frappe.generate_hash(length=8)}"
+
+		first = expenses.create_pos_expense(
+			shift.name,
+			self.PROFILE,
+			self.EXPENSE_ACCOUNT,
+			self.AMOUNT,
+			self.MODE_OF_PAYMENT,
+			remarks="First",
+			offline_id=offline_id,
+		)
+		second = expenses.create_pos_expense(
+			shift.name,
+			self.PROFILE,
+			self.EXPENSE_ACCOUNT,
+			self.AMOUNT,
+			self.MODE_OF_PAYMENT,
+			remarks="Second",
+			offline_id=offline_id,
+		)
+
+		self.assertEqual(first["journal_entry"], second["journal_entry"])
+		self.assertTrue(second.get("duplicate_prevented"))
+
+		je_count = frappe.db.count(
+			"Journal Entry",
+			{
+				"posa_pos_opening_shift": shift.name,
+				"posa_is_pos_expense": 1,
+				"docstatus": 1,
+			},
+		)
+		self.assertEqual(je_count, 1)
+		self.assertEqual(flt(expenses.get_shift_expense_total(shift.name)), self.AMOUNT)

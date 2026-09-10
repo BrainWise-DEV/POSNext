@@ -50,6 +50,7 @@ _asset_version = get_build_version()
 # include js in doctype views
 doctype_js = {
 	"Customer": "public/js/customer.js",
+	"POS Profile": "public/js/pos_profile.js",
 	"Pricing Rule": "public/js/pricing_rule.js",
 	"Promotional Scheme": "public/js/promotional_scheme.js",
 }

@@ -1,13 +1,13 @@
 import { call } from "@/utils/apiWrapper";
 import { logger } from "@/utils/logger";
 import { CoalescingMutex } from "@/utils/mutex";
-import { db } from "./db";
+import { db, getSetting, setSetting } from "./db";
 import { offlineState } from "./offlineState";
 import { removeOfflineReceiptPayload } from "./offlineReceiptCache";
-import { generateOfflineId } from "./uuid";
+import { generateOfflineExpenseId, generateOfflineId } from "./uuid";
 
 // Re-export for backwards compatibility
-export { generateOfflineId };
+export { generateOfflineExpenseId, generateOfflineId };
 
 // Create namespaced logger for sync operations
 const log = logger.create("Sync");
@@ -724,4 +724,568 @@ export const getCachedUnpaidSummary = async (posProfile) => {
 		log.error("Failed to get cached unpaid summary", error);
 		return { count: 0, total_outstanding: 0, total_paid: 0 };
 	}
+};
+
+// ============================================================================
+// OFFLINE EXPENSE QUEUE
+// ============================================================================
+
+const EXPENSE_ALLOWED_EXTENSIONS = [
+	".jpg",
+	".jpeg",
+	".png",
+	".gif",
+	".pdf",
+	".txt",
+	".csv",
+	".doc",
+	".docx",
+	".xls",
+	".xlsx",
+	".odt",
+	".ods",
+];
+
+const DEFAULT_EXPENSE_MAX_FILE_SIZE = 10 * 1024 * 1024;
+const expenseSyncMutex = new CoalescingMutex({ timeout: 60000, name: "ExpenseSync" });
+
+/**
+ * Settings key for cached expense dialog bootstrap data (profile + shift).
+ * Shift totals must not leak across opening shifts on the same profile.
+ * @param {string} posProfile
+ * @param {string} posOpeningShift
+ * @returns {string}
+ */
+export const expenseDialogCacheKey = (posProfile, posOpeningShift) =>
+	`expense_dialog_cache:${posProfile}:${posOpeningShift}`;
+
+/**
+ * Cache successful get_expense_dialog_data payload for offline open.
+ * @param {string} posProfile
+ * @param {string} posOpeningShift
+ * @param {Object} payload
+ */
+export const cacheExpenseDialogData = async (posProfile, posOpeningShift, payload) => {
+	if (!posProfile || !posOpeningShift || !payload) return false;
+	try {
+		const ok = await setSetting(expenseDialogCacheKey(posProfile, posOpeningShift), {
+			...payload,
+			pos_profile: posProfile,
+			pos_opening_shift: posOpeningShift,
+			cached_at: Date.now(),
+		});
+		return Boolean(ok);
+	} catch (error) {
+		log.error("Failed to cache expense dialog data", error);
+		return false;
+	}
+};
+
+/**
+ * Bump cached shift expense total after a JE is created offline→online.
+ * Keeps offline remaining allowance accurate without a full dialog reload.
+ * @param {string} posProfile
+ * @param {string} posOpeningShift
+ * @param {number} amount
+ * @returns {Promise<boolean>}
+ */
+export const bumpExpenseDialogCacheShiftTotal = async (posProfile, posOpeningShift, amount) => {
+	const delta = Number(amount) || 0;
+	if (!posProfile || !posOpeningShift || delta <= 0) return false;
+	const cache = await getExpenseDialogCache(posProfile, posOpeningShift);
+	if (!cache) return false;
+	const shiftTotal = (Number(cache.shift_expense_total) || 0) + delta;
+	const max = Number(cache.maximum_expense_amount) || 0;
+	return cacheExpenseDialogData(posProfile, posOpeningShift, {
+		...cache,
+		shift_expense_total: shiftTotal,
+		remaining_expense_amount: max > 0 ? Math.max(0, max - shiftTotal) : cache.remaining_expense_amount,
+	});
+};
+
+/**
+ * @param {string} posProfile
+ * @param {string} posOpeningShift
+ * @returns {Promise<Object|null>}
+ */
+export const getExpenseDialogCache = async (posProfile, posOpeningShift) => {
+	if (!posProfile || !posOpeningShift) return null;
+	try {
+		const cache =
+			(await getSetting(expenseDialogCacheKey(posProfile, posOpeningShift), null)) || null;
+		if (!cache) return null;
+		// Reject mismatched / legacy rows that somehow land in this key.
+		if (cache.pos_opening_shift && cache.pos_opening_shift !== posOpeningShift) {
+			return null;
+		}
+		if (cache.pos_profile && cache.pos_profile !== posProfile) {
+			return null;
+		}
+		return cache;
+	} catch (error) {
+		log.error("Failed to read expense dialog cache", error);
+		return null;
+	}
+};
+
+/**
+ * @param {string} fileName
+ * @returns {boolean}
+ */
+const isAllowedExpenseExtension = (fileName) => {
+	const lower = String(fileName || "").toLowerCase();
+	const dot = lower.lastIndexOf(".");
+	if (dot < 0) return false;
+	return EXPENSE_ALLOWED_EXTENSIONS.includes(lower.slice(dot));
+};
+
+/**
+ * Validate a queued attachment (File or {name,size,type,blob}).
+ * @param {Object} fileLike
+ * @param {number} maxFileSize
+ * @returns {string|null} Error message or null
+ */
+export const validateExpenseQueueAttachment = (fileLike, maxFileSize = DEFAULT_EXPENSE_MAX_FILE_SIZE) => {
+	const name = fileLike?.name || "";
+	const size = Number(fileLike?.size ?? fileLike?.blob?.size ?? 0);
+	if (!name || !isAllowedExpenseExtension(name)) {
+		return `File type not allowed: ${name || "(unnamed)"}`;
+	}
+	if (!Number.isFinite(size) || size <= 0) {
+		return `File is empty: ${name}`;
+	}
+	if (size > maxFileSize) {
+		return `File exceeds max size: ${name}`;
+	}
+	return null;
+};
+
+/**
+ * Remaining shift allowance using cached totals + pending local queue amounts.
+ * @param {Object} options
+ * @returns {number}
+ */
+export const getOfflineExpenseRemainingAllowance = ({
+	maximumExpenseAmount = 0,
+	shiftExpenseTotal = 0,
+	pendingLocalTotal = 0,
+} = {}) => {
+	const max = Number(maximumExpenseAmount) || 0;
+	if (max <= 0) return 0;
+	return Math.max(0, max - (Number(shiftExpenseTotal) || 0) - (Number(pendingLocalTotal) || 0));
+};
+
+/**
+ * Sum local expense amounts that are not yet reflected in cached shift_expense_total.
+ * Rows marked cache_counted (JE created + cache bumped) are excluded to avoid double-subtract.
+ * Unsynced rows without cache_counted — including JE-created-but-cache-stale — still count.
+ * @param {string} posOpeningShift
+ * @param {number} [excludeId]
+ * @returns {Promise<number>}
+ */
+export const getPendingExpenseLocalTotal = async (posOpeningShift, excludeId = null) => {
+	const pending = await getPendingExpenses();
+	return pending.reduce((sum, row) => {
+		if (excludeId != null && row.id === excludeId) return sum;
+		if (row.data?.pos_opening_shift !== posOpeningShift) return sum;
+		if (row.cache_counted) return sum;
+		return sum + (Number(row.data?.amount) || 0);
+	}, 0);
+};
+
+/**
+ * Save expense + optional Blob attachments to IndexedDB queue.
+ * @param {Object} expenseData
+ * @param {Array<{name:string,type?:string,size?:number,blob:Blob}>} [attachments]
+ * @param {Object} [limits] - { maximum_expense_amount, shift_expense_total, max_file_size }
+ * @returns {Promise<{success:boolean,id:number,offline_id:string}>}
+ */
+export const saveOfflineExpense = async (expenseData, attachments = [], limits = {}) => {
+	const amount = Number(expenseData?.amount);
+	if (!Number.isFinite(amount) || amount <= 0) {
+		throw new Error("Amount must be greater than zero");
+	}
+	if (!(expenseData?.remarks || "").trim()) {
+		throw new Error("Remarks are required");
+	}
+	if (!expenseData?.expense_account || !expenseData?.mode_of_payment) {
+		throw new Error("Expense account and mode of payment are required");
+	}
+	if (!expenseData?.pos_opening_shift || !expenseData?.pos_profile) {
+		throw new Error("POS shift and profile are required");
+	}
+
+	const maxAmount = Number(limits.maximum_expense_amount);
+	if (!Number.isFinite(maxAmount) || maxAmount <= 0) {
+		throw new Error(
+			"Maximum Expense Amount is not configured. Open expenses once while online to cache limits.",
+		);
+	}
+
+	const pendingLocal = await getPendingExpenseLocalTotal(expenseData.pos_opening_shift);
+	const remaining = getOfflineExpenseRemainingAllowance({
+		maximumExpenseAmount: maxAmount,
+		shiftExpenseTotal: Number(limits.shift_expense_total) || 0,
+		pendingLocalTotal: pendingLocal,
+	});
+	if (amount > remaining) {
+		throw new Error("Amount exceeds the remaining shift expense allowance");
+	}
+
+	const maxFileSize =
+		Number(limits.max_file_size) > 0
+			? Number(limits.max_file_size)
+			: DEFAULT_EXPENSE_MAX_FILE_SIZE;
+
+	const normalizedAttachments = [];
+	for (const file of attachments || []) {
+		const blob = file.blob || (file instanceof Blob ? file : null);
+		const name = file.name || blob?.name || "";
+		const size = file.size ?? blob?.size ?? 0;
+		const type = file.type || blob?.type || "";
+		const err = validateExpenseQueueAttachment({ name, size, type, blob }, maxFileSize);
+		if (err) throw new Error(err);
+		if (!blob) throw new Error(`Missing file data: ${name}`);
+		normalizedAttachments.push({ name, type, size, blob });
+	}
+
+	const offlineId = generateOfflineExpenseId();
+	const cleanData = {
+		pos_opening_shift: expenseData.pos_opening_shift,
+		pos_profile: expenseData.pos_profile,
+		expense_account: expenseData.expense_account,
+		amount,
+		mode_of_payment: expenseData.mode_of_payment,
+		employee: expenseData.employee || null,
+		remarks: String(expenseData.remarks).trim(),
+		company_currency: expenseData.company_currency || null,
+		offline_id: offlineId,
+	};
+
+	const id = await db.expense_queue.add({
+		offline_id: offlineId,
+		data: cleanData,
+		attachments: normalizedAttachments,
+		timestamp: Date.now(),
+		synced: false,
+		retry_count: 0,
+	});
+
+	log.info("Expense saved to offline queue", { offline_id: offlineId, attachments: normalizedAttachments.length });
+	return { success: true, id, offline_id: offlineId };
+};
+
+/**
+ * @returns {Promise<Array>}
+ */
+export const getPendingExpenses = async () => {
+	try {
+		return await db.expense_queue.filter((row) => !row.synced).toArray();
+	} catch (error) {
+		log.error("Failed to get pending expenses", error);
+		return [];
+	}
+};
+
+/**
+ * @returns {Promise<number>}
+ */
+export const getPendingExpenseCount = async () => {
+	try {
+		return await db.expense_queue.filter((row) => !row.synced).count();
+	} catch (error) {
+		log.error("Failed to get pending expense count", error);
+		return 0;
+	}
+};
+
+/**
+ * Delete an unsynced expense queue row (local only).
+ * Refused once a server Journal Entry exists — cash already posted.
+ * @param {number} id
+ * @returns {Promise<boolean>}
+ */
+export const deleteOfflineExpense = async (id) => {
+	try {
+		const row = await db.expense_queue.get(id);
+		if (!row) return false;
+		if (row.synced) {
+			throw new Error("Cannot delete a synced expense");
+		}
+		if (row.server_journal_entry) {
+			throw new Error(
+				"Journal Entry already created on the server. Discard remaining attachments instead of deleting.",
+			);
+		}
+		await db.expense_queue.delete(id);
+		return true;
+	} catch (error) {
+		log.error("Failed to delete offline expense", { id, error });
+		throw error;
+	}
+};
+
+/**
+ * @param {string} offlineId
+ * @returns {Promise<{synced:boolean,journal_entry?:string}>}
+ */
+export const checkOfflineExpenseSynced = async (offlineId) => {
+	if (!offlineId) return { synced: false };
+	try {
+		const response = await call("pos_next.api.expenses.check_offline_expense_synced", {
+			offline_id: offlineId,
+		});
+		return response || { synced: false };
+	} catch (error) {
+		log.warn("Failed to check offline expense sync status", { offlineId, error });
+		return { synced: false };
+	}
+};
+
+const markExpenseSynced = async (id, journalEntry, offlineId) => {
+	await db.expense_queue.update(id, {
+		synced: true,
+		server_journal_entry: journalEntry,
+		attachments: [],
+		sync_failed: false,
+		error: null,
+		cache_counted: true,
+		synced_at: Date.now(),
+	});
+	log.debug("Marked expense synced", { id, offline_id: offlineId, journal_entry: journalEntry });
+};
+
+/**
+ * Drop remaining queued attachments after JE exists (keep JE; clear local retry queue).
+ * @param {number} id
+ * @returns {Promise<boolean>}
+ */
+export const discardOfflineExpenseAttachments = async (id) => {
+	const row = await db.expense_queue.get(id);
+	if (!row) return false;
+	if (!row.server_journal_entry) {
+		throw new Error("No server Journal Entry yet — delete the pending expense instead");
+	}
+	await markExpenseSynced(id, row.server_journal_entry, row.offline_id);
+	return true;
+};
+
+const rememberExpenseJournalEntry = async (expense, journalEntry) => {
+	const amount = Number(expense.data?.amount) || 0;
+	const posProfile = expense.data?.pos_profile;
+	const posOpeningShift = expense.data?.pos_opening_shift;
+	let cacheCounted = Boolean(expense.cache_counted);
+	if (!cacheCounted && posProfile && posOpeningShift && amount > 0) {
+		cacheCounted = await bumpExpenseDialogCacheShiftTotal(
+			posProfile,
+			posOpeningShift,
+			amount,
+		);
+	}
+	await db.expense_queue.update(expense.id, {
+		server_journal_entry: journalEntry,
+		error: null,
+		cache_counted: cacheCounted,
+	});
+};
+
+const isExpenseDuplicateError = (error) => {
+	const message = error?.message || error?.exc || error?.title || String(error);
+	return (
+		Boolean(error?.duplicate_prevented) ||
+		message.includes("duplicate_prevented") ||
+		message.includes("already recorded") ||
+		message.includes("already been synced")
+	);
+};
+
+const uploadExpenseAttachmentBlob = async ({ blob, name, journalEntry, posOpeningShift, posProfile }) => {
+	const formData = new FormData();
+	formData.append("file", blob, name);
+	formData.append("journal_entry", journalEntry);
+	formData.append("pos_opening_shift", posOpeningShift);
+	formData.append("pos_profile", posProfile);
+
+	const response = await fetch("/api/method/pos_next.api.expenses.attach_pos_expense_file", {
+		method: "POST",
+		headers: {
+			"X-Frappe-CSRF-Token": window.csrf_token,
+		},
+		body: formData,
+	});
+	const responseData = await response.json().catch(() => ({}));
+	if (!response.ok || responseData.exc) {
+		const message =
+			responseData?.message ||
+			responseData?._error_message ||
+			`Failed to attach ${name}`;
+		throw new Error(typeof message === "string" ? message : `Failed to attach ${name}`);
+	}
+	if (!responseData.message?.file_url && !responseData.message?.name) {
+		throw new Error(`Attach did not return a file for ${name}`);
+	}
+	return responseData.message;
+};
+
+const isExpenseSyncInProgressError = (error) => {
+	const message = error?.message || error?.exc || error?.title || String(error);
+	return message.includes("SYNC_IN_PROGRESS") || message.includes("currently being processed");
+};
+
+/**
+ * Sync one expense queue row: create JE (deduped) then upload remaining blobs.
+ * @param {Object} expense
+ * @param {number} [retryCount]
+ */
+const syncExpenseToServer = async (expense, retryCount = 0) => {
+	const MAX_IN_PROGRESS_RETRIES = 3;
+	const IN_PROGRESS_WAIT_MS = 2000;
+	const offlineId = expense.offline_id || expense.data?.offline_id;
+	let journalEntry = expense.server_journal_entry || null;
+
+	if ((expense.retry_count || 0) >= SYNC_CONFIG.MAX_RETRY_COUNT && !journalEntry) {
+		throw new Error(expense.error || "Expense sync retry limit exceeded");
+	}
+
+	if (!journalEntry && offlineId) {
+		const syncStatus = await checkOfflineExpenseSynced(offlineId);
+		if (syncStatus.synced && syncStatus.journal_entry) {
+			journalEntry = syncStatus.journal_entry;
+			await rememberExpenseJournalEntry(expense, journalEntry);
+			expense = { ...expense, server_journal_entry: journalEntry, cache_counted: true };
+		}
+	}
+
+	if (!journalEntry) {
+		try {
+			const response = await call("pos_next.api.expenses.create_pos_expense", {
+				pos_opening_shift: expense.data.pos_opening_shift,
+				pos_profile: expense.data.pos_profile,
+				expense_account: expense.data.expense_account,
+				amount: expense.data.amount,
+				mode_of_payment: expense.data.mode_of_payment,
+				employee: expense.data.employee || null,
+				remarks: expense.data.remarks,
+				offline_id: offlineId,
+			});
+			journalEntry = response?.journal_entry || response?.name;
+			if (!journalEntry) {
+				throw new Error("Invalid create_pos_expense response");
+			}
+			await rememberExpenseJournalEntry(expense, journalEntry);
+			expense = { ...expense, server_journal_entry: journalEntry, cache_counted: true };
+		} catch (error) {
+			if (isExpenseSyncInProgressError(error) && retryCount < MAX_IN_PROGRESS_RETRIES) {
+				await new Promise((r) => setTimeout(r, IN_PROGRESS_WAIT_MS));
+				return syncExpenseToServer(expense, retryCount + 1);
+			}
+
+			if (isExpenseDuplicateError(error) && offlineId) {
+				const syncStatus = await checkOfflineExpenseSynced(offlineId);
+				if (syncStatus.synced && syncStatus.journal_entry) {
+					journalEntry = syncStatus.journal_entry;
+					await rememberExpenseJournalEntry(expense, journalEntry);
+					expense = { ...expense, server_journal_entry: journalEntry };
+				} else {
+					throw error;
+				}
+			} else {
+				throw error;
+			}
+		}
+	} else if (!expense.cache_counted) {
+		await rememberExpenseJournalEntry(expense, journalEntry);
+	}
+
+	const attachments = Array.isArray(expense.attachments) ? [...expense.attachments] : [];
+	for (let index = 0; index < attachments.length; index++) {
+		const att = attachments[index];
+		try {
+			await uploadExpenseAttachmentBlob({
+				blob: att.blob,
+				name: att.name,
+				journalEntry,
+				posOpeningShift: expense.data.pos_opening_shift,
+				posProfile: expense.data.pos_profile,
+			});
+		} catch (error) {
+			const remaining = attachments.slice(index);
+			await rememberExpenseJournalEntry(
+				{ ...expense, server_journal_entry: journalEntry },
+				journalEntry,
+			);
+			await db.expense_queue.update(expense.id, {
+				attachments: remaining,
+				synced: false,
+				sync_failed: true,
+				error: error.message || String(error),
+				retry_count: (expense.retry_count || 0) + 1,
+			});
+			throw error;
+		}
+	}
+
+	await markExpenseSynced(expense.id, journalEntry, offlineId);
+	return { status: "success", journal_entry: journalEntry };
+};
+
+/**
+ * Sync all pending offline expenses.
+ * @returns {Promise<{success:number,failed:number,skipped:number,errors:Array}>}
+ */
+export const syncOfflineExpenses = async () => {
+	if (isOffline()) {
+		log.debug("Cannot sync expenses while offline");
+		return { success: 0, failed: 0, skipped: 0, errors: [] };
+	}
+
+	return await expenseSyncMutex.withLock(async () => {
+		const pending = await getPendingExpenses();
+		if (!pending.length) {
+			return { success: 0, failed: 0, skipped: 0, errors: [] };
+		}
+
+		log.info(`Starting sync of ${pending.length} expense(s)`);
+		const result = { success: 0, failed: 0, skipped: 0, errors: [] };
+
+		for (const expense of pending) {
+			try {
+				// Re-read row in case prior attach-only update changed attachments
+				const fresh = (await db.expense_queue.get(expense.id)) || expense;
+				if (fresh.synced) {
+					result.skipped++;
+					continue;
+				}
+				const syncResult = await syncExpenseToServer(fresh);
+				if (syncResult.status === "success") {
+					result.success++;
+				} else {
+					result.skipped++;
+				}
+			} catch (error) {
+				log.error("Failed to sync expense", { id: expense.id, error });
+				result.errors.push({
+					expenseId: expense.id,
+					offlineId: expense.offline_id,
+					error,
+				});
+				await db.expense_queue.update(expense.id, {
+					sync_failed: true,
+					error: error.message || String(error),
+					retry_count: (expense.retry_count || 0) + 1,
+				});
+				result.failed++;
+			}
+		}
+
+		const cutoff = Date.now() - SYNC_CONFIG.CLEANUP_AGE_DAYS * 24 * 60 * 60 * 1000;
+		await db.expense_queue.filter((row) => row.synced && row.timestamp < cutoff).delete();
+
+		log.info("Expense sync completed", {
+			success: result.success,
+			skipped: result.skipped,
+			failed: result.failed,
+		});
+		return result;
+	}, log.debug.bind(log));
 };

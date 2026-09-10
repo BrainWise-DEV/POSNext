@@ -20,6 +20,13 @@ import {
 	cachePaymentMethodsFromServer,
 	cacheSalesPersonsFromServer,
 	syncOfflineInvoices,
+	syncOfflineExpenses,
+	saveOfflineExpense,
+	getPendingExpenses,
+	getPendingExpenseCount,
+	deleteOfflineExpense as deleteOfflineExpenseFromDb,
+	discardOfflineExpenseAttachments as discardOfflineExpenseAttachmentsFromDb,
+	cacheExpenseDialogData,
 	cacheInvoiceHistory,
 	cacheUnpaidInvoices,
 	cacheUnpaidSummary,
@@ -43,6 +50,9 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 
 	/** Number of invoices pending sync */
 	const pendingInvoicesCount = ref(0);
+
+	/** Number of expenses pending sync */
+	const pendingExpensesCount = ref(0);
 
 	/** Whether a sync operation is in progress */
 	const isSyncing = ref(false);
@@ -79,7 +89,7 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 
 		// Auto-sync when transitioning from offline to online
 		if (wasOffline && !nowOffline) {
-			log.info("Transition to online detected, auto-syncing pending invoices");
+			log.info("Transition to online detected, auto-syncing pending invoices/expenses");
 			try {
 				await syncPending();
 			} catch (error) {
@@ -97,23 +107,35 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 	/** Whether there are any pending invoices to sync */
 	const hasPendingInvoices = computed(() => pendingInvoicesCount.value > 0);
 
+	/** Combined pending invoices + expenses for header badge */
+	const totalPendingCount = computed(
+		() => pendingInvoicesCount.value + pendingExpensesCount.value,
+	);
+
+	const hasPendingExpenses = computed(() => pendingExpensesCount.value > 0);
+
 	// =========================================================================
 	// INTERNAL HELPERS
 	// =========================================================================
 
 	/**
-	 * Update the pending invoices count from the worker
+	 * Update pending invoice and expense counts
 	 */
 	async function updatePendingCount() {
 		try {
-			pendingInvoicesCount.value = await offlineWorker.getOfflineInvoiceCount();
+			const [invoiceCount, expenseCount] = await Promise.all([
+				offlineWorker.getOfflineInvoiceCount(),
+				getPendingExpenseCount(),
+			]);
+			pendingInvoicesCount.value = invoiceCount;
+			pendingExpensesCount.value = expenseCount;
 		} catch (error) {
-			log.error("Failed to get pending invoice count", error);
+			log.error("Failed to get pending sync counts", error);
 		}
 	}
 
 	/**
-	 * Sync pending invoices to the server
+	 * Sync pending invoices and expenses to the server
 	 * @throws {Error} If called while offline
 	 */
 	async function syncPending() {
@@ -123,11 +145,21 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 
 		isSyncing.value = true;
 		try {
-			const result = await syncOfflineInvoices();
+			const [invoiceResult, expenseResult] = await Promise.all([
+				syncOfflineInvoices(),
+				syncOfflineExpenses(),
+			]);
 			await updatePendingCount();
-			return result;
+			return {
+				success: (invoiceResult?.success || 0) + (expenseResult?.success || 0),
+				failed: (invoiceResult?.failed || 0) + (expenseResult?.failed || 0),
+				skipped: (invoiceResult?.skipped || 0) + (expenseResult?.skipped || 0),
+				errors: [...(invoiceResult?.errors || []), ...(expenseResult?.errors || [])],
+				invoices: invoiceResult,
+				expenses: expenseResult,
+			};
 		} catch (error) {
-			log.error("Failed to sync invoices", error);
+			log.error("Failed to sync pending offline documents", error);
 			throw error;
 		} finally {
 			isSyncing.value = false;
@@ -232,7 +264,7 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 			const result = await syncPending();
 
 			if (result.success > 0) {
-				showSuccess(__("{0} invoice(s) synced successfully", [result.success]));
+				showSuccess(__("{0} document(s) synced successfully", [result.success]));
 				await loadPendingInvoices();
 			}
 
@@ -244,11 +276,74 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 	}
 
 	/**
-	 * Preload data for offline use (payment methods, customers)
+	 * Save a POS expense offline for later sync (including attachment blobs).
+	 * @param {Object} expenseData
+	 * @param {Array} attachments
+	 * @param {Object} limits
+	 */
+	async function saveExpenseOffline(expenseData, attachments = [], limits = {}) {
+		try {
+			const result = await saveOfflineExpense(expenseData, attachments, limits);
+			await updatePendingCount();
+			log.info("Expense saved offline successfully");
+			return result;
+		} catch (error) {
+			log.error("Failed to save expense offline", error);
+			throw error;
+		}
+	}
+
+	/**
+	 * @returns {Promise<Array>}
+	 */
+	async function loadPendingExpenses() {
+		try {
+			return await getPendingExpenses();
+		} catch (error) {
+			log.error("Failed to load pending expenses", error);
+			return [];
+		}
+	}
+
+	/**
+	 * Delete an unsynced offline expense queue row (local only).
+	 * @param {number} expenseId
+	 */
+	async function deleteOfflineExpense(expenseId) {
+		try {
+			await deleteOfflineExpenseFromDb(expenseId);
+			await updatePendingCount();
+			showSuccess(__("Offline expense deleted"));
+		} catch (error) {
+			log.error("Failed to delete offline expense", error);
+			showError(error.message || __("Failed to delete offline expense"));
+			throw error;
+		}
+	}
+
+	/**
+	 * Keep server JE; clear remaining queued attachments for a partial sync row.
+	 * @param {number} expenseId
+	 */
+	async function discardOfflineExpenseAttachments(expenseId) {
+		try {
+			await discardOfflineExpenseAttachmentsFromDb(expenseId);
+			await updatePendingCount();
+			showSuccess(__("Remaining attachments discarded; Journal Entry kept"));
+		} catch (error) {
+			log.error("Failed to discard offline expense attachments", error);
+			showError(error.message || __("Failed to discard attachments"));
+			throw error;
+		}
+	}
+
+	/**
+	 * Preload data for offline use (payment methods, customers, expense dialog)
 	 * @param {Object} currentProfile - Current POS profile
+	 * @param {string} [posOpeningShift] - Open shift name (seeds expense dialog cache)
 	 */
 	let _preloadingProfile = null;
-	async function preloadDataForOffline(currentProfile) {
+	async function preloadDataForOffline(currentProfile, posOpeningShift = null) {
 		if (!currentProfile || isOffline.value) {
 			return;
 		}
@@ -302,6 +397,36 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 				}
 			} catch (error) {
 				log.error("Failed to load sales persons", error);
+			}
+
+			// Seed expense dialog cache whenever a shift is open. Server rejects if
+			// POS expense is disabled on the profile.
+			if (posOpeningShift) {
+				try {
+					const expenseDialogData = await call(
+						"pos_next.api.expenses.get_expense_dialog_data",
+						{
+							pos_profile: currentProfile.name,
+							pos_opening_shift: posOpeningShift,
+						},
+					);
+					if (expenseDialogData) {
+						const ok = await cacheExpenseDialogData(
+							currentProfile.name,
+							posOpeningShift,
+							JSON.parse(JSON.stringify(expenseDialogData)),
+						);
+						if (ok) {
+							log.success(
+								`Cached expense dialog data (${expenseDialogData.expense_accounts?.length || 0} accounts)`,
+							);
+						} else {
+							log.warn("Expense dialog cache write failed");
+						}
+					}
+				} catch (error) {
+					log.error("Failed to cache expense dialog data", error);
+				}
 			}
 
 			// Load customers if cache needs refresh
@@ -415,17 +540,24 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 		// State
 		isOffline,
 		pendingInvoicesCount,
+		pendingExpensesCount,
 		isSyncing,
 		pendingInvoicesList,
 
 		// Computed
 		hasPendingInvoices,
+		hasPendingExpenses,
+		totalPendingCount,
 
 		// Actions
 		saveInvoiceOffline,
+		saveExpenseOffline,
 		loadPendingInvoices,
+		loadPendingExpenses,
 		updatePendingCount,
 		deleteOfflineInvoice,
+		deleteOfflineExpense,
+		discardOfflineExpenseAttachments,
 		syncAllPending,
 		preloadDataForOffline,
 		checkOfflineCacheAvailability,
