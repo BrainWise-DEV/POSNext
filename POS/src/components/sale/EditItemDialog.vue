@@ -1,12 +1,15 @@
 <template>
 	<!-- Custom Modal matching frappe-ui Dialog styling -->
-	<!-- Uses @click.self pattern to properly handle teleported SelectInput dropdowns -->
+	<!-- Backdrop dismissal is driven by mousedown/mouseup on the overlay rather
+	     than @click.self: the inner flex wrapper covers the whole overlay, so a
+	     backdrop click never reaches the overlay element itself. -->
 	<Teleport to="body">
 		<Transition name="dialog">
 			<div
 				v-if="show"
 				class="fixed inset-0 bg-black/20 dark:bg-black/70 overflow-y-auto dialog-overlay outline-none z-dialog-overlay"
-				@click.self="cancel"
+				@mousedown="onOverlayMouseDown"
+				@mouseup="onOverlayMouseUp"
 			>
 				<div
 					class="flex min-h-screen flex-col items-center justify-center px-4 py-4 text-center"
@@ -676,6 +679,7 @@ const localSerials = ref([]); // List of serial numbers for this item
 const removedSerials = ref([]); // Track serials removed during this edit session
 const originalSerials = ref([]); // Original serials when dialog opened
 const originalPriceListRate = ref(0); // Original price_list_rate when dialog opened (for rate edit validation)
+const backdropPressed = ref(false); // Mousedown landed on the backdrop, not the card
 
 const getItemDetailsResource = createResource({
 	url: "pos_next.api.items.get_item_details",
@@ -1142,6 +1146,31 @@ function updateItem() {
 
 function cancel() {
 	show.value = false;
+}
+
+/**
+ * Backdrop dismissal.
+ *
+ * Closing on mouseup alone would discard the edit whenever a drag that started
+ * inside the dialog (selecting the rate text, say) happened to end on the
+ * backdrop, so the press and the release must BOTH land outside the card.
+ * `.dialog-content` is the card wrapper; everything inside it is off limits.
+ */
+function onOverlayMouseDown(event) {
+	backdropPressed.value = !event.target.closest(".dialog-content");
+}
+
+function onOverlayMouseUp(event) {
+	const pressedOnBackdrop = backdropPressed.value;
+	backdropPressed.value = false;
+
+	if (!pressedOnBackdrop || event.target.closest(".dialog-content")) return;
+
+	// SelectInput teleports its dropdown to body and closes it on a document
+	// click, so while one is open this click belongs to the dropdown, not to us.
+	if (document.querySelector('.dropdown-z-index[role="listbox"]')) return;
+
+	cancel();
 }
 </script>
 
