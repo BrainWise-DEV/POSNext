@@ -10,7 +10,7 @@ from erpnext.stock.get_item_details import get_item_details as erpnext_get_item_
 from frappe import _
 from frappe.query_builder import DocType
 from frappe.query_builder import functions as fn
-from frappe.utils import flt, nowdate
+from frappe.utils import cstr, flt, getdate, nowdate
 
 ITEM_RESULT_FIELDS = [
 	"name as item_code",
@@ -28,19 +28,166 @@ ITEM_RESULT_FIELDS = [
 	"disabled",
 ]
 
+# Selected only when present on Item: ``custom_sku`` is a site custom field and
+# ``gst_hsn_code`` ships with india_compliance.
+OPTIONAL_ITEM_RESULT_FIELDS = ["custom_sku", "gst_hsn_code"]
+
 ITEM_RESULT_COLUMNS = ",\n\t".join(ITEM_RESULT_FIELDS)
 
 
 def get_item_result_fields():
 	"""Item columns for POS item queries, including site-specific optional fields.
 
-	``custom_sku`` is a site-level custom field (not part of the app), so it is
-	only selected when it actually exists on Item to keep the SQL valid everywhere.
+	``custom_sku`` is a site-level custom field (not part of the app) and
+	``gst_hsn_code`` only exists when india_compliance is installed, so both are
+	only selected when they actually exist on Item to keep the SQL valid everywhere.
 	"""
 	fields = list(ITEM_RESULT_FIELDS)
-	if frappe.get_meta("Item").has_field("custom_sku"):
-		fields.append("custom_sku")
+	item_meta = frappe.get_meta("Item")
+	for optional_field in OPTIONAL_ITEM_RESULT_FIELDS:
+		if item_meta.has_field(optional_field):
+			fields.append(optional_field)
 	return fields
+
+
+def _matches_tax_category(row_category, tax_category):
+	"""ERPNext matches Item Tax rows on an exact tax_category string."""
+	return cstr(row_category) == cstr(tax_category)
+
+
+def _pick_item_tax_row(rows, tax_category):
+	"""Pick one Item Tax row the way ``erpnext._get_item_tax_template`` would.
+
+	Rows carrying a ``valid_from`` win over undated ones (latest first), and the
+	row's ``tax_category`` must equal the transaction's. A blank-category row is
+	accepted as a fallback when nothing matches the transaction category: POS
+	Profiles normally set a tax_category (e.g. "KA In-State") while Item Tax rows
+	are left blank, and ERPNext itself resolves the template with a blank
+	category through ``get_item_detail``.
+	"""
+	if not rows:
+		return None
+
+	today = getdate(nowdate())
+	dated = [r for r in rows if r.get("valid_from") and getdate(r["valid_from"]) <= today]
+	undated = [r for r in rows if not r.get("valid_from")]
+	candidates = sorted(dated, key=lambda r: getdate(r["valid_from"]), reverse=True) or undated
+
+	for row in candidates:
+		if _matches_tax_category(row.get("tax_category"), tax_category):
+			return row["item_tax_template"]
+
+	if cstr(tax_category):
+		for row in candidates:
+			if not cstr(row.get("tax_category")):
+				return row["item_tax_template"]
+
+	return None
+
+
+def _get_item_group_tax_templates(company, tax_category):
+	"""Item Group -> Item Tax Template, for items with no template of their own."""
+	cache_key = f"pos_item_group_tax_templates:{company}:{cstr(tax_category)}"
+	cached = frappe.cache().get_value(cache_key)
+	if cached is not None:
+		return cached
+
+	rows = frappe.get_all(
+		"Item Tax",
+		filters={"parenttype": "Item Group"},
+		fields=["parent", "item_tax_template", "tax_category", "valid_from"],
+	)
+	enabled = _enabled_templates_for_company(company)
+
+	by_group = defaultdict(list)
+	for row in rows:
+		if row.item_tax_template in enabled:
+			by_group[row.parent].append(row)
+
+	resolved = {group: _pick_item_tax_row(group_rows, tax_category) for group, group_rows in by_group.items()}
+	resolved = {group: template for group, template in resolved.items() if template}
+
+	frappe.cache().set_value(cache_key, resolved, expires_in_sec=300)
+	return resolved
+
+
+def _enabled_templates_for_company(company):
+	"""Names of the Item Tax Templates usable by ``company``."""
+	return set(
+		frappe.get_all(
+			"Item Tax Template",
+			filters={"disabled": 0, "company": company},
+			pluck="name",
+		)
+	)
+
+
+def get_item_tax_template_map(item_codes, company, tax_category=None, item_groups=None):
+	"""Resolve the Item Tax Template for a batch of items in two queries.
+
+	The POS cart needs each item's own GST rate (a 5% item next to an 18% one),
+	which ERPNext only resolves per document row. Resolving it here lets the cart
+	and the item details card show the same split the saved invoice will carry,
+	instead of the POS Profile's flat header rate.
+
+	``item_groups`` maps item_code -> item_group and enables the Item Group
+	fallback ERPNext walks when an item has no Item Tax row of its own.
+	"""
+	if not item_codes or not company:
+		return {}
+
+	enabled = _enabled_templates_for_company(company)
+	if not enabled:
+		return {}
+
+	rows = frappe.get_all(
+		"Item Tax",
+		filters={"parenttype": "Item", "parent": ["in", list(item_codes)]},
+		fields=["parent", "item_tax_template", "tax_category", "valid_from"],
+	)
+
+	by_item = defaultdict(list)
+	for row in rows:
+		if row.item_tax_template in enabled:
+			by_item[row.parent].append(row)
+
+	resolved = {}
+	for item_code in item_codes:
+		template = _pick_item_tax_row(by_item.get(item_code), tax_category)
+		if template:
+			resolved[item_code] = template
+
+	# Item Group fallback, mirroring erpnext.stock.get_item_details.get_item_tax_template
+	missing = [code for code in item_codes if code not in resolved]
+	if missing and item_groups:
+		group_templates = _get_item_group_tax_templates(company, tax_category)
+		if group_templates:
+			for item_code in missing:
+				item_group = item_groups.get(item_code)
+				seen = set()
+				while item_group and item_group not in seen:
+					seen.add(item_group)
+					if group_templates.get(item_group):
+						resolved[item_code] = group_templates[item_group]
+						break
+					item_group = frappe.get_cached_value("Item Group", item_group, "parent_item_group")
+
+	return resolved
+
+
+def attach_item_tax_templates(items, company, tax_category=None):
+	"""Stamp ``item_tax_template`` onto POS item result rows (in place)."""
+	if not items or not company:
+		return items
+
+	item_codes = [item.get("item_code") for item in items if item.get("item_code")]
+	item_groups = {item.get("item_code"): item.get("item_group") for item in items if item.get("item_code")}
+	template_map = get_item_tax_template_map(item_codes, company, tax_category, item_groups)
+
+	for item in items:
+		item["item_tax_template"] = template_map.get(item.get("item_code"))
+
+	return items
 
 
 def get_stock_availability(item_code, warehouse):
@@ -263,12 +410,11 @@ def get_item_detail(item, doc=None, warehouse=None, price_list=None, company=Non
 		doc = frappe._dict({"doctype": "Sales Invoice", "company": company})
 
 	# Fetch all needed Item fields in a single query (performance optimization)
-	item_data = (
-		frappe.db.get_value(
-			"Item", item_code, ["max_discount", "item_group", "brand", "stock_uom"], as_dict=True
-		)
-		or {}
-	)
+	item_fields = ["max_discount", "item_group", "brand", "stock_uom"]
+	if frappe.get_meta("Item").has_field("gst_hsn_code"):
+		item_fields.append("gst_hsn_code")
+
+	item_data = frappe.db.get_value("Item", item_code, item_fields, as_dict=True) or {}
 
 	# Prepare args dict for get_item_details - only include necessary fields
 	args = frappe._dict(
@@ -295,6 +441,9 @@ def get_item_detail(item, doc=None, warehouse=None, price_list=None, company=Non
 	res["serial_no_data"] = serial_no_data
 	res["item_group"] = item_data.get("item_group")
 	res["brand"] = item_data.get("brand")
+	# erpnext_get_item_details already resolved item_tax_template/item_tax_rate above;
+	# the HSN code lives on Item and is what the tax details card labels the rate with.
+	res["gst_hsn_code"] = item_data.get("gst_hsn_code")
 
 	# Add UOMs data
 	uoms = frappe.get_all(
@@ -650,6 +799,8 @@ def get_item_variants(template_item, pos_profile):
 
 			# Add UOM-specific prices
 			variant["uom_prices"] = uom_prices_map.get(variant["item_code"], {})
+
+		attach_item_tax_templates(variants, pos_profile_doc.company, pos_profile_doc.get("tax_category"))
 
 		return variants
 	except Exception as e:
@@ -1538,6 +1689,8 @@ def get_items(
 		if hide_unavailable and bundle_availability_map:
 			items = [item for item in items if not item.get("is_bundle") or item.get("actual_qty", 0) > 0]
 
+		attach_item_tax_templates(items, pos_profile_doc.company, pos_profile_doc.get("tax_category"))
+
 		return items
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Items Error")
@@ -1730,6 +1883,8 @@ def get_items_bulk(
 		# Post-filter: hide unavailable bundles
 		if hide_unavailable and bundle_availability_map:
 			items = [item for item in items if not item.get("is_bundle") or item.get("actual_qty", 0) > 0]
+
+		attach_item_tax_templates(items, pos_profile_doc.company, pos_profile_doc.get("tax_category"))
 
 		return items
 	except Exception as e:

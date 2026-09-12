@@ -30,6 +30,10 @@ export function useInvoice() {
 	const couponCode = ref(null);
 	const taxRules = ref([]); // Tax rules from POS Profile
 	const taxInclusive = ref(false); // Tax inclusive setting from POS Settings
+	// Item Tax Template -> rate + CGST/SGST style breakup, projected onto the POS
+	// Profile's tax rows by the backend. Lets a 5% item and an 18% item sit in the
+	// same cart and be taxed the way the saved invoice will tax them.
+	const itemTaxTemplates = ref({ default: { rate: 0, breakup: [] }, templates: {} });
 
 	// Submission state - prevents duplicate submissions
 	const isSubmitting = ref(false);
@@ -150,6 +154,11 @@ export function useInvoice() {
 
 	const getTaxesResource = createResource({
 		url: "pos_next.api.pos_profile.get_taxes",
+		auto: false,
+	});
+
+	const getItemTaxTemplatesResource = createResource({
+		url: "pos_next.api.pos_profile.get_item_tax_templates",
 		auto: false,
 	});
 
@@ -281,6 +290,10 @@ export function useInvoice() {
 				// Add item_group and brand for offer eligibility checking
 				item_group: item.item_group,
 				brand: item.brand,
+				// Tax identity of the line: drives the per-item rate and the tax
+				// details card (HSN + CGST/SGST split).
+				item_tax_template: item.item_tax_template || null,
+				gst_hsn_code: item.gst_hsn_code || null,
 				// Resolved barcode flag - prevents editing qty/uom/rate for weighted/priced barcodes
 				is_resolved_barcode: item.is_resolved_barcode || false,
 				// Stock validation fields — needed for qty increase checks in cart
@@ -596,6 +609,110 @@ export function useInvoice() {
 		return totalRate;
 	}
 
+	/**
+	 * Tax rate and breakup for a single cart line.
+	 *
+	 * ERPNext taxes each invoice row at its own Item Tax Template rate — it reads
+	 * every tax row's rate from the row's item_tax_map and only falls back to the
+	 * header rate when the item has no template. Taxing the whole cart at the POS
+	 * Profile's flat header rate instead makes the displayed split disagree with
+	 * the invoice that gets saved (and, in tax-exclusive mode, the grand total too).
+	 *
+	 * Falls back to the profile's flat rate when the template map is unavailable
+	 * (older backend, offline first load), which is the pre-existing behaviour.
+	 *
+	 * @param {Object} item - Cart line carrying item_tax_template
+	 * @returns {{rate: number, breakup: Array, template: string|null}}
+	 */
+	function getItemTaxInfo(item) {
+		const map = itemTaxTemplates.value || {};
+		const template = item?.item_tax_template || null;
+		const entry = template ? map.templates?.[template] : null;
+
+		if (entry) {
+			return { rate: entry.rate || 0, breakup: entry.breakup || [], template };
+		}
+
+		const fallback = map.default;
+		if (fallback?.breakup?.length) {
+			return { rate: fallback.rate || 0, breakup: fallback.breakup, template: null };
+		}
+
+		return { rate: calculateTotalTaxRate(), breakup: [], template: null };
+	}
+
+	/**
+	 * Split a line's tax into its per-account components, e.g. CGST 2.5% -> 0.36
+	 * and SGST 2.5% -> 0.36. Shares are derived from the line total rather than
+	 * re-rounded per account, so the components always sum back to taxAmount.
+	 */
+	function splitTaxByAccount(breakup, totalRate, taxAmount, template) {
+		if (!breakup.length) return [];
+
+		const rows = breakup.map((row) => ({
+			account_head: row.account_head,
+			description: row.description,
+			rate: row.rate || 0,
+			amount: totalRate > 0 ? roundCurrency((taxAmount * (row.rate || 0)) / totalRate) : 0,
+			item_tax_template: template,
+		}));
+
+		// Push any rounding remainder onto the largest component
+		const assigned = rows.reduce((sum, row) => sum + row.amount, 0);
+		const remainder = roundCurrency(taxAmount - assigned);
+		if (remainder !== 0) {
+			const largest = rows.reduce((a, b) => (b.rate > a.rate ? b : a), rows[0]);
+			largest.amount = roundCurrency(largest.amount + remainder);
+		}
+
+		return rows;
+	}
+
+	/**
+	 * Tax for one line at a given base and discount — the single source of truth
+	 * shared by the cart (recalculateItem) and the item details card, so the two
+	 * can never drift apart.
+	 *
+	 * @param {Object} item - Cart line or item stub carrying item_tax_template
+	 * @param {number} baseAmount - rate x quantity, before discount
+	 * @param {number} discountAmount - line discount
+	 * @returns {{rate, template, netAmount, taxAmount, grossAmount, breakup, inclusive}}
+	 */
+	function computeLineTax(item, baseAmount, discountAmount = 0) {
+		const { rate, breakup, template } = getItemTaxInfo(item);
+		const inclusive = Boolean(taxInclusive.value);
+
+		let netAmount;
+		let taxAmount;
+		if (inclusive && rate > 0) {
+			// Price already contains the tax — work backwards out of the gross
+			const grossAmount = roundCurrency(baseAmount - discountAmount);
+			netAmount = roundCurrency(grossAmount / (1 + rate / 100));
+			taxAmount = roundCurrency(grossAmount - netAmount);
+		} else {
+			netAmount = roundCurrency(baseAmount - discountAmount);
+			taxAmount = roundCurrency((netAmount * rate) / 100);
+		}
+
+		return {
+			rate,
+			template,
+			inclusive,
+			netAmount,
+			taxAmount,
+			grossAmount: roundCurrency(netAmount + taxAmount),
+			breakup: splitTaxByAccount(breakup, rate, taxAmount, template),
+		};
+	}
+
+	/**
+	 * Per-account tax amounts for a line that has already been calculated.
+	 */
+	function getItemTaxBreakup(item) {
+		const { rate, breakup, template } = getItemTaxInfo(item);
+		return splitTaxByAccount(breakup, rate, item?.tax_amount || 0, template);
+	}
+
 	function rebuildIncrementalCache() {
 		/**
 		 * Rebuild cache from scratch - used when bulk operations modify all items
@@ -664,25 +781,19 @@ export function useInvoice() {
 		}
 		item.discount_amount = discountAmount;
 
-		// Calculate tax based on inclusive/exclusive mode
-		// Use currency precision for all monetary calculations to match ERPNext
-		const totalTaxRate = calculateTotalTaxRate();
-		let netAmount = 0;
-		let taxAmount = 0;
-
-		if (taxInclusive.value && totalTaxRate > 0) {
-			// Tax-inclusive: Work backwards from gross to extract net and tax
-			const grossAmount = roundCurrency(baseAmount - discountAmount);
-			netAmount = roundCurrency(grossAmount / (1 + totalTaxRate / 100));
-			taxAmount = roundCurrency(grossAmount - netAmount);
-		} else {
-			// Tax-exclusive: Calculate tax on top of net amount
-			netAmount = roundCurrency(baseAmount - discountAmount);
-			taxAmount = roundCurrency((netAmount * totalTaxRate) / 100);
-		}
+		// Calculate tax based on inclusive/exclusive mode.
+		// The rate comes from the line's own Item Tax Template when it has one, so a
+		// 5% item is not taxed at the POS Profile's 18% header rate.
+		const { rate: totalTaxRate, netAmount, taxAmount } = computeLineTax(
+			item,
+			baseAmount,
+			discountAmount
+		);
 
 		// Update item fields with rounded values
 		item.tax_amount = taxAmount;
+		item.tax_rate = totalTaxRate;
+		item.net_amount = netAmount;
 		// For manually edited rates, preserve the edited rate; otherwise use price_list_rate
 		if (!isManuallyEdited) {
 			item.rate = effectiveRate; // Preserve original price for display
@@ -1224,6 +1335,18 @@ export function useInvoice() {
 			const result = await getTaxesResource.submit({ pos_profile: profileName });
 			taxRules.value = result?.data || result || [];
 
+			// Per-item rates. On failure the map stays empty and getItemTaxInfo
+			// falls back to the flat profile rate, so taxes still work.
+			try {
+				const taxTemplates = await getItemTaxTemplatesResource.submit({
+					pos_profile: profileName,
+				});
+				itemTaxTemplates.value = taxTemplates?.data ||
+					taxTemplates || { default: { rate: 0, breakup: [] }, templates: {} };
+			} catch (error) {
+				console.warn("Failed to load item tax templates:", error);
+			}
+
 			// Load tax inclusive setting from POS Settings if provided
 			if (posSettings && posSettings.tax_inclusive !== undefined) {
 				taxInclusive.value = posSettings.tax_inclusive || false;
@@ -1268,6 +1391,7 @@ export function useInvoice() {
 		couponCode,
 		taxRules,
 		taxInclusive,
+		itemTaxTemplates,
 		isSubmitting,
 
 		// Computed
@@ -1300,6 +1424,9 @@ export function useInvoice() {
 		loadTaxRules,
 		setTaxInclusive,
 		recalculateItem,
+		getItemTaxInfo,
+		getItemTaxBreakup,
+		computeLineTax,
 		rebuildIncrementalCache,
 		formatItemsForSubmission,
 		resolveUomPricing,
@@ -1311,5 +1438,6 @@ export function useInvoice() {
 		applyOffersResource,
 		getItemDetailsResource,
 		getTaxesResource,
+		getItemTaxTemplatesResource,
 	};
 }

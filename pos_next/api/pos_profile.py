@@ -3,7 +3,9 @@
 
 
 import frappe
+from erpnext.stock.get_item_details import get_item_tax_map
 from frappe import _
+from frappe.utils import cint, flt
 
 from pos_next.api.utilities import _parse_list_parameter, check_user_company
 
@@ -211,6 +213,96 @@ def get_taxes(pos_profile):
 		frappe.log_error(frappe.get_traceback(), "Get Taxes Error")
 		# Return empty array instead of throwing - taxes are optional
 		return []
+
+
+# Charge types whose rate can be overridden per item by an Item Tax Template.
+# "Actual" rows are a flat document charge and never carry a per-item rate.
+ITEM_RATE_CHARGE_TYPES = ("On Net Total", "On Previous Row Total")
+
+
+def _profile_tax_rows(pos_profile):
+	"""Tax rows of the POS Profile's Sales Taxes and Charges Template."""
+	profile_doc = frappe.get_cached_doc("POS Profile", pos_profile)
+	taxes_and_charges = getattr(profile_doc, "taxes_and_charges", None)
+	if not taxes_and_charges:
+		return profile_doc, []
+
+	template_doc = frappe.get_cached_doc("Sales Taxes and Charges Template", taxes_and_charges)
+	return profile_doc, [row for row in template_doc.taxes if row.charge_type in ITEM_RATE_CHARGE_TYPES]
+
+
+def _project_on_profile_rows(tax_rows, item_tax_map):
+	"""Rate breakup for one item, using the same lookup ERPNext uses.
+
+	``calculate_taxes_and_totals`` takes each tax row's rate from
+	``item_tax_map.get(row.account_head, row.rate)``, so an item on
+	"GST 5%" pays 2.5 + 2.5 against a header template of 9 + 9. Reproducing that
+	here is what lets the POS show the split the saved invoice will actually carry.
+	"""
+	breakup = []
+	total_rate = 0.0
+
+	for row in tax_rows:
+		rate = flt(item_tax_map.get(row.account_head, row.rate)) if item_tax_map else flt(row.rate)
+		breakup.append(
+			{
+				"account_head": row.account_head,
+				"description": row.description or row.account_head,
+				"rate": rate,
+				"charge_type": row.charge_type,
+				"included_in_print_rate": cint(row.included_in_print_rate),
+			}
+		)
+		total_rate += rate
+
+	return {"rate": flt(total_rate, 9), "breakup": breakup}
+
+
+@frappe.whitelist()
+def get_item_tax_templates(pos_profile):
+	"""Per-Item-Tax-Template rate breakup for this POS Profile.
+
+	The POS cart used to tax every line at the POS Profile's flat header rate,
+	which is wrong wherever items carry different Item Tax Templates (a 5% yarn
+	next to an 18% tool). The frontend joins this map on the item's
+	``item_tax_template`` to tax each line at its own rate and to show the
+	CGST/SGST split in the item details card.
+
+	Returns:
+		dict: ``default`` (profile rows as-is, for items with no template),
+		``templates`` (template name -> rate + breakup) and ``tax_inclusive``.
+	"""
+	try:
+		if not pos_profile:
+			return {"default": {"rate": 0, "breakup": []}, "templates": {}, "tax_inclusive": 0}
+
+		profile_doc, tax_rows = _profile_tax_rows(pos_profile)
+
+		templates = {}
+		if tax_rows:
+			template_names = frappe.get_all(
+				"Item Tax Template",
+				filters={"disabled": 0, "company": profile_doc.company},
+				pluck="name",
+			)
+			for template_name in template_names:
+				item_tax_map = get_item_tax_map(profile_doc.company, template_name, as_json=False)
+				templates[template_name] = _project_on_profile_rows(tax_rows, item_tax_map)
+
+		tax_inclusive = (
+			frappe.db.get_value("POS Settings", {"pos_profile": pos_profile}, "tax_inclusive") or 0
+		)
+
+		return {
+			"default": _project_on_profile_rows(tax_rows, None),
+			"templates": templates,
+			"tax_inclusive": cint(tax_inclusive),
+		}
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "Get Item Tax Templates Error")
+		# Taxes are optional — an empty map makes the frontend fall back to the
+		# POS Profile's flat header rate, i.e. the previous behaviour.
+		return {"default": {"rate": 0, "breakup": []}, "templates": {}, "tax_inclusive": 0}
 
 
 @frappe.whitelist()
