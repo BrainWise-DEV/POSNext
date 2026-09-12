@@ -144,25 +144,28 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	const isProcessingOffers = computed(() => offerProcessingState.value.isProcessing);
 
 	/**
-	 * Generates a comprehensive hash of the current cart state.
-	 * Used to detect ANY change that might affect offer eligibility.
+	 * Structural cart hash for offer processing dedupe.
 	 *
 	 * Free-item rows are omitted so applying/removing product-discount gifts
 	 * does not look like a purchase-qty change and re-enter offer processing.
+	 *
+	 * Discount % / amount / net rate are omitted on purpose: apply_offers and
+	 * coupon revalidation write those fields; including them re-queues offer
+	 * processing and flickers remove/re-apply on live carts.
 	 */
 	function generateCartHash() {
 		const items = invoiceItems.value.filter((item) => !item.is_free_item);
 		const parts = [
-			// Item details: code, quantity, uom, discount
+			// Item details: code, quantity, uom, list price (not discounted rate)
 			items
 				.map(
 					(i) =>
-						`${i.item_code}:${i.quantity}:${i.uom || ""}:${i.discount_percentage || 0}`
+						`${i.item_code}:${i.quantity}:${i.uom || ""}:${i.price_list_rate || 0}`
 				)
 				.join("|"),
 			// Total paid item count
 			items.length.toString(),
-			// Subtotal (rounded to avoid floating point issues)
+			// Subtotal uses price_list_rate (stable when discounts apply)
 			Math.round((subtotal.value || 0) * 100).toString(),
 			// Customer
 			customer.value?.name || customer.value || "none",
@@ -354,26 +357,49 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	}
 
 	function buildCouponItemsSnapshot() {
-		return toRaw(invoiceItems.value).map((item, index) => ({
-			item_code: item.item_code,
-			item_name: item.item_name,
-			brand: item.brand || "",
-			item_group: item.item_group || "",
-			qty: item.quantity || item.qty || 0,
-			quantity: item.quantity || item.qty || 0,
-			rate: item.rate || 0,
-			price_list_rate: item.price_list_rate || item.rate || 0,
-			amount: item.amount || 0,
-			discount_percentage: item.coupon_code ? 0 : item.discount_percentage || 0,
-			discount_amount: item.coupon_code ? 0 : item.discount_amount || 0,
-			pricing_rules: item.pricing_rules || null,
-			is_free_item: item.is_free_item || 0,
-			is_already_discounted: item.is_already_discounted || 0,
-			discount_source: item.discount_source || "",
-			coupon_code: item.coupon_code || "",
-			idx: index + 1,
-			name: item.name || null,
-		}));
+		return toRaw(invoiceItems.value).map((item, index) => {
+			// When a coupon is already on the line, send the *pre-coupon* (offer)
+			// discount so the server can stack instead of treating the combined
+			// value as the base and double-applying the coupon.
+			const hasCoupon = !!item.coupon_code;
+			const prePct = Number.parseFloat(item.pre_coupon_discount_percentage);
+			const preAmt = Number.parseFloat(item.pre_coupon_discount_amount);
+			let discountPercentage = item.discount_percentage || 0;
+			let discountAmount = item.discount_amount || 0;
+			if (hasCoupon) {
+				if (!Number.isNaN(prePct) && prePct > 0) {
+					discountPercentage = prePct;
+					discountAmount = 0;
+				} else if (!Number.isNaN(preAmt) && preAmt > 0) {
+					discountAmount = preAmt;
+					discountPercentage = 0;
+				} else {
+					discountPercentage = 0;
+					discountAmount = 0;
+				}
+			}
+
+			return {
+				item_code: item.item_code,
+				item_name: item.item_name,
+				brand: item.brand || "",
+				item_group: item.item_group || "",
+				qty: item.quantity || item.qty || 0,
+				quantity: item.quantity || item.qty || 0,
+				rate: item.rate || 0,
+				price_list_rate: item.price_list_rate || item.rate || 0,
+				amount: item.amount || 0,
+				discount_percentage: discountPercentage,
+				discount_amount: discountAmount,
+				pricing_rules: item.pricing_rules || null,
+				is_free_item: item.is_free_item || 0,
+				is_already_discounted: item.is_already_discounted || 0,
+				discount_source: item.discount_source || "",
+				coupon_code: item.coupon_code || "",
+				idx: index + 1,
+				name: item.name || null,
+			};
+		});
 	}
 
 	/**
@@ -403,17 +429,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				coupon_code: current.code,
 				customer: customerName,
 				company: shiftStore.currentProfile?.company || shiftStore.profileCompany || "",
-				items: buildCouponItemsSnapshot().map((item) => {
-					if (item.coupon_code) {
-						return {
-							...item,
-							discount_percentage: 0,
-							discount_amount: 0,
-							coupon_code: current.code,
-						};
-					}
-					return item;
-				}),
+				items: buildCouponItemsSnapshot(),
 			});
 
 			const validationData = unwrapCouponValidation(result);
@@ -601,6 +617,14 @@ export const usePOSCartStore = defineStore("posCart", () => {
 					discountAmt > 0 ||
 					gwpFreeQty > 0 ||
 					(serverItem.discount_source === "free_item" && bundledFreeQty > 0);
+
+				// Offer pass runs before coupon revalidation. Keep the offer-only
+				// snapshot so stacking (exclude_already_discounted=0) does not
+				// treat a previously combined rate as the new base.
+				if (item.coupon_code) {
+					item.pre_coupon_discount_percentage = item.discount_percentage || 0;
+					item.pre_coupon_discount_amount = item.discount_amount || 0;
+				}
 			} else if (itemHasOfferDiscount(item)) {
 				clearOfferDiscountFromItem(item);
 			}
@@ -2298,11 +2322,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		// When offline, use cached offers and apply discounts client-side
 		if (offlineState.isOffline) {
 			applyOffersOffline();
-			offerProcessingState.value.lastCartHash = generateCartHash();
-			offerProcessingState.value.lastProcessedAt = Date.now();
 			if (appliedCoupon.value?.code) {
 				await revalidateAppliedCoupon(true);
 			}
+			// Hash after coupon so discount writes do not look like a new cart
+			offerProcessingState.value.lastCartHash = generateCartHash();
+			offerProcessingState.value.lastProcessedAt = Date.now();
 			return;
 		}
 
@@ -2416,15 +2441,16 @@ export const usePOSCartStore = defineStore("posCart", () => {
 					}
 				}
 			}
-			// Update last processed hash on success
-			offerProcessingState.value.lastCartHash = generateCartHash();
-			offerProcessingState.value.lastProcessedAt = Date.now();
-			offerProcessingState.value.retryCount = 0;
-
 			// Re-apply coupon after offers so exclusion rules stay accurate
 			if (appliedCoupon.value?.code) {
 				await revalidateAppliedCoupon(true);
 			}
+
+			// Stamp hash after coupon too — coupon line updates must not
+			// look like a structural cart change and re-enter this pipeline.
+			offerProcessingState.value.lastCartHash = generateCartHash();
+			offerProcessingState.value.lastProcessedAt = Date.now();
+			offerProcessingState.value.retryCount = 0;
 		} catch (error) {
 			if (signal?.aborted) return;
 			console.error("Error in offer synchronization:", error);

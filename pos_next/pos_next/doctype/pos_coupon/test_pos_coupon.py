@@ -378,6 +378,50 @@ class TestPOSCoupon(unittest.TestCase):
 		self.assertFalse(result["valid"])
 		self.assertIn("Minimum eligible amount", result["message"])
 
+	def test_percentage_stacks_on_existing_offer_when_exclude_off(self):
+		"""exclude=0 → offer first, then coupon % on the post-offer price."""
+		coupon = _coupon(
+			discount_percentage=10,
+			exclude_already_discounted_items=0,
+		)
+		items = [
+			{
+				"item_code": "A",
+				"brand": "B1",
+				"item_group": "G1",
+				"qty": 1,
+				"price_list_rate": 100,
+				"rate": 80,
+				"discount_percentage": 20,
+			}
+		]
+		result = apply_coupon_to_items(coupon, items)
+		self.assertTrue(result["valid"])
+		# Sequential: 100 × 0.8 × 0.9 = 72 → combined 28%, coupon-only 8
+		self.assertAlmostEqual(result["total_discount"], 8.0, places=4)
+		self.assertAlmostEqual(result["line_updates"][0]["discount_percentage"], 28.0, places=4)
+		self.assertAlmostEqual(result["line_updates"][0]["rate"], 72.0, places=4)
+		self.assertAlmostEqual(
+			result["line_updates"][0]["pre_coupon_discount_fraction"], 0.2, places=4
+		)
+
+	def test_percentage_without_existing_discount_unchanged(self):
+		coupon = _coupon(discount_percentage=10, exclude_already_discounted_items=0)
+		items = [
+			{
+				"item_code": "A",
+				"brand": "B1",
+				"item_group": "G1",
+				"qty": 1,
+				"price_list_rate": 100,
+				"rate": 100,
+			}
+		]
+		result = apply_coupon_to_items(coupon, items)
+		self.assertTrue(result["valid"])
+		self.assertAlmostEqual(result["total_discount"], 10.0, places=4)
+		self.assertAlmostEqual(result["line_updates"][0]["discount_percentage"], 10.0, places=4)
+
 
 if __name__ == "__main__":
 	unittest.main()
