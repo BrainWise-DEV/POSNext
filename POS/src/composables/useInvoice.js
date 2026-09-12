@@ -573,8 +573,21 @@ export function useInvoice() {
 		invoiceItems.value.forEach((item) => {
 			if (!item.coupon_code) return;
 			item.coupon_code = null;
-			item.discount_percentage = 0;
-			item.discount_amount = 0;
+			// Restore the offer/manual discount that was on the line before the coupon
+			const prePct = Number.parseFloat(item.pre_coupon_discount_percentage);
+			const preAmt = Number.parseFloat(item.pre_coupon_discount_amount);
+			if (!Number.isNaN(prePct) && prePct > 0) {
+				item.discount_percentage = prePct;
+				item.discount_amount = 0;
+			} else if (!Number.isNaN(preAmt) && preAmt > 0) {
+				item.discount_amount = preAmt;
+				item.discount_percentage = 0;
+			} else {
+				item.discount_percentage = 0;
+				item.discount_amount = 0;
+			}
+			item.pre_coupon_discount_percentage = null;
+			item.pre_coupon_discount_amount = null;
 			recalculateItem(item);
 		});
 	}
@@ -582,6 +595,9 @@ export function useInvoice() {
 	function applyCouponLineDiscounts(discount) {
 		/**
 		 * Apply POS Coupon discounts on eligible lines only.
+		 * When exclude_already_discounted_items=0 the server returns a *combined*
+		 * offer+coupon discount — preserve the pre-coupon offer so removal /
+		 * revalidation can stack correctly instead of wiping the offer.
 		 * @param {Object} discount - { code, line_updates, amount, name, type }
 		 */
 		if (!discount) return;
@@ -624,6 +640,17 @@ export function useInvoice() {
 
 			const item = invoiceItems.value[itemIndex];
 			matchedIndexes.add(itemIndex);
+
+			// Snapshot offer discount before overwriting with combined values
+			const preFrac = Number.parseFloat(update.pre_coupon_discount_fraction);
+			if (!Number.isNaN(preFrac) && preFrac > 0) {
+				item.pre_coupon_discount_percentage = preFrac * 100;
+				item.pre_coupon_discount_amount = 0;
+			} else {
+				item.pre_coupon_discount_percentage = item.discount_percentage || 0;
+				item.pre_coupon_discount_amount = item.discount_amount || 0;
+			}
+
 			item.coupon_code = discount.code || update.coupon_code || null;
 			const pct = Number.parseFloat(update.discount_percentage) || 0;
 			const amt = Number.parseFloat(update.discount_amount) || 0;
@@ -749,7 +776,25 @@ export function useInvoice() {
 		let discountAmount = 0;
 		// GWP: exact discount = free_qty * unit_price (no percentage rounding)
 		const gwpFreeQty = Number.parseFloat(item.gwp_free_qty) || 0;
-		if (item.discount_source === "gwp" && gwpFreeQty > 0) {
+		const couponPct = Number.parseFloat(item.discount_percentage) || 0;
+		const couponAmt = Number.parseFloat(item.discount_amount) || 0;
+
+		// Coupon (possibly stacked on free-item / offer) must win over the
+		// free_item / gwp branches — those would otherwise wipe discount_% and
+		// leave Grand Total at the free-item-only amount (coupon toast shows
+		// savings but the cart never changes).
+		if (item.coupon_code && couponAmt > 0) {
+			discountAmount = roundCurrency(couponAmt);
+			if (discountAmount > baseAmount) {
+				discountAmount = baseAmount;
+			}
+			item.discount_percentage = 0;
+		} else if (item.coupon_code && couponPct > 0) {
+			discountAmount = roundCurrency((baseAmount * couponPct) / 100);
+			if (discountAmount > baseAmount) {
+				discountAmount = baseAmount;
+			}
+		} else if (item.discount_source === "gwp" && gwpFreeQty > 0) {
 			discountAmount = roundCurrency(gwpFreeQty * roundedRate);
 			if (discountAmount > baseAmount) {
 				discountAmount = baseAmount;
@@ -765,14 +810,6 @@ export function useInvoice() {
 				}
 				item.discount_percentage = 0;
 			}
-		// Coupon line discounts with max_amount are stored as absolute amounts.
-		// Do NOT convert them to % — qty changes would re-scale and exceed the cap.
-		} else if (item.coupon_code && Number.parseFloat(item.discount_amount) > 0) {
-			discountAmount = roundCurrency(item.discount_amount);
-			if (discountAmount > baseAmount) {
-				discountAmount = baseAmount;
-			}
-			item.discount_percentage = 0;
 		} else if (item.discount_percentage > 0) {
 			discountAmount = roundCurrency((baseAmount * item.discount_percentage) / 100);
 		} else if (item.discount_amount > 0) {
