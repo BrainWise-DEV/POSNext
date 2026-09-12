@@ -398,6 +398,127 @@
 												</div>
 											</div>
 
+											<!-- Tax Details -->
+											<div
+												v-if="showTaxDetails"
+												class="border-t border-gray-200 pt-4"
+											>
+												<div class="flex items-center justify-between mb-3">
+													<label
+														class="text-sm font-medium text-gray-700 text-start"
+														>{{ __("Tax Details") }}</label
+													>
+													<span
+														class="text-xs font-medium px-2 py-0.5 rounded-full"
+														:class="
+															taxDetails.inclusive
+																? 'bg-emerald-50 text-emerald-700'
+																: 'bg-sky-50 text-sky-700'
+														"
+													>
+														{{
+															taxDetails.inclusive
+																? __("Tax Inclusive")
+																: __("Tax Exclusive")
+														}}
+													</span>
+												</div>
+
+												<div
+													class="rounded-lg border border-gray-200 divide-y divide-gray-100"
+												>
+													<!-- HSN / Item Tax Template -->
+													<div class="px-3 py-2 flex flex-col gap-1">
+														<div
+															v-if="localItem.gst_hsn_code"
+															class="flex items-center justify-between text-sm"
+														>
+															<span class="text-gray-600">{{
+																__("HSN/SAC")
+															}}</span>
+															<span
+																class="font-medium text-gray-900 font-mono"
+																>{{ localItem.gst_hsn_code }}</span
+															>
+														</div>
+														<div
+															class="flex items-center justify-between text-sm gap-3"
+														>
+															<span class="text-gray-600 flex-shrink-0">{{
+																__("Tax Template")
+															}}</span>
+															<span
+																class="font-medium text-gray-900 truncate text-end"
+																:title="
+																	taxDetails.template ||
+																	__('POS Profile default')
+																"
+																>{{
+																	taxDetails.template ||
+																	__("POS Profile default")
+																}}</span
+															>
+														</div>
+														<div
+															class="flex items-center justify-between text-sm"
+														>
+															<span class="text-gray-600">{{
+																__("Total Tax Rate")
+															}}</span>
+															<span class="font-medium text-gray-900"
+																>{{ formatRate(taxDetails.rate) }}%</span
+															>
+														</div>
+													</div>
+
+													<!-- Per-account breakup: CGST 2.5% -> 0.36 etc. -->
+													<div
+														v-if="taxDetails.breakup.length"
+														class="px-3 py-2 flex flex-col gap-1"
+													>
+														<div
+															v-for="row in taxDetails.breakup"
+															:key="row.account_head"
+															class="flex items-center justify-between text-sm"
+														>
+															<span class="text-gray-600 truncate" :title="row.account_head">
+																{{ row.description }}
+																<span class="text-gray-400"
+																	>({{ formatRate(row.rate) }}%)</span
+																>
+															</span>
+															<span class="font-medium text-gray-900">{{
+																formatCurrency(row.amount)
+															}}</span>
+														</div>
+													</div>
+
+													<!-- Taxable value / tax total -->
+													<div class="px-3 py-2 flex flex-col gap-1">
+														<div
+															class="flex items-center justify-between text-sm"
+														>
+															<span class="text-gray-600">{{
+																__("Taxable Value")
+															}}</span>
+															<span class="font-medium text-gray-900">{{
+																formatCurrency(taxDetails.netAmount)
+															}}</span>
+														</div>
+														<div
+															class="flex items-center justify-between text-sm"
+														>
+															<span class="text-gray-600">{{
+																__("Total Tax")
+															}}</span>
+															<span class="font-medium text-gray-900">{{
+																formatCurrency(taxDetails.taxAmount)
+															}}</span>
+														</div>
+													</div>
+												</div>
+											</div>
+
 											<!-- Totals -->
 											<div
 												class="bg-gray-50 rounded-lg p-4 flex flex-col gap-2"
@@ -422,6 +543,35 @@
 															formatCurrency(calculatedDiscount)
 														}}</span
 													>
+												</div>
+												<div
+													v-if="showTaxDetails"
+													class="flex items-center justify-between text-sm"
+												>
+													<span class="text-gray-600">{{
+														__("Taxable Value:")
+													}}</span>
+													<span class="font-semibold text-gray-900">{{
+														formatCurrency(taxDetails.netAmount)
+													}}</span>
+												</div>
+												<div
+													v-if="showTaxDetails"
+													class="flex items-center justify-between text-sm"
+												>
+													<span class="text-gray-600">
+														{{ __("Tax") }}
+														<span class="text-gray-400"
+															>({{ formatRate(taxDetails.rate) }}%{{
+																taxDetails.inclusive
+																	? __(", incl.")
+																	: ""
+															}})</span
+														>:
+													</span>
+													<span class="font-semibold text-gray-900">{{
+														formatCurrency(taxDetails.taxAmount)
+													}}</span>
 												</div>
 												<div
 													class="flex items-center justify-between pt-2 border-t border-gray-200"
@@ -474,6 +624,7 @@
 
 <script setup>
 import { useToast } from "@/composables/useToast";
+import { usePOSCartStore } from "@/stores/posCart";
 import { usePOSSettingsStore } from "@/stores/posSettings";
 import { useSerialNumberStore } from "@/stores/serialNumber";
 import { getItemStock } from "@/utils/stockValidator";
@@ -489,6 +640,7 @@ import SelectInput from "@/components/common/SelectInput.vue";
 const { showSuccess, showError, showWarning } = useToast();
 const settingsStore = usePOSSettingsStore();
 const serialStore = useSerialNumberStore();
+const cartStore = usePOSCartStore();
 
 const props = defineProps({
 	modelValue: Boolean,
@@ -541,6 +693,35 @@ const availableUoms = computed(() => {
 });
 
 const currencySymbol = computed(() => getCurrencySymbol(props.currency));
+
+// Tax for this line at the rate/quantity/discount currently typed in the dialog.
+// Uses the cart's own calculation so the card can never show a different split
+// from the cart totals or from the invoice that gets saved.
+const taxDetails = computed(() => {
+	const empty = {
+		rate: 0,
+		template: null,
+		inclusive: false,
+		netAmount: 0,
+		taxAmount: 0,
+		grossAmount: 0,
+		breakup: [],
+	};
+	if (!localItem.value) return empty;
+
+	return (
+		cartStore.computeLineTax(
+			localItem.value,
+			calculatedSubtotal.value,
+			calculatedDiscount.value
+		) || empty
+	);
+});
+
+// Hide the whole section on tax-free setups (no tax rows on the POS Profile)
+const showTaxDetails = computed(
+	() => taxDetails.value.rate > 0 || taxDetails.value.breakup.length > 0
+);
 
 // Check if item has pricing rules applied (promotional offers)
 const hasPricingRules = computed(() => {
@@ -856,7 +1037,13 @@ function calculateDiscount() {
 		}
 		calculatedDiscount.value = roundCurrency(discountValue.value);
 	}
-	calculatedTotal.value = roundCurrency(calculatedSubtotal.value - calculatedDiscount.value);
+	// Tax-inclusive: the price already contains the tax, so this is subtotal - discount.
+	// Tax-exclusive: the line costs net + tax, which is what the cart adds up.
+	calculatedTotal.value = roundCurrency(
+		taxDetails.value.rate > 0
+			? taxDetails.value.grossAmount
+			: calculatedSubtotal.value - calculatedDiscount.value
+	);
 }
 
 function calculateTotals() {
@@ -879,6 +1066,14 @@ function removeSerial(serialNo) {
 
 function formatCurrency(amount) {
 	return formatCurrencyUtil(Number.parseFloat(amount || 0), props.currency);
+}
+
+/**
+ * Tax rates print as 5, 2.5, 18 — never 5.00 — matching the desk tax tables.
+ */
+function formatRate(rate) {
+	const value = Number.parseFloat(rate || 0);
+	return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(3)));
 }
 
 function updateItem() {
