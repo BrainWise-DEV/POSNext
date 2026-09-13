@@ -331,6 +331,57 @@
 			</div>
 		</template>
 	</Dialog>
+
+	<!-- In-app confirmation (replaces window.confirm) -->
+	<Dialog v-model="confirmVisible" :options="{ size: 'xs' }">
+		<template #body>
+			<div class="p-5">
+				<div class="flex items-start gap-3 mb-4">
+					<div
+						class="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 bg-amber-50 border border-amber-200"
+					>
+						<svg
+							class="w-5 h-5 text-amber-500"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							viewBox="0 0 24 24"
+						>
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"
+							/>
+						</svg>
+					</div>
+					<div class="min-w-0">
+						<h3 class="text-sm font-semibold text-gray-900">
+							{{ confirmTitle }}
+						</h3>
+						<p class="text-sm text-gray-500 mt-1 leading-relaxed">
+							{{ confirmMessage }}
+						</p>
+					</div>
+				</div>
+				<div class="flex gap-2.5 justify-end">
+					<button
+						type="button"
+						class="px-4 py-1.5 rounded-lg border border-gray-300 text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 active:bg-gray-100 transition-colors"
+						@click="resolveConfirm(false)"
+					>
+						{{ __("Cancel") }}
+					</button>
+					<button
+						type="button"
+						class="px-4 py-1.5 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 transition-colors"
+						@click="resolveConfirm(true)"
+					>
+						{{ confirmActionLabel }}
+					</button>
+				</div>
+			</div>
+		</template>
+	</Dialog>
 </template>
 
 <script setup>
@@ -385,6 +436,37 @@ const emit = defineEmits(["update:modelValue", "expense-created", "expense-cance
 const { showSuccess, showWarning, showError } = useToast()
 const { isOffline } = useOfflineStatus()
 const offlineStore = usePOSSyncStore()
+
+const confirmVisible = ref(false)
+const confirmTitle = ref("")
+const confirmMessage = ref("")
+const confirmActionLabel = ref(__("Confirm"))
+let confirmResolve = null
+
+function showConfirm({ title, message, actionLabel }) {
+	return new Promise((resolve) => {
+		confirmTitle.value = title
+		confirmMessage.value = message
+		confirmActionLabel.value = actionLabel || __("Confirm")
+		confirmResolve = resolve
+		confirmVisible.value = true
+	})
+}
+
+function resolveConfirm(result) {
+	const resolve = confirmResolve
+	confirmResolve = null
+	confirmVisible.value = false
+	if (resolve) resolve(result)
+}
+
+watch(confirmVisible, (visible) => {
+	if (!visible && confirmResolve) {
+		const resolve = confirmResolve
+		confirmResolve = null
+		resolve(false)
+	}
+})
 
 /** Prefer dialog API company_currency; then prop / shiftStore (Company.default_currency); never profile selling currency alone. */
 const currency = computed(
@@ -749,7 +831,14 @@ async function deletePendingExpense(row) {
 		)
 		return
 	}
-	if (!window.confirm(__("Delete this unsynced offline expense? It will not be sent to the server."))) {
+	const confirmed = await showConfirm({
+		title: __("Delete Offline Expense"),
+		message: __(
+			"Delete this unsynced offline expense? It will not be sent to the server.",
+		),
+		actionLabel: __("Delete"),
+	})
+	if (!confirmed) {
 		return
 	}
 	isBusy.value = true
@@ -766,14 +855,15 @@ async function deletePendingExpense(row) {
 
 async function discardPendingAttachments(row) {
 	if (isBusy.value || !row?.id || !row.server_journal_entry) return
-	if (
-		!window.confirm(
-			__(
-				"Keep Journal Entry {0} and discard remaining queued attachments?",
-				{ 0: row.server_journal_entry },
-			),
-		)
-	) {
+	const confirmed = await showConfirm({
+		title: __("Discard Attachments"),
+		message: __(
+			"Keep Journal Entry {0} and discard remaining queued attachments?",
+			{ 0: row.server_journal_entry },
+		),
+		actionLabel: __("Discard files"),
+	})
+	if (!confirmed) {
 		return
 	}
 	isBusy.value = true
@@ -1203,7 +1293,7 @@ async function cancelExpense(expense) {
 
 	const journalEntry = expense?.journal_entry || expense
 	const amountLabel = expense?.amount != null ? formatCurrency(expense.amount) : ""
-	const confirmMessage = amountLabel
+	const message = amountLabel
 		? __(
 				"Cancel expense {0} ({1})? This reverses the journal entry and cannot be undone from POS.",
 				{ 0: journalEntry, 1: amountLabel },
@@ -1213,7 +1303,12 @@ async function cancelExpense(expense) {
 				{ 0: journalEntry },
 			)
 
-	if (!window.confirm(confirmMessage)) {
+	const confirmed = await showConfirm({
+		title: __("Cancel Expense"),
+		message,
+		actionLabel: __("Cancel Expense"),
+	})
+	if (!confirmed) {
 		return
 	}
 
