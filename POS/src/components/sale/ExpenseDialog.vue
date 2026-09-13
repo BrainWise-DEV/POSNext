@@ -520,7 +520,11 @@ import { usePOSShiftStore } from "@/stores/posShift"
 import { usePOSSyncStore } from "@/stores/posSync"
 import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency"
 import { parseError } from "@/utils/errorHandler"
-import { cacheExpenseDialogData, getExpenseDialogCache } from "@/utils/offline"
+import {
+	cacheExpenseDialogData,
+	generateOfflineExpenseId,
+	getExpenseDialogCache,
+} from "@/utils/offline"
 import { translationVersion } from "@/utils/translation"
 import { Dialog, FeatherIcon, createResource } from "frappe-ui"
 import { computed, onUnmounted, reactive, ref, watch } from "vue"
@@ -635,6 +639,8 @@ const fileInput = ref(null)
 const offlineDialogCache = ref(null)
 const pendingExpenses = ref([])
 const dialogLoading = ref(false)
+/** Idempotency key for online submit; reminted only when the form is cleared for a new fill. */
+const currentOfflineId = ref(generateOfflineExpenseId())
 let accountSearchTimer = null
 
 const open = computed({
@@ -781,6 +787,7 @@ const submitResource = createResource({
 			mode_of_payment: form.mode_of_payment,
 			employee: null,
 			remarks: (form.remarks || "").trim() || null,
+			offline_id: currentOfflineId.value,
 		}
 	},
 	auto: false,
@@ -942,12 +949,8 @@ const expensesThisShiftTotal = computed(() => {
 
 async function refreshPendingExpenses() {
 	try {
-		const rows = await offlineStore.loadPendingExpenses()
-		pendingExpenses.value = (rows || []).filter(
-			(row) =>
-				!row.data?.pos_opening_shift ||
-				row.data.pos_opening_shift === props.posOpeningShift,
-		)
+		// Show all unsynced rows (any shift) so stranded expenses remain deletable.
+		pendingExpenses.value = (await offlineStore.loadPendingExpenses()) || []
 	} catch {
 		pendingExpenses.value = []
 	}
@@ -1092,6 +1095,8 @@ function clearExpenseFields() {
 	form.amount = ""
 	form.mode_of_payment = ""
 	form.remarks = ""
+	// New form fill → new idempotency key (do not remint on submit error/retry).
+	currentOfflineId.value = generateOfflineExpenseId()
 }
 
 function clearSelectedFiles() {

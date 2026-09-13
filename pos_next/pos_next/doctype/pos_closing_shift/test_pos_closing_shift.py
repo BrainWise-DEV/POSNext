@@ -345,9 +345,7 @@ class TestClosingShiftExpenseAggregation(FrappeTestCase):
 				"company": self.COMPANY,
 				"pos_profile": self.PROFILE,
 				"user": frappe.session.user,
-				"balance_details": [
-					{"mode_of_payment": self.MODE_OF_PAYMENT, "amount": self.OPENING_AMOUNT}
-				],
+				"balance_details": [{"mode_of_payment": self.MODE_OF_PAYMENT, "amount": self.OPENING_AMOUNT}],
 			}
 		)
 		shift.insert()
@@ -375,7 +373,9 @@ class TestClosingShiftExpenseAggregation(FrappeTestCase):
 		return make_closing_shift_from_opening(opening_json)
 
 	def _cash_row(self, closing):
-		return next(p for p in closing["payment_reconciliation"] if p["mode_of_payment"] == self.MODE_OF_PAYMENT)
+		return next(
+			p for p in closing["payment_reconciliation"] if p["mode_of_payment"] == self.MODE_OF_PAYMENT
+		)
 
 	def test_expenses_reduce_expected_and_drive_totals(self):
 		"""Submitted expenses land in pos_expenses, total_pos_expenses, and expected cash."""
@@ -407,7 +407,9 @@ class TestClosingShiftExpenseAggregation(FrappeTestCase):
 		# Sanity: expense is present before cancel.
 		before = self._closing_from(shift)
 		self.assertEqual(flt(before["total_pos_expenses"]), self.EXPENSE_AMOUNT)
-		self.assertEqual(flt(self._cash_row(before)["expected_amount"]), self.OPENING_AMOUNT - self.EXPENSE_AMOUNT)
+		self.assertEqual(
+			flt(self._cash_row(before)["expected_amount"]), self.OPENING_AMOUNT - self.EXPENSE_AMOUNT
+		)
 
 		frappe.get_doc("Journal Entry", je_name).cancel()
 

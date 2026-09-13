@@ -7,13 +7,13 @@ Records expenses from active POS shifts as submitted Journal Entries.
 
 Permission note
 ---------------
-Cashiers typically lack Employee / Account read permissions. get_active_employees
-and get_expense_accounts therefore use ignore_permissions=True after the caller
-has proven an open shift they own (via validate_open_shift). That is an intentional
-trade-off: HR and chart data are scoped to the shift's company and capped, but
-still visible at the till. The same pattern applies to Journal Entry insert/cancel
-and File attach for POS expenses (cashiers usually lack JE write). Revisit if a
-narrower Employee/Account/Journal Entry role is introduced.
+Cashiers typically lack Account read permissions. get_expense_accounts therefore
+uses ignore_permissions=True after the caller has proven an open shift they own
+(via validate_open_shift). That is an intentional trade-off: chart data is scoped
+to the shift's company and capped, but still visible at the till. The same pattern
+applies to Journal Entry insert/cancel and File attach for POS expenses (cashiers
+usually lack JE write). Revisit if a narrower Account/Journal Entry role is
+introduced.
 """
 
 import frappe
@@ -21,7 +21,6 @@ from frappe import _
 from frappe.utils import cint, cstr, flt, getdate, today
 
 EXPENSE_ACCOUNT_PAGE_LENGTH = 50
-EMPLOYEE_PAGE_LENGTH = 200
 
 
 @frappe.whitelist()
@@ -46,7 +45,6 @@ def get_expense_dialog_data(pos_profile, pos_opening_shift):
 	return {
 		"expense_accounts": get_expense_accounts(company, pos_profile=pos_profile),
 		"payment_methods": get_cash_payment_methods(pos_profile),
-		"employees": get_active_employees(company),
 		"expenses": get_pos_expenses(pos_opening_shift),
 		"company_currency": company_currency,
 		"maximum_expense_amount": maximum_expense_amount,
@@ -219,9 +217,7 @@ def _mark_offline_expense_sync_cancelled(journal_entry):
 	"""Mark the Offline Expense Sync row for a cancelled JE so retries cannot recreate it."""
 	if not journal_entry:
 		return
-	sync_name = frappe.db.get_value(
-		"Offline Expense Sync", {"journal_entry": journal_entry}, "name"
-	)
+	sync_name = frappe.db.get_value("Offline Expense Sync", {"journal_entry": journal_entry}, "name")
 	if not sync_name:
 		return
 	try:
@@ -255,9 +251,7 @@ def _ensure_offline_expense_uniqueness(offline_id, pos_profile=None, pos_opening
 
 		if sync_status == "Pending":
 			# If a JE was linked before status flipped (partial write), return it.
-			if existing_sync.journal_entry and frappe.db.exists(
-				"Journal Entry", existing_sync.journal_entry
-			):
+			if existing_sync.journal_entry and frappe.db.exists("Journal Entry", existing_sync.journal_entry):
 				je = frappe.get_doc("Journal Entry", existing_sync.journal_entry)
 				if je.docstatus == 1:
 					_complete_offline_expense_sync(sync_record_name, je.name)
@@ -314,9 +308,7 @@ def _ensure_offline_expense_uniqueness(offline_id, pos_profile=None, pos_opening
 		pending_sync.insert()
 		return {"already_synced": False, "sync_record_name": pending_sync.name}
 	except frappe.DuplicateEntryError:
-		return _ensure_offline_expense_uniqueness(
-			offline_id, pos_profile, pos_opening_shift
-		)
+		return _ensure_offline_expense_uniqueness(offline_id, pos_profile, pos_opening_shift)
 
 
 def _complete_offline_expense_sync(sync_record_name, journal_entry_name):
@@ -496,9 +488,7 @@ def _read_uploaded_file_capped(stream, chunk_size=1024 * 1024):
 	content_length = frappe.get_request_header("Content-Length")
 	if content_length and cint(content_length) > max_size:
 		frappe.throw(
-			_("File size exceeded the maximum allowed size of {0} MB").format(
-				max_size / 1048576
-			),
+			_("File size exceeded the maximum allowed size of {0} MB").format(max_size / 1048576),
 			title=_("File Too Large"),
 		)
 
@@ -511,9 +501,7 @@ def _read_uploaded_file_capped(stream, chunk_size=1024 * 1024):
 		total += len(chunk)
 		if total > max_size:
 			frappe.throw(
-				_("File size exceeded the maximum allowed size of {0} MB").format(
-					max_size / 1048576
-				),
+				_("File size exceeded the maximum allowed size of {0} MB").format(max_size / 1048576),
 				title=_("File Too Large"),
 			)
 		chunks.append(chunk)
@@ -625,9 +613,7 @@ def validate_expense_amount(amount, pos_profile, pos_opening_shift=None):
 
 	company_currency = None
 	if profile and profile.company:
-		company_currency = frappe.get_cached_value(
-			"Company", profile.company, "default_currency"
-		)
+		company_currency = frappe.get_cached_value("Company", profile.company, "default_currency")
 
 	# Lock the opening shift so concurrent create_pos_expense calls serialize:
 	# both would otherwise read the same SUM, pass the limit, and both commit.
@@ -755,9 +741,7 @@ def get_pos_expense_cancel_permissions(pos_profile):
 	dialog: every shift owner sees Cancel, and cancel-time still enforces JE owner
 	(or Journal Entry Cancel permission). Configure Cancel Roles to restrict further.
 	"""
-	allow_cancel = cint(
-		frappe.db.get_value("POS Profile", pos_profile, "posa_allow_cancel_pos_expense")
-	)
+	allow_cancel = cint(frappe.db.get_value("POS Profile", pos_profile, "posa_allow_cancel_pos_expense"))
 	if not allow_cancel:
 		return {"allow_cancel": 0, "can_cancel": 0}
 
@@ -881,28 +865,6 @@ def get_cash_payment_methods(pos_profile):
 
 	methods = get_payment_methods(pos_profile) or []
 	return [method for method in methods if (method.get("account_type") or "") == "Cash"]
-
-
-def get_active_employees(company):
-	"""Return active employees for the expense dialog.
-
-	Intentional permission bypass: POS cashiers may lack Employee read permission.
-	Only Active employees for the shift company are returned, capped at
-	EMPLOYEE_PAGE_LENGTH. See module docstring.
-	"""
-	filters = {"status": "Active"}
-	if company:
-		filters["company"] = company
-
-	return frappe.get_all(
-		"Employee",
-		filters=filters,
-		fields=["name", "employee_name"],
-		order_by="employee_name asc",
-		limit_page_length=EMPLOYEE_PAGE_LENGTH,
-		# Cashiers often cannot read Employee; gated by open-shift ownership upstream.
-		ignore_permissions=True,
-	)
 
 
 def validate_employee(employee, company):
@@ -1067,9 +1029,7 @@ def _create_expense_journal_entry(
 	posting_date = _shift_posting_date(period_start_date)
 	base_amount = flt(amount)
 
-	expense_amounts = _account_row_amounts(
-		expense_account, base_amount, company, posting_date, is_debit=True
-	)
+	expense_amounts = _account_row_amounts(expense_account, base_amount, company, posting_date, is_debit=True)
 	payment_amounts = _account_row_amounts(
 		payment_account, base_amount, company, posting_date, is_debit=False
 	)
@@ -1170,3 +1130,37 @@ def get_pos_expenses(pos_opening_shift):
 		)
 		for expense in expenses
 	]
+
+
+# Roles that already have broad Journal Entry desk access — do not further restrict them.
+_JE_BROADER_ROLES = frozenset(
+	{
+		"System Manager",
+		"Accounts Manager",
+		"Accounts User",
+		"Auditor",
+	}
+)
+
+
+def get_journal_entry_permission_query_conditions(user=None):
+	"""Limit Nexus POS Manager JE lists to POS expenses (posa_is_pos_expense = 1).
+
+	The Custom DocPerm fixture grants Nexus POS Manager read/report/print/export
+	on Journal Entry so the POS Expense Report can run. Without this filter that
+	grant would expose the full general ledger.
+	"""
+	if not user:
+		user = frappe.session.user
+
+	if user == "Administrator":
+		return None
+
+	roles = set(frappe.get_roles(user))
+	if "Nexus POS Manager" not in roles:
+		return None
+
+	if roles & _JE_BROADER_ROLES:
+		return None
+
+	return "`tabJournal Entry`.`posa_is_pos_expense` = 1"

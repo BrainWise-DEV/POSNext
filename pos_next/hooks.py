@@ -263,6 +263,12 @@ scheduler_events = {
 # Authentication and authorization
 # --------------------------------
 
+# Restrict Nexus POS Manager Journal Entry desk/report access to POS expenses only.
+# Broader accounting roles are left unrestricted (see get_journal_entry_permission_query_conditions).
+permission_query_conditions = {
+	"Journal Entry": "pos_next.api.expenses.get_journal_entry_permission_query_conditions",
+}
+
 # auth_hooks = [
 # 	"pos_next.auth.validate"
 # ]

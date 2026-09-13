@@ -29,18 +29,14 @@ def _raise_runtime_error(message, *args, **kwargs):
 class TestPOSExpenses(unittest.TestCase):
 	@patch("pos_next.api.expenses.frappe.throw", side_effect=_raise_runtime_error)
 	@patch("pos_next.api.expenses.frappe.db.get_value", return_value=0)
-	def test_validate_pos_expense_enabled_rejects_disabled_profile(
-		self, _mock_get_value, _mock_throw
-	):
+	def test_validate_pos_expense_enabled_rejects_disabled_profile(self, _mock_get_value, _mock_throw):
 		with self.assertRaisesRegex(RuntimeError, "POS Expense is not enabled"):
 			expenses.validate_pos_expense_enabled("Test POS Profile")
 
 	@patch("pos_next.api.expenses.frappe.throw", side_effect=_raise_runtime_error)
 	@patch("pos_next.api.expenses.frappe.db.get_value")
 	@patch("pos_next.api.expenses.frappe.session")
-	def test_validate_open_shift_rejects_closed_shift(
-		self, mock_session, mock_get_value, _mock_throw
-	):
+	def test_validate_open_shift_rejects_closed_shift(self, mock_session, mock_get_value, _mock_throw):
 		mock_session.user = "test@example.com"
 		mock_get_value.return_value = SimpleNamespace(
 			name="POS-OS-0001",
@@ -58,9 +54,7 @@ class TestPOSExpenses(unittest.TestCase):
 	@patch("pos_next.api.expenses.frappe.throw", side_effect=_raise_runtime_error)
 	@patch("pos_next.api.expenses.frappe.db.get_value")
 	@patch("pos_next.api.expenses.frappe.session")
-	def test_validate_open_shift_rejects_other_user(
-		self, mock_session, mock_get_value, _mock_throw
-	):
+	def test_validate_open_shift_rejects_other_user(self, mock_session, mock_get_value, _mock_throw):
 		mock_session.user = "other@example.com"
 		mock_get_value.return_value = SimpleNamespace(
 			name="POS-OS-0001",
@@ -85,12 +79,8 @@ class TestPOSExpenses(unittest.TestCase):
 
 	@patch("pos_next.api.expenses.frappe.throw", side_effect=_raise_runtime_error)
 	@patch("pos_next.api.expenses.frappe.db.get_value")
-	def test_validate_expense_amount_rejects_unconfigured_limit(
-		self, mock_get_value, _mock_throw
-	):
-		mock_get_value.return_value = SimpleNamespace(
-			posa_maximum_expense_amount=0, company="Test Company"
-		)
+	def test_validate_expense_amount_rejects_unconfigured_limit(self, mock_get_value, _mock_throw):
+		mock_get_value.return_value = SimpleNamespace(posa_maximum_expense_amount=0, company="Test Company")
 
 		with self.assertRaisesRegex(RuntimeError, "not configured"):
 			expenses.validate_expense_amount(50, "Test POS Profile")
@@ -103,9 +93,7 @@ class TestPOSExpenses(unittest.TestCase):
 	def test_validate_expense_amount_rejects_over_shift_limit(
 		self, mock_get_value, _mock_cached, _mock_shift_total, _mock_format, _mock_throw
 	):
-		mock_get_value.return_value = SimpleNamespace(
-			posa_maximum_expense_amount=100, company="Test Company"
-		)
+		mock_get_value.return_value = SimpleNamespace(posa_maximum_expense_amount=100, company="Test Company")
 
 		with self.assertRaisesRegex(RuntimeError, "shift expense limit"):
 			expenses.validate_expense_amount(150, "Test POS Profile", "POS-OS-0001")
@@ -118,9 +106,7 @@ class TestPOSExpenses(unittest.TestCase):
 	def test_validate_expense_amount_rejects_when_cumulative_exceeds_limit(
 		self, mock_get_value, _mock_cached, _mock_shift_total, _mock_format, _mock_throw
 	):
-		mock_get_value.return_value = SimpleNamespace(
-			posa_maximum_expense_amount=100, company="Test Company"
-		)
+		mock_get_value.return_value = SimpleNamespace(posa_maximum_expense_amount=100, company="Test Company")
 
 		with self.assertRaisesRegex(RuntimeError, "shift expense limit"):
 			expenses.validate_expense_amount(30, "Test POS Profile", "POS-OS-0001")
@@ -175,7 +161,6 @@ class TestPOSExpenses(unittest.TestCase):
 		self.assertEqual(expenses._get_remaining_shift_expense_amount(0, 50), 0)
 
 	@patch("pos_next.api.expenses.get_pos_expenses", return_value=[])
-	@patch("pos_next.api.expenses.get_active_employees", return_value=[])
 	@patch("pos_next.api.expenses.get_cash_payment_methods", return_value=[])
 	@patch("pos_next.api.expenses.get_expense_accounts", return_value=[])
 	@patch("pos_next.api.expenses.get_shift_expense_total", return_value=25)
@@ -199,7 +184,6 @@ class TestPOSExpenses(unittest.TestCase):
 		_mock_shift_total,
 		_mock_accounts,
 		_mock_methods,
-		_mock_employees,
 		_mock_expenses,
 	):
 		"""Dialog amounts share Company.default_currency with JE booking (not profile currency)."""
@@ -214,10 +198,10 @@ class TestPOSExpenses(unittest.TestCase):
 		self.assertEqual(data["allow_cancel"], 1)
 		self.assertEqual(data["can_cancel"], 1)
 		self.assertEqual(data["max_file_size"], 10485760)
+		self.assertNotIn("employees", data)
 		_mock_cached.assert_called_once_with("Company", "Test Company", "default_currency")
-		_mock_accounts.assert_called_once_with(
-			"Test Company", pos_profile="Test POS Profile"
-		)
+		_mock_accounts.assert_called_once_with("Test Company", pos_profile="Test POS Profile")
+
 	@patch("pos_next.api.expenses.frappe.throw", side_effect=_raise_runtime_error)
 	@patch("pos_next.api.expenses.frappe.db.get_value")
 	def test_validate_expense_account_rejects_non_expense(self, mock_get_value, _mock_throw):
@@ -261,9 +245,7 @@ class TestPOSExpenses(unittest.TestCase):
 		return_value=["Travel Expenses - TC"],
 	)
 	@patch("pos_next.api.expenses.frappe.db.get_value")
-	def test_validate_expense_account_allows_whitelisted(
-		self, mock_get_value, _mock_allowed
-	):
+	def test_validate_expense_account_allows_whitelisted(self, mock_get_value, _mock_allowed):
 		mock_get_value.return_value = SimpleNamespace(
 			name="Travel Expenses - TC",
 			company="Test Company",
@@ -282,9 +264,7 @@ class TestPOSExpenses(unittest.TestCase):
 		return_value=["Travel Expenses - TC"],
 	)
 	def test_get_expense_accounts_applies_whitelist(self, _mock_allowed, mock_sql):
-		expenses.get_expense_accounts(
-			"Test Company", pos_profile="Test POS Profile", txt="Travel"
-		)
+		expenses.get_expense_accounts("Test Company", pos_profile="Test POS Profile", txt="Travel")
 		params = mock_sql.call_args.args[1]
 		self.assertEqual(params["allowed"], ("Travel Expenses - TC",))
 		self.assertIn("AND name IN %(allowed)s", mock_sql.call_args.args[0])
@@ -295,9 +275,7 @@ class TestPOSExpenses(unittest.TestCase):
 	def test_validate_mode_of_payment_requires_payment_account(
 		self, _mock_throw, _mock_get_all, mock_resolve
 	):
-		mock_resolve.side_effect = RuntimeError(
-			"Please set default Cash account in Mode of Payment Cash"
-		)
+		mock_resolve.side_effect = RuntimeError("Please set default Cash account in Mode of Payment Cash")
 		with self.assertRaisesRegex(RuntimeError, "Please set default Cash account"):
 			expenses.validate_mode_of_payment("Cash", "Test POS Profile", "Test Company")
 
@@ -332,9 +310,7 @@ class TestPOSExpenses(unittest.TestCase):
 
 	@patch("pos_next.api.expenses.frappe.throw", side_effect=_raise_runtime_error)
 	@patch("pos_next.api.expenses.frappe.db.get_value", return_value=None)
-	def test_resolve_payment_account_throws_informative_error(
-		self, _mock_get_value, _mock_throw
-	):
+	def test_resolve_payment_account_throws_informative_error(self, _mock_get_value, _mock_throw):
 		with self.assertRaisesRegex(RuntimeError, "Please set default Cash account"):
 			expenses._resolve_payment_account("Cash", "Test Company")
 
@@ -355,24 +331,9 @@ class TestPOSExpenses(unittest.TestCase):
 	@patch("pos_next.api.expenses.frappe.db.get_value")
 	@patch("pos_next.api.expenses.frappe.db.exists", return_value=False)
 	@patch("pos_next.api.expenses.frappe.throw", side_effect=_raise_runtime_error)
-	def test_validate_employee_rejects_missing_employee(
-		self, _mock_throw, _mock_exists, _mock_get_value
-	):
+	def test_validate_employee_rejects_missing_employee(self, _mock_throw, _mock_exists, _mock_get_value):
 		with self.assertRaisesRegex(RuntimeError, "does not exist"):
 			expenses.validate_employee("EMP-0001", "Test Company")
-
-	@patch("pos_next.api.expenses.frappe.get_all")
-	def test_get_active_employees_scoped_to_company(self, mock_get_all):
-		"""Company scope and a finite page cap — not a full get_all kwarg snapshot."""
-		mock_get_all.return_value = [{"name": "EMP-0001", "employee_name": "John Doe"}]
-
-		result = expenses.get_active_employees("Test Company")
-
-		self.assertEqual(result[0]["name"], "EMP-0001")
-		kwargs = mock_get_all.call_args.kwargs
-		self.assertEqual(kwargs["filters"]["company"], "Test Company")
-		self.assertEqual(kwargs["filters"]["status"], "Active")
-		self.assertGreater(kwargs["limit_page_length"], 0)
 
 	@patch("pos_next.api.expenses.frappe.get_all")
 	def test_get_expense_accounts_is_capped(self, mock_get_all):
@@ -482,15 +443,11 @@ class TestPOSExpenses(unittest.TestCase):
 		mock_doc.cancel = unittest.mock.Mock()
 		mock_get_doc.return_value = mock_doc
 
-		result = expenses.cancel_pos_expense(
-			"ACC-JV-0001", "POS-OS-0001", "Test POS Profile"
-		)
+		result = expenses.cancel_pos_expense("ACC-JV-0001", "POS-OS-0001", "Test POS Profile")
 
 		self.assertEqual(result["journal_entry"], "ACC-JV-0001")
 		mock_doc.cancel.assert_called_once()
-		mock_validate_cancel.assert_called_once_with(
-			"Test POS Profile", "cashier@example.com", "ACC-JV-0001"
-		)
+		mock_validate_cancel.assert_called_once_with("Test POS Profile", "cashier@example.com", "ACC-JV-0001")
 		mock_mark_cancelled.assert_called_once_with("ACC-JV-0001")
 
 	@patch("pos_next.api.expenses.frappe.throw", side_effect=_raise_runtime_error)
@@ -504,9 +461,7 @@ class TestPOSExpenses(unittest.TestCase):
 	@patch("pos_next.api.expenses.frappe.throw", side_effect=_raise_runtime_error)
 	@patch("frappe.core.api.file.get_max_file_size", return_value=10)
 	@patch("pos_next.api.expenses.frappe.get_request_header", return_value=None)
-	def test_read_uploaded_file_capped_rejects_oversized(
-		self, _mock_header, _mock_max, _mock_throw
-	):
+	def test_read_uploaded_file_capped_rejects_oversized(self, _mock_header, _mock_max, _mock_throw):
 		stream = SimpleNamespace(read=unittest.mock.Mock(side_effect=[b"0123456789AB", b""]))
 		with self.assertRaisesRegex(RuntimeError, "File size exceeded"):
 			expenses._read_uploaded_file_capped(stream, chunk_size=4)
@@ -524,9 +479,7 @@ class TestPOSExpenses(unittest.TestCase):
 		return_value=[],
 	)
 	@patch("pos_next.api.expenses.frappe.db.get_value", return_value=1)
-	def test_get_pos_expense_cancel_permissions_empty_roles_allows_dialog(
-		self, _mock_get_value, _mock_roles
-	):
+	def test_get_pos_expense_cancel_permissions_empty_roles_allows_dialog(self, _mock_get_value, _mock_roles):
 		perms = expenses.get_pos_expense_cancel_permissions("Test POS Profile")
 		self.assertEqual(perms, {"allow_cancel": 1, "can_cancel": 1})
 
@@ -585,9 +538,7 @@ class TestPOSExpenses(unittest.TestCase):
 			owner="cashier@example.com",
 		)
 		with self.assertRaisesRegex(RuntimeError, "not a POS expense"):
-			expenses.attach_pos_expense_file(
-				"ACC-JV-0001", "POS-OS-0001", "Test POS Profile"
-			)
+			expenses.attach_pos_expense_file("ACC-JV-0001", "POS-OS-0001", "Test POS Profile")
 
 	@patch("pos_next.api.expenses.frappe.throw", side_effect=_raise_runtime_error)
 	@patch("pos_next.api.expenses.validate_open_shift")
@@ -598,18 +549,14 @@ class TestPOSExpenses(unittest.TestCase):
 	):
 		frappe.local.request = SimpleNamespace(files={})
 		with self.assertRaisesRegex(RuntimeError, "File is required"):
-			expenses.attach_pos_expense_file(
-				"ACC-JV-0001", "POS-OS-0001", "Test POS Profile"
-			)
+			expenses.attach_pos_expense_file("ACC-JV-0001", "POS-OS-0001", "Test POS Profile")
 
 	@patch("pos_next.api.expenses.frappe.throw", side_effect=_raise_runtime_error)
 	@patch(
 		"pos_next.api.expenses.get_pos_expense_cancel_permissions",
 		return_value={"allow_cancel": 0, "can_cancel": 0},
 	)
-	def test_validate_pos_expense_cancel_permission_requires_allow_cancel(
-		self, _mock_perms, _mock_throw
-	):
+	def test_validate_pos_expense_cancel_permission_requires_allow_cancel(self, _mock_perms, _mock_throw):
 		with self.assertRaisesRegex(RuntimeError, "not allowed for this POS Profile"):
 			expenses.validate_pos_expense_cancel_permission(
 				"Test POS Profile", "cashier@example.com", "ACC-JV-0001"
@@ -692,9 +639,7 @@ class TestPOSExpenses(unittest.TestCase):
 		]
 
 		with patch("pos_next.api.expenses.frappe.get_all") as mock_get_all:
-			mock_get_all.return_value = [
-				SimpleNamespace(name="cashier@example.com", full_name="Cashier One")
-			]
+			mock_get_all.return_value = [SimpleNamespace(name="cashier@example.com", full_name="Cashier One")]
 			result = expenses.get_pos_expenses("POS-OS-0001")
 
 		self.assertEqual(result[0].journal_entry, "ACC-JV-0001")
@@ -705,6 +650,26 @@ class TestPOSExpenses(unittest.TestCase):
 		self.assertIn("SUM(jea.credit)", sql)
 		self.assertIn("je.owner", sql)
 		self.assertNotIn("posa_expense_amount", sql)
+
+	@patch("pos_next.api.expenses.frappe.get_roles")
+	def test_je_permission_query_restricts_nexus_pos_manager(self, mock_get_roles):
+		mock_get_roles.return_value = ["Nexus POS Manager", "Nexus POS User"]
+		condition = expenses.get_journal_entry_permission_query_conditions("manager@example.com")
+		self.assertEqual(condition, "`tabJournal Entry`.`posa_is_pos_expense` = 1")
+
+	@patch("pos_next.api.expenses.frappe.get_roles")
+	def test_je_permission_query_skips_accounts_manager(self, mock_get_roles):
+		mock_get_roles.return_value = ["Nexus POS Manager", "Accounts Manager"]
+		self.assertIsNone(expenses.get_journal_entry_permission_query_conditions("accounts@example.com"))
+
+	def test_je_permission_query_skips_administrator(self):
+		self.assertIsNone(expenses.get_journal_entry_permission_query_conditions("Administrator"))
+
+	@patch("pos_next.api.expenses.frappe.get_roles")
+	def test_je_permission_query_skips_users_without_nexus_role(self, mock_get_roles):
+		mock_get_roles.return_value = ["Nexus POS User"]
+		self.assertIsNone(expenses.get_journal_entry_permission_query_conditions("cashier@example.com"))
+
 
 class TestPOSExpenseJournalEntry(FrappeTestCase):
 	"""Real Journal Entry insert/submit for the POS expense builder.
@@ -743,9 +708,7 @@ class TestPOSExpenseJournalEntry(FrappeTestCase):
 				"company": self.COMPANY,
 				"pos_profile": self.PROFILE,
 				"user": frappe.session.user,
-				"balance_details": [
-					{"mode_of_payment": self.MODE_OF_PAYMENT, "amount": 0}
-				],
+				"balance_details": [{"mode_of_payment": self.MODE_OF_PAYMENT, "amount": 0}],
 			}
 		)
 		shift.insert()
@@ -928,9 +891,7 @@ class TestOfflineExpenseDedup(unittest.TestCase):
 
 	@patch("pos_next.api.expenses._create_expense_journal_entry")
 	@patch("pos_next.api.expenses._ensure_offline_expense_uniqueness")
-	def test_create_with_duplicate_offline_id_returns_existing_je(
-		self, mock_ensure, mock_create
-	):
+	def test_create_with_duplicate_offline_id_returns_existing_je(self, mock_ensure, mock_create):
 		mock_ensure.return_value = {
 			"already_synced": True,
 			"expense_data": {
@@ -1006,9 +967,7 @@ class TestOfflineExpenseDedup(unittest.TestCase):
 	@patch("pos_next.api.expenses.frappe.get_doc")
 	@patch("pos_next.api.expenses.frappe.db.exists", return_value=True)
 	@patch("pos_next.api.expenses.frappe.db.get_value")
-	def test_cancelled_status_is_terminal(
-		self, mock_get_value, _mock_exists, mock_get_doc
-	):
+	def test_cancelled_status_is_terminal(self, mock_get_value, _mock_exists, mock_get_doc):
 		mock_get_value.return_value = frappe._dict(
 			name="OES-CANCELLED",
 			journal_entry="ACC-JV-CANCELLED",
@@ -1030,9 +989,7 @@ class TestOfflineExpenseDedup(unittest.TestCase):
 		self.assertTrue(result["already_synced"])
 		self.assertTrue(result["expense_data"]["cancelled"])
 
-	@patch(
-		"pos_next.pos_next.doctype.offline_expense_sync.offline_expense_sync.OfflineExpenseSync.is_synced"
-	)
+	@patch("pos_next.pos_next.doctype.offline_expense_sync.offline_expense_sync.OfflineExpenseSync.is_synced")
 	@patch("pos_next.api.expenses.frappe.db.exists", return_value=True)
 	@patch("pos_next.api.expenses.frappe.db.get_value", return_value=2)
 	def test_check_offline_expense_synced_cancelled_is_terminal(
@@ -1124,9 +1081,7 @@ class TestOfflineExpenseDedup(unittest.TestCase):
 
 		mock_cleanup.assert_called_once_with("OES-ACCT")
 
-	@patch(
-		"pos_next.pos_next.doctype.offline_expense_sync.offline_expense_sync.OfflineExpenseSync.is_synced"
-	)
+	@patch("pos_next.pos_next.doctype.offline_expense_sync.offline_expense_sync.OfflineExpenseSync.is_synced")
 	@patch("pos_next.api.expenses.frappe.db.exists", return_value=True)
 	@patch("pos_next.api.expenses.frappe.db.get_value", return_value=1)
 	def test_check_offline_expense_synced_true(self, _mock_get, _mock_exists, mock_is_synced):
@@ -1139,9 +1094,7 @@ class TestOfflineExpenseDedup(unittest.TestCase):
 		self.assertTrue(result["synced"])
 		self.assertEqual(result["journal_entry"], "ACC-JV-1")
 
-	@patch(
-		"pos_next.pos_next.doctype.offline_expense_sync.offline_expense_sync.OfflineExpenseSync.is_synced"
-	)
+	@patch("pos_next.pos_next.doctype.offline_expense_sync.offline_expense_sync.OfflineExpenseSync.is_synced")
 	def test_check_offline_expense_synced_false(self, mock_is_synced):
 		mock_is_synced.return_value = {
 			"synced": False,
@@ -1188,9 +1141,7 @@ class TestOfflineExpenseJournalEntry(FrappeTestCase):
 				"company": self.COMPANY,
 				"pos_profile": self.PROFILE,
 				"user": frappe.session.user,
-				"balance_details": [
-					{"mode_of_payment": self.MODE_OF_PAYMENT, "amount": 0}
-				],
+				"balance_details": [{"mode_of_payment": self.MODE_OF_PAYMENT, "amount": 0}],
 			}
 		)
 		shift.insert()
@@ -1354,9 +1305,7 @@ class TestOfflineExpenseJournalEntry(FrappeTestCase):
 
 		expenses.cancel_pos_expense(je_name, shift.name, self.PROFILE)
 
-		sync = frappe.get_doc(
-			"Offline Expense Sync", {"offline_id": offline_id}
-		)
+		sync = frappe.get_doc("Offline Expense Sync", {"offline_id": offline_id})
 		self.assertEqual(sync.status, "Cancelled")
 		self.assertEqual(sync.journal_entry, je_name)
 
