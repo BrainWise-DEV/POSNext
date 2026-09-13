@@ -451,6 +451,7 @@ class TestPOSExpenses(unittest.TestCase):
 			)
 
 	@patch("pos_next.api.expenses.frappe.has_permission", return_value=False)
+	@patch("pos_next.api.expenses._mark_offline_expense_sync_cancelled")
 	@patch("pos_next.api.expenses.frappe.get_doc")
 	@patch("pos_next.api.expenses.validate_pos_expense_cancel_permission")
 	@patch("pos_next.api.expenses.validate_open_shift")
@@ -465,6 +466,7 @@ class TestPOSExpenses(unittest.TestCase):
 		_mock_validate_shift,
 		mock_validate_cancel,
 		mock_get_doc,
+		mock_mark_cancelled,
 		_mock_has_permission,
 	):
 		mock_session.user = "cashier@example.com"
@@ -489,6 +491,7 @@ class TestPOSExpenses(unittest.TestCase):
 		mock_validate_cancel.assert_called_once_with(
 			"Test POS Profile", "cashier@example.com", "ACC-JV-0001"
 		)
+		mock_mark_cancelled.assert_called_once_with("ACC-JV-0001")
 
 	@patch("pos_next.api.expenses.frappe.throw", side_effect=_raise_runtime_error)
 	def test_validate_expense_attachment_filename_rejects_exe(self, _mock_throw):
@@ -970,6 +973,81 @@ class TestOfflineExpenseDedup(unittest.TestCase):
 				pos_opening_shift="POS-OS-0001",
 			)
 
+	@patch("pos_next.api.expenses._mark_offline_expense_sync_cancelled")
+	@patch("pos_next.api.expenses.frappe.get_doc")
+	@patch("pos_next.api.expenses.frappe.db.exists", return_value=True)
+	@patch("pos_next.api.expenses.frappe.db.get_value")
+	def test_synced_cancelled_je_does_not_reuse_for_new_je(
+		self, mock_get_value, _mock_exists, mock_get_doc, mock_mark_cancelled
+	):
+		mock_get_value.return_value = frappe._dict(
+			name="OES-SYNCED",
+			journal_entry="ACC-JV-CANCELLED",
+			status="Synced",
+			modified="2026-09-10 12:00:00",
+		)
+		mock_get_doc.return_value = SimpleNamespace(
+			name="ACC-JV-CANCELLED",
+			docstatus=2,
+			posa_expense_amount=25,
+		)
+
+		result = expenses._ensure_offline_expense_uniqueness(
+			"pos_expense_cancelled",
+			pos_profile="Test POS Profile",
+			pos_opening_shift="POS-OS-0001",
+		)
+
+		self.assertTrue(result["already_synced"])
+		self.assertTrue(result["expense_data"]["cancelled"])
+		self.assertEqual(result["expense_data"]["journal_entry"], "ACC-JV-CANCELLED")
+		mock_mark_cancelled.assert_called_once_with("ACC-JV-CANCELLED")
+
+	@patch("pos_next.api.expenses.frappe.get_doc")
+	@patch("pos_next.api.expenses.frappe.db.exists", return_value=True)
+	@patch("pos_next.api.expenses.frappe.db.get_value")
+	def test_cancelled_status_is_terminal(
+		self, mock_get_value, _mock_exists, mock_get_doc
+	):
+		mock_get_value.return_value = frappe._dict(
+			name="OES-CANCELLED",
+			journal_entry="ACC-JV-CANCELLED",
+			status="Cancelled",
+			modified="2026-09-10 12:00:00",
+		)
+		mock_get_doc.return_value = SimpleNamespace(
+			name="ACC-JV-CANCELLED",
+			docstatus=2,
+			posa_expense_amount=25,
+		)
+
+		result = expenses._ensure_offline_expense_uniqueness(
+			"pos_expense_cancelled_status",
+			pos_profile="Test POS Profile",
+			pos_opening_shift="POS-OS-0001",
+		)
+
+		self.assertTrue(result["already_synced"])
+		self.assertTrue(result["expense_data"]["cancelled"])
+
+	@patch(
+		"pos_next.pos_next.doctype.offline_expense_sync.offline_expense_sync.OfflineExpenseSync.is_synced"
+	)
+	@patch("pos_next.api.expenses.frappe.db.exists", return_value=True)
+	@patch("pos_next.api.expenses.frappe.db.get_value", return_value=2)
+	def test_check_offline_expense_synced_cancelled_is_terminal(
+		self, _mock_get, _mock_exists, mock_is_synced
+	):
+		mock_is_synced.return_value = {
+			"synced": True,
+			"journal_entry": "ACC-JV-CANCELLED",
+			"status": "Cancelled",
+		}
+		result = expenses.check_offline_expense_synced("pos_expense_cancelled")
+		self.assertTrue(result["synced"])
+		self.assertTrue(result["cancelled"])
+		self.assertEqual(result["journal_entry"], "ACC-JV-CANCELLED")
+
 	@patch("pos_next.api.expenses.validate_expense_amount", side_effect=_raise_runtime_error)
 	@patch("pos_next.api.expenses.validate_open_shift")
 	@patch("pos_next.api.expenses.validate_pos_expense_enabled")
@@ -1257,3 +1335,61 @@ class TestOfflineExpenseJournalEntry(FrappeTestCase):
 		)
 		self.assertEqual(je_count, 1)
 		self.assertEqual(flt(expenses.get_shift_expense_total(shift.name)), self.AMOUNT)
+
+	def test_cancel_then_resend_offline_id_does_not_mint_second_je(self):
+		frappe.db.set_value("POS Profile", self.PROFILE, "posa_allow_cancel_pos_expense", 1)
+		shift = self._make_opening_shift()
+		offline_id = f"pos_expense_cx_{frappe.generate_hash(length=8)}"
+
+		first = expenses.create_pos_expense(
+			shift.name,
+			self.PROFILE,
+			self.EXPENSE_ACCOUNT,
+			self.AMOUNT,
+			self.MODE_OF_PAYMENT,
+			remarks="Cancel then resend",
+			offline_id=offline_id,
+		)
+		je_name = first["journal_entry"]
+
+		expenses.cancel_pos_expense(je_name, shift.name, self.PROFILE)
+
+		sync = frappe.get_doc(
+			"Offline Expense Sync", {"offline_id": offline_id}
+		)
+		self.assertEqual(sync.status, "Cancelled")
+		self.assertEqual(sync.journal_entry, je_name)
+
+		second = expenses.create_pos_expense(
+			shift.name,
+			self.PROFILE,
+			self.EXPENSE_ACCOUNT,
+			self.AMOUNT,
+			self.MODE_OF_PAYMENT,
+			remarks="Cancel then resend",
+			offline_id=offline_id,
+		)
+
+		self.assertEqual(second["journal_entry"], je_name)
+		self.assertTrue(second.get("duplicate_prevented"))
+		self.assertTrue(second.get("cancelled"))
+
+		submitted_count = frappe.db.count(
+			"Journal Entry",
+			{
+				"posa_pos_opening_shift": shift.name,
+				"posa_is_pos_expense": 1,
+				"docstatus": 1,
+			},
+		)
+		cancelled_count = frappe.db.count(
+			"Journal Entry",
+			{
+				"posa_pos_opening_shift": shift.name,
+				"posa_is_pos_expense": 1,
+				"docstatus": 2,
+			},
+		)
+		self.assertEqual(submitted_count, 0)
+		self.assertEqual(cancelled_count, 1)
+		self.assertEqual(flt(expenses.get_shift_expense_total(shift.name)), 0)

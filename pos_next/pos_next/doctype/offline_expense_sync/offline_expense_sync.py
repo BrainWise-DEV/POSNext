@@ -67,10 +67,11 @@ class OfflineExpenseSync(Document):
 		)
 
 		if existing:
-			is_synced = existing.status == "Synced" and existing.journal_entry
+			# Synced and Cancelled are both terminal: do not mint another JE.
+			is_terminal = existing.status in ("Synced", "Cancelled") and existing.journal_entry
 			return {
-				"synced": bool(is_synced),
-				"journal_entry": existing.journal_entry if is_synced else None,
+				"synced": bool(is_terminal),
+				"journal_entry": existing.journal_entry if is_terminal else None,
 				"status": existing.status,
 			}
 

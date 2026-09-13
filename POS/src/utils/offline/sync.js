@@ -1153,6 +1153,10 @@ const syncExpenseToServer = async (expense, retryCount = 0) => {
 			journalEntry = syncStatus.journal_entry;
 			await rememberExpenseJournalEntry(expense, journalEntry);
 			expense = { ...expense, server_journal_entry: journalEntry, cache_counted: true };
+			if (syncStatus.cancelled) {
+				await markExpenseSynced(expense.id, journalEntry, offlineId);
+				return { status: "success", journal_entry: journalEntry, cancelled: true };
+			}
 		}
 	}
 
@@ -1174,6 +1178,10 @@ const syncExpenseToServer = async (expense, retryCount = 0) => {
 			}
 			await rememberExpenseJournalEntry(expense, journalEntry);
 			expense = { ...expense, server_journal_entry: journalEntry, cache_counted: true };
+			if (response?.cancelled) {
+				await markExpenseSynced(expense.id, journalEntry, offlineId);
+				return { status: "success", journal_entry: journalEntry, cancelled: true };
+			}
 		} catch (error) {
 			if (isExpenseSyncInProgressError(error) && retryCount < MAX_IN_PROGRESS_RETRIES) {
 				await new Promise((r) => setTimeout(r, IN_PROGRESS_WAIT_MS));
@@ -1186,6 +1194,10 @@ const syncExpenseToServer = async (expense, retryCount = 0) => {
 					journalEntry = syncStatus.journal_entry;
 					await rememberExpenseJournalEntry(expense, journalEntry);
 					expense = { ...expense, server_journal_entry: journalEntry };
+					if (syncStatus.cancelled) {
+						await markExpenseSynced(expense.id, journalEntry, offlineId);
+						return { status: "success", journal_entry: journalEntry, cancelled: true };
+					}
 				} else {
 					throw error;
 				}

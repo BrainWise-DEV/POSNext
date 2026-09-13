@@ -153,7 +153,11 @@ def create_pos_expense(
 
 @frappe.whitelist()
 def check_offline_expense_synced(offline_id):
-	"""Return whether an offline expense id already maps to a submitted JE."""
+	"""Return whether an offline expense id already maps to a finalized JE.
+
+	Submitted (docstatus 1) and cancelled (docstatus 2) Journal Entries are both
+	terminal for a given ``offline_id`` — a resend must not mint a second JE.
+	"""
 	from pos_next.pos_next.doctype.offline_expense_sync.offline_expense_sync import (
 		OfflineExpenseSync,
 	)
@@ -167,6 +171,11 @@ def check_offline_expense_synced(offline_id):
 			docstatus = frappe.db.get_value("Journal Entry", result["journal_entry"], "docstatus")
 			if docstatus == 1:
 				return result
+			if docstatus == 2:
+				# Cancelled JE is final for this offline_id.
+				out = dict(result)
+				out["cancelled"] = True
+				return out
 		return {"synced": False, "journal_entry": None, "status": None}
 
 	return result
@@ -182,10 +191,52 @@ def _is_pending_expense_expired(modified_time):
 def _reuse_offline_expense_sync_record(sync_record_name):
 	sync_doc = frappe.get_doc("Offline Expense Sync", sync_record_name)
 	sync_doc.status = "Pending"
+	sync_doc.journal_entry = ""
 	sync_doc.synced_at = None
 	sync_doc.flags.ignore_permissions = True
 	sync_doc.save()
 	return {"already_synced": False, "sync_record_name": sync_record_name}
+
+
+def _already_synced_expense_payload(je, offline_id, cancelled=False):
+	payload = {
+		"already_synced": True,
+		"expense_data": {
+			"name": je.name,
+			"journal_entry": je.name,
+			"amount": flt(je.posa_expense_amount),
+			"message": _("POS Expense already recorded in Journal Entry {0}").format(je.name),
+			"duplicate_prevented": True,
+			"offline_id": offline_id,
+		},
+	}
+	if cancelled:
+		payload["expense_data"]["cancelled"] = True
+	return payload
+
+
+def _mark_offline_expense_sync_cancelled(journal_entry):
+	"""Mark the Offline Expense Sync row for a cancelled JE so retries cannot recreate it."""
+	if not journal_entry:
+		return
+	sync_name = frappe.db.get_value(
+		"Offline Expense Sync", {"journal_entry": journal_entry}, "name"
+	)
+	if not sync_name:
+		return
+	try:
+		sync_doc = frappe.get_doc("Offline Expense Sync", sync_name)
+		if sync_doc.status == "Cancelled":
+			return
+		sync_doc.status = "Cancelled"
+		sync_doc.synced_at = frappe.utils.now_datetime()
+		sync_doc.flags.ignore_permissions = True
+		sync_doc.save()
+	except Exception as error:
+		frappe.log_error(
+			title="Offline Expense Sync Cancel Update Error",
+			message=f"Failed to mark sync record for {journal_entry} as Cancelled: {error!s}",
+		)
 
 
 def _ensure_offline_expense_uniqueness(offline_id, pos_profile=None, pos_opening_shift=None):
@@ -210,19 +261,10 @@ def _ensure_offline_expense_uniqueness(offline_id, pos_profile=None, pos_opening
 				je = frappe.get_doc("Journal Entry", existing_sync.journal_entry)
 				if je.docstatus == 1:
 					_complete_offline_expense_sync(sync_record_name, je.name)
-					return {
-						"already_synced": True,
-						"expense_data": {
-							"name": je.name,
-							"journal_entry": je.name,
-							"amount": flt(je.posa_expense_amount),
-							"message": _("POS Expense already recorded in Journal Entry {0}").format(
-								je.name
-							),
-							"duplicate_prevented": True,
-							"offline_id": offline_id,
-						},
-					}
+					return _already_synced_expense_payload(je, offline_id)
+				if je.docstatus == 2:
+					_mark_offline_expense_sync_cancelled(je.name)
+					return _already_synced_expense_payload(je, offline_id, cancelled=True)
 			if _is_pending_expense_expired(existing_sync.get("modified")):
 				return _reuse_offline_expense_sync_record(sync_record_name)
 			frappe.throw(
@@ -234,23 +276,25 @@ def _ensure_offline_expense_uniqueness(offline_id, pos_profile=None, pos_opening
 		if sync_status == "Failed":
 			return _reuse_offline_expense_sync_record(sync_record_name)
 
+		if sync_status == "Cancelled" and existing_sync.journal_entry:
+			if frappe.db.exists("Journal Entry", existing_sync.journal_entry):
+				je = frappe.get_doc("Journal Entry", existing_sync.journal_entry)
+				return _already_synced_expense_payload(je, offline_id, cancelled=True)
+			# Link missing — still terminal; do not mint a new JE for this offline_id.
+			frappe.throw(
+				_("This offline expense was cancelled and cannot be synced again."),
+				exc=frappe.ValidationError,
+			)
+
 		if sync_status == "Synced" and existing_sync.journal_entry:
 			if frappe.db.exists("Journal Entry", existing_sync.journal_entry):
 				je = frappe.get_doc("Journal Entry", existing_sync.journal_entry)
 				if je.docstatus == 1:
-					return {
-						"already_synced": True,
-						"expense_data": {
-							"name": je.name,
-							"journal_entry": je.name,
-							"amount": flt(je.posa_expense_amount),
-							"message": _("POS Expense already recorded in Journal Entry {0}").format(
-								je.name
-							),
-							"duplicate_prevented": True,
-							"offline_id": offline_id,
-						},
-					}
+					return _already_synced_expense_payload(je, offline_id)
+				if je.docstatus == 2:
+					# Cancelled JE must not fall through to reuse / create JE2.
+					_mark_offline_expense_sync_cancelled(je.name)
+					return _already_synced_expense_payload(je, offline_id, cancelled=True)
 			return _reuse_offline_expense_sync_record(sync_record_name)
 
 		return _reuse_offline_expense_sync_record(sync_record_name)
@@ -333,6 +377,9 @@ def cancel_pos_expense(journal_entry, pos_opening_shift, pos_profile):
 	jv_doc = frappe.get_doc("Journal Entry", journal_entry)
 	jv_doc.flags.ignore_permissions = True
 	jv_doc.cancel()
+
+	# Keep Offline Expense Sync terminal so a stale offline_id resend cannot mint JE2.
+	_mark_offline_expense_sync_cancelled(journal_entry)
 
 	return {
 		"name": jv_doc.name,
