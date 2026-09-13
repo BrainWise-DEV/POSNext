@@ -161,14 +161,15 @@ def _get_customer_coupon_usage_count(customer, coupon_code):
 
 def get_coupon_eligible_items(coupon, items):
 	"""
-	Return cart items that pass Exclusion Rules 5.3 / Promotion Interaction Matrix.
+	Return cart items that pass the Promotion Interaction Matrix for coupons.
 
-	Coupon applies only to normal eligible items. Always exclude:
-	1. Already discounted items
-	2. XY promotion trigger SKUs (via pricing_rules / broad discount detection)
-	3. Routine promotion triggers (same)
+	Coupon is blocked only when the line has:
+	1. Auto Discount
+	2. Item Level Discount (including Accumulative)
+	3. Manual cashier discount
 	4. Excluded brands from coupon config
 
+	Other promotional types (GWP, Gift Pool, etc.) remain coupon-eligible.
 	``exclude_already_discounted_items`` on the coupon is ignored — matrix rules
 	are mandatory for coupons.
 	"""
@@ -263,7 +264,7 @@ def _item_base_amount(item):
 
 
 def _coupon_rejection_message(coupon, items) -> str:
-	"""Explain why no cart lines qualify for this coupon (matrix Rules 1–4)."""
+	"""Explain why no cart lines qualify for this coupon."""
 	from pos_next.api.promotion_exclusions import (
 		PROMOTION_TARGET_COUPON,
 		classify_item_state,
@@ -282,7 +283,9 @@ def _coupon_rejection_message(coupon, items) -> str:
 			reasons.append(_("Item {0} is excluded (brand {1})").format(code, brand))
 			continue
 		if is_coupon_broad_discounted(item):
-			reasons.append(_("Item {0} is already discounted").format(code))
+			reasons.append(
+				_("Item {0} already has Auto Discount or Item Level Discount").format(code)
+			)
 			continue
 		state = classify_item_state(
 			item,
@@ -302,8 +305,9 @@ def apply_coupon_to_items(coupon, items):
 	"""
 	Calculate per-line coupon discounts for matrix-eligible items only.
 
-	Discounts are computed on list-price base. Already-discounted / trigger /
-	excluded-brand lines never reach this path (see get_coupon_eligible_items).
+	Lines with Auto Discount, Item Level Discount, or manual discount never
+	reach this path (see get_coupon_eligible_items). Other promotional types
+	remain eligible.
 
 	Returns dict with valid, message, eligible_item_codes, line_updates, total_discount.
 	"""

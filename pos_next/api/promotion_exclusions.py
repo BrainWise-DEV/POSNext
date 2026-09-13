@@ -5,8 +5,11 @@
 
 Item-Level Discount (Type 4) and manual cashier discounts mark cart lines as
 ``already discounted``. Auto Discount (Type 3) and Coupon (Type 5) consult the
-Promotion Interaction Matrix before applying additional discounts. GWP (Types 1–2)
-is unaffected.
+Promotion Interaction Matrix before applying additional discounts.
+
+For coupons specifically: only Auto Discount, Item Level Discount (including
+Accumulative), and manual line discounts block application. Other promotional
+types (GWP, Gift Pool, etc.) leave lines coupon-eligible.
 """
 
 from __future__ import annotations
@@ -112,6 +115,15 @@ def has_item_level_promotion_rule(item, rule_type_map: dict[str, str] | None = N
 	return any(type_map.get(name) == PROMOTION_TYPE_ITEM_LEVEL for name in rule_names)
 
 
+def has_auto_discount_rule(item, rule_type_map: dict[str, str] | None = None) -> bool:
+	rule_names = _parse_pricing_rules(item.get("pricing_rules"))
+	if not rule_names:
+		return False
+
+	type_map = rule_type_map or get_rule_promotion_types(rule_names)
+	return any(type_map.get(name) == PROMOTION_TYPE_AUTO for name in rule_names)
+
+
 def has_manual_item_discount(item) -> bool:
 	"""True when cashier applied a line discount not driven by pricing rules."""
 	if item.get("discount_source") == DISCOUNT_SOURCE_MANUAL:
@@ -151,25 +163,57 @@ def is_already_discounted(item, rule_type_map: dict[str, str] | None = None) -> 
 	return has_manual_item_discount(item)
 
 
+# Discount sources that block coupons. GWP / free-item / legacy stamps do not.
+_COUPON_BLOCKING_SOURCES = frozenset(
+	{
+		DISCOUNT_SOURCE_ITEM_LEVEL,
+		DISCOUNT_SOURCE_ACCUMULATIVE,
+		DISCOUNT_SOURCE_AUTO,
+		DISCOUNT_SOURCE_MANUAL,
+	}
+)
+_COUPON_NON_BLOCKING_SOURCES = frozenset(
+	{
+		DISCOUNT_SOURCE_GWP,
+		DISCOUNT_SOURCE_FREE_ITEM,
+		DISCOUNT_SOURCE_LEGACY,
+	}
+)
+
+
 def is_coupon_broad_discounted(item, rule_type_map: dict[str, str] | None = None) -> bool:
-	"""Broader discount detection for Coupon (includes auto-discount pricing rules)."""
+	"""Whether a coupon must skip this line.
+
+	Blocks only Auto Discount, Item Level Discount (incl. Accumulative), and
+	manual cashier discounts. Other promotional types (GWP, Gift Pool, etc.)
+	do not make a line coupon-ineligible.
+	"""
 	if is_accumulative_line(item):
 		# Stacks with Auto Discount but never with a coupon.
 		return True
-	if is_already_discounted(item, rule_type_map):
-		return True
 	if item.get("is_free_item"):
 		return False
-	if flt(item.get("discount_percentage") or 0) > 0:
+
+	source = cstr(item.get("discount_source") or "")
+	if source in _COUPON_BLOCKING_SOURCES:
 		return True
-	if flt(item.get("discount_amount") or 0) > 0:
+	if source in _COUPON_NON_BLOCKING_SOURCES:
+		# Still blocked if an Auto / Item Level rule is also stamped on the line.
+		return has_item_level_promotion_rule(item, rule_type_map) or has_auto_discount_rule(
+			item, rule_type_map
+		)
+
+	if has_item_level_promotion_rule(item, rule_type_map):
 		return True
-	if _parse_pricing_rules(item.get("pricing_rules")):
+	if has_auto_discount_rule(item, rule_type_map):
 		return True
-	price_list_rate = flt(item.get("price_list_rate") or 0)
-	rate = flt(item.get("rate") or 0)
-	if price_list_rate > 0 and rate > 0 and rate < price_list_rate:
+	if has_manual_item_discount(item):
 		return True
+
+	# Flag set without a typed source (API / older clients) — treat as discounted.
+	if item.get("is_already_discounted"):
+		return True
+
 	return False
 
 
