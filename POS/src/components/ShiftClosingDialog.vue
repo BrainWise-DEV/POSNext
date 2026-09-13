@@ -1437,8 +1437,9 @@ const hasExpenses = computed(() => {
 
 const netCashImpact = computed(() => {
 	if (!closingData.value) return 0;
+	// ?? keeps sales_total=0; || would fall back to grand_total and double-count returns
 	const sales = Number.parseFloat(
-		closingData.value.sales_total || closingData.value.grand_total || 0,
+		closingData.value.sales_total ?? closingData.value.grand_total ?? 0,
 	);
 	const returns = Number.parseFloat(closingData.value.returns_total || 0);
 	const expenses = Number.parseFloat(closingData.value.expenses_total || 0);
