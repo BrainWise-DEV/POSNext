@@ -1082,7 +1082,8 @@ def get_pos_expenses(pos_opening_shift):
 			COALESCE(SUM(jea.credit), 0) AS amount,
 			je.posa_expense_employee,
 			je.posa_expense_mode_of_payment,
-			je.user_remark
+			je.user_remark,
+			je.owner
 		FROM `tabJournal Entry` je
 		INNER JOIN `tabJournal Entry Account` jea ON jea.parent = je.name
 		WHERE je.posa_is_pos_expense = 1
@@ -1096,6 +1097,18 @@ def get_pos_expenses(pos_opening_shift):
 		as_dict=True,
 	)
 
+	owner_ids = list({expense.owner for expense in expenses if expense.owner})
+	cashier_by_owner = {}
+	if owner_ids:
+		# Cashiers often lack User read; names are display-only for the shift list.
+		for user in frappe.get_all(
+			"User",
+			filters={"name": ["in", owner_ids]},
+			fields=["name", "full_name"],
+			ignore_permissions=True,
+		):
+			cashier_by_owner[user.name] = user.full_name or user.name
+
 	return [
 		frappe._dict(
 			name=expense.name,
@@ -1103,6 +1116,8 @@ def get_pos_expenses(pos_opening_shift):
 			expense_account=expense.posa_expense_account,
 			amount=flt(expense.amount),
 			employee=expense.posa_expense_employee or "",
+			cashier=cashier_by_owner.get(expense.owner) or expense.owner or "",
+			owner=expense.owner or "",
 			remarks=(expense.user_remark or "").strip(),
 			mode_of_payment=expense.posa_expense_mode_of_payment,
 		)

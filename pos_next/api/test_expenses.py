@@ -684,16 +684,23 @@ class TestPOSExpenses(unittest.TestCase):
 				posa_expense_employee="EMP-0001",
 				posa_expense_mode_of_payment="Cash",
 				user_remark="Fuel",
+				owner="cashier@example.com",
 			)
 		]
 
-		result = expenses.get_pos_expenses("POS-OS-0001")
+		with patch("pos_next.api.expenses.frappe.get_all") as mock_get_all:
+			mock_get_all.return_value = [
+				SimpleNamespace(name="cashier@example.com", full_name="Cashier One")
+			]
+			result = expenses.get_pos_expenses("POS-OS-0001")
 
 		self.assertEqual(result[0].journal_entry, "ACC-JV-0001")
 		self.assertEqual(result[0].amount, 50)
 		self.assertEqual(result[0].mode_of_payment, "Cash")
+		self.assertEqual(result[0].cashier, "Cashier One")
 		sql = mock_sql.call_args.args[0]
 		self.assertIn("SUM(jea.credit)", sql)
+		self.assertIn("je.owner", sql)
 		self.assertNotIn("posa_expense_amount", sql)
 
 class TestPOSExpenseJournalEntry(FrappeTestCase):
