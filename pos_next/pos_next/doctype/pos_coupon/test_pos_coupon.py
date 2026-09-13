@@ -378,8 +378,8 @@ class TestPOSCoupon(unittest.TestCase):
 		self.assertFalse(result["valid"])
 		self.assertIn("Minimum eligible amount", result["message"])
 
-	def test_percentage_stacks_on_existing_offer_when_exclude_off(self):
-		"""exclude=0 → offer first, then coupon % on the post-offer price."""
+	def test_matrix_excludes_already_discounted_even_when_flag_off(self):
+		"""Exclusion Rule 1: coupon never stacks on already-discounted lines."""
 		coupon = _coupon(
 			discount_percentage=10,
 			exclude_already_discounted_items=0,
@@ -396,16 +396,41 @@ class TestPOSCoupon(unittest.TestCase):
 			}
 		]
 		result = apply_coupon_to_items(coupon, items)
-		self.assertTrue(result["valid"])
-		# Sequential: 100 × 0.8 × 0.9 = 72 → combined 28%, coupon-only 8
-		self.assertAlmostEqual(result["total_discount"], 8.0, places=4)
-		self.assertAlmostEqual(result["line_updates"][0]["discount_percentage"], 28.0, places=4)
-		self.assertAlmostEqual(result["line_updates"][0]["rate"], 72.0, places=4)
-		self.assertAlmostEqual(
-			result["line_updates"][0]["pre_coupon_discount_fraction"], 0.2, places=4
-		)
+		self.assertFalse(result["valid"])
+		self.assertEqual(result["line_updates"], [])
+		self.assertIn("already discounted", result["message"].lower())
 
-	def test_percentage_without_existing_discount_unchanged(self):
+	def test_matrix_excludes_pricing_rule_trigger_sku(self):
+		"""Rules 2–3: XY/routine trigger SKUs stamped with pricing_rules are excluded."""
+		coupon = _coupon(discount_percentage=20, exclude_already_discounted_items=0)
+		items = [
+			{
+				"item_code": "SLA-PAID",
+				"brand": "SLA",
+				"item_group": "G1",
+				"qty": 1,
+				"price_list_rate": 16000,
+				"rate": 16000,
+				"pricing_rules": "PRLE-0215",
+			},
+			{
+				"item_code": "SLA-FREE",
+				"brand": "SLA",
+				"item_group": "G1",
+				"qty": 1,
+				"price_list_rate": 0,
+				"rate": 0,
+				"is_free_item": 1,
+				"pricing_rules": "PRLE-0215",
+			},
+		]
+		result = apply_coupon_to_items(coupon, items)
+		self.assertFalse(result["valid"])
+		self.assertEqual(result["line_updates"], [])
+		self.assertEqual(get_coupon_eligible_items(coupon, items), [])
+
+	def test_percentage_on_normal_eligible_item(self):
+		"""Matrix: normal eligible item receives coupon % on list price."""
 		coupon = _coupon(discount_percentage=10, exclude_already_discounted_items=0)
 		items = [
 			{
@@ -421,6 +446,8 @@ class TestPOSCoupon(unittest.TestCase):
 		self.assertTrue(result["valid"])
 		self.assertAlmostEqual(result["total_discount"], 10.0, places=4)
 		self.assertAlmostEqual(result["line_updates"][0]["discount_percentage"], 10.0, places=4)
+		self.assertAlmostEqual(result["line_updates"][0]["rate"], 90.0, places=4)
+		self.assertEqual(result["line_updates"][0]["pre_coupon_discount_fraction"], 0)
 
 
 if __name__ == "__main__":

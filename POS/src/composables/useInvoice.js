@@ -594,10 +594,9 @@ export function useInvoice() {
 
 	function applyCouponLineDiscounts(discount) {
 		/**
-		 * Apply POS Coupon discounts on eligible lines only.
-		 * When exclude_already_discounted_items=0 the server returns a *combined*
-		 * offer+coupon discount — preserve the pre-coupon offer so removal /
-		 * revalidation can stack correctly instead of wiping the offer.
+		 * Apply POS Coupon discounts on matrix-eligible lines only.
+		 * Snapshot any pre-coupon line discount so clear/revalidate can restore
+		 * it (eligible lines should normally have none per Exclusion Rules 5.3).
 		 * @param {Object} discount - { code, line_updates, amount, name, type }
 		 */
 		if (!discount) return;
