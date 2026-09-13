@@ -1747,7 +1747,7 @@ const customerLpInfo = ref({
 });
 
 const customerLpResource = createResource({
-	url: "magento_integration.api.magento_loyalty.get_lp_balance_for_customer",
+	url: "pos_next.api.magento_loyalty.get_lp_balance_for_customer",
 	makeParams() {
 		const customerName = props.customer?.name || props.customer;
 		return {
