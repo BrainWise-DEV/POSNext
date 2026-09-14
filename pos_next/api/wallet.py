@@ -314,8 +314,14 @@ def create_wallet_on_customer_insert(doc, method=None):
 	if not company:
 		return
 
-	# Only auto-create wallets when a POS profile with auto_create_wallet exists
-	pos_profile = frappe.db.get_value("POS Profile", {"company": company, "disabled": 0}, "name")
+	# Only auto-create wallets when a POS profile with auto_create_wallet exists.
+	# order_by is required: a company can have several active profiles (e.g. one
+	# Magento/external-loyalty profile alongside a normal internal-wallet one), and
+	# an unordered get_value would pick an arbitrary one, making this decision
+	# nondeterministic. Oldest profile is treated as the canonical one.
+	pos_profile = frappe.db.get_value(
+		"POS Profile", {"company": company, "disabled": 0}, "name", order_by="creation asc"
+	)
 	if not pos_profile:
 		return
 
@@ -349,7 +355,10 @@ def get_or_create_wallet(customer, company, pos_settings=None, force_create=Fals
 
 	# Check if auto-create is enabled
 	if not pos_settings:
-		pos_profile = frappe.db.get_value("POS Profile", {"company": company, "disabled": 0}, "name")
+		# Same nondeterminism concern as create_wallet_on_customer_insert — order deterministically.
+		pos_profile = frappe.db.get_value(
+			"POS Profile", {"company": company, "disabled": 0}, "name", order_by="creation asc"
+		)
 		if pos_profile:
 			pos_settings = get_pos_settings(pos_profile)
 

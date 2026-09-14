@@ -412,6 +412,24 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	}
 
 	/**
+	 * Normalize pricing_rules to an array. The server echoes it back as a
+	 * comma-separated string (see useInvoice.js#stringifyPricingRules) —
+	 * spreading a string directly (`[...str]`) splits it into individual
+	 * characters instead of rule names, corrupting the field for offline
+	 * stacking / merge logic below.
+	 */
+	function normalizePricingRules(value) {
+		if (Array.isArray(value)) return [...value];
+		if (typeof value === "string" && value.trim()) {
+			return value
+				.split(",")
+				.map((s) => s.trim())
+				.filter(Boolean);
+		}
+		return [];
+	}
+
+	/**
 	 * Sync discounts from server response to cart items.
 	 * Server returns items in same order as sent (handles duplicate SKUs).
 	 */
@@ -429,7 +447,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			if (hasPricingRules(serverItem.pricing_rules) || discountPct > 0 || discountAmt > 0) {
 				item.discount_percentage = discountPct;
 				item.discount_amount = discountAmt;
-				item.pricing_rules = serverItem.pricing_rules;
+				item.pricing_rules = normalizePricingRules(serverItem.pricing_rules);
 				item.discount_source = serverItem.discount_source || item.discount_source;
 				item.free_qty = Number.parseFloat(serverItem.free_qty) || 0;
 				item.gwp_free_qty = Number.parseFloat(serverItem.gwp_free_qty) || 0;
@@ -1050,15 +1068,34 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				recalculateItem(item);
 				applied = true;
 			} else if (discountType === "Discount Amount" && discountAmount > 0) {
-				// Apply fixed discount amount
-				item.discount_amount = discountAmount;
-				item.pricing_rules = [offer.name];
+				if (stacks) {
+					// Accumulate, capped at the line's own value (never discount below zero).
+					const effectiveRate =
+						item.is_rate_manually_edited === 1
+							? item.rate
+							: item.price_list_rate || item.rate;
+					const baseAmount =
+						(Number.parseFloat(item.quantity) || 0) * (Number.parseFloat(effectiveRate) || 0);
+					const existing = Number.parseFloat(item.discount_amount) || 0;
+					item.discount_amount = Math.min(existing + discountAmount, baseAmount);
+					item.pricing_rules = [...(item.pricing_rules || []), offer.name];
+				} else {
+					item.discount_amount = discountAmount;
+					item.pricing_rules = [offer.name];
+				}
 				recalculateItem(item);
 				applied = true;
 			} else if (discountType === "Rate" && rate > 0) {
-				// Apply fixed rate (override price)
-				item.rate = rate;
-				item.pricing_rules = [offer.name];
+				if (stacks) {
+					// Two fixed-rate overrides can't be added together — combining them
+					// means the customer keeps whichever is more favorable (lower).
+					const currentRate = Number.parseFloat(item.rate);
+					item.rate = Number.isFinite(currentRate) ? Math.min(currentRate, rate) : rate;
+					item.pricing_rules = [...(item.pricing_rules || []), offer.name];
+				} else {
+					item.rate = rate;
+					item.pricing_rules = [offer.name];
+				}
 				recalculateItem(item);
 				applied = true;
 			}
@@ -1140,15 +1177,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				if (existingFreeRow) {
 					existingFreeRow.quantity = freeItemsToGive;
 					existingFreeRow.free_qty = freeItemsToGive;
-					const pr = existingFreeRow.pricing_rules;
-					const prArr = Array.isArray(pr)
-						? [...pr]
-						: pr
-						? String(pr)
-								.split(",")
-								.map((s) => s.trim())
-								.filter(Boolean)
-						: [];
+					const prArr = normalizePricingRules(existingFreeRow.pricing_rules);
 					if (!prArr.includes(offer.name)) prArr.push(offer.name);
 					existingFreeRow.pricing_rules = prArr;
 				} else {

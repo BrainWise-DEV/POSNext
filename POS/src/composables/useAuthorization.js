@@ -57,6 +57,15 @@ export function useAuthorization() {
 			return { grant_token: null, required: false };
 		}
 
+		// Only one gated request can be in flight — the dialog is a single shared
+		// instance. Without this, a second call before the first settles would
+		// silently overwrite state.resolve and leave the first caller's promise
+		// hanging forever with no result and no error. Settle it as cancelled
+		// (same outcome as the user dismissing the dialog) before starting the new one.
+		if (state.resolve) {
+			settle(null);
+		}
+
 		return new Promise((resolve) => {
 			state.action = action;
 			state.actionLabel = context.actionLabel || "";
