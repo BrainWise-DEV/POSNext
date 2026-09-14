@@ -103,7 +103,8 @@
 															{{ __("Quantity") }}
 															<span
 																v-if="
-																	localItem?.is_resolved_barcode
+																	localItem?.is_resolved_barcode ||
+																	isLockedFreeItem
 																"
 																class="ms-1 text-xs text-amber-600"
 																>({{ __("Locked") }})</span
@@ -122,10 +123,11 @@
 																>{{ localSerials.length }}</span
 															>
 														</div>
-														<!-- For resolved barcode items, quantity is read-only -->
+														<!-- For resolved barcode / free promo items, quantity is read-only -->
 														<div
 															v-else-if="
-																localItem?.is_resolved_barcode
+																localItem?.is_resolved_barcode ||
+																isLockedFreeItem
 															"
 															class="w-full h-10 border border-amber-300 rounded-lg bg-amber-50 flex items-center justify-center"
 														>
@@ -228,15 +230,19 @@
 															{{ __("UOM") }}
 															<span
 																v-if="
-																	localItem?.is_resolved_barcode
+																	localItem?.is_resolved_barcode ||
+																	isLockedFreeItem
 																"
 																class="ms-1 text-xs text-amber-600"
 																>({{ __("Locked") }})</span
 															>
 														</label>
-														<!-- For resolved barcode items, UOM is read-only -->
+														<!-- For resolved barcode / free promo items, UOM is read-only -->
 														<div
-															v-if="localItem?.is_resolved_barcode"
+															v-if="
+																localItem?.is_resolved_barcode ||
+																isLockedFreeItem
+															"
 															class="w-full h-10 border border-amber-300 rounded-lg bg-amber-50 flex items-center justify-center"
 														>
 															<span
@@ -255,9 +261,25 @@
 													<div>
 														<label
 															class="block text-sm font-medium text-gray-700 mb-2 text-start"
-															>{{ __("Warehouse") }}</label
 														>
+															{{ __("Warehouse") }}
+															<span
+																v-if="isLockedFreeItem"
+																class="ms-1 text-xs text-amber-600"
+																>({{ __("Locked") }})</span
+															>
+														</label>
+														<div
+															v-if="isLockedFreeItem"
+															class="w-full h-10 border border-amber-300 rounded-lg bg-amber-50 flex items-center justify-center"
+														>
+															<span
+																class="text-sm font-semibold text-amber-700"
+																>{{ localWarehouse }}</span
+															>
+														</div>
 														<SelectInput
+															v-else
 															v-model="localWarehouse"
 															:options="warehouseOptions"
 															@change="handleWarehouseChange"
@@ -479,9 +501,14 @@
 									<Button
 										variant="solid"
 										@click="updateItem"
-										:disabled="!hasStock || isCheckingStock"
+										:disabled="
+											isLockedFreeItem || !hasStock || isCheckingStock
+										"
 									>
-										<span v-if="isCheckingStock">{{
+										<span v-if="isLockedFreeItem">{{
+											__("Free Item Locked")
+										}}</span>
+										<span v-else-if="isCheckingStock">{{
 											__("Checking Stock...")
 										}}</span>
 										<span v-else-if="!hasStock">{{
@@ -646,6 +673,8 @@ const currencySymbol = computed(() => getCurrencySymbol(props.currency));
 
 // Lock rate/discount only when the current qty qualifies for a promo
 // (e.g. qty 2–5 for Buy 2–5 Get 1). Qty 1 or 6+ stays editable.
+const isLockedFreeItem = computed(() => Boolean(localItem.value?.is_free_item));
+
 const hasPricingRules = computed(() => {
 	if (!localItem.value) return false;
 	if (localItem.value.is_free_item) return true;
@@ -1030,6 +1059,11 @@ function formatCurrency(amount) {
 }
 
 function updateItem() {
+	if (isLockedFreeItem.value) {
+		showError(__("Free promotional items cannot be edited"));
+		return;
+	}
+
 	// Check if rate was manually edited
 	const isRateManuallyEdited = localRate.value !== originalPriceListRate.value;
 

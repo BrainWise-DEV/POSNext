@@ -2378,6 +2378,9 @@ async function selectUom(item, newUom) {
  * @param {Object} item - Cart item to edit
  */
 function openEditDialog(item) {
+	// Free / GWP / promo gift rows are promotion-owned — cashier must not
+	// change qty or rate (would oversell free stock beyond the offer).
+	if (isLockedFreeRow(item)) return;
 	selectedItem.value = { ...item };
 	showEditDialog.value = true;
 }

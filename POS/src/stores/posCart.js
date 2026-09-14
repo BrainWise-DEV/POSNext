@@ -216,10 +216,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 */
 	function updateItemQuantity(itemCode, quantity, uom = null) {
 		const item = uom
-			? invoiceItems.value.find((i) => i.item_code === itemCode && i.uom === uom)
-			: invoiceItems.value.find((i) => i.item_code === itemCode);
+			? invoiceItems.value.find(
+					(i) => i.item_code === itemCode && i.uom === uom && !i.is_free_item
+				)
+			: invoiceItems.value.find((i) => i.item_code === itemCode && !i.is_free_item);
 
-		if (!item) return baseUpdateItemQuantity(itemCode, quantity, uom);
+		if (!item) return;
 
 		const newQty = Number.parseFloat(quantity) || 1;
 
@@ -1304,10 +1306,19 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * @param {string|null} uom - Optional UOM to match
 	 * @returns {Object|undefined} Cart item or undefined
 	 */
-	function findCartItem(itemCode, uom = null) {
-		return invoiceItems.value.find(
-			(item) => item.item_code === itemCode && (!uom || item.uom === uom)
-		);
+	function findCartItem(itemCode, uom = null, isFreeItem = undefined) {
+		return invoiceItems.value.find((item) => {
+			if (item.item_code !== itemCode) return false;
+			if (uom && item.uom !== uom) return false;
+			// When same SKU has paid + free rows, match the intended line.
+			if (
+				isFreeItem !== undefined &&
+				Boolean(item.is_free_item) !== Boolean(isFreeItem)
+			) {
+				return false;
+			}
+			return true;
+		});
 	}
 
 	/**
@@ -1319,7 +1330,13 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 */
 	function findItemWithUom(itemCode, targetUom, excludeItem = null) {
 		return invoiceItems.value.find(
-			(item) => item.item_code === itemCode && item.uom === targetUom && item !== excludeItem
+			(item) =>
+				item.item_code === itemCode &&
+				item.uom === targetUom &&
+				item !== excludeItem &&
+				// Never merge a paid line into (or from) a free promo row
+				!item.is_free_item &&
+				!excludeItem?.is_free_item
 		);
 	}
 
@@ -1374,7 +1391,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 */
 	async function changeItemUOM(itemCode, newUom, currentUom = null) {
 		try {
-			const cartItem = findCartItem(itemCode, currentUom);
+			const cartItem = findCartItem(itemCode, currentUom, false);
 			if (!cartItem || cartItem.uom === newUom) return;
 
 			// Check for existing item to merge with
@@ -1404,9 +1421,15 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 */
 	async function updateItemDetails(itemCode, updates, currentUom = null) {
 		try {
-			const cartItem = findCartItem(itemCode, currentUom);
+			const cartItem = findCartItem(itemCode, currentUom, updates?.is_free_item);
 			if (!cartItem) {
 				throw new Error("Item not found in cart");
+			}
+
+			// Free / GWP rows are owned by the promotion engine — refuse
+			// cashier edits that would inflate free qty or change rate/UOM.
+			if (cartItem.is_free_item) {
+				throw new Error(__("Free promotional items cannot be edited"));
 			}
 
 			// Handle UOM change with potential merge

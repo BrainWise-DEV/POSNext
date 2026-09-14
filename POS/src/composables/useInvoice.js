@@ -364,9 +364,11 @@ export function useInvoice() {
 	function updateItemQuantity(itemCode, quantity, uom = null) {
 		let item;
 		if (uom) {
-			item = invoiceItems.value.find((i) => i.item_code === itemCode && i.uom === uom);
+			item = invoiceItems.value.find(
+				(i) => i.item_code === itemCode && i.uom === uom && !i.is_free_item
+			);
 		} else {
-			item = invoiceItems.value.find((i) => i.item_code === itemCode);
+			item = invoiceItems.value.find((i) => i.item_code === itemCode && !i.is_free_item);
 		}
 
 		if (item) {

@@ -442,9 +442,12 @@ def _get_available_stock(item):
 def _collect_stock_errors(items):
 	"""Return list of items exceeding available stock.
 
-	Sums qty per (item_code, warehouse) so paid + free rows of the same SKU are
-	checked together. Different products are never combined (a free gift of
-	another item must not count against the paid item's Bin qty).
+	Sums qty per (item_code, warehouse, batch_no) so:
+	- paid + free rows of the same SKU (and same batch) are checked together
+	- different products are never combined
+	- different batches of the same SKU are checked against their own batch qty
+	  (aggregating only by item+warehouse would compare total demand to one
+	  sample batch and allow overselling other batches)
 
 	Respects per-item allow_negative_stock if the field exists on Item.
 	"""
@@ -459,26 +462,28 @@ def _collect_stock_errors(items):
 		if not item_code or not warehouse:
 			continue
 		requested = flt(d.get("stock_qty") or (flt(d.get("qty")) * flt(d.get("conversion_factor") or 1)))
-		key = (item_code, warehouse)
+		batch_no = d.get("batch_no") or ""
+		key = (item_code, warehouse, batch_no)
 		requested_by_key[key] = requested_by_key.get(key, 0) + requested
 		sample_by_key[key] = d
 
 	errors = []
 	for key, requested in requested_by_key.items():
-		item_code, warehouse = key
+		item_code, warehouse, batch_no = key
 		if item_code in allowed_items:
 			continue
 		sample = sample_by_key[key]
 		available = _get_available_stock(sample)
 		if requested > available:
-			errors.append(
-				{
-					"item_code": item_code,
-					"warehouse": warehouse,
-					"requested_qty": requested,
-					"available_qty": available,
-				}
-			)
+			error = {
+				"item_code": item_code,
+				"warehouse": warehouse,
+				"requested_qty": requested,
+				"available_qty": available,
+			}
+			if batch_no:
+				error["batch_no"] = batch_no
+			errors.append(error)
 
 	return errors
 
