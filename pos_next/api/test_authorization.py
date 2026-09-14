@@ -13,13 +13,14 @@ policy / grants directly rather than through this API layer.
 import frappe
 from frappe.tests.utils import FrappeTestCase
 
-from pos_next.api.authorization import request_grant
+from pos_next.api.authorization import request_grant, set_authorization_pin
 from pos_next.authorization import pin as pin_store
 from pos_next.authorization.tests.helpers import (
 	DUMMY_ACTION,
 	GOOD_PIN,
 	MANAGER,
 	OTHER_PIN,
+	OUTSIDER,
 	ROLE,
 	make_role,
 	make_rule,
@@ -56,3 +57,51 @@ class TestRequestGrant(FrappeTestCase):
 		result = request_grant(DUMMY_ACTION, MANAGER, GOOD_PIN, context={})
 		self.assertTrue(result["authorized"])
 		self.assertTrue(result["grant_token"])
+
+
+class TestSetAuthorizationPin(FrappeTestCase):
+	"""Setting your own PIN is self-service; setting someone else's is an admin action —
+	the same authority as clear_authorization_pin, which is System Manager only.
+	"""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		make_user(MANAGER, [])
+		make_user(OUTSIDER, [])
+
+	def setUp(self):
+		frappe.set_user("Administrator")
+
+	def tearDown(self):
+		frappe.set_user("Administrator")
+
+	def test_setting_own_pin_does_not_require_system_manager(self):
+		pin_store.set_pin(OUTSIDER, GOOD_PIN)
+		frappe.set_user(OUTSIDER)
+
+		result = set_authorization_pin(user=OUTSIDER, new_pin=OTHER_PIN, current_pin=GOOD_PIN)
+
+		self.assertTrue(result["success"])
+
+	def test_setting_anothers_pin_without_system_manager_is_denied(self):
+		frappe.set_user(OUTSIDER)
+		in_test = frappe.flags.in_test
+		frappe.flags.in_test = False
+		try:
+			with self.assertRaises(frappe.PermissionError):
+				set_authorization_pin(user=MANAGER, new_pin=OTHER_PIN)
+		finally:
+			frappe.flags.in_test = in_test
+
+	def test_system_manager_can_set_anothers_pin(self):
+		make_user(OUTSIDER, ["System Manager"])
+		frappe.set_user(OUTSIDER)
+		in_test = frappe.flags.in_test
+		frappe.flags.in_test = False
+		try:
+			result = set_authorization_pin(user=MANAGER, new_pin=OTHER_PIN)
+		finally:
+			frappe.flags.in_test = in_test
+
+		self.assertTrue(result["success"])
