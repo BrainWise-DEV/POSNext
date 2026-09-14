@@ -50,6 +50,7 @@ _asset_version = get_build_version()
 # include js in doctype views
 doctype_js = {
 	"Customer": "public/js/customer.js",
+	"User": "public/js/user.js",
 	"POS Profile": "public/js/pos_profile.js",
 	"Pricing Rule": "public/js/pricing_rule.js",
 	"Promotional Scheme": "public/js/promotional_scheme.js",
@@ -156,8 +157,8 @@ doc_events = {
 		"validate": [
 			"pos_next.api.sales_invoice_hooks.validate",
 			"pos_next.api.wallet.validate_wallet_payment",
-			"pos_next.overrides.pricing_rule.apply_min_max_price_discounts",
 		],
+		"before_submit": "pos_next.authorization.gate.enforce_document",
 		"before_cancel": "pos_next.api.sales_invoice_hooks.before_cancel",
 		"on_submit": [
 			"pos_next.realtime_events.emit_stock_update_event",
@@ -171,15 +172,11 @@ doc_events = {
 		"after_insert": "pos_next.realtime_events.emit_invoice_created_event",
 	},
 	"POS Profile": {"on_update": "pos_next.realtime_events.emit_pos_profile_updated_event"},
-	"Promotional Scheme": {
-		"validate": "pos_next.overrides.pricing_rule.enforce_min_max_pricing_config",
-		"on_update": "pos_next.overrides.pricing_rule.sync_pos_only_to_pricing_rules",
+	"Mode of Payment": {
+		"after_insert": "pos_next.api.wallet.clear_wallet_payment_modes_cache",
+		"on_update": "pos_next.api.wallet.clear_wallet_payment_modes_cache",
+		"on_trash": "pos_next.api.wallet.clear_wallet_payment_modes_cache",
 	},
-	"Pricing Rule": {"validate": "pos_next.overrides.pricing_rule.enforce_min_max_pricing_config"},
-	"Sales Order": {"validate": "pos_next.overrides.pricing_rule.apply_min_max_price_discounts"},
-	"Quotation": {"validate": "pos_next.overrides.pricing_rule.apply_min_max_price_discounts"},
-	"Delivery Note": {"validate": "pos_next.overrides.pricing_rule.apply_min_max_price_discounts"},
-	"POS Invoice": {"validate": "pos_next.overrides.pricing_rule.apply_min_max_price_discounts"},
 }
 
 # Scheduled Tasks
@@ -279,6 +276,15 @@ permission_query_conditions = {
 # default_log_clearing_doctypes = {
 # 	"Logging DocType Name": 30  # days to retain logs
 # }
+
+
+
+# Extension points consumed by POS Next, implemented by optional apps
+pos_next_loyalty_provider = []
+pos_next_bootstrap_settings = []
+pos_next_customer_validators = []
+pos_next_customer_prepare = []
+pos_next_customer_after_insert = []
 
 
 website_route_rules = [

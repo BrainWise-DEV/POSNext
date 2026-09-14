@@ -6,7 +6,11 @@ Handles customer search, creation, and management for POS operations
 import frappe
 from frappe import _
 
-
+from pos_next.integrations.registry import (
+	after_customer_insert,
+	prepare_customer_doc,
+	validate_customer_create,
+)
 @frappe.whitelist()
 def get_customers(search_term="", pos_profile=None, limit=20, modified_since=None):
 	"""
@@ -83,6 +87,9 @@ def create_customer(
 	pos_profile=None,
 	custom_governorate=None,
 	custom_district=None,
+	custom_first_name=None,
+	custom_last_name=None,
+	custom_is_publish=1,
 ):
 	"""
 	Create a new customer from POS.
@@ -97,6 +104,9 @@ def create_customer(
 	    pos_profile (str): POS Profile (optional, preferred for context-aware loyalty assignment)
 	    custom_governorate (str): Governorate (optional)
 	    custom_district (str): District (optional, must belong to the governorate)
+	    custom_first_name (str): First name for Magento sync (required when masar_miraaya installed)
+	    custom_last_name (str): Last name for Magento sync (required when masar_miraaya installed)
+	    custom_is_publish (int): Publish customer to Magento (default 1)
 
 	Returns:
 	    dict: Created customer document
@@ -108,27 +118,20 @@ def create_customer(
 	if not customer_name:
 		frappe.throw(_("Customer name is required"))
 
+	validate_customer_create(
+		customer_name=customer_name,
+		email_id=email_id,
+		custom_first_name=custom_first_name,
+		custom_last_name=custom_last_name,
+	)
+
 	loyalty_program = get_default_loyalty_program_from_settings(
 		company=company,
 		pos_profile=pos_profile,
 	)
 
-	resolved_customer_group = customer_group
-	if not resolved_customer_group:
-		resolved_customer_group = frappe.db.get_single_value("Selling Settings", "customer_group")
-	if not resolved_customer_group:
-		resolved_customer_group = (
-			frappe.db.get_value("Customer Group", {"is_group": 0}, "name", order_by="lft")
-			or "All Customer Groups"
-		)
-
-	resolved_territory = territory
-	if not resolved_territory:
-		resolved_territory = frappe.db.get_single_value("Selling Settings", "territory")
-	if not resolved_territory:
-		resolved_territory = (
-			frappe.db.get_value("Territory", {"is_group": 0}, "name", order_by="lft") or "All Territories"
-		)
+	resolved_customer_group = _resolve_leaf_customer_group(customer_group)
+	resolved_territory = _resolve_leaf_territory(territory)
 
 	customer = frappe.get_doc(
 		{
@@ -145,15 +148,88 @@ def create_customer(
 		}
 	)
 
+	sync_external_customer = prepare_customer_doc(
+		customer,
+		custom_first_name=custom_first_name,
+		custom_last_name=custom_last_name,
+		custom_is_publish=custom_is_publish,
+	)
+
 	frappe.flags.pos_next_customer_company = company
 	frappe.flags.pos_next_customer_pos_profile = pos_profile
 	try:
 		customer.insert()
+		if sync_external_customer:
+			after_customer_insert(
+				customer,
+				email_id=email_id,
+				mobile_no=mobile_no,
+				custom_first_name=custom_first_name,
+				custom_last_name=custom_last_name,
+				custom_is_publish=custom_is_publish,
+			)
 	finally:
 		frappe.flags.pos_next_customer_company = None
 		frappe.flags.pos_next_customer_pos_profile = None
 
 	return customer.as_dict()
+
+
+def _is_leaf_customer_group(name):
+	"""True when name exists and is not a group node."""
+	if not name:
+		return False
+	return frappe.db.get_value("Customer Group", name, "is_group") == 0
+
+
+def _is_leaf_territory(name):
+	"""True when name exists and is not a group node."""
+	if not name:
+		return False
+	return frappe.db.get_value("Territory", name, "is_group") == 0
+
+
+def _resolve_leaf_customer_group(customer_group=None):
+	"""
+	Resolve a non-group Customer Group for POS creates.
+
+	Selling Settings often defaults to 'All Customer Groups' (is_group=1), which
+	ERPNext rejects on Customer.validate. Prefer an explicit leaf, then Selling
+	Settings only if it is a leaf, then any leaf group.
+	"""
+	candidates = [
+		customer_group,
+		frappe.db.get_single_value("Selling Settings", "customer_group"),
+	]
+	for name in candidates:
+		if _is_leaf_customer_group(name):
+			return name
+
+	leaf = frappe.db.get_value("Customer Group", {"is_group": 0}, "name", order_by="lft")
+	if leaf:
+		return leaf
+
+	frappe.throw(_("No non-group Customer Group found. Please create one in Customer Group."))
+
+
+def _resolve_leaf_territory(territory=None):
+	"""Resolve a Territory ERPNext will accept on Customer (prefer non-group)."""
+	candidates = [
+		territory,
+		frappe.db.get_single_value("Selling Settings", "territory"),
+	]
+	for name in candidates:
+		# Territory allows selecting group nodes in some setups; prefer leaves.
+		# Non-leaf / missing names fall through to the next candidate or fallback.
+		if _is_leaf_territory(name):
+			return name
+
+	leaf = frappe.db.get_value("Territory", {"is_group": 0}, "name", order_by="lft")
+	if leaf:
+		return leaf
+
+	# Last resort — ERPNext ships with this; better than failing create.
+	return "All Territories"
 
 
 def get_default_loyalty_program(company):

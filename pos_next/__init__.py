@@ -12,42 +12,6 @@ def console(*data):
 		frappe.publish_realtime("toconsole", data, user=frappe.session.user)
 
 
-# Patch get_other_conditions to exclude pos_only pricing rules from non-POS documents.
-# No Frappe hook exists for non-whitelisted module-level functions (override_whitelisted_methods
-# only works for @frappe.whitelist() HTTP endpoints, override_doctype_class only for DocType
-# classes). This is the standard Python module init approach — runs once at import.
-try:
-	from erpnext.accounts.doctype.pricing_rule import utils as pr_utils
-
-	from pos_next.overrides.pricing_rule import patch_get_other_conditions
-
-	patch_get_other_conditions(pr_utils)
-except Exception:
-	pass
-
-
-try:
-	from erpnext.accounts.doctype.pricing_rule import pricing_rule as _erpnext_pricing_rule
-
-	from pos_next.overrides.pricing_rule import (
-		apply_price_discount_rule as _pos_next_apply_price_discount_rule,
-	)
-
-	_erpnext_pricing_rule.apply_price_discount_rule = _pos_next_apply_price_discount_rule
-except Exception:
-	if frappe:
-		frappe.log_error(frappe.get_traceback(), "Pricing Rule Override Error")
-
-
-try:
-	from erpnext.accounts.doctype.promotional_scheme import promotional_scheme as _promotional_scheme
-
-	for _min_max_field in ("apply_discount_on_price", "min_or_max_discount_qty_limit"):
-		if _min_max_field not in _promotional_scheme.price_discount_fields:
-			_promotional_scheme.price_discount_fields.append(_min_max_field)
-except Exception:
-	if frappe:
-		frappe.log_error(frappe.get_traceback(), "Promotional Scheme Field Patch Error")
 
 # Frappe/ERPNext compatibility shim:
 # ERPNext may pass do_not_round_fields to round_floats_in, but older Frappe
@@ -81,5 +45,17 @@ try:
 	from pos_next.overrides.rounding_compat import patch_round_floats_in_compat
 
 	patch_round_floats_in_compat(document_module)
+except Exception:
+	pass
+
+# Stop `bench run-tests` from wiping a working site's Item Prices. ERPNext's
+# before_tests hook deletes the whole table with raw SQL and commits, leaving no
+# Deleted Document trail. Opt in per site with `preserve_item_prices_in_tests`.
+try:
+	from erpnext.setup import utils as _erpnext_setup_utils
+
+	from pos_next.overrides.test_setup_compat import patch_before_tests
+
+	patch_before_tests(_erpnext_setup_utils)
 except Exception:
 	pass

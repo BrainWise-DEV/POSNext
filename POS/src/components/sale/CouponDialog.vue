@@ -231,6 +231,7 @@
 </template>
 
 <script setup>
+import { promoApi } from "@/utils/promoApi";
 import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency";
 import { Button, Dialog, Input, createResource } from "frappe-ui";
 import { ref, watch } from "vue";
@@ -281,7 +282,7 @@ const errorMessage = ref("");
 
 // Resource to load gift cards
 const giftCardsResource = createResource({
-	url: "pos_next.api.offers.get_active_coupons",
+	url: promoApi.getActiveCoupons(),
 	makeParams() {
 		return {
 			customer: props.customer,
@@ -296,7 +297,7 @@ const giftCardsResource = createResource({
 
 // Resource to validate coupon
 const couponResource = createResource({
-	url: "pos_next.api.offers.validate_coupon",
+	url: promoApi.validateCoupon(),
 	makeParams() {
 		return {
 			coupon_code: couponCode.value,
