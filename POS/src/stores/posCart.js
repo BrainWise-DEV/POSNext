@@ -17,6 +17,11 @@ import {
 } from "@/utils/stockValidator";
 import { syncCartFreeItems } from "@/utils/gwpSameItemFreeRows";
 import { offlineState } from "@/utils/offline/offlineState";
+import {
+	isFreePromoRow,
+	scaleRateForUomChange,
+	shouldPreserveRateOnUomChange,
+} from "@/utils/uomPricingLock";
 import { useToast } from "@/composables/useToast";
 import { defineStore } from "pinia";
 import { computed, nextTick, ref, toRaw, watch } from "vue";
@@ -1367,18 +1372,36 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	}
 
 	/**
-	 * Fetch and apply UOM details from server
+	 * Apply UOM metadata and pricing.
+	 * Free / promo / manually-edited rates must NOT be replaced from the price
+	 * list — that path bypasses the same lock as free-item rate editing (#1/#5).
 	 * @param {Object} cartItem - Cart item to update
 	 * @param {string} newUom - New UOM
 	 * @param {number} qty - Quantity for pricing
 	 */
 	async function applyUomChange(cartItem, newUom, qty) {
+		if (isFreePromoRow(cartItem)) {
+			throw new Error(__("Free promotional items cannot be edited"));
+		}
+
 		const uomData = cartItem.item_uoms?.find((u) => u.uom === newUom);
 		const conversionFactor = uomData?.conversion_factor || 1;
-		const pricing = await resolveUomPricing(cartItem, newUom, conversionFactor, qty);
+		const oldConversion = cartItem.conversion_factor || 1;
 
 		cartItem.uom = newUom;
 		cartItem.conversion_factor = conversionFactor;
+
+		if (shouldPreserveRateOnUomChange(cartItem)) {
+			cartItem.rate = scaleRateForUomChange(cartItem.rate, oldConversion, conversionFactor);
+			cartItem.price_list_rate = scaleRateForUomChange(
+				cartItem.price_list_rate,
+				oldConversion,
+				conversionFactor
+			);
+			return;
+		}
+
+		const pricing = await resolveUomPricing(cartItem, newUom, conversionFactor, qty);
 		cartItem.rate = pricing.rate;
 		cartItem.price_list_rate = pricing.price_list_rate;
 	}
@@ -1393,6 +1416,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		try {
 			const cartItem = findCartItem(itemCode, currentUom, false);
 			if (!cartItem || cartItem.uom === newUom) return;
+			if (isFreePromoRow(cartItem)) {
+				showError(__("Free promotional items cannot be edited"));
+				return;
+			}
 
 			// Check for existing item to merge with
 			const existingItem = findItemWithUom(itemCode, newUom, cartItem);
@@ -1409,7 +1436,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			showSuccess(__("Unit changed to {0}", [newUom]));
 		} catch (error) {
 			console.error("Error changing UOM:", error);
-			showError(__("Failed to update UOM. Please try again."));
+			showError(parseError(error) || __("Failed to update UOM. Please try again."));
 		}
 	}
 

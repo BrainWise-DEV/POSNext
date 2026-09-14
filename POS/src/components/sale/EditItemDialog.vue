@@ -540,6 +540,10 @@ import {
 	roundCurrency,
 } from "@/utils/currency";
 import { call } from "@/utils/apiWrapper";
+import {
+	scaleRateForUomChange,
+	shouldPreserveRateOnUomChange,
+} from "@/utils/uomPricingLock";
 import { Button, FeatherIcon, createResource } from "frappe-ui";
 import { computed, ref, watch } from "vue";
 import SelectInput from "@/components/common/SelectInput.vue";
@@ -943,13 +947,44 @@ async function handleUomChange(newUom) {
 		return;
 	}
 
+	// Free / GWP rows: UOM is locked — refuse any price-list refresh.
+	if (isLockedFreeItem.value) {
+		localUom.value = localItem.value.uom || localItem.value.stock_uom;
+		return;
+	}
+
+	const oldConversion = Number(localItem.value.conversion_factor) || 1;
+	const newConversionFactor = getConversionFactorForUom(selectedUom);
+
+	// Promo / manual-rate lock: scale current rates — never fetch price list.
+	if (hasPricingRules.value || shouldPreserveRateOnUomChange(localItem.value)) {
+		const scaledRate = roundCurrency(
+			scaleRateForUomChange(localRate.value, oldConversion, newConversionFactor)
+		);
+		const scaledListRate = roundCurrency(
+			scaleRateForUomChange(
+				originalPriceListRate.value,
+				oldConversion,
+				newConversionFactor
+			)
+		);
+
+		localRate.value = scaledRate;
+		originalPriceListRate.value = scaledListRate;
+		localItem.value.uom = selectedUom;
+		localItem.value.conversion_factor = newConversionFactor;
+		localItem.value.rate = scaledRate;
+		localItem.value.price_list_rate = scaledListRate;
+		calculateTotals();
+		return;
+	}
+
 	const requestId = ++uomRateRequestId.value;
 	const fetchedRate = await getRateForUom(selectedUom);
 	// Ignore stale responses if user changes UOM repeatedly.
 	if (requestId !== uomRateRequestId.value) return;
 
 	const newRate = roundCurrency(fetchedRate);
-	const newConversionFactor = getConversionFactorForUom(selectedUom);
 
 	// Keep local state consistent so update payload has correct UOM pricing metadata.
 	localRate.value = newRate;

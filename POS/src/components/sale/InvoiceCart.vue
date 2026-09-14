@@ -2355,6 +2355,11 @@ function toggleUomDropdown(itemCode, uom) {
  * Handles merging if target UOM already exists in cart
  */
 async function selectUom(item, newUom) {
+	// Defense in depth: free/GWP rows stay promotion-owned even if UI disable fails.
+	if (isLockedFreeRow(item)) {
+		openUomDropdown.value = null;
+		return;
+	}
 	if (item.uom === newUom) {
 		openUomDropdown.value = null;
 		return;
