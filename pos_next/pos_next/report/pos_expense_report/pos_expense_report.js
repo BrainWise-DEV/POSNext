@@ -42,10 +42,10 @@ frappe.query_reports["POS Expense Report"] = {
 			options: "Mode of Payment",
 		},
 		{
-			fieldname: "employee",
-			label: __("Employee"),
+			fieldname: "cashier",
+			label: __("Cashier"),
 			fieldtype: "Link",
-			options: "Employee",
+			options: "User",
 		},
 	],
 };

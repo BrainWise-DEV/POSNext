@@ -70,21 +70,14 @@ def get_columns():
 			"width": 140,
 		},
 		{
-			"fieldname": "employee",
-			"label": _("Employee"),
-			"fieldtype": "Link",
-			"options": "Employee",
-			"width": 140,
-		},
-		{
 			"fieldname": "remarks",
 			"label": _("Remarks"),
 			"fieldtype": "Data",
 			"width": 220,
 		},
 		{
-			"fieldname": "created_by",
-			"label": _("Created By"),
+			"fieldname": "cashier",
+			"label": _("Cashier"),
 			"fieldtype": "Link",
 			"options": "User",
 			"width": 140,
@@ -119,9 +112,9 @@ def get_data(filters):
 		conditions.append("je.posa_expense_mode_of_payment = %(mode_of_payment)s")
 		values["mode_of_payment"] = filters["mode_of_payment"]
 
-	if filters.get("employee"):
-		conditions.append("je.posa_expense_employee = %(employee)s")
-		values["employee"] = filters["employee"]
+	if filters.get("cashier"):
+		conditions.append("je.owner = %(cashier)s")
+		values["cashier"] = filters["cashier"]
 
 	rows = frappe.db.sql(
 		f"""
@@ -134,9 +127,8 @@ def get_data(filters):
 			je.posa_expense_account AS expense_account,
 			COALESCE(SUM(jea.credit), 0) AS amount,
 			je.posa_expense_mode_of_payment AS mode_of_payment,
-			je.posa_expense_employee AS employee,
 			je.user_remark AS remarks,
-			je.owner AS created_by
+			je.owner AS cashier
 		FROM `tabJournal Entry` je
 		INNER JOIN `tabJournal Entry Account` jea
 			ON jea.parent = je.name AND jea.credit > 0

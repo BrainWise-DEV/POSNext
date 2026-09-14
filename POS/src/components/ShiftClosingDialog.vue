@@ -552,7 +552,7 @@
 										<th
 											class="px-4 py-3 text-start text-xs font-medium text-gray-500 uppercase"
 										>
-											{{ __("Employee") }}
+											{{ __("Cashier") }}
 										</th>
 										<th
 											class="px-4 py-3 text-start text-xs font-medium text-gray-500 uppercase"
@@ -578,7 +578,7 @@
 											{{ formatCurrency(expense.amount) }}
 										</td>
 										<td class="px-4 py-3 text-sm text-gray-600 text-start">
-											{{ expense.employee || __("N/A") }}
+											{{ expense.cashier || __("N/A") }}
 										</td>
 										<td class="px-4 py-3 text-sm text-gray-600 text-start">
 											{{ expense.remarks || __("N/A") }}

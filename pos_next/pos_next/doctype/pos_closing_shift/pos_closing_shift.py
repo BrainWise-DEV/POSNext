@@ -642,7 +642,7 @@ def make_closing_shift_from_opening(opening_shift):
 					"journal_entry": expense.journal_entry,
 					"expense_account": expense.expense_account,
 					"amount": expense_amount,
-					"employee": expense.employee or "",
+					"cashier": expense.cashier or expense.owner or "",
 					"remarks": expense.remarks or "",
 				}
 			)
