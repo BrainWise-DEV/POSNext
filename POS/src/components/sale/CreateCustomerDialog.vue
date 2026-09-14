@@ -478,6 +478,23 @@ const updateMobileNumber = () => {
 		: phoneNumber.value;
 };
 
+/** Split stored mobile into ISD + national number (supports legacy formats). */
+const hydrateMobileFields = (mobile) => {
+	if (!mobile) {
+		phoneNumber.value = "";
+		return;
+	}
+	customerData.value.mobile_no = mobile;
+	const parsed = countriesStore.parsePhoneNumber(mobile);
+	if (parsed.isd) {
+		selectedCountryCode.value = parsed.isd;
+		phoneNumber.value = parsed.number;
+	} else {
+		// Leave selectedCountryCode for applyDefaultCountryCode (profile / fallback)
+		phoneNumber.value = parsed.number || mobile;
+	}
+};
+
 const handleClickOutside = (event) => {
 	if (dropdownRef.value && !dropdownRef.value.contains(event.target)) {
 		showCountryDropdown.value = false;
@@ -536,20 +553,27 @@ const resolvePosProfileCountry = async () => {
 };
 
 /**
- * Apply default mobile ISD once when opening Create Customer.
- * Does nothing in edit mode, and never re-applies after open / user pick.
+ * Apply default mobile ISD once when opening the dialog if still unset.
+ * Also covers edit mode for legacy customers whose mobile_no has no ISD separator.
+ * Never re-applies after open / user pick.
  */
 const applyDefaultCountryCode = async () => {
-	if (isEditMode.value || defaultCountryApplied.value || selectedCountryCode.value) {
+	if (defaultCountryApplied.value || selectedCountryCode.value) {
 		defaultCountryApplied.value = true;
 		return;
 	}
 
 	await countriesStore.loadCountries();
 
-	// Bail if cashier already picked a code while countries were loading
+	// Re-parse stored mobile now that ISD list is available (e.g. "+2010..." without "-")
+	if (!selectedCountryCode.value && customerData.value.mobile_no) {
+		hydrateMobileFields(customerData.value.mobile_no);
+	}
+
+	// Bail if cashier already picked a code while countries were loading, or parse found ISD
 	if (selectedCountryCode.value) {
 		defaultCountryApplied.value = true;
+		if (phoneNumber.value) updateMobileNumber();
 		return;
 	}
 
@@ -557,6 +581,7 @@ const applyDefaultCountryCode = async () => {
 
 	if (selectedCountryCode.value) {
 		defaultCountryApplied.value = true;
+		if (phoneNumber.value) updateMobileNumber();
 		return;
 	}
 
@@ -570,6 +595,8 @@ const applyDefaultCountryCode = async () => {
 		log.warn(`Falling back to default ISD ${fallback}`);
 	}
 	defaultCountryApplied.value = true;
+	// Legacy edit: keep Save enabled and normalize mobile once ISD is resolved
+	if (phoneNumber.value) updateMobileNumber();
 };
 
 /** Auto-set territory based on selected country (exact or fuzzy match) */
@@ -875,16 +902,9 @@ watch(
 
 			customerData.value.custom_governorate = customer.custom_governorate || "";
 			customerData.value.custom_district = customer.custom_district || "";
-			// Handle mobile_no with country code
+			// Handle mobile_no (with or without country-code separator)
 			if (customer.mobile_no) {
-				customerData.value.mobile_no = customer.mobile_no;
-				if (customer.mobile_no.includes("-")) {
-					const [code, ...rest] = customer.mobile_no.split("-");
-					selectedCountryCode.value = code;
-					phoneNumber.value = rest.join("-");
-				} else {
-					phoneNumber.value = customer.mobile_no;
-				}
+				hydrateMobileFields(customer.mobile_no);
 			}
 		}
 	},
@@ -895,10 +915,11 @@ watch(
 	() => customerData.value.mobile_no,
 	(value) => {
 		// Only sync from stored mobile when editing; never overwrite create-mode default
-		if (!isEditMode.value || !value?.includes("-")) return;
-		const [code, ...rest] = value.split("-");
-		selectedCountryCode.value = code;
-		phoneNumber.value = rest.join("-");
+		if (!isEditMode.value || !value) return;
+		const parsed = countriesStore.parsePhoneNumber(value);
+		if (!parsed.isd) return;
+		selectedCountryCode.value = parsed.isd;
+		phoneNumber.value = parsed.number;
 	}
 );
 
