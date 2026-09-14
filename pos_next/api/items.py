@@ -307,6 +307,23 @@ def get_item_detail(item, doc=None, warehouse=None, price_list=None, company=Non
 	return res
 
 
+def get_uom_prices(item_code, price_list):
+	"""Return a {uom: price_list_rate} map for an item in the given price list."""
+	if not price_list:
+		return {}
+
+	ItemPrice = DocType("Item Price")
+	prices = (
+		frappe.qb.from_(ItemPrice)
+		.select(ItemPrice.uom, ItemPrice.price_list_rate)
+		.where(ItemPrice.item_code == item_code)
+		.where(ItemPrice.price_list == price_list)
+		.run(as_dict=True)
+	)
+
+	return {p["uom"]: p["price_list_rate"] for p in prices if p["uom"]}
+
+
 @frappe.whitelist()
 def search_by_barcode(barcode, pos_profile):
 	"""Search item by barcode"""
@@ -368,6 +385,47 @@ def search_by_barcode(barcode, pos_profile):
 		if not item_doc.is_sales_item:
 			frappe.throw(_("Item {0} is not allowed for sales").format(item_code))
 
+		# Template items (has_variants=1) have no price or stock of their own and
+		# ERPNext's get_item_details refuses to build details for them ("Item {0} is a
+		# template, please select one of its variants"). When the barcode is tagged on
+		# the template, return a lightweight payload instead so the UI opens the
+		# variant selection dialog — same path as clicking the template in the grid.
+		if item_doc.has_variants:
+			template_details = {
+				"item_code": item_code,
+				"item_name": item_doc.item_name,
+				"description": item_doc.description,
+				"image": item_doc.image,
+				"item_group": item_doc.item_group,
+				"brand": item_doc.brand,
+				"stock_uom": item_doc.stock_uom,
+				"uom": barcode_uom or item_doc.stock_uom,
+				"has_variants": 1,
+				"is_stock_item": item_doc.is_stock_item or 0,
+				"has_batch_no": item_doc.has_batch_no or 0,
+				"has_serial_no": item_doc.has_serial_no or 0,
+				"qty": 1,
+				"rate": 0,
+				"price_list_rate": 0,
+				"warehouse": pos_profile_doc.warehouse,
+				"uom_prices": get_uom_prices(item_code, pos_profile_doc.selling_price_list),
+				"item_uoms": [],
+			}
+
+			# Carry weighted/priced barcode data through so the variant dialog can
+			# pre-fill the scanned quantity once a variant is picked.
+			if resolved_barcode_data:
+				from pos_next.services.barcode import compute_resolved_item_data
+
+				resolved_item_data = compute_resolved_item_data(
+					resolved_barcode_data,
+					item=template_details,
+				)
+				if resolved_item_data:
+					template_details.update(resolved_item_data)
+
+			return template_details
+
 		# Prepare item dict for get_item_detail
 		item = {
 			"item_code": item_code,
@@ -393,21 +451,7 @@ def search_by_barcode(barcode, pos_profile):
 		item_details["warehouse"] = pos_profile_doc.warehouse
 
 		# Build uom_prices map (same pattern as get_items)
-		uom_prices = {}
-		if pos_profile_doc.selling_price_list:
-			ItemPrice = DocType("Item Price")
-			prices = (
-				frappe.qb.from_(ItemPrice)
-				.select(ItemPrice.uom, ItemPrice.price_list_rate)
-				.where(ItemPrice.item_code == item_code)
-				.where(ItemPrice.price_list == pos_profile_doc.selling_price_list)
-				.run(as_dict=True)
-			)
-			for p in prices:
-				if p["uom"]:
-					uom_prices[p["uom"]] = p["price_list_rate"]
-
-		item_details["uom_prices"] = uom_prices
+		item_details["uom_prices"] = get_uom_prices(item_code, pos_profile_doc.selling_price_list)
 
 		# Apply resolved barcode data (weighted/priced) to the item details
 		if resolved_barcode_data:

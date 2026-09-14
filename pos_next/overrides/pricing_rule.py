@@ -40,6 +40,32 @@ def _has_pos_only_column():
 	return result
 
 
+def set_batch_title(doc, method=None):
+	"""Keep the Pricing Rule title in sync with its item/batch on every save.
+
+	Item Code pricing rules created for POS Next (see custom_batch on
+	Pricing Rule Item Code) are single-item, batch-specific rules, so the
+	title is derived automatically ("Item Name - Item Code - Batch") instead
+	of being hand-typed and left to drift whenever the item or batch changes.
+	"""
+	if doc.apply_on != "Item Code" or not doc.get("items"):
+		return
+
+	labels = []
+	for row in doc.items:
+		if not row.item_code:
+			continue
+
+		item_name = frappe.get_cached_value("Item", row.item_code, "item_name") or row.item_code
+		label = f"{item_name} - {row.item_code}"
+		if row.get("custom_batch"):
+			label += f" - {row.custom_batch}"
+		labels.append(label)
+
+	if labels:
+		doc.title = ", ".join(labels)
+
+
 def sync_pos_only_to_pricing_rules(doc, method=None):
 	"""Sync POS Next custom flags from Promotional Scheme to its generated Pricing Rules.
 

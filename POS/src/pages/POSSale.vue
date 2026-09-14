@@ -1872,6 +1872,15 @@ async function handleShiftClosed() {
 }
 
 function handleItemSelected(item, autoAdd = false) {
+	// A template item cannot be sold directly — a variant must be picked first.
+	// This applies even in auto-add/scanner mode, where the barcode is tagged on
+	// the template rather than on an individual variant.
+	if (item?.has_variants) {
+		cartStore.setPendingItem(item, item.resolved_qty || 1, "variant");
+		uiStore.showItemSelectionDialog = true;
+		return;
+	}
+
 	// Auto-add mode
 	if (autoAdd) {
 		try {
@@ -1909,11 +1918,7 @@ function handleItemSelected(item, autoAdd = false) {
 
 	// Early out-of-stock guard — prevent opening dialogs for zero-stock items
 	// Full qty validation happens in cartStore.addItem()
-	if (
-		!item.has_variants &&
-		settingsStore.shouldEnforceStockValidation() &&
-		shouldValidateItemStock(item)
-	) {
+	if (settingsStore.shouldEnforceStockValidation() && shouldValidateItemStock(item)) {
 		const actualQty = item.actual_qty ?? item.stock_qty ?? 0;
 		if (actualQty <= 0) {
 			uiStore.showError(
@@ -1926,13 +1931,6 @@ function handleItemSelected(item, autoAdd = false) {
 			);
 			return;
 		}
-	}
-
-	// Check for variants
-	if (item.has_variants) {
-		cartStore.setPendingItem(item, 1, "variant");
-		uiStore.showItemSelectionDialog = true;
-		return;
 	}
 
 	// Check for UOMs

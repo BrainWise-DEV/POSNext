@@ -176,6 +176,17 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 	// Actions
 	function addItem(item, qty = 1, _autoAdd = false, currentProfile = null) {
+		// A template item has no price or stock of its own and ERPNext rejects it on
+		// submit. Callers must resolve it to a variant first (variant selection
+		// dialog) — guard here so no path can put a template in the cart.
+		if (item?.has_variants) {
+			throw new Error(
+				__("{0} is a template — please select one of its variants.", [
+					item.item_name || item.item_code,
+				])
+			);
+		}
+
 		if (
 			currentProfile &&
 			settingsStore.shouldEnforceStockValidation() &&
