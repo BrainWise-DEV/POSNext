@@ -146,12 +146,19 @@ class TestMagentoSplitSmoke(unittest.TestCase):
 			import pos_next.api.magento_loyalty  # noqa: F401
 
 	def test_integration_flag_defaults_live_in_constants(self):
-		from pos_next.api.constants import DEFAULT_POS_SETTINGS
+		from pos_next.api.constants import DEFAULT_POS_SETTINGS, merge_pos_settings
 
 		self.assertIn("miraaya_installed", DEFAULT_POS_SETTINGS)
 		self.assertIn("magento_loyalty_available", DEFAULT_POS_SETTINGS)
 		self.assertEqual(DEFAULT_POS_SETTINGS["miraaya_installed"], 0)
 		self.assertEqual(DEFAULT_POS_SETTINGS["magento_loyalty_available"], 0)
+
+		# Existing DB rows omit runtime flags; merge must still seed them.
+		merged = merge_pos_settings({"name": "ps-1", "enabled": 1, "cart_lifo": 1})
+		self.assertEqual(merged["miraaya_installed"], 0)
+		self.assertEqual(merged["magento_loyalty_available"], 0)
+		self.assertEqual(merged["cart_lifo"], 1)
+		self.assertEqual(merged["name"], "ps-1")
 
 	@patch("pos_next.api.wallet.is_external_loyalty_mode", return_value=False)
 	def test_wallet_balance_without_magento_mode(self, _mock_mode):

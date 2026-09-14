@@ -30,7 +30,7 @@ from frappe.query_builder import DocType
 from frappe.query_builder.functions import Coalesce
 from frappe.utils import get_system_timezone
 
-from pos_next.api.constants import DEFAULT_POS_SETTINGS, POS_SETTINGS_FIELDS
+from pos_next.api.constants import DEFAULT_POS_SETTINGS, POS_SETTINGS_FIELDS, merge_pos_settings
 
 
 @frappe.whitelist()
@@ -233,15 +233,13 @@ def _get_pos_settings(pos_profile_doc):
 		dict: POS Settings with derived values
 	"""
 	try:
-		settings = (
-			frappe.db.get_value(
-				"POS Settings",
-				{"pos_profile": pos_profile_doc.name, "enabled": 1},
-				POS_SETTINGS_FIELDS,
-				as_dict=True,
-			)
-			or DEFAULT_POS_SETTINGS.copy()
+		row = frappe.db.get_value(
+			"POS Settings",
+			{"pos_profile": pos_profile_doc.name, "enabled": 1},
+			POS_SETTINGS_FIELDS,
+			as_dict=True,
 		)
+		settings = merge_pos_settings(row)
 
 		# Derive from POS Profile (single source of truth)
 		settings["allow_write_off_change"] = (

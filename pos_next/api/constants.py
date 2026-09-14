@@ -84,3 +84,16 @@ DEFAULT_POS_SETTINGS = {
 	"miraaya_installed": 0,
 	"cart_lifo": 0,
 }
+
+
+def merge_pos_settings(row=None):
+	"""DB row over defaults so runtime integration flags always exist.
+
+	`miraaya_installed` / `magento_loyalty_available` are not DocType columns;
+	hooks may overwrite them, but vanilla benches still need the keys present
+	when a POS Settings row exists (defaults alone only apply on miss/error).
+	"""
+	settings = DEFAULT_POS_SETTINGS.copy()
+	if row:
+		settings.update(row)
+	return settings
