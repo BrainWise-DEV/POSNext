@@ -175,7 +175,9 @@ def set_authorization_pin(user: str, new_pin: str, current_pin: str | None = Non
 		if pin_store.has_pin(user) and not pin_store.verify(user, current_pin):
 			return {"success": False, "message": _("Current PIN is incorrect")}
 	else:
-		frappe.has_permission("User", ptype="write", doc=user, throw=True)
+		# Setting someone else's PIN is an admin action, same as clearing one —
+		# generic User-write permission is far broader than the authority this grants.
+		frappe.only_for("System Manager")
 
 	pin_store.set_pin(user, new_pin)
 	log.record(action="set_authorization_pin", approver=user, result=log.RESULT_PIN_SET)

@@ -536,11 +536,15 @@ const resolvePosProfileCountry = async () => {
 };
 
 /**
- * Apply default mobile ISD once when opening Create Customer.
- * Does nothing in edit mode, and never re-applies after open / user pick.
+ * Apply a default mobile ISD once when opening the dialog, unless one is already
+ * set. In create mode that's every time (no code picked yet); in edit mode it's a
+ * gap-filler for customers whose stored mobile_no predates the ISD-prefix format
+ * (no "-" for the customer-prop watcher to split on) — without this, such a
+ * customer can never satisfy canSubmitCustomer and Save Changes stays disabled.
+ * Never re-applies after open / user pick.
  */
 const applyDefaultCountryCode = async () => {
-	if (isEditMode.value || defaultCountryApplied.value || selectedCountryCode.value) {
+	if (defaultCountryApplied.value || selectedCountryCode.value) {
 		defaultCountryApplied.value = true;
 		return;
 	}
