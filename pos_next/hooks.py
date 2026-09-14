@@ -51,6 +51,9 @@ _asset_version = get_build_version()
 doctype_js = {
 	"Customer": "public/js/customer.js",
 	"User": "public/js/user.js",
+	"POS Profile": "public/js/pos_profile.js",
+	"Pricing Rule": "public/js/pricing_rule.js",
+	"Promotional Scheme": "public/js/promotional_scheme.js",
 }
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
@@ -92,7 +95,7 @@ jinja = {
 # --------
 fixtures = [
 	{"dt": "Role", "filters": [["role_name", "in", ["POSNext Cashier", "Nexus POS Manager"]]]},
-	{"dt": "Custom DocPerm", "filters": [["role", "in", ["POSNext Cashier"]]]},
+	{"dt": "Custom DocPerm", "filters": [["role", "in", ["POSNext Cashier", "Nexus POS Manager"]]]},
 ]
 
 # Installation
@@ -256,6 +259,12 @@ scheduler_events = {
 
 # Authentication and authorization
 # --------------------------------
+
+# Restrict Nexus POS Manager Journal Entry desk/report access to POS expenses only.
+# Broader accounting roles are left unrestricted (see get_journal_entry_permission_query_conditions).
+permission_query_conditions = {
+	"Journal Entry": "pos_next.api.expenses.get_journal_entry_permission_query_conditions",
+}
 
 # auth_hooks = [
 # 	"pos_next.auth.validate"
