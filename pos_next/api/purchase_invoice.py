@@ -96,15 +96,24 @@ def update_item_pricing_rules(doc, method):
         batch_no = row.batch_no
 
         # Pricing Rule has no direct item_code/batch fields (they live in the
-        # child table), so the title is used as the lookup key instead - same
-        # role the item_code/batch_no filters play for Item Price above.
-        title = (
-            f"PI Discount - {row.item_code} - {batch_no}"
-            if batch_no
-            else f"PI Discount - {row.item_code}"
+        # child table), so look up the existing rule via a join instead -
+        # same role the item_code/batch_no filters play for Item Price above.
+        # (title is no longer usable as a lookup key: it's auto-derived from
+        # item name/code/batch on every save, see overrides/pricing_rule.py)
+        existing = frappe.db.sql(
+            """
+            select pr.name
+            from `tabPricing Rule` pr
+            inner join `tabPricing Rule Item Code` pric on pric.parent = pr.name
+            where pr.company = %(company)s
+                and pr.apply_on = 'Item Code'
+                and pric.item_code = %(item_code)s
+                and ifnull(pric.custom_batch, '') = %(batch_no)s
+            limit 1
+            """,
+            {"company": doc.company, "item_code": row.item_code, "batch_no": batch_no or ""},
         )
-
-        existing = frappe.db.get_value("Pricing Rule", {"title": title}, "name")
+        existing = existing[0][0] if existing else None
 
         if existing:
             # Update existing Pricing Rule
@@ -117,7 +126,6 @@ def update_item_pricing_rules(doc, method):
         else:
             # Create new Pricing Rule
             pricing_rule = frappe.new_doc("Pricing Rule")
-            pricing_rule.title = title
             pricing_rule.apply_on = "Item Code"
             pricing_rule.price_or_product_discount = "Price"
             pricing_rule.selling = 1
