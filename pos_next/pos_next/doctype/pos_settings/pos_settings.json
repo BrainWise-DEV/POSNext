@@ -37,6 +37,7 @@
   "display_discount_percentage",
   "display_discount_amount",
   "show_variants_as_items",
+  "cart_lifo",
   "section_break_operations",
   "allow_sales_order",
   "allow_select_sales_order",
@@ -302,6 +303,13 @@
    "fieldname": "show_variants_as_items",
    "fieldtype": "Check",
    "label": "Show Variants as Items"
+  },
+  {
+   "default": "0",
+   "description": "Show most recently added item at the top of the cart",
+   "fieldname": "cart_lifo",
+   "fieldtype": "Check",
+   "label": "LIFO Cart Order (Newest on Top)"
   },
   {
    "collapsible": 1,

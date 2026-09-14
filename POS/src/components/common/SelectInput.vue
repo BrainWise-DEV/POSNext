@@ -84,19 +84,45 @@
 							:ref="(el) => (optionRefs[index] = el)"
 							tabindex="0"
 							role="option"
-							:aria-selected="option.value === modelValue"
+							:aria-selected="isSelected(option.value)"
 							class="px-2 py-1.5 text-base cursor-pointer text-start transition-colors focus:outline-none"
 							:class="
-								option.value === modelValue
+								isSelected(option.value)
 									? 'bg-blue-50 text-blue-700'
 									: 'text-gray-800 hover:bg-gray-100 focus:bg-gray-100'
 							"
 						>
-							<div v-if="option.subtitle" class="flex flex-col">
-								<span class="text-sm font-medium">{{ option.label }}</span>
-								<span class="text-xs text-gray-500">{{ option.subtitle }}</span>
+							<div class="flex items-center gap-2">
+								<span
+									v-if="multiple"
+									class="flex-shrink-0 w-4 h-4 border rounded flex items-center justify-center"
+									:class="
+										isSelected(option.value)
+											? 'bg-blue-600 border-blue-600 text-white'
+											: 'border-gray-300 bg-white'
+									"
+								>
+									<svg
+										v-if="isSelected(option.value)"
+										class="w-3 h-3"
+										fill="none"
+										stroke="currentColor"
+										viewBox="0 0 24 24"
+									>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											stroke-width="3"
+											d="M5 13l4 4L19 7"
+										/>
+									</svg>
+								</span>
+								<div v-if="option.subtitle" class="flex flex-col min-w-0">
+									<span class="text-sm font-medium">{{ option.label }}</span>
+									<span class="text-xs text-gray-500">{{ option.subtitle }}</span>
+								</div>
+								<span v-else class="min-w-0 truncate">{{ option.label }}</span>
 							</div>
-							<span v-else>{{ option.label }}</span>
 						</div>
 					</div>
 				</div>
@@ -115,7 +141,7 @@ defineOptions({
 
 const props = defineProps({
 	modelValue: {
-		type: [String, Number],
+		type: [String, Number, Array],
 		default: "",
 	},
 	options: {
@@ -150,6 +176,10 @@ const props = defineProps({
 		type: Number,
 		default: 50, // Limit displayed options for performance
 	},
+	multiple: {
+		type: Boolean,
+		default: false,
+	},
 });
 
 const emit = defineEmits(["update:modelValue", "change"]);
@@ -163,10 +193,30 @@ const optionRefs = ref([]);
 const dropdownPosition = ref({ top: 0, left: 0, width: 0 });
 const searchQuery = ref("");
 
+const selectedValues = computed(() => {
+	if (props.multiple) {
+		return Array.isArray(props.modelValue) ? props.modelValue : [];
+	}
+	return props.modelValue === 0 || props.modelValue ? [props.modelValue] : [];
+});
+
 const selectedLabel = computed(() => {
+	if (props.multiple) {
+		const count = selectedValues.value.length;
+		if (!count) return "";
+		if (count === 1) {
+			const selected = props.options.find((opt) => opt.value === selectedValues.value[0]);
+			return selected?.label || String(selectedValues.value[0]);
+		}
+		return `${count} selected`;
+	}
 	const selected = props.options.find((opt) => opt.value === props.modelValue);
 	return selected?.label || "";
 });
+
+function isSelected(value) {
+	return selectedValues.value.includes(value);
+}
 
 const filteredOptions = computed(() => {
 	let result = props.options;
@@ -237,6 +287,18 @@ function openAndFocusFirst() {
 }
 
 function selectOption(option) {
+	if (props.multiple) {
+		const current = [...selectedValues.value];
+		const idx = current.indexOf(option.value);
+		if (idx >= 0) {
+			current.splice(idx, 1);
+		} else {
+			current.push(option.value);
+		}
+		emit("update:modelValue", current);
+		emit("change", current);
+		return;
+	}
 	emit("update:modelValue", option.value);
 	emit("change", option.value);
 	close();

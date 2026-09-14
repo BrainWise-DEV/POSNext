@@ -434,6 +434,68 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 		clearBaseCache();
 	}
 
+	/**
+	 * Insert or update a single item inside one of the tracked lists.
+	 * Used after a product is edited so the POS reflects the change without
+	 * a full reload.
+	 */
+	function upsertItemInList(listRef, versionRef, registrySet, updatedItem) {
+		if (!updatedItem?.item_code) return;
+
+		const index = listRef.value.findIndex((item) => item.item_code === updatedItem.item_code);
+
+		if (index >= 0) {
+			Object.assign(listRef.value[index], updatedItem);
+			stockStore.init([listRef.value[index]]);
+		} else {
+			listRef.value.unshift(updatedItem);
+			registerItems([updatedItem], registrySet);
+		}
+
+		versionRef.value += 1;
+		clearBaseCache();
+	}
+
+	/**
+	 * Re-fetch one item from the server and refresh it in place across the
+	 * browse list, the search results and the offline cache.
+	 */
+	async function refreshItem(itemCode, profile = posProfile.value) {
+		if (!itemCode || !profile) return null;
+
+		try {
+			const items = await call("pos_next.api.items.get_items", {
+				pos_profile: profile,
+				search_term: itemCode,
+				start: 0,
+				limit: 5,
+				include_variants: 1,
+				show_variants_as_items: getShowVariantsFlag(),
+			});
+
+			const list = items?.message || items || [];
+			const updatedItem = list.find((item) => item.item_code === itemCode);
+			if (!updatedItem) return null;
+
+			upsertItemInList(allItems, allItemsVersion, registeredAllItems, updatedItem);
+			upsertItemInList(
+				searchResults,
+				searchResultsVersion,
+				registeredSearchItems,
+				updatedItem
+			);
+
+			offlineWorker.cacheItems([updatedItem]).catch((error) => {
+				log.warn("Failed to cache refreshed item", error.message);
+			});
+
+			return updatedItem;
+		} catch (error) {
+			log.error("Error refreshing item", error);
+			return null;
+		}
+	}
+
 	// ========================================================================
 	// FILTERED ITEMS WITH INTELLIGENT CACHING
 	// ========================================================================
@@ -580,43 +642,47 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 				let compareResult = 0;
 
 				switch (sortBy.value) {
-					case "name":
+					case "name": {
 						// Sort by item_name alphabetically
 						const nameA = (a.item_name || "").toLowerCase();
 						const nameB = (b.item_name || "").toLowerCase();
 						compareResult = nameA.localeCompare(nameB);
 						break;
+					}
 
-					case "brand":
+					case "brand": {
 						// Sort by brand alphabetically
 						const brandA = (a.brand || "").toLowerCase();
 						const brandB = (b.brand || "").toLowerCase();
 						compareResult = brandA.localeCompare(brandB);
 						break;
+					}
 
 					case "quantity":
 						// Sort by stock quantity
 						compareResult = (a.actual_qty ?? 0) - (b.actual_qty ?? 0);
 						break;
 
-					case "item_group":
+					case "item_group": {
 						// Sort by item_group alphabetically
 						const groupA = (a.item_group || "").toLowerCase();
 						const groupB = (b.item_group || "").toLowerCase();
 						compareResult = groupA.localeCompare(groupB);
 						break;
+					}
 
 					case "price":
 						// Sort by price_list_rate (standard selling rate)
 						compareResult = (a.price_list_rate ?? 0) - (b.price_list_rate ?? 0);
 						break;
 
-					case "item_code":
+					case "item_code": {
 						// Sort by item_code alphabetically
 						const codeA = (a.item_code || "").toLowerCase();
 						const codeB = (b.item_code || "").toLowerCase();
 						compareResult = codeA.localeCompare(codeB);
 						break;
+					}
 
 					default:
 						// No sorting
@@ -1415,7 +1481,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 
 		// Use already-fetched total from loadAllItems (stored in reactive ref)
 		// Avoids a duplicate get_items_count API call
-		let syncTotalItems = totalServerItems.value || 0;
+		const syncTotalItems = totalServerItems.value || 0;
 		log.info(`Total server items (from loadAllItems): ${syncTotalItems}`);
 
 		// Dynamic IndexedDB batch size — larger catalogs benefit from fewer transactions
@@ -2303,6 +2369,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 		stopBackgroundCacheSync,
 		cleanup,
 		invalidateCache,
+		refreshItem,
 		setSortFilter,
 		clearSortFilter,
 

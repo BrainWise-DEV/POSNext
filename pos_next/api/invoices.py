@@ -442,28 +442,48 @@ def _get_available_stock(item):
 def _collect_stock_errors(items):
 	"""Return list of items exceeding available stock.
 
+	Sums qty per (item_code, warehouse, batch_no) so:
+	- paid + free rows of the same SKU (and same batch) are checked together
+	- different products are never combined
+	- different batches of the same SKU are checked against their own batch qty
+	  (aggregating only by item+warehouse would compare total demand to one
+	  sample batch and allow overselling other batches)
+
 	Respects per-item allow_negative_stock if the field exists on Item.
 	"""
 	allowed_items = _get_item_negative_stock_allow_set(items)
-	errors = []
+	requested_by_key = {}
+	sample_by_key = {}
 	for d in items:
 		if flt(d.get("qty")) < 0:
 			continue
-
-		available = _get_available_stock(d)
+		item_code = d.get("item_code")
+		warehouse = d.get("warehouse")
+		if not item_code or not warehouse:
+			continue
 		requested = flt(d.get("stock_qty") or (flt(d.get("qty")) * flt(d.get("conversion_factor") or 1)))
+		batch_no = d.get("batch_no") or ""
+		key = (item_code, warehouse, batch_no)
+		requested_by_key[key] = requested_by_key.get(key, 0) + requested
+		sample_by_key[key] = d
 
+	errors = []
+	for key, requested in requested_by_key.items():
+		item_code, warehouse, batch_no = key
+		if item_code in allowed_items:
+			continue
+		sample = sample_by_key[key]
+		available = _get_available_stock(sample)
 		if requested > available:
-			if d.get("item_code") in allowed_items:
-				continue
-			errors.append(
-				{
-					"item_code": d.get("item_code"),
-					"warehouse": d.get("warehouse"),
-					"requested_qty": requested,
-					"available_qty": available,
-				}
-			)
+			error = {
+				"item_code": item_code,
+				"warehouse": warehouse,
+				"requested_qty": requested,
+				"available_qty": available,
+			}
+			if batch_no:
+				error["batch_no"] = batch_no
+			errors.append(error)
 
 	return errors
 
@@ -1461,6 +1481,10 @@ def submit_invoice(invoice=None, data=None):
 		frappe.flags.ignore_account_permission = True
 		invoice_doc.save()
 
+		from pos_next.authorization.gate import TOKEN_FLAG
+
+		invoice_doc.flags[TOKEN_FLAG] = invoice.get("authorization_token") or data.get("authorization_token")
+
 		# Submit invoice
 		invoice_doc.submit()
 		invoice_submitted = True
@@ -1624,17 +1648,22 @@ def get_invoice(invoice_name):
 
 
 @frappe.whitelist()
-def get_invoices(pos_profile: str, limit: int = 100, start: int = 0) -> list:
+def get_invoices(pos_profile: str, search=None, limit: int = 20, offset=0, from_date=None, to_date=None, include_items=False, docstatus=None, start: int = 0) -> list:
 	"""
-	Get list of invoices for a POS Profile.
+	Get paginated, server-side filtered list of invoices for a POS Profile.
 
 	Args:
 		pos_profile: POS Profile name
+		search: Optional search term matched against invoice name or customer_name
+		limit: Page size (default 20)
+		offset: Number of records to skip for pagination (default 0)
+		from_date: Optional start date filter (YYYY-MM-DD)
+		to_date: Optional end date filter (YYYY-MM-DD)
 		limit: Maximum number of invoices to return (default 100)
 		start: Offset for pagination (default 0)
 
 	Returns:
-		List of invoices with details
+		List of invoice dicts with basic fields (no per-invoice item loading)
 	"""
 	if not pos_profile:
 		frappe.throw(_("POS Profile is required"))
@@ -1642,15 +1671,52 @@ def get_invoices(pos_profile: str, limit: int = 100, start: int = 0) -> list:
 	limit = cint(limit) or 100
 	start = cint(start) or 0
 
-	# Check if user has access to this POS Profile
+	# Permission check
 	has_access = frappe.db.exists("POS Profile User", {"parent": pos_profile, "user": frappe.session.user})
-
 	if not has_access and not frappe.has_permission("Sales Invoice", "read"):
 		frappe.throw(_("You don't have access to this POS Profile"))
 
-	# Query for invoices
+	# Clamp page size securely: minimum 1, maximum 100
+	limit = max(1, min(cint(limit) or 20, 100))
+	offset = max(0, cint(offset) or 0)
+
+	# Build WHERE conditions and params
+	conditions = [
+		"pos_profile = %(pos_profile)s",
+		"is_pos = 1",
+	]
+	params = {"pos_profile": pos_profile, "limit": limit, "offset": offset}
+
+	if docstatus is not None:
+		if isinstance(docstatus, (list, tuple)):
+			docstatus_list = [cint(d) for d in docstatus]
+			conditions.append(f"docstatus IN ({','.join(map(str, docstatus_list))})")
+		else:
+			conditions.append("docstatus = %(docstatus)s")
+			params["docstatus"] = cint(docstatus)
+	else:
+		conditions.append("docstatus < 2")
+
+	if search:
+		conditions.append(
+			"(name LIKE %(search)s OR customer_name LIKE %(search)s OR customer LIKE %(search)s)"
+		)
+		params["search"] = f"%{cstr(search)}%"
+
+	if from_date:
+		conditions.append("posting_date >= %(from_date)s")
+		params["from_date"] = from_date
+
+	if to_date:
+		conditions.append("posting_date <= %(to_date)s")
+		params["to_date"] = to_date
+
+	where_clause = " AND ".join(conditions)
+	params["limit"] = limit
+	params["offset"] = offset
+
 	invoices = frappe.db.sql(
-		"""
+		f"""
 		SELECT
 			name,
 			customer,
@@ -1667,16 +1733,14 @@ def get_invoices(pos_profile: str, limit: int = 100, start: int = 0) -> list:
 		FROM
 			`tabSales Invoice`
 		WHERE
-			pos_profile = %(pos_profile)s
-			AND docstatus = 1
-			AND is_pos = 1
+			{where_clause}
 		ORDER BY
 			posting_date DESC,
 			posting_time DESC
 		LIMIT %(limit)s
-		OFFSET %(start)s
+		OFFSET %(offset)s
 	""",
-		{"pos_profile": pos_profile, "limit": limit, "start": start},
+		params,
 		as_dict=True,
 	)
 
@@ -3271,6 +3335,15 @@ def apply_offers(invoice_data, selected_offers=None):
 		for key, free_item_doc in txn_result.get("free_items", {}).items():
 			free_items_map.setdefault(key, free_item_doc)
 		applied_rules.update(txn_result.get("applied_rules", set()))
+
+		# Surface every rule ERPNext stamped on a line so the frontend tracks it.
+		if erpnext_get_applied_pricing_rules:
+			for prepared_item in prepared_items:
+				if not prepared_item.get("pricing_rules"):
+					continue
+				for pr_name in erpnext_get_applied_pricing_rules(prepared_item.get("pricing_rules")):
+					if pr_name in rule_map:
+						applied_rules.add(pr_name)
 
 		return {
 			"items": [dict(item) for item in prepared_items],
