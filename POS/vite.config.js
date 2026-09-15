@@ -230,6 +230,11 @@ export default defineConfig({
 	define: {
 		__BUILD_VERSION__: JSON.stringify(buildVersion),
 	},
+	test: {
+		environment: "jsdom",
+		globals: true,
+		include: ["src/**/*.{test,spec}.{js,ts}"],
+	},
 	optimizeDeps: {
 		include: ["feather-icons", "showdown", "highlight.js/lib/core", "interactjs", "qz-tray"],
 	},

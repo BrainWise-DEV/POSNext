@@ -14,6 +14,10 @@ import { useRealtimePosProfile } from "@/composables/useRealtimePosProfile";
 
 const log = logger.create("ItemSearch");
 
+/** Recently fetched batch/serial item codes → timestamp (dedupe search fan-out) */
+const recentlyFetchedBatchSerial = new Map();
+const BATCH_SERIAL_FETCH_TTL_MS = 5 * 60 * 1000;
+
 /**
  * Fetch and cache batch/serial data for items with batch or serial tracking
  * This ensures batch/serial selection works offline
@@ -31,11 +35,23 @@ async function cacheBatchSerialForItems(items, warehouse) {
 		return;
 	}
 
-	log.info(`Caching batch/serial data for ${batchSerialItems.length} items`);
+	const now = Date.now();
+	const itemCodes = batchSerialItems
+		.map((item) => item.item_code)
+		.filter((code) => {
+			const lastFetched = recentlyFetchedBatchSerial.get(code);
+			return !lastFetched || now - lastFetched > BATCH_SERIAL_FETCH_TTL_MS;
+		});
+
+	if (itemCodes.length === 0) {
+		log.debug("All batch/serial items were fetched recently — skipping");
+		return;
+	}
+
+	log.info(`Caching batch/serial data for ${itemCodes.length} items`);
 
 	// Fetch in batches to avoid too large requests
 	const BATCH_SIZE = 20;
-	const itemCodes = batchSerialItems.map((item) => item.item_code);
 
 	for (let i = 0; i < itemCodes.length; i += BATCH_SIZE) {
 		const batchCodes = itemCodes.slice(i, i + BATCH_SIZE);
@@ -51,6 +67,11 @@ async function cacheBatchSerialForItems(items, warehouse) {
 			if (Object.keys(data).length > 0) {
 				await updateItemBatchSerialData(data);
 				log.debug(`Cached batch/serial data for ${Object.keys(data).length} items`);
+			}
+
+			const fetchedAt = Date.now();
+			for (const code of batchCodes) {
+				recentlyFetchedBatchSerial.set(code, fetchedAt);
 			}
 		} catch (error) {
 			log.warn(`Failed to fetch batch/serial data for batch ${i}:`, error.message);
@@ -1774,6 +1795,15 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 
 						// Cache server results for future searches
 						await offlineWorker.cacheItems(serverResults);
+
+						if (shiftStore.profileWarehouse) {
+							cacheBatchSerialForItems(
+								serverResults,
+								shiftStore.profileWarehouse
+							).catch((err) => {
+								log.warn("Background batch/serial caching failed:", err.message);
+							});
+						}
 
 						// If we didn't resolve with cache, resolve with server results
 						if (!cached || cached.length === 0) {

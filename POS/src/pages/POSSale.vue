@@ -2259,7 +2259,7 @@ async function handlePaymentCompleted(paymentData) {
 			uiStore.setLastOfflinePrintDoc(offlinePrintDoc);
 			cacheOfflineReceiptPayload(offlineReceiptName, offlinePrintDoc);
 			uiStore.showPaymentDialog = false;
-			cartStore.clearCart();
+			cartStore.clearCart({ returnSerials: false });
 			// Reset cart hash after successful payment
 			previousCartHash = "";
 
@@ -2330,7 +2330,7 @@ async function handlePaymentCompleted(paymentData) {
 				const paidAmount = paymentData.paid_amount || invoiceTotal;
 
 				uiStore.showPaymentDialog = false;
-				cartStore.clearCart();
+				cartStore.clearCart({ returnSerials: false });
 				// Reset cart hash after successful payment
 				previousCartHash = "";
 
