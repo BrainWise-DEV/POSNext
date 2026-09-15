@@ -30,6 +30,16 @@ body {
 	z-index: 500 !important;
 }
 
+/*
+ * frappe-ui Select portals to document.body and copies SelectContent's
+ * z-[100] onto a position:fixed wrapper. POS overlays sit at z-300+, so
+ * the option list otherwise opens behind the dialog.
+ */
+[data-reka-popper-content-wrapper],
+body > div[style*="position: fixed"][style*="z-index"]:has([role="listbox"]) {
+	z-index: var(--z-dropdown) !important;
+}
+
 /* Mobile touch optimizations - removes 300ms tap delay and improves scrolling */
 .touch-manipulation {
 	touch-action: manipulation;
