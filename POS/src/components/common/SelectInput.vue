@@ -180,6 +180,10 @@ const props = defineProps({
 		type: Boolean,
 		default: false,
 	},
+	minDropdownWidth: {
+		type: Number,
+		default: 0,
+	},
 });
 
 const emit = defineEmits(["update:modelValue", "change"]);
@@ -245,10 +249,12 @@ const dropdownStyle = computed(() => ({
 function updateDropdownPosition() {
 	if (triggerRef.value) {
 		const rect = triggerRef.value.getBoundingClientRect();
+		const minWidth = Math.max(rect.width, props.minDropdownWidth || 0);
+		const maxLeft = Math.max(8, window.innerWidth - minWidth - 8);
 		dropdownPosition.value = {
 			top: rect.bottom + 4, // 4px gap below the trigger
-			left: rect.left,
-			width: rect.width,
+			left: Math.min(rect.left, maxLeft),
+			width: minWidth,
 		};
 	}
 }

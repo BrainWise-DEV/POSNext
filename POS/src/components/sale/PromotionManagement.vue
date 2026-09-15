@@ -88,16 +88,9 @@
 										</template>
 									</FormControl>
 
-									<FormControl
-										type="select"
+									<SelectInput
 										v-model="filterStatus"
-										:options="[
-											{ label: __('All Status'), value: 'all' },
-											{ label: __('Active Only'), value: 'active' },
-											{ label: __('Expired Only'), value: 'expired' },
-											{ label: __('Not Started'), value: 'not_started' },
-											{ label: __('Disabled Only'), value: 'disabled' },
-										]"
+										:options="statusFilterOptions"
 									/>
 								</div>
 
@@ -1278,6 +1271,13 @@ const activeTab = ref("promotions"); // Tab state: 'promotions' or 'coupons'
 const promotions = ref([]);
 const searchQuery = ref("");
 const filterStatus = ref("all");
+const statusFilterOptions = computed(() => [
+	{ label: __("All Status"), value: "all" },
+	{ label: __("Active Only"), value: "active" },
+	{ label: __("Expired Only"), value: "expired" },
+	{ label: __("Not Started"), value: "not_started" },
+	{ label: __("Disabled Only"), value: "disabled" },
+]);
 
 const promotionsInstalled = isPromotionsAppInstalled();
 const PROMOTION_TYPE_GIFT_POOL = "Gift Pool";
