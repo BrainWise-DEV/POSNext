@@ -16,26 +16,15 @@
 				</FormControl>
 
 				<div class="grid grid-cols-2 gap-2">
-					<FormControl
-						type="select"
+					<SelectInput
 						v-model="filterStatus"
-						:options="[
-							{ label: __('All Status'), value: 'all' },
-							{ label: __('Active Only'), value: 'active' },
-							{ label: __('Expired'), value: 'expired' },
-							{ label: __('Not Started'), value: 'not_started' },
-							{ label: __('Exhausted'), value: 'exhausted' },
-							{ label: __('Disabled'), value: 'disabled' },
-						]"
+						:options="statusFilterOptions"
+						:min-dropdown-width="180"
 					/>
-					<FormControl
-						type="select"
+					<SelectInput
 						v-model="filterType"
-						:options="[
-							{ label: __('All Types'), value: 'all' },
-							{ label: __('Promotional'), value: 'Promotional' },
-							{ label: __('Gift Card'), value: 'Gift Card' },
-						]"
+						:options="typeFilterOptions"
+						:min-dropdown-width="180"
 					/>
 				</div>
 			</div>
@@ -293,17 +282,20 @@
 										/>
 									</div>
 
-									<FormControl
-										type="select"
-										:label="__('Coupon Type')"
-										v-model="form.coupon_type"
-										:disabled="!isCreating"
-										:options="[
-											{ label: __('Promotional'), value: 'Promotional' },
-											{ label: __('Gift Card'), value: 'Gift Card' },
-										]"
-										required
-									/>
+									<div>
+										<label
+											class="block text-sm font-medium text-gray-700 mb-2 text-start"
+										>
+											{{ __("Coupon Type") }}
+											<span class="text-red-500">*</span>
+										</label>
+										<SelectInput
+											v-model="form.coupon_type"
+											:disabled="!isCreating"
+											:options="couponTypeOptions"
+											:placeholder="__('Select coupon type')"
+										/>
+									</div>
 
 									<FormControl
 										type="text"
@@ -364,14 +356,19 @@
 										</div>
 									</div>
 
-									<FormControl
-										v-if="campaigns.length > 0"
-										type="select"
-										:label="__('Campaign')"
-										v-model="form.campaign"
-										:disabled="!isCreating"
-										:options="campaignOptions"
-									/>
+									<div v-if="campaigns.length > 0">
+										<label
+											class="block text-sm font-medium text-gray-700 mb-2 text-start"
+										>
+											{{ __("Campaign") }}
+										</label>
+										<SelectInput
+											v-model="form.campaign"
+											:disabled="!isCreating"
+											:options="campaignOptions"
+											:placeholder="__('Select campaign')"
+										/>
+									</div>
 
 									<!-- Company field -->
 									<div>
@@ -418,27 +415,33 @@
 									</h4>
 								</div>
 								<div class="grid grid-cols-2 gap-4">
-									<FormControl
-										type="select"
-										:label="__('Discount Type')"
-										v-model="form.discount_type"
-										:options="[
-											{ label: __('Percentage'), value: 'Percentage' },
-											{ label: __('Amount'), value: 'Amount' },
-										]"
-										required
-									/>
+									<div>
+										<label
+											class="block text-sm font-medium text-gray-700 mb-2 text-start"
+										>
+											{{ __("Discount Type") }}
+											<span class="text-red-500">*</span>
+										</label>
+										<SelectInput
+											v-model="form.discount_type"
+											:options="discountTypeOptions"
+											:placeholder="__('Select discount type')"
+										/>
+									</div>
 
-									<FormControl
-										type="select"
-										:label="__('Apply Discount On')"
-										v-model="form.apply_on"
-										:options="[
-											{ label: __('Grand Total'), value: 'Grand Total' },
-											{ label: __('Net Total'), value: 'Net Total' },
-										]"
-										required
-									/>
+									<div>
+										<label
+											class="block text-sm font-medium text-gray-700 mb-2 text-start"
+										>
+											{{ __("Apply Discount On") }}
+											<span class="text-red-500">*</span>
+										</label>
+										<SelectInput
+											v-model="form.apply_on"
+											:options="applyOnOptions"
+											:placeholder="__('Select option')"
+										/>
+									</div>
 
 									<FormControl
 										v-if="form.discount_type === 'Percentage'"
@@ -694,7 +697,9 @@
 </template>
 
 <script setup>
+import { promoApi } from "@/utils/promoApi";
 import AutocompleteSelect from "@/components/common/AutocompleteSelect.vue";
+import SelectInput from "@/components/common/SelectInput.vue";
 import { useToast } from "@/composables/useToast";
 import { useCustomerSearchStore } from "@/stores/customerSearch";
 import { usePOSSettingsStore } from "@/stores/posSettings";
@@ -781,7 +786,7 @@ const filteredCoupons = computed(() => {
 	// Filter by status
 	if (filterStatus.value !== "all") {
 		filtered = filtered.filter((c) => {
-			const status = c.status.toLowerCase().replace(" ", "_");
+			const status = (c.status || "").toLowerCase().replace(" ", "_");
 			return status === filterStatus.value;
 		});
 	}
@@ -793,6 +798,36 @@ const filteredCoupons = computed(() => {
 
 	return filtered;
 });
+
+const statusFilterOptions = computed(() => [
+	{ label: __("All Status"), value: "all" },
+	{ label: __("Active Only"), value: "active" },
+	{ label: __("Expired"), value: "expired" },
+	{ label: __("Not Started"), value: "not_started" },
+	{ label: __("Exhausted"), value: "exhausted" },
+	{ label: __("Disabled"), value: "disabled" },
+]);
+
+const typeFilterOptions = computed(() => [
+	{ label: __("All Types"), value: "all" },
+	{ label: __("Promotional"), value: "Promotional" },
+	{ label: __("Gift Card"), value: "Gift Card" },
+]);
+
+const couponTypeOptions = computed(() => [
+	{ label: __("Promotional"), value: "Promotional" },
+	{ label: __("Gift Card"), value: "Gift Card" },
+]);
+
+const discountTypeOptions = computed(() => [
+	{ label: __("Percentage"), value: "Percentage" },
+	{ label: __("Amount"), value: "Amount" },
+]);
+
+const applyOnOptions = computed(() => [
+	{ label: __("Grand Total"), value: "Grand Total" },
+	{ label: __("Net Total"), value: "Net Total" },
+]);
 
 const campaignOptions = computed(() => {
 	return [
@@ -811,7 +846,7 @@ const customerOptions = computed(() => {
 
 // Resources
 const couponsResource = createResource({
-	url: "pos_next.api.promotions.get_coupons",
+	url: promoApi.getCoupons(),
 	makeParams() {
 		return {
 			company: props.company,
@@ -830,7 +865,7 @@ const couponsResource = createResource({
 });
 
 const couponDetailsResource = createResource({
-	url: "pos_next.api.promotions.get_coupon_details",
+	url: promoApi.getCouponDetails(),
 	makeParams() {
 		return { coupon_name: selectedCoupon.value?.name };
 	},
@@ -863,7 +898,7 @@ const campaignsResource = createResource({
 });
 
 const createCouponResource = createResource({
-	url: "pos_next.api.promotions.create_coupon",
+	url: promoApi.createCoupon(),
 	makeParams() {
 		return { data: JSON.stringify(form.value) };
 	},
@@ -883,7 +918,7 @@ const createCouponResource = createResource({
 });
 
 const updateCouponResource = createResource({
-	url: "pos_next.api.promotions.update_coupon",
+	url: promoApi.updateCoupon(),
 	makeParams() {
 		return {
 			coupon_name: selectedCoupon.value?.name,
@@ -917,7 +952,7 @@ const updateCouponResource = createResource({
 });
 
 const toggleCouponResource = createResource({
-	url: "pos_next.api.promotions.toggle_coupon",
+	url: promoApi.toggleCoupon(),
 	makeParams() {
 		return { coupon_name: selectedCoupon.value?.name };
 	},
@@ -939,7 +974,7 @@ const toggleCouponResource = createResource({
 });
 
 const deleteCouponResource = createResource({
-	url: "pos_next.api.promotions.delete_coupon",
+	url: promoApi.deleteCoupon(),
 	makeParams() {
 		return { coupon_name: selectedCoupon.value?.name };
 	},

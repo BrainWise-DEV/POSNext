@@ -18,7 +18,7 @@
 				:user-image="userImage"
 				:is-offline="offlineStore.isOffline"
 				:is-syncing="offlineStore.isSyncing"
-				:pending-invoices-count="offlineStore.pendingInvoicesCount"
+				:pending-invoices-count="offlineStore.totalPendingCount"
 				:is-any-dialog-open="uiStore.isAnyDialogOpen"
 				:cache-syncing="itemStore.cacheSyncing"
 				:cache-stats="itemStore.cacheStats"
@@ -100,6 +100,25 @@
 						<span>{{ __("Invoice History") }}</span>
 					</button>
 					<button
+						@click="navigateToShiftHistory"
+						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-indigo-50 flex items-center gap-3 transition-colors"
+					>
+						<svg
+							class="w-5 h-5 text-indigo-600"
+							fill="none"
+							stroke="currentColor"
+							viewBox="0 0 24 24"
+						>
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								stroke-width="2"
+								d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"
+							/>
+						</svg>
+						<span>{{ __("Shift History") }}</span>
+					</button>
+					<button
 						v-if="offlineStore.pendingInvoicesCount > 0"
 						@click="
 							uiStore.showOfflineInvoicesDialog = true;
@@ -126,6 +145,26 @@
 						>
 							{{ offlineStore.pendingInvoicesCount }}
 						</span>
+					</button>
+					<button
+						v-if="canRecordPosExpense"
+						@click="openExpenseDialog"
+						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-amber-50 flex items-center gap-3 transition-colors"
+					>
+						<svg
+							class="w-5 h-5 text-amber-600"
+							fill="none"
+							stroke="currentColor"
+							viewBox="0 0 24 24"
+						>
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								stroke-width="2"
+								d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"
+							/>
+						</svg>
+						<span>{{ __("POS Expense") }}</span>
 					</button>
 					<button
 						v-if="canAccessShiftActions"
@@ -219,7 +258,10 @@
 				style="max-height: calc(100vh - 60px - var(--header-height, 60px))"
 			>
 				<!-- Icon-Only Management Slider - Always Visible -->
-				<ManagementSlider @menu-clicked="handleManagementMenuClick" />
+				<ManagementSlider
+					:can-access-product-management="canAccessProductManagement"
+					@menu-clicked="handleManagementMenuClick"
+				/>
 
 				<!-- Main Content Container -->
 				<div
@@ -365,6 +407,7 @@
 								:discount-amount="cartStore.totalDiscount"
 								:grand-total="cartStore.grandTotal"
 								:pos-profile="shiftStore.profileName"
+								:company="shiftStore.profileCompany"
 								:currency="shiftStore.profileCurrency"
 								:applied-offers="cartStore.appliedOffers"
 								:warehouses="profileWarehouses"
@@ -394,7 +437,10 @@
 								@show-drafts="openDraftDialog"
 								@show-history="openHistoryDialog"
 								@show-return="openReturnDialog"
+								@show-expense="openExpenseDialog"
+								:allow-pos-expense="canRecordPosExpense"
 								@close-shift="handleCloseShift"
+								@show-shift-history="navigateToShiftHistory"
 							/>
 						</div>
 					</keep-alive>
@@ -544,6 +590,17 @@
 				@return-created="handleReturnCreated"
 			/>
 
+			<!-- POS Expense Dialog -->
+			<ExpenseDialog
+				v-model="uiStore.showExpenseDialog"
+				:pos-profile="shiftStore.profileName"
+				:pos-opening-shift="shiftStore.currentShift?.name"
+				:currency="shiftStore.companyCurrency"
+				:maximum-expense-amount="shiftStore.maximumExpenseAmount"
+				@expense-created="handleExpenseCreated"
+				@expense-cancelled="handleExpenseCancelled"
+			/>
+
 			<!-- Coupon Dialog -->
 			<CouponDialog
 				v-model="uiStore.showCouponDialog"
@@ -613,6 +670,13 @@
 				@return-created="handleReturnCreated"
 			/>
 
+			<!-- Shift History Dialog -->
+			<ShiftHistoryDialog
+				v-model="showShiftHistoryDialog"
+				:pos-profile="shiftStore.profileName"
+				:currency="shiftStore.profileCurrency"
+			/>
+
 			<!-- Offline Invoices Dialog -->
 			<OfflineInvoicesDialog
 				v-model="uiStore.showOfflineInvoicesDialog"
@@ -644,6 +708,14 @@
 				:company="shiftStore.profileCompany"
 				:currency="shiftStore.profileCurrency"
 				@promotion-saved="handlePromotionSaved"
+			/>
+
+			<!-- Product Management -->
+			<ProductManagement
+				v-model="showProductManagement"
+				:pos-profile="shiftStore.profileName"
+				:company="shiftStore.profileCompany"
+				:currency="shiftStore.profileCurrency"
 			/>
 
 			<!-- POS Settings -->
@@ -946,13 +1018,22 @@
 						<Button
 							v-if="
 								uiStore.errorRetryAction === 'sync' &&
-								uiStore.errorRetryActionData?.failedInvoiceId
+								(uiStore.errorRetryActionData?.failedInvoiceId ||
+									uiStore.errorRetryActionData?.failedExpenseId)
 							"
 							variant="outline"
 							theme="red"
-							@click="handleDeleteFailedInvoice"
+							@click="
+								uiStore.errorRetryActionData?.failedInvoiceId
+									? handleDeleteFailedInvoice()
+									: handleDeleteFailedExpense()
+							"
 						>
-							{{ __("Delete Invoice") }}
+							{{
+								uiStore.errorRetryActionData?.failedInvoiceId
+									? __("Delete Invoice")
+									: __("Delete Expense")
+							}}
 						</Button>
 						<div v-else></div>
 						<div class="flex gap-2">
@@ -992,7 +1073,9 @@
 // Module-scoped init guard — prevents redundant heavy initialization
 // when component remounts due to translationVersion changes.
 // Tracks the profile+shift key so a user/shift change correctly re-initializes.
+// biome-ignore lint/style/useConst: Reassigned from script setup lifecycle handlers.
 let _initializedKey = null;
+// biome-ignore lint/style/useConst: Reassigned from script setup lifecycle handlers.
 let _posInitPromise = null;
 </script>
 
@@ -1012,13 +1095,16 @@ import CustomerDialog from "@/components/sale/CustomerDialog.vue";
 import DraftInvoicesDialog from "@/components/sale/DraftInvoicesDialog.vue";
 import InvoiceCart from "@/components/sale/InvoiceCart.vue";
 import InvoiceHistoryDialog from "@/components/sale/InvoiceHistoryDialog.vue";
+import ShiftHistoryDialog from "@/components/sale/ShiftHistoryDialog.vue";
 import ItemSelectionDialog from "@/components/sale/ItemSelectionDialog.vue";
 import ItemsSelector from "@/components/sale/ItemsSelector.vue";
 import OffersDialog from "@/components/sale/OffersDialog.vue";
 import OfflineInvoicesDialog from "@/components/sale/OfflineInvoicesDialog.vue";
 import PaymentDialog from "@/components/sale/PaymentDialog.vue";
+import ProductManagement from "@/components/sale/ProductManagement.vue";
 import PromotionManagement from "@/components/sale/PromotionManagement.vue";
 import ReturnInvoiceDialog from "@/components/sale/ReturnInvoiceDialog.vue";
+import ExpenseDialog from "@/components/sale/ExpenseDialog.vue";
 import WarehouseAvailabilityDialog from "@/components/sale/WarehouseAvailabilityDialog.vue";
 import POSSettings from "@/components/settings/POSSettings.vue";
 import InvoiceManagement from "@/components/invoices/InvoiceManagement.vue";
@@ -1059,6 +1145,7 @@ import { usePOSSyncStore } from "@/stores/posSync";
 import { usePOSUIStore } from "@/stores/posUI";
 import { useBootstrapStore } from "@/stores/bootstrap";
 import { logger } from "@/utils/logger";
+import { canCloseShiftWithPendingExpenses } from "@/utils/shiftGuards";
 import { shouldValidateItemStock } from "@/utils/stockValidator";
 
 // Initialize stores
@@ -1145,6 +1232,10 @@ function computeCartHash() {
 // Promotion dialog
 const showPromotionManagement = ref(false);
 
+// Product Management dialog
+const showProductManagement = ref(false);
+const canAccessProductManagement = ref(false);
+
 // Settings dialog
 const showPOSSettings = ref(false);
 
@@ -1160,6 +1251,9 @@ const selectedInvoiceForView = ref(null);
 
 // Invoice history data (used by InvoiceManagement component)
 const invoiceHistoryData = ref([]);
+
+// Shift History dialog
+const showShiftHistoryDialog = ref(false);
 
 // Stock sync status
 const isStockSyncActive = ref(false);
@@ -1191,10 +1285,23 @@ watch(
 	(newProfile) => {
 		if (newProfile) {
 			warehousesResource.reload();
+			loadProductManagementPermissions();
 		}
 	},
 	{ immediate: true }
 );
+
+async function loadProductManagementPermissions() {
+	try {
+		const result = await call(
+			"pos_next.api.product_management.get_product_management_permissions"
+		);
+		canAccessProductManagement.value = Boolean(result?.can_access);
+	} catch (error) {
+		log.error("Error loading product management permissions:", error);
+		canAccessProductManagement.value = false;
+	}
+}
 
 // Computed for warehouses - returns all warehouses for the company
 const profileWarehouses = computed(() => {
@@ -1217,6 +1324,9 @@ const profileWarehouses = computed(() => {
 });
 
 const canAccessShiftActions = computed(() => shiftStore.hasOpenShift);
+const canRecordPosExpense = computed(
+	() => canAccessShiftActions.value && shiftStore.allowPosExpense,
+);
 
 /** Desk link only for users with the Nexus POS Manager role (from bootstrap API). */
 const canSwitchToDesk = computed(() => Boolean(bootstrapStore.data?.can_switch_to_desk));
@@ -1457,7 +1567,10 @@ onMounted(async () => {
 			cartStore.setDefaultCustomer(),
 			offlineStore.isOffline
 				? offlineStore.checkOfflineCacheAvailability()
-				: offlineStore.preloadDataForOffline(shiftStore.currentProfile),
+				: offlineStore.preloadDataForOffline(
+						shiftStore.currentProfile,
+						shiftStore.currentShift?.name,
+					),
 			draftsStore.updateDraftsCount(),
 		]);
 
@@ -1793,7 +1906,10 @@ async function handleShiftOpened() {
 		cartStore.setDefaultCustomer(),
 		offlineStore.isOffline
 			? offlineStore.checkOfflineCacheAvailability()
-			: offlineStore.preloadDataForOffline(shiftStore.currentProfile),
+			: offlineStore.preloadDataForOffline(
+					shiftStore.currentProfile,
+					shiftStore.currentShift?.name,
+				),
 		draftsStore.updateDraftsCount(),
 	]);
 
@@ -1992,6 +2108,19 @@ async function handleDeleteFailedInvoice() {
 
 	try {
 		await offlineStore.deleteOfflineInvoice(invoiceId);
+	} catch (error) {
+		// Error is handled in the store
+	}
+}
+
+async function handleDeleteFailedExpense() {
+	if (!uiStore.errorRetryActionData?.failedExpenseId) return;
+
+	const expenseId = uiStore.errorRetryActionData.failedExpenseId;
+	uiStore.clearError();
+
+	try {
+		await offlineStore.deleteOfflineExpense(expenseId);
 	} catch (error) {
 		// Error is handled in the store
 	}
@@ -2363,7 +2492,20 @@ function handleCloseShift() {
 		return;
 	}
 
+	if (!canCloseShiftWithPendingExpenses(offlineStore.pendingExpensesCount)) {
+		showError(
+			__(
+				"Sync or delete pending offline expenses before closing this shift. Unsynced cash expenses cannot be booked after the shift is closed.",
+			),
+		);
+		return;
+	}
+
 	uiStore.showCloseShiftDialog = true;
+}
+
+function navigateToShiftHistory() {
+	showShiftHistoryDialog.value = true;
 }
 
 function openDraftDialog() {
@@ -2390,6 +2532,14 @@ function openReturnDialog() {
 	uiStore.showReturnDialog = true;
 }
 
+function openExpenseDialog() {
+	if (!canRecordPosExpense.value) {
+		return;
+	}
+
+	uiStore.showExpenseDialog = true;
+}
+
 function switchToDesk() {
 	if (!canAccessShiftActions.value || !canSwitchToDesk.value || typeof window === "undefined") {
 		return;
@@ -2410,6 +2560,16 @@ async function confirmLogout() {
 }
 
 function logoutWithCloseShift() {
+	if (!canCloseShiftWithPendingExpenses(offlineStore.pendingExpensesCount)) {
+		uiStore.showLogoutDialog = false;
+		showError(
+			__(
+				"Sync or delete pending offline expenses before closing this shift. Unsynced cash expenses cannot be booked after the shift is closed.",
+			),
+		);
+		return;
+	}
+
 	// Open close shift dialog and remember to logout after closing
 	logoutAfterClose.value = true;
 	uiStore.showLogoutDialog = false;
@@ -2481,6 +2641,16 @@ async function handleLoadDraft(draft) {
 function handleReturnCreated(returnInvoice) {
 	// Success message is already shown by ReturnInvoiceDialog
 	log.debug("Return invoice created:", returnInvoice.name);
+}
+
+function handleExpenseCreated(expense) {
+	// ExpenseDialog reloads its own list/limits; toast is shown there too
+	log.debug("POS expense recorded:", expense?.journal_entry || expense?.name);
+}
+
+function handleExpenseCancelled(expense) {
+	// ExpenseDialog reloads its own list/limits; toast is shown there too
+	log.debug("POS expense cancelled:", expense?.journal_entry || expense?.name);
 }
 
 function handleDiscountApplied(discount) {
@@ -2706,7 +2876,12 @@ async function handleSyncClick() {
 		return;
 	}
 
-	showSuccess(__("No pending invoices to sync"));
+	if (offlineStore.hasPendingExpenses) {
+		await handleSyncAll();
+		return;
+	}
+
+	showSuccess(__("No pending documents to sync"));
 }
 
 async function handleSyncAll() {
@@ -2726,19 +2901,26 @@ async function handleSyncAll() {
 		if (result.failed > 0 && result.errors && result.errors.length > 0) {
 			const firstError = result.errors[0];
 			const errorContext = parseError(firstError.error);
+			const label =
+				firstError.customer ||
+				firstError.offlineId ||
+				firstError.expenseId ||
+				firstError.invoiceId ||
+				__("document");
 
 			uiStore.showError(
 				errorContext.title,
 				__(
-					"Failed to sync invoice for {0}\n\n${1}\n\nYou can delete this invoice from the offline queue if you don't need it.",
-					[firstError.customer, errorContext.message]
+					"Failed to sync {0}\n\n{1}\n\nYou can review or remove it from the offline queue if needed.",
+					[label, errorContext.message]
 				),
-				errorContext.technicalDetails || __("Invoice ID: {0}", [firstError.invoiceId]),
+				errorContext.technicalDetails ||
+					__("Queue ID: {0}", [firstError.invoiceId || firstError.expenseId || ""]),
 				"sync",
-				{ failedInvoiceId: firstError.invoiceId }
+				{ failedInvoiceId: firstError.invoiceId, failedExpenseId: firstError.expenseId }
 			);
 		} else if (result.failed > 0) {
-			showWarning(__("{0} invoice(s) failed to sync", [result.failed]));
+			showWarning(__("{0} document(s) failed to sync", [result.failed]));
 		}
 	} catch (error) {
 		log.error("Sync error:", error);
@@ -2861,6 +3043,8 @@ function restoreBodyStyles() {
 function handleManagementMenuClick(menuItem) {
 	if (menuItem === "promotions") {
 		showPromotionManagement.value = true;
+	} else if (menuItem === "product-management") {
+		showProductManagement.value = true;
 	} else if (menuItem === "settings") {
 		showPOSSettings.value = true;
 	} else if (menuItem === "invoices") {
