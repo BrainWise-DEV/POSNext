@@ -1,2 +1,1 @@
 POS Next
-POS Next Auth Gate
