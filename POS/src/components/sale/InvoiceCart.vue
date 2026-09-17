@@ -2254,7 +2254,13 @@ onBeforeUnmount(() => {
 
 defineExpose({
 	focusCustomerSearch() {
-		customerSearchInputRef.value?.focus();
+		if (props.customer) {
+			// A customer is already assigned, so the search input isn't rendered.
+			// Deselect it first so the input mounts, then clearCustomer() focuses it.
+			clearCustomer();
+		} else {
+			customerSearchInputRef.value?.focus();
+		}
 	},
 });
 </script>

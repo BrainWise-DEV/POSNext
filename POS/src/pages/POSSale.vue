@@ -1123,6 +1123,7 @@ const { onStockUpdate } = useRealtimeStock();
 
 // Session lock (inactivity + tab-refocus)
 const {
+	isLocked,
 	lock: lockSession,
 	configure: configureSessionLock,
 	startActivityTracking,
@@ -1299,8 +1300,10 @@ onMounted(async () => {
 
 	// Global keyboard shortcuts
 	const handleGlobalKeydown = (event) => {
-		// Skip if any dialog is open or if user is typing in an input/textarea
-		if (uiStore.isAnyDialogOpen) return;
+		// Skip if any dialog is open, the session is locked, the clear-cache overlay is
+		// showing, or if user is typing in an input/textarea. isLocked/showClearCacheDialog
+		// aren't wired into uiStore.isAnyDialogOpen, so they're checked explicitly here.
+		if (uiStore.isAnyDialogOpen || isLocked.value || showClearCacheDialog.value) return;
 		const tag = document.activeElement?.tagName;
 		if (tag === "INPUT" || tag === "TEXTAREA") return;
 
