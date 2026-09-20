@@ -2643,5 +2643,17 @@ onBeforeUnmount(() => {
 	if (typeof document === "undefined") return;
 	document.removeEventListener("mousedown", handleOutsideClick);
 });
+
+defineExpose({
+	focusCustomerSearch() {
+		if (props.customer) {
+			// A customer is already assigned, so the search input isn't rendered.
+			// Deselect it first so the input mounts, then clearCustomer() focuses it.
+			clearCustomer();
+		} else {
+			customerSearchInputRef.value?.focus();
+		}
+	},
+});
 </script>
 ```
