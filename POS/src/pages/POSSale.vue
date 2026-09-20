@@ -18,7 +18,7 @@
 				:user-image="userImage"
 				:is-offline="offlineStore.isOffline"
 				:is-syncing="offlineStore.isSyncing"
-				:pending-invoices-count="offlineStore.pendingInvoicesCount"
+				:pending-invoices-count="offlineStore.totalPendingCount"
 				:is-any-dialog-open="uiStore.isAnyDialogOpen"
 				:cache-syncing="itemStore.cacheSyncing"
 				:cache-stats="itemStore.cacheStats"
@@ -145,6 +145,26 @@
 						>
 							{{ offlineStore.pendingInvoicesCount }}
 						</span>
+					</button>
+					<button
+						v-if="canRecordPosExpense"
+						@click="openExpenseDialog"
+						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-amber-50 flex items-center gap-3 transition-colors"
+					>
+						<svg
+							class="w-5 h-5 text-amber-600"
+							fill="none"
+							stroke="currentColor"
+							viewBox="0 0 24 24"
+						>
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								stroke-width="2"
+								d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"
+							/>
+						</svg>
+						<span>{{ __("POS Expense") }}</span>
 					</button>
 					<button
 						v-if="canAccessShiftActions"
@@ -387,6 +407,7 @@
 								:discount-amount="cartStore.totalDiscount"
 								:grand-total="cartStore.grandTotal"
 								:pos-profile="shiftStore.profileName"
+								:company="shiftStore.profileCompany"
 								:currency="shiftStore.profileCurrency"
 								:applied-offers="cartStore.appliedOffers"
 								:warehouses="profileWarehouses"
@@ -413,10 +434,12 @@
 								@update-uom="cartStore.changeItemUOM"
 								@edit-item="handleEditItem"
 								@view-shift="uiStore.showOpenShiftDialog = true"
-								@show-drafts="uiStore.showDraftDialog = true"
-								@show-history="uiStore.showHistoryDialog = true"
-								@show-return="uiStore.showReturnDialog = true"
-								@close-shift="handleCloseShift()"
+								@show-drafts="openDraftDialog"
+								@show-history="openHistoryDialog"
+								@show-return="openReturnDialog"
+								@show-expense="openExpenseDialog"
+								:allow-pos-expense="canRecordPosExpense"
+								@close-shift="handleCloseShift"
 								@show-shift-history="navigateToShiftHistory"
 							/>
 						</div>
@@ -565,6 +588,17 @@
 				:pos-opening-shift="shiftStore.currentShift?.name"
 				:currency="shiftStore.profileCurrency"
 				@return-created="handleReturnCreated"
+			/>
+
+			<!-- POS Expense Dialog -->
+			<ExpenseDialog
+				v-model="uiStore.showExpenseDialog"
+				:pos-profile="shiftStore.profileName"
+				:pos-opening-shift="shiftStore.currentShift?.name"
+				:currency="shiftStore.companyCurrency"
+				:maximum-expense-amount="shiftStore.maximumExpenseAmount"
+				@expense-created="handleExpenseCreated"
+				@expense-cancelled="handleExpenseCancelled"
 			/>
 
 			<!-- Coupon Dialog -->
@@ -984,13 +1018,22 @@
 						<Button
 							v-if="
 								uiStore.errorRetryAction === 'sync' &&
-								uiStore.errorRetryActionData?.failedInvoiceId
+								(uiStore.errorRetryActionData?.failedInvoiceId ||
+									uiStore.errorRetryActionData?.failedExpenseId)
 							"
 							variant="outline"
 							theme="red"
-							@click="handleDeleteFailedInvoice"
+							@click="
+								uiStore.errorRetryActionData?.failedInvoiceId
+									? handleDeleteFailedInvoice()
+									: handleDeleteFailedExpense()
+							"
 						>
-							{{ __("Delete Invoice") }}
+							{{
+								uiStore.errorRetryActionData?.failedInvoiceId
+									? __("Delete Invoice")
+									: __("Delete Expense")
+							}}
 						</Button>
 						<div v-else></div>
 						<div class="flex gap-2">
@@ -1061,6 +1104,7 @@ import PaymentDialog from "@/components/sale/PaymentDialog.vue";
 import ProductManagement from "@/components/sale/ProductManagement.vue";
 import PromotionManagement from "@/components/sale/PromotionManagement.vue";
 import ReturnInvoiceDialog from "@/components/sale/ReturnInvoiceDialog.vue";
+import ExpenseDialog from "@/components/sale/ExpenseDialog.vue";
 import WarehouseAvailabilityDialog from "@/components/sale/WarehouseAvailabilityDialog.vue";
 import POSSettings from "@/components/settings/POSSettings.vue";
 import InvoiceManagement from "@/components/invoices/InvoiceManagement.vue";
@@ -1102,6 +1146,7 @@ import { usePOSSyncStore } from "@/stores/posSync";
 import { usePOSUIStore } from "@/stores/posUI";
 import { useBootstrapStore } from "@/stores/bootstrap";
 import { logger } from "@/utils/logger";
+import { canCloseShiftWithPendingExpenses } from "@/utils/shiftGuards";
 import { shouldValidateItemStock } from "@/utils/stockValidator";
 
 // Initialize stores
@@ -1289,6 +1334,9 @@ const profileWarehouses = computed(() => {
 });
 
 const canAccessShiftActions = computed(() => shiftStore.hasOpenShift);
+const canRecordPosExpense = computed(
+	() => canAccessShiftActions.value && shiftStore.allowPosExpense,
+);
 
 /** Desk link only for users with the Nexus POS Manager role (from bootstrap API). */
 const canSwitchToDesk = computed(() => Boolean(bootstrapStore.data?.can_switch_to_desk));
@@ -1529,7 +1577,10 @@ onMounted(async () => {
 			cartStore.setDefaultCustomer(),
 			offlineStore.isOffline
 				? offlineStore.checkOfflineCacheAvailability()
-				: offlineStore.preloadDataForOffline(shiftStore.currentProfile),
+				: offlineStore.preloadDataForOffline(
+						shiftStore.currentProfile,
+						shiftStore.currentShift?.name,
+					),
 			draftsStore.updateDraftsCount(),
 		]);
 
@@ -1865,7 +1916,10 @@ async function handleShiftOpened() {
 		cartStore.setDefaultCustomer(),
 		offlineStore.isOffline
 			? offlineStore.checkOfflineCacheAvailability()
-			: offlineStore.preloadDataForOffline(shiftStore.currentProfile),
+			: offlineStore.preloadDataForOffline(
+					shiftStore.currentProfile,
+					shiftStore.currentShift?.name,
+				),
 		draftsStore.updateDraftsCount(),
 	]);
 
@@ -2064,6 +2118,19 @@ async function handleDeleteFailedInvoice() {
 
 	try {
 		await offlineStore.deleteOfflineInvoice(invoiceId);
+	} catch (error) {
+		// Error is handled in the store
+	}
+}
+
+async function handleDeleteFailedExpense() {
+	if (!uiStore.errorRetryActionData?.failedExpenseId) return;
+
+	const expenseId = uiStore.errorRetryActionData.failedExpenseId;
+	uiStore.clearError();
+
+	try {
+		await offlineStore.deleteOfflineExpense(expenseId);
 	} catch (error) {
 		// Error is handled in the store
 	}
@@ -2435,6 +2502,15 @@ function handleCloseShift() {
 		return;
 	}
 
+	if (!canCloseShiftWithPendingExpenses(offlineStore.pendingExpensesCount)) {
+		showError(
+			__(
+				"Sync or delete pending offline expenses before closing this shift. Unsynced cash expenses cannot be booked after the shift is closed.",
+			),
+		);
+		return;
+	}
+
 	uiStore.showCloseShiftDialog = true;
 }
 
@@ -2466,6 +2542,14 @@ function openReturnDialog() {
 	uiStore.showReturnDialog = true;
 }
 
+function openExpenseDialog() {
+	if (!canRecordPosExpense.value) {
+		return;
+	}
+
+	uiStore.showExpenseDialog = true;
+}
+
 function switchToDesk() {
 	if (!canAccessShiftActions.value || !canSwitchToDesk.value || typeof window === "undefined") {
 		return;
@@ -2486,6 +2570,16 @@ async function confirmLogout() {
 }
 
 function logoutWithCloseShift() {
+	if (!canCloseShiftWithPendingExpenses(offlineStore.pendingExpensesCount)) {
+		uiStore.showLogoutDialog = false;
+		showError(
+			__(
+				"Sync or delete pending offline expenses before closing this shift. Unsynced cash expenses cannot be booked after the shift is closed.",
+			),
+		);
+		return;
+	}
+
 	// Open close shift dialog and remember to logout after closing
 	logoutAfterClose.value = true;
 	uiStore.showLogoutDialog = false;
@@ -2557,6 +2651,16 @@ async function handleLoadDraft(draft) {
 function handleReturnCreated(returnInvoice) {
 	// Success message is already shown by ReturnInvoiceDialog
 	log.debug("Return invoice created:", returnInvoice.name);
+}
+
+function handleExpenseCreated(expense) {
+	// ExpenseDialog reloads its own list/limits; toast is shown there too
+	log.debug("POS expense recorded:", expense?.journal_entry || expense?.name);
+}
+
+function handleExpenseCancelled(expense) {
+	// ExpenseDialog reloads its own list/limits; toast is shown there too
+	log.debug("POS expense cancelled:", expense?.journal_entry || expense?.name);
 }
 
 function handleDiscountApplied(discount) {
@@ -2782,7 +2886,12 @@ async function handleSyncClick() {
 		return;
 	}
 
-	showSuccess(__("No pending invoices to sync"));
+	if (offlineStore.hasPendingExpenses) {
+		await handleSyncAll();
+		return;
+	}
+
+	showSuccess(__("No pending documents to sync"));
 }
 
 async function handleSyncAll() {
@@ -2802,19 +2911,26 @@ async function handleSyncAll() {
 		if (result.failed > 0 && result.errors && result.errors.length > 0) {
 			const firstError = result.errors[0];
 			const errorContext = parseError(firstError.error);
+			const label =
+				firstError.customer ||
+				firstError.offlineId ||
+				firstError.expenseId ||
+				firstError.invoiceId ||
+				__("document");
 
 			uiStore.showError(
 				errorContext.title,
 				__(
-					"Failed to sync invoice for {0}\n\n${1}\n\nYou can delete this invoice from the offline queue if you don't need it.",
-					[firstError.customer, errorContext.message]
+					"Failed to sync {0}\n\n{1}\n\nYou can review or remove it from the offline queue if needed.",
+					[label, errorContext.message]
 				),
-				errorContext.technicalDetails || __("Invoice ID: {0}", [firstError.invoiceId]),
+				errorContext.technicalDetails ||
+					__("Queue ID: {0}", [firstError.invoiceId || firstError.expenseId || ""]),
 				"sync",
-				{ failedInvoiceId: firstError.invoiceId }
+				{ failedInvoiceId: firstError.invoiceId, failedExpenseId: firstError.expenseId }
 			);
 		} else if (result.failed > 0) {
-			showWarning(__("{0} invoice(s) failed to sync", [result.failed]));
+			showWarning(__("{0} document(s) failed to sync", [result.failed]));
 		}
 	} catch (error) {
 		log.error("Sync error:", error);

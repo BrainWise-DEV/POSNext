@@ -4,6 +4,7 @@
 
 import frappe
 from frappe import _
+from frappe.utils import cint
 
 from pos_next.api.utilities import _parse_list_parameter, check_user_company
 
@@ -67,20 +68,21 @@ def get_pos_profile_data(pos_profile):
 @frappe.whitelist()
 def get_pos_settings(pos_profile):
 	"""Get POS Settings for a given POS Profile"""
-	from pos_next.api.constants import DEFAULT_POS_SETTINGS, POS_SETTINGS_FIELDS
+	from pos_next.api.constants import DEFAULT_POS_SETTINGS, POS_SETTINGS_FIELDS, merge_pos_settings
 
 	if not pos_profile:
 		return DEFAULT_POS_SETTINGS.copy()
 
 	try:
 		# Get POS Settings linked to this POS Profile
-		pos_settings = frappe.db.get_value(
+		row = frappe.db.get_value(
 			"POS Settings", {"pos_profile": pos_profile, "enabled": 1}, POS_SETTINGS_FIELDS, as_dict=True
 		)
+		pos_settings = merge_pos_settings(row)
 
-		if not pos_settings:
-			return DEFAULT_POS_SETTINGS.copy()
+		from pos_next.integrations.registry import extend_bootstrap_settings
 
+		extend_bootstrap_settings(pos_settings, pos_profile)
 		return pos_settings
 	except Exception:
 		frappe.log_error(frappe.get_traceback(), "Get POS Settings Error")
