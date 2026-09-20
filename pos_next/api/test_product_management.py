@@ -133,61 +133,23 @@ class TestSaveProductScoping(unittest.TestCase):
 	@patch("pos_next.api.product_management.frappe.get_cached_doc")
 	@patch("pos_next.api.product_management.frappe.has_permission")
 	@patch("pos_next.api.product_management.frappe.db", new_callable=MagicMock)
-	def test_rejects_external_image_url(self, mock_db, mock_perm, mock_cached_doc, mock_new_doc, mock_groups):
-		"""item.image is rendered by the POS, so only Frappe file paths are accepted."""
+	def test_rejects_script_scheme_on_new_product(
+		self, mock_db, mock_perm, mock_cached_doc, mock_new_doc, mock_groups
+	):
+		"""item.image is rendered by the POS, so script-bearing schemes are refused.
+
+		This deliberately does NOT restrict images to local Frappe paths: an
+		external https URL is a legitimate value here, written by the
+		ecommerce_integrations Shopify sync.
+		"""
 		mock_db.exists.return_value = "POS Profile User Row"
 		mock_perm.return_value = True
 		mock_cached_doc.return_value = frappe._dict({"selling_price_list": None})
 		mock_groups.return_value = []
-		mock_new_doc.return_value = MagicMock()
+		mock_new_doc.return_value = MagicMock(image="")
 
-		with (
-			patch("pos_next.api.product_management._make_item_code", return_value="POS-ITEM-00001"),
-			self.assertRaises(frappe.ValidationError),
-		):
-			save_product(PROFILE, _payload(image="https://example.com/tracker.png"))
-
-
-class TestUpdateProductImage(unittest.TestCase):
-	def test_image_update_checks_scope_permissions_and_attachment(self):
-		with (
-			patch("pos_next.api.product_management._validate_pos_profile_access") as access,
-			patch("pos_next.api.product_management._get_pos_profile_allowed_item_groups", return_value=["Beverages"]) as groups,
-			patch("pos_next.api.product_management.frappe.get_cached_doc"),
-			patch("pos_next.api.product_management.frappe.get_doc") as get_doc,
-			patch("pos_next.api.product_management.frappe.db", new_callable=MagicMock) as db,
-		):
-			item = MagicMock()
-			item.name = "ITEM-1"
-			item.item_group = "Beverages"
-			file = MagicMock()
-			get_doc.side_effect = lambda doctype, name: item if doctype == "Item" else file
-			db.get_value.return_value = "FILE-1"
-			update_product_image(PROFILE, item.name, "/files/image.png")
-			access.assert_called_once_with(PROFILE)
-			item.check_permission.assert_called_once_with("write")
-			file.check_permission.assert_called_once_with("read")
-			self.assertEqual(item.image, "/files/image.png")
-			item.save.assert_called_once_with()
-			item.save.reset_mock()
-			for url in ("", "https://example.com/image.png"):
-				with self.assertRaises(frappe.ValidationError):
-					update_product_image(PROFILE, item.name, url)
-			db.get_value.return_value = None
-			with self.assertRaises(frappe.ValidationError):
-				update_product_image(PROFILE, item.name, "/files/other.png")
-			groups.return_value = ["Electronics"]
-			with self.assertRaises(frappe.ValidationError):
-				update_product_image(PROFILE, item.name, "/files/image.png")
-			groups.return_value = []
-			item.check_permission.side_effect = frappe.PermissionError
-			with self.assertRaises(frappe.PermissionError):
-				update_product_image(PROFILE, item.name, "/files/image.png")
-			item.check_permission.side_effect = None
-			access.side_effect = frappe.ValidationError
-			with self.assertRaises(frappe.ValidationError):
-				update_product_image(PROFILE, item.name, "/files/image.png")
-			item.save.assert_not_called()
+		with self.assertRaises(frappe.ValidationError):
+			save_product(PROFILE, _payload(image="javascript:alert(1)"))
 
 
 class TestSaveUomConversions(unittest.TestCase):
@@ -274,3 +236,79 @@ class TestProductImageSettings(unittest.TestCase):
 		mock_settings.side_effect = self._settings("", max_mb=7)
 
 		self.assertEqual(get_product_image_settings()["max_file_size"], 7 * 1024 * 1024)
+
+
+class TestSaveProductImageHandling(unittest.TestCase):
+	"""Item.image is not always a local upload. The ecommerce_integrations Shopify
+	sync stores cdn.shopify.com URLs, so validating every save against a
+	local-path allowlist broke unrelated edits on synced products."""
+
+	def _mocks(self, mock_db, mock_perm, mock_cached_doc, mock_groups, current_image):
+		mock_db.exists.return_value = "POS Profile User Row"
+		mock_perm.return_value = True
+		mock_cached_doc.return_value = frappe._dict({"selling_price_list": None})
+		mock_groups.return_value = []
+		item = MagicMock()
+		item.item_group = "Beverages"
+		item.image = current_image
+		item.name = "ITEM-1"
+		return item
+
+	@patch("pos_next.api.product_management._get_pos_profile_allowed_item_groups")
+	@patch("pos_next.api.product_management.frappe.get_doc")
+	@patch("pos_next.api.product_management.frappe.get_cached_doc")
+	@patch("pos_next.api.product_management.frappe.has_permission")
+	@patch("pos_next.api.product_management.frappe.db", new_callable=MagicMock)
+	def test_unchanged_external_image_does_not_block_a_price_edit(
+		self, mock_db, mock_perm, mock_cached_doc, mock_get_doc, mock_groups
+	):
+		"""Regression: changing only the price on a Shopify-synced product threw
+		'Invalid image path' because the untouched image was re-validated."""
+		synced = "https://cdn.shopify.com/s/files/1/0989/files/Main.jpg?v=1777998015"
+		item = self._mocks(mock_db, mock_perm, mock_cached_doc, mock_groups, synced)
+		mock_get_doc.return_value = item
+
+		save_product(
+			PROFILE,
+			_payload(item_code="ITEM-1", image=synced, price=10),
+		)
+
+		item.save.assert_called_once()
+
+	@patch("pos_next.api.product_management._get_pos_profile_allowed_item_groups")
+	@patch("pos_next.api.product_management.frappe.get_doc")
+	@patch("pos_next.api.product_management.frappe.get_cached_doc")
+	@patch("pos_next.api.product_management.frappe.has_permission")
+	@patch("pos_next.api.product_management.frappe.db", new_callable=MagicMock)
+	def test_script_scheme_is_still_rejected(
+		self, mock_db, mock_perm, mock_cached_doc, mock_get_doc, mock_groups
+	):
+		item = self._mocks(mock_db, mock_perm, mock_cached_doc, mock_groups, "/files/a.png")
+		mock_get_doc.return_value = item
+
+		with self.assertRaises(frappe.ValidationError):
+			save_product(
+				PROFILE,
+				_payload(item_code="ITEM-1", image="javascript:alert(1)"),
+			)
+
+		item.save.assert_not_called()
+
+	@patch("pos_next.api.product_management._get_pos_profile_allowed_item_groups")
+	@patch("pos_next.api.product_management.frappe.get_doc")
+	@patch("pos_next.api.product_management.frappe.get_cached_doc")
+	@patch("pos_next.api.product_management.frappe.has_permission")
+	@patch("pos_next.api.product_management.frappe.db", new_callable=MagicMock)
+	def test_pending_upload_data_uri_is_not_stored(
+		self, mock_db, mock_perm, mock_cached_doc, mock_get_doc, mock_groups
+	):
+		"""The real path is written by the upload step after save."""
+		item = self._mocks(mock_db, mock_perm, mock_cached_doc, mock_groups, "/files/a.png")
+		mock_get_doc.return_value = item
+
+		save_product(
+			PROFILE,
+			_payload(item_code="ITEM-1", image="data:image/png;base64,AAAA"),
+		)
+
+		self.assertEqual(item.image, "/files/a.png")

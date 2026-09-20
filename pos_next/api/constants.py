@@ -39,6 +39,13 @@ POS_SETTINGS_FIELDS = [
 	"enable_session_lock",
 	"session_lock_timeout",
 	"show_variants_as_items",
+	"enable_loyalty_program",
+	"default_loyalty_program",
+	"wallet_account",
+	"auto_create_wallet",
+	"loyalty_to_wallet",
+	"cart_lifo",
+	"display_item_code",
 ]
 
 # Default POS Settings values
@@ -69,4 +76,26 @@ DEFAULT_POS_SETTINGS = {
 	"enable_session_lock": 0,
 	"session_lock_timeout": 5,
 	"show_variants_as_items": 0,
+	"enable_loyalty_program": 0,
+	"default_loyalty_program": "",
+	"wallet_account": "",
+	"auto_create_wallet": 1,
+	"loyalty_to_wallet": 1,
+	"magento_loyalty_available": 0,
+	"miraaya_installed": 0,
+	"cart_lifo": 0,
+	"display_item_code": 1,
 }
+
+
+def merge_pos_settings(row=None):
+	"""DB row over defaults so runtime integration flags always exist.
+
+	`miraaya_installed` / `magento_loyalty_available` are not DocType columns;
+	hooks may overwrite them, but vanilla benches still need the keys present
+	when a POS Settings row exists (defaults alone only apply on miss/error).
+	"""
+	settings = DEFAULT_POS_SETTINGS.copy()
+	if row:
+		settings.update(row)
+	return settings
