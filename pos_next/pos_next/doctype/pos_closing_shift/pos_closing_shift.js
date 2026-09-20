@@ -126,10 +126,26 @@ function set_form_data(data, frm) {
 		const base_grand = get_base_value(d, "grand_total", "base_grand_total", conversion_rate);
 		const base_net = get_base_value(d, "net_total", "base_net_total", conversion_rate);
 
+		// Cash-basis figures, mirroring _process_invoice() in the Python module.
+		// paid_amount is the raw tendered total, so change handed back to the
+		// customer must be netted out — it never stayed in the drawer.
+		const base_change = get_base_value(
+			d,
+			"change_amount",
+			"base_change_amount",
+			conversion_rate
+		);
+		const base_paid =
+			get_base_value(d, "paid_amount", "base_paid_amount", conversion_rate) - base_change;
+		const collected = is_return ? base_grand : base_paid;
+		const outstanding = is_return ? 0 : base_grand - base_paid;
+
 		add_to_pos_transaction(d, frm, base_grand);
 		frm.doc.grand_total += base_grand;
 		frm.doc.net_total += base_net;
 		frm.doc.total_quantity += flt(d.total_qty);
+		frm.doc.collected_amount += collected;
+		frm.doc.outstanding_total += outstanding;
 		add_to_payments(d, frm, conversion_rate);
 		add_to_taxes(d, frm, conversion_rate);
 	});
@@ -259,6 +275,8 @@ function reset_values(frm) {
 	frm.set_value("taxes", []);
 	frm.set_value("grand_total", 0);
 	frm.set_value("net_total", 0);
+	frm.set_value("collected_amount", 0);
+	frm.set_value("outstanding_total", 0);
 	frm.set_value("total_quantity", 0);
 }
 
@@ -269,6 +287,8 @@ function refresh_fields(frm) {
 	frm.refresh_field("taxes");
 	frm.refresh_field("grand_total");
 	frm.refresh_field("net_total");
+	frm.refresh_field("collected_amount");
+	frm.refresh_field("outstanding_total");
 	frm.refresh_field("total_quantity");
 }
 

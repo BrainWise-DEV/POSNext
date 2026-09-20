@@ -717,6 +717,11 @@
 												"
 											/>
 											<CheckboxField
+												v-model="settings.cart_lifo"
+												:label="__('LIFO Cart Order (Newest on Top)')"
+												:description="__('Show the most recently added item at the top of the cart instead of the bottom.')"
+											/>
+											<CheckboxField
 												v-model="settings.customer_search_show_all"
 												:label="__('Show All Customers in Search')"
 												:description="__('Show the complete customer list in the cart search dropdown instead of capping results at the first 10-20 matches.')"
@@ -1202,6 +1207,7 @@ const settings = ref({
 	silent_print: 0,
 	allow_negative_stock: 0,
 	tax_inclusive: 0,
+	cart_lifo: 0,
 });
 
 // Stock Sync Settings (localStorage persisted)

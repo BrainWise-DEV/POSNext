@@ -7,6 +7,7 @@
 	--z-dialog-overlay: 400;
 	--z-dialog-content: 500;
 	--z-dropdown: 10000;
+	--z-authorization: 10010;
 }
 
 /* Apply Saudi Riyal symbol font to body for currency support */
@@ -27,6 +28,16 @@ body {
 .dialog-overlay .dialog-content,
 .dialog-content {
 	z-index: 500 !important;
+}
+
+/*
+ * frappe-ui Select portals to document.body and copies SelectContent's
+ * z-[100] onto a position:fixed wrapper. POS overlays sit at z-300+, so
+ * the option list otherwise opens behind the dialog.
+ */
+[data-reka-popper-content-wrapper],
+body > div[style*="position: fixed"][style*="z-index"]:has([role="listbox"]) {
+	z-index: var(--z-dropdown) !important;
 }
 
 /* Mobile touch optimizations - removes 300ms tap delay and improves scrolling */

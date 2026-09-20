@@ -1,0 +1,72 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "creation": "2026-08-10 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "approver_type",
+  "role",
+  "user",
+  "column_break_condition",
+  "condition"
+ ],
+ "fields": [
+  {
+   "columns": 2,
+   "default": "Role",
+   "fieldname": "approver_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Approver Type",
+   "options": "Role\nUser",
+   "reqd": 1
+  },
+  {
+   "columns": 3,
+   "depends_on": "eval:doc.approver_type == \"Role\"",
+   "fieldname": "role",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Role",
+   "mandatory_depends_on": "eval:doc.approver_type == \"Role\"",
+   "options": "Role"
+  },
+  {
+   "columns": 3,
+   "depends_on": "eval:doc.approver_type == \"User\"",
+   "fieldname": "user",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "User",
+   "mandatory_depends_on": "eval:doc.approver_type == \"User\"",
+   "options": "User"
+  },
+  {
+   "fieldname": "column_break_condition",
+   "fieldtype": "Column Break"
+  },
+  {
+   "columns": 3,
+   "description": "Optional. Python expression, e.g. <code>amount &gt; 50000</code>. Available names: doc, amount, pos_profile, customer, requested_by, nowdate, getdate. Leave blank to always apply.",
+   "fieldname": "condition",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Condition"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-08-10 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "POS Next Auth Gate",
+ "name": "POS Authorization Approver",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0
+}
