@@ -275,6 +275,7 @@
 
 							<!-- Native Input for Instant Search -->
 							<input
+								ref="customerSearchInputRef"
 								id="cart-customer-search"
 								name="cart-customer-search"
 								:value="customerSearch"
@@ -1684,6 +1685,7 @@ const displayCartItems = computed(() => {
 const customerSearch = ref(""); // Current search query
 const customerSearchContainer = ref(null); // Ref to search container for click-outside detection
 const customerSearchFocused = ref(false); // Track if search input is focused
+const customerSearchInputRef = ref(null); // Ref to the native search input element
 // Use Pinia store for allCustomers (shared with CustomerDialog, synced on customer creation)
 const allCustomers = computed(() => customerSearchStore.allCustomers);
 const customersLoaded = computed(() => customerSearchStore.allCustomers.length > 0);
@@ -2477,6 +2479,18 @@ onMounted(() => {
 onBeforeUnmount(() => {
 	if (typeof document === "undefined") return;
 	document.removeEventListener("mousedown", handleOutsideClick);
+});
+
+defineExpose({
+	focusCustomerSearch() {
+		if (props.customer) {
+			// A customer is already assigned, so the search input isn't rendered.
+			// Deselect it first so the input mounts, then clearCustomer() focuses it.
+			clearCustomer();
+		} else {
+			customerSearchInputRef.value?.focus();
+		}
+	},
 });
 </script>
 ```

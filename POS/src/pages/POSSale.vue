@@ -400,6 +400,7 @@
 							style="min-width: 300px; contain: layout style paint"
 						>
 							<InvoiceCart
+								ref="invoiceCartRef"
 								:items="cartStore.invoiceItems"
 								:customer="cartStore.customer"
 								:subtotal="cartStore.subtotal"
@@ -1167,6 +1168,7 @@ const { onStockUpdate } = useRealtimeStock();
 
 // Session lock (inactivity + tab-refocus)
 const {
+	isLocked,
 	lock: lockSession,
 	configure: configureSessionLock,
 	startActivityTracking,
@@ -1196,6 +1198,7 @@ const { isRTL } = useLocale();
 
 // Component refs
 const itemsSelectorRef = ref(null);
+const invoiceCartRef = ref(null);
 const offersDialogRef = ref(null);
 const containerRef = ref(null);
 const dividerRef = ref(null);
@@ -1342,6 +1345,29 @@ onMounted(async () => {
 		updateLayoutBounds();
 	};
 	window.addEventListener("resize", handleResize, { passive: true });
+
+	// Global keyboard shortcuts
+	const handleGlobalKeydown = (event) => {
+		// Skip if any dialog is open, the session is locked, the clear-cache overlay is
+		// showing, or if user is typing in an input/textarea. isLocked/showClearCacheDialog
+		// aren't wired into uiStore.isAnyDialogOpen, so they're checked explicitly here.
+		if (uiStore.isAnyDialogOpen || isLocked.value || showClearCacheDialog.value) return;
+		const tag = document.activeElement?.tagName;
+		if (tag === "INPUT" || tag === "TEXTAREA") return;
+
+		if (event.key === "F4") {
+			event.preventDefault();
+			itemsSelectorRef.value?.focusSearchInput();
+		} else if (event.key === "F8") {
+			event.preventDefault();
+			invoiceCartRef.value?.focusCustomerSearch();
+		} else if (event.key === "F9") {
+			event.preventDefault();
+			handleProceedToPayment();
+		}
+	};
+	window.addEventListener("keydown", handleGlobalKeydown);
+	onUnmounted(() => window.removeEventListener("keydown", handleGlobalKeydown));
 
 	// Set up real-time stock update listener
 	const cleanup = onStockUpdate(async (stockUpdates) => {
