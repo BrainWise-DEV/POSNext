@@ -120,6 +120,8 @@ export function usePaymentNumpad(options = {}) {
 		// Handle Enter - call custom handler if provided
 		if (key === "Enter") {
 			event.preventDefault();
+			// Held-down Enter auto-repeats; a repeat must never re-submit a payment.
+			if (event.repeat) return;
 			if (onEnter && typeof onEnter === "function") {
 				onEnter(numpadValue.value);
 			}
