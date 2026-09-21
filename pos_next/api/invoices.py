@@ -2342,6 +2342,62 @@ def _remap_foreign_payment_modes(payments_data, current_profile, original_profil
 	return payments_data
 
 
+def _get_qty_precision():
+	return cint(frappe.get_cached_value("System Settings", None, "float_precision")) or 3
+
+
+def _build_original_return_qty_maps(invoice_name, qty_precision):
+	"""Return original invoice quantities keyed by row name and item code."""
+	si_item = frappe.qb.DocType("Sales Invoice Item")
+	original_item_rows = (
+		frappe.qb.from_(si_item)
+		.select(si_item.name, si_item.item_code, si_item.qty)
+		.where(si_item.parent == invoice_name)
+	).run(as_dict=True)
+
+	original_qty_by_row = {
+		row["name"]: abs(flt(row["qty"], qty_precision)) for row in original_item_rows
+	}
+	original_qty_by_item_code = {}
+	for row in original_item_rows:
+		item_code = row["item_code"]
+		original_qty_by_item_code[item_code] = flt(
+			original_qty_by_item_code.get(item_code, 0)
+			+ abs(flt(row["qty"], qty_precision)),
+			qty_precision,
+		)
+
+	return original_qty_by_row, original_qty_by_item_code
+
+
+def _resolve_prepared_return_quantities(
+	item, returned_qty_map, original_qty_by_row, original_qty_by_item_code, qty_precision
+):
+	"""Resolve display quantities for an item returned by make_sales_return().
+
+	ERPNext's make_sales_return() already reduces item.qty to the remaining
+	returnable quantity. This helper treats that qty as remaining_qty and uses
+	previous submitted returns only to report already_returned/original_qty.
+	"""
+	item_ref = item.get("sales_invoice_item") or item.get("item_code")
+	remaining_qty = abs(flt(item.get("qty", 0), qty_precision))
+	already_returned_qty = flt(returned_qty_map.get(item_ref, 0), qty_precision)
+	original_qty = (
+		original_qty_by_row.get(item.get("sales_invoice_item"))
+		or original_qty_by_item_code.get(item.get("item_code"))
+		or flt(remaining_qty + already_returned_qty, qty_precision)
+	)
+
+	# If the original row cannot be found but make_sales_return already adjusted
+	# the row, preserve a coherent display value instead of double-subtracting.
+	already_returned = max(
+		flt(original_qty - remaining_qty, qty_precision),
+		already_returned_qty,
+	)
+
+	return original_qty, already_returned, remaining_qty
+
+
 @frappe.whitelist()
 def prepare_return_invoice(invoice_name, pos_opening_shift=None):
 	"""Prepare a return invoice using ERPNext's make_sales_return.
@@ -2511,12 +2567,20 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
 	)
 
 	precision = cint(frappe.get_cached_value("System Settings", None, "currency_precision")) or 2
+	qty_precision = _get_qty_precision()
+	original_qty_by_row, original_qty_by_item_code = _build_original_return_qty_maps(
+		invoice_name, qty_precision
+	)
 
 	def process_return_item(item):
 		"""Process single item for return, returns None if not returnable."""
-		item_ref = item.get("sales_invoice_item") or item.get("item_code")
-		original_qty = abs(flt(item.get("qty", 0)))
-		remaining_qty = original_qty - returned_qty_map.get(item_ref, 0)
+		original_qty, already_returned, remaining_qty = _resolve_prepared_return_quantities(
+			item,
+			returned_qty_map,
+			original_qty_by_row,
+			original_qty_by_item_code,
+			qty_precision,
+		)
 
 		if remaining_qty <= 0:
 			return None
@@ -2525,7 +2589,9 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
 		price_list_rate = flt(item.get("price_list_rate") or item.get("rate"), precision)
 		net_rate = flt(item.get("net_rate") or item.get("rate"), precision)
 		tax_per_unit = (
-			flt(item_tax_map.get(item.get("item_code"), 0) / original_qty, precision) if original_qty else 0
+			flt(item_tax_map.get(item.get("item_code"), 0) / remaining_qty, precision)
+			if remaining_qty
+			else 0
 		)
 
 		# For inclusive taxes, use the original rate (already includes tax) to prevent
@@ -2544,7 +2610,7 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
 		return {
 			**item,
 			"original_qty": original_qty,
-			"already_returned": original_qty - remaining_qty,
+			"already_returned": already_returned,
 			"remaining_qty": remaining_qty,
 			"qty": -remaining_qty,
 			"price_list_rate": price_list_rate,

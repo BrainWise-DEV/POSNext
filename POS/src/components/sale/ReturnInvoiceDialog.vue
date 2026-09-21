@@ -489,7 +489,7 @@
 										class="text-xs text-amber-600 mt-0.5"
 									>
 										{{
-											__("⚠️ {0} already returned", [item.already_returned])
+											__("⚠️ {0} already returned", [formatReturnQuantity(item.already_returned)])
 										}}
 									</p>
 								</div>
@@ -506,7 +506,7 @@
 										<button
 											type="button"
 											@click.stop="decrementReturnQuantity(item)"
-											:disabled="!item.selected || item.return_qty <= 1"
+											:disabled="!item.selected || item.return_qty <= getMinReturnQuantity()"
 											class="flex-shrink-0 w-8 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-700 font-bold text-lg transition-colors flex items-center justify-center border border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
 										>
 											−
@@ -514,10 +514,10 @@
 										<input
 											v-model.number="item.return_qty"
 											:max="item.quantity"
+											:min="getMinReturnQuantity()"
+											:step="getReturnQuantityStep()"
 											:disabled="!item.selected"
 											type="number"
-											min="1"
-											step="1"
 											@change="normalizeItemQuantity(item)"
 											@blur="normalizeItemQuantity(item)"
 											class="w-12 px-1 py-1 border border-gray-300 rounded-lg text-sm text-center font-bold focus:ring-2 focus:ring-blue-500 focus:border-blue-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
@@ -534,7 +534,7 @@
 										</button>
 									</div>
 									<span class="text-xs font-semibold text-gray-700">{{
-										__("of {0}", [item.quantity], "item qty")
+										__("of {0}", [formatReturnQuantity(item.quantity)], "item qty")
 									}}</span>
 								</div>
 
@@ -606,7 +606,7 @@
 										>
 											{{
 												__("⚠️ {0} already returned", [
-													item.already_returned,
+													formatReturnQuantity(item.already_returned),
 												])
 											}}
 										</p>
@@ -621,13 +621,13 @@
 											>{{ __("Return Qty:") }}</span
 										>
 										<span class="text-xs text-gray-500 text-end">{{
-											__("of {0}", [item.quantity], "item qty")
+											__("of {0}", [formatReturnQuantity(item.quantity)], "item qty")
 										}}</span>
 									</div>
 									<div class="flex items-center gap-2">
 										<button
 											@click.stop="decrementReturnQuantity(item)"
-											:disabled="!item.selected || item.return_qty <= 1"
+											:disabled="!item.selected || item.return_qty <= getMinReturnQuantity()"
 											class="flex-1 h-10 rounded-lg bg-white border-2 border-gray-300 flex items-center justify-center text-gray-700 active:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed font-bold text-xl"
 										>
 											−
@@ -635,10 +635,10 @@
 										<input
 											v-model.number="item.return_qty"
 											:max="item.quantity"
+											:min="getMinReturnQuantity()"
+											:step="getReturnQuantityStep()"
 											:disabled="!item.selected"
 											type="number"
-											min="1"
-											step="1"
 											@change="normalizeItemQuantity(item)"
 											@blur="normalizeItemQuantity(item)"
 											class="w-16 h-10 px-2 border-2 border-gray-300 rounded-lg text-lg text-center font-bold focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -1185,6 +1185,13 @@ import { useOfflineStatus } from "@/composables/useOfflineStatus";
 import { useToast } from "@/composables/useToast";
 import { getPaymentIcon } from "@/utils/payment";
 import {
+	clampReturnQuantity,
+	formatReturnQuantity,
+	getMinReturnQuantity,
+	getReturnQuantityStep,
+	roundReturnQuantity,
+} from "@/utils/returnQuantity";
+import {
 	DEFAULT_CURRENCY,
 	DEFAULT_LOCALE,
 	formatCurrency as formatCurrencyUtil,
@@ -1360,7 +1367,9 @@ const fetchInvoiceResource = createResource({
 
 			// Filter items that still have quantity available for return.
 			// The API calculates remaining_qty by subtracting previously returned quantities.
-			const availableItems = data.items.filter((item) => item.remaining_qty > 0);
+			const availableItems = data.items.filter(
+				(item) => roundReturnQuantity(item.remaining_qty) > 0
+			);
 
 			if (availableItems.length === 0) {
 				showWarning(__("All items from this invoice have already been returned"));
@@ -1388,14 +1397,19 @@ const fetchInvoiceResource = createResource({
 			// Map items for UI display and selection.
 			// - sales_invoice_item: links to original item row for accurate return tracking
 			// - remaining_qty: maximum quantity user can return for this item
-			returnItems.value = availableItems.map((item) => ({
-				...item,
-				name: item.sales_invoice_item,
-				quantity: item.remaining_qty,
-				selected: false,
-				return_qty: item.remaining_qty,
-				original_qty: item.original_qty,
-			}));
+			returnItems.value = availableItems.map((item) => {
+				const remainingQty = roundReturnQuantity(item.remaining_qty);
+
+				return {
+					...item,
+					name: item.sales_invoice_item,
+					quantity: remainingQty,
+					selected: false,
+					return_qty: remainingQty,
+					original_qty: roundReturnQuantity(item.original_qty),
+					already_returned: roundReturnQuantity(item.already_returned),
+				};
+			});
 			returnItems.value.forEach(normalizeItemQuantity);
 
 			// Calculate payment totals from original invoice for refund handling
@@ -1779,15 +1793,31 @@ function closeErrorDialog() {
 }
 
 function normalizeItemQuantity(item) {
-	const maxQuantity = Number(item.quantity) || 0;
+	const maxQuantity = roundReturnQuantity(item.quantity);
 	const currentQuantity = Number(item.return_qty);
-	const validQuantity = Number.isFinite(currentQuantity) ? currentQuantity : 1;
-	item.return_qty = Math.max(1, Math.min(validQuantity, maxQuantity || validQuantity));
+	const fallbackQuantity =
+		maxQuantity > 0 ? Math.min(getMinReturnQuantity(), maxQuantity) : 0;
+	const validQuantity =
+		Number.isFinite(currentQuantity) && currentQuantity > 0
+			? currentQuantity
+			: fallbackQuantity;
+
+	item.quantity = maxQuantity;
+
+	if (maxQuantity <= 0) {
+		item.return_qty = 0;
+		return;
+	}
+
+	item.return_qty = clampReturnQuantity(validQuantity, maxQuantity);
 }
 
 function validateSelectedItems() {
 	const invalidItems = selectedItems.value.filter((item) => item.return_qty > item.quantity);
-	if (!invalidItems.length) return true;
+	if (!invalidItems.length) {
+		selectedItems.value.forEach(normalizeItemQuantity);
+		return true;
+	}
 
 	invalidItems.forEach(normalizeItemQuantity);
 	const errorDetails = invalidItems
@@ -1990,15 +2020,25 @@ function handleKeyboardShortcuts(event) {
 }
 
 function incrementReturnQuantity(item) {
-	if (item.return_qty < item.quantity) {
-		item.return_qty++;
-	}
+	const maxQuantity = Number(item.quantity) || 0;
+	if (maxQuantity <= 0 || item.return_qty >= maxQuantity) return;
+
+	const currentQuantity = Number(item.return_qty) || 0;
+	item.return_qty = clampReturnQuantity(
+		currentQuantity + getReturnQuantityStep(),
+		maxQuantity
+	);
 }
 
 function decrementReturnQuantity(item) {
-	if (item.return_qty > 1) {
-		item.return_qty--;
-	}
+	const maxQuantity = Number(item.quantity) || 0;
+	if (maxQuantity <= 0 || item.return_qty <= getMinReturnQuantity()) return;
+
+	const currentQuantity = Number(item.return_qty) || getMinReturnQuantity();
+	item.return_qty = clampReturnQuantity(
+		currentQuantity - getReturnQuantityStep(),
+		maxQuantity
+	);
 }
 
 async function handleCreateReturn() {
