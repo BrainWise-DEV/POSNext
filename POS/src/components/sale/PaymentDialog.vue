@@ -1197,7 +1197,7 @@
 									(remainingAvailableCredit > 0 ||
 										getMethodTotal('Customer Credit') > 0)
 								"
-								@click="applyCustomerCredit"
+								@click="applyCustomerCredit()"
 								:disabled="remainingAmount === 0 || remainingAvailableCredit === 0"
 								:class="[
 									'inline-flex items-center rounded-lg border-2 transition-all font-medium',
@@ -1277,6 +1277,26 @@
 							{{ __("No payment methods available") }}
 						</div>
 
+						<!-- Payment Hub mobile number for asynchronous Electronic Payment -->
+						<div
+							v-if="paymentHubElectronicActive"
+							class="mt-2 rounded-lg border border-green-200 bg-green-50 p-2"
+						>
+							<label class="mb-1 block text-xs font-semibold text-green-800">
+								{{ __("WhatsApp payment mobile") }}
+							</label>
+							<input
+								v-model="paymentHubMobileNumber"
+								type="tel"
+								inputmode="tel"
+								class="h-9 w-full rounded-lg border border-green-300 bg-white px-3 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+								:placeholder="__('Example: +96550835135')"
+							/>
+							<p class="mt-1 text-[10px] text-green-700">
+								{{ __("The secure payment link will be sent to this number.") }}
+							</p>
+						</div>
+
 						<!-- Exact Amount Mode Info Banner -->
 						<div
 							v-if="
@@ -1324,8 +1344,8 @@
 								>
 									{{
 										!isExactAmountValid
-											? __("Total must equal invoice amount")
-											: __("Payment amount is correct")
+											? __("Non-cash payments cannot exceed invoice total")
+											: __("Non-cash limit is valid; cash may create change")
 									}}
 								</span>
 							</div>
@@ -1341,7 +1361,7 @@
 						<div class="text-start text-xs font-medium text-gray-600 mb-1.5">
 							{{
 								isExactAmountModeActive && !isCashPaymentMethod(lastSelectedMethod)
-									? __("Exact amount only")
+									? __("Non-cash: up to invoice total")
 									: __("Quick amounts for {0}", [
 											__(lastSelectedMethod.mode_of_payment),
 									  ])
@@ -2052,6 +2072,18 @@ const props = defineProps({
 		type: Boolean,
 		default: false,
 	},
+	autoApplyCustomerCredit: {
+		type: Boolean,
+		default: false,
+	},
+	autoApplyCustomerCreditOrigin: {
+		type: String,
+		default: "",
+	},
+	autoApplyCustomerCreditSource: {
+		type: Object,
+		default: null,
+	},
 	customer: {
 		type: [String, Object],
 		default: null,
@@ -2097,6 +2129,10 @@ const props = defineProps({
 		type: Number,
 		default: 0,
 	},
+	paymentHubConfig: {
+		type: Object,
+		default: () => ({}),
+	},
 });
 
 const emit = defineEmits([
@@ -2122,7 +2158,9 @@ const receivableAccounts = ref([]);
 const selectedReceivableAccount = ref("");
 const customAmount = ref("");
 const paymentEntries = ref([]);
+const paymentHubMobileNumber = ref("");
 const customerCredit = ref([]);
+const autoCustomerCreditApplied = ref(false);
 const customerBalance = ref({
 	total_outstanding: 0,
 	total_credit: 0,
@@ -2303,6 +2341,7 @@ const customerBalanceResource = createResource({
 		customerBalance.value = data || {
 			total_outstanding: 0,
 			total_credit: 0,
+			available_credit: 0,
 			net_balance: 0,
 		};
 		log.debug("[PaymentDialog] Net balance:", customerBalance.value.net_balance);
@@ -2313,6 +2352,7 @@ const customerBalanceResource = createResource({
 		customerBalance.value = {
 			total_outstanding: 0,
 			total_credit: 0,
+			available_credit: 0,
 			net_balance: 0,
 		};
 		loadingCredit.value = false;
@@ -2388,6 +2428,10 @@ function isWalletPaymentMethod(methodName) {
 // Check if a payment method is a cash payment (allows overpayment/change)
 function isCashPaymentMethod(method) {
 	if (!method) return false;
+	// Payment Hub mapping takes priority, so a user-defined name can be Cash
+	// without relying on words in the Mode of Payment label.
+	const mappedChannel = paymentHubChannelForMode(method.mode_of_payment);
+	if (mappedChannel) return mappedChannel === "Cash";
 	// Check by account_type first (most reliable - from linked Account)
 	const accountType = (method.account_type || "").toLowerCase();
 	if (accountType === "cash") return true;
@@ -2643,9 +2687,17 @@ const customerCreditEnabled = computed(() => {
 });
 
 const totalAvailableCredit = computed(() => {
-	// Use net_balance: negative means customer has credit, positive means they owe
-	// Return negative of net_balance so positive = credit available, negative = outstanding
-	return roundCurrency(-customerBalance.value.net_balance);
+	// Spendable Customer Credit must come from the same eligible source resolver
+	// used by redemption. A linked return can retain a negative outstanding in
+	// ERPNext even after its original-invoice credit has been consumed; that raw
+	// accounting value must not reappear here as phantom Credit Balance.
+	const eligibleCredit = roundCurrency(Number(customerBalance.value.available_credit || 0));
+	if (eligibleCredit > 0) return eligibleCredit;
+
+	// Preserve the existing red Outstanding Balance indicator when the customer
+	// genuinely owes money and has no spendable credit source.
+	const outstanding = roundCurrency(Number(customerBalance.value.total_outstanding || 0));
+	return outstanding > 0 ? -outstanding : 0;
 });
 
 // Remaining credit after deducting what's already been applied as payment
@@ -2820,34 +2872,43 @@ const hasNonCashPayment = computed(() => {
 	});
 });
 
+const nonCashPaidAmount = computed(() =>
+	roundCurrency(
+		paymentEntries.value
+			.filter((entry) => {
+				const method = paymentMethods.value.find(
+					(m) => m.mode_of_payment === entry.mode_of_payment
+				);
+				return method && !isCashPaymentMethod(method) && !entry.is_customer_credit;
+			})
+			.reduce((sum, entry) => sum + Number(entry.amount || 0), 0)
+	)
+);
+
 // Check if current payment scenario allows overpayment (change)
 const allowsOverpayment = computed(() => {
-	// If exact amount mode is not active, allow overpayment
-	if (!isExactAmountModeActive.value) return true;
-
-	// If no payments yet, default to allowing overpayment
+	// Change is always a cash-only concept. Bank/electronic/terminal payments
+	// are never allowed to create change, regardless of the Exact Amount setting.
 	if (paymentEntries.value.length === 0) return true;
-
-	// Cash only: allows overpayment
-	if (hasCashPayment.value && !hasNonCashPayment.value) return true;
-
-	// Non-cash or mixed: no overpayment allowed
-	return false;
+	return hasCashPayment.value;
 });
 
-// Check if current payment is valid according to exact amount rules
+// Universal tender safety rule: cumulative non-cash can never exceed the sale
+// total. Non-cash may be partial. Cash may exceed the remaining balance and the
+// difference is change due. This rule applies even when Exact Amount is disabled.
 const isExactAmountValid = computed(() => {
-	if (!isExactAmountModeActive.value) return true;
-
-	// If no payments, it's valid (nothing to validate yet)
 	if (paymentEntries.value.length === 0) return true;
-
-	// Cash only: always valid (allows overpayment)
-	if (hasCashPayment.value && !hasNonCashPayment.value) return true;
-
-	// Non-cash or mixed: total paid must not exceed grand total
-	return totalPaid.value <= roundCurrency(props.grandTotal);
+	if (nonCashPaidAmount.value > roundCurrency(props.grandTotal) + 0.001) return false;
+	if (!hasCashPayment.value && totalPaid.value > roundCurrency(props.grandTotal) + 0.001)
+		return false;
+	return true;
 });
+
+const hasCustomerCreditEntry = computed(() =>
+	paymentEntries.value.some(
+		(entry) => entry.is_customer_credit && Number(entry.amount || 0) > 0
+	)
+);
 
 const canComplete = computed(() => {
 	// Check sales person validation first (mandatory when enabled)
@@ -2865,6 +2926,16 @@ const canComplete = computed(() => {
 		return totalPaid.value <= roundCurrency(props.grandTotal) + 0.01;
 	}
 
+	// Customer Credit redemption is finalized after the Sales Invoice is submitted.
+	// Never let a Customer Credit checkout silently finish as a partial invoice: the
+	// cashier must cover the full invoice (or use an allowed write-off). This avoids
+	// the historical case where Cash + only part of the requested credit produced an
+	// unintended Partly Paid invoice.
+	if (hasCustomerCreditEntry.value) {
+		if (applyWriteOff.value && canWriteOff.value) return paymentEntries.value.length > 0;
+		return remainingAmount.value === 0 && paymentEntries.value.length > 0;
+	}
+
 	// If partial payment is allowed, can complete with any amount > 0
 	if (props.allowPartialPayment) {
 		return totalPaid.value > 0 && paymentEntries.value.length > 0;
@@ -2880,6 +2951,11 @@ const canComplete = computed(() => {
 });
 
 const paymentButtonText = computed(() => {
+	if (hasPaymentHubElectronicEntry.value && hasPaymentHubPhysicalEntry.value) {
+		return __("Start Payments / Send Link");
+	}
+	if (hasPaymentHubElectronicEntry.value) return __("Send Payment Link");
+	if (hasPaymentHubPhysicalEntry.value) return __("Start Terminal Payment");
 	// Show "Complete Payment" if fully paid or write-off covers remaining
 	if (remainingAmount.value === 0 || (applyWriteOff.value && canWriteOff.value)) {
 		return __("Complete Payment");
@@ -2901,11 +2977,9 @@ const { quickAmounts } = useQuickAmounts(remainingAmount, isLastMethodCash);
 // Whether a quick amount button should be disabled in exact-amount mode
 // Non-cash methods can only pay the exact remaining — no rounding allowed
 function isQuickAmountDisabled(amount) {
-	return (
-		isExactAmountModeActive.value &&
-		!isCashPaymentMethod(lastSelectedMethod.value) &&
-		amount !== roundCurrency(remainingAmount.value)
-	);
+	if (isCashPaymentMethod(lastSelectedMethod.value)) return false;
+	const maxNonCash = roundCurrency(props.grandTotal) - nonCashPaidAmount.value;
+	return Number(amount || 0) > maxNonCash + 0.001;
 }
 
 // Preload payment methods and sales persons when posProfile is set.
@@ -2949,6 +3023,7 @@ watch(
 
 watch(show, (newVal) => {
 	if (newVal) {
+		autoCustomerCreditApplied.value = false;
 		// Reset state when dialog opens (but NOT customerBalance - it's pre-fetched)
 		paymentEntries.value = [];
 		customAmount.value = "";
@@ -2956,6 +3031,7 @@ watch(show, (newVal) => {
 		mobileCustomAmount.value = "";
 		lastSelectedMethod.value = null;
 		selectedReceivableAccount.value = "";
+		paymentHubMobileNumber.value = customerMobileValue();
 		customerCredit.value = [];
 		// Refetch credit sources every time the dialog opens. The pre-fetch
 		// watcher only fires when customer/company changes, so reopening the
@@ -3014,6 +3090,122 @@ watch(show, (newVal) => {
 		}
 	}
 });
+
+// Exchange checkout can request a one-shot automatic application of Customer Credit.
+// Wait until both the balance and source credit notes have loaded; this keeps the
+// ordinary PaymentDialog behavior unchanged for normal sales.
+watch(
+	() => [
+		show.value,
+		props.autoApplyCustomerCredit,
+		props.autoApplyCustomerCreditOrigin,
+		props.autoApplyCustomerCreditSource,
+		remainingAmount.value,
+	],
+	([opened, autoApply, preferredOrigin, explicitSource, remaining]) => {
+		if (
+			!opened ||
+			!autoApply ||
+			autoCustomerCreditApplied.value ||
+			Number(remaining || 0) <= 0
+		)
+			return;
+
+		const source = explicitSource && explicitSource.credit_origin ? explicitSource : null;
+		const origin = source?.credit_origin || preferredOrigin || "";
+		const available = Number(source?.available_credit ?? source?.total_credit ?? 0);
+		if (!origin || available <= 0) return;
+
+		autoCustomerCreditApplied.value = true;
+		nextTick(() => applyCustomerCredit(origin, source ? [source] : null, false));
+	},
+	{ flush: "post", deep: true }
+);
+
+function normalizePaymentHubMode(value) {
+	return String(value || "").trim().toLowerCase();
+}
+
+function getPaymentHubMapping(value) {
+	const normalized = normalizePaymentHubMode(value);
+	return (props.paymentHubConfig?.payment_method_mappings || []).find(
+		(row) => normalizePaymentHubMode(row?.mode_of_payment) === normalized
+	);
+}
+
+function paymentHubChannelForMode(value) {
+	const mapping = getPaymentHubMapping(value);
+	if (mapping) return mapping.channel || null;
+	const normalized = normalizePaymentHubMode(value);
+	const legacyCash = props.paymentHubConfig?.cash_mode_of_payment || "Cash";
+	const legacyElectronic =
+		props.paymentHubConfig?.electronic_mode_of_payment || "Electronic Payment";
+	const legacyPhysical =
+		props.paymentHubConfig?.physical_mode_of_payment || "Physical Payment Terminal";
+	if (normalized === normalizePaymentHubMode(legacyCash) || normalized === "cash") return "Cash";
+	if (
+		normalized === normalizePaymentHubMode(legacyElectronic) ||
+		normalized === "electronic payment"
+	)
+		return "Electronic Payment";
+	if (
+		normalized === normalizePaymentHubMode(legacyPhysical) ||
+		normalized === "physical payment terminal"
+	)
+		return "Physical Payment Terminal";
+	return null;
+}
+
+function isPaymentHubElectronicModeName(value) {
+	return paymentHubChannelForMode(value) === "Electronic Payment";
+}
+
+function isPaymentHubPhysicalModeName(value) {
+	return paymentHubChannelForMode(value) === "Physical Payment Terminal";
+}
+
+function isPaymentHubElectronicMethod(method) {
+	return isPaymentHubElectronicModeName(method?.mode_of_payment);
+}
+
+function isPaymentHubPhysicalMethod(method) {
+	return isPaymentHubPhysicalModeName(method?.mode_of_payment);
+}
+
+const hasPaymentHubElectronicEntry = computed(() =>
+	paymentEntries.value.some(
+		(entry) => isPaymentHubElectronicModeName(entry.mode_of_payment) && Number(entry.amount || 0) > 0
+	)
+);
+
+const hasPaymentHubPhysicalEntry = computed(() =>
+	paymentEntries.value.some(
+		(entry) => isPaymentHubPhysicalModeName(entry.mode_of_payment) && Number(entry.amount || 0) > 0
+	)
+);
+
+const paymentHubElectronicActive = computed(
+	() => hasPaymentHubElectronicEntry.value || isPaymentHubElectronicMethod(lastSelectedMethod.value)
+);
+
+function customerMobileValue() {
+	if (!props.customer || typeof props.customer === "string") return "";
+	return (
+		props.customer.mobile_no ||
+		props.customer.mobile_number ||
+		props.customer.contact_mobile ||
+		props.customer.phone ||
+		""
+	);
+}
+
+function normalizedPaymentHubMobile() {
+	const raw = String(paymentHubMobileNumber.value || "").trim();
+	const digits = raw.replace(/\D/g, "");
+	if (digits.length === 8) return `+965${digits}`;
+	if (digits.length >= 10) return `+${digits}`;
+	return raw;
+}
 
 // ===========================================
 // Payment Method Press Handler (Long Press Support)
@@ -3120,38 +3312,18 @@ function quickAddPayment(method) {
 		}
 	}
 
-	// Exact amount validation for non-cash payments
-	if (isExactAmountModeActive.value && !isCashPaymentMethod(method)) {
-		const currentNonCashTotal = paymentEntries.value
-			.filter((entry) => {
-				const m = paymentMethods.value.find(
-					(pm) => pm.mode_of_payment === entry.mode_of_payment
-				);
-				return m && !isCashPaymentMethod(m) && !entry.is_customer_credit;
-			})
-			.reduce((sum, entry) => sum + (entry.amount || 0), 0);
-
-		const maxAllowed = roundCurrency(props.grandTotal) - currentNonCashTotal;
-
+	// Non-cash can be partial, but cumulative non-cash can never exceed the sale total.
+	if (!isCashPaymentMethod(method)) {
+		const maxAllowed = roundCurrency(props.grandTotal) - nonCashPaidAmount.value;
 		if (maxAllowed <= 0) {
-			showWarning(__("Cannot add more non-cash payments. Use cash for overpayment."));
+			showWarning(__("Non-cash payments already equal the invoice total."));
 			return;
 		}
-
-		// For quick add (long press), always use exact remaining amount
-		amt = maxAllowed;
+		amt = Math.min(amt, maxAllowed);
 	}
 
-	// For mixed payments in exact amount mode, validate total doesn't exceed grand total
-	if (isExactAmountModeActive.value && hasNonCashPayment.value && isCashPaymentMethod(method)) {
-		const maxAllowed = roundCurrency(props.grandTotal) - totalPaid.value;
-		if (maxAllowed <= 0) {
-			showInfo(__("Invoice fully paid. No additional payment needed."));
-			return;
-		}
-		// For quick add (long press), use exact remaining to complete payment
-		amt = maxAllowed;
-	}
+	// Cash is intentionally allowed to exceed the remaining amount; the excess
+	// is returned as change even when electronic/terminal payments are present.
 
 	_upsertPaymentEntry(method, roundCurrency(amt));
 	log.debug("[PaymentDialog] Long press payment added:", method.mode_of_payment);
@@ -3246,41 +3418,24 @@ async function addCustomPayment(method, amount) {
 		}
 	}
 
-	// Exact amount validation for non-cash payments
-	if (isExactAmountModeActive.value && !isCashPaymentMethod(method)) {
-		// Calculate the remaining amount after ALL existing payments (cash + non-cash)
-		// Non-cash payments in exact amount mode must equal the remaining balance exactly
-		const maxAllowed = roundCurrency(props.grandTotal - totalPaid.value);
-
+	// Non-cash can be any partial amount, but total non-cash across all bank,
+	// electronic and terminal methods cannot exceed the invoice total.
+	if (!isCashPaymentMethod(method)) {
+		const maxAllowed = roundCurrency(props.grandTotal) - nonCashPaidAmount.value;
 		if (maxAllowed <= 0) {
-			showWarning(__("Cannot add more non-cash payments. Use cash for overpayment."));
+			showWarning(__("Non-cash payments already equal the invoice total."));
 			return;
 		}
-
-		// Warn and reject if amount doesn't match exact remaining (use rounded comparison to avoid floating-point issues)
-		if (roundCurrency(amt) !== maxAllowed) {
+		if (roundCurrency(amt) > maxAllowed + 0.001) {
 			showWarning(
-				__("Non-cash payment must equal {0} exactly", [formatCurrency(maxAllowed)])
-			);
-			return;
-		}
-
-		// Use the maxAllowed value to ensure exact match
-		amt = maxAllowed;
-	}
-
-	// For mixed payments in exact amount mode, validate total doesn't exceed grand total
-	if (isExactAmountModeActive.value && hasNonCashPayment.value && isCashPaymentMethod(method)) {
-		const newTotal = totalPaid.value + amt;
-		if (newTotal > roundCurrency(props.grandTotal)) {
-			showWarning(
-				__("Mixed payment cannot exceed invoice total. Limit: {0}", [
-					formatCurrency(roundCurrency(props.grandTotal) - totalPaid.value),
-				])
+				__("Maximum non-cash amount is {0}", [formatCurrency(maxAllowed)])
 			);
 			return;
 		}
 	}
+
+	// Cash may exceed the remaining balance in mixed payments; changeAmount handles
+	// the excess. No mixed-payment ceiling is applied to Cash.
 
 	// Block the action when adding this payment would cause a large overpayment.
 	// This catches accidental double-adds (e.g., quick amount tap then numpad add)
@@ -3311,28 +3466,67 @@ async function addCustomPayment(method, amount) {
 	}
 }
 
-// Apply existing customer credit to payment
-function applyCustomerCredit() {
+// Apply existing customer credit to payment.
+// Manual application refreshes both the net balance and the detailed credit-source
+// list first so a stale dialog cannot omit the next return credit. Exchange checkout
+// can supply one explicit server-resolved credit source, including the original
+// invoice that actually carries a linked return's negative outstanding balance.
+async function applyCustomerCredit(preferredOrigin = null, explicitCredits = null, refreshFirst = true) {
+	if (!preferredOrigin && refreshFirst && !props.isOffline) {
+		try {
+			await Promise.all([customerBalanceResource.fetch(), customerCreditResource.fetch()]);
+		} catch (error) {
+			log.error("[PaymentDialog] Failed to refresh Customer Credit before applying:", error);
+			showWarning(__("Could not refresh Customer Credit. Please try again."));
+			return;
+		}
+	}
+
+	const sourceRows = Array.isArray(explicitCredits) && explicitCredits.length
+		? explicitCredits
+		: customerCredit.value;
+	const eligibleCredits = preferredOrigin
+		? sourceRows.filter((credit) => credit.credit_origin === preferredOrigin)
+		: sourceRows;
+	const sourceAvailable = roundCurrency(
+		eligibleCredits.reduce(
+			(sum, credit) => sum + Number(credit.available_credit ?? credit.total_credit ?? 0),
+			0
+		)
+	);
+	const usableCredit = preferredOrigin
+		? sourceAvailable
+		: Math.min(sourceAvailable, Math.max(0, totalAvailableCredit.value));
+
 	log.debug("[PaymentDialog] Apply customer credit:", {
 		totalCredit: totalAvailableCredit.value,
+		sourceAvailable,
+		preferredOrigin,
 		remainingAmount: remainingAmount.value,
 		currentEntries: paymentEntries.value.length,
 	});
 
-	if (remainingAmount.value === 0 || totalAvailableCredit.value === 0) return;
+	if (remainingAmount.value <= 0 || usableCredit <= 0 || eligibleCredits.length === 0) {
+		showWarning(__("No Customer Credit is available to apply."));
+		return;
+	}
 
-	// Calculate how much credit to apply (min of remaining amount and available credit)
-	const creditToApply = Math.min(remainingAmount.value, totalAvailableCredit.value);
+	// Keep one Customer Credit row only. A second click replaces/recalculates the
+	// existing row rather than accidentally doubling the credit amount.
+	paymentEntries.value = paymentEntries.value.filter((entry) => !entry.is_customer_credit);
+	const amountStillDue = roundCurrency(props.grandTotal) - totalPaid.value;
+	const creditToApply = Math.min(Math.max(0, amountStillDue), usableCredit);
+	if (creditToApply <= 0) return;
 
-	// Add credit as a payment entry
 	paymentEntries.value.push({
 		mode_of_payment: "Customer Credit",
 		amount: roundCurrency(creditToApply),
 		type: "Credit",
 		is_customer_credit: true,
-		credit_details: customerCredit.value.map((credit) => ({
+		credit_strict_origin: Boolean(preferredOrigin),
+		credit_details: eligibleCredits.map((credit) => ({
 			...credit,
-			credit_to_redeem: 0, // Will be calculated on backend
+			credit_to_redeem: 0, // Allocated deterministically before submission
 		})),
 	});
 
@@ -3388,6 +3582,14 @@ function completePayment() {
 		return;
 	}
 
+	if (hasPaymentHubElectronicEntry.value) {
+		const digits = String(paymentHubMobileNumber.value || "").replace(/\D/g, "");
+		if (digits.length < 8) {
+			showWarning(__("Enter a valid mobile number for the WhatsApp payment link"));
+			return;
+		}
+	}
+
 	// "Pay on Receivable Account": the chosen account holds the unpaid balance (the invoice's
 	// debit_to). Tendered payments are real money; whatever is left (grand_total − tendered)
 	// stays outstanding on that account — it is NOT a payment row.
@@ -3403,6 +3605,9 @@ function completePayment() {
 		change_amount: changeAmount.value,
 		is_partial_payment: isPartial,
 		paid_amount: totalPaid.value,
+		payment_hub_mobile_number: hasPaymentHubElectronicEntry.value
+			? normalizedPaymentHubMobile()
+			: null,
 		outstanding_amount: outstanding,
 		sales_team: selectedSalesPersons.value.length > 0 ? selectedSalesPersons.value : null,
 		delivery_date: isSalesOrder.value ? deliveryDate.value : null,

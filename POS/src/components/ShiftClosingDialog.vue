@@ -134,6 +134,34 @@
 								</div>
 							</div>
 
+							<!-- Customer Credit Redeemed (non-cash settlement) -->
+							<div
+								v-if="customerCreditRedeemed > 0"
+								class="text-start bg-violet-50 border border-violet-200 rounded-lg p-3 md:p-4"
+							>
+								<div class="text-violet-600 text-xs uppercase font-medium mb-1">
+									{{ __("Customer Credit Used") }}
+								</div>
+								<div class="text-lg md:text-2xl font-bold text-violet-900 mb-0.5 md:mb-1 truncate">
+									{{ formatCurrency(customerCreditRedeemed) }}
+								</div>
+								<div class="text-violet-600 text-xs">{{ __("Non-cash settlement") }}</div>
+							</div>
+
+							<!-- Customer Credit Issued by returns -->
+							<div
+								v-if="customerCreditIssued > 0"
+								class="text-start bg-fuchsia-50 border border-fuchsia-200 rounded-lg p-3 md:p-4"
+							>
+								<div class="text-fuchsia-600 text-xs uppercase font-medium mb-1">
+									{{ __("Customer Credit Issued") }}
+								</div>
+								<div class="text-lg md:text-2xl font-bold text-fuchsia-900 mb-0.5 md:mb-1 truncate">
+									{{ formatCurrency(customerCreditIssued) }}
+								</div>
+								<div class="text-fuchsia-600 text-xs">{{ __("Created by returns") }}</div>
+							</div>
+
 							<!-- On Account (invoiced but not collected) -->
 							<div
 								v-if="outstandingTotal > 0"
@@ -280,7 +308,13 @@
 												v-if="invoice.is_return"
 												class="px-1.5 py-0.5 text-xs font-medium bg-red-200 text-red-800 rounded"
 											>
-												{{ __("Return") }}
+												{{ Number(invoice.customer_credit_issued || 0) > 0 ? __("Return / Credit") : __("Return") }}
+											</span>
+											<span
+												v-else-if="Number(invoice.customer_credit_redeemed || 0) > 0"
+												class="px-1.5 py-0.5 text-xs font-medium bg-violet-100 text-violet-800 rounded"
+											>
+												{{ __("Sale / Credit") }}
 											</span>
 											<span
 												v-else-if="invoice.outstanding_amount > 0"
@@ -319,7 +353,7 @@
 									>
 										<span>{{ invoice.customer }}</span>
 										<span class="text-gray-500">{{
-											formatTime(invoice.posting_date)
+											formatTime(invoice.posting_time || invoice.posting_date)
 										}}</span>
 									</div>
 								</div>
@@ -398,7 +432,13 @@
 													v-if="invoice.is_return"
 													class="px-2 py-1 text-xs font-medium bg-red-200 text-red-800 rounded"
 												>
-													{{ __("Return") }}
+													{{ Number(invoice.customer_credit_issued || 0) > 0 ? __("Return / Credit") : __("Return") }}
+												</span>
+												<span
+													v-else-if="Number(invoice.customer_credit_redeemed || 0) > 0"
+													class="px-2 py-1 text-xs font-medium bg-violet-100 text-violet-800 rounded"
+												>
+													{{ __("Sale / Credit") }}
 												</span>
 												<span
 													v-else-if="invoice.outstanding_amount > 0"
@@ -425,7 +465,7 @@
 											<td
 												class="text-start px-6 py-4 whitespace-nowrap text-sm text-gray-500"
 											>
-												{{ formatTime(invoice.posting_date) }}
+												{{ formatTime(invoice.posting_time || invoice.posting_date) }}
 											</td>
 											<td class="text-start px-6 py-4 whitespace-nowrap">
 												<span
@@ -1342,6 +1382,21 @@ const collectedAmount = computed(() => {
 const outstandingTotal = computed(() => {
 	if (!closingData.value) return 0;
 	return Number(closingData.value.outstanding_total ?? sumTransactions("outstanding_amount"));
+});
+
+const customerCreditRedeemed = computed(() => {
+	if (!closingData.value) return 0;
+	return Number(
+		closingData.value.customer_credit_redeemed ??
+			sumTransactions("customer_credit_redeemed")
+	);
+});
+
+const customerCreditIssued = computed(() => {
+	if (!closingData.value) return 0;
+	return Number(
+		closingData.value.customer_credit_issued ?? sumTransactions("customer_credit_issued")
+	);
 });
 const getTotalExpected = computed(() => {
 	if (!closingData.value || !closingData.value.payment_reconciliation) return 0;

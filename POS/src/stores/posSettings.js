@@ -3,6 +3,22 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { useBootstrapStore } from "./bootstrap";
 
+function settingEnabled(value, fallback = false) {
+	if (value === null || value === undefined || value === "") return fallback;
+	if (typeof value === "boolean") return value;
+	if (typeof value === "number") return value === 1;
+	if (typeof value === "string") {
+		const normalized = value.trim().toLowerCase();
+		return (
+			normalized === "1" ||
+			normalized === "true" ||
+			normalized === "yes" ||
+			normalized === "on"
+		);
+	}
+	return Boolean(value);
+}
+
 export const usePOSSettingsStore = defineStore("posSettings", () => {
 	// State
 	const settings = ref({
@@ -40,6 +56,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		allow_select_sales_order: 0,
 		create_only_sales_order: 0,
 		allow_return_without_invoice: 0,
+		allow_exchange: 1,
 		allow_free_batch_return: 0,
 		allow_print_draft_invoices: 0,
 		// Pricing & Display
@@ -51,6 +68,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		// Printing
 		allow_print_last_invoice: 0,
 		silent_print: 0,
+		return_invoice_print_format: "",
 		// Delivery
 		use_delivery_charges: 0,
 		auto_set_delivery_charges: 0,
@@ -119,8 +137,9 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	const allowSelectSalesOrder = computed(() => Boolean(settings.value.allow_select_sales_order));
 	const createOnlySalesOrder = computed(() => Boolean(settings.value.create_only_sales_order));
 	const allowReturnWithoutInvoice = computed(() =>
-		Boolean(settings.value.allow_return_without_invoice)
+		settingEnabled(settings.value.allow_return_without_invoice, false)
 	);
+	const allowExchange = computed(() => settingEnabled(settings.value.allow_exchange, true));
 	const allowFreeBatchReturn = computed(() => Boolean(settings.value.allow_free_batch_return));
 	const allowPrintDraftInvoices = computed(() =>
 		Boolean(settings.value.allow_print_draft_invoices)
@@ -143,6 +162,9 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	// Computed - Printing
 	const allowPrintLastInvoice = computed(() => Boolean(settings.value.allow_print_last_invoice));
 	const silentPrint = computed(() => Boolean(settings.value.silent_print));
+	const returnInvoicePrintFormat = computed(
+		() => String(settings.value.return_invoice_print_format || "").trim()
+	);
 
 	// Computed - Delivery
 	const useDeliveryCharges = computed(() => Boolean(settings.value.use_delivery_charges));
@@ -262,6 +284,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 			allow_select_sales_order: 0,
 			create_only_sales_order: 0,
 			allow_return_without_invoice: 0,
+			allow_exchange: 1,
 			allow_free_batch_return: 0,
 			allow_print_draft_invoices: 0,
 			decimal_precision: "2",
@@ -270,6 +293,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 			fetch_coupon: 0,
 			allow_print_last_invoice: 0,
 			silent_print: 0,
+			return_invoice_print_format: "",
 			use_delivery_charges: 0,
 			auto_set_delivery_charges: 0,
 			use_limit_search: 0,
@@ -379,6 +403,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		allowSelectSalesOrder,
 		createOnlySalesOrder,
 		allowReturnWithoutInvoice,
+		allowExchange,
 		allowFreeBatchReturn,
 		allowPrintDraftInvoices,
 
@@ -393,6 +418,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		// Computed - Printing
 		allowPrintLastInvoice,
 		silentPrint,
+		returnInvoicePrintFormat,
 
 		// Computed - Delivery
 		useDeliveryCharges,

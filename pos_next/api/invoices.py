@@ -544,6 +544,77 @@ def _validate_stock_on_invoice(invoice_doc):
 		frappe.throw(frappe.as_json({"errors": errors}), frappe.ValidationError)
 
 
+def _force_pos_return_warehouse(invoice_doc, pos_profile_doc=None):
+	"""Force POS return stock into the active POS Profile warehouse.
+
+	The physical store accepting the return owns the returned stock. Item defaults
+	or the original sale warehouse must not silently redirect stock to another
+	warehouse (for example Main Warehouse). This applies to invoice-linked returns,
+	no-invoice returns and both exchange return paths.
+	"""
+	if not invoice_doc or not cint(invoice_doc.get("is_return")):
+		return
+
+	pos_profile = invoice_doc.get("pos_profile")
+	if not pos_profile:
+		return
+
+	profile = pos_profile_doc
+	if not profile or getattr(profile, "name", None) != pos_profile:
+		profile = frappe.get_cached_doc("POS Profile", pos_profile)
+
+	warehouse = profile.get("warehouse") if hasattr(profile, "get") else getattr(profile, "warehouse", None)
+	if not warehouse:
+		frappe.throw(_("Warehouse is not set in POS Profile {0}.").format(pos_profile))
+
+	if invoice_doc.meta.has_field("set_warehouse"):
+		invoice_doc.set_warehouse = warehouse
+
+	for row in invoice_doc.get("items", []):
+		row.warehouse = warehouse
+
+	# Packed items may be materialised only after set_missing_values(). Re-running
+	# this helper before submit ensures they follow the same store warehouse.
+	for row in invoice_doc.get("packed_items", []):
+		row.warehouse = warehouse
+
+
+
+def _apply_pos_loyalty_policy(invoice_doc, pos_profile=None):
+	"""Honor the POS Settings loyalty switch before Sales Invoice validation.
+
+	When loyalty is disabled, stale Customer loyalty links must never leak into a
+	POS invoice and trigger LinkValidationError. We intentionally do not mutate the
+	Customer master because the same customer may use a different POS Profile where
+	loyalty is enabled.
+	"""
+	profile = pos_profile or invoice_doc.get("pos_profile")
+	if not profile or invoice_doc.doctype != "Sales Invoice":
+		return
+
+	settings = frappe.db.get_value(
+		"POS Settings",
+		{"pos_profile": profile},
+		["enable_loyalty_program", "default_loyalty_program"],
+		as_dict=True,
+	) or {}
+
+	if cint(settings.get("enable_loyalty_program")):
+		return
+
+	clear_values = {
+		"loyalty_program": None,
+		"redeem_loyalty_points": 0,
+		"loyalty_points": 0,
+		"loyalty_amount": 0,
+		"loyalty_redemption_account": None,
+		"loyalty_redemption_cost_center": None,
+	}
+	for fieldname, value in clear_values.items():
+		if invoice_doc.meta.has_field(fieldname):
+			invoice_doc.set(fieldname, value)
+
+
 def _auto_set_return_batches(invoice_doc):
 	"""Assign batch numbers for return invoices without a source invoice.
 
@@ -692,6 +763,304 @@ def validate_return_items(original_invoice_name, return_items, doctype="Sales In
 	return {"valid": True}
 
 
+
+def _validate_pos_return_feature_flags(invoice, data=None):
+	"""Enforce POS Settings return/exchange feature gates server-side."""
+	if not isinstance(invoice, dict):
+		return
+	if invoice.get("doctype", "Sales Invoice") != "Sales Invoice":
+		return
+	if not cint(invoice.get("is_pos")) or not cint(invoice.get("is_return")):
+		return
+
+	pos_profile = invoice.get("pos_profile")
+	if not pos_profile:
+		return
+	settings = frappe.db.get_value(
+		DOCTYPE_POS_SETTINGS,
+		{"pos_profile": pos_profile},
+		["allow_return", "allow_return_without_invoice", "allow_exchange"],
+		as_dict=True,
+	) or {}
+	if not cint(settings.get("allow_return") or 0):
+		frappe.throw(_("Returns are disabled in POS Settings for this POS Profile."), frappe.PermissionError)
+
+	data = data if isinstance(data, dict) else {}
+	is_exchange = cint(data.get("pos_next_exchange_return") or invoice.get("pos_next_exchange_return") or 0)
+	if is_exchange and not cint(settings.get("allow_exchange") if settings.get("allow_exchange") is not None else 1):
+		frappe.throw(_("Exchange is disabled in POS Settings."), frappe.PermissionError)
+
+	if not invoice.get("return_against"):
+		if not cint(settings.get("allow_return_without_invoice") or 0):
+			frappe.throw(_("Return Without Invoice is disabled in POS Settings."), frappe.PermissionError)
+		if is_exchange and not cint(settings.get("allow_exchange") if settings.get("allow_exchange") is not None else 1):
+			frappe.throw(_("Exchange is disabled in POS Settings."), frappe.PermissionError)
+
+
+def _validate_credit_sale_return_cash_refund(invoice_doc, data, pos_profile):
+	"""Validate controlled Cash refund on a linked credit-sale return.
+
+	The linked return reverses the customer's current positive receivable first.
+	Only the selected return value beyond that receivable is cash-refundable.
+	"""
+	if not isinstance(data, dict):
+		return None
+	cfg = data.get("credit_sale_cash_refund")
+	if not cfg:
+		return None
+	if isinstance(cfg, str):
+		try:
+			cfg = json.loads(cfg)
+		except Exception:
+			cfg = {}
+	if not isinstance(cfg, dict):
+		frappe.throw(_("Invalid credit-sale cash refund data."))
+
+	if not cint(invoice_doc.get("is_return")) or not invoice_doc.get("return_against"):
+		frappe.throw(_("Credit-sale cash refund is only allowed for an invoice-linked return."))
+
+	requested = abs(flt(cfg.get("amount") or 0))
+	if requested <= 0:
+		return None
+
+	original = frappe.db.get_value(
+		"Sales Invoice",
+		invoice_doc.return_against,
+		["name", "customer", "company", "grand_total", "outstanding_amount", "docstatus"],
+		as_dict=True,
+	)
+	if not original or cint(original.docstatus) != 1:
+		frappe.throw(_("Original Sales Invoice is not submitted."))
+	if original.customer != invoice_doc.customer or original.company != invoice_doc.company:
+		frappe.throw(_("Credit-sale return customer/company does not match the original invoice."))
+
+	# This special path is only for invoices originally sold on account. If the
+	# original POS invoice had tender rows, use the normal/provider-aware refund flow.
+	original_tender = flt(
+		frappe.db.sql(
+			"""SELECT COALESCE(SUM(ABS(amount)), 0) FROM `tabSales Invoice Payment` WHERE parent=%s""",
+			(original.name,),
+		)[0][0]
+		or 0
+	)
+	if original_tender > 0.0005:
+		frappe.throw(_("This invoice has original POS payments. Use the normal refund settlement flow."))
+
+	return_amount = abs(flt(invoice_doc.grand_total or 0))
+	open_receivable = max(0.0, flt(original.outstanding_amount or 0))
+	ar_reversal = min(return_amount, open_receivable)
+	max_cash_refund = max(0.0, return_amount - ar_reversal)
+	if requested > max_cash_refund + 0.0005:
+		frappe.throw(
+			_("Cash refund exceeds the eligible paid portion. Maximum Cash refund: {0}").format(
+				frappe.format_value(max_cash_refund, {"fieldtype": "Currency", "options": invoice_doc.currency})
+			)
+		)
+
+	mode = (cfg.get("mode_of_payment") or "").strip()
+	if not mode:
+		frappe.throw(_("Cash Mode of Payment is required."))
+	profile_modes = {row.mode_of_payment for row in frappe.get_cached_doc("POS Profile", pos_profile).payments if row.mode_of_payment}
+	if mode not in profile_modes:
+		frappe.throw(_("Mode of Payment {0} is not available in this POS Profile.").format(mode))
+	if (frappe.db.get_value("Mode of Payment", mode, "type") or "").lower() != "cash":
+		frappe.throw(_("Credit-sale Cash refund must use a Cash Mode of Payment."))
+
+	actual_refund = 0.0
+	for row in invoice_doc.get("payments", []):
+		amount = flt(row.amount or 0)
+		if amount < 0:
+			if row.mode_of_payment != mode:
+				frappe.throw(_("Credit-sale Cash refund contains an unexpected payment method."))
+			actual_refund += abs(amount)
+	if abs(actual_refund - requested) > 0.0005:
+		frappe.throw(_("Credit-sale Cash refund payment amount does not match the authorized amount."))
+
+	settings = frappe.db.get_value(
+		DOCTYPE_POS_SETTINGS,
+		{"pos_profile": pos_profile},
+		["require_manager_pin_cash_refund"],
+		as_dict=True,
+	) or {}
+	approver = "Not Required"
+	if cint(settings.get("require_manager_pin_cash_refund") if settings.get("require_manager_pin_cash_refund") is not None else 1):
+		from pos_next.api.retail_returns import _verify_manager_pin
+		approver = _verify_manager_pin(cfg.get("manager_pin"))["approver"]
+
+	audit = _("Credit Sale Return Cash Refund: {0} | A/R Reversal: {1} | Approved by: {2}").format(
+		requested, ar_reversal, approver
+	)
+	invoice_doc.remarks = f"{invoice_doc.remarks or ''} | {audit}".strip(" |")
+	return {
+		"cash_refund": requested,
+		"ar_reversal": ar_reversal,
+		"remaining_credit": max(0.0, return_amount - ar_reversal - requested),
+		"approved_by": approver,
+	}
+
+def _is_no_invoice_pos_return(invoice):
+	"""True for a POS return/credit note that has no original invoice link."""
+	if not isinstance(invoice, dict):
+		return False
+	return bool(
+		invoice.get("doctype", "Sales Invoice") == "Sales Invoice"
+		and cint(invoice.get("is_pos"))
+		and cint(invoice.get("is_return"))
+		and not invoice.get("return_against")
+	)
+
+
+def _require_no_invoice_return_approval(invoice):
+	"""Block browser-created no-invoice POS returns unless a server-approved flow owns the request."""
+	if not _is_no_invoice_pos_return(invoice):
+		return
+
+	approval = getattr(frappe.flags, "pos_next_no_invoice_return_approved", None)
+	if not approval:
+		frappe.throw(
+			_(
+				"Return Without Invoice requires manager authorization. "
+				"Use the POSNext Return / Exchange workflow."
+			),
+			frappe.PermissionError,
+		)
+
+
+def _restore_customer_credit_tender_audit(invoice_doc, gross_payments, change_amount):
+	"""Restore gross cashier tender/change after Customer Credit settles the invoice.
+
+	Customer Credit is posted after the Sales Invoice, so the invoice must first be
+	submitted with NET real-money payment rows. Once the credit allocation succeeds,
+	we restore the cashier-facing gross tender + actual change on the submitted
+	Sales Invoice without reposting GL. The invariant enforced here is:
+
+		gross tender - change == real-money amount already posted by the invoice
+
+	This keeps accounting unchanged while preserving the correct POS audit trail.
+	"""
+	if not gross_payments:
+		return
+
+	if isinstance(gross_payments, str):
+		try:
+			gross_payments = json.loads(gross_payments)
+		except Exception:
+			frappe.throw(_("Invalid gross payment audit payload."))
+
+	if not isinstance(gross_payments, list):
+		frappe.throw(_("Invalid gross payment audit payload."))
+
+	precision = invoice_doc.precision("paid_amount") or 3
+	conversion_rate = flt(invoice_doc.conversion_rate or 1)
+	audit_change = flt(change_amount or 0, precision)
+	if audit_change < 0:
+		frappe.throw(_("Change Amount cannot be negative."))
+
+	normalized = []
+	for payment in gross_payments:
+		if not isinstance(payment, dict):
+			continue
+		amount = flt(payment.get("amount") or 0, precision)
+		if amount <= 0:
+			continue
+		normalized.append(
+			{
+				"mode_of_payment": payment.get("mode_of_payment"),
+				"type": payment.get("type"),
+				"amount": amount,
+			}
+		)
+
+	if not normalized:
+		return
+
+	gross_paid = flt(sum(row["amount"] for row in normalized), precision)
+	net_posted = flt(invoice_doc.paid_amount or 0, precision)
+	if abs(flt(gross_paid - audit_change - net_posted, precision)) > 0.01:
+		frappe.throw(
+			_(
+				"Customer Credit tender audit mismatch. Gross tender: {0}, Change: {1}, Posted: {2}"
+			).format(
+				frappe.format_value(gross_paid, {"fieldtype": "Currency"}),
+				frappe.format_value(audit_change, {"fieldtype": "Currency"}),
+				frappe.format_value(net_posted, {"fieldtype": "Currency"}),
+			)
+		)
+
+	def is_cash(row):
+		mode = str(row.get("mode_of_payment") or "").strip().lower()
+		type_ = str(row.get("type") or "").strip().lower()
+		return type_ == "cash" or mode == "cash" or "cash" in mode or "نقد" in mode
+
+	cash_tender = flt(sum(row["amount"] for row in normalized if is_cash(row)), precision)
+	if audit_change - cash_tender > 0.01:
+		frappe.throw(_("Customer Credit change cannot exceed the Cash tender."))
+
+	# Match gross rows to the submitted child rows by mode/type occurrence. The
+	# accounting row already contains the NET amount; only its stored audit amount
+	# is restored here after all Customer Credit JEs have succeeded.
+	available_rows = list(invoice_doc.get("payments") or [])
+	used = set()
+	matched = []
+	for gross in normalized:
+		match = None
+		for row in available_rows:
+			if row.name in used:
+				continue
+			if row.mode_of_payment != gross.get("mode_of_payment"):
+				continue
+			gross_type = str(gross.get("type") or "").strip().lower()
+			row_type = str(row.get("type") or "").strip().lower()
+			if gross_type and row_type and gross_type != row_type:
+				continue
+			match = row
+			break
+
+		if not match:
+			frappe.throw(
+				_("Unable to restore gross tender for Mode of Payment {0}.").format(
+					gross.get("mode_of_payment") or _("Unknown")
+				)
+			)
+
+		used.add(match.name)
+		matched.append((match, gross["amount"]))
+
+	for row, gross_amount in matched:
+		frappe.db.set_value(
+			"Sales Invoice Payment",
+			row.name,
+			{
+				"amount": gross_amount,
+				"base_amount": flt(gross_amount * conversion_rate, precision),
+			},
+			update_modified=False,
+		)
+
+	values = {
+		"paid_amount": gross_paid,
+		"base_paid_amount": flt(gross_paid * conversion_rate, precision),
+		"change_amount": audit_change,
+		"base_change_amount": flt(audit_change * conversion_rate, precision),
+	}
+
+	# Preserve the standard ERPNext change account for display/printing. Normally
+	# POS Profile already populated it; fall back to the Cash payment account.
+	if audit_change > 0 and not invoice_doc.account_for_change_amount:
+		for row, _gross_amount in matched:
+			if is_cash({"mode_of_payment": row.mode_of_payment, "type": row.get("type")}):
+				values["account_for_change_amount"] = row.account
+				break
+
+	frappe.db.set_value(
+		"Sales Invoice",
+		invoice_doc.name,
+		values,
+		update_modified=False,
+	)
+	invoice_doc.reload()
+
+
 # ==========================================
 # Invoice Management (Two-Step Flow)
 # ==========================================
@@ -703,6 +1072,8 @@ def update_invoice(data):
 	try:
 		data = json.loads(data) if isinstance(data, str) else data
 		data = _strip_server_managed_fields(data)
+		_require_no_invoice_return_approval(data)
+		_validate_pos_return_feature_flags(data, {})
 
 		pos_profile = data.get("pos_profile")
 		doctype = data.get("doctype", "Sales Invoice")
@@ -748,6 +1119,14 @@ def update_invoice(data):
 						item.branch = pos_profile_doc.branch
 
 		company = invoice_doc.get("company") or (pos_profile_doc.company if pos_profile_doc else None)
+
+		# POS retail policy: every return is physically received into the active
+		# store warehouse, regardless of Item defaults or the original sale store.
+		_force_pos_return_warehouse(invoice_doc, pos_profile_doc)
+		# Clear stale loyalty values early when loyalty is disabled. The policy is
+		# applied again after set_missing_values() because ERPNext may fetch Customer
+		# defaults during that step.
+		_apply_pos_loyalty_policy(invoice_doc, pos_profile)
 
 		if company and invoice_doc.get("payments") and doctype == "Sales Invoice":
 			_set_payment_accounts(invoice_doc.payments, company)
@@ -950,6 +1329,11 @@ def update_invoice(data):
 		#   - tax_category         → sent from frontend or not needed
 		# ========================================================================
 		invoice_doc.set_missing_values(for_validate=True)
+
+		# ERPNext may repopulate warehouse/loyalty fields while filling defaults.
+		# Re-assert POSNext's retail return + loyalty policies before validation/save.
+		_force_pos_return_warehouse(invoice_doc, pos_profile_doc)
+		_apply_pos_loyalty_policy(invoice_doc, pos_profile)
 
 		# Calculate totals and apply discounts (with rounding disabled)
 		invoice_doc.calculate_taxes_and_totals()
@@ -1281,6 +1665,8 @@ def submit_invoice(invoice=None, data=None):
 		data = {}
 
 	invoice = _strip_server_managed_fields(invoice)
+	_require_no_invoice_return_approval(invoice)
+	_validate_pos_return_feature_flags(invoice, data)
 
 	pos_profile = invoice.get("pos_profile")
 	doctype = invoice.get("doctype", "Sales Invoice")
@@ -1365,6 +1751,10 @@ def submit_invoice(invoice=None, data=None):
 		if doctype == "Sales Invoice" and hasattr(invoice_doc, "payments"):
 			_set_payment_accounts(invoice_doc.payments, invoice_doc.company)
 
+		# Controlled Cash refund for credit-sale returns. Server recalculates the
+		# maximum refundable portion and verifies Manager PIN; browser values are not trusted.
+		_validate_credit_sale_return_cash_refund(invoice_doc, data, pos_profile)
+
 		# Handle sales team (multiple sales persons)
 		sales_team_data = invoice.get("sales_team") or data.get("sales_team")
 		if sales_team_data and isinstance(sales_team_data, list):
@@ -1396,6 +1786,12 @@ def submit_invoice(invoice=None, data=None):
 						title="Failed to increment coupon usage",
 						message=f"Coupon: {coupon_code}, Error: {e!s}",
 					)
+
+		# Final server-side safety: do not trust a browser-supplied/item-default
+		# warehouse on any POS return, and never submit stale loyalty links while
+		# loyalty is disabled for this POS Profile.
+		_force_pos_return_warehouse(invoice_doc)
+		_apply_pos_loyalty_policy(invoice_doc, pos_profile)
 
 		# Auto-set batch numbers for returns
 		_auto_set_return_batches(invoice_doc)
@@ -1443,6 +1839,29 @@ def submit_invoice(invoice=None, data=None):
 		)
 		if redeemed_customer_credit and not invoice_doc.payments:
 			invoice_doc.flags.pos_next_redeemed_customer_credit = flt(redeemed_customer_credit)
+
+		# Customer Credit is redeemed only after this Sales Invoice is submitted.
+		# Force NET real-money accounting at submit time so the invoice outstanding
+		# remains exactly equal to the credit that will be redeemed. Gross cashier
+		# tender/change is restored only after the credit allocation succeeds.
+		credit_audit_change = 0
+		credit_audit_gross_payments = None
+		if redeemed_customer_credit and doctype == "Sales Invoice":
+			credit_audit_change = flt(
+				data.get("customer_credit_change_amount")
+				if data.get("customer_credit_change_amount") is not None
+				else data.get("change_amount")
+				if data.get("change_amount") is not None
+				else invoice.get("change_amount") or 0
+			)
+			credit_audit_gross_payments = data.get("customer_credit_gross_payments")
+			# Backward compatibility for a v1.4.3 browser: its draft contains gross
+			# payment rows, so use those when the explicit audit payload is absent.
+			if not credit_audit_gross_payments and credit_audit_change > 0:
+				credit_audit_gross_payments = invoice.get("payments")
+
+			invoice_doc.change_amount = 0
+			invoice_doc.base_change_amount = 0
 
 		# Allow intentional "Pay on Account" credit sales to submit without a
 		# payment row. The frontend sends is_credit_sale=1 when the cashier puts
@@ -1527,24 +1946,36 @@ def submit_invoice(invoice=None, data=None):
 		if sync_record_name:
 			_complete_offline_sync(sync_record_name, invoice_doc.name)
 
-		# Handle credit redemption after successful submission
+		# Handle Customer Credit redemption in the SAME database transaction as
+		# invoice submission. Never swallow a redemption error: doing so can leave a
+		# cashier-facing "completed" sale as Partly Paid after only one credit source
+		# was allocated. Raising here lets Frappe roll back the invoice + any JEs.
 		if redeemed_customer_credit and customer_credit_dict:
-			try:
-				from pos_next.api.credit_sales import redeem_customer_credit
+			from pos_next.api.credit_sales import redeem_customer_credit
 
-				redeem_customer_credit(invoice_doc.name, customer_credit_dict)
-			except Exception as credit_error:
-				frappe.log_error(
-					title="Credit Redemption Error",
-					message=f"Invoice: {invoice_doc.name}, Error: {credit_error!s}\n{frappe.get_traceback()}",
-				)
-				# Don't fail the entire transaction, just log the error
-				frappe.msgprint(
-					_(
-						"Invoice submitted successfully but credit redemption failed. Please contact administrator."
-					),
-					alert=True,
-					indicator="orange",
+			redeem_customer_credit(
+				invoice_doc.name,
+				customer_credit_dict,
+				expected_credit_amount=redeemed_customer_credit,
+				require_full_settlement=cint(
+					data.get("require_full_customer_credit_settlement")
+					or invoice.get("require_full_customer_credit_settlement")
+					or 0
+				),
+			)
+			# Journal Entries / advance allocations update outstanding and the
+			# POSNext credit tracking fields in the database. Keep the response fresh.
+			invoice_doc.reload()
+
+			# Only after the credit JE has fully settled the invoice do we restore
+			# cashier-facing GROSS tender + actual change for audit/printing. The
+			# helper verifies gross - change equals the real-money amount already
+			# posted, so this metadata restoration cannot alter accounting.
+			if credit_audit_gross_payments:
+				_restore_customer_credit_tender_audit(
+					invoice_doc,
+					credit_audit_gross_payments,
+					credit_audit_change,
 				)
 
 		# Log manual rate edits for audit trail (only after successful submission)
@@ -1827,6 +2258,49 @@ def delete_invoice(invoice):
 	return _("Invoice {0} Deleted").format(invoice)
 
 
+def _payment_hub_protects_draft(invoice_name):
+	"""Return True when a non-finalized Payment Hub session still owns the draft.
+
+	This check is intentionally optional and dependency-free: POSNext continues to
+	work normally when ERPNext Payment Hub is not installed.  Payment Hub sessions
+	with captured money or any non-terminal operational state protect their linked
+	draft from generic POS cleanup.  Once the session becomes Completed, Cancelled,
+	or Expired, normal POSNext cleanup rules may apply again.
+	"""
+	if not frappe.db.exists("DocType", "POS Payment Session"):
+		return False
+
+	meta = frappe.get_meta("POS Payment Session")
+	if not meta.has_field("invoice_name"):
+		return False
+
+	filters = {"invoice_name": invoice_name}
+	if meta.has_field("invoice_doctype"):
+		filters["invoice_doctype"] = "Sales Invoice"
+
+	fields = ["name"]
+	for fieldname in ("status", "finalized", "confirmed_paid_amount", "recover_until"):
+		if meta.has_field(fieldname):
+			fields.append(fieldname)
+
+	rows = frappe.get_all(
+		"POS Payment Session",
+		filters=filters,
+		fields=fields,
+		order_by="modified desc",
+		limit=5,
+	)
+	terminal_statuses = {"Completed", "Cancelled", "Expired"}
+	for row in rows:
+		if int(row.get("finalized") or 0):
+			continue
+		if float(row.get("confirmed_paid_amount") or 0) > 0:
+			return True
+		if str(row.get("status") or "").strip() not in terminal_statuses:
+			return True
+	return False
+
+
 @frappe.whitelist()
 def cleanup_old_drafts(pos_profile=None, max_age_hours=48):
 	"""
@@ -1857,8 +2331,12 @@ def cleanup_old_drafts(pos_profile=None, max_age_hours=48):
 	)
 
 	deleted_count = 0
+	protected_count = 0
 	for draft in old_drafts:
 		try:
+			if _payment_hub_protects_draft(draft["name"]):
+				protected_count += 1
+				continue
 			frappe.delete_doc(doctype, draft["name"], force=True, ignore_permissions=True)
 			deleted_count += 1
 		except Exception as e:
@@ -1869,7 +2347,8 @@ def cleanup_old_drafts(pos_profile=None, max_age_hours=48):
 
 	return {
 		"deleted": deleted_count,
-		"message": f"Cleaned up {deleted_count} old draft invoices",
+		"protected": protected_count,
+		"message": f"Cleaned up {deleted_count} old draft invoices; protected {protected_count} active Payment Hub draft(s)",
 	}
 
 

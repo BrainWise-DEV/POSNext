@@ -66,9 +66,63 @@
 					</div>
 				</div>
 
+				<!-- Payment Hub refund result -->
+				<div
+					v-if="invoiceData.is_return && paymentHubRefundInfo?.managed"
+					:class="[
+						'rounded-lg p-4 border',
+						paymentHubRefundInfo.all_complete
+							? 'bg-gradient-to-r rtl:bg-gradient-to-l from-green-50 to-emerald-50 border-green-200'
+							: paymentHubRefundInfo.needs_review
+								? 'bg-red-50 border-red-200'
+								: 'bg-amber-50 border-amber-200',
+					]"
+				>
+					<div class="flex items-start gap-3">
+						<div class="w-8 h-8 rounded-full bg-white/70 flex items-center justify-center flex-shrink-0 border">
+							<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+							</svg>
+						</div>
+						<div class="text-start flex-1 min-w-0">
+							<h4 class="text-sm font-semibold">
+								{{ paymentHubRefundInfo.all_complete ? __('Payment Hub Refund Completed') : paymentHubRefundInfo.needs_review ? __('Refund Review Required') : __('Refund Pending') }}
+							</h4>
+							<p class="text-xs mt-1 opacity-80">{{ __('Refund is tied to the original payment source and provider transaction.') }}</p>
+							<div class="mt-3 flex flex-col gap-2">
+								<div v-for="row in paymentHubRefundInfo.rows" :key="row.name" class="rounded-md border bg-white/70 px-3 py-2">
+									<div class="flex items-center justify-between gap-3">
+										<div class="min-w-0">
+											<div class="text-xs font-semibold text-gray-900">{{ row.actual_refund_mode_of_payment || row.mode_of_payment }}</div>
+											<div class="text-[11px] text-gray-600 truncate"><template v-if="row.is_override">{{ __('Override from') }} {{ row.provider ? `${row.provider}${row.actual_payment_method ? ' • ' + row.actual_payment_method : ''}` : row.channel }} {{ __('to') }} {{ row.actual_refund_channel }}</template><template v-else>{{ row.provider ? `${row.provider}${row.actual_payment_method ? ' • ' + row.actual_payment_method : ''}` : row.channel }}</template></div>
+										</div>
+										<div class="text-end flex-shrink-0">
+											<div class="text-sm font-bold text-gray-900">{{ formatCurrency(-Math.abs(row.amount || 0)) }}</div>
+											<div class="text-[10px] text-gray-500">{{ __(row.status) }}<span v-if="row.provider_status && row.provider_status !== row.status"> · {{ row.provider_status }}</span></div>
+										</div>
+									</div>
+									<div v-if="row.refund_gateway_transaction" class="text-[10px] text-gray-500 mt-1">{{ __('Refund Transaction:') }} {{ row.refund_gateway_transaction }}<span v-if="row.refund_attempt_count > 1"> · {{ __('Attempts:') }} {{ row.refund_attempt_count }}</span></div>
+									<div v-if="row.provider_refund_id" class="text-[10px] text-gray-500 mt-1">{{ __('Provider Refund ID:') }} {{ row.provider_refund_id }}</div>
+									<div v-if="row.provider_reference" class="text-[10px] text-gray-500 mt-1">{{ __('Provider Reference / ARN:') }} {{ row.provider_reference }}</div>
+									<div v-if="row.provider_auth_no" class="text-[10px] text-gray-500 mt-1">{{ __('Provider Auth No:') }} {{ row.provider_auth_no }}</div>
+									<div v-if="row.authorized_by" class="text-[10px] text-violet-700 mt-1">{{ __('Authorized By:') }} {{ row.authorized_by }}<span v-if="row.override_reason"> · {{ row.override_reason }}</span></div>
+									<div v-if="row.error" class="text-[10px] text-red-600 mt-1">{{ row.error }}</div>
+								</div>
+							</div>
+							<div v-if="refundActionMessage" class="mt-3 text-xs text-green-700 bg-green-50 border border-green-200 rounded-md px-3 py-2">{{ refundActionMessage }}</div>
+							<div v-if="refundActionError" class="mt-3 text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">{{ refundActionError }}</div>
+							<div v-if="hasCheckableRefund || hasRetryableFailedRefund || canCompleteRefundedReturn" class="mt-3 flex flex-wrap gap-2">
+								<Button v-if="hasCheckableRefund" variant="subtle" :loading="refundActionLoading" :disabled="refundActionLoading" @click="handleCheckRefundFromDetails">{{ __('Check Refund') }}</Button>
+								<Button v-if="hasRetryableFailedRefund" variant="solid" theme="red" :loading="refundActionLoading" :disabled="refundActionLoading" @click="handleRetryRefundFromDetails">{{ __('Retry Refund') }}</Button>
+								<Button v-if="canCompleteRefundedReturn" variant="solid" :loading="refundActionLoading" :disabled="refundActionLoading" @click="handleCompleteRefundedReturn">{{ __('Complete Return') }}</Button>
+							</div>
+						</div>
+					</div>
+				</div>
+
 				<!-- Return Type Notice: Added to Customer Credit (no payments, negative outstanding) -->
 				<div
-					v-if="invoiceData.is_return && isAddedToCustomerCredit"
+					v-if="invoiceData.is_return && !paymentHubRefundInfo?.managed && isAddedToCustomerCredit"
 					class="bg-gradient-to-r rtl:bg-gradient-to-l from-blue-50 to-indigo-50 rounded-lg p-4 border border-blue-200"
 				>
 					<div class="flex items-start gap-3">
@@ -104,9 +158,9 @@
 					</div>
 				</div>
 
-				<!-- Return Type Notice: Cash Refund (has payments) -->
+				<!-- Return Type Notice: Recorded refund for non-Payment-Hub returns -->
 				<div
-					v-else-if="invoiceData.is_return && isCashRefund"
+					v-else-if="invoiceData.is_return && !paymentHubRefundInfo?.managed && hasReturnPayments"
 					class="bg-gradient-to-r rtl:bg-gradient-to-l from-green-50 to-emerald-50 rounded-lg p-4 border border-green-200"
 				>
 					<div class="flex items-start gap-3">
@@ -129,10 +183,10 @@
 						</div>
 						<div class="text-start flex-1">
 							<h4 class="text-sm font-semibold text-green-900">
-								{{ __("Cash Refund") }}
+								{{ isCashRefund ? __("Cash Refund") : __("Refund Recorded") }}
 							</h4>
 							<p class="text-xs text-green-700 mt-1">
-								{{ __("The customer received a cash refund for this return.") }}
+								{{ isCashRefund ? __("The customer received a cash refund for this return.") : __("A refund payment row was recorded on this return. Provider settlement is not implied unless Payment Hub details are shown.") }}
 							</p>
 						</div>
 					</div>
@@ -514,6 +568,31 @@ const emit = defineEmits(["update:modelValue", "print-invoice"]);
 const show = ref(props.modelValue);
 const loading = ref(false);
 const invoiceData = ref(null);
+const paymentHubRefundInfo = ref(null);
+const refundActionLoading = ref(false);
+const refundActionMessage = ref("");
+const refundActionError = ref("");
+
+const hasRetryableFailedRefund = computed(() =>
+	Boolean(paymentHubRefundInfo.value?.rows?.some((row) => row?.can_retry || row?.status === "Failed"))
+);
+
+const hasCheckableRefund = computed(() =>
+	Boolean(
+		paymentHubRefundInfo.value?.managed &&
+			!paymentHubRefundInfo.value?.all_complete &&
+			paymentHubRefundInfo.value?.rows?.some(
+				(row) => row?.can_check || ["Reserved", "Processing", "Pending", "Failed", "Manual Review"].includes(row?.status)
+			)
+	)
+);
+
+const canCompleteRefundedReturn = computed(() =>
+	Boolean(
+		paymentHubRefundInfo.value?.all_complete &&
+			Number(invoiceData.value?.docstatus || 0) === 0
+	)
+);
 
 // Computed: Check if this is a credit sale (Pay on Account - no payments, full outstanding)
 const isCreditSale = computed(() => {
@@ -538,13 +617,20 @@ const isAddedToCustomerCredit = computed(() => {
 	return (hasNoPayments || totalPaid < 0.01) && hasNegativeOutstanding;
 });
 
-// Computed: Check if this return was a cash refund (has payments)
-const isCashRefund = computed(() => {
+const hasReturnPayments = computed(() => {
 	if (!invoiceData.value || !invoiceData.value.is_return) return false;
 	const totalPaid =
 		invoiceData.value.payments?.reduce((sum, p) => sum + Math.abs(p.amount || 0), 0) || 0;
-	// Cash refund if payments were made (refund given)
 	return totalPaid >= 0.01;
+});
+
+// Only label a legacy/non-Payment-Hub return as Cash Refund when every
+// recorded refund payment is actually a cash mode.
+const isCashRefund = computed(() => {
+	if (!hasReturnPayments.value) return false;
+	return (invoiceData.value.payments || []).every((payment) =>
+		String(payment.mode_of_payment || "").toLowerCase().includes("cash")
+	);
 });
 
 watch(
@@ -562,6 +648,9 @@ watch(show, async (val) => {
 	if (!val) {
 		// Clear data when closing
 		invoiceData.value = null;
+		paymentHubRefundInfo.value = null;
+		refundActionMessage.value = "";
+		refundActionError.value = "";
 	} else {
 		// Ensure dialog appears above other dialogs
 		await nextTick();
@@ -609,11 +698,111 @@ async function loadInvoiceDetails() {
 			}));
 		}
 		invoiceData.value = result;
+		paymentHubRefundInfo.value = null;
+		refundActionMessage.value = "";
+		refundActionError.value = "";
+		if (result?.is_return && result?.name) {
+			try {
+				const refundInfo = await call("erpnext_payment_hub.pos.refund.get_return_refund_status", {
+					return_invoice: result.name,
+				});
+				if (refundInfo?.managed) paymentHubRefundInfo.value = refundInfo;
+			} catch (refundError) {
+				log.debug("Payment Hub refund details unavailable:", refundError);
+			}
+		}
 	} catch (error) {
 		log.error("Error loading invoice details:", error);
 		invoiceData.value = null;
 	} finally {
 		loading.value = false;
+	}
+}
+
+async function refreshRefundInfo() {
+	if (!invoiceData.value?.name) return null;
+	const status = await call("erpnext_payment_hub.pos.refund.get_return_refund_status", {
+		return_invoice: invoiceData.value.name,
+	});
+	paymentHubRefundInfo.value = status?.managed ? status : null;
+	return status;
+}
+
+function refundStatusMessage(status) {
+	if (status?.all_complete) {
+		return __("Refund completed. Complete the Draft return invoice to finish the return.");
+	}
+	if (status?.rows?.some((row) => row?.status === "Failed" || row?.can_retry)) {
+		return __("Refund failed with the provider. Retry Refund is available.");
+	}
+	if (status?.rows?.some((row) => row?.status === "Manual Review")) {
+		return __("Refund still requires manual review. No new refund was sent.");
+	}
+	return __("Refund is still pending with the payment provider.");
+}
+
+async function handleCheckRefundFromDetails() {
+	if (!invoiceData.value?.name || refundActionLoading.value) return;
+	refundActionLoading.value = true;
+	refundActionMessage.value = "";
+	refundActionError.value = "";
+	try {
+		const status = await call("erpnext_payment_hub.pos.refund.refresh_return_refunds", {
+			return_invoice: invoiceData.value.name,
+		});
+		paymentHubRefundInfo.value = status?.managed ? status : null;
+		refundActionMessage.value = refundStatusMessage(status);
+	} catch (error) {
+		refundActionError.value = error?.message || __("Unable to check refund status.");
+	} finally {
+		refundActionLoading.value = false;
+	}
+}
+
+async function handleRetryRefundFromDetails() {
+	if (!invoiceData.value?.name || refundActionLoading.value) return;
+	refundActionLoading.value = true;
+	refundActionMessage.value = "";
+	refundActionError.value = "";
+	try {
+		const status = await call("erpnext_payment_hub.pos.refund.retry_failed_return_refunds", {
+			return_invoice: invoiceData.value.name,
+		});
+		paymentHubRefundInfo.value = status?.managed ? status : null;
+		refundActionMessage.value = refundStatusMessage(status);
+	} catch (error) {
+		refundActionError.value = error?.message || __("Unable to retry the failed refund.");
+		try {
+			await refreshRefundInfo();
+		} catch (refreshError) {
+			log.debug("Refund refresh after retry error failed:", refreshError);
+		}
+	} finally {
+		refundActionLoading.value = false;
+	}
+}
+
+async function handleCompleteRefundedReturn() {
+	if (!invoiceData.value?.name || refundActionLoading.value || !canCompleteRefundedReturn.value) return;
+	refundActionLoading.value = true;
+	refundActionMessage.value = "";
+	refundActionError.value = "";
+	try {
+		const freshInvoice = await call("pos_next.api.invoices.get_invoice", {
+			invoice_name: invoiceData.value.name,
+		});
+		await call("pos_next.api.invoices.submit_invoice", {
+			invoice: JSON.stringify(freshInvoice),
+			data: JSON.stringify({}),
+		});
+		await loadInvoiceDetails();
+		refundActionMessage.value = __("Refund completed and return invoice submitted successfully.");
+	} catch (error) {
+		refundActionError.value =
+			error?.message ||
+			__("Refund is completed, but the return invoice could not be submitted.");
+	} finally {
+		refundActionLoading.value = false;
 	}
 }
 

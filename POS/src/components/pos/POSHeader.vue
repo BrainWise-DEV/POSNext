@@ -125,6 +125,26 @@
 						</span>
 					</button>
 
+					<!-- Payment Hub queue -->
+					<button
+						v-if="paymentHubEnabled && hasOpenShift && !isOffline"
+						@click="$emit('payment-hub-click')"
+						class="p-1.5 sm:p-2 hover:bg-gray-100 active:bg-gray-200 rounded-lg transition-colors relative touch-manipulation"
+						:title="__('Payment Hub: {0} waiting, {1} paid', [paymentHubPendingCount, paymentHubPaidCount])"
+						:aria-label="__('Open Payment Hub')"
+					>
+						<svg class="w-4 h-4 sm:w-5 sm:h-5" :class="paymentHubPaidCount > 0 ? 'text-green-600' : 'text-blue-600'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h2m-9 5h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+						</svg>
+						<span
+							v-if="paymentHubTotalCount > 0"
+							class="absolute -top-1 -end-1 text-white text-[10px] font-bold rounded-full min-w-[20px] h-5 px-1 flex items-center justify-center shadow-md"
+							:class="paymentHubPaidCount > 0 ? 'bg-green-600' : 'bg-blue-600'"
+						>
+							{{ paymentHubTotalCount }}
+						</span>
+					</button>
+
 					<!-- Cache Status Indicator -->
 					<div class="relative">
 						<button
@@ -392,7 +412,7 @@ import StatusBadge from "@/components/common/StatusBadge.vue";
 import UserMenu from "@/components/common/UserMenu.vue";
 import LanguageSwitcher from "@/components/common/LanguageSwitcher.vue";
 import { DEFAULT_LOCALE } from "@/utils/currency";
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { version } from "../../../package.json";
 
 const showCacheTooltip = ref(false);
@@ -407,6 +427,7 @@ const emit = defineEmits([
 	"menu-opened",
 	"menu-closed",
 	"clear-cache",
+	"payment-hub-click",
 ]);
 
 function handleClearCacheClick() {
@@ -460,6 +481,22 @@ const props = defineProps({
 		type: Number,
 		default: 0,
 	},
+	paymentHubEnabled: {
+		type: Boolean,
+		default: false,
+	},
+	paymentHubPendingCount: {
+		type: Number,
+		default: 0,
+	},
+	paymentHubPaidCount: {
+		type: Number,
+		default: 0,
+	},
+	paymentHubFailedCount: {
+		type: Number,
+		default: 0,
+	},
 	isAnyDialogOpen: {
 		type: Boolean,
 		default: false,
@@ -489,6 +526,10 @@ const props = defineProps({
 		default: false,
 	},
 });
+
+const paymentHubTotalCount = computed(
+	() => props.paymentHubPendingCount + props.paymentHubPaidCount + props.paymentHubFailedCount
+);
 
 // Cache status helpers
 function getCacheIconColor() {

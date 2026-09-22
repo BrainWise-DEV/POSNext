@@ -43,8 +43,13 @@
   "create_only_sales_order",
   "column_break_operations",
   "allow_return_without_invoice",
+  "allow_exchange",
   "return_validity_days",
   "allow_free_batch_return",
+  "section_break_return_exchange_security",
+  "require_manager_pin_no_invoice_return",
+  "require_manager_pin_cash_refund",
+  "require_manager_pin_rate_override",
   "allow_print_draft_invoices",
   "section_break_pricing",
   "decimal_precision",
@@ -56,6 +61,7 @@
   "section_break_printing",
   "allow_print_last_invoice",
   "silent_print",
+  "return_invoice_print_format",
   "section_break_delivery",
   "use_delivery_charges",
   "auto_set_delivery_charges",
@@ -342,6 +348,13 @@
    "label": "Allow Return Without Invoice"
   },
   {
+   "default": "1",
+   "description": "Show and allow the Exchange workflow in POSNext. Exchange Without Invoice also requires Allow Return Without Invoice.",
+   "fieldname": "allow_exchange",
+   "fieldtype": "Check",
+   "label": "Allow Exchange"
+  },
+  {
    "default": "0",
    "depends_on": "allow_return",
    "description": "Number of days allowed for invoice returns. Set to 0 for unlimited returns.",
@@ -354,6 +367,33 @@
    "fieldname": "allow_free_batch_return",
    "fieldtype": "Check",
    "label": "Allow Free Batch Return"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "section_break_return_exchange_security",
+   "fieldtype": "Section Break",
+   "label": "Return & Exchange Authorization"
+  },
+  {
+   "default": "1",
+   "description": "Require an enabled POS User PIN with Can Approve Returns for Return Without Invoice and Exchange Without Invoice.",
+   "fieldname": "require_manager_pin_no_invoice_return",
+   "fieldtype": "Check",
+   "label": "Require Manager PIN for No-Invoice Return"
+  },
+  {
+   "default": "1",
+   "description": "Require manager POS PIN for controlled cash refunds, including Return Without Invoice and cash refunds from credit-sale returns.",
+   "fieldname": "require_manager_pin_cash_refund",
+   "fieldtype": "Check",
+   "label": "Require Manager PIN for Cash Refund"
+  },
+  {
+   "default": "1",
+   "description": "Require manager POS PIN when a no-invoice return rate is manually changed from the current POS price.",
+   "fieldname": "require_manager_pin_rate_override",
+   "fieldtype": "Check",
+   "label": "Require Manager PIN for Return Rate Override"
   },
   {
    "default": "0",
@@ -429,6 +469,14 @@
    "fieldname": "silent_print",
    "fieldtype": "Check",
    "label": "Enable Silent Print"
+  },
+  {
+   "depends_on": "eval:doc.allow_return || doc.allow_exchange || doc.allow_return_without_invoice",
+   "description": "Print format used automatically for submitted POS return invoices. If empty, the normal POS Profile print format is used.",
+   "fieldname": "return_invoice_print_format",
+   "fieldtype": "Link",
+   "label": "Return Invoice Print Format",
+   "options": "Print Format"
   },
   {
    "collapsible": 1,

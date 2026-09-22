@@ -440,6 +440,38 @@
 						</div>
 					</div>
 
+					<!-- Fast barcode return input -->
+					<div class="mb-3 rounded-xl border border-blue-200 bg-blue-50 p-3">
+						<div class="flex items-center justify-between gap-2 mb-2">
+							<div class="text-start">
+								<p class="text-xs font-bold text-blue-900">{{ __("Scan Return Barcode") }}</p>
+								<p class="text-[11px] text-blue-700 mt-0.5">{{ __("Each valid scan selects or increments the return quantity. Over-return is blocked.") }}</p>
+							</div>
+							<span
+								v-if="returnBarcodeStatus.message"
+								:class="[
+									'text-[11px] font-semibold px-2 py-1 rounded-full max-w-[50%] truncate',
+									returnBarcodeStatus.type === 'error'
+										? 'bg-red-100 text-red-700'
+										: 'bg-emerald-100 text-emerald-700',
+								]"
+							>{{ returnBarcodeStatus.message }}</span>
+						</div>
+						<div class="relative">
+							<FeatherIcon name="maximize" class="absolute start-3 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-500 pointer-events-none" />
+							<input
+								ref="returnBarcodeInput"
+								v-model="returnBarcode"
+								type="text"
+								autocomplete="off"
+								:placeholder="__('Scan barcode and press Enter...')"
+								class="w-full ps-10 pe-10 py-2.5 rounded-lg border border-blue-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+								@keydown.enter.prevent.stop="handleReturnBarcodeScan"
+							/>
+							<FeatherIcon v-if="returnBarcodeBusy" name="loader" class="absolute end-3 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-500 animate-spin" />
+						</div>
+					</div>
+
 					<!-- Search bar for items (shown when more than 7 items) -->
 					<div v-if="returnItems.length > 7" class="mb-3 relative">
 						<input
@@ -717,9 +749,28 @@
 					</p>
 				</div>
 
+				<!-- Exchange credit deliberately skips refund/provider settlement here. -->
+				<div v-if="selectedItems.length > 0 && isExchangeCreditMode" class="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-start">
+					<div class="flex items-start gap-3">
+						<FeatherIcon name="repeat" class="w-5 h-5 text-emerald-600 mt-0.5" />
+						<div>
+							<p class="text-sm font-bold text-emerald-900">{{ __("Exchange Credit") }}</p>
+							<p class="text-xs text-emerald-700 mt-1">{{ __("The return will remain as Customer Credit. No cash/provider refund is sent. Replacement items will continue through the normal POS checkout.") }}</p>
+						</div>
+					</div>
+				</div>
+
 				<!-- Payment Methods Selection -->
-				<div v-if="selectedItems.length > 0">
-					<!-- Credit Sale Return Notice -->
+				<div v-if="selectedItems.length > 0 && !isExchangeCreditMode">
+					<div v-if="paymentHubPlanLoading" class="bg-blue-50 rounded-xl p-3 border border-blue-200 mb-4 text-start text-xs text-blue-800">
+						{{ __("Checking the original payment source before allowing this return...") }}
+					</div>
+					<div v-else-if="paymentHubPlanError" class="bg-red-50 rounded-xl p-3 border border-red-200 mb-4 text-start">
+						<div class="text-sm font-bold text-red-900">{{ __("Payment Source Check Failed") }}</div>
+						<div class="text-xs text-red-700 mt-1">{{ paymentHubPlanError }}</div>
+					</div>
+
+					<!-- Credit Sale Return Settlement -->
 					<div
 						v-if="isOriginalCreditSale"
 						class="bg-amber-50 rounded-xl p-4 border border-amber-200 mb-4 text-start"
@@ -728,17 +779,56 @@
 							{{ __("Credit Sale Return") }}
 						</h4>
 						<p class="text-xs text-amber-800">
-							{{
-								__(
-									"This invoice was paid on account (credit sale). The return will reverse the accounts receivable balance. No cash refund will be processed."
-								)
-							}}
+							{{ __("The return first reverses the customer's open receivable. Any remaining refundable value can stay as Customer Credit or, when eligible, be refunded in Cash.") }}
 						</p>
+
+						<div class="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+							<div class="rounded-lg bg-white border border-amber-200 p-2">
+								<div class="text-gray-500">{{ __("A/R Reversal") }}</div>
+								<div class="font-bold text-gray-900 mt-0.5">{{ formatCurrency(creditSaleArReversalAmount) }}</div>
+							</div>
+							<div class="rounded-lg bg-white border border-amber-200 p-2">
+								<div class="text-gray-500">{{ __("Eligible Cash / Credit") }}</div>
+								<div class="font-bold text-gray-900 mt-0.5">{{ formatCurrency(creditSaleRefundableExcess) }}</div>
+							</div>
+							<div class="rounded-lg bg-white border border-amber-200 p-2">
+								<div class="text-gray-500">{{ __("Customer Credit After Return") }}</div>
+								<div class="font-bold text-emerald-700 mt-0.5">{{ formatCurrency(creditSaleCustomerCreditAmount) }}</div>
+							</div>
+						</div>
+
+						<label v-if="creditSaleRefundableExcess > 0" class="mt-3 flex items-start gap-3 cursor-pointer">
+							<input v-model="creditSaleCashRefundEnabled" type="checkbox" class="mt-0.5 w-5 h-5 rounded border-amber-300 text-amber-600 focus:ring-amber-500" />
+							<div>
+								<div class="text-sm font-bold text-amber-900">{{ __("Refund Eligible Amount in Cash") }}</div>
+								<div class="text-xs text-amber-700">{{ __("Cash is limited to the part of this return that exceeds the customer's current unpaid receivable.") }}</div>
+							</div>
+						</label>
+
+						<div v-if="creditSaleCashRefundEnabled && creditSaleRefundableExcess > 0" class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+							<div>
+								<label class="block text-xs font-semibold text-gray-700 mb-1">{{ __("Cash Refund Amount") }}</label>
+								<input v-model.number="creditSaleCashRefundAmount" type="number" min="0" :max="creditSaleRefundableExcess" step="0.001" class="w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm" />
+								<p class="text-[11px] text-gray-500 mt-1">{{ __("Maximum: {0}", [formatCurrency(creditSaleRefundableExcess)]) }}</p>
+							</div>
+							<div>
+								<label class="block text-xs font-semibold text-gray-700 mb-1">{{ __("Cash Mode") }}</label>
+								<select v-model="creditSaleCashMode" class="w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm">
+									<option value="">{{ __("Select Cash Mode") }}</option>
+									<option v-for="mode in creditSaleCashModes" :key="mode" :value="mode">{{ mode }}</option>
+								</select>
+							</div>
+							<div v-if="creditSaleManagerRequired" class="sm:col-span-2">
+								<label class="block text-xs font-semibold text-gray-700 mb-1">{{ __("Manager POS PIN") }}</label>
+								<input v-model="creditSaleManagerPin" type="password" inputmode="numeric" maxlength="6" autocomplete="off" class="w-full rounded-lg border border-violet-300 bg-white px-3 py-2 text-sm tracking-[0.35em]" :placeholder="__('4–6 digit PIN')" />
+								<p class="text-[11px] text-violet-700 mt-1">{{ __("Manager PIN is required by POS Settings for this cash refund.") }}</p>
+							</div>
+						</div>
 					</div>
 
 					<!-- Add to Customer Credit Option (only for non-credit sales) -->
 					<div
-						v-if="!isOriginalCreditSale"
+						v-if="!isOriginalCreditSale && !paymentHubManaged"
 						class="bg-emerald-50 rounded-xl p-4 border border-emerald-200 mb-4"
 					>
 						<label class="flex items-start gap-3 cursor-pointer">
@@ -822,6 +912,28 @@
 						</div>
 					</div>
 
+					<!-- Payment Hub refund source lock -->
+					<div v-if="paymentHubManaged && !isOriginalCreditSale" class="bg-sky-50 rounded-xl p-4 border border-sky-200 mb-4 text-start">
+						<div class="flex items-start gap-3">
+							<FeatherIcon name="shield" class="w-5 h-5 text-sky-600 flex-shrink-0 mt-0.5" />
+							<div class="flex-1">
+								<h4 class="text-sm font-bold text-sky-900">{{ __("Refund to Original Payment") }}</h4>
+								<p class="text-xs text-sky-800 mt-1">{{ __("Payment Hub locks the refund to the original cash, gateway, payment method and transaction. The cashier cannot change the refund source.") }}</p>
+							</div>
+						</div>
+					</div>
+					<div v-if="paymentHubLegacyProtected" class="rounded-xl border border-amber-300 bg-amber-50 p-3 mb-4 text-start">
+						<div class="flex items-start gap-2"><FeatherIcon name="alert-triangle" class="w-4 h-4 text-amber-700 mt-0.5" /><div><div class="text-xs font-bold text-amber-900">{{ __("Legacy Protected Payment") }}</div><div class="text-[11px] text-amber-800 mt-0.5">{{ __("This Electronic / Physical payment is not linked to a Payment Hub provider transaction. Direct provider refund is blocked. A manager with Refund Override permission must authorize a Cash refund.") }}</div></div></div>
+					</div>
+					<div v-if="paymentHubManaged && requiresManagerAuthorization" class="rounded-xl border border-violet-200 bg-violet-50 p-3 mb-4 text-start">
+						<div class="flex items-start gap-2"><FeatherIcon name="lock" class="w-4 h-4 text-violet-600 mt-0.5" /><div><div class="text-xs font-bold text-violet-900">{{ __("Manager / Admin Authorization Required") }}</div><div class="text-[11px] text-violet-700 mt-0.5">{{ __("Electronic and physical-terminal refunds cannot be sent until an authorized manager verifies their password.") }}</div></div></div>
+					</div>
+					<div v-if="hasRefundOverride" class="rounded-xl border border-orange-200 bg-orange-50 p-3 mb-4 text-start">
+						<label class="block text-xs font-bold text-orange-900 mb-1">{{ __("Refund Override Reason") }} *</label>
+						<input v-model="refundOverrideReason" type="text" class="w-full rounded-lg border border-orange-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" :placeholder="__('Why is the original payment method being overridden?')" />
+						<p class="mt-1 text-[10px] text-orange-700">{{ __("The original provider, actual cash refund, manager and reason are permanently recorded.") }}</p>
+					</div>
+
 					<!-- Regular Payment Methods (only for non-credit sales and not adding to customer credit) -->
 					<div v-if="!isOriginalCreditSale && !addToCustomerCredit">
 						<div
@@ -831,6 +943,7 @@
 								{{ __("Refund Payment Methods") }}
 							</label>
 							<Button
+								v-if="!paymentHubManaged"
 								size="sm"
 								variant="subtle"
 								@click="addPaymentRow"
@@ -859,7 +972,36 @@
 													: "💰"
 											}}
 										</div>
+										<div
+											v-if="paymentHubManaged"
+											class="flex-1 min-w-0 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2"
+										>
+											<div class="text-sm font-semibold text-sky-900">{{ payment.mode_of_payment }}</div>
+											<div class="text-[11px] text-sky-700 truncate">
+												{{ payment.provider ? `${payment.provider}${payment.actual_payment_method ? ' • ' + payment.actual_payment_method : ''}` : payment.channel }}
+											</div>
+											<div class="text-[10px] text-sky-600 mt-0.5">
+												{{ __("Available:") }} {{ formatCurrency(payment.max_refundable || 0) }}
+											</div>
+											<div v-if="!payment.refund_supported && payment.warning && !payment.override_to_cash" class="text-[10px] text-red-600 mt-1">{{ payment.warning }}</div>
+											<div v-if="payment.override_allowed" class="mt-2 flex flex-wrap items-center gap-2">
+												<button
+													type="button"
+													@click="toggleRefundOverride(payment)"
+													:class="[
+														'rounded-md border px-2 py-1 text-[10px] font-semibold',
+														payment.override_to_cash ? 'border-orange-300 bg-orange-100 text-orange-800' : 'border-gray-300 bg-white text-gray-600 hover:bg-gray-50',
+													]"
+												>
+													{{ payment.override_to_cash ? __("Override: Refund as Cash") : __("Manager Override to Cash") }}
+												</button>
+												<span v-if="payment.override_to_cash" class="text-[10px] font-medium text-orange-700">
+													{{ __("Actual refund:") }} {{ payment.override_mode_of_payment }}
+												</span>
+											</div>
+										</div>
 										<select
+											v-else
 											v-model="payment.mode_of_payment"
 											:style="paymentSelectStyle"
 											class="payment-select flex-1 py-2.5 border border-gray-300 rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white appearance-none cursor-pointer hover:border-gray-400 transition-colors ps-3 pe-10"
@@ -877,12 +1019,7 @@
 									<!-- Amount with Counter -->
 									<div class="flex items-center gap-2 flex-1">
 										<button
-											@click="
-												payment.amount = Math.max(
-													0,
-													(payment.amount || 0) - 1
-												)
-											"
+											@click="adjustRefundPayment(payment, -1)"
 											type="button"
 											class="flex-shrink-0 w-10 h-10 sm:w-9 sm:h-9 rounded-lg bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-700 font-bold text-xl transition-colors flex items-center justify-center border border-gray-300"
 										>
@@ -890,10 +1027,7 @@
 										</button>
 										<input
 											:value="payment.amount"
-											@input="
-												payment.amount =
-													parseFloat($event.target.value) || 0
-											"
+											@input="updateRefundPaymentAmount(payment, $event.target.value)"
 											@focus="$event.target.select()"
 											type="text"
 											inputmode="decimal"
@@ -901,7 +1035,7 @@
 											class="flex-1 min-w-0 px-3 py-2.5 text-base font-bold text-center border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 hover:border-gray-400 transition-colors"
 										/>
 										<button
-											@click="payment.amount = (payment.amount || 0) + 1"
+											@click="adjustRefundPayment(payment, 1)"
 											type="button"
 											class="flex-shrink-0 w-10 h-10 sm:w-9 sm:h-9 rounded-lg bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-700 font-bold text-xl transition-colors flex items-center justify-center border border-gray-300"
 										>
@@ -910,7 +1044,7 @@
 									</div>
 									<!-- Delete Button -->
 									<button
-										v-if="refundPayments.length > 1"
+										v-if="refundPayments.length > 1 && !paymentHubManaged"
 										@click="removePaymentRow(index)"
 										class="hidden sm:flex flex-shrink-0 w-9 h-9 items-center justify-center text-red-500 hover:text-red-700 hover:bg-red-50 active:bg-red-100 rounded-lg transition-colors"
 										:title="__('Remove')"
@@ -920,7 +1054,7 @@
 								</div>
 								<!-- Mobile Delete Button -->
 								<button
-									v-if="refundPayments.length > 1"
+									v-if="refundPayments.length > 1 && !paymentHubManaged"
 									@click="removePaymentRow(index)"
 									class="sm:hidden mt-2 w-full py-2 text-sm text-red-600 hover:bg-red-50 active:bg-red-100 rounded-lg transition-colors flex items-center justify-center gap-1"
 								>
@@ -1074,6 +1208,14 @@
 							<span class="text-sm">{{ __("Cancel") }}</span>
 						</Button>
 						<Button
+							v-if="paymentHubManaged && returnDraftDoc && returnRefundStatus && !returnRefundStatus.all_complete"
+							variant="subtle"
+							@click="handleCheckRefund"
+							:disabled="isSubmitting"
+						>
+							<span class="text-sm whitespace-nowrap">{{ __("Check Refund") }}</span>
+						</Button>
+						<Button
 							variant="solid"
 							theme="red"
 							@click="handleCreateReturn"
@@ -1082,11 +1224,48 @@
 							class="flex-1 sm:flex-initial"
 						>
 							<span class="text-sm whitespace-nowrap">{{
-								__("Create Return")
+								hasRetryableFailedRefund
+									? __("Retry Refund")
+									: paymentHubManaged
+										? __("Refund & Create Return")
+										: __("Create Return")
 							}}</span>
 						</Button>
 					</div>
 				</div>
+			</div>
+		</template>
+	</Dialog>
+
+	<!-- Refund manager/admin authorization -->
+	<Dialog
+		v-model="refundAuthDialog.visible"
+		:options="{ title: __('Manager / Admin Authorization'), size: 'sm' }"
+	>
+		<template #body-content>
+			<div class="space-y-3">
+				<div class="rounded-lg border border-violet-200 bg-violet-50 p-3 text-xs text-violet-800">
+					{{ hasRefundOverride ? __("A refund-method override requires a user with Payment Hub Refund Override permission.") : __("Electronic / terminal refund requires a user with Payment Hub Refund Approver permission.") }}
+				</div>
+				<div>
+					<label class="block text-xs font-semibold text-gray-700 mb-1">{{ __("Manager Username / Email") }}</label>
+					<input v-model="refundAuthDialog.approver" type="text" autocomplete="username" class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500" />
+				</div>
+				<div>
+					<label class="block text-xs font-semibold text-gray-700 mb-1">{{ __("Password") }}</label>
+					<input v-model="refundAuthDialog.password" type="password" autocomplete="current-password" class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500" @keyup.enter="submitRefundAuthorization" />
+				</div>
+				<div>
+					<label class="block text-xs font-semibold text-gray-700 mb-1">{{ __("Authorization Reason") }}</label>
+					<textarea v-model="refundAuthDialog.reason" rows="2" class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"></textarea>
+				</div>
+				<p v-if="refundAuthDialog.error" class="text-xs text-red-600">{{ refundAuthDialog.error }}</p>
+			</div>
+		</template>
+		<template #actions>
+			<div class="flex w-full justify-end gap-2">
+				<Button variant="subtle" :disabled="refundAuthDialog.loading" @click="cancelRefundAuthorization">{{ __("Cancel") }}</Button>
+				<Button variant="solid" theme="blue" :loading="refundAuthDialog.loading" :disabled="refundAuthDialog.loading" @click="submitRefundAuthorization">{{ __("Authorize Refund") }}</Button>
 			</div>
 		</template>
 	</Dialog>
@@ -1189,8 +1368,10 @@ import {
 	roundCurrency,
 } from "@/utils/currency";
 import { getInvoiceStatusColor } from "@/utils/invoice";
+import { call } from "@/utils/apiWrapper";
+import { QueuedMutex } from "@/utils/mutex";
 import { Button, Dialog, FeatherIcon, createResource } from "frappe-ui";
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 
 const { showSuccess, showError, showWarning } = useToast();
 const { isOffline } = useOfflineStatus();
@@ -1212,6 +1393,7 @@ const props = defineProps({
 	posOpeningShift: String,
 	currency: { type: String, default: DEFAULT_CURRENCY },
 	preselectedInvoice: { type: Object, default: null },
+	settlementMode: { type: String, default: "refund" },
 });
 
 const emit = defineEmits(["update:modelValue", "return-created"]);
@@ -1221,6 +1403,8 @@ const showDialog = computed({
 	get: () => props.modelValue,
 	set: (val) => emit("update:modelValue", val),
 });
+
+const isExchangeCreditMode = computed(() => props.settlementMode === "exchange-credit");
 
 // State
 const originalInvoice = ref(null);
@@ -1239,6 +1423,34 @@ const isSubmitting = ref(false);
 // When true, return amount is added to customer credit balance instead of cash refund
 const addToCustomerCredit = ref(false);
 
+// Fast retail barcode-return state. Scans are queued so rapid scanner input is
+// never lost while the previous barcode lookup is still in flight.
+const returnBarcodeInput = ref(null);
+const returnBarcode = ref("");
+const returnBarcodeBusy = ref(false);
+const returnBarcodeStatus = reactive({ type: "", message: "" });
+const returnBarcodeQueue = new QueuedMutex({ timeout: 10000, name: "InvoiceReturnBarcode" });
+let returnBarcodeStatusTimer = null;
+
+// Payment Hub return/refund state
+const paymentHubPlan = ref(null);
+const paymentHubPlanLoading = ref(false);
+const paymentHubPlanError = ref("");
+const returnDraftDoc = ref(null);
+const returnRefundStatus = ref(null);
+const refundOverrideReason = ref("");
+let refundAuthResolve = null;
+const refundAuthDialog = reactive({
+	visible: false,
+	loading: false,
+	approver: "",
+	password: "",
+	reason: "",
+	error: "",
+	returnInvoice: null,
+	refundLines: [],
+});
+
 // Autocomplete state
 const invoiceSearchInput = ref(null);
 const showSuggestions = ref(false);
@@ -1249,6 +1461,16 @@ const isOriginalCreditSale = ref(false);
 const isPartiallyPaid = ref(false);
 const originalPaidAmount = ref(0);
 const originalOutstandingAmount = ref(0);
+
+// Credit-sale return settlement. Linked returns always reverse open A/R first.
+// Any value beyond the remaining receivable can stay as Customer Credit or be
+// refunded in Cash (up to the server-calculated eligible excess).
+const creditSaleCashRefundEnabled = ref(false);
+const creditSaleCashRefundAmount = ref(0);
+const creditSaleCashMode = ref("");
+const creditSaleManagerPin = ref("");
+const creditSaleCashModes = ref([]);
+const requireManagerPinCreditSaleCash = ref(true);
 
 // UI state
 const errorDialog = reactive({
@@ -1337,6 +1559,26 @@ const loadPaymentMethodsResource = createResource({
 	},
 });
 
+// Return-security/cash options are shared with the no-invoice return flow.
+// We use the same POS Settings manager-PIN switch and the current profile Cash modes.
+const returnSecurityOptionsResource = createResource({
+	url: "pos_next.api.retail_returns.get_no_invoice_return_options",
+	auto: false,
+	onSuccess(data) {
+		creditSaleCashModes.value = Array.isArray(data?.cash_modes) ? data.cash_modes : [];
+		requireManagerPinCreditSaleCash.value = Boolean(
+			Number(data?.require_manager_pin_cash_refund ?? 1)
+		);
+		if (!creditSaleCashMode.value && creditSaleCashModes.value.length) {
+			creditSaleCashMode.value = creditSaleCashModes.value[0];
+		}
+	},
+	onError(error) {
+		console.error("Could not load return security options:", error);
+		creditSaleCashModes.value = [];
+	},
+});
+
 // Resource for fetching a prepared return invoice.
 // Uses ERPNext's make_sales_return() which creates a properly structured return document
 // with all child tables (sales_team, taxes, etc.) copied from the original invoice.
@@ -1417,8 +1659,21 @@ const fetchInvoiceResource = createResource({
 				loadPaymentMethodsResource.reload();
 			}
 
-			// Set up refund payment rows based on original invoice payments
-			initializePaymentsFromInvoice();
+			if (isExchangeCreditMode.value) {
+				// Exchange returns intentionally become Customer Credit. Provider refunds
+				// remain untouched and the replacement sale goes through normal checkout.
+				refundPayments.value = [];
+				paymentHubPlan.value = null;
+				paymentHubPlanError.value = "";
+				nextTick(() => returnBarcodeInput.value?.focus());
+			} else {
+				// Set up refund payment rows based on original invoice payments
+				initializePaymentsFromInvoice();
+
+				// Lock Payment Hub-managed returns to the original captured payment sources.
+				loadPaymentHubRefundPlan();
+			}
+			focusReturnBarcodeInput();
 		}
 	},
 	onError(error) {
@@ -1472,24 +1727,45 @@ const createReturnResource = createResource({
 				// Link to original invoice item row for accurate return tracking in ERPNext
 				sales_invoice_item: item.name,
 			})),
-			// Flag to indicate return amount should be added to customer credit balance
-			add_to_customer_balance: addToCustomerCredit.value,
-			// Payment amounts are negative for refunds
-			// If addToCustomerCredit is true, send empty payments array so outstanding stays negative
-			// This negative outstanding becomes customer credit balance
-			payments: addToCustomerCredit.value
+			// Exchange mode deliberately leaves the credit note outstanding so the
+			// replacement sale can consume it as Customer Credit. It does NOT create
+			// wallet credit and does NOT send a Payment Hub provider refund.
+			add_to_customer_balance: isExchangeCreditMode.value ? false : addToCustomerCredit.value,
+			payments: isExchangeCreditMode.value
+				? []
+				: isOriginalCreditSale.value
+				? normalizedCreditSaleCashRefund.value > 0
+					? [{
+						mode_of_payment: creditSaleCashMode.value,
+						amount: -Math.abs(normalizedCreditSaleCashRefund.value),
+					  }]
+					: []
+				: addToCustomerCredit.value
 				? []
 				: refundPayments.value.map((payment) => ({
 						mode_of_payment: payment.mode_of_payment,
 						amount: -Math.abs(payment.amount),
 				  })),
-			remarks: returnReason.value || __("Return against {0}", [originalInvoice.value.name]),
+			remarks:
+				returnReason.value ||
+				(isExchangeCreditMode.value
+					? __("Exchange credit against {0}", [originalInvoice.value.name])
+					: __("Return against {0}", [originalInvoice.value.name])),
 		};
 
 		// Return in the correct format: invoice as JSON string
 		return {
 			invoice: JSON.stringify(invoiceData),
-			data: JSON.stringify({}),
+			data: JSON.stringify({
+				pos_next_exchange_return: isExchangeCreditMode.value ? 1 : 0,
+				credit_sale_cash_refund: isOriginalCreditSale.value && normalizedCreditSaleCashRefund.value > 0
+					? {
+						amount: normalizedCreditSaleCashRefund.value,
+						mode_of_payment: creditSaleCashMode.value,
+						manager_pin: creditSaleManagerRequired.value ? creditSaleManagerPin.value : "",
+					  }
+					: null,
+			}),
 		};
 	},
 	auto: false,
@@ -1503,13 +1779,22 @@ const createReturnResource = createResource({
 	onSuccess(data) {
 		submitError.value = "";
 		isSubmitting.value = false;
-		emit("return-created", data);
+		const successPayload = {
+			...data,
+			customer: originalInvoice.value?.customer,
+			customer_name: originalInvoice.value?.customer_name,
+			exchange_credit: isExchangeCreditMode.value,
+		};
+
+		// Close/reset the source return modal BEFORE bubbling success. ExchangeDialog
+		// can then transition to replacement items without a late child close event
+		// racing the new dialog, and standalone return printing cannot leave this
+		// modal/overlay visible behind the print window.
+		closeReturnModal();
+		emit("return-created", successPayload);
 
 		// Reload the invoice list to remove fully returned invoices
 		loadInvoicesResource.reload();
-
-		// Close return modal and go back to invoice list
-		closeReturnModal();
 		showSuccess(__("Return invoice {0} created successfully", [data.name]));
 	},
 	onError(error) {
@@ -1525,6 +1810,7 @@ const createReturnResource = createResource({
 onMounted(() => {
 	if (props.posProfile) {
 		loadPaymentMethodsResource.reload();
+		returnSecurityOptionsResource.fetch({ pos_profile: props.posProfile });
 	}
 	document.addEventListener("keydown", handleKeyboardShortcuts);
 });
@@ -1535,6 +1821,10 @@ onUnmounted(() => {
 	if (serverSearchTimeout) {
 		clearTimeout(serverSearchTimeout);
 		serverSearchTimeout = null;
+	}
+	if (returnBarcodeStatusTimer) {
+		clearTimeout(returnBarcodeStatusTimer);
+		returnBarcodeStatusTimer = null;
 	}
 });
 
@@ -1610,6 +1900,27 @@ const returnTotal = computed(() =>
 	)
 );
 
+const creditSaleArReversalAmount = computed(() =>
+	roundCurrency(
+		Math.min(returnTotal.value, Math.max(0, Number(originalOutstandingAmount.value || 0)))
+	)
+);
+const creditSaleRefundableExcess = computed(() =>
+	roundCurrency(Math.max(0, returnTotal.value - creditSaleArReversalAmount.value))
+);
+const normalizedCreditSaleCashRefund = computed(() => {
+	if (!creditSaleCashRefundEnabled.value) return 0;
+	return roundCurrency(
+		Math.max(0, Math.min(Number(creditSaleCashRefundAmount.value || 0), creditSaleRefundableExcess.value))
+	);
+});
+const creditSaleCustomerCreditAmount = computed(() =>
+	roundCurrency(Math.max(0, creditSaleRefundableExcess.value - normalizedCreditSaleCashRefund.value))
+);
+const creditSaleManagerRequired = computed(() =>
+	Boolean(normalizedCreditSaleCashRefund.value > 0 && requireManagerPinCreditSaleCash.value)
+);
+
 const totalPaymentAmount = computed(() =>
 	roundCurrency(
 		refundPayments.value.reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0)
@@ -1633,13 +1944,26 @@ const creditAdjustmentAmount = computed(() =>
 );
 
 // Summary display helpers for the Return Summary section
-const showPartialBreakdown = computed(() => isPartiallyPaid.value && !isOriginalCreditSale.value);
-const summaryRefundLabel = computed(() =>
-	showPartialBreakdown.value ? "Cash Refund:" : "Refund Amount:"
+const showPartialBreakdown = computed(
+	() => !isExchangeCreditMode.value && isPartiallyPaid.value && !isOriginalCreditSale.value
 );
+const summaryRefundLabel = computed(() => {
+	if (isExchangeCreditMode.value) return "Exchange Credit:";
+	if (isOriginalCreditSale.value) return "Return Value:";
+	if (paymentHubManaged.value) return "Refund to Original Payment:";
+	return showPartialBreakdown.value ? "Cash Refund:" : "Refund Amount:";
+});
 const summaryRefundAmount = computed(() =>
-	showPartialBreakdown.value ? maxRefundableAmount.value : returnTotal.value
+	isExchangeCreditMode.value
+		? returnTotal.value
+		: showPartialBreakdown.value
+		? maxRefundableAmount.value
+		: returnTotal.value
 );
+
+watch(summaryRefundAmount, () => {
+	if (paymentHubManaged.value) applyPaymentHubRefundAmounts();
+});
 
 // Cache RTL direction check (only needs to run once per session)
 const isRTL = document.documentElement.dir === "rtl";
@@ -1650,10 +1974,35 @@ const paymentSelectStyle = {
 const canCreateReturn = computed(() => {
 	const hasSelectedItems = selectedItems.value.length > 0;
 	if (!hasSelectedItems || !hasOpenShift.value) return false;
-	// Credit sale returns and "add to customer credit" returns don't need payment validation
-	if (isOriginalCreditSale.value || addToCustomerCredit.value) return true;
+	if (isExchangeCreditMode.value) return true;
+	if (paymentHubPlanLoading.value || paymentHubPlanError.value) return false;
+	// Credit-sale returns reverse open A/R first. Cash is optional and limited to
+	// the eligible excess; when selected, require a current-profile Cash mode and
+	// (when configured) a Manager POS PIN. Any non-cash excess remains Customer Credit.
+	if (isOriginalCreditSale.value) {
+		if (!creditSaleCashRefundEnabled.value || normalizedCreditSaleCashRefund.value <= 0) return true;
+		if (normalizedCreditSaleCashRefund.value > creditSaleRefundableExcess.value + 0.0005) return false;
+		if (!creditSaleCashMode.value) return false;
+		if (creditSaleManagerRequired.value && creditSaleManagerPin.value.trim().length < 4) return false;
+		return true;
+	}
+	if (addToCustomerCredit.value) return true;
 
 	const payments = refundPayments.value;
+	if (paymentHubManaged.value) {
+		const active = payments.filter((payment) => Number(payment.amount || 0) > 0);
+		if (!active.length) return false;
+		if (active.some((payment) => !payment.refund_supported && !payment.override_to_cash)) return false;
+		if (
+			active.some(
+				(payment) =>
+					Number(payment.amount || 0) > Number(payment.max_refundable || 0) + 0.0005
+			)
+		)
+			return false;
+		if (hasRefundOverride.value && !refundOverrideReason.value.trim()) return false;
+		return Math.abs(totalPaymentAmount.value - summaryRefundAmount.value) < 0.01;
+	}
 	if (isPartiallyPaid.value) {
 		if (!payments.length) return true;
 		const hasValidPayments = payments.every(
@@ -1730,7 +2079,12 @@ watch(normalizedSearchTerm, (searchTerm) => {
 
 // Auto-populate payment amount when return total changes (single payment only)
 watch(returnTotal, (newTotal) => {
+	if (isExchangeCreditMode.value) return;
 	if (!returnModal.visible || !showDialog.value || isOriginalCreditSale.value) return;
+	if (paymentHubManaged.value) {
+		applyPaymentHubRefundAmounts();
+		return;
+	}
 	if (refundPayments.value.length !== 1 || newTotal <= 0) return;
 
 	refundPayments.value[0].amount = isPartiallyPaid.value
@@ -1772,6 +2126,106 @@ function closeErrorDialog() {
 	errorDialog.visible = false;
 }
 
+function focusReturnBarcodeInput() {
+	nextTick(() => returnBarcodeInput.value?.focus());
+}
+
+function setReturnBarcodeStatus(type, message) {
+	returnBarcodeStatus.type = type;
+	returnBarcodeStatus.message = message;
+	if (returnBarcodeStatusTimer) clearTimeout(returnBarcodeStatusTimer);
+	returnBarcodeStatusTimer = setTimeout(() => {
+		returnBarcodeStatus.type = "";
+		returnBarcodeStatus.message = "";
+	}, 2500);
+}
+
+function roundedReturnQty(value) {
+	return Math.round((Number(value) || 0) * 1000000) / 1000000;
+}
+
+function handleReturnBarcodeScan() {
+	const barcode = returnBarcode.value.trim();
+	if (!barcode) {
+		focusReturnBarcodeInput();
+		return;
+	}
+
+	// Clear/refocus immediately. Hardware scanners can submit the next barcode while
+	// the previous lookup is still running; QueuedMutex preserves scan order.
+	returnBarcode.value = "";
+	focusReturnBarcodeInput();
+
+	returnBarcodeQueue.withLock(async () => {
+		returnBarcodeBusy.value = true;
+		try {
+			const detail = await call("pos_next.api.items.search_by_barcode", {
+				barcode,
+				pos_profile: props.posProfile,
+			});
+			if (!detail?.item_code) throw new Error(__("Item not found"));
+
+			let candidates = returnItems.value.filter((item) => item.item_code === detail.item_code);
+			const scannedUom = detail.resolved_uom || detail.uom || detail.stock_uom;
+			if (scannedUom) {
+				const exactUom = candidates.filter(
+					(item) => String(item.uom || item.stock_uom || "") === String(scannedUom)
+				);
+				if (exactUom.length) candidates = exactUom;
+			}
+
+			if (!candidates.length) {
+				setReturnBarcodeStatus(
+					"error",
+					__("Barcode does not belong to this invoice: {0}", [barcode])
+				);
+				return;
+			}
+
+			const increment = Math.max(Number(detail.resolved_qty || 1), 0.001);
+			const target = candidates.find((item) => {
+				const current = item.selected ? Number(item.return_qty || 0) : 0;
+				return current + 0.000001 < Number(item.quantity || 0);
+			});
+
+			if (!target) {
+				setReturnBarcodeStatus(
+					"error",
+					__("All returnable quantity for {0} is already selected", [detail.item_code])
+				);
+				return;
+			}
+
+			const current = target.selected ? Number(target.return_qty || 0) : 0;
+			const maximum = Number(target.quantity || 0);
+			const nextQty = roundedReturnQty(current + increment);
+			if (nextQty > maximum + 0.000001) {
+				setReturnBarcodeStatus(
+					"error",
+					__("Cannot return more than {0} of {1}", [maximum, detail.item_code])
+				);
+				return;
+			}
+
+			target.selected = true;
+			target.return_qty = nextQty;
+			setReturnBarcodeStatus(
+				"success",
+				__("{0}: {1} / {2}", [detail.item_code, nextQty, maximum])
+			);
+		} catch (error) {
+			console.error("Return barcode lookup failed:", error);
+			setReturnBarcodeStatus(
+				"error",
+				extractErrorMessage(error, __("Barcode not found: {0}", [barcode]))
+			);
+		} finally {
+			returnBarcodeBusy.value = false;
+			focusReturnBarcodeInput();
+		}
+	});
+}
+
 function normalizeItemQuantity(item) {
 	const maxQuantity = Number(item.quantity) || 0;
 	const currentQuantity = Number(item.return_qty);
@@ -1794,11 +2248,26 @@ function validateSelectedItems() {
 }
 
 function addPaymentRow() {
+	if (paymentHubManaged.value) return;
 	refundPayments.value.push({ mode_of_payment: "", amount: 0 });
 }
 
 function removePaymentRow(paymentIndex) {
+	if (paymentHubManaged.value) return;
 	refundPayments.value.splice(paymentIndex, 1);
+}
+
+function updateRefundPaymentAmount(payment, value) {
+	let amount = Number.parseFloat(value) || 0;
+	amount = Math.max(0, amount);
+	if (paymentHubManaged.value) {
+		amount = Math.min(amount, Number(payment.max_refundable || 0));
+	}
+	payment.amount = roundCurrency(amount);
+}
+
+function adjustRefundPayment(payment, delta) {
+	updateRefundPaymentAmount(payment, (Number(payment.amount) || 0) + delta);
 }
 
 /**
@@ -1823,6 +2292,10 @@ function removePaymentRow(paymentIndex) {
  * value, so this remap also ensures the dropdown works correctly.
  */
 function initializePaymentsFromInvoice() {
+	if (paymentHubManaged.value) {
+		initializePaymentHubRefunds();
+		return;
+	}
 	if (isOriginalCreditSale.value) {
 		refundPayments.value = [];
 		return;
@@ -1853,6 +2326,109 @@ function initializePaymentsFromInvoice() {
 				amount: 0,
 			},
 		];
+	}
+}
+
+const paymentHubLegacyProtected = computed(() => Boolean(paymentHubPlan.value?.legacy_protected));
+const paymentHubManaged = computed(() =>
+	Boolean(paymentHubPlan.value?.managed || paymentHubPlan.value?.legacy_protected)
+);
+const hasRetryableFailedRefund = computed(() =>
+	Boolean(
+		paymentHubManaged.value &&
+			returnRefundStatus.value?.rows?.some(
+				(row) => row?.can_retry || row?.status === "Failed"
+			)
+	)
+);
+
+const hasRefundOverride = computed(() =>
+	refundPayments.value.some(
+		(payment) => payment.override_to_cash && Number(payment.amount || 0) > 0
+	)
+);
+const requiresManagerAuthorization = computed(() =>
+	refundPayments.value.some(
+		(payment) =>
+			Number(payment.amount || 0) > 0 &&
+			(payment.authorization_required || payment.override_to_cash)
+	)
+);
+
+function toggleRefundOverride(payment) {
+	if (!payment.override_allowed) return;
+	payment.override_to_cash = !payment.override_to_cash;
+	if (payment.override_to_cash) {
+		const target = payment.override_targets?.[0];
+		payment.override_mode_of_payment = target?.mode_of_payment || "Cash";
+	}
+}
+
+function effectiveRefundMode(payment) {
+	return payment.override_to_cash ? payment.override_mode_of_payment : payment.mode_of_payment;
+}
+
+async function loadPaymentHubRefundPlan() {
+	paymentHubPlan.value = null;
+	paymentHubPlanLoading.value = true;
+	paymentHubPlanError.value = "";
+	returnDraftDoc.value = null;
+	returnRefundStatus.value = null;
+	if (!originalInvoice.value?.name) {
+		paymentHubPlanLoading.value = false;
+		return;
+	}
+
+	try {
+		const result = await call("erpnext_payment_hub.pos.refund.get_refund_plan", {
+			original_invoice: originalInvoice.value.name,
+		});
+		if (result?.managed || result?.legacy_protected) {
+			paymentHubPlan.value = result;
+			addToCustomerCredit.value = false;
+			initializePaymentHubRefunds();
+		}
+	} catch (error) {
+		console.error("Payment Hub refund plan check failed", error);
+		paymentHubPlanError.value = extractErrorMessage(
+			error,
+			__("Unable to verify the original payment source. Return is blocked for safety.")
+		);
+	} finally {
+		paymentHubPlanLoading.value = false;
+	}
+}
+
+function initializePaymentHubRefunds() {
+	if (!paymentHubPlan.value?.managed && !paymentHubPlan.value?.legacy_protected) return;
+	refundPayments.value = (paymentHubPlan.value.sources || []).map((source) => ({
+		mode_of_payment: source.mode_of_payment,
+		amount: 0,
+		source_allocation: source.source_allocation,
+		channel: source.channel,
+		provider_account: source.provider_account,
+		provider: source.provider,
+		actual_payment_method: source.actual_payment_method,
+		gateway_transaction: source.gateway_transaction,
+		max_refundable: Number(source.refundable_amount || 0),
+		refund_supported: source.refund_supported !== false,
+		authorization_required: source.authorization_required === true,
+		override_allowed: source.override_allowed === true,
+		override_targets: source.override_targets || [],
+		override_to_cash: false,
+		override_mode_of_payment: source.override_targets?.[0]?.mode_of_payment || "Cash",
+		warning: source.warning || null,
+	}));
+	applyPaymentHubRefundAmounts();
+}
+
+function applyPaymentHubRefundAmounts() {
+	if (!paymentHubManaged.value) return;
+	let remaining = Number(summaryRefundAmount.value || 0);
+	for (const payment of refundPayments.value) {
+		const maxAmount = Number(payment.max_refundable || 0);
+		payment.amount = roundCurrency(Math.min(maxAmount, Math.max(remaining, 0)));
+		remaining = roundCurrency(Math.max(0, remaining - payment.amount));
 	}
 }
 
@@ -1995,6 +2571,286 @@ function decrementReturnQuantity(item) {
 	}
 }
 
+function buildPaymentHubReturnInvoiceData() {
+	const baseDoc = preparedReturnDoc.value || {};
+	const invoiceData = {
+		doctype: "Sales Invoice",
+		pos_profile: props.posProfile,
+		posa_pos_opening_shift: props.posOpeningShift,
+		customer: baseDoc.customer || originalInvoice.value.customer,
+		company: baseDoc.company || originalInvoice.value.company,
+		is_return: 1,
+		return_against: baseDoc.return_against || originalInvoice.value.name,
+		update_outstanding_for_self: 0,
+		is_pos: 1,
+		update_stock: 1,
+		sales_team:
+			baseDoc.sales_team?.map((member) => ({
+				sales_person: member.sales_person,
+				allocated_percentage: member.allocated_percentage || 0,
+			})) || [],
+		items: selectedItems.value.map((item) => ({
+			item_code: item.item_code,
+			item_name: item.item_name,
+			qty: -Math.abs(item.return_qty),
+			rate: item.rate,
+			warehouse: item.warehouse,
+			uom: item.uom,
+			conversion_factor: item.conversion_factor || 1,
+			sales_invoice_item: item.name,
+		})),
+		add_to_customer_balance: false,
+		payments: refundPayments.value
+			.filter((payment) => Number(payment.amount || 0) > 0)
+			.map((payment) => ({
+				mode_of_payment: effectiveRefundMode(payment),
+				amount: -Math.abs(payment.amount),
+			})),
+		remarks: returnReason.value || __("Return against {0}", [originalInvoice.value.name]),
+	};
+	if (returnDraftDoc.value?.name) invoiceData.name = returnDraftDoc.value.name;
+	return invoiceData;
+}
+
+function finishReturnSuccess(data) {
+	submitError.value = "";
+	const successPayload = {
+		...data,
+		customer: originalInvoice.value?.customer,
+		customer_name: originalInvoice.value?.customer_name,
+		exchange_credit: isExchangeCreditMode.value,
+	};
+	closeReturnModal();
+	emit("return-created", successPayload);
+	loadInvoicesResource.reload();
+	showSuccess(__("Return invoice {0} created successfully", [data.name]));
+}
+
+async function submitPaymentHubReturnDraft() {
+	if (!returnDraftDoc.value?.name) throw new Error(__("Return draft is missing"));
+	const result = await call("pos_next.api.invoices.submit_invoice", {
+		invoice: JSON.stringify(returnDraftDoc.value),
+		data: JSON.stringify({}),
+	});
+	finishReturnSuccess(result);
+	return result;
+}
+
+function cancelRefundAuthorization() {
+	refundAuthDialog.visible = false;
+	refundAuthDialog.loading = false;
+	refundAuthDialog.password = "";
+	refundAuthDialog.error = "";
+	const resolve = refundAuthResolve;
+	refundAuthResolve = null;
+	resolve?.(null);
+}
+
+async function submitRefundAuthorization() {
+	if (refundAuthDialog.loading) return;
+	if (!refundAuthDialog.approver || !refundAuthDialog.password || !refundAuthDialog.reason.trim()) {
+		refundAuthDialog.error = __("Manager username, password and reason are required");
+		return;
+	}
+	refundAuthDialog.loading = true;
+	refundAuthDialog.error = "";
+	try {
+		const overridePayment = refundAuthDialog.refundLines.find((line) => line.override_channel);
+		const result = await call("erpnext_payment_hub.pos.authorization.authorize_pos_refund", {
+			approver: refundAuthDialog.approver,
+			password: refundAuthDialog.password,
+			original_invoice: originalInvoice.value.name,
+			return_invoice: refundAuthDialog.returnInvoice,
+			amount: roundCurrency(
+				refundAuthDialog.refundLines.reduce(
+					(sum, line) => sum + Number(line.amount || 0),
+					0
+				)
+			),
+			reason: refundAuthDialog.reason.trim(),
+			source_allocations: JSON.stringify(
+				refundAuthDialog.refundLines.map((line) => line.source_allocation)
+			),
+			is_override: hasRefundOverride.value ? 1 : 0,
+			override_channel: overridePayment?.override_channel || null,
+			override_mode_of_payment: overridePayment?.override_mode_of_payment || null,
+		});
+		refundAuthDialog.visible = false;
+		refundAuthDialog.password = "";
+		const resolve = refundAuthResolve;
+		refundAuthResolve = null;
+		resolve?.(result?.authorization_token || null);
+	} catch (error) {
+		refundAuthDialog.password = "";
+		refundAuthDialog.error = extractErrorMessage(error, __("Authorization failed"));
+	} finally {
+		refundAuthDialog.loading = false;
+	}
+}
+
+function requestRefundAuthorization(returnInvoice, refundLines) {
+	if (!requiresManagerAuthorization.value) return Promise.resolve(null);
+	refundAuthDialog.returnInvoice = returnInvoice;
+	refundAuthDialog.refundLines = refundLines;
+	refundAuthDialog.password = "";
+	refundAuthDialog.error = "";
+	refundAuthDialog.reason =
+		refundOverrideReason.value.trim() ||
+		returnReason.value.trim() ||
+		__("POS customer return");
+	refundAuthDialog.visible = true;
+	return new Promise((resolve) => {
+		refundAuthResolve = resolve;
+	});
+}
+
+watch(
+	() => refundAuthDialog.visible,
+	(visible) => {
+		if (!visible && refundAuthResolve && !refundAuthDialog.loading) {
+			const resolve = refundAuthResolve;
+			refundAuthResolve = null;
+			refundAuthDialog.password = "";
+			resolve(null);
+		}
+	}
+);
+
+async function handleLegacyProtectedReturn() {
+	if (!hasRefundOverride.value) {
+		throw new Error(
+			__("This legacy Electronic / Physical payment requires a manager-authorized Cash override.")
+		);
+	}
+
+	const invoiceData = buildPaymentHubReturnInvoiceData();
+	const draft = await call("pos_next.api.invoices.update_invoice", {
+		data: JSON.stringify(invoiceData),
+	});
+	returnDraftDoc.value = draft;
+
+	const refundLines = refundPayments.value
+		.filter((payment) => Number(payment.amount || 0) > 0)
+		.map((payment) => ({
+			source_allocation: payment.source_allocation,
+			amount: roundCurrency(payment.amount),
+			override_channel: "Cash",
+			override_mode_of_payment: payment.override_mode_of_payment || "Cash",
+			override_reason: refundOverrideReason.value.trim(),
+		}));
+
+	const authorizationToken = await requestRefundAuthorization(draft.name, refundLines);
+	if (!authorizationToken) {
+		showWarning(__("Return was not submitted. Manager Refund Override authorization is required."));
+		return { authorization_required: true, return_invoice: draft.name };
+	}
+
+	return await submitPaymentHubReturnDraft();
+}
+
+async function handlePaymentHubReturn() {
+	if (paymentHubLegacyProtected.value) {
+		return await handleLegacyProtectedReturn();
+	}
+
+	const invoiceData = buildPaymentHubReturnInvoiceData();
+	const draft = await call("pos_next.api.invoices.update_invoice", {
+		data: JSON.stringify(invoiceData),
+	});
+	returnDraftDoc.value = draft;
+
+	const refundLines = refundPayments.value
+		.filter((payment) => Number(payment.amount || 0) > 0)
+		.map((payment) => ({
+			source_allocation: payment.source_allocation,
+			amount: roundCurrency(payment.amount),
+			override_channel: payment.override_to_cash ? "Cash" : null,
+			override_mode_of_payment: payment.override_to_cash
+				? payment.override_mode_of_payment
+				: null,
+			override_reason: payment.override_to_cash ? refundOverrideReason.value.trim() : null,
+		}));
+
+	let authorizationToken = null;
+	if (requiresManagerAuthorization.value) {
+		authorizationToken = await requestRefundAuthorization(draft.name, refundLines);
+		if (!authorizationToken) {
+			showWarning(__("Refund was not sent. Manager authorization is required."));
+			return { authorization_required: true, return_invoice: draft.name };
+		}
+	}
+
+	const status = await call("erpnext_payment_hub.pos.refund.process_pos_return_refund", {
+		original_invoice: originalInvoice.value.name,
+		return_invoice: draft.name,
+		refund_lines: JSON.stringify(refundLines),
+		reason: returnReason.value || "POS customer return",
+		authorization_token: authorizationToken,
+	});
+	returnRefundStatus.value = status;
+
+	if (status?.all_complete) {
+		return await submitPaymentHubReturnDraft();
+	}
+
+	if (status?.needs_review) {
+		if (status?.rows?.some((row) => row?.can_retry || row?.status === "Failed")) {
+			showWarning(
+				__(
+					"Refund failed with the provider. Return invoice {0} remains Draft. Click Retry Refund to create a new provider refund attempt.",
+					[draft.name]
+				)
+			);
+			return status;
+		}
+		throw new Error(
+			__(
+				"Refund requires manual review. Return invoice {0} remains Draft.",
+				[draft.name]
+			)
+		);
+	}
+
+	showWarning(
+		__(
+			"Refund is pending with the payment provider. Return invoice {0} remains Draft. Use Check Refund to continue after confirmation.",
+			[draft.name]
+		)
+	);
+	return status;
+}
+
+async function handleCheckRefund() {
+	if (!returnDraftDoc.value?.name || isSubmitting.value) return;
+	isSubmitting.value = true;
+	try {
+		const status = await call("erpnext_payment_hub.pos.refund.refresh_return_refunds", {
+			return_invoice: returnDraftDoc.value.name,
+		});
+		returnRefundStatus.value = status;
+		if (status?.all_complete) {
+			await submitPaymentHubReturnDraft();
+		} else if (status?.needs_review) {
+			if (status?.rows?.some((row) => row?.can_retry || row?.status === "Failed")) {
+				showWarning(__("Refund failed with the provider. Click Retry Refund to try again."));
+			} else {
+				openErrorDialog(
+					__("Refund requires manual review before the return can be submitted."),
+					__("Refund Review Required")
+				);
+			}
+		} else {
+			showWarning(__("Refund is still pending with the payment provider."));
+		}
+	} catch (error) {
+		const errorMsg = extractErrorMessage(error);
+		submitError.value = errorMsg;
+		openErrorDialog(errorMsg);
+	} finally {
+		isSubmitting.value = false;
+	}
+}
+
 async function handleCreateReturn() {
 	if (!canCreateReturn.value || isSubmitting.value) return;
 	if (!hasOpenShift.value) {
@@ -2012,6 +2868,11 @@ async function handleCreateReturn() {
 	isSubmitting.value = true;
 
 	try {
+		if (!isExchangeCreditMode.value && paymentHubManaged.value) {
+			await handlePaymentHubReturn();
+			return;
+		}
+
 		const result = await createReturnResource.submit();
 
 		// Check if result contains an error (HTTP 417 might return error in response body)
@@ -2030,13 +2891,51 @@ async function handleCreateReturn() {
 	}
 }
 
+watch(creditSaleCashRefundEnabled, (enabled) => {
+	if (enabled) {
+		creditSaleCashRefundAmount.value = creditSaleRefundableExcess.value;
+		if (!creditSaleCashMode.value && creditSaleCashModes.value.length) {
+			creditSaleCashMode.value = creditSaleCashModes.value[0];
+		}
+	} else {
+		creditSaleCashRefundAmount.value = 0;
+		creditSaleManagerPin.value = "";
+	}
+});
+
+watch(creditSaleRefundableExcess, (maxAmount) => {
+	if (creditSaleCashRefundEnabled.value && Number(creditSaleCashRefundAmount.value || 0) > maxAmount) {
+		creditSaleCashRefundAmount.value = maxAmount;
+	}
+});
+
 function resetForm() {
 	// Reset invoice and return document state
 	originalInvoice.value = null;
 	preparedReturnDoc.value = null;
 	returnItems.value = [];
+	returnBarcode.value = "";
+	returnBarcodeBusy.value = false;
+	returnBarcodeStatus.message = "";
+	returnBarcodeStatus.type = "";
 	returnReason.value = "";
 	refundPayments.value = [];
+	addToCustomerCredit.value = false;
+	paymentHubPlan.value = null;
+	paymentHubPlanLoading.value = false;
+	paymentHubPlanError.value = "";
+	returnDraftDoc.value = null;
+	returnRefundStatus.value = null;
+	refundOverrideReason.value = "";
+	refundAuthDialog.visible = false;
+	refundAuthDialog.loading = false;
+	refundAuthDialog.approver = "";
+	refundAuthDialog.password = "";
+	refundAuthDialog.reason = "";
+	refundAuthDialog.error = "";
+	refundAuthDialog.returnInvoice = null;
+	refundAuthDialog.refundLines = [];
+	refundAuthResolve = null;
 
 	// Reset list and search state
 	invoiceList.value = [];
@@ -2057,6 +2956,10 @@ function resetForm() {
 	isPartiallyPaid.value = false;
 	originalPaidAmount.value = 0;
 	originalOutstandingAmount.value = 0;
+	creditSaleCashRefundEnabled.value = false;
+	creditSaleCashRefundAmount.value = 0;
+	creditSaleCashMode.value = creditSaleCashModes.value[0] || "";
+	creditSaleManagerPin.value = "";
 
 	// Reset customer credit option
 	addToCustomerCredit.value = false;

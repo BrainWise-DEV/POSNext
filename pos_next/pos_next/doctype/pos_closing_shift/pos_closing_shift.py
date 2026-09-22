@@ -10,7 +10,7 @@ from erpnext.accounts.doctype.pos_invoice_merge_log.pos_invoice_merge_log import
 )
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import flt
+from frappe.utils import cint, flt
 
 
 def get_base_value(doc, fieldname, base_fieldname=None, conversion_rate=None):
@@ -434,74 +434,114 @@ def _aggregate_tax(taxes, account_head, rate, amount):
 	)
 
 
+def _get_customer_credit_redemption_map(invoice_names):
+	"""Return Customer Credit redeemed per Sales Invoice from submitted JEs.
+
+	This deliberately derives the amount from accounting entries instead of
+	``paid_amount``. Customer Credit is a receivable allocation, not physical
+	money, so a fully credit-paid invoice correctly has paid_amount = 0.
+	"""
+	names = [name for name in (invoice_names or []) if name]
+	if not names:
+		return {}
+
+	placeholders = ", ".join(["%s"] * len(names))
+	rows = frappe.db.sql(
+		f"""
+		SELECT
+			jea.reference_name AS invoice_name,
+			SUM(jea.credit_in_account_currency) AS redeemed_amount
+		FROM `tabJournal Entry Account` jea
+		INNER JOIN `tabJournal Entry` je ON je.name = jea.parent
+		WHERE je.docstatus = 1
+		  AND jea.reference_type = 'Sales Invoice'
+		  AND jea.reference_name IN ({placeholders})
+		  AND jea.credit_in_account_currency > 0
+		  AND je.user_remark LIKE %s
+		GROUP BY jea.reference_name
+		""",
+		tuple(names) + ("POS Next credit redemption for invoice %",),
+		as_dict=True,
+	)
+	return {row.invoice_name: flt(row.redeemed_amount) for row in rows}
+
+
+
 def _process_invoice(invoice, invoice_field, company_currency, cash_mode, payments, taxes, summary):
-	"""Process a single invoice and update aggregates."""
+	"""Process one invoice using accrual totals + real settlement movement.
+
+	Sales/return metrics always use the invoice's economic value. Physical
+	collection/reconciliation uses only tender rows (paid_amount net of change).
+	Customer Credit is reported separately and never masquerades as cash or On
+	Account.
+	"""
 	conversion_rate = invoice.get("conversion_rate")
-	is_return = invoice.get("is_return", 0)
+	is_return = cint(invoice.get("is_return", 0))
 
 	base_grand_total = get_base_value(invoice, "grand_total", "base_grand_total", conversion_rate)
 	base_net_total = get_base_value(invoice, "net_total", "base_net_total", conversion_rate)
-
-	# Credit returns with no payment rows were added to customer credit —
-	# no money entered or left the drawer.  Skip entirely.
-	if is_return and not invoice.payments:
-		return frappe._dict(
-			{
-				invoice_field: invoice.name,
-				"posting_date": invoice.posting_date,
-				"grand_total": 0,
-				"transaction_currency": invoice.get("currency") or company_currency,
-				"transaction_amount": flt(invoice.get("grand_total")),
-				"customer": invoice.customer,
-				"is_return": is_return,
-				"return_against": invoice.get("return_against"),
-				"collected_amount": 0,
-				"outstanding_amount": 0,
-			}
-		)
-
-	# Money actually collected on this sale, in company currency.  A pure
-	# Pay-on-Account credit sale has paid_amount == 0; a partial sale carries
-	# only its cash/card down-payment.  Returns keep the full (signed) amount —
-	# the return branch already reflects real refunds via payment rows.
-	# paid_amount is the raw tendered total, so change given back to the
-	# customer (e.g. a $20 bill on a $15.50 sale) must be netted out — it
-	# never stayed in the drawer.
 	base_change = get_base_value(invoice, "change_amount", "base_change_amount", conversion_rate)
 	base_paid = get_base_value(invoice, "paid_amount", "base_paid_amount", conversion_rate) - base_change
+	base_outstanding = get_base_value(
+		invoice, "outstanding_amount", "base_outstanding_amount", conversion_rate
+	)
 
-	# Cash-basis figures are tracked alongside the accrual ones rather than
-	# replacing them: grand_total / net_total / taxes stay invoiced so they
-	# keep tying to the GL and to every existing report, while
-	# collected_amount / outstanding_total answer "what is in the drawer".
-	collected = base_grand_total if is_return else base_paid
-	outstanding = 0 if is_return else (base_grand_total - base_paid)
+	# Real money movement only. A return refunded in cash is negative; a return
+	# converted to Customer Credit has zero physical movement.
+	collected = base_paid
+	# On Account is a positive receivable on a SALE. Return documents must never
+	# be classified as customer debt in the close-shift UI.
+	outstanding = 0 if is_return else max(0, base_outstanding)
 
-	# Build transaction record
+	credit_redeemed = max(
+		flt(invoice.get("posa_redeemed_customer_credit") or 0),
+		flt(invoice.get("_pos_next_customer_credit_redeemed") or 0),
+	)
+	credit_issued = 0
+	if is_return:
+		physical_refund = abs(min(base_paid, 0))
+		credit_issued = max(0, abs(base_grand_total) - physical_refund)
+
+	if is_return and credit_issued > 0:
+		settlement_type = "return_customer_credit"
+	elif is_return:
+		settlement_type = "return_refund"
+	elif credit_redeemed > 0 and abs(collected) > 0.000001:
+		settlement_type = "sale_credit_mixed"
+	elif credit_redeemed > 0:
+		settlement_type = "sale_customer_credit"
+	elif outstanding > 0:
+		settlement_type = "sale_on_account"
+	else:
+		settlement_type = "sale"
+
 	transaction = frappe._dict(
 		{
 			invoice_field: invoice.name,
 			"posting_date": invoice.posting_date,
+			"posting_time": invoice.get("posting_time"),
 			"grand_total": base_grand_total,
 			"transaction_currency": invoice.get("currency") or company_currency,
 			"transaction_amount": flt(invoice.get("grand_total")),
 			"customer": invoice.customer,
 			"is_return": is_return,
 			"return_against": invoice.get("return_against") if is_return else None,
-			# Display-only (stripped before the child table set): what was
-			# actually taken on this invoice and what is still owed, used by
-			# the closing dialog badge.
 			"collected_amount": collected,
 			"outstanding_amount": outstanding,
+			"customer_credit_issued": credit_issued,
+			"customer_credit_redeemed": credit_redeemed,
+			"settlement_type": settlement_type,
 		}
 	)
 
-	# Update summary totals
+	# Accrual/economic totals. Customer-credit returns MUST still reduce Net Sales.
 	summary["grand_total"] += base_grand_total
 	summary["net_total"] += base_net_total
 	summary["total_quantity"] += flt(invoice.total_qty)
 	summary["collected_total"] += collected
 	summary["outstanding_total"] += outstanding
+	summary["customer_credit_issued"] += credit_issued
+	summary["customer_credit_redeemed"] += credit_redeemed
 
 	if is_return:
 		summary["returns_total"] += abs(base_grand_total)
@@ -510,24 +550,15 @@ def _process_invoice(invoice, invoice_field, company_currency, cash_mode, paymen
 		summary["sales_total"] += base_grand_total
 		summary["sales_count"] += 1
 
-	# Process taxes — full invoiced amount, never scaled.  Tax is posted to the
-	# GL in full when the invoice is submitted regardless of what the customer
-	# paid, so scaling it here would make this table impossible to reconcile
-	# against the VAT accounts.
-	for t in invoice.taxes:
+	# Tax remains accrual-based and includes returns, including credit returns.
+	for t in invoice.get("taxes", []):
 		tax_amount = get_base_value(t, "tax_amount", "base_tax_amount", conversion_rate)
 		_aggregate_tax(taxes, t.account_head, t.rate, tax_amount)
 
-	# Process payments
-	#
-	# Cross-branch return safety net (Layer 3):
-	# Return invoices may carry foreign payment modes from the original
-	# invoice's POS profile.  Remap unknown modes to the cash mode so the
-	# reconciliation table stays clean.
+	# Payment reconciliation contains only real tender movements. Customer Credit
+	# has no Sales Invoice Payment row and is intentionally excluded.
 	known_modes = {pay.mode_of_payment for pay in payments}
-
-	# Aggregate each payment row's amount into the reconciliation buckets.
-	for p in invoice.payments:
+	for p in invoice.get("payments", []):
 		amount = get_base_value(p, "amount", "base_amount", conversion_rate)
 		mode = p.mode_of_payment
 
@@ -536,11 +567,6 @@ def _process_invoice(invoice, invoice_field, company_currency, cash_mode, paymen
 
 		_aggregate_payment(payments, mode, amount)
 
-	# Subtract change_amount once from the cash mode.  change_amount is an
-	# invoice-level field — the customer overpaid and received change back,
-	# so the drawer's net gain is (sum of cash rows - change).  Handling it
-	# outside the loop avoids double-subtraction when multiple payment rows
-	# share the same cash mode. (base_change computed above, reused here.)
 	if base_change:
 		_aggregate_payment(payments, cash_mode, -base_change)
 
@@ -587,6 +613,8 @@ def make_closing_shift_from_opening(opening_shift):
 		"sales_count": 0,
 		"collected_total": 0,
 		"outstanding_total": 0,
+		"customer_credit_issued": 0,
+		"customer_credit_redeemed": 0,
 	}
 
 	# Add opening balances to payments
@@ -602,9 +630,13 @@ def make_closing_shift_from_opening(opening_shift):
 			)
 		)
 
-	# Process invoices
+	# Process invoices. Derive Customer Credit redemption from submitted accounting
+	# entries so shifts created before the new tracking-field fix also classify
+	# correctly.
 	invoices = get_pos_invoices(opening_shift.get("name"), doctype)
+	credit_redemption_map = _get_customer_credit_redemption_map([invoice.name for invoice in invoices])
 	for invoice in invoices:
+		invoice["_pos_next_customer_credit_redeemed"] = credit_redemption_map.get(invoice.name, 0)
 		txn = _process_invoice(invoice, invoice_field, company_currency, cash_mode, payments, taxes, summary)
 		pos_transactions.append(txn)
 
@@ -639,7 +671,17 @@ def make_closing_shift_from_opening(opening_shift):
 			{
 				k: v
 				for k, v in txn.items()
-				if k not in ("is_return", "return_against", "collected_amount", "outstanding_amount")
+				if k
+				not in (
+					"is_return",
+					"return_against",
+					"posting_time",
+					"collected_amount",
+					"outstanding_amount",
+					"customer_credit_issued",
+					"customer_credit_redeemed",
+					"settlement_type",
+				)
 			}
 			for txn in pos_transactions
 		],
@@ -656,7 +698,9 @@ def make_closing_shift_from_opening(opening_shift):
 			"returns_count": summary["returns_count"],
 			"sales_total": summary["sales_total"],
 			"sales_count": summary["sales_count"],
-			"pos_transactions": pos_transactions,  # Include return info for display
+			"customer_credit_issued": summary["customer_credit_issued"],
+			"customer_credit_redeemed": summary["customer_credit_redeemed"],
+			"pos_transactions": pos_transactions,  # Include return/settlement info for display
 		}
 	)
 

@@ -1758,16 +1758,20 @@ const customerResults = computed(() => {
 		return [];
 	}
 
-	// Instant in-memory filter
+	// Instant in-memory filter. Normalize phone formatting so a cashier can type
+	// local digits, country-code digits, or the formatted value interchangeably.
+	const searchPhone = searchValue.replace(/\D/g, "");
 	return allCustomers.value
 		.filter((cust) => {
 			const name = (cust.customer_name || "").toLowerCase();
 			const mobile = (cust.mobile_no || "").toLowerCase();
+			const mobileDigits = mobile.replace(/\D/g, "");
 			const id = (cust.name || "").toLowerCase();
 
 			return (
 				name.includes(searchValue) ||
 				mobile.includes(searchValue) ||
+				(searchPhone && mobileDigits.includes(searchPhone)) ||
 				id.includes(searchValue)
 			);
 		})

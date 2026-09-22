@@ -152,6 +152,7 @@ doc_events = {
 		"on_trash": "pos_next.realtime_events.emit_customer_event",
 	},
 	"Sales Invoice": {
+		"before_validate": "pos_next.api.credit_sales.prepare_payment_hub_credit_invoice",
 		"validate": [
 			"pos_next.api.sales_invoice_hooks.validate",
 			"pos_next.api.wallet.validate_wallet_payment",
@@ -162,6 +163,7 @@ doc_events = {
 			"pos_next.realtime_events.emit_stock_update_event",
 			"pos_next.api.wallet.process_loyalty_to_wallet",
 			"pos_next.api.sales_invoice_hooks.record_one_time_offer_usage",
+			"pos_next.api.credit_sales.apply_pending_payment_hub_credit",
 		],
 		"on_cancel": [
 			"pos_next.realtime_events.emit_stock_update_event",

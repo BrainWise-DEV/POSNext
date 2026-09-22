@@ -3,6 +3,16 @@
 
 frappe.ui.form.on("POS Settings", {
 	refresh(frm) {
+		// Return receipts must use a Sales Invoice print format.
+		frm.set_query("return_invoice_print_format", function () {
+			return {
+				filters: {
+					doc_type: "Sales Invoice",
+					disabled: 0,
+				},
+			};
+		});
+
 		// Set query for loyalty program filtered by POS Profile company
 		frm.set_query("default_loyalty_program", function () {
 			if (!frm.doc.__company) {
@@ -28,6 +38,12 @@ frappe.ui.form.on("POS Settings", {
 
 		if (frm.doc.pos_profile) {
 			fetch_pos_profile_company(frm);
+		}
+	},
+
+	enable_loyalty_program(frm) {
+		if (!frm.doc.enable_loyalty_program) {
+			frm.set_value("default_loyalty_program", "");
 		}
 	},
 });

@@ -18,8 +18,13 @@ def _invoice(
 	payments=None,
 	change_amount=0,
 	taxes=None,
+	outstanding_amount=None,
+	credit_redeemed=0,
 ):
 	"""Build a minimal Sales Invoice as_dict() shape for _process_invoice()."""
+	if outstanding_amount is None:
+		outstanding_amount = 0 if is_return else max(0, grand_total - paid_amount + change_amount)
+
 	return frappe._dict(
 		{
 			"name": name,
@@ -33,6 +38,9 @@ def _invoice(
 			"base_net_total": net_total if net_total is not None else grand_total,
 			"paid_amount": paid_amount,
 			"base_paid_amount": paid_amount,
+			"outstanding_amount": outstanding_amount,
+			"base_outstanding_amount": outstanding_amount,
+			"posa_redeemed_customer_credit": credit_redeemed,
 			"total_qty": qty,
 			"is_return": is_return,
 			"change_amount": change_amount,
@@ -54,6 +62,8 @@ def _empty_summary():
 		"sales_count": 0,
 		"collected_total": 0,
 		"outstanding_total": 0,
+		"customer_credit_issued": 0,
+		"customer_credit_redeemed": 0,
 	}
 
 
@@ -142,8 +152,8 @@ class TestPOSClosingShift(unittest.TestCase):
 		self.assertEqual(summary["collected_total"], 50)
 		self.assertEqual(summary["outstanding_total"], 50)
 
-	def test_credit_return_is_unaffected(self):
-		"""Credit returns with no payment rows still contribute nothing and skip early."""
+	def test_credit_return_reduces_sales_without_touching_cash(self):
+		"""Customer-credit returns are real returns but have zero cash movement."""
 		summary = _empty_summary()
 		payments, taxes = [], []
 
@@ -158,13 +168,34 @@ class TestPOSClosingShift(unittest.TestCase):
 
 		txn = _process_invoice(credit_return, "sales_invoice", "USD", "Cash", payments, taxes, summary)
 
-		self.assertEqual(txn["grand_total"], 0)
+		self.assertEqual(txn["grand_total"], -100)
 		self.assertEqual(txn["collected_amount"], 0)
 		self.assertEqual(txn["outstanding_amount"], 0)
-		self.assertEqual(summary["grand_total"], 0)
+		self.assertEqual(txn["customer_credit_issued"], 100)
+		self.assertEqual(summary["grand_total"], -100)
 		self.assertEqual(summary["collected_total"], 0)
 		self.assertEqual(summary["outstanding_total"], 0)
-		self.assertEqual(summary["returns_total"], 0)
+		self.assertEqual(summary["returns_total"], 100)
+		self.assertEqual(summary["customer_credit_issued"], 100)
+
+	def test_linked_credit_return_positive_outstanding_is_not_on_account(self):
+		"""Legacy/bad linked-return outstanding must never be shown as customer debt."""
+		summary = _empty_summary()
+		payments, taxes = [], []
+		linked_return = _invoice(
+			"INV-LINKED-CREDIT-RET",
+			grand_total=-2.9,
+			paid_amount=0,
+			outstanding_amount=2.9,
+			is_return=1,
+			payments=[],
+		)
+		txn = _process_invoice(linked_return, "sales_invoice", "USD", "Cash", payments, taxes, summary)
+		self.assertEqual(txn["grand_total"], -2.9)
+		self.assertEqual(txn["outstanding_amount"], 0)
+		self.assertEqual(txn["customer_credit_issued"], 2.9)
+		self.assertEqual(summary["outstanding_total"], 0)
+		self.assertEqual(summary["returns_total"], 2.9)
 
 	def test_refund_return_reduces_collected(self):
 		"""A refunded return takes money out of the drawer and out of collected."""
@@ -247,7 +278,7 @@ class TestPOSClosingShift(unittest.TestCase):
 		refund = _invoice(
 			"INV-TAX-RET",
 			grand_total=-110,
-			paid_amount=0,
+			paid_amount=-110,
 			net_total=-100,
 			is_return=1,
 			payments=[frappe._dict({"mode_of_payment": "Cash", "amount": -110, "base_amount": -110})],
@@ -262,6 +293,25 @@ class TestPOSClosingShift(unittest.TestCase):
 
 		vat = next(t for t in taxes if t.account_head == "VAT - T")
 		self.assertEqual(vat.amount, -10)
+
+	def test_customer_credit_sale_uses_real_outstanding_not_paid_amount(self):
+		"""A fully credit-redeemed sale is Paid even though paid_amount stays zero."""
+		summary = _empty_summary()
+		payments, taxes = [], []
+		sale = _invoice(
+			"INV-CREDIT-USED",
+			grand_total=5.8,
+			paid_amount=0,
+			outstanding_amount=0,
+			credit_redeemed=5.8,
+			payments=[],
+		)
+		txn = _process_invoice(sale, "sales_invoice", "USD", "Cash", payments, taxes, summary)
+		self.assertEqual(txn["outstanding_amount"], 0)
+		self.assertEqual(txn["customer_credit_redeemed"], 5.8)
+		self.assertEqual(txn["settlement_type"], "sale_customer_credit")
+		self.assertEqual(summary["customer_credit_redeemed"], 5.8)
+		self.assertEqual(summary["collected_total"], 0)
 
 	def test_written_off_invoice_keeps_full_net_and_tax(self):
 		"""A write-off leaves a residual balance but must not distort net_total or tax.

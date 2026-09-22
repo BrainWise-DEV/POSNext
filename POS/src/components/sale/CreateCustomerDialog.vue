@@ -597,9 +597,93 @@ const posProfileResource = createResource({
 // Dialog Lifecycle
 // =============================================================================
 
+/**
+ * Smart-prefill the create customer form from the text entered in POS search.
+ *
+ * Examples:
+ * - "Ahmed" -> customer name
+ * - "65156265" -> mobile number (keep POS Profile/default country code)
+ * - "Ahmed 65156265" -> name + mobile
+ * - "+971501234567 Ahmed" / "00971501234567 Ahmed" -> country code + mobile + name
+ */
+const applyInitialSearchPrefill = (rawValue) => {
+	if (isEditMode.value) return;
+
+	const query = String(rawValue || "").trim();
+	if (!query) return;
+
+	let working = query;
+	let detectedPhone = "";
+	let detectedCountryISD = "";
+
+	// Match an explicitly international number anywhere in the search text.
+	// Keep separators so values like +965 6515 6265 and 00971-50-123-4567 work.
+	const internationalMatches = [
+		...working.matchAll(/(?:\+|00)\s*\d(?:[\d\s().-]*\d)?/g),
+	];
+
+	for (const match of internationalMatches) {
+		const token = match[0];
+		let digits = token.replace(/\D/g, "");
+		if (token.trim().startsWith("00")) digits = digits.slice(2);
+
+		// Prefer the longest known ISD prefix so overlapping codes are deterministic.
+		const country = [...countriesStore.countries]
+			.map((entry) => ({
+				...entry,
+				isdDigits: String(entry.isd || "").replace(/\D/g, ""),
+			}))
+			.filter((entry) => entry.isdDigits && digits.startsWith(entry.isdDigits))
+			.sort((a, b) => b.isdDigits.length - a.isdDigits.length)[0];
+
+		if (!country) continue;
+		const localDigits = digits.slice(country.isdDigits.length);
+		if (localDigits.length < 6 || localDigits.length > 15) continue;
+
+		detectedCountryISD = country.isd;
+		detectedPhone = localDigits;
+		working = `${working.slice(0, match.index)} ${working.slice(
+			(match.index || 0) + token.length
+		)}`;
+		break;
+	}
+
+	// If there was no explicit international prefix, detect a local phone-like value.
+	// Require at least 7 digits so short numeric text is not accidentally treated as a phone.
+	if (!detectedPhone) {
+		const localMatches = [...working.matchAll(/\d(?:[\d\s().-]*\d)?/g)];
+		for (const match of localMatches) {
+			const token = match[0];
+			const digits = token.replace(/\D/g, "");
+			if (digits.length < 7 || digits.length > 15) continue;
+
+			detectedPhone = digits;
+			working = `${working.slice(0, match.index)} ${working.slice(
+				(match.index || 0) + token.length
+			)}`;
+			break;
+		}
+	}
+
+	const detectedName = working
+		.replace(/^[\s,;|/\-]+|[\s,;|/\-]+$/g, "")
+		.replace(/\s{2,}/g, " ")
+		.trim();
+
+	customerData.value.customer_name = detectedName;
+
+	if (detectedCountryISD) {
+		selectedCountryCode.value = detectedCountryISD;
+	}
+	if (detectedPhone) {
+		phoneNumber.value = detectedPhone;
+		updateMobileNumber();
+	}
+};
+
 const loadDialogData = async () => {
-	// Lazy load countries (non-blocking)
-	countriesStore.loadCountries();
+	// Country data is required before parsing explicit +<code>/00<code> prefixes.
+	await countriesStore.loadCountries();
 
 	await sellingSettingsResource.reload();
 
@@ -627,6 +711,12 @@ const loadDialogData = async () => {
 		await posProfileResource.reload();
 	} else {
 		selectedCountryCode.value = "+20";
+	}
+
+	// Apply POS search text only after the default country code is known.
+	// An explicit +<code>/00<code> in the search overrides that default.
+	if (!isEditMode.value && props.initialName) {
+		applyInitialSearchPrefill(props.initialName);
 	}
 };
 
@@ -680,7 +770,11 @@ const resetForm = () => {
 
 watch(
 	() => props.initialName,
-	(name) => name && (customerData.value.customer_name = name)
+	(value) => {
+		if (show.value && !isEditMode.value && value) {
+			applyInitialSearchPrefill(value);
+		}
+	}
 );
 
 // Pre-fill form when customer prop changes (edit mode)

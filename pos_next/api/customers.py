@@ -5,6 +5,7 @@ Handles customer search, creation, and management for POS operations
 
 import frappe
 from frappe import _
+from frappe.utils import cint
 
 
 @frappe.whitelist()
@@ -233,16 +234,23 @@ def get_default_loyalty_program_from_settings(company=None, pos_profile=None):
 		pos_settings = frappe.db.get_value(
 			"POS Settings",
 			{"enabled": 1, "pos_profile": pos_profile},
-			"default_loyalty_program",
-		)
-		return pos_settings or None
+			["enable_loyalty_program", "default_loyalty_program"],
+			as_dict=True,
+		) or {}
+		if not cint(pos_settings.get("enable_loyalty_program")):
+			return None
+		return pos_settings.get("default_loyalty_program") or None
 
 	if not company:
 		return None
 
 	pos_settings = frappe.get_all(
 		"POS Settings",
-		filters={"enabled": 1, "default_loyalty_program": ["is", "set"]},
+		filters={
+			"enabled": 1,
+			"enable_loyalty_program": 1,
+			"default_loyalty_program": ["is", "set"],
+		},
 		fields=["pos_profile", "default_loyalty_program"],
 		order_by="modified desc",
 	)

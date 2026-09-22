@@ -853,17 +853,29 @@ export function useInvoice() {
 		}
 	}
 
+	function isCashTender(payment) {
+		const type = String(payment?.type || "").trim().toLowerCase();
+		const mode = String(payment?.mode_of_payment || "").trim().toLowerCase();
+		return (
+			type === "cash" ||
+			mode === "cash" ||
+			mode.includes("cash") ||
+			mode.includes("نقد")
+		);
+	}
+
 	function serializeInvoicePayments(rawPayments) {
 		return rawPayments
 			.filter((payment) => !payment?.is_customer_credit)
 			.map((payment) => ({
 				mode_of_payment: payment.mode_of_payment,
-				amount: payment.amount,
+				amount: roundCurrency(Number(payment.amount || 0)),
 				type: payment.type,
-			}));
+			}))
+			.filter((payment) => payment.amount > 0);
 	}
 
-	function buildCustomerCreditPayload(rawPayments) {
+	function buildCustomerCreditPayload(rawPayments, settlementGrandTotal = grandTotal.value) {
 		const creditPayments = rawPayments.filter((payment) => payment?.is_customer_credit);
 
 		if (!creditPayments.length) {
@@ -871,6 +883,7 @@ export function useInvoice() {
 				invoicePayments: serializeInvoicePayments(rawPayments),
 				redeemedCustomerCredit: 0,
 				customerCreditDict: [],
+				customerCreditChangeAmount: 0,
 			};
 		}
 
@@ -914,10 +927,52 @@ export function useInvoice() {
 			throw new Error("Unable to allocate the selected customer credit");
 		}
 
+		// Customer Credit is redeemed only AFTER the Sales Invoice is submitted.
+		// Therefore the invoice must first be submitted with the NET real-money amount
+		// so ERPNext leaves exactly the Customer Credit amount outstanding. After the
+		// credit JE succeeds, the backend restores the GROSS cashier tender + real change
+		// onto the Sales Invoice for audit/printing without changing the posted accounting.
+		//
+		// Example: invoice 8.700, exchange credit 2.900, Cash tender 15.000:
+		//   customer-facing change = 9.200
+		//   accounting Cash applied before credit JE = 5.800
+		//   outstanding before credit JE = 2.900
+		//   after credit JE, invoice audit is restored to Cash 15.000 / Change 9.200.
+		const allPaid = roundCurrency(
+			rawPayments.reduce((sum, payment) => sum + Number(payment?.amount || 0), 0)
+		);
+		const customerCreditChangeAmount = Math.max(
+			0,
+			roundCurrency(allPaid - roundCurrency(settlementGrandTotal || 0))
+		);
+
+		const grossInvoicePayments = serializeInvoicePayments(rawPayments);
+		const normalizedTenders = rawPayments
+			.filter((payment) => !payment?.is_customer_credit)
+			.map((payment) => ({ ...payment, amount: roundCurrency(Number(payment.amount || 0)) }));
+
+		let changeToNetFromCash = customerCreditChangeAmount;
+		if (changeToNetFromCash > 0) {
+			for (let index = normalizedTenders.length - 1; index >= 0; index -= 1) {
+				const payment = normalizedTenders[index];
+				if (!isCashTender(payment) || changeToNetFromCash <= 0) continue;
+
+				const reduction = Math.min(payment.amount, changeToNetFromCash);
+				payment.amount = roundCurrency(payment.amount - reduction);
+				changeToNetFromCash = roundCurrency(changeToNetFromCash - reduction);
+			}
+		}
+
+		if (changeToNetFromCash > 0.01) {
+			throw new Error("Customer Credit overpayment must be returned from a Cash tender");
+		}
+
 		return {
-			invoicePayments: serializeInvoicePayments(rawPayments),
+			invoicePayments: serializeInvoicePayments(normalizedTenders),
+			grossInvoicePayments,
 			redeemedCustomerCredit,
 			customerCreditDict,
+			customerCreditChangeAmount,
 		};
 	}
 
@@ -929,7 +984,7 @@ export function useInvoice() {
 		// Use toRaw() to ensure we get current, non-reactive values (prevents stale cached quantities)
 		const rawItems = toRaw(invoiceItems.value);
 		const rawPayments = toRaw(payments.value);
-		const { invoicePayments } = buildCustomerCreditPayload(rawPayments);
+		const { invoicePayments } = buildCustomerCreditPayload(rawPayments, grandTotal.value);
 
 		const invoiceData = {
 			doctype: targetDoctype,
@@ -990,8 +1045,13 @@ export function useInvoice() {
 				const rawItems = toRaw(invoiceItems.value);
 				const rawPayments = toRaw(payments.value);
 				const rawSalesTeam = toRaw(salesTeam.value);
-				const { invoicePayments, redeemedCustomerCredit, customerCreditDict } =
-					buildCustomerCreditPayload(rawPayments);
+				const {
+					invoicePayments,
+					grossInvoicePayments,
+					redeemedCustomerCredit,
+					customerCreditDict,
+					customerCreditChangeAmount,
+				} = buildCustomerCreditPayload(rawPayments, grandTotal.value);
 
 				const invoiceData = {
 					doctype: targetDoctype,
@@ -1037,13 +1097,27 @@ export function useInvoice() {
 				}
 
 				const submitData = {
-					change_amount: remainingAmount.value < 0 ? Math.abs(remainingAmount.value) : 0,
+					// With Customer Credit, submit the invoice using the NET real-money rows
+					// and zero ERPNext change so the credit amount remains outstanding. The
+					// backend restores gross tender/change only after credit redemption succeeds.
+					change_amount:
+						redeemedCustomerCredit > 0
+							? 0
+							: remainingAmount.value < 0
+								? Math.abs(remainingAmount.value)
+								: 0,
 					write_off_amount: writeOffAmount || 0,
 				};
 
 				if (redeemedCustomerCredit > 0 && customerCreditDict.length > 0) {
 					submitData.redeemed_customer_credit = redeemedCustomerCredit;
 					submitData.customer_credit_dict = customerCreditDict;
+					submitData.customer_credit_change_amount = customerCreditChangeAmount;
+					submitData.customer_credit_gross_payments = grossInvoicePayments;
+					// Customer Credit checkout must be atomic. The backend verifies that
+					// every requested credit source is allocated and that no unintended
+					// outstanding amount remains after the Journal Entries are posted.
+					submitData.require_full_customer_credit_settlement = 1;
 				}
 				if (isCreditSale && invoicePayments.length === 0) {
 					submitData.is_credit_sale = 1;

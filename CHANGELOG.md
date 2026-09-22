@@ -1,3 +1,47 @@
+## v1.4.10 - Payment Hub mixed Customer Credit hardening
+
+- Payment Hub v0.6.14 now receives the full Sales Invoice total while Customer Credit is represented as a captured `POSNext Customer Credit` Manual / Non-Cash PPS allocation; provider/terminal rows still receive only the real-money remainder.
+- POSNext strips the synthetic Customer Credit tender before Sales Invoice validation/submission and redeems the selected credit source through the existing receivable Journal Entry / advance allocation flow.
+- Pending Customer Credit plans are now verified against the exact Payment Hub session allocation before redemption, preventing stale plans from breaking later normal Electronic/Terminal Complete & Print flows.
+- Fully paid invoices automatically cancel stale pending credit plans instead of throwing `Customer Credit exceeds invoice outstanding`.
+- Deterministic pre-provider validation failures clean up their unused pending credit plan while ambiguous provider/network failures remain recoverable.
+- Return Without Invoice + Customer Credit now fully unmounts before printing, fixing the completed dialog/overlay remaining open.
+- ERPNext Payment Hub v0.6.14 source remains unchanged.
+
+## v1.4.9 - Eligible Customer Credit Balance consistency
+
+- Payment dialog Credit Balance now shows only spendable credit returned by the same eligible-credit resolver used for redemption.
+- Linked return documents with negative ERPNext outstanding are no longer displayed as phantom reusable Customer Credit after their original-invoice credit has been consumed.
+- `posa_remaining_customer_credit_balance` now stores eligible/spendable credit rather than raw net negative outstanding.
+- Raw accounting totals remain available from `get_customer_balance`, with a new `available_credit` field for POS use.
+
+
+## v1.4.8 - 2026-09-21
+
+- Prevent linked Sales Returns (`return_against` set) from being exposed or redeemed as independent Customer Credit sources.
+- Add backend redemption guard so a linked return can never be debited into a positive outstanding / Unpaid credit note.
+- Support Customer Credit together with Payment Hub Electronic Payment and Physical Terminal without modifying Payment Hub itself.
+- Payment Hub receives only the real-money balance remaining after selected Customer Credit.
+- Persist a POS Payment Hub Credit Plan keyed by `posa_client_request_id` so asynchronous Payment Hub completion can redeem Customer Credit atomically when the Sales Invoice submits.
+- Keep normal Customer Credit + Cash / manual Credit Card behavior unchanged.
+
+## v1.4.7 - 2026-09-20
+
+- Smart-prefill Create New Customer from the POS customer search text.
+- Text-only searches prefill Customer Name; phone-only searches prefill Mobile Number.
+- Mixed name + phone searches split into the correct fields regardless of order.
+- Explicit international prefixes such as `+965`, `00965`, `+971`, and `00971` switch the country-code selector automatically and store only the local number in the Mobile field.
+- When no explicit country prefix is typed, the existing POS Profile/default country code is preserved.
+- The same smart prefill is available when creating a customer from the reusable Customer Search dialog used by return flows.
+
+## v1.4.3 - 2026-09-20
+
+- Preserve gross Cash tender and real Change Amount on Customer Credit / Exchange replacement Sales Invoices while still redeeming the exact credit source atomically.
+- Add POS Settings field `Return Invoice Print Format` (Sales Invoice Print Format).
+- Auto-print every successfully submitted Return With Invoice and Return Without Invoice using the selected return format, with normal POS Profile print format as fallback.
+- Auto-print the return side of Exchange before/while replacement checkout continues.
+- Silent-print mode uses the same configured Return Invoice Print Format and falls back to browser print if needed.
+
 # Changelog
 
 All notable changes to this project will be documented in this file.

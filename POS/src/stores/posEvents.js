@@ -270,6 +270,8 @@ export const usePOSEventsStore = defineStore("posEvents", () => {
 		const salesFields = [
 			"allow_credit_sale",
 			"allow_return",
+			"allow_return_without_invoice",
+			"allow_exchange",
 			"allow_write_off_change",
 			"allow_partial_payment",
 			"silent_print",

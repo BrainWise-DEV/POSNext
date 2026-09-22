@@ -19,6 +19,10 @@
 				:is-offline="offlineStore.isOffline"
 				:is-syncing="offlineStore.isSyncing"
 				:pending-invoices-count="offlineStore.pendingInvoicesCount"
+				:payment-hub-enabled="Boolean(paymentHubConfig)"
+				:payment-hub-pending-count="paymentHubQueueCounts.waiting"
+				:payment-hub-paid-count="paymentHubQueueCounts.paid"
+				:payment-hub-failed-count="paymentHubQueueCounts.failed"
 				:is-any-dialog-open="uiStore.isAnyDialogOpen"
 				:cache-syncing="itemStore.cacheSyncing"
 				:cache-stats="itemStore.cacheStats"
@@ -30,6 +34,7 @@
 				@printer-click="openHistoryDialog"
 				@refresh-click="handleRefresh"
 				@clear-cache="handleClearCache"
+				@payment-hub-click="showPaymentHubPendingDialog = true"
 				@logout="uiStore.showLogoutDialog = true"
 			>
 				<template #menu-items>
@@ -147,7 +152,7 @@
 						</span>
 					</button>
 					<button
-						v-if="canAccessShiftActions"
+						v-if="canAccessShiftActions && posSettingsStore.allowReturn"
 						@click="openReturnDialog"
 						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-red-50 flex items-center gap-3 transition-colors"
 					>
@@ -164,7 +169,7 @@
 								d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"
 							/>
 						</svg>
-						<span>{{ __("Return Invoice") }}</span>
+						<span>{{ __("Return / Exchange") }}</span>
 					</button>
 					<button
 						v-if="canAccessShiftActions && canSwitchToDesk"
@@ -415,7 +420,7 @@
 								@view-shift="uiStore.showOpenShiftDialog = true"
 								@show-drafts="uiStore.showDraftDialog = true"
 								@show-history="uiStore.showHistoryDialog = true"
-								@show-return="uiStore.showReturnDialog = true"
+								@show-return="openReturnDialog"
 								@close-shift="handleCloseShift()"
 								@show-shift-history="navigateToShiftHistory"
 							/>
@@ -511,7 +516,10 @@
 				:is-offline="offlineStore.isOffline"
 				:allow-partial-payment="posSettingsStore.allowPartialPayment"
 				:allow-credit-sale="posSettingsStore.allowCreditSale"
-				:allow-customer-credit-payment="posSettingsStore.allowCustomerCreditPayment"
+				:allow-customer-credit-payment="posSettingsStore.allowCustomerCreditPayment || autoApplyExchangeCredit"
+				:auto-apply-customer-credit="autoApplyExchangeCredit"
+				:auto-apply-customer-credit-origin="exchangeCreditOrigin"
+				:auto-apply-customer-credit-source="exchangeCreditSource"
 				:allow-write-off="posSettingsStore.allowWriteOffChange"
 				:write-off-limit="shiftStore.writeOffLimit"
 				:customer="cartStore.customer"
@@ -522,11 +530,21 @@
 				:discount-amount="cartStore.totalDiscount"
 				:target-doctype="cartStore.targetDoctype"
 				:is-submitting="cartStore.isSubmitting"
+				:payment-hub-config="paymentHubConfig"
 				:applied-offer-count="cartStore.appliedOffers.length"
 				@payment-completed="handlePaymentCompleted"
 				@update-additional-discount="handleAdditionalDiscountUpdate"
 				@show-offers="uiStore.showOffersDialog = true"
 				@show-coupon="uiStore.showCouponDialog = true"
+			/>
+
+			<PaymentHubPendingDialog
+				v-model="showPaymentHubPendingDialog"
+				:pos-profile="shiftStore.profileName"
+				:pos-opening-shift="shiftStore.currentShift?.name"
+				:payment-hub-config="paymentHubConfig"
+				@counts-updated="handlePaymentHubCountsUpdated"
+				@completed="handlePaymentHubCompleted"
 			/>
 
 			<!-- Customer Selection Dialog -->
@@ -564,6 +582,33 @@
 				:pos-profile="shiftStore.profileName"
 				:pos-opening-shift="shiftStore.currentShift?.name"
 				:currency="shiftStore.profileCurrency"
+				@return-created="handleReturnCreated"
+			/>
+
+			<RetailReturnExchangeMenu
+				v-model="showRetailReturnMenu"
+				:allow-without-invoice="posSettingsStore.allowReturnWithoutInvoice"
+				:allow-exchange="posSettingsStore.allowExchange"
+				@select="handleRetailReturnMode"
+			/>
+
+			<NoInvoiceReturnDialog
+				v-model="showNoInvoiceReturnDialog"
+				:pos-profile="shiftStore.profileName"
+				:pos-opening-shift="shiftStore.currentShift?.name"
+				:currency="shiftStore.profileCurrency"
+				:customer="cartStore.customer"
+				@return-created="handleReturnCreated"
+			/>
+
+			<ExchangeDialog
+				v-model="showExchangeDialog"
+				:pos-profile="shiftStore.profileName"
+				:pos-opening-shift="shiftStore.currentShift?.name"
+				:currency="shiftStore.profileCurrency"
+				:customer="cartStore.customer"
+				:allow-without-invoice="posSettingsStore.allowReturnWithoutInvoice"
+				@exchange-ready="handleExchangeReady"
 				@return-created="handleReturnCreated"
 			/>
 
@@ -1058,9 +1103,13 @@ import ItemsSelector from "@/components/sale/ItemsSelector.vue";
 import OffersDialog from "@/components/sale/OffersDialog.vue";
 import OfflineInvoicesDialog from "@/components/sale/OfflineInvoicesDialog.vue";
 import PaymentDialog from "@/components/sale/PaymentDialog.vue";
+import PaymentHubPendingDialog from "@/components/sale/PaymentHubPendingDialog.vue";
 import ProductManagement from "@/components/sale/ProductManagement.vue";
 import PromotionManagement from "@/components/sale/PromotionManagement.vue";
 import ReturnInvoiceDialog from "@/components/sale/ReturnInvoiceDialog.vue";
+import NoInvoiceReturnDialog from "@/components/sale/NoInvoiceReturnDialog.vue";
+import RetailReturnExchangeMenu from "@/components/sale/RetailReturnExchangeMenu.vue";
+import ExchangeDialog from "@/components/sale/ExchangeDialog.vue";
 import WarehouseAvailabilityDialog from "@/components/sale/WarehouseAvailabilityDialog.vue";
 import POSSettings from "@/components/settings/POSSettings.vue";
 import InvoiceManagement from "@/components/invoices/InvoiceManagement.vue";
@@ -1086,7 +1135,7 @@ import { qzConnected, connect as qzConnect, disconnect as qzDisconnect } from "@
 
 import { Button, Dialog, createResource } from "frappe-ui";
 import { call } from "@/utils/apiWrapper";
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useToast } from "@/composables/useToast";
 
 import { useCustomerSearchStore } from "@/stores/customerSearch";
@@ -1159,6 +1208,22 @@ const logoutAfterClose = ref(false);
 const editCustomer = ref(null); // Customer being edited (null for create mode)
 const showClearCacheDialog = ref(false);
 const clearCacheOverlayRef = ref(null);
+
+// Payment Hub POSNext adapter state
+const paymentHubConfig = ref(null);
+const paymentHubQueueCounts = ref({ waiting: 0, paid: 0, failed: 0 });
+const showPaymentHubPendingDialog = ref(false);
+
+// Retail Return / Exchange launcher and one-shot checkout state.
+const showRetailReturnMenu = ref(false);
+const showNoInvoiceReturnDialog = ref(false);
+const showExchangeDialog = ref(false);
+const autoApplyExchangeCredit = ref(false);
+const exchangeCreditOrigin = ref("");
+const exchangeCreditSource = ref(null);
+const paymentHubCartReference = ref(null);
+const paymentHubCartFingerprint = ref(null);
+let paymentHubPollTimer = null;
 
 // Debounce timer for offer reapplication
 const offerReapplyTimer = ref(null);
@@ -1399,6 +1464,8 @@ onMounted(async () => {
 		const changeLabels = {
 			allow_credit_sale: __("Credit Sale"),
 			allow_return: __("Returns"),
+			allow_return_without_invoice: __("Return Without Invoice"),
+			allow_exchange: __("Exchange"),
 			allow_write_off_change: __("Write Off Change"),
 			allow_partial_payment: __("Partial Payment"),
 			silent_print: __("Silent Print"),
@@ -2073,6 +2140,636 @@ async function handleErrorRetry() {
 	}
 }
 
+function unwrapPaymentHubResult(result) {
+	return result?.message ?? result;
+}
+
+function normalizePaymentHubMode(value) {
+	return String(value || "").trim().toLowerCase();
+}
+
+function getPaymentHubModes() {
+	return {
+		cash: paymentHubConfig.value?.cash_mode_of_payment || "Cash",
+		electronic:
+			paymentHubConfig.value?.electronic_mode_of_payment || "Electronic Payment",
+		physical:
+			paymentHubConfig.value?.physical_mode_of_payment || "Physical Payment Terminal",
+	};
+}
+
+function getPaymentHubMapping(value) {
+	const normalized = normalizePaymentHubMode(value);
+	return (paymentHubConfig.value?.payment_method_mappings || []).find(
+		(row) => normalizePaymentHubMode(row?.mode_of_payment) === normalized
+	);
+}
+
+function isPaymentHubElectronicMode(value) {
+	const mapping = getPaymentHubMapping(value);
+	if (mapping) return mapping.channel === "Electronic Payment";
+	const modes = getPaymentHubModes();
+	const normalized = normalizePaymentHubMode(value);
+	return normalized === normalizePaymentHubMode(modes.electronic) || normalized === "electronic payment";
+}
+
+function isPaymentHubPhysicalMode(value) {
+	const mapping = getPaymentHubMapping(value);
+	if (mapping) return mapping.channel === "Physical Payment Terminal";
+	const modes = getPaymentHubModes();
+	const normalized = normalizePaymentHubMode(value);
+	return normalized === normalizePaymentHubMode(modes.physical) || normalized === "physical payment terminal";
+}
+
+function isPaymentHubCashMode(value) {
+	const mapping = getPaymentHubMapping(value);
+	if (mapping) return mapping.channel === "Cash";
+	const modes = getPaymentHubModes();
+	const normalized = normalizePaymentHubMode(value);
+	return normalized === normalizePaymentHubMode(modes.cash) || normalized === "cash";
+}
+
+function isPaymentHubManualMode(value) {
+	const mapping = getPaymentHubMapping(value);
+	return mapping?.channel === "Manual / Non-Cash";
+}
+
+function buildPaymentHubFingerprint() {
+	const items = cartStore.invoiceItems.map((item) => [
+		item.item_code,
+		Number(item.quantity || item.qty || 0),
+		Number(item.rate || 0),
+		item.uom || "",
+	]);
+	return JSON.stringify({
+		customer: cartStore.customer?.name || cartStore.customer || shiftStore.profileCustomer,
+		grand_total: Number(cartStore.grandTotal || 0),
+		items,
+	});
+}
+
+function getPaymentHubCartReference() {
+	const fingerprint = buildPaymentHubFingerprint();
+	if (!paymentHubCartReference.value || paymentHubCartFingerprint.value !== fingerprint) {
+		const token =
+			globalThis.crypto?.randomUUID?.() ||
+			`${Date.now()}-${Math.random().toString(16).slice(2)}`;
+		paymentHubCartReference.value = `POSNEXT-${token}`;
+		paymentHubCartFingerprint.value = fingerprint;
+	}
+	return paymentHubCartReference.value;
+}
+
+function resetPaymentHubCartReference() {
+	paymentHubCartReference.value = null;
+	paymentHubCartFingerprint.value = null;
+}
+
+function paymentHubCreditStorageKey(sessionName) {
+	return `posnext:payment-hub-credit:${String(sessionName || "").trim()}`;
+}
+
+function rememberPaymentHubCreditSession(sessionName, cartReference) {
+	if (typeof window === "undefined" || !sessionName || !cartReference) return;
+	try {
+		window.localStorage.setItem(paymentHubCreditStorageKey(sessionName), cartReference);
+	} catch (error) {
+		log.debug("Unable to persist Payment Hub Customer Credit session mapping:", error);
+	}
+}
+
+function getPaymentHubCreditSessionReference(sessionName) {
+	if (typeof window === "undefined" || !sessionName) return null;
+	try {
+		return window.localStorage.getItem(paymentHubCreditStorageKey(sessionName));
+	} catch (error) {
+		return null;
+	}
+}
+
+function forgetPaymentHubCreditSession(sessionName) {
+	if (typeof window === "undefined" || !sessionName) return;
+	try {
+		window.localStorage.removeItem(paymentHubCreditStorageKey(sessionName));
+	} catch (error) {
+		log.debug("Unable to clear Payment Hub Customer Credit session mapping:", error);
+	}
+}
+
+async function finalizePaymentHubCustomerCredit(invoiceName, cartReference = null) {
+	if (!invoiceName) return null;
+	return await call("pos_next.api.credit_sales.finalize_payment_hub_credit", {
+		invoice_name: invoiceName,
+		cart_reference: cartReference || null,
+	});
+}
+
+async function loadPaymentHubConfig() {
+	if (offlineStore.isOffline || !shiftStore.profileName) return;
+	try {
+		const result = await call(
+			"erpnext_payment_hub.pos.api.get_pos_payment_config",
+			{ pos_profile: shiftStore.profileName },
+		);
+		paymentHubConfig.value = unwrapPaymentHubResult(result);
+	} catch (error) {
+		paymentHubConfig.value = null;
+		log.debug("Payment Hub config unavailable:", error?.message || error);
+	}
+}
+
+async function refreshPaymentHubQueueCounts() {
+	if (!paymentHubConfig.value || offlineStore.isOffline || !shiftStore.profileName) return;
+	try {
+		const result = await call(
+			"erpnext_payment_hub.pos.api.get_sales_queue_counts",
+			{
+				pos_profile: shiftStore.profileName,
+				current_pos_profile: shiftStore.profileName,
+				pos_opening_shift: shiftStore.currentShift?.name || null,
+			},
+		);
+		paymentHubQueueCounts.value = unwrapPaymentHubResult(result) || { waiting: 0, paid: 0, failed: 0 };
+	} catch (error) {
+		log.debug("Payment Hub queue count refresh failed:", error?.message || error);
+	}
+}
+
+function handlePaymentHubCountsUpdated(counts) {
+	paymentHubQueueCounts.value = counts || { waiting: 0, paid: 0, failed: 0 };
+}
+
+function buildPaymentHubInvoicePayload(customerValue, paymentData, cartReference = null) {
+	return {
+		doctype: "Sales Invoice",
+		pos_profile: cartStore.posProfile,
+		posa_pos_opening_shift: cartStore.posOpeningShift,
+		// Payment Hub persists this on the Sales Invoice. POSNext's on_submit hook
+		// uses it to find and atomically redeem the Customer Credit plan after the
+		// provider has paid only the remaining real-money balance.
+		posa_client_request_id: cartReference || null,
+		customer: customerValue || shiftStore.profileCustomer,
+		company: shiftStore.profileCompany,
+		currency: shiftStore.profileCurrency,
+		items: cartStore.formatItemsForSubmission(cartStore.invoiceItems),
+		payments: [],
+		sales_team: JSON.parse(JSON.stringify(paymentData.sales_team || cartStore.salesTeam || [])),
+		discount_amount: cartStore.additionalDiscount || 0,
+		coupon_code: cartStore.appliedCoupon?.name || "",
+		is_pos: 1,
+		update_stock: 1,
+	};
+}
+
+function roundPaymentHubAmount(value) {
+	const precision = Number(posSettingsStore.decimalPrecision || 3);
+	return Number(Number(value || 0).toFixed(precision));
+}
+
+function buildPaymentHubCustomerCreditPlan(paymentData) {
+	const creditRows = (paymentData.payments || []).filter(
+		(row) => row.is_customer_credit && Number(row.amount || 0) > 0
+	);
+	if (!creditRows.length) {
+		return { redeemedCustomerCredit: 0, customerCreditDict: [] };
+	}
+
+	const redeemedCustomerCredit = roundPaymentHubAmount(
+		creditRows.reduce((sum, row) => sum + Number(row.amount || 0), 0)
+	);
+	const sources = new Map();
+	for (const row of creditRows) {
+		for (const credit of row.credit_details || []) {
+			if (!credit?.type || !credit?.credit_origin) continue;
+			const key = `${credit.type}:${credit.credit_origin}`;
+			if (!sources.has(key)) sources.set(key, credit);
+		}
+	}
+
+	let remaining = redeemedCustomerCredit;
+	const customerCreditDict = [];
+	for (const credit of sources.values()) {
+		if (remaining <= 0) break;
+		const available = roundPaymentHubAmount(
+			Number(credit.available_credit ?? credit.total_credit ?? 0)
+		);
+		if (available <= 0) continue;
+		const amount = Math.min(available, remaining);
+		if (amount <= 0) continue;
+		customerCreditDict.push({ ...credit, credit_to_redeem: roundPaymentHubAmount(amount) });
+		remaining = roundPaymentHubAmount(remaining - amount);
+	}
+
+	if (remaining > 0.001) {
+		throw new Error(__("Unable to allocate the selected Customer Credit."));
+	}
+
+	return { redeemedCustomerCredit, customerCreditDict };
+}
+
+async function startPaymentHubMappedSale(paymentData, customerValue, draftIdToDelete) {
+	if (offlineStore.isOffline) {
+		throw new Error(__("Payment Hub mapped payments require an online connection"));
+	}
+	if (cartStore.targetDoctype !== "Sales Invoice") {
+		throw new Error(__("Payment Hub mapped payments currently support Sales Invoice only"));
+	}
+	if (Number(paymentData.write_off_amount || 0) > 0) {
+		throw new Error(__("Write-off cannot be combined with Payment Hub mapped payments"));
+	}
+
+	if (!paymentHubConfig.value) await loadPaymentHubConfig();
+	if (!paymentHubConfig.value) throw new Error(__("Payment Hub configuration is not available"));
+
+	const { redeemedCustomerCredit, customerCreditDict } =
+		buildPaymentHubCustomerCreditPlan(paymentData);
+	const activePayments = (paymentData.payments || []).filter(
+		(row) => !row.is_customer_credit && Number(row.amount || 0) > 0
+	);
+	const managedRows = activePayments.filter(
+		(row) =>
+			isPaymentHubCashMode(row.mode_of_payment) ||
+			isPaymentHubManualMode(row.mode_of_payment) ||
+			isPaymentHubElectronicMode(row.mode_of_payment) ||
+			isPaymentHubPhysicalMode(row.mode_of_payment),
+	);
+	if (!managedRows.some((row) =>
+		isPaymentHubElectronicMode(row.mode_of_payment) || isPaymentHubPhysicalMode(row.mode_of_payment),
+	)) return null;
+
+	// Once a gateway/terminal method is involved, every REAL-MONEY tender row
+	// must have a Payment Hub classification. Customer Credit is intentionally
+	// excluded because it is redeemed by POSNext against receivables, not sent to
+	// the provider.
+	const unsupported = activePayments.filter((row) => !managedRows.includes(row));
+	if (unsupported.length) {
+		throw new Error(
+			__("Map these non-cash methods in Payment Hub Settings before mixing them with a gateway payment: {0}", [
+				unsupported.map((row) => row.mode_of_payment).join(", "),
+			]),
+		);
+	}
+
+	const invoiceGrandTotal = roundPaymentHubAmount(Number(cartStore.grandTotal || 0));
+	const realMoneyDue = roundPaymentHubAmount(
+		Math.max(0, invoiceGrandTotal - redeemedCustomerCredit)
+	);
+	if (realMoneyDue <= 0 && activePayments.length) {
+		throw new Error(__("No provider amount remains after Customer Credit."));
+	}
+
+	const cartReference = getPaymentHubCartReference();
+	const invoicePayload = buildPaymentHubInvoicePayload(customerValue, paymentData, cartReference);
+	let paymentHubCallStarted = false;
+	try {
+		let paymentHubCustomerCreditMode = null;
+		if (redeemedCustomerCredit > 0) {
+			await call("pos_next.api.credit_sales.create_payment_hub_credit_plan", {
+				cart_reference: cartReference,
+				customer: customerValue || shiftStore.profileCustomer,
+				company: shiftStore.profileCompany,
+				pos_profile: shiftStore.profileName,
+				credit_amount: redeemedCustomerCredit,
+				customer_credit_dict: customerCreditDict,
+			});
+			const creditModeResult = await call(
+				"pos_next.api.credit_sales.ensure_payment_hub_customer_credit_mode",
+				{
+					company: shiftStore.profileCompany,
+					pos_profile: shiftStore.profileName,
+				}
+			);
+			paymentHubCustomerCreditMode =
+				creditModeResult?.mode_of_payment || "POSNext Customer Credit";
+		}
+
+		const hubPayments = activePayments.map((row) => ({
+			mode_of_payment: row.mode_of_payment,
+			amount: Number(row.amount || 0),
+		}));
+		if (redeemedCustomerCredit > 0) {
+			hubPayments.push({
+				mode_of_payment: paymentHubCustomerCreditMode || "POSNext Customer Credit",
+				amount: redeemedCustomerCredit,
+			});
+		}
+
+		paymentHubCallStarted = true;
+		const callResult = await call("erpnext_payment_hub.pos.api.begin_mapped_sale", {
+			pos_system: "POSNext",
+			company: shiftStore.profileCompany,
+			// Payment Hub v0.6.14 requires PPS Grand Total == Sales Invoice Grand
+			// Total. Customer Credit is therefore represented in the PPS as a
+			// captured Manual / Non-Cash allocation while the provider still receives
+			// only the real-money rows. POSNext strips the synthetic credit row from
+			// the Sales Invoice before validation and redeems the actual credit source
+			// atomically after submit.
+			grand_total: invoiceGrandTotal,
+			payments: hubPayments,
+			draft_payload: invoicePayload,
+			currency: shiftStore.profileCurrency,
+			mobile_number: paymentData.payment_hub_mobile_number,
+			customer: customerValue || shiftStore.profileCustomer,
+			customer_name: cartStore.customer?.customer_name || cartStore.customer?.name || customerValue,
+			pos_profile: shiftStore.profileName,
+			pos_opening_shift: shiftStore.currentShift?.name || null,
+			warehouse: shiftStore.profileWarehouse,
+			computer_name: paymentHubConfig.value?.computer_name || null,
+			pos_station: paymentHubConfig.value?.station || null,
+			cart_reference: cartReference,
+			idempotency_key: cartReference,
+			send_whatsapp: 1,
+			auto_complete: 1,
+		});
+		const result = unwrapPaymentHubResult(callResult);
+		const paymentHubSessionName = result?.session?.name || null;
+		if (redeemedCustomerCredit > 0 && paymentHubSessionName) {
+			rememberPaymentHubCreditSession(paymentHubSessionName, cartReference);
+		}
+		if (redeemedCustomerCredit > 0 && result?.invoice?.name) {
+			await finalizePaymentHubCustomerCredit(result.invoice.name, cartReference);
+			if (paymentHubSessionName) forgetPaymentHubCreditSession(paymentHubSessionName);
+		}
+
+		uiStore.showPaymentDialog = false;
+		cartStore.clearCart();
+		previousCartHash = "";
+		resetPaymentHubCartReference();
+		if (draftIdToDelete) draftsStore.deleteDraft(draftIdToDelete);
+		await refreshPaymentHubQueueCounts();
+
+		if (result?.invoice?.name) {
+			showSuccess(
+				result.change_amount > 0
+					? __("Payment completed. Change due: {0}", [result.change_amount])
+					: __("Payment completed"),
+			);
+			await handlePrintInvoice({ name: result.invoice.name });
+		} else {
+			const sessionName = result?.session?.name || __("Payment Hub sale");
+			if ((result?.errors || []).length) {
+				showWarning(
+					__("{0} saved in Payment Hub. Some payment attempts need attention in Waiting/Failed.", [sessionName]),
+				);
+			} else if (activePayments.some((row) => isPaymentHubElectronicMode(row.mode_of_payment))) {
+				showSuccess(__("Payment link sent. {0} moved to Waiting", [sessionName]));
+			} else {
+				showSuccess(__("Terminal payment started. Check Payment Hub for confirmation."));
+			}
+		}
+		return result;
+	} catch (error) {
+		// Clean up only deterministic validation failures that happen before an
+		// external provider attempt can be started. Transport/provider ambiguity is
+		// intentionally left recoverable in Payment Hub.
+		const message = String(error?.message || error || "");
+		const safePreProviderFailure =
+			!paymentHubCallStarted ||
+			message.includes("does not match POS Payment Session total") ||
+			(message.includes("Invoice total") && message.includes("Payment Session total")) ||
+			message.includes("is not mapped in Payment Hub Settings");
+		if (redeemedCustomerCredit > 0 && safePreProviderFailure) {
+			try {
+				await call("pos_next.api.credit_sales.cancel_payment_hub_credit_plan", {
+					cart_reference: cartReference,
+				});
+			} catch (cleanupError) {
+				log.warn("Could not cancel failed Payment Hub Customer Credit plan:", cleanupError);
+			}
+			resetPaymentHubCartReference();
+		}
+
+		throw error;
+	}
+}
+
+
+async function startPaymentHubElectronicSale(paymentData, customerValue, draftIdToDelete) {
+	if (offlineStore.isOffline) {
+		throw new Error(__("Electronic Payment requires an online connection"));
+	}
+	if (cartStore.targetDoctype !== "Sales Invoice") {
+		throw new Error(__("Payment Hub Electronic Payment currently supports Sales Invoice only"));
+	}
+	if (Number(paymentData.write_off_amount || 0) > 0) {
+		throw new Error(__("Write-off cannot be combined with asynchronous Electronic Payment"));
+	}
+
+	if (!paymentHubConfig.value) await loadPaymentHubConfig();
+	if (!paymentHubConfig.value) {
+		throw new Error(__("Payment Hub configuration is not available"));
+	}
+
+	const activePayments = (paymentData.payments || []).filter(
+		(row) => Number(row.amount || 0) > 0,
+	);
+	const physicalPayment = activePayments.find((row) =>
+		isPaymentHubPhysicalMode(row.mode_of_payment),
+	);
+	if (physicalPayment) {
+		throw new Error(__("Electronic and physical-terminal payments cannot be mixed in one checkout"));
+	}
+
+	const electronicRows = activePayments.filter((row) =>
+		isPaymentHubElectronicMode(row.mode_of_payment),
+	);
+	if (electronicRows.length === 0) return null;
+
+	const electronicModes = [...new Set(electronicRows.map((row) => row.mode_of_payment))];
+	if (electronicModes.length !== 1) {
+		throw new Error(__("Use only one Electronic Payment provider per checkout"));
+	}
+	const electronicMode = electronicModes[0];
+	const electronicMapping = getPaymentHubMapping(electronicMode);
+
+	const unsupported = activePayments.filter(
+		(row) =>
+			!isPaymentHubCashMode(row.mode_of_payment) &&
+			!isPaymentHubElectronicMode(row.mode_of_payment),
+	);
+	if (unsupported.length > 0) {
+		throw new Error(
+			__("Electronic Payment currently supports split payment with Cash only"),
+		);
+	}
+
+	const electronicAmount = electronicRows.reduce(
+		(sum, row) => sum + Number(row.amount || 0),
+		0,
+	);
+	const cashRows = activePayments.filter((row) => isPaymentHubCashMode(row.mode_of_payment));
+	const cashModes = [...new Set(cashRows.map((row) => row.mode_of_payment))];
+	if (cashModes.length > 1) {
+		throw new Error(__("Use only one Cash Mode of Payment per checkout"));
+	}
+	const cashAmount = cashRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+	const cashMode = cashModes[0] || paymentHubConfig.value?.cash_mode_of_payment || "Cash";
+
+	const cartReference = getPaymentHubCartReference();
+	const invoicePayload = buildPaymentHubInvoicePayload(customerValue, paymentData);
+	const callResult = await call(
+		"erpnext_payment_hub.pos.api.begin_async_electronic_sale",
+		{
+			pos_system: "POSNext",
+			company: shiftStore.profileCompany,
+			grand_total: cartStore.grandTotal,
+			electronic_amount: electronicAmount,
+			cash_amount: cashAmount,
+			mobile_number: paymentData.payment_hub_mobile_number,
+			draft_payload: invoicePayload,
+			currency: shiftStore.profileCurrency,
+			customer: customerValue || shiftStore.profileCustomer,
+			customer_name:
+				cartStore.customer?.customer_name || cartStore.customer?.name || customerValue,
+			pos_profile: shiftStore.profileName,
+			pos_opening_shift: shiftStore.currentShift?.name || null,
+			warehouse: shiftStore.profileWarehouse,
+			cart_reference: cartReference,
+			provider_account: electronicMapping?.provider_account || null,
+			payment_method: electronicMapping?.payment_method || "KNET",
+			electronic_mode_of_payment: electronicMode,
+			cash_mode_of_payment: cashMode,
+			idempotency_key: cartReference,
+			send_whatsapp: 1,
+		},
+	);
+	const result = unwrapPaymentHubResult(callResult);
+
+	uiStore.showPaymentDialog = false;
+	cartStore.clearCart();
+	previousCartHash = "";
+	resetPaymentHubCartReference();
+
+	if (draftIdToDelete) {
+		draftsStore.deleteDraft(draftIdToDelete);
+	}
+
+	await refreshPaymentHubQueueCounts();
+	const sessionName = result?.session?.name || __("Payment Hub sale");
+	const status = result?.session?.status;
+	if (status === "Ready to Complete") {
+		showSuccess(__("{0} is paid and ready to complete", [sessionName]));
+	} else {
+		showSuccess(__("Payment link sent. {0} moved to Waiting", [sessionName]));
+	}
+	return result;
+}
+
+async function startPaymentHubTerminalSale(paymentData, customerValue, draftIdToDelete) {
+	if (offlineStore.isOffline) {
+		throw new Error(__("Physical Terminal requires an online connection"));
+	}
+	if (cartStore.targetDoctype !== "Sales Invoice") {
+		throw new Error(__("Payment Hub Physical Terminal currently supports Sales Invoice only"));
+	}
+	if (Number(paymentData.write_off_amount || 0) > 0) {
+		throw new Error(__("Write-off cannot be combined with Physical Terminal payment"));
+	}
+
+	if (!paymentHubConfig.value) await loadPaymentHubConfig();
+	if (!paymentHubConfig.value) throw new Error(__("Payment Hub configuration is not available"));
+
+	const activePayments = (paymentData.payments || []).filter((row) => Number(row.amount || 0) > 0);
+	const terminalRows = activePayments.filter((row) => isPaymentHubPhysicalMode(row.mode_of_payment));
+	const electronicRows = activePayments.filter((row) => isPaymentHubElectronicMode(row.mode_of_payment));
+	if (electronicRows.length) {
+		throw new Error(__("Electronic and physical-terminal payments cannot be mixed in one checkout"));
+	}
+	const terminalModes = [...new Set(terminalRows.map((row) => row.mode_of_payment))];
+	if (terminalModes.length !== 1) {
+		throw new Error(__("Use only one Physical Terminal provider per checkout"));
+	}
+	const terminalMode = terminalModes[0];
+	const terminalMapping = getPaymentHubMapping(terminalMode);
+	const terminalReady = terminalMapping
+		? terminalMapping.terminal_api_ready !== false
+		: paymentHubConfig.value?.physical_terminal_api_ready !== false;
+	if (!terminalReady) {
+		throw new Error(__("Physical terminal API is not ready for {0}", [terminalMode]));
+	}
+	const unsupported = activePayments.filter(
+		(row) => !isPaymentHubCashMode(row.mode_of_payment) && !isPaymentHubPhysicalMode(row.mode_of_payment),
+	);
+	if (unsupported.length) {
+		throw new Error(__("Physical Terminal currently supports split payment with Cash only"));
+	}
+
+	const terminalAmount = terminalRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+	const cashRows = activePayments.filter((row) => isPaymentHubCashMode(row.mode_of_payment));
+	const cashModes = [...new Set(cashRows.map((row) => row.mode_of_payment))];
+	if (cashModes.length > 1) throw new Error(__("Use only one Cash Mode of Payment per checkout"));
+	const cashAmount = cashRows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+	const cashMode = cashModes[0] || paymentHubConfig.value?.cash_mode_of_payment || "Cash";
+
+	const cartReference = getPaymentHubCartReference();
+	const invoicePayload = buildPaymentHubInvoicePayload(customerValue, paymentData);
+	const callResult = await call(
+		"erpnext_payment_hub.pos.api.begin_terminal_sale",
+		{
+			pos_system: "POSNext",
+			company: shiftStore.profileCompany,
+			grand_total: cartStore.grandTotal,
+			terminal_amount: terminalAmount,
+			cash_amount: cashAmount,
+			draft_payload: invoicePayload,
+			currency: shiftStore.profileCurrency,
+			customer: customerValue || shiftStore.profileCustomer,
+			customer_name: cartStore.customer?.customer_name || cartStore.customer?.name || customerValue,
+			pos_profile: shiftStore.profileName,
+			pos_opening_shift: shiftStore.currentShift?.name || null,
+			warehouse: shiftStore.profileWarehouse,
+			computer_name: paymentHubConfig.value?.computer_name || null,
+			pos_station: paymentHubConfig.value?.station || null,
+			cart_reference: cartReference,
+			provider_account: terminalMapping?.provider_account || null,
+			payment_terminal: terminalMapping?.payment_terminal || null,
+			payment_method: terminalMapping?.payment_method || "CARD",
+			terminal_mode_of_payment: terminalMode,
+			cash_mode_of_payment: cashMode,
+			idempotency_key: cartReference,
+			auto_complete: 1,
+		},
+	);
+	const result = unwrapPaymentHubResult(callResult);
+
+	uiStore.showPaymentDialog = false;
+	cartStore.clearCart();
+	previousCartHash = "";
+	resetPaymentHubCartReference();
+	if (draftIdToDelete) draftsStore.deleteDraft(draftIdToDelete);
+	await refreshPaymentHubQueueCounts();
+	if (result?.invoice?.name) {
+		showSuccess(__("Terminal payment captured and invoice completed"));
+		await handlePrintInvoice({ name: result.invoice.name });
+	} else {
+		showSuccess(__("Terminal payment started. Check Payment Hub if confirmation is pending."));
+	}
+	return result;
+}
+
+async function handlePaymentHubCompleted(result) {
+	const invoice = result?.invoice;
+	if (!invoice?.name) return;
+	const sessionName = result?.payment_hub_session_name || result?.session?.name || null;
+	const cartReference = getPaymentHubCreditSessionReference(sessionName);
+	try {
+		await finalizePaymentHubCustomerCredit(invoice.name, cartReference);
+		if (sessionName) forgetPaymentHubCreditSession(sessionName);
+	} catch (error) {
+		const errorContext = parseError(error);
+		showError(
+			__("Customer Credit Settlement Error"),
+			errorContext.message || __("Payment completed, but Customer Credit could not be allocated."),
+		);
+		throw error;
+	}
+	await refreshPaymentHubQueueCounts();
+	loadInvoiceHistoryData().catch((error) =>
+		log.debug("Payment Hub invoice history refresh failed:", error),
+	);
+	await handlePrintInvoice({ name: invoice.name });
+}
+
 async function handlePaymentCompleted(paymentData) {
 	try {
 		const customerValue = cartStore.customer?.name || cartStore.customer;
@@ -2094,6 +2791,11 @@ async function handlePaymentCompleted(paymentData) {
 				});
 			});
 		}
+		// PaymentDialog can include Customer Credit plus an over-tendered Cash row.
+		// The invoice composable keeps an incremental paid cache; direct array pushes
+		// do not update that cache. Rebuild it before submit so exchange change is
+		// calculated from Cash + mandatory Exchange Credit, not Cash alone.
+		cartStore.rebuildIncrementalCache();
 
 		// Store sales team data if provided
 		if (paymentData.sales_team && Array.isArray(paymentData.sales_team)) {
@@ -2114,6 +2816,18 @@ async function handlePaymentCompleted(paymentData) {
 
 		// Delete draft if it exists (since we're submitting/saving invoice)
 		const draftIdToDelete = cartStore.currentDraftId;
+
+		const hasElectronicPayment = (paymentData.payments || []).some(
+			(row) => isPaymentHubElectronicMode(row.mode_of_payment) && Number(row.amount || 0) > 0
+		);
+		const hasPhysicalPayment = (paymentData.payments || []).some(
+			(row) => isPaymentHubPhysicalMode(row.mode_of_payment) && Number(row.amount || 0) > 0
+		);
+
+		if (hasElectronicPayment || hasPhysicalPayment) {
+			await startPaymentHubMappedSale(paymentData, customerValue, draftIdToDelete);
+			return;
+		}
 
 		if (offlineStore.isOffline) {
 			// Use the same item transformation as online flow for consistency
@@ -2449,11 +3163,152 @@ function openHistoryDialog() {
 }
 
 function openReturnDialog() {
-	if (!canAccessShiftActions.value) {
+	if (!canAccessShiftActions.value || !posSettingsStore.allowReturn) return;
+	if (!cartStore.isEmpty) {
+		showWarning(__("Save or clear the current sale before starting a return or exchange."));
 		return;
 	}
 
-	uiStore.showReturnDialog = true;
+	showRetailReturnMenu.value = true;
+}
+
+async function waitForRetailDialogHandoff() {
+	await nextTick();
+	if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
+		await new Promise((resolve) =>
+			window.requestAnimationFrame(() => window.requestAnimationFrame(resolve))
+		);
+	}
+}
+
+async function handleRetailReturnMode(mode) {
+	if (!cartStore.isEmpty) {
+		showWarning(__("Save or clear the current sale before starting a return or exchange."));
+		return;
+	}
+
+	// frappe-ui Dialogs use an overlay/focus-trap transition. Closing the launcher
+	// and opening the next modal in the same Vue tick can leave the new dialog
+	// behind a stale overlay until a hard refresh. Tear down every return modal,
+	// let two animation frames complete, then open exactly one destination.
+	showRetailReturnMenu.value = false;
+	uiStore.showReturnDialog = false;
+	showNoInvoiceReturnDialog.value = false;
+	showExchangeDialog.value = false;
+	await waitForRetailDialogHandoff();
+
+	if (mode === "with-invoice") {
+		if (!posSettingsStore.allowReturn) return;
+		uiStore.showReturnDialog = true;
+	} else if (mode === "without-invoice") {
+		if (!posSettingsStore.allowReturnWithoutInvoice) {
+			showWarning(__("Return Without Invoice is disabled in POS Settings."));
+			return;
+		}
+		showNoInvoiceReturnDialog.value = true;
+	} else if (mode === "exchange") {
+		if (!posSettingsStore.allowExchange) {
+			showWarning(__("Exchange is disabled in POS Settings."));
+			return;
+		}
+		showExchangeDialog.value = true;
+	}
+}
+
+async function handleExchangeReady(exchange) {
+	try {
+		if (
+			!exchange?.customer ||
+			!exchange?.return_invoice ||
+			!Array.isArray(exchange.items) ||
+			exchange.items.length === 0
+		) {
+			showError(__("Exchange checkout data is incomplete. The return credit remains available."));
+			return;
+		}
+
+		cartStore.clearCart();
+
+		// Keep the FULL return customer selected for the replacement sale. Payment
+		// Hub's WhatsApp link prefill reads mobile_no/mobile_number/contact_mobile
+		// from the customer object; rebuilding only {name, customer_name} made the
+		// mobile blank after Exchange even though normal POS checkout worked.
+		const customerDetails = await call("pos_next.api.customers.get_customer_details", {
+			customer: exchange.customer,
+		});
+		const exchangeCustomer =
+			customerDetails && typeof customerDetails === "object"
+				? customerDetails
+				: {
+					name: exchange.customer,
+					customer_name: exchange.customer_name || exchange.customer,
+				};
+		if (!exchangeCustomer.name) exchangeCustomer.name = exchange.customer;
+		if (!exchangeCustomer.customer_name) {
+			exchangeCustomer.customer_name = exchange.customer_name || exchange.customer;
+		}
+		await cartStore.setCustomer(exchangeCustomer);
+
+		for (const item of exchange.items) {
+			cartStore.addItem(
+				item,
+				Number(item.quantity || item.qty || 1),
+				false,
+				shiftStore.currentProfile
+			);
+		}
+
+		// Defensive re-apply: replacement item staging must never lose the
+		// customer selected on the return side of the exchange.
+		await cartStore.setCustomer(exchangeCustomer);
+
+		// Resolve the accounting reference that actually carries the return credit.
+		// For a linked ERPNext return this can be the ORIGINAL invoice (because
+		// update_outstanding_for_self=0 moves the negative outstanding there); for a
+		// no-invoice return it is the return invoice itself. Never guess this in UI.
+		const resolvedCredit = await call(
+			"pos_next.api.retail_returns.resolve_exchange_credit_source",
+			{ return_invoice: exchange.return_invoice }
+		);
+		if (!resolvedCredit?.credit_origin || Number(resolvedCredit?.available_credit || 0) <= 0) {
+			throw new Error(__("The exchange return was created, but no available exchange credit could be resolved."));
+		}
+
+		// Never consume older credit that may already exist on the same receivable
+		// reference. The exchange may use at most the value of THIS newly-created
+		// return, even if the resolved invoice has a larger negative outstanding.
+		const exchangeCreditAmount = Number(exchange.return_credit || 0);
+		const resolvedAvailable = Number(resolvedCredit.available_credit || 0);
+		const usableExchangeCredit = exchangeCreditAmount > 0
+			? Math.min(exchangeCreditAmount, resolvedAvailable)
+			: resolvedAvailable;
+		resolvedCredit.available_credit = usableExchangeCredit;
+		resolvedCredit.total_credit = usableExchangeCredit;
+
+		// Normal PaymentDialog performs final pricing/payment. Apply exactly this
+		// exchange credit source once; any remaining amount is paid normally.
+		exchangeCreditSource.value = resolvedCredit;
+		exchangeCreditOrigin.value = resolvedCredit.credit_origin;
+		autoApplyExchangeCredit.value = true;
+		await nextTick();
+		uiStore.showPaymentDialog = true;
+		showSuccess(
+			__("Exchange return {0} created. Replacement items are ready for checkout.", [
+				exchange.return_invoice || "",
+			])
+		);
+	} catch (error) {
+		console.error("Failed to prepare exchange checkout:", error);
+		cartStore.clearCart();
+		autoApplyExchangeCredit.value = false;
+		exchangeCreditOrigin.value = "";
+		exchangeCreditSource.value = null;
+		const errorContext = parseError(error);
+		showError(
+			errorContext.message ||
+				__("Could not load the replacement items. The return credit remains available.")
+		);
+	}
 }
 
 function switchToDesk() {
@@ -2544,10 +3399,60 @@ async function handleLoadDraft(draft) {
 	}
 }
 
-function handleReturnCreated(returnInvoice) {
-	// Success message is already shown by ReturnInvoiceDialog
-	log.debug("Return invoice created:", returnInvoice.name);
+async function handleReturnCreated(returnInvoice) {
+	// Close any standalone return launcher/source dialog BEFORE opening the browser
+	// print flow. Browser print can block JavaScript; if the return dialog is left
+	// open until after printing, frappe-ui's overlay/focus trap can remain on screen
+	// and interfere with the next POS action. ExchangeDialog keeps its own outer
+	// dialog open while it moves from the return step to replacement-item selection.
+	showRetailReturnMenu.value = false;
+	uiStore.showReturnDialog = false;
+	showNoInvoiceReturnDialog.value = false;
+	await waitForRetailDialogHandoff();
+
+	// Returns are printed only after the backend has successfully submitted the
+	// Sales Invoice. The same handler is used by Return With Invoice, Return
+	// Without Invoice, Invoice History returns, and the return side of Exchange.
+	const invoiceName = returnInvoice?.name || returnInvoice?.sales_invoice || returnInvoice;
+	if (!invoiceName || typeof invoiceName !== "string") {
+		log.warn("Return created without a printable invoice name:", returnInvoice);
+		return;
+	}
+
+	log.debug("Return invoice created:", invoiceName);
+	const returnPrintFormat =
+		posSettingsStore.returnInvoicePrintFormat || shiftStore.currentProfile?.print_format || null;
+
+	try {
+		if (posSettingsStore.silentPrint) {
+			const result = await printWithSilentFallback({ name: invoiceName }, returnPrintFormat);
+			if (!result?.success) {
+				throw new Error(__("Return invoice printing failed"));
+			}
+		} else {
+			await printInvoiceByName(invoiceName, returnPrintFormat);
+		}
+	} catch (error) {
+		log.error("Return invoice auto-print failed:", error);
+		showWarning(
+			__("Return {0} was created successfully, but printing failed. You can print it again from invoice history.", [
+				invoiceName,
+			])
+		);
+	}
 }
+
+// Auto-credit is exchange-only and must never leak into the next ordinary sale.
+watch(
+	() => uiStore.showPaymentDialog,
+	(opened, wasOpen) => {
+		if (!opened && wasOpen) {
+			autoApplyExchangeCredit.value = false;
+			exchangeCreditOrigin.value = "";
+			exchangeCreditSource.value = null;
+		}
+	}
+);
 
 function handleDiscountApplied(discount) {
 	cartStore.applyDiscountToCart(discount);
@@ -3092,4 +3997,26 @@ function handleTabSwitch(tab) {
 		uiStore.setMobileTab(tab);
 	});
 }
+// Payment Hub queue badge: light polling complements the backend realtime event.
+onMounted(async () => {
+	await loadPaymentHubConfig();
+	await refreshPaymentHubQueueCounts();
+	paymentHubPollTimer = window.setInterval(refreshPaymentHubQueueCounts, 15000);
+});
+
+onUnmounted(() => {
+	if (paymentHubPollTimer) {
+		window.clearInterval(paymentHubPollTimer);
+		paymentHubPollTimer = null;
+	}
+});
+
+watch(
+	() => [shiftStore.profileName, offlineStore.isOffline],
+	async () => {
+		await loadPaymentHubConfig();
+		await refreshPaymentHubQueueCounts();
+	}
+);
+
 </script>

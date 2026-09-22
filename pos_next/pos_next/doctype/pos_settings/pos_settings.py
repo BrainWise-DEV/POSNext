@@ -9,6 +9,11 @@ from frappe.utils import cint, flt
 class POSSettings(Document):
 	def validate(self):
 		"""Validate POS Settings"""
+		# A hidden stale Loyalty Program link must not survive after loyalty is
+		# disabled. Clearing it here protects API/Desk saves as well as the UI.
+		if not cint(self.enable_loyalty_program):
+			self.default_loyalty_program = ""
+
 		# Guard against None values and validate discount percentage
 		max_discount = flt(self.max_discount_allowed)
 		if max_discount < 0 or max_discount > 100:

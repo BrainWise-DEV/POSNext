@@ -70,43 +70,48 @@ def apply_tax_inclusive(doc):
 
 
 def auto_assign_loyalty_program_on_invoice(doc):
-	"""
-	Auto-assign loyalty program to customer if loyalty is enabled in POS Settings
-	but customer doesn't have a loyalty program yet.
+	"""Apply the POS Profile loyalty policy to a Sales Invoice.
 
-	This ensures customers created before loyalty was enabled can still earn points.
-
-	Args:
-		doc: Sales Invoice document
+	When loyalty is disabled, stale Customer loyalty values are ignored and all
+	invoice loyalty/redemption fields are cleared before link validation. When it
+	is enabled, the configured default is assigned only if the customer does not
+	already have a loyalty program.
 	"""
 	if not doc.is_pos or not doc.pos_profile or not doc.customer:
 		return
 
-	# Check if customer already has a loyalty program
-	customer_loyalty = frappe.db.get_value("Customer", doc.customer, "loyalty_program")
-	if customer_loyalty:
-		return
-
-	# Get POS Settings
 	pos_settings = frappe.db.get_value(
 		"POS Settings",
 		{"pos_profile": doc.pos_profile},
 		["enable_loyalty_program", "default_loyalty_program"],
 		as_dict=True,
-	)
-
-	if not pos_settings:
-		return
+	) or {}
 
 	if not cint(pos_settings.get("enable_loyalty_program")):
+		for fieldname, value in {
+			"loyalty_program": None,
+			"redeem_loyalty_points": 0,
+			"loyalty_points": 0,
+			"loyalty_amount": 0,
+			"loyalty_redemption_account": None,
+			"loyalty_redemption_cost_center": None,
+		}.items():
+			if doc.meta.has_field(fieldname):
+				doc.set(fieldname, value)
+		return
+
+	# Loyalty is enabled: preserve an existing Customer program.
+	customer_loyalty = frappe.db.get_value("Customer", doc.customer, "loyalty_program")
+	if customer_loyalty:
 		return
 
 	loyalty_program = pos_settings.get("default_loyalty_program")
 	if not loyalty_program:
 		return
 
-	# Assign loyalty program to customer
 	frappe.db.set_value("Customer", doc.customer, "loyalty_program", loyalty_program, update_modified=False)
+	if doc.meta.has_field("loyalty_program") and not doc.get("loyalty_program"):
+		doc.loyalty_program = loyalty_program
 
 
 def record_one_time_offer_usage(doc, method=None):
