@@ -405,7 +405,9 @@ export async function getCachedPaymentMethods(posProfile) {
 }
 
 /**
- * Cache sales persons from server for offline use
+ * Cache sales persons from server for offline use.
+ * Each person may include ``item_commissions``, ``item_group_commissions``,
+ * and ``brand_commissions`` override lists (priority: Item → Item Group → Brand → rate).
  * @param {string} posProfile - POS Profile name
  * @returns {Promise<object>} - Result with sales_persons array
  */

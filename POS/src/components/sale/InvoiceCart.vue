@@ -1083,6 +1083,14 @@
 											])
 										}}
 									</div>
+									<!-- Item-level Sales Person indicator -->
+									<span
+										v-if="item.sales_person"
+										class="inline-flex items-center px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded-full text-[9px] font-bold border border-blue-200 flex-shrink-0 max-w-[7rem] truncate"
+										:title="item.sales_person_name || item.sales_person"
+									>
+										{{ item.sales_person_name || item.sales_person }}
+									</span>
 								</div>
 								<button
 									v-if="!isLockedFreeRow(item)"
