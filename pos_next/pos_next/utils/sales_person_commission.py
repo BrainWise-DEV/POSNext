@@ -207,10 +207,61 @@ def _item_grants_commission(item, *, item_cache: dict | None = None) -> bool:
 	return bool(cint(grant))
 
 
+def _item_get(item, key, default=None):
+	if hasattr(item, "get"):
+		return item.get(key, default)
+	return getattr(item, key, default)
+
+
+def _line_looks_zero_value(item) -> bool:
+	"""True when the line is free / fully discounted / zero-priced (net 0 is real)."""
+	if cint(_item_get(item, "is_free_item")):
+		return True
+	if abs(flt(_item_get(item, "rate") or 0)) < 0.0001:
+		return True
+	if flt(_item_get(item, "discount_percentage") or 0) >= 100:
+		return True
+	return False
+
+
 def _line_net_amount(item) -> float:
-	"""Prefer base_net_amount (company currency); fall back to net_amount / amount."""
-	for key in ("base_net_amount", "net_amount", "amount", "base_amount"):
-		val = item.get(key) if hasattr(item, "get") else getattr(item, key, None)
+	"""Return the line amount used for commission — always AFTER discount.
+
+	Priority:
+	1. ``base_net_amount`` / ``net_amount`` (ERPNext nets after item + additional discount)
+	2. Explicit item discount: ``price_list_rate * qty - discount`` (never list price alone)
+	3. ``rate * qty`` (POS submits post-discount rate)
+	4. ``amount`` / ``base_amount`` last resort
+	"""
+	# 1) Prefer ERPNext nets. Skip placeholder 0 before taxes when the line still
+	# has a positive rate (uncalculated child rows default Currency fields to 0).
+	for key in ("base_net_amount", "net_amount"):
+		val = _item_get(item, key)
+		if val is None:
+			continue
+		if abs(flt(val)) > 0.0001 or _line_looks_zero_value(item):
+			return flt(val)
+
+	qty = flt(_item_get(item, "qty") if _item_get(item, "qty") is not None else _item_get(item, "quantity") or 0)
+	price_list_rate = flt(_item_get(item, "price_list_rate") or 0)
+	discount_amount = flt(_item_get(item, "discount_amount") or 0)
+	discount_percentage = flt(_item_get(item, "discount_percentage") or 0)
+	rate = _item_get(item, "rate")
+
+	# 2) Derive post-discount from list price when discount fields are present
+	if qty and price_list_rate > 0 and (discount_amount or discount_percentage):
+		gross = price_list_rate * qty
+		if discount_amount:
+			return flt(gross - discount_amount)
+		return flt(gross * (1.0 - discount_percentage / 100.0))
+
+	# 3) rate * qty (rate from POS is already after item discount)
+	if rate is not None and qty:
+		return flt(rate) * qty
+
+	# 4) Last resort
+	for key in ("amount", "base_amount"):
+		val = _item_get(item, key)
 		if val is not None:
 			return flt(val)
 	return 0.0

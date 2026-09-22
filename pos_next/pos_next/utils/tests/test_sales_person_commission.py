@@ -377,6 +377,105 @@ class TestBuildSalesTeamFromItems(unittest.TestCase):
 		rows = spc.build_sales_team_from_items(invoice, invoice_level_team=[])
 		self.assertAlmostEqual(rows[0]["incentives"], 200.0)
 
+	@patch.object(spc, "_get_item_master_dims")
+	@patch.object(spc, "get_sales_person_commission_maps")
+	def test_commission_uses_amount_after_discount(self, mock_maps, mock_dims):
+		"""Incentives must use post-discount net, not list / pre-discount amount."""
+		mock_maps.return_value = {
+			"item_map": {},
+			"item_group_map": {},
+			"brand_map": {},
+			"commission_rate": 10.0,
+		}
+		mock_dims.side_effect = self._dims
+
+		# List 1000, 20% discount → net 800. amount left at gross to catch regressions.
+		invoice = SimpleNamespace(
+			items=[
+				_item(
+					sales_person="SP-A",
+					base_net_amount=800,
+					amount=1000,
+					price_list_rate=1000,
+					rate=800,
+					qty=1,
+					discount_percentage=20,
+					discount_amount=200,
+				)
+			],
+			sales_team=[],
+			flags=SimpleNamespace(),
+		)
+		rows = spc.build_sales_team_from_items(invoice, invoice_level_team=[])
+		self.assertAlmostEqual(rows[0]["incentives"], 80.0)  # 10% of 800, not 100
+
+	@patch.object(spc, "_get_item_master_dims")
+	@patch.object(spc, "get_sales_person_commission_maps")
+	def test_commission_from_discount_fields_when_nets_unset(self, mock_maps, mock_dims):
+		"""Before taxes, nets are 0 — derive post-discount from list price - discount."""
+		mock_maps.return_value = {
+			"item_map": {},
+			"item_group_map": {},
+			"brand_map": {},
+			"commission_rate": 10.0,
+		}
+		mock_dims.side_effect = self._dims
+
+		invoice = SimpleNamespace(
+			items=[
+				{
+					"item_code": "ITEM-1",
+					"item_group": "Products",
+					"brand": "Acme",
+					"grant_commission": 1,
+					"sales_person": "SP-A",
+					"base_net_amount": 0,
+					"net_amount": 0,
+					"qty": 2,
+					"price_list_rate": 100,
+					"rate": 100,  # not yet reduced
+					"discount_percentage": 25,
+					"discount_amount": 50,  # 25% of 200
+					"amount": 200,
+				}
+			],
+			sales_team=[],
+			flags=SimpleNamespace(),
+		)
+		rows = spc.build_sales_team_from_items(invoice, invoice_level_team=[])
+		# (100*2 - 50) * 10% = 15
+		self.assertAlmostEqual(rows[0]["incentives"], 15.0)
+
+
+class TestLineNetAmount(unittest.TestCase):
+	def test_prefers_base_net_over_gross_amount(self):
+		self.assertEqual(
+			spc._line_net_amount(
+				{
+					"base_net_amount": 800,
+					"amount": 1000,
+					"price_list_rate": 1000,
+					"discount_amount": 200,
+				}
+			),
+			800.0,
+		)
+
+	def test_derives_from_price_list_minus_discount(self):
+		self.assertEqual(
+			spc._line_net_amount(
+				{
+					"base_net_amount": 0,
+					"qty": 1,
+					"price_list_rate": 500,
+					"rate": 500,
+					"discount_percentage": 10,
+					"discount_amount": 50,
+				}
+			),
+			450.0,
+		)
+
 
 class TestValidateCoverage(unittest.TestCase):
 	@patch.object(spc, "sales_persons_enabled", return_value=True)
