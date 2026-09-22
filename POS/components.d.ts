@@ -9,6 +9,7 @@ export {}
 declare module 'vue' {
   export interface GlobalComponents {
     ActionButton: typeof import('./src/components/common/ActionButton.vue')['default']
+    AuthorizationDialog: typeof import('./src/components/common/AuthorizationDialog.vue')['default']
     AutocompleteSelect: typeof import('./src/components/common/AutocompleteSelect.vue')['default']
     BatchSerialDialog: typeof import('./src/components/sale/BatchSerialDialog.vue')['default']
     CheckboxField: typeof import('./src/components/settings/CheckboxField.vue')['default']
@@ -20,6 +21,7 @@ declare module 'vue' {
     CustomerDialog: typeof import('./src/components/sale/CustomerDialog.vue')['default']
     DraftInvoicesDialog: typeof import('./src/components/sale/DraftInvoicesDialog.vue')['default']
     EditItemDialog: typeof import('./src/components/sale/EditItemDialog.vue')['default']
+    ExpenseDialog: typeof import('./src/components/sale/ExpenseDialog.vue')['default']
     InstallAppBadge: typeof import('./src/components/common/InstallAppBadge.vue')['default']
     InvoiceCart: typeof import('./src/components/sale/InvoiceCart.vue')['default']
     InvoiceDetailDialog: typeof import('./src/components/invoices/InvoiceDetailDialog.vue')['default']

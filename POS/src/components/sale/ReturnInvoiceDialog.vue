@@ -1179,6 +1179,8 @@
 </template>
 
 <script setup>
+import { useAuthorization } from "@/composables/useAuthorization";
+import { isAuthorizationError } from "@/utils/authorizationError";
 import { useOfflineStatus } from "@/composables/useOfflineStatus";
 import { useToast } from "@/composables/useToast";
 import { getPaymentIcon } from "@/utils/payment";
@@ -1194,6 +1196,9 @@ import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 
 const { showSuccess, showError, showWarning } = useToast();
 const { isOffline } = useOfflineStatus();
+const { requireAuthorization } = useAuthorization();
+const authorizationToken = ref(null);
+const awaitingAuthorization = ref(false);
 
 // ============================================
 // Constants (hoisted for performance)
@@ -1444,10 +1449,10 @@ const createReturnResource = createResource({
 			doctype: "Sales Invoice",
 			pos_profile: props.posProfile,
 			posa_pos_opening_shift: props.posOpeningShift,
-			customer: baseDoc.customer || originalInvoice.value.customer,
-			company: baseDoc.company || originalInvoice.value.company,
+			customer: baseDoc.customer || originalInvoice.value?.customer,
+			company: baseDoc.company || originalInvoice.value?.company,
 			is_return: 1,
-			return_against: baseDoc.return_against || originalInvoice.value.name,
+			return_against: baseDoc.return_against || originalInvoice.value?.name,
 			// Setting to 0 ensures GL entries point to original invoice,
 			// which reduces its outstanding amount and updates its status
 			update_outstanding_for_self: 0,
@@ -1483,7 +1488,8 @@ const createReturnResource = createResource({
 						mode_of_payment: payment.mode_of_payment,
 						amount: -Math.abs(payment.amount),
 				  })),
-			remarks: returnReason.value || __("Return against {0}", [originalInvoice.value.name]),
+			remarks: returnReason.value || __("Return against {0}", [originalInvoice.value?.name]),
+			authorization_token: authorizationToken.value,
 		};
 
 		// Return in the correct format: invoice as JSON string
@@ -1980,7 +1986,7 @@ function handleKeyboardShortcuts(event) {
 		event.preventDefault();
 		handleCreateReturn();
 	}
-	if (event.key === "Escape") closeReturnModal();
+	if (event.key === "Escape" && !awaitingAuthorization.value) closeReturnModal();
 }
 
 function incrementReturnQuantity(item) {
@@ -2009,25 +2015,84 @@ async function handleCreateReturn() {
 	}
 
 	submitError.value = "";
+
+	const returnAgainst = preparedReturnDoc.value?.return_against || originalInvoice.value?.name;
+	const action = returnAgainst ? "Sales Invoice Return" : "Sales Return Without Invoice";
+
+	authorizationToken.value = null;
+	awaitingAuthorization.value = true;
+	let grant;
+	try {
+		grant = await requireAuthorization(action, {
+			pos_profile: props.posProfile,
+			return_against: returnAgainst,
+			customer: preparedReturnDoc.value?.customer || originalInvoice.value?.customer,
+			amount: returnTotal.value,
+		});
+	} finally {
+		awaitingAuthorization.value = false;
+	}
+
+	if (!grant) return;
+
+	if (!originalInvoice.value) {
+		openErrorDialog(
+			__("This return was closed before authorization completed. Please start again.")
+		);
+		return;
+	}
+
+	authorizationToken.value = grant.grant_token || null;
 	isSubmitting.value = true;
 
 	try {
-		const result = await createReturnResource.submit();
-
-		// Check if result contains an error (HTTP 417 might return error in response body)
-		if (result && result.exc) {
-			throw result;
-		}
+		await submitReturnOnce();
 	} catch (error) {
-		console.error("Caught error in handleCreateReturn:", error);
+		let failure = error;
+
+		if (isAuthorizationError(failure) && !authorizationToken.value) {
+			try {
+				const retryGrant = await requireAuthorization(
+					action,
+					{
+						pos_profile: props.posProfile,
+						return_against: returnAgainst,
+						customer: preparedReturnDoc.value?.customer || originalInvoice.value?.customer,
+						amount: returnTotal.value,
+					},
+					{ force: true }
+				);
+
+				if (!retryGrant) return;
+				if (retryGrant.grant_token) {
+					authorizationToken.value = retryGrant.grant_token;
+					await submitReturnOnce();
+					return;
+				}
+			} catch (retryError) {
+				failure = retryError;
+			}
+		}
+
+		console.error("Caught error in handleCreateReturn:", failure);
 		if (!submitError.value) {
-			const errorMsg = extractErrorMessage(error);
+			const errorMsg = extractErrorMessage(failure);
 			submitError.value = errorMsg;
 			openErrorDialog(errorMsg);
 		}
 	} finally {
 		isSubmitting.value = false;
+		authorizationToken.value = null;
 	}
+}
+
+async function submitReturnOnce() {
+	const result = await createReturnResource.submit();
+
+	if (result && result.exc) {
+		throw result;
+	}
+	return result;
 }
 
 function resetForm() {

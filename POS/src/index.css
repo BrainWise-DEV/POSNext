@@ -7,6 +7,33 @@
 	--z-dialog-overlay: 400;
 	--z-dialog-content: 500;
 	--z-dropdown: 10000;
+	--z-authorization: 10010;
+}
+
+/* POS fills the space its host leaves it, instead of assuming it owns the whole
+   viewport. A host can put chrome above us — Frappe's navbar, a demo countdown
+   banner — usually as padding on the body. A page sized at a flat 100vh ignores
+   that padding and simply hangs off the bottom of the screen, taking the till's
+   Checkout button with it. Sizing the chain with flex instead means the page is
+   whatever is actually left over, whether that is 48px of banner, 86px of a
+   two-row one on a phone, or nothing at all. */
+html,
+body {
+	height: 100%;
+}
+
+body {
+	box-sizing: border-box;
+	min-height: 100dvh;
+	display: flex;
+	flex-direction: column;
+}
+
+#app {
+	flex: 1;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
 }
 
 /* Apply Saudi Riyal symbol font to body for currency support */
@@ -27,6 +54,16 @@ body {
 .dialog-overlay .dialog-content,
 .dialog-content {
 	z-index: 500 !important;
+}
+
+/*
+ * frappe-ui Select portals to document.body and copies SelectContent's
+ * z-[100] onto a position:fixed wrapper. POS overlays sit at z-300+, so
+ * the option list otherwise opens behind the dialog.
+ */
+[data-reka-popper-content-wrapper],
+body > div[style*="position: fixed"][style*="z-index"]:has([role="listbox"]) {
+	z-index: var(--z-dropdown) !important;
 }
 
 /* Mobile touch optimizations - removes 300ms tap delay and improves scrolling */

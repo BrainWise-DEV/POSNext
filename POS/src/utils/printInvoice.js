@@ -17,6 +17,15 @@ function formatCurrency(amount) {
 	return Number.parseFloat(amount || 0).toFixed(2);
 }
 
+function getSalesPersonNames(invoiceData) {
+	const salesTeam = invoiceData.sales_team;
+	if (!Array.isArray(salesTeam) || salesTeam.length === 0) return "";
+	return salesTeam
+		.map((row) => row.sales_person_name || row.sales_person)
+		.filter(Boolean)
+		.join(", ");
+}
+
 /**
  * Fall back to summing payment rows when paid_amount is not set —
  * offline invoices lack paid_amount until server submission.
@@ -66,6 +75,8 @@ function receiptDocFromQueuedInvoice(offlineId, raw) {
 		posting_date: raw.posting_date || new Date().toISOString().slice(0, 10),
 		company: raw.company,
 		customer_name: raw.customer,
+		sales_team: raw.sales_team,
+		coupon_code: raw.coupon_code,
 		items: items.map((item) => ({
 			...item,
 			quantity: item.quantity ?? item.qty,
@@ -157,6 +168,7 @@ const RECEIPT_STYLES = `
 export function buildReceiptHTML(invoiceData) {
 	const items = invoiceData.items || [];
 	const paidAmount = derivePaidAmount(invoiceData);
+	const salesPersonNames = getSalesPersonNames(invoiceData);
 	const itemsHtml = items
 		.map((item) => {
 			const hasDiscount =
@@ -218,6 +230,16 @@ export function buildReceiptHTML(invoiceData) {
 							? `<div><span>${__("Customer:")}</span><span>${
 									invoiceData.customer_name || invoiceData.customer
 							  }</span></div>`
+							: ""
+					}
+					${
+						salesPersonNames
+							? `<div><span>${__("Sales Person:")}</span><span>${salesPersonNames}</span></div>`
+							: ""
+					}
+					${
+						invoiceData.coupon_code
+							? `<div><span>${__("Coupon:")}</span><span>${invoiceData.coupon_code}</span></div>`
 							: ""
 					}
 					${

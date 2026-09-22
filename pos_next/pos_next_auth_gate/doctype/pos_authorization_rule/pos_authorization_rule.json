@@ -1,0 +1,92 @@
+{
+ "actions": [],
+ "autoname": "format:AUTH-RULE-{#####}",
+ "creation": "2026-08-10 00:00:00",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "action",
+  "pos_profile",
+  "column_break_main",
+  "enabled",
+  "allow_self_approval",
+  "section_break_approvers",
+  "approvers"
+ ],
+ "fields": [
+  {
+   "description": "Which POS action this rule gates.",
+   "fieldname": "action",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Action",
+   "options": "Sales Invoice Return\nSales Return Without Invoice",
+   "reqd": 1
+  },
+  {
+   "description": "Leave blank to apply to every POS Profile. A rule naming a profile takes precedence over a blank one.",
+   "fieldname": "pos_profile",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "POS Profile",
+   "options": "POS Profile"
+  },
+  {
+   "fieldname": "column_break_main",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Enabled"
+  },
+  {
+   "default": "1",
+   "description": "When enabled, an approver may authorize an action they started themselves.",
+   "fieldname": "allow_self_approval",
+   "fieldtype": "Check",
+   "label": "Allow Self Approval"
+  },
+  {
+   "fieldname": "section_break_approvers",
+   "fieldtype": "Section Break",
+   "label": "Approvers"
+  },
+  {
+   "fieldname": "approvers",
+   "fieldtype": "Table",
+   "label": "Approvers",
+   "options": "POS Authorization Approver",
+   "reqd": 1
+  }
+ ],
+ "links": [],
+ "modified": "2026-08-12 14:21:20.786243",
+ "modified_by": "Administrator",
+ "module": "POS Next Auth Gate",
+ "name": "POS Authorization Rule",
+ "naming_rule": "Expression (old style)",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
