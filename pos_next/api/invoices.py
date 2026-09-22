@@ -289,6 +289,87 @@ def _strip_server_managed_fields(payload):
 	return cleaned
 
 
+def _apply_pos_sales_team(invoice_doc, sales_team_data=None, pos_profile=None):
+	"""
+	Resolve item-level + invoice-level Sales Persons into Sales Invoice.sales_team.
+
+	- Lines with ``sales_person`` keep that SP at 100% of the line.
+	- Uncovered lines fall back to ``sales_team_data`` (invoice-level team).
+	- Rebuilds allocated_percentage / incentives using Item / Item Group / Brand rates.
+
+	``sales_team_data`` must be the cashier / payment-screen team (or ``[]`` / ``None``).
+	Never pass the rebuilt aggregate from a draft invoice — that would treat item-level
+	SPs as invoice-level fallbacks. ``None`` means no invoice-level team (``[]``).
+	"""
+	from pos_next.pos_next.utils.sales_person_commission import (
+		apply_return_sales_person_from_original,
+		apply_sales_team_to_invoice,
+		build_sales_team_from_items,
+		clear_sales_person_fields,
+		persist_invoice_level_sales_team,
+		sales_persons_enabled,
+		validate_sales_person_assignments,
+		validate_sales_person_coverage,
+	)
+
+	profile = pos_profile or invoice_doc.get("pos_profile")
+
+	# Feature disabled → strip any client-supplied SP fields (do not build commission)
+	if not sales_persons_enabled(profile):
+		clear_sales_person_fields(invoice_doc)
+		return
+
+	# Returns: lock sales_person (and invoice-level team) to the original sale
+	if invoice_doc.get("is_return") and invoice_doc.get("return_against"):
+		apply_return_sales_person_from_original(invoice_doc)
+		invoice_level = getattr(invoice_doc.flags, "pos_invoice_level_sales_team", None) or []
+		# Coverage still required when feature enabled; skip allowlist — original
+		# SPs may have been disabled since the sale and must still reverse.
+		validate_sales_person_coverage(
+			invoice_doc,
+			pos_profile=profile,
+			invoice_level_team=invoice_level,
+		)
+	else:
+		# Explicit cashier team only — never fall back to rebuilt doc.sales_team
+		invoice_level = sales_team_data if sales_team_data is not None else []
+
+		validate_sales_person_coverage(
+			invoice_doc,
+			pos_profile=profile,
+			invoice_level_team=invoice_level,
+		)
+		validate_sales_person_assignments(
+			invoice_doc,
+			pos_profile=profile,
+			invoice_level_team=invoice_level,
+		)
+
+	# Remember invoice-level fallback so calculate_contribution can rebuild correctly
+	invoice_doc.flags.pos_invoice_level_sales_team = invoice_level
+	# Persist cashier team (not the rebuilt aggregate) for accurate return reversal
+	if not (invoice_doc.get("is_return") and invoice_doc.get("return_against")):
+		persist_invoice_level_sales_team(invoice_doc, invoice_level)
+
+	rows = build_sales_team_from_items(invoice_doc, invoice_level_team=invoice_level)
+	apply_sales_team_to_invoice(invoice_doc, rows)
+
+
+def _resolve_submit_invoice_level_team(invoice, data):
+	"""Cashier invoice-level team for submit.
+
+	Prefer ``data.sales_team`` (online flow). Offline sync stores the cashier team on
+	the invoice payload and sends ``data: {}`` — accept ``invoice.sales_team`` only
+	when ``offline_id`` is present (never for online drafts whose sales_team is the
+	rebuilt aggregate).
+	"""
+	if isinstance(data, dict) and isinstance(data.get("sales_team"), list):
+		return data.get("sales_team")
+	if invoice.get("offline_id") and isinstance(invoice.get("sales_team"), list):
+		return invoice.get("sales_team")
+	return []
+
+
 def get_payment_account(mode_of_payment, company):
 	"""
 	Get account for mode of payment.
@@ -661,16 +742,21 @@ def validate_return_items(original_invoice_name, return_items, doctype="Sales In
 					).format(original_invoice_name, days_since_invoice, return_validity_days),
 				}
 
-	# Aggregate original item quantities by item_code
+	# Aggregate original item quantities by item_code and by row name
 	si_item = frappe.qb.DocType(f"{doctype} Item")
 	original_items = (
 		frappe.qb.from_(si_item)
-		.select(si_item.item_code, Sum(si_item.qty).as_("total_qty"))
+		.select(si_item.name, si_item.item_code, si_item.qty)
 		.where(si_item.parent == original_invoice_name)
-		.groupby(si_item.item_code)
 	).run(as_dict=True)
 
-	original_item_qty = {item.item_code: flt(item.total_qty) for item in original_items}
+	original_item_qty = {}
+	original_row_qty = {}
+	original_row_item = {}
+	for item in original_items:
+		original_item_qty[item.item_code] = original_item_qty.get(item.item_code, 0) + flt(item.qty)
+		original_row_qty[item.name] = flt(item.qty)
+		original_row_item[item.name] = item.item_code
 
 	# Aggregate quantities already returned from previous return invoices
 	ret_si = frappe.qb.DocType(doctype)
@@ -680,24 +766,58 @@ def validate_return_items(original_invoice_name, return_items, doctype="Sales In
 		frappe.qb.from_(ret_si)
 		.inner_join(ret_item)
 		.on(ret_item.parent == ret_si.name)
-		.select(ret_item.item_code, Sum(Abs(ret_item.qty)).as_("returned_qty"))
+		.select(
+			ret_item.item_code,
+			ret_item.sales_invoice_item,
+			Sum(Abs(ret_item.qty)).as_("returned_qty"),
+		)
 		.where(
 			(ret_si.return_against == original_invoice_name)
 			& (ret_si.docstatus == 1)
 			& (ret_si.is_return == 1)
 		)
-		.groupby(ret_item.item_code)
+		.groupby(ret_item.item_code, ret_item.sales_invoice_item)
 	).run(as_dict=True)
 
-	# Subtract returned quantities
+	# Subtract returned quantities (by row when linked, else by item_code)
 	for row in returned_qty_data:
+		qty = flt(row.returned_qty)
+		if row.sales_invoice_item and row.sales_invoice_item in original_row_qty:
+			original_row_qty[row.sales_invoice_item] -= qty
 		if row.item_code in original_item_qty:
-			original_item_qty[row.item_code] -= flt(row.returned_qty)
+			original_item_qty[row.item_code] -= qty
 
 	# Validate new return items
 	for item in return_items:
 		item_code = item.get("item_code")
 		return_qty = abs(flt(item.get("qty", 0)))
+		row_ref = item.get("sales_invoice_item")
+
+		if row_ref:
+			if row_ref not in original_row_item:
+				return {
+					"valid": False,
+					"message": _("Return item link {0} does not belong to invoice {1}").format(
+						row_ref, original_invoice_name
+					),
+				}
+			if item_code and original_row_item[row_ref] != item_code:
+				return {
+					"valid": False,
+					"message": _(
+						"Return item {0} does not match original row {1} ({2})"
+					).format(item_code, row_ref, original_row_item[row_ref]),
+				}
+			remaining_row = original_row_qty.get(row_ref, 0)
+			if return_qty > remaining_row:
+				return {
+					"valid": False,
+					"message": _(
+						"You are trying to return more quantity for item {0} than remains on that line."
+					).format(item_code),
+				}
+			original_row_qty[row_ref] = remaining_row - return_qty
+
 		remaining = original_item_qty.get(item_code, 0)
 		if return_qty > remaining:
 			return {
@@ -706,6 +826,7 @@ def validate_return_items(original_invoice_name, return_items, doctype="Sales In
 					item_code
 				),
 			}
+		original_item_qty[item_code] = remaining - return_qty
 
 	return {"valid": True}
 
@@ -1029,6 +1150,15 @@ def update_invoice(data):
 					errors = _collect_stock_errors(stock_items)
 					if errors:
 						frappe.throw(frappe.as_json({"errors": errors}), frappe.ValidationError)
+
+		# Resolve item-level + invoice-level sales persons into sales_team.
+		# Use only the cashier payload team — never the (possibly rebuilt) doc.sales_team.
+		if doctype == "Sales Invoice":
+			_apply_pos_sales_team(
+				invoice_doc,
+				sales_team_data=data.get("sales_team") if isinstance(data.get("sales_team"), list) else [],
+				pos_profile=pos_profile,
+			)
 
 		# Save as draft
 		invoice_doc.flags.ignore_permissions = True
@@ -1383,22 +1513,15 @@ def submit_invoice(invoice=None, data=None):
 		if doctype == "Sales Invoice" and hasattr(invoice_doc, "payments"):
 			_set_payment_accounts(invoice_doc.payments, invoice_doc.company)
 
-		# Handle sales team (multiple sales persons)
-		sales_team_data = invoice.get("sales_team") or data.get("sales_team")
-		if sales_team_data and isinstance(sales_team_data, list):
-			# Clear existing sales team entries
-			invoice_doc.sales_team = []
-
-			# Add new sales team entries
-			for member in sales_team_data:
-				if member and isinstance(member, dict):
-					invoice_doc.append(
-						"sales_team",
-						{
-							"sales_person": member.get("sales_person"),
-							"allocated_percentage": member.get("allocated_percentage", 0),
-						},
-					)
+		# Resolve item-level + invoice-level sales persons into sales_team.
+		# Prefer cashier team from submit ``data``; offline uses invoice.sales_team
+		# only when offline_id is set (never the rebuilt draft aggregate).
+		if doctype == "Sales Invoice":
+			_apply_pos_sales_team(
+				invoice_doc,
+				sales_team_data=_resolve_submit_invoice_level_team(invoice, data),
+				pos_profile=pos_profile,
+			)
 
 		# Handle POS Coupon if coupon_code is provided
 		coupon_code = invoice.get("coupon_code") or data.get("coupon_code")

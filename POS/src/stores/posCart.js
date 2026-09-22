@@ -1199,6 +1199,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 						free_qty: freeItemsToGive,
 						pricing_rules: [offer.name],
 						warehouse: item.warehouse,
+						sales_person: item.sales_person || null,
+						sales_person_name: item.sales_person_name || null,
 					});
 				}
 				applied = true;
@@ -1544,6 +1546,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				cartItem.is_rate_manually_edited = updates.is_rate_manually_edited;
 			if (updates.original_rate !== undefined)
 				cartItem.original_rate = updates.original_rate;
+			if (updates.sales_person !== undefined) {
+				cartItem.sales_person = updates.sales_person || null;
+				cartItem.sales_person_name = updates.sales_person
+					? updates.sales_person_name || updates.sales_person
+					: null;
+			}
 
 			recalculateItem(cartItem);
 			rebuildIncrementalCache();

@@ -1476,6 +1476,8 @@ const createReturnResource = createResource({
 				conversion_factor: item.conversion_factor || 1,
 				// Link to original invoice item row for accurate return tracking in ERPNext
 				sales_invoice_item: item.name,
+				// Preserve item-level sales person for commission reversal
+				sales_person: item.sales_person || null,
 			})),
 			// Flag to indicate return amount should be added to customer credit balance
 			add_to_customer_balance: addToCustomerCredit.value,

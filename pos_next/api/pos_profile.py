@@ -357,32 +357,58 @@ def get_wallet_payment_flags(methods):
 
 @frappe.whitelist()
 def get_sales_persons(pos_profile=None):
-	"""Get all active individual sales persons (not groups) for POS"""
-	try:
-		filters = {
-			"enabled": 1,
-			"is_group": 0,  # Only get individual sales persons, not group nodes
-		}
+	"""Get all active individual sales persons (not groups) for POS.
 
-		# If company is specified via POS Profile, filter by company (if Sales Person has company field)
-		if pos_profile:
-			company = frappe.db.get_value("POS Profile", pos_profile, "company")
-			# Check if Sales Person doctype has a company field
-			if frappe.db.has_column("Sales Person", "company") and company:
-				filters["company"] = company
+	Each row includes commission override lists from the Sales Person master:
+	- ``item_commissions``: ``[{item, commission_rate}, ...]``
+	- ``item_group_commissions``: ``[{item_group, commission_rate}, ...]``
+	- ``brand_commissions``: ``[{brand, commission_rate}, ...]``
 
-		sales_persons = frappe.get_list(
-			"Sales Person",
-			filters=filters,
-			fields=["name", "sales_person_name", "commission_rate", "employee"],
-			order_by="sales_person_name",
-			limit_page_length=0,
-		)
+	Rate priority when calculating: Item → Item Group → Brand → commission_rate.
+	"""
+	from pos_next.pos_next.utils.sales_person_commission import get_sales_person_commission_maps
 
-		return sales_persons
-	except Exception:
-		frappe.log_error(frappe.get_traceback(), "Get Sales Persons Error")
-		return []
+	if not pos_profile:
+		frappe.throw(_("POS Profile is required"))
+
+	has_access = frappe.db.exists(
+		"POS Profile User", {"parent": pos_profile, "user": frappe.session.user}
+	)
+	if not has_access:
+		frappe.throw(_("You don't have access to this POS Profile"))
+
+	filters = {
+		"enabled": 1,
+		"is_group": 0,  # Only get individual sales persons, not group nodes
+	}
+
+	company = frappe.db.get_value("POS Profile", pos_profile, "company")
+	if frappe.db.has_column("Sales Person", "company") and company:
+		filters["company"] = company
+
+	sales_persons = frappe.get_list(
+		"Sales Person",
+		filters=filters,
+		fields=["name", "sales_person_name", "commission_rate", "employee"],
+		order_by="sales_person_name",
+		limit_page_length=0,
+	)
+
+	for person in sales_persons:
+		maps = get_sales_person_commission_maps(person.name)
+		person["item_commissions"] = [
+			{"item": item, "commission_rate": rate} for item, rate in maps["item_map"].items()
+		]
+		person["item_group_commissions"] = [
+			{"item_group": ig, "commission_rate": rate}
+			for ig, rate in maps["item_group_map"].items()
+		]
+		person["brand_commissions"] = [
+			{"brand": brand, "commission_rate": rate}
+			for brand, rate in maps["brand_map"].items()
+		]
+
+	return sales_persons
 
 
 @frappe.whitelist()

@@ -324,8 +324,20 @@ const syncInvoiceToServer = async (invoice, retryCount = 0) => {
 	const invoiceData = normalizeInvoiceForSync(invoice.data, offlineId);
 
 	try {
+		// Pass cashier sales_team in ``data`` so the server does not treat a
+		// rebuilt draft aggregate as the invoice-level fallback. Offline
+		// invoices also keep sales_team on the invoice payload (offline_id).
+		const salesTeam = Array.isArray(invoiceData.sales_team) ? invoiceData.sales_team : [];
 		const response = await call("pos_next.api.invoices.submit_invoice", {
-			data: JSON.stringify({ invoice: invoiceData, data: {} }),
+			data: JSON.stringify({
+				invoice: invoiceData,
+				data: {
+					sales_team: salesTeam.map((member) => ({
+						sales_person: member.sales_person,
+						allocated_percentage: member.allocated_percentage || 0,
+					})),
+				},
+			}),
 		});
 
 		if (response.message || response.name) {

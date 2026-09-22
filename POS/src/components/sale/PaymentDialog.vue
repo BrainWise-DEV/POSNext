@@ -66,6 +66,16 @@
 								: 'bg-purple-50 border border-purple-200',
 						]"
 					>
+						<p
+							v-if="allItemsHaveSalesPerson"
+							class="text-xs text-purple-700 mb-1.5"
+						>
+							{{
+								__(
+									"All items have a Sales Person — invoice-level selection is optional."
+								)
+							}}
+						</p>
 						<!-- Single Mode: Show selected person or dropdown -->
 						<template v-if="settingsStore.isSingleSalesPerson">
 							<!-- Show selected person as a nice display -->
@@ -2521,7 +2531,13 @@ const totalSalesAllocation = computed(() => {
 	return selectedSalesPersons.value.reduce((sum, p) => sum + (p.allocated_percentage || 0), 0);
 });
 
-// Computed: Validation - sales person is required when enabled and online
+// Computed: Validation - sales person is required when enabled and online,
+// unless every cart line already has an item-level sales person.
+const allItemsHaveSalesPerson = computed(() => {
+	const cartItems = (props.items || []).filter((item) => !item?.is_free_item);
+	return cartItems.length > 0 && cartItems.every((item) => item?.sales_person);
+});
+
 const isSalesPersonValid = computed(() => {
 	// If sales persons feature is disabled, always valid
 	if (!settingsStore.enableSalesPersons) {
@@ -2532,7 +2548,11 @@ const isSalesPersonValid = computed(() => {
 	if (props.isOffline) {
 		return true;
 	}
-	// At least one sales person must be selected
+	// All lines covered by item-level SP → invoice-level SP not required
+	if (allItemsHaveSalesPerson.value) {
+		return true;
+	}
+	// At least one sales person must be selected at invoice level
 	return selectedSalesPersons.value.length > 0;
 });
 
