@@ -14,23 +14,6 @@
   <meta name="apple-mobile-web-app-title" content="POSNext" />
   <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='%234F46E5' d='M20 7h-4V4c0-1.1-.9-2-2-2h-4c-1.1 0-2 .9-2 2v3H4c-1.1 0-2 .9-2 2v11c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V9c0-1.1-.9-2-2-2zM10 4h4v3h-4V4zm10 16H4V9h16v11z'/></svg>" />
   <title>POSNext</title>
-  <!--
-    Frappe rewrites the csrf_token placeholder per session, outside the page
-    cache, so the token is on the page at first paint instead of arriving over
-    the network after the SPA boots; the demo card's first POST needs it.
-
-    It lands on frappe.csrf_token. Move it to window.csrf_token, the one copy
-    utils/csrf.js keeps fresh, so nothing reads a stale token after an in-app
-    re-login. A guest page renders the string "None"; drop that, or the SPA
-    would take it as a real token after login and skip fetching one.
-  -->
-  <script>window.frappe = window.frappe || {};</script>
-  <!-- csrf_token -->
-  <script>
-    if (window.frappe.csrf_token && window.frappe.csrf_token !== "None")
-      window.csrf_token = window.frappe.csrf_token;
-    delete window.frappe.csrf_token;
-  </script>
 </head>
 
 <body>
