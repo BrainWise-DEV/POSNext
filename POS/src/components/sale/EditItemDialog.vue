@@ -288,6 +288,25 @@
 												</div>
 											</div>
 
+											<!-- Sales Person (item-level, optional) -->
+											<div
+												v-if="settingsStore.enableSalesPersons"
+												class="border-t border-gray-200 pt-4"
+											>
+												<label
+													class="block text-sm font-medium text-gray-700 mb-2 text-start"
+												>
+													{{ __("Sales Person") }}
+													<span class="ms-1 text-xs text-gray-400 font-normal"
+														>({{ __("Optional") }})</span
+													>
+												</label>
+												<SelectInput
+													v-model="localSalesPerson"
+													:options="salesPersonOptions"
+												/>
+											</div>
+
 											<!-- Serial Numbers Section (only for serial items) -->
 											<div
 												v-if="
@@ -616,6 +635,7 @@ const localQuantity = ref(1);
 const localUom = ref("");
 const localRate = ref(0);
 const localWarehouse = ref("");
+const localSalesPerson = ref("");
 const discountType = ref("percentage");
 const discountValue = ref(0);
 const calculatedSubtotal = ref(0);
@@ -627,6 +647,7 @@ const isInitializingItem = ref(false);
 const uomRateRequestId = ref(0);
 const localSerials = ref([]); // List of serial numbers for this item
 const removedSerials = ref([]); // Track serials removed during this edit session
+const salesPersons = ref([]); // Cached sales persons for item-level picker
 const originalSerials = ref([]); // Original serials when dialog opened
 const originalPriceListRate = ref(0); // Original price_list_rate when dialog opened (for rate edit validation)
 // True when server confirms current qty qualifies for an active promotion
@@ -755,6 +776,46 @@ const discountTypeOptions = computed(() => [
 	{ value: "amount", label: __("Amount") },
 ]);
 
+const salesPersonOptions = computed(() => {
+	const options = [{ value: "", label: __("— None —") }];
+	for (const person of salesPersons.value) {
+		options.push({
+			value: person.name,
+			label: person.sales_person_name || person.name,
+		});
+	}
+	return options;
+});
+
+async function loadSalesPersons() {
+	if (!settingsStore.enableSalesPersons) {
+		salesPersons.value = [];
+		return;
+	}
+	const posProfile = settingsStore.settings?.pos_profile;
+	try {
+		if (navigator.onLine === false && posProfile) {
+			const { getCachedSalesPersons } = await import("@/utils/offline/cache");
+			salesPersons.value = (await getCachedSalesPersons(posProfile)) || [];
+			return;
+		}
+		const result = await call("pos_next.api.pos_profile.get_sales_persons", {
+			pos_profile: posProfile || undefined,
+		});
+		salesPersons.value = result?.message || result || [];
+	} catch (error) {
+		console.error("Failed to load sales persons for item edit:", error);
+		if (posProfile) {
+			try {
+				const { getCachedSalesPersons } = await import("@/utils/offline/cache");
+				salesPersons.value = (await getCachedSalesPersons(posProfile)) || [];
+			} catch {
+				salesPersons.value = [];
+			}
+		}
+	}
+}
+
 // Initialize local state when item changes
 watch(
 	() => props.item,
@@ -768,6 +829,7 @@ watch(
 			// Store original price_list_rate for rate edit validation
 			originalPriceListRate.value = newItem.price_list_rate || newItem.rate || 0;
 			localWarehouse.value = newItem.warehouse || props.warehouses[0]?.name || "";
+			localSalesPerson.value = newItem.sales_person || "";
 
 			// Initialize serial numbers
 			if (newItem.has_serial_no && newItem.serial_no) {
@@ -817,6 +879,15 @@ watch(
 		}
 	},
 	{ immediate: true }
+);
+
+watch(
+	() => props.modelValue,
+	(isOpen) => {
+		if (isOpen && settingsStore.enableSalesPersons) {
+			loadSalesPersons();
+		}
+	}
 );
 
 watch(localUom, (newUom, oldUom) => {
@@ -1165,6 +1236,9 @@ function updateItem() {
 		}
 	}
 
+	const selectedSp = localSalesPerson.value || null;
+	const selectedSpMeta = salesPersons.value.find((p) => p.name === selectedSp);
+
 	const updatedItem = {
 		...localItem.value,
 		quantity: localQuantity.value,
@@ -1186,6 +1260,10 @@ function updateItem() {
 		// Track manual rate edits for audit logging
 		is_rate_manually_edited: isRateManuallyEdited ? 1 : 0,
 		original_rate: isRateManuallyEdited ? originalPriceListRate.value : null,
+		sales_person: selectedSp,
+		sales_person_name: selectedSp
+			? selectedSpMeta?.sales_person_name || selectedSp
+			: null,
 	};
 
 	// Update serial numbers if item has serials

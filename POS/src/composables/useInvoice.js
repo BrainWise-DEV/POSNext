@@ -292,6 +292,9 @@ export function useInvoice() {
 				is_stock_item: item.is_stock_item ?? 1,
 				is_bundle: item.is_bundle || false,
 				allow_negative_stock: item.allow_negative_stock || 0,
+				// Optional item-level Sales Person (commission attribution)
+				sales_person: item.sales_person || null,
+				sales_person_name: item.sales_person_name || null,
 			};
 			invoiceItems.value.push(newItem);
 			// Recalculate the newly added item to apply taxes
@@ -758,6 +761,7 @@ export function useInvoice() {
 			is_rate_manually_edited: item.is_rate_manually_edited || 0,
 			original_rate: item.original_rate || null,
 			is_free_item: item.is_free_item || 0,
+			sales_person: item.sales_person || null,
 		});
 
 		const out = [];
@@ -791,6 +795,8 @@ export function useInvoice() {
 						is_rate_manually_edited: 0,
 						original_rate: null,
 						is_free_item: 1,
+						// Inherit parent line SP so free rows never block coverage
+						sales_person: item.sales_person || null,
 					});
 				}
 			}
@@ -1045,6 +1051,15 @@ export function useInvoice() {
 				const submitData = {
 					change_amount: remainingAmount.value < 0 ? Math.abs(remainingAmount.value) : 0,
 					write_off_amount: writeOffAmount || 0,
+					// Pass cashier invoice-level team explicitly — never rely on the
+					// draft's rebuilt sales_team (item-level SPs aggregated in).
+					sales_team:
+						rawSalesTeam && rawSalesTeam.length > 0
+							? rawSalesTeam.map((member) => ({
+									sales_person: member.sales_person,
+									allocated_percentage: member.allocated_percentage || 0,
+								}))
+							: [],
 				};
 
 				if (redeemedCustomerCredit > 0 && customerCreditDict.length > 0) {

@@ -94,6 +94,21 @@ class CustomSalesInvoice(SalesInvoice):
 		if cint(self.is_pos):
 			self._validate_pos_payment_accounts()
 
+	def calculate_contribution(self):
+		"""Use per-line Item Group commission rates when item-level SP is in play."""
+		from pos_next.pos_next.utils.sales_person_commission import (
+			apply_item_level_contribution,
+			needs_item_level_contribution,
+		)
+
+		if needs_item_level_contribution(self) or getattr(
+			self.flags, "pos_commission_breakdown", None
+		):
+			apply_item_level_contribution(self)
+			return
+
+		super().calculate_contribution()
+
 	def on_submit(self):
 		# Re-align after fetch_from so ERPNext's loyalty branch does not run on a
 		# credit note whose original invoice has no loyalty_program.
