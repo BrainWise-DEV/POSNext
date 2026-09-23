@@ -2,4 +2,4 @@
 # For license information, please see license.txt
 
 
-from pos_next.authorization.actions import sales_invoice
+from pos_next.authorization.actions import pos_expense, sales_invoice
