@@ -339,11 +339,12 @@ def _validate_and_lock_invoice_credit(invoice_name, amount_to_redeem, customer, 
 	available_credit = -current_outstanding  # Credit is negative outstanding
 
 	if available_credit < amount_to_redeem:
+		currency = frappe.get_cached_value("Company", company, "default_currency")
 		frappe.throw(
 			_("Insufficient credit available from {0}. Available: {1}, Requested: {2}").format(
 				invoice_name,
-				frappe.format_value(available_credit, {"fieldtype": "Currency"}),
-				frappe.format_value(amount_to_redeem, {"fieldtype": "Currency"}),
+				frappe.format_value(available_credit, {"fieldtype": "Currency"}, currency=currency),
+				frappe.format_value(amount_to_redeem, {"fieldtype": "Currency"}, currency=currency),
 			)
 		)
 
@@ -400,11 +401,12 @@ def _validate_and_lock_advance_credit(payment_entry_name, amount_to_redeem, cust
 	available_amount = flt(result[0].unallocated_amount)
 
 	if available_amount < amount_to_redeem:
+		currency = frappe.get_cached_value("Company", company, "default_currency")
 		frappe.throw(
 			_("Insufficient unallocated amount in {0}. Available: {1}, Requested: {2}").format(
 				payment_entry_name,
-				frappe.format_value(available_amount, {"fieldtype": "Currency"}),
-				frappe.format_value(amount_to_redeem, {"fieldtype": "Currency"}),
+				frappe.format_value(available_amount, {"fieldtype": "Currency"}, currency=currency),
+				frappe.format_value(amount_to_redeem, {"fieldtype": "Currency"}, currency=currency),
 			)
 		)
 

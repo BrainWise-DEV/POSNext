@@ -49,11 +49,13 @@ class TestLinkedReturnCredit(FrappeTestCase):
 	def tearDown(self):
 		frappe.db.rollback(save_point="linked_return_credit")
 
-	def _pos_sale(self, paid):
-		c = self.company
+	def _pos_sale(self, paid, company=None):
+		c = company or self.company
 		doc = frappe.get_doc(
 			doctype="Sales Invoice",
 			company=c.name,
+			currency=frappe.get_cached_value("Company", c.name, "default_currency"),
+			conversion_rate=1,
 			customer=CUSTOMER,
 			is_pos=1,
 			debit_to=c.default_receivable_account,
@@ -122,3 +124,39 @@ class TestLinkedReturnCredit(FrappeTestCase):
 		ret = self._linked_return(original, update_outstanding_for_self=1)
 
 		self.assertEqual(self._credit_sources(original.name, ret.name), [(ret.name, 100)])
+
+	def test_insufficient_credit_message_uses_company_currency(self):
+		default_currency = frappe.defaults.get_global_default("currency")
+		company = next(
+			(
+				c
+				for c in frappe.get_all(
+					"Company",
+					filters={
+						"default_receivable_account": ["is", "set"],
+						"default_income_account": ["is", "set"],
+						"default_currency": ["!=", default_currency],
+					},
+					fields=[
+						"name",
+						"default_receivable_account",
+						"default_income_account",
+						"cost_center",
+						"default_currency",
+					],
+					limit=1,
+				)
+			),
+			None,
+		)
+		if not company:
+			self.skipTest(f"No Company with a currency other than the site default {default_currency}")
+		_resolve_mode_of_payment(company.name)
+		original = self._pos_sale(paid=True, company=company)
+		self._linked_return(original)
+		rows = [{"type": "Invoice", "credit_origin": original.name, "credit_to_redeem": 100}]
+		credit_sales.redeem_customer_credit(self._pos_sale(paid=False, company=company).name, rows)
+
+		symbol = frappe.db.get_value("Currency", company.default_currency, "symbol")
+		with self.assertRaisesRegex(frappe.ValidationError, symbol):
+			credit_sales.redeem_customer_credit(self._pos_sale(paid=False, company=company).name, rows)
