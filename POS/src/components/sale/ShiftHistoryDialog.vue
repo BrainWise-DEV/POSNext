@@ -1,245 +1,273 @@
 <template>
-	<Dialog
-		v-model="show"
-		:options="{ title: __('POS Shift History'), size: '7xl' }"
-	>
-		<template #body-content>
-			<div class="flex flex-col gap-6">
-				<!-- Quick Summary Cards — totals come from the server (#11 fix) -->
-				<div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-					<div class="bg-blue-50 border border-blue-100 rounded-xl p-4 flex flex-col justify-between shadow-sm">
-						<span class="text-xs font-semibold text-blue-600 uppercase tracking-wider">{{ __('Total Sales') }}</span>
-						<span class="text-2xl font-bold text-blue-900 mt-1">{{ formatCurrency(serverTotals.total_sales) }}</span>
-					</div>
-					<div class="bg-indigo-50 border border-indigo-100 rounded-xl p-4 flex flex-col justify-between shadow-sm">
-						<span class="text-xs font-semibold text-indigo-600 uppercase tracking-wider">{{ __('Total Shifts') }}</span>
-						<span class="text-2xl font-bold text-indigo-900 mt-1">{{ serverTotals.total_shifts }}</span>
-					</div>
-					<div :class="['rounded-xl p-4 flex flex-col justify-between shadow-sm border', serverTotals.total_cash_diff >= 0 ? 'bg-emerald-50 border-emerald-100' : 'bg-rose-50 border-rose-100']">
-						<span :class="['text-xs font-semibold uppercase tracking-wider', serverTotals.total_cash_diff >= 0 ? 'text-emerald-600' : 'text-rose-600']">{{ __('Net Cash Diff') }}</span>
-						<span :class="['text-2xl font-bold mt-1', serverTotals.total_cash_diff >= 0 ? 'text-emerald-900' : 'text-rose-900']">{{ formatCurrency(serverTotals.total_cash_diff) }}</span>
-					</div>
-				</div>
-
-				<!-- Filters Section -->
-				<div class="flex flex-col sm:flex-row items-end gap-3 bg-gray-50/50 p-4 rounded-xl border border-gray-100">
-					<div class="w-full sm:w-44">
-						<label class="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">{{ __('From Date') }}</label>
-						<Input
-							type="date"
-							v-model="filters.from_date"
-							class="shadow-sm"
-							@change="loadShifts"
-						/>
-					</div>
-					<div class="w-full sm:w-44">
-						<label class="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">{{ __('To Date') }}</label>
-						<Input
-							type="date"
-							v-model="filters.to_date"
-							class="shadow-sm"
-							@change="loadShifts"
-						/>
-					</div>
-					<div class="flex-1"></div>
-					<div class="flex items-center gap-2">
-						<Button
-							variant="subtle"
-							theme="gray"
-							class="shadow-sm font-bold"
-							@click="setQuickFilter('7days')"
-						>
-							{{ __('7D') }}
-						</Button>
-						<Button
-							variant="subtle"
-							theme="gray"
-							class="shadow-sm font-bold"
-							@click="setQuickFilter('1month')"
-						>
-							{{ __('1M') }}
-						</Button>
-						<Button
-							variant="solid"
-							theme="blue"
-							class="shadow-md"
-							@click="loadShifts"
-							:loading="shiftsResource.loading"
-						>
-							<template #icon>
-								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-								</svg>
-							</template>
-							{{ __('Refresh') }}
-						</Button>
-						<Button
-							variant="subtle"
-							theme="gray"
-							class="shadow-sm border border-gray-100"
-							@click="exportToCSV"
-							:disabled="shifts.length === 0"
-						>
-							<template #icon>
-								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
-								</svg>
-							</template>
-						</Button>
-					</div>
-				</div>
-
-				<!-- Shifts Table -->
-				<div class="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-					<div v-if="shiftsResource.loading" class="flex flex-col items-center justify-center py-20">
-						<div class="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div>
-						<p class="mt-4 text-sm font-semibold text-gray-500 tracking-wide uppercase">{{ __('Loading your history...') }}</p>
-					</div>
-
-					<div v-else-if="shifts.length === 0" class="flex flex-col items-center justify-center py-20 opacity-50">
-						<svg class="h-16 w-16 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
-						</svg>
-						<p class="mt-4 text-sm font-semibold text-gray-500 uppercase tracking-widest">{{ __('No shifts found for this range') }}</p>
-					</div>
-
-					<div v-else class="overflow-x-auto max-h-[50vh]">
-						<table class="w-full text-left text-sm whitespace-nowrap border-collapse">
-							<thead class="bg-gray-50 border-b border-gray-100 top-0 sticky z-10">
-								<tr>
-									<th class="px-5 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-widest">{{ __('Shift Date') }}</th>
-									<th class="px-5 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-widest">{{ __('POS Profile') }}</th>
-									<th class="px-5 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-widest">{{ __('Cashier') }}</th>
-									<th class="px-5 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-widest text-center">{{ __('Times (Open - Close)') }}</th>
-									<th class="px-5 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-widest text-right">{{ __('Opening') }}</th>
-									<th class="px-5 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-widest text-right">{{ __('Closing') }}</th>
-									<th class="px-5 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-widest text-right">{{ __('Sales') }}</th>
-									<th class="px-5 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-widest text-right">{{ __('Cash Diff') }}</th>
-									<th class="px-5 py-3 text-[10px] font-bold text-gray-500 uppercase tracking-widest text-right">{{ __('Actions') }}</th>
-								</tr>
-							</thead>
-							<tbody class="divide-y divide-gray-50 bg-white">
-								<tr 
-									v-for="shift in shifts" 
-									:key="shift.opening_shift_name" 
-									class="hover:bg-blue-50/50 transition-all duration-200 group relative"
-								>
-									<td class="px-5 py-4 font-semibold text-gray-900 group-hover:text-blue-700">
-										{{ formatDate(shift.date) }}
-									</td>
-									<td class="px-5 py-4">
-										<span class="px-2 py-1 bg-gray-100 text-gray-700 text-[11px] font-semibold rounded-md uppercase tracking-wide">
-											{{ shift.pos_profile }}
-										</span>
-									</td>
-									<td class="px-5 py-4 text-gray-500 tabular-nums">
-										{{ shift.cashier }}
-									</td>
-									<td class="px-5 py-4 text-center">
-										<div class="flex items-center justify-center gap-2">
-											<span class="text-[11px] font-semibold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">{{ formatTime(shift.open_time) }}</span>
-											<svg class="w-3 h-3 text-gray-300" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
-											<span v-if="shift.close_time" class="text-[11px] font-semibold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded">{{ formatTime(shift.close_time) }}</span>
-											<span v-else class="text-[11px] font-semibold text-green-600 bg-green-50 px-1.5 py-0.5 rounded italic uppercase tracking-tighter">{{ __('Running') }}</span>
-										</div>
-									</td>
-									<td class="px-5 py-4 text-right tabular-nums font-medium text-gray-600">{{ formatCurrency(shift.opening_amount) }}</td>
-									<td class="px-5 py-4 text-right tabular-nums font-medium text-gray-600">{{ formatCurrency(shift.closing_amount) }}</td>
-									<td class="px-5 py-4 text-right tabular-nums font-bold text-gray-900">{{ formatCurrency(shift.sales_total) }}</td>
-									<td class="px-5 py-4 text-right">
-										<span :class="['inline-flex items-center gap-1 font-bold tabular-nums', getCashDiffColor(shift.difference)]">
-											<svg v-if="shift.difference > 0" class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z" clip-rule="evenodd"/></svg>
-											<svg v-else-if="shift.difference < 0" class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
-											{{ formatCurrency(shift.difference) }}
-										</span>
-									</td>
-									<!-- FIX #17: actions column — user can open either Opening or Closing shift -->
-									<td class="px-3 py-4 text-right">
-										<div class="flex items-center justify-end gap-1">
-											<button
-												@click.stop="openShiftDoc(shift, 'opening')"
-												class="text-[10px] font-semibold px-2 py-1 rounded bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors"
-												:title="__('View Opening Shift')"
-											>
-												{{ __('Open') }}
-											</button>
-											<button
-												v-if="shift.closing_shift_name"
-												@click.stop="openShiftDoc(shift, 'closing')"
-												class="text-[10px] font-semibold px-2 py-1 rounded bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors"
-												:title="__('View Closing Shift')"
-											>
-												{{ __('Close') }}
-											</button>
-										</div>
-									</td>
-								</tr>
-							</tbody>
-						</table>
-					</div>
-				</div>
-
-				<!-- Pagination bar (shown when there is more than one page) -->
-				<div
-					v-if="totalPages > 1"
-					class="flex items-center justify-between px-4 py-3 border-t border-gray-100 bg-gray-50/60 rounded-b-xl"
-				>
-					<span class="text-[11px] font-medium text-gray-500 select-none">
-						{{ __('Showing') }}
-						{{ (currentPage - 1) * PAGE_SIZE + 1 }}&ndash;{{ Math.min(currentPage * PAGE_SIZE, serverTotals.total_shifts) }}
-						{{ __('of') }} {{ serverTotals.total_shifts }} {{ __('shifts') }}
-					</span>
-
-					<div class="flex items-center gap-1">
-						<button
-							@click="goToPage(currentPage - 1)"
-							:disabled="currentPage === 1 || shiftsResource.loading"
-							class="w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-white hover:border-blue-300 hover:text-blue-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-						>
-							<svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
-						</button>
-
-						<template v-for="page in visiblePages" :key="page">
-							<span
-								v-if="typeof page === 'string'"
-								class="w-8 h-8 flex items-center justify-center text-gray-400 text-xs select-none"
-							>&hellip;</span>
+	<!-- Full Page Overlay -->
+	<Transition name="fade">
+		<div v-if="show" class="fixed inset-0 bg-black bg-opacity-50 z-[300]">
+			<!-- Main Container -->
+			<div class="fixed inset-0 flex items-center justify-center p-4" @click.self="show = false">
+				<div class="w-full max-w-[95vw] max-h-[95vh] bg-white rounded-lg shadow-2xl flex flex-col overflow-hidden">
+					<!-- Header -->
+					<div
+						class="flex items-center justify-between px-6 py-5 border-b rounded-t-lg bg-gradient-to-r from-blue-50 to-indigo-50"
+					>
+						<div class="flex items-center gap-3">
+							<div class="p-2 bg-blue-100 rounded-lg">
+								<FeatherIcon name="clock" class="w-6 h-6 text-blue-600" />
+							</div>
+							<div class="text-start">
+								<h2 class="text-xl font-bold text-gray-900">{{ __("Shift History") }}</h2>
+								<p class="text-sm text-gray-600 mt-0.5">{{ __("Your opened and closed shifts") }}</p>
+							</div>
+						</div>
+						<div class="flex items-center gap-2">
+							<Button
+								variant="ghost"
+								size="sm"
+								icon-left="download"
+								:disabled="shifts.length === 0"
+								@click="exportToCSV"
+							>
+								{{ __("Export") }}
+							</Button>
+							<Button
+								variant="ghost"
+								size="sm"
+								icon-left="refresh-cw"
+								:loading="shiftsResource.loading"
+								@click="loadShifts"
+							>
+								{{ __("Refresh") }}
+							</Button>
 							<button
-								v-else
-								@click="goToPage(page)"
-								:disabled="shiftsResource.loading"
-								:class="[
-									'w-8 h-8 flex items-center justify-center rounded-lg border text-xs font-semibold transition-colors',
-									page === currentPage
-										? 'bg-blue-600 border-blue-600 text-white shadow-sm'
-										: 'border-gray-200 text-gray-600 hover:bg-white hover:border-blue-300 hover:text-blue-600 disabled:opacity-50',
-								]"
-							>{{ page }}</button>
-						</template>
+								type="button"
+								class="p-2 hover:bg-white/50 rounded-lg transition-colors"
+								:aria-label="__('Close')"
+								@click="show = false"
+							>
+								<FeatherIcon name="x" class="w-5 h-5 text-gray-600" />
+							</button>
+						</div>
+					</div>
 
-						<button
-							@click="goToPage(currentPage + 1)"
-							:disabled="currentPage === totalPages || shiftsResource.loading"
-							class="w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-white hover:border-blue-300 hover:text-blue-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-						>
-							<svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"/></svg>
-						</button>
+					<!-- Body -->
+					<div class="flex-1 min-h-0 overflow-y-auto p-6 flex flex-col gap-5">
+						<!-- Filters: drive both the totals and the table -->
+						<div class="flex flex-wrap items-end gap-4 p-4 bg-gray-50 border border-gray-200 rounded-lg">
+							<div class="w-full sm:w-48">
+								<label class="block text-start text-sm font-medium text-gray-700 mb-2">{{ __("From Date") }}</label>
+								<Input v-model="filters.from_date" type="date" :max="filters.to_date" @change="onDateChange" />
+							</div>
+							<div class="w-full sm:w-48">
+								<label class="block text-start text-sm font-medium text-gray-700 mb-2">{{ __("To Date") }}</label>
+								<Input v-model="filters.to_date" type="date" :min="filters.from_date" @change="onDateChange" />
+							</div>
+							<div class="inline-flex rounded-lg border border-gray-200 bg-white p-0.5" role="group">
+								<button
+									v-for="range in QUICK_RANGES"
+									:key="range.key"
+									type="button"
+									class="h-7 px-3 rounded-md text-sm font-medium transition-colors"
+									:class="
+										activeRange === range.key
+											? 'bg-blue-600 text-white shadow-sm'
+											: 'text-gray-600 hover:bg-gray-100'
+									"
+									:aria-pressed="activeRange === range.key"
+									@click="setQuickFilter(range.key)"
+								>
+									{{ range.label() }}
+								</button>
+							</div>
+						</div>
+
+						<!-- Summary: totals come from the server -->
+						<div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+							<div class="text-center p-4 bg-blue-50 rounded-lg border border-blue-100">
+								<div class="text-xs text-gray-600 mb-1">{{ __("Total Sales") }}</div>
+								<div class="text-xl font-bold text-gray-900 tabular-nums">
+									{{ formatCurrency(serverTotals.total_sales) }}
+								</div>
+							</div>
+							<div class="text-center p-4 bg-gray-50 rounded-lg border border-gray-200">
+								<div class="text-xs text-gray-600 mb-1">{{ __("Total Shifts") }}</div>
+								<div class="text-xl font-bold text-gray-900 tabular-nums">{{ serverTotals.total_shifts }}</div>
+							</div>
+							<div
+								class="text-center p-4 rounded-lg border"
+								:class="serverTotals.total_cash_diff < 0 ? 'bg-red-50 border-red-100' : 'bg-green-50 border-green-100'"
+							>
+								<div class="text-xs text-gray-600 mb-1">{{ __("Net Cash Difference") }}</div>
+								<div
+									class="text-xl font-bold tabular-nums"
+									:class="serverTotals.total_cash_diff < 0 ? 'text-red-700' : 'text-green-700'"
+								>
+									{{ formatCurrency(serverTotals.total_cash_diff) }}
+								</div>
+							</div>
+						</div>
+
+						<!-- Shifts table -->
+						<div class="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+							<div v-if="shiftsResource.loading" class="text-center py-16">
+								<div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
+								<p class="mt-3 text-xs text-gray-500">{{ __("Loading shifts...") }}</p>
+							</div>
+
+							<div v-else-if="shifts.length === 0" class="text-center py-16">
+								<div class="w-14 h-14 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
+									<FeatherIcon name="clock" class="w-7 h-7 text-gray-400" />
+								</div>
+								<p class="text-gray-600 font-medium">{{ __("No shifts in this period") }}</p>
+								<p class="text-gray-500 text-sm mt-1">{{ __("Try a wider date range") }}</p>
+							</div>
+
+							<div v-else class="overflow-auto max-h-[55vh]">
+								<table class="w-full text-start text-sm border-collapse min-w-[860px]">
+									<thead class="bg-gray-50 border-b border-gray-200 sticky top-0 z-10">
+										<tr class="text-xs font-medium text-gray-500 uppercase whitespace-nowrap">
+											<th class="px-5 py-3 text-start">{{ __("Shift") }}</th>
+											<th class="px-5 py-3 text-start">{{ __("Status") }}</th>
+											<th class="px-5 py-3 text-start">{{ __("Cashier") }}</th>
+											<th class="px-5 py-3 text-end">{{ __("Opening") }}</th>
+											<th class="px-5 py-3 text-end">{{ __("Closing") }}</th>
+											<th class="px-5 py-3 text-end">{{ __("Sales") }}</th>
+											<th class="px-5 py-3 text-end">{{ __("Cash Difference") }}</th>
+											<th class="px-5 py-3 text-end">{{ __("Actions") }}</th>
+										</tr>
+									</thead>
+									<tbody class="divide-y divide-gray-100">
+										<tr
+											v-for="shift in shifts"
+											:key="shift.opening_shift_name"
+											class="hover:bg-blue-50/50 transition-colors"
+										>
+											<td class="px-5 py-4 text-start">
+												<p class="font-semibold text-gray-900 whitespace-nowrap">{{ formatDate(shift.date) }}</p>
+												<p class="mt-0.5 text-xs text-gray-500 tabular-nums whitespace-nowrap">
+													<bdi v-if="shift.close_time" dir="ltr">
+														{{ formatTime(shift.open_time) }} – {{ formatTime(shift.close_time) }}
+													</bdi>
+													<template v-else>{{ __("Since {0}", { 0: `\u2066${formatTime(shift.open_time)}\u2069` }) }}</template>
+												</p>
+											</td>
+											<td class="px-5 py-4 text-start">
+												<span
+													class="inline-flex px-2 py-0.5 text-xs font-semibold rounded-full whitespace-nowrap"
+													:class="shift.close_time ? 'bg-gray-100 text-gray-700' : 'bg-green-100 text-green-700'"
+												>
+													{{ shift.close_time ? __("Closed") : __("Running") }}
+												</span>
+											</td>
+											<td class="px-5 py-4 text-start">
+												<p class="text-gray-900 break-all">{{ shift.cashier }}</p>
+												<p v-if="!posProfile" class="text-xs text-gray-500 break-words">{{ shift.pos_profile }}</p>
+											</td>
+											<td class="px-5 py-4 text-end whitespace-nowrap tabular-nums text-gray-600">
+												{{ formatCurrency(shift.opening_amount) }}
+											</td>
+											<td class="px-5 py-4 text-end whitespace-nowrap tabular-nums text-gray-600">
+												{{ shift.close_time ? formatCurrency(shift.closing_amount) : "—" }}
+											</td>
+											<td class="px-5 py-4 text-end whitespace-nowrap tabular-nums font-bold text-gray-900">
+												{{ formatCurrency(shift.sales_total) }}
+											</td>
+											<td class="px-5 py-4 text-end whitespace-nowrap tabular-nums font-bold" :class="getCashDiffColor(shift.difference)">
+												{{ formatCurrency(shift.difference) }}
+											</td>
+											<td class="px-5 py-4 text-end">
+												<div class="flex items-center justify-end gap-2">
+													<button
+														type="button"
+														class="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-gray-200 bg-white text-xs font-semibold text-gray-700 shadow-sm hover:bg-gray-50 transition-colors"
+														:title="__('View Opening Shift')"
+														@click.stop="openShiftDoc(shift, 'opening')"
+													>
+														<FeatherIcon name="external-link" class="w-3.5 h-3.5" />
+														{{ __("Opening") }}
+													</button>
+													<button
+														v-if="shift.closing_shift_name"
+														type="button"
+														class="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-gray-200 bg-white text-xs font-semibold text-gray-700 shadow-sm hover:bg-gray-50 transition-colors"
+														:title="__('View Closing Shift')"
+														@click.stop="openShiftDoc(shift, 'closing')"
+													>
+														<FeatherIcon name="external-link" class="w-3.5 h-3.5" />
+														{{ __("Closing") }}
+													</button>
+												</div>
+											</td>
+										</tr>
+									</tbody>
+								</table>
+							</div>
+
+							<!-- Pagination -->
+							<div
+								v-if="totalPages > 1"
+								class="flex items-center justify-between gap-3 px-5 py-3 border-t border-gray-200 bg-gray-50"
+							>
+								<span class="text-xs text-gray-600 select-none">
+									{{
+										__("Showing {0}–{1} of {2} shifts", {
+											0: (currentPage - 1) * PAGE_SIZE + 1,
+											1: Math.min(currentPage * PAGE_SIZE, serverTotals.total_shifts),
+											2: serverTotals.total_shifts,
+										})
+									}}
+								</span>
+								<div class="flex items-center gap-1">
+									<button
+										type="button"
+										class="w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600 hover:border-blue-300 hover:text-blue-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+										:disabled="currentPage === 1 || shiftsResource.loading"
+										:aria-label="__('Previous')"
+										@click="goToPage(currentPage - 1)"
+									>
+										<FeatherIcon name="chevron-left" class="w-4 h-4 rtl:rotate-180" />
+									</button>
+									<template v-for="page in visiblePages" :key="page">
+										<span
+											v-if="typeof page === 'string'"
+											class="w-8 h-8 flex items-center justify-center text-gray-400 text-xs select-none"
+										>&hellip;</span>
+										<button
+											v-else
+											type="button"
+											:disabled="shiftsResource.loading"
+											:class="[
+												'w-8 h-8 flex items-center justify-center rounded-lg border text-xs font-semibold transition-colors',
+												page === currentPage
+													? 'bg-blue-600 border-blue-600 text-white shadow-sm'
+													: 'bg-white border-gray-200 text-gray-600 hover:border-blue-300 hover:text-blue-600 disabled:opacity-50',
+											]"
+											@click="goToPage(page)"
+										>
+											{{ page }}
+										</button>
+									</template>
+									<button
+										type="button"
+										class="w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600 hover:border-blue-300 hover:text-blue-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+										:disabled="currentPage === totalPages || shiftsResource.loading"
+										:aria-label="__('Next')"
+										@click="goToPage(currentPage + 1)"
+									>
+										<FeatherIcon name="chevron-right" class="w-4 h-4 rtl:rotate-180" />
+									</button>
+								</div>
+							</div>
+						</div>
 					</div>
 				</div>
 			</div>
-		</template>
-		<template #actions>
-			<Button variant="subtle" @click="show = false" class="font-bold uppercase tracking-widest text-xs px-6">
-				{{ __('Close History') }}
-			</Button>
-		</template>
-	</Dialog>
+		</div>
+	</Transition>
 </template>
 
 <script setup>
 import { useToast } from "@/composables/useToast"
 import { DEFAULT_CURRENCY, DEFAULT_LOCALE, formatCurrency as formatCurrencyUtil } from "@/utils/currency"
-import { Button, Dialog, Input, createResource } from "frappe-ui"
+import { Button, FeatherIcon, Input, createResource } from "frappe-ui"
 import { ref, watch, reactive, onMounted, computed } from "vue"
 
 const { showError } = useToast()
@@ -259,7 +287,7 @@ const show = ref(props.modelValue)
 const shifts = ref([])
 
 // Pagination
-const PAGE_SIZE   = 5
+const PAGE_SIZE   = 10
 const currentPage = ref(1)
 
 const totalPages = computed(() => {
@@ -441,7 +469,20 @@ function getCashDiffColor(diff) {
 	return 'text-gray-900'
 }
 
+// Quick ranges; a manual date edit clears the highlighted one
+const QUICK_RANGES = [
+	{ key: "7days", label: () => __("Last 7 days") },
+	{ key: "1month", label: () => __("Last 30 days") },
+]
+const activeRange = ref(null)
+
+function onDateChange() {
+	activeRange.value = null
+	loadShifts()
+}
+
 function setQuickFilter(type) {
+	activeRange.value = type
 	const today = new Date()
 	filters.to_date = today.toISOString().split('T')[0]
 	
@@ -519,3 +560,15 @@ function loadShifts() {
 }
 
 </script>
+
+<style scoped>
+.fade-enter-active,
+.fade-leave-active {
+	transition: opacity 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+	opacity: 0;
+}
+</style>

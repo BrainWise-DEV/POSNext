@@ -20,6 +20,9 @@ import frappe
 from frappe import _
 from frappe.utils import cint, cstr, flt, getdate, today
 
+from pos_next.authorization.actions.pos_expense import ACTION_VOID_POS_EXPENSE
+from pos_next.authorization.gate import enforce_context
+
 EXPENSE_ACCOUNT_PAGE_LENGTH = 50
 
 
@@ -351,11 +354,12 @@ def _cleanup_failed_offline_expense_sync(sync_record_name):
 
 
 @frappe.whitelist()
-def cancel_pos_expense(journal_entry, pos_opening_shift, pos_profile):
+def cancel_pos_expense(journal_entry, pos_opening_shift, pos_profile, authorization_token=None):
 	"""Cancel a POS expense Journal Entry while the opening shift is still open.
 
 	Refused once the shift is closed so closing totals and payment reconciliation
-	cannot silently diverge from cancelled JEs.
+	cannot silently diverge from cancelled JEs. When a "Void POS Expense"
+	authorization rule applies, ``authorization_token`` must carry a manager grant.
 	"""
 	if not journal_entry:
 		frappe.throw(_("Journal Entry is required"))
@@ -367,6 +371,16 @@ def cancel_pos_expense(journal_entry, pos_opening_shift, pos_profile):
 	validate_pos_expense_cancel_permission(pos_profile, je.owner, journal_entry)
 
 	jv_doc = frappe.get_doc("Journal Entry", journal_entry)
+	enforce_context(
+		ACTION_VOID_POS_EXPENSE,
+		{
+			"pos_profile": pos_profile,
+			"journal_entry": journal_entry,
+			"amount": flt(jv_doc.posa_expense_amount),
+		},
+		authorization_token,
+		reference=journal_entry,
+	)
 	jv_doc.flags.ignore_permissions = True
 	jv_doc.cancel()
 

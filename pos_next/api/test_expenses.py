@@ -411,6 +411,7 @@ class TestPOSExpenses(unittest.TestCase):
 				remarks="   ",
 			)
 
+	@patch("pos_next.api.expenses.enforce_context")
 	@patch("pos_next.api.expenses.frappe.has_permission", return_value=False)
 	@patch("pos_next.api.expenses._mark_offline_expense_sync_cancelled")
 	@patch("pos_next.api.expenses.frappe.get_doc")
@@ -429,6 +430,7 @@ class TestPOSExpenses(unittest.TestCase):
 		mock_get_doc,
 		mock_mark_cancelled,
 		_mock_has_permission,
+		_mock_enforce,
 	):
 		mock_session.user = "cashier@example.com"
 		mock_get_value.return_value = SimpleNamespace(
@@ -439,7 +441,7 @@ class TestPOSExpenses(unittest.TestCase):
 			posa_pos_profile="Test POS Profile",
 			owner="cashier@example.com",
 		)
-		mock_doc = SimpleNamespace(name="ACC-JV-0001", flags=SimpleNamespace())
+		mock_doc = SimpleNamespace(name="ACC-JV-0001", flags=SimpleNamespace(), posa_expense_amount=50)
 		mock_doc.cancel = unittest.mock.Mock()
 		mock_get_doc.return_value = mock_doc
 
@@ -449,6 +451,48 @@ class TestPOSExpenses(unittest.TestCase):
 		mock_doc.cancel.assert_called_once()
 		mock_validate_cancel.assert_called_once_with("Test POS Profile", "cashier@example.com", "ACC-JV-0001")
 		mock_mark_cancelled.assert_called_once_with("ACC-JV-0001")
+
+	@patch("pos_next.api.expenses.enforce_context")
+	@patch("pos_next.api.expenses._mark_offline_expense_sync_cancelled")
+	@patch("pos_next.api.expenses.frappe.get_doc")
+	@patch("pos_next.api.expenses.validate_pos_expense_cancel_permission")
+	@patch("pos_next.api.expenses._get_submitted_pos_expense_for_shift")
+	@patch("pos_next.api.expenses.validate_open_shift")
+	@patch("pos_next.api.expenses.validate_pos_expense_enabled")
+	def test_cancel_pos_expense_passes_grant_to_void_gate(
+		self, _enabled, _shift, _je, _perm, mock_get_doc, _mark, mock_enforce
+	):
+		mock_doc = SimpleNamespace(name="ACC-JV-0001", flags=SimpleNamespace(), posa_expense_amount=50)
+		mock_doc.cancel = unittest.mock.Mock()
+		mock_get_doc.return_value = mock_doc
+
+		expenses.cancel_pos_expense("ACC-JV-0001", "POS-OS-0001", "Test POS Profile", "tok")
+
+		mock_enforce.assert_called_once_with(
+			"Void POS Expense",
+			{"pos_profile": "Test POS Profile", "journal_entry": "ACC-JV-0001", "amount": 50.0},
+			"tok",
+			reference="ACC-JV-0001",
+		)
+		mock_doc.cancel.assert_called_once()
+
+	@patch("pos_next.api.expenses.enforce_context", side_effect=frappe.ValidationError("denied"))
+	@patch("pos_next.api.expenses.frappe.get_doc")
+	@patch("pos_next.api.expenses.validate_pos_expense_cancel_permission")
+	@patch("pos_next.api.expenses._get_submitted_pos_expense_for_shift")
+	@patch("pos_next.api.expenses.validate_open_shift")
+	@patch("pos_next.api.expenses.validate_pos_expense_enabled")
+	def test_cancel_pos_expense_refused_by_void_gate_does_not_cancel(
+		self, _enabled, _shift, _je, _perm, mock_get_doc, _enforce
+	):
+		mock_doc = SimpleNamespace(name="ACC-JV-0001", flags=SimpleNamespace(), posa_expense_amount=50)
+		mock_doc.cancel = unittest.mock.Mock()
+		mock_get_doc.return_value = mock_doc
+
+		with self.assertRaises(frappe.ValidationError):
+			expenses.cancel_pos_expense("ACC-JV-0001", "POS-OS-0001", "Test POS Profile")
+
+		mock_doc.cancel.assert_not_called()
 
 	@patch("pos_next.api.expenses.frappe.throw", side_effect=_raise_runtime_error)
 	def test_validate_expense_attachment_filename_rejects_exe(self, _mock_throw):
