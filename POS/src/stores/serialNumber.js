@@ -129,6 +129,9 @@ export const useSerialNumberStore = defineStore("serialNumber", () => {
 	 * Remove consumed serials from cache (when added to cart)
 	 */
 	const consumeSerials = (itemCode, serialNumbers) => {
+		// Durable cache first: offline, the in-memory cache is empty
+		consumeCachedSerials(itemCode, serialNumbers).catch(() => {});
+
 		const cached = cache.value.get(itemCode);
 		if (!cached) return;
 
@@ -143,8 +146,6 @@ export const useSerialNumberStore = defineStore("serialNumber", () => {
 
 		cached.serials = cached.serials.filter((s) => !serialsToRemove.has(s.serial_no));
 
-		consumeCachedSerials(itemCode, serialNumbers).catch(() => {});
-
 		log.info(`Consumed ${serialsToRemove.size} serials for ${itemCode}`);
 	};
 
@@ -152,6 +153,9 @@ export const useSerialNumberStore = defineStore("serialNumber", () => {
 	 * Return serials back to cache (when removed from cart or quantity decreased)
 	 */
 	const returnSerials = (itemCode, serialNumbers) => {
+		// Durable cache first: offline, the in-memory cache is empty
+		returnCachedSerials(itemCode, serialNumbers, currentWarehouse.value).catch(() => {});
+
 		const cached = cache.value.get(itemCode);
 		if (!cached) return;
 
@@ -178,8 +182,6 @@ export const useSerialNumberStore = defineStore("serialNumber", () => {
 		cached.serials.sort((a, b) =>
 			a.serial_no.localeCompare(b.serial_no, undefined, { numeric: true })
 		);
-
-		returnCachedSerials(itemCode, serialNumbers, currentWarehouse.value).catch(() => {});
 
 		log.info(`Returned ${serialsToReturn.length} serials for ${itemCode}`);
 	};

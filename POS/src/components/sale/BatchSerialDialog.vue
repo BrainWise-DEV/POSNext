@@ -453,6 +453,8 @@ async function loadBatchesOrSerials() {
 		// Fetch from server when online
 		batchesResource.reload();
 	} else if (props.item?.has_serial_no) {
+		// Set warehouse in store (also scopes serials returned while offline)
+		serialStore.setWarehouse(props.warehouse);
 		// Try cached data first when offline
 		if (isOffline()) {
 			const cachedSerials = await getCachedSerialData(props.item.item_code);
@@ -463,8 +465,6 @@ async function loadBatchesOrSerials() {
 			availableSerials.value = [];
 			return;
 		}
-		// Set warehouse in store
-		serialStore.setWarehouse(props.warehouse);
 		// Fetch from store (uses cache if valid)
 		const serials = await serialStore.fetchSerials(props.item.item_code);
 		availableSerials.value = serials;
