@@ -3915,14 +3915,18 @@ function handleViewInvoice(invoice) {
 // Centralized print handler - uses printInvoice.js utilities
 async function handlePrintInvoice(invoiceData) {
 	try {
+		const isDuplicate = Boolean(invoiceData?._posnext_duplicate);
 		invoiceData = await hydrateLocalOnlyInvoice(invoiceData || {});
+		if (isDuplicate) invoiceData = { ...invoiceData, _posnext_duplicate: true };
 		const offlineSnapshot = uiStore.lastOfflinePrintDoc;
 		if (
 			invoiceData?.name &&
 			offlineSnapshot?.name === invoiceData.name &&
 			offlineSnapshot.items?.length > 0
 		) {
-			invoiceData = offlineSnapshot;
+			invoiceData = isDuplicate
+				? { ...offlineSnapshot, _posnext_duplicate: true }
+				: offlineSnapshot;
 		}
 
 		// Silent print path — send directly to thermal printer via QZ Tray
@@ -3940,7 +3944,7 @@ async function handlePrintInvoice(invoiceData) {
 		} else {
 			// If it's just an invoice object with name, fetch and print
 			// printInvoiceByName will automatically fetch the print format from the invoice's POS Profile
-			await printInvoiceByName(invoiceData.name);
+			await printInvoiceByName(invoiceData.name, null, null, { duplicate: isDuplicate });
 		}
 	} catch (error) {
 		log.error("Error printing invoice:", error);

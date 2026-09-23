@@ -1,3 +1,11 @@
+## v1.4.11 - Duplicate marking on receipt reprints
+
+- Invoice History, Invoice Detail, Invoice Management, and Offline Invoice History prints are now explicitly marked as reprints.
+- Reprinted receipts show a bold bilingual `DUPLICATE / نسخة مكررة` banner after the company identity/header and before the receipt type.
+- Keeping the Duplicate mark inside the receipt header makes it harder to remove by cutting off the top of the paper.
+- The first/original receipt printed after checkout remains unchanged and is not marked Duplicate.
+- Duplicate marking works for both browser printing and QZ Tray silent printing, including custom POS print formats.
+
 ## v1.4.10 - Payment Hub mixed Customer Credit hardening
 
 - Payment Hub v0.6.14 now receives the full Sales Invoice total while Customer Credit is represented as a captured `POSNext Customer Credit` Manual / Non-Cash PPS allocation; provider/terminal rows still receive only the real-money remainder.

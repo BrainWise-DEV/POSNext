@@ -9,6 +9,41 @@ const log = logger.create("PrintInvoice");
 
 const DEFAULT_PRINT_FORMAT = "POS Next Receipt";
 
+const DUPLICATE_BANNER_HTML = `
+	<div style="
+		border: 2px solid #000;
+		padding: 4px 6px;
+		margin: 0 auto 6px auto;
+		text-align: center;
+		font-family: Arial, Tahoma, sans-serif;
+		font-size: 15px;
+		font-weight: 900;
+		line-height: 1.2;
+		width: calc(100% - 12px);
+		box-sizing: border-box;
+	">
+		DUPLICATE / <span dir="rtl" style="font-family: Tahoma, Arial, sans-serif;">نسخة مكررة</span>
+	</div>`;
+
+function addDuplicateBanner(html, isDuplicate = false) {
+	if (!isDuplicate) return html;
+
+	const source = html || "";
+	// Brand & More receipts use .receipt-type immediately after the company
+	// identity block. Insert DUPLICATE there so the company header cannot be
+	// cut away separately from the reprint mark. Other/custom formats fall
+	// back to the previous safe behavior of prepending the banner.
+	const receiptTypePattern =
+		/(<[a-z][^>]*\bclass=(["'])[^"']*\breceipt-type\b[^"']*\2[^>]*>)/i;
+
+	if (receiptTypePattern.test(source)) {
+		return source.replace(receiptTypePattern, `${DUPLICATE_BANNER_HTML}$1`);
+	}
+
+	return `${DUPLICATE_BANNER_HTML}${source}`;
+}
+
+
 // ============================================================================
 // Shared helpers
 // ============================================================================
@@ -206,6 +241,8 @@ export function buildReceiptHTML(invoiceData) {
 					<div style="font-size: 12px;">${invoiceData.header || __("TAX INVOICE")}</div>
 				</div>
 
+				${invoiceData._posnext_duplicate ? DUPLICATE_BANNER_HTML : ""}
+
 				${invoiceData.is_offline ? `<div class="offline-badge">${__("OFFLINE — PENDING SYNC")}</div>` : ""}
 
 				<div class="invoice-info">
@@ -385,7 +422,9 @@ export async function printInvoice(invoiceData, printFormat = null, letterhead =
 	try {
 		if (!invoiceData?.name) throw new Error("Invalid invoice data");
 
+		const isDuplicate = Boolean(invoiceData?._posnext_duplicate);
 		invoiceData = await hydrateLocalOnlyInvoice(invoiceData);
+		if (isDuplicate) invoiceData = { ...invoiceData, _posnext_duplicate: true };
 
 		// Pending offline / local IDs are not in ERPNext — use embedded receipt HTML.
 		if (isLocalOnlyInvoiceName(invoiceData.name)) {
@@ -399,6 +438,50 @@ export async function printInvoice(invoiceData, printFormat = null, letterhead =
 
 		const doctype = invoiceData.doctype || "Sales Invoice";
 		const format = printFormat || DEFAULT_PRINT_FORMAT;
+
+		// Reprints are rendered through Frappe's print HTML API so the DUPLICATE
+		// banner works with any selected POS print format without changing the
+		// user's custom receipt template. Original checkout prints keep the normal
+		// /printview flow unchanged.
+		if (isDuplicate) {
+			const printWindow = window.open("", "_blank", "width=800,height=600");
+			if (!printWindow) {
+				throw new Error("Popup blocked — check your browser settings.");
+			}
+
+			try {
+				const args = {
+					doc: doctype,
+					name: invoiceData.name,
+					print_format: format,
+					no_letterhead: letterhead ? 0 : 1,
+				};
+				if (letterhead) args.letterhead = letterhead;
+
+				const result = await call("frappe.www.printview.get_html_and_style", args);
+				const html = result?.html || result?.message?.html;
+				const style = result?.style || result?.message?.style || "";
+				if (!html) throw new Error("Failed to get print HTML from server");
+
+				printWindow.document.write(`<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><style>${style}</style></head>
+<body>${addDuplicateBanner(html, true)}</body>
+</html>`);
+				printWindow.document.close();
+				printWindow.onload = () => {
+					setTimeout(() => printWindow.print(), 250);
+				};
+				return true;
+			} catch (error) {
+				try {
+					printWindow.close();
+				} catch {
+					// Ignore popup close errors and use the normal fallback below.
+				}
+				throw error;
+			}
+		}
 
 		const params = new URLSearchParams({
 			doctype,
@@ -429,9 +512,15 @@ export async function printInvoice(invoiceData, printFormat = null, letterhead =
  * Fetch an invoice by name, resolve its POS Profile print settings,
  * then open the browser print window.
  */
-export async function printInvoiceByName(invoiceName, printFormat = null, letterhead = null) {
+export async function printInvoiceByName(
+	invoiceName,
+	printFormat = null,
+	letterhead = null,
+	options = {}
+) {
+	const isDuplicate = Boolean(options?.duplicate);
 	if (isLocalOnlyInvoiceName(invoiceName)) {
-		const localDoc = await hydrateLocalOnlyInvoice({ name: invoiceName });
+		let localDoc = await hydrateLocalOnlyInvoice({ name: invoiceName });
 		if (!localDoc.items?.length) {
 			throw new Error(
 				__(
@@ -439,13 +528,15 @@ export async function printInvoiceByName(invoiceName, printFormat = null, letter
 				)
 			);
 		}
+		if (isDuplicate) localDoc = { ...localDoc, _posnext_duplicate: true };
 		const settings = await resolvePrintSettings(localDoc.pos_profile, printFormat, letterhead);
 		return printInvoice(localDoc, settings.printFormat, settings.letterhead);
 	}
-	const invoiceDoc = await call("pos_next.api.invoices.get_invoice", {
+	let invoiceDoc = await call("pos_next.api.invoices.get_invoice", {
 		invoice_name: invoiceName,
 	});
 	if (!invoiceDoc) throw new Error("Invoice not found");
+	if (isDuplicate) invoiceDoc = { ...invoiceDoc, _posnext_duplicate: true };
 
 	const settings = await resolvePrintSettings(invoiceDoc.pos_profile, printFormat, letterhead);
 	return printInvoice(invoiceDoc, settings.printFormat, settings.letterhead);
@@ -455,7 +546,7 @@ export async function printInvoiceByName(invoiceName, printFormat = null, letter
 // Silent printing (QZ Tray — no browser dialog)
 // ============================================================================
 
-export async function silentPrintDoc(doctype, name, printFormat) {
+export async function silentPrintDoc(doctype, name, printFormat, isDuplicate = false) {
 	const result = await call("frappe.www.printview.get_html_and_style", {
 		doc: doctype,
 		name,
@@ -470,7 +561,7 @@ export async function silentPrintDoc(doctype, name, printFormat) {
 	const fullHTML = `<!DOCTYPE html>
 <html>
 <head><meta charset="UTF-8"><style>${style}</style></head>
-<body>${html}</body>
+<body>${addDuplicateBanner(html, isDuplicate)}</body>
 </html>`;
 
 	await qzPrintHTML(fullHTML);
@@ -485,10 +576,10 @@ export async function silentPrintDoc(doctype, name, printFormat) {
  * formats that rely on Bootstrap layout classes may render differently.
  * Paper size and margins are controlled by the QZ Tray config in qzTray.js.
  */
-export async function silentPrintInvoice(invoiceName, printFormat = null) {
+export async function silentPrintInvoice(invoiceName, printFormat = null, isDuplicate = false) {
 	if (isLocalOnlyInvoiceName(invoiceName)) {
 		const doc = await hydrateLocalOnlyInvoice({ name: invoiceName });
-		if (doc.items?.length > 0) return silentPrintInvoiceFromDoc(doc);
+		if (doc.items?.length > 0) return silentPrintInvoiceFromDoc(isDuplicate ? { ...doc, _posnext_duplicate: true } : doc);
 		throw new Error(
 			__(
 				"This offline receipt is no longer in browser storage. Use browser print from the success dialog after checkout."
@@ -497,7 +588,7 @@ export async function silentPrintInvoice(invoiceName, printFormat = null) {
 	}
 	const format = printFormat || DEFAULT_PRINT_FORMAT;
 
-	await silentPrintDoc("Sales Invoice", invoiceName, format);
+	await silentPrintDoc("Sales Invoice", invoiceName, format, isDuplicate);
 	log.info(`Silent print sent for ${invoiceName}`);
 	return true;
 }
@@ -519,7 +610,9 @@ export async function silentPrintInvoiceFromDoc(invoiceData) {
  * internally, so no separate connection logic is needed here.
  */
 export async function printWithSilentFallback(invoiceData, printFormat = null) {
+	const isDuplicate = Boolean(invoiceData?._posnext_duplicate);
 	invoiceData = await hydrateLocalOnlyInvoice(invoiceData);
+	if (isDuplicate) invoiceData = { ...invoiceData, _posnext_duplicate: true };
 	const invoiceName = invoiceData?.name;
 	if (!invoiceName) throw new Error("Invalid invoice data — missing name");
 
@@ -540,14 +633,14 @@ export async function printWithSilentFallback(invoiceData, printFormat = null) {
 	}
 
 	try {
-		await silentPrintInvoice(invoiceName, printFormat);
+		await silentPrintInvoice(invoiceName, printFormat, isDuplicate);
 		return { method: "silent", success: true };
 	} catch (err) {
 		log.warn("Silent print failed, falling back to browser:", err?.message || err);
 	}
 
 	try {
-		await printInvoiceByName(invoiceName, printFormat);
+		await printInvoiceByName(invoiceName, printFormat, null, { duplicate: isDuplicate });
 		return { method: "browser", success: true };
 	} catch (err) {
 		log.error("Browser print fallback also failed:", err);
