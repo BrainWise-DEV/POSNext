@@ -8,7 +8,7 @@
 			<!-- Main Container -->
 			<div class="fixed inset-0 flex items-center justify-center p-4" @click.self="!isBusy && (open = false)">
 				<div
-					class="w-full h-full max-w-[95vw] max-h-[95vh] bg-white rounded-lg shadow-2xl flex flex-col overflow-hidden lg:overflow-visible"
+					class="w-full max-w-[95vw] max-h-[95vh] bg-white rounded-lg shadow-2xl flex flex-col overflow-hidden"
 				>
 					<!-- Header -->
 					<div
@@ -51,13 +51,13 @@
 					</div>
 
 					<!-- Body -->
-					<div class="flex-1 min-h-0 overflow-y-auto lg:overflow-visible p-6">
+					<div class="flex-1 min-h-0 overflow-y-auto p-6">
 			<div v-if="dialogLoading || (dialogDataResource.loading && !isOffline)" class="text-center py-8">
 				<div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
 				<p class="mt-3 text-xs text-gray-500">{{ __("Loading expense data...") }}</p>
 			</div>
 
-			<div v-else class="pos-expense-dialog-fields flex flex-col gap-4 lg:h-full">
+			<div v-else class="pos-expense-dialog-fields flex flex-col gap-4">
 				<div
 					v-if="isOffline"
 					class="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start gap-3"
@@ -112,15 +112,15 @@
 					</div>
 				</div>
 
-				<div class="grid grid-cols-1 lg:grid-cols-5 gap-6 items-stretch lg:flex-1 lg:min-h-0">
+				<div class="grid grid-cols-1 lg:grid-cols-5 gap-5 items-stretch">
 					<!-- Form card -->
 					<div class="lg:col-span-2 flex flex-col min-w-0 bg-white rounded-xl shadow-sm border border-gray-200">
 						<div class="flex items-center gap-2 px-5 py-4 border-b bg-gray-50 rounded-t-xl">
 							<FeatherIcon name="plus-circle" class="w-5 h-5 text-blue-600" />
-							<h3 class="text-base font-bold text-gray-900">{{ __("New Expense") }}</h3>
+							<h3 class="text-base font-bold text-gray-900">{{ __("Add Expense") }}</h3>
 						</div>
 
-						<div class="flex flex-col gap-5 p-5">
+						<div class="flex flex-col flex-1 gap-4 p-5">
 							<div>
 								<label class="block text-start text-sm font-medium text-gray-700 mb-2">
 									{{ __("Amount") }}
@@ -142,6 +142,7 @@
 									:placeholder="amountPlaceholder"
 									:disabled="Boolean(pendingAttachJournalEntry) || isBusy"
 								/>
+
 
 								<!-- Shift limit meter: spent + this expense against the limit -->
 								<div v-if="maximumExpenseAmount > 0" class="mt-3 text-start">
@@ -240,15 +241,15 @@
 								/>
 								<button
 									type="button"
-									class="w-full flex items-center gap-3 rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 px-4 py-3 text-start hover:border-blue-400 hover:bg-blue-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+									class="w-full flex items-center gap-4 rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 px-5 py-5 text-start hover:border-blue-400 hover:bg-blue-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
 									:disabled="isBusy"
 									:title="attachmentHelpText"
 									@click="fileInput?.click()"
 								>
-									<div class="p-2 bg-blue-100 rounded-lg shrink-0">
-										<FeatherIcon name="upload" class="w-4 h-4 text-blue-600" />
+									<div class="p-3 bg-blue-100 rounded-xl shrink-0">
+										<FeatherIcon name="upload" class="w-5 h-5 text-blue-600" />
 									</div>
-									<div class="min-w-0">
+									<div class="min-w-0 flex flex-col gap-1">
 										<p class="text-sm font-semibold text-gray-900">{{ __("Upload Receipt") }}</p>
 										<p class="text-xs text-gray-500 truncate">{{ attachmentUploadHint }}</p>
 									</div>
@@ -281,12 +282,27 @@
 								<FeatherIcon name="alert-circle" class="w-4 h-4 mt-0.5 shrink-0" />
 								<span>{{ validationError }}</span>
 							</div>
+
+							<div v-if="!pendingAttachJournalEntry" class="mt-auto pt-2">
+								<Button
+									class="w-full"
+									size="lg"
+									variant="solid"
+									theme="blue"
+									icon-left="check"
+									:loading="isBusy && !cancellingExpense"
+									:disabled="dialogLoading || isBusy || !hasDialogData"
+									@click="submitExpense"
+								>
+									{{ __("Record Expense") }}
+								</Button>
+							</div>
 						</div>
 					</div>
 
 					<!-- Expenses card -->
 					<div
-						class="lg:col-span-3 flex flex-col min-w-0 min-h-[320px] lg:min-h-0 bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden"
+						class="lg:col-span-3 flex flex-col min-w-0 min-h-[320px] bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden"
 					>
 						<div class="flex items-center justify-between gap-3 px-5 py-4 border-b bg-gray-50">
 							<div class="flex items-center gap-2">
@@ -323,7 +339,7 @@
 							</p>
 						</div>
 
-						<div class="min-h-0 flex-1 overflow-auto">
+						<div class="min-h-0 flex-1 max-h-[50vh] overflow-auto">
 							<table class="w-full table-fixed text-start text-sm border-collapse min-w-[520px]">
 								<thead class="bg-gray-50 border-b border-gray-100 sticky top-0 z-10">
 									<tr class="text-[10px] font-bold text-gray-500 uppercase tracking-widest">
@@ -369,7 +385,7 @@
 											<button
 												v-if="!row.server_journal_entry"
 												type="button"
-												class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100 transition-colors text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+												class="inline-flex items-center gap-1.5 h-8 px-3.5 rounded-lg bg-red-600 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-red-700 active:bg-red-800 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-red-600"
 												:disabled="isBusy || row.synced"
 												@click="deletePendingExpense(row)"
 											>
@@ -379,7 +395,7 @@
 											<button
 												v-else
 												type="button"
-												class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+												class="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-gray-200 bg-white text-xs font-semibold text-gray-600 shadow-sm transition-colors hover:bg-gray-50 hover:text-gray-900 disabled:opacity-40 disabled:cursor-not-allowed"
 												:disabled="isBusy"
 												:title="__('Discard files')"
 												@click="discardPendingAttachments(row)"
@@ -421,7 +437,7 @@
 											<button
 												v-if="canCancelExpense"
 												type="button"
-												class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100 transition-colors text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+												class="inline-flex items-center gap-1.5 h-8 px-3.5 rounded-lg bg-red-600 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-red-700 active:bg-red-800 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-red-600"
 												:disabled="isOffline || isBusy || cancellingExpense === expense.journal_entry"
 												:title="isOffline ? __('Voiding requires a connection') : __('Void this expense')"
 												@click="cancelExpense(expense)"
@@ -452,23 +468,6 @@
 			</div>
 					</div>
 
-					<!-- Footer -->
-					<div class="flex justify-between gap-2 px-6 py-4 border-t bg-gray-50 rounded-b-lg">
-						<Button variant="subtle" :disabled="isBusy" @click="open = false">
-							{{ __("Close") }}
-						</Button>
-						<Button
-							v-if="!pendingAttachJournalEntry"
-							variant="solid"
-							theme="blue"
-							icon-left="check"
-							:loading="isBusy && !cancellingExpense"
-							:disabled="dialogLoading || isBusy || !hasDialogData"
-							@click="submitExpense"
-						>
-							{{ __("Record Expense") }}
-						</Button>
-					</div>
 				</div>
 			</div>
 		</div>
