@@ -61,7 +61,7 @@ class TestLinkedReturnCredit(FrappeTestCase):
 			items=[{"item_code": ITEM, "qty": 1, "rate": 100, "income_account": c.default_income_account}],
 			payments=[{"mode_of_payment": self.mode_of_payment, "amount": 100 if paid else 0}],
 		)
-		return doc.insert(ignore_permissions=True).submit() or doc
+		return doc.insert(ignore_permissions=True).submit()
 
 	def _linked_return(self, original, update_outstanding_for_self=0):
 		ret = make_return_doc("Sales Invoice", original.name)
@@ -75,7 +75,7 @@ class TestLinkedReturnCredit(FrappeTestCase):
 				"posting_time": original.posting_time,
 			}
 		)
-		return ret.insert(ignore_permissions=True).submit() or ret
+		return ret.insert(ignore_permissions=True).submit()
 
 	def _gl_balance(self, name):
 		gle = frappe.qb.DocType("GL Entry")

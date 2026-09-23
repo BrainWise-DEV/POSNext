@@ -29,9 +29,11 @@ def get_customer_balance(customer, company=None):
 
 	Calculates the net balance from:
 	- Any invoice: Only positive outstanding_amount (what customer owes)
-	- Any invoice: Only negative outstanding_amount (credit added to customer balance)
+	- Invoices, standalone returns and self-updating returns: Only negative outstanding_amount
+	  (credit added to customer balance)
 
-	Credit comes from returns where "Add to Customer Credit" was selected:
+	Credit comes from returns where "Add to Customer Credit" was selected, held on the return
+	or, for linked returns, on the original invoice:
 	- Cash refund given: outstanding_amount = 0 → NOT counted as credit
 	- Added to customer credit: outstanding_amount < 0 → counted as credit
 
