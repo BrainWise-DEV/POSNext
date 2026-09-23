@@ -227,6 +227,25 @@ export const consumeCachedSerials = async (itemCode, serialNumbers) => {
 	}
 };
 
+// Deduct a sold batch quantity from offline cache (offline sale committed)
+export const deductCachedBatchQty = async (itemCode, batchNo, qty) => {
+	try {
+		if (!itemCode || !batchNo || !qty) return;
+
+		await db.transaction("rw", db.items, async () => {
+			const item = await db.items.get(itemCode);
+			if (!item?.batch_no_data?.length) return;
+
+			const batch_no_data = item.batch_no_data.map((b) =>
+				b.batch_no === batchNo ? { ...b, batch_qty: Math.max(0, (b.batch_qty || 0) - qty) } : b
+			);
+			await db.items.update(itemCode, { batch_no_data });
+		});
+	} catch (error) {
+		console.error("Error deducting cached batch qty:", error);
+	}
+};
+
 // Return serial numbers to offline cache (e.g. item removed from cart)
 export const returnCachedSerials = async (itemCode, serialNumbers, warehouse = null) => {
 	try {

@@ -1032,6 +1032,7 @@ import { useUserData } from "@/data/user";
 import { parseError } from "@/utils/errorHandler";
 import { cleanupUserSession } from "@/utils/sessionCleanup";
 import { offlineWorker } from "@/utils/offline/workerClient";
+import { deductCachedBatchQty } from "@/utils/offline/items";
 import { cacheOfflineReceiptPayload } from "@/utils/offline/offlineReceiptCache";
 import { cacheInvoiceHistory, getCachedInvoiceHistory } from "@/utils/offline/sync";
 import {
@@ -2129,6 +2130,26 @@ async function handlePaymentCompleted(paymentData) {
 			};
 			uiStore.setLastOfflinePrintDoc(offlinePrintDoc);
 			cacheOfflineReceiptPayload(offlineReceiptName, offlinePrintDoc);
+
+			// Deduct sold stock locally; the server refresh after sync replaces it
+			const soldQty = new Map();
+			for (const item of preparedItems) {
+				const qty = (item.qty || 0) * (item.conversion_factor || 1);
+				soldQty.set(item.item_code, (soldQty.get(item.item_code) || 0) + qty);
+				if (item.batch_no) {
+					deductCachedBatchQty(item.item_code, item.batch_no, qty).catch(() => {});
+				}
+			}
+			const stockUpdates = [...soldQty]
+				.filter(([itemCode]) => stockStore.server.has(itemCode))
+				.map(([itemCode, qty]) => ({
+					item_code: itemCode,
+					actual_qty: stockStore.getStockInfo(itemCode).server - qty,
+					warehouse: shiftStore.profileWarehouse,
+				}));
+			stockStore.update(stockUpdates);
+			offlineWorker.updateStockQuantities(stockUpdates).catch(() => {});
+
 			uiStore.showPaymentDialog = false;
 			cartStore.clearCart({ returnSerials: false });
 			// Reset cart hash after successful payment

@@ -33,6 +33,8 @@ const {
 	consumeCachedSerials,
 	returnCachedSerials,
 	getCachedSerialData,
+	getCachedBatchData,
+	deductCachedBatchQty,
 } = await import("../items")
 
 describe("parseSerialNumbers", () => {
@@ -101,5 +103,25 @@ describe("offline serial cache mutators", () => {
 		expect(await getCachedSerialData("ITEM-1")).toEqual([
 			{ serial_no: "SN-1", warehouse: "Stores - T" },
 		])
+	})
+})
+
+describe("deductCachedBatchQty", () => {
+	it("deducts the sold batch only and clamps at zero", async () => {
+		itemStore.set("BATCH-1", {
+			item_code: "BATCH-1",
+			batch_no_data: [
+				{ batch_no: "B1", batch_qty: 3 },
+				{ batch_no: "B2", batch_qty: 3 },
+			],
+		})
+		await deductCachedBatchQty("BATCH-1", "B1", 1)
+		expect(
+			(await getCachedBatchData("BATCH-1")).map((b) => b.batch_qty),
+		).toEqual([2, 3])
+		await deductCachedBatchQty("BATCH-1", "B1", 5)
+		expect(
+			(await getCachedBatchData("BATCH-1")).map((b) => b.batch_qty),
+		).toEqual([0, 3])
 	})
 })
