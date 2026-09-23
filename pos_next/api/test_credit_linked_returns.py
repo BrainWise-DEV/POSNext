@@ -65,7 +65,16 @@ class TestLinkedReturnCredit(FrappeTestCase):
 
 	def _linked_return(self, original, update_outstanding_for_self=0):
 		ret = make_return_doc("Sales Invoice", original.name)
-		ret.update({"is_pos": 1, "update_outstanding_for_self": update_outstanding_for_self, "payments": []})
+		ret.update(
+			{
+				"is_pos": 1,
+				"update_outstanding_for_self": update_outstanding_for_self,
+				"payments": [],
+				"set_posting_time": 1,
+				"posting_date": original.posting_date,
+				"posting_time": original.posting_time,
+			}
+		)
 		return ret.insert(ignore_permissions=True).submit() or ret
 
 	def _gl_balance(self, name):
