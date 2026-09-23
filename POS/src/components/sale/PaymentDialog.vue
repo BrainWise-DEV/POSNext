@@ -1569,10 +1569,10 @@
 								<!-- Pay on Account Button -->
 								<button
 									@click="addCreditAccountPayment"
-									:disabled="isSubmitting"
+									:disabled="isSubmitting || !isSalesPersonValid"
 									:class="[
 										'font-semibold rounded-lg flex items-center justify-center',
-										isSubmitting
+										isSubmitting || !isSalesPersonValid
 											? 'bg-orange-300 text-white cursor-not-allowed'
 											: 'bg-orange-500 text-white active:bg-orange-600',
 										mobileButtonSize.height,
@@ -1869,12 +1869,14 @@
 						<button
 							v-if="allowCreditSale"
 							@click="addCreditAccountPayment"
-							:disabled="paymentEntries.length > 0 || isSubmitting"
+							:disabled="
+								paymentEntries.length > 0 || isSubmitting || !isSalesPersonValid
+							"
 							:class="[
 								'flex-1 inline-flex items-center justify-center gap-2 transition-colors focus:outline-none',
 								dynamicButtonHeight,
 								'text-sm font-semibold px-4 rounded-lg',
-								paymentEntries.length > 0 || isSubmitting
+								paymentEntries.length > 0 || isSubmitting || !isSalesPersonValid
 									? 'bg-orange-300 text-white cursor-not-allowed'
 									: 'bg-orange-500 text-white hover:bg-orange-600 active:bg-orange-700 focus-visible:ring-2 focus-visible:ring-orange-400',
 							]"
@@ -3421,7 +3423,16 @@ function addCreditAccountPayment() {
 		grandTotal: props.grandTotal,
 		currentPaid: totalPaid.value,
 		remainingAmount: remainingAmount.value,
+		salesPersons: selectedSalesPersons.value,
+		isSalesPersonValid: isSalesPersonValid.value,
 	});
+
+	// Same sales-person gate as Complete Payment — credit sales still need
+	// coverage when the feature is enabled (backend validates too).
+	if (!isSalesPersonValid.value) {
+		log.warn("[PaymentDialog] Cannot pay on account - sales person required");
+		return;
+	}
 
 	// Close dialog and complete as credit sale (0 payment)
 	// The backend will create an invoice with outstanding amount
@@ -3432,6 +3443,8 @@ function addCreditAccountPayment() {
 		is_credit_sale: true, // Mark as credit sale
 		paid_amount: 0,
 		outstanding_amount: props.grandTotal,
+		sales_team: selectedSalesPersons.value.length > 0 ? selectedSalesPersons.value : null,
+		delivery_date: isSalesOrder.value ? deliveryDate.value : null,
 	};
 
 	log.debug("[PaymentDialog] Emitting credit sale payment-completed:", paymentData);
