@@ -228,12 +228,13 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		baseUpdateItemQuantity(itemCode, quantity, uom);
 	}
 
-	function clearCart(options = {}) {
+	// A cart loaded from a draft leaves its serials held by that draft
+	function clearCart({ returnSerials = !currentDraftId.value } = {}) {
 		// Cancel any pending offer processing
 		debouncedProcessOffers.cancel();
 		offerQueue.cancel();
 
-		clearInvoiceCart(options);
+		clearInvoiceCart({ returnSerials });
 		customer.value = null;
 		offersStore.clearOneTimeContext();
 		appliedOffers.value = [];

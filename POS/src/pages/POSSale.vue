@@ -2425,7 +2425,8 @@ async function handleSaveDraft() {
 		cartStore.currentDraftId
 	);
 	if (savedDraft) {
-		cartStore.clearCart();
+		// The draft now holds the serials
+		cartStore.clearCart({ returnSerials: false });
 		// Reset cart hash when cart is saved as draft and cleared
 		previousCartHash = "";
 	}
@@ -2986,7 +2987,7 @@ function handleLoadDraftFromManagement(draft) {
 }
 
 function handleDeleteDraft(draftId) {
-	draftsStore.deleteDraft(draftId);
+	draftsStore.deleteDraft(draftId, { returnSerials: draftId !== cartStore.currentDraftId });
 }
 
 async function handleWarehouseChanged(newWarehouse) {
