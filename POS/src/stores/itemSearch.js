@@ -2278,6 +2278,11 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 
 	// Stock delegates - Smart & minimal!
 	const applyStockUpdates = (updates) => stockStore.update(updates);
+	// Re-fetch cached batch/serial data, bypassing the search dedupe (e.g. after offline sync)
+	const refreshBatchSerialCache = () => {
+		recentlyFetchedBatchSerial.clear();
+		return cacheBatchSerialForItems(allItems.value, shiftStore.profileWarehouse);
+	};
 	const refreshStockFromServer = (codes, wh) => stockStore.refresh(codes, wh);
 
 	return {
@@ -2340,6 +2345,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 		// STOCK ACTIONS - Delegates to stock store
 		// ========================================================================
 		applyStockUpdates, // Delegates to stockStore.applyUpdates
+		refreshBatchSerialCache,
 		refreshStockFromServer, // Delegates to stockStore.refreshFromServer
 
 		// ========================================================================

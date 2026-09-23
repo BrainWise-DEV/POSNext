@@ -1050,6 +1050,7 @@ import { useToast } from "@/composables/useToast";
 
 import { useCustomerSearchStore } from "@/stores/customerSearch";
 import { useItemSearchStore } from "@/stores/itemSearch";
+import { useSerialNumberStore } from "@/stores/serialNumber";
 import { useStockStore } from "@/stores/stock";
 // Pinia Stores
 import { usePOSCartStore } from "@/stores/posCart";
@@ -1768,10 +1769,27 @@ async function updatePeriodicStockSyncItems(warehouse) {
 	}
 }
 
+/**
+ * Offline invoices synced: replace local stock, batch and serial figures with server values
+ */
+async function handleOfflineInvoicesSynced() {
+	useSerialNumberStore().clearCache();
+	try {
+		await Promise.all([
+			stockStore.refresh(null, shiftStore.profileWarehouse),
+			itemStore.refreshBatchSerialCache(),
+		]);
+	} catch (error) {
+		log.error("Failed to refresh stock after offline sync:", error);
+	}
+}
+window.addEventListener("offlineInvoicesSynced", handleOfflineInvoicesSynced);
+
 // Cleanup event listeners on unmount
 onUnmounted(() => {
 	window.removeEventListener("stockSyncComplete", handleStockSyncComplete);
 	window.removeEventListener("stockSyncError", handleStockSyncError);
+	window.removeEventListener("offlineInvoicesSynced", handleOfflineInvoicesSynced);
 });
 
 // Handlers
