@@ -62,6 +62,12 @@
   "allow_print_last_invoice",
   "silent_print",
   "return_invoice_print_format",
+  "section_break_cash_drawer",
+  "enable_cash_drawer",
+  "auto_open_cash_sale",
+  "auto_open_cash_refund",
+  "allow_manual_cash_drawer",
+  "require_manager_pin_cash_drawer",
   "section_break_delivery",
   "use_delivery_charges",
   "auto_set_delivery_charges",
@@ -477,6 +483,51 @@
    "fieldtype": "Link",
    "label": "Return Invoice Print Format",
    "options": "Print Format"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "section_break_cash_drawer",
+   "fieldtype": "Section Break",
+   "label": "Cash Drawer"
+  },
+  {
+   "default": "0",
+   "description": "Enable POSNext cash drawer authorization for this POS Profile. Drawer mode and printer are configured per terminal.",
+   "fieldname": "enable_cash_drawer",
+   "fieldtype": "Check",
+   "label": "Enable Cash Drawer"
+  },
+  {
+   "default": "1",
+   "depends_on": "enable_cash_drawer",
+   "description": "Authorize one automatic drawer opening after a submitted sale containing a Cash-type Mode of Payment.",
+   "fieldname": "auto_open_cash_sale",
+   "fieldtype": "Check",
+   "label": "Auto Open on Cash Sale"
+  },
+  {
+   "default": "1",
+   "depends_on": "enable_cash_drawer",
+   "description": "Authorize one automatic drawer opening after a submitted return/refund containing a Cash-type Mode of Payment.",
+   "fieldname": "auto_open_cash_refund",
+   "fieldtype": "Check",
+   "label": "Auto Open on Cash Refund"
+  },
+  {
+   "default": "1",
+   "depends_on": "enable_cash_drawer",
+   "description": "Allow the manager-authorized Open Cash Drawer workflow.",
+   "fieldname": "allow_manual_cash_drawer",
+   "fieldtype": "Check",
+   "label": "Allow Manual Open Drawer"
+  },
+  {
+   "default": "1",
+   "depends_on": "eval:doc.enable_cash_drawer && doc.allow_manual_cash_drawer",
+   "description": "Require an enabled POS User PIN with Can Open Cash Drawer before a manual drawer opening is authorized.",
+   "fieldname": "require_manager_pin_cash_drawer",
+   "fieldtype": "Check",
+   "label": "Require Manager PIN for Manual Open"
   },
   {
    "collapsible": 1,

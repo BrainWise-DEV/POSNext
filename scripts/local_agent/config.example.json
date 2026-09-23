@@ -1,0 +1,7 @@
+{
+  "BindHost": "127.0.0.1",
+  "Port": 17777,
+  "Token": "REPLACE-WITH-INSTALLER-GENERATED-TOKEN",
+  "AllowedOrigins": ["https://erp.bm-kw.com"],
+  "AllowedPrinters": ["EPSON TM-T20II Receipt"]
+}

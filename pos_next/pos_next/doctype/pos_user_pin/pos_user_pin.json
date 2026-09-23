@@ -10,6 +10,7 @@
   "enabled",
   "pos_pin",
   "can_approve_returns",
+  "can_open_cash_drawer",
   "notes"
  ],
  "fields": [
@@ -43,6 +44,14 @@
    "fieldtype": "Check",
    "in_list_view": 1,
    "label": "Can Approve Returns"
+  },
+  {
+   "default": "0",
+   "description": "Allow this user's POS PIN to authorize manual cash drawer opening.",
+   "fieldname": "can_open_cash_drawer",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Can Open Cash Drawer"
   },
   {
    "fieldname": "notes",

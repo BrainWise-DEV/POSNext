@@ -80,6 +80,7 @@
 											d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
 										/>
 									</svg>
+													<span>{{ loadingPrinters ? __("Refreshing...") : __("Refresh") }}</span>
 								</template>
 								{{ __("Refresh") }}
 							</Button>
@@ -771,50 +772,66 @@
 												</div>
 
 												<!-- Printer Selection -->
-												<div class="flex items-end gap-2">
-													<div class="flex-1">
-														<SelectField
-															v-model="selectedPrinter"
-															:label="__('Printer')"
-															:options="printerOptions"
-															:description="
-																qzPrinters.length === 0 &&
-																!loadingPrinters
-																	? __(
-																			'No printers found. Is QZ Tray running?'
-																	  )
-																	: ''
-															"
-														/>
-													</div>
-													<button
-														@click="handleRefreshPrinters"
-														:disabled="loadingPrinters"
-														class="px-2 py-2 mb-0.5 bg-gray-100 hover:bg-gray-200 rounded transition-colors"
-														:title="__('Refresh printer list')"
-													>
-														<svg
-															class="w-4 h-4 text-gray-600"
-															:class="
-																loadingPrinters
-																	? 'animate-spin'
-																	: ''
-															"
-															fill="none"
-															stroke="currentColor"
-															viewBox="0 0 24 24"
-														>
-															<path
-																stroke-linecap="round"
-																stroke-linejoin="round"
-																stroke-width="2"
-																d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-															/>
-														</svg>
-													</button>
+											<div class="flex items-end gap-2">
+												<div class="flex-1">
+													<SelectField
+														v-model="selectedPrinter"
+														:label="__('Receipt Printer')"
+														:options="printerOptions"
+														:description="
+															qzPrinters.length === 0 && !loadingPrinters
+																? __('No printers found. Is QZ Tray running?')
+																: ''
+														"
+													/>
 												</div>
+												<button
+													type="button"
+													@click="handleRefreshPrinters"
+													:disabled="loadingPrinters"
+													class="px-3 py-2 mb-0.5 bg-gray-100 hover:bg-gray-200 rounded transition-colors text-xs font-semibold text-gray-700 flex items-center gap-1.5 disabled:cursor-not-allowed disabled:opacity-50"
+													:title="__('Refresh printer list')"
+												>
+													<svg
+														class="w-4 h-4 text-gray-600"
+														:class="loadingPrinters ? 'animate-spin' : ''"
+														fill="none"
+														stroke="currentColor"
+														viewBox="0 0 24 24"
+													>
+														<path
+															stroke-linecap="round"
+															stroke-linejoin="round"
+															stroke-width="2"
+															d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+														/>
+													</svg>
+													<span>{{ loadingPrinters ? __("Refreshing...") : __("Refresh") }}</span>
+												</button>
+											</div>
 
-												<!-- QZ Certificate Status & Setup -->
+											<div class="grid grid-cols-2 gap-2">
+												<button
+													type="button"
+													:disabled="qzTestPrinting || !qzConnected || !selectedPrinter"
+													@click="handleQzTestPrint"
+													class="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+												>
+													{{ qzTestPrinting ? __("Testing...") : __("Test Print") }}
+												</button>
+												<button
+													type="button"
+													@click="emit('test-cash-drawer')"
+													class="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
+												>
+													{{ __("Test Cash Drawer") }}
+												</button>
+											</div>
+											<p class="text-[11px] text-gray-500">
+												{{ __("Receipt printer selection is stored on this POS terminal/browser, so multiple terminals can use the same POS Profile with different printers.") }}
+											</p>
+
+											<!-- QZ Certificate Status & Setup -->
 												<div
 													:class="[
 														'p-3 rounded-lg border',
@@ -1159,6 +1176,7 @@ import { logger } from "@/utils/logger";
 import { usePOSEvents } from "@/composables/usePOSEvents";
 import TranslatedHTML from "../common/TranslatedHTML.vue";
 import { useQzTray } from "@/composables/useQzTray";
+import { printHTML as qzPrintHTML } from "@/utils/qzTray";
 
 const log = logger.create("POSSettings");
 const { detectSettingsChanges, updateSettingsSnapshot, emitStockSyncConfigured } = usePOSEvents();
@@ -1170,7 +1188,7 @@ const props = defineProps({
 	currentWarehouse: String,
 });
 
-const emit = defineEmits(["update:modelValue"]);
+const emit = defineEmits(["update:modelValue", "test-cash-drawer"]);
 
 const show = ref(props.modelValue);
 
@@ -1178,6 +1196,7 @@ const show = ref(props.modelValue);
 const activeTab = ref("stock");
 const loading = ref(true);
 const saving = ref(false);
+const qzTestPrinting = ref(false);
 const warehousesList = ref([]);
 const selectedWarehouse = ref(props.currentWarehouse || "");
 const settings = ref({
@@ -1227,6 +1246,37 @@ const {
 	generateCertificate: handleSetupQzCertificate,
 	downloadCertificate: handleDownloadQzCertificate,
 } = useQzTray();
+
+function escapeTestReceiptText(value) {
+	return String(value || "").replace(/[&<>"']/g, (char) => ({
+		"&": "&amp;",
+		"<": "&lt;",
+		">": "&gt;",
+		'"': "&quot;",
+		"'": "&#39;",
+	})[char]);
+}
+
+async function handleQzTestPrint() {
+	const printer = String(selectedPrinter.value || "").trim();
+	if (!printer) {
+		showError(__("Select a receipt printer first."));
+		return;
+	}
+	qzTestPrinting.value = true;
+	try {
+		const profile = escapeTestReceiptText(String(props.posProfile || "-") || "-");
+		const safePrinter = escapeTestReceiptText(printer);
+		const html = `<!doctype html><html><head><meta charset="utf-8"><style>body{font-family:Arial,Tahoma,sans-serif;width:72mm;margin:0;padding:2mm;font-size:12px}h3{text-align:center;margin:0 0 8px}.ok{text-align:center;font-weight:700;margin-top:10px}</style></head><body><h3>POSNext Printer Test</h3><div>POS Profile: ${profile}</div><div>Printer: ${safePrinter}</div><div class="ok">Printer connection successful.</div></body></html>`;
+		await qzPrintHTML(html, printer);
+		showSuccess(__("Test print sent to {0}.", [printer]));
+	} catch (error) {
+		log.error("QZ test print failed:", error);
+		showError(error?.message || __("Test print failed."));
+	} finally {
+		qzTestPrinting.value = false;
+	}
+}
 
 // Warehouse options
 const warehouseOptions = computed(() => {

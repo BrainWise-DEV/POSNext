@@ -935,7 +935,198 @@
 							__("Shift History")
 						}}</span>
 					</button>
+
+
+					<!-- Manual Open Cash Drawer -->
+					<button
+						v-if="cashDrawerEnabled && allowManualCashDrawer"
+						type="button"
+						@click="openCashDrawerDialog"
+						class="flex flex-col items-center justify-center p-3 sm:p-4 bg-white border border-gray-200 rounded-lg hover:border-emerald-300 hover:bg-emerald-50 active:bg-emerald-100 transition-colors shadow-sm hover:shadow touch-manipulation group"
+						:title="__('Open cash drawer')"
+					>
+						<div
+							class="w-9 h-9 sm:w-10 sm:h-10 bg-emerald-50 rounded-full flex items-center justify-center mb-2 group-hover:bg-emerald-100 transition-colors"
+						>
+							<svg
+								class="w-5 h-5 text-emerald-600"
+								fill="none"
+								stroke="currentColor"
+								viewBox="0 0 24 24"
+							>
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M4 7h16a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V9a2 2 0 012-2zm0 4h16M8 15h2"
+								/>
+							</svg>
+						</div>
+						<span class="text-[11px] sm:text-xs font-semibold text-gray-700">{{
+							__("Open Drawer")
+						}}</span>
+					</button>
 				</div>
+
+				<Dialog v-model="showCashDrawerDialog" :options="{ title: __('Open Cash Drawer'), size: 'md' }">
+					<template #body-content>
+						<div class="space-y-4">
+							<div class="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-2">
+                                                                <div class="text-xs font-semibold text-gray-700">
+                                                                        {{ __("Terminal") }}
+                                                                </div>
+                                                                <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                                                                        <span class="text-gray-500">{{ __("Terminal ID") }}</span>
+                                                                        <span class="font-medium text-gray-900 text-end">{{ cashDrawerTerminalId || __("Not configured") }}</span>
+                                                                        <span class="text-gray-500">{{ __("Drawer Mode") }}</span>
+                                                                        <span class="font-medium text-gray-900 text-end">{{ cashDrawerModeLabel }}</span>
+                                                                        <span class="text-gray-500">{{ __("Printer") }}</span>
+                                                                        <span class="font-medium text-gray-900 text-end truncate">{{ effectiveCashDrawerPrinterName || __("Not configured") }}</span>
+                                                                        <span class="text-gray-500">{{ __("Drawer Command") }}</span>
+                                                                        <span class="font-medium text-gray-900 text-end">{{ cashDrawerCommandLabel }}</span>
+                                                                </div>
+                                                        </div>
+
+							<div
+								v-if="cashDrawerMode === 'disabled' || !cashDrawerTerminalId"
+								class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"
+							>
+								{{ __("This terminal is not configured for a cash drawer. Ask an authorized manager to use Cash Drawer Setup.") }}
+							</div>
+
+							<div>
+								<label class="block text-xs font-medium text-gray-600 mb-1">{{ __("Reason") }}</label>
+								<select
+									v-model="cashDrawerReason"
+									class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+								>
+									<option value="Change Required">{{ __("Change Required") }}</option>
+									<option value="Cash Count">{{ __("Cash Count") }}</option>
+									<option value="Cash Pickup">{{ __("Cash Pickup") }}</option>
+									<option value="Cash Deposit">{{ __("Cash Deposit") }}</option>
+									<option value="Shift Check">{{ __("Shift Check") }}</option>
+									<option value="Other">{{ __("Other") }}</option>
+								</select>
+								<input
+									v-if="cashDrawerReason === 'Other'"
+									v-model.trim="cashDrawerOtherReason"
+									type="text"
+									maxlength="140"
+									:placeholder="__('Enter reason')"
+									class="w-full mt-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+								/>
+							</div>
+
+							<div v-if="requireManagerPinCashDrawer">
+								<label class="block text-xs font-medium text-gray-600 mb-1">{{
+									__("Manager PIN")
+								}}</label>
+								<input
+									ref="cashDrawerPinInput"
+									v-model="cashDrawerManagerPin"
+									type="password"
+									inputmode="numeric"
+									pattern="[0-9]*"
+									minlength="4"
+									maxlength="6"
+									autocomplete="off"
+									:placeholder="__('4 to 6 digit PIN')"
+									@keyup.enter="authorizeCashDrawer"
+									class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm tracking-widest focus:outline-none focus:ring-2 focus:ring-emerald-500"
+								/>
+							</div>
+
+
+							<div class="flex justify-end gap-2 pt-1">
+								<button
+									type="button"
+									@click="showCashDrawerDialog = false"
+									class="px-4 py-2 text-sm font-semibold rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-100"
+								>
+									{{ __("Cancel") }}
+								</button>
+								<button
+									type="button"
+									:disabled="!cashDrawerCanAuthorize"
+									@click="authorizeCashDrawer"
+									class="px-4 py-2 text-sm font-semibold rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:bg-gray-300 disabled:text-gray-500 disabled:opacity-100 disabled:cursor-not-allowed"
+								>
+									{{ cashDrawerSubmitting ? __("Opening...") : __("Open Drawer") }}
+								</button>
+							</div>
+						</div>
+					</template>
+				</Dialog>
+
+                                <Dialog v-model="showCashDrawerSetupDialog" :options="{ title: __('Cash Drawer Setup'), size: 'md' }">
+                                        <template #body-content>
+                                                <div class="space-y-4">
+                                                        <div v-if="!cashDrawerSetupUnlocked" class="space-y-3">
+                                                                <div class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                                                                        {{ __("Terminal hardware settings are protected. Enter a manager POS PIN with Can Open Cash Drawer permission.") }}
+                                                                </div>
+                                                                <div>
+                                                                        <label class="block text-xs font-medium text-gray-600 mb-1">{{ __("Manager PIN") }}</label>
+                                                                        <input ref="cashDrawerSetupPinInput" v-model="cashDrawerSetupPin" type="password" inputmode="numeric" pattern="[0-9]*" minlength="4" maxlength="6" autocomplete="off" :placeholder="__('4 to 6 digit PIN')" @keyup.enter="unlockCashDrawerSetup" class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm tracking-widest focus:outline-none focus:ring-2 focus:ring-slate-500" />
+                                                                </div>
+                                                                <div class="flex justify-end gap-2">
+                                                                        <button type="button" @click="showCashDrawerSetupDialog = false" class="px-4 py-2 text-sm font-semibold rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-100">{{ __("Cancel") }}</button>
+                                                                        <button type="button" :disabled="cashDrawerSetupSubmitting || !/^\d{4,6}$/.test(cashDrawerSetupPin)" @click="unlockCashDrawerSetup" class="px-4 py-2 text-sm font-semibold rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300 disabled:text-gray-500 disabled:opacity-100 disabled:cursor-not-allowed">{{ cashDrawerSetupSubmitting ? __("Checking...") : __("Unlock Setup") }}</button>
+                                                                </div>
+                                                        </div>
+
+                                                        <div v-else class="space-y-4">
+                                                                <div class="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-800">{{ __("Authorized by {0}", [cashDrawerSetupApprover || __("Manager")]) }}</div>
+                                                                <div>
+                                                                        <label class="block text-xs font-medium text-gray-600 mb-1">{{ __("Cash Drawer Mode") }}</label>
+                                                                        <select v-model="cashDrawerMode" @change="handleCashDrawerModeChanged" class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-500">
+                                                                                <option value="disabled">{{ __("Disabled") }}</option>
+                                                                                <option value="qz">{{ __("QZ Tray") }}</option>
+                                                                                <option value="local_agent">{{ __("POSNext Local Agent") }}</option>
+                                                                        </select>
+                                                                </div>
+                                                                <div>
+                                                                        <label class="block text-xs font-medium text-gray-600 mb-1">{{ __("Terminal ID") }}</label>
+                                                                        <input v-model.trim="cashDrawerTerminalId" type="text" maxlength="140" :placeholder="__('Example: JAHRA-POS-01')" class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-500" />
+                                                                </div>
+                                                                <div>
+                                                                        <label class="block text-xs font-medium text-gray-600 mb-1">{{ __("Receipt Printer") }}</label>
+                                                                        <div class="flex items-center gap-2">
+                                                                                <select v-model="cashDrawerPrinterName" class="min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-500">
+                                                                                        <option value="">{{ __("Select printer") }}</option>
+                                                                                        <option v-for="printer in cashDrawerPrinterOptions" :key="printer" :value="printer">{{ printer }}</option>
+                                                                                </select>
+                                                                                <button type="button" :disabled="cashDrawerPrinterLoading || cashDrawerMode === 'disabled'" @click="refreshCashDrawerPrinters" class="shrink-0 rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50">
+                                                                                        {{ cashDrawerPrinterLoading ? __("Refreshing...") : __("Refresh") }}
+                                                                                </button>
+                                                                        </div>
+                                                                        <p v-if="cashDrawerHardwareStatus" class="mt-1 text-[11px]" :class="cashDrawerHardwareStatusError ? 'text-red-600' : 'text-gray-500'">{{ cashDrawerHardwareStatus }}</p>
+                                                                </div>
+                                                                <div v-if="cashDrawerMode === 'local_agent'">
+                                                                        <label class="block text-xs font-medium text-gray-600 mb-1">{{ __("Local Agent Token") }}</label>
+                                                                        <input v-model.trim="cashDrawerLocalAgentToken" type="password" autocomplete="off" :placeholder="__('Token created by the POSNext Local Agent installer')" class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-500" />
+                                                                        <p class="mt-1 text-[11px] text-gray-500">{{ __("Stored only on this POS terminal. The agent listens on localhost and restricts requests to the configured ERPNext origin and printer.") }}</p>
+                                                                </div>
+                                                                <div class="grid grid-cols-2 gap-2">
+                                                                        <button type="button" :disabled="cashDrawerHardwareTesting || cashDrawerMode === 'disabled' || !cashDrawerPrinterName" @click="testCashDrawerPrinter" class="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50">{{ cashDrawerHardwareTesting ? __("Testing...") : __("Test Print") }}</button>
+                                                                        <button type="button" :disabled="cashDrawerHardwareTesting || cashDrawerMode === 'disabled' || !cashDrawerPrinterName" @click="testCashDrawerFromSetup" class="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50">{{ __("Test Cash Drawer") }}</button>
+                                                                </div>
+                                                                <div>
+                                                                        <label class="block text-xs font-medium text-gray-600 mb-1">{{ __("Drawer Command Profile") }}</label>
+                                                                        <select v-model="cashDrawerCommandProfile" class="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-500">
+                                                                                <option value="escpos_drawer_1">{{ __("Generic ESC/POS Drawer 1") }}</option>
+                                                                                <option value="escpos_drawer_2">{{ __("Generic ESC/POS Drawer 2") }}</option>
+                                                                                <option value="star">{{ __("Star Compatible") }}</option>
+                                                                        </select>
+                                                                </div>
+                                                                <div class="flex justify-end gap-2">
+                                                                        <button type="button" @click="showCashDrawerSetupDialog = false" class="px-4 py-2 text-sm font-semibold rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-100">{{ __("Cancel") }}</button>
+                                                                        <button type="button" @click="saveCashDrawerSetup" class="px-4 py-2 text-sm font-semibold rounded-lg bg-blue-600 text-white hover:bg-blue-700">{{ __("Save Terminal Setup") }}</button>
+                                                                </div>
+                                                        </div>
+                                                </div>
+                                        </template>
+                                </Dialog>
 			</div>
 
 			<div v-else class="flex flex-col gap-0.5 sm:gap-1">
@@ -1484,15 +1675,32 @@
  */
 import { usePOSCartStore } from "@/stores/posCart";
 import { usePOSSettingsStore } from "@/stores/posSettings";
+import { usePOSShiftStore } from "@/stores/posShift";
 import { usePOSOffersStore } from "@/stores/posOffers";
 import { useCustomerSearchStore } from "@/stores/customerSearch";
 import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency";
 import { useFormatters } from "@/composables/useFormatters";
 import { useCartSort } from "@/composables/useCartSort";
+import { useToast } from "@/composables/useToast";
 import { isOffline } from "@/utils/offline";
 import { offlineWorker } from "@/utils/offline/workerClient";
 import { logger } from "@/utils/logger";
-import { FeatherIcon } from "frappe-ui";
+import { openCashDrawerHardware, resolveCashDrawerPrinter } from "@/utils/cashDrawerHardware";
+import {
+	getLocalAgentToken,
+	listLocalAgentPrinters,
+	localAgentHealth,
+	saveLocalAgentToken,
+	testLocalAgentPrinter,
+} from "@/utils/localAgent";
+import {
+	findPrinters as findQzPrinters,
+	getSavedPrinterName,
+	printHTML as qzPrintHTML,
+	savePrinterName,
+} from "@/utils/qzTray";
+import { call } from "@/utils/apiWrapper";
+import { Dialog, FeatherIcon } from "frappe-ui";
 
 const log = logger.create("InvoiceCart");
 import { createResource } from "frappe-ui";
@@ -1506,9 +1714,11 @@ import EditItemDialog from "./EditItemDialog.vue";
  */
 const cartStore = usePOSCartStore(); // Pinia store for cart state management
 const settingsStore = usePOSSettingsStore(); // Pinia store for POS settings
+const shiftStore = usePOSShiftStore(); // Current POS opening shift for drawer authorization
 const offersStore = usePOSOffersStore(); // Pinia store for offers/promotions
 const customerSearchStore = useCustomerSearchStore(); // Pinia store for customer search
 const { formatQuantity } = useFormatters(); // Quantity formatting utilities
+const { showSuccess, showError, showWarning } = useToast();
 
 function handleProceedToPayment() {
 	emit("proceed-to-payment");
@@ -1635,6 +1845,421 @@ const openUomDropdown = ref(null);
 
 // Cart sort dropdown container (template ref for outside-click detection)
 const cartSortContainer = ref(null);
+
+// Cash drawer: terminal-local configuration, manager authorization, and hardware dispatch.
+const showCashDrawerDialog = ref(false);
+const cashDrawerSubmitting = ref(false);
+const showCashDrawerSetupDialog = ref(false);
+const cashDrawerSetupSubmitting = ref(false);
+const cashDrawerSetupUnlocked = ref(false);
+const cashDrawerSetupPin = ref("");
+const cashDrawerSetupApprover = ref("");
+const cashDrawerMode = ref("disabled");
+const cashDrawerTerminalId = ref("");
+const cashDrawerPrinterName = ref("");
+const cashDrawerCommandProfile = ref("escpos_drawer_1");
+const cashDrawerManagerPin = ref("");
+const cashDrawerReason = ref("Change Required");
+const cashDrawerOtherReason = ref("");
+const cashDrawerPinInput = ref(null);
+const cashDrawerSetupPinInput = ref(null);
+const cashDrawerPrinterOptions = ref([]);
+const cashDrawerPrinterLoading = ref(false);
+const cashDrawerHardwareTesting = ref(false);
+const cashDrawerHardwareStatus = ref("");
+const cashDrawerHardwareStatusError = ref(false);
+const cashDrawerLocalAgentToken = ref("");
+
+function drawerSettingEnabled(value, fallback = false) {
+	if (value === null || value === undefined || value === "") return fallback;
+	if (typeof value === "boolean") return value;
+	if (typeof value === "number") return value === 1;
+	return ["1", "true", "yes", "on"].includes(String(value).trim().toLowerCase());
+}
+
+const cashDrawerEnabled = computed(() =>
+	drawerSettingEnabled(settingsStore.settings?.enable_cash_drawer, false)
+);
+const allowManualCashDrawer = computed(() =>
+	drawerSettingEnabled(settingsStore.settings?.allow_manual_cash_drawer, true)
+);
+const requireManagerPinCashDrawer = computed(() =>
+	drawerSettingEnabled(settingsStore.settings?.require_manager_pin_cash_drawer, true)
+);
+
+const cashDrawerModeLabel = computed(() => {
+        if (cashDrawerMode.value === "qz") return __("QZ Tray");
+        if (cashDrawerMode.value === "local_agent") return __("POSNext Local Agent");
+        return __("Disabled");
+});
+
+const cashDrawerCommandLabel = computed(() => {
+        if (cashDrawerCommandProfile.value === "escpos_drawer_2") return __("Generic ESC/POS Drawer 2");
+        if (cashDrawerCommandProfile.value === "star") return __("Star Compatible");
+        return __("Generic ESC/POS Drawer 1");
+});
+
+const effectiveCashDrawerPrinterName = computed(() =>
+	resolveCashDrawerPrinter(cashDrawerMode.value, cashDrawerPrinterName.value)
+);
+
+const cashDrawerCanAuthorize = computed(() => {
+        if (cashDrawerSubmitting.value) return false;
+        if (cashDrawerMode.value === "disabled") return false;
+        if (!String(cashDrawerTerminalId.value || "").trim()) return false;
+        if (!requireManagerPinCashDrawer.value) return true;
+        return /^\d{4,6}$/.test(String(cashDrawerManagerPin.value || ""));
+});
+
+function cashDrawerStorageKey() {
+	const profile = String(props.posProfile || "default").trim() || "default";
+	return `posnext_cash_drawer_terminal:${profile}`;
+}
+
+function loadCashDrawerTerminalSettings() {
+	try {
+		cashDrawerLocalAgentToken.value = getLocalAgentToken();
+		const raw = localStorage.getItem(cashDrawerStorageKey());
+		if (!raw) {
+			if (!cashDrawerPrinterName.value) cashDrawerPrinterName.value = getSavedPrinterName();
+			return;
+		}
+		const saved = JSON.parse(raw);
+		if (["disabled", "qz", "local_agent"].includes(saved?.mode)) {
+			cashDrawerMode.value = saved.mode;
+		}
+		cashDrawerTerminalId.value = String(saved?.terminal_id || "").trim();
+		cashDrawerPrinterName.value = String(saved?.printer_name || "").trim();
+		cashDrawerCommandProfile.value = ["escpos_drawer_1", "escpos_drawer_2", "star"].includes(saved?.command_profile) ? saved.command_profile : "escpos_drawer_1";
+		if (cashDrawerPrinterName.value && !cashDrawerPrinterOptions.value.includes(cashDrawerPrinterName.value)) {
+			cashDrawerPrinterOptions.value = [cashDrawerPrinterName.value, ...cashDrawerPrinterOptions.value];
+		}
+	} catch (error) {
+		log.warn("Unable to load local cash drawer settings:", error);
+	}
+}
+
+function saveCashDrawerTerminalSettings(showMessage = false) {
+	try {
+		if (cashDrawerMode.value === "qz" && cashDrawerPrinterName.value) {
+			savePrinterName(cashDrawerPrinterName.value);
+		}
+		if (cashDrawerMode.value === "local_agent") {
+			saveLocalAgentToken(cashDrawerLocalAgentToken.value);
+		}
+		localStorage.setItem(
+			cashDrawerStorageKey(),
+			JSON.stringify({
+				mode: cashDrawerMode.value,
+				terminal_id: String(cashDrawerTerminalId.value || "").trim(),
+				printer_name: String(cashDrawerPrinterName.value || "").trim(),
+				command_profile: cashDrawerCommandProfile.value,
+			})
+		);
+		if (showMessage) {
+			showSuccess(__("Cash drawer terminal settings saved on this device."));
+		}
+		return true;
+	} catch (error) {
+		log.error("Unable to save local cash drawer settings:", error);
+		showError(__("Could not save cash drawer terminal settings on this device."));
+		return false;
+	}
+}
+
+function focusCashDrawerPin() {
+	if (!requireManagerPinCashDrawer.value) return;
+	nextTick(() => cashDrawerPinInput.value?.focus());
+}
+
+function focusCashDrawerSetupPin() {
+	nextTick(() => cashDrawerSetupPinInput.value?.focus());
+}
+
+function openCashDrawerDialog(reason = "Change Required") {
+	loadCashDrawerTerminalSettings();
+	cashDrawerManagerPin.value = "";
+	cashDrawerReason.value = reason || "Change Required";
+	cashDrawerOtherReason.value = "";
+	showCashDrawerDialog.value = true;
+	focusCashDrawerPin();
+}
+
+function openCashDrawerSetupDialog() {
+        loadCashDrawerTerminalSettings();
+        cashDrawerSetupPin.value = "";
+        cashDrawerSetupUnlocked.value = false;
+        cashDrawerSetupApprover.value = "";
+        cashDrawerHardwareStatus.value = "";
+        cashDrawerHardwareStatusError.value = false;
+        showCashDrawerSetupDialog.value = true;
+        focusCashDrawerSetupPin();
+}
+
+async function unlockCashDrawerSetup() {
+        if (cashDrawerSetupSubmitting.value) return;
+        if (!/^\d{4,6}$/.test(String(cashDrawerSetupPin.value || ""))) {
+                showWarning(__("Enter the manager 4 to 6 digit POS PIN."));
+                focusCashDrawerSetupPin();
+                return;
+        }
+        cashDrawerSetupSubmitting.value = true;
+        try {
+                const response = await call("pos_next.api.cash_drawer.verify_cash_drawer_manager_pin", {
+                        manager_pin: cashDrawerSetupPin.value,
+                        pos_profile: props.posProfile,
+                });
+                const result = response?.message || response;
+                if (!result?.authorized) throw new Error(__("Manager authorization failed."));
+                cashDrawerSetupUnlocked.value = true;
+                cashDrawerSetupApprover.value = result.authorized_by || "";
+                cashDrawerSetupPin.value = "";
+                await nextTick();
+                await refreshCashDrawerPrinters();
+        } catch (error) {
+                log.error("Cash drawer setup authorization failed:", error);
+                showError(error?.messages?.[0] || error?.message || __("Manager authorization failed. Check the POS PIN."));
+                cashDrawerSetupPin.value = "";
+                focusCashDrawerSetupPin();
+        } finally {
+                cashDrawerSetupSubmitting.value = false;
+        }
+}
+
+async function refreshCashDrawerPrinters() {
+	if (cashDrawerPrinterLoading.value || cashDrawerMode.value === "disabled") return;
+	cashDrawerPrinterLoading.value = true;
+	cashDrawerHardwareStatus.value = "";
+	cashDrawerHardwareStatusError.value = false;
+	try {
+		let printers = [];
+		if (cashDrawerMode.value === "qz") {
+			printers = await findQzPrinters();
+			const saved = cashDrawerPrinterName.value || getSavedPrinterName();
+			if (saved && !cashDrawerPrinterName.value) cashDrawerPrinterName.value = saved;
+			cashDrawerHardwareStatus.value = printers.length
+				? __("QZ Tray connected. {0} printer(s) found.", [printers.length])
+				: __("QZ Tray connected, but no printers were found.");
+		} else if (cashDrawerMode.value === "local_agent") {
+			saveLocalAgentToken(cashDrawerLocalAgentToken.value);
+			const health = await localAgentHealth();
+			printers = await listLocalAgentPrinters();
+			cashDrawerHardwareStatus.value = __("Local Agent {0} connected. {1} printer(s) found.", [
+				health?.version || "",
+				printers.length,
+			]);
+		}
+		const current = String(cashDrawerPrinterName.value || "").trim();
+		cashDrawerPrinterOptions.value = Array.from(new Set([current, ...printers].filter(Boolean)));
+	} catch (error) {
+		cashDrawerHardwareStatusError.value = true;
+		cashDrawerHardwareStatus.value = error?.message || __("Unable to discover printers.");
+	}
+	cashDrawerPrinterLoading.value = false;
+}
+
+async function handleCashDrawerModeChanged() {
+	cashDrawerHardwareStatus.value = "";
+	cashDrawerHardwareStatusError.value = false;
+	if (cashDrawerMode.value === "qz" && !cashDrawerPrinterName.value) {
+		cashDrawerPrinterName.value = getSavedPrinterName();
+	}
+	await refreshCashDrawerPrinters();
+}
+
+function escapeReceiptText(value) {
+	return String(value || "").replace(/[&<>"']/g, (char) => ({
+		"&": "&amp;",
+		"<": "&lt;",
+		">": "&gt;",
+		'"': "&quot;",
+		"'": "&#39;",
+	})[char]);
+}
+
+function buildCashDrawerTestReceipt() {
+	const terminal = escapeReceiptText(String(cashDrawerTerminalId.value || "-").trim() || "-");
+	const printer = escapeReceiptText(String(cashDrawerPrinterName.value || "-").trim() || "-");
+	const mode = escapeReceiptText(cashDrawerModeLabel.value);
+	return `<!doctype html><html><head><meta charset="utf-8"><style>body{font-family:Arial,Tahoma,sans-serif;width:72mm;margin:0;padding:2mm;font-size:12px}h3{text-align:center;margin:0 0 8px}div{margin:3px 0}.ok{text-align:center;font-weight:700;margin-top:10px}</style></head><body><h3>POSNext Printer Test</h3><div>Terminal: ${terminal}</div><div>Printer: ${printer}</div><div>Mode: ${mode}</div><div class="ok">Printer connection successful.</div></body></html>`;
+}
+
+async function testCashDrawerPrinter() {
+	if (cashDrawerHardwareTesting.value) return;
+	const printer = String(cashDrawerPrinterName.value || "").trim();
+	if (!printer) {
+		showWarning(__("Select a receipt printer first."));
+		return;
+	}
+	cashDrawerHardwareTesting.value = true;
+	try {
+		if (cashDrawerMode.value === "qz") {
+			savePrinterName(printer);
+			await qzPrintHTML(buildCashDrawerTestReceipt(), printer);
+		} else if (cashDrawerMode.value === "local_agent") {
+			saveLocalAgentToken(cashDrawerLocalAgentToken.value);
+			await testLocalAgentPrinter(printer, cashDrawerTerminalId.value);
+		} else {
+			throw new Error(__("Select a cash drawer mode first."));
+		}
+		showSuccess(__("Test print sent to {0}.", [printer]));
+	} catch (error) {
+		showError(error?.message || __("Test print failed."));
+	} finally {
+		cashDrawerHardwareTesting.value = false;
+	}
+}
+
+function testCashDrawerFromSetup() {
+	if (!String(cashDrawerTerminalId.value || "").trim()) {
+		showWarning(__("Enter the Terminal ID first."));
+		return;
+	}
+	if (!effectiveCashDrawerPrinterName.value) {
+		showWarning(__("Select a receipt printer first."));
+		return;
+	}
+	if (cashDrawerMode.value === "local_agent" && !String(cashDrawerLocalAgentToken.value || "").trim()) {
+		showWarning(__("Enter the POSNext Local Agent token first."));
+		return;
+	}
+	if (!saveCashDrawerTerminalSettings(false)) return;
+	showCashDrawerSetupDialog.value = false;
+	openCashDrawerDialog("Shift Check");
+}
+
+function saveCashDrawerSetup() {
+        if (!cashDrawerSetupUnlocked.value) return;
+        if (cashDrawerMode.value !== "disabled" && !String(cashDrawerTerminalId.value || "").trim()) {
+                showWarning(__("Terminal ID is required when the cash drawer is enabled."));
+                return;
+        }
+        if (cashDrawerMode.value !== "disabled" && !effectiveCashDrawerPrinterName.value) {
+                showWarning(__("Select a receipt printer for this terminal."));
+                return;
+        }
+        if (cashDrawerMode.value === "local_agent" && !String(cashDrawerLocalAgentToken.value || "").trim()) {
+                showWarning(__("Enter the POSNext Local Agent token for this terminal."));
+                return;
+        }
+        if (!saveCashDrawerTerminalSettings(false)) return;
+        showSuccess(__("Cash drawer terminal setup saved on this device."));
+        showCashDrawerSetupDialog.value = false;
+}
+
+function resolvedCashDrawerReason() {
+	if (cashDrawerReason.value !== "Other") return cashDrawerReason.value;
+	return String(cashDrawerOtherReason.value || "").trim();
+}
+
+function cashDrawerMethodLabel() {
+	if (cashDrawerMode.value === "qz") return "QZ Tray";
+	if (cashDrawerMode.value === "local_agent") return "POSNext Local Agent";
+	return "";
+}
+
+async function authorizeCashDrawer() {
+	if (cashDrawerSubmitting.value) return;
+
+	if (cashDrawerMode.value === "disabled") {
+		showWarning(__("Select a Cash Drawer Mode first."));
+		return;
+	}
+	if (!String(cashDrawerTerminalId.value || "").trim()) {
+		showWarning(__("Terminal ID is required."));
+		return;
+	}
+
+	const posOpeningShift = shiftStore.currentShift?.name;
+	if (!props.posProfile || !posOpeningShift) {
+		showError(__("An open POS shift is required."));
+		return;
+	}
+
+	const reason = resolvedCashDrawerReason();
+	if (!reason) {
+		showWarning(__("A reason is required."));
+		return;
+	}
+	if (
+		requireManagerPinCashDrawer.value &&
+		!/^\d{4,6}$/.test(String(cashDrawerManagerPin.value || ""))
+	) {
+		showWarning(__("Enter the manager 4 to 6 digit POS PIN."));
+		focusCashDrawerPin();
+		return;
+	}
+
+	saveCashDrawerTerminalSettings(false);
+	cashDrawerSubmitting.value = true;
+	try {
+		const response = await call("pos_next.api.cash_drawer.authorize_manual_open", {
+			pos_profile: props.posProfile,
+			pos_opening_shift: posOpeningShift,
+			manager_pin: cashDrawerManagerPin.value || "",
+			reason,
+			terminal_id: cashDrawerTerminalId.value,
+			method: cashDrawerMethodLabel(),
+		});
+		const result = response?.message || response;
+		if (!result?.authorized || !result?.log_name) {
+			throw new Error(__("Cash drawer authorization was not approved."));
+		}
+
+		let hardwareResult;
+		try {
+			hardwareResult = await openCashDrawerHardware({
+				mode: cashDrawerMode.value,
+				printerName: effectiveCashDrawerPrinterName.value,
+				commandProfile: cashDrawerCommandProfile.value,
+				terminalId: cashDrawerTerminalId.value,
+			});
+		} catch (hardwareError) {
+			try {
+				await call("pos_next.api.cash_drawer.report_open_result", {
+					log_name: result.log_name,
+					success: 0,
+					printer_name: effectiveCashDrawerPrinterName.value || "",
+					error_message: hardwareError?.message || "Cash drawer hardware failed.",
+				});
+			} catch (reportError) {
+				log.warn("Unable to record failed cash drawer hardware result:", reportError);
+			}
+			throw hardwareError;
+		}
+
+		try {
+			await call("pos_next.api.cash_drawer.report_open_result", {
+				log_name: result.log_name,
+				success: 1,
+				printer_name: hardwareResult?.printerName || effectiveCashDrawerPrinterName.value || "",
+			});
+		} catch (reportError) {
+			log.error("Cash drawer opened but the audit result could not be saved:", reportError);
+			showWarning(__("Cash drawer opened, but the audit result could not be saved. Please inform a manager."));
+		}
+
+		showSuccess(__("Cash drawer opened."));
+		cashDrawerManagerPin.value = "";
+		showCashDrawerDialog.value = false;
+	} catch (error) {
+		log.error("Cash drawer authorization failed:", error);
+		const message =
+			error?.messages?.[0] ||
+			error?.message ||
+			__("Cash drawer authorization failed. Check the manager PIN and try again.");
+		showError(message);
+		cashDrawerManagerPin.value = "";
+		focusCashDrawerPin();
+	} finally {
+		cashDrawerSubmitting.value = false;
+	}
+}
+
+defineExpose({
+	openCashDrawerDialog,
+	openCashDrawerSetupDialog,
+});
 
 /**
  * ============================================================================

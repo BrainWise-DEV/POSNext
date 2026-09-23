@@ -274,3 +274,61 @@ export async function printHTML(html, printerName, options = {}) {
 		throw err;
 	}
 }
+
+
+// ============================================================================
+// Cash Drawer Raw Dispatch
+// ============================================================================
+
+const CASH_DRAWER_COMMANDS = Object.freeze({
+	escpos_drawer_1: "\x1B\x70\x00\x19\xFA",
+	escpos_drawer_2: "\x1B\x70\x01\x19\xFA",
+});
+
+/**
+ * Send a single ESC/POS cash-drawer pulse through QZ Tray.
+ *
+ * QZ treats plain string print data as a raw command. Drawer 1/2 map to the
+ * standard ESC p connector pin selector. Vendor-specific profiles must be
+ * verified before being enabled here.
+ *
+ * @param {string} [printerName] - Target printer; falls back to saved QZ printer.
+ * @param {string} [commandProfile] - escpos_drawer_1 | escpos_drawer_2
+ * @returns {Promise<{success: boolean, printerName: string}>}
+ */
+export async function openCashDrawer(printerName, commandProfile = "escpos_drawer_1") {
+	if (!qz.websocket.isActive()) {
+		const ok = await connect();
+		if (!ok) {
+			throw new Error("QZ Tray is not available");
+		}
+	}
+
+	const printer = String(printerName || getSavedPrinterName() || "").trim();
+	if (!printer) {
+		throw new Error("No cash drawer printer configured. Select a QZ printer in Cash Drawer Setup or POS Settings.");
+	}
+
+	if (commandProfile === "star") {
+		throw new Error("Star Compatible drawer command is not enabled yet. Use a verified ESC/POS profile or confirm the printer vendor command.");
+	}
+
+	const command = CASH_DRAWER_COMMANDS[commandProfile];
+	if (!command) {
+		throw new Error(`Unsupported cash drawer command profile: ${commandProfile || "unknown"}`);
+	}
+
+	const config = qz.configs.create(printer, {
+		encoding: "ISO-8859-1",
+		jobName: "POSNext Cash Drawer",
+	});
+
+	try {
+		await qz.print(config, [command]);
+		log.info(`Cash drawer pulse sent to "${printer}" using ${commandProfile}`);
+		return { success: true, printerName: printer };
+	} catch (err) {
+		log.error(`Cash drawer pulse failed on "${printer}":`, err?.message || err);
+		throw err;
+	}
+}
