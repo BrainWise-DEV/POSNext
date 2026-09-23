@@ -55,6 +55,9 @@ async function cacheBatchSerialForItems(items, warehouse) {
 
 	for (let i = 0; i < itemCodes.length; i += BATCH_SIZE) {
 		const batchCodes = itemCodes.slice(i, i + BATCH_SIZE);
+		// Mark before the request so concurrent searches skip in-flight codes
+		const fetchedAt = Date.now();
+		for (const code of batchCodes) recentlyFetchedBatchSerial.set(code, fetchedAt);
 
 		try {
 			const response = await call("pos_next.api.items.get_batch_serial_data_for_items", {
@@ -68,12 +71,9 @@ async function cacheBatchSerialForItems(items, warehouse) {
 				await updateItemBatchSerialData(data);
 				log.debug(`Cached batch/serial data for ${Object.keys(data).length} items`);
 			}
-
-			const fetchedAt = Date.now();
-			for (const code of batchCodes) {
-				recentlyFetchedBatchSerial.set(code, fetchedAt);
-			}
 		} catch (error) {
+			// Unmark so the next search retries
+			for (const code of batchCodes) recentlyFetchedBatchSerial.delete(code);
 			log.warn(`Failed to fetch batch/serial data for batch ${i}:`, error.message);
 		}
 	}

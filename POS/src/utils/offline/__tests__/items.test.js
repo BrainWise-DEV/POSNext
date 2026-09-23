@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const itemStore = new Map()
 
-vi.mock("./db", () => {
+vi.mock("../db", () => {
 	const items = {
 		get: vi.fn(async (itemCode) => itemStore.get(itemCode) ?? undefined),
 		update: vi.fn(async (itemCode, update) => {
@@ -33,7 +33,7 @@ const {
 	consumeCachedSerials,
 	returnCachedSerials,
 	getCachedSerialData,
-} = await import("./items")
+} = await import("../items")
 
 describe("parseSerialNumbers", () => {
 	it("parses newline-delimited strings", () => {
