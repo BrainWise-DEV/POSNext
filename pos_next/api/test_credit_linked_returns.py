@@ -106,6 +106,9 @@ class TestLinkedReturnCredit(FrappeTestCase):
 
 		self.assertEqual([self._gl_balance(n) for n in (original.name, ret.name, sale.name)], [0, 0, 0])
 		self.assertEqual(self._credit_sources(original.name, ret.name), [])
+		self.assertEqual(
+			str(credit_sales.get_customer_balance(CUSTOMER, self.company.name)["total_credit"]), "0.0"
+		)
 
 	def test_customer_balance_counts_linked_return_credit_once(self):
 		self._linked_return(self._pos_sale(paid=True))

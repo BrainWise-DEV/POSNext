@@ -65,13 +65,15 @@ def get_customer_balance(customer, company=None):
 			)[0].total
 		)
 		# Negative outstanding (customer credit)
-		total_credit = -flt(
-			frappe.get_all(
-				"Sales Invoice",
-				filters={**filters, "outstanding_amount": ["<", 0]},
-				or_filters=CUSTOMER_CREDIT_OR_FILTERS,
-				fields=total,
-			)[0].total
+		total_credit = abs(
+			flt(
+				frappe.get_all(
+					"Sales Invoice",
+					filters={**filters, "outstanding_amount": ["<", 0]},
+					or_filters=CUSTOMER_CREDIT_OR_FILTERS,
+					fields=total,
+				)[0].total
+			)
 		)
 
 		# Net balance: positive = owes, negative = has credit
