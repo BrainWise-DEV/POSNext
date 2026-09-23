@@ -211,6 +211,35 @@
 						</svg>
 						<span>{{ __("Lock Screen") }}</span>
 					</button>
+                                        <button
+                                                v-if="
+                                                        shiftStore.hasOpenShift &&
+                                                        cartStore.itemCount === 0 &&
+                                                        Number(posSettingsStore.settings?.enable_cash_drawer) === 1 &&
+                                                        Number(posSettingsStore.settings?.allow_manual_cash_drawer ?? 1) === 1
+                                                "
+                                                @click="$refs.invoiceCart?.openCashDrawerDialog()"
+                                                class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-emerald-50 flex items-center gap-3 transition-colors"
+                                        >
+                                                <svg class="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7h16a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V9a2 2 0 012-2zm0 4h16M8 15h2" />
+                                                </svg>
+                                                <span>{{ __("Open Drawer") }}</span>
+                                        </button>
+                                        <button
+                                                v-if="
+                                                        shiftStore.hasOpenShift &&
+                                                        cartStore.itemCount === 0 &&
+                                                        Number(posSettingsStore.settings?.enable_cash_drawer) === 1
+                                                "
+                                                @click="$refs.invoiceCart?.openCashDrawerSetupDialog()"
+                                                class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-slate-50 flex items-center gap-3 transition-colors"
+                                        >
+                                                <svg class="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15.5a3.5 3.5 0 100-7 3.5 3.5 0 000 7zM19.4 15a1.65 1.65 0 00.33 1.82l.06.06" />
+                                                </svg>
+                                                <span>{{ __("Cash Drawer Setup") }}</span>
+                                        </button>
 				</template>
 				<template #additional-actions>
 					<button
@@ -385,6 +414,7 @@
 							style="min-width: 300px; contain: layout style paint"
 						>
 							<InvoiceCart
+								ref="invoiceCart"
 								:items="cartStore.invoiceItems"
 								:customer="cartStore.customer"
 								:subtotal="cartStore.subtotal"
@@ -734,6 +764,7 @@
 				v-model="showPOSSettings"
 				:pos-profile="shiftStore.profileName"
 				:current-warehouse="shiftStore.profileWarehouse"
+				@test-cash-drawer="handleSettingsTestCashDrawer"
 			/>
 
 			<!-- Stock Lookup Dialog (Products Menu) -->
@@ -1132,6 +1163,7 @@ import {
 	printWithSilentFallback,
 } from "@/utils/printInvoice";
 import { qzConnected, connect as qzConnect, disconnect as qzDisconnect } from "@/utils/qzTray";
+import { tryAutomaticCashDrawerOpen } from "@/utils/cashDrawerAuto";
 
 import { Button, Dialog, createResource } from "frappe-ui";
 import { call } from "@/utils/apiWrapper";
@@ -1258,6 +1290,7 @@ const canAccessProductManagement = ref(false);
 
 // Settings dialog
 const showPOSSettings = ref(false);
+const invoiceCart = ref(null);
 
 // Stock Lookup dialog (Products menu)
 const showStockLookup = ref(false);
@@ -2504,6 +2537,7 @@ async function startPaymentHubMappedSale(paymentData, customerValue, draftIdToDe
 					? __("Payment completed. Change due: {0}", [result.change_amount])
 					: __("Payment completed"),
 			);
+			await handleAutomaticCashDrawer(result.invoice.name);
 			await handlePrintInvoice({ name: result.invoice.name });
 		} else {
 			const sessionName = result?.session?.name || __("Payment Hub sale");
@@ -2949,6 +2983,7 @@ async function handlePaymentCompleted(paymentData) {
 
 			if (result) {
 				uiStore.clearLastOfflinePrintDoc();
+				const submittedFromOfflineEdit = Boolean(editingOfflineContext?.originalQueueId);
 
 				// If this online checkout originated from editing a still-queued
 				// offline invoice, mark the original row as superseded so the
@@ -2984,6 +3019,13 @@ async function handlePaymentCompleted(paymentData) {
 				// Delete draft after successful submission
 				if (draftIdToDelete) {
 					draftsStore.deleteDraft(draftIdToDelete);
+				}
+
+				// Automatic drawer opening is tied only to a new live checkout. Reprints,
+				// refreshes, background offline sync and re-submission of an offline edit
+				// must never kick the drawer again.
+				if (!submittedFromOfflineEdit) {
+					await handleAutomaticCashDrawer(invoiceName);
 				}
 
 				// Refresh stock - Direct API (50-200ms), no Socket.IO lag!
@@ -3399,6 +3441,49 @@ async function handleLoadDraft(draft) {
 	}
 }
 
+async function handleSettingsTestCashDrawer() {
+	showPOSSettings.value = false;
+	if (!uiStore.isDesktop && uiStore.mobileActiveTab !== "cart") {
+		uiStore.setMobileTab("cart");
+	}
+	await nextTick();
+	if (!invoiceCart.value?.openCashDrawerDialog) {
+		showWarning(__("Cash drawer controls are not available on this screen."));
+		return;
+	}
+	invoiceCart.value.openCashDrawerDialog("Shift Check");
+}
+
+async function handleAutomaticCashDrawer(invoiceName) {
+	const name = String(invoiceName || "").trim();
+	const posOpeningShift = shiftStore.currentShift?.name;
+	if (!name || !posOpeningShift || name.startsWith("OFFLINE-")) return;
+
+	try {
+		const result = await tryAutomaticCashDrawerOpen({
+			invoiceName: name,
+			posOpeningShift,
+			posProfile: shiftStore.profileName,
+		});
+		if (result?.hardwareError) {
+			showWarning(
+				__("Invoice {0} was completed, but the cash drawer did not open: {1}", [
+					name,
+					result.hardwareError,
+				])
+			);
+		}
+	} catch (error) {
+		// The sale/refund is already submitted. Drawer failure must never cancel it.
+		log.error("Automatic cash drawer open failed:", error);
+		showWarning(
+			__("Invoice {0} was completed, but automatic cash drawer authorization failed. Use Open Drawer if needed.", [
+				name,
+			])
+		);
+	}
+}
+
 async function handleReturnCreated(returnInvoice) {
 	// Close any standalone return launcher/source dialog BEFORE opening the browser
 	// print flow. Browser print can block JavaScript; if the return dialog is left
@@ -3420,6 +3505,7 @@ async function handleReturnCreated(returnInvoice) {
 	}
 
 	log.debug("Return invoice created:", invoiceName);
+	await handleAutomaticCashDrawer(invoiceName);
 	const returnPrintFormat =
 		posSettingsStore.returnInvoicePrintFormat || shiftStore.currentProfile?.print_format || null;
 
