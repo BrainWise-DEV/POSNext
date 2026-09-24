@@ -1461,6 +1461,8 @@ onMounted(async () => {
 				? offlineStore.checkOfflineCacheAvailability()
 				: offlineStore.preloadDataForOffline(shiftStore.currentProfile),
 			draftsStore.updateDraftsCount(),
+			// Invoices queued in an earlier offline session: sync now, not on the next reconnect
+			offlineStore.isOffline ? null : offlineStore.syncAllPending(),
 		]);
 
 		// Wait for settings (required for tax rules) + all background ops
@@ -1814,6 +1816,8 @@ async function handleShiftOpened() {
 			? offlineStore.checkOfflineCacheAvailability()
 			: offlineStore.preloadDataForOffline(shiftStore.currentProfile),
 		draftsStore.updateDraftsCount(),
+		// Invoices queued in an earlier offline session: sync now, not on the next reconnect
+		offlineStore.isOffline ? null : offlineStore.syncAllPending(),
 	]);
 
 	// Wait for settings (required for tax rules) + all background ops

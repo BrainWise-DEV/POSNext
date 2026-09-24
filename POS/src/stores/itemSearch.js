@@ -133,6 +133,11 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 	// Cache state
 	const cacheReady = ref(false);
 	const cacheSyncing = ref(false);
+
+	// Re-read cache stats so the header cache indicator reflects what was just cached
+	const refreshCacheStats = async () => {
+		cacheStats.value = { ...cacheStats.value, ...(await offlineWorker.getCacheStats()) };
+	};
 	const cacheStats = ref({ items: 0, lastSync: null });
 	const serverDataFresh = ref(false); // Track if we have fresh server data in current session
 
@@ -935,9 +940,12 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 
 				if (fetchedItems.length > 0) {
 					// Cache this batch for offline access (non-blocking)
-					offlineWorker.cacheItems(fetchedItems).catch((err) => {
-						log.warn("Background item caching failed:", err.message);
-					});
+					offlineWorker
+						.cacheItems(fetchedItems)
+						.then(refreshCacheStats)
+						.catch((err) => {
+							log.warn("Background item caching failed:", err.message);
+						});
 					cacheReady.value = true;
 					serverDataFresh.value = true;
 
@@ -996,9 +1004,12 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 					hasMore.value = totalItemCount > unfilteredLimit;
 
 					// Cache this batch (non-blocking — background sync fills the rest)
-					offlineWorker.cacheItems(list).catch((err) => {
-						log.warn("Background item caching failed:", err.message);
-					});
+					offlineWorker
+						.cacheItems(list)
+						.then(refreshCacheStats)
+						.catch((err) => {
+							log.warn("Background item caching failed:", err.message);
+						});
 
 					// Mark data as fresh
 					serverDataFresh.value = true;
