@@ -641,6 +641,6 @@ async function loadInvoiceDetails() {
 
 function handlePrint() {
 	if (!invoiceData.value) return;
-	emit("print-invoice", invoiceData.value);
+	emit("print-invoice", { ...invoiceData.value, _posnext_duplicate: true });
 }
 </script>
