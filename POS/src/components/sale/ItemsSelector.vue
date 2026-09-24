@@ -1432,7 +1432,8 @@ function selectItem(item, autoAdd = false) {
 		}
 	}
 
-	emit("item-selected", item, autoAdd);
+	openUomSelectionModal(item);
+	
 	return true;
 }
 
