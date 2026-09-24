@@ -6,12 +6,14 @@ import {
 	updateDraft,
 } from "@/utils/draftManager";
 import { useToast } from "@/composables/useToast";
+import { useSerialNumberStore } from "@/stores/serialNumber";
 import { defineStore } from "pinia";
 import { ref } from "vue";
 
 export const usePOSDraftsStore = defineStore("posDrafts", () => {
 	// Use custom toast
 	const { showSuccess, showError, showWarning } = useToast();
+	const serialStore = useSerialNumberStore();
 
 	// State
 	const draftsCount = ref(0);
@@ -90,9 +92,24 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 		}
 	}
 
-	async function deleteDraftById(draftId) {
+	// Return a parked draft's serials to the offline cache
+	function returnDraftSerials(draft) {
+		for (const item of draft?.items || []) {
+			if (item.has_serial_no && item.serial_no) {
+				serialStore.returnSerials(item.item_code, item.serial_no);
+			}
+		}
+	}
+
+	/**
+	 * @param {{ returnSerials?: boolean }} [options]
+	 *   true when the user discards the draft; false (default) after the draft was sold
+	 */
+	async function deleteDraftById(draftId, { returnSerials = false } = {}) {
 		try {
+			const draft = drafts.value.find((d) => d.draft_id === draftId);
 			await deleteDraft(draftId);
+			if (returnSerials) returnDraftSerials(draft);
 			await loadDrafts(); // Refresh drafts list and count
 			showSuccess(__("Draft deleted successfully"));
 		} catch (error) {
@@ -112,5 +129,6 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 		saveDraftInvoice,
 		loadDraft,
 		deleteDraft: deleteDraftById,
+		returnDraftSerials,
 	};
 });

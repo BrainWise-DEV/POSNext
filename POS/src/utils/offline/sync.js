@@ -427,6 +427,11 @@ export const syncOfflineInvoices = async () => {
 			failed: result.failed,
 		});
 
+		// Let the POS replace local stock/batch/serial figures with server values
+		if (result.success > 0) {
+			window.dispatchEvent(new CustomEvent("offlineInvoicesSynced", { detail: result }));
+		}
+
 		return result;
 	}, log.debug.bind(log));
 };

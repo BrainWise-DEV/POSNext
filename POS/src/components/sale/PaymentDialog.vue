@@ -2643,20 +2643,23 @@ async function loadPaymentMethods() {
 
 	loadingPaymentMethods.value = true;
 
+	// Load from cache using worker
+	const loadCachedPaymentMethods = async () => {
+		const cached = await offlineWorker.getCachedPaymentMethods(props.posProfile);
+		if (cached && cached.length > 0) {
+			paymentMethods.value = cached;
+			const defaultMethod = paymentMethods.value.find((m) => m.default);
+			lastSelectedMethod.value = defaultMethod || paymentMethods.value[0];
+		}
+	};
+
 	try {
 		if (props.isOffline) {
-			// Load from cache when offline using worker
-			const cached = await offlineWorker.getCachedPaymentMethods(props.posProfile);
-			if (cached && cached.length > 0) {
-				paymentMethods.value = cached;
-				if (paymentMethods.value.length > 0) {
-					const defaultMethod = paymentMethods.value.find((m) => m.default);
-					lastSelectedMethod.value = defaultMethod || paymentMethods.value[0];
-				}
-			}
+			await loadCachedPaymentMethods();
 		} else {
-			// Load from server when online
-			await paymentMethodsResource.fetch();
+			// Load from server when online; a failed request (offline not detected yet,
+			// e.g. right after an offline start) falls back to the cache
+			await paymentMethodsResource.fetch().catch(loadCachedPaymentMethods);
 			// Receivable accounts for "Pay on Receivable Account" (online only)
 			receivableAccountsResource.fetch();
 		}

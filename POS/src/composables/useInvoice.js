@@ -3,6 +3,7 @@ import { createResource } from "frappe-ui";
 import { computed, ref, toRaw } from "vue";
 import { isOffline, getCachedItem } from "@/utils/offline";
 import { useSerialNumberStore } from "@/stores/serialNumber";
+import { shiftState } from "@/composables/useShift";
 import { CoalescingMutex } from "@/utils/mutex";
 import { logger } from "@/utils/logger";
 import { roundCurrency } from "@/utils/currency";
@@ -1156,8 +1157,13 @@ export function useInvoice() {
 				};
 			}
 		} catch (error) {
-			// Silently fail - default customer is optional
-			console.log("No default customer set in POS Profile");
+			// Offline or request failed: use the default customer from the cached POS Profile
+			const fallback = shiftState.value.pos_profile?.customer;
+			if (fallback) {
+				customer.value = { name: fallback, customer_name: fallback };
+			} else {
+				console.log("No default customer set in POS Profile");
+			}
 		}
 	}
 
@@ -1184,12 +1190,17 @@ export function useInvoice() {
 	/**
 	 * Clears the cart and resets to default state.
 	 * If a POS Profile is active and has a default customer, it will be pre-selected.
+	 * @param {{ returnSerials?: boolean }} [options]
+	 *   When false (post-submit), sold serials stay consumed in durable cache.
+	 *   Default true restores serials for abandoned / cleared carts.
 	 */
-	async function clearCart() {
-		// Return all serial numbers back to cache before clearing
-		for (const item of invoiceItems.value) {
-			if (item.has_serial_no && item.serial_no) {
-				serialStore.returnSerials(item.item_code, item.serial_no);
+	async function clearCart({ returnSerials = true } = {}) {
+		// Return serials only when the cart is abandoned — not after a successful sale
+		if (returnSerials) {
+			for (const item of invoiceItems.value) {
+				if (item.has_serial_no && item.serial_no) {
+					serialStore.returnSerials(item.item_code, item.serial_no);
+				}
 			}
 		}
 
