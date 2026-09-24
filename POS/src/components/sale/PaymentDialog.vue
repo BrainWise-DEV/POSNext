@@ -873,7 +873,10 @@
 								<div
 									v-if="remainingAmount > 0 && !applyWriteOff"
 									:class="[
-										'bg-orange-50 text-center',
+										'bg-orange-50 text-center transition-all duration-200',
+										remainingPulse
+											? 'ring-2 ring-inset ring-orange-400 bg-orange-100 scale-[1.02]'
+											: '',
 										isCompactMode ? 'p-2' : 'p-3',
 									]"
 								>
@@ -1360,17 +1363,21 @@
 							}}
 						</div>
 						<div class="grid grid-cols-4 gap-1.5">
+							<!-- Click only adds the amount; Enter is the keyboard fast-path and also
+							     completes the sale once covered (so a mouse slip can't submit an invoice). -->
 							<button
-								v-for="amount in quickAmounts"
+								v-for="(amount, index) in quickAmounts"
 								:key="amount"
+								:ref="(el) => setQuickAmountBtnRef(el, index)"
 								@click="addCustomPayment(lastSelectedMethod, amount)"
+								@keydown.enter.stop.prevent="handleQuickAmountEnter(amount, $event)"
 								:disabled="isQuickAmountDisabled(amount)"
 								:class="[
 									'font-semibold rounded-lg border-2 transition-all',
 									isCompactMode ? 'px-2 py-2 text-sm' : 'px-2 py-2 text-sm',
 									isQuickAmountDisabled(amount)
 										? 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed'
-										: 'bg-white border-gray-200 hover:border-blue-400 hover:bg-blue-50 text-gray-700 hover:text-blue-600',
+										: 'bg-white border-gray-200 hover:border-blue-400 hover:bg-blue-50 text-gray-700 hover:text-blue-600 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-300 focus:bg-blue-50',
 								]"
 							>
 								{{ formatCurrency(amount) }}
@@ -1441,6 +1448,7 @@
 										>{{ currencySymbol }}</span
 									>
 									<input
+										ref="mobileAmountInputRef"
 										v-model="mobileCustomAmount"
 										type="number"
 										inputmode="decimal"
@@ -1466,6 +1474,7 @@
 												? 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed'
 												: 'bg-white border-gray-200 focus:ring-1 focus:ring-blue-500',
 										]"
+										@keydown.enter.prevent="handleMobileAmountEnter($event)"
 									/>
 								</div>
 								<button
@@ -2202,25 +2211,125 @@ watch(
 	}
 );
 
-// Handle Enter key from numpad keyboard input
-function handleNumpadEnter(value) {
-	if (value > 0 && lastSelectedMethod.value) {
-		numpadAddPayment();
-	} else if (remainingAmount.value === 0 && totalPaid.value > 0 && canComplete.value) {
-		// If fully paid and can complete, trigger complete payment
-		completePayment();
+// Brief highlight on the Remaining figure when Enter has nothing to do (see rule 4 below).
+const remainingPulse = ref(false);
+let remainingPulseTimer = null;
+function pulseRemaining() {
+	remainingPulse.value = true;
+	clearTimeout(remainingPulseTimer);
+	remainingPulseTimer = setTimeout(() => {
+		remainingPulse.value = false;
+	}, 600);
+}
+
+// Re-entrancy latch for Enter. _upsertPaymentEntry ADDS to an existing entry and a fully
+// paid balance flips quickAmounts to [10, 20, 50, 100], so a second Enter (key auto-repeat,
+// or Enter again before the parent closes the dialog) would silently overpay. It stays set
+// after completePayment() because the parent only raises isSubmitting asynchronously.
+let enterLatched = false;
+let enterLatchTimer = null;
+function releaseEnterLatch(delay = 0) {
+	clearTimeout(enterLatchTimer);
+	if (delay > 0) {
+		enterLatchTimer = setTimeout(() => {
+			enterLatched = false;
+		}, delay);
+	} else {
+		enterLatched = false;
 	}
+}
+
+/**
+ * The single Enter rule for the payment dialog. Shared by the numpad's window
+ * listener, the focused quick-amount buttons, and the mobile amount input so the
+ * three surfaces cannot drift apart.
+ *
+ *   typed amount        → add it to the selected method (pay only if it clears the balance)
+ *   empty + covered     → pay
+ *   empty + nothing yet → full remaining on the selected method + pay (the fast path)
+ *   empty + part paid   → nothing; the cashier must pick a method first
+ *
+ * The last case is deliberate: Enter must never put money on a method the cashier
+ * did not choose, nor silently turn the sale into customer debt.
+ *
+ * @param {number} typed - amount currently in the numpad/input buffer (0 if empty)
+ * @param {Function} clearInput - clears whichever buffer the amount came from
+ */
+async function applyPaymentEnter(typed, clearInput) {
+	if (props.isSubmitting || enterLatched) return;
+	enterLatched = true;
+	let completed = false;
+	try {
+		if (typed > 0) {
+			if (!lastSelectedMethod.value) return;
+			await addCustomPayment(lastSelectedMethod.value, typed);
+			clearInput();
+			await nextTick();
+			if (remainingAmount.value === 0 && canComplete.value && !props.isSubmitting) {
+				completed = true;
+				completePayment();
+			}
+			return;
+		}
+
+		if (canComplete.value) {
+			completed = true;
+			completePayment();
+			return;
+		}
+
+		if (paymentEntries.value.length === 0 && lastSelectedMethod.value && quickAmounts.value?.[0]) {
+			await addCustomPayment(lastSelectedMethod.value, quickAmounts.value[0]);
+			await nextTick();
+			if (canComplete.value && !props.isSubmitting) {
+				completed = true;
+				completePayment();
+			}
+			return;
+		}
+
+		pulseRemaining();
+	} finally {
+		// Once the sale was emitted keep the latch up briefly so a stray second Enter can't
+		// re-add the amount; otherwise release immediately for the next keystroke.
+		releaseEnterLatch(completed ? 1000 : 0);
+	}
+}
+
+function handlePaymentEnter() {
+	applyPaymentEnter(numpadValue.value, numpadClear);
+}
+
+// Enter on a focused quick-amount button applies THAT button's amount. The listener is
+// on the button with .stop so the window-level numpad handler doesn't also fire.
+function handleQuickAmountEnter(amount, event) {
+	if (event?.repeat) return;
+	// Digits typed while the button is focused go to the numpad buffer; typed amount wins.
+	if (numpadValue.value > 0) {
+		applyPaymentEnter(numpadValue.value, numpadClear);
+	} else {
+		applyPaymentEnter(amount, () => {});
+	}
+}
+
+// Ref callback so the first quick-amount button can be auto-focused on open.
+function setQuickAmountBtnRef(el, index) {
+	if (index === 0) firstQuickAmountBtnRef.value = el || null;
 }
 
 // Use numpad composable for keypad input handling with keyboard support
 const { numpadDisplay, numpadValue, numpadInput, numpadBackspace, numpadClear, setNumpadValue } =
 	usePaymentNumpad({
 		isEnabled: computed(() => props.modelValue), // Only enabled when dialog is open
-		onEnter: handleNumpadEnter,
+		onEnter: handlePaymentEnter,
 	});
 
 // Mobile custom amount state
 const mobileCustomAmount = ref("");
+const mobileAmountInputRef = ref(null);
+
+// First quick-amount button (desktop), focused on open for Enter-to-pay
+const firstQuickAmountBtnRef = ref(null);
 
 function addMobileCustomPayment() {
 	const amount = Number.parseFloat(mobileCustomAmount.value);
@@ -2228,6 +2337,18 @@ function addMobileCustomPayment() {
 		addCustomPayment(lastSelectedMethod.value, amount);
 		mobileCustomAmount.value = "";
 	}
+}
+
+function handleMobileAmountEnter(event) {
+	if (event?.repeat) return;
+	const amount = Number.parseFloat(mobileCustomAmount.value);
+	applyPaymentEnter(Number.isNaN(amount) ? 0 : amount, () => {
+		mobileCustomAmount.value = "";
+		nextTick(() => {
+			mobileAmountInputRef.value?.focus();
+			mobileAmountInputRef.value?.select();
+		});
+	});
 }
 
 function numpadAddPayment() {
@@ -2992,6 +3113,39 @@ watch(
 	{ immediate: true }
 );
 
+// Focus the right control when the dialog opens: the first quick-amount button on desktop,
+// the amount input (selected) on mobile. The targets render only once payment methods have
+// resolved, so re-run as their inputs change and mark done only after focus really landed.
+let hasAutofocused = false;
+watch(
+	() => [
+		props.modelValue,
+		isMobileView.value,
+		quickAmounts.value.length,
+		!!lastSelectedMethod.value,
+		props.grandTotal > 0,
+	],
+	() => {
+		if (!props.modelValue) {
+			hasAutofocused = false;
+			return;
+		}
+		if (hasAutofocused || !(props.grandTotal > 0)) return;
+		if (isMobileView.value) {
+			const input = mobileAmountInputRef.value;
+			if (!input) return;
+			input.focus();
+			input.select();
+		} else {
+			const btn = firstQuickAmountBtnRef.value;
+			if (!btn || btn.disabled) return;
+			btn.focus();
+		}
+		hasAutofocused = true;
+	},
+	{ flush: "post", immediate: true }
+);
+
 watch(show, (newVal) => {
 	if (newVal) {
 		// Reset state when dialog opens (but NOT customerBalance - it's pre-fetched)
@@ -3034,6 +3188,13 @@ watch(show, (newVal) => {
 		if (paymentMethods.value.length > 0 && !lastSelectedMethod.value) {
 			const defaultMethod = paymentMethods.value.find((m) => m.default);
 			lastSelectedMethod.value = defaultMethod || paymentMethods.value[0];
+		}
+
+		// Pre-populate the mobile amount input; focus itself is handled by the autofocus
+		// watcher below, which retries until the target element actually exists.
+		releaseEnterLatch();
+		if (props.grandTotal > 0) {
+			mobileCustomAmount.value = props.grandTotal.toFixed(2);
 		}
 
 		if (creditEnabled) {
