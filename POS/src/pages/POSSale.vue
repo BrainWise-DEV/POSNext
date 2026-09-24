@@ -2208,6 +2208,7 @@ async function handlePaymentCompleted(paymentData) {
 		} else {
 			// Get item codes from cart before clearing
 			const soldItemCodes = cartStore.invoiceItems.map((item) => item.item_code);
+			const soldBatches = cartStore.invoiceItems.filter((item) => item.batch_no);
 
 			const result = await cartStore.submitInvoice({
 				isCreditSale: Boolean(paymentData.is_credit_sale),
@@ -2255,6 +2256,12 @@ async function handlePaymentCompleted(paymentData) {
 
 				// Refresh stock - Direct API (50-200ms), no Socket.IO lag!
 				await stockStore.refresh(soldItemCodes, shiftStore.profileWarehouse);
+
+				// Keep the offline batch cache in step; the refresh above covers stock only
+				for (const item of soldBatches) {
+					const qty = (item.quantity || item.qty || 0) * (item.conversion_factor || 1);
+					deductCachedBatchQty(item.item_code, item.batch_no, qty).catch(() => {});
+				}
 
 				// Refresh invoice history cache in background (non-blocking)
 				loadInvoiceHistoryData().catch((err) =>
