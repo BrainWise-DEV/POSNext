@@ -57,6 +57,7 @@
   "section_break_printing",
   "allow_print_last_invoice",
   "silent_print",
+  "return_invoice_print_format",
   "section_break_delivery",
   "use_delivery_charges",
   "auto_set_delivery_charges",
@@ -437,6 +438,14 @@
    "fieldname": "silent_print",
    "fieldtype": "Check",
    "label": "Enable Silent Print"
+  },
+  {
+   "depends_on": "eval:doc.allow_return || doc.allow_return_without_invoice",
+   "description": "Print format used automatically for submitted POS return invoices. If empty, the normal POS Profile print format is used.",
+   "fieldname": "return_invoice_print_format",
+   "fieldtype": "Link",
+   "label": "Return Invoice Print Format",
+   "options": "Print Format"
   },
   {
    "collapsible": 1,
