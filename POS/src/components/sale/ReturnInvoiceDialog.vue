@@ -718,7 +718,7 @@
 				</div>
 
 				<!-- Payment Methods Selection -->
-				<div v-if="selectedItems.length > 0">
+				<div v-if="selectedItems.length > 0 && !isExchangeCreditMode">
 					<!-- Credit Sale Return Notice -->
 					<div
 						v-if="isOriginalCreditSale"
@@ -1217,6 +1217,7 @@ const props = defineProps({
 	posOpeningShift: String,
 	currency: { type: String, default: DEFAULT_CURRENCY },
 	preselectedInvoice: { type: Object, default: null },
+	settlementMode: { type: String, default: "refund" },
 });
 
 const emit = defineEmits(["update:modelValue", "return-created"]);
@@ -1226,6 +1227,10 @@ const showDialog = computed({
 	get: () => props.modelValue,
 	set: (val) => emit("update:modelValue", val),
 });
+
+const isExchangeCreditMode = computed(
+	() => props.settlementMode === "exchange-credit"
+);
 
 // State
 const originalInvoice = ref(null);
@@ -1422,8 +1427,12 @@ const fetchInvoiceResource = createResource({
 				loadPaymentMethodsResource.reload();
 			}
 
-			// Set up refund payment rows based on original invoice payments
-			initializePaymentsFromInvoice();
+			if (isExchangeCreditMode.value) {
+				refundPayments.value = [];
+			} else {
+				// Set up refund payment rows based on original invoice payments
+				initializePaymentsFromInvoice();
+			}
 		}
 	},
 	onError(error) {
@@ -1478,11 +1487,11 @@ const createReturnResource = createResource({
 				sales_invoice_item: item.name,
 			})),
 			// Flag to indicate return amount should be added to customer credit balance
-			add_to_customer_balance: addToCustomerCredit.value,
+			add_to_customer_balance: isExchangeCreditMode.value ? false : addToCustomerCredit.value,
 			// Payment amounts are negative for refunds
 			// If addToCustomerCredit is true, send empty payments array so outstanding stays negative
 			// This negative outstanding becomes customer credit balance
-			payments: addToCustomerCredit.value
+			payments: isExchangeCreditMode.value ? [] : addToCustomerCredit.value
 				? []
 				: refundPayments.value.map((payment) => ({
 						mode_of_payment: payment.mode_of_payment,
@@ -1509,7 +1518,14 @@ const createReturnResource = createResource({
 	onSuccess(data) {
 		submitError.value = "";
 		isSubmitting.value = false;
-		emit("return-created", data);
+		emit("return-created", {
+			...data,
+			customer: originalInvoice.value?.customer,
+			customer_name: originalInvoice.value?.customer_name,
+			return_against: originalInvoice.value?.name,
+			return_total: returnTotal.value,
+			exchange_credit: isExchangeCreditMode.value,
+		});
 
 		// Reload the invoice list to remove fully returned invoices
 		loadInvoicesResource.reload();
@@ -1656,6 +1672,7 @@ const paymentSelectStyle = {
 const canCreateReturn = computed(() => {
 	const hasSelectedItems = selectedItems.value.length > 0;
 	if (!hasSelectedItems || !hasOpenShift.value) return false;
+	if (isExchangeCreditMode.value) return true;
 	// Credit sale returns and "add to customer credit" returns don't need payment validation
 	if (isOriginalCreditSale.value || addToCustomerCredit.value) return true;
 

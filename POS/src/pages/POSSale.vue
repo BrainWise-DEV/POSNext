@@ -194,6 +194,30 @@
 						</svg>
 						<span>{{ __("Return Invoice") }}</span>
 					</button>
+                                        <button
+                                                v-if="
+                                                        canAccessShiftActions &&
+                                                        posSettingsStore.allowReturn &&
+                                                        posSettingsStore.allowExchange
+                                                "
+                                                @click="openExchangeDialog"
+                                                class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-emerald-50 flex items-center gap-3 transition-colors"
+                                        >
+                                                <svg
+                                                        class="w-5 h-5 text-emerald-600"
+                                                        fill="none"
+                                                        stroke="currentColor"
+                                                        viewBox="0 0 24 24"
+                                                >
+                                                        <path
+                                                                stroke-linecap="round"
+                                                                stroke-linejoin="round"
+                                                                stroke-width="2"
+                                                                d="M4 7h11a4 4 0 014 4v1M20 17H9a4 4 0 01-4-4v-1M4 7l3-3M4 7l3 3M20 17l-3-3m3 3l-3 3"
+                                                        />
+                                                </svg>
+                                                <span>{{ __("Exchange") }}</span>
+                                        </button>
 					<button
 						v-if="canAccessShiftActions && canSwitchToDesk"
 						@click="switchToDesk"
@@ -543,7 +567,10 @@
 				:is-offline="offlineStore.isOffline"
 				:allow-partial-payment="posSettingsStore.allowPartialPayment"
 				:allow-credit-sale="posSettingsStore.allowCreditSale"
-				:allow-customer-credit-payment="posSettingsStore.allowCustomerCreditPayment"
+				:allow-customer-credit-payment="posSettingsStore.allowCustomerCreditPayment || autoApplyExchangeCredit"
+                                :auto-apply-customer-credit="autoApplyExchangeCredit"
+                                :auto-apply-customer-credit-origin="exchangeCreditOrigin"
+                                :auto-apply-customer-credit-limit="exchangeCreditLimit"
 				:allow-write-off="posSettingsStore.allowWriteOffChange"
 				:write-off-limit="shiftStore.writeOffLimit"
 				:customer="cartStore.customer"
@@ -596,6 +623,7 @@
 				:pos-profile="shiftStore.profileName"
 				:pos-opening-shift="shiftStore.currentShift?.name"
 				:currency="shiftStore.profileCurrency"
+				:settlement-mode="exchangeReturnMode ? 'exchange-credit' : 'refund'"
 				@return-created="handleReturnCreated"
 			/>
 
@@ -1214,6 +1242,11 @@ const pendingPaymentAfterCustomer = ref(false);
 const logoutAfterClose = ref(false);
 const editCustomer = ref(null); // Customer being edited (null for create mode)
 const showClearCacheDialog = ref(false);
+
+const exchangeReturnMode = ref(false);
+const autoApplyExchangeCredit = ref(false);
+const exchangeCreditOrigin = ref("");
+const exchangeCreditLimit = ref(0);
 const clearCacheOverlayRef = ref(null);
 
 // Debounce timer for offer reapplication
@@ -2294,6 +2327,7 @@ async function handlePaymentCompleted(paymentData) {
 			cacheOfflineReceiptPayload(offlineReceiptName, offlinePrintDoc);
 			uiStore.showPaymentDialog = false;
 			cartStore.clearCart();
+			resetExchangeCheckout();
 			// Reset cart hash after successful payment
 			previousCartHash = "";
 
@@ -2365,6 +2399,7 @@ async function handlePaymentCompleted(paymentData) {
 
 				uiStore.showPaymentDialog = false;
 				cartStore.clearCart();
+				resetExchangeCheckout();
 				// Reset cart hash after successful payment
 				previousCartHash = "";
 
@@ -2428,6 +2463,7 @@ function handleClearCart() {
 
 function confirmClearCart() {
 	cartStore.clearCart();
+	resetExchangeCheckout();
 	// Reset cart hash when cart is cleared
 	previousCartHash = "";
 	editingOfflineContext = null;
@@ -2558,11 +2594,44 @@ function openHistoryDialog() {
 	uiStore.showHistoryDialog = true;
 }
 
+function resetExchangeCheckout() {
+	exchangeReturnMode.value = false;
+	autoApplyExchangeCredit.value = false;
+	exchangeCreditOrigin.value = "";
+	exchangeCreditLimit.value = 0;
+}
+
 function openReturnDialog() {
 	if (!canAccessShiftActions.value) {
 		return;
 	}
 
+	resetExchangeCheckout();
+	uiStore.showReturnDialog = true;
+}
+
+function openExchangeDialog() {
+	if (!canAccessShiftActions.value) return;
+
+	if (!posSettingsStore.allowReturn || !posSettingsStore.allowExchange) {
+		showWarning(__("Exchange is disabled in POS Settings."));
+		return;
+	}
+
+	if (offlineStore.isOffline) {
+		showWarning(__("Exchange requires an online connection."));
+		return;
+	}
+
+	if (!cartStore.isEmpty) {
+		showWarning(
+			__("Save or clear the current sale before starting an exchange.")
+		);
+		return;
+	}
+
+	resetExchangeCheckout();
+	exchangeReturnMode.value = true;
 	uiStore.showReturnDialog = true;
 }
 
@@ -2673,8 +2742,69 @@ async function handleLoadDraft(draft) {
 }
 
 function handleReturnCreated(returnInvoice) {
-	// Success message is already shown by ReturnInvoiceDialog
-	log.debug("Return invoice created:", returnInvoice.name);
+	// Normal Return Invoice keeps the existing behavior.
+	if (!returnInvoice?.exchange_credit) {
+		log.debug("Return invoice created:", returnInvoice?.name);
+		return;
+	}
+
+	const customer =
+		returnInvoice.customer ||
+		returnInvoice.customer_name ||
+		null;
+
+	const creditOrigin =
+		returnInvoice.return_against ||
+		"";
+
+	const creditLimit = Math.abs(
+		Number(
+			returnInvoice.return_total ||
+			returnInvoice.grand_total ||
+			0
+		)
+	);
+
+	uiStore.showReturnDialog = false;
+	exchangeReturnMode.value = false;
+
+	if (customer) {
+		cartStore.setCustomer({
+			name: returnInvoice.customer || customer,
+			customer_name:
+				returnInvoice.customer_name ||
+				returnInvoice.customer ||
+				customer,
+		});
+	}
+
+	if (!creditOrigin || creditLimit <= 0) {
+		autoApplyExchangeCredit.value = false;
+		exchangeCreditOrigin.value = "";
+		exchangeCreditLimit.value = 0;
+
+		showWarning(
+			__(
+				"Exchange return {0} was created, but its exact Customer Credit source could not be prepared automatically. The return credit remains available.",
+				[returnInvoice?.name || ""]
+			)
+		);
+		return;
+	}
+
+	// BrainWise exposes linked-return Customer Credit on the original
+	// invoice reference. Limit redemption to the value of THIS return,
+	// so older credit on the same invoice is never consumed accidentally.
+	exchangeCreditOrigin.value = creditOrigin;
+	exchangeCreditLimit.value = creditLimit;
+	autoApplyExchangeCredit.value = true;
+
+	showSuccess(
+		__(
+			"Exchange return {0} created. Add the replacement items, then continue to checkout.",
+			[returnInvoice?.name || ""]
+		)
+	);
 }
 
 function handleExpenseCreated(expense) {

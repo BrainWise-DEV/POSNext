@@ -43,6 +43,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		allow_select_sales_order: 0,
 		create_only_sales_order: 0,
 		allow_return_without_invoice: 0,
+		allow_exchange: 0,
 		allow_free_batch_return: 0,
 		allow_print_draft_invoices: 0,
 		// Pricing & Display
@@ -127,6 +128,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	const allowReturnWithoutInvoice = computed(() =>
 		Boolean(settings.value.allow_return_without_invoice)
 	);
+	const allowExchange = computed(() => Boolean(settings.value.allow_exchange));
 	const allowFreeBatchReturn = computed(() => Boolean(settings.value.allow_free_batch_return));
 	const allowPrintDraftInvoices = computed(() =>
 		Boolean(settings.value.allow_print_draft_invoices)
@@ -271,6 +273,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 			allow_select_sales_order: 0,
 			create_only_sales_order: 0,
 			allow_return_without_invoice: 0,
+			allow_exchange: 0,
 			allow_free_batch_return: 0,
 			allow_print_draft_invoices: 0,
 			decimal_precision: "2",
@@ -391,6 +394,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		allowSelectSalesOrder,
 		createOnlySalesOrder,
 		allowReturnWithoutInvoice,
+		allowExchange,
 		allowFreeBatchReturn,
 		allowPrintDraftInvoices,
 
