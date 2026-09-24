@@ -103,7 +103,8 @@
 															{{ __("Quantity") }}
 															<span
 																v-if="
-																	localItem?.is_resolved_barcode
+																	localItem?.is_resolved_barcode ||
+																	isLockedFreeItem
 																"
 																class="ms-1 text-xs text-amber-600"
 																>({{ __("Locked") }})</span
@@ -122,10 +123,11 @@
 																>{{ localSerials.length }}</span
 															>
 														</div>
-														<!-- For resolved barcode items, quantity is read-only -->
+														<!-- For resolved barcode / free promo items, quantity is read-only -->
 														<div
 															v-else-if="
-																localItem?.is_resolved_barcode
+																localItem?.is_resolved_barcode ||
+																isLockedFreeItem
 															"
 															class="w-full h-10 border border-amber-300 rounded-lg bg-amber-50 flex items-center justify-center"
 														>
@@ -213,7 +215,7 @@
 																name="lock"
 																class="w-3 h-3"
 															/>
-															{{ __("Locked (offer applied)") }}
+															{{ __("Locked (promotional offer)") }}
 														</p>
 													</div>
 												</div>
@@ -228,15 +230,19 @@
 															{{ __("UOM") }}
 															<span
 																v-if="
-																	localItem?.is_resolved_barcode
+																	localItem?.is_resolved_barcode ||
+																	isLockedFreeItem
 																"
 																class="ms-1 text-xs text-amber-600"
 																>({{ __("Locked") }})</span
 															>
 														</label>
-														<!-- For resolved barcode items, UOM is read-only -->
+														<!-- For resolved barcode / free promo items, UOM is read-only -->
 														<div
-															v-if="localItem?.is_resolved_barcode"
+															v-if="
+																localItem?.is_resolved_barcode ||
+																isLockedFreeItem
+															"
 															class="w-full h-10 border border-amber-300 rounded-lg bg-amber-50 flex items-center justify-center"
 														>
 															<span
@@ -255,9 +261,25 @@
 													<div>
 														<label
 															class="block text-sm font-medium text-gray-700 mb-2 text-start"
-															>{{ __("Warehouse") }}</label
 														>
+															{{ __("Warehouse") }}
+															<span
+																v-if="isLockedFreeItem"
+																class="ms-1 text-xs text-amber-600"
+																>({{ __("Locked") }})</span
+															>
+														</label>
+														<div
+															v-if="isLockedFreeItem"
+															class="w-full h-10 border border-amber-300 rounded-lg bg-amber-50 flex items-center justify-center"
+														>
+															<span
+																class="text-sm font-semibold text-amber-700"
+																>{{ localWarehouse }}</span
+															>
+														</div>
 														<SelectInput
+															v-else
 															v-model="localWarehouse"
 															:options="warehouseOptions"
 															@change="handleWarehouseChange"
@@ -340,7 +362,7 @@
 
 											<!-- Item Discount Section (only if allowed by POS Profile) -->
 											<div
-												v-if="settingsStore.allowItemDiscount"
+												v-if="canEditItemDiscount"
 												class="border-t border-gray-200 pt-4"
 											>
 												<label
@@ -357,6 +379,7 @@
 														<SelectInput
 															v-model="discountType"
 															:options="discountTypeOptions"
+															:disabled="!canEditDiscount"
 															@change="handleDiscountTypeChange"
 														/>
 													</div>
@@ -381,7 +404,15 @@
 																		: undefined
 																"
 																step="0.01"
-																class="w-full h-7 border border-gray-300 rounded-lg px-3 pe-8 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+																:readonly="!canEditDiscount"
+																:disabled="!canEditDiscount"
+																:title="discountEditDisabledReason"
+																:class="
+																	canEditDiscount
+																		? 'bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
+																		: 'bg-gray-50 cursor-not-allowed'
+																"
+																class="w-full h-7 border border-gray-300 rounded-lg px-3 pe-8 text-sm"
 																@input="calculateDiscount"
 															/>
 															<span
@@ -396,6 +427,24 @@
 														</div>
 													</div>
 												</div>
+												<!-- Compact warning when discount editing disabled due to pricing rules -->
+												<p
+													v-if="hasPricingRules"
+													class="mt-2 text-xs text-amber-600 flex items-center gap-1"
+												>
+													<FeatherIcon
+														name="lock"
+														class="w-3 h-3"
+													/>
+													{{ __("Locked (promotional offer)") }}
+												</p>
+											</div>
+
+											<div
+												v-else-if="isItemLevelPromotion"
+												class="border-t border-gray-200 pt-4 text-xs text-amber-700"
+											>
+												{{ __("SKU promotion applied — discount is locked") }}
 											</div>
 
 											<!-- Totals -->
@@ -452,9 +501,14 @@
 									<Button
 										variant="solid"
 										@click="updateItem"
-										:disabled="!hasStock || isCheckingStock"
+										:disabled="
+											isLockedFreeItem || !hasStock || isCheckingStock
+										"
 									>
-										<span v-if="isCheckingStock">{{
+										<span v-if="isLockedFreeItem">{{
+											__("Free Item Locked")
+										}}</span>
+										<span v-else-if="isCheckingStock">{{
 											__("Checking Stock...")
 										}}</span>
 										<span v-else-if="!hasStock">{{
@@ -473,8 +527,11 @@
 </template>
 
 <script setup>
+import { promoApi } from "@/utils/promoApi";
 import { useToast } from "@/composables/useToast";
 import { usePOSSettingsStore } from "@/stores/posSettings";
+import { usePOSOffersStore } from "@/stores/posOffers";
+import { usePOSShiftStore } from "@/stores/posShift";
 import { useSerialNumberStore } from "@/stores/serialNumber";
 import { getItemStock } from "@/utils/stockValidator";
 import {
@@ -482,13 +539,61 @@ import {
 	getCurrencySymbol,
 	roundCurrency,
 } from "@/utils/currency";
+import { call } from "@/utils/apiWrapper";
+import {
+	scaleRateForUomChange,
+	shouldPreserveRateOnUomChange,
+} from "@/utils/uomPricingLock";
 import { Button, FeatherIcon, createResource } from "frappe-ui";
 import { computed, ref, watch } from "vue";
 import SelectInput from "@/components/common/SelectInput.vue";
 
 const { showSuccess, showError, showWarning } = useToast();
 const settingsStore = usePOSSettingsStore();
+const offersStore = usePOSOffersStore();
+const shiftStore = usePOSShiftStore();
 const serialStore = useSerialNumberStore();
+
+/**
+ * True if this item currently qualifies for an active offer based on qty
+ * (min_qty / max_qty). Outside that range, manual discount stays allowed.
+ */
+function isItemCoveredByOffer(item, offers, qty) {
+	if (!item?.item_code || !Array.isArray(offers) || offers.length === 0) {
+		return false;
+	}
+
+	const q = Number(qty);
+	if (!Number.isFinite(q) || q <= 0) return false;
+
+	for (const offer of offers) {
+		if (!offer || offer.coupon_based) continue;
+
+		const minQty = Number(offer.min_qty) || 0;
+		const maxQty = Number(offer.max_qty) || 0;
+		if (minQty > 0 && q < minQty) continue;
+		if (maxQty > 0 && q > maxQty) continue;
+
+		if (offer.apply_on === "Item Code") {
+			const eligibleItems = offer.eligible_items || [];
+			if (eligibleItems.includes(item.item_code)) return true;
+		} else if (offer.apply_on === "Item Group") {
+			const eligibleGroups = offer.eligible_item_groups || [];
+			if (
+				eligibleGroups.includes("All Item Groups") ||
+				(item.item_group && eligibleGroups.includes(item.item_group))
+			) {
+				return true;
+			}
+		} else if (offer.apply_on === "Brand") {
+			const eligibleBrands = offer.eligible_brands || [];
+			if (item.brand && eligibleBrands.includes(item.brand)) return true;
+		}
+		// Transaction-level offers intentionally skipped
+	}
+
+	return false;
+}
 
 const props = defineProps({
 	modelValue: Boolean,
@@ -524,6 +629,34 @@ const localSerials = ref([]); // List of serial numbers for this item
 const removedSerials = ref([]); // Track serials removed during this edit session
 const originalSerials = ref([]); // Original serials when dialog opened
 const originalPriceListRate = ref(0); // Original price_list_rate when dialog opened (for rate edit validation)
+// True when server confirms current qty qualifies for an active promotion
+const itemHasActivePromotion = ref(false);
+let promotionCheckRequestId = 0;
+
+async function checkItemPromotion(itemCode, qty) {
+	const requestId = ++promotionCheckRequestId;
+	itemHasActivePromotion.value = false;
+	if (!itemCode) return;
+
+	const quantity = Number(qty);
+	if (!Number.isFinite(quantity) || quantity <= 0) return;
+
+	try {
+		const company = shiftStore.currentProfile?.company || shiftStore.profileCompany;
+		const resp = await call(promoApi.itemHasActivePromotion(), {
+			item_code: itemCode,
+			company: company || undefined,
+			qty: quantity,
+		});
+		if (requestId !== promotionCheckRequestId) return;
+		const result = resp?.message ?? resp;
+		itemHasActivePromotion.value = Boolean(result?.has_promotion);
+	} catch (error) {
+		if (requestId !== promotionCheckRequestId) return;
+		console.error("Failed to check item promotion:", error);
+		itemHasActivePromotion.value = false;
+	}
+}
 
 const getItemDetailsResource = createResource({
 	url: "pos_next.api.items.get_item_details",
@@ -542,17 +675,39 @@ const availableUoms = computed(() => {
 
 const currencySymbol = computed(() => getCurrencySymbol(props.currency));
 
-// Check if item has pricing rules applied (promotional offers)
+// Lock rate/discount only when the current qty qualifies for a promo
+// (e.g. qty 2–5 for Buy 2–5 Get 1). Qty 1 or 6+ stays editable.
+const isLockedFreeItem = computed(() => Boolean(localItem.value?.is_free_item));
+
 const hasPricingRules = computed(() => {
 	if (!localItem.value) return false;
-	return Boolean(localItem.value.pricing_rules) && localItem.value.pricing_rules.length > 0;
+	if (localItem.value.is_free_item) return true;
+	if (itemHasActivePromotion.value) return true;
+	return isItemCoveredByOffer(
+		localItem.value,
+		offersStore.availableOffers,
+		localQuantity.value
+	);
+});
+
+const isItemLevelPromotion = computed(() => {
+	return localItem.value?.discount_source === "item_level_promotion";
+});
+
+const canEditItemDiscount = computed(() => {
+	return settingsStore.allowItemDiscount && !isItemLevelPromotion.value;
 });
 
 // Rate editing is allowed only if:
 // 1. POS Settings allows rate editing AND
-// 2. Item does NOT have pricing rules (promotional offers) applied
+// 2. Item does NOT have pricing rules (promotional offers) applied / configured
 const canEditRate = computed(() => {
 	return settingsStore.allowUserToEditRate && !hasPricingRules.value;
+});
+
+// Item discount editing is allowed only if no promotional offer covers this item
+const canEditDiscount = computed(() => {
+	return settingsStore.allowItemDiscount && !hasPricingRules.value;
 });
 
 // Tooltip message for why rate editing is disabled
@@ -561,7 +716,14 @@ const rateEditDisabledReason = computed(() => {
 		return __("Rate editing is disabled");
 	}
 	if (hasPricingRules.value) {
-		return __("Locked (offer applied)");
+		return __("Locked (promotional offer)");
+	}
+	return "";
+});
+
+const discountEditDisabledReason = computed(() => {
+	if (hasPricingRules.value) {
+		return __("Cannot add item discount while a promotional offer applies to this item");
 	}
 	return "";
 });
@@ -622,7 +784,14 @@ watch(
 			}
 
 			// Initialize discount
-			if (newItem.discount_percentage && newItem.discount_percentage > 0) {
+			const usesExactPromoDiscount =
+				(newItem.discount_source === "free_item" ||
+					newItem.discount_source === "gwp") &&
+				Number(newItem.discount_amount) > 0;
+			if (usesExactPromoDiscount) {
+				discountType.value = "amount";
+				discountValue.value = newItem.discount_amount;
+			} else if (newItem.discount_percentage && newItem.discount_percentage > 0) {
 				discountType.value = "percentage";
 				discountValue.value = newItem.discount_percentage;
 			} else if (newItem.discount_amount && newItem.discount_amount > 0) {
@@ -633,12 +802,18 @@ watch(
 				discountValue.value = 0;
 			}
 
+			// Lock discount only when current qty qualifies for the promo
+			checkItemPromotion(newItem.item_code, localQuantity.value);
+
 			// Reset stock check state
 			hasStock.value = true;
 			isCheckingStock.value = false;
 
 			calculateTotals();
 			isInitializingItem.value = false;
+		} else {
+			localItem.value = null;
+			itemHasActivePromotion.value = false;
 		}
 	},
 	{ immediate: true }
@@ -647,6 +822,12 @@ watch(
 watch(localUom, (newUom, oldUom) => {
 	if (!newUom || newUom === oldUom || isInitializingItem.value) return;
 	handleUomChange(newUom);
+});
+
+// Re-evaluate promo lock when qty changes (e.g. 1 → editable, 2–5 → locked)
+watch(localQuantity, (newQty) => {
+	if (isInitializingItem.value || !localItem.value?.item_code) return;
+	checkItemPromotion(localItem.value.item_code, newQty);
 });
 
 /**
@@ -766,13 +947,44 @@ async function handleUomChange(newUom) {
 		return;
 	}
 
+	// Free / GWP rows: UOM is locked — refuse any price-list refresh.
+	if (isLockedFreeItem.value) {
+		localUom.value = localItem.value.uom || localItem.value.stock_uom;
+		return;
+	}
+
+	const oldConversion = Number(localItem.value.conversion_factor) || 1;
+	const newConversionFactor = getConversionFactorForUom(selectedUom);
+
+	// Promo / manual-rate lock: scale current rates — never fetch price list.
+	if (hasPricingRules.value || shouldPreserveRateOnUomChange(localItem.value)) {
+		const scaledRate = roundCurrency(
+			scaleRateForUomChange(localRate.value, oldConversion, newConversionFactor)
+		);
+		const scaledListRate = roundCurrency(
+			scaleRateForUomChange(
+				originalPriceListRate.value,
+				oldConversion,
+				newConversionFactor
+			)
+		);
+
+		localRate.value = scaledRate;
+		originalPriceListRate.value = scaledListRate;
+		localItem.value.uom = selectedUom;
+		localItem.value.conversion_factor = newConversionFactor;
+		localItem.value.rate = scaledRate;
+		localItem.value.price_list_rate = scaledListRate;
+		calculateTotals();
+		return;
+	}
+
 	const requestId = ++uomRateRequestId.value;
 	const fetchedRate = await getRateForUom(selectedUom);
 	// Ignore stale responses if user changes UOM repeatedly.
 	if (requestId !== uomRateRequestId.value) return;
 
 	const newRate = roundCurrency(fetchedRate);
-	const newConversionFactor = getConversionFactorForUom(selectedUom);
 
 	// Keep local state consistent so update payload has correct UOM pricing metadata.
 	localRate.value = newRate;
@@ -882,6 +1094,11 @@ function formatCurrency(amount) {
 }
 
 function updateItem() {
+	if (isLockedFreeItem.value) {
+		showError(__("Free promotional items cannot be edited"));
+		return;
+	}
+
 	// Check if rate was manually edited
 	const isRateManuallyEdited = localRate.value !== originalPriceListRate.value;
 
@@ -915,6 +1132,39 @@ function updateItem() {
 		}
 	}
 
+	// ========================================================================
+	// ITEM DISCOUNT VALIDATION — block manual discount when offer is applied
+	// ========================================================================
+	let discountPercentage =
+		discountType.value === "percentage" ? discountValue.value : 0;
+	let discountAmount = discountType.value === "amount" ? discountValue.value : 0;
+
+	if (hasPricingRules.value) {
+		// Keep promotional discount values; do not allow manual override
+		discountPercentage = Number(localItem.value.discount_percentage) || 0;
+		discountAmount = Number(localItem.value.discount_amount) || 0;
+
+		const attemptedPct =
+			discountType.value === "percentage" ? Number(discountValue.value) || 0 : 0;
+		const attemptedAmt =
+			discountType.value === "amount" ? Number(discountValue.value) || 0 : 0;
+		const initPct =
+			discountType.value === "percentage"
+				? Number(localItem.value.discount_percentage) || 0
+				: 0;
+		const initAmt =
+			discountType.value === "amount"
+				? Number(localItem.value.discount_amount) || 0
+				: 0;
+
+		if (attemptedPct !== initPct || attemptedAmt !== initAmt) {
+			showError(
+				__("Cannot add item discount while a promotional offer applies to this item")
+			);
+			return;
+		}
+	}
+
 	const updatedItem = {
 		...localItem.value,
 		quantity: localQuantity.value,
@@ -923,8 +1173,16 @@ function updateItem() {
 		// Preserve price_list_rate for reference (original price before any manual edits)
 		price_list_rate: originalPriceListRate.value,
 		warehouse: localWarehouse.value,
-		discount_percentage: discountType.value === "percentage" ? discountValue.value : 0,
-		discount_amount: discountType.value === "amount" ? discountValue.value : 0,
+		discount_percentage: discountPercentage,
+		discount_amount: discountAmount,
+		discount_source:
+			(discountPercentage > 0 || discountAmount > 0) && !isItemLevelPromotion.value
+				? "manual_discount"
+				: localItem.value.discount_source || "",
+		is_already_discounted:
+			(discountPercentage > 0 || discountAmount > 0) && !isItemLevelPromotion.value
+				? 1
+				: localItem.value.is_already_discounted || 0,
 		// Track manual rate edits for audit logging
 		is_rate_manually_edited: isRateManuallyEdited ? 1 : 0,
 		original_rate: isRateManuallyEdited ? originalPriceListRate.value : null,
