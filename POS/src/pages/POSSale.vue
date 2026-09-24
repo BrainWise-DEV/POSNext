@@ -2672,9 +2672,44 @@ async function handleLoadDraft(draft) {
 	}
 }
 
-function handleReturnCreated(returnInvoice) {
-	// Success message is already shown by ReturnInvoiceDialog
-	log.debug("Return invoice created:", returnInvoice.name);
+async function handleReturnCreated(returnInvoice) {
+	const invoiceName =
+		returnInvoice?.name || returnInvoice?.sales_invoice || returnInvoice;
+
+	if (!invoiceName || typeof invoiceName !== "string") {
+		log.warn("Return created without a printable invoice name:", returnInvoice);
+		return;
+	}
+
+	log.debug("Return invoice created:", invoiceName);
+
+	const returnPrintFormat =
+		posSettingsStore.returnInvoicePrintFormat ||
+		shiftStore.currentProfile?.print_format ||
+		null;
+
+	try {
+		if (posSettingsStore.silentPrint) {
+			const result = await printWithSilentFallback(
+				{ name: invoiceName },
+				returnPrintFormat
+			);
+
+			if (!result?.success) {
+				throw new Error(__("Return invoice printing failed"));
+			}
+		} else {
+			await printInvoiceByName(invoiceName, returnPrintFormat);
+		}
+	} catch (error) {
+		log.error("Return invoice auto-print failed:", error);
+		showWarning(
+			__(
+				"Return {0} was created successfully, but printing failed. You can print it again from invoice history.",
+				[invoiceName]
+			)
+		);
+	}
 }
 
 function handleExpenseCreated(expense) {
