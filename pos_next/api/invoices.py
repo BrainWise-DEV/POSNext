@@ -770,6 +770,12 @@ def update_invoice(data):
 		if company and invoice_doc.get("payments") and doctype == "Sales Invoice":
 			_set_payment_accounts(invoice_doc.payments, company)
 
+		# Apply server-side controls for standalone POS returns.
+		# Linked returns are unaffected.
+		from pos_next.api.no_invoice_returns import normalize_no_invoice_return
+
+		normalize_no_invoice_return(invoice_doc)
+
 		# Validate return items if this is a return invoice
 		if (data.get("is_return") or invoice_doc.get("is_return")) and invoice_doc.get("return_against"):
 			validation = validate_return_items(
@@ -1351,6 +1357,13 @@ def submit_invoice(invoice=None, data=None):
 		# Keep permission bypass consistent for POS API flow.
 		invoice_doc.flags.ignore_permissions = True
 		frappe.flags.ignore_account_permission = True
+
+		# Revalidate standalone POS returns immediately before submission.
+		# This prevents direct API callers from bypassing Return Without
+		# Invoice settings, shift, pricing, warehouse or settlement rules.
+		from pos_next.api.no_invoice_returns import normalize_no_invoice_return
+
+		normalize_no_invoice_return(invoice_doc)
 
 		# Ensure update_stock is set for Sales Invoice
 		if doctype == "Sales Invoice":
