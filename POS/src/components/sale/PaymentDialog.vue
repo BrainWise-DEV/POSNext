@@ -2064,6 +2064,20 @@ const props = defineProps({
 		type: Boolean,
 		default: false,
 	},
+	// Used by Exchange checkout to automatically consume only the
+	// credit created by the just-completed return.
+	autoApplyCustomerCredit: {
+		type: Boolean,
+		default: false,
+	},
+	autoApplyCustomerCreditOrigin: {
+		type: String,
+		default: "",
+	},
+	autoApplyCustomerCreditLimit: {
+		type: Number,
+		default: 0,
+	},
 	customer: {
 		type: [String, Object],
 		default: null,
@@ -2135,6 +2149,7 @@ const selectedReceivableAccount = ref("");
 const customAmount = ref("");
 const paymentEntries = ref([]);
 const customerCredit = ref([]);
+const autoCustomerCreditApplied = ref(false);
 const customerBalance = ref({
 	total_outstanding: 0,
 	total_credit: 0,
@@ -2994,6 +3009,7 @@ watch(
 
 watch(show, (newVal) => {
 	if (newVal) {
+		autoCustomerCreditApplied.value = false;
 		// Reset state when dialog opens (but NOT customerBalance - it's pre-fetched)
 		paymentEntries.value = [];
 		customAmount.value = "";
@@ -3367,32 +3383,141 @@ async function addCustomPayment(method, amount) {
 	}
 }
 
-// Apply existing customer credit to payment
-function applyCustomerCredit() {
+// Exchange exact-credit auto application.
+// Wait until the freshly-created linked-return credit source has loaded.
+// Never auto-consume older Customer Credit belonging to the same customer.
+watch(
+	() => [
+		show.value,
+		props.autoApplyCustomerCredit,
+		props.autoApplyCustomerCreditOrigin,
+		props.autoApplyCustomerCreditLimit,
+		customerCredit.value.length,
+		remainingAmount.value,
+	],
+	([
+		opened,
+		autoApply,
+		origin,
+		limit,
+		_creditCount,
+		remaining,
+	]) => {
+		if (
+			!opened ||
+			!autoApply ||
+			!origin ||
+			autoCustomerCreditApplied.value ||
+			Number(remaining || 0) <= 0
+		) {
+			return;
+		}
+
+		if (
+			paymentEntries.value.some(
+				(entry) => entry.is_customer_credit
+			)
+		) {
+			autoCustomerCreditApplied.value = true;
+			return;
+		}
+
+		const source = customerCredit.value.find(
+			(credit) =>
+				credit.credit_origin === origin &&
+				Number(
+					credit.available_credit ??
+					credit.total_credit ??
+					0
+				) > 0
+		);
+
+		if (!source) return;
+
+		autoCustomerCreditApplied.value = true;
+		applyCustomerCredit(origin, Number(limit || 0));
+	},
+	{ flush: "post" }
+);
+
+// Apply existing customer credit to payment.
+// Exchange may provide a preferred credit origin so only the credit created
+// by that specific linked return is used. Normal manual Customer Credit
+// continues to use the customer's ordinary available-credit pool.
+function applyCustomerCredit(preferredOrigin = null, creditLimit = 0) {
+	const origin =
+		typeof preferredOrigin === "string" && preferredOrigin
+			? preferredOrigin
+			: null;
+
+	const eligibleCredits = origin
+		? customerCredit.value.filter(
+				(credit) => credit.credit_origin === origin
+		  )
+		: customerCredit.value;
+
+	const sourceAvailable = roundCurrency(
+		eligibleCredits.reduce(
+			(sum, credit) =>
+				sum +
+				Number(
+					credit.available_credit ??
+					credit.total_credit ??
+					0
+				),
+			0
+		)
+	);
+
+	let usableCredit = origin
+		? sourceAvailable
+		: Math.min(
+				sourceAvailable,
+				Math.max(0, totalAvailableCredit.value)
+		  );
+
+	const limit = Number(creditLimit || 0);
+	if (origin && limit > 0) {
+		usableCredit = Math.min(usableCredit, limit);
+	}
+
 	log.debug("[PaymentDialog] Apply customer credit:", {
 		totalCredit: totalAvailableCredit.value,
+		sourceAvailable,
+		preferredOrigin: origin,
+		creditLimit: limit,
 		remainingAmount: remainingAmount.value,
 		currentEntries: paymentEntries.value.length,
 	});
 
-	if (remainingAmount.value === 0 || totalAvailableCredit.value === 0) return;
+	if (
+		remainingAmount.value <= 0 ||
+		usableCredit <= 0 ||
+		eligibleCredits.length === 0
+	) {
+		return;
+	}
 
-	// Calculate how much credit to apply (min of remaining amount and available credit)
-	const creditToApply = Math.min(remainingAmount.value, totalAvailableCredit.value);
+	const creditToApply = Math.min(
+		remainingAmount.value,
+		usableCredit
+	);
 
-	// Add credit as a payment entry
 	paymentEntries.value.push({
 		mode_of_payment: "Customer Credit",
 		amount: roundCurrency(creditToApply),
 		type: "Credit",
 		is_customer_credit: true,
-		credit_details: customerCredit.value.map((credit) => ({
+		credit_details: eligibleCredits.map((credit) => ({
 			...credit,
-			credit_to_redeem: 0, // Will be calculated on backend
+			credit_to_redeem: 0,
 		})),
 	});
 
-	log.debug("[PaymentDialog] Existing credit applied, new entries:", paymentEntries.value);
+	log.debug(
+		"[PaymentDialog] Existing credit applied, new entries:",
+		paymentEntries.value
+	);
 }
 
 // Add "Pay on Account" - Credit Sale (invoice with outstanding amount)

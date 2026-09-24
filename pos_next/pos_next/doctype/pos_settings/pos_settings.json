@@ -44,6 +44,7 @@
   "create_only_sales_order",
   "column_break_operations",
   "allow_return_without_invoice",
+  "allow_exchange",
   "return_validity_days",
   "allow_free_batch_return",
   "allow_print_draft_invoices",
@@ -348,6 +349,14 @@
    "fieldname": "allow_return_without_invoice",
    "fieldtype": "Check",
    "label": "Allow Return Without Invoice"
+  },
+  {
+   "default": "0",
+   "depends_on": "allow_return",
+   "description": "Enable Exchange With Invoice in POSNext.",
+   "fieldname": "allow_exchange",
+   "fieldtype": "Check",
+   "label": "Allow Exchange"
   },
   {
    "default": "0",
