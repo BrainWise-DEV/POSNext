@@ -195,6 +195,29 @@
 						<span>{{ __("Return Invoice") }}</span>
 					</button>
 					<button
+						v-if="
+							canAccessShiftActions &&
+							posSettingsStore.allowReturnWithoutInvoice
+						"
+						@click="openNoInvoiceReturnDialog"
+						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-amber-50 flex items-center gap-3 transition-colors"
+					>
+						<svg
+							class="w-5 h-5 text-amber-600"
+							fill="none"
+							stroke="currentColor"
+							viewBox="0 0 24 24"
+						>
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								stroke-width="2"
+								d="M12 8v4l3 3M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"
+							/>
+						</svg>
+						<span>{{ __("Return Without Invoice") }}</span>
+					</button>
+					<button
 						v-if="canAccessShiftActions && canSwitchToDesk"
 						@click="switchToDesk"
 						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-emerald-50 flex items-center gap-3 transition-colors"
@@ -596,6 +619,16 @@
 				:pos-profile="shiftStore.profileName"
 				:pos-opening-shift="shiftStore.currentShift?.name"
 				:currency="shiftStore.profileCurrency"
+				@return-created="handleReturnCreated"
+			/>
+
+			<!-- Return Without Invoice Dialog -->
+			<NoInvoiceReturnDialog
+				v-model="showNoInvoiceReturnDialog"
+				:pos-profile="shiftStore.profileName"
+				:pos-opening-shift="shiftStore.currentShift?.name"
+				:currency="shiftStore.profileCurrency"
+				:customer="cartStore.customer"
 				@return-created="handleReturnCreated"
 			/>
 
@@ -1113,6 +1146,7 @@ import PaymentDialog from "@/components/sale/PaymentDialog.vue";
 import ProductManagement from "@/components/sale/ProductManagement.vue";
 import PromotionManagement from "@/components/sale/PromotionManagement.vue";
 import ReturnInvoiceDialog from "@/components/sale/ReturnInvoiceDialog.vue";
+import NoInvoiceReturnDialog from "@/components/sale/NoInvoiceReturnDialog.vue";
 import ExpenseDialog from "@/components/sale/ExpenseDialog.vue";
 import WarehouseAvailabilityDialog from "@/components/sale/WarehouseAvailabilityDialog.vue";
 import POSSettings from "@/components/settings/POSSettings.vue";
@@ -1265,6 +1299,9 @@ const invoiceHistoryData = ref([]);
 
 // Shift History dialog
 const showShiftHistoryDialog = ref(false);
+
+// Return Without Invoice dialog
+const showNoInvoiceReturnDialog = ref(false);
 
 // Stock sync status
 const isStockSyncActive = ref(false);
@@ -1644,6 +1681,7 @@ watch(
 		uiStore.showDraftDialog = false;
 		uiStore.showHistoryDialog = false;
 		uiStore.showReturnDialog = false;
+		showNoInvoiceReturnDialog.value = false;
 	}
 );
 
@@ -2564,6 +2602,21 @@ function openReturnDialog() {
 	}
 
 	uiStore.showReturnDialog = true;
+}
+
+function openNoInvoiceReturnDialog() {
+	if (!canAccessShiftActions.value) {
+		return;
+	}
+
+	if (!posSettingsStore.allowReturnWithoutInvoice) {
+		showWarning(
+			__("Return Without Invoice is disabled in POS Settings.")
+		);
+		return;
+	}
+
+	showNoInvoiceReturnDialog.value = true;
 }
 
 function openExpenseDialog() {
