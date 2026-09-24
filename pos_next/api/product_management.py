@@ -23,7 +23,16 @@ SUPPORTED_IMAGE_TYPES = {
 DEFAULT_PAGE_LENGTH = 20
 MAX_PAGE_LENGTH = 100
 POS_ITEM_CODE_SERIES = "POS-ITEM-.#####"
-ALLOWED_IMAGE_PREFIXES = ("/files/", "/private/files/")
+# Image sources that may be assigned to Item.image. Site-relative paths cover
+# Frappe uploads; http(s) covers images synced from an external catalogue (the
+# ecommerce_integrations Shopify sync stores cdn.shopify.com URLs, for example).
+# The point of the check is to reject script-bearing schemes, not to force
+# images to be local.
+SAFE_IMAGE_PREFIXES = ("/", "http://", "https://")
+
+# update_product_image() resolves the URL back to an attached File record, so it
+# genuinely requires a local upload path — an external URL could never match.
+LOCAL_FILE_PREFIXES = ("/files/", "/private/files/")
 
 
 def _validate_pos_profile_access(pos_profile: str) -> None:
@@ -263,12 +272,18 @@ def save_product(pos_profile: str, data: str) -> dict:
 		item.is_stock_item = 1 if data.get("is_stock_item") else 0
 
 	if "image" in data:
-		image = str(data.get("image") or "")
-		# The client sends a data: URI while a new file is pending upload; the
-		# real path is set afterwards. Anything else must be a Frappe file path
-		# so an arbitrary external URL cannot be rendered by the POS.
-		if not image.startswith("data:"):
-			if image and not image.startswith(ALLOWED_IMAGE_PREFIXES):
+		image = cstr(data.get("image") or "").strip()
+		current_image = cstr(item.image or "")
+		# A data: URI means a new file is still pending upload; the real path is
+		# written by the upload step afterwards, so there is nothing to store yet.
+		if image.lower().startswith("data:"):
+			pass
+		elif image != current_image:
+			# Only validate a value the caller is actually changing. Re-checking an
+			# untouched image would reject products whose existing image predates
+			# this screen — e.g. externally synced URLs — on an unrelated edit such
+			# as a price change.
+			if image and not image.lower().startswith(SAFE_IMAGE_PREFIXES):
 				frappe.throw(_("Invalid image path"))
 			item.image = image
 
@@ -321,7 +336,7 @@ def update_product_image(pos_profile: str, item_code: str, file_url: str) -> dic
 	groups = _get_pos_profile_allowed_item_groups(profile)
 	if groups and item.item_group not in groups:
 		frappe.throw(_("This product belongs to an Item Group not allowed for this POS Profile"))
-	if not file_url or not file_url.startswith(ALLOWED_IMAGE_PREFIXES):
+	if not file_url or not file_url.startswith(LOCAL_FILE_PREFIXES):
 		frappe.throw(_("Invalid image path"))
 	file_name = frappe.db.get_value(
 		"File",
