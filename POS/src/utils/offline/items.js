@@ -5,18 +5,24 @@ export const cacheItems = async (items, priceList = null) => {
 	try {
 		if (!items || items.length === 0) return;
 
-		// Process items with barcodes
-		const processedItems = items.map((item) => ({
-			...item,
-			barcodes: item.item_barcode
-				? Array.isArray(item.item_barcode)
-					? item.item_barcode.map((b) => b.barcode).filter(Boolean)
-					: [item.item_barcode]
-				: [],
-		}));
+		// Save to items table, keeping cached batch/serial data (server rows don't carry it)
+		await db.transaction("rw", db.items, async () => {
+			const existing = await db.items.bulkGet(items.map((item) => item.item_code));
 
-		// Save to items table
-		await db.items.bulkPut(processedItems);
+			// Process items with barcodes
+			const processedItems = items.map((item, index) => ({
+				batch_no_data: existing[index]?.batch_no_data,
+				serial_no_data: existing[index]?.serial_no_data,
+				...item,
+				barcodes: item.item_barcode
+					? Array.isArray(item.item_barcode)
+						? item.item_barcode.map((b) => b.barcode).filter(Boolean)
+						: [item.item_barcode]
+					: [],
+			}));
+
+			await db.items.bulkPut(processedItems);
+		});
 
 		// Save prices if price list is provided
 		if (priceList) {

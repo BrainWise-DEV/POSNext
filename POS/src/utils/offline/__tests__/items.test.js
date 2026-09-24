@@ -15,6 +15,10 @@ vi.mock("../db", () => {
 			itemStore.set(row.item_code, { ...row })
 			return row.item_code
 		}),
+		bulkGet: vi.fn(async (codes) => codes.map((code) => itemStore.get(code))),
+		bulkPut: vi.fn(async (rows) => {
+			for (const row of rows) itemStore.set(row.item_code, { ...row })
+		}),
 	}
 
 	return {
@@ -35,6 +39,7 @@ const {
 	getCachedSerialData,
 	getCachedBatchData,
 	deductCachedBatchQty,
+	cacheItems,
 } = await import("../items")
 
 describe("parseSerialNumbers", () => {
@@ -123,5 +128,20 @@ describe("deductCachedBatchQty", () => {
 		expect(
 			(await getCachedBatchData("BATCH-1")).map((b) => b.batch_qty),
 		).toEqual([0, 3])
+	})
+})
+
+describe("cacheItems", () => {
+	it("keeps cached batch/serial data when re-caching server rows", async () => {
+		itemStore.set("BATCH-2", {
+			item_code: "BATCH-2",
+			actual_qty: 5,
+			batch_no_data: [{ batch_no: "B1", batch_qty: 5 }],
+		})
+		await cacheItems([{ item_code: "BATCH-2", actual_qty: 4 }])
+		expect(itemStore.get("BATCH-2")).toMatchObject({
+			actual_qty: 4,
+			batch_no_data: [{ batch_no: "B1", batch_qty: 5 }],
+		})
 	})
 })
