@@ -262,8 +262,20 @@ async function handlePrintDraft(draft) {
 	}
 
 	try {
+		// 1. Normalize items so 'qty' and 'quantity' are always synchronized
+		const normalizedItems = (draft.items || []).map((item) => {
+			const finalQty = item.qty || item.quantity || 1;
+			return {
+				...item,
+				qty: finalQty,
+				quantity: finalQty,
+			};
+		});
+
+		// 2. Pass the normalized items into the print utility
 		await printDraftInvoice({
 			...draft,
+			items: normalizedItems,
 			company: draft.company || shiftStore.profileCompany,
 		});
 	} catch (error) {
