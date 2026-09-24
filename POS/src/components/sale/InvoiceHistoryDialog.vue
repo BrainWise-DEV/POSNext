@@ -325,7 +325,7 @@ function viewInvoice(invoice) {
 }
 
 function printInvoice(invoice) {
-	emit("print-invoice", invoice);
+	emit("print-invoice", { ...invoice, _posnext_duplicate: true });
 }
 
 function canCreateReturn(invoice) {

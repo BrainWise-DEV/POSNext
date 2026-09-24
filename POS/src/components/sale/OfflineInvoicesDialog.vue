@@ -522,7 +522,7 @@ function editInvoice(invoice) {
 function printInvoice(invoice) {
 	// Emit the offline_id — the parent's handlePrintInvoice hydrates from
 	// sessionStorage first, then IndexedDB, so reprinting works across reloads.
-	emit("print-invoice", { name: invoice.offline_id });
+	emit("print-invoice", { name: invoice.offline_id, _posnext_duplicate: true });
 }
 
 function syncAll() {
