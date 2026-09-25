@@ -101,11 +101,15 @@
 								</div>
 								<div class="w-32">
 									<Input
-										v-model="openingBalances[method.mode_of_payment]"
-										type="number"
+										:value="formatAmountInput(openingBalances[method.mode_of_payment])"
+										@input="
+											(val) =>
+												(openingBalances[method.mode_of_payment] =
+													parseAmountInput(val))
+										"
+										type="text"
+										inputmode="decimal"
 										placeholder="0.00"
-										step="0.01"
-										min="0"
 									/>
 								</div>
 							</div>
@@ -252,6 +256,7 @@ import { createResource } from "frappe-ui";
 import { computed, ref, watch } from "vue";
 import { useShift } from "../composables/useShift";
 import { useFormatters } from "../composables/useFormatters";
+import { formatAmountInput, parseAmountInput } from "../utils/currency";
 import ShiftClosingDialog from "./ShiftClosingDialog.vue";
 import TranslatedHTML from "./common/TranslatedHTML.vue";
 
