@@ -81,8 +81,10 @@ export const usePOSShiftStore = defineStore("posShift", () => {
 		updateCurrentTime();
 		updateShiftDuration();
 
-		// Then update every second
+		// Then update every second. Skip both while close-shift pauses the timer —
+		// otherwise POSSale re-renders every tick and wipes in-progress amount entry.
 		const intervalId = setInterval(() => {
+			if (shiftTimerPaused.value) return;
 			updateCurrentTime();
 			updateShiftDuration();
 		}, 1000);
