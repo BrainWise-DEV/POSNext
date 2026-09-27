@@ -53,6 +53,7 @@
   "section_break_customer",
   "allow_customer_purchase_order",
   "allow_duplicate_customer_names",
+  "require_customer_phone",
   "fetch_coupon",
   "section_break_printing",
   "allow_print_last_invoice",
@@ -410,6 +411,13 @@
    "fieldname": "allow_duplicate_customer_names",
    "fieldtype": "Check",
    "label": "Allow Duplicate Customer Names"
+  },
+  {
+   "default": "1",
+   "description": "Require a mobile number when creating or editing customers in POS. Disable to allow customers without a phone number.",
+   "fieldname": "require_customer_phone",
+   "fieldtype": "Check",
+   "label": "Require Customer Phone Number"
   },
   {
    "default": "0",
