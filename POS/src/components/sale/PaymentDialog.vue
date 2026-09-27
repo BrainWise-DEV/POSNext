@@ -1645,8 +1645,10 @@
 							<!-- Complete Payment Button -->
 							<button
 								v-if="
-									(remainingAmount === 0 || (applyWriteOff && canWriteOff)) &&
-									totalPaid > 0
+									totalPaid > 0 &&
+									(remainingAmount === 0 ||
+										(applyWriteOff && canWriteOff) ||
+										allowPartialPayment)
 								"
 								@click="completePayment"
 								:disabled="isSubmitting || !canComplete"
@@ -1694,7 +1696,7 @@
 									/>
 								</svg>
 								<span>{{
-									isSubmitting ? __("Processing...") : __("Complete Payment")
+									isSubmitting ? __("Processing...") : paymentButtonText
 								}}</span>
 							</button>
 						</div>
