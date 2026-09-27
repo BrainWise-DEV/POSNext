@@ -1,0 +1,10 @@
+# Maps author/committer identities to their canonical form for git log,
+# shortlog and blame. Display-only: no commit or history is rewritten.
+# See https://git-scm.com/docs/gitmailmap
+
+# Canonical name for every commit using this email (fixes commits whose
+# author name was set incorrectly).
+MohamedAliSmk <mohamedalismk@gmail.com>
+# Typo'd email used between Feb and Sep 2026, and the GitHub noreply address.
+MohamedAliSmk <mohamedalismk@gmail.com> <mohamedalismk@cgmail.com>
+MohamedAliSmk <mohamedalismk@gmail.com> <121524930+MohamedAliSmk@users.noreply.github.com>
