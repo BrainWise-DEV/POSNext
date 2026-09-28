@@ -11,7 +11,7 @@ pos_next/public/pos/
 pos_next/www/
 yarn.lock
 package-lock.json
-
+CLAUDE.md
 # IDE and editor files
 .vscode/
 .idea/
