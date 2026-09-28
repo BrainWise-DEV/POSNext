@@ -1,5 +1,5 @@
 <template>
-	<div>
+	<div class="flex flex-1 flex-col min-h-0">
 		<router-view :key="translationVersion" />
 		<Toast />
 		<AuthorizationDialog />

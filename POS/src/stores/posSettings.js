@@ -260,7 +260,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 			allow_partial_payment: 0,
 			use_exact_amount: 0,
 			default_card_view: 0,
-			display_item_code: 0,
+			display_item_code: 1,
 			show_customer_balance: 0,
 			hide_expected_amount: 0,
 			display_discount_percentage: 0,

@@ -1560,14 +1560,7 @@ def submit_invoice(invoice=None, data=None):
 					title="Credit Redemption Error",
 					message=f"Invoice: {invoice_doc.name}, Error: {credit_error!s}\n{frappe.get_traceback()}",
 				)
-				# Don't fail the entire transaction, just log the error
-				frappe.msgprint(
-					_(
-						"Invoice submitted successfully but credit redemption failed. Please contact administrator."
-					),
-					alert=True,
-					indicator="orange",
-				)
+				raise
 
 		# Log manual rate edits for audit trail (only after successful submission)
 		if doctype == DOCTYPE_SALES_INVOICE:

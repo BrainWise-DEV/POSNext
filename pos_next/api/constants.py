@@ -45,6 +45,7 @@ POS_SETTINGS_FIELDS = [
 	"auto_create_wallet",
 	"loyalty_to_wallet",
 	"cart_lifo",
+	"display_item_code",
 ]
 
 # Default POS Settings values
@@ -83,6 +84,7 @@ DEFAULT_POS_SETTINGS = {
 	"magento_loyalty_available": 0,
 	"miraaya_installed": 0,
 	"cart_lifo": 0,
+	"display_item_code": 1,
 }
 
 

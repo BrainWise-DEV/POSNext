@@ -1,7 +1,15 @@
 <template>
+	<!--
+		No height: 100vh here. The page fills whatever the host leaves it (see the
+		flex chain in index.css), so chrome above POS — Frappe's navbar, a demo
+		countdown banner — shortens the page instead of pushing its bottom off the
+		screen. padding-bottom keeps POSFooter's fixed strip from sitting on top of
+		the cart's Checkout button; the footer publishes its own height, so this
+		follows if it is ever restyled.
+	-->
 	<div
-		class="flex flex-col bg-gray-50 overflow-x-hidden"
-		style="height: 100vh; max-height: 100vh"
+		class="flex flex-1 flex-col min-h-0 bg-gray-50 overflow-x-hidden"
+		style="padding-bottom: var(--pos-footer-h, 45px)"
 	>
 		<!-- Loading State -->
 		<LoadingSpinner v-if="uiStore.isLoading" />
@@ -400,6 +408,7 @@
 							style="min-width: 300px; contain: layout style paint"
 						>
 							<InvoiceCart
+								ref="invoiceCartRef"
 								:items="cartStore.invoiceItems"
 								:customer="cartStore.customer"
 								:subtotal="cartStore.subtotal"
@@ -1167,6 +1176,7 @@ const { onStockUpdate } = useRealtimeStock();
 
 // Session lock (inactivity + tab-refocus)
 const {
+	isLocked,
 	lock: lockSession,
 	configure: configureSessionLock,
 	startActivityTracking,
@@ -1196,6 +1206,7 @@ const { isRTL } = useLocale();
 
 // Component refs
 const itemsSelectorRef = ref(null);
+const invoiceCartRef = ref(null);
 const offersDialogRef = ref(null);
 const containerRef = ref(null);
 const dividerRef = ref(null);
@@ -1342,6 +1353,29 @@ onMounted(async () => {
 		updateLayoutBounds();
 	};
 	window.addEventListener("resize", handleResize, { passive: true });
+
+	// Global keyboard shortcuts
+	const handleGlobalKeydown = (event) => {
+		// Skip if any dialog is open, the session is locked, the clear-cache overlay is
+		// showing, or if user is typing in an input/textarea. isLocked/showClearCacheDialog
+		// aren't wired into uiStore.isAnyDialogOpen, so they're checked explicitly here.
+		if (uiStore.isAnyDialogOpen || isLocked.value || showClearCacheDialog.value) return;
+		const tag = document.activeElement?.tagName;
+		if (tag === "INPUT" || tag === "TEXTAREA") return;
+
+		if (event.key === "F4") {
+			event.preventDefault();
+			itemsSelectorRef.value?.focusSearchInput();
+		} else if (event.key === "F8") {
+			event.preventDefault();
+			invoiceCartRef.value?.focusCustomerSearch();
+		} else if (event.key === "F9") {
+			event.preventDefault();
+			handleProceedToPayment();
+		}
+	};
+	window.addEventListener("keydown", handleGlobalKeydown);
+	onUnmounted(() => window.removeEventListener("keydown", handleGlobalKeydown));
 
 	// Set up real-time stock update listener
 	const cleanup = onStockUpdate(async (stockUpdates) => {
@@ -1930,7 +1964,7 @@ async function handleShiftOpened() {
 	// Load tax rules (depends on settings being loaded)
 	await cartStore.loadTaxRules(shiftStore.profileName, posSettingsStore.settings);
 
-	_initializedProfile = shiftStore.profileName;
+	_initializedKey = `${shiftStore.profileName}::${shiftStore.currentShift?.name}`;
 
 	// Start session lock tracking now that a shift is open and POS is ready
 	startActivityTracking();

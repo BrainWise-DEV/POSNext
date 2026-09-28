@@ -259,7 +259,7 @@
    "label": "Default Card View"
   },
   {
-   "default": "0",
+   "default": "1",
    "description": "Show item codes in the UI",
    "fieldname": "display_item_code",
    "fieldtype": "Check",
