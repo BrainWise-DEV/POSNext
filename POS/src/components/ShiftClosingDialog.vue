@@ -102,6 +102,24 @@
 								</div>
 							</div>
 
+							<!-- POS Expenses -->
+							<div
+								v-if="hasExpenses"
+								class="text-start bg-amber-50 border border-amber-200 rounded-lg p-3 md:p-4"
+							>
+								<div class="text-amber-700 text-xs uppercase font-medium mb-1">
+									{{ __("POS Expenses") }}
+								</div>
+								<div
+									class="text-lg md:text-2xl font-bold text-amber-900 mb-0.5 md:mb-1 truncate"
+								>
+									-{{ formatCurrency(closingData.expenses_total) }}
+								</div>
+								<div class="text-amber-700 text-xs">
+									{{ __("{0} expenses", [closingData.expenses_count]) }}
+								</div>
+							</div>
+
 							<!-- Net Sales (after returns) -->
 							<div
 								class="text-start bg-green-50 border border-green-200 rounded-lg p-3 md:p-4"
@@ -115,6 +133,59 @@
 									{{ formatCurrency(closingData.grand_total) }}
 								</div>
 								<div class="text-green-600 text-xs">{{ __("After returns") }}</div>
+							</div>
+
+							<!-- Collected (money actually taken this shift) -->
+							<div
+								class="text-start bg-emerald-50 border border-emerald-200 rounded-lg p-3 md:p-4"
+							>
+								<div class="text-emerald-600 text-xs uppercase font-medium mb-1">
+									{{ __("Collected") }}
+								</div>
+								<div
+									class="text-lg md:text-2xl font-bold text-emerald-900 mb-0.5 md:mb-1 truncate"
+								>
+									{{ formatCurrency(collectedAmount) }}
+								</div>
+								<div class="text-emerald-600 text-xs">
+									{{ __("Money taken") }}
+								</div>
+							</div>
+
+							<!-- On Account (invoiced but not collected) -->
+							<div
+								v-if="outstandingTotal > 0"
+								class="text-start bg-amber-50 border border-amber-200 rounded-lg p-3 md:p-4"
+							>
+								<div class="text-amber-600 text-xs uppercase font-medium mb-1">
+									{{ __("On Account") }}
+								</div>
+								<div
+									class="text-lg md:text-2xl font-bold text-amber-900 mb-0.5 md:mb-1 truncate"
+								>
+									{{ formatCurrency(outstandingTotal) }}
+								</div>
+								<div class="text-amber-600 text-xs">
+									{{ __("Not collected") }}
+								</div>
+							</div>
+
+							<!-- Net Cash Impact -->
+							<div
+								v-if="hasExpenses"
+								class="text-start bg-purple-50 border border-purple-200 rounded-lg p-3 md:p-4"
+							>
+								<div class="text-purple-700 text-xs uppercase font-medium mb-1">
+									{{ __("Net Cash Impact") }}
+								</div>
+								<div
+									class="text-lg md:text-2xl font-bold text-purple-900 mb-0.5 md:mb-1 truncate"
+								>
+									{{ formatCurrency(netCashImpact) }}
+								</div>
+								<div class="text-purple-700 text-xs">
+									{{ __("Sales - Returns - Expenses") }}
+								</div>
 							</div>
 
 							<!-- Tax Collected -->
@@ -247,6 +318,16 @@
 											>
 												{{ __("Return") }}
 											</span>
+											<span
+												v-else-if="invoice.outstanding_amount > 0"
+												class="px-1.5 py-0.5 text-xs font-medium bg-amber-100 text-amber-800 rounded"
+											>
+												{{
+													Number(invoice.collected_amount) > 0
+														? __("Partially Paid")
+														: __("On Account")
+												}}
+											</span>
 										</div>
 										<span
 											:class="[
@@ -258,6 +339,16 @@
 										>
 											{{ formatCurrency(invoice.grand_total) }}
 										</span>
+									</div>
+									<div
+										v-if="invoice.outstanding_amount > 0"
+										class="text-xs text-amber-700 mb-1"
+									>
+										{{
+											__("Unpaid: {0}", [
+												formatCurrency(invoice.outstanding_amount),
+											])
+										}}
 									</div>
 									<div
 										class="flex justify-between items-center text-xs text-gray-600"
@@ -346,6 +437,16 @@
 													{{ __("Return") }}
 												</span>
 												<span
+													v-else-if="invoice.outstanding_amount > 0"
+													class="px-2 py-1 text-xs font-medium bg-amber-100 text-amber-800 rounded"
+												>
+													{{
+														Number(invoice.collected_amount) > 0
+															? __("Partially Paid")
+															: __("On Account")
+													}}
+												</span>
+												<span
 													v-else
 													class="px-2 py-1 text-xs font-medium bg-green-100 text-green-800 rounded"
 												>
@@ -373,6 +474,18 @@
 												>
 													{{ formatCurrency(invoice.grand_total) }}
 												</span>
+												<div
+													v-if="invoice.outstanding_amount > 0"
+													class="text-xs text-amber-700"
+												>
+													{{
+														__("Unpaid: {0}", [
+															formatCurrency(
+																invoice.outstanding_amount
+															),
+														])
+													}}
+												</div>
 											</td>
 										</tr>
 									</tbody>
@@ -393,6 +506,86 @@
 									</tfoot>
 								</table>
 							</div>
+						</div>
+					</div>
+
+					<!-- POS Expenses Summary -->
+					<div
+						v-if="hasExpenses"
+						class="bg-white border border-gray-200 rounded-lg overflow-hidden shadow-sm"
+					>
+						<div class="px-3 py-3 md:px-6 md:py-4 border-b border-gray-200 bg-amber-50">
+							<h3 class="text-sm md:text-lg font-semibold text-gray-900 text-start">
+								{{ __("POS Expenses") }}
+							</h3>
+							<p class="text-xs md:text-sm text-gray-600 text-start">
+								{{
+									__(
+										"{0} expenses totaling {1}",
+										[
+											closingData.expenses_count,
+											formatCurrency(closingData.expenses_total),
+										]
+									)
+								}}
+							</p>
+						</div>
+						<div class="overflow-x-auto">
+							<table class="min-w-full divide-y divide-gray-200">
+								<thead class="bg-gray-50">
+									<tr>
+										<th
+											class="px-4 py-3 text-start text-xs font-medium text-gray-500 uppercase"
+										>
+											{{ __("Journal Entry") }}
+										</th>
+										<th
+											class="px-4 py-3 text-start text-xs font-medium text-gray-500 uppercase"
+										>
+											{{ __("Expense Account") }}
+										</th>
+										<th
+											class="px-4 py-3 text-start text-xs font-medium text-gray-500 uppercase"
+										>
+											{{ __("Amount") }}
+										</th>
+										<th
+											class="px-4 py-3 text-start text-xs font-medium text-gray-500 uppercase"
+										>
+											{{ __("Cashier") }}
+										</th>
+										<th
+											class="px-4 py-3 text-start text-xs font-medium text-gray-500 uppercase"
+										>
+											{{ __("Remarks") }}
+										</th>
+									</tr>
+								</thead>
+								<tbody class="divide-y divide-gray-200">
+									<tr
+										v-for="(expense, idx) in closingData.pos_expenses"
+										:key="expense.journal_entry || idx"
+									>
+										<td class="px-4 py-3 text-sm text-gray-900 text-start">
+											{{ expense.journal_entry || __("N/A") }}
+										</td>
+										<td class="px-4 py-3 text-sm text-gray-900 text-start">
+											{{ expense.expense_account }}
+										</td>
+										<td
+											class="px-4 py-3 text-sm font-semibold text-amber-800 text-start"
+										>
+											{{ formatCurrency(expense.amount) }}
+										</td>
+										<td class="px-4 py-3 text-sm text-gray-600 text-start">
+											{{ expense.cashier || __("N/A") }}
+										</td>
+										<td class="px-4 py-3 text-sm text-gray-600 text-start">
+											{{ expense.remarks || __("N/A") }}
+										</td>
+									</tr>
+								</tbody>
+							</table>
 						</div>
 					</div>
 
@@ -552,6 +745,17 @@
 														)
 													"
 												/>
+												<p
+													v-if="payment.expense_amount > 0"
+													class="text-xs md:text-sm text-amber-700 text-start"
+												>
+													{{
+														__(
+															"Expenses: -{0}",
+															[formatCurrency(payment.expense_amount)],
+														)
+													}}
+												</p>
 											</div>
 										</div>
 
@@ -1226,6 +1430,22 @@ const hasReturns = computed(() => {
 	return (closingData.value.returns_count || 0) > 0;
 });
 
+const hasExpenses = computed(() => {
+	if (!closingData.value) return false;
+	return (closingData.value.expenses_count || 0) > 0;
+});
+
+const netCashImpact = computed(() => {
+	if (!closingData.value) return 0;
+	// ?? keeps sales_total=0; || would fall back to grand_total and double-count returns
+	const sales = Number.parseFloat(
+		closingData.value.sales_total ?? closingData.value.grand_total ?? 0,
+	);
+	const returns = Number.parseFloat(closingData.value.returns_total || 0);
+	const expenses = Number.parseFloat(closingData.value.expenses_total || 0);
+	return sales - returns - expenses;
+});
+
 // Count of sales invoices (non-returns)
 const salesInvoiceCount = computed(() => {
 	if (!closingData.value) return 0;
@@ -1244,6 +1464,27 @@ const totalTax = computed(() => {
 const grossSales = computed(() => {
 	if (!closingData.value) return 0;
 	return closingData.value.sales_total ?? closingData.value.grand_total ?? 0;
+});
+
+// Sum a cash-basis field off the invoice rows.  The header fields are dropped
+// from as_dict() until `bench migrate` adds them to the doctype, so between
+// deploy and migrate the rows are the only source — and they always carry it.
+function sumTransactions(field) {
+	const rows = closingData.value?.pos_transactions;
+	if (!Array.isArray(rows)) return 0;
+	return rows.reduce((sum, r) => sum + Number(r[field] || 0), 0);
+}
+
+// Money actually taken during the shift.
+const collectedAmount = computed(() => {
+	if (!closingData.value) return 0;
+	return Number(closingData.value.collected_amount ?? sumTransactions("collected_amount"));
+});
+
+// Invoiced value still owed by customers (credit and partially-paid sales).
+const outstandingTotal = computed(() => {
+	if (!closingData.value) return 0;
+	return Number(closingData.value.outstanding_total ?? sumTransactions("outstanding_amount"));
 });
 const getTotalExpected = computed(() => {
 	if (!closingData.value || !closingData.value.payment_reconciliation) return 0;

@@ -5,7 +5,7 @@
 
 A grant is minted when an approver proves their PIN, and is spent when the gate lets an
 action through. It is deliberately narrow: bound to one action, one requester and one
-set of binding values, and dead within :data:`GRANT_TTL` seconds.
+set of binding values, and dead within :func:`ttl_seconds` seconds.
 
 **Consumption is compare-and-set, not delete.** Redis is not transactional with MariaDB.
 If a grant were deleted in ``before_submit`` and a later ``on_submit`` handler threw —
@@ -19,9 +19,11 @@ import pickle
 import secrets
 
 import frappe
-from frappe.utils import flt
+from frappe.utils import cint, flt
 
-GRANT_TTL = 180
+SETTINGS_DOCTYPE = "POS Authorization Settings"
+
+GRANT_TTL = 15 * 60
 
 _AMOUNT_TOLERANCE = 0.01
 
@@ -40,8 +42,19 @@ def _read(key: bytes) -> dict | None:
 	return pickle.loads(raw) if raw else None
 
 
+def ttl_seconds() -> int:
+
+	try:
+		minutes = cint(frappe.get_cached_doc(SETTINGS_DOCTYPE).get("grant_ttl_minutes"))
+	except Exception:
+		return GRANT_TTL
+
+	return minutes * 60 if minutes > 0 else GRANT_TTL
+
+
 def _write(key: bytes, grant: dict) -> None:
-	frappe.cache().set(key, pickle.dumps(grant), ex=GRANT_TTL)
+
+	frappe.cache().set(key, pickle.dumps(grant), ex=ttl_seconds())
 
 
 def issue(action_name: str, approver: str, binding: dict) -> str:

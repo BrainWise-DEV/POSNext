@@ -194,23 +194,29 @@ def _fail_key(user: str) -> str:
 	return f"pos_auth_pin_fail:{user}"
 
 
+def _log_cache_failure(title: str) -> None:
+	try:
+		frappe.log_error(frappe.get_traceback(), title)
+	except Exception:
+		pass
+
+
 def _lock_key(user: str) -> str:
 	return f"pos_auth_pin_lock:{user}"
 
 
 def is_locked_out(user: str) -> bool:
-	"""True when ``user`` has failed too often and may not approve for now."""
-	cache = frappe.cache()
 	try:
+		cache = frappe.cache()
 		return bool(cache.get(cache.make_key(_lock_key(user))))
 	except Exception:
-		return False
+		_log_cache_failure("POS Authorization Lockout Unavailable")
+		return True
 
 
 def register_failure(user: str) -> bool:
-	"""Count a failed attempt. Returns True when this attempt triggered a lockout."""
-	cache = frappe.cache()
 	try:
+		cache = frappe.cache()
 		lockout = lockout_seconds()
 		key = cache.make_key(_fail_key(user))
 		count = cint(cache.incr(key))
@@ -222,16 +228,17 @@ def register_failure(user: str) -> bool:
 			cache.delete(key)
 			return True
 	except Exception:
-		frappe.log_error(frappe.get_traceback(), "POS Authorization Lockout Error")
+		_log_cache_failure("POS Authorization Lockout Error")
+		return True
 
 	return False
 
 
 def clear_failures(user: str) -> None:
 	"""Reset the failure counter and any lockout for ``user``."""
-	cache = frappe.cache()
 	try:
+		cache = frappe.cache()
 		cache.delete(cache.make_key(_fail_key(user)))
 		cache.delete(cache.make_key(_lock_key(user)))
 	except Exception:
-		frappe.log_error(frappe.get_traceback(), "POS Authorization Lockout Error")
+		_log_cache_failure("POS Authorization Lockout Error")

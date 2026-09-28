@@ -90,10 +90,17 @@ def get_authorization_readiness(action: str, pos_profile: str | None = None) -> 
 		"missing_pin": sorted(candidates - with_pin),
 	}
 
+RATE_LIMIT_PER_MINUTE = 20
+
 
 @frappe.whitelist()
-@rate_limit(limit=5, seconds=60)
+@rate_limit(key="approver", limit=RATE_LIMIT_PER_MINUTE, seconds=60, ip_based=True)
 def request_grant(action: str, approver: str, pin: str, context=None) -> dict:
+
+	approver = (approver or "").strip()
+	if not approver:
+		return {"authorized": False, "message": _("Select an approver")}
+
 	action_def = registry.get(action)
 	if not action_def:
 		return {"authorized": False, "message": _("Unknown authorization action")}
@@ -154,7 +161,7 @@ def request_grant(action: str, approver: str, pin: str, context=None) -> dict:
 	return {
 		"authorized": True,
 		"grant_token": token,
-		"expires_in": grants.GRANT_TTL,
+		"expires_in": grants.ttl_seconds(),
 		"approved_by": approver,
 	}
 
@@ -168,7 +175,9 @@ def set_authorization_pin(user: str, new_pin: str, current_pin: str | None = Non
 		if pin_store.has_pin(user) and not pin_store.verify(user, current_pin):
 			return {"success": False, "message": _("Current PIN is incorrect")}
 	else:
-		frappe.has_permission("User", ptype="write", doc=user, throw=True)
+		# Setting someone else's PIN is an admin action, same as clearing one —
+		# generic User-write permission is far broader than the authority this grants.
+		frappe.only_for("System Manager")
 
 	pin_store.set_pin(user, new_pin)
 	log.record(action="set_authorization_pin", approver=user, result=log.RESULT_PIN_SET)

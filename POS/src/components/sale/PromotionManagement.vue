@@ -88,31 +88,9 @@
 										</template>
 									</FormControl>
 
-									<FormControl
-										type="select"
+									<SelectInput
 										v-model="filterStatus"
-										:options="[
-											{ label: __('All Status'), value: 'all' },
-											{ label: __('Active Only'), value: 'active' },
-											{ label: __('Expired Only'), value: 'expired' },
-											{ label: __('Not Started'), value: 'not_started' },
-											{ label: __('Disabled Only'), value: 'disabled' },
-										]"
-									/>
-
-									<FormControl
-										type="select"
-										v-model="filterPromotionType"
-										:options="[
-											{ label: __('All Types'), value: 'all' },
-											{
-												label: __('Item Level Discount'),
-												value: PROMOTION_TYPE_ITEM_LEVEL,
-											},
-											{ label: __('Auto Discount'), value: PROMOTION_TYPE_AUTO },
-											{ label: __('GWP'), value: PROMOTION_TYPE_GWP },
-											{ label: __('Gift Pool'), value: PROMOTION_TYPE_GIFT_POOL },
-										]"
+										:options="statusFilterOptions"
 									/>
 								</div>
 
@@ -260,19 +238,9 @@
 												</Badge>
 											</div>
 											<div class="flex items-center justify-between text-xs">
-												<div class="flex items-center gap-1">
-													<Badge variant="subtle">
-														{{ translateApplyOn(promotion.apply_on) }}
-													</Badge>
-													<Badge
-														v-if="promotion.promotion_type"
-														variant="subtle"
-														theme="orange"
-														size="sm"
-													>
-														{{ promotion.promotion_type }}
-													</Badge>
-												</div>
+												<Badge variant="subtle">
+													{{ translateApplyOn(promotion.apply_on) }}
+												</Badge>
 												<span class="text-gray-500">
 													{{
 														promotion.valid_upto
@@ -524,7 +492,10 @@
 															/>
 														</div>
 
-														<div class="col-span-3">
+														<div
+															v-if="promotionsInstalled"
+															class="col-span-3"
+														>
 															<label
 																class="block text-sm font-medium text-gray-700 mb-1.5 text-start"
 															>
@@ -537,17 +508,7 @@
 																:placeholder="__('Select promotion type')"
 															/>
 															<p
-																v-if="isItemLevelPromotionType"
-																class="text-xs text-amber-700 mt-1"
-															>
-																{{
-																	__(
-																		"SKU discount — excluded from Auto Discount; coupons may exclude"
-																	)
-																}}
-															</p>
-															<p
-																v-else-if="isGiftPoolPromotionType"
+																v-if="isGiftPoolPromotionType"
 																class="text-xs text-emerald-700 mt-1"
 															>
 																{{
@@ -584,7 +545,6 @@
 																:disabled="
 																	!isCreating ||
 																	isPricingRule ||
-																	isItemLevelPromotionType ||
 																	isGiftPoolPromotionType
 																"
 																:options="applyOnOptions"
@@ -596,7 +556,12 @@
 											</Card>
 
 											<!-- Item Selection Card -->
-											<Card v-if="form.apply_on !== 'Transaction' && !isGiftPoolPromotionType">
+											<Card
+												v-if="
+													form.apply_on !== 'Transaction' &&
+													!isGiftPoolPromotionType
+												"
+											>
 												<div class="p-5">
 													<div class="flex items-center gap-2 mb-4">
 														<FeatherIcon
@@ -814,7 +779,9 @@
 																{{ group }}
 																<button
 																	v-if="isCreating"
-																	@click="removeGiftPoolGroup(group)"
+																	@click="
+																		removeGiftPoolGroup(group)
+																	"
 																	class="ms-1 hover:text-green-900"
 																	type="button"
 																>
@@ -833,10 +800,7 @@
 															)
 														}}
 													</div>
-													<div
-														v-else
-														class="flex flex-col gap-5"
-													>
+													<div v-else class="flex flex-col gap-5">
 														<div
 															v-for="group in giftPoolGroups"
 															:key="group"
@@ -883,7 +847,9 @@
 																			codes
 																		)
 																"
-																:options="giftPoolItemOptions(group)"
+																:options="
+																	giftPoolItemOptions(group)
+																"
 																:placeholder="
 																	__('Select free items')
 																"
@@ -961,14 +927,14 @@
 
 													<div class="flex flex-col gap-4">
 														<!-- Discount Type Selection -->
-														<div v-if="!isGwpPromotionType">
+														<div>
 															<label
 																class="block text-sm font-medium text-gray-700 mb-3 text-start"
 																>{{ __("Discount Type") }}</label
 															>
 															<div class="grid grid-cols-3 gap-3">
 																<button
-																	v-for="type in availableDiscountTypes"
+																	v-for="type in discountTypes"
 																	:key="type.value"
 																	@click="
 																		form.discount_type =
@@ -1122,8 +1088,7 @@
 															<FormControl
 																v-if="
 																	form.discount_type ===
-																		'free_item' ||
-																	isGwpPromotionType
+																	'free_item'
 																"
 																type="number"
 																:label="__('Free Quantity')"
@@ -1133,53 +1098,7 @@
 																required
 															/>
 
-															<div
-																v-if="isGwpPromotionType"
-																class="col-span-3 rounded-lg border border-purple-200 bg-purple-50 px-4 py-3"
-															>
-																<p
-																	class="text-xs font-medium text-purple-800"
-																>
-																	{{
-																		__(
-																			"Discount per Free Items"
-																		)
-																	}}
-																</p>
-																<p
-																	class="text-lg font-bold text-purple-900 mt-1"
-																>
-																	{{
-																		gwpDiscountPreview > 0
-																			? __(
-																					"{0}% (based on {1} free / {2} purchased)",
-																					[
-																						gwpDiscountPreview.toFixed(
-																							2
-																						),
-																						form.free_qty ||
-																							0,
-																						gwpReferenceQty,
-																					]
-																			  )
-																			: __(
-																					"Set minimum quantity and free quantity to preview"
-																			  )
-																	}}
-																</p>
-																<p
-																	class="text-xs text-purple-700 mt-1"
-																>
-																	{{
-																		__(
-																			"At checkout the discount is recalculated dynamically as free quantity divided by purchased quantity."
-																		)
-																	}}
-																</p>
-															</div>
-
 															<FormControl
-																v-if="!isItemLevelPromotionType"
 																type="number"
 																:label="__('Minimum Quantity')"
 																v-model="form.min_qty"
@@ -1188,7 +1107,6 @@
 															/>
 
 															<FormControl
-																v-if="!isItemLevelPromotionType"
 																type="number"
 																:label="__('Maximum Quantity')"
 																v-model="form.max_qty"
@@ -1197,7 +1115,6 @@
 															/>
 
 															<FormControl
-																v-if="!isItemLevelPromotionType"
 																type="number"
 																:label="
 																	__('Minimum Amount ({0})', [
@@ -1303,6 +1220,7 @@
 </template>
 
 <script setup>
+import { isPromotionsAppInstalled, promoApi } from "@/utils/promoApi";
 import { usePOSPermissions } from "@/composables/usePermissions";
 import { useToast } from "@/composables/useToast";
 import { useItemSearchStore } from "@/stores/itemSearch";
@@ -1353,21 +1271,23 @@ const activeTab = ref("promotions"); // Tab state: 'promotions' or 'coupons'
 const promotions = ref([]);
 const searchQuery = ref("");
 const filterStatus = ref("all");
-const filterPromotionType = ref("all");
+const statusFilterOptions = computed(() => [
+	{ label: __("All Status"), value: "all" },
+	{ label: __("Active Only"), value: "active" },
+	{ label: __("Expired Only"), value: "expired" },
+	{ label: __("Not Started"), value: "not_started" },
+	{ label: __("Disabled Only"), value: "disabled" },
+]);
 
-// Promotion types
-const PROMOTION_TYPE_ITEM_LEVEL = "Item Level Discount";
-const PROMOTION_TYPE_AUTO = "Auto Discount";
-const PROMOTION_TYPE_GWP = "GWP";
+const promotionsInstalled = isPromotionsAppInstalled();
 const PROMOTION_TYPE_GIFT_POOL = "Gift Pool";
 
-const promotionTypeOptions = [
-	{ label: __("Legacy / Unclassified"), value: "" },
-	{ label: __("Item Level Discount"), value: PROMOTION_TYPE_ITEM_LEVEL },
-	{ label: __("Auto Discount"), value: PROMOTION_TYPE_AUTO },
-	{ label: __("GWP"), value: PROMOTION_TYPE_GWP },
-	{ label: __("Gift Pool"), value: PROMOTION_TYPE_GIFT_POOL },
-];
+const promotionTypeOptions = promotionsInstalled
+	? [
+			{ label: __("Standard"), value: "" },
+			{ label: __("Gift Pool"), value: PROMOTION_TYPE_GIFT_POOL },
+		]
+	: [];
 
 // Form state
 const form = ref({
@@ -1396,7 +1316,6 @@ const itemSearch = ref("");
 const freeItemSearch = ref("");
 const selectedItemGroup = ref("");
 const selectedBrand = ref("");
-const selectedGiftPoolItem = ref({});
 const giftPoolFreeQtyByGroup = ref({});
 
 // Discount types
@@ -1409,6 +1328,18 @@ const discountTypes = [
 // Computed
 const isPricingRule = computed(() => {
 	return !isCreating.value && selectedPromotion.value?.source === "Pricing Rule";
+});
+
+const isGiftPoolPromotionType = computed(
+	() => promotionsInstalled && form.value.promotion_type === PROMOTION_TYPE_GIFT_POOL
+);
+
+const giftPoolGroups = computed(() => {
+	const fromItems = (form.value.items || []).map((row) => row.item_group).filter(Boolean);
+	const fromPool = (form.value.gift_pool_items || [])
+		.map((row) => row.item_group)
+		.filter(Boolean);
+	return [...new Set([...fromItems, ...fromPool])];
 });
 
 const filteredPromotions = computed(() => {
@@ -1432,59 +1363,7 @@ const filteredPromotions = computed(() => {
 		filtered = filtered.filter((p) => p.status === "Disabled");
 	}
 
-	if (filterPromotionType.value !== "all") {
-		filtered = filtered.filter(
-			(p) => (p.promotion_type || "") === filterPromotionType.value
-		);
-	}
-
 	return filtered;
-});
-
-const isItemLevelPromotionType = computed(
-	() => form.value.promotion_type === PROMOTION_TYPE_ITEM_LEVEL
-);
-
-const isAutoPromotionType = computed(() => form.value.promotion_type === PROMOTION_TYPE_AUTO);
-
-const isGwpPromotionType = computed(() => form.value.promotion_type === PROMOTION_TYPE_GWP);
-
-const isGiftPoolPromotionType = computed(
-	() => form.value.promotion_type === PROMOTION_TYPE_GIFT_POOL
-);
-
-const giftPoolGroups = computed(() => {
-	const fromItems = (form.value.items || []).map((row) => row.item_group).filter(Boolean);
-	const fromPool = (form.value.gift_pool_items || [])
-		.map((row) => row.item_group)
-		.filter(Boolean);
-	return [...new Set([...fromItems, ...fromPool])];
-});
-
-function calculateGwpDiscountPercentage(freeQty, purchasedQty) {
-	const purchased = Number.parseFloat(purchasedQty) || 0;
-	const free = Number.parseFloat(freeQty) || 0;
-	if (purchased <= 0 || free <= 0) return 0;
-	return Math.min(100, (free / purchased) * 100);
-}
-
-const gwpReferenceQty = computed(() => {
-	const minQty = Number.parseFloat(form.value.min_qty) || 0;
-	return minQty > 0 ? minQty : 0;
-});
-
-const gwpDiscountPreview = computed(() =>
-	calculateGwpDiscountPercentage(form.value.free_qty, gwpReferenceQty.value)
-);
-
-const availableDiscountTypes = computed(() => {
-	if (isItemLevelPromotionType.value || isAutoPromotionType.value) {
-		return discountTypes.filter((t) => t.value !== "free_item");
-	}
-	if (isGwpPromotionType.value) {
-		return discountTypes.filter((t) => t.value === "free_item");
-	}
-	return discountTypes;
 });
 
 // Computed: Filter cached items based on search term
@@ -1569,7 +1448,7 @@ const itemCodeOptions = computed(() => {
 
 // Resources
 const promotionsResource = createResource({
-	url: "pos_next.api.promotions.get_promotions",
+	url: promoApi.getPromotions(),
 	makeParams() {
 		return {
 			pos_profile: props.posProfile,
@@ -1585,7 +1464,7 @@ const promotionsResource = createResource({
 });
 
 const itemGroupsResource = createResource({
-	url: "pos_next.api.promotions.get_item_groups",
+	url: promoApi.getItemGroups(),
 	makeParams() {
 		return { company: props.company };
 	},
@@ -1600,7 +1479,7 @@ const itemGroupsResource = createResource({
 });
 
 const brandsResource = createResource({
-	url: "pos_next.api.promotions.get_brands",
+	url: promoApi.getBrands(),
 	auto: false,
 	onSuccess(data) {
 		brands.value = data || [];
@@ -1612,7 +1491,7 @@ const brandsResource = createResource({
 });
 
 const savePromotionResource = createResource({
-	url: "pos_next.api.promotions.create_promotion",
+	url: promoApi.createPromotion(),
 	makeParams() {
 		return { data: JSON.stringify(form.value) };
 	},
@@ -1634,7 +1513,7 @@ const savePromotionResource = createResource({
 });
 
 const updatePromotionResource = createResource({
-	url: "pos_next.api.promotions.update_promotion",
+	url: promoApi.updatePromotion(),
 	makeParams() {
 		return {
 			scheme_name: form.value.name,
@@ -1670,7 +1549,7 @@ const updatePromotionResource = createResource({
 });
 
 const toggleResource = createResource({
-	url: "pos_next.api.promotions.toggle_promotion",
+	url: promoApi.togglePromotion(),
 	auto: false,
 	onSuccess() {
 		showSuccess(__("Promotion status updated successfully"));
@@ -1682,7 +1561,7 @@ const toggleResource = createResource({
 });
 
 const deleteResource = createResource({
-	url: "pos_next.api.promotions.delete_promotion",
+	url: promoApi.deletePromotion(),
 	auto: false,
 	onSuccess(data) {
 		const responseData = data?.message || data;
@@ -1707,7 +1586,7 @@ const deleteResource = createResource({
 });
 
 const promotionDetailsResource = createResource({
-	url: "pos_next.api.promotions.get_promotion_details",
+	url: promoApi.getPromotionDetails(),
 	makeParams() {
 		return {
 			scheme_name: selectedPromotion.value?.name,
@@ -1751,6 +1630,8 @@ watch(
 	(newVal, oldVal) => {
 		if (isCreating.value && oldVal && newVal !== oldVal) {
 			form.value.items = [];
+			form.value.gift_pool_items = [];
+			giftPoolFreeQtyByGroup.value = {};
 		}
 	}
 );
@@ -1758,28 +1639,13 @@ watch(
 watch(
 	() => form.value.promotion_type,
 	(type) => {
-		if (!isCreating.value) return;
-		if (type === PROMOTION_TYPE_ITEM_LEVEL) {
-			form.value.apply_on = "Item Code";
-			form.value.min_qty = 0;
-			form.value.min_amt = 0;
-			form.value.max_qty = 0;
-			form.value.max_amt = 0;
-			if (form.value.discount_type === "free_item") {
-				form.value.discount_type = "percentage";
-			}
-		} else if (type === PROMOTION_TYPE_AUTO) {
-			if (form.value.discount_type === "free_item") {
-				form.value.discount_type = "percentage";
-			}
-		} else if (type === PROMOTION_TYPE_GWP) {
-			form.value.discount_type = "free_item";
-		} else if (type === PROMOTION_TYPE_GIFT_POOL) {
+		if (type === PROMOTION_TYPE_GIFT_POOL) {
 			form.value.apply_on = "Item Group";
 			form.value.discount_type = "free_item";
-			form.value.gift_pool_items = [];
-			selectedGiftPoolItem.value = {};
-			giftPoolFreeQtyByGroup.value = {};
+			if (isCreating.value) {
+				form.value.gift_pool_items = [];
+				giftPoolFreeQtyByGroup.value = {};
+			}
 		}
 	}
 );
@@ -1925,9 +1791,7 @@ function handleSubmit() {
 			return;
 		}
 		const groups = [
-			...new Set(
-				form.value.gift_pool_items.map((row) => row.item_group).filter(Boolean)
-			),
+			...new Set(form.value.gift_pool_items.map((row) => row.item_group).filter(Boolean)),
 		];
 		form.value.items = groups.map((item_group) => ({ item_group }));
 	} else if (form.value.apply_on !== "Transaction" && form.value.items.length === 0) {
@@ -1972,10 +1836,6 @@ function addItemGroup() {
 		!form.value.items.some((i) => i.item_group === selectedItemGroup.value)
 	) {
 		form.value.items.push({ item_group: selectedItemGroup.value });
-		selectedGiftPoolItem.value = {
-			...selectedGiftPoolItem.value,
-			[selectedItemGroup.value]: "",
-		};
 		if (!giftPoolFreeQtyByGroup.value[selectedItemGroup.value]) {
 			giftPoolFreeQtyByGroup.value = {
 				...giftPoolFreeQtyByGroup.value,
@@ -2000,9 +1860,6 @@ function removeItem(index) {
 		form.value.gift_pool_items = form.value.gift_pool_items.filter(
 			(row) => row.item_group !== removed.item_group
 		);
-		const next = { ...selectedGiftPoolItem.value };
-		delete next[removed.item_group];
-		selectedGiftPoolItem.value = next;
 		const qtyNext = { ...giftPoolFreeQtyByGroup.value };
 		delete qtyNext[removed.item_group];
 		giftPoolFreeQtyByGroup.value = qtyNext;
@@ -2012,7 +1869,6 @@ function removeItem(index) {
 function clearAllItems() {
 	form.value.items = [];
 	form.value.gift_pool_items = [];
-	selectedGiftPoolItem.value = {};
 	giftPoolFreeQtyByGroup.value = {};
 }
 
@@ -2086,9 +1942,6 @@ function removeGiftPoolGroup(itemGroup) {
 	form.value.gift_pool_items = form.value.gift_pool_items.filter(
 		(row) => row.item_group !== itemGroup
 	);
-	const next = { ...selectedGiftPoolItem.value };
-	delete next[itemGroup];
-	selectedGiftPoolItem.value = next;
 	const qtyNext = { ...giftPoolFreeQtyByGroup.value };
 	delete qtyNext[itemGroup];
 	giftPoolFreeQtyByGroup.value = qtyNext;
@@ -2122,7 +1975,6 @@ function resetForm() {
 	freeItemSearch.value = "";
 	selectedItemGroup.value = "";
 	selectedBrand.value = "";
-	selectedGiftPoolItem.value = {};
 	giftPoolFreeQtyByGroup.value = {};
 }
 
@@ -2133,7 +1985,7 @@ function populateFormFromPromotion(promotion) {
 	// Basic fields
 	form.value.name = promotion.name;
 	form.value.company = promotion.company;
-	form.value.promotion_type = promotion.promotion_type || "";
+	form.value.promotion_type = promotionsInstalled ? promotion.promotion_type || "" : "";
 	form.value.apply_on = promotion.apply_on;
 	form.value.valid_from = promotion.valid_from || "";
 	form.value.valid_upto = promotion.valid_upto || "";
@@ -2156,7 +2008,7 @@ function populateFormFromPromotion(promotion) {
 		}));
 	}
 
-	if (promotion.gift_pool_items?.length) {
+	if (promotionsInstalled && promotion.gift_pool_items?.length) {
 		form.value.gift_pool_items = promotion.gift_pool_items.map((row) => ({
 			item_group: row.item_group,
 			item_code: row.item_code,

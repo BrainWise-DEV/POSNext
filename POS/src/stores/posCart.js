@@ -1,14 +1,28 @@
+import {
+	allowsAutoDiscountStacking,
+	getProductStrategyForOffer,
+	getStrategyForOffer,
+	offerStrategyOrder,
+} from "@/utils/offerStrategies";
 import { useInvoice } from "@/composables/useInvoice";
 import { usePOSOffersStore } from "@/stores/posOffers";
 import { usePOSSettingsStore } from "@/stores/posSettings";
 import { usePOSShiftStore } from "@/stores/posShift";
 import { parseError } from "@/utils/errorHandler";
-import { unwrapCouponValidation } from "@/utils/invoice";
-import { shouldValidateItemStock, checkStockAvailability } from "@/utils/stockValidator";
+import {
+	shouldValidateItemStock,
+	checkStockAvailability,
+	getCartStockQtyForItem,
+	rowStockQty,
+} from "@/utils/stockValidator";
+import { syncCartFreeItems } from "@/utils/gwpSameItemFreeRows";
 import { offlineState } from "@/utils/offline/offlineState";
+import {
+	isFreePromoRow,
+	scaleRateForUomChange,
+	shouldPreserveRateOnUomChange,
+} from "@/utils/uomPricingLock";
 import { useToast } from "@/composables/useToast";
-import { useStockStore } from "@/stores/stock";
-import { call } from "@/utils/apiWrapper";
 import { defineStore } from "pinia";
 import { computed, nextTick, ref, toRaw, watch } from "vue";
 
@@ -104,7 +118,6 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		setDefaultCustomer,
 		applyDiscount,
 		removeDiscount,
-		applyCouponLineDiscounts,
 		applyOffersResource,
 		getItemDetailsResource,
 		resolveUomPricing,
@@ -115,9 +128,6 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 	const offersStore = usePOSOffersStore();
 	const settingsStore = usePOSSettingsStore();
-	const stockStore = useStockStore();
-	const FREE_ITEM_OUT_OF_STOCK_MSG = __("sorry free item is out of stock");
-	let lastSkippedFreeKey = "";
 
 	// Additional cart state
 	const pendingItem = ref(null);
@@ -148,28 +158,22 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	const isProcessingOffers = computed(() => offerProcessingState.value.isProcessing);
 
 	/**
-	 * Structural cart hash for offer processing dedupe.
-	 *
-	 * Free-item rows are omitted so applying/removing product-discount gifts
-	 * does not look like a purchase-qty change and re-enter offer processing.
-	 *
-	 * Discount % / amount / net rate are omitted on purpose: apply_offers and
-	 * coupon revalidation write those fields; including them re-queues offer
-	 * processing and flickers remove/re-apply on live carts.
+	 * Generates a comprehensive hash of the current cart state.
+	 * Used to detect ANY change that might affect offer eligibility.
 	 */
 	function generateCartHash() {
-		const items = invoiceItems.value.filter((item) => !item.is_free_item);
+		const items = invoiceItems.value;
 		const parts = [
-			// Item details: code, quantity, uom, list price (not discounted rate)
+			// Item details: code, quantity, uom, discount
 			items
 				.map(
 					(i) =>
-						`${i.item_code}:${i.quantity}:${i.uom || ""}:${i.price_list_rate || 0}`
+						`${i.item_code}:${i.quantity}:${i.uom || ""}:${i.discount_percentage || 0}`
 				)
 				.join("|"),
-			// Total paid item count
+			// Total item count
 			items.length.toString(),
-			// Subtotal uses price_list_rate (stable when discounts apply)
+			// Subtotal (rounded to avoid floating point issues)
 			Math.round((subtotal.value || 0) * 100).toString(),
 			// Customer
 			customer.value?.name || customer.value || "none",
@@ -194,12 +198,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			settingsStore.shouldEnforceStockValidation() &&
 			shouldValidateItemStock(item)
 		) {
-			// Account for quantity already in the cart for this item
-			const itemUom = item.uom || item.stock_uom;
-			const existing = invoiceItems.value.find(
-				(i) => i.item_code === item.item_code && i.uom === itemUom
-			);
-			const totalQty = (existing ? existing.quantity : 0) + qty;
+			// Only this SKU (paid + free rows of the same item). A free gift of a
+			// different product must not inflate requested qty (Iphone 17 x6 +
+			// Aqua Water free x1 is 6 phones, not 7).
+			const totalQty =
+				getCartStockQtyForItem(invoiceItems.value, item.item_code) + rowStockQty(item, qty);
 			const warehouse = item.warehouse || currentProfile.warehouse;
 
 			const check = checkStockAvailability(item, totalQty, warehouse);
@@ -218,10 +221,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 */
 	function updateItemQuantity(itemCode, quantity, uom = null) {
 		const item = uom
-			? invoiceItems.value.find((i) => i.item_code === itemCode && i.uom === uom)
-			: invoiceItems.value.find((i) => i.item_code === itemCode);
+			? invoiceItems.value.find(
+					(i) => i.item_code === itemCode && i.uom === uom && !i.is_free_item
+				)
+			: invoiceItems.value.find((i) => i.item_code === itemCode && !i.is_free_item);
 
-		if (!item) return baseUpdateItemQuantity(itemCode, quantity, uom);
+		if (!item) return;
 
 		const newQty = Number.parseFloat(quantity) || 1;
 
@@ -231,7 +236,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			settingsStore.shouldEnforceStockValidation() &&
 			shouldValidateItemStock(item)
 		) {
-			const check = checkStockAvailability(item, newQty);
+			const otherLinesQty =
+				getCartStockQtyForItem(invoiceItems.value, item.item_code) - rowStockQty(item);
+			const totalQty = otherLinesQty + rowStockQty(item, newQty);
+			const check = checkStockAvailability(item, totalQty);
 			if (!check.available) {
 				showWarning(check.error);
 				return;
@@ -253,7 +261,6 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		appliedCoupon.value = null;
 		currentDraftId.value = null;
 		targetDoctype.value = "Sales Invoice";
-		lastSkippedFreeKey = "";
 
 		// Reset offer processing state
 		offerProcessingState.value.lastCartHash = "";
@@ -286,12 +293,6 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		}
 		if (!customer.value) {
 			showWarning(__("Please select a customer"));
-			return;
-		}
-
-		dropOutOfStockFreeItems();
-		if (invoiceItems.value.length === 0) {
-			showWarning(__("Cart is empty"));
 			return;
 		}
 
@@ -336,6 +337,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	}
 
 	async function loadDefaultCustomer() {
+		const shiftStore = usePOSShiftStore();
 		const profileCustomer =
 			shiftStore.currentProfile?.customer || shiftStore.profileCustomer || null;
 		await setDefaultCustomer(profileCustomer);
@@ -358,130 +360,19 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	function applyDiscountToCart(discount) {
 		applyDiscount(discount);
 		appliedCoupon.value = discount;
-		showSuccess(__("{0} applied successfully", [discount.name || discount.code]));
+		showSuccess(__("{0} applied successfully", [discount.name]));
 	}
 
 	function removeDiscountFromCart() {
+		appliedOffers.value = [];
 		removeDiscount();
 		appliedCoupon.value = null;
 		showSuccess(__("Discount has been removed from cart"));
 	}
 
-	function buildCouponItemsSnapshot() {
-		return toRaw(invoiceItems.value).map((item, index) => {
-			// When a coupon is already on the line, send the *pre-coupon* (offer)
-			// discount so the server can stack instead of treating the combined
-			// value as the base and double-applying the coupon.
-			const hasCoupon = !!item.coupon_code;
-			const prePct = Number.parseFloat(item.pre_coupon_discount_percentage);
-			const preAmt = Number.parseFloat(item.pre_coupon_discount_amount);
-			let discountPercentage = item.discount_percentage || 0;
-			let discountAmount = item.discount_amount || 0;
-			if (hasCoupon) {
-				if (!Number.isNaN(prePct) && prePct > 0) {
-					discountPercentage = prePct;
-					discountAmount = 0;
-				} else if (!Number.isNaN(preAmt) && preAmt > 0) {
-					discountAmount = preAmt;
-					discountPercentage = 0;
-				} else {
-					discountPercentage = 0;
-					discountAmount = 0;
-				}
-			}
-
-			return {
-				item_code: item.item_code,
-				item_name: item.item_name,
-				brand: item.brand || "",
-				item_group: item.item_group || "",
-				qty: item.quantity || item.qty || 0,
-				quantity: item.quantity || item.qty || 0,
-				rate: item.rate || 0,
-				price_list_rate: item.price_list_rate || item.rate || 0,
-				amount: item.amount || 0,
-				discount_percentage: discountPercentage,
-				discount_amount: discountAmount,
-				pricing_rules: item.pricing_rules || null,
-				is_free_item: item.is_free_item || 0,
-				is_already_discounted: item.is_already_discounted || 0,
-				discount_source: item.discount_source || "",
-				coupon_code: item.coupon_code || "",
-				idx: index + 1,
-				name: item.name || null,
-			};
-		});
-	}
-
-	/**
-	 * Re-validate and re-apply the active coupon after cart/offer changes.
-	 * Clears the coupon if it is no longer valid or has no eligible items.
-	 */
-	async function revalidateAppliedCoupon(silent = true) {
-		const current = appliedCoupon.value;
-		if (!current?.code) return;
-
-		if (!invoiceItems.value.length) {
-			removeDiscount();
-			appliedCoupon.value = null;
-			return;
-		}
-
-		const customerName = customer.value?.name || customer.value;
-		if (!customerName) {
-			removeDiscount();
-			appliedCoupon.value = null;
-			return;
-		}
-
-		try {
-			const shiftStore = usePOSShiftStore();
-			const result = await call("pos_next.api.offers.validate_coupon", {
-				coupon_code: current.code,
-				customer: customerName,
-				company: shiftStore.currentProfile?.company || shiftStore.profileCompany || "",
-				items: buildCouponItemsSnapshot(),
-			});
-
-			const validationData = unwrapCouponValidation(result);
-			if (
-				!validationData?.valid ||
-				!(validationData.line_updates || []).length ||
-				!(Number.parseFloat(validationData.total_discount) > 0)
-			) {
-				removeDiscount();
-				appliedCoupon.value = null;
-				if (!silent) {
-					showSuccess(__("Coupon removed: cart no longer meets requirements"));
-				}
-				return;
-			}
-
-			const coupon = validationData.coupon || current.coupon;
-			const updated = {
-				...current,
-				name: coupon?.coupon_name || current.name || current.code,
-				code: (coupon?.coupon_code || current.code).toUpperCase(),
-				percentage:
-					coupon?.discount_type === "Percentage" ? coupon.discount_percentage : 0,
-				amount: Number.parseFloat(validationData.total_discount) || 0,
-				type: coupon?.discount_type || current.type,
-				coupon,
-				line_updates: validationData.line_updates || [],
-				eligible_item_codes: validationData.eligible_item_codes || [],
-				eligible_subtotal: validationData.eligible_subtotal || 0,
-				application_mode: "line",
-			};
-			applyCouponLineDiscounts(updated);
-			appliedCoupon.value = updated;
-		} catch (error) {
-			console.error("Error revalidating coupon:", error);
-		}
-	}
-
 	function buildOfferEvaluationPayload(currentProfile) {
 		// Use toRaw() to ensure we get current, non-reactive values (prevents stale cached quantities)
-		const rawItems = toRaw(invoiceItems.value).filter((item) => !item.is_free_item);
+		const rawItems = toRaw(invoiceItems.value);
 
 		return {
 			doctype: "Sales Invoice",
@@ -491,7 +382,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			selling_price_list: currentProfile?.selling_price_list,
 			currency: currentProfile?.currency,
 			discount_amount: additionalDiscount.value || 0,
-			coupon_code: appliedCoupon.value?.code || appliedCoupon.value?.name || "",
+			coupon_code: appliedCoupon.value?.name || "",
 			items: rawItems.map((item) => ({
 				item_code: item.item_code,
 				item_name: item.item_name,
@@ -523,45 +414,22 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		return typeof value === "string" && value.trim().length > 0;
 	}
 
-	const OFFER_DISCOUNT_SOURCES = new Set([
-		"gwp",
-		"free_item",
-		"accumulative_promotion",
-		"item_level_promotion",
-		"auto_discount",
-	]);
-
-	function itemHasOfferDiscount(item) {
-		if (item.discount_source === "manual_discount") return false;
-		if (Number.parseFloat(item.gwp_free_qty) > 0) return true;
-		if (item.discount_source === "free_item" && Number.parseFloat(item.free_qty) > 0) {
-			return true;
+	/**
+	 * Normalize pricing_rules to an array. The server echoes it back as a
+	 * comma-separated string (see useInvoice.js#stringifyPricingRules) —
+	 * spreading a string directly (`[...str]`) splits it into individual
+	 * characters instead of rule names, corrupting the field for offline
+	 * stacking / merge logic below.
+	 */
+	function normalizePricingRules(value) {
+		if (Array.isArray(value)) return [...value];
+		if (typeof value === "string" && value.trim()) {
+			return value
+				.split(",")
+				.map((s) => s.trim())
+				.filter(Boolean);
 		}
-		if (hasPricingRules(item.pricing_rules)) return true;
-		return Boolean(item.discount_source && OFFER_DISCOUNT_SOURCES.has(item.discount_source));
-	}
-
-	function clearOfferDiscountFromItem(item) {
-		if (item.discount_source === "manual_discount") return;
-
-		item.discount_percentage = 0;
-		item.discount_amount = 0;
-		item.gwp_free_qty = 0;
-		item.free_qty = 0;
-		item.pricing_rules = [];
-		item.discount_source = "";
-		item.is_already_discounted = 0;
-		item.is_accumulative_discount = 0;
-		recalculateItem(item);
-	}
-
-	function clearAllOfferDiscounts() {
-		invoiceItems.value.forEach((item) => {
-			if (!item.is_free_item) {
-				clearOfferDiscountFromItem(item);
-			}
-		});
-		rebuildIncrementalCache();
+		return [];
 	}
 
 	/**
@@ -574,94 +442,27 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		let hasDiscounts = false;
 
 		invoiceItems.value.forEach((item, index) => {
-			if (item.is_free_item) return;
-
-			const paidIndex = invoiceItems.value
-				.slice(0, index + 1)
-				.filter((row) => !row.is_free_item).length - 1;
-			const serverItem = serverItems[paidIndex] || {};
+			const serverItem = serverItems[index] || {};
 			const discountPct = Number.parseFloat(serverItem.discount_percentage) || 0;
 			const discountAmt = Number.parseFloat(serverItem.discount_amount) || 0;
-			const gwpFreeQty = Number.parseFloat(serverItem.gwp_free_qty) || 0;
-			const bundledFreeQty = Number.parseFloat(serverItem.free_qty) || 0;
 
-			const serverHasOfferDiscount =
-				hasPricingRules(serverItem.pricing_rules) ||
-				discountPct > 0 ||
-				discountAmt > 0 ||
-				gwpFreeQty > 0 ||
-				(serverItem.discount_source === "free_item" && bundledFreeQty > 0);
-
-			if (serverHasOfferDiscount) {
-				// GWP and bundled same-item free: keep exact amount, not % (avoids rounding drift)
-				if (
-					gwpFreeQty > 0 ||
-					serverItem.discount_source === "free_item" ||
-					bundledFreeQty > 0
-				) {
-					item.discount_amount = discountAmt;
-					item.discount_percentage = 0;
-					item.gwp_free_qty = gwpFreeQty;
-					item.free_qty =
-						serverItem.discount_source === "free_item" || bundledFreeQty > 0
-							? bundledFreeQty
-							: 0;
-					// Always stamp free_item when qty is bundled so the cart
-					// shows "N free items" instead of a derived "%".
-					if (bundledFreeQty > 0) {
-						item.discount_source = "free_item";
-					}
-				} else if (discountAmt > 0) {
-					item.discount_amount = discountAmt;
-					item.discount_percentage = 0;
-					item.gwp_free_qty = 0;
-					item.free_qty = 0;
-				} else {
-					item.discount_percentage = discountPct;
-					item.discount_amount = 0;
-					item.gwp_free_qty = 0;
-					item.free_qty = 0;
-				}
-				item.pricing_rules = serverItem.pricing_rules;
-				hasDiscounts =
-					discountPct > 0 ||
-					discountAmt > 0 ||
-					gwpFreeQty > 0 ||
-					(serverItem.discount_source === "free_item" && bundledFreeQty > 0);
-
-				// Offer pass runs before coupon revalidation. Keep the offer-only
-				// snapshot so stacking (exclude_already_discounted=0) does not
-				// treat a previously combined rate as the new base.
-				if (item.coupon_code) {
-					item.pre_coupon_discount_percentage = item.discount_percentage || 0;
-					item.pre_coupon_discount_amount = item.discount_amount || 0;
-				}
-			} else if (itemHasOfferDiscount(item)) {
-				clearOfferDiscountFromItem(item);
+			// Only update if server applied a pricing rule or discount
+			if (hasPricingRules(serverItem.pricing_rules) || discountPct > 0 || discountAmt > 0) {
+				item.discount_percentage = discountPct;
+				item.discount_amount = discountAmt;
+				item.pricing_rules = normalizePricingRules(serverItem.pricing_rules);
+				item.discount_source = serverItem.discount_source || item.discount_source;
+				item.free_qty = Number.parseFloat(serverItem.free_qty) || 0;
+				item.gwp_free_qty = Number.parseFloat(serverItem.gwp_free_qty) || 0;
+				hasDiscounts = discountPct > 0 || discountAmt > 0;
 			}
 			// Otherwise preserve existing manual discount
 
 			if (serverItem.is_already_discounted !== undefined) {
 				item.is_already_discounted = serverItem.is_already_discounted ? 1 : 0;
 			}
-			if (serverItem.discount_source !== undefined) {
-				// Do not let a blank/legacy source wipe a bundled free-item stamp.
-				if (
-					Number.parseFloat(item.free_qty) > 0 &&
-					item.discount_source === "free_item" &&
-					!serverItem.discount_source
-				) {
-					// keep free_item
-				} else if (
-					Number.parseFloat(item.free_qty) > 0 &&
-					(serverItem.discount_source === "pricing_rule" ||
-						serverItem.discount_source === "legacy")
-				) {
-					item.discount_source = "free_item";
-				} else {
-					item.discount_source = serverItem.discount_source || "";
-				}
-			}
+			item.is_accumulative_discount =
+				serverItem.discount_source === "accumulative_promotion" ? 1 : 0;
 
 			recalculateItem(item);
 		});
@@ -673,169 +474,23 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	/**
 	 * Processes free items from backend offer response.
 	 *
-	 * ERPNext represents product discounts as separate SI rows for different-item
-	 * gifts. Same-item free gifts are bundled onto the paid line (qty stays 4,
-	 * one unit discounted) so the cashier does not see an extra cart row.
+	 * ERPNext represents product discounts as separate SI rows: paid line(s) plus
+	 * one or more rows with is_free_item=1 (see pricing_rule tests for same_item).
+	 * We always add a dedicated free row so formatItemsForSubmission sends qty > 0
+	 * for stock and accounting; annotating only free_qty on the paid line never
+	 * reaches Sales Invoice Item (there is no free_qty field server-side).
 	 *
 	 * @param {Array} freeItems - Array of free items from backend (e.g., [{item_code, qty, uom, item_name}])
 	 * @returns {void}
 	 */
-	/** Whole units only — free gift qty is always floored (never decimal). */
-	function floorFreeItemQty(qty) {
-		return Math.max(0, Math.floor(Number.parseFloat(qty) || 0));
-	}
-
-	function reportSkippedFreeItems(codes) {
-		const key = [...new Set((codes || []).filter(Boolean))].sort().join(",");
-		if (!key) {
-			lastSkippedFreeKey = "";
-			return;
-		}
-		if (key === lastSkippedFreeKey) return;
-		lastSkippedFreeKey = key;
-		showWarning(FREE_ITEM_OUT_OF_STOCK_MSG);
-	}
-
-	function isFreeItemOutOfStock(itemCode, requestedQty) {
-		if (!itemCode || !settingsStore.shouldEnforceStockValidation()) return false;
-		if (!stockStore.server?.has(itemCode)) return false;
-
-		const requested = Number.parseFloat(requestedQty) || 0;
-		if (requested <= 0) return false;
-
-		const serverQty = stockStore.getStockInfo(itemCode).server || 0;
-		const paidQty = invoiceItems.value
-			.filter((item) => !item.is_free_item && item.item_code === itemCode)
-			.reduce(
-				(sum, item) =>
-					sum + (Number(item.quantity) || 0) * (Number(item.conversion_factor) || 1),
-				0
-			);
-		return serverQty - paidQty < requested;
-	}
-
-	function dropOutOfStockFreeItems() {
-		if (!settingsStore.shouldEnforceStockValidation()) return false;
-
-		const skippedCodes = [];
-		const kept = invoiceItems.value.filter((item) => {
-			if (!item.is_free_item) return true;
-			const requested =
-				(Number(item.quantity) || 0) * (Number(item.conversion_factor) || 1);
-			if (isFreeItemOutOfStock(item.item_code, requested)) {
-				skippedCodes.push(item.item_code);
-				return false;
-			}
-			return true;
+	function processFreeItems(freeItems) {
+		// Restore qty previously carved into same-SKU free rows, then rebuild.
+		// See syncCartFreeItems — gwp_same_item_row is client-only; skipping this
+		// undercharges scanned units.
+		invoiceItems.value = syncCartFreeItems(invoiceItems.value, freeItems, {
+			recalculateItem,
 		});
-
-		if (skippedCodes.length === 0) return false;
-
-		invoiceItems.value = kept;
 		rebuildIncrementalCache();
-		reportSkippedFreeItems(skippedCodes);
-		return true;
-	}
-
-	function processFreeItems(freeItems, skippedFromServer = []) {
-		// Reset free_qty on paid lines that are NOT already carrying a
-		// server-bundled same-item free discount. applyDiscountsFromServer
-		// stamps free_qty + discount_source=free_item first; wiping those
-		// here would drop the "N free items" badge and fall back to "%".
-		invoiceItems.value.forEach((item) => {
-			if (item.is_free_item) return;
-			if (
-				item.discount_source === "free_item" &&
-				Number.parseFloat(item.free_qty) > 0
-			) {
-				return;
-			}
-			item.free_qty = 0;
-		});
-
-		// Remove previously-added free item rows (they'll be re-added below if still valid)
-		invoiceItems.value = invoiceItems.value.filter((item) => !item.is_free_item);
-
-		const skippedCodes = (Array.isArray(skippedFromServer) ? skippedFromServer : [])
-			.map((entry) => (typeof entry === "string" ? entry : entry?.item_code))
-			.filter(Boolean);
-
-		const gwpOfferRules = new Set(
-			appliedOffers.value
-				.filter((entry) => entry.offer?.promotion_type === "GWP")
-				.flatMap((entry) => entry.rules || [entry.code])
-		);
-
-		const filteredFreeItems = (Array.isArray(freeItems) ? freeItems : []).filter(
-			(freeItem) => {
-				const ruleName = freeItem.pricing_rules;
-				if (!ruleName || gwpOfferRules.size === 0) {
-					return true;
-				}
-				return !gwpOfferRules.has(ruleName);
-			}
-		);
-
-		// Early return if no free items
-		if (filteredFreeItems.length === 0) {
-			rebuildIncrementalCache();
-			reportSkippedFreeItems(skippedCodes);
-			return;
-		}
-
-		for (const freeItem of filteredFreeItems) {
-			const freeQty = floorFreeItemQty(freeItem.qty);
-			if (freeQty <= 0) continue;
-
-			const freeUom = freeItem.uom || freeItem.stock_uom;
-
-			// Check if this free item matches an existing (non-free) cart item
-			const cartItem = invoiceItems.value.find(
-				(item) =>
-					!item.is_free_item &&
-					item.item_code === freeItem.item_code &&
-					(item.uom || item.stock_uom) === freeUom
-			);
-
-			if (cartItem) {
-				applyBundledSameItemFreeDiscount(
-					cartItem,
-					freeQty,
-					freeItem.pricing_rules || null
-				);
-				continue;
-			}
-
-			const cf = freeItem.conversion_factor || cartItem?.conversion_factor || 1;
-			const requestedStockQty = freeQty * (Number(cf) || 1);
-			if (isFreeItemOutOfStock(freeItem.item_code, requestedStockQty)) {
-				skippedCodes.push(freeItem.item_code);
-				continue;
-			}
-
-			invoiceItems.value.push({
-				item_code: freeItem.item_code,
-				item_name: freeItem.item_name || cartItem?.item_name || freeItem.item_code,
-				rate: 0,
-				price_list_rate: 0,
-				quantity: freeQty,
-				discount_amount: 0,
-				discount_percentage: 0,
-				tax_amount: 0,
-				amount: 0,
-				stock_qty: 0,
-				uom: freeUom,
-				stock_uom: freeItem.stock_uom || freeUom,
-				conversion_factor: cf,
-				is_free_item: 1,
-				free_qty: freeQty,
-				pricing_rules: freeItem.pricing_rules || null,
-				warehouse: freeItem.warehouse || cartItem?.warehouse,
-			});
-		}
-
-		rebuildIncrementalCache();
-		reportSkippedFreeItems(skippedCodes);
 	}
 
 	/**
@@ -855,9 +510,6 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		return {
 			items: Array.isArray(payload.items) ? payload.items : [],
 			freeItems: Array.isArray(payload.free_items) ? payload.free_items : [],
-			skippedFreeItems: Array.isArray(payload.skipped_free_items)
-				? payload.skipped_free_items
-				: [],
 			// CRITICAL: Only trust explicitly returned rules - NO FALLBACK
 			// If backend doesn't return applied_pricing_rules, NO offers were applied
 			appliedRules: Array.isArray(payload.applied_pricing_rules)
@@ -960,13 +612,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				const {
 					items: responseItems,
 					freeItems,
-					skippedFreeItems,
 					appliedRules,
 					headerDiscount,
 				} = parseOfferResponse(response);
 
 				applyDiscountsFromServer(responseItems);
-				processFreeItems(freeItems, skippedFreeItems);
+				processFreeItems(freeItems);
 				applyHeaderDiscountFromServer(headerDiscount);
 				filterActiveOffers(appliedRules);
 
@@ -983,13 +634,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 							const {
 								items: rollbackItems,
 								freeItems: rollbackFreeItems,
-								skippedFreeItems: rollbackSkippedFreeItems,
 								appliedRules: rollbackRules,
 								headerDiscount: rollbackHeaderDiscount,
 							} = parseOfferResponse(rollbackResponse);
 
 							applyDiscountsFromServer(rollbackItems);
-							processFreeItems(rollbackFreeItems, rollbackSkippedFreeItems);
+							processFreeItems(rollbackFreeItems);
 							applyHeaderDiscountFromServer(rollbackHeaderDiscount);
 							filterActiveOffers(rollbackRules);
 						} catch (rollbackError) {
@@ -997,13 +647,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 						}
 					}
 
-					if (skippedFreeItems.length) {
-						reportSkippedFreeItems(
-							skippedFreeItems.map((entry) => entry.item_code || entry)
-						);
-					} else {
-						showWarning(__("Your cart doesn't meet the requirements for this offer."));
-					}
+					showWarning(__("Your cart doesn't meet the requirements for this offer."));
 					offersDialogRef?.resetApplyingState();
 					result = false;
 					return;
@@ -1065,9 +709,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 			appliedOffers.value = [];
 			processFreeItems([]); // Remove all free items
-			clearAllOfferDiscounts();
 			removeDiscount();
-			applyHeaderDiscountFromServer(null);
 			await nextTick();
 			showSuccess(__("Offer has been removed from cart"));
 			offersDialogRef?.resetApplyingState();
@@ -1083,9 +725,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 			appliedOffers.value = [];
 			processFreeItems([]); // Remove all free items
-			clearAllOfferDiscounts();
 			removeDiscount();
-			applyHeaderDiscountFromServer(null);
 			await nextTick();
 			showSuccess(__("Offer has been removed from cart"));
 			offersDialogRef?.resetApplyingState();
@@ -1113,13 +753,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				const {
 					items: responseItems,
 					freeItems,
-					skippedFreeItems,
 					appliedRules,
 					headerDiscount,
 				} = parseOfferResponse(response);
 
 				applyDiscountsFromServer(responseItems);
-				processFreeItems(freeItems, skippedFreeItems);
+				processFreeItems(freeItems);
 				applyHeaderDiscountFromServer(headerDiscount);
 				filterActiveOffers(appliedRules);
 
@@ -1198,51 +837,62 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 			// If any offers are invalid, remove them and reapply remaining
 			if (invalidOffers.length > 0) {
-				const candidateCodes = [
-					...new Set([
-						...appliedOffers.value.map((o) => o.code),
-						...offersStore.allEligibleOffers.map((o) => o.name),
-					]),
-				];
+				const validOfferCodes = appliedOffers.value
+					.filter((o) => !invalidOffers.find((inv) => inv.code === o.code))
+					.map((o) => o.code);
 
-				const invoiceData = buildOfferEvaluationPayload(currentProfile);
-				const response = await applyOffersResource.submit({
-					invoice_data: invoiceData,
-					selected_offers: candidateCodes,
-				});
+				if (validOfferCodes.length === 0) {
+					// All offers invalid - clear everything
+					appliedOffers.value = [];
+					processFreeItems([]);
 
-				if (signal?.aborted) return false;
+					// Reset all item rates to original (remove discounts)
+					invoiceItems.value.forEach((item) => {
+						if (item.pricing_rules && item.pricing_rules.length > 0) {
+							item.discount_percentage = 0;
+							item.discount_amount = 0;
+							item.pricing_rules = [];
+							item.is_already_discounted = 0;
+							item.is_accumulative_discount = 0;
+							recalculateItem(item);
+						}
+					});
+					rebuildIncrementalCache();
+				} else {
+					// Reapply only valid offers
+					const invoiceData = buildOfferEvaluationPayload(currentProfile);
+					const response = await applyOffersResource.submit({
+						invoice_data: invoiceData,
+						selected_offers: validOfferCodes,
+					});
 
-				const {
-					items: responseItems,
-					freeItems,
-					skippedFreeItems,
-					appliedRules,
-					headerDiscount,
-				} = parseOfferResponse(response);
+					if (signal?.aborted) return false;
 
-				applyDiscountsFromServer(responseItems);
-				processFreeItems(freeItems, skippedFreeItems);
-				applyHeaderDiscountFromServer(headerDiscount);
-				filterActiveOffers(appliedRules);
+					const {
+						items: responseItems,
+						freeItems,
+						appliedRules,
+						headerDiscount,
+					} = parseOfferResponse(response);
 
-				const removedNames = appliedOffers.value
-					.filter((entry) => !appliedRules.includes(entry.code))
-					.map((entry) => entry.name);
-				appliedOffers.value = appliedOffers.value.filter((entry) =>
-					appliedRules.includes(entry.code)
-				);
+					applyDiscountsFromServer(responseItems);
+					processFreeItems(freeItems);
+					applyHeaderDiscountFromServer(headerDiscount);
+					filterActiveOffers(appliedRules);
 
-				// The server kept everything the client doubted — nothing to report.
-				if (removedNames.length === 0) return false;
+					// Update appliedOffers to only include valid ones
+					appliedOffers.value = appliedOffers.value.filter((entry) =>
+						appliedRules.includes(entry.code)
+					);
+				}
 
 				// Wait for Vue to update before showing toast
 				await nextTick();
 
+				// Show warning about removed offers
+				const offerNames = invalidOffers.map((o) => o.name).join(", ");
 				showWarning(
-					__("Offer removed: {0}. Cart no longer meets requirements.", [
-						removedNames.join(", "),
-					])
+					__("Offer removed: {0}. Cart no longer meets requirements.", [offerNames])
 				);
 				return true;
 			}
@@ -1303,11 +953,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 			const newlyAppliedOffers = [];
 
-
 			const orderedOffers = [...newOffers].sort(
-				(a, b) =>
-					(b.apply_discount_on_price === "Accumulative" ? 1 : 0) -
-					(a.apply_discount_on_price === "Accumulative" ? 1 : 0)
+				(a, b) => offerStrategyOrder(b) - offerStrategyOrder(a)
 			);
 
 			for (const offer of orderedOffers) {
@@ -1317,27 +964,26 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				// Find eligible items based on offer.apply_on
 				let eligibleItems = [];
 
-				// Exclude free-item rows — they are the gift, not purchase qty
-				const paidItems = invoiceItems.value.filter((item) => !item.is_free_item);
-
 				if (offer.apply_on === "Item Code") {
 					const eligibleCodes = offer.eligible_items || [];
-					eligibleItems = paidItems.filter((item) =>
+					eligibleItems = invoiceItems.value.filter((item) =>
 						eligibleCodes.includes(item.item_code)
 					);
 				} else if (offer.apply_on === "Item Group") {
 					const eligibleGroups = offer.eligible_item_groups || [];
 					eligibleItems = eligibleGroups.includes("All Item Groups")
-						? paidItems
-						: paidItems.filter((item) => eligibleGroups.includes(item.item_group));
+						? invoiceItems.value
+						: invoiceItems.value.filter((item) =>
+								eligibleGroups.includes(item.item_group)
+							);
 				} else if (offer.apply_on === "Brand") {
 					const eligibleBrands = offer.eligible_brands || [];
-					eligibleItems = paidItems.filter((item) =>
+					eligibleItems = invoiceItems.value.filter((item) =>
 						eligibleBrands.includes(item.brand)
 					);
 				} else if (offer.apply_on === "Transaction") {
-					// Transaction-level discount applies to all paid items
-					eligibleItems = paidItems;
+					// Transaction-level discount applies to all items
+					eligibleItems = invoiceItems.value;
 				}
 
 				if (eligibleItems.length === 0) continue;
@@ -1382,81 +1028,15 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	}
 
 	/**
-	 * Total percentage an Accumulative offer grants, given what's in the cart.
-	 *
-	 * Mirrors apply_accumulative_discount_rules in pos_next/promotions/engine.py.
-	 * The server pre-expands each scope row's values (item groups to their
-	 * descendants, template items to their variants), so matching here is a plain
-	 * lookup — every scope row represented in the cart contributes its percentage
-	 * and the sum lands on every eligible line.
-	 *
-	 * @param {Object} offer - The offer, carrying accumulative_scopes
-	 * @param {Array} eligibleItems - Lines that would receive the discount
-	 * @returns {number} Percentage off list price, 0 when the offer doesn't qualify
-	 */
-	function computeAccumulativeDiscount(offer, eligibleItems) {
-		const scopes = offer.accumulative_scopes || [];
-		const field = offer.accumulative_scope_field;
-		if (scopes.length === 0 || !field) return 0;
-
-		let total = 0;
-		let scopesPresent = 0;
-
-		for (const scope of scopes) {
-			const values = scope.values || [];
-			if (!eligibleItems.some((item) => values.includes(item[field]))) continue;
-			scopesPresent += 1;
-			total += Number.parseFloat(scope.discount_percentage) || 0;
-		}
-
-		const minScopes = Math.max(Number.parseInt(offer.min_scopes_required, 10) || 1, 1);
-		if (scopesPresent < minScopes) return 0;
-
-		const cap = Number.parseFloat(offer.max_accumulated_discount_percentage) || 0;
-		if (cap > 0) total = Math.min(total, cap);
-
-		return Math.min(Math.max(total, 0), 100);
-	}
-
-	/**
-	 * Apply an Accumulative offer's summed percentage to every eligible line.
-	 * @returns {boolean} True if any line was discounted
-	 */
-	function applyOfflineAccumulativeDiscount(offer, eligibleItems) {
-		const total = computeAccumulativeDiscount(offer, eligibleItems);
-		if (total <= 0) return false;
-
-		let applied = false;
-
-		for (const item of eligibleItems) {
-			// Skip lines another rule already claimed, matching the server pass.
-			if (item.pricing_rules && item.pricing_rules.length > 0) continue;
-			if (item.is_already_discounted) continue;
-
-			// Honour the item's own ceiling when the cached record carries one;
-			// the server clamps against Item.max_discount unconditionally.
-			const itemMax = Number.parseFloat(item.max_discount) || 0;
-			item.discount_percentage = itemMax > 0 ? Math.min(total, itemMax) : total;
-			item.pricing_rules = [offer.name];
-			item.is_accumulative_discount = 1;
-			item.is_already_discounted = 1;
-			item.discount_source = "accumulative_promotion";
-			recalculateItem(item);
-			applied = true;
-		}
-
-		return applied;
-	}
-
-	/**
 	 * Apply price discount (percentage or amount) to eligible items offline
 	 * @param {Object} offer - The offer to apply
 	 * @param {Array} eligibleItems - Items eligible for the discount
 	 * @returns {boolean} True if discount was applied
 	 */
 	function applyOfflinePriceDiscount(offer, eligibleItems) {
-		if (offer.apply_discount_on_price === "Accumulative") {
-			return applyOfflineAccumulativeDiscount(offer, eligibleItems);
+		const strategy = getStrategyForOffer(offer);
+		if (strategy) {
+			return strategy.apply(offer, eligibleItems, { recalculateItem });
 		}
 
 		const discountType = offer.discount_type || offer.rate_or_discount;
@@ -1467,27 +1047,18 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		let applied = false;
 
 		for (const item of eligibleItems) {
-			// Accumulative lines are the one case where Auto Discount stacks —
-			// the two percentages sum, matching ITEM_STATE_ACCUMULATIVE in the
-			// Promotion Interaction Matrix.
-			const stacksOnAccumulative =
-				offer.promotion_type === "Auto Discount" && !!item.is_accumulative_discount;
+			const stacks =
+				offer.promotion_type === "Auto Discount" && allowsAutoDiscountStacking(item);
 
-			if (
-				offer.promotion_type === "Auto Discount" &&
-				item.is_already_discounted &&
-				!stacksOnAccumulative
-			) {
+			if (offer.promotion_type === "Auto Discount" && item.is_already_discounted && !stacks) {
 				continue;
 			}
 
 			// Only apply if no existing pricing rule
-			if (item.pricing_rules && item.pricing_rules.length > 0 && !stacksOnAccumulative) {
-				continue;
-			}
+			if (item.pricing_rules && item.pricing_rules.length > 0 && !stacks) continue;
 
 			if (discountType === "Discount Percentage" && discountPercentage > 0) {
-				if (stacksOnAccumulative) {
+				if (stacks) {
 					const base = Number.parseFloat(item.discount_percentage) || 0;
 					const itemMax = Number.parseFloat(item.max_discount) || 0;
 					const total = base + discountPercentage;
@@ -1497,177 +1068,51 @@ export const usePOSCartStore = defineStore("posCart", () => {
 					item.discount_percentage = discountPercentage;
 					item.pricing_rules = [offer.name];
 				}
-				if (offer.promotion_type === "Item Level Discount") {
-					item.is_already_discounted = 1;
-					item.discount_source = "item_level_promotion";
-				} else if (offer.promotion_type === "Auto Discount" && !stacksOnAccumulative) {
-					item.discount_source = "auto_discount";
-				}
 				recalculateItem(item);
 				applied = true;
 			} else if (discountType === "Discount Amount" && discountAmount > 0) {
-				// Apply fixed discount amount
-				item.discount_amount = discountAmount;
-				item.pricing_rules = [offer.name];
+				if (stacks) {
+					// Accumulate, capped at the line's own value (never discount below zero).
+					const effectiveRate =
+						item.is_rate_manually_edited === 1
+							? item.rate
+							: item.price_list_rate || item.rate;
+					const baseAmount =
+						(Number.parseFloat(item.quantity) || 0) * (Number.parseFloat(effectiveRate) || 0);
+					const existing = Number.parseFloat(item.discount_amount) || 0;
+					item.discount_amount = Math.min(existing + discountAmount, baseAmount);
+					item.pricing_rules = [...(item.pricing_rules || []), offer.name];
+				} else {
+					item.discount_amount = discountAmount;
+					item.pricing_rules = [offer.name];
+				}
 				recalculateItem(item);
 				applied = true;
 			} else if (discountType === "Rate" && rate > 0) {
-				// Apply fixed rate (override price)
-				item.rate = rate;
-				item.pricing_rules = [offer.name];
+				if (stacks) {
+					// Two fixed-rate overrides can't be added together — combining them
+					// means the customer keeps whichever is more favorable (lower).
+					const currentRate = Number.parseFloat(item.rate);
+					item.rate = Number.isFinite(currentRate) ? Math.min(currentRate, rate) : rate;
+					item.pricing_rules = [...(item.pricing_rules || []), offer.name];
+				} else {
+					item.rate = rate;
+					item.pricing_rules = [offer.name];
+				}
 				recalculateItem(item);
 				applied = true;
 			}
 		}
 
 		return applied;
-	}
-
-	function shouldAggregateGwpQty(offer) {
-		if (offer.apply_on === "Item Group") return true;
-		if (offer.apply_on === "Brand") return true;
-		if (offer.apply_on === "Item Code" && (offer.eligible_items?.length || 0) > 1) {
-			return true;
-		}
-		return false;
-	}
-
-	/** Product recursive free: aggregate Item Group / Brand only — never Item Code. */
-	function shouldAggregateProductFreeQty(offer) {
-		return offer.apply_on === "Item Group" || offer.apply_on === "Brand";
-	}
-
-	function getGwpSlabFreeQty(slabFreeQty, totalQty, minQty, maxQty) {
-		const total = Number.parseFloat(totalQty) || 0;
-		const min = Number.parseFloat(minQty) || 0;
-		const max = Number.parseFloat(maxQty) || 0;
-		if (min > 0 && total < min) return 0;
-		if (max > 0 && total > max) return 0;
-
-		const free = Number.parseFloat(slabFreeQty) || 0;
-		if (free <= 0 || total <= 0) return 0;
-		return Math.min(free, total);
-	}
-
-	function distributeGwpFreeUnitsForBasis(
-		lineQuantities,
-		linePrices,
-		totalFreeUnits,
-		paidQtyBasis
-	) {
-		const basis = paidQtyBasis || "Max Price";
-		const expensiveFirst = basis === "Min Price" || basis === "Min Qty";
-		const totalFree = Math.round(Number.parseFloat(totalFreeUnits) || 0);
-		if (totalFree <= 0) return lineQuantities.map(() => 0);
-
-		const quantities = lineQuantities.map((q) => Math.round(Number.parseFloat(q) || 0));
-		const prices = linePrices.map((p) => Number.parseFloat(p) || 0);
-		if (quantities.reduce((sum, q) => sum + q, 0) <= 0) {
-			return quantities.map(() => 0);
-		}
-
-		const result = quantities.map(() => 0);
-		let remaining = totalFree;
-		const indices = quantities
-			.map((_, index) => index)
-			.sort((a, b) => {
-				if (prices[a] !== prices[b]) {
-					return expensiveFirst ? prices[b] - prices[a] : prices[a] - prices[b];
-				}
-				return a - b;
-			});
-
-		for (const index of indices) {
-			if (remaining <= 0) break;
-			const take = Math.min(quantities[index], remaining);
-			result[index] = take;
-			remaining -= take;
-		}
-		return result;
-	}
-
-	function stampOfferOnItem(item, offerName) {
-		const prArr = Array.isArray(item.pricing_rules)
-			? [...item.pricing_rules]
-			: item.pricing_rules
-			? String(item.pricing_rules)
-					.split(",")
-					.map((s) => s.trim())
-					.filter(Boolean)
-			: [];
-		if (!prArr.includes(offerName)) prArr.push(offerName);
-		item.pricing_rules = prArr;
-	}
-
-	function applyOfflineManyItemsGwp(offer, eligibleItems) {
-		const totalQty = eligibleItems.reduce((sum, item) => sum + (item.quantity || 0), 0);
-		const totalFree = getGwpSlabFreeQty(
-			offer.free_qty,
-			totalQty,
-			offer.min_qty,
-			offer.max_qty
-		);
-		if (totalFree <= 0) return false;
-
-		const lineQtys = eligibleItems.map((item) => item.quantity || 0);
-		const linePrices = eligibleItems.map(
-			(item) => item.price_list_rate || item.rate || 0
-		);
-		const freePerLine = distributeGwpFreeUnitsForBasis(
-			lineQtys,
-			linePrices,
-			totalFree,
-			offer.gwp_paid_qty_basis
-		);
-		let applied = false;
-
-		eligibleItems.forEach((item, index) => {
-			stampOfferOnItem(item, offer.name);
-			const lineFree = freePerLine[index] || 0;
-			if (lineFree <= 0) return;
-			if (applyGwpDiscountToItem(item, lineFree)) {
-				applied = true;
-			}
-		});
-
-		return applied;
-	}
-
-	function applyGwpDiscountToItem(item, freeQty) {
-		const priceListRate = item.price_list_rate || item.rate || 0;
-		const lineDiscount = freeQty * priceListRate;
-		if (lineDiscount <= 0) return false;
-
-		item.discount_amount = lineDiscount;
-		item.discount_percentage = 0;
-		item.gwp_free_qty = freeQty;
-		item.free_qty = freeQty;
-		item.discount_source = "gwp";
-		recalculateItem(item);
-		return true;
-	}
-
-	function applyBundledSameItemFreeDiscount(item, freeQty, offerName) {
-		const priceListRate = item.price_list_rate || item.rate || 0;
-		const lineFree = floorFreeItemQty(freeQty);
-		const lineDiscount = lineFree * priceListRate;
-		if (lineFree <= 0 || lineDiscount <= 0) return false;
-
-		item.discount_amount = lineDiscount;
-		item.discount_percentage = 0;
-		item.gwp_free_qty = 0;
-		item.free_qty = lineFree;
-		item.discount_source = "free_item";
-		if (offerName) {
-			stampOfferOnItem(item, offerName);
-		}
-		recalculateItem(item);
-		return true;
 	}
 
 	/**
 	 * Apply free item (product discount) offer offline
 	 * Handles: same_item (free item = purchased item) or specific free_item
+	 *
+	 * Satellite product types (Gift Pool, GWP) register via offerStrategies —
+	 * this host only owns the plain free-item paths.
 	 *
 	 * Recursive logic:
 	 * - recurse_for: Give free item for every N quantity
@@ -1679,252 +1124,44 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * @param {Array} eligibleItems - Items eligible for the free item
 	 * @returns {boolean} True if free item was applied
 	 */
-	function upsertOfflineFreeItemRow({
-		itemCode,
-		itemName,
-		freeItemsToGive: rawFreeItemsToGive,
-		uomKey,
-		stockUom,
-		conversionFactor,
-		warehouse,
-		offerName,
-	}) {
-		const freeItemsToGive = floorFreeItemQty(rawFreeItemsToGive);
-		if (freeItemsToGive <= 0) return false;
-
-		const requestedStockQty = freeItemsToGive * (Number(conversionFactor) || 1);
-		if (isFreeItemOutOfStock(itemCode, requestedStockQty)) {
-			reportSkippedFreeItems([itemCode]);
-			return false;
-		}
-
-		const existingFreeRow = invoiceItems.value.find(
-			(r) =>
-				r.is_free_item &&
-				r.item_code === itemCode &&
-				(r.uom || r.stock_uom) === uomKey
-		);
-		if (existingFreeRow) {
-			existingFreeRow.quantity = freeItemsToGive;
-			existingFreeRow.free_qty = freeItemsToGive;
-			const pr = existingFreeRow.pricing_rules;
-			const prArr = Array.isArray(pr)
-				? [...pr]
-				: pr
-				? String(pr)
-						.split(",")
-						.map((s) => s.trim())
-						.filter(Boolean)
-				: [];
-			if (!prArr.includes(offerName)) prArr.push(offerName);
-			existingFreeRow.pricing_rules = prArr;
-			return true;
-		}
-
-		invoiceItems.value.push({
-			item_code: itemCode,
-			item_name: itemName || itemCode,
-			rate: 0,
-			price_list_rate: 0,
-			quantity: freeItemsToGive,
-			discount_amount: 0,
-			discount_percentage: 0,
-			tax_amount: 0,
-			amount: 0,
-			stock_qty: 0,
-			uom: uomKey,
-			stock_uom: stockUom || uomKey,
-			conversion_factor: conversionFactor || 1,
-			is_free_item: 1,
-			free_qty: freeItemsToGive,
-			pricing_rules: [offerName],
-			warehouse,
-		});
-		return true;
-	}
-
-	function computeAdditionalRecursiveFreeQty(
-		lineQty,
-		effectiveFreeQty,
-		recurseFor,
-		applyRecursionOver
-	) {
-		// ERPNext-style: extra free units for every recurseFor purchased.
-		let freeItemsToGive = floorFreeItemQty(effectiveFreeQty);
-		if (!recurseFor || recurseFor <= 0) {
-			return freeItemsToGive;
-		}
-
-		const effectiveQty = Math.max(0, lineQty - applyRecursionOver);
-		if (effectiveQty <= 0) return 0;
-		const multiplier = Math.floor(effectiveQty / recurseFor);
-		return floorFreeItemQty(multiplier * freeItemsToGive);
-	}
-
-	function computeIncludedRecursiveFreeQty(
-		lineQty,
-		effectiveFreeQty,
-		recurseFor,
-		applyRecursionOver
-	) {
-		// Same-item bundled: buy recurseFor get freeQty free from purchased units.
-		// Cycle = recurseFor + freeQty (e.g. buy 2 get 1 → every 3, 1 is free).
-		// qty 2 → 0 free; qty 3 → 1 free; qty 6 → 2 free.
-		const freePerCycle = floorFreeItemQty(effectiveFreeQty) || 1;
-		if (!recurseFor || recurseFor <= 0) {
-			return Math.min(freePerCycle, floorFreeItemQty(lineQty));
-		}
-
-		const effectiveQty = Math.max(0, lineQty - applyRecursionOver);
-		if (effectiveQty <= 0) return 0;
-		const cycle = recurseFor + freePerCycle;
-		if (cycle <= 0) return 0;
-		const multiplier = Math.floor(effectiveQty / cycle);
-		return floorFreeItemQty(multiplier * freePerCycle);
-	}
-
-	function isQtyInOfferRange(qty, minQty, maxQty) {
-		const total = Number.parseFloat(qty) || 0;
-		const min = Number.parseFloat(minQty) || 0;
-		const max = Number.parseFloat(maxQty) || 0;
-		if (min > 0 && total < min) return false;
-		if (max > 0 && total > max) return false;
-		return true;
-	}
-
-	function applyOfflineGiftPool(offer, eligibleItems) {
-		const poolRows = Array.isArray(offer.gift_pool_items) ? offer.gift_pool_items : [];
-		if (!poolRows.length) return false;
-
-		const pools = {};
-		for (const row of poolRows) {
-			const group = row.item_group;
-			const code = row.item_code;
-			if (!group || !code) continue;
-			if (!pools[group]) pools[group] = [];
-			if (!pools[group].includes(code)) pools[group].push(code);
-		}
-
-		let applied = false;
-		const referenceItem = eligibleItems[0];
-		const uomKey = referenceItem?.uom || referenceItem?.stock_uom || "Nos";
-
-		for (const [itemGroup, poolCodes] of Object.entries(pools)) {
-			const poolSet = new Set(poolCodes);
-			const sample = poolRows.find((row) => row.item_group === itemGroup);
-			const groupSet = new Set(
-				sample?.matching_item_groups?.length
-					? sample.matching_item_groups
-					: [itemGroup]
-			);
-			const paidItems = eligibleItems.filter(
-				(item) => groupSet.has(item.item_group) && !poolSet.has(item.item_code)
-			);
-			const paidQty = paidItems.reduce(
-				(sum, item) => sum + (floorFreeItemQty(item.quantity || item.qty || 0) || 0),
-				0
-			);
-			if (paidQty <= 0) continue;
-
-			const giftQty = Math.max(1, Number(sample?.free_qty) || 1);
-			const counts = {};
-			for (let i = 0; i < giftQty; i++) {
-				const giftCode = poolCodes[i % poolCodes.length];
-				counts[giftCode] = (counts[giftCode] || 0) + 1;
-			}
-
-			for (const item of paidItems) {
-				stampOfferOnItem(item, offer.name);
-			}
-
-			for (const [giftCode, giftQty] of Object.entries(counts)) {
-				const poolRow = poolRows.find((row) => row.item_code === giftCode);
-				if (
-					upsertOfflineFreeItemRow({
-						itemCode: giftCode,
-						itemName: poolRow?.item_name || giftCode,
-						freeItemsToGive: giftQty,
-						uomKey,
-						stockUom: uomKey,
-						conversionFactor: 1,
-						warehouse: referenceItem?.warehouse,
-						offerName: offer.name,
-					})
-				) {
-					applied = true;
-				}
-			}
-		}
-
-		return applied;
-	}
-
 	function applyOfflineFreeItem(offer, eligibleItems) {
-		const freeQty = Number.parseFloat(offer.free_qty) || 0;
-		const isGwp = offer.promotion_type === "GWP";
-		const isGiftPool = offer.promotion_type === "Gift Pool";
-		if (isGiftPool) {
-			return applyOfflineGiftPool(offer, eligibleItems);
+		const strategy = getProductStrategyForOffer(offer);
+		if (strategy) {
+			return strategy.apply(offer, eligibleItems, {
+				recalculateItem,
+				invoiceItems: invoiceItems.value,
+			});
 		}
-		const isAggregateGwp = isGwp && shouldAggregateGwpQty(offer);
-		const isRecursive = !isGwp && offer.is_recursive === 1;
+		const freeQty = Number.parseFloat(offer.free_qty) || 0;
+		const sameItem = offer.same_item === 1;
+		const isRecursive = offer.is_recursive === 1;
 		const recurseFor = Number.parseFloat(offer.recurse_for) || 0;
 		const applyRecursionOver = Number.parseFloat(offer.apply_recursion_over) || 0;
 		const freeItemCode = offer.free_item;
-		const sameItem = offer.same_item === 1;
-		// ERPNext treats free_qty=0 as 1 for product (non-GWP) discounts.
-		const effectiveFreeQty = freeQty > 0 ? freeQty : 1;
-		// Same-item: always per line. Aggregate only other free-item + group/brand.
-		const shouldAggregate =
-			!isGwp && isRecursive && !sameItem && shouldAggregateProductFreeQty(offer);
 
-		if (isGwp) {
-			if (isAggregateGwp) {
-				return applyOfflineManyItemsGwp(offer, eligibleItems);
-			}
-			if (freeQty <= 0) return false;
-			let applied = false;
-			for (const item of eligibleItems) {
-				const lineFree = getGwpSlabFreeQty(
-					freeQty,
-					item.quantity || 0,
-					offer.min_qty,
-					offer.max_qty
-				);
-				if (lineFree <= 0) continue;
-				if (applyGwpDiscountToItem(item, lineFree)) {
-					stampOfferOnItem(item, offer.name);
-					applied = true;
-				}
-			}
-			return applied;
-		}
-
-		if (!sameItem && !freeItemCode) return false;
+		if (freeQty <= 0) return false;
 
 		let applied = false;
 
 		if (sameItem) {
-			// Each line that meets min_qty gets free units from itself.
+			// Free item is the same as the purchased item
+			// E.g., "Buy 2 Get 1 Free" - the free item is the same item
 			for (const item of eligibleItems) {
-				let freeItemsToGive = effectiveFreeQty;
-				const lineQty = item.quantity || 0;
+				let freeItemsToGive = freeQty;
 
 				if (isRecursive && recurseFor > 0) {
-					if (!isQtyInOfferRange(lineQty, offer.min_qty, offer.max_qty)) {
-						continue;
-					}
-					freeItemsToGive = computeIncludedRecursiveFreeQty(
-						lineQty,
-						effectiveFreeQty,
-						recurseFor,
-						applyRecursionOver
-					);
+					// Recursive: for every recurseFor quantity, give freeQty free
+					// Formula: floor((qty - apply_recursion_over) / recurse_for) * free_qty
+					// E.g., Buy 2 Get 1 Free: recurse_for=2, free_qty=1
+					//   For 6 items: floor((6-0)/2) * 1 = 3 free items
+					const effectiveQty = Math.max(0, item.quantity - applyRecursionOver);
+					const multiplier = Math.floor(effectiveQty / recurseFor);
+					freeItemsToGive = multiplier * freeQty;
 				} else if (!isRecursive && offer.min_qty > 0) {
 					// Non-recursive: just check if min_qty is met, give freeQty once
 					// E.g., Buy 2 Get 1 Free (non-recursive): for 6 items, still give 1 free
-					if (lineQty >= offer.min_qty) {
-						freeItemsToGive = effectiveFreeQty;
+					if (item.quantity >= offer.min_qty) {
+						freeItemsToGive = freeQty;
 					} else {
 						freeItemsToGive = 0;
 					}
@@ -1933,128 +1170,95 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				if (freeItemsToGive <= 0) {
 					continue;
 				}
+				const uomKey = item.uom || item.stock_uom;
+				const existingFreeRow = invoiceItems.value.find(
+					(r) =>
+						r.is_free_item &&
+						r.item_code === item.item_code &&
+						(r.uom || r.stock_uom) === uomKey
+				);
+				if (existingFreeRow) {
+					existingFreeRow.quantity = freeItemsToGive;
+					existingFreeRow.free_qty = freeItemsToGive;
+					const prArr = normalizePricingRules(existingFreeRow.pricing_rules);
+					if (!prArr.includes(offer.name)) prArr.push(offer.name);
+					existingFreeRow.pricing_rules = prArr;
+				} else {
+					invoiceItems.value.push({
+						item_code: item.item_code,
+						item_name: item.item_name || item.item_code,
+						rate: 0,
+						price_list_rate: 0,
+						quantity: freeItemsToGive,
+						discount_amount: 0,
+						discount_percentage: 0,
+						tax_amount: 0,
+						amount: 0,
+						stock_qty: 0,
+						uom: uomKey,
+						stock_uom: item.stock_uom || uomKey,
+						conversion_factor: item.conversion_factor || 1,
+						is_free_item: 1,
+						free_qty: freeItemsToGive,
+						pricing_rules: [offer.name],
+						warehouse: item.warehouse,
+						sales_person: item.sales_person || null,
+						sales_person_name: item.sales_person_name || null,
+					});
+				}
+				applied = true;
+			}
+		} else if (freeItemCode) {
+			// Free item is a specific different item
+			// Find if the free item is already in the cart
+			const freeItemInCart = invoiceItems.value.find(
+				(item) => item.item_code === freeItemCode
+			);
 
-				if (applyBundledSameItemFreeDiscount(item, freeItemsToGive, offer.name)) {
+			if (freeItemInCart) {
+				// Calculate free qty (same recursive logic applies)
+				let freeItemsToGive = freeQty;
+
+				if (isRecursive && recurseFor > 0) {
+					// Calculate based on total eligible quantity
+					const totalEligibleQty = eligibleItems.reduce(
+						(sum, item) => sum + (item.quantity || 0),
+						0
+					);
+					const effectiveQty = Math.max(0, totalEligibleQty - applyRecursionOver);
+					const multiplier = Math.floor(effectiveQty / recurseFor);
+					freeItemsToGive = multiplier * freeQty;
+				}
+
+				// Mark existing cart item as having free quantity
+				if (
+					freeItemsToGive > 0 &&
+					(!freeItemInCart.free_qty || freeItemInCart.free_qty === 0)
+				) {
+					freeItemInCart.free_qty = freeItemsToGive;
+					freeItemInCart.pricing_rules = freeItemInCart.pricing_rules || [];
+					if (!freeItemInCart.pricing_rules.includes(offer.name)) {
+						freeItemInCart.pricing_rules.push(offer.name);
+					}
 					applied = true;
 				}
 			}
-		} else if (freeItemCode) {
-			// Other free item: Item Group/Brand aggregate qty; Item Code is per line
-			// (3 laptops → 1 gift + 3 mice → 1 gift = 2), then sum into one free row.
-			if (shouldAggregate) {
-				const totalEligibleQty = eligibleItems.reduce(
-					(sum, item) => sum + (item.quantity || 0),
-					0
-				);
-				let freeItemsToGive = effectiveFreeQty;
-
-				if (isRecursive && recurseFor > 0) {
-					if (!isQtyInOfferRange(totalEligibleQty, offer.min_qty, offer.max_qty)) {
-						return false;
-					}
-					freeItemsToGive = computeAdditionalRecursiveFreeQty(
-						totalEligibleQty,
-						effectiveFreeQty,
-						recurseFor,
-						applyRecursionOver
-					);
-				} else if (!isRecursive && offer.min_qty > 0) {
-					freeItemsToGive =
-						totalEligibleQty >= offer.min_qty ? effectiveFreeQty : 0;
-				}
-
-				if (freeItemsToGive > 0) {
-					const referenceItem = eligibleItems[0];
-					const uomKey =
-						offer.free_item_uom ||
-						referenceItem?.uom ||
-						referenceItem?.stock_uom ||
-						"Nos";
-					applied = Boolean(
-						upsertOfflineFreeItemRow({
-							itemCode: freeItemCode,
-							itemName: freeItemCode,
-							freeItemsToGive,
-							uomKey,
-							stockUom: uomKey,
-							conversionFactor: 1,
-							warehouse: referenceItem?.warehouse,
-							offerName: offer.name,
-						})
-					);
-				}
-			} else {
-				let totalFree = 0;
-				let referenceItem = eligibleItems[0];
-				for (const item of eligibleItems) {
-					const lineQty = item.quantity || 0;
-					let freeItemsToGive = effectiveFreeQty;
-
-					if (isRecursive && recurseFor > 0) {
-						if (!isQtyInOfferRange(lineQty, offer.min_qty, offer.max_qty)) {
-							continue;
-						}
-						freeItemsToGive = computeAdditionalRecursiveFreeQty(
-							lineQty,
-							effectiveFreeQty,
-							recurseFor,
-							applyRecursionOver
-						);
-					} else if (!isRecursive && offer.min_qty > 0) {
-						freeItemsToGive = lineQty >= offer.min_qty ? effectiveFreeQty : 0;
-					}
-
-					if (freeItemsToGive <= 0) continue;
-					totalFree += freeItemsToGive;
-					referenceItem = item;
-				}
-
-				if (totalFree > 0) {
-					const uomKey =
-						offer.free_item_uom ||
-						referenceItem?.uom ||
-						referenceItem?.stock_uom ||
-						"Nos";
-					applied = Boolean(
-						upsertOfflineFreeItemRow({
-							itemCode: freeItemCode,
-							itemName: freeItemCode,
-							freeItemsToGive: totalFree,
-							uomKey,
-							stockUom: uomKey,
-							conversionFactor: 1,
-							warehouse: referenceItem?.warehouse,
-							offerName: offer.name,
-						})
-					);
-				}
-			}
+			// Note: We don't add new items to cart offline - that would require
+			// fetching item details. The free item will be added when back online.
 		}
 
 		return applied;
 	}
 
 	/**
-	 * Builds cart snapshot for offer validation.
-	 *
-	 * Free-item rows (is_free_item) are excluded: min_qty/max_qty refer to
-	 * purchased qty only. Counting free gifts would break slabs where
-	 * min_qty === max_qty (e.g. buy exactly 2 get 1 free → qty becomes 3 →
-	 * offer removed → re-applied in a loop).
-	 */
-	/**
 	 * Gross and net amount of a single cart line, on the same basis the server
 	 * uses when gating min_amt/max_amt.
 	 *
 	 * Mirrors buildOfferEvaluationPayload (which sends
 	 * `price_list_rate: item.price_list_rate || item.rate`) and the net-rate
-	 * derivation in pos_next.api.invoices.apply_offers, which folds item
-	 * discounts back into the pricing items as
-	 * `price_list_rate * (1 - discount_percentage / 100)` before handing the
-	 * cart total to ERPNext's transaction engine. Deriving net from
-	 * discount_percentage rather than discount_amount keeps the two sides in
-	 * step: per-unit vs. line-total conventions differ across discount paths,
-	 * but every path leaves price_list_rate and discount_percentage consistent.
+	 * derivation in apply_offers, which folds item discounts back into the
+	 * pricing items as `price_list_rate * (1 - discount_percentage / 100)`
+	 * before handing the cart total to ERPNext's transaction engine.
 	 */
 	function offerLineAmounts(item) {
 		const qty = item.quantity || 0;
@@ -2069,6 +1273,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		return items.reduce((sum, item) => sum + offerLineAmounts(item).net, 0);
 	}
 
+	/**
+	 * Builds cart snapshot for offer validation.
+	 * Paid lines only — free gifts must not inflate min_qty/max_qty/min_amt checks.
+	 */
 	function buildCartSnapshot() {
 		const items = invoiceItems.value.filter((item) => !item.is_free_item);
 		const totalQty = items.reduce((sum, item) => sum + (item.quantity || 0), 0);
@@ -2119,7 +1327,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			itemCodes: [...new Set(itemCodes)],
 			itemGroups: [...new Set(itemGroups)],
 			brands: [...new Set(brands)],
-			// New: quantity maps for accurate min_qty/max_qty validation
+			// Quantity maps for accurate min_qty/max_qty validation
 			itemQuantities,
 			itemGroupQuantities,
 			brandQuantities,
@@ -2137,10 +1345,19 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * @param {string|null} uom - Optional UOM to match
 	 * @returns {Object|undefined} Cart item or undefined
 	 */
-	function findCartItem(itemCode, uom = null) {
-		return invoiceItems.value.find(
-			(item) => item.item_code === itemCode && (!uom || item.uom === uom)
-		);
+	function findCartItem(itemCode, uom = null, isFreeItem = undefined) {
+		return invoiceItems.value.find((item) => {
+			if (item.item_code !== itemCode) return false;
+			if (uom && item.uom !== uom) return false;
+			// When same SKU has paid + free rows, match the intended line.
+			if (
+				isFreeItem !== undefined &&
+				Boolean(item.is_free_item) !== Boolean(isFreeItem)
+			) {
+				return false;
+			}
+			return true;
+		});
 	}
 
 	/**
@@ -2152,7 +1369,13 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 */
 	function findItemWithUom(itemCode, targetUom, excludeItem = null) {
 		return invoiceItems.value.find(
-			(item) => item.item_code === itemCode && item.uom === targetUom && item !== excludeItem
+			(item) =>
+				item.item_code === itemCode &&
+				item.uom === targetUom &&
+				item !== excludeItem &&
+				// Never merge a paid line into (or from) a free promo row
+				!item.is_free_item &&
+				!excludeItem?.is_free_item
 		);
 	}
 
@@ -2183,18 +1406,36 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	}
 
 	/**
-	 * Fetch and apply UOM details from server
+	 * Apply UOM metadata and pricing.
+	 * Free / promo / manually-edited rates must NOT be replaced from the price
+	 * list — that path bypasses the same lock as free-item rate editing (#1/#5).
 	 * @param {Object} cartItem - Cart item to update
 	 * @param {string} newUom - New UOM
 	 * @param {number} qty - Quantity for pricing
 	 */
 	async function applyUomChange(cartItem, newUom, qty) {
+		if (isFreePromoRow(cartItem)) {
+			throw new Error(__("Free promotional items cannot be edited"));
+		}
+
 		const uomData = cartItem.item_uoms?.find((u) => u.uom === newUom);
 		const conversionFactor = uomData?.conversion_factor || 1;
-		const pricing = await resolveUomPricing(cartItem, newUom, conversionFactor, qty);
+		const oldConversion = cartItem.conversion_factor || 1;
 
 		cartItem.uom = newUom;
 		cartItem.conversion_factor = conversionFactor;
+
+		if (shouldPreserveRateOnUomChange(cartItem)) {
+			cartItem.rate = scaleRateForUomChange(cartItem.rate, oldConversion, conversionFactor);
+			cartItem.price_list_rate = scaleRateForUomChange(
+				cartItem.price_list_rate,
+				oldConversion,
+				conversionFactor
+			);
+			return;
+		}
+
+		const pricing = await resolveUomPricing(cartItem, newUom, conversionFactor, qty);
 		cartItem.rate = pricing.rate;
 		cartItem.price_list_rate = pricing.price_list_rate;
 	}
@@ -2207,8 +1448,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 */
 	async function changeItemUOM(itemCode, newUom, currentUom = null) {
 		try {
-			const cartItem = findCartItem(itemCode, currentUom);
+			const cartItem = findCartItem(itemCode, currentUom, false);
 			if (!cartItem || cartItem.uom === newUom) return;
+			if (isFreePromoRow(cartItem)) {
+				showError(__("Free promotional items cannot be edited"));
+				return;
+			}
 
 			// Check for existing item to merge with
 			const existingItem = findItemWithUom(itemCode, newUom, cartItem);
@@ -2225,7 +1470,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			showSuccess(__("Unit changed to {0}", [newUom]));
 		} catch (error) {
 			console.error("Error changing UOM:", error);
-			showError(__("Failed to update UOM. Please try again."));
+			showError(parseError(error) || __("Failed to update UOM. Please try again."));
 		}
 	}
 
@@ -2237,9 +1482,15 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 */
 	async function updateItemDetails(itemCode, updates, currentUom = null) {
 		try {
-			const cartItem = findCartItem(itemCode, currentUom);
+			const cartItem = findCartItem(itemCode, currentUom, updates?.is_free_item);
 			if (!cartItem) {
 				throw new Error("Item not found in cart");
+			}
+
+			// Free / GWP rows are owned by the promotion engine — refuse
+			// cashier edits that would inflate free qty or change rate/UOM.
+			if (cartItem.is_free_item) {
+				throw new Error(__("Free promotional items cannot be edited"));
 			}
 
 			// Handle UOM change with potential merge
@@ -2272,7 +1523,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				settingsStore.shouldEnforceStockValidation() &&
 				shouldValidateItemStock(cartItem)
 			) {
-				const check = checkStockAvailability(cartItem, updates.quantity);
+				const otherLinesQty =
+					getCartStockQtyForItem(invoiceItems.value, cartItem.item_code) -
+					rowStockQty(cartItem);
+				const totalQty = otherLinesQty + rowStockQty(cartItem, updates.quantity);
+				const check = checkStockAvailability(cartItem, totalQty);
 				if (!check.available) {
 					throw new Error(check.error);
 				}
@@ -2299,22 +1554,6 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				cartItem.sales_person_name = updates.sales_person
 					? updates.sales_person_name || updates.sales_person
 					: null;
-			}
-
-			const hasManualDiscount =
-				((Number.parseFloat(updates.discount_percentage) || 0) > 0 ||
-					(Number.parseFloat(updates.discount_amount) || 0) > 0) &&
-				!hasPricingRules(cartItem.pricing_rules);
-			if (hasManualDiscount) {
-				cartItem.discount_source = "manual_discount";
-				cartItem.is_already_discounted = 1;
-			} else if (
-				updates.discount_percentage === 0 &&
-				updates.discount_amount === 0 &&
-				!hasPricingRules(cartItem.pricing_rules)
-			) {
-				cartItem.discount_source = "";
-				cartItem.is_already_discounted = 0;
 			}
 
 			recalculateItem(cartItem);
@@ -2363,7 +1602,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				cachedItemGroups = [
 					...new Set(paidItems.map((item) => item.item_group).filter(Boolean)),
 				];
-				cachedBrands = [...new Set(paidItems.map((item) => item.brand).filter(Boolean))];
+				cachedBrands = [
+					...new Set(paidItems.map((item) => item.brand).filter(Boolean)),
+				];
 
 				// Build quantity maps for accurate offer validation
 				cachedItemQuantities = {};
@@ -2400,7 +1641,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				previousItemCodesHash = currentHash;
 			}
 
-			// Calculate total paid quantity (sum of quantities, not line count)
+			// Calculate total quantity (sum of all paid item quantities, not line count)
 			const totalQty = paidItems.reduce((sum, item) => {
 				return sum + (item.quantity || 0);
 			}, 0);
@@ -2451,10 +1692,6 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		// Skip offer processing if POS Profile has ignore_pricing_rule enabled
 		const shiftStore = usePOSShiftStore();
 		if (shiftStore.currentProfile?.ignore_pricing_rule) {
-			// Still re-apply coupon caps (e.g. max_amount) when qty changes
-			if (appliedCoupon.value?.code) {
-				await revalidateAppliedCoupon(true);
-			}
 			return;
 		}
 
@@ -2496,49 +1733,71 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		// When offline, use cached offers and apply discounts client-side
 		if (offlineState.isOffline) {
 			applyOffersOffline();
-			if (appliedCoupon.value?.code) {
-				await revalidateAppliedCoupon(true);
-			}
-			// Hash after coupon so discount writes do not look like a new cart
 			offerProcessingState.value.lastCartHash = generateCartHash();
 			offerProcessingState.value.lastProcessedAt = Date.now();
 			return;
 		}
 
 		// === ONLINE MODE ===
-		const profileDoc = shiftStore.currentProfile;
+		// Get current profile from posProfile
 		const currentProfile = {
 			customer: customer.value?.name || customer.value,
-			company: profileDoc?.company || shiftStore.profileCompany,
-			selling_price_list: profileDoc?.selling_price_list,
-			currency: profileDoc?.currency || shiftStore.profileCurrency,
+			company: posProfile.value.company,
+			selling_price_list: posProfile.value.selling_price_list,
+			currency: posProfile.value.currency,
 		};
 		try {
+			// 1. Identify invalid offers to remove (client-side check)
+			const invalidOffers = [];
 
-			if (invoiceItems.value.length === 0) {
-				if (appliedOffers.value.length > 0) {
-					appliedOffers.value = [];
-					processFreeItems([]);
-					clearAllOfferDiscounts();
-					applyHeaderDiscountFromServer(null);
-					rebuildIncrementalCache();
+			for (const entry of appliedOffers.value) {
+				if (entry.offer) {
+					const { eligible } = offersStore.checkOfferEligibility(entry.offer);
+					if (!eligible) invalidOffers.push(entry);
 				}
-				offerProcessingState.value.lastCartHash = generateCartHash();
-				offerProcessingState.value.lastProcessedAt = Date.now();
-				return;
 			}
 
+			// 2. Identify new eligible offers to apply (client-side check)
 			const allEligibleOffers = offersStore.allEligibleOffers;
 			const currentAppliedCodes = new Set(appliedOffers.value.map((o) => o.code));
 			const newOffers = allEligibleOffers.filter(
 				(offer) => !currentAppliedCodes.has(offer.name)
 			);
-			const newOfferCodes = newOffers.map((o) => o.name);
-			const combinedCodes = [
-				...new Set([...appliedOffers.value.map((o) => o.code), ...newOfferCodes]),
-			];
 
-			if (combinedCodes.length > 0) {
+			// 3. Determine if we need to call the server
+			// We MUST hit the server if:
+			// - We have applied offers
+			// - We have new auto-offers to apply
+			// - We have invalid offers to remove
+			const invalidCodes = new Set(invalidOffers.map((o) => o.code));
+			const validExistingCodes = appliedOffers.value
+				.filter((o) => !invalidCodes.has(o.code))
+				.map((o) => o.code);
+
+			const newOfferCodes = newOffers.map((o) => o.name);
+			const combinedCodes = [...new Set([...validExistingCodes, ...newOfferCodes])];
+
+			// All applied offers became invalid and no new offers to apply.
+			if (combinedCodes.length === 0 && invalidOffers.length > 0) {
+				appliedOffers.value = [];
+				processFreeItems([]);
+				invoiceItems.value.forEach((item) => {
+					if (item.pricing_rules && item.pricing_rules.length > 0) {
+						item.discount_percentage = 0;
+						item.discount_amount = 0;
+						item.is_already_discounted = 0;
+						item.is_accumulative_discount = 0;
+						recalculateItem(item);
+					}
+				});
+				// Also clear any transaction-level header discount the server
+				// previously surfaced — if no offers remain, no header discount applies.
+				applyHeaderDiscountFromServer(null);
+				rebuildIncrementalCache();
+
+				const names = invalidOffers.map((o) => o.name).join(", ");
+				showWarning(__("Offer removed: {0}. Cart no longer meets requirements.", [names]));
+			} else if (combinedCodes.length > 0) {
 				const invoiceData = buildOfferEvaluationPayload(currentProfile);
 				const response = await applyOffersResource.submit({
 					invoice_data: invoiceData,
@@ -2551,7 +1810,6 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				const {
 					items: responseItems,
 					freeItems,
-					skippedFreeItems,
 					appliedRules,
 					headerDiscount,
 				} = parseOfferResponse(response);
@@ -2559,22 +1817,21 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				// 4. Update cart items with new discounts
 
 				applyDiscountsFromServer(responseItems);
-				processFreeItems(freeItems, skippedFreeItems);
+				processFreeItems(freeItems);
 				applyHeaderDiscountFromServer(headerDiscount);
 
 				// 5. Update appliedOffers list based on server confirmation
 				const actuallyApplied = new Set(appliedRules);
 				const nextAppliedOffers = [];
 				const newlyAddedNames = [];
-				const removedNames = [];
 
-				// Handle existing ones. The server's verdict is the only input —
-				// an offer it did not return has genuinely lapsed.
+				// Handle existing ones
 				for (const entry of appliedOffers.value) {
-					if (actuallyApplied.has(entry.code)) {
+					if (
+						!invalidOffers.find((inv) => inv.code === entry.code) &&
+						actuallyApplied.has(entry.code)
+					) {
 						nextAppliedOffers.push(entry);
-					} else {
-						removedNames.push(entry.name);
 					}
 				}
 
@@ -2600,11 +1857,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				appliedOffers.value = nextAppliedOffers;
 
 				// 6. UI Feedback
-				if (removedNames.length > 0) {
+				if (invalidOffers.length > 0) {
+					const names = invalidOffers.map((o) => o.name).join(", ");
 					showWarning(
-						__("Offer removed: {0}. Cart no longer meets requirements.", [
-							removedNames.join(", "),
-						])
+						__("Offer removed: {0}. Cart no longer meets requirements.", [names])
 					);
 				}
 
@@ -2615,14 +1871,13 @@ export const usePOSCartStore = defineStore("posCart", () => {
 						showSuccess(__("Offers applied: {0}", [newlyAddedNames.join(", ")]));
 					}
 				}
+			} else if (invoiceItems.value.length === 0 && appliedOffers.value.length > 0) {
+				// Cart cleared, reset offers
+				appliedOffers.value = [];
+				processFreeItems([]);
+				rebuildIncrementalCache();
 			}
-			// Re-apply coupon after offers so exclusion rules stay accurate
-			if (appliedCoupon.value?.code) {
-				await revalidateAppliedCoupon(true);
-			}
-
-			// Stamp hash after coupon too — coupon line updates must not
-			// look like a structural cart change and re-enter this pipeline.
+			// Update last processed hash on success
 			offerProcessingState.value.lastCartHash = generateCartHash();
 			offerProcessingState.value.lastProcessedAt = Date.now();
 			offerProcessingState.value.retryCount = 0;
@@ -2687,47 +1942,6 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		triggerOfferProcessing(true);
 	}
 
-	/** Fingerprint of what each line is currently discounted by. */
-	function discountFingerprint() {
-		return invoiceItems.value
-			.map((item) => `${item.item_code}:${item.discount_percentage || 0}:${item.rate || 0}`)
-			.join("|");
-	}
-
-	/**
-	 * Re-evaluate offers now and resolve once finished.
-	 *
-	 * Offers are otherwise only reprocessed when the cart changes, so a cart left
-	 * open keeps a time-limited offer past the end of its window. Call this before
-	 * taking payment so the total is correct before money changes hands.
-	 *
-	 * @returns {Promise<boolean>} true if any line's discount changed
-	 */
-	async function revalidateOffers() {
-		if (isEmpty.value) return false;
-
-		debouncedProcessOffers.cancel();
-		offerQueue.cancel();
-
-		offerProcessingState.value.lastCartHash = "";
-		offerProcessingState.value.error = null;
-		offerProcessingState.value.retryCount = 0;
-
-		const before = discountFingerprint();
-		const generation = ++cartGeneration;
-
-		await offerQueue.enqueue(async (signal) => {
-			try {
-				offerProcessingState.value.isProcessing = true;
-				await processOffersInternal(signal, generation, true);
-			} finally {
-				offerProcessingState.value.isProcessing = false;
-			}
-		});
-
-		return before !== discountFingerprint();
-	}
-
 	/**
 	 * Calculate dynamic debounce delay based on cart size.
 	 * Small carts (1-3 items): 100ms - fast response
@@ -2774,15 +1988,13 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 	// Watch for ANY cart changes that might affect offer eligibility
 	// This includes: items, quantities, customer, subtotal, etc.
-	// Free-item rows are ignored — they are outcomes of offers, not purchase input.
 	watch(
 		[
-			// Watch paid item count (additions/removals)
-			() => invoiceItems.value.filter((item) => !item.is_free_item).length,
-			// Watch paid item details (quantity, code, uom changes)
+			// Watch item count (additions/removals)
+			() => invoiceItems.value.length,
+			// Watch item details (quantity, code, uom changes)
 			() =>
 				invoiceItems.value
-					.filter((item) => !item.is_free_item)
 					.map(
 						(item) =>
 							`${item.item_code}:${item.quantity}:${item.uom || ""}:${
@@ -2797,7 +2009,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		],
 		(_newVals, oldVals) => {
 			// Skip if this is initial render with empty cart
-			if (!oldVals && invoiceItems.value.filter((item) => !item.is_free_item).length === 0) {
+			if (!oldVals && invoiceItems.value.length === 0) {
 				return;
 			}
 
@@ -2863,7 +2075,6 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		submitInvoice,
 		applyDiscountToCart,
 		removeDiscountFromCart,
-		revalidateAppliedCoupon,
 		applyOffer,
 		removeOffer,
 		reapplyOffer,
@@ -2894,7 +2105,5 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			offerQueue.cancel();
 		},
 		forceRefreshOffers, // Force reprocess offers from scratch
-		revalidateOffers, // Awaitable reprocess — use before taking payment
-		dropOutOfStockFreeItems,
 	};
 });

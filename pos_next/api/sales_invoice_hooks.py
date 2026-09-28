@@ -89,9 +89,9 @@ def auto_assign_loyalty_program_on_invoice(doc):
 	if not doc.is_pos or not doc.pos_profile or not doc.customer:
 		return
 
-	from pos_next.services.miraaya_loyalty import is_magento_loyalty_mode
+	from pos_next.integrations.registry import is_external_loyalty_mode
 
-	if is_magento_loyalty_mode(doc.pos_profile):
+	if is_external_loyalty_mode(doc.pos_profile):
 		return
 
 	# Check if customer already has a loyalty program
@@ -151,6 +151,11 @@ def record_one_time_offer_usage(doc, method=None):
 	composite name ({customer}::{pricing_rule}) makes a duplicate insert raise
 	DuplicateEntryError, so it stays idempotent and race-safe.
 	"""
+	from pos_next.optional_apps import promotions_installed
+
+	if promotions_installed():
+		return
+
 	import json
 
 	if doc.get("is_return") or not doc.get("customer"):
@@ -186,6 +191,11 @@ def record_one_time_offer_usage(doc, method=None):
 
 def release_one_time_offer_usage(doc, method=None):
 	"""Release one-time redemptions on cancel so the customer can redeem again."""
+	from pos_next.optional_apps import promotions_installed
+
+	if promotions_installed():
+		return
+
 	frappe.db.delete("One Time Customer Offer Usage", {"sales_invoice": doc.name})
 
 

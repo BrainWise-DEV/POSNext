@@ -717,6 +717,7 @@
 								{{ __("Name") }}
 							</th>
 							<th
+								v-if="settingsStore.displayItemCode"
 								scope="col"
 								class="hidden sm:table-cell px-2 sm:px-3 py-2 sm:py-2.5 text-start text-[10px] sm:text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 sm:max-w-[150px]"
 							>
@@ -813,6 +814,7 @@
 								</div>
 							</td>
 							<td
+								v-if="settingsStore.displayItemCode"
 								class="hidden sm:table-cell px-2 sm:px-3 py-2 whitespace-nowrap sm:max-w-[150px]"
 							>
 								<div

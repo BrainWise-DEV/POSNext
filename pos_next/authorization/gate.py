@@ -27,9 +27,23 @@ TOKEN_FLAG = "pos_auth_token"
 FIELD_AUTHORIZED_BY = "custom_authorized_by"
 FIELD_AUTHORIZED_AT = "custom_authorized_at"
 
+INTERNAL_FLAGS = ("in_install", "in_patch", "in_migrate", "in_import", "in_setup_wizard")
+
+
+def is_internal_context() -> bool:
+	return any(bool(frappe.flags.get(flag)) for flag in INTERNAL_FLAGS)
+
+
+def is_pos_document(doc) -> bool:
+
+	return bool(doc.get("is_pos") or doc.get("pos_profile"))
+
 
 def enforce_document(doc, method=None):
 	"""``doc_events`` entry point. One generic hook line covers every document action."""
+	if is_internal_context() or not is_pos_document(doc):
+		return
+
 	for action in registry.for_doctype(doc.doctype):
 		if action.applies and not action.applies(doc):
 			continue

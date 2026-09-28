@@ -5,6 +5,8 @@
 POS Authorization Settings that drive pin_length/max_failures/lockout/strict-mode.
 """
 
+from unittest.mock import patch
+
 import frappe
 from frappe.tests.utils import FrappeTestCase
 
@@ -96,6 +98,27 @@ class TestPin(FrappeTestCase):
 			locked = pin_store.register_failure(OUTSIDER)
 		self.assertTrue(locked)
 		self.assertTrue(pin_store.is_locked_out(OUTSIDER))
+
+	def test_lockout_fails_closed_when_the_cache_is_unreachable(self):
+		"""An unreadable lock must read as locked, not as clear.
+
+		The counter lives only in the cache. If it cannot be read, register_failure
+		cannot write either, so attempts would stop accumulating — answering "not
+		locked" there turns the endpoint into an unthrottled PIN oracle.
+		"""
+		with patch.object(frappe, "cache", side_effect=RuntimeError("redis down")):
+			self.assertTrue(pin_store.is_locked_out(OUTSIDER))
+
+	def test_an_unrecordable_failure_reports_a_lockout(self):
+		"""A guess we could not count must cost the attacker something."""
+		with patch.object(frappe, "cache", side_effect=RuntimeError("redis down")):
+			self.assertTrue(pin_store.register_failure(OUTSIDER))
+
+	def test_cache_outage_does_not_leak_a_stack_trace_to_the_caller(self):
+		"""Fail-closed, but still a clean boolean — never an exception at the till."""
+		with patch.object(frappe, "cache", side_effect=RuntimeError("redis down")):
+			self.assertIsInstance(pin_store.is_locked_out(OUTSIDER), bool)
+			self.assertIsInstance(pin_store.register_failure(OUTSIDER), bool)
 
 	def test_setting_a_pin_clears_the_lockout(self):
 		for _ in range(pin_store.max_failures()):

@@ -89,7 +89,6 @@ def remove_print_formats():
 		print_formats = [
 			"POS Next Receipt",
 			"POS Next EOD Report",
-			"Miraaya Receipt",
 		]
 
 		removed_count = 0

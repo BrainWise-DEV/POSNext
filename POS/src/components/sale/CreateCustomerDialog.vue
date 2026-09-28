@@ -9,7 +9,7 @@
 		<template #body-content>
 			<div class="flex flex-col gap-6">
 				<!-- Customer Name (Required) -->
-				<div v-if="!miraayaCustomerSync">
+				<div v-if="!requiresSplitCustomerName">
 					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
 						{{ __("Customer Name") }} <span class="text-red-500">*</span>
 					</label>
@@ -410,7 +410,7 @@ const show = computed({
 
 const isEditMode = computed(() => !!props.customer?.name);
 
-const miraayaCustomerSync = computed(() => posSettingsStore.miraayaInstalled);
+const requiresSplitCustomerName = computed(() => Boolean(posSettingsStore.miraayaInstalled));
 
 const computedCustomerName = computed(() => {
 	const first = (customerData.value.custom_first_name || "").trim();
@@ -419,14 +419,18 @@ const computedCustomerName = computed(() => {
 });
 
 const hasValidCustomerName = computed(() => {
-	if (miraayaCustomerSync.value) {
+	if (requiresSplitCustomerName.value) {
 		return Boolean(computedCustomerName.value);
 	}
 	return Boolean((customerData.value.customer_name || "").trim());
 });
 
 const canSubmitCustomer = computed(
-	() => hasValidCustomerName.value && Boolean(phoneNumber.value) && hasPermission.value
+	() =>
+		hasValidCustomerName.value &&
+		Boolean(phoneNumber.value) &&
+		Boolean(selectedCountryCode.value) &&
+		hasPermission.value
 );
 
 const currentCountryCode = computed(() => {
@@ -461,10 +465,34 @@ const selectCountry = (country) => {
 	updateTerritoryFromCountry();
 };
 
+const DEFAULT_MOBILE_ISD = "+20";
+
 const updateMobileNumber = () => {
-	customerData.value.mobile_no = phoneNumber.value
+	if (!phoneNumber.value) {
+		customerData.value.mobile_no = "";
+		return;
+	}
+	// Never persist a leading "-" when ISD is still unresolved
+	customerData.value.mobile_no = selectedCountryCode.value
 		? `${selectedCountryCode.value}-${phoneNumber.value}`
-		: "";
+		: phoneNumber.value;
+};
+
+/** Split stored mobile into ISD + national number (supports legacy formats). */
+const hydrateMobileFields = (mobile) => {
+	if (!mobile) {
+		phoneNumber.value = "";
+		return;
+	}
+	customerData.value.mobile_no = mobile;
+	const parsed = countriesStore.parsePhoneNumber(mobile);
+	if (parsed.isd) {
+		selectedCountryCode.value = parsed.isd;
+		phoneNumber.value = parsed.number;
+	} else {
+		// Leave selectedCountryCode for applyDefaultCountryCode (profile / fallback)
+		phoneNumber.value = parsed.number || mobile;
+	}
 };
 
 const handleClickOutside = (event) => {
@@ -525,20 +553,30 @@ const resolvePosProfileCountry = async () => {
 };
 
 /**
- * Apply default mobile ISD once when opening Create Customer.
- * Does nothing in edit mode, and never re-applies after open / user pick.
+ * Apply a default mobile ISD once when opening the dialog, unless one is already
+ * set. In create mode that's every time (no code picked yet); in edit mode it's a
+ * gap-filler for customers whose stored mobile_no predates the ISD-prefix format
+ * (no "-" for the customer-prop watcher to split on) — without this, such a
+ * customer can never satisfy canSubmitCustomer and Save Changes stays disabled.
+ * Never re-applies after open / user pick.
  */
 const applyDefaultCountryCode = async () => {
-	if (isEditMode.value || defaultCountryApplied.value || selectedCountryCode.value) {
+	if (defaultCountryApplied.value || selectedCountryCode.value) {
 		defaultCountryApplied.value = true;
 		return;
 	}
 
 	await countriesStore.loadCountries();
 
-	// Bail if cashier already picked a code while countries were loading
+	// Re-parse stored mobile now that ISD list is available (e.g. "+2010..." without "-")
+	if (!selectedCountryCode.value && customerData.value.mobile_no) {
+		hydrateMobileFields(customerData.value.mobile_no);
+	}
+
+	// Bail if cashier already picked a code while countries were loading, or parse found ISD
 	if (selectedCountryCode.value) {
 		defaultCountryApplied.value = true;
+		if (phoneNumber.value) updateMobileNumber();
 		return;
 	}
 
@@ -546,11 +584,22 @@ const applyDefaultCountryCode = async () => {
 
 	if (selectedCountryCode.value) {
 		defaultCountryApplied.value = true;
+		if (phoneNumber.value) updateMobileNumber();
 		return;
 	}
 
-	setCountryFromProfileValue(profileCountry);
+	const applied = setCountryFromProfileValue(profileCountry);
+	if (!applied && !selectedCountryCode.value) {
+		const fallback =
+			resolveCountryIsd(DEFAULT_MOBILE_ISD) ||
+			countriesStore.countries[0]?.isd ||
+			DEFAULT_MOBILE_ISD;
+		selectedCountryCode.value = fallback;
+		log.warn(`Falling back to default ISD ${fallback}`);
+	}
 	defaultCountryApplied.value = true;
+	// Legacy edit: keep Save enabled and normalize mobile once ISD is resolved
+	if (phoneNumber.value) updateMobileNumber();
 };
 
 /** Auto-set territory based on selected country (exact or fuzzy match) */
@@ -587,7 +636,7 @@ const updateTerritoryFromCountry = () => {
 const createCustomerResource = createResource({
 	url: "pos_next.api.customers.create_customer",
 	makeParams: () => ({
-		customer_name: miraayaCustomerSync.value
+		customer_name: requiresSplitCustomerName.value
 			? computedCustomerName.value
 			: customerData.value.customer_name,
 		mobile_no: customerData.value.mobile_no || "",
@@ -608,7 +657,12 @@ const createCustomerResource = createResource({
 	},
 	onError: (error) => {
 		log.error("Error creating customer", error);
-		showError(error.message || __("Failed to create customer"));
+		const message =
+			error?.messages?.[0] ||
+			error?.message ||
+			(typeof error === "string" ? error : null) ||
+			__("Failed to create customer");
+		showError(message);
 	},
 });
 
@@ -784,7 +838,7 @@ const checkPermissions = async () => {
 };
 
 const handleCreate = async () => {
-	if (miraayaCustomerSync.value) {
+	if (requiresSplitCustomerName.value) {
 		if (!customerData.value.custom_first_name?.trim()) {
 			return showError(__("First Name is required"));
 		}
@@ -851,16 +905,9 @@ watch(
 
 			customerData.value.custom_governorate = customer.custom_governorate || "";
 			customerData.value.custom_district = customer.custom_district || "";
-			// Handle mobile_no with country code
+			// Handle mobile_no (with or without country-code separator)
 			if (customer.mobile_no) {
-				customerData.value.mobile_no = customer.mobile_no;
-				if (customer.mobile_no.includes("-")) {
-					const [code, ...rest] = customer.mobile_no.split("-");
-					selectedCountryCode.value = code;
-					phoneNumber.value = rest.join("-");
-				} else {
-					phoneNumber.value = customer.mobile_no;
-				}
+				hydrateMobileFields(customer.mobile_no);
 			}
 		}
 	},
@@ -871,10 +918,11 @@ watch(
 	() => customerData.value.mobile_no,
 	(value) => {
 		// Only sync from stored mobile when editing; never overwrite create-mode default
-		if (!isEditMode.value || !value?.includes("-")) return;
-		const [code, ...rest] = value.split("-");
-		selectedCountryCode.value = code;
-		phoneNumber.value = rest.join("-");
+		if (!isEditMode.value || !value) return;
+		const parsed = countriesStore.parsePhoneNumber(value);
+		if (!parsed.isd) return;
+		selectedCountryCode.value = parsed.isd;
+		phoneNumber.value = parsed.number;
 	}
 );
 

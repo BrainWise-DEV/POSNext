@@ -14,44 +14,6 @@ from erpnext.accounts.utils import get_account_currency
 from frappe.utils import cint, flt
 
 
-def _find_paid_bundle_row_for_free(si_doc, free_row):
-	"""Pick the paid SI item row whose bundle qty should absorb this free bundle's packed items."""
-	candidates = []
-	for row in si_doc.get("items"):
-		if row.name == free_row.name or cint(row.is_free_item):
-			continue
-		if row.item_code != free_row.item_code:
-			continue
-		if (row.warehouse or "") != (free_row.warehouse or ""):
-			continue
-		candidates.append(row)
-	if not candidates:
-		return None
-	free_idx = free_row.idx or 0
-	before = [r for r in candidates if (r.idx or 0) < free_idx]
-	if before:
-		return max(before, key=lambda r: r.idx or 0)
-	return candidates[0]
-
-
-def _find_matching_packed_item_for_merge(si_doc, paid_row, component_item_code, warehouse):
-	"""Match a packed item on the paid bundle line; prefer same warehouse."""
-	w = warehouse or ""
-	matches = []
-	for pi in si_doc.get("packed_items"):
-		if pi.parent_detail_docname != paid_row.name:
-			continue
-		if pi.parent_item != paid_row.item_code:
-			continue
-		if pi.item_code != component_item_code:
-			continue
-		matches.append(pi)
-	if not matches:
-		return None
-	for pi in matches:
-		if (pi.warehouse or "") == w:
-			return pi
-	return matches[0]
 
 
 def _get_post_change_gl_entries_setting():
@@ -88,10 +50,22 @@ def _get_post_change_gl_entries_setting():
 
 
 def _resolve_pos_customer(invoice_doc):
-	"""Return a valid Customer name for POS invoices, or None."""
+	"""Return a valid Customer name for POS invoices, or None.
+
+	Falls back to the POS Profile default customer only when the invoice
+	customer was blank. A non-empty customer that does not exist must fail
+	loudly so revenue is not silently reattributed to the walk-in party.
+	"""
 	customer = (invoice_doc.get("customer") or "").strip()
-	if customer and frappe.db.exists("Customer", customer):
-		return customer
+	if customer:
+		if frappe.db.exists("Customer", customer):
+			return customer
+		frappe.throw(
+			_("Customer {0} does not exist. Please select a valid customer.").format(
+				frappe.bold(customer)
+			),
+			title=_("Invalid Customer"),
+		)
 
 	pos_profile = invoice_doc.get("pos_profile")
 	if pos_profile:
@@ -114,8 +88,11 @@ class CustomSalesInvoice(SalesInvoice):
 	def validate(self):
 		if cint(self.is_pos):
 			self._ensure_pos_customer()
-			self._validate_pos_payment_accounts()
 		super().validate()
+		# debit_to is set in ERPNext validate (set_missing_values / validate_debit_to_acc);
+		# POS clients do not send it, so this must run after super().
+		if cint(self.is_pos):
+			self._validate_pos_payment_accounts()
 
 	def calculate_contribution(self):
 		"""Use per-line Item Group commission rates when item-level SP is in play."""
@@ -174,8 +151,9 @@ class CustomSalesInvoice(SalesInvoice):
 				if self.is_return and self.return_against and not self.update_outstanding_for_self:
 					against_voucher = self.return_against
 
-				payment_amount = flt(payment_mode.base_amount) or flt(payment_mode.amount)
-				if not payment_amount:
+				# Gate and post on base_amount (company currency) only — never fall
+				# back to amount (transaction currency) for credit/debit GL fields.
+				if not flt(payment_mode.base_amount):
 					continue
 
 				# Credit customer receivable (payment received against the invoice)
@@ -186,10 +164,11 @@ class CustomSalesInvoice(SalesInvoice):
 							"party_type": "Customer",
 							"party": self.customer,
 							"against": payment_mode.account,
-							"credit": payment_amount,
-							"credit_in_account_currency": payment_amount
+							"credit": payment_mode.base_amount,
+							"credit_in_account_currency": payment_mode.base_amount
 							if self.party_account_currency == self.company_currency
 							else payment_mode.amount,
+							"credit_in_transaction_currency": payment_mode.amount,
 							"against_voucher": against_voucher,
 							"against_voucher_type": self.doctype,
 							"cost_center": self.cost_center,
@@ -212,10 +191,11 @@ class CustomSalesInvoice(SalesInvoice):
 							"party_type": party_type,
 							"party": party,
 							"against": self.customer,
-							"debit": payment_amount,
-							"debit_in_account_currency": payment_amount
+							"debit": payment_mode.base_amount,
+							"debit_in_account_currency": payment_mode.base_amount
 							if payment_mode_account_currency == self.company_currency
 							else payment_mode.amount,
+							"debit_in_transaction_currency": payment_mode.amount,
 							"cost_center": self.cost_center,
 						},
 						payment_mode_account_currency,
@@ -310,7 +290,6 @@ class CustomSalesInvoice(SalesInvoice):
 
 	def update_packing_list(self):
 		super().update_packing_list()
-		self._combine_packed_qty_for_free_product_bundles()
 		self._set_use_serial_batch_fields_on_packed_items()
 
 	def _set_use_serial_batch_fields_on_packed_items(self):
@@ -339,40 +318,3 @@ class CustomSalesInvoice(SalesInvoice):
 			if tracking.has_batch_no or tracking.has_serial_no:
 				pi.use_serial_batch_fields = 1
 
-	def _combine_packed_qty_for_free_product_bundles(self):
-		"""
-		Merge packed_items from free bundle lines into the matching paid bundle line.
-
-		ERPNext builds packed rows per Sales Invoice Item row. For BOGO / pricing-rule
-		free rows, the same product bundle often appears twice (paid + is_free_item).
-		That duplicates component rows. Stock and picking should follow total bundle
-		qty on one set of packed lines tied to the paid row.
-		"""
-		if self.is_return or not self.get("packed_items"):
-			return
-
-		free_bundle_rows = [
-			row
-			for row in self.get("items")
-			if row.item_code and cint(row.is_free_item) and self.has_product_bundle(row.item_code)
-		]
-		if not free_bundle_rows:
-			return
-
-		for free_row in free_bundle_rows:
-			paid_row = _find_paid_bundle_row_for_free(self, free_row)
-			if not paid_row:
-				continue
-
-			to_remove = []
-			for pi in list(self.get("packed_items")):
-				if pi.parent_detail_docname != free_row.name or pi.parent_item != free_row.item_code:
-					continue
-				tgt = _find_matching_packed_item_for_merge(self, paid_row, pi.item_code, pi.warehouse)
-				if tgt:
-					prec = tgt.precision("qty")
-					tgt.qty = flt(flt(tgt.qty) + flt(pi.qty), prec)
-					to_remove.append(pi)
-
-			for pi in to_remove:
-				self.remove(pi)

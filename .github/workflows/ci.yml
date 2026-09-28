@@ -52,7 +52,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v3
         with:
-          node-version: 20
+          node-version: 22
           check-latest: true
 
       - name: Cache pip
@@ -105,5 +105,6 @@ jobs:
         run: |
           bench --site test_site set-config allow_tests true
           bench --site test_site run-tests --module pos_next.test_promotions
+          bench --site test_site run-tests --module pos_next.api.test_credit_linked_returns
         env:
           TYPE: server

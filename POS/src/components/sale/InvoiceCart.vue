@@ -275,6 +275,7 @@
 
 							<!-- Native Input for Instant Search -->
 							<input
+								ref="customerSearchInputRef"
 								id="cart-customer-search"
 								name="cart-customer-search"
 								:value="customerSearch"
@@ -859,6 +860,36 @@
 						}}</span>
 					</button>
 
+					<!-- POS Expense -->
+					<button
+						v-if="allowPosExpense"
+						type="button"
+						@click="$emit('show-expense')"
+						class="flex flex-col items-center justify-center p-3 sm:p-4 bg-white border border-gray-200 rounded-lg hover:border-amber-300 hover:bg-amber-50 active:bg-amber-100 transition-colors shadow-sm hover:shadow touch-manipulation group"
+						:title="__('Record POS expense')"
+					>
+						<div
+							class="w-9 h-9 sm:w-10 sm:h-10 bg-amber-50 rounded-full flex items-center justify-center mb-2 group-hover:bg-amber-100 transition-colors"
+						>
+							<svg
+								class="w-5 h-5 text-amber-600"
+								fill="none"
+								stroke="currentColor"
+								viewBox="0 0 24 24"
+							>
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"
+								/>
+							</svg>
+						</div>
+						<span class="text-[11px] sm:text-xs font-semibold text-gray-700">{{
+							__("POS Expense")
+						}}</span>
+					</button>
+
 					<!-- Close Shift -->
 					<button
 						type="button"
@@ -1062,6 +1093,7 @@
 									</span>
 								</div>
 								<button
+									v-if="!isLockedFreeRow(item)"
 									type="button"
 									@click.stop="$emit('remove-item', item.item_code, item.uom)"
 									class="text-gray-400 hover:text-red-600 active:text-red-700 transition-colors flex-shrink-0 p-0.5 -m-0.5 touch-manipulation active:scale-90"
@@ -1130,7 +1162,7 @@
 										<button
 											type="button"
 											@click.stop="decrementQuantity(item)"
-											:disabled="item.is_resolved_barcode"
+											:disabled="item.is_resolved_barcode || isLockedFreeRow(item)"
 											:class="[
 												'w-6 h-6 sm:w-7 sm:h-7 flex items-center justify-center font-bold transition-colors touch-manipulation border-e',
 												item.is_resolved_barcode
@@ -1166,7 +1198,7 @@
 											@keydown.enter="$event.target.blur()"
 											type="text"
 											inputmode="decimal"
-											:disabled="item.is_resolved_barcode"
+											:disabled="item.is_resolved_barcode || isLockedFreeRow(item)"
 											:class="[
 												'w-16 sm:w-20 h-6 sm:h-7 text-center border-0 text-xs sm:text-sm font-bold focus:outline-none',
 												item.is_resolved_barcode
@@ -1183,7 +1215,7 @@
 										<button
 											type="button"
 											@click.stop="incrementQuantity(item)"
-											:disabled="item.is_resolved_barcode"
+											:disabled="item.is_resolved_barcode || isLockedFreeRow(item)"
 											:class="[
 												'w-6 h-6 sm:w-7 sm:h-7 flex items-center justify-center font-bold transition-colors touch-manipulation border-s',
 												item.is_resolved_barcode
@@ -1220,6 +1252,7 @@
 											@click="toggleUomDropdown(item.item_code, item.uom)"
 											:disabled="
 												item.is_resolved_barcode ||
+												isLockedFreeRow(item) ||
 												!item.item_uoms ||
 												item.item_uoms.length === 0
 											"
@@ -1497,6 +1530,7 @@
  * IMPORTS
  * ============================================================================
  */
+import { promoApi } from "@/utils/promoApi";
 import { usePOSCartStore } from "@/stores/posCart";
 import { usePOSSettingsStore } from "@/stores/posSettings";
 import { usePOSOffersStore } from "@/stores/posOffers";
@@ -1580,6 +1614,10 @@ const props = defineProps({
 		type: Array,
 		default: () => [],
 	},
+	allowPosExpense: {
+		type: Boolean,
+		default: false,
+	},
 });
 
 /**
@@ -1607,6 +1645,7 @@ const emit = defineEmits([
 	"show-drafts", // () - Show draft/held orders
 	"show-history", // () - Show invoice history
 	"show-return", // () - Open return invoice dialog
+	"show-expense", // () - Open POS expense dialog
 	"close-shift", // () - Close current shift
 	"show-shift-history", // () - Open shift history dialog
 	// "create-sales-order", // () - Create Sales Order // Removed as per instruction
@@ -1624,51 +1663,25 @@ const {
 	handleCartSortToggle,
 	getCartSortLabel,
 	getCartSortIconState,
-} = useCartSort(() => props.items);
+} = useCartSort(
+	() => props.items,
+	computed(() => settingsStore.cartLifo),
+);
 
 /**
- * Display-only merge: hide matching same-item free rows and show one combined line.
- * Cart data stays unchanged for offers and invoicing.
+ * Display cart lines as stored. Same-SKU GWP free gifts are their own row
+ * with a free-item badge (buy 2 get 1 free → 2 paid + 1 free after 3 scans).
  */
-function cartLineKey(item) {
-	return `${item.item_code}\0${item.uom || item.stock_uom || ""}`;
-}
-
 const displayCartItems = computed(() => {
 	const items = sortedItems.value;
-	const freeQtyByKey = new Map();
-	const paidKeys = new Set();
-
-	for (const item of items) {
-		if (!item.is_free_item) {
-			paidKeys.add(cartLineKey(item));
-			continue;
-		}
-		const key = cartLineKey(item);
-		freeQtyByKey.set(
-			key,
-			(freeQtyByKey.get(key) || 0) + (Number.parseFloat(item.quantity) || 0)
-		);
-	}
-
 	const merged = [];
 	for (const item of items) {
-		if (item.is_free_item) continue;
-		const bundledFreeQty = freeQtyByKey.get(cartLineKey(item)) || 0;
-		merged.push(
-			bundledFreeQty > 0 ? { ...item, _bundledFreeQty: bundledFreeQty } : item
-		);
+		if (item.is_free_item) {
+			merged.push({ ...item, _isStandaloneFreeRow: true });
+			continue;
+		}
+		merged.push(item);
 	}
-
-	// Different-item product discounts add dedicated is_free_item rows (e.g. buy A get B).
-	// Those rows are not bundled onto a paid line — show them as their own cart lines.
-	for (const item of items) {
-		if (!item.is_free_item) continue;
-		const key = cartLineKey(item);
-		if (paidKeys.has(key)) continue;
-		merged.push({ ...item, _isStandaloneFreeRow: true });
-	}
-
 	return merged;
 });
 
@@ -1680,6 +1693,7 @@ const displayCartItems = computed(() => {
 const customerSearch = ref(""); // Current search query
 const customerSearchContainer = ref(null); // Ref to search container for click-outside detection
 const customerSearchFocused = ref(false); // Track if search input is focused
+const customerSearchInputRef = ref(null); // Ref to the native search input element
 // Use Pinia store for allCustomers (shared with CustomerDialog, synced on customer creation)
 const allCustomers = computed(() => customerSearchStore.allCustomers);
 const customersLoaded = computed(() => customerSearchStore.allCustomers.length > 0);
@@ -1734,7 +1748,7 @@ if (props.posProfile) {
  * @endpoint pos_next.api.offers.get_active_coupons
  */
 const giftCardsResource = createResource({
-	url: "pos_next.api.offers.get_active_coupons",
+	url: promoApi.getActiveCoupons(),
 	makeParams() {
 		const customerName = props.customer?.name || props.customer;
 		return {
@@ -1755,20 +1769,22 @@ const customerLpInfo = ref({
 });
 
 const customerLpResource = createResource({
-	url: "pos_next.api.magento_loyalty.get_lp_balance_for_customer",
+	url: "pos_next.api.wallet.get_wallet_info",
 	makeParams() {
 		const customerName = props.customer?.name || props.customer;
 		return {
 			customer: customerName,
+			company: props.company,
 			pos_profile: props.posProfile,
 		};
 	},
 	auto: false,
 	onSuccess(data) {
-		customerLpInfo.value = data || {
-			wallet_enabled: false,
-			balance_points: 0,
-			balance_iqd: 0,
+		const payload = data?.message || data || {};
+		customerLpInfo.value = {
+			wallet_enabled: Boolean(payload.wallet_enabled),
+			balance_points: Number(payload.balance_points) || 0,
+			balance_iqd: Number(payload.balance_iqd ?? payload.wallet_balance) || 0,
 		};
 	},
 	onError() {
@@ -1795,7 +1811,7 @@ watch(
 			availableGiftCards.value = [];
 		}
 
-		if (customerName && props.posProfile && !isOffline()) {
+		if (customerName && props.company && props.posProfile && !isOffline()) {
 			customerLpResource.reload();
 		} else {
 			customerLpInfo.value = {
@@ -1807,14 +1823,14 @@ watch(
 	}
 );
 
-// Refresh Magento LP balance after a completed sale when the cart is cleared
+// Refresh wallet / LP balance after a completed sale when the cart is cleared
 // but the same customer stays selected (watch on customer alone won't re-fire).
 watch(
 	() => props.items?.length ?? 0,
 	(newLen, oldLen) => {
 		if (oldLen > 0 && newLen === 0) {
 			const customerName = props.customer?.name || props.customer;
-			if (customerName && props.posProfile && !isOffline()) {
+			if (customerName && props.company && props.posProfile && !isOffline()) {
 				customerLpResource.reload();
 			}
 		}
@@ -1959,8 +1975,10 @@ const displayDiscountAmount = computed(() => {
 		(sum, item) => sum + (Number.parseFloat(item.discount_amount) || 0),
 		0
 	);
-	// Fall back to store total when items haven't been stamped yet (e.g. header coupon)
-	return lineDiscounts > 0 ? lineDiscounts : props.discountAmount;
+	const storeDiscount = Number.parseFloat(props.discountAmount) || 0;
+	// Prefer the larger value: store total includes header/additional discounts;
+	// line sum is fresher when offer stamps land before the incremental cache.
+	return Math.max(lineDiscounts, storeDiscount);
 });
 
 /**
@@ -2117,6 +2135,10 @@ function getInitials(name) {
  * Effective discount % for badges. Coupon max_amount caps are stored as
  * absolute amounts (discount_percentage=0), so derive % from amount/base.
  */
+function isLockedFreeRow(item) {
+	return Boolean(item?.is_free_item || item?._isStandaloneFreeRow);
+}
+
 function isGwpItem(item) {
 	return item?.discount_source === "gwp" || Number.parseFloat(item?.gwp_free_qty) > 0;
 }
@@ -2249,8 +2271,7 @@ function getSmartStep(quantity) {
  * @param {Object} item - Cart item to increment
  */
 function incrementQuantity(item) {
-	// Prevent editing resolved barcode items
-	if (item.is_resolved_barcode) return;
+	if (item.is_resolved_barcode || isLockedFreeRow(item)) return;
 
 	const step = getSmartStep(getDisplayQuantity(item));
 	const newPaidQty = Math.round((item.quantity + step) * 10000) / 10000;
@@ -2264,8 +2285,7 @@ function incrementQuantity(item) {
  * @param {Object} item - Cart item to decrement
  */
 function decrementQuantity(item) {
-	// Prevent editing resolved barcode items
-	if (item.is_resolved_barcode) return;
+	if (item.is_resolved_barcode || isLockedFreeRow(item)) return;
 
 	const step = getSmartStep(getDisplayQuantity(item));
 	const newPaidQty = Math.round((item.quantity - step) * 10000) / 10000;
@@ -2288,7 +2308,7 @@ function decrementQuantity(item) {
 
 function updateQuantity(item, value) {
 	// Prevent editing resolved barcode items
-	if (item.is_resolved_barcode) return;
+	if (item.is_resolved_barcode || isLockedFreeRow(item)) return;
 
 	const displayQty = Number.parseFloat(value);
 
@@ -2313,6 +2333,7 @@ function updateQuantity(item, value) {
  * @param {Object} item - Cart item that lost focus
  */
 function handleQuantityBlur(item) {
+	if (isLockedFreeRow(item)) return;
 	// When user leaves the input field, round and validate
 	if (!item.quantity || item.quantity <= 0) {
 		// If quantity is 0 or invalid, remove the item
@@ -2344,6 +2365,11 @@ function toggleUomDropdown(itemCode, uom) {
  * Handles merging if target UOM already exists in cart
  */
 async function selectUom(item, newUom) {
+	// Defense in depth: free/GWP rows stay promotion-owned even if UI disable fails.
+	if (isLockedFreeRow(item)) {
+		openUomDropdown.value = null;
+		return;
+	}
 	if (item.uom === newUom) {
 		openUomDropdown.value = null;
 		return;
@@ -2367,6 +2393,9 @@ async function selectUom(item, newUom) {
  * @param {Object} item - Cart item to edit
  */
 function openEditDialog(item) {
+	// Free / GWP / promo gift rows are promotion-owned — cashier must not
+	// change qty or rate (would oversell free stock beyond the offer).
+	if (isLockedFreeRow(item)) return;
 	selectedItem.value = { ...item };
 	showEditDialog.value = true;
 }
@@ -2458,6 +2487,18 @@ onMounted(() => {
 onBeforeUnmount(() => {
 	if (typeof document === "undefined") return;
 	document.removeEventListener("mousedown", handleOutsideClick);
+});
+
+defineExpose({
+	focusCustomerSearch() {
+		if (props.customer) {
+			// A customer is already assigned, so the search input isn't rendered.
+			// Deselect it first so the input mounts, then clearCustomer() focuses it.
+			clearCustomer();
+		} else {
+			customerSearchInputRef.value?.focus();
+		}
+	},
 });
 </script>
 ```

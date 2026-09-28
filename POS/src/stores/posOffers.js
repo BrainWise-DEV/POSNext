@@ -1,3 +1,5 @@
+import { promoApi } from "@/utils/promoApi";
+import { loadOfferStrategyPlugins } from "@/utils/offerStrategies";
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { call } from "@/utils/apiWrapper";
@@ -85,7 +87,7 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 
 		if (!isOffline()) {
 			try {
-				const resp = await call("pos_next.api.offers.get_customer_one_time_redemptions", {
+				const resp = await call(promoApi.getCustomerOneTimeRedemptions(), {
 					customer: customerName,
 				});
 				const serverRules = resp?.message || resp || [];
@@ -458,6 +460,8 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 	 * @returns {Promise<boolean>} True if offers are available (fetched or cached)
 	 */
 	async function ensureOffersFetched(posProfile) {
+		await loadOfferStrategyPlugins();
+
 		// Skip fetching offers if POS Profile has ignore_pricing_rule enabled
 		const shiftStore = usePOSShiftStore();
 		if (shiftStore.currentProfile?.ignore_pricing_rule) {
@@ -496,7 +500,7 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 				}
 
 				// Online: fetch from API
-				const response = await call("pos_next.api.offers.get_offers", {
+				const response = await call(promoApi.getOffers(), {
 					pos_profile: posProfile,
 				});
 

@@ -7,8 +7,6 @@ import frappe
 from frappe import _
 from frappe.utils import cint, cstr, flt, getdate, nowdate
 
-from pos_next.api.gwp import GWP_BASIS_MAX
-
 
 def check_promotion_permissions(action="read"):
 	"""
@@ -32,76 +30,6 @@ def check_promotion_permissions(action="read"):
 	elif action == "delete":
 		if not frappe.has_permission("Promotional Scheme", "delete"):
 			frappe.throw(_("You don't have permission to delete promotions"), frappe.PermissionError)
-
-
-PROMOTION_TYPE_ITEM_LEVEL = "Item Level Discount"
-PROMOTION_TYPE_AUTO = "Auto Discount"
-PROMOTION_TYPE_GWP = "GWP"
-PROMOTION_TYPE_GIFT_POOL = "Gift Pool"
-
-
-ACCUMULATIVE_MODE = "Accumulative"
-
-
-def _normalize_promotion_type(value):
-	return cstr(value or "").strip() or None
-
-
-def _is_accumulative(data) -> bool:
-	return cstr(data.get("apply_discount_on_price") or "").strip() == ACCUMULATIVE_MODE
-
-
-def _apply_promotion_type_constraints(data):
-	"""Enforce field constraints based on promotion_type."""
-	promotion_type = _normalize_promotion_type(data.get("promotion_type"))
-	if not promotion_type:
-		return data
-
-	if promotion_type == PROMOTION_TYPE_ITEM_LEVEL:
-		data["pos_only"] = 1
-		if data.get("discount_type") == "free_item":
-			frappe.throw(_("Item Level Discount cannot grant free items"))
-
-		# An Accumulative rule is an Item Level Discount that sums per-scope
-		# percentages, so it must keep its Item Group / Brand scoping and any
-		# cart threshold. Only plain item-level promotions get pinned to
-		# individual item codes.
-		if not _is_accumulative(data):
-			data["apply_on"] = "Item Code"
-			data["min_qty"] = 0
-			data["min_amt"] = 0
-			data["max_qty"] = 0
-			data["max_amt"] = 0
-			if not data.get("items"):
-				frappe.throw(_("Please select at least one item for Item Level Discount"))
-		elif not data.get("items"):
-			frappe.throw(_("Please select at least one scope row for an Accumulative discount"))
-	elif promotion_type == PROMOTION_TYPE_GWP:
-		if data.get("discount_type") not in (None, "free_item"):
-			data["discount_type"] = "free_item"
-	elif promotion_type == PROMOTION_TYPE_GIFT_POOL:
-		data["apply_on"] = "Item Group"
-		data["discount_type"] = "free_item"
-		data["pos_only"] = 1
-		data["mixed_conditions"] = 1
-		if not data.get("gift_pool_items"):
-			frappe.throw(_("Please choose at least one free item for Gift Pool"))
-		if not data.get("items"):
-			seen = set()
-			derived = []
-			for row in data.get("gift_pool_items") or []:
-				item_group = row.get("item_group")
-				if item_group and item_group not in seen:
-					seen.add(item_group)
-					derived.append({"item_group": item_group})
-			data["items"] = derived
-		if not data.get("items"):
-			frappe.throw(_("Please select at least one item group for Gift Pool"))
-	elif promotion_type == PROMOTION_TYPE_AUTO:
-		if data.get("discount_type") == "free_item":
-			frappe.throw(_("Auto Discount cannot grant free items"))
-
-	return data
 
 
 @frappe.whitelist()
@@ -139,8 +67,6 @@ def get_promotions(pos_profile=None, company=None, include_disabled=False):
 			"company",
 			"mixed_conditions",
 			"is_cumulative",
-			"promotion_type",
-			"pos_only",
 		],
 		order_by="modified desc",
 	)
@@ -339,8 +265,6 @@ def create_promotion(data):
 	if not data.get("apply_on"):
 		frappe.throw(_("Apply On is required"))
 
-	data = _apply_promotion_type_constraints(data)
-
 	try:
 		# Create promotional scheme
 		scheme = frappe.new_doc("Promotional Scheme")
@@ -355,11 +279,8 @@ def create_promotion(data):
 				"valid_upto": data.get("valid_upto"),
 				"mixed_conditions": cint(data.get("mixed_conditions", 0)),
 				"is_cumulative": cint(data.get("is_cumulative", 0)),
-				"pos_only": cint(data.get("pos_only", 0)),
 			}
 		)
-		if data.get("promotion_type") and hasattr(scheme, "promotion_type"):
-			scheme.promotion_type = data.get("promotion_type")
 
 		# Set applicable for
 		if data.get("applicable_for"):
@@ -386,20 +307,6 @@ def create_promotion(data):
 			for item in items_data:
 				scheme.append("brands", {"brand": item.get("brand"), "uom": item.get("uom")})
 
-		if hasattr(scheme, "gift_pool_items"):
-			for row in data.get("gift_pool_items") or []:
-				item_code = row.get("item_code")
-				item_group = row.get("item_group")
-				if item_code and item_group:
-					scheme.append(
-						"gift_pool_items",
-						{
-							"item_group": item_group,
-							"item_code": item_code,
-							"free_qty": row.get("free_qty") or 1,
-						},
-					)
-
 		# Add discount slab
 		discount_type = data.get("discount_type", "percentage")
 
@@ -419,16 +326,6 @@ def create_promotion(data):
 				slab.rate_or_discount = "Discount Amount"
 				slab.discount_amount = flt(data.get("discount_value", 0))
 
-			# Cross-cart mode (Min / Max / Accumulative) and its config, when the
-			# caller supplies them. The per-scope percentages themselves live on
-			# the items/item_groups/brands rows and are configured in desk.
-			if data.get("apply_discount_on_price") and hasattr(slab, "apply_discount_on_price"):
-				slab.apply_discount_on_price = data["apply_discount_on_price"]
-				slab.max_accumulated_discount_percentage = flt(
-					data.get("max_accumulated_discount_percentage", 0)
-				)
-				slab.min_scopes_required = cint(data.get("min_scopes_required", 1))
-
 			if data.get("priority"):
 				slab.priority = cstr(data["priority"])
 
@@ -444,8 +341,6 @@ def create_promotion(data):
 			slab.free_qty = flt(data.get("free_qty", 1))
 			slab.free_item_uom = data.get("free_item_uom")
 			slab.same_item = cint(data.get("same_item", 0))
-			if hasattr(slab, "gwp_paid_qty_basis"):
-				slab.gwp_paid_qty_basis = data.get("gwp_paid_qty_basis") or GWP_BASIS_MAX
 
 			if data.get("priority"):
 				slab.priority = cstr(data["priority"])
@@ -491,23 +386,6 @@ def update_promotion(scheme_name, data):
 			scheme.valid_upto = data["valid_upto"]
 		if "disable" in data:
 			scheme.disable = cint(data["disable"])
-		if "promotion_type" in data and hasattr(scheme, "promotion_type"):
-			scheme.promotion_type = data.get("promotion_type") or ""
-
-		if "gift_pool_items" in data and hasattr(scheme, "gift_pool_items"):
-			scheme.set("gift_pool_items", [])
-			for row in data.get("gift_pool_items") or []:
-				item_code = row.get("item_code")
-				item_group = row.get("item_group")
-				if item_code and item_group:
-					scheme.append(
-						"gift_pool_items",
-						{
-							"item_group": item_group,
-							"item_code": item_code,
-							"free_qty": row.get("free_qty") or 1,
-						},
-					)
 
 		# Update discount values in slabs
 		if (
@@ -557,8 +435,6 @@ def update_promotion(scheme_name, data):
 					slab.min_amount = flt(data["min_amt"])
 				if "max_amt" in data:
 					slab.max_amount = flt(data["max_amt"])
-				if "gwp_paid_qty_basis" in data and hasattr(slab, "gwp_paid_qty_basis"):
-					slab.gwp_paid_qty_basis = data.get("gwp_paid_qty_basis") or GWP_BASIS_MAX
 
 		# Save
 		scheme.save()
@@ -723,19 +599,6 @@ def get_coupons(company=None, include_disabled=False, coupon_type=None):
 	if has_disabled_field:
 		fields.append("disabled")
 
-	optional_fields = (
-		"maximum_use_per_customer",
-		"discount_type",
-		"discount_percentage",
-		"discount_amount",
-		"apply_scope",
-		"applicable_brand",
-		"applicable_item_group",
-	)
-	for fieldname in optional_fields:
-		if frappe.db.has_column("POS Coupon", fieldname):
-			fields.append(fieldname)
-
 	coupons = frappe.get_all("POS Coupon", filters=filters, fields=fields, order_by="modified desc")
 
 	# Enrich with status
@@ -857,27 +720,15 @@ def create_coupon(data):
 				"min_amount": flt(data.get("min_amount")) if data.get("min_amount") else None,
 				"max_amount": flt(data.get("max_amount")) if data.get("max_amount") else None,
 				"apply_on": data.get("apply_on", "Grand Total"),
-				"apply_scope": data.get("apply_scope") or "All Eligible Items",
-				"applicable_brand": data.get("applicable_brand"),
-				"applicable_item_group": data.get("applicable_item_group"),
 				"company": data.get("company"),
 				"customer": data.get("customer"),
 				"valid_from": data.get("valid_from"),
 				"valid_upto": data.get("valid_upto"),
 				"maximum_use": cint(data.get("maximum_use", 0)) or None,
 				"one_use": cint(data.get("one_use", 0)),
-				"maximum_use_per_customer": cint(data.get("maximum_use_per_customer", 0)) or 0,
-				"exclude_already_discounted_items": cint(
-					data.get("exclude_already_discounted_items", 1)
-				),
 				"campaign": data.get("campaign"),
 			}
 		)
-
-		for brand in data.get("excluded_brands") or []:
-			brand_name = brand.get("brand") if isinstance(brand, dict) else brand
-			if brand_name:
-				coupon.append("excluded_brands", {"brand": brand_name})
 
 		coupon.insert()
 
@@ -928,18 +779,6 @@ def update_coupon(coupon_name, data):
 			coupon.max_amount = flt(data["max_amount"]) if data["max_amount"] else None
 		if "apply_on" in data:
 			coupon.apply_on = data["apply_on"]
-		if "apply_scope" in data:
-			coupon.apply_scope = data["apply_scope"] or "All Eligible Items"
-		if "applicable_brand" in data:
-			coupon.applicable_brand = data["applicable_brand"]
-		if "applicable_item_group" in data:
-			coupon.applicable_item_group = data["applicable_item_group"]
-		if "excluded_brands" in data:
-			coupon.set("excluded_brands", [])
-			for brand in data.get("excluded_brands") or []:
-				brand_name = brand.get("brand") if isinstance(brand, dict) else brand
-				if brand_name:
-					coupon.append("excluded_brands", {"brand": brand_name})
 
 		# Update validity and usage fields
 		if "valid_from" in data:
@@ -950,10 +789,6 @@ def update_coupon(coupon_name, data):
 			coupon.maximum_use = cint(data["maximum_use"]) or None
 		if "one_use" in data:
 			coupon.one_use = cint(data["one_use"])
-		if "maximum_use_per_customer" in data:
-			coupon.maximum_use_per_customer = cint(data["maximum_use_per_customer"]) or 0
-		if "exclude_already_discounted_items" in data:
-			coupon.exclude_already_discounted_items = cint(data["exclude_already_discounted_items"])
 		if "disabled" in data:
 			coupon.disabled = cint(data["disabled"])
 		if "description" in data:

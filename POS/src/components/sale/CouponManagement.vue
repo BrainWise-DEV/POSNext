@@ -16,26 +16,15 @@
 				</FormControl>
 
 				<div class="grid grid-cols-2 gap-2">
-					<FormControl
-						type="select"
+					<SelectInput
 						v-model="filterStatus"
-						:options="[
-							{ label: __('All Status'), value: 'all' },
-							{ label: __('Active Only'), value: 'active' },
-							{ label: __('Expired'), value: 'expired' },
-							{ label: __('Not Started'), value: 'not_started' },
-							{ label: __('Exhausted'), value: 'exhausted' },
-							{ label: __('Disabled'), value: 'disabled' },
-						]"
+						:options="statusFilterOptions"
+						:min-dropdown-width="180"
 					/>
-					<FormControl
-						type="select"
+					<SelectInput
 						v-model="filterType"
-						:options="[
-							{ label: __('All Types'), value: 'all' },
-							{ label: __('Promotional'), value: 'Promotional' },
-							{ label: __('Gift Card'), value: 'Gift Card' },
-						]"
+						:options="typeFilterOptions"
+						:min-dropdown-width="180"
 					/>
 				</div>
 			</div>
@@ -293,17 +282,20 @@
 										/>
 									</div>
 
-									<FormControl
-										type="select"
-										:label="__('Coupon Type')"
-										v-model="form.coupon_type"
-										:disabled="!isCreating"
-										:options="[
-											{ label: __('Promotional'), value: 'Promotional' },
-											{ label: __('Gift Card'), value: 'Gift Card' },
-										]"
-										required
-									/>
+									<div>
+										<label
+											class="block text-sm font-medium text-gray-700 mb-2 text-start"
+										>
+											{{ __("Coupon Type") }}
+											<span class="text-red-500">*</span>
+										</label>
+										<SelectInput
+											v-model="form.coupon_type"
+											:disabled="!isCreating"
+											:options="couponTypeOptions"
+											:placeholder="__('Select coupon type')"
+										/>
+									</div>
 
 									<FormControl
 										type="text"
@@ -364,14 +356,19 @@
 										</div>
 									</div>
 
-									<FormControl
-										v-if="campaigns.length > 0"
-										type="select"
-										:label="__('Campaign')"
-										v-model="form.campaign"
-										:disabled="!isCreating"
-										:options="campaignOptions"
-									/>
+									<div v-if="campaigns.length > 0">
+										<label
+											class="block text-sm font-medium text-gray-700 mb-2 text-start"
+										>
+											{{ __("Campaign") }}
+										</label>
+										<SelectInput
+											v-model="form.campaign"
+											:disabled="!isCreating"
+											:options="campaignOptions"
+											:placeholder="__('Select campaign')"
+										/>
+									</div>
 
 									<!-- Company field -->
 									<div>
@@ -418,27 +415,33 @@
 									</h4>
 								</div>
 								<div class="grid grid-cols-2 gap-4">
-									<FormControl
-										type="select"
-										:label="__('Discount Type')"
-										v-model="form.discount_type"
-										:options="[
-											{ label: __('Percentage'), value: 'Percentage' },
-											{ label: __('Amount'), value: 'Amount' },
-										]"
-										required
-									/>
+									<div>
+										<label
+											class="block text-sm font-medium text-gray-700 mb-2 text-start"
+										>
+											{{ __("Discount Type") }}
+											<span class="text-red-500">*</span>
+										</label>
+										<SelectInput
+											v-model="form.discount_type"
+											:options="discountTypeOptions"
+											:placeholder="__('Select discount type')"
+										/>
+									</div>
 
-									<FormControl
-										type="select"
-										:label="__('Apply Discount On')"
-										v-model="form.apply_on"
-										:options="[
-											{ label: __('Grand Total'), value: 'Grand Total' },
-											{ label: __('Net Total'), value: 'Net Total' },
-										]"
-										required
-									/>
+									<div>
+										<label
+											class="block text-sm font-medium text-gray-700 mb-2 text-start"
+										>
+											{{ __("Apply Discount On") }}
+											<span class="text-red-500">*</span>
+										</label>
+										<SelectInput
+											v-model="form.apply_on"
+											:options="applyOnOptions"
+											:placeholder="__('Select option')"
+										/>
+									</div>
 
 									<FormControl
 										v-if="form.discount_type === 'Percentage'"
@@ -520,92 +523,6 @@
 							</div>
 						</Card>
 
-						<!-- Scope & Exclusions Card -->
-						<Card>
-							<div class="p-5">
-								<div class="flex items-center gap-2 mb-4">
-									<FeatherIcon name="filter" class="w-4 h-4 text-indigo-600" />
-									<h4 class="text-sm font-semibold text-gray-900">
-										{{ __("Scope & Exclusions") }}
-									</h4>
-								</div>
-								<div class="grid grid-cols-2 gap-4">
-									<FormControl
-										type="select"
-										:label="__('Apply Scope')"
-										v-model="form.apply_scope"
-										:options="[
-											{
-												label: __('All Eligible Items'),
-												value: 'All Eligible Items',
-											},
-											{ label: __('Brand'), value: 'Brand' },
-											{
-												label: __('Collection (Item Group)'),
-												value: 'Item Group',
-											},
-										]"
-									/>
-
-									<FormControl
-										v-if="form.apply_scope === 'Brand'"
-										type="select"
-										:label="__('Applicable Brand')"
-										v-model="form.applicable_brand"
-										:options="brandOptions"
-									/>
-
-									<FormControl
-										v-if="form.apply_scope === 'Item Group'"
-										type="select"
-										:label="__('Applicable Collection')"
-										v-model="form.applicable_item_group"
-										:options="itemGroupOptions"
-									/>
-								</div>
-
-								<div class="mt-4">
-									<label class="block text-sm font-medium text-gray-700 mb-2">
-										{{ __("Excluded Brands") }}
-									</label>
-									<div class="flex gap-2 mb-2">
-										<FormControl
-											type="select"
-											v-model="selectedExcludedBrand"
-											:options="availableExcludedBrandOptions"
-											class="flex-1"
-										/>
-										<Button
-											variant="outline"
-											@click="addExcludedBrand"
-											:disabled="!selectedExcludedBrand"
-										>
-											{{ __("Add") }}
-										</Button>
-									</div>
-									<div
-										v-if="form.excluded_brands.length"
-										class="flex flex-wrap gap-2"
-									>
-										<Badge
-											v-for="row in form.excluded_brands"
-											:key="row.brand"
-											theme="red"
-											variant="subtle"
-											size="sm"
-											class="cursor-pointer"
-											@click="removeExcludedBrand(row.brand)"
-										>
-											{{ row.brand }} ×
-										</Badge>
-									</div>
-									<p v-else class="text-xs text-gray-500">
-										{{ __("No excluded brands") }}
-									</p>
-								</div>
-							</div>
-						</Card>
-
 						<!-- Validity & Usage Card -->
 						<Card>
 							<div class="p-5">
@@ -633,13 +550,6 @@
 										v-model="form.maximum_use"
 										:placeholder="__('Unlimited')"
 									/>
-									<FormControl
-										type="number"
-										:label="__('Uses Per Customer')"
-										v-model="form.maximum_use_per_customer"
-										:placeholder="__('Unlimited (0)')"
-										:min="0"
-									/>
 									<div v-if="!isCreating">
 										<label
 											class="block text-sm font-medium text-gray-700 mb-2 text-start"
@@ -652,7 +562,7 @@
 										</div>
 									</div>
 								</div>
-								<div class="mt-4 flex flex-col gap-2">
+								<div class="mt-4">
 									<label class="flex items-center gap-2">
 										<input
 											type="checkbox"
@@ -661,26 +571,6 @@
 										/>
 										<span class="text-sm text-gray-700">{{
 											__("Only One Use Per Customer")
-										}}</span>
-									</label>
-									<p class="text-xs text-gray-500 mt-1">
-										{{
-											__(
-												"If checked and Uses Per Customer is 0, treated as 1 use per customer"
-											)
-										}}
-									</p>
-									<label
-										v-if="form.coupon_type === 'Promotional'"
-										class="flex items-center gap-2"
-									>
-										<input
-											type="checkbox"
-											v-model="form.exclude_already_discounted_items"
-											class="rounded border-gray-300"
-										/>
-										<span class="text-sm text-gray-700">{{
-											__("Exclude Already Discounted Items")
 										}}</span>
 									</label>
 								</div>
@@ -807,7 +697,9 @@
 </template>
 
 <script setup>
+import { promoApi } from "@/utils/promoApi";
 import AutocompleteSelect from "@/components/common/AutocompleteSelect.vue";
+import SelectInput from "@/components/common/SelectInput.vue";
 import { useToast } from "@/composables/useToast";
 import { useCustomerSearchStore } from "@/stores/customerSearch";
 import { usePOSSettingsStore } from "@/stores/posSettings";
@@ -855,9 +747,6 @@ const filterType = ref("all");
 
 // Data for dropdowns
 const campaigns = ref([]);
-const brands = ref([]);
-const itemGroups = ref([]);
-const selectedExcludedBrand = ref("");
 
 // Form
 const form = ref({
@@ -870,18 +759,12 @@ const form = ref({
 	min_amount: null,
 	max_amount: null,
 	apply_on: "Grand Total",
-	apply_scope: "All Eligible Items",
-	applicable_brand: "",
-	applicable_item_group: "",
-	excluded_brands: [],
 	customer: "",
 	campaign: "",
 	valid_from: "",
 	valid_upto: "",
 	maximum_use: null,
 	one_use: 0,
-	maximum_use_per_customer: 0,
-	exclude_already_discounted_items: 1,
 	company: props.company,
 });
 
@@ -903,7 +786,7 @@ const filteredCoupons = computed(() => {
 	// Filter by status
 	if (filterStatus.value !== "all") {
 		filtered = filtered.filter((c) => {
-			const status = c.status.toLowerCase().replace(" ", "_");
+			const status = (c.status || "").toLowerCase().replace(" ", "_");
 			return status === filterStatus.value;
 		});
 	}
@@ -916,41 +799,40 @@ const filteredCoupons = computed(() => {
 	return filtered;
 });
 
+const statusFilterOptions = computed(() => [
+	{ label: __("All Status"), value: "all" },
+	{ label: __("Active Only"), value: "active" },
+	{ label: __("Expired"), value: "expired" },
+	{ label: __("Not Started"), value: "not_started" },
+	{ label: __("Exhausted"), value: "exhausted" },
+	{ label: __("Disabled"), value: "disabled" },
+]);
+
+const typeFilterOptions = computed(() => [
+	{ label: __("All Types"), value: "all" },
+	{ label: __("Promotional"), value: "Promotional" },
+	{ label: __("Gift Card"), value: "Gift Card" },
+]);
+
+const couponTypeOptions = computed(() => [
+	{ label: __("Promotional"), value: "Promotional" },
+	{ label: __("Gift Card"), value: "Gift Card" },
+]);
+
+const discountTypeOptions = computed(() => [
+	{ label: __("Percentage"), value: "Percentage" },
+	{ label: __("Amount"), value: "Amount" },
+]);
+
+const applyOnOptions = computed(() => [
+	{ label: __("Grand Total"), value: "Grand Total" },
+	{ label: __("Net Total"), value: "Net Total" },
+]);
+
 const campaignOptions = computed(() => {
 	return [
 		{ label: __("-- No Campaign --"), value: "" },
 		...campaigns.value.map((c) => ({ label: c.name, value: c.name })),
-	];
-});
-
-const brandOptions = computed(() => {
-	return [
-		{ label: __("-- Select Brand --"), value: "" },
-		...brands.value.map((b) => ({
-			label: b.name || b.brand || b,
-			value: b.name || b.brand || b,
-		})),
-	];
-});
-
-const itemGroupOptions = computed(() => {
-	return [
-		{ label: __("-- Select Collection --"), value: "" },
-		...itemGroups.value.map((g) => ({
-			label: g.name || g.item_group || g,
-			value: g.name || g.item_group || g,
-		})),
-	];
-});
-
-const availableExcludedBrandOptions = computed(() => {
-	const selected = new Set((form.value.excluded_brands || []).map((r) => r.brand));
-	return [
-		{ label: __("-- Add Brand --"), value: "" },
-		...brands.value
-			.map((b) => b.name || b.brand || b)
-			.filter((name) => name && !selected.has(name))
-			.map((name) => ({ label: name, value: name })),
 	];
 });
 
@@ -964,7 +846,7 @@ const customerOptions = computed(() => {
 
 // Resources
 const couponsResource = createResource({
-	url: "pos_next.api.promotions.get_coupons",
+	url: promoApi.getCoupons(),
 	makeParams() {
 		return {
 			company: props.company,
@@ -983,7 +865,7 @@ const couponsResource = createResource({
 });
 
 const couponDetailsResource = createResource({
-	url: "pos_next.api.promotions.get_coupon_details",
+	url: promoApi.getCouponDetails(),
 	makeParams() {
 		return { coupon_name: selectedCoupon.value?.name };
 	},
@@ -1015,27 +897,8 @@ const campaignsResource = createResource({
 	},
 });
 
-const brandsResource = createResource({
-	url: "pos_next.api.promotions.get_brands",
-	auto: false,
-	onSuccess(data) {
-		brands.value = data || [];
-	},
-});
-
-const itemGroupsResource = createResource({
-	url: "pos_next.api.promotions.get_item_groups",
-	makeParams() {
-		return { company: props.company };
-	},
-	auto: false,
-	onSuccess(data) {
-		itemGroups.value = data || [];
-	},
-});
-
 const createCouponResource = createResource({
-	url: "pos_next.api.promotions.create_coupon",
+	url: promoApi.createCoupon(),
 	makeParams() {
 		return { data: JSON.stringify(form.value) };
 	},
@@ -1055,7 +918,7 @@ const createCouponResource = createResource({
 });
 
 const updateCouponResource = createResource({
-	url: "pos_next.api.promotions.update_coupon",
+	url: promoApi.updateCoupon(),
 	makeParams() {
 		return {
 			coupon_name: selectedCoupon.value?.name,
@@ -1066,16 +929,10 @@ const updateCouponResource = createResource({
 				min_amount: form.value.min_amount,
 				max_amount: form.value.max_amount,
 				apply_on: form.value.apply_on,
-				apply_scope: form.value.apply_scope,
-				applicable_brand: form.value.applicable_brand,
-				applicable_item_group: form.value.applicable_item_group,
-				excluded_brands: form.value.excluded_brands,
 				valid_from: form.value.valid_from,
 				valid_upto: form.value.valid_upto,
 				maximum_use: form.value.maximum_use,
 				one_use: form.value.one_use,
-				maximum_use_per_customer: form.value.maximum_use_per_customer,
-				exclude_already_discounted_items: form.value.exclude_already_discounted_items,
 			}),
 		};
 	},
@@ -1095,7 +952,7 @@ const updateCouponResource = createResource({
 });
 
 const toggleCouponResource = createResource({
-	url: "pos_next.api.promotions.toggle_coupon",
+	url: promoApi.toggleCoupon(),
 	makeParams() {
 		return { coupon_name: selectedCoupon.value?.name };
 	},
@@ -1117,7 +974,7 @@ const toggleCouponResource = createResource({
 });
 
 const deleteCouponResource = createResource({
-	url: "pos_next.api.promotions.delete_coupon",
+	url: promoApi.deleteCoupon(),
 	makeParams() {
 		return { coupon_name: selectedCoupon.value?.name };
 	},
@@ -1151,8 +1008,6 @@ watch(
 onMounted(() => {
 	loadCoupons();
 	loadCampaigns();
-	loadBrands();
-	loadItemGroups();
 	if (posSettingsStore.settings.pos_profile) {
 		customerStore.loadAllCustomers(posSettingsStore.settings.pos_profile);
 	}
@@ -1170,28 +1025,6 @@ function loadCoupons() {
 
 function loadCampaigns() {
 	campaignsResource.reload();
-}
-
-function loadBrands() {
-	brandsResource.reload();
-}
-
-function loadItemGroups() {
-	itemGroupsResource.reload();
-}
-
-function addExcludedBrand() {
-	if (!selectedExcludedBrand.value) return;
-	if (form.value.excluded_brands.some((r) => r.brand === selectedExcludedBrand.value)) {
-		selectedExcludedBrand.value = "";
-		return;
-	}
-	form.value.excluded_brands.push({ brand: selectedExcludedBrand.value });
-	selectedExcludedBrand.value = "";
-}
-
-function removeExcludedBrand(brand) {
-	form.value.excluded_brands = form.value.excluded_brands.filter((r) => r.brand !== brand);
 }
 
 function handleCreateNew() {
@@ -1290,20 +1123,14 @@ function resetForm() {
 		min_amount: null,
 		max_amount: null,
 		apply_on: "Grand Total",
-		apply_scope: "All Eligible Items",
-		applicable_brand: "",
-		applicable_item_group: "",
-		excluded_brands: [],
 		customer: "",
 		campaign: "",
 		valid_from: "",
 		valid_upto: "",
 		maximum_use: null,
 		one_use: 0,
-		maximum_use_per_customer: 0,
 		company: props.company,
 	};
-	selectedExcludedBrand.value = "";
 }
 
 function populateFormFromCoupon(coupon) {
@@ -1317,23 +1144,14 @@ function populateFormFromCoupon(coupon) {
 		min_amount: coupon.min_amount || null,
 		max_amount: coupon.max_amount || null,
 		apply_on: coupon.apply_on || __("Grand Total"),
-		apply_scope: coupon.apply_scope || "All Eligible Items",
-		applicable_brand: coupon.applicable_brand || "",
-		applicable_item_group: coupon.applicable_item_group || "",
-		excluded_brands: (coupon.excluded_brands || [])
-			.map((r) => ({ brand: r.brand }))
-			.filter((r) => r.brand),
 		customer: coupon.customer || "",
 		campaign: coupon.campaign || "",
 		valid_from: coupon.valid_from || "",
 		valid_upto: coupon.valid_upto || "",
 		maximum_use: coupon.maximum_use || null,
 		one_use: coupon.one_use || 0,
-		maximum_use_per_customer: coupon.maximum_use_per_customer || 0,
-		exclude_already_discounted_items: coupon.exclude_already_discounted_items ?? 1,
 		company: coupon.company || props.company,
 	};
-	selectedExcludedBrand.value = "";
 }
 
 function formatDate(dateStr) {

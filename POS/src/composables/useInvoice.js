@@ -1,3 +1,4 @@
+import { promoApi } from "@/utils/promoApi";
 import { createResource } from "frappe-ui";
 import { computed, ref, toRaw } from "vue";
 import { isOffline, getCachedItem } from "@/utils/offline";
@@ -87,7 +88,7 @@ export function useInvoice() {
 	});
 
 	const applyOffersResource = createResource({
-		url: "pos_next.api.invoices.apply_offers",
+		url: promoApi.applyOffers(),
 		makeParams({ invoice_data, selected_offers }) {
 			const params = {
 				invoice_data: JSON.stringify(invoice_data),
@@ -99,11 +100,6 @@ export function useInvoice() {
 
 			return params;
 		},
-		auto: false,
-	});
-
-	const calculateCouponDiscountResource = createResource({
-		url: "pos_next.api.offers.calculate_coupon_discount",
 		auto: false,
 	});
 
@@ -228,7 +224,8 @@ export function useInvoice() {
 	function addItem(item, quantity = 1) {
 		const itemUom = item.uom || item.stock_uom;
 		const existingItem = invoiceItems.value.find(
-			(i) => i.item_code === item.item_code && i.uom === itemUom
+			(i) =>
+				!i.is_free_item && i.item_code === item.item_code && i.uom === itemUom
 		);
 
 		if (existingItem) {
@@ -294,12 +291,12 @@ export function useInvoice() {
 				// Resolved barcode flag - prevents editing qty/uom/rate for weighted/priced barcodes
 				is_resolved_barcode: item.is_resolved_barcode || false,
 				// Stock validation fields — needed for qty increase checks in cart
-				actual_qty: item.actual_qty ?? 0,
+				// Prefer Bin qty (original_stock). Grid actual_qty is remaining after cart reserve.
+				actual_qty: item.original_stock ?? item.actual_qty ?? 0,
+				original_stock: item.original_stock ?? item.actual_qty ?? 0,
 				is_stock_item: item.is_stock_item ?? 1,
 				is_bundle: item.is_bundle || false,
 				allow_negative_stock: item.allow_negative_stock || 0,
-				is_already_discounted: item.is_already_discounted || 0,
-				discount_source: item.discount_source || "",
 				// Optional item-level Sales Person (commission attribution)
 				sales_person: item.sales_person || null,
 				sales_person_name: item.sales_person_name || null,
@@ -375,9 +372,11 @@ export function useInvoice() {
 	function updateItemQuantity(itemCode, quantity, uom = null) {
 		let item;
 		if (uom) {
-			item = invoiceItems.value.find((i) => i.item_code === itemCode && i.uom === uom);
+			item = invoiceItems.value.find(
+				(i) => i.item_code === itemCode && i.uom === uom && !i.is_free_item
+			);
 		} else {
-			item = invoiceItems.value.find((i) => i.item_code === itemCode);
+			item = invoiceItems.value.find((i) => i.item_code === itemCode && !i.is_free_item);
 		}
 
 		if (item) {
@@ -531,19 +530,11 @@ export function useInvoice() {
 
 	function applyDiscount(discount) {
 		/**
-		 * Apply coupon discount. Uses line-level updates when provided;
-		 * otherwise falls back to header additional discount.
-		 * @param {Object} discount - { percentage, amount, name, code, apply_on, line_updates }
+		 * Apply discount as Additional Discount (grand total level)
+		 * This prevents conflicts with item-level pricing rules
+		 * @param {Object} discount - { percentage, amount, name, code, apply_on }
 		 */
 		if (!discount) return;
-
-		if (
-			discount.application_mode === "line" ||
-			(discount.line_updates && discount.line_updates.length)
-		) {
-			applyCouponLineDiscounts(discount);
-			return;
-		}
 
 		// Store coupon code for tracking
 		couponCode.value = discount.code || discount.name;
@@ -572,115 +563,17 @@ export function useInvoice() {
 		rebuildIncrementalCache();
 	}
 
-	function clearCouponLineDiscounts() {
-		invoiceItems.value.forEach((item) => {
-			if (!item.coupon_code) return;
-			item.coupon_code = null;
-			// Restore the offer/manual discount that was on the line before the coupon
-			const prePct = Number.parseFloat(item.pre_coupon_discount_percentage);
-			const preAmt = Number.parseFloat(item.pre_coupon_discount_amount);
-			if (!Number.isNaN(prePct) && prePct > 0) {
-				item.discount_percentage = prePct;
-				item.discount_amount = 0;
-			} else if (!Number.isNaN(preAmt) && preAmt > 0) {
-				item.discount_amount = preAmt;
-				item.discount_percentage = 0;
-			} else {
-				item.discount_percentage = 0;
-				item.discount_amount = 0;
-			}
-			item.pre_coupon_discount_percentage = null;
-			item.pre_coupon_discount_amount = null;
-			recalculateItem(item);
-		});
-	}
-
-	function applyCouponLineDiscounts(discount) {
-		/**
-		 * Apply POS Coupon discounts on matrix-eligible lines only.
-		 * Snapshot any pre-coupon line discount so clear/revalidate can restore
-		 * it (eligible lines should normally have none per Exclusion Rules 5.3).
-		 * @param {Object} discount - { code, line_updates, amount, name, type }
-		 */
-		if (!discount) return;
-
-		clearCouponLineDiscounts();
-		additionalDiscount.value = 0;
-		couponCode.value = discount.code || discount.name;
-
-		const updates = discount.line_updates || [];
-		const matchedIndexes = new Set();
-
-		updates.forEach((update) => {
-			const lineKey = update.line_key;
-			let itemIndex = -1;
-
-			// Prefer explicit 0-based cart index from the server
-			const numericKey = Number(lineKey);
-			if (
-				lineKey !== null &&
-				lineKey !== undefined &&
-				lineKey !== "" &&
-				Number.isInteger(numericKey) &&
-				numericKey >= 0 &&
-				numericKey < invoiceItems.value.length &&
-				!matchedIndexes.has(numericKey)
-			) {
-				itemIndex = numericKey;
-			}
-
-			if (itemIndex < 0 && update.item_code) {
-				itemIndex = invoiceItems.value.findIndex(
-					(row, index) =>
-						!matchedIndexes.has(index) &&
-						row.item_code === update.item_code &&
-						!row.is_free_item
-				);
-			}
-
-			if (itemIndex < 0) return;
-
-			const item = invoiceItems.value[itemIndex];
-			matchedIndexes.add(itemIndex);
-
-			// Snapshot offer discount before overwriting with combined values
-			const preFrac = Number.parseFloat(update.pre_coupon_discount_fraction);
-			if (!Number.isNaN(preFrac) && preFrac > 0) {
-				item.pre_coupon_discount_percentage = preFrac * 100;
-				item.pre_coupon_discount_amount = 0;
-			} else {
-				item.pre_coupon_discount_percentage = item.discount_percentage || 0;
-				item.pre_coupon_discount_amount = item.discount_amount || 0;
-			}
-
-			item.coupon_code = discount.code || update.coupon_code || null;
-			const pct = Number.parseFloat(update.discount_percentage) || 0;
-			const amt = Number.parseFloat(update.discount_amount) || 0;
-			// Prefer absolute amount when provided (fixed coupons and max_amount caps).
-			// Percentage alone scales with qty locally and can exceed max_amount.
-			if (amt > 0) {
-				item.discount_amount = amt;
-				item.discount_percentage = 0;
-			} else if (pct > 0) {
-				item.discount_percentage = pct;
-				item.discount_amount = 0;
-			} else {
-				item.discount_percentage = 0;
-				item.discount_amount = 0;
-			}
-			recalculateItem(item);
-		});
-
-		rebuildIncrementalCache();
-	}
-
 	function removeDiscount() {
 		/**
-		 * Remove coupon discount (header additional and/or line-level)
+		 * Remove additional discount (coupon discount)
 		 */
-		clearCouponLineDiscounts();
+		// Clear additional discount
 		additionalDiscount.value = 0;
+
+		// Clear coupon code
 		couponCode.value = null;
+
+		// Rebuild cache after removing discount
 		rebuildIncrementalCache();
 	}
 
@@ -776,49 +669,10 @@ export function useInvoice() {
 
 		// Calculate discount from either percentage or fixed amount
 		let discountAmount = 0;
-		// GWP: exact discount = free_qty * unit_price (no percentage rounding)
-		const gwpFreeQty = Number.parseFloat(item.gwp_free_qty) || 0;
-		const couponPct = Number.parseFloat(item.discount_percentage) || 0;
-		const couponAmt = Number.parseFloat(item.discount_amount) || 0;
-
-		// Coupon (possibly stacked on free-item / offer) must win over the
-		// free_item / gwp branches — those would otherwise wipe discount_% and
-		// leave Grand Total at the free-item-only amount (coupon toast shows
-		// savings but the cart never changes).
-		if (item.coupon_code && couponAmt > 0) {
-			discountAmount = roundCurrency(couponAmt);
-			if (discountAmount > baseAmount) {
-				discountAmount = baseAmount;
-			}
-			item.discount_percentage = 0;
-		} else if (item.coupon_code && couponPct > 0) {
-			discountAmount = roundCurrency((baseAmount * couponPct) / 100);
-			if (discountAmount > baseAmount) {
-				discountAmount = baseAmount;
-			}
-		} else if (item.discount_source === "gwp" && gwpFreeQty > 0) {
-			discountAmount = roundCurrency(gwpFreeQty * roundedRate);
-			if (discountAmount > baseAmount) {
-				discountAmount = baseAmount;
-			}
-			// Keep exact amount; do not derive % (e.g. 1/3 → 33.33% rounds wrong).
-			item.discount_percentage = 0;
-		} else if (item.discount_source === "free_item") {
-			const bundledFreeQty = Number.parseFloat(item.free_qty) || 0;
-			if (bundledFreeQty > 0) {
-				discountAmount = roundCurrency(bundledFreeQty * roundedRate);
-				if (discountAmount > baseAmount) {
-					discountAmount = baseAmount;
-				}
-				item.discount_percentage = 0;
-			}
-		} else if (item.discount_percentage > 0) {
+		if (item.discount_percentage > 0) {
 			discountAmount = roundCurrency((baseAmount * item.discount_percentage) / 100);
 		} else if (item.discount_amount > 0) {
 			discountAmount = roundCurrency(item.discount_amount);
-			if (discountAmount > baseAmount) {
-				discountAmount = baseAmount;
-			}
 			// Sync percentage when amount is provided directly
 			item.discount_percentage = baseAmount > 0 ? (discountAmount / baseAmount) * 100 : 0;
 		}
@@ -891,10 +745,10 @@ export function useInvoice() {
 	 * @returns {Array} Items formatted for ERPNext Sales Invoice
 	 */
 	function formatItemsForSubmission(items) {
-		const mapRow = (item, qtyOverride = null) => ({
+		const mapRow = (item) => ({
 			item_code: item.item_code,
 			item_name: item.item_name,
-			qty: qtyOverride ?? item.quantity ?? item.qty ?? 1,
+			qty: item.quantity || item.qty || 1,
 			rate: item.is_free_item ? 0 : computeBackendRate(item),
 			price_list_rate: item.is_free_item
 				? 0
@@ -917,20 +771,9 @@ export function useInvoice() {
 
 		const out = [];
 		for (const item of items) {
+			out.push(mapRow(item));
 			const fq = Number.parseFloat(item.free_qty) || 0;
-			const bundledSameItemFree =
-				!item.is_free_item && fq > 0 && item.discount_source === "free_item";
-			const lineQty = item.quantity || item.qty || 1;
-			const paidQty = bundledSameItemFree ? Math.max(0, lineQty - fq) : lineQty;
-
-			if (item.is_free_item) {
-				out.push(mapRow(item));
-				continue;
-			}
-
-			out.push(mapRow(item, paidQty));
-
-			if (fq > 0) {
+			if (!item.is_free_item && fq > 0) {
 				const u = item.uom || item.stock_uom;
 				const hasDedicatedFree = items.some(
 					(i) =>
@@ -1481,8 +1324,6 @@ export function useInvoice() {
 		calculateDiscountAmount,
 		applyDiscount,
 		removeDiscount,
-		applyCouponLineDiscounts,
-		clearCouponLineDiscounts,
 		addPayment,
 		removePayment,
 		updatePayment,
@@ -1504,7 +1345,6 @@ export function useInvoice() {
 		submitInvoiceResource,
 		validateCartItemsResource,
 		applyOffersResource,
-		calculateCouponDiscountResource,
 		getItemDetailsResource,
 		getTaxesResource,
 	};

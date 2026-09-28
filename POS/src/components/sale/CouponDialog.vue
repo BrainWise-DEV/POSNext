@@ -231,13 +231,15 @@
 </template>
 
 <script setup>
+import { promoApi } from "@/utils/promoApi";
 import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency";
-import { call } from "@/utils/apiWrapper";
-import { unwrapCouponValidation } from "@/utils/invoice";
 import { Button, Dialog, Input, createResource } from "frappe-ui";
 import { ref, watch } from "vue";
+import { useInvoice } from "@/composables/useInvoice";
 import { useToast } from "@/composables/useToast";
 
+// Get calculateDiscountAmount helper from composable
+const { calculateDiscountAmount } = useInvoice();
 const { showSuccess, showError, showWarning } = useToast();
 
 const props = defineProps({
@@ -280,7 +282,7 @@ const errorMessage = ref("");
 
 // Resource to load gift cards
 const giftCardsResource = createResource({
-	url: "pos_next.api.offers.get_active_coupons",
+	url: promoApi.getActiveCoupons(),
 	makeParams() {
 		return {
 			customer: props.customer,
@@ -293,31 +295,18 @@ const giftCardsResource = createResource({
 	},
 });
 
-// Resource to validate coupon — use call() in applyCoupon for reliable response parsing
-
-function buildCartItemsSnapshot() {
-	const items = props.items || [];
-	return items.map((item, index) => ({
-		item_code: item.item_code,
-		item_name: item.item_name,
-		brand: item.brand || "",
-		item_group: item.item_group || "",
-		qty: item.quantity || item.qty || 0,
-		quantity: item.quantity || item.qty || 0,
-		rate: item.rate || 0,
-		price_list_rate: item.price_list_rate || item.rate || 0,
-		amount: item.amount || 0,
-		discount_percentage: item.discount_percentage || 0,
-		discount_amount: item.discount_amount || 0,
-		pricing_rules: item.pricing_rules || null,
-		is_free_item: item.is_free_item || 0,
-		is_already_discounted: item.is_already_discounted || 0,
-		discount_source: item.discount_source || "",
-		coupon_code: item.coupon_code || "",
-		idx: index + 1,
-		name: item.name || null,
-	}));
-}
+// Resource to validate coupon
+const couponResource = createResource({
+	url: promoApi.validateCoupon(),
+	makeParams() {
+		return {
+			coupon_code: couponCode.value,
+			customer: props.customer,
+			company: props.company,
+		};
+	},
+	auto: false,
+});
 
 watch(
 	() => props.modelValue,
@@ -359,23 +348,23 @@ function applyGiftCard(card) {
 	applyCoupon();
 }
 
+function getCouponBaseAmount(coupon) {
+	const grandTotal = Number.parseFloat(props.grandTotal || 0);
+	const taxAmount = Number.parseFloat(props.taxAmount || 0);
+	const netTotal = Math.max(grandTotal - taxAmount, 0);
+
+	return coupon.apply_on === "Grand Total" ? grandTotal : netTotal;
+}
+
 async function applyCoupon() {
 	if (!couponCode.value.trim()) {
 		errorMessage.value = __("Please enter a coupon code");
 		return;
 	}
 
-
-	if (!props.items?.length) {
-		errorMessage.value = __("Add items to the cart before applying a coupon");
-		showWarning(errorMessage.value);
-		return;
-	}
-
-	if (!props.customer || !props.company) {
-		errorMessage.value = __("Please select a customer before applying a coupon");
-		showWarning(errorMessage.value);
-
+	if (!props.customer) {
+		errorMessage.value = __("Please choose a customer");
+		showError(errorMessage.value);
 		return;
 	}
 
@@ -383,15 +372,17 @@ async function applyCoupon() {
 	errorMessage.value = "";
 
 	try {
-		const result = await call("pos_next.api.offers.validate_coupon", {
-			coupon_code: couponCode.value,
-			customer: props.customer,
-			company: props.company,
-			items: buildCartItemsSnapshot(),
-		});
-		const validationData = unwrapCouponValidation(result);
+		await couponResource.reload();
+		// Frappe wraps response in { message: {...} }
+		const result = couponResource.data?.message || couponResource.data;
 
-		if (!validationData || validationData.valid !== true) {
+		// Handle if result is the actual response object
+		const validationData =
+			typeof result === "object" && result.valid !== undefined
+				? result
+				: couponResource.data;
+
+		if (!validationData || !validationData.valid) {
 			errorMessage.value =
 				validationData?.message || __("The coupon code you entered is not valid");
 			showError(errorMessage.value);
@@ -399,28 +390,43 @@ async function applyCoupon() {
 		}
 
 		const coupon = validationData.coupon;
-		const lineUpdates = validationData.line_updates || [];
-		const totalDiscount = Number.parseFloat(validationData.total_discount || 0);
+		const baseAmount = getCouponBaseAmount(coupon);
 
-		if (!lineUpdates.length || totalDiscount <= 0) {
-			errorMessage.value =
-				validationData?.message || __("No eligible items for this coupon");
+		// Check minimum amount on the configured coupon base
+		if (coupon.min_amount && baseAmount < coupon.min_amount) {
+			errorMessage.value = __("This coupon requires a minimum purchase of ", [
+				formatCurrency(coupon.min_amount),
+			]);
 			showWarning(errorMessage.value);
 			return;
 		}
 
+		// Calculate discount on subtotal (before tax) using centralized helper
+		// Transform server coupon format to discount object format
+		const discountObj = {
+			percentage: coupon.discount_type === "Percentage" ? coupon.discount_percentage : 0,
+			amount: coupon.discount_type === "Amount" ? coupon.discount_amount : 0,
+		};
+
+		let discountAmount = calculateDiscountAmount(discountObj, baseAmount);
+
+		// Apply maximum discount limit if specified
+		if (coupon.max_amount && discountAmount > coupon.max_amount) {
+			discountAmount = coupon.max_amount;
+		}
+
+		// Clamp discount to the selected coupon base to prevent negative totals
+		discountAmount = Math.min(discountAmount, baseAmount);
+
 		appliedDiscount.value = {
 			name: coupon.coupon_name || coupon.coupon_code,
-			code: (coupon.coupon_code || couponCode.value).toUpperCase(),
+			code: couponCode.value.toUpperCase(),
 			percentage: coupon.discount_type === "Percentage" ? coupon.discount_percentage : 0,
-			amount: totalDiscount,
+			amount: discountAmount,
 			type: coupon.discount_type,
 			coupon: coupon,
 			apply_on: coupon.apply_on,
-			line_updates: lineUpdates,
-			eligible_item_codes: validationData.eligible_item_codes || [],
-			eligible_subtotal: validationData.eligible_subtotal || 0,
-			application_mode: "line",
+			base_amount: baseAmount,
 		};
 
 		emit("discount-applied", appliedDiscount.value);

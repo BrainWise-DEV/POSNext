@@ -90,11 +90,6 @@ export const useBootstrapStore = defineStore("bootstrap", () => {
 		return data.value?.site_name || null;
 	}
 
-
-	function getSystemTimezone() {
-		return data.value?.system_timezone || null;
-	}
-
 	/**
 	 * Get preloaded shift data or null if not available
 	 */
@@ -174,6 +169,5 @@ export const useBootstrapStore = defineStore("bootstrap", () => {
 		hasBootstrapData,
 		reset,
 		getSiteName,
-		getSystemTimezone,
 	};
 });

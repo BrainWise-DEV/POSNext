@@ -104,11 +104,16 @@ def get_pos_settings(pos_profile):
 	if not has_access and not frappe.has_permission("POS Settings", "read"):
 		frappe.throw(_("You don't have access to this POS Profile"))
 
-	settings = frappe.db.get_value("POS Settings", {"pos_profile": pos_profile}, "*", as_dict=True)
+	from pos_next.api.constants import merge_pos_settings
+
+	row = frappe.db.get_value("POS Settings", {"pos_profile": pos_profile}, "*", as_dict=True)
 
 	# If no settings exist, create default settings
-	if not settings:
-		settings = create_default_settings(pos_profile)
+	if not row:
+		row = create_default_settings(pos_profile)
+
+	# Runtime flags (miraaya_installed, magento_loyalty_available) are not columns
+	settings = merge_pos_settings(row)
 
 	# Inject the current global Stock Settings value for transparency
 	# This helps UI reflect the actual state even if multiple POS Settings exist
@@ -116,11 +121,9 @@ def get_pos_settings(pos_profile):
 		frappe.db.get_single_value("Stock Settings", "allow_negative_stock") or 0
 	)
 
-	from pos_next.api.pos_profile import _is_magento_loyalty_available
-	from pos_next.services.miraaya_loyalty import is_miraaya_loyalty_available
+	from pos_next.integrations.registry import extend_bootstrap_settings
 
-	settings["magento_loyalty_available"] = _is_magento_loyalty_available(pos_profile)
-	settings["miraaya_installed"] = is_miraaya_loyalty_available()
+	extend_bootstrap_settings(settings, pos_profile)
 
 	return settings
 

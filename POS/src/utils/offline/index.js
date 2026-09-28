@@ -30,6 +30,21 @@ export {
 	getCachedUnpaidInvoices,
 	cacheUnpaidSummary,
 	getCachedUnpaidSummary,
+	saveOfflineExpense,
+	getPendingExpenses,
+	getPendingExpenseCount,
+	deleteOfflineExpense,
+	discardOfflineExpenseAttachments,
+	checkOfflineExpenseSynced,
+	syncOfflineExpenses,
+	cacheExpenseDialogData,
+	getExpenseDialogCache,
+	bumpExpenseDialogCacheShiftTotal,
+	expenseDialogCacheKey,
+	validateExpenseQueueAttachment,
+	getOfflineExpenseRemainingAllowance,
+	getPendingExpenseLocalTotal,
+	generateOfflineExpenseId,
 } from "./sync";
 
 export {
