@@ -103,6 +103,9 @@ class CustomSalesInvoice(SalesInvoice):
 
 		if needs_item_level_contribution(self) or getattr(self.flags, "pos_commission_breakdown", None):
 			apply_item_level_contribution(self)
+			# Same disabled-Sales-Person check ERPNext's calculate_contribution runs
+			# (skipped for offline sync / returns, see validate_sales_team below)
+			self.validate_sales_team(self.get("sales_team") or [])
 			return
 
 		super().calculate_contribution()

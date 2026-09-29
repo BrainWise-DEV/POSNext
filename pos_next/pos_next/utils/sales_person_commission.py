@@ -402,25 +402,49 @@ def all_items_have_sales_person(items) -> bool:
 	return True
 
 
-def _has_any_commission_overrides(sales_person: str) -> bool:
-	maps = get_sales_person_commission_maps(sales_person)
-	return bool(maps["item_map"] or maps["item_group_map"] or maps["brand_map"])
+_COMMISSION_TABLES = (
+	(FIELD_ITEM_COMMISSIONS, "Sales Person Item Commission"),
+	(FIELD_ITEM_GROUP_COMMISSIONS, "Sales Person Item Group Commission"),
+	(FIELD_BRAND_COMMISSIONS, "Sales Person Brand Commission"),
+)
+
+
+def _any_commission_overrides(sales_persons) -> bool:
+	"""True when any of the Sales Persons has an Item / Item Group / Brand override row.
+
+	At most one ``limit=1`` query per commission table, for all Sales Persons
+	together (none when the custom fields are not installed).
+	"""
+	names = sorted({sp for sp in sales_persons or [] if sp})
+	if not names:
+		return False
+	sp_meta = frappe.get_meta("Sales Person")
+	for fieldname, doctype in _COMMISSION_TABLES:
+		if not sp_meta.has_field(fieldname):
+			continue
+		if frappe.get_all(
+			doctype,
+			filters={"parent": ["in", names], "parenttype": "Sales Person"},
+			pluck="name",
+			limit=1,
+		):
+			return True
+	return False
 
 
 def needs_item_level_contribution(invoice_doc) -> bool:
-	"""True when item-level SP or scoped rates require custom incentives."""
+	"""True when item-level SP or scoped rates require custom incentives.
+
+	Runs on every Sales Invoice validate (Desk too): no queries unless the invoice
+	has a sales team, then at most three for the whole team.
+	"""
 	items = _doc_get(invoice_doc, "items") or []
 	for item in items:
 		if _line_sales_person(item):
 			return True
 
 	sales_team = _doc_get(invoice_doc, "sales_team") or []
-	for row in sales_team:
-		sp = row.get("sales_person") if hasattr(row, "get") else getattr(row, "sales_person", None)
-		if sp and _has_any_commission_overrides(sp):
-			return True
-
-	return False
+	return _any_commission_overrides(_row_sales_person(row) for row in sales_team)
 
 
 def _team_has_sales_person(invoice_team) -> bool:
@@ -864,21 +888,59 @@ def build_sales_team_from_items(invoice_doc, invoice_level_team=None) -> list[di
 	return result
 
 
+def _set_row_value(row, fieldname, value) -> None:
+	if isinstance(row, dict):
+		row[fieldname] = value
+	else:
+		setattr(row, fieldname, value)
+
+
 def apply_sales_team_to_invoice(invoice_doc, sales_team_rows: list[dict]) -> None:
-	"""Replace invoice sales_team with computed rows."""
-	invoice_doc.sales_team = []
+	"""Sync invoice sales_team to the computed rows, in place.
+
+	Rows of Sales Persons that stay on the team are updated rather than
+	recreated, so their order, row name and any other (custom) fields survive a
+	rebuild; rows of Sales Persons no longer on the team are removed and new ones
+	appended. ``idx`` is renumbered.
+	"""
+	wanted: dict[str, dict] = {}
 	for row in sales_team_rows or []:
-		if not row.get("sales_person"):
+		sp = row.get("sales_person")
+		if sp and sp not in wanted:
+			wanted[sp] = row
+
+	team = _doc_get(invoice_doc, "sales_team")
+	if team is None:
+		team = []
+		invoice_doc.sales_team = team
+
+	kept: set[str] = set()
+	for row in list(team):
+		sp = _row_sales_person(row)
+		if sp in wanted and sp not in kept:
+			computed = wanted[sp]
+			_set_row_value(row, "allocated_percentage", flt(computed.get("allocated_percentage") or 0))
+			_set_row_value(row, "commission_rate", computed.get("commission_rate"))
+			_set_row_value(row, "incentives", flt(computed.get("incentives") or 0))
+			kept.add(sp)
+		else:
+			team.remove(row)
+
+	for sp, computed in wanted.items():
+		if sp in kept:
 			continue
 		invoice_doc.append(
 			"sales_team",
 			{
-				"sales_person": row["sales_person"],
-				"allocated_percentage": flt(row.get("allocated_percentage") or 0),
-				"commission_rate": row.get("commission_rate"),
-				"incentives": flt(row.get("incentives") or 0),
+				"sales_person": sp,
+				"allocated_percentage": flt(computed.get("allocated_percentage") or 0),
+				"commission_rate": computed.get("commission_rate"),
+				"incentives": flt(computed.get("incentives") or 0),
 			},
 		)
+
+	for idx, row in enumerate(_doc_get(invoice_doc, "sales_team") or [], start=1):
+		_set_row_value(row, "idx", idx)
 
 
 def apply_item_level_contribution(invoice_doc) -> None:
