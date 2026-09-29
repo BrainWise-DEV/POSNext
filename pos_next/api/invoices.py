@@ -373,19 +373,27 @@ def _apply_pos_sales_team(invoice_doc, sales_team_data=None, pos_profile=None):
 	apply_sales_team_to_invoice(invoice_doc, rows)
 
 
-def _resolve_submit_invoice_level_team(invoice, data):
+def _resolve_submit_invoice_level_team(invoice, data, invoice_name=None):
 	"""Cashier invoice-level team for submit.
 
 	Prefer ``data.sales_team`` (online flow). Offline sync stores the cashier team on
 	the invoice payload and sends ``data: {}`` — accept ``invoice.sales_team`` only
 	when ``offline_id`` is present (never for online drafts whose sales_team is the
 	rebuilt aggregate).
+
+	Otherwise (older clients, or callers that submit a saved draft without resending
+	the team) fall back to the cashier team persisted on the draft
+	(``custom_pos_invoice_level_sales_team``). Without that fallback the invoice-level
+	sales persons would be silently dropped, or the submit rejected as having none.
 	"""
+	from pos_next.pos_next.utils.sales_person_commission import load_stored_invoice_level_sales_team
+
 	if isinstance(data, dict) and isinstance(data.get("sales_team"), list):
 		return data.get("sales_team")
 	if invoice.get("offline_id") and isinstance(invoice.get("sales_team"), list):
 		return invoice.get("sales_team")
-	return []
+	stored = load_stored_invoice_level_sales_team(invoice_name or invoice.get("name"))
+	return stored if stored is not None else []
 
 
 def get_payment_account(mode_of_payment, company):
@@ -1659,7 +1667,9 @@ def submit_invoice(invoice=None, data=None):
 		if doctype == "Sales Invoice":
 			_apply_pos_sales_team(
 				invoice_doc,
-				sales_team_data=_resolve_submit_invoice_level_team(invoice, data),
+				sales_team_data=_resolve_submit_invoice_level_team(
+					invoice, data, invoice_name=invoice_doc.name
+				),
 				pos_profile=pos_profile,
 			)
 
