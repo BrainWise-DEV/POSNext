@@ -337,7 +337,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	}
 
 	async function loadDefaultCustomer() {
-		await setDefaultCustomer();
+		const shiftStore = usePOSShiftStore();
+		const profileCustomer =
+			shiftStore.currentProfile?.customer || shiftStore.profileCustomer || null;
+		await setDefaultCustomer(profileCustomer);
 		await syncOneTimeContextForCurrentCustomer();
 	}
 
