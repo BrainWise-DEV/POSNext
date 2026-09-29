@@ -559,6 +559,7 @@ import {
 	roundCurrency,
 } from "@/utils/currency";
 import { call } from "@/utils/apiWrapper";
+import { loadSalesPersonsForProfile } from "@/utils/salesPersonsList";
 import {
 	scaleRateForUomChange,
 	shouldPreserveRateOnUomChange,
@@ -792,28 +793,8 @@ async function loadSalesPersons() {
 		salesPersons.value = [];
 		return;
 	}
-	const posProfile = settingsStore.settings?.pos_profile;
-	try {
-		if (navigator.onLine === false && posProfile) {
-			const { getCachedSalesPersons } = await import("@/utils/offline/cache");
-			salesPersons.value = (await getCachedSalesPersons(posProfile)) || [];
-			return;
-		}
-		const result = await call("pos_next.api.pos_profile.get_sales_persons", {
-			pos_profile: posProfile || undefined,
-		});
-		salesPersons.value = result?.message || result || [];
-	} catch (error) {
-		console.error("Failed to load sales persons for item edit:", error);
-		if (posProfile) {
-			try {
-				const { getCachedSalesPersons } = await import("@/utils/offline/cache");
-				salesPersons.value = (await getCachedSalesPersons(posProfile)) || [];
-			} catch {
-				salesPersons.value = [];
-			}
-		}
-	}
+	// Session-cached per POS Profile; IndexedDB copy when offline (see util)
+	salesPersons.value = await loadSalesPersonsForProfile(settingsStore.settings?.pos_profile);
 }
 
 // Initialize local state when item changes

@@ -359,15 +359,10 @@ def get_wallet_payment_flags(methods):
 def get_sales_persons(pos_profile=None):
 	"""Get all active individual sales persons (not groups) for POS.
 
-	Each row includes commission override lists from the Sales Person master:
-	- ``item_commissions``: ``[{item, commission_rate}, ...]``
-	- ``item_group_commissions``: ``[{item_group, commission_rate}, ...]``
-	- ``brand_commissions``: ``[{brand, commission_rate}, ...]``
-
-	Rate priority when calculating: Item → Item Group → Brand → commission_rate.
+	Returns only the picker fields. Item / Item Group / Brand commission overrides
+	are resolved server-side when the invoice is saved
+	(``pos_next.pos_next.utils.sales_person_commission``), so they are not sent.
 	"""
-	from pos_next.pos_next.utils.sales_person_commission import get_sales_person_commission_maps
-
 	if not pos_profile:
 		frappe.throw(_("POS Profile is required"))
 
@@ -391,18 +386,6 @@ def get_sales_persons(pos_profile=None):
 		order_by="sales_person_name",
 		limit_page_length=0,
 	)
-
-	for person in sales_persons:
-		maps = get_sales_person_commission_maps(person.name)
-		person["item_commissions"] = [
-			{"item": item, "commission_rate": rate} for item, rate in maps["item_map"].items()
-		]
-		person["item_group_commissions"] = [
-			{"item_group": ig, "commission_rate": rate} for ig, rate in maps["item_group_map"].items()
-		]
-		person["brand_commissions"] = [
-			{"brand": brand, "commission_rate": rate} for brand, rate in maps["brand_map"].items()
-		]
 
 	return sales_persons
 
