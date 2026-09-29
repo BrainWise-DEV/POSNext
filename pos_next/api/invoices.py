@@ -549,7 +549,13 @@ def _ensure_invoice_customer(invoice_doc, pos_profile=None):
 
 
 def _apply_pos_item_accounting_dimensions(invoice_doc):
-	"""Stamp POS customer (and header dimensions) on each Sales Invoice Item row."""
+	"""Stamp the invoice customer on every Sales Invoice Item row of a POS invoice.
+
+	Always overwrite (not only blank rows): a draft re-saved with a different
+	customer would otherwise keep the previous customer on existing rows, and
+	that stale value would flow into item-level GL entries when a Customer
+	accounting dimension is configured.
+	"""
 	if invoice_doc.doctype != "Sales Invoice" or not cint(invoice_doc.get("is_pos")):
 		return
 
@@ -562,7 +568,7 @@ def _apply_pos_item_accounting_dimensions(invoice_doc):
 		return
 
 	for item in invoice_doc.get("items") or []:
-		if not item.get("customer"):
+		if item.get("customer") != customer:
 			item.customer = customer
 
 
