@@ -107,6 +107,20 @@ class CustomSalesInvoice(SalesInvoice):
 
 		super().calculate_contribution()
 
+	def validate_sales_team(self, sales_team):
+		"""ERPNext rejects disabled Sales Persons on the sales team.
+
+		POS flows that must accept what was already recorded (offline sync,
+		returns) set ``flags.pos_allow_disabled_sales_persons``: the Sales Person
+		was valid when the sale happened, so the commission (or its reversal)
+		must still go to them.
+		"""
+		if getattr(self.flags, "pos_allow_disabled_sales_persons", False):
+			return
+		parent = getattr(super(), "validate_sales_team", None)
+		if parent:
+			parent(sales_team)
+
 	def on_submit(self):
 		# Re-align after fetch_from so ERPNext's loyalty branch does not run on a
 		# credit note whose original invoice has no loyalty_program.

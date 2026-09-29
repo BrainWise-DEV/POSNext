@@ -294,6 +294,55 @@ def _line_sales_person(item) -> str | None:
 	return sp or None
 
 
+def _set_line_sales_person(item, value) -> None:
+	if isinstance(item, dict):
+		item["sales_person"] = value
+	else:
+		item.sales_person = value
+
+
+def _row_sales_person(row) -> str | None:
+	sp = row.get("sales_person") if hasattr(row, "get") else getattr(row, "sales_person", None)
+	return sp or None
+
+
+def drop_missing_sales_persons(invoice_doc, invoice_level_team=None) -> list:
+	"""Remove Sales Persons that no longer exist from item rows and the invoice-level team.
+
+	Used where the server has to accept what was already recorded instead of
+	rejecting it (offline sync, returns). A Sales Person deleted since the sale
+	would fail Link validation and block the save, so it is dropped and logged.
+	Disabled Sales Persons are kept on purpose: they were valid when the sale was
+	made and must still earn (or, on a return, reverse) the commission.
+
+	Returns the filtered invoice-level team.
+	"""
+	items = _doc_get(invoice_doc, "items") or []
+	team = list(invoice_level_team or [])
+
+	names = {sp for sp in (_line_sales_person(item) for item in items) if sp}
+	names.update(sp for sp in (_row_sales_person(row) for row in team) if sp)
+	if not names:
+		return team
+
+	existing = set(frappe.get_all("Sales Person", filters={"name": ["in", sorted(names)]}, pluck="name"))
+	missing = names - existing
+	if not missing:
+		return team
+
+	for item in items:
+		if _line_sales_person(item) in missing:
+			_set_line_sales_person(item, None)
+
+	invoice_doc.flags.pos_dropped_sales_persons = sorted(missing)
+	frappe.log_error(
+		title="POS Next: dropped missing Sales Persons",
+		message="Invoice {0}: Sales Person(s) {1} no longer exist and were removed from the "
+		"sales team.".format(_doc_get(invoice_doc, "name") or "(new)", ", ".join(sorted(missing))),
+	)
+	return [row for row in team if _row_sales_person(row) not in missing]
+
+
 def _line_needs_sales_person_coverage(item) -> bool:
 	"""True when the line is economically billable and must have an effective SP.
 

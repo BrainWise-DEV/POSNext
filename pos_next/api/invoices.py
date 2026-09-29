@@ -300,12 +300,19 @@ def _apply_pos_sales_team(invoice_doc, sales_team_data=None, pos_profile=None):
 	``sales_team_data`` must be the cashier / payment-screen team (or ``[]`` / ``None``).
 	Never pass the rebuilt aggregate from a draft invoice — that would treat item-level
 	SPs as invoice-level fallbacks. ``None`` means no invoice-level team (``[]``).
+
+	Offline sync (``invoice_doc.flags.pos_offline_sync``): the sale already happened
+	on the till, where the POS lets cashiers finish without a Sales Person. Never
+	reject it here, or the invoice would be stuck in the offline queue forever.
+	The required / allowlist checks are skipped, Sales Persons deleted since are
+	dropped, and disabled ones are kept so commission lands on whoever made the sale.
 	"""
 	from pos_next.pos_next.utils.sales_person_commission import (
 		apply_return_sales_person_from_original,
 		apply_sales_team_to_invoice,
 		build_sales_team_from_items,
 		clear_sales_person_fields,
+		drop_missing_sales_persons,
 		persist_invoice_level_sales_team,
 		sales_persons_enabled,
 		validate_sales_person_assignments,
@@ -334,16 +341,20 @@ def _apply_pos_sales_team(invoice_doc, sales_team_data=None, pos_profile=None):
 		# Explicit cashier team only — never fall back to rebuilt doc.sales_team
 		invoice_level = sales_team_data if sales_team_data is not None else []
 
-		validate_sales_person_coverage(
-			invoice_doc,
-			pos_profile=profile,
-			invoice_level_team=invoice_level,
-		)
-		validate_sales_person_assignments(
-			invoice_doc,
-			pos_profile=profile,
-			invoice_level_team=invoice_level,
-		)
+		if getattr(invoice_doc.flags, "pos_offline_sync", False):
+			invoice_level = drop_missing_sales_persons(invoice_doc, invoice_level)
+			invoice_doc.flags.pos_allow_disabled_sales_persons = True
+		else:
+			validate_sales_person_coverage(
+				invoice_doc,
+				pos_profile=profile,
+				invoice_level_team=invoice_level,
+			)
+			validate_sales_person_assignments(
+				invoice_doc,
+				pos_profile=profile,
+				invoice_level_team=invoice_level,
+			)
 
 	# Remember invoice-level fallback so calculate_contribution can rebuild correctly
 	invoice_doc.flags.pos_invoice_level_sales_team = invoice_level
@@ -961,6 +972,8 @@ def update_invoice(data):
 		# read linked docs (e.g., Customer) and trigger controller permission checks.
 		invoice_doc.flags.ignore_permissions = True
 		frappe.flags.ignore_account_permission = True
+		# Offline-queued sale being synced (see _apply_pos_sales_team)
+		invoice_doc.flags.pos_offline_sync = bool(data.get("offline_id"))
 
 		pos_profile_doc = None
 		if pos_profile:
@@ -1592,6 +1605,8 @@ def submit_invoice(invoice=None, data=None):
 		# Keep permission bypass consistent for POS API flow.
 		invoice_doc.flags.ignore_permissions = True
 		frappe.flags.ignore_account_permission = True
+		# Offline-queued sale being synced (see _apply_pos_sales_team)
+		invoice_doc.flags.pos_offline_sync = bool(offline_id)
 
 		# Ensure update_stock is set for Sales Invoice
 		if doctype == "Sales Invoice":
