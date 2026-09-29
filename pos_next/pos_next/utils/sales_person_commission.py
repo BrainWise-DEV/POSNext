@@ -123,6 +123,44 @@ def get_sales_person_commission_maps(sales_person: str) -> dict:
 	}
 
 
+def validate_sales_person_commission_tables(doc, method=None) -> None:
+	"""Sales Person ``validate`` hook (hooks.py doc_events) for the commission tables.
+
+	Frappe does not run ``validate`` on child rows, so the checks live on the
+	parent: every rate must be within 0-100, and an Item / Item Group / Brand may
+	appear only once per table (a duplicate would make the applied rate depend on
+	row order).
+	"""
+	tables = (
+		("custom_item_commissions", "item", _("Item")),
+		("custom_item_group_commissions", "item_group", _("Item Group")),
+		("custom_brand_commissions", "brand", _("Brand")),
+	)
+	for fieldname, key, label in tables:
+		seen: dict[str, int] = {}
+		for row in doc.get(fieldname) or []:
+			value = row.get(key)
+			idx = row.get("idx")
+			rate = flt(row.get("commission_rate"))
+			if rate < 0 or rate > 100:
+				frappe.throw(
+					_("Row #{0}: Commission Rate for {1} {2} must be between 0 and 100").format(
+						idx, label, frappe.bold(value or "")
+					),
+					title=_("Invalid Commission Rate"),
+				)
+			if not value:
+				continue
+			if value in seen:
+				frappe.throw(
+					_("Row #{0}: Commission for {1} {2} is already defined in row #{3}").format(
+						idx, label, frappe.bold(value), seen[value]
+					),
+					title=_("Duplicate Commission"),
+				)
+			seen[value] = idx
+
+
 def resolve_commission_rate(
 	sales_person: str,
 	item_code: str | None = None,
