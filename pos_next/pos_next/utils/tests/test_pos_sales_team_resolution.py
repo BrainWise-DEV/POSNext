@@ -244,9 +244,7 @@ class TestValidateSalesTeamOverride(unittest.TestCase):
 
 	def test_disabled_check_skipped_when_flagged(self):
 		team = [Row(sales_person="SP-DISABLED")]
-		with patch(
-			"erpnext.controllers.selling_controller.SellingController.validate_sales_team"
-		) as parent:
+		with patch("erpnext.controllers.selling_controller.SellingController.validate_sales_team") as parent:
 			self._invoice(pos_allow_disabled_sales_persons=True).validate_sales_team(team)
 			parent.assert_not_called()
 			self._invoice().validate_sales_team(team)
@@ -312,7 +310,9 @@ class TestBatchedCommissionOverrides(unittest.TestCase):
 		meta.assert_not_called()
 
 	def test_item_sales_person_short_circuits(self):
-		doc = FakeDoc(items=[{"item_code": "A", "sales_person": "SP-A"}], sales_team=[Row(sales_person="SP-A")])
+		doc = FakeDoc(
+			items=[{"item_code": "A", "sales_person": "SP-A"}], sales_team=[Row(sales_person="SP-A")]
+		)
 		with patch.object(spc.frappe, "get_all") as get_all:
 			self.assertTrue(spc.needs_item_level_contribution(doc))
 		get_all.assert_not_called()

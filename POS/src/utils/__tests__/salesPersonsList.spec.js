@@ -40,12 +40,17 @@ describe("loadSalesPersonsForProfile", () => {
 
 	it("dedupes concurrent loads", async () => {
 		callMock.mockResolvedValue([{ name: "SP-1" }]);
-		await Promise.all([loadSalesPersonsForProfile("POS-A"), loadSalesPersonsForProfile("POS-A")]);
+		await Promise.all([
+			loadSalesPersonsForProfile("POS-A"),
+			loadSalesPersonsForProfile("POS-A"),
+		]);
 		expect(callMock).toHaveBeenCalledTimes(1);
 	});
 
 	it("keeps a separate list per profile", async () => {
-		callMock.mockResolvedValueOnce([{ name: "SP-A" }]).mockResolvedValueOnce([{ name: "SP-B" }]);
+		callMock
+			.mockResolvedValueOnce([{ name: "SP-A" }])
+			.mockResolvedValueOnce([{ name: "SP-B" }]);
 		expect(await loadSalesPersonsForProfile("POS-A")).toEqual([{ name: "SP-A" }]);
 		expect(await loadSalesPersonsForProfile("POS-B")).toEqual([{ name: "SP-B" }]);
 	});
@@ -59,7 +64,9 @@ describe("loadSalesPersonsForProfile", () => {
 
 	it("falls back to the IndexedDB copy on server error and retries next time", async () => {
 		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-		callMock.mockRejectedValueOnce(new Error("boom")).mockResolvedValueOnce([{ name: "SP-1" }]);
+		callMock
+			.mockRejectedValueOnce(new Error("boom"))
+			.mockResolvedValueOnce([{ name: "SP-1" }]);
 
 		expect(await loadSalesPersonsForProfile("POS-A")).toEqual([{ name: "SP-CACHED" }]);
 		expect(await loadSalesPersonsForProfile("POS-A")).toEqual([{ name: "SP-1" }]);

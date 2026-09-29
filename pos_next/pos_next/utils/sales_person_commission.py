@@ -640,7 +640,8 @@ def _legacy_invoice_level_from_original(return_against: str, original_items) -> 
 	if not total:
 		return []
 	return [
-		{"sales_person": sp, "allocated_percentage": amount * 100.0 / total} for sp, amount in residual.items()
+		{"sales_person": sp, "allocated_percentage": amount * 100.0 / total}
+		for sp, amount in residual.items()
 	]
 
 
