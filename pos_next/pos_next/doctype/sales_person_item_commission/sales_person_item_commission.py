@@ -12,9 +12,7 @@ class SalesPersonItemCommission(Document):
 		rate = flt(self.commission_rate)
 		if rate < 0 or rate > 100:
 			frappe.throw(
-				_("Commission Rate for Item {0} must be between 0 and 100").format(
-					frappe.bold(self.item)
-				)
+				_("Commission Rate for Item {0} must be between 0 and 100").format(frappe.bold(self.item))
 			)
 
 		if not self.parent or not self.item:

@@ -101,9 +101,7 @@ class CustomSalesInvoice(SalesInvoice):
 			needs_item_level_contribution,
 		)
 
-		if needs_item_level_contribution(self) or getattr(
-			self.flags, "pos_commission_breakdown", None
-		):
+		if needs_item_level_contribution(self) or getattr(self.flags, "pos_commission_breakdown", None):
 			apply_item_level_contribution(self)
 			return
 

@@ -19,7 +19,6 @@ import frappe
 from frappe import _
 from frappe.utils import cint, flt
 
-
 FIELD_ITEM_COMMISSIONS = "custom_item_commissions"
 FIELD_ITEM_GROUP_COMMISSIONS = "custom_item_group_commissions"
 FIELD_BRAND_COMMISSIONS = "custom_brand_commissions"
@@ -118,9 +117,7 @@ def get_sales_person_commission_maps(sales_person: str) -> dict:
 		"item_map": get_item_commission_map(sales_person),
 		"item_group_map": get_item_group_commission_map(sales_person),
 		"brand_map": get_brand_commission_map(sales_person),
-		"commission_rate": flt(
-			frappe.db.get_value("Sales Person", sales_person, "commission_rate") or 0
-		)
+		"commission_rate": flt(frappe.db.get_value("Sales Person", sales_person, "commission_rate") or 0)
 		if sales_person
 		else 0.0,
 	}
@@ -242,7 +239,9 @@ def _line_net_amount(item) -> float:
 		if abs(flt(val)) > 0.0001 or _line_looks_zero_value(item):
 			return flt(val)
 
-	qty = flt(_item_get(item, "qty") if _item_get(item, "qty") is not None else _item_get(item, "quantity") or 0)
+	qty = flt(
+		_item_get(item, "qty") if _item_get(item, "qty") is not None else _item_get(item, "quantity") or 0
+	)
 	price_list_rate = flt(_item_get(item, "price_list_rate") or 0)
 	discount_amount = flt(_item_get(item, "discount_amount") or 0)
 	discount_percentage = flt(_item_get(item, "discount_percentage") or 0)
@@ -370,9 +369,7 @@ def validate_sales_person_coverage(
 	has_invoice_team = _team_has_sales_person(invoice_level_team)
 	# Free / zero-net rows do not need a Sales Person (ignore client is_free_item alone)
 	uncovered = [
-		item
-		for item in items
-		if _line_needs_sales_person_coverage(item) and not _line_sales_person(item)
+		item for item in items if _line_needs_sales_person_coverage(item) and not _line_sales_person(item)
 	]
 	if uncovered and not has_invoice_team:
 		frappe.throw(
@@ -447,9 +444,7 @@ def persist_invoice_level_sales_team(invoice_doc, invoice_level) -> None:
 		if not sp:
 			continue
 		pct = flt(
-			m.get("allocated_percentage")
-			if hasattr(m, "get")
-			else getattr(m, "allocated_percentage", 0)
+			m.get("allocated_percentage") if hasattr(m, "get") else getattr(m, "allocated_percentage", 0)
 		)
 		payload.append({"sales_person": sp, "allocated_percentage": pct})
 	invoice_doc.set(FIELD_INVOICE_LEVEL_TEAM, frappe.as_json(payload))
@@ -541,16 +536,14 @@ def apply_return_sales_person_from_original(invoice_doc) -> None:
 			orig = by_name.get(ref)
 			if not orig:
 				frappe.throw(
-					_("Return item link {0} does not belong to invoice {1}").format(
-						ref, return_against
-					),
+					_("Return item link {0} does not belong to invoice {1}").format(ref, return_against),
 					title=_("Invalid Return Item"),
 				)
 			if code and orig.item_code and orig.item_code != code:
 				frappe.throw(
-					_(
-						"Return item {0} does not match original row {1} ({2})"
-					).format(code, ref, orig.item_code),
+					_("Return item {0} does not match original row {1} ({2})").format(
+						code, ref, orig.item_code
+					),
 					title=_("Invalid Return Item"),
 				)
 		else:
@@ -662,9 +655,7 @@ def build_sales_team_from_items(invoice_doc, invoice_level_team=None) -> list[di
 		if line_sp:
 			shares = [(line_sp, 1.0)]
 		elif invoice_team:
-			shares = [
-				(m["sales_person"], flt(m["allocated_percentage"]) / 100.0) for m in invoice_team
-			]
+			shares = [(m["sales_person"], flt(m["allocated_percentage"]) / 100.0) for m in invoice_team]
 		else:
 			continue
 

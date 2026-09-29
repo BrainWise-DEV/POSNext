@@ -150,9 +150,7 @@ class TestBuildSalesTeamFromItems(unittest.TestCase):
 			"GRANT-1": {"item_group": "Products", "brand": "Acme", "grant_commission": 1},
 			"SPOOF": {"item_group": "Products", "brand": "Acme", "grant_commission": 1},
 		}
-		dims = table.get(
-			item_code, {"item_group": "Products", "brand": "Acme", "grant_commission": 1}
-		)
+		dims = table.get(item_code, {"item_group": "Products", "brand": "Acme", "grant_commission": 1})
 		if cache is not None:
 			cache[item_code] = dims
 		return dims
@@ -616,9 +614,7 @@ class TestValidateAssignments(unittest.TestCase):
 			pos_profile="POS-1",
 		)
 		with self.assertRaisesRegex(RuntimeError, "invalid"):
-			spc.validate_sales_person_assignments(
-				invoice, "POS-1", invoice_level_team=[]
-			)
+			spc.validate_sales_person_assignments(invoice, "POS-1", invoice_level_team=[])
 
 	@patch.object(spc, "sales_persons_enabled", return_value=True)
 	@patch.object(spc, "get_allowed_sales_person_names", return_value={"SP-A", "SP-B"})

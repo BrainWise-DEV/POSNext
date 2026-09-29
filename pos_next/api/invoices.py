@@ -541,9 +541,7 @@ def _ensure_invoice_customer(invoice_doc, pos_profile=None):
 		return
 
 	frappe.throw(
-		_(
-			"Customer is required. Please select a customer or configure a default customer in POS Profile."
-		),
+		_("Customer is required. Please select a customer or configure a default customer in POS Profile."),
 		title=_("Customer Required"),
 	)
 
@@ -904,9 +902,9 @@ def validate_return_items(original_invoice_name, return_items, doctype="Sales In
 			if item_code and original_row_item[row_ref] != item_code:
 				return {
 					"valid": False,
-					"message": _(
-						"Return item {0} does not match original row {1} ({2})"
-					).format(item_code, row_ref, original_row_item[row_ref]),
+					"message": _("Return item {0} does not match original row {1} ({2})").format(
+						item_code, row_ref, original_row_item[row_ref]
+					),
 				}
 			remaining_row = original_row_qty.get(row_ref, 0)
 			if return_qty > remaining_row:

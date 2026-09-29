@@ -371,9 +371,7 @@ def get_sales_persons(pos_profile=None):
 	if not pos_profile:
 		frappe.throw(_("POS Profile is required"))
 
-	has_access = frappe.db.exists(
-		"POS Profile User", {"parent": pos_profile, "user": frappe.session.user}
-	)
+	has_access = frappe.db.exists("POS Profile User", {"parent": pos_profile, "user": frappe.session.user})
 	if not has_access:
 		frappe.throw(_("You don't have access to this POS Profile"))
 
@@ -400,12 +398,10 @@ def get_sales_persons(pos_profile=None):
 			{"item": item, "commission_rate": rate} for item, rate in maps["item_map"].items()
 		]
 		person["item_group_commissions"] = [
-			{"item_group": ig, "commission_rate": rate}
-			for ig, rate in maps["item_group_map"].items()
+			{"item_group": ig, "commission_rate": rate} for ig, rate in maps["item_group_map"].items()
 		]
 		person["brand_commissions"] = [
-			{"brand": brand, "commission_rate": rate}
-			for brand, rate in maps["brand_map"].items()
+			{"brand": brand, "commission_rate": rate} for brand, rate in maps["brand_map"].items()
 		]
 
 	return sales_persons

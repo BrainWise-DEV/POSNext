@@ -58,7 +58,12 @@ def get_columns(group_by_pos_profile=0):
 			},
 			{"fieldname": "avg_selling_rate", "label": _("Avg Rate"), "fieldtype": "Currency", "width": 110},
 			{"fieldname": "current_stock", "label": _("Current Stock"), "fieldtype": "Float", "width": 120},
-			{"fieldname": "days_to_stockout", "label": _("Days to Stockout"), "fieldtype": "Int", "width": 140},
+			{
+				"fieldname": "days_to_stockout",
+				"label": _("Days to Stockout"),
+				"fieldtype": "Int",
+				"width": 140,
+			},
 			{
 				"fieldname": "stock_depletion_rate",
 				"label": _("Depletion Rate/Day"),
@@ -133,9 +138,7 @@ def get_data(filters, group_by_pos_profile=0):
 			sold_keys = {(row.item_code, row.pos_profile) for row in data}
 		else:
 			sold_keys = {row.item_code for row in data}
-		zero_stock_items = _get_zero_stock_items(
-			filters, warehouse, sold_keys, group_by_pos_profile
-		)
+		zero_stock_items = _get_zero_stock_items(filters, warehouse, sold_keys, group_by_pos_profile)
 		data.extend(zero_stock_items)
 
 	if not data:
