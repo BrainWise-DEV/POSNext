@@ -1006,14 +1006,8 @@ def update_invoice(data):
 
 		company = invoice_doc.get("company") or (pos_profile_doc.company if pos_profile_doc else None)
 
-		if doctype == "Sales Invoice":
-			_ensure_invoice_customer(invoice_doc, pos_profile)
-			_apply_pos_item_accounting_dimensions(invoice_doc)
-
 		if company and invoice_doc.get("payments") and doctype == "Sales Invoice":
 			_set_payment_accounts(invoice_doc.payments, company)
-			_validate_customer_for_receivable_payments(invoice_doc)
-			_validate_payment_account_not_debit_to(invoice_doc)
 
 		# Validate return items if this is a return invoice
 		if (data.get("is_return") or invoice_doc.get("is_return")) and invoice_doc.get("return_against"):
@@ -1044,6 +1038,15 @@ def update_invoice(data):
 				invoice_doc.customer_name = cust.customer_name
 			except Exception as e:
 				frappe.log_error(f"Failed to create customer {customer_name}: {e}")
+
+		# Customer checks run only after the auto-create above, so a customer typed
+		# at the till (not yet in the system) is created rather than rejected.
+		if doctype == "Sales Invoice":
+			_ensure_invoice_customer(invoice_doc, pos_profile)
+			_apply_pos_item_accounting_dimensions(invoice_doc)
+			if company and invoice_doc.get("payments"):
+				_validate_customer_for_receivable_payments(invoice_doc)
+				_validate_payment_account_not_debit_to(invoice_doc)
 
 		# Disable automatic pricing rules (we handle discounts manually from POS)
 		invoice_doc.ignore_pricing_rule = 1
