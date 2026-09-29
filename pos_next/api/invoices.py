@@ -313,6 +313,7 @@ def _apply_pos_sales_team(invoice_doc, sales_team_data=None, pos_profile=None):
 		build_sales_team_from_items,
 		clear_sales_person_fields,
 		drop_missing_sales_persons,
+		original_has_sales_attribution,
 		persist_invoice_level_sales_team,
 		sales_persons_enabled,
 		validate_sales_person_assignments,
@@ -320,23 +321,29 @@ def _apply_pos_sales_team(invoice_doc, sales_team_data=None, pos_profile=None):
 	)
 
 	profile = pos_profile or invoice_doc.get("pos_profile")
+	is_return = bool(invoice_doc.get("is_return") and invoice_doc.get("return_against"))
 
-	# Feature disabled → strip any client-supplied SP fields (do not build commission)
-	if not sales_persons_enabled(profile):
+	# Feature disabled → strip any client-supplied SP fields (do not build commission).
+	# Exception: a return whose original sale carried sales persons still mirrors
+	# them, so the commission earned on the sale is reversed.
+	if not sales_persons_enabled(profile) and not (
+		is_return and original_has_sales_attribution(invoice_doc.return_against)
+	):
 		clear_sales_person_fields(invoice_doc)
 		return
 
-	# Returns: lock sales_person (and invoice-level team) to the original sale
-	if invoice_doc.get("is_return") and invoice_doc.get("return_against"):
+	if is_return:
+		# Returns: lock sales_person (and invoice-level team) to the original sale.
+		# No "Sales Person is required" check: a reversal mirrors whatever the
+		# original had — including nothing (sold before the feature was enabled,
+		# while it was Disabled, or offline without a Sales Person). Deleted SPs
+		# are dropped; disabled ones are kept so their commission is reversed.
 		apply_return_sales_person_from_original(invoice_doc)
-		invoice_level = getattr(invoice_doc.flags, "pos_invoice_level_sales_team", None) or []
-		# Coverage still required when feature enabled; skip allowlist — original
-		# SPs may have been disabled since the sale and must still reverse.
-		validate_sales_person_coverage(
+		invoice_level = drop_missing_sales_persons(
 			invoice_doc,
-			pos_profile=profile,
-			invoice_level_team=invoice_level,
+			getattr(invoice_doc.flags, "pos_invoice_level_sales_team", None) or [],
 		)
+		invoice_doc.flags.pos_allow_disabled_sales_persons = True
 	else:
 		# Explicit cashier team only — never fall back to rebuilt doc.sales_team
 		invoice_level = sales_team_data if sales_team_data is not None else []
@@ -359,7 +366,7 @@ def _apply_pos_sales_team(invoice_doc, sales_team_data=None, pos_profile=None):
 	# Remember invoice-level fallback so calculate_contribution can rebuild correctly
 	invoice_doc.flags.pos_invoice_level_sales_team = invoice_level
 	# Persist cashier team (not the rebuilt aggregate) for accurate return reversal
-	if not (invoice_doc.get("is_return") and invoice_doc.get("return_against")):
+	if not is_return:
 		persist_invoice_level_sales_team(invoice_doc, invoice_level)
 
 	rows = build_sales_team_from_items(invoice_doc, invoice_level_team=invoice_level)

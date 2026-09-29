@@ -517,27 +517,69 @@ def load_stored_invoice_level_sales_team(invoice_name: str) -> list[dict] | None
 	return parsed
 
 
-def _legacy_invoice_level_from_original(return_against: str, original_items) -> list[dict]:
-	"""Best-effort recover cashier team for invoices saved before persistence existed."""
-	item_sps = [r.sales_person for r in original_items]
-	if item_sps and all(item_sps):
-		# All lines had item-level SP → no invoice-level fallback
-		return []
-	if not any(item_sps):
-		# Pure invoice-level sale → saved sales_team is the cashier team
-		rows = frappe.get_all(
-			"Sales Team",
-			filters={"parent": return_against, "parenttype": "Sales Invoice"},
-			fields=["sales_person", "allocated_percentage"],
-			order_by="idx",
+def original_has_sales_attribution(invoice_name: str | None) -> bool:
+	"""True when the Sales Invoice has a Sales Team row or an item-level Sales Person."""
+	if not invoice_name:
+		return False
+	if frappe.db.exists("Sales Team", {"parent": invoice_name, "parenttype": "Sales Invoice"}):
+		return True
+	if not frappe.get_meta("Sales Invoice Item").has_field("sales_person"):
+		return False
+	return bool(
+		frappe.db.exists(
+			"Sales Invoice Item",
+			{"parent": invoice_name, "parenttype": "Sales Invoice", "sales_person": ["is", "set"]},
 		)
+	)
+
+
+def _legacy_invoice_level_from_original(return_against: str, original_items) -> list[dict]:
+	"""Best-effort recovery of the cashier team for invoices saved before it was persisted.
+
+	- Every line had an item-level SP → there was no invoice-level fallback.
+	- No line had one → the saved Sales Team *is* the cashier team.
+	- Mixed → the saved Sales Team aggregates both. For each member, the
+	  allocated_amount minus what that member earned through their own item-level
+	  lines is their share of the uncovered lines; those residuals, normalised to
+	  100%, are the cashier team.
+	"""
+	item_sps = [_line_sales_person(r) for r in original_items]
+	if item_sps and all(item_sps):
+		return []
+
+	rows = frappe.get_all(
+		"Sales Team",
+		filters={"parent": return_against, "parenttype": "Sales Invoice"},
+		fields=["sales_person", "allocated_percentage", "allocated_amount"],
+		order_by="idx",
+	)
+	rows = [r for r in rows if r.sales_person]
+
+	if not any(item_sps):
 		return [
 			{"sales_person": r.sales_person, "allocated_percentage": flt(r.allocated_percentage)}
 			for r in rows
-			if r.sales_person
 		]
-	# Mixed legacy — cannot safely recover cashier team from the aggregate
-	return []
+
+	item_cache: dict[str, dict] = {}
+	item_level_amount: dict[str, float] = defaultdict(float)
+	for r in original_items:
+		sp = _line_sales_person(r)
+		if sp and _item_grants_commission(r, item_cache=item_cache):
+			item_level_amount[sp] += abs(flt(_item_get(r, "base_net_amount") or 0))
+
+	residual: dict[str, float] = {}
+	for r in rows:
+		rest = abs(flt(getattr(r, "allocated_amount", 0))) - item_level_amount.get(r.sales_person, 0)
+		if rest > 0.01:
+			residual[r.sales_person] = residual.get(r.sales_person, 0) + rest
+
+	total = sum(residual.values())
+	if not total:
+		return []
+	return [
+		{"sales_person": sp, "allocated_percentage": amount * 100.0 / total} for sp, amount in residual.items()
+	]
 
 
 def apply_return_sales_person_from_original(invoice_doc) -> None:
@@ -557,7 +599,7 @@ def apply_return_sales_person_from_original(invoice_doc) -> None:
 	original_items = frappe.get_all(
 		"Sales Invoice Item",
 		filters={"parent": return_against},
-		fields=["name", "item_code", "sales_person"],
+		fields=["name", "item_code", "sales_person", "base_net_amount"],
 	)
 	by_name = {r.name: r for r in original_items}
 	# Safe item_code fallback only when a single original row exists for that code

@@ -592,10 +592,51 @@ class TestLegacyInvoiceLevelRecovery(unittest.TestCase):
 		result = spc._legacy_invoice_level_from_original("SI-1", items)
 		self.assertEqual(result[0]["sales_person"], "SP-A")
 
-	def test_mixed_legacy_returns_empty(self):
+	@patch("pos_next.pos_next.utils.sales_person_commission.frappe.get_all", return_value=[])
+	def test_mixed_legacy_without_sales_team_returns_empty(self, _get_all):
 		items = [
 			SimpleNamespace(sales_person="SP-A"),
 			SimpleNamespace(sales_person=None),
+		]
+		self.assertEqual(spc._legacy_invoice_level_from_original("SI-1", items), [])
+
+	@patch.object(
+		spc,
+		"_get_item_master_dims",
+		return_value={"item_group": "Products", "brand": None, "grant_commission": 1},
+	)
+	@patch(
+		"pos_next.pos_next.utils.sales_person_commission.frappe.get_all",
+		return_value=[
+			# Aggregate saved by the old code: SP-A earned 300 on its own line + 350 of the
+			# uncovered 700; SP-B earned the other 350 of the uncovered line.
+			SimpleNamespace(sales_person="SP-A", allocated_percentage=65, allocated_amount=650),
+			SimpleNamespace(sales_person="SP-B", allocated_percentage=35, allocated_amount=350),
+		],
+	)
+	def test_mixed_legacy_recovers_cashier_team_from_residuals(self, _get_all, _dims):
+		items = [
+			SimpleNamespace(item_code="A", sales_person="SP-A", base_net_amount=300),
+			SimpleNamespace(item_code="B", sales_person=None, base_net_amount=700),
+		]
+		team = spc._legacy_invoice_level_from_original("SI-1", items)
+		by_sp = {m["sales_person"]: m["allocated_percentage"] for m in team}
+		self.assertAlmostEqual(by_sp["SP-A"], 50.0)
+		self.assertAlmostEqual(by_sp["SP-B"], 50.0)
+
+	@patch.object(
+		spc,
+		"_get_item_master_dims",
+		return_value={"item_group": "Products", "brand": None, "grant_commission": 1},
+	)
+	@patch(
+		"pos_next.pos_next.utils.sales_person_commission.frappe.get_all",
+		return_value=[SimpleNamespace(sales_person="SP-A", allocated_percentage=100, allocated_amount=300)],
+	)
+	def test_mixed_legacy_without_residual_returns_empty(self, _get_all, _dims):
+		items = [
+			SimpleNamespace(item_code="A", sales_person="SP-A", base_net_amount=300),
+			SimpleNamespace(item_code="B", sales_person=None, base_net_amount=0),
 		]
 		self.assertEqual(spc._legacy_invoice_level_from_original("SI-1", items), [])
 
