@@ -874,14 +874,6 @@ def validate_return_items(original_invoice_name, return_items, doctype="Sales In
 		.where(si_item.parent == original_invoice_name)
 	).run(as_dict=True)
 
-	original_item_qty = {}
-	original_row_qty = {}
-	original_row_item = {}
-	for item in original_items:
-		original_item_qty[item.item_code] = original_item_qty.get(item.item_code, 0) + flt(item.qty)
-		original_row_qty[item.name] = flt(item.qty)
-		original_row_item[item.name] = item.item_code
-
 	# Aggregate quantities already returned from previous return invoices
 	ret_si = frappe.qb.DocType(doctype)
 	ret_item = frappe.qb.DocType(f"{doctype} Item")
@@ -902,6 +894,24 @@ def validate_return_items(original_invoice_name, return_items, doctype="Sales In
 		)
 		.groupby(ret_item.item_code, ret_item.sales_invoice_item)
 	).run(as_dict=True)
+
+	return _check_return_quantities(original_invoice_name, original_items, returned_qty_data, return_items)
+
+
+def _check_return_quantities(original_invoice_name, original_items, returned_qty_data, return_items):
+	"""Pure row / item quantity checks for ``validate_return_items`` (no DB access).
+
+	``original_items``: rows of the original invoice (name, item_code, qty).
+	``returned_qty_data``: already-returned qty grouped by (item_code, sales_invoice_item).
+	``return_items``: the new return's rows (item_code, qty, sales_invoice_item).
+	"""
+	original_item_qty = {}
+	original_row_qty = {}
+	original_row_item = {}
+	for item in original_items:
+		original_item_qty[item.item_code] = original_item_qty.get(item.item_code, 0) + flt(item.qty)
+		original_row_qty[item.name] = flt(item.qty)
+		original_row_item[item.name] = item.item_code
 
 	# Subtract returned quantities (by row when linked, else by item_code)
 	for row in returned_qty_data:
