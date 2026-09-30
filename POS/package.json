@@ -24,7 +24,7 @@
 		"core-js-compat": "^3.48.0",
 		"dexie": "^4.2.0",
 		"feather-icons": "^4.29.2",
-		"frappe-ui": "^0.1.240",
+		"frappe-ui": "0.1.240",
 		"pinia": "^3.0.4",
 		"qz-tray": "^2.2.5",
 		"socket.io-client": "^4.7.2",
