@@ -37,6 +37,7 @@
   "display_discount_percentage",
   "display_discount_amount",
   "show_variants_as_items",
+  "cart_lifo",
   "section_break_operations",
   "allow_sales_order",
   "allow_select_sales_order",
@@ -69,6 +70,9 @@
   "section_break_misc",
   "input_qty",
   "allow_negative_stock",
+  "section_break_security",
+  "enable_session_lock",
+  "session_lock_timeout",
   "barcode_tab",
   "barcode_rules"
  ],
@@ -228,10 +232,10 @@
   },
   {
    "default": "0",
+   "description": "When enabled, non-cash payments (card, bank transfer) require exact amount. Cash payments can still have change. Cannot be used with Credit Sale or Partial Payment.",
    "fieldname": "use_exact_amount",
    "fieldtype": "Check",
-   "label": "Use Exact Amount for Non-Cash",
-   "description": "When enabled, non-cash payments (card, bank transfer) require exact amount. Cash payments can still have change. Cannot be used with Credit Sale or Partial Payment."
+   "label": "Use Exact Amount for Non-Cash"
   },
   {
    "default": "Disabled",
@@ -255,7 +259,7 @@
    "label": "Default Card View"
   },
   {
-   "default": "0",
+   "default": "1",
    "description": "Show item codes in the UI",
    "fieldname": "display_item_code",
    "fieldtype": "Check",
@@ -301,6 +305,13 @@
    "label": "Show Variants as Items"
   },
   {
+   "default": "0",
+   "description": "Show most recently added item at the top of the cart",
+   "fieldname": "cart_lifo",
+   "fieldtype": "Check",
+   "label": "LIFO Cart Order (Newest on Top)"
+  },
+  {
    "collapsible": 1,
    "fieldname": "section_break_operations",
    "fieldtype": "Section Break",
@@ -340,11 +351,11 @@
   },
   {
    "default": "0",
+   "depends_on": "allow_return",
+   "description": "Number of days allowed for invoice returns. Set to 0 for unlimited returns.",
    "fieldname": "return_validity_days",
    "fieldtype": "Int",
-   "label": "Return Validity Days",
-   "description": "Number of days allowed for invoice returns. Set to 0 for unlimited returns.",
-   "depends_on": "allow_return"
+   "label": "Return Validity Days"
   },
   {
    "default": "0",
@@ -513,6 +524,27 @@
    "label": "Allow Negative Stock"
   },
   {
+   "collapsible": 1,
+   "fieldname": "section_break_security",
+   "fieldtype": "Section Break",
+   "label": "Security"
+  },
+  {
+   "default": "0",
+   "description": "Lock the POS screen after a period of inactivity or when the browser tab loses focus",
+   "fieldname": "enable_session_lock",
+   "fieldtype": "Check",
+   "label": "Enable Session Lock"
+  },
+  {
+   "default": "5",
+   "depends_on": "enable_session_lock",
+   "description": "Minutes of inactivity before the session is locked",
+   "fieldname": "session_lock_timeout",
+   "fieldtype": "Int",
+   "label": "Session Lock Timeout (minutes)"
+  },
+  {
    "fieldname": "barcode_tab",
    "fieldtype": "Tab Break",
    "label": "Barcode"
@@ -526,7 +558,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-01-11 16:52:08.009217",
+ "modified": "2026-06-03 15:54:09.903964",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Settings",
@@ -553,6 +585,17 @@
    "read": 1,
    "report": 1,
    "role": "Sales Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Nexus POS Manager",
    "share": 1,
    "write": 1
   },

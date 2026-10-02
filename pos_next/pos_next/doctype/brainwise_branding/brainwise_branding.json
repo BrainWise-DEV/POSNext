@@ -1,6 +1,6 @@
 {
  "actions": [],
- "creation": "2025-11-05 00:00:00.000000",
+ "creation": "2025-11-05 00:00:00",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
@@ -29,40 +29,39 @@
  "fields": [
   {
    "default": "1",
+   "description": "Branding is always enabled unless you provide the Master Key to disable it",
    "fieldname": "enabled",
    "fieldtype": "Check",
    "in_list_view": 1,
    "label": "Enabled",
-   "description": "Branding is always enabled unless you provide the Master Key to disable it",
    "read_only": 1
   },
   {
-   "collapsible": 0,
    "fieldname": "master_key_section",
    "fieldtype": "Section Break",
-   "label": "🔐 Master Key Protection"
+   "label": "\ud83d\udd10 Master Key Protection"
   },
   {
    "fieldname": "master_key_help",
    "fieldtype": "HTML",
    "label": "Master Key Help",
-   "options": "<div class=\"alert alert-warning\"><strong>🔒 Protected Configuration:</strong><br><br>• To <strong>disable branding</strong>, uncheck 'Enabled' and provide the Master Key<br>• To <strong>modify branding fields</strong> (text, name, URL, interval), provide the Master Key<br>• Master Key format: <code>{\"key\": \"...\", \"phrase\": \"...\"}</code><br><br>⚠️ The Master Key is not stored in the system and must be kept secure.<br>📧 Contact BrainWise support if you've lost the key.</div>"
+   "options": "<div class=\"alert alert-warning\"><strong>\ud83d\udd12 Protected Configuration:</strong><br><br>\u2022 To <strong>disable branding</strong>, uncheck 'Enabled' and provide the Master Key<br>\u2022 To <strong>modify branding fields</strong> (text, name, URL, interval), provide the Master Key<br>\u2022 Master Key format: <code>{\"key\": \"...\", \"phrase\": \"...\"}</code><br><br>\u26a0\ufe0f The Master Key is not stored in the system and must be kept secure.<br>\ud83d\udce7 Contact BrainWise support if you've lost the key.</div>"
   },
   {
+   "description": "Required to disable branding OR modify any branding configuration fields. The key will NOT be stored after validation.",
    "fieldname": "master_key_provided",
    "fieldtype": "Password",
-   "label": "Master Key (JSON)",
-   "description": "Required to disable branding OR modify any branding configuration fields. The key will NOT be stored after validation."
+   "label": "Master Key (JSON)"
   },
   {
    "fieldname": "section_break_branding",
    "fieldtype": "Section Break",
-   "label": "🎨 Branding Configuration"
+   "label": "\ud83c\udfa8 Branding Configuration"
   },
   {
    "fieldname": "branding_locked_notice",
    "fieldtype": "HTML",
-   "options": "<div class=\"alert alert-info\" style=\"margin-bottom: 15px;\"><strong>🔒 These fields are protected and read-only.</strong><br>To modify them, provide the Master Key above.</div>"
+   "options": "<div class=\"alert alert-info\" style=\"margin-bottom: 15px;\"><strong>\ud83d\udd12 These fields are protected and read-only.</strong><br>To modify them, provide the Master Key above.</div>"
   },
   {
    "default": "Powered by",
@@ -70,8 +69,8 @@
    "fieldtype": "Data",
    "in_list_view": 1,
    "label": "Brand Text",
-   "reqd": 1,
-   "read_only": 1
+   "read_only": 1,
+   "reqd": 1
   },
   {
    "default": "BrainWise",
@@ -79,16 +78,16 @@
    "fieldtype": "Data",
    "in_list_view": 1,
    "label": "Brand Name",
-   "reqd": 1,
-   "read_only": 1
+   "read_only": 1,
+   "reqd": 1
   },
   {
    "default": "https://nexus.brainwise.me",
    "fieldname": "brand_url",
    "fieldtype": "Data",
    "label": "Brand URL",
-   "reqd": 1,
-   "read_only": 1
+   "read_only": 1,
+   "reqd": 1
   },
   {
    "fieldname": "column_break_config",
@@ -167,7 +166,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2025-11-05 12:00:00.000000",
+ "modified": "2026-06-03 15:54:13.334363",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "BrainWise Branding",
@@ -188,9 +187,14 @@
   },
   {
    "read": 1,
+   "role": "Nexus POS Manager"
+  },
+  {
+   "read": 1,
    "role": "Sales User"
   }
  ],
+ "row_format": "Dynamic",
  "sort_field": "modified",
  "sort_order": "DESC",
  "states": [],

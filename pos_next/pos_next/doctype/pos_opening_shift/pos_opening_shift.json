@@ -121,17 +121,16 @@
    "read_only": 1
   },
   {
-  "allow_on_submit": 1,
-  "fieldname": "pos_closing_shift",
-  "fieldtype": "Data",
-  "label": "POS Closing Shift",
-  "read_only": 0,
-  "read_only_depends_on": "eval:doc.docstatus==1"
- }
-],
+   "allow_on_submit": 1,
+   "fieldname": "pos_closing_shift",
+   "fieldtype": "Data",
+   "label": "POS Closing Shift",
+   "read_only_depends_on": "eval:doc.docstatus==1"
+  }
+ ],
  "is_submittable": 1,
  "links": [],
- "modified": "2022-11-22 15:04:30.555123",
+ "modified": "2026-06-03 15:54:10.799263",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Opening Shift",
@@ -167,6 +166,19 @@
   {
    "cancel": 1,
    "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Nexus POS Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "cancel": 1,
+   "create": 1,
    "delete": 1,
    "email": 1,
    "export": 1,
@@ -191,7 +203,9 @@
    "write": 1
   }
  ],
+ "row_format": "Dynamic",
  "sort_field": "modified",
  "sort_order": "DESC",
+ "states": [],
  "track_changes": 1
 }

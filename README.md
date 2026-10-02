@@ -16,6 +16,17 @@
 
 ---
 
+## Branches
+
+| Branch | Stability | Purpose |
+|--------|-----------|---------|
+| [`version-15`](https://github.com/BrainWise-DEV/POSNext/tree/version-15) | **Stable** | Production-ready release for Frappe/ERPNext v15 |
+| [`develop`](https://github.com/BrainWise-DEV/POSNext/tree/develop) | **Unstable** | Active development — may contain breaking changes |
+
+> For production use, always install from the `version-15` branch.
+
+---
+
 ## 🎯 Why POS Next?
 
 POS Next is a **complete rewrite** of the ERPNext POS system, built from the ground up with modern technologies to deliver:
@@ -165,7 +176,7 @@ POS Next is a **complete rewrite** of the ERPNext POS system, built from the gro
 cd ~/frappe-bench
 
 # Get the app from GitHub
-bench get-app https://github.com/BrainWise-DEV/pos_next.git --branch develop
+bench get-app https://github.com/BrainWise-DEV/pos_next.git --branch version-15
 
 # Install on your site
 bench --site [your-site-name] install-app pos_next
@@ -179,6 +190,26 @@ bench build --app pos_next
 # Restart (production only)
 bench restart
 ```
+
+### Bootstrap dependencies (recommended helper)
+
+After `pos_next` is on the bench (`bench get-app ...`), you can ensure required and optional apps on a site with:
+
+```bash
+# Always ensures erpnext (version-15), then installs pos_next on the site
+bench bootstrap --site [your-site-name]
+
+# Also get/install posnext_promotions from the public Promotions repo
+bench bootstrap --site [your-site-name] --with-posnext-promotions
+```
+
+| App | Behavior |
+|-----|----------|
+| `erpnext` | **Required** — always fetched (`version-15`) and installed if missing |
+| `posnext_promotions` | **Optional** — only with `--with-posnext-promotions` (repo: `https://github.com/BrainWise-DEV/Promotions.git`, branch `main`) |
+| `pos_next` | Always installed on the site if missing (skipped if already installed) |
+
+Apps already present on the bench or site are skipped with a clear message. Bootstrap does not replace `migrate`, `build`, or `restart`.
 
 ### Development Setup
 
@@ -204,7 +235,7 @@ Already have POS Next? Update to the latest version:
 
 ```bash
 cd ~/frappe-bench/apps/pos_next
-git pull origin develop
+git pull origin version-15
 cd ../..
 
 # Apply updates

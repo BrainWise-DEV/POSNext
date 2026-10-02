@@ -226,7 +226,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2021-07-29 22:28:54.158213",
+ "modified": "2026-06-03 15:54:13.890422",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "Referral Code",
@@ -276,13 +276,27 @@
    "print": 1,
    "read": 1,
    "report": 1,
+   "role": "Nexus POS Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
    "role": "Website Manager",
    "share": 1,
    "write": 1
   }
  ],
+ "row_format": "Dynamic",
  "sort_field": "modified",
  "sort_order": "DESC",
+ "states": [],
  "title_field": "referral_code",
  "track_changes": 1
 }

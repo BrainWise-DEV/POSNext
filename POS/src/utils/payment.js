@@ -20,6 +20,6 @@ export function getPaymentIcon(type) {
 		"Mobile Money": "📱",
 		Check: "🧾",
 		"Gift Card": "🎁",
-	}
-	return iconMap[type] || "💰"
+	};
+	return iconMap[type] || "💰";
 }

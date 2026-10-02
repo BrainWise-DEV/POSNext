@@ -11,19 +11,19 @@
  * Performance improvement: ~300-500ms faster initial load
  */
 
-import { call } from "@/utils/apiWrapper"
-import { logger } from "@/utils/logger"
-import { defineStore } from "pinia"
-import { ref } from "vue"
+import { call } from "@/utils/apiWrapper";
+import { logger } from "@/utils/logger";
+import { defineStore } from "pinia";
+import { ref } from "vue";
 
-const log = logger.create("Bootstrap")
+const log = logger.create("Bootstrap");
 
 export const useBootstrapStore = defineStore("bootstrap", () => {
 	// State
-	const loaded = ref(false)
-	const loading = ref(false)
-	const data = ref(null)
-	const error = ref(null)
+	const loaded = ref(false);
+	const loading = ref(false);
+	const data = ref(null);
+	const error = ref(null);
 
 	/**
 	 * Load all initial data in a single API call
@@ -31,48 +31,48 @@ export const useBootstrapStore = defineStore("bootstrap", () => {
 	 */
 	async function loadInitialData() {
 		if (loaded.value) {
-			log.debug("Bootstrap data already loaded")
-			return data.value
+			log.debug("Bootstrap data already loaded");
+			return data.value;
 		}
 
 		if (loading.value) {
-			log.debug("Bootstrap already loading, waiting...")
+			log.debug("Bootstrap already loading, waiting...");
 			// Wait for existing load to complete
 			await new Promise((resolve) => {
 				const checkLoaded = setInterval(() => {
 					if (!loading.value) {
-						clearInterval(checkLoaded)
-						resolve()
+						clearInterval(checkLoaded);
+						resolve();
 					}
-				}, 50)
-			})
-			return data.value
+				}, 50);
+			});
+			return data.value;
 		}
 
-		loading.value = true
-		error.value = null
+		loading.value = true;
+		error.value = null;
 
 		try {
-			log.info("Loading bootstrap data...")
-			const result = await call("pos_next.api.bootstrap.get_initial_data", {})
+			log.info("Loading bootstrap data...");
+			const result = await call("pos_next.api.bootstrap.get_initial_data", {});
 
 			if (result?.success) {
-				data.value = result
-				loaded.value = true
+				data.value = result;
+				loaded.value = true;
 				log.success("Bootstrap data loaded", {
 					hasShift: !!result.shift,
 					locale: result.locale,
-				})
-				return result
+				});
+				return result;
 			} else {
-				throw new Error("Bootstrap API returned unsuccessful response")
+				throw new Error("Bootstrap API returned unsuccessful response");
 			}
 		} catch (err) {
-			log.error("Failed to load bootstrap data", err)
-			error.value = err.message || "Failed to load initial data"
-			return null
+			log.error("Failed to load bootstrap data", err);
+			error.value = err.message || "Failed to load initial data";
+			return null;
 		} finally {
-			loading.value = false
+			loading.value = false;
 		}
 	}
 
@@ -80,42 +80,42 @@ export const useBootstrapStore = defineStore("bootstrap", () => {
 	 * Get preloaded locale or null if not available
 	 */
 	function getPreloadedLocale() {
-		return data.value?.locale || null
+		return data.value?.locale || null;
 	}
 
 	/**
 	 * Get preloaded site name
 	 */
 	function getSiteName() {
-		return data.value?.site_name || null
+		return data.value?.site_name || null;
 	}
 
 	/**
 	 * Get preloaded shift data or null if not available
 	 */
 	function getPreloadedShift() {
-		return data.value?.shift || null
+		return data.value?.shift || null;
 	}
 
 	/**
 	 * Get preloaded POS profile data or null if not available
 	 */
 	function getPreloadedPOSProfile() {
-		return data.value?.pos_profile || null
+		return data.value?.pos_profile || null;
 	}
 
 	/**
 	 * Get preloaded POS settings or null if not available
 	 */
 	function getPreloadedPOSSettings() {
-		return data.value?.pos_settings || null
+		return data.value?.pos_settings || null;
 	}
 
 	/**
 	 * Get preloaded payment methods or empty array if not available
 	 */
 	function getPreloadedPaymentMethods() {
-		return data.value?.payment_methods || []
+		return data.value?.payment_methods || [];
 	}
 
 	/**
@@ -124,29 +124,31 @@ export const useBootstrapStore = defineStore("bootstrap", () => {
 	 * @returns {{ currency: number, float: number, rounding_method: string, number_format: string }}
 	 */
 	function getPreloadedPrecision() {
-		return data.value?.precision || {
-			currency: 2,
-			float: 3,
-			rounding_method: null,
-			number_format: null,
-		}
+		return (
+			data.value?.precision || {
+				currency: 2,
+				float: 3,
+				rounding_method: null,
+				number_format: null,
+			}
+		);
 	}
 
 	/**
 	 * Check if bootstrap data is available
 	 */
 	function hasBootstrapData() {
-		return loaded.value && data.value !== null
+		return loaded.value && data.value !== null;
 	}
 
 	/**
 	 * Reset bootstrap state (useful for logout/login cycles)
 	 */
 	function reset() {
-		loaded.value = false
-		loading.value = false
-		data.value = null
-		error.value = null
+		loaded.value = false;
+		loading.value = false;
+		data.value = null;
+		error.value = null;
 	}
 
 	return {
@@ -167,5 +169,5 @@ export const useBootstrapStore = defineStore("bootstrap", () => {
 		hasBootstrapData,
 		reset,
 		getSiteName,
-	}
-})
+	};
+});

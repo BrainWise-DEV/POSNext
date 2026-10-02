@@ -48,7 +48,13 @@ _asset_version = get_build_version()
 # page_js = {"page" : "public/js/file.js"}
 
 # include js in doctype views
-# doctype_js = {"doctype" : "public/js/doctype.js"}
+doctype_js = {
+	"Customer": "public/js/customer.js",
+	"User": "public/js/user.js",
+	"POS Profile": "public/js/pos_profile.js",
+	"Pricing Rule": "public/js/pricing_rule.js",
+	"Promotional Scheme": "public/js/promotional_scheme.js",
+}
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
@@ -79,56 +85,17 @@ _asset_version = get_build_version()
 # ----------
 
 # add methods and filters to jinja environment
-# jinja = {
-# 	"methods": "pos_next.utils.jinja_methods",
-# 	"filters": "pos_next.utils.jinja_filters"
-# }
+jinja = {
+	"methods": [
+		"pos_next.pos_next.utils.pos_closing_print.get_items_sold",
+	]
+}
 
 # Fixtures
 # --------
 fixtures = [
-	{
-		"dt": "Custom Field",
-		"filters": [
-			[
-				"name",
-				"in",
-				[
-					"Sales Invoice-posa_pos_opening_shift",
-					"Sales Invoice-posa_is_printed",
-					"Item-custom_company",
-					"POS Profile-posa_cash_mode_of_payment",
-					"POS Profile-posa_allow_delete",
-					"POS Profile-posa_block_sale_beyond_available_qty",
-					"Mode of Payment-is_wallet_payment"
-				]
-			]
-		]
-	},
-	{
-		"dt": "Print Format",
-		"filters": [
-			[
-				"name",
-				"in",
-				[
-					"POS Next Receipt"
-				]
-			]
-		]
-	},
-    {
-        "dt": "Role",
-        "filters": [
-            ["role_name", "in", ["POSNext Cashier"]]
-        ]
-    },
-    {
-        "dt": "Custom DocPerm",
-        "filters": [
-            ["role", "in", ["POSNext Cashier"]]
-        ]
-    }
+	{"dt": "Role", "filters": [["role_name", "in", ["POSNext Cashier", "Nexus POS Manager"]]]},
+	{"dt": "Custom DocPerm", "filters": [["role", "in", ["POSNext Cashier", "Nexus POS Manager"]]]},
 ]
 
 # Installation
@@ -166,65 +133,50 @@ before_uninstall = "pos_next.uninstall.before_uninstall"
 
 # notification_config = "pos_next.notifications.get_notification_config"
 
-# Permissions
-# -----------
-# Permissions evaluated in scripted ways
-
-# permission_query_conditions = {
-# 	"Event": "frappe.desk.doctype.event.event.get_permission_query_conditions",
-# }
-#
-# has_permission = {
-# 	"Event": "frappe.desk.doctype.event.event.has_permission",
-# }
-
-# Standard Queries
-# ----------------
-# Custom query for company-aware item filtering
-standard_queries = {
-	"Item": "pos_next.validations.item_query"
-}
-
 # DocType Class
 # ---------------
 # Override standard doctype classes
 
-override_doctype_class = {
-	"Sales Invoice": "pos_next.overrides.sales_invoice.CustomSalesInvoice"
-}
+override_doctype_class = {"Sales Invoice": "pos_next.overrides.sales_invoice.CustomSalesInvoice"}
 
 # Document Events
 # ---------------
 # Hook on document methods and events
 
 doc_events = {
-	"Item": {
-		"validate": "pos_next.validations.validate_item"
-	},
 	"Customer": {
 		"after_insert": [
 			"pos_next.api.customers.auto_assign_loyalty_program",
-			"pos_next.realtime_events.emit_customer_event"
+			"pos_next.realtime_events.emit_customer_event",
+			"pos_next.api.wallet.create_wallet_on_customer_insert",
 		],
 		"on_update": "pos_next.realtime_events.emit_customer_event",
-		"on_trash": "pos_next.realtime_events.emit_customer_event"
+		"on_trash": "pos_next.realtime_events.emit_customer_event",
 	},
 	"Sales Invoice": {
 		"validate": [
 			"pos_next.api.sales_invoice_hooks.validate",
-			"pos_next.api.wallet.validate_wallet_payment"
+			"pos_next.api.wallet.validate_wallet_payment",
 		],
+		"before_submit": "pos_next.authorization.gate.enforce_document",
 		"before_cancel": "pos_next.api.sales_invoice_hooks.before_cancel",
 		"on_submit": [
 			"pos_next.realtime_events.emit_stock_update_event",
-			"pos_next.api.wallet.process_loyalty_to_wallet"
+			"pos_next.api.wallet.process_loyalty_to_wallet",
+			"pos_next.api.sales_invoice_hooks.record_one_time_offer_usage",
 		],
-		"on_cancel": "pos_next.realtime_events.emit_stock_update_event",
-		"after_insert": "pos_next.realtime_events.emit_invoice_created_event"
+		"on_cancel": [
+			"pos_next.realtime_events.emit_stock_update_event",
+			"pos_next.api.sales_invoice_hooks.release_one_time_offer_usage",
+		],
+		"after_insert": "pos_next.realtime_events.emit_invoice_created_event",
 	},
-	"POS Profile": {
-		"on_update": "pos_next.realtime_events.emit_pos_profile_updated_event"
-	}
+	"POS Profile": {"on_update": "pos_next.realtime_events.emit_pos_profile_updated_event"},
+	"Mode of Payment": {
+		"after_insert": "pos_next.api.wallet.clear_wallet_payment_modes_cache",
+		"on_update": "pos_next.api.wallet.clear_wallet_payment_modes_cache",
+		"on_trash": "pos_next.api.wallet.clear_wallet_payment_modes_cache",
+	},
 }
 
 # Scheduled Tasks
@@ -308,6 +260,12 @@ scheduler_events = {
 # Authentication and authorization
 # --------------------------------
 
+# Restrict Nexus POS Manager Journal Entry desk/report access to POS expenses only.
+# Broader accounting roles are left unrestricted (see get_journal_entry_permission_query_conditions).
+permission_query_conditions = {
+	"Journal Entry": "pos_next.api.expenses.get_journal_entry_permission_query_conditions",
+}
+
 # auth_hooks = [
 # 	"pos_next.auth.validate"
 # ]
@@ -320,4 +278,15 @@ scheduler_events = {
 # }
 
 
-website_route_rules = [{'from_route': '/pos/<path:app_path>', 'to_route': 'pos'},]
+
+# Extension points consumed by POS Next, implemented by optional apps
+pos_next_loyalty_provider = []
+pos_next_bootstrap_settings = []
+pos_next_customer_validators = []
+pos_next_customer_prepare = []
+pos_next_customer_after_insert = []
+
+
+website_route_rules = [
+	{"from_route": "/pos/<path:app_path>", "to_route": "pos"},
+]

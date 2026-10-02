@@ -1,8 +1,5 @@
 <template>
-	<Dialog
-		v-model="show"
-		:options="{ title: __('Invoice History'), size: '5xl' }"
-	>
+	<Dialog v-model="show" :options="{ title: __('Invoice History'), size: '5xl' }">
 		<template #body-content>
 			<div class="flex flex-col gap-4">
 				<!-- Filters -->
@@ -12,7 +9,7 @@
 							v-model="searchTerm"
 							type="text"
 							:placeholder="__('Search by invoice number or customer...')"
-							@input="searchInvoices"
+							@input="onSearchInput"
 						>
 							<template #prefix>
 								<svg class="h-4 w-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -24,9 +21,10 @@
 					<Button
 						variant="subtle"
 						@click="loadInvoices"
-						:loading="invoicesResource.loading"
+						:loading="invoicesResource.loading && !isLoadingMore"
 						:title="__('Refresh')"
 					>
+						<!-- RotateCcw icon -->
 						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
 						</svg>
@@ -46,10 +44,11 @@
 					<p class="mt-2 text-sm text-gray-500">{{ __('No invoices found') }}</p>
 				</div>
 
+				<!-- Invoices List -->
 				<div v-else class="flex flex-col gap-2 max-h-96 overflow-y-auto pe-2">
 					<div
-						v-for="invoice in filteredInvoices"
-						:key="invoice.name"
+						v-for="(invoice, index) in filteredInvoices"
+						:key="invoice.name + invoice.posting_date"
 						class="bg-white border border-gray-200 rounded-lg p-3 hover:shadow-md transition-all"
 					>
 						<div class="flex items-start justify-between gap-3">
@@ -59,26 +58,35 @@
 									<h4 class="text-sm font-semibold text-gray-900">
 										{{ invoice.name }}
 									</h4>
-									<!-- Show Return badge (red) if it's a return invoice -->
+									<!-- Return badge -->
 									<span
 										v-if="invoice.is_return"
 										class="text-xs px-2 py-0.5 rounded-full font-medium bg-red-100 text-red-800"
 									>
-										{{ __('Return') }}
+										{{ __("Return") }}
 									</span>
-									<!-- Otherwise show regular status badge -->
+									<!-- Status badge -->
 									<span
 										v-else
 										:class="[
 											'text-xs px-2 py-0.5 rounded-full font-medium',
-											getInvoiceStatusColor(invoice)
+											getInvoiceStatusColor(invoice),
 										]"
 									>
 										{{ __(invoice.status) }}
 									</span>
 								</div>
-								<p class="text-xs text-gray-600 text-start">{{ invoice.customer_name }}</p>
-								<p class="text-xs text-gray-500 text-start">{{ formatDateTime(invoice.posting_date, invoice.posting_time) }}</p>
+								<p class="text-xs text-gray-600 text-start">
+									{{ invoice.customer_name }}
+								</p>
+								<p class="text-xs text-gray-500 text-start">
+									{{
+										formatDateTime(invoice.posting_date, invoice.posting_time)
+									}}
+								</p>
+								<p class="text-xs text-gray-500 text-start">
+									{{ formatPaymentModes(invoice) }}
+								</p>
 							</div>
 
 							<!-- Amount & Actions (End Side) -->
@@ -87,35 +95,41 @@
 									{{ formatCurrency(invoice.grand_total) }}
 								</p>
 								<div class="flex items-center gap-1 mt-2">
-									<button
+									<Button
+										variant="ghost"
+										theme="blue"
+										size="sm"
 										@click="viewInvoice(invoice)"
-										class="p-1.5 hover:bg-blue-50 rounded transition-colors"
 										:title="__('View Details')"
 									>
 										<svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
 											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
 										</svg>
-									</button>
-									<button
+									</Button>
+									<Button
+										variant="ghost"
+										theme="green"
+										size="sm"
 										@click="printInvoice(invoice)"
-										class="p-1.5 hover:bg-green-50 rounded transition-colors"
 										:title="__('Print')"
 									>
 										<svg class="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/>
 										</svg>
-									</button>
-									<button
+									</Button>
+									<Button
 										v-if="canCreateReturn(invoice)"
+										variant="ghost"
+										theme="orange"
+										size="sm"
 										@click="openReturnModal(invoice)"
-										class="p-1.5 hover:bg-orange-50 rounded transition-colors"
 										:title="__('Create Return')"
 									>
 										<svg class="w-4 h-4 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/>
 										</svg>
-									</button>
+									</Button>
 								</div>
 							</div>
 						</div>
@@ -132,7 +146,7 @@
 		</template>
 		<template #actions>
 			<Button variant="subtle" @click="show = false">
-				{{ __('Close') }}
+				{{ __("Close") }}
 			</Button>
 		</template>
 	</Dialog>
@@ -149,6 +163,7 @@
 </template>
 
 <script setup>
+import { useFormatters } from "@/composables/useFormatters"
 import { useToast } from "@/composables/useToast"
 import { DEFAULT_CURRENCY, DEFAULT_LOCALE, formatCurrency as formatCurrencyUtil } from "@/utils/currency"
 import { getInvoiceStatusColor } from "@/utils/invoice"
@@ -156,7 +171,8 @@ import { Button, Dialog, Input, createResource } from "frappe-ui"
 import { computed, ref, watch } from "vue"
 import ReturnInvoiceDialog from "./ReturnInvoiceDialog.vue"
 
-const { showError } = useToast()
+const { showError } = useToast();
+const { formatDate, formatTime } = useFormatters();
 
 const props = defineProps({
 	modelValue: Boolean,
@@ -166,13 +182,19 @@ const props = defineProps({
 		type: String,
 		default: DEFAULT_CURRENCY,
 	},
-})
+});
 
 function formatCurrency(amount) {
-	return formatCurrencyUtil(Number.parseFloat(amount || 0), props.currency)
+	return formatCurrencyUtil(Number.parseFloat(amount || 0), props.currency);
 }
 
-const emit = defineEmits(["update:modelValue", "create-return", "view-invoice", "print-invoice", "return-created"])
+const emit = defineEmits([
+	"update:modelValue",
+	"create-return",
+	"view-invoice",
+	"print-invoice",
+	"return-created",
+]);
 
 const show = ref(props.modelValue)
 const invoices = ref([])
@@ -182,36 +204,21 @@ const pageSize = 20
 const hasMore = ref(true)
 
 // Return dialog state
-const showReturnDialog = ref(false)
-const selectedInvoiceForReturn = ref(null)
+const showReturnDialog = ref(false);
+const selectedInvoiceForReturn = ref(null);
 
 // Track if we're loading more (appending) vs fresh load (replacing)
 const isLoadingMore = ref(false)
 
 // Create resource for loading invoices
 const invoicesResource = createResource({
-	url: "frappe.client.get_list",
+	url: "pos_next.api.invoices.get_invoices",
 	makeParams() {
 		return {
-			doctype: "Sales Invoice",
-			filters: {
-				is_pos: 1,
-				...(props.posProfile && { pos_profile: props.posProfile }),
-			},
-			fields: [
-				"name",
-				"customer",
-				"customer_name",
-				"posting_date",
-				"posting_time",
-				"grand_total",
-				"status",
-				"docstatus",
-				"is_return",
-			],
-			order_by: "modified desc",
-			start: page.value * pageSize,
-			page_length: pageSize,
+			pos_profile: props.posProfile,
+			search: searchTerm.value || undefined,
+			limit: pageSize,
+			offset: page.value * pageSize,
 		}
 	},
 	auto: false,
@@ -234,26 +241,34 @@ const invoicesResource = createResource({
 			hasMore.value = data.length === pageSize
 			isLoadingMore.value = false
 		}
+		isLoadingMore.value = false
 	},
 	onError(error) {
 		console.error("Error loading invoices:", error)
 		showError(__("Failed to load invoices"))
 		isLoadingMore.value = false
 	},
-})
+});
 
 watch(
 	() => props.modelValue,
 	(val) => {
 		show.value = val
 		if (val && props.posProfile) {
-			invoicesResource.reload()
+			loadInvoices()
 		}
 	},
 )
 
 watch(show, (val) => {
 	emit("update:modelValue", val)
+	// Dialog cleanup: reset state when dialog closes
+	if (!val) {
+		searchTerm.value = ""
+		page.value = 0
+		invoices.value = []
+		hasMore.value = true
+	}
 })
 
 // Clear selected invoice when return dialog closes
@@ -289,16 +304,28 @@ function loadMore() {
 	invoicesResource.reload()
 }
 
-function searchInvoices() {
-	// Debounced search - already filtered by computed property
+function debounce(fn, wait) {
+	let timer
+	return (...args) => {
+		clearTimeout(timer)
+		timer = setTimeout(() => fn(...args), wait)
+	}
+}
+
+const _debouncedSearch = debounce(() => {
+	loadInvoices()
+}, 300)
+
+function onSearchInput() {
+	_debouncedSearch()
 }
 
 function viewInvoice(invoice) {
-	emit("view-invoice", invoice)
+	emit("view-invoice", invoice);
 }
 
 function printInvoice(invoice) {
-	emit("print-invoice", invoice)
+	emit("print-invoice", invoice);
 }
 
 function canCreateReturn(invoice) {
@@ -310,8 +337,8 @@ function canCreateReturn(invoice) {
 }
 
 function openReturnModal(invoice) {
-	selectedInvoiceForReturn.value = invoice
-	showReturnDialog.value = true
+	selectedInvoiceForReturn.value = invoice;
+	showReturnDialog.value = true;
 }
 
 function handleReturnCreated(returnInvoice) {
@@ -322,14 +349,28 @@ function handleReturnCreated(returnInvoice) {
 }
 
 function formatDateTime(date, time) {
-	const dateStr = new Date(date).toLocaleDateString(DEFAULT_LOCALE, {
-		month: "short",
-		day: "numeric",
-		year: "numeric",
-	})
-	if (time) {
-		return `${dateStr} ${time}`
+	const dateStr = formatDate(date);
+	const timeStr = formatTime(time);
+	return [dateStr, timeStr].filter(Boolean).join(" ");
+}
+
+function formatPaymentModes(invoice) {
+	const payments = Array.isArray(invoice?.payments) ? invoice.payments : []
+	const validPayments = payments.filter((payment) => payment.mode_of_payment)
+
+	if (validPayments.length === 0) {
+		return __("No payment mode")
 	}
-	return dateStr
+
+	if (validPayments.length === 1) {
+		return __(validPayments[0].mode_of_payment)
+	}
+
+	return validPayments
+		.map(
+			(payment) =>
+				`${__(payment.mode_of_payment)} ${formatCurrency(Number.parseFloat(payment.amount || 0))}`,
+		)
+		.join(", ")
 }
 </script>

@@ -1,0 +1,22 @@
+{
+ "custom_fields": [
+  {
+   "allow_on_submit": 1,
+   "dt": "POS Closing Shift",
+   "fieldname": "custom_bank_deposit",
+   "fieldtype": "Link",
+   "insert_after": "pos_opening_shift",
+   "label": "Bank Deposit",
+   "module": "POS Next",
+   "name": "POS Closing Shift-custom_bank_deposit",
+   "no_copy": 1,
+   "options": "Bank Deposits",
+   "read_only": 1
+  }
+ ],
+ "custom_perms": [],
+ "doctype": "POS Closing Shift",
+ "links": [],
+ "property_setters": [],
+ "sync_on_migrate": 1
+}

@@ -36,9 +36,9 @@ export class CoalescingMutex {
 	 * @param {string} options.name - Optional name for debugging
 	 */
 	constructor(options = {}) {
-		this._activePromise = null
-		this._timeout = options.timeout ?? 60000
-		this._name = options.name || "Mutex"
+		this._activePromise = null;
+		this._timeout = options.timeout ?? 60000;
+		this._name = options.name || "Mutex";
 	}
 
 	/**
@@ -46,7 +46,7 @@ export class CoalescingMutex {
 	 * @returns {boolean}
 	 */
 	get isLocked() {
-		return this._activePromise !== null
+		return this._activePromise !== null;
 	}
 
 	/**
@@ -60,23 +60,23 @@ export class CoalescingMutex {
 	async withLock(fn, logFn = null) {
 		// If already running, wait for it then run again to catch new work
 		if (this._activePromise) {
-			logFn?.(`${this._name}: Waiting for ongoing operation to complete...`)
+			logFn?.(`${this._name}: Waiting for ongoing operation to complete...`);
 			try {
-				await this._activePromise
+				await this._activePromise;
 			} catch {
 				// Ignore errors from the previous run, we'll do our own
 			}
 			// Recursive call - will either start fresh or wait again
-			return this.withLock(fn, logFn)
+			return this.withLock(fn, logFn);
 		}
 
 		// Create the guarded promise with timeout
-		this._activePromise = this._executeWithTimeout(fn)
+		this._activePromise = this._executeWithTimeout(fn);
 
 		try {
-			return await this._activePromise
+			return await this._activePromise;
 		} finally {
-			this._activePromise = null
+			this._activePromise = null;
 		}
 	}
 
@@ -87,19 +87,19 @@ export class CoalescingMutex {
 	async _executeWithTimeout(fn) {
 		return new Promise((resolve, reject) => {
 			const timeoutId = setTimeout(() => {
-				reject(new Error(`${this._name}: Operation timed out after ${this._timeout}ms`))
-			}, this._timeout)
+				reject(new Error(`${this._name}: Operation timed out after ${this._timeout}ms`));
+			}, this._timeout);
 
 			fn()
 				.then((result) => {
-					clearTimeout(timeoutId)
-					resolve(result)
+					clearTimeout(timeoutId);
+					resolve(result);
 				})
 				.catch((error) => {
-					clearTimeout(timeoutId)
-					reject(error)
-				})
-		})
+					clearTimeout(timeoutId);
+					reject(error);
+				});
+		});
 	}
 }
 
@@ -118,10 +118,10 @@ export class QueuedMutex {
 	 * @param {string} options.name - Optional name for debugging
 	 */
 	constructor(options = {}) {
-		this._queue = Promise.resolve()
-		this._timeout = options.timeout ?? 60000
-		this._name = options.name || "QueuedMutex"
-		this._pendingCount = 0
+		this._queue = Promise.resolve();
+		this._timeout = options.timeout ?? 60000;
+		this._name = options.name || "QueuedMutex";
+		this._pendingCount = 0;
 	}
 
 	/**
@@ -129,7 +129,7 @@ export class QueuedMutex {
 	 * @returns {boolean}
 	 */
 	get isLocked() {
-		return this._pendingCount > 0
+		return this._pendingCount > 0;
 	}
 
 	/**
@@ -137,7 +137,7 @@ export class QueuedMutex {
 	 * @returns {number}
 	 */
 	get pendingCount() {
-		return this._pendingCount
+		return this._pendingCount;
 	}
 
 	/**
@@ -149,25 +149,25 @@ export class QueuedMutex {
 	 * @returns {Promise} Result of the function execution
 	 */
 	async withLock(fn, logFn = null) {
-		this._pendingCount++
+		this._pendingCount++;
 
 		if (this._pendingCount > 1) {
-			logFn?.(`${this._name}: Queued (${this._pendingCount - 1} ahead)`)
+			logFn?.(`${this._name}: Queued (${this._pendingCount - 1} ahead)`);
 		}
 
 		// Chain onto the queue
 		const result = this._queue.then(async () => {
 			try {
-				return await this._executeWithTimeout(fn)
+				return await this._executeWithTimeout(fn);
 			} finally {
-				this._pendingCount--
+				this._pendingCount--;
 			}
-		})
+		});
 
 		// Update queue to include this operation
-		this._queue = result.catch(() => {})
+		this._queue = result.catch(() => {});
 
-		return result
+		return result;
 	}
 
 	/**
@@ -177,18 +177,18 @@ export class QueuedMutex {
 	async _executeWithTimeout(fn) {
 		return new Promise((resolve, reject) => {
 			const timeoutId = setTimeout(() => {
-				reject(new Error(`${this._name}: Operation timed out after ${this._timeout}ms`))
-			}, this._timeout)
+				reject(new Error(`${this._name}: Operation timed out after ${this._timeout}ms`));
+			}, this._timeout);
 
 			fn()
 				.then((result) => {
-					clearTimeout(timeoutId)
-					resolve(result)
+					clearTimeout(timeoutId);
+					resolve(result);
 				})
 				.catch((error) => {
-					clearTimeout(timeoutId)
-					reject(error)
-				})
-		})
+					clearTimeout(timeoutId);
+					reject(error);
+				});
+		});
 	}
 }

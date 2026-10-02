@@ -71,20 +71,49 @@
 					<!-- Two Cards Layout: Customer Card + Document Type Card -->
 					<div class="flex items-stretch gap-2">
 						<!-- Customer Card -->
-						<div class="flex-1 flex items-center gap-1.5 bg-white border border-gray-200 rounded-xl p-1.5 shadow-sm min-w-0">
+						<div
+							class="flex-1 flex items-center gap-1.5 bg-white border border-gray-200 rounded-xl p-1.5 shadow-sm min-w-0"
+						>
 							<!-- Customer Avatar & Info -->
 							<div class="flex items-center gap-2 min-w-0 flex-1 px-1.5 py-1">
-								<div class="w-8 h-8 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center flex-shrink-0">
-									<svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+								<div
+									class="w-8 h-8 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center flex-shrink-0"
+								>
+									<svg
+										class="w-4 h-4 text-white"
+										fill="none"
+										stroke="currentColor"
+										viewBox="0 0 24 24"
+									>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											stroke-width="2"
+											d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+										/>
 									</svg>
 								</div>
 								<div class="min-w-0 flex-1">
-									<p class="text-xs font-semibold text-gray-900 truncate leading-tight">
+									<p
+										class="text-xs font-semibold text-gray-900 truncate leading-tight"
+									>
 										{{ customer.customer_name || customer.name }}
 									</p>
-									<p v-if="customer.mobile_no" class="text-[10px] text-gray-500 truncate leading-tight">
+									<p
+										v-if="customer.mobile_no"
+										class="text-[10px] text-gray-500 truncate leading-tight"
+									>
 										{{ customer.mobile_no }}
+									</p>
+									<p
+										v-if="customerLpInfo.wallet_enabled"
+										class="text-[10px] text-amber-600 font-medium truncate leading-tight"
+									>
+										{{ __("LP") }}:
+										{{ formatCurrency(customerLpInfo.balance_iqd) }}
+										<span v-if="customerLpInfo.balance_points">
+											({{ customerLpInfo.balance_points }} {{ __("pts") }})
+										</span>
 									</p>
 								</div>
 							</div>
@@ -97,8 +126,18 @@
 									class="w-7 h-7 flex items-center justify-center text-blue-500 hover:bg-blue-50 active:bg-blue-100 rounded-lg transition-colors touch-manipulation"
 									:title="__('Edit customer details')"
 								>
-									<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
-										<path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+									<svg
+										class="w-4 h-4"
+										fill="none"
+										stroke="currentColor"
+										viewBox="0 0 24 24"
+										stroke-width="2"
+									>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+										/>
 									</svg>
 								</button>
 								<button
@@ -107,8 +146,18 @@
 									class="w-7 h-7 flex items-center justify-center text-green-600 hover:bg-green-50 active:bg-green-100 rounded-lg transition-colors touch-manipulation"
 									:title="__('Create new customer')"
 								>
-									<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5">
-										<path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+									<svg
+										class="w-4 h-4"
+										fill="none"
+										stroke="currentColor"
+										viewBox="0 0 24 24"
+										stroke-width="2.5"
+									>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											d="M12 4v16m8-8H4"
+										/>
 									</svg>
 								</button>
 								<button
@@ -117,8 +166,18 @@
 									class="w-7 h-7 flex items-center justify-center text-red-500 hover:bg-red-50 active:bg-red-100 rounded-lg transition-colors touch-manipulation"
 									:title="__('Remove customer')"
 								>
-									<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5">
-										<path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+									<svg
+										class="w-4 h-4"
+										fill="none"
+										stroke="currentColor"
+										viewBox="0 0 24 24"
+										stroke-width="2.5"
+									>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											d="M6 18L18 6M6 6l12 12"
+										/>
 									</svg>
 								</button>
 							</div>
@@ -134,13 +193,25 @@
 									type="button"
 									@click="selectDocType('Sales Invoice')"
 									class="px-2.5 py-1.5 text-[11px] font-semibold rounded-md transition-all duration-200 flex items-center gap-1"
-									:class="cartStore.targetDoctype === 'Sales Invoice'
-										? 'bg-white text-blue-600 shadow-sm'
-										: 'text-gray-500 hover:text-gray-700'"
+									:class="
+										cartStore.targetDoctype === 'Sales Invoice'
+											? 'bg-white text-blue-600 shadow-sm'
+											: 'text-gray-500 hover:text-gray-700'
+									"
 									:title="__('Sales Invoice')"
 								>
-									<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+									<svg
+										class="w-3.5 h-3.5"
+										fill="none"
+										stroke="currentColor"
+										viewBox="0 0 24 24"
+									>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											stroke-width="2"
+											d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+										/>
 									</svg>
 									<span>{{ __("Invoice") }}</span>
 								</button>
@@ -148,13 +219,25 @@
 									type="button"
 									@click="selectDocType('Sales Order')"
 									class="px-2.5 py-1.5 text-[11px] font-semibold rounded-md transition-all duration-200 flex items-center gap-1"
-									:class="cartStore.targetDoctype === 'Sales Order'
-										? 'bg-white text-orange-600 shadow-sm'
-										: 'text-gray-500 hover:text-gray-700'"
+									:class="
+										cartStore.targetDoctype === 'Sales Order'
+											? 'bg-white text-orange-600 shadow-sm'
+											: 'text-gray-500 hover:text-gray-700'
+									"
 									:title="__('Sales Order')"
 								>
-									<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+									<svg
+										class="w-3.5 h-3.5"
+										fill="none"
+										stroke="currentColor"
+										viewBox="0 0 24 24"
+									>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											stroke-width="2"
+											d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"
+										/>
 									</svg>
 									<span>{{ __("Order") }}</span>
 								</button>
@@ -192,6 +275,7 @@
 
 							<!-- Native Input for Instant Search -->
 							<input
+								ref="customerSearchInputRef"
 								id="cart-customer-search"
 								name="cart-customer-search"
 								:value="customerSearch"
@@ -240,13 +324,25 @@
 								type="button"
 								@click="selectDocType('Sales Invoice')"
 								class="h-full px-2.5 text-xs font-semibold rounded-lg transition-all duration-200 flex items-center gap-1.5"
-								:class="cartStore.targetDoctype === 'Sales Invoice'
-									? 'bg-white text-blue-600 shadow-sm'
-									: 'text-gray-500 hover:text-gray-700'"
+								:class="
+									cartStore.targetDoctype === 'Sales Invoice'
+										? 'bg-white text-blue-600 shadow-sm'
+										: 'text-gray-500 hover:text-gray-700'
+								"
 								:title="__('Sales Invoice')"
 							>
-								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+								<svg
+									class="w-4 h-4"
+									fill="none"
+									stroke="currentColor"
+									viewBox="0 0 24 24"
+								>
+									<path
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										stroke-width="2"
+										d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+									/>
 								</svg>
 								<span class="hidden sm:inline">{{ __("Invoice") }}</span>
 							</button>
@@ -254,13 +350,25 @@
 								type="button"
 								@click="selectDocType('Sales Order')"
 								class="h-full px-2.5 text-xs font-semibold rounded-lg transition-all duration-200 flex items-center gap-1.5"
-								:class="cartStore.targetDoctype === 'Sales Order'
-									? 'bg-white text-orange-600 shadow-sm'
-									: 'text-gray-500 hover:text-gray-700'"
+								:class="
+									cartStore.targetDoctype === 'Sales Order'
+										? 'bg-white text-orange-600 shadow-sm'
+										: 'text-gray-500 hover:text-gray-700'
+								"
 								:title="__('Sales Order')"
 							>
-								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+								<svg
+									class="w-4 h-4"
+									fill="none"
+									stroke="currentColor"
+									viewBox="0 0 24 24"
+								>
+									<path
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										stroke-width="2"
+										d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"
+									/>
 								</svg>
 								<span class="hidden sm:inline">{{ __("Order") }}</span>
 							</button>
@@ -275,16 +383,25 @@
 				>
 					<!-- Frequent Customers Header (when showing suggestions) -->
 					<div
-						v-if="customerSearchFocused && customerSearch.trim().length < 2 && customerResults.length > 0"
+						v-if="
+							customerSearchFocused &&
+							customerSearch.trim().length < 2 &&
+							customerResults.length > 0
+						"
 						class="px-2 py-1 bg-gray-50 border-b border-gray-200"
 					>
-						<span class="text-[10px] font-medium text-gray-500 uppercase tracking-wide">
-							{{ __('Frequent Customers') }}
+						<span
+							class="text-[10px] font-medium text-gray-500 uppercase tracking-wide"
+						>
+							{{ __("Frequent Customers") }}
 						</span>
 					</div>
 
 					<!-- Customer Results -->
-					<div v-if="customerResults.length > 0" class="max-h-48 overflow-y-auto overscroll-contain">
+					<div
+						v-if="customerResults.length > 0"
+						class="max-h-48 overflow-y-auto overscroll-contain"
+					>
 						<button
 							type="button"
 							v-for="(cust, index) in customerResults"
@@ -292,7 +409,9 @@
 							@mousedown.prevent="selectCustomer(cust)"
 							:class="[
 								'w-full text-start px-2 py-1.5 flex items-center gap-1.5 border-b border-gray-100 last:border-0 touch-manipulation select-none cursor-pointer active:bg-blue-200',
-								index === selectedIndex ? 'bg-blue-100' : 'hover:bg-blue-50 active:bg-blue-100',
+								index === selectedIndex
+									? 'bg-blue-100'
+									: 'hover:bg-blue-50 active:bg-blue-100',
 							]"
 						>
 							<div
@@ -369,8 +488,18 @@
 						type="button"
 						:title="__('Clear all items')"
 					>
-						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
-							<path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V5a2 2 0 00-2-2h-2a2 2 0 00-2 2v2M4 7h16"/>
+						<svg
+							class="w-4 h-4"
+							fill="none"
+							stroke="currentColor"
+							viewBox="0 0 24 24"
+							stroke-width="2"
+						>
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V5a2 2 0 00-2-2h-2a2 2 0 00-2 2v2M4 7h16"
+							/>
 						</svg>
 						<span>{{ __("Clear") }}</span>
 					</button>
@@ -382,18 +511,30 @@
 								'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors touch-manipulation',
 								cartSortBy
 									? 'text-blue-600 hover:bg-blue-50'
-									: 'text-gray-600 hover:bg-gray-50'
+									: 'text-gray-600 hover:bg-gray-50',
 							]"
-							:title="cartSortBy
-								? (cartSortOrder === 'asc'
-									? __('Sorted by {0} A-Z', [getCartSortLabel()])
-									: __('Sorted by {0} Z-A', [getCartSortLabel()]))
-								: __('Sort cart items')"
+							:title="
+								cartSortBy
+									? cartSortOrder === 'asc'
+										? __('Sorted by {0} A-Z', [getCartSortLabel()])
+										: __('Sorted by {0} Z-A', [getCartSortLabel()])
+									: __('Sort cart items')
+							"
 							:aria-label="__('Sort cart items')"
 							type="button"
 						>
-							<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
-								<path stroke-linecap="round" stroke-linejoin="round" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/>
+							<svg
+								class="w-4 h-4"
+								fill="none"
+								stroke="currentColor"
+								viewBox="0 0 24 24"
+								stroke-width="2"
+							>
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"
+								/>
 							</svg>
 							<span>{{ __("Sort") }}</span>
 						</button>
@@ -405,8 +546,10 @@
 							class="absolute end-0 mt-1 w-52 bg-white rounded-lg shadow-xl border border-gray-200 z-[9999]"
 						>
 							<div class="py-2">
-								<div class="px-3 py-2 text-xs font-semibold text-gray-500 uppercase border-b border-gray-100">
-									{{ __('Sort Cart') }}
+								<div
+									class="px-3 py-2 text-xs font-semibold text-gray-500 uppercase border-b border-gray-100"
+								>
+									{{ __("Sort Cart") }}
 								</div>
 								<div class="py-1">
 									<!-- No Sorting (clear) -->
@@ -414,15 +557,27 @@
 										@click="handleCartSortToggle(null)"
 										:class="[
 											'w-full px-3 py-2 text-sm transition-colors flex items-center justify-between group',
-											!cartSortBy ? 'bg-blue-50 text-blue-700' : 'text-gray-700 hover:bg-gray-50'
+											!cartSortBy
+												? 'bg-blue-50 text-blue-700'
+												: 'text-gray-700 hover:bg-gray-50',
 										]"
 										type="button"
 									>
 										<span class="flex items-center gap-2.5">
-											<svg class="w-4 h-4 text-gray-400 group-hover:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+											<svg
+												class="w-4 h-4 text-gray-400 group-hover:text-gray-600"
+												fill="none"
+												stroke="currentColor"
+												viewBox="0 0 24 24"
+											>
+												<path
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													stroke-width="2"
+													d="M6 18L18 6M6 6l12 12"
+												/>
 											</svg>
-											<span>{{ __('No Sorting') }}</span>
+											<span>{{ __("No Sorting") }}</span>
 										</span>
 									</button>
 
@@ -435,25 +590,50 @@
 										@click="handleCartSortToggle(option.field)"
 										:class="[
 											'w-full px-3 py-2 text-sm transition-colors flex items-center justify-between group',
-											cartSortBy === option.field ? 'bg-blue-50 text-blue-700' : 'text-gray-700 hover:bg-gray-50'
+											cartSortBy === option.field
+												? 'bg-blue-50 text-blue-700'
+												: 'text-gray-700 hover:bg-gray-50',
 										]"
 										type="button"
 									>
 										<span class="flex items-center gap-2.5">
-											<svg class="w-4 h-4 text-gray-400 group-hover:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="option.icon"/>
+											<svg
+												class="w-4 h-4 text-gray-400 group-hover:text-gray-600"
+												fill="none"
+												stroke="currentColor"
+												viewBox="0 0 24 24"
+											>
+												<path
+													stroke-linecap="round"
+													stroke-linejoin="round"
+													stroke-width="2"
+													:d="option.icon"
+												/>
 											</svg>
 											<span>{{ option.label }}</span>
 										</span>
 										<!-- Sort direction icon -->
 										<svg
 											class="w-5 h-5"
-											:class="cartSortBy === option.field ? 'text-blue-600' : 'text-gray-300'"
+											:class="
+												cartSortBy === option.field
+													? 'text-blue-600'
+													: 'text-gray-300'
+											"
 											fill="none"
 											stroke="currentColor"
 											viewBox="0 0 24 24"
 										>
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="CART_SORT_ICONS[getCartSortIconState(option.field)]"/>
+											<path
+												stroke-linecap="round"
+												stroke-linejoin="round"
+												stroke-width="2"
+												:d="
+													CART_SORT_ICONS[
+														getCartSortIconState(option.field)
+													]
+												"
+											/>
 										</svg>
 									</button>
 								</div>
@@ -680,6 +860,36 @@
 						}}</span>
 					</button>
 
+					<!-- POS Expense -->
+					<button
+						v-if="allowPosExpense"
+						type="button"
+						@click="$emit('show-expense')"
+						class="flex flex-col items-center justify-center p-3 sm:p-4 bg-white border border-gray-200 rounded-lg hover:border-amber-300 hover:bg-amber-50 active:bg-amber-100 transition-colors shadow-sm hover:shadow touch-manipulation group"
+						:title="__('Record POS expense')"
+					>
+						<div
+							class="w-9 h-9 sm:w-10 sm:h-10 bg-amber-50 rounded-full flex items-center justify-center mb-2 group-hover:bg-amber-100 transition-colors"
+						>
+							<svg
+								class="w-5 h-5 text-amber-600"
+								fill="none"
+								stroke="currentColor"
+								viewBox="0 0 24 24"
+							>
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"
+								/>
+							</svg>
+						</div>
+						<span class="text-[11px] sm:text-xs font-semibold text-gray-700">{{
+							__("POS Expense")
+						}}</span>
+					</button>
+
 					<!-- Close Shift -->
 					<button
 						type="button"
@@ -737,19 +947,53 @@
 							__("Create Customer")
 						}}</span>
 					</button>
+
+					<!-- Shift History -->
+					<button
+						type="button"
+						@click="$emit('show-shift-history')"
+						class="flex flex-col items-center justify-center p-3 sm:p-4 bg-white border border-gray-200 rounded-lg hover:border-indigo-300 hover:bg-indigo-50 active:bg-indigo-100 transition-colors shadow-sm hover:shadow touch-manipulation group"
+						:title="__('View shift history')"
+					>
+						<div
+							class="w-9 h-9 sm:w-10 sm:h-10 bg-indigo-50 rounded-full flex items-center justify-center mb-2 group-hover:bg-indigo-100 transition-colors"
+						>
+							<svg
+								class="w-5 h-5 text-indigo-600"
+								fill="none"
+								stroke="currentColor"
+								viewBox="0 0 24 24"
+							>
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"
+								/>
+							</svg>
+						</div>
+						<span class="text-[11px] sm:text-xs font-semibold text-gray-700">{{
+							__("Shift History")
+						}}</span>
+					</button>
 				</div>
 			</div>
 
 			<div v-else class="flex flex-col gap-0.5 sm:gap-1">
 				<div
-					v-for="(item, index) in sortedItems"
-					:key="item.item_code + '-' + (item.uom || '') + (item.is_free_item ? '-free' : '')"
-					@click="item.is_free_item ? null : openEditDialog(item)"
+					v-for="(item, index) in displayCartItems"
+					:key="
+						item.item_code +
+						'-' +
+						(item.uom || '') +
+						(item.is_free_item ? '-free' : '')
+					"
+					@click="openEditDialog(item)"
 					:class="[
 						'border rounded-md p-1.5 sm:p-2 transition-all duration-200',
-						item.is_free_item
-							? 'bg-green-50 border-green-300 cursor-default'
-							: 'bg-white border-gray-200 hover:border-blue-300 hover:shadow-md active:scale-[0.99] cursor-pointer group'
+						item.is_free_item || item._isStandaloneFreeRow
+							? 'bg-green-50 border-green-200 hover:border-green-300'
+							: 'bg-white border-gray-200 hover:border-blue-300 hover:shadow-md active:scale-[0.99] cursor-pointer group',
 					]"
 				>
 					<div class="flex gap-1.5 sm:gap-2">
@@ -793,11 +1037,11 @@
 									>
 										{{ item.item_name }}
 									</h4>
-									<!-- Free Item Badge -->
+									<!-- GWP / Free Item Badge -->
 									<span
-										v-if="item.free_qty && item.free_qty > 0"
+										v-if="getDisplayFreeQty(item) > 0"
 										class="inline-flex items-center px-1.5 py-0.5 bg-green-600 text-white rounded-full text-[9px] font-bold flex-shrink-0"
-										:title="item.is_free_item ? __('Free item') : __('{0} free item(s) included', [item.free_qty])"
+										:title="formatFreeItemBadgeText(getDisplayFreeQty(item))"
 									>
 										<svg
 											class="w-2.5 h-2.5 me-0.5"
@@ -810,11 +1054,16 @@
 												clip-rule="evenodd"
 											/>
 										</svg>
-										{{ item.is_free_item ? __("FREE") : __("+{0} FREE", [item.free_qty]) }}
+										{{ formatFreeItemBadgeText(getDisplayFreeQty(item)) }}
 									</span>
-									<!-- Discount Badge -->
+									<!-- Discount Badge (hide when same-item free gift is bundled on this line) -->
 									<div
-										v-if="item.discount_amount && item.discount_amount > 0"
+										v-if="
+											!isGwpItem(item) &&
+											!hasBundledSameItemFree(item) &&
+											item.discount_amount &&
+											item.discount_amount > 0
+										"
 										class="inline-flex items-center px-1.5 py-0.5 bg-gradient-to-r from-red-50 to-orange-50 text-red-700 rounded-full text-[9px] font-bold border border-red-200 flex-shrink-0"
 									>
 										<svg
@@ -830,13 +1079,13 @@
 										</svg>
 										{{
 											__("{0}%", [
-												Number(item.discount_percentage).toFixed(0),
+												Number(getItemDiscountPercent(item)).toFixed(0),
 											])
 										}}
 									</div>
 								</div>
 								<button
-									v-if="!item.is_free_item"
+									v-if="!isLockedFreeRow(item)"
 									type="button"
 									@click.stop="$emit('remove-item', item.item_code, item.uom)"
 									class="text-gray-400 hover:text-red-600 active:text-red-700 transition-colors flex-shrink-0 p-0.5 -m-0.5 touch-manipulation active:scale-90"
@@ -863,16 +1112,9 @@
 							<div class="flex items-center justify-between gap-1.5">
 								<div class="flex items-center gap-1.5">
 									<!-- Quantity Counter -->
-									<!-- For free items, show static quantity badge -->
-									<div
-										v-if="item.is_free_item"
-										class="flex items-center bg-green-100 border border-green-300 rounded px-2 h-6 sm:h-7"
-									>
-										<span class="text-xs sm:text-sm font-bold text-green-700">{{ item.quantity }}</span>
-									</div>
 									<!-- For serial items, show serial badge with edit button -->
 									<div
-										v-else-if="item.has_serial_no && item.serial_no"
+										v-if="item.has_serial_no && item.serial_no"
 										class="flex items-center gap-1"
 										@click.stop
 									>
@@ -904,21 +1146,27 @@
 										v-else
 										:class="[
 											'flex items-center bg-gray-50 border rounded overflow-hidden',
-											item.is_resolved_barcode ? 'border-amber-300 bg-amber-50' : 'border-gray-200'
+											item.is_resolved_barcode
+												? 'border-amber-300 bg-amber-50'
+												: 'border-gray-200',
 										]"
 									>
 										<button
 											type="button"
 											@click.stop="decrementQuantity(item)"
-											:disabled="item.is_resolved_barcode"
+											:disabled="item.is_resolved_barcode || isLockedFreeRow(item)"
 											:class="[
 												'w-6 h-6 sm:w-7 sm:h-7 flex items-center justify-center font-bold transition-colors touch-manipulation border-e',
 												item.is_resolved_barcode
 													? 'bg-gray-100 text-gray-400 cursor-not-allowed border-amber-300'
-													: 'bg-white hover:bg-gray-100 active:bg-gray-200 text-gray-700 border-gray-200'
+													: 'bg-white hover:bg-gray-100 active:bg-gray-200 text-gray-700 border-gray-200',
 											]"
 											:aria-label="__('Decrease quantity')"
-											:title="item.is_resolved_barcode ? __('Quantity locked (barcode item)') : __('Decrease quantity')"
+											:title="
+												item.is_resolved_barcode
+													? __('Quantity locked (barcode item)')
+													: __('Decrease quantity')
+											"
 										>
 											<svg
 												class="w-3 h-3"
@@ -935,35 +1183,43 @@
 											</svg>
 										</button>
 										<input
-											:value="formatQuantity(item.quantity)"
+											:value="formatQuantity(getDisplayQuantity(item))"
 											@click.stop
 											@input="updateQuantity(item, $event.target.value)"
 											@blur="handleQuantityBlur(item)"
 											@keydown.enter="$event.target.blur()"
 											type="text"
 											inputmode="decimal"
-											:disabled="item.is_resolved_barcode"
+											:disabled="item.is_resolved_barcode || isLockedFreeRow(item)"
 											:class="[
 												'w-16 sm:w-20 h-6 sm:h-7 text-center border-0 text-xs sm:text-sm font-bold focus:outline-none',
 												item.is_resolved_barcode
 													? 'bg-amber-50 text-amber-700 cursor-not-allowed'
-													: 'bg-white text-gray-900 focus:ring-2 focus:ring-blue-500'
+													: 'bg-white text-gray-900 focus:ring-2 focus:ring-blue-500',
 											]"
 											:aria-label="__('Quantity')"
-											:title="item.is_resolved_barcode ? __('Quantity locked (barcode item)') : ''"
+											:title="
+												item.is_resolved_barcode
+													? __('Quantity locked (barcode item)')
+													: ''
+											"
 										/>
 										<button
 											type="button"
 											@click.stop="incrementQuantity(item)"
-											:disabled="item.is_resolved_barcode"
+											:disabled="item.is_resolved_barcode || isLockedFreeRow(item)"
 											:class="[
 												'w-6 h-6 sm:w-7 sm:h-7 flex items-center justify-center font-bold transition-colors touch-manipulation border-s',
 												item.is_resolved_barcode
 													? 'bg-gray-100 text-gray-400 cursor-not-allowed border-amber-300'
-													: 'bg-white hover:bg-gray-100 active:bg-gray-200 text-gray-700 border-gray-200'
+													: 'bg-white hover:bg-gray-100 active:bg-gray-200 text-gray-700 border-gray-200',
 											]"
 											:aria-label="__('Increase quantity')"
-											:title="item.is_resolved_barcode ? __('Quantity locked (barcode item)') : __('Increase quantity')"
+											:title="
+												item.is_resolved_barcode
+													? __('Quantity locked (barcode item)')
+													: __('Increase quantity')
+											"
 										>
 											<svg
 												class="w-3 h-3"
@@ -987,22 +1243,25 @@
 											type="button"
 											@click="toggleUomDropdown(item.item_code, item.uom)"
 											:disabled="
-												item.is_resolved_barcode || !item.item_uoms || item.item_uoms.length === 0
+												item.is_resolved_barcode ||
+												isLockedFreeRow(item) ||
+												!item.item_uoms ||
+												item.item_uoms.length === 0
 											"
 											:class="[
 												'h-6 sm:h-7 text-[10px] sm:text-xs font-bold rounded ps-2 pe-5 transition-all touch-manipulation flex items-center justify-center min-w-[45px]',
 												item.is_resolved_barcode
 													? 'bg-amber-100 text-amber-700 border border-amber-300 cursor-not-allowed'
 													: item.item_uoms && item.item_uoms.length > 0
-														? 'bg-blue-500 text-white border border-blue-400 hover:bg-blue-600 active:scale-95 cursor-pointer'
-														: 'bg-gray-100 text-gray-500 border border-gray-200 cursor-not-allowed opacity-60',
+													? 'bg-blue-500 text-white border border-blue-400 hover:bg-blue-600 active:scale-95 cursor-pointer'
+													: 'bg-gray-100 text-gray-500 border border-gray-200 cursor-not-allowed opacity-60',
 											]"
 											:title="
 												item.is_resolved_barcode
 													? __('UOM locked (barcode item)')
 													: item.item_uoms && item.item_uoms.length > 0
-														? __('Click to change unit')
-														: __('Only one unit available')
+													? __('Click to change unit')
+													: __('Only one unit available')
 											"
 										>
 											{{
@@ -1020,8 +1279,8 @@
 												item.is_resolved_barcode
 													? 'text-amber-600'
 													: item.item_uoms && item.item_uoms.length > 0
-														? 'text-white'
-														: 'text-gray-400',
+													? 'text-white'
+													: 'text-gray-400',
 											]"
 											fill="none"
 											stroke="currentColor"
@@ -1073,9 +1332,20 @@
 									</div>
 
 									<!-- Price -->
-									<span class="text-[10px] sm:text-xs font-bold text-gray-700">
-										{{ formatCurrency(item.rate) }}
-									</span>
+									<div class="flex flex-col items-end">
+										<span
+											v-if="
+												item.is_already_discounted &&
+												item.price_list_rate > item.rate
+											"
+											class="text-[9px] text-gray-400 line-through leading-none"
+										>
+											{{ formatCurrency(item.price_list_rate) }}
+										</span>
+										<span class="text-[10px] sm:text-xs font-bold text-gray-700">
+											{{ formatCurrency(item.rate) }}
+										</span>
+									</div>
 								</div>
 
 								<!-- Item Total -->
@@ -1119,7 +1389,7 @@
 			<div v-if="items.length > 0" class="mb-1.5">
 				<!-- Discount Display - Highlighted -->
 				<div
-					v-if="discountAmount > 0"
+					v-if="displayDiscountAmount > 0"
 					class="flex items-center justify-between mb-0.5 bg-red-50 rounded px-1.5 py-1 -mx-0.5"
 				>
 					<div class="flex items-center gap-1">
@@ -1137,7 +1407,7 @@
 						<span class="text-xs font-bold text-red-700">{{ __("Discount") }}</span>
 					</div>
 					<span class="text-sm font-extrabold text-red-600 text-center min-w-[60px]">{{
-						formatCurrency(discountAmount)
+						formatCurrency(displayDiscountAmount)
 					}}</span>
 				</div>
 
@@ -1243,7 +1513,6 @@
 			:currency="currency"
 			@update-item="handleUpdateItem"
 		/>
-
 	</div>
 </template>
 
@@ -1253,6 +1522,7 @@
  * IMPORTS
  * ============================================================================
  */
+import { promoApi } from "@/utils/promoApi";
 import { usePOSCartStore } from "@/stores/posCart";
 import { usePOSSettingsStore } from "@/stores/posSettings";
 import { usePOSOffersStore } from "@/stores/posOffers";
@@ -1323,6 +1593,7 @@ const props = defineProps({
 		default: 0,
 	},
 	posProfile: String,
+	company: String,
 	currency: {
 		type: String,
 		default: DEFAULT_CURRENCY,
@@ -1334,6 +1605,10 @@ const props = defineProps({
 	warehouses: {
 		type: Array,
 		default: () => [],
+	},
+	allowPosExpense: {
+		type: Boolean,
+		default: false,
 	},
 });
 
@@ -1362,27 +1637,55 @@ const emit = defineEmits([
 	"show-drafts", // () - Show draft/held orders
 	"show-history", // () - Show invoice history
 	"show-return", // () - Open return invoice dialog
+	"show-expense", // () - Open POS expense dialog
 	"close-shift", // () - Close current shift
+	"show-shift-history", // () - Open shift history dialog
 	// "create-sales-order", // () - Create Sales Order // Removed as per instruction
 ]);
 
 // Cart sort composable (must be after defineProps)
 const {
-	cartSortBy, cartSortOrder, showCartSortDropdown,
+	cartSortBy,
+	cartSortOrder,
+	showCartSortDropdown,
 	sortedItems,
-	CART_SORT_OPTIONS, CART_SORT_ICONS,
-	toggleCartSortDropdown, handleCartSortToggle, getCartSortLabel, getCartSortIconState,
-} = useCartSort(() => props.items);
+	CART_SORT_OPTIONS,
+	CART_SORT_ICONS,
+	toggleCartSortDropdown,
+	handleCartSortToggle,
+	getCartSortLabel,
+	getCartSortIconState,
+} = useCartSort(
+	() => props.items,
+	computed(() => settingsStore.cartLifo),
+);
 
 /**
- * ============================================================================
- * REACTIVE STATE
+ * Display cart lines as stored. Same-SKU GWP free gifts are their own row
+ * with a free-item badge (buy 2 get 1 free → 2 paid + 1 free after 3 scans).
+ */
+const displayCartItems = computed(() => {
+	const items = sortedItems.value;
+	const merged = [];
+	for (const item of items) {
+		if (item.is_free_item) {
+			merged.push({ ...item, _isStandaloneFreeRow: true });
+			continue;
+		}
+		merged.push(item);
+	}
+	return merged;
+});
+
+/**
+ * Reactive State
  * ============================================================================
  */
 // Customer search state
 const customerSearch = ref(""); // Current search query
 const customerSearchContainer = ref(null); // Ref to search container for click-outside detection
 const customerSearchFocused = ref(false); // Track if search input is focused
+const customerSearchInputRef = ref(null); // Ref to the native search input element
 // Use Pinia store for allCustomers (shared with CustomerDialog, synced on customer creation)
 const allCustomers = computed(() => customerSearchStore.allCustomers);
 const customersLoaded = computed(() => customerSearchStore.allCustomers.length > 0);
@@ -1437,16 +1740,51 @@ if (props.posProfile) {
  * @endpoint pos_next.api.offers.get_active_coupons
  */
 const giftCardsResource = createResource({
-	url: "pos_next.api.offers.get_active_coupons",
+	url: promoApi.getActiveCoupons(),
 	makeParams() {
+		const customerName = props.customer?.name || props.customer;
 		return {
-			customer: props.customer?.name || props.customer,
-			company: props.posProfile, // Will get company from profile
+			customer: customerName,
+			company: props.company,
 		};
 	},
 	auto: false,
 	onSuccess(data) {
 		availableGiftCards.value = data?.message || data || [];
+	},
+});
+
+const customerLpInfo = ref({
+	wallet_enabled: false,
+	balance_points: 0,
+	balance_iqd: 0,
+});
+
+const customerLpResource = createResource({
+	url: "pos_next.api.wallet.get_wallet_info",
+	makeParams() {
+		const customerName = props.customer?.name || props.customer;
+		return {
+			customer: customerName,
+			company: props.company,
+			pos_profile: props.posProfile,
+		};
+	},
+	auto: false,
+	onSuccess(data) {
+		const payload = data?.message || data || {};
+		customerLpInfo.value = {
+			wallet_enabled: Boolean(payload.wallet_enabled),
+			balance_points: Number(payload.balance_points) || 0,
+			balance_iqd: Number(payload.balance_iqd ?? payload.wallet_balance) || 0,
+		};
+	},
+	onError() {
+		customerLpInfo.value = {
+			wallet_enabled: false,
+			balance_points: 0,
+			balance_iqd: 0,
+		};
 	},
 });
 
@@ -1458,10 +1796,35 @@ const giftCardsResource = createResource({
 watch(
 	() => props.customer,
 	(newCustomer) => {
-		if (newCustomer && props.posProfile && !isOffline()) {
+		const customerName = newCustomer?.name || newCustomer;
+		if (customerName && props.company && !isOffline()) {
 			giftCardsResource.reload();
 		} else {
 			availableGiftCards.value = [];
+		}
+
+		if (customerName && props.company && props.posProfile && !isOffline()) {
+			customerLpResource.reload();
+		} else {
+			customerLpInfo.value = {
+				wallet_enabled: false,
+				balance_points: 0,
+				balance_iqd: 0,
+			};
+		}
+	}
+);
+
+// Refresh wallet / LP balance after a completed sale when the cart is cleared
+// but the same customer stays selected (watch on customer alone won't re-fire).
+watch(
+	() => props.items?.length ?? 0,
+	(newLen, oldLen) => {
+		if (oldLen > 0 && newLen === 0) {
+			const customerName = props.customer?.name || props.customer;
+			if (customerName && props.company && props.posProfile && !isOffline()) {
+				customerLpResource.reload();
+			}
 		}
 	}
 );
@@ -1555,7 +1918,7 @@ const totalQuantity = computed(() => {
 	return props.items.reduce((sum, item) => {
 		const qty = item.quantity || 0;
 		// For dedicated free item rows, quantity IS the free qty — don't double-count
-		const freeQty = item.is_free_item ? 0 : (item.free_qty || 0);
+		const freeQty = item.is_free_item ? 0 : item.free_qty || 0;
 		return sum + qty + freeQty;
 	}, 0);
 });
@@ -1592,9 +1955,22 @@ const displaySubtotal = computed(() => {
  * @returns {Number} Grand total amount to display
  */
 const displayGrandTotal = computed(() => {
-	// Always: displaySubtotal + tax - discount
-	// This makes the display consistent and intuitive
-	return displaySubtotal.value + props.taxAmount - props.discountAmount;
+	return displaySubtotal.value + props.taxAmount - displayDiscountAmount.value;
+});
+
+/**
+ * Sum line discounts directly from cart items for instant, exact footer display.
+ * Avoids waiting on incremental cache updates after offer application.
+ */
+const displayDiscountAmount = computed(() => {
+	const lineDiscounts = props.items.reduce(
+		(sum, item) => sum + (Number.parseFloat(item.discount_amount) || 0),
+		0
+	);
+	const storeDiscount = Number.parseFloat(props.discountAmount) || 0;
+	// Prefer the larger value: store total includes header/additional discounts;
+	// line sum is fresher when offer stamps land before the incremental cache.
+	return Math.max(lineDiscounts, storeDiscount);
 });
 
 /**
@@ -1748,6 +2124,88 @@ function getInitials(name) {
 }
 
 /**
+ * Effective discount % for badges. Coupon max_amount caps are stored as
+ * absolute amounts (discount_percentage=0), so derive % from amount/base.
+ */
+function isLockedFreeRow(item) {
+	return Boolean(item?.is_free_item || item?._isStandaloneFreeRow);
+}
+
+function isGwpItem(item) {
+	return item?.discount_source === "gwp" || Number.parseFloat(item?.gwp_free_qty) > 0;
+}
+
+function getGwpFreeQty(item) {
+	const gwpQty = Number.parseFloat(item?.gwp_free_qty) || 0;
+	if (gwpQty > 0) return gwpQty;
+	return Number.parseFloat(item?.free_qty) || 0;
+}
+
+function hasBundledSameItemFree(item) {
+	if (item?.is_free_item || item?._isStandaloneFreeRow) {
+		return false;
+	}
+	const bundled = Number.parseFloat(item?._bundledFreeQty) || 0;
+	if (bundled > 0) return true;
+	if ((Number.parseFloat(item?.free_qty) || 0) > 0) return true;
+	return item?.discount_source === "free_item";
+}
+
+function getDisplayFreeQty(item) {
+	if (item?.is_free_item || item?._isStandaloneFreeRow) {
+		return Number.parseFloat(item.quantity) || 0;
+	}
+	const freeQty = Number.parseFloat(item?.free_qty) || 0;
+	if (freeQty > 0) return freeQty;
+	const bundled = Number.parseFloat(item?._bundledFreeQty) || 0;
+	if (bundled > 0) return bundled;
+	return getGwpFreeQty(item);
+}
+
+function getDisplayQuantity(item) {
+	if (item?.discount_source === "free_item" && (Number.parseFloat(item?.free_qty) || 0) > 0) {
+		return item.quantity || 0;
+	}
+	const bundled = Number.parseFloat(item?._bundledFreeQty) || 0;
+	if (bundled > 0) {
+		return (Number.parseFloat(item.quantity) || 0) + bundled;
+	}
+	return item.quantity || 0;
+}
+
+function formatFreeItemBadgeText(freeQty) {
+	const count = Number.parseFloat(freeQty) || 0;
+	if (count === 1) return __("1 free item");
+	return __("{0} free items", [count]);
+}
+
+function resolvePaidQuantityFromDisplay(item, displayQty) {
+	if (item?.discount_source === "free_item") {
+		const freeQty = Number.parseFloat(item?.free_qty) || 0;
+		if (freeQty > 0) {
+			return Math.max(0, displayQty - freeQty);
+		}
+	}
+	const bundled = Number.parseFloat(item?._bundledFreeQty) || 0;
+	if (bundled > 0) {
+		return Math.max(0, displayQty - bundled);
+	}
+	return displayQty;
+}
+
+function getItemDiscountPercent(item) {
+	const pct = Number.parseFloat(item?.discount_percentage) || 0;
+	if (pct > 0) return pct;
+	const discountAmount = Number.parseFloat(item?.discount_amount) || 0;
+	if (discountAmount <= 0) return 0;
+	const qty = Number.parseFloat(item?.quantity || item?.qty) || 0;
+	const rate = Number.parseFloat(item?.price_list_rate || item?.rate) || 0;
+	const base = qty * rate;
+	if (base <= 0) return 0;
+	return (discountAmount / base) * 100;
+}
+
+/**
  * Format a numeric amount as currency string.
  * Uses the component's currency prop for formatting.
  *
@@ -1805,12 +2263,11 @@ function getSmartStep(quantity) {
  * @param {Object} item - Cart item to increment
  */
 function incrementQuantity(item) {
-	// Prevent editing resolved barcode items
-	if (item.is_resolved_barcode) return;
+	if (item.is_resolved_barcode || isLockedFreeRow(item)) return;
 
-	const step = getSmartStep(item.quantity);
-	const newQty = Math.round((item.quantity + step) * 10000) / 10000;
-	emit("update-quantity", item.item_code, newQty, item.uom);
+	const step = getSmartStep(getDisplayQuantity(item));
+	const newPaidQty = Math.round((item.quantity + step) * 10000) / 10000;
+	emit("update-quantity", item.item_code, newPaidQty, item.uom);
 }
 
 /**
@@ -1820,17 +2277,16 @@ function incrementQuantity(item) {
  * @param {Object} item - Cart item to decrement
  */
 function decrementQuantity(item) {
-	// Prevent editing resolved barcode items
-	if (item.is_resolved_barcode) return;
+	if (item.is_resolved_barcode || isLockedFreeRow(item)) return;
 
-	const step = getSmartStep(item.quantity);
-	const newQty = Math.round((item.quantity - step) * 10000) / 10000;
+	const step = getSmartStep(getDisplayQuantity(item));
+	const newPaidQty = Math.round((item.quantity - step) * 10000) / 10000;
 
-	if (newQty <= 0) {
+	if (newPaidQty <= 0) {
 		// If quantity would be 0 or negative, remove the item
 		emit("remove-item", item.item_code, item.uom);
 	} else {
-		emit("update-quantity", item.item_code, newQty, item.uom);
+		emit("update-quantity", item.item_code, newPaidQty, item.uom);
 	}
 }
 
@@ -1841,21 +2297,23 @@ function decrementQuantity(item) {
  * @param {Object} item - Cart item to update
  * @param {String} value - New quantity value from input
  */
-  
+
 function updateQuantity(item, value) {
 	// Prevent editing resolved barcode items
-	if (item.is_resolved_barcode) return;
+	if (item.is_resolved_barcode || isLockedFreeRow(item)) return;
 
-	const qty = Number.parseFloat(value);
+	const displayQty = Number.parseFloat(value);
 
 	// If the input isn't a valid number (e.g., user cleared the field), do nothing
-	if (isNaN(qty)) return;
+	if (isNaN(displayQty)) return;
+
+	const paidQty = resolvePaidQuantityFromDisplay(item, displayQty);
 
 	// If quantity is zero or negative, remove the item from the cart
-	if (qty <= 0) return emit("remove-item", item.item_code, item.uom);
+	if (paidQty <= 0) return emit("remove-item", item.item_code, item.uom);
 
-	// For positive numbers, update quantity immediately (no rounding here while typing)
-	emit("update-quantity", item.item_code, qty, item.uom);
+	// For positive numbers, update paid quantity (free row stays separate in data)
+	emit("update-quantity", item.item_code, paidQty, item.uom);
 }
 
 /**
@@ -1867,6 +2325,7 @@ function updateQuantity(item, value) {
  * @param {Object} item - Cart item that lost focus
  */
 function handleQuantityBlur(item) {
+	if (isLockedFreeRow(item)) return;
 	// When user leaves the input field, round and validate
 	if (!item.quantity || item.quantity <= 0) {
 		// If quantity is 0 or invalid, remove the item
@@ -1898,6 +2357,11 @@ function toggleUomDropdown(itemCode, uom) {
  * Handles merging if target UOM already exists in cart
  */
 async function selectUom(item, newUom) {
+	// Defense in depth: free/GWP rows stay promotion-owned even if UI disable fails.
+	if (isLockedFreeRow(item)) {
+		openUomDropdown.value = null;
+		return;
+	}
 	if (item.uom === newUom) {
 		openUomDropdown.value = null;
 		return;
@@ -1921,6 +2385,9 @@ async function selectUom(item, newUom) {
  * @param {Object} item - Cart item to edit
  */
 function openEditDialog(item) {
+	// Free / GWP / promo gift rows are promotion-owned — cashier must not
+	// change qty or rate (would oversell free stock beyond the offer).
+	if (isLockedFreeRow(item)) return;
 	selectedItem.value = { ...item };
 	showEditDialog.value = true;
 }
@@ -2012,6 +2479,18 @@ onMounted(() => {
 onBeforeUnmount(() => {
 	if (typeof document === "undefined") return;
 	document.removeEventListener("mousedown", handleOutsideClick);
+});
+
+defineExpose({
+	focusCustomerSearch() {
+		if (props.customer) {
+			// A customer is already assigned, so the search input isn't rendered.
+			// Deselect it first so the input mounts, then clearCustomer() focuses it.
+			clearCustomer();
+		} else {
+			customerSearchInputRef.value?.focus();
+		}
+	},
 });
 </script>
 ```

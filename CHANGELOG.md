@@ -7,6 +7,174 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.16.0] - 2026-04-01
+
+### Added
+- **Brands Filter** (#180)
+  - Filter items by brand in the POS item selector
+  - Brand handling integrated with POS Profile configuration
+  - Offline brand filtering support in IndexedDB cache
+
+- **Credit Return to Wallet** (#181)
+  - Return invoices can credit the refund amount to customer wallet
+  - Auto-create wallet on customer insert if wallet feature is enabled
+  - Reverse wallet transactions for return invoices (full and partial returns)
+
+- **POS-Only Pricing Rules** (#169)
+  - New "POS Only" checkbox for Promotional Schemes and Pricing Rules
+  - POS-only rules are automatically excluded from non-POS documents (desk, website)
+  - Module-level monkey-patch for `get_other_conditions` since no Frappe hook exists
+
+- **Sales Persons Offline Caching** (#174)
+  - Sales persons list cached for offline use
+  - Refresh button to manually reload sales persons
+
+- **POS Reports Suite** (#158, #171, #172)
+  - Sales vs Shifts Report with advanced analytics and chart visualization
+  - Payments and Cash Control Report with expected amounts and per-shift rows
+  - Inventory Impact and Fast Movers Report with improved filters
+  - Cashier Performance Report
+  - Offline Sync and System Health Report
+  - Eliminated double-counting across all reports by using Sales Invoice Reference
+
+- **Session Lock Screen** (#161)
+  - Configurable session lock with password protection
+  - Brute-force protection with progressive lockout
+  - Offline unlock fallback
+  - Persistence across page reloads via localStorage
+  - Disabled by default in POS Settings
+
+- **QZ Tray Silent Printing** (#143)
+  - Self-signed certificate generation and server-side signing
+  - Silent printing integration for receipt printers
+  - Arabic translations for QZ Tray UI
+
+- **Cart Sort & Filter** (#145)
+  - Sort dropdown for cart items
+
+- **Show Variants as Items** (#150, #153)
+  - New POS setting to display item variants directly in the item grid
+  - Configurable per POS Profile
+
+- **Require Actual Closing Amounts** (#159)
+  - Manual entry of actual closing amounts when closing shift (no auto-fill from expected)
+
+- **Shift Reopen Initialization** (#160)
+  - Default customer, warehouse, and offline cache properly initialized on shift reopen
+
+- **Overpayment Confirmation** (#187)
+  - Confirmation dialog when cashier enters payment amount exceeding invoice total
+  - Closing shift reconciliation fixes
+
+- **Allow User to Edit Rate** (#128)
+  - Backend validation and audit logging for manual rate edits
+  - Frontend rate tracking
+
+- **Draft Invoice Printing** (#213, #223)
+  - Print draft invoices from the Drafts dialog
+  - Customizable print header and footer
+
+- **Hide POS Actions When Shift is Closed** (#212, #226)
+  - POS action buttons and print hidden when no active shift
+
+- **Auto-Select Quantity in UOM Dialog** (#222)
+  - Quantity input auto-selected when UOM dialog opens for faster editing
+
+- **UOM Handling Refactor** (#225)
+  - Refactored UOM handling in EditItemDialog for better price and factor display
+
+- **Nexus POS Manager Role**
+  - New role for desk switching functionality
+  - "Switch To Desk" button in POS Sale page
+
+- **Ignore Pricing Rule Setting** (#185)
+  - `ignore_pricing_rule` configurable in POS Profile
+
+- **Item Group Search** (#183)
+  - Search items by item group name in POS search
+
+- **Custom Fields Migration** (#179)
+  - Convert custom fields and print format from fixtures to exported customizations
+
+### Changed
+- **Customer Search** (#208)
+  - Server-side search filtering on name, customer_name, mobile_no, email_id (was browse-only before)
+  - Customer creation routed through `pos_next.api.customers.create_customer` instead of generic `frappe.client.insert`
+
+- **Loyalty Program Assignment** (#208)
+  - Context-aware loyalty assignment using explicit company/POS Profile
+  - Ambiguity guard: skips auto-assignment when multiple different loyalty programs exist for the same company
+
+- **Coupon Discount Base** (#219)
+  - Coupon dialog now respects `apply_on` setting (Grand Total vs Net Total)
+  - Previously all coupons calculated against subtotal regardless of configuration
+
+- **Partial Payments** (#216)
+  - Payment Entry creation now uses ERPNext core `get_payment_entry()` instead of manual field construction
+  - Multi-currency support via core currency setup
+  - Batch payment creation wrapped in database savepoint for atomic rollback on failure
+
+- **Return Invoice Performance** (#174)
+  - Optimized return invoice creation path
+
+### Fixed
+- **Payment Amount Preservation** (#228)
+  - ERPNext's `set_missing_values()` no longer wipes cashier-entered payment amounts during invoice creation
+  - Root cause: ERPNext removed the `if not self.get("payments")` guard in `set_pos_fields()`, causing `update_multi_mode_option()` to run unconditionally
+  - Fix: use `set_missing_values(for_validate=True)` to skip the destructive payment rebuild
+
+- **Customer Credit Redemption** (#218)
+  - Frontend now preserves customer credit metadata through the POS submit flow
+  - `customer_credit_dict` and `redeemed_customer_credit` properly sent to backend
+  - Pure customer-credit POS sales (no cash/card payment) now submit correctly
+
+- **Credit Source Ownership Validation** (#221)
+  - Validates that credit source invoices/advances belong to the same customer and company as the target invoice
+  - Defense-in-depth checks at both validation and mutation layers
+  - Rejects non-Customer or non-Receive payment entries before advance allocation
+
+- **One-Use Coupon Enforcement** (#205)
+  - Coupon usage counted across both Sales Invoice and legacy POS Invoice doctypes
+  - Prevents reuse of one-use coupons even when previous usage was on a different document type
+
+- **Cross-Branch Return Payment Modes** (#177)
+  - Foreign payment modes remapped on cross-branch return invoices
+  - Desk form closing shift path also handles remapping
+
+- **Stock Validation** (#168)
+  - Stock validation enforced across all cart entry paths (manual add, barcode, offers)
+
+- **Barcode Matching** (#129)
+  - Changed barcode matching to exact match (was substring match, causing false positives)
+  - Barcode scan queue prevents lost items at rapid scanning speeds
+
+- **Free Item Handling** (#151, #152, #154, #155)
+  - Warehouse assignment from POS Profile for free items
+  - Free items that are different products handled correctly
+  - Deduplicate free items from `mixed_conditions` pricing rules
+  - Promotions list filtered to only show selling schemes
+
+- **Pricing Rule Filter** (#155)
+  - Guard `pos_only` pricing rule filter for sites without POS Next installed
+
+- **Discount Calculation**
+  - Fixed discount calculation for fixed amount coupons
+  - Draft cleanup restricted to only POS Sales Invoices
+
+- **POS Profile Cache**
+  - Cache invalidation when POS Profile is updated
+
+- **Warehouse Settings**
+  - Warehouse change event uses event bus instead of emit (fixes settings propagation)
+
+- **Inclusive Tax Returns**
+  - Return invoice processing correctly handles inclusive taxes
+
+### Security
+- **Credit Source Validation** (#221) — Prevents cross-customer/cross-company credit theft via client-supplied document names
+- **Atomic Coupon Consumption** — Coupon usage increment protected by `SELECT FOR UPDATE` row locking (merged via #205)
+- **Session Lock** — Brute-force protection with progressive lockout for session lock screen
+
 ## [1.15.0] - 2026-02-06
 
 ### Added

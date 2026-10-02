@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Copyright (c) 2024, POS Next and contributors
 # For license information, please see license.txt
 
@@ -33,10 +32,20 @@ POS_SETTINGS_FIELDS = [
 	"allow_negative_stock",
 	"enable_sales_persons",
 	"silent_print",
+	"allow_print_draft_invoices",
 	"allow_sales_order",
 	"allow_select_sales_order",
 	"create_only_sales_order",
+	"enable_session_lock",
+	"session_lock_timeout",
 	"show_variants_as_items",
+	"enable_loyalty_program",
+	"default_loyalty_program",
+	"wallet_account",
+	"auto_create_wallet",
+	"loyalty_to_wallet",
+	"cart_lifo",
+	"display_item_code",
 ]
 
 # Default POS Settings values
@@ -60,8 +69,33 @@ DEFAULT_POS_SETTINGS = {
 	"allow_negative_stock": 0,
 	"enable_sales_persons": "Disabled",
 	"silent_print": 0,
+	"allow_print_draft_invoices": 0,
 	"allow_sales_order": 0,
 	"allow_select_sales_order": 0,
 	"create_only_sales_order": 0,
+	"enable_session_lock": 0,
+	"session_lock_timeout": 5,
 	"show_variants_as_items": 0,
+	"enable_loyalty_program": 0,
+	"default_loyalty_program": "",
+	"wallet_account": "",
+	"auto_create_wallet": 1,
+	"loyalty_to_wallet": 1,
+	"magento_loyalty_available": 0,
+	"miraaya_installed": 0,
+	"cart_lifo": 0,
+	"display_item_code": 1,
 }
+
+
+def merge_pos_settings(row=None):
+	"""DB row over defaults so runtime integration flags always exist.
+
+	`miraaya_installed` / `magento_loyalty_available` are not DocType columns;
+	hooks may overwrite them, but vanilla benches still need the keys present
+	when a POS Settings row exists (defaults alone only apply on miss/error).
+	"""
+	settings = DEFAULT_POS_SETTINGS.copy()
+	if row:
+		settings.update(row)
+	return settings

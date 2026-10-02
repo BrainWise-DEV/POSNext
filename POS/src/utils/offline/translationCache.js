@@ -1,8 +1,8 @@
-import { db } from "./db"
-import { logger } from "../logger"
+import { db } from "./db";
+import { logger } from "../logger";
 
 /** @type {import('../logger').Logger} */
-const log = logger.create("TranslationCache")
+const log = logger.create("TranslationCache");
 
 /**
  * @fileoverview Lightweight IndexedDB-backed cache for translation bundles.
@@ -20,13 +20,13 @@ const log = logger.create("TranslationCache")
  */
 
 /** @constant {number} Cache time-to-live in milliseconds (24 hours) */
-const CACHE_TTL = 24 * 60 * 60 * 1000
+const CACHE_TTL = 24 * 60 * 60 * 1000;
 
 /** @type {Map<string, TranslationEntry>} In-memory cache for fast lookups */
-const memoryCache = new Map()
+const memoryCache = new Map();
 
 /** @type {Map<string, Promise<TranslationEntry|null>>} Tracks in-flight refresh requests */
-const pendingRefreshes = new Map()
+const pendingRefreshes = new Map();
 
 /**
  * @typedef {Object} TranslationEntry
@@ -40,7 +40,7 @@ const pendingRefreshes = new Map()
  * @param {string|null|undefined} locale - Raw locale code
  * @returns {string} Normalized lowercase locale
  */
-const normalizeLocale = (locale) => (locale || "en").toLowerCase()
+const normalizeLocale = (locale) => (locale || "en").toLowerCase();
 
 /**
  * Persists translation entry to both memory and IndexedDB.
@@ -52,13 +52,13 @@ const normalizeLocale = (locale) => (locale || "en").toLowerCase()
  */
 async function persist(locale, messages, timestamp) {
 	try {
-		const entry = { locale, messages, timestamp }
-		memoryCache.set(locale, entry)
-		await db.translations.put(entry)
-		return entry
+		const entry = { locale, messages, timestamp };
+		memoryCache.set(locale, entry);
+		await db.translations.put(entry);
+		return entry;
 	} catch (error) {
-		log.error("Failed to cache translations:", error)
-		return null
+		log.error("Failed to cache translations:", error);
+		return null;
 	}
 }
 
@@ -69,20 +69,20 @@ async function persist(locale, messages, timestamp) {
  * @private
  */
 async function read(locale) {
-	const memoized = memoryCache.get(locale)
+	const memoized = memoryCache.get(locale);
 	if (memoized) {
-		return memoized
+		return memoized;
 	}
 
 	try {
-		const stored = await db.translations.get(locale)
+		const stored = await db.translations.get(locale);
 		if (stored) {
-			memoryCache.set(locale, stored)
+			memoryCache.set(locale, stored);
 		}
-		return stored || null
+		return stored || null;
 	} catch (error) {
-		log.error("Failed to get cached translations:", error)
-		return null
+		log.error("Failed to get cached translations:", error);
+		return null;
 	}
 }
 
@@ -99,7 +99,7 @@ export const translationCache = {
 	 * @returns {Promise<TranslationEntry|null>} Stored entry or null on failure
 	 */
 	async set(locale, messages, timestamp = Date.now()) {
-		return persist(normalizeLocale(locale), messages, timestamp)
+		return persist(normalizeLocale(locale), messages, timestamp);
 	},
 
 	/**
@@ -108,7 +108,7 @@ export const translationCache = {
 	 * @returns {Promise<TranslationEntry|null>} Cached entry or null if not found
 	 */
 	async get(locale) {
-		return read(normalizeLocale(locale))
+		return read(normalizeLocale(locale));
 	},
 
 	/**
@@ -118,7 +118,7 @@ export const translationCache = {
 	 * @returns {boolean} True if stale or missing timestamp
 	 */
 	isStale(timestamp, ttl = CACHE_TTL) {
-		return !timestamp || Date.now() - timestamp > ttl
+		return !timestamp || Date.now() - timestamp > ttl;
 	},
 
 	/**
@@ -136,32 +136,32 @@ export const translationCache = {
 	 * const entry = await translationCache.getFresh('ar', () => fetchFromAPI())
 	 */
 	async getFresh(locale, fetcher, options = {}) {
-		const { force = false, ttl = CACHE_TTL } = options
-		const normalized = normalizeLocale(locale)
-		const cached = await read(normalized)
+		const { force = false, ttl = CACHE_TTL } = options;
+		const normalized = normalizeLocale(locale);
+		const cached = await read(normalized);
 
 		if (!force && cached && !this.isStale(cached.timestamp, ttl)) {
-			return cached
+			return cached;
 		}
 
-		if (!fetcher) return cached
+		if (!fetcher) return cached;
 
 		// Return existing in-flight request to avoid duplicate fetches
-		const inflight = pendingRefreshes.get(normalized)
-		if (inflight) return inflight
+		const inflight = pendingRefreshes.get(normalized);
+		if (inflight) return inflight;
 
 		const promise = (async () => {
 			try {
-				const messages = await fetcher()
-				if (messages) return await persist(normalized, messages, Date.now())
+				const messages = await fetcher();
+				if (messages) return await persist(normalized, messages, Date.now());
 			} catch (error) {
-				log.error(`Failed to refresh translations for ${normalized}:`, error)
+				log.error(`Failed to refresh translations for ${normalized}:`, error);
 			}
-			return cached
-		})().finally(() => pendingRefreshes.delete(normalized))
+			return cached;
+		})().finally(() => pendingRefreshes.delete(normalized));
 
-		pendingRefreshes.set(normalized, promise)
-		return promise
+		pendingRefreshes.set(normalized, promise);
+		return promise;
 	},
 
 	/**
@@ -171,24 +171,24 @@ export const translationCache = {
 	 */
 	async clear(locale) {
 		if (!locale) {
-			memoryCache.clear()
+			memoryCache.clear();
 			try {
-				await db.translations.clear()
-				return true
+				await db.translations.clear();
+				return true;
 			} catch (error) {
-				log.error("Failed to clear translation cache:", error)
-				return false
+				log.error("Failed to clear translation cache:", error);
+				return false;
 			}
 		}
 
-		const normalized = normalizeLocale(locale)
-		memoryCache.delete(normalized)
+		const normalized = normalizeLocale(locale);
+		memoryCache.delete(normalized);
 		try {
-			await db.translations.delete(normalized)
-			return true
+			await db.translations.delete(normalized);
+			return true;
 		} catch (error) {
-			log.error(`Failed to clear translation cache for locale ${normalized}:`, error)
-			return false
+			log.error(`Failed to clear translation cache for locale ${normalized}:`, error);
+			return false;
 		}
 	},
-}
+};

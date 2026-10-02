@@ -21,6 +21,9 @@
   "pos_transactions",
   "section_break_9",
   "pos_payments",
+  "section_break_pos_expenses",
+  "pos_expenses",
+  "total_pos_expenses",
   "section_break_if3m1",
   "payment_reconciliation_details",
   "section_break_11",
@@ -28,6 +31,8 @@
   "section_break_13",
   "grand_total",
   "net_total",
+  "collected_amount",
+  "outstanding_total",
   "total_quantity",
   "column_break_16",
   "taxes",
@@ -151,6 +156,22 @@
    "read_only": 1
   },
   {
+   "default": "0",
+   "description": "Money actually taken during the shift. Excludes amounts put on customer account.",
+   "fieldname": "collected_amount",
+   "fieldtype": "Currency",
+   "label": "Collected Amount",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "description": "Invoiced value still owed by customers at the end of the shift.",
+   "fieldname": "outstanding_total",
+   "fieldtype": "Currency",
+   "label": "Outstanding Total",
+   "read_only": 1
+  },
+  {
    "fieldname": "total_quantity",
    "fieldtype": "Float",
    "label": "Total Quantity",
@@ -194,17 +215,36 @@
    "options": "POS Payment Entry Reference"
   },
   {
+   "fieldname": "section_break_pos_expenses",
+   "fieldtype": "Section Break",
+   "label": "POS Expenses"
+  },
+  {
+   "fieldname": "pos_expenses",
+   "fieldtype": "Table",
+   "label": "POS Expenses",
+   "options": "POS Closing Shift Expense",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "total_pos_expenses",
+   "fieldtype": "Currency",
+   "label": "Total POS Expenses",
+   "read_only": 1
+  },
+  {
    "fieldname": "section_break_if3m1",
    "fieldtype": "Section Break"
   }
  ],
  "is_submittable": 1,
  "links": [],
- "modified": "2023-06-12 03:01:49.146706",
+ "modified": "2026-09-06 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Closing Shift",
- "naming_rule": "Expression (old style)",
+ "naming_rule": "Expression",
  "owner": "Administrator",
  "permissions": [
   {
@@ -237,6 +277,19 @@
   {
    "cancel": 1,
    "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Nexus POS Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "cancel": 1,
+   "create": 1,
    "delete": 1,
    "email": 1,
    "export": 1,
@@ -261,6 +314,7 @@
    "write": 1
   }
  ],
+ "row_format": "Dynamic",
  "sort_field": "modified",
  "sort_order": "DESC",
  "states": [],

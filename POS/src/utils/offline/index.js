@@ -1,6 +1,6 @@
 // Main offline module - exports all offline functionality
 
-export { db, initDB, checkDBHealth, getSetting, setSetting } from "./db"
+export { db, initDB, checkDBHealth, getSetting, setSetting } from "./db";
 
 // Centralized offline state manager (single source of truth)
 export {
@@ -11,7 +11,7 @@ export {
 	getOfflineState,
 	checkConnectivity,
 	getConnectionQuality,
-} from "./offlineState"
+} from "./offlineState";
 
 export {
 	pingServer,
@@ -30,7 +30,22 @@ export {
 	getCachedUnpaidInvoices,
 	cacheUnpaidSummary,
 	getCachedUnpaidSummary,
-} from "./sync"
+	saveOfflineExpense,
+	getPendingExpenses,
+	getPendingExpenseCount,
+	deleteOfflineExpense,
+	discardOfflineExpenseAttachments,
+	checkOfflineExpenseSynced,
+	syncOfflineExpenses,
+	cacheExpenseDialogData,
+	getExpenseDialogCache,
+	bumpExpenseDialogCacheShiftTotal,
+	expenseDialogCacheKey,
+	validateExpenseQueueAttachment,
+	getOfflineExpenseRemainingAllowance,
+	getPendingExpenseLocalTotal,
+	generateOfflineExpenseId,
+} from "./sync";
 
 export {
 	cacheItems,
@@ -45,7 +60,7 @@ export {
 	isCacheFresh,
 	clearItemsCache,
 	clearCustomersCache,
-} from "./items"
+} from "./items";
 
 // New cache system exports (excluding setManualOffline/toggleManualOffline - use offlineState instead)
 export {
@@ -58,6 +73,8 @@ export {
 	cacheCustomersFromServer,
 	cachePaymentMethodsFromServer,
 	getCachedPaymentMethods,
+	cacheSalesPersonsFromServer,
+	getCachedSalesPersons,
 	searchCachedItems,
 	searchCachedCustomers,
 	getCachedItem,
@@ -65,4 +82,4 @@ export {
 	needsCacheRefresh,
 	clearAllCache,
 	getCacheStats,
-} from "./cache"
+} from "./cache";

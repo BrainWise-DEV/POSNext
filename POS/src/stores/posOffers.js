@@ -1,8 +1,16 @@
-import { defineStore } from "pinia"
-import { computed, ref } from "vue"
-import { call } from "@/utils/apiWrapper"
-import { isOffline } from "@/utils/offline"
-import { offlineWorker } from "@/utils/offline/workerClient"
+import { promoApi } from "@/utils/promoApi";
+import { loadOfferStrategyPlugins } from "@/utils/offerStrategies";
+import { defineStore } from "pinia";
+import { computed, ref } from "vue";
+import { call } from "@/utils/apiWrapper";
+import { isOffline } from "@/utils/offline";
+import { offlineWorker } from "@/utils/offline/workerClient";
+import {
+	getOneTimeRedemptions,
+	setOneTimeRedemptions,
+	addOneTimeRedemptions,
+} from "@/utils/offline/db";
+import { usePOSShiftStore } from "@/stores/posShift";
 
 const defaultSnapshot = () => ({
 	subtotal: 0,
@@ -11,51 +19,143 @@ const defaultSnapshot = () => ({
 	itemGroups: [],
 	brands: [],
 	// Quantity maps for accurate min_qty/max_qty validation
-	itemQuantities: {},      // { item_code: qty }
+	itemQuantities: {}, // { item_code: qty }
 	itemGroupQuantities: {}, // { item_group: qty }
-	brandQuantities: {},     // { brand: qty }
-})
+	brandQuantities: {}, // { brand: qty }
+	// Amount basis for min_amt/max_amt validation. The server does NOT use one
+	// figure for every offer — see getEligibleItemAmount:
+	//   apply_on = "Transaction"  -> netSubtotal (cart, after item discounts)
+	//   apply_on = Item/Group/Brand -> gross amount of the matching lines only
+	netSubtotal: 0,
+	itemAmounts: {}, // { item_code: qty * price_list_rate }
+	itemGroupAmounts: {}, // { item_group: qty * price_list_rate }
+	brandAmounts: {}, // { brand: qty * price_list_rate }
+});
 
 function getDiscountSortValue(offer) {
-	const percentage = Number.parseFloat(offer?.discount_percentage) || 0
+	const percentage = Number.parseFloat(offer?.discount_percentage) || 0;
 	if (percentage) {
-		return percentage
+		return percentage;
 	}
 
-	return Number.parseFloat(offer?.discount_amount) || 0
+	return Number.parseFloat(offer?.discount_amount) || 0;
 }
 
 export const usePOSOffersStore = defineStore("posOffers", () => {
-	const availableOffers = ref([])
-	const cartSnapshot = ref(defaultSnapshot())
-	const hasFetched = ref(false)
+	const availableOffers = ref([]);
+	const cartSnapshot = ref(defaultSnapshot());
+	const hasFetched = ref(false);
+
+	// One-time-per-customer context (mirrors the server gate in apply_offers).
+	// `oneTimeCustomerIdentified` is false for the walk-in/default customer;
+	// `redeemedOneTimeRules` holds rule names this customer has already used.
+	const oneTimeCustomerIdentified = ref(false);
+	const redeemedOneTimeRules = ref([]);
+
+	function setOneTimeContext({ identified = false, redeemedRules = [] } = {}) {
+		oneTimeCustomerIdentified.value = !!identified;
+		redeemedOneTimeRules.value = Array.isArray(redeemedRules) ? redeemedRules : [];
+	}
+
+	function addRedeemedOneTimeRule(ruleName) {
+		if (ruleName && !redeemedOneTimeRules.value.includes(ruleName)) {
+			redeemedOneTimeRules.value = [...redeemedOneTimeRules.value, ruleName];
+		}
+	}
+
+	function clearOneTimeContext() {
+		oneTimeCustomerIdentified.value = false;
+		redeemedOneTimeRules.value = [];
+	}
+
+	/**
+	 * Load the one-time-per-customer context for the selected customer.
+	 * Online: fetch redemptions from the server and refresh the offline cache.
+	 * Offline: use whatever is cached (from a prior online select + offline
+	 * checkouts on this device). The walk-in/default customer is never eligible.
+	 *
+	 * @param {string} customerName
+	 * @param {{isWalkIn?: boolean}} opts
+	 */
+	async function loadOneTimeContextForCustomer(customerName, { isWalkIn = false } = {}) {
+		if (!customerName || isWalkIn) {
+			setOneTimeContext({ identified: false, redeemedRules: [] });
+			return;
+		}
+
+		let redeemed = await getOneTimeRedemptions(customerName);
+
+		if (!isOffline()) {
+			try {
+				const resp = await call(promoApi.getCustomerOneTimeRedemptions(), {
+					customer: customerName,
+				});
+				const serverRules = resp?.message || resp || [];
+				if (Array.isArray(serverRules)) {
+					redeemed = Array.from(new Set([...(redeemed || []), ...serverRules]));
+					await setOneTimeRedemptions(customerName, redeemed);
+				}
+			} catch (error) {
+				// Keep cached redemptions if the server fetch fails.
+				console.error("Error fetching one-time redemptions:", error);
+			}
+		}
+
+		setOneTimeContext({ identified: true, redeemedRules: redeemed });
+	}
+
+	/**
+	 * Persist one-time rule redemptions made during an offline checkout so the
+	 * next offline sale to the same customer sees them.
+	 *
+	 * @param {string} customerName
+	 * @param {string[]} ruleNames
+	 */
+	async function recordOfflineRedemptions(customerName, ruleNames = []) {
+		if (!customerName || !ruleNames.length) return;
+		await addOneTimeRedemptions(customerName, ruleNames);
+		for (const ruleName of ruleNames) {
+			addRedeemedOneTimeRule(ruleName);
+		}
+	}
 
 	function updateCartSnapshot(snapshot = {}) {
-		const subtotal = Number.parseFloat(snapshot.subtotal) || 0
-		const itemCount = Number.isFinite(snapshot.itemCount)
-			? snapshot.itemCount
-			: 0
-		const itemCodes = Array.isArray(snapshot.itemCodes)
-			? snapshot.itemCodes
-			: []
-		const itemGroups = Array.isArray(snapshot.itemGroups)
-			? snapshot.itemGroups
-			: []
-		const brands = Array.isArray(snapshot.brands) ? snapshot.brands : []
+		const subtotal = Number.parseFloat(snapshot.subtotal) || 0;
+		const itemCount = Number.isFinite(snapshot.itemCount) ? snapshot.itemCount : 0;
+		const itemCodes = Array.isArray(snapshot.itemCodes) ? snapshot.itemCodes : [];
+		const itemGroups = Array.isArray(snapshot.itemGroups) ? snapshot.itemGroups : [];
+		const brands = Array.isArray(snapshot.brands) ? snapshot.brands : [];
 
 		// Quantity maps for accurate offer validation
-		const itemQuantities = snapshot.itemQuantities && typeof snapshot.itemQuantities === 'object'
-			? snapshot.itemQuantities
-			: {}
-		const itemGroupQuantities = snapshot.itemGroupQuantities && typeof snapshot.itemGroupQuantities === 'object'
-			? snapshot.itemGroupQuantities
-			: {}
-		const brandQuantities = snapshot.brandQuantities && typeof snapshot.brandQuantities === 'object'
-			? snapshot.brandQuantities
-			: {}
+		const itemQuantities =
+			snapshot.itemQuantities && typeof snapshot.itemQuantities === "object"
+				? snapshot.itemQuantities
+				: {};
+		const itemGroupQuantities =
+			snapshot.itemGroupQuantities && typeof snapshot.itemGroupQuantities === "object"
+				? snapshot.itemGroupQuantities
+				: {};
+		const brandQuantities =
+			snapshot.brandQuantities && typeof snapshot.brandQuantities === "object"
+				? snapshot.brandQuantities
+				: {};
+
+		// Amount maps mirroring the server's min_amt/max_amt bases.
+		const asAmountMap = (value) =>
+			value && typeof value === "object" ? value : {};
+		const netSubtotal = Number.isFinite(Number.parseFloat(snapshot.netSubtotal))
+			? Number.parseFloat(snapshot.netSubtotal)
+			: subtotal;
+		const itemAmounts = asAmountMap(snapshot.itemAmounts);
+		const itemGroupAmounts = asAmountMap(snapshot.itemGroupAmounts);
+		const brandAmounts = asAmountMap(snapshot.brandAmounts);
 
 		cartSnapshot.value = {
 			subtotal,
+			netSubtotal,
+			itemAmounts,
+			itemGroupAmounts,
+			brandAmounts,
 			itemCount,
 			itemCodes,
 			itemGroups,
@@ -63,25 +163,25 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 			itemQuantities,
 			itemGroupQuantities,
 			brandQuantities,
-		}
+		};
 	}
 
 	function resetCartSnapshot() {
-		cartSnapshot.value = defaultSnapshot()
+		cartSnapshot.value = defaultSnapshot();
 	}
 
 	function setAvailableOffers(offers = []) {
 		if (!Array.isArray(offers)) {
-			availableOffers.value = []
+			availableOffers.value = [];
 		} else {
-			availableOffers.value = offers
+			availableOffers.value = offers;
 		}
-		hasFetched.value = true
+		hasFetched.value = true;
 	}
 
 	function clearOffers() {
-		availableOffers.value = []
-		hasFetched.value = false
+		availableOffers.value = [];
+		hasFetched.value = false;
 	}
 
 	/**
@@ -90,39 +190,96 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 	 * @returns {number} Total quantity of eligible items
 	 */
 	function getEligibleItemQuantity(offer) {
-		const itemQuantities = cartSnapshot.value.itemQuantities || {}
-		const itemGroupQuantities = cartSnapshot.value.itemGroupQuantities || {}
-		const brandQuantities = cartSnapshot.value.brandQuantities || {}
+		const itemQuantities = cartSnapshot.value.itemQuantities || {};
+		const itemGroupQuantities = cartSnapshot.value.itemGroupQuantities || {};
+		const brandQuantities = cartSnapshot.value.brandQuantities || {};
 
 		if (offer?.apply_on === "Item Code") {
-			const eligibleItems = offer.eligible_items || []
+			const eligibleItems = offer.eligible_items || [];
 			if (eligibleItems.length > 0) {
 				// Sum quantities of all eligible items in cart
 				return eligibleItems.reduce((sum, itemCode) => {
-					return sum + (itemQuantities[itemCode] || 0)
-				}, 0)
+					return sum + (itemQuantities[itemCode] || 0);
+				}, 0);
 			}
 		} else if (offer?.apply_on === "Item Group") {
-			const eligibleGroups = offer.eligible_item_groups || []
+			const eligibleGroups = offer.eligible_item_groups || [];
 			if (eligibleGroups.length > 0) {
+				if (eligibleGroups.includes("All Item Groups")) {
+					return cartSnapshot.value.itemCount || 0;
+				}
 				// Sum quantities of all items in eligible groups
 				return eligibleGroups.reduce((sum, group) => {
-					return sum + (itemGroupQuantities[group] || 0)
-				}, 0)
+					return sum + (itemGroupQuantities[group] || 0);
+				}, 0);
 			}
 		} else if (offer?.apply_on === "Brand") {
-			const eligibleBrands = offer.eligible_brands || []
+			const eligibleBrands = offer.eligible_brands || [];
 			if (eligibleBrands.length > 0) {
 				// Sum quantities of all items from eligible brands
 				return eligibleBrands.reduce((sum, brand) => {
-					return sum + (brandQuantities[brand] || 0)
-				}, 0)
+					return sum + (brandQuantities[brand] || 0);
+				}, 0);
 			}
 		}
 
 		// For 'Transaction' offers or offers without specific item criteria,
 		// use total cart quantity
-		return cartSnapshot.value.itemCount || 0
+		return cartSnapshot.value.itemCount || 0;
+	}
+
+	/**
+	 * Resolves the amount an offer's min_amt/max_amt must be compared against.
+	 *
+	 * The server uses two different bases depending on the rule's scope, so a
+	 * single cart figure cannot mirror it:
+	 *
+	 * - apply_on = "Transaction" -> ERPNext gates on `doc.total`
+	 *   (apply_pricing_rule_on_transaction), i.e. the whole cart AFTER
+	 *   item-level discounts. Comparing the gross subtotal here rejects offers
+	 *   the server would grant.
+	 * - apply_on = Item Code / Item Group / Brand -> ERPNext gates on
+	 *   `qty * price_list_rate` of the MATCHING lines only (filter_pricing_rules),
+	 *   at list price, ignoring discounts other rules put on those lines.
+	 *   Comparing the whole cart here accepts offers the server would reject.
+	 *
+	 * This is the amount-side counterpart of getEligibleItemQuantity.
+	 *
+	 * @param {Object} offer - The offer to check
+	 * @returns {number} Amount to compare against min_amt / max_amt
+	 */
+	function getEligibleItemAmount(offer) {
+		const itemAmounts = cartSnapshot.value.itemAmounts || {};
+		const itemGroupAmounts = cartSnapshot.value.itemGroupAmounts || {};
+		const brandAmounts = cartSnapshot.value.brandAmounts || {};
+		const sumOver = (keys, map) => keys.reduce((sum, key) => sum + (map[key] || 0), 0);
+
+		if (offer?.apply_on === "Item Code") {
+			const eligibleItems = offer.eligible_items || [];
+			if (eligibleItems.length > 0) {
+				return sumOver(eligibleItems, itemAmounts);
+			}
+		} else if (offer?.apply_on === "Item Group") {
+			const eligibleGroups = offer.eligible_item_groups || [];
+			if (eligibleGroups.length > 0) {
+				if (eligibleGroups.includes("All Item Groups")) {
+					return cartSnapshot.value.subtotal || 0;
+				}
+				return sumOver(eligibleGroups, itemGroupAmounts);
+			}
+		} else if (offer?.apply_on === "Brand") {
+			const eligibleBrands = offer.eligible_brands || [];
+			if (eligibleBrands.length > 0) {
+				return sumOver(eligibleBrands, brandAmounts);
+			}
+		} else if (offer?.apply_on === "Transaction") {
+			// Post-item-discount cart total — what `doc.total` carries server-side.
+			return cartSnapshot.value.netSubtotal || 0;
+		}
+
+		// Offers without usable scope metadata: fall back to the gross cart
+		// subtotal, the pre-existing behaviour for every offer.
+		return cartSnapshot.value.subtotal || 0;
 	}
 
 	/**
@@ -131,68 +288,83 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 	 * @returns {Object} {eligible: boolean, reason: string|null}
 	 */
 	function checkOfferEligibility(offer) {
-		const subtotal = cartSnapshot.value.subtotal || 0
-		const itemCount = cartSnapshot.value.itemCount || 0
-		const cartItemCodes = cartSnapshot.value.itemCodes || []
-		const cartItemGroups = cartSnapshot.value.itemGroups || []
-		const cartBrands = cartSnapshot.value.brands || []
+		const itemCount = cartSnapshot.value.itemCount || 0;
+		const cartItemCodes = cartSnapshot.value.itemCodes || [];
+		const cartItemGroups = cartSnapshot.value.itemGroups || [];
+		const cartBrands = cartSnapshot.value.brands || [];
 
 		// Check if cart is empty
 		if (itemCount === 0) {
 			return {
 				eligible: false,
 				reason: "Cart is empty",
+			};
+		}
+
+		// One-time-per-customer gate (mirrors the server gate in apply_offers):
+		// such offers require an identified (non walk-in) customer and must not
+		// re-apply to a customer who has already redeemed them.
+		if (offer?.one_time_per_customer) {
+			if (!oneTimeCustomerIdentified.value) {
+				return {
+					eligible: false,
+					reason: __("Select a customer to use this one-time offer"),
+				};
+			}
+			if (redeemedOneTimeRules.value.includes(offer.name)) {
+				return {
+					eligible: false,
+					reason: __("This one-time offer has already been used by this customer"),
+				};
 			}
 		}
 
 		// Check item eligibility based on apply_on FIRST
 		// This determines which items are eligible for the offer
-		let eligibleItemQty = itemCount // Default to total cart qty for Transaction offers
+		let eligibleItemQty = itemCount; // Default to total cart qty for Transaction offers
 
 		if (offer?.apply_on === "Item Code") {
-			const eligibleItems = offer.eligible_items || []
+			const eligibleItems = offer.eligible_items || [];
 			if (eligibleItems.length > 0) {
-				const hasEligibleItem = eligibleItems.some((item) =>
-					cartItemCodes.includes(item),
-				)
+				const hasEligibleItem = eligibleItems.some((item) => cartItemCodes.includes(item));
 				if (!hasEligibleItem) {
 					return {
 						eligible: false,
 						reason: __("Cart does not contain eligible items for this offer"),
-					}
+					};
 				}
 				// Calculate quantity of eligible items only
-				eligibleItemQty = getEligibleItemQuantity(offer)
+				eligibleItemQty = getEligibleItemQuantity(offer);
 			}
 		} else if (offer?.apply_on === "Item Group") {
-			const eligibleGroups = offer.eligible_item_groups || []
+			const eligibleGroups = offer.eligible_item_groups || [];
 			if (eligibleGroups.length > 0) {
-				const hasEligibleGroup = eligibleGroups.some((group) =>
-					cartItemGroups.includes(group),
-				)
+				const hasEligibleGroup =
+					eligibleGroups.includes("All Item Groups") ||
+					eligibleGroups.some((group) => cartItemGroups.includes(group));
 				if (!hasEligibleGroup) {
 					return {
 						eligible: false,
 						reason: __("Cart does not contain items from eligible groups"),
-					}
+					};
 				}
 				// Calculate quantity of items in eligible groups only
-				eligibleItemQty = getEligibleItemQuantity(offer)
+				eligibleItemQty = getEligibleItemQuantity(offer);
 			}
 		} else if (offer?.apply_on === "Brand") {
-			const eligibleBrands = offer.eligible_brands || []
+			const eligibleBrands = offer.eligible_brands || [];
 			if (eligibleBrands.length > 0) {
 				const hasEligibleBrand = eligibleBrands.some((brand) =>
-					cartBrands.includes(brand),
-				)
+					cartBrands.includes(brand)
+				);
 				if (!hasEligibleBrand) {
 					return {
 						eligible: false,
 						reason: __("Cart does not contain items from eligible brands"),
-					}
+					};
 				}
 				// Calculate quantity of items from eligible brands only
-				eligibleItemQty = getEligibleItemQuantity(offer)
+				eligibleItemQty = getEligibleItemQuantity(offer);
 			}
 		}
 		// If apply_on is 'Transaction', eligibleItemQty remains as total cart qty
@@ -202,77 +374,82 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 		if (offer?.min_qty && eligibleItemQty < offer.min_qty) {
 			return {
 				eligible: false,
-				reason: __('At least {0} eligible items required', [offer.min_qty]),
-			}
+				reason: __("At least {0} eligible items required", [offer.min_qty]),
+			};
 		}
 
 		// Check maximum quantity against ELIGIBLE items quantity
 		if (offer?.max_qty && eligibleItemQty > offer.max_qty) {
 			return {
 				eligible: false,
-				reason: __('Maximum {0} eligible items allowed for this offer', [offer.max_qty]),
-			}
+				reason: __("Maximum {0} eligible items allowed for this offer", [offer.max_qty]),
+			};
 		}
 
-		// Check minimum amount (still uses total subtotal)
-		if (offer?.min_amt && subtotal < offer.min_amt) {
+		// Check min/max amount against the same basis the server uses for this
+		// offer's scope — net cart total for Transaction rules, gross amount of
+		// the matching lines otherwise. See getEligibleItemAmount.
+		const eligibleAmount = getEligibleItemAmount(offer);
+
+		if (offer?.min_amt && eligibleAmount < offer.min_amt) {
 			return {
 				eligible: false,
-				reason: __('Minimum cart value of {0} required', [offer.min_amt]),
-			}
+				reason: __("Minimum cart value of {0} required", [offer.min_amt]),
+			};
 		}
 
-		// Check maximum amount (still uses total subtotal)
-		if (offer?.max_amt && subtotal > offer.max_amt) {
+		if (offer?.max_amt && eligibleAmount > offer.max_amt) {
 			return {
 				eligible: false,
-				reason: __('Maximum cart value exceeded ({0})', [offer.max_amt]),
-			}
+				reason: __("Maximum cart value exceeded ({0})", [offer.max_amt]),
+			};
 		}
 
-		return { eligible: true, reason: null }
+		return { eligible: true, reason: null };
 	}
 
 	const allEligibleOffers = computed(() => {
 		return availableOffers.value.filter((offer) => {
 			if (offer?.coupon_based) {
-				return false
+				return false;
 			}
 
-			const eligibility = checkOfferEligibility(offer)
-			return eligibility.eligible
-		})
-	})
+			const eligibility = checkOfferEligibility(offer);
+			return eligibility.eligible;
+		});
+	});
 
 	const allEligibleOffersSorted = computed(() => {
 		return [...allEligibleOffers.value].sort((a, b) => {
-			return getDiscountSortValue(b) - getDiscountSortValue(a)
-		})
-	})
+			return getDiscountSortValue(b) - getDiscountSortValue(a);
+		});
+	});
 
 	const autoEligibleOffers = computed(() => {
 		return availableOffers.value.filter((offer) => {
 			if (!offer?.auto || offer?.coupon_based) {
-				return false
+				return false;
 			}
 
-			const eligibility = checkOfferEligibility(offer)
-			return eligibility.eligible
-		})
-	})
+			const eligibility = checkOfferEligibility(offer);
+			return eligibility.eligible;
+		});
+	});
 
-	const autoEligibleCount = computed(() => autoEligibleOffers.value.length)
+	const autoEligibleCount = computed(() => autoEligibleOffers.value.length);
 
 	function getUnlockAmount(offer) {
-		const subtotal = cartSnapshot.value.subtotal || 0
-		if (offer?.min_amt && subtotal < offer.min_amt) {
-			return offer.min_amt - subtotal
+		// Same basis as the eligibility gate, or the prompt would ask for an
+		// amount that does not actually unlock the offer.
+		const eligibleAmount = getEligibleItemAmount(offer);
+		if (offer?.min_amt && eligibleAmount < offer.min_amt) {
+			return offer.min_amt - eligibleAmount;
 		}
-		return 0
+		return 0;
 	}
 
 	// Track if we're currently fetching to prevent duplicate requests
-	let fetchPromise = null
+	let fetchPromise = null;
 
 	/**
 	 * Ensures offers are fetched before offer processing.
@@ -283,19 +460,28 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 	 * @returns {Promise<boolean>} True if offers are available (fetched or cached)
 	 */
 	async function ensureOffersFetched(posProfile) {
+		await loadOfferStrategyPlugins();
+
+		// Skip fetching offers if POS Profile has ignore_pricing_rule enabled
+		const shiftStore = usePOSShiftStore();
+		if (shiftStore.currentProfile?.ignore_pricing_rule) {
+			hasFetched.value = true;
+			return false;
+		}
+
 		// If already fetched, return immediately
 		if (hasFetched.value) {
-			return true
+			return true;
 		}
 
 		// If already fetching, wait for the existing request
 		if (fetchPromise) {
-			return fetchPromise
+			return fetchPromise;
 		}
 
 		// No profile means we can't fetch
 		if (!posProfile) {
-			return false
+			return false;
 		}
 
 		// Start fetching
@@ -303,42 +489,42 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 			try {
 				if (isOffline()) {
 					// Load offers from cache when offline
-					const cachedOffers = await offlineWorker.getCachedOffers(posProfile)
+					const cachedOffers = await offlineWorker.getCachedOffers(posProfile);
 					if (cachedOffers && cachedOffers.length > 0) {
-						setAvailableOffers(cachedOffers)
-						return true
+						setAvailableOffers(cachedOffers);
+						return true;
 					}
 					// No cached offers available offline
-					hasFetched.value = true // Mark as fetched to prevent retries
-					return false
+					hasFetched.value = true; // Mark as fetched to prevent retries
+					return false;
 				}
 
 				// Online: fetch from API
-				const response = await call("pos_next.api.offers.get_offers", {
+				const response = await call(promoApi.getOffers(), {
 					pos_profile: posProfile,
-				})
+				});
 
-				const offers = response?.message || response || []
-				setAvailableOffers(offers)
+				const offers = response?.message || response || [];
+				setAvailableOffers(offers);
 
 				// Cache offers for offline use
 				if (offers.length > 0) {
 					offlineWorker.cacheOffers(offers, posProfile).catch(() => {
 						// Silently ignore cache errors
-					})
+					});
 				}
 
-				return true
+				return true;
 			} catch (error) {
-				console.error("Error fetching offers:", error)
-				hasFetched.value = true // Mark as fetched to prevent infinite retries
-				return false
+				console.error("Error fetching offers:", error);
+				hasFetched.value = true; // Mark as fetched to prevent infinite retries
+				return false;
 			} finally {
-				fetchPromise = null
+				fetchPromise = null;
 			}
-		})()
+		})();
 
-		return fetchPromise
+		return fetchPromise;
 	}
 
 	return {
@@ -346,6 +532,8 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 		availableOffers,
 		cartSnapshot,
 		hasFetched,
+		oneTimeCustomerIdentified,
+		redeemedOneTimeRules,
 
 		// Computed
 		allEligibleOffers,
@@ -359,7 +547,13 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 		setAvailableOffers,
 		clearOffers,
 		checkOfferEligibility,
+		getEligibleItemAmount,
 		getUnlockAmount,
 		ensureOffersFetched,
-	}
-})
+		setOneTimeContext,
+		addRedeemedOneTimeRule,
+		clearOneTimeContext,
+		loadOneTimeContextForCustomer,
+		recordOfflineRedemptions,
+	};
+});
