@@ -9,6 +9,12 @@
         </div>
 
         <div v-else-if="closingData" class="flex flex-col gap-3 md:gap-6">
+          <!-- Idle Warning -->
+          <div v-if="showIdleWarning" class="rounded-lg bg-amber-50 border border-amber-300 p-3 flex items-center gap-2">
+            <FeatherIcon name="alert-triangle" class="w-5 h-5 text-amber-600 flex-shrink-0" />
+            <p class="text-xs md:text-sm text-amber-800 font-medium">{{ __('This dialog has been open for over a minute. Please close the shift or close this dialog to resume the shift timer.') }}</p>
+          </div>
+
           <!-- Shift Summary Header (hidden in entry mode when hideExpectedAmount is enabled) -->
           <div v-if="shouldShowSummary" class="bg-white border border-gray-200 rounded-lg p-3 md:p-6 shadow-sm">
             <div class="flex flex-col sm:flex-row justify-start items-start gap-3 mb-3 md:mb-6">
@@ -498,12 +504,13 @@
 </template>
 
 <script setup>
-import { Button, Dialog, Input } from "frappe-ui"
-import { computed, reactive, ref, watch } from "vue"
+import { Button, Dialog, FeatherIcon, Input } from "frappe-ui"
+import { computed, onBeforeUnmount, reactive, ref, watch } from "vue"
 import { storeToRefs } from "pinia"
-import { useShift } from "../composables/useShift"
+import { useShift, shiftState } from "../composables/useShift"
 import { useFormatters } from "../composables/useFormatters"
 import { usePOSSettingsStore } from "../stores/posSettings"
+import { usePOSShiftStore } from "../stores/posShift"
 import TranslatedHTML from "./common/TranslatedHTML.vue"
 
 const props = defineProps({
@@ -530,19 +537,48 @@ const { formatCurrency, formatQuantity, formatDateTime, formatTime } = useFormat
 const posSettingsStore = usePOSSettingsStore()
 const { hideExpectedAmount } = storeToRefs(posSettingsStore)
 
+const shiftStore = usePOSShiftStore()
+
 const closingData = ref(null)
 const closingDataResource = getClosingShiftData
 const submitResource = submitClosingShift
 const showInvoiceDetails = ref(false)
 const showSuccessReport = ref(false) // Track if shift is closed and showing report
 const errorMessage = ref('') // User-friendly error message
+const showIdleWarning = ref(false)
+let _idleWarningTimer = null
 
 // Watch dialog open state
 watch(open, async (isOpen) => {
 	if (isOpen && props.openingShift) {
+		// Pause the shift duration counter in the header
+		shiftStore.shiftTimerPaused = true
+		showIdleWarning.value = false
+
+		// Warn user if dialog stays open for more than 1 minute
+		_idleWarningTimer = setTimeout(() => {
+			showIdleWarning.value = true
+		}, 60_000)
+
 		// Refresh POS settings to get latest hideExpectedAmount value
 		await posSettingsStore.reloadSettings()
 		loadClosingData()
+	} else {
+		// Resume the shift duration counter
+		shiftStore.shiftTimerPaused = false
+		showIdleWarning.value = false
+		if (_idleWarningTimer) {
+			clearTimeout(_idleWarningTimer)
+			_idleWarningTimer = null
+		}
+	}
+})
+
+onBeforeUnmount(() => {
+	shiftStore.shiftTimerPaused = false
+	if (_idleWarningTimer) {
+		clearTimeout(_idleWarningTimer)
+		_idleWarningTimer = null
 	}
 })
 
@@ -736,15 +772,21 @@ function getSalesForPayment(payment) {
 function getShiftDuration() {
 	if (!closingData.value || !closingData.value.period_start_date) return __("N/A")
 
-	const start = new Date(closingData.value.period_start_date)
-	const end = new Date()
-	const diff = end - start
+	// Use the same timezone-safe approach as the header timer
+	const { _initialElapsedMs, _receivedAt } = shiftState.value
+	const diff = _initialElapsedMs + (Date.now() - (_receivedAt || Date.now()))
+	if (diff < 0) return __("N/A")
 
-	const hours = Math.floor(diff / (1000 * 60 * 60))
+	const days = Math.floor(diff / (1000 * 60 * 60 * 24))
+	const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))
 	const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60))
 
+	if (days > 0) {
+		const dayLabel = days === 1 ? __('Day') : __('Days')
+		return __('{0} {1} {2}h {3}m', [days, dayLabel, hours, minutes])
+	}
 	if (hours > 0) {
-    return __('{0}h {1}m', [hours, minutes])
+		return __('{0}h {1}m', [hours, minutes])
 	}
 	return __('{0}m', [minutes])
 }

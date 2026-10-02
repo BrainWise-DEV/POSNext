@@ -1,4 +1,4 @@
-import { useShift } from "@/composables/useShift"
+import { useShift, shiftState } from "@/composables/useShift"
 import { DEFAULT_CURRENCY, DEFAULT_LOCALE } from "@/utils/currency"
 import { defineStore } from "pinia"
 import { computed, ref } from "vue"
@@ -11,6 +11,7 @@ export const usePOSShiftStore = defineStore("posShift", () => {
 	// Additional shift state
 	const currentTime = ref("")
 	const shiftDuration = ref("")
+	const shiftTimerPaused = ref(false)
 
 	// Computed
 	const profileName = computed(() => currentProfile.value?.name)
@@ -34,15 +35,35 @@ export const usePOSShiftStore = defineStore("posShift", () => {
 			return
 		}
 
-		const startTime = new Date(currentShift.value.period_start_date)
-		const now = new Date()
-		const diff = now - startTime
+		// Freeze the counter when closing dialog is open
+		if (shiftTimerPaused.value) return
 
-		const hours = Math.floor(diff / (1000 * 60 * 60))
+		// Elapsed = initial elapsed (server_now - shift_start, computed at fetch time)
+		//         + time since we received the data (local clock only)
+		// This avoids timezone mismatch between server and browser.
+		const { _initialElapsedMs, _receivedAt } = shiftState.value
+		const diff = _initialElapsedMs + (Date.now() - (_receivedAt || Date.now()))
+		if (diff < 0) {
+			shiftDuration.value = ""
+			return
+		}
+
+		const days = Math.floor(diff / (1000 * 60 * 60 * 24))
+		const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))
 		const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60))
 		const seconds = Math.floor((diff % (1000 * 60)) / 1000)
 
-		shiftDuration.value = `${hours} ${__('Hr')} ${minutes} ${__('Min')} ${seconds} ${__('Sec')}`
+		if (days > 0) {
+			const dayLabel = days === 1 ? __('Day') : __('Days')
+			const hourLabel = hours === 1 ? __('Hour') : __('Hours')
+			const minLabel = minutes === 1 ? __('Minute') : __('Minutes')
+			shiftDuration.value = `${days} ${dayLabel} ${hours} ${hourLabel} ${minutes} ${minLabel}`
+		} else {
+			const hourLabel = hours === 1 ? __('Hour') : __('Hours')
+			const minLabel = minutes === 1 ? __('Minute') : __('Minutes')
+			const secLabel = seconds === 1 ? __('Second') : __('Seconds')
+			shiftDuration.value = `${hours} ${hourLabel} ${minutes} ${minLabel} ${seconds} ${secLabel}`
+		}
 	}
 
 	function updateCurrentTime() {
@@ -76,6 +97,7 @@ export const usePOSShiftStore = defineStore("posShift", () => {
 		hasOpenShift,
 		currentTime,
 		shiftDuration,
+		shiftTimerPaused,
 
 		// Computed
 		profileName,

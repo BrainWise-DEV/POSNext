@@ -19,6 +19,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		use_percentage_discount: 0,
 		allow_user_to_edit_additional_discount: 0,
 		allow_user_to_edit_item_discount: 1, // Allow item-level discounts
+		allow_user_to_edit_rate: 0, // Allow rate editing in edit dialog
 		disable_rounded_total: 1, // Disable rounding for accurate totals
 		allow_credit_sale: 0,
 		allow_customer_credit_payment: 0,
@@ -33,6 +34,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		hide_expected_amount: 0,
 		display_discount_percentage: 0,
 		display_discount_amount: 0,
+		show_variants_as_items: 0,
 		// Operations
 		allow_sales_order: 0,
 		allow_select_sales_order: 0,
@@ -99,6 +101,9 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	const allowItemDiscount = computed(() =>
 		Boolean(settings.value.allow_user_to_edit_item_discount),
 	)
+	const allowUserToEditRate = computed(() =>
+		Boolean(settings.value.allow_user_to_edit_rate),
+	)
 	const disableRoundedTotal = computed(() =>
 		Boolean(settings.value.disable_rounded_total),
 	)
@@ -137,6 +142,9 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	)
 	const displayDiscountAmount = computed(() =>
 		Boolean(settings.value.display_discount_amount),
+	)
+	const showVariantsAsItems = computed(() =>
+		Boolean(settings.value.show_variants_as_items),
 	)
 
 	// Computed - Operations
@@ -286,6 +294,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 			use_percentage_discount: 0,
 			allow_user_to_edit_additional_discount: 0,
 			allow_user_to_edit_item_discount: 1,
+			allow_user_to_edit_rate: 0,
 			disable_rounded_total: 1,
 			allow_credit_sale: 0,
 			allow_customer_credit_payment: 0,
@@ -299,6 +308,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 			hide_expected_amount: 0,
 			display_discount_percentage: 0,
 			display_discount_amount: 0,
+			show_variants_as_items: 0,
 			allow_sales_order: 0,
 			allow_select_sales_order: 0,
 			create_only_sales_order: 0,
@@ -367,7 +377,8 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		isLoading.value = true
 
 		try {
-			await settingsResource.reload()
+			// Use submit with pos_profile to ensure proper reload
+			await settingsResource.submit({ pos_profile: settings.value.pos_profile })
 			return true
 		} catch {
 			return false
@@ -393,6 +404,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		usePercentageDiscount,
 		allowAdditionalDiscount,
 		allowItemDiscount,
+		allowUserToEditRate,
 		disableRoundedTotal,
 		allowCreditSale,
 		allowCustomerCreditPayment,
@@ -408,6 +420,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		hideExpectedAmount,
 		displayDiscountPercentage,
 		displayDiscountAmount,
+		showVariantsAsItems,
 
 		// Computed - Operations
 		allowSalesOrder,

@@ -8,7 +8,7 @@ from frappe import _
 
 
 @frappe.whitelist()
-def get_customers(search_term="", pos_profile=None, limit=20):
+def get_customers(search_term="", pos_profile=None, limit=20, modified_since=None):
 
     """
     Search customers for inline customer selection in POS.
@@ -17,13 +17,14 @@ def get_customers(search_term="", pos_profile=None, limit=20):
         search_term (str): Search query (name, mobile, or customer ID)
         pos_profile (str): POS Profile to filter by customer group
         limit (int): Maximum number of results to return
+        modified_since (str): Fetch customers modified after this timestamp (ISO format)
 
     Returns:
-        list: List of customer dictionaries with name, customer_name, mobile_no, email_id
+        list: List of customer dictionaries with name, customer_name, mobile_no, email_id, disabled
     """
     try:
         frappe.logger().debug(
-            f"get_customers called with search_term={search_term}, pos_profile={pos_profile}, limit={limit}"
+            f"get_customers called with search_term={search_term}, pos_profile={pos_profile}, limit={limit}, modified_since={modified_since}"
         )
 
         filters = {}
@@ -37,13 +38,18 @@ def get_customers(search_term="", pos_profile=None, limit=20):
                 filters["customer_group"] = profile_doc.customer_group
                 frappe.logger().debug(f"Filtering by customer_group: {profile_doc.customer_group}")
 
-        # Return all customers (for client-side filtering)
-        filters["disabled"] = 0
+        if modified_since:
+            # Delta sync: include disabled customers so frontend can purge them
+            filters["modified"] = [">=", modified_since]
+        else:
+            # Full fetch: only active customers
+            filters["disabled"] = 0
+
         customer_limit = limit if limit not in (None, 0) else frappe.db.count("Customer", filters)
         result = frappe.get_all(
             "Customer",
             filters=filters,
-            fields=["name", "customer_name", "mobile_no", "email_id"],
+            fields=["name", "customer_name", "mobile_no", "email_id", "disabled"],
             limit=customer_limit,
             order_by="customer_name asc",
         )

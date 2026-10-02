@@ -48,8 +48,11 @@ declare global {
 /**
  * Reactive counter that increments when translations change.
  * Watch this to trigger re-renders when language changes.
+ * Debounced to avoid multiple remounts during stale-while-revalidate
+ * (cache hit + network refresh can fire applyMessages 2-3 times rapidly).
  */
 export const translationVersion = ref(0)
+let _versionDebounce: ReturnType<typeof setTimeout> | null = null
 
 /** Default locale when none is configured */
 const FALLBACK_LOCALE = "en"
@@ -144,7 +147,13 @@ async function init() {
  */
 function applyMessages(messages: Messages) {
   window.translatedMessages = messages
-  translationVersion.value++
+  // Debounce: coalesce rapid calls (cache hit + network refresh)
+  // into a single version bump to avoid multiple component remounts
+  if (_versionDebounce) clearTimeout(_versionDebounce)
+  _versionDebounce = setTimeout(() => {
+    translationVersion.value++
+    _versionDebounce = null
+  }, 100)
 }
 
 /**

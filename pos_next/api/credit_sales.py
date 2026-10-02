@@ -173,10 +173,6 @@ def get_available_credit(customer, company, pos_profile=None):
 	if not company:
 		frappe.throw(_("Company is required"))
 
-	# Check if credit sale is enabled (if pos_profile is provided)
-	if pos_profile and not check_credit_sale_enabled(pos_profile):
-		frappe.throw(_("Credit sale is not enabled for this POS Profile"))
-
 	total_credit = []
 
 	# Get invoices with negative outstanding (customer has overpaid or returns)
