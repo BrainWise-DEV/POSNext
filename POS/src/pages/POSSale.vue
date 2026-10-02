@@ -96,6 +96,25 @@
 						<span>{{ __("Invoice History") }}</span>
 					</button>
 					<button
+						@click="handleOpenCustomerDisplay"
+						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-teal-50 flex items-center gap-3 transition-colors"
+					>
+						<svg
+							class="w-5 h-5 text-teal-600"
+							fill="none"
+							stroke="currentColor"
+							viewBox="0 0 24 24"
+						>
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								stroke-width="2"
+								d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+							/>
+						</svg>
+						<span>{{ __("Customer Display") }}</span>
+					</button>
+					<button
 						v-if="offlineStore.pendingInvoicesCount > 0"
 						@click="
 							uiStore.showOfflineInvoicesDialog = true;
@@ -943,6 +962,7 @@ import ManagementSlider from "@/components/pos/ManagementSlider.vue";
 import POSHeader from "@/components/pos/POSHeader.vue";
 import BatchSerialDialog from "@/components/sale/BatchSerialDialog.vue";
 import CouponDialog from "@/components/sale/CouponDialog.vue";
+import TableSelectDialog from "@/components/sale/TableSelectDialog.vue";
 import CreateCustomerDialog from "@/components/sale/CreateCustomerDialog.vue";
 import CustomerDialog from "@/components/sale/CustomerDialog.vue";
 import DraftInvoicesDialog from "@/components/sale/DraftInvoicesDialog.vue";
@@ -960,6 +980,7 @@ import POSSettings from "@/components/settings/POSSettings.vue";
 import InvoiceManagement from "@/components/invoices/InvoiceManagement.vue";
 import InvoiceDetailDialog from "@/components/invoices/InvoiceDetailDialog.vue";
 import { useRealtimeStock } from "@/composables/useRealtimeStock";
+import { useCustomerDisplay } from "@/composables/useCustomerDisplay";
 import { usePOSEvents } from "@/composables/usePOSEvents";
 import { useLocale } from "@/composables/useLocale";
 import { session } from "@/data/session";
@@ -1000,6 +1021,9 @@ const settingsStore = posSettingsStore;
 
 // Real-time stock updates
 const { onStockUpdate } = useRealtimeStock();
+
+// Customer-facing second screen
+const customerDisplay = useCustomerDisplay();
 
 // POS Events system
 const {
@@ -1875,6 +1899,7 @@ async function handlePaymentCompleted(paymentData) {
 			};
 
 			await offlineStore.saveInvoiceOffline(invoiceData);
+			customerDisplay.showPaymentComplete(paymentData, cartStore.grandTotal);
 			uiStore.showSuccess(
 				`OFFLINE-${Date.now()}`,
 				cartStore.grandTotal,
@@ -1901,6 +1926,9 @@ async function handlePaymentCompleted(paymentData) {
 				const invoiceName = result.name || result.message?.name || __("Unknown");
 				const invoiceTotal = result.grand_total || result.total || 0;
 				const paidAmount = paymentData.paid_amount || invoiceTotal;
+
+				// Must run before clearCart() so the display shows "Thank You" instead of the welcome screen
+				customerDisplay.showPaymentComplete(paymentData, invoiceTotal);
 
 				uiStore.showPaymentDialog = false;
 				cartStore.clearCart();
@@ -1953,6 +1981,16 @@ async function handlePaymentCompleted(paymentData) {
 		} else {
 			showWarning(errorContext.message);
 		}
+	}
+}
+
+function handleOpenCustomerDisplay() {
+	if (!customerDisplay.isSupported) {
+		showWarning(__("Customer display is not supported in this browser"));
+		return;
+	}
+	if (!customerDisplay.open()) {
+		showWarning(__("Allow pop-ups for this site to open the customer display"));
 	}
 }
 

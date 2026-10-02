@@ -190,7 +190,7 @@ export default defineConfig({
 							cacheName: "pos-page-cache",
 							networkTimeoutSeconds: 3,
 							expiration: {
-								maxEntries: 1,
+								maxEntries: 2, // /pos and /pos/customer-display, so neither evicts the other
 								maxAgeSeconds: 60 * 60 * 24, // 24 hours
 							},
 						},

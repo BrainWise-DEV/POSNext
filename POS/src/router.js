@@ -10,6 +10,12 @@ const routes = [
 		component: () => import("@/pages/POSSale.vue"),
 	},
 	{
+		// Customer-facing second screen, opened from the POS user menu
+		path: "/customer-display",
+		name: "CustomerDisplay",
+		component: () => import("@/pages/CustomerDisplay.vue"),
+	},
+	{
 		name: "Login",
 		path: "/account/login",
 		component: () => import("@/pages/Login.vue"),
