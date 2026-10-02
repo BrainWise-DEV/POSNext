@@ -66,7 +66,7 @@
 							<div class="min-w-0">
 								<p class="text-lg sm:text-xl font-semibold text-gray-900 truncate">{{ item.name }}</p>
 								<p class="text-base text-gray-500 tabular-nums">
-									{{ item.quantity }} {{ item.uom }} × {{ item.rate }}
+									{{ item.quantity }} {{ item.uom }}<template v-if="!item.isFree"> × {{ item.rate }}</template>
 								</p>
 								<p v-if="item.freeQuantity" class="text-sm font-semibold text-green-600">
 									{{ __("+{0} FREE", [item.freeQuantity]) }}
@@ -75,7 +75,8 @@
 									{{ __("You save {0}", [item.discount]) }}
 								</p>
 							</div>
-							<p class="text-lg sm:text-xl font-bold text-gray-900 tabular-nums whitespace-nowrap">{{ item.amount }}</p>
+							<p v-if="item.isFree" class="text-lg sm:text-xl font-bold text-green-600 whitespace-nowrap">{{ __("FREE") }}</p>
+							<p v-else class="text-lg sm:text-xl font-bold text-gray-900 tabular-nums whitespace-nowrap">{{ item.amount }}</p>
 						</li>
 					</ul>
 

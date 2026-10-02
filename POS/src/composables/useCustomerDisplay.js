@@ -63,20 +63,31 @@ export function useCustomerDisplay() {
 
 		return {
 			storeName: shiftStore.profileCompany || "",
-			items: items.map((item, index) => ({
-				key: `${item.item_code}:${item.uom || ""}:${index}`,
-				name: item.item_name || item.item_code,
-				quantity: formatQuantity(item.quantity),
-				freeQuantity: item.free_qty > 0 ? formatQuantity(item.free_qty) : null,
-				uom: item.uom || item.stock_uom || "",
-				rate: format(item.rate),
-				discount:
-					item.discount_amount > 0 ? format(item.discount_amount) : null,
-				amount: format(item.amount || item.rate * item.quantity),
-			})),
+			items: items.map((item, index) => {
+				// Free product rows (offers) carry quantity === free_qty and a zero price
+				const isFree = !!item.is_free_item
+				return {
+					key: `${item.item_code}:${item.uom || ""}:${index}`,
+					name: item.item_name || item.item_code,
+					isFree,
+					quantity: formatQuantity(item.quantity),
+					freeQuantity:
+						!isFree && item.free_qty > 0 ? formatQuantity(item.free_qty) : null,
+					uom: item.uom || item.stock_uom || "",
+					rate: isFree ? null : format(item.rate),
+					discount:
+						item.discount_amount > 0 ? format(item.discount_amount) : null,
+					amount: isFree
+						? null
+						: format(item.amount || item.rate * item.quantity),
+				}
+			}),
 			totalQuantity: formatQuantity(
 				items.reduce(
-					(sum, item) => sum + (item.quantity || 0) + (item.free_qty || 0),
+					(sum, item) =>
+						sum +
+						(item.quantity || 0) +
+						(item.is_free_item ? 0 : item.free_qty || 0),
 					0,
 				),
 			),
