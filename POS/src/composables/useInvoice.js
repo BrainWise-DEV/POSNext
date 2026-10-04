@@ -758,6 +758,11 @@ export function useInvoice() {
 			is_rate_manually_edited: item.is_rate_manually_edited || 0,
 			original_rate: item.original_rate || null,
 			is_free_item: item.is_free_item || 0,
+			// Lines discounted by a scoped coupon; posnext_promotions re-checks them on validate.
+			posnext_coupon_code:
+				item.discount_source === "coupon" && item.coupon_code && item.coupon_code === couponCode.value
+					? item.coupon_code
+					: null,
 		});
 
 		const out = [];

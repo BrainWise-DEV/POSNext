@@ -290,3 +290,5 @@ pos_next_customer_after_insert = []
 website_route_rules = [
 	{"from_route": "/pos/<path:app_path>", "to_route": "pos"},
 ]
+
+update_website_context = "pos_next.optional_apps.add_pos_app_flags"

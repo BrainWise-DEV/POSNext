@@ -2616,7 +2616,8 @@ async function handleSaveDraft() {
 		cartStore.customer,
 		cartStore.posProfile,
 		cartStore.appliedOffers,
-		cartStore.currentDraftId
+		cartStore.currentDraftId,
+		cartStore.appliedCoupon
 	);
 	if (savedDraft) {
 		cartStore.clearCart();
@@ -2634,7 +2635,8 @@ async function handleLoadDraft(draft) {
 				cartStore.customer,
 				cartStore.posProfile,
 				cartStore.appliedOffers,
-				cartStore.currentDraftId
+				cartStore.currentDraftId,
+				cartStore.appliedCoupon
 			);
 
 			if (!saved) {
@@ -2652,6 +2654,7 @@ async function handleLoadDraft(draft) {
 		cartStore.invoiceItems = draftData.items;
 		cartStore.setCustomer(draftData.customer);
 		cartStore.currentDraftId = draft.draft_id; // Set current draft ID
+		cartStore.restoreLineCoupon(draftData.applied_coupon);
 
 		// Rebuild incremental cache to recalculate totals
 		cartStore.rebuildIncrementalCache();
