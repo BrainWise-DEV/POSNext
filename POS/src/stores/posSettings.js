@@ -50,6 +50,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		// Customer Settings
 		allow_customer_purchase_order: 0,
 		allow_duplicate_customer_names: 0,
+		require_customer_phone: 1,
 		fetch_coupon: 0,
 		// Printing
 		allow_print_last_invoice: 0,
@@ -144,6 +145,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	const allowDuplicateCustomerNames = computed(() =>
 		Boolean(settings.value.allow_duplicate_customer_names)
 	);
+	const requireCustomerPhone = computed(() => Boolean(settings.value.require_customer_phone));
 	const fetchCoupon = computed(() => Boolean(settings.value.fetch_coupon));
 
 	// Computed - Printing
@@ -276,6 +278,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 			decimal_precision: "2",
 			allow_customer_purchase_order: 0,
 			allow_duplicate_customer_names: 0,
+			require_customer_phone: 1,
 			fetch_coupon: 0,
 			allow_print_last_invoice: 0,
 			silent_print: 0,
@@ -400,6 +403,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		// Computed - Customer Settings
 		allowCustomerPurchaseOrder,
 		allowDuplicateCustomerNames,
+		requireCustomerPhone,
 		fetchCoupon,
 
 		// Computed - Printing
