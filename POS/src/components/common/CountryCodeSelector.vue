@@ -159,7 +159,7 @@ const props = defineProps({
 	},
 	defaultCountry: {
 		type: String,
-		default: "United States", // Default to US
+		default: "",
 	},
 });
 
