@@ -175,6 +175,11 @@ export function buildReceiptHTML(invoiceData) {
 				(item.discount_percentage && Number.parseFloat(item.discount_percentage) > 0) ||
 				(item.discount_amount && Number.parseFloat(item.discount_amount) > 0);
 			const isFree = item.is_free_item;
+			// PN-130: name the Friends & Family discount on the receipt.
+			const isFnf =
+				item.discount_source === "friends_and_family" ||
+				item.posnext_discount_source === "friends_and_family";
+			const discountLabel = isFnf ? __("Friends & Family discount") : "Discount";
 			const qty = item.quantity || item.qty || 0;
 			const displayRate = item.price_list_rate || item.rate || 0;
 			const subtotal = qty * displayRate;
@@ -187,7 +192,7 @@ export function buildReceiptHTML(invoiceData) {
 							</div>
 							${
 								hasDiscount
-									? `<div class="item-discount"><span>Discount ${
+									? `<div class="item-discount"><span>${discountLabel} ${
 											item.discount_percentage
 												? `(${Number(item.discount_percentage).toFixed(
 														2

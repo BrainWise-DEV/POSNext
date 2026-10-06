@@ -94,11 +94,27 @@
 									</svg>
 								</div>
 								<div class="min-w-0 flex-1">
-									<p
-										class="text-xs font-semibold text-gray-900 truncate leading-tight"
-									>
-										{{ customer.customer_name || customer.name }}
-									</p>
+									<div class="flex items-center gap-1 min-w-0">
+										<p
+											class="text-xs font-semibold text-gray-900 truncate leading-tight"
+										>
+											{{ customer.customer_name || customer.name }}
+										</p>
+										<!-- PN-130: Friends & Family customer badge -->
+										<span
+											v-if="fnfCustomerBadge"
+											:class="[
+												'inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-bold border flex-shrink-0',
+												fnfCustomerBadge.muted
+													? 'bg-gray-100 text-gray-500 border-gray-200'
+													: 'bg-pink-50 text-pink-700 border-pink-200',
+											]"
+											:title="fnfCustomerBadge.title"
+											data-testid="fnf-customer-badge"
+										>
+											{{ fnfCustomerBadge.text }}
+										</span>
+									</div>
 									<p
 										v-if="customer.mobile_no"
 										class="text-[10px] text-gray-500 truncate leading-tight"
@@ -1064,7 +1080,11 @@
 											item.discount_amount &&
 											item.discount_amount > 0
 										"
-										class="inline-flex items-center px-1.5 py-0.5 bg-gradient-to-r from-red-50 to-orange-50 text-red-700 rounded-full text-[9px] font-bold border border-red-200 flex-shrink-0"
+										:class="[
+											'inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-bold border flex-shrink-0',
+											getLineSourceBadgeClass(item),
+										]"
+										:title="getLineSourceTitle(item)"
 									>
 										<svg
 											class="w-2.5 h-2.5 me-0.5"
@@ -1077,6 +1097,9 @@
 												clip-rule="evenodd"
 											/>
 										</svg>
+										<span v-if="getLineSourceShort(item)" class="me-0.5">{{
+											getLineSourceShort(item)
+										}}</span>
 										{{
 											__("{0}%", [
 												Number(getItemDiscountPercent(item)).toFixed(0),
@@ -1369,6 +1392,45 @@
 									</div>
 								</div>
 							</div>
+
+							<!-- PN-130: price breakdown (original − discount = final, labelled by source) -->
+							<div
+								v-if="getLineBreakdownView(item)"
+								class="mt-0.5 flex items-center justify-between gap-1 text-[10px] leading-tight"
+								data-testid="line-price-breakdown"
+							>
+								<span
+									:class="[
+										'font-semibold truncate',
+										getLineSourceTextClass(item),
+									]"
+									>{{ getLineBreakdownView(item).label }}</span
+								>
+								<span class="text-gray-500 whitespace-nowrap" dir="ltr">
+									<span class="line-through">{{
+										formatCurrency(getLineBreakdownView(item).original)
+									}}</span>
+									<span class="mx-0.5">−</span>
+									<span :class="getLineSourceTextClass(item)">{{
+										formatCurrency(getLineBreakdownView(item).discount)
+									}}</span>
+									<span class="mx-0.5">=</span>
+									<strong class="text-gray-800">{{
+										formatCurrency(getLineBreakdownView(item).final)
+									}}</strong>
+								</span>
+							</div>
+							<!-- PN-130: why F&F did / did not apply on this line -->
+							<p
+								v-if="getFnfLineNoteView(item)"
+								:class="[
+									'mt-0.5 text-[10px] leading-snug',
+									fnfToneClass(getFnfLineNoteView(item).tone),
+								]"
+								data-testid="fnf-line-note"
+							>
+								{{ getFnfLineNoteView(item).text }}
+							</p>
 						</div>
 					</div>
 				</div>
@@ -1377,6 +1439,22 @@
 
 		<!-- Totals Summary -->
 		<div class="p-1.5 sm:p-2 bg-white border-t border-gray-200">
+			<!-- PN-130: Friends & Family cashier messages (applied / cap / exclusions / comparison) -->
+			<div
+				v-if="fnfCartMessages.length > 0"
+				class="mb-1.5 rounded-md border border-pink-200 bg-pink-50 px-2 py-1 flex flex-col gap-0.5"
+				role="status"
+				aria-live="polite"
+				data-testid="fnf-cart-messages"
+			>
+				<p
+					v-for="msg in fnfCartMessages"
+					:key="msg.key"
+					:class="['text-[10px] sm:text-[11px] leading-snug', fnfToneClass(msg.tone)]"
+				>
+					{{ msg.text }}
+				</p>
+			</div>
 			<!-- Summary Details -->
 			<div v-if="items.length > 0" class="mb-1.5">
 				<div class="flex items-center justify-between text-xs text-gray-600 mb-0.5">
@@ -1417,6 +1495,18 @@
 					<span class="text-sm font-extrabold text-red-600 text-center min-w-[60px]">{{
 						formatCurrency(displayDiscountAmount)
 					}}</span>
+				</div>
+				<!-- PN-130: discount split by source (F&F vs promotion vs coupon…) -->
+				<div
+					v-for="row in discountBreakdownRows"
+					:key="row.key"
+					class="flex items-center justify-between text-[10px] px-1.5 -mx-0.5 mb-0.5"
+					data-testid="discount-breakdown-row"
+				>
+					<span :class="['font-medium', row.textClass]">{{ row.label }}</span>
+					<span class="font-semibold text-gray-700 text-center min-w-[60px]"
+						>-{{ formatCurrency(row.amount) }}</span
+					>
 				</div>
 
 				<div class="flex items-center justify-between text-xs text-gray-600">
@@ -1547,6 +1637,17 @@ const log = logger.create("InvoiceCart");
 import { createResource } from "frappe-ui";
 import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from "vue";
 import EditItemDialog from "./EditItemDialog.vue";
+import { useLocale } from "@/composables/useLocale";
+import {
+	buildFnfCartMessages,
+	discountTotalsBySource,
+	fnfLineNote,
+	LINE_SOURCE,
+	lineBreakdown,
+	lineDiscountSource,
+	lineSourceLabel,
+	lineSourceShortLabel,
+} from "@/utils/friendsAndFamily";
 
 /**
  * ============================================================================
@@ -2223,6 +2324,135 @@ function getItemDiscountPercent(item) {
 function formatCurrency(amount) {
 	return formatCurrencyUtil(Number.parseFloat(amount || 0), props.currency);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Friends & Family (PN-130): badge, line breakdown, cashier messages
+// ─────────────────────────────────────────────────────────────────────────────
+const { locale } = useLocale();
+
+const fnfCustomerBadge = computed(() => {
+	const eligibility = cartStore.fnfEligibility;
+	if (!eligibility?.eligible) return null;
+	const pct = Number(eligibility.discountPercentage || 0);
+	const override = cartStore.fnfCouponOverride;
+	return {
+		text: __("F&F {0}%", [String(Number(pct.toFixed(2)))]),
+		muted: Boolean(override),
+		title: override
+			? __("Coupon {0} applied instead of Friends & Family", [override.code || ""])
+			: eligibility.userMessage || __("Friends & Family customer"),
+	};
+});
+
+const fnfCartMessages = computed(() =>
+	buildFnfCartMessages({
+		result: cartStore.fnfResult,
+		eligibility: cartStore.fnfEligibility,
+		couponOverride: cartStore.fnfCouponOverride,
+		locale: locale.value,
+		formatAmount: formatCurrency,
+		hasItems: props.items.length > 0,
+	})
+);
+
+const SOURCE_STYLES = {
+	[LINE_SOURCE.FRIENDS_AND_FAMILY]: {
+		badge: "bg-pink-50 text-pink-700 border-pink-200",
+		text: "text-pink-700",
+	},
+	[LINE_SOURCE.COUPON]: {
+		badge: "bg-purple-50 text-purple-700 border-purple-200",
+		text: "text-purple-700",
+	},
+	[LINE_SOURCE.PROMOTION]: {
+		badge: "bg-gradient-to-r from-red-50 to-orange-50 text-red-700 border-red-200",
+		text: "text-red-600",
+	},
+	[LINE_SOURCE.MANUAL]: {
+		badge: "bg-gradient-to-r from-red-50 to-orange-50 text-red-700 border-red-200",
+		text: "text-gray-600",
+	},
+};
+
+function sourceStyle(item) {
+	return SOURCE_STYLES[lineDiscountSource(item)] || SOURCE_STYLES[LINE_SOURCE.MANUAL];
+}
+
+function getLineSourceBadgeClass(item) {
+	return sourceStyle(item).badge;
+}
+
+function getLineSourceTextClass(item) {
+	return sourceStyle(item).text;
+}
+
+function getLineSourceShort(item) {
+	return lineSourceShortLabel(lineDiscountSource(item));
+}
+
+function getLineSourceTitle(item) {
+	return lineSourceLabel(lineDiscountSource(item));
+}
+
+/** Breakdown for discounted paid lines (free / gift lines keep their own badge). */
+function getLineBreakdownView(item) {
+	if (!item || item.is_free_item || item._isStandaloneFreeRow) return null;
+	if (isGwpItem(item) || hasBundledSameItemFree(item)) return null;
+	const view = lineBreakdown(item);
+	if (view.discount <= 0 || view.source === LINE_SOURCE.FREE || view.source === LINE_SOURCE.NONE) {
+		return null;
+	}
+	return { ...view, label: lineSourceLabel(view.source) };
+}
+
+/** F&F reason note, only while the customer is in the program. */
+function getFnfLineNoteView(item) {
+	if (!item || item.is_free_item) return null;
+	if (!cartStore.fnfEligibility?.eligible && !cartStore.fnfResult) return null;
+	if (cartStore.fnfCouponOverride) return null;
+	return fnfLineNote(item, { locale: locale.value });
+}
+
+function fnfToneClass(tone) {
+	switch (tone) {
+		case "success":
+			return "text-pink-800 font-semibold";
+		case "warning":
+			return "text-amber-700 font-medium";
+		case "info":
+			return "text-blue-700";
+		default:
+			return "text-gray-500";
+	}
+}
+
+const discountBreakdownRows = computed(() => {
+	const totals = discountTotalsBySource(props.items);
+	const rows = [];
+	const push = (key, label, amount, textClass) => {
+		if (amount > 0.004) rows.push({ key, label, amount, textClass });
+	};
+	push(
+		LINE_SOURCE.FRIENDS_AND_FAMILY,
+		__("Friends & Family discount"),
+		totals[LINE_SOURCE.FRIENDS_AND_FAMILY],
+		"text-pink-700"
+	);
+	push(LINE_SOURCE.PROMOTION, __("Promotion discount"), totals[LINE_SOURCE.PROMOTION], "text-red-600");
+	push(LINE_SOURCE.COUPON, __("Coupon discount"), totals[LINE_SOURCE.COUPON], "text-purple-700");
+	push(LINE_SOURCE.MANUAL, __("Manual discount"), totals[LINE_SOURCE.MANUAL], "text-gray-600");
+	const header = Number.parseFloat(cartStore.additionalDiscount) || 0;
+	const coupon = cartStore.appliedCoupon;
+	push(
+		"header",
+		coupon ? __("Coupon {0}", [coupon.code || coupon.name || ""]) : __("Invoice discount"),
+		header,
+		coupon ? "text-purple-700" : "text-gray-600"
+	);
+	// A single unlabelled manual discount needs no breakdown.
+	if (rows.length === 1 && rows[0].key === LINE_SOURCE.MANUAL) return [];
+	return rows;
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Quantity Control Functions

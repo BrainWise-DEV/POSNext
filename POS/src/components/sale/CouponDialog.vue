@@ -27,6 +27,22 @@
 					</div>
 				</div>
 
+				<!-- PN-130: Friends & Family customer — discounts are never combined -->
+				<div
+					v-if="fnfEligible && !appliedDiscount"
+					class="bg-pink-50 border border-pink-200 rounded-lg p-3"
+					data-testid="coupon-fnf-hint"
+				>
+					<p class="text-xs text-pink-800">
+						{{
+							__(
+								"Friends & Family customer ({0}%). Only the better discount applies — coupon or Friends & Family, never both.",
+								[fnfPercentText]
+							)
+						}}
+					</p>
+				</div>
+
 				<!-- Coupon Code Input -->
 				<div v-if="!appliedDiscount">
 					<label class="block text-sm font-medium text-gray-700 mb-2 text-start">
@@ -177,7 +193,27 @@
 								-{{ formatCurrency(appliedDiscount.amount) }}
 							</span>
 						</div>
+						<p
+							v-if="appliedComparisonMessage"
+							class="mt-2 text-xs text-pink-800"
+							data-testid="coupon-applied-fnf-message"
+						>
+							{{ appliedComparisonMessage }}
+						</p>
 					</div>
+				</div>
+
+				<!-- PN-130: coupon not applied because a better discount exists -->
+				<div
+					v-if="comparisonMessage"
+					class="bg-amber-50 border border-amber-200 rounded-lg p-3"
+					role="status"
+					data-testid="coupon-comparison-message"
+				>
+					<p class="text-xs font-semibold text-amber-900">
+						{{ __("Coupon not applied") }}
+					</p>
+					<p class="text-xs text-amber-800 mt-0.5">{{ comparisonMessage }}</p>
 				</div>
 
 				<!-- Error Message -->
@@ -234,9 +270,18 @@
 import { promoApi } from "@/utils/promoApi";
 import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency";
 import { Button, Dialog, Input, createResource } from "frappe-ui";
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { useInvoice } from "@/composables/useInvoice";
 import { useToast } from "@/composables/useToast";
+import { useLocale } from "@/composables/useLocale";
+import { usePOSCartStore } from "@/stores/posCart";
+import { call } from "@/utils/apiWrapper";
+import {
+	COUPON_REASON_BETTER_DISCOUNT_EXISTS,
+	discountTotalsBySource,
+	LINE_SOURCE,
+	pickLocalizedMessage,
+} from "@/utils/friendsAndFamily";
 
 // Get calculateDiscountAmount helper from composable
 const { calculateDiscountAmount } = useInvoice();
@@ -279,6 +324,33 @@ const giftCards = ref([]);
 const appliedDiscount = ref(null);
 const applying = ref(false);
 const errorMessage = ref("");
+// PN-130: "better discount exists" explanation (amber, not an error).
+const comparisonMessage = ref("");
+
+const cartStore = usePOSCartStore();
+const { locale } = useLocale();
+
+// Friends & Family customers get the best-discount comparison (PN-128): the
+// coupon is validated against the cart, and only applied when it beats F&F.
+const fnfEligible = computed(() =>
+	Boolean(cartStore.fnfEligibility?.eligible && promoApi.applyFriendsAndFamilyDiscount())
+);
+const fnfPercentText = computed(() =>
+	String(Number(Number(cartStore.fnfEligibility?.discountPercentage || 0).toFixed(2)))
+);
+const appliedComparisonMessage = computed(() =>
+	appliedDiscount.value?.fnf_message
+		? pickLocalizedMessage(appliedDiscount.value.fnf_message, locale.value)
+		: ""
+);
+
+/** Cart lines in the shape the promotions API expects (qty, price_list_rate, discount_source…). */
+function buildCartPayload() {
+	return cartStore.buildOfferEvaluationPayload({
+		customer: props.customer,
+		company: props.company,
+	});
+}
 
 // Resource to load gift cards
 const giftCardsResource = createResource({
@@ -299,11 +371,17 @@ const giftCardsResource = createResource({
 const couponResource = createResource({
 	url: promoApi.validateCoupon(),
 	makeParams() {
-		return {
+		const params = {
 			coupon_code: couponCode.value,
 			customer: props.customer,
 			company: props.company,
 		};
+		// With cart items the server compares the coupon with F&F / promotions
+		// and answers reason=better_discount_exists before anything is applied.
+		if (fnfEligible.value) {
+			params.items = JSON.stringify(buildCartPayload().items);
+		}
+		return params;
 	},
 	auto: false,
 });
@@ -315,6 +393,7 @@ watch(
 		if (val) {
 			loadGiftCards();
 			errorMessage.value = "";
+			comparisonMessage.value = "";
 			couponCode.value = "";
 			// Sync with external state
 			appliedDiscount.value = props.appliedCoupon;
@@ -370,6 +449,7 @@ async function applyCoupon() {
 
 	applying.value = true;
 	errorMessage.value = "";
+	comparisonMessage.value = "";
 
 	try {
 		await couponResource.reload();
@@ -383,9 +463,16 @@ async function applyCoupon() {
 				: couponResource.data;
 
 		if (!validationData || !validationData.valid) {
+			if (showBetterDiscountMessage(validationData)) return;
 			errorMessage.value =
-				validationData?.message || __("The coupon code you entered is not valid");
+				pickLocalizedMessage(validationData, locale.value) ||
+				__("The coupon code you entered is not valid");
 			showError(errorMessage.value);
+			return;
+		}
+
+		if (fnfEligible.value) {
+			await applyCouponAgainstFriendsAndFamily(validationData.coupon);
 			return;
 		}
 
@@ -441,6 +528,74 @@ async function applyCoupon() {
 	} finally {
 		applying.value = false;
 	}
+}
+
+/** Show the PN-128 comparison when F&F (or a promotion) beats the coupon. */
+function showBetterDiscountMessage(response) {
+	if (response?.reason !== COUPON_REASON_BETTER_DISCOUNT_EXISTS) return false;
+	comparisonMessage.value =
+		pickLocalizedMessage(response, locale.value) ||
+		__("A better discount already applies — the coupon was not applied.");
+	showWarning(comparisonMessage.value);
+	return true;
+}
+
+/**
+ * F&F customer: the coupon is applied as an order discount, so the final
+ * decision is the order-level comparison (calculate_coupon_discount) — the
+ * coupon only goes on when it saves more than F&F; then F&F is suppressed.
+ */
+async function applyCouponAgainstFriendsAndFamily(coupon) {
+	const payload = buildCartPayload();
+	const response = await call(promoApi.calculateCouponDiscount(), {
+		coupon_code: couponCode.value,
+		invoice_data: payload,
+		customer: props.customer,
+		company: props.company,
+	});
+	const data = response?.message && typeof response.message === "object" ? response.message : response;
+
+	if (!data || !data.valid) {
+		if (showBetterDiscountMessage(data)) return;
+		errorMessage.value =
+			pickLocalizedMessage(data, locale.value) || __("The coupon code you entered is not valid");
+		showError(errorMessage.value);
+		return;
+	}
+
+	const discountAmount = Math.max(Number.parseFloat(data.discount) || 0, 0);
+	const suppress = Boolean(data.suppress_friends_and_family);
+	// Coupon base without the F&F line discounts it replaces.
+	const fnfLineTotal = suppress
+		? discountTotalsBySource(cartStore.invoiceItems)[LINE_SOURCE.FRIENDS_AND_FAMILY]
+		: 0;
+	const baseAmount = getCouponBaseAmount(coupon || data.coupon || {}) + fnfLineTotal;
+	const code = couponCode.value.toUpperCase();
+	// Only the F&F comparison text (best_discount present), not the plain coupon message.
+	const hasMessage =
+		Boolean(data.best_discount) && Boolean(data.message_en || data.message_ar || data.message);
+	const fnfMessage = hasMessage
+		? { message: data.message, message_en: data.message_en, message_ar: data.message_ar }
+		: null;
+
+	appliedDiscount.value = {
+		name: coupon?.coupon_name || coupon?.coupon_code || code,
+		code,
+		// Exact server amount: percentage 0 so applyDiscount() keeps it as-is.
+		percentage: 0,
+		coupon_percentage: coupon?.discount_type === "Percentage" ? coupon.discount_percentage : 0,
+		amount: Math.min(discountAmount, baseAmount || discountAmount),
+		type: coupon?.discount_type,
+		coupon,
+		apply_on: coupon?.apply_on,
+		base_amount: baseAmount,
+		suppress_friends_and_family: suppress,
+		fnf_message: fnfMessage,
+	};
+
+	emit("discount-applied", appliedDiscount.value);
+	showSuccess(__("{0} applied successfully", [code]));
+	errorMessage.value = "";
 }
 
 function removeDiscount() {

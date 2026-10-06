@@ -6,6 +6,7 @@ import { useSerialNumberStore } from "@/stores/serialNumber";
 import { CoalescingMutex } from "@/utils/mutex";
 import { logger } from "@/utils/logger";
 import { roundCurrency } from "@/utils/currency";
+import { fnfLockedDiscountAmount } from "@/utils/friendsAndFamily";
 
 const log = logger.create("Invoice");
 
@@ -669,7 +670,12 @@ export function useInvoice() {
 
 		// Calculate discount from either percentage or fixed amount
 		let discountAmount = 0;
-		if (item.discount_percentage > 0) {
+		// Friends & Family (PN-130): the server's line amount is authoritative —
+		// a capped line carries an unrounded %, so recomputing would drift.
+		const fnfAmount = isManuallyEdited ? null : fnfLockedDiscountAmount(item, baseAmount);
+		if (fnfAmount !== null) {
+			discountAmount = fnfAmount;
+		} else if (item.discount_percentage > 0) {
 			discountAmount = roundCurrency((baseAmount * item.discount_percentage) / 100);
 		} else if (item.discount_amount > 0) {
 			discountAmount = roundCurrency(item.discount_amount);

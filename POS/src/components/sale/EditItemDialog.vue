@@ -379,6 +379,60 @@
 												</div>
 											</div>
 
+											<!-- PN-130: Friends & Family line — read-only breakdown -->
+											<div
+												v-if="isFnfItem"
+												class="border-t border-gray-200 pt-4"
+												data-testid="fnf-item-info"
+											>
+												<div
+													class="rounded-lg border border-pink-200 bg-pink-50 p-3 text-xs"
+												>
+													<div
+														class="flex items-center gap-1 font-semibold text-pink-800"
+													>
+														<FeatherIcon name="lock" class="w-3 h-3" />
+														{{
+															__(
+																"Friends & Family discount — set by the program, cannot be changed"
+															)
+														}}
+													</div>
+													<div class="mt-2 grid grid-cols-3 gap-2 text-center">
+														<div>
+															<div class="text-gray-500">
+																{{ __("Original price") }}
+															</div>
+															<div class="font-semibold text-gray-900">
+																{{ formatCurrency(fnfBreakdown.original) }}
+															</div>
+														</div>
+														<div>
+															<div class="text-gray-500">
+																{{ __("F&F discount") }}
+															</div>
+															<div class="font-semibold text-pink-700">
+																-{{ formatCurrency(fnfBreakdown.discount) }}
+															</div>
+														</div>
+														<div>
+															<div class="text-gray-500">
+																{{ __("Final price") }}
+															</div>
+															<div class="font-semibold text-gray-900">
+																{{ formatCurrency(fnfBreakdown.final) }}
+															</div>
+														</div>
+													</div>
+													<p
+														v-if="localItem && localItem.fnf_capped"
+														class="mt-2 text-amber-700"
+													>
+														{{ __("Friends & Family reduced by the discount limit") }}
+													</p>
+												</div>
+											</div>
+
 											<!-- Item Discount Section (only if allowed by POS Profile) -->
 											<div
 												v-if="canEditItemDiscount"
@@ -560,6 +614,7 @@ import {
 } from "@/utils/currency";
 import { call } from "@/utils/apiWrapper";
 import { loadSalesPersonsForProfile } from "@/utils/salesPersonsList";
+import { isFnfLine, lineBreakdown } from "@/utils/friendsAndFamily";
 import {
 	scaleRateForUomChange,
 	shouldPreserveRateOnUomChange,
@@ -716,6 +771,11 @@ const isItemLevelPromotion = computed(() => {
 	return localItem.value?.discount_source === "item_level_promotion";
 });
 
+// PN-130: Friends & Family lines are priced by the program (Settings %), never
+// by the cashier — rate and discount stay read-only.
+const isFnfItem = computed(() => isFnfLine(localItem.value));
+const fnfBreakdown = computed(() => lineBreakdown(props.item || {}));
+
 const canEditItemDiscount = computed(() => {
 	return settingsStore.allowItemDiscount && !isItemLevelPromotion.value;
 });
@@ -724,18 +784,21 @@ const canEditItemDiscount = computed(() => {
 // 1. POS Settings allows rate editing AND
 // 2. Item does NOT have pricing rules (promotional offers) applied / configured
 const canEditRate = computed(() => {
-	return settingsStore.allowUserToEditRate && !hasPricingRules.value;
+	return settingsStore.allowUserToEditRate && !hasPricingRules.value && !isFnfItem.value;
 });
 
 // Item discount editing is allowed only if no promotional offer covers this item
 const canEditDiscount = computed(() => {
-	return settingsStore.allowItemDiscount && !hasPricingRules.value;
+	return settingsStore.allowItemDiscount && !hasPricingRules.value && !isFnfItem.value;
 });
 
 // Tooltip message for why rate editing is disabled
 const rateEditDisabledReason = computed(() => {
 	if (!settingsStore.allowUserToEditRate) {
 		return __("Rate editing is disabled");
+	}
+	if (isFnfItem.value) {
+		return __("Locked (Friends & Family)");
 	}
 	if (hasPricingRules.value) {
 		return __("Locked (promotional offer)");
@@ -744,6 +807,9 @@ const rateEditDisabledReason = computed(() => {
 });
 
 const discountEditDisabledReason = computed(() => {
+	if (isFnfItem.value) {
+		return __("Friends & Family discount — set by the program, cannot be changed");
+	}
 	if (hasPricingRules.value) {
 		return __("Cannot add item discount while a promotional offer applies to this item");
 	}
@@ -831,7 +897,8 @@ watch(
 				(newItem.discount_source === "free_item" ||
 					newItem.discount_source === "gwp") &&
 				Number(newItem.discount_amount) > 0;
-			if (usesExactPromoDiscount) {
+			if (usesExactPromoDiscount || isFnfLine(newItem)) {
+				// Exact server amount — an F&F capped line has an unrounded %.
 				discountType.value = "amount";
 				discountValue.value = newItem.discount_amount;
 			} else if (newItem.discount_percentage && newItem.discount_percentage > 0) {
@@ -1191,7 +1258,11 @@ function updateItem() {
 		discountType.value === "percentage" ? discountValue.value : 0;
 	let discountAmount = discountType.value === "amount" ? discountValue.value : 0;
 
-	if (hasPricingRules.value) {
+	if (isFnfItem.value) {
+		// Friends & Family: keep the program's discount; the server re-decides it.
+		discountPercentage = Number(localItem.value.discount_percentage) || 0;
+		discountAmount = Number(localItem.value.discount_amount) || 0;
+	} else if (hasPricingRules.value) {
 		// Keep promotional discount values; do not allow manual override
 		discountPercentage = Number(localItem.value.discount_percentage) || 0;
 		discountAmount = Number(localItem.value.discount_amount) || 0;
@@ -1231,7 +1302,9 @@ function updateItem() {
 		discount_percentage: discountPercentage,
 		discount_amount: discountAmount,
 		discount_source:
-			(discountPercentage > 0 || discountAmount > 0) && !isItemLevelPromotion.value
+			(discountPercentage > 0 || discountAmount > 0) &&
+			!isItemLevelPromotion.value &&
+			!isFnfItem.value
 				? "manual_discount"
 				: localItem.value.discount_source || "",
 		is_already_discounted:

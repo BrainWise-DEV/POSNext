@@ -17,6 +17,10 @@ function promoOrPos(promoPath, posPath) {
 	return isPromotionsAppInstalled() ? promoPath : posPath;
 }
 
+function promoOrNull(promoPath) {
+	return isPromotionsAppInstalled() ? promoPath : null;
+}
+
 export const promoApi = {
 	applyOffers: () =>
 		promoOrPos("posnext_promotions.api.offers.apply_offers", "pos_next.api.invoices.apply_offers"),
@@ -43,6 +47,12 @@ export const promoApi = {
 			"posnext_promotions.api.offers.get_customer_one_time_redemptions",
 			"pos_next.api.offers.get_customer_one_time_redemptions",
 		),
+	// Friends & Family (PN-124..PN-130) exists only in POSNext Promotions;
+	// null when the app is absent so callers skip F&F entirely.
+	checkFriendsAndFamilyEligibility: () =>
+		promoOrNull("posnext_promotions.api.friends_and_family.check_friends_and_family_eligibility"),
+	applyFriendsAndFamilyDiscount: () =>
+		promoOrNull("posnext_promotions.api.friends_and_family.apply_friends_and_family_discount"),
 	getPromotions: () =>
 		promoOrPos("posnext_promotions.api.promotions.get_promotions", "pos_next.api.promotions.get_promotions"),
 	getPromotionDetails: () =>
