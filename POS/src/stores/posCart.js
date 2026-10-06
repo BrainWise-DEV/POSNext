@@ -34,6 +34,7 @@ import {
 	normalizeEligibility,
 	normalizeFnfResult,
 	stampFnfLine,
+	resolveHeaderDiscount,
 	stripFnfLine,
 } from "@/utils/friendsAndFamily";
 import { defineStore } from "pinia";
@@ -698,13 +699,16 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * rule applies on the current cart).
 	 */
 	function applyHeaderDiscountFromServer(headerDiscount) {
-		if (!headerDiscount) {
-			additionalDiscount.value = 0;
-			rebuildIncrementalCache();
+		const { amount, keepCoupon } = resolveHeaderDiscount(
+			headerDiscount?.discountAmount,
+			appliedCoupon.value
+		);
+		if (keepCoupon) {
+			// The applied POS Coupon owns the header discount — the server
+			// reported no transaction-rule discount, which must not wipe it.
+			applyDiscount(appliedCoupon.value);
 			return;
 		}
-
-		const amount = Number.parseFloat(headerDiscount.discountAmount) || 0;
 		additionalDiscount.value = amount;
 		rebuildIncrementalCache();
 	}

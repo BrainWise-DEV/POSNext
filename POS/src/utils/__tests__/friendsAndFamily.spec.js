@@ -18,6 +18,7 @@ import {
 	normalizeEligibility,
 	normalizeFnfResult,
 	pickLocalizedMessage,
+	resolveHeaderDiscount,
 	stampFnfLine,
 	stripFnfLine,
 } from "@/utils/friendsAndFamily";
@@ -339,5 +340,27 @@ describe("mergeServerLine (apply_offers → cart)", () => {
 		const item = cartLine({ discount_percentage: 5, discount_amount: 44.95, discount_source: "manual_discount" });
 		mergeServerLine(item, {}, undefined);
 		expect(item.discount_percentage).toBe(5);
+	});
+});
+
+describe("resolveHeaderDiscount (coupon vs apply_offers header)", () => {
+	const coupon = { code: "FFDEMO40", percentage: 0, amount: 960, suppress_friends_and_family: true };
+
+	it("keeps an applied coupon when the server reports no transaction-rule discount", () => {
+		// Coupon beat F&F → F&F stamps stripped → cart re-evaluated → apply_offers
+		// answers discount_amount 0. The coupon must survive (was the PN-130 bug).
+		expect(resolveHeaderDiscount(0, coupon)).toEqual({ amount: 0, keepCoupon: true });
+		expect(resolveHeaderDiscount(undefined, coupon)).toEqual({ amount: 0, keepCoupon: true });
+		expect(resolveHeaderDiscount("0", coupon)).toEqual({ amount: 0, keepCoupon: true });
+	});
+
+	it("uses the server header discount when no coupon is applied", () => {
+		expect(resolveHeaderDiscount(0, null)).toEqual({ amount: 0, keepCoupon: false });
+		expect(resolveHeaderDiscount("125.5", null)).toEqual({ amount: 125.5, keepCoupon: false });
+		expect(resolveHeaderDiscount(-5, null)).toEqual({ amount: 0, keepCoupon: false });
+	});
+
+	it("lets a real transaction-rule discount from the server through", () => {
+		expect(resolveHeaderDiscount(50, coupon)).toEqual({ amount: 50, keepCoupon: false });
 	});
 });

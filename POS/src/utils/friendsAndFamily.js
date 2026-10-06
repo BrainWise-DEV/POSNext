@@ -521,3 +521,24 @@ export function buildFnfCartMessages({
 
 	return messages;
 }
+
+/**
+ * Header (invoice-level) discount the cart should carry after an
+ * apply_offers response.
+ *
+ * apply_offers only reports discounts from transaction-scope Pricing Rules
+ * (0 when none fired). A POS Coupon is applied client-side as the header
+ * discount, so a 0 from the server must not wipe it — otherwise any cart
+ * re-evaluation (e.g. the one triggered when a coupon that beat F&F strips
+ * the F&F line stamps) silently drops the coupon while F&F stays removed.
+ *
+ * @param {number|string} serverAmount  discount_amount from apply_offers
+ * @param {object|null} appliedCoupon   the coupon currently applied in the cart
+ * @returns {{ amount: number, keepCoupon: boolean }}
+ *   keepCoupon=true → re-apply the coupon (amount is then ignored).
+ */
+export function resolveHeaderDiscount(serverAmount, appliedCoupon = null) {
+	const amount = Math.max(num(serverAmount), 0);
+	if (appliedCoupon && amount <= 0) return { amount: 0, keepCoupon: true };
+	return { amount, keepCoupon: false };
+}
