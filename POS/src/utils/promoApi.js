@@ -2,15 +2,27 @@
  * Runtime API paths for optional POSNext Promotions.
  *
  * pos_next never imports the promotions Python package. Vue may call
- * posnext_promotions.api.* only when that app's extend_bootinfo flag is present.
+ * posnext_promotions.api.* only when that app's install flag is present
+ * (frappe.boot via extend_bootinfo on Desk, window.posnext_app_flags on /pos).
  */
 
+/**
+ * Install flag for an optional app. The /pos page is not the Desk, so
+ * frappe.boot (extend_bootinfo) is usually absent; the update_website_context
+ * hook (pos_next.optional_apps) exposes the same flags as
+ * window.posnext_app_flags. Either source is accepted.
+ */
+function hasAppFlag(app) {
+	if (typeof window === "undefined") return false;
+	return Boolean(window.frappe?.boot?.[app] || window.posnext_app_flags?.[app]);
+}
+
 export function isPromotionsAppInstalled() {
-	return Boolean(window.frappe?.boot?.posnext_promotions);
+	return hasAppFlag("posnext_promotions");
 }
 
 export function isMagentoAppInstalled() {
-	return Boolean(window.frappe?.boot?.magento_integration);
+	return hasAppFlag("magento_integration");
 }
 
 function promoOrPos(promoPath, posPath) {
