@@ -293,3 +293,6 @@ pos_next_customer_after_insert = []
 website_route_rules = [
 	{"from_route": "/pos/<path:app_path>", "to_route": "pos"},
 ]
+
+# /pos is not the Desk: expose optional-app install flags to the Vue app.
+update_website_context = ["pos_next.optional_apps.update_pos_page_context"]
