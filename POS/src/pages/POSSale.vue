@@ -1127,6 +1127,7 @@ import { useUserData } from "@/data/user";
 import { parseError } from "@/utils/errorHandler";
 import { cleanupUserSession } from "@/utils/sessionCleanup";
 import { offlineWorker } from "@/utils/offline/workerClient";
+import { deductCachedBatchQty } from "@/utils/offline/items";
 import { cacheOfflineReceiptPayload } from "@/utils/offline/offlineReceiptCache";
 import { cacheInvoiceHistory, getCachedInvoiceHistory } from "@/utils/offline/sync";
 import {
@@ -1144,6 +1145,7 @@ import { useToast } from "@/composables/useToast";
 
 import { useCustomerSearchStore } from "@/stores/customerSearch";
 import { useItemSearchStore } from "@/stores/itemSearch";
+import { useSerialNumberStore } from "@/stores/serialNumber";
 import { useStockStore } from "@/stores/stock";
 // Pinia Stores
 import { usePOSCartStore } from "@/stores/posCart";
@@ -1606,6 +1608,8 @@ onMounted(async () => {
 						shiftStore.currentShift?.name,
 					),
 			draftsStore.updateDraftsCount(),
+			// Invoices queued in an earlier offline session: sync now, not on the next reconnect
+			offlineStore.isOffline ? null : offlineStore.syncAllPending(),
 		]);
 
 		// Wait for settings (required for tax rules) + all background ops
@@ -1914,10 +1918,27 @@ async function updatePeriodicStockSyncItems(warehouse) {
 	}
 }
 
+/**
+ * Offline invoices synced: replace local stock, batch and serial figures with server values
+ */
+async function handleOfflineInvoicesSynced() {
+	useSerialNumberStore().clearCache();
+	try {
+		await Promise.all([
+			stockStore.refresh(null, shiftStore.profileWarehouse),
+			itemStore.refreshBatchSerialCache(),
+		]);
+	} catch (error) {
+		log.error("Failed to refresh stock after offline sync:", error);
+	}
+}
+window.addEventListener("offlineInvoicesSynced", handleOfflineInvoicesSynced);
+
 // Cleanup event listeners on unmount
 onUnmounted(() => {
 	window.removeEventListener("stockSyncComplete", handleStockSyncComplete);
 	window.removeEventListener("stockSyncError", handleStockSyncError);
+	window.removeEventListener("offlineInvoicesSynced", handleOfflineInvoicesSynced);
 });
 
 // Handlers
@@ -1945,6 +1966,8 @@ async function handleShiftOpened() {
 					shiftStore.currentShift?.name,
 				),
 		draftsStore.updateDraftsCount(),
+		// Invoices queued in an earlier offline session: sync now, not on the next reconnect
+		offlineStore.isOffline ? null : offlineStore.syncAllPending(),
 	]);
 
 	// Wait for settings (required for tax rules) + all background ops
@@ -2292,8 +2315,28 @@ async function handlePaymentCompleted(paymentData) {
 			};
 			uiStore.setLastOfflinePrintDoc(offlinePrintDoc);
 			cacheOfflineReceiptPayload(offlineReceiptName, offlinePrintDoc);
+
+			// Deduct sold stock locally; the server refresh after sync replaces it
+			const soldQty = new Map();
+			for (const item of preparedItems) {
+				const qty = (item.qty || 0) * (item.conversion_factor || 1);
+				soldQty.set(item.item_code, (soldQty.get(item.item_code) || 0) + qty);
+				if (item.batch_no) {
+					deductCachedBatchQty(item.item_code, item.batch_no, qty).catch(() => {});
+				}
+			}
+			const stockUpdates = [...soldQty]
+				.filter(([itemCode]) => stockStore.server.has(itemCode))
+				.map(([itemCode, qty]) => ({
+					item_code: itemCode,
+					actual_qty: stockStore.getStockInfo(itemCode).server - qty,
+					warehouse: shiftStore.profileWarehouse,
+				}));
+			stockStore.update(stockUpdates);
+			offlineWorker.updateStockQuantities(stockUpdates).catch(() => {});
+
 			uiStore.showPaymentDialog = false;
-			cartStore.clearCart();
+			cartStore.clearCart({ returnSerials: false });
 			// Reset cart hash after successful payment
 			previousCartHash = "";
 
@@ -2328,6 +2371,7 @@ async function handlePaymentCompleted(paymentData) {
 		} else {
 			// Get item codes from cart before clearing
 			const soldItemCodes = cartStore.invoiceItems.map((item) => item.item_code);
+			const soldBatches = cartStore.invoiceItems.filter((item) => item.batch_no);
 
 			const result = await cartStore.submitInvoice({
 				isCreditSale: Boolean(paymentData.is_credit_sale),
@@ -2364,7 +2408,7 @@ async function handlePaymentCompleted(paymentData) {
 				const paidAmount = paymentData.paid_amount || invoiceTotal;
 
 				uiStore.showPaymentDialog = false;
-				cartStore.clearCart();
+				cartStore.clearCart({ returnSerials: false });
 				// Reset cart hash after successful payment
 				previousCartHash = "";
 
@@ -2375,6 +2419,12 @@ async function handlePaymentCompleted(paymentData) {
 
 				// Refresh stock - Direct API (50-200ms), no Socket.IO lag!
 				await stockStore.refresh(soldItemCodes, shiftStore.profileWarehouse);
+
+				// Keep the offline batch cache in step; the refresh above covers stock only
+				for (const item of soldBatches) {
+					const qty = (item.quantity || item.qty || 0) * (item.conversion_factor || 1);
+					deductCachedBatchQty(item.item_code, item.batch_no, qty).catch(() => {});
+				}
 
 				// Refresh invoice history cache in background (non-blocking)
 				loadInvoiceHistoryData().catch((err) =>
@@ -2619,7 +2669,8 @@ async function handleSaveDraft() {
 		cartStore.currentDraftId
 	);
 	if (savedDraft) {
-		cartStore.clearCart();
+		// The draft now holds the serials
+		cartStore.clearCart({ returnSerials: false });
 		// Reset cart hash when cart is saved as draft and cleared
 		previousCartHash = "";
 	}
@@ -3204,7 +3255,7 @@ function handleLoadDraftFromManagement(draft) {
 }
 
 function handleDeleteDraft(draftId) {
-	draftsStore.deleteDraft(draftId);
+	draftsStore.deleteDraft(draftId, { returnSerials: draftId !== cartStore.currentDraftId });
 }
 
 async function handleWarehouseChanged(newWarehouse) {

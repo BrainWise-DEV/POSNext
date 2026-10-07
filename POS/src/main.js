@@ -54,15 +54,22 @@ if ("serviceWorker" in navigator) {
 	window.addEventListener(
 		"load",
 		() => {
-			import("virtual:pwa-register").then(({ registerSW }) => {
-				registerSW({
-					immediate: true,
-					onNeedRefresh: () => log.info("New content available, reloading..."),
-					onOfflineReady: () => log.info("App ready to work offline"),
-					onRegistered: (reg) => log.info("Service Worker registered", reg),
-					onRegisterError: (err) => log.error("Service Worker registration error", err),
-				});
-			});
+			// Scope /pos (not /assets/...) so the POS page itself can open offline.
+			// No trailing slash: the page is first opened as /pos, then routed to /pos/
+			navigator.serviceWorker
+				.register("/pos-sw.js", { scope: "/pos" })
+				.then(async (reg) => {
+					log.info("Service Worker registered", reg);
+					// Drop the old worker registered under the assets scope
+					for (const old of await navigator.serviceWorker.getRegistrations()) {
+						if (old.scope.endsWith("/assets/pos_next/pos/")) old.unregister();
+					}
+					// Cache the POS page now so the first visit already works offline
+					await navigator.serviceWorker.ready;
+					const shell = await caches.open("pos-page-cache");
+					if (!(await shell.match("/pos/"))) await shell.add("/pos/");
+				})
+				.catch((err) => log.error("Service Worker registration error", err));
 		},
 		{ passive: true }
 	);
@@ -164,7 +171,10 @@ async function initializeApp() {
 			return sessionUser();
 		} catch (error) {
 			log.debug("User not logged in", error?.message || "No session");
-			return null;
+			// Only a server "not logged in" logs out. A network failure (offline start,
+			// server unreachable) can't confirm the session, so trust the session cookie.
+			// navigator.onLine is not used: it stays true on a LAN without the server.
+			return error?.exc_type === "AuthenticationError" ? null : sessionUser();
 		}
 	})();
 
