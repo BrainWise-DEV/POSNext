@@ -33,6 +33,13 @@
 				@logout="uiStore.showLogoutDialog = true"
 			>
 				<template #menu-items>
+					<button
+						v-if="tintaUsage.allowed"
+						@click="showPemakaianTintaDialog = true"
+						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-blue-50 flex items-center gap-3 transition-colors"
+					>
+						<span>{{ __("Pemakaian Tinta") }}</span>
+					</button>
 					<template v-if="shiftStore.isSpgMode">
 						<button
 							@click="showSpgOrdersDialog = true"
@@ -290,7 +297,10 @@
 				style="max-height: calc(100vh - 60px - var(--header-height, 60px))"
 			>
 				<!-- Icon-Only Management Slider - Always Visible -->
-				<ManagementSlider @menu-clicked="handleManagementMenuClick" />
+				<ManagementSlider
+					:show-tinta-usage="tintaUsage.allowed"
+					@menu-clicked="handleManagementMenuClick"
+				/>
 
 				<!-- Main Content Container -->
 				<div
@@ -623,6 +633,11 @@
 				:currency="shiftStore.profileCurrency"
 				@orders-changed="setSpgOrders"
 				@edit-order="handleEditSpgOrder"
+			/>
+			<PemakaianTintaDialog
+				v-model="showPemakaianTintaDialog"
+				:warehouses="tintaUsage.warehouses"
+				:default-warehouse="shiftStore.currentProfile?.warehouse || ''"
 			/>
 			<SpgInvoicesDialog
 				v-model="showSpgInvoicesDialog"
@@ -1156,6 +1171,7 @@ let _posInitPromise = null;
 <script setup>
 import ShiftClosingDialog from "@/components/ShiftClosingDialog.vue";
 import ShiftOpeningDialog from "@/components/ShiftOpeningDialog.vue";
+import PemakaianTintaDialog from "@/components/sale/PemakaianTintaDialog.vue";
 import SpgInvoicesDialog from "@/components/sale/SpgInvoicesDialog.vue";
 import SpgOrdersDialog from "@/components/sale/SpgOrdersDialog.vue";
 import OrderQrCameraDialog from "@/components/sale/OrderQrCameraDialog.vue";
@@ -1496,6 +1512,17 @@ const showSpgOrdersDialog = ref(false);
 const spgOrdersDialogRef = ref(null);
 // SPG: invoices credited to their Sales Person (instead of the cashier's history)
 const showSpgInvoicesDialog = ref(false);
+const showPemakaianTintaDialog = ref(false);
+// nextend.pemakaian_tinta: menu only for SPG / kepala toko, online only
+const tintaUsage = ref({ allowed: false, warehouses: [] });
+
+async function loadTintaUsageContext() {
+	try {
+		tintaUsage.value = (await call("nextend.pemakaian_tinta.get_upload_context")) || tintaUsage.value;
+	} catch {
+		// Offline or nextend without this feature - the menu stays hidden
+	}
+}
 const savingSpgOrder = ref(false);
 
 // SPG: own Pending orders waiting at the cashier (badge on "Pesanan Saya")
@@ -1614,6 +1641,7 @@ let bodyStyleSnapshot = null;
 
 onMounted(async () => {
 	loadCachedAddonCatalog();
+	loadTintaUsageContext();
 
 	// Window resize listeners (passive for better performance)
 	const handleResize = () => {
@@ -3588,6 +3616,8 @@ function handleManagementMenuClick(menuItem) {
 		// Load drafts data
 		draftsStore.loadDrafts();
 		showInvoiceManagement.value = true;
+	} else if (menuItem === "tinta") {
+		showPemakaianTintaDialog.value = true;
 	} else if (menuItem === "products") {
 		// Open Stock Lookup dialog in search mode
 		showStockLookup.value = true;
