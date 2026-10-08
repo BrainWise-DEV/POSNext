@@ -2561,6 +2561,8 @@ function openOrderCameraFromQueue() {
 
 async function fillOrderItemNamesFromCache(order) {
 	for (const row of order.items) {
+		// Gelondongan rows are named after their group - nothing to look up.
+		if (row.addon_parent_key && !row.addon_item) continue;
 		const code = row.addon_item || row.item_code;
 		try {
 			const cached = await offlineWorker.searchCachedItems(code, 5);
@@ -2594,6 +2596,7 @@ async function handleSaveSpgOrder() {
 	const items = cartStore.formatItemsForSubmission(cartStore.invoiceItems).map((row) => ({
 		...row,
 		addon_item: row.custom_addon_item,
+		addon_group: row.custom_addon_group,
 		addon_key: row.custom_addon_key,
 		addon_parent_key: row.custom_addon_parent_key,
 		keterangan: row.custom_keterangan,
@@ -3363,8 +3366,9 @@ async function handleEditOfflineInvoice(invoice) {
 			for (const row of invoiceData.items) {
 				if (!row.custom_addon_parent_key) continue;
 				(addonsByKey[row.custom_addon_parent_key] ||= []).push({
-					item_code: row.custom_addon_item,
-					item_name: row.item_name,
+					item_code: row.custom_addon_item || null,
+					addon_group: row.custom_addon_group || null,
+					item_name: row.custom_addon_item ? row.item_name : row.custom_addon_group,
 					amount: row.rate,
 				});
 			}

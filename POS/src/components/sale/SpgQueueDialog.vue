@@ -113,7 +113,11 @@
 										:class="{ 'ps-3 text-gray-600': item.addon_parent_key }"
 									>
 										<template v-if="item.addon_parent_key">+ </template>
-										{{ item.item_name || item.addon_item || item.item_code }}
+										{{
+											item.addon_parent_key && !item.addon_item
+												? item.addon_group
+												: item.item_name || item.addon_item || item.item_code
+										}}
 										<div class="text-[10px] text-gray-400">
 											{{ item.warehouse }}
 										</div>

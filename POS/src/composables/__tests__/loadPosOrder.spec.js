@@ -21,7 +21,9 @@ const ORDER = {
 		{ item_code: "SAUCE", addon_item: "SAUCE", addon_parent_key: "k1", qty: 2, uom: "Nos",
 			warehouse: "W1", rate: 5 },
 		{ item_code: "B", qty: 1, uom: "Nos", warehouse: "W1", price_list_rate: 50, rate: 45,
-			discount_percentage: 10, discount_amount: 5 },
+			discount_percentage: 10, discount_amount: 5, addon_key: "k2" },
+		{ item_code: "ADDON-TINTING", addon_group: "Tinta Propan", addon_parent_key: "k2", qty: 1,
+			uom: "Nos", warehouse: "W1", rate: 25 },
 		{ item_code: "FREE", qty: 1, uom: "Nos", warehouse: "W1", price_list_rate: 20, rate: 0,
 			discount_percentage: 100, pricing_rules: "PRLE-2", is_free_item: 1 },
 	],
@@ -40,7 +42,13 @@ describe("loadPosOrder", () => {
 		expect(rows.map((r) => r.item_code)).toEqual(["A", "B", "FREE"]);
 		expect(rows.every((r) => r.pos_order_row && r.is_resolved_barcode)).toBe(true);
 		expect(rows[0].discount_percentage).toBe(10);
-		expect(rows[0].addons).toEqual([{ item_code: "SAUCE", item_name: "SAUCE", amount: 5 }]);
+		// Gelondongan comes back as the group, named after it.
+		expect(rows[1].addons).toEqual([
+			{ item_code: null, addon_group: "Tinta Propan", item_name: "Tinta Propan", amount: 25 },
+		]);
+		expect(rows[0].addons).toEqual([
+			{ item_code: "SAUCE", addon_group: null, item_name: "SAUCE", amount: 5 },
+		]);
 		expect(invoice.posOrder.value).toBe(ORDER.name);
 		expect(invoice.couponCode.value).toBe("HEMAT");
 		expect(invoice.posOrderSalesPerson.value).toBe("SPG Ani");

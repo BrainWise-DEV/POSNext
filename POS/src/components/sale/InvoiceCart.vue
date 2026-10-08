@@ -1426,7 +1426,7 @@
 							<!-- Add ons (e.g. tinta), indented under their base line -->
 							<div
 								v-for="addon in item.addons || []"
-								:key="addon.item_code"
+								:key="addonKey(addon)"
 								class="flex items-center justify-between ps-3 mt-0.5 text-[11px] sm:text-xs text-gray-600"
 							>
 								<span class="truncate">+ {{ addon.item_name }}</span>
@@ -1689,7 +1689,7 @@ import { useCartSort } from "@/composables/useCartSort";
 import { isOffline } from "@/utils/offline";
 import { offlineWorker } from "@/utils/offline/workerClient";
 import { logger } from "@/utils/logger";
-import { getAvailableAddons } from "@/utils/itemAddons";
+import { addonKey, hasAvailableAddons } from "@/utils/itemAddons";
 import { saleRowKey } from "@/utils/saleSplit";
 import { approvalReasonLabel } from "@/utils/salesApproval";
 import { FeatherIcon } from "frappe-ui";
@@ -2517,7 +2517,7 @@ function formatCurrency(amount) {
 }
 
 function hasAddons(item) {
-	return getAvailableAddons(item).length > 0;
+	return hasAvailableAddons(item);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

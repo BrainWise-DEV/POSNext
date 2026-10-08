@@ -750,7 +750,8 @@ export function useInvoice() {
 
 	/**
 	 * Replace the add ons of the line matching item_code + uom.
-	 * @param {Array} addons - [{ item_code, item_name, amount }]
+	 * @param {Array} addons - [{ item_code, addon_group, item_name, amount }]
+	 *   (gelondongan: addon_group without item_code). Amounts of 0 are dropped.
 	 */
 	function setItemAddons(itemCode, uom, addons) {
 		const item = invoiceItems.value.find(
@@ -759,11 +760,14 @@ export function useInvoice() {
 		if (!item) return;
 
 		const before = addonTotals(item);
-		item.addons = addons.map((a) => ({
-			item_code: a.item_code,
-			item_name: a.item_name,
-			amount: roundCurrency(Number.parseFloat(a.amount) || 0),
-		}));
+		item.addons = addons
+			.map((a) => ({
+				item_code: a.item_code || null,
+				addon_group: a.addon_group || null,
+				item_name: a.item_name,
+				amount: roundCurrency(Number.parseFloat(a.amount) || 0),
+			}))
+			.filter((a) => a.amount > 0);
 		if (item.addons.length && !item.addon_key) {
 			item.addon_key = generateUUID();
 		}
@@ -790,7 +794,8 @@ export function useInvoice() {
 			is_rate_manually_edited: 0,
 			original_rate: null,
 			is_free_item: 0,
-			custom_addon_item: addon.item_code,
+			custom_addon_item: addon.item_code || null,
+			custom_addon_group: addon.addon_group || null,
 			custom_addon_parent_key: item.addon_key,
 		}));
 	}
@@ -1466,8 +1471,9 @@ export function useInvoice() {
 			if (row.addon_parent_key) {
 				if (!addonsByKey[row.addon_parent_key]) addonsByKey[row.addon_parent_key] = [];
 				addonsByKey[row.addon_parent_key].push({
-					item_code: row.addon_item,
-					item_name: row.item_name || row.addon_item,
+					item_code: row.addon_item || null,
+					addon_group: row.addon_group || null,
+					item_name: row.addon_item ? row.item_name || row.addon_item : row.addon_group,
 					amount: Number.parseFloat(row.rate) || 0,
 				});
 			}

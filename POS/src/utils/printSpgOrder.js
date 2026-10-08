@@ -29,7 +29,7 @@ export function buildSpgOrderSlipHTML(order, currency) {
 			if (item.addon_parent_key) {
 				return `
 				<div class="row addon">
-					<span>+ ${escapeHtml(item.item_name || item.addon_item)}</span>
+					<span>+ ${escapeHtml(item.addon_item ? item.item_name || item.addon_item : item.addon_group)}</span>
 					<span>${formatCurrency(item.amount || 0, currency)}</span>
 				</div>`;
 			}
