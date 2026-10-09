@@ -217,7 +217,9 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 
 			// Step 2: If online, fetch delta from server
 			if (!isOffline()) {
-				const lastSync = forceReload ? null : localStorage.getItem(CUSTOMERS_SYNC_KEY);
+				// Empty cache: a delta since the last sync would return nothing, so fetch everything
+				const lastSync =
+					forceReload || !cachedCustomers?.length ? null : localStorage.getItem(CUSTOMERS_SYNC_KEY);
 
 				const response = await call("pos_next.api.customers.get_customers", {
 					pos_profile: posProfile,

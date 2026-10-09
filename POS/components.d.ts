@@ -9,6 +9,7 @@ export {}
 declare module 'vue' {
   export interface GlobalComponents {
     ActionButton: typeof import('./src/components/common/ActionButton.vue')['default']
+    AuthorizationDialog: typeof import('./src/components/common/AuthorizationDialog.vue')['default']
     AutocompleteSelect: typeof import('./src/components/common/AutocompleteSelect.vue')['default']
     BatchSerialDialog: typeof import('./src/components/sale/BatchSerialDialog.vue')['default']
     CheckboxField: typeof import('./src/components/settings/CheckboxField.vue')['default']
@@ -20,6 +21,7 @@ declare module 'vue' {
     CustomerDialog: typeof import('./src/components/sale/CustomerDialog.vue')['default']
     DraftInvoicesDialog: typeof import('./src/components/sale/DraftInvoicesDialog.vue')['default']
     EditItemDialog: typeof import('./src/components/sale/EditItemDialog.vue')['default']
+    ExpenseDialog: typeof import('./src/components/sale/ExpenseDialog.vue')['default']
     InstallAppBadge: typeof import('./src/components/common/InstallAppBadge.vue')['default']
     InvoiceCart: typeof import('./src/components/sale/InvoiceCart.vue')['default']
     InvoiceDetailDialog: typeof import('./src/components/invoices/InvoiceDetailDialog.vue')['default']
@@ -41,6 +43,7 @@ declare module 'vue' {
     POSFooter: typeof import('./src/components/common/POSFooter.vue')['default']
     POSHeader: typeof import('./src/components/pos/POSHeader.vue')['default']
     POSSettings: typeof import('./src/components/settings/POSSettings.vue')['default']
+    ProductManagement: typeof import('./src/components/sale/ProductManagement.vue')['default']
     PromotionManagement: typeof import('./src/components/sale/PromotionManagement.vue')['default']
     ReturnInvoiceDialog: typeof import('./src/components/sale/ReturnInvoiceDialog.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
@@ -50,6 +53,7 @@ declare module 'vue' {
     SessionLockScreen: typeof import('./src/components/common/SessionLockScreen.vue')['default']
     SettingsSection: typeof import('./src/components/settings/SettingsSection.vue')['default']
     ShiftClosingDialog: typeof import('./src/components/ShiftClosingDialog.vue')['default']
+    ShiftHistoryDialog: typeof import('./src/components/sale/ShiftHistoryDialog.vue')['default']
     ShiftOpeningDialog: typeof import('./src/components/ShiftOpeningDialog.vue')['default']
     StatusBadge: typeof import('./src/components/common/StatusBadge.vue')['default']
     Toast: typeof import('./src/components/common/Toast.vue')['default']

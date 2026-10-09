@@ -231,11 +231,16 @@
 </template>
 
 <script setup>
+import { isPromotionsAppInstalled, promoApi } from "@/utils/promoApi";
 import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency";
-import { Button, Dialog, Input, createResource } from "frappe-ui";
+import { Button, Dialog, Input, call, createResource } from "frappe-ui";
 import { ref, watch } from "vue";
 import { useInvoice } from "@/composables/useInvoice";
 import { useToast } from "@/composables/useToast";
+import { usePOSCartStore } from "@/stores/posCart";
+
+const SCOPED_COUPON_SCOPES = ["Item Code", "Item Group", "Brand"];
+const cartStore = usePOSCartStore();
 
 // Get calculateDiscountAmount helper from composable
 const { calculateDiscountAmount } = useInvoice();
@@ -281,7 +286,7 @@ const errorMessage = ref("");
 
 // Resource to load gift cards
 const giftCardsResource = createResource({
-	url: "pos_next.api.offers.get_active_coupons",
+	url: promoApi.getActiveCoupons(),
 	makeParams() {
 		return {
 			customer: props.customer,
@@ -294,18 +299,17 @@ const giftCardsResource = createResource({
 	},
 });
 
-// Resource to validate coupon
-const couponResource = createResource({
-	url: "pos_next.api.offers.validate_coupon",
-	makeParams() {
-		return {
-			coupon_code: couponCode.value,
-			customer: props.customer,
-			company: props.company,
-		};
-	},
-	auto: false,
-});
+async function validateCouponCode(withItems) {
+	const params = {
+		coupon_code: couponCode.value,
+		customer: props.customer,
+		company: props.company,
+	};
+	if (withItems) {
+		params.items = JSON.stringify(cartStore.buildCouponItemsPayload());
+	}
+	return call(promoApi.validateCoupon(), params);
+}
 
 watch(
 	() => props.modelValue,
@@ -361,19 +365,29 @@ async function applyCoupon() {
 		return;
 	}
 
+	if (!props.customer) {
+		errorMessage.value = __("Please choose a customer");
+		showError(errorMessage.value);
+		return;
+	}
+
 	applying.value = true;
 	errorMessage.value = "";
 
 	try {
-		await couponResource.reload();
-		// Frappe wraps response in { message: {...} }
-		const result = couponResource.data?.message || couponResource.data;
-
-		// Handle if result is the actual response object
-		const validationData =
-			typeof result === "object" && result.valid !== undefined
-				? result
-				: couponResource.data;
+		// Only posnext_promotions prices cart lines; pos_next's validate_coupon takes no items.
+		const withItems = isPromotionsAppInstalled();
+		let validationData = await validateCouponCode(withItems);
+		// The line check can reject a whole-cart coupon (e.g. every line already discounted)
+		// that the cart-level path below accepts and prices on its own.
+		if (
+			withItems &&
+			!validationData?.valid &&
+			validationData?.coupon &&
+			!isScopedCoupon(validationData.coupon)
+		) {
+			validationData = await validateCouponCode(false);
+		}
 
 		if (!validationData || !validationData.valid) {
 			errorMessage.value =
@@ -383,6 +397,10 @@ async function applyCoupon() {
 		}
 
 		const coupon = validationData.coupon;
+		if (isScopedCoupon(coupon)) {
+			applyScopedCoupon(coupon, validationData);
+			return;
+		}
 		const baseAmount = getCouponBaseAmount(coupon);
 
 		// Check minimum amount on the configured coupon base
@@ -434,6 +452,29 @@ async function applyCoupon() {
 	} finally {
 		applying.value = false;
 	}
+}
+
+function isScopedCoupon(coupon) {
+	return isPromotionsAppInstalled() && SCOPED_COUPON_SCOPES.includes(coupon?.apply_scope);
+}
+
+// Scoped coupons are priced by the server per cart line; min amount is checked on eligible lines there.
+function applyScopedCoupon(coupon, result) {
+	const code = couponCode.value.toUpperCase();
+	appliedDiscount.value = {
+		name: coupon.coupon_name || coupon.coupon_code,
+		code,
+		percentage: 0,
+		amount: Number.parseFloat(result.total_discount) || 0,
+		type: coupon.discount_type,
+		coupon,
+		apply_on: coupon.apply_on,
+		line_level: true,
+		line_updates: result.line_updates || [],
+	};
+	emit("discount-applied", appliedDiscount.value);
+	showSuccess(__("{0} applied successfully", [code]));
+	errorMessage.value = "";
 }
 
 function removeDiscount() {

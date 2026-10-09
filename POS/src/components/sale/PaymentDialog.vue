@@ -66,6 +66,16 @@
 								: 'bg-purple-50 border border-purple-200',
 						]"
 					>
+						<p
+							v-if="allItemsHaveSalesPerson"
+							class="text-xs text-purple-700 mb-1.5"
+						>
+							{{
+								__(
+									"All items have a Sales Person — invoice-level selection is optional."
+								)
+							}}
+						</p>
 						<!-- Single Mode: Show selected person or dropdown -->
 						<template v-if="settingsStore.isSingleSalesPerson">
 							<!-- Show selected person as a nice display -->
@@ -510,6 +520,12 @@
 							</div>
 							<div v-if="customer" class="text-gray-600 text-xs mt-0.5 text-start">
 								{{ customer?.customer_name || customer?.name || customer }}
+							</div>
+							<div
+								v-else-if="requiresCustomerForPayment"
+								class="text-amber-700 text-xs mt-0.5 text-start font-medium"
+							>
+								{{ __("Customer required for this payment method") }}
 							</div>
 						</div>
 
@@ -1173,6 +1189,12 @@
 									]"
 								>
 									{{ formatCurrency(availableWalletBalance) }}
+									<span
+										v-if="walletInfo.balance_points"
+										class="ms-0.5"
+									>
+										({{ walletInfo.balance_points }} {{ __("pts") }})
+									</span>
 								</span>
 								<!-- Payment Amount Badge -->
 								<span
@@ -1547,10 +1569,10 @@
 								<!-- Pay on Account Button -->
 								<button
 									@click="addCreditAccountPayment"
-									:disabled="isSubmitting"
+									:disabled="isSubmitting || !isSalesPersonValid"
 									:class="[
 										'font-semibold rounded-lg flex items-center justify-center',
-										isSubmitting
+										isSubmitting || !isSalesPersonValid
 											? 'bg-orange-300 text-white cursor-not-allowed'
 											: 'bg-orange-500 text-white active:bg-orange-600',
 										mobileButtonSize.height,
@@ -1847,12 +1869,14 @@
 						<button
 							v-if="allowCreditSale"
 							@click="addCreditAccountPayment"
-							:disabled="paymentEntries.length > 0 || isSubmitting"
+							:disabled="
+								paymentEntries.length > 0 || isSubmitting || !isSalesPersonValid
+							"
 							:class="[
 								'flex-1 inline-flex items-center justify-center gap-2 transition-colors focus:outline-none',
 								dynamicButtonHeight,
 								'text-sm font-semibold px-4 rounded-lg',
-								paymentEntries.length > 0 || isSubmitting
+								paymentEntries.length > 0 || isSubmitting || !isSalesPersonValid
 									? 'bg-orange-300 text-white cursor-not-allowed'
 									: 'bg-orange-500 text-white hover:bg-orange-600 active:bg-orange-700 focus-visible:ring-2 focus-visible:ring-orange-400',
 							]"
@@ -2136,6 +2160,8 @@ const walletInfo = ref({
 	wallet_exists: false,
 	wallet_balance: 0,
 	wallet_name: null,
+	balance_points: 0,
+	magento_loyalty: false,
 });
 const loadingWallet = ref(false);
 const walletPaymentMethods = ref(new Set()); // Set of mode_of_payment names that are wallet payments
@@ -2339,6 +2365,8 @@ const walletInfoResource = createResource({
 			wallet_exists: false,
 			wallet_balance: 0,
 			wallet_name: null,
+			balance_points: 0,
+			magento_loyalty: false,
 		};
 		loadingWallet.value = false;
 	},
@@ -2398,6 +2426,30 @@ function isCashPaymentMethod(method) {
 	const name = (method.mode_of_payment || "").toLowerCase();
 	return name.includes("cash") || name.includes("نقد") || name.includes("نقدي");
 }
+
+// Check if a payment method posts to a Receivable account (requires customer)
+function isReceivablePaymentMethod(method) {
+	if (!method) return false;
+	return (method.account_type || "").toLowerCase() === "receivable";
+}
+
+function getCustomerName() {
+	if (!props.customer) return "";
+	if (typeof props.customer === "string") return props.customer;
+	return props.customer?.name || props.customer?.customer_name || "";
+}
+
+const requiresCustomerForPayment = computed(() => {
+	if (selectedReceivableAccount.value) return true;
+	return paymentEntries.value.some((entry) => {
+		const method = paymentMethods.value.find(
+			(m) => m.mode_of_payment === entry.mode_of_payment,
+		);
+		return isReceivablePaymentMethod(method);
+	});
+});
+
+const hasCustomerForPayment = computed(() => !!getCustomerName());
 
 // Get available wallet balance for payment (considering already added wallet payments)
 const availableWalletBalance = computed(() => {
@@ -2481,7 +2533,13 @@ const totalSalesAllocation = computed(() => {
 	return selectedSalesPersons.value.reduce((sum, p) => sum + (p.allocated_percentage || 0), 0);
 });
 
-// Computed: Validation - sales person is required when enabled and online
+// Computed: Validation - sales person is required when enabled and online,
+// unless every cart line already has an item-level sales person.
+const allItemsHaveSalesPerson = computed(() => {
+	const cartItems = (props.items || []).filter((item) => !item?.is_free_item);
+	return cartItems.length > 0 && cartItems.every((item) => item?.sales_person);
+});
+
 const isSalesPersonValid = computed(() => {
 	// If sales persons feature is disabled, always valid
 	if (!settingsStore.enableSalesPersons) {
@@ -2492,7 +2550,11 @@ const isSalesPersonValid = computed(() => {
 	if (props.isOffline) {
 		return true;
 	}
-	// At least one sales person must be selected
+	// All lines covered by item-level SP → invoice-level SP not required
+	if (allItemsHaveSalesPerson.value) {
+		return true;
+	}
+	// At least one sales person must be selected at invoice level
 	return selectedSalesPersons.value.length > 0;
 });
 
@@ -2603,20 +2665,23 @@ async function loadPaymentMethods() {
 
 	loadingPaymentMethods.value = true;
 
+	// Load from cache using worker
+	const loadCachedPaymentMethods = async () => {
+		const cached = await offlineWorker.getCachedPaymentMethods(props.posProfile);
+		if (cached && cached.length > 0) {
+			paymentMethods.value = cached;
+			const defaultMethod = paymentMethods.value.find((m) => m.default);
+			lastSelectedMethod.value = defaultMethod || paymentMethods.value[0];
+		}
+	};
+
 	try {
 		if (props.isOffline) {
-			// Load from cache when offline using worker
-			const cached = await offlineWorker.getCachedPaymentMethods(props.posProfile);
-			if (cached && cached.length > 0) {
-				paymentMethods.value = cached;
-				if (paymentMethods.value.length > 0) {
-					const defaultMethod = paymentMethods.value.find((m) => m.default);
-					lastSelectedMethod.value = defaultMethod || paymentMethods.value[0];
-				}
-			}
+			await loadCachedPaymentMethods();
 		} else {
-			// Load from server when online
-			await paymentMethodsResource.fetch();
+			// Load from server when online; a failed request (offline not detected yet,
+			// e.g. right after an offline start) falls back to the cache
+			await paymentMethodsResource.fetch().catch(loadCachedPaymentMethods);
 			// Receivable accounts for "Pay on Receivable Account" (online only)
 			receivableAccountsResource.fetch();
 		}
@@ -2855,6 +2920,11 @@ const canComplete = computed(() => {
 		return false;
 	}
 
+	// Receivable payment modes require a customer on the invoice
+	if (requiresCustomerForPayment.value && !hasCustomerForPayment.value) {
+		return false;
+	}
+
 	// Check exact amount validation
 	if (!isExactAmountValid.value) {
 		return false;
@@ -3030,6 +3100,10 @@ function selectPaymentMethod(method) {
 // invoice's debit_to). It's a destination, not a tendered amount — the outstanding is
 // grand_total minus the cash tendered. Tapping again clears it (back to default Debtors).
 function toggleReceivableAccount(acc) {
+	if (!hasCustomerForPayment.value) {
+		showWarning(__("Please select a customer before paying on account"));
+		return;
+	}
 	selectedReceivableAccount.value = selectedReceivableAccount.value === acc.name ? "" : acc.name;
 	// Drop the active payment-method highlight so only one option looks active at a time.
 	if (selectedReceivableAccount.value) {
@@ -3082,6 +3156,13 @@ function switchToNextPaymentMethod(partialAmount) {
 // Consolidate payment entries: if a row with the same mode already exists,
 // add to it instead of creating a duplicate row.
 function _upsertPaymentEntry(method, amt) {
+	if (isReceivablePaymentMethod(method) && !hasCustomerForPayment.value) {
+		showWarning(
+			__("Please select a customer before paying with {0}", [method.mode_of_payment]),
+		);
+		return;
+	}
+
 	const existing = paymentEntries.value.find(
 		(e) => e.mode_of_payment === method.mode_of_payment && !e.is_customer_credit
 	);
@@ -3345,7 +3426,16 @@ function addCreditAccountPayment() {
 		grandTotal: props.grandTotal,
 		currentPaid: totalPaid.value,
 		remainingAmount: remainingAmount.value,
+		salesPersons: selectedSalesPersons.value,
+		isSalesPersonValid: isSalesPersonValid.value,
 	});
+
+	// Same sales-person gate as Complete Payment — credit sales still need
+	// coverage when the feature is enabled (backend validates too).
+	if (!isSalesPersonValid.value) {
+		log.warn("[PaymentDialog] Cannot pay on account - sales person required");
+		return;
+	}
 
 	// Close dialog and complete as credit sale (0 payment)
 	// The backend will create an invoice with outstanding amount
@@ -3356,6 +3446,8 @@ function addCreditAccountPayment() {
 		is_credit_sale: true, // Mark as credit sale
 		paid_amount: 0,
 		outstanding_amount: props.grandTotal,
+		sales_team: selectedSalesPersons.value.length > 0 ? selectedSalesPersons.value : null,
+		delivery_date: isSalesOrder.value ? deliveryDate.value : null,
 	};
 
 	log.debug("[PaymentDialog] Emitting credit sale payment-completed:", paymentData);

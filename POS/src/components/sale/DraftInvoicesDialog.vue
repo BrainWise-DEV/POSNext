@@ -203,11 +203,15 @@ import { clearAllDrafts, deleteDraft, getAllDrafts } from "@/utils/draftManager"
 import { printInvoiceCustom } from "@/utils/printInvoice";
 import { useToast } from "@/composables/useToast";
 import { usePOSShiftStore } from "@/stores/posShift";
+import { usePOSCartStore } from "@/stores/posCart";
+import { usePOSDraftsStore } from "@/stores/posDrafts";
 import { Button, Dialog } from "frappe-ui";
 import { onMounted, ref, watch } from "vue";
 
 const { showSuccess, showError } = useToast();
 const shiftStore = usePOSShiftStore();
+const cartStore = usePOSCartStore();
+const draftsStore = usePOSDraftsStore();
 
 const props = defineProps({
 	modelValue: Boolean,
@@ -288,7 +292,10 @@ function handleDeleteDraft(draftId) {
 
 async function confirmDeleteDraft() {
 	try {
+		const draft = drafts.value.find((d) => d.draft_id === draftToDelete.value);
 		await deleteDraft(draftToDelete.value);
+		// The draft loaded in the cart keeps its serials in the cart
+		if (draft?.draft_id !== cartStore.currentDraftId) draftsStore.returnDraftSerials(draft);
 		await loadDrafts();
 		showDeleteDialog.value = false;
 		draftToDelete.value = null;
@@ -306,6 +313,9 @@ async function confirmDeleteDraft() {
 async function confirmClearAll() {
 	try {
 		await clearAllDrafts();
+		drafts.value
+			.filter((d) => d.draft_id !== cartStore.currentDraftId)
+			.forEach((d) => draftsStore.returnDraftSerials(d));
 		await loadDrafts();
 		showClearAllDialog.value = false;
 

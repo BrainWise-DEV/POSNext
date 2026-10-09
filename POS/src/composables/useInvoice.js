@@ -1,7 +1,9 @@
+import { promoApi } from "@/utils/promoApi";
 import { createResource } from "frappe-ui";
 import { computed, ref, toRaw } from "vue";
 import { isOffline, getCachedItem } from "@/utils/offline";
 import { useSerialNumberStore } from "@/stores/serialNumber";
+import { shiftState } from "@/composables/useShift";
 import { CoalescingMutex } from "@/utils/mutex";
 import { logger } from "@/utils/logger";
 import { roundCurrency } from "@/utils/currency";
@@ -19,9 +21,14 @@ export function useInvoice() {
 	// Serial Number Store for returning serials when items are removed
 	const serialStore = useSerialNumberStore();
 
+	function resolveCustomerName() {
+		return customer.value?.name || customer.value || defaultCustomerName.value || null;
+	}
+
 	// State
 	const invoiceItems = ref([]);
 	const customer = ref(null);
+	const defaultCustomerName = ref(null);
 	const payments = ref([]);
 	const salesTeam = ref([]); // Sales team for Sales Invoice
 	const posProfile = ref(null);
@@ -82,7 +89,7 @@ export function useInvoice() {
 	});
 
 	const applyOffersResource = createResource({
-		url: "pos_next.api.invoices.apply_offers",
+		url: promoApi.applyOffers(),
 		makeParams({ invoice_data, selected_offers }) {
 			const params = {
 				invoice_data: JSON.stringify(invoice_data),
@@ -119,7 +126,7 @@ export function useInvoice() {
 				const itemDetails = await getItemDetailsResource.submit({
 					item_code: item.item_code,
 					pos_profile: posProfile.value,
-					customer: customer.value?.name || customer.value,
+					customer: resolveCustomerName(),
 					qty,
 					uom,
 				});
@@ -218,7 +225,8 @@ export function useInvoice() {
 	function addItem(item, quantity = 1) {
 		const itemUom = item.uom || item.stock_uom;
 		const existingItem = invoiceItems.value.find(
-			(i) => i.item_code === item.item_code && i.uom === itemUom
+			(i) =>
+				!i.is_free_item && i.item_code === item.item_code && i.uom === itemUom
 		);
 
 		if (existingItem) {
@@ -284,10 +292,15 @@ export function useInvoice() {
 				// Resolved barcode flag - prevents editing qty/uom/rate for weighted/priced barcodes
 				is_resolved_barcode: item.is_resolved_barcode || false,
 				// Stock validation fields — needed for qty increase checks in cart
-				actual_qty: item.actual_qty ?? 0,
+				// Prefer Bin qty (original_stock). Grid actual_qty is remaining after cart reserve.
+				actual_qty: item.original_stock ?? item.actual_qty ?? 0,
+				original_stock: item.original_stock ?? item.actual_qty ?? 0,
 				is_stock_item: item.is_stock_item ?? 1,
 				is_bundle: item.is_bundle || false,
 				allow_negative_stock: item.allow_negative_stock || 0,
+				// Optional item-level Sales Person (commission attribution)
+				sales_person: item.sales_person || null,
+				sales_person_name: item.sales_person_name || null,
 			};
 			invoiceItems.value.push(newItem);
 			// Recalculate the newly added item to apply taxes
@@ -360,9 +373,11 @@ export function useInvoice() {
 	function updateItemQuantity(itemCode, quantity, uom = null) {
 		let item;
 		if (uom) {
-			item = invoiceItems.value.find((i) => i.item_code === itemCode && i.uom === uom);
+			item = invoiceItems.value.find(
+				(i) => i.item_code === itemCode && i.uom === uom && !i.is_free_item
+			);
 		} else {
-			item = invoiceItems.value.find((i) => i.item_code === itemCode);
+			item = invoiceItems.value.find((i) => i.item_code === itemCode && !i.is_free_item);
 		}
 
 		if (item) {
@@ -752,6 +767,12 @@ export function useInvoice() {
 			is_rate_manually_edited: item.is_rate_manually_edited || 0,
 			original_rate: item.original_rate || null,
 			is_free_item: item.is_free_item || 0,
+			// Lines discounted by a scoped coupon; posnext_promotions re-checks them on validate.
+			posnext_coupon_code:
+				item.discount_source === "coupon" && item.coupon_code && item.coupon_code === couponCode.value
+					? item.coupon_code
+					: null,
+			sales_person: item.sales_person || null,
 		});
 
 		const out = [];
@@ -785,6 +806,8 @@ export function useInvoice() {
 						is_rate_manually_edited: 0,
 						original_rate: null,
 						is_free_item: 1,
+						// Inherit parent line SP so free rows never block coverage
+						sales_person: item.sales_person || null,
 					});
 				}
 			}
@@ -935,7 +958,7 @@ export function useInvoice() {
 			doctype: targetDoctype,
 			pos_profile: posProfile.value,
 			posa_pos_opening_shift: posOpeningShift.value,
-			customer: customer.value?.name || customer.value,
+			customer: resolveCustomerName(),
 			items: formatItemsForSubmission(rawItems),
 			payments: invoicePayments,
 			discount_amount: additionalDiscount.value || 0,
@@ -997,7 +1020,7 @@ export function useInvoice() {
 					doctype: targetDoctype,
 					pos_profile: posProfile.value,
 					posa_pos_opening_shift: posOpeningShift.value,
-					customer: customer.value?.name || customer.value,
+					customer: resolveCustomerName(),
 					items: formatItemsForSubmission(rawItems),
 					payments: invoicePayments,
 					discount_amount: additionalDiscount.value || 0,
@@ -1039,6 +1062,15 @@ export function useInvoice() {
 				const submitData = {
 					change_amount: remainingAmount.value < 0 ? Math.abs(remainingAmount.value) : 0,
 					write_off_amount: writeOffAmount || 0,
+					// Pass cashier invoice-level team explicitly — never rely on the
+					// draft's rebuilt sales_team (item-level SPs aggregated in).
+					sales_team:
+						rawSalesTeam && rawSalesTeam.length > 0
+							? rawSalesTeam.map((member) => ({
+									sales_person: member.sales_person,
+									allocated_percentage: member.allocated_percentage || 0,
+								}))
+							: [],
 				};
 
 				if (redeemedCustomerCredit > 0 && customerCreditDict.length > 0) {
@@ -1125,10 +1157,19 @@ export function useInvoice() {
 	 * Sets the default customer from POS Profile if available.
 	 * This is called when resetting/clearing the cart to auto-select
 	 * the default customer configured in the POS Profile.
+	 *
+	 * @param {string|null} profileCustomer - Optional customer from the active shift profile (sync seed)
 	 */
-	async function setDefaultCustomer() {
-		// Reset to null first
+	async function setDefaultCustomer(profileCustomer = null) {
 		customer.value = null;
+		defaultCustomerName.value = profileCustomer || null;
+
+		if (profileCustomer) {
+			customer.value = {
+				name: profileCustomer,
+				customer_name: profileCustomer,
+			};
+		}
 
 		// Only fetch default customer if we have a POS Profile
 		if (!posProfile.value) {
@@ -1142,6 +1183,7 @@ export function useInvoice() {
 
 			// Set the default customer if one is configured
 			if (result && result.customer) {
+				defaultCustomerName.value = result.customer;
 				// Create customer object matching the structure from customer selection
 				customer.value = {
 					name: result.customer,
@@ -1150,8 +1192,13 @@ export function useInvoice() {
 				};
 			}
 		} catch (error) {
-			// Silently fail - default customer is optional
-			console.log("No default customer set in POS Profile");
+			// Offline or request failed: use the default customer from the cached POS Profile
+			const fallback = shiftState.value.pos_profile?.customer;
+			if (fallback) {
+				customer.value = { name: fallback, customer_name: fallback };
+			} else {
+				console.log("No default customer set in POS Profile");
+			}
 		}
 	}
 
@@ -1178,12 +1225,17 @@ export function useInvoice() {
 	/**
 	 * Clears the cart and resets to default state.
 	 * If a POS Profile is active and has a default customer, it will be pre-selected.
+	 * @param {{ returnSerials?: boolean }} [options]
+	 *   When false (post-submit), sold serials stay consumed in durable cache.
+	 *   Default true restores serials for abandoned / cleared carts.
 	 */
-	async function clearCart() {
-		// Return all serial numbers back to cache before clearing
-		for (const item of invoiceItems.value) {
-			if (item.has_serial_no && item.serial_no) {
-				serialStore.returnSerials(item.item_code, item.serial_no);
+	async function clearCart({ returnSerials = true } = {}) {
+		// Return serials only when the cart is abandoned — not after a successful sale
+		if (returnSerials) {
+			for (const item of invoiceItems.value) {
+				if (item.has_serial_no && item.serial_no) {
+					serialStore.returnSerials(item.item_code, item.serial_no);
+				}
 			}
 		}
 
