@@ -5,6 +5,14 @@ import {
 	offerStrategyOrder,
 } from "@/utils/offerStrategies";
 import { useInvoice } from "@/composables/useInvoice";
+import {
+	COUPON_DISCOUNT_SOURCE,
+	fixedCouponLineDiscount,
+	hasFixedCouponDiscount,
+	isCouponLine,
+} from "@/utils/couponLines";
+import { getPrecision } from "@/utils/currency";
+import { promoApi } from "@/utils/promoApi";
 import { usePOSOffersStore } from "@/stores/posOffers";
 import { usePOSSettingsStore } from "@/stores/posSettings";
 import { usePOSShiftStore } from "@/stores/posShift";
@@ -23,6 +31,7 @@ import {
 	shouldPreserveRateOnUomChange,
 } from "@/utils/uomPricingLock";
 import { useToast } from "@/composables/useToast";
+import { call } from "frappe-ui";
 import { defineStore } from "pinia";
 import { computed, nextTick, ref, toRaw, watch } from "vue";
 
@@ -118,6 +127,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		setDefaultCustomer,
 		applyDiscount,
 		removeDiscount,
+		couponCode,
 		applyOffersResource,
 		getItemDetailsResource,
 		resolveUomPricing,
@@ -359,6 +369,17 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 	// Discount & Offer Management
 	function applyDiscountToCart(discount) {
+		if (isLineLevelCoupon(discount)) {
+			if (appliedCoupon.value && !isLineLevelCoupon(appliedCoupon.value)) {
+				removeDiscount();
+			}
+			const amount = applyCouponLineUpdates(discount.code, discount.line_updates, discount.coupon);
+			couponCode.value = discount.code;
+			appliedCoupon.value = { ...discount, amount };
+			showSuccess(__("{0} applied successfully", [discount.name]));
+			return;
+		}
+		clearCouponLines();
 		applyDiscount(discount);
 		appliedCoupon.value = discount;
 		showSuccess(__("{0} applied successfully", [discount.name]));
@@ -366,9 +387,191 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 	function removeDiscountFromCart() {
 		appliedOffers.value = [];
-		removeDiscount();
+		if (isLineLevelCoupon(appliedCoupon.value)) {
+			clearCouponLines();
+			couponCode.value = null;
+		} else {
+			removeDiscount();
+		}
 		appliedCoupon.value = null;
 		showSuccess(__("Discount has been removed from cart"));
+	}
+
+	// Scoped coupons (Item Code / Item Group / Brand) discount only their eligible lines.
+	// Those lines are tagged so the server can re-check them on submit.
+	const COUPON_REVALIDATE_MAX_WAIT_MS = 5000;
+	let couponRevalidateTimer = null;
+	let couponRevalidateSeq = 0;
+
+	function isLineLevelCoupon(coupon) {
+		return Boolean(coupon?.line_level);
+	}
+
+	function buildCouponItemsPayload() {
+		return toRaw(invoiceItems.value).map((item) => ({
+			item_code: item.item_code,
+			item_group: item.item_group,
+			brand: item.brand,
+			qty: item.quantity,
+			uom: item.uom,
+			price_list_rate: item.price_list_rate || item.rate,
+			rate: item.rate,
+			amount: item.amount,
+			discount_percentage: item.discount_percentage || 0,
+			discount_amount: item.discount_amount || 0,
+			pricing_rules: normalizePricingRules(item.pricing_rules).join(","),
+			is_free_item: item.is_free_item || 0,
+			is_already_discounted: item.is_already_discounted || 0,
+			discount_source: item.discount_source || "",
+			coupon_code: item.discount_source === COUPON_DISCOUNT_SOURCE ? item.coupon_code : "",
+		}));
+	}
+
+	function clearCouponLines() {
+		let changed = false;
+		for (const item of invoiceItems.value) {
+			if (item.discount_source !== COUPON_DISCOUNT_SOURCE) continue;
+			item.discount_percentage = 0;
+			item.discount_amount = 0;
+			item.discount_source = "";
+			item.coupon_code = null;
+			item.coupon_fixed_discount = null;
+			item.coupon_percentage_cap = null;
+			item.is_already_discounted = 0;
+			recalculateItem(item);
+			changed = true;
+		}
+		if (changed) rebuildIncrementalCache();
+	}
+
+	/**
+	 * Apply server line_updates (from validate_coupon) to the cart.
+	 * line_key is the 0-based index of the line in the items payload.
+	 * @returns {number} total coupon discount now on the cart
+	 */
+	function applyCouponLineUpdates(code, lineUpdates, coupon) {
+		clearCouponLines();
+		const couponPercentage =
+			coupon?.discount_type === "Percentage" ? Number(coupon.discount_percentage) || 0 : 0;
+		let total = 0;
+		for (const update of lineUpdates || []) {
+			const item = invoiceItems.value[update.line_key];
+			// Cart changed while the request was in flight; the revalidation watcher catches up.
+			if (!item || item.item_code !== update.item_code) continue;
+			const percentage = Number.parseFloat(update.discount_percentage) || 0;
+			const fixedAmount = percentage > 0 ? 0 : Number.parseFloat(update.discount_amount) || 0;
+			item.discount_percentage = percentage;
+			item.discount_amount = fixedAmount;
+			item.coupon_fixed_discount = percentage > 0 ? null : fixedAmount;
+			item.coupon_percentage_cap = percentage > 0 ? null : couponPercentage || null;
+			item.discount_source = COUPON_DISCOUNT_SOURCE;
+			item.coupon_code = code;
+			recalculateItem(item);
+			total += item.discount_amount;
+		}
+		rebuildIncrementalCache();
+		return total;
+	}
+
+	// Keep fixed coupon lines within their allocation after a local quantity/UOM change.
+	function capFixedCouponLines() {
+		const { currency } = getPrecision();
+		let changed = false;
+		for (const item of invoiceItems.value) {
+			if (!hasFixedCouponDiscount(item)) continue;
+			const allowed = fixedCouponLineDiscount(item, currency);
+			if (Math.abs((item.discount_amount || 0) - allowed) < 1e-9) continue;
+			item.discount_percentage = 0;
+			item.discount_amount = allowed;
+			recalculateItem(item);
+			changed = true;
+		}
+		if (changed) rebuildIncrementalCache();
+	}
+
+	/**
+	 * Re-attach a scoped coupon saved with a held cart, or drop its line discounts
+	 * when the coupon itself was not saved (they must never outlive the coupon).
+	 */
+	function restoreLineCoupon(coupon) {
+		const code = coupon?.code;
+		const hasLines = Boolean(code) && invoiceItems.value.some((item) => isCouponLine(item) && item.coupon_code === code);
+		if (isLineLevelCoupon(coupon) && hasLines) {
+			for (const item of invoiceItems.value) {
+				if (isCouponLine(item) && item.coupon_code !== code) {
+					item.coupon_code = null;
+					item.discount_source = "";
+					item.discount_percentage = 0;
+					item.discount_amount = 0;
+					recalculateItem(item);
+				}
+			}
+			appliedCoupon.value = coupon;
+			couponCode.value = code;
+			capFixedCouponLines();
+			rebuildIncrementalCache();
+			scheduleCouponRevalidation();
+			return;
+		}
+		clearCouponLines();
+		if (isLineLevelCoupon(appliedCoupon.value)) {
+			appliedCoupon.value = null;
+			couponCode.value = null;
+		}
+	}
+
+	function scheduleCouponRevalidation() {
+		if (couponRevalidateTimer) clearTimeout(couponRevalidateTimer);
+		couponRevalidateTimer = setTimeout(() => {
+			couponRevalidateTimer = null;
+			revalidateLineCoupon();
+		}, 400);
+	}
+
+	async function revalidateLineCoupon() {
+		const coupon = appliedCoupon.value;
+		// Offline carts keep their tagged lines; the server re-checks them when the invoice syncs.
+		if (!isLineLevelCoupon(coupon) || offlineState.isOffline) return;
+
+		const seq = ++couponRevalidateSeq;
+		const waitUntil = Date.now() + COUPON_REVALIDATE_MAX_WAIT_MS;
+		while (offerProcessingState.value.isProcessing && Date.now() < waitUntil) {
+			await new Promise((resolve) => setTimeout(resolve, 100));
+			if (seq !== couponRevalidateSeq) return;
+		}
+
+		try {
+			const result = await call(promoApi.validateCoupon(), {
+				coupon_code: coupon.code,
+				customer: customer.value?.name || customer.value,
+				company: usePOSShiftStore().currentProfile?.company,
+				items: JSON.stringify(buildCouponItemsPayload()),
+			});
+			if (seq !== couponRevalidateSeq || appliedCoupon.value?.code !== coupon.code) return;
+
+			if (!result?.valid) {
+				clearCouponLines();
+				couponCode.value = null;
+				appliedCoupon.value = null;
+				showWarning(
+					__("Coupon {0} removed: {1}", [
+						coupon.code,
+						result?.message || __("Cart no longer meets requirements"),
+					])
+				);
+				return;
+			}
+
+			const amount = applyCouponLineUpdates(coupon.code, result.line_updates, coupon.coupon);
+			appliedCoupon.value = { ...appliedCoupon.value, amount, line_updates: result.line_updates };
+		} catch (error) {
+			console.error("Error re-validating coupon:", error);
+			showWarning(
+				__("Could not re-check coupon {0}. It will be validated again on payment.", [
+					coupon.code,
+				])
+			);
+		}
 	}
 
 	function buildOfferEvaluationPayload(currentProfile) {
@@ -398,6 +601,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				pricing_rules: item.pricing_rules || "",
 				is_already_discounted: item.is_already_discounted || 0,
 				discount_source: item.discount_source || "",
+				coupon_code: item.discount_source === COUPON_DISCOUNT_SOURCE ? item.coupon_code : "",
 				item_group: item.item_group,
 				brand: item.brand,
 				amount: item.amount,
@@ -449,6 +653,17 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 			// Only update if server applied a pricing rule or discount
 			if (hasPricingRules(serverItem.pricing_rules) || discountPct > 0 || discountAmt > 0) {
+				if (
+					item.discount_source === COUPON_DISCOUNT_SOURCE &&
+					hasPricingRules(serverItem.pricing_rules)
+				) {
+					// A pricing rule took over this line, so it no longer carries the coupon discount.
+					item.coupon_code = null;
+					item.coupon_fixed_discount = null;
+					item.coupon_percentage_cap = null;
+					item.discount_source = "";
+					scheduleCouponRevalidation();
+				}
 				item.discount_percentage = discountPct;
 				item.discount_amount = discountAmt;
 				item.pricing_rules = normalizePricingRules(serverItem.pricing_rules);
@@ -2022,6 +2237,27 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		{ immediate: true, flush: "post" }
 	);
 
+	// Re-check a scoped coupon when the paid lines (qty, UOM, price, manual rate) or the customer change.
+	watch(
+		() =>
+			isLineLevelCoupon(appliedCoupon.value)
+				? `${invoiceItems.value
+						.filter((item) => !item.is_free_item)
+						.map(
+							(item) =>
+								`${item.item_code}:${item.quantity}:${item.uom || ""}:${item.price_list_rate || 0}:${
+									item.is_rate_manually_edited ? item.rate : ""
+								}`
+						)
+						.join(",")}::${customer.value?.name || customer.value || ""}`
+				: null,
+		(key, oldKey) => {
+			if (!key || !oldKey || key === oldKey) return;
+			capFixedCouponLines();
+			scheduleCouponRevalidation();
+		}
+	);
+
 	// Additional watcher for applied offers changes (to handle removal edge cases)
 	watch(
 		() => appliedOffers.value.length,
@@ -2076,6 +2312,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		submitInvoice,
 		applyDiscountToCart,
 		removeDiscountFromCart,
+		buildCouponItemsPayload,
+		restoreLineCoupon,
 		applyOffer,
 		removeOffer,
 		reapplyOffer,
