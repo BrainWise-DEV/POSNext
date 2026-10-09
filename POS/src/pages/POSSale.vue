@@ -1230,14 +1230,17 @@ let previousCartHash = "";
 // whenever the edit is abandoned (cart cleared without checkout).
 let editingOfflineContext = null;
 
-// Helper function to compute cart hash
+// Structural cart hash for the offer re-apply watcher.
+// Do NOT include rate / discount_% / discount_amount: apply_offers and
+// coupon revalidation write those fields, which would re-trigger this
+// watcher and flicker "offer removed / offer applied" in a loop.
 function computeCartHash() {
 	return cartStore.invoiceItems
 		.map(
 			(i) =>
-				`${i.item_code}-${i.quantity}-${i.rate}-${i.discount_percentage || 0}-${
-					i.discount_amount || 0
-				}-${i.uom || ""}-${i.warehouse || ""}`
+				`${i.item_code}-${i.quantity}-${i.price_list_rate || 0}-${i.uom || ""}-${
+					i.warehouse || ""
+				}`
 		)
 		.join("|");
 }
