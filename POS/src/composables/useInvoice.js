@@ -531,11 +531,16 @@ export function useInvoice() {
 
 	function applyDiscount(discount) {
 		/**
-		 * Apply discount as Additional Discount (grand total level)
-		 * This prevents conflicts with item-level pricing rules
-		 * @param {Object} discount - { percentage, amount, name, code, apply_on }
+		 * Apply coupon discount. Uses line-level updates when the server returns them;
+		 * otherwise falls back to Additional Discount (grand total level)
+		 * @param {Object} discount - { percentage, amount, name, code, apply_on, line_updates }
 		 */
 		if (!discount) return;
+
+		if (discount.application_mode === "line") {
+			applyCouponLineDiscounts(discount);
+			return;
+		}
 
 		// Store coupon code for tracking
 		couponCode.value = discount.code || discount.name;
@@ -564,12 +569,78 @@ export function useInvoice() {
 		rebuildIncrementalCache();
 	}
 
+	function clearCouponLineDiscounts() {
+		/**
+		 * Remove coupon line discounts, restoring each line's pre-coupon (offer) discount
+		 * @returns {Boolean} true if any line carried the coupon
+		 */
+		const couponLines = invoiceItems.value.filter((item) => item.coupon_code);
+		couponLines.forEach((item) => {
+			const prePct = Number.parseFloat(item.pre_coupon_discount_percentage);
+			const preAmt = Number.parseFloat(item.pre_coupon_discount_amount);
+			item.discount_percentage = prePct > 0 ? prePct : 0;
+			item.discount_amount = prePct > 0 ? 0 : preAmt > 0 ? preAmt : 0;
+			item.coupon_code = null;
+			item.pre_coupon_discount_percentage = null;
+			item.pre_coupon_discount_amount = null;
+			recalculateItem(item);
+		});
+		return couponLines.length > 0;
+	}
+
+	function applyCouponLineDiscounts(discount) {
+		/**
+		 * Apply POS Coupon discounts on the eligible lines returned by validate_coupon.
+		 * Snapshots each line's pre-coupon discount so clear/revalidate can restore it.
+		 * Leaves additionalDiscount alone: it carries transaction-level offer discounts.
+		 * @param {Object} discount - { code, name, line_updates }
+		 */
+		clearCouponLineDiscounts();
+		couponCode.value = discount.code || discount.name;
+
+		const matched = new Set();
+		(discount.line_updates || []).forEach((update) => {
+			// line_key is the 0-based cart index sent to the server; item_code is the fallback
+			const key = Number(update.line_key);
+			const index =
+				Number.isInteger(key) && invoiceItems.value[key] && !matched.has(key)
+					? key
+					: invoiceItems.value.findIndex(
+							(row, i) =>
+								!matched.has(i) &&
+								row.item_code === update.item_code &&
+								!row.is_free_item
+						);
+			if (index < 0) return;
+			matched.add(index);
+
+			const item = invoiceItems.value[index];
+			const preFrac = Number.parseFloat(update.pre_coupon_discount_fraction);
+			item.pre_coupon_discount_percentage =
+				preFrac > 0 ? preFrac * 100 : item.discount_percentage || 0;
+			item.pre_coupon_discount_amount = preFrac > 0 ? 0 : item.discount_amount || 0;
+			item.coupon_code = couponCode.value;
+
+			// Prefer the absolute amount (fixed coupons and max_amount caps):
+			// a percentage would rescale with qty and could exceed the cap.
+			const amt = Number.parseFloat(update.discount_amount) || 0;
+			item.discount_amount = amt;
+			item.discount_percentage =
+				amt > 0 ? 0 : Number.parseFloat(update.discount_percentage) || 0;
+			recalculateItem(item);
+		});
+
+		rebuildIncrementalCache();
+	}
+
 	function removeDiscount() {
 		/**
-		 * Remove additional discount (coupon discount)
+		 * Remove coupon discount (line-level, or the Additional Discount fallback)
 		 */
-		// Clear additional discount
-		additionalDiscount.value = 0;
+		// Line coupons leave additionalDiscount to transaction-level offers
+		if (!clearCouponLineDiscounts()) {
+			additionalDiscount.value = 0;
+		}
 
 		// Clear coupon code
 		couponCode.value = null;
@@ -670,7 +741,11 @@ export function useInvoice() {
 
 		// Calculate discount from either percentage or fixed amount
 		let discountAmount = 0;
-		if (item.discount_percentage > 0) {
+		if (item.coupon_code && item.discount_amount > 0) {
+			// Coupon amounts stay absolute so a qty change cannot exceed the coupon's cap
+			discountAmount = Math.min(roundCurrency(item.discount_amount), baseAmount);
+			item.discount_percentage = 0;
+		} else if (item.discount_percentage > 0) {
 			discountAmount = roundCurrency((baseAmount * item.discount_percentage) / 100);
 		} else if (item.discount_amount > 0) {
 			discountAmount = roundCurrency(item.discount_amount);

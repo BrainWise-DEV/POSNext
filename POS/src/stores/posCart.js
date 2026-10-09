@@ -9,6 +9,9 @@ import { usePOSOffersStore } from "@/stores/posOffers";
 import { usePOSSettingsStore } from "@/stores/posSettings";
 import { usePOSShiftStore } from "@/stores/posShift";
 import { parseError } from "@/utils/errorHandler";
+import { call } from "@/utils/apiWrapper";
+import { buildCouponItemsSnapshot, unwrapCouponValidation } from "@/utils/invoice";
+import { promoApi } from "@/utils/promoApi";
 import {
 	shouldValidateItemStock,
 	checkStockAvailability,
@@ -158,17 +161,20 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	const isProcessingOffers = computed(() => offerProcessingState.value.isProcessing);
 
 	/**
-	 * Generates a comprehensive hash of the current cart state.
-	 * Used to detect ANY change that might affect offer eligibility.
+	 * Structural cart hash for offer processing dedupe.
+	 *
+	 * Discount % / amount are omitted on purpose: apply_offers and coupon
+	 * revalidation write those fields; including them re-queues offer
+	 * processing and flickers remove/re-apply on live carts.
 	 */
 	function generateCartHash() {
 		const items = invoiceItems.value;
 		const parts = [
-			// Item details: code, quantity, uom, discount
+			// Item details: code, quantity, uom, list price (not discounted rate)
 			items
 				.map(
 					(i) =>
-						`${i.item_code}:${i.quantity}:${i.uom || ""}:${i.discount_percentage || 0}`
+						`${i.item_code}:${i.quantity}:${i.uom || ""}:${i.price_list_rate || 0}`
 				)
 				.join("|"),
 			// Total item count
@@ -371,6 +377,46 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		showSuccess(__("Discount has been removed from cart"));
 	}
 
+	/**
+	 * Re-validate and re-apply a line-level coupon after cart/offer changes.
+	 * Clears the coupon if it is no longer valid or has no eligible items.
+	 */
+	async function revalidateAppliedCoupon() {
+		const current = appliedCoupon.value;
+		if (current?.application_mode !== "line") return;
+
+		const customerName = customer.value?.name || customer.value;
+		try {
+			const result =
+				invoiceItems.value.length && customerName
+					? unwrapCouponValidation(
+							await call(promoApi.validateCoupon(), {
+								coupon_code: current.code,
+								customer: customerName,
+								company: usePOSShiftStore().profileCompany,
+								items: buildCouponItemsSnapshot(invoiceItems.value),
+							})
+						)
+					: null;
+			if (!result?.valid || !result.line_updates?.length || !(result.total_discount > 0)) {
+				removeDiscount();
+				appliedCoupon.value = null;
+				return;
+			}
+
+			const updated = {
+				...current,
+				amount: result.total_discount,
+				line_updates: result.line_updates,
+				eligible_item_codes: result.eligible_item_codes || [],
+			};
+			applyDiscount(updated);
+			appliedCoupon.value = updated;
+		} catch (error) {
+			console.error("Error revalidating coupon:", error);
+		}
+	}
+
 	function buildOfferEvaluationPayload(currentProfile) {
 		// Use toRaw() to ensure we get current, non-reactive values (prevents stale cached quantities)
 		const rawItems = toRaw(invoiceItems.value);
@@ -383,7 +429,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			selling_price_list: currentProfile?.selling_price_list,
 			currency: currentProfile?.currency,
 			discount_amount: additionalDiscount.value || 0,
-			coupon_code: appliedCoupon.value?.name || "",
+			coupon_code: appliedCoupon.value?.code || appliedCoupon.value?.name || "",
 			items: rawItems.map((item) => ({
 				item_code: item.item_code,
 				item_name: item.item_name,
@@ -456,6 +502,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				item.free_qty = Number.parseFloat(serverItem.free_qty) || 0;
 				item.gwp_free_qty = Number.parseFloat(serverItem.gwp_free_qty) || 0;
 				hasDiscounts = discountPct > 0 || discountAmt > 0;
+				// Offer pass runs before coupon revalidation: keep the offer-only
+				// discount so the coupon is re-applied on top of the right base
+				if (item.coupon_code && hasPricingRules(serverItem.pricing_rules)) {
+					item.pre_coupon_discount_percentage = discountPct;
+					item.pre_coupon_discount_amount = discountAmt;
+				}
 			}
 			// Otherwise preserve existing manual discount
 
@@ -1693,6 +1745,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		// Skip offer processing if POS Profile has ignore_pricing_rule enabled
 		const shiftStore = usePOSShiftStore();
 		if (shiftStore.currentProfile?.ignore_pricing_rule) {
+			// Still re-apply coupon caps (e.g. max_amount) when qty changes
+			await revalidateAppliedCoupon();
 			return;
 		}
 
@@ -1878,6 +1932,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				processFreeItems([]);
 				rebuildIncrementalCache();
 			}
+			// Re-apply the coupon after offers so exclusion rules stay accurate
+			await revalidateAppliedCoupon();
+
 			// Update last processed hash on success
 			offerProcessingState.value.lastCartHash = generateCartHash();
 			offerProcessingState.value.lastProcessedAt = Date.now();

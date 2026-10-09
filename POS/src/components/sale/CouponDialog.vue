@@ -232,6 +232,7 @@
 
 <script setup>
 import { promoApi } from "@/utils/promoApi";
+import { buildCouponItemsSnapshot, unwrapCouponValidation } from "@/utils/invoice";
 import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency";
 import { Button, Dialog, Input, createResource } from "frappe-ui";
 import { ref, watch } from "vue";
@@ -303,6 +304,7 @@ const couponResource = createResource({
 			coupon_code: couponCode.value,
 			customer: props.customer,
 			company: props.company,
+			items: buildCouponItemsSnapshot(props.items),
 		};
 	},
 	auto: false,
@@ -374,13 +376,7 @@ async function applyCoupon() {
 	try {
 		await couponResource.reload();
 		// Frappe wraps response in { message: {...} }
-		const result = couponResource.data?.message || couponResource.data;
-
-		// Handle if result is the actual response object
-		const validationData =
-			typeof result === "object" && result.valid !== undefined
-				? result
-				: couponResource.data;
+		const validationData = unwrapCouponValidation(couponResource.data);
 
 		if (!validationData || !validationData.valid) {
 			errorMessage.value =
@@ -390,6 +386,32 @@ async function applyCoupon() {
 		}
 
 		const coupon = validationData.coupon;
+
+		// Promotions app: the server picks the eligible lines and their discounts
+		if (Array.isArray(validationData.line_updates)) {
+			const totalDiscount = Number.parseFloat(validationData.total_discount) || 0;
+			if (!validationData.line_updates.length || totalDiscount <= 0) {
+				errorMessage.value = __("No eligible items for this coupon");
+				showWarning(errorMessage.value);
+				return;
+			}
+			appliedDiscount.value = {
+				name: coupon.coupon_name || coupon.coupon_code,
+				code: (coupon.coupon_code || couponCode.value).toUpperCase(),
+				percentage: coupon.discount_type === "Percentage" ? coupon.discount_percentage : 0,
+				amount: totalDiscount,
+				type: coupon.discount_type,
+				coupon: coupon,
+				apply_on: coupon.apply_on,
+				line_updates: validationData.line_updates,
+				eligible_item_codes: validationData.eligible_item_codes || [],
+				application_mode: "line",
+			};
+			emit("discount-applied", appliedDiscount.value);
+			showSuccess(__("{0} applied successfully", [couponCode.value.toUpperCase()]));
+			return;
+		}
+
 		const baseAmount = getCouponBaseAmount(coupon);
 
 		// Check minimum amount on the configured coupon base
