@@ -130,6 +130,19 @@
 											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/>
 										</svg>
 									</Button>
+									<Button
+										variant="ghost"
+										theme="blue"
+										size="sm"
+										@click="copyAsImage(invoice)"
+										:loading="copyingInvoice === invoice.name"
+										:title="__('Copy as Image')"
+										:aria-label="__('Copy as Image')"
+									>
+										<svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+										</svg>
+									</Button>
 								</div>
 							</div>
 						</div>
@@ -167,11 +180,12 @@ import { useFormatters } from "@/composables/useFormatters"
 import { useToast } from "@/composables/useToast"
 import { DEFAULT_CURRENCY, DEFAULT_LOCALE, formatCurrency as formatCurrencyUtil } from "@/utils/currency"
 import { getInvoiceStatusColor } from "@/utils/invoice"
+import { copyInvoiceImage } from "@/utils/invoiceImage"
 import { Button, Dialog, Input, createResource } from "frappe-ui"
 import { computed, ref, watch } from "vue"
 import ReturnInvoiceDialog from "./ReturnInvoiceDialog.vue"
 
-const { showError } = useToast();
+const { showError, showSuccess, showInfo } = useToast();
 const { formatDate, formatTime } = useFormatters();
 
 const props = defineProps({
@@ -334,6 +348,27 @@ function canCreateReturn(invoice) {
 	// 2. Not already a return invoice
 	// 3. Status is not "Credit Note Issued" (already has a return)
 	return invoice.docstatus === 1 && !invoice.is_return && invoice.status !== 'Credit Note Issued'
+}
+
+// Name of the invoice whose image is being rendered
+const copyingInvoice = ref(null);
+
+async function copyAsImage(invoice) {
+	if (copyingInvoice.value) return;
+	copyingInvoice.value = invoice.name;
+	try {
+		const { method } = await copyInvoiceImage(invoice);
+		if (method === "clipboard") {
+			showSuccess(__("Invoice image copied"));
+		} else {
+			showInfo(__("Clipboard unavailable, invoice image downloaded"));
+		}
+	} catch (error) {
+		console.error("Error copying invoice image:", error);
+		showError(error?.message || __("Failed to create invoice image"));
+	} finally {
+		copyingInvoice.value = null;
+	}
 }
 
 function openReturnModal(invoice) {
