@@ -740,7 +740,7 @@
 												<span>{{ __("View") }}</span>
 											</button>
 											<button
-												@click="$emit('print-invoice', invoice)"
+												@click="$emit('print-invoice', { ...invoice, _posnext_duplicate: true })"
 												class="px-3 py-2 text-xs font-semibold text-green-600 bg-green-50 hover:bg-green-100 rounded-lg transition-colors flex items-center gap-1"
 												:title="__('Print')"
 											>
@@ -977,7 +977,7 @@
 														</svg>
 													</button>
 													<button
-														@click="$emit('print-invoice', invoice)"
+														@click="$emit('print-invoice', { ...invoice, _posnext_duplicate: true })"
 														class="p-1.5 hover:bg-green-50 rounded transition-colors"
 														:title="__('Print')"
 													>
