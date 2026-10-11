@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { fixedCouponLineDiscount, hasFixedCouponDiscount, isCouponLine } from "../couponLines";
+import {
+	fixedCouponLineDiscount,
+	hasFixedCouponDiscount,
+	isCouponLine,
+	preCouponDiscount,
+	preCouponLineDiscount,
+	restorePreCouponDiscount,
+	stashPreCouponDiscount,
+} from "../couponLines";
 
 const line = (overrides = {}) => ({
 	discount_source: "coupon",
@@ -44,5 +52,48 @@ describe("couponLines", () => {
 		const amount = fixedCouponLineDiscount(line({ quantity: 7, coupon_fixed_discount: 100 }));
 		expect(amount).toBe(99.96);
 		expect(Number.isInteger(Math.round((amount / 7) * 100 * 1e6) / 1e6)).toBe(true);
+	});
+
+	it("gives a promotion line its discount back when the coupon comes off", () => {
+		const item = {
+			price_list_rate: 100,
+			quantity: 2,
+			discount_percentage: 20,
+			discount_amount: 40,
+			discount_source: "item_level_promotion",
+			is_already_discounted: 1,
+		};
+		stashPreCouponDiscount(item);
+		Object.assign(item, { discount_percentage: 28, discount_source: "coupon", coupon_code: "SAVE" });
+
+		expect(preCouponDiscount(item)).toMatchObject({
+			discount_percentage: 20,
+			discount_source: "item_level_promotion",
+			is_already_discounted: 1,
+		});
+		expect(preCouponLineDiscount(item)).toBe(40);
+
+		restorePreCouponDiscount(item);
+		expect(item).toMatchObject({
+			discount_percentage: 20,
+			discount_amount: 40,
+			discount_source: "item_level_promotion",
+			is_already_discounted: 1,
+			pre_coupon_discount: null,
+		});
+	});
+
+	it("treats a coupon line without a stash as undiscounted before the coupon", () => {
+		const item = line({ discount_percentage: 10 });
+		expect(preCouponDiscount(item)).toMatchObject({ discount_percentage: 0, discount_amount: 0 });
+		expect(preCouponLineDiscount(item)).toBe(0);
+		restorePreCouponDiscount(item);
+		expect(item.discount_percentage).toBe(0);
+		expect(item.discount_source).toBe("");
+	});
+
+	it("shows a line that is not a coupon line as it is", () => {
+		const item = { discount_percentage: 5, discount_amount: 0, discount_source: "manual_discount" };
+		expect(preCouponDiscount(item)).toMatchObject({ discount_percentage: 5, discount_source: "manual_discount" });
 	});
 });

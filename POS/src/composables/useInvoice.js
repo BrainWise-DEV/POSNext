@@ -7,6 +7,7 @@ import { shiftState } from "@/composables/useShift";
 import { CoalescingMutex } from "@/utils/mutex";
 import { logger } from "@/utils/logger";
 import { roundCurrency } from "@/utils/currency";
+import { preCouponLineDiscount } from "@/utils/couponLines";
 
 const log = logger.create("Invoice");
 
@@ -746,6 +747,8 @@ export function useInvoice() {
 	 * @returns {Array} Items formatted for ERPNext Sales Invoice
 	 */
 	function formatItemsForSubmission(items) {
+		const isAppliedCouponLine = (item) =>
+			item.discount_source === "coupon" && item.coupon_code && item.coupon_code === couponCode.value;
 		const mapRow = (item) => ({
 			item_code: item.item_code,
 			item_name: item.item_name,
@@ -767,11 +770,11 @@ export function useInvoice() {
 			is_rate_manually_edited: item.is_rate_manually_edited || 0,
 			original_rate: item.original_rate || null,
 			is_free_item: item.is_free_item || 0,
-			// Lines discounted by a scoped coupon; posnext_promotions re-checks them on validate.
-			posnext_coupon_code:
-				item.discount_source === "coupon" && item.coupon_code && item.coupon_code === couponCode.value
-					? item.coupon_code
-					: null,
+			// Lines discounted by a line-level coupon; posnext_promotions re-checks them on validate.
+			posnext_coupon_code: isAppliedCouponLine(item) ? item.coupon_code : null,
+			posnext_coupon_discount: isAppliedCouponLine(item)
+				? Math.max(roundCurrency((item.discount_amount || 0) - preCouponLineDiscount(item)), 0)
+				: 0,
 			sales_person: item.sales_person || null,
 		});
 
