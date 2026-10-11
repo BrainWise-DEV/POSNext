@@ -741,7 +741,7 @@ const territoriesResource = createListResource("Territory", (names) => {
 	}
 });
 
-const governoratesResource = createListResource("Governorate", (names) => {
+const governoratesResource = createListResource("POS Governorate", (names) => {
 	governorates.value = names;
 });
 
@@ -763,7 +763,7 @@ const customerLocationResource = createResource({
 const districtsResource = createResource({
 	url: "frappe.client.get_list",
 	makeParams: () => ({
-		doctype: "District",
+		doctype: "POS District",
 		fields: ["name", "district"],
 		filters: { governorate: customerData.value.custom_governorate },
 		limit_page_length: 0,
