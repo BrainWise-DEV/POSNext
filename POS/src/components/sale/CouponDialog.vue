@@ -239,7 +239,6 @@ import { useInvoice } from "@/composables/useInvoice";
 import { useToast } from "@/composables/useToast";
 import { usePOSCartStore } from "@/stores/posCart";
 
-const SCOPED_COUPON_SCOPES = ["Item Code", "Item Group", "Brand"];
 const cartStore = usePOSCartStore();
 
 // Get calculateDiscountAmount helper from composable
@@ -375,19 +374,10 @@ async function applyCoupon() {
 	errorMessage.value = "";
 
 	try {
-		// Only posnext_promotions prices cart lines; pos_next's validate_coupon takes no items.
-		const withItems = isPromotionsAppInstalled();
-		let validationData = await validateCouponCode(withItems);
-		// The line check can reject a whole-cart coupon (e.g. every line already discounted)
-		// that the cart-level path below accepts and prices on its own.
-		if (
-			withItems &&
-			!validationData?.valid &&
-			validationData?.coupon &&
-			!isScopedCoupon(validationData.coupon)
-		) {
-			validationData = await validateCouponCode(false);
-		}
+		// Only posnext_promotions prices cart lines (honouring excluded brands and already
+		// discounted items); pos_next's validate_coupon takes no items.
+		const linePriced = isPromotionsAppInstalled();
+		const validationData = await validateCouponCode(linePriced);
 
 		if (!validationData || !validationData.valid) {
 			errorMessage.value =
@@ -397,8 +387,8 @@ async function applyCoupon() {
 		}
 
 		const coupon = validationData.coupon;
-		if (isScopedCoupon(coupon)) {
-			applyScopedCoupon(coupon, validationData);
+		if (linePriced) {
+			applyLineCoupon(coupon, validationData);
 			return;
 		}
 		const baseAmount = getCouponBaseAmount(coupon);
@@ -454,12 +444,8 @@ async function applyCoupon() {
 	}
 }
 
-function isScopedCoupon(coupon) {
-	return isPromotionsAppInstalled() && SCOPED_COUPON_SCOPES.includes(coupon?.apply_scope);
-}
-
-// Scoped coupons are priced by the server per cart line; min amount is checked on eligible lines there.
-function applyScopedCoupon(coupon, result) {
+// Priced by the server per cart line; min amount is checked on eligible lines there.
+function applyLineCoupon(coupon, result) {
 	const code = couponCode.value.toUpperCase();
 	appliedDiscount.value = {
 		name: coupon.coupon_name || coupon.coupon_code,

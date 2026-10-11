@@ -10,6 +10,9 @@ import {
 	fixedCouponLineDiscount,
 	hasFixedCouponDiscount,
 	isCouponLine,
+	preCouponDiscount,
+	restorePreCouponDiscount,
+	stashPreCouponDiscount,
 } from "@/utils/couponLines";
 import { getPrecision } from "@/utils/currency";
 import { promoApi } from "@/utils/promoApi";
@@ -397,7 +400,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		showSuccess(__("Discount has been removed from cart"));
 	}
 
-	// Scoped coupons (Item Code / Item Group / Brand) discount only their eligible lines.
+	// Line-level coupons (priced by posnext_promotions) discount only their eligible lines.
 	// Those lines are tagged so the server can re-check them on submit.
 	const COUPON_REVALIDATE_MAX_WAIT_MS = 5000;
 	let couponRevalidateTimer = null;
@@ -407,38 +410,43 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		return Boolean(coupon?.line_level);
 	}
 
+	// The coupon is always priced against the lines as they are without it.
 	function buildCouponItemsPayload() {
-		return toRaw(invoiceItems.value).map((item) => ({
-			item_code: item.item_code,
-			item_group: item.item_group,
-			brand: item.brand,
-			qty: item.quantity,
-			uom: item.uom,
-			price_list_rate: item.price_list_rate || item.rate,
-			rate: item.rate,
-			amount: item.amount,
-			discount_percentage: item.discount_percentage || 0,
-			discount_amount: item.discount_amount || 0,
-			pricing_rules: normalizePricingRules(item.pricing_rules).join(","),
-			is_free_item: item.is_free_item || 0,
-			is_already_discounted: item.is_already_discounted || 0,
-			discount_source: item.discount_source || "",
-			coupon_code: item.discount_source === COUPON_DISCOUNT_SOURCE ? item.coupon_code : "",
-		}));
+		return toRaw(invoiceItems.value).map((item) => {
+			const pre = preCouponDiscount(item);
+			return {
+				item_code: item.item_code,
+				item_group: item.item_group,
+				brand: item.brand,
+				qty: item.quantity,
+				uom: item.uom,
+				price_list_rate: item.price_list_rate || item.rate,
+				rate: item.rate,
+				amount: item.amount,
+				discount_percentage: pre.discount_percentage || 0,
+				discount_amount: pre.discount_amount || 0,
+				pricing_rules: normalizePricingRules(item.pricing_rules).join(","),
+				is_free_item: item.is_free_item || 0,
+				is_already_discounted: pre.is_already_discounted || 0,
+				discount_source: pre.discount_source || "",
+				coupon_code: "",
+			};
+		});
+	}
+
+	function dropCouponFromLine(item) {
+		restorePreCouponDiscount(item);
+		item.coupon_code = null;
+		item.coupon_fixed_discount = null;
+		item.coupon_percentage_cap = null;
+		recalculateItem(item);
 	}
 
 	function clearCouponLines() {
 		let changed = false;
 		for (const item of invoiceItems.value) {
 			if (item.discount_source !== COUPON_DISCOUNT_SOURCE) continue;
-			item.discount_percentage = 0;
-			item.discount_amount = 0;
-			item.discount_source = "";
-			item.coupon_code = null;
-			item.coupon_fixed_discount = null;
-			item.coupon_percentage_cap = null;
-			item.is_already_discounted = 0;
-			recalculateItem(item);
+			dropCouponFromLine(item);
 			changed = true;
 		}
 		if (changed) rebuildIncrementalCache();
@@ -460,14 +468,18 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			if (!item || item.item_code !== update.item_code) continue;
 			const percentage = Number.parseFloat(update.discount_percentage) || 0;
 			const fixedAmount = percentage > 0 ? 0 : Number.parseFloat(update.discount_amount) || 0;
+			// A stacked line's discount includes what it already had, so the coupon % is no cap for it.
+			const stacked = Boolean(update.stacked);
+			stashPreCouponDiscount(item);
 			item.discount_percentage = percentage;
 			item.discount_amount = fixedAmount;
 			item.coupon_fixed_discount = percentage > 0 ? null : fixedAmount;
-			item.coupon_percentage_cap = percentage > 0 ? null : couponPercentage || null;
+			item.coupon_percentage_cap = percentage > 0 || stacked ? null : couponPercentage || null;
 			item.discount_source = COUPON_DISCOUNT_SOURCE;
 			item.coupon_code = code;
 			recalculateItem(item);
-			total += item.discount_amount;
+			const couponPart = Number.parseFloat(update.coupon_discount_amount);
+			total += Number.isFinite(couponPart) ? couponPart : item.discount_amount;
 		}
 		rebuildIncrementalCache();
 		return total;
@@ -499,11 +511,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		if (isLineLevelCoupon(coupon) && hasLines) {
 			for (const item of invoiceItems.value) {
 				if (isCouponLine(item) && item.coupon_code !== code) {
-					item.coupon_code = null;
-					item.discount_source = "";
-					item.discount_percentage = 0;
-					item.discount_amount = 0;
-					recalculateItem(item);
+					dropCouponFromLine(item);
 				}
 			}
 			appliedCoupon.value = coupon;
@@ -587,27 +595,64 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			currency: currentProfile?.currency,
 			discount_amount: additionalDiscount.value || 0,
 			coupon_code: appliedCoupon.value?.name || "",
-			items: rawItems.map((item) => ({
-				item_code: item.item_code,
-				item_name: item.item_name,
-				qty: item.quantity,
-				rate: item.rate,
-				uom: item.uom,
-				warehouse: item.warehouse,
-				conversion_factor: item.conversion_factor || 1,
-				price_list_rate: item.price_list_rate || item.rate,
-				discount_percentage: item.discount_percentage || 0,
-				discount_amount: item.discount_amount || 0,
-				pricing_rules: item.pricing_rules || "",
-				is_already_discounted: item.is_already_discounted || 0,
-				discount_source: item.discount_source || "",
-				coupon_code: item.discount_source === COUPON_DISCOUNT_SOURCE ? item.coupon_code : "",
-				item_group: item.item_group,
-				brand: item.brand,
-				amount: item.amount,
-				is_free_item: item.is_free_item || 0,
-			})),
+			// Offers see coupon lines without the coupon; otherwise its discount reads as a manual one.
+			items: rawItems.map((item) => {
+				const pre = preCouponDiscount(item);
+				return {
+					item_code: item.item_code,
+					item_name: item.item_name,
+					qty: item.quantity,
+					rate: item.rate,
+					uom: item.uom,
+					warehouse: item.warehouse,
+					conversion_factor: item.conversion_factor || 1,
+					price_list_rate: item.price_list_rate || item.rate,
+					discount_percentage: pre.discount_percentage || 0,
+					discount_amount: pre.discount_amount || 0,
+					pricing_rules: item.pricing_rules || "",
+					is_already_discounted: pre.is_already_discounted || 0,
+					discount_source: pre.discount_source || "",
+					coupon_code: "",
+					item_group: item.item_group,
+					brand: item.brand,
+					amount: item.amount,
+					is_free_item: item.is_free_item || 0,
+				};
+			}),
 		};
+	}
+
+	/** @returns {boolean} true when the line is a coupon line (handled here, its coupon kept) */
+	function dropPromotionUnderCoupon(item) {
+		if (!isCouponLine(item)) return false;
+		if (hasPricingRules(item.pricing_rules)) {
+			item.pricing_rules = [];
+			item.is_accumulative_discount = 0;
+			updatePreCouponDiscount(item, {
+				discount_percentage: 0,
+				discount_amount: 0,
+				discount_source: "",
+				is_already_discounted: 0,
+			});
+		}
+		return true;
+	}
+
+	/**
+	 * Offers changed the discount under a coupon line: keep the coupon on it and
+	 * re-price the coupon against the line's new pre-coupon discount.
+	 */
+	function updatePreCouponDiscount(item, next) {
+		const pre = preCouponDiscount(item);
+		const changed =
+			Number(pre.discount_percentage || 0) !== Number(next.discount_percentage || 0) ||
+			(next.discount_percentage > 0
+				? false
+				: Number(pre.discount_amount || 0) !== Number(next.discount_amount || 0)) ||
+			(pre.discount_source || "") !== (next.discount_source || "") ||
+			Number(pre.is_already_discounted || 0) !== Number(next.is_already_discounted || 0);
+		item.pre_coupon_discount = { ...next };
+		if (changed) scheduleCouponRevalidation();
 	}
 
 	/**
@@ -650,20 +695,36 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			const serverItem = serverItems[index] || {};
 			const discountPct = Number.parseFloat(serverItem.discount_percentage) || 0;
 			const discountAmt = Number.parseFloat(serverItem.discount_amount) || 0;
+			const serverDiscounted =
+				hasPricingRules(serverItem.pricing_rules) || discountPct > 0 || discountAmt > 0;
+
+			if (isCouponLine(item)) {
+				if (serverDiscounted) {
+					updatePreCouponDiscount(item, {
+						discount_percentage: discountPct,
+						discount_amount: discountAmt,
+						discount_source: serverItem.discount_source || "",
+						is_already_discounted: serverItem.is_already_discounted ? 1 : 0,
+					});
+				} else if (hasPricingRules(item.pricing_rules)) {
+					// The promotion under the coupon no longer applies.
+					updatePreCouponDiscount(item, {
+						discount_percentage: 0,
+						discount_amount: 0,
+						discount_source: "",
+						is_already_discounted: 0,
+					});
+				}
+				item.pricing_rules = normalizePricingRules(serverItem.pricing_rules);
+				item.free_qty = Number.parseFloat(serverItem.free_qty) || 0;
+				item.gwp_free_qty = Number.parseFloat(serverItem.gwp_free_qty) || 0;
+				item.is_accumulative_discount =
+					serverItem.discount_source === "accumulative_promotion" ? 1 : 0;
+				return;
+			}
 
 			// Only update if server applied a pricing rule or discount
-			if (hasPricingRules(serverItem.pricing_rules) || discountPct > 0 || discountAmt > 0) {
-				if (
-					item.discount_source === COUPON_DISCOUNT_SOURCE &&
-					hasPricingRules(serverItem.pricing_rules)
-				) {
-					// A pricing rule took over this line, so it no longer carries the coupon discount.
-					item.coupon_code = null;
-					item.coupon_fixed_discount = null;
-					item.coupon_percentage_cap = null;
-					item.discount_source = "";
-					scheduleCouponRevalidation();
-				}
+			if (serverDiscounted) {
 				item.discount_percentage = discountPct;
 				item.discount_amount = discountAmt;
 				item.pricing_rules = normalizePricingRules(serverItem.pricing_rules);
@@ -1064,6 +1125,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 					// Reset all item rates to original (remove discounts)
 					invoiceItems.value.forEach((item) => {
+						if (dropPromotionUnderCoupon(item)) return;
 						if (item.pricing_rules && item.pricing_rules.length > 0) {
 							item.discount_percentage = 0;
 							item.discount_amount = 0;
@@ -1998,6 +2060,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				appliedOffers.value = [];
 				processFreeItems([]);
 				invoiceItems.value.forEach((item) => {
+					if (dropPromotionUnderCoupon(item)) return;
 					if (item.pricing_rules && item.pricing_rules.length > 0) {
 						item.discount_percentage = 0;
 						item.discount_amount = 0;
