@@ -585,6 +585,7 @@
 				:is-offline="offlineStore.isOffline"
 				:allow-partial-payment="posSettingsStore.allowPartialPayment"
 				:allow-credit-sale="posSettingsStore.allowCreditSale"
+				allow-delivery
 				:allow-customer-credit-payment="posSettingsStore.allowCustomerCreditPayment"
 				:allow-write-off="posSettingsStore.allowWriteOffChange"
 				:write-off-limit="shiftStore.writeOffLimit"
@@ -2690,6 +2691,9 @@ async function handlePaymentCompleted(paymentData) {
 			cartStore.salesTeam = [];
 		}
 
+		// nextend Pengiriman: Dikirim / Bayar di Tempat chosen in the payment dialog
+		cartStore.delivery = paymentData.delivery || null;
+
 		// Set delivery date for Sales Orders
 		if (paymentData.delivery_date) {
 			cartStore.setDeliveryDate(paymentData.delivery_date);
@@ -2725,6 +2729,7 @@ async function handlePaymentCompleted(paymentData) {
 				is_credit_sale: paymentData.is_credit_sale ? 1 : 0,
 				receivable_account: paymentData.receivable_account || null,
 				edited_from: editingOfflineContext?.originalOfflineId || null,
+				...(cartStore.delivery || {}),
 			};
 			if (cartStore.posOrder) {
 				invoiceData.custom_pos_order = cartStore.posOrder;
@@ -2878,7 +2883,8 @@ async function handlePaymentCompleted(paymentData) {
 					(sum, invoice) => sum + (invoice.grand_total || invoice.total || 0),
 					0
 				);
-				const paidAmount = paymentData.paid_amount || invoiceTotal;
+				// ?? not ||: a Bayar di Tempat sale may be paid nothing at the till
+				const paidAmount = paymentData.paid_amount ?? invoiceTotal;
 
 				uiStore.showPaymentDialog = false;
 				cartStore.clearCart();

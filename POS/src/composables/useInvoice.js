@@ -40,6 +40,8 @@ export function useInvoice() {
 	const posOrder = ref(null);
 	// Sales Person of the loaded SPG order - the invoice is credited to them
 	const posOrderSalesPerson = ref(null);
+	/** nextend Pengiriman: the sale's delivery as Sales Invoice fields, null = taken along */
+	const delivery = ref(null);
 	const taxRules = ref([]); // Tax rules from POS Profile
 	const taxInclusive = ref(false); // Tax inclusive setting from POS Settings
 
@@ -1303,6 +1305,10 @@ export function useInvoice() {
 					invoiceData.expected_allocation = expectedAllocation;
 				}
 
+				if (delivery.value && targetDoctype === "Sales Invoice") {
+					Object.assign(invoiceData, delivery.value);
+				}
+
 				// "Pay on Receivable Account": route the invoice's debit_to to a chosen AR
 				if (receivableAccount) {
 					invoiceData.receivable_account = receivableAccount;
@@ -1583,6 +1589,7 @@ export function useInvoice() {
 		couponCode.value = null;
 		posOrder.value = null;
 		posOrderSalesPerson.value = null;
+		delivery.value = null;
 
 		// Reset incremental cache
 		_cachedSubtotal.value = 0;
@@ -1612,6 +1619,7 @@ export function useInvoice() {
 		couponCode.value = null;
 		posOrder.value = null;
 		posOrderSalesPerson.value = null;
+		delivery.value = null;
 
 		// Reset incremental cache
 		_cachedSubtotal.value = 0;
@@ -1689,6 +1697,7 @@ export function useInvoice() {
 		couponCode,
 		posOrder,
 		posOrderSalesPerson,
+		delivery,
 		taxRules,
 		taxInclusive,
 		isSubmitting,

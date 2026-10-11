@@ -449,6 +449,63 @@
 						</template>
 					</div>
 
+					<!-- Pengiriman (nextend): our own vehicle takes the goods to the customer -->
+					<div
+						v-if="allowDelivery && !isSalesOrder"
+						:class="[
+							'rounded-lg p-2',
+							isDeliveryValid
+								? 'bg-sky-50 border border-sky-200'
+								: 'bg-red-50 border-2 border-red-300',
+						]"
+					>
+						<div class="flex flex-wrap items-center gap-x-4 gap-y-1">
+							<!-- blur(): a focused input would swallow the numpad's keyboard keys -->
+							<label
+								class="flex items-center gap-1.5 text-xs font-semibold text-sky-800 cursor-pointer"
+							>
+								<input
+									type="checkbox"
+									v-model="dikirim"
+									class="rounded border-sky-400 text-sky-600 focus:ring-sky-500"
+									@change="$event.target.blur()"
+								/>
+								{{ __("Dikirim") }}
+							</label>
+							<label
+								v-if="dikirim"
+								class="flex items-center gap-1.5 text-xs font-semibold text-sky-800 cursor-pointer"
+							>
+								<input
+									type="checkbox"
+									v-model="bayarDiTempat"
+									class="rounded border-sky-400 text-sky-600 focus:ring-sky-500"
+									@change="$event.target.blur()"
+								/>
+								{{ __("Bayar di tempat (COD)") }}
+							</label>
+						</div>
+						<template v-if="dikirim">
+							<textarea
+								v-model="alamatKirim"
+								rows="2"
+								:aria-label="__('Alamat kirim')"
+								:placeholder="__('Alamat kirim (wajib diisi)')"
+								class="mt-1.5 w-full border border-sky-300 rounded-lg px-2 py-1 text-sm bg-white resize-none focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent"
+							></textarea>
+							<input
+								v-model="catatanKirim"
+								type="text"
+								:aria-label="__('Catatan untuk sopir')"
+								:placeholder="__('Catatan untuk sopir (boleh kosong)')"
+								class="mt-1 w-full h-8 border border-sky-300 rounded-lg px-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent"
+							/>
+							<p v-if="isCodUnpaid" class="mt-1 text-xs font-medium text-sky-800">
+								{{ __("Sopir menagih {0} saat barang sampai.", [formatCurrency(remainingAmount)]) }}
+							</p>
+						</template>
+					</div>
+
 					<!-- Outstanding Balance Row (full width, two columns) -->
 					<div
 						v-if="customerCreditEnabled && totalAvailableCredit !== 0"
@@ -1674,8 +1731,9 @@
 							<!-- Complete Payment Button -->
 							<button
 								v-if="
-									(remainingAmount === 0 || (applyWriteOff && canWriteOff)) &&
-									totalPaid > 0
+									((remainingAmount === 0 || (applyWriteOff && canWriteOff)) &&
+										totalPaid > 0) ||
+									isCodUnpaid
 								"
 								@click="completePayment"
 								:disabled="isSubmitting || !canComplete"
@@ -1723,7 +1781,7 @@
 									/>
 								</svg>
 								<span>{{
-									isSubmitting ? __("Processing...") : __("Complete Payment")
+									isSubmitting ? __("Processing...") : paymentButtonText
 								}}</span>
 							</button>
 						</div>
@@ -2103,6 +2161,11 @@ const props = defineProps({
 		default: false,
 	},
 	allowCustomerCreditPayment: {
+		type: Boolean,
+		default: false,
+	},
+	/** nextend Pengiriman: offer Dikirim / Bayar di Tempat - a new sale only, not a payment on an old nota */
+	allowDelivery: {
 		type: Boolean,
 		default: false,
 	},
@@ -2924,9 +2987,69 @@ const isExactAmountValid = computed(() => {
 	return totalPaid.value <= roundCurrency(props.grandTotal);
 });
 
+// nextend Pengiriman: the sale is taken to the customer by our own vehicle.
+// Bayar di Tempat (COD) lets it leave unpaid or with a down payment - the
+// driver collects the rest at the door (nextend.pengiriman).
+const dikirim = ref(false);
+const bayarDiTempat = ref(false);
+const alamatKirim = ref("");
+const catatanKirim = ref("");
+const isDelivery = computed(() => dikirim.value && props.allowDelivery && !isSalesOrder.value);
+const isDeliveryValid = computed(() => !isDelivery.value || alamatKirim.value.trim() !== "");
+const isCodUnpaid = computed(
+	() => isDelivery.value && bayarDiTempat.value && remainingAmount.value > 0
+);
+
+/** Sales Invoice fields of the delivery, null when the customer takes the goods along. */
+function deliveryPayload() {
+	if (!isDelivery.value) return null;
+	return {
+		nextend_dikirim: 1,
+		nextend_bayar_di_tempat: bayarDiTempat.value ? 1 : 0,
+		nextend_alamat_kirim: alamatKirim.value.trim(),
+		nextend_catatan_kirim: catatanKirim.value.trim(),
+	};
+}
+
+// The choice belongs to one sale and one customer: it survives reopening the
+// dialog, and goes once the sale is done or somebody else is buying.
+function resetDelivery() {
+	dikirim.value = false;
+	bayarDiTempat.value = false;
+	alamatKirim.value = "";
+	catatanKirim.value = "";
+}
+watch(
+	() => props.items.length,
+	(count) => {
+		if (!count) resetDelivery();
+	}
+);
+watch(() => props.customer?.name || props.customer, resetDelivery);
+
+// Offer where this customer's last delivery went (nextend.pengiriman); the
+// cashier may still overwrite it.
+watch(isDelivery, async (on) => {
+	const customer = props.customer?.name || props.customer;
+	if (!on || !customer || alamatKirim.value.trim()) return;
+	try {
+		const alamat = await call("nextend.pengiriman.get_delivery_address", { customer });
+		if (alamat && isDelivery.value && !alamatKirim.value.trim()) {
+			alamatKirim.value = alamat;
+		}
+	} catch {
+		// Offline or no access to the customer: the address is typed by hand
+	}
+});
+
 const canComplete = computed(() => {
 	// Check sales person validation first (mandatory when enabled)
 	if (!isSalesPersonValid.value) {
+		return false;
+	}
+
+	// A delivery needs somewhere to go
+	if (!isDeliveryValid.value) {
 		return false;
 	}
 
@@ -2938,6 +3061,11 @@ const canComplete = computed(() => {
 	// Check exact amount validation
 	if (!isExactAmountValid.value) {
 		return false;
+	}
+
+	// Bayar di Tempat: nothing or a down payment now, the rest at the door
+	if (isCodUnpaid.value) {
+		return true;
 	}
 
 	// "Pay on Receivable Account": the chosen account holds the unpaid balance
@@ -2960,6 +3088,9 @@ const canComplete = computed(() => {
 });
 
 const paymentButtonText = computed(() => {
+	if (isCodUnpaid.value) {
+		return __("Selesai, bayar di tempat");
+	}
 	// Show "Complete Payment" if fully paid or write-off covers remaining
 	if (remainingAmount.value === 0 || (applyWriteOff.value && canWriteOff.value)) {
 		return __("Complete Payment");
@@ -3446,6 +3577,8 @@ function addCreditAccountPayment() {
 		remainingAmount: remainingAmount.value,
 	});
 
+	if (!isDeliveryValid.value) return;
+
 	// Close dialog and complete as credit sale (0 payment)
 	// The backend will create an invoice with outstanding amount
 	const paymentData = {
@@ -3455,6 +3588,7 @@ function addCreditAccountPayment() {
 		is_credit_sale: true, // Mark as credit sale
 		paid_amount: 0,
 		outstanding_amount: props.grandTotal,
+		delivery: deliveryPayload(),
 	};
 
 	log.debug("[PaymentDialog] Emitting credit sale payment-completed:", paymentData);
@@ -3513,6 +3647,7 @@ function completePayment() {
 		// the allow_credit_sale gate).
 		receivable_account: receivableAccount,
 		is_credit_sale: !!receivableAccount && paymentEntries.value.length === 0,
+		delivery: deliveryPayload(),
 	};
 
 	log.debug("[PaymentDialog] Emitting payment-completed:", paymentData);
