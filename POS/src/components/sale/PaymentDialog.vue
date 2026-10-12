@@ -2162,6 +2162,11 @@ const props = defineProps({
 		type: Boolean,
 		default: false,
 	},
+	/** nextend Pengiriman: Dikirim as the SPG of the loaded order chose it ({ alamat, catatan }) - the cashier may change it */
+	orderDelivery: {
+		type: Object,
+		default: null,
+	},
 	customer: {
 		type: [String, Object],
 		default: null,
@@ -3005,12 +3010,15 @@ function deliveryPayload() {
 }
 
 // The choice belongs to one sale and one customer: it survives reopening the
-// dialog, and goes once the sale is done or somebody else is buying.
+// dialog, and goes once the sale is done or somebody else is buying. It
+// starts from what the SPG of a loaded order chose; Bayar di Tempat is always
+// the cashier's own decision.
 function resetDelivery() {
-	dikirim.value = false;
+	const order = props.orderDelivery;
+	dikirim.value = Boolean(order);
 	bayarDiTempat.value = false;
-	alamatKirim.value = "";
-	catatanKirim.value = "";
+	alamatKirim.value = order?.alamat || "";
+	catatanKirim.value = order?.catatan || "";
 }
 watch(
 	() => props.items.length,
@@ -3019,6 +3027,7 @@ watch(
 	}
 );
 watch(() => props.customer?.name || props.customer, resetDelivery);
+watch(() => props.orderDelivery, resetDelivery, { immediate: true });
 
 const canComplete = computed(() => {
 	// Check sales person validation first (mandatory when enabled)

@@ -599,6 +599,7 @@
 				:is-submitting="cartStore.isSubmitting"
 				:applied-offer-count="cartStore.appliedOffers.length"
 				:locked-sales-person="cartStore.posOrderSalesPerson"
+				:order-delivery="cartStore.posOrderDelivery"
 				@payment-completed="handlePaymentCompleted"
 				@update-additional-discount="handleAdditionalDiscountUpdate"
 				@show-offers="uiStore.showOffersDialog = true"
@@ -617,6 +618,14 @@
 				v-model="showSpgShiftDialog"
 				:current-shift-name="shiftStore.currentShift?.name"
 				@shift-selected="handleShiftOpened"
+			/>
+			<!-- SPG: Dikirim or taken along, asked before the order is saved -->
+			<SpgSaveOrderDialog
+				v-model="showSpgSaveDialog"
+				:customer="spgOrderCustomer"
+				:initial="cartStore.posOrderDelivery"
+				:saving="savingSpgOrder"
+				@save="handleSaveSpgOrder"
 			/>
 			<SpgOrdersDialog
 				ref="spgOrdersDialogRef"
@@ -1161,6 +1170,7 @@ import SpgInvoicesDialog from "@/components/sale/SpgInvoicesDialog.vue";
 import SpgOrdersDialog from "@/components/sale/SpgOrdersDialog.vue";
 import OrderQrCameraDialog from "@/components/sale/OrderQrCameraDialog.vue";
 import SpgQueueDialog from "@/components/sale/SpgQueueDialog.vue";
+import SpgSaveOrderDialog from "@/components/sale/SpgSaveOrderDialog.vue";
 import SpgShiftDialog from "@/components/sale/SpgShiftDialog.vue";
 import { openSpgOrderSlipWindow, printSpgOrderSlip } from "@/utils/printSpgOrder";
 import { orderFromQrPayload } from "@/utils/posOrderCode";
@@ -1498,6 +1508,12 @@ const spgOrdersDialogRef = ref(null);
 // SPG: invoices credited to their Sales Person (instead of the cashier's history)
 const showSpgInvoicesDialog = ref(false);
 const savingSpgOrder = ref(false);
+const showSpgSaveDialog = ref(false);
+// A walk-in (the POS Profile's customer) has no addresses of their own to offer
+const spgOrderCustomer = computed(() => {
+	const customer = cartStore.customer?.name || cartStore.customer;
+	return customer && customer !== shiftStore.profileCustomer ? customer : "";
+});
 
 // SPG: own Pending orders waiting at the cashier (badge on "Pesanan Saya")
 const spgOrdersCount = ref(0);
@@ -2419,7 +2435,12 @@ async function handleProceedToPayment() {
 	}
 
 	if (shiftStore.isSpgMode) {
-		await handleSaveSpgOrder();
+		if (offlineStore.isOffline) {
+			showWarning(__("Pesanan hanya bisa disimpan saat online"));
+			return;
+		}
+		// Dikirim or taken along is asked before the order is saved
+		showSpgSaveDialog.value = true;
 		return;
 	}
 
@@ -2581,7 +2602,11 @@ async function fillOrderItemNamesFromCache(order) {
  * with QR for the customer to bring to the cashier, then start a new cart.
  * Prices are sent as computed here - they stay locked on the order.
  */
-async function handleSaveSpgOrder() {
+/**
+ * SPG: save the cart as an order for the cashier. `delivery` holds the POS
+ * Order delivery fields chosen in SpgSaveOrderDialog.
+ */
+async function handleSaveSpgOrder(delivery = {}) {
 	if (savingSpgOrder.value) return;
 	if (offlineStore.isOffline) {
 		showWarning(__("Pesanan hanya bisa disimpan saat online"));
@@ -2589,7 +2614,10 @@ async function handleSaveSpgOrder() {
 	}
 
 	cartStore.dropOutOfStockFreeItems();
-	if (cartStore.isEmpty) return;
+	if (cartStore.isEmpty) {
+		showSpgSaveDialog.value = false;
+		return;
+	}
 
 	const customer = cartStore.customer?.name || cartStore.customer;
 	const items = cartStore.formatItemsForSubmission(cartStore.invoiceItems).map((row) => ({
@@ -2611,11 +2639,13 @@ async function handleSaveSpgOrder() {
 				discount_amount: cartStore.additionalDiscount || 0,
 				coupon_code:
 					cartStore.appliedCoupon?.code || cartStore.appliedCoupon?.name || null,
+				...delivery,
 				items,
 				expected_allocation: cartStore.getExpectedAllocation(),
 			}),
 		});
 
+		showSpgSaveDialog.value = false;
 		cartStore.clearCart();
 		previousCartHash = "";
 		await cartStore.setDefaultCustomer();

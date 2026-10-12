@@ -33,7 +33,8 @@ export function parsePosOrderCode(text) {
 /**
  * Expand a QR payload into the shape of a POS Order (as returned by
  * nextend.pos_order.get_order). Row columns follow build_qr_payload; trailing
- * empty columns are omitted there.
+ * empty columns are omitted there. `k` is the address of an order the SPG
+ * marked Dikirim, `kc` the note for the driver.
  */
 export function orderFromQrPayload(payload) {
 	return {
@@ -43,6 +44,9 @@ export function orderFromQrPayload(payload) {
 		sales_person: payload.sp,
 		discount_amount: payload.d || 0,
 		coupon_code: payload.c || null,
+		dikirim: payload.k ? 1 : 0,
+		alamat_kirim: payload.k || "",
+		catatan_kirim: payload.kc || "",
 		items: payload.i.map((r) => ({
 			item_code: r[0],
 			warehouse: payload.w[r[1]],

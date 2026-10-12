@@ -60,6 +60,7 @@ declare module 'vue' {
     SpgInvoicesDialog: typeof import('./src/components/sale/SpgInvoicesDialog.vue')['default']
     SpgOrdersDialog: typeof import('./src/components/sale/SpgOrdersDialog.vue')['default']
     SpgQueueDialog: typeof import('./src/components/sale/SpgQueueDialog.vue')['default']
+    SpgSaveOrderDialog: typeof import('./src/components/sale/SpgSaveOrderDialog.vue')['default']
     SpgShiftDialog: typeof import('./src/components/sale/SpgShiftDialog.vue')['default']
     StatusBadge: typeof import('./src/components/common/StatusBadge.vue')['default']
     Toast: typeof import('./src/components/common/Toast.vue')['default']
