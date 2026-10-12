@@ -1503,6 +1503,7 @@ const createReturnResource = createResource({
 				custom_addon_key: item.custom_addon_key,
 				custom_addon_parent_key: item.custom_addon_parent_key,
 				custom_addon_item: item.custom_addon_item,
+				custom_addon_group: item.custom_addon_group,
 			})),
 			// Flag to indicate return amount should be added to customer credit balance
 			add_to_customer_balance: addToCustomerCredit.value,

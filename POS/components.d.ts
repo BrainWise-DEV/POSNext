@@ -41,6 +41,7 @@ declare module 'vue' {
     OrderQrCameraDialog: typeof import('./src/components/sale/OrderQrCameraDialog.vue')['default']
     PartialPayments: typeof import('./src/components/partials/PartialPayments.vue')['default']
     PaymentDialog: typeof import('./src/components/sale/PaymentDialog.vue')['default']
+    PemakaianTintaDialog: typeof import('./src/components/sale/PemakaianTintaDialog.vue')['default']
     PhoneInput: typeof import('./src/components/common/PhoneInput.vue')['default']
     POSFooter: typeof import('./src/components/common/POSFooter.vue')['default']
     POSHeader: typeof import('./src/components/pos/POSHeader.vue')['default']
