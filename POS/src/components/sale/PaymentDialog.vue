@@ -486,19 +486,11 @@
 							</label>
 						</div>
 						<template v-if="dikirim">
-							<textarea
-								v-model="alamatKirim"
-								rows="2"
-								:aria-label="__('Alamat kirim')"
-								:placeholder="__('Alamat kirim (wajib diisi)')"
-								class="mt-1.5 w-full border border-sky-300 rounded-lg px-2 py-1 text-sm bg-white resize-none focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent"
-							></textarea>
-							<input
-								v-model="catatanKirim"
-								type="text"
-								:aria-label="__('Catatan untuk sopir')"
-								:placeholder="__('Catatan untuk sopir (boleh kosong)')"
-								class="mt-1 w-full h-8 border border-sky-300 rounded-lg px-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent"
+							<DeliveryAddressFields
+								v-model:alamat="alamatKirim"
+								v-model:catatan="catatanKirim"
+								:customer="customer?.name || customer || ''"
+								class="mt-1.5"
 							/>
 							<p v-if="isCodUnpaid" class="mt-1 text-xs font-medium text-sky-800">
 								{{ __("Sopir menagih {0} saat barang sampai.", [formatCurrency(remainingAmount)]) }}
@@ -2109,6 +2101,7 @@ import {
 import { getPaymentIcon } from "@/utils/payment";
 import { offlineWorker } from "@/utils/offline/workerClient";
 import { logger } from "@/utils/logger";
+import DeliveryAddressFields from "@/components/sale/DeliveryAddressFields.vue";
 import { Dialog, createResource, call } from "frappe-ui";
 import { computed, ref, watch, nextTick } from "vue";
 import { useToast } from "@/composables/useToast";
@@ -3026,21 +3019,6 @@ watch(
 	}
 );
 watch(() => props.customer?.name || props.customer, resetDelivery);
-
-// Offer where this customer's last delivery went (nextend.pengiriman); the
-// cashier may still overwrite it.
-watch(isDelivery, async (on) => {
-	const customer = props.customer?.name || props.customer;
-	if (!on || !customer || alamatKirim.value.trim()) return;
-	try {
-		const alamat = await call("nextend.pengiriman.get_delivery_address", { customer });
-		if (alamat && isDelivery.value && !alamatKirim.value.trim()) {
-			alamatKirim.value = alamat;
-		}
-	} catch {
-		// Offline or no access to the customer: the address is typed by hand
-	}
-});
 
 const canComplete = computed(() => {
 	// Check sales person validation first (mandatory when enabled)
