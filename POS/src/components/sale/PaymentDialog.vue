@@ -66,6 +66,16 @@
 								: 'bg-purple-50 border border-purple-200',
 						]"
 					>
+						<p
+							v-if="allItemsHaveSalesPerson"
+							class="text-xs text-purple-700 mb-1.5"
+						>
+							{{
+								__(
+									"All items have a Sales Person — invoice-level selection is optional."
+								)
+							}}
+						</p>
 						<!-- Single Mode: Show selected person or dropdown -->
 						<template v-if="settingsStore.isSingleSalesPerson">
 							<!-- Show selected person as a nice display -->
@@ -1559,10 +1569,10 @@
 								<!-- Pay on Account Button -->
 								<button
 									@click="addCreditAccountPayment"
-									:disabled="isSubmitting"
+									:disabled="isSubmitting || !isSalesPersonValid"
 									:class="[
 										'font-semibold rounded-lg flex items-center justify-center',
-										isSubmitting
+										isSubmitting || !isSalesPersonValid
 											? 'bg-orange-300 text-white cursor-not-allowed'
 											: 'bg-orange-500 text-white active:bg-orange-600',
 										mobileButtonSize.height,
@@ -1859,12 +1869,14 @@
 						<button
 							v-if="allowCreditSale"
 							@click="addCreditAccountPayment"
-							:disabled="paymentEntries.length > 0 || isSubmitting"
+							:disabled="
+								paymentEntries.length > 0 || isSubmitting || !isSalesPersonValid
+							"
 							:class="[
 								'flex-1 inline-flex items-center justify-center gap-2 transition-colors focus:outline-none',
 								dynamicButtonHeight,
 								'text-sm font-semibold px-4 rounded-lg',
-								paymentEntries.length > 0 || isSubmitting
+								paymentEntries.length > 0 || isSubmitting || !isSalesPersonValid
 									? 'bg-orange-300 text-white cursor-not-allowed'
 									: 'bg-orange-500 text-white hover:bg-orange-600 active:bg-orange-700 focus-visible:ring-2 focus-visible:ring-orange-400',
 							]"
@@ -2521,7 +2533,13 @@ const totalSalesAllocation = computed(() => {
 	return selectedSalesPersons.value.reduce((sum, p) => sum + (p.allocated_percentage || 0), 0);
 });
 
-// Computed: Validation - sales person is required when enabled and online
+// Computed: Validation - sales person is required when enabled and online,
+// unless every cart line already has an item-level sales person.
+const allItemsHaveSalesPerson = computed(() => {
+	const cartItems = (props.items || []).filter((item) => !item?.is_free_item);
+	return cartItems.length > 0 && cartItems.every((item) => item?.sales_person);
+});
+
 const isSalesPersonValid = computed(() => {
 	// If sales persons feature is disabled, always valid
 	if (!settingsStore.enableSalesPersons) {
@@ -2532,7 +2550,11 @@ const isSalesPersonValid = computed(() => {
 	if (props.isOffline) {
 		return true;
 	}
-	// At least one sales person must be selected
+	// All lines covered by item-level SP → invoice-level SP not required
+	if (allItemsHaveSalesPerson.value) {
+		return true;
+	}
+	// At least one sales person must be selected at invoice level
 	return selectedSalesPersons.value.length > 0;
 });
 
@@ -2643,20 +2665,23 @@ async function loadPaymentMethods() {
 
 	loadingPaymentMethods.value = true;
 
+	// Load from cache using worker
+	const loadCachedPaymentMethods = async () => {
+		const cached = await offlineWorker.getCachedPaymentMethods(props.posProfile);
+		if (cached && cached.length > 0) {
+			paymentMethods.value = cached;
+			const defaultMethod = paymentMethods.value.find((m) => m.default);
+			lastSelectedMethod.value = defaultMethod || paymentMethods.value[0];
+		}
+	};
+
 	try {
 		if (props.isOffline) {
-			// Load from cache when offline using worker
-			const cached = await offlineWorker.getCachedPaymentMethods(props.posProfile);
-			if (cached && cached.length > 0) {
-				paymentMethods.value = cached;
-				if (paymentMethods.value.length > 0) {
-					const defaultMethod = paymentMethods.value.find((m) => m.default);
-					lastSelectedMethod.value = defaultMethod || paymentMethods.value[0];
-				}
-			}
+			await loadCachedPaymentMethods();
 		} else {
-			// Load from server when online
-			await paymentMethodsResource.fetch();
+			// Load from server when online; a failed request (offline not detected yet,
+			// e.g. right after an offline start) falls back to the cache
+			await paymentMethodsResource.fetch().catch(loadCachedPaymentMethods);
 			// Receivable accounts for "Pay on Receivable Account" (online only)
 			receivableAccountsResource.fetch();
 		}
@@ -3401,7 +3426,16 @@ function addCreditAccountPayment() {
 		grandTotal: props.grandTotal,
 		currentPaid: totalPaid.value,
 		remainingAmount: remainingAmount.value,
+		salesPersons: selectedSalesPersons.value,
+		isSalesPersonValid: isSalesPersonValid.value,
 	});
+
+	// Same sales-person gate as Complete Payment — credit sales still need
+	// coverage when the feature is enabled (backend validates too).
+	if (!isSalesPersonValid.value) {
+		log.warn("[PaymentDialog] Cannot pay on account - sales person required");
+		return;
+	}
 
 	// Close dialog and complete as credit sale (0 payment)
 	// The backend will create an invoice with outstanding amount
@@ -3412,6 +3446,8 @@ function addCreditAccountPayment() {
 		is_credit_sale: true, // Mark as credit sale
 		paid_amount: 0,
 		outstanding_amount: props.grandTotal,
+		sales_team: selectedSalesPersons.value.length > 0 ? selectedSalesPersons.value : null,
+		delivery_date: isSalesOrder.value ? deliveryDate.value : null,
 	};
 
 	log.debug("[PaymentDialog] Emitting credit sale payment-completed:", paymentData);

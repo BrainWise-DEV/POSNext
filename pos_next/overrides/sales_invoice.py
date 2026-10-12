@@ -94,6 +94,36 @@ class CustomSalesInvoice(SalesInvoice):
 		if cint(self.is_pos):
 			self._validate_pos_payment_accounts()
 
+	def calculate_contribution(self):
+		"""Use per-line Item Group commission rates when item-level SP is in play."""
+		from pos_next.pos_next.utils.sales_person_commission import (
+			apply_item_level_contribution,
+			needs_item_level_contribution,
+		)
+
+		if needs_item_level_contribution(self) or getattr(self.flags, "pos_commission_breakdown", None):
+			apply_item_level_contribution(self)
+			# Same disabled-Sales-Person check ERPNext's calculate_contribution runs
+			# (skipped for offline sync / returns, see validate_sales_team below)
+			self.validate_sales_team(self.get("sales_team") or [])
+			return
+
+		super().calculate_contribution()
+
+	def validate_sales_team(self, sales_team):
+		"""ERPNext rejects disabled Sales Persons on the sales team.
+
+		POS flows that must accept what was already recorded (offline sync,
+		returns) set ``flags.pos_allow_disabled_sales_persons``: the Sales Person
+		was valid when the sale happened, so the commission (or its reversal)
+		must still go to them.
+		"""
+		if getattr(self.flags, "pos_allow_disabled_sales_persons", False):
+			return
+		parent = getattr(super(), "validate_sales_team", None)
+		if parent:
+			parent(sales_team)
+
 	def on_submit(self):
 		# Re-align after fetch_from so ERPNext's loyalty branch does not run on a
 		# credit note whose original invoice has no loyalty_program.

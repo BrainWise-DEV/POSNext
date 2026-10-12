@@ -6,12 +6,14 @@ import {
 	updateDraft,
 } from "@/utils/draftManager";
 import { useToast } from "@/composables/useToast";
+import { useSerialNumberStore } from "@/stores/serialNumber";
 import { defineStore } from "pinia";
 import { ref } from "vue";
 
 export const usePOSDraftsStore = defineStore("posDrafts", () => {
 	// Use custom toast
 	const { showSuccess, showError, showWarning } = useToast();
+	const serialStore = useSerialNumberStore();
 
 	// State
 	const draftsCount = ref(0);
@@ -40,7 +42,8 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 		customer,
 		posProfile,
 		appliedOffers = [],
-		draftId = null
+		draftId = null,
+		appliedCoupon = null
 	) {
 		if (invoiceItems.length === 0) {
 			showWarning(__("Cannot save an empty cart as draft"));
@@ -53,6 +56,8 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 				customer: customer,
 				items: invoiceItems,
 				applied_offers: appliedOffers, // Save applied offers
+				// Scoped coupons live on the lines; the coupon must travel with them.
+				applied_coupon: appliedCoupon?.line_level ? appliedCoupon : null,
 			};
 
 			let savedDraft;
@@ -82,6 +87,7 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 				items: draft.items || [],
 				customer: draft.customer,
 				applied_offers: draft.applied_offers || [], // Restore applied offers
+				applied_coupon: draft.applied_coupon || null,
 			};
 		} catch (error) {
 			console.error("Error loading draft:", error);
@@ -90,9 +96,24 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 		}
 	}
 
-	async function deleteDraftById(draftId) {
+	// Return a parked draft's serials to the offline cache
+	function returnDraftSerials(draft) {
+		for (const item of draft?.items || []) {
+			if (item.has_serial_no && item.serial_no) {
+				serialStore.returnSerials(item.item_code, item.serial_no);
+			}
+		}
+	}
+
+	/**
+	 * @param {{ returnSerials?: boolean }} [options]
+	 *   true when the user discards the draft; false (default) after the draft was sold
+	 */
+	async function deleteDraftById(draftId, { returnSerials = false } = {}) {
 		try {
+			const draft = drafts.value.find((d) => d.draft_id === draftId);
 			await deleteDraft(draftId);
+			if (returnSerials) returnDraftSerials(draft);
 			await loadDrafts(); // Refresh drafts list and count
 			showSuccess(__("Draft deleted successfully"));
 		} catch (error) {
@@ -112,5 +133,6 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 		saveDraftInvoice,
 		loadDraft,
 		deleteDraft: deleteDraftById,
+		returnDraftSerials,
 	};
 });

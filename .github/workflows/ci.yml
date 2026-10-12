@@ -77,7 +77,9 @@ jobs:
             ${{ runner.os }}-yarn-
 
       - name: Install MariaDB Client
-        run: sudo apt-get install mariadb-client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mariadb-client
 
       - name: Setup
         run: |
@@ -106,5 +108,14 @@ jobs:
           bench --site test_site set-config allow_tests true
           bench --site test_site run-tests --module pos_next.test_promotions
           bench --site test_site run-tests --module pos_next.api.test_credit_linked_returns
+        env:
+          TYPE: server
+
+      - name: Run Sales Person Commission Tests
+        working-directory: /home/runner/frappe-bench
+        run: |
+          bench --site test_site run-tests --module pos_next.pos_next.utils.tests.test_sales_person_commission
+          bench --site test_site run-tests --module pos_next.pos_next.utils.tests.test_pos_sales_team_resolution
+          bench --site test_site run-tests --module pos_next.pos_next.utils.tests.test_sales_person_commission_hook
         env:
           TYPE: server
