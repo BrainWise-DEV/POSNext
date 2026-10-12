@@ -40,6 +40,10 @@ export function useInvoice() {
 	const posOrder = ref(null);
 	// Sales Person of the loaded SPG order - the invoice is credited to them
 	const posOrderSalesPerson = ref(null);
+	/** nextend Pengiriman: Dikirim as the loaded order's SPG chose it ({ alamat, catatan }), null = taken along */
+	const posOrderDelivery = ref(null);
+	/** nextend Pengiriman: the sale's delivery as Sales Invoice fields, null = taken along */
+	const delivery = ref(null);
 	const taxRules = ref([]); // Tax rules from POS Profile
 	const taxInclusive = ref(false); // Tax inclusive setting from POS Settings
 
@@ -1308,6 +1312,10 @@ export function useInvoice() {
 					invoiceData.expected_allocation = expectedAllocation;
 				}
 
+				if (delivery.value && targetDoctype === "Sales Invoice") {
+					Object.assign(invoiceData, delivery.value);
+				}
+
 				// "Pay on Receivable Account": route the invoice's debit_to to a chosen AR
 				if (receivableAccount) {
 					invoiceData.receivable_account = receivableAccount;
@@ -1579,6 +1587,11 @@ export function useInvoice() {
 		couponCode.value = editable ? null : order.coupon_code || null;
 		posOrder.value = editable ? null : order.name;
 		posOrderSalesPerson.value = editable ? null : order.sales_person || null;
+		// The SPG's delivery choice follows the order both ways: into the
+		// cashier's payment dialog, and back to the SPG who reopens the order
+		posOrderDelivery.value = order.dikirim
+			? { alamat: order.alamat_kirim || "", catatan: order.catatan_kirim || "" }
+			: null;
 		rebuildIncrementalCache();
 	}
 
@@ -1589,6 +1602,8 @@ export function useInvoice() {
 		couponCode.value = null;
 		posOrder.value = null;
 		posOrderSalesPerson.value = null;
+		posOrderDelivery.value = null;
+		delivery.value = null;
 
 		// Reset incremental cache
 		_cachedSubtotal.value = 0;
@@ -1618,6 +1633,8 @@ export function useInvoice() {
 		couponCode.value = null;
 		posOrder.value = null;
 		posOrderSalesPerson.value = null;
+		posOrderDelivery.value = null;
+		delivery.value = null;
 
 		// Reset incremental cache
 		_cachedSubtotal.value = 0;
@@ -1695,6 +1712,8 @@ export function useInvoice() {
 		couponCode,
 		posOrder,
 		posOrderSalesPerson,
+		posOrderDelivery,
+		delivery,
 		taxRules,
 		taxInclusive,
 		isSubmitting,

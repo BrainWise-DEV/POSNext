@@ -49,6 +49,15 @@ class TestAllocatePayments(unittest.TestCase):
 			[(r["mode_of_payment"], r["amount"]) for r in rows[0]], [("Cash", 136), ("Card", 34)]
 		)
 
+	def test_down_payment_never_pays_more_than_was_tendered(self):
+		payments = [{"mode_of_payment": "Cash", "amount": 50, "type": "Cash"}]
+		rows = _allocate_payments(payments, [150, 80, 40])
+		self.assertEqual(rows[1], [{"mode_of_payment": "Cash", "amount": 50, "type": "Cash"}])
+		self.assertEqual((rows[0], rows[2]), ([], []))
+
+	def test_nothing_paid_leaves_every_invoice_without_payments(self):
+		self.assertEqual(_allocate_payments([], [150, 80]), [[], []])
+
 	def test_single_invoice_takes_everything(self):
 		payments = [{"mode_of_payment": "Cash", "amount": 100, "type": "Cash"}]
 		self.assertEqual(

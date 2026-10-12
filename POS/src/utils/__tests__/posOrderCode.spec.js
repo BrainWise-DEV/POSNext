@@ -72,4 +72,14 @@ describe("orderFromQrPayload", () => {
 			addon_group: "Tinta Propan",
 		});
 	});
+
+	it("carries the delivery the SPG chose, none when the goods are taken along", () => {
+		const payload = parsePosOrderCode(QR).payload;
+		expect(orderFromQrPayload(payload)).toMatchObject({ dikirim: 0, alamat_kirim: "" });
+		expect(orderFromQrPayload({ ...payload, k: "Jl. Kenanga 14", kc: "sore" })).toMatchObject({
+			dikirim: 1,
+			alamat_kirim: "Jl. Kenanga 14",
+			catatan_kirim: "sore",
+		});
+	});
 });

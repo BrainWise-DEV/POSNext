@@ -56,6 +56,17 @@ export function buildSpgOrderSlipHTML(order, currency) {
 		.join("");
 
 	const discount = Number.parseFloat(order.discount_amount) || 0;
+	// nextend Pengiriman: the SPG marked the order Dikirim
+	const deliveryHtml = order.dikirim
+		? `
+	<div class="sep"></div>
+	<div class="kirim">${__("DIKIRIM")}</div>
+	<div class="alamat">${escapeHtml(order.alamat_kirim)}</div>${
+		order.catatan_kirim
+			? `<div class="note">${__("Catatan")}: ${escapeHtml(order.catatan_kirim)}</div>`
+			: ""
+	}`
+		: "";
 
 	return `<!DOCTYPE html>
 <html>
@@ -76,6 +87,8 @@ export function buildSpgOrderSlipHTML(order, currency) {
 		.total { font-weight: bold; font-size: 14px; }
 		.qr svg { width: 100%; height: auto; }
 		.note { font-size: 11px; margin-top: 4px; }
+		.kirim { font-weight: bold; font-size: 14px; }
+		.alamat { white-space: pre-line; }
 	</style>
 </head>
 <body>
@@ -103,7 +116,7 @@ export function buildSpgOrderSlipHTML(order, currency) {
 	<div class="row total"><span>${__("TOTAL")}</span><span>${formatCurrency(
 		order.grand_total || 0,
 		currency
-	)}</span></div>
+	)}</span></div>${deliveryHtml}
 	<div class="sep"></div>
 	<div class="qr">${order.qr_svg || ""}</div>
 	<div class="center note">${__("Bawa struk ini ke kasir untuk pembayaran")}</div>

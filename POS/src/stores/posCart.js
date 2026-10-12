@@ -115,6 +115,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		setItemAddons,
 		posOrder,
 		posOrderSalesPerson,
+		posOrderDelivery,
+		delivery,
 		loadPosOrder,
 	} = useInvoice();
 
@@ -2968,6 +2970,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		setItemAddons,
 		posOrder,
 		posOrderSalesPerson,
+		posOrderDelivery,
+		delivery,
 		loadPosOrder,
 		getExpectedAllocation,
 

@@ -595,6 +595,7 @@
 				:is-offline="offlineStore.isOffline"
 				:allow-partial-payment="posSettingsStore.allowPartialPayment"
 				:allow-credit-sale="posSettingsStore.allowCreditSale"
+				allow-delivery
 				:allow-customer-credit-payment="posSettingsStore.allowCustomerCreditPayment"
 				:allow-write-off="posSettingsStore.allowWriteOffChange"
 				:write-off-limit="shiftStore.writeOffLimit"
@@ -608,6 +609,7 @@
 				:is-submitting="cartStore.isSubmitting"
 				:applied-offer-count="cartStore.appliedOffers.length"
 				:locked-sales-person="cartStore.posOrderSalesPerson"
+				:order-delivery="cartStore.posOrderDelivery"
 				@payment-completed="handlePaymentCompleted"
 				@update-additional-discount="handleAdditionalDiscountUpdate"
 				@show-offers="uiStore.showOffersDialog = true"
@@ -626,6 +628,14 @@
 				v-model="showSpgShiftDialog"
 				:current-shift-name="shiftStore.currentShift?.name"
 				@shift-selected="handleShiftOpened"
+			/>
+			<!-- SPG: Dikirim or taken along, asked before the order is saved -->
+			<SpgSaveOrderDialog
+				v-model="showSpgSaveDialog"
+				:customer="spgOrderCustomer"
+				:initial="cartStore.posOrderDelivery"
+				:saving="savingSpgOrder"
+				@save="handleSaveSpgOrder"
 			/>
 			<SpgOrdersDialog
 				ref="spgOrdersDialogRef"
@@ -1176,6 +1186,7 @@ import SpgInvoicesDialog from "@/components/sale/SpgInvoicesDialog.vue";
 import SpgOrdersDialog from "@/components/sale/SpgOrdersDialog.vue";
 import OrderQrCameraDialog from "@/components/sale/OrderQrCameraDialog.vue";
 import SpgQueueDialog from "@/components/sale/SpgQueueDialog.vue";
+import SpgSaveOrderDialog from "@/components/sale/SpgSaveOrderDialog.vue";
 import SpgShiftDialog from "@/components/sale/SpgShiftDialog.vue";
 import { openSpgOrderSlipWindow, printSpgOrderSlip } from "@/utils/printSpgOrder";
 import { orderFromQrPayload } from "@/utils/posOrderCode";
@@ -1524,6 +1535,12 @@ async function loadTintaUsageContext() {
 	}
 }
 const savingSpgOrder = ref(false);
+const showSpgSaveDialog = ref(false);
+// A walk-in (the POS Profile's customer) has no addresses of their own to offer
+const spgOrderCustomer = computed(() => {
+	const customer = cartStore.customer?.name || cartStore.customer;
+	return customer && customer !== shiftStore.profileCustomer ? customer : "";
+});
 
 // SPG: own Pending orders waiting at the cashier (badge on "Pesanan Saya")
 const spgOrdersCount = ref(0);
@@ -2446,7 +2463,12 @@ async function handleProceedToPayment() {
 	}
 
 	if (shiftStore.isSpgMode) {
-		await handleSaveSpgOrder();
+		if (offlineStore.isOffline) {
+			showWarning(__("Pesanan hanya bisa disimpan saat online"));
+			return;
+		}
+		// Dikirim or taken along is asked before the order is saved
+		showSpgSaveDialog.value = true;
 		return;
 	}
 
@@ -2610,7 +2632,11 @@ async function fillOrderItemNamesFromCache(order) {
  * with QR for the customer to bring to the cashier, then start a new cart.
  * Prices are sent as computed here - they stay locked on the order.
  */
-async function handleSaveSpgOrder() {
+/**
+ * SPG: save the cart as an order for the cashier. `delivery` holds the POS
+ * Order delivery fields chosen in SpgSaveOrderDialog.
+ */
+async function handleSaveSpgOrder(delivery = {}) {
 	if (savingSpgOrder.value) return;
 	if (offlineStore.isOffline) {
 		showWarning(__("Pesanan hanya bisa disimpan saat online"));
@@ -2618,7 +2644,10 @@ async function handleSaveSpgOrder() {
 	}
 
 	cartStore.dropOutOfStockFreeItems();
-	if (cartStore.isEmpty) return;
+	if (cartStore.isEmpty) {
+		showSpgSaveDialog.value = false;
+		return;
+	}
 
 	const customer = cartStore.customer?.name || cartStore.customer;
 	const items = cartStore.formatItemsForSubmission(cartStore.invoiceItems).map((row) => ({
@@ -2641,11 +2670,13 @@ async function handleSaveSpgOrder() {
 				discount_amount: cartStore.additionalDiscount || 0,
 				coupon_code:
 					cartStore.appliedCoupon?.code || cartStore.appliedCoupon?.name || null,
+				...delivery,
 				items,
 				expected_allocation: cartStore.getExpectedAllocation(),
 			}),
 		});
 
+		showSpgSaveDialog.value = false;
 		cartStore.clearCart();
 		previousCartHash = "";
 		await cartStore.setDefaultCustomer();
@@ -2721,6 +2752,9 @@ async function handlePaymentCompleted(paymentData) {
 			cartStore.salesTeam = [];
 		}
 
+		// nextend Pengiriman: Dikirim / Bayar di Tempat chosen in the payment dialog
+		cartStore.delivery = paymentData.delivery || null;
+
 		// Set delivery date for Sales Orders
 		if (paymentData.delivery_date) {
 			cartStore.setDeliveryDate(paymentData.delivery_date);
@@ -2756,6 +2790,7 @@ async function handlePaymentCompleted(paymentData) {
 				is_credit_sale: paymentData.is_credit_sale ? 1 : 0,
 				receivable_account: paymentData.receivable_account || null,
 				edited_from: editingOfflineContext?.originalOfflineId || null,
+				...(cartStore.delivery || {}),
 			};
 			if (cartStore.posOrder) {
 				invoiceData.custom_pos_order = cartStore.posOrder;
@@ -2909,7 +2944,8 @@ async function handlePaymentCompleted(paymentData) {
 					(sum, invoice) => sum + (invoice.grand_total || invoice.total || 0),
 					0
 				);
-				const paidAmount = paymentData.paid_amount || invoiceTotal;
+				// ?? not ||: a Bayar di Tempat sale may be paid nothing at the till
+				const paidAmount = paymentData.paid_amount ?? invoiceTotal;
 
 				uiStore.showPaymentDialog = false;
 				cartStore.clearCart();
