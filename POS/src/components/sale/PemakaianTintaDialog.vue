@@ -20,6 +20,19 @@
 					<div class="text-sm font-semibold text-gray-900">{{ __("Upload Baru") }}</div>
 					<div class="flex flex-wrap items-end gap-2">
 						<label class="text-xs text-gray-600 flex flex-col gap-1">
+							{{ __("Brand") }}
+							<select
+								v-model="brand"
+								class="h-8 text-sm border border-gray-300 rounded px-2"
+								:aria-label="__('Brand')"
+							>
+								<option :value="null" disabled>{{ __("Pilih brand") }}</option>
+								<option v-for="name in brands" :key="name" :value="name">
+									{{ brandLabel(name) }}
+								</option>
+							</select>
+						</label>
+						<label class="text-xs text-gray-600 flex flex-col gap-1">
 							{{ __("Periode Dari") }}
 							<input
 								v-model="periodeDari"
@@ -36,11 +49,18 @@
 							/>
 						</label>
 						<a
+							v-if="brand !== null"
 							:href="templateUrl"
 							class="h-8 inline-flex items-center px-3 text-sm rounded bg-gray-100 hover:bg-gray-200 text-gray-800"
 						>
 							{{ __("Download Template") }}
 						</a>
+						<span
+							v-else
+							class="h-8 inline-flex items-center px-3 text-sm rounded bg-gray-50 text-gray-400"
+						>
+							{{ __("Download Template") }}
+						</span>
 						<input
 							ref="fileInput"
 							type="file"
@@ -49,10 +69,13 @@
 							@change="onFileChosen"
 						/>
 					</div>
+					<p v-if="!brands.length && !loadingList" class="text-xs text-yellow-700">
+						{{ __("Belum ada tinta add on yang tercatat di gudang ini.") }}
+					</p>
 					<p class="text-xs text-gray-500">
 						{{
 							__(
-								"Isi kolom Qty Keluar dengan total pemakaian periode ini dalam satuan di template. Baris kosong dianggap tidak dipakai."
+								"Isi kolom Qty Keluar dengan total pemakaian periode ini dalam satuan di template. Baris kosong dianggap tidak dipakai. Salah qty? Batalkan upload yang masih Diajukan lalu upload ulang; yang sudah disetujui minta dibatalkan Stock Manager."
 							)
 						}}
 					</p>
@@ -137,6 +160,7 @@
 						<div class="min-w-0">
 							<div class="text-sm font-semibold text-gray-900">{{ upload.name }}</div>
 							<div class="text-xs text-gray-500">
+								{{ brandLabel(upload.brand || "") }} ·
 								{{ upload.periode_dari }} – {{ upload.periode_sampai }} ·
 								{{ __("{0} tinta", [upload.rows]) }}
 								<template v-if="upload.pending">
@@ -147,12 +171,23 @@
 								{{ upload.alasan_tolak }}
 							</div>
 						</div>
-						<span
-							class="text-[11px] font-semibold px-2 py-0.5 rounded whitespace-nowrap"
-							:class="STATUS_CLASS[upload.status] || 'bg-gray-100 text-gray-700'"
-						>
-							{{ upload.status }}
-						</span>
+						<div class="flex flex-col items-end gap-1">
+							<span
+								class="text-[11px] font-semibold px-2 py-0.5 rounded whitespace-nowrap"
+								:class="STATUS_CLASS[upload.status] || 'bg-gray-100 text-gray-700'"
+							>
+								{{ upload.status }}
+							</span>
+							<Button
+								v-if="upload.can_cancel"
+								variant="subtle"
+								size="sm"
+								:loading="cancelling === upload.name"
+								@click="cancelUpload(upload.name)"
+							>
+								{{ __("Batalkan") }}
+							</Button>
+						</div>
 					</div>
 				</div>
 			</div>
@@ -174,6 +209,7 @@ const STATUS_CLASS = {
 	Selesai: "bg-green-100 text-green-700",
 	Ditolak: "bg-red-100 text-red-700",
 	Gagal: "bg-red-100 text-red-700",
+	Dibatalkan: "bg-gray-200 text-gray-600",
 };
 
 const props = defineProps({
@@ -195,9 +231,15 @@ const submitting = ref(false);
 const error = ref("");
 const uploads = ref([]);
 const loadingList = ref(false);
+const cancelling = ref("");
+const brands = ref([]);
+// null = not chosen yet; "" = tinta without a brand.
+const brand = ref(null);
 
 const templateUrl = computed(
-	() => `/api/method/${METHOD}.download_template?warehouse=${encodeURIComponent(warehouse.value)}`
+	() =>
+		`/api/method/${METHOD}.download_template?warehouse=${encodeURIComponent(warehouse.value)}` +
+		`&brand=${encodeURIComponent(brand.value ?? "")}`
 );
 
 watch(
@@ -218,9 +260,13 @@ watch(warehouse, () => {
 	resetUpload();
 	loadUploads();
 });
-watch([periodeDari, periodeSampai], () => {
-	if (fileUrl.value) runPreview();
+watch([brand, periodeDari, periodeSampai], () => {
+	if (fileUrl.value && brand.value !== null) runPreview();
 });
+
+function brandLabel(name) {
+	return name || __("(Tanpa Brand)");
+}
 
 function messageOf(err) {
 	return err?.messages?.join("\n") || err?.message || String(err);
@@ -230,7 +276,13 @@ async function loadUploads() {
 	if (!warehouse.value) return;
 	loadingList.value = true;
 	try {
-		uploads.value = (await call(`${METHOD}.list_uploads`, { warehouse: warehouse.value })) || [];
+		const [list, names] = await Promise.all([
+			call(`${METHOD}.list_uploads`, { warehouse: warehouse.value }),
+			call(`${METHOD}.get_template_brands`, { warehouse: warehouse.value }),
+		]);
+		uploads.value = list || [];
+		brands.value = names || [];
+		if (!brands.value.includes(brand.value)) brand.value = brands.value.length === 1 ? brands.value[0] : null;
 	} catch (err) {
 		error.value = messageOf(err);
 	} finally {
@@ -264,8 +316,8 @@ async function onFileChosen(event) {
 	preview.value = null;
 	error.value = "";
 	if (!file) return;
-	if (!periodeDari.value || !periodeSampai.value) {
-		error.value = __("Isi periode dulu sebelum memilih file.");
+	if (brand.value === null || !periodeDari.value || !periodeSampai.value) {
+		error.value = __("Pilih brand dan isi periode dulu sebelum memilih file.");
 		event.target.value = "";
 		return;
 	}
@@ -286,6 +338,7 @@ async function runPreview() {
 	try {
 		preview.value = await call(`${METHOD}.preview_upload`, {
 			warehouse: warehouse.value,
+			brand: brand.value,
 			periode_dari: periodeDari.value,
 			periode_sampai: periodeSampai.value,
 			file_url: fileUrl.value,
@@ -303,6 +356,7 @@ async function submitUpload() {
 	try {
 		await call(`${METHOD}.submit_upload`, {
 			warehouse: warehouse.value,
+			brand: brand.value,
 			periode_dari: periodeDari.value,
 			periode_sampai: periodeSampai.value,
 			file_url: fileUrl.value,
@@ -315,6 +369,20 @@ async function submitUpload() {
 		error.value = messageOf(err);
 	} finally {
 		submitting.value = false;
+	}
+}
+
+async function cancelUpload(name) {
+	if (!window.confirm(__("Batalkan upload {0}? Periodenya bisa diupload ulang.", [name]))) return;
+	cancelling.value = name;
+	error.value = "";
+	try {
+		await call(`${METHOD}.cancel_upload`, { name });
+		await loadUploads();
+	} catch (err) {
+		error.value = messageOf(err);
+	} finally {
+		cancelling.value = "";
 	}
 }
 </script>
