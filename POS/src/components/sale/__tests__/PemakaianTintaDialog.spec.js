@@ -33,11 +33,16 @@ const PREVIEW_BAD = {
 	can_submit: false,
 };
 
-function respond(preview) {
+function respond(preview, brands = ["NIPPON", "PROPAN", ""]) {
 	call.mockImplementation(async (method) => {
-		if (method.endsWith("list_uploads")) return [{ name: "PMT-0001", status: "Ada Pending", rows: 2, pending: 1 }];
+		if (method.endsWith("list_uploads"))
+			return [
+				{ name: "PMT-0001", brand: "PROPAN", status: "Ada Pending", rows: 2, pending: 1, can_cancel: false },
+				{ name: "PMT-0002", status: "Diajukan", rows: 1, pending: 0, can_cancel: true },
+			];
+		if (method.endsWith("get_template_brands")) return brands;
 		if (method.endsWith("preview_upload")) return preview;
-		if (method.endsWith("submit_upload")) return "PMT-0002";
+		if (method.endsWith("submit_upload")) return "PMT-0003";
 	});
 }
 
@@ -51,7 +56,12 @@ async function open() {
 	return wrapper;
 }
 
-async function chooseFile(wrapper, { periode = true } = {}) {
+function brandSelect(wrapper) {
+	return wrapper.findAll("select")[1];
+}
+
+async function chooseFile(wrapper, { periode = true, brand = "PROPAN" } = {}) {
+	if (brand !== null) await brandSelect(wrapper).setValue(brand);
 	const dates = wrapper.findAll("input[type=date]");
 	if (periode) {
 		await dates[0].setValue("2026-09-01");
@@ -64,6 +74,10 @@ async function chooseFile(wrapper, { periode = true } = {}) {
 	});
 	await input.trigger("change");
 	await flushPromises();
+}
+
+function batalkan(wrapper) {
+	return wrapper.findAll("button").filter((b) => b.text() === "Batalkan");
 }
 
 function ajukan(wrapper) {
@@ -86,7 +100,34 @@ describe("PemakaianTintaDialog", () => {
 		expect(call).toHaveBeenCalledWith("nextend.pemakaian_tinta.list_uploads", { warehouse: "WH B" });
 		expect(wrapper.text()).toContain("PMT-0001");
 		expect(wrapper.text()).toContain("1 pending");
-		expect(wrapper.find("a").attributes("href")).toContain("download_template?warehouse=WH%20B");
+		expect(wrapper.text()).toContain("PROPAN ·");
+		expect(wrapper.text()).toContain("(Tanpa Brand) ·");
+	});
+
+	it("lists the warehouse brands and needs one before the template downloads", async () => {
+		respond(PREVIEW_OK);
+		const wrapper = await open();
+		expect(call).toHaveBeenCalledWith("nextend.pemakaian_tinta.get_template_brands", { warehouse: "WH B" });
+		const options = brandSelect(wrapper).findAll("option").map((o) => o.text());
+		expect(options).toEqual(["Pilih brand", "NIPPON", "PROPAN", "(Tanpa Brand)"]);
+		expect(wrapper.find("a").exists()).toBe(false);
+
+		await brandSelect(wrapper).setValue("NIPPON");
+		expect(wrapper.find("a").attributes("href")).toContain("download_template?warehouse=WH%20B&brand=NIPPON");
+		await brandSelect(wrapper).setValue("");
+		expect(wrapper.find("a").attributes("href")).toMatch(/&brand=$/);
+	});
+
+	it("picks the only brand by itself", async () => {
+		respond(PREVIEW_OK, ["AVIAN"]);
+		const wrapper = await open();
+		expect(wrapper.find("a").attributes("href")).toContain("&brand=AVIAN");
+	});
+
+	it("says when the warehouse has no tinta", async () => {
+		respond(PREVIEW_OK, []);
+		const wrapper = await open();
+		expect(wrapper.text()).toContain("Belum ada tinta add on");
 	});
 
 	it("asks for the period before reading a file", async () => {
@@ -94,7 +135,15 @@ describe("PemakaianTintaDialog", () => {
 		const wrapper = await open();
 		await chooseFile(wrapper, { periode: false });
 		expect(globalThis.fetch).not.toHaveBeenCalled();
-		expect(wrapper.text()).toContain("Isi periode dulu");
+		expect(wrapper.text()).toContain("Pilih brand dan isi periode");
+	});
+
+	it("asks for the brand before reading a file", async () => {
+		respond(PREVIEW_OK);
+		const wrapper = await open();
+		await chooseFile(wrapper, { brand: null });
+		expect(globalThis.fetch).not.toHaveBeenCalled();
+		expect(wrapper.text()).toContain("Pilih brand dan isi periode");
 	});
 
 	it("previews the file and submits it", async () => {
@@ -104,6 +153,7 @@ describe("PemakaianTintaDialog", () => {
 
 		expect(call).toHaveBeenCalledWith("nextend.pemakaian_tinta.preview_upload", {
 			warehouse: "WH B",
+			brand: "PROPAN",
 			periode_dari: "2026-09-01",
 			periode_sampai: "2026-09-30",
 			file_url: "/private/files/pakai.xlsx",
@@ -135,5 +185,38 @@ describe("PemakaianTintaDialog", () => {
 		await chooseFile(wrapper);
 		expect(wrapper.text()).toContain("Too big");
 		expect(ajukan(wrapper)).toBeUndefined();
+	});
+
+	it("offers Batalkan only on uploads the server allows to withdraw", async () => {
+		respond(PREVIEW_OK);
+		const wrapper = await open();
+		expect(batalkan(wrapper)).toHaveLength(1);
+
+		globalThis.confirm = vi.fn(() => false);
+		await batalkan(wrapper)[0].trigger("click");
+		expect(call).not.toHaveBeenCalledWith("nextend.pemakaian_tinta.cancel_upload", expect.anything());
+
+		globalThis.confirm = vi.fn(() => true);
+		call.mockClear();
+		await batalkan(wrapper)[0].trigger("click");
+		await flushPromises();
+		expect(call.mock.calls.map(([m]) => m)).toEqual([
+			"nextend.pemakaian_tinta.cancel_upload",
+			"nextend.pemakaian_tinta.list_uploads",
+			"nextend.pemakaian_tinta.get_template_brands",
+		]);
+		expect(call).toHaveBeenCalledWith("nextend.pemakaian_tinta.cancel_upload", { name: "PMT-0002" });
+	});
+
+	it("shows why a withdraw failed", async () => {
+		respond(PREVIEW_OK);
+		const wrapper = await open();
+		call.mockImplementation(async () => {
+			throw new Error("Hanya upload berstatus Diajukan yang bisa dibatalkan dari POS.");
+		});
+		globalThis.confirm = vi.fn(() => true);
+		await batalkan(wrapper)[0].trigger("click");
+		await flushPromises();
+		expect(wrapper.text()).toContain("Hanya upload berstatus Diajukan");
 	});
 });
