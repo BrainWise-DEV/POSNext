@@ -1607,7 +1607,7 @@ Points applied: {0}. Please pay remaining {1} with {2},تم خصم النقاط:
 "Money taken","النقد المُحصَّل",""
 "Not collected","غير محصَّل",""
 "Show All Customers in Search","عرض كل العملاء في البحث",""
-"Show the complete customer list in the cart search dropdown instead of capping results at the first 10-20 matches.","عرض قائمة العملاء كاملة في قائمة البحث بدلاً من الاقتصار على أول 10-20 نتيجة.",""
+"Show the complete customer list in the cart search dropdown instead of capping results at the first 10-20 matches. Large customer lists may take longer to render.","عرض قائمة العملاء كاملة في قائمة البحث بدلاً من الاقتصار على أول 10-20 نتيجة. قد يستغرق عرض القوائم الكبيرة وقتًا أطول.",""
 "All Customers","كل العملاء",""
 "Results","النتائج",""
 "Governorate","المحافظة",""

@@ -1,7 +1,15 @@
 <template>
+	<!--
+		No height: 100vh here. The page fills whatever the host leaves it (see the
+		flex chain in index.css), so chrome above POS — Frappe's navbar, a demo
+		countdown banner — shortens the page instead of pushing its bottom off the
+		screen. padding-bottom keeps POSFooter's fixed strip from sitting on top of
+		the cart's Checkout button; the footer publishes its own height, so this
+		follows if it is ever restyled.
+	-->
 	<div
-		class="flex flex-col bg-gray-50 overflow-x-hidden"
-		style="height: 100vh; max-height: 100vh"
+		class="flex flex-1 flex-col min-h-0 bg-gray-50 overflow-x-hidden"
+		style="padding-bottom: var(--pos-footer-h, 45px)"
 	>
 		<!-- Loading State -->
 		<LoadingSpinner v-if="uiStore.isLoading" />
@@ -1956,7 +1964,7 @@ async function handleShiftOpened() {
 	// Load tax rules (depends on settings being loaded)
 	await cartStore.loadTaxRules(shiftStore.profileName, posSettingsStore.settings);
 
-	_initializedProfile = shiftStore.profileName;
+	_initializedKey = `${shiftStore.profileName}::${shiftStore.currentShift?.name}`;
 
 	// Start session lock tracking now that a shift is open and POS is ready
 	startActivityTracking();
