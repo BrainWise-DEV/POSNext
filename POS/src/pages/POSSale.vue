@@ -33,6 +33,13 @@
 				@logout="uiStore.showLogoutDialog = true"
 			>
 				<template #menu-items>
+					<button
+						v-if="tintaUsage.allowed"
+						@click="showPemakaianTintaDialog = true"
+						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-blue-50 flex items-center gap-3 transition-colors"
+					>
+						<span>{{ __("Pemakaian Tinta") }}</span>
+					</button>
 					<template v-if="shiftStore.isSpgMode">
 						<button
 							@click="showSpgOrdersDialog = true"
@@ -290,7 +297,10 @@
 				style="max-height: calc(100vh - 60px - var(--header-height, 60px))"
 			>
 				<!-- Icon-Only Management Slider - Always Visible -->
-				<ManagementSlider @menu-clicked="handleManagementMenuClick" />
+				<ManagementSlider
+					:show-tinta-usage="tintaUsage.allowed"
+					@menu-clicked="handleManagementMenuClick"
+				/>
 
 				<!-- Main Content Container -->
 				<div
@@ -633,6 +643,11 @@
 				:currency="shiftStore.profileCurrency"
 				@orders-changed="setSpgOrders"
 				@edit-order="handleEditSpgOrder"
+			/>
+			<PemakaianTintaDialog
+				v-model="showPemakaianTintaDialog"
+				:warehouses="tintaUsage.warehouses"
+				:default-warehouse="shiftStore.currentProfile?.warehouse || ''"
 			/>
 			<SpgInvoicesDialog
 				v-model="showSpgInvoicesDialog"
@@ -1166,6 +1181,7 @@ let _posInitPromise = null;
 <script setup>
 import ShiftClosingDialog from "@/components/ShiftClosingDialog.vue";
 import ShiftOpeningDialog from "@/components/ShiftOpeningDialog.vue";
+import PemakaianTintaDialog from "@/components/sale/PemakaianTintaDialog.vue";
 import SpgInvoicesDialog from "@/components/sale/SpgInvoicesDialog.vue";
 import SpgOrdersDialog from "@/components/sale/SpgOrdersDialog.vue";
 import OrderQrCameraDialog from "@/components/sale/OrderQrCameraDialog.vue";
@@ -1507,6 +1523,17 @@ const showSpgOrdersDialog = ref(false);
 const spgOrdersDialogRef = ref(null);
 // SPG: invoices credited to their Sales Person (instead of the cashier's history)
 const showSpgInvoicesDialog = ref(false);
+const showPemakaianTintaDialog = ref(false);
+// nextend.pemakaian_tinta: menu only for SPG / kepala toko, online only
+const tintaUsage = ref({ allowed: false, warehouses: [] });
+
+async function loadTintaUsageContext() {
+	try {
+		tintaUsage.value = (await call("nextend.pemakaian_tinta.get_upload_context")) || tintaUsage.value;
+	} catch {
+		// Offline or nextend without this feature - the menu stays hidden
+	}
+}
 const savingSpgOrder = ref(false);
 const showSpgSaveDialog = ref(false);
 // A walk-in (the POS Profile's customer) has no addresses of their own to offer
@@ -1631,6 +1658,7 @@ let bodyStyleSnapshot = null;
 
 onMounted(async () => {
 	loadCachedAddonCatalog();
+	loadTintaUsageContext();
 
 	// Window resize listeners (passive for better performance)
 	const handleResize = () => {
@@ -2583,6 +2611,8 @@ function openOrderCameraFromQueue() {
 
 async function fillOrderItemNamesFromCache(order) {
 	for (const row of order.items) {
+		// Gelondongan rows are named after their group - nothing to look up.
+		if (row.addon_parent_key && !row.addon_item) continue;
 		const code = row.addon_item || row.item_code;
 		try {
 			const cached = await offlineWorker.searchCachedItems(code, 5);
@@ -2623,6 +2653,7 @@ async function handleSaveSpgOrder(delivery = {}) {
 	const items = cartStore.formatItemsForSubmission(cartStore.invoiceItems).map((row) => ({
 		...row,
 		addon_item: row.custom_addon_item,
+		addon_group: row.custom_addon_group,
 		addon_key: row.custom_addon_key,
 		addon_parent_key: row.custom_addon_parent_key,
 		keterangan: row.custom_keterangan,
@@ -3400,8 +3431,9 @@ async function handleEditOfflineInvoice(invoice) {
 			for (const row of invoiceData.items) {
 				if (!row.custom_addon_parent_key) continue;
 				(addonsByKey[row.custom_addon_parent_key] ||= []).push({
-					item_code: row.custom_addon_item,
-					item_name: row.item_name,
+					item_code: row.custom_addon_item || null,
+					addon_group: row.custom_addon_group || null,
+					item_name: row.custom_addon_item ? row.item_name : row.custom_addon_group,
 					amount: row.rate,
 				});
 			}
@@ -3621,6 +3653,8 @@ function handleManagementMenuClick(menuItem) {
 		// Load drafts data
 		draftsStore.loadDrafts();
 		showInvoiceManagement.value = true;
+	} else if (menuItem === "tinta") {
+		showPemakaianTintaDialog.value = true;
 	} else if (menuItem === "products") {
 		// Open Stock Lookup dialog in search mode
 		showStockLookup.value = true;
