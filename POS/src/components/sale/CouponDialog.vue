@@ -267,7 +267,7 @@
 </template>
 
 <script setup>
-import { promoApi } from "@/utils/promoApi";
+import { isPromotionsAppInstalled, promoApi } from "@/utils/promoApi";
 import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency";
 import { Button, Dialog, Input, createResource } from "frappe-ui";
 import { computed, ref, watch } from "vue";
@@ -367,24 +367,20 @@ const giftCardsResource = createResource({
 	},
 });
 
-// Resource to validate coupon
-const couponResource = createResource({
-	url: promoApi.validateCoupon(),
-	makeParams() {
-		const params = {
-			coupon_code: couponCode.value,
-			customer: props.customer,
-			company: props.company,
-		};
-		// With cart items the server compares the coupon with F&F / promotions
-		// and answers reason=better_discount_exists before anything is applied.
-		if (fnfEligible.value) {
-			params.items = JSON.stringify(buildCartPayload().items);
-		}
-		return params;
-	},
-	auto: false,
-});
+// Validate the coupon. Cart lines are sent when posnext_promotions prices
+// lines (develop #415 line-level coupons) and for F&F customers, so the
+// server can compare the coupon with F&F / promotions (reason=better_discount_exists).
+async function validateCouponCode(withItems) {
+	const params = {
+		coupon_code: couponCode.value,
+		customer: props.customer,
+		company: props.company,
+	};
+	if (withItems || fnfEligible.value) {
+		params.items = JSON.stringify(cartStore.buildCouponItemsPayload());
+	}
+	return call(promoApi.validateCoupon(), params);
+}
 
 watch(
 	() => props.modelValue,
@@ -452,15 +448,10 @@ async function applyCoupon() {
 	comparisonMessage.value = "";
 
 	try {
-		await couponResource.reload();
-		// Frappe wraps response in { message: {...} }
-		const result = couponResource.data?.message || couponResource.data;
-
-		// Handle if result is the actual response object
-		const validationData =
-			typeof result === "object" && result.valid !== undefined
-				? result
-				: couponResource.data;
+		// Only posnext_promotions prices cart lines (honouring excluded brands and already
+		// discounted items); pos_next's validate_coupon takes no items.
+		const linePriced = isPromotionsAppInstalled();
+		const validationData = await validateCouponCode(linePriced);
 
 		if (!validationData || !validationData.valid) {
 			if (showBetterDiscountMessage(validationData)) return;
@@ -477,6 +468,10 @@ async function applyCoupon() {
 		}
 
 		const coupon = validationData.coupon;
+		if (linePriced) {
+			applyLineCoupon(coupon, validationData);
+			return;
+		}
 		const baseAmount = getCouponBaseAmount(coupon);
 
 		// Check minimum amount on the configured coupon base
@@ -593,6 +588,25 @@ async function applyCouponAgainstFriendsAndFamily(coupon) {
 		fnf_message: fnfMessage,
 	};
 
+	emit("discount-applied", appliedDiscount.value);
+	showSuccess(__("{0} applied successfully", [code]));
+	errorMessage.value = "";
+}
+
+// Priced by the server per cart line; min amount is checked on eligible lines there.
+function applyLineCoupon(coupon, result) {
+	const code = couponCode.value.toUpperCase();
+	appliedDiscount.value = {
+		name: coupon.coupon_name || coupon.coupon_code,
+		code,
+		percentage: 0,
+		amount: Number.parseFloat(result.total_discount) || 0,
+		type: coupon.discount_type,
+		coupon,
+		apply_on: coupon.apply_on,
+		line_level: true,
+		line_updates: result.line_updates || [],
+	};
 	emit("discount-applied", appliedDiscount.value);
 	showSuccess(__("{0} applied successfully", [code]));
 	errorMessage.value = "";

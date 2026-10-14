@@ -8,8 +8,9 @@
 
 /**
  * Install flag for an optional app. The /pos page is not the Desk, so
- * frappe.boot (extend_bootinfo) is usually absent; www/pos.py exposes the same
- * flags as window.posnext_app_flags. Either source is accepted.
+ * frappe.boot (extend_bootinfo) is usually absent; the update_website_context
+ * hook (pos_next.optional_apps) exposes the same flags as
+ * window.posnext_app_flags. Either source is accepted.
  */
 function hasAppFlag(app) {
 	if (typeof window === "undefined") return false;
