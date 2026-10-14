@@ -232,7 +232,7 @@
 							<div
 								v-if="
 									offer.min_amt &&
-									offersStore.cartSnapshot.subtotal < offer.min_amt
+									offersStore.getEligibleItemAmount(offer) < offer.min_amt
 								"
 								class="mt-3"
 							>
@@ -241,7 +241,7 @@
 										__("Subtotal (before tax)")
 									}}</span>
 									<span class="text-gray-900 font-semibold">
-										{{ formatCurrency(offersStore.cartSnapshot.subtotal) }} /
+										{{ formatCurrency(offersStore.getEligibleItemAmount(offer)) }} /
 										{{ formatCurrency(offer.min_amt) }}
 									</span>
 								</div>
@@ -250,7 +250,7 @@
 										class="bg-green-600 h-2 rounded-full transition-all"
 										:style="{
 											width: `${Math.min(
-												(offersStore.cartSnapshot.subtotal /
+												(offersStore.getEligibleItemAmount(offer) /
 													offer.min_amt) *
 													100,
 												100
@@ -379,7 +379,11 @@ watch(show, (val) => {
 });
 
 function isOfferApplied(offer) {
-	return appliedOfferCodes.value.has(offer?.name);
+	// Applied only while the cart still qualifies on the same basis the
+	// eligibility gate uses; avoids an APPLIED badge on an offer that is
+	// already being removed (stale badge in the offers-loop bug).
+	if (!appliedOfferCodes.value.has(offer?.name)) return false;
+	return offersStore.checkOfferEligibility(offer).eligible;
 }
 
 function formatCurrency(amount) {

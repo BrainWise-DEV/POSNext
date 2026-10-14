@@ -174,6 +174,40 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * Generates a comprehensive hash of the current cart state.
 	 * Used to detect ANY change that might affect offer eligibility.
 	 */
+	/**
+	 * Offers-loop guard. Signature of what decides offer eligibility from the
+	 * cashier's side (paid lines + customer) — deliberately excludes discounts,
+	 * free rows and appliedOffers, which the offer engine itself rewrites.
+	 */
+	function offerCartSignature() {
+		const paid = invoiceItems.value
+			.filter((i) => !i.is_free_item)
+			.map((i) => `${i.item_code}:${i.quantity}:${i.uom || ""}:${i.price_list_rate || i.rate || 0}`)
+			.join("|");
+		return `${paid}::${customer.value?.name || customer.value || "none"}`;
+	}
+
+	// offer code -> offerCartSignature() at the moment it was removed as no
+	// longer eligible. Auto-apply skips it until the cart really changes, so a
+	// removal can never be undone by the very next pass on the same cart.
+	const removedOfferSignatures = new Map();
+
+	function rememberRemovedOffers(offers) {
+		const sig = offerCartSignature();
+		for (const o of offers || []) {
+			const code = o?.code || o?.name;
+			if (code) removedOfferSignatures.set(code, sig);
+		}
+	}
+
+	function wasRemovedForCurrentCart(code) {
+		const sig = removedOfferSignatures.get(code);
+		if (sig === undefined) return false;
+		if (sig === offerCartSignature()) return true;
+		removedOfferSignatures.delete(code);
+		return false;
+	}
+
 	function generateCartHash() {
 		const items = invoiceItems.value;
 		const parts = [
@@ -732,6 +766,15 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				item.free_qty = Number.parseFloat(serverItem.free_qty) || 0;
 				item.gwp_free_qty = Number.parseFloat(serverItem.gwp_free_qty) || 0;
 				hasDiscounts = discountPct > 0 || discountAmt > 0;
+			} else if (!item.is_free_item && hasPricingRules(item.pricing_rules)) {
+				// The server is the authority for promotion discounts. A line whose
+				// promotion (pricing_rules) the server no longer applies must drop it,
+				// otherwise the client keeps a stale % and computes min_amt on a
+				// different total than the server just used (offers-loop fix).
+				item.discount_percentage = 0;
+				item.discount_amount = 0;
+				item.pricing_rules = [];
+				item.is_already_discounted = 0;
 			}
 			// Otherwise preserve existing manual discount
 
@@ -1166,6 +1209,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 				// Wait for Vue to update before showing toast
 				await nextTick();
+
+				rememberRemovedOffers(invalidOffers);
 
 				// Show warning about removed offers
 				const offerNames = invalidOffers.map((o) => o.name).join(", ");
@@ -2039,7 +2084,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			const allEligibleOffers = offersStore.allEligibleOffers;
 			const currentAppliedCodes = new Set(appliedOffers.value.map((o) => o.code));
 			const newOffers = allEligibleOffers.filter(
-				(offer) => !currentAppliedCodes.has(offer.name)
+				(offer) =>
+					!currentAppliedCodes.has(offer.name) && !wasRemovedForCurrentCart(offer.name)
 			);
 
 			// 3. Determine if we need to call the server
@@ -2074,6 +2120,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				applyHeaderDiscountFromServer(null);
 				rebuildIncrementalCache();
 
+				rememberRemovedOffers(invalidOffers);
 				const names = invalidOffers.map((o) => o.name).join(", ");
 				showWarning(__("Offer removed: {0}. Cart no longer meets requirements.", [names]));
 			} else if (combinedCodes.length > 0) {
@@ -2137,6 +2184,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 				// 6. UI Feedback
 				if (invalidOffers.length > 0) {
+					rememberRemovedOffers(invalidOffers);
 					const names = invalidOffers.map((o) => o.name).join(", ");
 					showWarning(
 						__("Offer removed: {0}. Cart no longer meets requirements.", [names])
