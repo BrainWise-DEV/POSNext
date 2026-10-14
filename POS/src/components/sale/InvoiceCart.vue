@@ -1342,16 +1342,13 @@
 									<!-- Price -->
 									<div class="flex flex-col items-end">
 										<span
-											v-if="
-												item.is_already_discounted &&
-												item.price_list_rate > item.rate
-											"
+											v-if="getLineStrikePrice(item) !== null"
 											class="text-[9px] text-gray-400 line-through leading-none"
 										>
-											{{ formatCurrency(item.price_list_rate) }}
+											{{ formatCurrency(getLineStrikePrice(item)) }}
 										</span>
 										<span class="text-[10px] sm:text-xs font-bold text-gray-700">
-											{{ formatCurrency(item.rate) }}
+											{{ formatCurrency(getLineNetRate(item)) }}
 										</span>
 									</div>
 								</div>
@@ -1363,7 +1360,7 @@
 									>
 										{{
 											formatCurrency(
-												item.amount || item.rate * item.quantity
+												getLineAmount(item)
 											)
 										}}
 									</div>
@@ -2199,6 +2196,44 @@ function resolvePaidQuantityFromDisplay(item, displayQty) {
 		return Math.max(0, displayQty - bundled);
 	}
 	return displayQty;
+}
+
+/**
+ * Net line amount. Uses `??` so a legitimate 0 (100% discount / free item)
+ * is not replaced by the full rate × qty.
+ */
+function getLineAmount(item) {
+	const amount = item?.amount;
+	if (amount !== null && amount !== undefined && amount !== "") {
+		return Number.parseFloat(amount) || 0;
+	}
+	return (Number.parseFloat(item?.rate) || 0) * (Number.parseFloat(item?.quantity) || 0);
+}
+
+/** Effective unit price after line discount (0 for a fully free line). */
+function getLineNetRate(item) {
+	const qty = Number.parseFloat(item?.quantity ?? item?.qty) || 0;
+	const hasDiscount =
+		(Number.parseFloat(item?.discount_amount) || 0) > 0 ||
+		(Number.parseFloat(item?.discount_percentage) || 0) > 0 ||
+		item?.is_free_item;
+	const rate = Number.parseFloat(item?.rate) || 0;
+	if (hasDiscount && qty > 0) {
+		// Gross (tax-mode independent) unit price after discount
+		const discount = Number.parseFloat(item?.discount_amount) || 0;
+		if (discount > 0) return Math.max(0, rate - discount / qty);
+		if (item?.is_free_item) return getLineAmount(item) / qty;
+		const pct = Number.parseFloat(item?.discount_percentage) || 0;
+		return Math.max(0, rate * (1 - pct / 100));
+	}
+	return rate;
+}
+
+/** Original list price to show struck through, or null when there is no discount. */
+function getLineStrikePrice(item) {
+	const list = Number.parseFloat(item?.price_list_rate ?? item?.rate) || 0;
+	const net = getLineNetRate(item);
+	return list > net + 0.0001 ? list : null;
 }
 
 function getItemDiscountPercent(item) {
