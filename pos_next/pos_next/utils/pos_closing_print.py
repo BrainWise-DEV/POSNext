@@ -56,9 +56,6 @@ def _get_pos_invoice_parent_targets(pos_invoices: set[str]) -> set[tuple[str, st
 
 
 def _fetch_items_for_targets(parent_targets: set[tuple[str, str]]) -> list[dict]:
-	if not parent_targets:
-		return []
-
 	sales_invoice_item = DocType("Sales Invoice Item")
 	amount_sum = Sum(sales_invoice_item.amount)
 	qty_sum = Sum(sales_invoice_item.qty)
@@ -87,6 +84,9 @@ def _fetch_items_for_targets(parent_targets: set[tuple[str, str]]) -> list[dict]
 def get_items_sold(doc) -> list[dict]:
 	closing_doc = _as_closing_doc(doc)
 	parent_targets = _collect_parent_targets(closing_doc.get("pos_transactions"))
+	if not parent_targets:
+		return []
+
 	items = _fetch_items_for_targets(parent_targets)
 
 	return [
