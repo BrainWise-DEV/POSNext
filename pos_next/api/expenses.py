@@ -21,6 +21,7 @@ from frappe import _
 from frappe.utils import cint, cstr, flt, getdate, today
 
 from pos_next.authorization.actions.pos_expense import ACTION_VOID_POS_EXPENSE
+from pos_next.authorization import grants
 from pos_next.authorization.gate import enforce_context
 
 EXPENSE_ACCOUNT_PAGE_LENGTH = 50
@@ -358,31 +359,46 @@ def cancel_pos_expense(journal_entry, pos_opening_shift, pos_profile, authorizat
 	"""Cancel a POS expense Journal Entry while the opening shift is still open.
 
 	Refused once the shift is closed so closing totals and payment reconciliation
-	cannot silently diverge from cancelled JEs. When a "Void POS Expense"
-	authorization rule applies, ``authorization_token`` must carry a manager grant.
+	cannot silently diverge from cancelled JEs.
+
+	The void gate is opt-in: only when a "Void POS Expense" authorization rule applies
+	must ``authorization_token`` carry a manager grant; with no rule the cancel proceeds
+	as before. The POS Profile used for the rule and the grant amount are derived
+	server-side (validated shift, Journal Entry), never from client-supplied values.
+	The grant is released again if the cancel itself fails.
 	"""
 	if not journal_entry:
 		frappe.throw(_("Journal Entry is required"))
 
 	validate_pos_expense_enabled(pos_profile)
-	validate_open_shift(pos_opening_shift, pos_profile)
+	shift = validate_open_shift(pos_opening_shift, pos_profile)
 
 	je = _get_submitted_pos_expense_for_shift(journal_entry, pos_opening_shift, pos_profile)
 	validate_pos_expense_cancel_permission(pos_profile, je.owner, journal_entry)
 
 	jv_doc = frappe.get_doc("Journal Entry", journal_entry)
+	# Profile comes from the validated shift (not the raw client value) and the amount
+	# from the Journal Entry, identically to how the grant was minted in request_grant.
+	# No-op unless a "Void POS Expense" rule exists (the gate is opt-in).
+	gate_context = {
+		"pos_profile": shift.pos_profile,
+		"journal_entry": journal_entry,
+		"amount": abs(flt(jv_doc.posa_expense_amount)),
+	}
 	enforce_context(
 		ACTION_VOID_POS_EXPENSE,
-		{
-			"pos_profile": pos_profile,
-			"journal_entry": journal_entry,
-			"amount": flt(jv_doc.posa_expense_amount),
-		},
+		gate_context,
 		authorization_token,
 		reference=journal_entry,
 	)
 	jv_doc.flags.ignore_permissions = True
-	jv_doc.cancel()
+	try:
+		jv_doc.cancel()
+	except Exception:
+		# The grant was pinned to this JE when the gate passed; release it so a failed
+		# cancel does not burn the manager's approval.
+		grants.release(authorization_token, journal_entry)
+		raise
 
 	# Keep Offline Expense Sync terminal so a stale offline_id resend cannot mint JE2.
 	_mark_offline_expense_sync_cancelled(journal_entry)
