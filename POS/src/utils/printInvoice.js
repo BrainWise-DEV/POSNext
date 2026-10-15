@@ -234,7 +234,7 @@ export function buildReceiptHTML(invoiceData) {
 					}
 					${
 						salesPersonNames
-							? `<div><span>${__("Sales Person:")}</span><span>${salesPersonNames}</span></div>`
+							? `<div><span>${__("Sales Person")}:</span><span>${salesPersonNames}</span></div>`
 							: ""
 					}
 					${
