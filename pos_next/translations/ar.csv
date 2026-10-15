@@ -1680,3 +1680,5 @@ Points applied: {0}. Please pay remaining {1} with {2},تم خصم النقاط:
 "Expense {0} was recorded, but attachments failed.","تم تسجيل المصروف {0}، لكن فشل إرفاق الملفات.",""
 "Mode of Payment","طريقة الدفع",""
 "Submit","إرسال",""
+"Print Multiple Sales Persons","طباعة عدة مناديب مبيعات",""
+"Print all sales persons on the receipt when an invoice has more than one. When off, receipts with multiple sales persons do not show them (a single sales person always prints).","طباعة جميع مناديب المبيعات على الإيصال عندما تحتوي الفاتورة على أكثر من مندوب. عند الإيقاف، لا يتم عرضهم في الإيصال إذا كان هناك أكثر من مندوب (المندوب الواحد يُطبع دائماً).",""
