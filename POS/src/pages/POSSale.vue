@@ -40,6 +40,13 @@
 					>
 						<span>{{ __("Pemakaian Tinta") }}</span>
 					</button>
+					<button
+						v-if="panduanCategories.length"
+						@click="showPanduanDialog = true"
+						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-blue-50 flex items-center gap-3 transition-colors"
+					>
+						<span>{{ __("Panduan") }}</span>
+					</button>
 					<template v-if="shiftStore.isSpgMode">
 						<button
 							@click="showSpgOrdersDialog = true"
@@ -299,6 +306,7 @@
 				<!-- Icon-Only Management Slider - Always Visible -->
 				<ManagementSlider
 					:show-tinta-usage="tintaUsage.allowed"
+					:show-panduan="panduanCategories.length > 0"
 					@menu-clicked="handleManagementMenuClick"
 				/>
 
@@ -639,6 +647,7 @@
 				:warehouses="tintaUsage.warehouses"
 				:default-warehouse="shiftStore.currentProfile?.warehouse || ''"
 			/>
+			<PanduanDialog v-model="showPanduanDialog" :categories="panduanCategories" />
 			<SpgInvoicesDialog
 				v-model="showSpgInvoicesDialog"
 				:currency="shiftStore.profileCurrency"
@@ -1172,6 +1181,7 @@ let _posInitPromise = null;
 import ShiftClosingDialog from "@/components/ShiftClosingDialog.vue";
 import ShiftOpeningDialog from "@/components/ShiftOpeningDialog.vue";
 import PemakaianTintaDialog from "@/components/sale/PemakaianTintaDialog.vue";
+import PanduanDialog from "@/components/sale/PanduanDialog.vue";
 import SpgInvoicesDialog from "@/components/sale/SpgInvoicesDialog.vue";
 import SpgOrdersDialog from "@/components/sale/SpgOrdersDialog.vue";
 import OrderQrCameraDialog from "@/components/sale/OrderQrCameraDialog.vue";
@@ -1523,6 +1533,17 @@ async function loadTintaUsageContext() {
 		// Offline or nextend without this feature - the menu stays hidden
 	}
 }
+// nextend.panduan: docs marked "Tampil di POS"; menu hidden when none / offline
+const showPanduanDialog = ref(false);
+const panduanCategories = ref([]);
+
+async function loadPanduan() {
+	try {
+		panduanCategories.value = (await call("nextend.panduan.list_docs", { target: "pos" }))?.categories || [];
+	} catch {
+		// Offline or nextend without this feature - the menu stays hidden
+	}
+}
 const savingSpgOrder = ref(false);
 
 // SPG: own Pending orders waiting at the cashier (badge on "Pesanan Saya")
@@ -1642,6 +1663,7 @@ let bodyStyleSnapshot = null;
 onMounted(async () => {
 	loadCachedAddonCatalog();
 	loadTintaUsageContext();
+	loadPanduan();
 
 	// Window resize listeners (passive for better performance)
 	const handleResize = () => {
@@ -3619,6 +3641,8 @@ function handleManagementMenuClick(menuItem) {
 		showInvoiceManagement.value = true;
 	} else if (menuItem === "tinta") {
 		showPemakaianTintaDialog.value = true;
+	} else if (menuItem === "panduan") {
+		showPanduanDialog.value = true;
 	} else if (menuItem === "products") {
 		// Open Stock Lookup dialog in search mode
 		showStockLookup.value = true;
