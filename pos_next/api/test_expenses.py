@@ -460,8 +460,9 @@ class TestPOSExpenses(unittest.TestCase):
 	@patch("pos_next.api.expenses.validate_open_shift")
 	@patch("pos_next.api.expenses.validate_pos_expense_enabled")
 	def test_cancel_pos_expense_passes_grant_to_void_gate(
-		self, _enabled, _shift, _je, _perm, mock_get_doc, _mark, mock_enforce
+		self, _enabled, mock_shift, _je, _perm, mock_get_doc, _mark, mock_enforce
 	):
+		mock_shift.return_value = SimpleNamespace(pos_profile="Test POS Profile")
 		mock_doc = SimpleNamespace(name="ACC-JV-0001", flags=SimpleNamespace(), posa_expense_amount=50)
 		mock_doc.cancel = unittest.mock.Mock()
 		mock_get_doc.return_value = mock_doc
@@ -483,8 +484,9 @@ class TestPOSExpenses(unittest.TestCase):
 	@patch("pos_next.api.expenses.validate_open_shift")
 	@patch("pos_next.api.expenses.validate_pos_expense_enabled")
 	def test_cancel_pos_expense_refused_by_void_gate_does_not_cancel(
-		self, _enabled, _shift, _je, _perm, mock_get_doc, _enforce
+		self, _enabled, mock_shift, _je, _perm, mock_get_doc, _enforce
 	):
+		mock_shift.return_value = SimpleNamespace(pos_profile="Test POS Profile")
 		mock_doc = SimpleNamespace(name="ACC-JV-0001", flags=SimpleNamespace(), posa_expense_amount=50)
 		mock_doc.cancel = unittest.mock.Mock()
 		mock_get_doc.return_value = mock_doc
@@ -1386,3 +1388,149 @@ class TestOfflineExpenseJournalEntry(FrappeTestCase):
 		self.assertEqual(submitted_count, 0)
 		self.assertEqual(cancelled_count, 1)
 		self.assertEqual(flt(expenses.get_shift_expense_total(shift.name)), 0)
+
+
+class _FakeCache:
+	"""Dict-backed stand-in for frappe.cache() so grants run for real without Redis."""
+
+	def __init__(self):
+		self.store = {}
+
+	def make_key(self, key):
+		return key
+
+	def get(self, key):
+		return self.store.get(key)
+
+	def set(self, key, value, ex=None):
+		self.store[key] = value
+
+	def delete(self, key):
+		self.store.pop(key, None)
+
+
+class TestVoidExpenseRealGrant(unittest.TestCase):
+	"""Drive cancel_pos_expense with a *real* grant (real grants/gate/binding code).
+
+	Only storage (cache), the rule lookup and the DB reads are stubbed.
+	"""
+
+	JE = "ACC-JV-0001"
+	SHIFT = "POS-OS-0001"
+	PROFILE = "Test POS Profile"
+
+	def setUp(self):
+		from pos_next.authorization import grants
+
+		self.grants = grants
+		self.cache = _FakeCache()
+		self.session = SimpleNamespace(user="cashier@example.com")
+		self.doc = SimpleNamespace(name=self.JE, flags=SimpleNamespace(), posa_expense_amount=-50)
+		self.doc.cancel = unittest.mock.Mock()
+
+		je_row = SimpleNamespace(
+			name=self.JE,
+			docstatus=1,
+			posa_is_pos_expense=1,
+			posa_pos_opening_shift=self.SHIFT,
+			posa_expense_amount=50,
+		)
+		shift_row = SimpleNamespace(
+			name=self.SHIFT, status="Open", pos_profile=self.PROFILE, user=self.session.user, docstatus=1
+		)
+
+		def get_value(doctype, *args, **kwargs):
+			return je_row if doctype == "Journal Entry" else shift_row
+
+		patches = [
+			patch("pos_next.authorization.grants.frappe.cache", return_value=self.cache),
+			patch("pos_next.authorization.grants.frappe.session", self.session),
+			patch("pos_next.authorization.actions.pos_expense.frappe.session", self.session),
+			patch("pos_next.authorization.actions.pos_expense.frappe.db.get_value", side_effect=get_value),
+			patch("pos_next.authorization.grants.ttl_seconds", return_value=600),
+			patch(
+				"pos_next.authorization.gate.policy.resolve_rule",
+				return_value={"name": "rule"},
+			),
+			patch("pos_next.authorization.gate.policy.describe_approvers", return_value="Managers"),
+			patch("pos_next.authorization.gate.log.record"),
+			patch("pos_next.api.expenses.validate_pos_expense_enabled"),
+			patch("pos_next.api.expenses.validate_open_shift", return_value=shift_row),
+			patch(
+				"pos_next.api.expenses._get_submitted_pos_expense_for_shift",
+				return_value=SimpleNamespace(owner=self.session.user),
+			),
+			patch("pos_next.api.expenses.validate_pos_expense_cancel_permission"),
+			patch("pos_next.api.expenses.frappe.get_doc", return_value=self.doc),
+			patch("pos_next.api.expenses._mark_offline_expense_sync_cancelled"),
+		]
+		for p in patches:
+			p.start()
+			self.addCleanup(p.stop)
+
+	def _issue(self, **overrides):
+		from pos_next.authorization.actions.pos_expense import ACTION_VOID_POS_EXPENSE, resolve_void_context
+		from pos_next.authorization.registry import get
+
+		# Client claims a wrong amount/profile; the server-derived context must win.
+		ctx = resolve_void_context(self.JE, {"pos_profile": self.PROFILE, "amount": 1})
+		ctx.update(overrides)
+		return self.grants.issue(
+			ACTION_VOID_POS_EXPENSE, "manager@example.com", get(ACTION_VOID_POS_EXPENSE).binding(ctx)
+		)
+
+	def test_real_grant_allows_cancel(self):
+		token = self._issue()
+		result = expenses.cancel_pos_expense(self.JE, self.SHIFT, self.PROFILE, token)
+		self.assertEqual(result["journal_entry"], self.JE)
+		self.doc.cancel.assert_called_once()
+
+	def test_missing_or_bogus_grant_is_refused_and_nothing_cancelled(self):
+		for tok in (None, "bogus"):
+			with self.assertRaises(frappe.ValidationError):
+				expenses.cancel_pos_expense(self.JE, self.SHIFT, self.PROFILE, tok)
+		self.doc.cancel.assert_not_called()
+
+	def test_grant_for_a_lower_amount_is_refused(self):
+		token = self._issue(amount=10)
+		with self.assertRaises(frappe.ValidationError):
+			expenses.cancel_pos_expense(self.JE, self.SHIFT, self.PROFILE, token)
+		self.doc.cancel.assert_not_called()
+
+	def test_grant_for_another_journal_entry_is_refused(self):
+		token = self._issue(journal_entry="ACC-JV-9999")
+		with self.assertRaises(frappe.ValidationError):
+			expenses.cancel_pos_expense(self.JE, self.SHIFT, self.PROFILE, token)
+		self.doc.cancel.assert_not_called()
+
+	def test_grant_survives_failed_cancel_and_retry_succeeds(self):
+		token = self._issue()
+		self.doc.cancel.side_effect = [RuntimeError("boom"), None]
+		with self.assertRaises(RuntimeError):
+			expenses.cancel_pos_expense(self.JE, self.SHIFT, self.PROFILE, token)
+		# Grant released: it is not pinned to the JE, and still usable for a retry.
+		(grant,) = [self.grants._read(k) for k in self.cache.store]
+		self.assertIsNone(grant["consumed_by"])
+		expenses.cancel_pos_expense(self.JE, self.SHIFT, self.PROFILE, token)
+		self.assertEqual(self.doc.cancel.call_count, 2)
+
+	def test_grant_is_pinned_after_successful_cancel(self):
+		token = self._issue()
+		expenses.cancel_pos_expense(self.JE, self.SHIFT, self.PROFILE, token)
+		(grant,) = [self.grants._read(k) for k in self.cache.store]
+		self.assertEqual(grant["consumed_by"], self.JE)
+
+	def test_client_profile_and_amount_are_not_trusted_when_minting(self):
+		from pos_next.authorization.actions.pos_expense import resolve_void_context
+
+		ctx = resolve_void_context(self.JE, {"pos_profile": self.PROFILE, "amount": 1})
+		self.assertEqual(ctx, {"pos_profile": self.PROFILE, "journal_entry": self.JE, "amount": 50})
+		with self.assertRaises(frappe.ValidationError):
+			resolve_void_context(self.JE, {"pos_profile": "Some Other Profile"})
+
+	def test_other_users_shift_is_refused_when_minting(self):
+		from pos_next.authorization.actions.pos_expense import resolve_void_context
+
+		self.session.user = "someone.else@example.com"
+		with self.assertRaises(frappe.ValidationError):
+			resolve_void_context(self.JE, {"pos_profile": self.PROFILE})
