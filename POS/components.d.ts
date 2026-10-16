@@ -39,6 +39,7 @@ declare module 'vue' {
     OffersDialog: typeof import('./src/components/sale/OffersDialog.vue')['default']
     OfflineInvoicesDialog: typeof import('./src/components/sale/OfflineInvoicesDialog.vue')['default']
     OrderQrCameraDialog: typeof import('./src/components/sale/OrderQrCameraDialog.vue')['default']
+    PanduanDialog: typeof import('./src/components/sale/PanduanDialog.vue')['default']
     PartialPayments: typeof import('./src/components/partials/PartialPayments.vue')['default']
     PaymentDialog: typeof import('./src/components/sale/PaymentDialog.vue')['default']
     PemakaianTintaDialog: typeof import('./src/components/sale/PemakaianTintaDialog.vue')['default']
