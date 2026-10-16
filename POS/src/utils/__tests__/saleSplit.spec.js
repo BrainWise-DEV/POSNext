@@ -108,10 +108,10 @@ describe("previewSaleSplit", () => {
 		expect(split.groups.map((g) => g.abbr)).toEqual(["MJP"]);
 	});
 
-	it("bills add ons with the row's first chunk", () => {
-		const cart = [row({ item_code: "B", quantity: 2, addons: [{ amount: 30 }] })];
+	it("bills a tinted row at its own price - HPP tinta is a cost", () => {
+		const cart = [row({ item_code: "B", quantity: 2, tinting: { job: "J1", hpp_tinta: 30 } })];
 		const split = previewSaleSplit(cart, scope, stockOf);
-		expect(split.groups).toEqual([{ company: "BISC CV", abbr: "BISC", amount: 130 }]);
+		expect(split.groups).toEqual([{ company: "BISC CV", abbr: "BISC", amount: 100 }]);
 		expect(split.company).toBe("MJP PT");
 	});
 

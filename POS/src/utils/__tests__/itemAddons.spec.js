@@ -5,9 +5,11 @@ vi.mock("@/utils/apiWrapper", () => ({ call: vi.fn(async () => catalogData.value
 vi.mock("@/utils/offline/db", () => ({ getSetting: vi.fn(), setSetting: vi.fn() }));
 
 import {
-	addonKey,
+	JENIS_JUAL,
 	getAvailableAddons,
 	hasAvailableAddons,
+	isOpenPriceItem,
+	isTintable,
 	refreshAddonCatalog,
 } from "@/utils/itemAddons";
 
@@ -25,13 +27,27 @@ const CATALOG = {
 			addons: ["AVN-BLK"],
 			groups: [],
 		},
+		{
+			jenis: "Add On Jual",
+			bases: { Item: [], Brand: ["Propan Base"], "Item Group": [] },
+			addons: ["JASA-ANTAR"],
+			groups: [],
+		},
 	],
-	overrides: { "BASE-X": { add: ["LOOSE"], exclude: ["PRP-RED"] } },
+	overrides: { "BASE-X": { add: ["LOOSE", "JASA-POTONG"], exclude: ["PRP-RED", "JASA-ANTAR"] } },
+	service_items: ["JASA-ANTAR", "JASA-POTONG"],
 	groups: {
 		"Tinta Propan": ["PRP-YEL", "PRP-RED"],
 		"Tinta Avian": ["AVN-BLK", "AVN-WHT"],
 	},
 	item_names: { "PRP-YEL": "Propan Yellow", "PRP-RED": "Propan Red", "AVN-BLK": "Avian Black" },
+	item_brands: {
+		"PRP-YEL": "Propan Base",
+		"PRP-RED": "Propan Base",
+		"AVN-BLK": "Avian",
+		"AVN-WHT": "Avian",
+	},
+	open_price_items: ["BASE-X"],
 	bins: {
 		"PRP-YEL": ["W1"],
 		"PRP-RED": ["W1", "W2"],
@@ -91,9 +107,8 @@ describe("getAvailableAddons", () => {
 	});
 
 	it("offers nothing to unmatched or free items", () => {
-		expect(hasAvailableAddons(base({ item_code: "Z", brand: "Other" }))).toBe(false);
-		expect(hasAvailableAddons(base({ is_free_item: 1 }))).toBe(false);
-		expect(hasAvailableAddons(base())).toBe(true);
+		expect(getAvailableAddons(base({ item_code: "Z", brand: "Other" })).items).toEqual([]);
+		expect(getAvailableAddons(base({ is_free_item: 1 })).items).toEqual([]);
 	});
 
 	it("still reads a catalog cached before groups existed", async () => {
@@ -109,9 +124,76 @@ describe("getAvailableAddons", () => {
 	});
 });
 
-describe("addonKey", () => {
-	it("tells a tinta apart from a gelondongan group", () => {
-		expect(addonKey({ item_code: "PRP-YEL", addon_group: "Tinta Propan" })).toBe("PRP-YEL");
-		expect(addonKey({ item_code: null, addon_group: "Tinta Propan" })).toBe("group:Tinta Propan");
+describe("Add On Jual", () => {
+	beforeEach(async () => {
+		await loadCatalog(CATALOG);
+	});
+
+	it("offers services of jual rules only, whatever the warehouse", () => {
+		expect(getAvailableAddons(base({ item_code: "BASE-Y", warehouse: "W9" }), JENIS_JUAL)).toEqual({
+			items: [{ item_code: "JASA-ANTAR", item_name: "JASA-ANTAR", addon_group: null }],
+			groups: [],
+		});
+		expect(hasAvailableAddons(base({ item_code: "OTHER-BASE", brand: null, item_group: "x" }))).toBe(
+			false
+		);
+	});
+
+	it("applies overrides to the kind of their item", () => {
+		// BASE-X adds JASA-POTONG and drops JASA-ANTAR; its tinta overrides stay on the tinta side
+		expect(getAvailableAddons(base(), JENIS_JUAL).items.map((i) => i.item_code)).toEqual([
+			"JASA-POTONG",
+		]);
+		expect(getAvailableAddons(base()).items.map((i) => i.item_code)).toEqual([
+			"AVN-BLK",
+			"LOOSE",
+			"PRP-YEL",
+		]);
+	});
+
+	it("treats rules of a catalog cached before jenis existed as tinta", () => {
+		expect(getAvailableAddons(base({ item_code: "BASE-Y" })).items).toHaveLength(3);
+	});
+});
+
+describe("isTintable", () => {
+	beforeEach(async () => {
+		await loadCatalog(CATALOG);
+	});
+
+	it("needs the offered tinta in the warehouse to share one brand", () => {
+		// OTHER-BASE is offered Avian Black only; the base's own brand plays no part
+		expect(isTintable(base({ item_code: "OTHER-BASE", brand: "X", item_group: "x" }))).toBe(true);
+		expect(isTintable(base({ item_code: "OTHER-BASE", brand: null, item_group: "x" }))).toBe(true);
+		// BASE-X: Propan Yellow + Avian Black + LOOSE in W1 - two brands, ambiguous
+		expect(isTintable(base())).toBe(false);
+	});
+
+	it("counts members of an offered group that are in the warehouse", () => {
+		// W2: Propan Red per item; W3: only AVN-WHT through the Avian group
+		expect(isTintable(base({ item_code: "BASE-Y", warehouse: "W2" }))).toBe(true);
+		expect(isTintable(base({ item_code: "BASE-Y", warehouse: "W3" }))).toBe(true);
+		expect(isTintable(base({ item_code: "BASE-Y", warehouse: "W9" }))).toBe(false);
+	});
+
+	it("is false without a rule or a catalog", async () => {
+		expect(isTintable(base({ item_code: "Z", brand: "Other" }))).toBe(false);
+		await loadCatalog(null);
+		expect(isTintable(base({ item_code: "OTHER-BASE", item_group: "x" }))).toBe(false);
+	});
+});
+
+describe("isOpenPriceItem", () => {
+	it("follows the catalog list", async () => {
+		await loadCatalog(CATALOG);
+		expect(isOpenPriceItem("BASE-X")).toBe(true);
+		expect(isOpenPriceItem("BASE-Y")).toBe(false);
+		expect(isOpenPriceItem(null)).toBe(false);
+	});
+
+	it("is false for a catalog cached before the list existed", async () => {
+		const { open_price_items: _o, ...old } = CATALOG;
+		await loadCatalog(old);
+		expect(isOpenPriceItem("BASE-X")).toBe(false);
 	});
 });

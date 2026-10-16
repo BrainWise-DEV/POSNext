@@ -205,7 +205,7 @@
 														<p
 															v-if="
 																hasPricingRules &&
-																settingsStore.allowUserToEditRate
+																(settingsStore.allowUserToEditRate || isOpenPrice)
 															"
 															class="mt-1 text-xs text-amber-600 flex items-center gap-1"
 														>
@@ -525,6 +525,7 @@ import {
 	roundCurrency,
 } from "@/utils/currency";
 import { call } from "@/utils/apiWrapper";
+import { isOpenPriceItem } from "@/utils/itemAddons";
 import { Button, FeatherIcon, createResource } from "frappe-ui";
 import { computed, ref, watch } from "vue";
 import SelectInput from "@/components/common/SelectInput.vue";
@@ -682,11 +683,15 @@ const canEditItemDiscount = computed(() => {
 	return settingsStore.allowItemDiscount && !isItemLevelPromotion.value;
 });
 
+// Open price item (nextend Item.custom_allow_open_price): priced freely, a
+// price below cost goes to Sales Approval instead of max_discount_allowed.
+const isOpenPrice = computed(() => isOpenPriceItem(localItem.value?.item_code));
+
 // Rate editing is allowed only if:
-// 1. POS Settings allows rate editing AND
+// 1. POS Settings allows rate editing, or the item is open price, AND
 // 2. Item does NOT have pricing rules (promotional offers) applied / configured
 const canEditRate = computed(() => {
-	return settingsStore.allowUserToEditRate && !hasPricingRules.value;
+	return (settingsStore.allowUserToEditRate || isOpenPrice.value) && !hasPricingRules.value;
 });
 
 // Item discount editing is allowed only if no promotional offer covers this item
@@ -696,7 +701,7 @@ const canEditDiscount = computed(() => {
 
 // Tooltip message for why rate editing is disabled
 const rateEditDisabledReason = computed(() => {
-	if (!settingsStore.allowUserToEditRate) {
+	if (!settingsStore.allowUserToEditRate && !isOpenPrice.value) {
 		return __("Rate editing is disabled");
 	}
 	if (hasPricingRules.value) {
@@ -1063,7 +1068,7 @@ function updateItem() {
 	// ========================================================================
 	// RATE EDIT VALIDATION
 	// ========================================================================
-	if (settingsStore.allowUserToEditRate && isRateManuallyEdited) {
+	if (canEditRate.value && isRateManuallyEdited) {
 		// Validate rate is positive
 		if (localRate.value <= 0) {
 			showError(__("Rate must be greater than zero"));
@@ -1071,7 +1076,7 @@ function updateItem() {
 		}
 
 		// Validate against max discount if rate was reduced
-		const maxDiscount = settingsStore.maxDiscountAllowed;
+		const maxDiscount = isOpenPrice.value ? 0 : settingsStore.maxDiscountAllowed;
 		if (maxDiscount > 0 && localRate.value < originalPriceListRate.value) {
 			const discountPercent =
 				((originalPriceListRate.value - localRate.value) / originalPriceListRate.value) *

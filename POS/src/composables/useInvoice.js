@@ -734,8 +734,9 @@ export function useInvoice() {
 	}
 
 	/**
-	 * Totals of a line's add ons. Add on amounts are typed by the cashier as
-	 * the line total (not per unit) and follow the same tax mode as items.
+	 * Totals of a line's add ons (Add On Jual - services charged on top of the
+	 * line). Add on amounts are typed by the cashier as the line total (not per
+	 * unit) and follow the same tax mode as items.
 	 */
 	function addonTotals(item) {
 		const gross = roundCurrency(
@@ -752,7 +753,7 @@ export function useInvoice() {
 	/**
 	 * Replace the add ons of the line matching item_code + uom.
 	 * @param {Array} addons - [{ item_code, addon_group, item_name, amount }]
-	 *   (gelondongan: addon_group without item_code). Amounts of 0 are dropped.
+	 *   Amounts of 0 are dropped.
 	 */
 	function setItemAddons(itemCode, uom, addons) {
 		const item = invoiceItems.value.find(
@@ -799,6 +800,23 @@ export function useInvoice() {
 			custom_addon_group: addon.addon_group || null,
 			custom_addon_parent_key: item.addon_key,
 		}));
+	}
+
+	/**
+	 * Mark the line matching item_code + uom as tinted, or clear it with null.
+	 * The HPP tinta is a cost for Sales Approval, not part of the price.
+	 * @param {{ job: string, hpp_tinta: number, tinta?: Array } | null} tinting
+	 *   `tinta` is what the dialog was filled with (cart only - the invoice
+	 *   gets the total).
+	 */
+	function setItemTinting(itemCode, uom, tinting) {
+		const item = invoiceItems.value.find(
+			(i) => i.item_code === itemCode && i.uom === uom && !i.is_free_item
+		);
+		if (!item) return;
+		const hpp = roundCurrency(Number.parseFloat(tinting?.hpp_tinta) || 0);
+		const job = String(tinting?.job || "").trim();
+		item.tinting = hpp > 0 && job ? { job, hpp_tinta: hpp, tinta: tinting.tinta || [] } : null;
 	}
 
 	function rebuildIncrementalCache() {
@@ -945,12 +963,16 @@ export function useInvoice() {
 	 */
 	function computeBackendRate(item) {
 		const qty = item.quantity || item.qty || 1;
-		const priceListRate = item.price_list_rate || item.rate || 0;
+		// A manually edited (open) price replaces the list price, as in recalculateItem
+		const unitPrice =
+			item.is_rate_manually_edited === 1
+				? item.rate || 0
+				: item.price_list_rate || item.rate || 0;
 		const discountAmount = item.discount_amount || 0;
 
 		if (taxInclusive.value) {
 			// Gross rate: price minus per-unit discount
-			return roundCurrency(priceListRate - discountAmount / qty);
+			return roundCurrency(unitPrice - discountAmount / qty);
 		}
 		// Net rate: total amount divided by quantity
 		return qty > 0 ? roundCurrency((item.amount || 0) / qty) : item.rate || 0;
@@ -1003,6 +1025,11 @@ export function useInvoice() {
 			warehouse_manual: item.warehouse_manual ? 1 : 0,
 			custom_keterangan: item.keterangan || "",
 		});
+		// One machine job per line: the tinting goes on its first row only.
+		const tintingOf = (item) =>
+			item.tinting
+				? { custom_hpp_tinta: item.tinting.hpp_tinta, custom_tinting_job: item.tinting.job }
+				: {};
 
 		const out = [];
 		for (const item of items) {
@@ -1022,7 +1049,10 @@ export function useInvoice() {
 						warehouse: chunk.warehouse,
 						discount_amount: share,
 					};
-					if (index === 0 && addonRows.length) row.custom_addon_key = item.addon_key;
+					if (index === 0) {
+						Object.assign(row, tintingOf(item));
+						if (addonRows.length) row.custom_addon_key = item.addon_key;
+					}
 					out.push(row);
 				});
 				out.push(...addonRows);
@@ -1040,7 +1070,7 @@ export function useInvoice() {
 				continue;
 			}
 
-			const row = mapRow(item, paidQty);
+			const row = { ...mapRow(item, paidQty), ...tintingOf(item) };
 			const addonRows = addonRowsForSubmission(item);
 			if (addonRows.length) {
 				row.custom_addon_key = item.addon_key;
@@ -1483,7 +1513,9 @@ export function useInvoice() {
 	 * same rate/discount fields the SPG's cart submitted and marked read-only
 	 * (`is_resolved_barcode`); the cashier may only remove rows. Their stock is
 	 * already reserved for this order (`pos_order_row` skips stock checks).
-	 * Add on rows go back onto their base row as `item.addons`.
+	 * Add on rows go back onto their base row as `item.addons`, a tinted line
+	 * gets its `item.tinting` back, and a price the SPG typed (open price)
+	 * stays as typed.
 	 *
 	 * With `editable` the SPG reopens their own order to change it (the order
 	 * itself is cancelled by the caller; saving makes a new one): rows stay
@@ -1523,6 +1555,8 @@ export function useInvoice() {
 				line.qty += qty;
 				line.discount_amount += discount;
 				line.addon_key = line.addon_key || row.addon_key;
+				line.tinting_job = line.tinting_job || row.tinting_job;
+				line.hpp_tinta = line.hpp_tinta || row.hpp_tinta;
 				line.chunks.push({ warehouse: row.warehouse, qty });
 			} else {
 				lines.set(key, {
@@ -1570,6 +1604,17 @@ export function useInvoice() {
 			if (row.addon_key && addonsByKey[row.addon_key]) {
 				item.addon_key = row.addon_key;
 				item.addons = addonsByKey[row.addon_key];
+			}
+			if (row.tinting_job) {
+				item.tinting = {
+					job: row.tinting_job,
+					hpp_tinta: Number.parseFloat(row.hpp_tinta) || 0,
+				};
+			}
+			if (Number(row.is_rate_manually_edited)) {
+				item.rate = Number.parseFloat(row.rate) || 0;
+				item.is_rate_manually_edited = 1;
+				item.original_rate = priceListRate;
 			}
 			recalculateItem(item);
 			return item;
@@ -1735,6 +1780,7 @@ export function useInvoice() {
 		formatItemsForSubmission,
 		resolveUomPricing,
 		setItemAddons,
+		setItemTinting,
 		loadPosOrder,
 
 		// Resources

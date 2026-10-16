@@ -294,8 +294,10 @@ def _split_row(row, warehouses, remaining, whole_uoms):
 		# discount_amount is the row total here (see update_invoice), not per unit
 		new_row["discount_amount"] = discount * chunk_qty / qty
 		if index:
-			# The add on key must stay unique in an invoice; add ons follow the first chunk.
-			new_row.pop("custom_addon_key", None)
+			# The add on key must stay unique in an invoice; add ons and the
+			# tinting of a tinted base (one machine job) follow the first chunk.
+			for field in ("custom_addon_key", "custom_hpp_tinta", "custom_tinting_job"):
+				new_row.pop(field, None)
 		rows.append(new_row)
 	return rows
 

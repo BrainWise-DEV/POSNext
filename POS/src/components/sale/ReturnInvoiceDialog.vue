@@ -472,6 +472,7 @@
 								<input
 									type="checkbox"
 									v-model="item.selected"
+									:disabled="isTinted(item)"
 									@click.stop
 									class="h-4 w-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500 cursor-pointer"
 								/>
@@ -491,6 +492,9 @@
 										{{
 											__("⚠️ {0} already returned", [item.already_returned])
 										}}
+									</p>
+									<p v-if="isTinted(item)" class="text-xs text-red-600 mt-0.5">
+										{{ __("Sudah ditinting - belum bisa diretur") }}
 									</p>
 								</div>
 
@@ -588,6 +592,7 @@
 									<input
 										type="checkbox"
 										v-model="item.selected"
+										:disabled="isTinted(item)"
 										@click.stop
 										class="h-5 w-5 mt-1 text-blue-600 rounded-md focus:ring-2 focus:ring-blue-500 cursor-pointer flex-shrink-0"
 									/>
@@ -609,6 +614,9 @@
 													item.already_returned,
 												])
 											}}
+										</p>
+										<p v-if="isTinted(item)" class="text-xs text-red-600 mt-1">
+											{{ __("Sudah ditinting - belum bisa diretur") }}
 										</p>
 									</div>
 								</div>
@@ -1628,7 +1636,7 @@ const selectedItems = computed(() => {
 	return returnItems.value.filter((item) =>
 		item.custom_addon_parent_key
 			? baseKeys.has(item.custom_addon_parent_key)
-			: item.selected && item.return_qty > 0
+			: item.selected && item.return_qty > 0 && !isTinted(item)
 	);
 });
 
@@ -2003,8 +2011,14 @@ function closeReturnModal() {
 	emit("update:modelValue", false);
 }
 
+// A tinted base can not be returned yet (policy still open - nextend.item_addon).
+function isTinted(item) {
+	return Boolean(item.custom_tinting_job);
+}
+
 function selectAllFilteredItems() {
 	filteredReturnItems.value.forEach((item) => {
+		if (isTinted(item)) return;
 		item.selected = true;
 		item.return_qty = item.quantity;
 	});
@@ -2017,6 +2031,7 @@ function deselectAllItems() {
 }
 
 function toggleItemSelection(item) {
+	if (isTinted(item)) return;
 	item.selected = !item.selected;
 	if (item.selected && item.return_qty === 0) {
 		item.return_qty = item.quantity;

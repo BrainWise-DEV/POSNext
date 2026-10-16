@@ -106,7 +106,7 @@
 
 <script setup>
 import { formatCurrency as formatCurrencyUtil } from "@/utils/currency";
-import { addonKey, getAvailableAddons } from "@/utils/itemAddons";
+import { JENIS_JUAL, addonKey, getAvailableAddons } from "@/utils/itemAddons";
 import { Button, Dialog, Input } from "frappe-ui";
 import { computed, ref, watch } from "vue";
 
@@ -144,7 +144,8 @@ function headerLocked(group) {
 function loadRows() {
 	search.value = "";
 	const current = new Map((props.item?.addons || []).map((a) => [addonKey(a), a.amount]));
-	const available = getAvailableAddons(props.item);
+	// Add On Jual: services charged to the customer (tinta goes through TintingDialog)
+	const available = getAvailableAddons(props.item, JENIS_JUAL);
 	const offered = new Set(available.groups);
 
 	const rows = available.items.map((addon) => ({

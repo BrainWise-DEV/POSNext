@@ -7,7 +7,8 @@ const QR =
 	'{"c":"HEMAT","d":500,"i":[["BASE",0,2,"Nos",9000,10000,2000,10,1,0,"","k1"],' +
 	'["ADDON-TINTING",0,1,"Nos",5000,5000,0,0,1,0,"TINTA-A","","k1"],["GRATIS",1,1,"Nos",0,0,0,0,1,1],' +
 	'["CAT",0,1,"Nos",1000,1000,0,0,1,0,"","","","warna biru"],' +
-	'["ADDON-TINTING",0,1,"Nos",25000,25000,0,0,1,0,"","","k1","","Tinta Propan"]],' +
+	'["ADDON-TINTING",0,1,"Nos",25000,25000,0,0,1,0,"","","k1","","Tinta Propan"],' +
+	'["TINTED",0,1,"Nos",130000,100000,0,0,1,0,"","","","","",1,15000,"J-77"]],' +
 	'"o":"SPO-260927-0001","sh":"POSA-OS-26-0000004","sp":"SPG A","v":1,"w":["DKB - PT","DKB - CV"]}';
 
 describe("parsePosOrderCode", () => {
@@ -21,7 +22,7 @@ describe("parsePosOrderCode", () => {
 	it("recognises the order QR", () => {
 		const code = parsePosOrderCode(QR);
 		expect(code.name).toBe("SPO-260927-0001");
-		expect(code.payload.i).toHaveLength(5);
+		expect(code.payload.i).toHaveLength(6);
 	});
 
 	it("leaves ordinary barcodes and foreign JSON alone", () => {
@@ -70,6 +71,20 @@ describe("orderFromQrPayload", () => {
 			addon_item: null,
 			addon_parent_key: "k1",
 			addon_group: "Tinta Propan",
+		});
+		expect(order.items[0]).toMatchObject({
+			is_rate_manually_edited: 0,
+			hpp_tinta: 0,
+			tinting_job: null,
+		});
+		// Open price + tinting columns, appended after addon_group.
+		expect(order.items[5]).toMatchObject({
+			item_code: "TINTED",
+			rate: 130000,
+			price_list_rate: 100000,
+			is_rate_manually_edited: 1,
+			hpp_tinta: 15000,
+			tinting_job: "J-77",
 		});
 	});
 });

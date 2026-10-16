@@ -9,7 +9,8 @@ globalThis.__ = (s, args = []) => String(s).replace(/\{(\d+)\}/g, (_, i) => args
 
 import { useInvoice } from "@/composables/useInvoice";
 
-// SPG order: base row with promo discount + add on, manual-discount row, promo free item.
+// SPG order: base row with promo discount, tinted open price row split over two
+// warehouses, promo free item.
 const ORDER = {
 	name: "SPO-261007-0001",
 	sales_person: "SPG Ani",
@@ -17,13 +18,11 @@ const ORDER = {
 	coupon_code: "HEMAT",
 	items: [
 		{ item_code: "A", qty: 2, uom: "Nos", warehouse: "W1", price_list_rate: 100, rate: 90,
-			discount_percentage: 10, discount_amount: 10, pricing_rules: "PRLE-1", addon_key: "k1" },
-		{ item_code: "SAUCE", addon_item: "SAUCE", addon_parent_key: "k1", qty: 2, uom: "Nos",
-			warehouse: "W1", rate: 5 },
-		{ item_code: "B", qty: 1, uom: "Nos", warehouse: "W1", price_list_rate: 50, rate: 45,
-			discount_percentage: 10, discount_amount: 5, addon_key: "k2" },
-		{ item_code: "ADDON-TINTING", addon_group: "Tinta Propan", addon_parent_key: "k2", qty: 1,
-			uom: "Nos", warehouse: "W1", rate: 25 },
+			discount_percentage: 10, discount_amount: 10, pricing_rules: "PRLE-1" },
+		{ item_code: "B", qty: 1, uom: "Nos", warehouse: "W1", price_list_rate: 50, rate: 70,
+			is_rate_manually_edited: 1, hpp_tinta: 12, tinting_job: "J-9" },
+		{ item_code: "B", qty: 1, uom: "Nos", warehouse: "W2", price_list_rate: 50, rate: 70,
+			is_rate_manually_edited: 1 },
 		{ item_code: "FREE", qty: 1, uom: "Nos", warehouse: "W1", price_list_rate: 20, rate: 0,
 			discount_percentage: 100, pricing_rules: "PRLE-2", is_free_item: 1 },
 	],
@@ -42,12 +41,20 @@ describe("loadPosOrder", () => {
 		expect(rows.map((r) => r.item_code)).toEqual(["A", "B", "FREE"]);
 		expect(rows.every((r) => r.pos_order_row && r.is_resolved_barcode)).toBe(true);
 		expect(rows[0].discount_percentage).toBe(10);
-		// Gelondongan comes back as the group, named after it.
-		expect(rows[1].addons).toEqual([
-			{ item_code: null, addon_group: "Tinta Propan", item_name: "Tinta Propan", amount: 25 },
-		]);
-		expect(rows[0].addons).toEqual([
-			{ item_code: "SAUCE", addon_group: null, item_name: "SAUCE", amount: 5 },
+		// The SPG's open price and tinting come back on the merged line.
+		expect(rows[1]).toMatchObject({
+			quantity: 2,
+			rate: 70,
+			price_list_rate: 50,
+			is_rate_manually_edited: 1,
+			original_rate: 50,
+			tinting: { job: "J-9", hpp_tinta: 12 },
+		});
+		expect(rows[0].tinting).toBeUndefined();
+		const submitted = invoice.formatItemsForSubmission(rows);
+		expect(submitted.filter((r) => r.item_code === "B").map((r) => [r.warehouse, r.rate, r.custom_tinting_job])).toEqual([
+			["W1", 70, "J-9"],
+			["W2", 70, undefined],
 		]);
 		expect(invoice.posOrder.value).toBe(ORDER.name);
 		expect(invoice.couponCode.value).toBe("HEMAT");
@@ -60,8 +67,7 @@ describe("loadPosOrder", () => {
 		expect(rows.map((r) => r.item_code)).toEqual(["A", "B"]);
 		expect(rows.some((r) => r.pos_order_row || r.is_resolved_barcode)).toBe(false);
 		expect(rows[0]).toMatchObject({ discount_percentage: 0, pricing_rules: "", quantity: 2 });
-		expect(rows[0].addons).toHaveLength(1);
-		expect(rows[1].discount_percentage).toBe(10);
+		expect(rows[1]).toMatchObject({ rate: 70, tinting: { job: "J-9", hpp_tinta: 12 } });
 		expect(invoice.posOrder.value).toBe(null);
 		expect(invoice.couponCode.value).toBe(null);
 		expect(invoice.additionalDiscount.value).toBe(5000);

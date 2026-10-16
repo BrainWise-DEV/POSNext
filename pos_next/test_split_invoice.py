@@ -91,6 +91,14 @@ class TestSplitRow(unittest.TestCase):
 		rows = _split_row(self.row(custom_addon_key="k1"), ["W1", "W2"], {"W1": 20, "W2": 10}, set())
 		self.assertEqual([r.get("custom_addon_key") for r in rows], ["k1", None])
 
+	def test_tinting_stays_on_first_chunk_only(self):
+		row = self.row(custom_hpp_tinta=15000, custom_tinting_job="J-1")
+		rows = _split_row(row, ["W1", "W2"], {"W1": 20, "W2": 10}, set())
+		self.assertEqual(
+			[(r.get("custom_hpp_tinta"), r.get("custom_tinting_job")) for r in rows],
+			[(15000, "J-1"), (None, None)],
+		)
+
 
 class TestAllocateRows(unittest.TestCase):
 	"""The cart keeps one row per item + UOM: 2 sabun added from the store and

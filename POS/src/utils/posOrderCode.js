@@ -59,6 +59,9 @@ export function orderFromQrPayload(payload) {
 			addon_parent_key: r[12] || null,
 			keterangan: r[13] || "",
 			addon_group: r[14] || null,
+			is_rate_manually_edited: r[15] || 0,
+			hpp_tinta: r[16] || 0,
+			tinting_job: r[17] || null,
 		})),
 	};
 }
