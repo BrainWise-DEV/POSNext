@@ -82,7 +82,6 @@
 
 		<!-- Panduan (nextend): docs marked "Tampil di POS" -->
 		<button
-			v-if="showPanduan"
 			@click="handleMenuClick('panduan')"
 			:class="[
 				'w-12 h-12 rounded-lg flex items-center justify-center transition-all relative group',
@@ -133,7 +132,6 @@ import { ref } from "vue";
 
 defineProps({
 	showTintaUsage: { type: Boolean, default: false },
-	showPanduan: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(["menu-clicked"]);
