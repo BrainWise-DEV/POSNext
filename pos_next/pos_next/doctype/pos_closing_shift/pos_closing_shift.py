@@ -194,19 +194,41 @@ class POSClosingShift(Document):
 	def _invoices_awaiting_approval(self) -> set:
 		"""Sales Invoice names held by an undecided approval request.
 
+		A split sale (posa_split_ref) is held as a whole: an invoice priced
+		normally has no request of its own, but it is submitted together with
+		the held one once approved - deleting it would leave the paid sale half
+		recorded.
+
 		Empty set when the approval app (nextend) is not installed, so this
 		controller keeps working on benches without it.
 		"""
 		if not frappe.db.table_exists("Sales Approval Request"):
 			return set()
 
-		return set(
+		held = set(
 			frappe.get_all(
 				"Sales Approval Request",
 				filters={"sales_doctype": "Sales Invoice", "docstatus": 0, "status": "Pending"},
 				pluck="sales_docname",
 			)
 		)
+		if not held:
+			return held
+
+		split_refs = frappe.get_all(
+			"Sales Invoice",
+			filters={"name": ("in", list(held)), "posa_split_ref": ("is", "set")},
+			pluck="posa_split_ref",
+		)
+		if split_refs:
+			held.update(
+				frappe.get_all(
+					"Sales Invoice",
+					filters={"posa_split_ref": ("in", split_refs), "docstatus": 0},
+					pluck="name",
+				)
+			)
+		return held
 
 	@frappe.whitelist()
 	def get_payment_reconciliation_details(self):
