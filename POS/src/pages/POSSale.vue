@@ -41,7 +41,6 @@
 						<span>{{ __("Pemakaian Tinta") }}</span>
 					</button>
 					<button
-						v-if="panduanCategories.length"
 						@click="showPanduanDialog = true"
 						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-blue-50 flex items-center gap-3 transition-colors"
 					>
@@ -306,7 +305,6 @@
 				<!-- Icon-Only Management Slider - Always Visible -->
 				<ManagementSlider
 					:show-tinta-usage="tintaUsage.allowed"
-					:show-panduan="panduanCategories.length > 0"
 					@menu-clicked="handleManagementMenuClick"
 				/>
 
@@ -648,7 +646,12 @@
 				:warehouses="tintaUsage.warehouses"
 				:default-warehouse="shiftStore.currentProfile?.warehouse || ''"
 			/>
-			<PanduanDialog v-model="showPanduanDialog" :categories="panduanCategories" />
+			<PanduanDialog
+				v-model="showPanduanDialog"
+				:categories="panduanCategories"
+				:loading="panduanLoading"
+				:load-error="panduanError"
+			/>
 			<SpgInvoicesDialog
 				v-model="showSpgInvoicesDialog"
 				:currency="shiftStore.profileCurrency"
@@ -1571,17 +1574,26 @@ async function loadTintaUsageContext() {
 		// Offline or nextend without this feature - the menu stays hidden
 	}
 }
-// nextend.panduan: docs marked "Tampil di POS"; menu hidden when none / offline
+// nextend.panduan: docs marked "Tampil di POS" that the user's roles may read.
+// The menu is always shown; the list is fetched each time the dialog opens.
 const showPanduanDialog = ref(false);
 const panduanCategories = ref([]);
+const panduanLoading = ref(false);
+const panduanError = ref("");
 
 async function loadPanduan() {
+	panduanLoading.value = true;
+	panduanError.value = "";
 	try {
 		panduanCategories.value = (await call("nextend.panduan.list_docs", { target: "pos" }))?.categories || [];
 	} catch {
-		// Offline or nextend without this feature - the menu stays hidden
+		panduanCategories.value = [];
+		panduanError.value = __("Panduan tidak bisa dimuat. Periksa koneksi internet.");
+	} finally {
+		panduanLoading.value = false;
 	}
 }
+watch(showPanduanDialog, (open) => open && loadPanduan());
 const savingSpgOrder = ref(false);
 
 // SPG: own Pending orders waiting at the cashier (badge on "Pesanan Saya")
@@ -1701,7 +1713,6 @@ let bodyStyleSnapshot = null;
 onMounted(async () => {
 	loadCachedAddonCatalog();
 	loadTintaUsageContext();
-	loadPanduan();
 
 	// Window resize listeners (passive for better performance)
 	const handleResize = () => {

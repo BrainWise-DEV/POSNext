@@ -16,7 +16,9 @@
 				</template>
 
 				<template v-else>
-					<div v-if="!categories.length" class="text-sm text-gray-500">
+					<div v-if="loading" class="text-sm text-gray-500">{{ __("Memuat...") }}</div>
+					<div v-else-if="loadError" class="text-sm text-red-600">{{ loadError }}</div>
+					<div v-else-if="!categories.length" class="text-sm text-gray-500">
 						{{ __("Belum ada panduan.") }}
 					</div>
 					<div v-for="category in categories" :key="category.label" class="mb-4">
@@ -47,6 +49,8 @@ import { computed, ref, watch } from "vue";
 const props = defineProps({
 	modelValue: Boolean,
 	categories: { type: Array, default: () => [] },
+	loading: Boolean,
+	loadError: { type: String, default: "" },
 });
 const emit = defineEmits(["update:modelValue"]);
 
