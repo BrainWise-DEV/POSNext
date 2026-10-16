@@ -10,7 +10,7 @@ vi.mock("frappe-ui", () => ({
 vi.mock("@/utils/currency", () => ({ formatCurrency: (n) => String(n) }));
 vi.mock("@/utils/itemAddons", async (importOriginal) => ({
 	...(await importOriginal()),
-	getAvailableAddons: () => ({
+	getAvailableAddons: (_item, jenis) => ((globalThis.__addonJenis = jenis), {
 		items: [
 			{ item_code: "PRP-YEL", item_name: "Propan Yellow", addon_group: "Tinta Propan" },
 			{ item_code: "PRP-RED", item_name: "Propan Red", addon_group: "Tinta Propan" },
@@ -48,6 +48,11 @@ async function save(wrapper) {
 }
 
 describe("ItemAddonDialog", () => {
+	it("offers the Add On Jual kind - tinta goes through the tinting dialog", async () => {
+		await open();
+		expect(globalThis.__addonJenis).toBe("Add On Jual");
+	});
+
 	it("nests members under their offered group and lists the rest flat", async () => {
 		const wrapper = await open();
 		expect(wrapper.findAll("input[type=number]")).toHaveLength(5);

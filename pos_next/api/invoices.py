@@ -646,6 +646,14 @@ def validate_manual_rate_edit(item, pos_profile=None, pos_settings_cache=None):
 	if item_rate <= 0:
 		return {"valid": False, "message": _("Rate for item {0} must be greater than zero").format(item_code)}
 
+	# Open price items (nextend Item.custom_allow_open_price) may be priced
+	# freely by the cashier/SPG; a price below cost goes to nextend's Sales
+	# Approval instead of being capped here.
+	if frappe.get_meta("Item").has_field("custom_allow_open_price") and cint(
+		frappe.db.get_value("Item", item_code, "custom_allow_open_price")
+	):
+		return {"valid": True}
+
 	# POS Profile is required for manual rate edit validation
 	if not pos_profile:
 		return {

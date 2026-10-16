@@ -478,6 +478,7 @@
 								"
 								@update-uom="cartStore.changeItemUOM"
 								@edit-item="handleEditItem"
+								@edit-tinting="openTintingDialog"
 								@edit-addons="openAddonDialog"
 								@view-shift="uiStore.showOpenShiftDialog = true"
 								@show-drafts="uiStore.showDraftDialog = true"
@@ -752,6 +753,13 @@
 				:item="addonDialogItem"
 				:currency="shiftStore.profileCurrency"
 				@save="handleAddonsSaved"
+			/>
+
+			<TintingDialog
+				v-model="showTintingDialog"
+				:item="tintingDialogItem"
+				:currency="shiftStore.profileCurrency"
+				@save="handleTintingSaved"
 			/>
 
 			<ItemSelectionDialog
@@ -1196,6 +1204,7 @@ import InvoiceHistoryDialog from "@/components/sale/InvoiceHistoryDialog.vue";
 import ShiftHistoryDialog from "@/components/sale/ShiftHistoryDialog.vue";
 import ItemSelectionDialog from "@/components/sale/ItemSelectionDialog.vue";
 import ItemAddonDialog from "@/components/sale/ItemAddonDialog.vue";
+import TintingDialog from "@/components/sale/TintingDialog.vue";
 import { loadCachedAddonCatalog } from "@/utils/itemAddons";
 import ItemsSelector from "@/components/sale/ItemsSelector.vue";
 import OffersDialog from "@/components/sale/OffersDialog.vue";
@@ -1413,7 +1422,7 @@ function computeCartHash() {
 		.join("|");
 }
 
-// Add on dialog (tinta etc. attached to a cart line - see utils/itemAddons)
+// Add on dialog (Add On Jual: services charged on top of a cart line - see utils/itemAddons)
 const showAddonDialog = ref(false);
 const addonDialogItem = ref(null);
 
@@ -1426,6 +1435,35 @@ function handleAddonsSaved(addons) {
 	const item = addonDialogItem.value;
 	if (!item) return;
 	cartStore.setItemAddons(item.item_code, item.uom, addons);
+}
+
+// Tinting dialog (base + tinta mixed by the machine - see utils/itemAddons)
+const showTintingDialog = ref(false);
+const tintingDialogItem = ref(null);
+
+function openTintingDialog(item) {
+	tintingDialogItem.value = item;
+	showTintingDialog.value = true;
+}
+
+async function handleTintingSaved(tinting, rate = null) {
+	const item = tintingDialogItem.value;
+	if (!item) return;
+	cartStore.setItemTinting(item.item_code, item.uom, tinting);
+	if (rate === null) return;
+	// Open price set in the tinta dialog: tracked like an edit from EditItemDialog
+	const priceListRate = item.price_list_rate || item.rate;
+	const edited = rate !== priceListRate;
+	await cartStore.updateItemDetails(
+		item.item_code,
+		{
+			rate,
+			price_list_rate: priceListRate,
+			is_rate_manually_edited: edited ? 1 : 0,
+			original_rate: edited ? priceListRate : null,
+		},
+		item.uom
+	);
 }
 
 // Promotion dialog
@@ -2628,6 +2666,8 @@ async function handleSaveSpgOrder() {
 		addon_key: row.custom_addon_key,
 		addon_parent_key: row.custom_addon_parent_key,
 		keterangan: row.custom_keterangan,
+		hpp_tinta: row.custom_hpp_tinta,
+		tinting_job: row.custom_tinting_job,
 	}));
 
 	savingSpgOrder.value = true;
@@ -3415,6 +3455,12 @@ async function handleEditOfflineInvoice(invoice) {
 				const addons = addonsByKey[item.custom_addon_key];
 				if (addons) {
 					cartStore.setItemAddons(item.item_code, item.uom || item.stock_uom, addons);
+				}
+				if (item.custom_tinting_job) {
+					cartStore.setItemTinting(item.item_code, item.uom || item.stock_uom, {
+						job: item.custom_tinting_job,
+						hpp_tinta: item.custom_hpp_tinta,
+					});
 				}
 			}
 		}

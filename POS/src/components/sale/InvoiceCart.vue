@@ -1513,7 +1513,7 @@
 								{{ item.keterangan }}
 							</div>
 
-							<!-- Add ons (e.g. tinta), indented under their base line -->
+							<!-- Add On Jual (services charged on top), indented under their base line -->
 							<div
 								v-for="addon in item.addons || []"
 								:key="addonKey(addon)"
@@ -1524,18 +1524,37 @@
 									formatCurrency(addon.amount)
 								}}</span>
 							</div>
-							<button
-								v-if="
-									!item.is_free_item &&
-									!item.pos_order_row &&
-									(item.addons?.length || hasAddons(item))
-								"
-								type="button"
-								@click.stop="$emit('edit-addons', item)"
-								class="self-start mt-0.5 text-[11px] sm:text-xs font-semibold text-blue-600 hover:text-blue-800"
+							<!-- Tinting: machine job + HPP tinta (cost, not part of the price) -->
+							<div
+								v-if="item.tinting"
+								class="flex items-center justify-between ps-3 mt-0.5 text-[11px] sm:text-xs text-gray-600"
 							>
-								{{ item.addons?.length ? __("Edit Add On") : __("+ Add On") }}
-							</button>
+								<span class="truncate">{{ __("Tinta · job {0}", [item.tinting.job]) }}</span>
+								<span class="text-gray-500">{{
+									__("HPP {0}", [formatCurrency(item.tinting.hpp_tinta)])
+								}}</span>
+							</div>
+							<div
+								v-if="!item.is_free_item && !item.pos_order_row"
+								class="flex flex-wrap gap-2 mt-1 text-[11px] sm:text-xs font-semibold"
+							>
+								<button
+									v-if="item.tinting || canTint(item)"
+									type="button"
+									@click.stop="$emit('edit-tinting', item)"
+									class="px-2.5 py-1 rounded-md border border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 active:bg-blue-200 transition-colors"
+								>
+									{{ item.tinting ? __("Edit Tinta") : __("+ Tinta") }}
+								</button>
+								<button
+									v-if="item.addons?.length || hasAddons(item)"
+									type="button"
+									@click.stop="$emit('edit-addons', item)"
+									class="px-2.5 py-1 rounded-md border border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 active:bg-blue-200 transition-colors"
+								>
+									{{ item.addons?.length ? __("Edit Add On") : __("+ Add On") }}
+								</button>
+							</div>
 						</div>
 					</div>
 				</div>
@@ -1779,7 +1798,7 @@ import { useCartSort } from "@/composables/useCartSort";
 import { isOffline } from "@/utils/offline";
 import { offlineWorker } from "@/utils/offline/workerClient";
 import { logger } from "@/utils/logger";
-import { addonKey, hasAvailableAddons } from "@/utils/itemAddons";
+import { addonKey, hasAvailableAddons, isTintable } from "@/utils/itemAddons";
 import { saleRowKey } from "@/utils/saleSplit";
 import { approvalReasonLabel } from "@/utils/salesApproval";
 import { FeatherIcon } from "frappe-ui";
@@ -2014,7 +2033,8 @@ const emit = defineEmits([
 	"remove-offer", // (offerId) - Remove applied offer
 	"update-uom", // (itemCode, newUom) - Change item's unit of measure
 	"edit-item", // (item) - Open item edit dialog
-	"edit-addons", // (item) - Open add on dialog for a cart line
+	"edit-addons", // (item) - Open add on (Add On Jual) dialog for a cart line
+	"edit-tinting", // (item) - Open tinting dialog for a cart line
 	"view-shift", // () - View current shift details
 	"show-drafts", // () - Show draft/held orders
 	"show-spg-queue", // () - Show Pending SPG orders of this branch
@@ -2614,6 +2634,10 @@ function getItemDiscountPercent(item) {
  */
 function formatCurrency(amount) {
 	return formatCurrencyUtil(Number.parseFloat(amount || 0), props.currency);
+}
+
+function canTint(item) {
+	return isTintable(item);
 }
 
 function hasAddons(item) {

@@ -51,6 +51,11 @@ export function buildSpgOrderSlipHTML(order, currency) {
 									: item.warehouse
 						  )}</div>`
 						: ""
+				}${
+					// HPP tinta is a cost - only the machine job goes on the slip
+					item.tinting_job
+						? `<div class="wh">${__("Tinting job")}: ${escapeHtml(item.tinting_job)}</div>`
+						: ""
 				}`;
 		})
 		.join("");
