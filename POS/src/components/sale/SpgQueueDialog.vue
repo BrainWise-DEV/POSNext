@@ -59,6 +59,12 @@
 									<span v-else class="text-[10px] text-gray-500">
 										{{ __("Kasir: {0}", [order.cashier_name]) }}
 									</span>
+									<span
+										v-if="order.dikirim"
+										class="text-[10px] font-medium bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded"
+									>
+										{{ __("Dikirim") }}
+									</span>
 								</div>
 								<div class="text-xs text-gray-600 mt-0.5">
 									{{ __("SPG: {0}", [order.spg_name]) }}

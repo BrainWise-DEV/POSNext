@@ -403,6 +403,11 @@ def _validate_split_sale(invoice, data, plan):
 			title=_("Split Sale"),
 		)
 
+	# nextend: a delivered sale marked Bayar di Tempat is collected at the door,
+	# so it may leave with a down payment or nothing paid at all.
+	if cint(invoice.get("nextend_dikirim")) and cint(invoice.get("nextend_bayar_di_tempat")):
+		return
+
 	paid = sum(flt(payment.get("amount")) for payment in invoice.get("payments") or [])
 	if paid <= 0:
 		frappe.throw(
@@ -430,20 +435,24 @@ def _allocate_payments(payments, totals, precision=2):
 
 	Every invoice but the first is paid exactly its total, split across payment
 	modes in the basket's proportions. The first (primary) invoice takes the
-	rest, change included.
+	rest, change included. A basket paid short (a down payment) pays those
+	invoices as far as the money goes, never more than was tendered.
 	"""
 	modes = [p for p in payments if flt(p.get("amount"))]
 	per_invoice = [[] for _ in totals]
 	left = {index: flt(p.get("amount")) for index, p in enumerate(modes)}
+	unspent = sum(left.values())
 
 	for invoice_index in range(1, len(totals)):
-		shares = _prorate(totals[invoice_index], [flt(p.get("amount")) for p in modes], precision)
+		due = min(totals[invoice_index], unspent)
+		unspent = flt(unspent - due, precision)
+		shares = _prorate(due, [flt(p.get("amount")) for p in modes], precision)
 		for index, share in enumerate(shares):
 			left[index] = flt(left[index] - share, precision)
 			if share:
 				per_invoice[invoice_index].append(_payment_row(modes[index], share))
 
-	per_invoice[0] = [_payment_row(modes[index], amount) for index, amount in left.items() if amount]
+	per_invoice[0] = [_payment_row(modes[index], amount) for index, amount in left.items() if amount > 0]
 	return per_invoice
 
 

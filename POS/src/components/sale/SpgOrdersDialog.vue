@@ -20,8 +20,16 @@
 					>
 						<div class="flex items-start justify-between gap-2">
 							<div class="flex-1 min-w-0">
-								<div class="text-sm font-semibold text-gray-900">
-									{{ order.name }}
+								<div class="flex items-center gap-2 flex-wrap">
+									<span class="text-sm font-semibold text-gray-900">
+										{{ order.name }}
+									</span>
+									<span
+										v-if="order.dikirim"
+										class="text-[10px] font-medium bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded"
+									>
+										{{ __("Dikirim") }}
+									</span>
 								</div>
 								<div class="text-xs text-gray-500 mt-0.5">
 									{{ order.total_qty }} {{ __("item") }} ·

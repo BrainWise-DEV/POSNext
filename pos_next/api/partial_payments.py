@@ -771,6 +771,21 @@ def add_payment_to_partial_invoice(invoice_name: str, payments) -> Dict:
 			)
 		)
 
+	# Money taken at the till belongs to the cashier's open shift: its closing
+	# counts the Payment Entries whose reference is the opening shift
+	# (pos_closing_shift.get_payments_entries). No open shift, no link.
+	shift = frappe.db.get_value(
+		"POS Opening Shift",
+		{
+			"user": frappe.session.user,
+			"docstatus": 1,
+			"status": "Open",
+			"pos_closing_shift": ["is", "not set"],
+		},
+		"name",
+		order_by="period_start_date desc",
+	)
+
 	# Create Payment Entries inside one savepoint-backed batch.
 	payment_entries_created = []
 	batch_savepoint = "partial_payment_batch"
@@ -790,7 +805,7 @@ def add_payment_to_partial_invoice(invoice_name: str, payments) -> Dict:
 
 			mode_of_payment = payment.get("mode_of_payment") or DEFAULT_PAYMENT_MODE
 			payment_account = payment.get("account")
-			reference_no = payment.get("reference_no")
+			reference_no = payment.get("reference_no") or shift
 
 			pe_name = create_payment_entry(
 				invoice_name=invoice_name,

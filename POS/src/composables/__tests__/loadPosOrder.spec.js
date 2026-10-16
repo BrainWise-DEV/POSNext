@@ -73,4 +73,18 @@ describe("loadPosOrder", () => {
 		expect(invoice.additionalDiscount.value).toBe(5000);
 		expect(invoice.posOrderSalesPerson.value).toBe(null);
 	});
+
+	it("the SPG's delivery choice follows the order to the cashier and back to the SPG", () => {
+		invoice.loadPosOrder(ORDER);
+		expect(invoice.posOrderDelivery.value).toBe(null);
+
+		const delivered = { ...ORDER, dikirim: 1, alamat_kirim: "Jl. Kenanga 14", catatan_kirim: "sore" };
+		invoice.loadPosOrder(delivered);
+		expect(invoice.posOrderDelivery.value).toEqual({ alamat: "Jl. Kenanga 14", catatan: "sore" });
+		invoice.loadPosOrder(delivered, { editable: true });
+		expect(invoice.posOrderDelivery.value).toEqual({ alamat: "Jl. Kenanga 14", catatan: "sore" });
+
+		invoice.resetInvoice();
+		expect(invoice.posOrderDelivery.value).toBe(null);
+	});
 });
