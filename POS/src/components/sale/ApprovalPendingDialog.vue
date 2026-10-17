@@ -97,7 +97,8 @@
 
 <script setup>
 /**
- * Ditampilkan ketika penjualan di bawah HPP (atau HPP-nya belum diketahui)
+ * Ditampilkan ketika penjualan di bawah HPP (atau HPP-nya belum diketahui,
+ * atau margin barang dengan add on di bawah minimum)
  * ditahan oleh approval berjenjang (lihat nextend/sales_approval).
  *
  * Kasir TIDAK boleh melihat dialog sukses atau mencetak struk di sini:
@@ -138,8 +139,11 @@ const headline = computed(() => {
 	if (reasons.size === 1 && reasons.has("below_hpp")) {
 		return __("Harga jual di bawah HPP, jadi transaksi perlu persetujuan atasan.");
 	}
+	if (reasons.size === 1 && reasons.has("low_margin")) {
+		return __("Margin barang di bawah batas minimum, jadi transaksi perlu persetujuan atasan.");
+	}
 	return __(
-		"Ada barang yang dijual di bawah HPP atau HPP-nya belum diketahui, jadi transaksi perlu persetujuan atasan."
+		"Ada barang yang dijual di bawah HPP, bermargin di bawah minimum, atau HPP-nya belum diketahui, jadi transaksi perlu persetujuan atasan."
 	);
 });
 

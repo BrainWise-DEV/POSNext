@@ -6,5 +6,6 @@
 export function approvalReasonLabel(reason) {
 	if (reason === "hpp_unknown") return __("HPP belum diketahui (stok tanpa lot pembelian)");
 	if (reason === "below_hpp") return __("Harga di bawah HPP");
+	if (reason === "low_margin") return __("Margin di bawah minimum");
 	return __("Perlu approval");
 }
