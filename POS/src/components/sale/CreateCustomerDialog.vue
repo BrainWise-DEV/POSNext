@@ -373,6 +373,7 @@ import { usePOSSettingsStore } from "@/stores/posSettings";
 import { usePOSShiftStore } from "@/stores/posShift";
 import { useCustomerSearchStore } from "@/stores/customerSearch";
 import { isOffline } from "@/utils/offline/offlineState";
+import { fetchVerificationStatus } from "@/utils/customerVerification";
 import { logger } from "@/utils/logger";
 import { Button, Dialog, Input, createResource } from "frappe-ui";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
@@ -402,7 +403,12 @@ const props = defineProps({
 	customer: Object, // Customer object for edit mode
 });
 
-const emit = defineEmits(["update:modelValue", "customer-created", "customer-updated"]);
+const emit = defineEmits([
+	"update:modelValue",
+	"customer-created",
+	"customer-updated",
+	"customer-verified",
+]);
 
 // =============================================================================
 // State
@@ -424,6 +430,8 @@ const emailVerificationLocked = ref(false);
 /** Customer just created in this dialog, kept open to offer "Verify email" */
 const createdCustomer = ref(null);
 const verifiedOverride = ref(null);
+/** Fresh server status fetched when the dialog opens in edit mode (cached objects can be stale) */
+const freshVerification = ref(null);
 
 const customerGroups = ref([]);
 const territories = ref([]);
@@ -468,12 +476,13 @@ const showEmailVerification = computed(
 );
 const verificationCustomerName = computed(() => props.customer?.name || "");
 const verificationSavedEmail = computed(() => props.customer?.email_id || "");
+const currentVerification = computed(
+	() => verifiedOverride.value || freshVerification.value || props.customer || {}
+);
 const verificationVerified = computed(() =>
-	Boolean(Number(verifiedOverride.value?.custom_email_verified ?? props.customer?.custom_email_verified))
+	Boolean(Number(currentVerification.value.custom_email_verified))
 );
-const verificationVerifiedEmail = computed(
-	() => verifiedOverride.value?.custom_verified_email || props.customer?.custom_verified_email || ""
-);
+const verificationVerifiedEmail = computed(() => currentVerification.value.custom_verified_email || "");
 
 const requiresSplitCustomerName = computed(() => Boolean(posSettingsStore.miraayaInstalled));
 
@@ -872,7 +881,16 @@ const posProfileResource = createResource({
 // Dialog Lifecycle
 // =============================================================================
 
+const loadFreshVerification = async () => {
+	freshVerification.value = null;
+	if (!props.customer?.name || isOffline()) return;
+	const name = props.customer.name;
+	const status = await fetchVerificationStatus(name);
+	if (status && props.customer?.name === name) freshVerification.value = status;
+};
+
 const loadDialogData = async () => {
+	loadFreshVerification();
 	await sellingSettingsResource.reload();
 
 	if (!isEditMode.value) {
@@ -918,6 +936,8 @@ const handleEmailVerified = async ({ verified_email }) => {
 		custom_email_verified_on: new Date().toISOString(),
 	};
 	verifiedOverride.value = patch;
+	// Let the parent refresh the (stale) edit/selected-cart customer objects
+	if (props.customer?.name) emit("customer-verified", { name: props.customer.name, patch });
 	const base = createdCustomer.value || props.customer;
 	if (createdCustomer.value) createdCustomer.value = { ...createdCustomer.value, ...patch };
 	// Keep the POS customer cache in sync without closing/selecting anything
@@ -1068,6 +1088,7 @@ watch(
 		}
 		emailVerificationLocked.value = false;
 		verifiedOverride.value = null;
+		freshVerification.value = null;
 		resetForm();
 	}
 );

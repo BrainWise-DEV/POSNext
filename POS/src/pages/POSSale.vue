@@ -708,6 +708,7 @@
 				:customer="editCustomer"
 				@customer-created="handleCustomerCreated"
 				@customer-updated="handleCustomerUpdated"
+				@customer-verified="handleCustomerVerified"
 			/>
 
 			<!-- Promotion Management -->
@@ -1100,6 +1101,7 @@ import POSHeader from "@/components/pos/POSHeader.vue";
 import BatchSerialDialog from "@/components/sale/BatchSerialDialog.vue";
 import CouponDialog from "@/components/sale/CouponDialog.vue";
 import CreateCustomerDialog from "@/components/sale/CreateCustomerDialog.vue";
+import { applyVerificationPatch } from "@/utils/customerVerification";
 import CustomerDialog from "@/components/sale/CustomerDialog.vue";
 import DraftInvoicesDialog from "@/components/sale/DraftInvoicesDialog.vue";
 import InvoiceCart from "@/components/sale/InvoiceCart.vue";
@@ -2788,6 +2790,14 @@ async function handleCustomerCreated(newCustomer) {
 	await customerSearchStore.addCustomerToCache(newCustomer);
 
 	showSuccess(__("{0} created and selected", [newCustomer.customer_name]));
+}
+
+// Email verified in the dialog: refresh stale edit/cart customer objects (dialog stays open)
+function handleCustomerVerified({ name, patch }) {
+	editCustomer.value = applyVerificationPatch(editCustomer.value, name, patch);
+	if (cartStore.customer?.name === name) {
+		cartStore.customer = applyVerificationPatch(cartStore.customer, name, patch);
+	}
 }
 
 async function handleCustomerUpdated(updatedCustomer) {
