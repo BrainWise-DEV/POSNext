@@ -39,6 +39,7 @@ import {
 	annotateFnfLine,
 	clearFnfAnnotations,
 	indexFnfLines,
+	isFnfAllowedForProfile,
 	isFnfLine,
 	mergeServerLine,
 	normalizeEligibility,
@@ -380,10 +381,15 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * Cached per customer; pass force=true to re-ask the server. Informational:
 	 * pricing is re-checked server-side on every apply / invoice save.
 	 */
+	/** POS Profile "Allow F&F" — off means no F&F calls, badges or stamps on this profile. */
+	function friendsAndFamilyAllowed() {
+		return isFnfAllowedForProfile(usePOSShiftStore().currentProfile);
+	}
+
 	async function refreshFriendsAndFamilyEligibility(force = false) {
 		const customerName = currentCustomerName();
 		const method = promoApi.checkFriendsAndFamilyEligibility();
-		if (!customerName || !method) {
+		if (!customerName || !method || !friendsAndFamilyAllowed()) {
 			fnfEligibility.value = null;
 			fnfEligibilityKey = customerName;
 			return null;
@@ -399,7 +405,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 		const requestId = ++fnfEligibilityRequest;
 		try {
-			const response = await call(method, { customer: customerName });
+			const response = await call(method, {
+				customer: customerName,
+				pos_profile: posProfile.value || undefined,
+			});
 			if (requestId !== fnfEligibilityRequest || currentCustomerName() !== customerName) {
 				return fnfEligibility.value; // customer changed meanwhile
 			}
@@ -545,7 +554,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		const eligible = Boolean(fnfEligibility.value?.eligible);
 		const method = promoApi.applyFriendsAndFamilyDiscount();
 
-		if (!method || invoiceItems.value.length === 0) {
+		if (!method || invoiceItems.value.length === 0 || !friendsAndFamilyAllowed()) {
 			stripAllFriendsAndFamily();
 			fnfResult.value = null;
 			return;
@@ -570,6 +579,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			customer: payload.customer,
 			items: payload.items,
 			mutate: 1,
+			pos_profile: posProfile.value || undefined,
 		});
 		if (signal?.aborted || (generation > 0 && generation < cartGeneration)) return;
 
@@ -731,6 +741,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				coupon_code: coupon.code,
 				customer: customer.value?.name || customer.value,
 				company: usePOSShiftStore().currentProfile?.company,
+				pos_profile: posProfile.value || undefined,
 				items: JSON.stringify(buildCouponItemsPayload()),
 			});
 			if (seq !== couponRevalidateSeq || appliedCoupon.value?.code !== coupon.code) return;

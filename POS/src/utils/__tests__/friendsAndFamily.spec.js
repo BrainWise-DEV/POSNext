@@ -5,6 +5,8 @@
 import { describe, expect, it } from "vitest";
 import {
 	buildFnfCartMessages,
+	FNF_REASON,
+	isFnfAllowedForProfile,
 	discountTotalsBySource,
 	FNF_DISCOUNT_SOURCE,
 	fnfLineNote,
@@ -362,5 +364,29 @@ describe("resolveHeaderDiscount (coupon vs apply_offers header)", () => {
 
 	it("lets a real transaction-rule discount from the server through", () => {
 		expect(resolveHeaderDiscount(50, coupon)).toEqual({ amount: 50, keepCoupon: false });
+	});
+});
+
+describe("isFnfAllowedForProfile (POS Profile Allow F&F)", () => {
+	it("defaults to allowed when the profile or field is missing", () => {
+		expect(isFnfAllowedForProfile(null)).toBe(true);
+		expect(isFnfAllowedForProfile(undefined)).toBe(true);
+		expect(isFnfAllowedForProfile({})).toBe(true);
+		expect(isFnfAllowedForProfile({ allow_friends_family: null })).toBe(true);
+		expect(isFnfAllowedForProfile({ allow_friends_family: "" })).toBe(true);
+	});
+	it("allows when ticked", () => {
+		expect(isFnfAllowedForProfile({ allow_friends_family: 1 })).toBe(true);
+		expect(isFnfAllowedForProfile({ allow_friends_family: "1" })).toBe(true);
+		expect(isFnfAllowedForProfile({ allow_friends_family: true })).toBe(true);
+	});
+	it("is off only for an explicit 0", () => {
+		expect(isFnfAllowedForProfile({ allow_friends_family: 0 })).toBe(false);
+		expect(isFnfAllowedForProfile({ allow_friends_family: "0" })).toBe(false);
+		expect(isFnfAllowedForProfile({ allow_friends_family: false })).toBe(false);
+	});
+	it("normalizes the server's profile_not_allowed answer as not eligible", () => {
+		const e = normalizeEligibility({ eligible: false, reason: FNF_REASON.PROFILE_NOT_ALLOWED, discount_percentage: 0 }, "X");
+		expect(e).toMatchObject({ eligible: false, reason: "profile_not_allowed", discountPercentage: 0, program: null });
 	});
 });

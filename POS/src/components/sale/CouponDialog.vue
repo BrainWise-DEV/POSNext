@@ -375,6 +375,7 @@ async function validateCouponCode(withItems) {
 		coupon_code: couponCode.value,
 		customer: props.customer,
 		company: props.company,
+		pos_profile: props.posProfile || undefined,
 	};
 	if (withItems || fnfEligible.value) {
 		params.items = JSON.stringify(cartStore.buildCouponItemsPayload());

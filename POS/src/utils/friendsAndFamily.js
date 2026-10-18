@@ -33,6 +33,8 @@ export const FNF_REASON = Object.freeze({
 	STRIPPED: "stripped",
 	ORDER_DISCOUNT_BETTER: "order_discount_better",
 	CAP_REACHED: "cap_reached",
+	// POS Profile has "Allow F&F" unticked: F&F is off for the whole profile.
+	PROFILE_NOT_ALLOWED: "profile_not_allowed",
 });
 
 export const COUPON_REASON_BETTER_DISCOUNT_EXISTS = "better_discount_exists";
@@ -93,6 +95,20 @@ function hasPricingRules(value) {
 /** True when the cart line currently carries a Friends & Family stamp. */
 export function isFnfLine(item) {
 	return Boolean(item) && item.discount_source === FNF_DISCOUNT_SOURCE;
+}
+
+/**
+ * POS Profile "Allow F&F" (`allow_friends_family`, default ticked). Anything but
+ * an explicit 0 / false means allowed, so a profile payload from a site that has
+ * not installed the field yet (or no profile at all) keeps F&F working. The
+ * server enforces the same rule; this only avoids pointless round trips and
+ * hides stale badges.
+ */
+export function isFnfAllowedForProfile(profile) {
+	if (!profile || typeof profile !== "object") return true;
+	const value = profile.allow_friends_family;
+	if (value === undefined || value === null || value === "") return true;
+	return !(value === false || value === "0" || Number(value) === 0);
 }
 
 /** Arabic UI → `message_ar`; English → `message_en`; anything else → server-translated `message`. */
