@@ -150,7 +150,11 @@ doc_events = {
 			"pos_next.realtime_events.emit_customer_event",
 			"pos_next.api.wallet.create_wallet_on_customer_insert",
 		],
-		"on_update": "pos_next.realtime_events.emit_customer_event",
+		"validate": "pos_next.api.email_verification.protect_email_verification_fields",
+		"on_update": [
+			"pos_next.api.email_verification.reset_email_verification_on_email_change",
+			"pos_next.realtime_events.emit_customer_event",
+		],
 		"on_trash": "pos_next.realtime_events.emit_customer_event",
 	},
 	"Sales Invoice": {
