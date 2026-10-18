@@ -1,4 +1,4 @@
-import { syncOfflineInvoices } from "@/utils/offline";
+import { syncOfflineExpenses, syncOfflineInvoices } from "@/utils/offline";
 import { offlineState } from "@/utils/offline/offlineState";
 import { offlineWorker } from "@/utils/offline/workerClient";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
@@ -41,7 +41,7 @@ export function useOffline() {
 		}
 	};
 
-	// Sync pending invoices
+	// Sync pending invoices and expenses
 	const syncPending = async () => {
 		if (isOffline.value) {
 			throw new Error("Cannot sync while offline");
@@ -49,11 +49,21 @@ export function useOffline() {
 
 		isSyncing.value = true;
 		try {
-			const result = await syncOfflineInvoices();
+			const [invoiceResult, expenseResult] = await Promise.all([
+				syncOfflineInvoices(),
+				syncOfflineExpenses(),
+			]);
 			await updatePendingCount();
-			return result;
+			return {
+				success: (invoiceResult?.success || 0) + (expenseResult?.success || 0),
+				failed: (invoiceResult?.failed || 0) + (expenseResult?.failed || 0),
+				skipped: (invoiceResult?.skipped || 0) + (expenseResult?.skipped || 0),
+				errors: [...(invoiceResult?.errors || []), ...(expenseResult?.errors || [])],
+				invoices: invoiceResult,
+				expenses: expenseResult,
+			};
 		} catch (error) {
-			console.error("[useOffline] Error syncing invoices:", error);
+			console.error("[useOffline] Error syncing offline documents:", error);
 			throw error;
 		} finally {
 			isSyncing.value = false;

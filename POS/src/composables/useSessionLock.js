@@ -292,7 +292,7 @@ function unlockSuccess() {
 	clearPersistedLock();
 	// Restart inactivity tracking
 	lastActivityTime = Date.now();
-	resetTimer();
+	inactivityTimer = setTimeout(tryLock, lockTimeoutMs);
 }
 
 async function verifyOfflinePassword(password) {
@@ -427,7 +427,7 @@ function startActivityTracking() {
 
 	listenersAttached = true;
 	lastActivityTime = Date.now();
-	resetTimer();
+	inactivityTimer = setTimeout(tryLock, lockTimeoutMs);
 }
 
 function stopActivityTracking() {

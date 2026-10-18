@@ -15,6 +15,10 @@ export const usePOSShiftStore = defineStore("posShift", () => {
 	// Computed
 	const profileName = computed(() => currentProfile.value?.name);
 	const profileCurrency = computed(() => currentProfile.value?.currency || DEFAULT_CURRENCY);
+	/** Company.default_currency — basis for POS expense amounts and shift limits. */
+	const companyCurrency = computed(
+		() => shiftState.value.company?.default_currency || profileCurrency.value,
+	);
 	const profileWarehouse = computed(() => currentProfile.value?.warehouse);
 	const profileCompany = computed(() => currentProfile.value?.company);
 	const profileCustomer = computed(() => currentProfile.value?.customer);
@@ -22,6 +26,12 @@ export const usePOSShiftStore = defineStore("posShift", () => {
 	const writeOffAccount = computed(() => currentProfile.value?.write_off_account);
 	const writeOffCostCenter = computed(() => currentProfile.value?.write_off_cost_center);
 	const writeOffLimit = computed(() => currentProfile.value?.write_off_limit || 0);
+	const allowPosExpense = computed(
+		() => Number(currentProfile.value?.posa_allow_pos_expense || 0) === 1,
+	);
+	const maximumExpenseAmount = computed(
+		() => Number.parseFloat(currentProfile.value?.posa_maximum_expense_amount) || 0,
+	);
 
 	// Actions
 	function updateShiftDuration() {
@@ -81,7 +91,8 @@ export const usePOSShiftStore = defineStore("posShift", () => {
 	}
 
 	async function checkShift() {
-		await checkOpeningShift.fetch();
+		// Offline start: the fetch fails, but its onError restores the shift from the local cache
+		await checkOpeningShift.fetch().catch(() => {});
 		return hasOpenShift.value;
 	}
 
@@ -97,6 +108,7 @@ export const usePOSShiftStore = defineStore("posShift", () => {
 		// Computed
 		profileName,
 		profileCurrency,
+		companyCurrency,
 		profileWarehouse,
 		profileCompany,
 		profileCustomer,
@@ -104,6 +116,8 @@ export const usePOSShiftStore = defineStore("posShift", () => {
 		writeOffAccount,
 		writeOffCostCenter,
 		writeOffLimit,
+		allowPosExpense,
+		maximumExpenseAmount,
 
 		// Actions
 		updateShiftDuration,
