@@ -7,7 +7,22 @@
 		}"
 	>
 		<template #body-content>
-			<div class="flex flex-col gap-6">
+			<div v-if="createdCustomer" class="flex flex-col gap-4" data-testid="created-verify-step">
+				<p class="text-sm text-gray-700">
+					{{ __("Customer {0} created successfully", [createdCustomer.customer_name]) }}
+				</p>
+				<EmailVerificationPanel
+					:customer="createdCustomer.name"
+					:email="customerData.email_id"
+					:saved-email="createdCustomer.email_id || ''"
+					:verified="Boolean(Number(createdCustomer.custom_email_verified))"
+					:verified-email="createdCustomer.custom_verified_email || ''"
+					:pos-profile="posProfile"
+					@verified="handleEmailVerified"
+					@lock-change="(v) => (emailVerificationLocked = v)"
+				/>
+			</div>
+			<div v-else class="flex flex-col gap-6">
 				<!-- Customer Name (Required) -->
 				<div v-if="!requiresSplitCustomerName">
 					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
@@ -179,6 +194,19 @@
 						v-model="customerData.email_id"
 						type="email"
 						:placeholder="__('Enter email address (optional)')"
+						:disabled="emailVerificationLocked"
+					/>
+					<EmailVerificationPanel
+						v-if="showEmailVerification"
+						class="mt-2"
+						:customer="verificationCustomerName"
+						:email="customerData.email_id"
+						:saved-email="verificationSavedEmail"
+						:verified="verificationVerified"
+						:verified-email="verificationVerifiedEmail"
+						:pos-profile="posProfile"
+						@verified="handleEmailVerified"
+						@lock-change="(v) => (emailVerificationLocked = v)"
 					/>
 				</div>
 
@@ -297,7 +325,12 @@
 					</div>
 				</div>
 
-				<div class="flex gap-2">
+				<div v-if="createdCustomer" class="flex gap-2">
+					<Button variant="solid" @click="finishCreated">
+						{{ __("Done") }}
+					</Button>
+				</div>
+				<div v-else class="flex gap-2">
 					<Button
 						variant="solid"
 						@click="handleCreate"
@@ -333,10 +366,13 @@
 
 import { usePOSPermissions } from "@/composables/usePermissions";
 import { useToast } from "@/composables/useToast";
+import EmailVerificationPanel from "@/components/sale/EmailVerificationPanel.vue";
 import { useBootstrapStore } from "@/stores/bootstrap";
 import { useCountriesStore } from "@/stores/countries";
 import { usePOSSettingsStore } from "@/stores/posSettings";
 import { usePOSShiftStore } from "@/stores/posShift";
+import { useCustomerSearchStore } from "@/stores/customerSearch";
+import { isOffline } from "@/utils/offline/offlineState";
 import { logger } from "@/utils/logger";
 import { Button, Dialog, Input, createResource } from "frappe-ui";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
@@ -351,6 +387,7 @@ const countriesStore = useCountriesStore();
 const posSettingsStore = usePOSSettingsStore();
 const shiftStore = usePOSShiftStore();
 const bootstrapStore = useBootstrapStore();
+const customerSearchStore = useCustomerSearchStore();
 const { canCreateCustomer } = usePOSPermissions();
 const { showSuccess, showError } = useToast();
 
@@ -382,6 +419,12 @@ const countrySearchRef = ref(null);
 /** Ensures POS Profile default ISD is applied only once per dialog open */
 const defaultCountryApplied = ref(false);
 
+/** Email OTP verification (flag: POS Settings > Enable Customer Email Verification) */
+const emailVerificationLocked = ref(false);
+/** Customer just created in this dialog, kept open to offer "Verify email" */
+const createdCustomer = ref(null);
+const verifiedOverride = ref(null);
+
 const customerGroups = ref([]);
 const territories = ref([]);
 const governorates = ref([]);
@@ -409,6 +452,28 @@ const show = computed({
 });
 
 const isEditMode = computed(() => !!props.customer?.name);
+
+const FABRICATED_EMAIL_SUFFIX = "@pos.miraaya";
+const hasRealEmail = (email) => {
+	const e = (email || "").trim().toLowerCase();
+	return Boolean(e) && e.includes("@") && !e.endsWith(FABRICATED_EMAIL_SUFFIX);
+};
+
+// Edit mode only (customer exists); create mode uses the post-create step.
+const showEmailVerification = computed(
+	() =>
+		isEditMode.value &&
+		posSettingsStore.customerEmailVerificationEnabled &&
+		hasRealEmail(props.customer?.email_id || customerData.value.email_id)
+);
+const verificationCustomerName = computed(() => props.customer?.name || "");
+const verificationSavedEmail = computed(() => props.customer?.email_id || "");
+const verificationVerified = computed(() =>
+	Boolean(Number(verifiedOverride.value?.custom_email_verified ?? props.customer?.custom_email_verified))
+);
+const verificationVerifiedEmail = computed(
+	() => verifiedOverride.value?.custom_verified_email || props.customer?.custom_verified_email || ""
+);
 
 const requiresSplitCustomerName = computed(() => Boolean(posSettingsStore.miraayaInstalled));
 
@@ -652,6 +717,15 @@ const createCustomerResource = createResource({
 	}),
 	onSuccess: (data) => {
 		showSuccess(__("Customer {0} created successfully", [data.customer_name]));
+		// Offer "Verify email now" when enabled, online and a real email was entered
+		if (
+			posSettingsStore.customerEmailVerificationEnabled &&
+			hasRealEmail(data.email_id || customerData.value.email_id) &&
+			!isOffline()
+		) {
+			createdCustomer.value = { ...data, email_id: data.email_id || customerData.value.email_id };
+			return;
+		}
 		emit("customer-created", data);
 		show.value = false;
 	},
@@ -837,7 +911,44 @@ const checkPermissions = async () => {
 	}
 };
 
+const handleEmailVerified = async ({ verified_email }) => {
+	const patch = {
+		custom_email_verified: 1,
+		custom_verified_email: verified_email,
+		custom_email_verified_on: new Date().toISOString(),
+	};
+	verifiedOverride.value = patch;
+	const base = createdCustomer.value || props.customer;
+	if (createdCustomer.value) createdCustomer.value = { ...createdCustomer.value, ...patch };
+	// Keep the POS customer cache in sync without closing/selecting anything
+	try {
+		if (base?.name) await customerSearchStore.addCustomerToCache({ ...base, ...patch });
+	} catch (err) {
+		log.error("Failed to refresh customer cache after verification", err);
+	}
+};
+
+const finishCreated = () => {
+	const created = createdCustomer.value;
+	if (
+		emailVerificationLocked.value &&
+		!window.confirm(__("Email verification is in progress. Leave without verifying?"))
+	) {
+		return;
+	}
+	createdCustomer.value = null;
+	emailVerificationLocked.value = false;
+	if (created) emit("customer-created", created);
+	show.value = false;
+};
+
 const handleCreate = async () => {
+	if (
+		emailVerificationLocked.value &&
+		!window.confirm(__("Email verification is in progress. Leave without verifying?"))
+	) {
+		return;
+	}
 	if (requiresSplitCustomerName.value) {
 		if (!customerData.value.custom_first_name?.trim()) {
 			return showError(__("First Name is required"));
@@ -948,7 +1059,16 @@ watch(showCountryDropdown, async (isOpen) => {
 watch(
 	() => props.modelValue,
 	async (isOpen) => {
-		isOpen ? await loadDialogData() : resetForm();
+		if (isOpen) return await loadDialogData();
+		// Closed (X / Esc) while the post-create verify step was open: still hand the customer over
+		if (createdCustomer.value) {
+			const created = createdCustomer.value;
+			createdCustomer.value = null;
+			emit("customer-created", created);
+		}
+		emailVerificationLocked.value = false;
+		verifiedOverride.value = null;
+		resetForm();
 	}
 );
 
