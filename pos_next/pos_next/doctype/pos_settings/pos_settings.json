@@ -15,6 +15,8 @@
   "column_break_wallet",
   "auto_create_wallet",
   "loyalty_to_wallet",
+  "section_break_customer_email_verification",
+  "enable_customer_email_verification",
   "section_break_general",
   "allow_user_to_edit_additional_discount",
   "allow_user_to_edit_item_discount",
@@ -554,6 +556,18 @@
    "fieldtype": "Table",
    "label": "Barcode Rules",
    "options": "POS Barcode Rules"
+  },
+  {
+   "fieldname": "section_break_customer_email_verification",
+   "fieldtype": "Section Break",
+   "label": "Customer Email Verification"
+  },
+  {
+   "default": "0",
+   "description": "Show the 'Verify email' (OTP) action in the customer dialog. Requires a Magento-synced customer and a configured Magento Setting. Informational badge only.",
+   "fieldname": "enable_customer_email_verification",
+   "fieldtype": "Check",
+   "label": "Enable Customer Email Verification"
   }
  ],
  "index_web_pages_for_search": 1,

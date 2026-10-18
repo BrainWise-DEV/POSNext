@@ -6,6 +6,7 @@ Handles customer search, creation, and management for POS operations
 import frappe
 from frappe import _
 
+from pos_next.api.constants import EMAIL_VERIFICATION_FIELDS
 from pos_next.integrations.registry import (
 	after_customer_insert,
 	prepare_customer_doc,
@@ -64,7 +65,7 @@ def get_customers(search_term="", pos_profile=None, limit=20, modified_since=Non
 			"Customer",
 			filters=filters,
 			or_filters=or_filters or None,
-			fields=["name", "customer_name", "mobile_no", "email_id", "disabled"],
+			fields=["name", "customer_name", "mobile_no", "email_id", "disabled", *EMAIL_VERIFICATION_FIELDS],
 			limit=customer_limit,
 			order_by="customer_name asc",
 		)
