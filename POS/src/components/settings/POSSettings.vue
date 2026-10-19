@@ -722,6 +722,11 @@
 												:description="__('Show the most recently added item at the top of the cart instead of the bottom.')"
 											/>
 											<CheckboxField
+												v-model="settings.print_multiple_sales_persons"
+												:label="__('Print Multiple Sales Persons')"
+												:description="__('Print all sales persons on the receipt when an invoice has more than one. When off, receipts with multiple sales persons do not show them (a single sales person always prints).')"
+											/>
+											<CheckboxField
 												v-model="settings.silent_print"
 												:label="__('Silent Print')"
 												:description="
@@ -1200,6 +1205,7 @@ const settings = ref({
 	allow_write_off_change: 0,
 	allow_partial_payment: 0,
 	silent_print: 0,
+	print_multiple_sales_persons: 0,
 	allow_negative_stock: 0,
 	tax_inclusive: 0,
 	cart_lifo: 0,

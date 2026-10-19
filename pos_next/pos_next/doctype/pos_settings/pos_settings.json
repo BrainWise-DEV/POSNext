@@ -59,6 +59,7 @@
   "section_break_printing",
   "allow_print_last_invoice",
   "silent_print",
+  "print_multiple_sales_persons",
   "section_break_delivery",
   "use_delivery_charges",
   "auto_set_delivery_charges",
@@ -439,6 +440,13 @@
    "fieldname": "silent_print",
    "fieldtype": "Check",
    "label": "Enable Silent Print"
+  },
+  {
+   "default": "0",
+   "description": "Print all sales persons on the receipt when an invoice has more than one. When off, receipts with multiple sales persons do not show them (a single sales person always prints).",
+   "fieldname": "print_multiple_sales_persons",
+   "fieldtype": "Check",
+   "label": "Print Multiple Sales Persons"
   },
   {
    "collapsible": 1,
