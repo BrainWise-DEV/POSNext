@@ -34,7 +34,6 @@ const appliedBlock = {
 	applied_count: 1,
 	message: "You have received the Miraaya Friends & Family offer!",
 	reason: "customer_flag",
-	user_message: "You have received the Miraaya Friends & Family offer!",
 	items: [
 		{
 			item_code: "GP-LAP-01",
@@ -107,21 +106,30 @@ describe("pickLocalizedMessage", () => {
 });
 
 describe("normalizeEligibility", () => {
-	it("keeps the admin user_message and % for an eligible customer", () => {
+	it("keeps the ff_activated customer message and % for an eligible customer", () => {
 		const e = normalizeEligibility({
 			message: {
 				customer: "F&F Smoke Eligible",
 				eligible: true,
 				reason: "customer_flag",
 				discount_percentage: 30,
-				program: { user_message: "Miraaya F&F offer" },
+				program: { discount_percentage: 30 },
+				customer_message: { event: "ff_activated", ar: "عرض ميرايا", en: "Miraaya F&F offer", message: "عرض ميرايا" },
 			},
 		});
-		expect(e).toMatchObject({ eligible: true, discountPercentage: 30, userMessage: "Miraaya F&F offer" });
+		expect(e).toMatchObject({ eligible: true, discountPercentage: 30 });
+		expect(e).not.toHaveProperty("userMessage");
+		expect(pickLocalizedMessage(e.customerMessage, "en")).toBe("Miraaya F&F offer");
+		expect(pickLocalizedMessage(e.customerMessage, "ar")).toBe("عرض ميرايا");
+	});
+	it("has no customer message when none is configured", () => {
+		const e = normalizeEligibility({ eligible: true, discount_percentage: 30, customer_message: null });
+		expect(e.customerMessage).toBeNull();
+		expect(pickLocalizedMessage(e.customerMessage, "en")).toBe("");
 	});
 	it("zeroes the % for an ineligible customer", () => {
 		const e = normalizeEligibility({ eligible: false, reason: "not_eligible", discount_percentage: 0 }, "X");
-		expect(e).toMatchObject({ eligible: false, discountPercentage: 0, userMessage: "", customer: "X" });
+		expect(e).toMatchObject({ eligible: false, discountPercentage: 0, customerMessage: null, customer: "X" });
 	});
 });
 

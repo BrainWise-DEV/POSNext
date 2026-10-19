@@ -1644,6 +1644,7 @@ import {
 	lineDiscountSource,
 	lineSourceLabel,
 	lineSourceShortLabel,
+	pickLocalizedMessage,
 } from "@/utils/friendsAndFamily";
 
 /**
@@ -2375,7 +2376,7 @@ const fnfCustomerBadge = computed(() => {
 		muted: Boolean(override),
 		title: override
 			? __("Coupon {0} applied instead of Friends & Family", [override.code || ""])
-			: eligibility.userMessage || __("Friends & Family customer"),
+			: pickLocalizedMessage(eligibility.customerMessage, locale.value) || __("Friends & Family customer"),
 	};
 });
 

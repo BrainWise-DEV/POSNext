@@ -8,7 +8,8 @@
  *
  * Payload contract (posnext_promotions):
  *   - check_friends_and_family_eligibility(customer)
- *       → { eligible, reason, message, discount_percentage, program: { user_message, … } }
+ *       → { eligible, reason, message, discount_percentage, program: {…},
+ *           customer_message: { ar, en, message } | null }   ("ff_activated" Friends and Family Message)
  *   - apply_offers(...)  → { items, friends_and_family: {…}, best_discount: {…} }
  *   - apply_friends_and_family_discount(customer, items)
  *       → same shape as the `friends_and_family` block, plus best_discount
@@ -120,6 +121,17 @@ export function pickLocalizedMessage(payload, locale = "en") {
 	return payload.message || payload.message_en || "";
 }
 
+/** Server `{ ar, en, message }` customer text → `{ message, message_ar, message_en }`, or null when empty. */
+export function normalizeCustomerMessage(customerMessage) {
+	if (!customerMessage || typeof customerMessage !== "object") return null;
+	const normalized = {
+		message: customerMessage.message || "",
+		message_ar: customerMessage.ar || customerMessage.message_ar || "",
+		message_en: customerMessage.en || customerMessage.message_en || "",
+	};
+	return normalized.message || normalized.message_ar || normalized.message_en ? normalized : null;
+}
+
 /** Normalize check_friends_and_family_eligibility() for the store. */
 export function normalizeEligibility(response, customer = null) {
 	const payload = response?.message && typeof response.message === "object" ? response.message : response;
@@ -131,8 +143,8 @@ export function normalizeEligibility(response, customer = null) {
 		reason: payload.reason || "",
 		message: payload.message || "",
 		discountPercentage: eligible ? num(payload.discount_percentage) : 0,
-		// Admin-editable template from Friends and Family Settings.
-		userMessage: (eligible && (payload.program?.user_message || payload.message)) || "",
+		// "ff_activated" Friends and Family Message, shaped for pickLocalizedMessage().
+		customerMessage: eligible ? normalizeCustomerMessage(payload.customer_message) : null,
 		program: eligible ? payload.program || null : null,
 	};
 }
@@ -154,7 +166,6 @@ export function normalizeFnfResult(block, bestDiscount = null) {
 		message: payload.message || "",
 		message_en: payload.message_en || "",
 		message_ar: payload.message_ar || "",
-		userMessage: payload.user_message || "",
 		lines: Array.isArray(payload.items) ? payload.items : [],
 		caps,
 		capHit: payload.cap_hit || caps?.cap_hit || null,

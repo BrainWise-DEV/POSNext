@@ -44,6 +44,7 @@ import {
 	mergeServerLine,
 	normalizeEligibility,
 	normalizeFnfResult,
+	pickLocalizedMessage,
 	stampFnfLine,
 	resolveHeaderDiscount,
 	stripFnfLine,
@@ -458,6 +459,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		return fnfEligibility.value;
 	}
 
+	/** UI language (useLocale() keeps <html lang> in sync; it can't be called inside a store). */
+	function currentUiLocale() {
+		return globalThis.document?.documentElement?.lang || "en";
+	}
+
 	async function setCustomer(selectedCustomer) {
 		const previous = currentCustomerName();
 		customer.value = selectedCustomer;
@@ -467,7 +473,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		]);
 		if (eligibility?.eligible && currentCustomerName() !== previous) {
 			showSuccess(
-				eligibility.userMessage ||
+				pickLocalizedMessage(eligibility.customerMessage, currentUiLocale()) ||
 					__("Friends & Family customer — {0}% discount", [
 						String(eligibility.discountPercentage),
 					])
