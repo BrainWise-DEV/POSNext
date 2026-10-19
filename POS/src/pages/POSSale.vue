@@ -41,6 +41,13 @@
 						<span>{{ __("Pemakaian Tinta") }}</span>
 					</button>
 					<button
+						v-if="!shiftStore.isSpgMode"
+						@click="showTerimaTransferDialog = true"
+						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-blue-50 flex items-center gap-3 transition-colors"
+					>
+						<span>{{ __("Terima Transfer") }}</span>
+					</button>
+					<button
 						@click="showPanduanDialog = true"
 						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-blue-50 flex items-center gap-3 transition-colors"
 					>
@@ -656,6 +663,13 @@
 				:warehouses="tintaUsage.warehouses"
 				:default-warehouse="shiftStore.currentProfile?.warehouse || ''"
 			/>
+			<TerimaTransferDialog
+				v-model="showTerimaTransferDialog"
+				:pos-profile="cartStore.posProfile"
+				:currency="shiftStore.profileCurrency"
+				:initial-customer="cartStore.customer"
+				@print-invoice="(name) => handlePrintInvoice({ name })"
+			/>
 			<PanduanDialog
 				v-model="showPanduanDialog"
 				:categories="panduanCategories"
@@ -1203,6 +1217,7 @@ import ShiftClosingDialog from "@/components/ShiftClosingDialog.vue";
 import ShiftOpeningDialog from "@/components/ShiftOpeningDialog.vue";
 import PemakaianTintaDialog from "@/components/sale/PemakaianTintaDialog.vue";
 import PanduanDialog from "@/components/sale/PanduanDialog.vue";
+import TerimaTransferDialog from "@/components/sale/TerimaTransferDialog.vue";
 import SpgInvoicesDialog from "@/components/sale/SpgInvoicesDialog.vue";
 import SpgOrdersDialog from "@/components/sale/SpgOrdersDialog.vue";
 import OrderQrCameraDialog from "@/components/sale/OrderQrCameraDialog.vue";
@@ -1605,6 +1620,8 @@ async function loadTintaUsageContext() {
 // nextend.panduan: docs marked "Tampil di POS" that the user's roles may read.
 // The menu is always shown; the list is fetched each time the dialog opens.
 const showPanduanDialog = ref(false);
+// nextend Treasury: one transfer for several COD notes / Sales Orders
+const showTerimaTransferDialog = ref(false);
 const panduanCategories = ref([]);
 const panduanLoading = ref(false);
 const panduanError = ref("");
