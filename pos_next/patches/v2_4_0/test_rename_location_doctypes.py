@@ -4,9 +4,9 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
-from pos_next.patches.v2_4_0 import rename_location_doctypes as patch_mod
+from pos_next.patches.v2_4_0 import rename_locations_doctypes as patch_mod
 
-MOD = "pos_next.patches.v2_4_0.rename_location_doctypes.frappe"
+MOD = "pos_next.patches.v2_4_0.rename_locations_doctypes.frappe"
 NEW_TABLES = {"POS Governorate": {"governorate"}, "POS District": {"district", "governorate"}}
 OLD_TABLES = {"Governorate": {"governorate"}, "District": {"district", "governorate"}}
 COUNTS = {"Governorate": 2, "District": 2, "POS Governorate": 2, "POS District": 2}

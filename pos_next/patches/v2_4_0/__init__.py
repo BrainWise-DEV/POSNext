@@ -1,0 +1,1 @@
+from . import rename_locations_doctypes

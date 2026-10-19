@@ -295,6 +295,15 @@ export function mergeServerLine(item, serverLine = {}, fnfLine = null, { fnfSupp
 		stripFnfLine(item);
 		item.pricing_rules = [];
 		result.stripped = true;
+	} else if (!item.is_free_item && hasPricingRules(item.pricing_rules)) {
+		// The server is the authority for promotion discounts. A line whose
+		// promotion (pricing_rules) the server no longer applies must drop it,
+		// otherwise the client keeps a stale % and computes min_amt on a
+		// different total than the server just used (offers-loop fix, develop).
+		item.discount_percentage = 0;
+		item.discount_amount = 0;
+		item.pricing_rules = [];
+		item.is_already_discounted = 0;
 	}
 
 	if (result.stripped) {
