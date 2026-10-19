@@ -1301,12 +1301,29 @@ function handleApprovalRealtime(payload) {
 	}
 }
 
+// nextend Treasury: treasury found no money for a transfer this cashier took
+// (nextend.treasury.realtime.KASIR_EVENT, sent to this user only).
+const TRANSFER_REJECTED_EVENT = "nextend_transfer_ditolak";
+
+function handleTransferRejected(payload) {
+	if (!payload) return;
+	showWarning(
+		__("Transfer {0} {1} ditolak treasury: {2}", [
+			payload.pengirim,
+			formatCurrency(payload.total || 0),
+			payload.alasan || "",
+		])
+	);
+}
+
 onMounted(() => {
 	window.frappe?.realtime?.on(APPROVAL_EVENT, handleApprovalRealtime);
+	window.frappe?.realtime?.on(TRANSFER_REJECTED_EVENT, handleTransferRejected);
 });
 
 onUnmounted(() => {
 	window.frappe?.realtime?.off(APPROVAL_EVENT, handleApprovalRealtime);
+	window.frappe?.realtime?.off(TRANSFER_REJECTED_EVENT, handleTransferRejected);
 });
 
 /**
@@ -2827,6 +2844,8 @@ async function handlePaymentCompleted(paymentData) {
 
 		// nextend Pengiriman: Dikirim / Bayar di Tempat chosen in the payment dialog
 		cartStore.delivery = paymentData.delivery || null;
+		// nextend Treasury: sender/date/reference/proof of a transfer payment
+		cartStore.transfer = paymentData.transfer || null;
 
 		// Set delivery date for Sales Orders
 		if (paymentData.delivery_date) {
@@ -2864,6 +2883,7 @@ async function handlePaymentCompleted(paymentData) {
 				receivable_account: paymentData.receivable_account || null,
 				edited_from: editingOfflineContext?.originalOfflineId || null,
 				...(cartStore.delivery || {}),
+				...(cartStore.transfer || {}),
 			};
 			if (cartStore.posOrder) {
 				invoiceData.custom_pos_order = cartStore.posOrder;
