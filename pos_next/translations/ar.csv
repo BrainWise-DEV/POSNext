@@ -1753,3 +1753,4 @@ Points applied: {0}. Please pay remaining {1} with {2},تم خصم النقاط:
 "Print all sales persons on the receipt when an invoice has more than one. When off, receipts with multiple sales persons do not show them (a single sales person always prints).","طباعة جميع مناديب المبيعات على الإيصال عندما تحتوي الفاتورة على أكثر من مندوب. عند الإيقاف، لا يتم عرضهم في الإيصال إذا كان هناك أكثر من مندوب (المندوب الواحد يُطبع دائماً).",""
 "No Friends & Family: verify the customer's email (OTP) first","لا يوجد خصم الأصدقاء والعائلة: يجب التحقق من بريد العميل (OTP) أولًا",""
 "No Friends & Family: the customer needs an email on an approved company domain","لا يوجد خصم الأصدقاء والعائلة: يجب أن يكون للعميل بريد إلكتروني على نطاق شركة معتمد",""
+"Friends & Family has no approved email domains configured","لا توجد نطاقات بريد إلكتروني معتمدة مُعدّة لخصم الأصدقاء والعائلة",""

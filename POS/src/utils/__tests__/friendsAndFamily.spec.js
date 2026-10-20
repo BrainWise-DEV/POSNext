@@ -428,3 +428,17 @@ describe("Approved Domains email block (F&F member with unapproved / unverified 
 		expect(buildFnfCartMessages({ eligibility: blocked("not_eligible", "m"), hasItems: true })).toEqual([]);
 	});
 });
+
+describe("mandatory Approved Domains (rev. 2)", () => {
+	it("no_approved_domains blocks with the server message or a local fallback", () => {
+		const e = normalizeEligibility({ eligible: false, reason: "no_approved_domains", ff_member: true }, "C");
+		expect(e.ffMember).toBe(true);
+		expect(fnfEmailBlockMessage(e)).toMatch(/no approved email domains/i);
+		const withMsg = normalizeEligibility({ eligible: false, reason: "no_approved_domains", message: "srv" });
+		expect(fnfEmailBlockMessage(withMsg)).toBe("srv");
+	});
+	it("ffMember is false for non-members and missing flags", () => {
+		expect(normalizeEligibility({ eligible: false, reason: "not_eligible" }).ffMember).toBe(false);
+		expect(normalizeEligibility({ eligible: true, ff_member: true, discount_percentage: 30 }).ffMember).toBe(true);
+	});
+});

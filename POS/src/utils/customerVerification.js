@@ -3,6 +3,7 @@
  * (custom_email_verified, custom_verified_email, custom_email_verified_on).
  */
 import { call } from "frappe-ui";
+import { promoApi } from "@/utils/promoApi";
 
 export const STATUS_URL = "pos_next.api.email_verification.get_email_verification_status";
 
@@ -27,4 +28,26 @@ export async function fetchVerificationStatus(customer) {
 export function applyVerificationPatch(customer, name, patch) {
 	if (!customer || typeof customer !== "object" || customer.name !== name) return customer;
 	return { ...customer, ...patch };
+}
+
+/**
+ * Whether the customer is a Friends & Family member (POSNext Promotions). F&F
+ * requires a verified email, so members can be verified even when the general
+ * POS email-verification switch is off. False when the app is absent / on error.
+ */
+export async function fetchFnfMembership(customer, posProfile = null) {
+	const method = promoApi.checkFriendsAndFamilyEligibility();
+	if (!customer || !method) return false;
+	try {
+		const res = await call(method, { customer, pos_profile: posProfile || undefined });
+		const data = res?.message && typeof res.message === "object" ? res.message : res;
+		return Boolean(data?.ff_member);
+	} catch {
+		return false;
+	}
+}
+
+/** Show the email-verification UI: POS switch on, or the customer is an F&F member. */
+export function canOfferEmailVerification({ switchEnabled = false, fnfMember = false } = {}) {
+	return Boolean(switchEnabled || fnfMember);
 }

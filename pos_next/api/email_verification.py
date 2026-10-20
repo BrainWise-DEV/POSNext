@@ -20,7 +20,9 @@ Design notes
 * Magento answers verify failures with HTTP 200 and ``{"status": false}``; the
   body ``status`` is therefore always checked.
 * The feature is gated by ``POS Settings.enable_customer_email_verification``
-  (default off).
+  (default off) — except for Friends & Family members (optional POSNext
+  Promotions app), who must have a verified email for F&F and can therefore
+  always be verified.
 """
 
 import json
@@ -164,6 +166,28 @@ def is_feature_enabled(pos_profile=None):
 		return bool(frappe.db.exists("POS Settings", filters))
 	except Exception:
 		return False
+
+
+def _is_ff_member(customer, pos_profile=None):
+	"""Friends & Family member per POSNext Promotions (optional app); False when absent."""
+	if not customer or "posnext_promotions" not in frappe.get_installed_apps():
+		return False
+	try:
+		check = frappe.get_attr(
+			"posnext_promotions.promotions.friends_and_family_eligibility.is_customer_ff_member"
+		)
+	except Exception:
+		return False
+	try:
+		return bool(check(customer, pos_profile=pos_profile))
+	except Exception:
+		_log_unexpected("Friends & Family membership check failed")
+		return False
+
+
+def is_verification_allowed(customer, pos_profile=None):
+	"""POS switch on, or the customer is an F&F member (verification is mandatory for F&F)."""
+	return is_feature_enabled(pos_profile) or _is_ff_member(customer, pos_profile)
 
 
 def _get_magento_config():
@@ -335,7 +359,7 @@ def _prepare(customer, email, pos_profile):
 	"""Run checks common to send/verify. Returns (ctx, error_result)."""
 	if not customer:
 		frappe.throw(_("Customer is required"))
-	if not is_feature_enabled(pos_profile):
+	if not is_verification_allowed(customer, pos_profile):
 		return None, _result(False, "disabled")
 	if not frappe.has_permission("Customer", "write", customer):
 		frappe.throw(_("You don't have permission to verify this customer's email"), frappe.PermissionError)

@@ -8,7 +8,7 @@
  *
  * Payload contract (posnext_promotions):
  *   - check_friends_and_family_eligibility(customer)
- *       → { eligible, reason, message, discount_percentage, program: {…}, email_domain,
+ *       → { eligible, reason, message, discount_percentage, program: {…}, email_domain, ff_member,
  *           customer_message: { ar, en, message } | null }   ("ff_activated" Friends and Family Message)
  *   - apply_offers(...)  → { items, friends_and_family: {…}, best_discount: {…} }
  *   - apply_friends_and_family_discount(customer, items)
@@ -40,12 +40,15 @@ export const FNF_REASON = Object.freeze({
 	// company domain, or is not OTP-verified / changed since verification.
 	EMAIL_DOMAIN_NOT_APPROVED: "email_domain_not_approved",
 	EMAIL_NOT_VERIFIED: "email_not_verified",
+	// F&F is on but no enabled Approved Domain is configured: nobody gets F&F.
+	NO_APPROVED_DOMAINS: "no_approved_domains",
 });
 
 /** Eligibility reasons where the customer is an F&F member but their email blocks the discount. */
 export const FNF_EMAIL_REASONS = Object.freeze([
 	FNF_REASON.EMAIL_DOMAIN_NOT_APPROVED,
 	FNF_REASON.EMAIL_NOT_VERIFIED,
+	FNF_REASON.NO_APPROVED_DOMAINS,
 ]);
 
 /**
@@ -56,6 +59,9 @@ export function fnfEmailBlockMessage(eligibility) {
 	if (!eligibility || eligibility.eligible) return "";
 	if (!FNF_EMAIL_REASONS.includes(eligibility.reason)) return "";
 	if (eligibility.message) return eligibility.message;
+	if (eligibility.reason === FNF_REASON.NO_APPROVED_DOMAINS) {
+		return t("Friends & Family has no approved email domains configured");
+	}
 	return eligibility.reason === FNF_REASON.EMAIL_NOT_VERIFIED
 		? t("No Friends & Family: verify the customer's email (OTP) first")
 		: t("No Friends & Family: the customer needs an email on an approved company domain");
@@ -166,6 +172,8 @@ export function normalizeEligibility(response, customer = null) {
 		reason: payload.reason || "",
 		message: payload.message || "",
 		discountPercentage: eligible ? num(payload.discount_percentage) : 0,
+		// Matches the F&F Group / Flag rule (also when the email rule failed).
+		ffMember: Boolean(payload.ff_member),
 		// "ff_activated" Friends and Family Message, shaped for pickLocalizedMessage().
 		customerMessage: eligible ? normalizeCustomerMessage(payload.customer_message) : null,
 		program: eligible ? payload.program || null : null,

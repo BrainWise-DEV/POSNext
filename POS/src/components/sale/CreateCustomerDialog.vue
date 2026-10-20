@@ -373,7 +373,11 @@ import { usePOSSettingsStore } from "@/stores/posSettings";
 import { usePOSShiftStore } from "@/stores/posShift";
 import { useCustomerSearchStore } from "@/stores/customerSearch";
 import { isOffline } from "@/utils/offline/offlineState";
-import { fetchVerificationStatus } from "@/utils/customerVerification";
+import {
+	canOfferEmailVerification,
+	fetchFnfMembership,
+	fetchVerificationStatus,
+} from "@/utils/customerVerification";
 import { logger } from "@/utils/logger";
 import { Button, Dialog, Input, createResource } from "frappe-ui";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
@@ -467,11 +471,18 @@ const hasRealEmail = (email) => {
 	return Boolean(e) && e.includes("@") && !e.endsWith(FABRICATED_EMAIL_SUFFIX);
 };
 
+// F&F members need a verified email for Friends & Family, so the panel is
+// offered to them even when the general POS verification switch is off.
+const fnfMember = ref(false);
+
 // Edit mode only (customer exists); create mode uses the post-create step.
 const showEmailVerification = computed(
 	() =>
 		isEditMode.value &&
-		posSettingsStore.customerEmailVerificationEnabled &&
+		canOfferEmailVerification({
+			switchEnabled: posSettingsStore.customerEmailVerificationEnabled,
+			fnfMember: fnfMember.value,
+		}) &&
 		hasRealEmail(props.customer?.email_id || customerData.value.email_id)
 );
 const verificationCustomerName = computed(() => props.customer?.name || "");
@@ -724,14 +735,16 @@ const createCustomerResource = createResource({
 		custom_is_publish: 1,
 		pos_profile: props.posProfile,
 	}),
-	onSuccess: (data) => {
+	onSuccess: async (data) => {
 		showSuccess(__("Customer {0} created successfully", [data.customer_name]));
-		// Offer "Verify email now" when enabled, online and a real email was entered
-		if (
-			posSettingsStore.customerEmailVerificationEnabled &&
-			hasRealEmail(data.email_id || customerData.value.email_id) &&
-			!isOffline()
-		) {
+		// Offer "Verify email now" when enabled (or the new customer is an F&F
+		// member, who needs a verified email), online and a real email was entered
+		const realEmail = hasRealEmail(data.email_id || customerData.value.email_id) && !isOffline();
+		const offerVerification =
+			realEmail &&
+			(posSettingsStore.customerEmailVerificationEnabled ||
+				(await fetchFnfMembership(data.name, props.posProfile)));
+		if (offerVerification) {
 			createdCustomer.value = { ...data, email_id: data.email_id || customerData.value.email_id };
 			return;
 		}
@@ -883,10 +896,18 @@ const posProfileResource = createResource({
 
 const loadFreshVerification = async () => {
 	freshVerification.value = null;
+	fnfMember.value = false;
 	if (!props.customer?.name || isOffline()) return;
 	const name = props.customer.name;
-	const status = await fetchVerificationStatus(name);
-	if (status && props.customer?.name === name) freshVerification.value = status;
+	const [status, member] = await Promise.all([
+		fetchVerificationStatus(name),
+		posSettingsStore.customerEmailVerificationEnabled
+			? Promise.resolve(false)
+			: fetchFnfMembership(name, props.posProfile),
+	]);
+	if (props.customer?.name !== name) return;
+	if (status) freshVerification.value = status;
+	fnfMember.value = member;
 };
 
 const loadDialogData = async () => {

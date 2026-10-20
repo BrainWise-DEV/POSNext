@@ -72,6 +72,7 @@ class EmailOTPTestBase(unittest.TestCase):
 			patch(f"{MODULE}._audit"),
 			patch(f"{MODULE}._mark_verified"),
 			patch(f"{MODULE}.frappe.log_error"),
+			patch(f"{MODULE}._is_ff_member", return_value=False),
 		]
 		mocks = [p.start() for p in self.patches]
 		self.mock_audit = mocks[6]
@@ -180,6 +181,16 @@ class TestSend(EmailOTPTestBase):
 			res = ev.send_email_otp("CUST-1")
 		self.assertEqual((res["ok"], res["code"]), (False, "disabled"))
 		m.assert_not_called()
+
+	def test_flag_off_but_friends_and_family_member(self):
+		with (
+			patch(f"{MODULE}.is_feature_enabled", return_value=False),
+			patch(f"{MODULE}._is_ff_member", return_value=True),
+			self.post(200, {"success": True}) as m,
+		):
+			res = ev.send_email_otp("CUST-1")
+		self.assertTrue(res["ok"], res)
+		m.assert_called_once()
 
 	def test_permission_denied(self):
 		with patch(f"{MODULE}.frappe.has_permission", return_value=False), self.post(200, {}) as m:
