@@ -46,6 +46,8 @@ POS_SETTINGS_FIELDS = [
 	"loyalty_to_wallet",
 	"cart_lifo",
 	"display_item_code",
+	"enable_idle_refocus",
+	"idle_refocus_seconds",
 ]
 
 # Default POS Settings values
@@ -85,6 +87,8 @@ DEFAULT_POS_SETTINGS = {
 	"miraaya_installed": 0,
 	"cart_lifo": 0,
 	"display_item_code": 1,
+	"enable_idle_refocus": 1,
+	"idle_refocus_seconds": 3,
 }
 
 
