@@ -8,7 +8,7 @@
  *
  * Payload contract (posnext_promotions):
  *   - check_friends_and_family_eligibility(customer)
- *       → { eligible, reason, message, discount_percentage, program: {…},
+ *       → { eligible, reason, message, discount_percentage, program: {…}, email_domain,
  *           customer_message: { ar, en, message } | null }   ("ff_activated" Friends and Family Message)
  *   - apply_offers(...)  → { items, friends_and_family: {…}, best_discount: {…} }
  *   - apply_friends_and_family_discount(customer, items)
@@ -36,7 +36,30 @@ export const FNF_REASON = Object.freeze({
 	CAP_REACHED: "cap_reached",
 	// POS Profile has "Allow F&F" unticked: F&F is off for the whole profile.
 	PROFILE_NOT_ALLOWED: "profile_not_allowed",
+	// Approved Domains (eligibility): the member's email is not on an approved
+	// company domain, or is not OTP-verified / changed since verification.
+	EMAIL_DOMAIN_NOT_APPROVED: "email_domain_not_approved",
+	EMAIL_NOT_VERIFIED: "email_not_verified",
 });
+
+/** Eligibility reasons where the customer is an F&F member but their email blocks the discount. */
+export const FNF_EMAIL_REASONS = Object.freeze([
+	FNF_REASON.EMAIL_DOMAIN_NOT_APPROVED,
+	FNF_REASON.EMAIL_NOT_VERIFIED,
+]);
+
+/**
+ * Cashier note when an F&F member is blocked by the Approved Domains email rule,
+ * else "". Uses the server's translated message, with a local fallback.
+ */
+export function fnfEmailBlockMessage(eligibility) {
+	if (!eligibility || eligibility.eligible) return "";
+	if (!FNF_EMAIL_REASONS.includes(eligibility.reason)) return "";
+	if (eligibility.message) return eligibility.message;
+	return eligibility.reason === FNF_REASON.EMAIL_NOT_VERIFIED
+		? t("No Friends & Family: verify the customer's email (OTP) first")
+		: t("No Friends & Family: the customer needs an email on an approved company domain");
+}
 
 export const COUPON_REASON_BETTER_DISCOUNT_EXISTS = "better_discount_exists";
 
@@ -493,6 +516,12 @@ export function buildFnfCartMessages({
 					couponOverride.code || "",
 				]),
 		});
+		return messages;
+	}
+
+	const emailBlock = fnfEmailBlockMessage(eligibility);
+	if (emailBlock) {
+		messages.push({ key: "email", tone: "warning", text: emailBlock });
 		return messages;
 	}
 

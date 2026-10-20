@@ -2797,6 +2797,8 @@ function handleCustomerVerified({ name, patch }) {
 	editCustomer.value = applyVerificationPatch(editCustomer.value, name, patch);
 	if (cartStore.customer?.name === name) {
 		cartStore.customer = applyVerificationPatch(cartStore.customer, name, patch);
+		// F&F Approved Domains may require a verified email: re-check and re-price.
+		cartStore.recheckFriendsAndFamily?.();
 	}
 }
 

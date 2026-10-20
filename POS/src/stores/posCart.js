@@ -42,6 +42,7 @@ import {
 	isFnfAllowedForProfile,
 	isFnfLine,
 	mergeServerLine,
+	fnfEmailBlockMessage,
 	normalizeEligibility,
 	normalizeFnfResult,
 	pickLocalizedMessage,
@@ -464,6 +465,16 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		return globalThis.document?.documentElement?.lang || "en";
 	}
 
+	/**
+	 * Re-check F&F for the current customer after something server-side changed
+	 * (e.g. the email was just OTP-verified) and re-price the cart.
+	 */
+	async function recheckFriendsAndFamily() {
+		const eligibility = await refreshFriendsAndFamilyEligibility(true);
+		if (invoiceItems.value.length > 0) triggerOfferProcessing(true);
+		return eligibility;
+	}
+
 	async function setCustomer(selectedCustomer) {
 		const previous = currentCustomerName();
 		customer.value = selectedCustomer;
@@ -471,6 +482,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			syncOneTimeContextForCurrentCustomer(),
 			refreshFriendsAndFamilyEligibility(true),
 		]);
+		const emailBlock = fnfEmailBlockMessage(eligibility);
+		if (emailBlock && currentCustomerName() !== previous) {
+			showWarning(emailBlock);
+		}
 		if (eligibility?.eligible && currentCustomerName() !== previous) {
 			showSuccess(
 				pickLocalizedMessage(eligibility.customerMessage, currentUiLocale()) ||
@@ -2666,5 +2681,6 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		},
 		forceRefreshOffers, // Force reprocess offers from scratch
 		refreshFriendsAndFamilyEligibility,
+		recheckFriendsAndFamily,
 	};
 });

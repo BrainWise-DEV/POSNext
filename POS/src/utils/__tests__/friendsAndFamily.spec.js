@@ -5,6 +5,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	buildFnfCartMessages,
+	fnfEmailBlockMessage,
 	FNF_REASON,
 	isFnfAllowedForProfile,
 	discountTotalsBySource,
@@ -396,5 +397,34 @@ describe("isFnfAllowedForProfile (POS Profile Allow F&F)", () => {
 	it("normalizes the server's profile_not_allowed answer as not eligible", () => {
 		const e = normalizeEligibility({ eligible: false, reason: FNF_REASON.PROFILE_NOT_ALLOWED, discount_percentage: 0 }, "X");
 		expect(e).toMatchObject({ eligible: false, reason: "profile_not_allowed", discountPercentage: 0, program: null });
+	});
+});
+
+describe("Approved Domains email block (F&F member with unapproved / unverified email)", () => {
+	const blocked = (reason, message = "") =>
+		normalizeEligibility({ eligible: false, reason, message, discount_percentage: 0 }, "C1");
+
+	it("returns the server message for the email reasons only", () => {
+		expect(fnfEmailBlockMessage(blocked("email_domain_not_approved", "srv domain"))).toBe("srv domain");
+		expect(fnfEmailBlockMessage(blocked("email_not_verified", "srv verify"))).toBe("srv verify");
+		expect(fnfEmailBlockMessage(blocked("not_eligible", "x"))).toBe("");
+		expect(fnfEmailBlockMessage(null)).toBe("");
+		expect(fnfEmailBlockMessage({ eligible: true, reason: "email_not_verified" })).toBe("");
+	});
+	it("falls back to a local text when the server sent no message", () => {
+		expect(fnfEmailBlockMessage(blocked(FNF_REASON.EMAIL_NOT_VERIFIED))).toMatch(/verify/i);
+		expect(fnfEmailBlockMessage(blocked(FNF_REASON.EMAIL_DOMAIN_NOT_APPROVED))).toMatch(/approved company domain/i);
+	});
+	it("shows a single warning in the cart messages", () => {
+		const messages = buildFnfCartMessages({
+			result: { eligible: false, appliedCount: 0, lines: [], caps: null },
+			eligibility: blocked("email_domain_not_approved", "No F&F: approved domain needed"),
+			hasItems: true,
+		});
+		expect(messages).toEqual([{ key: "email", tone: "warning", text: "No F&F: approved domain needed" }]);
+	});
+	it("shows nothing for an empty cart or a plain non-member", () => {
+		expect(buildFnfCartMessages({ eligibility: blocked("email_not_verified", "m"), hasItems: false })).toEqual([]);
+		expect(buildFnfCartMessages({ eligibility: blocked("not_eligible", "m"), hasItems: true })).toEqual([]);
 	});
 });
