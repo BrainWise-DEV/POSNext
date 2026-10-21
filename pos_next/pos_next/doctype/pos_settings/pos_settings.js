@@ -3,6 +3,16 @@
 
 frappe.ui.form.on("POS Settings", {
 	refresh(frm) {
+		// Return receipts must use a Sales Invoice print format.
+		frm.set_query("return_invoice_print_format", function () {
+			return {
+				filters: {
+					doc_type: "Sales Invoice",
+					disabled: 0,
+				},
+			};
+		});
+
 		// Set query for loyalty program filtered by POS Profile company
 		frm.set_query("default_loyalty_program", function () {
 			if (!frm.doc.__company) {
