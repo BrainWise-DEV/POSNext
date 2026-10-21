@@ -28,7 +28,14 @@ beforeEach(() => {
 	call.mockReset();
 	call.mockImplementation(async (method) => {
 		if (method.endsWith("get_kasir_setup"))
-			return { modes: ["Transfer BCA"], rekening: { bank: "BCA", nomor: "1234567890", company: "PT X" }, today: "2026-10-19" };
+			return {
+				modes: ["Transfer BCA", "Transfer Mandiri"],
+				rekening_mode: {
+					"Transfer BCA": { name: "BCA", bank: "BCA", nomor: "1234567890", company: "PT X" },
+					"Transfer Mandiri": { name: "MDR", bank: "Mandiri", nomor: "2222", company: "PT X" },
+				},
+				today: "2026-10-19",
+			};
 		if (method.endsWith("get_open_bills")) return { bills: BILLS, customer_name: "Toko Sinar" };
 		if (method.endsWith("receive_transfer")) return { transfer: "TRF-1", payment_entries: ["PE-1", "PE-2", "PE-3"], uang_muka: 400000 };
 	});
@@ -90,6 +97,14 @@ describe("TerimaTransferDialog", () => {
 			{ doctype: "Sales Order", name: "SO-PT-00068", amount: 6000000 },
 		]);
 		expect(wrapper.text()).toContain("Cetak SINV-PT-00401");
+	});
+
+	it("shows the account of the chosen payment mode", async () => {
+		const wrapper = await open();
+		expect(wrapper.text()).toContain("BCA 1234567890");
+		await wrapper.find("select").setValue("Transfer Mandiri");
+		expect(wrapper.text()).toContain("Mandiri 2222");
+		expect(wrapper.text()).not.toContain("BCA 1234567890");
 	});
 
 	it("refuses a transfer smaller than the bills", async () => {

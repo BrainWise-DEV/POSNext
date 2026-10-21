@@ -505,9 +505,9 @@
 					>
 						<div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
 							<span class="text-xs font-semibold text-gray-800">{{ __("Data transfer untuk treasury") }}</span>
-							<span v-if="transferSetup?.rekening" class="text-xs text-gray-500">
-								{{ __("Ke") }} {{ transferSetup.rekening.bank }} {{ transferSetup.rekening.nomor }}
-								<template v-if="transferSetup.rekening.atas_nama">· {{ transferSetup.rekening.atas_nama }}</template>
+							<span v-for="r in transferRekening" :key="r.name" class="text-xs text-gray-500">
+								{{ __("Ke") }} {{ r.bank }} {{ r.nomor }}
+								<template v-if="r.atas_nama">· {{ r.atas_nama }}</template>
 							</span>
 						</div>
 						<div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
@@ -543,6 +543,7 @@
 						</div>
 						<p class="text-xs text-gray-500">
 							{{ __("Terisi otomatis. Ubah nama pengirim bila rekening pengirim atas nama orang lain.") }}
+							{{ __("Satu transfer untuk beberapa transaksi: setelah semua dibayar, gabungkan di menu Transfer Shift Ini.") }}
 						</p>
 					</div>
 
@@ -3076,6 +3077,18 @@ const transferAmount = computed(() => {
 	return paymentEntries.value
 		.filter((entry) => modes.has(entry.mode_of_payment))
 		.reduce((sum, entry) => sum + (entry.amount || 0), 0);
+});
+
+// One account per transfer Mode of Payment (nextend resolves it through the
+// COA); the customer may split the payment over two banks.
+const transferRekening = computed(() => {
+	const perMode = transferSetup.value?.rekening_mode || {};
+	const seen = new Map();
+	for (const entry of paymentEntries.value) {
+		const r = perMode[entry.mode_of_payment];
+		if (r && (entry.amount || 0) > 0 && !seen.has(r.name)) seen.set(r.name, r);
+	}
+	return [...seen.values()];
 });
 
 function readTransferSetup() {

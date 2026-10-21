@@ -48,6 +48,13 @@
 						<span>{{ __("Terima Transfer") }}</span>
 					</button>
 					<button
+						v-if="!shiftStore.isSpgMode"
+						@click="showTransferShiftDialog = true"
+						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-blue-50 flex items-center gap-3 transition-colors"
+					>
+						<span>{{ __("Transfer Shift Ini") }}</span>
+					</button>
+					<button
 						@click="showPanduanDialog = true"
 						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-blue-50 flex items-center gap-3 transition-colors"
 					>
@@ -670,6 +677,11 @@
 				:initial-customer="cartStore.customer"
 				@print-invoice="(name) => handlePrintInvoice({ name })"
 			/>
+			<TransferShiftDialog
+				v-model="showTransferShiftDialog"
+				:pos-profile="cartStore.posProfile"
+				:currency="shiftStore.profileCurrency"
+			/>
 			<PanduanDialog
 				v-model="showPanduanDialog"
 				:categories="panduanCategories"
@@ -1218,6 +1230,7 @@ import ShiftOpeningDialog from "@/components/ShiftOpeningDialog.vue";
 import PemakaianTintaDialog from "@/components/sale/PemakaianTintaDialog.vue";
 import PanduanDialog from "@/components/sale/PanduanDialog.vue";
 import TerimaTransferDialog from "@/components/sale/TerimaTransferDialog.vue";
+import TransferShiftDialog from "@/components/sale/TransferShiftDialog.vue";
 import SpgInvoicesDialog from "@/components/sale/SpgInvoicesDialog.vue";
 import SpgOrdersDialog from "@/components/sale/SpgOrdersDialog.vue";
 import OrderQrCameraDialog from "@/components/sale/OrderQrCameraDialog.vue";
@@ -1622,6 +1635,8 @@ async function loadTintaUsageContext() {
 const showPanduanDialog = ref(false);
 // nextend Treasury: one transfer for several COD notes / Sales Orders
 const showTerimaTransferDialog = ref(false);
+// ...and merging several sales paid by one transfer into one for treasury
+const showTransferShiftDialog = ref(false);
 const panduanCategories = ref([]);
 const panduanLoading = ref(false);
 const panduanError = ref("");

@@ -143,13 +143,16 @@
 									<option v-for="m in setup.modes" :key="m" :value="m">{{ m }}</option>
 								</select>
 							</label>
-							<div v-if="setup.rekening" class="rounded bg-gray-50 border border-gray-200 px-2 py-1.5 text-xs text-gray-600">
-								{{ __("Ke rekening") }} · {{ __("otomatis") }}
+							<div v-if="rekening" class="rounded bg-gray-50 border border-gray-200 px-2 py-1.5 text-xs text-gray-600">
+								{{ __("Ke rekening") }} · {{ __("sesuai metode bayar") }}
 								<div class="text-sm font-semibold text-gray-900">
-									{{ setup.rekening.bank }} {{ setup.rekening.nomor }}
-									<template v-if="setup.rekening.atas_nama">· {{ setup.rekening.atas_nama }}</template>
+									{{ rekening.bank }} {{ rekening.nomor }}
+									<template v-if="rekening.atas_nama">· {{ rekening.atas_nama }}</template>
 								</div>
 							</div>
+							<p v-else-if="mode" class="rounded bg-amber-50 border border-amber-200 px-2 py-1.5 text-xs text-amber-800">
+								{{ __("Rekening {0} belum diatur. Hubungi accounting.", [mode]) }}
+							</p>
 							<label class="flex flex-col gap-0.5 text-xs text-gray-600">
 								{{ __("Nama pengirim") }}
 								<input v-model="pengirim" type="text" class="h-10 text-sm border border-gray-300 rounded px-2" />
@@ -222,7 +225,7 @@ const show = computed({
 });
 const { showError, showSuccess } = useToast();
 
-const setup = ref({ modes: [], rekening: null, today: "" });
+const setup = ref({ modes: [], rekening_mode: {}, today: "" });
 const customer = ref(null);
 const search = ref("");
 const results = ref([]);
@@ -239,6 +242,7 @@ const uploading = ref(false);
 const saving = ref(false);
 const done = ref(null);
 
+const rekening = computed(() => setup.value.rekening_mode?.[mode.value] || null);
 const formatCurrency = (v) => formatCurrencyUtil(Number(v || 0), props.currency);
 const round = (v) => Math.round(Number(v || 0) * 100) / 100;
 
@@ -256,7 +260,7 @@ const diffNote = computed(() => {
 	if (diff.value === 0) return __("Seluruh transfer terbagi ke tagihan.");
 	if (diff.value > 0)
 		return __("Disimpan sebagai saldo customer di {0} dan bisa dipakai di belanja berikutnya.", [
-			setup.value.rekening?.company || "",
+			rekening.value?.company || "",
 		]);
 	return __("Kurangi nominal bayar salah satu tagihan sampai pas dengan transfer.");
 });

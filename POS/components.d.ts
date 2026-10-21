@@ -68,6 +68,7 @@ declare module 'vue' {
     TerimaTransferDialog: typeof import('./src/components/sale/TerimaTransferDialog.vue')['default']
     TintingDialog: typeof import('./src/components/sale/TintingDialog.vue')['default']
     Toast: typeof import('./src/components/common/Toast.vue')['default']
+    TransferShiftDialog: typeof import('./src/components/sale/TransferShiftDialog.vue')['default']
     TranslatedHTML: typeof import('./src/components/common/TranslatedHTML.vue')['default']
     UserMenu: typeof import('./src/components/common/UserMenu.vue')['default']
     WarehouseAvailabilityDialog: typeof import('./src/components/sale/WarehouseAvailabilityDialog.vue')['default']
