@@ -498,6 +498,55 @@
 						</template>
 					</div>
 
+					<!-- Data transfer (nextend Treasury): treasury checks it in the bank app the same day -->
+					<div
+						v-if="transferAmount > 0"
+						class="rounded-lg p-2 bg-gray-50 border border-gray-200 flex flex-col gap-1.5"
+					>
+						<div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+							<span class="text-xs font-semibold text-gray-800">{{ __("Data transfer untuk treasury") }}</span>
+							<span v-for="r in transferRekening" :key="r.name" class="text-xs text-gray-500">
+								{{ __("Ke") }} {{ r.bank }} {{ r.nomor }}
+								<template v-if="r.atas_nama">· {{ r.atas_nama }}</template>
+							</span>
+						</div>
+						<div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+							<label class="flex flex-col gap-0.5 text-xs text-gray-600">
+								{{ __("Nama pengirim") }}
+								<input
+									v-model="transferPengirim"
+									type="text"
+									class="h-9 text-sm border border-gray-300 rounded px-2"
+									:placeholder="customerLabel"
+								/>
+							</label>
+							<label class="flex flex-col gap-0.5 text-xs text-gray-600">
+								{{ __("Tanggal transfer") }}
+								<input v-model="transferTanggal" type="date" class="h-9 text-sm border border-gray-300 rounded px-2" />
+							</label>
+							<label class="flex flex-col gap-0.5 text-xs text-gray-600">
+								{{ __("No. referensi (opsional)") }}
+								<input v-model="transferRef" type="text" class="h-9 text-sm border border-gray-300 rounded px-2" />
+							</label>
+							<label class="flex flex-col gap-0.5 text-xs text-gray-600">
+								{{ __("Foto bukti (opsional)") }}
+								<input
+									type="file"
+									accept="image/*,application/pdf"
+									class="text-xs"
+									:disabled="isOffline || uploadingBukti"
+									@change="uploadBukti"
+								/>
+								<span v-if="uploadingBukti" class="text-gray-500">{{ __("Mengunggah…") }}</span>
+								<span v-else-if="transferBukti" class="text-green-700">{{ __("Bukti terlampir") }}</span>
+							</label>
+						</div>
+						<p class="text-xs text-gray-500">
+							{{ __("Terisi otomatis. Ubah nama pengirim bila rekening pengirim atas nama orang lain.") }}
+							{{ __("Satu transfer untuk beberapa transaksi: setelah semua dibayar, gabungkan di menu Transfer Shift Ini.") }}
+						</p>
+					</div>
+
 					<!-- Outstanding Balance Row (full width, two columns) -->
 					<div
 						v-if="customerCreditEnabled && totalAvailableCredit !== 0"
@@ -3009,6 +3058,109 @@ function deliveryPayload() {
 	};
 }
 
+// -- nextend Treasury: data transfer -----------------------------------------
+// Payments by a Mode of Payment of jenis Transfer are checked by treasury in
+// the bank app the same day (nextend.treasury). Everything starts filled in;
+// the cashier only changes the sender when the account is someone else's.
+const TRANSFER_SETUP_KEY = "nextend_transfer_setup";
+const transferSetup = ref(readTransferSetup());
+const transferPengirim = ref("");
+const transferTanggal = ref("");
+const transferRef = ref("");
+const transferBukti = ref("");
+const uploadingBukti = ref(false);
+const customerLabel = computed(
+	() => props.customer?.customer_name || props.customer?.name || props.customer || ""
+);
+const transferAmount = computed(() => {
+	const modes = new Set(transferSetup.value?.modes || []);
+	return paymentEntries.value
+		.filter((entry) => modes.has(entry.mode_of_payment))
+		.reduce((sum, entry) => sum + (entry.amount || 0), 0);
+});
+
+// One account per transfer Mode of Payment (nextend resolves it through the
+// COA); the customer may split the payment over two banks.
+const transferRekening = computed(() => {
+	const perMode = transferSetup.value?.rekening_mode || {};
+	const seen = new Map();
+	for (const entry of paymentEntries.value) {
+		const r = perMode[entry.mode_of_payment];
+		if (r && (entry.amount || 0) > 0 && !seen.has(r.name)) seen.set(r.name, r);
+	}
+	return [...seen.values()];
+});
+
+function readTransferSetup() {
+	try {
+		return JSON.parse(localStorage.getItem(TRANSFER_SETUP_KEY) || "null");
+	} catch {
+		return null;
+	}
+}
+
+// Kept for offline use: the panel still shows with the last known setup.
+async function loadTransferSetup() {
+	if (props.isOffline) return;
+	try {
+		const setup = await call("nextend.treasury.transfer.get_kasir_setup", {
+			pos_profile: props.posProfile,
+		});
+		transferSetup.value = setup;
+		try {
+			localStorage.setItem(TRANSFER_SETUP_KEY, JSON.stringify(setup));
+		} catch {
+			// storage full or blocked: the setup is simply fetched again next time
+		}
+	} catch (error) {
+		log.warn("[PaymentDialog] Transfer setup unavailable:", error);
+	}
+}
+
+function resetTransfer() {
+	transferPengirim.value = customerLabel.value;
+	transferTanggal.value = today;
+	transferRef.value = "";
+	transferBukti.value = "";
+}
+
+async function uploadBukti(event) {
+	const file = event.target.files?.[0];
+	event.target.blur();
+	if (!file) return;
+	uploadingBukti.value = true;
+	try {
+		const form = new FormData();
+		form.append("file", file, file.name);
+		form.append("is_private", "1");
+		const res = await fetch("/api/method/upload_file", {
+			method: "POST",
+			headers: { Accept: "application/json", "X-Frappe-CSRF-Token": window.csrf_token },
+			body: form,
+		});
+		const data = await res.json();
+		if (!res.ok || !data.message?.file_url) throw new Error(data.exception || res.statusText);
+		transferBukti.value = data.message.file_url;
+	} catch (error) {
+		transferBukti.value = "";
+		showWarning(__("Bukti transfer gagal diunggah. Transaksi tetap bisa disimpan tanpa bukti."));
+		log.error("[PaymentDialog] Upload bukti failed:", error);
+	} finally {
+		uploadingBukti.value = false;
+	}
+}
+
+/** Sales Invoice / Sales Order fields of the transfer, null without a transfer payment. */
+function transferPayload() {
+	if (!(transferAmount.value > 0)) return null;
+	return {
+		nextend_transfer_pengirim: transferPengirim.value.trim() || customerLabel.value,
+		nextend_transfer_tanggal: transferTanggal.value || today,
+		nextend_transfer_referensi: transferRef.value.trim(),
+		nextend_transfer_bukti: transferBukti.value || null,
+	};
+}
+
 // The choice belongs to one sale and one customer: it survives reopening the
 // dialog, and goes once the sale is done or somebody else is buying. It
 // starts from what the SPG of a loaded order chose; Bayar di Tempat is always
@@ -3179,6 +3331,8 @@ watch(show, (newVal) => {
 		applyWriteOff.value = false; // Reset write-off state
 		// Set default delivery date to today for Sales Orders
 		deliveryDate.value = isSalesOrder.value ? today : "";
+		loadTransferSetup();
+		resetTransfer();
 
 		// Debug logging
 		log.debug("[PaymentDialog] Dialog opened with props:", {
@@ -3576,6 +3730,7 @@ function addCreditAccountPayment() {
 		paid_amount: 0,
 		outstanding_amount: props.grandTotal,
 		delivery: deliveryPayload(),
+		transfer: transferPayload(),
 	};
 
 	log.debug("[PaymentDialog] Emitting credit sale payment-completed:", paymentData);
@@ -3635,6 +3790,7 @@ function completePayment() {
 		receivable_account: receivableAccount,
 		is_credit_sale: !!receivableAccount && paymentEntries.value.length === 0,
 		delivery: deliveryPayload(),
+		transfer: transferPayload(),
 	};
 
 	log.debug("[PaymentDialog] Emitting payment-completed:", paymentData);

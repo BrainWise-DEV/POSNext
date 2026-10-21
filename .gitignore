@@ -67,3 +67,6 @@ TODO.md
 .claude/settings.json
 *.jpeg
 missing.txt
+
+# graphify knowledge graph output
+graphify-out/

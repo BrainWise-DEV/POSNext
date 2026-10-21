@@ -44,6 +44,8 @@ export function useInvoice() {
 	const posOrderDelivery = ref(null);
 	/** nextend Pengiriman: the sale's delivery as Sales Invoice fields, null = taken along */
 	const delivery = ref(null);
+	/** nextend Treasury: the transfer's sender/date/reference/proof as document fields, null = no transfer */
+	const transfer = ref(null);
 	const taxRules = ref([]); // Tax rules from POS Profile
 	const taxInclusive = ref(false); // Tax inclusive setting from POS Settings
 
@@ -1355,6 +1357,22 @@ export function useInvoice() {
 					invoiceData.delivery_date = deliveryDate;
 				}
 
+				// nextend Treasury: Transfer Pelanggan is made from these fields at submit.
+				if (transfer.value) {
+					Object.assign(invoiceData, transfer.value);
+				}
+				// A Sales Order has no payments table and would drop what the customer
+				// paid; nextend books it as a down payment when the order is submitted.
+				if (targetDoctype === "Sales Order" && invoicePayments.length) {
+					invoiceData.nextend_pembayaran_kasir = JSON.stringify({
+						shift: posOpeningShift.value,
+						payments: invoicePayments.map((p) => ({
+							mode_of_payment: p.mode_of_payment,
+							amount: p.amount,
+						})),
+					});
+				}
+
 				// Add sales_team if provided
 				if (rawSalesTeam && rawSalesTeam.length > 0) {
 					invoiceData.sales_team = rawSalesTeam.map((member) => ({
@@ -1649,6 +1667,7 @@ export function useInvoice() {
 		posOrderSalesPerson.value = null;
 		posOrderDelivery.value = null;
 		delivery.value = null;
+		transfer.value = null;
 
 		// Reset incremental cache
 		_cachedSubtotal.value = 0;
@@ -1680,6 +1699,7 @@ export function useInvoice() {
 		posOrderSalesPerson.value = null;
 		posOrderDelivery.value = null;
 		delivery.value = null;
+		transfer.value = null;
 
 		// Reset incremental cache
 		_cachedSubtotal.value = 0;
@@ -1759,6 +1779,7 @@ export function useInvoice() {
 		posOrderSalesPerson,
 		posOrderDelivery,
 		delivery,
+		transfer,
 		taxRules,
 		taxInclusive,
 		isSubmitting,

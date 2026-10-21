@@ -41,9 +41,62 @@
 						<span>{{ __("Pemakaian Tinta") }}</span>
 					</button>
 					<button
-						@click="showPanduanDialog = true"
-						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-blue-50 flex items-center gap-3 transition-colors"
+						v-if="!shiftStore.isSpgMode"
+						@click="showTerimaTransferDialog = true"
+						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-green-50 flex items-center gap-3 transition-colors"
 					>
+						<svg
+							class="w-5 h-5 text-green-600"
+							fill="none"
+							stroke="currentColor"
+							viewBox="0 0 24 24"
+						>
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								stroke-width="2"
+								d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"
+							/>
+						</svg>
+						<span>{{ __("Terima Transfer") }}</span>
+					</button>
+					<button
+						v-if="!shiftStore.isSpgMode"
+						@click="showTransferShiftDialog = true"
+						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-cyan-50 flex items-center gap-3 transition-colors"
+					>
+						<svg
+							class="w-5 h-5 text-cyan-600"
+							fill="none"
+							stroke="currentColor"
+							viewBox="0 0 24 24"
+						>
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								stroke-width="2"
+								d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"
+							/>
+						</svg>
+						<span>{{ __("Transfer Shift Ini") }}</span>
+					</button>
+					<button
+						@click="showPanduanDialog = true"
+						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-slate-50 flex items-center gap-3 transition-colors"
+					>
+						<svg
+							class="w-5 h-5 text-slate-600"
+							fill="none"
+							stroke="currentColor"
+							viewBox="0 0 24 24"
+						>
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								stroke-width="2"
+								d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+							/>
+						</svg>
 						<span>{{ __("Panduan") }}</span>
 					</button>
 					<template v-if="shiftStore.isSpgMode">
@@ -656,6 +709,18 @@
 				:warehouses="tintaUsage.warehouses"
 				:default-warehouse="shiftStore.currentProfile?.warehouse || ''"
 			/>
+			<TerimaTransferDialog
+				v-model="showTerimaTransferDialog"
+				:pos-profile="cartStore.posProfile"
+				:currency="shiftStore.profileCurrency"
+				:initial-customer="cartStore.customer"
+				@print-invoice="(name) => handlePrintInvoice({ name })"
+			/>
+			<TransferShiftDialog
+				v-model="showTransferShiftDialog"
+				:pos-profile="cartStore.posProfile"
+				:currency="shiftStore.profileCurrency"
+			/>
 			<PanduanDialog
 				v-model="showPanduanDialog"
 				:categories="panduanCategories"
@@ -1203,6 +1268,8 @@ import ShiftClosingDialog from "@/components/ShiftClosingDialog.vue";
 import ShiftOpeningDialog from "@/components/ShiftOpeningDialog.vue";
 import PemakaianTintaDialog from "@/components/sale/PemakaianTintaDialog.vue";
 import PanduanDialog from "@/components/sale/PanduanDialog.vue";
+import TerimaTransferDialog from "@/components/sale/TerimaTransferDialog.vue";
+import TransferShiftDialog from "@/components/sale/TransferShiftDialog.vue";
 import SpgInvoicesDialog from "@/components/sale/SpgInvoicesDialog.vue";
 import SpgOrdersDialog from "@/components/sale/SpgOrdersDialog.vue";
 import OrderQrCameraDialog from "@/components/sale/OrderQrCameraDialog.vue";
@@ -1301,12 +1368,29 @@ function handleApprovalRealtime(payload) {
 	}
 }
 
+// nextend Treasury: treasury found no money for a transfer this cashier took
+// (nextend.treasury.realtime.KASIR_EVENT, sent to this user only).
+const TRANSFER_REJECTED_EVENT = "nextend_transfer_ditolak";
+
+function handleTransferRejected(payload) {
+	if (!payload) return;
+	showWarning(
+		__("Transfer {0} {1} ditolak treasury: {2}", [
+			payload.pengirim,
+			formatCurrency(payload.total || 0),
+			payload.alasan || "",
+		])
+	);
+}
+
 onMounted(() => {
 	window.frappe?.realtime?.on(APPROVAL_EVENT, handleApprovalRealtime);
+	window.frappe?.realtime?.on(TRANSFER_REJECTED_EVENT, handleTransferRejected);
 });
 
 onUnmounted(() => {
 	window.frappe?.realtime?.off(APPROVAL_EVENT, handleApprovalRealtime);
+	window.frappe?.realtime?.off(TRANSFER_REJECTED_EVENT, handleTransferRejected);
 });
 
 /**
@@ -1588,6 +1672,10 @@ async function loadTintaUsageContext() {
 // nextend.panduan: docs marked "Tampil di POS" that the user's roles may read.
 // The menu is always shown; the list is fetched each time the dialog opens.
 const showPanduanDialog = ref(false);
+// nextend Treasury: one transfer for several COD notes / Sales Orders
+const showTerimaTransferDialog = ref(false);
+// ...and merging several sales paid by one transfer into one for treasury
+const showTransferShiftDialog = ref(false);
 const panduanCategories = ref([]);
 const panduanLoading = ref(false);
 const panduanError = ref("");
@@ -2827,6 +2915,8 @@ async function handlePaymentCompleted(paymentData) {
 
 		// nextend Pengiriman: Dikirim / Bayar di Tempat chosen in the payment dialog
 		cartStore.delivery = paymentData.delivery || null;
+		// nextend Treasury: sender/date/reference/proof of a transfer payment
+		cartStore.transfer = paymentData.transfer || null;
 
 		// Set delivery date for Sales Orders
 		if (paymentData.delivery_date) {
@@ -2864,6 +2954,7 @@ async function handlePaymentCompleted(paymentData) {
 				receivable_account: paymentData.receivable_account || null,
 				edited_from: editingOfflineContext?.originalOfflineId || null,
 				...(cartStore.delivery || {}),
+				...(cartStore.transfer || {}),
 			};
 			if (cartStore.posOrder) {
 				invoiceData.custom_pos_order = cartStore.posOrder;
