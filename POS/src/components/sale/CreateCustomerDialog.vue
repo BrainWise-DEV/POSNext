@@ -62,7 +62,7 @@
 				<!-- Mobile Number with Country Code Selector -->
 				<div>
 					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
-						{{ __("Mobile Number") }} <span class="text-red-500">*</span>
+						{{ __("Mobile Number") }} <span v-if="requireCustomerPhone" class="text-red-500">*</span>
 					</label>
 					<div class="flex gap-2">
 						<!-- Country Code Dropdown -->
@@ -165,7 +165,7 @@
 							:placeholder="__('Enter phone number')"
 							class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-start"
 							@input="updateMobileNumber"
-							required
+							:required="requireCustomerPhone"
 						/>
 					</div>
 				</div>
@@ -411,6 +411,7 @@ const show = computed({
 const isEditMode = computed(() => !!props.customer?.name);
 
 const requiresSplitCustomerName = computed(() => Boolean(posSettingsStore.miraayaInstalled));
+const requireCustomerPhone = computed(() => posSettingsStore.requireCustomerPhone);
 
 const computedCustomerName = computed(() => {
 	const first = (customerData.value.custom_first_name || "").trim();
@@ -425,12 +426,16 @@ const hasValidCustomerName = computed(() => {
 	return Boolean((customerData.value.customer_name || "").trim());
 });
 
+const hasValidMobile = computed(() => {
+	const hasPhone = Boolean(String(phoneNumber.value || "").trim());
+	if (!hasPhone) {
+		return !requireCustomerPhone.value;
+	}
+	return Boolean(selectedCountryCode.value);
+});
+
 const canSubmitCustomer = computed(
-	() =>
-		hasValidCustomerName.value &&
-		Boolean(phoneNumber.value) &&
-		Boolean(selectedCountryCode.value) &&
-		hasPermission.value
+	() => hasValidCustomerName.value && hasValidMobile.value && hasPermission.value
 );
 
 const currentCountryCode = computed(() => {
@@ -848,8 +853,11 @@ const handleCreate = async () => {
 	} else if (!customerData.value.customer_name) {
 		return showError(__("Customer Name is required"));
 	}
-	if (!phoneNumber.value) {
+	if (requireCustomerPhone.value && !phoneNumber.value) {
 		return showError(__("Mobile Number is required"));
+	}
+	if (phoneNumber.value && !selectedCountryCode.value) {
+		return showError(__("Country code is required"));
 	}
 	if (isEditMode.value) {
 		await updateCustomerResource.submit();
