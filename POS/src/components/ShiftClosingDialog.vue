@@ -671,25 +671,24 @@
 											</label>
 										</div>
 
-										<!-- Simple Input with Native Arrows -->
 										<div class="w-40 md:w-48">
-											<Input
+											<input
 												:id="`payment-${idx}`"
-												:modelValue="payment.closing_amount"
-												@update:modelValue="
-													(value) => updateClosingAmount(payment, value)
-												"
-												type="number"
-												step="10"
-												min="0"
+												type="text"
+												inputmode="decimal"
+												autocomplete="off"
 												placeholder="0.00"
+												class="form-input block w-full text-base md:text-lg text-center font-semibold"
+												:value="payment.closing_amount ?? ''"
 												:disabled="submitResource.loading"
 												:aria-label="
 													__('Enter actual amount for {0}', [
 														payment.mode_of_payment,
 													])
 												"
-												class="text-base md:text-lg text-center font-semibold"
+												@focus="onAmountFocus(payment)"
+												@input="(e) => updateClosingAmount(payment, e.target.value)"
+												@blur="onAmountBlur(payment)"
 											/>
 										</div>
 									</div>
@@ -700,14 +699,10 @@
 							<div v-else class="flex flex-col gap-4 md:gap-5">
 								<div
 									v-for="(payment, idx) in closingData.payment_reconciliation"
-									:key="idx"
+									:key="payment.mode_of_payment || idx"
 									:class="[
 										'border rounded-lg p-3 md:p-5 transition-all',
-										payment.difference === 0
-											? 'border-green-200 bg-green-50'
-											: payment.difference > 0
-											? 'border-blue-200 bg-blue-50'
-											: 'border-red-200 bg-red-50',
+										paymentCardClass(payment),
 									]"
 								>
 									<div
@@ -759,11 +754,13 @@
 											</div>
 										</div>
 
-										<!-- Status Badge -->
+										<!-- Status Badge (hidden while typing so layout does not steal focus) -->
 										<div
 											v-if="
+												!payment._editing &&
 												payment.closing_amount !== null &&
-												payment.closing_amount !== undefined
+												payment.closing_amount !== undefined &&
+												String(payment.closing_amount).trim() !== ''
 											"
 											class="flex-shrink-0"
 										>
@@ -845,29 +842,32 @@
 											</div>
 										</div>
 
-										<!-- Actual/Closing Amount -->
+										<!-- Actual/Closing Amount — native input keeps Dialog focus
+										     stable; same Opening | Expected | Actual layout. -->
 										<div
-											class="text-start bg-white rounded-lg p-2 md:p-3 border border-gray-300"
+											class="text-start bg-white rounded-lg p-2 md:p-3 border border-gray-300 relative z-10"
 										>
 											<label
+												:for="`payment-review-${idx}`"
 												class="block text-xs font-medium text-gray-700 uppercase mb-0.5 md:mb-1"
 											>
 												{{ __("Actual Amount *") }}
 											</label>
-											<Input
-												:modelValue="payment.closing_amount"
-												@update:modelValue="
-													(value) => updateClosingAmount(payment, value)
-												"
-												type="number"
-												step="0.01"
-												min="0"
+											<input
+												:id="`payment-review-${idx}`"
+												type="text"
+												inputmode="decimal"
+												autocomplete="off"
 												placeholder="0.00"
+												class="form-input block w-full text-base md:text-lg font-semibold bg-white"
+												:value="payment.closing_amount ?? ''"
 												:disabled="
 													showSuccessReport || submitResource.loading
 												"
 												:aria-label="`Enter actual amount for ${payment.mode_of_payment}`"
-												class="text-base md:text-lg"
+												@focus="onAmountFocus(payment)"
+												@input="(e) => updateClosingAmount(payment, e.target.value)"
+												@blur="onAmountBlur(payment)"
 											/>
 											<div
 												class="text-xs text-gray-500 mt-0.5 md:mt-1 hidden sm:block"
@@ -884,8 +884,10 @@
 									<!-- Difference Alert -->
 									<div
 										v-if="
+											!payment._editing &&
 											payment.closing_amount !== null &&
 											payment.closing_amount !== undefined &&
+											String(payment.closing_amount).trim() !== '' &&
 											payment.difference !== 0
 										"
 										class="text-start mt-2 md:mt-3 p-2 md:p-3 rounded-lg"
@@ -1175,7 +1177,7 @@
 </template>
 
 <script setup>
-import { Button, Dialog, FeatherIcon, Input } from "frappe-ui";
+import { Button, Dialog, FeatherIcon } from "frappe-ui";
 import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
 import { useShift, shiftState } from "../composables/useShift";
@@ -1267,20 +1269,23 @@ async function loadClosingData() {
 			opening_shift: props.openingShift,
 		});
 
-		// Make payment_reconciliation reactive
+		// Make payment_reconciliation reactive. Force blank Actual Amount —
+		// Currency fields default to 0 in as_dict and look "locked".
 		if (data.payment_reconciliation) {
 			data.payment_reconciliation = data.payment_reconciliation.map((payment) =>
 				reactive({
 					...payment,
-					closing_amount: payment.closing_amount ?? 0,
+					closing_amount: null,
 					difference: 0,
-					_touched: true,
+					_touched: false,
+					_editing: false,
+					_frozenDifference: 0,
 				})
 			);
 
-			// Calculate initial differences
 			data.payment_reconciliation.forEach((payment) => {
 				calculateDifference(payment);
+				payment._frozenDifference = payment.difference;
 			});
 		}
 
@@ -1303,24 +1308,45 @@ function calculateDifference(payment) {
 	payment.difference = closing - expected;
 }
 
-// New function to handle closing amount updates with proper reactivity
+/** Freeze card colors while focused — live class changes steal input focus. */
+function paymentCardClass(payment) {
+	const diff = payment._editing ? payment._frozenDifference : payment.difference;
+	if (diff === 0) return "border-green-200 bg-green-50";
+	if (diff > 0) return "border-blue-200 bg-blue-50";
+	return "border-red-200 bg-red-50";
+}
+
+function onAmountFocus(payment) {
+	payment._editing = true;
+	payment._frozenDifference = payment.difference;
+}
+
 function updateClosingAmount(payment, value) {
-	payment.closing_amount = value;
+	// Keep empty as null so the field stays blank (placeholder) until typed.
+	payment.closing_amount =
+		value === "" || value === null || value === undefined ? null : value;
 	payment._touched = true;
 	calculateDifference(payment);
+}
+
+function onAmountBlur(payment) {
+	payment._editing = false;
+	calculateDifference(payment);
+	payment._frozenDifference = payment.difference;
 }
 
 const canSubmit = computed(() => {
 	if (!closingData.value || !closingData.value.payment_reconciliation) return false;
 
-	// Check if all closing amounts have been manually entered
-	return closingData.value.payment_reconciliation.every(
-		(payment) =>
+	return closingData.value.payment_reconciliation.every((payment) => {
+		const raw = payment.closing_amount;
+		return (
 			payment._touched &&
-			payment.closing_amount !== null &&
-			payment.closing_amount !== undefined &&
-			payment.closing_amount !== ""
-	);
+			raw !== null &&
+			raw !== undefined &&
+			String(raw).trim() !== ""
+		);
+	});
 });
 
 async function submitClosing() {
