@@ -80,7 +80,14 @@
 								]"
 							>
 								<label class="flex gap-2 items-start flex-1 min-w-[12rem] cursor-pointer">
-									<input v-model="b.checked" type="checkbox" class="mt-0.5 w-5 h-5" @change="toggle(b)" />
+									<input
+										v-model="b.checked"
+										type="checkbox"
+										class="mt-0.5 w-5 h-5"
+										:disabled="otherCompany(b)"
+										:title="otherCompany(b) ? __('Perusahaan lain: dibayar dengan transfer terpisah') : ''"
+										@change="toggle(b)"
+									/>
 									<span class="flex flex-col gap-0.5 min-w-0">
 										<span class="flex flex-wrap items-center gap-1.5">
 											<span class="font-mono text-xs font-semibold">{{ b.name }}</span>
@@ -143,15 +150,18 @@
 									<option v-for="m in setup.modes" :key="m" :value="m">{{ m }}</option>
 								</select>
 							</label>
-							<div v-if="rekening" class="rounded bg-gray-50 border border-gray-200 px-2 py-1.5 text-xs text-gray-600">
+							<p v-if="!billCompany" class="rounded bg-gray-50 border border-gray-200 px-2 py-1.5 text-xs text-gray-600">
+								{{ __("Rekening tujuan tampil setelah memilih tagihan. Tagihan PT dan CV dibayar dengan transfer terpisah.") }}
+							</p>
+							<div v-else-if="rekening" class="rounded bg-gray-50 border border-gray-200 px-2 py-1.5 text-xs text-gray-600">
 								{{ __("Ke rekening") }} · {{ __("sesuai metode bayar") }}
 								<div class="text-sm font-semibold text-gray-900">
 									{{ rekening.bank }} {{ rekening.nomor }}
 									<template v-if="rekening.atas_nama">· {{ rekening.atas_nama }}</template>
 								</div>
 							</div>
-							<p v-else-if="mode" class="rounded bg-amber-50 border border-amber-200 px-2 py-1.5 text-xs text-amber-800">
-								{{ __("Rekening {0} belum diatur. Hubungi accounting.", [mode]) }}
+							<p v-else class="rounded bg-amber-50 border border-amber-200 px-2 py-1.5 text-xs text-amber-800">
+								{{ __("Rekening {0} untuk {1} belum diatur. Hubungi accounting.", [mode, billCompany]) }}
 							</p>
 							<label class="flex flex-col gap-0.5 text-xs text-gray-600">
 								{{ __("Nama pengirim") }}
@@ -242,7 +252,12 @@ const uploading = ref(false);
 const saving = ref(false);
 const done = ref(null);
 
-const rekening = computed(() => setup.value.rekening_mode?.[mode.value] || null);
+// PT and CV have their own accounts: one transfer pays bills of one company.
+const billCompany = computed(() => bills.value.find((b) => b.checked)?.company || null);
+const otherCompany = (b) => !!billCompany.value && b.company !== billCompany.value;
+const rekening = computed(
+	() => setup.value.rekening_mode?.[mode.value]?.[billCompany.value] || null
+);
 const formatCurrency = (v) => formatCurrencyUtil(Number(v || 0), props.currency);
 const round = (v) => Math.round(Number(v || 0) * 100) / 100;
 
@@ -277,6 +292,7 @@ const canSave = computed(
 		!uploading.value &&
 		customer.value &&
 		mode.value &&
+		rekening.value &&
 		allocated.value > 0 &&
 		Number(nominal.value || 0) > 0 &&
 		diff.value >= 0 &&

@@ -7,6 +7,7 @@ import {
 	previewWarehousePick,
 	saleRowKey,
 	splitSubmissionItems,
+	transferByCompany,
 } from "../saleSplit";
 
 const scope = {
@@ -283,5 +284,35 @@ describe("previewWarehousePick", () => {
 			{ warehouse: "LUAR", qty: 2 },
 		]);
 		expect(pick.shortfall).toBe(0);
+	});
+});
+
+describe("transferByCompany", () => {
+	const groups = [
+		{ company: "MJP PT", amount: 800000 },
+		{ company: "BISC CV", amount: 450000 },
+	];
+
+	it("sends each company its own invoice total to its own account", () => {
+		expect(transferByCompany(groups, { "Transfer BCA": 1250000 }, 1250000)).toEqual([
+			{ company: "MJP PT", mode: "Transfer BCA", amount: 800000 },
+			{ company: "BISC CV", mode: "Transfer BCA", amount: 450000 },
+		]);
+	});
+
+	it("splits a basket over two banks in the basket's proportions, rest to the session company", () => {
+		const rows = transferByCompany(groups, { A: 750000, B: 500000 }, 1250000);
+		expect(rows.filter((r) => r.company === "BISC CV")).toEqual([
+			{ company: "BISC CV", mode: "A", amount: 270000 },
+			{ company: "BISC CV", mode: "B", amount: 180000 },
+		]);
+		expect(rows.filter((r) => r.company === "MJP PT").map((r) => r.amount)).toEqual([480000, 320000]);
+	});
+
+	it("applies the invoice discount and keeps a single company on one account", () => {
+		expect(transferByCompany(groups, { A: 1000000 }, 1000000)[1].amount).toBe(360000);
+		expect(transferByCompany([groups[0]], { A: 800000 }, 800000)).toEqual([
+			{ company: "MJP PT", mode: "A", amount: 800000 },
+		]);
 	});
 });

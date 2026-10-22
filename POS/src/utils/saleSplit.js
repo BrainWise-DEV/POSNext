@@ -287,3 +287,45 @@ export function splitSubmissionItems(items, split) {
 		(a, b) => (a.company !== split.company) - (b.company !== split.company)
 	);
 }
+
+/**
+ * How much of each transfer payment mode lands on each company's account, so
+ * the cashier can tell the customer what to send where. Follows the server
+ * (split_invoice._allocate_payments): every invoice but the first is paid
+ * exactly its total in the basket's mode proportions, the first (session
+ * company) takes the rest. Group amounts are previews, scaled to the grand
+ * total to carry the invoice discount.
+ *
+ * ponytail: client-side estimate; a rounding difference with the server's
+ * invoice totals only means one transfer shows up as "Perlu diperiksa" in
+ * treasury H+1. Add a server preview endpoint if that happens often.
+ *
+ * @param {Array<{company: string, amount: number}>} groups session company first
+ * @param {Object<string, number>} modeAmounts tendered amount per payment mode
+ * @param {number} grandTotal
+ * @returns {Array<{company: string, mode: string, amount: number}>} zero amounts dropped
+ */
+export function transferByCompany(groups, modeAmounts, grandTotal) {
+	const round = (n) => Math.round(n * 100) / 100;
+	const tendered = Object.values(modeAmounts).reduce((sum, a) => sum + a, 0);
+	if (!tendered || !groups.length) return [];
+	const net = groups.reduce((sum, g) => sum + g.amount, 0);
+	const scale = net > 0 && grandTotal > 0 ? grandTotal / net : 1;
+
+	const left = { ...modeAmounts };
+	let unspent = tendered;
+	const rows = [];
+	groups.slice(1).forEach((group) => {
+		const due = Math.min(round(group.amount * scale), unspent);
+		unspent = round(unspent - due);
+		for (const [mode, amount] of Object.entries(modeAmounts)) {
+			const share = round((due * amount) / tendered);
+			left[mode] = round(left[mode] - share);
+			if (share > 0) rows.push({ company: group.company, mode, amount: share });
+		}
+	});
+	const first = Object.entries(left)
+		.filter(([, amount]) => amount > 0)
+		.map(([mode, amount]) => ({ company: groups[0].company, mode, amount }));
+	return [...first, ...rows];
+}

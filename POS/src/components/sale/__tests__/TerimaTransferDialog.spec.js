@@ -22,6 +22,7 @@ import TerimaTransferDialog from "@/components/sale/TerimaTransferDialog.vue";
 const BILLS = [
 	{ doctype: "Sales Invoice", name: "SINV-PT-00401", company: "PT", tanggal: "2026-10-15", total: 3600000, sisa: 3600000 },
 	{ doctype: "Sales Order", name: "SO-PT-00068", company: "PT", tanggal: "2026-10-16", total: 15000000, dp: 0, sisa: 15000000 },
+	{ doctype: "Sales Invoice", name: "SINV-CV-00077", company: "CV", tanggal: "2026-10-16", total: 500000, sisa: 500000 },
 ];
 
 beforeEach(() => {
@@ -31,8 +32,14 @@ beforeEach(() => {
 			return {
 				modes: ["Transfer BCA", "Transfer Mandiri"],
 				rekening_mode: {
-					"Transfer BCA": { name: "BCA", bank: "BCA", nomor: "1234567890", company: "PT X" },
-					"Transfer Mandiri": { name: "MDR", bank: "Mandiri", nomor: "2222", company: "PT X" },
+					"Transfer BCA": {
+						PT: { name: "BCA", bank: "BCA", nomor: "1234567890", company: "PT" },
+						CV: { name: "BCA-CV", bank: "BCA", nomor: "9876543210", company: "CV" },
+					},
+					"Transfer Mandiri": {
+						PT: { name: "MDR", bank: "Mandiri", nomor: "2222", company: "PT" },
+						CV: null,
+					},
 				},
 				today: "2026-10-19",
 			};
@@ -99,12 +106,26 @@ describe("TerimaTransferDialog", () => {
 		expect(wrapper.text()).toContain("Cetak SINV-PT-00401");
 	});
 
-	it("shows the account of the chosen payment mode", async () => {
+	it("shows the account of the chosen payment mode and of the bills' company", async () => {
 		const wrapper = await open();
+		expect(wrapper.text()).toContain("setelah memilih tagihan");
+		await wrapper.findAll("input[type=checkbox]")[0].setValue(true);
 		expect(wrapper.text()).toContain("BCA 1234567890");
 		await wrapper.find("select").setValue("Transfer Mandiri");
 		expect(wrapper.text()).toContain("Mandiri 2222");
 		expect(wrapper.text()).not.toContain("BCA 1234567890");
+	});
+
+	it("pays bills of one company per transfer, to that company's account", async () => {
+		const wrapper = await open();
+		const boxes = wrapper.findAll("input[type=checkbox]");
+		await boxes[2].setValue(true); // CV
+		expect(boxes[0].attributes("disabled")).toBeDefined();
+		expect(boxes[1].attributes("disabled")).toBeDefined();
+		expect(wrapper.text()).toContain("BCA 9876543210");
+		await wrapper.find("select").setValue("Transfer Mandiri");
+		expect(wrapper.text()).toContain("belum diatur");
+		expect(save(wrapper).attributes("disabled")).toBeDefined();
 	});
 
 	it("refuses a transfer smaller than the bills", async () => {
