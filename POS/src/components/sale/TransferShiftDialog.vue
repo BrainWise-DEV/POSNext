@@ -51,6 +51,9 @@
 								</span>
 								<span class="flex flex-wrap items-center gap-1">
 									<span :class="['text-[11px] font-bold rounded-full px-2', statusClass(r)]">{{ statusText(r) }}</span>
+									<span v-if="r.refund" class="text-[11px] font-bold rounded-full px-2 bg-purple-100 text-purple-800">
+										{{ __("Direfund") }}
+									</span>
 									<span v-if="r.gabungan" class="text-[11px] font-bold rounded-full px-2 bg-indigo-100 text-indigo-800">
 										{{ __("Gabungan") }}
 									</span>
@@ -66,6 +69,9 @@
 						</ul>
 						<p v-if="r.status === 'Ditolak' && r.alasan_tolak" class="ms-7 text-xs text-red-700">
 							{{ __("Alasan: {0}", [r.alasan_tolak]) }}
+						</p>
+						<p v-if="r.refund" class="ms-7 text-xs text-purple-800">
+							{{ __("Uang dikembalikan ke customer: {0}", [r.refund.catatan]) }}
 						</p>
 						<div v-if="r.gabungan && r.bisa_diubah" class="ms-7">
 							<Button variant="ghost" size="sm" :loading="splitting === r.name" @click="split(r)">
@@ -87,7 +93,7 @@
 						<span class="text-lg font-bold text-gray-900">{{ formatCurrency(chosenTotal) }}</span>
 					</div>
 					<p v-if="mixedAccounts" class="rounded bg-red-50 text-red-800 text-xs px-2 py-1.5">
-						{{ __("Rekening tujuannya berbeda. Satu transfer hanya masuk ke satu rekening, jadi tidak bisa digabung.") }}
+						{{ __("Rekening tujuannya berbeda (mis. PT dan CV punya rekening sendiri). Satu transfer hanya masuk ke satu rekening, jadi tidak bisa digabung.") }}
 					</p>
 					<template v-else-if="chosen.length > 1">
 						<p class="text-xs text-gray-600">

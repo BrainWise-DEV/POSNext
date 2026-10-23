@@ -508,6 +508,9 @@
 							<span v-for="r in transferRekening" :key="r.name" class="text-xs text-gray-500">
 								{{ __("Ke") }} {{ r.bank }} {{ r.nomor }}
 								<template v-if="r.atas_nama">· {{ r.atas_nama }}</template>
+								<template v-if="transferRekening.length > 1">
+									· {{ r.company }}: <b>{{ formatCurrency(r.amount) }}</b>
+								</template>
 							</span>
 						</div>
 						<div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
@@ -2158,6 +2161,7 @@ import { useLongPress } from "@/composables/useLongPress";
 import { usePaymentNumpad } from "@/composables/usePaymentNumpad";
 import { useResponsivePayment } from "@/composables/useResponsivePayment";
 import { useQuickAmounts } from "@/composables/useQuickAmounts";
+import { transferByCompany } from "@/utils/saleSplit";
 
 const log = logger.create("PaymentDialog");
 const settingsStore = usePOSSettingsStore();
@@ -3079,14 +3083,32 @@ const transferAmount = computed(() => {
 		.reduce((sum, entry) => sum + (entry.amount || 0), 0);
 });
 
-// One account per transfer Mode of Payment (nextend resolves it through the
-// COA); the customer may split the payment over two banks.
+// One account per transfer Mode of Payment and company (nextend resolves it
+// through the COA): PT and CV have their own accounts, so a sale billed to both
+// is paid with two transfers. Amounts follow the server's split of the payment.
 const transferRekening = computed(() => {
 	const perMode = transferSetup.value?.rekening_mode || {};
-	const seen = new Map();
+	const modes = new Set(transferSetup.value?.modes || []);
+	const modeAmounts = {};
 	for (const entry of paymentEntries.value) {
-		const r = perMode[entry.mode_of_payment];
-		if (r && (entry.amount || 0) > 0 && !seen.has(r.name)) seen.set(r.name, r);
+		if (modes.has(entry.mode_of_payment) && (entry.amount || 0) > 0) {
+			modeAmounts[entry.mode_of_payment] =
+				(modeAmounts[entry.mode_of_payment] || 0) + entry.amount;
+		}
+	}
+	const { groups, company } = cartStore.saleSplit;
+	const rows = transferByCompany(
+		groups.length ? groups : [{ company, amount: 0 }],
+		modeAmounts,
+		props.grandTotal
+	);
+	// Several transfers (companies or banks): show what goes where.
+	const seen = new Map();
+	for (const row of rows) {
+		const r = perMode[row.mode]?.[row.company];
+		if (!r) continue;
+		const known = seen.get(r.name);
+		seen.set(r.name, { ...r, amount: (known?.amount || 0) + row.amount, company: row.company });
 	}
 	return [...seen.values()];
 });
