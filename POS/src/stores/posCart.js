@@ -319,6 +319,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		offerQueue.cancel();
 
 		clearInvoiceCart({ returnSerials });
+		offerHeaderDiscount.value = 0;
 		customer.value = null;
 		offersStore.clearOneTimeContext();
 		appliedOffers.value = [];
@@ -421,6 +422,13 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	}
 
 	// Discount & Offer Management
+	// An order discount and a whole-cart coupon share the header, so only one applies at a time
+	const offerHeaderDiscount = ref(0);
+
+	function isWholeCartCoupon(coupon) {
+		return Boolean(coupon) && !isLineLevelCoupon(coupon);
+	}
+
 	function applyDiscountToCart(discount) {
 		if (isLineLevelCoupon(discount)) {
 			if (appliedCoupon.value && !isLineLevelCoupon(appliedCoupon.value)) {
@@ -431,6 +439,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			appliedCoupon.value = { ...discount, amount };
 			showSuccess(__("{0} applied successfully", [discount.name]));
 			return;
+		}
+		if (offerHeaderDiscount.value > 0) {
+			showWarning(__("{0} can't be combined with the order discount already applied", [discount.name]));
+			return false;
 		}
 		clearCouponLines();
 		applyDiscount(discount);
@@ -644,7 +656,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			company: currentProfile?.company,
 			selling_price_list: currentProfile?.selling_price_list,
 			currency: currentProfile?.currency,
-			discount_amount: additionalDiscount.value || 0,
+			// A whole-cart coupon's amount is not sent, so the server can't echo it back as an order discount
+			discount_amount: isWholeCartCoupon(appliedCoupon.value) ? 0 : additionalDiscount.value || 0,
 			coupon_code: appliedCoupon.value?.name || "",
 			// Offers see coupon lines without the coupon; otherwise its discount reads as a manual one.
 			items: rawItems.map((item) => {
@@ -876,20 +889,19 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * the invoice payload — see useInvoice.js#submitInvoice).
 	 *
 	 * Pass an empty/zero headerDiscount to clear (e.g. when no transaction-level
-	 * rule applies on the current cart).
+	 * rule applies on the current cart). A whole-cart coupon keeps the header
+	 * while no order discount applies, and is removed, with a warning, when one does.
 	 */
 	function applyHeaderDiscountFromServer(headerDiscount) {
-		if (!headerDiscount) {
-			// No offer header discount left; a whole-cart coupon keeps its own
-			additionalDiscount.value = isLineLevelCoupon(appliedCoupon.value)
-				? 0
-				: appliedCoupon.value?.amount || 0;
-			rebuildIncrementalCache();
-			return;
+		offerHeaderDiscount.value = Number.parseFloat(headerDiscount?.discountAmount) || 0;
+		const coupon = appliedCoupon.value;
+		if (isWholeCartCoupon(coupon)) {
+			if (!offerHeaderDiscount.value) return;
+			removeDiscount();
+			appliedCoupon.value = null;
+			showWarning(__("Coupon {0} removed: it can't be combined with the order discount", [coupon.code]));
 		}
-
-		const amount = Number.parseFloat(headerDiscount.discountAmount) || 0;
-		additionalDiscount.value = amount;
+		additionalDiscount.value = offerHeaderDiscount.value;
 		rebuildIncrementalCache();
 	}
 
