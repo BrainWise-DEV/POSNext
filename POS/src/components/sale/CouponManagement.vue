@@ -35,7 +35,7 @@
 					v-if="permissions.create"
 					@click="handleCreateNew"
 					variant="solid"
-					class="w-full"
+					class="pos-btn pos-btn-primary w-full"
 				>
 					<template #prefix>
 						<FeatherIcon name="plus-circle" class="w-4 h-4" />
@@ -115,7 +115,7 @@
 								:theme="getStatusTheme(coupon.status)"
 								size="sm"
 							>
-								{{ coupon.status || __("Active") }}
+								{{ __(coupon.status || "Active") }}
 							</Badge>
 						</div>
 						<div class="flex items-center justify-between text-xs">
@@ -160,7 +160,7 @@
 							)
 						}}
 					</p>
-					<Button v-if="permissions.create" @click="handleCreateNew" variant="solid">
+					<Button v-if="permissions.create" @click="handleCreateNew" variant="solid" class="pos-btn pos-btn-primary">
 						<template #prefix>
 							<FeatherIcon name="plus" class="w-4 h-4" />
 						</template>
@@ -247,6 +247,7 @@
 								@click="handleSubmit"
 								:loading="loading"
 								variant="solid"
+								class="pos-btn pos-btn-primary"
 							>
 								<template #prefix>
 									<FeatherIcon
@@ -787,7 +788,7 @@
 					<Button @click="showDeleteConfirm = false" variant="ghost">
 						{{ __("Cancel") }}
 					</Button>
-					<Button @click="confirmDelete" variant="solid" theme="red" :loading="loading">
+					<Button @click="confirmDelete" variant="solid" theme="red" class="pos-btn pos-btn-danger" :loading="loading">
 						<template #prefix>
 							<FeatherIcon name="trash-2" class="w-4 h-4" />
 						</template>
