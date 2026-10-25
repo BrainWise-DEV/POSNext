@@ -1107,9 +1107,11 @@
 								<div
 									class="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-gray-600 mt-0.5"
 								>
-									<span class="tabular-nums">
-										<bdi dir="ltr" class="me-1">{{ formatQuantity(item.quantity) }} ×</bdi>
-										<s v-if="getLineStrikePrice(item)" class="text-gray-500 me-1"
+									<!-- Quantity × price as separate boxes, so they order with the page direction -->
+									<span class="inline-flex items-center gap-1 tabular-nums">
+										<bdi>{{ formatQuantity(item.quantity) }}</bdi>
+										<span aria-hidden="true">×</span>
+										<s v-if="getLineStrikePrice(item)" class="text-gray-500"
 											><bdi>{{ formatCurrency(getLineStrikePrice(item)) }}</bdi></s
 										>
 										<bdi :class="getLineStrikePrice(item) ? 'font-semibold text-[#0f7a4a]' : ''">{{
