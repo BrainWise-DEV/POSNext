@@ -1046,8 +1046,8 @@
 							class="w-10 h-10 sm:w-12 sm:h-12 flex-shrink-0 rounded-lg overflow-hidden bg-white border border-[#0f7a4a]/20 flex items-center justify-center"
 						>
 							<img
-								v-if="item.image"
-								:src="item.image"
+								v-if="giftImage(item)"
+								:src="giftImage(item)"
 								:alt="item.item_name"
 								loading="lazy"
 								class="w-full h-full object-cover"
@@ -1664,11 +1664,20 @@ function lineKey(item) {
 
 const itemSearchStore = useItemSearchStore();
 
+function listedItem(item) {
+	return itemSearchStore.allItems?.find((i) => i.item_code === item.item_code);
+}
+
 // What a free gift would normally cost, so the cashier can tell the customer its value
 function giftValue(item) {
-	const listed = itemSearchStore.allItems?.find((i) => i.item_code === item.item_code);
+	const listed = listedItem(item);
 	const unit = Number.parseFloat(listed?.price_list_rate ?? listed?.rate) || 0;
 	return unit * (Number.parseFloat(item.quantity) || 0);
+}
+
+// Gift picture from the free row, else from the item list (some offer engines send none)
+function giftImage(item) {
+	return item.image || listedItem(item)?.image || null;
 }
 
 watch(
