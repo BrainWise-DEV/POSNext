@@ -3,7 +3,10 @@
  * Handles numeric keypad state, input, and keyboard support for payment dialog
  */
 
-import { ref, computed, onMounted, onUnmounted } from "vue";
+import { ref, computed, onMounted, onUnmounted, watch } from "vue";
+
+// Enter within this window after opening is the F9 press or a scanner's Enter suffix, not a cashier decision
+const ENTER_GUARD_MS = 500;
 
 export function usePaymentNumpad(options = {}) {
 	const numpadDisplay = ref("");
@@ -68,6 +71,14 @@ export function usePaymentNumpad(options = {}) {
 
 	// Keyboard input handling
 	const { isEnabled = ref(true), onEnter = null } = options;
+	let enabledAt = 0;
+	watch(
+		() => (typeof isEnabled === "function" ? isEnabled() : isEnabled.value),
+		(enabled) => {
+			if (enabled) enabledAt = Date.now();
+		},
+		{ immediate: true }
+	);
 
 	/**
 	 * Handle keyboard input for physical keyboard support
@@ -120,6 +131,7 @@ export function usePaymentNumpad(options = {}) {
 		// Handle Enter - call custom handler if provided
 		if (key === "Enter") {
 			event.preventDefault();
+			if (Date.now() - enabledAt < ENTER_GUARD_MS) return;
 			if (onEnter && typeof onEnter === "function") {
 				onEnter(numpadValue.value);
 			}
