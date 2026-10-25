@@ -50,26 +50,11 @@
 									: 'bg-gradient-to-r from-green-50 to-emerald-50 border-green-200 hover:border-green-400 hover:shadow-lg cursor-pointer',
 							]"
 						>
-							<!-- Applied Badge -->
-							<div
-								v-if="isOfferApplied(offer)"
-								class="absolute top-2 end-2 bg-green-600 text-white text-[10px] font-bold px-2 py-1 rounded-full flex items-center gap-1"
-							>
-								<svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-									<path
-										fill-rule="evenodd"
-										d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-										clip-rule="evenodd"
-									/>
-								</svg>
-								<span>{{ __("APPLIED") }}</span>
-							</div>
-
 							<!-- Source Badge (Pricing Rule vs Promotional Scheme) -->
 							<div
 								:class="[
 									'absolute top-2 text-[10px] font-bold px-2 py-1 rounded-full',
-									isOfferApplied(offer) ? 'end-24' : 'end-2',
+									'end-2',
 									offer.source === 'Pricing Rule'
 										? 'bg-blue-600 text-white'
 										: 'bg-purple-600 text-white',
@@ -80,19 +65,6 @@
 										? __("PRICING RULE")
 										: __("PROMO SCHEME")
 								}}
-							</div>
-
-							<!-- Offer Header -->
-							<div class="mb-3 me-28">
-								<h4 class="text-base font-bold text-gray-900 text-start">
-									{{ offer.title || offer.name }}
-								</h4>
-								<p
-									v-if="offer.description"
-									class="text-xs text-gray-600 mt-1 text-start"
-								>
-									{{ offer.description }}
-								</p>
 							</div>
 
 							<!-- Discount Display -->
@@ -109,24 +81,23 @@
 											: 'bg-green-600',
 									]"
 								>
-									<div class="text-lg font-bold">
-										<span v-if="offer.discount_percentage">{{
-											__("{0}% OFF", [
-												Number(offer.discount_percentage).toFixed(2),
-											])
-										}}</span>
-										<span v-else-if="offer.discount_amount">{{
-											__("{0} OFF", [formatCurrency(offer.discount_amount)])
-										}}</span>
-										<span v-else>{{ __("Special Offer") }}</span>
+									<div class="text-lg font-bold" dir="auto">
+										{{ offerBenefit(offer, formatCurrency) }}
 									</div>
 								</div>
-								<div
-									v-if="offer.offer === 'Give Product'"
-									class="text-xs bg-purple-100 text-purple-700 px-3 py-1 rounded-full font-semibold"
+							</div>
+
+							<!-- Offer Header -->
+							<div class="mb-3 me-28">
+								<h4 class="text-sm font-semibold text-gray-900 text-start" dir="auto">
+									{{ offer.title || offer.name }}
+								</h4>
+								<p
+									v-if="offer.description"
+									class="text-xs text-gray-600 mt-1 text-start"
 								>
-									{{ __("+ Free Item") }}
-								</div>
+									{{ offer.description }}
+								</p>
 							</div>
 
 							<!-- Offer Details -->
@@ -176,7 +147,11 @@
 											{{ __("Min Quantity") }}
 										</p>
 										<p class="text-xs font-semibold text-gray-900">
-											{{ __("{0} items", [offer.min_qty]) }}
+											{{
+												offer.min_qty === 1
+													? __("1 item")
+													: __("{0} items", [offer.min_qty])
+											}}
 										</p>
 									</div>
 								</div>
@@ -222,48 +197,22 @@
 									<div>
 										<p class="text-[10px] text-gray-500">{{ __("Type") }}</p>
 										<p class="text-xs font-semibold text-gray-900">
-											{{ offer.offer || __("Discount") }}
+											{{ offerTypeLabel(offer.offer) }}
 										</p>
 									</div>
 								</div>
 							</div>
 
-							<!-- Progress Bar for Min Amount (only shown if not eligible) -->
-							<div
-								v-if="
-									offer.min_amt &&
-									offersStore.getEligibleItemAmount(offer) < offer.min_amt
-								"
-								class="mt-3"
-							>
-								<div class="flex items-center justify-between text-xs mb-1">
-									<span class="text-gray-600">{{
-										__("Subtotal (before tax)")
-									}}</span>
-									<span class="text-gray-900 font-semibold">
-										{{ formatCurrency(offersStore.getEligibleItemAmount(offer)) }} /
-										{{ formatCurrency(offer.min_amt) }}
-									</span>
-								</div>
+							<!-- Progress toward the offer's minimum (only shown if not met) -->
+							<div v-if="getProgress(offer)" class="mt-3">
 								<div class="w-full bg-gray-200 rounded-full h-2">
 									<div
-										class="bg-green-600 h-2 rounded-full transition-all"
-										:style="{
-											width: `${Math.min(
-												(offersStore.getEligibleItemAmount(offer) /
-													offer.min_amt) *
-													100,
-												100
-											)}%`,
-										}"
+										class="bg-green-700 h-2 rounded-full transition-all"
+										:style="{ width: `${getProgress(offer).percent}%` }"
 									></div>
 								</div>
-								<p class="text-xs text-orange-600 mt-1 font-medium">
-									{{
-										__("Add {0} more to unlock", [
-											formatCurrency(offersStore.getUnlockAmount(offer)),
-										])
-									}}
+								<p class="text-xs text-amber-700 mt-1 font-medium">
+									{{ formatProgress(offer) }}
 								</p>
 							</div>
 
@@ -324,6 +273,7 @@ import {
 	DEFAULT_LOCALE,
 	formatCurrency as formatCurrencyUtil,
 } from "@/utils/currency";
+import { offerBenefit, offerProgress, offerTypeLabel } from "@/utils/offerProgress";
 import { Button, Dialog } from "frappe-ui";
 import { computed, ref, watch } from "vue";
 
@@ -384,6 +334,22 @@ function isOfferApplied(offer) {
 	// already being removed (stale badge in the offers-loop bug).
 	if (!appliedOfferCodes.value.has(offer?.name)) return false;
 	return offersStore.checkOfferEligibility(offer).eligible;
+}
+
+function getProgress(offer) {
+	return offerProgress(offer, {
+		qty: offersStore.getEligibleItemQuantity(offer),
+		amount: offersStore.getEligibleItemAmount(offer),
+	});
+}
+
+/** "Buy 1 more to get 1 free" / "Add E£50 more to get 20% off" */
+function formatProgress(offer) {
+	const progress = getProgress(offer);
+	const benefit = offerBenefit(offer, formatCurrency);
+	return progress.kind === "qty"
+		? __("Buy {0} more to get {1}", [progress.missing, benefit])
+		: __("Add {0} more and get {1}", [formatCurrency(progress.missing), benefit]);
 }
 
 function formatCurrency(amount) {

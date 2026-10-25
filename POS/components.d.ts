@@ -36,6 +36,7 @@ declare module 'vue' {
     ManagementSlider: typeof import('./src/components/pos/ManagementSlider.vue')['default']
     NumberField: typeof import('./src/components/settings/NumberField.vue')['default']
     OffersDialog: typeof import('./src/components/sale/OffersDialog.vue')['default']
+    OffersStrip: typeof import('./src/components/sale/OffersStrip.vue')['default']
     OfflineInvoicesDialog: typeof import('./src/components/sale/OfflineInvoicesDialog.vue')['default']
     PartialPayments: typeof import('./src/components/partials/PartialPayments.vue')['default']
     PaymentDialog: typeof import('./src/components/sale/PaymentDialog.vue')['default']
