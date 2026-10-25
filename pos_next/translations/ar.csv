@@ -1962,3 +1962,5 @@ Points applied: {0}. Please pay remaining {1} with {2},تم خصم النقاط:
 "Pagination","التنقل بين الصفحات",""
 "Scheduled","مجدول",""
 "Upcoming","قادم",""
+"No item matches «{0}». Search by name or scan the barcode again.","لم يتم العثور على «{0}». جرّب البحث بالاسم أو امسح الباركود مرة أخرى.",""
+"{0} off","خصم {0}",""
