@@ -1322,23 +1322,31 @@
 								</div>
 
 								<!-- Saving: its own full-size line with the offer name -->
+								<!-- Saving: what the customer gets and keeps; the offer's name on its own line -->
 								<div
 									v-if="lineSaving(item) > 0"
-									class="flex items-center justify-between gap-2 mt-1.5 rounded-md bg-[#e9f5ef] px-2 py-1 text-sm text-[#0f7a4a]"
+									class="mt-1.5 rounded-md bg-[#e9f5ef] px-2 py-1 text-sm text-[#0f7a4a]"
 								>
-									<span class="flex items-center gap-1.5 min-w-0">
-										<FeatherIcon
-											:name="isGiftSaving(item) ? 'gift' : 'tag'"
-											class="w-4 h-4 flex-shrink-0"
-										/>
-										<span class="font-bold flex-shrink-0" dir="auto">{{ savingTitle(item) }}</span>
-										<span v-if="savingSource(item)" class="truncate text-xs" dir="auto">{{
-											savingSource(item)
-										}}</span>
-									</span>
-									<span class="font-bold tabular-nums flex-shrink-0">
-										{{ __("You save {0}", [formatCurrency(lineSaving(item))]) }}
-									</span>
+									<div class="flex items-center justify-between gap-2">
+										<span class="flex items-center gap-1.5 min-w-0 font-bold">
+											<FeatherIcon
+												:name="isGiftSaving(item) ? 'gift' : 'tag'"
+												class="w-4 h-4 flex-shrink-0"
+											/>
+											<span class="truncate">{{ savingTitle(item) }}</span>
+										</span>
+										<span class="font-bold tabular-nums flex-shrink-0">
+											{{ __("You save {0}", [formatCurrency(lineSaving(item))]) }}
+										</span>
+									</div>
+									<div
+										v-if="savingSource(item)"
+										dir="auto"
+										class="truncate text-xs text-[#0f7a4a]/80 ps-[22px]"
+										:title="savingSource(item)"
+									>
+										{{ savingSource(item) }}
+									</div>
 								</div>
 							</div>
 						</div>
