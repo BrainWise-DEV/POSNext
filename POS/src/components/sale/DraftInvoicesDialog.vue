@@ -1,6 +1,6 @@
 <template>
 	<!-- Main Dialog -->
-	<Dialog v-model="show" :options="{ title: __('Held Invoices'), size: 'lg' }">
+	<Dialog v-model="show" :options="{ title: __('Draft Invoices'), size: 'lg' }">
 		<template #body-content>
 			<div class="flex flex-col gap-3">
 				<!-- Empty State -->

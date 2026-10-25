@@ -823,7 +823,7 @@
 						type="button"
 						@click="$emit('show-drafts')"
 						class="flex flex-col items-center justify-center p-3 sm:p-4 bg-white border border-gray-200 rounded-lg hover:border-purple-300 hover:bg-purple-50 active:bg-purple-100 transition-colors shadow-sm hover:shadow touch-manipulation group"
-						:title="__('Held Invoices')"
+						:title="__('Draft Invoices')"
 					>
 						<div
 							class="w-9 h-9 sm:w-10 sm:h-10 bg-purple-50 rounded-full flex items-center justify-center mb-2 group-hover:bg-purple-100 transition-colors"
@@ -843,7 +843,7 @@
 							</svg>
 						</div>
 						<span class="text-[11px] sm:text-xs font-semibold text-gray-700">{{
-							__("Held Invoices")
+							__("Draft Invoices")
 						}}</span>
 					</button>
 
@@ -1438,7 +1438,7 @@
 					v-if="items.length > 0"
 					@click="$emit('save-draft')"
 					class="flex-1 py-2.5 px-2 rounded-lg font-semibold text-xs text-orange-700 bg-orange-50 hover:bg-orange-100 active:bg-orange-200 transition-all touch-manipulation active:scale-[0.98] flex items-center justify-center"
-					:aria-label="__('Hold Invoice')"
+					:aria-label="__('Hold')"
 				>
 					<svg
 						class="w-4 h-4 me-1.5"
@@ -1453,7 +1453,7 @@
 							d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"
 						/>
 					</svg>
-					<span>{{ __("Hold Invoice") }}</span>
+					<span>{{ __("Hold") }}</span>
 				</button>
 			</div>
 		</div>
