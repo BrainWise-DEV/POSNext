@@ -1,4 +1,5 @@
 import { call } from "@/utils/apiWrapper";
+import { formatDate, formatDateTime } from "@/utils/currency";
 import { logger } from "@/utils/logger";
 import { getOfflineReceiptPayload } from "@/utils/offline/offlineReceiptCache";
 import { getOfflineInvoiceByOfflineId } from "@/utils/offline/sync";
@@ -222,9 +223,15 @@ export function buildReceiptHTML(invoiceData) {
 
 				<div class="invoice-info">
 					<div><span>${__("Invoice #:")}</span><span><strong>${invoiceData.name}</strong></span></div>
-					<div><span>${__("Date:")}</span><span>${new Date(
-		invoiceData.posting_date || Date.now()
-	).toLocaleString()}</span></div>
+					<div><span>${__("Date:")}</span><span>${
+						invoiceData.posting_date && !invoiceData.posting_time
+							? formatDate(invoiceData.posting_date)
+							: formatDateTime(
+									invoiceData.posting_date
+										? `${invoiceData.posting_date} ${invoiceData.posting_time}`
+										: Date.now()
+								)
+					}</span></div>
 					${
 						invoiceData.customer_name || invoiceData.customer
 							? `<div><span>${__("Customer:")}</span><span>${
