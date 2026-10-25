@@ -6,15 +6,19 @@ import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { syncCartFreeItems, totalSkuQty } from "@/utils/gwpSameItemFreeRows";
 
-vi.hoisted(() => {
-	globalThis.__ = (s) => s;
+const toast = vi.hoisted(() => {
+	globalThis.__ = (s, args) => (args ? `${s} ${args.join(" ")}` : s);
+	return {};
 });
 vi.mock("frappe-ui", () => ({
-	call: vi.fn(),
+	call: vi.fn(async () => ({ valid: true })),
 	createResource: () => ({ submit: vi.fn(), reload: vi.fn(), fetch: vi.fn() }),
 }));
 vi.mock("@/composables/useToast", () => ({
-	useToast: () => ({ showSuccess: vi.fn(), showError: vi.fn(), showWarning: vi.fn(), showInfo: vi.fn() }),
+	useToast: () => {
+		Object.assign(toast, { showSuccess: vi.fn(), showError: vi.fn(), showWarning: vi.fn(), showInfo: vi.fn() });
+		return toast;
+	},
 }));
 vi.mock("@/utils/offline", () => ({ isOffline: () => false, getCachedItem: vi.fn() }));
 vi.mock("@/stores/posSettings", () => ({
@@ -84,5 +88,29 @@ describe("posCart same-item gift quantities", () => {
 		offerPass(cart);
 		expect(paidQty(cart)).toBe(3);
 		expect(totalSkuQty(cart.invoiceItems, "CHIPSY")).toBe(4);
+	});
+});
+
+describe("posCart whole-cart coupon", () => {
+	let cart;
+	beforeEach(() => {
+		setActivePinia(createPinia());
+		cart = usePOSCartStore();
+		cart.addItem({ ...chipsy });
+		cart.customer = "CUST-1";
+		cart.applyDiscountToCart({ name: "WELCOME10", code: "WELCOME10", percentage: 0, amount: 5 });
+	});
+
+	it("says why when removing the customer drops the coupon", async () => {
+		cart.customer = null;
+		await vi.waitFor(() => expect(cart.appliedCoupon).toBeNull());
+		expect(cart.additionalDiscount).toBe(0);
+		expect(toast.showWarning).toHaveBeenCalledWith(expect.stringContaining("WELCOME10"));
+	});
+
+	it("keeps the coupon when the offers no longer give a header discount", () => {
+		cart.removeOffer();
+		expect(cart.additionalDiscount).toBe(5);
+		expect(cart.appliedCoupon?.code).toBe("WELCOME10");
 	});
 });

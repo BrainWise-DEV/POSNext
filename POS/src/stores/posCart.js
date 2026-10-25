@@ -200,6 +200,19 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		}
 	}
 
+	// Names of offers just removed as no longer eligible, shown briefly in the offers strip
+	const removedOfferNotices = ref([]);
+	let removedNoticeTimer = null;
+
+	function noteRemovedOffers(offers) {
+		rememberRemovedOffers(offers);
+		removedOfferNotices.value = (offers || []).map((o) => o.name);
+		clearTimeout(removedNoticeTimer);
+		removedNoticeTimer = setTimeout(() => {
+			removedOfferNotices.value = [];
+		}, 5000);
+	}
+
 	function wasRemovedForCurrentCart(code) {
 		const sig = removedOfferSignatures.get(code);
 		if (sig === undefined) return false;
@@ -879,7 +892,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 */
 	function applyHeaderDiscountFromServer(headerDiscount) {
 		if (!headerDiscount) {
-			additionalDiscount.value = 0;
+			// No offer header discount left; a whole-cart coupon keeps its own
+			additionalDiscount.value = isLineLevelCoupon(appliedCoupon.value)
+				? 0
+				: appliedCoupon.value?.amount || 0;
 			rebuildIncrementalCache();
 			return;
 		}
@@ -1050,7 +1066,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 			appliedOffers.value = [];
 			processFreeItems([]); // Remove all free items
-			removeDiscount();
+			applyHeaderDiscountFromServer(null);
 			await nextTick();
 			showSuccess(__("Offer has been removed from cart"));
 			offersDialogRef?.resetApplyingState();
@@ -1066,7 +1082,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 			appliedOffers.value = [];
 			processFreeItems([]); // Remove all free items
-			removeDiscount();
+			applyHeaderDiscountFromServer(null);
 			await nextTick();
 			showSuccess(__("Offer has been removed from cart"));
 			offersDialogRef?.resetApplyingState();
@@ -1231,13 +1247,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				// Wait for Vue to update before showing toast
 				await nextTick();
 
-				rememberRemovedOffers(invalidOffers);
-
-				// Show warning about removed offers
-				const offerNames = invalidOffers.map((o) => o.name).join(", ");
-				showWarning(
-					__("Offer removed: {0}. Cart no longer meets requirements.", [offerNames])
-				);
+				// The cart's offers strip shows the removal
+				noteRemovedOffers(invalidOffers);
 				return true;
 			}
 			return false;
@@ -2141,9 +2152,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				applyHeaderDiscountFromServer(null);
 				rebuildIncrementalCache();
 
-				rememberRemovedOffers(invalidOffers);
-				const names = invalidOffers.map((o) => o.name).join(", ");
-				showWarning(__("Offer removed: {0}. Cart no longer meets requirements.", [names]));
+				noteRemovedOffers(invalidOffers);
 			} else if (combinedCodes.length > 0) {
 				const invoiceData = buildOfferEvaluationPayload(currentProfile);
 				const response = await applyOffersResource.submit({
@@ -2170,7 +2179,6 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				// 5. Update appliedOffers list based on server confirmation
 				const actuallyApplied = new Set(appliedRules);
 				const nextAppliedOffers = [];
-				const newlyAddedNames = [];
 
 				// Handle existing ones
 				for (const entry of appliedOffers.value) {
@@ -2197,7 +2205,6 @@ export const usePOSCartStore = defineStore("posCart", () => {
 							min_amt: offer.min_amt,
 							max_amt: offer.max_amt,
 						});
-						newlyAddedNames.push(offer.title || offer.name);
 					}
 				}
 
@@ -2205,20 +2212,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 				// 6. UI Feedback
 				if (invalidOffers.length > 0) {
-					rememberRemovedOffers(invalidOffers);
-					const names = invalidOffers.map((o) => o.name).join(", ");
-					showWarning(
-						__("Offer removed: {0}. Cart no longer meets requirements.", [names])
-					);
+					noteRemovedOffers(invalidOffers);
 				}
-
-				if (newlyAddedNames.length > 0) {
-					if (newlyAddedNames.length === 1) {
-						showSuccess(__("Offer applied: {0}", [newlyAddedNames[0]]));
-					} else {
-						showSuccess(__("Offers applied: {0}", [newlyAddedNames.join(", ")]));
-					}
-				}
+				// Newly applied offers show as applied in the cart's offers strip
 			} else if (invoiceItems.value.length === 0 && appliedOffers.value.length > 0) {
 				// Cart cleared, reset offers
 				appliedOffers.value = [];
@@ -2390,6 +2386,31 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		}
 	);
 
+	// Re-check a whole-cart coupon for the new customer; say why when it is dropped
+	watch(
+		() => customer.value?.name || customer.value || null,
+		async (name, oldName) => {
+			const coupon = appliedCoupon.value;
+			if (!coupon || isLineLevelCoupon(coupon) || name === oldName) return;
+			const result = name
+				? await call(promoApi.validateCoupon(), {
+						coupon_code: coupon.code,
+						customer: name,
+						company: usePOSShiftStore().currentProfile?.company,
+					}).catch(() => ({ valid: true }))
+				: { valid: false, message: __("No customer selected") };
+			if (result?.valid || appliedCoupon.value !== coupon) return;
+			removeDiscount();
+			appliedCoupon.value = null;
+			showWarning(
+				__("Coupon {0} removed: {1}", [
+					coupon.code,
+					result.message || __("Cart no longer meets requirements"),
+				])
+			);
+		}
+	);
+
 	// Additional watcher for applied offers changes (to handle removal edge cases)
 	watch(
 		() => appliedOffers.value.length,
@@ -2422,6 +2443,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		selectionMode,
 		currentDraftId,
 		offerProcessingState, // Offer processing state for UI feedback
+		removedOfferNotices, // Offers just removed as no longer eligible
 
 		// Computed
 		itemCount,
