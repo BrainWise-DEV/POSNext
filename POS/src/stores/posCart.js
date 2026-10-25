@@ -528,7 +528,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			item.discount_source = COUPON_DISCOUNT_SOURCE;
 			item.coupon_code = code;
 			recalculateItem(item);
-			const couponPart = Number.parseFloat(update.coupon_discount_amount);
+			// The server names the coupon's own share coupon_only_discount (older builds: coupon_discount_amount)
+			const couponPart = Number.parseFloat(update.coupon_only_discount ?? update.coupon_discount_amount);
 			total += Number.isFinite(couponPart) ? couponPart : item.discount_amount;
 		}
 		rebuildIncrementalCache();

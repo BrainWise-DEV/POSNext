@@ -120,3 +120,21 @@ describe("posCart whole-cart coupon", () => {
 		expect(cart.appliedCoupon?.code).toBe("WELCOME10");
 	});
 });
+
+describe("posCart line coupon on top of a promotion", () => {
+	it("records only the coupon's share as the coupon amount", () => {
+		setActivePinia(createPinia());
+		const cart = usePOSCartStore();
+		cart.addItem({ ...chipsy });
+		cart.applyDiscountToCart({
+			name: "WELCOME10",
+			code: "WELCOME10",
+			line_level: true,
+			coupon: { discount_type: "Amount" },
+			line_updates: [
+				{ line_key: 0, item_code: "CHIPSY", discount_percentage: 0, discount_amount: 5, stacked: true, coupon_only_discount: 2 },
+			],
+		});
+		expect(cart.appliedCoupon.amount).toBe(2);
+	});
+});

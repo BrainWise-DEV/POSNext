@@ -2216,7 +2216,13 @@ function savingOffer(item) {
 
 // What the customer gets on this line: "1 free", "20% off", "Coupon WELCOME10"
 function savingTitle(item) {
-	if (item.coupon_code) return __("Coupon {0}", [item.coupon_code]);
+	if (item.coupon_code) {
+		// A coupon stacked on a promotion names both
+		const pre = Number(item.pre_coupon_discount?.discount_percentage) || 0;
+		return pre > 0
+			? __("{0}% off + Coupon {1}", [pre.toFixed(0), item.coupon_code])
+			: __("Coupon {0}", [item.coupon_code]);
+	}
 	if (isGiftSaving(item)) {
 		const unit = Number.parseFloat(item.price_list_rate || item.rate) || 0;
 		const units = unit ? Math.round(lineSaving(item) / unit) : 0;
