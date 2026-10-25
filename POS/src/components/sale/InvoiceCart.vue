@@ -1034,23 +1034,45 @@
 						(item.is_free_item ? '-free' : '')
 					"
 				>
-					<!-- Free gift: nested under the line that earned it, no quantity controls -->
+					<!-- Free gift: its own mini line under the line that earned it, no quantity controls -->
 					<div
 						v-if="isLockedFreeRow(item)"
 						:class="[
-							'flex items-center gap-2 rounded-md border-s-2 border-emerald-600 bg-emerald-50 px-2 py-1.5 text-sm',
+							'flex items-center gap-2 rounded-md border border-[#0f7a4a]/30 bg-[#e9f5ef] p-2',
 							item._giftOf ? 'ms-6 -mt-0.5' : '',
 						]"
 					>
-						<FeatherIcon name="gift" class="w-4 h-4 text-emerald-700 flex-shrink-0" />
-						<span class="font-semibold text-emerald-800 flex-shrink-0">{{ __("Gift") }}</span>
-						<span dir="auto" class="min-w-0 flex-1 truncate text-gray-800">
-							{{ item.item_name }}
-						</span>
-						<span class="text-gray-600 tabular-nums flex-shrink-0" dir="ltr">
-							× {{ formatQuantity(item.quantity) }}
-						</span>
-						<span class="font-semibold text-emerald-700 flex-shrink-0">{{ __("Free") }}</span>
+						<div
+							class="w-10 h-10 sm:w-12 sm:h-12 flex-shrink-0 rounded-lg overflow-hidden bg-white border border-[#0f7a4a]/20 flex items-center justify-center"
+						>
+							<img
+								v-if="item.image"
+								:src="item.image"
+								:alt="item.item_name"
+								loading="lazy"
+								class="w-full h-full object-cover"
+							/>
+							<FeatherIcon v-else name="gift" class="w-5 h-5 text-[#0f7a4a]" />
+						</div>
+						<div class="flex-1 min-w-0">
+							<span
+								class="inline-flex items-center gap-1 rounded-full bg-[#0f7a4a] px-2 py-0.5 text-[11px] font-bold text-white"
+							>
+								<FeatherIcon name="gift" class="w-3 h-3" />{{ __("Free gift") }}
+							</span>
+							<div dir="auto" class="mt-0.5 text-sm font-semibold text-[#1d2433] leading-snug line-clamp-2">
+								{{ item.item_name }}
+							</div>
+						</div>
+						<div class="flex-shrink-0 text-end tabular-nums">
+							<div class="text-sm font-bold text-[#0f7a4a]">{{ __("Free of charge") }}</div>
+							<div v-if="giftValue(item) > 0" class="text-xs text-gray-500 line-through">
+								<bdi>{{ formatCurrency(giftValue(item)) }}</bdi>
+							</div>
+							<div class="text-xs text-gray-600 inline-flex items-center gap-1">
+								<bdi>{{ formatQuantity(item.quantity) }}</bdi><span aria-hidden="true">×</span>
+							</div>
+						</div>
 					</div>
 
 					<!-- Paid line -->
@@ -1494,6 +1516,7 @@ import { useFormatters } from "@/composables/useFormatters";
 import { useCartSort } from "@/composables/useCartSort";
 import { isOffline } from "@/utils/offline";
 import { nestFreeRows } from "@/utils/gwpSameItemFreeRows";
+import { useItemSearchStore } from "@/stores/itemSearch";
 import { offlineWorker } from "@/utils/offline/workerClient";
 import { logger } from "@/utils/logger";
 import { FeatherIcon } from "frappe-ui";
@@ -1637,6 +1660,15 @@ let flashTimer = null;
 
 function lineKey(item) {
 	return `${item.item_code}-${item.uom || ""}`;
+}
+
+const itemSearchStore = useItemSearchStore();
+
+// What a free gift would normally cost, so the cashier can tell the customer its value
+function giftValue(item) {
+	const listed = itemSearchStore.allItems?.find((i) => i.item_code === item.item_code);
+	const unit = Number.parseFloat(listed?.price_list_rate ?? listed?.rate) || 0;
+	return unit * (Number.parseFloat(item.quantity) || 0);
 }
 
 watch(
