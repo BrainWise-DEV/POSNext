@@ -1,23 +1,40 @@
 <template>
 	<div class="flex flex-col h-full bg-gray-50">
 		<!-- Item Groups Filter Tabs -->
-		<div
-			class="px-1.5 sm:px-3 pt-1.5 sm:pt-3 pb-1.5 sm:pb-2 bg-white border-b border-gray-200"
-		>
+		<div class="relative px-1.5 sm:px-3 py-1.5 bg-white border-b border-gray-200">
+			<!-- Scroll back: fade edge plus button, shown only when categories are hidden on that side -->
 			<div
-				class="flex items-center gap-1 sm:gap-2 overflow-x-auto pb-1 scrollbar-hide snap-x snap-mandatory"
+				v-if="chipScroll.start"
+				class="absolute inset-y-0 start-0 z-[1] flex items-center ps-1 pe-6 bg-gradient-to-r rtl:bg-gradient-to-l from-white via-white to-transparent"
+			>
+				<button
+					type="button"
+					class="pos-btn pos-btn-outline pos-btn-icon rounded-full shadow-sm"
+					:aria-label="__('Show previous categories')"
+					@click="scrollChips(-1)"
+				>
+					<svg class="w-4 h-4 rtl:-scale-x-100" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+					</svg>
+				</button>
+			</div>
+			<div
+				ref="chipStripRef"
+				class="flex items-center gap-1.5 sm:gap-2 overflow-x-auto scrollbar-hide snap-x"
+				@scroll.passive="updateChipScroll"
 			>
 				<button
 					@click="handleAllFilterClick"
+					:aria-pressed="!activeFilterValue"
 					:class="[
-						'flex items-center px-2 sm:px-3 py-1.5 sm:py-2 rounded-lg text-[10px] sm:text-xs font-medium whitespace-nowrap transition-[background-color,border-color] duration-75 touch-manipulation snap-start flex-shrink-0',
+						'flex items-center gap-1.5 min-h-target px-3 rounded-lg border text-pos-sm font-medium whitespace-nowrap transition-[background-color,border-color] duration-75 touch-manipulation snap-start flex-shrink-0 pos-focus',
 						!activeFilterValue
-							? 'bg-blue-50 text-blue-600 border-2 border-blue-500 shadow-sm'
-							: 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50 active:bg-gray-100',
+							? 'bg-pos-action-soft text-pos-action border-pos-action font-semibold'
+							: 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 active:bg-gray-100',
 					]"
 				>
 					<svg
-						class="w-3.5 h-3.5 sm:w-4 sm:h-4"
+						class="w-4 h-4"
 						fill="none"
 						stroke="currentColor"
 						viewBox="0 0 24 24"
@@ -35,14 +52,32 @@
 					v-for="option in activeFilterOptions"
 					:key="option.value"
 					@click="handleFilterClick(option.value)"
+					:aria-pressed="activeFilterValue === option.value"
+					dir="auto"
 					:class="[
-						'flex items-center px-2 sm:px-3 py-1.5 sm:py-2 rounded-lg text-[10px] sm:text-xs font-medium whitespace-nowrap transition-[background-color,border-color] duration-75 touch-manipulation snap-start flex-shrink-0',
+						'flex items-center min-h-target px-3 rounded-lg border text-pos-sm font-medium whitespace-nowrap transition-[background-color,border-color] duration-75 touch-manipulation snap-start flex-shrink-0 pos-focus',
 						activeFilterValue === option.value
-							? 'bg-blue-50 text-blue-600 border-2 border-blue-500 shadow-sm'
-							: 'bg-white text-gray-700 border border-gray-200 hover:bg-gray-50 active:bg-gray-100',
+							? 'bg-pos-action-soft text-pos-action border-pos-action font-semibold'
+							: 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 active:bg-gray-100',
 					]"
 				>
 					<span>{{ __(option.label) }}</span>
+				</button>
+			</div>
+			<!-- Scroll forward: the fade edge is the cue that more categories exist -->
+			<div
+				v-if="chipScroll.end"
+				class="absolute inset-y-0 end-0 z-[1] flex items-center pe-1 ps-6 bg-gradient-to-l rtl:bg-gradient-to-r from-white via-white to-transparent"
+			>
+				<button
+					type="button"
+					class="pos-btn pos-btn-outline pos-btn-icon rounded-full shadow-sm"
+					:aria-label="__('Show more categories')"
+					@click="scrollChips(1)"
+				>
+					<svg class="w-4 h-4 rtl:-scale-x-100" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+					</svg>
 				</button>
 			</div>
 		</div>
@@ -60,15 +95,15 @@
 		</div>
 
 		<!-- Search Bar with Barcode Scanner and View Controls -->
-		<div class="px-1.5 sm:px-3 py-1.5 sm:py-2 bg-white border-b border-gray-200">
-			<div class="flex items-center gap-1 sm:gap-2">
+		<div class="px-1.5 sm:px-3 py-1.5 bg-white border-b border-gray-200">
+			<div class="flex items-center gap-1.5 sm:gap-2">
 				<div class="flex-1 relative min-w-0">
 					<!-- Search Icon -->
 					<div
 						class="absolute inset-y-0 start-0 ps-2 sm:ps-3 flex items-center pointer-events-none"
 					>
 						<svg
-							class="h-3.5 w-3.5 sm:h-4 sm:w-4 text-gray-400"
+							class="h-4 w-4 text-gray-500"
 							fill="none"
 							stroke="currentColor"
 							viewBox="0 0 24 24"
@@ -91,9 +126,11 @@
 						@keydown="handleKeyDown"
 						@click="handleSearchClick"
 						type="text"
+						spellcheck="false"
+						autocomplete="off"
 						:placeholder="searchPlaceholder"
 						:class="[
-							'w-full text-[11px] sm:text-sm border rounded-lg px-2 sm:px-3 py-2 ps-7 sm:ps-10 pe-16 sm:pe-24 focus:outline-none transition-all',
+							'w-full min-h-target text-pos-sm text-pos-ink placeholder:text-gray-500 border rounded-lg px-2 sm:px-3 py-2 ps-8 sm:ps-10 pe-[calc(var(--pos-target)_*_2_+_0.5rem)] focus:outline-none transition-all',
 							autoAddEnabled
 								? 'border-blue-400 bg-blue-50 focus:ring-2 focus:ring-blue-500 focus:border-transparent'
 								: scannerEnabled
@@ -103,11 +140,11 @@
 						:aria-label="__('Search items')"
 					/>
 					<!-- Barcode Scan Icon and Auto-Add Toggle -->
-					<div class="absolute inset-y-0 end-0 pe-1 sm:pe-2 flex items-center gap-0.5">
+					<div class="absolute inset-y-0 end-0 pe-0.5 flex items-center gap-0.5">
 						<button
 							@click="toggleBarcodeScanner"
 							:class="[
-								'p-1 sm:p-1.5 rounded transition-[background-color] duration-75 touch-manipulation',
+								'flex items-center justify-center min-h-target min-w-target rounded-md transition-[background-color] duration-75 touch-manipulation pos-focus',
 								scannerEnabled
 									? 'bg-green-100 hover:bg-green-200 active:bg-green-300 text-green-700'
 									: 'hover:bg-gray-100 active:bg-gray-200 text-gray-600',
@@ -124,7 +161,7 @@
 							"
 						>
 							<svg
-								class="w-3.5 h-3.5 sm:w-4 sm:h-4"
+								class="w-[18px] h-[18px]"
 								fill="none"
 								stroke="currentColor"
 								viewBox="0 0 24 24"
@@ -140,7 +177,7 @@
 						<button
 							@click="toggleAutoAdd"
 							:class="[
-								'p-1 sm:p-1.5 rounded transition-[background-color] duration-75 flex items-center gap-0.5 text-[9px] sm:text-xs font-medium px-1 sm:px-2 touch-manipulation',
+								'flex items-center justify-center min-h-target min-w-target rounded-md transition-[background-color] duration-75 touch-manipulation pos-focus',
 								autoAddEnabled
 									? 'bg-blue-100 hover:bg-blue-200 active:bg-blue-300 text-blue-700'
 									: 'hover:bg-gray-100 active:bg-gray-200 text-gray-600',
@@ -157,7 +194,7 @@
 							"
 						>
 							<svg
-								class="w-3 h-3 sm:w-3.5 sm:h-3.5"
+								class="w-4 h-4"
 								fill="none"
 								stroke="currentColor"
 								viewBox="0 0 24 24"
@@ -169,15 +206,15 @@
 									d="M12 4v16m8-8H4"
 								/>
 							</svg>
-							<span class="hidden xs:inline">{{ __("Auto") }}</span>
 						</button>
 					</div>
 				</div>
 				<div class="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5 flex-shrink-0">
 					<button
 						@click="setViewMode('grid')"
+						:aria-pressed="viewMode === 'grid'"
 						:class="[
-							'p-1.5 sm:p-2 rounded transition-[background-color,box-shadow] duration-75 touch-manipulation',
+							'flex items-center justify-center min-h-target min-w-target rounded-md transition-[background-color,box-shadow] duration-75 touch-manipulation pos-focus',
 							viewMode === 'grid'
 								? 'bg-white shadow-sm'
 								: 'hover:bg-gray-200 active:bg-gray-300',
@@ -186,7 +223,7 @@
 						:aria-label="__('Switch to grid view')"
 					>
 						<svg
-							class="w-4 h-4 sm:w-4.5 sm:h-4.5"
+							class="w-[18px] h-[18px]"
 							fill="none"
 							stroke="currentColor"
 							viewBox="0 0 24 24"
@@ -201,8 +238,9 @@
 					</button>
 					<button
 						@click="setViewMode('list')"
+						:aria-pressed="viewMode === 'list'"
 						:class="[
-							'p-1.5 sm:p-2 rounded transition-[background-color,box-shadow] duration-75 touch-manipulation',
+							'flex items-center justify-center min-h-target min-w-target rounded-md transition-[background-color,box-shadow] duration-75 touch-manipulation pos-focus',
 							viewMode === 'list'
 								? 'bg-white shadow-sm'
 								: 'hover:bg-gray-200 active:bg-gray-300',
@@ -211,7 +249,7 @@
 						:aria-label="__('Switch to list view')"
 					>
 						<svg
-							class="w-4 h-4 sm:w-4.5 sm:h-4.5"
+							class="w-[18px] h-[18px]"
 							fill="none"
 							stroke="currentColor"
 							viewBox="0 0 24 24"
@@ -232,7 +270,7 @@
 						@click="toggleSortDropdown"
 						data-sort-button
 						:class="[
-							'p-1.5 sm:p-2 rounded-lg transition-[background-color,box-shadow] duration-75 touch-manipulation border',
+							'flex items-center justify-center min-h-target min-w-target rounded-lg transition-[background-color,box-shadow] duration-75 touch-manipulation border pos-focus',
 							sortBy
 								? 'bg-blue-50 border-blue-400 text-blue-700 shadow-sm'
 								: 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50 active:bg-gray-100',
@@ -268,7 +306,7 @@
 					>
 						<div class="py-2">
 							<div
-								class="px-3 py-2 text-xs font-semibold text-gray-500 uppercase border-b border-gray-100"
+								class="px-3 py-2 text-xs font-semibold text-gray-600 border-b border-gray-100"
 							>
 								{{ __("Sort Items") }}
 							</div>
@@ -277,7 +315,7 @@
 								<button
 									@click="handleSortToggle(null)"
 									:class="[
-										'w-full px-3 py-2 text-sm transition-colors flex items-center justify-between group',
+										'w-full min-h-target px-3 py-2 text-sm transition-colors flex items-center justify-between group',
 										!sortBy
 											? 'bg-blue-50 text-blue-700'
 											: 'text-gray-700 hover:bg-gray-50',
@@ -285,7 +323,7 @@
 								>
 									<span class="flex items-center gap-2.5">
 										<svg
-											class="w-4 h-4 text-gray-400 group-hover:text-gray-600"
+											class="w-4 h-4 text-gray-500 group-hover:text-gray-700"
 											fill="none"
 											stroke="currentColor"
 											viewBox="0 0 24 24"
@@ -309,7 +347,7 @@
 									:key="option.field"
 									@click="handleSortToggle(option.field)"
 									:class="[
-										'w-full px-3 py-2 text-sm transition-colors flex items-center justify-between group',
+										'w-full min-h-target px-3 py-2 text-sm transition-colors flex items-center justify-between group',
 										sortBy === option.field
 											? 'bg-blue-50 text-blue-700'
 											: 'text-gray-700 hover:bg-gray-50',
@@ -317,7 +355,7 @@
 								>
 									<span class="flex items-center gap-2.5">
 										<svg
-											class="w-4 h-4 text-gray-400 group-hover:text-gray-600"
+											class="w-4 h-4 text-gray-500 group-hover:text-gray-700"
 											fill="none"
 											stroke="currentColor"
 											viewBox="0 0 24 24"
@@ -336,8 +374,8 @@
 										class="w-5 h-5"
 										:class="
 											sortBy === option.field
-												? 'text-blue-600'
-												: 'text-gray-300'
+												? 'text-pos-action'
+												: 'text-gray-400'
 										"
 										fill="none"
 										stroke="currentColor"
@@ -414,55 +452,53 @@
 		>
 			<div
 				ref="gridScrollContainer"
-				class="flex-1 overflow-y-auto p-1.5 sm:p-3"
+				class="flex-1 overflow-y-auto p-2 sm:p-3"
 				style="min-height: 0"
 			>
-				<div
-					class="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-1.5 sm:gap-2.5"
-				>
+				<!-- Columns follow the pane's own width (auto-fill), not the viewport -->
+				<div class="pos-item-grid grid gap-2 sm:gap-2.5">
 					<div
 						v-for="item in displayedItems"
 						:key="item.item_code"
+						role="button"
+						tabindex="0"
+						:data-item-code="item.item_code"
+						:aria-label="item.item_name"
 						@touchstart.passive="getOptimizedClickHandler(item).touchstart"
 						@touchmove.passive="getOptimizedClickHandler(item).touchmove"
 						@touchend.passive="getOptimizedClickHandler(item).touchend"
 						@click="getOptimizedClickHandler(item).click"
+						@keydown.enter.prevent="selectItem(item)"
+						@keydown.space.prevent="selectItem(item)"
 						:class="[
-							'group relative bg-white border border-gray-200 rounded-lg p-1.5 sm:p-2.5 touch-manipulation transition-[border-color,box-shadow] duration-100 cursor-pointer hover:border-blue-400 hover:shadow-md',
+							'group relative flex flex-col bg-white border rounded-lg p-2 sm:p-2.5 touch-manipulation transition-[border-color,box-shadow] duration-100 cursor-pointer hover:border-pos-action hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pos-action focus-visible:ring-offset-1',
+							highlightedCode === item.item_code
+								? 'border-pos-action ring-2 ring-pos-action'
+								: 'border-gray-200',
 						]"
 					>
-						<!-- Stock Badge - Tap to select, long press to view warehouse availability -->
+						<!-- Stock Badge -->
 						<div
 							v-if="(item.is_stock_item || item.is_bundle) && !item.has_variants"
-							@pointerdown="onLongPressStart(item)"
-							@pointerup="onLongPressEnd"
-							@pointercancel="clearLongPress"
-							@pointerleave="clearLongPress"
 							:class="[
-								'absolute -top-1.5 -end-1.5 sm:-top-2 sm:-end-2 rounded-md shadow-lg z-10',
-								'px-2 sm:px-2.5 py-1 sm:py-1 text-[10px] sm:text-xs font-bold',
-								'border-2 border-white cursor-pointer select-none',
-								'hover:scale-110 hover:shadow-xl transition-all duration-200',
-								getStockStatus(item.actual_qty ?? item.stock_qty ?? 0).color,
-								getStockStatus(item.actual_qty ?? item.stock_qty ?? 0).textColor,
+								'absolute -top-1.5 -end-1.5 rounded-md shadow-sm z-10 border-2 border-white select-none pointer-events-none',
+								'min-w-[1.75rem] px-1.5 py-0.5 text-xs font-semibold text-center tabular-nums',
+								getItemStockStatus(item).color,
+								getItemStockStatus(item).textColor,
 							]"
-							:title="__('Check availability in other warehouses')"
+							:title="getItemStockStatus(item).label"
 						>
 							{{ Math.floor(item.actual_qty ?? item.stock_qty ?? 0) }}
 						</div>
 
 						<!-- Item Image -->
 						<div
-							class="relative aspect-square bg-gray-100 rounded-md mb-1.5 sm:mb-2 overflow-hidden"
+							class="relative aspect-square bg-pos-panel rounded-md mb-2 overflow-hidden"
 						>
-							<!-- Image with conditional blur on hover -->
 							<div
 								:class="[
-									'w-full h-full transition-all duration-300',
-									(item.is_stock_item || item.is_bundle) &&
-									(item.actual_qty ?? item.stock_qty ?? 0) <= 0
-										? 'group-hover:blur-sm group-hover:brightness-75'
-										: '',
+									'w-full h-full',
+									isOutOfStock(item) ? 'grayscale opacity-60' : '',
 								]"
 							>
 								<LazyImage
@@ -506,61 +542,74 @@
 								</div>
 							</div>
 
-							<!-- Info Icon Overlay - Tap to select, long press to show warehouse availability -->
+							<!-- Out of stock: always visible, no hover needed -->
 							<div
-								v-if="
-									(item.is_stock_item || item.is_bundle) &&
-									(item.actual_qty ?? item.stock_qty ?? 0) <= 0
-								"
-								@pointerdown="onLongPressStart(item)"
-								@pointerup="onLongPressEnd"
-								@pointercancel="clearLongPress"
-								@pointerleave="clearLongPress"
-								class="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-10 cursor-pointer select-none"
-								:title="__('Check availability in other warehouses')"
+								v-if="isOutOfStock(item)"
+								class="absolute inset-x-0 bottom-0 bg-red-700 text-white text-xs font-semibold text-center py-1"
 							>
-								<div
-									class="p-2.5 bg-white/80 backdrop-blur-sm rounded-full pointer-events-none"
-								>
-									<svg
-										class="w-6 h-6 sm:w-7 sm:h-7 text-blue-600"
-										fill="currentColor"
-										viewBox="0 0 20 20"
-									>
-										<path
-											fill-rule="evenodd"
-											d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
-											clip-rule="evenodd"
-										/>
-									</svg>
-								</div>
+								{{ getItemStockStatus(item).label }}
 							</div>
 						</div>
 
 						<!-- Item Details -->
-						<div class="min-w-0">
+						<div class="min-w-0 flex flex-col flex-1">
 							<h3
-								class="text-[10px] sm:text-xs font-semibold text-gray-900 truncate mb-0.5 leading-tight"
+								dir="auto"
+								class="text-pos-sm font-medium text-pos-ink line-clamp-2 leading-snug min-h-[2.75em]"
+								:title="item.item_name"
 							>
 								{{ item.item_name }}
 							</h3>
 							<p
 								v-if="item.attributes"
-								class="text-[8px] sm:text-[9px] text-gray-400 truncate leading-tight"
+								dir="auto"
+								class="text-xs text-gray-600 truncate leading-tight mt-0.5"
 							>
 								{{ Object.values(item.attributes).join(" / ") }}
 							</p>
-							<p class="text-[9px] sm:text-[10px] text-gray-500 leading-tight">
-								<span class="font-semibold text-blue-600">{{
-									formatCurrency(item.rate || item.price_list_rate || 0)
-								}}</span>
-								<span class="text-gray-400"
-									>/
-									{{
-										item.uom || item.stock_uom || __("Nos", null, "UOM")
-									}}</span
+							<div class="mt-auto pt-1 flex items-center justify-between gap-1 min-h-target">
+								<p class="min-w-0 truncate leading-tight">
+									<span class="text-[14px] font-semibold text-pos-ink tabular-nums">{{
+										formatCurrency(item.rate || item.price_list_rate || 0)
+									}}</span>
+									<span v-if="isNonDefaultUom(item)" class="text-xs text-gray-500">
+										/ {{ item.uom }}</span
+									>
+								</p>
+								<!-- Other warehouses: visible affordance (was a hidden long-press) -->
+								<button
+									v-if="(item.is_stock_item || item.is_bundle) && !isOutOfStock(item)"
+									type="button"
+									class="flex-shrink-0 flex items-center justify-center min-h-target min-w-target -me-1.5 rounded-md text-gray-500 hover:text-pos-action hover:bg-pos-action-soft pos-focus"
+									:title="__('Check availability in other warehouses')"
+									:aria-label="__('Check availability in other warehouses')"
+									@touchstart.stop
+									@touchend.stop
+									@click.stop="showWarehouseAvailability(item)"
+									@keydown.enter.stop
+									@keydown.space.stop
 								>
-							</p>
+									<svg class="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+									</svg>
+								</button>
+							</div>
+							<!-- Out of stock: offer the other warehouses as a labelled action -->
+							<button
+								v-if="isOutOfStock(item)"
+								type="button"
+								class="pos-btn pos-btn-outline w-full mt-1 text-pos-action"
+								@touchstart.stop
+								@touchend.stop
+								@click.stop="showWarehouseAvailability(item)"
+								@keydown.enter.stop
+								@keydown.space.stop
+							>
+								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+								</svg>
+								{{ __("Other warehouses") }}
+							</button>
 						</div>
 					</div>
 				</div>
@@ -583,7 +632,7 @@
 					"
 					class="flex justify-center items-center py-3"
 				>
-					<p class="text-xs text-gray-400">{{ __("All items loaded") }}</p>
+					<p class="text-xs text-gray-500">{{ __("All items loaded") }}</p>
 				</div>
 
 				<!-- Search Results Count -->
@@ -598,93 +647,14 @@
 			</div>
 
 			<!-- Pagination Controls for Grid View -->
-			<div v-if="totalPages > 1" class="px-2 sm:px-3 py-2 bg-white border-t border-gray-200">
-				<div class="flex flex-col sm:flex-row items-center justify-between gap-2">
-					<div class="text-[10px] sm:text-xs text-gray-600 order-2 sm:order-1">
-						{{
-							__("{0} - {1} of {2}", [
-								(currentPage - 1) * itemsPerPage + 1,
-								Math.min(currentPage * itemsPerPage, paginationTotal),
-								paginationTotal,
-							])
-						}}
-					</div>
-					<div class="flex items-center gap-1 order-1 sm:order-2">
-						<button
-							@click="goToPage(1)"
-							:disabled="currentPage === 1"
-							:class="[
-								'px-2 sm:px-3 py-1.5 text-[10px] sm:text-xs font-medium rounded-lg border transition-[background-color] duration-75 touch-manipulation',
-								currentPage === 1
-									? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
-									: 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 active:bg-gray-100',
-							]"
-							:aria-label="__('Go to first page')"
-						>
-							<span class="hidden xs:inline">{{ __("First") }}</span>
-							<span class="xs:hidden">&laquo;</span>
-						</button>
-						<button
-							@click="previousPage"
-							:disabled="currentPage === 1"
-							:class="[
-								'px-2 sm:px-3 py-1.5 text-[10px] sm:text-xs font-medium rounded-lg border transition-[background-color] duration-75 touch-manipulation',
-								currentPage === 1
-									? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
-									: 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 active:bg-gray-100',
-							]"
-							:aria-label="__('Go to previous page')"
-						>
-							<span class="hidden xs:inline">{{ __("Previous") }}</span>
-							<span class="xs:hidden">&lsaquo;</span>
-						</button>
-						<div class="flex items-center gap-0.5 sm:gap-1">
-							<button
-								v-for="page in getPaginationRange()"
-								:key="page"
-								@click="goToPage(page)"
-								:class="[
-									'min-w-[28px] sm:min-w-[32px] px-1.5 sm:px-2.5 py-1.5 text-[10px] sm:text-xs font-medium rounded-lg border transition-[background-color,border-color] duration-75 touch-manipulation',
-									currentPage === page
-										? 'bg-blue-600 text-white border-blue-600'
-										: 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 active:bg-gray-100',
-								]"
-								:aria-label="__('Go to page {0}', [page])"
-							>
-								{{ page }}
-							</button>
-						</div>
-						<button
-							@click="nextPage"
-							:disabled="currentPage === totalPages"
-							:class="[
-								'px-2 sm:px-3 py-1.5 text-[10px] sm:text-xs font-medium rounded-lg border transition-[background-color] duration-75 touch-manipulation',
-								currentPage === totalPages
-									? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
-									: 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 active:bg-gray-100',
-							]"
-							:aria-label="__('Go to next page')"
-						>
-							<span class="hidden xs:inline">{{ __("Next") }}</span>
-							<span class="xs:hidden">&rsaquo;</span>
-						</button>
-						<button
-							@click="goToPage(totalPages)"
-							:disabled="currentPage === totalPages"
-							:class="[
-								'px-2 sm:px-3 py-1.5 text-[10px] sm:text-xs font-medium rounded-lg border transition-[background-color] duration-75 touch-manipulation',
-								currentPage === totalPages
-									? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
-									: 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 active:bg-gray-100',
-							]"
-							:aria-label="__('Go to last page')"
-						>
-							<span class="hidden xs:inline">{{ __("Last") }}</span>
-							<span class="xs:hidden">&raquo;</span>
-						</button>
-					</div>
-				</div>
-			</div>
+			<ItemsPagination
+				v-if="totalPages > 1"
+				:current-page="currentPage"
+				:total-pages="totalPages"
+				:items-per-page="itemsPerPage"
+				:total="paginationTotal"
+				@go="goToPage"
+			/>
 		</div>
 
 		<!-- Table View -->
@@ -706,40 +676,34 @@
 						<tr>
 							<th
 								scope="col"
-								class="px-2 sm:px-3 py-2 sm:py-2.5 text-start text-[10px] sm:text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 w-[50px] sm:w-[60px]"
+								class="px-2 sm:px-3 py-2 sm:py-2.5 text-start text-xs font-semibold text-gray-700 bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 w-[50px] sm:w-[60px]"
 							>
 								{{ __("Image") }}
 							</th>
 							<th
 								scope="col"
-								class="px-2 sm:px-3 py-2 sm:py-2.5 text-start text-[10px] sm:text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 max-w-[120px] sm:max-w-[180px] md:max-w-[200px]"
+								class="px-2 sm:px-3 py-2 sm:py-2.5 text-start text-xs font-semibold text-gray-700 bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 max-w-[120px] sm:max-w-[180px] md:max-w-[200px]"
 							>
 								{{ __("Name") }}
 							</th>
 							<th
 								v-if="settingsStore.displayItemCode"
 								scope="col"
-								class="hidden sm:table-cell px-2 sm:px-3 py-2 sm:py-2.5 text-start text-[10px] sm:text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 sm:max-w-[150px]"
+								class="hidden sm:table-cell px-2 sm:px-3 py-2 sm:py-2.5 text-start text-xs font-semibold text-gray-700 bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 sm:max-w-[150px]"
 							>
 								{{ __("Code") }}
 							</th>
 							<th
 								scope="col"
-								class="px-2 sm:px-3 py-2 sm:py-2.5 text-start text-[10px] sm:text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 w-[70px] sm:w-[100px]"
+								class="px-2 sm:px-3 py-2 sm:py-2.5 text-start text-xs font-semibold text-gray-700 bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 w-[70px] sm:w-[100px]"
 							>
 								{{ __("Rate") }}
 							</th>
 							<th
 								scope="col"
-								class="px-2 sm:px-3 py-2 sm:py-2.5 text-start text-[10px] sm:text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 w-[70px] sm:w-[100px]"
+								class="px-2 sm:px-3 py-2 sm:py-2.5 text-start text-xs font-semibold text-gray-700 bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 w-[70px] sm:w-[100px]"
 							>
 								{{ __("Qty") }}
-							</th>
-							<th
-								scope="col"
-								class="hidden md:table-cell px-2 sm:px-3 py-2 sm:py-2.5 text-start text-[10px] sm:text-xs font-semibold text-gray-700 uppercase tracking-wider bg-gray-50 border-b-2 border-gray-200 sticky top-0 z-10 md:w-[80px]"
-							>
-								{{ __("UOM") }}
 							</th>
 						</tr>
 					</thead>
@@ -751,7 +715,12 @@
 							@touchmove.passive="getOptimizedClickHandler(item).touchmove"
 							@touchend.passive="getOptimizedClickHandler(item).touchend"
 							@click="getOptimizedClickHandler(item).click"
-							class="group cursor-pointer hover:bg-blue-50 hover:shadow-md transition-[background-color,box-shadow] duration-100 touch-manipulation active:bg-blue-100"
+							tabindex="0"
+							:data-item-code="item.item_code"
+							@keydown.enter.prevent="selectItem(item)"
+							@keydown.space.prevent="selectItem(item)"
+							:class="highlightedCode === item.item_code ? 'bg-pos-action-soft' : ''"
+							class="group cursor-pointer focus-visible:outline-none focus-visible:bg-pos-action-soft focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-pos-action hover:bg-blue-50 hover:shadow-md transition-[background-color,box-shadow] duration-100 touch-manipulation active:bg-blue-100"
 						>
 							<td class="px-2 sm:px-3 py-2 whitespace-nowrap w-[50px] sm:w-[60px]">
 								<div
@@ -801,14 +770,16 @@
 								class="px-2 sm:px-3 py-2 max-w-[120px] sm:max-w-[180px] md:max-w-[200px]"
 							>
 								<div
-									class="text-xs sm:text-sm font-medium text-gray-900 truncate"
+									dir="auto"
+									class="text-pos-sm font-medium text-pos-ink truncate"
 									:title="item.item_name"
 								>
 									{{ item.item_name }}
 								</div>
 								<div
 									v-if="item.attributes"
-									class="text-[8px] sm:text-[9px] text-gray-400 truncate leading-tight"
+									dir="auto"
+									class="text-xs text-gray-600 truncate leading-tight"
 								>
 									{{ Object.values(item.attributes).join(" / ") }}
 								</div>
@@ -818,56 +789,72 @@
 								class="hidden sm:table-cell px-2 sm:px-3 py-2 whitespace-nowrap sm:max-w-[150px]"
 							>
 								<div
-									class="text-xs sm:text-sm text-gray-500 truncate"
+									dir="ltr"
+									class="text-pos-sm text-gray-600 truncate tabular-nums"
 									:title="item.item_code"
 								>
 									{{ item.item_code }}
 								</div>
 							</td>
 							<td class="px-2 sm:px-3 py-2 whitespace-nowrap w-[70px] sm:w-[100px]">
-								<div class="text-xs sm:text-sm font-semibold text-blue-600">
+								<div class="text-pos-sm font-semibold text-pos-ink tabular-nums">
 									{{ formatCurrency(item.rate || item.price_list_rate || 0) }}
+								</div>
+								<!-- Unit merged into the rate cell; only shown when not the stock unit -->
+								<div v-if="isNonDefaultUom(item)" class="text-xs text-gray-500">
+									/ {{ item.uom }}
 								</div>
 							</td>
 							<td class="px-2 sm:px-3 py-2 whitespace-nowrap w-[70px] sm:w-[100px]">
-								<!-- Stock Badge - Tap to select, long press to view warehouse availability -->
 								<div
 									v-if="
 										(item.is_stock_item || item.is_bundle) &&
 										!item.has_variants
 									"
-									@pointerdown="onLongPressStart(item)"
-									@pointerup="onLongPressEnd"
-									@pointercancel="clearLongPress"
-									@pointerleave="clearLongPress"
-									:class="[
-										'inline-block px-1.5 sm:px-3 py-0.5 sm:py-1.5 rounded-md shadow-sm',
-										'text-[10px] sm:text-sm font-bold cursor-pointer select-none',
-										'hover:scale-105 hover:shadow-md transition-all duration-200',
-										getStockStatus(item.actual_qty ?? item.stock_qty ?? 0)
-											.color,
-										getStockStatus(item.actual_qty ?? item.stock_qty ?? 0)
-											.textColor,
-									]"
-									:title="__('Check availability in other warehouses')"
+									class="flex items-center gap-0.5"
 								>
-									{{ Math.floor(item.actual_qty ?? item.stock_qty ?? 0) }}
+									<span
+										:class="[
+											'inline-block min-w-[2rem] px-2 py-1 rounded-md text-pos-sm font-semibold text-center tabular-nums select-none',
+											getItemStockStatus(item).color,
+											getItemStockStatus(item).textColor,
+										]"
+										:title="getItemStockStatus(item).label"
+									>
+										{{ Math.floor(item.actual_qty ?? item.stock_qty ?? 0) }}
+									</span>
+									<button
+										type="button"
+										class="flex items-center justify-center min-h-target min-w-target rounded-md text-gray-500 hover:text-pos-action hover:bg-pos-action-soft pos-focus"
+										:title="__('Check availability in other warehouses')"
+										:aria-label="__('Check availability in other warehouses')"
+										@touchstart.stop
+										@touchend.stop
+										@click.stop="showWarehouseAvailability(item)"
+										@keydown.enter.stop
+										@keydown.space.stop
+									>
+										<svg class="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+										</svg>
+									</button>
 								</div>
-								<span v-else class="text-xs sm:text-sm text-gray-400 italic">
+								<!-- Template stock is per variant; the list payload carries no sum -->
+								<span
+									v-else-if="item.has_variants"
+									class="text-pos-sm text-gray-600"
+									:title="__('Stock varies by variant')"
+								>
+									{{ __("variants") }}
+								</span>
+								<span v-else class="text-pos-sm text-gray-500">
 									{{ __("N/A") }}
 								</span>
-							</td>
-							<td
-								class="hidden md:table-cell px-2 sm:px-3 py-2 whitespace-nowrap md:w-[80px]"
-							>
-								<div class="text-xs sm:text-sm text-gray-500">
-									{{ item.uom || item.stock_uom || __("Nos", null, "UOM") }}
-								</div>
 							</td>
 						</tr>
 						<!-- Loading More Indicator Row -->
 						<tr v-if="loadingMore">
-							<td colspan="6" class="px-2 sm:px-3 py-4 text-center bg-white">
+							<td colspan="5" class="px-2 sm:px-3 py-4 text-center bg-white">
 								<div class="flex justify-center items-center">
 									<div
 										class="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-500"
@@ -888,14 +875,14 @@
 								totalPages >= 1
 							"
 						>
-							<td colspan="6" class="px-2 sm:px-3 py-3 text-center bg-white">
+							<td colspan="5" class="px-2 sm:px-3 py-3 text-center bg-white">
 								<p class="text-xs text-gray-400">{{ __("All items loaded") }}</p>
 							</td>
 						</tr>
 
 						<!-- Search Results Count Row -->
 						<tr v-else-if="searchTerm && filteredItems.length > 0">
-							<td colspan="6" class="px-2 sm:px-3 py-3 text-center bg-white">
+							<td colspan="5" class="px-2 sm:px-3 py-3 text-center bg-white">
 								<p class="text-xs text-gray-500">
 									{{ __("{0} items found", [filteredItems.length]) }}
 								</p>
@@ -906,93 +893,14 @@
 			</div>
 
 			<!-- Pagination Controls for List View -->
-			<div v-if="totalPages > 1" class="px-2 sm:px-3 py-2 bg-white border-t border-gray-200">
-				<div class="flex flex-col sm:flex-row items-center justify-between gap-2">
-					<div class="text-[10px] sm:text-xs text-gray-600 order-2 sm:order-1">
-						{{
-							__("{0} - {1} of {2}", [
-								(currentPage - 1) * itemsPerPage + 1,
-								Math.min(currentPage * itemsPerPage, paginationTotal),
-								paginationTotal,
-							])
-						}}
-					</div>
-					<div class="flex items-center gap-1 order-1 sm:order-2">
-						<button
-							@click="goToPage(1)"
-							:disabled="currentPage === 1"
-							:class="[
-								'px-2 sm:px-3 py-1.5 text-[10px] sm:text-xs font-medium rounded-lg border transition-[background-color] duration-75 touch-manipulation',
-								currentPage === 1
-									? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
-									: 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 active:bg-gray-100',
-							]"
-							:aria-label="__('Go to first page')"
-						>
-							<span class="hidden xs:inline">{{ __("First") }}</span>
-							<span class="xs:hidden">&laquo;</span>
-						</button>
-						<button
-							@click="previousPage"
-							:disabled="currentPage === 1"
-							:class="[
-								'px-2 sm:px-3 py-1.5 text-[10px] sm:text-xs font-medium rounded-lg border transition-[background-color] duration-75 touch-manipulation',
-								currentPage === 1
-									? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
-									: 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 active:bg-gray-100',
-							]"
-							:aria-label="__('Go to previous page')"
-						>
-							<span class="hidden xs:inline">{{ __("Previous") }}</span>
-							<span class="xs:hidden">&lsaquo;</span>
-						</button>
-						<div class="flex items-center gap-0.5 sm:gap-1">
-							<button
-								v-for="page in getPaginationRange()"
-								:key="page"
-								@click="goToPage(page)"
-								:class="[
-									'min-w-[28px] sm:min-w-[32px] px-1.5 sm:px-2.5 py-1.5 text-[10px] sm:text-xs font-medium rounded-lg border transition-[background-color,border-color] duration-75 touch-manipulation',
-									currentPage === page
-										? 'bg-blue-600 text-white border-blue-600'
-										: 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 active:bg-gray-100',
-								]"
-								:aria-label="__('Go to page {0}', [page])"
-							>
-								{{ page }}
-							</button>
-						</div>
-						<button
-							@click="nextPage"
-							:disabled="currentPage === totalPages"
-							:class="[
-								'px-2 sm:px-3 py-1.5 text-[10px] sm:text-xs font-medium rounded-lg border transition-[background-color] duration-75 touch-manipulation',
-								currentPage === totalPages
-									? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
-									: 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 active:bg-gray-100',
-							]"
-							:aria-label="__('Go to next page')"
-						>
-							<span class="hidden xs:inline">{{ __("Next") }}</span>
-							<span class="xs:hidden">&rsaquo;</span>
-						</button>
-						<button
-							@click="goToPage(totalPages)"
-							:disabled="currentPage === totalPages"
-							:class="[
-								'px-2 sm:px-3 py-1.5 text-[10px] sm:text-xs font-medium rounded-lg border transition-[background-color] duration-75 touch-manipulation',
-								currentPage === totalPages
-									? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
-									: 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 active:bg-gray-100',
-							]"
-							:aria-label="__('Go to last page')"
-						>
-							<span class="hidden xs:inline">{{ __("Last") }}</span>
-							<span class="xs:hidden">&raquo;</span>
-						</button>
-					</div>
-				</div>
-			</div>
+			<ItemsPagination
+				v-if="totalPages > 1"
+				:current-page="currentPage"
+				:total-pages="totalPages"
+				:items-per-page="itemsPerPage"
+				:total="paginationTotal"
+				@go="goToPage"
+			/>
 		</div>
 	</div>
 
@@ -1009,10 +917,13 @@
 
 <script setup>
 import LazyImage from "@/components/common/LazyImage.vue";
+import ItemsPagination from "@/components/sale/ItemsPagination.vue";
 import WarehouseAvailabilityDialog from "@/components/sale/WarehouseAvailabilityDialog.vue";
 import { useItemSearchStore } from "@/stores/itemSearch";
 import { usePOSSettingsStore } from "@/stores/posSettings";
 import { useStock } from "@/composables/useStock";
+import { useItemsViewMode } from "@/composables/useItemsViewMode";
+import { session } from "@/data/session";
 import { useDialogState } from "@/composables/useDialogState";
 import { useSearchInput } from "@/composables/useSearchInput";
 import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency";
@@ -1038,12 +949,17 @@ const props = defineProps({
 		type: String,
 		default: DEFAULT_CURRENCY,
 	},
+	// Item code of the keyboard-highlighted result (ring on that card/row)
+	highlightedCode: {
+		type: String,
+		default: null,
+	},
 });
 
 const emit = defineEmits(["item-selected"]);
 
 // Use composables
-const { getStockStatus } = useStock();
+const { getItemStockStatus } = useStock();
 const settingsStore = usePOSSettingsStore();
 const { showError, showWarning } = useToast();
 const { isAnyDialogOpen } = useDialogState();
@@ -1088,9 +1004,9 @@ const {
 });
 
 // Local state
-const viewMode = ref("grid");
+// Grid/list choice, remembered per user
+const { viewMode, userManuallySetView, setViewMode } = useItemsViewMode(session.user);
 const itemThreshold = ref(50); // Threshold for auto-switching to list view
-const userManuallySetView = ref(false); // Track if user manually changed view mode
 const lastAutoSwitchCount = ref(0);
 const showSortDropdown = ref(false); // Sort dropdown visibility
 const skipPageReset = ref(false); // Skip page reset when navigating via pagination
@@ -1299,7 +1215,7 @@ let scrollTimeout = null;
 // Scroll handler — pagination controls handle page navigation now.
 // Scroll is only used for scrolling within the current page.
 const handleScrollRAF = throttleRAF(() => {
-	// No-op: pagination handles page navigation via goToPage/nextPage/previousPage
+	// No-op: pagination handles page navigation via goToPage
 });
 
 function handleScroll(event) {
@@ -1326,6 +1242,11 @@ onMounted(() => {
 
 	// Add click outside listener for sort dropdown
 	document.addEventListener("click", handleClickOutside);
+
+	if (chipStripRef.value && typeof ResizeObserver !== "undefined") {
+		chipResizeObserver = new ResizeObserver(updateChipScroll);
+		chipResizeObserver.observe(chipStripRef.value);
+	}
 });
 
 onUnmounted(() => {
@@ -1344,7 +1265,7 @@ onUnmounted(() => {
 
 	// Clear handlers and timers
 	optimizedClickHandlers.clear();
-	clearLongPress();
+	chipResizeObserver?.disconnect();
 	cleanupSearchInput();
 
 	// Remove click outside listener for sort dropdown
@@ -1368,43 +1289,6 @@ function getOptimizedClickHandler(item) {
 		optimizedClickHandlers.set(key, handler);
 	}
 	return optimizedClickHandlers.get(key);
-}
-
-// Long press handler for stock badge/info icon
-// Short tap = select item (with validation), Long press = show warehouse availability
-let longPressTimer = null;
-let longPressItem = null;
-let longPressTriggered = false;
-let itemHandledByLongPress = false; // Flag to prevent double handling
-
-function onLongPressStart(item) {
-	clearTimeout(longPressTimer);
-	longPressItem = item;
-	longPressTriggered = false;
-	longPressTimer = setTimeout(() => {
-		longPressTriggered = true;
-		itemHandledByLongPress = true;
-		showWarehouseAvailability(item);
-	}, 500);
-}
-
-function onLongPressEnd() {
-	clearTimeout(longPressTimer);
-	// If not a long press, trigger item selection
-	if (!longPressTriggered && longPressItem) {
-		itemHandledByLongPress = true;
-		selectItem(longPressItem);
-	}
-	longPressTimer = null;
-	longPressItem = null;
-	longPressTriggered = false;
-}
-
-function clearLongPress() {
-	clearTimeout(longPressTimer);
-	longPressTimer = null;
-	longPressItem = null;
-	longPressTriggered = false;
 }
 
 /**
@@ -1439,14 +1323,47 @@ function selectItem(item, autoAdd = false) {
 }
 
 function handleItemClick(itemCode) {
-	// Skip if already handled by long press handler (prevents double-add)
-	if (itemHandledByLongPress) {
-		itemHandledByLongPress = false;
-		return;
-	}
 	const item = filteredItems.value.find((i) => i.item_code === itemCode);
 	selectItem(item);
 }
+
+function isOutOfStock(item) {
+	return Boolean(
+		(item.is_stock_item || item.is_bundle) &&
+			!item.has_variants &&
+			(item.actual_qty ?? item.stock_qty ?? 0) <= 0
+	);
+}
+
+// The stock unit is the default, so only another unit is worth printing
+function isNonDefaultUom(item) {
+	return Boolean(item.uom && item.uom !== item.stock_uom);
+}
+
+// Category strip: which sides have hidden chips (drives the fade + scroll buttons)
+const chipStripRef = ref(null);
+const chipScroll = ref({ start: false, end: false });
+let chipResizeObserver = null;
+
+function updateChipScroll() {
+	const el = chipStripRef.value;
+	if (!el) return;
+	// scrollLeft is negative in RTL, so measure the distance from the start edge
+	const offset = Math.abs(el.scrollLeft);
+	chipScroll.value = {
+		start: offset > 2,
+		end: offset < el.scrollWidth - el.clientWidth - 2,
+	};
+}
+
+function scrollChips(direction) {
+	const el = chipStripRef.value;
+	if (!el) return;
+	const rtl = getComputedStyle(el).direction === "rtl" ? -1 : 1;
+	el.scrollBy({ left: direction * rtl * el.clientWidth * 0.8, behavior: "smooth" });
+}
+
+watch(activeFilterOptions, () => nextTick(updateChipScroll));
 
 function formatCurrency(amount) {
 	return formatCurrencyUtil(Number.parseFloat(amount || 0), props.currency);
@@ -1494,12 +1411,6 @@ watch(viewMode, async () => {
 	}
 });
 
-// View mode functions
-function setViewMode(mode) {
-	viewMode.value = mode;
-	userManuallySetView.value = true;
-}
-
 function handleAllFilterClick() {
 	if (isBrandSortActive.value) {
 		itemStore.setSelectedBrand(null);
@@ -1523,53 +1434,6 @@ function goToPage(page) {
 		currentPage.value = page;
 		itemStore.fetchPage(page);
 	}
-}
-
-function nextPage() {
-	if (currentPage.value < totalPages.value) {
-		skipPageReset.value = true;
-		currentPage.value++;
-		itemStore.fetchPage(currentPage.value);
-	}
-}
-
-function previousPage() {
-	if (currentPage.value > 1) {
-		skipPageReset.value = true;
-		currentPage.value--;
-		itemStore.fetchPage(currentPage.value);
-	}
-}
-
-function getPaginationRange() {
-	const range = [];
-	const total = totalPages.value;
-	const current = currentPage.value;
-	const delta = 2; // Number of pages to show on each side of current page
-
-	if (total <= 7) {
-		// Show all pages if total is small
-		for (let i = 1; i <= total; i++) {
-			range.push(i);
-		}
-	} else {
-		// Show smart range with ellipsis
-		if (current <= 3) {
-			for (let i = 1; i <= 5; i++) {
-				range.push(i);
-			}
-		} else if (current >= total - 2) {
-			for (let i = total - 4; i <= total; i++) {
-				range.push(i);
-			}
-		} else {
-			for (let i = current - delta; i <= current + delta; i++) {
-				range.push(i);
-			}
-		}
-	}
-
-	return range;
 }
 
 // Sort dropdown functions
@@ -1650,8 +1514,13 @@ function handleClickOutside(event) {
 	scrollbar-width: none; /* Firefox */
 }
 
+/* Columns come from the product pane's width, not viewport breakpoints */
+.pos-item-grid {
+	grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+}
+
 /* Performance optimizations for low-end devices */
-[class*="grid-cols-"] > div {
+.pos-item-grid > div {
 	/* Tell browser which properties will change */
 	will-change: opacity;
 	/* Use GPU acceleration for transforms */
