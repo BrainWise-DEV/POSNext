@@ -343,6 +343,8 @@ function calculateTotal(items) {
 	if (!items || items.length === 0) return 0;
 	return roundCurrency(
 		items.reduce((sum, item) => {
+			// A held line's amount is its net total after offers and coupons; older drafts lack it
+			if (typeof item.amount === "number") return sum + roundCurrency(item.amount);
 			const qty = item.quantity || item.qty || 1;
 			const rate = item.rate || 0;
 			return sum + roundCurrency(qty * roundCurrency(rate));
