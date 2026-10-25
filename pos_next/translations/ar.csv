@@ -1979,3 +1979,5 @@ Points applied: {0}. Please pay remaining {1} with {2},تم خصم النقاط:
 "The promotion already gives more on these items","العرض الحالي يوفّر أكثر على هذه الأصناف",""
 "Default for New Coupons: When a Line Already Has a Discount","الافتراضي للكوبونات الجديدة: عند وجود خصم على السطر",""
 "{0}% off + Coupon {1}","خصم {0}% + كوبون {1}",""
+"Secure connection required","يلزم اتصال آمن",""
+"Open POS Next over https:// to sign in. Passwords are never sent over an insecure connection.","افتح POS Next عبر https:// لتسجيل الدخول. لا تُرسل كلمات المرور عبر اتصال غير آمن.",""
