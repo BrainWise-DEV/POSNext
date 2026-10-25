@@ -1325,13 +1325,6 @@
 
 		<!-- Totals Summary -->
 		<div class="p-1.5 sm:p-2 bg-white border-t border-gray-200">
-			<!-- Offers progress: applied, just removed, and near-miss offers -->
-			<OffersStrip
-				v-if="items.length > 0"
-				:applied-offers="appliedOffers"
-				:format-currency="formatCurrency"
-				@show-offers="$emit('show-offers')"
-			/>
 			<!-- Summary Details -->
 			<div v-if="items.length > 0" class="mb-1.5">
 				<div class="flex items-center justify-between text-xs text-gray-600 mb-0.5">
@@ -1507,7 +1500,6 @@ const log = logger.create("InvoiceCart");
 import { createResource } from "frappe-ui";
 import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from "vue";
 import EditItemDialog from "./EditItemDialog.vue";
-import OffersStrip from "./OffersStrip.vue";
 
 /**
  * ============================================================================

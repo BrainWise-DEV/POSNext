@@ -42,18 +42,3 @@ export function offerTypeLabel(type) {
 	return { "Give Product": __("Free gift"), "Item Price": __("Price discount") }[type] || __("Discount");
 }
 
-/**
- * The paid cart line an offer counts, so the hint can name it and top it up.
- *
- * @param {Object} offer - Offer with apply_on and eligible_items / eligible_item_groups / eligible_brands
- * @param {Array} lines - Cart lines
- * @returns {Object|null} The first matching paid line, or null
- */
-export function offerLine(offer, lines = []) {
-	const match = {
-		"Item Code": (line) => (offer?.eligible_items || []).includes(line.item_code),
-		"Item Group": (line) => (offer?.eligible_item_groups || []).includes(line.item_group),
-		Brand: (line) => (offer?.eligible_brands || []).includes(line.brand),
-	}[offer?.apply_on];
-	return (match && lines.find((line) => !line.is_free_item && match(line))) || null;
-}

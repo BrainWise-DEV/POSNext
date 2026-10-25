@@ -200,19 +200,6 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		}
 	}
 
-	// Names of offers just removed as no longer eligible, shown briefly in the offers strip
-	const removedOfferNotices = ref([]);
-	let removedNoticeTimer = null;
-
-	function noteRemovedOffers(offers) {
-		rememberRemovedOffers(offers);
-		removedOfferNotices.value = (offers || []).map((o) => o.name);
-		clearTimeout(removedNoticeTimer);
-		removedNoticeTimer = setTimeout(() => {
-			removedOfferNotices.value = [];
-		}, 5000);
-	}
-
 	function wasRemovedForCurrentCart(code) {
 		const sig = removedOfferSignatures.get(code);
 		if (sig === undefined) return false;
@@ -1247,8 +1234,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				// Wait for Vue to update before showing toast
 				await nextTick();
 
-				// The cart's offers strip shows the removal
-				noteRemovedOffers(invalidOffers);
+				// The line's saving row disappears; the offers popup lists what the cart lacks
+				rememberRemovedOffers(invalidOffers);
 				return true;
 			}
 			return false;
@@ -2152,7 +2139,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				applyHeaderDiscountFromServer(null);
 				rebuildIncrementalCache();
 
-				noteRemovedOffers(invalidOffers);
+				rememberRemovedOffers(invalidOffers);
 			} else if (combinedCodes.length > 0) {
 				const invoiceData = buildOfferEvaluationPayload(currentProfile);
 				const response = await applyOffersResource.submit({
@@ -2212,9 +2199,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 				// 6. UI Feedback
 				if (invalidOffers.length > 0) {
-					noteRemovedOffers(invalidOffers);
+					rememberRemovedOffers(invalidOffers);
 				}
-				// Newly applied offers show as applied in the cart's offers strip
+				// Newly applied offers show as savings on their cart lines
 			} else if (invoiceItems.value.length === 0 && appliedOffers.value.length > 0) {
 				// Cart cleared, reset offers
 				appliedOffers.value = [];
@@ -2453,7 +2440,6 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		selectionMode,
 		currentDraftId,
 		offerProcessingState, // Offer processing state for UI feedback
-		removedOfferNotices, // Offers just removed as no longer eligible
 
 		// Computed
 		itemCount,

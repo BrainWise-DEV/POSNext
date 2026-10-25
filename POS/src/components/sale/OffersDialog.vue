@@ -82,7 +82,7 @@
 									]"
 								>
 									<div class="text-lg font-bold" dir="auto">
-										{{ offerBenefit(offer, formatCurrency) }}
+										{{ offerBenefit(offer, formatCurrency, itemName) }}
 									</div>
 								</div>
 							</div>
@@ -268,6 +268,7 @@
 
 <script setup>
 import { usePOSOffersStore } from "@/stores/posOffers";
+import { useItemSearchStore } from "@/stores/itemSearch";
 import {
 	DEFAULT_CURRENCY,
 	DEFAULT_LOCALE,
@@ -279,6 +280,12 @@ import { computed, ref, watch } from "vue";
 
 // Use Pinia stores
 const offersStore = usePOSOffersStore();
+const itemSearchStore = useItemSearchStore();
+
+// Gift item name for an item code, falling back to the code
+function itemName(code) {
+	return itemSearchStore.allItems?.find((item) => item.item_code === code)?.item_name || code;
+}
 
 const props = defineProps({
 	modelValue: Boolean,
@@ -352,7 +359,7 @@ function getProgress(offer) {
 /** "Buy 1 more to get 1 free" / "Add E£50 more to get 20% off" */
 function formatProgress(offer) {
 	const progress = getProgress(offer);
-	const benefit = offerBenefit(offer, formatCurrency);
+	const benefit = offerBenefit(offer, formatCurrency, itemName);
 	return progress.kind === "qty"
 		? __("Buy {0} more to get {1}", [progress.missing, benefit])
 		: __("Add {0} more and get {1}", [formatCurrency(progress.missing), benefit]);
