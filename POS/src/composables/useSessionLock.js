@@ -163,6 +163,8 @@ function clearCachedPasswordHash() {
 }
 
 async function cachePasswordHashFromLogin(password) {
+	// Web Crypto exists only in secure contexts; plain http reaches here only in dev mode (see canLogin)
+	if (!globalThis.crypto?.subtle) return;
 	const user = getCurrentUserId();
 	const { hash, salt } = await hashPassword(password);
 	cachePasswordHash(user, hash, salt);

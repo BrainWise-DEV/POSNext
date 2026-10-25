@@ -37,3 +37,14 @@ describe("useSessionLock idle timer", () => {
 		expect(isLocked.value).toBe(true)
 	})
 })
+
+describe("useSessionLock without Web Crypto (dev mode over plain http)", () => {
+	afterEach(() => vi.unstubAllGlobals())
+
+	it("skips the offline unlock hash instead of failing the login", async () => {
+		vi.stubGlobal("crypto", { getRandomValues: (a) => a })
+		const { cachePasswordHashFromLogin } = useSessionLock()
+
+		await expect(cachePasswordHashFromLogin("secret")).resolves.toBeUndefined()
+	})
+})
