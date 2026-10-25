@@ -1981,3 +1981,5 @@ Points applied: {0}. Please pay remaining {1} with {2},تم خصم النقاط:
 "{0}% off + Coupon {1}","خصم {0}% + كوبون {1}",""
 "Secure connection required","يلزم اتصال آمن",""
 "Open POS Next over https:// to sign in. Passwords are never sent over an insecure connection.","افتح POS Next عبر https:// لتسجيل الدخول. لا تُرسل كلمات المرور عبر اتصال غير آمن.",""
+"{0} can't be combined with the order discount already applied","لا يمكن الجمع بين {0} وخصم الفاتورة المطبّق حاليًا",""
+"Coupon {0} removed: it can't be combined with the order discount","تم إلغاء الكوبون {0}: لا يمكن الجمع بينه وبين خصم الفاتورة",""
