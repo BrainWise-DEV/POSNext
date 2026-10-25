@@ -3463,7 +3463,9 @@ function applyCustomerCredit() {
 // Add "Pay on Account" - Credit Sale (invoice with outstanding amount)
 // Cash method for "Exact cash", offered while nothing has been entered yet
 const exactCashMethod = computed(() =>
-	paymentEntries.value.length === 0 && remainingAmount.value > 0
+	paymentEntries.value.length === 0 &&
+	remainingAmount.value > 0 &&
+	!(applyWriteOff.value && canWriteOff.value)
 		? filteredPaymentMethods.value.find((m) => isCashPaymentMethod(m))
 		: null
 );

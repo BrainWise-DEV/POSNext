@@ -308,8 +308,14 @@ const appliedOfferCodes = computed(() => {
 	return new Set((props.appliedOffers || []).map((entry) => entry?.code).filter(Boolean));
 });
 
-// Use ALL eligible offers from store (includes both auto and manual offers)
-const eligibleOffers = computed(() => offersStore.allEligibleOffersSorted);
+// Use ALL eligible offers from store (includes both auto and manual offers),
+// then near-miss offers the cart is on its way to
+const eligibleOffers = computed(() => [
+	...offersStore.allEligibleOffersSorted,
+	...offersStore.availableOffers.filter(
+		(o) => !o.coupon_based && !offersStore.allEligibleOffers.includes(o) && getProgress(o)
+	),
+]);
 
 // Loading state - check if offers are being loaded
 const loading = computed(() => {
