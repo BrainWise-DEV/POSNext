@@ -24,6 +24,12 @@ describe("translationCache version", () => {
 		expect(entry.messages.Clear).toBe("مسح")
 	})
 
+	it("refetches bundles cached by an earlier build", async () => {
+		stored.set("de", { locale: "de", messages: {}, timestamp: Date.now(), version: 2 })
+		const old = await translationCache.get("de")
+		expect(translationCache.isStale(old.timestamp)).toBe(true)
+	})
+
 	it("keeps an older bundle as the offline fallback", async () => {
 		stored.set("id", { locale: "id", messages: { Clear: "Hapus" }, timestamp: Date.now() })
 		const entry = await translationCache.getFresh("id", async () => null)

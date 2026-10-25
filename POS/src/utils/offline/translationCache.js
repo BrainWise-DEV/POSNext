@@ -22,8 +22,8 @@ const log = logger.create("TranslationCache");
 /** @constant {number} Cache time-to-live in milliseconds (24 hours) */
 const CACHE_TTL = 24 * 60 * 60 * 1000;
 
-/** @constant {number} Bundle format version; bump to drop bundles cached by older builds */
-export const CACHE_VERSION = 2;
+/** @constant {string} Bundle format version plus the build, so each release refetches its strings */
+export const CACHE_VERSION = `2-${typeof __BUILD_VERSION__ !== "undefined" ? __BUILD_VERSION__ : "dev"}`;
 
 /** @type {Map<string, TranslationEntry>} In-memory cache for fast lookups */
 const memoryCache = new Map();
@@ -36,7 +36,7 @@ const pendingRefreshes = new Map();
  * @property {string} locale - Normalized locale code (e.g., "en", "ar")
  * @property {Record<string, string>} messages - Key-value translation pairs
  * @property {number} timestamp - Unix timestamp when cached
- * @property {number} version - CACHE_VERSION the bundle was cached under
+ * @property {string} version - CACHE_VERSION the bundle was cached under
  */
 
 /**
