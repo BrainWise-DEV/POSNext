@@ -711,7 +711,7 @@
 									</div>
 									<span
 										v-if="localAdditionalDiscount > 0"
-										class="text-xs font-bold text-red-600"
+										class="text-xs font-bold text-[#0f7a4a]"
 									>
 										-{{ formatCurrency(calculatedAdditionalDiscount) }}
 									</span>
@@ -836,7 +836,7 @@
 								class="flex items-center justify-between text-sm"
 							>
 								<span class="text-gray-600 text-start">{{ __("Discount") }}</span>
-								<span class="font-medium text-red-600 text-end"
+								<span class="font-medium text-[#0f7a4a] text-end"
 									>-{{ formatCurrency(discountAmount) }}</span
 								>
 							</div>

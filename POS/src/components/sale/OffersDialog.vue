@@ -50,28 +50,11 @@
 									: 'bg-gradient-to-r from-green-50 to-emerald-50 border-green-200 hover:border-green-400 hover:shadow-lg cursor-pointer',
 							]"
 						>
-							<!-- Source Badge (Pricing Rule vs Promotional Scheme) -->
-							<div
-								:class="[
-									'absolute top-2 text-[10px] font-bold px-2 py-1 rounded-full',
-									'end-2',
-									offer.source === 'Pricing Rule'
-										? 'bg-blue-600 text-white'
-										: 'bg-purple-600 text-white',
-								]"
-							>
-								{{
-									offer.source === "Pricing Rule"
-										? __("PRICING RULE")
-										: __("PROMO SCHEME")
-								}}
-							</div>
-
-							<!-- Discount Display -->
-							<div class="flex items-center gap-3 mb-3">
+							<!-- What the customer gets, with the offer type beside it -->
+							<div class="flex items-start gap-2 mb-3">
 								<div
 									:class="[
-										'text-white px-4 py-2 rounded-lg transition-all',
+										'flex-1 min-w-0 text-white px-3 py-2 rounded-lg transition-all',
 										isOfferApplied(offer)
 											? 'bg-green-700 ring-2 ring-green-600'
 											: offer.offer === 'Give Product'
@@ -81,19 +64,34 @@
 											: 'bg-green-600',
 									]"
 								>
-									<div class="text-lg font-bold" dir="auto">
+									<div class="text-base font-bold leading-snug break-words" dir="auto">
 										{{ offerBenefit(offer, formatCurrency, itemName) }}
 									</div>
+								</div>
+								<!-- Source Badge (Pricing Rule vs Promotional Scheme) -->
+								<div
+									:class="[
+										'flex-shrink-0 text-[10px] font-bold px-2 py-1 rounded-full',
+										offer.source === 'Pricing Rule'
+											? 'bg-blue-600 text-white'
+											: 'bg-purple-600 text-white',
+									]"
+								>
+									{{
+										offer.source === "Pricing Rule"
+											? __("PRICING RULE")
+											: __("PROMO SCHEME")
+									}}
 								</div>
 							</div>
 
 							<!-- Offer Header -->
-							<div class="mb-3 me-28">
+							<div class="mb-3">
 								<h4 class="text-sm font-semibold text-gray-900 text-start" dir="auto">
 									{{ offer.title || offer.name }}
 								</h4>
 								<p
-									v-if="offer.description"
+									v-if="offer.description && offer.description !== (offer.title || offer.name)"
 									class="text-xs text-gray-600 mt-1 text-start"
 								>
 									{{ offer.description }}
