@@ -69,7 +69,7 @@ async function persist(locale, messages, timestamp) {
 /**
  * Reads translation entry from memory cache, falling back to IndexedDB.
  * @param {string} locale - Normalized locale code
- * @returns {Promise<TranslationEntry|null>} Cached entry or null if not found or from an older version
+ * @returns {Promise<TranslationEntry|null>} Cached entry (stale if from an older version) or null if not found
  * @private
  */
 async function read(locale) {
@@ -80,9 +80,11 @@ async function read(locale) {
 
 	try {
 		const stored = await db.translations.get(locale);
-		if (stored?.version !== CACHE_VERSION) return null;
-		memoryCache.set(locale, stored);
-		return stored;
+		if (!stored) return null;
+		// Older-version bundles stay usable offline but are always stale
+		const entry = stored.version === CACHE_VERSION ? stored : { ...stored, timestamp: 0 };
+		memoryCache.set(locale, entry);
+		return entry;
 	} catch (error) {
 		log.error("Failed to get cached translations:", error);
 		return null;
