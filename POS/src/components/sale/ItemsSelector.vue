@@ -125,12 +125,16 @@
 						@input="handleSearchInput"
 						@keydown="handleKeyDown"
 						@click="handleSearchClick"
+						@focus="handleSearchClick"
 						type="text"
 						spellcheck="false"
 						autocomplete="off"
 						:placeholder="searchPlaceholder"
 						:class="[
-							'w-full min-h-target text-pos-sm text-pos-ink placeholder:text-gray-500 border rounded-lg px-2 sm:px-3 py-2 ps-8 sm:ps-10 pe-[calc(var(--pos-target)_*_2_+_0.5rem)] focus:outline-none transition-all',
+							'w-full min-h-target text-pos-sm text-pos-ink placeholder:text-gray-500 border rounded-lg px-2 sm:px-3 py-2 ps-8 sm:ps-10 focus:outline-none transition-all',
+							searchTerm
+								? 'pe-[calc(var(--pos-target)_*_3_+_0.75rem)]'
+								: 'pe-[calc(var(--pos-target)_*_2_+_2.5rem)]',
 							autoAddEnabled
 								? 'border-blue-400 bg-blue-50 focus:ring-2 focus:ring-blue-500 focus:border-transparent'
 								: scannerEnabled
@@ -139,8 +143,27 @@
 						]"
 						:aria-label="__('Search items')"
 					/>
-					<!-- Barcode Scan Icon and Auto-Add Toggle -->
+					<!-- Clear, F4 hint, barcode scan icon and auto-add toggle -->
 					<div class="absolute inset-y-0 end-0 pe-0.5 flex items-center gap-0.5">
+						<button
+							v-if="searchTerm"
+							type="button"
+							class="flex items-center justify-center min-h-target min-w-target rounded-md text-gray-500 hover:text-pos-ink hover:bg-gray-100 pos-focus"
+							:title="__('Clear search')"
+							:aria-label="__('Clear search')"
+							@click="clearSearchAndResetInput"
+						>
+							<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+							</svg>
+						</button>
+						<kbd
+							v-else
+							class="hidden sm:inline-block px-1.5 py-0.5 me-1 rounded border border-gray-300 bg-white text-xs font-medium text-gray-600 tabular-nums"
+							dir="ltr"
+							:title="__('Press F4 to focus search')"
+							>F4</kbd
+						>
 						<button
 							@click="toggleBarcodeScanner"
 							:class="[
@@ -472,8 +495,8 @@
 						@keydown.space.prevent="selectItem(item)"
 						:class="[
 							'group relative flex flex-col bg-white border rounded-lg p-2 sm:p-2.5 touch-manipulation transition-[border-color,box-shadow] duration-100 cursor-pointer hover:border-pos-action hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pos-action focus-visible:ring-offset-1',
-							highlightedCode === item.item_code
-								? 'border-pos-action ring-2 ring-pos-action'
+							activeHighlightCode === item.item_code
+								? 'border-pos-action ring-2 ring-pos-action ring-offset-1'
 								: 'border-gray-200',
 						]"
 					>
@@ -719,7 +742,7 @@
 							:data-item-code="item.item_code"
 							@keydown.enter.prevent="selectItem(item)"
 							@keydown.space.prevent="selectItem(item)"
-							:class="highlightedCode === item.item_code ? 'bg-pos-action-soft' : ''"
+							:class="activeHighlightCode === item.item_code ? 'bg-pos-action-soft ring-2 ring-inset ring-pos-action' : ''"
 							class="group cursor-pointer focus-visible:outline-none focus-visible:bg-pos-action-soft focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-pos-action hover:bg-blue-50 hover:shadow-md transition-[background-color,box-shadow] duration-100 touch-manipulation active:bg-blue-100"
 						>
 							<td class="px-2 sm:px-3 py-2 whitespace-nowrap w-[50px] sm:w-[60px]">
@@ -995,6 +1018,7 @@ const {
 	toggleAutoAdd,
 	focusSearchInput,
 	clearSearchAndResetInput,
+	highlightedCode: searchHighlightedCode = ref(null),
 	cleanup: cleanupSearchInput,
 } = useSearchInput({
 	itemStore,
@@ -1002,6 +1026,11 @@ const {
 	showWarning,
 	isAnyDialogOpen,
 });
+
+// Keyboard-highlighted result: the parent's prop wins, else the search composable's
+const activeHighlightCode = computed(
+	() => props.highlightedCode ?? searchHighlightedCode.value ?? null
+);
 
 // Local state
 // Grid/list choice, remembered per user
