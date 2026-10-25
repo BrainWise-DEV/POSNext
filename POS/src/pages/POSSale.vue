@@ -262,8 +262,7 @@
 			<!-- Main Content: Responsive Layout -->
 			<div
 				v-if="shiftStore.hasOpenShift"
-				class="flex-1 flex overflow-hidden relative"
-				style="max-height: calc(100vh - 60px - var(--header-height, 60px))"
+				class="flex-1 min-h-0 flex overflow-hidden relative"
 			>
 				<!-- Icon-Only Management Slider - Always Visible -->
 				<ManagementSlider
@@ -495,8 +494,7 @@
 			<!-- No Shift Placeholder -->
 			<div
 				v-else
-				class="flex-1 flex items-center justify-center bg-gray-50"
-				style="max-height: calc(100vh - 60px - var(--header-height, 60px))"
+				class="flex-1 min-h-0 flex items-center justify-center bg-gray-50"
 			>
 				<div class="text-center">
 					<div
