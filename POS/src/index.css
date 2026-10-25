@@ -237,12 +237,9 @@ button.active\:scale-95:active,
 }
 
 /*
- * Money and quantity figures line up in columns: tabular digits everywhere a
- * number is read against another (prices, totals, stock, pagination).
+ * Money and quantity figures use Tailwind's `tabular-nums` so digits line up
+ * wherever a number is read against another (prices, totals, stock, pagination).
  */
-.pos-num {
-	font-variant-numeric: tabular-nums;
-}
 
 /*
  * Button variant map. One primary colour (action blue); danger only for

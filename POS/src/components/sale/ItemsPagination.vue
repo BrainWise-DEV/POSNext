@@ -3,7 +3,7 @@
 		class="px-2 sm:px-3 py-1.5 bg-white border-t border-gray-200 flex flex-wrap items-center justify-between gap-2"
 		:aria-label="__('Pagination')"
 	>
-		<div class="text-pos-sm text-gray-600 tabular-nums" dir="ltr">
+		<div class="text-pos-sm text-gray-600 tabular-nums">
 			{{
 				__("{0} - {1} of {2}", [
 					(currentPage - 1) * itemsPerPage + 1,
@@ -57,7 +57,7 @@
 </template>
 
 <script setup>
-import { computed } from "vue";
+import { computed } from "vue"
 
 // Shared pager for the items grid and list. Chevrons point along the reading
 // direction, so they are mirrored under RTL.
@@ -66,24 +66,45 @@ const props = defineProps({
 	totalPages: { type: Number, required: true },
 	itemsPerPage: { type: Number, required: true },
 	total: { type: Number, required: true },
-});
+})
 
-defineEmits(["go"]);
+defineEmits(["go"])
 
 const startNav = computed(() => [
-	{ key: "first", page: 1, label: __("Go to first page"), icon: "M11 19l-7-7 7-7M19 19l-7-7 7-7" },
-	{ key: "prev", page: props.currentPage - 1, label: __("Go to previous page"), icon: "M15 19l-7-7 7-7" },
-]);
+	{
+		key: "first",
+		page: 1,
+		label: __("Go to first page"),
+		icon: "M11 19l-7-7 7-7M19 19l-7-7 7-7",
+	},
+	{
+		key: "prev",
+		page: props.currentPage - 1,
+		label: __("Go to previous page"),
+		icon: "M15 19l-7-7 7-7",
+	},
+])
 
 const endNav = computed(() => [
-	{ key: "next", page: props.currentPage + 1, label: __("Go to next page"), icon: "M9 5l7 7-7 7" },
-	{ key: "last", page: props.totalPages, label: __("Go to last page"), icon: "M13 5l7 7-7 7M5 5l7 7-7 7" },
-]);
+	{
+		key: "next",
+		page: props.currentPage + 1,
+		label: __("Go to next page"),
+		icon: "M9 5l7 7-7 7",
+	},
+	{
+		key: "last",
+		page: props.totalPages,
+		label: __("Go to last page"),
+		icon: "M13 5l7 7-7 7M5 5l7 7-7 7",
+	},
+])
 
 // Every page when there are 7 or fewer, else five centred on the current page
 const pageRange = computed(() => {
-	const total = props.totalPages;
-	const first = total <= 7 ? 1 : Math.min(Math.max(props.currentPage - 2, 1), total - 4);
-	return Array.from({ length: total <= 7 ? total : 5 }, (_, i) => first + i);
-});
+	const total = props.totalPages
+	const first =
+		total <= 7 ? 1 : Math.min(Math.max(props.currentPage - 2, 1), total - 4)
+	return Array.from({ length: total <= 7 ? total : 5 }, (_, i) => first + i)
+})
 </script>

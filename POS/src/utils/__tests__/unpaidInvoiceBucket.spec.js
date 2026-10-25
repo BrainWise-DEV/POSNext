@@ -19,12 +19,14 @@ describe("unpaidInvoiceBucket", () => {
 		expect(counts.overdue).toHaveLength(3)
 		expect(counts.partial).toHaveLength(3)
 		expect(counts.unpaid).toHaveLength(2)
-		expect(counts.overdue.length + counts.partial.length + counts.unpaid.length).toBe(
-			invoices.length,
-		)
+		expect(
+			counts.overdue.length + counts.partial.length + counts.unpaid.length,
+		).toBe(invoices.length)
 	})
 
 	it("ranks overdue above partly paid", () => {
-		expect(unpaidInvoiceBucket({ status: "Overdue", paid_amount: 40 })).toBe("overdue")
+		expect(unpaidInvoiceBucket({ status: "Overdue", paid_amount: 40 })).toBe(
+			"overdue",
+		)
 	})
 })

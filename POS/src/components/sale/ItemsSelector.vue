@@ -125,7 +125,6 @@
 						@input="handleSearchInput"
 						@keydown="handleKeyDown"
 						@click="handleSearchClick"
-						@focus="handleSearchClick"
 						type="text"
 						spellcheck="false"
 						autocomplete="off"

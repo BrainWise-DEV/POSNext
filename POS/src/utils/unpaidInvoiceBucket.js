@@ -7,8 +7,9 @@
  * @returns {"overdue"|"partial"|"unpaid"} The one bucket the invoice belongs to
  */
 export function unpaidInvoiceBucket(invoice) {
-	const status = invoice?.status || "";
-	if (status.startsWith("Overdue")) return "overdue";
-	if (status.startsWith("Partly Paid") || Number(invoice?.paid_amount) > 0) return "partial";
-	return "unpaid";
+	const status = invoice?.status || ""
+	if (status.startsWith("Overdue")) return "overdue"
+	if (status.startsWith("Partly Paid") || Number(invoice?.paid_amount) > 0)
+		return "partial"
+	return "unpaid"
 }

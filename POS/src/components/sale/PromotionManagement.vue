@@ -1632,6 +1632,8 @@ watch(
 // Esc closes the delete confirmation first, then the modal
 function handleEscape(event) {
 	if (event.key !== "Escape" || event.defaultPrevented) return;
+	// An open select/popover takes Esc first
+	if (document.querySelector("[data-reka-popper-content-wrapper]")) return;
 	if (showDeleteConfirm.value) cancelDelete();
 	else handleClose();
 }
