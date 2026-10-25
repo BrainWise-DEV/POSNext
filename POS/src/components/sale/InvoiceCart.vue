@@ -1108,13 +1108,13 @@
 									class="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-gray-600 mt-0.5"
 								>
 									<span class="tabular-nums">
-										<s v-if="getLineStrikePrice(item)" class="text-gray-500 me-1">{{
-											formatCurrency(getLineStrikePrice(item))
-										}}</s>
-										<span :class="getLineStrikePrice(item) ? 'font-semibold text-[#0f7a4a]' : ''">{{
+										<bdi dir="ltr" class="me-1">{{ formatQuantity(item.quantity) }} ×</bdi>
+										<s v-if="getLineStrikePrice(item)" class="text-gray-500 me-1"
+											><bdi>{{ formatCurrency(getLineStrikePrice(item)) }}</bdi></s
+										>
+										<bdi :class="getLineStrikePrice(item) ? 'font-semibold text-[#0f7a4a]' : ''">{{
 											formatCurrency(getLineNetRate(item))
-										}}</span>
-										<span dir="ltr"> × {{ formatQuantity(item.quantity) }}</span>
+										}}</bdi>
 									</span>
 									<span
 										v-if="item._bundledFreeQty > 0"
