@@ -590,6 +590,7 @@ function handleConfirm() {
 
 	if (props.item?.has_batch_no && selectedBatch.value) {
 		result.batch_no = selectedBatch.value.batch_no;
+		result.batch_expiry_date = selectedBatch.value.expiry_date || null;
 	}
 
 	if (props.item?.has_serial_no) {

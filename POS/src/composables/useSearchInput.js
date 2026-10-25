@@ -210,7 +210,7 @@ export function useSearchInput({ itemStore, onItemFound, showWarning, isAnyDialo
 				focusSearchInput();
 				return;
 			}
-			showWarning(__("Item Not Found: No item found with barcode: {0}", [barcode]));
+			showWarning(__("No item matches «{0}». Search by name or scan the barcode again.", [barcode]));
 			focusSearchInput();
 		});
 	}

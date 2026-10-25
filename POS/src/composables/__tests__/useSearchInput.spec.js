@@ -64,6 +64,14 @@ describe("useSearchInput Enter on a name search", () => {
 		press("Enter");
 		await vi.waitFor(() => expect(onItemFound).toHaveBeenCalledWith(lays, false));
 	});
+
+	it("tells the cashier what to do when nothing matches", async () => {
+		const { showWarning, type, press } = setup({ results: [] });
+		type("zzz");
+		press("Enter");
+		await vi.waitFor(() => expect(showWarning).toHaveBeenCalled());
+		expect(showWarning.mock.calls[0][0]).toBe("No item matches «zzz». Search by name or scan the barcode again.");
+	});
 });
 
 describe("useSearchInput keyboard navigation", () => {

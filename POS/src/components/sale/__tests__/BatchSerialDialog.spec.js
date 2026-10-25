@@ -51,6 +51,15 @@ describe("BatchSerialDialog batch picker", () => {
 		expect(state.availableBatches.map((b) => b.batch_no)).toEqual(["SOON", "LATE", "NODATE", "OLD"]);
 	});
 
+	it("passes the chosen batch's expiry with the batch number", async () => {
+		const wrapper = mountDialog({ item: { item_code: "YOG", has_batch_no: 1 } });
+		const state = wrapper.vm.$.setupState;
+		state.warehouseBatches = [{ batch_no: "SOON", qty: 3, expiry_date: "2026-11-05" }];
+		await nextTick();
+		state.handleConfirm();
+		expect(wrapper.emitted("batch-serial-selected")[0][0]).toEqual({ batch_no: "SOON", batch_expiry_date: "2026-11-05" });
+	});
+
 	it("labels expiry with an unambiguous date, a relative day count and a tone", () => {
 		const state = mountDialog({ item: { item_code: "YOG", has_batch_no: 1 } }).vm.$.setupState;
 		expect(state.expiryLabel("2026-11-05")).toBe("5 November 2026 · in 11 days");
