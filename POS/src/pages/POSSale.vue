@@ -3,9 +3,14 @@
 		No height: 100vh here. The page fills whatever the host leaves it (see the
 		flex chain in index.css), so chrome above POS — Frappe's navbar, a demo
 		countdown banner — shortens the page instead of pushing its bottom off the
-		screen. The sale screen has no footer strip, so the cart reaches the bottom.
+		screen. padding-bottom keeps POSFooter's fixed strip from sitting on top of
+		the cart's Checkout button; the footer publishes its own height, so this
+		follows if it is ever restyled.
 	-->
-	<div class="flex flex-1 flex-col min-h-0 bg-gray-50 overflow-x-hidden">
+	<div
+		class="flex flex-1 flex-col min-h-0 bg-gray-50 overflow-x-hidden"
+		style="padding-bottom: var(--pos-footer-h, 24px)"
+	>
 		<!-- Loading State -->
 		<LoadingSpinner v-if="uiStore.isLoading" />
 
@@ -1064,6 +1069,8 @@
 				@confirm="confirmClearCache"
 			/>
 
+			<!-- Footer -->
+			<POSFooter />
 		</template>
 
 		<!-- Session Lock Screen (outside v-if/v-else so it renders even during loading) -->
@@ -1087,6 +1094,7 @@ import ShiftOpeningDialog from "@/components/ShiftOpeningDialog.vue";
 import ClearCacheOverlay from "@/components/common/ClearCacheOverlay.vue";
 import SessionLockScreen from "@/components/common/SessionLockScreen.vue";
 import LoadingSpinner from "@/components/common/LoadingSpinner.vue";
+import POSFooter from "@/components/common/POSFooter.vue";
 import ManagementSlider from "@/components/pos/ManagementSlider.vue";
 import POSHeader from "@/components/pos/POSHeader.vue";
 import BatchSerialDialog from "@/components/sale/BatchSerialDialog.vue";
