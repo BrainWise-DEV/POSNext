@@ -3628,7 +3628,11 @@ def apply_offers(invoice_data, selected_offers=None):
 
 		return {
 			"items": [dict(item) for item in prepared_items],
-			"free_items": [dict(item) for item in free_items_map.values()],
+			# Free rows carry the item image so gifts not already in the cart show it
+			"free_items": [
+				dict(item, image=item.get("image") or frappe.get_cached_value("Item", item.item_code, "image"))
+				for item in free_items_map.values()
+			],
 			"applied_pricing_rules": sorted(applied_rules),
 			# Header-level (transaction-scope) discount surfaced from
 			# _evaluate_transaction_offers. Frontend should apply these to the

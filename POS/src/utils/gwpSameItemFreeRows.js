@@ -93,7 +93,7 @@ export function syncCartFreeItems(items, freeItems, { recalculateItem } = {}) {
 			gwp_same_item_row: carveFromPaid ? 1 : 0,
 			pricing_rules: freeItem.pricing_rules || null,
 			warehouse: freeItem.warehouse || cartItem?.warehouse,
-			image: cartItem?.image,
+			image: cartItem?.image || freeItem.image,
 		});
 	}
 
