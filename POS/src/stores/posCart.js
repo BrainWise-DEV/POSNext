@@ -265,6 +265,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * Update item quantity with stock validation.
 	 * Wraps useInvoice.updateItemQuantity to enforce stock limits
 	 * when the user clicks +/- or types a new quantity.
+	 * The quantity is the line's total units, including a same-item gift
+	 * carved out of it (typed 3 on "buy 2 get 1" → 2 paid + 1 gift).
 	 */
 	function updateItemQuantity(itemCode, quantity, uom = null) {
 		const item = uom
@@ -276,15 +278,25 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		if (!item) return;
 
 		const newQty = Number.parseFloat(quantity) || 1;
+		// Same-item gift rows carved out of this line
+		const carved = invoiceItems.value.filter(
+			(i) =>
+				i.is_free_item &&
+				Number(i.gwp_same_item_row) === 1 &&
+				i.item_code === itemCode &&
+				i.uom === item.uom
+		);
+		const lineQty =
+			item.quantity + carved.reduce((sum, i) => sum + (Number.parseFloat(i.quantity) || 0), 0);
 
 		// Only validate when quantity is increasing
 		if (
-			newQty > item.quantity &&
+			newQty > lineQty &&
 			settingsStore.shouldEnforceStockValidation() &&
 			shouldValidateItemStock(item)
 		) {
 			const otherLinesQty =
-				getCartStockQtyForItem(invoiceItems.value, item.item_code) - rowStockQty(item);
+				getCartStockQtyForItem(invoiceItems.value, item.item_code) - rowStockQty(item, lineQty);
 			const totalQty = otherLinesQty + rowStockQty(item, newQty);
 			const check = checkStockAvailability(item, totalQty);
 			if (!check.available) {
@@ -293,6 +305,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			}
 		}
 
+		// Typed qty replaces the carved split; the next offer pass carves again
+		if (carved.length) {
+			invoiceItems.value = invoiceItems.value.filter((i) => !carved.includes(i));
+		}
 		baseUpdateItemQuantity(itemCode, quantity, uom);
 	}
 
