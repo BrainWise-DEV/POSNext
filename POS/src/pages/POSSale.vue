@@ -1120,6 +1120,8 @@ import InvoiceManagement from "@/components/invoices/InvoiceManagement.vue";
 import InvoiceDetailDialog from "@/components/invoices/InvoiceDetailDialog.vue";
 import { useRealtimeStock } from "@/composables/useRealtimeStock";
 import { useSessionLock } from "@/composables/useSessionLock";
+import { useGlobalShortcuts } from "@/composables/useKeyboardShortcuts";
+import { getDistinctUoms } from "@/utils/itemUoms";
 import { usePOSEvents } from "@/composables/usePOSEvents";
 import { useLocale } from "@/composables/useLocale";
 import { session } from "@/data/session";
@@ -1356,28 +1358,18 @@ onMounted(async () => {
 	};
 	window.addEventListener("resize", handleResize, { passive: true });
 
-	// Global keyboard shortcuts
-	const handleGlobalKeydown = (event) => {
-		// Skip if any dialog is open, the session is locked, the clear-cache overlay is
-		// showing, or if user is typing in an input/textarea. isLocked/showClearCacheDialog
-		// aren't wired into uiStore.isAnyDialogOpen, so they're checked explicitly here.
-		if (uiStore.isAnyDialogOpen || isLocked.value || showClearCacheDialog.value) return;
-		const tag = document.activeElement?.tagName;
-		if (tag === "INPUT" || tag === "TEXTAREA") return;
-
-		if (event.key === "F4") {
-			event.preventDefault();
-			itemsSelectorRef.value?.focusSearchInput();
-		} else if (event.key === "F8") {
-			event.preventDefault();
-			invoiceCartRef.value?.focusCustomerSearch();
-		} else if (event.key === "F9") {
-			event.preventDefault();
-			handleProceedToPayment();
+	// Global keyboard shortcuts (F-keys also fire from the search input)
+	// Skip if any dialog is open, the session is locked or the clear-cache overlay is
+	// showing. isLocked/showClearCacheDialog aren't wired into uiStore.isAnyDialogOpen,
+	// so they're checked explicitly here.
+	useGlobalShortcuts(
+		() => uiStore.isAnyDialogOpen || isLocked.value || showClearCacheDialog.value,
+		{
+			F4: () => itemsSelectorRef.value?.focusSearchInput(),
+			F8: () => invoiceCartRef.value?.focusCustomerSearch(),
+			F9: () => handleProceedToPayment(),
 		}
-	};
-	window.addEventListener("keydown", handleGlobalKeydown);
-	onUnmounted(() => window.removeEventListener("keydown", handleGlobalKeydown));
+	);
 
 	// Set up real-time stock update listener
 	const cleanup = onStockUpdate(async (stockUpdates) => {
@@ -2075,8 +2067,8 @@ function handleItemSelected(item, autoAdd = false) {
 		return;
 	}
 
-	// Check for UOMs
-	if (item.item_uoms && item.item_uoms.length > 0) {
+	// Check for UOMs (picker only when there is a real choice, or to keep a scanned weight)
+	if (getDistinctUoms(item).length > 1 || (item.resolved_qty && item.item_uoms?.length > 0)) {
 		cartStore.setPendingItem(item, 1, "uom");
 		uiStore.showItemSelectionDialog = true;
 		return;
@@ -2509,7 +2501,7 @@ async function handleOptionSelected(option) {
 				}
 			}
 
-			if (variant.item_uoms && variant.item_uoms.length > 0) {
+			if (getDistinctUoms(variant).length > 1) {
 				cartStore.setPendingItem(variant, cartStore.pendingItemQty, "uom");
 				return;
 			}
