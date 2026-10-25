@@ -18,12 +18,15 @@ export function offerProgress(offer, { qty = 0, amount = 0 } = {}) {
 	return { kind, have, need, missing: need - have, percent: Math.min((have / need) * 100, 100) };
 }
 
-/** What the customer gets, e.g. "20% off", "1 free", "Gift: Charger". */
-export function offerBenefit(offer, formatCurrency) {
+/**
+ * What the customer gets, e.g. "20% off", "1 free", "Gift: Charger".
+ * @param {(code: string) => string} [itemName] - Resolves a gift item code to its name
+ */
+export function offerBenefit(offer, formatCurrency, itemName = (code) => code) {
 	if (offer?.offer === "Give Product") {
 		return offer.same_item || !offer.free_item
 			? __("{0} free", [offer.free_qty || 1])
-			: __("Gift: {0}", [offer.free_item]);
+			: __("Gift: {0}", [itemName(offer.free_item)]);
 	}
 	if (Number(offer?.discount_percentage) > 0) {
 		return __("{0}% off", [Number(offer.discount_percentage)]);
@@ -37,4 +40,20 @@ export function offerBenefit(offer, formatCurrency) {
 /** Label for ERPNext's raw offer type ("Give Product", "Item Price"). */
 export function offerTypeLabel(type) {
 	return { "Give Product": __("Free gift"), "Item Price": __("Price discount") }[type] || __("Discount");
+}
+
+/**
+ * The paid cart line an offer counts, so the hint can name it and top it up.
+ *
+ * @param {Object} offer - Offer with apply_on and eligible_items / eligible_item_groups / eligible_brands
+ * @param {Array} lines - Cart lines
+ * @returns {Object|null} The first matching paid line, or null
+ */
+export function offerLine(offer, lines = []) {
+	const match = {
+		"Item Code": (line) => (offer?.eligible_items || []).includes(line.item_code),
+		"Item Group": (line) => (offer?.eligible_item_groups || []).includes(line.item_group),
+		Brand: (line) => (offer?.eligible_brands || []).includes(line.brand),
+	}[offer?.apply_on];
+	return (match && lines.find((line) => !line.is_free_item && match(line))) || null;
 }

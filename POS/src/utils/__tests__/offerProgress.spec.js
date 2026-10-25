@@ -4,7 +4,7 @@ vi.hoisted(() => {
 	globalThis.__ = (s, args) => (args ? s.replace(/\{(\d)\}/g, (_, i) => args[i]) : s);
 });
 
-const { offerBenefit, offerProgress, offerTypeLabel } = await import("@/utils/offerProgress");
+const { offerBenefit, offerLine, offerProgress, offerTypeLabel } = await import("@/utils/offerProgress");
 
 const money = (v) => `E£${v}`;
 
@@ -48,5 +48,26 @@ describe("offer labels", () => {
 		expect(offerTypeLabel("Give Product")).toBe("Free gift");
 		expect(offerTypeLabel("Item Price")).toBe("Price discount");
 		expect(offerTypeLabel(undefined)).toBe("Discount");
+	});
+});
+
+describe("offer hint subject", () => {
+	const lines = [
+		{ item_code: "GIFT", is_free_item: 1, item_group: "Snacks" },
+		{ item_code: "CHIPSY", item_name: "Chipsy", item_group: "Snacks", brand: "Chipsy" },
+	];
+
+	it("finds the paid line an offer counts, by item, group or brand", () => {
+		expect(offerLine({ apply_on: "Item Code", eligible_items: ["CHIPSY"] }, lines)?.item_code).toBe("CHIPSY");
+		expect(offerLine({ apply_on: "Item Group", eligible_item_groups: ["Snacks"] }, lines)?.item_code).toBe("CHIPSY");
+		expect(offerLine({ apply_on: "Brand", eligible_brands: ["Chipsy"] }, lines)?.item_code).toBe("CHIPSY");
+		expect(offerLine({ apply_on: "Transaction" }, lines)).toBeNull();
+	});
+
+	it("names the gift instead of showing its item code", () => {
+		const name = (code) => ({ "EG-1221": "Samsung charger" })[code] || code;
+		expect(offerBenefit({ offer: "Give Product", free_item: "EG-1221", free_qty: 1 }, money, name)).toBe(
+			"Gift: Samsung charger"
+		);
 	});
 });

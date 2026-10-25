@@ -1063,6 +1063,7 @@
 							flashKey === lineKey(item)
 								? 'border-blue-400 bg-blue-50'
 								: 'border-gray-200 hover:border-blue-300',
+							lineSaving(item) > 0 ? 'border-s-[3px] border-s-[#0f7a4a]' : '',
 						]"
 					>
 						<div class="flex gap-2">
@@ -1092,10 +1093,13 @@
 									>
 										{{ item.item_name }}
 									</h4>
-									<div
-										class="text-[15px] font-bold text-gray-900 tabular-nums flex-shrink-0 min-[1100px]:text-end"
-									>
-										{{ formatCurrency(getLineAmount(item)) }}
+									<div class="flex-shrink-0 tabular-nums min-[1100px]:text-end">
+										<div class="text-base font-bold text-[#1d2433]">
+											{{ formatCurrency(getLineAmount(item)) }}
+										</div>
+										<div v-if="lineSaving(item) > 0" class="text-xs text-gray-500 line-through">
+											{{ formatCurrency(getLineAmount(item) + lineSaving(item)) }}
+										</div>
 									</div>
 								</div>
 
@@ -1103,11 +1107,15 @@
 								<div
 									class="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-gray-600 mt-0.5"
 								>
-									<span class="tabular-nums">{{
-										__("{0} each", [
-											formatCurrency(getLineStrikePrice(item) ?? getLineNetRate(item)),
-										])
-									}}</span>
+									<span class="tabular-nums">
+										<s v-if="getLineStrikePrice(item)" class="text-gray-500 me-1">{{
+											formatCurrency(getLineStrikePrice(item))
+										}}</s>
+										<span :class="getLineStrikePrice(item) ? 'font-semibold text-[#0f7a4a]' : ''">{{
+											formatCurrency(getLineNetRate(item))
+										}}</span>
+										<span dir="ltr"> × {{ formatQuantity(item.quantity) }}</span>
+									</span>
 									<span
 										v-if="item._bundledFreeQty > 0"
 										class="font-semibold text-emerald-700"
@@ -1291,15 +1299,21 @@
 
 								<!-- Saving: its own full-size line with the offer name -->
 								<div
-									v-if="(Number.parseFloat(item.discount_amount) || 0) > 0"
-									class="flex items-center justify-between gap-2 mt-1.5 rounded-md bg-emerald-50 px-2 py-1 text-sm font-semibold text-emerald-700"
+									v-if="lineSaving(item) > 0"
+									class="flex items-center justify-between gap-2 mt-1.5 rounded-md bg-[#e9f5ef] px-2 py-1 text-sm text-[#0f7a4a]"
 								>
 									<span class="flex items-center gap-1.5 min-w-0">
-										<FeatherIcon name="tag" class="w-4 h-4 flex-shrink-0" />
-										<span class="truncate" dir="auto">{{ savingLabel(item) }}</span>
+										<FeatherIcon
+											:name="isGiftSaving(item) ? 'gift' : 'tag'"
+											class="w-4 h-4 flex-shrink-0"
+										/>
+										<span class="font-bold flex-shrink-0" dir="auto">{{ savingTitle(item) }}</span>
+										<span v-if="savingSource(item)" class="truncate text-xs" dir="auto">{{
+											savingSource(item)
+										}}</span>
 									</span>
-									<span class="tabular-nums flex-shrink-0" dir="ltr">
-										−{{ formatCurrency(item.discount_amount) }}
+									<span class="font-bold tabular-nums flex-shrink-0">
+										{{ __("You save {0}", [formatCurrency(lineSaving(item))]) }}
 									</span>
 								</div>
 							</div>
@@ -1343,7 +1357,7 @@
 				>
 					<div class="flex items-center gap-1.5 min-w-0">
 						<FeatherIcon name="tag" class="w-3.5 h-3.5 text-emerald-700 flex-shrink-0" />
-						<span class="text-xs font-bold text-emerald-800">{{ __("Discount") }}</span>
+						<span class="text-xs font-bold text-emerald-800">{{ __("Customer saves") }}</span>
 						<span
 							v-if="cartStore.appliedCoupon"
 							class="inline-flex items-center rounded-full border border-emerald-300 bg-white ps-2 text-[11px] font-bold text-emerald-800 min-w-0"
@@ -2147,16 +2161,38 @@ function batchExpiryClass(item) {
 }
 
 /** "20% off (Fairy 3 pcs)": the discount and the offer or coupon that gave it */
-function savingLabel(item) {
+// Money the customer keeps on this line, from an offer, a gift or a coupon
+function lineSaving(item) {
+	return Number.parseFloat(item?.discount_amount) || 0;
+}
+
+function isGiftSaving(item) {
+	return ["free_item", "gwp"].includes(item?.discount_source);
+}
+
+function savingOffer(item) {
 	const rules = Array.isArray(item.pricing_rules)
 		? item.pricing_rules
 		: String(item.pricing_rules || "").split(",");
-	const offer = (props.appliedOffers || []).find(
+	return (props.appliedOffers || []).find(
 		(o) => rules.includes(o.code) || (o.rules || []).some((r) => rules.includes(r))
 	);
-	const source = item.coupon_code || offer?.name;
-	const pct = Number(getItemDiscountPercent(item)).toFixed(0);
-	return source ? __("{0}% off ({1})", [pct, source]) : __("{0}% off", [pct]);
+}
+
+// What the customer gets on this line: "1 free", "20% off", "Coupon WELCOME10"
+function savingTitle(item) {
+	if (item.coupon_code) return __("Coupon {0}", [item.coupon_code]);
+	if (isGiftSaving(item)) {
+		const unit = Number.parseFloat(item.price_list_rate || item.rate) || 0;
+		const units = unit ? Math.round(lineSaving(item) / unit) : 0;
+		if (units > 0) return __("{0} free", [units]);
+	}
+	return __("{0}% off", [Number(getItemDiscountPercent(item)).toFixed(0)]);
+}
+
+// The offer that gave it, shown quieter beside the title
+function savingSource(item) {
+	return item.coupon_code ? "" : savingOffer(item)?.name || "";
 }
 
 function resolvePaidQuantityFromDisplay(item, displayQty) {
