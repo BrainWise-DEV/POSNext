@@ -122,6 +122,15 @@ describe("syncCartFreeItems — same-SKU GWP carve/restore", () => {
 		});
 	});
 
+	it("shows the server image on a different-SKU gift row", () => {
+		const items = [paidLine({ item_code: "SKU-A", quantity: 1, image: "/files/a.jpg" })];
+		const next = syncCartFreeItems(items, [
+			{ item_code: "GIFT-B", qty: 1, uom: "Nos", image: "/files/gift.jpg" },
+		]);
+
+		expect(next[1].image).toBe("/files/gift.jpg");
+	});
+
 	it("ignores unmarked free rows on restore (would undercharge if GWP flag were dropped)", () => {
 		// Documents the invariant: only gwp_same_item_row===1 restores.
 		// A free row without the flag is treated as an added gift, not carved qty.
