@@ -28,6 +28,14 @@ class TestGrants(FrappeTestCase):
 		self.assertIsNotNone(grants.consume(token, DUMMY_ACTION, {"widget": "W-1"}, "DOC-A"))
 		self.assertIsNotNone(grants.consume(token, DUMMY_ACTION, {"widget": "W-1"}, "DOC-A"))
 
+	def test_release_unpins_grant_so_another_reference_can_use_it(self):
+		token = grants.issue(DUMMY_ACTION, MANAGER, {"widget": "W-1"})
+		self.assertIsNotNone(grants.consume(token, DUMMY_ACTION, {"widget": "W-1"}, "DOC-A"))
+		grants.release(token, "DOC-B")  # not the holder: no effect
+		self.assertIsNone(grants.consume(token, DUMMY_ACTION, {"widget": "W-1"}, "DOC-B"))
+		grants.release(token, "DOC-A")
+		self.assertIsNotNone(grants.consume(token, DUMMY_ACTION, {"widget": "W-1"}, "DOC-B"))
+
 	def test_grant_is_bound_to_its_action(self):
 		token = grants.issue(DUMMY_ACTION, MANAGER, {"widget": "W-1"})
 		self.assertIsNone(grants.consume(token, "some_other_action", {"widget": "W-1"}, "DOC-A"))
@@ -125,9 +133,7 @@ class TestGrantValidity(FrappeTestCase):
 	def test_longer_validity_does_not_relax_the_binding(self):
 		self._set_ttl_minutes(60)
 		token = grants.issue(DUMMY_ACTION, MANAGER, {"widget": "W-1", "amount": 50})
-		self.assertIsNone(
-			grants.consume(token, DUMMY_ACTION, {"widget": "W-1", "amount": 5000}, "DOC-A")
-		)
+		self.assertIsNone(grants.consume(token, DUMMY_ACTION, {"widget": "W-1", "amount": 5000}, "DOC-A"))
 
 	def test_revoked_token_stays_dead_regardless_of_validity(self):
 		self._set_ttl_minutes(60)

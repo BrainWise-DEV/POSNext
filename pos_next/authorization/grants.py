@@ -111,6 +111,23 @@ def consume(token: str, action_name: str, binding: dict, reference: str | None =
 	return grant
 
 
+def release(token: str, reference: str | None) -> None:
+	"""Un-pin a grant from ``reference`` after the authorized action failed.
+
+	Used by callers that spend a grant and then fail (e.g. a cancel that throws), so the
+	approver does not have to approve again and the grant is not stuck to a reference that
+	never completed. Only the reference that holds the pin can release it.
+	"""
+	if not token:
+		return
+
+	key = _key(token)
+	grant = _read(key)
+	if grant and grant.get("consumed_by") is not None and grant.get("consumed_by") == reference:
+		grant["consumed_by"] = None
+		_write(key, grant)
+
+
 def revoke(token: str) -> None:
 	"""Drop a grant early. Not used in the normal flow; handy for tests and cleanup."""
 	if token:
