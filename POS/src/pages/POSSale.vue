@@ -3,14 +3,9 @@
 		No height: 100vh here. The page fills whatever the host leaves it (see the
 		flex chain in index.css), so chrome above POS — Frappe's navbar, a demo
 		countdown banner — shortens the page instead of pushing its bottom off the
-		screen. padding-bottom keeps POSFooter's fixed strip from sitting on top of
-		the cart's Checkout button; the footer publishes its own height, so this
-		follows if it is ever restyled.
+		screen. The sale screen has no footer strip, so the cart reaches the bottom.
 	-->
-	<div
-		class="flex flex-1 flex-col min-h-0 bg-gray-50 overflow-x-hidden"
-		style="padding-bottom: var(--pos-footer-h, 45px)"
-	>
+	<div class="flex flex-1 flex-col min-h-0 bg-gray-50 overflow-x-hidden">
 		<!-- Loading State -->
 		<LoadingSpinner v-if="uiStore.isLoading" />
 
@@ -1069,8 +1064,6 @@
 				@confirm="confirmClearCache"
 			/>
 
-			<!-- Footer -->
-			<POSFooter />
 		</template>
 
 		<!-- Session Lock Screen (outside v-if/v-else so it renders even during loading) -->
@@ -1094,7 +1087,6 @@ import ShiftOpeningDialog from "@/components/ShiftOpeningDialog.vue";
 import ClearCacheOverlay from "@/components/common/ClearCacheOverlay.vue";
 import SessionLockScreen from "@/components/common/SessionLockScreen.vue";
 import LoadingSpinner from "@/components/common/LoadingSpinner.vue";
-import POSFooter from "@/components/common/POSFooter.vue";
 import ManagementSlider from "@/components/pos/ManagementSlider.vue";
 import POSHeader from "@/components/pos/POSHeader.vue";
 import BatchSerialDialog from "@/components/sale/BatchSerialDialog.vue";
@@ -1211,6 +1203,16 @@ const itemsSelectorRef = ref(null);
 const invoiceCartRef = ref(null);
 const offersDialogRef = ref(null);
 const containerRef = ref(null);
+// The item/cart split follows the container's own width (sidebar, banner, window)
+const containerObserver =
+	typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => updateLayoutBounds()) : null;
+watch(containerRef, (el, oldEl) => {
+	if (oldEl) containerObserver?.unobserve(oldEl);
+	if (el) {
+		containerObserver?.observe(el);
+		updateLayoutBounds();
+	}
+});
 const dividerRef = ref(null);
 const pendingPaymentAfterCustomer = ref(false);
 const logoutAfterClose = ref(false);
@@ -1348,13 +1350,14 @@ const canSwitchToDesk = computed(() => Boolean(bootstrapStore.data?.can_switch_t
 let resizeState = null;
 let bodyStyleSnapshot = null;
 
+// Window resize listener (passive for better performance)
+function handleWindowResize() {
+	uiStore.setWindowWidth(window.innerWidth);
+	updateLayoutBounds();
+}
+
 onMounted(async () => {
-	// Window resize listeners (passive for better performance)
-	const handleResize = () => {
-		uiStore.setWindowWidth(window.innerWidth);
-		updateLayoutBounds();
-	};
-	window.addEventListener("resize", handleResize, { passive: true });
+	window.addEventListener("resize", handleWindowResize, { passive: true });
 
 	// Global keyboard shortcuts
 	const handleGlobalKeydown = (event) => {
@@ -1780,10 +1783,8 @@ watch(
 );
 
 onUnmounted(() => {
-	window.removeEventListener("resize", () => {
-		uiStore.setWindowWidth(window.innerWidth);
-		updateLayoutBounds();
-	});
+	window.removeEventListener("resize", handleWindowResize);
+	containerObserver?.disconnect();
 	stopResize();
 
 	// Stop periodic stock sync on unmount
