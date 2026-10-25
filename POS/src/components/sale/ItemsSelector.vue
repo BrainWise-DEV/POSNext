@@ -130,7 +130,7 @@
 						autocomplete="off"
 						:placeholder="searchPlaceholder"
 						:class="[
-							'w-full min-h-target text-pos-sm text-pos-ink placeholder:text-gray-500 border rounded-lg px-2 sm:px-3 py-2 ps-8 sm:ps-10 focus:outline-none transition-all',
+							'w-full min-h-target text-pos-sm text-pos-ink placeholder:text-gray-500 border rounded-lg px-2 sm:px-3 py-2 ps-8 sm:ps-10 pe-36 sm:pe-36 text-ellipsis focus:outline-none transition-all',
 							searchTerm
 								? 'pe-[calc(var(--pos-target)_*_3_+_0.75rem)]'
 								: 'pe-[calc(var(--pos-target)_*_2_+_2.5rem)]',
