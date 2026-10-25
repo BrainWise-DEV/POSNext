@@ -76,15 +76,49 @@
 							<button
 								v-for="value in values"
 								:key="value"
+								type="button"
 								@click="selectAttribute(attrName, value)"
+								:aria-pressed="selectedAttributes[attrName] === value"
 								:class="[
-									'px-4 py-2 rounded-lg border-2 text-sm font-medium transition-all',
+									'min-h-[44px] px-3 py-1.5 rounded-lg border-2 text-sm font-medium transition-colors inline-flex items-center gap-2 text-start',
 									selectedAttributes[attrName] === value
-										? 'border-blue-500 bg-blue-500 text-white'
-										: 'border-gray-300 bg-white text-gray-700 hover:border-blue-300',
+										? 'border-[#0b63ce] bg-[#0b63ce] text-white'
+										: isChipInStock(attrName, value)
+											? 'border-gray-300 bg-white text-gray-800 hover:border-[#0b63ce]/50'
+											: 'border-dashed border-gray-300 bg-gray-50 text-gray-400',
 								]"
 							>
-								{{ value }}
+								<span
+									v-if="swatchColor(attrName, value)"
+									class="w-4 h-4 rounded-full flex-shrink-0 ring-1 ring-black/15"
+									:style="{ backgroundColor: swatchColor(attrName, value) }"
+									aria-hidden="true"
+								></span>
+								<span class="flex flex-col leading-tight">
+									<span
+										:class="{
+											'line-through': !isChipInStock(attrName, value) && selectedAttributes[attrName] !== value,
+										}"
+									>{{ value }}</span>
+									<span
+										v-if="resolveChip(attrName, value)"
+										:class="[
+											'text-[11px] font-normal tabular-nums',
+											selectedAttributes[attrName] === value
+												? 'text-white/85'
+												: resolveChip(attrName, value).stock > 0
+													? 'text-[#0f7a4a]'
+													: 'text-gray-400',
+										]"
+									>
+										{{ formatCurrency(resolveChip(attrName, value).rate) }} ·
+										{{
+											resolveChip(attrName, value).stock > 0
+												? __("Stock: {0}", [resolveChip(attrName, value).stock])
+												: __("Out of Stock")
+										}}
+									</span>
+								</span>
 							</button>
 						</div>
 					</div>
@@ -158,7 +192,7 @@
 								:class="[
 									'px-4 py-3 rounded-xl font-bold text-base transition-all touch-manipulation flex flex-col items-center justify-center min-h-[60px]',
 									selectedOption === option
-										? 'bg-blue-600 text-white shadow-lg ring-2 ring-blue-300'
+										? 'bg-[#0b63ce] text-white shadow-lg ring-2 ring-[#0b63ce]/30'
 										: 'bg-gray-100 text-gray-700 hover:bg-gray-200 active:bg-gray-300',
 								]"
 							>
@@ -344,30 +378,20 @@
 		</template>
 
 		<template #actions>
-			<div class="flex gap-2 w-full">
-				<Button class="flex-1" variant="subtle" @click="cancel">
-					{{ __("Cancel") }}
-				</Button>
-				<Button
-					class="flex-1"
-					variant="solid"
-					theme="blue"
-					@click="confirm"
-					:disabled="!selectedOption"
-				>
-					{{ confirmButtonText }}
-				</Button>
-			</div>
+			<PickerDialogFooter :disabled="!selectedOption" @cancel="cancel" @confirm="confirm" />
 		</template>
 	</Dialog>
 </template>
 
 <script setup>
 import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency";
-import { Button, Dialog } from "frappe-ui";
+import { Dialog } from "frappe-ui";
 import { createResource } from "frappe-ui";
 import { computed, nextTick, ref, watch } from "vue";
 import TranslatedHTML from "../common/TranslatedHTML.vue";
+import PickerDialogFooter from "./PickerDialogFooter.vue";
+import { usePickerEnter } from "@/composables/useKeyboardShortcuts";
+import { getDistinctUoms } from "@/utils/itemUoms";
 import { offlineState } from "@/utils/offline/offlineState";
 import { getCachedVariants, cacheItems } from "@/utils/offline/items";
 
@@ -410,9 +434,16 @@ const dialogDescription = computed(() => {
 		: __("Select the unit of measure for this item:");
 });
 
-const confirmButtonText = computed(() => {
-	return props.mode === "variant" ? __("Add to Cart") : __("Add to Cart");
-});
+// Common colour names (English / Arabic) for variant swatches
+const COLOUR_SWATCHES = {
+	white: "#ffffff", ابيض: "#ffffff", black: "#111827", اسود: "#111827",
+	blue: "#2563eb", ازرق: "#2563eb", red: "#dc2626", احمر: "#dc2626",
+	green: "#16a34a", اخضر: "#16a34a", yellow: "#facc15", اصفر: "#facc15",
+	gray: "#9ca3af", grey: "#9ca3af", رمادي: "#9ca3af", silver: "#d1d5db", فضي: "#d1d5db",
+	gold: "#d4a017", ذهبي: "#d4a017", pink: "#f472b6", وردي: "#f472b6", بمبي: "#f472b6",
+	purple: "#9333ea", بنفسجي: "#9333ea", orange: "#f97316", برتقالي: "#f97316",
+	brown: "#92400e", بني: "#92400e", navy: "#1e3a8a", كحلي: "#1e3a8a", beige: "#e7d8b9", بيج: "#e7d8b9",
+};
 
 // Computed: Stock warning when quantity exceeds available stock
 const stockWarning = computed(() => {
@@ -494,6 +525,30 @@ const matchedVariant = computed(() => {
 		});
 	});
 });
+
+/** Variants matching the current pick with one attribute set to `value` */
+function variantsWith(attributeName, value) {
+	const pick = { ...selectedAttributes.value, [attributeName]: value };
+	return options.value.filter((o) => Object.entries(pick).every(([k, v]) => o.attributes[k] === v));
+}
+
+/** True when the chip can form an in-stock variant with the other picked attributes */
+function isChipInStock(attributeName, value) {
+	return variantsWith(attributeName, value).some((o) => o.stock > 0);
+}
+
+/** The single variant this chip resolves to when every other attribute is picked */
+function resolveChip(attributeName, value) {
+	const others = Object.keys(variantAttributesMap.value).filter((k) => k !== attributeName);
+	return others.every((k) => selectedAttributes.value[k]) ? variantsWith(attributeName, value)[0] || null : null;
+}
+
+/** Swatch colour for a colour attribute value, matched on the full value or its first word */
+function swatchColor(attributeName, value) {
+	if (!/colou?r|لون/i.test(attributeName)) return null;
+	const name = String(value).toLowerCase().replace(/[أإآ]/g, "ا").trim();
+	return COLOUR_SWATCHES[name] || COLOUR_SWATCHES[name.split(/\s+/)[0]] || null;
+}
 
 /**
  * Transform raw variant data into option format for the UI
@@ -618,6 +673,13 @@ async function loadOptions() {
 	}
 }
 
+// Pre-select the first in-stock variant so Enter adds it
+watch(options, (list) => {
+	if (props.mode === "variant") {
+		selectedAttributes.value = { ...(list.find((o) => o.stock > 0)?.attributes || {}) };
+	}
+});
+
 // Watch matched variant and auto-select it
 watch(matchedVariant, (variant) => {
 	if (variant) {
@@ -630,39 +692,23 @@ watch(matchedVariant, (variant) => {
 function buildUomOptions() {
 	if (!props.item) return [];
 
-	const uomOptions = [];
-
-	// Stock UOM option
-	uomOptions.push({
+	// Stock UOM first, then additional UOMs, each unit once
+	return getDistinctUoms(props.item).map((uomData, index) => ({
 		type: "uom",
-		uom: props.item.stock_uom,
-		conversion_factor: 1,
-		label: props.item.stock_uom,
-		description: __("Stock unit"),
-		rate: getUomPrice(props.item.stock_uom, 1),
-		priceLabel: __("per {0}", [props.item.stock_uom]),
-	});
-
-	// Additional UOMs
-	if (props.item.item_uoms && props.item.item_uoms.length > 0) {
-		props.item.item_uoms.forEach((uomData) => {
-			uomOptions.push({
-				type: "uom",
-				uom: uomData.uom,
-				conversion_factor: uomData.conversion_factor,
-				label: uomData.uom,
-				description: __("1 {0} = {1} {2}", [
-					uomData.uom,
-					uomData.conversion_factor,
-					props.item.stock_uom,
-				]),
-				rate: getUomPrice(uomData.uom, uomData.conversion_factor),
-				priceLabel: __("per {0}", [uomData.uom]),
-			});
-		});
-	}
-
-	return uomOptions;
+		uom: uomData.uom,
+		conversion_factor: uomData.conversion_factor,
+		label: uomData.uom,
+		description:
+			index === 0
+				? __("Stock unit")
+				: __("1 {0} = {1} {2}", [
+						uomData.uom,
+						uomData.conversion_factor,
+						props.item.stock_uom,
+					]),
+		rate: getUomPrice(uomData.uom, uomData.conversion_factor),
+		priceLabel: __("per {0}", [uomData.uom]),
+	}));
 }
 
 function getUomPrice(uom, conversionFactor) {
@@ -680,6 +726,15 @@ function getUomPrice(uom, conversionFactor) {
 }
 
 function selectAttribute(attributeName, value) {
+	// No variant with the other picks: switch them to the best variant with this value
+	if (!variantsWith(attributeName, value).length) {
+		const withValue = options.value.filter((o) => o.attributes[attributeName] === value);
+		const best = withValue.find((o) => o.stock > 0) || withValue[0];
+		if (best) {
+			selectedAttributes.value = { ...best.attributes };
+			return;
+		}
+	}
 	selectedAttributes.value[attributeName] = value;
 	// Force reactivity
 	selectedAttributes.value = { ...selectedAttributes.value };
@@ -700,6 +755,9 @@ function confirm() {
 		emit("option-selected", option);
 	}
 }
+
+// Enter outside an input adds the selected option (the quantity input has its own Enter)
+usePickerEnter(isOpen, () => confirm());
 
 function cancel() {
 	selectedOption.value = null;
