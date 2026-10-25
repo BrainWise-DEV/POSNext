@@ -807,7 +807,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		// Restore qty previously carved into same-SKU free rows, then rebuild.
 		// See syncCartFreeItems — gwp_same_item_row is client-only; skipping this
 		// undercharges scanned units.
-		invoiceItems.value = syncCartFreeItems(invoiceItems.value, freeItems, {
+		// Rule min_qty decides whether a same-SKU free unit is carved or added on top
+		const withMinQty = (freeItems || []).map((free) => ({
+			min_qty: offersStore.availableOffers.find((o) => o.name === free.pricing_rules)?.min_qty,
+			...free,
+		}));
+		invoiceItems.value = syncCartFreeItems(invoiceItems.value, withMinQty, {
 			recalculateItem,
 		});
 		rebuildIncrementalCache();

@@ -84,6 +84,27 @@ describe("syncCartFreeItems — same-SKU GWP carve/restore", () => {
 		expect(recalc).toHaveBeenCalled();
 	});
 
+	it("adds the free unit on top when carving would drop paid qty below min_qty", () => {
+		const items = [paidLine({ quantity: 2 })];
+		const next = syncCartFreeItems(items, [
+			{ item_code: "SKU-A", qty: 1, uom: "Nos", min_qty: 2 },
+		]);
+
+		expect(next[0].quantity).toBe(2);
+		expect(next[1]).toMatchObject({ quantity: 1, is_free_item: 1, gwp_same_item_row: 0 });
+		expect(totalSkuQty(next, "SKU-A")).toBe(3);
+	});
+
+	it("still carves when paid qty after carving meets min_qty", () => {
+		const items = [paidLine({ quantity: 3 })];
+		const next = syncCartFreeItems(items, [
+			{ item_code: "SKU-A", qty: 1, uom: "Nos", min_qty: 2 },
+		]);
+
+		expect(next[0].quantity).toBe(2);
+		expect(next[1].gwp_same_item_row).toBe(1);
+	});
+
 	it("does not carve when the free gift is a different SKU", () => {
 		const items = [paidLine({ item_code: "SKU-A", quantity: 2 })];
 		const next = syncCartFreeItems(items, [
