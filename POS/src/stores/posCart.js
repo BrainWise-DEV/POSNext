@@ -2386,6 +2386,16 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		}
 	);
 
+	// An emptied cart drops its whole-cart coupon, which would otherwise push the total below zero
+	watch(
+		() => invoiceItems.value.some((item) => !item.is_free_item),
+		(hasPaidItems) => {
+			if (hasPaidItems || !appliedCoupon.value || isLineLevelCoupon(appliedCoupon.value)) return;
+			removeDiscount();
+			appliedCoupon.value = null;
+		}
+	);
+
 	// Re-check a whole-cart coupon for the new customer; say why when it is dropped
 	watch(
 		() => customer.value?.name || customer.value || null,

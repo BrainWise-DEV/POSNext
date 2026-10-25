@@ -108,6 +108,12 @@ describe("posCart whole-cart coupon", () => {
 		expect(toast.showWarning).toHaveBeenCalledWith(expect.stringContaining("WELCOME10"));
 	});
 
+	it("drops the coupon when the last paid item is removed", async () => {
+		cart.removeItem("CHIPSY", "Nos");
+		await vi.waitFor(() => expect(cart.appliedCoupon).toBeNull());
+		expect(cart.additionalDiscount).toBe(0);
+	});
+
 	it("keeps the coupon when the offers no longer give a header discount", () => {
 		cart.removeOffer();
 		expect(cart.additionalDiscount).toBe(5);
