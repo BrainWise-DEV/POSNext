@@ -1,10 +1,11 @@
 <template>
-	<Dialog v-model="isOpen" :options="{ title: dialogTitle, size: 'md' }">
+	<Dialog v-model="isOpen" :options="{ title: dialogTitle, size: mode === 'variant' ? '3xl' : 'md' }">
 		<template #body-content>
 			<div class="py-4">
 				<div v-if="item" class="mb-4">
 					<div class="flex items-center gap-3 mb-3">
 						<div
+							v-if="mode !== 'variant'"
 							class="w-12 h-12 bg-gray-100 rounded flex items-center justify-center overflow-hidden flex-shrink-0"
 						>
 							<img
@@ -48,21 +49,78 @@
 				</div>
 
 				<!-- Variant Options with Attribute Selection -->
+				<!-- Wide two-column picker: image and the chosen variant beside the attributes -->
 				<div
 					v-else-if="mode === 'variant' && options.length > 0"
-					class="flex flex-col gap-4"
+					class="flex flex-col sm:flex-row gap-5"
 				>
-					<!-- Display item image and info - show variant image when selected, otherwise template image -->
-					<div class="flex items-center justify-center mb-4">
+					<div class="sm:w-56 flex-shrink-0 flex flex-col items-center gap-3">
 						<img
 							v-if="matchedVariant?.data?.image || item?.image"
 							:src="matchedVariant?.data?.image || item.image"
 							loading="lazy"
 							:alt="matchedVariant?.label || item.item_name"
-							class="w-32 h-32 object-contain rounded-lg transition-opacity duration-300"
+							class="w-40 h-40 object-contain rounded-lg transition-opacity duration-300"
 						/>
+
+					<!-- Show selected variant info -->
+					<div
+						v-if="matchedVariant"
+						class="w-full p-3 bg-green-50 border border-green-200 rounded-lg"
+					>
+						<div class="flex items-center justify-between">
+							<div>
+								<p class="text-sm font-semibold text-gray-900">
+									{{ matchedVariant.label }}
+								</p>
+								<p class="text-xs text-gray-500">
+									{{ matchedVariant.description }}
+								</p>
+							</div>
+							<div class="text-end">
+								<p class="text-sm font-bold text-blue-600">
+									{{ formatCurrency(matchedVariant.rate || 0) }}
+								</p>
+								<p
+									class="text-xs"
+									:class="
+										(matchedVariant.stock ??
+											matchedVariant.data?.actual_qty ??
+											0) > 0
+											? 'text-green-600'
+											: 'text-red-600'
+									"
+								>
+									{{
+										__("Stock: {0}", [
+											matchedVariant.stock ??
+												matchedVariant.data?.actual_qty ??
+												0,
+										])
+									}}
+								</p>
+							</div>
+						</div>
 					</div>
 
+					<!-- Warning if combination not found -->
+					<div
+						v-else-if="allAttributesSelected"
+						class="w-full p-3 bg-orange-50 border border-orange-200 rounded-lg"
+					>
+						<p class="text-xs text-orange-700">
+							{{ __("This combination is not available") }}
+						</p>
+					</div>
+					</div>
+
+					<!-- Attribute groups side by side -->
+					<div
+						:class="[
+							'flex-1 min-w-0 grid gap-4 content-start',
+							Object.keys(variantAttributesMap).length > 1 ? 'md:grid-cols-2' : '',
+						]"
+					>
 					<!-- Group variants by attributes -->
 					<div
 						v-for="(values, attrName) in variantAttributesMap"
@@ -123,54 +181,6 @@
 						</div>
 					</div>
 
-					<!-- Show selected variant info -->
-					<div
-						v-if="matchedVariant"
-						class="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg"
-					>
-						<div class="flex items-center justify-between">
-							<div>
-								<p class="text-sm font-semibold text-gray-900">
-									{{ matchedVariant.label }}
-								</p>
-								<p class="text-xs text-gray-500">
-									{{ matchedVariant.description }}
-								</p>
-							</div>
-							<div class="text-end">
-								<p class="text-sm font-bold text-blue-600">
-									{{ formatCurrency(matchedVariant.rate || 0) }}
-								</p>
-								<p
-									class="text-xs"
-									:class="
-										(matchedVariant.stock ??
-											matchedVariant.data?.actual_qty ??
-											0) > 0
-											? 'text-green-600'
-											: 'text-red-600'
-									"
-								>
-									{{
-										__("Stock: {0}", [
-											matchedVariant.stock ??
-												matchedVariant.data?.actual_qty ??
-												0,
-										])
-									}}
-								</p>
-							</div>
-						</div>
-					</div>
-
-					<!-- Warning if combination not found -->
-					<div
-						v-else-if="allAttributesSelected"
-						class="mt-4 p-3 bg-orange-50 border border-orange-200 rounded-lg"
-					>
-						<p class="text-xs text-orange-700">
-							{{ __("This combination is not available") }}
-						</p>
 					</div>
 				</div>
 
