@@ -285,6 +285,7 @@ export function useInvoice() {
 				has_batch_no: item.has_batch_no || 0,
 				has_serial_no: item.has_serial_no || 0,
 				batch_no: item.batch_no,
+				batch_expiry_date: item.batch_expiry_date, // Cart meta row only, not sent to the server
 				serial_no: item.serial_no,
 				item_uoms: item.item_uoms || [], // Available UOMs for this item
 				// Add item_group and brand for offer eligibility checking
