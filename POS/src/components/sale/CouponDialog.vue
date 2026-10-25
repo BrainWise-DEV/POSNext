@@ -447,7 +447,15 @@ function applyLineCoupon(coupon, result) {
 		line_updates: result.line_updates || [],
 	};
 	emit("discount-applied", appliedDiscount.value);
-	showSuccess(__("{0} applied successfully", [code]));
+	// Lines whose own promotion beats the coupon (coupon set to "Better of the two")
+	const kept = (result.kept_promotion_items || []).map(
+		(itemCode) => cartStore.invoiceItems.find((i) => i.item_code === itemCode)?.item_name || itemCode
+	);
+	showSuccess(
+		kept.length
+			? __("{0} applied. The current promotion saves more on: {1}", [code, kept.join(", ")])
+			: __("{0} applied successfully", [code])
+	);
 	errorMessage.value = "";
 }
 
