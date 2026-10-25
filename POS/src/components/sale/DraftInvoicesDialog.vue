@@ -1,6 +1,6 @@
 <template>
 	<!-- Main Dialog -->
-	<Dialog v-model="show" :options="{ title: __('Draft Invoices'), size: 'lg' }">
+	<Dialog v-model="show" :options="{ title: __('Held Invoices'), size: 'lg' }">
 		<template #body-content>
 			<div class="flex flex-col gap-3">
 				<!-- Empty State -->
@@ -22,9 +22,9 @@
 							/>
 						</svg>
 					</div>
-					<p class="text-sm font-medium text-gray-900">{{ __("No draft invoices") }}</p>
+					<p class="text-sm font-medium text-gray-900">{{ __("No held invoices") }}</p>
 					<p class="text-xs text-gray-500 mt-1">
-						{{ __("Save invoices as drafts to continue later") }}
+						{{ __("Hold an invoice to finish it later") }}
 					</p>
 				</div>
 
@@ -33,66 +33,51 @@
 					<div
 						v-for="draft in drafts"
 						:key="draft.draft_id"
-						class="bg-white border border-gray-200 rounded-lg p-3 hover:border-blue-400 transition-all cursor-pointer"
-						@click="$emit('load-draft', draft)"
+						:class="[
+							'bg-white border rounded-lg p-3 transition-all',
+							isOpen(draft)
+								? 'border-blue-300 bg-blue-50 cursor-default'
+								: 'border-gray-200 hover:border-blue-400 cursor-pointer',
+						]"
+						:aria-disabled="isOpen(draft)"
+						@click="!isOpen(draft) && $emit('load-draft', draft)"
 					>
-						<div class="flex items-start justify-between mb-2">
-							<div class="flex-1">
-								<h4 class="text-sm font-semibold text-gray-900">
-									{{ draft.draft_id }}
+						<div class="flex items-start justify-between gap-2 mb-2">
+							<!-- Customer · time · total -->
+							<div class="flex-1 min-w-0">
+								<h4 class="text-sm font-semibold text-gray-900 flex flex-wrap gap-x-1.5">
+									<span dir="auto" class="truncate">{{ draftCustomer(draft) }}</span>
+									<span class="text-gray-400">·</span>
+									<span dir="ltr">{{ formatDateTime(draft.created_at) }}</span>
+									<span class="text-gray-400">·</span>
+									<span class="text-blue-700 tabular-nums">{{
+										formatCurrency(calculateTotal(draft.items))
+									}}</span>
 								</h4>
-								<p v-if="draft.customer" class="text-xs text-gray-500 mt-0.5">
-									{{
-										__("Customer: {0}", [
-											draft.customer?.customer_name ||
-												draft.customer?.name ||
-												draft.customer,
-										])
-									}}
-								</p>
-								<p class="text-xs text-gray-400 mt-0.5">
-									{{ formatDateTime(draft.created_at) }}
+								<p
+									v-if="isOpen(draft)"
+									class="text-xs font-semibold text-blue-700 mt-0.5"
+								>
+									{{ __("Open in the cart now") }}
 								</p>
 							</div>
-							<div class="flex items-center gap-1">
+							<div class="flex items-center gap-1 flex-shrink-0">
 								<button
 									v-if="props.allowPrintDraftInvoices"
 									@click.stop="handlePrintDraft(draft)"
-									class="text-gray-400 hover:text-blue-600 transition-colors p-1"
+									class="w-10 h-10 flex items-center justify-center rounded-md text-gray-500 hover:text-blue-700 hover:bg-blue-50"
 									:title="__('Print draft')"
+									:aria-label="__('Print draft')"
 								>
-									<svg
-										class="w-4 h-4"
-										fill="none"
-										stroke="currentColor"
-										viewBox="0 0 24 24"
-									>
-										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											stroke-width="2"
-											d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"
-										/>
-									</svg>
+									<FeatherIcon name="printer" class="w-4 h-4" />
 								</button>
 								<button
 									@click.stop="handleDeleteDraft(draft.draft_id)"
-									class="text-gray-400 hover:text-red-600 transition-colors p-1"
-									:title="__('Delete draft')"
+									class="w-10 h-10 flex items-center justify-center rounded-md border border-gray-200 text-gray-600 hover:text-red-700 hover:border-red-300 hover:bg-red-50"
+									:title="__('Delete held invoice')"
+									:aria-label="__('Delete held invoice')"
 								>
-									<svg
-										class="w-4 h-4"
-										fill="none"
-										stroke="currentColor"
-										viewBox="0 0 24 24"
-									>
-										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											stroke-width="2"
-											d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-										/>
-									</svg>
+									<FeatherIcon name="trash-2" class="w-4 h-4" />
 								</button>
 							</div>
 						</div>
@@ -100,10 +85,11 @@
 						<!-- Items Preview -->
 						<div class="flex items-center justify-between text-xs">
 							<span class="text-gray-600">
-								{{ __("{0} item(s)", [draft.items?.length || 0]) }}
-							</span>
-							<span class="font-bold text-blue-600">
-								{{ formatCurrency(calculateTotal(draft.items)) }}
+								{{
+									draft.items?.length === 1
+										? __("1 item")
+										: __("{0} items", [draft.items?.length || 0])
+								}}
 							</span>
 						</div>
 
@@ -116,7 +102,8 @@
 								<span
 									v-for="(item, idx) in draft.items.slice(0, 3)"
 									:key="idx"
-									class="text-[10px] bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded"
+									dir="auto"
+									class="text-[11px] bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded"
 								>
 									{{ item.item_name }} ({{ item.quantity || item.qty }})
 								</span>
@@ -150,11 +137,11 @@
 	</Dialog>
 
 	<!-- Delete Single Draft Confirmation -->
-	<Dialog v-model="showDeleteDialog" :options="{ title: __('Delete Draft?'), size: 'xs' }">
+	<Dialog v-model="showDeleteDialog" :options="{ title: __('Delete held invoice?'), size: 'xs' }">
 		<template #body-content>
 			<div class="py-3">
 				<p class="text-sm text-gray-600">
-					{{ __("Permanently delete this draft invoice?") }}
+					{{ __("Permanently delete this held invoice?") }}
 				</p>
 			</div>
 		</template>
@@ -205,7 +192,7 @@ import { useToast } from "@/composables/useToast";
 import { usePOSShiftStore } from "@/stores/posShift";
 import { usePOSCartStore } from "@/stores/posCart";
 import { usePOSDraftsStore } from "@/stores/posDrafts";
-import { Button, Dialog } from "frappe-ui";
+import { Button, Dialog, FeatherIcon } from "frappe-ui";
 import { onMounted, ref, watch } from "vue";
 
 const { showSuccess, showError } = useToast();
@@ -258,6 +245,15 @@ async function loadDrafts() {
 		console.error("Error loading drafts:", error);
 		showError(__("Failed to load draft invoices"));
 	}
+}
+
+// The held invoice loaded in the cart can't be loaded a second time
+function isOpen(draft) {
+	return draft.draft_id === cartStore.currentDraftId;
+}
+
+function draftCustomer(draft) {
+	return draft.customer?.customer_name || draft.customer?.name || draft.customer || __("Walk-in");
 }
 
 function handlePrintDraft(draft) {
