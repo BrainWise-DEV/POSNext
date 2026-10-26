@@ -9,7 +9,7 @@
 	-->
 	<div
 		class="flex flex-1 flex-col min-h-0 bg-gray-50 overflow-x-hidden"
-		style="padding-bottom: var(--pos-footer-h, 45px)"
+		style="padding-bottom: var(--pos-footer-h, 24px)"
 	>
 		<!-- Loading State -->
 		<LoadingSpinner v-if="uiStore.isLoading" />
@@ -262,8 +262,7 @@
 			<!-- Main Content: Responsive Layout -->
 			<div
 				v-if="shiftStore.hasOpenShift"
-				class="flex-1 flex overflow-hidden relative"
-				style="max-height: calc(100vh - 60px - var(--header-height, 60px))"
+				class="flex-1 min-h-0 flex overflow-hidden relative"
 			>
 				<!-- Icon-Only Management Slider - Always Visible -->
 				<ManagementSlider
@@ -495,8 +494,7 @@
 			<!-- No Shift Placeholder -->
 			<div
 				v-else
-				class="flex-1 flex items-center justify-center bg-gray-50"
-				style="max-height: calc(100vh - 60px - var(--header-height, 60px))"
+				class="flex-1 min-h-0 flex items-center justify-center bg-gray-50"
 			>
 				<div class="text-center">
 					<div
@@ -1213,6 +1211,16 @@ const itemsSelectorRef = ref(null);
 const invoiceCartRef = ref(null);
 const offersDialogRef = ref(null);
 const containerRef = ref(null);
+// The item/cart split follows the container's own width (sidebar, banner, window)
+const containerObserver =
+	typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => updateLayoutBounds()) : null;
+watch(containerRef, (el, oldEl) => {
+	if (oldEl) containerObserver?.unobserve(oldEl);
+	if (el) {
+		containerObserver?.observe(el);
+		updateLayoutBounds();
+	}
+});
 const dividerRef = ref(null);
 const pendingPaymentAfterCustomer = ref(false);
 const logoutAfterClose = ref(false);
@@ -1350,13 +1358,14 @@ const canSwitchToDesk = computed(() => Boolean(bootstrapStore.data?.can_switch_t
 let resizeState = null;
 let bodyStyleSnapshot = null;
 
+// Window resize listener (passive for better performance)
+function handleWindowResize() {
+	uiStore.setWindowWidth(window.innerWidth);
+	updateLayoutBounds();
+}
+
 onMounted(async () => {
-	// Window resize listeners (passive for better performance)
-	const handleResize = () => {
-		uiStore.setWindowWidth(window.innerWidth);
-		updateLayoutBounds();
-	};
-	window.addEventListener("resize", handleResize, { passive: true });
+	window.addEventListener("resize", handleWindowResize, { passive: true });
 
 	// Global keyboard shortcuts (F-keys also fire from the search input)
 	// Skip if any dialog is open, the session is locked or the clear-cache overlay is
@@ -1772,10 +1781,8 @@ watch(
 );
 
 onUnmounted(() => {
-	window.removeEventListener("resize", () => {
-		uiStore.setWindowWidth(window.innerWidth);
-		updateLayoutBounds();
-	});
+	window.removeEventListener("resize", handleWindowResize);
+	containerObserver?.disconnect();
 	stopResize();
 
 	// Stop periodic stock sync on unmount
