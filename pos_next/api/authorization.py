@@ -19,6 +19,7 @@ from frappe.utils import flt
 
 from pos_next.authorization import gate, grants, log, policy, registry
 from pos_next.authorization import pin as pin_store
+from pos_next.authorization.actions.pos_expense import ACTION_VOID_POS_EXPENSE, resolve_void_context
 
 
 def _parse_context(context) -> dict:
@@ -90,6 +91,7 @@ def get_authorization_readiness(action: str, pos_profile: str | None = None) -> 
 		"missing_pin": sorted(candidates - with_pin),
 	}
 
+
 RATE_LIMIT_PER_MINUTE = 20
 
 
@@ -106,6 +108,9 @@ def request_grant(action: str, approver: str, pin: str, context=None) -> dict:
 		return {"authorized": False, "message": _("Unknown authorization action")}
 
 	context = _parse_context(context)
+	if action == ACTION_VOID_POS_EXPENSE:
+		# Profile and amount are derived from the Journal Entry/shift, never the client.
+		context.update(resolve_void_context(context.get("journal_entry"), context))
 	pos_profile = context.get("pos_profile")
 
 	rule = policy.resolve_rule(action, pos_profile)

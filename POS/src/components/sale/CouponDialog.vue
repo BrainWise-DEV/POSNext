@@ -494,7 +494,8 @@ async function applyCoupon() {
 		let discountAmount = calculateDiscountAmount(discountObj, baseAmount);
 
 		// Apply maximum discount limit if specified
-		if (coupon.max_amount && discountAmount > coupon.max_amount) {
+		const capped = Boolean(coupon.max_amount && discountAmount > coupon.max_amount);
+		if (capped) {
 			discountAmount = coupon.max_amount;
 		}
 
@@ -504,7 +505,9 @@ async function applyCoupon() {
 		appliedDiscount.value = {
 			name: coupon.coupon_name || coupon.coupon_code,
 			code: couponCode.value.toUpperCase(),
-			percentage: coupon.discount_type === "Percentage" ? coupon.discount_percentage : 0,
+			// Capped coupons apply as a fixed amount; a percentage would be recomputed uncapped
+			percentage:
+				coupon.discount_type === "Percentage" && !capped ? coupon.discount_percentage : 0,
 			amount: discountAmount,
 			type: coupon.discount_type,
 			coupon: coupon,

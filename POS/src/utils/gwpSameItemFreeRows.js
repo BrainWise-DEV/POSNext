@@ -24,7 +24,7 @@ function findPaidCartItem(items, itemCode, uom) {
  * then rebuild free rows from `freeItems` (carving again when same-SKU).
  *
  * @param {Array} items - Cart lines (mutates paid-line quantities in place)
- * @param {Array} freeItems - Free lines from offer response, or [] to clear
+ * @param {Array} freeItems - Free lines from offer response (optional `min_qty` of their rule), or [] to clear
  * @param {{ recalculateItem?: Function }} [opts]
  * @returns {Array} Next cart lines (paid + new free rows)
  */
@@ -62,9 +62,11 @@ export function syncCartFreeItems(items, freeItems, { recalculateItem } = {}) {
 		const freeUom = freeItem.uom || freeItem.stock_uom;
 		const cartItem = findPaidCartItem(next, freeItem.item_code, freeUom);
 
-		// Same SKU (GWP buy 2 get 1): split scanned units. Qty 3 → 2 paid + 1 free.
+		// Same SKU (GWP buy 2 get 1): split scanned units while the paid rest still meets
+		// min_qty. Qty 3 → 2 paid + 1 free; qty 2 → 2 paid + 1 free added on top.
 		const paidQty = cartItem ? Number.parseFloat(cartItem.quantity) || 0 : 0;
-		const carveFromPaid = Boolean(cartItem && paidQty > freeQty);
+		const minQty = Number.parseFloat(freeItem.min_qty) || 0;
+		const carveFromPaid = Boolean(cartItem && paidQty > freeQty && paidQty - freeQty >= minQty);
 		if (carveFromPaid) {
 			cartItem.quantity = paidQty - freeQty;
 			recalc(cartItem);
@@ -91,7 +93,7 @@ export function syncCartFreeItems(items, freeItems, { recalculateItem } = {}) {
 			gwp_same_item_row: carveFromPaid ? 1 : 0,
 			pricing_rules: freeItem.pricing_rules || null,
 			warehouse: freeItem.warehouse || cartItem?.warehouse,
-			image: cartItem?.image,
+			image: cartItem?.image || freeItem.image,
 		});
 	}
 

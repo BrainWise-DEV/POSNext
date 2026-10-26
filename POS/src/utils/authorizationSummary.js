@@ -17,7 +17,15 @@ export function buildAuthorizationSummary(state = {}, { formatAmount = formatCur
 
 	const amount = Number.parseFloat(context.amount);
 	if (Number.isFinite(amount) && amount !== 0) {
-		rows.push({ key: "amount", label: t("Refund Amount"), value: formatAmount(amount) });
+		rows.push({
+			key: "amount",
+			label: context.amountLabel ? t(context.amountLabel) : t("Refund Amount"),
+			value: formatAmount(amount, context.currency),
+		});
+	}
+
+	if (context.journal_entry) {
+		rows.push({ key: "journal_entry", label: t("Journal Entry"), value: String(context.journal_entry) });
 	}
 
 	if (context.return_against) {
