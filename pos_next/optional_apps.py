@@ -10,6 +10,7 @@ monkey-patches when the owning app is installed.
 from __future__ import annotations
 
 import frappe
+from frappe.utils import cint
 
 
 def promotions_installed() -> bool:
@@ -45,4 +46,6 @@ def update_pos_page_context(context):
 		return
 	boot = dict(context.get("boot") or {})
 	boot["posnext_app_flags"] = get_pos_ui_app_flags()
+	# Lets the POS allow plain-http login on a developer_mode site (window.posnext_developer_mode)
+	boot["posnext_developer_mode"] = cint(frappe.conf.get("developer_mode"))
 	context.boot = boot
