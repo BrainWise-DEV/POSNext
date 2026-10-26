@@ -25,7 +25,11 @@ import {
 	getCartStockQtyForItem,
 	rowStockQty,
 } from "@/utils/stockValidator";
-import { resolveFreeItemMinQty, syncCartFreeItems } from "@/utils/gwpSameItemFreeRows";
+import {
+	resolveFreeItemMinQty,
+	syncCartFreeItems,
+	withCarvedQtyRestored,
+} from "@/utils/gwpSameItemFreeRows";
 import { offlineState } from "@/utils/offline/offlineState";
 import {
 	isFreePromoRow,
@@ -205,7 +209,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * free rows and appliedOffers, which the offer engine itself rewrites.
 	 */
 	function offerCartSignature() {
-		const paid = invoiceItems.value
+		const paid = withCarvedQtyRestored(invoiceItems.value)
 			.filter((i) => !i.is_free_item)
 			.map((i) => `${i.item_code}:${i.quantity}:${i.uom || ""}:${i.price_list_rate || i.rate || 0}`)
 			.join("|");
@@ -828,7 +832,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 	function buildOfferEvaluationPayload(currentProfile) {
 		// Use toRaw() to ensure we get current, non-reactive values (prevents stale cached quantities)
-		const rawItems = toRaw(invoiceItems.value);
+		// Carved same-SKU free units count as paid demand (see withCarvedQtyRestored)
+		const rawItems = withCarvedQtyRestored(toRaw(invoiceItems.value));
 
 		return {
 			doctype: "Sales Invoice",
@@ -1811,7 +1816,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * Paid lines only — free gifts must not inflate min_qty/max_qty/min_amt checks.
 	 */
 	function buildCartSnapshot() {
-		const items = invoiceItems.value.filter((item) => !item.is_free_item);
+		const items = withCarvedQtyRestored(invoiceItems.value).filter((item) => !item.is_free_item);
 		const totalQty = items.reduce((sum, item) => sum + (item.quantity || 0), 0);
 		const itemCodes = items.map((item) => item.item_code);
 		const itemGroups = items.map((item) => item.item_group).filter(Boolean);
@@ -2120,7 +2125,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		// Only sync if values are initialized
 		if (subtotal.value !== undefined && invoiceItems.value) {
 			// Paid lines only — free gifts must not inflate min_qty/max_qty checks
-			const paidItems = invoiceItems.value.filter((item) => !item.is_free_item);
+			const paidItems = withCarvedQtyRestored(invoiceItems.value).filter(
+				(item) => !item.is_free_item
+			);
 
 			// Create hash for paid item codes and quantities to detect actual changes.
 			// price_list_rate is part of the key because the cached amount maps
