@@ -184,3 +184,44 @@ export function resolvePaidQuantityFromDisplay(item, displayQty) {
 	}
 	return displayQty;
 }
+
+/**
+ * Display order for the cart: each free row right after the paid line that
+ * earned it (same SKU and unit, else the line carrying its pricing rule).
+ * Paid lines get `_bundledFreeQty`: qty of LEGACY carved same-item rows only
+ * (gwp_same_item_row === 1). On-top gifts (the current model) count 0 here.
+ *
+ * @param {Array} items - Cart lines in display order
+ * @returns {Array} Copies of the lines; nested gifts marked `_giftOf`, other free rows last
+ */
+export function nestFreeRows(items) {
+	const rows = items || [];
+	const paid = rows.filter((item) => !item.is_free_item);
+	const rulesOf = (item) =>
+		Array.isArray(item.pricing_rules)
+			? item.pricing_rules
+			: String(item.pricing_rules || "").split(",").map((r) => r.trim());
+	const parentOf = (gift) =>
+		findPaidCartItem(paid, gift.item_code, gift.uom || gift.stock_uom) ||
+		paid.find((item) => gift.pricing_rules && rulesOf(item).includes(gift.pricing_rules));
+	const gifts = rows
+		.filter((item) => item.is_free_item)
+		.map((gift) => ({ gift, parent: parentOf(gift) }));
+	const giftRow = (gift, parent) => ({
+		...gift,
+		_isStandaloneFreeRow: true,
+		_giftOf: parent ? `${parent.item_code}-${parent.uom || ""}` : null,
+	});
+
+	return [
+		...paid.flatMap((item) => {
+			const own = gifts.filter((g) => g.parent === item).map((g) => g.gift);
+			const bundled = totalSkuQty(
+				own.filter((g) => Number(g.gwp_same_item_row) === 1),
+				item.item_code
+			);
+			return [{ ...item, _bundledFreeQty: bundled }, ...own.map((g) => giftRow(g, item))];
+		}),
+		...gifts.filter((g) => !g.parent).map((g) => giftRow(g.gift, null)),
+	];
+}

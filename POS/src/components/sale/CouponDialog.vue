@@ -1,5 +1,5 @@
 <template>
-	<Dialog v-model="show" :options="{ title: __('Apply'), size: 'md' }">
+	<Dialog v-model="show" :options="{ title: __('Coupon'), size: 'md' }">
 		<template #body-content>
 			<div class="flex flex-col gap-4">
 				<!-- Info Banner -->
@@ -48,19 +48,7 @@
 							variant="solid"
 							class="flex-shrink-0"
 						>
-							<svg
-								class="w-3.5 h-3.5"
-								fill="none"
-								stroke="currentColor"
-								viewBox="0 0 24 24"
-							>
-								<path
-									stroke-linecap="round"
-									stroke-linejoin="round"
-									stroke-width="2"
-									d="M5 13l4 4L19 7"
-								/>
-							</svg>
+							{{ __("Apply") }}
 						</Button>
 					</div>
 					<p class="text-xs text-gray-500 mt-1">{{ __("Code is case-insensitive") }}</p>
@@ -243,7 +231,8 @@ const cartStore = usePOSCartStore();
 
 // Get calculateDiscountAmount helper from composable
 const { calculateDiscountAmount } = useInvoice();
-const { showSuccess, showError, showWarning } = useToast();
+// Errors show inline in the dialog only
+const { showSuccess } = useToast();
 
 const props = defineProps({
 	modelValue: Boolean,
@@ -366,7 +355,6 @@ async function applyCoupon() {
 
 	if (!props.customer) {
 		errorMessage.value = __("Please choose a customer");
-		showError(errorMessage.value);
 		return;
 	}
 
@@ -382,7 +370,6 @@ async function applyCoupon() {
 		if (!validationData || !validationData.valid) {
 			errorMessage.value =
 				validationData?.message || __("The coupon code you entered is not valid");
-			showError(errorMessage.value);
 			return;
 		}
 
@@ -395,10 +382,9 @@ async function applyCoupon() {
 
 		// Check minimum amount on the configured coupon base
 		if (coupon.min_amount && baseAmount < coupon.min_amount) {
-			errorMessage.value = __("This coupon requires a minimum purchase of ", [
+			errorMessage.value = __("This coupon requires a minimum purchase of {0}", [
 				formatCurrency(coupon.min_amount),
 			]);
-			showWarning(errorMessage.value);
 			return;
 		}
 
@@ -441,7 +427,6 @@ async function applyCoupon() {
 	} catch (error) {
 		console.error("Error applying coupon:", error);
 		errorMessage.value = __("Failed to apply coupon. Please try again.");
-		showError(errorMessage.value);
 	} finally {
 		applying.value = false;
 	}
@@ -462,7 +447,15 @@ function applyLineCoupon(coupon, result) {
 		line_updates: result.line_updates || [],
 	};
 	emit("discount-applied", appliedDiscount.value);
-	showSuccess(__("{0} applied successfully", [code]));
+	// Lines whose own promotion beats the coupon (coupon set to "Better of the two")
+	const kept = (result.kept_promotion_items || []).map(
+		(itemCode) => cartStore.invoiceItems.find((i) => i.item_code === itemCode)?.item_name || itemCode
+	);
+	showSuccess(
+		kept.length
+			? __("{0} applied. The current promotion saves more on: {1}", [code, kept.join(", ")])
+			: __("{0} applied successfully", [code])
+	);
 	errorMessage.value = "";
 }
 

@@ -14,7 +14,13 @@
 					dynamicGap,
 					isMobileView ? '' : 'overflow-hidden',
 				]"
-				:style="isMobileView ? {} : { maxHeight: dialogContentMaxHeight }"
+				:style="{
+					// Whole dialog within 100dvh - 32px (6rem for title and padding)
+					maxHeight: isMobileView
+						? 'calc(100dvh - 32px - 6rem)'
+						: `min(${dialogContentMaxHeight}, calc(100dvh - 32px - 6rem))`,
+					overflowY: isMobileView ? 'auto' : undefined,
+				}"
 			>
 				<!-- Left Column (2/5): Sales Person + Invoice Summary -->
 				<div
@@ -705,7 +711,7 @@
 									</div>
 									<span
 										v-if="localAdditionalDiscount > 0"
-										class="text-xs font-bold text-red-600"
+										class="text-xs font-bold text-[#0f7a4a]"
 									>
 										-{{ formatCurrency(calculatedAdditionalDiscount) }}
 									</span>
@@ -830,7 +836,7 @@
 								class="flex items-center justify-between text-sm"
 							>
 								<span class="text-gray-600 text-start">{{ __("Discount") }}</span>
-								<span class="font-medium text-red-600 text-end"
+								<span class="font-medium text-[#0f7a4a] text-end"
 									>-{{ formatCurrency(discountAmount) }}</span
 								>
 							</div>
@@ -1164,11 +1170,14 @@
 										: 'border-gray-200 bg-white hover:border-blue-400 hover:bg-blue-50 text-gray-700',
 								]"
 							>
-								<span :class="isSmallMobile ? 'text-xs' : 'text-sm lg:text-lg'">{{
-									isWalletPaymentMethod(method.mode_of_payment)
-										? "🎁"
-										: getPaymentIcon(method.type)
-								}}</span>
+								<FeatherIcon
+									:name="
+										isWalletPaymentMethod(method.mode_of_payment)
+											? 'gift'
+											: paymentFeatherIcon(method)
+									"
+									:class="isSmallMobile ? 'w-3 h-3' : 'w-4 h-4 lg:w-5 lg:h-5'"
+								/>
 								<span class="truncate max-w-[80px] lg:max-w-none">{{
 									__(method.mode_of_payment)
 								}}</span>
@@ -1234,9 +1243,10 @@
 										: 'border-emerald-300 bg-emerald-50 hover:border-emerald-500 hover:bg-emerald-100 text-emerald-700',
 								]"
 							>
-								<span :class="isSmallMobile ? 'text-xs' : 'text-sm lg:text-lg'"
-									>💳</span
-								>
+								<FeatherIcon
+									name="credit-card"
+									:class="isSmallMobile ? 'w-3 h-3' : 'w-4 h-4 lg:w-5 lg:h-5'"
+								/>
 								<span class="truncate">{{ __("Credit Balance") }}</span>
 								<span
 									v-if="getMethodTotal('Customer Credit') > 0"
@@ -1271,9 +1281,10 @@
 											: 'border-gray-200 bg-white hover:border-blue-400 hover:bg-blue-50 text-gray-700',
 									]"
 								>
-									<span :class="isSmallMobile ? 'text-xs' : 'text-sm lg:text-lg'"
-										>🧾</span
-									>
+									<FeatherIcon
+										name="file-text"
+										:class="isSmallMobile ? 'w-3 h-3' : 'w-4 h-4 lg:w-5 lg:h-5'"
+									/>
 									<span class="truncate max-w-[80px] lg:max-w-none">{{
 										__(acc.account_name || acc.name)
 									}}</span>
@@ -1568,13 +1579,15 @@
 								</button>
 								<!-- Pay on Account Button -->
 								<button
-									@click="addCreditAccountPayment"
+									@click="confirmCreditSale"
 									:disabled="isSubmitting || !isSalesPersonValid"
 									:class="[
-										'font-semibold rounded-lg flex items-center justify-center',
+										'font-semibold rounded-lg flex items-center justify-center border-2',
 										isSubmitting || !isSalesPersonValid
-											? 'bg-orange-300 text-white cursor-not-allowed'
-											: 'bg-orange-500 text-white active:bg-orange-600',
+											? 'border-gray-200 text-gray-400 cursor-not-allowed'
+											: creditConfirming
+												? 'border-amber-700 bg-amber-700 text-white'
+												: 'border-amber-600 bg-white text-amber-800 active:bg-amber-50',
 										mobileButtonSize.height,
 										mobileButtonSize.text,
 										mobileButtonSize.gap,
@@ -1616,7 +1629,11 @@
 										/>
 									</svg>
 									<span class="truncate">{{
-										isSubmitting ? __("Processing...") : __("On Account")
+										isSubmitting
+											? __("Processing...")
+											: creditConfirming
+												? __("Tap again to confirm")
+												: __("On Account")
 									}}</span>
 								</button>
 							</div>
@@ -1740,7 +1757,7 @@
 						</div>
 
 						<!-- Keypad Grid (4 columns) -->
-						<div :class="['grid grid-cols-4', isCompactMode ? 'gap-1' : 'gap-1.5']">
+						<div dir="ltr" :class="['grid grid-cols-4', isCompactMode ? 'gap-1' : 'gap-1.5']">
 							<!-- Row 1: 7, 8, 9, Backspace -->
 							<button
 								v-for="num in ['7', '8', '9']"
@@ -1868,17 +1885,19 @@
 						<!-- Pay on Account Button (if credit sales enabled) -->
 						<button
 							v-if="allowCreditSale"
-							@click="addCreditAccountPayment"
+							@click="confirmCreditSale"
 							:disabled="
 								paymentEntries.length > 0 || isSubmitting || !isSalesPersonValid
 							"
 							:class="[
-								'flex-1 inline-flex items-center justify-center gap-2 transition-colors focus:outline-none',
+								'flex-1 inline-flex items-center justify-center gap-2 transition-colors focus:outline-none border-2',
 								dynamicButtonHeight,
 								'text-sm font-semibold px-4 rounded-lg',
 								paymentEntries.length > 0 || isSubmitting || !isSalesPersonValid
-									? 'bg-orange-300 text-white cursor-not-allowed'
-									: 'bg-orange-500 text-white hover:bg-orange-600 active:bg-orange-700 focus-visible:ring-2 focus-visible:ring-orange-400',
+									? 'border-gray-200 text-gray-400 cursor-not-allowed'
+									: creditConfirming
+										? 'border-amber-700 bg-amber-700 text-white'
+										: 'border-amber-600 bg-white text-amber-800 hover:bg-amber-50 focus-visible:ring-2 focus-visible:ring-amber-500',
 							]"
 						>
 							<svg
@@ -1916,12 +1935,32 @@
 								/>
 							</svg>
 							<span>{{
-								isSubmitting ? __("Processing...") : __("Pay on Account")
+								isSubmitting
+									? __("Processing...")
+									: creditConfirming
+										? __("Click again to confirm")
+										: __("Pay on Account")
 							}}</span>
 						</button>
 
+						<!-- Exact cash (Enter): the primary action while nothing is entered -->
+						<button
+							v-if="exactCashMethod"
+							@click="payExactCash"
+							:disabled="isSubmitting"
+							:class="[
+								'flex-1 inline-flex items-center justify-center gap-2 transition-colors focus:outline-none',
+								dynamicButtonHeight,
+								'text-sm font-semibold px-5 rounded-lg bg-blue-700 text-white hover:bg-blue-800 focus-visible:ring-2 focus-visible:ring-blue-400',
+							]"
+						>
+							<FeatherIcon name="dollar-sign" class="w-4 h-4" />
+							<span dir="auto">{{ __("Exact cash {0}", [formatCurrency(remainingAmount)]) }}</span>
+							<kbd class="text-[11px] font-mono bg-blue-600 rounded px-1.5 py-0.5">Enter</kbd>
+						</button>
 						<!-- Complete/Partial Payment Button -->
 						<button
+							v-else
 							@click="completePayment"
 							:disabled="!canComplete || isSubmitting"
 							:class="[
@@ -2030,10 +2069,9 @@ import {
 	getCurrencySymbol,
 	roundCurrency,
 } from "@/utils/currency";
-import { getPaymentIcon } from "@/utils/payment";
 import { offlineWorker } from "@/utils/offline/workerClient";
 import { logger } from "@/utils/logger";
-import { Dialog, createResource, call } from "frappe-ui";
+import { Dialog, FeatherIcon, createResource, call } from "frappe-ui";
 import { computed, ref, watch, nextTick } from "vue";
 import { useToast } from "@/composables/useToast";
 import { useLongPress } from "@/composables/useLongPress";
@@ -2218,6 +2256,8 @@ watch(
 function handleNumpadEnter(value) {
 	if (value > 0 && lastSelectedMethod.value) {
 		numpadAddPayment();
+	} else if (!value && exactCashMethod.value) {
+		payExactCash();
 	} else if (remainingAmount.value === 0 && totalPaid.value > 0 && canComplete.value) {
 		// If fully paid and can complete, trigger complete payment
 		completePayment();
@@ -3421,6 +3461,46 @@ function applyCustomerCredit() {
 }
 
 // Add "Pay on Account" - Credit Sale (invoice with outstanding amount)
+// Cash method for "Exact cash", offered while nothing has been entered yet
+const exactCashMethod = computed(() =>
+	paymentEntries.value.length === 0 &&
+	remainingAmount.value > 0 &&
+	!(applyWriteOff.value && canWriteOff.value)
+		? filteredPaymentMethods.value.find((m) => isCashPaymentMethod(m))
+		: null
+);
+
+// Pay the remainder in cash, then complete (Enter)
+async function payExactCash() {
+	await addCustomPayment(exactCashMethod.value, remainingAmount.value);
+	await nextTick();
+	if (remainingAmount.value === 0 && canComplete.value) completePayment();
+}
+
+// Pay on account (credit sale) needs a second click within 4 seconds
+const creditConfirming = ref(false);
+let creditConfirmTimer = null;
+
+function confirmCreditSale() {
+	if (!creditConfirming.value) {
+		creditConfirming.value = true;
+		creditConfirmTimer = setTimeout(() => {
+			creditConfirming.value = false;
+		}, 4000);
+		return;
+	}
+	clearTimeout(creditConfirmTimer);
+	creditConfirming.value = false;
+	addCreditAccountPayment();
+}
+
+/** Feather icon for a payment method, by account or Mode of Payment type */
+function paymentFeatherIcon(method) {
+	if (isCashPaymentMethod(method)) return "dollar-sign";
+	const type = (method?.type || "").toLowerCase();
+	return type === "bank" ? "home" : type === "phone" || type.includes("mobile") ? "smartphone" : "credit-card";
+}
+
 function addCreditAccountPayment() {
 	log.debug("[PaymentDialog] Add credit account payment (Pay Later):", {
 		grandTotal: props.grandTotal,
