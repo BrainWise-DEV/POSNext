@@ -20,8 +20,9 @@ function findPaidCartItem(items, itemCode, uom) {
 }
 
 /**
- * Restore qty previously carved into same-SKU free rows, drop all free rows,
- * then rebuild free rows from `freeItems` (carving again when same-SKU).
+ * Restore qty previously carved into same-SKU free rows (legacy carts), drop
+ * all free rows, then rebuild free rows from `freeItems` as additional lines on
+ * top of the paid quantity (never carved).
  *
  * @param {Array} items - Cart lines (mutates paid-line quantities in place)
  * @param {Array} freeItems - Free lines from offer response (optional `min_qty` of their rule), or [] to clear
@@ -62,15 +63,13 @@ export function syncCartFreeItems(items, freeItems, { recalculateItem } = {}) {
 		const freeUom = freeItem.uom || freeItem.stock_uom;
 		const cartItem = findPaidCartItem(next, freeItem.item_code, freeUom);
 
-		// Same SKU (GWP buy 2 get 1): split scanned units while the paid rest still meets
-		// min_qty. Qty 3 → 2 paid + 1 free; qty 2 → 2 paid + 1 free added on top.
-		const paidQty = cartItem ? Number.parseFloat(cartItem.quantity) || 0 : 0;
-		const minQty = Number.parseFloat(freeItem.min_qty) || 0;
-		const carveFromPaid = Boolean(cartItem && paidQty > freeQty && paidQty - freeQty >= minQty);
-		if (carveFromPaid) {
-			cartItem.quantity = paidQty - freeQty;
-			recalc(cartItem);
-		}
+		// The server (posnext_promotions gwp.py) qualifies same-SKU GWP on paid qty
+		// only and returns the gift as an extra free row ON TOP of the paid units
+		// (buy 2 get 1: 2 paid → 2 paid + 1 free; 3 paid → 3 paid + 1 free).
+		// Never carve the gift out of the paid line: doing so made a typed/+ qty
+		// of 3 snap back to 2 paid + 1 free. Legacy carved rows (gwp_same_item_row
+		// === 1) from older carts are still restored above.
+		const carveFromPaid = false;
 
 		const cf = freeItem.conversion_factor || cartItem?.conversion_factor || 1;
 		next.push({
@@ -153,4 +152,35 @@ export function withCarvedQtyRestored(items) {
 		if (paid) paid.quantity = (Number.parseFloat(paid.quantity) || 0) + freeQty;
 	}
 	return view;
+}
+
+function stampedFreeQty(item) {
+	return item?.discount_source === "free_item" ? Number.parseFloat(item?.free_qty) || 0 : 0;
+}
+
+/**
+ * Qty shown in a paid line's input. A same-SKU gift that the server stamps on
+ * the paid line (discount_source "free_item" + free_qty) is NOT bundled into the
+ * displayed number, so the displayed number is the paid qty.
+ */
+export function getDisplayQuantity(item) {
+	const bundled = stampedFreeQty(item) > 0 ? 0 : Number.parseFloat(item?._bundledFreeQty) || 0;
+	if (bundled > 0) {
+		return (Number.parseFloat(item.quantity) || 0) + bundled;
+	}
+	return Number.parseFloat(item?.quantity) || 0;
+}
+
+/**
+ * Inverse of getDisplayQuantity for a typed value. Must mirror it exactly:
+ * previously a "free_item" line displayed its paid qty but the typed value had
+ * free_qty subtracted, so typing 3 set 2 paid and typing 1 set 0 (ignored /
+ * removed) — the offer never dropped from the keyboard path.
+ */
+export function resolvePaidQuantityFromDisplay(item, displayQty) {
+	const bundled = stampedFreeQty(item) > 0 ? 0 : Number.parseFloat(item?._bundledFreeQty) || 0;
+	if (bundled > 0) {
+		return Math.max(0, displayQty - bundled);
+	}
+	return displayQty;
 }

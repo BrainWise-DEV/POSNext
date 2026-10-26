@@ -1646,6 +1646,10 @@ import {
 	lineSourceShortLabel,
 	pickLocalizedMessage,
 } from "@/utils/friendsAndFamily";
+import {
+	getDisplayQuantity as getDisplayQuantityForLine,
+	resolvePaidQuantityFromDisplay as resolvePaidQtyForLine,
+} from "@/utils/gwpSameItemFreeRows";
 
 /**
  * ============================================================================
@@ -2269,16 +2273,7 @@ function getDisplayFreeQty(item) {
 	return getGwpFreeQty(item);
 }
 
-function getDisplayQuantity(item) {
-	if (item?.discount_source === "free_item" && (Number.parseFloat(item?.free_qty) || 0) > 0) {
-		return item.quantity || 0;
-	}
-	const bundled = Number.parseFloat(item?._bundledFreeQty) || 0;
-	if (bundled > 0) {
-		return (Number.parseFloat(item.quantity) || 0) + bundled;
-	}
-	return item.quantity || 0;
-}
+const getDisplayQuantity = getDisplayQuantityForLine;
 
 function formatFreeItemBadgeText(freeQty) {
 	const count = Number.parseFloat(freeQty) || 0;
@@ -2286,19 +2281,7 @@ function formatFreeItemBadgeText(freeQty) {
 	return __("{0} free items", [count]);
 }
 
-function resolvePaidQuantityFromDisplay(item, displayQty) {
-	if (item?.discount_source === "free_item") {
-		const freeQty = Number.parseFloat(item?.free_qty) || 0;
-		if (freeQty > 0) {
-			return Math.max(0, displayQty - freeQty);
-		}
-	}
-	const bundled = Number.parseFloat(item?._bundledFreeQty) || 0;
-	if (bundled > 0) {
-		return Math.max(0, displayQty - bundled);
-	}
-	return displayQty;
-}
+const resolvePaidQuantityFromDisplay = resolvePaidQtyForLine;
 
 /**
  * Net line amount. Uses `??` so a legitimate 0 (100% discount / free item)

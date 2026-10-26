@@ -12,7 +12,7 @@ function server(payloadItems) {
 	return {
 		items: payloadItems,
 		free_items: ok
-			? [{ item_code: "ZZFS-A", qty: 1, uom: "Nos", rate: 0, is_free_item: 1, gwp_same_item_row: 1, pricing_rules: RULE }]
+			? [{ item_code: "ZZFS-A", qty: 1, uom: "Nos", rate: 0, is_free_item: 1, pricing_rules: RULE }]
 			: [],
 		applied_pricing_rules: ok ? [RULE] : [],
 	};
@@ -58,12 +58,12 @@ describe("PRLE-1585 replay against paid-only server", () => {
 		paidLine(c).quantity += 1;
 		c = settle(c, s);
 		expect(rows(c)).toBe("paid:2,free:1");
-		paidLine(c).quantity += 1; // 3rd scan: the gift unit itself → carved
+		paidLine(c).quantity += 1; // 3 paid → gift stays on top
 		c = settle(c, s);
-		expect(rows(c)).toBe("paid:2,free:1");
-		expect(totalSkuQty(c, "ZZFS-A")).toBe(3);
+		expect(rows(c)).toBe("paid:3,free:1");
+		expect(totalSkuQty(c, "ZZFS-A")).toBe(4);
 		expect(s.removed).toEqual([]);
-		paidLine(c).quantity -= 1; // 3 scanned → 2 scanned
+		paidLine(c).quantity -= 1; // 3 paid → 2 paid
 		c = settle(c, s);
 		expect(rows(c)).toBe("paid:2,free:1");
 		expect(s.removed).toEqual([]);
@@ -72,8 +72,8 @@ describe("PRLE-1585 replay against paid-only server", () => {
 		expect(rows(c)).toBe("paid:1");
 		expect(s.removed).toEqual([1]);
 	});
-	it("scan 4 → 3 paid + 1 free", () => {
+	it("scan 4 → 4 paid + 1 free", () => {
 		const s = { applied: false, removed: [] };
-		expect(rows(settle([line(4)], s))).toBe("paid:3,free:1");
+		expect(rows(settle([line(4)], s))).toBe("paid:4,free:1");
 	});
 });

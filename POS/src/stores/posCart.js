@@ -1005,7 +1005,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		// Restore qty previously carved into same-SKU free rows, then rebuild.
 		// See syncCartFreeItems — gwp_same_item_row is client-only; skipping this
 		// undercharges scanned units.
-		// Rule min_qty decides whether a same-SKU free unit is carved or added on top
+		// Same-SKU gifts are added on top of paid qty (never carved); min_qty kept for reference
 		const withMinQty = (freeItems || []).map((free) => ({
 			...free,
 			min_qty:
@@ -1530,7 +1530,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 				if (isProductDiscount) {
 					// === PRODUCT DISCOUNT (FREE ITEMS) ===
-					offerApplied = applyOfflineFreeItem(offer, eligibleItems);
+					// Paid lines only: free gift rows must not qualify for (or seed) more gifts
+					offerApplied = applyOfflineFreeItem(
+						offer,
+						eligibleItems.filter((item) => !item.is_free_item)
+					);
 				} else {
 					// === PRICE DISCOUNT ===
 					offerApplied = applyOfflinePriceDiscount(offer, eligibleItems);
@@ -1686,8 +1690,13 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			// E.g., "Buy 2 Get 1 Free" - the free item is the same item
 			for (const item of eligibleItems) {
 				let freeItemsToGive = freeQty;
+				const minQty = Number.parseFloat(offer.min_qty) || 0;
 
-				if (isRecursive && recurseFor > 0) {
+				// Mirrors posnext_promotions get_gwp_same_item_free_qty: paid qty must
+				// meet min_qty; the gift is added on top (never carved from paid qty).
+				if (minQty > 0 && item.quantity < minQty) {
+					freeItemsToGive = 0;
+				} else if (isRecursive && recurseFor > 0) {
 					// Recursive: for every recurseFor quantity, give freeQty free
 					// Formula: floor((qty - apply_recursion_over) / recurse_for) * free_qty
 					// E.g., Buy 2 Get 1 Free: recurse_for=2, free_qty=1
