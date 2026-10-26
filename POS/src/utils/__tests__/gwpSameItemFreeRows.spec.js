@@ -16,22 +16,21 @@ function paidLine({ item_code = "SKU-A", quantity = 3, uom = "Nos", ...rest } = 
 }
 
 describe("syncCartFreeItems — same-SKU GWP carve/restore", () => {
-	it("carves free qty off the paid line and marks gwp_same_item_row", () => {
+	it("adds a same-SKU free row on top of the paid line (never carves)", () => {
 		const items = [paidLine({ quantity: 3 })];
 		const next = syncCartFreeItems(items, [{ item_code: "SKU-A", qty: 1, uom: "Nos" }]);
 
 		expect(next).toHaveLength(2);
-		expect(next[0].quantity).toBe(2);
+		expect(next[0].quantity).toBe(3);
 		expect(next[0].is_free_item).toBeFalsy();
 		expect(next[1]).toMatchObject({
 			item_code: "SKU-A",
 			quantity: 1,
 			is_free_item: 1,
-			gwp_same_item_row: 1,
-			discount_source: "gwp",
+			gwp_same_item_row: 0,
 			rate: 0,
 		});
-		expect(totalSkuQty(next, "SKU-A")).toBe(3);
+		expect(totalSkuQty(next, "SKU-A")).toBe(4);
 	});
 
 	it("restores carved qty when free rows are cleared so paid qty matches scans", () => {
@@ -57,18 +56,12 @@ describe("syncCartFreeItems — same-SKU GWP carve/restore", () => {
 		expect(totalSkuQty(cleared, "SKU-A")).toBe(3);
 	});
 
-	it("round-trips carve → clear → carve without losing scanned units", () => {
+	it("round-trips legacy carved row → clear → rebuild on top without losing paid units", () => {
 		const recalc = vi.fn();
-		let items = [paidLine({ quantity: 3 })];
-
-		items = syncCartFreeItems(
-			items,
-			[{ item_code: "SKU-A", qty: 1, uom: "Nos" }],
-			{ recalculateItem: recalc }
-		);
-		expect(totalSkuQty(items, "SKU-A")).toBe(3);
-		expect(items.find((i) => i.is_free_item)?.gwp_same_item_row).toBe(1);
-
+		let items = [
+			paidLine({ quantity: 2 }),
+			{ item_code: "SKU-A", quantity: 1, uom: "Nos", stock_uom: "Nos", is_free_item: 1, gwp_same_item_row: 1, rate: 0 },
+		];
 		items = syncCartFreeItems(items, [], { recalculateItem: recalc });
 		expect(items).toHaveLength(1);
 		expect(items[0].quantity).toBe(3);
@@ -78,9 +71,9 @@ describe("syncCartFreeItems — same-SKU GWP carve/restore", () => {
 			[{ item_code: "SKU-A", qty: 1, uom: "Nos" }],
 			{ recalculateItem: recalc }
 		);
-		expect(totalSkuQty(items, "SKU-A")).toBe(3);
-		expect(items[0].quantity).toBe(2);
-		expect(items[1].gwp_same_item_row).toBe(1);
+		expect(items[0].quantity).toBe(3);
+		expect(items[1].gwp_same_item_row).toBe(0);
+		expect(totalSkuQty(items, "SKU-A")).toBe(4);
 		expect(recalc).toHaveBeenCalled();
 	});
 
@@ -95,14 +88,22 @@ describe("syncCartFreeItems — same-SKU GWP carve/restore", () => {
 		expect(totalSkuQty(next, "SKU-A")).toBe(3);
 	});
 
-	it("still carves when paid qty after carving meets min_qty", () => {
+	it("does not carve even when paid qty minus free still meets min_qty (server adds on top)", () => {
 		const items = [paidLine({ quantity: 3 })];
 		const next = syncCartFreeItems(items, [
 			{ item_code: "SKU-A", qty: 1, uom: "Nos", min_qty: 2 },
 		]);
 
-		expect(next[0].quantity).toBe(2);
-		expect(next[1].gwp_same_item_row).toBe(1);
+		expect(next[0].quantity).toBe(3);
+		expect(next[1].gwp_same_item_row).toBe(0);
+	});
+
+	it("is idempotent across echo passes (no drift of paid qty)", () => {
+		let items = [paidLine({ quantity: 3 })];
+		for (let i = 0; i < 3; i++) {
+			items = syncCartFreeItems(items, [{ item_code: "SKU-A", qty: 1, uom: "Nos", min_qty: 2 }]);
+		}
+		expect(items.map((x) => `${x.is_free_item ? "free" : "paid"}:${x.quantity}`)).toEqual(["paid:3", "free:1"]);
 	});
 
 	it("does not carve when the free gift is a different SKU", () => {
@@ -197,7 +198,8 @@ describe("same-SKU buy 2 get 1 at exactly min_qty (PRLE-1585 style GWP rule)", (
 
 	it.each([
 		[2, 2, 1],
-		[3, 2, 1],
+		[3, 3, 1],
+		[4, 4, 1],
 	])("scanned %i -> %i paid + %i free, still eligible across two passes", (scanned, paid, free) => {
 		let cart = [paidLine({ item_code: "ZZFS-A", quantity: scanned })];
 		for (let pass = 0; pass < 2; pass++) {
