@@ -132,3 +132,25 @@ export function totalSkuQty(items, itemCode, uom) {
 		})
 		.reduce((sum, item) => sum + (Number.parseFloat(item.quantity) || 0), 0);
 }
+
+/**
+ * Offer-evaluation view of the cart: same order/length as `items`, but each
+ * paid line carries back the qty carved into its same-SKU free rows
+ * (`gwp_same_item_row: 1`). Those units were scanned/paid demand; leaving them
+ * out makes min_qty checks see e.g. 1 instead of 2 after a 3→2 reduction, so
+ * the offer is dropped and the restore then leaves 2 full-price units with no
+ * gift. Does not mutate `items`.
+ */
+export function withCarvedQtyRestored(items) {
+	const cart = Array.isArray(items) ? items : [];
+	const view = cart.map((item) => ({ ...item }));
+	const paidView = view.filter((item) => !item.is_free_item);
+	for (const item of cart) {
+		if (!item.is_free_item || Number(item.gwp_same_item_row) !== 1) continue;
+		const freeQty = Number.parseFloat(item.quantity) || 0;
+		if (freeQty <= 0) continue;
+		const paid = findPaidCartItem(paidView, item.item_code, item.uom || item.stock_uom);
+		if (paid) paid.quantity = (Number.parseFloat(paid.quantity) || 0) + freeQty;
+	}
+	return view;
+}
