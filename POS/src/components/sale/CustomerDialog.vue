@@ -216,6 +216,7 @@
 	<CreateCustomerDialog
 		v-model="showCreateDialog"
 		:pos-profile="posProfile"
+		:initial-name="createCustomerInitialSearch"
 		@customer-created="handleCustomerCreated"
 	/>
 </template>
@@ -241,6 +242,7 @@ const { filteredCustomers, loading, selectedIndex, searchTerm, allCustomers, rec
 
 // Local state
 const showCreateDialog = ref(false);
+const createCustomerInitialSearch = ref("");
 
 const show = computed({
 	get: () => props.modelValue,
@@ -308,6 +310,8 @@ function selectCustomer(customer) {
 }
 
 async function createNewCustomer() {
+	// Preserve the current search so Create Customer can smart-prefill name/mobile.
+	createCustomerInitialSearch.value = searchTerm.value?.trim() || "";
 	show.value = false;
 	await nextTick();
 	showCreateDialog.value = true;
