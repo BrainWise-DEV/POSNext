@@ -419,7 +419,7 @@
 </template>
 
 <script setup>
-import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency";
+import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil, formatDateTime } from "@/utils/currency";
 import { Button, Dialog } from "frappe-ui";
 import { computed, ref, watch } from "vue";
 
@@ -504,7 +504,7 @@ function formatDate(timestamp) {
 	if (diffInSeconds < 3600) return __("{0} minutes ago", [Math.floor(diffInSeconds / 60)]);
 	if (diffInSeconds < 86400) return __("{0} hours ago", [Math.floor(diffInSeconds / 3600)]);
 
-	return date.toLocaleDateString() + " " + date.toLocaleTimeString();
+	return formatDateTime(date);
 }
 
 function viewDetails(invoice) {

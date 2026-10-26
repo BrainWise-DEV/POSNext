@@ -119,3 +119,11 @@ jobs:
           bench --site test_site run-tests --module pos_next.pos_next.utils.tests.test_sales_person_commission_hook
         env:
           TYPE: server
+
+      - name: Run Translation Tests
+        working-directory: /home/runner/frappe-bench
+        run: |
+          bench --site test_site run-tests --module pos_next.test_ar_translations
+          bench --site test_site run-tests --module pos_next.api.test_localization
+        env:
+          TYPE: server
