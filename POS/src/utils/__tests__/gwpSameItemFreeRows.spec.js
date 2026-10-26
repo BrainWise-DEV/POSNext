@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { syncCartFreeItems, totalSkuQty } from "@/utils/gwpSameItemFreeRows";
+import { resolveFreeItemMinQty, syncCartFreeItems, totalSkuQty } from "@/utils/gwpSameItemFreeRows";
 
 function paidLine({ item_code = "SKU-A", quantity = 3, uom = "Nos", ...rest } = {}) {
 	return {
@@ -172,5 +172,42 @@ describe("syncCartFreeItems — same-SKU GWP carve/restore", () => {
 		const box = cleared.find((i) => i.uom === "Box");
 		expect(nos.quantity).toBe(3);
 		expect(box.quantity).toBe(5);
+	});
+});
+
+describe("same-SKU buy 2 get 1 at exactly min_qty (PRLE-1585 style GWP rule)", () => {
+	const offer = { name: "PRLE-1585", min_qty: 2, eligible_items: ["ZZFS-A", "ZZFS-C"] };
+	const serverFree = { item_code: "ZZFS-A", qty: 1, uom: "Nos", pricing_rules: "PRLE-1585" };
+	const paidEligible = (cart) =>
+		cart.filter((i) => !i.is_free_item && offer.eligible_items.includes(i.item_code))
+			.reduce((s, i) => s + i.quantity, 0);
+
+	it.each([
+		["string", "PRLE-1585"],
+		["comma list", "PRLE-1585,PRLE-9999"],
+		["array", ["PRLE-1585"]],
+	])("resolves min_qty from pricing_rules as %s", (_, pr) => {
+		expect(resolveFreeItemMinQty({ pricing_rules: pr }, [offer])).toBe(2);
+	});
+
+	it("falls back to the applied offer entry when the offers store lacks the rule", () => {
+		expect(resolveFreeItemMinQty(serverFree, [], [{ code: "PRLE-1585", offer }])).toBe(2);
+		expect(resolveFreeItemMinQty(serverFree, [], [])).toBeUndefined();
+	});
+
+	it.each([
+		[2, 2, 1],
+		[3, 2, 1],
+	])("scanned %i -> %i paid + %i free, still eligible across two passes", (scanned, paid, free) => {
+		let cart = [paidLine({ item_code: "ZZFS-A", quantity: scanned })];
+		for (let pass = 0; pass < 2; pass++) {
+			const freeItems = [
+				{ ...serverFree, min_qty: resolveFreeItemMinQty(serverFree, [], [{ code: offer.name, offer }]) },
+			];
+			cart = syncCartFreeItems(cart, freeItems);
+			expect(paidEligible(cart)).toBe(paid);
+			expect(paidEligible(cart)).toBeGreaterThanOrEqual(offer.min_qty);
+			expect(cart.filter((i) => i.is_free_item).map((i) => i.quantity)).toEqual([free]);
+		}
 	});
 });

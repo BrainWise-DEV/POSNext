@@ -25,7 +25,7 @@ import {
 	getCartStockQtyForItem,
 	rowStockQty,
 } from "@/utils/stockValidator";
-import { syncCartFreeItems } from "@/utils/gwpSameItemFreeRows";
+import { resolveFreeItemMinQty, syncCartFreeItems } from "@/utils/gwpSameItemFreeRows";
 import { offlineState } from "@/utils/offline/offlineState";
 import {
 	isFreePromoRow,
@@ -1002,8 +1002,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		// undercharges scanned units.
 		// Rule min_qty decides whether a same-SKU free unit is carved or added on top
 		const withMinQty = (freeItems || []).map((free) => ({
-			min_qty: offersStore.availableOffers.find((o) => o.name === free.pricing_rules)?.min_qty,
 			...free,
+			min_qty:
+				free.min_qty ??
+				resolveFreeItemMinQty(free, offersStore.availableOffers, appliedOffers.value),
 		}));
 		invoiceItems.value = syncCartFreeItems(invoiceItems.value, withMinQty, {
 			recalculateItem,

@@ -100,6 +100,28 @@ export function syncCartFreeItems(items, freeItems, { recalculateItem } = {}) {
 	return next;
 }
 
+/**
+ * min_qty of the rule that produced a free line. `pricing_rules` may be a
+ * string, a comma list or an array; falls back to the applied-offer entries so
+ * a missing offers-store entry never silently disables the min_qty guard.
+ */
+export function resolveFreeItemMinQty(freeItem, availableOffers = [], appliedOffers = []) {
+	const raw = freeItem?.pricing_rules;
+	const codes = (Array.isArray(raw) ? raw : String(raw || "").split(","))
+		.map((c) => String(c).trim())
+		.filter(Boolean);
+	let best;
+	for (const code of codes) {
+		const offer =
+			(availableOffers || []).find((o) => o?.name === code) ||
+			(appliedOffers || []).find((o) => o?.code === code)?.offer ||
+			(appliedOffers || []).find((o) => o?.code === code);
+		const minQty = Number.parseFloat(offer?.min_qty);
+		if (Number.isFinite(minQty) && (best === undefined || minQty > best)) best = minQty;
+	}
+	return best;
+}
+
 /** Total units of a SKU across paid + free rows (scanned / stock demand). */
 export function totalSkuQty(items, itemCode, uom) {
 	return (items || [])
