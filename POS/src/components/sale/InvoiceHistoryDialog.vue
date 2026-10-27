@@ -119,6 +119,19 @@
 										</svg>
 									</Button>
 									<Button
+										v-if="canRequestFaktur(invoice)"
+										variant="ghost"
+										theme="gray"
+										size="sm"
+										:loading="fakturLoading === invoice.name"
+										@click="requestFaktur(invoice)"
+										:title="__('Minta Faktur Pajak')"
+									>
+										<svg class="w-4 h-4 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+										</svg>
+									</Button>
+									<Button
 										v-if="canCreateReturn(invoice)"
 										variant="ghost"
 										theme="orange"
@@ -167,11 +180,11 @@ import { useFormatters } from "@/composables/useFormatters"
 import { useToast } from "@/composables/useToast"
 import { DEFAULT_CURRENCY, DEFAULT_LOCALE, formatCurrency as formatCurrencyUtil } from "@/utils/currency"
 import { getInvoiceStatusColor } from "@/utils/invoice"
-import { Button, Dialog, Input, createResource } from "frappe-ui"
+import { Button, Dialog, Input, call, createResource } from "frappe-ui"
 import { computed, ref, watch } from "vue"
 import ReturnInvoiceDialog from "./ReturnInvoiceDialog.vue"
 
-const { showError } = useToast();
+const { showError, showSuccess, showWarning } = useToast();
 const { formatDate, formatTime } = useFormatters();
 
 const props = defineProps({
@@ -202,6 +215,50 @@ const searchTerm = ref("")
 const page = ref(0)
 const pageSize = 20
 const hasMore = ref(true)
+
+// nextend Faktur Pajak: ask for a tax invoice afterwards on a PT nota (the consultant issues it)
+const fakturLoading = ref("");
+const pkpCompanies = ref([]);
+
+const loadPkpCompanies = async () => {
+	try {
+		const info = await call("nextend.tax_portal.info_faktur", {
+			companies: JSON.stringify([...new Set(invoices.value.map((i) => i.company).filter(Boolean))]),
+		});
+		pkpCompanies.value = info?.pkp_companies || [];
+	} catch {
+		// not staff, or offline: no button
+		pkpCompanies.value = [];
+	}
+};
+
+const canRequestFaktur = (invoice) =>
+	invoice.docstatus === 1 &&
+	!invoice.is_return &&
+	!invoice.nextend_minta_faktur &&
+	"nextend_minta_faktur" in invoice &&
+	pkpCompanies.value.includes(invoice.company);
+
+const requestFaktur = async (invoice) => {
+	fakturLoading.value = invoice.name;
+	try {
+		const result = await call("nextend.tax_portal.minta_faktur", { sales_invoice: invoice.name });
+		invoice.nextend_minta_faktur = 1;
+		if (result?.kurang?.length) {
+			showWarning(
+				__("Faktur pajak diminta, tetapi data customer belum lengkap: {0}. Lengkapi di data customer.", [
+					result.kurang.join(", "),
+				])
+			);
+		} else {
+			showSuccess(__("Faktur pajak diminta untuk {0}", [invoice.name]));
+		}
+	} catch (error) {
+		showError(error.message || __("Faktur pajak gagal diminta"));
+	} finally {
+		fakturLoading.value = "";
+	}
+};
 
 // Return dialog state
 const showReturnDialog = ref(false);
@@ -236,6 +293,8 @@ const invoicesResource = createResource({
 				// Replace the list
 				invoices.value = newInvoices
 			}
+
+			loadPkpCompanies()
 
 			// Check if there are more results
 			hasMore.value = data.length === pageSize

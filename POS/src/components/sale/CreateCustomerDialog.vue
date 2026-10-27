@@ -182,6 +182,32 @@
 					/>
 				</div>
 
+				<!-- Faktur Pajak (nextend): optional, new customers only -->
+				<div v-if="!isEditMode" class="rounded-lg border border-gray-200 bg-gray-50 p-3 flex flex-col gap-2">
+					<p class="text-start text-sm font-medium text-gray-700">
+						{{ __("Faktur Pajak (opsional)") }}
+					</p>
+					<p class="text-start text-xs text-gray-500">
+						{{ __("Isi bila customer minta faktur pajak. Bisa dilengkapi nanti saat pembayaran.") }}
+					</p>
+					<Input
+						v-model="customerData.faktur_npwp"
+						type="text"
+						inputmode="numeric"
+						:placeholder="__('NPWP / NIK (16 digit)')"
+					/>
+					<Input
+						v-model="customerData.faktur_alamat"
+						type="text"
+						:placeholder="__('Alamat di faktur')"
+					/>
+					<Input
+						v-model="customerData.faktur_email"
+						type="email"
+						:placeholder="__('Email faktur (kosong = Email di atas)')"
+					/>
+				</div>
+
 				<!-- Customer Group -->
 				<div>
 					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
@@ -338,7 +364,7 @@ import { useCountriesStore } from "@/stores/countries";
 import { usePOSSettingsStore } from "@/stores/posSettings";
 import { usePOSShiftStore } from "@/stores/posShift";
 import { logger } from "@/utils/logger";
-import { Button, Dialog, Input, createResource } from "frappe-ui";
+import { Button, Dialog, Input, call, createResource } from "frappe-ui";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 const log = logger.create("CreateCustomerDialog");
@@ -397,6 +423,10 @@ const customerData = ref({
 	custom_district: "",
 	custom_first_name: "",
 	custom_last_name: "",
+	// nextend Faktur Pajak (optional): saved through nextend.tax_portal.lengkapi_data_faktur
+	faktur_npwp: "",
+	faktur_alamat: "",
+	faktur_email: "",
 });
 
 // =============================================================================
@@ -584,6 +614,31 @@ const updateTerritoryFromCountry = () => {
 // API Resources
 // =============================================================================
 
+const hasFakturData = () =>
+	Boolean(
+		(customerData.value.faktur_npwp || "").trim() ||
+			(customerData.value.faktur_alamat || "").trim() ||
+			(customerData.value.faktur_email || "").trim()
+	);
+
+// The customer exists by now: a failure here only means the data is asked again at payment.
+const saveFakturData = async (customer) => {
+	if (!hasFakturData()) return;
+	try {
+		await call("nextend.tax_portal.lengkapi_data_faktur", {
+			customer: customer.name,
+			npwp: customerData.value.faktur_npwp,
+			alamat: customerData.value.faktur_alamat,
+			email: customerData.value.faktur_email || customerData.value.email_id,
+		});
+	} catch (error) {
+		log.error("Error saving faktur data", error);
+		showError(
+			__("Customer dibuat, tetapi data faktur pajak belum tersimpan: {0}", [error.message || ""])
+		);
+	}
+};
+
 const createCustomerResource = createResource({
 	url: "pos_next.api.customers.create_customer",
 	makeParams: () => ({
@@ -601,8 +656,9 @@ const createCustomerResource = createResource({
 		custom_is_publish: 1,
 		pos_profile: props.posProfile,
 	}),
-	onSuccess: (data) => {
+	onSuccess: async (data) => {
 		showSuccess(__("Customer {0} created successfully", [data.customer_name]));
+		await saveFakturData(data);
 		emit("customer-created", data);
 		show.value = false;
 	},
@@ -797,6 +853,17 @@ const handleCreate = async () => {
 	if (!phoneNumber.value) {
 		return showError(__("Mobile Number is required"));
 	}
+	if (!isEditMode.value && hasFakturData()) {
+		if (String(customerData.value.faktur_npwp || "").replace(/\D/g, "").length !== 16) {
+			return showError(__("NPWP / NIK harus 16 digit"));
+		}
+		if (!(customerData.value.faktur_alamat || "").trim()) {
+			return showError(__("Alamat faktur wajib diisi"));
+		}
+		if (!(customerData.value.faktur_email || customerData.value.email_id || "").trim()) {
+			return showError(__("Email faktur wajib diisi"));
+		}
+	}
 	if (isEditMode.value) {
 		await updateCustomerResource.submit();
 	} else {
@@ -818,6 +885,9 @@ const resetForm = () => {
 		custom_district: "",
 		custom_first_name: "",
 		custom_last_name: "",
+		faktur_npwp: "",
+		faktur_alamat: "",
+		faktur_email: "",
 	});
 	districts.value = [];
 	selectedCountryCode.value = "";

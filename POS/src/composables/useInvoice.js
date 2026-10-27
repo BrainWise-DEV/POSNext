@@ -46,6 +46,8 @@ export function useInvoice() {
 	const delivery = ref(null);
 	/** nextend Treasury: the transfer's sender/date/reference/proof as document fields, null = no transfer */
 	const transfer = ref(null);
+	/** nextend Faktur Pajak: { nextend_minta_faktur: 1 } when the customer asked for a tax invoice, null = no */
+	const faktur = ref(null);
 	const taxRules = ref([]); // Tax rules from POS Profile
 	const taxInclusive = ref(false); // Tax inclusive setting from POS Settings
 
@@ -1357,6 +1359,11 @@ export function useInvoice() {
 					invoiceData.delivery_date = deliveryDate;
 				}
 
+				// nextend Faktur Pajak: the consultant's queue is filled from this flag.
+				if (faktur.value && targetDoctype === "Sales Invoice") {
+					Object.assign(invoiceData, faktur.value);
+				}
+
 				// nextend Treasury: Transfer Pelanggan is made from these fields at submit.
 				if (transfer.value) {
 					Object.assign(invoiceData, transfer.value);
@@ -1668,6 +1675,7 @@ export function useInvoice() {
 		posOrderDelivery.value = null;
 		delivery.value = null;
 		transfer.value = null;
+		faktur.value = null;
 
 		// Reset incremental cache
 		_cachedSubtotal.value = 0;
@@ -1700,6 +1708,7 @@ export function useInvoice() {
 		posOrderDelivery.value = null;
 		delivery.value = null;
 		transfer.value = null;
+		faktur.value = null;
 
 		// Reset incremental cache
 		_cachedSubtotal.value = 0;
@@ -1780,6 +1789,7 @@ export function useInvoice() {
 		posOrderDelivery,
 		delivery,
 		transfer,
+		faktur,
 		taxRules,
 		taxInclusive,
 		isSubmitting,

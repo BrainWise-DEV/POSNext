@@ -2641,10 +2641,16 @@ def get_invoices(pos_profile: str, search=None, limit: int = 20, offset=0, from_
 	params["limit"] = limit
 	params["offset"] = offset
 
+	# nextend Faktur Pajak: the history offers "Minta Faktur Pajak" on a PT nota that has not asked yet.
+	faktur_column = (
+		"nextend_minta_faktur," if frappe.db.has_column("Sales Invoice", "nextend_minta_faktur") else ""
+	)
 	invoices = frappe.db.sql(
 		f"""
 		SELECT
 			name,
+			company,
+			{faktur_column}
 			customer,
 			customer_name,
 			posting_date,

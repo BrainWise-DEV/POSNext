@@ -498,6 +498,73 @@
 						</template>
 					</div>
 
+					<!-- Faktur Pajak (nextend): the customer asks for a tax invoice from the PT; the tax consultant issues it -->
+					<div
+						v-if="fakturTersedia"
+						:class="[
+							'rounded-lg p-2 flex flex-col gap-1.5',
+							isFakturValid ? 'bg-amber-50 border border-amber-200' : 'bg-red-50 border-2 border-red-300',
+						]"
+					>
+						<label class="flex items-center gap-1.5 text-xs font-semibold text-amber-900 cursor-pointer min-h-[32px]">
+							<input
+								type="checkbox"
+								v-model="mintaFaktur"
+								class="rounded border-amber-400 text-amber-600 focus:ring-amber-500"
+								@change="$event.target.blur()"
+							/>
+							{{ __("Minta Faktur Pajak") }}
+						</label>
+						<template v-if="mintaFaktur">
+							<p v-if="fakturCustomerUmum" class="text-xs font-medium text-red-700">
+								{{ __("Pilih atau buat customer dulu. Customer umum tidak punya NPWP/NIK untuk faktur.") }}
+							</p>
+							<template v-else-if="fakturKurang.length">
+								<p class="text-xs font-medium text-red-700">
+									{{ __("Data faktur customer belum lengkap: {0}.", [fakturKurang.join(", ")]) }}
+								</p>
+								<div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+									<input
+										v-model="fakturForm.npwp"
+										type="text"
+										inputmode="numeric"
+										class="h-9 text-sm border border-gray-300 rounded px-2"
+										:placeholder="__('NPWP / NIK (16 digit)')"
+									/>
+									<input
+										v-model="fakturForm.nama"
+										type="text"
+										class="h-9 text-sm border border-gray-300 rounded px-2"
+										:placeholder="__('Nama di faktur (kosong = nama customer)')"
+									/>
+									<input
+										v-model="fakturForm.alamat"
+										type="text"
+										class="h-9 text-sm border border-gray-300 rounded px-2"
+										:placeholder="__('Alamat di faktur')"
+									/>
+									<input
+										v-model="fakturForm.email"
+										type="email"
+										class="h-9 text-sm border border-gray-300 rounded px-2"
+										:placeholder="__('Email untuk kirim faktur')"
+									/>
+								</div>
+								<button
+									type="button"
+									class="self-start h-9 px-3 text-xs font-semibold rounded bg-amber-600 text-white disabled:opacity-50"
+									:disabled="fakturSaving"
+									@click="saveFakturData"
+								>
+									{{ fakturSaving ? __("Menyimpan…") : __("Simpan data faktur") }}
+								</button>
+							</template>
+							<p v-else class="text-xs text-amber-900">
+								{{ __("Faktur pajak dikirim ke {0} setelah diterbitkan konsultan pajak.", [fakturEmail]) }}
+							</p>
+						</template>
+					</div>
+
 					<!-- Data transfer (nextend Treasury): treasury checks it in the bank app the same day -->
 					<div
 						v-if="transferAmount > 0"
@@ -3183,6 +3250,90 @@ function transferPayload() {
 	};
 }
 
+// -- nextend Faktur Pajak ------------------------------------------------------
+// Only a sale with goods of a PKP company (PT) can carry a tax invoice. The consultant
+// issues it later from the portal (nextend.tax_portal); here the cashier only ticks the
+// box and completes the customer's identity when it is missing. Needs the server, so it
+// is not offered offline (the invoice history can ask for it afterwards).
+const mintaFaktur = ref(false);
+const fakturInfo = ref(null);
+const fakturForm = ref({ npwp: "", nama: "", alamat: "", email: "" });
+const fakturSaving = ref(false);
+const customerName = computed(() => props.customer?.name || props.customer || "");
+
+const fakturTersedia = computed(
+	() => !props.isOffline && !isSalesOrder.value && Boolean(fakturInfo.value?.pkp)
+);
+const fakturCustomerUmum = computed(
+	() => !customerName.value || Boolean(fakturInfo.value?.customer?.umum)
+);
+const fakturKurang = computed(() => fakturInfo.value?.customer?.kurang || []);
+const fakturEmail = computed(() => fakturInfo.value?.customer?.email || "");
+const isFakturValid = computed(
+	() =>
+		!(fakturTersedia.value && mintaFaktur.value) ||
+		(!fakturCustomerUmum.value && !fakturKurang.value.length)
+);
+
+async function loadFakturInfo() {
+	fakturInfo.value = null;
+	if (props.isOffline || isSalesOrder.value || !props.items.length) return;
+	const { groups, company } = cartStore.saleSplit;
+	const companies = groups.length ? groups.map((g) => g.company) : [company || props.company];
+	try {
+		fakturInfo.value = await call("nextend.tax_portal.info_faktur", {
+			companies: JSON.stringify(companies.filter(Boolean)),
+			customer: customerName.value || null,
+			pos_profile: props.posProfile,
+		});
+	} catch (error) {
+		// Not a cashier/staff role or server unreachable: no checkbox, the sale goes on.
+		log.warn("[PaymentDialog] Faktur info unavailable:", error);
+		return;
+	}
+	const known = fakturInfo.value?.customer;
+	mintaFaktur.value = Boolean(known?.selalu_minta && !known.umum);
+	fakturForm.value = {
+		npwp: known?.npwp || "",
+		nama: known?.nama || "",
+		alamat: known?.alamat || "",
+		email: known?.email || "",
+	};
+}
+
+async function saveFakturData() {
+	fakturSaving.value = true;
+	try {
+		await call("nextend.tax_portal.lengkapi_data_faktur", {
+			customer: customerName.value,
+			npwp: fakturForm.value.npwp,
+			nama: fakturForm.value.nama,
+			alamat: fakturForm.value.alamat,
+			email: fakturForm.value.email,
+		});
+		await loadFakturInfo();
+		mintaFaktur.value = true;
+	} catch (error) {
+		showWarning(error.message || __("Data faktur gagal disimpan."));
+	} finally {
+		fakturSaving.value = false;
+	}
+}
+
+/** Sales Invoice field of the request, null when no tax invoice is asked. */
+function fakturPayload() {
+	if (!(fakturTersedia.value && mintaFaktur.value && isFakturValid.value)) return null;
+	return { nextend_minta_faktur: 1 };
+}
+
+watch(
+	() => [customerName.value, show.value],
+	([, open]) => {
+		if (open) loadFakturInfo();
+		else mintaFaktur.value = false;
+	}
+);
+
 // The choice belongs to one sale and one customer: it survives reopening the
 // dialog, and goes once the sale is done or somebody else is buying. It
 // starts from what the SPG of a loaded order chose; Bayar di Tempat is always
@@ -3211,6 +3362,11 @@ const canComplete = computed(() => {
 
 	// A delivery needs somewhere to go
 	if (!isDeliveryValid.value) {
+		return false;
+	}
+
+	// A requested tax invoice needs a real customer with complete data
+	if (!isFakturValid.value) {
 		return false;
 	}
 
@@ -3740,7 +3896,7 @@ function addCreditAccountPayment() {
 		remainingAmount: remainingAmount.value,
 	});
 
-	if (!isDeliveryValid.value) return;
+	if (!isDeliveryValid.value || !isFakturValid.value) return;
 
 	// Close dialog and complete as credit sale (0 payment)
 	// The backend will create an invoice with outstanding amount
@@ -3753,6 +3909,7 @@ function addCreditAccountPayment() {
 		outstanding_amount: props.grandTotal,
 		delivery: deliveryPayload(),
 		transfer: transferPayload(),
+		faktur: fakturPayload(),
 	};
 
 	log.debug("[PaymentDialog] Emitting credit sale payment-completed:", paymentData);
@@ -3813,6 +3970,7 @@ function completePayment() {
 		is_credit_sale: !!receivableAccount && paymentEntries.value.length === 0,
 		delivery: deliveryPayload(),
 		transfer: transferPayload(),
+		faktur: fakturPayload(),
 	};
 
 	log.debug("[PaymentDialog] Emitting payment-completed:", paymentData);
