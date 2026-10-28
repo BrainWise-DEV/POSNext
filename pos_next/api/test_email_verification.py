@@ -169,12 +169,40 @@ class TestSend(EmailOTPTestBase):
 		self.assertEqual(res["code"], "otp_not_required")
 		self.mock_mark.assert_not_called()
 
-	def test_not_synced(self):
+	def test_new_customer_without_magento_id_still_sends(self):
+		# New POS customer: no custom_customer_id yet, but Magento knows the phone.
 		self.row.custom_customer_id = None
-		with self.post(200, {"success": True}) as m:
+		with self.post(200, {"success": True, "otp_required": True}) as m:
+			res = ev.send_email_otp("CUST-1", "jane@example.com")
+		self.assertEqual((res["ok"], res["code"]), (True, "sent"))
+		m.assert_called_once()
+		self.assertEqual(m.call_args.kwargs["json"]["phone"], "+9647701234567")
+
+	def test_new_customer_unknown_to_magento_is_sync_pending(self):
+		self.row.custom_customer_id = None
+		for status, body in (
+			(400, {"message": "No customer was found with this phone"}),
+			(200, {"success": False, "message": "No customer was found"}),
+		):
+			with self.subTest(status=status), self.post(status, body):
+				res = ev.send_email_otp("CUST-1")
+			self.assertEqual((res["ok"], res["code"]), (False, "sync_pending"))
+			self.assertNotEqual(res["message"], ev._messages()["customer_not_found"])
+
+	def test_synced_customer_unknown_to_magento_stays_customer_not_found(self):
+		with self.post(400, {"message": "No customer was found with this phone"}):
 			res = ev.send_email_otp("CUST-1")
-		self.assertEqual((res["ok"], res["code"]), (False, "not_synced"))
-		m.assert_not_called()
+		self.assertEqual(res["code"], "customer_not_found")
+
+	def test_not_found_and_sync_pending_messages_differ(self):
+		msgs = ev._messages()
+		self.assertNotEqual(msgs["customer_not_found"], msgs["sync_pending"])
+		self.assertNotIn("not registered", msgs["sync_pending"])
+
+	def test_other_errors_unchanged_when_not_synced(self):
+		self.row.custom_customer_id = None
+		with self.post(400, {"message": "This email is already registered"}):
+			self.assertEqual(ev.send_email_otp("CUST-1")["code"], "email_taken")
 
 	def test_flag_off(self):
 		with patch(f"{MODULE}.is_feature_enabled", return_value=False), self.post(200, {}) as m:
@@ -341,7 +369,10 @@ class TestVerify(EmailOTPTestBase):
 		with patch(f"{MODULE}.is_feature_enabled", return_value=False):
 			self.assertEqual(ev.verify_email_otp("CUST-1", OTP)["code"], "disabled")
 		self.row.custom_customer_id = 0
-		self.assertEqual(ev.verify_email_otp("CUST-1", OTP)["code"], "not_synced")
+		with self.post(200, {"status": False, "message": "No customer was found"}):
+			self.assertEqual(ev.verify_email_otp("CUST-1", OTP)["code"], "sync_pending")
+		with self.post(200, {"status": True}):
+			self.assertEqual(ev.verify_email_otp("CUST-1", OTP)["code"], "verified")
 		with patch(f"{MODULE}.frappe.has_permission", return_value=False):
 			with self.assertRaises(frappe.PermissionError):
 				ev.verify_email_otp("CUST-1", OTP)

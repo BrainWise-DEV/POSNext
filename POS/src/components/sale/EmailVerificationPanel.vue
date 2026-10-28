@@ -39,6 +39,9 @@
 			<p v-else-if="emailDirty" class="text-xs text-gray-500" data-testid="unsaved-msg">
 				{{ __("Save the customer's email before verifying it.") }}
 			</p>
+			<p v-else-if="!magentoSynced" class="text-xs text-amber-700" data-testid="sync-pending-hint">
+				{{ __("Customer is saved but not synced with Magento yet. Verification may take a moment to become available.") }}
+			</p>
 		</div>
 
 		<!-- sending -->
@@ -138,6 +141,8 @@ const props = defineProps({
 	verified: { type: Boolean, default: false },
 	verifiedEmail: { type: String, default: "" },
 	posProfile: { type: String, default: "" },
+	/** False when the Customer has no Magento id yet (informational only; the server decides) */
+	magentoSynced: { type: Boolean, default: true },
 });
 
 const emit = defineEmits(["verified", "lock-change"]);

@@ -1784,3 +1784,6 @@ Points applied: {0}. Please pay remaining {1} with {2},تم خصم النقاط:
 "View Closing Shift","عرض وردية الإغلاق",""
 "Showing {0}–{1} of {2} shifts","عرض {0}–{1} من {2} ورديات",""
 "Since {0}","منذ {0}",""
+"No Magento account was found for this customer's phone number.","لا يوجد حساب في ماجنتو برقم هاتف هذا العميل.",""
+"Customer is saved but not synced with Magento yet. Please try again in a moment.","تم حفظ العميل لكن لم تتم مزامنته مع ماجنتو بعد. يرجى المحاولة مرة أخرى بعد قليل.",""
+"Customer is saved but not synced with Magento yet. Verification may take a moment to become available.","تم حفظ العميل لكن لم تتم مزامنته مع ماجنتو بعد. قد يستغرق توفر التحقق بعض الوقت.",""

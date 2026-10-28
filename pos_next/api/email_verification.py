@@ -69,8 +69,11 @@ def _messages():
 		"phone_required": _("Customer has no phone number."),
 		"invalid_phone": _("Invalid Iraqi phone number."),
 		"invalid_email": _("Enter a valid email address."),
-		"customer_not_found": _("Customer is not registered in Magento yet."),
+		"customer_not_found": _("No Magento account was found for this customer's phone number."),
 		"not_synced": _("Customer is not registered in Magento yet."),
+		"sync_pending": _(
+			"Customer is saved but not synced with Magento yet. Please try again in a moment."
+		),
 		"email_taken": _("This email belongs to another account."),
 		"server_error": _("Could not send the code, please try again."),
 		"unavailable": _("Magento is unreachable."),
@@ -373,8 +376,11 @@ def _prepare(customer, email, pos_profile):
 	if not doc:
 		frappe.throw(_("Customer {0} not found").format(customer), frappe.DoesNotExistError)
 
-	if not has_magento_id or not doc.get("custom_customer_id"):
-		return None, _result(False, "not_synced")
+	# Magento identifies the customer by phone, not by the local Magento id. A customer
+	# just created in the POS may lack custom_customer_id (registration failed, was
+	# skipped, or Magento answered "already exists" without an id), so do not block
+	# here: let Magento decide and translate "no customer" into ``sync_pending``.
+	synced = bool(has_magento_id and doc.get("custom_customer_id"))
 
 	saved_email = (doc.get("email_id") or "").strip()
 	if _clean_email(saved_email) is None:
@@ -392,7 +398,14 @@ def _prepare(customer, email, pos_profile):
 	if not _get_magento_config():
 		return None, _result(False, "not_configured")
 
-	return {"customer": customer, "email": saved_email, "phone": phone}, None
+	return {"customer": customer, "email": saved_email, "phone": phone, "synced": synced}, None
+
+
+def _unsynced_aware(ctx, result):
+	"""Magento has no customer for this phone and we hold no Magento id: sync is pending."""
+	if result.get("code") == "customer_not_found" and not ctx.get("synced"):
+		return _result(False, "sync_pending")
+	return result
 
 
 def _audit(customer, action, code, email, phone, http_status=None):
@@ -447,14 +460,14 @@ def send_email_otp(customer, email=None, pos_profile=None):
 			if http_status >= 500:
 				state["sends"].append(now)
 				_save_state(customer, state)
-			result = _error_from(http_status, body, "send_failed")
+			result = _unsynced_aware(ctx, _error_from(http_status, body, "send_failed"))
 			_audit(customer, "send", result["code"], ctx["email"], ctx["phone"], http_status)
 			if result["code"] in ("credentials_invalid", "server_error", "send_failed"):
 				_log_unexpected(f"Email OTP send failed (HTTP {http_status})")
 			return result
 
 		if body.get("success") is False or body.get("status") is False:
-			result = _error_from(http_status, body, "send_failed")
+			result = _unsynced_aware(ctx, _error_from(http_status, body, "send_failed"))
 			_audit(customer, "send", result["code"], ctx["email"], ctx["phone"], http_status)
 			return result
 
@@ -524,7 +537,7 @@ def verify_email_otp(customer, otp, email=None, pos_profile=None):
 				verified_email=ctx["email"],
 			)
 
-		result = _error_from(http_status, body, "verify_failed")
+		result = _unsynced_aware(ctx, _error_from(http_status, body, "verify_failed"))
 		if result["code"] in ("credentials_invalid", "server_error"):
 			_log_unexpected(f"Email OTP verify failed (HTTP {http_status})")
 		_audit(customer, "verify", result["code"], ctx["email"], ctx["phone"], http_status)
