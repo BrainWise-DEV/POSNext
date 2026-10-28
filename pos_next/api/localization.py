@@ -12,11 +12,18 @@ def get_app_translations():
 	This is a wrapper around frappe.translate.get_all_translations
 	since the original function is not whitelisted.
 
+	pos_next's own translations override other apps' for the same source string;
+	the site's Translation records still override both.
+
 	Returns:
 		dict: Translation dictionary {source: translated}
 	"""
 	lang = frappe.local.lang or "en"
-	return translate.get_all_translations(lang)
+	return {
+		**translate.get_all_translations(lang),
+		**translate.get_translations_from_apps(lang, ["pos_next"]),
+		**translate.get_user_translations(lang),
+	}
 
 
 @frappe.whitelist()

@@ -1533,6 +1533,10 @@ const log = logger.create("InvoiceCart");
 import { createResource } from "frappe-ui";
 import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from "vue";
 import EditItemDialog from "./EditItemDialog.vue";
+import {
+	getDisplayQuantity as getDisplayQuantityForLine,
+	resolvePaidQuantityFromDisplay as resolvePaidQtyForLine,
+} from "@/utils/gwpSameItemFreeRows";
 
 /**
  * ============================================================================
@@ -2176,16 +2180,7 @@ function isLockedFreeRow(item) {
 	return Boolean(item?.is_free_item || item?._isStandaloneFreeRow);
 }
 
-function getDisplayQuantity(item) {
-	if (item?.discount_source === "free_item" && (Number.parseFloat(item?.free_qty) || 0) > 0) {
-		return item.quantity || 0;
-	}
-	const bundled = Number.parseFloat(item?._bundledFreeQty) || 0;
-	if (bundled > 0) {
-		return (Number.parseFloat(item.quantity) || 0) + bundled;
-	}
-	return item.quantity || 0;
-}
+const getDisplayQuantity = getDisplayQuantityForLine;
 
 function serialList(item) {
 	return String(item?.serial_no || "")
@@ -2244,16 +2239,7 @@ function savingSource(item) {
 	return item.coupon_code ? "" : savingOffer(item)?.name || "";
 }
 
-function resolvePaidQuantityFromDisplay(item, displayQty) {
-	if (item?.discount_source === "free_item") {
-		const freeQty = Number.parseFloat(item?.free_qty) || 0;
-		if (freeQty > 0) {
-			return Math.max(0, displayQty - freeQty);
-		}
-	}
-	// A carved same-item gift is part of the typed total; the store splits it again
-	return displayQty;
-}
+const resolvePaidQuantityFromDisplay = resolvePaidQtyForLine;
 
 /**
  * Net line amount. Uses `??` so a legitimate 0 (100% discount / free item)

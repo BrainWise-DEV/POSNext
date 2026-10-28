@@ -26,7 +26,11 @@ import {
 	getCartStockQtyForItem,
 	rowStockQty,
 } from "@/utils/stockValidator";
-import { syncCartFreeItems } from "@/utils/gwpSameItemFreeRows";
+import {
+	resolveFreeItemMinQty,
+	syncCartFreeItems,
+	withCarvedQtyRestored,
+} from "@/utils/gwpSameItemFreeRows";
 import { offlineState } from "@/utils/offline/offlineState";
 import {
 	isFreePromoRow,
@@ -180,7 +184,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * free rows and appliedOffers, which the offer engine itself rewrites.
 	 */
 	function offerCartSignature() {
-		const paid = invoiceItems.value
+		const paid = withCarvedQtyRestored(invoiceItems.value)
 			.filter((i) => !i.is_free_item)
 			.map((i) => `${i.item_code}:${i.quantity}:${i.uom || ""}:${i.price_list_rate || i.rate || 0}`)
 			.join("|");
@@ -265,8 +269,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * Update item quantity with stock validation.
 	 * Wraps useInvoice.updateItemQuantity to enforce stock limits
 	 * when the user clicks +/- or types a new quantity.
-	 * The quantity is the line's total units, including a same-item gift
-	 * carved out of it (typed 3 on "buy 2 get 1" → 2 paid + 1 gift).
+	 * The quantity is the paid units. Same-SKU gifts are added ON TOP as a
+	 * separate free row (never carved); only legacy carved rows
+	 * (gwp_same_item_row === 1, from older drafts) are folded back in here.
 	 */
 	function updateItemQuantity(itemCode, quantity, uom = null) {
 		const item = uom
@@ -305,7 +310,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			}
 		}
 
-		// Typed qty replaces the carved split; the next offer pass carves again
+		// Typed qty replaces a legacy carved split; the next offer pass adds the gift on top
 		if (carved.length) {
 			invoiceItems.value = invoiceItems.value.filter((i) => !carved.includes(i));
 		}
@@ -647,7 +652,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 	function buildOfferEvaluationPayload(currentProfile) {
 		// Use toRaw() to ensure we get current, non-reactive values (prevents stale cached quantities)
-		const rawItems = toRaw(invoiceItems.value);
+		// Carved same-SKU free units count as paid demand (see withCarvedQtyRestored)
+		const rawItems = withCarvedQtyRestored(toRaw(invoiceItems.value));
 
 		return {
 			doctype: "Sales Invoice",
@@ -837,10 +843,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		// Restore qty previously carved into same-SKU free rows, then rebuild.
 		// See syncCartFreeItems — gwp_same_item_row is client-only; skipping this
 		// undercharges scanned units.
-		// Rule min_qty decides whether a same-SKU free unit is carved or added on top
+		// Same-SKU gifts are added on top of paid qty (never carved); min_qty kept for reference
 		const withMinQty = (freeItems || []).map((free) => ({
-			min_qty: offersStore.availableOffers.find((o) => o.name === free.pricing_rules)?.min_qty,
 			...free,
+			min_qty:
+				free.min_qty ??
+				resolveFreeItemMinQty(free, offersStore.availableOffers, appliedOffers.value),
 		}));
 		invoiceItems.value = syncCartFreeItems(invoiceItems.value, withMinQty, {
 			recalculateItem,
@@ -1347,7 +1355,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 				if (isProductDiscount) {
 					// === PRODUCT DISCOUNT (FREE ITEMS) ===
-					offerApplied = applyOfflineFreeItem(offer, eligibleItems);
+					// Paid lines only: free gift rows must not qualify for (or seed) more gifts
+					offerApplied = applyOfflineFreeItem(
+						offer,
+						eligibleItems.filter((item) => !item.is_free_item)
+					);
 				} else {
 					// === PRICE DISCOUNT ===
 					offerApplied = applyOfflinePriceDiscount(offer, eligibleItems);
@@ -1503,8 +1515,13 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			// E.g., "Buy 2 Get 1 Free" - the free item is the same item
 			for (const item of eligibleItems) {
 				let freeItemsToGive = freeQty;
+				const minQty = Number.parseFloat(offer.min_qty) || 0;
 
-				if (isRecursive && recurseFor > 0) {
+				// Mirrors posnext_promotions get_gwp_same_item_free_qty: paid qty must
+				// meet min_qty; the gift is added on top (never carved from paid qty).
+				if (minQty > 0 && item.quantity < minQty) {
+					freeItemsToGive = 0;
+				} else if (isRecursive && recurseFor > 0) {
 					// Recursive: for every recurseFor quantity, give freeQty free
 					// Formula: floor((qty - apply_recursion_over) / recurse_for) * free_qty
 					// E.g., Buy 2 Get 1 Free: recurse_for=2, free_qty=1
@@ -1633,7 +1650,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * Paid lines only — free gifts must not inflate min_qty/max_qty/min_amt checks.
 	 */
 	function buildCartSnapshot() {
-		const items = invoiceItems.value.filter((item) => !item.is_free_item);
+		const items = withCarvedQtyRestored(invoiceItems.value).filter((item) => !item.is_free_item);
 		const totalQty = items.reduce((sum, item) => sum + (item.quantity || 0), 0);
 		const itemCodes = items.map((item) => item.item_code);
 		const itemGroups = items.map((item) => item.item_group).filter(Boolean);
@@ -1938,7 +1955,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		// Only sync if values are initialized
 		if (subtotal.value !== undefined && invoiceItems.value) {
 			// Paid lines only — free gifts must not inflate min_qty/max_qty checks
-			const paidItems = invoiceItems.value.filter((item) => !item.is_free_item);
+			const paidItems = withCarvedQtyRestored(invoiceItems.value).filter(
+				(item) => !item.is_free_item
+			);
 
 			// Create hash for paid item codes and quantities to detect actual changes.
 			// price_list_rate is part of the key because the cached amount maps

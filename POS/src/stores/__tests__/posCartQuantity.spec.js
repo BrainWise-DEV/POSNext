@@ -44,15 +44,17 @@ describe("posCart same-item gift quantities", () => {
 		cart = usePOSCartStore();
 	});
 
-	it("typing 3 gives 3 units: 2 paid + 1 gift", () => {
+	// On-top model (fix/same-sku-b2g1-min-qty + Promotions gwp.py): the server
+	// qualifies on PAID qty and returns the gift as an extra row; never carved.
+	it("typing 3 gives 3 paid + 1 gift on top", () => {
 		cart.addItem({ ...chipsy });
 		cart.updateItemQuantity("CHIPSY", 3, "Nos");
 		offerPass(cart);
-		expect(paidQty(cart)).toBe(2);
-		expect(totalSkuQty(cart.invoiceItems, "CHIPSY")).toBe(3);
+		expect(paidQty(cart)).toBe(3);
+		expect(totalSkuQty(cart.invoiceItems, "CHIPSY")).toBe(4);
 	});
 
-	it("typing 1 on a 2 + 1 gift line settles at 1 paid, not 2", () => {
+	it("typing 1 on a 3 + 1 gift line settles at 1 paid and drops the gift", () => {
 		cart.addItem({ ...chipsy });
 		cart.updateItemQuantity("CHIPSY", 3, "Nos");
 		offerPass(cart);
@@ -62,26 +64,22 @@ describe("posCart same-item gift quantities", () => {
 		expect(totalSkuQty(cart.invoiceItems, "CHIPSY")).toBe(1);
 	});
 
-	it("typing 4 on a 2 + 1 gift line gives 4 units: 3 paid + 1 gift", () => {
+	it("typing 4 on a 3 + 1 gift line gives 4 paid + 1 gift", () => {
 		cart.addItem({ ...chipsy });
 		cart.updateItemQuantity("CHIPSY", 3, "Nos");
 		offerPass(cart);
 		cart.updateItemQuantity("CHIPSY", 4, "Nos");
 		offerPass(cart);
-		expect(paidQty(cart)).toBe(3);
-		expect(totalSkuQty(cart.invoiceItems, "CHIPSY")).toBe(4);
+		expect(paidQty(cart)).toBe(4);
+		expect(totalSkuQty(cart.invoiceItems, "CHIPSY")).toBe(5);
 	});
 
-	it("every tap adds a unit; the 3rd tap becomes the gift instead of a paid unit", () => {
+	it("every tap adds a paid unit; the gift appears on top once 2 are paid", () => {
 		cart.addItem({ ...chipsy });
 		offerPass(cart);
+		expect(totalSkuQty(cart.invoiceItems, "CHIPSY")).toBe(1);
 		cart.addItem({ ...chipsy });
 		offerPass(cart);
-		// 2 paid + 1 gift added on top
-		expect(totalSkuQty(cart.invoiceItems, "CHIPSY")).toBe(3);
-		cart.addItem({ ...chipsy });
-		offerPass(cart);
-		// 3rd scanned unit is the gift: 2 paid + 1 gift
 		expect(paidQty(cart)).toBe(2);
 		expect(totalSkuQty(cart.invoiceItems, "CHIPSY")).toBe(3);
 		cart.addItem({ ...chipsy });

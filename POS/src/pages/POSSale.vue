@@ -9,7 +9,7 @@
 	-->
 	<div
 		class="flex flex-1 flex-col min-h-0 bg-gray-50 overflow-x-hidden"
-		style="padding-bottom: var(--pos-footer-h, 45px)"
+		style="padding-bottom: var(--pos-footer-h, 24px)"
 	>
 		<!-- Loading State -->
 		<LoadingSpinner v-if="uiStore.isLoading" />
@@ -262,8 +262,7 @@
 			<!-- Main Content: Responsive Layout -->
 			<div
 				v-if="shiftStore.hasOpenShift"
-				class="flex-1 flex overflow-hidden relative"
-				style="max-height: calc(100vh - 60px - var(--header-height, 60px))"
+				class="flex-1 min-h-0 flex overflow-hidden relative"
 			>
 				<!-- Icon-Only Management Slider - Always Visible -->
 				<ManagementSlider
@@ -495,8 +494,7 @@
 			<!-- No Shift Placeholder -->
 			<div
 				v-else
-				class="flex-1 flex items-center justify-center bg-gray-50"
-				style="max-height: calc(100vh - 60px - var(--header-height, 60px))"
+				class="flex-1 min-h-0 flex items-center justify-center bg-gray-50"
 			>
 				<div class="text-center">
 					<div
@@ -1120,6 +1118,8 @@ import InvoiceManagement from "@/components/invoices/InvoiceManagement.vue";
 import InvoiceDetailDialog from "@/components/invoices/InvoiceDetailDialog.vue";
 import { useRealtimeStock } from "@/composables/useRealtimeStock";
 import { useSessionLock } from "@/composables/useSessionLock";
+import { useGlobalShortcuts } from "@/composables/useKeyboardShortcuts";
+import { getDistinctUoms } from "@/utils/itemUoms";
 import { usePOSEvents } from "@/composables/usePOSEvents";
 import { useLocale } from "@/composables/useLocale";
 import { session } from "@/data/session";
@@ -1211,6 +1211,16 @@ const itemsSelectorRef = ref(null);
 const invoiceCartRef = ref(null);
 const offersDialogRef = ref(null);
 const containerRef = ref(null);
+// The item/cart split follows the container's own width (sidebar, banner, window)
+const containerObserver =
+	typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => updateLayoutBounds()) : null;
+watch(containerRef, (el, oldEl) => {
+	if (oldEl) containerObserver?.unobserve(oldEl);
+	if (el) {
+		containerObserver?.observe(el);
+		updateLayoutBounds();
+	}
+});
 const dividerRef = ref(null);
 const pendingPaymentAfterCustomer = ref(false);
 const logoutAfterClose = ref(false);
@@ -1348,36 +1358,27 @@ const canSwitchToDesk = computed(() => Boolean(bootstrapStore.data?.can_switch_t
 let resizeState = null;
 let bodyStyleSnapshot = null;
 
+// Window resize listener (passive for better performance)
+function handleWindowResize() {
+	uiStore.setWindowWidth(window.innerWidth);
+	updateLayoutBounds();
+}
+
 onMounted(async () => {
-	// Window resize listeners (passive for better performance)
-	const handleResize = () => {
-		uiStore.setWindowWidth(window.innerWidth);
-		updateLayoutBounds();
-	};
-	window.addEventListener("resize", handleResize, { passive: true });
+	window.addEventListener("resize", handleWindowResize, { passive: true });
 
-	// Global keyboard shortcuts
-	const handleGlobalKeydown = (event) => {
-		// Skip if any dialog is open, the session is locked, the clear-cache overlay is
-		// showing, or if user is typing in an input/textarea. isLocked/showClearCacheDialog
-		// aren't wired into uiStore.isAnyDialogOpen, so they're checked explicitly here.
-		if (uiStore.isAnyDialogOpen || isLocked.value || showClearCacheDialog.value) return;
-		const tag = document.activeElement?.tagName;
-		if (tag === "INPUT" || tag === "TEXTAREA") return;
-
-		if (event.key === "F4") {
-			event.preventDefault();
-			itemsSelectorRef.value?.focusSearchInput();
-		} else if (event.key === "F8") {
-			event.preventDefault();
-			invoiceCartRef.value?.focusCustomerSearch();
-		} else if (event.key === "F9") {
-			event.preventDefault();
-			handleProceedToPayment();
+	// Global keyboard shortcuts (F-keys also fire from the search input)
+	// Skip if any dialog is open, the session is locked or the clear-cache overlay is
+	// showing. isLocked/showClearCacheDialog aren't wired into uiStore.isAnyDialogOpen,
+	// so they're checked explicitly here.
+	useGlobalShortcuts(
+		() => uiStore.isAnyDialogOpen || isLocked.value || showClearCacheDialog.value,
+		{
+			F4: () => itemsSelectorRef.value?.focusSearchInput(),
+			F8: () => invoiceCartRef.value?.focusCustomerSearch(),
+			F9: () => handleProceedToPayment(),
 		}
-	};
-	window.addEventListener("keydown", handleGlobalKeydown);
-	onUnmounted(() => window.removeEventListener("keydown", handleGlobalKeydown));
+	);
 
 	// Set up real-time stock update listener
 	const cleanup = onStockUpdate(async (stockUpdates) => {
@@ -1780,10 +1781,8 @@ watch(
 );
 
 onUnmounted(() => {
-	window.removeEventListener("resize", () => {
-		uiStore.setWindowWidth(window.innerWidth);
-		updateLayoutBounds();
-	});
+	window.removeEventListener("resize", handleWindowResize);
+	containerObserver?.disconnect();
 	stopResize();
 
 	// Stop periodic stock sync on unmount
@@ -2075,8 +2074,8 @@ function handleItemSelected(item, autoAdd = false) {
 		return;
 	}
 
-	// Check for UOMs
-	if (item.item_uoms && item.item_uoms.length > 0) {
+	// Check for UOMs (picker only when there is a real choice, or to keep a scanned weight)
+	if (getDistinctUoms(item).length > 1 || (item.resolved_qty && item.item_uoms?.length > 0)) {
 		cartStore.setPendingItem(item, 1, "uom");
 		uiStore.showItemSelectionDialog = true;
 		return;
@@ -2117,7 +2116,6 @@ function handleCustomerSelected(selectedCustomer) {
 	if (selectedCustomer) {
 		cartStore.setCustomer(selectedCustomer);
 		uiStore.showCustomerDialog = false;
-		showSuccess(__("{0} selected", [selectedCustomer.customer_name]));
 
 		if (pendingPaymentAfterCustomer.value) {
 			pendingPaymentAfterCustomer.value = false;
@@ -2509,7 +2507,7 @@ async function handleOptionSelected(option) {
 				}
 			}
 
-			if (variant.item_uoms && variant.item_uoms.length > 0) {
+			if (getDistinctUoms(variant).length > 1) {
 				cartStore.setPendingItem(variant, cartStore.pendingItemQty, "uom");
 				return;
 			}
@@ -2528,7 +2526,6 @@ async function handleOptionSelected(option) {
 					);
 					uiStore.showItemSelectionDialog = false;
 					cartStore.clearPendingItem();
-					showSuccess(__("{0} added to cart", [variant.item_name]));
 				} catch (error) {
 					showError(error.message);
 				}
@@ -2559,7 +2556,6 @@ async function handleOptionSelected(option) {
 					cartStore.addItem(itemToAdd, qty, false, shiftStore.currentProfile);
 					uiStore.showItemSelectionDialog = false;
 					cartStore.clearPendingItem();
-					showSuccess(__("{0} ({1}) added to cart", [itemToAdd.item_name, option.uom]));
 				} catch (error) {
 					showError(error.message);
 				}
