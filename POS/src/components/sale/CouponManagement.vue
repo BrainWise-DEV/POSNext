@@ -35,7 +35,7 @@
 					v-if="permissions.create"
 					@click="handleCreateNew"
 					variant="solid"
-					class="w-full"
+					class="pos-btn pos-btn-primary w-full"
 				>
 					<template #prefix>
 						<FeatherIcon name="plus-circle" class="w-4 h-4" />
@@ -115,7 +115,7 @@
 								:theme="getStatusTheme(coupon.status)"
 								size="sm"
 							>
-								{{ coupon.status || __("Active") }}
+								{{ __(coupon.status || "Active") }}
 							</Badge>
 						</div>
 						<div class="flex items-center justify-between text-xs">
@@ -160,7 +160,7 @@
 							)
 						}}
 					</p>
-					<Button v-if="permissions.create" @click="handleCreateNew" variant="solid">
+					<Button v-if="permissions.create" @click="handleCreateNew" variant="solid" class="pos-btn pos-btn-primary">
 						<template #prefix>
 							<FeatherIcon name="plus" class="w-4 h-4" />
 						</template>
@@ -247,6 +247,7 @@
 								@click="handleSubmit"
 								:loading="loading"
 								variant="solid"
+								class="pos-btn pos-btn-primary"
 							>
 								<template #prefix>
 									<FeatherIcon
@@ -479,6 +480,19 @@
 										:placeholder="__('Optional cap in {0}', [currency])"
 										:min="0"
 									/>
+
+									<!-- What the coupon does on a line that already has a discount -->
+									<div v-if="scopeSupported" class="sm:col-span-2">
+										<FormControl
+											type="select"
+											:label="__('When a Line Already Has a Discount')"
+											v-model="form.promotion_conflict"
+											:options="promotionConflictOptions"
+										/>
+										<p class="mt-1 text-xs text-gray-600">
+											{{ promotionConflictHint(form.promotion_conflict) }}
+										</p>
+									</div>
 								</div>
 								<div
 									v-if="!isCreating && couponDetails.discount_type"
@@ -787,7 +801,7 @@
 					<Button @click="showDeleteConfirm = false" variant="ghost">
 						{{ __("Cancel") }}
 					</Button>
-					<Button @click="confirmDelete" variant="solid" theme="red" :loading="loading">
+					<Button @click="confirmDelete" variant="solid" theme="red" class="pos-btn pos-btn-danger" :loading="loading">
 						<template #prefix>
 							<FeatherIcon name="trash-2" class="w-4 h-4" />
 						</template>
@@ -823,6 +837,27 @@ const itemSearchStore = useItemSearchStore();
 const SCOPE_ALL = "All Eligible Items";
 // Scope tables live in posnext_promotions; plain pos_next coupons always apply to the whole cart.
 const scopeSupported = isPromotionsAppInstalled();
+
+// The coupon engine (posnext_promotions) reads this per coupon; POS Settings holds the default for new ones
+const PROMOTION_CONFLICT_SKIP = "Skip the line";
+const promotionConflictOptions = [
+	{ label: __("Skip the line"), value: PROMOTION_CONFLICT_SKIP },
+	{ label: __("Add on top"), value: "Add on top" },
+	{ label: __("Better of the two"), value: "Better of the two" },
+];
+const PROMOTION_CONFLICT_HINTS = {
+	"Skip the line": () => __("The coupon leaves lines that already have a discount alone."),
+	"Add on top": () => __("The coupon also applies to what is left after the existing discount."),
+	"Better of the two": () => __("Each line gets whichever saves the customer more."),
+};
+
+function promotionConflictHint(mode) {
+	return (PROMOTION_CONFLICT_HINTS[mode] || PROMOTION_CONFLICT_HINTS[PROMOTION_CONFLICT_SKIP])();
+}
+
+function defaultPromotionConflict() {
+	return posSettingsStore.settings?.default_coupon_promotion_conflict || PROMOTION_CONFLICT_SKIP;
+}
 
 const SCOPE_CONFIG = {
 	"Item Code": {
@@ -902,6 +937,7 @@ const form = ref({
 	maximum_use: null,
 	one_use: 0,
 	company: props.company,
+	promotion_conflict: defaultPromotionConflict(),
 	...emptyScope(),
 });
 
@@ -1089,7 +1125,13 @@ const brandsResource = createResource({
 const createCouponResource = createResource({
 	url: promoApi.createCoupon(),
 	makeParams() {
-		return { data: JSON.stringify({ ...form.value, ...scopePayload() }) };
+		return {
+			data: JSON.stringify({
+				...form.value,
+				pos_profile: posSettingsStore.settings?.pos_profile,
+				...scopePayload(),
+			}),
+		};
 	},
 	auto: false,
 	onSuccess(data) {
@@ -1122,6 +1164,7 @@ const updateCouponResource = createResource({
 				valid_upto: form.value.valid_upto,
 				maximum_use: form.value.maximum_use,
 				one_use: form.value.one_use,
+				...(scopeSupported ? { promotion_conflict: form.value.promotion_conflict } : {}),
 				...scopePayload(),
 			}),
 		};
@@ -1388,6 +1431,7 @@ function resetForm() {
 		maximum_use: null,
 		one_use: 0,
 		company: props.company,
+		promotion_conflict: defaultPromotionConflict(),
 		...emptyScope(),
 	};
 }
@@ -1410,6 +1454,7 @@ function populateFormFromCoupon(coupon) {
 		maximum_use: coupon.maximum_use || null,
 		one_use: coupon.one_use || 0,
 		company: coupon.company || props.company,
+		promotion_conflict: coupon.promotion_conflict || PROMOTION_CONFLICT_SKIP,
 		...scopeFromCoupon(coupon),
 	};
 }

@@ -9,6 +9,9 @@
 			<!-- Main Container -->
 			<div class="fixed inset-0 flex items-center justify-center p-4">
 				<div
+					role="dialog"
+					aria-modal="true"
+					aria-labelledby="promotion-management-title"
 					class="w-full h-full max-w-[95vw] max-h-[95vh] bg-white rounded-lg shadow-2xl overflow-hidden flex flex-col"
 				>
 					<!-- Header -->
@@ -16,7 +19,10 @@
 						<div class="flex items-center gap-3">
 							<FeatherIcon name="tag" class="w-5 h-5 text-gray-700" />
 							<div>
-								<h2 class="text-lg mb-1 font-semibold text-gray-900">
+								<h2
+									id="promotion-management-title"
+									class="text-lg mb-1 font-semibold text-gray-900"
+								>
 									{{ __("Promotion & Coupon Management") }}
 								</h2>
 								<p class="text-sm text-gray-600">
@@ -25,7 +31,13 @@
 							</div>
 						</div>
 						<div class="flex items-center gap-2">
-							<Button variant="ghost" @click="handleClose" icon="x">
+							<Button
+								variant="ghost"
+								@click="handleClose"
+								icon="x"
+								class="min-h-target min-w-target"
+								:aria-label="__('Close')"
+							>
 								<template #icon>
 									<FeatherIcon name="x" class="w-4 h-4" />
 								</template>
@@ -100,7 +112,7 @@
 										v-if="permissions.create"
 										@click="handleCreateNew"
 										variant="solid"
-										class="w-full"
+										class="pos-btn pos-btn-primary w-full"
 									>
 										<template #prefix>
 											<FeatherIcon name="plus-circle" class="w-4 h-4" />
@@ -234,7 +246,7 @@
 													:theme="getStatusTheme(promotion.status)"
 													size="sm"
 												>
-													{{ promotion.status || __("Active") }}
+													{{ __(promotion.status || "Active") }}
 												</Badge>
 											</div>
 											<div class="flex items-center justify-between text-xs">
@@ -279,6 +291,7 @@
 											v-if="permissions.create"
 											@click="handleCreateNew"
 											variant="solid"
+											class="pos-btn pos-btn-primary"
 										>
 											<template #prefix>
 												<FeatherIcon name="plus" class="w-4 h-4" />
@@ -450,6 +463,7 @@
 													@click="handleSubmit"
 													:loading="loading"
 													variant="solid"
+													class="pos-btn pos-btn-primary"
 												>
 													<template #prefix>
 														<FeatherIcon
@@ -1204,7 +1218,7 @@
 								<Button @click="cancelDelete" variant="ghost">
 									{{ __("Cancel") }}
 								</Button>
-								<Button @click="confirmDelete" variant="solid" theme="red">
+								<Button @click="confirmDelete" variant="solid" theme="red" class="pos-btn pos-btn-danger">
 									<template #prefix>
 										<FeatherIcon name="trash-2" class="w-4 h-4" />
 									</template>
@@ -1230,7 +1244,7 @@ import CouponManagement from "./CouponManagement.vue";
 import SelectInput from "../common/SelectInput.vue";
 import { Badge, Button, Card, FormControl, LoadingIndicator, createResource } from "frappe-ui";
 import { FeatherIcon } from "frappe-ui";
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import TranslatedHTML from "../common/TranslatedHTML.vue";
 
 // Use shared toast
@@ -1615,7 +1629,17 @@ watch(
 	}
 );
 
+// Esc closes the delete confirmation first, then the modal
+function handleEscape(event) {
+	if (event.key !== "Escape" || event.defaultPrevented) return;
+	// An open select/popover takes Esc first
+	if (document.querySelector("[data-reka-popper-content-wrapper]")) return;
+	if (showDeleteConfirm.value) cancelDelete();
+	else handleClose();
+}
+
 watch(show, (val) => {
+	window[val ? "addEventListener" : "removeEventListener"]("keydown", handleEscape);
 	emit("update:modelValue", val);
 	if (!val) {
 		resetForm();
@@ -1653,6 +1677,8 @@ watch(
 onMounted(() => {
 	checkPermissions();
 });
+
+onUnmounted(() => window.removeEventListener("keydown", handleEscape));
 
 // Check user permissions
 async function checkPermissions() {
