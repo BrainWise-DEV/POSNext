@@ -2019,3 +2019,6 @@ Points applied: {0}. Please pay remaining {1} with {2},تم خصم النقاط:
 "Verified: {0}","تم التحقق: {0}",""
 "Save the customer first, then verify the email.","احفظ العميل أولاً ثم تحقق من البريد الإلكتروني.",""
 "Email verification is in progress. Leave without verifying?","التحقق من البريد الإلكتروني قيد التنفيذ. هل تريد المغادرة دون التحقق؟",""
+"No Magento account was found for this customer's phone number.","لا يوجد حساب في ماجنتو برقم هاتف هذا العميل.",""
+"Customer is saved but not synced with Magento yet. Please try again in a moment.","تم حفظ العميل لكن لم تتم مزامنته مع ماجنتو بعد. يرجى المحاولة مرة أخرى بعد قليل.",""
+"Customer is saved but not synced with Magento yet. Verification may take a moment to become available.","تم حفظ العميل لكن لم تتم مزامنته مع ماجنتو بعد. قد يستغرق توفر التحقق بعض الوقت.",""

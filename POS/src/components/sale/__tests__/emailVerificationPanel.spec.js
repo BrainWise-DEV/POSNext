@@ -225,4 +225,26 @@ describe("EmailVerificationPanel", () => {
 		expect(find(w, "verified-badge").exists()).toBe(true)
 		w.unmount()
 	})
+
+	it("new customer without Magento id: shows sync hint but keeps Verify enabled", () => {
+		const w = factory({ magentoSynced: false })
+		expect(find(w, "sync-pending-hint").exists()).toBe(true)
+		expect(find(w, "send-code").attributes("disabled")).toBeUndefined()
+		w.unmount()
+	})
+
+	it("synced customer: no sync hint", () => {
+		const w = factory()
+		expect(find(w, "sync-pending-hint").exists()).toBe(false)
+		w.unmount()
+	})
+
+	it("sync_pending from the server shows the server message, not 'not registered'", async () => {
+		const msg = "Customer is saved but not synced with Magento yet. Please try again in a moment."
+		const w = factory({ magentoSynced: false })
+		await toCodeSent(w, { ok: false, code: "sync_pending", message: msg })
+		expect(w.text()).toContain(msg)
+		expect(w.text()).not.toContain("not registered")
+		w.unmount()
+	})
 })

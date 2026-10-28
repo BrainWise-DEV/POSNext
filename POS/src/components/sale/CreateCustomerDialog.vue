@@ -17,6 +17,7 @@
 					:saved-email="createdCustomer.email_id || ''"
 					:verified="Boolean(Number(createdCustomer.custom_email_verified))"
 					:verified-email="createdCustomer.custom_verified_email || ''"
+					:magento-synced="Boolean(createdCustomer.custom_customer_id)"
 					:pos-profile="posProfile"
 					@verified="handleEmailVerified"
 					@lock-change="(v) => (emailVerificationLocked = v)"
