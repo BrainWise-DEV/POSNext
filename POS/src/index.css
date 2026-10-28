@@ -1,3 +1,4 @@
+@import "./assets/IBMPlex/ibm-plex.css";
 @import "./assets/Inter/inter.css";
 @import "frappe-ui/style.css";
 @import "@abdulrysr/saudi-riyal-new-symbol-font/style.css";
@@ -7,11 +8,70 @@
 	--z-dialog-overlay: 400;
 	--z-dialog-content: 500;
 	--z-dropdown: 10000;
+	--z-authorization: 10010;
+
+	/* POS visual tokens. Colour carries meaning only: action is the single primary,
+	   saving marks discounts and gifts, caution marks low stock, near expiry and credit,
+	   danger is for destructive actions and real errors. Tailwind: text-pos-ink, bg-pos-action, ... */
+	--pos-ink: #1d2433;
+	--pos-ink-muted: #5b6475;
+	--pos-surface: #ffffff;
+	--pos-panel: #f3f5f8;
+	--pos-line: #dde2ea;
+	--pos-action: #0b63ce;
+	--pos-action-hover: #0952ab;
+	--pos-action-soft: #e8f1fc;
+	--pos-saving: #0f7a4a;
+	--pos-caution: #b45309;
+	--pos-danger: #b91c1c;
+	--pos-danger-hover: #991b1b;
+
+	/* Type scale: 13 body, 15 emphasis, 18 headings, 28 grand total */
+	--pos-text-sm: 13px;
+	--pos-text-md: 15px;
+	--pos-text-lg: 18px;
+	--pos-text-xl: 28px;
+
+	/* Touch target: 40px, 44px on touch-first widths */
+	--pos-target: 40px;
+}
+
+@media (max-width: 1100px) {
+	:root {
+		--pos-target: 44px;
+	}
+}
+
+/* POS fills the space its host leaves it, instead of assuming it owns the whole
+   viewport. A host can put chrome above us — Frappe's navbar, a demo countdown
+   banner — usually as padding on the body. A page sized at a flat 100vh ignores
+   that padding and simply hangs off the bottom of the screen, taking the till's
+   Checkout button with it. Sizing the chain with flex instead means the page is
+   whatever is actually left over, whether that is 48px of banner, 86px of a
+   two-row one on a phone, or nothing at all. */
+html,
+body {
+	height: 100%;
+}
+
+body {
+	box-sizing: border-box;
+	min-height: 100dvh;
+	display: flex;
+	flex-direction: column;
+}
+
+#app {
+	flex: 1;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
 }
 
 /* Apply Saudi Riyal symbol font to body for currency support */
 body {
-	font-family: "SaudiRiyalSymbol", "Inter", sans-serif;
+	font-family: "SaudiRiyalSymbol", "IBM Plex Sans Arabic", "IBM Plex Sans", "Inter", sans-serif;
+	color: var(--pos-ink);
 }
 
 /* Ensure all text elements inherit the font stack with Saudi Riyal support */
@@ -27,6 +87,16 @@ body {
 .dialog-overlay .dialog-content,
 .dialog-content {
 	z-index: 500 !important;
+}
+
+/*
+ * frappe-ui Select portals to document.body and copies SelectContent's
+ * z-[100] onto a position:fixed wrapper. POS overlays sit at z-300+, so
+ * the option list otherwise opens behind the dialog.
+ */
+[data-reka-popper-content-wrapper],
+body > div[style*="position: fixed"][style*="z-index"]:has([role="listbox"]) {
+	z-index: var(--z-dropdown) !important;
 }
 
 /* Mobile touch optimizations - removes 300ms tap delay and improves scrolling */
@@ -164,4 +234,96 @@ button.active\:scale-95:active,
 		opacity: 0.5;
 		transform: scale(0.98);
 	}
+}
+
+/*
+ * Money and quantity figures use Tailwind's `tabular-nums` so digits line up
+ * wherever a number is read against another (prices, totals, stock, pagination).
+ */
+
+/*
+ * Button variant map. One primary colour (action blue); danger only for
+ * destructive actions. Plain CSS after the Tailwind import so it wins over the
+ * frappe-ui <Button> utility colours at equal specificity, e.g.
+ *   <Button class="pos-btn pos-btn-primary" :loading="saving">Save</Button>
+ *   <button class="pos-btn pos-btn-outline">Cancel</button>
+ *
+ *   pos-btn            size, radius, focus ring, 40px (44px <=1100px) target
+ *   pos-btn-primary    the one main action on a surface (solid action blue)
+ *   pos-btn-secondary  supporting action (panel grey, ink text)
+ *   pos-btn-outline    low-emphasis action (white, line border)
+ *   pos-btn-danger     delete / void / destructive confirm (solid red)
+ */
+.pos-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.375rem;
+	min-height: var(--pos-target);
+	min-width: var(--pos-target);
+	padding-inline: 0.875rem;
+	border-radius: 0.5rem;
+	border: 1px solid transparent;
+	font-size: var(--pos-text-sm);
+	font-weight: 600;
+	line-height: 1.2;
+	transition: background-color 75ms, border-color 75ms, color 75ms;
+}
+
+.pos-btn:focus-visible,
+.pos-focus:focus-visible {
+	outline: 2px solid var(--pos-action);
+	outline-offset: 2px;
+}
+
+.pos-btn:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+.pos-btn-primary {
+	background-color: var(--pos-action);
+	border-color: var(--pos-action);
+	color: #ffffff;
+}
+
+.pos-btn-primary:hover:not(:disabled) {
+	background-color: var(--pos-action-hover);
+	border-color: var(--pos-action-hover);
+}
+
+.pos-btn-secondary {
+	background-color: var(--pos-panel);
+	border-color: var(--pos-panel);
+	color: var(--pos-ink);
+}
+
+.pos-btn-secondary:hover:not(:disabled) {
+	background-color: var(--pos-line);
+}
+
+.pos-btn-outline {
+	background-color: var(--pos-surface);
+	border-color: var(--pos-line);
+	color: var(--pos-ink);
+}
+
+.pos-btn-outline:hover:not(:disabled) {
+	background-color: var(--pos-panel);
+}
+
+.pos-btn-danger {
+	background-color: var(--pos-danger);
+	border-color: var(--pos-danger);
+	color: #ffffff;
+}
+
+.pos-btn-danger:hover:not(:disabled) {
+	background-color: var(--pos-danger-hover);
+	border-color: var(--pos-danger-hover);
+}
+
+/* Square icon-only button at the touch target size */
+.pos-btn-icon {
+	padding-inline: 0;
 }

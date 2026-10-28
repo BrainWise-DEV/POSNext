@@ -14,7 +14,13 @@
 					dynamicGap,
 					isMobileView ? '' : 'overflow-hidden',
 				]"
-				:style="isMobileView ? {} : { maxHeight: dialogContentMaxHeight }"
+				:style="{
+					// Whole dialog within 100dvh - 32px (6rem for title and padding)
+					maxHeight: isMobileView
+						? 'calc(100dvh - 32px - 6rem)'
+						: `min(${dialogContentMaxHeight}, calc(100dvh - 32px - 6rem))`,
+					overflowY: isMobileView ? 'auto' : undefined,
+				}"
 			>
 				<!-- Left Column (2/5): Sales Person + Invoice Summary -->
 				<div
@@ -66,6 +72,16 @@
 								: 'bg-purple-50 border border-purple-200',
 						]"
 					>
+						<p
+							v-if="allItemsHaveSalesPerson"
+							class="text-xs text-purple-700 mb-1.5"
+						>
+							{{
+								__(
+									"All items have a Sales Person — invoice-level selection is optional."
+								)
+							}}
+						</p>
 						<!-- Single Mode: Show selected person or dropdown -->
 						<template v-if="settingsStore.isSingleSalesPerson">
 							<!-- Show selected person as a nice display -->
@@ -511,6 +527,12 @@
 							<div v-if="customer" class="text-gray-600 text-xs mt-0.5 text-start">
 								{{ customer?.customer_name || customer?.name || customer }}
 							</div>
+							<div
+								v-else-if="requiresCustomerForPayment"
+								class="text-amber-700 text-xs mt-0.5 text-start font-medium"
+							>
+								{{ __("Customer required for this payment method") }}
+							</div>
 						</div>
 
 						<!-- Promotional offers & coupons (same entry points as cart — usable while paying) -->
@@ -689,7 +711,7 @@
 									</div>
 									<span
 										v-if="localAdditionalDiscount > 0"
-										class="text-xs font-bold text-red-600"
+										class="text-xs font-bold text-[#0f7a4a]"
 									>
 										-{{ formatCurrency(calculatedAdditionalDiscount) }}
 									</span>
@@ -814,7 +836,7 @@
 								class="flex items-center justify-between text-sm"
 							>
 								<span class="text-gray-600 text-start">{{ __("Discount") }}</span>
-								<span class="font-medium text-red-600 text-end"
+								<span class="font-medium text-[#0f7a4a] text-end"
 									>-{{ formatCurrency(discountAmount) }}</span
 								>
 							</div>
@@ -1148,11 +1170,14 @@
 										: 'border-gray-200 bg-white hover:border-blue-400 hover:bg-blue-50 text-gray-700',
 								]"
 							>
-								<span :class="isSmallMobile ? 'text-xs' : 'text-sm lg:text-lg'">{{
-									isWalletPaymentMethod(method.mode_of_payment)
-										? "🎁"
-										: getPaymentIcon(method.type)
-								}}</span>
+								<FeatherIcon
+									:name="
+										isWalletPaymentMethod(method.mode_of_payment)
+											? 'gift'
+											: paymentFeatherIcon(method)
+									"
+									:class="isSmallMobile ? 'w-3 h-3' : 'w-4 h-4 lg:w-5 lg:h-5'"
+								/>
 								<span class="truncate max-w-[80px] lg:max-w-none">{{
 									__(method.mode_of_payment)
 								}}</span>
@@ -1173,6 +1198,12 @@
 									]"
 								>
 									{{ formatCurrency(availableWalletBalance) }}
+									<span
+										v-if="walletInfo.balance_points"
+										class="ms-0.5"
+									>
+										({{ walletInfo.balance_points }} {{ __("pts") }})
+									</span>
 								</span>
 								<!-- Payment Amount Badge -->
 								<span
@@ -1212,9 +1243,10 @@
 										: 'border-emerald-300 bg-emerald-50 hover:border-emerald-500 hover:bg-emerald-100 text-emerald-700',
 								]"
 							>
-								<span :class="isSmallMobile ? 'text-xs' : 'text-sm lg:text-lg'"
-									>💳</span
-								>
+								<FeatherIcon
+									name="credit-card"
+									:class="isSmallMobile ? 'w-3 h-3' : 'w-4 h-4 lg:w-5 lg:h-5'"
+								/>
 								<span class="truncate">{{ __("Credit Balance") }}</span>
 								<span
 									v-if="getMethodTotal('Customer Credit') > 0"
@@ -1249,9 +1281,10 @@
 											: 'border-gray-200 bg-white hover:border-blue-400 hover:bg-blue-50 text-gray-700',
 									]"
 								>
-									<span :class="isSmallMobile ? 'text-xs' : 'text-sm lg:text-lg'"
-										>🧾</span
-									>
+									<FeatherIcon
+										name="file-text"
+										:class="isSmallMobile ? 'w-3 h-3' : 'w-4 h-4 lg:w-5 lg:h-5'"
+									/>
 									<span class="truncate max-w-[80px] lg:max-w-none">{{
 										__(acc.account_name || acc.name)
 									}}</span>
@@ -1546,13 +1579,15 @@
 								</button>
 								<!-- Pay on Account Button -->
 								<button
-									@click="addCreditAccountPayment"
-									:disabled="isSubmitting"
+									@click="confirmCreditSale"
+									:disabled="isSubmitting || !isSalesPersonValid"
 									:class="[
-										'font-semibold rounded-lg flex items-center justify-center',
-										isSubmitting
-											? 'bg-orange-300 text-white cursor-not-allowed'
-											: 'bg-orange-500 text-white active:bg-orange-600',
+										'font-semibold rounded-lg flex items-center justify-center border-2',
+										isSubmitting || !isSalesPersonValid
+											? 'border-gray-200 text-gray-400 cursor-not-allowed'
+											: creditConfirming
+												? 'border-amber-700 bg-amber-700 text-white'
+												: 'border-amber-600 bg-white text-amber-800 active:bg-amber-50',
 										mobileButtonSize.height,
 										mobileButtonSize.text,
 										mobileButtonSize.gap,
@@ -1594,7 +1629,11 @@
 										/>
 									</svg>
 									<span class="truncate">{{
-										isSubmitting ? __("Processing...") : __("On Account")
+										isSubmitting
+											? __("Processing...")
+											: creditConfirming
+												? __("Tap again to confirm")
+												: __("On Account")
 									}}</span>
 								</button>
 							</div>
@@ -1718,7 +1757,7 @@
 						</div>
 
 						<!-- Keypad Grid (4 columns) -->
-						<div :class="['grid grid-cols-4', isCompactMode ? 'gap-1' : 'gap-1.5']">
+						<div dir="ltr" :class="['grid grid-cols-4', isCompactMode ? 'gap-1' : 'gap-1.5']">
 							<!-- Row 1: 7, 8, 9, Backspace -->
 							<button
 								v-for="num in ['7', '8', '9']"
@@ -1846,15 +1885,19 @@
 						<!-- Pay on Account Button (if credit sales enabled) -->
 						<button
 							v-if="allowCreditSale"
-							@click="addCreditAccountPayment"
-							:disabled="paymentEntries.length > 0 || isSubmitting"
+							@click="confirmCreditSale"
+							:disabled="
+								paymentEntries.length > 0 || isSubmitting || !isSalesPersonValid
+							"
 							:class="[
-								'flex-1 inline-flex items-center justify-center gap-2 transition-colors focus:outline-none',
+								'flex-1 inline-flex items-center justify-center gap-2 transition-colors focus:outline-none border-2',
 								dynamicButtonHeight,
 								'text-sm font-semibold px-4 rounded-lg',
-								paymentEntries.length > 0 || isSubmitting
-									? 'bg-orange-300 text-white cursor-not-allowed'
-									: 'bg-orange-500 text-white hover:bg-orange-600 active:bg-orange-700 focus-visible:ring-2 focus-visible:ring-orange-400',
+								paymentEntries.length > 0 || isSubmitting || !isSalesPersonValid
+									? 'border-gray-200 text-gray-400 cursor-not-allowed'
+									: creditConfirming
+										? 'border-amber-700 bg-amber-700 text-white'
+										: 'border-amber-600 bg-white text-amber-800 hover:bg-amber-50 focus-visible:ring-2 focus-visible:ring-amber-500',
 							]"
 						>
 							<svg
@@ -1892,12 +1935,32 @@
 								/>
 							</svg>
 							<span>{{
-								isSubmitting ? __("Processing...") : __("Pay on Account")
+								isSubmitting
+									? __("Processing...")
+									: creditConfirming
+										? __("Click again to confirm")
+										: __("Pay on Account")
 							}}</span>
 						</button>
 
+						<!-- Exact cash (Enter): the primary action while nothing is entered -->
+						<button
+							v-if="exactCashMethod"
+							@click="payExactCash"
+							:disabled="isSubmitting"
+							:class="[
+								'flex-1 inline-flex items-center justify-center gap-2 transition-colors focus:outline-none',
+								dynamicButtonHeight,
+								'text-sm font-semibold px-5 rounded-lg bg-blue-700 text-white hover:bg-blue-800 focus-visible:ring-2 focus-visible:ring-blue-400',
+							]"
+						>
+							<FeatherIcon name="dollar-sign" class="w-4 h-4" />
+							<span dir="auto">{{ __("Exact cash {0}", [formatCurrency(remainingAmount)]) }}</span>
+							<kbd class="text-[11px] font-mono bg-blue-600 rounded px-1.5 py-0.5">Enter</kbd>
+						</button>
 						<!-- Complete/Partial Payment Button -->
 						<button
+							v-else
 							@click="completePayment"
 							:disabled="!canComplete || isSubmitting"
 							:class="[
@@ -2006,10 +2069,9 @@ import {
 	getCurrencySymbol,
 	roundCurrency,
 } from "@/utils/currency";
-import { getPaymentIcon } from "@/utils/payment";
 import { offlineWorker } from "@/utils/offline/workerClient";
 import { logger } from "@/utils/logger";
-import { Dialog, createResource, call } from "frappe-ui";
+import { Dialog, FeatherIcon, createResource, call } from "frappe-ui";
 import { computed, ref, watch, nextTick } from "vue";
 import { useToast } from "@/composables/useToast";
 import { useLongPress } from "@/composables/useLongPress";
@@ -2136,6 +2198,8 @@ const walletInfo = ref({
 	wallet_exists: false,
 	wallet_balance: 0,
 	wallet_name: null,
+	balance_points: 0,
+	magento_loyalty: false,
 });
 const loadingWallet = ref(false);
 const walletPaymentMethods = ref(new Set()); // Set of mode_of_payment names that are wallet payments
@@ -2192,6 +2256,8 @@ watch(
 function handleNumpadEnter(value) {
 	if (value > 0 && lastSelectedMethod.value) {
 		numpadAddPayment();
+	} else if (!value && exactCashMethod.value) {
+		payExactCash();
 	} else if (remainingAmount.value === 0 && totalPaid.value > 0 && canComplete.value) {
 		// If fully paid and can complete, trigger complete payment
 		completePayment();
@@ -2339,6 +2405,8 @@ const walletInfoResource = createResource({
 			wallet_exists: false,
 			wallet_balance: 0,
 			wallet_name: null,
+			balance_points: 0,
+			magento_loyalty: false,
 		};
 		loadingWallet.value = false;
 	},
@@ -2398,6 +2466,30 @@ function isCashPaymentMethod(method) {
 	const name = (method.mode_of_payment || "").toLowerCase();
 	return name.includes("cash") || name.includes("نقد") || name.includes("نقدي");
 }
+
+// Check if a payment method posts to a Receivable account (requires customer)
+function isReceivablePaymentMethod(method) {
+	if (!method) return false;
+	return (method.account_type || "").toLowerCase() === "receivable";
+}
+
+function getCustomerName() {
+	if (!props.customer) return "";
+	if (typeof props.customer === "string") return props.customer;
+	return props.customer?.name || props.customer?.customer_name || "";
+}
+
+const requiresCustomerForPayment = computed(() => {
+	if (selectedReceivableAccount.value) return true;
+	return paymentEntries.value.some((entry) => {
+		const method = paymentMethods.value.find(
+			(m) => m.mode_of_payment === entry.mode_of_payment,
+		);
+		return isReceivablePaymentMethod(method);
+	});
+});
+
+const hasCustomerForPayment = computed(() => !!getCustomerName());
 
 // Get available wallet balance for payment (considering already added wallet payments)
 const availableWalletBalance = computed(() => {
@@ -2481,7 +2573,13 @@ const totalSalesAllocation = computed(() => {
 	return selectedSalesPersons.value.reduce((sum, p) => sum + (p.allocated_percentage || 0), 0);
 });
 
-// Computed: Validation - sales person is required when enabled and online
+// Computed: Validation - sales person is required when enabled and online,
+// unless every cart line already has an item-level sales person.
+const allItemsHaveSalesPerson = computed(() => {
+	const cartItems = (props.items || []).filter((item) => !item?.is_free_item);
+	return cartItems.length > 0 && cartItems.every((item) => item?.sales_person);
+});
+
 const isSalesPersonValid = computed(() => {
 	// If sales persons feature is disabled, always valid
 	if (!settingsStore.enableSalesPersons) {
@@ -2492,7 +2590,11 @@ const isSalesPersonValid = computed(() => {
 	if (props.isOffline) {
 		return true;
 	}
-	// At least one sales person must be selected
+	// All lines covered by item-level SP → invoice-level SP not required
+	if (allItemsHaveSalesPerson.value) {
+		return true;
+	}
+	// At least one sales person must be selected at invoice level
 	return selectedSalesPersons.value.length > 0;
 });
 
@@ -2603,20 +2705,23 @@ async function loadPaymentMethods() {
 
 	loadingPaymentMethods.value = true;
 
+	// Load from cache using worker
+	const loadCachedPaymentMethods = async () => {
+		const cached = await offlineWorker.getCachedPaymentMethods(props.posProfile);
+		if (cached && cached.length > 0) {
+			paymentMethods.value = cached;
+			const defaultMethod = paymentMethods.value.find((m) => m.default);
+			lastSelectedMethod.value = defaultMethod || paymentMethods.value[0];
+		}
+	};
+
 	try {
 		if (props.isOffline) {
-			// Load from cache when offline using worker
-			const cached = await offlineWorker.getCachedPaymentMethods(props.posProfile);
-			if (cached && cached.length > 0) {
-				paymentMethods.value = cached;
-				if (paymentMethods.value.length > 0) {
-					const defaultMethod = paymentMethods.value.find((m) => m.default);
-					lastSelectedMethod.value = defaultMethod || paymentMethods.value[0];
-				}
-			}
+			await loadCachedPaymentMethods();
 		} else {
-			// Load from server when online
-			await paymentMethodsResource.fetch();
+			// Load from server when online; a failed request (offline not detected yet,
+			// e.g. right after an offline start) falls back to the cache
+			await paymentMethodsResource.fetch().catch(loadCachedPaymentMethods);
 			// Receivable accounts for "Pay on Receivable Account" (online only)
 			receivableAccountsResource.fetch();
 		}
@@ -2855,6 +2960,11 @@ const canComplete = computed(() => {
 		return false;
 	}
 
+	// Receivable payment modes require a customer on the invoice
+	if (requiresCustomerForPayment.value && !hasCustomerForPayment.value) {
+		return false;
+	}
+
 	// Check exact amount validation
 	if (!isExactAmountValid.value) {
 		return false;
@@ -3030,6 +3140,10 @@ function selectPaymentMethod(method) {
 // invoice's debit_to). It's a destination, not a tendered amount — the outstanding is
 // grand_total minus the cash tendered. Tapping again clears it (back to default Debtors).
 function toggleReceivableAccount(acc) {
+	if (!hasCustomerForPayment.value) {
+		showWarning(__("Please select a customer before paying on account"));
+		return;
+	}
 	selectedReceivableAccount.value = selectedReceivableAccount.value === acc.name ? "" : acc.name;
 	// Drop the active payment-method highlight so only one option looks active at a time.
 	if (selectedReceivableAccount.value) {
@@ -3082,6 +3196,13 @@ function switchToNextPaymentMethod(partialAmount) {
 // Consolidate payment entries: if a row with the same mode already exists,
 // add to it instead of creating a duplicate row.
 function _upsertPaymentEntry(method, amt) {
+	if (isReceivablePaymentMethod(method) && !hasCustomerForPayment.value) {
+		showWarning(
+			__("Please select a customer before paying with {0}", [method.mode_of_payment]),
+		);
+		return;
+	}
+
 	const existing = paymentEntries.value.find(
 		(e) => e.mode_of_payment === method.mode_of_payment && !e.is_customer_credit
 	);
@@ -3340,12 +3461,61 @@ function applyCustomerCredit() {
 }
 
 // Add "Pay on Account" - Credit Sale (invoice with outstanding amount)
+// Cash method for "Exact cash", offered while nothing has been entered yet
+const exactCashMethod = computed(() =>
+	paymentEntries.value.length === 0 &&
+	remainingAmount.value > 0 &&
+	!(applyWriteOff.value && canWriteOff.value)
+		? filteredPaymentMethods.value.find((m) => isCashPaymentMethod(m))
+		: null
+);
+
+// Pay the remainder in cash, then complete (Enter)
+async function payExactCash() {
+	await addCustomPayment(exactCashMethod.value, remainingAmount.value);
+	await nextTick();
+	if (remainingAmount.value === 0 && canComplete.value) completePayment();
+}
+
+// Pay on account (credit sale) needs a second click within 4 seconds
+const creditConfirming = ref(false);
+let creditConfirmTimer = null;
+
+function confirmCreditSale() {
+	if (!creditConfirming.value) {
+		creditConfirming.value = true;
+		creditConfirmTimer = setTimeout(() => {
+			creditConfirming.value = false;
+		}, 4000);
+		return;
+	}
+	clearTimeout(creditConfirmTimer);
+	creditConfirming.value = false;
+	addCreditAccountPayment();
+}
+
+/** Feather icon for a payment method, by account or Mode of Payment type */
+function paymentFeatherIcon(method) {
+	if (isCashPaymentMethod(method)) return "dollar-sign";
+	const type = (method?.type || "").toLowerCase();
+	return type === "bank" ? "home" : type === "phone" || type.includes("mobile") ? "smartphone" : "credit-card";
+}
+
 function addCreditAccountPayment() {
 	log.debug("[PaymentDialog] Add credit account payment (Pay Later):", {
 		grandTotal: props.grandTotal,
 		currentPaid: totalPaid.value,
 		remainingAmount: remainingAmount.value,
+		salesPersons: selectedSalesPersons.value,
+		isSalesPersonValid: isSalesPersonValid.value,
 	});
+
+	// Same sales-person gate as Complete Payment — credit sales still need
+	// coverage when the feature is enabled (backend validates too).
+	if (!isSalesPersonValid.value) {
+		log.warn("[PaymentDialog] Cannot pay on account - sales person required");
+		return;
+	}
 
 	// Close dialog and complete as credit sale (0 payment)
 	// The backend will create an invoice with outstanding amount
@@ -3356,6 +3526,8 @@ function addCreditAccountPayment() {
 		is_credit_sale: true, // Mark as credit sale
 		paid_amount: 0,
 		outstanding_amount: props.grandTotal,
+		sales_team: selectedSalesPersons.value.length > 0 ? selectedSalesPersons.value : null,
+		delivery_date: isSalesOrder.value ? deliveryDate.value : null,
 	};
 
 	log.debug("[PaymentDialog] Emitting credit sale payment-completed:", paymentData);

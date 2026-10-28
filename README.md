@@ -191,6 +191,26 @@ bench build --app pos_next
 bench restart
 ```
 
+### Bootstrap dependencies (recommended helper)
+
+After `pos_next` is on the bench (`bench get-app ...`), you can ensure required and optional apps on a site with:
+
+```bash
+# Always ensures erpnext (version-15), then installs pos_next on the site
+bench bootstrap --site [your-site-name]
+
+# Also get/install posnext_promotions from the public Promotions repo
+bench bootstrap --site [your-site-name] --with-posnext-promotions
+```
+
+| App | Behavior |
+|-----|----------|
+| `erpnext` | **Required** — always fetched (`version-15`) and installed if missing |
+| `posnext_promotions` | **Optional** — only with `--with-posnext-promotions` (repo: `https://github.com/BrainWise-DEV/Promotions.git`, branch `main`) |
+| `pos_next` | Always installed on the site if missing (skipped if already installed) |
+
+Apps already present on the bench or site are skipped with a clear message. Bootstrap does not replace `migrate`, `build`, or `restart`.
+
 ### Development Setup
 
 ```bash

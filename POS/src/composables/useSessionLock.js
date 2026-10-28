@@ -163,6 +163,8 @@ function clearCachedPasswordHash() {
 }
 
 async function cachePasswordHashFromLogin(password) {
+	// Web Crypto exists only in secure contexts; plain http reaches here only in dev mode (see canLogin)
+	if (!globalThis.crypto?.subtle) return;
 	const user = getCurrentUserId();
 	const { hash, salt } = await hashPassword(password);
 	cachePasswordHash(user, hash, salt);
@@ -292,7 +294,7 @@ function unlockSuccess() {
 	clearPersistedLock();
 	// Restart inactivity tracking
 	lastActivityTime = Date.now();
-	resetTimer();
+	inactivityTimer = setTimeout(tryLock, lockTimeoutMs);
 }
 
 async function verifyOfflinePassword(password) {
@@ -427,7 +429,7 @@ function startActivityTracking() {
 
 	listenersAttached = true;
 	lastActivityTime = Date.now();
-	resetTimer();
+	inactivityTimer = setTimeout(tryLock, lockTimeoutMs);
 }
 
 function stopActivityTracking() {

@@ -13,6 +13,14 @@ import frappe
 from frappe import _
 from frappe.utils import cint, flt, get_datetime, nowdate, today
 
+# Invoices whose negative outstanding counts as customer credit. Linked returns
+# with update_outstanding_for_self = 0 are excluded: their credit is on the original invoice.
+CUSTOMER_CREDIT_OR_FILTERS = {
+	"is_return": 0,
+	"return_against": ["is", "not set"],
+	"update_outstanding_for_self": 1,
+}
+
 
 @frappe.whitelist()
 def get_customer_balance(customer, company=None):
@@ -20,15 +28,17 @@ def get_customer_balance(customer, company=None):
 	Get customer balance from Sales Invoices.
 
 	Calculates the net balance from:
-	- Regular invoices: Only positive outstanding_amount (what customer owes)
-	- Return invoices: Only negative outstanding_amount (credit added to customer balance)
+	- Any invoice: Only positive outstanding_amount (what customer owes)
+	- Invoices, standalone returns and self-updating returns: Only negative outstanding_amount
+	  (credit added to customer balance)
 
-	Credit ONLY comes from return invoices where "Add to Customer Credit" was selected:
+	Credit comes from returns where "Add to Customer Credit" was selected, held on the return
+	or, for linked returns, on the original invoice:
 	- Cash refund given: outstanding_amount = 0 → NOT counted as credit
 	- Added to customer credit: outstanding_amount < 0 → counted as credit
 
-	Note: Negative outstanding on regular invoices (from linked returns) is NOT counted
-	as credit to avoid double-counting - the credit is tracked on the return invoice.
+	Note: Linked returns with update_outstanding_for_self = 0 are NOT counted; their
+	credit is on the original invoice.
 
 	Args:
 		customer: Customer ID
@@ -45,54 +55,26 @@ def get_customer_balance(customer, company=None):
 		frappe.throw(_("Customer is required"))
 
 	try:
-		from frappe.query_builder import DocType
-		from frappe.query_builder.functions import Abs, Coalesce, Sum
-		from pypika import Case
+		filters = {"customer": customer, "docstatus": 1, **({"company": company} if company else {})}
+		total = ["sum(outstanding_amount) as total"]
 
-		SalesInvoice = DocType("Sales Invoice")
-
-		# Build base filters
-		base_filters = (SalesInvoice.customer == customer) & (SalesInvoice.docstatus == 1)
-		if company:
-			base_filters = base_filters & (SalesInvoice.company == company)
-
-		# Query for regular invoices (non-returns)
-		# Only count positive outstanding (what customer owes)
-		# Negative outstanding on regular invoices comes from returns linked to them,
-		# so we don't count it here to avoid double-counting (credit comes from returns only)
-		regular_query = (
-			frappe.qb.from_(SalesInvoice)
-			.select(
-				Coalesce(
-					Sum(
-						Case()
-						.when(SalesInvoice.outstanding_amount > 0, SalesInvoice.outstanding_amount)
-						.else_(0)
-					),
-					0,
-				).as_("total_outstanding")
+		# Positive outstanding (what customer owes)
+		total_outstanding = flt(
+			frappe.get_all(
+				"Sales Invoice", filters={**filters, "outstanding_amount": [">", 0]}, fields=total
+			)[0].total
+		)
+		# Negative outstanding (customer credit)
+		total_credit = abs(
+			flt(
+				frappe.get_all(
+					"Sales Invoice",
+					filters={**filters, "outstanding_amount": ["<", 0]},
+					or_filters=CUSTOMER_CREDIT_OR_FILTERS,
+					fields=total,
+				)[0].total
 			)
-			.where(base_filters & (SalesInvoice.is_return == 0))
 		)
-
-		# Query for return invoices
-		# Only count returns where outstanding_amount < 0 (not refunded in cash)
-		# If cash refund was given, outstanding_amount = 0 and should NOT count as credit
-		# If no cash refund (added to customer credit), outstanding_amount < 0
-		return_query = (
-			frappe.qb.from_(SalesInvoice)
-			.select(Coalesce(Sum(Abs(SalesInvoice.outstanding_amount)), 0).as_("return_credit"))
-			.where(base_filters & (SalesInvoice.is_return == 1) & (SalesInvoice.outstanding_amount < 0))
-		)
-
-		# Execute queries
-		regular_result = regular_query.run(as_dict=True)
-		return_result = return_query.run(as_dict=True)
-
-		# Calculate totals
-		total_outstanding = flt(regular_result[0].total_outstanding) if regular_result else 0.0
-		# Credit only comes from return invoices where no cash refund was given
-		total_credit = flt(return_result[0].return_credit) if return_result else 0.0
 
 		# Net balance: positive = owes, negative = has credit
 		net_balance = total_outstanding - total_credit
@@ -159,11 +141,7 @@ def get_available_credit(customer, company, pos_profile=None):
 
 	total_credit = []
 
-	# Get return invoices with negative outstanding (credit added to customer balance).
-	# We restrict to is_return=1 because a return SI also reduces the original
-	# sale's outstanding, so a regular SI with negative outstanding represents the
-	# same money as its linked return — counting both would double the credit.
-	# This matches the logic in get_customer_balance.
+	# Get invoices with negative outstanding (customer credit)
 	outstanding_invoices = frappe.get_all(
 		"Sales Invoice",
 		filters={
@@ -171,8 +149,8 @@ def get_available_credit(customer, company, pos_profile=None):
 			"docstatus": 1,
 			"customer": customer,
 			"company": company,
-			"is_return": 1,
 		},
+		or_filters=CUSTOMER_CREDIT_OR_FILTERS,
 		fields=["name", "outstanding_amount", "is_return", "posting_date", "grand_total", "modified"],
 		order_by="posting_date desc",
 	)
@@ -188,7 +166,7 @@ def get_available_credit(customer, company, pos_profile=None):
 					"credit_origin": row.name,
 					"total_credit": available_credit,
 					"available_credit": available_credit,
-					"source_type": "Sales Return",
+					"source_type": "Sales Return" if row.is_return else "Sales Invoice",
 					"posting_date": row.posting_date,
 					"reference_amount": row.grand_total,
 					"credit_to_redeem": 0,  # User will set this
@@ -361,11 +339,12 @@ def _validate_and_lock_invoice_credit(invoice_name, amount_to_redeem, customer, 
 	available_credit = -current_outstanding  # Credit is negative outstanding
 
 	if available_credit < amount_to_redeem:
+		currency = frappe.get_cached_value("Company", company, "default_currency")
 		frappe.throw(
 			_("Insufficient credit available from {0}. Available: {1}, Requested: {2}").format(
 				invoice_name,
-				frappe.format_value(available_credit, {"fieldtype": "Currency"}),
-				frappe.format_value(amount_to_redeem, {"fieldtype": "Currency"}),
+				frappe.format_value(available_credit, {"fieldtype": "Currency"}, currency=currency),
+				frappe.format_value(amount_to_redeem, {"fieldtype": "Currency"}, currency=currency),
 			)
 		)
 
@@ -422,11 +401,12 @@ def _validate_and_lock_advance_credit(payment_entry_name, amount_to_redeem, cust
 	available_amount = flt(result[0].unallocated_amount)
 
 	if available_amount < amount_to_redeem:
+		currency = frappe.get_cached_value("Company", company, "default_currency")
 		frappe.throw(
 			_("Insufficient unallocated amount in {0}. Available: {1}, Requested: {2}").format(
 				payment_entry_name,
-				frappe.format_value(available_amount, {"fieldtype": "Currency"}),
-				frappe.format_value(amount_to_redeem, {"fieldtype": "Currency"}),
+				frappe.format_value(available_amount, {"fieldtype": "Currency"}, currency=currency),
+				frappe.format_value(amount_to_redeem, {"fieldtype": "Currency"}, currency=currency),
 			)
 		)
 

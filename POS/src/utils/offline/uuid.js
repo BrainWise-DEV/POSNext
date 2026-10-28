@@ -28,3 +28,10 @@ export const generateUUID = () => {
  * @returns {string} Unique offline ID
  */
 export const generateOfflineId = () => `pos_offline_${generateUUID()}`;
+
+/**
+ * Generate a unique offline ID for expense deduplication.
+ * Format: pos_expense_<uuid>
+ * @returns {string} Unique offline expense ID
+ */
+export const generateOfflineExpenseId = () => `pos_expense_${generateUUID()}`;
