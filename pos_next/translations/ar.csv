@@ -1787,3 +1787,7 @@ Points applied: {0}. Please pay remaining {1} with {2},تم خصم النقاط:
 "No Magento account was found for this customer's phone number.","لا يوجد حساب في ماجنتو برقم هاتف هذا العميل.",""
 "Customer is saved but not synced with Magento yet. Please try again in a moment.","تم حفظ العميل لكن لم تتم مزامنته مع ماجنتو بعد. يرجى المحاولة مرة أخرى بعد قليل.",""
 "Customer is saved but not synced with Magento yet. Verification may take a moment to become available.","تم حفظ العميل لكن لم تتم مزامنته مع ماجنتو بعد. قد يستغرق توفر التحقق بعض الوقت.",""
+"Verification code sent by email.","تم إرسال رمز التحقق إلى البريد الإلكتروني.",""
+"Send new code by email","إرسال رمز جديد عبر البريد الإلكتروني",""
+"Resend code by email","إعادة إرسال الرمز عبر البريد الإلكتروني",""
+"Enter the 6-digit code sent to the email {0}","أدخل الرمز المكون من 6 أرقام المرسل إلى البريد الإلكتروني {0}",""

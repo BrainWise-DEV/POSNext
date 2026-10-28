@@ -444,6 +444,8 @@ def send_email_otp(customer, email=None, pos_profile=None):
 		if retry_after:
 			return _too_many(retry_after)
 
+		# Email-only delivery: the payload carries no channel/SMS option. ``phone`` is the
+		# Magento customer lookup key; the code is delivered to ``email``.
 		http_status, body = _post(SEND_ENDPOINT, {"phone": ctx["phone"], "email": ctx["email"]})
 
 		if http_status == "not_configured":
@@ -488,7 +490,7 @@ def send_email_otp(customer, email=None, pos_profile=None):
 
 		expires_in = cint(body.get("expires_in")) or DEFAULT_OTP_TTL
 		resend_in = max(cint(body.get("resend_in")), RESEND_COOLDOWN)
-		return _result(True, "sent", _("Verification code sent."), expires_in=expires_in, resend_in=resend_in)
+		return _result(True, "sent", _("Verification code sent by email."), expires_in=expires_in, resend_in=resend_in)
 
 
 @frappe.whitelist(methods=["POST"])

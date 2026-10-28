@@ -128,6 +128,17 @@ class TestSend(EmailOTPTestBase):
 		self.assertEqual(args[0], "https://magento.test" + ev.SEND_ENDPOINT)
 		self.assertEqual(kwargs["json"], {"phone": "+9647701234567", "email": "jane@example.com"})
 		self.assertEqual(kwargs["timeout"], (5, 20))
+		self.assertEqual(res["message"], "Verification code sent by email.")
+
+	def test_payload_has_no_sms_or_channel_option(self):
+		with self.post(200, {"success": True, "otp_required": True}) as m:
+			ev.send_email_otp("CUST-1", "jane@example.com")
+		with self.post(200, {"status": True}) as v:
+			ev.verify_email_otp("CUST-1", OTP, "jane@example.com")
+		for mock in (m, v):
+			keys = set(mock.call_args.kwargs["json"])
+			self.assertLessEqual(keys, {"phone", "email", "otp"})
+			self.assertFalse(keys & {"channel", "type", "delivery", "method", "sms", "whatsapp"})
 
 	def test_error_mappings(self):
 		table = [
