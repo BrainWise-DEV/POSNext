@@ -24,7 +24,7 @@
 					:disabled="!canSend"
 					@click="sendCode"
 				>
-					{{ view === "expired" ? __("Send new code") : __("Verify email") }}
+					{{ view === "expired" ? __("Send new code by email") : __("Verify email") }}
 				</button>
 			</div>
 			<p v-if="view === 'expired'" class="text-xs text-amber-700" data-testid="expired-msg">
@@ -57,7 +57,7 @@
 		<!-- code_sent / verifying -->
 		<div v-else class="flex flex-col gap-2">
 			<p class="text-sm text-gray-700" data-testid="enter-code-hint">
-				{{ __("Enter the 6-digit code sent to {0}", [email]) }}
+				{{ __("Enter the 6-digit code sent to the email {0}", [email]) }}
 			</p>
 			<div class="flex items-center gap-2">
 				<input
@@ -98,7 +98,7 @@
 					<template v-if="cooldownRemaining > 0">
 						{{ __("Resend available in {0}s", [cooldownRemaining]) }}
 					</template>
-					<template v-else>{{ __("Resend code") }}</template>
+					<template v-else>{{ __("Resend code by email") }}</template>
 				</button>
 			</div>
 			<button
@@ -125,7 +125,8 @@
  *
  * States: idle | sending | code_sent | verifying | verified | expired | error
  * `error` keeps the previous step visible (see returnState).
- * Nothing about the code is persisted client side; the server owns the phone
+ * The code is delivered by email only. Nothing about the code is persisted
+ * client side; the server owns the phone (Magento lookup key)
  * number (taken from Customer.mobile_no) and all rate limits.
  */
 import { isOffline } from "@/utils/offline/offlineState";
