@@ -671,13 +671,28 @@ export function useInvoice() {
 		const baseAmount = roundCurrency(item.quantity * roundedRate);
 
 		// Calculate discount from either percentage or fixed amount
+		// A fixed-amount discount also gets a derived percentage (for display and
+		// the payload). Remember that the percentage was derived, so the next
+		// recalc (e.g. a qty change) keeps the fixed amount instead of re-reading
+		// the stale percentage as a real percentage discount. Any caller that
+		// writes a different percentage, or clears the amount, leaves amount mode.
+		const amountMode =
+			item.discount_mode === "amount" &&
+			item.discount_amount > 0 &&
+			(!(item.discount_percentage > 0) ||
+				item.discount_percentage === item._derived_discount_percentage);
 		let discountAmount = 0;
-		if (item.discount_percentage > 0) {
+		if (!amountMode && item.discount_percentage > 0) {
 			discountAmount = roundCurrency((baseAmount * item.discount_percentage) / 100);
+			item.discount_mode = "percentage";
 		} else if (item.discount_amount > 0) {
 			discountAmount = roundCurrency(item.discount_amount);
 			// Sync percentage when amount is provided directly
 			item.discount_percentage = baseAmount > 0 ? (discountAmount / baseAmount) * 100 : 0;
+			item.discount_mode = "amount";
+			item._derived_discount_percentage = item.discount_percentage;
+		} else {
+			item.discount_mode = null;
 		}
 		item.discount_amount = discountAmount;
 
