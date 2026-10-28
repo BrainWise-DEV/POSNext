@@ -29,7 +29,16 @@ class TestPosPageContext(FrappeTestCase):
 		context = frappe._dict(path="pos")
 		with patch("frappe.get_installed_apps", return_value=["posnext_promotions"]):
 			update_pos_page_context(context)
-		self.assertEqual(context.boot, {"posnext_app_flags": {"posnext_promotions": 1}})
+		self.assertEqual(
+			context.boot, {"posnext_app_flags": {"posnext_promotions": 1}, "posnext_developer_mode": 0}
+		)
+
+	def test_exposes_backend_developer_mode(self):
+		for flag in (0, 1):
+			context = frappe._dict(path="pos")
+			with patch.dict(frappe.conf, {"developer_mode": flag}):
+				update_pos_page_context(context)
+			self.assertEqual(context.boot["posnext_developer_mode"], flag)
 
 	def test_other_pages_untouched(self):
 		context = frappe._dict(path="login")

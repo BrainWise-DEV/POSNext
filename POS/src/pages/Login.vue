@@ -14,6 +14,13 @@
 
 			<div class="bg-white py-8 px-6 shadow rounded-lg">
 				<form class="space-y-6" @submit.prevent="submit">
+					<!-- Plain http outside dev mode: never send the password -->
+					<div v-if="!loginAllowed" role="alert" class="rounded-md bg-amber-50 p-4 text-sm text-amber-900">
+						<p class="font-semibold">{{ __("Secure connection required") }}</p>
+						<p class="mt-1">
+							{{ __("Open POS Next over https:// to sign in. Passwords are never sent over an insecure connection.") }}
+						</p>
+					</div>
 					<div v-if="session.login.error" class="rounded-md bg-red-50 p-4">
 						<div class="flex">
 							<div class="flex-shrink-0">
@@ -90,6 +97,7 @@
 					<div>
 						<Button
 							:loading="session.login.loading"
+							:disabled="!loginAllowed"
 							variant="solid"
 							class="w-full py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
 							type="submit"
@@ -114,6 +122,7 @@
 import { FeatherIcon } from "frappe-ui";
 import { onMounted, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
+import { canLogin, currentLoginEnv } from "@/utils/secureLogin";
 import ShiftOpeningDialog from "../components/ShiftOpeningDialog.vue";
 import { session } from "../data/session";
 import { useSessionLock } from "../composables/useSessionLock";
@@ -125,6 +134,8 @@ import { logger } from "@/utils/logger";
 const log = logger.create("Login");
 
 const router = useRouter();
+// Login needs HTTPS (or localhost) unless frontend or backend dev mode is on
+const loginAllowed = canLogin(currentLoginEnv());
 const { cachePasswordHashFromLogin } = useSessionLock();
 
 const loginForm = reactive({
@@ -156,7 +167,7 @@ onMounted(async () => {
 });
 
 function submit() {
-	if (!loginForm.email || !loginForm.password) {
+	if (!loginAllowed || !loginForm.email || !loginForm.password) {
 		return;
 	}
 
