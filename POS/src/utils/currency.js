@@ -120,6 +120,31 @@ export function getCurrencyClass(value) {
 }
 
 // =============================================================================
+// Live-Typing Amount Input Formatting
+// =============================================================================
+// Unlike formatCurrency/formatCurrencyNumber, these don't force a fixed decimal
+// count — that would fight the user mid-keystroke (e.g. typing "1" forced to
+// "1.00" before they can type the decimal part). Used for text inputs where
+// large amounts need thousand separators while still being editable.
+
+/** Group the integer part of a raw numeric string as the user types, leaving any decimal part untouched. */
+export function formatAmountInput(raw, locale = DEFAULT_LOCALE) {
+	if (raw === null || raw === undefined || raw === "") return "";
+	const [intPart, ...rest] = String(raw).split(".");
+	const grouped = intPart ? Number(intPart).toLocaleString(locale) : "0";
+	return rest.length ? `${grouped}.${rest.join("")}` : grouped;
+}
+
+/** Strip grouping/invalid characters from a live-typed amount, keeping at most one decimal point. */
+export function parseAmountInput(raw) {
+	if (raw === null || raw === undefined) return "";
+	let cleaned = String(raw).replace(/[^\d.]/g, "");
+	const parts = cleaned.split(".");
+	if (parts.length > 2) cleaned = `${parts[0]}.${parts.slice(1).join("")}`;
+	return cleaned;
+}
+
+// =============================================================================
 // Rounding (matches frappe/utils/data.py exactly)
 // =============================================================================
 
