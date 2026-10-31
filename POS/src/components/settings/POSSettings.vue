@@ -724,7 +724,7 @@
 											<CheckboxField
 												v-model="settings.customer_search_show_all"
 												:label="__('Show All Customers in Search')"
-											:description="__('Show the complete customer list in the cart search dropdown instead of capping results at the first 10-20 matches. Large customer lists may take longer to render.')"
+											:description="__('Show up to 500 customers in the cart search dropdown instead of the first 10-20 matches. Type to narrow the list; very large lists may take longer to render.')"
 											/>
 											<CheckboxField
 												v-model="settings.silent_print"
@@ -1166,6 +1166,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { getSectionHeaderClasses, getSubsectionClasses, icons } from "./settingsConfig";
 import { offlineWorker } from "@/utils/offline/workerClient";
 import { logger } from "@/utils/logger";
+import { formatTime } from "@/utils/currency";
 import { usePOSEvents } from "@/composables/usePOSEvents";
 import TranslatedHTML from "../common/TranslatedHTML.vue";
 import { useQzTray } from "@/composables/useQzTray";
@@ -1571,7 +1572,7 @@ function formatSyncTime(timestamp) {
 		return __("{0}m ago", [Math.floor(diff / 60000)]);
 	} else {
 		const date = new Date(timestamp);
-		return date.toLocaleTimeString();
+		return formatTime(date);
 	}
 }
 

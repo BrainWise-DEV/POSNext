@@ -80,4 +80,14 @@ describe("buildAuthorizationSummary", () => {
 			expect(row.value).toBeTruthy();
 		}
 	});
+
+	it("shows an expense void with its own amount label and journal entry", () => {
+		const rows = build({
+			action: "Void POS Expense",
+			context: { amount: 750, amountLabel: "Expense Amount", journal_entry: "ACC-JV-1" },
+		});
+		expect(rows.map((r) => r.key)).toEqual(["action", "amount", "journal_entry"]);
+		expect(rows[1].label).toBe("Expense Amount");
+		expect(byKey(rows).journal_entry).toBe("ACC-JV-1");
+	});
 });
