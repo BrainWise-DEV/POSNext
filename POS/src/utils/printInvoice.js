@@ -8,7 +8,7 @@ import { printHTML as qzPrintHTML } from "@/utils/qzTray";
 
 const log = logger.create("PrintInvoice");
 
-const DEFAULT_PRINT_FORMAT = "POS Next Receipt";
+export const DEFAULT_PRINT_FORMAT = "POS Next Receipt";
 
 // ============================================================================
 // Shared helpers
@@ -347,7 +347,7 @@ export function buildReceiptHTML(invoiceData) {
 			</div>`;
 }
 
-function buildReceiptDocumentHTML(invoiceData, { includeControls = false } = {}) {
+export function buildReceiptDocumentHTML(invoiceData, { includeControls = false } = {}) {
 	const controls = includeControls
 		? `
 			<div class="no-print" style="text-align: center; margin-top: 20px;">
@@ -378,7 +378,7 @@ function buildReceiptDocumentHTML(invoiceData, { includeControls = false } = {})
  * Resolve print format & letterhead from a POS Profile.
  * Returns defaults when the profile lookup fails so callers always get a value.
  */
-async function resolvePrintSettings(posProfile, printFormat, letterhead) {
+export async function resolvePrintSettings(posProfile, printFormat, letterhead) {
 	if (printFormat) return { printFormat, letterhead };
 
 	if (posProfile) {
