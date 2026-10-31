@@ -5,7 +5,7 @@
 	"type": "module",
 	"scripts": {
 		"dev": "vite",
-		"build": "vite build --base=/assets/pos_next/pos/",
+		"build": "vite build --base=/assets/pos_next/pos/ && node -e \"const fs=require('fs');fs.copyFileSync('../pos_next/public/pos/sw.js','../pos_next/www/pos-sw.js')\"",
 		"preview": "vite preview",
 		"lint": "biome check .",
 		"lint:fix": "biome check --write .",
@@ -27,6 +27,7 @@
 		"frappe-ui": "^0.1.240",
 		"pinia": "^3.0.4",
 		"qz-tray": "^2.2.5",
+		"reka-ui": "^2.5.0",
 		"socket.io-client": "^4.7.2",
 		"vue": "3.5.13",
 		"vue-router": "^4.5.0"
@@ -34,21 +35,22 @@
 	"devDependencies": {
 		"@biomejs/biome": "1.9.4",
 		"@iconify-json/lucide": "^1.2.79",
-		"@vitejs/plugin-vue": "^5.1.4",
-		"@vitest/coverage-v8": "^2.1.8",
+		"@vitejs/plugin-vue": "^5.2.4",
+		"@vitest/coverage-v8": "^4.1.11",
 		"autoprefixer": "^10.4.24",
 		"baseline-browser-mapping": "^2.9.19",
 		"jsdom": "^25.0.1",
 		"postcss": "^8.4.5",
 		"tailwindcss": "^3.4.15",
-		"vite": "^5.4.10",
+		"vite": "^6.4.3",
 		"vite-plugin-pwa": "^1.0.3",
-		"vite-plugin-static-copy": "^1.0.6",
-		"vitest": "^2.1.9",
+		"vite-plugin-static-copy": "^2.3.2",
+		"vitest": "^4.1.11",
 		"workbox-build": "^7.3.0",
 		"workbox-window": "^7.3.0"
 	},
 	"resolutions": {
-		"baseline-browser-mapping": "^2.9.19"
+		"baseline-browser-mapping": "^2.9.19",
+		"vite": "^6.4.3"
 	}
 }

@@ -5,5 +5,5 @@
 from frappe.model.document import Document
 
 
-class Governorate(Document):
+class POSGovernorate(Document):
 	pass

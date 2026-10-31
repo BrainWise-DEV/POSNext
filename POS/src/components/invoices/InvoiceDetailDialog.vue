@@ -55,6 +55,19 @@
 										invoiceData.return_against
 									}}</span>
 								</div>
+								<div v-if="salesPersonNames" class="text-start">
+									<span class="text-gray-600">{{ __("Sales Person:") }}</span>
+									<span class="ms-2 font-medium text-gray-900">{{
+										salesPersonNames
+									}}</span>
+								</div>
+								<div v-if="invoiceData.coupon_code" class="text-start">
+									<span class="text-gray-600">{{ __("Coupon Applied:") }}</span>
+									<span
+										class="ms-2 font-medium text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded"
+										>{{ invoiceData.coupon_code }}</span
+									>
+								</div>
 							</div>
 						</div>
 						<div class="text-start sm:text-end">
@@ -545,6 +558,15 @@ const isCashRefund = computed(() => {
 		invoiceData.value.payments?.reduce((sum, p) => sum + Math.abs(p.amount || 0), 0) || 0;
 	// Cash refund if payments were made (refund given)
 	return totalPaid >= 0.01;
+});
+
+const salesPersonNames = computed(() => {
+	const salesTeam = invoiceData.value?.sales_team;
+	if (!Array.isArray(salesTeam) || salesTeam.length === 0) return "";
+	return salesTeam
+		.map((row) => row.sales_person_name || row.sales_person)
+		.filter(Boolean)
+		.join(", ");
 });
 
 watch(

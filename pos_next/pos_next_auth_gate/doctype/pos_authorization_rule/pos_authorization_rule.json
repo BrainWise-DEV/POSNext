@@ -21,7 +21,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Action",
-   "options": "Sales Invoice Return\nSales Return Without Invoice",
+   "options": "Sales Invoice Return\nSales Return Without Invoice\nVoid POS Expense",
    "reqd": 1
   },
   {
@@ -64,7 +64,7 @@
   }
  ],
  "links": [],
- "modified": "2026-08-12 14:21:20.786243",
+ "modified": "2026-09-24 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next Auth Gate",
  "name": "POS Authorization Rule",

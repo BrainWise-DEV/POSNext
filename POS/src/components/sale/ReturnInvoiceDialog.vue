@@ -219,7 +219,7 @@
 								<!-- Invoice Info (Start Side) -->
 								<div class="flex-1 min-w-0">
 									<div class="flex items-center gap-2 flex-wrap">
-										<h4 class="text-sm font-bold text-gray-900">
+										<h4 class="text-sm font-bold text-gray-900" dir="ltr">
 											{{ invoice.name }}
 										</h4>
 										<span
@@ -232,9 +232,9 @@
 										</span>
 									</div>
 									<p class="text-xs text-gray-600 mt-1 text-start">
-										{{ invoice.customer_name }}
+										<span dir="auto">{{ invoice.customer_name }}</span>
 										<span v-if="invoice.contact_mobile" class="text-gray-400">
-											• {{ invoice.contact_mobile }}</span
+											• <span dir="ltr">{{ invoice.contact_mobile }}</span></span
 										>
 									</p>
 									<p class="text-xs text-gray-500 text-start">
@@ -300,14 +300,19 @@
 								>
 									<FeatherIcon name="file-text" class="w-8 h-8 text-gray-400" />
 								</div>
+								<!-- Before any search: nothing recent to return, point to search -->
 								<p class="text-sm font-medium text-gray-900 mb-1 text-center">
-									{{ __("No invoices found") }}
+									{{
+										invoiceListFilter.trim()
+											? __("No invoices found")
+											: __("No recent invoices to return")
+									}}
 								</p>
 								<p class="text-xs text-gray-500 text-center">
 									{{
-										__(
-											"Try a different search term or check the invoice number"
-										)
+										invoiceListFilter.trim()
+											? __("Try a different search term or check the invoice number")
+											: __("Type an invoice number to search all invoices")
 									}}
 								</p>
 							</template>
@@ -1476,6 +1481,8 @@ const createReturnResource = createResource({
 				conversion_factor: item.conversion_factor || 1,
 				// Link to original invoice item row for accurate return tracking in ERPNext
 				sales_invoice_item: item.name,
+				// Preserve item-level sales person for commission reversal
+				sales_person: item.sales_person || null,
 			})),
 			// Flag to indicate return amount should be added to customer credit balance
 			add_to_customer_balance: addToCustomerCredit.value,

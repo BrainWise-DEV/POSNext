@@ -1,34 +1,47 @@
 {
  "actions": [],
  "allow_rename": 1,
- "autoname": "field:governorate",
- "creation": "2026-06-09 10:54:57.009043",
+ "autoname": "format:{governorate}-{district}",
+ "creation": "2026-06-09 10:55:40.584980",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
-  "governorate"
+  "governorate",
+  "column_break_drcm",
+  "district"
  ],
  "fields": [
   {
-   "fieldname": "governorate",
+   "fieldname": "district",
    "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "District",
+   "reqd": 1
+  },
+  {
+   "fieldname": "governorate",
+   "fieldtype": "Link",
    "in_filter": 1,
    "in_list_view": 1,
    "in_preview": 1,
    "in_standard_filter": 1,
    "label": "Governorate",
-   "reqd": 1,
-   "unique": 1
+   "options": "POS Governorate",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_drcm",
+   "fieldtype": "Column Break"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-06-09 12:45:46.769004",
+ "modified": "2026-06-09 12:50:24.717788",
  "modified_by": "Administrator",
  "module": "POS Next",
- "name": "Governorate",
- "naming_rule": "By fieldname",
+ "name": "POS District",
+ "naming_rule": "Expression (old style)",
  "owner": "Administrator",
  "permissions": [
   {
@@ -46,10 +59,7 @@
  ],
  "row_format": "Dynamic",
  "rows_threshold_for_grid_search": 20,
- "show_title_field_in_link": 1,
  "sort_field": "modified",
  "sort_order": "DESC",
- "states": [],
- "title_field": "governorate",
- "translated_doctype": 1
+ "states": []
 }

@@ -1,7 +1,15 @@
 <template>
+	<!--
+		No height: 100vh here. The page fills whatever the host leaves it (see the
+		flex chain in index.css), so chrome above POS — Frappe's navbar, a demo
+		countdown banner — shortens the page instead of pushing its bottom off the
+		screen. padding-bottom keeps POSFooter's fixed strip from sitting on top of
+		the cart's Checkout button; the footer publishes its own height, so this
+		follows if it is ever restyled.
+	-->
 	<div
-		class="flex flex-col bg-gray-50 overflow-x-hidden"
-		style="height: 100vh; max-height: 100vh"
+		class="flex flex-1 flex-col min-h-0 bg-gray-50 overflow-x-hidden"
+		style="padding-bottom: var(--pos-footer-h, 24px)"
 	>
 		<!-- Loading State -->
 		<LoadingSpinner v-if="uiStore.isLoading" />
@@ -254,8 +262,7 @@
 			<!-- Main Content: Responsive Layout -->
 			<div
 				v-if="shiftStore.hasOpenShift"
-				class="flex-1 flex overflow-hidden relative"
-				style="max-height: calc(100vh - 60px - var(--header-height, 60px))"
+				class="flex-1 min-h-0 flex overflow-hidden relative"
 			>
 				<!-- Icon-Only Management Slider - Always Visible -->
 				<ManagementSlider
@@ -400,6 +407,7 @@
 							style="min-width: 300px; contain: layout style paint"
 						>
 							<InvoiceCart
+								ref="invoiceCartRef"
 								:items="cartStore.invoiceItems"
 								:customer="cartStore.customer"
 								:subtotal="cartStore.subtotal"
@@ -486,8 +494,7 @@
 			<!-- No Shift Placeholder -->
 			<div
 				v-else
-				class="flex-1 flex items-center justify-center bg-gray-50"
-				style="max-height: calc(100vh - 60px - var(--header-height, 60px))"
+				class="flex-1 min-h-0 flex items-center justify-center bg-gray-50"
 			>
 				<div class="text-center">
 					<div
@@ -1112,6 +1119,8 @@ import InvoiceDetailDialog from "@/components/invoices/InvoiceDetailDialog.vue";
 import { useRealtimeStock } from "@/composables/useRealtimeStock";
 import { useSessionLock } from "@/composables/useSessionLock";
 import { useIdleRefocus } from "@/composables/useIdleRefocus";
+import { useGlobalShortcuts } from "@/composables/useKeyboardShortcuts";
+import { getDistinctUoms } from "@/utils/itemUoms";
 import { usePOSEvents } from "@/composables/usePOSEvents";
 import { useLocale } from "@/composables/useLocale";
 import { session } from "@/data/session";
@@ -1119,6 +1128,7 @@ import { useUserData } from "@/data/user";
 import { parseError } from "@/utils/errorHandler";
 import { cleanupUserSession } from "@/utils/sessionCleanup";
 import { offlineWorker } from "@/utils/offline/workerClient";
+import { deductCachedBatchQty } from "@/utils/offline/items";
 import { cacheOfflineReceiptPayload } from "@/utils/offline/offlineReceiptCache";
 import { cacheInvoiceHistory, getCachedInvoiceHistory } from "@/utils/offline/sync";
 import {
@@ -1136,6 +1146,7 @@ import { useToast } from "@/composables/useToast";
 
 import { useCustomerSearchStore } from "@/stores/customerSearch";
 import { useItemSearchStore } from "@/stores/itemSearch";
+import { useSerialNumberStore } from "@/stores/serialNumber";
 import { useStockStore } from "@/stores/stock";
 // Pinia Stores
 import { usePOSCartStore } from "@/stores/posCart";
@@ -1168,6 +1179,7 @@ const { onStockUpdate } = useRealtimeStock();
 
 // Session lock (inactivity + tab-refocus)
 const {
+	isLocked,
 	lock: lockSession,
 	configure: configureSessionLock,
 	startActivityTracking,
@@ -1197,8 +1209,19 @@ const { isRTL } = useLocale();
 
 // Component refs
 const itemsSelectorRef = ref(null);
+const invoiceCartRef = ref(null);
 const offersDialogRef = ref(null);
 const containerRef = ref(null);
+// The item/cart split follows the container's own width (sidebar, banner, window)
+const containerObserver =
+	typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => updateLayoutBounds()) : null;
+watch(containerRef, (el, oldEl) => {
+	if (oldEl) containerObserver?.unobserve(oldEl);
+	if (el) {
+		containerObserver?.observe(el);
+		updateLayoutBounds();
+	}
+});
 const dividerRef = ref(null);
 const pendingPaymentAfterCustomer = ref(false);
 
@@ -1345,13 +1368,27 @@ const canSwitchToDesk = computed(() => Boolean(bootstrapStore.data?.can_switch_t
 let resizeState = null;
 let bodyStyleSnapshot = null;
 
+// Window resize listener (passive for better performance)
+function handleWindowResize() {
+	uiStore.setWindowWidth(window.innerWidth);
+	updateLayoutBounds();
+}
+
 onMounted(async () => {
-	// Window resize listeners (passive for better performance)
-	const handleResize = () => {
-		uiStore.setWindowWidth(window.innerWidth);
-		updateLayoutBounds();
-	};
-	window.addEventListener("resize", handleResize, { passive: true });
+	window.addEventListener("resize", handleWindowResize, { passive: true });
+
+	// Global keyboard shortcuts (F-keys also fire from the search input)
+	// Skip if any dialog is open, the session is locked or the clear-cache overlay is
+	// showing. isLocked/showClearCacheDialog aren't wired into uiStore.isAnyDialogOpen,
+	// so they're checked explicitly here.
+	useGlobalShortcuts(
+		() => uiStore.isAnyDialogOpen || isLocked.value || showClearCacheDialog.value,
+		{
+			F4: () => itemsSelectorRef.value?.focusSearchInput(),
+			F8: () => invoiceCartRef.value?.focusCustomerSearch(),
+			F9: () => handleProceedToPayment(),
+		}
+	);
 
 	// Set up real-time stock update listener
 	const cleanup = onStockUpdate(async (stockUpdates) => {
@@ -1582,6 +1619,8 @@ onMounted(async () => {
 						shiftStore.currentShift?.name,
 					),
 			draftsStore.updateDraftsCount(),
+			// Invoices queued in an earlier offline session: sync now, not on the next reconnect
+			offlineStore.isOffline ? null : offlineStore.syncAllPending(),
 		]);
 
 		// Wait for settings (required for tax rules) + all background ops
@@ -1752,10 +1791,8 @@ watch(
 );
 
 onUnmounted(() => {
-	window.removeEventListener("resize", () => {
-		uiStore.setWindowWidth(window.innerWidth);
-		updateLayoutBounds();
-	});
+	window.removeEventListener("resize", handleWindowResize);
+	containerObserver?.disconnect();
 	stopResize();
 
 	// Stop periodic stock sync on unmount
@@ -1890,10 +1927,27 @@ async function updatePeriodicStockSyncItems(warehouse) {
 	}
 }
 
+/**
+ * Offline invoices synced: replace local stock, batch and serial figures with server values
+ */
+async function handleOfflineInvoicesSynced() {
+	useSerialNumberStore().clearCache();
+	try {
+		await Promise.all([
+			stockStore.refresh(null, shiftStore.profileWarehouse),
+			itemStore.refreshBatchSerialCache(),
+		]);
+	} catch (error) {
+		log.error("Failed to refresh stock after offline sync:", error);
+	}
+}
+window.addEventListener("offlineInvoicesSynced", handleOfflineInvoicesSynced);
+
 // Cleanup event listeners on unmount
 onUnmounted(() => {
 	window.removeEventListener("stockSyncComplete", handleStockSyncComplete);
 	window.removeEventListener("stockSyncError", handleStockSyncError);
+	window.removeEventListener("offlineInvoicesSynced", handleOfflineInvoicesSynced);
 });
 
 // Handlers
@@ -1921,6 +1975,8 @@ async function handleShiftOpened() {
 					shiftStore.currentShift?.name,
 				),
 		draftsStore.updateDraftsCount(),
+		// Invoices queued in an earlier offline session: sync now, not on the next reconnect
+		offlineStore.isOffline ? null : offlineStore.syncAllPending(),
 	]);
 
 	// Wait for settings (required for tax rules) + all background ops
@@ -1940,7 +1996,7 @@ async function handleShiftOpened() {
 	// Load tax rules (depends on settings being loaded)
 	await cartStore.loadTaxRules(shiftStore.profileName, posSettingsStore.settings);
 
-	_initializedProfile = shiftStore.profileName;
+	_initializedKey = `${shiftStore.profileName}::${shiftStore.currentShift?.name}`;
 
 	// Start session lock tracking now that a shift is open and POS is ready
 	startActivityTracking();
@@ -2028,8 +2084,8 @@ function handleItemSelected(item, autoAdd = false) {
 		return;
 	}
 
-	// Check for UOMs
-	if (item.item_uoms && item.item_uoms.length > 0) {
+	// Check for UOMs (picker only when there is a real choice, or to keep a scanned weight)
+	if (getDistinctUoms(item).length > 1 || (item.resolved_qty && item.item_uoms?.length > 0)) {
 		cartStore.setPendingItem(item, 1, "uom");
 		uiStore.showItemSelectionDialog = true;
 		return;
@@ -2070,7 +2126,6 @@ function handleCustomerSelected(selectedCustomer) {
 	if (selectedCustomer) {
 		cartStore.setCustomer(selectedCustomer);
 		uiStore.showCustomerDialog = false;
-		showSuccess(__("{0} selected", [selectedCustomer.customer_name]));
 
 		if (pendingPaymentAfterCustomer.value) {
 			pendingPaymentAfterCustomer.value = false;
@@ -2268,8 +2323,28 @@ async function handlePaymentCompleted(paymentData) {
 			};
 			uiStore.setLastOfflinePrintDoc(offlinePrintDoc);
 			cacheOfflineReceiptPayload(offlineReceiptName, offlinePrintDoc);
+
+			// Deduct sold stock locally; the server refresh after sync replaces it
+			const soldQty = new Map();
+			for (const item of preparedItems) {
+				const qty = (item.qty || 0) * (item.conversion_factor || 1);
+				soldQty.set(item.item_code, (soldQty.get(item.item_code) || 0) + qty);
+				if (item.batch_no) {
+					deductCachedBatchQty(item.item_code, item.batch_no, qty).catch(() => {});
+				}
+			}
+			const stockUpdates = [...soldQty]
+				.filter(([itemCode]) => stockStore.server.has(itemCode))
+				.map(([itemCode, qty]) => ({
+					item_code: itemCode,
+					actual_qty: stockStore.getStockInfo(itemCode).server - qty,
+					warehouse: shiftStore.profileWarehouse,
+				}));
+			stockStore.update(stockUpdates);
+			offlineWorker.updateStockQuantities(stockUpdates).catch(() => {});
+
 			uiStore.showPaymentDialog = false;
-			cartStore.clearCart();
+			cartStore.clearCart({ returnSerials: false });
 			// Reset cart hash after successful payment
 			previousCartHash = "";
 
@@ -2304,6 +2379,7 @@ async function handlePaymentCompleted(paymentData) {
 		} else {
 			// Get item codes from cart before clearing
 			const soldItemCodes = cartStore.invoiceItems.map((item) => item.item_code);
+			const soldBatches = cartStore.invoiceItems.filter((item) => item.batch_no);
 
 			const result = await cartStore.submitInvoice({
 				isCreditSale: Boolean(paymentData.is_credit_sale),
@@ -2340,7 +2416,7 @@ async function handlePaymentCompleted(paymentData) {
 				const paidAmount = paymentData.paid_amount || invoiceTotal;
 
 				uiStore.showPaymentDialog = false;
-				cartStore.clearCart();
+				cartStore.clearCart({ returnSerials: false });
 				// Reset cart hash after successful payment
 				previousCartHash = "";
 
@@ -2351,6 +2427,12 @@ async function handlePaymentCompleted(paymentData) {
 
 				// Refresh stock - Direct API (50-200ms), no Socket.IO lag!
 				await stockStore.refresh(soldItemCodes, shiftStore.profileWarehouse);
+
+				// Keep the offline batch cache in step; the refresh above covers stock only
+				for (const item of soldBatches) {
+					const qty = (item.quantity || item.qty || 0) * (item.conversion_factor || 1);
+					deductCachedBatchQty(item.item_code, item.batch_no, qty).catch(() => {});
+				}
 
 				// Refresh invoice history cache in background (non-blocking)
 				loadInvoiceHistoryData().catch((err) =>
@@ -2435,7 +2517,7 @@ async function handleOptionSelected(option) {
 				}
 			}
 
-			if (variant.item_uoms && variant.item_uoms.length > 0) {
+			if (getDistinctUoms(variant).length > 1) {
 				cartStore.setPendingItem(variant, cartStore.pendingItemQty, "uom");
 				return;
 			}
@@ -2454,7 +2536,6 @@ async function handleOptionSelected(option) {
 					);
 					uiStore.showItemSelectionDialog = false;
 					cartStore.clearPendingItem();
-					showSuccess(__("{0} added to cart", [variant.item_name]));
 				} catch (error) {
 					showError(error.message);
 				}
@@ -2485,7 +2566,6 @@ async function handleOptionSelected(option) {
 					cartStore.addItem(itemToAdd, qty, false, shiftStore.currentProfile);
 					uiStore.showItemSelectionDialog = false;
 					cartStore.clearPendingItem();
-					showSuccess(__("{0} ({1}) added to cart", [itemToAdd.item_name, option.uom]));
 				} catch (error) {
 					showError(error.message);
 				}
@@ -2592,10 +2672,12 @@ async function handleSaveDraft() {
 		cartStore.customer,
 		cartStore.posProfile,
 		cartStore.appliedOffers,
-		cartStore.currentDraftId
+		cartStore.currentDraftId,
+		cartStore.appliedCoupon
 	);
 	if (savedDraft) {
-		cartStore.clearCart();
+		// The draft now holds the serials
+		cartStore.clearCart({ returnSerials: false });
 		// Reset cart hash when cart is saved as draft and cleared
 		previousCartHash = "";
 	}
@@ -2610,7 +2692,8 @@ async function handleLoadDraft(draft) {
 				cartStore.customer,
 				cartStore.posProfile,
 				cartStore.appliedOffers,
-				cartStore.currentDraftId
+				cartStore.currentDraftId,
+				cartStore.appliedCoupon
 			);
 
 			if (!saved) {
@@ -2628,6 +2711,7 @@ async function handleLoadDraft(draft) {
 		cartStore.invoiceItems = draftData.items;
 		cartStore.setCustomer(draftData.customer);
 		cartStore.currentDraftId = draft.draft_id; // Set current draft ID
+		cartStore.restoreLineCoupon(draftData.applied_coupon);
 
 		// Rebuild incremental cache to recalculate totals
 		cartStore.rebuildIncrementalCache();
@@ -3180,7 +3264,7 @@ function handleLoadDraftFromManagement(draft) {
 }
 
 function handleDeleteDraft(draftId) {
-	draftsStore.deleteDraft(draftId);
+	draftsStore.deleteDraft(draftId, { returnSerials: draftId !== cartStore.currentDraftId });
 }
 
 async function handleWarehouseChanged(newWarehouse) {

@@ -1179,6 +1179,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { getSectionHeaderClasses, getSubsectionClasses, icons } from "./settingsConfig";
 import { offlineWorker } from "@/utils/offline/workerClient";
 import { logger } from "@/utils/logger";
+import { formatTime } from "@/utils/currency";
 import { usePOSEvents } from "@/composables/usePOSEvents";
 import TranslatedHTML from "../common/TranslatedHTML.vue";
 import { useQzTray } from "@/composables/useQzTray";
@@ -1586,7 +1587,7 @@ function formatSyncTime(timestamp) {
 		return __("{0}m ago", [Math.floor(diff / 60000)]);
 	} else {
 		const date = new Date(timestamp);
-		return date.toLocaleTimeString();
+		return formatTime(date);
 	}
 }
 

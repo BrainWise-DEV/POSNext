@@ -40,11 +40,11 @@ const footerClass = ref(`pos-footer-component pos-footer-component-${componentId
 const brandSignature = computed(() => `BrainWise-${componentId}`);
 
 const footerStyle = computed(() => ({
-	padding: config.value._s?.p || "12px 20px",
+	padding: config.value._s?.p || "3px 16px",
 	backgroundColor: config.value._s?.bg || "#f8f9fa",
 	borderTop: config.value._s?.bt || "1px solid #e0e0e0",
 	textAlign: config.value._s?.ta || "center",
-	fontSize: config.value._s?.fs || "13px",
+	fontSize: config.value._s?.fs || "12px",
 	color: config.value._s?.c || "#6b7280",
 	zIndex: config.value._s?.z || 100,
 	userSelect: "none",
@@ -60,6 +60,7 @@ const footerStyle = computed(() => ({
 
 // Protection mechanisms
 let integrityTimer = null;
+let sizeObserver = null;
 let visibilityObserver = null;
 let styleElement = null;
 let originalParent = null;
@@ -183,7 +184,7 @@ const ensureStylePresence = () => {
 		styleElement.textContent = `
 			.pos-footer-component {
 				pointer-events: auto !important;
-				min-height: 45px;
+				min-height: 24px;
 				position: fixed !important;
 				bottom: 0 !important;
 				left: 0 !important;
@@ -240,6 +241,19 @@ const handleLinkClick = () => {
 	const timestamp = Date.now();
 	sessionStorage.setItem("_bw_lc", timestamp.toString());
 	logClientEvent("link_click", { url: footerLink.value });
+};
+
+// This strip is position:fixed, so it sits on top of the page rather than taking
+// space in it — at the till that means covering the cart's Checkout button. Publish
+// our measured height so the page can hold that band clear (see POSSale.vue). We
+// own the number, so restyling the footer moves the reservation with it instead of
+// leaving a stale constant somewhere else in the tree.
+const publishFooterHeight = () => {
+	if (!footerRoot.value || typeof document === "undefined") return;
+	const h = Math.ceil(footerRoot.value.getBoundingClientRect().height);
+	if (h > 0) {
+		document.documentElement.style.setProperty("--pos-footer-h", `${h}px`);
+	}
 };
 
 // Integrity check function
@@ -342,6 +356,11 @@ onMounted(async () => {
 		originalParent = footerRoot.value.parentNode;
 		originalNextSibling = footerRoot.value.nextSibling;
 		ensureBranding();
+		publishFooterHeight();
+		if (typeof ResizeObserver !== "undefined") {
+			sizeObserver = new ResizeObserver(publishFooterHeight);
+			sizeObserver.observe(footerRoot.value);
+		}
 	}
 
 	if (typeof window !== "undefined") {
@@ -359,6 +378,9 @@ onBeforeUnmount(() => {
 	}
 	if (visibilityObserver) {
 		visibilityObserver.disconnect();
+	}
+	if (sizeObserver) {
+		sizeObserver.disconnect();
 	}
 	if (styleElement && document.head.contains(styleElement)) {
 		document.head.removeChild(styleElement);

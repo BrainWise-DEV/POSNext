@@ -65,6 +65,9 @@ class NetworkMonitor {
 		this._pingIntervalId = null;
 		this._consecutiveFailures = 0;
 		this._consecutiveSuccesses = 0;
+		// The first result decides alone: at startup there is no state to protect from
+		// flapping, and an offline start must use cached data right away
+		this._firstResult = true;
 		this._latencyHistory = [];
 		this._lastPingTime = 0;
 		this._backoffMultiplier = 1;
@@ -288,6 +291,9 @@ class NetworkMonitor {
 			}
 		}
 
+		const firstResult = this._firstResult;
+		this._firstResult = false;
+
 		// Update counters
 		if (success) {
 			this._consecutiveFailures = 0;
@@ -295,7 +301,7 @@ class NetworkMonitor {
 			this._backoffMultiplier = 1; // Reset backoff on success
 
 			// Check if we've reached online threshold
-			if (this._consecutiveSuccesses >= CONFIG.ONLINE_THRESHOLD) {
+			if (firstResult || this._consecutiveSuccesses >= CONFIG.ONLINE_THRESHOLD) {
 				if (!offlineState._serverOnline) {
 					log.info(
 						`Server online (${CONFIG.ONLINE_THRESHOLD} consecutive successes, latency: ${latency}ms)`
@@ -309,7 +315,7 @@ class NetworkMonitor {
 			this._consecutiveFailures++;
 
 			// Check if we've reached offline threshold
-			if (this._consecutiveFailures >= CONFIG.OFFLINE_THRESHOLD) {
+			if (firstResult || this._consecutiveFailures >= CONFIG.OFFLINE_THRESHOLD) {
 				if (offlineState._serverOnline) {
 					log.warn(`Server offline (${CONFIG.OFFLINE_THRESHOLD} consecutive failures)`);
 					offlineState.setServerOnline(false);

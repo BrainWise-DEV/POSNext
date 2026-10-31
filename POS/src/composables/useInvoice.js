@@ -3,9 +3,11 @@ import { createResource } from "frappe-ui";
 import { computed, ref, toRaw } from "vue";
 import { isOffline, getCachedItem } from "@/utils/offline";
 import { useSerialNumberStore } from "@/stores/serialNumber";
+import { shiftState } from "@/composables/useShift";
 import { CoalescingMutex } from "@/utils/mutex";
 import { logger } from "@/utils/logger";
 import { roundCurrency } from "@/utils/currency";
+import { preCouponLineDiscount } from "@/utils/couponLines";
 
 const log = logger.create("Invoice");
 
@@ -20,9 +22,14 @@ export function useInvoice() {
 	// Serial Number Store for returning serials when items are removed
 	const serialStore = useSerialNumberStore();
 
+	function resolveCustomerName() {
+		return customer.value?.name || customer.value || defaultCustomerName.value || null;
+	}
+
 	// State
 	const invoiceItems = ref([]);
 	const customer = ref(null);
+	const defaultCustomerName = ref(null);
 	const payments = ref([]);
 	const salesTeam = ref([]); // Sales team for Sales Invoice
 	const posProfile = ref(null);
@@ -120,7 +127,7 @@ export function useInvoice() {
 				const itemDetails = await getItemDetailsResource.submit({
 					item_code: item.item_code,
 					pos_profile: posProfile.value,
-					customer: customer.value?.name || customer.value,
+					customer: resolveCustomerName(),
 					qty,
 					uom,
 				});
@@ -278,6 +285,7 @@ export function useInvoice() {
 				has_batch_no: item.has_batch_no || 0,
 				has_serial_no: item.has_serial_no || 0,
 				batch_no: item.batch_no,
+				batch_expiry_date: item.batch_expiry_date, // Cart meta row only, not sent to the server
 				serial_no: item.serial_no,
 				item_uoms: item.item_uoms || [], // Available UOMs for this item
 				// Add item_group and brand for offer eligibility checking
@@ -292,6 +300,9 @@ export function useInvoice() {
 				is_stock_item: item.is_stock_item ?? 1,
 				is_bundle: item.is_bundle || false,
 				allow_negative_stock: item.allow_negative_stock || 0,
+				// Optional item-level Sales Person (commission attribution)
+				sales_person: item.sales_person || null,
+				sales_person_name: item.sales_person_name || null,
 			};
 			invoiceItems.value.push(newItem);
 			// Recalculate the newly added item to apply taxes
@@ -660,13 +671,28 @@ export function useInvoice() {
 		const baseAmount = roundCurrency(item.quantity * roundedRate);
 
 		// Calculate discount from either percentage or fixed amount
+		// A fixed-amount discount also gets a derived percentage (for display and
+		// the payload). Remember that the percentage was derived, so the next
+		// recalc (e.g. a qty change) keeps the fixed amount instead of re-reading
+		// the stale percentage as a real percentage discount. Any caller that
+		// writes a different percentage, or clears the amount, leaves amount mode.
+		const amountMode =
+			item.discount_mode === "amount" &&
+			item.discount_amount > 0 &&
+			(!(item.discount_percentage > 0) ||
+				item.discount_percentage === item._derived_discount_percentage);
 		let discountAmount = 0;
-		if (item.discount_percentage > 0) {
+		if (!amountMode && item.discount_percentage > 0) {
 			discountAmount = roundCurrency((baseAmount * item.discount_percentage) / 100);
+			item.discount_mode = "percentage";
 		} else if (item.discount_amount > 0) {
 			discountAmount = roundCurrency(item.discount_amount);
 			// Sync percentage when amount is provided directly
 			item.discount_percentage = baseAmount > 0 ? (discountAmount / baseAmount) * 100 : 0;
+			item.discount_mode = "amount";
+			item._derived_discount_percentage = item.discount_percentage;
+		} else {
+			item.discount_mode = null;
 		}
 		item.discount_amount = discountAmount;
 
@@ -737,6 +763,8 @@ export function useInvoice() {
 	 * @returns {Array} Items formatted for ERPNext Sales Invoice
 	 */
 	function formatItemsForSubmission(items) {
+		const isAppliedCouponLine = (item) =>
+			item.discount_source === "coupon" && item.coupon_code && item.coupon_code === couponCode.value;
 		const mapRow = (item) => ({
 			item_code: item.item_code,
 			item_name: item.item_name,
@@ -758,6 +786,12 @@ export function useInvoice() {
 			is_rate_manually_edited: item.is_rate_manually_edited || 0,
 			original_rate: item.original_rate || null,
 			is_free_item: item.is_free_item || 0,
+			// Lines discounted by a line-level coupon; posnext_promotions re-checks them on validate.
+			posnext_coupon_code: isAppliedCouponLine(item) ? item.coupon_code : null,
+			posnext_coupon_discount: isAppliedCouponLine(item)
+				? Math.max(roundCurrency((item.discount_amount || 0) - preCouponLineDiscount(item)), 0)
+				: 0,
+			sales_person: item.sales_person || null,
 		});
 
 		const out = [];
@@ -791,6 +825,8 @@ export function useInvoice() {
 						is_rate_manually_edited: 0,
 						original_rate: null,
 						is_free_item: 1,
+						// Inherit parent line SP so free rows never block coverage
+						sales_person: item.sales_person || null,
 					});
 				}
 			}
@@ -941,7 +977,7 @@ export function useInvoice() {
 			doctype: targetDoctype,
 			pos_profile: posProfile.value,
 			posa_pos_opening_shift: posOpeningShift.value,
-			customer: customer.value?.name || customer.value,
+			customer: resolveCustomerName(),
 			items: formatItemsForSubmission(rawItems),
 			payments: invoicePayments,
 			discount_amount: additionalDiscount.value || 0,
@@ -1003,7 +1039,7 @@ export function useInvoice() {
 					doctype: targetDoctype,
 					pos_profile: posProfile.value,
 					posa_pos_opening_shift: posOpeningShift.value,
-					customer: customer.value?.name || customer.value,
+					customer: resolveCustomerName(),
 					items: formatItemsForSubmission(rawItems),
 					payments: invoicePayments,
 					discount_amount: additionalDiscount.value || 0,
@@ -1045,6 +1081,15 @@ export function useInvoice() {
 				const submitData = {
 					change_amount: remainingAmount.value < 0 ? Math.abs(remainingAmount.value) : 0,
 					write_off_amount: writeOffAmount || 0,
+					// Pass cashier invoice-level team explicitly — never rely on the
+					// draft's rebuilt sales_team (item-level SPs aggregated in).
+					sales_team:
+						rawSalesTeam && rawSalesTeam.length > 0
+							? rawSalesTeam.map((member) => ({
+									sales_person: member.sales_person,
+									allocated_percentage: member.allocated_percentage || 0,
+								}))
+							: [],
 				};
 
 				if (redeemedCustomerCredit > 0 && customerCreditDict.length > 0) {
@@ -1131,10 +1176,19 @@ export function useInvoice() {
 	 * Sets the default customer from POS Profile if available.
 	 * This is called when resetting/clearing the cart to auto-select
 	 * the default customer configured in the POS Profile.
+	 *
+	 * @param {string|null} profileCustomer - Optional customer from the active shift profile (sync seed)
 	 */
-	async function setDefaultCustomer() {
-		// Reset to null first
+	async function setDefaultCustomer(profileCustomer = null) {
 		customer.value = null;
+		defaultCustomerName.value = profileCustomer || null;
+
+		if (profileCustomer) {
+			customer.value = {
+				name: profileCustomer,
+				customer_name: profileCustomer,
+			};
+		}
 
 		// Only fetch default customer if we have a POS Profile
 		if (!posProfile.value) {
@@ -1148,6 +1202,7 @@ export function useInvoice() {
 
 			// Set the default customer if one is configured
 			if (result && result.customer) {
+				defaultCustomerName.value = result.customer;
 				// Create customer object matching the structure from customer selection
 				customer.value = {
 					name: result.customer,
@@ -1156,8 +1211,13 @@ export function useInvoice() {
 				};
 			}
 		} catch (error) {
-			// Silently fail - default customer is optional
-			console.log("No default customer set in POS Profile");
+			// Offline or request failed: use the default customer from the cached POS Profile
+			const fallback = shiftState.value.pos_profile?.customer;
+			if (fallback) {
+				customer.value = { name: fallback, customer_name: fallback };
+			} else {
+				console.log("No default customer set in POS Profile");
+			}
 		}
 	}
 
@@ -1184,12 +1244,17 @@ export function useInvoice() {
 	/**
 	 * Clears the cart and resets to default state.
 	 * If a POS Profile is active and has a default customer, it will be pre-selected.
+	 * @param {{ returnSerials?: boolean }} [options]
+	 *   When false (post-submit), sold serials stay consumed in durable cache.
+	 *   Default true restores serials for abandoned / cleared carts.
 	 */
-	async function clearCart() {
-		// Return all serial numbers back to cache before clearing
-		for (const item of invoiceItems.value) {
-			if (item.has_serial_no && item.serial_no) {
-				serialStore.returnSerials(item.item_code, item.serial_no);
+	async function clearCart({ returnSerials = true } = {}) {
+		// Return serials only when the cart is abandoned — not after a successful sale
+		if (returnSerials) {
+			for (const item of invoiceItems.value) {
+				if (item.has_serial_no && item.serial_no) {
+					serialStore.returnSerials(item.item_code, item.serial_no);
+				}
 			}
 		}
 
