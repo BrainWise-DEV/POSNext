@@ -46,6 +46,7 @@ POS_SETTINGS_FIELDS = [
 	"loyalty_to_wallet",
 	"cart_lifo",
 	"display_item_code",
+	"customer_search_show_all",
 ]
 
 # Default POS Settings values
@@ -85,6 +86,7 @@ DEFAULT_POS_SETTINGS = {
 	"miraaya_installed": 0,
 	"cart_lifo": 0,
 	"display_item_code": 1,
+	"customer_search_show_all": 0,
 }
 
 
