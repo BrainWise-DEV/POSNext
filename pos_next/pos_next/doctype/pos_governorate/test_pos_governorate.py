@@ -5,5 +5,5 @@
 from frappe.tests.utils import FrappeTestCase
 
 
-class TestGovernorate(FrappeTestCase):
+class TestPOSGovernorate(FrappeTestCase):
 	pass

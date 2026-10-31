@@ -357,32 +357,37 @@ def get_wallet_payment_flags(methods):
 
 @frappe.whitelist()
 def get_sales_persons(pos_profile=None):
-	"""Get all active individual sales persons (not groups) for POS"""
-	try:
-		filters = {
-			"enabled": 1,
-			"is_group": 0,  # Only get individual sales persons, not group nodes
-		}
+	"""Get all active individual sales persons (not groups) for POS.
 
-		# If company is specified via POS Profile, filter by company (if Sales Person has company field)
-		if pos_profile:
-			company = frappe.db.get_value("POS Profile", pos_profile, "company")
-			# Check if Sales Person doctype has a company field
-			if frappe.db.has_column("Sales Person", "company") and company:
-				filters["company"] = company
+	Returns only the picker fields. Item / Item Group / Brand commission overrides
+	are resolved server-side when the invoice is saved
+	(``pos_next.pos_next.utils.sales_person_commission``), so they are not sent.
+	"""
+	if not pos_profile:
+		frappe.throw(_("POS Profile is required"))
 
-		sales_persons = frappe.get_list(
-			"Sales Person",
-			filters=filters,
-			fields=["name", "sales_person_name", "commission_rate", "employee"],
-			order_by="sales_person_name",
-			limit_page_length=0,
-		)
+	has_access = frappe.db.exists("POS Profile User", {"parent": pos_profile, "user": frappe.session.user})
+	if not has_access:
+		frappe.throw(_("You don't have access to this POS Profile"))
 
-		return sales_persons
-	except Exception:
-		frappe.log_error(frappe.get_traceback(), "Get Sales Persons Error")
-		return []
+	filters = {
+		"enabled": 1,
+		"is_group": 0,  # Only get individual sales persons, not group nodes
+	}
+
+	company = frappe.db.get_value("POS Profile", pos_profile, "company")
+	if frappe.db.has_column("Sales Person", "company") and company:
+		filters["company"] = company
+
+	sales_persons = frappe.get_list(
+		"Sales Person",
+		filters=filters,
+		fields=["name", "sales_person_name", "commission_rate", "employee"],
+		order_by="sales_person_name",
+		limit_page_length=0,
+	)
+
+	return sales_persons
 
 
 @frappe.whitelist()

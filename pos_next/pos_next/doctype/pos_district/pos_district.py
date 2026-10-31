@@ -5,5 +5,5 @@
 from frappe.model.document import Document
 
 
-class District(Document):
+class POSDistrict(Document):
 	pass
