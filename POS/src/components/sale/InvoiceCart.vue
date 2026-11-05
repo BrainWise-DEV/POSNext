@@ -2212,7 +2212,7 @@ function isPhoneName(name) {
  * Handle keyboard navigation in customer search dropdown.
  * Supports:
  * - ArrowDown/ArrowUp: Navigate through results
- * - Enter: Select current or auto-select single result
+ * - Enter: Select highlighted result, or the top match when a query is typed
  * - Escape: Clear search
  *
  * @param {KeyboardEvent} event - Keyboard event from search input
@@ -2249,8 +2249,9 @@ function handleKeydown(event) {
 			selectedIndex.value < customerResults.value.length
 		) {
 			selectCustomer(customerResults.value[selectedIndex.value])
-		} else if (customerResults.value.length > 0) {
-			// No explicit selection: take the top-ranked result
+		} else if (customerSearch.value.trim()) {
+			// No explicit selection: take the top-ranked match, but only for a
+			// typed query so Enter on an empty, just-focused input picks nothing
 			selectCustomer(customerResults.value[0])
 		}
 	}
