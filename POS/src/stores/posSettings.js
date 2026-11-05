@@ -60,6 +60,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		// Advanced Settings
 		use_limit_search: 0,
 		search_limit: 1000,
+		customer_search_show_all: 0,
 		allow_submissions_in_background_job: 0,
 		allow_delete_offline_invoice: 0,
 		allow_change_posting_date: 0,
@@ -159,6 +160,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	// Computed - Advanced Settings
 	const useLimitSearch = computed(() => Boolean(settings.value.use_limit_search));
 	const searchLimit = computed(() => Number.parseInt(settings.value.search_limit) || 1000);
+	const customerSearchShowAll = computed(() => Boolean(settings.value.customer_search_show_all));
 	const allowSubmissionsInBackgroundJob = computed(() =>
 		Boolean(settings.value.allow_submissions_in_background_job)
 	);
@@ -283,6 +285,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 			auto_set_delivery_charges: 0,
 			use_limit_search: 0,
 			search_limit: 1000,
+			customer_search_show_all: 0,
 			allow_submissions_in_background_job: 0,
 			allow_delete_offline_invoice: 0,
 			allow_change_posting_date: 0,
@@ -413,6 +416,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		// Computed - Advanced Settings
 		useLimitSearch,
 		searchLimit,
+		customerSearchShowAll,
 		allowSubmissionsInBackgroundJob,
 		allowDeleteOfflineInvoice,
 		allowChangePostingDate,

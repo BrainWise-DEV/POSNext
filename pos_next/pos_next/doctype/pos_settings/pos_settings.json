@@ -63,6 +63,7 @@
   "section_break_advanced",
   "use_limit_search",
   "search_limit",
+  "customer_search_show_all",
   "column_break_advanced",
   "allow_submissions_in_background_job",
   "allow_delete_offline_invoice",
@@ -479,6 +480,13 @@
    "label": "Search Limit Number"
   },
   {
+   "default": "0",
+   "description": "Show up to 500 customers in the cart search dropdown instead of the first 10-20 matches. Type to narrow the list; very large lists may take longer to render.",
+   "fieldname": "customer_search_show_all",
+   "fieldtype": "Check",
+   "label": "Show All Customers in Search"
+  },
+  {
    "fieldname": "column_break_advanced",
    "fieldtype": "Column Break"
   },
@@ -558,7 +566,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-06-03 15:54:09.903964",
+ "modified": "2026-11-05 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Settings",

@@ -722,6 +722,11 @@
 												:description="__('Show the most recently added item at the top of the cart instead of the bottom.')"
 											/>
 											<CheckboxField
+												v-model="settings.customer_search_show_all"
+												:label="__('Show All Customers in Search')"
+											:description="__('Show up to 500 customers in the cart search dropdown instead of the first 10-20 matches. Type to narrow the list; very large lists may take longer to render.')"
+											/>
+											<CheckboxField
 												v-model="settings.silent_print"
 												:label="__('Silent Print')"
 												:description="
