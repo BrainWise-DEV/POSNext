@@ -71,6 +71,27 @@ class ExternalCustomerRejected(frappe.ValidationError):
 	"""
 
 
+class ExistingCustomerFound(ExternalCustomerRejected):
+	"""The email or phone already belongs to an existing customer; do not create a new one."""
+
+	def __init__(self, message, existing_customer=None, magento_id=None):
+		super().__init__(message)
+		self.existing_customer = existing_customer
+		self.magento_id = magento_id
+
+
+def resolve_existing_customer(**kwargs):
+	"""Ask integrations for an existing customer to use instead of inserting a new one.
+
+	A hook returns ``{"message": str, "existing_customer": dict}`` or ``None``.
+	"""
+	for method_path in frappe.get_hooks("pos_next_customer_resolve_existing") or []:
+		result = frappe.get_attr(method_path)(**kwargs)
+		if result:
+			return result
+	return None
+
+
 def after_customer_insert(customer, **kwargs):
 	# Best-effort for unexpected errors (e.g. external system unreachable): the
 	# customer stays. An explicit ExternalCustomerRejected fails the create.

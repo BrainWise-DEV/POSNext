@@ -8,8 +8,10 @@ from frappe import _
 
 from pos_next.api.constants import EMAIL_VERIFICATION_FIELDS
 from pos_next.integrations.registry import (
+	ExistingCustomerFound,
 	after_customer_insert,
 	prepare_customer_doc,
+	resolve_existing_customer,
 	validate_customer_create,
 )
 @frappe.whitelist()
@@ -128,6 +130,25 @@ def create_customer(
 		custom_is_publish=custom_is_publish,
 	)
 
+	existing = resolve_existing_customer(
+		customer_name=customer_name,
+		email_id=email_id,
+		mobile_no=mobile_no,
+		custom_first_name=custom_first_name,
+		custom_last_name=custom_last_name,
+		custom_is_publish=custom_is_publish,
+		customer_group=customer_group,
+		territory=territory,
+		company=company,
+		pos_profile=pos_profile,
+	)
+	if existing and existing.get("existing_customer"):
+		return {
+			"already_exists": True,
+			"message": existing.get("message") or _("A customer with this email already exists."),
+			"existing_customer": existing["existing_customer"],
+		}
+
 	loyalty_program = get_default_loyalty_program_from_settings(
 		company=company,
 		pos_profile=pos_profile,
@@ -161,16 +182,46 @@ def create_customer(
 	frappe.flags.pos_next_customer_company = company
 	frappe.flags.pos_next_customer_pos_profile = pos_profile
 	try:
-		customer.insert()
-		if sync_external_customer:
-			after_customer_insert(
-				customer,
-				email_id=email_id,
-				mobile_no=mobile_no,
-				custom_first_name=custom_first_name,
-				custom_last_name=custom_last_name,
-				custom_is_publish=custom_is_publish,
+		try:
+			customer.insert()
+			if sync_external_customer:
+				after_customer_insert(
+					customer,
+					email_id=email_id,
+					mobile_no=mobile_no,
+					custom_first_name=custom_first_name,
+					custom_last_name=custom_last_name,
+					custom_is_publish=custom_is_publish,
+				)
+		except ExistingCustomerFound as exc:
+			message = str(getattr(exc, "message", None) or exc or "").strip() or _(
+				"A customer with this email already exists."
 			)
+			existing_doc = getattr(exc, "existing_customer", None)
+			frappe.db.rollback()
+			if not existing_doc:
+				resolved = resolve_existing_customer(
+					customer_name=customer_name,
+					email_id=email_id,
+					mobile_no=mobile_no,
+					custom_first_name=custom_first_name,
+					custom_last_name=custom_last_name,
+					custom_is_publish=custom_is_publish,
+					customer_group=customer_group,
+					territory=territory,
+					company=company,
+					pos_profile=pos_profile,
+				)
+				if resolved:
+					existing_doc = resolved.get("existing_customer")
+					message = resolved.get("message") or message
+			if existing_doc:
+				return {
+					"already_exists": True,
+					"message": message,
+					"existing_customer": existing_doc,
+				}
+			frappe.throw(message)
 	finally:
 		frappe.flags.pos_next_customer_company = None
 		frappe.flags.pos_next_customer_pos_profile = None

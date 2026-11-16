@@ -15,7 +15,7 @@ from pos_next.api.customers import (
 class TestCustomersAPI(unittest.TestCase):
 	@patch("pos_next.api.customers.frappe.logger")
 	@patch("pos_next.api.customers.frappe.get_all")
-	@patch("pos_next.api.customers.frappe.db")
+	@patch("pos_next.api.customers.frappe.db.rollback")
 	def test_get_customers_applies_search_term_filters(self, mock_db, mock_get_all, mock_logger):
 		mock_logger.return_value = Mock()
 		mock_get_all.return_value = []
@@ -35,7 +35,7 @@ class TestCustomersAPI(unittest.TestCase):
 			],
 		)
 
-	@patch("pos_next.api.customers.frappe.db")
+	@patch("pos_next.api.customers.frappe.db.rollback")
 	def test_get_default_loyalty_program_from_settings_uses_explicit_pos_profile(self, mock_db):
 		mock_db.get_value.return_value = "LOYALTY-A"
 
@@ -83,6 +83,7 @@ class TestCustomersAPI(unittest.TestCase):
 		"pos_next.api.customers.frappe.flags",
 		new=Mock(pos_next_customer_company=None, pos_next_customer_pos_profile=None),
 	)
+	@patch("pos_next.api.customers.resolve_existing_customer", return_value=None)
 	@patch("pos_next.api.customers.frappe.get_doc")
 	@patch("pos_next.api.customers.get_default_loyalty_program_from_settings")
 	@patch("pos_next.api.customers.frappe.has_permission")
@@ -91,6 +92,7 @@ class TestCustomersAPI(unittest.TestCase):
 		mock_has_permission,
 		mock_get_loyalty,
 		mock_get_doc,
+		_mock_resolve,
 	):
 		mock_has_permission.return_value = True
 		mock_get_loyalty.return_value = "LOYALTY-A"
@@ -109,3 +111,104 @@ class TestCustomersAPI(unittest.TestCase):
 		mock_get_loyalty.assert_called_once_with(company=None, pos_profile="POS-A")
 		customer_doc.insert.assert_called_once_with()
 		self.assertEqual(result["loyalty_program"], "LOYALTY-A")
+
+
+	@patch(
+		"pos_next.api.customers.frappe.flags",
+		new=Mock(pos_next_customer_company=None, pos_next_customer_pos_profile=None),
+	)
+	@patch("pos_next.api.customers.resolve_existing_customer")
+	@patch("pos_next.api.customers.frappe.get_doc")
+	@patch("pos_next.api.customers.get_default_loyalty_program_from_settings")
+	@patch("pos_next.api.customers.validate_customer_create")
+	@patch("pos_next.api.customers.frappe.has_permission")
+	def test_create_customer_returns_existing_without_insert(
+		self,
+		mock_has_permission,
+		_mock_validate,
+		mock_get_loyalty,
+		mock_get_doc,
+		mock_resolve,
+	):
+		mock_has_permission.return_value = True
+		existing = {
+			"name": "CUST-2026-68541",
+			"customer_name": "ZZ Test POSSync1",
+			"mobile_no": "+964-7754539344",
+			"email_id": "pos.9647754539344@pos.miraaya",
+		}
+		mock_resolve.return_value = {
+			"message": "A customer with this email already exists.",
+			"existing_customer": existing,
+		}
+
+		result = create_customer(
+			customer_name="ZZ Test Dup Email Warn",
+			email_id="pos.9647754539344@pos.miraaya",
+			mobile_no="+964-7011998877",
+			customer_group="Individual",
+			territory="All Territories",
+		)
+
+		self.assertTrue(result["already_exists"])
+		self.assertEqual(result["message"], "A customer with this email already exists.")
+		self.assertEqual(result["existing_customer"]["name"], "CUST-2026-68541")
+		mock_get_loyalty.assert_not_called()
+		mock_get_doc.assert_not_called()
+
+	@patch(
+		"pos_next.api.customers.frappe.flags",
+		new=Mock(pos_next_customer_company=None, pos_next_customer_pos_profile=None),
+	)
+	@patch("pos_next.api.customers.resolve_existing_customer")
+	@patch("pos_next.api.customers.frappe.db.rollback")
+	@patch("pos_next.api.customers.after_customer_insert")
+	@patch("pos_next.api.customers.prepare_customer_doc", return_value=True)
+	@patch("pos_next.api.customers.frappe.get_doc")
+	@patch("pos_next.api.customers.get_default_loyalty_program_from_settings")
+	@patch("pos_next.api.customers.validate_customer_create")
+	@patch("pos_next.api.customers.frappe.has_permission")
+	def test_create_customer_rolls_back_when_existing_found_after_insert(
+		self,
+		mock_has_permission,
+		_mock_validate,
+		mock_get_loyalty,
+		mock_get_doc,
+		_mock_prepare,
+		mock_after_insert,
+		mock_rollback,
+		mock_resolve,
+	):
+		from pos_next.integrations.registry import ExistingCustomerFound
+
+		mock_has_permission.return_value = True
+		mock_get_loyalty.return_value = None
+		mock_resolve.side_effect = [
+			None,
+			{
+				"message": "A customer with this phone already exists.",
+				"existing_customer": {
+					"name": "CUST-2026-68541",
+					"customer_name": "ZZ Test POSSync1",
+					"mobile_no": "+964-7754539344",
+				},
+			},
+		]
+		customer_doc = Mock()
+		mock_get_doc.return_value = customer_doc
+		mock_after_insert.side_effect = ExistingCustomerFound(
+			"A customer with this phone already exists."
+		)
+
+		result = create_customer(
+			customer_name="Someone Else",
+			mobile_no="+964-7754539344",
+			customer_group="Individual",
+			territory="All Territories",
+		)
+
+		mock_rollback.assert_called_once_with()
+		self.assertTrue(result["already_exists"])
+		self.assertEqual(result["message"], "A customer with this phone already exists.")
+		self.assertEqual(result["existing_customer"]["name"], "CUST-2026-68541")
+
