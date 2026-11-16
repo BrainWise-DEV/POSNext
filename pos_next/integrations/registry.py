@@ -62,11 +62,23 @@ def prepare_customer_doc(customer, **kwargs):
 	return sync_external_customer
 
 
+class ExternalCustomerRejected(frappe.ValidationError):
+	"""Raised by an after-insert hook when the external system refused the customer.
+
+	It propagates out of ``create_customer`` so the request rolls back and the
+	cashier sees the external system's message, instead of keeping a customer
+	that is "saved but not synced".
+	"""
+
+
 def after_customer_insert(customer, **kwargs):
-	# Best-effort: customer.insert() already succeeded; do not roll it back.
+	# Best-effort for unexpected errors (e.g. external system unreachable): the
+	# customer stays. An explicit ExternalCustomerRejected fails the create.
 	for method_path in frappe.get_hooks("pos_next_customer_after_insert") or []:
 		try:
 			frappe.get_attr(method_path)(customer, **kwargs)
+		except ExternalCustomerRejected:
+			raise
 		except Exception:
 			frappe.log_error(
 				frappe.get_traceback(),

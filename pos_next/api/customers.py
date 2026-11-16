@@ -122,8 +122,10 @@ def create_customer(
 	validate_customer_create(
 		customer_name=customer_name,
 		email_id=email_id,
+		mobile_no=mobile_no,
 		custom_first_name=custom_first_name,
 		custom_last_name=custom_last_name,
+		custom_is_publish=custom_is_publish,
 	)
 
 	loyalty_program = get_default_loyalty_program_from_settings(
