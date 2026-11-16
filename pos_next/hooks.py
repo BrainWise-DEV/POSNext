@@ -292,6 +292,7 @@ pos_next_bootstrap_settings = []
 pos_next_customer_validators = []
 pos_next_customer_prepare = []
 pos_next_customer_after_insert = []
+pos_next_customer_resolve_existing = []
 
 
 website_route_rules = [

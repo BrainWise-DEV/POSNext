@@ -62,13 +62,79 @@ def prepare_customer_doc(customer, **kwargs):
 	return sync_external_customer
 
 
+class ExternalCustomerRejected(frappe.ValidationError):
+	"""Raised by an after-insert hook when the external system refused the customer.
+
+	It propagates out of ``create_customer`` so the request rolls back and the
+	cashier sees the external system's message, instead of keeping a customer
+	that is "saved but not synced".
+	"""
+
+
+class ExistingCustomerFound(ExternalCustomerRejected):
+	"""The email or phone already belongs to an existing customer; do not create a new one."""
+
+	def __init__(self, message, existing_customer=None, magento_id=None):
+		super().__init__(message)
+		self.existing_customer = existing_customer
+		self.magento_id = magento_id
+
+
+def resolve_existing_customer(**kwargs):
+	"""Ask integrations for an existing customer to use instead of inserting a new one.
+
+	A hook returns ``{"message": str, "existing_customer": dict}`` or ``None``.
+	"""
+	for method_path in frappe.get_hooks("pos_next_customer_resolve_existing") or []:
+		result = frappe.get_attr(method_path)(**kwargs)
+		if result:
+			return result
+	return None
+
+
 def after_customer_insert(customer, **kwargs):
-	# Best-effort: customer.insert() already succeeded; do not roll it back.
+	# Best-effort for unexpected errors (e.g. external system unreachable): the
+	# customer stays. An explicit ExternalCustomerRejected fails the create.
 	for method_path in frappe.get_hooks("pos_next_customer_after_insert") or []:
 		try:
 			frappe.get_attr(method_path)(customer, **kwargs)
+		except ExternalCustomerRejected:
+			raise
 		except Exception:
 			frappe.log_error(
 				frappe.get_traceback(),
 				f"Customer after_insert hook failed: {method_path}",
 			)
+
+
+# ---------------------------------------------------------------------------
+# External customer registration errors
+# ---------------------------------------------------------------------------
+# An integration (e.g. magento_integration) records why it could not register a
+# POS customer externally — typically "email already registered with a different
+# mobile number". POS Next shows that message to the cashier instead of a vague
+# "not synced yet" (customer create toast + email OTP).
+
+_SYNC_ERROR_KEY = "pos_next:customer_sync_error:{0}"
+_SYNC_ERROR_TTL = 30 * 24 * 3600
+
+
+def record_customer_sync_error(customer, message):
+	if not customer:
+		return
+	text = (str(message or "")).strip()[:500]
+	if not text:
+		clear_customer_sync_error(customer)
+		return
+	frappe.cache().set_value(_SYNC_ERROR_KEY.format(customer), text, expires_in_sec=_SYNC_ERROR_TTL)
+
+
+def clear_customer_sync_error(customer):
+	if customer:
+		frappe.cache().delete_value(_SYNC_ERROR_KEY.format(customer))
+
+
+def get_customer_sync_error(customer):
+	if not customer:
+		return None
+	return frappe.cache().get_value(_SYNC_ERROR_KEY.format(customer)) or None

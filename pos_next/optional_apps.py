@@ -45,4 +45,13 @@ def update_pos_page_context(context):
 		return
 	boot = dict(context.get("boot") or {})
 	boot["posnext_app_flags"] = get_pos_ui_app_flags()
+	# www/ is a gitignored build output, so a pos.py that sets the CSRF token is
+	# not deployed with the app. Without a token in boot the Vue app starts with
+	# no window.csrf_token and its first POSTs (frappe.auth.get_logged_user,
+	# frappe.client.get_value) fail with CSRFTokenError. Set it here instead.
+	if frappe.session.user != "Guest" and not boot.get("csrf_token"):
+		boot["csrf_token"] = frappe.sessions.get_csrf_token()
+	boot.setdefault("site_name", frappe.local.site)
 	context.boot = boot
+	# The page carries a per-session token: never serve it from the page cache.
+	context.no_cache = 1

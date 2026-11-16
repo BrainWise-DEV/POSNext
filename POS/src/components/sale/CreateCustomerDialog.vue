@@ -24,6 +24,27 @@
 				/>
 			</div>
 			<div v-else class="flex flex-col gap-6">
+				<div
+					v-if="existingDuplicate"
+					class="px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg"
+					data-testid="existing-customer-warning"
+				>
+					<p class="text-sm font-medium text-amber-900">
+						{{ existingDuplicate.message }}
+					</p>
+					<div class="mt-2 text-sm text-amber-800">
+						<p class="font-medium">
+							{{ existingDuplicate.existing_customer.customer_name }}
+						</p>
+						<p>{{ existingDuplicate.existing_customer.name }}</p>
+						<p v-if="existingDuplicate.existing_customer.mobile_no">
+							{{ existingDuplicate.existing_customer.mobile_no }}
+						</p>
+						<p v-if="existingDuplicate.existing_customer.email_id">
+							{{ existingDuplicate.existing_customer.email_id }}
+						</p>
+					</div>
+				</div>
 				<!-- Customer Name (Required) -->
 				<div v-if="!requiresSplitCustomerName">
 					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
@@ -331,6 +352,14 @@
 						{{ __("Done") }}
 					</Button>
 				</div>
+				<div v-else-if="existingDuplicate" class="flex gap-2">
+					<Button variant="solid" @click="selectExistingCustomer">
+						{{ __("Select this customer") }}
+					</Button>
+					<Button variant="subtle" @click="clearExistingDuplicate">
+						{{ __("Back") }}
+					</Button>
+				</div>
 				<div v-else class="flex gap-2">
 					<Button
 						variant="solid"
@@ -434,6 +463,7 @@ const defaultCountryApplied = ref(false);
 const emailVerificationLocked = ref(false);
 /** Customer just created in this dialog, kept open to offer "Verify email" */
 const createdCustomer = ref(null);
+const existingDuplicate = ref(null);
 const verifiedOverride = ref(null);
 /** Fresh server status fetched when the dialog opens in edit mode (cached objects can be stale) */
 const freshVerification = ref(null);
@@ -737,7 +767,19 @@ const createCustomerResource = createResource({
 		pos_profile: props.posProfile,
 	}),
 	onSuccess: async (data) => {
+		if (data?.already_exists && data.existing_customer) {
+			existingDuplicate.value = {
+				message: data.message || __("A customer with this email already exists."),
+				existing_customer: data.existing_customer,
+			};
+			return;
+		}
 		showSuccess(__("Customer {0} created successfully", [data.customer_name]));
+		if (data.external_sync_error) {
+			// Saved in POS, but Magento rejected it (e.g. email already registered
+			// with a different mobile number): show Magento's own message.
+			showError(data.external_sync_error);
+		}
 		// Offer "Verify email now" when enabled (or the new customer is an F&F
 		// member, who needs a verified email), online and a real email was entered
 		const realEmail = hasRealEmail(data.email_id || customerData.value.email_id) && !isOffline();
@@ -1011,7 +1053,19 @@ const handleCreate = async () => {
 	}
 };
 
+const selectExistingCustomer = () => {
+	const customer = existingDuplicate.value?.existing_customer;
+	existingDuplicate.value = null;
+	if (customer) emit("customer-created", customer);
+	show.value = false;
+};
+
+const clearExistingDuplicate = () => {
+	existingDuplicate.value = null;
+};
+
 const resetForm = () => {
+
 	const settings = sellingSettingsResource.data || {};
 	Object.assign(customerData.value, {
 		customer_name: "",
@@ -1030,6 +1084,7 @@ const resetForm = () => {
 	selectedCountryCode.value = "";
 	phoneNumber.value = "";
 	defaultCountryApplied.value = false;
+	existingDuplicate.value = null;
 };
 
 // =============================================================================
