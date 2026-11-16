@@ -9,6 +9,7 @@ describe("promoApi install detection", () => {
 	it("is off when no flag source exists", () => {
 		vi.stubGlobal("window", {});
 		expect(isPromotionsAppInstalled()).toBe(false);
+		expect(promoApi.checkFriendsAndFamilyEligibility()).toBeNull();
 		expect(promoApi.applyOffers()).toBe("pos_next.api.invoices.apply_offers");
 	});
 
@@ -16,6 +17,9 @@ describe("promoApi install detection", () => {
 		vi.stubGlobal("window", { posnext_app_flags: { posnext_promotions: 1 } });
 		expect(isPromotionsAppInstalled()).toBe(true);
 		expect(isMagentoAppInstalled()).toBe(false);
+		expect(promoApi.checkFriendsAndFamilyEligibility()).toBe(
+			"posnext_promotions.api.friends_and_family.check_friends_and_family_eligibility"
+		);
 		expect(promoApi.applyOffers()).toBe("posnext_promotions.api.offers.apply_offers");
 	});
 

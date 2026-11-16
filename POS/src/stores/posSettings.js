@@ -16,6 +16,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		loyalty_to_wallet: 1,
 		magento_loyalty_available: 0,
 		miraaya_installed: 0,
+		enable_customer_email_verification: 0,
 		// General Settings
 		max_discount_allowed: 0,
 		use_percentage_discount: 0,
@@ -54,6 +55,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		// Printing
 		allow_print_last_invoice: 0,
 		silent_print: 0,
+		print_multiple_sales_persons: 0,
 		// Delivery
 		use_delivery_charges: 0,
 		auto_set_delivery_charges: 0,
@@ -84,6 +86,9 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	const loyaltyToWallet = computed(() => Boolean(settings.value.loyalty_to_wallet));
 	const magentoLoyaltyAvailable = computed(() => Boolean(settings.value.magento_loyalty_available));
 	const miraayaInstalled = computed(() => Boolean(settings.value.miraaya_installed));
+	const customerEmailVerificationEnabled = computed(() =>
+		Boolean(Number(settings.value.enable_customer_email_verification))
+	);
 
 	// Computed - General Settings
 	const isEnabled = computed(() => Boolean(settings.value.enabled));
@@ -246,6 +251,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 			loyalty_to_wallet: 1,
 			magento_loyalty_available: 0,
 			miraaya_installed: 0,
+			enable_customer_email_verification: 0,
 			// General Settings
 			max_discount_allowed: 0,
 			use_percentage_discount: 0,
@@ -279,6 +285,8 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 			fetch_coupon: 0,
 			allow_print_last_invoice: 0,
 			silent_print: 0,
+			print_multiple_sales_persons: 0,
+		print_multiple_sales_persons: 0,
 			use_delivery_charges: 0,
 			auto_set_delivery_charges: 0,
 			use_limit_search: 0,
@@ -360,6 +368,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		loyaltyToWallet,
 		magentoLoyaltyAvailable,
 		miraayaInstalled,
+		customerEmailVerificationEnabled,
 
 		// Computed - General Settings
 		isEnabled,

@@ -304,7 +304,17 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 	// Real-time Push Integration
 	const { onCustomerUpdate } = useRealtimeCustomers();
 	onCustomerUpdate(async (data) => {
-		const { name, action, customer_name, mobile_no, email_id, disabled } = data;
+		const {
+			name,
+			action,
+			customer_name,
+			mobile_no,
+			email_id,
+			disabled,
+			custom_email_verified,
+			custom_verified_email,
+			custom_email_verified_on,
+		} = data;
 		console.log("Customer update via real-time:", data);
 		if (action === "delete" || disabled) {
 			// Remove from memory
@@ -325,6 +335,9 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 				customer_name,
 				mobile_no,
 				email_id,
+				custom_email_verified,
+				custom_verified_email,
+				custom_email_verified_on,
 				disabled: !!disabled,
 			};
 			await addCustomerToCache(customer);

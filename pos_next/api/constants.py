@@ -32,6 +32,7 @@ POS_SETTINGS_FIELDS = [
 	"allow_negative_stock",
 	"enable_sales_persons",
 	"silent_print",
+	"print_multiple_sales_persons",
 	"allow_print_draft_invoices",
 	"allow_sales_order",
 	"allow_select_sales_order",
@@ -46,6 +47,7 @@ POS_SETTINGS_FIELDS = [
 	"loyalty_to_wallet",
 	"cart_lifo",
 	"display_item_code",
+	"enable_customer_email_verification",
 ]
 
 # Default POS Settings values
@@ -69,6 +71,7 @@ DEFAULT_POS_SETTINGS = {
 	"allow_negative_stock": 0,
 	"enable_sales_persons": "Disabled",
 	"silent_print": 0,
+	"print_multiple_sales_persons": 0,
 	"allow_print_draft_invoices": 0,
 	"allow_sales_order": 0,
 	"allow_select_sales_order": 0,
@@ -85,6 +88,7 @@ DEFAULT_POS_SETTINGS = {
 	"miraaya_installed": 0,
 	"cart_lifo": 0,
 	"display_item_code": 1,
+	"enable_customer_email_verification": 0,
 }
 
 
@@ -99,3 +103,12 @@ def merge_pos_settings(row=None):
 	if row:
 		settings.update(row)
 	return settings
+
+
+# Customer fields maintained by the email OTP verification flow. Returned by
+# get_customers so the POS offline customer cache carries the verified badge.
+EMAIL_VERIFICATION_FIELDS = [
+	"custom_email_verified",
+	"custom_verified_email",
+	"custom_email_verified_on",
+]

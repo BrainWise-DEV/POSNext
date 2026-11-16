@@ -15,7 +15,6 @@ import {
 	stashPreCouponDiscount,
 } from "@/utils/couponLines";
 import { getPrecision } from "@/utils/currency";
-import { promoApi } from "@/utils/promoApi";
 import { usePOSOffersStore } from "@/stores/posOffers";
 import { usePOSSettingsStore } from "@/stores/posSettings";
 import { usePOSShiftStore } from "@/stores/posShift";
@@ -38,7 +37,23 @@ import {
 	shouldPreserveRateOnUomChange,
 } from "@/utils/uomPricingLock";
 import { useToast } from "@/composables/useToast";
-import { call } from "frappe-ui";
+import { call } from "@/utils/apiWrapper";
+import { isPromotionsAppInstalled, promoApi } from "@/utils/promoApi";
+import {
+	annotateFnfLine,
+	clearFnfAnnotations,
+	indexFnfLines,
+	isFnfAllowedForProfile,
+	isFnfLine,
+	mergeServerLine,
+	fnfEmailBlockMessage,
+	normalizeEligibility,
+	normalizeFnfResult,
+	pickLocalizedMessage,
+	stampFnfLine,
+	resolveHeaderDiscount,
+	stripFnfLine,
+} from "@/utils/friendsAndFamily";
 import { defineStore } from "pinia";
 import { computed, nextTick, ref, toRaw, watch } from "vue";
 
@@ -154,6 +169,16 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	const selectionMode = ref("uom"); // 'uom' or 'variant'
 	const currentDraftId = ref(null);
 	const targetDoctype = ref("Sales Invoice");
+
+	// Friends & Family (PN-130). The server decides everything; the cart only
+	// mirrors its last answer for badges, breakdowns and cashier messages.
+	const fnfEligibility = ref(null); // normalizeEligibility() for the current customer
+	const fnfResult = ref(null); // normalizeFnfResult() of the last cart evaluation
+	// Set when an order coupon beat F&F (calculate_coupon_discount →
+	// suppress_friends_and_family): { code, message, message_en, message_ar }.
+	const fnfCouponOverride = ref(null);
+	let fnfEligibilityKey = null; // customer the cached eligibility belongs to
+	let fnfEligibilityRequest = 0;
 
 	// Offer processing state management
 	const offerProcessingState = ref({
@@ -329,6 +354,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		offersStore.clearOneTimeContext();
 		appliedOffers.value = [];
 		appliedCoupon.value = null;
+		fnfEligibility.value = null;
+		fnfEligibilityKey = null;
+		fnfResult.value = null;
+		fnfCouponOverride.value = null;
 		currentDraftId.value = null;
 		targetDoctype.value = "Sales Invoice";
 
@@ -401,9 +430,92 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		return offersStore.loadOneTimeContextForCustomer(customerName, { isWalkIn });
 	}
 
+	function currentCustomerName() {
+		return customer.value?.name || customer.value || null;
+	}
+
+	/**
+	 * Fetch F&F eligibility for the current customer (PN-125 endpoint).
+	 * Cached per customer; pass force=true to re-ask the server. Informational:
+	 * pricing is re-checked server-side on every apply / invoice save.
+	 */
+	/** POS Profile "Allow F&F" — off means no F&F calls, badges or stamps on this profile. */
+	function friendsAndFamilyAllowed() {
+		return isFnfAllowedForProfile(usePOSShiftStore().currentProfile);
+	}
+
+	async function refreshFriendsAndFamilyEligibility(force = false) {
+		const customerName = currentCustomerName();
+		const method = promoApi.checkFriendsAndFamilyEligibility();
+		if (!customerName || !method || !friendsAndFamilyAllowed()) {
+			fnfEligibility.value = null;
+			fnfEligibilityKey = customerName;
+			return null;
+		}
+		if (!force && fnfEligibilityKey === customerName) {
+			return fnfEligibility.value;
+		}
+		if (offlineState.isOffline) {
+			// Keep the last answer for the same customer; nothing for a new one.
+			if (fnfEligibility.value?.customer !== customerName) fnfEligibility.value = null;
+			return fnfEligibility.value;
+		}
+
+		const requestId = ++fnfEligibilityRequest;
+		try {
+			const response = await call(method, {
+				customer: customerName,
+				pos_profile: posProfile.value || undefined,
+			});
+			if (requestId !== fnfEligibilityRequest || currentCustomerName() !== customerName) {
+				return fnfEligibility.value; // customer changed meanwhile
+			}
+			fnfEligibility.value = normalizeEligibility(response, customerName);
+			fnfEligibilityKey = customerName;
+		} catch (error) {
+			console.error("Error checking Friends & Family eligibility:", error);
+			if (requestId === fnfEligibilityRequest) {
+				fnfEligibility.value = null;
+				fnfEligibilityKey = null; // retry on the next evaluation
+			}
+		}
+		return fnfEligibility.value;
+	}
+
+	/** UI language (useLocale() keeps <html lang> in sync; it can't be called inside a store). */
+	function currentUiLocale() {
+		return globalThis.document?.documentElement?.lang || "en";
+	}
+
+	/**
+	 * Re-check F&F for the current customer after something server-side changed
+	 * (e.g. the email was just OTP-verified) and re-price the cart.
+	 */
+	async function recheckFriendsAndFamily() {
+		const eligibility = await refreshFriendsAndFamilyEligibility(true);
+		if (invoiceItems.value.length > 0) triggerOfferProcessing(true);
+		return eligibility;
+	}
+
 	async function setCustomer(selectedCustomer) {
+		const previous = currentCustomerName();
 		customer.value = selectedCustomer;
-		await syncOneTimeContextForCurrentCustomer();
+		const [, eligibility] = await Promise.all([
+			syncOneTimeContextForCurrentCustomer(),
+			refreshFriendsAndFamilyEligibility(true),
+		]);
+		const emailBlock = fnfEmailBlockMessage(eligibility);
+		if (emailBlock && currentCustomerName() !== previous) {
+			showWarning(emailBlock);
+		}
+		if (eligibility?.eligible && currentCustomerName() !== previous) {
+			showSuccess(
+				pickLocalizedMessage(eligibility.customerMessage, currentUiLocale()) ||
+					__("Friends & Family customer — {0}% discount", [
+						String(eligibility.discountPercentage),
+					])
+			);
+		}
 	}
 
 	async function loadDefaultCustomer() {
@@ -411,7 +523,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		const profileCustomer =
 			shiftStore.currentProfile?.customer || shiftStore.profileCustomer || null;
 		await setDefaultCustomer(profileCustomer);
-		await syncOneTimeContextForCurrentCustomer();
+		await Promise.all([
+			syncOneTimeContextForCurrentCustomer(),
+			refreshFriendsAndFamilyEligibility(true),
+		]);
 	}
 
 	function setPendingItem(item, qty = 1, mode = "uom") {
@@ -435,6 +550,19 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	}
 
 	function applyDiscountToCart(discount) {
+		// PN-128/130: an order coupon that beat Friends & Family replaces it —
+		// drop the F&F line stamps so the two are never combined in the cart.
+		if (discount?.suppress_friends_and_family) {
+			fnfCouponOverride.value = {
+				code: discount.code || discount.name || "",
+				message: discount.fnf_message?.message || "",
+				message_en: discount.fnf_message?.message_en || "",
+				message_ar: discount.fnf_message?.message_ar || "",
+			};
+			stripAllFriendsAndFamily();
+		} else {
+			fnfCouponOverride.value = null;
+		}
 		if (isLineLevelCoupon(discount)) {
 			if (appliedCoupon.value && !isLineLevelCoupon(appliedCoupon.value)) {
 				removeDiscount();
@@ -456,6 +584,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	}
 
 	function removeDiscountFromCart() {
+		const hadFnfOverride = Boolean(fnfCouponOverride.value);
 		appliedOffers.value = [];
 		if (isLineLevelCoupon(appliedCoupon.value)) {
 			clearCouponLines();
@@ -464,7 +593,87 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			removeDiscount();
 		}
 		appliedCoupon.value = null;
+		fnfCouponOverride.value = null;
 		showSuccess(__("Discount has been removed from cart"));
+		// Bring Friends & Family back now that the coupon is gone.
+		if (hadFnfOverride) forceRefreshOffers();
+	}
+
+	/** Drop every F&F stamp in the cart (coupon won, program ended, customer changed…). */
+	function stripAllFriendsAndFamily({ keepAnnotations = false } = {}) {
+		let changed = false;
+		for (const item of invoiceItems.value) {
+			if (stripFnfLine(item)) {
+				changed = true;
+				recalculateItem(item);
+			}
+			if (!keepAnnotations) clearFnfAnnotations(item);
+		}
+		if (changed) rebuildIncrementalCache();
+		return changed;
+	}
+
+	/**
+	 * Mirror an F&F-only evaluation (apply_friends_and_family_discount) onto
+	 * the cart: stamp lines F&F wins, strip stale stamps elsewhere.
+	 */
+	function applyFriendsAndFamilyOnlyResult(result) {
+		const lines = indexFnfLines(result);
+		invoiceItems.value.forEach((item, index) => {
+			const line = lines.get(index);
+			if (line?.applies && !fnfCouponOverride.value) {
+				stampFnfLine(item, line);
+			} else {
+				stripFnfLine(item);
+				annotateFnfLine(item, line || null);
+			}
+			recalculateItem(item);
+		});
+		rebuildIncrementalCache();
+	}
+
+	/**
+	 * No promotion needed a server round-trip, but F&F may still apply (or a
+	 * stale F&F stamp must be removed). Uses the dedicated F&F endpoint so the
+	 * cart shows the discount before the invoice is saved.
+	 */
+	async function evaluateFriendsAndFamilyOnly(currentProfile, signal = null, generation = 0) {
+		const hasFnfLines = invoiceItems.value.some(isFnfLine);
+		const eligible = Boolean(fnfEligibility.value?.eligible);
+		const method = promoApi.applyFriendsAndFamilyDiscount();
+
+		if (!method || invoiceItems.value.length === 0 || !friendsAndFamilyAllowed()) {
+			stripAllFriendsAndFamily();
+			fnfResult.value = null;
+			return;
+		}
+		if (fnfCouponOverride.value) {
+			stripAllFriendsAndFamily();
+			fnfResult.value = null;
+			return;
+		}
+		if (!eligible && !hasFnfLines && fnfEligibility.value) {
+			// Known-ineligible customer and nothing to clean up.
+			if (fnfResult.value) {
+				fnfResult.value = null;
+				for (const item of invoiceItems.value) clearFnfAnnotations(item);
+			}
+			return;
+		}
+		if (!eligible && !hasFnfLines) return;
+
+		const payload = buildOfferEvaluationPayload(currentProfile);
+		const response = await call(method, {
+			customer: payload.customer,
+			items: payload.items,
+			mutate: 1,
+			pos_profile: posProfile.value || undefined,
+		});
+		if (signal?.aborted || (generation > 0 && generation < cartGeneration)) return;
+
+		const result = normalizeFnfResult(response);
+		fnfResult.value = result?.eligible ? result : null;
+		applyFriendsAndFamilyOnlyResult(result);
 	}
 
 	// Line-level coupons (priced by posnext_promotions) discount only their eligible lines.
@@ -621,6 +830,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				coupon_code: coupon.code,
 				customer: customer.value?.name || customer.value,
 				company: usePOSShiftStore().currentProfile?.company,
+				pos_profile: posProfile.value || undefined,
 				items: JSON.stringify(buildCouponItemsPayload()),
 			});
 			if (seq !== couponRevalidateSeq || appliedCoupon.value?.code !== coupon.code) return;
@@ -756,10 +966,16 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * Sync discounts from server response to cart items.
 	 * Server returns items in same order as sent (handles duplicate SKUs).
 	 */
-	function applyDiscountsFromServer(serverItems) {
+	function applyDiscountsFromServer(serverItems, friendsAndFamily = null) {
 		if (!Array.isArray(serverItems)) return false;
 
 		let hasDiscounts = false;
+		// F&F stamps are trusted only when the response's F&F block says the
+		// line applies. Without a block (ineligible customer) the server echoes
+		// the request lines back — an old F&F % must not survive as "manual".
+		const fnfLines = indexFnfLines(friendsAndFamily);
+		const fnfSuppressed = Boolean(fnfCouponOverride.value);
+		fnfResult.value = friendsAndFamily?.eligible && !fnfSuppressed ? friendsAndFamily : null;
 
 		invoiceItems.value.forEach((item, index) => {
 			const serverItem = serverItems[index] || {};
@@ -793,33 +1009,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				return;
 			}
 
-			// Only update if server applied a pricing rule or discount
-			if (serverDiscounted) {
-				item.discount_percentage = discountPct;
-				item.discount_amount = discountAmt;
-				item.pricing_rules = normalizePricingRules(serverItem.pricing_rules);
-				item.discount_source = serverItem.discount_source || item.discount_source;
-				item.free_qty = Number.parseFloat(serverItem.free_qty) || 0;
-				item.gwp_free_qty = Number.parseFloat(serverItem.gwp_free_qty) || 0;
-				hasDiscounts = discountPct > 0 || discountAmt > 0;
-			} else if (!item.is_free_item && hasPricingRules(item.pricing_rules)) {
-				// The server is the authority for promotion discounts. A line whose
-				// promotion (pricing_rules) the server no longer applies must drop it,
-				// otherwise the client keeps a stale % and computes min_amt on a
-				// different total than the server just used (offers-loop fix).
-				item.discount_percentage = 0;
-				item.discount_amount = 0;
-				item.pricing_rules = [];
-				item.is_already_discounted = 0;
-			}
-			// Otherwise preserve existing manual discount
-
-			if (serverItem.is_already_discounted !== undefined) {
-				item.is_already_discounted = serverItem.is_already_discounted ? 1 : 0;
-			}
-			item.is_accumulative_discount =
-				serverItem.discount_source === "accumulative_promotion" ? 1 : 0;
-
+			const { discounted } = mergeServerLine(item, serverItems[index] || {}, fnfLines.get(index), {
+				fnfSuppressed,
+			});
+			if (discounted) hasDiscounts = true;
 			recalculateItem(item);
 		});
 
@@ -886,6 +1079,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				discountAmount: Number.parseFloat(payload.discount_amount) || 0,
 				applyDiscountOn: payload.apply_discount_on || null,
 			},
+			// PN-130: F&F decision + best-discount explanation. null when the
+			// server sent no F&F block (ineligible customer / program off).
+			friendsAndFamily: normalizeFnfResult(payload.friends_and_family, payload.best_discount),
 		};
 	}
 
@@ -901,12 +1097,22 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * while no order discount applies, and is removed, with a warning, when one does.
 	 */
 	function applyHeaderDiscountFromServer(headerDiscount) {
-		offerHeaderDiscount.value = Number.parseFloat(headerDiscount?.discountAmount) || 0;
+		const { amount, keepCoupon } = resolveHeaderDiscount(
+			headerDiscount?.discountAmount,
+			isWholeCartCoupon(appliedCoupon.value) ? appliedCoupon.value : null
+		);
+		offerHeaderDiscount.value = amount;
 		const coupon = appliedCoupon.value;
 		if (isWholeCartCoupon(coupon)) {
-			if (!offerHeaderDiscount.value) return;
+			if (keepCoupon) {
+				// The applied POS Coupon owns the header discount — the server
+				// reported no transaction-rule discount, which must not wipe it.
+				applyDiscount(coupon);
+				return;
+			}
 			removeDiscount();
 			appliedCoupon.value = null;
+			fnfCouponOverride.value = null;
 			showWarning(__("Coupon {0} removed: it can't be combined with the order discount", [coupon.code]));
 		}
 		additionalDiscount.value = offerHeaderDiscount.value;
@@ -979,9 +1185,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 					freeItems,
 					appliedRules,
 					headerDiscount,
+					friendsAndFamily,
 				} = parseOfferResponse(response);
 
-				applyDiscountsFromServer(responseItems);
+				applyDiscountsFromServer(responseItems, friendsAndFamily);
 				processFreeItems(freeItems);
 				applyHeaderDiscountFromServer(headerDiscount);
 				filterActiveOffers(appliedRules);
@@ -1001,9 +1208,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 								freeItems: rollbackFreeItems,
 								appliedRules: rollbackRules,
 								headerDiscount: rollbackHeaderDiscount,
+								friendsAndFamily: rollbackFriendsAndFamily,
 							} = parseOfferResponse(rollbackResponse);
 
-							applyDiscountsFromServer(rollbackItems);
+							applyDiscountsFromServer(rollbackItems, rollbackFriendsAndFamily);
 							processFreeItems(rollbackFreeItems);
 							applyHeaderDiscountFromServer(rollbackHeaderDiscount);
 							filterActiveOffers(rollbackRules);
@@ -1120,9 +1328,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 					freeItems,
 					appliedRules,
 					headerDiscount,
+					friendsAndFamily,
 				} = parseOfferResponse(response);
 
-				applyDiscountsFromServer(responseItems);
+				applyDiscountsFromServer(responseItems, friendsAndFamily);
 				processFreeItems(freeItems);
 				applyHeaderDiscountFromServer(headerDiscount);
 				filterActiveOffers(appliedRules);
@@ -1239,9 +1448,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 						freeItems,
 						appliedRules,
 						headerDiscount,
+						friendsAndFamily,
 					} = parseOfferResponse(response);
 
-					applyDiscountsFromServer(responseItems);
+					applyDiscountsFromServer(responseItems, friendsAndFamily);
 					processFreeItems(freeItems);
 					applyHeaderDiscountFromServer(headerDiscount);
 					filterActiveOffers(appliedRules);
@@ -1905,12 +2115,16 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				}
 			}
 
+			// Friends & Family lines: the % comes from F&F Settings and the
+			// server re-decides it on every evaluation — never a cashier edit.
+			const isFnf = isFnfLine(cartItem);
+
 			// Apply other updates
 			if (updates.quantity !== undefined) cartItem.quantity = updates.quantity;
 			if (updates.warehouse !== undefined) cartItem.warehouse = updates.warehouse;
-			if (updates.discount_percentage !== undefined)
+			if (updates.discount_percentage !== undefined && !isFnf)
 				cartItem.discount_percentage = updates.discount_percentage;
-			if (updates.discount_amount !== undefined)
+			if (updates.discount_amount !== undefined && !isFnf)
 				cartItem.discount_amount = updates.discount_amount;
 			if (updates.rate !== undefined) cartItem.rate = updates.rate;
 			if (updates.price_list_rate !== undefined)
@@ -2085,7 +2299,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		// redemptions + identified flag). Await here so we never evaluate offers
 		// before the customer gate is ready — setCustomer() alone can lose the
 		// race with the debounced cart/customer watcher below.
-		await syncOneTimeContextForCurrentCustomer();
+		await Promise.all([
+			syncOneTimeContextForCurrentCustomer(),
+			// PN-130: cached per customer, so this is a no-op after setCustomer().
+			refreshFriendsAndFamilyEligibility(),
+		]);
 
 		// Check cancellation after one-time context fetch
 		if (signal?.aborted) return;
@@ -2120,6 +2338,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			selling_price_list: posProfile.value.selling_price_list,
 			currency: posProfile.value.currency,
 		};
+		// True once apply_offers ran this pass (it evaluates F&F as well).
+		let evaluatedOnServer = false;
 		try {
 			// 1. Identify invalid offers to remove (client-side check)
 			const invalidOffers = [];
@@ -2187,11 +2407,13 @@ export const usePOSCartStore = defineStore("posCart", () => {
 					freeItems,
 					appliedRules,
 					headerDiscount,
+					friendsAndFamily,
 				} = parseOfferResponse(response);
 
 				// 4. Update cart items with new discounts
 
-				applyDiscountsFromServer(responseItems);
+				applyDiscountsFromServer(responseItems, friendsAndFamily);
+				evaluatedOnServer = true;
 				processFreeItems(freeItems);
 				applyHeaderDiscountFromServer(headerDiscount);
 
@@ -2239,6 +2461,13 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				appliedOffers.value = [];
 				processFreeItems([]);
 				rebuildIncrementalCache();
+			}
+
+			// PN-130: apply_offers was not needed for promotions — still let the
+			// server apply (or strip) Friends & Family on this cart.
+			if (!evaluatedOnServer) {
+				await evaluateFriendsAndFamilyOnly(currentProfile, signal, generation);
+				if (signal?.aborted || (generation > 0 && generation < cartGeneration)) return;
 			}
 			// Update last processed hash on success
 			offerProcessingState.value.lastCartHash = generateCartHash();
@@ -2472,6 +2701,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		selectionMode,
 		currentDraftId,
 		offerProcessingState, // Offer processing state for UI feedback
+		fnfEligibility, // PN-130: F&F eligibility of the current customer
+		fnfResult, // PN-130: last server F&F decision for the cart
+		fnfCouponOverride, // PN-130: coupon that replaced F&F, if any
 
 		// Computed
 		itemCount,
@@ -2526,5 +2758,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			offerQueue.cancel();
 		},
 		forceRefreshOffers, // Force reprocess offers from scratch
+		refreshFriendsAndFamilyEligibility,
+		recheckFriendsAndFamily,
 	};
 });

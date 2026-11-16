@@ -7,6 +7,7 @@ import { shiftState } from "@/composables/useShift";
 import { CoalescingMutex } from "@/utils/mutex";
 import { logger } from "@/utils/logger";
 import { roundCurrency } from "@/utils/currency";
+import { fnfLockedDiscountAmount } from "@/utils/friendsAndFamily";
 import { preCouponLineDiscount } from "@/utils/couponLines";
 
 const log = logger.create("Invoice");
@@ -682,7 +683,12 @@ export function useInvoice() {
 			(!(item.discount_percentage > 0) ||
 				item.discount_percentage === item._derived_discount_percentage);
 		let discountAmount = 0;
-		if (!amountMode && item.discount_percentage > 0) {
+		// Friends & Family (PN-130): the server's line amount is authoritative —
+		// a capped line carries an unrounded %, so recomputing would drift.
+		const fnfAmount = isManuallyEdited ? null : fnfLockedDiscountAmount(item, baseAmount);
+		if (fnfAmount !== null) {
+			discountAmount = fnfAmount;
+		} else if (!amountMode && item.discount_percentage > 0) {
 			discountAmount = roundCurrency((baseAmount * item.discount_percentage) / 100);
 			item.discount_mode = "percentage";
 		} else if (item.discount_amount > 0) {

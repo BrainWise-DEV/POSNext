@@ -104,6 +104,10 @@ def get_initial_data():
 		"ignore_pricing_rule": pos_profile.ignore_pricing_rule or 0,
 		"posa_allow_pos_expense": pos_profile.get("posa_allow_pos_expense") or 0,
 		"posa_maximum_expense_amount": pos_profile.get("posa_maximum_expense_amount") or 0,
+		# POS Profile "Allow F&F" (custom field owned by posnext_promotions). Missing
+		# (field not installed) or blank counts as allowed; only an explicit 0 turns
+		# Friends & Family off for the profile.
+		"allow_friends_family": _allow_friends_family(pos_profile),
 	}
 
 	result["pos_settings"] = _get_pos_settings(pos_profile)
@@ -117,6 +121,11 @@ def get_initial_data():
 # =============================================================================
 # Private Helper Functions
 # =============================================================================
+
+
+def _allow_friends_family(pos_profile) -> int:
+	value = pos_profile.get("allow_friends_family")
+	return 1 if value is None or value == "" else (1 if int(value or 0) else 0)
 
 
 def _get_authorization_policy(pos_profile_name):
