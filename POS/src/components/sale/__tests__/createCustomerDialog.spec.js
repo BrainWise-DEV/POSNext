@@ -300,15 +300,18 @@ describe("CreateCustomerDialog edit mode", () => {
 		const wrapper = mountEditor(editCustomer)
 		await flushPromises()
 
-		const update = resourceFor("frappe.client.set_value")
+		const update = resourceFor("pos_next.api.customers.update_customer")
 		const create = resourceFor("pos_next.api.customers.create_customer")
 		const params = update.opts.makeParams()
 
 		expect(params.name).toBe("CUST-2026-68541")
-		expect(params.fieldname.custom_first_name).toBe("Ahmed")
-		expect(params.fieldname.custom_last_name).toBe("Ali Hassan")
-		expect(params.fieldname.customer_name).toBe("Ahmed Ali Hassan")
-		expect(params.fieldname.email_id).toBe("ahmed.ali@example.com")
+		expect(params.custom_first_name).toBe("Ahmed")
+		expect(params.custom_last_name).toBe("Ali Hassan")
+		expect(params.customer_name).toBe("Ahmed Ali Hassan")
+		expect(params.email_id).toBe("ahmed.ali@example.com")
+		expect(params.mobile_no).toBe("+964-7754539344")
+		expect(params.doctype).toBeUndefined()
+		expect(params.fieldname).toBeUndefined()
 
 		const save = wrapper.findAll("button").find((btn) => btn.text() === "Save Changes")
 		expect(save).toBeTruthy()
@@ -326,6 +329,23 @@ describe("CreateCustomerDialog edit mode", () => {
 		await flushPromises()
 
 		expect(wrapper.find('[data-testid="existing-customer-warning"]').exists()).toBe(false)
+		wrapper.unmount()
+	})
+
+	it("shows Magento's message when an email update is rejected", async () => {
+		const wrapper = mountEditor(editCustomer)
+		await flushPromises()
+
+		const update = resourceFor("pos_next.api.customers.update_customer")
+		await update.opts.onError({
+			messages: ["A customer with the same email already exists in an associated website."],
+		})
+		await flushPromises()
+
+		expect(showSuccess).not.toHaveBeenCalled()
+		expect(showError).toHaveBeenCalledWith(
+			"A customer with the same email already exists in an associated website."
+		)
 		wrapper.unmount()
 	})
 })

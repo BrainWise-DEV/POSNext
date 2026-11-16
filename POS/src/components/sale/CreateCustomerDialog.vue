@@ -881,36 +881,43 @@ const createCustomerResource = createResource({
 });
 
 const updateCustomerResource = createResource({
-	url: "frappe.client.set_value",
+	url: "pos_next.api.customers.update_customer",
 	makeParams: () => ({
-		doctype: "Customer",
 		name: editingCustomerName.value,
-		fieldname: {
-			customer_name: requiresSplitCustomerName.value
-				? computedCustomerName.value
-				: customerData.value.customer_name,
-			customer_group: customerData.value.customer_group || "",
-			territory: customerData.value.territory || "",
-			mobile_no: customerData.value.mobile_no || "",
-			email_id: customerData.value.email_id || "",
-			custom_governorate: customerData.value.custom_governorate || "",
-			custom_district: customerData.value.custom_district || "",
-			...(requiresSplitCustomerName.value
-				? {
-						custom_first_name: customerData.value.custom_first_name || "",
-						custom_last_name: customerData.value.custom_last_name || "",
-					}
-				: {}),
-		},
+		customer_name: requiresSplitCustomerName.value
+			? computedCustomerName.value
+			: customerData.value.customer_name,
+		customer_group: customerData.value.customer_group || "",
+		territory: customerData.value.territory || "",
+		mobile_no: customerData.value.mobile_no || "",
+		email_id: customerData.value.email_id || "",
+		custom_governorate: customerData.value.custom_governorate || "",
+		custom_district: customerData.value.custom_district || "",
+		...(requiresSplitCustomerName.value
+			? {
+					custom_first_name: customerData.value.custom_first_name || "",
+					custom_last_name: customerData.value.custom_last_name || "",
+				}
+			: {}),
+		pos_profile: props.posProfile,
 	}),
 	onSuccess: (data) => {
 		showSuccess(__("Customer {0} updated successfully", [data.customer_name]));
+		if (data.external_sync_error) {
+			// Saved in POS, but Magento rejected or could not apply the change.
+			showError(data.external_sync_error);
+		}
 		emit("customer-updated", data);
 		show.value = false;
 	},
 	onError: (error) => {
 		log.error("Error updating customer", error);
-		showError(error.message || __("Failed to update customer"));
+		const message =
+			error?.messages?.[0] ||
+			error?.message ||
+			(typeof error === "string" ? error : null) ||
+			__("Failed to update customer");
+		showError(message);
 	},
 });
 
