@@ -107,6 +107,26 @@ def after_customer_insert(customer, **kwargs):
 			)
 
 
+def after_customer_update(customer, **kwargs):
+	"""Let integrations sync an existing POS customer (e.g. Magento).
+
+	ExternalCustomerRejected fails the update so the cashier sees the real
+	message and the local change is rolled back. Other errors are logged and
+	exposed via get_customer_sync_error.
+	"""
+	for method_path in frappe.get_hooks("pos_next_customer_after_update") or []:
+		try:
+			frappe.get_attr(method_path)(customer, **kwargs)
+		except ExternalCustomerRejected:
+			raise
+		except Exception as exc:
+			frappe.log_error(
+				frappe.get_traceback(),
+				f"Customer after_update hook failed: {method_path}",
+			)
+			record_customer_sync_error(customer.name if customer else None, exc)
+
+
 # ---------------------------------------------------------------------------
 # External customer registration errors
 # ---------------------------------------------------------------------------
