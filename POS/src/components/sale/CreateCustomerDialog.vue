@@ -1,10 +1,8 @@
 <template>
 	<Dialog
 		v-model="show"
-		:options="{
-			title: isEditMode ? __('Edit Customer') : __('Create New Customer'),
-			size: 'md',
-		}"
+		:key="dialogKey"
+		:options="dialogOptions"
 	>
 		<template #body-content>
 			<div v-if="createdCustomer" class="flex flex-col gap-4" data-testid="created-verify-step">
@@ -68,6 +66,7 @@
 								v-model="customerData.custom_first_name"
 								type="text"
 								:placeholder="__('First name')"
+								data-testid="customer-first-name"
 								required
 							/>
 						</div>
@@ -79,6 +78,7 @@
 								v-model="customerData.custom_last_name"
 								type="text"
 								:placeholder="__('Last name')"
+								data-testid="customer-last-name"
 								required
 							/>
 						</div>
@@ -494,7 +494,20 @@ const show = computed({
 	set: (val) => emit("update:modelValue", val),
 });
 
-const isEditMode = computed(() => !!props.customer?.name);
+const editingCustomerName = computed(() => {
+	const customer = props.customer;
+	if (!customer) return "";
+	if (typeof customer === "string") return customer;
+	return customer.name || "";
+});
+const isEditMode = computed(() => !!editingCustomerName.value);
+const dialogKey = computed(() =>
+	isEditMode.value ? `edit-${editingCustomerName.value}` : "create"
+);
+const dialogOptions = computed(() => ({
+	title: isEditMode.value ? __("Edit Customer") : __("Create New Customer"),
+	size: "md",
+}));
 
 const FABRICATED_EMAIL_SUFFIX = "@pos.miraaya";
 const hasRealEmail = (email) => {
@@ -516,7 +529,7 @@ const showEmailVerification = computed(
 		}) &&
 		hasRealEmail(props.customer?.email_id || customerData.value.email_id)
 );
-const verificationCustomerName = computed(() => props.customer?.name || "");
+const verificationCustomerName = computed(() => editingCustomerName.value);
 const verificationSavedEmail = computed(() => props.customer?.email_id || "");
 const currentVerification = computed(
 	() => verifiedOverride.value || freshVerification.value || props.customer || {}
@@ -592,6 +605,63 @@ const updateMobileNumber = () => {
 	customerData.value.mobile_no = selectedCountryCode.value
 		? `${selectedCountryCode.value}-${phoneNumber.value}`
 		: phoneNumber.value;
+};
+
+/** Split a full customer name into first + remaining last-name parts. */
+const splitCustomerName = (fullName) => {
+	const parts = (fullName || "").trim().split(/\s+/).filter(Boolean);
+	if (parts.length === 0) return { first: "", last: "" };
+	if (parts.length === 1) return { first: parts[0], last: "" };
+	return { first: parts[0], last: parts.slice(1).join(" ") };
+};
+
+const firstAndLastFromCustomer = (customer) => {
+	const first = (customer.custom_first_name || customer.first_name || "").trim();
+	const last = (customer.custom_last_name || customer.last_name || "").trim();
+	if (first || last) return { first, last };
+	return splitCustomerName(customer.customer_name);
+};
+
+const applyCustomerToForm = (customer) => {
+	if (!customer || typeof customer !== "object") return;
+
+	if (customer.customer_name) {
+		customerData.value.customer_name = customer.customer_name;
+	} else if (customer.custom_first_name || customer.custom_last_name) {
+		customerData.value.customer_name = [customer.custom_first_name, customer.custom_last_name]
+			.filter(Boolean)
+			.join(" ")
+			.trim();
+	}
+
+	if (customer.email_id != null) {
+		customerData.value.email_id = customer.email_id || "";
+	}
+	if (customer.customer_group) {
+		customerData.value.customer_group = customer.customer_group;
+	} else if (!customerData.value.customer_group) {
+		customerData.value.customer_group = customerGroups.value[0] || "";
+	}
+	if (customer.territory) {
+		customerData.value.territory = customer.territory;
+	} else if (!customerData.value.territory) {
+		customerData.value.territory =
+			territories.value.find((n) => n === "All Territories") || territories.value[0] || "";
+	}
+	if (customer.custom_governorate != null) {
+		customerData.value.custom_governorate = customer.custom_governorate || "";
+	}
+	if (customer.custom_district != null) {
+		customerData.value.custom_district = customer.custom_district || "";
+	}
+
+	const { first, last } = firstAndLastFromCustomer(customer);
+	customerData.value.custom_first_name = first;
+	customerData.value.custom_last_name = last;
+
+	if (customer.mobile_no) {
+		hydrateMobileFields(customer.mobile_no);
+	}
 };
 
 /** Split stored mobile into ISD + national number (supports legacy formats). */
@@ -768,6 +838,11 @@ const createCustomerResource = createResource({
 	}),
 	onSuccess: async (data) => {
 		if (data?.already_exists && data.existing_customer) {
+			const existingName = data.existing_customer.name;
+			// Editing this same customer is not a duplicate of itself.
+			if (isEditMode.value && existingName && existingName === editingCustomerName.value) {
+				return;
+			}
 			existingDuplicate.value = {
 				message: data.message || __("A customer with this email already exists."),
 				existing_customer: data.existing_customer,
@@ -809,15 +884,23 @@ const updateCustomerResource = createResource({
 	url: "frappe.client.set_value",
 	makeParams: () => ({
 		doctype: "Customer",
-		name: props.customer?.name,
+		name: editingCustomerName.value,
 		fieldname: {
-			customer_name: customerData.value.customer_name,
+			customer_name: requiresSplitCustomerName.value
+				? computedCustomerName.value
+				: customerData.value.customer_name,
 			customer_group: customerData.value.customer_group || "",
 			territory: customerData.value.territory || "",
 			mobile_no: customerData.value.mobile_no || "",
 			email_id: customerData.value.email_id || "",
 			custom_governorate: customerData.value.custom_governorate || "",
 			custom_district: customerData.value.custom_district || "",
+			...(requiresSplitCustomerName.value
+				? {
+						custom_first_name: customerData.value.custom_first_name || "",
+						custom_last_name: customerData.value.custom_last_name || "",
+					}
+				: {}),
 		},
 	}),
 	onSuccess: (data) => {
@@ -888,7 +971,7 @@ const customerLocationResource = createResource({
 	url: "frappe.client.get_value",
 	makeParams: () => ({
 		doctype: "Customer",
-		filters: { name: props.customer?.name },
+		filters: { name: editingCustomerName.value },
 		fieldname: ["custom_governorate", "custom_district"],
 	}),
 	auto: false,
@@ -897,6 +980,20 @@ const customerLocationResource = createResource({
 		customerData.value.custom_district = data?.custom_district || "";
 	},
 	onError: (err) => log.error("Error loading customer location", err),
+});
+
+const customerDetailsResource = createResource({
+	url: "pos_next.api.customers.get_customer_details",
+	makeParams: () => ({ customer: editingCustomerName.value }),
+	auto: false,
+	onSuccess: (data) => {
+		if (!data) return;
+		if (editingCustomerName.value && data.name && data.name !== editingCustomerName.value) {
+			return;
+		}
+		applyCustomerToForm(data);
+	},
+	onError: (err) => log.error("Error loading customer details", err),
 });
 
 const districtsResource = createResource({
@@ -969,8 +1066,11 @@ const loadDialogData = async () => {
 		customerGroupsResource.reload(),
 		governoratesResource.reload(),
 	]);
-	if (isEditMode.value && props.customer?.name) {
-		await customerLocationResource.reload();
+	if (isEditMode.value && editingCustomerName.value) {
+		await Promise.all([
+			customerDetailsResource.reload(),
+			customerLocationResource.reload(),
+		]);
 	}
 	if (customerData.value.custom_governorate) {
 		await districtsResource.reload();
@@ -1046,11 +1146,11 @@ const handleCreate = async () => {
 	if (!phoneNumber.value) {
 		return showError(__("Mobile Number is required"));
 	}
-	if (isEditMode.value) {
+	if (isEditMode.value && editingCustomerName.value) {
 		await updateCustomerResource.submit();
-	} else {
-		await createCustomerResource.submit();
+		return;
 	}
+	await createCustomerResource.submit();
 };
 
 const selectExistingCustomer = () => {
@@ -1100,23 +1200,8 @@ watch(
 watch(
 	() => props.customer,
 	(customer) => {
-		if (customer?.name) {
-			customerData.value.customer_name = customer.customer_name || "";
-			customerData.value.email_id = customer.email_id || "";
-			customerData.value.customer_group =
-				customer.customer_group || customerGroups.value[0] || "";
-			customerData.value.territory =
-				customer.territory ||
-				territories.value.find((n) => n === "All Territories") ||
-				territories.value[0] ||
-				"";
-
-			customerData.value.custom_governorate = customer.custom_governorate || "";
-			customerData.value.custom_district = customer.custom_district || "";
-			// Handle mobile_no (with or without country-code separator)
-			if (customer.mobile_no) {
-				hydrateMobileFields(customer.mobile_no);
-			}
+		if (customer && typeof customer === "object" && customer.name) {
+			applyCustomerToForm(customer);
 		}
 	},
 	{ immediate: true }

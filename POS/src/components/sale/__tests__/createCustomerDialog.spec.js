@@ -18,7 +18,7 @@ vi.mock("frappe-ui", () => ({
 	Input: {
 		name: "Input",
 		props: ["modelValue"],
-		template: `<input />`,
+		template: `<input :value="modelValue" />`,
 	},
 	Dialog: {
 		name: "Dialog",
@@ -56,11 +56,13 @@ vi.mock("@/stores/countries", () => ({
 	}),
 }))
 
+const posSettings = {
+	customerEmailVerificationEnabled: false,
+	miraayaInstalled: false,
+}
+
 vi.mock("@/stores/posSettings", () => ({
-	usePOSSettingsStore: () => ({
-		customerEmailVerificationEnabled: false,
-		miraayaInstalled: false,
-	}),
+	usePOSSettingsStore: () => posSettings,
 }))
 
 vi.mock("@/stores/posShift", () => ({
@@ -133,6 +135,8 @@ describe("CreateCustomerDialog existing-customer response", () => {
 		showError.mockReset()
 		canCreateCustomer.mockReset()
 		canCreateCustomer.mockResolvedValue(true)
+		posSettings.customerEmailVerificationEnabled = false
+		posSettings.miraayaInstalled = false
 	})
 
 	afterEach(() => {
@@ -197,6 +201,131 @@ describe("CreateCustomerDialog existing-customer response", () => {
 		await flushPromises()
 		expect(find(wrapper, "existing-customer-warning").exists()).toBe(false)
 		expect(wrapper.emitted("customer-created")).toBeFalsy()
+		wrapper.unmount()
+	})
+})
+
+const editCustomer = {
+	name: "CUST-2026-68541",
+	customer_name: "Ahmed Ali Hassan",
+	mobile_no: "+964-7754539344",
+	email_id: "ahmed.ali@example.com",
+}
+
+function resourceFor(url) {
+	const entry = resourceConfigs.find((item) => item.opts.url === url)
+	if (!entry) throw new Error(`createResource not called for ${url}`)
+	return entry
+}
+
+function mountEditor(customer, { miraaya = true, modelValue = true } = {}) {
+	posSettings.miraayaInstalled = miraaya
+	return mount(CreateCustomerDialog, {
+		props: { modelValue, posProfile: "POS-A", customer },
+		global: { mocks: { __: t } },
+	})
+}
+
+describe("CreateCustomerDialog edit mode", () => {
+	beforeEach(() => {
+		resourceConfigs.length = 0
+		showSuccess.mockReset()
+		showError.mockReset()
+		canCreateCustomer.mockReset()
+		canCreateCustomer.mockResolvedValue(true)
+		posSettings.customerEmailVerificationEnabled = false
+		posSettings.miraayaInstalled = true
+	})
+
+	afterEach(() => {
+		document.body.innerHTML = ""
+		posSettings.miraayaInstalled = false
+	})
+
+	it("opens as Edit Customer and prefills first/last name by splitting customer_name", async () => {
+		const wrapper = mountEditor(editCustomer)
+		await flushPromises()
+
+		expect(wrapper.getComponent({ name: "Dialog" }).props("options").title).toBe(
+			"Edit Customer"
+		)
+		expect(wrapper.find('[data-testid="customer-first-name"]').element.value).toBe("Ahmed")
+		expect(wrapper.find('[data-testid="customer-last-name"]').element.value).toBe("Ali Hassan")
+		expect(wrapper.text()).toContain("Save Changes")
+		expect(wrapper.text()).not.toContain("Create Customer")
+		expect(wrapper.text()).not.toContain("Create New Customer")
+		wrapper.unmount()
+	})
+
+	it("prefers custom_first_name and custom_last_name over splitting customer_name", async () => {
+		const wrapper = mountEditor({
+			...editCustomer,
+			customer_name: "Ahmed Ali Hassan",
+			custom_first_name: "Mona",
+			custom_last_name: "Said",
+		})
+		await flushPromises()
+
+		expect(wrapper.find('[data-testid="customer-first-name"]').element.value).toBe("Mona")
+		expect(wrapper.find('[data-testid="customer-last-name"]').element.value).toBe("Said")
+		wrapper.unmount()
+	})
+
+	it("fills first and last name from get_customer_details when the cart object omits them", async () => {
+		const wrapper = mountEditor({
+			name: "CUST-2026-68541",
+			customer_name: "Cached Name Only",
+			mobile_no: "+964-7754539344",
+			email_id: "ahmed.ali@example.com",
+		})
+		await flushPromises()
+
+		const onSuccess = resourceFor("pos_next.api.customers.get_customer_details").opts.onSuccess
+		await onSuccess({
+			name: "CUST-2026-68541",
+			customer_name: "Mona Said",
+			custom_first_name: "Mona",
+			custom_last_name: "Said",
+			email_id: "ahmed.ali@example.com",
+			mobile_no: "+964-7754539344",
+		})
+		await flushPromises()
+
+		expect(wrapper.find('[data-testid="customer-first-name"]').element.value).toBe("Mona")
+		expect(wrapper.find('[data-testid="customer-last-name"]').element.value).toBe("Said")
+		wrapper.unmount()
+	})
+
+	it("saves the existing customer and does not treat it as a duplicate of itself", async () => {
+		const wrapper = mountEditor(editCustomer)
+		await flushPromises()
+
+		const update = resourceFor("frappe.client.set_value")
+		const create = resourceFor("pos_next.api.customers.create_customer")
+		const params = update.opts.makeParams()
+
+		expect(params.name).toBe("CUST-2026-68541")
+		expect(params.fieldname.custom_first_name).toBe("Ahmed")
+		expect(params.fieldname.custom_last_name).toBe("Ali Hassan")
+		expect(params.fieldname.customer_name).toBe("Ahmed Ali Hassan")
+		expect(params.fieldname.email_id).toBe("ahmed.ali@example.com")
+
+		const save = wrapper.findAll("button").find((btn) => btn.text() === "Save Changes")
+		expect(save).toBeTruthy()
+		await save.trigger("click")
+		await flushPromises()
+
+		expect(update.resource.submit).toHaveBeenCalled()
+		expect(create.resource.submit).not.toHaveBeenCalled()
+
+		await create.opts.onSuccess({
+			already_exists: true,
+			message: "A customer with this email already exists.",
+			existing_customer: editCustomer,
+		})
+		await flushPromises()
+
+		expect(wrapper.find('[data-testid="existing-customer-warning"]').exists()).toBe(false)
 		wrapper.unmount()
 	})
 })
