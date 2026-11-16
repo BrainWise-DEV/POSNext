@@ -738,6 +738,11 @@ const createCustomerResource = createResource({
 	}),
 	onSuccess: async (data) => {
 		showSuccess(__("Customer {0} created successfully", [data.customer_name]));
+		if (data.external_sync_error) {
+			// Saved in POS, but Magento rejected it (e.g. email already registered
+			// with a different mobile number): show Magento's own message.
+			showError(data.external_sync_error);
+		}
 		// Offer "Verify email now" when enabled (or the new customer is an F&F
 		// member, who needs a verified email), online and a real email was entered
 		const realEmail = hasRealEmail(data.email_id || customerData.value.email_id) && !isOffline();

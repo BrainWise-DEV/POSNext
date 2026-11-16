@@ -1791,3 +1791,5 @@ Points applied: {0}. Please pay remaining {1} with {2},تم خصم النقاط:
 "Send new code by email","إرسال رمز جديد عبر البريد الإلكتروني",""
 "Resend code by email","إعادة إرسال الرمز عبر البريد الإلكتروني",""
 "Enter the 6-digit code sent to the email {0}","أدخل الرمز المكون من 6 أرقام المرسل إلى البريد الإلكتروني {0}",""
+"Promotion item — not eligible for Friends & Family","صنف عليه عرض — غير مشمول بخصم الأصدقاء والعائلة",""
+"Magento rejected this customer's registration.","رفض ماجنتو تسجيل هذا العميل.",""

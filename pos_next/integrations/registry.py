@@ -72,3 +72,36 @@ def after_customer_insert(customer, **kwargs):
 				frappe.get_traceback(),
 				f"Customer after_insert hook failed: {method_path}",
 			)
+
+
+# ---------------------------------------------------------------------------
+# External customer registration errors
+# ---------------------------------------------------------------------------
+# An integration (e.g. magento_integration) records why it could not register a
+# POS customer externally — typically "email already registered with a different
+# mobile number". POS Next shows that message to the cashier instead of a vague
+# "not synced yet" (customer create toast + email OTP).
+
+_SYNC_ERROR_KEY = "pos_next:customer_sync_error:{0}"
+_SYNC_ERROR_TTL = 30 * 24 * 3600
+
+
+def record_customer_sync_error(customer, message):
+	if not customer:
+		return
+	text = (str(message or "")).strip()[:500]
+	if not text:
+		clear_customer_sync_error(customer)
+		return
+	frappe.cache().set_value(_SYNC_ERROR_KEY.format(customer), text, expires_in_sec=_SYNC_ERROR_TTL)
+
+
+def clear_customer_sync_error(customer):
+	if customer:
+		frappe.cache().delete_value(_SYNC_ERROR_KEY.format(customer))
+
+
+def get_customer_sync_error(customer):
+	if not customer:
+		return None
+	return frappe.cache().get_value(_SYNC_ERROR_KEY.format(customer)) or None

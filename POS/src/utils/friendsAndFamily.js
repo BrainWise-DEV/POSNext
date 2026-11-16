@@ -34,6 +34,8 @@ export const FNF_REASON = Object.freeze({
 	STRIPPED: "stripped",
 	ORDER_DISCOUNT_BETTER: "order_discount_better",
 	CAP_REACHED: "cap_reached",
+	// Buy X Get Y / Routine (Item Level Discount) line: not eligible for F&F.
+	SCHEME_NOT_ELIGIBLE: "scheme_not_eligible",
 	// POS Profile has "Allow F&F" unticked: F&F is off for the whole profile.
 	PROFILE_NOT_ALLOWED: "profile_not_allowed",
 	// Approved Domains (eligibility): the member's email is not on an approved
@@ -471,6 +473,8 @@ export function fnfLineNote(item, { locale = "en" } = {}) {
 			return { tone: "warning", text: t("Friends & Family limit reached") };
 		case FNF_REASON.ORDER_DISCOUNT_BETTER:
 			return { tone: "info", text: t("Invoice promotion applied instead of Friends & Family") };
+		case FNF_REASON.SCHEME_NOT_ELIGIBLE:
+			return { tone: "info", text: t("Promotion item — not eligible for Friends & Family") };
 		case FNF_REASON.OTHER_BETTER: {
 			const text = pickLocalizedMessage(item.fnf_decision, locale);
 			return { tone: "info", text: text || t("A better discount applies instead of Friends & Family") };

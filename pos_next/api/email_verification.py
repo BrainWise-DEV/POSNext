@@ -75,6 +75,7 @@ def _messages():
 			"Customer is saved but not synced with Magento yet. Please try again in a moment."
 		),
 		"email_taken": _("This email belongs to another account."),
+		"registration_failed": _("Magento rejected this customer's registration."),
 		"server_error": _("Could not send the code, please try again."),
 		"unavailable": _("Magento is unreachable."),
 		"expired": _("Code expired. Request a new one."),
@@ -342,16 +343,23 @@ def _safe_message(message):
 
 
 def _error_from(http_status, body, default_code):
-	"""Map a Magento error (HTTP >=400, or 200 with status:false) to a result."""
+	"""Map a Magento error (HTTP >=400, or 200 with status:false) to a result.
+
+	The cashier sees Magento's own message (e.g. "This email is already
+	registered to another account") — the canned text is only a fallback when
+	Magento sends none. Auth and 5xx errors keep the generic text so server
+	internals are not shown at the till.
+	"""
 	raw = body.get("message") if isinstance(body, dict) else None
+	api_message = _safe_message(raw) or None
 	code = _map_message(raw)
-	if code:
-		return _result(False, code)
-	if http_status in (401, 403):
+	if http_status in (401, 403) and code is None:
 		return _result(False, "credentials_invalid")
-	if http_status and http_status >= 500:
+	if http_status and http_status >= 500 and code is None:
 		return _result(False, "server_error")
-	return _result(False, default_code, _safe_message(raw) or None)
+	if code in ("server_error",):
+		return _result(False, code)
+	return _result(False, code or default_code, api_message, api_message=api_message)
 
 
 # ---------------------------------------------------------------------------
@@ -402,10 +410,31 @@ def _prepare(customer, email, pos_profile):
 
 
 def _unsynced_aware(ctx, result):
-	"""Magento has no customer for this phone and we hold no Magento id: sync is pending."""
+	"""Magento has no customer for this phone and we hold no Magento id.
+
+	If Magento rejected the customer's registration (e.g. the email is already
+	registered with a different mobile number) show that error — it is the real
+	reason the customer is missing, not a pending sync. Otherwise sync is pending.
+	"""
 	if result.get("code") == "customer_not_found" and not ctx.get("synced"):
+		registration_error = _registration_error(ctx.get("customer"))
+		if registration_error:
+			code = _map_message(registration_error) or "registration_failed"
+			return _result(False, code, registration_error, api_message=registration_error)
 		return _result(False, "sync_pending")
 	return result
+
+
+def _registration_error(customer):
+	"""Last Magento registration error recorded for this customer (see integrations.registry)."""
+	if not customer:
+		return None
+	try:
+		from pos_next.integrations.registry import get_customer_sync_error
+
+		return _safe_message(get_customer_sync_error(customer)) or None
+	except Exception:
+		return None
 
 
 def _audit(customer, action, code, email, phone, http_status=None):

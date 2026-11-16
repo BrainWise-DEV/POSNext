@@ -173,7 +173,16 @@ def create_customer(
 		frappe.flags.pos_next_customer_company = None
 		frappe.flags.pos_next_customer_pos_profile = None
 
-	return customer.as_dict()
+	out = customer.as_dict()
+	if sync_external_customer:
+		from pos_next.integrations.registry import get_customer_sync_error
+
+		sync_error = get_customer_sync_error(customer.name)
+		if sync_error:
+			# Saved locally, but the external system (Magento) rejected it — e.g.
+			# the email is already registered with a different mobile number.
+			out["external_sync_error"] = sync_error
+	return out
 
 
 def _is_leaf_customer_group(name):

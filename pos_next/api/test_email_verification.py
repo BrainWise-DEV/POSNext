@@ -195,7 +195,9 @@ class TestSend(EmailOTPTestBase):
 			(400, {"message": "No customer was found with this phone"}),
 			(200, {"success": False, "message": "No customer was found"}),
 		):
-			with self.subTest(status=status), self.post(status, body):
+			with self.subTest(status=status), self.post(status, body), patch(
+				"pos_next.integrations.registry.get_customer_sync_error", return_value=None
+			):
 				res = ev.send_email_otp("CUST-1")
 			self.assertEqual((res["ok"], res["code"]), (False, "sync_pending"))
 			self.assertNotEqual(res["message"], ev._messages()["customer_not_found"])
@@ -214,6 +216,35 @@ class TestSend(EmailOTPTestBase):
 		self.row.custom_customer_id = None
 		with self.post(400, {"message": "This email is already registered"}):
 			self.assertEqual(ev.send_email_otp("CUST-1")["code"], "email_taken")
+
+	def test_api_message_reaches_cashier(self):
+		api_text = "This email is already registered with a different mobile number"
+		with self.post(400, {"message": api_text}):
+			res = ev.send_email_otp("CUST-1")
+		self.assertEqual((res["ok"], res["code"], res["message"]), (False, "email_taken", api_text))
+		with self.post(200, {"status": False, "message": api_text}):
+			res = ev.verify_email_otp("CUST-1", OTP)
+		self.assertEqual((res["code"], res["message"]), ("email_taken", api_text))
+
+	def test_canned_message_when_api_sends_none(self):
+		with self.post(400, {}):
+			res = ev.send_email_otp("CUST-1")
+		self.assertEqual(res["code"], "send_failed")
+		with self.post(500, {"message": "Traceback internal detail"}):
+			res = ev.send_email_otp("CUST-1")
+		self.assertEqual(res["code"], "server_error")
+		self.assertNotIn("Traceback", res["message"])
+
+	def test_registration_conflict_not_masked_as_sync_pending(self):
+		# Magento rejected the POS registration (email owned by another mobile);
+		# the OTP lookup by phone then finds nobody. Show the real reason.
+		self.row.custom_customer_id = None
+		api_text = "Email is already registered to another account"
+		with patch(
+			"pos_next.integrations.registry.get_customer_sync_error", return_value=api_text
+		), self.post(400, {"message": "No customer was found with this phone"}):
+			res = ev.send_email_otp("CUST-1")
+		self.assertEqual((res["ok"], res["code"], res["message"]), (False, "email_taken", api_text))
 
 	def test_flag_off(self):
 		with patch(f"{MODULE}.is_feature_enabled", return_value=False), self.post(200, {}) as m:

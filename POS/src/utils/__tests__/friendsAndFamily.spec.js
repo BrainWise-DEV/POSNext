@@ -224,6 +224,9 @@ describe("lineDiscountSource / lineBreakdown", () => {
 describe("fnfLineNote", () => {
 	it("explains excluded / out of scope / cap / promo better", () => {
 		expect(fnfLineNote(cartLine({ fnf_reason: "excluded" })).text).toBe("Excluded from Friends & Family");
+		expect(fnfLineNote(cartLine({ fnf_reason: "scheme_not_eligible" })).text).toBe(
+			"Promotion item — not eligible for Friends & Family",
+		);
 		expect(fnfLineNote(cartLine({ fnf_reason: "out_of_scope" })).text).toBe("Not covered by Friends & Family");
 		expect(fnfLineNote(cartLine({ fnf_reason: "cap_reached" })).tone).toBe("warning");
 		const decision = {
