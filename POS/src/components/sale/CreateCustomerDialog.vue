@@ -424,7 +424,7 @@ const shiftStore = usePOSShiftStore();
 const bootstrapStore = useBootstrapStore();
 const customerSearchStore = useCustomerSearchStore();
 const { canCreateCustomer } = usePOSPermissions();
-const { showSuccess, showError } = useToast();
+const { showSuccess, showError, handleError } = useToast();
 
 // =============================================================================
 // Props & Emits
@@ -871,12 +871,8 @@ const createCustomerResource = createResource({
 	},
 	onError: (error) => {
 		log.error("Error creating customer", error);
-		const message =
-			error?.messages?.[0] ||
-			error?.message ||
-			(typeof error === "string" ? error : null) ||
-			__("Failed to create customer");
-		showError(message);
+		// Prefer _server_messages / messages from frappe.throw (e.g. Magento rejection).
+		handleError(error, __("Failed to create customer"));
 	},
 });
 
@@ -912,12 +908,7 @@ const updateCustomerResource = createResource({
 	},
 	onError: (error) => {
 		log.error("Error updating customer", error);
-		const message =
-			error?.messages?.[0] ||
-			error?.message ||
-			(typeof error === "string" ? error : null) ||
-			__("Failed to update customer");
-		showError(message);
+		handleError(error, __("Failed to update customer"));
 	},
 });
 

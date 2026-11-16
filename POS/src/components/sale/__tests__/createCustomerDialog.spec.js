@@ -6,6 +6,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const showSuccess = vi.fn()
 const showError = vi.fn()
+const handleError = vi.fn((error, fallback) => {
+	const message =
+		(Array.isArray(error?.messages) && error.messages[0]) ||
+		error?.message ||
+		fallback
+	showError(message)
+})
 const canCreateCustomer = vi.fn(async () => true)
 const resourceConfigs = []
 
@@ -42,7 +49,7 @@ vi.mock("@/composables/usePermissions", () => ({
 }))
 
 vi.mock("@/composables/useToast", () => ({
-	useToast: () => ({ showSuccess, showError }),
+	useToast: () => ({ showSuccess, showError, handleError }),
 }))
 
 vi.mock("@/stores/countries", () => ({
