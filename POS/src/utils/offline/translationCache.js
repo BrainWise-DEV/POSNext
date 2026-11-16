@@ -22,6 +22,9 @@ const log = logger.create("TranslationCache");
 /** @constant {number} Cache time-to-live in milliseconds (24 hours) */
 const CACHE_TTL = 24 * 60 * 60 * 1000;
 
+/** @constant {string} Bundle format version plus the build, so each release refetches its strings */
+export const CACHE_VERSION = `2-${typeof __BUILD_VERSION__ !== "undefined" ? __BUILD_VERSION__ : "dev"}`;
+
 /** @type {Map<string, TranslationEntry>} In-memory cache for fast lookups */
 const memoryCache = new Map();
 
@@ -33,6 +36,7 @@ const pendingRefreshes = new Map();
  * @property {string} locale - Normalized locale code (e.g., "en", "ar")
  * @property {Record<string, string>} messages - Key-value translation pairs
  * @property {number} timestamp - Unix timestamp when cached
+ * @property {string} version - CACHE_VERSION the bundle was cached under
  */
 
 /**
@@ -52,7 +56,7 @@ const normalizeLocale = (locale) => (locale || "en").toLowerCase();
  */
 async function persist(locale, messages, timestamp) {
 	try {
-		const entry = { locale, messages, timestamp };
+		const entry = { locale, messages, timestamp, version: CACHE_VERSION };
 		memoryCache.set(locale, entry);
 		await db.translations.put(entry);
 		return entry;
@@ -65,7 +69,7 @@ async function persist(locale, messages, timestamp) {
 /**
  * Reads translation entry from memory cache, falling back to IndexedDB.
  * @param {string} locale - Normalized locale code
- * @returns {Promise<TranslationEntry|null>} Cached entry or null if not found
+ * @returns {Promise<TranslationEntry|null>} Cached entry (stale if from an older version) or null if not found
  * @private
  */
 async function read(locale) {
@@ -76,10 +80,11 @@ async function read(locale) {
 
 	try {
 		const stored = await db.translations.get(locale);
-		if (stored) {
-			memoryCache.set(locale, stored);
-		}
-		return stored || null;
+		if (!stored) return null;
+		// Older-version bundles stay usable offline but are always stale
+		const entry = stored.version === CACHE_VERSION ? stored : { ...stored, timestamp: 0 };
+		memoryCache.set(locale, entry);
+		return entry;
 	} catch (error) {
 		log.error("Failed to get cached translations:", error);
 		return null;

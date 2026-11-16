@@ -31,6 +31,7 @@ vi.mock("@/utils/draftManager", () => ({
 globalThis.__ = (s) => s
 
 const { usePOSDraftsStore } = await import("../posDrafts")
+const { saveDraft } = await import("@/utils/draftManager")
 
 describe("posDrafts serial release", () => {
 	beforeEach(async () => {
@@ -51,5 +52,16 @@ describe("posDrafts serial release", () => {
 		await store.loadDrafts()
 		await store.deleteDraft("D-1")
 		expect(returnSerials).not.toHaveBeenCalled()
+	})
+})
+
+describe("posDrafts held coupons", () => {
+	beforeEach(() => setActivePinia(createPinia()))
+
+	it("holds a line coupon with its lines but drops a whole-cart coupon", async () => {
+		const store = usePOSDraftsStore()
+		await store.saveDraftInvoice(draft.items, "CUST-1", "POS-1", [], null, { code: "C50", amount: 50 })
+		await store.saveDraftInvoice(draft.items, "CUST-1", "POS-1", [], null, { code: "L10", line_level: true })
+		expect(saveDraft.mock.calls.map(([data]) => data.applied_coupon?.code ?? null)).toEqual([null, "L10"])
 	})
 })

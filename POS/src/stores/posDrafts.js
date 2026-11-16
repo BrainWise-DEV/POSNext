@@ -69,7 +69,7 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 
 			await loadDrafts(); // Refresh drafts list and count
 
-			showSuccess(__("Invoice saved as draft successfully"));
+			showSuccess(__("Invoice held"));
 
 			return savedDraft;
 		} catch (error) {
@@ -81,7 +81,7 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 
 	async function loadDraft(draft) {
 		try {
-			showSuccess(__("Draft invoice loaded successfully"));
+			showSuccess(__("Held invoice opened"));
 
 			return {
 				items: draft.items || [],

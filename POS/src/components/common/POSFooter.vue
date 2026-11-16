@@ -40,11 +40,11 @@ const footerClass = ref(`pos-footer-component pos-footer-component-${componentId
 const brandSignature = computed(() => `BrainWise-${componentId}`);
 
 const footerStyle = computed(() => ({
-	padding: config.value._s?.p || "12px 20px",
+	padding: config.value._s?.p || "3px 16px",
 	backgroundColor: config.value._s?.bg || "#f8f9fa",
 	borderTop: config.value._s?.bt || "1px solid #e0e0e0",
 	textAlign: config.value._s?.ta || "center",
-	fontSize: config.value._s?.fs || "13px",
+	fontSize: config.value._s?.fs || "12px",
 	color: config.value._s?.c || "#6b7280",
 	zIndex: config.value._s?.z || 100,
 	userSelect: "none",
@@ -184,7 +184,7 @@ const ensureStylePresence = () => {
 		styleElement.textContent = `
 			.pos-footer-component {
 				pointer-events: auto !important;
-				min-height: 45px;
+				min-height: 24px;
 				position: fixed !important;
 				bottom: 0 !important;
 				left: 0 !important;

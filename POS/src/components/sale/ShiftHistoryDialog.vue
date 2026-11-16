@@ -266,7 +266,7 @@
 
 <script setup>
 import { useToast } from "@/composables/useToast"
-import { DEFAULT_CURRENCY, DEFAULT_LOCALE, formatCurrency as formatCurrencyUtil } from "@/utils/currency"
+import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil, formatDate as formatLocaleDate, formatTime as formatLocaleTime } from "@/utils/currency"
 import { Button, FeatherIcon, Input, createResource } from "frappe-ui"
 import { ref, watch, reactive, onMounted, computed } from "vue"
 
@@ -446,20 +446,12 @@ function formatCurrency(amount) {
 
 function formatDate(dateString) {
 	if (!dateString) return ""
-	return new Date(dateString).toLocaleDateString(DEFAULT_LOCALE, {
-		year: "numeric",
-		month: "short",
-		day: "2-digit"
-	})
+	return formatLocaleDate(dateString)
 }
 
 function formatTime(dateTimeString) {
 	if (!dateTimeString) return "-"
-	return new Date(dateTimeString).toLocaleTimeString(DEFAULT_LOCALE, {
-		hour: "2-digit",
-		minute: "2-digit",
-		hour12: true
-	})
+	return formatLocaleTime(dateTimeString)
 }
 
 function getCashDiffColor(diff) {

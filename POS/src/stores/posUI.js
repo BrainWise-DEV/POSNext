@@ -4,6 +4,9 @@ import { computed, ref } from "vue";
 
 const LEFT_PANEL_MIN = 320;
 const RIGHT_PANEL_MIN = 360;
+// The cart stops growing here on wide screens; the rest goes to the item grid
+export const RIGHT_PANEL_MAX = 520;
+const DEFAULT_LEFT_PANEL_RATIO = 0.62;
 
 export const usePOSUIStore = defineStore("posUI", () => {
 	// Loading state
@@ -54,8 +57,12 @@ export const usePOSUIStore = defineStore("posUI", () => {
 	const mobileActiveTab = ref("items"); // 'items' or 'cart'
 	const windowWidth = ref(typeof window !== "undefined" ? window.innerWidth : 1024);
 
-	// Layout state
-	const leftPanelWidth = ref(800);
+	// Layout state: the split is a ratio of the container, so it follows window resizes
+	const leftPanelRatio = ref(DEFAULT_LEFT_PANEL_RATIO);
+	const containerWidth = ref(0);
+	const leftPanelWidth = computed(() =>
+		clampLeftPanelWidth(leftPanelRatio.value * containerWidth.value, containerWidth.value)
+	);
 	const isResizing = ref(false);
 
 	// Computed
@@ -112,22 +119,27 @@ export const usePOSUIStore = defineStore("posUI", () => {
 	}
 
 	// Layout actions
+	// Items pane width kept between its minimum and the cart's min/max widths
 	function clampLeftPanelWidth(width, containerWidth) {
 		const safeContainerWidth =
 			Number.isFinite(containerWidth) && containerWidth > 0
 				? containerWidth
 				: LEFT_PANEL_MIN + RIGHT_PANEL_MIN;
 		const maxWidth = Math.max(LEFT_PANEL_MIN, safeContainerWidth - RIGHT_PANEL_MIN);
-		const clampedWidth = Math.min(Math.max(width, LEFT_PANEL_MIN), maxWidth);
+		const minWidth = Math.min(
+			maxWidth,
+			Math.max(LEFT_PANEL_MIN, safeContainerWidth - RIGHT_PANEL_MAX)
+		);
+		const clampedWidth = Math.min(Math.max(width, minWidth), maxWidth);
 		return Number.isFinite(clampedWidth) ? clampedWidth : LEFT_PANEL_MIN;
 	}
 
-	function setLeftPanelWidth(width, containerWidth = null) {
-		if (containerWidth !== null) {
-			const clamped = clampLeftPanelWidth(width, containerWidth);
-			leftPanelWidth.value = clamped;
-		} else {
-			leftPanelWidth.value = width;
+	// Stores the dragged width as a ratio of the container
+	function setLeftPanelWidth(width, newContainerWidth = null) {
+		if (newContainerWidth) containerWidth.value = newContainerWidth;
+		if (containerWidth.value > 0) {
+			leftPanelRatio.value =
+				clampLeftPanelWidth(width, containerWidth.value) / containerWidth.value;
 		}
 	}
 
@@ -135,9 +147,10 @@ export const usePOSUIStore = defineStore("posUI", () => {
 		isResizing.value = resizing;
 	}
 
-	function updateLayoutBounds(containerWidth) {
-		if (containerWidth) {
-			leftPanelWidth.value = clampLeftPanelWidth(leftPanelWidth.value, containerWidth);
+	// New container width: leftPanelWidth recomputes from the ratio and re-clamps
+	function updateLayoutBounds(newContainerWidth) {
+		if (newContainerWidth) {
+			containerWidth.value = newContainerWidth;
 		}
 	}
 
@@ -201,6 +214,7 @@ export const usePOSUIStore = defineStore("posUI", () => {
 		mobileActiveTab,
 		windowWidth,
 		leftPanelWidth,
+		leftPanelRatio,
 		isResizing,
 
 		// Computed

@@ -66,7 +66,8 @@
 							</Button>
 							<button
 								@click="handleClose"
-								class="p-2 hover:bg-white/50 rounded-lg transition-colors"
+								class="flex items-center justify-center min-h-target min-w-target hover:bg-white/50 rounded-lg transition-colors pos-focus"
+								:aria-label="__('Close')"
 							>
 								<svg
 									class="w-5 h-5 text-gray-600"
@@ -154,10 +155,10 @@
 									<button
 										@click="unpaidFilter = 'all'"
 										:class="[
-											'px-4 py-2 rounded-lg font-medium text-sm transition-all',
+											'min-h-target px-4 rounded-lg border font-medium text-sm tabular-nums transition-colors pos-focus',
 											unpaidFilter === 'all'
-												? 'bg-orange-500 text-white shadow-md'
-												: 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50',
+												? 'bg-pos-action-soft text-pos-action border-pos-action font-semibold'
+												: 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50',
 										]"
 									>
 										{{ __("All ({0})", [unpaidInvoices.length]) }}
@@ -165,51 +166,45 @@
 									<button
 										@click="unpaidFilter = 'partial'"
 										:class="[
-											'px-4 py-2 rounded-lg font-medium text-sm transition-all',
+											'min-h-target px-4 rounded-lg border font-medium text-sm tabular-nums transition-colors pos-focus',
 											unpaidFilter === 'partial'
-												? 'bg-orange-500 text-white shadow-md'
-												: 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50',
+												? 'bg-pos-action-soft text-pos-action border-pos-action font-semibold'
+												: 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50',
 										]"
 									>
 										{{
 											__("Partially Paid ({0})", [
-												unpaidInvoices.filter(
-													(inv) => inv.status === "Partly Paid"
-												).length,
+												unpaidBucketCounts.partial,
 											])
 										}}
 									</button>
 									<button
 										@click="unpaidFilter = 'unpaid'"
 										:class="[
-											'px-4 py-2 rounded-lg font-medium text-sm transition-all',
+											'min-h-target px-4 rounded-lg border font-medium text-sm tabular-nums transition-colors pos-focus',
 											unpaidFilter === 'unpaid'
-												? 'bg-orange-500 text-white shadow-md'
-												: 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50',
+												? 'bg-pos-action-soft text-pos-action border-pos-action font-semibold'
+												: 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50',
 										]"
 									>
 										{{
 											__("Unpaid ({0})", [
-												unpaidInvoices.filter(
-													(inv) => inv.status === "Unpaid"
-												).length,
+												unpaidBucketCounts.unpaid,
 											])
 										}}
 									</button>
 									<button
 										@click="unpaidFilter = 'overdue'"
 										:class="[
-											'px-4 py-2 rounded-lg font-medium text-sm transition-all',
+											'min-h-target px-4 rounded-lg border font-medium text-sm tabular-nums transition-colors pos-focus',
 											unpaidFilter === 'overdue'
-												? 'bg-red-500 text-white shadow-md'
-												: 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50',
+												? 'bg-pos-action-soft text-pos-action border-pos-action font-semibold'
+												: 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50',
 										]"
 									>
 										{{
 											__("Overdue ({0})", [
-												unpaidInvoices.filter(
-													(inv) => inv.status === "Overdue"
-												).length,
+												unpaidBucketCounts.overdue,
 											])
 										}}
 									</button>
@@ -312,225 +307,93 @@
 									</p>
 								</div>
 
-								<!-- Invoices List -->
-								<div v-else class="flex flex-col gap-4">
-									<div
-										v-for="invoice in filteredUnpaidInvoices"
-										:key="invoice.name"
-										class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hover:shadow-md transition-shadow"
-									>
-										<!-- Invoice Header -->
-										<div class="p-4 border-b bg-gray-50">
-											<div class="flex items-start justify-between">
-												<div>
-													<div class="flex items-center gap-2">
-														<h3
-															class="text-lg font-bold text-gray-900"
-														>
-															{{ invoice.name }}
-														</h3>
-														<span
-															:class="[
-																'px-2 py-0.5 text-xs font-semibold rounded-full',
-																getInvoiceStatusColor(invoice),
-															]"
-														>
-															{{ __(invoice.status) }}
-														</span>
-													</div>
-													<div
-														class="flex items-center gap-4 mt-1 text-sm text-gray-600"
-													>
-														<div class="flex items-center">
-															<svg
-																class="w-4 h-4 me-1"
-																fill="none"
-																stroke="currentColor"
-																viewBox="0 0 24 24"
-															>
-																<path
-																	stroke-linecap="round"
-																	stroke-linejoin="round"
-																	stroke-width="2"
-																	d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
-																/>
-															</svg>
-															{{
-																invoice.customer_name ||
-																invoice.customer
-															}}
-														</div>
-														<div class="flex items-center">
-															<svg
-																class="w-4 h-4 me-1"
-																fill="none"
-																stroke="currentColor"
-																viewBox="0 0 24 24"
-															>
-																<path
-																	stroke-linecap="round"
-																	stroke-linejoin="round"
-																	stroke-width="2"
-																	d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
-																/>
-															</svg>
-															{{ formatDate(invoice.posting_date) }}
-															{{ formatTime(invoice.posting_time) }}
-														</div>
-													</div>
-												</div>
-												<button
-													@click="selectInvoiceForPayment(invoice)"
-													:disabled="
-														loadingInvoiceDetails || isOffline()
-													"
-													:title="
-														isOffline()
-															? __(
-																	'Payments cannot be added while offline'
-															  )
-															: ''
-													"
-													class="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-												>
-													<LoadingIndicator
-														v-if="loadingInvoiceDetails"
-														class="w-4 h-4"
-													/>
-													{{ __("Add Payment") }}
-												</button>
-											</div>
-										</div>
-
-										<!-- Payment Summary -->
-										<div class="p-4">
-											<div class="grid grid-cols-3 gap-4 mb-4">
-												<div
-													class="text-center p-3 bg-blue-50 rounded-lg border border-blue-100"
-												>
-													<div class="text-xs text-gray-600 mb-1">
-														{{ __("Total Amount") }}
-													</div>
-													<div class="text-lg font-bold text-gray-900">
-														{{ formatCurrency(invoice.grand_total) }}
-													</div>
-												</div>
-												<div
-													class="text-center p-3 bg-green-50 rounded-lg border border-green-100"
-												>
-													<div class="text-xs text-gray-600 mb-1">
-														{{ __("Paid") }}
-													</div>
-													<div class="text-lg font-bold text-green-600">
-														{{ formatCurrency(invoice.paid_amount) }}
-													</div>
-												</div>
-												<div
-													class="text-center p-3 bg-orange-50 rounded-lg border border-orange-100"
-												>
-													<div class="text-xs text-gray-600 mb-1">
-														{{ __("Outstanding") }}
-													</div>
-													<div class="text-lg font-bold text-orange-600">
-														{{
-															formatCurrency(
-																invoice.outstanding_amount
-															)
-														}}
-													</div>
-												</div>
-											</div>
-
-											<!-- Payment Progress Bar -->
-											<div
-												class="w-full bg-gray-200 rounded-full h-2 overflow-hidden mb-3"
+								<!-- Invoices List: one dense row per invoice -->
+								<div
+									v-else
+									class="bg-white rounded-lg border border-gray-200 overflow-x-auto"
+								>
+									<table class="min-w-full text-pos-sm">
+										<thead class="bg-pos-panel text-xs font-semibold text-gray-700">
+											<tr>
+												<th scope="col" class="px-3 py-2 text-start">{{ __("Invoice") }}</th>
+												<th scope="col" class="px-3 py-2 text-start">{{ __("Customer") }}</th>
+												<th scope="col" class="px-3 py-2 text-start">{{ __("Date") }}</th>
+												<th scope="col" class="px-3 py-2 text-end">{{ __("Total Amount") }}</th>
+												<th scope="col" class="px-3 py-2 text-end">{{ __("Paid") }}</th>
+												<th scope="col" class="px-3 py-2 text-end">{{ __("Outstanding") }}</th>
+												<th scope="col" class="px-3 py-2"><span class="sr-only">{{ __("Add Payment") }}</span></th>
+											</tr>
+										</thead>
+										<tbody class="divide-y divide-gray-200">
+											<tr
+												v-for="invoice in filteredUnpaidInvoices"
+												:key="invoice.name"
+												class="hover:bg-gray-50 align-middle"
 											>
-												<div
-													class="h-full bg-gradient-to-r from-green-500 to-green-600 transition-all duration-300"
-													:style="{
-														width: `${
-															(invoice.paid_amount /
-																invoice.grand_total) *
-															100
-														}%`,
-													}"
-												></div>
-											</div>
-
-											<!-- Payment Methods -->
-											<div
-												v-if="
-													invoice.payments && invoice.payments.length > 0
-												"
-												class="mt-3"
-											>
-												<div
-													class="text-xs font-medium text-gray-600 mb-2"
-												>
-													{{ __("Payment History") }}
-												</div>
-												<div class="grid grid-cols-2 md:grid-cols-3 gap-2">
-													<div
-														v-for="(payment, idx) in invoice.payments"
-														:key="idx"
+												<td class="px-3 py-2 whitespace-nowrap">
+													<div class="font-semibold text-pos-ink tabular-nums" dir="ltr">
+														{{ invoice.name }}
+													</div>
+													<span
 														:class="[
-															'flex flex-col p-2 rounded-lg border text-sm',
-															payment.source === 'Payment Entry'
-																? 'bg-blue-50 border-blue-200'
-																: 'bg-gray-50 border-gray-200',
+															'inline-block mt-0.5 px-2 py-0.5 text-xs font-semibold rounded-full',
+															getInvoiceStatusColor(invoice),
 														]"
 													>
-														<div
-															class="flex items-center justify-between mb-1"
-														>
-															<span
-																class="text-gray-700 font-medium"
-																>{{
-																	payment.mode_of_payment ||
-																	__("N/A")
-																}}</span
-															>
-															<span
-																class="font-semibold text-gray-900"
-																>{{
-																	formatCurrency(payment.amount)
-																}}</span
-															>
-														</div>
-														<div
-															class="flex items-center justify-between"
-														>
-															<span
-																v-if="payment.posting_date"
-																class="text-[9px] text-gray-500"
-															>
-																{{
-																	formatDate(
-																		payment.posting_date
-																	)
-																}}
-															</span>
-															<span
-																:class="[
-																	'text-[9px] font-semibold',
-																	payment.source ===
-																	'Payment Entry'
-																		? 'text-blue-600'
-																		: 'text-gray-500',
-																]"
-															>
-																{{
-																	getPaymentSourceLabel(
-																		payment.source
-																	)
-																}}
-															</span>
-														</div>
+														{{ __(invoice.status) }}
+													</span>
+												</td>
+												<td class="px-3 py-2 max-w-[14rem] truncate text-pos-ink" dir="auto">
+													{{ invoice.customer_name || invoice.customer }}
+												</td>
+												<td class="px-3 py-2 whitespace-nowrap text-gray-600 tabular-nums">
+													<span dir="ltr">
+														{{ formatDate(invoice.posting_date) }}
+														{{ formatTime(invoice.posting_time) }}
+													</span>
+												</td>
+												<td class="px-3 py-2 text-end whitespace-nowrap font-medium text-pos-ink tabular-nums">
+													{{ formatCurrency(invoice.grand_total) }}
+												</td>
+												<td class="px-3 py-2 text-end whitespace-nowrap tabular-nums">
+													<div class="font-medium text-pos-saving">
+														{{ formatCurrency(invoice.paid_amount) }}
 													</div>
-												</div>
-											</div>
-										</div>
-									</div>
+													<!-- Payment history, one line per payment -->
+													<div
+														v-for="(payment, idx) in invoice.payments || []"
+														:key="idx"
+														class="text-xs text-gray-600"
+														:title="getPaymentSourceLabel(payment.source)"
+													>
+														{{ payment.mode_of_payment || __("N/A") }}
+														{{ formatCurrency(payment.amount) }}
+													</div>
+												</td>
+												<td class="px-3 py-2 text-end whitespace-nowrap font-semibold text-pos-caution tabular-nums">
+													{{ formatCurrency(invoice.outstanding_amount) }}
+												</td>
+												<td class="px-3 py-2 text-end whitespace-nowrap">
+													<button
+														@click="selectInvoiceForPayment(invoice)"
+														:disabled="loadingInvoiceDetails || isOffline()"
+														:title="
+															isOffline()
+																? __('Payments cannot be added while offline')
+																: ''
+														"
+														class="pos-btn pos-btn-primary"
+													>
+														<LoadingIndicator
+															v-if="loadingInvoiceDetails"
+															class="w-4 h-4"
+														/>
+														{{ __("Add Payment") }}
+													</button>
+												</td>
+											</tr>
+										</tbody>
+									</table>
 								</div>
 							</div>
 
@@ -1030,6 +893,7 @@ import { useInvoiceFilters } from "@/composables/useInvoiceFilters";
 import { useInvoiceFiltersStore } from "@/stores/invoiceFilters";
 import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency";
 import { getInvoiceStatusColor } from "@/utils/invoice";
+import { unpaidInvoiceBucket } from "@/utils/unpaidInvoiceBucket";
 import { useFormatters } from "@/composables/useFormatters";
 import { useToast } from "@/composables/useToast";
 import { useShift } from "@/composables/useShift";
@@ -1098,22 +962,22 @@ const unpaidSummary = ref({
 const selectedInvoice = ref(null);
 const showPaymentDialog = ref(false);
 
-// Filtered unpaid invoices based on payment amounts
+// Filtered unpaid invoices: each invoice sits in exactly one bucket (overdue, partial, unpaid)
 const filteredUnpaidInvoices = computed(() => {
-	if (unpaidFilter.value === "partial") {
-		// Partially paid: status is 'Partly Paid' only
-		return unpaidInvoices.value.filter((inv) => inv.status === "Partly Paid");
-	}
-	if (unpaidFilter.value === "unpaid") {
-		// Totally unpaid: status is 'Unpaid'
-		return unpaidInvoices.value.filter((inv) => inv.status === "Unpaid");
-	}
-	if (unpaidFilter.value === "overdue") {
-		// Overdue: invoice status is Overdue
-		return unpaidInvoices.value.filter((inv) => inv.status === "Overdue");
-	}
-	return unpaidInvoices.value; // "all"
+	if (unpaidFilter.value === "all") return unpaidInvoices.value;
+	return unpaidInvoices.value.filter((inv) => unpaidInvoiceBucket(inv) === unpaidFilter.value);
 });
+
+// Chip counts from the same buckets, so they add up to the tab total
+const unpaidBucketCounts = computed(() =>
+	unpaidInvoices.value.reduce(
+		(counts, inv) => {
+			counts[unpaidInvoiceBucket(inv)]++;
+			return counts;
+		},
+		{ overdue: 0, partial: 0, unpaid: 0 }
+	)
+);
 
 // Filtered summary based on selected filter
 const filteredUnpaidSummary = computed(() => {

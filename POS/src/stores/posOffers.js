@@ -547,6 +547,7 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 		setAvailableOffers,
 		clearOffers,
 		checkOfferEligibility,
+		getEligibleItemQuantity,
 		getEligibleItemAmount,
 		getUnlockAmount,
 		ensureOffersFetched,

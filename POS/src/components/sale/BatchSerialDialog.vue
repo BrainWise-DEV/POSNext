@@ -58,8 +58,8 @@
 							:class="[
 								'border rounded-lg p-3 cursor-pointer transition-all',
 								selectedBatch?.batch_no === batch.batch_no
-									? 'border-blue-500 bg-blue-50'
-									: 'border-gray-200 hover:border-blue-300',
+									? 'border-[#0b63ce] bg-[#0b63ce]/5 ring-1 ring-[#0b63ce]'
+									: 'border-gray-200 hover:border-[#0b63ce]/40',
 							]"
 						>
 							<div class="flex items-start justify-between">
@@ -73,9 +73,12 @@
 										</span>
 										<span
 											v-if="batch.expiry_date"
-											class="text-xs text-gray-600"
+											:class="[
+												'text-xs rounded px-1.5 py-0.5',
+												expiryTone(batch.expiry_date),
+											]"
 										>
-											{{ __("Exp: {0}", [formatDate(batch.expiry_date)]) }}
+											{{ expiryLabel(batch.expiry_date) }}
 										</span>
 									</div>
 								</div>
@@ -84,7 +87,7 @@
 									class="flex-shrink-0"
 								>
 									<svg
-										class="w-5 h-5 text-blue-600"
+										class="w-5 h-5 text-[#0b63ce]"
 										fill="currentColor"
 										viewBox="0 0 20 20"
 									>
@@ -124,6 +127,7 @@
 							</button>
 							<button
 								v-if="
+									quantity > 1 &&
 									filteredSerials.length > 0 &&
 									selectedSerials.length < filteredSerials.length
 								"
@@ -139,8 +143,12 @@
 					<!-- Search Input -->
 					<div class="relative mb-3">
 						<input
+							ref="serialSearchInput"
 							v-model="serialSearchQuery"
 							type="text"
+							spellcheck="false"
+							autocomplete="off"
+							@keydown.enter.prevent="handleSerialEnter"
 							:placeholder="__('Search serial numbers...')"
 							class="w-full px-3 py-2 ps-9 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
 						/>
@@ -234,15 +242,15 @@
 							:class="[
 								'border rounded-lg p-3 cursor-pointer transition-all',
 								isSerialSelected(serial.serial_no)
-									? 'border-blue-500 bg-blue-50'
-									: 'border-gray-200 hover:border-blue-300',
+									? 'border-[#0b63ce] bg-[#0b63ce]/5'
+									: 'border-gray-200 hover:border-[#0b63ce]/40',
 							]"
 						>
 							<div class="flex items-center gap-3">
 								<!-- Selection order badge (start) -->
 								<span
 									v-if="isSerialSelected(serial.serial_no)"
-									class="flex-shrink-0 inline-flex items-center justify-center w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-medium"
+									class="flex-shrink-0 inline-flex items-center justify-center w-6 h-6 rounded-full bg-[#0b63ce] text-white text-xs font-medium"
 								>
 									{{ getSelectionOrder(serial.serial_no) }}
 								</span>
@@ -260,7 +268,7 @@
 									:class="[
 										'flex-shrink-0 w-5 h-5 rounded border-2 flex items-center justify-center transition-all ms-auto',
 										isSerialSelected(serial.serial_no)
-											? 'bg-blue-600 border-blue-600'
+											? 'bg-[#0b63ce] border-[#0b63ce]'
 											: 'border-gray-300 bg-white',
 									]"
 								>
@@ -284,21 +292,20 @@
 			</div>
 		</template>
 		<template #actions>
-			<div class="flex gap-2">
-				<Button variant="subtle" @click="show = false">
-					{{ __("Cancel") }}
-				</Button>
-				<Button variant="solid" @click="handleConfirm" :disabled="!isValid">
-					{{ __("Confirm") }}
-				</Button>
-			</div>
+			<PickerDialogFooter
+				:disabled="!isValid"
+				@cancel="show = false"
+				@confirm="handleConfirm"
+			/>
 		</template>
 	</Dialog>
 </template>
 
 <script setup>
-import { Button, Dialog, createResource } from "frappe-ui";
-import { computed, ref, watch } from "vue";
+import { Dialog, createResource } from "frappe-ui";
+import { computed, nextTick, ref, watch } from "vue";
+import PickerDialogFooter from "./PickerDialogFooter.vue";
+import { usePickerEnter } from "@/composables/useKeyboardShortcuts";
 import { useSerialNumberStore } from "@/stores/serialNumber";
 import { usePOSCartStore } from "@/stores/posCart";
 import {
@@ -333,6 +340,46 @@ const availableSerials = ref([]);
 const selectedBatch = ref(null);
 const selectedSerials = ref([]);
 const serialSearchQuery = ref("");
+const serialSearchInput = ref(null);
+
+const MONTHS = [
+	"January", "February", "March", "April", "May", "June",
+	"July", "August", "September", "October", "November", "December",
+];
+
+/** Whole days from today (local date) to a YYYY-MM-DD expiry date; negative once expired */
+function daysToExpiry(dateStr) {
+	const d = new Date();
+	const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+	return Math.round((Date.parse(dateStr.slice(0, 10)) - Date.parse(today)) / 86400000);
+}
+
+/** "5 November 2026 · in 11 days", month name translated */
+function expiryLabel(dateStr) {
+	const [year, month, day] = dateStr.slice(0, 10).split("-").map(Number);
+	const days = daysToExpiry(dateStr);
+	const relative =
+		days < 0 ? __("Expired") : days === 0 ? __("Expires today") : __("in {0} days", [days]);
+	return `${day} ${__(MONTHS[month - 1])} ${year} · ${relative}`;
+}
+
+/** Red once expired, caution amber under 30 days */
+function expiryTone(dateStr) {
+	const days = daysToExpiry(dateStr);
+	return days < 0
+		? "bg-red-50 text-red-700 font-medium"
+		: days < 30
+			? "bg-[#b45309]/10 text-[#b45309] font-medium"
+			: "text-gray-600";
+}
+
+// FEFO order: unexpired by earliest expiry, then undated, then expired
+const fefoKey = (batch) =>
+	!batch.expiry_date
+		? "1"
+		: daysToExpiry(batch.expiry_date) < 0
+			? `2${batch.expiry_date}`
+			: `0${batch.expiry_date}`;
 
 // Computed: Available batches with cart quantities subtracted
 const availableBatches = computed(() => {
@@ -352,7 +399,16 @@ const availableBatches = computed(() => {
 				qty: Math.max(0, batch.qty - cartQtyForBatch), // Available = warehouse - cart
 			};
 		})
-		.filter((batch) => batch.qty > 0); // Only show batches with available qty
+		.filter((batch) => batch.qty > 0) // Only show batches with available qty
+		.sort((a, b) => fefoKey(a).localeCompare(fefoKey(b)));
+});
+
+// Default to the earliest-expiry unexpired batch so Enter confirms it
+watch(availableBatches, (batches) => {
+	if (!batches.some((b) => b.batch_no === selectedBatch.value?.batch_no)) {
+		selectedBatch.value =
+			batches.find((b) => !b.expiry_date || daysToExpiry(b.expiry_date) >= 0) || null;
+	}
 });
 
 // Resource for loading batches with actual stock quantities
@@ -394,6 +450,10 @@ watch(
 		show.value = val;
 		if (val && props.item) {
 			loadBatchesOrSerials();
+		}
+		// Focus the serial search so a scanned serial lands in it
+		if (val && props.item?.has_serial_no) {
+			nextTick(() => setTimeout(() => serialSearchInput.value?.focus(), 100));
 		}
 	}
 );
@@ -506,11 +566,31 @@ function clearAllSerials() {
 	selectedSerials.value = [];
 }
 
+/** Enter in the serial search: toggle an exact match, confirm once the quantity is met */
+function handleSerialEnter() {
+	const query = serialSearchQuery.value.trim().toLowerCase();
+	if (!query) {
+		if (isValid.value) handleConfirm();
+		return;
+	}
+	const match = availableSerials.value.find((s) => s.serial_no.toLowerCase() === query);
+	if (!match) return;
+	toggleSerial(match);
+	serialSearchQuery.value = "";
+	if (isSerialSelected(match.serial_no) && totalSelectedSerials.value === props.quantity) {
+		handleConfirm();
+	}
+}
+
+// Enter outside an input confirms the current selection
+usePickerEnter(show, () => isValid.value && handleConfirm());
+
 function handleConfirm() {
 	const result = {};
 
 	if (props.item?.has_batch_no && selectedBatch.value) {
 		result.batch_no = selectedBatch.value.batch_no;
+		result.batch_expiry_date = selectedBatch.value.expiry_date || null;
 	}
 
 	if (props.item?.has_serial_no) {
@@ -534,8 +614,4 @@ function resetSelection() {
 	// Don't clear availableSerials - it's managed by the store cache
 }
 
-function formatDate(dateStr) {
-	if (!dateStr) return "";
-	return new Date(dateStr).toLocaleDateString();
-}
 </script>

@@ -31,6 +31,7 @@ class TestPosPageContext(FrappeTestCase):
 			update_pos_page_context(context)
 		self.assertEqual(context.boot["posnext_app_flags"], {"posnext_promotions": 1})
 		self.assertEqual(context.boot["site_name"], frappe.local.site)
+		self.assertIn("posnext_developer_mode", context.boot)
 
 	def test_logged_in_boot_carries_session_csrf_token(self):
 		# www/pos.py is not deployed (www/ is gitignored); without this the POS
@@ -50,6 +51,13 @@ class TestPosPageContext(FrappeTestCase):
 		finally:
 			frappe.set_user(user)
 		self.assertNotIn("csrf_token", context.boot)
+
+	def test_exposes_backend_developer_mode(self):
+		for flag in (0, 1):
+			context = frappe._dict(path="pos")
+			with patch.dict(frappe.conf, {"developer_mode": flag}):
+				update_pos_page_context(context)
+			self.assertEqual(context.boot["posnext_developer_mode"], flag)
 
 	def test_other_pages_untouched(self):
 		context = frappe._dict(path="login")

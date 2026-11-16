@@ -1269,12 +1269,8 @@ def update_invoice(data):
 				)
 
 				if not coupon_result or not coupon_result.get("valid"):
-					error_msg = (
-						coupon_result.get("msg", "Invalid coupon code")
-						if coupon_result
-						else "Invalid coupon code"
-					)
-					frappe.throw(_(error_msg))
+					# check_coupon_code returns its msg already translated
+					frappe.throw((coupon_result or {}).get("msg") or _("Invalid coupon code"))
 
 				# Store coupon code on invoice for tracking
 				invoice_doc.coupon_code = coupon_code

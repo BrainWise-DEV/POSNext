@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { resolveFreeItemMinQty, syncCartFreeItems, totalSkuQty } from "@/utils/gwpSameItemFreeRows";
+import { nestFreeRows, resolveFreeItemMinQty, syncCartFreeItems, totalSkuQty } from "@/utils/gwpSameItemFreeRows";
 
 function paidLine({ item_code = "SKU-A", quantity = 3, uom = "Nos", ...rest } = {}) {
 	return {
@@ -211,5 +211,42 @@ describe("same-SKU buy 2 get 1 at exactly min_qty (PRLE-1585 style GWP rule)", (
 			expect(paidEligible(cart)).toBeGreaterThanOrEqual(offer.min_qty);
 			expect(cart.filter((i) => i.is_free_item).map((i) => i.quantity)).toEqual([free]);
 		}
+	});
+});
+
+describe("nestFreeRows — gifts under the line that earned them", () => {
+	const gift = (rest) => ({ quantity: 1, uom: "Nos", stock_uom: "Nos", is_free_item: 1, rate: 0, ...rest });
+
+	it("puts each gift right after its paid line and counts carved qty on it", () => {
+		const rows = nestFreeRows([
+			paidLine({ item_code: "SKU-A", quantity: 2 }),
+			paidLine({ item_code: "SKU-B", quantity: 1, pricing_rules: "PR-B" }),
+			gift({ item_code: "GIFT-B", pricing_rules: "PR-B" }),
+			gift({ item_code: "SKU-A", gwp_same_item_row: 1 }),
+		]);
+
+		expect(rows.map((r) => r.item_code)).toEqual(["SKU-A", "SKU-A", "SKU-B", "GIFT-B"]);
+		expect(rows[0]._bundledFreeQty).toBe(1);
+		expect(rows[1]._giftOf).toBe("SKU-A-Nos");
+		expect(rows[2]._bundledFreeQty).toBe(0);
+		expect(rows[3]._giftOf).toBe("SKU-B-Nos");
+	});
+
+	it("keeps a gift with no matching line at the bottom, unnested", () => {
+		const rows = nestFreeRows([gift({ item_code: "GIFT-X" }), paidLine({ item_code: "SKU-A" })]);
+		expect(rows.map((r) => r.item_code)).toEqual(["SKU-A", "GIFT-X"]);
+		expect(rows[1]._giftOf).toBeNull();
+		expect(rows[1]._isStandaloneFreeRow).toBe(true);
+	});
+
+	it("on-top same-SKU gift (not carved) nests under its line without inflating displayed qty", () => {
+		let cart = syncCartFreeItems([paidLine({ item_code: "SKU-A", quantity: 2 })], [
+			{ item_code: "SKU-A", qty: 1, uom: "Nos", min_qty: 2 },
+		]);
+		const rows = nestFreeRows(cart);
+		expect(rows.map((r) => r.item_code)).toEqual(["SKU-A", "SKU-A"]);
+		expect(rows[0].quantity).toBe(2);
+		expect(rows[0]._bundledFreeQty).toBe(0);
+		expect(rows[1]._giftOf).toBe("SKU-A-Nos");
 	});
 });

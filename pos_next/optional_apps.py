@@ -10,6 +10,7 @@ monkey-patches when the owning app is installed.
 from __future__ import annotations
 
 import frappe
+from frappe.utils import cint
 
 
 def promotions_installed() -> bool:
@@ -45,6 +46,8 @@ def update_pos_page_context(context):
 		return
 	boot = dict(context.get("boot") or {})
 	boot["posnext_app_flags"] = get_pos_ui_app_flags()
+	# Lets the POS allow plain-http login on a developer_mode site (window.posnext_developer_mode)
+	boot["posnext_developer_mode"] = cint(frappe.conf.get("developer_mode"))
 	# www/ is a gitignored build output, so a pos.py that sets the CSRF token is
 	# not deployed with the app. Without a token in boot the Vue app starts with
 	# no window.csrf_token and its first POSTs (frappe.auth.get_logged_user,

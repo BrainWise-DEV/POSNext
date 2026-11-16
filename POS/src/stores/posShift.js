@@ -1,5 +1,5 @@
 import { useShift, shiftState } from "@/composables/useShift";
-import { DEFAULT_CURRENCY, DEFAULT_LOCALE } from "@/utils/currency";
+import { DEFAULT_CURRENCY, formatTime } from "@/utils/currency";
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 
@@ -73,7 +73,7 @@ export const usePOSShiftStore = defineStore("posShift", () => {
 
 	function updateCurrentTime() {
 		const now = new Date();
-		currentTime.value = now.toLocaleTimeString(DEFAULT_LOCALE, { hour12: false });
+		currentTime.value = formatTime(now);
 	}
 
 	function startTimers() {
