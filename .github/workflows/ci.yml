@@ -13,7 +13,9 @@ concurrency:
 
 jobs:
   tests:
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest (26.04) ships mariadb-client 11.8, which requires
+    # SSL by default and cannot talk to the mariadb:10.6 service container.
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
     name: Server
