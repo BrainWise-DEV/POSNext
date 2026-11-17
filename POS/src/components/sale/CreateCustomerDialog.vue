@@ -15,7 +15,6 @@
 					:saved-email="createdCustomer.email_id || ''"
 					:verified="Boolean(Number(createdCustomer.custom_email_verified))"
 					:verified-email="createdCustomer.custom_verified_email || ''"
-					:magento-synced="Boolean(createdCustomer.custom_customer_id)"
 					:pos-profile="posProfile"
 					@verified="handleEmailVerified"
 					@lock-change="(v) => (emailVerificationLocked = v)"
@@ -207,7 +206,7 @@
 					</div>
 				</div>
 
-				<!-- Email (optional; Magento sync uses a default if blank) -->
+				<!-- Email (optional) -->
 				<div>
 					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
 						{{ __("Email") }}
@@ -220,6 +219,7 @@
 					/>
 					<EmailVerificationPanel
 						v-if="showEmailVerification"
+						ref="verificationPanel"
 						class="mt-2"
 						:customer="verificationCustomerName"
 						:email="customerData.email_id"
@@ -228,6 +228,7 @@
 						:verified-email="verificationVerifiedEmail"
 						:pos-profile="posProfile"
 						@verified="handleEmailVerified"
+						@save-and-send="handleSaveAndSend"
 						@lock-change="(v) => (emailVerificationLocked = v)"
 					/>
 				</div>
@@ -509,10 +510,13 @@ const dialogOptions = computed(() => ({
 	size: "md",
 }));
 
-const FABRICATED_EMAIL_SUFFIX = "@pos.miraaya";
+// An email on the site's placeholder domain (POS Settings) is not a real address.
+// Blank setting: nothing is a placeholder.
 const hasRealEmail = (email) => {
 	const e = (email || "").trim().toLowerCase();
-	return Boolean(e) && e.includes("@") && !e.endsWith(FABRICATED_EMAIL_SUFFIX);
+	if (!e || !e.includes("@")) return false;
+	const domain = (posSettingsStore.placeholderEmailDomain || "").trim().toLowerCase().replace(/^@/, "");
+	return !domain || e.split("@").pop() !== domain;
 };
 
 // F&F members need a verified email for Friends & Family, so the panel is
@@ -527,10 +531,16 @@ const showEmailVerification = computed(
 			switchEnabled: posSettingsStore.customerEmailVerificationEnabled,
 			fnfMember: fnfMember.value,
 		}) &&
-		hasRealEmail(props.customer?.email_id || customerData.value.email_id)
+		hasRealEmail(savedEmailOverride.value ?? (props.customer?.email_id || customerData.value.email_id))
 );
 const verificationCustomerName = computed(() => editingCustomerName.value);
-const verificationSavedEmail = computed(() => props.customer?.email_id || "");
+const verificationPanel = ref(null);
+/** Email saved via "Save email & send code" (props.customer is stale until the parent refreshes) */
+const savedEmailOverride = ref(null);
+const saveAndSendPending = ref(false);
+const verificationSavedEmail = computed(
+	() => savedEmailOverride.value ?? (props.customer?.email_id || "")
+);
 const currentVerification = computed(
 	() => verifiedOverride.value || freshVerification.value || props.customer || {}
 );
@@ -851,8 +861,7 @@ const createCustomerResource = createResource({
 		}
 		showSuccess(__("Customer {0} created successfully", [data.customer_name]));
 		if (data.external_sync_error) {
-			// Saved in POS, but Magento rejected it (e.g. email already registered
-			// with a different mobile number): show Magento's own message.
+			// Saved in POS, but the external system rejected it: show its message.
 			showError(data.external_sync_error);
 		}
 		// Offer "Verify email now" when enabled (or the new customer is an F&F
@@ -871,7 +880,7 @@ const createCustomerResource = createResource({
 	},
 	onError: (error) => {
 		log.error("Error creating customer", error);
-		// Prefer _server_messages / messages from frappe.throw (e.g. Magento rejection).
+		// Prefer _server_messages / messages from frappe.throw (e.g. an external rejection).
 		handleError(error, __("Failed to create customer"));
 	},
 });
@@ -897,16 +906,30 @@ const updateCustomerResource = createResource({
 			: {}),
 		pos_profile: props.posProfile,
 	}),
-	onSuccess: (data) => {
+	onSuccess: async (data) => {
+		const saveAndSend = saveAndSendPending.value;
+		saveAndSendPending.value = false;
 		showSuccess(__("Customer {0} updated successfully", [data.customer_name]));
 		if (data.external_sync_error) {
-			// Saved in POS, but Magento rejected or could not apply the change.
+			// Saved in POS, but the external system rejected or could not apply the change.
 			showError(data.external_sync_error);
+		}
+		if (saveAndSend) {
+			// Stay open: record the saved email, then send the code.
+			const savedEmail = data.email_id ?? customerData.value.email_id ?? "";
+			savedEmailOverride.value = savedEmail;
+			if (props.customer?.name) {
+				emit("customer-verified", { name: props.customer.name, patch: { email_id: savedEmail } });
+			}
+			await nextTick();
+			await verificationPanel.value?.send?.();
+			return;
 		}
 		emit("customer-updated", data);
 		show.value = false;
 	},
 	onError: (error) => {
+		saveAndSendPending.value = false;
 		log.error("Error updating customer", error);
 		handleError(error, __("Failed to update customer"));
 	},
@@ -1124,6 +1147,34 @@ const finishCreated = () => {
 	show.value = false;
 };
 
+const validateForm = () => {
+	if (requiresSplitCustomerName.value) {
+		if (!customerData.value.custom_first_name?.trim()) {
+			showError(__("First Name is required"));
+			return false;
+		}
+		if (!customerData.value.custom_last_name?.trim()) {
+			showError(__("Last Name is required"));
+			return false;
+		}
+	} else if (!customerData.value.customer_name) {
+		showError(__("Customer Name is required"));
+		return false;
+	}
+	if (!phoneNumber.value) {
+		showError(__("Mobile Number is required"));
+		return false;
+	}
+	return true;
+};
+
+/** Panel "Save email & send code": save the customer, keep the dialog open, then send. */
+const handleSaveAndSend = async () => {
+	if (!isEditMode.value || !editingCustomerName.value || !validateForm()) return;
+	saveAndSendPending.value = true;
+	await updateCustomerResource.submit();
+};
+
 const handleCreate = async () => {
 	if (
 		emailVerificationLocked.value &&
@@ -1131,19 +1182,7 @@ const handleCreate = async () => {
 	) {
 		return;
 	}
-	if (requiresSplitCustomerName.value) {
-		if (!customerData.value.custom_first_name?.trim()) {
-			return showError(__("First Name is required"));
-		}
-		if (!customerData.value.custom_last_name?.trim()) {
-			return showError(__("Last Name is required"));
-		}
-	} else if (!customerData.value.customer_name) {
-		return showError(__("Customer Name is required"));
-	}
-	if (!phoneNumber.value) {
-		return showError(__("Mobile Number is required"));
-	}
+	if (!validateForm()) return;
 	if (isEditMode.value && editingCustomerName.value) {
 		await updateCustomerResource.submit();
 		return;
@@ -1249,6 +1288,8 @@ watch(
 		emailVerificationLocked.value = false;
 		verifiedOverride.value = null;
 		freshVerification.value = null;
+		savedEmailOverride.value = null;
+		saveAndSendPending.value = false;
 		resetForm();
 	}
 );

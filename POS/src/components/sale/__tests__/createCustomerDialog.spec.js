@@ -66,7 +66,10 @@ vi.mock("@/stores/countries", () => ({
 const posSettings = {
 	customerEmailVerificationEnabled: false,
 	requireSplitName: false,
+	placeholderEmailDomain: "",
 }
+const canOffer = vi.fn(() => false)
+const panelSend = vi.fn()
 
 vi.mock("@/stores/posSettings", () => ({
 	usePOSSettingsStore: () => posSettings,
@@ -95,7 +98,7 @@ vi.mock("@/utils/offline/offlineState", () => ({
 }))
 
 vi.mock("@/utils/customerVerification", () => ({
-	canOfferEmailVerification: () => false,
+	canOfferEmailVerification: (...a) => canOffer(...a),
 	fetchFnfMembership: vi.fn(async () => false),
 	fetchVerificationStatus: vi.fn(),
 }))
@@ -105,7 +108,15 @@ vi.mock("@/utils/logger", () => ({
 }))
 
 vi.mock("@/components/sale/EmailVerificationPanel.vue", () => ({
-	default: { name: "EmailVerificationPanel", template: "<div />" },
+	default: {
+		name: "EmailVerificationPanel",
+		props: ["customer", "email", "savedEmail"],
+		emits: ["save-and-send"],
+		setup(_, { expose }) {
+			expose({ send: (...a) => panelSend(...a) })
+		},
+		template: '<div data-testid="panel-stub" />',
+	},
 }))
 
 import CreateCustomerDialog from "../CreateCustomerDialog.vue"
@@ -117,7 +128,7 @@ const existingCustomer = {
 	name: "CUST-2026-68541",
 	customer_name: "ZZ Test POSSync1",
 	mobile_no: "+964-7754539344",
-	email_id: "pos.9647754539344@pos.miraaya",
+	email_id: "pos.9647754539344@pos.example",
 }
 
 function createResourceOnSuccess(url) {
@@ -150,7 +161,7 @@ describe("CreateCustomerDialog existing-customer response", () => {
 		document.body.innerHTML = ""
 	})
 
-	it("shows Magento's exact email message and lets the cashier select the existing customer", async () => {
+	it("shows the server's exact email message and lets the cashier select the existing customer", async () => {
 		const wrapper = factory()
 		const onSuccess = createResourceOnSuccess("pos_next.api.customers.create_customer")
 		const message = "A customer with this email already exists."
@@ -182,7 +193,7 @@ describe("CreateCustomerDialog existing-customer response", () => {
 		wrapper.unmount()
 	})
 
-	it("shows Magento's exact phone message and does not create a new customer", async () => {
+	it("shows the server's exact phone message and does not create a new customer", async () => {
 		const wrapper = factory()
 		const onSuccess = createResourceOnSuccess("pos_next.api.customers.create_customer")
 		const message = "A customer with this phone already exists."
@@ -225,8 +236,8 @@ function resourceFor(url) {
 	return entry
 }
 
-function mountEditor(customer, { miraaya = true, modelValue = true } = {}) {
-	posSettings.requireSplitName = miraaya
+function mountEditor(customer, { splitName = true, modelValue = true } = {}) {
+	posSettings.requireSplitName = splitName
 	return mount(CreateCustomerDialog, {
 		props: { modelValue, posProfile: "POS-A", customer },
 		global: { mocks: { __: t } },
@@ -339,7 +350,7 @@ describe("CreateCustomerDialog edit mode", () => {
 		wrapper.unmount()
 	})
 
-	it("shows Magento's message when an email update is rejected", async () => {
+	it("shows the server's message when an email update is rejected", async () => {
 		const wrapper = mountEditor(editCustomer)
 		await flushPromises()
 
@@ -353,6 +364,86 @@ describe("CreateCustomerDialog edit mode", () => {
 		expect(showError).toHaveBeenCalledWith(
 			"A customer with the same email already exists in an associated website."
 		)
+		wrapper.unmount()
+	})
+})
+
+describe("CreateCustomerDialog settings-driven behaviour", () => {
+	beforeEach(() => {
+		resourceConfigs.length = 0
+		showSuccess.mockReset()
+		showError.mockReset()
+		panelSend.mockReset()
+		canOffer.mockReset()
+		canOffer.mockReturnValue(false)
+		posSettings.customerEmailVerificationEnabled = false
+		posSettings.placeholderEmailDomain = ""
+	})
+	afterEach(() => {
+		document.body.innerHTML = ""
+		posSettings.requireSplitName = false
+		posSettings.placeholderEmailDomain = ""
+	})
+
+	it("generic site has no vendor text", async () => {
+		const wrapper = mountEditor(editCustomer, { splitName: false })
+		await flushPromises()
+		expect(wrapper.html()).not.toMatch(/magento|miraaya|iraq/i)
+		wrapper.unmount()
+	})
+
+	it("split name follows setting", async () => {
+		let wrapper = mountEditor(editCustomer, { splitName: true })
+		await flushPromises()
+		expect(find(wrapper, "customer-first-name").exists()).toBe(true)
+		expect(find(wrapper, "customer-last-name").exists()).toBe(true)
+		wrapper.unmount()
+		wrapper = mountEditor(editCustomer, { splitName: false })
+		await flushPromises()
+		expect(find(wrapper, "customer-first-name").exists()).toBe(false)
+		wrapper.unmount()
+	})
+
+	it("placeholder email from setting hides the panel", async () => {
+		canOffer.mockReturnValue(true)
+		posSettings.placeholderEmailDomain = "pos.example"
+		let wrapper = mountEditor({ ...editCustomer, email_id: "a@pos.example" })
+		await flushPromises()
+		expect(find(wrapper, "panel-stub").exists()).toBe(false)
+		wrapper.unmount()
+		wrapper = mountEditor(editCustomer)
+		await flushPromises()
+		expect(find(wrapper, "panel-stub").exists()).toBe(true)
+		wrapper.unmount()
+		// blank setting: nothing is a placeholder
+		posSettings.placeholderEmailDomain = ""
+		wrapper = mountEditor({ ...editCustomer, email_id: "a@pos.example" })
+		await flushPromises()
+		expect(find(wrapper, "panel-stub").exists()).toBe(true)
+		wrapper.unmount()
+	})
+
+	it("save and send keeps dialog open, updates email and calls panel send()", async () => {
+		canOffer.mockReturnValue(true)
+		const wrapper = mountEditor(editCustomer)
+		await flushPromises()
+		const update = resourceFor("pos_next.api.customers.update_customer")
+		await wrapper.findComponent({ name: "EmailVerificationPanel" }).vm.$emit("save-and-send")
+		await flushPromises()
+		expect(update.resource.submit).toHaveBeenCalled()
+		await update.opts.onSuccess({ ...editCustomer, email_id: "new@example.com" })
+		await flushPromises()
+		expect(wrapper.emitted("customer-updated")).toBeFalsy()
+		expect(wrapper.emitted("update:modelValue")).toBeFalsy()
+		expect(wrapper.findComponent({ name: "EmailVerificationPanel" }).props("savedEmail")).toBe(
+			"new@example.com"
+		)
+		expect(panelSend).toHaveBeenCalledTimes(1)
+
+		// a normal save afterwards closes as before
+		await update.opts.onSuccess({ ...editCustomer })
+		expect(wrapper.emitted("customer-updated")).toBeTruthy()
+		expect(panelSend).toHaveBeenCalledTimes(1)
 		wrapper.unmount()
 	})
 })

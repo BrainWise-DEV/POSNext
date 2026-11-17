@@ -36,12 +36,20 @@
 			<p v-else-if="!emailUsable" class="text-xs text-gray-500">
 				{{ __("Enter a valid email address.") }}
 			</p>
-			<p v-else-if="emailDirty" class="text-xs text-gray-500" data-testid="unsaved-msg">
-				{{ __("Save the customer's email before verifying it.") }}
-			</p>
-			<p v-else-if="!magentoSynced" class="text-xs text-amber-700" data-testid="sync-pending-hint">
-				{{ __("Customer is saved but not synced with Magento yet. Verification may take a moment to become available.") }}
-			</p>
+			<div v-else-if="emailDirty" class="flex items-center justify-between gap-2" data-testid="unsaved-msg">
+				<p class="text-xs text-gray-500">
+					{{ __("Save the customer's email before verifying it.") }}
+				</p>
+				<button
+					type="button"
+					class="px-3 py-1.5 text-sm font-medium rounded-lg bg-blue-600 text-white disabled:bg-gray-300 disabled:cursor-not-allowed"
+					data-testid="save-and-send"
+					:disabled="!customer"
+					@click="emit('save-and-send')"
+				>
+					{{ __("Save email & send code") }}
+				</button>
+			</div>
 		</div>
 
 		<!-- sending -->
@@ -126,8 +134,9 @@
  * States: idle | sending | code_sent | verifying | verified | expired | error
  * `error` keeps the previous step visible (see returnState).
  * The code is delivered by email only. Nothing about the code is persisted
- * client side; the server owns the phone (Magento lookup key)
- * number (taken from Customer.mobile_no) and all rate limits.
+ * client side; the server owns the phone
+ * number (taken from Customer.mobile_no) and all rate limits. Message text
+ * comes from the server result; the panel adds no provider wording.
  */
 import { isOffline } from "@/utils/offline/offlineState";
 import { call } from "frappe-ui";
@@ -142,15 +151,12 @@ const props = defineProps({
 	verified: { type: Boolean, default: false },
 	verifiedEmail: { type: String, default: "" },
 	posProfile: { type: String, default: "" },
-	/** False when the Customer has no Magento id yet (informational only; the server decides) */
-	magentoSynced: { type: Boolean, default: true },
 });
 
-const emit = defineEmits(["verified", "lock-change"]);
+const emit = defineEmits(["verified", "lock-change", "save-and-send"]);
 
 const DEFAULT_TTL = 900;
 const DEFAULT_COOLDOWN = 60;
-const FABRICATED_SUFFIX = "@pos.miraaya";
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const SEND_URL = "pos_next.api.email_verification.send_email_otp";
 const VERIFY_URL = "pos_next.api.email_verification.verify_email_otp";
@@ -172,7 +178,7 @@ const norm = (v) => (v || "").trim().toLowerCase();
 
 const emailUsable = computed(() => {
 	const e = (props.email || "").trim();
-	return Boolean(e) && EMAIL_RE.test(e) && !norm(e).endsWith(FABRICATED_SUFFIX);
+	return Boolean(e) && EMAIL_RE.test(e);
 });
 const emailDirty = computed(() => norm(props.email) !== norm(props.savedEmail));
 
@@ -403,5 +409,5 @@ onBeforeUnmount(() => {
 	window.removeEventListener("offline", syncOffline);
 });
 
-defineExpose({ state, view, reset });
+defineExpose({ state, view, reset, send: sendCode });
 </script>
