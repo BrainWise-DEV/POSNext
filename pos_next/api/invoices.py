@@ -348,7 +348,7 @@ def _apply_pos_sales_team(invoice_doc, sales_team_data=None, pos_profile=None):
 		# Explicit cashier team only — never fall back to rebuilt doc.sales_team
 		invoice_level = sales_team_data if sales_team_data is not None else []
 
-		if getattr(invoice_doc.flags, "pos_offline_sync", False):
+		if invoice_doc.flags.pos_offline_sync:
 			invoice_level = drop_missing_sales_persons(invoice_doc, invoice_level)
 			invoice_doc.flags.pos_allow_disabled_sales_persons = True
 		else:
@@ -1347,18 +1347,32 @@ def update_invoice(data):
 		if coupon_code:
 			# Validate POS Coupon exists and is valid
 			if frappe.db.table_exists("POS Coupon"):
-				from pos_next.pos_next.doctype.pos_coupon.pos_coupon import check_coupon_code
-
-				coupon_result = check_coupon_code(
-					coupon_code, customer=invoice_doc.customer, company=invoice_doc.company
+				from pos_next.pos_next.doctype.pos_coupon.pos_coupon import (
+					check_coupon_code,
+					offline_overshoot_allowed,
+					resolve_coupon_name,
 				)
 
-				if not coupon_result or not coupon_result.get("valid"):
-					# check_coupon_code returns its msg already translated
-					frappe.throw((coupon_result or {}).get("msg") or _("Invalid coupon code"))
+				if invoice_doc.flags.pos_offline_sync and offline_overshoot_allowed(pos_profile):
+					# An offline sale already happened and POS Settings allows it to
+					# skip coupon checks: only the code must exist here. On submit the
+					# coupon is re-checked, counted, and any skipped check is logged
+					# (pos_coupon.count_usage_on_submit).
+					coupon_name = resolve_coupon_name(coupon_code)
+					if not coupon_name:
+						frappe.throw(_("Sorry, this coupon code does not exist"))
+					canonical_code = frappe.db.get_value("POS Coupon", coupon_name, "coupon_code")
+				else:
+					coupon_result = check_coupon_code(
+						coupon_code, customer=invoice_doc.customer, company=invoice_doc.company
+					)
+					if not coupon_result or not coupon_result.get("valid"):
+						# check_coupon_code returns its msg already translated
+						frappe.throw((coupon_result or {}).get("msg") or _("Invalid coupon code"))
+					canonical_code = coupon_result["coupon"].coupon_code
 
-				# Store coupon code on invoice for tracking
-				invoice_doc.coupon_code = coupon_code
+				# Store the coupon's own code (canonical case) on the invoice for tracking
+				invoice_doc.coupon_code = canonical_code
 
 		# Validate stock availability before saving draft
 		# is_stock_item may not be set on unsaved doc items (frontend doesn't send it),
@@ -1771,20 +1785,8 @@ def submit_invoice(invoice=None, data=None):
 				pos_profile=pos_profile,
 			)
 
-		# Handle POS Coupon if coupon_code is provided
-		coupon_code = invoice.get("coupon_code") or data.get("coupon_code")
-		if coupon_code:
-			# Increment usage counter for POS Coupon
-			if frappe.db.table_exists("POS Coupon"):
-				try:
-					from pos_next.pos_next.doctype.pos_coupon.pos_coupon import increment_coupon_usage
-
-					increment_coupon_usage(coupon_code)
-				except Exception as e:
-					frappe.log_error(
-						title="Failed to increment coupon usage",
-						message=f"Coupon: {coupon_code}, Error: {e!s}",
-					)
+		# POS Coupon usage is counted by the invoice's on_submit hook from the
+		# saved coupon_code (see pos_coupon.count_usage_on_submit), not here.
 
 		# Auto-set batch numbers for returns
 		_auto_set_return_batches(invoice_doc)

@@ -63,6 +63,7 @@
   "allow_customer_purchase_order",
   "allow_duplicate_customer_names",
   "fetch_coupon",
+  "offline_coupon_overshoot",
   "section_break_printing",
   "allow_print_last_invoice",
   "silent_print",
@@ -429,6 +430,14 @@
    "label": "Auto Fetch Coupon Gifts"
   },
   {
+   "default": "Allow and log",
+   "description": "When an offline sale is synced after its coupon reached a usage limit (total or per customer). Allow and log: the sale is kept, counted and written to Error Log. Reject: the sync fails like an online sale.",
+   "fieldname": "offline_coupon_overshoot",
+   "fieldtype": "Select",
+   "label": "Offline Coupon Over Limit",
+   "options": "Allow and log\nReject"
+  },
+  {
    "collapsible": 1,
    "fieldname": "section_break_printing",
    "fieldtype": "Section Break",
@@ -630,7 +639,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-06-03 15:54:09.903964",
+ "modified": "2026-11-17 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Settings",
