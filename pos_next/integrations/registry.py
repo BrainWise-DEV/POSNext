@@ -40,6 +40,25 @@ def get_external_loyalty_balance(customer):
 	return get_balance(customer) if get_balance else None
 
 
+def is_benefit_member(customer, pos_profile=None):
+	"""True when any ``pos_next_customer_benefit_providers`` provider says the customer is a member.
+
+	Each hook is a callable returning ``{"is_member": callable(customer, pos_profile=None)}``.
+	A failing provider counts as "not a member"; only its path is logged.
+	"""
+	if not customer:
+		return False
+	for method_path in frappe.get_hooks("pos_next_customer_benefit_providers") or []:
+		try:
+			provider = frappe.get_attr(method_path)()
+			is_member = (provider or {}).get("is_member")
+			if is_member and is_member(customer, pos_profile=pos_profile):
+				return True
+		except Exception:
+			frappe.log_error(title="Customer benefit provider", message=method_path)
+	return False
+
+
 def extend_bootstrap_settings(settings, pos_profile=None):
 	for method_path in frappe.get_hooks("pos_next_bootstrap_settings") or []:
 		try:

@@ -24,8 +24,8 @@ Design notes
   ``rejected``; every other code uses pos_next text. Provider ``health()`` text
   is never shown to the cashier.
 * The feature is gated by ``POS Settings.enable_customer_email_verification``
-  (default off) — except for Friends & Family members (optional POSNext
-  Promotions app), who must have a verified email for F&F and can therefore
+  (default off) — except for members reported by a customer benefit
+  provider (hook ``pos_next_customer_benefit_providers``, e.g. Friends & Family), who must have a verified email for F&F and can therefore
   always be verified.
 """
 
@@ -39,7 +39,7 @@ import phonenumbers
 from frappe import _
 from frappe.utils import cint, now_datetime
 
-from pos_next.integrations import otp
+from pos_next.integrations import otp, registry
 from pos_next.utils import validate_pos_profile_access
 
 DEFAULT_OTP_TTL = 900  # seconds
@@ -236,26 +236,9 @@ def is_feature_enabled(pos_profile=None):
 		return False
 
 
-def _is_ff_member(customer, pos_profile=None):
-	"""Friends & Family member per POSNext Promotions (optional app); False when absent."""
-	if not customer or "posnext_promotions" not in frappe.get_installed_apps():
-		return False
-	try:
-		check = frappe.get_attr(
-			"posnext_promotions.promotions.friends_and_family_eligibility.is_customer_ff_member"
-		)
-	except Exception:
-		return False
-	try:
-		return bool(check(customer, pos_profile=pos_profile))
-	except Exception:
-		_log_unexpected("Friends & Family membership check failed")
-		return False
-
-
 def is_verification_allowed(customer, pos_profile=None):
-	"""POS switch on, or the customer is an F&F member (verification is mandatory for F&F)."""
-	return is_feature_enabled(pos_profile) or _is_ff_member(customer, pos_profile)
+	"""POS switch on, or a benefit provider says the customer is a member (e.g. F&F requires verification)."""
+	return is_feature_enabled(pos_profile) or registry.is_benefit_member(customer, pos_profile)
 
 
 # ---------------------------------------------------------------------------

@@ -79,7 +79,7 @@ class EmailOTPTestBase(unittest.TestCase):
 			patch(f"{MODULE}._mark_verified"),
 			patch(f"{MODULE}.frappe.log_error"),
 			patch("pos_next.integrations.otp.frappe.log_error"),
-			patch(f"{MODULE}._is_ff_member", return_value=False),
+			patch("pos_next.integrations.registry.is_benefit_member", return_value=False),
 		]
 		mocks = [p.start() for p in self.patches]
 		self.mock_audit = mocks[6]
@@ -320,7 +320,7 @@ class TestSend(EmailOTPTestBase):
 	def test_flag_off_but_friends_and_family_member(self):
 		with (
 			patch(f"{MODULE}.is_feature_enabled", return_value=False),
-			patch(f"{MODULE}._is_ff_member", return_value=True),
+			patch("pos_next.integrations.registry.is_benefit_member", return_value=True),
 		):
 			self.assertEqual(ev.send_email_otp("CUST-1")["code"], "sent")
 
