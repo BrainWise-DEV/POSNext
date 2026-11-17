@@ -294,6 +294,7 @@ pos_next_customer_prepare = []
 pos_next_customer_after_insert = []
 pos_next_customer_after_update = []
 pos_next_customer_resolve_existing = []
+pos_next_email_otp_providers = ["pos_next.integrations.otp_frappe_email.get_provider"]
 
 
 website_route_rules = [

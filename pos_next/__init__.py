@@ -4,6 +4,7 @@ except ModuleNotFoundError:  # pragma: no cover - frappe may not be installed du
 	frappe = None
 
 __version__ = "2.0.0"
+FF_CONTRACT = 1
 
 
 def console(*data):
