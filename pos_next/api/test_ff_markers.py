@@ -258,7 +258,8 @@ class TestFFMarkers(FrappeTestCase):
 		beats the coupon, so it keeps F&F. The expected lines are worked out by hand, the
 		cart is built the way the POS submits it, and the saved draft must hold exactly it.
 		"""
-		from posnext_promotions.api.offers import calculate_coupon_discount
+		# Resolved by name: pos_next never imports posnext_promotions (test_no_promotions_import).
+		calculate_coupon_discount = frappe.get_attr("posnext_promotions.api.offers.calculate_coupon_discount")
 
 		enable_ff(self, CUSTOMER, EMAIL_DOMAIN, excluded_items=[{"item_code": ITEM_A}])
 		coupon = frappe.get_doc(

@@ -705,6 +705,11 @@ export function useInvoice() {
 		} else {
 			item.discount_mode = null;
 		}
+		// Stacked discounts stop at the line's value (100%), never beyond it.
+		if (discountAmount > baseAmount) {
+			discountAmount = baseAmount;
+			item.discount_percentage = Math.min(item.discount_percentage || 0, 100);
+		}
 		item.discount_amount = discountAmount;
 
 		// Calculate tax based on inclusive/exclusive mode

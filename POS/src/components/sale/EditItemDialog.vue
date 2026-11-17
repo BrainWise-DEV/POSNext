@@ -615,6 +615,7 @@ import {
 import { call } from "@/utils/apiWrapper";
 import { loadSalesPersonsForProfile } from "@/utils/salesPersonsList";
 import { isFnfLine, lineBreakdown } from "@/utils/friendsAndFamily";
+import { manualDiscountError } from "@/utils/manualDiscount";
 import {
 	scaleRateForUomChange,
 	shouldPreserveRateOnUomChange,
@@ -1284,6 +1285,19 @@ function updateItem() {
 			showError(
 				__("Cannot add item discount while a promotional offer applies to this item")
 			);
+			return;
+		}
+	} else {
+		const discountError = manualDiscountError({
+			listPrice: originalPriceListRate.value,
+			rate: localRate.value,
+			qty: localQuantity.value,
+			discountPercentage,
+			discountAmount,
+			maxDiscount: settingsStore.maxDiscountAllowed,
+		});
+		if (discountError) {
+			showError(discountError);
 			return;
 		}
 	}

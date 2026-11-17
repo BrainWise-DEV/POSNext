@@ -85,88 +85,6 @@ def calculate_price_list_rate(item_rate, discount_pct, current_price_list_rate):
 	return current_price_list_rate if current_price_list_rate else item_rate
 
 
-def validate_manual_rate_edit(item, pos_profile=None, pos_settings_cache=None):
-	"""
-	Validate manually edited item rates against POS Settings business rules.
-
-	This function enforces:
-	1. Rate must be positive
-	2. Rate editing must be enabled in POS Settings
-	3. Rate reduction must not exceed max_discount_allowed (if configured)
-
-	Args:
-	    item: The item dict/object with rate information. Must contain:
-	        - is_rate_manually_edited: Flag indicating manual edit (1 or 0)
-	        - item_code: The item code for error messages
-	        - rate: The edited rate
-	        - original_rate or price_list_rate: The original catalog price
-	    pos_profile: POS Profile name for settings lookup. Required for manual edits.
-	    pos_settings_cache: Optional pre-fetched POS Settings dict to avoid repeated DB queries.
-	        Should contain: allow_user_to_edit_rate, max_discount_allowed
-
-	Returns:
-	    dict with 'valid' boolean and 'message' string if invalid
-	"""
-	is_manual_edit = cint(item.get(FIELD_IS_RATE_MANUALLY_EDITED) or 0)
-
-	# Skip validation if not a manual edit
-	if not is_manual_edit:
-		return {"valid": True}
-
-	item_code = item.get(FIELD_ITEM_CODE)
-	item_rate = flt(item.get(FIELD_RATE) or 0)
-	original_rate = flt(item.get(FIELD_ORIGINAL_RATE) or item.get(FIELD_PRICE_LIST_RATE) or 0)
-
-	# Validate rate is positive
-	if item_rate <= 0:
-		return {"valid": False, "message": _("Rate for item {0} must be greater than zero").format(item_code)}
-
-	# POS Profile is required for manual rate edit validation
-	if not pos_profile:
-		return {
-			"valid": False,
-			"message": _("POS Profile is required to validate rate edit for item {0}").format(item_code),
-		}
-
-	# Use cached POS Settings if provided, otherwise fetch from DB
-	pos_settings = pos_settings_cache
-	if pos_settings is None:
-		pos_settings = frappe.db.get_value(
-			DOCTYPE_POS_SETTINGS,
-			{"pos_profile": pos_profile},
-			[FIELD_ALLOW_USER_TO_EDIT_RATE, FIELD_MAX_DISCOUNT_ALLOWED],
-			as_dict=True,
-		)
-
-	# Check if POS Settings exists
-	if not pos_settings:
-		return {
-			"valid": False,
-			"message": _("POS Settings not found for profile {0}. Cannot validate rate edit.").format(
-				pos_profile
-			),
-		}
-
-	# Check if rate editing is allowed
-	if not cint(pos_settings.get(FIELD_ALLOW_USER_TO_EDIT_RATE)):
-		return {"valid": False, "message": _("Rate editing is not allowed for this POS Profile")}
-
-	# Validate against max discount if configured and rate is reduced
-	max_discount = flt(pos_settings.get(FIELD_MAX_DISCOUNT_ALLOWED) or 0)
-	if max_discount > 0 and original_rate > 0 and item_rate < original_rate:
-		# Calculate effective discount percentage
-		discount_pct = round(((original_rate - item_rate) / original_rate) * 100, 2)
-		if discount_pct > max_discount:
-			return {
-				"valid": False,
-				"message": _(
-					"Rate reduction for item {0} is {1}% which exceeds the maximum allowed discount of {2}%"
-				).format(item_code, discount_pct, max_discount),
-			}
-
-	return {"valid": True}
-
-
 def log_manual_rate_edit(item, invoice_name, user=None):
 	"""
 	Create an audit log entry for manual rate edits.
@@ -408,7 +326,52 @@ class _ItemData:
 		return self.item_factor(code, uom) or flt(fallback) or 1
 
 
-def _force_item_factors(invoice_doc, rows, item_data, lenient) -> None:
+class _PricingContext:
+	"""Server pricing facts for one save, shared by the free-row and paid-row checks.
+
+	The offers of the genuinely paid rows are evaluated at most once per save
+	(``paid_offers``), whichever check needs them first.
+	"""
+
+	def __init__(self, invoice_doc):
+		self.doc = invoice_doc
+		self.item_data = _ItemData()
+		self.list_prices = {}
+		self._paid = None
+
+	def load(self, rows):
+		"""Item master facts and list prices (``_list_prices``) for ``rows``."""
+		self.item_data.load(row.item_code for row in rows)
+		missing = [row for row in rows if id(row) not in self.list_prices]
+		if missing:
+			self.list_prices.update(_list_prices(self.doc, missing, self.item_data))
+
+	def paid_offers(self, paid_rows) -> tuple[dict, Exception | None]:
+		"""The evaluator's answer for ``paid_rows`` (its items are in that order)."""
+		key = [id(row) for row in paid_rows]
+		if self._paid is None or self._paid[0] != key:
+			self.load(paid_rows)
+			payload = _offer_payload(self.doc, paid_rows, self.item_data, self.list_prices)
+			self._paid = (key, *_evaluate_offers(self.doc, payload))
+		return self._paid[1], self._paid[2]
+
+
+def _pricing_context(invoice_doc) -> _PricingContext:
+	if not invoice_doc.flags.pos_pricing:
+		invoice_doc.flags.pos_pricing = _PricingContext(invoice_doc)
+	return invoice_doc.flags.pos_pricing
+
+
+def _refuse(message, title) -> None:
+	"""Refuse an online save. Its Error Log row is a deferred insert, so the
+	request's rollback does not take it away."""
+	frappe.get_doc(doctype="Error Log", method=title, error=message).deferred_insert()
+	frappe.throw(message, frappe.ValidationError)
+
+
+def _force_item_factors(
+	invoice_doc, rows, item_data, lenient, log_title=UNBACKED_FREE_ITEM_LOG_TITLE
+) -> None:
 	"""Checked rows move stock by the Item's own UOM factor, never the client's.
 
 	ERPNext posts ``qty * conversion_factor`` from the row, so the row's factor is set
@@ -426,14 +389,14 @@ def _force_item_factors(invoice_doc, rows, item_data, lenient) -> None:
 		return
 	if not lenient:
 		row = undefined[0]
-		frappe.throw(
+		_refuse(
 			_("Row {0}: UOM {1} is not defined on item {2}.").format(row.idx, row.uom, row.item_code),
-			frappe.ValidationError,
+			log_title,
 		)
 	reference = invoice_doc.name or invoice_doc.get("offline_id") or "new"
 	for row in undefined:
 		log_error_without_telemetry(
-			UNBACKED_FREE_ITEM_LOG_TITLE,
+			log_title,
 			f"Invoice {reference}, row {row.idx}, item {row.item_code}: UOM {row.uom} not on the Item",
 		)
 
@@ -620,34 +583,59 @@ def _offer_zeroing_rules(result, idx) -> list[str]:
 COUPON_DISCOUNT_METHOD = "pos_next.api.offers.calculate_coupon_discount"
 
 
+def _coupon_line_updates(invoice_doc, coupon_code, payload, log_title) -> dict[int, dict] | None:
+	"""Promotions' coupon resolver (its override of ``calculate_coupon_discount``) on
+	``payload``: {line index: line update} where ``coupon_code`` discounts the line.
+
+	None when promotions does not resolve coupons. Only the invoice's own coupon
+	counts, so its usage limits apply (it is validated and counted from
+	``coupon_code``): another code, an invalid coupon or a resolver error gives {}.
+	"""
+	override = frappe.override_whitelisted_method(COUPON_DISCOUNT_METHOD)
+	if override == COUPON_DISCOUNT_METHOD:
+		return None
+	if cstr(invoice_doc.get("coupon_code")).upper() != cstr(coupon_code).upper():
+		return {}
+	message_count = len(frappe.local.message_log or [])
+	try:
+		result = frappe.get_attr(override)(
+			coupon_code,
+			json.dumps(payload, default=str),
+			customer=invoice_doc.get("customer"),
+			company=invoice_doc.get("company"),
+			target_doctype=invoice_doc.doctype,
+		)
+	except Exception as error:
+		# A failing resolver explains nothing; its own msgprint must not reach the
+		# cashier as a second error.
+		del frappe.local.message_log[message_count:]
+		log_error_without_telemetry(
+			log_title, f"Coupon {coupon_code}: could not be resolved ({type(error).__name__}: {error})"
+		)
+		return {}
+	if not (result or {}).get("valid"):
+		return {}
+	return {
+		cint(update.get("line_key")): update
+		for update in result.get("line_updates") or []
+		if update.get("line_key") is not None
+	}
+
+
 def _coupon_zeroed_lines(invoice_doc, coupon_code, payload) -> set[int]:
 	"""Indexes of ``payload`` lines that ``coupon_code`` discounts fully, per the server.
 
-	Only the invoice's own coupon counts, so its usage limits apply (it is validated
-	and counted from ``coupon_code``). Promotions' coupon resolver (its override of
-	``calculate_coupon_discount``) when installed; otherwise pos_next's own POS
-	Coupon: a valid percentage coupon of at least 100% whose minimum amount the
-	lines reach.
+	Promotions' coupon resolver when installed (``_coupon_line_updates``); otherwise
+	pos_next's own POS Coupon, the invoice's own: a valid percentage coupon of at
+	least 100% whose minimum amount the lines reach.
 	"""
+	updates = _coupon_line_updates(invoice_doc, coupon_code, payload, UNBACKED_FREE_ITEM_LOG_TITLE)
+	if updates is not None:
+		return {idx for idx, update in updates.items() if _line_zeroed(update)}
 	if cstr(invoice_doc.get("coupon_code")).upper() != cstr(coupon_code).upper():
 		return set()
 	message_count = len(frappe.local.message_log or [])
 	try:
-		override = frappe.override_whitelisted_method(COUPON_DISCOUNT_METHOD)
-		if override != COUPON_DISCOUNT_METHOD:
-			result = frappe.get_attr(override)(
-				coupon_code,
-				json.dumps(payload, default=str),
-				customer=invoice_doc.get("customer"),
-				company=invoice_doc.get("company"),
-			)
-			if not (result or {}).get("valid"):
-				return set()
-			return {
-				cint(update.get("line_key"))
-				for update in result.get("line_updates") or []
-				if update.get("line_key") is not None and _line_zeroed(update)
-			}
 		from pos_next.pos_next.doctype.pos_coupon.pos_coupon import check_coupon_code
 
 		check = check_coupon_code(
@@ -664,7 +652,7 @@ def _coupon_zeroed_lines(invoice_doc, coupon_code, payload) -> set[int]:
 		):
 			return set(range(len(lines)))
 	except Exception as error:
-		# A failing resolver backs nothing; the row is then checked as an unbacked free row.
+		# A failing check backs nothing; the row is then checked as an unbacked free row.
 		# Its own msgprint must not reach the cashier as a second error.
 		del frappe.local.message_log[message_count:]
 		log_error_without_telemetry(
@@ -802,10 +790,11 @@ def _check_free_rows_backed(
 		if not _rule_names(row.get("pricing_rules") or "") and not row.get("posnext_coupon_code")
 	}
 	paid_rows = [row for row in rows if not cint(row.get("is_free_item"))]
-	item_data = _ItemData()
+	context = _pricing_context(invoice_doc)
+	item_data, list_prices = context.item_data, context.list_prices
 	item_data.load(row.item_code for row in rows)
 	_force_item_factors(invoice_doc, free_rows, item_data, lenient=offline_sync)
-	list_prices = _list_prices(invoice_doc, paid_rows + candidates, item_data)
+	context.load(paid_rows + candidates)
 
 	backed = set()
 	if candidates:
@@ -832,8 +821,7 @@ def _check_free_rows_backed(
 	remaining = [row for row in free_rows if id(row) not in backed]
 	if not remaining:
 		return
-	payload = _offer_payload(invoice_doc, paid_rows, item_data, list_prices)
-	result, evaluator_error = _evaluate_offers(invoice_doc, payload)
+	result, evaluator_error = context.paid_offers(paid_rows)
 	_check_free_rows(
 		invoice_doc,
 		remaining,
@@ -886,7 +874,7 @@ def _check_free_rows(
 	if refused:
 		zero_priced = [row for row, _cap, _qty in refused if id(row) in sourceless]
 		if zero_priced:
-			frappe.throw(_zero_price_message(zero_priced[0]), frappe.ValidationError)
+			_refuse(_zero_price_message(zero_priced[0]), UNBACKED_FREE_ITEM_LOG_TITLE)
 		messages = [
 			_("Row {0}: free item {1} is not backed by an offer (free qty {2} expected, {3} sent).").format(
 				row.idx, row.item_code, cap, qty
@@ -896,7 +884,7 @@ def _check_free_rows(
 		if evaluator_error:
 			messages.append(_("Free items could not be checked against the offers."))
 		messages.append(_("The offers changed. Refresh and re-apply offers."))
-		frappe.throw("<br>".join(messages), frappe.ValidationError)
+		_refuse("<br>".join(messages), UNBACKED_FREE_ITEM_LOG_TITLE)
 	for row, cap, qty in logged:
 		log_error_without_telemetry(
 			UNBACKED_FREE_ITEM_LOG_TITLE,
@@ -952,7 +940,7 @@ def _refuse_zero_rate_after_totals(invoice_doc, lenient) -> None:
 	if not zero:
 		return
 	if not lenient:
-		frappe.throw(_zero_price_message(zero[0]), frappe.ValidationError)
+		_refuse(_zero_price_message(zero[0]), UNBACKED_FREE_ITEM_LOG_TITLE)
 	reference = invoice_doc.name or invoice_doc.get("offline_id") or "new"
 	for row in zero:
 		log_error_without_telemetry(
@@ -965,6 +953,208 @@ def _zero_price_message(row) -> str:
 	return _("Item {0} cannot be sold at zero price. Free items must come from an offer.").format(
 		row.item_code
 	)
+
+
+UNEXPLAINED_DISCOUNT_LOG_TITLE = "Unexplained discount"
+FNF_DISCOUNT_SOURCE = "friends_and_family"
+FIELD_ALLOW_USER_TO_EDIT_ITEM_DISCOUNT = "allow_user_to_edit_item_discount"
+# POS Settings defaults (pos_settings.json) when a profile has no POS Settings row.
+DISCOUNT_SETTING_DEFAULTS = {
+	FIELD_ALLOW_USER_TO_EDIT_ITEM_DISCOUNT: 1,
+	FIELD_ALLOW_USER_TO_EDIT_RATE: 0,
+	FIELD_MAX_DISCOUNT_ALLOWED: 0,
+}
+
+
+def _promotions_evaluates_offers() -> bool:
+	"""Promotions is installed and owns offers (it overrides ``apply_offers``)."""
+	return frappe.override_whitelisted_method(APPLY_OFFERS_METHOD) != APPLY_OFFERS_METHOD
+
+
+def _paid_draft_rates(doc) -> dict:
+	"""Lowest rate per (item, UOM) on a stored draft that carries a payment, else {}."""
+	if sum(flt(row.get("amount")) for row in doc.get("payments") or []) <= 0:
+		return {}
+	rates = {}
+	for row in doc.get("items") or []:
+		if row.get("item_code") and not cint(row.get("is_free_item")) and flt(row.qty) > 0:
+			key = (row.item_code, row.get("uom"))
+			rates[key] = min(rates.get(key, flt(row.rate)), flt(row.rate))
+	return rates
+
+
+def _offer_rate(result, idx, list_price) -> float | None:
+	"""Per-unit rate that rules the server applied give paid line ``idx``, or None.
+
+	Only a line carrying a rule listed in ``applied_pricing_rules`` counts: the
+	evaluators echo a cashier's own discount on a line without rules, and an early
+	return echoes every line as sent. ``discount_amount`` is the line total.
+	"""
+	applied = set(result.get("applied_pricing_rules") or [])
+	items = result.get("items") or []
+	if not applied or idx >= len(items):
+		return None
+	line = items[idx]
+	if not applied & set(_rule_names(_pricing_rule_to_string(line.get("pricing_rules")))):
+		return None
+	price = flt(line.get("price_list_rate")) or list_price
+	qty = flt(line.get("qty")) or 1
+	by_percentage = price * (1 - min(flt(line.get("discount_percentage")), 100) / 100)
+	by_amount = price - flt(line.get("discount_amount")) / qty
+	return max(min(by_percentage, by_amount), 0)
+
+
+def _coupon_line_rates(invoice_doc, coupon_code, paid_rows, context) -> dict[int, float]:
+	"""Per-unit rate the invoice's coupon gives each paid line, on the server's list
+	price with no other discount: {line index: rate}. Empty without promotions."""
+	measures = {
+		id(row): flt(row.get("price_list_rate"))
+		if context.list_prices.get(id(row)) is None
+		else context.list_prices[id(row)]
+		for row in paid_rows
+	}
+	payload = _offer_payload(
+		invoice_doc, paid_rows, context.item_data, measures, normalised={id(row) for row in paid_rows}
+	)
+	updates = _coupon_line_updates(invoice_doc, coupon_code, payload, UNEXPLAINED_DISCOUNT_LOG_TITLE)
+	return {idx: flt(update["rate"]) for idx, update in (updates or {}).items() if "rate" in update}
+
+
+def _discount_settings(pos_profile) -> dict:
+	settings = (
+		pos_profile
+		and frappe.db.get_value(
+			DOCTYPE_POS_SETTINGS, {"pos_profile": pos_profile}, list(DISCOUNT_SETTING_DEFAULTS), as_dict=True
+		)
+	) or {}
+	return {
+		field: default if settings.get(field) is None else settings.get(field)
+		for field, default in DISCOUNT_SETTING_DEFAULTS.items()
+	}
+
+
+def _manual_discount_problem(row, list_price, unexplained, tolerance, settings) -> str | None:
+	"""Why a cashier may not take ``unexplained`` (per unit) off ``list_price``, or None.
+
+	The part carried by the row's discount percentage needs Allow Item Discount;
+	any further gap down to the rate needs Allow User To Edit Rate. Max Discount
+	Percentage Allowed (0 = no limit) caps the sum, as a percentage of list price.
+	"""
+	rate = flt(row.rate)
+	percentage = flt(row.get("discount_percentage"))
+	in_discount, in_rate = 0, unexplained
+	if 0 < percentage < 100:
+		in_discount = min(unexplained, rate * percentage / (100 - percentage))
+		# The POS sends the percentage at 2 decimals: allow that much on the split.
+		in_rate = unexplained - in_discount - list_price * 0.0001
+	prices = (row.idx, row.item_code, list_price, rate)
+	if in_discount > tolerance and not cint(settings[FIELD_ALLOW_USER_TO_EDIT_ITEM_DISCOUNT]):
+		return _(
+			"Row {0}: item {1} is discounted from {2} to {3}, and item discounts are not allowed "
+			"for this POS Profile."
+		).format(*prices)
+	if in_rate > tolerance and not cint(settings[FIELD_ALLOW_USER_TO_EDIT_RATE]):
+		return _(
+			"Row {0}: item {1} is priced {3} against a list price of {2}, and rate editing is not "
+			"allowed for this POS Profile."
+		).format(*prices)
+	limit = flt(settings[FIELD_MAX_DISCOUNT_ALLOWED])
+	taken = flt(unexplained / list_price * 100, 2)
+	if limit > 0 and taken > limit:
+		return _(
+			"Row {0}: item {1} is reduced from {2} to {3} ({4}%), above the maximum allowed discount "
+			"of {5}%."
+		).format(*prices, taken, limit)
+	return None
+
+
+def _check_paid_row_discounts(invoice_doc, offline_sync=False, paid_draft_rates=None) -> None:
+	"""A paid row below its list price must be explained by the server, not the client.
+
+	Runs after ``calculate_taxes_and_totals``: it judges the rate that will be saved.
+	List price: the Item Price ``_list_prices`` finds, which also becomes the row's
+	saved ``price_list_rate``; else the row's ``price_list_rate`` (a measure only,
+	never an exemption). Nothing skips a paid row (Ruling 88). The reduction from
+	there to the rate is explained by, in turn:
+	- the offers the server evaluates for the paid rows (``_PricingContext``,
+	  shared with the free-row check), only discounts of rules it applied;
+	- a line coupon (``posnext_coupon_code``): what promotions' coupon resolver gives
+	  that line on the server's list price, for the invoice's own coupon only;
+	- an F&F line (``posnext_discount_source``) on a Sales Invoice with promotions:
+	  promotions' F&F check is the authority, measuring on the server's list price;
+	  without promotions, or on a Sales Order, the mark explains nothing;
+	- a manual edit the POS Settings permit (``_manual_discount_problem``).
+	Client flags (``is_rate_manually_edited``, ``original_rate``) decide nothing.
+	Tolerance: one unit of the rate's precision per unit sold. A row at rate 0 is
+	``_refuse_zero_rate_after_totals``'s.
+
+	An unexplained reduction refuses the save, except on an offline sync, or for
+	an item a stored paid draft already held in that UOM at a rate no higher
+	(``paid_draft_rates``):
+	then it is kept and logged.
+	"""
+	if invoice_doc.get("is_return"):
+		return
+	paid_rows = [
+		row
+		for row in invoice_doc.get("items") or []
+		if row.get("item_code") and not cint(row.get("is_free_item"))
+	]
+	rows = [row for row in paid_rows if flt(row.qty) > 0 and flt(row.rate) > 0]
+	if not rows:
+		return
+	context = _pricing_context(invoice_doc)
+	context.item_data.load(row.item_code for row in rows)
+	_force_item_factors(
+		invoice_doc, rows, context.item_data, lenient=offline_sync, log_title=UNEXPLAINED_DISCOUNT_LOG_TITLE
+	)
+	context.load(rows)
+	for row in rows:
+		# Saved (and measured by promotions' F&F check) on the server's list price.
+		if context.list_prices.get(id(row)) is not None:
+			row.price_list_rate = context.list_prices[id(row)]
+	fnf_left_to_promotions = invoice_doc.doctype == DOCTYPE_SALES_INVOICE and _promotions_evaluates_offers()
+
+	below = []
+	for row in rows:
+		list_price = flt(row.get("price_list_rate"))
+		precision = row.precision("rate")
+		tolerance = 10 ** -cint(2 if precision is None else precision)
+		if list_price <= 0 or flt(row.rate) >= list_price - tolerance:
+			continue
+		if fnf_left_to_promotions and row.get("posnext_discount_source") == FNF_DISCOUNT_SOURCE:
+			continue
+		below.append((row, list_price, tolerance))
+	if not below:
+		return
+
+	result, _error = context.paid_offers(paid_rows)
+	index = {id(row): idx for idx, row in enumerate(paid_rows)}
+	coupon_rates = {}
+	settings = _discount_settings(invoice_doc.get("pos_profile"))
+	refused, logged = [], []
+	for row, list_price, tolerance in below:
+		idx = index[id(row)]
+		explained = [list_price, _offer_rate(result, idx, list_price)]
+		code = row.get("posnext_coupon_code")
+		if code:
+			if code not in coupon_rates:
+				coupon_rates[code] = _coupon_line_rates(invoice_doc, code, paid_rows, context)
+			explained.append(coupon_rates[code].get(idx))
+		unexplained = min(rate for rate in explained if rate is not None) - flt(row.rate)
+		if unexplained <= tolerance:
+			continue
+		problem = _manual_discount_problem(row, list_price, unexplained, tolerance, settings)
+		if not problem:
+			continue
+		held = (paid_draft_rates or {}).get((row.item_code, row.get("uom")))
+		lenient = offline_sync or (held is not None and flt(row.rate) >= held - tolerance)
+		(logged if lenient else refused).append(problem)
+	if refused:
+		_refuse("<br>".join(refused), UNEXPLAINED_DISCOUNT_LOG_TITLE)
+	reference = invoice_doc.name or invoice_doc.get("offline_id") or "new"
+	for problem in logged:
+		log_error_without_telemetry(UNEXPLAINED_DISCOUNT_LOG_TITLE, f"Invoice {reference}: {problem}")
 
 
 def _validate_invoice_profile(payload):
@@ -1804,11 +1994,12 @@ def _update_invoice(data: str | dict, offline_sync: bool = False) -> dict:
 		standardize_pricing_rules(data.get("items"))
 
 		# Create or update invoice
-		paid_draft_free, stored_sources = {}, set()
+		paid_draft_free, stored_sources, paid_draft_rates = {}, set(), {}
 		if data.get("name"):
 			invoice_doc = frappe.get_doc(doctype, data.get("name"))
 			paid_draft_free = _paid_draft_free_qty(invoice_doc)
 			stored_sources = _stored_line_sources(invoice_doc)
+			paid_draft_rates = _paid_draft_rates(invoice_doc)
 			invoice_doc.update(data)
 		else:
 			invoice_doc = frappe.get_doc(data)
@@ -1890,7 +2081,7 @@ def _update_invoice(data: str | dict, offline_sync: bool = False) -> dict:
 			pos_settings_cache = frappe.db.get_value(
 				DOCTYPE_POS_SETTINGS,
 				{"pos_profile": pos_profile},
-				[FIELD_ALLOW_USER_TO_EDIT_RATE, FIELD_MAX_DISCOUNT_ALLOWED, FIELD_ALLOW_NEGATIVE_STOCK],
+				[FIELD_ALLOW_NEGATIVE_STOCK],
 				as_dict=True,
 			)
 			# disable_rounded_total is on POS Profile, not POS Settings
@@ -1923,11 +2114,8 @@ def _update_invoice(data: str | dict, offline_sync: bool = False) -> dict:
 				original_rate = flt(item.get(FIELD_ORIGINAL_RATE) or item.get(FIELD_PRICE_LIST_RATE) or 0)
 				if original_rate > 0:
 					item.price_list_rate = original_rate
-
-				# Validate manual rate edit against business rules (uses cached settings)
-				validation = validate_manual_rate_edit(item, pos_profile, pos_settings_cache)
-				if not validation.get("valid"):
-					frappe.throw(validation.get("message"))
+				# Whether the edit is allowed is decided against the server's list
+				# price, flag or not (_check_paid_row_discounts, after the totals).
 			else:
 				# NORMAL FLOW: Trust frontend's price_list_rate if provided and valid
 				if frontend_price_list_rate > 0:
@@ -1971,7 +2159,7 @@ def _update_invoice(data: str | dict, offline_sync: bool = False) -> dict:
 			# that branch entirely. The discount itself is preserved via the
 			# discount_percentage / discount_amount fields we already set above.
 
-		# Free rows only from offers; zero-rate rows only with rate-edit rights.
+		# Free rows only from offers (a zero-rate row is a free row).
 		_check_free_rows_backed(
 			invoice_doc,
 			offline_sync=offline_sync,
@@ -2049,8 +2237,10 @@ def _update_invoice(data: str | dict, offline_sync: bool = False) -> dict:
 
 		# Calculate totals and apply discounts (with rounding disabled)
 		invoice_doc.calculate_taxes_and_totals()
-		# Judge the rates ERPNext computed: no paid row may come out at 0.
+		# Judge the rates ERPNext computed: no paid row may come out at 0, and
+		# none below list price without a reason the server confirms.
 		_refuse_zero_rate_after_totals(invoice_doc, lenient=offline_sync)
+		_check_paid_row_discounts(invoice_doc, offline_sync=offline_sync, paid_draft_rates=paid_draft_rates)
 
 		# Validate return rows after the totals, so the rates checked are the
 		# rates that will be saved
@@ -2476,6 +2666,7 @@ def submit_invoice(invoice: str | dict | None = None, data: str | dict | None = 
 			existing_customer = invoice_doc.customer
 			paid_draft_free = _paid_draft_free_qty(invoice_doc)
 			stored_sources = _stored_line_sources(invoice_doc)
+			paid_draft_rates = _paid_draft_rates(invoice_doc)
 			invoice_doc.update(invoice)
 			if not invoice_doc.get("customer") and existing_customer:
 				invoice_doc.customer = existing_customer
@@ -2486,6 +2677,13 @@ def submit_invoice(invoice: str | dict | None = None, data: str | dict | None = 
 				stored_sources=stored_sources,
 			)
 			_reset_row_pricing_rules(invoice_doc.get("items", []))
+			if not invoice_doc.get("is_return"):
+				# Judge the rates this save will store, as update_invoice does.
+				invoice_doc.calculate_taxes_and_totals()
+				_refuse_zero_rate_after_totals(invoice_doc, lenient=offline_sync)
+				_check_paid_row_discounts(
+					invoice_doc, offline_sync=offline_sync, paid_draft_rates=paid_draft_rates
+				)
 			# The draft was validated by update_invoice, but its rows and header
 			# discount may have been replaced by this payload, so redo both.
 			# Validating before totals is safe here: it checks only row links,
@@ -4760,6 +4958,12 @@ def apply_offers(invoice_data, selected_offers=None):
 				line_discount_amount = per_unit_discount * qty
 			else:
 				line_discount_amount = per_unit_discount
+
+			# Several rules' discounts are summed above; they stop at the line's value
+			# (100 %), never beyond it.
+			discount_percentage = min(discount_percentage, 100.0)
+			if qty and price_list_rate:
+				line_discount_amount = min(line_discount_amount, price_list_rate * qty)
 
 			if not discount_percentage and line_discount_amount and qty and price_list_rate:
 				base_amount = price_list_rate * qty

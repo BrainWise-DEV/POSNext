@@ -270,6 +270,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 	// Actions
 	function addItem(item, qty = 1, _autoAdd = false, currentProfile = null) {
+		// An item without a price (no Item Price) cannot be sold at 0; gifts come from offers.
+		if (!item.is_free_item && !(Number(item.rate) > 0) && !(Number(item.price_list_rate) > 0)) {
+			showError(__("Item {0} has no price and cannot be sold at zero price.", [item.item_code]));
+			return;
+		}
 		if (
 			currentProfile &&
 			settingsStore.shouldEnforceStockValidation() &&
@@ -861,6 +866,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				company: usePOSShiftStore().currentProfile?.company,
 				pos_profile: posProfile.value || undefined,
 				items: JSON.stringify(buildCouponItemsPayload()),
+				target_doctype: targetDoctype.value,
 			});
 			if (seq !== couponRevalidateSeq || appliedCoupon.value?.code !== coupon.code) return;
 
@@ -2685,6 +2691,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 						coupon_code: coupon.code,
 						customer: name,
 						company: usePOSShiftStore().currentProfile?.company,
+						target_doctype: targetDoctype.value,
 					}).catch(() => ({ valid: true }))
 				: { valid: false, message: __("No customer selected") };
 			if (result?.valid || appliedCoupon.value !== coupon) return;

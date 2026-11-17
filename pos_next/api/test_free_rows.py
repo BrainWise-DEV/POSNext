@@ -535,6 +535,8 @@ class TestFreeRows(FrappeTestCase):
 		self.assertRefused(lambda: update_invoice(json.dumps(self._only(row))))
 
 	def test_client_margin_cannot_zero_a_paid_row(self):
+		# Rate editing on: rate 5 against list 50 is then a permitted edit (Task 8k).
+		self._pos_settings(allow_user_to_edit_rate=1, max_discount_allowed=0)
 		row = dict(
 			_line(self.ctx, ITEM_A),
 			rate=5,

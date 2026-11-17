@@ -369,6 +369,8 @@ async function validateCouponCode(withItems) {
 		customer: props.customer,
 		company: props.company,
 		pos_profile: props.posProfile || undefined,
+		// Promotions drops F&F as a rival on a Sales Order.
+		target_doctype: cartStore.targetDoctype,
 	};
 	if (withItems || fnfEligible.value) {
 		params.items = JSON.stringify(cartStore.buildCouponItemsPayload());
@@ -549,6 +551,7 @@ async function applyCouponAgainstFriendsAndFamily(coupon) {
 		invoice_data: payload,
 		customer: props.customer,
 		company: props.company,
+		target_doctype: cartStore.targetDoctype,
 	});
 	const data = response?.message && typeof response.message === "object" ? response.message : response;
 
