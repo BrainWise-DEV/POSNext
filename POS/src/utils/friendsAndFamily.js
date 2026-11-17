@@ -619,3 +619,50 @@ export function resolveHeaderDiscount(serverAmount, appliedCoupon = null) {
 	if (appliedCoupon && amount <= 0) return { amount: 0, keepCoupon: true };
 	return { amount, keepCoupon: false };
 }
+
+// Sales Orders carry no F&F (the server strips them too; Phase 3 adds real support).
+const FNF_HEADER_PREFIX = "posnext_fnf_";
+
+function isFnfMarked(item) {
+	return (
+		item?.posnext_discount_source === FNF_DISCOUNT_SOURCE ||
+		item?.discount_source === FNF_DISCOUNT_SOURCE
+	);
+}
+
+/** Drop every `posnext_fnf_*` key from a document / line (mutates, returns it). */
+export function stripFnfKeys(doc) {
+	if (!doc) return doc;
+	for (const key of Object.keys(doc)) {
+		if (key.startsWith(FNF_HEADER_PREFIX)) delete doc[key];
+	}
+	return doc;
+}
+
+/**
+ * Sales Order payloads: F&F lines go back to list price with no discount and lose
+ * their F&F keys; every other line (manual, promotion, coupon) is kept as is.
+ * A line is F&F when `posnext_discount_source` (document field) or the cart's
+ * `discount_source` is "friends_and_family". Pure: input items are not mutated.
+ * @returns {{items: object[], stripped: number}}
+ */
+export function stripFriendsAndFamilyForOrder(items) {
+	let stripped = 0;
+	const out = (items || []).map((item) => {
+		if (!isFnfMarked(item)) return stripFnfKeys({ ...item });
+		stripped += 1;
+		const copy = stripFnfKeys({ ...item });
+		const listRate = item.price_list_rate ?? item.rate;
+		const qty = num(item.quantity ?? item.qty);
+		copy.discount_percentage = 0;
+		copy.discount_amount = 0;
+		copy.rate = listRate;
+		if ("amount" in copy) copy.amount = round2(num(listRate) * qty);
+		if ("posnext_discount_source" in copy) copy.posnext_discount_source = "";
+		if ("discount_source" in copy) copy.discount_source = "";
+		if ("is_already_discounted" in copy) copy.is_already_discounted = 0;
+		for (const field of FNF_ITEM_FIELDS) delete copy[field];
+		return copy;
+	});
+	return { items: out, stripped };
+}

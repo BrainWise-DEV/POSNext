@@ -260,7 +260,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	}
 
 	// Toast composable
-	const { showSuccess, showError, showWarning } = useToast();
+	const { showSuccess, showError, showWarning, showInfo } = useToast();
 
 	// Computed
 	const itemCount = computed(() => invoiceItems.value.length);
@@ -371,7 +371,20 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	}
 
 	function setTargetDoctype(doctype) {
+		const previous = targetDoctype.value;
 		targetDoctype.value = doctype;
+		if (doctype === previous) return;
+		if (doctype === "Sales Order") {
+			// Sales Orders carry no F&F: strip the lines and tell the cashier.
+			const hadFnf = invoiceItems.value.some(isFnfLine);
+			stripAllFriendsAndFamily();
+			fnfResult.value = null;
+			if (hadFnf) showInfo(__("Friends & Family discounts apply to invoices only"));
+		} else if (previous === "Sales Order") {
+			// Back to Sales Invoice: re-run offers so F&F returns.
+			fnfEligibilityKey = null;
+			refreshFriendsAndFamilyEligibility(true).finally(() => forceRefreshOffers());
+		}
 	}
 
 	const deliveryDate = ref("");
@@ -441,6 +454,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 */
 	/** POS Profile "Allow F&F" — off means no F&F calls, badges or stamps on this profile. */
 	function friendsAndFamilyAllowed() {
+		// Sales Orders carry no F&F (Phase 3 adds real support).
+		if (targetDoctype.value === "Sales Order") return false;
 		return isFnfAllowedForProfile(usePOSShiftStore().currentProfile);
 	}
 
@@ -974,7 +989,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		// line applies. Without a block (ineligible customer) the server echoes
 		// the request lines back — an old F&F % must not survive as "manual".
 		const fnfLines = indexFnfLines(friendsAndFamily);
-		const fnfSuppressed = Boolean(fnfCouponOverride.value);
+		const fnfSuppressed =
+			Boolean(fnfCouponOverride.value) || targetDoctype.value === "Sales Order";
 		fnfResult.value = friendsAndFamily?.eligible && !fnfSuppressed ? friendsAndFamily : null;
 
 		invoiceItems.value.forEach((item, index) => {

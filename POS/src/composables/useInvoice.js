@@ -7,7 +7,11 @@ import { shiftState } from "@/composables/useShift";
 import { CoalescingMutex } from "@/utils/mutex";
 import { logger } from "@/utils/logger";
 import { roundCurrency } from "@/utils/currency";
-import { fnfLockedDiscountAmount } from "@/utils/friendsAndFamily";
+import {
+	fnfLockedDiscountAmount,
+	stripFnfKeys,
+	stripFriendsAndFamilyForOrder,
+} from "@/utils/friendsAndFamily";
 import { preCouponLineDiscount } from "@/utils/couponLines";
 
 const log = logger.create("Invoice");
@@ -969,13 +973,18 @@ export function useInvoice() {
 		};
 	}
 
+	/** Sales Orders carry no F&F: price those lines at list rate with no discount. */
+	function itemsForDoctype(doctype, items) {
+		return doctype === "Sales Order" ? stripFriendsAndFamilyForOrder(items).items : items;
+	}
+
 	async function saveDraft(targetDoctype = "Sales Invoice") {
 		/**
 		 * Save invoice as draft (Step 1)
 		 * This creates the invoice with docstatus=0
 		 */
 		// Use toRaw() to ensure we get current, non-reactive values (prevents stale cached quantities)
-		const rawItems = toRaw(invoiceItems.value);
+		const rawItems = itemsForDoctype(targetDoctype, toRaw(invoiceItems.value));
 		const rawPayments = toRaw(payments.value);
 		const { invoicePayments } = buildCustomerCreditPayload(rawPayments);
 
@@ -993,6 +1002,7 @@ export function useInvoice() {
 		};
 
 		if (targetDoctype === "Sales Order") {
+			stripFnfKeys(invoiceData);
 			const today = new Date().toISOString().split("T")[0];
 			invoiceData.delivery_date = today;
 			invoiceData.transaction_date = today;
@@ -1035,7 +1045,7 @@ export function useInvoice() {
 			try {
 				// Step 1: Create invoice draft
 				// Use toRaw() to ensure we get current, non-reactive values (prevents stale cached quantities)
-				const rawItems = toRaw(invoiceItems.value);
+				const rawItems = itemsForDoctype(targetDoctype, toRaw(invoiceItems.value));
 				const rawPayments = toRaw(payments.value);
 				const rawSalesTeam = toRaw(salesTeam.value);
 				const { invoicePayments, redeemedCustomerCredit, customerCreditDict } =
@@ -1059,6 +1069,7 @@ export function useInvoice() {
 					invoiceData.receivable_account = receivableAccount;
 				}
 
+				if (targetDoctype === "Sales Order") stripFnfKeys(invoiceData);
 				if (targetDoctype === "Sales Order" && deliveryDate) {
 					invoiceData.delivery_date = deliveryDate;
 				}
