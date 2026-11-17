@@ -4,6 +4,7 @@ from unittest.mock import patch
 import frappe
 from frappe.tests.utils import FrappeTestCase
 
+from pos_next import utils
 from pos_next.integrations import otp
 
 BUILTIN = "pos_next.integrations.otp_frappe_email.get_provider"
@@ -38,7 +39,7 @@ class TestOtpRegistry(FrappeTestCase):
 		with (
 			patch.object(frappe, "get_hooks", lambda k, *a, **kw: hooks.get(k, [])),
 			patch.object(frappe, "get_attr", lambda p: fmap.get(p) or real(p)),
-			patch.object(frappe, "log_error") as log_error,
+			patch.object(utils, "log_error_without_telemetry") as log_error,
 		):
 			self.log_error = log_error
 			return otp.get_providers()
@@ -67,7 +68,7 @@ class TestOtpRegistry(FrappeTestCase):
 		self.assertEqual(otp.get_active_provider(None).name, "frappe_email")
 
 	def test_call_provider_bad_result(self):
-		with patch.object(frappe, "log_error"):
+		with patch.object(utils, "log_error_without_telemetry"):
 			res = otp.call_provider(lambda: {"foo": 1})
 			self.assertEqual(res, {"ok": False, "code": "unavailable"})
 			self.assertEqual(otp.call_provider(_raise)["code"], "unavailable")

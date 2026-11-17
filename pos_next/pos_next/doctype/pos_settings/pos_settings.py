@@ -8,6 +8,12 @@ from frappe.utils import cint, flt
 
 
 class POSSettings(Document):
+	def onload(self):
+		from pos_next.integrations.otp import can_manage_verification
+
+		# The form lists providers (with admin-only health text) only for these users.
+		self.set_onload("can_manage_verification", can_manage_verification())
+
 	def validate(self):
 		"""Validate POS Settings"""
 		# Guard against None values and validate discount percentage
@@ -99,8 +105,42 @@ class POSSettings(Document):
 					)
 
 
+_PROTECTED_KEYS = frozenset(
+	{"name", "doctype", "modified", "modified_by", "owner", "creation", "docstatus", "idx", "pos_profile"}
+)
+
+
+def has_permission(doc, ptype=None, user=None, debug=False) -> bool:
+	"""``has_permission`` hook: write only on rows of profiles the user works in.
+
+	Users who can write POS Profile, verification admins (permlevel-1 write,
+	who already manage every profile's settings) and Administrator are not
+	restricted. Other permission types are left to the role permissions.
+	"""
+	from pos_next.integrations.otp import can_manage_verification
+
+	user = user or frappe.session.user
+	if ptype not in ("write", "submit", "cancel", "delete") or user == "Administrator":
+		return True
+	if frappe.has_permission("POS Profile", "write", user=user) or can_manage_verification(user):
+		return True
+	if not doc:
+		return False
+	if isinstance(doc, str):
+		doc = frappe.get_doc("POS Settings", doc)
+	# The in-memory doc may carry a new pos_profile (e.g. set_value moving the row
+	# to the user's profile): the user must work in the stored profile too.
+	profiles = {doc.get("pos_profile")}
+	if not doc.is_new():
+		profiles.add(frappe.db.get_value("POS Settings", doc.name, "pos_profile"))
+	return all(
+		profile and frappe.db.exists("POS Profile User", {"parent": profile, "user": user})
+		for profile in profiles
+	)
+
+
 @frappe.whitelist()
-def get_pos_settings(pos_profile):
+def get_pos_settings(pos_profile: str | None = None) -> dict | None:
 	"""
 	Get POS Settings for a specific POS Profile.
 
@@ -154,32 +194,50 @@ def create_default_settings(pos_profile):
 
 
 @frappe.whitelist()
-def update_pos_settings(pos_profile, settings):
-	"""Update POS Settings for a POS Profile"""
+def update_pos_settings(pos_profile: str, settings: str | dict) -> dict:
+	"""Update POS Settings for a POS Profile.
+
+	Needs write on the row, and (unless the user manages verification) to be a
+	user of that POS Profile. Fields above permlevel 0 (Customer Verification)
+	are reset by ``Document.save`` for users without write at that level.
+	"""
 	import json
 
 	from frappe import _
 
+	from pos_next.integrations.otp import can_manage_verification
+
 	if isinstance(settings, str):
 		settings = json.loads(settings)
+	if not isinstance(settings, dict):
+		frappe.throw(_("Invalid settings"))
+	# Identity and audit fields are never taken from the client.
+	settings = {k: v for k, v in settings.items() if k not in _PROTECTED_KEYS}
+	if not pos_profile:
+		frappe.throw(_("POS Profile is required."), frappe.PermissionError)
 
-	# Check if user has access to this POS Profile
-	has_access = frappe.db.exists("POS Profile User", {"parent": pos_profile, "user": frappe.session.user})
-
-	if not has_access and not frappe.has_permission("POS Settings", "write"):
-		frappe.throw(_("You don't have permission to update this POS Profile"))
+	if not can_manage_verification():
+		is_profile_user = frappe.db.exists(
+			"POS Profile User", {"parent": pos_profile, "user": frappe.session.user}
+		)
+		if not is_profile_user:
+			frappe.throw(_("You don't have permission to update this POS Profile"), frappe.PermissionError)
 
 	# Check if settings exist
 	existing = frappe.db.exists("POS Settings", {"pos_profile": pos_profile})
 
 	if existing:
 		doc = frappe.get_doc("POS Settings", existing)
+		if not doc.has_permission("write"):
+			frappe.throw(_("You don't have permission to update these POS Settings"), frappe.PermissionError)
 		doc.update(settings)
+		# A payload cannot move the row to another profile.
+		doc.pos_profile = pos_profile
 		doc.save()
 	else:
 		doc = frappe.new_doc("POS Settings")
-		doc.pos_profile = pos_profile
 		doc.update(settings)
+		doc.pos_profile = pos_profile
 		doc.insert()
 
 	return doc.as_dict()

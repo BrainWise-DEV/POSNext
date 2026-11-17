@@ -104,3 +104,18 @@ def validate_pos_profile_access(pos_profile: str, exc: type[Exception] = frappe.
 	# Users who can administer POS Profiles are not constrained by them.
 	if not is_assigned and not frappe.has_permission("POS Profile", "write"):
 		frappe.throw(_("You don't have access to this POS Profile"), exc)
+
+
+def log_error_without_telemetry(title: str, message: str) -> None:
+	"""Write an Error Log row with a fixed ``message`` and never send it to Sentry.
+
+	``frappe.log_error`` also calls ``capture_exception``, whose Sentry scope
+	carries the request body (and, inside an ``except`` block, frame locals).
+	On OTP and provider paths that body holds the code, so those paths log
+	here, outside any ``except`` block, with only an exception class name.
+	"""
+	doc = frappe.get_doc(doctype="Error Log", method=title, error=message)
+	if frappe.flags.read_only:
+		doc.deferred_insert()
+	else:
+		doc.insert(ignore_permissions=True)

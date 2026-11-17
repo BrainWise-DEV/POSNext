@@ -4,15 +4,25 @@ from __future__ import annotations
 
 import frappe
 
+from pos_next import utils
+
+
+def _log_hook_failure(title, method_path, error):
+	"""Hook failures: path and exception class only, no Sentry (see utils)."""
+	utils.log_error_without_telemetry(title, f"{method_path}: {error}")
+
 
 def get_loyalty_provider():
 	for method_path in frappe.get_hooks("pos_next_loyalty_provider") or []:
+		error = None
 		try:
 			provider = frappe.get_attr(method_path)()
 			if provider:
 				return provider
-		except Exception:
-			frappe.log_error(frappe.get_traceback(), f"Loyalty provider hook failed: {method_path}")
+		except Exception as e:
+			error = type(e).__name__
+		if error:
+			_log_hook_failure("Loyalty provider hook failed", method_path, error)
 	return None
 
 
@@ -49,13 +59,16 @@ def is_benefit_member(customer, pos_profile=None):
 	if not customer:
 		return False
 	for method_path in frappe.get_hooks("pos_next_customer_benefit_providers") or []:
+		error = None
 		try:
 			provider = frappe.get_attr(method_path)()
 			is_member = (provider or {}).get("is_member")
 			if is_member and is_member(customer, pos_profile=pos_profile):
 				return True
-		except Exception:
-			frappe.log_error(title="Customer benefit provider", message=method_path)
+		except Exception as e:
+			error = type(e).__name__
+		if error:
+			_log_hook_failure("Customer benefit provider", method_path, error)
 	return False
 
 
@@ -72,21 +85,27 @@ def notify_verification_change(
 	if not customer:
 		return
 	for method_path in frappe.get_hooks("pos_next_customer_benefit_providers") or []:
+		error = None
 		try:
 			provider = frappe.get_attr(method_path)()
 			on_change = (provider or {}).get("on_verification_change")
 			if on_change:
 				on_change(customer, verified, email_domain, via)
-		except Exception:
-			frappe.log_error(title="Customer benefit provider", message=method_path)
+		except Exception as e:
+			error = type(e).__name__
+		if error:
+			_log_hook_failure("Customer benefit provider", method_path, error)
 
 
 def extend_bootstrap_settings(settings, pos_profile=None):
 	for method_path in frappe.get_hooks("pos_next_bootstrap_settings") or []:
+		error = None
 		try:
 			frappe.get_attr(method_path)(settings, pos_profile)
-		except Exception:
-			frappe.log_error(frappe.get_traceback(), f"Bootstrap settings hook failed: {method_path}")
+		except Exception as e:
+			error = type(e).__name__
+		if error:
+			_log_hook_failure("Bootstrap settings hook failed", method_path, error)
 
 
 def validate_customer_create(**kwargs):
@@ -198,4 +217,5 @@ def clear_customer_sync_error(customer):
 def get_customer_sync_error(customer):
 	if not customer:
 		return None
-	return frappe.cache().get_value(_SYNC_ERROR_KEY.format(customer)) or None
+	# expires=True: a TTL key must not be memoised per process.
+	return frappe.cache().get_value(_SYNC_ERROR_KEY.format(customer), expires=True) or None

@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 import frappe
 from frappe.tests.utils import FrappeTestCase
 
+from pos_next import utils
 from pos_next.api import email_verification as ev
 from pos_next.integrations import otp
 from pos_next.integrations.otp import OTP_PROVIDER_API
@@ -129,7 +130,7 @@ class TestVerifiedEmailUnique(VerifiedEmailTestBase):
 		self.assertIsNone(ev._mark_verified(a, EMAIL, "frappe_email"))
 
 		with self._prepare_for(b, "Staff@Acme.example"), patch.object(ev, "_audit"):
-			result = ev.verify_email_otp(b, "123456")
+			result = ev.verify_email_otp(b, "123456", pos_profile="P1")
 
 		self.assertFalse(result["ok"])
 		self.assertEqual(result["code"], "email_in_use")
@@ -142,7 +143,7 @@ class TestVerifiedEmailUnique(VerifiedEmailTestBase):
 		_set_verified(a, EMAIL)
 
 		with self._prepare_for(b, "STAFF@acme.example"), patch.object(ev, "_audit"):
-			result = ev.send_email_otp(b)
+			result = ev.send_email_otp(b, pos_profile="P1")
 
 		self.assertEqual(result["code"], "email_in_use")
 		self.provider.send.assert_not_called()
@@ -180,7 +181,7 @@ class TestVerifiedEmailUnique(VerifiedEmailTestBase):
 		a, b = _customer("A"), _customer("B")
 		_set_verified(a, EMAIL)
 		with self._prepare_for(b, EMAIL), patch.object(ev, "_audit"):
-			result = ev.verify_email_otp(b, "123456")
+			result = ev.verify_email_otp(b, "123456", pos_profile="P1")
 		self.assertEqual(result["code"], "email_in_use")
 		self.provider.verify.assert_not_called()
 
@@ -198,7 +199,7 @@ class TestVerifiedEmailUnique(VerifiedEmailTestBase):
 			patch.object(ev, "_save_state") as save_state,
 			patch.object(ev, "_email_in_use", side_effect=frappe.QueryDeadlockError("deadlock")),
 		):
-			result = ev.verify_email_otp(b, "123456")
+			result = ev.verify_email_otp(b, "123456", pos_profile="P1")
 		self.assertEqual(result["code"], "busy")
 		self.assertIn("try again", result["message"])
 		self.provider.verify.assert_not_called()
@@ -211,7 +212,7 @@ class TestVerifiedEmailUnique(VerifiedEmailTestBase):
 			patch.object(ev, "_audit"),
 			patch.object(ev, "_mark_verified", side_effect=frappe.QueryDeadlockError("deadlock")),
 		):
-			result = ev.verify_email_otp(b, "123456")
+			result = ev.verify_email_otp(b, "123456", pos_profile="P1")
 		self.provider.verify.assert_called_once()
 		self.assertEqual(result["code"], "verification_not_saved")
 		self.assertIn("new code", result["message"])
@@ -259,7 +260,7 @@ class TestVerificationReset(VerifiedEmailTestBase):
 		self.provider = _otp_provider(with_clear=False)
 		a = _new_customer(self, "A")
 		_set_verified(a, EMAIL)
-		with patch.object(frappe, "log_error") as log_error:
+		with patch.object(utils, "log_error_without_telemetry") as log_error:
 			self._change_email(a, "new@acme.example")
 		self.assertFalse(_verified(a).custom_email_verified)
 		log_error.assert_not_called()
@@ -268,7 +269,7 @@ class TestVerificationReset(VerifiedEmailTestBase):
 		self.provider.clear.side_effect = RuntimeError("secret detail")
 		a = _new_customer(self, "A")
 		_set_verified(a, EMAIL)
-		with patch.object(frappe, "log_error") as log_error:
+		with patch.object(utils, "log_error_without_telemetry") as log_error:
 			ev.reset_verification(a, "test")
 		self.assertFalse(_verified(a).custom_email_verified)
 		self.assertNotIn("secret detail", str(log_error.call_args))
@@ -295,10 +296,10 @@ class TestVerificationReset(VerifiedEmailTestBase):
 	def test_benefit_provider_error_swallowed(self):
 		self.on_change.side_effect = RuntimeError("boom")
 		a = _new_customer(self, "A")
-		with patch.object(frappe, "log_error") as log_error:
+		with patch.object(utils, "log_error_without_telemetry") as log_error:
 			self.assertIsNone(ev._mark_verified(a, EMAIL, "frappe_email"))
 		self.assertEqual(_verified(a).custom_email_verified, 1)
-		log_error.assert_called_once_with(title="Customer benefit provider", message=BENEFIT_PATH)
+		log_error.assert_called_once_with("Customer benefit provider", f"{BENEFIT_PATH}: RuntimeError")
 
 
 class TestUpdateCustomerDuplicate(VerifiedEmailTestBase):

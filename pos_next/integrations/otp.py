@@ -9,6 +9,17 @@ Optional: ``clear(ctx) -> None`` forgets any pending code for ``ctx.customer``
 (called on an email change or a verification reset). It is looked up with
 ``getattr``; a provider without it is valid and ``OTP_PROVIDER_API`` stays 1.
 Exceptions from ``clear`` are logged with a fixed text and ignored.
+
+Provider failures are logged with the exception class name only, after the
+``except`` block and without Sentry (``utils.log_error_without_telemetry``),
+so neither the code, the request body nor frame locals leave the server.
+
+Providers must follow the same rule: inside ``send`` / ``verify`` (and
+``clear`` / ``health``) never call ``frappe.log_error`` -- it sends the
+request body (which holds the code) to Sentry. Use
+``pos_next.utils.log_error_without_telemetry(title, message)`` with a fixed
+message (no code, email, phone or response body), outside any ``except``
+block.
 """
 
 from __future__ import annotations
@@ -16,8 +27,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import frappe
+from frappe import _
+
+from pos_next import utils
 
 OTP_PROVIDER_API = 1
+OTP_LENGTH = 6  # digits in a verification code (public contract value)
 
 RESULT_CODES = frozenset(
 	{
@@ -72,16 +87,19 @@ def get_providers() -> dict:
 
 	providers = {}
 	for path in frappe.get_hooks("pos_next_email_otp_providers") or []:
+		error = None
 		try:
 			provider = frappe.get_attr(path)()
-		except Exception:
-			frappe.log_error(frappe.get_traceback(), _LOG_TITLE)
+		except Exception as e:
+			error = type(e).__name__
+		if error:
+			_log(f"Provider factory failed: {path}: {error}")
 			continue
 		if not _valid(provider):
-			frappe.log_error(f"Invalid email OTP provider from {path}", _LOG_TITLE)
+			_log(f"Invalid email OTP provider from {path}")
 			continue
 		if provider.name in providers:
-			frappe.log_error(f"Duplicate email OTP provider name '{provider.name}' from {path}", _LOG_TITLE)
+			_log(f"Duplicate email OTP provider name '{provider.name}' from {path}")
 			continue
 		providers[provider.name] = provider
 
@@ -103,22 +121,48 @@ def get_active_provider(pos_profile: str | None):
 	return get_providers().get(name or DEFAULT_PROVIDER)
 
 
+def _log(message: str) -> None:
+	# Logging must never break the caller (or raise a 5xx carrying the request body).
+	try:
+		utils.log_error_without_telemetry(_LOG_TITLE, message)
+	except Exception:
+		pass
+
+
 def call_provider(fn, *args) -> dict:
 	unavailable = {"ok": False, "code": "unavailable"}
+	error = None
 	try:
 		result = fn(*args)
-	except Exception:
-		frappe.log_error(frappe.get_traceback(), _LOG_TITLE)
+	except Exception as e:
+		# Only the class name leaves this block: the arguments hold the code.
+		error = type(e).__name__
+	if error:
+		_log(f"Provider call failed: {error}")
 		return unavailable
 	if not isinstance(result, dict) or "ok" not in result or result.get("code") not in RESULT_CODES:
-		frappe.log_error("Provider returned a malformed result", _LOG_TITLE)
+		_log("Provider returned a malformed result")
 		return unavailable
 	return result
 
 
+def can_manage_verification(user: str | None = None) -> bool:
+	"""True when the user may write the POS Settings verification fields (permlevel 1).
+
+	Who that is lives only in the DocType's permissions (Role Permissions
+	Manager), never in code.
+	"""
+	user = user or frappe.session.user
+	if user == "Administrator":
+		return True
+	return 1 in frappe.get_meta("POS Settings").get_permlevel_access("write", user=user)
+
+
 @frappe.whitelist()
 def get_provider_options() -> list[dict]:
-	frappe.has_permission("POS Settings", "write", throw=True)
+	"""Registered providers with their health, for the POS Settings form (admins only)."""
+	if not can_manage_verification():
+		frappe.throw(_("Not permitted to manage email verification providers"), frappe.PermissionError)
 	options = []
 	for provider in get_providers().values():
 		health = _call_provider_health(provider)
@@ -127,10 +171,13 @@ def get_provider_options() -> list[dict]:
 
 
 def _call_provider_health(provider) -> dict:
+	error = None
 	try:
 		health = provider.health()
 		if isinstance(health, dict) and "ok" in health:
 			return health
-	except Exception:
-		frappe.log_error(frappe.get_traceback(), _LOG_TITLE)
+	except Exception as e:
+		error = type(e).__name__
+	if error:
+		_log(f"Provider health check failed: {error}")
 	return {"ok": False, "message": "Health check failed", "fix_url": None}

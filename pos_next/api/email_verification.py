@@ -40,6 +40,7 @@ import phonenumbers
 from frappe import _
 from frappe.utils import cint, now_datetime
 
+from pos_next import utils
 from pos_next.integrations import otp, registry
 from pos_next.utils import validate_pos_profile_access
 
@@ -51,7 +52,9 @@ HOUR = 3600
 LOCK_TIMEOUT = 30
 
 EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+\-']+@[A-Za-z0-9\-]+(\.[A-Za-z0-9\-]+)*\.[A-Za-z]{2,}$")
-OTP_RE = re.compile(r"^\d{6}$")
+# Re-exported: other apps import OTP_LENGTH from here or from pos_next.integrations.otp.
+OTP_LENGTH = otp.OTP_LENGTH
+OTP_RE = re.compile(rf"^\d{{{OTP_LENGTH}}}$")
 
 VERIFICATION_FIELDS = (
 	"custom_email_verified",
@@ -259,7 +262,8 @@ def _state_key(customer):
 
 
 def _load_state(customer):
-	raw = _cache().get_value(_state_key(customer))
+	# expires=True: the state key has a TTL, so it must not be memoised per process.
+	raw = _cache().get_value(_state_key(customer), expires=True)
 	if isinstance(raw, (str, bytes)):
 		try:
 			raw = json.loads(raw)
@@ -419,12 +423,12 @@ def _provider_healthy(provider):
 
 
 def _prepare(customer, email, pos_profile):
-	"""Run checks common to send/verify. Returns (ctx, provider, settings, error_result)."""
+	"""Run checks common to send/verify. Returns (ctx, provider, settings, error_result).
+
+	The endpoint bodies have already run ``_require_pos_profile(pos_profile)``.
+	"""
 	if not customer:
 		frappe.throw(_("Customer is required"))
-	if pos_profile:
-		# The profile decides limits and provider; a caller must not pick another one.
-		validate_pos_profile_access(pos_profile, frappe.PermissionError)
 	if not is_verification_allowed(customer, pos_profile):
 		return None, None, None, _result(False, "disabled")
 	if not frappe.has_permission("Customer", "write", customer):
@@ -458,6 +462,13 @@ def _prepare(customer, email, pos_profile):
 	return ctx, provider, settings, None
 
 
+def _require_pos_profile(pos_profile):
+	"""The profile decides limits and provider: required, and the caller must be allowed to use it."""
+	if not pos_profile:
+		frappe.throw(_("POS Profile is required."), frappe.PermissionError)
+	validate_pos_profile_access(pos_profile, frappe.PermissionError)
+
+
 def _audit(customer, action, code, email, phone):
 	"""Customer comment audit trail. Never contains the OTP."""
 	try:
@@ -475,9 +486,40 @@ def _audit(customer, action, code, email, phone):
 # Whitelisted API
 # ---------------------------------------------------------------------------
 
+def _guarded(action, fn, *args):
+	"""Run an endpoint body; an unexpected server error becomes ``unavailable``.
+
+	A 5xx escaping the endpoint would be logged by Frappe's request handler
+	(``log_error_snapshot`` -> Sentry with the JSON body, and the form dict in
+	frappe.log), and the body holds the code. Only the exception class name
+	leaves the ``except`` block; logging happens after it, without Sentry.
+	Client errors (http status < 500: validation, permission) propagate, as
+	Frappe does not snapshot them.
+	"""
+	error = None
+	try:
+		return fn(*args)
+	except Exception as e:
+		if getattr(e, "http_status_code", 500) < 500:
+			raise
+		error = type(e).__name__
+	try:
+		frappe.db.rollback()
+	except Exception:
+		pass
+	_log_unexpected(f"Email OTP {action} failed: {error}")
+	message = _("Could not verify the code, please try again.") if action == "verify" else None
+	return _result(False, "unavailable", message)
+
+
 @frappe.whitelist(methods=["POST"])
 def send_email_otp(customer: str, email: str | None = None, pos_profile: str | None = None) -> dict:
 	"""Send a verification code to the customer's saved email."""
+	return _guarded("send", _send_email_otp, customer, email, pos_profile)
+
+
+def _send_email_otp(customer, email, pos_profile):
+	_require_pos_profile(pos_profile)
 	ctx, provider, settings, err = _prepare(customer, email, pos_profile)
 	if err:
 		return err
@@ -538,8 +580,13 @@ def send_email_otp(customer: str, email: str | None = None, pos_profile: str | N
 def verify_email_otp(
 	customer: str, otp: str, email: str | None = None, pos_profile: str | None = None
 ) -> dict:
-	"""Verify the 6-digit code. Success only when the provider answers ok + ``verified``."""
+	"""Verify the ``OTP_LENGTH``-digit code. Success only when the provider answers ok + ``verified``."""
 	code_in = str(otp or "").translate(_ARABIC_DIGITS).strip()
+	return _guarded("verify", _verify_email_otp, customer, code_in, email, pos_profile)
+
+
+def _verify_email_otp(customer, code_in, email, pos_profile):
+	_require_pos_profile(pos_profile)
 	ctx, provider, settings, err = _prepare(customer, email, pos_profile)
 	if err:
 		return err
@@ -594,15 +641,19 @@ def verify_email_otp(
 
 def _save_verified(customer, email, provider_name):
 	"""Write the verification after the provider said ``verified``. False on any failure."""
+	failed = False
 	try:
 		refused = _mark_verified(customer, email, provider_name)
 	except Exception:
+		failed = True
+	if failed:
 		# E.g. a deadlock on the write: the transaction is unusable, start clean.
-		_log_unexpected("Saving the email verification failed")
+		# Handled outside the except block so no live exception reaches telemetry.
 		try:
 			frappe.db.rollback()
 		except Exception:
 			pass
+		_log_unexpected("Saving the email verification failed")
 		return False
 	return not isinstance(refused, dict)
 
@@ -672,9 +723,9 @@ def _emit_customer_update(customer):
 
 
 def _log_unexpected(title):
-	"""Error Log entry with a fixed message only (no payload, headers or traceback)."""
+	"""Error Log entry with a fixed message only (no payload, headers or traceback), never Sentry."""
 	try:
-		frappe.log_error(message=title, title="Customer Email OTP")
+		utils.log_error_without_telemetry("Customer Email OTP", title)
 	except Exception:
 		pass
 
@@ -718,9 +769,12 @@ def _clear_pending_codes(customer, email=None, pos_profile=None):
 		clear = getattr(provider, "clear", None)
 		if not callable(clear):
 			continue
+		failed = False
 		try:
 			clear(ctx)
 		except Exception:
+			failed = True
+		if failed:
 			_log_unexpected("Email OTP provider clear failed")
 
 

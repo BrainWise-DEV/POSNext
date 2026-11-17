@@ -591,55 +591,63 @@
    "description": "Show the 'Verify email' (OTP) action in the customer dialog. Codes are sent by the selected verification provider. Informational badge only.",
    "fieldname": "enable_customer_email_verification",
    "fieldtype": "Check",
-   "label": "Enable Customer Email Verification"
+   "label": "Enable Customer Email Verification",
+   "permlevel": 1
   },
   {
+   "description": "Service that sends and checks email verification codes. Leave blank to use the built-in Frappe email provider.",
    "fieldname": "verification_provider",
    "fieldtype": "Select",
    "label": "Verification Provider",
-   "description": "Service that sends and checks email verification codes. Leave blank to use the built-in Frappe email provider."
+   "permlevel": 1
   },
   {
    "default": "900",
    "fieldname": "otp_ttl_seconds",
    "fieldtype": "Int",
-   "label": "Code Validity (seconds)"
+   "label": "Code Validity (seconds)",
+   "permlevel": 1
   },
   {
    "default": "60",
    "fieldname": "otp_resend_cooldown",
    "fieldtype": "Int",
-   "label": "Resend Cooldown (seconds)"
+   "label": "Resend Cooldown (seconds)",
+   "permlevel": 1
   },
   {
    "default": "5",
    "fieldname": "otp_max_sends_per_hour",
    "fieldtype": "Int",
-   "label": "Max Codes per Hour"
+   "label": "Max Codes per Hour",
+   "permlevel": 1
   },
   {
    "fieldname": "default_phone_country",
    "fieldtype": "Link",
    "label": "Default Phone Country",
-   "options": "Country"
+   "options": "Country",
+   "permlevel": 1
   },
   {
+   "description": "Domain used for emails generated when a customer has no real email. Leave blank to disable.",
    "fieldname": "placeholder_email_domain",
    "fieldtype": "Data",
    "label": "Placeholder Email Domain",
-   "description": "Domain used for emails generated when a customer has no real email. Leave blank to disable."
+   "permlevel": 1
   },
   {
    "default": "0",
+   "description": "Customer dialog asks for first and last name separately.",
    "fieldname": "require_split_name",
    "fieldtype": "Check",
    "label": "Require First and Last Name",
-   "description": "Customer dialog asks for first and last name separately."
+   "permlevel": 1
   }
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-11-17 12:00:00.000000",
+ "modified": "2026-11-17 18:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Settings",
@@ -689,6 +697,23 @@
    "read": 1,
    "role": "POSNext Cashier",
    "write": 1
+  },
+  {
+   "permlevel": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  },
+  {
+   "permlevel": 1,
+   "read": 1,
+   "role": "Nexus POS Manager",
+   "write": 1
+  },
+  {
+   "permlevel": 1,
+   "read": 1,
+   "role": "POSNext Cashier"
   }
  ],
  "row_format": "Dynamic",

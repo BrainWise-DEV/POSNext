@@ -12,6 +12,8 @@ from erpnext.stock.doctype.batch.batch import get_batch_no, get_batch_qty
 from frappe import _
 from frappe.utils import cint, cstr, flt, get_datetime, nowdate, nowtime
 
+from pos_next.utils import validate_pos_profile_access
+
 # ==========================================
 # Constants for field names (avoid typos and enable refactoring)
 # ==========================================
@@ -31,6 +33,8 @@ DOCTYPE_SALES_INVOICE = "Sales Invoice"
 DOCTYPE_POS_SETTINGS = "POS Settings"
 DOCTYPE_POS_PROFILE = "POS Profile"
 DOCTYPE_COMMENT = "Comment"
+# Document types update_invoice / submit_invoice may create or change.
+POS_DOCUMENT_DOCTYPES = frozenset({DOCTYPE_SALES_INVOICE, "Sales Order"})
 
 
 try:
@@ -287,6 +291,52 @@ def _strip_server_managed_fields(payload):
 	# Accepting client-side packed rows can reintroduce duplicates on re-save.
 	cleaned.pop("packed_items", None)
 	return cleaned
+
+
+def _validate_invoice_profile(payload):
+	"""The caller must be allowed to use the payload's POS Profile (required).
+
+	Only POS document types are accepted. When ``name`` is given, the document
+	must exist and have been saved under that same profile; a blank stored
+	profile (e.g. a Desk draft) is accepted only for users who can write POS
+	Profile. "Missing" and "not yours" share one message, so a caller cannot
+	probe which names exist.
+	"""
+	if not isinstance(payload, dict):
+		frappe.throw(_("Invalid invoice format"), frappe.PermissionError)
+	pos_profile = payload.get("pos_profile")
+	if not isinstance(pos_profile, str):
+		pos_profile = None
+	validate_pos_profile_access(pos_profile, frappe.PermissionError)
+
+	doctype = payload.get("doctype") or DOCTYPE_SALES_INVOICE
+	if doctype not in POS_DOCUMENT_DOCTYPES:
+		frappe.throw(_("Invalid invoice format"), frappe.PermissionError)
+	name = payload.get("name")
+	if name is None or name == "":
+		return
+	if not isinstance(name, str):
+		frappe.throw(_("Invalid invoice format"), frappe.PermissionError)
+
+	stored = None
+	if frappe.get_meta(doctype).has_field("pos_profile"):
+		stored = frappe.db.get_value(doctype, name, ["name", "pos_profile"], as_dict=True)
+	else:
+		stored = frappe.db.get_value(doctype, name, ["name"], as_dict=True)
+	if stored and not stored.get("pos_profile") and frappe.has_permission("POS Profile", "write"):
+		return
+	if not stored or stored.get("pos_profile") != pos_profile:
+		frappe.throw(_("This document cannot be changed from this POS Profile."), frappe.PermissionError)
+
+
+def _set_payment_collected_flag(invoice_doc, payments):
+	"""Flag the save when the payload carries money (payments summing to > 0).
+
+	Benefit engines read ``flags.pos_payment_collected`` to freeze a paid
+	invoice's discounts instead of silently changing its totals.
+	"""
+	total = sum(flt(row.get("amount")) for row in (payments or []) if isinstance(row, dict))
+	invoice_doc.flags.pos_payment_collected = total > 0
 
 
 def _apply_pos_sales_team(invoice_doc, sales_team_data=None, pos_profile=None):
@@ -1049,10 +1099,14 @@ def _validate_return_rows(invoice_doc):
 
 
 @frappe.whitelist()
-def update_invoice(data):
+def update_invoice(data: str | dict) -> dict:
 	"""Create or update invoice draft (Step 1)."""
+	# Before the try: a refused profile is not an "Update Invoice Error".
+	data = json.loads(data) if isinstance(data, str) else data
+	if not isinstance(data, dict):
+		frappe.throw(_("Invalid invoice format"))
+	_validate_invoice_profile(data)
 	try:
-		data = json.loads(data) if isinstance(data, str) else data
 		data = _strip_server_managed_fields(data)
 
 		pos_profile = data.get("pos_profile")
@@ -1077,6 +1131,7 @@ def update_invoice(data):
 		frappe.flags.ignore_account_permission = True
 		# Offline-queued sale being synced (see _apply_pos_sales_team)
 		invoice_doc.flags.pos_offline_sync = bool(data.get("offline_id"))
+		_set_payment_collected_flag(invoice_doc, data.get("payments"))
 
 		pos_profile_doc = None
 		if pos_profile:
@@ -1465,10 +1520,14 @@ def _ensure_offline_uniqueness(offline_id, pos_profile=None, customer=None):
 	existing_sync = frappe.db.get_value(
 		"Offline Invoice Sync",
 		{"offline_id": offline_id},
-		["name", "sales_invoice", "status", "modified"],
+		["name", "sales_invoice", "status", "modified", "pos_profile"],
 		as_dict=True,
 		for_update=True,
 	)
+
+	if existing_sync and existing_sync.pos_profile and existing_sync.pos_profile != pos_profile:
+		# An offline_id reserved by another profile: never reuse it or return its invoice.
+		frappe.throw(_("This offline invoice belongs to another POS Profile."), frappe.PermissionError)
 
 	if existing_sync:
 		sync_status = existing_sync.get("status")
@@ -1631,7 +1690,7 @@ def check_offline_invoice_synced(offline_id):
 
 
 @frappe.whitelist()
-def submit_invoice(invoice=None, data=None):
+def submit_invoice(invoice: str | dict | None = None, data: str | dict | None = None) -> dict:
 	"""Submit the invoice (Step 2)."""
 	# Handle different calling conventions
 	if invoice is None:
@@ -1673,6 +1732,9 @@ def submit_invoice(invoice=None, data=None):
 		data = {}
 
 	invoice = _strip_server_managed_fields(invoice)
+	# Before the offline dedup: a refused call must neither reserve an offline_id
+	# nor read another profile's synced invoice.
+	_validate_invoice_profile(invoice)
 
 	pos_profile = invoice.get("pos_profile")
 	doctype = invoice.get("doctype", "Sales Invoice")
@@ -1737,6 +1799,8 @@ def submit_invoice(invoice=None, data=None):
 		frappe.flags.ignore_account_permission = True
 		# Offline-queued sale being synced (see _apply_pos_sales_team)
 		invoice_doc.flags.pos_offline_sync = bool(offline_id)
+		# Set again here: the draft made by update_invoice above is re-fetched.
+		_set_payment_collected_flag(invoice_doc, invoice.get("payments"))
 
 		# Ensure update_stock is set for Sales Invoice
 		if doctype == "Sales Invoice":

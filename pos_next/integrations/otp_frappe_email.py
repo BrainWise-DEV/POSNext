@@ -16,7 +16,8 @@ from types import SimpleNamespace
 import frappe
 from frappe import _
 
-from pos_next.integrations.otp import OTP_PROVIDER_API
+from pos_next import utils
+from pos_next.integrations.otp import OTP_LENGTH, OTP_PROVIDER_API
 
 _DEFAULT_TTL = 900
 _LOG_TITLE = "Customer Email OTP (Frappe Email)"
@@ -56,7 +57,7 @@ def _result(ok, code, message=""):
 
 def _send(ctx):
 	ttl = _ttl(ctx.pos_profile)
-	code = f"{secrets.randbelow(10**6):06d}"
+	code = f"{secrets.randbelow(10**OTP_LENGTH):0{OTP_LENGTH}d}"
 	frappe.cache().set_value(_key(ctx.customer), _hash(ctx.customer, ctx.email, code), expires_in_sec=ttl)
 	error = None
 	try:
@@ -75,15 +76,18 @@ def _send(ctx):
 	except Exception as e:
 		error = type(e).__name__
 	if error:
-		# Logged outside the except block so exception capture cannot ship frame locals (the code).
+		# Logged outside the except block, without Sentry: neither frame locals nor
+		# the request body (the code) may leave the server.
 		clear_code(ctx.customer)
-		frappe.log_error(title=_LOG_TITLE, message=f"sendmail failed: {error}")
+		utils.log_error_without_telemetry(_LOG_TITLE, f"sendmail failed: {error}")
 		return _result(False, "unavailable")
 	return _result(True, "sent")
 
 
 def _verify(ctx, otp):
-	stored = frappe.cache().get_value(_key(ctx.customer))
+	# expires=True: a TTL key must not be memoised per process (a send in the
+	# same process would otherwise be invisible to this read).
+	stored = frappe.cache().get_value(_key(ctx.customer), expires=True)
 	if not stored:
 		return _result(False, "expired")
 	if hmac.compare_digest(str(stored), _hash(ctx.customer, ctx.email, str(otp or "").strip())):

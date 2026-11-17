@@ -4,6 +4,7 @@ from unittest.mock import patch
 import frappe
 from frappe.tests.utils import FrappeTestCase
 
+from pos_next import utils
 from pos_next.integrations import registry
 
 HOOK = "pos_next_customer_benefit_providers"
@@ -16,7 +17,7 @@ def _run(providers, customer="CUST-1", pos_profile="P1"):
 	with (
 		patch.object(frappe, "get_hooks", lambda k, *a, **kw: hooks.get(k, [])),
 		patch.object(frappe, "get_attr", lambda p: attrs[p]),
-		patch.object(frappe, "log_error") as log_error,
+		patch.object(utils, "log_error_without_telemetry") as log_error,
 	):
 		return registry.is_benefit_member(customer, pos_profile), log_error
 
@@ -52,10 +53,8 @@ class TestBenefitRegistry(FrappeTestCase):
 
 		result, log_error = _run({PATH: lambda: {"is_member": boom}})
 		self.assertIs(result, False)
-		log_error.assert_called_once()
-		args, kwargs = log_error.call_args
-		self.assertEqual(kwargs.get("title"), "Customer benefit provider")
-		self.assertEqual(kwargs.get("message"), PATH)
+		# Path and exception class only: never the exception text.
+		log_error.assert_called_once_with("Customer benefit provider", f"{PATH}: RuntimeError")
 
 	def test_second_provider_used_after_first_fails(self):
 		def boom():

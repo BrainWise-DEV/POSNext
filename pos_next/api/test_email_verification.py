@@ -80,11 +80,13 @@ class EmailOTPTestBase(unittest.TestCase):
 			patch(f"{MODULE}.frappe.log_error"),
 			patch("pos_next.integrations.otp.frappe.log_error"),
 			patch("pos_next.integrations.registry.is_benefit_member", return_value=False),
+			patch("pos_next.utils.log_error_without_telemetry"),
 		]
 		mocks = [p.start() for p in self.patches]
 		self.mock_audit = mocks[6]
 		self.mock_mark = mocks[7]
 		self.mock_log_error = mocks[8]
+		self.mock_quiet_log = mocks[11]
 		self.addCleanup(lambda: [p.stop() for p in self.patches])
 
 	def _get_value(self, doctype, name=None, fields=None, *a, **k):
@@ -158,34 +160,34 @@ class TestSend(EmailOTPTestBase):
 
 	def test_not_configured_when_no_provider(self):
 		self.provider.health.return_value = {"ok": False, "message": "SMTP missing", "fix_url": "/app/email-account"}
-		res = ev.send_email_otp("CUST-1")
+		res = ev.send_email_otp("CUST-1", pos_profile="P1")
 		self.assertFalse(res["ok"])
 		self.assertEqual(res["code"], "not_configured")
 		self.provider.send.assert_not_called()
 		self.provider = None
-		res = ev.send_email_otp("CUST-1")
+		res = ev.send_email_otp("CUST-1", pos_profile="P1")
 		self.assertEqual((res["ok"], res["code"]), (False, "not_configured"))
 
 	def test_not_configured_uses_generic_text(self):
 		self.provider.health.return_value = {"ok": False, "message": "Provider secret XYZ broken", "fix_url": None}
-		res = ev.send_email_otp("CUST-1")
+		res = ev.send_email_otp("CUST-1", pos_profile="P1")
 		self.assertEqual(res["message"], "Email verification is not set up. Ask an administrator.")
 		self.assertNotIn("XYZ", json.dumps(res))
 		# Provider-returned not_configured on send uses the same generic text.
 		self.provider.health.return_value = {"ok": True, "message": "", "fix_url": None}
 		self.provider.send.return_value = {"ok": False, "code": "not_configured", "message": "token XYZ missing"}
-		res = ev.send_email_otp("CUST-1")
+		res = ev.send_email_otp("CUST-1", pos_profile="P1")
 		self.assertEqual(res["code"], "not_configured")
 		self.assertEqual(res["message"], "Email verification is not set up. Ask an administrator.")
 
 	def test_unavailable_uses_generic_text(self):
 		self.provider.send.return_value = {"ok": False, "code": "unavailable", "message": "stack trace at host 10.0.0.1"}
-		res = ev.send_email_otp("CUST-1")
+		res = ev.send_email_otp("CUST-1", pos_profile="P1")
 		self.assertEqual(res["code"], "unavailable")
 		self.assertEqual(res["message"], "Could not send the code, please try again.")
 		self.provider.send.side_effect = RuntimeError("boom 10.0.0.1")
 		self.cache.store.clear()
-		res = ev.send_email_otp("CUST-1")
+		res = ev.send_email_otp("CUST-1", pos_profile="P1")
 		self.assertEqual(res["code"], "unavailable")
 		self.assertNotIn("10.0.0.1", json.dumps(res))
 
@@ -194,39 +196,39 @@ class TestSend(EmailOTPTestBase):
 			with self.subTest(bad=bad):
 				self.cache.store.clear()
 				self.provider.send.return_value = bad
-				res = ev.send_email_otp("CUST-1")
+				res = ev.send_email_otp("CUST-1", pos_profile="P1")
 				self.assertFalse(res["ok"])
 				self.assertEqual(res["code"], "unavailable")
 
 	def test_rejected_passes_provider_message(self):
 		self.provider.send.return_value = {"ok": False, "code": "rejected", "message": "already registered"}
-		res = ev.send_email_otp("CUST-1")
+		res = ev.send_email_otp("CUST-1", pos_profile="P1")
 		self.assertEqual((res["ok"], res["code"], res["message"]), (False, "rejected", "already registered"))
 		self.cache.store.clear()
 		self.provider.send.return_value = {"ok": False, "code": "rejected", "message": ""}
-		res = ev.send_email_otp("CUST-1")
+		res = ev.send_email_otp("CUST-1", pos_profile="P1")
 		self.assertEqual(res["code"], "rejected")
 		self.assertTrue(res["message"])
 		self.cache.store.clear()
 		self.provider.send.return_value = {"ok": False, "code": "rejected", "message": "x" * 500}
-		self.assertLessEqual(len(ev.send_email_otp("CUST-1")["message"]), 200)
+		self.assertLessEqual(len(ev.send_email_otp("CUST-1", pos_profile="P1")["message"]), 200)
 
 	def test_provider_rate_limited_passes_retry_after(self):
 		self.provider.send.return_value = {"ok": False, "code": "rate_limited", "message": "slow down", "retry_after": 42}
-		res = ev.send_email_otp("CUST-1")
+		res = ev.send_email_otp("CUST-1", pos_profile="P1")
 		self.assertEqual((res["code"], res["retry_after"]), ("rate_limited", 42))
 		self.assertNotEqual(res["message"], "slow down")
 
 	def test_otp_not_required_does_not_mark_verified(self):
 		self.provider.send.return_value = {"ok": True, "code": "otp_not_required", "message": ""}
-		res = ev.send_email_otp("CUST-1")
+		res = ev.send_email_otp("CUST-1", pos_profile="P1")
 		self.assertTrue(res["ok"])
 		self.assertEqual(res["code"], "otp_not_required")
 		self.mock_mark.assert_not_called()
 
 	def test_double_send_single_email(self):
-		first = ev.send_email_otp("CUST-1")
-		second = ev.send_email_otp("CUST-1")
+		first = ev.send_email_otp("CUST-1", pos_profile="P1")
+		second = ev.send_email_otp("CUST-1", pos_profile="P1")
 		self.assertEqual(first["code"], "sent")
 		self.assertEqual(second["code"], "rate_limited")
 		self.assertFalse(second["ok"])
@@ -235,8 +237,8 @@ class TestSend(EmailOTPTestBase):
 
 	def test_failed_send_still_counts_for_cooldown(self):
 		self.provider.send.return_value = {"ok": False, "code": "rejected", "message": "no"}
-		ev.send_email_otp("CUST-1")
-		self.assertEqual(ev.send_email_otp("CUST-1")["code"], "rate_limited")
+		ev.send_email_otp("CUST-1", pos_profile="P1")
+		self.assertEqual(ev.send_email_otp("CUST-1", pos_profile="P1")["code"], "rate_limited")
 		self.assertEqual(self.provider.send.call_count, 1)
 
 	def test_hourly_cap(self):
@@ -244,7 +246,7 @@ class TestSend(EmailOTPTestBase):
 		state = ev._load_state("CUST-1")
 		state["sends"] = [now - 3000, now - 2500, now - 2000, now - 1500, now - 200]
 		ev._save_state("CUST-1", state)
-		res = ev.send_email_otp("CUST-1")
+		res = ev.send_email_otp("CUST-1", pos_profile="P1")
 		self.assertEqual(res["code"], "rate_limited")
 		self.assertGreater(res["retry_after"], 60)
 		self.provider.send.assert_not_called()
@@ -279,20 +281,20 @@ class TestSend(EmailOTPTestBase):
 	def test_phone_errors_when_provider_requires_phone(self):
 		self.provider = fake_provider(requires_phone=True)
 		self.row.mobile_no = ""
-		self.assertEqual(ev.send_email_otp("CUST-1")["code"], "phone_required")
+		self.assertEqual(ev.send_email_otp("CUST-1", pos_profile="P1")["code"], "phone_required")
 		self.row.mobile_no = "12345"
-		self.assertEqual(ev.send_email_otp("CUST-1")["code"], "invalid_phone")
+		self.assertEqual(ev.send_email_otp("CUST-1", pos_profile="P1")["code"], "invalid_phone")
 		self.provider.send.assert_not_called()
 
 	def test_phone_not_required_for_email_provider(self):
 		self.provider = fake_provider(name="frappe_email", requires_phone=False)
 		self.row.mobile_no = ""
-		res = ev.send_email_otp("CUST-1")
+		res = ev.send_email_otp("CUST-1", pos_profile="P1")
 		self.assertEqual(res["code"], "sent")
 		self.assertIsNone(self.provider.send.call_args.args[0].phone)
 		self.row.mobile_no = "garbage"
 		self.cache.store.clear()
-		self.assertEqual(ev.send_email_otp("CUST-1")["code"], "sent")
+		self.assertEqual(ev.send_email_otp("CUST-1", pos_profile="P1")["code"], "sent")
 
 	def test_placeholder_email_rejected(self):
 		self.settings = {"placeholder_email_domain": "pos.example"}
@@ -305,16 +307,16 @@ class TestSend(EmailOTPTestBase):
 		for email in ("", "not-an-email"):
 			with self.subTest(email=email):
 				self.row.email_id = email
-				self.assertEqual(ev.send_email_otp("CUST-1")["code"], "invalid_email")
+				self.assertEqual(ev.send_email_otp("CUST-1", pos_profile="P1")["code"], "invalid_email")
 		self.provider.send.assert_not_called()
 
 	def test_email_param_must_match_saved(self):
-		self.assertEqual(ev.send_email_otp("CUST-1", "other@example.com")["code"], "email_not_saved")
-		self.assertEqual(ev.send_email_otp("CUST-1", "JANE@example.com")["code"], "sent")
+		self.assertEqual(ev.send_email_otp("CUST-1", "other@example.com", pos_profile="P1")["code"], "email_not_saved")
+		self.assertEqual(ev.send_email_otp("CUST-1", "JANE@example.com", pos_profile="P1")["code"], "sent")
 
 	def test_flag_off(self):
 		with patch(f"{MODULE}.is_feature_enabled", return_value=False):
-			self.assertEqual(ev.send_email_otp("CUST-1")["code"], "disabled")
+			self.assertEqual(ev.send_email_otp("CUST-1", pos_profile="P1")["code"], "disabled")
 		self.provider.send.assert_not_called()
 
 	def test_flag_off_but_friends_and_family_member(self):
@@ -322,19 +324,19 @@ class TestSend(EmailOTPTestBase):
 			patch(f"{MODULE}.is_feature_enabled", return_value=False),
 			patch("pos_next.integrations.registry.is_benefit_member", return_value=True),
 		):
-			self.assertEqual(ev.send_email_otp("CUST-1")["code"], "sent")
+			self.assertEqual(ev.send_email_otp("CUST-1", pos_profile="P1")["code"], "sent")
 
 	def test_permission_denied(self):
 		with patch(f"{MODULE}.frappe.has_permission", return_value=False):
 			with self.assertRaises(frappe.PermissionError):
-				ev.send_email_otp("CUST-1")
+				ev.send_email_otp("CUST-1", pos_profile="P1")
 		self.provider.send.assert_not_called()
 
 	def test_lock_busy(self):
 		lock = MagicMock()
 		lock.acquire.return_value = False
 		self.cache.lock = lambda *a, **k: lock
-		self.assertEqual(ev.send_email_otp("CUST-1")["code"], "busy")
+		self.assertEqual(ev.send_email_otp("CUST-1", pos_profile="P1")["code"], "busy")
 		self.provider.send.assert_not_called()
 
 
@@ -371,7 +373,7 @@ class TestVerify(EmailOTPTestBase):
 			with self.subTest(bad=bad):
 				self.cache.store.clear()
 				self.provider.verify.return_value = bad
-				res = ev.verify_email_otp("CUST-1", OTP)
+				res = ev.verify_email_otp("CUST-1", OTP, pos_profile="P1")
 				self.assertFalse(res["ok"])
 		self.mock_mark.assert_not_called()
 
@@ -380,7 +382,7 @@ class TestVerify(EmailOTPTestBase):
 			with self.subTest(code=code):
 				self.cache.store.clear()
 				self.provider.verify.return_value = {"ok": False, "code": code, "message": "PROVIDER TEXT"}
-				res = ev.verify_email_otp("CUST-1", OTP)
+				res = ev.verify_email_otp("CUST-1", OTP, pos_profile="P1")
 				self.assertEqual(res["code"], code)
 				self.assertNotEqual(res["message"], "PROVIDER TEXT")
 		self.mock_mark.assert_not_called()
@@ -388,26 +390,26 @@ class TestVerify(EmailOTPTestBase):
 	def test_bad_otp_format_no_provider_call(self):
 		for bad in ("12345", "abcdef", "1234567", ""):
 			with self.subTest(otp=bad):
-				self.assertEqual(ev.verify_email_otp("CUST-1", bad)["code"], "invalid_otp")
+				self.assertEqual(ev.verify_email_otp("CUST-1", bad, pos_profile="P1")["code"], "invalid_otp")
 		self.provider.verify.assert_not_called()
 
 	def test_arabic_digit_otp_normalized(self):
-		ev.verify_email_otp("CUST-1", "٤٨٢٩١٣")
+		ev.verify_email_otp("CUST-1", "٤٨٢٩١٣", pos_profile="P1")
 		self.assertEqual(self.provider.verify.call_args.args[1], OTP)
 
 	def test_ten_wrong_attempts_rate_limited(self):
 		self.provider.verify.return_value = {"ok": False, "code": "invalid_otp", "message": ""}
-		ev.send_email_otp("CUST-1")
+		ev.send_email_otp("CUST-1", pos_profile="P1")
 		for _i in range(ev.MAX_VERIFY_ATTEMPTS):
-			self.assertEqual(ev.verify_email_otp("CUST-1", OTP)["code"], "invalid_otp")
-		res = ev.verify_email_otp("CUST-1", OTP)
+			self.assertEqual(ev.verify_email_otp("CUST-1", OTP, pos_profile="P1")["code"], "invalid_otp")
+		res = ev.verify_email_otp("CUST-1", OTP, pos_profile="P1")
 		self.assertEqual(res["code"], "rate_limited")
 		self.assertGreater(res["retry_after"], 0)
 		self.assertEqual(self.provider.verify.call_count, ev.MAX_VERIFY_ATTEMPTS)
 		self.assertEqual(ev.MAX_VERIFY_ATTEMPTS, 10)
 		# Even a correct code is refused once locked out.
 		self.provider.verify.return_value = {"ok": True, "code": "verified", "message": ""}
-		self.assertEqual(ev.verify_email_otp("CUST-1", OTP)["code"], "rate_limited")
+		self.assertEqual(ev.verify_email_otp("CUST-1", OTP, pos_profile="P1")["code"], "rate_limited")
 		self.mock_mark.assert_not_called()
 
 	def test_lockout_window_uses_profile_ttl(self):
@@ -491,25 +493,25 @@ class TestVerify(EmailOTPTestBase):
 	def test_new_send_resets_attempts(self):
 		self.provider.verify.return_value = {"ok": False, "code": "invalid_otp", "message": ""}
 		for _i in range(3):
-			ev.verify_email_otp("CUST-1", OTP)
+			ev.verify_email_otp("CUST-1", OTP, pos_profile="P1")
 		self.assertEqual(ev._load_state("CUST-1")["attempts"], 3)
-		ev.send_email_otp("CUST-1")
+		ev.send_email_otp("CUST-1", pos_profile="P1")
 		self.assertEqual(ev._load_state("CUST-1")["attempts"], 0)
 
 	def test_failed_send_does_not_reset_attempts(self):
 		self.provider.verify.return_value = {"ok": False, "code": "invalid_otp", "message": ""}
 		for _i in range(3):
-			ev.verify_email_otp("CUST-1", OTP)
+			ev.verify_email_otp("CUST-1", OTP, pos_profile="P1")
 		self.provider.send.return_value = {"ok": False, "code": "unavailable", "message": ""}
-		ev.send_email_otp("CUST-1")
+		ev.send_email_otp("CUST-1", pos_profile="P1")
 		self.assertEqual(ev._load_state("CUST-1")["attempts"], 3)
 
 	def test_flag_off_and_permission(self):
 		with patch(f"{MODULE}.is_feature_enabled", return_value=False):
-			self.assertEqual(ev.verify_email_otp("CUST-1", OTP)["code"], "disabled")
+			self.assertEqual(ev.verify_email_otp("CUST-1", OTP, pos_profile="P1")["code"], "disabled")
 		with patch(f"{MODULE}.frappe.has_permission", return_value=False):
 			with self.assertRaises(frappe.PermissionError):
-				ev.verify_email_otp("CUST-1", OTP)
+				ev.verify_email_otp("CUST-1", OTP, pos_profile="P1")
 		self.provider.verify.assert_not_called()
 
 
@@ -522,13 +524,14 @@ class TestSecrets(EmailOTPTestBase):
 			{"ok": False, "code": "unavailable", "message": ""},
 		):
 			self.provider.verify.return_value = verify
-			results.append(ev.verify_email_otp("CUST-1", OTP))
+			results.append(ev.verify_email_otp("CUST-1", OTP, pos_profile="P1"))
 		self.provider.verify.side_effect = RuntimeError("boom")
-		results.append(ev.verify_email_otp("CUST-1", OTP))
+		results.append(ev.verify_email_otp("CUST-1", OTP, pos_profile="P1"))
 		text = "\n".join(
 			[json.dumps(results, default=str)]
 			+ [str(c) for c in self.mock_audit.call_args_list]
 			+ [str(c) for c in self.mock_log_error.call_args_list]
+			+ [str(c) for c in self.mock_quiet_log.call_args_list]
 			+ [json.dumps(self.cache.store, default=str)]
 		)
 		self.assertNotIn(OTP, text)

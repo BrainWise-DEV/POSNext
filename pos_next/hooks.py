@@ -275,6 +275,11 @@ permission_query_conditions = {
 	"Journal Entry": "pos_next.api.expenses.get_journal_entry_permission_query_conditions",
 }
 
+# POS Settings rows are per POS Profile: write only on the profiles a user works in.
+has_permission = {
+	"POS Settings": "pos_next.pos_next.doctype.pos_settings.pos_settings.has_permission",
+}
+
 # auth_hooks = [
 # 	"pos_next.auth.validate"
 # ]
