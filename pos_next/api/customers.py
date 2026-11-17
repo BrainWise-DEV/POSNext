@@ -84,6 +84,23 @@ def get_customers(search_term="", pos_profile=None, limit=20, modified_since=Non
 		frappe.throw(_("Error fetching customers: {0}").format(str(e)))
 
 
+def _drop_rename_note():
+	"""Drop ERPNext's "Changed customer name to ... already exists" note.
+
+	Duplicate display names are allowed; the record keeps ERPNext's unique ID, and the
+	note reads as an error to cashiers. Matches the translated text, so it works in any
+	language, and leaves every other message in place.
+	"""
+	prefix = _("Changed customer name to '{}' as '{}' already exists.").split("{}")[0]
+
+	def text(entry):
+		message = entry.get("message") if isinstance(entry, dict) else entry
+		return message if isinstance(message, str) else ""
+
+	log = frappe.local.message_log
+	log[:] = [entry for entry in log if not text(entry).startswith(prefix)]
+
+
 @frappe.whitelist()
 def create_customer(
 	customer_name,
@@ -189,6 +206,7 @@ def create_customer(
 	try:
 		try:
 			customer.insert()
+			_drop_rename_note()
 			if sync_external_customer:
 				after_customer_insert(
 					customer,
@@ -467,9 +485,9 @@ def update_customer(
 			frappe.throw(_("Customer name is required"))
 
 	# A changed email or phone must not take over another customer's (same rule as create).
-	email_changed = email_id is not None and (email_id or "").strip().lower() != (
-		customer.email_id or ""
-	).strip().lower()
+	email_changed = (
+		email_id is not None and (email_id or "").strip().lower() != (customer.email_id or "").strip().lower()
+	)
 	mobile_changed = mobile_no is not None and (mobile_no or "").strip() != (customer.mobile_no or "").strip()
 	if email_changed or mobile_changed:
 		existing = resolve_existing_customer(
