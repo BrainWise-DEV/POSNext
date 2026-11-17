@@ -124,4 +124,5 @@ EMAIL_VERIFICATION_FIELDS = [
 	"custom_email_verified",
 	"custom_verified_email",
 	"custom_email_verified_on",
+	"custom_email_verified_via",
 ]

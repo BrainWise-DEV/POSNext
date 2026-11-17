@@ -7,6 +7,7 @@ from frappe.model.naming import make_autoname
 from frappe.utils import cint, cstr, flt
 
 from pos_next.api.items import _get_pos_profile_allowed_item_groups
+from pos_next.utils import validate_pos_profile_access as _validate_pos_profile_access
 
 # Image types this screen can render. The site's own allowed_file_extensions
 # list covers every file type (CSV, PDF, ...), so it is intersected with this
@@ -33,24 +34,6 @@ SAFE_IMAGE_PREFIXES = ("/", "http://", "https://")
 # update_product_image() resolves the URL back to an attached File record, so it
 # genuinely requires a local upload path — an external URL could never match.
 LOCAL_FILE_PREFIXES = ("/files/", "/private/files/")
-
-
-def _validate_pos_profile_access(pos_profile: str) -> None:
-	"""Ensure the session user may act through this POS Profile.
-
-	Every endpoint here scopes what the caller can read or change to the
-	profile's allowed item groups, so an unvalidated profile name would let a
-	caller pick any profile — including one with no group restriction at all,
-	which disables the scoping entirely. Mirrors the check used in
-	`api/invoices.py` and `api/credit_sales.py`.
-	"""
-	if not pos_profile:
-		frappe.throw(_("POS Profile is required"))
-
-	is_assigned = frappe.db.exists("POS Profile User", {"parent": pos_profile, "user": frappe.session.user})
-	# Users who can administer POS Profiles are not constrained by them.
-	if not is_assigned and not frappe.has_permission("POS Profile", "write"):
-		frappe.throw(_("You don't have access to this POS Profile"))
 
 
 @frappe.whitelist()
