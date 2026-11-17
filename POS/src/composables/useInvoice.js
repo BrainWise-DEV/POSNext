@@ -9,6 +9,7 @@ import { logger } from "@/utils/logger";
 import { roundCurrency } from "@/utils/currency";
 import {
 	fnfLockedDiscountAmount,
+	fnfSubmissionMarkers,
 	stripFnfKeys,
 	stripFriendsAndFamilyForOrder,
 } from "@/utils/friendsAndFamily";
@@ -802,6 +803,7 @@ export function useInvoice() {
 				? Math.max(roundCurrency((item.discount_amount || 0) - preCouponLineDiscount(item)), 0)
 				: 0,
 			sales_person: item.sales_person || null,
+			...fnfSubmissionMarkers(item),
 		});
 
 		const out = [];

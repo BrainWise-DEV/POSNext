@@ -620,6 +620,21 @@ export function resolveHeaderDiscount(serverAmount, appliedCoupon = null) {
 	return { amount, keepCoupon: false };
 }
 
+/**
+ * Sales Invoice Item markers for an F&F cart line, else {}. The promotions
+ * server reads them (audit, usage ledger, paid-invoice check, gift policy).
+ * Program and % go only when the cart already holds them; amounts are never
+ * sent, the server derives them.
+ */
+export function fnfSubmissionMarkers(item) {
+	if (!isFnfLine(item) || item.is_free_item) return {};
+	const markers = { posnext_discount_source: FNF_DISCOUNT_SOURCE };
+	if (item.posnext_fnf_program) markers.posnext_fnf_program = item.posnext_fnf_program;
+	if (num(item.posnext_fnf_percentage) > 0)
+		markers.posnext_fnf_percentage = num(item.posnext_fnf_percentage);
+	return markers;
+}
+
 // Sales Orders carry no F&F (the server strips them too; Phase 3 adds real support).
 const FNF_HEADER_PREFIX = "posnext_fnf_";
 

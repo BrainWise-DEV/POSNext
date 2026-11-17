@@ -281,6 +281,53 @@ def _pricing_rule_to_string(value):
 	return ""
 
 
+def _rule_names(pricing_rules) -> list[str]:
+	"""Pricing Rule names in a row's ``pricing_rules`` (comma list or JSON list)."""
+	if erpnext_get_applied_pricing_rules:
+		return [r for r in erpnext_get_applied_pricing_rules(pricing_rules) or [] if r]
+	return [r.strip() for r in str(pricing_rules).split(",") if r.strip()]
+
+
+def _keep_gift_rule_names(items) -> None:
+	"""Free rows keep only names of existing product-discount (gift) Pricing Rules.
+
+	Forged, unknown or price-discount names are dropped; a row left with none gets
+	a blank ``pricing_rules``.
+	"""
+	free_rows = [row for row in items if cint(row.get("is_free_item")) and row.get("pricing_rules")]
+	if not free_rows:
+		return
+	names = {name for row in free_rows for name in _rule_names(row.pricing_rules)}
+	gift_rules = set(
+		frappe.get_all(
+			"Pricing Rule",
+			filters={"name": ["in", list(names)], "price_or_product_discount": "Product"},
+			pluck="name",
+		)
+	)
+	for row in free_rows:
+		row.pricing_rules = ",".join(name for name in _rule_names(row.pricing_rules) if name in gift_rules)
+
+
+def _reset_row_pricing_rules(items) -> set[str]:
+	"""Blank ``pricing_rules`` on paid rows; free rows keep only validated gift rule names.
+
+	ERPNext zeroes a paid row's discount on the next save of an existing invoice
+	with ``ignore_pricing_rule=1`` when the row still lists rules (see the comment
+	in ``update_invoice``). Free rows are exempt: ``get_pricing_rule_for_item``
+	returns early for ``is_free_item``, and the F&F gift policy needs their rule.
+	Returns every rule name the rows carried (for one-time offers).
+	"""
+	seen = set()
+	for item in items:
+		if item.get("pricing_rules"):
+			seen.update(_rule_names(item.pricing_rules))
+			if not cint(item.get("is_free_item")):
+				item.pricing_rules = ""
+	_keep_gift_rule_names(items)
+	return seen
+
+
 def _strip_server_managed_fields(payload):
 	"""Remove fields that are derived server-side and should not be replayed."""
 	if not isinstance(payload, dict):
@@ -1224,8 +1271,6 @@ def update_invoice(data: str | dict) -> dict:
 		# Formula: rate = price_list_rate * (1 - discount_percentage/100)
 		# Reverse: price_list_rate = rate / (1 - discount_percentage/100)
 		# ========================================================================
-		# Collect applied pricing rule names before we clear item.pricing_rules
-		applied_rule_names_seen = set()
 		for item in invoice_doc.get("items", []):
 			item_rate = flt(item.rate or 0)
 			discount_pct = flt(item.discount_percentage or 0)
@@ -1280,19 +1325,12 @@ def update_invoice(data: str | dict) -> dict:
 			# price. See erpnext/accounts/doctype/pricing_rule/pricing_rule.py
 			# around line 421.
 			#
-			# Clearing item.pricing_rules here avoids that branch entirely. The
-			# discount itself is preserved via the discount_percentage /
-			# discount_amount fields we already set above.
-			if item.get("pricing_rules"):
-				if erpnext_get_applied_pricing_rules:
-					applied_rule_names_seen.update(
-						erpnext_get_applied_pricing_rules(item.pricing_rules) or []
-					)
-				else:
-					applied_rule_names_seen.update(
-						r.strip() for r in str(item.pricing_rules).split(",") if r.strip()
-					)
-				item.pricing_rules = ""
+			# Clearing item.pricing_rules (_reset_row_pricing_rules, after this
+			# loop; submit_invoice does the same for an existing draft) avoids
+			# that branch entirely. The discount itself is preserved via the
+			# discount_percentage / discount_amount fields we already set above.
+
+		applied_rule_names_seen = _reset_row_pricing_rules(invoice_doc.get("items", []))
 
 		if doctype == "Sales Invoice":
 			one_time_applied = (
@@ -1784,6 +1822,7 @@ def submit_invoice(invoice: str | dict | None = None, data: str | dict | None = 
 			invoice_doc = frappe.get_doc(doctype, invoice_name)
 			existing_customer = invoice_doc.customer
 			invoice_doc.update(invoice)
+			_reset_row_pricing_rules(invoice_doc.get("items", []))
 			if not invoice_doc.get("customer") and existing_customer:
 				invoice_doc.customer = existing_customer
 			# The draft was validated by update_invoice, but its rows and header
