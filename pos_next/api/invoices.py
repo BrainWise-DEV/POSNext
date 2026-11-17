@@ -10,9 +10,9 @@ import frappe
 from erpnext.accounts.doctype.sales_invoice.sales_invoice import get_bank_cash_account
 from erpnext.stock.doctype.batch.batch import get_batch_no, get_batch_qty
 from frappe import _
-from frappe.utils import cint, cstr, flt, get_datetime, nowdate, nowtime
+from frappe.utils import cint, cstr, flt, get_datetime, getdate, nowdate, nowtime
 
-from pos_next.utils import validate_pos_profile_access
+from pos_next.utils import log_error_without_telemetry, validate_pos_profile_access
 
 # ==========================================
 # Constants for field names (avoid typos and enable refactoring)
@@ -292,9 +292,14 @@ def _keep_gift_rule_names(items) -> None:
 	"""Free rows keep only names of existing product-discount (gift) Pricing Rules.
 
 	Forged, unknown or price-discount names are dropped; a row left with none gets
-	a blank ``pricing_rules``.
+	a blank ``pricing_rules``. A row made free by a Price rule the server confirmed
+	(``flags.pos_backing_rule``, see ``_check_free_rows_backed``) keeps that rule.
 	"""
-	free_rows = [row for row in items if cint(row.get("is_free_item")) and row.get("pricing_rules")]
+	free_rows = [
+		row
+		for row in items
+		if cint(row.get("is_free_item")) and row.get("pricing_rules") and not row.flags.pos_backing_rule
+	]
 	if not free_rows:
 		return
 	names = {name for row in free_rows for name in _rule_names(row.pricing_rules)}
@@ -328,6 +333,578 @@ def _reset_row_pricing_rules(items) -> set[str]:
 	return seen
 
 
+UNBACKED_FREE_ITEM_LOG_TITLE = "Unbacked free item"
+APPLY_OFFERS_METHOD = "pos_next.api.invoices.apply_offers"
+
+
+def _offer_evaluator():
+	"""The offer evaluator the cart calls: promotions' override when installed, else ours."""
+	return frappe.get_attr(frappe.override_whitelisted_method(APPLY_OFFERS_METHOD))
+
+
+def _first_rule(row) -> str:
+	names = _rule_names(row.get("pricing_rules") or "")
+	return names[0] if names else ""
+
+
+def _is_zero_rate(row) -> bool:
+	"""A paid row ERPNext will save at rate 0: 100% off (rate forced to 0 whatever is
+	sent), or a rate that rounds to 0 at the field's precision. It is a free item."""
+	return (
+		not cint(row.get("is_free_item"))
+		and flt(row.qty) > 0
+		and (flt(row.get("discount_percentage")) >= 100 or flt(row.rate, row.precision("rate")) <= 0)
+	)
+
+
+def _paid_draft_free_qty(doc) -> dict:
+	"""Free stock qty per (item_code, rule) on a stored draft that carries a payment, else {}.
+
+	Those rows were checked (or logged) when the draft was saved; a re-save may keep them.
+	"""
+	if sum(flt(row.get("amount")) for row in doc.get("payments") or []) <= 0:
+		return {}
+	stored = {}
+	for row in doc.get("items") or []:
+		if cint(row.get("is_free_item")):
+			key = (row.item_code, _first_rule(row))
+			qty = flt(row.get("stock_qty")) or flt(row.qty) * (flt(row.get("conversion_factor")) or 1)
+			stored[key] = stored.get(key, 0) + qty
+	return stored
+
+
+class _ItemData:
+	"""Item master facts the checks trust instead of the client: group, brand, UOM factors."""
+
+	def __init__(self):
+		self.items, self.factors = {}, {}
+
+	def load(self, codes):
+		missing = list({code for code in codes if code} - set(self.items))
+		if not missing:
+			return
+		for item in frappe.get_all(
+			"Item", filters={"name": ["in", missing]}, fields=["name", "item_group", "brand", "stock_uom"]
+		):
+			self.items[item.name] = item
+		for row in frappe.get_all(
+			"UOM Conversion Detail",
+			filters={"parenttype": "Item", "parent": ["in", missing]},
+			fields=["parent", "uom", "conversion_factor"],
+		):
+			self.factors[(row.parent, row.uom)] = flt(row.conversion_factor)
+
+	def get(self, code, field):
+		return (self.items.get(code) or {}).get(field)
+
+	def item_factor(self, code, uom) -> float | None:
+		"""Stock units per ``uom`` as the Item defines it; None when the Item has no such UOM."""
+		if not uom or uom == self.get(code, "stock_uom"):
+			return 1
+		return self.factors.get((code, uom))
+
+	def factor(self, code, uom, fallback=None) -> float:
+		"""Stock units per ``uom`` of ``code``: the Item's own factor, else ``fallback``."""
+		return self.item_factor(code, uom) or flt(fallback) or 1
+
+
+def _force_item_factors(invoice_doc, rows, item_data, lenient) -> None:
+	"""Checked rows move stock by the Item's own UOM factor, never the client's.
+
+	ERPNext posts ``qty * conversion_factor`` from the row, so the row's factor is set
+	to the Item's. A UOM the Item does not define cannot be measured: refused online,
+	kept and logged on an offline sync.
+	"""
+	undefined = []
+	for row in rows:
+		factor = item_data.item_factor(row.item_code, row.get("uom"))
+		if factor:
+			row.conversion_factor = factor
+		else:
+			undefined.append(row)
+	if not undefined:
+		return
+	if not lenient:
+		row = undefined[0]
+		frappe.throw(
+			_("Row {0}: UOM {1} is not defined on item {2}.").format(row.idx, row.uom, row.item_code),
+			frappe.ValidationError,
+		)
+	reference = invoice_doc.name or invoice_doc.get("offline_id") or "new"
+	for row in undefined:
+		log_error_without_telemetry(
+			UNBACKED_FREE_ITEM_LOG_TITLE,
+			f"Invoice {reference}, row {row.idx}, item {row.item_code}: UOM {row.uom} not on the Item",
+		)
+
+
+def _list_prices(invoice_doc, rows, item_data) -> dict:
+	"""id(row) → list price from the POS Profile's price list (else the invoice's), or None."""
+	profile = invoice_doc.get("pos_profile")
+	price_list = (
+		profile and frappe.get_cached_value(DOCTYPE_POS_PROFILE, profile, "selling_price_list")
+	) or invoice_doc.get("selling_price_list")
+	codes = list({row.item_code for row in rows})
+	if not price_list or not codes:
+		return {}
+	today = getdate(invoice_doc.get("posting_date") or nowdate())
+	prices = {}
+	for price in frappe.get_all(
+		"Item Price",
+		filters={"price_list": price_list, "item_code": ["in", codes]},
+		fields=["item_code", "uom", "price_list_rate", "customer", "valid_from", "valid_upto"],
+	):
+		if price.customer and price.customer != invoice_doc.get("customer"):
+			continue
+		if (price.valid_from and getdate(price.valid_from) > today) or (
+			price.valid_upto and getdate(price.valid_upto) < today
+		):
+			continue
+		prices.setdefault(price.item_code, []).append(price)
+
+	def row_price(row):
+		# A customer's own price first; the row's UOM, else the stock UOM scaled.
+		ranked = sorted(prices.get(row.item_code) or [], key=lambda price: not price.customer)
+		for price in ranked:
+			if price.uom and price.uom == row.get("uom"):
+				return flt(price.price_list_rate)
+		for price in ranked:
+			if not price.uom or price.uom == item_data.get(row.item_code, "stock_uom"):
+				factor = item_data.factor(row.item_code, row.get("uom"), row.get("conversion_factor"))
+				return flt(price.price_list_rate) * factor
+		return None
+
+	return {id(row): row_price(row) for row in rows}
+
+
+def _offer_payload(invoice_doc, paid_rows, item_data, list_prices, normalised=()) -> dict:
+	"""The cart's apply_offers payload (posCart ``buildOfferEvaluationPayload``).
+
+	Item group, brand and list price come from the server, never the client: they
+	decide which offers (and amount thresholds) apply. A row without a list price
+	uses the rate it is charged. A free row with a line-discount source
+	(``normalised`` ids) goes in as a paid line at list price with no discount, so
+	only the server can zero it; that payload is used for line pricing only.
+	"""
+	items = []
+	for row in paid_rows:
+		list_price = list_prices.get(id(row))
+		rate = flt(list_price) if id(row) in normalised else flt(row.rate)
+		discounts = {
+			"discount_percentage": flt(row.get("discount_percentage")),
+			"discount_amount": flt(row.get("discount_amount")),
+			"discount_source": row.get("posnext_discount_source") or "",
+		}
+		if id(row) in normalised:
+			discounts = {"discount_percentage": 0, "discount_amount": 0, "discount_source": ""}
+		items.append(
+			{
+				"item_code": row.item_code,
+				"item_name": row.get("item_name"),
+				"qty": flt(row.qty),
+				"rate": rate,
+				"uom": row.get("uom"),
+				"warehouse": row.get("warehouse"),
+				"conversion_factor": item_data.factor(
+					row.item_code, row.get("uom"), row.get("conversion_factor")
+				),
+				"price_list_rate": rate if list_price is None else list_price,
+				**discounts,
+				"pricing_rules": row.get("pricing_rules") or "",
+				"item_group": item_data.get(row.item_code, "item_group"),
+				"brand": item_data.get(row.item_code, "brand"),
+				"amount": rate * flt(row.qty),
+				"is_free_item": 0,
+			}
+		)
+	return {
+		"doctype": DOCTYPE_SALES_INVOICE,
+		"pos_profile": invoice_doc.get("pos_profile"),
+		"customer": invoice_doc.get("customer"),
+		"company": invoice_doc.get("company"),
+		"selling_price_list": invoice_doc.get("selling_price_list"),
+		"currency": invoice_doc.get("currency"),
+		"discount_amount": flt(invoice_doc.get("discount_amount")),
+		"coupon_code": invoice_doc.get("coupon_code") or "",
+		"items": items,
+	}
+
+
+def _gift_pool_groups(schemes) -> dict[str, dict[str, set[str]]]:
+	"""Promotional Scheme → {pool item group: item codes}: a Gift Pool's choices, per pool."""
+	if not schemes or not frappe.db.exists("DocType", "POS Gift Pool Item"):
+		return {}
+	pools = {}
+	for row in frappe.get_all(
+		"POS Gift Pool Item",
+		filters={"parent": ["in", list(schemes)], "parenttype": "Promotional Scheme"},
+		fields=["parent", "item_group", "item_code"],
+	):
+		pools.setdefault(row.parent, {}).setdefault(row.item_group, set()).add(row.item_code)
+	return pools
+
+
+def _expected_free_rows(free_items, item_data) -> tuple[dict, dict]:
+	"""Evaluator free rows → ({(rule, item_code): stock qty}, {rule: {pool group: codes}}).
+
+	Pools are set only for Gift Pool rules, and only the pools the evaluator granted
+	from: the gift may be any item of that pool, up to the pool's granted qty.
+	"""
+	item_data.load(free.get("item_code") for free in free_items or [])
+	expected, schemes = {}, {}
+	for free in free_items or []:
+		code = free.get("item_code")
+		qty = flt(free.get("qty")) * item_data.factor(code, free.get("uom"), free.get("conversion_factor"))
+		for rule in _rule_names(free.get("pricing_rules") or ""):
+			expected[(rule, code)] = expected.get((rule, code), 0) + qty
+			if free.get("applied_promotional_scheme"):
+				schemes[rule] = free.get("applied_promotional_scheme")
+	pools = _gift_pool_groups(set(schemes.values()))
+	allowed = {}
+	for rule, scheme in schemes.items():
+		granted = {code for (r, code) in expected if r == rule}
+		groups = {group: codes for group, codes in (pools.get(scheme) or {}).items() if codes & granted}
+		if groups:
+			allowed[rule] = groups
+	return expected, allowed
+
+
+def _pool_group(rule, item_code, allowed):
+	return next((g for g in sorted(allowed.get(rule) or {}) if item_code in allowed[rule][g]), None)
+
+
+def _row_rule(row, expected, allowed) -> str | None:
+	"""The offer rule backing a free row: a sent name the evaluator expects, else one found by item."""
+
+	def backs(rule):
+		return (rule, row.item_code) in expected or _pool_group(rule, row.item_code, allowed) is not None
+
+	sent = [rule for rule in _rule_names(row.get("pricing_rules") or "") if backs(rule)]
+	if sent:
+		return sent[0]
+	candidates = sorted({rule for rule, _code in expected} | set(allowed))
+	return next((rule for rule in candidates if backs(rule)), None)
+
+
+def _line_zeroed(line) -> bool:
+	"""A priced line the server discounted fully (by percentage, amount or rate).
+
+	``discount_amount`` is the line total: both evaluators (pos_next's ``apply_offers``,
+	promotions' engine) and the coupon engine report the line's discount, not ERPNext's
+	per-unit field.
+	"""
+	gross = flt(line.get("price_list_rate")) * flt(line.get("qty") or 1)
+	return (
+		flt(line.get("discount_percentage")) >= 100
+		or (gross > 0 and flt(line.get("discount_amount")) >= flt(gross, 2) - 0.01)
+		or ("rate" in line and flt(line.get("rate"), 2) <= 0)
+	)
+
+
+def _offer_zeroing_rules(result, idx) -> list[str]:
+	"""Applied rules with which the evaluator itself discounted paid line ``idx`` to 0.
+
+	``applied_pricing_rules`` is only present when offers were evaluated (an early
+	return echoes the sent rows), and the sent line carried no discount.
+	"""
+	applied = set(result.get("applied_pricing_rules") or [])
+	items = result.get("items") or []
+	if not applied or idx >= len(items):
+		return []
+	line = dict(items[idx])
+	line.pop("rate", None)  # the evaluator echoes the sent rate; judge by its discount
+	rules = applied & set(_rule_names(_pricing_rule_to_string(line.get("pricing_rules"))))
+	return sorted(rules) if rules and _line_zeroed(line) else []
+
+
+COUPON_DISCOUNT_METHOD = "pos_next.api.offers.calculate_coupon_discount"
+
+
+def _coupon_zeroed_lines(invoice_doc, coupon_code, payload) -> set[int]:
+	"""Indexes of ``payload`` lines that ``coupon_code`` discounts fully, per the server.
+
+	Only the invoice's own coupon counts, so its usage limits apply (it is validated
+	and counted from ``coupon_code``). Promotions' coupon resolver (its override of
+	``calculate_coupon_discount``) when installed; otherwise pos_next's own POS
+	Coupon: a valid percentage coupon of at least 100% whose minimum amount the
+	lines reach.
+	"""
+	if cstr(invoice_doc.get("coupon_code")).upper() != cstr(coupon_code).upper():
+		return set()
+	message_count = len(frappe.local.message_log or [])
+	try:
+		override = frappe.override_whitelisted_method(COUPON_DISCOUNT_METHOD)
+		if override != COUPON_DISCOUNT_METHOD:
+			result = frappe.get_attr(override)(
+				coupon_code,
+				json.dumps(payload, default=str),
+				customer=invoice_doc.get("customer"),
+				company=invoice_doc.get("company"),
+			)
+			if not (result or {}).get("valid"):
+				return set()
+			return {
+				cint(update.get("line_key"))
+				for update in result.get("line_updates") or []
+				if update.get("line_key") is not None and _line_zeroed(update)
+			}
+		from pos_next.pos_next.doctype.pos_coupon.pos_coupon import check_coupon_code
+
+		check = check_coupon_code(
+			coupon_code, customer=invoice_doc.get("customer"), company=invoice_doc.get("company")
+		)
+		coupon = check.get("coupon")
+		lines = [line for line in payload["items"] if not cint(line.get("is_free_item"))]
+		subtotal = sum(flt(line.get("price_list_rate")) * flt(line.get("qty")) for line in lines)
+		if (
+			check.get("valid")
+			and coupon.discount_type == "Percentage"
+			and flt(coupon.discount_percentage) >= 100
+			and subtotal >= flt(coupon.min_amount)
+		):
+			return set(range(len(lines)))
+	except Exception as error:
+		# A failing resolver backs nothing; the row is then checked as an unbacked free row.
+		# Its own msgprint must not reach the cashier as a second error.
+		del frappe.local.message_log[message_count:]
+		log_error_without_telemetry(
+			UNBACKED_FREE_ITEM_LOG_TITLE,
+			f"Coupon {coupon_code}: could not be resolved ({type(error).__name__}: {error})",
+		)
+	return set()
+
+
+def _evaluate_offers(invoice_doc, payload) -> tuple[dict, Exception | None]:
+	"""One call to the cart's evaluator; an error is logged and returned, never raised."""
+	payload = json.dumps(payload, default=str)
+	message_count = len(frappe.local.message_log or [])
+	result, evaluator_error = {}, None
+	try:
+		result = _offer_evaluator()(payload) or {}
+	except Exception as error:
+		# Any evaluator failure means no offer backs anything; the callers decide.
+		evaluator_error = error
+	if evaluator_error:
+		# The evaluator's own msgprint must not reach the cashier as a second error.
+		del frappe.local.message_log[message_count:]
+		reference = invoice_doc.name or invoice_doc.get("offline_id") or "new"
+		log_error_without_telemetry(
+			UNBACKED_FREE_ITEM_LOG_TITLE,
+			f"Invoice {reference}: offers could not be evaluated "
+			f"({type(evaluator_error).__name__}: {evaluator_error})",
+		)
+	return result, evaluator_error
+
+
+def _price_rule_names(rows) -> set[str]:
+	"""Names on ``rows`` that are Price (line discount) Pricing Rules."""
+	names = {name for row in rows for name in _rule_names(row.get("pricing_rules") or "")}
+	if not names:
+		return set()
+	return set(
+		frappe.get_all(
+			"Pricing Rule",
+			filters={"name": ["in", list(names)], "price_or_product_discount": "Price"},
+			pluck="name",
+		)
+	)
+
+
+def _line_sources(row, price_rules, coupon_code) -> set[tuple]:
+	"""A free row's line-discount sources: its Price rules, and its coupon if it is the invoice's."""
+	sources = {
+		(row.item_code, name) for name in _rule_names(row.get("pricing_rules") or "") if name in price_rules
+	}
+	code = cstr(row.get("posnext_coupon_code")).upper()
+	if code and code == cstr(coupon_code).upper():
+		sources.add((row.item_code, f"coupon:{code}"))
+	return sources
+
+
+def _stored_line_sources(doc) -> set[tuple]:
+	"""Line-discount sources of the free rows a stored draft already holds.
+
+	They were confirmed when the draft was saved: a Price rule name survives on a
+	free row only when the server confirmed it (``flags.pos_backing_rule``), and a
+	coupon only when it is the invoice's own.
+	"""
+	free = [row for row in doc.get("items") or [] if cint(row.get("is_free_item"))]
+	price_rules = _price_rule_names(free)
+	return {source for row in free for source in _line_sources(row, price_rules, doc.get("coupon_code"))}
+
+
+def _check_free_rows_backed(
+	invoice_doc, offline_sync=False, paid_draft_free=None, stored_sources=frozenset()
+) -> None:
+	"""Every free row must come from an offer; a row at zero price is a free row.
+
+	A paid row ERPNext would save at rate 0 (100% off, or a rate that rounds to 0) is
+	made a free row (``is_free_item`` 1, rate 0, no discount) that keeps its source
+	(``pricing_rules`` or ``posnext_coupon_code``). A free row with a line-discount
+	source (made free now, or confirmed on the stored draft: ``stored_sources``) is
+	backed when the server confirms that source gives the line 100%:
+	- a line pricing evaluation: paid rows plus these rows at list price with no
+	  discount; it is used for nothing else;
+	- or the coupon resolver, for the invoice's own coupon.
+	Every other free row must match a Product rule gift from a gift evaluation of
+	only the genuinely paid rows: a free row never earns its own gift (Ruling 83).
+
+	The cart's evaluator is promotions' ``apply_offers`` override when installed. It
+	gets item group, brand and list price from the server. Free qty is compared in
+	stock units, per rule and item (per pool for a Gift Pool), and free rows move
+	stock by the Item's own UOM factor.
+
+	An unbacked or excess free row, or an evaluator error, refuses the save, except:
+	- ``offline_sync`` (an offline sale synced through ``submit_invoice``, first try or
+	  a retry with no completed invoice): every problem is only logged;
+	- ``paid_draft_free`` (see ``_paid_draft_free_qty``): free qty up to what the
+	  stored paid draft already held is only logged.
+	Must run before ``_reset_row_pricing_rules`` blanks the paid rows' rules.
+	"""
+	if invoice_doc.get("is_return"):
+		return
+	rows = [row for row in invoice_doc.get("items") or [] if row.get("item_code")]
+	made_free = [row for row in rows if _is_zero_rate(row)]
+	for row in made_free:
+		# As ERPNext stores a gift; a list price left on it would make ERPNext
+		# re-price the row (taxes_and_totals.calculate_item_values).
+		row.update(
+			{
+				"is_free_item": 1,
+				"rate": 0,
+				"price_list_rate": 0,
+				"discount_percentage": 0,
+				"discount_amount": 0,
+			}
+		)
+	free_rows = [row for row in rows if cint(row.get("is_free_item"))]
+	if not free_rows:
+		return
+	made_free_ids = {id(row) for row in made_free}
+	price_rules = _price_rule_names(free_rows)
+	coupon_code = invoice_doc.get("coupon_code")
+	candidates = [
+		row
+		for row in free_rows
+		if (
+			id(row) in made_free_ids
+			and (_rule_names(row.get("pricing_rules") or "") or row.get("posnext_coupon_code"))
+		)
+		or (
+			id(row) not in made_free_ids
+			and _line_sources(row, price_rules, coupon_code) & set(stored_sources)
+		)
+	]
+	# A manual edit to 0 has no source: it is told so, not that offers changed.
+	sourceless = {
+		id(row)
+		for row in made_free
+		if not _rule_names(row.get("pricing_rules") or "") and not row.get("posnext_coupon_code")
+	}
+	paid_rows = [row for row in rows if not cint(row.get("is_free_item"))]
+	item_data = _ItemData()
+	item_data.load(row.item_code for row in rows)
+	_force_item_factors(invoice_doc, free_rows, item_data, lenient=offline_sync)
+	list_prices = _list_prices(invoice_doc, paid_rows + candidates, item_data)
+
+	backed = set()
+	if candidates:
+		candidate_ids = {id(row) for row in candidates}
+		priced = [row for row in rows if id(row) in candidate_ids or not cint(row.get("is_free_item"))]
+		payload = _offer_payload(invoice_doc, priced, item_data, list_prices, candidate_ids)
+		result, _error = _evaluate_offers(invoice_doc, payload)
+		coupon_lines = {}
+		for idx, row in enumerate(priced):
+			if id(row) not in candidate_ids:
+				continue
+			rules = _offer_zeroing_rules(result, idx)
+			if rules:
+				row.pricing_rules = ",".join(rules)
+				row.flags.pos_backing_rule = True
+				backed.add(id(row))
+			elif row.get("posnext_coupon_code"):
+				code = row.posnext_coupon_code
+				if code not in coupon_lines:
+					coupon_lines[code] = _coupon_zeroed_lines(invoice_doc, code, payload)
+				if idx in coupon_lines[code]:
+					backed.add(id(row))
+
+	remaining = [row for row in free_rows if id(row) not in backed]
+	if not remaining:
+		return
+	payload = _offer_payload(invoice_doc, paid_rows, item_data, list_prices)
+	result, evaluator_error = _evaluate_offers(invoice_doc, payload)
+	_check_free_rows(
+		invoice_doc,
+		remaining,
+		result.get("free_items") or [],
+		evaluator_error,
+		item_data,
+		offline_sync,
+		paid_draft_free,
+		sourceless,
+	)
+
+
+def _check_free_rows(
+	invoice_doc, free_rows, free_items, evaluator_error, item_data, offline_sync, paid_draft_free, sourceless
+):
+	reference = invoice_doc.name or invoice_doc.get("offline_id") or "new"
+	expected, allowed = _expected_free_rows(free_items, item_data)
+	sent, by_stored_key, first_row = {}, {}, {}
+	for row in free_rows:
+		rule = _row_rule(row, expected, allowed)
+		group = _pool_group(rule, row.item_code, allowed) if rule in allowed else None
+		key = (rule, ("pool", group)) if group is not None else (rule, row.item_code)
+		qty = flt(row.qty) * item_data.factor(row.item_code, row.get("uom"), row.get("conversion_factor"))
+		sent[key] = sent.get(key, 0) + qty
+		stored_key = (row.item_code, rule or _first_rule(row))
+		by_stored_key.setdefault(key, {})
+		by_stored_key[key][stored_key] = by_stored_key[key].get(stored_key, 0) + qty
+		first_row.setdefault(key, row)
+		if rule:
+			row.pricing_rules = rule
+
+	refused, logged = [], []
+	for key, qty in sent.items():
+		rule, target = key
+		if isinstance(target, tuple):
+			cap = sum(
+				q for (r, code), q in expected.items() if r == rule and code in allowed[rule][target[1]]
+			)
+		else:
+			cap = expected.get(key, 0) if rule else 0
+		if flt(qty, 6) <= flt(cap, 6):
+			continue
+		problem = (first_row[key], cap, qty)
+		already_held = all(
+			flt(held, 6) <= flt((paid_draft_free or {}).get(stored_key, 0), 6)
+			for stored_key, held in by_stored_key[key].items()
+		)
+		(logged if offline_sync or already_held else refused).append(problem)
+
+	if refused:
+		zero_priced = [row for row, _cap, _qty in refused if id(row) in sourceless]
+		if zero_priced:
+			frappe.throw(_zero_price_message(zero_priced[0]), frappe.ValidationError)
+		messages = [
+			_("Row {0}: free item {1} is not backed by an offer (free qty {2} expected, {3} sent).").format(
+				row.idx, row.item_code, cap, qty
+			)
+			for row, cap, qty in refused
+		]
+		if evaluator_error:
+			messages.append(_("Free items could not be checked against the offers."))
+		messages.append(_("The offers changed. Refresh and re-apply offers."))
+		frappe.throw("<br>".join(messages), frappe.ValidationError)
+	for row, cap, qty in logged:
+		log_error_without_telemetry(
+			UNBACKED_FREE_ITEM_LOG_TITLE,
+			f"Invoice {reference}, row {row.idx}, item {row.item_code}: free stock qty {cap} expected, "
+			f"{qty} sent (rules sent: {row.get('pricing_rules') or '-'})",
+		)
+
+
 def _strip_server_managed_fields(payload):
 	"""Remove fields that are derived server-side and should not be replayed."""
 	if not isinstance(payload, dict):
@@ -337,7 +914,57 @@ def _strip_server_managed_fields(payload):
 	# Packed Items are regenerated from Product Bundle definitions during save.
 	# Accepting client-side packed rows can reintroduce duplicates on re-save.
 	cleaned.pop("packed_items", None)
+	# A client margin lets ERPNext compute a paid row down to 0 (taxes_and_totals
+	# calculate_margin); the POS never sends one.
+	if isinstance(cleaned.get("items"), list):
+		cleaned["items"] = [
+			{key: value for key, value in row.items() if key not in CLIENT_ROW_MARGIN_FIELDS}
+			if isinstance(row, dict)
+			else row
+			for row in cleaned["items"]
+		]
 	return cleaned
+
+
+CLIENT_ROW_MARGIN_FIELDS = (
+	"margin_type",
+	"margin_rate_or_amount",
+	"rate_with_margin",
+	"base_rate_with_margin",
+)
+
+
+def _refuse_zero_rate_after_totals(invoice_doc, lenient) -> None:
+	"""A paid row ERPNext computed at rate 0 is refused online, logged on an offline sync.
+
+	Runs after ``calculate_taxes_and_totals``: it judges the rate ERPNext will save,
+	whatever field produced it.
+	"""
+	if invoice_doc.get("is_return"):
+		return
+	zero = [
+		row
+		for row in invoice_doc.get("items") or []
+		if not cint(row.get("is_free_item"))
+		and flt(row.qty) > 0
+		and flt(row.rate, row.precision("rate")) <= 0
+	]
+	if not zero:
+		return
+	if not lenient:
+		frappe.throw(_zero_price_message(zero[0]), frappe.ValidationError)
+	reference = invoice_doc.name or invoice_doc.get("offline_id") or "new"
+	for row in zero:
+		log_error_without_telemetry(
+			UNBACKED_FREE_ITEM_LOG_TITLE,
+			f"Invoice {reference}, row {row.idx}, item {row.item_code}: paid row computed at rate 0",
+		)
+
+
+def _zero_price_message(row) -> str:
+	return _("Item {0} cannot be sold at zero price. Free items must come from an offer.").format(
+		row.item_code
+	)
 
 
 def _validate_invoice_profile(payload):
@@ -1148,6 +1775,17 @@ def _validate_return_rows(invoice_doc):
 @frappe.whitelist()
 def update_invoice(data: str | dict) -> dict:
 	"""Create or update invoice draft (Step 1)."""
+	return _update_invoice(data)
+
+
+def _update_invoice(data: str | dict, offline_sync: bool = False) -> dict:
+	"""Create or update an invoice draft.
+
+	``offline_sync``: set only by ``submit_invoice`` for an offline sale it reserved
+	for sync (a new ``offline_id``, or a retry with no completed invoice); free-row
+	problems are then only logged.
+	A client-sent ``offline_id`` alone never makes this check lenient.
+	"""
 	# Before the try: a refused profile is not an "Update Invoice Error".
 	data = json.loads(data) if isinstance(data, str) else data
 	if not isinstance(data, dict):
@@ -1166,8 +1804,11 @@ def update_invoice(data: str | dict) -> dict:
 		standardize_pricing_rules(data.get("items"))
 
 		# Create or update invoice
+		paid_draft_free, stored_sources = {}, set()
 		if data.get("name"):
 			invoice_doc = frappe.get_doc(doctype, data.get("name"))
+			paid_draft_free = _paid_draft_free_qty(invoice_doc)
+			stored_sources = _stored_line_sources(invoice_doc)
 			invoice_doc.update(data)
 		else:
 			invoice_doc = frappe.get_doc(data)
@@ -1330,6 +1971,13 @@ def update_invoice(data: str | dict) -> dict:
 			# that branch entirely. The discount itself is preserved via the
 			# discount_percentage / discount_amount fields we already set above.
 
+		# Free rows only from offers; zero-rate rows only with rate-edit rights.
+		_check_free_rows_backed(
+			invoice_doc,
+			offline_sync=offline_sync,
+			paid_draft_free=paid_draft_free,
+			stored_sources=stored_sources,
+		)
 		applied_rule_names_seen = _reset_row_pricing_rules(invoice_doc.get("items", []))
 
 		if doctype == "Sales Invoice":
@@ -1401,6 +2049,8 @@ def update_invoice(data: str | dict) -> dict:
 
 		# Calculate totals and apply discounts (with rounding disabled)
 		invoice_doc.calculate_taxes_and_totals()
+		# Judge the rates ERPNext computed: no paid row may come out at 0.
+		_refuse_zero_rate_after_totals(invoice_doc, lenient=offline_sync)
 
 		# Validate return rows after the totals, so the rates checked are the
 		# rates that will be saved
@@ -1802,6 +2452,9 @@ def submit_invoice(invoice: str | dict | None = None, data: str | dict | None = 
 
 		# Store the sync record name for later update
 		sync_record_name = dedup_result.get("sync_record_name") if dedup_result else None
+	# An offline sale reserved for sync here (new, or a retry with no completed
+	# invoice) makes the free-row check log-only (Ruling 68).
+	offline_sync = bool(offline_id and sync_record_name)
 
 	# Track whether invoice was successfully submitted
 	invoice_submitted = False
@@ -1811,7 +2464,7 @@ def submit_invoice(invoice: str | dict | None = None, data: str | dict | None = 
 
 		# Get or create invoice
 		if not invoice_name or not frappe.db.exists(doctype, invoice_name):
-			created = update_invoice(json.dumps(invoice))
+			created = _update_invoice(json.dumps(invoice), offline_sync=offline_sync)
 			if not created or not isinstance(created, dict):
 				frappe.throw(_("Failed to create invoice draft"))
 			invoice_name = created.get("name")
@@ -1821,10 +2474,18 @@ def submit_invoice(invoice: str | dict | None = None, data: str | dict | None = 
 		else:
 			invoice_doc = frappe.get_doc(doctype, invoice_name)
 			existing_customer = invoice_doc.customer
+			paid_draft_free = _paid_draft_free_qty(invoice_doc)
+			stored_sources = _stored_line_sources(invoice_doc)
 			invoice_doc.update(invoice)
-			_reset_row_pricing_rules(invoice_doc.get("items", []))
 			if not invoice_doc.get("customer") and existing_customer:
 				invoice_doc.customer = existing_customer
+			_check_free_rows_backed(
+				invoice_doc,
+				offline_sync=offline_sync,
+				paid_draft_free=paid_draft_free,
+				stored_sources=stored_sources,
+			)
+			_reset_row_pricing_rules(invoice_doc.get("items", []))
 			# The draft was validated by update_invoice, but its rows and header
 			# discount may have been replaced by this payload, so redo both.
 			# Validating before totals is safe here: it checks only row links,
@@ -2122,7 +2783,17 @@ def get_invoice(invoice_name):
 
 
 @frappe.whitelist()
-def get_invoices(pos_profile: str, search=None, limit: int = 20, offset=0, from_date=None, to_date=None, include_items=False, docstatus=None, start: int = 0) -> list:
+def get_invoices(
+	pos_profile: str,
+	search=None,
+	limit: int = 20,
+	offset=0,
+	from_date=None,
+	to_date=None,
+	include_items=False,
+	docstatus=None,
+	start: int = 0,
+) -> list:
 	"""
 	Get paginated, server-side filtered list of invoices for a POS Profile.
 
@@ -4155,7 +4826,9 @@ def apply_offers(invoice_data, selected_offers=None):
 			"items": [dict(item) for item in prepared_items],
 			# Free rows carry the item image so gifts not already in the cart show it
 			"free_items": [
-				dict(item, image=item.get("image") or frappe.get_cached_value("Item", item.item_code, "image"))
+				dict(
+					item, image=item.get("image") or frappe.get_cached_value("Item", item.item_code, "image")
+				)
 				for item in free_items_map.values()
 			],
 			"applied_pricing_rules": sorted(applied_rules),

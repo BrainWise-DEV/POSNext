@@ -2069,3 +2069,8 @@ Points applied: {0}. Please pay remaining {1} with {2},تم خصم النقاط:
 "A customer with this email already exists.","يوجد عميل بهذا البريد الإلكتروني بالفعل.",""
 "Select this customer","اختيار هذا العميل",""
 "F&F {0}%","الأصدقاء والعائلة {0}%",""
+"Free items could not be checked against the offers.","تعذر التحقق من الأصناف المجانية مقابل العروض.",""
+"Row {0}: UOM {1} is not defined on item {2}.","الصف {0}: وحدة القياس {1} غير معرّفة للصنف {2}.",""
+"Row {0}: free item {1} is not backed by an offer (free qty {2} expected, {3} sent).","الصف {0}: الصنف المجاني {1} غير مدعوم بعرض (الكمية المجانية المتوقعة {2}، والمرسلة {3}).",""
+"The offers changed. Refresh and re-apply offers.","تغيرت العروض. حدّث الصفحة وأعد تطبيق العروض.",""
+"Item {0} cannot be sold at zero price. Free items must come from an offer.","لا يمكن بيع الصنف {0} بسعر صفر. الأصناف المجانية تأتي من العروض فقط.",""

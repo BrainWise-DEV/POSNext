@@ -709,7 +709,7 @@ class TestPromotions(FrappeTestCase):
 	# -------------------------------------------------------------------
 
 	def test_full_100_percent_discount(self):
-		"""100% off — invoice should still post with grand_total = 0."""
+		"""100% off — the line is saved as a free item carrying the rule (Ruling 74)."""
 		rule = _make_rule(
 			"_PNXT_TEST_Full100",
 			apply_on="Item Code",
@@ -725,9 +725,10 @@ class TestPromotions(FrappeTestCase):
 		self.assertEqual(final.status, "Paid")
 		self.assertAlmostEqual(flt(final.grand_total), 0, places=2)
 		self.assertAlmostEqual(flt(final.items[0].rate), 0, places=2)
+		self.assertEqual((final.items[0].is_free_item, final.items[0].pricing_rules), (1, rule))
 
 	def test_discount_equal_to_price(self):
-		"""Discount Amount = price — final rate goes to 0 cleanly."""
+		"""Discount Amount = price — the line is saved as a free item carrying the rule (Ruling 74)."""
 		rule = _make_rule(
 			"_PNXT_TEST_DiscEqPrice",
 			apply_on="Item Code",
@@ -742,6 +743,7 @@ class TestPromotions(FrappeTestCase):
 
 		self.assertEqual(final.status, "Paid")
 		self.assertAlmostEqual(flt(final.grand_total), 0, places=2)
+		self.assertEqual((final.items[0].is_free_item, final.items[0].pricing_rules), (1, rule))
 
 	def test_multi_qty_percentage(self):
 		"""Discount Percentage with qty > 1: total discount must scale."""

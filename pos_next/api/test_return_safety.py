@@ -16,12 +16,14 @@ Runs on a dev site with:
 """
 
 import json
+from unittest.mock import patch
 
 import frappe
 from erpnext.stock.doctype.stock_entry.test_stock_entry import make_stock_entry
 from frappe.tests.utils import FrappeTestCase
 from frappe.utils import flt, nowdate
 
+from pos_next.api import invoices
 from pos_next.api.invoices import (
 	prepare_return_invoice,
 	submit_invoice,
@@ -376,7 +378,12 @@ class TestReturnSafety(FrappeTestCase):
 		# 3 x 33.33 + a free item (no weight), less 10.00; three single returns
 		# of the paid item, the free item kept: the third takes the remainder.
 		free = dict(_line(self.ctx, ITEM_A, price_list_rate=0), rate=0, is_free_item=1)
-		sale = self._sale([_line(self.ctx, ITEM_C, qty=3, price_list_rate=33.33), free], discount_amount=10)
+		# The free item comes from an offer (free rows must be backed, Task 8i).
+		offer = {"free_items": [{"item_code": ITEM_A, "qty": 1, "pricing_rules": "_PNXT_TEST_RS_GIFT"}]}
+		with patch.object(invoices, "_offer_evaluator", return_value=lambda *args, **kwargs: offer):
+			sale = self._sale(
+				[_line(self.ctx, ITEM_C, qty=3, price_list_rate=33.33), free], discount_amount=10
+			)
 		self.assertEqual(flt(sale.paid_amount), 89.99)
 
 		discounts, refunds = [], []
