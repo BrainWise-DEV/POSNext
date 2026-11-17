@@ -2,6 +2,7 @@
 # For license information, please see license.txt
 
 import frappe
+from frappe import _
 from frappe.model.document import Document
 from frappe.utils import cint, flt
 
@@ -32,6 +33,20 @@ class POSSettings(Document):
 					"'Use Exact Amount for Non-Cash' cannot be enabled together with 'Allow Partial Payment'. "
 					"Please disable Partial Payment first."
 				)
+
+		self.validate_verification_provider()
+
+	def validate_verification_provider(self):
+		"""A set provider must be registered; blank means the built-in frappe_email."""
+		if not self.verification_provider:
+			return
+		from pos_next.integrations.otp import get_providers
+
+		if self.verification_provider not in get_providers():
+			frappe.throw(
+				_("Unknown verification provider: {0}").format(self.verification_provider),
+				title=_("Invalid Verification Provider"),
+			)
 
 	def on_update(self):
 		"""Sync allow_negative_stock with Stock Settings"""
@@ -112,7 +127,7 @@ def get_pos_settings(pos_profile):
 	if not row:
 		row = create_default_settings(pos_profile)
 
-	# Runtime flags (miraaya_installed, magento_loyalty_available) are not columns
+	# Runtime flags (magento_loyalty_available) are not columns
 	settings = merge_pos_settings(row)
 
 	# Inject the current global Stock Settings value for transparency

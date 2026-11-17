@@ -17,6 +17,13 @@
   "loyalty_to_wallet",
   "section_break_customer_email_verification",
   "enable_customer_email_verification",
+  "verification_provider",
+  "otp_ttl_seconds",
+  "otp_resend_cooldown",
+  "otp_max_sends_per_hour",
+  "default_phone_country",
+  "placeholder_email_domain",
+  "require_split_name",
   "section_break_general",
   "allow_user_to_edit_additional_discount",
   "allow_user_to_edit_item_discount",
@@ -568,14 +575,57 @@
   {
    "fieldname": "section_break_customer_email_verification",
    "fieldtype": "Section Break",
-   "label": "Customer Email Verification"
+   "label": "Customer Verification"
   },
   {
    "default": "0",
-   "description": "Show the 'Verify email' (OTP) action in the customer dialog. Requires a Magento-synced customer and a configured Magento Setting. Informational badge only.",
+   "description": "Show the 'Verify email' (OTP) action in the customer dialog. Codes are sent by the selected verification provider. Informational badge only.",
    "fieldname": "enable_customer_email_verification",
    "fieldtype": "Check",
    "label": "Enable Customer Email Verification"
+  },
+  {
+   "fieldname": "verification_provider",
+   "fieldtype": "Select",
+   "label": "Verification Provider",
+   "description": "Service that sends and checks email verification codes. Leave blank to use the built-in Frappe email provider."
+  },
+  {
+   "default": "900",
+   "fieldname": "otp_ttl_seconds",
+   "fieldtype": "Int",
+   "label": "Code Validity (seconds)"
+  },
+  {
+   "default": "60",
+   "fieldname": "otp_resend_cooldown",
+   "fieldtype": "Int",
+   "label": "Resend Cooldown (seconds)"
+  },
+  {
+   "default": "5",
+   "fieldname": "otp_max_sends_per_hour",
+   "fieldtype": "Int",
+   "label": "Max Codes per Hour"
+  },
+  {
+   "fieldname": "default_phone_country",
+   "fieldtype": "Link",
+   "label": "Default Phone Country",
+   "options": "Country"
+  },
+  {
+   "fieldname": "placeholder_email_domain",
+   "fieldtype": "Data",
+   "label": "Placeholder Email Domain",
+   "description": "Domain used for emails generated when a customer has no real email. Leave blank to disable."
+  },
+  {
+   "default": "0",
+   "fieldname": "require_split_name",
+   "fieldtype": "Check",
+   "label": "Require First and Last Name",
+   "description": "Customer dialog asks for first and last name separately."
   }
  ],
  "index_web_pages_for_search": 1,

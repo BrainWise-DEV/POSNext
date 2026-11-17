@@ -539,7 +539,7 @@ const verificationVerified = computed(() =>
 );
 const verificationVerifiedEmail = computed(() => currentVerification.value.custom_verified_email || "");
 
-const requiresSplitCustomerName = computed(() => Boolean(posSettingsStore.miraayaInstalled));
+const requiresSplitCustomerName = computed(() => Boolean(posSettingsStore.requireSplitName));
 
 const computedCustomerName = computed(() => {
 	const first = (customerData.value.custom_first_name || "").trim();

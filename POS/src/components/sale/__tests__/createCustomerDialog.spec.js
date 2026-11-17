@@ -65,7 +65,7 @@ vi.mock("@/stores/countries", () => ({
 
 const posSettings = {
 	customerEmailVerificationEnabled: false,
-	miraayaInstalled: false,
+	requireSplitName: false,
 }
 
 vi.mock("@/stores/posSettings", () => ({
@@ -143,7 +143,7 @@ describe("CreateCustomerDialog existing-customer response", () => {
 		canCreateCustomer.mockReset()
 		canCreateCustomer.mockResolvedValue(true)
 		posSettings.customerEmailVerificationEnabled = false
-		posSettings.miraayaInstalled = false
+		posSettings.requireSplitName = false
 	})
 
 	afterEach(() => {
@@ -226,7 +226,7 @@ function resourceFor(url) {
 }
 
 function mountEditor(customer, { miraaya = true, modelValue = true } = {}) {
-	posSettings.miraayaInstalled = miraaya
+	posSettings.requireSplitName = miraaya
 	return mount(CreateCustomerDialog, {
 		props: { modelValue, posProfile: "POS-A", customer },
 		global: { mocks: { __: t } },
@@ -241,12 +241,12 @@ describe("CreateCustomerDialog edit mode", () => {
 		canCreateCustomer.mockReset()
 		canCreateCustomer.mockResolvedValue(true)
 		posSettings.customerEmailVerificationEnabled = false
-		posSettings.miraayaInstalled = true
+		posSettings.requireSplitName = true
 	})
 
 	afterEach(() => {
 		document.body.innerHTML = ""
-		posSettings.miraayaInstalled = false
+		posSettings.requireSplitName = false
 	})
 
 	it("opens as Edit Customer and prefills first/last name by splitting customer_name", async () => {

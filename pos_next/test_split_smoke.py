@@ -97,7 +97,7 @@ class TestMagentoSplitSmoke(unittest.TestCase):
 		settings = {}
 
 		def extender(s, pos_profile=None):
-			s["miraaya_installed"] = 1
+			s["require_split_name"] = 1
 			s["magento_loyalty_available"] = 1
 			s["seen_profile"] = pos_profile
 
@@ -110,7 +110,7 @@ class TestMagentoSplitSmoke(unittest.TestCase):
 		):
 			extend_bootstrap_settings(settings, "POS-TEST")
 
-		self.assertEqual(settings["miraaya_installed"], 1)
+		self.assertEqual(settings["require_split_name"], 1)
 		self.assertEqual(settings["magento_loyalty_available"], 1)
 		self.assertEqual(settings["seen_profile"], "POS-TEST")
 
@@ -148,14 +148,13 @@ class TestMagentoSplitSmoke(unittest.TestCase):
 	def test_integration_flag_defaults_live_in_constants(self):
 		from pos_next.api.constants import DEFAULT_POS_SETTINGS, merge_pos_settings
 
-		self.assertIn("miraaya_installed", DEFAULT_POS_SETTINGS)
+		self.assertNotIn("miraaya_installed", DEFAULT_POS_SETTINGS)
 		self.assertIn("magento_loyalty_available", DEFAULT_POS_SETTINGS)
-		self.assertEqual(DEFAULT_POS_SETTINGS["miraaya_installed"], 0)
 		self.assertEqual(DEFAULT_POS_SETTINGS["magento_loyalty_available"], 0)
 
 		# Existing DB rows omit runtime flags; merge must still seed them.
 		merged = merge_pos_settings({"name": "ps-1", "enabled": 1, "cart_lifo": 1})
-		self.assertEqual(merged["miraaya_installed"], 0)
+		self.assertNotIn("miraaya_installed", merged)
 		self.assertEqual(merged["magento_loyalty_available"], 0)
 		self.assertEqual(merged["cart_lifo"], 1)
 		self.assertEqual(merged["name"], "ps-1")
@@ -191,7 +190,7 @@ class TestMagentoSplitSmoke(unittest.TestCase):
 		frappe.local.form_dict = frappe._dict(pos_profile=profiles[0])
 		data = get_initial_data()
 		settings = data.get("pos_settings") or {}
-		self.assertIn("miraaya_installed", settings)
+		self.assertIn("require_split_name", settings)
 		self.assertIn("magento_loyalty_available", settings)
 		self.assertTrue(data.get("success"))
 

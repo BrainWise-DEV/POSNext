@@ -15,6 +15,8 @@ frappe.ui.form.on("POS Settings", {
 			};
 		});
 
+		load_verification_providers(frm);
+
 		// Fetch company when form loads
 		if (frm.doc.pos_profile) {
 			fetch_pos_profile_company(frm);
@@ -37,5 +39,29 @@ function fetch_pos_profile_company(frm) {
 		if (r && r.company) {
 			frm.doc.__company = r.company;
 		}
+	});
+}
+
+function load_verification_providers(frm) {
+	frappe.call({
+		method: "pos_next.integrations.otp.get_provider_options",
+		callback(r) {
+			const providers = r.message || [];
+			// Stored value is the provider name; blank means the built-in one.
+			const options = [""].concat(providers.map((p) => p.name));
+			frm.set_df_property("verification_provider", "options", options.join("\n"));
+			const rows = providers
+				.map((p) => {
+					const h = p.health || {};
+					const state = h.ok ? __("OK") : __("Needs attention");
+					const msg = h.message ? ` - ${frappe.utils.escape_html(h.message)}` : "";
+					return `<li><b>${frappe.utils.escape_html(p.label)}</b>: ${state}${msg}</li>`;
+				})
+				.join("");
+			frm.set_intro("", "blue");
+			if (rows) {
+				frm.set_intro(`<b>${__("Verification providers")}</b><ul>${rows}</ul>`, "blue");
+			}
+		},
 	});
 }
