@@ -643,6 +643,11 @@ def protect_email_verification_fields(doc, method=None):
 
 def reset_email_verification_on_email_change(doc, method=None):
 	"""on_update: clear the verified flag when email_id differs from the verified one."""
+	if doc.has_value_changed("email_id"):
+		# A pending code must never survive an email change.
+		from pos_next.integrations.otp_frappe_email import clear_code
+
+		clear_code(doc.name)
 	if not cint(doc.get("custom_email_verified")):
 		return
 	current = (doc.get("email_id") or "").strip().lower()
