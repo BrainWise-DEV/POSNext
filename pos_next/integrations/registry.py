@@ -59,6 +59,28 @@ def is_benefit_member(customer, pos_profile=None):
 	return False
 
 
+def notify_verification_change(
+	customer: str, verified: bool, email_domain: str | None, via: str | None
+) -> None:
+	"""Tell each benefit provider that a customer's email verification changed.
+
+	Calls the provider's optional ``on_verification_change(customer, verified,
+	email_domain, via)``. Providers are dicts (like ``is_member``), so a provider
+	without the key is skipped. Only the email domain is passed, never the
+	address. A failing provider is logged (its path only) and the rest still run.
+	"""
+	if not customer:
+		return
+	for method_path in frappe.get_hooks("pos_next_customer_benefit_providers") or []:
+		try:
+			provider = frappe.get_attr(method_path)()
+			on_change = (provider or {}).get("on_verification_change")
+			if on_change:
+				on_change(customer, verified, email_domain, via)
+		except Exception:
+			frappe.log_error(title="Customer benefit provider", message=method_path)
+
+
 def extend_bootstrap_settings(settings, pos_profile=None):
 	for method_path in frappe.get_hooks("pos_next_bootstrap_settings") or []:
 		try:

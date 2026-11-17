@@ -350,6 +350,24 @@ describe("CreateCustomerDialog edit mode", () => {
 		wrapper.unmount()
 	})
 
+	it("keeps the dialog open when the new email belongs to another customer", async () => {
+		const wrapper = mountEditor(editCustomer)
+		await flushPromises()
+
+		const update = resourceFor("pos_next.api.customers.update_customer")
+		await update.opts.onSuccess({
+			already_exists: true,
+			message: "A customer with this email already exists.",
+			existing_customer: { name: "CUST-OTHER", customer_name: "Other" },
+		})
+		await flushPromises()
+
+		expect(showSuccess).not.toHaveBeenCalled()
+		expect(showError).toHaveBeenCalledWith("A customer with this email already exists.")
+		expect(wrapper.emitted("customer-updated")).toBeUndefined()
+		wrapper.unmount()
+	})
+
 	it("shows the server's message when an email update is rejected", async () => {
 		const wrapper = mountEditor(editCustomer)
 		await flushPromises()

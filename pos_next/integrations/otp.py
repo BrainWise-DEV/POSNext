@@ -4,6 +4,11 @@ A provider is a duck-typed object (or module) exposing ``name``, ``label``,
 ``api`` (must equal OTP_PROVIDER_API), ``requires_phone``, ``health()``,
 ``send(ctx)`` and ``verify(ctx, otp)``. Providers are registered through the
 ``pos_next_email_otp_providers`` hook as dotted paths to zero-arg factories.
+
+Optional: ``clear(ctx) -> None`` forgets any pending code for ``ctx.customer``
+(called on an email change or a verification reset). It is looked up with
+``getattr``; a provider without it is valid and ``OTP_PROVIDER_API`` stays 1.
+Exceptions from ``clear`` are logged with a fixed text and ignored.
 """
 
 from __future__ import annotations

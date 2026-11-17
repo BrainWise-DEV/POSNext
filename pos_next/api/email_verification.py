@@ -29,6 +29,7 @@ Design notes
   always be verified.
 """
 
+import hashlib
 import json
 import re
 import time
@@ -81,6 +82,10 @@ def _messages():
 		"disabled": _("Email verification is disabled."),
 		"email_not_saved": _("Save the customer's email before verifying it."),
 		"busy": _("Another request is in progress. Please wait."),
+		"email_in_use": _("This email is already verified for another customer."),
+		"verification_not_saved": _(
+			"The code was accepted, but the verification could not be saved. Request a new code."
+		),
 	}
 
 
@@ -294,30 +299,113 @@ def _send_gate(state, now, settings):
 
 
 class _Lock:
-	"""Best-effort per-customer lock against double clicks."""
+	"""Best-effort named lock (per customer, or per email) against concurrent requests.
 
-	def __init__(self, customer):
-		self.customer = customer
+	``until_transaction_end`` keeps the lock until the request's transaction
+	commits or rolls back (not when the ``with`` block ends), so a second request
+	cannot read the database before this one's write is visible. Re-entering a
+	lock this transaction already holds counts as acquired.
+	"""
+
+	def __init__(self, key, until_transaction_end=False):
+		self.name = key
+		self.until_transaction_end = until_transaction_end
 		self.lock = None
 		self.acquired = False
 
 	def __enter__(self):
+		held = _held_locks()
+		if self.name in held:
+			self.acquired = True
+			return self
 		try:
-			self.lock = _cache().lock(f"pos_next:email_otp:lock:{self.customer}", timeout=LOCK_TIMEOUT)
+			self.lock = _cache().lock(self.name, timeout=LOCK_TIMEOUT)
 			self.acquired = bool(self.lock.acquire(blocking=False))
 		except Exception:
 			# Redis lock unavailable: fall back to the cooldown/attempt counters only.
 			self.lock = None
 			self.acquired = True
+		if self.acquired and self.lock is not None and self.until_transaction_end:
+			held.add(self.name)
+			release = self._release_at_transaction_end
+			frappe.db.after_commit.add(release)
+			frappe.db.after_rollback.add(release)
 		return self
 
+	def _release(self):
+		try:
+			self.lock.release()
+		except Exception:
+			pass
+
+	def _release_at_transaction_end(self):
+		_held_locks().discard(self.name)
+		self._release()
+
 	def __exit__(self, *exc):
-		if self.lock is not None and self.acquired:
-			try:
-				self.lock.release()
-			except Exception:
-				pass
+		if self.lock is not None and self.acquired and not self.until_transaction_end:
+			self._release()
 		return False
+
+
+def _held_locks():
+	"""Names of the locks this request holds until its transaction ends."""
+	if getattr(frappe.local, "pos_next_email_otp_locks", None) is None:
+		frappe.local.pos_next_email_otp_locks = set()
+	return frappe.local.pos_next_email_otp_locks
+
+
+def _lock_key(kind, value):
+	"""Redis lock name; ``kind`` ("customer" / "email") keeps the namespaces disjoint."""
+	return f"pos_next:email_otp:lock:{kind}:{value}"
+
+
+def _email_lock_key(email):
+	return _lock_key("email", hashlib.sha256((email or "").strip().lower().encode()).hexdigest())
+
+
+_EMAIL_CHECK_SAVEPOINT = "pos_next_email_in_use"
+
+
+def _locked_email_check(customer, email):
+	"""Locking ``_email_in_use`` read (caller holds the email lock).
+
+	Returns None when the email is free, ``email_in_use``, or ``busy`` when the
+	read hit a lock wait timeout / deadlock (nothing was consumed: try again).
+	"""
+	try:
+		frappe.db.savepoint(_EMAIL_CHECK_SAVEPOINT)
+		in_use = _email_in_use(customer, email, for_update=True)
+	except (frappe.QueryDeadlockError, frappe.QueryTimeoutError):
+		try:
+			frappe.db.rollback(save_point=_EMAIL_CHECK_SAVEPOINT)
+		except Exception:
+			# A deadlock already rolled the whole transaction back (savepoint gone).
+			frappe.db.rollback()
+		return _result(False, "busy", _("The system is busy. Please try again."))
+	return _result(False, "email_in_use") if in_use else None
+
+
+def _email_in_use(customer, email, for_update=False):
+	"""True when another Customer holds ``email`` as its verified email (case-insensitive)."""
+	email = (email or "").strip().lower()
+	if not email:
+		return False
+	table = frappe.qb.DocType("Customer")
+	query = (
+		frappe.qb.from_(table)
+		.select(table.name)
+		# Case-insensitive through the column's *_ci collation, which also lets the
+		# query use the custom_verified_email index (LOWER(column) would not).
+		.where(table.custom_verified_email == email)
+		.where(table.custom_email_verified == 1)
+		.where(table.name != customer)
+		.limit(1)
+	)
+	if for_update:
+		# Locking read: sees rows committed after this transaction started.
+		query = query.for_update()
+	return bool(query.run())
 
 
 # ---------------------------------------------------------------------------
@@ -388,13 +476,13 @@ def _audit(customer, action, code, email, phone):
 # ---------------------------------------------------------------------------
 
 @frappe.whitelist(methods=["POST"])
-def send_email_otp(customer, email=None, pos_profile=None):
+def send_email_otp(customer: str, email: str | None = None, pos_profile: str | None = None) -> dict:
 	"""Send a verification code to the customer's saved email."""
 	ctx, provider, settings, err = _prepare(customer, email, pos_profile)
 	if err:
 		return err
 
-	with _Lock(customer) as lock:
+	with _Lock(_lock_key("customer", customer)) as lock:
 		if not lock.acquired:
 			return _result(False, "busy")
 
@@ -403,6 +491,11 @@ def send_email_otp(customer, email=None, pos_profile=None):
 		retry_after = _send_gate(state, now, settings)
 		if retry_after:
 			return _rate_limited(retry_after)
+
+		if _email_in_use(customer, ctx.email):
+			# Checked before the provider: no mail is sent and the refused send is not counted.
+			_audit(customer, "send", "email_in_use", ctx.email, ctx.phone)
+			return _result(False, "email_in_use")
 
 		# Every call that reaches the provider counts toward the cooldown and the
 		# hourly cap, whatever the outcome, so failures cannot bypass the limits.
@@ -442,7 +535,9 @@ def send_email_otp(customer, email=None, pos_profile=None):
 
 
 @frappe.whitelist(methods=["POST"])
-def verify_email_otp(customer, otp, email=None, pos_profile=None):
+def verify_email_otp(
+	customer: str, otp: str, email: str | None = None, pos_profile: str | None = None
+) -> dict:
 	"""Verify the 6-digit code. Success only when the provider answers ok + ``verified``."""
 	code_in = str(otp or "").translate(_ARABIC_DIGITS).strip()
 	ctx, provider, settings, err = _prepare(customer, email, pos_profile)
@@ -452,7 +547,7 @@ def verify_email_otp(customer, otp, email=None, pos_profile=None):
 	if not OTP_RE.match(code_in):
 		return _result(False, "invalid_otp")
 
-	with _Lock(customer) as lock:
+	with _Lock(_lock_key("customer", customer)) as lock:
 		if not lock.acquired:
 			return _result(False, "busy")
 
@@ -464,22 +559,52 @@ def verify_email_otp(customer, otp, email=None, pos_profile=None):
 				# The locked-out code is dead: only a new code (which resets attempts) helps.
 				return _result(False, "expired")
 			return _rate_limited(remaining)
-		# Count the attempt before asking the provider, so a crash cannot skip it.
-		state["attempts"] += 1
-		_save_state(customer, state, settings.otp_ttl_seconds)
 
-		result = _call_verify(provider, ctx, code_in)
+		# Everything that can refuse runs BEFORE the provider consumes the code:
+		# the per-email lock (held until the transaction ends) and the locking
+		# uniqueness read. A refusal here leaves the code valid.
+		with _Lock(_email_lock_key(ctx.email), until_transaction_end=True) as email_lock:
+			if not email_lock.acquired:
+				return _result(False, "busy")
+			refused = _locked_email_check(customer, ctx.email)
+			if refused:
+				_audit(customer, "verify", refused["code"], ctx.email, ctx.phone)
+				return refused
 
-		if result.get("ok") is True and result.get("code") == "verified":
-			_mark_verified(customer, ctx.email, provider.name)
-			state["attempts"] = 0
+			# Count the attempt before asking the provider, so a crash cannot skip it.
+			state["attempts"] += 1
 			_save_state(customer, state, settings.otp_ttl_seconds)
-			_audit(customer, "verify", "verified", ctx.email, ctx.phone)
-			return _result(True, "verified", _("Email verified"), verified_email=ctx.email)
+
+			result = _call_verify(provider, ctx, code_in)
+
+			if result.get("ok") is True and result.get("code") == "verified":
+				if not _save_verified(customer, ctx.email, provider.name):
+					# The provider has consumed the code: only a new one helps.
+					_audit(customer, "verify", "verification_not_saved", ctx.email, ctx.phone)
+					return _result(False, "verification_not_saved")
+				state["attempts"] = 0
+				_save_state(customer, state, settings.otp_ttl_seconds)
+				_audit(customer, "verify", "verified", ctx.email, ctx.phone)
+				return _result(True, "verified", _("Email verified"), verified_email=ctx.email)
 
 		out = _failure(result if result.get("ok") is not True else {"code": "unavailable"}, "verify")
 		_audit(customer, "verify", out["code"], ctx.email, ctx.phone)
 		return out
+
+
+def _save_verified(customer, email, provider_name):
+	"""Write the verification after the provider said ``verified``. False on any failure."""
+	try:
+		refused = _mark_verified(customer, email, provider_name)
+	except Exception:
+		# E.g. a deadlock on the write: the transaction is unusable, start clean.
+		_log_unexpected("Saving the email verification failed")
+		try:
+			frappe.db.rollback()
+		except Exception:
+			pass
+		return False
+	return not isinstance(refused, dict)
 
 
 def _call_verify(provider, ctx, code):
@@ -488,7 +613,7 @@ def _call_verify(provider, ctx, code):
 
 
 @frappe.whitelist()
-def get_email_verification_status(customer):
+def get_email_verification_status(customer: str) -> dict:
 	"""Local read of the verification flags (no provider call)."""
 	if not frappe.has_permission("Customer", "read", customer):
 		frappe.throw(_("You don't have permission to read this customer"), frappe.PermissionError)
@@ -504,18 +629,40 @@ def get_email_verification_status(customer):
 	}
 
 
+def _email_domain(email):
+	return (email or "").strip().lower().rpartition("@")[2] or None
+
+
 def _mark_verified(customer, email, provider_name):
-	frappe.db.set_value(
-		"Customer",
-		customer,
-		{
-			"custom_email_verified": 1,
-			"custom_email_verified_on": now_datetime(),
-			"custom_email_verified_by": frappe.session.user,
-			"custom_verified_email": email,
-			"custom_email_verified_via": provider_name,
-		},
-	)
+	"""Record the verified email. Returns None, or a refusal result (``busy`` / ``email_in_use``).
+
+	A verified email belongs to one customer. The check and the write run under a
+	per-email lock held until the transaction ends, with a locking read, so two
+	customers cannot verify the same address concurrently.
+	"""
+	with _Lock(_email_lock_key(email), until_transaction_end=True) as lock:
+		if not lock.acquired:
+			return _result(False, "busy")
+		refused = _locked_email_check(customer, email)
+		if refused:
+			return refused
+		frappe.db.set_value(
+			"Customer",
+			customer,
+			{
+				"custom_email_verified": 1,
+				"custom_email_verified_on": now_datetime(),
+				"custom_email_verified_by": frappe.session.user,
+				"custom_verified_email": email,
+				"custom_email_verified_via": provider_name,
+			},
+		)
+	registry.notify_verification_change(customer, True, _email_domain(email), provider_name)
+	_emit_customer_update(customer)
+	return None
+
+
+def _emit_customer_update(customer):
 	try:
 		from pos_next.realtime_events import emit_customer_event
 
@@ -555,26 +702,87 @@ def protect_email_verification_fields(doc, method=None):
 		doc.set(field, before.get(field))
 
 
-def reset_email_verification_on_email_change(doc, method=None):
-	"""on_update: clear the verified flag when email_id differs from the verified one."""
-	if doc.has_value_changed("email_id"):
-		# A pending code must never survive an email change.
-		from pos_next.integrations.otp_frappe_email import clear_code
+def _clear_pending_codes(customer, email=None, pos_profile=None):
+	"""Call the optional provider ``clear(ctx)``: the profile's active provider, or
+	every registered provider that has one when there is no profile (Desk save).
 
-		clear_code(doc.name)
-	if not cint(doc.get("custom_email_verified")):
-		return
-	current = (doc.get("email_id") or "").strip().lower()
-	verified = (doc.get("custom_verified_email") or "").strip().lower()
-	if current and current == verified:
-		return
-	reset = {
-		"custom_email_verified": 0,
-		"custom_email_verified_on": None,
-		"custom_email_verified_by": None,
-		"custom_verified_email": None,
-		"custom_email_verified_via": None,
-	}
-	doc.db_set(reset, update_modified=False)
-	for key, value in reset.items():
-		doc.set(key, value)
+	A failing ``clear`` is logged with a fixed text and ignored.
+	"""
+	if pos_profile:
+		provider = otp.get_active_provider(pos_profile)
+		providers = [provider] if provider is not None else []
+	else:
+		providers = list(otp.get_providers().values())
+	ctx = otp.OtpContext(customer=customer, email=(email or "").strip(), pos_profile=pos_profile or None)
+	for provider in providers:
+		clear = getattr(provider, "clear", None)
+		if not callable(clear):
+			continue
+		try:
+			clear(ctx)
+		except Exception:
+			_log_unexpected("Email OTP provider clear failed")
+
+
+def reset_verification(customer: str, reason: str, pos_profile: str | None = None) -> None:
+	"""Revoke the customer's verified email.
+
+	Clears the verification fields and any pending code (provider ``clear``),
+	writes an audit comment and tells the benefit providers
+	(``registry.notify_verification_change`` with ``verified=False``). Uses
+	``frappe.db.set_value``, so it works for writes that bypass doc events.
+	"""
+	meta = frappe.get_meta("Customer")
+	fields = [f for f in VERIFICATION_FIELDS if meta.has_field(f)]
+	row = (frappe.db.get_value("Customer", customer, [*fields, "email_id"], as_dict=True) if fields else None) or {}
+	if fields:
+		frappe.db.set_value(
+			"Customer",
+			customer,
+			{f: (0 if f == "custom_email_verified" else None) for f in fields},
+			update_modified=False,
+		)
+	_clear_pending_codes(customer, row.get("email_id"), pos_profile)
+	_audit(customer, "reset", reason, row.get("custom_verified_email"), None)
+	registry.notify_verification_change(
+		customer,
+		False,
+		_email_domain(row.get("custom_verified_email")),
+		row.get("custom_email_verified_via") or None,
+	)
+
+
+def _badge_stale(verified, verified_email, email):
+	"""True when a verified badge exists for an address other than ``email``."""
+	current = (email or "").strip().lower()
+	return bool(cint(verified)) and not (current and current == (verified_email or "").strip().lower())
+
+
+def apply_email_change(customer: str, email: str | None, pos_profile: str | None = None) -> bool:
+	"""The customer's email is now ``email`` (a write that bypassed doc events):
+	drop pending codes, and the verified badge when it is for another address.
+	Returns True when the badge was reset. Changing back to the verified email
+	keeps the badge.
+	"""
+	row = None
+	if frappe.get_meta("Customer").has_field("custom_email_verified"):
+		row = frappe.db.get_value(
+			"Customer", customer, ["custom_email_verified", "custom_verified_email"], as_dict=True
+		)
+	row = row or {}
+	if _badge_stale(row.get("custom_email_verified"), row.get("custom_verified_email"), email):
+		reset_verification(customer, "email_changed", pos_profile)
+		return True
+	_clear_pending_codes(customer, email, pos_profile)
+	return False
+
+
+def reset_email_verification_on_email_change(doc, method=None):
+	"""on_update: a pending code never survives an email change, and the verified
+	flag is cleared when email_id differs from the verified one."""
+	if _badge_stale(doc.get("custom_email_verified"), doc.get("custom_verified_email"), doc.get("email_id")):
+		reset_verification(doc.name, "email_changed")
+		for field in VERIFICATION_FIELDS:
+			doc.set(field, 0 if field == "custom_email_verified" else None)
+	elif doc.has_value_changed("email_id"):
+		_clear_pending_codes(doc.name, doc.get("email_id"))

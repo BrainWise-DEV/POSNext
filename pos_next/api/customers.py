@@ -16,6 +16,9 @@ from pos_next.integrations.registry import (
 	resolve_existing_customer,
 	validate_customer_create,
 )
+from pos_next.utils import validate_pos_profile_access
+
+
 @frappe.whitelist()
 def get_customers(search_term="", pos_profile=None, limit=20, modified_since=None):
 	"""
@@ -421,18 +424,18 @@ def get_customer_details(customer):
 
 @frappe.whitelist()
 def update_customer(
-	name,
-	customer_name=None,
-	mobile_no=None,
-	email_id=None,
-	customer_group=None,
-	territory=None,
-	custom_governorate=None,
-	custom_district=None,
-	custom_first_name=None,
-	custom_last_name=None,
-	pos_profile=None,
-	company=None,
+	name: str,
+	customer_name: str | None = None,
+	mobile_no: str | None = None,
+	email_id: str | None = None,
+	customer_group: str | None = None,
+	territory: str | None = None,
+	custom_governorate: str | None = None,
+	custom_district: str | None = None,
+	custom_first_name: str | None = None,
+	custom_last_name: str | None = None,
+	pos_profile: str | None = None,
+	company: str | None = None,
 ):
 	"""Update an existing POS customer, including email and mobile.
 
@@ -447,6 +450,8 @@ def update_customer(
 	customer = frappe.get_doc("Customer", name)
 	if not customer.has_permission("write"):
 		frappe.throw(_("You don't have permission to update this customer"), frappe.PermissionError)
+	if pos_profile:
+		validate_pos_profile_access(pos_profile, frappe.PermissionError)
 	meta = frappe.get_meta("Customer")
 
 	first = (custom_first_name or "").strip()
@@ -460,6 +465,33 @@ def update_customer(
 		customer_name = (customer_name or "").strip()
 		if not customer_name:
 			frappe.throw(_("Customer name is required"))
+
+	# A changed email or phone must not take over another customer's (same rule as create).
+	email_changed = email_id is not None and (email_id or "").strip().lower() != (
+		customer.email_id or ""
+	).strip().lower()
+	mobile_changed = mobile_no is not None and (mobile_no or "").strip() != (customer.mobile_no or "").strip()
+	if email_changed or mobile_changed:
+		existing = resolve_existing_customer(
+			customer_name=customer_name or customer.customer_name,
+			email_id=(email_id or "").strip() if email_changed else None,
+			mobile_no=(mobile_no or "").strip() if mobile_changed else None,
+			custom_first_name=first or customer.get("custom_first_name"),
+			custom_last_name=last or customer.get("custom_last_name"),
+			custom_is_publish=customer.get("custom_is_publish") or 0,
+			customer_group=customer.customer_group,
+			territory=customer.territory,
+			company=company,
+			pos_profile=pos_profile,
+			exclude_customer=name,
+		)
+		found = (existing or {}).get("existing_customer")
+		if found and found.get("name") != name:
+			return {
+				"already_exists": True,
+				"message": existing.get("message") or _("A customer with this email already exists."),
+				"existing_customer": found,
+			}
 
 	validate_customer_create(
 		customer_name=customer_name or customer.customer_name,

@@ -221,6 +221,10 @@ const locked = computed(() => {
 
 watch(locked, (value) => emit("lock-change", value), { immediate: true });
 
+// Verify results after which the entered code is no longer usable from this panel.
+// ("busy" is refused before the code is used: stay on the code step and retry.)
+const LEAVE_CODE_SENT = new Set(["email_in_use", "verification_not_saved"]);
+
 function setState(next) {
 	if (next !== "error") returnState.value = next;
 	state.value = next;
@@ -343,6 +347,14 @@ async function verify() {
 			stopTimer();
 			otp.value = "";
 			setState("expired");
+			return;
+		}
+		if (LEAVE_CODE_SENT.has(res?.code)) {
+			// Email verified elsewhere, or the code was used but not saved:
+			// this code cannot be retried. Start over.
+			stopTimer();
+			otp.value = "";
+			fail(messageFrom(res, __("Could not verify the code, please try again.")), "idle");
 			return;
 		}
 		if (res?.retry_after) {

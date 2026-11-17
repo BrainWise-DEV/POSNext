@@ -575,23 +575,23 @@ class TestDocEvents(unittest.TestCase):
 			custom_email_verified_via="frappe_email",
 			email_id="b@x.com",
 		)
-		ev.reset_email_verification_on_email_change(doc)
-		doc.db_set.assert_called_once()
-		reset = doc.db_set.call_args.args[0]
-		self.assertEqual(reset["custom_email_verified"], 0)
-		self.assertIsNone(reset["custom_email_verified_via"])
+		with patch.object(ev, "reset_verification") as reset:
+			ev.reset_email_verification_on_email_change(doc)
+		reset.assert_called_once_with(doc.name, "email_changed")
 		self.assertEqual(doc._store["custom_email_verified"], 0)
 		self.assertIsNone(doc._store["custom_email_verified_via"])
 
 	def test_no_reset_when_same_email_case_insensitive(self):
 		doc = self._doc(custom_email_verified=1, custom_verified_email="a@x.com", email_id="A@X.com")
-		ev.reset_email_verification_on_email_change(doc)
-		doc.db_set.assert_not_called()
+		with patch.object(ev, "reset_verification") as reset:
+			ev.reset_email_verification_on_email_change(doc)
+		reset.assert_not_called()
 
 	def test_no_reset_when_not_verified(self):
 		doc = self._doc(custom_email_verified=0, email_id="b@x.com")
-		ev.reset_email_verification_on_email_change(doc)
-		doc.db_set.assert_not_called()
+		with patch.object(ev, "reset_verification") as reset:
+			ev.reset_email_verification_on_email_change(doc)
+		reset.assert_not_called()
 
 	def test_protect_fields_reverts_client_changes(self):
 		meta = MagicMock()

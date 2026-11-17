@@ -97,6 +97,11 @@ class TestOtpFrappeEmail(FrappeTestCase):
 		reset_email_verification_on_email_change(doc)
 		self.assertIsNone(frappe.cache().get_value(mod._key(CUST)))
 
+	def test_clear_drops_pending_code(self):
+		_, code, _ = self._send()
+		self.assertIsNone(self.p.clear(_ctx()))
+		self.assertEqual(self.p.verify(_ctx(), code)["code"], "expired")
+
 	def test_resend_replaces_code(self):
 		_, old, _ = self._send()
 		new = old

@@ -92,6 +92,11 @@ def _verify(ctx, otp):
 	return _result(False, "invalid_otp")
 
 
+def _clear(ctx):
+	"""Provider ``clear``: forget the pending code (email change, reset)."""
+	clear_code(ctx.customer)
+
+
 def _health():
 	server = frappe.db.get_value(
 		"Email Account", {"default_outgoing": 1, "enable_outgoing": 1}, "smtp_server"
@@ -110,4 +115,5 @@ def get_provider():
 		health=_health,
 		send=_send,
 		verify=_verify,
+		clear=_clear,
 	)

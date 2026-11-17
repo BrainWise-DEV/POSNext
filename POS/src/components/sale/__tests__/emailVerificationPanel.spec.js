@@ -176,6 +176,48 @@ describe("EmailVerificationPanel", () => {
 		w.unmount()
 	})
 
+	it("busy at verify keeps the code step and the entered code for a retry", async () => {
+		const message = "The system is busy. Please try again."
+		const w = factory()
+		await toCodeSent(w)
+		await find(w, "otp-input").setValue("111111")
+		callMock.mockResolvedValueOnce({ ok: false, code: "busy", message })
+		await find(w, "verify").trigger("click")
+		await flushPromises()
+		expect(find(w, "error-msg").text()).toBe(message)
+		expect(find(w, "otp-input").element.value).toBe("111111")
+		expect(find(w, "verify").attributes("disabled")).toBeUndefined()
+		expect(w.emitted("lock-change").at(-1)).toEqual([true])
+		callMock.mockResolvedValueOnce({ ok: true, code: "verified", verified_email: "jane@example.com" })
+		await find(w, "verify").trigger("click")
+		await flushPromises()
+		expect(w.emitted("verified")).toBeTruthy()
+		w.unmount()
+	})
+
+	it.each([
+		["email_in_use", "This email is already verified for another customer."],
+		[
+			"verification_not_saved",
+			"The code was accepted, but the verification could not be saved. Request a new code.",
+		],
+	])("%s at verify shows the message and leaves the code step", async (code, message) => {
+		const w = factory()
+		await toCodeSent(w)
+		expect(w.emitted("lock-change").at(-1)).toEqual([true])
+		await find(w, "otp-input").setValue("111111")
+		callMock.mockResolvedValueOnce({ ok: false, code, message })
+		await find(w, "verify").trigger("click")
+		await flushPromises()
+		expect(find(w, "error-msg").text()).toBe(message)
+		expect(find(w, "otp-input").exists()).toBe(false)
+		expect(find(w, "send-code").exists()).toBe(true)
+		expect(find(w, "verified-badge").exists()).toBe(false)
+		expect(w.emitted("verified")).toBeUndefined()
+		expect(w.emitted("lock-change").at(-1)).toEqual([false])
+		w.unmount()
+	})
+
 	it("not_configured shows the server's generic message and stays idle", async () => {
 		const msg = "Email verification is not set up. Ask an administrator."
 		const w = factory()

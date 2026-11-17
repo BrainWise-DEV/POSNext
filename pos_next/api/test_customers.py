@@ -397,6 +397,7 @@ class TestUpdateCustomer(unittest.TestCase):
 		doc.as_dict.return_value = {"name": doc.name, "customer_name": "ZZ Test New", "email_id": "new@example.com"}
 		return doc
 
+	@patch("pos_next.api.customers.resolve_existing_customer", return_value=None)
 	@patch("pos_next.api.customers.get_customer_sync_error", return_value=None)
 	@patch("pos_next.api.customers.after_customer_update")
 	@patch("pos_next.api.customers.sync_primary_contact")
@@ -415,6 +416,7 @@ class TestUpdateCustomer(unittest.TestCase):
 		mock_sync,
 		mock_after,
 		_sync_error,
+		mock_resolve,
 	):
 		customer = self._customer_doc()
 		mock_get_doc.return_value = customer
@@ -446,6 +448,8 @@ class TestUpdateCustomer(unittest.TestCase):
 		mock_after.assert_called_once()
 		self.assertEqual(result["email_id"], "new@example.com")
 		customer.reload.assert_called_once_with()
+		# The changed email/phone is checked against other customers, never this one.
+		self.assertEqual(mock_resolve.call_args.kwargs["exclude_customer"], "CUST-2026-68545")
 
 	@patch("pos_next.api.customers.frappe.get_doc")
 	def test_sync_primary_contact_updates_and_saves_contact(self, mock_get_doc):
@@ -468,6 +472,7 @@ class TestUpdateCustomer(unittest.TestCase):
 		self.assertEqual(contact.email_id, "new@example.com")
 		self.assertEqual(contact.mobile_no, "+964-7111111111")
 
+	@patch("pos_next.api.customers.resolve_existing_customer", return_value=None)
 	@patch("pos_next.api.customers.get_customer_sync_error", return_value=None)
 	@patch("pos_next.api.customers.after_customer_update")
 	@patch("pos_next.api.customers.sync_primary_contact")
@@ -486,6 +491,7 @@ class TestUpdateCustomer(unittest.TestCase):
 		mock_sync,
 		mock_after,
 		_sync_error,
+		mock_resolve,
 	):
 		from pos_next.integrations.registry import ExternalCustomerRejected
 

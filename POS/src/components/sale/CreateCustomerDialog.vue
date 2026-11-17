@@ -909,6 +909,11 @@ const updateCustomerResource = createResource({
 	onSuccess: async (data) => {
 		const saveAndSend = saveAndSendPending.value;
 		saveAndSendPending.value = false;
+		if (data?.already_exists) {
+			// The new email or phone belongs to another customer: nothing was saved.
+			showError(data.message || __("A customer with this email already exists."));
+			return;
+		}
 		showSuccess(__("Customer {0} updated successfully", [data.customer_name]));
 		if (data.external_sync_error) {
 			// Saved in POS, but the external system rejected or could not apply the change.
