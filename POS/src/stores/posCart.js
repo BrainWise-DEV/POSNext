@@ -40,6 +40,7 @@ import { useToast } from "@/composables/useToast";
 import { call } from "@/utils/apiWrapper";
 import { isPromotionsAppInstalled, promoApi } from "@/utils/promoApi";
 import {
+	FNF_DISCOUNT_SOURCE,
 	annotateFnfLine,
 	clearFnfAnnotations,
 	indexFnfLines,
@@ -615,9 +616,19 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	}
 
 	/** Drop every F&F stamp in the cart (coupon won, program ended, customer changed…). */
+	function stripStashedFnf(item) {
+		if (isCouponLine(item) && item.pre_coupon_discount?.discount_source === FNF_DISCOUNT_SOURCE) {
+			item.pre_coupon_discount = { discount_percentage: 0, discount_amount: 0, discount_source: "", is_already_discounted: 0 };
+			return true;
+		}
+		return false;
+	}
+
 	function stripAllFriendsAndFamily({ keepAnnotations = false } = {}) {
 		let changed = false;
 		for (const item of invoiceItems.value) {
+			// A coupon line keeps its F&F in the stash; removing the coupon must not bring it back
+			stripStashedFnf(item);
 			if (stripFnfLine(item)) {
 				changed = true;
 				recalculateItem(item);
@@ -635,6 +646,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	function applyFriendsAndFamilyOnlyResult(result) {
 		const lines = indexFnfLines(result);
 		invoiceItems.value.forEach((item, index) => {
+			// A coupon line is the coupon's: its F&F is kept in pre_coupon_discount and comes back with it
+			if (isCouponLine(item)) return;
 			const line = lines.get(index);
 			if (line?.applies && !fnfCouponOverride.value) {
 				stampFnfLine(item, line);
@@ -655,6 +668,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	async function evaluateFriendsAndFamilyOnly(currentProfile, signal = null, generation = 0) {
 		const hasFnfLines = invoiceItems.value.some(isFnfLine);
 		const eligible = Boolean(fnfEligibility.value?.eligible);
+		if (fnfEligibility.value && !eligible) invoiceItems.value.forEach(stripStashedFnf);
 		const method = promoApi.applyFriendsAndFamilyDiscount();
 
 		if (!method || invoiceItems.value.length === 0 || !friendsAndFamilyAllowed()) {
@@ -2760,6 +2774,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		// Sales Order feature
 		targetDoctype,
 		setTargetDoctype,
+		evaluateFriendsAndFamilyOnly,
 		createSalesOrder,
 		deliveryDate,
 		setDeliveryDate,

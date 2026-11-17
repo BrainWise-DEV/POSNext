@@ -322,7 +322,11 @@ const { locale } = useLocale();
 // Friends & Family customers get the best-discount comparison (PN-128): the
 // coupon is validated against the cart, and only applied when it beats F&F.
 const fnfEligible = computed(() =>
-	Boolean(cartStore.fnfEligibility?.eligible && promoApi.applyFriendsAndFamilyDiscount())
+	Boolean(
+		cartStore.fnfEligibility?.eligible &&
+			cartStore.targetDoctype !== "Sales Order" && // a Sales Order carries no F&F
+			promoApi.applyFriendsAndFamilyDiscount()
+	)
 );
 const fnfPercentText = computed(() =>
 	String(Number(Number(cartStore.fnfEligibility?.discountPercentage || 0).toFixed(2)))
@@ -525,6 +529,14 @@ function showBetterDiscountMessage(response) {
 	return true;
 }
 
+function fnfComparisonMessage(data) {
+	const hasMessage =
+		Boolean(data.best_discount) && Boolean(data.message_en || data.message_ar || data.message);
+	return hasMessage
+		? { message: data.message, message_en: data.message_en, message_ar: data.message_ar }
+		: null;
+}
+
 /**
  * F&F customer: the coupon is applied as an order discount, so the final
  * decision is the order-level comparison (calculate_coupon_discount) — the
@@ -548,6 +560,16 @@ async function applyCouponAgainstFriendsAndFamily(coupon) {
 		return;
 	}
 
+	// Per-line decision (uncapped % coupon): the coupon takes only the lines it wins,
+	// every other line keeps its Friends & Family discount.
+	if (data.granularity === "line" && Array.isArray(data.line_updates) && data.line_updates.length) {
+		applyLineCoupon(coupon || data.coupon || {}, {
+			...data,
+			total_discount: data.discount,
+		});
+		return;
+	}
+
 	const discountAmount = Math.max(Number.parseFloat(data.discount) || 0, 0);
 	const suppress = Boolean(data.suppress_friends_and_family);
 	// Coupon base without the F&F line discounts it replaces.
@@ -557,11 +579,7 @@ async function applyCouponAgainstFriendsAndFamily(coupon) {
 	const baseAmount = getCouponBaseAmount(coupon || data.coupon || {}) + fnfLineTotal;
 	const code = couponCode.value.toUpperCase();
 	// Only the F&F comparison text (best_discount present), not the plain coupon message.
-	const hasMessage =
-		Boolean(data.best_discount) && Boolean(data.message_en || data.message_ar || data.message);
-	const fnfMessage = hasMessage
-		? { message: data.message, message_en: data.message_en, message_ar: data.message_ar }
-		: null;
+	const fnfMessage = fnfComparisonMessage(data);
 
 	appliedDiscount.value = {
 		name: coupon?.coupon_name || coupon?.coupon_code || code,

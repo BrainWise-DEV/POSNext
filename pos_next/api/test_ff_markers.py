@@ -248,3 +248,86 @@ class TestFFMarkers(FrappeTestCase):
 			}
 		)
 		return payload
+
+	# ---- coupon and F&F per line (Task 8j) -----------------------------------
+
+	def test_per_line_coupon_invoice_matches_cart(self):
+		"""20% coupon + F&F 30% on one line only.
+
+		ITEM_A is excluded from F&F, so the coupon takes it (20); ITEM_B has F&F 30, which
+		beats the coupon, so it keeps F&F. The expected lines are worked out by hand, the
+		cart is built the way the POS submits it, and the saved draft must hold exactly it.
+		"""
+		from posnext_promotions.api.offers import calculate_coupon_discount
+
+		enable_ff(self, CUSTOMER, EMAIL_DOMAIN, excluded_items=[{"item_code": ITEM_A}])
+		coupon = frappe.get_doc(
+			{
+				"doctype": "POS Coupon",
+				"coupon_name": f"{PREFIX}COUPON20",
+				"coupon_code": f"{PREFIX}C20"[:20].upper(),
+				"coupon_type": "Promotional",
+				"company": self.ctx.company,
+				"discount_type": "Percentage",
+				"discount_percentage": 20,
+				"apply_on": "Net Total",
+				"valid_from": frappe.utils.today(),
+			}
+		).insert(ignore_permissions=True)
+		self.addCleanup(frappe.delete_doc, "POS Coupon", coupon.name, force=True, ignore_permissions=True)
+		code = coupon.coupon_code
+
+		price_a, price_b = ITEM_PRICES[ITEM_A], ITEM_PRICES[ITEM_B]
+		# By hand: A coupon 20% -> 40.00 (discount 10); B F&F 30% -> 56.00 (discount 24)
+		expect_a = {"rate": flt(price_a * 0.8, 2), "discount": flt(price_a * 0.2, 2)}
+		expect_b = {"rate": flt(price_b * 0.7, 2), "discount": flt(price_b * 0.3, 2)}
+
+		# What the POS sends for the coupon decision: B already carries its F&F stamp.
+		line_a = _line(self.ctx, ITEM_A)
+		line_b = _line(self.ctx, ITEM_B)
+		line_b.update(
+			{
+				"discount_percentage": 30,
+				"discount_amount": expect_b["discount"],
+				"rate": expect_b["rate"],
+				"discount_source": FNF,
+				"is_already_discounted": 1,
+			}
+		)
+		cart = _cart_payload(self.ctx, [line_a, line_b])
+		cart["customer"] = CUSTOMER
+		decision = calculate_coupon_discount(code, json.dumps(cart), customer=CUSTOMER)
+		self.assertTrue(decision.get("valid"), decision)
+		self.assertEqual(decision.get("granularity"), "line")
+		self.assertEqual([u["item_code"] for u in decision["line_updates"]], [ITEM_A])
+
+		# The cart as formatItemsForSubmission sends it.
+		sent_a = _line(self.ctx, ITEM_A)
+		sent_a.update(
+			{
+				"discount_percentage": 20,
+				"discount_amount": expect_a["discount"],
+				"rate": expect_a["rate"],
+				"posnext_coupon_code": code,
+				"posnext_coupon_discount": expect_a["discount"],
+				"posnext_discount_source": "coupon",
+			}
+		)
+		sent_b = dict(line_b)
+		sent_b.update({"posnext_discount_source": FNF, "posnext_coupon_code": None})
+		payload = _cart_payload(self.ctx, [sent_a, sent_b])
+		payload["customer"] = CUSTOMER
+		payload["coupon_code"] = code
+
+		draft = self._draft(payload)
+		rows = {row.item_code: row for row in draft.items}
+		self.assertAlmostEqual(flt(rows[ITEM_A].rate), expect_a["rate"], places=2)
+		self.assertAlmostEqual(flt(rows[ITEM_B].rate), expect_b["rate"], places=2)
+		self.assertEqual(rows[ITEM_A].posnext_coupon_code, code)
+		self.assertFalse(rows[ITEM_B].posnext_coupon_code)
+		self.assertEqual(rows[ITEM_A].posnext_discount_source, "coupon")
+		self.assertEqual(rows[ITEM_B].posnext_discount_source, FNF)
+		self.assertAlmostEqual(flt(draft.net_total), expect_a["rate"] + expect_b["rate"], places=2)
+		self.assertAlmostEqual(
+			flt(draft.grand_total), flt(draft.net_total) + flt(draft.total_taxes_and_charges), places=2
+		)
