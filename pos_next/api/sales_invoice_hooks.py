@@ -148,7 +148,7 @@ def record_one_time_offer_usage(doc, method=None):
 	JSON list stamped by update_invoice before item.pricing_rules is cleared —
 	the cleared field can't be read back here). Inserts a
 	``One Time Customer Offer Usage`` row per (customer, rule); the doctype's
-	composite name ({customer}::{pricing_rule}) makes a duplicate insert raise
+	composite name ({customer}:{pricing_rule}) makes a duplicate insert raise
 	DuplicateEntryError, so it stays idempotent and race-safe.
 	"""
 	from pos_next.optional_apps import promotions_installed

@@ -442,8 +442,8 @@ class TestGetSalesPersons(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 
-def _orig(name, item_code, qty):
-	return frappe._dict(name=name, item_code=item_code, qty=qty)
+def _orig(name, item_code, qty, rate=10):
+	return frappe._dict(name=name, item_code=item_code, qty=qty, rate=rate)
 
 
 def _returned(item_code, row, qty):
@@ -456,16 +456,28 @@ class TestCheckReturnQuantities(unittest.TestCase):
 	def check(self, return_items, returned=()):
 		return invoices._check_return_quantities("SI-1", self.ORIGINAL, list(returned), return_items)
 
-	def test_valid_linked_and_unlinked_returns(self):
+	def test_valid_linked_returns(self):
 		self.assertEqual(
 			self.check(
 				[
 					{"item_code": "A", "qty": -2, "sales_invoice_item": "r1"},
-					{"item_code": "B", "qty": -1},
+					{"item_code": "B", "qty": -1, "sales_invoice_item": "r3"},
 				]
 			),
 			{"valid": True},
 		)
+
+	def test_unlinked_row_rejected(self):
+		# Every return row must link to its original row (returns safety, 2026-11).
+		result = self.check(
+			[
+				{"item_code": "A", "qty": -2, "sales_invoice_item": "r1"},
+				{"item_code": "B", "qty": -1},
+			]
+		)
+		self.assertFalse(result["valid"])
+		self.assertIn("Row #2", result["message"])
+		self.assertIn("not linked", result["message"])
 
 	def test_row_from_another_invoice_rejected(self):
 		result = self.check([{"item_code": "A", "qty": -1, "sales_invoice_item": "foreign"}])
@@ -500,8 +512,12 @@ class TestCheckReturnQuantities(unittest.TestCase):
 		)
 		self.assertFalse(result["valid"])
 
-	def test_unlinked_over_return_by_item_total_rejected(self):
-		result = self.check([{"item_code": "A", "qty": -4}], returned=[_returned("A", None, 2)])
+	def test_legacy_unlinked_return_still_counts_against_item_total(self):
+		# A return saved before rows had to be linked still uses up the item total.
+		result = self.check(
+			[{"item_code": "A", "qty": -2, "sales_invoice_item": "r2"}],
+			returned=[_returned("A", None, 4)],
+		)
 		self.assertFalse(result["valid"])
 		self.assertIn("than was sold", result["message"])
 

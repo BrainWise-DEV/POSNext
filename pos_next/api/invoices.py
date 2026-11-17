@@ -821,10 +821,29 @@ def validate_cart_items(items, pos_profile=None):
 	return errors
 
 
+# Child-row field that links a return row to its original row, per invoice doctype.
+RETURN_ROW_LINK_FIELD = {"Sales Invoice": "sales_invoice_item", "POS Invoice": "pos_invoice_item"}
+
+
+def _currency_precision(currency):
+	"""Decimal places for money in ``currency`` (from its number format, not System Settings)."""
+	from frappe.utils import get_number_format_info
+
+	number_format = (
+		(currency and frappe.db.get_value("Currency", currency, "number_format", cache=True))
+		or frappe.db.get_default("number_format")
+		or "#,###.##"
+	)
+	return get_number_format_info(number_format)[2]
+
+
 @frappe.whitelist()
 def validate_return_items(original_invoice_name, return_items, doctype="Sales Invoice"):
 	"""Ensure that return items do not exceed the quantity from the original invoice.
 	Also validates return time frame based on POS Settings.
+
+	Every return row must link to its original row (``sales_invoice_item`` /
+	``pos_invoice_item``) and must not be refunded above that row's rate.
 
 	Uses query builder for parameterized queries. Fetches invoice details, original
 	item quantities, and already-returned quantities in 3 queries total.
@@ -835,10 +854,16 @@ def validate_return_items(original_invoice_name, return_items, doctype="Sales In
 	if isinstance(return_items, str):
 		return_items = json.loads(return_items)
 
-	# Fetch invoice pos_profile and posting_date for validation
+	if doctype not in RETURN_ROW_LINK_FIELD:
+		return {"valid": False, "message": _("Returns are not supported for {0}").format(doctype)}
+	link_field = RETURN_ROW_LINK_FIELD[doctype]
+
+	# Fetch invoice pos_profile, posting_date and currency for validation
 	si = frappe.qb.DocType(doctype)
 	invoice_data = (
-		frappe.qb.from_(si).select(si.pos_profile, si.posting_date).where(si.name == original_invoice_name)
+		frappe.qb.from_(si)
+		.select(si.pos_profile, si.posting_date, si.currency)
+		.where(si.name == original_invoice_name)
 	).run(as_dict=True)
 
 	if not invoice_data:
@@ -870,7 +895,7 @@ def validate_return_items(original_invoice_name, return_items, doctype="Sales In
 	si_item = frappe.qb.DocType(f"{doctype} Item")
 	original_items = (
 		frappe.qb.from_(si_item)
-		.select(si_item.name, si_item.item_code, si_item.qty)
+		.select(si_item.name, si_item.item_code, si_item.qty, si_item.rate)
 		.where(si_item.parent == original_invoice_name)
 	).run(as_dict=True)
 
@@ -884,7 +909,7 @@ def validate_return_items(original_invoice_name, return_items, doctype="Sales In
 		.on(ret_item.parent == ret_si.name)
 		.select(
 			ret_item.item_code,
-			ret_item.sales_invoice_item,
+			getattr(ret_item, link_field),
 			Sum(Abs(ret_item.qty)).as_("returned_qty"),
 		)
 		.where(
@@ -892,65 +917,105 @@ def validate_return_items(original_invoice_name, return_items, doctype="Sales In
 			& (ret_si.docstatus == 1)
 			& (ret_si.is_return == 1)
 		)
-		.groupby(ret_item.item_code, ret_item.sales_invoice_item)
+		.groupby(ret_item.item_code, getattr(ret_item, link_field))
 	).run(as_dict=True)
 
-	return _check_return_quantities(original_invoice_name, original_items, returned_qty_data, return_items)
+	return _check_return_quantities(
+		original_invoice_name,
+		original_items,
+		returned_qty_data,
+		return_items,
+		link_field=link_field,
+		precision=_currency_precision(invoice_info.currency),
+	)
 
 
-def _check_return_quantities(original_invoice_name, original_items, returned_qty_data, return_items):
-	"""Pure row / item quantity checks for ``validate_return_items`` (no DB access).
+def _check_return_quantities(
+	original_invoice_name,
+	original_items,
+	returned_qty_data,
+	return_items,
+	link_field="sales_invoice_item",
+	precision=2,
+):
+	"""Pure row / item quantity and rate checks for ``validate_return_items`` (no DB access).
 
-	``original_items``: rows of the original invoice (name, item_code, qty).
-	``returned_qty_data``: already-returned qty grouped by (item_code, sales_invoice_item).
-	``return_items``: the new return's rows (item_code, qty, sales_invoice_item).
+	``original_items``: rows of the original invoice (name, item_code, qty, rate).
+	``returned_qty_data``: already-returned qty grouped by (item_code, ``link_field``).
+	``return_items``: the new return's rows (item_code, qty, rate, ``link_field``).
+	``precision``: money precision of the invoice currency, used for the rate check.
 	"""
 	original_item_qty = {}
 	original_row_qty = {}
 	original_row_item = {}
+	original_row_rate = {}
 	for item in original_items:
 		original_item_qty[item.item_code] = original_item_qty.get(item.item_code, 0) + flt(item.qty)
 		original_row_qty[item.name] = flt(item.qty)
 		original_row_item[item.name] = item.item_code
+		original_row_rate[item.name] = flt(item.get("rate"))
 
 	# Subtract returned quantities (by row when linked, else by item_code)
 	for row in returned_qty_data:
 		qty = flt(row.returned_qty)
-		if row.sales_invoice_item and row.sales_invoice_item in original_row_qty:
-			original_row_qty[row.sales_invoice_item] -= qty
+		linked_row = row.get(link_field)
+		if linked_row and linked_row in original_row_qty:
+			original_row_qty[linked_row] -= qty
 		if row.item_code in original_item_qty:
 			original_item_qty[row.item_code] -= qty
 
 	# Validate new return items
-	for item in return_items:
+	for position, item in enumerate(return_items, start=1):
 		item_code = item.get("item_code")
 		return_qty = abs(flt(item.get("qty", 0)))
-		row_ref = item.get("sales_invoice_item")
+		row_ref = item.get(link_field)
+		row_no = item.get("idx") or position
 
-		if row_ref:
-			if row_ref not in original_row_item:
-				return {
-					"valid": False,
-					"message": _("Return item link {0} does not belong to invoice {1}").format(
-						row_ref, original_invoice_name
-					),
-				}
-			if item_code and original_row_item[row_ref] != item_code:
-				return {
-					"valid": False,
-					"message": _("Return item {0} does not match original row {1} ({2})").format(
-						item_code, row_ref, original_row_item[row_ref]
-					),
-				}
-			remaining_row = original_row_qty.get(row_ref, 0)
-			if return_qty > remaining_row:
-				return {
-					"valid": False,
-					"message": _(
-						"You are trying to return more quantity for item {0} than remains on that line."
-					).format(item_code),
-				}
-			original_row_qty[row_ref] = remaining_row - return_qty
+		# Every return row must point at the original row it refunds: the row
+		# fixes both the quantity left and the rate the customer actually paid.
+		if not row_ref:
+			return {
+				"valid": False,
+				"message": _("Row #{0}: return item {1} is not linked to a row of invoice {2}").format(
+					row_no, item_code, original_invoice_name
+				),
+			}
+
+		if row_ref not in original_row_item:
+			return {
+				"valid": False,
+				"message": _("Return item link {0} does not belong to invoice {1}").format(
+					row_ref, original_invoice_name
+				),
+			}
+		if item_code and original_row_item[row_ref] != item_code:
+			return {
+				"valid": False,
+				"message": _("Return item {0} does not match original row {1} ({2})").format(
+					item_code, row_ref, original_row_item[row_ref]
+				),
+			}
+		# ERPNext skips its own rate check for Moving Average items, so the
+		# POS checks every row here, whatever the valuation method.
+		return_rate = flt(abs(flt(item.get("rate"))), precision)
+		original_rate = flt(original_row_rate[row_ref], precision)
+		if return_rate > original_rate:
+			return {
+				"valid": False,
+				"message": _(
+					"Row #{0}: return rate {1} for item {2} is higher than the rate {3} it was sold at"
+				).format(row_no, return_rate, item_code, original_rate),
+			}
+
+		remaining_row = original_row_qty.get(row_ref, 0)
+		if return_qty > remaining_row:
+			return {
+				"valid": False,
+				"message": _(
+					"You are trying to return more quantity for item {0} than remains on that line."
+				).format(item_code),
+			}
+		original_row_qty[row_ref] = remaining_row - return_qty
 
 		remaining = original_item_qty.get(item_code, 0)
 		if return_qty > remaining:
@@ -963,6 +1028,19 @@ def _check_return_quantities(original_invoice_name, original_items, returned_qty
 		original_item_qty[item_code] = remaining - return_qty
 
 	return {"valid": True}
+
+
+def _validate_return_rows(invoice_doc):
+	"""Throw unless every row of a return against an invoice passes ``validate_return_items``."""
+	if not invoice_doc.get("return_against"):
+		return
+	validation = validate_return_items(
+		invoice_doc.return_against,
+		[d.as_dict() for d in invoice_doc.items],
+		doctype=invoice_doc.doctype,
+	)
+	if not validation.get("valid"):
+		frappe.throw(validation.get("message"))
 
 
 # ==========================================
@@ -1026,16 +1104,6 @@ def update_invoice(data):
 
 		if company and invoice_doc.get("payments") and doctype == "Sales Invoice":
 			_set_payment_accounts(invoice_doc.payments, company)
-
-		# Validate return items if this is a return invoice
-		if (data.get("is_return") or invoice_doc.get("is_return")) and invoice_doc.get("return_against"):
-			validation = validate_return_items(
-				invoice_doc.return_against,
-				[d.as_dict() for d in invoice_doc.items],
-				doctype=invoice_doc.doctype,
-			)
-			if not validation.get("valid"):
-				frappe.throw(validation.get("message"))
 
 		# Ensure customer exists
 		customer_name = invoice_doc.get("customer")
@@ -1235,8 +1303,25 @@ def update_invoice(data):
 		# ========================================================================
 		invoice_doc.set_missing_values(for_validate=True)
 
+		# A return's header discount is worked out here, from the original invoice
+		_apply_return_header_discount(invoice_doc)
+
 		# Calculate totals and apply discounts (with rounding disabled)
 		invoice_doc.calculate_taxes_and_totals()
+
+		# Validate return rows after the totals, so the rates checked are the
+		# rates that will be saved
+		if invoice_doc.get("is_return"):
+			_validate_return_rows(invoice_doc)
+		elif doctype == "Sales Invoice":
+			# Header discounts come from transaction-level rules; record the
+			# one-time ones with the per-item ones stamped above.
+			txn_one_time = _applied_one_time_transaction_rules(
+				invoice_doc, pos_profile_doc.customer if pos_profile_doc else None
+			)
+			if txn_one_time:
+				stamped = json.loads(invoice_doc.pos_applied_one_time_rules or "[]")
+				invoice_doc.pos_applied_one_time_rules = json.dumps(sorted(set(stamped) | set(txn_one_time)))
 		if invoice_doc.grand_total is None:
 			invoice_doc.grand_total = 0.0
 		if invoice_doc.base_grand_total is None:
@@ -1625,6 +1710,13 @@ def submit_invoice(invoice=None, data=None):
 			invoice_doc.update(invoice)
 			if not invoice_doc.get("customer") and existing_customer:
 				invoice_doc.customer = existing_customer
+			# The draft was validated by update_invoice, but its rows and header
+			# discount may have been replaced by this payload, so redo both.
+			# Validating before totals is safe here: it checks only row links,
+			# quantities and rates, and recalculating totals does not change rates.
+			if invoice_doc.get("is_return"):
+				_apply_return_header_discount(invoice_doc)
+				_validate_return_rows(invoice_doc)
 
 		# Keep permission bypass consistent for POS API flow.
 		invoice_doc.flags.ignore_permissions = True
@@ -2665,6 +2757,10 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
 			si.customer_name,
 			si.net_total,
 			si.total_taxes_and_charges,
+			si.currency,
+			si.total,
+			si.discount_amount,
+			si.apply_discount_on,
 		)
 		.where(si.name == invoice_name)
 	).run(as_dict=True)
@@ -2787,12 +2883,32 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
 		tax.get("included_in_print_rate") for tax in applicable_taxes
 	)
 
-	precision = cint(frappe.get_cached_value("System Settings", None, "currency_precision")) or 2
+	precision = _currency_precision(invoice_info.currency)
+
+	# Header discount: the server owns the return's discount (see
+	# _apply_return_header_discount), so line rates stay at the original rates.
+	# The refund shown to the cashier subtracts each row's share of the discount
+	# still to be returned, so a full return shows exactly what is left to refund.
+	discount_plan = _return_discount_plan("Sales Invoice", invoice_name)
+	row_discounts = _full_return_row_discounts(discount_plan, precision) if discount_plan else {}
+	# Without tax, or with inclusive tax, the line rate is what the customer was charged
+	rate_is_gross = tax_inclusive or not applicable_taxes
+
+	# make_sales_return already takes earlier returns off each row's qty, so
+	# read the sold qty from the original rows (else they are taken off twice).
+	original_row_qty = dict(
+		frappe.get_all(
+			"Sales Invoice Item",
+			filters={"parent": invoice_name, "parenttype": "Sales Invoice"},
+			fields=["name", "qty"],
+			as_list=True,
+		)
+	)
 
 	def process_return_item(item):
 		"""Process single item for return, returns None if not returnable."""
 		item_ref = item.get("sales_invoice_item") or item.get("item_code")
-		original_qty = abs(flt(item.get("qty", 0)))
+		original_qty = abs(flt(original_row_qty.get(item.get("sales_invoice_item"), item.get("qty", 0))))
 		remaining_qty = original_qty - returned_qty_map.get(item_ref, 0)
 
 		if remaining_qty <= 0:
@@ -2807,16 +2923,24 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
 
 		# For inclusive taxes, use the original rate (already includes tax) to prevent
 		# ERPNext from back-calculating and double-reducing the tax.
-		# For exclusive taxes, use net_rate as before.
-		if tax_inclusive:
+		# With a header discount, also use the original rate: the server applies
+		# the discount to the return (net_rate already has it, so it would count twice).
+		# Otherwise (exclusive taxes) use net_rate as before.
+		if tax_inclusive or discount_plan:
 			item_rate = flt(item.get("rate"), precision)
-			rate_with_tax = item_rate
+			rate_with_tax = item_rate if tax_inclusive else flt(net_rate + tax_per_unit, precision)
 			# Both price_list_rate and rate are tax-inclusive, so discount is their difference
 			discount_per_unit = flt(price_list_rate - item_rate, precision)
 		else:
 			item_rate = net_rate
 			rate_with_tax = flt(net_rate + tax_per_unit, precision)
 			discount_per_unit = flt(price_list_rate - net_rate, precision)
+
+		if discount_plan and rate_is_gross:
+			# Unrounded per-unit figure: the dialog rounds qty x rate_with_tax per
+			# row, so returning the full remaining qty gives the exact row refund.
+			row_discount = row_discounts.get(item.get("sales_invoice_item"), 0)
+			rate_with_tax = (item_rate * remaining_qty - row_discount) / remaining_qty
 
 		return {
 			**item,
@@ -2843,7 +2967,150 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
 	if not return_dict["items"]:
 		frappe.throw(_("All items from this invoice have already been returned"))
 
+	# make_sales_return copies the full header discount (negated). The server
+	# works out the return's discount itself, so a caller that sends this dict
+	# back must not carry a second one.
+	for field in ("discount_amount", "base_discount_amount", "additional_discount_percentage"):
+		return_dict[field] = 0
+
 	return return_dict
+
+
+def _return_discount_plan(doctype, invoice_name):
+	"""What a return against ``invoice_name`` needs to share out its header discount.
+
+	Returns ``None`` when the invoice has no header discount. Otherwise a dict:
+	``discount`` (D), the original discount settings, ``rows`` (row name ->
+	original qty and weight = net amount before the discount), ``weight``
+	(sum of weights), and what earlier submitted returns already took:
+	``prior_discount`` and ``prior_qty`` (row name -> qty).
+	"""
+	link_field = RETURN_ROW_LINK_FIELD.get(doctype)
+	if not link_field:
+		return None
+	original = frappe.db.get_value(
+		doctype,
+		invoice_name,
+		["discount_amount", "apply_discount_on", "is_cash_or_non_trade_discount", "currency"],
+		as_dict=True,
+	)
+	if not original or not flt(original.discount_amount):
+		return None
+
+	rows = {}
+	for row in frappe.get_all(
+		f"{doctype} Item",
+		filters={"parent": invoice_name, "parenttype": doctype},
+		fields=["name", "qty", "net_amount", "distributed_discount_amount"],
+	):
+		rows[row.name] = frappe._dict(
+			qty=abs(flt(row.qty)),
+			weight=abs(flt(row.net_amount) + flt(row.distributed_discount_amount)),
+		)
+
+	earlier_returns = frappe.get_all(
+		doctype,
+		filters={"return_against": invoice_name, "is_return": 1, "docstatus": 1},
+		fields=["name", "discount_amount"],
+	)
+	prior_qty = {}
+	if earlier_returns:
+		for row in frappe.get_all(
+			f"{doctype} Item",
+			filters={"parent": ["in", [r.name for r in earlier_returns]], "parenttype": doctype},
+			fields=[link_field, "qty"],
+		):
+			linked = row.get(link_field)
+			if linked:
+				prior_qty[linked] = prior_qty.get(linked, 0) + abs(flt(row.qty))
+
+	return frappe._dict(
+		link_field=link_field,
+		discount=abs(flt(original.discount_amount)),
+		apply_discount_on=original.apply_discount_on,
+		is_cash_or_non_trade_discount=original.is_cash_or_non_trade_discount,
+		precision=_currency_precision(original.currency),
+		rows=rows,
+		weight=sum(r.weight for r in rows.values()),
+		prior_discount=sum(abs(flt(r.discount_amount)) for r in earlier_returns),
+		prior_qty=prior_qty,
+	)
+
+
+def _return_discount_amount(plan, return_qty):
+	"""Header discount (positive) for a return of ``return_qty`` (row name -> qty).
+
+	The return takes D x (its rows' share of the original net). The return
+	that completes the invoice takes whatever is left, so all returns together
+	give back exactly D.
+	"""
+	precision = plan.precision
+	left = flt(plan.discount - plan.prior_discount, precision)
+	if left <= 0 or not plan.weight:
+		return 0
+	# Rows with no weight (free items) carry no discount, so they need not be returned
+	completes = all(
+		plan.prior_qty.get(name, 0) + return_qty.get(name, 0) >= row.qty
+		for name, row in plan.rows.items()
+		if row.weight
+	)
+	if completes:
+		return left
+	share = sum(
+		row.weight * min(return_qty.get(name, 0), row.qty) / row.qty
+		for name, row in plan.rows.items()
+		if row.qty
+	)
+	return min(flt(plan.discount * share / plan.weight, precision), left)
+
+
+def _full_return_row_discounts(plan, precision):
+	"""Split the discount still to be returned over the rows still to be returned.
+
+	Matches what _return_discount_amount gives a return of everything left; the
+	rounding remainder goes on the row with the largest share.
+	"""
+	left = flt(plan.discount - plan.prior_discount, precision)
+	shares = {}
+	for name, row in plan.rows.items():
+		remaining = row.qty - plan.prior_qty.get(name, 0)
+		if remaining > 0 and row.qty and plan.weight:
+			shares[name] = flt(plan.discount * row.weight * remaining / row.qty / plan.weight, precision)
+	if not shares or left <= 0:
+		return {}
+	largest = max(shares, key=shares.get)
+	shares[largest] = flt(shares[largest] + left - sum(shares.values()), precision)
+	return shares
+
+
+def _apply_return_header_discount(invoice_doc):
+	"""Set the header discount of a return against an invoice (the server owns it).
+
+	Whatever discount the client sent is replaced. With no header discount on
+	the original, the return gets none. Otherwise the return gets
+	``-_return_discount_amount`` with the original's ``apply_discount_on``, so
+	ERPNext spreads it over the rows the same way it did on the sale. The
+	amount is used rather than ``additional_discount_percentage``: a percentage
+	would be recomputed from the return's own totals and lose the exact remainder.
+	"""
+	if not (invoice_doc.get("is_return") and invoice_doc.get("return_against")):
+		return
+	invoice_doc.additional_discount_percentage = 0
+	plan = _return_discount_plan(invoice_doc.doctype, invoice_doc.return_against)
+	if not plan:
+		invoice_doc.discount_amount = 0
+		return
+
+	return_qty = {}
+	for row in invoice_doc.get("items", []):
+		linked = row.get(plan.link_field)
+		if linked in plan.rows:
+			return_qty[linked] = return_qty.get(linked, 0) + abs(flt(row.qty))
+
+	invoice_doc.apply_discount_on = plan.apply_discount_on
+	if invoice_doc.meta.has_field("is_cash_or_non_trade_discount"):
+		invoice_doc.is_cash_or_non_trade_discount = plan.is_cash_or_non_trade_discount
+	invoice_doc.discount_amount = -_return_discount_amount(plan, return_qty)
 
 
 @frappe.whitelist()
@@ -3088,8 +3355,13 @@ def _evaluate_transaction_offers(
 	price_list,
 	rule_map,
 	selected_offer_names,
+	blocked_rules=frozenset(),
 ):
 	"""Run ERPNext's transaction-level pricing engine and collect free items.
+
+	``blocked_rules``: one-time rules this customer may not get. ERPNext's
+	engine picks rules with its own query, so a header discount it set from a
+	blocked rule is worked out again from the other rules it applied.
 
 	ERPNext routes `apply_on = "Transaction"` rules through a different entry
 	point (`apply_pricing_rule_on_transaction`) than the per-item engine. That
@@ -3200,6 +3472,15 @@ def _evaluate_transaction_offers(
 	post_discount_amt = flt(doc.get("discount_amount") or 0)
 	apply_discount_on = doc.get("apply_discount_on") or None
 
+	engine_applied = _transaction_rules_applied(doc)
+	if blocked_rules and blocked_rules.intersection(engine_applied):
+		post_addl_pct, post_discount_amt, apply_discount_on = _replay_transaction_discount(
+			doc,
+			[name for name in engine_applied if name not in blocked_rules],
+			pre_addl_pct,
+			pre_discount_amt,
+		)
+
 	header_discount_changed = post_addl_pct != pre_addl_pct or post_discount_amt != pre_discount_amt
 	if header_discount_changed:
 		for rule_name, details in rule_map.items():
@@ -3218,6 +3499,140 @@ def _evaluate_transaction_offers(
 		"discount_amount": post_discount_amt,
 		"apply_discount_on": apply_discount_on,
 	}
+
+
+def _one_time_rule_blocked(rule_name, customer, default_customer):
+	"""True when a one-time-per-customer rule may not apply to ``customer``.
+
+	Walk-in / default customers can't be tracked, so they never get one-time
+	rules; a named customer gets each one only until it is redeemed.
+	"""
+	from pos_next.pos_next.doctype.one_time_customer_offer_usage.one_time_customer_offer_usage import (
+		is_redeemed,
+	)
+
+	if not customer or customer == default_customer:
+		return True
+	return is_redeemed(customer, rule_name)
+
+
+def _transaction_rules_applied(doc):
+	"""Transaction-level rules ERPNext applied to ``doc``, in order.
+
+	ERPNext records them as ``pricing_rules`` rows without an item.
+	"""
+	return list(
+		dict.fromkeys(
+			row.pricing_rule
+			for row in doc.get("pricing_rules") or []
+			if row.pricing_rule and not row.get("item_code") and not row.get("child_docname")
+		)
+	)
+
+
+def _replay_transaction_discount(doc, rule_names, addl_pct, discount_amt):
+	"""Header discount from Price-type transaction rules, set in order as ERPNext does.
+
+	The fields are set on ``doc`` (the transient evaluation invoice) and its
+	totals recalculated, so a percentage rule's amount is worked out by ERPNext
+	on the right base (``apply_discount_on``). The POS reads only the amount.
+	"""
+	apply_discount_on = None
+	for name in rule_names:
+		rule = frappe.db.get_value(
+			"Pricing Rule",
+			name,
+			["price_or_product_discount", "apply_discount_on", "discount_percentage", "discount_amount"],
+			as_dict=True,
+		)
+		if not rule or rule.price_or_product_discount != "Price":
+			continue
+		if rule.apply_discount_on:
+			apply_discount_on = rule.apply_discount_on
+		if flt(rule.discount_percentage):
+			addl_pct = flt(rule.discount_percentage)
+		if flt(rule.discount_amount):
+			discount_amt = flt(rule.discount_amount)
+
+	doc.additional_discount_percentage = addl_pct
+	doc.discount_amount = discount_amt
+	if apply_discount_on:
+		doc.apply_discount_on = apply_discount_on
+	doc.calculate_taxes_and_totals()
+	return (
+		flt(doc.additional_discount_percentage),
+		flt(doc.discount_amount),
+		doc.get("apply_discount_on") or None,
+	)
+
+
+def _applied_one_time_transaction_rules(invoice_doc, default_customer=None):
+	"""One-time transaction-level rules behind this sale's header discount.
+
+	The POS sends the header discount, not the rule that produced it. Run
+	ERPNext's transaction engine on a throwaway copy (without the discount) and
+	keep the one-time rules it applies whose discount matches the invoice.
+	"""
+	pct = flt(invoice_doc.get("additional_discount_percentage"))
+	amount = flt(invoice_doc.get("discount_amount"))
+	customer = invoice_doc.get("customer")
+	if not (pct or amount) or not customer or customer == default_customer:
+		return []
+	if not erpnext_apply_pricing_rule_on_transaction:
+		return []
+	candidates = frappe.get_all(
+		"Pricing Rule",
+		filters={
+			"disable": 0,
+			"apply_on": "Transaction",
+			"one_time_per_customer": 1,
+			"selling": 1,
+			"company": invoice_doc.company,
+			"price_or_product_discount": "Price",
+		},
+		fields=["name", "discount_percentage", "discount_amount", "apply_discount_on"],
+	)
+	if not candidates:
+		return []
+
+	probe = frappe.copy_doc(invoice_doc)
+	probe.additional_discount_percentage = 0
+	probe.discount_amount = 0
+	probe.set("pricing_rules", [])
+	probe.flags.ignore_mandatory = True
+	try:
+		probe.calculate_taxes_and_totals()
+		# Totals before any header discount: the base a percentage rule applies to
+		base = {"Grand Total": flt(probe.grand_total), "Net Total": flt(probe.net_total)}
+		erpnext_apply_pricing_rule_on_transaction(probe)
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "POS One-Time Transaction Rule Check")
+		return []
+
+	precision = _currency_precision(invoice_doc.get("currency"))
+	invoice_amount = flt(amount, precision)
+
+	def rule_amount(rule):
+		if flt(rule.discount_amount):
+			return flt(rule.discount_amount, precision)
+		return flt(
+			base[rule.apply_discount_on or "Grand Total"] * flt(rule.discount_percentage) / 100, precision
+		)
+
+	# ponytail: NOTE heuristic ceiling. The POS sends only the header discount
+	# amount, so a rule counts as used when the engine applies it and its
+	# discount equals the invoice's. A manual header discount of the same value
+	# would be recorded as that rule. Phase 4 sends the applied rule names.
+	applied = set(_transaction_rules_applied(probe))
+	return sorted(
+		rule.name
+		for rule in candidates
+		if rule.name in applied
+		and (
+			(pct and flt(rule.discount_percentage) == pct)
+			or (invoice_amount and rule_amount(rule) == invoice_amount)
+		)
+	)
 
 
 @frappe.whitelist()
@@ -3450,14 +3865,15 @@ def apply_offers(invoice_data, selected_offers=None):
 				# customers who have already redeemed this rule. Dropping the rule
 				# here keeps its discount out of the per-item loop below (which only
 				# applies rules present in rule_map), mirroring the coupon skip above.
-				if record.one_time_per_customer:
-					if not customer or customer == default_customer:
-						continue
-					if frappe.db.exists("One Time Customer Offer Usage", f"{customer}::{record.name}"):
-						continue
+				if record.one_time_per_customer and _one_time_rule_blocked(
+					record.name, customer, default_customer
+				):
+					continue
 
 				# Include both promotional scheme rules and standalone pricing rules
 				rule_map[record.name] = record
+
+		blocked_txn_rules = set()
 
 		# Top up rule_map with transaction-scoped rules. The per-item engine
 		# never surfaces apply_on="Transaction" rules, so without this they
@@ -3478,11 +3894,18 @@ def apply_offers(invoice_data, selected_offers=None):
 					"name",
 					"promotional_scheme",
 					"coupon_code_based",
+					"one_time_per_customer",
 					"promotional_scheme_id",
 					"price_or_product_discount",
 				],
 			)
 			for record in txn_rule_records:
+				# Same one-time gate as the per-item rules above
+				if record.one_time_per_customer and _one_time_rule_blocked(
+					record.name, customer, default_customer
+				):
+					blocked_txn_rules.add(record.name)
+					continue
 				rule_map.setdefault(record.name, record)
 
 		if selected_offer_names:
@@ -3606,6 +4029,7 @@ def apply_offers(invoice_data, selected_offers=None):
 			pricing_args.price_list,
 			rule_map,
 			selected_offer_names,
+			blocked_rules=blocked_txn_rules,
 		)
 		# Per-item results win on collisions because they already carry full
 		# discount metadata from the per-item engine result.
