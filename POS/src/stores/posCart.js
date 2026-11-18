@@ -1476,6 +1476,25 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		return result;
 	}
 
+	/**
+	 * No offer is applied any more: drop every line's promotion discount and its rules.
+	 * A rule left on a line would still block F&F in the F&F-only check (Task 8q).
+	 */
+	function dropOfferDiscountsFromLines() {
+		invoiceItems.value.forEach((item) => {
+			if (dropPromotionUnderCoupon(item)) return;
+			if (item.pricing_rules && item.pricing_rules.length > 0) {
+				item.discount_percentage = 0;
+				item.discount_amount = 0;
+				item.pricing_rules = [];
+				item.is_already_discounted = 0;
+				item.is_accumulative_discount = 0;
+				recalculateItem(item);
+			}
+		});
+		rebuildIncrementalCache();
+	}
+
 	async function removeOffer(offer, currentProfile = null, offersDialogRef = null) {
 		const offerCode = typeof offer === "string" ? offer : offer?.name || offer?.code;
 
@@ -1488,6 +1507,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 			appliedOffers.value = [];
 			processFreeItems([]); // Remove all free items
+			dropOfferDiscountsFromLines();
 			applyHeaderDiscountFromServer(null);
 			await nextTick();
 			showSuccess(__("Offer has been removed from cart"));
@@ -1504,6 +1524,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 			appliedOffers.value = [];
 			processFreeItems([]); // Remove all free items
+			dropOfferDiscountsFromLines();
 			applyHeaderDiscountFromServer(null);
 			await nextTick();
 			showSuccess(__("Offer has been removed from cart"));
@@ -1625,20 +1646,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 					// All offers invalid - clear everything
 					appliedOffers.value = [];
 					processFreeItems([]);
-
-					// Reset all item rates to original (remove discounts)
-					invoiceItems.value.forEach((item) => {
-						if (dropPromotionUnderCoupon(item)) return;
-						if (item.pricing_rules && item.pricing_rules.length > 0) {
-							item.discount_percentage = 0;
-							item.discount_amount = 0;
-							item.pricing_rules = [];
-							item.is_already_discounted = 0;
-							item.is_accumulative_discount = 0;
-							recalculateItem(item);
-						}
-					});
-					rebuildIncrementalCache();
+					dropOfferDiscountsFromLines();
 				} else {
 					// Reapply only valid offers
 					const invoiceData = buildOfferEvaluationPayload(currentProfile);
@@ -2582,20 +2590,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			if (combinedCodes.length === 0 && invalidOffers.length > 0) {
 				appliedOffers.value = [];
 				processFreeItems([]);
-				invoiceItems.value.forEach((item) => {
-					if (dropPromotionUnderCoupon(item)) return;
-					if (item.pricing_rules && item.pricing_rules.length > 0) {
-						item.discount_percentage = 0;
-						item.discount_amount = 0;
-						item.is_already_discounted = 0;
-						item.is_accumulative_discount = 0;
-						recalculateItem(item);
-					}
-				});
+				dropOfferDiscountsFromLines();
 				// Also clear any transaction-level header discount the server
 				// previously surfaced — if no offers remain, no header discount applies.
 				applyHeaderDiscountFromServer(null);
-				rebuildIncrementalCache();
 
 				rememberRemovedOffers(invalidOffers);
 			} else if (combinedCodes.length > 0) {

@@ -2,10 +2,10 @@
 
 Date: 2026-11-18 (rewritten the same day after the Codex critique). Type: test plan. Nothing here has been run yet.
 
-This plan replaces the 328-case draft with **52 current-phase checks**:
-- **40 UI checks**, manual or browser;
+This plan replaces the 328-case draft with **53 current-phase checks**:
+- **41 UI checks**, manual or browser;
 - **12 scripted request probes**;
-- **11 of the 40 UI checks** are then automated as a small Playwright smoke run (§6).
+- **12 of the 41 UI checks** are then automated as a small Playwright smoke run (§6).
 
 The binding direction is `.superpowers/sdd/2026-11-16-ff-phase2-unlock/codex-ui-test-plan-critique.md`: the Q5 keep-list, the Q2 merges and the Q6 missing items. The server suites stay the exhaustive matrix. These checks prove only three things:
 - the browser contract;
@@ -100,19 +100,19 @@ You can read it in Desk, or with read-only SQL through `bench --site nexus.local
 
 ## 2. Execution order
 
-1. **Manual checklist.** Run the 40 UI checks in §3 in order. Each block only needs the seeded state, plus the `set_ff`, POS Settings or UIT-rule changes the row names. Run the smoke rows first (U-01, U-06, U-09, U-15, U-23). Stop if any of them fails.
+1. **Manual checklist.** Run the 41 UI checks in §3 in order. Each block only needs the seeded state, plus the `set_ff`, POS Settings or UIT-rule changes the row names. Run the smoke rows first (U-01, U-06, U-09, U-15, U-21b, U-23). Stop if any of them fails.
 2. **Existing vitest:** `cd apps/pos_next/POS && yarn test:run`. The relevant specs are:
    - `friendsAndFamily*.spec.js`, `couponLines`, `couponPerLineFnf`, `couponMaxDiscountCap`;
    - `emailVerificationPanel`, `customerVerification`, `posSettings.verification`;
    - `posCartDiscountLimits`, `posCartHeaderDiscount`, `posCartCouponPerLine`, `posCart.salesOrder`;
    - `manualDiscount`, `useInvoiceFnfMarkers`.
 3. **The 12 probes** in §4, using `page.evaluate` from a logged-in `uit-cashier` tab.
-4. **Playwright smoke** (§6): 11 stable paths, added only after steps 1–3 pass.
+4. **Playwright smoke** (§6): 12 stable paths, added only after steps 1–3 pass.
 5. **Teardown and isolation check** (U-40).
 
 ---
 
-## 3. UI checks (40)
+## 3. UI checks (41)
 
 Unless a row names another, the profile is `UIT-FF Profile` and the user is `uit-cashier`. "F&F customer" means `UIT-Verified`. "Plain customer" means `UIT-Unverified`.
 
@@ -163,6 +163,7 @@ Nothing a row changes may leak into the next row.
 | # | Check (old IDs) | Steps | Expected UI | Expected server | Src |
 |---|---|---|---|---|---|
 | U-21 | **BXGY blocks F&F** (CMP-01) + Open Q4 | F&F customer. (a) UIT-BXGY ×2 + UIT-A. (b) UIT-BXGY ×1 alone, which is below "buy 2". | (a) The UIT-BXGY lines stay at full price with the note "Promotion item — not eligible for Friends & Family". A "Free" UIT-BXGY ×1 row appears. UIT-A gets F&F. (b) UIT-BXGY gets F&F (60 → 42). | (a) No markers on the BXGY lines. The free row has `is_free_item` 1 and the BXGY rule. `USG` only for UIT-A. | R7, R19 |
+| U-21b | **BXGY qty 1 → 2 → 1 brings F&F back** (new) · **P0** · Playwright smoke (§6) | Preconditions: seeded state, F&F customer, `UIT-PR-BXGY` enabled, no coupon. One cart: add UIT-BXGY ×1, wait for pricing. Set qty 2, wait. Set qty back to 1, wait. Then open the payment dialog and pay. | ×1: UIT-BXGY gets F&F (60 → 42). ×2: the paid ×2 line stays at full price (120) with the note "Promotion item — not eligible for Friends & Family", and a "Free" UIT-BXGY ×1 row appears. Back at ×1: the free row is gone, the note is gone, and the line shows F&F again (60 → 42) **before** payment opens. The payment dialog opens at 42 with no "price changed" prompt. | The last `apply_friends_and_family_discount` (or `apply_offers`) request at ×1 has no `UIT-PR-BXGY` in the line's `pricing_rules` (Playwright: read the request body). The paid invoice has one UIT-BXGY row, qty 1, with F&F markers and empty `pricing_rules`, and no free row. `USG` for UIT-BXGY. | client report 2026-11-18, P2-T8q |
 | U-22 | **Free gift with F&F, parameterised** (CMP-05, CMP-06) + Open Q1, Q5 + INV-1 | F&F customer. Run each kind with `set_ff allow_free_gift_with_ff=0`, then `=1`. Kinds: (i) free item, UIT-TRIG. (ii) GWP, UIT-GWP1 + UIT-GWP2 (promotions only). (iii) cart total, UIT-A ×8 (list 800, after F&F 560), then UIT-A ×7 (list 700, after F&F 490). Then `reset_ff`. | **allow 0:** each gift is removed. The trigger lines keep F&F, and the gift rule is detached from them. **allow 1:** (i) and (ii) show F&F **and** the free row. (iii) shows the gift at ×8 but **not** at ×7, because the minimum is measured after F&F (Q5). | allow 0: no free row is saved. allow 1: the free row is saved with its rule (`UIT-PR-FREE` / `UIT-PR-GWP` / `UIT-PR-CART-GIFT`). | R8/R10, P1-T3, §7 |
 | U-23 | **Offer shapes, plain customer, parameterised** (OFR-01, OFR-08, OFR-02, OFR-09, OFR-06) + INV-2 on OFR-01 | (a) UIT-BXGY ×2, then reload. (b) UIT-TRIG ×1. (c) UIT-P100. (d) UIT-A ×5 (500), then qty 4. (e) Gift Pool: **not seeded**, so skip unless a UIT Gift Pool scheme is added. | (a) The paid ×2 line at 60, plus a separate "Free" ×1 row; it survives the reload. (b) UIT-TRIG at 100, plus a UIT-GIFT free row. (c) The line shows Free / 0. (d) The gift row appears at 500 and is gone at 400. | (a) and (b): the free row has `is_free_item` 1, rate 0, and the rule on the row. (c) `is_free_item` 1, `pricing_rules = UIT-PR-P100`. | zero-audit, R74, R84/85 |
 | U-24 | **Locks** (OFR-11, OFR-12) | (a) Add UIT-NOPRICE. (b) Open EditItemDialog on the free row from U-23 (a). | (a) "Item UIT-NOPRICE has no price and cannot be sold at zero price." It is not added. (b) "Free promotional items cannot be edited". | — | R77, EditItemDialog |
@@ -251,7 +252,7 @@ Optional: run SEC-24 (UOM factor forced) only if UOM is a release risk. Seeding 
 | Q1 | Does `allow_free_gift_with_ff` apply only to gift kinds? | **Yes, but GWP depends on how the rule is built.** The checkbox governs `CONFIGURABLE_GIFT_KINDS` = free_item (Gift Pool included), gwp, cart_total_gift and brand_gift (`friends_and_family_gifts.py`). BXGY and Item Level lines are always blocked, whatever the checkbox says, and price rules compete. `classify_promotion` tests "Product + same_item" **before** the GWP type. ERPNext sets `same_item = 1` on any Product rule saved with no free item and no mixed conditions, so such a "GWP" classifies as **bxgy**: its lines get no F&F and its gift is always kept. A mixed-SKU GWP with a free item classifies as **gwp** and follows the checkbox. U-22 (ii) tests the gwp shape; the seed checks the kind. | The checkbox applies only to gift kinds. Update the Phase 1 UI step (P1-T8 Step 3(b)) to say so, and to note that a same-item GWP counts as Buy X Get Y. |
 | Q2 | Desk Sales Invoices that are not POS (`is_pos = 0`) for an F&F customer? | **No F&F, and no counting either.** `apply_friends_and_family_on_invoice` returns early when the invoice is not POS (`friends_and_family_apply.py`, the `is_pos_doc` check). The ledger counts only `is_pos = 1` (`ff_ledger.py`). So there is **no "applied but not counted" gap.** **Flag:** unlike Sales Orders and Quotations (`ff_non_invoice.strip_ff`), nothing strips F&F markers from an `is_pos = 0` Sales Invoice. A Desk or API user can save `posnext_*` markers with a manual discount, and it stays as an uncounted manual discount. Returns behave the same: `ledger_rows` is gated by `is_tracked`, so they are not counted either. | No F&F on Desk non-POS invoices until Phase 3. Decide whether Phase 3 adds a strip and log for them, as SO/Quotation have. |
 | Q3 | With Block submit, does the refusal come before payment? | **No. It comes after the payment is entered.** The throw is in `ff_ledger.on_submit`. In the POS the payment dialog completes first; then `useInvoice.submitInvoice` saves the draft with its payments (`update_invoice`) and calls `submit_invoice`, which throws. Offline sales are never blocked. The refusal is reachable only when the cap was used up between pricing and submit (U-38 b), because the cart already caps F&F at pricing time. The step-1 draft appears to stay behind; U-38 (b) records this. | The refusal comes before payment. That needs a re-check when Payment opens (§13b, the DPS-09 idea, Phase 4). Until then it is a known gap: the refusal comes after payment. |
-| Q4 | Buy X Get Y below its minimum? | **F&F applies, as the default says.** `ff_compatibility.block_ineligible_lines` skips a BXGY rule when the line qty is below its `min_qty`. Only `min_qty` is checked: a BXGY gated by `min_amt` or a `condition` still over-blocks. A line that already carries the rule in `pricing_rules` is blocked at any qty. U-21 (b) asserts the qty case. | Follow ERPNext: the rule does not apply, so F&F applies. Extend the check to `min_amt` and `condition` later. |
+| Q4 | Buy X Get Y below its minimum? | **F&F applies, as the default says.** The server judges each BXGY rule (tagged or not) and each Routine rule (only when tagged) by its own eligibility (posnext_promotions Rulings 119 and 121, `ff_compatibility.tag_blocks` / `rule_eligible_on_line`). That covers dates and times, company, profile, customer tree, one-time use, scope, and `min_qty` / `min_amt` on ERPNext's basis: stock qty against the rule row's UOM. A stale tag below the minimum no longer blocks. Exceptions: a rule with `mixed_conditions`, `is_cumulative` or `apply_rule_on_other` keeps blocking on its tag (fail closed), and `condition` is not evaluated. The cart still drops the rule from a line once the offer no longer applies (P2-T8q; U-21b). U-21 (b) asserts the qty case. | Follow ERPNext: the rule does not apply, so F&F applies. `condition` is not evaluated; cart-wide rules over-block on a stale tag. |
 | Q5 | Gift threshold basis (`allow_free_gift_with_ff = 1`)? | **After F&F.** In promotions' `apply_offers`, F&F runs first. `_fold_line_discounts` then feeds the post-F&F rates to ERPNext's transaction engine, so a cart-total gift's `min_amt` is measured on the net after line discounts, F&F included. When F&F loses to an order promotion, the cart without F&F is used. pos_next's free-row backing check (`invoices._offer_payload`) re-runs the evaluator on the rows at the rates charged, so the server agrees with the cart. With the checkbox off, the cart-total gift is dropped whenever any line has F&F. | Test as built (After F&F; U-22 iii). The Phase 3 setting `gift_threshold_basis` decides it later (Miraaya R11 wanted After; the neutral default in §7 is Before). |
 
 Questions dropped from the old E.4:
@@ -269,18 +270,19 @@ Questions dropped from the old E.4:
 - **Selectors:** only the existing `data-testid`s and `getByRole`. No page objects and no fixture framework.
 - **Data:** the seed script only. No reset between tests beyond clearing the cart.
 - **Mailpit:** read with `GET /api/v1/search?query=to:"<email>"`, take the code with `/\b\d{6}\b/`.
-- **Paths, one test each (11):**
+- **Paths, one test each (12):**
   1. U-01 OTP;
   2. U-06 badge + reload;
   3. U-09 F&F submit + INV-1;
   4. U-15 (a) line coupon;
   5. U-18 (b) CVF-03 + reload;
-  6. U-23 (a) BXGY free row;
-  7. U-25 stale offer;
-  8. U-29 (a) offline missing F&F (`context.setOffline`);
-  9. U-33 (a) receipt HTML artifact;
-  10. U-35 RTL screenshot;
-  11. U-38 (a) two-context race.
+  6. U-21b BXGY qty 1 → 2 → 1 brings F&F back;
+  7. U-23 (a) BXGY free row;
+  8. U-25 stale offer;
+  9. U-29 (a) offline missing F&F (`context.setOffline`);
+  10. U-33 (a) receipt HTML artifact;
+  11. U-35 RTL screenshot;
+  12. U-38 (a) two-context race.
 - **Growth rule:** add a path only when the same regression has escaped twice.
 
 ---
@@ -334,7 +336,7 @@ The cut current-phase rows are covered by the server suites:
 - the rest of OTP, ELG, FFP, BST, CPN, CVF, CMP, OFR, MAN, HDR, SO, DPS, PAY, RET, CAN, SEC, CUR and I18N;
 - the test files are `test_email_verification.py`, `test_otp_frappe_email.py`, `test_discount_enforcement.py`, `test_free_rows.py`, `test_ff_markers.py`, `test_security_hardening.py`, `test_coupon_usage.py`, `test_return_safety.py`, and the promotions F&F suites.
 
-## Appendix B. Manual ops checklist (not in the 52; the tester does these by hand)
+## Appendix B. Manual ops checklist (not in the 53; the tester does these by hand)
 
 - **O-1 Code and build.**
   - The apps are on their reviewed feature tips.
