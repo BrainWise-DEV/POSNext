@@ -103,6 +103,9 @@ fixtures = [
 
 # before_install = "pos_next.install.before_install"
 after_install = "pos_next.install.after_install"
+
+# Version gate: stops a migrate when a companion app is too old (runs on every migrate).
+before_migrate = ["pos_next.integrations.contract_gate.before_migrate"]
 after_migrate = "pos_next.install.after_migrate"
 
 # Uninstallation
