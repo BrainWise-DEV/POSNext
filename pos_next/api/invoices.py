@@ -1253,7 +1253,9 @@ def _offer_header_value(result, bases, apply_discount_on) -> float:
 	)
 
 
-def _check_header_discount(invoice_doc, offline_sync=False, paid_draft_header=None) -> None:
+def _check_header_discount(
+	invoice_doc, offline_sync=False, paid_draft_header=None, paid_draft_rates=None
+) -> None:
 	"""The invoice-level discount must be explained by the server, not the client.
 
 	Runs after ``calculate_taxes_and_totals`` and the paid-row check, on the header
@@ -1271,8 +1273,9 @@ def _check_header_discount(invoice_doc, offline_sync=False, paid_draft_header=No
 
 	An unexplained header refuses the save, except on an offline sync, or when a
 	stored paid draft already held a header no smaller, as an amount and as a share
-	of the total before it (Ruling 90): then it is kept and logged. When the offers
-	could not be evaluated, the refusal says so.
+	of the total before it (Ruling 90), on the same rows at rates no lower (Ruling
+	100): then it is kept and logged. When the offers could not be evaluated, the
+	refusal says so.
 	"""
 	if invoice_doc.get("is_return"):
 		return
@@ -1334,10 +1337,7 @@ def _check_header_discount(invoice_doc, offline_sync=False, paid_draft_header=No
 		problem = _(
 			"Invoice discount {0} could not be checked against the offers. Try again in a moment."
 		).format(flt(header, precision))
-	held = paid_draft_header
-	if offline_sync or (
-		held is not None and header <= held[0] + tolerance and header <= held[1] * base + tolerance
-	):
+	if offline_sync or _keeps_held_header(invoice_doc, paid_draft_header, paid_draft_rates):
 		reference = invoice_doc.name or invoice_doc.get("offline_id") or "new"
 		log_error_without_telemetry(UNEXPLAINED_DISCOUNT_LOG_TITLE, f"Invoice {reference}: {problem}")
 		return
@@ -1390,7 +1390,7 @@ def _set_payment_collected_flag(invoice_doc, payments):
 	invoice_doc.flags.pos_payment_collected = total > 0
 
 
-def _set_paid_draft_flag(invoice_doc, paid_draft_header):
+def _set_paid_draft_flag(invoice_doc, paid_draft_header, paid_draft_rates=None):
 	"""Flag the save as a stored paid draft keeping the header it held (Ruling 99).
 
 	Set only when the stored draft carried a payment and a header above one currency
@@ -1399,13 +1399,28 @@ def _set_paid_draft_flag(invoice_doc, paid_draft_header):
 	share of the total before it: Ruling 90 applied to the whole header. Benefit engines
 	read ``flags.pos_paid_draft`` to log, not refuse, that header (Ruling 97); any other
 	save gets no flag, so their online rules apply. pos_next's own coupon valuation is no
-	bound here (it counts F&F lines). Always assigned, so a stale value never survives.
+	bound here (it counts F&F lines). The rows must also be the held ones, at rates no
+	lower (``_keeps_held_rows``, Ruling 100). Always assigned, so a stale value never survives.
 	"""
-	invoice_doc.flags.pos_paid_draft = _keeps_held_header(invoice_doc, paid_draft_header)
+	invoice_doc.flags.pos_paid_draft = _keeps_held_header(invoice_doc, paid_draft_header, paid_draft_rates)
 
 
-def _keeps_held_header(invoice_doc, held) -> bool:
-	if held is None or invoice_doc.get("is_return"):
+def _keeps_held_rows(invoice_doc, held_rates) -> bool:
+	"""Every paid row is an (item, UOM) the stored paid draft held, at a rate no lower
+	(``held_rates``, see ``_paid_draft_rates``): the header stays on the lines it was
+	earned on (Ruling 100). A smaller quantity of the same rows keeps it."""
+	tolerance = 10 ** -cint(_currency_precision(invoice_doc.get("currency")))
+	for row in invoice_doc.get("items") or []:
+		if not row.get("item_code") or cint(row.get("is_free_item")) or flt(row.qty) <= 0:
+			continue
+		held_rate = (held_rates or {}).get((row.item_code, row.get("uom")))
+		if held_rate is None or flt(row.rate) < held_rate - tolerance:
+			return False
+	return True
+
+
+def _keeps_held_header(invoice_doc, held, held_rates) -> bool:
+	if held is None or invoice_doc.get("is_return") or not _keeps_held_rows(invoice_doc, held_rates):
 		return False
 	tolerance = 10 ** -cint(_currency_precision(invoice_doc.get("currency")))
 	if flt(held[0]) <= tolerance:
@@ -2455,9 +2470,14 @@ def _update_invoice(data: str | dict, offline_sync: bool = False) -> dict:
 		# none below list price without a reason the server confirms.
 		_refuse_zero_rate_after_totals(invoice_doc, lenient=offline_sync)
 		_check_paid_row_discounts(invoice_doc, offline_sync=offline_sync, paid_draft_rates=paid_draft_rates)
-		_check_header_discount(invoice_doc, offline_sync=offline_sync, paid_draft_header=paid_draft_header)
-		# After totals: the flag compares this save's header with the one the draft held.
-		_set_paid_draft_flag(invoice_doc, paid_draft_header)
+		_check_header_discount(
+			invoice_doc,
+			offline_sync=offline_sync,
+			paid_draft_header=paid_draft_header,
+			paid_draft_rates=paid_draft_rates,
+		)
+		# After totals: the flag compares this save's header and rows with the draft's.
+		_set_paid_draft_flag(invoice_doc, paid_draft_header, paid_draft_rates)
 
 		# Validate return rows after the totals, so the rates checked are the
 		# rates that will be saved
@@ -2868,7 +2888,8 @@ def submit_invoice(invoice: str | dict | None = None, data: str | dict | None = 
 
 	try:
 		invoice_name = invoice.get("name")
-		paid_draft_header = None  # set below when a stored paid draft is re-saved
+		# Set below when a stored paid draft is re-saved
+		paid_draft_header, paid_draft_rates = None, {}
 
 		# Get or create invoice
 		if not invoice_name or not frappe.db.exists(doctype, invoice_name):
@@ -2904,7 +2925,10 @@ def submit_invoice(invoice: str | dict | None = None, data: str | dict | None = 
 					invoice_doc, offline_sync=offline_sync, paid_draft_rates=paid_draft_rates
 				)
 				_check_header_discount(
-					invoice_doc, offline_sync=offline_sync, paid_draft_header=paid_draft_header
+					invoice_doc,
+					offline_sync=offline_sync,
+					paid_draft_header=paid_draft_header,
+					paid_draft_rates=paid_draft_rates,
 				)
 			# The draft was validated by update_invoice, but its rows and header
 			# discount may have been replaced by this payload, so redo both.
@@ -2921,7 +2945,7 @@ def submit_invoice(invoice: str | dict | None = None, data: str | dict | None = 
 		invoice_doc.flags.pos_offline_sync = bool(offline_id)
 		# Set again here: the draft made by update_invoice above is re-fetched.
 		_set_payment_collected_flag(invoice_doc, invoice.get("payments"))
-		_set_paid_draft_flag(invoice_doc, paid_draft_header)
+		_set_paid_draft_flag(invoice_doc, paid_draft_header, paid_draft_rates)
 
 		# Ensure update_stock is set for Sales Invoice
 		if doctype == "Sales Invoice":

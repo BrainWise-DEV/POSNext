@@ -247,6 +247,37 @@ class TestDiscountEnforcement(DiscountEnforcementCase):
 		doc = self._draft(self._payload(45, discount_percentage=10, price_list_rate=1000))
 		self.assertEqual((flt(doc.items[0].price_list_rate), flt(doc.items[0].rate)), (PRICE, 45))
 
+	# ---- price-list currency (Ruling 102) -----------------------------------
+
+	def _server_list_prices(self, payload):
+		doc = frappe.get_doc(payload)
+		item_data = invoices._ItemData()
+		item_data.load(row.item_code for row in doc.items)
+		return [invoices._list_prices(doc, doc.items, item_data)[id(row)] for row in doc.items]
+
+	def test_cross_currency_price_list_raw(self):
+		"""Ruling 102: a price list in another currency than the invoice is measured on the
+		raw Item Price, the number the cart sells, whatever exchange rates the invoice has."""
+		currency = frappe.db.get_value("Price List", self.ctx.price_list, "currency")
+		if not currency or currency == self.ctx.currency:
+			self.skipTest("The test price list is in the invoice currency")
+		payload = self._payload(PRICE)
+		payload.update(conversion_rate=1, plc_conversion_rate=1.5)
+		self.assertEqual(self._server_list_prices(payload), [PRICE])
+		doc = self._draft(dict(payload))
+		self.assertEqual((flt(doc.items[0].price_list_rate), flt(doc.items[0].rate)), (PRICE, PRICE))
+		# 40 is a rate edit against the raw 50, not against a converted list price.
+		over = self._payload(40, price_list_rate=40)
+		over.update(conversion_rate=1, plc_conversion_rate=1.5)
+		self.assertIn(f"list price of {flt(PRICE)}", self.assertRefused(over, RATE_EDIT_OFF))
+
+	def test_same_currency_unchanged(self):
+		"""An invoice in the price list's own currency takes the Item Price as it is."""
+		currency = frappe.db.get_value("Price List", self.ctx.price_list, "currency")
+		payload = self._payload(PRICE)
+		payload.update(currency=currency, conversion_rate=2, plc_conversion_rate=3)
+		self.assertEqual(self._server_list_prices(payload), [PRICE])
+
 	def _line_coupon(self, code, percentage=10):
 		if not frappe.db.has_column("POS Coupon", "apply_scope"):
 			self.skipTest("Line-level coupons are not installed")

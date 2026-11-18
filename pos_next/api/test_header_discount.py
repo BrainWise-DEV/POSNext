@@ -402,7 +402,7 @@ class TestHeaderDiscount(DiscountEnforcementCase):
 
 		self.assertEqual(set(self._paid_draft_flags(resave(5))), {True})
 		self.assertEqual(set(self._paid_draft_flags(resave(4))), {True})
-		self.assertNotIn(True, self._paid_draft_flags(resave(6)))
+		self.assertEqual(set(self._paid_draft_flags(resave(6))), {False})
 		self.assertEqual(
 			set(self._paid_draft_flags(lambda: self._paid(dict(self._header_payload(5), name=name), 5))),
 			{True},
@@ -419,6 +419,77 @@ class TestHeaderDiscount(DiscountEnforcementCase):
 			self._paid_draft_flags(lambda: self._paid(dict(self._header_payload(5), name=unpaid), 5)),
 		)
 		self.assertNotIn(True, self._paid_draft_flags(lambda: self._paid(self._header_payload(5), 5)))
+
+	def _coupon_payload(self, header, code, qty=1):
+		"""ITEM_A at list price (no F&F) with the invoice's 10% Grand Total coupon."""
+		payload = self._header_payload(header)
+		payload["items"][0]["qty"] = qty
+		payload["coupon_code"] = code
+		return payload
+
+	def test_paid_draft_header_moved_to_fnf_line_refused(self):
+		"""Ruling 100: a paid draft that held the coupon's 5 on 1 x 50 at list price is
+		re-saved, then submitted, with that line at F&F 35 and header 3.5 (within the held
+		amount and share): the line is no longer the one the header was earned on, so no
+		paid-draft leniency, and the coupon next to F&F is refused at both. Also with the
+		header on Net Total (rereview4's variant)."""
+		enable_ff(self, CUSTOMER, EMAIL_DOMAIN)
+		code = self._header_coupon(f"{HEADER_PREFIX}FC")
+		for apply_on in ("Grand Total", "Net Total"):
+			with self.subTest(apply_discount_on=apply_on):
+				name = self._stored_paid_draft(
+					dict(self._coupon_payload(5, code), apply_discount_on=apply_on)
+				)
+				self.assertEqual(flt(frappe.db.get_value("Sales Invoice", name, "discount_amount")), 5)
+				moved = dict(self._fnf_coupon_payload(3.5, code), apply_discount_on=apply_on)
+				with self.assertRaises(frappe.ValidationError) as caught:
+					self._resave_paid(dict(moved), name)
+				self.assertIn(f"is more than coupon {code} gives", str(caught.exception))
+				with self.assertRaises(frappe.ValidationError) as caught:
+					self._paid(dict(moved, name=name), 3.5)
+				self.assertIn(f"is more than coupon {code} gives", str(caught.exception))
+
+	def test_paid_draft_header_moved_to_other_lines_refused(self):
+		"""Ruling 100: a paid draft that held the "Better of the two" coupon's 32 on 2 x ITEM_B
+		at 80 is re-saved, then submitted, as ITEM_A at 45 (its 10% rule) + ITEM_B at 80 with
+		header 25 (within the held 32 and 20%): ITEM_A was never held, so refused at both."""
+		code = self._header_coupon(
+			f"{HEADER_PREFIX}BETTER", 20, max_amount=100, promotion_conflict="Better of the two"
+		)
+		rule = self._price_rule(10)
+		held = self._payload(80, item=ITEM_B)
+		held["items"][0]["qty"] = 2
+		held.update(discount_amount=32, coupon_code=code)
+		name = self._stored_paid_draft(held)
+		self.assertEqual(flt(frappe.db.get_value("Sales Invoice", name, "discount_amount")), 32)
+		# Refused by the coupon's own cap, which applies only when not flagged a paid draft.
+		with self.assertRaises(frappe.ValidationError) as caught:
+			self._resave_paid(self._better_payload(25, code, rule), name)
+		self.assertIn(f"is more than coupon {code} gives", str(caught.exception))
+		with self.assertRaises(frappe.ValidationError) as caught:
+			self._paid(dict(self._better_payload(25, code, rule), name=name), 25)
+		self.assertIn(f"is more than coupon {code} gives", str(caught.exception))
+
+	def test_paid_draft_smaller_cart_same_rows_logged(self):
+		"""Ruling 100 keeps Ruling 97's case: a paid draft that held 10.5 next to 3 x F&F 35
+		is submitted as 1 x F&F 35 with 3.5 (the same row, rate and share): flagged a paid
+		draft, so the header is kept (promotions logs it)."""
+		enable_ff(self, CUSTOMER, EMAIL_DOMAIN)
+		code = self._header_coupon(f"{HEADER_PREFIX}FC")
+		payload = self._fnf_coupon_payload(0, code)
+		payload["items"][0]["qty"] = 3
+		name = self._stored_paid_draft(payload)
+		frappe.db.set_value(
+			"Sales Invoice",
+			name,
+			{"discount_amount": 10.5, "base_discount_amount": 10.5, "net_total": 94.5, "grand_total": 94.5},
+		)
+		docs = []
+		flags = self._paid_draft_flags(
+			lambda: docs.append(self._paid(dict(self._fnf_coupon_payload(3.5, code), name=name), 3.5))
+		)
+		self.assertEqual(set(flags), {True})
+		self.assertEqual((docs[0].docstatus, flt(docs[0].discount_amount)), (1, 3.5))
 
 	def test_paid_coupon_header_with_fnf_above_coupon_refused(self):
 		"""Probe P3: promotions only logs a header next to F&F rows on a paid invoice."""
