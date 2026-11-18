@@ -476,12 +476,12 @@ def get_item_variants(template_item, pos_profile):
 		variant_filters = {"variant_of": template_item, "disabled": 0, "is_sales_item": 1}
 
 		# Add company filter to show items for specific company + global items
-		if pos_profile_doc.company:
-			variant_filters["ifnull(custom_company, '')"] = ["in", [pos_profile_doc.company, ""]]
+		company_or_filters = _company_or_filters(pos_profile_doc.company)
 
 		variants = frappe.get_all(
 			"Item",
 			filters=variant_filters,
+			or_filters=company_or_filters,
 			fields=[
 				"name as item_code",
 				"item_name",
@@ -599,6 +599,16 @@ def get_item_variants(template_item, pos_profile):
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Item Variants Error")
 		frappe.throw(_("Error fetching item variants: {0}").format(str(e)))
+
+
+def _company_or_filters(company):
+	"""OR filters matching items of `company` or global items (no company).
+
+	Frappe v16 rejects SQL expressions such as ifnull() as filter keys.
+	"""
+	if not company:
+		return None
+	return [["custom_company", "=", company], ["custom_company", "is", "not set"]]
 
 
 def _build_item_base_conditions(pos_profile_doc, item_group=None):
@@ -953,7 +963,7 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20)
 		filters = {
 			"disabled": 0,
 			"is_sales_item": 1,  # Only show items with "Allow Sales" enabled
-			"ifnull(variant_of, '')": "",  # Exclude items that are variants of a template
+			"variant_of": ["is", "not set"],  # Exclude items that are variants of a template
 		}
 
 		# IMPORTANT: Filtering logic explained:
@@ -963,8 +973,7 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20)
 
 		# Add company filter - show items for specific company + global items (empty company)
 		# Global items (custom_company is empty) are available to all companies
-		if pos_profile_doc.company:
-			filters["ifnull(custom_company, '')"] = ["in", [pos_profile_doc.company, ""]]
+		company_or_filters = _company_or_filters(pos_profile_doc.company)
 
 		# Add item group filter if provided
 		if item_group:
@@ -1019,6 +1028,7 @@ def get_items(pos_profile, search_term=None, item_group=None, start=0, limit=20)
 			items = frappe.get_list(
 				"Item",
 				filters=filters,
+				or_filters=company_or_filters,
 				fields=[
 					"name as item_code",
 					"item_name",
