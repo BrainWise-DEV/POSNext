@@ -120,6 +120,17 @@ class TestOtpFrappeEmail(FrappeTestCase):
 		self.assertEqual(h["fix_url"], "/app/email-account")
 
 	def test_health_ok_on_dev_site(self):
+		# Own fixture: a default outgoing Email Account, created if the site has none.
 		if not frappe.db.get_value("Email Account", {"default_outgoing": 1, "enable_outgoing": 1}):
-			self.skipTest("no default outgoing Email Account")
+			frappe.get_doc(
+				{
+					"doctype": "Email Account",
+					"email_id": "pnxt-test-outgoing@example.com",
+					"email_account_name": "_PNXT_TEST_OUTGOING",
+					"enable_outgoing": 1,
+					"default_outgoing": 1,
+					"smtp_server": "localhost",
+					"smtp_port": 25,
+				}
+			).insert(ignore_permissions=True)
 		self.assertTrue(self.p.health()["ok"])

@@ -41,14 +41,14 @@ class TestCustomersAPI(unittest.TestCase):
 			],
 		)
 
-	@patch("pos_next.api.customers.frappe.db.rollback")
-	def test_get_default_loyalty_program_from_settings_uses_explicit_pos_profile(self, mock_db):
-		mock_db.get_value.return_value = "LOYALTY-A"
+	@patch("pos_next.api.customers.frappe.db.get_value")
+	def test_get_default_loyalty_program_from_settings_uses_explicit_pos_profile(self, mock_get_value):
+		mock_get_value.return_value = "LOYALTY-A"
 
 		result = get_default_loyalty_program_from_settings(pos_profile="POS-A")
 
 		self.assertEqual(result, "LOYALTY-A")
-		mock_db.get_value.assert_called_once_with(
+		mock_get_value.assert_called_once_with(
 			"POS Settings",
 			{"enabled": 1, "pos_profile": "POS-A"},
 			"default_loyalty_program",

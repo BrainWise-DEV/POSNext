@@ -26,6 +26,7 @@ from pos_next.integrations import otp
 from pos_next.integrations import otp_frappe_email as frappe_email
 from pos_next.patches.v2_5_0 import pos_settings_verification_permlevel as perm_patch
 from pos_next.pos_next.doctype.pos_settings.pos_settings import update_pos_settings
+from pos_next.test_fixtures import ensure_pos_profile
 from pos_next.test_promotions import (
 	ITEM_C,
 	_cart_payload,
@@ -102,12 +103,7 @@ class TestSecurityHardening(FrappeTestCase):
 		super().setUpClass()
 		cls.ctx = _ctx()
 		cls.profile_a = cls.ctx.pos_profile
-		others = frappe.get_all(
-			"POS Profile", filters={"name": ["!=", cls.profile_a], "disabled": 0}, pluck="name", limit=1
-		)
-		if not others:
-			raise unittest.SkipTest("Needs a second POS Profile")
-		cls.profile_b = others[0]
+		cls.profile_b = ensure_pos_profile("_PNXT_TEST_SECURITY_PROFILE_B")
 		_ensure_user(CASHIER, CASHIER_ROLE)
 		_ensure_user(MANAGER, MANAGER_ROLE)
 		profile = frappe.get_doc("POS Profile", cls.profile_a)

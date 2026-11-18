@@ -6,6 +6,7 @@ from frappe.tests.utils import FrappeTestCase
 
 from pos_next.api.constants import DEFAULT_POS_SETTINGS
 from pos_next.integrations import otp
+from pos_next.test_fixtures import ensure_pos_profile
 
 NEW_KEYS = {
 	"verification_provider": "",
@@ -36,10 +37,7 @@ class TestPOSSettingsVerification(FrappeTestCase):
 		self.addCleanup(lambda: setattr(frappe.local, "pos_next_otp_providers", None))
 
 	def _profiles(self, n):
-		names = frappe.get_all("POS Profile", filters={"disabled": 0}, pluck="name", limit=n)
-		if len(names) < n:
-			self.skipTest(f"Need {n} POS Profiles")
-		return names
+		return [ensure_pos_profile(f"_PNXT_TEST_VERIFY_PROFILE_{i}") for i in range(n)]
 
 	def _settings_for(self, profile):
 		name = frappe.db.get_value("POS Settings", {"pos_profile": profile})

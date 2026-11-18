@@ -129,9 +129,9 @@ def create_customer(
 	    pos_profile (str): POS Profile (optional, preferred for context-aware loyalty assignment)
 	    custom_governorate (str): Governorate (optional)
 	    custom_district (str): District (optional, must belong to the governorate)
-	    custom_first_name (str): First name for Magento sync (required when masar_miraaya installed)
-	    custom_last_name (str): Last name for Magento sync (required when masar_miraaya installed)
-	    custom_is_publish (int): Publish customer to Magento (default 1)
+	    custom_first_name (str): First name (required when the customer sync provider requires split names)
+	    custom_last_name (str): Last name (required when the customer sync provider requires split names)
+	    custom_is_publish (int): Publish customer to the external store (default 1)
 
 	Returns:
 	    dict: Created customer document

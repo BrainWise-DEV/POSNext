@@ -18,7 +18,21 @@ jobs:
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
-    name: Server
+      matrix:
+        include:
+          - leg: core
+            satellites: false
+          # Installs the satellite apps too and migrates twice: proves the rollout
+          # gate (a before_migrate hook) passes on compatible branches and that
+          # migrate is idempotent.
+          - leg: with-satellites
+            satellites: true
+    name: Server (${{ matrix.leg }})
+
+    env:
+      # Compatible satellite branches; a repo variable overrides them.
+      PROMOTIONS_REF: ${{ vars.PROMOTIONS_REF || 'feature/friends-family-fixes' }}
+      MAGENTO_REF: ${{ vars.MAGENTO_REF || 'feature/friends-family-magento-otp' }}
 
     services:
       redis-cache:
@@ -78,6 +92,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-yarn-
 
+      - name: Run Frontend Tests
+        if: matrix.leg == 'core'
+        working-directory: POS
+        run: yarn install --frozen-lockfile && yarn test:run
+
       - name: Install MariaDB Client
         run: |
           sudo apt-get update
@@ -95,14 +114,30 @@ jobs:
         run: |
           bench get-app erpnext --branch version-15
           bench get-app pos_next $GITHUB_WORKSPACE
+          if [ "${{ matrix.satellites }}" = "true" ]; then
+            bench get-app posnext_promotions --branch "$PROMOTIONS_REF" --skip-assets https://github.com/BrainWise-DEV/Promotions
+            bench get-app magento_integration --branch "$MAGENTO_REF" --skip-assets https://github.com/BrainWise-DEV/magento_integration
+          fi
           bench setup requirements --dev
           uv pip install 'setuptools>=71,<82' --python env/bin/python
           bench new-site --db-root-password root --admin-password admin test_site
           bench --site test_site install-app erpnext
           bench --site test_site install-app pos_next
+          if [ "${{ matrix.satellites }}" = "true" ]; then
+            bench --site test_site install-app posnext_promotions magento_integration
+          fi
           bench build
         env:
           CI: 'Yes'
+
+      # Twice: the first run exercises the version gate (before_migrate hook) and the
+      # patches, the second proves they are idempotent.
+      - name: Migrate twice (gates and patch idempotency)
+        if: matrix.satellites
+        working-directory: /home/runner/frappe-bench
+        run: |
+          bench --site test_site migrate
+          bench --site test_site migrate
 
       - name: Run Promotion Tests
         working-directory: /home/runner/frappe-bench
@@ -127,5 +162,23 @@ jobs:
         run: |
           bench --site test_site run-tests --module pos_next.test_ar_translations
           bench --site test_site run-tests --module pos_next.api.test_localization
+        env:
+          TYPE: server
+
+      - name: Run Friends & Family Tests
+        working-directory: /home/runner/frappe-bench
+        run: |
+          bench --site test_site set-config allow_tests true
+          bench --site test_site run-tests --module pos_next.api.test_email_verification
+          bench --site test_site run-tests --module pos_next.integrations.test_otp_registry
+          bench --site test_site run-tests --module pos_next.integrations.test_otp_frappe_email
+          bench --site test_site run-tests --module pos_next.integrations.test_benefit_registry
+          bench --site test_site run-tests --module pos_next.integrations.test_contract_gate
+          bench --site test_site run-tests --module pos_next.test_no_promotions_import
+          bench --site test_site run-tests --module pos_next.pos_next.doctype.pos_settings.test_pos_settings_verification
+          bench --site test_site run-tests --module pos_next.api.test_return_safety
+          bench --site test_site run-tests --module pos_next.api.test_coupon_usage
+          bench --site test_site run-tests --module pos_next.api.test_verified_email_unique
+          bench --site test_site run-tests --module pos_next.api.test_security_hardening
         env:
           TYPE: server
