@@ -48,7 +48,9 @@ ITEM_DISCOUNT_OFF = "item discounts are not allowed"
 OVER_LIMIT = "maximum allowed discount"
 
 
-class TestDiscountEnforcement(FrappeTestCase):
+class DiscountEnforcementCase(FrappeTestCase):
+	"""Fixtures and helpers shared with the header-discount tests (no tests of its own)."""
+
 	@classmethod
 	def setUpClass(cls):
 		super().setUpClass()
@@ -151,6 +153,8 @@ class TestDiscountEnforcement(FrappeTestCase):
 		self.addCleanup(frappe.delete_doc, "Pricing Rule", name, force=True, ignore_permissions=True)
 		return name
 
+
+class TestDiscountEnforcement(DiscountEnforcementCase):
 	# ---- manual edits -------------------------------------------------------
 
 	def test_unflagged_low_rate_refused(self):

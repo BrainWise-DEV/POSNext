@@ -958,8 +958,10 @@ def _zero_price_message(row) -> str:
 UNEXPLAINED_DISCOUNT_LOG_TITLE = "Unexplained discount"
 FNF_DISCOUNT_SOURCE = "friends_and_family"
 FIELD_ALLOW_USER_TO_EDIT_ITEM_DISCOUNT = "allow_user_to_edit_item_discount"
+FIELD_ALLOW_USER_TO_EDIT_ADDITIONAL_DISCOUNT = "allow_user_to_edit_additional_discount"
 # POS Settings defaults (pos_settings.json) when a profile has no POS Settings row.
 DISCOUNT_SETTING_DEFAULTS = {
+	FIELD_ALLOW_USER_TO_EDIT_ADDITIONAL_DISCOUNT: 0,
 	FIELD_ALLOW_USER_TO_EDIT_ITEM_DISCOUNT: 1,
 	FIELD_ALLOW_USER_TO_EDIT_RATE: 0,
 	FIELD_MAX_DISCOUNT_ALLOWED: 0,
@@ -971,9 +973,13 @@ def _promotions_evaluates_offers() -> bool:
 	return frappe.override_whitelisted_method(APPLY_OFFERS_METHOD) != APPLY_OFFERS_METHOD
 
 
+def _carries_payment(doc) -> bool:
+	return sum(flt(row.get("amount")) for row in doc.get("payments") or []) > 0
+
+
 def _paid_draft_rates(doc) -> dict:
 	"""Lowest rate per (item, UOM) on a stored draft that carries a payment, else {}."""
-	if sum(flt(row.get("amount")) for row in doc.get("payments") or []) <= 0:
+	if not _carries_payment(doc):
 		return {}
 	rates = {}
 	for row in doc.get("items") or []:
@@ -1062,10 +1068,18 @@ def _manual_discount_problem(row, list_price, unexplained, tolerance, settings) 
 	taken = flt(unexplained / list_price * 100, 2)
 	if limit > 0 and taken > limit:
 		return _(
-			"Row {0}: item {1} is reduced from {2} to {3} ({4}%), above the maximum allowed discount "
-			"of {5}%."
+			"Row {0}: item {1} is reduced from {2} to {3} ({4}%), above the maximum allowed discount of {5}%."
 		).format(*prices, taken, limit)
 	return None
+
+
+def _paid_rows(invoice_doc) -> list:
+	"""The invoice's paid item rows, in order: the rows the shared evaluator call sees."""
+	return [
+		row
+		for row in invoice_doc.get("items") or []
+		if row.get("item_code") and not cint(row.get("is_free_item"))
+	]
 
 
 def _check_paid_row_discounts(invoice_doc, offline_sync=False, paid_draft_rates=None) -> None:
@@ -1095,11 +1109,7 @@ def _check_paid_row_discounts(invoice_doc, offline_sync=False, paid_draft_rates=
 	"""
 	if invoice_doc.get("is_return"):
 		return
-	paid_rows = [
-		row
-		for row in invoice_doc.get("items") or []
-		if row.get("item_code") and not cint(row.get("is_free_item"))
-	]
+	paid_rows = _paid_rows(invoice_doc)
 	rows = [row for row in paid_rows if flt(row.qty) > 0 and flt(row.rate) > 0]
 	if not rows:
 		return
@@ -1157,6 +1167,183 @@ def _check_paid_row_discounts(invoice_doc, offline_sync=False, paid_draft_rates=
 		log_error_without_telemetry(UNEXPLAINED_DISCOUNT_LOG_TITLE, f"Invoice {reference}: {problem}")
 
 
+def _paid_draft_header(doc) -> tuple[float, float] | None:
+	"""(header discount, its share of the total before it) of a stored draft that
+	carries a payment, else None. The stored totals give the share, as 8k's paid-draft
+	rule is per unit."""
+	if not _carries_payment(doc):
+		return None
+	header = flt(doc.get("discount_amount"))
+	base = _header_discount_bases(doc).get(cstr(doc.get("apply_discount_on")) or "Grand Total") or 0
+	return header, header / base if base > 0 else 0
+
+
+def _header_discount_bases(invoice_doc) -> dict[str, float]:
+	"""Totals before the header discount, after ``calculate_taxes_and_totals``:
+	{"Net Total": ..., "Grand Total": ...}.
+
+	ERPNext takes the header discount off the totals it applies to, so adding it
+	back gives the total it was taken from. Its percentage is worked out on that
+	total, minus any Actual taxes for "Grand Total", so this base is never smaller.
+	"""
+	discount = flt(invoice_doc.get("discount_amount"))
+	net, grand = flt(invoice_doc.get("net_total")), flt(invoice_doc.get("grand_total"))
+	if cstr(invoice_doc.get("apply_discount_on")) == "Net Total":
+		return {"Net Total": net + discount, "Grand Total": grand + discount * (grand / net if net else 1)}
+	return {"Net Total": net + discount * (net / grand if grand else 1), "Grand Total": grand + discount}
+
+
+def _coupon_header_left_to_promotions(invoice_doc, paid) -> bool:
+	"""Promotions caps a POS Coupon's header discount on an unpaid POS Sales Invoice
+	(its validate hook). A paid invoice is never re-priced there, and its header next
+	to F&F rows is only logged (Ruling 89), so pos_next judges a paid one itself."""
+	from pos_next.pos_next.doctype.pos_coupon.pos_coupon import resolve_coupon_name
+
+	return (
+		not paid
+		and invoice_doc.doctype == DOCTYPE_SALES_INVOICE
+		and cint(invoice_doc.get("is_pos"))
+		and frappe.override_whitelisted_method(COUPON_DISCOUNT_METHOD) != COUPON_DISCOUNT_METHOD
+		and bool(resolve_coupon_name(invoice_doc.get("coupon_code")))
+	)
+
+
+def _coupon_header_value(invoice_doc, bases) -> float:
+	"""What the invoice's POS Coupon gives as a header discount, in invoice currency.
+
+	pos_next's own coupon rule (``check_coupon_code`` + ``apply_coupon_discount``) on
+	the totals before the header. Coupon amounts are company currency. An invalid or
+	unknown coupon, or one whose check fails, gives 0.
+	"""
+	from pos_next.pos_next.doctype.pos_coupon.pos_coupon import apply_coupon_discount, check_coupon_code
+
+	code = invoice_doc.get("coupon_code")
+	conversion_rate = flt(invoice_doc.get("conversion_rate")) or 1
+	message_count = len(frappe.local.message_log or [])
+	try:
+		check = check_coupon_code(
+			code, customer=invoice_doc.get("customer"), company=invoice_doc.get("company")
+		)
+		if not check.get("valid"):
+			return 0
+		value = apply_coupon_discount(
+			check["coupon"], bases["Grand Total"] * conversion_rate, bases["Net Total"] * conversion_rate
+		)
+	except Exception as error:
+		# A failing check explains nothing; its own msgprint must not reach the cashier.
+		del frappe.local.message_log[message_count:]
+		log_error_without_telemetry(
+			UNEXPLAINED_DISCOUNT_LOG_TITLE,
+			f"Coupon {code}: could not be resolved ({type(error).__name__}: {error})",
+		)
+		return 0
+	return flt(value.get("discount")) / conversion_rate if value.get("valid") else 0
+
+
+def _offer_header_value(result, bases, apply_discount_on) -> float:
+	"""Header discount the server-evaluated transaction offers give (0 when none fired).
+
+	The evaluators work it out on a fresh document, so it is never the client's
+	header echoed back. A percentage is valued on this invoice's base.
+	"""
+	base = bases.get(cstr(result.get("apply_discount_on")) or apply_discount_on) or 0
+	return max(
+		flt(result.get("discount_amount")),
+		base * flt(result.get("additional_discount_percentage")) / 100,
+	)
+
+
+def _check_header_discount(invoice_doc, offline_sync=False, paid_draft_header=None) -> None:
+	"""The invoice-level discount must be explained by the server, not the client.
+
+	Runs after ``calculate_taxes_and_totals`` and the paid-row check, on the header
+	that will be saved (``discount_amount``, worked out from any percentage). It is
+	explained, the larger of the two (the cart never combines them), by:
+	- the invoice's coupon: on an unpaid POS Sales Invoice with promotions,
+	  promotions caps a POS Coupon's header itself, so nothing is checked here;
+	  otherwise (also any paid one) pos_next's POS Coupon value (``_coupon_header_value``);
+	- the transaction offers the server evaluates for the paid rows (the shared
+	  ``_PricingContext`` call, no second one).
+	The rest is a manual invoice discount: it needs Allow Additional Discount, and
+	Max Discount Percentage Allowed (0 = no limit) caps it as a percentage of the
+	total before the header it applies to (``apply_discount_on``), separately from
+	the line cap. Tolerance: one unit of the currency precision.
+
+	An unexplained header refuses the save, except on an offline sync, or when a
+	stored paid draft already held a header no smaller, as an amount and as a share
+	of the total before it (Ruling 90): then it is kept and logged. When the offers
+	could not be evaluated, the refusal says so.
+	"""
+	if invoice_doc.get("is_return"):
+		return
+	header = flt(invoice_doc.get("discount_amount"))
+	precision = cint(_currency_precision(invoice_doc.get("currency")))
+	tolerance = 10**-precision
+	if header <= tolerance:
+		return
+	code = invoice_doc.get("coupon_code")
+	paid = bool(
+		offline_sync
+		or invoice_doc.get("offline_id")
+		or paid_draft_header is not None
+		or _carries_payment(invoice_doc)
+	)
+	if code and _coupon_header_left_to_promotions(invoice_doc, paid):
+		return
+	bases = _header_discount_bases(invoice_doc)
+	apply_discount_on = cstr(invoice_doc.get("apply_discount_on")) or "Grand Total"
+	coupon = _coupon_header_value(invoice_doc, bases) if code else 0
+	offers, evaluator_error = 0, None
+	if header - coupon > tolerance:
+		result, evaluator_error = _pricing_context(invoice_doc).paid_offers(_paid_rows(invoice_doc))
+		offers = _offer_header_value(result, bases, apply_discount_on)
+	explained, source = (
+		(coupon, _("coupon {0}").format(code)) if coupon >= offers else (offers, _("the offers"))
+	)
+	manual = header - explained
+	if manual <= tolerance:
+		return
+
+	explanation = (
+		_("{0} of it is given by {1}").format(flt(explained, precision), source)
+		if explained > tolerance
+		else _("no coupon or offer gives it")
+	)
+	settings = _discount_settings(invoice_doc.get("pos_profile"))
+	base = bases.get(apply_discount_on, bases["Grand Total"])
+	limit = flt(settings[FIELD_MAX_DISCOUNT_ALLOWED])
+	if not cint(settings[FIELD_ALLOW_USER_TO_EDIT_ADDITIONAL_DISCOUNT]):
+		problem = _(
+			"Invoice discount {0} ({1}): manual invoice discounts are not allowed for this POS Profile."
+		).format(flt(header, precision), explanation)
+	elif limit > 0 and manual > base * limit / 100 + tolerance:
+		problem = _(
+			"Invoice discount {0} ({1}): the manual part {2} is {3}% of {4}, above the maximum allowed "
+			"invoice discount of {5}%."
+		).format(
+			flt(header, precision),
+			explanation,
+			flt(manual, precision),
+			flt(manual / base * 100, 2) if base > 0 else 100,
+			flt(base, precision),
+			limit,
+		)
+	else:
+		return
+	if evaluator_error:
+		problem = _(
+			"Invoice discount {0} could not be checked against the offers. Try again in a moment."
+		).format(flt(header, precision))
+	held = paid_draft_header
+	if offline_sync or (
+		held is not None and header <= held[0] + tolerance and header <= held[1] * base + tolerance
+	):
+		reference = invoice_doc.name or invoice_doc.get("offline_id") or "new"
+		log_error_without_telemetry(UNEXPLAINED_DISCOUNT_LOG_TITLE, f"Invoice {reference}: {problem}")
+		return
+	_refuse(problem, UNEXPLAINED_DISCOUNT_LOG_TITLE)
+
+
 def _validate_invoice_profile(payload):
 	"""The caller must be allowed to use the payload's POS Profile (required).
 
@@ -1201,6 +1388,32 @@ def _set_payment_collected_flag(invoice_doc, payments):
 	"""
 	total = sum(flt(row.get("amount")) for row in (payments or []) if isinstance(row, dict))
 	invoice_doc.flags.pos_payment_collected = total > 0
+
+
+def _set_paid_draft_flag(invoice_doc, paid_draft_header):
+	"""Flag the save as a stored paid draft keeping the header it held (Ruling 99).
+
+	Set only when the stored draft carried a payment and a header above one currency
+	unit (``paid_draft_header``, see ``_paid_draft_header``), and this save's header
+	(after ``calculate_taxes_and_totals``) is no larger than it, as an amount and as a
+	share of the total before it: Ruling 90 applied to the whole header. Benefit engines
+	read ``flags.pos_paid_draft`` to log, not refuse, that header (Ruling 97); any other
+	save gets no flag, so their online rules apply. pos_next's own coupon valuation is no
+	bound here (it counts F&F lines). Always assigned, so a stale value never survives.
+	"""
+	invoice_doc.flags.pos_paid_draft = _keeps_held_header(invoice_doc, paid_draft_header)
+
+
+def _keeps_held_header(invoice_doc, held) -> bool:
+	if held is None or invoice_doc.get("is_return"):
+		return False
+	tolerance = 10 ** -cint(_currency_precision(invoice_doc.get("currency")))
+	if flt(held[0]) <= tolerance:
+		return False
+	header = flt(invoice_doc.get("discount_amount"))
+	apply_discount_on = cstr(invoice_doc.get("apply_discount_on")) or "Grand Total"
+	base = _header_discount_bases(invoice_doc).get(apply_discount_on) or 0
+	return header <= flt(held[0]) + tolerance and header <= flt(held[1]) * base + tolerance
 
 
 def _apply_pos_sales_team(invoice_doc, sales_team_data=None, pos_profile=None):
@@ -1994,12 +2207,13 @@ def _update_invoice(data: str | dict, offline_sync: bool = False) -> dict:
 		standardize_pricing_rules(data.get("items"))
 
 		# Create or update invoice
-		paid_draft_free, stored_sources, paid_draft_rates = {}, set(), {}
+		paid_draft_free, stored_sources, paid_draft_rates, paid_draft_header = {}, set(), {}, None
 		if data.get("name"):
 			invoice_doc = frappe.get_doc(doctype, data.get("name"))
 			paid_draft_free = _paid_draft_free_qty(invoice_doc)
 			stored_sources = _stored_line_sources(invoice_doc)
 			paid_draft_rates = _paid_draft_rates(invoice_doc)
+			paid_draft_header = _paid_draft_header(invoice_doc)
 			invoice_doc.update(data)
 		else:
 			invoice_doc = frappe.get_doc(data)
@@ -2241,6 +2455,9 @@ def _update_invoice(data: str | dict, offline_sync: bool = False) -> dict:
 		# none below list price without a reason the server confirms.
 		_refuse_zero_rate_after_totals(invoice_doc, lenient=offline_sync)
 		_check_paid_row_discounts(invoice_doc, offline_sync=offline_sync, paid_draft_rates=paid_draft_rates)
+		_check_header_discount(invoice_doc, offline_sync=offline_sync, paid_draft_header=paid_draft_header)
+		# After totals: the flag compares this save's header with the one the draft held.
+		_set_paid_draft_flag(invoice_doc, paid_draft_header)
 
 		# Validate return rows after the totals, so the rates checked are the
 		# rates that will be saved
@@ -2651,6 +2868,7 @@ def submit_invoice(invoice: str | dict | None = None, data: str | dict | None = 
 
 	try:
 		invoice_name = invoice.get("name")
+		paid_draft_header = None  # set below when a stored paid draft is re-saved
 
 		# Get or create invoice
 		if not invoice_name or not frappe.db.exists(doctype, invoice_name):
@@ -2667,6 +2885,7 @@ def submit_invoice(invoice: str | dict | None = None, data: str | dict | None = 
 			paid_draft_free = _paid_draft_free_qty(invoice_doc)
 			stored_sources = _stored_line_sources(invoice_doc)
 			paid_draft_rates = _paid_draft_rates(invoice_doc)
+			paid_draft_header = _paid_draft_header(invoice_doc)
 			invoice_doc.update(invoice)
 			if not invoice_doc.get("customer") and existing_customer:
 				invoice_doc.customer = existing_customer
@@ -2684,6 +2903,9 @@ def submit_invoice(invoice: str | dict | None = None, data: str | dict | None = 
 				_check_paid_row_discounts(
 					invoice_doc, offline_sync=offline_sync, paid_draft_rates=paid_draft_rates
 				)
+				_check_header_discount(
+					invoice_doc, offline_sync=offline_sync, paid_draft_header=paid_draft_header
+				)
 			# The draft was validated by update_invoice, but its rows and header
 			# discount may have been replaced by this payload, so redo both.
 			# Validating before totals is safe here: it checks only row links,
@@ -2699,6 +2921,7 @@ def submit_invoice(invoice: str | dict | None = None, data: str | dict | None = 
 		invoice_doc.flags.pos_offline_sync = bool(offline_id)
 		# Set again here: the draft made by update_invoice above is re-fetched.
 		_set_payment_collected_flag(invoice_doc, invoice.get("payments"))
+		_set_paid_draft_flag(invoice_doc, paid_draft_header)
 
 		# Ensure update_stock is set for Sales Invoice
 		if doctype == "Sales Invoice":

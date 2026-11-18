@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { manualDiscountError } from "../manualDiscount";
+import { capInvoiceDiscount, manualDiscountError } from "../manualDiscount";
 
 beforeAll(() => {
 	globalThis.__ = (s, args) => (args ? s.replace(/\{(\d)\}/g, (_, i) => args[i]) : s);
@@ -41,5 +41,54 @@ describe("manualDiscountError", () => {
 		expect(
 			manualDiscountError(line({ rate: 45, discountPercentage: 10, maxDiscount: 15 }))
 		).toContain("19.00%");
+	});
+});
+
+describe("capInvoiceDiscount (invoice-level discount, as the server caps it)", () => {
+	const cap = (fields) =>
+		capInvoiceDiscount({ value: 0, isPercentage: false, base: 45, maxDiscount: 0, ...fields });
+
+	it("an amount within the limit is kept", () => {
+		expect(cap({ value: 4.5, maxDiscount: 10 })).toEqual({
+			amount: 4.5,
+			value: 4.5,
+			limited: false,
+		});
+	});
+
+	it("an amount above the limit is cut to the limit of the base after line discounts", () => {
+		expect(cap({ value: 5, maxDiscount: 10 })).toEqual({
+			amount: 4.5,
+			value: 4.5,
+			limited: true,
+		});
+	});
+
+	it("a percentage converts on the base after line discounts and is cut to the limit", () => {
+		expect(cap({ value: 10, isPercentage: true, maxDiscount: 10 })).toEqual({
+			amount: 4.5,
+			value: 10,
+			limited: false,
+		});
+		expect(cap({ value: 30, isPercentage: true, maxDiscount: 10 })).toEqual({
+			amount: 4.5,
+			value: 10,
+			limited: true,
+		});
+	});
+
+	it("0 = no limit, but never more than the base", () => {
+		expect(cap({ value: 40 })).toEqual({ amount: 40, value: 40, limited: false });
+		expect(cap({ value: 60 })).toEqual({ amount: 45, value: 45, limited: false });
+		expect(cap({ value: 150, isPercentage: true })).toEqual({
+			amount: 45,
+			value: 100,
+			limited: false,
+		});
+	});
+
+	it("negative or empty input is no discount", () => {
+		expect(cap({ value: -5 })).toEqual({ amount: 0, value: 0, limited: false });
+		expect(cap({ value: "" })).toEqual({ amount: 0, value: 0, limited: false });
 	});
 });

@@ -92,6 +92,31 @@ describe("CouponDialog coupon vs F&F per line", () => {
 		expect(discount.suppress_friends_and_family).toBe(true);
 	});
 
+	it("a coupon that loses to F&F (valid: false) applies no header discount", async () => {
+		// Ruling 98: what calculate_coupon_discount returns when F&F wins (the R1 shape):
+		// the dialog must stop here, so the cart never sends a header next to F&F lines.
+		server.coupon = { coupon_code: "C20", discount_type: "Percentage", discount_percentage: 10 };
+		server.calc = {
+			valid: false,
+			granularity: "order",
+			discount: 0,
+			coupon_value: 5,
+			line_updates: [],
+			best_discount: { suppressed: true },
+			message: "Friends & Family discount (15.00) is better",
+			message_en: "Friends & Family discount (15.00) is better",
+		};
+		const wrapper = mount(CouponDialog, {
+			props: { modelValue: true, subtotal: 130, grandTotal: 130, customer: "C", company: "Nexus" },
+			global: { mocks: { __: globalThis.__ } },
+		});
+		wrapper.vm.$.setupState.couponCode = "C20";
+		await wrapper.vm.$.setupState.applyCoupon();
+		expect(server.methods).toContain("calc");
+		expect(wrapper.emitted("discount-applied")).toBeUndefined();
+		expect(wrapper.vm.$.setupState.appliedDiscount).toBeFalsy();
+	});
+
 	it("a Sales Order is not compared with F&F: the coupon calculation is not used", async () => {
 		server.doctype = "Sales Order";
 		server.calc = { valid: false };

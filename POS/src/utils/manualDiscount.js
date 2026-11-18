@@ -45,3 +45,34 @@ export function manualDiscountError({
 	}
 	return null;
 }
+
+/**
+ * Manual invoice (header) discount, capped as the server caps it: Max Discount
+ * Percentage Allowed (0 = no limit) of the total the header applies to, after the
+ * line discounts, and never more than that total. Line and header discounts are
+ * capped separately (one cap each).
+ *
+ * @param {Object} input
+ * @param {number} input.value - what the cashier typed: a percentage or an amount
+ * @param {boolean} input.isPercentage
+ * @param {number} input.base - total before the invoice discount, after line discounts
+ * @param {number} input.maxDiscount - Max Discount Percentage Allowed (0 = no limit)
+ * @returns {{amount: number, value: number, limited: boolean}} the discount amount, the
+ *   field's value after capping, and whether Max Discount Percentage Allowed cut it
+ */
+export function capInvoiceDiscount({ value, isPercentage, base, maxDiscount }) {
+	const typed = Math.max(Number(value) || 0, 0);
+	const total = Math.max(Number(base) || 0, 0);
+	const limit = Number(maxDiscount) > 0 ? Math.min(Number(maxDiscount), 100) : 100;
+	if (isPercentage) {
+		const percentage = Math.min(typed, limit);
+		return {
+			amount: (total * percentage) / 100,
+			value: percentage,
+			limited: limit < 100 && typed > limit,
+		};
+	}
+	const maxAmount = (total * limit) / 100;
+	const amount = Math.min(typed, maxAmount);
+	return { amount, value: amount, limited: limit < 100 && typed > maxAmount };
+}

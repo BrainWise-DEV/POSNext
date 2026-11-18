@@ -756,7 +756,7 @@
 											:max="
 												additionalDiscountType === 'percentage'
 													? 100
-													: subtotal
+													: invoiceDiscountBase
 											"
 											step="1"
 											class="flex-1 h-9 px-1 text-sm font-semibold text-center bg-transparent border-none focus:outline-none focus:ring-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
@@ -2071,6 +2071,7 @@ import {
 } from "@/utils/currency";
 import { offlineWorker } from "@/utils/offline/workerClient";
 import { logger } from "@/utils/logger";
+import { capInvoiceDiscount } from "@/utils/manualDiscount";
 import { Dialog, FeatherIcon, createResource, call } from "frappe-ui";
 import { computed, ref, watch, nextTick } from "vue";
 import { useToast } from "@/composables/useToast";
@@ -2760,10 +2761,20 @@ const remainingAvailableCredit = computed(() => {
 	return remaining > 0 ? roundCurrency(remaining) : 0;
 });
 
+// The total the invoice discount applies to: the subtotal after line discounts
+// (the server measures the manual invoice discount on it).
+const invoiceDiscountBase = computed(() => {
+	const lineDiscounts = props.items.reduce(
+		(sum, item) => sum + (Number.parseFloat(item.discount_amount) || 0),
+		0
+	);
+	return Math.max(props.subtotal - lineDiscounts, 0);
+});
+
 // Calculate the actual discount amount based on type (percentage or fixed amount)
 const calculatedAdditionalDiscount = computed(() => {
 	if (additionalDiscountType.value === "percentage") {
-		return roundCurrency((props.subtotal * localAdditionalDiscount.value) / 100);
+		return roundCurrency((invoiceDiscountBase.value * localAdditionalDiscount.value) / 100);
 	}
 	return roundCurrency(localAdditionalDiscount.value);
 });
@@ -3608,70 +3619,28 @@ function getMethodTotal(methodName) {
 
 // Additional discount handlers
 function handleAdditionalDiscountChange() {
-	let discountValue = localAdditionalDiscount.value;
-	let discountAmount = 0;
-
-	// If percentage mode, calculate amount
-	if (additionalDiscountType.value === "percentage") {
-		// Validate against max_discount_allowed if configured
-		if (
-			settingsStore.maxDiscountAllowed > 0 &&
-			discountValue > settingsStore.maxDiscountAllowed
-		) {
-			localAdditionalDiscount.value = settingsStore.maxDiscountAllowed;
-			discountValue = settingsStore.maxDiscountAllowed;
-			// Show warning toast
-			showWarning(
-				__("Maximum allowed discount is {0}%", [settingsStore.maxDiscountAllowed])
-			);
-		}
-
-		// Ensure percentage is between 0-100
-		if (discountValue > 100) {
-			localAdditionalDiscount.value = 100;
-			discountValue = 100;
-		}
-
-		// Convert percentage to amount
-		discountAmount = (props.subtotal * discountValue) / 100;
-	} else {
-		// Amount mode
-		discountAmount = discountValue;
-
-		// For amount mode, check if it exceeds percentage limit when converted
-		if (settingsStore.maxDiscountAllowed > 0 && props.subtotal > 0) {
-			const percentageEquivalent = (discountAmount / props.subtotal) * 100;
-			if (percentageEquivalent > settingsStore.maxDiscountAllowed) {
-				const maxAmount = (props.subtotal * settingsStore.maxDiscountAllowed) / 100;
-				localAdditionalDiscount.value = maxAmount;
-				discountAmount = maxAmount;
-				// Show warning toast
-				showWarning(
-					__("Maximum allowed discount is {0}% ({1} {2})", [
+	const isPercentage = additionalDiscountType.value === "percentage";
+	const { amount, value, limited } = capInvoiceDiscount({
+		value: localAdditionalDiscount.value,
+		isPercentage,
+		base: invoiceDiscountBase.value,
+		maxDiscount: settingsStore.maxDiscountAllowed,
+	});
+	if (value !== (Number(localAdditionalDiscount.value) || 0)) {
+		localAdditionalDiscount.value = value;
+	}
+	if (limited) {
+		showWarning(
+			isPercentage
+				? __("Maximum allowed discount is {0}%", [settingsStore.maxDiscountAllowed])
+				: __("Maximum allowed discount is {0}% ({1} {2})", [
 						settingsStore.maxDiscountAllowed,
 						props.currency,
-						maxAmount.toFixed(2),
+						value.toFixed(2),
 					])
-				);
-			}
-		}
+		);
 	}
-
-	// Ensure discount doesn't exceed subtotal
-	if (discountAmount > props.subtotal) {
-		if (additionalDiscountType.value === "amount") {
-			localAdditionalDiscount.value = props.subtotal;
-		}
-		discountAmount = props.subtotal;
-	}
-
-	// Ensure non-negative
-	if (discountAmount < 0) {
-		localAdditionalDiscount.value = 0;
-		discountAmount = 0;
-	}
-
-	emit("update-additional-discount", discountAmount);
+	emit("update-additional-discount", amount);
 }
 
 function handleAdditionalDiscountTypeChange() {

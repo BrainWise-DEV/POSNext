@@ -119,6 +119,13 @@ class TestReturnSafety(FrappeTestCase):
 		frappe.db.commit()
 		super().tearDownClass()
 
+	def setUp(self):
+		# The sales carry a manual invoice discount (Task 8m: it needs the setting).
+		field = "allow_user_to_edit_additional_discount"
+		saved = frappe.db.get_value("POS Settings", self.pos_settings, field)
+		frappe.db.set_value("POS Settings", self.pos_settings, field, 1)
+		self.addCleanup(frappe.db.set_value, "POS Settings", self.pos_settings, field, saved)
+
 	# ------------------------------------------------------------------
 	# Helpers
 	# ------------------------------------------------------------------
