@@ -1210,7 +1210,6 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				}
 				item.pricing_rules = normalizePricingRules(serverItem.pricing_rules);
 				item.free_qty = Number.parseFloat(serverItem.free_qty) || 0;
-				item.gwp_free_qty = Number.parseFloat(serverItem.gwp_free_qty) || 0;
 				item.is_accumulative_discount =
 					serverItem.discount_source === "accumulative_promotion" ? 1 : 0;
 				return;

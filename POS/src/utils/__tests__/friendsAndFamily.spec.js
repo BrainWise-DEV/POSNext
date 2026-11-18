@@ -204,6 +204,12 @@ describe("lineDiscountSource / lineBreakdown", () => {
 		expect(lineDiscountSource(cartLine({ is_free_item: 1 }))).toBe(LINE_SOURCE.FREE);
 	});
 
+	it("a gift is a free row: a stray gwp_free_qty on a paid line does not make it free", () => {
+		// The GWP line-discount gift is gone (promotions P1 6g): no server sends gwp_free_qty.
+		const item = cartLine({ discount_percentage: 10, pricing_rules: ["PRLE-0001"], gwp_free_qty: 1 });
+		expect(lineDiscountSource(item)).toBe(LINE_SOURCE.PROMOTION);
+	});
+
 	it("shows original − discount = final", () => {
 		const item = cartLine({ quantity: 2, discount_amount: 539.4, discount_source: FNF_DISCOUNT_SOURCE });
 		expect(lineBreakdown(item)).toEqual({ source: "friends_and_family", original: 1798, discount: 539.4, final: 1258.6 });
@@ -348,6 +354,15 @@ describe("mergeServerLine (apply_offers → cart)", () => {
 		const res = mergeServerLine(item, { discount_percentage: 30, discount_amount: 269.7, discount_source: FNF_DISCOUNT_SOURCE }, appliedBlock.items[0], { fnfSuppressed: true });
 		expect(res.stripped).toBe(true);
 		expect(item.discount_amount).toBe(0);
+	});
+
+	it("does not copy gwp_free_qty from the server line", () => {
+		const promo = cartLine();
+		mergeServerLine(promo, { discount_percentage: 10, discount_amount: 89.9, pricing_rules: "PRLE-0009", gwp_free_qty: 1 }, undefined);
+		expect(promo).not.toHaveProperty("gwp_free_qty");
+		const fnf = cartLine();
+		mergeServerLine(fnf, { discount_percentage: 30, discount_amount: 269.7, discount_source: FNF_DISCOUNT_SOURCE, gwp_free_qty: 1 }, appliedBlock.items[0]);
+		expect(fnf).not.toHaveProperty("gwp_free_qty");
 	});
 
 	it("keeps a manual cashier discount when the server sends nothing", () => {

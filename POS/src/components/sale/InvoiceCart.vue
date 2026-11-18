@@ -2334,7 +2334,7 @@ function lineSaving(item) {
 }
 
 function isGwpItem(item) {
-	return item?.discount_source === "gwp" || Number.parseFloat(item?.gwp_free_qty) > 0;
+	return item?.discount_source === "gwp";
 }
 
 function hasBundledSameItemFree(item) {

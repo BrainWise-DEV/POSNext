@@ -314,7 +314,6 @@ export function mergeServerLine(item, serverLine = {}, fnfLine = null, { fnfSupp
 	if (fnfLine?.applies && !fnfSuppressed && !item.is_free_item) {
 		stampFnfLine(item, fnfLine);
 		item.free_qty = num(serverItem.free_qty);
-		item.gwp_free_qty = num(serverItem.gwp_free_qty);
 		result.discounted = true;
 		result.stamped = true;
 		return result;
@@ -333,7 +332,6 @@ export function mergeServerLine(item, serverLine = {}, fnfLine = null, { fnfSupp
 		item.pricing_rules = serverRules;
 		item.discount_source = serverItem.discount_source || (wasFnf ? "" : item.discount_source);
 		item.free_qty = num(serverItem.free_qty);
-		item.gwp_free_qty = num(serverItem.gwp_free_qty);
 		result.discounted = discountPct > 0 || discountAmt > 0;
 	} else if (isFnfLine(item)) {
 		stripFnfLine(item);
@@ -377,7 +375,7 @@ export function lineDiscountSource(item) {
 	if (item.is_free_item) return LINE_SOURCE.FREE;
 	const source = item.discount_source || "";
 	if (source === FNF_DISCOUNT_SOURCE) return LINE_SOURCE.FRIENDS_AND_FAMILY;
-	if (FREE_DISCOUNT_SOURCES.has(source) || num(item.free_qty) > 0 || num(item.gwp_free_qty) > 0) {
+	if (FREE_DISCOUNT_SOURCES.has(source) || num(item.free_qty) > 0) {
 		return LINE_SOURCE.FREE;
 	}
 	if (num(item.discount_amount) <= 0 && num(item.discount_percentage) <= 0) return LINE_SOURCE.NONE;

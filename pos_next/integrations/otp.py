@@ -180,4 +180,4 @@ def _call_provider_health(provider) -> dict:
 		error = type(e).__name__
 	if error:
 		_log(f"Provider health check failed: {error}")
-	return {"ok": False, "message": "Health check failed", "fix_url": None}
+	return {"ok": False, "message": _("Health check failed"), "fix_url": None}
