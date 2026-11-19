@@ -5,6 +5,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	buildFnfCartMessages,
+	cappedUnitValues,
 	fnfEmailBlockMessage,
 	FNF_REASON,
 	isFnfAllowedForProfile,
@@ -23,6 +24,7 @@ import {
 	pickLocalizedMessage,
 	resolveHeaderDiscount,
 	stampFnfLine,
+	lineCouponFnfView,
 	stripFnfLine,
 } from "@/utils/friendsAndFamily";
 
@@ -179,7 +181,7 @@ describe("fnfLockedDiscountAmount (capped lines)", () => {
 	it("uses the server amount instead of the unrounded %", () => {
 		// Per-order cap 100 on an 899 line → 11.1234…% on the server.
 		const item = cartLine();
-		stampFnfLine(item, { ...appliedBlock.items[0], discount_percentage: 11.123470522803114, discount_amount: 100, capped: true });
+		stampFnfLine(item, { ...appliedBlock.items[0], discount_percentage: 11.123470522803114, discount_amount: 100, rate: 799, capped: true });
 		expect(fnfLockedDiscountAmount(item, 899)).toBe(100);
 	});
 	it("falls back to normal maths once the quantity changed", () => {
@@ -190,6 +192,106 @@ describe("fnfLockedDiscountAmount (capped lines)", () => {
 	});
 	it("ignores non-F&F lines", () => {
 		expect(fnfLockedDiscountAmount(cartLine({ discount_amount: 5 }), 899)).toBeNull();
+	});
+});
+
+describe("D-7: a capped line uses the server's per-unit rate", () => {
+	// posnext_promotions _capped_line_values(100, 3, 50, AMOUNT_BASIS_UNIT) → rate 83.34, saving 49.98
+	it("pins 83.34 × 3 for a cap of 50 on 3 × 100", () => {
+		const v = cappedUnitValues(100, 3, 50, 2);
+		expect(v.rate).toBe(83.34);
+		expect(v.amount).toBe(49.98);
+		expect(v.percentage).toBeCloseTo(16.66, 10);
+	});
+	it("pins UIT-ODD × 7 (33.33, cap 50) at 26.19 / 183.33", () => {
+		const v = cappedUnitValues(33.33, 7, 50, 2);
+		expect(v.rate).toBe(26.19);
+		expect(v.amount).toBe(49.98);
+		expect(Math.round((33.33 * 7 - v.amount) * 100) / 100).toBe(183.33);
+	});
+	// The same inputs as pos_next/api/test_ff_capped_unit_rate.py (the server pin)
+	it("pins cap 40 on 3 × 50 at 36.67 / 39.99 and cap 50 on 7 × 50 at 42.86 / 49.98", () => {
+		expect(cappedUnitValues(50, 3, 40, 2)).toMatchObject({ rate: 36.67, amount: 39.99 });
+		expect(cappedUnitValues(50, 7, 50, 2)).toMatchObject({ rate: 42.86, amount: 49.98 });
+		// From the line-basis payload's rate, as the cart stamps it
+		expect(cappedUnitValues(50, 3, 40, 2, 50 - 40 / 3)).toMatchObject({ rate: 36.67, amount: 39.99 });
+		expect(cappedUnitValues(50, 7, 50, 2, 50 - 50 / 7)).toMatchObject({ rate: 42.86, amount: 49.98 });
+	});
+	it("is idempotent on an amount that already divides evenly", () => {
+		expect(cappedUnitValues(100, 3, 49.98, 2)).toEqual(cappedUnitValues(100, 3, 50, 2));
+		expect(cappedUnitValues(899, 1, 100, 2).amount).toBe(100);
+	});
+	it("stamps the line-basis cart payload and the unit-basis invoice payload alike", () => {
+		const line = { applies: true, capped: true, discount_percentage: 16.666666666666664, discount_amount: 50, rate: 83.33333333333333 };
+		const unit = { applies: true, capped: true, discount_percentage: 16.66, discount_amount: 49.98, rate: 83.34 };
+		const a = cartLine({ quantity: 3, rate: 100, price_list_rate: 100 });
+		const b = cartLine({ quantity: 3, rate: 100, price_list_rate: 100 });
+		stampFnfLine(a, line);
+		stampFnfLine(b, unit);
+		for (const key of ["discount_percentage", "discount_amount", "fnf_discount_amount", "fnf_rate"]) {
+			expect(a[key]).toBe(b[key]);
+		}
+		expect(a.fnf_rate).toBe(83.34);
+		expect(fnfLockedDiscountAmount(a, 300)).toBe(49.98);
+	});
+	it("leaves an uncapped line to the server's amount", () => {
+		const item = cartLine({ quantity: 3, rate: 33.33, price_list_rate: 33.33 });
+		stampFnfLine(item, { applies: true, capped: false, discount_percentage: 30, discount_amount: 29.997, rate: 23.331 });
+		expect(item.discount_amount).toBe(29.997);
+		expect(item.discount_percentage).toBe(30);
+	});
+});
+
+describe("Fix round 1: capped stamps match the saved invoice", () => {
+	// C2: qty 2.5 × 10, cap 0.33. Server (unit basis, banker's): 0.13 a unit, rate 9.87, saving 0.32.
+	const fractionalLine = { applies: true, capped: true, discount_percentage: 1.32, discount_amount: 0.33, rate: 10 - 0.33 / 2.5 };
+	const fractionalUnit = { applies: true, capped: true, discount_percentage: 1.3, discount_amount: 0.32, rate: 9.87 };
+
+	it("C2: a fractional qty stamps 9.87 / 0.32 from both payloads (banker's rounding)", () => {
+		for (const line of [fractionalLine, fractionalUnit]) {
+			const item = cartLine({ quantity: 2.5, rate: 10, price_list_rate: 10 });
+			stampFnfLine(item, line);
+			expect(item.fnf_rate).toBe(9.87);
+			expect(item.discount_amount).toBe(0.32);
+		}
+	});
+
+	it("C2: the stamp is idempotent: the cart's own stamp after the adopted draft keeps the draft's values", () => {
+		const item = cartLine({ quantity: 2.5, rate: 10, price_list_rate: 10 });
+		stampFnfLine(item, fractionalUnit); // payment-open check adopts the draft
+		const adopted = { rate: item.fnf_rate, amount: item.discount_amount };
+		stampFnfLine(item, fractionalLine); // the cart's own evaluation runs again
+		stampFnfLine(item, { ...fractionalUnit, rate: adopted.rate, discount_amount: adopted.amount });
+		expect({ rate: item.fnf_rate, amount: item.discount_amount }).toEqual(adopted);
+		stampFnfLine(item, fractionalLine);
+		expect({ rate: item.fnf_rate, amount: item.discount_amount }).toEqual(adopted);
+	});
+
+	it("I1: a UOM-scaled price (10/3) is priced at currency precision, as the invoice is: 4.97", () => {
+		// The evaluation payload sends the rounded price (3.33), so the line basis is 3.33 − 4.98/7.
+		const line = { applies: true, capped: true, discount_percentage: 21.36, discount_amount: 4.98, rate: 3.33 - 4.98 / 7 };
+		const unit = { applies: true, capped: true, discount_percentage: 21.32, discount_amount: 4.97, rate: 2.62 };
+		for (const payload of [line, unit]) {
+			const item = cartLine({ quantity: 7, rate: 10 / 3, price_list_rate: 10 / 3 });
+			stampFnfLine(item, payload);
+			expect(item.fnf_rate).toBe(2.62);
+			expect(item.discount_amount).toBe(4.97);
+		}
+	});
+
+	it("I2: a capped line's message and balance use the stamped saving (49.98, not 50.00)", () => {
+		const items = [cartLine({ quantity: 3, rate: 100, price_list_rate: 100 })];
+		stampFnfLine(items[0], { applies: true, capped: true, discount_percentage: 50 / 3, discount_amount: 50, rate: 100 - 50 / 3 });
+		const result = {
+			eligible: true,
+			appliedCount: 1,
+			lines: [{ idx: 0, applies: true, capped: true, discount_amount: 50 }],
+			caps: { active: true, fnf_applied_total: 50, monthly_remaining: 100, monthly_remaining_after: 50 },
+		};
+		const view = lineCouponFnfView({ result, items, appliedCoupon: null });
+		expect(view.override).toBeNull();
+		expect(view.result.caps.fnf_applied_total).toBe(49.98);
+		expect(view.result.caps.monthly_remaining_after).toBe(50.02);
 	});
 });
 

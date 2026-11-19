@@ -4,7 +4,7 @@
  * @vitest-environment jsdom
  */
 import { createPinia, setActivePinia } from "pinia"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const server = vi.hoisted(() => {
 	globalThis.__ = (s, args) => (args ? `${s} ${args.join(" ")}` : s)
@@ -62,6 +62,8 @@ vi.mock("@/stores/posSettings", () => ({
 
 const { usePOSCartStore } = await import("@/stores/posCart")
 const { usePaymentOpenCheck } = await import("@/composables/usePaymentOpenCheck")
+const { stampFnfLine } = await import("@/utils/friendsAndFamily")
+const { shiftState } = await import("@/composables/useShift")
 
 const CAP_MESSAGE =
 	"Friends & Family discount 15 on this invoice exceeds the customer's remaining monthly allowance"
@@ -411,6 +413,196 @@ describe("payment-open price re-check", () => {
 		expect(a.discount_source).toBe("friends_and_family")
 		expect(a.discount_amount).toBe(15)
 		expect(cart.grandTotal).toBe(55)
+	})
+
+	it("D-7: a capped line whose cap does not split per unit can be paid", async () => {
+		// Cap 50 on 3 × 100: the cart's evaluation sends the line basis (exactly 50),
+		// the invoice the unit basis (83.34 a unit, 49.98).
+		const line = cart.invoiceItems[0]
+		Object.assign(line, { rate: 100, price_list_rate: 100, quantity: 3 })
+		const lineBasis = { idx: 0, applies: true, capped: true, discount_percentage: 50 / 3, discount_amount: 50, rate: 100 - 50 / 3 }
+		const restamp = () => {
+			stampFnfLine(line, lineBasis)
+			cart.recalculateItem(line)
+			cart.rebuildIncrementalCache()
+		}
+		restamp()
+		expect(cart.grandTotal).toBe(250.02)
+		server.draft = {
+			name: "SINV-CHECK",
+			grand_total: 250.02,
+			discount_amount: 0,
+			friends_and_family: {
+				eligible: true,
+				discount_percentage: 30,
+				applied_count: 1,
+				items: [{ idx: 0, applies: true, capped: true, discount_percentage: 16.66, discount_amount: 49.98, rate: 83.34 }],
+			},
+		}
+		expect(await check.requestPayment()).toBe(true)
+		// The cart's own evaluation runs again after the check: same stamp, same cart.
+		restamp()
+		expect(cart.paymentTotal).toBe(250.02)
+		cart.payments = [{ mode_of_payment: "Cash", amount: 250.02 }]
+		await expect(cart.submitInvoice()).resolves.toBeTruthy()
+		expect(server.submits).toHaveLength(1)
+	})
+
+	describe("D-5: a POS Profile that rounds the total", () => {
+		beforeEach(() => {
+			shiftState.value = { ...shiftState.value, pos_profile: { name: "POS-1", disable_rounded_total: 0, smallest_currency_fraction_value: 0 } }
+		})
+		afterEach(() => {
+			shiftState.value = { ...shiftState.value, pos_profile: null }
+		})
+
+		it("shows and collects the rounded total (80.50 → 80.00)", async () => {
+			const line = cart.invoiceItems[0]
+			Object.assign(line, { rate: 80.5, price_list_rate: 80.5 })
+			cart.recalculateItem(line)
+			cart.rebuildIncrementalCache()
+			expect(cart.grandTotal).toBe(80.5)
+			expect(cart.roundedTotal).toBe(80)
+			expect(cart.roundingAdjustment).toBe(-0.5)
+			expect(cart.paymentTotal).toBe(80)
+
+			server.draft = { name: "SINV-CHECK", grand_total: 80.5, rounded_total: 80, disable_rounded_total: 0, discount_amount: 0 }
+			expect(await check.requestPayment()).toBe(true)
+			expect(cart.paymentTotal).toBe(80)
+			expect(cart.paymentRoundingAdjustment).toBe(-0.5)
+
+			// 100 in cash for an 80.00 sale: the change is 20.00, not 19.50.
+			cart.payments = [{ mode_of_payment: "Cash", amount: 100 }]
+			cart.rebuildIncrementalCache()
+			await cart.submitInvoice()
+			expect(server.submits[0].data.change_amount).toBe(20)
+		})
+
+		it("rounding up collects the whole unit, so the invoice is not Partly Paid (287.50 → 288.00)", async () => {
+			const line = cart.invoiceItems[0]
+			Object.assign(line, { rate: 287.5, price_list_rate: 287.5 })
+			cart.recalculateItem(line)
+			cart.rebuildIncrementalCache()
+			expect(cart.paymentTotal).toBe(288)
+		})
+
+		it("a cent of server drift that rounds the same opens payment without a prompt", async () => {
+			const line = cart.invoiceItems[0]
+			Object.assign(line, { rate: 287.5, price_list_rate: 287.5 })
+			cart.recalculateItem(line)
+			cart.rebuildIncrementalCache()
+			server.draft = { name: "SINV-CHECK", grand_total: 287.53, rounded_total: 288, disable_rounded_total: 0, discount_amount: 0 }
+			expect(await check.requestPayment()).toBe(true)
+			expect(cart.paymentTotal).toBe(288)
+			expect(cart.paymentRoundingAdjustment).toBe(0.47)
+		})
+
+		it("I3: a cent of drift across .5 changes what is collected, so it asks (287 → 288)", async () => {
+			const line = cart.invoiceItems[0]
+			Object.assign(line, { rate: 287.49, price_list_rate: 287.49 })
+			cart.recalculateItem(line)
+			cart.rebuildIncrementalCache()
+			expect(cart.paymentTotal).toBe(287)
+			server.draft = { name: "SINV-CHECK", grand_total: 287.51, rounded_total: 288, disable_rounded_total: 0, discount_amount: 0 }
+			expect(await check.requestPayment()).toBe(false)
+			expect(check.pendingChange.value).toMatchObject({ previousTotal: 287, total: 288 })
+			expect(cart.paymentTotal).toBe(288)
+		})
+
+		const priceCart = (price, fraction) => {
+			shiftState.value = { ...shiftState.value, pos_profile: { name: "POS-1", disable_rounded_total: 0, smallest_currency_fraction_value: fraction } }
+			const line = cart.invoiceItems[0]
+			Object.assign(line, { rate: price, price_list_rate: price })
+			cart.recalculateItem(line)
+			cart.rebuildIncrementalCache()
+		}
+
+		it("Ruling 134: USD (fraction 0.01) — a cent of drift opens payment without a prompt", async () => {
+			priceCart(10.01, 0.01)
+			expect(cart.paymentTotal).toBe(10.01)
+			server.draft = { name: "SINV-CHECK", grand_total: 10.02, rounded_total: 10.02, disable_rounded_total: 0, discount_amount: 0 }
+			expect(await check.requestPayment()).toBe(true)
+			expect(check.pendingChange.value).toBeNull()
+			expect(cart.paymentTotal).toBe(10.02)
+		})
+
+		it("Ruling 134: EGP (no fraction) — 287.49 → 287.51 collects 288, so it asks", async () => {
+			priceCart(287.49, 0)
+			server.draft = { name: "SINV-CHECK", grand_total: 287.51, rounded_total: 288, disable_rounded_total: 0, discount_amount: 0 }
+			expect(await check.requestPayment()).toBe(false)
+			expect(check.pendingChange.value).toMatchObject({ previousTotal: 287, total: 288 })
+		})
+
+		it("Ruling 134: CHF (fraction 0.05) — 10.02 → 10.03 collects 10.05, not 10.00, so it asks", async () => {
+			priceCart(10.02, 0.05)
+			expect(cart.paymentTotal).toBe(10)
+			server.draft = { name: "SINV-CHECK", grand_total: 10.03, rounded_total: 10.05, disable_rounded_total: 0, discount_amount: 0 }
+			expect(await check.requestPayment()).toBe(false)
+			expect(check.pendingChange.value).toMatchObject({ previousTotal: 10, total: 10.05 })
+		})
+
+		it("M2: a draft whose total rounds to 0 is collected at its grand total (0.40)", async () => {
+			const line = cart.invoiceItems[0]
+			Object.assign(line, { rate: 0.4, price_list_rate: 0.4 })
+			cart.recalculateItem(line)
+			cart.rebuildIncrementalCache()
+			expect(cart.paymentTotal).toBe(0.4)
+			server.draft = { name: "SINV-CHECK", grand_total: 0.4, rounded_total: 0, disable_rounded_total: 0, discount_amount: 0 }
+			await check.requestPayment()
+			expect(cart.paymentTotal).toBe(0.4)
+			expect(cart.paymentRoundingAdjustment).toBe(0)
+		})
+
+		it("a draft that does not round is collected at its grand total", async () => {
+			server.draft = { name: "SINV-CHECK", grand_total: 50, rounded_total: 0, disable_rounded_total: 1, discount_amount: 0 }
+			await check.requestPayment()
+			expect(cart.paymentTotal).toBe(50)
+			expect(cart.paymentRoundingAdjustment).toBe(0)
+		})
+	})
+
+	it("C2: a capped line with a fractional qty can be paid (2.5 × 10, cap 0.33 → 24.68)", async () => {
+		const line = cart.invoiceItems[0]
+		Object.assign(line, { rate: 10, price_list_rate: 10, quantity: 2.5 })
+		const lineBasis = { idx: 0, applies: true, capped: true, discount_percentage: 1.32, discount_amount: 0.33, rate: 10 - 0.33 / 2.5 }
+		const restamp = () => {
+			stampFnfLine(line, lineBasis)
+			cart.recalculateItem(line)
+			cart.rebuildIncrementalCache()
+		}
+		restamp()
+		expect(cart.grandTotal).toBe(24.68)
+		server.draft = {
+			name: "SINV-CHECK",
+			grand_total: 24.68,
+			discount_amount: 0,
+			friends_and_family: {
+				eligible: true,
+				discount_percentage: 30,
+				applied_count: 1,
+				items: [{ idx: 0, applies: true, capped: true, discount_percentage: 1.3, discount_amount: 0.32, rate: 9.87 }],
+			},
+		}
+		expect(await check.requestPayment()).toBe(true)
+		restamp()
+		cart.payments = [{ mode_of_payment: "Cash", amount: 24.68 }]
+		await expect(cart.submitInvoice()).resolves.toBeTruthy()
+	})
+
+	it("I1: a UOM-scaled capped line totals as the saved invoice (10/3 × 7, cap 4.98 → 18.34)", () => {
+		const line = cart.invoiceItems[0]
+		Object.assign(line, { rate: 10 / 3, price_list_rate: 10 / 3, quantity: 7 })
+		stampFnfLine(line, { idx: 0, applies: true, capped: true, discount_percentage: 21.36, discount_amount: 4.98, rate: 3.33 - 4.98 / 7 })
+		cart.recalculateItem(line)
+		cart.rebuildIncrementalCache()
+		expect(cart.grandTotal).toBe(18.34)
+	})
+
+	it("I1: the evaluation payloads price a UOM-scaled line at currency precision", () => {
+		const line = cart.invoiceItems[0]
+		Object.assign(line, { rate: 10 / 3, price_list_rate: 10 / 3 })
+		expect(cart.buildOfferEvaluationPayload({}).items[0].price_list_rate).toBe(3.33)
+		expect(cart.buildCouponItemsPayload()[0].price_list_rate).toBe(3.33)
 	})
 
 	it("a header changed after the check makes the submit re-check", async () => {

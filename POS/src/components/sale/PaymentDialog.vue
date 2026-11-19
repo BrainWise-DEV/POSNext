@@ -840,6 +840,17 @@
 									>-{{ formatCurrency(discountAmount) }}</span
 								>
 							</div>
+							<!-- Rounding (POS Profile rounds the total, D-5) -->
+							<div
+								v-if="hasRounding"
+								class="flex items-center justify-between text-sm"
+								data-testid="payment-rounding-adjustment"
+							>
+								<span class="text-gray-600 text-start">{{ __("Rounding Adjustment") }}</span>
+								<span class="font-medium text-gray-900 text-end" dir="ltr">{{
+									formatCurrency(roundingAdjustment)
+								}}</span>
+							</div>
 							<!-- Grand Total -->
 							<div
 								class="flex items-center justify-between pt-2 mt-1 border-t border-gray-300"
@@ -849,7 +860,7 @@
 										'font-bold text-gray-900 text-start',
 										isCompactMode ? 'text-sm' : 'text-base',
 									]"
-									>{{ __("Grand Total") }}</span
+									>{{ hasRounding ? __("Rounded Total") : __("Grand Total") }}</span
 								>
 								<span
 									:class="[
@@ -2072,6 +2083,7 @@ import {
 import { offlineWorker } from "@/utils/offline/workerClient";
 import { logger } from "@/utils/logger";
 import { capInvoiceDiscount } from "@/utils/manualDiscount";
+import { canCompletePayment, isZeroTotal } from "@/utils/paymentCompletion";
 import { Dialog, FeatherIcon, createResource, call } from "frappe-ui";
 import { computed, ref, watch, nextTick } from "vue";
 import { useToast } from "@/composables/useToast";
@@ -2087,6 +2099,11 @@ const { showWarning, showInfo } = useToast();
 const props = defineProps({
 	modelValue: Boolean,
 	grandTotal: {
+		type: Number,
+		default: 0,
+	},
+	// grandTotal is the rounded total when the POS Profile rounds; this is rounded − grand (D-5)
+	roundingAdjustment: {
 		type: Number,
 		default: 0,
 	},
@@ -2965,40 +2982,27 @@ const isExactAmountValid = computed(() => {
 	return totalPaid.value <= roundCurrency(props.grandTotal);
 });
 
-const canComplete = computed(() => {
-	// Check sales person validation first (mandatory when enabled)
-	if (!isSalesPersonValid.value) {
-		return false;
-	}
+const hasRounding = computed(() => !isZeroTotal(Number(props.roundingAdjustment) || 0));
 
-	// Receivable payment modes require a customer on the invoice
-	if (requiresCustomerForPayment.value && !hasCustomerForPayment.value) {
-		return false;
-	}
-
-	// Check exact amount validation
-	if (!isExactAmountValid.value) {
-		return false;
-	}
-
-	// "Pay on Receivable Account": the chosen account holds the unpaid balance
-	if (selectedReceivableAccount.value && props.allowCreditSale) {
-		return totalPaid.value <= roundCurrency(props.grandTotal) + 0.01;
-	}
-
-	// If partial payment is allowed, can complete with any amount > 0
-	if (props.allowPartialPayment) {
-		return totalPaid.value > 0 && paymentEntries.value.length > 0;
-	}
-
-	// If write-off is applied and covers the remaining amount, can complete
-	if (applyWriteOff.value && canWriteOff.value) {
-		return paymentEntries.value.length > 0;
-	}
-
-	// Otherwise require full payment
-	return remainingAmount.value === 0 && paymentEntries.value.length > 0;
-});
+const canComplete = computed(() =>
+	canCompletePayment({
+		// Before rounding: 0.40 rounds to 0 but still needs a payment (D-14)
+		invoiceTotal: props.grandTotal - (Number(props.roundingAdjustment) || 0),
+		remaining: remainingAmount.value,
+		totalPaid: totalPaid.value,
+		entryCount: paymentEntries.value.length,
+		// Sales person is mandatory when enabled
+		salesPersonValid: isSalesPersonValid.value,
+		// Receivable payment modes require a customer on the invoice
+		customerOk: !(requiresCustomerForPayment.value && !hasCustomerForPayment.value),
+		exactAmountValid: isExactAmountValid.value,
+		// "Pay on Receivable Account": the chosen account holds the unpaid balance
+		receivableAccount: Boolean(selectedReceivableAccount.value && props.allowCreditSale),
+		receivableLimit: roundCurrency(props.grandTotal),
+		allowPartialPayment: props.allowPartialPayment,
+		writeOffCovers: Boolean(applyWriteOff.value && canWriteOff.value),
+	})
+);
 
 const paymentButtonText = computed(() => {
 	// Show "Complete Payment" if fully paid or write-off covers remaining

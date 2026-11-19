@@ -77,6 +77,24 @@ describe("CouponDialog coupon vs F&F per line", () => {
 		expect(discount.suppress_friends_and_family).toBeUndefined();
 	});
 
+	it("D-15: a line coupon that beat F&F carries the comparison for coupon-applied-fnf-message", async () => {
+		const text = "Coupon C20 (50%) is better than Friends & Family (30%)"
+		server.calc = {
+			valid: true,
+			granularity: "line",
+			discount: 50,
+			suppress_friends_and_family: true,
+			line_updates: [{ line_key: 1, item_code: "B", discount_percentage: 50 }],
+			best_discount: { suppressed: ["friends_and_family"] },
+			message: text,
+			message_en: text,
+		};
+		const discount = await apply();
+		expect(discount.line_level).toBe(true);
+		expect(discount.fnf_message).toMatchObject({ message_en: text });
+		expect(discount.suppress_friends_and_family).toBeUndefined();
+	});
+
 	it("order_level_coupon_uses_header", async () => {
 		server.coupon = { coupon_code: "C20", discount_type: "Amount", discount_amount: 60 };
 		server.calc = {

@@ -14,7 +14,7 @@ import {
 	restorePreCouponDiscount,
 	stashPreCouponDiscount,
 } from "@/utils/couponLines";
-import { getPrecision } from "@/utils/currency";
+import { getPrecision, roundCurrency } from "@/utils/currency";
 import { usePOSOffersStore } from "@/stores/posOffers";
 import { usePOSSettingsStore } from "@/stores/posSettings";
 import { usePOSShiftStore } from "@/stores/posShift";
@@ -133,6 +133,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		totalTax,
 		totalDiscount,
 		grandTotal,
+		roundedTotal,
+		roundingAdjustment,
 		posProfile,
 		posOpeningShift,
 		payments,
@@ -529,20 +531,32 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 	const PAYMENT_CHECK_MAX_WAIT_MS = 5000;
 	// After the payment-open check: the server's total for the cart as it then stood.
-	const paymentCheck = ref(null); // { total, hash }
+	// total: its grand total; payable: what the invoice is paid at (rounded total when rounded).
+	const paymentCheck = ref(null); // { total, payable, hash }
 
 	/** The smallest currency unit (currency precision from System Settings). */
 	function currencyUnit() {
 		return 10 ** -(getPrecision().currency ?? 2);
 	}
 
+	function currentPaymentCheck() {
+		const checked = paymentCheck.value;
+		return checked && checked.hash === paymentCheckHash() ? checked : null;
+	}
+
 	/**
-	 * What payment collects: the server total of the last payment-open check while the
-	 * cart is unchanged since, else the cart's own total.
+	 * What payment collects: the server's payable total of the last payment-open check
+	 * while the cart is unchanged since, else the cart's own. Both are the rounded total
+	 * when the POS Profile rounds (D-5).
 	 */
 	const paymentTotal = computed(() => {
-		const checked = paymentCheck.value;
-		return checked && checked.hash === paymentCheckHash() ? checked.total : grandTotal.value;
+		const checked = currentPaymentCheck();
+		return checked ? checked.payable : roundedTotal.value;
+	});
+	/** Rounded minus grand total of what payment collects (0 without rounding). */
+	const paymentRoundingAdjustment = computed(() => {
+		const checked = currentPaymentCheck();
+		return checked ? roundCurrency(checked.payable - checked.total) : roundingAdjustment.value;
 	});
 
 	/** The cart as the payment-open check priced it: its lines, header and coupon. */
@@ -667,6 +681,18 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * Online Sales Invoices only; offline sales and Sales Orders are not checked.
 	 * @returns {Promise<{checked: boolean, changed: boolean, previousTotal?: number, total?: number, message?: string}>}
 	 */
+	/** The draft's rounded total when it rounds (`disable_rounded_total` 0), else its grand total. */
+	function draftRounds(draft) {
+		return Boolean(draft && "disable_rounded_total" in draft && !Number(draft.disable_rounded_total));
+	}
+
+	function draftPayableTotal(draft, grand) {
+		const rounds = draftRounds(draft);
+		// ERPNext's `rounded_total or grand_total`: a 0.40 that rounds to 0 is paid at 0.40.
+		const rounded = Number.parseFloat(draft?.rounded_total);
+		return rounds && rounded ? rounded : grand;
+	}
+
 	async function checkPriceBeforePayment() {
 		if (offlineState.isOffline || targetDoctype.value !== "Sales Invoice") {
 			return { checked: false, changed: false };
@@ -677,16 +703,25 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			await new Promise((resolve) => setTimeout(resolve, 100));
 		}
 
-		const previousTotal = Number(grandTotal.value) || 0;
+		const previousGrand = Number(grandTotal.value) || 0;
+		const previousPayable = Number(roundedTotal.value) || 0;
 		paymentCheck.value = null;
 		const draft = await savePaymentDraft();
 		const total = Number.parseFloat(draft.grand_total) || 0;
+		const payable = draftPayableTotal(draft, total);
 		const notes = adoptServerDraft(draft);
-		paymentCheck.value = { total, hash: paymentCheckHash() };
-		const changed = Math.abs(total - previousTotal) > 2 * currencyUnit() + 1e-9;
+		paymentCheck.value = { total, payable, hash: paymentCheckHash() };
+		// Ruling 134: ask when what is collected changes and either total drifts by more than
+		// two currency units. A cent of drift stays silent (USD rounds to 0.01, Ruling 110 I4);
+		// a rounding step does not (EGP 287 → 288, CHF 10.00 → 10.05). The cashier is shown
+		// what is collected.
+		const tolerance = 2 * currencyUnit() + 1e-9;
+		const changed =
+			Math.abs(payable - previousPayable) > 1e-9 &&
+			(Math.abs(total - previousGrand) > tolerance || Math.abs(payable - previousPayable) > tolerance);
 		const message = notes.join(" ");
 		if (!changed && message) showWarning(message);
-		return { checked: true, changed, previousTotal, total, message };
+		return { checked: true, changed, previousTotal: previousPayable, total: payable, message };
 	}
 
 	async function setCustomer(selectedCustomer) {
@@ -901,7 +936,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				brand: item.brand,
 				qty: item.quantity,
 				uom: item.uom,
-				price_list_rate: item.price_list_rate || item.rate,
+				// At currency precision, as the invoice row sends it (a UOM change leaves 10/3)
+				price_list_rate: roundCurrency(item.price_list_rate || item.rate),
 				rate: item.rate,
 				amount: item.amount,
 				discount_percentage: pre.discount_percentage || 0,
@@ -1093,7 +1129,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 					uom: item.uom,
 					warehouse: item.warehouse,
 					conversion_factor: item.conversion_factor || 1,
-					price_list_rate: item.price_list_rate || item.rate,
+					// At currency precision, as the invoice row sends it (a UOM change leaves 10/3)
+					price_list_rate: roundCurrency(item.price_list_rate || item.rate),
 					discount_percentage: pre.discount_percentage || 0,
 					discount_amount: pre.discount_amount || 0,
 					pricing_rules: item.pricing_rules || "",
@@ -2932,6 +2969,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		submitInvoice,
 		checkPriceBeforePayment,
 		paymentTotal,
+		paymentRoundingAdjustment,
+		roundedTotal,
+		roundingAdjustment,
 		applyDiscountToCart,
 		removeDiscountFromCart,
 		buildCouponItemsPayload,

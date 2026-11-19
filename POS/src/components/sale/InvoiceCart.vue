@@ -1543,16 +1543,27 @@
 				</div>
 			</div>
 
-			<!-- Grand Total -->
+			<!-- Grand Total (the rounded total when the POS Profile rounds, D-5) -->
 			<div class="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-2.5 mb-1.5">
+				<div
+					v-if="hasRounding"
+					class="flex items-center justify-between text-[11px] text-gray-600 mb-1"
+					data-testid="cart-rounding-adjustment"
+				>
+					<span>{{ __("Grand Total") }} {{ formatCurrency(displayPayableTotal - roundingAdjustment) }}</span>
+					<span dir="ltr"
+						>{{ __("Rounding Adjustment") }} {{ formatCurrency(roundingAdjustment) }}</span
+					>
+				</div>
 				<div class="flex items-center justify-between">
 					<span class="text-sm font-extrabold text-gray-900">{{
-						__("Grand Total")
+						hasRounding ? __("Rounded Total") : __("Grand Total")
 					}}</span>
 					<span
 						class="text-lg sm:text-xl font-extrabold text-blue-600 text-center min-w-[60px]"
+						data-testid="cart-grand-total"
 					>
-						{{ formatCurrency(displayGrandTotal) }}
+						{{ formatCurrency(displayPayableTotal) }}
 					</span>
 				</div>
 			</div>
@@ -1653,6 +1664,7 @@ import EditItemDialog from "./EditItemDialog.vue";
 import { useLocale } from "@/composables/useLocale";
 import {
 	buildFnfCartMessages,
+	lineCouponFnfView,
 	discountTotalsBySource,
 	fnfLineNote,
 	LINE_SOURCE,
@@ -1662,6 +1674,7 @@ import {
 	lineSourceShortLabel,
 	pickLocalizedMessage,
 } from "@/utils/friendsAndFamily";
+import { isZeroTotal } from "@/utils/paymentCompletion";
 import {
 	getDisplayQuantity as getDisplayQuantityForLine,
 	resolvePaidQuantityFromDisplay as resolvePaidQtyForLine,
@@ -1716,6 +1729,11 @@ const props = defineProps({
 		default: 0,
 	},
 	grandTotal: {
+		type: Number,
+		default: 0,
+	},
+	// Rounded − grand total when the POS Profile rounds (D-5); 0 otherwise
+	roundingAdjustment: {
 		type: Number,
 		default: 0,
 	},
@@ -2120,6 +2138,17 @@ const displayGrandTotal = computed(() => {
 	return displaySubtotal.value + props.taxAmount - displayDiscountAmount.value;
 });
 
+const hasRounding = computed(() => !isZeroTotal(Number(props.roundingAdjustment) || 0));
+
+/**
+ * What the sale is paid at (D-5): what payment collects (the server's rounded total
+ * while a payment check is current, else the cart's), never the line-sum total plus an
+ * adjustment computed on another total (that could show a number nobody collects).
+ */
+const displayPayableTotal = computed(() =>
+	hasRounding.value ? cartStore.paymentTotal : displayGrandTotal.value
+);
+
 /**
  * Sum line discounts directly from cart items for instant, exact footer display.
  * Avoids waiting on incremental cache updates after offer application.
@@ -2450,11 +2479,21 @@ function formatCurrency(amount) {
 // ─────────────────────────────────────────────────────────────────────────────
 const { locale } = useLocale();
 
+// A line coupon that took the F&F lines mutes F&F like an order coupon (D-15).
+const fnfView = computed(() => {
+	const view = lineCouponFnfView({
+		result: cartStore.fnfResult,
+		items: props.items,
+		appliedCoupon: cartStore.appliedCoupon,
+	});
+	return { override: cartStore.fnfCouponOverride || view.override, result: view.result };
+});
+
 const fnfCustomerBadge = computed(() => {
 	const eligibility = cartStore.fnfEligibility;
 	if (!eligibility?.eligible) return null;
 	const pct = Number(eligibility.discountPercentage || 0);
-	const override = cartStore.fnfCouponOverride;
+	const override = fnfView.value.override;
 	return {
 		text: __("F&F {0}%", [String(Number(pct.toFixed(2)))]),
 		muted: Boolean(override),
@@ -2466,9 +2505,9 @@ const fnfCustomerBadge = computed(() => {
 
 const fnfCartMessages = computed(() =>
 	buildFnfCartMessages({
-		result: cartStore.fnfResult,
+		result: fnfView.value.result,
 		eligibility: cartStore.fnfEligibility,
-		couponOverride: cartStore.fnfCouponOverride,
+		couponOverride: fnfView.value.override,
 		locale: locale.value,
 		formatAmount: formatCurrency,
 		hasItems: props.items.length > 0,
@@ -2529,7 +2568,7 @@ function getLineBreakdownView(item) {
 function getFnfLineNoteView(item) {
 	if (!item || item.is_free_item) return null;
 	if (!cartStore.fnfEligibility?.eligible && !cartStore.fnfResult) return null;
-	if (cartStore.fnfCouponOverride) return null;
+	if (fnfView.value.override) return null;
 	return fnfLineNote(item, { locale: locale.value });
 }
 

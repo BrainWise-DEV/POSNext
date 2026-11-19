@@ -614,6 +614,8 @@ function applyLineCoupon(coupon, result) {
 		apply_on: coupon.apply_on,
 		line_level: true,
 		line_updates: result.line_updates || [],
+		// The F&F comparison text, when the coupon took F&F lines (D-15)
+		fnf_message: fnfComparisonMessage(result),
 	};
 	emit("discount-applied", appliedDiscount.value);
 	// Lines whose own promotion beats the coupon (coupon set to "Better of the two")

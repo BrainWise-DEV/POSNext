@@ -6,7 +6,7 @@ import { useSerialNumberStore } from "@/stores/serialNumber";
 import { shiftState } from "@/composables/useShift";
 import { CoalescingMutex } from "@/utils/mutex";
 import { logger } from "@/utils/logger";
-import { roundCurrency } from "@/utils/currency";
+import { invoiceRoundedTotal, roundCurrency } from "@/utils/currency";
 import {
 	fnfLockedDiscountAmount,
 	fnfSubmissionMarkers,
@@ -216,10 +216,14 @@ export function useInvoice() {
 			return roundCurrency(_cachedSubtotal.value + _cachedTotalTax.value - discount);
 		}
 	});
+	// What the invoice is paid at: the rounded total when the POS Profile rounds (D-5),
+	// as ERPNext's set_rounded_total computes it on the server.
+	const roundedTotal = computed(() => invoiceRoundedTotal(grandTotal.value, shiftState.value?.pos_profile));
+	const roundingAdjustment = computed(() => roundCurrency(roundedTotal.value - grandTotal.value));
 	const totalPaid = computed(() => _cachedTotalPaid.value);
 
 	const remainingAmount = computed(() => {
-		return grandTotal.value - totalPaid.value;
+		return roundedTotal.value - totalPaid.value;
 	});
 
 	const canSubmit = computed(() => {
@@ -1481,6 +1485,8 @@ export function useInvoice() {
 		totalTax,
 		totalDiscount,
 		grandTotal,
+		roundedTotal,
+		roundingAdjustment,
 		totalPaid,
 		remainingAmount,
 		canSubmit,

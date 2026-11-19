@@ -29,7 +29,7 @@ vi.mock("@/stores/posSettings", () => ({
 }))
 
 const { usePOSCartStore } = await import("../posCart")
-const { stampFnfLine, isFnfLine } = await import("@/utils/friendsAndFamily")
+const { stampFnfLine, isFnfLine, lineCouponFnfView, buildFnfCartMessages } = await import("@/utils/friendsAndFamily")
 
 const item = (code) => ({
 	item_code: code,
@@ -106,6 +106,65 @@ describe("coupon vs Friends & Family per line", () => {
 		expect(cart.invoiceItems.some(isFnfLine)).toBe(false)
 		expect(cart.invoiceItems.every((i) => i.coupon_code == null)).toBe(true)
 		expect(cart.fnfCouponOverride?.code).toBe("C50")
+	})
+
+	const fnfResult = {
+		eligible: true,
+		discountPercentage: 30,
+		appliedCount: 1,
+		lines: [{ idx: 1, applies: true, discount_amount: 30 }],
+		caps: { active: true, fnf_applied_total: 30, monthly_remaining: 1850, monthly_remaining_after: 1820 },
+	}
+
+	it("D-15: a line coupon that took every F&F line mutes F&F", () => {
+		// U-18 b: the coupon (40%) beats F&F 30% on B, the only F&F line
+		cart.applyDiscountToCart({
+			name: "C20",
+			code: "C20",
+			line_level: true,
+			coupon: coupon20,
+			line_updates: [lineUpdate(1, "B", 40)],
+			fnf_message: { message_en: "Coupon C20 (40%) is better than Friends & Family (30%)" },
+		})
+		expect(cart.appliedCoupon.fnf_message.message_en).toContain("better")
+		expect(cart.fnfCouponOverride).toBeNull() // F&F is not dropped from other lines
+		const view = lineCouponFnfView({ result: fnfResult, items: cart.invoiceItems, appliedCoupon: cart.appliedCoupon })
+		expect(view.override).toEqual({ code: "C20" })
+		const messages = buildFnfCartMessages({ result: view.result, couponOverride: view.override })
+		expect(messages).toHaveLength(1)
+		expect(messages[0].text).toContain("applied instead of Friends & Family")
+		expect(messages[0].text).toContain("never combined")
+	})
+
+	it("D-15: a line coupon that took some F&F lines counts only the lines that kept F&F", () => {
+		cart.addItem(item("C"))
+		stampFnfLine(cart.invoiceItems[2], { discount_percentage: 30, discount_amount: 30, rate: 70, applies: true })
+		cart.recalculateItem(cart.invoiceItems[2])
+		const result = {
+			...fnfResult,
+			appliedCount: 2,
+			lines: [
+				{ idx: 1, applies: true, discount_amount: 30 },
+				{ idx: 2, applies: true, discount_amount: 30 },
+			],
+			caps: { active: true, fnf_applied_total: 60, monthly_remaining: 1850, monthly_remaining_after: 1790 },
+		}
+		applyCoupon([lineUpdate(1, "B", 40)])
+		const view = lineCouponFnfView({ result, items: cart.invoiceItems, appliedCoupon: cart.appliedCoupon })
+		expect(view.override).toBeNull()
+		expect(view.result.appliedCount).toBe(1)
+		expect(view.result.caps.fnf_applied_total).toBe(30)
+		expect(view.result.caps.monthly_remaining_after).toBe(1820)
+		const text = buildFnfCartMessages({ result: view.result, formatAmount: (v) => v.toFixed(2) }).map((m) => m.text).join(" | ")
+		expect(text).toContain("30 1 30.00") // the spec's __ appends the args: 30%, 1 item, 30.00
+		expect(text).toContain("30.00")
+		expect(text).toContain("1820.00")
+	})
+
+	it("D-15: a line coupon on a line without F&F leaves the F&F view alone", () => {
+		applyCoupon([lineUpdate(0, "A", 20)])
+		const view = lineCouponFnfView({ result: fnfResult, items: cart.invoiceItems, appliedCoupon: cart.appliedCoupon })
+		expect(view).toEqual({ override: null, result: fnfResult })
 	})
 
 	it("removing_coupon_restores_fnf", () => {

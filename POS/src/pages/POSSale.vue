@@ -414,6 +414,7 @@
 								:tax-amount="cartStore.totalTax"
 								:discount-amount="cartStore.totalDiscount"
 								:grand-total="cartStore.grandTotal"
+								:rounding-adjustment="cartStore.paymentRoundingAdjustment"
 								:pos-profile="shiftStore.profileName"
 								:company="shiftStore.profileCompany"
 								:currency="shiftStore.profileCurrency"
@@ -535,6 +536,7 @@
 			<PaymentDialog
 				v-model="uiStore.showPaymentDialog"
 				:grand-total="cartStore.paymentTotal"
+				:rounding-adjustment="cartStore.paymentRoundingAdjustment"
 				:subtotal="cartStore.subtotal"
 				:pos-profile="shiftStore.profileName"
 				:currency="shiftStore.profileCurrency"
@@ -2339,8 +2341,10 @@ async function handlePaymentCompleted(paymentData) {
 				editingOfflineContext = null;
 			}
 
-			const paidAmount = paymentData.paid_amount ?? cartStore.grandTotal ?? 0;
 			const grandTotal = cartStore.grandTotal || 0;
+			// Paid at the rounded total when the POS Profile rounds (D-5)
+			const payableTotal = cartStore.roundedTotal ?? grandTotal;
+			const paidAmount = paymentData.paid_amount ?? payableTotal ?? 0;
 			const customerLabel =
 				cartStore.customer?.customer_name ||
 				cartStore.customer?.name ||
@@ -2360,12 +2364,14 @@ async function handlePaymentCompleted(paymentData) {
 					quantity: item.qty ?? item.quantity,
 				})),
 				grand_total: grandTotal,
+				rounded_total: payableTotal,
+				rounding_adjustment: cartStore.roundingAdjustment || 0,
 				total_taxes_and_charges: cartStore.totalTax,
 				payments: invoiceData.payments,
 				paid_amount: paidAmount,
 				change_amount: paymentData.change_amount || 0,
-				outstanding_amount: Math.max(0, grandTotal - paidAmount),
-				status: Math.max(0, grandTotal - paidAmount) < 0.01 ? "Paid" : "Unpaid",
+				outstanding_amount: Math.max(0, payableTotal - paidAmount),
+				status: Math.max(0, payableTotal - paidAmount) < 0.01 ? "Paid" : "Unpaid",
 				docstatus: 0,
 			};
 			uiStore.setLastOfflinePrintDoc(offlinePrintDoc);
@@ -2411,7 +2417,7 @@ async function handlePaymentCompleted(paymentData) {
 					);
 				} catch (error) {
 					log.error("Offline auto-print error:", error);
-					uiStore.showSuccess(offlineReceiptName, grandTotal, paymentData.paid_amount);
+					uiStore.showSuccess(offlineReceiptName, payableTotal, paymentData.paid_amount);
 					showWarning(
 						__(
 							"Invoice {0} saved offline but print failed — open Print from the success dialog",
@@ -2420,7 +2426,7 @@ async function handlePaymentCompleted(paymentData) {
 					);
 				}
 			} else {
-				uiStore.showSuccess(offlineReceiptName, grandTotal, paymentData.paid_amount);
+				uiStore.showSuccess(offlineReceiptName, payableTotal, paymentData.paid_amount);
 				showSuccess(__("Invoice saved offline. Will sync when online"));
 			}
 		} else {
@@ -2459,7 +2465,10 @@ async function handlePaymentCompleted(paymentData) {
 				}
 
 				const invoiceName = result.name || result.message?.name || __("Unknown");
-				const invoiceTotal = result.grand_total || result.total || 0;
+				// What was collected: the rounded total when the invoice rounds (D-5); submit_invoice
+				// does not return rounded_total, so the payable total of the cart is the fallback.
+				const invoiceTotal =
+					result.rounded_total || cartStore.paymentTotal || result.grand_total || result.total || 0;
 				const paidAmount = paymentData.paid_amount || invoiceTotal;
 
 				uiStore.showPaymentDialog = false;

@@ -19,6 +19,9 @@
  * Pure functions only (no stores, no network) so they are unit-testable.
  */
 
+import { isCouponLine } from "@/utils/couponLines";
+import { getPrecision, roundTo } from "@/utils/currency";
+
 export const FNF_DISCOUNT_SOURCE = "friends_and_family";
 
 export const FNF_REASON = Object.freeze({
@@ -250,19 +253,64 @@ export function clearFnfAnnotations(item) {
  * for; recalculateItem falls back to the % if the qty changes before the
  * next server round-trip.
  */
-export function stampFnfLine(item, line) {
+export function stampFnfLine(item, line, { precision = getPrecision().currency ?? 2 } = {}) {
 	if (!item || !line) return;
 	const qty = num(item.quantity ?? item.qty);
-	item.discount_percentage = num(line.discount_percentage);
-	item.discount_amount = num(line.discount_amount);
+	let percentage = num(line.discount_percentage);
+	let amount = num(line.discount_amount);
+	let rate = num(line.rate);
+	const priceListRate = num(item.price_list_rate || item.rate);
+	if (line.capped && qty > 0 && priceListRate > 0) {
+		// The invoice keeps the server's per-unit rate (D-7), so the cart uses it too.
+		const netRate = line.rate === undefined || line.rate === null || line.rate === "" ? null : num(line.rate);
+		({ percentage, amount, rate } = cappedUnitValues(priceListRate, qty, amount, precision, netRate));
+	}
+	item.discount_percentage = percentage;
+	item.discount_amount = amount;
 	item.discount_source = FNF_DISCOUNT_SOURCE;
 	item.pricing_rules = [];
 	item.is_already_discounted = 1;
 	item.is_accumulative_discount = 0;
-	item.fnf_discount_amount = num(line.discount_amount);
+	item.fnf_discount_amount = amount;
 	item.fnf_qty = qty;
-	item.fnf_rate = num(line.rate);
+	item.fnf_rate = rate;
 	annotateFnfLine(item, line);
+}
+
+// posnext_promotions ff_money._EPSILON
+const MONEY_EPSILON = 1e-6;
+
+/**
+ * A capped F&F line as a saved invoice row holds it: posnext_promotions
+ * `_capped_line_values(..., AMOUNT_BASIS_UNIT)`. The net unit rate is rounded UP to
+ * the currency unit (the line never saves more than its allowance), so a cap of
+ * 50 on 3 × 100 is 83.34 a unit: 250.02, saving 49.98.
+ *
+ * - The price is taken at currency precision first, as the invoice row sends it
+ *   (a UOM change leaves 10/3 unrounded; the server prices 3.33).
+ * - `netRate` is the payload's `rate`. The line-basis cart payload's rate is
+ *   `price − allocation / qty`, the very expression the server rounds up for the
+ *   unit basis; the unit-basis invoice payload's rate is already rounded. Ceiling it
+ *   gives the same rate from both, and stamping the result again gives it back
+ *   (re-deriving from the saving does not: 2.5 × 10, saving 0.32 → 0.30).
+ *   Without a rate, it is derived from `lineAmount`.
+ * - Saving per unit and per line use the system rounding (banker's: 0.325 → 0.32).
+ */
+export function cappedUnitValues(priceListRate, qty, lineAmount, precision = 2, netRate = null) {
+	const plr = roundTo(num(priceListRate), precision);
+	const q = num(qty);
+	const gross = plr * q;
+	if (gross <= 0 || q <= 0) return { percentage: 0, amount: 0, rate: plr };
+	const scale = 10 ** precision;
+	const raw =
+		netRate === null || !Number.isFinite(netRate)
+			? plr - Math.max(0, Math.min(num(lineAmount), gross)) / q
+			: netRate;
+	let rate = Math.ceil(raw * scale - MONEY_EPSILON) / scale;
+	rate = Math.min(plr, Math.max(0, rate));
+	const perUnit = roundTo(plr - rate, precision);
+	const amount = roundTo(perUnit * q, precision);
+	return { percentage: (amount / gross) * 100, amount, rate };
 }
 
 /** Remove an F&F stamp (ineligible customer, coupon won, program ended…). */
@@ -491,6 +539,63 @@ function fnfAppliedTotal(result) {
 			.filter((line) => line?.applies)
 			.reduce((sum, line) => sum + num(line.discount_amount), 0)
 	);
+}
+
+/**
+ * What the cashier is told about F&F: a LINE coupon that took F&F lines (D-15), and capped lines (I2).
+ *
+ * A line coupon takes only the lines it wins; F&F stays on the others, so it never
+ * sets the cart's `fnfCouponOverride` (which drops F&F from every line). The last
+ * F&F evaluation still counts the lines the coupon took, so:
+ *   - the coupon took every F&F line → `override` (muted badge, "applied instead of
+ *     Friends & Family" message, no line notes), as for an order coupon that beat F&F;
+ *   - it took some → `result` counts only the lines that kept F&F: count, saving and
+ *     the monthly balance after this order.
+ * A capped line (I2) keeps the invoice's per-unit saving (49.98 for a 50.00 cap), so
+ * the saving and the balance after this order count the stamped amounts too.
+ * Otherwise `result` is returned as it is.
+ *
+ * @returns {{ override: Object|null, result: Object|null }}
+ */
+export function lineCouponFnfView({ result = null, items = [], appliedCoupon = null } = {}) {
+	const fnfItems = (items || []).filter((item) => isFnfLine(item) && !item.is_free_item);
+	const replaced = appliedCoupon?.line_level
+		? (items || []).filter(
+				(item) => isCouponLine(item) && item.pre_coupon_discount?.discount_source === FNF_DISCOUNT_SOURCE
+			)
+		: [];
+	if (replaced.length && !fnfItems.length) {
+		// No server text: the cart says "… applied instead of Friends & Family — discounts
+		// are never combined." (plan U-18 b); the coupon dialog shows the comparison.
+		return { override: { code: appliedCoupon.code || appliedCoupon.name || "" }, result: null };
+	}
+	if (!result) return { override: null, result };
+	const capped = (result.lines || []).some((line) => line?.applies && line?.capped);
+	if (!replaced.length && !capped) return { override: null, result };
+	// What the lines save as stamped: a capped line keeps the invoice's per-unit rate
+	// (49.98, not the evaluation's 50.00), and a line a coupon took saves nothing by F&F.
+	const keptTotal = round2(fnfItems.reduce((sum, item) => sum + num(item.discount_amount), 0));
+	const view = { ...result, caps: capsForSaving(result, keptTotal) };
+	if (replaced.length) {
+		view.appliedCount = fnfItems.length;
+		view.lines = (result.lines || []).filter((line) => !replaced.includes(items[Number.parseInt(line?.idx, 10)]));
+	}
+	return { override: null, result: view };
+}
+
+/** `result.caps` with `fnf_applied_total` = `saving` and the monthly balance moved by the difference. */
+function capsForSaving(result, saving) {
+	if (!result.caps) return null;
+	const shownTotal = fnfAppliedTotal(result);
+	const caps = { ...result.caps, fnf_applied_total: saving };
+	if (caps.monthly_remaining_after !== null && caps.monthly_remaining_after !== undefined && shownTotal > 0) {
+		// Monthly amounts are in company currency: convert at the rate the server used.
+		const rate = (num(caps.monthly_remaining) - num(caps.monthly_remaining_after)) / shownTotal || 1;
+		caps.monthly_remaining_after = round2(
+			Math.max(0, num(caps.monthly_remaining_after) + (shownTotal - saving) * rate)
+		);
+	}
+	return caps;
 }
 
 /**
