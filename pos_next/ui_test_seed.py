@@ -117,7 +117,7 @@ GWP_RULE = (
 		"free_item": "UIT-GWP1",
 		"min_qty": 2,
 		"free_qty": 1,
-		"mixed_conditions": 1,
+		# No mixed_conditions: promotions' cleanup_fields_value forces same_item on a mixed GWP (-> bxgy).
 		"promotion_type": "GWP",
 		"gwp_paid_qty_basis": "Max Price",
 	},
@@ -376,8 +376,14 @@ def _rule_covers_uit(row, group_bounds) -> bool:
 # ---- seed ----------------------------------------------------------------
 
 
-def seed():
-	"""Create the UIT test data. Running it again changes nothing."""
+def seed(currency: str | None = None):
+	"""Create the UIT test data. Running it again changes nothing.
+
+	`currency` picks the company by its default currency (SAR when omitted), for sites with no SAR company.
+	"""
+	global COMPANY_CURRENCY
+	if currency:
+		COMPANY_CURRENCY = currency
 	frappe.only_for("System Manager")
 	promotions = promotions_installed()
 	_require_fields(
