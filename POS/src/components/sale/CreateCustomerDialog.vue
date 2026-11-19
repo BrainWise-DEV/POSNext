@@ -20,7 +20,7 @@
 					@lock-change="(v) => (emailVerificationLocked = v)"
 				/>
 			</div>
-			<div v-else class="flex flex-col gap-6">
+			<div v-else class="flex flex-col gap-5">
 				<div
 					v-if="existingDuplicate"
 					class="px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg"
@@ -42,9 +42,12 @@
 						</p>
 					</div>
 				</div>
+				<div class="grid grid-cols-1 gap-x-10 gap-y-6 md:grid-cols-2">
+				<section class="flex flex-col gap-4" aria-labelledby="customer-section-contact">
+					<h3 id="customer-section-contact" class="pb-2 text-start text-sm font-semibold text-gray-900 border-b border-gray-200">{{ __("Contact") }}</h3>
 				<!-- Customer Name (Required) -->
 				<div v-if="!requiresSplitCustomerName">
-					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
+					<label class="block text-start text-sm font-medium text-gray-700 mb-1.5">
 						{{ __("Customer Name") }} <span class="text-red-500">*</span>
 					</label>
 					<Input
@@ -58,7 +61,7 @@
 				<template v-else>
 					<div class="grid grid-cols-2 gap-4">
 						<div>
-							<label class="block text-start text-sm font-medium text-gray-700 mb-2">
+							<label class="block text-start text-sm font-medium text-gray-700 mb-1.5">
 								{{ __("First Name") }} <span class="text-red-500">*</span>
 							</label>
 							<Input
@@ -70,7 +73,7 @@
 							/>
 						</div>
 						<div>
-							<label class="block text-start text-sm font-medium text-gray-700 mb-2">
+							<label class="block text-start text-sm font-medium text-gray-700 mb-1.5">
 								{{ __("Last Name") }} <span class="text-red-500">*</span>
 							</label>
 							<Input
@@ -83,7 +86,7 @@
 						</div>
 					</div>
 					<div>
-						<label class="block text-start text-sm font-medium text-gray-700 mb-2">
+						<label class="block text-start text-sm font-medium text-gray-700 mb-1.5">
 							{{ __("Customer Name") }}
 						</label>
 						<Input
@@ -97,7 +100,7 @@
 
 				<!-- Mobile Number with Country Code Selector -->
 				<div>
-					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
+					<label class="block text-start text-sm font-medium text-gray-700 mb-1.5">
 						{{ __("Mobile Number") }} <span class="text-red-500">*</span>
 					</label>
 					<div class="flex gap-2">
@@ -208,7 +211,7 @@
 
 				<!-- Email (optional) -->
 				<div>
-					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
+					<label class="block text-start text-sm font-medium text-gray-700 mb-1.5">
 						{{ __("Email") }}
 					</label>
 					<Input
@@ -233,14 +236,19 @@
 					/>
 				</div>
 
+				</section>
+				<div class="flex flex-col gap-6">
+				<section class="flex flex-col gap-4" aria-labelledby="customer-section-class">
+					<h3 id="customer-section-class" class="pb-2 text-start text-sm font-semibold text-gray-900 border-b border-gray-200">{{ __("Classification") }}</h3>
+					<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
 				<!-- Customer Group -->
 				<div>
-					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
+					<label class="block text-start text-sm font-medium text-gray-700 mb-1.5">
 						{{ __("Customer Group") }}
 					</label>
 					<select
 						v-model="customerData.customer_group"
-						class="w-full px-8 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+						class="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
 					>
 						<option value="">{{ __("Select Customer Group") }}</option>
 						<option v-for="group in customerGroups" :key="group" :value="group">
@@ -251,12 +259,12 @@
 
 				<!-- Territory -->
 				<div>
-					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
+					<label class="block text-start text-sm font-medium text-gray-700 mb-1.5">
 						{{ __("Territory") }}
 					</label>
 					<select
 						v-model="customerData.territory"
-						class="w-full px-8 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+						class="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
 					>
 						<option value="">{{ __("Select Territory") }}</option>
 						<option
@@ -269,14 +277,19 @@
 					</select>
 				</div>
 
+					</div>
+				</section>
+				<section class="flex flex-col gap-4" aria-labelledby="customer-section-address">
+					<h3 id="customer-section-address" class="pb-2 text-start text-sm font-semibold text-gray-900 border-b border-gray-200">{{ __("Address") }}</h3>
+					<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
 				<!-- Governorate -->
 				<div>
-					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
+					<label class="block text-start text-sm font-medium text-gray-700 mb-1.5">
 						{{ __("Governorate") }}
 					</label>
 					<select
 						v-model="customerData.custom_governorate"
-						class="w-full px-8 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+						class="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
 					>
 						<option value="">{{ __("Select Governorate") }}</option>
 						<option v-for="gov in governorates" :key="gov" :value="gov">
@@ -287,13 +300,13 @@
 
 				<!-- District (filtered by selected Governorate) -->
 				<div>
-					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
+					<label class="block text-start text-sm font-medium text-gray-700 mb-1.5">
 						{{ __("District") }}
 					</label>
 					<select
 						v-model="customerData.custom_district"
 						:disabled="!customerData.custom_governorate"
-						class="w-full px-8 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
+						class="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
 					>
 						<option value="">
 							{{
@@ -310,6 +323,10 @@
 							{{ district.district }}
 						</option>
 					</select>
+				</div>
+					</div>
+				</section>
+				</div>
 				</div>
 			</div>
 		</template>
@@ -507,7 +524,7 @@ const dialogKey = computed(() =>
 );
 const dialogOptions = computed(() => ({
 	title: isEditMode.value ? __("Edit Customer") : __("Create New Customer"),
-	size: "md",
+	size: "3xl",
 }));
 
 // An email on the site's placeholder domain (POS Settings) is not a real address.

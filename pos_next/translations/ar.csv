@@ -2263,3 +2263,5 @@ Points applied: {0}. Please pay remaining {1} with {2},تم خصم النقاط:
 "Coupon {0} does not apply to this sale and was removed.","الكوبون {0} لا ينطبق على هذه العملية وتمت إزالته.",""
 "The invoice discount does not apply in full to this sale.","خصم الفاتورة لا ينطبق بالكامل على هذه العملية.",""
 "The cart changed after its total was checked. Check the total again.","تغيّرت السلة بعد التحقق من إجماليها. تحقّق من الإجمالي مرة أخرى.",""
+"Contact","جهة الاتصال",""
+"Classification","التصنيف",""
