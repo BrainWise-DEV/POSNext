@@ -165,7 +165,10 @@ doc_events = {
 			"pos_next.api.sales_invoice_hooks.validate",
 			"pos_next.api.wallet.validate_wallet_payment",
 		],
-		"before_submit": "pos_next.authorization.gate.enforce_document",
+		"before_submit": [
+			"pos_next.authorization.gate.enforce_document",
+			"pos_next.api.sales_invoice_hooks.check_one_time_offers",
+		],
 		"before_cancel": "pos_next.api.sales_invoice_hooks.before_cancel",
 		"on_submit": [
 			"pos_next.realtime_events.emit_stock_update_event",

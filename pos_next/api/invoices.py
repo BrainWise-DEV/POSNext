@@ -52,6 +52,27 @@ except Exception:  # pragma: no cover - ERPNext not installed in some environmen
 	erpnext_get_applied_pricing_rules = None
 	erpnext_apply_pricing_rule_on_transaction = None
 
+# ERPNext's rule lookups the one-time offer check matches redeemed rules with
+# (Ruling 111/113). Without them that check fails closed (``_one_time_lookup_missing``).
+try:
+	from erpnext.accounts.doctype.pricing_rule.utils import (
+		_get_pricing_rules as erpnext_get_item_pricing_rules,
+	)
+	from erpnext.accounts.doctype.pricing_rule.utils import (
+		filter_pricing_rule_based_on_condition as erpnext_filter_pricing_rule_based_on_condition,
+	)
+	from erpnext.accounts.doctype.pricing_rule.utils import (
+		filter_pricing_rules_for_qty_amount as erpnext_filter_pricing_rules_for_qty_amount,
+	)
+	from erpnext.accounts.doctype.pricing_rule.utils import (
+		get_other_conditions as erpnext_get_other_conditions,
+	)
+except Exception:  # pragma: no cover
+	erpnext_get_item_pricing_rules = None
+	erpnext_filter_pricing_rule_based_on_condition = None
+	erpnext_filter_pricing_rules_for_qty_amount = None
+	erpnext_get_other_conditions = None
+
 
 # ==========================================
 # Helper Functions
@@ -329,15 +350,15 @@ class _ItemData:
 class _PricingContext:
 	"""Server pricing facts for one save, shared by the free-row and paid-row checks.
 
-	The offers of the genuinely paid rows are evaluated at most once per save
-	(``paid_offers``), whichever check needs them first.
+	The offers of the genuinely paid rows are evaluated at most once per save and
+	date (``paid_offers``), whichever check needs them first.
 	"""
 
 	def __init__(self, invoice_doc):
 		self.doc = invoice_doc
 		self.item_data = _ItemData()
 		self.list_prices = {}
-		self._paid = None
+		self._paid = {}
 
 	def load(self, rows):
 		"""Item master facts and list prices (``_list_prices``) for ``rows``."""
@@ -346,14 +367,17 @@ class _PricingContext:
 		if missing:
 			self.list_prices.update(_list_prices(self.doc, missing, self.item_data))
 
-	def paid_offers(self, paid_rows) -> tuple[dict, Exception | None]:
-		"""The evaluator's answer for ``paid_rows`` (its items are in that order)."""
-		key = [id(row) for row in paid_rows]
-		if self._paid is None or self._paid[0] != key:
+	def paid_offers(self, paid_rows, on=None) -> tuple[dict, Exception | None]:
+		"""The evaluator's answer for ``paid_rows`` (its items are in that order), on the
+		evaluator's own date (today), or on the server date ``on``."""
+		key = (tuple(id(row) for row in paid_rows), on)
+		if key not in self._paid:
 			self.load(paid_rows)
 			payload = _offer_payload(self.doc, paid_rows, self.item_data, self.list_prices)
-			self._paid = (key, *_evaluate_offers(self.doc, payload))
-		return self._paid[1], self._paid[2]
+			if on:
+				payload["posting_date"] = on
+			self._paid[key] = _evaluate_offers(self.doc, payload)
+		return self._paid[key]
 
 
 def _pricing_context(invoice_doc) -> _PricingContext:
@@ -662,16 +686,100 @@ def _coupon_zeroed_lines(invoice_doc, coupon_code, payload) -> set[int]:
 	return set()
 
 
+EXCLUDED_RULES_FLAG = "pos_next_excluded_pricing_rules"
+
+
+def _install_rule_exclusion() -> None:
+	"""Let ERPNext's rule lookups leave out the rules named in ``frappe.flags`` (``EXCLUDED_RULES_FLAG``).
+
+	Both of ERPNext's engines (per item and per transaction) build their rule query with
+	``get_other_conditions``, looked up on the module when called, so one wrapper there
+	makes a rule absent from the query: the engine then picks among the others, by its
+	own priority and conflict rules, as if the rule did not exist. The wrapper is
+	installed once per process and does nothing while the request-local flag is unset;
+	pos_next's own reference (``erpnext_get_other_conditions``) stays unwrapped.
+	"""
+	from erpnext.accounts.doctype.pricing_rule import utils
+
+	if getattr(utils.get_other_conditions, "pos_next_excludes_rules", False):
+		return
+	original = utils.get_other_conditions
+
+	def get_other_conditions(*args, **kwargs):
+		conditions = original(*args, **kwargs)
+		excluded = frappe.flags.get(EXCLUDED_RULES_FLAG)
+		if excluded:
+			# ERPNext's (conditions, values, args); any other shape fails the lookup, so
+			# the evaluation explains nothing rather than everything.
+			values = kwargs["values"] if "values" in kwargs else args[1]
+			conditions += f" and `tabPricing Rule`.name not in %({EXCLUDED_RULES_FLAG})s"
+			values[EXCLUDED_RULES_FLAG] = tuple(sorted(excluded))
+		return conditions
+
+	get_other_conditions.pos_next_excludes_rules = True
+	utils.get_other_conditions = get_other_conditions
+
+
+def _evaluate_without(rule_names, evaluate):
+	"""``evaluate()`` with ERPNext's engines leaving out the Pricing Rules ``rule_names``
+	(``_install_rule_exclusion``); nothing is disabled for anyone else."""
+	if not rule_names:
+		return evaluate()
+	_install_rule_exclusion()
+	previous = frappe.flags.get(EXCLUDED_RULES_FLAG)
+	frappe.flags[EXCLUDED_RULES_FLAG] = set(previous or ()) | set(rule_names)
+	try:
+		return evaluate()
+	finally:
+		frappe.flags[EXCLUDED_RULES_FLAG] = previous
+
+
+def _desk_pricing_profile(invoice_doc) -> frappe._dict:
+	"""The pricing facts the offer evaluator takes from a POS Profile, for a sale made
+	without one (Desk): the invoice's own company, price list and currency."""
+	return frappe._dict(
+		company=invoice_doc.get("company"),
+		selling_price_list=invoice_doc.get("selling_price_list"),
+		currency=invoice_doc.get("currency"),
+		warehouse=None,
+		customer=None,
+		ignore_pricing_rule=0,
+	)
+
+
 def _evaluate_offers(invoice_doc, payload) -> tuple[dict, Exception | None]:
-	"""One call to the cart's evaluator; an error is logged and returned, never raised."""
+	"""One call to the cart's evaluator; an error is logged and returned, never raised.
+
+	A sale without a POS Profile (Desk) is evaluated by pos_next's own evaluator on the
+	invoice's pricing facts (``_desk_pricing_profile``). On a Sales Invoice, the one-time
+	rules this customer already redeemed are left out of ERPNext's rule lookup, so the
+	offers it picks are those it would pick without them (Ruling 117), on the
+	evaluator's own date; an unresolved rule conflict is an error, which explains
+	nothing.
+	"""
+	if payload.get("pos_profile"):
+		evaluator = _offer_evaluator()
+	else:
+		profile = _desk_pricing_profile(invoice_doc)
+
+		def evaluator(data):
+			return _apply_offers(data, profile=profile)
+
 	payload = json.dumps(payload, default=str)
 	message_count = len(frappe.local.message_log or [])
 	result, evaluator_error = {}, None
 	try:
-		result = _offer_evaluator()(payload) or {}
+		redeemed = set()
+		if invoice_doc.doctype == DOCTYPE_SALES_INVOICE:
+			redeemed = set(_redeemed_one_time_records(invoice_doc)[1])
+		result = _evaluate_without(redeemed, lambda: evaluator(payload)) or {}
+		if invoice_doc.doctype != DOCTYPE_SALES_INVOICE:
+			result = _without_one_time_rules(result)
+		elif redeemed:
+			result = _without_one_time_rules(result, only=redeemed)
 	except Exception as error:
 		# Any evaluator failure means no offer backs anything; the callers decide.
-		evaluator_error = error
+		result, evaluator_error = {}, error
 	if evaluator_error:
 		# The evaluator's own msgprint must not reach the cashier as a second error.
 		del frappe.local.message_log[message_count:]
@@ -682,6 +790,54 @@ def _evaluate_offers(invoice_doc, payload) -> tuple[dict, Exception | None]:
 			f"({type(evaluator_error).__name__}: {evaluator_error})",
 		)
 	return result, evaluator_error
+
+
+def _without_one_time_rules(result, only=None) -> dict:
+	"""``result`` with nothing one-time-per-customer rules gave (``only`` those, when
+	given). One-time rules apply only to a Sales Invoice, where they are redeemed, and
+	a rule this customer already redeemed explains nothing whatever an evaluator
+	answers (Ruling 113). A line any of them touched keeps no rule, so its discount is
+	explained by nothing; a one-time transaction rule takes the header offer away;
+	their gifts are dropped."""
+	if not result:
+		return result
+	items = result.get("items") or []
+	free_items = result.get("free_items") or []
+	names = set(result.get("applied_pricing_rules") or [])
+	for line in items:
+		names.update(_rule_names(_pricing_rule_to_string(line.get("pricing_rules"))))
+	names.update(cstr(free.get("pricing_rules")) for free in free_items if free.get("pricing_rules"))
+	if not names:
+		return result
+	if only is not None:
+		names &= set(only)
+		if not names:
+			return result
+	one_time = {
+		record.name: record.apply_on
+		for record in frappe.get_all(
+			"Pricing Rule",
+			filters={"name": ["in", list(names)], "one_time_per_customer": 1},
+			fields=["name", "apply_on"],
+		)
+	}
+	if not one_time:
+		return result
+	result = dict(result)
+	result["applied_pricing_rules"] = [
+		name for name in result.get("applied_pricing_rules") or [] if name not in one_time
+	]
+	stripped = []
+	for line in items:
+		line = dict(line)
+		if set(_rule_names(_pricing_rule_to_string(line.get("pricing_rules")))) & set(one_time):
+			line.update(pricing_rules="", discount_percentage=0, discount_amount=0)
+		stripped.append(line)
+	result["items"] = stripped
+	result["free_items"] = [free for free in free_items if cstr(free.get("pricing_rules")) not in one_time]
+	if "Transaction" in one_time.values():
+		result.update(additional_discount_percentage=0, discount_amount=0)
+	return result
 
 
 def _price_rule_names(rows) -> set[str]:
@@ -852,6 +1008,7 @@ def _check_free_rows(
 		first_row.setdefault(key, row)
 		if rule:
 			row.pricing_rules = rule
+			row.flags.pos_server_rule = True
 
 	refused, logged = [], []
 	for key, qty in sent.items():
@@ -1099,8 +1256,14 @@ def _check_paid_row_discounts(invoice_doc, offline_sync=False, paid_draft_rates=
 	- an F&F line (``posnext_discount_source``) on a Sales Invoice with promotions:
 	  promotions' F&F check is the authority, measuring on the server's list price;
 	  without promotions, or on a Sales Order, the mark explains nothing;
-	- a manual edit the POS Settings permit (``_manual_discount_problem``).
+	- a manual edit the POS Settings permit (``_manual_discount_problem``), except on
+	  a row a one-time offer this customer already used matches: that row takes no
+	  manual discount at all (``_used_one_time_offer_rows``, Ruling 111).
 	Client flags (``is_rate_manually_edited``, ``original_rate``) decide nothing.
+	One-time offers the server applied to a discounted row are stamped on a Sales
+	Invoice whatever rule names the client sent (``_stamp_server_one_time_rules``),
+	unless the row's coupon explains at least as much: its discount is then the
+	coupon's, not the offer's (Ruling 118).
 	Tolerance: one unit of the rate's precision per unit sold. A row at rate 0 is
 	``_refuse_zero_rate_after_totals``'s.
 
@@ -1145,16 +1308,38 @@ def _check_paid_row_discounts(invoice_doc, offline_sync=False, paid_draft_rates=
 	coupon_rates = {}
 	settings = _discount_settings(invoice_doc.get("pos_profile"))
 	refused, logged = [], []
+	used_offers = None
+	offer_lines = []
 	for row, list_price, tolerance in below:
 		idx = index[id(row)]
-		explained = [list_price, _offer_rate(result, idx, list_price)]
+		offer = _offer_rate(result, idx, list_price)
+		coupon = None
 		code = row.get("posnext_coupon_code")
 		if code:
 			if code not in coupon_rates:
 				coupon_rates[code] = _coupon_line_rates(invoice_doc, code, paid_rows, context)
-			explained.append(coupon_rates[code].get(idx))
-		unexplained = min(rate for rate in explained if rate is not None) - flt(row.rate)
+			coupon = coupon_rates[code].get(idx)
+		if coupon is None or (offer is not None and offer < coupon):
+			# The line's discount is the offer's, not a coupon's at least as large (Ruling 118).
+			offer_lines.append(idx)
+		unexplained = min(rate for rate in (list_price, offer, coupon) if rate is not None) - flt(row.rate)
 		if unexplained <= tolerance:
+			continue
+		if used_offers is None:
+			used_offers = _offline_safe(
+				offline_sync,
+				invoice_doc,
+				dict,
+				_used_one_time_offer_rows,
+				invoice_doc,
+				[below_row for below_row, *_ in below],
+				context.item_data,
+			)
+		if id(row) in used_offers:
+			# The offers explained above were evaluated without the used ones, so a regular
+			# offer ERPNext would pick still explains its part (Rulings 116, 117). What is
+			# left is a manual discount, and none re-gives an offer already used (Ruling 111).
+			(logged if offline_sync else refused).append(_one_time_used_message(used_offers[id(row)]))
 			continue
 		problem = _manual_discount_problem(row, list_price, unexplained, tolerance, settings)
 		if not problem:
@@ -1162,6 +1347,8 @@ def _check_paid_row_discounts(invoice_doc, offline_sync=False, paid_draft_rates=
 		held = (paid_draft_rates or {}).get((row.item_code, row.get("uom")))
 		lenient = offline_sync or (held is not None and flt(row.rate) >= held - tolerance)
 		(logged if lenient else refused).append(problem)
+	if invoice_doc.doctype == DOCTYPE_SALES_INVOICE:
+		_stamp_server_one_time_rules(invoice_doc, result, offer_lines)
 	if refused:
 		_refuse("<br>".join(refused), UNEXPLAINED_DISCOUNT_LOG_TITLE)
 	reference = invoice_doc.name or invoice_doc.get("offline_id") or "new"
@@ -1255,20 +1442,60 @@ def _offer_header_value(result, bases, apply_discount_on) -> float:
 	)
 
 
+def _unexplained_header(invoice_doc, dates=(None,)) -> frappe._dict:
+	"""How much of the invoice's header discount nothing on the server explains, for the
+	POS checks and the Desk before_submit hook alike (Ruling 117).
+
+	Run after the totals. The header (``discount_amount``) is explained, the larger of the
+	two (the cart never combines them), by:
+	- the invoice's coupon: pos_next's POS Coupon value (``_coupon_header_value``);
+	- the transaction offers the server evaluates for the paid rows (the shared
+	  ``_PricingContext`` call), without the one-time rules this customer already
+	  redeemed (``_evaluate_offers``), on each of ``dates`` (None: the evaluator's
+	  own date), the most any of them gives.
+	Returns header, manual (the rest), explained, source, evaluator_error, bases and
+	apply_discount_on.
+	"""
+	header = flt(invoice_doc.get("discount_amount"))
+	tolerance = 10 ** -cint(_currency_precision(invoice_doc.get("currency")))
+	code = invoice_doc.get("coupon_code")
+	bases = _header_discount_bases(invoice_doc)
+	apply_discount_on = cstr(invoice_doc.get("apply_discount_on")) or "Grand Total"
+	coupon = _coupon_header_value(invoice_doc, bases) if code else 0
+	offers, evaluator_error = 0, None
+	if header - coupon > tolerance:
+		context, paid_rows = _pricing_context(invoice_doc), _paid_rows(invoice_doc)
+		for on in dates:
+			result, error = context.paid_offers(paid_rows, on)
+			evaluator_error = evaluator_error or error
+			offers = max(offers, _offer_header_value(result, bases, apply_discount_on))
+	explained, source = (
+		(coupon, _("coupon {0}").format(code)) if coupon >= offers else (offers, _("the offers"))
+	)
+	return frappe._dict(
+		header=header,
+		manual=header - explained,
+		explained=explained,
+		source=source,
+		evaluator_error=evaluator_error,
+		bases=bases,
+		apply_discount_on=apply_discount_on,
+	)
+
+
 def _check_header_discount(
 	invoice_doc, offline_sync=False, paid_draft_header=None, paid_draft_rates=None
 ) -> None:
 	"""The invoice-level discount must be explained by the server, not the client.
 
 	Runs after ``calculate_taxes_and_totals`` and the paid-row check, on the header
-	that will be saved (``discount_amount``, worked out from any percentage). It is
-	explained, the larger of the two (the cart never combines them), by:
-	- the invoice's coupon: on an unpaid POS Sales Invoice with promotions,
-	  promotions caps a POS Coupon's header itself, so nothing is checked here;
-	  otherwise (also any paid one) pos_next's POS Coupon value (``_coupon_header_value``);
-	- the transaction offers the server evaluates for the paid rows (the shared
-	  ``_PricingContext`` call, no second one).
-	The rest is a manual invoice discount: it needs Allow Additional Discount, and
+	that will be saved (``discount_amount``, worked out from any percentage). On an
+	unpaid POS Sales Invoice with promotions and a coupon, promotions caps a POS
+	Coupon's header itself, so nothing is checked here. Otherwise the coupon or the
+	server-evaluated offers explain part of it (``_unexplained_header``, shared with
+	the Desk hook). The rest is a manual invoice discount: on a cart a one-time offer
+	this customer already used matches, it is refused at any size; else it needs Allow
+	Additional Discount, and
 	Max Discount Percentage Allowed (0 = no limit) caps it as a percentage of the
 	total before the header it applies to (``apply_discount_on``), separately from
 	the line cap. Tolerance: one unit of the currency precision.
@@ -1281,32 +1508,34 @@ def _check_header_discount(
 	"""
 	if invoice_doc.get("is_return"):
 		return
-	header = flt(invoice_doc.get("discount_amount"))
 	precision = cint(_currency_precision(invoice_doc.get("currency")))
 	tolerance = 10**-precision
-	if header <= tolerance:
+	if flt(invoice_doc.get("discount_amount")) <= tolerance:
 		return
-	code = invoice_doc.get("coupon_code")
 	paid = bool(
 		offline_sync
 		or invoice_doc.get("offline_id")
 		or paid_draft_header is not None
 		or _carries_payment(invoice_doc)
 	)
-	if code and _coupon_header_left_to_promotions(invoice_doc, paid):
+	if invoice_doc.get("coupon_code") and _coupon_header_left_to_promotions(invoice_doc, paid):
 		return
-	bases = _header_discount_bases(invoice_doc)
-	apply_discount_on = cstr(invoice_doc.get("apply_discount_on")) or "Grand Total"
-	coupon = _coupon_header_value(invoice_doc, bases) if code else 0
-	offers, evaluator_error = 0, None
-	if header - coupon > tolerance:
-		result, evaluator_error = _pricing_context(invoice_doc).paid_offers(_paid_rows(invoice_doc))
-		offers = _offer_header_value(result, bases, apply_discount_on)
-	explained, source = (
-		(coupon, _("coupon {0}").format(code)) if coupon >= offers else (offers, _("the offers"))
-	)
-	manual = header - explained
+	unexplained = _unexplained_header(invoice_doc)
+	header, manual, explained = unexplained.header, unexplained.manual, unexplained.explained
+	source, evaluator_error, bases = unexplained.source, unexplained.evaluator_error, unexplained.bases
+	apply_discount_on = unexplained.apply_discount_on
 	if manual <= tolerance:
+		return
+	used = _offline_safe(
+		offline_sync, invoice_doc, lambda: None, _used_one_time_transaction_rule, invoice_doc
+	) or _offline_safe(offline_sync, invoice_doc, lambda: None, _used_one_time_item_in_cart, invoice_doc)
+	if used:
+		# No manual header re-gives a cart offer this customer already used (Ruling 113).
+		problem = _one_time_used_message(used)
+		if not offline_sync:
+			_refuse(problem, UNEXPLAINED_DISCOUNT_LOG_TITLE)
+		reference = invoice_doc.name or invoice_doc.get("offline_id") or "new"
+		log_error_without_telemetry(UNEXPLAINED_DISCOUNT_LOG_TITLE, f"Invoice {reference}: {problem}")
 		return
 
 	explanation = (
@@ -2397,10 +2626,10 @@ def _update_invoice(data: str | dict, offline_sync: bool = False) -> dict:
 			paid_draft_free=paid_draft_free,
 			stored_sources=stored_sources,
 		)
-		applied_rule_names_seen = _reset_row_pricing_rules(invoice_doc.get("items", []))
+		_reset_row_pricing_rules(invoice_doc.get("items", []))
 
 		if doctype == "Sales Invoice":
-			_stamp_one_time_item_rules(invoice_doc, applied_rule_names_seen)
+			_stamp_one_time_item_rules(invoice_doc, _server_free_row_rules(invoice_doc.get("items", [])))
 
 		# Set invoice flags BEFORE calculations
 		if doctype == "Sales Invoice":
@@ -2938,11 +3167,11 @@ def submit_invoice(invoice: str | dict | None = None, data: str | dict | None = 
 				paid_draft_free=paid_draft_free,
 				stored_sources=stored_sources,
 			)
-			rule_names_seen = _reset_row_pricing_rules(invoice_doc.get("items", []))
+			_reset_row_pricing_rules(invoice_doc.get("items", []))
 			if doctype == DOCTYPE_SALES_INVOICE:
 				# The rows may not be the stored draft's: stamp the one-time offers as
 				# update_invoice does (Ruling 110).
-				_stamp_one_time_item_rules(invoice_doc, rule_names_seen)
+				_stamp_one_time_item_rules(invoice_doc, _server_free_row_rules(invoice_doc.get("items", [])))
 			if not invoice_doc.get("is_return"):
 				# Judge the rates this save will store, as update_invoice does.
 				invoice_doc.calculate_taxes_and_totals()
@@ -3108,6 +3337,9 @@ def submit_invoice(invoice: str | dict | None = None, data: str | dict | None = 
 		from pos_next.authorization.gate import TOKEN_FLAG
 
 		invoice_doc.flags[TOKEN_FLAG] = invoice.get("authorization_token") or data.get("authorization_token")
+
+		if doctype == DOCTYPE_SALES_INVOICE:
+			_redeem_one_time_rules(invoice_doc, offline_sync=offline_sync)
 
 		# Submit invoice
 		invoice_doc.submit()
@@ -4776,6 +5008,478 @@ def _one_time_rule_blocked(rule_name, customer, default_customer):
 	return is_redeemed(customer, rule_name)
 
 
+def _one_time_used_message(rule_name) -> str:
+	title = frappe.db.get_value("Pricing Rule", rule_name, "title") or rule_name
+	return _("{0} was already used by this customer").format(title)
+
+
+def _tracked_customer(invoice_doc) -> str | None:
+	"""The invoice's customer when one-time offers are tracked for it: never the
+	walk-in / default customer (``_one_time_rule_blocked``)."""
+	customer = invoice_doc.get("customer")
+	pos_profile = invoice_doc.get("pos_profile")
+	default_customer = (
+		frappe.get_cached_value("POS Profile", pos_profile, "customer") if pos_profile else None
+	)
+	return customer if customer and customer != default_customer else None
+
+
+def _stamped_one_time_rules(customer, invoice_name=None) -> set[str]:
+	"""One-time rules stamped on ``customer``'s other submitted sales."""
+	filters = {
+		"customer": customer,
+		"docstatus": 1,
+		"is_return": 0,
+		"pos_applied_one_time_rules": ["is", "set"],
+	}
+	if invoice_name:
+		filters["name"] = ["!=", invoice_name]
+	rules = set()
+	for stamp in frappe.get_all(DOCTYPE_SALES_INVOICE, filters=filters, pluck="pos_applied_one_time_rules"):
+		try:
+			rules.update(json.loads(stamp or "[]"))
+		except (ValueError, TypeError):
+			continue
+	return rules
+
+
+def _redeemed_one_time_rules(customer, invoice_name=None) -> set[str]:
+	"""One-time rules ``customer`` already redeemed on another invoice: a usage row,
+	or a stamp on another submitted sale (Ruling 111)."""
+	usage = frappe.get_all(
+		"One Time Customer Offer Usage",
+		filters={"customer": customer},
+		fields=["pricing_rule", "sales_invoice"],
+	)
+	redeemed = {row.pricing_rule for row in usage if not invoice_name or row.sales_invoice != invoice_name}
+	return redeemed | _stamped_one_time_rules(customer, invoice_name)
+
+
+def _redeemed_one_time_records(invoice_doc) -> tuple[str | None, dict]:
+	"""(customer, {rule: record}) for the enabled one-time rules this invoice's tracked
+	customer already redeemed on another invoice (``_redeemed_one_time_rules``)."""
+	customer = _tracked_customer(invoice_doc)
+	if not customer:
+		return None, {}
+	redeemed = _redeemed_one_time_rules(customer, invoice_doc.name)
+	if not redeemed:
+		return customer, {}
+	records = frappe.get_all(
+		"Pricing Rule",
+		filters={"name": ["in", list(redeemed)], "one_time_per_customer": 1, "disable": 0},
+		fields=["name", "apply_on", "price_or_product_discount", "free_item", "promotional_scheme"],
+	)
+	return customer, {record.name: record for record in records}
+
+
+def _one_time_match_dates(invoice_doc) -> list:
+	"""The sale's posting date and today: a rule valid on either matches (Ruling 113)."""
+	return sorted({cstr(invoice_doc.get("posting_date") or nowdate()), nowdate()})
+
+
+def _one_time_match_args(invoice_doc, customer) -> frappe._dict:
+	customer_group, territory = frappe.get_cached_value(
+		"Customer", customer, ["customer_group", "territory"]
+	) or (None, None)
+	return frappe._dict(
+		doctype=invoice_doc.doctype,
+		name=invoice_doc.name,
+		transaction_type="selling",
+		company=invoice_doc.get("company"),
+		customer=customer,
+		customer_group=customer_group,
+		territory=territory,
+		price_list=invoice_doc.get("selling_price_list")
+		or (
+			invoice_doc.get("pos_profile")
+			and frappe.get_cached_value("POS Profile", invoice_doc.get("pos_profile"), "selling_price_list")
+		),
+	)
+
+
+def _one_time_lookup_missing():
+	"""ERPNext's rule lookup is gone: the check cannot run, so it fails closed."""
+	frappe.throw(
+		_("One-time offers could not be checked for this customer. Try again in a moment."),
+		frappe.ValidationError,
+	)
+
+
+def _used_one_time_offer_rows(invoice_doc, rows, item_data, rules=None) -> dict[int, str]:
+	"""{id(row): rule} for ``rows`` a one-time rule this customer already redeemed matches.
+
+	A redeemed rule never reaches the offer evaluators, so it is matched here with
+	ERPNext's own rule lookup on server data (item, item group, brand, UOM,
+	warehouse, customer, customer group, territory, company, price list), on the
+	posting date or today, before any quantity threshold or priority: the item is
+	the offer's item. A gift rule also matches its ``free_item`` and, for a Gift Pool
+	scheme, every item of its pools. The row's
+	``pricing_rules`` play no part. Without the lookup the check raises.
+	``rules`` ((customer, {rule: record})) replaces the redeemed rules.
+	"""
+	customer, redeemed = rules or _redeemed_one_time_records(invoice_doc)
+	if not redeemed:
+		return {}
+	if not erpnext_get_item_pricing_rules:
+		_one_time_lookup_missing()
+
+	gifts = {}
+	products = [record for record in redeemed.values() if record.price_or_product_discount == "Product"]
+	pools = _gift_pool_groups({record.promotional_scheme for record in products if record.promotional_scheme})
+	for record in products:
+		# The gift, and every item of a Gift Pool scheme's pools (Ruling 116).
+		codes = {record.free_item} if record.free_item else set()
+		for pool in (pools.get(record.promotional_scheme) or {}).values():
+			codes |= pool
+		for code in codes:
+			gifts.setdefault(code, []).append(record.name)
+	base = _one_time_match_args(invoice_doc, customer)
+	dates = _one_time_match_dates(invoice_doc)
+	used = {}
+	for row in rows:
+		matched = set(gifts.get(row.item_code, ()))
+		for date in dates:
+			args = frappe._dict(
+				base,
+				item_code=row.item_code,
+				item_group=item_data.get(row.item_code, "item_group"),
+				brand=item_data.get(row.item_code, "brand"),
+				uom=row.get("uom"),
+				warehouse=row.get("warehouse"),
+				transaction_date=date,
+			)
+			matched.update(
+				rule.name
+				for apply_on in ("Item Code", "Item Group", "Brand")
+				for rule in erpnext_get_item_pricing_rules(apply_on, args, {})
+				if rule.name in redeemed
+			)
+		if matched:
+			used[id(row)] = sorted(matched)[0]
+	return used
+
+
+def _used_one_time_transaction_rule(invoice_doc, rules=None) -> str | None:
+	"""A one-time transaction rule this customer already redeemed whose conditions match
+	this cart, or None.
+
+	ERPNext's own transaction evaluation on server data: its rule conditions (company,
+	customer, customer group, territory, validity on the posting date or today), its
+	quantity and amount thresholds on the cart's totals, and its Python condition.
+	Without the lookup the check raises. ``rules`` ((customer, {rule: record}))
+	replaces the redeemed rules.
+	"""
+	customer, redeemed = rules or _redeemed_one_time_records(invoice_doc)
+	names = tuple(name for name, record in redeemed.items() if record.apply_on == "Transaction")
+	if not names:
+		return None
+	if not (
+		erpnext_get_other_conditions
+		and erpnext_filter_pricing_rules_for_qty_amount
+		and erpnext_filter_pricing_rule_based_on_condition
+	):
+		_one_time_lookup_missing()
+	base = _one_time_match_args(invoice_doc, customer)
+	for date in _one_time_match_dates(invoice_doc):
+		values = {"one_time_rules": names}
+		conditions = erpnext_get_other_conditions(
+			"`tabPricing Rule`.name in %(one_time_rules)s", values, frappe._dict(base, transaction_date=date)
+		)
+		rules = frappe.db.sql(
+			f"select `tabPricing Rule`.* from `tabPricing Rule` where {conditions} "
+			"and `tabPricing Rule`.disable = 0 and `tabPricing Rule`.apply_on = 'Transaction'",
+			values,
+			as_dict=True,
+		)
+		rules = erpnext_filter_pricing_rules_for_qty_amount(
+			invoice_doc.get("total_qty"), invoice_doc.get("total"), rules
+		)
+		rules = erpnext_filter_pricing_rule_based_on_condition(rules, invoice_doc)
+		if rules:
+			return sorted(rule.name for rule in rules)[0]
+	return None
+
+
+def _server_line_rules(result, indexes) -> set[str]:
+	"""Rules the server's offer evaluation ``result`` applied to its paid lines ``indexes``."""
+	applied = set(result.get("applied_pricing_rules") or [])
+	items = result.get("items") or []
+	names = set()
+	for idx in indexes:
+		if idx < len(items):
+			names.update(set(_rule_names(_pricing_rule_to_string(items[idx].get("pricing_rules")))) & applied)
+	return names
+
+
+def _stamp_server_one_time_rules(invoice_doc, result, indexes) -> None:
+	"""Add to the stamp the one-time rules the server's offer evaluation applied to the
+	discounted paid lines ``indexes``, so a redemption never depends on the client
+	sending the rule's name."""
+	names = _server_line_rules(result, indexes)
+	if not names:
+		return
+	one_time = frappe.get_all(
+		"Pricing Rule", filters={"name": ["in", list(names)], "one_time_per_customer": 1}, pluck="name"
+	)
+	if one_time:
+		stamped = json.loads(invoice_doc.get("pos_applied_one_time_rules") or "[]")
+		invoice_doc.pos_applied_one_time_rules = json.dumps(sorted(set(stamped) | set(one_time)))
+
+
+def _offline_safe(offline_sync, invoice_doc, empty, fn, *args):
+	"""``fn(*args)``; on an offline sync an error is logged and ``empty()`` returned,
+	so a one-time offer check never refuses a sale already made (Ruling 111)."""
+	if not offline_sync:
+		return fn(*args)
+	savepoint = "pos_next_one_time_offer"
+	frappe.db.savepoint(savepoint)
+	try:
+		return fn(*args)
+	except Exception as error:
+		frappe.db.rollback(save_point=savepoint)
+		reference = invoice_doc.name or invoice_doc.get("offline_id") or "new"
+		log_error_without_telemetry(
+			UNEXPLAINED_DISCOUNT_LOG_TITLE,
+			f"Invoice {reference}: one-time offers could not be checked ({type(error).__name__}: {error})",
+		)
+		return empty()
+
+
+def _redeem_one_time_rules(invoice_doc, offline_sync=False) -> None:
+	"""Record the one-time offers this sale redeems, just before it is submitted.
+
+	Each stamped rule takes the customer's usage row (``redeem``): its name is the
+	(customer, rule) key, so a second tab or device redeeming the same rule waits
+	on the first insert and then finds it taken. A rule stamped on another
+	submitted sale is taken too, and so is one whose key is still held when the
+	lock wait times out. A taken rule refuses the submit online with the offer's
+	"already used"; an offline sync keeps the sale and logs, and drops a timed-out
+	rule from its stamp so no on_submit recorder waits on the key again. The
+	walk-in customer is never tracked.
+
+	The pos_next before_submit hook (``check_one_time_offers_on_submit``) leaves a
+	sale checked here alone.
+	"""
+	from pos_next.pos_next.doctype.one_time_customer_offer_usage import one_time_customer_offer_usage
+
+	invoice_doc.flags.pos_one_time_checked = True
+	if invoice_doc.get("is_return"):
+		return
+	customer = _tracked_customer(invoice_doc)
+	try:
+		rules = json.loads(invoice_doc.get("pos_applied_one_time_rules") or "[]")
+	except (ValueError, TypeError):
+		rules = []
+	if not customer or not rules:
+		return
+	timed_out = set()
+
+	def taken_rules():
+		stamped_elsewhere = _stamped_one_time_rules(customer, invoice_doc.name)
+		taken = []
+		for rule in sorted(rules):
+			try:
+				redeemed = one_time_customer_offer_usage.redeem(customer, rule, invoice_doc.name)
+			except frappe.QueryTimeoutError:
+				timed_out.add(rule)
+				redeemed = False
+			if not redeemed or rule in stamped_elsewhere:
+				taken.append(_one_time_used_message(rule))
+		return taken
+
+	taken = _offline_safe(offline_sync, invoice_doc, list, taken_rules)
+	if not taken:
+		return
+	if not offline_sync:
+		_refuse("<br>".join(taken), UNEXPLAINED_DISCOUNT_LOG_TITLE)
+	if timed_out:
+		kept = sorted(set(rules) - timed_out)
+		invoice_doc.pos_applied_one_time_rules = json.dumps(kept) if kept else ""
+	reference = invoice_doc.name or invoice_doc.get("offline_id") or "new"
+	for problem in taken:
+		log_error_without_telemetry(UNEXPLAINED_DISCOUNT_LOG_TITLE, f"Invoice {reference}: {problem}")
+
+
+def check_one_time_offers_on_submit(doc) -> None:
+	"""Sales Invoice before_submit, any origin (Desk, an invoice billed from a Sales
+	Order, a printed draft at shift close): every one-time rule the sale carries or
+	matches is redeemed here, under the same (customer, rule) key as the POS
+	(Rulings 113, 114). The first use counts; a rule already redeemed on another
+	invoice (usage row or stamp) refuses the submit, and an offline sync logs.
+
+	Carries: the rule is stamped, or named on a row or in the header's pricing rules.
+	Matches: the server's offer evaluation applied it to a discounted row; a free row,
+	or a row discounted beyond what that evaluation explains, the rule matches
+	(``_used_one_time_offer_rows``); a header discount on a cart the conditions of a
+	rule not yet used match (``_used_one_time_transaction_rule``). A used rule refuses
+	a header only for its part no regular offer or coupon explains
+	(``_unexplained_header``, as on the POS). The redeemed rules are added to the stamp;
+	the on_submit recorders then find their rows. A sale ``submit_invoice`` already
+	checked and recorded (``_redeem_one_time_rules``) is left alone.
+	"""
+	# A return or debit note adjusts a sale; a consolidated invoice merges checked ones.
+	if (
+		doc.flags.pos_one_time_checked
+		or doc.get("is_return")
+		or doc.get("is_debit_note")
+		or doc.get("is_consolidated")
+	):
+		return
+	offline_sync = bool(doc.flags.pos_offline_sync)
+	problems = _offline_safe(offline_sync, doc, list, _redeem_on_submit, doc)
+	if not problems:
+		return
+	if not offline_sync:
+		_refuse("<br>".join(problems), UNEXPLAINED_DISCOUNT_LOG_TITLE)
+	reference = doc.name or doc.get("offline_id") or "new"
+	for problem in problems:
+		log_error_without_telemetry(UNEXPLAINED_DISCOUNT_LOG_TITLE, f"Invoice {reference}: {problem}")
+
+
+def _redeem_on_submit(doc) -> list[str]:
+	"""Redeem every one-time rule ``doc`` carries or matches; the "already used"
+	messages of the rules another invoice holds."""
+	from pos_next.pos_next.doctype.one_time_customer_offer_usage import one_time_customer_offer_usage
+
+	customer = _tracked_customer(doc)
+	if not customer:
+		return []
+	records = {
+		record.name: record
+		for record in frappe.get_all(
+			"Pricing Rule",
+			filters={"one_time_per_customer": 1, "disable": 0, "selling": 1},
+			fields=["name", "apply_on", "price_or_product_discount", "free_item", "promotional_scheme"],
+		)
+	}
+	if not records:
+		return []
+	try:
+		stamped = set(json.loads(doc.get("pos_applied_one_time_rules") or "[]"))
+	except (ValueError, TypeError):
+		stamped = set()
+	carried = set(stamped)
+	rows = [row for row in doc.get("items") or [] if row.get("item_code")]
+	for row in rows:
+		carried.update(_rule_names(row.get("pricing_rules") or ""))
+	carried.update(row.pricing_rule for row in doc.get("pricing_rules") or [] if row.get("pricing_rule"))
+	rules = carried & set(records)
+
+	context = _pricing_context(doc)
+	paid_rows = _paid_rows(doc)
+	context.load(rows)
+	item_data = context.item_data
+	index = {id(row): idx for idx, row in enumerate(paid_rows)}
+	# Promotions judges an F&F line on a POS invoice in this same save (Ruling 118); a
+	# Desk invoice's mark is the caller's and explains nothing.
+	fnf_judged = cint(doc.get("is_pos")) and _promotions_evaluates_offers()
+	discounted, below = [], []
+	for row in rows:
+		precision = row.precision("rate")
+		tolerance = 10 ** -cint(2 if precision is None else precision)
+		# The server's list price (``_list_prices``) or the row's, whichever is higher,
+		# as the row's own may be the caller's.
+		list_price = max(flt(context.list_prices.get(id(row))), flt(row.get("price_list_rate")))
+		if cint(row.get("is_free_item")):
+			discounted.append(row)
+		elif flt(row.rate) < list_price - tolerance:
+			if fnf_judged and row.get("posnext_discount_source") == FNF_DISCOUNT_SOURCE:
+				continue
+			below.append((row, list_price, tolerance))
+	# Only a row some one-time rule matches can redeem or re-give one: the server's offers
+	# are evaluated for those alone.
+	matched = (
+		_used_one_time_offer_rows(doc, [row for row, *_ in below], item_data, (customer, records))
+		if below
+		else {}
+	)
+	dates = _offer_dates(doc)
+	coupon_rates, offers_on = {}, []
+	for row, list_price, tolerance in below:
+		if id(row) not in matched:
+			continue
+		idx = index[id(row)]
+		# The server's offers without the redeemed one-time rules (``_evaluate_offers``,
+		# Ruling 117), on each date (``_offer_dates``); the most any gives explains.
+		offers = [_offer_rate(context.paid_offers(paid_rows, on)[0], idx, list_price) for on in dates]
+		offer = min((rate for rate in offers if rate is not None), default=None)
+		coupon = None
+		code = row.get("posnext_coupon_code")
+		if code:
+			# pos_next's coupon resolver, for the invoice's own coupon only (Ruling 118).
+			if code not in coupon_rates:
+				coupon_rates[code] = _coupon_line_rates(doc, code, paid_rows, context)
+			coupon = coupon_rates[code].get(idx)
+		if offer is not None and (coupon is None or offer < coupon):
+			# The offer is the row's discount: a one-time rule it applied is this sale's use.
+			offers_on.append(idx)
+		explained = min(rate for rate in (list_price, offer, coupon) if rate is not None)
+		# Any rest is a discount the matching one-time rule redeems or re-gives.
+		if flt(row.rate) < explained - tolerance:
+			discounted.append(row)
+	for on in dates if offers_on else ():
+		rules.update(_server_line_rules(context.paid_offers(paid_rows, on)[0], offers_on) & set(records))
+	if discounted:
+		rules.update(_used_one_time_offer_rows(doc, discounted, item_data, (customer, records)).values())
+	header_taken = []
+	tolerance = 10 ** -cint(_currency_precision(doc.get("currency")))
+	if flt(doc.get("discount_amount")) > tolerance:
+		redeemed = _redeemed_one_time_records(doc)[1]
+		unredeemed = {name: record for name, record in records.items() if name not in redeemed}
+		# A one-time cart offer this customer has not used yet: the header redeems it.
+		header_rule = _used_one_time_transaction_rule(doc, (customer, unredeemed))
+		if header_rule:
+			rules.add(header_rule)
+		# On a cart a used cart or item offer matches, the part of the header no regular
+		# offer or coupon explains (as on the POS) re-gives it (Ruling 116). The match is
+		# looked up first: the offers are evaluated only when it finds one.
+		used = _used_one_time_transaction_rule(doc, (customer, redeemed)) or _used_one_time_item_in_cart(
+			doc, item_data
+		)
+		if used and _unexplained_header(doc, dates).manual > tolerance:
+			header_taken.append(_one_time_used_message(used))
+	if not rules:
+		return header_taken
+
+	stamped_elsewhere = _stamped_one_time_rules(customer, doc.name)
+	taken, recorded = [], set()
+	for rule in sorted(rules):
+		try:
+			redeemed = one_time_customer_offer_usage.redeem(customer, rule, doc.name)
+		except frappe.QueryTimeoutError:
+			redeemed = False
+		if redeemed and rule not in stamped_elsewhere:
+			recorded.add(rule)
+		else:
+			taken.append(_one_time_used_message(rule))
+	if recorded - stamped and doc.meta.has_field("pos_applied_one_time_rules"):
+		doc.pos_applied_one_time_rules = json.dumps(sorted(stamped | recorded))
+	return taken + header_taken
+
+
+def _offer_dates(doc) -> list:
+	"""Dates the before_submit check evaluates offers on: the evaluator's own (today, as
+	None), then the day the invoice was first saved (its server-set ``creation``), so a
+	printed draft closed the next day keeps its sale day's offers (Ruling 118). Never
+	the caller's ``posting_date``."""
+	created = doc.get("creation") and cstr(getdate(doc.creation))
+	return [None, created] if created and created != nowdate() else [None]
+
+
+def _used_one_time_item_in_cart(invoice_doc, item_data=None) -> str | None:
+	"""An item (or gift) one-time rule this customer already redeemed that matches any
+	paid or free row of the cart, or None: such a cart takes no manual header
+	discount (Ruling 116)."""
+	rows = [row for row in invoice_doc.get("items") or [] if row.get("item_code")]
+	if not rows:
+		return None
+	if item_data is None:
+		item_data = _pricing_context(invoice_doc).item_data
+	item_data.load(row.item_code for row in rows)
+	used = _used_one_time_offer_rows(invoice_doc, rows, item_data)
+	return sorted(used.values())[0] if used else None
+
+
 def _transaction_rules_applied(doc):
 	"""Transaction-level rules ERPNext applied to ``doc``, in order.
 
@@ -4824,6 +5528,18 @@ def _replay_transaction_discount(doc, rule_names, addl_pct, discount_amt):
 		flt(doc.discount_amount),
 		doc.get("apply_discount_on") or None,
 	)
+
+
+def _server_free_row_rules(items) -> set[str]:
+	"""Rule names the server put on free rows (``_check_free_rows_backed``): never a
+	name the client sent (Ruling 113). Paid rows are stamped by
+	``_stamp_server_one_time_rules``."""
+	return {
+		name
+		for row in items
+		if cint(row.get("is_free_item")) and (row.flags.pos_backing_rule or row.flags.pos_server_rule)
+		for name in _rule_names(row.get("pricing_rules") or "")
+	}
 
 
 def _stamp_one_time_item_rules(invoice_doc, rule_names) -> None:
@@ -4932,6 +5648,12 @@ def apply_offers(invoice_data, selected_offers=None):
 	                When provided, results are filtered to only include these rules.
 	                ERPNext handles all conflict resolution based on priority.
 	"""
+	return _apply_offers(invoice_data, selected_offers)
+
+
+def _apply_offers(invoice_data, selected_offers=None, profile=None):
+	"""``apply_offers``; ``profile`` replaces the payload's POS Profile (a Desk sale's
+	pricing facts, ``_desk_pricing_profile``)."""
 	try:
 		if isinstance(invoice_data, str):
 			invoice_data = json.loads(invoice_data or "{}")
@@ -4953,11 +5675,11 @@ def apply_offers(invoice_data, selected_offers=None):
 		if not items:
 			return {"items": []}
 
-		if not invoice.get("pos_profile") or not erpnext_apply_pricing_rule:
+		if not (profile or invoice.get("pos_profile")) or not erpnext_apply_pricing_rule:
 			# Either no POS profile supplied or ERPNext promotional engine unavailable
 			return {"items": items}
 
-		profile = frappe.get_cached_doc("POS Profile", invoice.get("pos_profile"))
+		profile = profile or frappe.get_cached_doc("POS Profile", invoice.get("pos_profile"))
 
 		# Respect POS Profile's ignore_pricing_rule setting
 		if profile.ignore_pricing_rule:
@@ -5128,6 +5850,8 @@ def apply_offers(invoice_data, selected_offers=None):
 		# Walk-in / default customer can't be tracked one-time, so one-time
 		# rules never apply to anonymous sales (see the loop below).
 		default_customer = profile.get("customer")
+		# One-time rules are redeemed on a Sales Invoice only: never on an order (Ruling 113).
+		one_time_off = (invoice.get("doctype") or DOCTYPE_SALES_INVOICE) != DOCTYPE_SALES_INVOICE
 
 		rule_map = {}
 		if raw_rule_names:
@@ -5152,8 +5876,8 @@ def apply_offers(invoice_data, selected_offers=None):
 				# customers who have already redeemed this rule. Dropping the rule
 				# here keeps its discount out of the per-item loop below (which only
 				# applies rules present in rule_map), mirroring the coupon skip above.
-				if record.one_time_per_customer and _one_time_rule_blocked(
-					record.name, customer, default_customer
+				if record.one_time_per_customer and (
+					one_time_off or _one_time_rule_blocked(record.name, customer, default_customer)
 				):
 					continue
 
@@ -5188,8 +5912,8 @@ def apply_offers(invoice_data, selected_offers=None):
 			)
 			for record in txn_rule_records:
 				# Same one-time gate as the per-item rules above
-				if record.one_time_per_customer and _one_time_rule_blocked(
-					record.name, customer, default_customer
+				if record.one_time_per_customer and (
+					one_time_off or _one_time_rule_blocked(record.name, customer, default_customer)
 				):
 					blocked_txn_rules.add(record.name)
 					continue

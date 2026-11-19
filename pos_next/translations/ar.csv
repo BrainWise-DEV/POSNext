@@ -2265,3 +2265,6 @@ Points applied: {0}. Please pay remaining {1} with {2},تم خصم النقاط:
 "The cart changed after its total was checked. Check the total again.","تغيّرت السلة بعد التحقق من إجماليها. تحقّق من الإجمالي مرة أخرى.",""
 "Contact","جهة الاتصال",""
 "Classification","التصنيف",""
+"{0} was already used by this customer","{0} سبق أن استخدمه هذا العميل",""
+"One-time offers could not be checked for this customer. Try again in a moment.","تعذّر التحقق من العروض المخصّصة لمرة واحدة لهذا العميل. حاول مرة أخرى بعد قليل.",""
+"Printed invoice {0} could not be submitted: {1}","تعذّر اعتماد الفاتورة المطبوعة {0}: {1}",""

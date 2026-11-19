@@ -3,6 +3,7 @@
 
 import frappe
 from frappe.model.document import Document
+from frappe.utils import now
 
 DOCTYPE = "One Time Customer Offer Usage"
 
@@ -20,3 +21,38 @@ def usage_name(customer: str, pricing_rule: str) -> str:
 def is_redeemed(customer: str, pricing_rule: str) -> bool:
 	"""True when ``customer`` has already used the one-time ``pricing_rule``."""
 	return bool(frappe.db.exists(DOCTYPE, usage_name(customer, pricing_rule)))
+
+
+# Seconds a redemption waits for another sale holding the same (customer, rule) key
+# before it is told "already used" (Ruling 114), instead of the server's default.
+LOCK_WAIT_SECONDS = 5
+
+
+def redeem(customer: str, pricing_rule: str, sales_invoice: str) -> bool:
+	"""Record that ``customer`` uses ``pricing_rule`` on ``sales_invoice``.
+
+	False when the rule is already redeemed on another invoice. The row's name is
+	the (customer, rule) key, so a concurrent redemption of the same rule waits on
+	this insert until it commits, then finds it taken; the locking read sees the
+	latest committed row, not the transaction's snapshot. The wait is at most
+	``LOCK_WAIT_SECONDS`` (then ``frappe.QueryTimeoutError``); the session's own
+	lock wait is restored afterwards.
+	"""
+	previous = frappe.db.sql("select @@session.innodb_lock_wait_timeout")[0][0]
+	frappe.db.sql(f"set session innodb_lock_wait_timeout = {int(LOCK_WAIT_SECONDS)}")
+	try:
+		frappe.get_doc(
+			{
+				"doctype": DOCTYPE,
+				"customer": customer,
+				"pricing_rule": pricing_rule,
+				"sales_invoice": sales_invoice,
+				"redemption_date": now(),
+			}
+		).insert(ignore_permissions=True, ignore_if_duplicate=True)
+		holder = frappe.db.get_value(
+			DOCTYPE, usage_name(customer, pricing_rule), "sales_invoice", for_update=True
+		)
+	finally:
+		frappe.db.sql(f"set session innodb_lock_wait_timeout = {int(previous)}")
+	return holder == sales_invoice

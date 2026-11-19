@@ -10,6 +10,8 @@ import frappe
 from frappe import _
 from frappe.utils import cint
 
+from pos_next.utils import log_error_without_telemetry
+
 
 def validate(doc, method=None):
 	"""
@@ -141,6 +143,17 @@ def sync_return_loyalty_program(doc):
 	doc.loyalty_program = original_program or None
 
 
+USAGE_LOG_TITLE = "One-time offer usage"
+
+
+def check_one_time_offers(doc, method=None):
+	"""before_submit: a one-time offer this customer already used is refused on every
+	origin, Desk included (``invoices.check_one_time_offers_on_submit``)."""
+	from pos_next.api.invoices import check_one_time_offers_on_submit
+
+	check_one_time_offers_on_submit(doc)
+
+
 def record_one_time_offer_usage(doc, method=None):
 	"""Record redemption of one-time-per-customer Pricing Rules on submit.
 
@@ -187,6 +200,12 @@ def record_one_time_offer_usage(doc, method=None):
 		except frappe.DuplicateEntryError:
 			# Customer already recorded for this rule — one-time guard intact.
 			pass
+		except frappe.QueryTimeoutError:
+			# Another sale holds the key: never fail this submit over the record (Ruling 113).
+			log_error_without_telemetry(
+				USAGE_LOG_TITLE,
+				f"Invoice {doc.name}: usage of {rule} by {doc.customer} not recorded (lock wait timeout)",
+			)
 
 
 def release_one_time_offer_usage(doc, method=None):

@@ -1072,7 +1072,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		const rawItems = withCarvedQtyRestored(toRaw(invoiceItems.value));
 
 		return {
-			doctype: "Sales Invoice",
+			// The cart's own target: one-time offers apply to invoices only.
+			doctype: targetDoctype.value || "Sales Invoice",
 			pos_profile: posProfile.value,
 			customer: customer.value?.name || customer.value || currentProfile?.customer,
 			company: currentProfile?.company,

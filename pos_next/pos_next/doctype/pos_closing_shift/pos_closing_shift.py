@@ -716,4 +716,11 @@ def submit_printed_invoices(pos_opening_shift, doctype):
 	)
 	for invoice in invoices_list:
 		invoice_doc = frappe.get_doc(doctype, invoice.name)
-		invoice_doc.submit()
+		try:
+			invoice_doc.submit()
+		except frappe.ValidationError as error:
+			# The shift does not close past it, and the cashier is told which (Ruling 114).
+			frappe.throw(
+				_("Printed invoice {0} could not be submitted: {1}").format(invoice.name, error),
+				type(error),
+			)

@@ -64,6 +64,13 @@ describe("F&F on a Sales Order", () => {
 		cart.invoiceItems[0].amount = 700
 	})
 
+	it("evaluates offers for the cart's own doctype", () => {
+		// One-time offers apply to invoices only: the server must know it prices an order.
+		expect(cart.buildOfferEvaluationPayload({}).doctype).toBe("Sales Invoice")
+		cart.setTargetDoctype("Sales Order")
+		expect(cart.buildOfferEvaluationPayload({}).doctype).toBe("Sales Order")
+	})
+
 	it("switching to sales order shows notice", () => {
 		cart.setTargetDoctype("Sales Order")
 		const line = cart.invoiceItems[0]
