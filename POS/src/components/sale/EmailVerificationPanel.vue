@@ -1,25 +1,27 @@
 <template>
-	<div class="rounded-lg border border-gray-200 bg-gray-50 p-3" data-testid="email-verification-panel">
+	<div class="rounded-xl border border-gray-200 bg-pos-panel p-3" data-testid="email-verification-panel">
 		<!-- Verified badge (idle view only; stays correct while the email is unchanged) -->
 		<div
 			v-if="view === 'verified'"
-			class="flex items-center gap-2 text-sm text-green-700"
+			class="flex flex-wrap items-center gap-x-2 gap-y-1 text-pos-sm text-pos-saving"
 			data-testid="verified-badge"
 		>
-			<span aria-hidden="true">✔</span>
-			<span class="font-medium">{{ __("Email verified") }}</span>
-			<span class="text-xs text-green-600 truncate" dir="ltr">{{ verifiedEmailShown }}</span>
+			<svg class="h-4 w-4 flex-shrink-0" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" aria-hidden="true">
+				<path d="M5 12l5 5L20 7" stroke-linecap="round" stroke-linejoin="round" />
+			</svg>
+			<span class="font-semibold">{{ __("Email verified") }}</span>
+			<span class="min-w-0 break-all text-xs" dir="ltr">{{ verifiedEmailShown }}</span>
 		</div>
 
 		<!-- idle / expired -->
 		<div v-else-if="view === 'idle' || view === 'expired'" class="flex flex-col gap-2">
-			<div class="flex items-center justify-between gap-2">
-				<span class="text-xs text-gray-500" data-testid="not-verified-label">
+			<div class="flex flex-wrap items-center justify-between gap-2">
+				<span class="text-pos-sm text-pos-muted" data-testid="not-verified-label">
 					{{ __("Email not verified") }}
 				</span>
 				<button
 					type="button"
-					class="px-3 py-1.5 text-sm font-medium rounded-lg bg-blue-600 text-white disabled:bg-gray-300 disabled:cursor-not-allowed"
+					:class="actionButton"
 					data-testid="send-code"
 					:disabled="!canSend"
 					@click="sendCode"
@@ -27,22 +29,26 @@
 					{{ view === "expired" ? __("Send new code by email") : __("Verify email") }}
 				</button>
 			</div>
-			<p v-if="view === 'expired'" class="text-xs text-amber-700" data-testid="expired-msg">
+			<p v-if="view === 'expired'" class="text-xs text-pos-caution" data-testid="expired-msg">
 				{{ __("Code expired. Request a new one.") }}
 			</p>
-			<p v-if="offline" class="text-xs text-gray-500" data-testid="offline-msg">
+			<p v-if="offline" class="text-xs text-pos-muted" data-testid="offline-msg">
 				{{ __("Verification requires an internet connection.") }}
 			</p>
-			<p v-else-if="!emailUsable" class="text-xs text-gray-500">
+			<p v-else-if="!emailUsable" class="text-xs text-pos-muted">
 				{{ __("Enter a valid email address.") }}
 			</p>
-			<div v-else-if="emailDirty" class="flex items-center justify-between gap-2" data-testid="unsaved-msg">
-				<p class="text-xs text-gray-500">
+			<div
+				v-else-if="emailDirty"
+				class="flex flex-wrap items-center justify-between gap-2 border-t border-gray-200 pt-2"
+				data-testid="unsaved-msg"
+			>
+				<p class="text-xs text-pos-muted">
 					{{ __("Save the customer's email before verifying it.") }}
 				</p>
 				<button
 					type="button"
-					class="px-3 py-1.5 text-sm font-medium rounded-lg bg-blue-600 text-white disabled:bg-gray-300 disabled:cursor-not-allowed"
+					:class="actionButton"
 					data-testid="save-and-send"
 					:disabled="!customer"
 					@click="emit('save-and-send')"
@@ -55,19 +61,19 @@
 		<!-- sending -->
 		<div
 			v-else-if="view === 'sending'"
-			class="flex items-center gap-2 text-sm text-gray-600"
+			class="flex min-h-target items-center gap-2 text-pos-sm text-pos-muted"
 			data-testid="sending"
 		>
-			<span class="inline-block h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-blue-600" />
+			<span class="inline-block h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-pos-action" />
 			{{ __("Sending code…") }}
 		</div>
 
 		<!-- code_sent / verifying -->
 		<div v-else class="flex flex-col gap-2">
-			<p class="text-sm text-gray-700" data-testid="enter-code-hint">
+			<p class="text-pos-sm text-pos-ink" data-testid="enter-code-hint">
 				{{ __("Enter the 6-digit code sent to the email {0}", [email]) }}
 			</p>
-			<div class="flex items-center gap-2">
+			<div class="flex flex-wrap items-center gap-2">
 				<input
 					ref="otpInput"
 					v-model="otp"
@@ -76,7 +82,7 @@
 					autocomplete="one-time-code"
 					maxlength="6"
 					dir="ltr"
-					class="w-32 px-3 py-2 text-center tracking-widest border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+					class="min-h-target w-44 rounded-lg border border-gray-300 bg-white px-3 text-center text-pos-lg font-semibold tabular-nums tracking-[0.35em] placeholder:text-pos-sm placeholder:font-normal placeholder:tracking-normal focus:border-pos-action focus:outline-none focus:ring-1 focus:ring-pos-action"
 					data-testid="otp-input"
 					:placeholder="__('Verification code')"
 					:disabled="state === 'verifying'"
@@ -85,7 +91,7 @@
 				/>
 				<button
 					type="button"
-					class="px-3 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white disabled:bg-gray-300 disabled:cursor-not-allowed"
+					:class="actionButton"
 					data-testid="verify"
 					:disabled="!otpComplete || state === 'verifying' || offline"
 					@click="verify"
@@ -94,36 +100,38 @@
 					<span v-else>{{ __("Verify") }}</span>
 				</button>
 			</div>
-			<div class="flex items-center justify-between text-xs text-gray-500">
-				<span data-testid="countdown">{{ __("Code expires in {0}", [countdownLabel]) }}</span>
-				<button
-					type="button"
-					class="text-blue-600 disabled:text-gray-400 disabled:cursor-not-allowed"
-					data-testid="resend"
-					:disabled="cooldownRemaining > 0 || state === 'verifying' || offline"
-					@click="sendCode"
-				>
-					<template v-if="cooldownRemaining > 0">
-						{{ __("Resend available in {0}s", [cooldownRemaining]) }}
-					</template>
-					<template v-else>{{ __("Resend code by email") }}</template>
-				</button>
+			<div class="flex flex-wrap items-center justify-between gap-x-3 text-xs text-pos-muted">
+				<span class="tabular-nums" data-testid="countdown">{{ __("Code expires in {0}", [countdownLabel]) }}</span>
+				<div class="flex flex-wrap items-center">
+					<button
+						type="button"
+						:class="linkButton"
+						data-testid="resend"
+						:disabled="cooldownRemaining > 0 || state === 'verifying' || offline"
+						@click="sendCode"
+					>
+						<template v-if="cooldownRemaining > 0">
+							{{ __("Resend available in {0}s", [cooldownRemaining]) }}
+						</template>
+						<template v-else>{{ __("Resend code by email") }}</template>
+					</button>
+					<button
+						type="button"
+						:class="linkButton"
+						data-testid="change-email"
+						:disabled="state === 'verifying'"
+						@click="changeEmail"
+					>
+						{{ __("Change email") }}
+					</button>
+				</div>
 			</div>
-			<button
-				type="button"
-				class="self-start text-xs text-blue-600"
-				data-testid="change-email"
-				:disabled="state === 'verifying'"
-				@click="changeEmail"
-			>
-				{{ __("Change email") }}
-			</button>
 		</div>
 
-		<p v-if="state === 'error' && errorMessage" class="mt-2 text-xs text-red-600" data-testid="error-msg" role="alert">
+		<p v-if="state === 'error' && errorMessage" class="mt-2 text-xs text-pos-danger" data-testid="error-msg" role="alert">
 			{{ errorMessage }}
 		</p>
-		<p v-if="infoMessage" class="mt-2 text-xs text-gray-600" data-testid="info-msg">{{ infoMessage }}</p>
+		<p v-if="infoMessage" class="mt-2 text-xs text-pos-muted" data-testid="info-msg">{{ infoMessage }}</p>
 	</div>
 </template>
 
@@ -154,6 +162,12 @@ const props = defineProps({
 });
 
 const emit = defineEmits(["verified", "lock-change", "save-and-send"]);
+
+// Touch-sized controls (min-h-target is 40px, 44px on tablets and phones)
+const actionButton =
+	"inline-flex min-h-target items-center justify-center rounded-lg bg-pos-action px-4 text-pos-sm font-semibold text-white hover:bg-pos-action-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-pos-action focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-gray-300";
+const linkButton =
+	"inline-flex min-h-target items-center px-2 text-xs font-medium text-pos-action hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-pos-action disabled:cursor-not-allowed disabled:text-gray-400 disabled:no-underline";
 
 const DEFAULT_TTL = 900;
 const DEFAULT_COOLDOWN = 60;

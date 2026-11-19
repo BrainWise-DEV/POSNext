@@ -526,3 +526,89 @@ describe("CreateCustomerDialog loading when Selling Settings is forbidden (D-1)"
 		wrapper.unmount()
 	})
 })
+
+describe("CreateCustomerDialog inline validation", () => {
+	beforeEach(() => {
+		resourceConfigs.length = 0
+		showSuccess.mockReset()
+		showError.mockReset()
+		canCreateCustomer.mockReset()
+		canCreateCustomer.mockResolvedValue(true)
+		posSettings.customerEmailVerificationEnabled = false
+		posSettings.requireSplitName = false
+	})
+	afterEach(() => {
+		document.body.innerHTML = ""
+	})
+
+	it("shows each required message under its field instead of submitting", async () => {
+		const wrapper = factory()
+		await flushPromises()
+		const submit = find(wrapper, "customer-submit")
+		expect(submit.attributes("disabled")).toBeUndefined()
+		await submit.trigger("click")
+		await flushPromises()
+
+		expect(find(wrapper, "error-customer-name").text()).toBe("Customer Name is required")
+		expect(find(wrapper, "error-mobile").text()).toBe("Mobile Number is required")
+		expect(resourceFor("pos_next.api.customers.create_customer").resource.submit).not.toHaveBeenCalled()
+
+		const name = wrapper.find("input[aria-describedby]")
+		expect(name.attributes("aria-invalid")).toBe("true")
+		await name.setValue("Mona Said")
+		await flushPromises()
+		expect(find(wrapper, "error-customer-name").exists()).toBe(false)
+		wrapper.unmount()
+	})
+})
+
+describe("CreateCustomerDialog country picker and params", () => {
+	beforeEach(() => {
+		resourceConfigs.length = 0
+		posSettings.customerEmailVerificationEnabled = false
+		posSettings.requireSplitName = false
+	})
+	afterEach(() => {
+		document.body.innerHTML = ""
+	})
+
+	it("Escape in the country search closes only the picker, never the dialog", async () => {
+		const wrapper = mount(CreateCustomerDialog, {
+			props: { modelValue: true, posProfile: "POS-A" },
+			global: { mocks: { __: t } },
+			attachTo: document.body,
+		})
+		await flushPromises()
+		await find(wrapper, "country-code-button").trigger("click")
+		await flushPromises()
+		expect(find(wrapper, "country-picker").exists()).toBe(true)
+
+		// Reka/frappe-ui close the dialog from a window keydown listener
+		const reachedWindow = vi.fn()
+		window.addEventListener("keydown", reachedWindow)
+		await wrapper.find('[data-testid="country-picker"] input').trigger("keydown", { key: "Escape" })
+		await flushPromises()
+		window.removeEventListener("keydown", reachedWindow)
+
+		expect(reachedWindow).not.toHaveBeenCalled()
+		expect(find(wrapper, "country-picker").exists()).toBe(false)
+		expect(wrapper.emitted("update:modelValue")).toBeUndefined()
+
+		// Picker closed: Escape is left alone for the dialog
+		const again = vi.fn()
+		window.addEventListener("keydown", again)
+		await find(wrapper, "country-code-button").trigger("keydown", { key: "Escape" })
+		window.removeEventListener("keydown", again)
+		expect(again).toHaveBeenCalled()
+		wrapper.unmount()
+	})
+
+	it("sends the customer name trimmed", async () => {
+		const wrapper = factory()
+		await flushPromises()
+		await wrapper.find("input[type=text]").setValue("  Mona Said  ")
+		const params = resourceFor("pos_next.api.customers.create_customer").opts.makeParams()
+		expect(params.customer_name).toBe("Mona Said")
+		wrapper.unmount()
+	})
+})

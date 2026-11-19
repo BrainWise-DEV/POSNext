@@ -19,6 +19,7 @@ declare module 'vue' {
     CouponManagement: typeof import('./src/components/sale/CouponManagement.vue')['default']
     CreateCustomerDialog: typeof import('./src/components/sale/CreateCustomerDialog.vue')['default']
     CustomerDialog: typeof import('./src/components/sale/CustomerDialog.vue')['default']
+    CustomerIdentityStrip: typeof import('./src/components/sale/CustomerIdentityStrip.vue')['default']
     DraftInvoicesDialog: typeof import('./src/components/sale/DraftInvoicesDialog.vue')['default']
     EditItemDialog: typeof import('./src/components/sale/EditItemDialog.vue')['default']
     EmailVerificationPanel: typeof import('./src/components/sale/EmailVerificationPanel.vue')['default']

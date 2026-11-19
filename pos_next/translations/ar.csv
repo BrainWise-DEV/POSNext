@@ -2269,3 +2269,6 @@ Points applied: {0}. Please pay remaining {1} with {2},تم خصم النقاط:
 "{0} was already used by this customer","{0} سبق أن استخدمه هذا العميل",""
 "One-time offers could not be checked for this customer. Try again in a moment.","تعذّر التحقق من العروض المخصّصة لمرة واحدة لهذا العميل. حاول مرة أخرى بعد قليل.",""
 "Printed invoice {0} could not be submitted: {1}","تعذّر اعتماد الفاتورة المطبوعة {0}: {1}",""
+"New customer","عميل جديد",""
+"Choose a country code","اختر رمز الدولة",""
+"Country code","رمز الدولة",""
