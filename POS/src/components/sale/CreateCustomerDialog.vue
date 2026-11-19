@@ -528,6 +528,7 @@ import CustomerIdentityStrip from "@/components/sale/CustomerIdentityStrip.vue";
 import EmailVerificationPanel from "@/components/sale/EmailVerificationPanel.vue";
 import { useBootstrapStore } from "@/stores/bootstrap";
 import { useCountriesStore } from "@/stores/countries";
+import { isValidIsd, normalizeIsd } from "@/utils/isd";
 import { usePOSSettingsStore } from "@/stores/posSettings";
 import { usePOSShiftStore } from "@/stores/posShift";
 import { useCustomerSearchStore } from "@/stores/customerSearch";
@@ -934,7 +935,7 @@ const resolveCountryIsd = (value) => {
 	if (byIsd?.isd) return byIsd.isd;
 
 	// Value may already be an ISD like "+20"
-	if (String(value).startsWith("+")) return value;
+	if (isValidIsd(value)) return normalizeIsd(value);
 
 	return null;
 };
