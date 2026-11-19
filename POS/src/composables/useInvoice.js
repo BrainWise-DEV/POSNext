@@ -778,6 +778,29 @@ export function useInvoice() {
 	 * @param {Array} items - Raw cart items
 	 * @returns {Array} Items formatted for ERPNext Sales Invoice
 	 */
+	/** A legacy same-item BOGO line (`free_qty`) with no dedicated free row gets one. */
+	function needsSynthesizedFreeRow(item, items) {
+		if (item.is_free_item || !(Number.parseFloat(item.free_qty) > 0)) return false;
+		const u = item.uom || item.stock_uom;
+		return !items.some(
+			(i) => i.is_free_item && i.item_code === item.item_code && (i.uom || i.stock_uom) === u
+		);
+	}
+
+	/**
+	 * The cart item behind each row formatItemsForSubmission sends, in order; a
+	 * synthesized free row maps to null. Server answers indexed by payload row (the
+	 * F&F block's `idx`) are mapped back to cart lines with it.
+	 */
+	function payloadRowOwners(items) {
+		const owners = [];
+		for (const item of items) {
+			owners.push(item);
+			if (needsSynthesizedFreeRow(item, items)) owners.push(null);
+		}
+		return owners;
+	}
+
 	function formatItemsForSubmission(items) {
 		const isAppliedCouponLine = (item) =>
 			item.discount_source === "coupon" && item.coupon_code && item.coupon_code === couponCode.value;
@@ -816,14 +839,7 @@ export function useInvoice() {
 			out.push(mapRow(item));
 			const fq = Number.parseFloat(item.free_qty) || 0;
 			if (!item.is_free_item && fq > 0) {
-				const u = item.uom || item.stock_uom;
-				const hasDedicatedFree = items.some(
-					(i) =>
-						i.is_free_item &&
-						i.item_code === item.item_code &&
-						(i.uom || i.stock_uom) === u
-				);
-				if (!hasDedicatedFree) {
+				if (needsSynthesizedFreeRow(item, items)) {
 					out.push({
 						item_code: item.item_code,
 						item_name: item.item_name,
@@ -1019,6 +1035,76 @@ export function useInvoice() {
 		return result?.data || result;
 	}
 
+	/**
+	 * The unpaid draft saved when the payment dialog opens (Ruling 101). The sale is
+	 * submitted as that draft, so an abandoned check leaves one unpaid draft at most
+	 * (clearCart's cleanup_old_drafts removes it).
+	 */
+	const paymentDraftName = ref(null);
+
+	/**
+	 * Save the cart as an UNPAID draft when the payment dialog opens (Ruling 101).
+	 *
+	 * Never sends payments, even when a refused submit left them in the cart: with no
+	 * payments the server re-prices Friends & Family to the customer's remaining
+	 * allowance. Returns the saved draft, with the server `grand_total` and its F&F
+	 * block (`friends_and_family`).
+	 */
+	async function saveUnpaidDraft(invoiceData) {
+		const response = await updateInvoiceResource.submit({ data: invoiceData });
+		return response && typeof response === "object" && "data" in response ? response.data : response;
+	}
+
+	/**
+	 * The server answers a draft name it does not know (or not under this profile) with
+	 * one PermissionError, before it writes anything.
+	 */
+	function isMissingDraftError(error) {
+		const parts = [error?.exc_type, error?.resourceError?.exc_type, error?.exception, error?.message];
+		return parts.some((part) => String(part || "").includes("PermissionError"));
+	}
+
+	async function savePaymentDraft() {
+		const rawSalesTeam = toRaw(salesTeam.value);
+		const invoiceData = {
+			doctype: "Sales Invoice",
+			pos_profile: posProfile.value,
+			posa_pos_opening_shift: posOpeningShift.value,
+			customer: resolveCustomerName(),
+			items: formatItemsForSubmission(toRaw(invoiceItems.value)),
+			payments: [],
+			discount_amount: additionalDiscount.value || 0,
+			coupon_code: couponCode.value,
+			is_pos: 1,
+			update_stock: 1,
+		};
+		if (paymentDraftName.value) invoiceData.name = paymentDraftName.value;
+		if (rawSalesTeam && rawSalesTeam.length > 0) {
+			invoiceData.sales_team = rawSalesTeam.map((member) => ({
+				sales_person: member.sales_person,
+				allocated_percentage: member.allocated_percentage || 0,
+			}));
+		}
+
+		let draft;
+		try {
+			draft = await saveUnpaidDraft(invoiceData);
+		} catch (error) {
+			// A draft that could not be saved (or was cleaned up) is not reused.
+			paymentDraftName.value = null;
+			if (!invoiceData.name || !isMissingDraftError(error)) throw error;
+			// The stored draft is gone (cleanup_old_drafts): start a new one.
+			delete invoiceData.name;
+			draft = await saveUnpaidDraft(invoiceData);
+		}
+		if (!draft?.name) {
+			paymentDraftName.value = null;
+			throw new Error(__("Could not check the invoice total"));
+		}
+		paymentDraftName.value = draft.name;
+		return draft;
+	}
+
 	async function submitInvoice(
 		targetDoctype = "Sales Invoice",
 		deliveryDate = null,
@@ -1089,17 +1175,27 @@ export function useInvoice() {
 					}));
 				}
 
-				const draftInvoice = await updateInvoiceResource.submit({
-					data: invoiceData,
-				});
+				let invoiceDoc;
+				if (targetDoctype === "Sales Invoice") {
+					// One request (Ruling 101): the payments reach the server only with the
+					// submit, which keeps nothing when it is refused. The payment-open draft
+					// is submitted when there is one; otherwise submit_invoice creates it.
+					invoiceDoc = paymentDraftName.value
+						? { ...invoiceData, name: paymentDraftName.value }
+						: invoiceData;
+				} else {
+					const draftInvoice = await updateInvoiceResource.submit({
+						data: invoiceData,
+					});
 
-				let invoiceDoc = draftInvoice;
-				if (draftInvoice && typeof draftInvoice === "object" && "data" in draftInvoice) {
-					invoiceDoc = draftInvoice.data;
-				}
+					invoiceDoc = draftInvoice;
+					if (draftInvoice && typeof draftInvoice === "object" && "data" in draftInvoice) {
+						invoiceDoc = draftInvoice.data;
+					}
 
-				if (!invoiceDoc || !invoiceDoc.name) {
-					throw new Error("Failed to create draft invoice - no invoice name returned");
+					if (!invoiceDoc || !invoiceDoc.name) {
+						throw new Error("Failed to create draft invoice - no invoice name returned");
+					}
 				}
 
 				const submitData = {
@@ -1125,10 +1221,23 @@ export function useInvoice() {
 				}
 
 				try {
-					const result = await submitInvoiceResource.submit({
-						invoice: invoiceDoc,
-						data: submitData,
-					});
+					let result;
+					try {
+						result = await submitInvoiceResource.submit({
+							invoice: invoiceDoc,
+							data: submitData,
+						});
+					} catch (error) {
+						// The checked draft is gone (cleanup_old_drafts): refused before any
+						// write, so submit the cart as a new invoice.
+						if (!(paymentDraftName.value && invoiceDoc.name === paymentDraftName.value)) throw error;
+						if (!isMissingDraftError(error)) throw error;
+						paymentDraftName.value = null;
+						result = await submitInvoiceResource.submit({
+							invoice: invoiceData,
+							data: submitData,
+						});
+					}
 
 					// Check if resource has error (frappe-ui pattern)
 					if (submitInvoiceResource.error) {
@@ -1252,6 +1361,7 @@ export function useInvoice() {
 	function resetInvoice() {
 		invoiceItems.value = [];
 		payments.value = [];
+		paymentDraftName.value = null;
 		additionalDiscount.value = 0;
 		couponCode.value = null;
 
@@ -1284,6 +1394,7 @@ export function useInvoice() {
 
 		invoiceItems.value = [];
 		payments.value = [];
+		paymentDraftName.value = null;
 		additionalDiscount.value = 0;
 		couponCode.value = null;
 
@@ -1388,6 +1499,8 @@ export function useInvoice() {
 		updatePayment,
 		validateStock,
 		saveDraft,
+		savePaymentDraft,
+		paymentDraftName,
 		submitInvoice,
 		resetInvoice,
 		clearCart,
@@ -1397,6 +1510,7 @@ export function useInvoice() {
 		recalculateItem,
 		rebuildIncrementalCache,
 		formatItemsForSubmission,
+		payloadRowOwners,
 		resolveUomPricing,
 
 		// Resources

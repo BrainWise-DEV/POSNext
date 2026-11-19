@@ -144,6 +144,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		removeItem,
 		updateItemQuantity: baseUpdateItemQuantity,
 		submitInvoice: baseSubmitInvoice,
+		savePaymentDraft,
 		clearCart: clearInvoiceCart,
 		loadTaxRules,
 		setTaxInclusive,
@@ -157,6 +158,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		recalculateItem,
 		rebuildIncrementalCache,
 		formatItemsForSubmission,
+		payloadRowOwners,
 	} = useInvoice();
 
 	const offersStore = usePOSOffersStore();
@@ -421,6 +423,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			.map((o) => o.code)
 			.filter(Boolean);
 		const wasOffline = offlineState.isOffline;
+		// Online, only the cart the payment-open check priced is submitted (Ruling 110).
+		const checked = paymentCheck.value;
+		if (!wasOffline && checked && checked.hash !== paymentCheckHash()) {
+			paymentCheck.value = null;
+			throw new Error(__("The cart changed after its total was checked. Check the total again."));
+		}
 
 		const result = await baseSubmitInvoice(
 			targetDoctype.value,
@@ -432,6 +440,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		// Reset write-off amount after successful submission
 		if (result) {
 			writeOffAmount.value = 0;
+			paymentCheck.value = null;
 		}
 		return result;
 	}
@@ -516,6 +525,168 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		const eligibility = await refreshFriendsAndFamilyEligibility(true);
 		if (invoiceItems.value.length > 0) triggerOfferProcessing(true);
 		return eligibility;
+	}
+
+	const PAYMENT_CHECK_MAX_WAIT_MS = 5000;
+	// After the payment-open check: the server's total for the cart as it then stood.
+	const paymentCheck = ref(null); // { total, hash }
+
+	/** The smallest currency unit (currency precision from System Settings). */
+	function currencyUnit() {
+		return 10 ** -(getPrecision().currency ?? 2);
+	}
+
+	/**
+	 * What payment collects: the server total of the last payment-open check while the
+	 * cart is unchanged since, else the cart's own total.
+	 */
+	const paymentTotal = computed(() => {
+		const checked = paymentCheck.value;
+		return checked && checked.hash === paymentCheckHash() ? checked.total : grandTotal.value;
+	});
+
+	/** The cart as the payment-open check priced it: its lines, header and coupon. */
+	function paymentCheckHash() {
+		return [generateCartHash(), Number(additionalDiscount.value) || 0, couponCode.value || ""].join("#");
+	}
+
+	function lineDiscountPerUnit(item) {
+		const qty = Number(item.quantity ?? item.qty) || 1;
+		return (Number(item.discount_amount) || 0) / qty;
+	}
+
+	/**
+	 * Take the checked draft's decisions into the cart (Ruling 110): its F&F lines, the
+	 * discounts of its other lines, its free rows, coupon and header discount. Returns
+	 * why anything the cart had was dropped, for the cashier.
+	 */
+	function adoptServerDraft(draft) {
+		const unit = currencyUnit();
+		const notes = [];
+		const fnf = draft.friends_and_family ? normalizeFnfResult(draft.friends_and_family) : null;
+		const serverReason = fnf?.bestDiscount ? pickLocalizedMessage(fnf.bestDiscount, currentUiLocale()) : "";
+
+		// The coupon first: while a coupon that replaced F&F is applied (its override),
+		// the F&F block below would strip every F&F line (Ruling 112).
+		if (appliedCoupon.value && !draft.coupon_code) {
+			const code = appliedCoupon.value.code || appliedCoupon.value.name;
+			notes.push(serverReason || __("Coupon {0} does not apply to this sale and was removed.", [code]));
+			if (isLineLevelCoupon(appliedCoupon.value)) clearCouponLines();
+			else removeDiscount();
+			couponCode.value = null;
+			appliedCoupon.value = null;
+			fnfCouponOverride.value = null;
+		}
+
+		if (fnf) {
+			fnfResult.value = fnf.eligible ? fnf : null;
+			// The block's idx is the payload row; a synthesized free row has no cart line.
+			const owners = payloadRowOwners(invoiceItems.value);
+			const lines = [];
+			for (const line of fnf.lines) {
+				const owner = owners[Number.parseInt(line?.idx, 10)];
+				const index = owner ? invoiceItems.value.indexOf(owner) : -1;
+				if (index >= 0) lines.push({ ...line, idx: index });
+			}
+			applyFriendsAndFamilyOnlyResult({ ...fnf, lines });
+		}
+
+		// Other lines, paired in order by item and free flag (the server may drop a gift).
+		if (Array.isArray(draft.items)) {
+			const serverRows = draft.items;
+			let next = 0;
+			const dropped = [];
+			for (const item of invoiceItems.value) {
+				const free = Boolean(item.is_free_item);
+				const at = serverRows.findIndex(
+					(row, index) =>
+						index >= next && row.item_code === item.item_code && Boolean(row.is_free_item) === free
+				);
+				if (at < 0) {
+					if (free) dropped.push(item);
+					continue;
+				}
+				next = at + 1;
+				const row = serverRows[at];
+				if (free || isFnfLine(item) || isCouponLine(item)) continue;
+				const serverPerUnit = Number(row.discount_amount) || 0;
+				const qty = Number(item.quantity ?? item.qty) || 1;
+				if (row.posnext_discount_source === FNF_DISCOUNT_SOURCE && serverPerUnit > 0) {
+					// An F&F row the block did not stamp: its F&F markers come from the row.
+					stampFnfLine(item, {
+						discount_percentage: Number(row.discount_percentage) || 0,
+						discount_amount: serverPerUnit * qty,
+						rate: Number(row.rate) || 0,
+					});
+					recalculateItem(item);
+					continue;
+				}
+				if (Math.abs(serverPerUnit - lineDiscountPerUnit(item)) <= unit) continue;
+				if (serverPerUnit <= 0) {
+					notes.push(__("The offer on {0} does not apply to this sale and was removed.", [item.item_name || item.item_code]));
+					item.discount_percentage = 0;
+					item.discount_amount = 0;
+					item.discount_source = "";
+					item.pricing_rules = [];
+					item.is_already_discounted = 0;
+				} else {
+					item.discount_percentage = Number(row.discount_percentage) || 0;
+					item.discount_amount = serverPerUnit * qty;
+				}
+				recalculateItem(item);
+			}
+			for (const item of dropped) {
+				notes.push(__("The free item {0} does not apply to this sale and was removed.", [item.item_name || item.item_code]));
+				const index = invoiceItems.value.indexOf(item);
+				if (index >= 0) invoiceItems.value.splice(index, 1);
+			}
+		}
+
+		// Header discount.
+		if ("discount_amount" in draft) {
+			const serverHeader = Number(draft.discount_amount) || 0;
+			const cartHeader = Number(additionalDiscount.value) || 0;
+			if (Math.abs(serverHeader - cartHeader) > unit) {
+				if (serverHeader < cartHeader && !notes.length) {
+					notes.push(serverReason || __("The invoice discount does not apply in full to this sale."));
+				}
+				additionalDiscount.value = serverHeader;
+			}
+		}
+		rebuildIncrementalCache();
+		return [...new Set(notes.filter(Boolean))];
+	}
+
+	/**
+	 * Payment-open re-check (Rulings 101, 110): save the cart as an unpaid draft, so
+	 * the server re-prices Friends & Family to the customer's remaining allowance, and
+	 * take the server draft into the cart; payment collects the server total. Only a
+	 * difference above 2 currency units asks the cashier; smaller drift (rounding) is
+	 * taken silently.
+	 *
+	 * Online Sales Invoices only; offline sales and Sales Orders are not checked.
+	 * @returns {Promise<{checked: boolean, changed: boolean, previousTotal?: number, total?: number, message?: string}>}
+	 */
+	async function checkPriceBeforePayment() {
+		if (offlineState.isOffline || targetDoctype.value !== "Sales Invoice") {
+			return { checked: false, changed: false };
+		}
+		// The cart's own offer evaluation first, so the total compared is the one shown.
+		const waitUntil = Date.now() + PAYMENT_CHECK_MAX_WAIT_MS;
+		while (offerProcessingState.value.isProcessing && Date.now() < waitUntil) {
+			await new Promise((resolve) => setTimeout(resolve, 100));
+		}
+
+		const previousTotal = Number(grandTotal.value) || 0;
+		paymentCheck.value = null;
+		const draft = await savePaymentDraft();
+		const total = Number.parseFloat(draft.grand_total) || 0;
+		const notes = adoptServerDraft(draft);
+		paymentCheck.value = { total, hash: paymentCheckHash() };
+		const changed = Math.abs(total - previousTotal) > 2 * currencyUnit() + 1e-9;
+		const message = notes.join(" ");
+		if (!changed && message) showWarning(message);
+		return { checked: true, changed, previousTotal, total, message };
 	}
 
 	async function setCustomer(selectedCustomer) {
@@ -2761,6 +2932,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		loadTaxRules,
 		setTaxInclusive,
 		submitInvoice,
+		checkPriceBeforePayment,
+		paymentTotal,
 		applyDiscountToCart,
 		removeDiscountFromCart,
 		buildCouponItemsPayload,

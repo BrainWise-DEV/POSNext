@@ -534,7 +534,7 @@
 			<!-- Payment Dialog -->
 			<PaymentDialog
 				v-model="uiStore.showPaymentDialog"
-				:grand-total="cartStore.grandTotal"
+				:grand-total="cartStore.paymentTotal"
 				:subtotal="cartStore.subtotal"
 				:pos-profile="shiftStore.profileName"
 				:currency="shiftStore.profileCurrency"
@@ -763,6 +763,41 @@
 				:currency="shiftStore.profileCurrency"
 				@print-invoice="handlePrintInvoice"
 			/>
+
+			<!-- Payment-open re-check: the server total changed (Ruling 101) -->
+			<Dialog
+				v-model="showTotalChangedDialog"
+				:options="{ title: __('Invoice Total Changed'), size: 'sm' }"
+			>
+				<template #body-content>
+					<div class="py-3 space-y-2">
+						<p
+							v-if="paymentCheck.pendingChange.value?.message"
+							class="text-sm text-red-600"
+						>
+							{{ paymentCheck.pendingChange.value.message }}
+						</p>
+						<p class="text-sm text-gray-600">
+							{{
+								__("The invoice total is now {0} (was {1}). Continue to payment?", [
+									formatCurrency(paymentCheck.pendingChange.value?.total),
+									formatCurrency(paymentCheck.pendingChange.value?.previousTotal),
+								])
+							}}
+						</p>
+					</div>
+				</template>
+				<template #actions>
+					<div class="flex gap-2 w-full">
+						<Button class="flex-1" variant="subtle" @click="paymentCheck.cancelChange()">
+							{{ __("Cancel") }}
+						</Button>
+						<Button class="flex-1" variant="solid" @click="paymentCheck.confirmChange()">
+							{{ __("Continue to Payment") }}
+						</Button>
+					</div>
+				</template>
+			</Dialog>
 
 			<!-- Clear Cart Confirmation Dialog -->
 			<Dialog
@@ -1124,6 +1159,7 @@ import { useGlobalShortcuts } from "@/composables/useKeyboardShortcuts";
 import { getDistinctUoms } from "@/utils/itemUoms";
 import { usePOSEvents } from "@/composables/usePOSEvents";
 import { useLocale } from "@/composables/useLocale";
+import { usePaymentOpenCheck } from "@/composables/usePaymentOpenCheck";
 import { session } from "@/data/session";
 import { useUserData } from "@/data/user";
 import { parseError } from "@/utils/errorHandler";
@@ -1225,6 +1261,24 @@ watch(containerRef, (el, oldEl) => {
 });
 const dividerRef = ref(null);
 const pendingPaymentAfterCustomer = ref(false);
+// Opening payment re-checks the price online first (Ruling 101)
+const paymentCheck = usePaymentOpenCheck({
+	isOffline: () => offlineStore.isOffline,
+	checkPrice: () => cartStore.checkPriceBeforePayment(),
+	openPayment: () => {
+		uiStore.showPaymentDialog = true;
+	},
+	showError: (error) => {
+		const errorContext = parseError(error);
+		showError(errorContext.message || __("Could not check the invoice total"));
+	},
+});
+const showTotalChangedDialog = computed({
+	get: () => Boolean(paymentCheck.pendingChange.value),
+	set: (open) => {
+		if (!open) paymentCheck.cancelChange();
+	},
+});
 const logoutAfterClose = ref(false);
 const editCustomer = ref(null); // Customer being edited (null for create mode)
 const showClearCacheDialog = ref(false);
@@ -2116,12 +2170,13 @@ function handleAdditionalDiscountUpdate(discountAmount) {
 
 function handleCustomerSelected(selectedCustomer) {
 	if (selectedCustomer) {
-		cartStore.setCustomer(selectedCustomer);
+		const customerReady = Promise.resolve(cartStore.setCustomer(selectedCustomer)).catch(() => {});
 		uiStore.showCustomerDialog = false;
 
 		if (pendingPaymentAfterCustomer.value) {
 			pendingPaymentAfterCustomer.value = false;
-			uiStore.showPaymentDialog = true;
+			// The check prices the cart for this customer: wait for setCustomer.
+			customerReady.then(() => paymentCheck.requestPayment());
 		}
 	} else {
 		cartStore.setCustomer(null);
@@ -2154,7 +2209,7 @@ function handleProceedToPayment() {
 		return;
 	}
 
-	uiStore.showPaymentDialog = true;
+	paymentCheck.requestPayment();
 }
 
 async function handleDeleteFailedInvoice() {
@@ -2187,7 +2242,7 @@ async function handleErrorRetry() {
 	uiStore.clearError();
 	if (uiStore.errorRetryAction === "payment") {
 		setTimeout(() => {
-			uiStore.showPaymentDialog = true;
+			paymentCheck.requestPayment();
 		}, 300);
 	} else if (uiStore.errorRetryAction === "sync") {
 		await offlineStore.loadPendingInvoices();
@@ -2454,6 +2509,10 @@ async function handlePaymentCompleted(paymentData) {
 		editingOfflineContext = null;
 
 		const errorContext = parseError(error);
+		// The cart is kept. Online, the price check runs again (Ruling 101): when the
+		// total changed, the cashier confirms the new one, with the server's message.
+		if (await paymentCheck.recheckAfterRefusal(errorContext.message || "")) return;
+
 		uiStore.showError(
 			errorContext.title || __("Error"),
 			errorContext.message || __("An unexpected error occurred"),

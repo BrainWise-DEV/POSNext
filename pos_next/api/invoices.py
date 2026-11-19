@@ -899,6 +899,8 @@ def _strip_server_managed_fields(payload):
 		return payload
 
 	cleaned = dict(payload)
+	# One-time offers used by this sale are stamped by the server only (Ruling 110).
+	cleaned.pop("pos_applied_one_time_rules", None)
 	# Packed Items are regenerated from Product Bundle definitions during save.
 	# Accepting client-side packed rows can reintroduce duplicates on re-save.
 	cleaned.pop("packed_items", None)
@@ -2398,21 +2400,7 @@ def _update_invoice(data: str | dict, offline_sync: bool = False) -> dict:
 		applied_rule_names_seen = _reset_row_pricing_rules(invoice_doc.get("items", []))
 
 		if doctype == "Sales Invoice":
-			one_time_applied = (
-				frappe.get_all(
-					"Pricing Rule",
-					filters={
-						"name": ["in", list(applied_rule_names_seen)],
-						"one_time_per_customer": 1,
-					},
-					pluck="name",
-				)
-				if applied_rule_names_seen
-				else []
-			)
-			invoice_doc.pos_applied_one_time_rules = (
-				json.dumps(sorted(one_time_applied)) if one_time_applied else ""
-			)
+			_stamp_one_time_item_rules(invoice_doc, applied_rule_names_seen)
 
 		# Set invoice flags BEFORE calculations
 		if doctype == "Sales Invoice":
@@ -2484,14 +2472,7 @@ def _update_invoice(data: str | dict, offline_sync: bool = False) -> dict:
 		if invoice_doc.get("is_return"):
 			_validate_return_rows(invoice_doc)
 		elif doctype == "Sales Invoice":
-			# Header discounts come from transaction-level rules; record the
-			# one-time ones with the per-item ones stamped above.
-			txn_one_time = _applied_one_time_transaction_rules(
-				invoice_doc, pos_profile_doc.customer if pos_profile_doc else None
-			)
-			if txn_one_time:
-				stamped = json.loads(invoice_doc.pos_applied_one_time_rules or "[]")
-				invoice_doc.pos_applied_one_time_rules = json.dumps(sorted(set(stamped) | set(txn_one_time)))
+			_stamp_one_time_transaction_rules(invoice_doc, pos_profile_doc)
 		if invoice_doc.grand_total is None:
 			invoice_doc.grand_total = 0.0
 		if invoice_doc.base_grand_total is None:
@@ -2580,7 +2561,13 @@ def _update_invoice(data: str | dict, offline_sync: bool = False) -> dict:
 		invoice_doc.docstatus = 0
 		invoice_doc.save()
 
-		return invoice_doc.as_dict()
+		result = invoice_doc.as_dict()
+		# The F&F decision this save made (promotions' validate hook, when installed): the
+		# POS opening payment takes the server's per-line F&F from it (Ruling 101).
+		friends_and_family = invoice_doc.flags.get("friends_and_family")
+		if isinstance(friends_and_family, dict):
+			result["friends_and_family"] = friends_and_family
+		return result
 	except Exception:
 		frappe.log_error(frappe.get_traceback(), "Update Invoice Error")
 		raise
@@ -2804,6 +2791,34 @@ def check_offline_invoice_synced(offline_id):
 	return result
 
 
+SUBMIT_SAVEPOINT = "pos_next_submit_invoice"
+
+
+def _store_canonical_coupon_code(invoice_doc) -> None:
+	"""Store the POS Coupon's own code, as update_invoice does; a code that does not exist
+	is refused with update_invoice's message (Ruling 110)."""
+	code = invoice_doc.get("coupon_code")
+	if not code or not frappe.db.table_exists("POS Coupon"):
+		return
+	from pos_next.pos_next.doctype.pos_coupon.pos_coupon import resolve_coupon_name
+
+	coupon_name = resolve_coupon_name(code)
+	if not coupon_name:
+		frappe.throw(_("Sorry, this coupon code does not exist"))
+	invoice_doc.coupon_code = frappe.db.get_value("POS Coupon", coupon_name, "coupon_code")
+
+
+def _rollback_submit() -> None:
+	"""Undo what a refused ``submit_invoice`` wrote, back to its savepoint.
+
+	A deadlock has already rolled the whole transaction back (the savepoint with it).
+	"""
+	try:
+		frappe.db.rollback(save_point=SUBMIT_SAVEPOINT)
+	except Exception:
+		frappe.db.rollback()
+
+
 @frappe.whitelist()
 def submit_invoice(invoice: str | dict | None = None, data: str | dict | None = None) -> dict:
 	"""Submit the invoice (Step 2)."""
@@ -2885,6 +2900,10 @@ def submit_invoice(invoice: str | dict | None = None, data: str | dict | None = 
 
 	# Track whether invoice was successfully submitted
 	invoice_submitted = False
+	# A refused submit keeps nothing it wrote: not the draft's payments (so no later
+	# re-save is a paid-draft re-save) nor its docstatus (Ruling 101). A request is rolled
+	# back whole anyway; this also holds for a direct call.
+	frappe.db.savepoint(SUBMIT_SAVEPOINT)
 
 	try:
 		invoice_name = invoice.get("name")
@@ -2910,16 +2929,28 @@ def submit_invoice(invoice: str | dict | None = None, data: str | dict | None = 
 			invoice_doc.update(invoice)
 			if not invoice_doc.get("customer") and existing_customer:
 				invoice_doc.customer = existing_customer
+			# The POS submits its cart as the draft checked when payment opened; the code
+			# comes as typed.
+			_store_canonical_coupon_code(invoice_doc)
 			_check_free_rows_backed(
 				invoice_doc,
 				offline_sync=offline_sync,
 				paid_draft_free=paid_draft_free,
 				stored_sources=stored_sources,
 			)
-			_reset_row_pricing_rules(invoice_doc.get("items", []))
+			rule_names_seen = _reset_row_pricing_rules(invoice_doc.get("items", []))
+			if doctype == DOCTYPE_SALES_INVOICE:
+				# The rows may not be the stored draft's: stamp the one-time offers as
+				# update_invoice does (Ruling 110).
+				_stamp_one_time_item_rules(invoice_doc, rule_names_seen)
 			if not invoice_doc.get("is_return"):
 				# Judge the rates this save will store, as update_invoice does.
 				invoice_doc.calculate_taxes_and_totals()
+				if doctype == DOCTYPE_SALES_INVOICE:
+					_stamp_one_time_transaction_rules(
+						invoice_doc,
+						frappe.get_cached_doc("POS Profile", pos_profile) if pos_profile else None,
+					)
 				_refuse_zero_rate_after_totals(invoice_doc, lenient=offline_sync)
 				_check_paid_row_discounts(
 					invoice_doc, offline_sync=offline_sync, paid_draft_rates=paid_draft_rates
@@ -2975,6 +3006,12 @@ def submit_invoice(invoice: str | dict | None = None, data: str | dict | None = 
 				frappe.log_error(
 					f"Failed to set branch from POS Profile {pos_profile}: {e}", "POS Profile Branch"
 				)
+		# Rows that replaced a stored draft's rows (the POS submits its cart as the draft
+		# checked when payment opened) take the header's branch, as update_invoice's rows do.
+		if invoice_doc.get("branch"):
+			for item in invoice_doc.get("items", []):
+				if not item.get("branch"):
+					item.branch = invoice_doc.branch
 
 		# Set accounts for all payment methods before saving
 		if doctype == "Sales Invoice" and hasattr(invoice_doc, "payments"):
@@ -3186,7 +3223,9 @@ def submit_invoice(invoice: str | dict | None = None, data: str | dict | None = 
 		return result
 
 	except Exception:
-		frappe.log_error(frappe.get_traceback(), "Submit Invoice Error")
+		traceback = frappe.get_traceback()
+		_rollback_submit()
+		frappe.log_error(traceback, "Submit Invoice Error")
 		raise
 
 	finally:
@@ -4785,6 +4824,33 @@ def _replay_transaction_discount(doc, rule_names, addl_pct, discount_amt):
 		flt(doc.discount_amount),
 		doc.get("apply_discount_on") or None,
 	)
+
+
+def _stamp_one_time_item_rules(invoice_doc, rule_names) -> None:
+	"""Stamp ``pos_applied_one_time_rules`` with the one-time rules among the rows' rules.
+
+	Server-side only: the client's value is stripped (``_strip_server_managed_fields``).
+	"""
+	one_time_applied = (
+		frappe.get_all(
+			"Pricing Rule",
+			filters={"name": ["in", list(rule_names)], "one_time_per_customer": 1},
+			pluck="name",
+		)
+		if rule_names
+		else []
+	)
+	invoice_doc.pos_applied_one_time_rules = json.dumps(sorted(one_time_applied)) if one_time_applied else ""
+
+
+def _stamp_one_time_transaction_rules(invoice_doc, pos_profile_doc=None) -> None:
+	"""After totals: add the one-time transaction rules behind the header discount."""
+	txn_one_time = _applied_one_time_transaction_rules(
+		invoice_doc, pos_profile_doc.customer if pos_profile_doc else None
+	)
+	if txn_one_time:
+		stamped = json.loads(invoice_doc.pos_applied_one_time_rules or "[]")
+		invoice_doc.pos_applied_one_time_rules = json.dumps(sorted(set(stamped) | set(txn_one_time)))
 
 
 def _applied_one_time_transaction_rules(invoice_doc, default_customer=None):
