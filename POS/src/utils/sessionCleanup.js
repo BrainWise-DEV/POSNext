@@ -39,6 +39,8 @@ export async function cleanupUserSession() {
 	// 2. Clear Pinia stores
 	const cartStore = usePOSCartStore();
 	const uiStore = usePOSUIStore();
+	// The next cashier starts without the last unanswered submit's key (Ruling 141).
+	cartStore.dropPendingSubmit();
 	// Clears the cart and forgets its saved copy, so the next user never sees it (D-4)
 	await cartStore.stopCartPersistence();
 	// Reset shift/profile refs that persist in the useInvoice singleton

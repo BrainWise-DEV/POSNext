@@ -1,5 +1,6 @@
 import { promoApi } from "@/utils/promoApi";
 import { createResource } from "frappe-ui";
+import { call } from "@/utils/apiWrapper";
 import { computed, ref, toRaw } from "vue";
 import { isOffline, getCachedItem } from "@/utils/offline";
 import { useSerialNumberStore } from "@/stores/serialNumber";
@@ -1136,6 +1137,104 @@ export function useInvoice() {
 		return draft;
 	}
 
+	/**
+	 * The open online submit attempt (D-19): its idempotency key, the cart it was made
+	 * for, and whether its outcome is unknown (the request got no server answer). The
+	 * key is kept while the same cart is retried, so a submit whose response was lost
+	 * returns the invoice the server already made instead of a second sale.
+	 */
+	const pendingSubmit = ref(null);
+
+	function newSubmitKey() {
+		if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+		return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+	}
+
+	/** What identifies the cart of a submit attempt (the payments may be re-entered). */
+	function submitCartHash(invoiceData) {
+		// Row order is not part of the sale: the same items re-entered in another order
+		// are the same cart.
+		const rows = (invoiceData.items || []).map((row) => JSON.stringify(row)).sort();
+		return JSON.stringify([
+			invoiceData.customer,
+			rows,
+			invoiceData.discount_amount || 0,
+			invoiceData.coupon_code || null,
+		]);
+	}
+
+	function currentSubmitCartHash() {
+		return submitCartHash({
+			customer: resolveCustomerName(),
+			items: formatItemsForSubmission(itemsForDoctype("Sales Invoice", toRaw(invoiceItems.value))),
+			discount_amount: additionalDiscount.value || 0,
+			coupon_code: couponCode.value,
+		});
+	}
+
+	/** A submit of this very cart reached no server answer: it may have been made. */
+	function hasUnresolvedSubmit() {
+		const pending = pendingSubmit.value;
+		return Boolean(pending?.unresolved && pending.hash === currentSubmitCartHash());
+	}
+
+	/** The key of an earlier online submit of this very cart, else null (Ruling 139). */
+	function submitKeyForCart() {
+		const pending = pendingSubmit.value;
+		return pending && pending.hash === currentSubmitCartHash() ? pending.key : null;
+	}
+
+	/**
+	 * An online submit got no answer and the cart has changed since, so its key cannot
+	 * go with an offline sale: that sale may already be made (Ruling 139).
+	 */
+	function offlineCheckoutBlocked() {
+		// After Clear Cart a different cart is a new sale (Ruling 141): only an edited
+		// version of the unanswered cart still on screen is blocked.
+		const pending = pendingSubmit.value;
+		return Boolean(pending?.unresolved && !pending.cleared && pending.hash !== currentSubmitCartHash());
+	}
+
+	/**
+	 * Back online: ask the server about a cleared, unanswered submit's key (Rulings 141,
+	 * 143). Any answer drops the key; a made sale's invoice name is returned, so the
+	 * cashier is told once. After that a re-entered cart is a new sale (a kept key would
+	 * turn the next customer's identical sale into the old invoice). A cart still on
+	 * screen keeps its key (Checkout re-sends it); no answer keeps the key.
+	 * @returns {Promise<string|null>} the made sale's name
+	 */
+	async function resolvePendingSubmit() {
+		const pending = pendingSubmit.value;
+		if (!pending?.unresolved || !pending.cleared) return null;
+		let answer;
+		try {
+			const response = await call("pos_next.api.invoices.check_offline_invoice_synced", {
+				offline_id: `pos_online:${pending.key}`,
+			});
+			answer = response?.message ?? response;
+		} catch {
+			return null; // Still unreachable: keep the key.
+		}
+		if (!answer || typeof answer !== "object" || pendingSubmit.value !== pending) return null;
+		pendingSubmit.value = null;
+		return answer.synced ? answer.sales_invoice || null : null;
+	}
+
+	/** Shift close and logout: the next shift or cashier starts without it. */
+	function dropPendingSubmit() {
+		pendingSubmit.value = null;
+	}
+
+	/** The pending key went with the queued offline sale, whose sync resolves it. */
+	function releaseSubmitKey() {
+		pendingSubmit.value = null;
+	}
+
+	/** The server answered (a refusal it rolled back), as opposed to a lost request. */
+	function serverAnswered(error) {
+		return Boolean(error?.exc_type || error?.resourceError?.exc_type);
+	}
+
 	async function submitInvoice(
 		targetDoctype = "Sales Invoice",
 		deliveryDate = null,
@@ -1243,6 +1342,16 @@ export function useInvoice() {
 							: [],
 				};
 
+				if (targetDoctype === "Sales Invoice") {
+					// One key per checkout attempt, kept while this cart is retried (D-19).
+					const hash = submitCartHash(invoiceData);
+					if (!pendingSubmit.value || pendingSubmit.value.hash !== hash) {
+						pendingSubmit.value = { key: newSubmitKey(), hash, unresolved: false };
+					}
+					pendingSubmit.value.unresolved = true;
+					submitData.idempotency_key = pendingSubmit.value.key;
+				}
+
 				if (redeemedCustomerCredit > 0 && customerCreditDict.length > 0) {
 					submitData.redeemed_customer_credit = redeemedCustomerCredit;
 					submitData.customer_credit_dict = customerCreditDict;
@@ -1329,6 +1438,7 @@ export function useInvoice() {
 			} catch (error) {
 				// Outer catch to ensure error propagates
 				console.error("Submit invoice outer error:", error);
+				if (pendingSubmit.value && serverAnswered(error)) pendingSubmit.value.unresolved = false;
 				throw error;
 			} finally {
 				isSubmitting.value = false;
@@ -1393,6 +1503,7 @@ export function useInvoice() {
 		invoiceItems.value = [];
 		payments.value = [];
 		paymentDraftName.value = null;
+		pendingSubmit.value = null;
 		additionalDiscount.value = 0;
 		couponCode.value = null;
 
@@ -1426,6 +1537,11 @@ export function useInvoice() {
 		invoiceItems.value = [];
 		payments.value = [];
 		paymentDraftName.value = null;
+		// An unanswered online submit may already be a sale: clearing the cart keeps the
+		// offline block until an online submit is answered (N-5).
+		// Kept, marked cleared (Ruling 141): an exact re-entry still carries the key.
+		if (pendingSubmit.value?.unresolved) pendingSubmit.value = { ...pendingSubmit.value, cleared: true };
+		else pendingSubmit.value = null;
 		additionalDiscount.value = 0;
 		couponCode.value = null;
 
@@ -1535,6 +1651,12 @@ export function useInvoice() {
 		savePaymentDraft,
 		paymentDraftName,
 		defaultCustomerName,
+		hasUnresolvedSubmit,
+		submitKeyForCart,
+		offlineCheckoutBlocked,
+		releaseSubmitKey,
+		resolvePendingSubmit,
+		dropPendingSubmit,
 		submitInvoice,
 		resetInvoice,
 		clearCart,

@@ -1196,6 +1196,7 @@ import { usePOSSyncStore } from "@/stores/posSync";
 import { usePOSUIStore } from "@/stores/posUI";
 import { useBootstrapStore } from "@/stores/bootstrap";
 import { logger } from "@/utils/logger";
+import { buildOfflineInvoiceData } from "@/utils/offlineInvoicePayload";
 import { canCloseShiftWithPendingExpenses } from "@/utils/shiftGuards";
 import { shouldValidateItemStock } from "@/utils/stockValidator";
 
@@ -1274,7 +1275,25 @@ const paymentCheck = usePaymentOpenCheck({
 		const errorContext = parseError(error);
 		showError(errorContext.message || __("Could not check the invoice total"));
 	},
+	// A submit of this cart that got no answer may already be made (D-19): send it
+	// again, with its key and payments, instead of re-pricing an already-made sale.
+	resumeUnresolved: () =>
+		lastOnlinePayment && cartStore.hasUnresolvedSubmit()
+			? handlePaymentCompleted(lastOnlinePayment)
+			: null,
+	offlineBlocked: () => (cartStore.offlineCheckoutBlocked() ? OFFLINE_BLOCKED_MESSAGE() : null),
 });
+// An online submit of an earlier cart got no answer (Ruling 139).
+const OFFLINE_BLOCKED_MESSAGE = () => __("The last sale may already be saved. Reconnect to confirm.");
+// Back online: settle a cleared, unanswered submit's key (Ruling 141).
+watch(
+	() => offlineStore.isOffline,
+	(offline, wasOffline) => {
+		if (!offline && wasOffline) cartStore.resolvePendingSubmit();
+	}
+);
+// The payment of the last online checkout, re-sent by resumeUnresolved above.
+let lastOnlinePayment = null;
 const showTotalChangedDialog = computed({
 	get: () => Boolean(paymentCheck.pendingChange.value),
 	set: (open) => {
@@ -2085,6 +2104,8 @@ function openCartScope() {
 
 async function handleShiftClosed() {
 	uiStore.showCloseShiftDialog = false;
+	// The next shift starts without the last unanswered submit's key (Ruling 141).
+	cartStore.dropPendingSubmit();
 	showSuccess(__("Shift closed successfully"));
 
 	// The closed shift's cart is dropped, in memory and in storage (D-4).
@@ -2285,12 +2306,14 @@ async function handleDeleteFailedExpense() {
 }
 
 async function handleErrorRetry() {
+	// clearError resets the retry action: read it first.
+	const action = uiStore.errorRetryAction;
 	uiStore.clearError();
-	if (uiStore.errorRetryAction === "payment") {
+	if (action === "payment") {
 		setTimeout(() => {
 			paymentCheck.requestPayment();
 		}, 300);
-	} else if (uiStore.errorRetryAction === "sync") {
+	} else if (action === "sync") {
 		await offlineStore.loadPendingInvoices();
 		setTimeout(() => {
 			handleSyncClick();
@@ -2343,27 +2366,21 @@ async function handlePaymentCompleted(paymentData) {
 		if (offlineStore.isOffline) {
 			// A restored cart whose draft may be sold already is not paid offline (Ruling 136 (b))
 			if (cartStore.paymentBlockedMessage) throw new Error(cartStore.paymentBlockedMessage);
-			// Use the same item transformation as online flow for consistency
-			// This ensures rate, discount_percentage, discount_amount, and pricing_rules
-			// are all correctly formatted for ERPNext
-			const preparedItems = cartStore.formatItemsForSubmission(cartStore.invoiceItems);
-
+			if (cartStore.offlineCheckoutBlocked()) {
+				uiStore.showPaymentDialog = false;
+				showError(OFFLINE_BLOCKED_MESSAGE());
+				return;
+			}
 			const invoiceData = {
-				pos_profile: cartStore.posProfile,
-				posa_pos_opening_shift: cartStore.posOpeningShift,
-				company: shiftStore.profileCompany,
-				customer: customerValue || shiftStore.profileCustomer,
-				items: preparedItems,
-				payments: JSON.parse(JSON.stringify(cartStore.payments)),
-				sales_team: JSON.parse(JSON.stringify(cartStore.salesTeam || [])),
-				grand_total: cartStore.grandTotal,
-				total_tax: cartStore.totalTax,
-				total_discount: cartStore.totalDiscount,
-				write_off_amount: paymentData.write_off_amount || 0,
-				change_amount: paymentData.change_amount || 0,
-				is_credit_sale: paymentData.is_credit_sale ? 1 : 0,
-				receivable_account: paymentData.receivable_account || null,
-				edited_from: editingOfflineContext?.originalOfflineId || null,
+				...buildOfflineInvoiceData({
+					cart: cartStore,
+					shift: shiftStore,
+					customer: customerValue,
+					paymentData,
+					editedFrom: editingOfflineContext?.originalOfflineId,
+					// The same cart after a lost online submit: the sync returns that sale.
+					idempotencyKey: cartStore.submitKeyForCart(),
+				}),
 				// The cart's own id, saved with it: paying a restored cart again finds this
 				// sale already queued, and the server dedups one already synced (Ruling 136 (d)).
 				offline_id: await cartStore.checkoutOfflineId(),
@@ -2373,6 +2390,8 @@ async function handlePaymentCompleted(paymentData) {
 			// canonical pos_offline_<uuid> id as the cache key — keeping
 			// IndexedDB and sessionStorage aligned on a single identifier.
 			const saveResult = await offlineStore.saveInvoiceOffline(invoiceData);
+			// The queued sale carries the pending key (if any); its sync resolves it.
+			if (invoiceData.idempotency_key) cartStore.releaseSubmitKey();
 			const offlineReceiptName =
 				saveResult?.offline_id || invoiceData.offline_id || `pos_offline_${Date.now()}`;
 
@@ -2483,6 +2502,7 @@ async function handlePaymentCompleted(paymentData) {
 			const soldItemCodes = cartStore.invoiceItems.map((item) => item.item_code);
 			const soldBatches = cartStore.invoiceItems.filter((item) => item.batch_no);
 
+			lastOnlinePayment = paymentData;
 			const result = await cartStore.submitInvoice({
 				isCreditSale: Boolean(paymentData.is_credit_sale),
 				receivableAccount: paymentData.receivable_account || null,
@@ -2569,7 +2589,12 @@ async function handlePaymentCompleted(paymentData) {
 		const errorContext = parseError(error);
 		// The cart is kept. Online, the price check runs again (Ruling 101): when the
 		// total changed, the cashier confirms the new one, with the server's message.
-		if (await paymentCheck.recheckAfterRefusal(errorContext.message || "")) return;
+		// A submit with no answer is not re-checked: it may already be made (D-19).
+		if (
+			!cartStore.hasUnresolvedSubmit() &&
+			(await paymentCheck.recheckAfterRefusal(errorContext.message || ""))
+		)
+			return;
 
 		uiStore.showError(
 			errorContext.title || __("Error"),

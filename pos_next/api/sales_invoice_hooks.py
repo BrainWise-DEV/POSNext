@@ -27,6 +27,32 @@ def validate(doc, method=None):
 	apply_tax_inclusive(doc)
 	auto_assign_loyalty_program_on_invoice(doc)
 	sync_return_loyalty_program(doc)
+	blank_rule_tags_of_desk_copy(doc)
+
+
+def blank_rule_tags_of_desk_copy(doc):
+	"""A Desk copy (Amend, Duplicate) of a POS sale keeps its prices, not its rule tags.
+
+	A submitted POS sale's paid rows carry the rules the server confirmed (Ruling 137)
+	next to ``ignore_pricing_rule=1``. ``frappe.copy_doc`` copies both, and on the
+	copy's next save ERPNext's ``get_pricing_rule_for_item`` takes its
+	ignore-pricing-rule branch for a stored row that lists rules and removes the
+	discount (N-1). So on the copy's first save (insert: that branch needs a stored
+	doc) the paid rows' tags are blanked, as pos_next saves its own drafts.
+
+	Only for a POS invoice inserted outside the pos_next API (Ruling 140): pos_next's
+	own saves (``flags.pos_next_api``) keep their tags, which its checks read. Free
+	rows keep their gift rule. A return is ERPNext's (its mapping clears the tags).
+	"""
+	if doc.doctype != "Sales Invoice" or not (doc.flags.in_insert or doc.is_new()):
+		return
+	if doc.flags.pos_next_api or not cint(doc.get("is_pos")) or not cint(doc.get("ignore_pricing_rule")):
+		return
+	if cint(doc.get("is_return")):
+		return
+	for row in doc.get("items") or []:
+		if row.get("pricing_rules") and not cint(row.get("is_free_item")):
+			row.pricing_rules = ""
 
 
 def apply_tax_inclusive(doc):

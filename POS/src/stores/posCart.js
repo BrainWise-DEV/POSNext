@@ -154,6 +154,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		removeItem,
 		updateItemQuantity: baseUpdateItemQuantity,
 		submitInvoice: baseSubmitInvoice,
+		hasUnresolvedSubmit,
+		submitKeyForCart,
+		offlineCheckoutBlocked,
+		releaseSubmitKey,
+		resolvePendingSubmit: baseResolvePendingSubmit,
+		dropPendingSubmit,
 		savePaymentDraft,
 		paymentDraftName,
 		defaultCustomerName,
@@ -437,6 +443,13 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 	function setWriteOffAmount(amount) {
 		writeOffAmount.value = amount || 0;
+	}
+
+	/** Back online: settle a cleared submit's key; tell the cashier once about a sale it made (Ruling 143). */
+	async function resolvePendingSubmitAndTell() {
+		const name = await baseResolvePendingSubmit();
+		if (name) showSuccess(__("The last sale was saved as {0}", [name]));
+		return name;
 	}
 
 	async function submitInvoice(options = {}) {
@@ -3284,6 +3297,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		payments,
 		salesTeam,
 		additionalDiscount,
+		couponCode,
 		taxInclusive,
 		pendingItem,
 		pendingItemQty,
@@ -3319,6 +3333,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		loadTaxRules,
 		setTaxInclusive,
 		submitInvoice,
+		hasUnresolvedSubmit,
+		submitKeyForCart,
+		offlineCheckoutBlocked,
+		releaseSubmitKey,
+		resolvePendingSubmit: resolvePendingSubmitAndTell,
+		dropPendingSubmit,
 		checkPriceBeforePayment,
 		paymentTotal,
 		paymentRoundingAdjustment,

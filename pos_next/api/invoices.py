@@ -1172,6 +1172,45 @@ def _fnf_not_eligible_message(row, list_price) -> str:
 	).format(row.idx, row.item_code, list_price, flt(row.rate))
 
 
+FNF_REPLACED_FIELD = "posnext_fnf_replaced_discount"
+
+
+def _stored_fnf_snapshots(doc) -> list[tuple]:
+	"""The signed replaced-discount snapshots (``posnext_fnf_replaced_discount``) of a
+	stored draft's F&F rows, with each row's item, UOM, qty and rate.
+
+	Promotions signs the snapshot on the unpaid save (the payment-open check). The POS
+	never sends it back, and promotions never re-prices (so never re-signs) a paid save,
+	so without this the submitted row loses the record of the discount F&F beat (D-10).
+	"""
+	if not doc.meta.get_field("items") or not frappe.get_meta(doc.meta.get_field("items").options).has_field(
+		FNF_REPLACED_FIELD
+	):
+		return []
+	return [
+		(row.item_code, row.uom, flt(row.qty, 6), flt(row.rate, row.precision("rate")), row.get(FNF_REPLACED_FIELD))
+		for row in doc.get("items") or []
+		if row.get(FNF_REPLACED_FIELD) and row.get("posnext_discount_source") == FNF_DISCOUNT_SOURCE
+	]
+
+
+def _carry_fnf_snapshots(doc, snapshots) -> None:
+	"""Put a stored F&F row's signed snapshot back on the submitted row it matches
+	exactly (item, UOM, qty, rate), one to one. The value is the server's own and
+	promotions verifies its signature wherever it uses it; it never explains a price
+	here."""
+	left = list(snapshots)
+	for row in doc.get("items") or []:
+		if not left or row.get("posnext_discount_source") != FNF_DISCOUNT_SOURCE:
+			continue
+		key = (row.item_code, row.uom, flt(row.qty, 6), flt(row.rate, row.precision("rate")))
+		for i, snap in enumerate(left):
+			if snap[:4] == key:
+				row.set(FNF_REPLACED_FIELD, snap[4])
+				del left[i]
+				break
+
+
 def _carries_payment(doc) -> bool:
 	return sum(flt(row.get("amount")) for row in doc.get("payments") or []) > 0
 
@@ -1545,6 +1584,9 @@ def _check_paid_row_discounts(invoice_doc, offline_sync=False, paid_draft_rows=N
 			# The line's discount is the offer's, not a coupon's or F&F's at least as large
 			# (Rulings 118, 120).
 			offer_lines.append(idx)
+			if offer is not None and abs(offer - flt(row.rate)) <= tolerance:
+				# Written to the row at before_submit (Ruling 137): the server's names only.
+				row.flags.pos_server_rules = ",".join(sorted(_server_line_rules(result, [idx])))
 		if (
 			min(rate for rate in (list_price, offer, coupon, fnf) if rate is not None) - flt(row.rate)
 			<= tolerance
@@ -2794,6 +2836,9 @@ def _update_invoice(data: str | dict, offline_sync: bool = False, submitting: bo
 		else:
 			invoice_doc = frappe.get_doc(data)
 
+		# A pos_next API save: its rule tags are the server's (sales_invoice_hooks,
+		# Ruling 140, blanks only those of a Desk copy).
+		invoice_doc.flags.pos_next_api = True
 		# Important: set before set_missing_values()/pricing/validation paths that may
 		# read linked docs (e.g., Customer) and trigger controller permission checks.
 		invoice_doc.flags.ignore_permissions = True
@@ -3120,6 +3165,12 @@ def _update_invoice(data: str | dict, offline_sync: bool = False, submitting: bo
 		frappe.flags.ignore_account_permission = True
 		invoice_doc.docstatus = 0
 		invoice_doc.save()
+		if submitting:
+			# submit_invoice re-reads this draft to submit it: carry the server's rule names
+			# (Ruling 137) to its before_submit by row name.
+			rules = {row.name: row.flags.pos_server_rules for row in invoice_doc.get("items") or [] if row.flags.pos_server_rules}
+			if rules:
+				frappe.flags.pos_server_row_rules = dict(frappe.flags.pos_server_row_rules or {}, **{invoice_doc.name: rules})
 		if (
 			_carries_payment(invoice_doc)
 			and not offline_sync
@@ -3156,7 +3207,8 @@ def _is_pending_expired(modified_time):
 
 def _reuse_sync_record(sync_record_name):
 	"""Reset an existing sync record to Pending status for retry."""
-	sync_doc = frappe.get_doc("Offline Invoice Sync", sync_record_name)
+	# Locking read: the row may be newer than this transaction's snapshot.
+	sync_doc = frappe.get_doc("Offline Invoice Sync", sync_record_name, for_update=True)
 	sync_doc.status = "Pending"
 	sync_doc.synced_at = None
 	sync_doc.flags.ignore_permissions = True
@@ -3164,18 +3216,45 @@ def _reuse_sync_record(sync_record_name):
 	return {"already_synced": False, "sync_record_name": sync_record_name}
 
 
-def _ensure_offline_uniqueness(offline_id, pos_profile=None, customer=None):
+def _insert_sync_reservation(offline_id, pos_profile=None, customer=None) -> str | None:
+	"""Insert a Pending reservation for ``offline_id``; its name, or None when the id is
+	already reserved (the unique ``offline_id`` index).
+
+	A plain INSERT takes a record lock on the new row only, no gap lock, so reserving
+	one id never waits on another id's open submit (I-3). Inserting an id another open
+	transaction reserved waits for that transaction, then fails with a duplicate key
+	once it commits (or succeeds if it rolled back).
+	"""
+	name = frappe.generate_hash(length=10)
+	now = frappe.utils.now_datetime()
+	user = frappe.session.user
+	try:
+		frappe.db.sql(
+			"""INSERT INTO `tabOffline Invoice Sync`
+				(name, creation, modified, owner, modified_by, docstatus, idx,
+				offline_id, sales_invoice, status, pos_profile, customer, synced_at)
+			VALUES (%s, %s, %s, %s, %s, 0, 0, %s, '', 'Pending', %s, %s, NULL)""",
+			(name, now, now, user, user, offline_id, pos_profile, customer),
+		)
+	except Exception as error:
+		if frappe.db.is_duplicate_entry(error):
+			return None
+		raise
+	return name
+
+
+def _ensure_offline_uniqueness(offline_id, pos_profile=None, customer=None, _retry=True):
 	"""
 	Ensure offline invoice uniqueness with race condition protection.
 
-	Uses a reservation pattern:
-	1. Check if a sync record exists (with row-level lock)
-	2. If synced with valid invoice, return existing invoice
-	3. If synced but invoice deleted/invalid, allow retry
-	4. If pending but expired (>5 min), allow retry
-	5. If pending and active, reject (another request processing)
-	6. If failed, allow retry
-	7. If not exists, create pending reservation
+	Uses a reservation pattern, insert first (I-3):
+	1. Insert a pending reservation; when the id is new, this request owns it
+	2. Otherwise read the existing record with a row lock (a record lock only):
+	3. If synced with valid invoice, return existing invoice
+	4. If synced but invoice deleted/invalid, allow retry
+	5. If pending but expired (>5 min), allow retry
+	6. If pending and active, reject (another request processing)
+	7. If failed, allow retry
 
 	Args:
 	    offline_id: The unique offline ID from the client
@@ -3188,7 +3267,11 @@ def _ensure_offline_uniqueness(offline_id, pos_profile=None, customer=None):
 	    - invoice_data (dict): Existing invoice data if already_synced
 	    - sync_record_name (str): Name of the sync record for this attempt
 	"""
-	# Acquire row-level lock to prevent race conditions
+	reserved = _insert_sync_reservation(offline_id, pos_profile, customer)
+	if reserved:
+		return {"already_synced": False, "sync_record_name": reserved}
+
+	# The id exists: lock that row (a record lock, no gap lock).
 	existing_sync = frappe.db.get_value(
 		"Offline Invoice Sync",
 		{"offline_id": offline_id},
@@ -3196,90 +3279,99 @@ def _ensure_offline_uniqueness(offline_id, pos_profile=None, customer=None):
 		as_dict=True,
 		for_update=True,
 	)
+	if not existing_sync:
+		# Deleted between the insert and the read (or a name collision): once more.
+		if _retry:
+			return _ensure_offline_uniqueness(offline_id, pos_profile, customer, _retry=False)
+		frappe.throw(_("This invoice is currently being processed. Please wait."), title="SYNC_IN_PROGRESS")
 
-	if existing_sync and existing_sync.pos_profile and existing_sync.pos_profile != pos_profile:
+	if existing_sync.pos_profile and existing_sync.pos_profile != pos_profile:
 		# An offline_id reserved by another profile: never reuse it or return its invoice.
 		frappe.throw(_("This offline invoice belongs to another POS Profile."), frappe.PermissionError)
 
-	if existing_sync:
-		sync_status = existing_sync.get("status")
-		sync_record_name = existing_sync.name
+	sync_status = existing_sync.get("status")
+	sync_record_name = existing_sync.name
 
-		# Handle Pending status
-		if sync_status == "Pending":
-			if _is_pending_expired(existing_sync.get("modified")):
-				# Expired pending - allow retry
-				return _reuse_sync_record(sync_record_name)
-			else:
-				# Active pending - reject with specific error code
-				frappe.throw(
-					_("This invoice is currently being processed. Please wait."),
-					exc=frappe.ValidationError,
-					title="SYNC_IN_PROGRESS",
-				)
-
-		# Handle Failed status - allow retry
-		if sync_status == "Failed":
+	# Handle Pending status
+	if sync_status == "Pending":
+		if _is_pending_expired(existing_sync.get("modified")):
+			# Expired pending - allow retry
 			return _reuse_sync_record(sync_record_name)
+		# Active pending - reject with specific error code
+		frappe.throw(
+			_("This invoice is currently being processed. Please wait."),
+			exc=frappe.ValidationError,
+			title="SYNC_IN_PROGRESS",
+		)
 
-		# Handle Synced status - verify invoice still valid
-		if sync_status == "Synced" and existing_sync.sales_invoice:
-			if frappe.db.exists("Sales Invoice", existing_sync.sales_invoice):
-				existing_invoice = frappe.get_doc("Sales Invoice", existing_sync.sales_invoice)
-				if existing_invoice.docstatus == 1:
-					return {
-						"already_synced": True,
-						"invoice_data": {
-							"name": existing_invoice.name,
-							"status": existing_invoice.docstatus,
-							"grand_total": existing_invoice.grand_total,
-							"total": existing_invoice.total,
-							"net_total": existing_invoice.net_total,
-							"outstanding_amount": getattr(existing_invoice, "outstanding_amount", 0),
-							"paid_amount": getattr(existing_invoice, "paid_amount", 0),
-							"change_amount": getattr(existing_invoice, "change_amount", 0),
-							"duplicate_prevented": True,
-							"offline_id": offline_id,
-						},
-					}
-
-			# Synced record points to deleted/invalid invoice - allow retry
-			return _reuse_sync_record(sync_record_name)
-
-		# Unknown status or synced without invoice - allow retry
+	# Handle Failed status - allow retry
+	if sync_status == "Failed":
 		return _reuse_sync_record(sync_record_name)
 
-	# No existing record - create pending reservation
-	try:
-		pending_sync = frappe.get_doc(
-			{
-				"doctype": "Offline Invoice Sync",
-				"offline_id": offline_id,
-				"sales_invoice": "",
-				"pos_profile": pos_profile,
-				"customer": customer,
-				"status": "Pending",
-			}
-		)
-		pending_sync.flags.ignore_permissions = True
-		pending_sync.insert()
+	# Handle Synced status - verify invoice still valid
+	if sync_status == "Synced" and existing_sync.sales_invoice:
+		invoice_data = _synced_invoice_data(existing_sync.sales_invoice)
+		if invoice_data:
+			invoice_data["offline_id"] = offline_id
+			return {"already_synced": True, "invoice_data": invoice_data}
 
-		return {"already_synced": False, "sync_record_name": pending_sync.name}
-	except frappe.DuplicateEntryError:
-		# Race condition: another request just created the record
-		# Retry the check to get the new record
-		return _ensure_offline_uniqueness(offline_id, pos_profile, customer)
+	# Synced record points to deleted/invalid invoice, or unknown status - allow retry
+	return _reuse_sync_record(sync_record_name)
 
 
-def _complete_offline_sync(sync_record_name, invoice_name):
+def _record_offline_id_as(offline_id, invoice_name, pos_profile=None, customer=None) -> None:
+	"""Point ``offline_id`` at ``invoice_name`` (the online sale its key already made),
+	so a re-sync and ``check_offline_invoice_synced`` find it. Another profile's id is
+	refused by ``_ensure_offline_uniqueness``."""
+	result = _ensure_offline_uniqueness(offline_id, pos_profile, customer)
+	if not result.get("already_synced"):
+		_complete_offline_sync(result["sync_record_name"], invoice_name, strict=True)
+
+
+def _synced_invoice_data(invoice_name) -> dict | None:
+	"""What a repeated submit returns for the submitted invoice ``invoice_name``, or None.
+
+	A locking read: after waiting on the other request's reservation, this transaction's
+	REPEATABLE READ snapshot predates that request's commit, so a plain read would not
+	see the invoice it made.
+	"""
+	fields = ["name", "docstatus", "grand_total", "total", "net_total", "outstanding_amount", "paid_amount", "change_amount"]
+	existing = frappe.db.get_value("Sales Invoice", invoice_name, fields, as_dict=True, for_update=True)
+	if not existing or existing.docstatus != 1:
+		return None
+	return {
+		"name": existing.name,
+		"status": existing.docstatus,
+		"grand_total": existing.grand_total,
+		"total": existing.total,
+		"net_total": existing.net_total,
+		"outstanding_amount": existing.outstanding_amount or 0,
+		"paid_amount": existing.paid_amount or 0,
+		"change_amount": existing.change_amount or 0,
+		"duplicate_prevented": True,
+	}
+
+
+def _complete_offline_sync(sync_record_name, invoice_name, strict=False):
 	"""
 	Mark an offline sync record as completed after successful invoice submission.
 
 	Args:
 	    sync_record_name: Name of the Offline Invoice Sync record
 	    invoice_name: Name of the submitted Sales Invoice
+	    strict: raise instead of logging. An online submit key (D-19) left Pending would
+	        let a retry after the pending timeout make a second sale, so its submit fails
+	        (and keeps nothing) when the record cannot be completed.
 	"""
 	if not sync_record_name:
+		return
+
+	if strict:
+		frappe.db.set_value(
+			"Offline Invoice Sync",
+			sync_record_name,
+			{"sales_invoice": invoice_name, "status": "Synced", "synced_at": frappe.utils.now_datetime()},
+		)
 		return
 
 	try:
@@ -3322,6 +3414,29 @@ def _cleanup_failed_sync(sync_record_name):
 			title="Offline Sync Cleanup Error",
 			message=f"Failed to mark sync record {sync_record_name} as failed: {error!s}",
 		)
+
+
+# An online submit's client key (D-19) is reserved in the Offline Invoice Sync table
+# under this prefix: the unique ``offline_id`` index makes one invoice per key.
+ONLINE_SUBMIT_KEY_PREFIX = "pos_online:"
+_ONLINE_SUBMIT_KEY_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
+
+
+def _online_submit_key(invoice, data, doctype) -> str | None:
+	"""The reservation name of an online submit's ``idempotency_key``, or None.
+
+	The POS sends one key per checkout attempt and keeps it while it retries the same
+	cart. Only a Sales Invoice is reserved (the sync row links a Sales Invoice); an
+	offline sale is reserved by its ``offline_id`` instead.
+	"""
+	key = data.get("idempotency_key")
+	if key is None:
+		key = invoice.get("idempotency_key")
+	if key is None or doctype != DOCTYPE_SALES_INVOICE:
+		return None
+	if not isinstance(key, str) or not 8 <= len(key) <= 100 or not set(key) <= _ONLINE_SUBMIT_KEY_CHARS:
+		frappe.throw(_("Invalid submit key"))
+	return f"{ONLINE_SUBMIT_KEY_PREFIX}{key}"
 
 
 @frappe.whitelist()
@@ -3451,7 +3566,32 @@ def submit_invoice(invoice: str | dict | None = None, data: str | dict | None = 
 	# update to "synced" after successful submission.
 	# ========================================================================
 	offline_id = invoice.get("offline_id") or data.get("offline_id")
+	# An online submit is reserved by its client key the same way (D-19): a retry after a
+	# lost response returns the invoice the first request made. The key never makes the
+	# submit an offline sync: ``offline_sync`` and ``pos_offline_sync`` read offline_id only.
+	# An offline sale queued after a lost response carries the same key (Ruling 139): the
+	# key is reserved first, so the sync returns the online invoice instead of a second.
+	submit_key = _online_submit_key(invoice, data, doctype)
+	invoice.pop("idempotency_key", None)
 	sync_record_name = None
+	key_record_name = None
+
+	if submit_key:
+		# One row per key (the unique ``offline_id`` index), inserted first: a concurrent
+		# request with the same key waits for this one, then finds its Synced row.
+		key_result = _ensure_offline_uniqueness(
+			offline_id=submit_key, pos_profile=pos_profile, customer=invoice.get("customer")
+		)
+		if key_result.get("already_synced"):
+			existing = dict(key_result.get("invoice_data") or {})
+			existing["idempotency_key"] = submit_key[len(ONLINE_SUBMIT_KEY_PREFIX) :]
+			existing.pop("offline_id", None)
+			if offline_id:
+				# The queued sale is that invoice: its offline id points there too.
+				_record_offline_id_as(offline_id, existing["name"], pos_profile, invoice.get("customer"))
+				existing["offline_id"] = offline_id
+			return existing
+		key_record_name = key_result.get("sync_record_name")
 
 	if offline_id:
 		dedup_result = _ensure_offline_uniqueness(
@@ -3460,7 +3600,10 @@ def submit_invoice(invoice: str | dict | None = None, data: str | dict | None = 
 
 		if dedup_result and dedup_result.get("already_synced"):
 			# Invoice was already synced - return the existing invoice details
-			return dedup_result.get("invoice_data", {})
+			existing = dict(dedup_result.get("invoice_data") or {})
+			if key_record_name:
+				_complete_offline_sync(key_record_name, existing["name"], strict=True)
+			return existing
 
 		# Store the sync record name for later update
 		sync_record_name = dedup_result.get("sync_record_name") if dedup_result else None
@@ -3493,13 +3636,16 @@ def submit_invoice(invoice: str | dict | None = None, data: str | dict | None = 
 			invoice_doc.flags.pos_paid_draft_rows = []
 		else:
 			invoice_doc = frappe.get_doc(doctype, invoice_name)
+			invoice_doc.flags.pos_next_api = True
 			existing_customer = invoice_doc.customer
 			paid_draft_free = _paid_draft_free_qty(invoice_doc)
 			stored_sources = _stored_line_sources(invoice_doc)
 			paid_draft_rates = _paid_draft_rates(invoice_doc)
 			paid_draft_rows = _paid_draft_rows(invoice_doc)
 			paid_draft_header = _paid_draft_header(invoice_doc)
+			fnf_snapshots = _stored_fnf_snapshots(invoice_doc)
 			invoice_doc.update(invoice)
+			_carry_fnf_snapshots(invoice_doc, fnf_snapshots)
 			if not invoice_doc.get("customer") and existing_customer:
 				invoice_doc.customer = existing_customer
 			# Before the paid-row check, which reads them (Rulings 126, 128).
@@ -3755,6 +3901,8 @@ def submit_invoice(invoice: str | dict | None = None, data: str | dict | None = 
 		# Complete the offline sync record
 		if sync_record_name:
 			_complete_offline_sync(sync_record_name, invoice_doc.name)
+		if key_record_name:
+			_complete_offline_sync(key_record_name, invoice_doc.name, strict=True)
 
 		# Handle credit redemption after successful submission
 		if redeemed_customer_credit and customer_credit_dict:
@@ -3815,6 +3963,8 @@ def submit_invoice(invoice: str | dict | None = None, data: str | dict | None = 
 		# Cleanup sync record if invoice was not successfully submitted
 		if sync_record_name and not invoice_submitted:
 			_cleanup_failed_sync(sync_record_name)
+		if key_record_name and not invoice_submitted:
+			_cleanup_failed_sync(key_record_name)
 
 
 # ==========================================
@@ -5695,12 +5845,34 @@ def check_one_time_offers_on_submit(doc) -> None:
 		_refuse("<br>".join(problems), UNEXPLAINED_DISCOUNT_LOG_TITLE)
 	# Submitted: no longer a draft (rolled back with the submit if it fails later).
 	_forget_checked_paid_draft(doc)
+	_write_server_pricing_rules(doc)
 	problems = list(dict.fromkeys(problems + held))
 	if not problems:
 		return
 	reference = doc.name or doc.get("offline_id") or "new"
 	for problem in problems:
 		log_error_without_telemetry(UNEXPLAINED_DISCOUNT_LOG_TITLE, f"Invoice {reference}: {problem}")
+
+
+def _write_server_pricing_rules(doc) -> None:
+	"""Put on each paid row the Pricing Rules the server's own offer evaluation applied
+	to it, for the rows that evaluation explained (Ruling 137); never a client name.
+
+	Paid rows are saved with a blank ``pricing_rules`` (``_reset_row_pricing_rules``: a
+	stored row that lists rules has its discount zeroed by ERPNext on the next save of
+	the invoice). before_submit runs after the last validate, so the names written here
+	are stored once and never re-priced; returns clear them (ERPNext's return mapping).
+	Runs after the one-time checks above, which judge the rows as saved.
+	"""
+	carried = (frappe.flags.pos_server_row_rules or {}).pop(doc.name, None) or {}
+	for row in doc.get("items") or []:
+		if cint(row.get("is_free_item")):
+			continue
+		names = row.flags.pos_server_rules
+		if names is None:
+			names = carried.get(row.name)
+		if names:
+			row.pricing_rules = names
 
 
 def _redeem_on_submit(doc) -> list[str]:

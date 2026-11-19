@@ -14,8 +14,20 @@ import { ref } from "vue";
  * @param {() => Promise<{changed: boolean, alreadySubmitted?: boolean, previousTotal?: number, total?: number}>} deps.checkPrice
  * @param {() => void} deps.openPayment
  * @param {(error: unknown) => void} deps.showError
+ * @param {() => (Promise<unknown>|null)} [deps.resumeUnresolved] - re-sends a submit of
+ *   this cart that got no server answer (D-19) and returns its promise, else null. That
+ *   submit may already be made: a new price check would re-price an already-made sale.
+ * @param {() => (string|null)} [deps.offlineBlocked] - offline only: why checkout must
+ *   wait for the connection (an unanswered online submit of an earlier cart, Ruling 139)
  */
-export function usePaymentOpenCheck({ isOffline, checkPrice, openPayment, showError }) {
+export function usePaymentOpenCheck({
+	isOffline,
+	checkPrice,
+	openPayment,
+	showError,
+	resumeUnresolved,
+	offlineBlocked,
+}) {
 	const checking = ref(false);
 	// { previousTotal, total, message } while the cashier is asked to confirm a new total
 	const pendingChange = ref(null);
@@ -34,7 +46,17 @@ export function usePaymentOpenCheck({ isOffline, checkPrice, openPayment, showEr
 	async function requestPayment() {
 		if (checking.value) return false;
 		if (isOffline()) {
+			const blocked = offlineBlocked?.();
+			if (blocked) {
+				showError(new Error(blocked));
+				return false;
+			}
 			openPayment();
+			return true;
+		}
+		const resumed = resumeUnresolved?.();
+		if (resumed) {
+			await resumed;
 			return true;
 		}
 		let check;
