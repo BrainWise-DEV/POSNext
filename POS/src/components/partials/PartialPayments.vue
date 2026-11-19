@@ -345,6 +345,7 @@ import PaymentDialog from "@/components/sale/PaymentDialog.vue";
 import { usePOSSettingsStore } from "@/stores/posSettings";
 import { useToast } from "@/composables/useToast";
 import { useFormatters } from "@/composables/useFormatters";
+import { useShift } from "@/composables/useShift";
 import { Button, call } from "frappe-ui";
 import { onMounted, ref, watch } from "vue";
 
@@ -362,6 +363,8 @@ const props = defineProps({
 });
 
 const emit = defineEmits(["update:modelValue"]);
+
+const { currentShift } = useShift();
 
 const show = ref(props.modelValue);
 const loading = ref(false);
@@ -455,6 +458,7 @@ async function handlePaymentCompleted(paymentData) {
 		const result = await call("pos_next.api.partial_payments.add_payment_to_partial_invoice", {
 			invoice_name: selectedInvoice.value.name,
 			payments: paymentData.payments,
+			pos_opening_shift: currentShift.value?.name,
 		});
 
 		console.log("[PartialPayments] API response:", result);

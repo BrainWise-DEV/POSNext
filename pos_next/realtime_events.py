@@ -201,6 +201,9 @@ def emit_customer_event(doc, method=None):
 			"mobile_no": doc.mobile_no or "",
 			"email_id": doc.email_id or "",
 			"disabled": doc.disabled,
+			"custom_email_verified": doc.get("custom_email_verified") or 0,
+			"custom_verified_email": doc.get("custom_verified_email") or "",
+			"custom_email_verified_on": str(doc.get("custom_email_verified_on") or ""),
 			"action": action,
 			"timestamp": frappe.utils.now(),
 		}

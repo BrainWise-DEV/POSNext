@@ -1,7 +1,13 @@
 <template>
 	<Teleport to="body">
-		<Transition :name="isRTL ? 'toast-slide-rtl' : 'toast-slide-ltr'">
-			<div v-if="showToast && toastNotification" class="fixed top-4 end-4 z-[9999] max-w-md">
+		<!-- Bottom-start corner, away from the header icons; slides in from the start side -->
+		<Transition :name="isRTL ? 'toast-slide-ltr' : 'toast-slide-rtl'">
+			<div
+				v-if="showToast && toastNotification"
+				class="fixed bottom-4 start-4 z-[9999] max-w-md"
+				role="status"
+				aria-live="polite"
+			>
 				<div
 					:class="[
 						'rounded-lg shadow-xl p-4 flex items-start gap-3',

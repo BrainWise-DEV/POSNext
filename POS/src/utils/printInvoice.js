@@ -1,9 +1,11 @@
 import { call } from "@/utils/apiWrapper";
+import { formatDate, formatDateTime } from "@/utils/currency";
 import { logger } from "@/utils/logger";
 import { getOfflineReceiptPayload } from "@/utils/offline/offlineReceiptCache";
 import { getOfflineInvoiceByOfflineId } from "@/utils/offline/sync";
 import { offlineWorker } from "@/utils/offline/workerClient";
 import { printHTML as qzPrintHTML } from "@/utils/qzTray";
+import { usePOSSettingsStore } from "@/stores/posSettings";
 
 const log = logger.create("PrintInvoice");
 
@@ -15,6 +17,26 @@ const DEFAULT_PRINT_FORMAT = "POS Next Receipt";
 
 function formatCurrency(amount) {
 	return Number.parseFloat(amount || 0).toFixed(2);
+}
+
+/** POS Settings flag (default OFF): print sales persons when an invoice has several. */
+function shouldPrintMultipleSalesPersons() {
+	try {
+		return Boolean(usePOSSettingsStore().settings?.print_multiple_sales_persons);
+	} catch (err) {
+		log.warn("Could not read print_multiple_sales_persons setting:", err);
+		return false;
+	}
+}
+
+function getSalesPersonNames(invoiceData) {
+	const salesTeam = invoiceData.sales_team;
+	if (!Array.isArray(salesTeam) || salesTeam.length === 0) return "";
+	if (salesTeam.length > 1 && !shouldPrintMultipleSalesPersons()) return "";
+	return salesTeam
+		.map((row) => row.sales_person_name || row.sales_person)
+		.filter(Boolean)
+		.join(", ");
 }
 
 /**
@@ -66,6 +88,8 @@ function receiptDocFromQueuedInvoice(offlineId, raw) {
 		posting_date: raw.posting_date || new Date().toISOString().slice(0, 10),
 		company: raw.company,
 		customer_name: raw.customer,
+		sales_team: raw.sales_team,
+		coupon_code: raw.coupon_code,
 		items: items.map((item) => ({
 			...item,
 			quantity: item.quantity ?? item.qty,
@@ -157,12 +181,18 @@ const RECEIPT_STYLES = `
 export function buildReceiptHTML(invoiceData) {
 	const items = invoiceData.items || [];
 	const paidAmount = derivePaidAmount(invoiceData);
+	const salesPersonNames = getSalesPersonNames(invoiceData);
 	const itemsHtml = items
 		.map((item) => {
 			const hasDiscount =
 				(item.discount_percentage && Number.parseFloat(item.discount_percentage) > 0) ||
 				(item.discount_amount && Number.parseFloat(item.discount_amount) > 0);
 			const isFree = item.is_free_item;
+			// PN-130: name the Friends & Family discount on the receipt.
+			const isFnf =
+				item.discount_source === "friends_and_family" ||
+				item.posnext_discount_source === "friends_and_family";
+			const discountLabel = isFnf ? __("Friends & Family discount") : "Discount";
 			const qty = item.quantity || item.qty || 0;
 			const displayRate = item.price_list_rate || item.rate || 0;
 			const subtotal = qty * displayRate;
@@ -175,7 +205,7 @@ export function buildReceiptHTML(invoiceData) {
 							</div>
 							${
 								hasDiscount
-									? `<div class="item-discount"><span>Discount ${
+									? `<div class="item-discount"><span>${discountLabel} ${
 											item.discount_percentage
 												? `(${Number(item.discount_percentage).toFixed(
 														2
@@ -210,14 +240,30 @@ export function buildReceiptHTML(invoiceData) {
 
 				<div class="invoice-info">
 					<div><span>${__("Invoice #:")}</span><span><strong>${invoiceData.name}</strong></span></div>
-					<div><span>${__("Date:")}</span><span>${new Date(
-		invoiceData.posting_date || Date.now()
-	).toLocaleString()}</span></div>
+					<div><span>${__("Date:")}</span><span>${
+						invoiceData.posting_date && !invoiceData.posting_time
+							? formatDate(invoiceData.posting_date)
+							: formatDateTime(
+									invoiceData.posting_date
+										? `${invoiceData.posting_date} ${invoiceData.posting_time}`
+										: Date.now()
+								)
+					}</span></div>
 					${
 						invoiceData.customer_name || invoiceData.customer
 							? `<div><span>${__("Customer:")}</span><span>${
 									invoiceData.customer_name || invoiceData.customer
 							  }</span></div>`
+							: ""
+					}
+					${
+						salesPersonNames
+							? `<div><span>${__("Sales Person")}:</span><span>${salesPersonNames}</span></div>`
+							: ""
+					}
+					${
+						invoiceData.coupon_code
+							? `<div><span>${__("Coupon:")}</span><span>${invoiceData.coupon_code}</span></div>`
 							: ""
 					}
 					${

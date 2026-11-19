@@ -40,7 +40,30 @@ export function getPrecision() {
 // =============================================================================
 
 export const DEFAULT_CURRENCY = "USD";
-export const DEFAULT_LOCALE = "en-US";
+const FALLBACK_LOCALE = "en-US";
+
+/** BCP 47 locale for a language code, with Latin digits (e.g. "ar" → "ar-EG-u-nu-latn") */
+function toLocale(lang) {
+	const tag = { ar: "ar-EG", en: "en-US" }[lang?.toLowerCase()] || lang;
+	try {
+		return tag ? Intl.getCanonicalLocales(`${tag}-u-nu-latn`)[0] : FALLBACK_LOCALE;
+	} catch {
+		return FALLBACK_LOCALE;
+	}
+}
+
+/** User's locale from boot/session, falling back to en-US; updated by setLocale() */
+export let DEFAULT_LOCALE = toLocale(
+	globalThis.frappe?.boot?.lang || globalThis.localStorage?.getItem("pos_next_language")
+);
+
+/** Switch formatting to the given language code (null resets to en-US) */
+export function setLocale(lang) {
+	DEFAULT_LOCALE = toLocale(lang);
+	_formatterCache.clear();
+}
+
+const isArabic = (locale) => locale.startsWith("ar");
 
 const SYMBOLS = {
 	USD: "$",
@@ -56,22 +79,24 @@ const SYMBOLS = {
 
 const _symbolCache = new Map();
 
-function getSymbol(currency) {
+function getSymbol(currency, locale = DEFAULT_LOCALE) {
 	if (!currency) return SYMBOLS[DEFAULT_CURRENCY];
+	if (currency === "EGP" && isArabic(locale)) return "ج.م";
 	if (SYMBOLS[currency]) return SYMBOLS[currency];
-	if (_symbolCache.has(currency)) return _symbolCache.get(currency);
+	const key = `${locale}:${currency}`;
+	if (_symbolCache.has(key)) return _symbolCache.get(key);
 
 	try {
-		const parts = new Intl.NumberFormat(DEFAULT_LOCALE, {
+		const parts = new Intl.NumberFormat(locale, {
 			style: "currency",
 			currency,
 			currencyDisplay: "narrowSymbol",
 		}).formatToParts(0);
 		const symbol = parts.find((p) => p.type === "currency")?.value || currency;
-		_symbolCache.set(currency, symbol);
+		_symbolCache.set(key, symbol);
 		return symbol;
 	} catch {
-		_symbolCache.set(currency, currency);
+		_symbolCache.set(key, currency);
 		return currency;
 	}
 }
@@ -98,13 +123,16 @@ function getFormatter(precision, locale = DEFAULT_LOCALE) {
 	return _formatterCache.get(key);
 }
 
-/** Format value as currency string with symbol */
+/** Format value as currency string with symbol (after the amount in Arabic: "1,234.50 ج.م") */
 export function formatCurrency(value, currency = DEFAULT_CURRENCY, locale = DEFAULT_LOCALE) {
 	if (typeof value !== "number" || Number.isNaN(value)) return "";
 	const abs = Math.abs(value);
-	const formatted = `${getSymbol(currency)} ${getFormatter(settings.currency, locale).format(
-		abs
-	)}`;
+	const number = getFormatter(settings.currency, locale).format(abs);
+	// LTR isolate keeps the minus sign left of the digits in RTL text
+	if (isArabic(locale)) {
+		return `${value < 0 ? `\u2066-${number}\u2069` : number} ${getSymbol(currency, locale)}`;
+	}
+	const formatted = `${getSymbol(currency, locale)} ${number}`;
 	return value < 0 ? `-${formatted}` : formatted;
 }
 
@@ -112,6 +140,43 @@ export function formatCurrency(value, currency = DEFAULT_CURRENCY, locale = DEFA
 export function formatCurrencyNumber(value, locale = DEFAULT_LOCALE) {
 	if (typeof value !== "number" || Number.isNaN(value)) return "0.00";
 	return getFormatter(settings.currency, locale).format(value);
+}
+
+// =============================================================================
+// Date Formatting
+// =============================================================================
+
+const DATE_OPTIONS = { day: "numeric", month: "short", year: "numeric" };
+const TIME_OPTIONS = { hour: "numeric", minute: "2-digit", hour12: true };
+
+/** Parse a Date, timestamp, "YYYY-MM-DD" (local day), "HH:MM[:SS]" or Frappe datetime string */
+function toDate(value) {
+	const ymd = typeof value === "string" && value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+	const hms = typeof value === "string" && value.match(/^(\d{1,2}):(\d{2})/);
+	const date = ymd
+		? new Date(ymd[1], ymd[2] - 1, ymd[3])
+		: hms
+			? new Date(1970, 0, 1, hms[1], hms[2])
+			: new Date(typeof value === "string" ? value.replace(" ", "T") : value);
+	return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/** Format date with month name: "5 نوفمبر 2026" / "Nov 5, 2026" */
+export function formatDate(value, locale = DEFAULT_LOCALE) {
+	const date = value ? toDate(value) : null;
+	return date ? date.toLocaleDateString(locale, DATE_OPTIONS) : "";
+}
+
+/** Format 12h time: "9:15 م" / "9:15 PM" */
+export function formatTime(value, locale = DEFAULT_LOCALE) {
+	const date = value ? toDate(value) : null;
+	return date ? date.toLocaleTimeString(locale, TIME_OPTIONS) : "";
+}
+
+/** Format date and 12h time: "5 نوفمبر 2026، 9:15 م" / "Nov 5, 2026, 9:15 PM" */
+export function formatDateTime(value, locale = DEFAULT_LOCALE) {
+	const date = value ? toDate(value) : null;
+	return date ? date.toLocaleString(locale, { ...DATE_OPTIONS, ...TIME_OPTIONS }) : "";
 }
 
 /** Get CSS class for positive/negative values */

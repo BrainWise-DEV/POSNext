@@ -14,6 +14,9 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		wallet_account: "",
 		auto_create_wallet: 1,
 		loyalty_to_wallet: 1,
+		magento_loyalty_available: 0,
+		miraaya_installed: 0,
+		enable_customer_email_verification: 0,
 		// General Settings
 		max_discount_allowed: 0,
 		use_percentage_discount: 0,
@@ -35,6 +38,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		display_discount_percentage: 0,
 		display_discount_amount: 0,
 		show_variants_as_items: 0,
+		cart_lifo: 0,
 		// Operations
 		allow_sales_order: 0,
 		allow_select_sales_order: 0,
@@ -51,6 +55,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		// Printing
 		allow_print_last_invoice: 0,
 		silent_print: 0,
+		print_multiple_sales_persons: 0,
 		// Delivery
 		use_delivery_charges: 0,
 		auto_set_delivery_charges: 0,
@@ -79,6 +84,11 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	const walletAccount = computed(() => settings.value.wallet_account || "");
 	const autoCreateWallet = computed(() => Boolean(settings.value.auto_create_wallet));
 	const loyaltyToWallet = computed(() => Boolean(settings.value.loyalty_to_wallet));
+	const magentoLoyaltyAvailable = computed(() => Boolean(settings.value.magento_loyalty_available));
+	const miraayaInstalled = computed(() => Boolean(settings.value.miraaya_installed));
+	const customerEmailVerificationEnabled = computed(() =>
+		Boolean(Number(settings.value.enable_customer_email_verification))
+	);
 
 	// Computed - General Settings
 	const isEnabled = computed(() => Boolean(settings.value.enabled));
@@ -113,6 +123,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	);
 	const displayDiscountAmount = computed(() => Boolean(settings.value.display_discount_amount));
 	const showVariantsAsItems = computed(() => Boolean(settings.value.show_variants_as_items));
+	const cartLifo = computed(() => Boolean(settings.value.cart_lifo));
 
 	// Computed - Operations
 	const allowSalesOrder = computed(() => Boolean(settings.value.allow_sales_order));
@@ -238,6 +249,9 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 			wallet_account: "",
 			auto_create_wallet: 1,
 			loyalty_to_wallet: 1,
+			magento_loyalty_available: 0,
+			miraaya_installed: 0,
+			enable_customer_email_verification: 0,
 			// General Settings
 			max_discount_allowed: 0,
 			use_percentage_discount: 0,
@@ -252,12 +266,13 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 			allow_partial_payment: 0,
 			use_exact_amount: 0,
 			default_card_view: 0,
-			display_item_code: 0,
+			display_item_code: 1,
 			show_customer_balance: 0,
 			hide_expected_amount: 0,
 			display_discount_percentage: 0,
 			display_discount_amount: 0,
 			show_variants_as_items: 0,
+			cart_lifo: 0,
 			allow_sales_order: 0,
 			allow_select_sales_order: 0,
 			create_only_sales_order: 0,
@@ -270,6 +285,8 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 			fetch_coupon: 0,
 			allow_print_last_invoice: 0,
 			silent_print: 0,
+			print_multiple_sales_persons: 0,
+		print_multiple_sales_persons: 0,
 			use_delivery_charges: 0,
 			auto_set_delivery_charges: 0,
 			use_limit_search: 0,
@@ -349,6 +366,9 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		walletAccount,
 		autoCreateWallet,
 		loyaltyToWallet,
+		magentoLoyaltyAvailable,
+		miraayaInstalled,
+		customerEmailVerificationEnabled,
 
 		// Computed - General Settings
 		isEnabled,
@@ -373,6 +393,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		displayDiscountPercentage,
 		displayDiscountAmount,
 		showVariantsAsItems,
+		cartLifo,
 
 		// Computed - Operations
 		allowSalesOrder,

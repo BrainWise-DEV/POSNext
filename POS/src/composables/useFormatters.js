@@ -2,6 +2,11 @@
  * useFormatters composable
  * Provides common formatting functions for use across all components
  */
+import {
+	formatDate as formatLocaleDate,
+	formatDateTime as formatLocaleDateTime,
+	formatTime as formatLocaleTime,
+} from "@/utils/currency";
 
 /**
  * Format currency values to 2 decimal places
@@ -28,68 +33,31 @@ function formatQuantity(quantity) {
 }
 
 /**
- * Format date and time
+ * Format date and time in the user's locale
  * @param {string|Date} datetime - The datetime to format
- * @returns {string} Formatted date and time string
+ * @returns {string} Formatted date and time string (e.g. "Nov 5, 2026, 9:15 PM")
  */
 function formatDateTime(datetime) {
-	if (!datetime) return "";
-	return new Date(datetime).toLocaleString();
+	return formatLocaleDateTime(datetime);
 }
 
 /**
  * Format time to HH:MM AM/PM only (hours and minutes)
  * Handles both Date objects and time strings (e.g., "15:31:22.975239")
  * @param {string|Date} time - The time to format
- * @returns {string} Formatted time string (HH:MM AM/PM)
+ * @returns {string} Formatted time string (e.g. "9:15 PM", "9:15 م")
  */
 function formatTime(time) {
-	if (!time) return "";
-
-	// If it's a time string (contains colon), extract HH:MM
-	if (typeof time === "string" && time.includes(":")) {
-		const parts = time.split(":");
-		if (parts.length >= 2) {
-			const hours = Number.parseInt(parts[0], 10);
-			const minutes = parts[1];
-			if (Number.isNaN(hours)) return time;
-
-			const period = hours >= 12 ? "PM" : "AM";
-			const displayHours = hours % 12 || 12;
-			return `${displayHours}:${minutes} ${period}`;
-		}
-		return time;
-	}
-
-	// If it's a Date object or datetime string, convert and format
-	return new Date(time).toLocaleTimeString([], {
-		hour: "numeric",
-		minute: "2-digit",
-		hour12: true,
-	});
+	return formatLocaleTime(time);
 }
 
 /**
- * Format date only (short format: DD/MM/YY)
+ * Format date only, with month name (e.g. "Nov 5, 2026", "5 نوفمبر 2026")
  * @param {string|Date} date - The date to format
  * @returns {string} Formatted date string
  */
 function formatDate(date) {
-	if (!date) return "";
-
-	if (typeof date === "string") {
-		const match = date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-		if (match) {
-			const [, year, month, day] = match;
-			return `${day}/${month}/${year.slice(-2)}`;
-		}
-	}
-
-	return new Date(date).toLocaleDateString("en-GB", {
-		day: "2-digit",
-		month: "2-digit",
-		year: "2-digit",
-	});
+	return formatLocaleDate(date);
 }
 
 /**
