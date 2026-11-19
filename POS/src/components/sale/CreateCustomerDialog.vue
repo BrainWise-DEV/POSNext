@@ -958,13 +958,11 @@ const updateCustomerResource = createResource({
 });
 
 const sellingSettingsResource = createResource({
-	url: "frappe.client.get_value",
-	makeParams: () => ({
-		doctype: "Selling Settings",
-		fieldname: ["customer_group", "territory"],
-	}),
+	// A cashier cannot read Selling Settings or Customer Group: this endpoint returns the two
+	// defaults and the selectable groups
+	url: "pos_next.api.customers.get_customer_defaults",
 	auto: false,
-	onError: (err) => log.error("Error loading Selling Settings", err),
+	onError: (err) => log.error("Error loading customer defaults", err),
 });
 
 function pickDefault(settingsValue, list, fallbackFn = null) {
@@ -987,14 +985,6 @@ const createListResource = (doctype, onSuccess) =>
 		onSuccess: (data) => data?.length && onSuccess(data.map((d) => d.name)),
 		onError: (err) => log.error(`Error loading ${doctype}`, err),
 	});
-
-const customerGroupsResource = createListResource("Customer Group", (names) => {
-	customerGroups.value = names;
-	if (!customerData.value.customer_group && names.length > 0) {
-		const settingsDefault = sellingSettingsResource.data?.customer_group;
-		customerData.value.customer_group = pickDefault(settingsDefault, names);
-	}
-});
 
 const territoriesResource = createListResource("Territory", (names) => {
 	territories.value = names;
@@ -1093,35 +1083,59 @@ const loadFreshVerification = async () => {
 	fnfMember.value = member;
 };
 
+/** Customer Group list and default come from the endpoint: a cashier cannot read the doctype */
+const applyCustomerGroups = () => {
+	const data = sellingSettingsResource.data;
+	const names = data?.customer_groups || [];
+	if (!names.length) return;
+	customerGroups.value = names;
+	if (!customerData.value.customer_group) {
+		customerData.value.customer_group = pickDefault(data.customer_group, names);
+	}
+};
+
 const loadDialogData = async () => {
 	loadFreshVerification();
-	await sellingSettingsResource.reload();
+	// One failing resource must not stop the others: each is guarded and logs its own error
+	try {
+		await sellingSettingsResource.reload();
+	} catch (err) {
+		log.error("Error loading customer defaults", err);
+	}
 
 	if (!isEditMode.value) {
 		customerData.value.customer_group = "";
 		customerData.value.territory = "";
 	}
+	applyCustomerGroups();
 
 	// Load form options + countries (awaited so ISD map is ready before default)
-	await Promise.all([
-		countriesStore.loadCountries(),
+	await Promise.allSettled([
+		countriesStore.loadCountries().catch((err) => log.error("Error loading countries", err)),
 		territoriesResource.reload(),
-		customerGroupsResource.reload(),
 		governoratesResource.reload(),
 	]);
 	if (isEditMode.value && editingCustomerName.value) {
-		await Promise.all([
+		await Promise.allSettled([
 			customerDetailsResource.reload(),
 			customerLocationResource.reload(),
 		]);
 	}
 	if (customerData.value.custom_governorate) {
-		await districtsResource.reload();
+		try {
+			await districtsResource.reload();
+		} catch (err) {
+			log.error("Error loading districts", err);
+		}
 	}
 	checkPermissions();
 
 	// Default mobile country code from POS Profile → Company country
-	await applyDefaultCountryCode();
+	try {
+		await applyDefaultCountryCode();
+	} catch (err) {
+		log.error("Error applying default country code", err);
+	}
 };
 
 const checkPermissions = async () => {

@@ -453,7 +453,6 @@ async function applyCoupon() {
 			errorMessage.value =
 				pickLocalizedMessage(validationData, locale.value) ||
 				__("The coupon code you entered is not valid");
-			showError(errorMessage.value);
 			return;
 		}
 
@@ -527,7 +526,6 @@ function showBetterDiscountMessage(response) {
 	comparisonMessage.value =
 		pickLocalizedMessage(response, locale.value) ||
 		__("A better discount already applies — the coupon was not applied.");
-	showWarning(comparisonMessage.value);
 	return true;
 }
 
@@ -559,7 +557,6 @@ async function applyCouponAgainstFriendsAndFamily(coupon) {
 		if (showBetterDiscountMessage(data)) return;
 		errorMessage.value =
 			pickLocalizedMessage(data, locale.value) || __("The coupon code you entered is not valid");
-		showError(errorMessage.value);
 		return;
 	}
 

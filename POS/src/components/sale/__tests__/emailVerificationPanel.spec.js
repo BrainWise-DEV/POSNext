@@ -86,6 +86,16 @@ describe("EmailVerificationPanel", () => {
 		w.unmount()
 	})
 
+	it("turns Arabic-Indic and Eastern Arabic-Indic digits into ASCII", async () => {
+		const w = factory()
+		await toCodeSent(w)
+		const input = find(w, "otp-input")
+		await input.setValue("٤٨٢x۹۱٣")
+		expect(input.element.value).toBe("482913")
+		expect(find(w, "verify").attributes("disabled")).toBeUndefined()
+		w.unmount()
+	})
+
 	it("accepts only digits, max 6, and enables Verify at 6 digits", async () => {
 		const w = factory()
 		await toCodeSent(w)

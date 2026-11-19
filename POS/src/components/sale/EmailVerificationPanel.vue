@@ -368,7 +368,11 @@ async function verify() {
 }
 
 function onOtpInput() {
-	otp.value = (otp.value || "").replace(/\D/g, "").slice(0, 6);
+	// Arabic-Indic (U+0660-0669) and Eastern Arabic-Indic (U+06F0-06F9) digits become ASCII first
+	otp.value = (otp.value || "")
+		.replace(/[\u0660-\u0669\u06F0-\u06F9]/g, (d) => String(d.charCodeAt(0) & 0xf))
+		.replace(/\D/g, "")
+		.slice(0, 6);
 	if (state.value === "error") {
 		errorMessage.value = "";
 		state.value = returnState.value;

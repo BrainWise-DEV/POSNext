@@ -26,6 +26,7 @@ its functions are reached through ``frappe.get_attr``. pos_next never imports it
 from __future__ import annotations
 
 import json
+import re
 import secrets
 
 import frappe
@@ -265,8 +266,28 @@ def _promotions_fn(path: str):
 # ---- snapshot of the site settings the seed changes --------------------------------
 
 
+def _snapshot_names() -> list[str]:
+	"""Every snapshot File, newest first. Frappe renames a duplicate upload (UIT-seed-snapshotd6bce8.json)."""
+	stem, ext = SNAPSHOT_FILE.rsplit(".", 1)
+	# the stem, an optional dedup suffix of up to 8 hex characters, then the extension
+	pattern = re.compile(rf"^{re.escape(stem)}[0-9a-f]{{0,8}}\.{re.escape(ext)}$", re.IGNORECASE)
+	rows = frappe.get_all(
+		"File",
+		filters={"file_name": ["like", f"{stem}%"]},
+		fields=["name", "file_name"],
+		order_by="creation desc, name desc",
+	)
+	return [r.name for r in rows if pattern.match(r.file_name or "")]
+
+
 def _snapshot_name() -> str | None:
-	return frappe.db.get_value("File", {"file_name": SNAPSHOT_FILE}, "name")
+	names = _snapshot_names()
+	return names[0] if names else None
+
+
+def _delete_snapshots() -> None:
+	for name in _snapshot_names():
+		frappe.delete_doc("File", name, force=True, ignore_permissions=True, delete_permanently=True)
 
 
 def _snapshot_content(name: str) -> str:
@@ -283,9 +304,9 @@ def _save_snapshot(snapshot: dict) -> None:
 	content = json.dumps(snapshot, indent=1, sort_keys=True, default=str)
 	name = _snapshot_name()
 	if name:
-		if _snapshot_content(name) == content:
+		if _snapshot_content(name) == content and len(_snapshot_names()) == 1:
 			return
-		frappe.delete_doc("File", name, force=True, ignore_permissions=True, delete_permanently=True)
+		_delete_snapshots()
 	frappe.get_doc(
 		{"doctype": "File", "file_name": SNAPSHOT_FILE, "is_private": 1, "content": content}
 	).insert(ignore_permissions=True)
@@ -1106,9 +1127,7 @@ def teardown():
 	frappe.db.commit()
 
 	if not errors:
-		name = _snapshot_name()
-		if name:
-			frappe.delete_doc("File", name, force=True, ignore_permissions=True, delete_permanently=True)
+		_delete_snapshots()
 		frappe.db.commit()
 	if promotions_installed():
 		_promotions_fn("promotions.friends_and_family_eligibility.clear_cache")()

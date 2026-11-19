@@ -268,6 +268,23 @@ def _is_leaf_customer_group(name):
 	return frappe.db.get_value("Customer Group", name, "is_group") == 0
 
 
+@frappe.whitelist()
+def get_customer_defaults():
+	"""What the new-customer dialog needs and a cashier cannot read itself.
+
+	Returns the Selling Settings default Customer Group and Territory, and the selectable
+	(non-group) Customer Groups. Same permission as create_customer.
+	"""
+	frappe.has_permission("Customer", "create", throw=True)
+	return {
+		"customer_group": frappe.db.get_single_value("Selling Settings", "customer_group"),
+		"territory": frappe.db.get_single_value("Selling Settings", "territory"),
+		"customer_groups": frappe.get_all(
+			"Customer Group", filters={"is_group": 0}, pluck="name", limit_page_length=500
+		),
+	}
+
+
 def _is_leaf_territory(name):
 	"""True when name exists and is not a group node."""
 	if not name:

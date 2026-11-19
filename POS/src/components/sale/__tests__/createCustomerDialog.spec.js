@@ -465,3 +465,64 @@ describe("CreateCustomerDialog settings-driven behaviour", () => {
 		wrapper.unmount()
 	})
 })
+
+describe("CreateCustomerDialog loading when Selling Settings is forbidden (D-1)", () => {
+	beforeEach(() => {
+		resourceConfigs.length = 0
+		canCreateCustomer.mockResolvedValue(true)
+	})
+
+	it("reads the defaults from the pos_next endpoint, not Selling Settings", () => {
+		factory()
+		const urls = resourceConfigs.map((c) => c.opts.url)
+		expect(urls).toContain("pos_next.api.customers.get_customer_defaults")
+		const doctypes = resourceConfigs
+			.filter((c) => c.opts.makeParams)
+			.map((c) => c.opts.makeParams().doctype)
+		expect(doctypes).not.toContain("Selling Settings")
+	})
+
+	it("still loads territories and governorates when the defaults call fails", async () => {
+		const wrapper = factory()
+		const byUrl = (url, doctype) =>
+			resourceConfigs.find(
+				(c) => c.opts.url === url && (!doctype || c.opts.makeParams?.().doctype === doctype)
+			).resource
+		byUrl("pos_next.api.customers.get_customer_defaults").reload.mockRejectedValue(
+			Object.assign(new Error("Forbidden"), { status: 403 })
+		)
+		const lists = ["Territory", "POS Governorate"].map((d) =>
+			byUrl("frappe.client.get_list", d)
+		)
+		lists.forEach((r) => r.reload.mockResolvedValue([]))
+		await wrapper.setProps({ modelValue: true })
+		await flushPromises()
+		lists.forEach((r) => expect(r.reload).toHaveBeenCalled())
+		wrapper.unmount()
+	})
+
+	it("takes the Customer Group list from the endpoint, since a cashier cannot read the doctype", async () => {
+		const wrapper = factory()
+		const defaults = resourceConfigs.find(
+			(c) => c.opts.url === "pos_next.api.customers.get_customer_defaults"
+		)
+		const groupLists = resourceConfigs.filter(
+			(c) => c.opts.url === "frappe.client.get_list" && c.opts.makeParams?.().doctype === "Customer Group"
+		)
+		expect(groupLists).toHaveLength(0)
+		defaults.resource.data = {
+			customer_group: "Individual",
+			territory: "Iraq",
+			customer_groups: ["Commercial", "Individual"],
+		}
+		defaults.resource.reload.mockResolvedValue(defaults.resource.data)
+		resourceConfigs
+			.filter((c) => c.opts.url === "frappe.client.get_list")
+			.forEach((c) => c.resource.reload.mockResolvedValue([]))
+		await wrapper.setProps({ modelValue: true })
+		await flushPromises()
+		expect(wrapper.vm.$.setupState.customerGroups).toEqual(["Commercial", "Individual"])
+		expect(wrapper.vm.$.setupState.customerData.customer_group).toBe("Individual")
+		wrapper.unmount()
+	})
+})
