@@ -11,7 +11,7 @@ import { ref } from "vue";
  *
  * @param {Object} deps
  * @param {() => boolean} deps.isOffline
- * @param {() => Promise<{changed: boolean, previousTotal?: number, total?: number}>} deps.checkPrice
+ * @param {() => Promise<{changed: boolean, alreadySubmitted?: boolean, previousTotal?: number, total?: number}>} deps.checkPrice
  * @param {() => void} deps.openPayment
  * @param {(error: unknown) => void} deps.showError
  */
@@ -44,6 +44,8 @@ export function usePaymentOpenCheck({ isOffline, checkPrice, openPayment, showEr
 			showError(error);
 			return false;
 		}
+		// The cart was sold before (a restored draft, Ruling 136): no payment for it.
+		if (check?.alreadySubmitted) return false;
 		if (check?.changed) {
 			pendingChange.value = {
 				previousTotal: check.previousTotal,
@@ -80,6 +82,7 @@ export function usePaymentOpenCheck({ isOffline, checkPrice, openPayment, showEr
 		} catch {
 			return false; // the refusal itself is still shown by the caller
 		}
+		if (check?.alreadySubmitted) return true; // the cart was closed as sold; no refusal to show
 		if (!check?.changed) return false;
 		pendingChange.value = {
 			previousTotal: check.previousTotal,

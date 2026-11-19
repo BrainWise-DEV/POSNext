@@ -31,6 +31,14 @@ import {
 	withCarvedQtyRestored,
 } from "@/utils/gwpSameItemFreeRows";
 import { offlineState } from "@/utils/offline/offlineState";
+import { generateOfflineId } from "@/utils/offline/uuid";
+import {
+	deleteOpenCart,
+	deleteOpenCarts,
+	openCartScopeKey,
+	readOpenCart,
+	writeOpenCart,
+} from "@/utils/offline/openCart";
 import {
 	isFreePromoRow,
 	scaleRateForUomChange,
@@ -147,6 +155,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		updateItemQuantity: baseUpdateItemQuantity,
 		submitInvoice: baseSubmitInvoice,
 		savePaymentDraft,
+		paymentDraftName,
+		defaultCustomerName,
 		clearCart: clearInvoiceCart,
 		loadTaxRules,
 		setTaxInclusive,
@@ -184,6 +194,18 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	const fnfCouponOverride = ref(null);
 	let fnfEligibilityKey = null; // customer the cached eligibility belongs to
 	let fnfEligibilityRequest = 0;
+
+	// D-4: the open cart is saved (debounced) for one user, POS Profile and opening
+	// shift, and restored after a reload. Saving is off until restoreOpenCart() arms it.
+	const OPEN_CART_SAVE_DELAY_MS = 300;
+	let openCartScope = null; // { user, pos_profile, pos_opening_shift } while saving
+	let openCartSuspended = false; // a cart loaded to edit an offline invoice is not saved
+	let openCartTimer = null;
+	let stopRepriceWhenOnline = null;
+	const cartOfflineId = ref(null); // the offline_id this cart's offline sale is queued under
+	const submitIdempotencyKey = ref(null); // F5 hook: the online submit key, saved with the cart
+	const unverifiedDraftName = ref(null); // a restored payment draft not yet checked on the server
+	const alreadySubmittedInvoice = ref(null); // { name, grand_total, ... } of a cart sold before the reload
 
 	// Offer processing state management
 	const offerProcessingState = ref({
@@ -357,6 +379,15 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		// Cancel any pending offer processing
 		debouncedProcessOffers.cancel();
 		offerQueue.cancel();
+
+		// The sale is done, held, or abandoned: its saved copy goes too (D-4).
+		cancelOpenCartSave();
+		stopWaitingForOnline();
+		openCartSuspended = false;
+		cartOfflineId.value = null;
+		submitIdempotencyKey.value = null;
+		unverifiedDraftName.value = null;
+		if (openCartScope) deleteOpenCart();
 
 		clearInvoiceCart({ returnSerials });
 		offerHeaderDiscount.value = 0;
@@ -703,10 +734,26 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			await new Promise((resolve) => setTimeout(resolve, 100));
 		}
 
+		// A restored draft is checked first: a sold cart is never priced or paid again (Ruling 136).
+		const gate = await ensurePaymentAllowed();
+		if (gate.alreadySubmitted) return { checked: false, changed: false, alreadySubmitted: true };
+		if (!gate.allowed) throw new Error(gate.message);
+
 		const previousGrand = Number(grandTotal.value) || 0;
 		const previousPayable = Number(roundedTotal.value) || 0;
 		paymentCheck.value = null;
-		const draft = await savePaymentDraft();
+		let draft;
+		try {
+			draft = await savePaymentDraft();
+		} catch (error) {
+			// The draft is a submitted invoice (Ruling 136 (c)): read it and close the cart.
+			if (!error?.already_submitted) throw error;
+			unverifiedDraftName.value = error.invoice_name;
+			if ((await verifyPaymentDraft()) === "submitted") {
+				return { checked: false, changed: false, alreadySubmitted: true };
+			}
+			throw error;
+		}
 		const total = Number.parseFloat(draft.grand_total) || 0;
 		const payable = draftPayableTotal(draft, total);
 		const notes = adoptServerDraft(draft);
@@ -2886,30 +2933,331 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		}
 	);
 
-	// Re-check a whole-cart coupon for the new customer; say why when it is dropped
+	/** Re-check a whole-cart coupon for the customer; say why when it is dropped. */
+	async function revalidateWholeCartCoupon(coupon, name) {
+		const result = name
+			? await call(promoApi.validateCoupon(), {
+					coupon_code: coupon.code,
+					customer: name,
+					company: usePOSShiftStore().currentProfile?.company,
+					target_doctype: targetDoctype.value,
+				}).catch(() => ({ valid: true }))
+			: { valid: false, message: __("No customer selected") };
+		if (result?.valid || appliedCoupon.value !== coupon) return;
+		removeDiscount();
+		appliedCoupon.value = null;
+		showWarning(
+			__("Coupon {0} removed: {1}", [
+				coupon.code,
+				result.message || __("Cart no longer meets requirements"),
+			])
+		);
+	}
+
+	// Re-check a whole-cart coupon for the new customer
 	watch(
 		() => customer.value?.name || customer.value || null,
-		async (name, oldName) => {
+		(name, oldName) => {
 			const coupon = appliedCoupon.value;
 			if (!coupon || isLineLevelCoupon(coupon) || name === oldName) return;
-			const result = name
-				? await call(promoApi.validateCoupon(), {
-						coupon_code: coupon.code,
-						customer: name,
-						company: usePOSShiftStore().currentProfile?.company,
-						target_doctype: targetDoctype.value,
-					}).catch(() => ({ valid: true }))
-				: { valid: false, message: __("No customer selected") };
-			if (result?.valid || appliedCoupon.value !== coupon) return;
-			removeDiscount();
-			appliedCoupon.value = null;
-			showWarning(
-				__("Coupon {0} removed: {1}", [
-					coupon.code,
-					result.message || __("Cart no longer meets requirements"),
-				])
-			);
+			revalidateWholeCartCoupon(coupon, name);
 		}
+	);
+
+
+	// ── Open cart persistence (D-4, INV-2) ──────────────────────────────────────
+
+	/** The cart as a held draft saves it (posDrafts.saveDraftInvoice), plus what a draft does not keep. */
+	function buildOpenCartRecord() {
+		return {
+			pos_profile: posProfile.value,
+			customer: customer.value,
+			items: invoiceItems.value,
+			applied_offers: appliedOffers.value,
+			applied_coupon: appliedCoupon.value,
+			scope: openCartScope,
+			coupon_code: couponCode.value,
+			additional_discount: additionalDiscount.value,
+			offer_header_discount: offerHeaderDiscount.value,
+			fnf_eligibility: fnfEligibility.value,
+			fnf_result: fnfResult.value,
+			fnf_coupon_override: fnfCouponOverride.value,
+			target_doctype: targetDoctype.value,
+			// The server-checked draft (Ruling 101). After a reload it is checked before
+			// payment (Ruling 136). The check itself (paymentCheck) is not kept (8o).
+			payment_draft_name: paymentDraftName.value,
+			current_draft_id: currentDraftId.value,
+			// The offline sale is queued under this id, so paying the cart again dedups (Ruling 136 (d)).
+			offline_id: cartOfflineId.value,
+			// Hook for F5: the online submit idempotency key is stored here once F5 lands.
+			idempotency_key: submitIdempotencyKey.value,
+			updated_at: new Date().toISOString(),
+		};
+	}
+
+	/** A cart worth keeping: lines, or a customer other than the profile default. */
+	function hasOpenCartContent() {
+		if (invoiceItems.value.length > 0) return true;
+		const name = currentCustomerName();
+		return Boolean(name) && name !== (defaultCustomerName.value || null);
+	}
+
+	function cancelOpenCartSave() {
+		if (openCartTimer) clearTimeout(openCartTimer);
+		openCartTimer = null;
+	}
+
+	// The snapshot is taken when the save runs, not when it was scheduled.
+	function saveOpenCart() {
+		openCartTimer = null;
+		if (!openCartScope || openCartSuspended) return Promise.resolve(false);
+		if (!hasOpenCartContent()) return deleteOpenCart();
+		return writeOpenCart(buildOpenCartRecord());
+	}
+
+	function scheduleOpenCartSave() {
+		if (!openCartScope || openCartSuspended) return;
+		cancelOpenCartSave();
+		openCartTimer = setTimeout(saveOpenCart, OPEN_CART_SAVE_DELAY_MS);
+	}
+
+	/** Save now, skipping the debounce (before an offline queue write). */
+	function flushOpenCartSave() {
+		cancelOpenCartSave();
+		return saveOpenCart();
+	}
+
+	/**
+	 * The offline_id this cart's offline sale is queued under. Made once per cart and
+	 * saved at once, so a crash after the queue write still restores it (Ruling 136 (d)).
+	 */
+	async function checkoutOfflineId() {
+		if (!cartOfflineId.value) cartOfflineId.value = generateOfflineId();
+		await flushOpenCartSave();
+		return cartOfflineId.value;
+	}
+
+	function stopWaitingForOnline() {
+		if (stopRepriceWhenOnline) stopRepriceWhenOnline();
+		stopRepriceWhenOnline = null;
+	}
+
+	/** Why payment is blocked: a restored draft not yet checked on the server (Ruling 136 (b)). */
+	const paymentBlockedMessage = computed(() =>
+		unverifiedDraftName.value
+			? __("Invoice {0} may already be paid. Go online to check it before taking payment.", [
+					unverifiedDraftName.value,
+				])
+			: ""
+	);
+
+	/** The draft was submitted after all: close the cart as sold, never sell it again. */
+	function closeAsAlreadySubmitted(row) {
+		unverifiedDraftName.value = null;
+		clearCart({ returnSerials: false });
+		alreadySubmittedInvoice.value = {
+			name: row.name,
+			grand_total: Number(row.grand_total) || 0,
+			rounded_total: Number(row.rounded_total) || 0,
+			paid_amount: Number(row.paid_amount) || 0,
+		};
+	}
+
+	/**
+	 * Ask the server what the cart's payment draft became (Ruling 136 (a)):
+	 * "submitted" (the cart is closed as sold), "draft" (still open, reused),
+	 * "gone" (cleaned up or cancelled: a new draft is safe) or "unverified" (offline,
+	 * or the check failed: payment stays blocked).
+	 */
+	async function verifyPaymentDraft() {
+		const name = unverifiedDraftName.value || paymentDraftName.value;
+		if (!name) return "gone";
+		unverifiedDraftName.value = name;
+		if (offlineState.isOffline) return "unverified";
+		let row;
+		try {
+			row = await call("frappe.client.get_value", {
+				doctype: "Sales Invoice",
+				filters: { name },
+				fieldname: ["name", "docstatus", "grand_total", "rounded_total", "paid_amount"],
+			});
+		} catch (error) {
+			console.error("Could not check the payment draft:", error);
+			return "unverified";
+		}
+		if (unverifiedDraftName.value !== name) return "gone"; // the cart was cleared meanwhile
+		if (row?.name && Number(row.docstatus) === 1) {
+			closeAsAlreadySubmitted(row);
+			return "submitted";
+		}
+		unverifiedDraftName.value = null;
+		if (row?.name && Number(row.docstatus) === 0) return "draft";
+		if (paymentDraftName.value === name) paymentDraftName.value = null;
+		return "gone";
+	}
+
+	/**
+	 * Before payment opens: a restored draft must be checked first. Resolves
+	 * { allowed, message }; a submitted draft closes the cart (alreadySubmittedInvoice).
+	 */
+	async function ensurePaymentAllowed() {
+		if (!unverifiedDraftName.value) return { allowed: true, message: "" };
+		const status = await verifyPaymentDraft();
+		if (status === "draft" || status === "gone") return { allowed: true, message: "" };
+		if (status === "submitted") return { allowed: false, message: "", alreadySubmitted: true };
+		if (offlineState.isOffline) return { allowed: false, message: paymentBlockedMessage.value };
+		return {
+			allowed: false,
+			message: __("Could not check invoice {0}. Try again before taking payment.", [unverifiedDraftName.value]),
+		};
+	}
+
+	/**
+	 * Re-price a restored cart as after a customer or qty change: F&F eligibility is
+	 * asked again, the coupon re-checked and the offers (with F&F) re-evaluated.
+	 * A restored payment draft is checked first. Offline, the cart stays as it was
+	 * saved until the POS is back online.
+	 */
+	async function repriceRestoredCart() {
+		stopWaitingForOnline();
+		if (offlineState.isOffline) {
+			stopRepriceWhenOnline = offlineState.subscribe(() => {
+				if (offlineState.isOffline) return;
+				repriceRestoredCart();
+			});
+			return;
+		}
+		if (unverifiedDraftName.value && (await verifyPaymentDraft()) === "submitted") return;
+		await Promise.all([
+			syncOneTimeContextForCurrentCustomer(),
+			refreshFriendsAndFamilyEligibility(true),
+		]).catch(() => {});
+		if (invoiceItems.value.length === 0) return;
+		const coupon = appliedCoupon.value;
+		if (isWholeCartCoupon(coupon)) revalidateWholeCartCoupon(coupon, currentCustomerName());
+		else if (isLineLevelCoupon(coupon)) scheduleCouponRevalidation();
+		forceRefreshOffers();
+	}
+
+	function applyOpenCartRecord(record) {
+		debouncedProcessOffers.cancel();
+		offerQueue.cancel();
+		paymentCheck.value = null;
+
+		// Lines first: the coupon below must find them.
+		invoiceItems.value = Array.isArray(record.items) ? record.items : [];
+		rebuildIncrementalCache();
+		if (record.customer) customer.value = record.customer;
+		appliedOffers.value = Array.isArray(record.applied_offers) ? record.applied_offers : [];
+		offerHeaderDiscount.value = Number(record.offer_header_discount) || 0;
+		additionalDiscount.value = Number(record.additional_discount) || 0;
+		// Offline, the badge keeps the saved answer (same customer); online it is asked again.
+		fnfEligibility.value = record.fnf_eligibility || null;
+		fnfEligibilityKey = null;
+		fnfResult.value = record.fnf_result || null;
+		fnfCouponOverride.value = record.fnf_coupon_override || null;
+		targetDoctype.value = record.target_doctype || "Sales Invoice";
+		paymentDraftName.value = record.payment_draft_name || null;
+		// Possibly submitted before the reload: payment waits for the server's answer.
+		unverifiedDraftName.value = paymentDraftName.value;
+		currentDraftId.value = record.current_draft_id || null;
+		cartOfflineId.value = record.offline_id || null;
+		submitIdempotencyKey.value = record.idempotency_key || null;
+
+		const coupon = record.applied_coupon || null;
+		if (isWholeCartCoupon(coupon)) {
+			appliedCoupon.value = coupon;
+			couponCode.value = record.coupon_code || coupon.code || coupon.name || null;
+		} else {
+			// A scoped coupon goes back on its lines; without one, no coupon line survives.
+			restoreLineCoupon(coupon);
+		}
+		rebuildIncrementalCache();
+		offerProcessingState.value.lastCartHash = "";
+		syncOfferSnapshot();
+	}
+
+	/**
+	 * After a reload: bring back this tab's cart saved for this user, POS Profile and
+	 * opening shift, and save the cart from now on. A cart saved for any other scope is
+	 * deleted, never shown. Online, a restored payment draft that was already submitted
+	 * closes the cart (alreadySubmittedInvoice). Returns true when a cart was restored.
+	 * @param {{ user: string, pos_profile: string, pos_opening_shift: string }} scope
+	 */
+	async function restoreOpenCart(scope) {
+		cancelOpenCartSave();
+		stopWaitingForOnline();
+		openCartScope = null; // nothing is saved before the saved cart is read
+		openCartSuspended = false;
+		const key = openCartScopeKey(scope);
+		if (!key) return false;
+
+		const record = await readOpenCart();
+		// Other tabs' carts for another user, POS Profile or shift can never be restored.
+		await deleteOpenCarts(key);
+		openCartScope = {
+			user: scope.user,
+			pos_profile: scope.pos_profile,
+			pos_opening_shift: scope.pos_opening_shift,
+		};
+		if (!record) return false;
+		const hasLines = Array.isArray(record.items) && record.items.length > 0;
+		if (openCartScopeKey(record.scope) !== key || (!hasLines && !record.customer)) {
+			await deleteOpenCart();
+			return false;
+		}
+		try {
+			applyOpenCartRecord(record);
+		} catch (error) {
+			console.error("Could not restore the open cart:", error);
+			clearCart();
+			return false;
+		}
+		if (unverifiedDraftName.value && !offlineState.isOffline) {
+			// Checked before the cart is shown: a sold cart never comes back.
+			if ((await verifyPaymentDraft()) === "submitted") return false;
+		}
+		repriceRestoredCart();
+		return true;
+	}
+
+	/** The shift closed: drop the cart and every tab's saved copy; nothing is saved until the next restoreOpenCart(). */
+	async function stopCartPersistence() {
+		clearCart();
+		cancelOpenCartSave();
+		stopWaitingForOnline();
+		openCartScope = null;
+		await deleteOpenCarts();
+	}
+
+	/**
+	 * A cart loaded to edit an offline invoice is not saved: restored without its edit
+	 * context, paying it would queue a second invoice. The next clearCart() resumes saving.
+	 */
+	async function suspendCartPersistence() {
+		cancelOpenCartSave();
+		openCartSuspended = true;
+		await deleteOpenCart();
+	}
+
+	watch(
+		[
+			invoiceItems,
+			customer,
+			appliedOffers,
+			appliedCoupon,
+			additionalDiscount,
+			fnfEligibility,
+			fnfResult,
+			fnfCouponOverride,
+			targetDoctype,
+			paymentDraftName,
+			currentDraftId,
+			cartOfflineId,
+			submitIdempotencyKey,
+		],
+		scheduleOpenCartSave,
+		{ deep: true }
 	);
 
 	// Additional watcher for applied offers changes (to handle removal edge cases)
@@ -2947,6 +3295,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		fnfEligibility, // PN-130: F&F eligibility of the current customer
 		fnfResult, // PN-130: last server F&F decision for the cart
 		fnfCouponOverride, // PN-130: coupon that replaced F&F, if any
+		paymentDraftName, // the server-checked unpaid draft (Ruling 101)
+		alreadySubmittedInvoice, // set when a restored cart turned out sold (Ruling 136 (a))
+		paymentBlockedMessage, // non-empty while a restored draft is unchecked (Ruling 136 (b))
+		submitIdempotencyKey, // F5 hook: saved with the cart
 
 		// Computed
 		itemCount,
@@ -3009,5 +3361,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		forceRefreshOffers, // Force reprocess offers from scratch
 		refreshFriendsAndFamilyEligibility,
 		recheckFriendsAndFamily,
+
+		// Open cart persistence (D-4)
+		restoreOpenCart,
+		stopCartPersistence,
+		suspendCartPersistence,
+		ensurePaymentAllowed,
+		checkoutOfflineId,
 	};
 });

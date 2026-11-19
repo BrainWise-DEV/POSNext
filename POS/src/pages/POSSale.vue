@@ -1692,6 +1692,11 @@ onMounted(async () => {
 		// Load tax rules (depends on settings being loaded)
 		await cartStore.loadTaxRules(shiftStore.profileName, posSettingsStore.settings);
 
+		// Bring back the cart open before the reload (D-4), after the default customer
+		// is set and before the cart is first shown.
+		await cartStore.restoreOpenCart(openCartScope());
+		previousCartHash = computeCartHash();
+
 		_initializedKey = `${shiftStore.profileName}::${shiftStore.currentShift?.name}`;
 	}
 });
@@ -2044,6 +2049,10 @@ async function handleShiftOpened() {
 	// Load tax rules (depends on settings being loaded)
 	await cartStore.loadTaxRules(shiftStore.profileName, posSettingsStore.settings);
 
+	// Save the open cart for this shift from now on (D-4).
+	await cartStore.restoreOpenCart(openCartScope());
+	previousCartHash = computeCartHash();
+
 	_initializedKey = `${shiftStore.profileName}::${shiftStore.currentShift?.name}`;
 
 	// Start session lock tracking now that a shift is open and POS is ready
@@ -2051,9 +2060,37 @@ async function handleShiftOpened() {
 	showSuccess(__("You can now start making sales"));
 }
 
+// A restored cart that was sold before the reload is shown as that sale (Ruling 136 (a))
+watch(
+	() => cartStore.alreadySubmittedInvoice,
+	(invoice) => {
+		if (!invoice) return;
+		cartStore.alreadySubmittedInvoice = null;
+		previousCartHash = "";
+		uiStore.showPaymentDialog = false;
+		const total = invoice.rounded_total || invoice.grand_total || 0;
+		uiStore.showSuccess(invoice.name, total, invoice.paid_amount || total);
+		showWarning(__("Invoice {0} was already submitted. The restored cart was closed.", [invoice.name]));
+	}
+);
+
+/** Who the open cart is saved for (D-4): this user, POS Profile and opening shift. */
+function openCartScope() {
+	return {
+		user: session.user,
+		pos_profile: shiftStore.profileName,
+		pos_opening_shift: shiftStore.currentShift?.name,
+	};
+}
+
 async function handleShiftClosed() {
 	uiStore.showCloseShiftDialog = false;
 	showSuccess(__("Shift closed successfully"));
+
+	// The closed shift's cart is dropped, in memory and in storage (D-4).
+	await cartStore.stopCartPersistence();
+	previousCartHash = "";
+	editingOfflineContext = null;
 
 	// Check if logout should happen after closing shift
 	if (logoutAfterClose.value) {
@@ -2197,7 +2234,7 @@ function handleEditCustomer(customer) {
 	uiStore.showCreateCustomerDialog = true;
 }
 
-function handleProceedToPayment() {
+async function handleProceedToPayment() {
 	if (cartStore.isEmpty) {
 		showWarning(__("Please add items to cart before proceeding to payment"));
 		return;
@@ -2208,6 +2245,13 @@ function handleProceedToPayment() {
 		showWarning(__("Please select a customer before proceeding"));
 		uiStore.showCustomerDialog = true;
 		pendingPaymentAfterCustomer.value = true;
+		return;
+	}
+
+	// A cart restored with a payment draft is checked first: it may be sold already (Ruling 136)
+	const gate = await cartStore.ensurePaymentAllowed();
+	if (!gate.allowed) {
+		if (gate.message) showWarning(gate.message);
 		return;
 	}
 
@@ -2297,6 +2341,8 @@ async function handlePaymentCompleted(paymentData) {
 		const draftIdToDelete = cartStore.currentDraftId;
 
 		if (offlineStore.isOffline) {
+			// A restored cart whose draft may be sold already is not paid offline (Ruling 136 (b))
+			if (cartStore.paymentBlockedMessage) throw new Error(cartStore.paymentBlockedMessage);
 			// Use the same item transformation as online flow for consistency
 			// This ensures rate, discount_percentage, discount_amount, and pricing_rules
 			// are all correctly formatted for ERPNext
@@ -2318,6 +2364,9 @@ async function handlePaymentCompleted(paymentData) {
 				is_credit_sale: paymentData.is_credit_sale ? 1 : 0,
 				receivable_account: paymentData.receivable_account || null,
 				edited_from: editingOfflineContext?.originalOfflineId || null,
+				// The cart's own id, saved with it: paying a restored cart again finds this
+				// sale already queued, and the server dedups one already synced (Ruling 136 (d)).
+				offline_id: await cartStore.checkoutOfflineId(),
 			};
 
 			// Save to the offline queue first so we can use the worker's
@@ -2985,6 +3034,9 @@ async function handleEditOfflineInvoice(invoice) {
 		}
 
 		cartStore.clearCart();
+		// Not saved for a reload: restored without its edit context (below), paying
+		// would queue a second invoice. The next clearCart() saves carts again.
+		cartStore.suspendCartPersistence();
 
 		const invoiceData = invoice.data;
 

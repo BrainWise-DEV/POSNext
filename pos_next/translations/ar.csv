@@ -2274,3 +2274,7 @@ Points applied: {0}. Please pay remaining {1} with {2},تم خصم النقاط:
 "Country code","رمز الدولة",""
 "Rounding Adjustment","تعديل التقريب",""
 "Rounded Total","الإجمالي المقرّب",""
+"Invoice {0} was already submitted","الفاتورة {0} مُرحَّلة بالفعل",""
+"Invoice {0} may already be paid. Go online to check it before taking payment.","قد تكون الفاتورة {0} مدفوعة بالفعل. اتصل بالإنترنت للتحقق منها قبل تحصيل الدفع.",""
+"Could not check invoice {0}. Try again before taking payment.","تعذّر التحقق من الفاتورة {0}. حاول مرة أخرى قبل تحصيل الدفع.",""
+"Invoice {0} was already submitted. The restored cart was closed.","الفاتورة {0} مُرحَّلة بالفعل. تم إغلاق السلة المستعادة.",""

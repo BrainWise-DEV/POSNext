@@ -4,7 +4,7 @@ import { CoalescingMutex } from "@/utils/mutex";
 import { db, getSetting, setSetting } from "./db";
 import { offlineState } from "./offlineState";
 import { removeOfflineReceiptPayload } from "./offlineReceiptCache";
-import { generateOfflineExpenseId, generateOfflineId } from "./uuid";
+import { generateOfflineExpenseId, generateOfflineId, queuedOfflineId } from "./uuid";
 
 // Re-export for backwards compatibility
 export { generateOfflineExpenseId, generateOfflineId };
@@ -88,8 +88,15 @@ export const saveOfflineInvoice = async (invoiceData) => {
 
 	// Clean data (remove reactive properties) and add offline_id
 	const cleanData = JSON.parse(JSON.stringify(invoiceData));
-	const offlineId = generateOfflineId();
+	const offlineId = queuedOfflineId(cleanData);
 	cleanData.offline_id = offlineId;
+
+	// The same cart paid again (a restored cart, Ruling 136 (d)): it is already queued.
+	const existing = await db.invoice_queue.where("offline_id").equals(offlineId).first();
+	if (existing) {
+		log.info("Invoice already in the offline queue", { offline_id: offlineId });
+		return { success: true, id: existing.id, offline_id: offlineId, duplicate: true };
+	}
 
 	const id = await db.invoice_queue.add({
 		offline_id: offlineId,

@@ -1068,6 +1068,24 @@ export function useInvoice() {
 		return parts.some((part) => String(part || "").includes("PermissionError"));
 	}
 
+	/**
+	 * The stored draft name is a submitted invoice: the save tried to move it from
+	 * docstatus 1 back to 0 (Frappe's DocstatusTransitionError). The sale is done.
+	 */
+	function isAlreadySubmittedError(error) {
+		const parts = [
+			error?.exc_type,
+			error?.resourceError?.exc_type,
+			error?.exception,
+			error?.message,
+			error?.resourceError?.message,
+		];
+		return parts.some((part) => {
+			const text = String(part || "");
+			return text.includes("DocstatusTransitionError") || text.includes("from 1 (Submitted) to 0");
+		});
+	}
+
 	async function savePaymentDraft() {
 		const rawSalesTeam = toRaw(salesTeam.value);
 		const invoiceData = {
@@ -1094,6 +1112,15 @@ export function useInvoice() {
 		try {
 			draft = await saveUnpaidDraft(invoiceData);
 		} catch (error) {
+			// The stored draft is already a submitted invoice (a lost response, then F5):
+			// never start a new draft for this cart, which would sell it twice (Ruling 136 (c)).
+			if (invoiceData.name && isAlreadySubmittedError(error)) {
+				const submitted = new Error(__("Invoice {0} was already submitted", [invoiceData.name]));
+				submitted.already_submitted = true;
+				submitted.invoice_name = invoiceData.name;
+				submitted.cause = error;
+				throw submitted;
+			}
 			// A draft that could not be saved (or was cleaned up) is not reused.
 			paymentDraftName.value = null;
 			if (!invoiceData.name || !isMissingDraftError(error)) throw error;
@@ -1507,6 +1534,7 @@ export function useInvoice() {
 		saveDraft,
 		savePaymentDraft,
 		paymentDraftName,
+		defaultCustomerName,
 		submitInvoice,
 		resetInvoice,
 		clearCart,

@@ -39,7 +39,8 @@ export async function cleanupUserSession() {
 	// 2. Clear Pinia stores
 	const cartStore = usePOSCartStore();
 	const uiStore = usePOSUIStore();
-	cartStore.clearCart();
+	// Clears the cart and forgets its saved copy, so the next user never sees it (D-4)
+	await cartStore.stopCartPersistence();
 	// Reset shift/profile refs that persist in the useInvoice singleton
 	// (clearCart intentionally does NOT reset these since it's also called between transactions)
 	cartStore.posOpeningShift = null;

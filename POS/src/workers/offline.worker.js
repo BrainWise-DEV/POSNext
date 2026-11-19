@@ -18,7 +18,7 @@
  */
 
 import { logger } from "../utils/logger";
-import { generateOfflineId } from "../utils/offline/uuid";
+import { queuedOfflineId } from "../utils/offline/uuid";
 
 const log = logger.create("OfflineWorker");
 
@@ -421,11 +421,18 @@ async function saveOfflineInvoice(invoiceData) {
 			throw new Error("Cannot save empty invoice");
 		}
 
-		// Generate unique offline_id for deduplication
-		const offlineId = generateOfflineId();
+		// The cart's offline_id when it has one (Ruling 136 (d)), else a new one
+		const offlineId = queuedOfflineId(invoiceData);
 
 		// Store offline_id in the invoice data for server-side tracking
 		invoiceData.offline_id = offlineId;
+
+		// The same cart paid again (a restored cart): it is already queued.
+		const existing = await db.table("invoice_queue").where("offline_id").equals(offlineId).first();
+		if (existing) {
+			log.info(`Invoice already in the offline queue with offline_id: ${offlineId}`);
+			return { success: true, id: existing.id, offline_id: offlineId, duplicate: true };
+		}
 
 		const id = await db.table("invoice_queue").add({
 			offline_id: offlineId,
