@@ -1132,20 +1132,191 @@ def _promotions_evaluates_offers() -> bool:
 	return frappe.override_whitelisted_method(APPLY_OFFERS_METHOD) != APPLY_OFFERS_METHOD
 
 
+def _fnf_repriced_in_this_save(invoice_doc, offline_sync) -> bool:
+	"""Promotions re-prices this save's F&F rows itself: an unpaid, online POS Sales Invoice
+	draft that is not being submitted in this call (no payment on the document or in its
+	flags, no offline sync, no ``offline_id``, not ``submit_invoice``) with promotions
+	installed. Storing such a draft is harmless: every submit route judges its F&F rows in
+	before_submit (``_fnf_rows_on_submit``, Ruling 128). "Paid" is the document's own payments, whatever flag a path set
+	or not yet set (Ruling 126).
+
+	Its validate then clears a stale F&F mark and gives the row what F&F really gives,
+	so the row's mark is left for it (Ruling 123). A paid save, an offline sync and
+	before_submit are judged on the computed F&F rate instead (Ruling 120).
+	"""
+	return (
+		invoice_doc.doctype == DOCTYPE_SALES_INVOICE
+		and cint(invoice_doc.get("is_pos"))
+		and not offline_sync
+		and not invoice_doc.flags.pos_offline_sync
+		and not invoice_doc.flags.pos_submitting
+		and not invoice_doc.flags.pos_payment_collected
+		and not _carries_payment(invoice_doc)
+		and not invoice_doc.get("offline_id")
+		and _promotions_evaluates_offers()
+	)
+
+
+def _fnf_rows_left_to_promotions(invoice_doc, offline_sync) -> bool:
+	"""This save carries an F&F-marked row that ``_check_paid_row_discounts`` left to
+	promotions (``_fnf_repriced_in_this_save``): before_submit must judge it again."""
+	return _fnf_repriced_in_this_save(invoice_doc, offline_sync) and any(
+		row.get("posnext_discount_source") == FNF_DISCOUNT_SOURCE for row in invoice_doc.get("items") or []
+	)
+
+
+def _fnf_not_eligible_message(row, list_price) -> str:
+	return _(
+		"Row {0}: item {1} is discounted from {2} to {3} as Friends & Family, but this sale is "
+		"not eligible for Friends & Family on that item."
+	).format(row.idx, row.item_code, list_price, flt(row.rate))
+
+
 def _carries_payment(doc) -> bool:
 	return sum(flt(row.get("amount")) for row in doc.get("payments") or []) > 0
 
 
 def _paid_draft_rates(doc) -> dict:
-	"""Lowest rate per (item, UOM) on a stored draft that carries a payment, else {}."""
-	if not _carries_payment(doc):
-		return {}
+	"""Lowest rate per (item, UOM) on a stored paid draft, else {}.
+
+	``doc`` is the draft as the database holds it. It counts as a stored paid draft only
+	when it carries a payment and the server's paid-row check passed it exactly as stored
+	(``_checked_paid_draft``): a payment saved on Desk, or set in memory, holds nothing
+	(Ruling 130).
+	"""
 	rates = {}
-	for row in doc.get("items") or []:
-		if row.get("item_code") and not cint(row.get("is_free_item")) and flt(row.qty) > 0:
-			key = (row.item_code, row.get("uom"))
-			rates[key] = min(rates.get(key, flt(row.rate)), flt(row.rate))
+	for item_code, uom, _qty, rate, _factor in _paid_draft_rows(doc):
+		rates[(item_code, uom)] = min(rates.get((item_code, uom), rate), rate)
 	return rates
+
+
+def _paid_draft_rows(doc) -> list[tuple]:
+	"""The paid rows of a stored paid draft (see ``_paid_draft_rates``), each as
+	(item_code, uom, qty, rate, conversion_factor), else []. A submitted row is held
+	only by a stored row it matches exactly, one to one (``_take_held_row``, Ruling 132).
+	"""
+	if not _carries_payment(doc) or not _checked_paid_draft(doc.doctype, doc.name):
+		return []
+	return [
+		(
+			row.item_code,
+			row.get("uom"),
+			flt(row.qty),
+			flt(row.rate),
+			flt(row.get("conversion_factor")) or 1.0,
+		)
+		for row in doc.get("items") or []
+		if row.get("item_code") and not cint(row.get("is_free_item")) and flt(row.qty) > 0
+	]
+
+
+def _take_held_row(held_rows, row) -> bool:
+	"""Whether a stored paid draft row matches ``row`` exactly on item, UOM, qty, rate and
+	conversion factor; the match is removed, so a second row cannot reuse it (Ruling 132)."""
+	precision = row.precision("rate")
+	precision = 2 if precision is None else cint(precision)
+	key = (
+		row.item_code,
+		row.get("uom"),
+		flt(row.qty, 6),
+		flt(row.rate, precision),
+		flt(flt(row.get("conversion_factor")) or 1.0, 6),
+	)
+	for position, (item_code, uom, qty, rate, factor) in enumerate(held_rows or []):
+		if (item_code, uom, flt(qty, 6), flt(rate, precision), flt(factor, 6)) == key:
+			del held_rows[position]
+			return True
+	return False
+
+
+#: ``tabDefaultValue`` parent of the record that the server's paid-row check passed a
+#: draft. No whitelisted method writes it, and its value is sealed with the site key.
+CHECKED_PAID_DRAFT_PARENT = "__pos_next_checked_paid_draft"
+
+
+def _stored_draft_state(doctype, name) -> str | None:
+	"""The draft the DATABASE holds under ``name`` (customer, rows, payments) as one string,
+	or None when no draft is stored. Never the doc in memory."""
+	header = name and frappe.db.get_value(doctype, name, ["docstatus", "customer"], as_dict=True)
+	if not header or cint(header.docstatus) != 0:
+		return None
+	meta = frappe.get_meta(doctype)
+	items_doctype = meta.get_field("items").options
+	item_fields = ["item_code", "uom", "qty", "rate", "is_free_item"]
+	if frappe.get_meta(items_doctype).has_field("posnext_discount_source"):
+		item_fields.append("posnext_discount_source")
+	rows = frappe.get_all(
+		items_doctype,
+		filters={"parent": name, "parenttype": doctype, "parentfield": "items"},
+		fields=item_fields,
+		order_by="idx asc",
+	)
+	payments = frappe.get_all(
+		meta.get_field("payments").options,
+		filters={"parent": name, "parenttype": doctype, "parentfield": "payments"},
+		fields=["mode_of_payment", "amount"],
+		order_by="idx asc",
+	)
+	return json.dumps(
+		[header.customer, [[row.get(field) for field in item_fields] for row in rows], payments],
+		default=str,
+		sort_keys=True,
+	)
+
+
+def _paid_draft_seal(doctype, name, state) -> str:
+	import hashlib
+	import hmac
+
+	from frappe.utils.password import get_encryption_key
+
+	message = f"{doctype}\n{name}\n{state}".encode()
+	return hmac.new(get_encryption_key().encode(), message, hashlib.sha256).hexdigest()
+
+
+def _record_checked_paid_draft(doc) -> None:
+	"""The server's paid-row check passed this paid draft, as it is now saved."""
+	state = _stored_draft_state(doc.doctype, doc.name)
+	if state is not None:
+		frappe.defaults.set_default(
+			f"{doc.doctype}::{doc.name}",
+			_paid_draft_seal(doc.doctype, doc.name, state),
+			CHECKED_PAID_DRAFT_PARENT,
+		)
+
+
+def _checked_paid_draft(doctype, name) -> bool:
+	"""Whether the draft the database holds under ``name`` is exactly one the server's
+	paid-row check passed (``_record_checked_paid_draft``). A record lost or changed
+	means no: the draft is then judged like a new sale."""
+	state = _stored_draft_state(doctype, name)
+	if state is None:
+		return False
+	seal = frappe.db.get_value(
+		"DefaultValue", {"parent": CHECKED_PAID_DRAFT_PARENT, "defkey": f"{doctype}::{name}"}, "defvalue"
+	)
+	return bool(seal) and seal == _paid_draft_seal(doctype, name, state)
+
+
+def _forget_checked_paid_draft(doc) -> None:
+	if doc.name:
+		frappe.db.delete(
+			"DefaultValue", {"parent": CHECKED_PAID_DRAFT_PARENT, "defkey": f"{doc.doctype}::{doc.name}"}
+		)
+
+
+def _held_paid_draft_rows(doc) -> list[tuple]:
+	"""Before_submit, any route: the rows of the stored paid draft ``doc`` is submitted
+	from, read from the DATABASE (Ruling 130). ``submit_invoice`` saves before it submits,
+	so it passes the stored draft's rows it read before its own save
+	(``flags.pos_paid_draft_rows``, [] on the create path). A fresh list: matching
+	consumes it."""
+	rows = doc.flags.get("pos_paid_draft_rows")
+	if rows is not None:
+		return list(rows)
+	if doc.is_new() or not frappe.db.exists(doc.doctype, {"name": doc.name, "docstatus": 0}):
+		return []
+	return _paid_draft_rows(frappe.get_doc(doc.doctype, doc.name))
 
 
 def _offer_rate(result, idx, list_price) -> float | None:
@@ -1183,6 +1354,51 @@ def _coupon_line_rates(invoice_doc, coupon_code, paid_rows, context) -> dict[int
 	)
 	updates = _coupon_line_updates(invoice_doc, coupon_code, payload, UNEXPLAINED_DISCOUNT_LOG_TITLE)
 	return {idx: flt(update["rate"]) for idx, update in (updates or {}).items() if "rate" in update}
+
+
+NEW_ROW_KEY = "pos-next-new-row-"
+
+
+def _fnf_line_rates(invoice_doc, list_prices) -> dict[int, float]:
+	"""Per-unit rate F&F gives each F&F-marked row in ``list_prices`` ({id(row): the
+	server's list price}): {id(row): rate}, never below 0 or above that list price.
+
+	The rate is what the benefit providers compute on the server's data
+	(``registry.fnf_line_rates``, Ruling 120). The mark only asks for it and explains
+	nothing by itself. With no provider, or on a document that is not a Sales Invoice,
+	it is {}. The provider sees copies of the invoice and its rows, without flags, with
+	each row on its server list price. An unsaved row is keyed by its position.
+	"""
+	from pos_next.integrations import registry
+
+	marked = {
+		id(row)
+		for row in invoice_doc.get("items") or []
+		if id(row) in list_prices and row.get("posnext_discount_source") == FNF_DISCOUNT_SOURCE
+	}
+	if invoice_doc.doctype != DOCTYPE_SALES_INVOICE or not marked:
+		return {}
+	view = frappe._dict(invoice_doc.as_dict())
+	# The stored creation only, never one set in memory (Ruling 125).
+	stored = invoice_doc.get("name") and frappe.db.get_value(
+		invoice_doc.doctype, invoice_doc.name, "creation"
+	)
+	view["creation"] = stored or None
+	rows, copies = {}, []
+	for position, row in enumerate(invoice_doc.get("items") or []):
+		copy = frappe._dict(row.as_dict())
+		copy.name = row.name or f"{NEW_ROW_KEY}{position}"
+		if id(row) in list_prices:
+			copy.price_list_rate = list_prices[id(row)]
+		rows[copy.name] = row
+		copies.append(copy)
+	view["items"] = copies
+	rates = {}
+	for name, rate in registry.fnf_line_rates(view).items():
+		row = rows.get(name)
+		if row is not None and id(row) in marked:
+			rates[id(row)] = min(flt(rate), flt(list_prices[id(row)]))
+	return rates
 
 
 def _discount_settings(pos_profile) -> dict:
@@ -1241,7 +1457,7 @@ def _paid_rows(invoice_doc) -> list:
 	]
 
 
-def _check_paid_row_discounts(invoice_doc, offline_sync=False, paid_draft_rates=None) -> None:
+def _check_paid_row_discounts(invoice_doc, offline_sync=False, paid_draft_rows=None) -> None:
 	"""A paid row below its list price must be explained by the server, not the client.
 
 	Runs after ``calculate_taxes_and_totals``: it judges the rate that will be saved.
@@ -1253,27 +1469,30 @@ def _check_paid_row_discounts(invoice_doc, offline_sync=False, paid_draft_rates=
 	  shared with the free-row check), only discounts of rules it applied;
 	- a line coupon (``posnext_coupon_code``): what promotions' coupon resolver gives
 	  that line on the server's list price, for the invoice's own coupon only;
-	- an F&F line (``posnext_discount_source``) on a Sales Invoice with promotions:
-	  promotions' F&F check is the authority, measuring on the server's list price;
-	  without promotions, or on a Sales Order, the mark explains nothing;
+	- an F&F line (``posnext_discount_source``): down to the rate the benefit provider
+	  computes for that row on the server's data (``_fnf_line_rates``), never the mark
+	  itself (Ruling 120); without a provider, or on a Sales Order, nothing. On an
+	  unpaid, online POS save the row is left to promotions, which re-prices it in the
+	  same save (``_fnf_repriced_in_this_save``, Ruling 123);
 	- a manual edit the POS Settings permit (``_manual_discount_problem``), except on
 	  a row a one-time offer this customer already used matches: that row takes no
 	  manual discount at all (``_used_one_time_offer_rows``, Ruling 111).
 	Client flags (``is_rate_manually_edited``, ``original_rate``) decide nothing.
 	One-time offers the server applied to a discounted row are stamped on a Sales
 	Invoice whatever rule names the client sent (``_stamp_server_one_time_rules``),
-	unless the row's coupon explains at least as much: its discount is then the
-	coupon's, not the offer's (Ruling 118).
+	unless the row's coupon or F&F rate explains at least as much: its discount is then
+	the coupon's or F&F's, not the offer's (Rulings 118, 120).
 	Tolerance: one unit of the rate's precision per unit sold. A row at rate 0 is
 	``_refuse_zero_rate_after_totals``'s.
 
 	An unexplained reduction refuses the save, except on an offline sync, or for
-	an item a stored paid draft already held in that UOM at a rate no higher
-	(``paid_draft_rates``):
+	a row that matches a stored paid draft's row exactly, one to one
+	(``paid_draft_rows``, ``_take_held_row``, Ruling 132):
 	then it is kept and logged.
 	"""
 	if invoice_doc.get("is_return"):
 		return
+	held_rows = list(paid_draft_rows or [])
 	paid_rows = _paid_rows(invoice_doc)
 	rows = [row for row in paid_rows if flt(row.qty) > 0 and flt(row.rate) > 0]
 	if not rows:
@@ -1288,7 +1507,7 @@ def _check_paid_row_discounts(invoice_doc, offline_sync=False, paid_draft_rates=
 		# Saved (and measured by promotions' F&F check) on the server's list price.
 		if context.list_prices.get(id(row)) is not None:
 			row.price_list_rate = context.list_prices[id(row)]
-	fnf_left_to_promotions = invoice_doc.doctype == DOCTYPE_SALES_INVOICE and _promotions_evaluates_offers()
+	fnf_left_to_promotions = _fnf_repriced_in_this_save(invoice_doc, offline_sync)
 
 	below = []
 	for row in rows:
@@ -1305,6 +1524,7 @@ def _check_paid_row_discounts(invoice_doc, offline_sync=False, paid_draft_rates=
 
 	result, _error = context.paid_offers(paid_rows)
 	index = {id(row): idx for idx, row in enumerate(paid_rows)}
+	fnf_rates = _fnf_line_rates(invoice_doc, {id(row): list_price for row, list_price, _t in below})
 	coupon_rates = {}
 	settings = _discount_settings(invoice_doc.get("pos_profile"))
 	refused, logged = [], []
@@ -1319,11 +1539,16 @@ def _check_paid_row_discounts(invoice_doc, offline_sync=False, paid_draft_rates=
 			if code not in coupon_rates:
 				coupon_rates[code] = _coupon_line_rates(invoice_doc, code, paid_rows, context)
 			coupon = coupon_rates[code].get(idx)
-		if coupon is None or (offer is not None and offer < coupon):
-			# The line's discount is the offer's, not a coupon's at least as large (Ruling 118).
+		fnf = fnf_rates.get(id(row))
+		other = min((rate for rate in (coupon, fnf) if rate is not None), default=None)
+		if other is None or (offer is not None and offer < other):
+			# The line's discount is the offer's, not a coupon's or F&F's at least as large
+			# (Rulings 118, 120).
 			offer_lines.append(idx)
-		unexplained = min(rate for rate in (list_price, offer, coupon) if rate is not None) - flt(row.rate)
-		if unexplained <= tolerance:
+		if (
+			min(rate for rate in (list_price, offer, coupon, fnf) if rate is not None) - flt(row.rate)
+			<= tolerance
+		):
 			continue
 		if used_offers is None:
 			used_offers = _offline_safe(
@@ -1335,18 +1560,18 @@ def _check_paid_row_discounts(invoice_doc, offline_sync=False, paid_draft_rates=
 				[below_row for below_row, *_ in below],
 				context.item_data,
 			)
-		if id(row) in used_offers:
-			# The offers explained above were evaluated without the used ones, so a regular
-			# offer ERPNext would pick still explains its part (Rulings 116, 117). What is
-			# left is a manual discount, and none re-gives an offer already used (Ruling 111).
-			(logged if offline_sync else refused).append(_one_time_used_message(used_offers[id(row)]))
-			continue
-		problem = _manual_discount_problem(row, list_price, unexplained, tolerance, settings)
-		if not problem:
-			continue
-		held = (paid_draft_rates or {}).get((row.item_code, row.get("uom")))
-		lenient = offline_sync or (held is not None and flt(row.rate) >= held - tolerance)
-		(logged if lenient else refused).append(problem)
+		problem, held = _row_discount_problem(
+			invoice_doc,
+			row,
+			list_price,
+			tolerance,
+			(offer, coupon, fnf),
+			used_offers.get(id(row)),
+			settings,
+			held_rows,
+		)
+		if problem:
+			(logged if offline_sync or held else refused).append(problem)
 	if invoice_doc.doctype == DOCTYPE_SALES_INVOICE:
 		_stamp_server_one_time_rules(invoice_doc, result, offer_lines)
 	if refused:
@@ -1354,6 +1579,105 @@ def _check_paid_row_discounts(invoice_doc, offline_sync=False, paid_draft_rates=
 	reference = invoice_doc.name or invoice_doc.get("offline_id") or "new"
 	for problem in logged:
 		log_error_without_telemetry(UNEXPLAINED_DISCOUNT_LOG_TITLE, f"Invoice {reference}: {problem}")
+
+
+def _row_discount_problem(
+	invoice_doc, row, list_price, tolerance, rates, used_rule, settings, held_rows=None
+) -> tuple[str | None, bool]:
+	"""Why a paid row's rate is refused, or None; and whether a stored paid draft held it,
+	matching one of ``held_rows`` exactly (then it is logged, not refused). One judge for the POS paid-row check and the
+	before_submit F&F check (Ruling 128), so both give the same answer.
+
+	``rates`` are the per-unit rates the server explains the row down to (offers,
+	coupon, F&F; None where none applies). What is left below them:
+	- on a row a one-time offer this customer already used matches (``used_rule``),
+	  "already used": the offers were evaluated without the used ones, so a regular
+	  offer ERPNext would pick still explains its part (Rulings 111, 116, 117);
+	- else a manual discount the POS Settings may permit (``_manual_discount_problem``);
+	  an F&F row the server gives no F&F rate says so instead (M2).
+	"""
+	offer, coupon, fnf = rates
+	unexplained = min(rate for rate in (list_price, offer, coupon, fnf) if rate is not None) - flt(row.rate)
+	if unexplained <= tolerance:
+		return None, False
+	if used_rule:
+		return _one_time_used_message(used_rule), False
+	problem = _manual_discount_problem(row, list_price, unexplained, tolerance, settings)
+	if not problem:
+		return None, False
+	if (
+		fnf is None
+		and invoice_doc.doctype == DOCTYPE_SALES_INVOICE
+		and row.get("posnext_discount_source") == FNF_DISCOUNT_SOURCE
+	):
+		# An F&F row the server gives no F&F rate: say so, not "a manual discount".
+		problem = _fnf_not_eligible_message(row, list_price)
+	return problem, _take_held_row(held_rows, row)
+
+
+def _fnf_rows_on_submit(doc) -> tuple[list[str], list[str]]:
+	"""Sales Invoice before_submit, any route (Ruling 128): every F&F-marked paid row below
+	its list price is judged as the POS paid-row check judges it (``_row_discount_problem``),
+	on the F&F rate the server computes (``_fnf_line_rates``: today and the stored
+	creation day, Ruling 125), the offers on ``_offer_dates`` without this customer's
+	redeemed one-time rules, the invoice's own line coupon, and the POS Settings.
+
+	Returns (refused, held) messages; ``held`` are rows the stored paid draft already held
+	(an exact, one-to-one match with ``_held_paid_draft_rows``, read from the database on
+	every route, Rulings 130 and 132), which are logged.
+	"""
+	rows = [
+		row
+		for row in _paid_rows(doc)
+		if row.get("posnext_discount_source") == FNF_DISCOUNT_SOURCE
+		and flt(row.qty) > 0
+		and flt(row.rate) > 0
+	]
+	if not rows:
+		return [], []
+	context = _pricing_context(doc)
+	paid_rows = _paid_rows(doc)
+	context.load(paid_rows)
+	index = {id(row): idx for idx, row in enumerate(paid_rows)}
+	below = []
+	for row in rows:
+		precision = row.precision("rate")
+		tolerance = 10 ** -cint(2 if precision is None else precision)
+		# The server's list price or the row's, whichever is higher (as ``_redeem_on_submit``).
+		list_price = max(flt(context.list_prices.get(id(row))), flt(row.get("price_list_rate")))
+		if list_price > 0 and flt(row.rate) < list_price - tolerance:
+			below.append((row, list_price, tolerance))
+	if not below:
+		return [], []
+	fnf_rates = _fnf_line_rates(doc, {id(row): list_price for row, list_price, _t in below})
+	used = _used_one_time_offer_rows(doc, [row for row, *_ in below], context.item_data)
+	settings = _discount_settings(doc.get("pos_profile"))
+	dates = _offer_dates(doc)
+	held_rows = _held_paid_draft_rows(doc)
+	coupon_rates, refused, held = {}, [], []
+	for row, list_price, tolerance in below:
+		idx = index[id(row)]
+		offers = [_offer_rate(context.paid_offers(paid_rows, on)[0], idx, list_price) for on in dates]
+		offer = min((rate for rate in offers if rate is not None), default=None)
+		coupon = None
+		code = row.get("posnext_coupon_code")
+		if code:
+			if code not in coupon_rates:
+				coupon_rates[code] = _coupon_line_rates(doc, code, paid_rows, context)
+			coupon = coupon_rates[code].get(idx)
+		problem, kept = _row_discount_problem(
+			doc,
+			row,
+			list_price,
+			tolerance,
+			(offer, coupon, fnf_rates.get(id(row))),
+			used.get(id(row)),
+			settings,
+			held_rows,
+		)
+		if problem:
+			(held if kept else refused).append(problem)
+	return refused, held
 
 
 def _paid_draft_header(doc) -> tuple[float, float] | None:
@@ -2427,8 +2751,12 @@ def update_invoice(data: str | dict) -> dict:
 	return _update_invoice(data)
 
 
-def _update_invoice(data: str | dict, offline_sync: bool = False) -> dict:
+def _update_invoice(data: str | dict, offline_sync: bool = False, submitting: bool = False) -> dict:
 	"""Create or update an invoice draft.
+
+	``submitting``: set by ``submit_invoice``, which submits this draft in the same call:
+	its F&F rows are judged here on the computed rate, never left to promotions
+	(Ruling 128).
 
 	``offline_sync``: set only by ``submit_invoice`` for an offline sale it reserved
 	for sync (a new ``offline_id``, or a retry with no completed invoice); free-row
@@ -2454,11 +2782,13 @@ def _update_invoice(data: str | dict, offline_sync: bool = False) -> dict:
 
 		# Create or update invoice
 		paid_draft_free, stored_sources, paid_draft_rates, paid_draft_header = {}, set(), {}, None
+		paid_draft_rows = []
 		if data.get("name"):
 			invoice_doc = frappe.get_doc(doctype, data.get("name"))
 			paid_draft_free = _paid_draft_free_qty(invoice_doc)
 			stored_sources = _stored_line_sources(invoice_doc)
 			paid_draft_rates = _paid_draft_rates(invoice_doc)
+			paid_draft_rows = _paid_draft_rows(invoice_doc)
 			paid_draft_header = _paid_draft_header(invoice_doc)
 			invoice_doc.update(data)
 		else:
@@ -2470,6 +2800,7 @@ def _update_invoice(data: str | dict, offline_sync: bool = False) -> dict:
 		frappe.flags.ignore_account_permission = True
 		# Offline-queued sale being synced (see _apply_pos_sales_team)
 		invoice_doc.flags.pos_offline_sync = bool(data.get("offline_id"))
+		invoice_doc.flags.pos_submitting = submitting
 		_set_payment_collected_flag(invoice_doc, data.get("payments"))
 
 		pos_profile_doc = None
@@ -2686,7 +3017,7 @@ def _update_invoice(data: str | dict, offline_sync: bool = False) -> dict:
 		# Judge the rates ERPNext computed: no paid row may come out at 0, and
 		# none below list price without a reason the server confirms.
 		_refuse_zero_rate_after_totals(invoice_doc, lenient=offline_sync)
-		_check_paid_row_discounts(invoice_doc, offline_sync=offline_sync, paid_draft_rates=paid_draft_rates)
+		_check_paid_row_discounts(invoice_doc, offline_sync=offline_sync, paid_draft_rows=paid_draft_rows)
 		_check_header_discount(
 			invoice_doc,
 			offline_sync=offline_sync,
@@ -2789,6 +3120,16 @@ def _update_invoice(data: str | dict, offline_sync: bool = False) -> dict:
 		frappe.flags.ignore_account_permission = True
 		invoice_doc.docstatus = 0
 		invoice_doc.save()
+		if (
+			_carries_payment(invoice_doc)
+			and not offline_sync
+			and not invoice_doc.flags.pos_offline_sync
+			and not submitting
+			and not invoice_doc.get("is_return")
+		):
+			# The paid-row check above passed this paid draft: it is a stored paid draft on
+			# every submit route while the database holds it unchanged (Ruling 130).
+			_record_checked_paid_draft(invoice_doc)
 
 		result = invoice_doc.as_dict()
 		# The F&F decision this save made (promotions' validate hook, when installed): the
@@ -3137,27 +3478,37 @@ def submit_invoice(invoice: str | dict | None = None, data: str | dict | None = 
 	try:
 		invoice_name = invoice.get("name")
 		# Set below when a stored paid draft is re-saved
-		paid_draft_header, paid_draft_rates = None, {}
+		paid_draft_header, paid_draft_rates, paid_draft_rows = None, {}, []
 
 		# Get or create invoice
 		if not invoice_name or not frappe.db.exists(doctype, invoice_name):
-			created = _update_invoice(json.dumps(invoice), offline_sync=offline_sync)
+			created = _update_invoice(json.dumps(invoice), offline_sync=offline_sync, submitting=True)
 			if not created or not isinstance(created, dict):
 				frappe.throw(_("Failed to create invoice draft"))
 			invoice_name = created.get("name")
 			if not invoice_name:
 				frappe.throw(_("Failed to get invoice name from draft"))
 			invoice_doc = frappe.get_doc(doctype, invoice_name)
+			# No stored draft held anything: this call made it (Ruling 130).
+			invoice_doc.flags.pos_paid_draft_rows = []
 		else:
 			invoice_doc = frappe.get_doc(doctype, invoice_name)
 			existing_customer = invoice_doc.customer
 			paid_draft_free = _paid_draft_free_qty(invoice_doc)
 			stored_sources = _stored_line_sources(invoice_doc)
 			paid_draft_rates = _paid_draft_rates(invoice_doc)
+			paid_draft_rows = _paid_draft_rows(invoice_doc)
 			paid_draft_header = _paid_draft_header(invoice_doc)
 			invoice_doc.update(invoice)
 			if not invoice_doc.get("customer") and existing_customer:
 				invoice_doc.customer = existing_customer
+			# Before the paid-row check, which reads them (Rulings 126, 128).
+			invoice_doc.flags.pos_offline_sync = bool(offline_id)
+			invoice_doc.flags.pos_submitting = True
+			_set_payment_collected_flag(invoice_doc, invoice.get("payments"))
+			# The before_submit F&F check keeps a row this stored paid draft held, as here:
+			# read before the save below, which overwrites the stored draft (Ruling 130).
+			invoice_doc.flags.pos_paid_draft_rows = paid_draft_rows
 			# The POS submits its cart as the draft checked when payment opened; the code
 			# comes as typed.
 			_store_canonical_coupon_code(invoice_doc)
@@ -3182,7 +3533,7 @@ def submit_invoice(invoice: str | dict | None = None, data: str | dict | None = 
 					)
 				_refuse_zero_rate_after_totals(invoice_doc, lenient=offline_sync)
 				_check_paid_row_discounts(
-					invoice_doc, offline_sync=offline_sync, paid_draft_rates=paid_draft_rates
+					invoice_doc, offline_sync=offline_sync, paid_draft_rows=paid_draft_rows
 				)
 				_check_header_discount(
 					invoice_doc,
@@ -5073,8 +5424,13 @@ def _redeemed_one_time_records(invoice_doc) -> tuple[str | None, dict]:
 
 
 def _one_time_match_dates(invoice_doc) -> list:
-	"""The sale's posting date and today: a rule valid on either matches (Ruling 113)."""
-	return sorted({cstr(invoice_doc.get("posting_date") or nowdate()), nowdate()})
+	"""The sale's posting date, today and the day the invoice was first saved (its stored
+	``creation``): a rule valid on any of them matches (Rulings 113, 120, 125)."""
+	dates = {cstr(invoice_doc.get("posting_date") or nowdate()), nowdate()}
+	created = _stored_creation_day(invoice_doc)
+	if created:
+		dates.add(created)
+	return sorted(dates)
 
 
 def _one_time_match_args(invoice_doc, customer) -> frappe._dict:
@@ -5262,7 +5618,10 @@ def _redeem_one_time_rules(invoice_doc, offline_sync=False) -> None:
 	"""
 	from pos_next.pos_next.doctype.one_time_customer_offer_usage import one_time_customer_offer_usage
 
-	invoice_doc.flags.pos_one_time_checked = True
+	# An F&F row left to promotions was never judged on the computed rate: before_submit
+	# judges the sale again then (Ruling 126).
+	if not _fnf_rows_left_to_promotions(invoice_doc, offline_sync):
+		invoice_doc.flags.pos_one_time_checked = True
 	if invoice_doc.get("is_return"):
 		return
 	customer = _tracked_customer(invoice_doc)
@@ -5315,22 +5674,30 @@ def check_one_time_offers_on_submit(doc) -> None:
 	a header only for its part no regular offer or coupon explains
 	(``_unexplained_header``, as on the POS). The redeemed rules are added to the stamp;
 	the on_submit recorders then find their rows. A sale ``submit_invoice`` already
-	checked and recorded (``_redeem_one_time_rules``) is left alone.
+	checked and recorded (``_redeem_one_time_rules``) is not redeemed again.
+
+	First, on every route and every sale, each F&F-marked row is judged on the F&F rate
+	the server computes (``_fnf_rows_on_submit``, Ruling 128): this is the one place a
+	Desk, ``frappe.client.submit``, credit-sale or shift-close submit cannot skip.
 	"""
 	# A return or debit note adjusts a sale; a consolidated invoice merges checked ones.
-	if (
-		doc.flags.pos_one_time_checked
-		or doc.get("is_return")
-		or doc.get("is_debit_note")
-		or doc.get("is_consolidated")
-	):
+	if doc.get("is_return") or doc.get("is_debit_note") or doc.get("is_consolidated"):
 		return
 	offline_sync = bool(doc.flags.pos_offline_sync)
-	problems = _offline_safe(offline_sync, doc, list, _redeem_on_submit, doc)
+	# Every route ends here, so every F&F row is judged here, also on a sale the POS
+	# already checked (Ruling 128).
+	problems, held = _offline_safe(offline_sync, doc, lambda: ([], []), _fnf_rows_on_submit, doc)
+	if not doc.flags.pos_one_time_checked:
+		problems = problems + _offline_safe(offline_sync, doc, list, _redeem_on_submit, doc)
+	# A used offer's F&F row is "already used" in both checks: say it once.
+	problems = list(dict.fromkeys(problems))
+	if problems and not offline_sync:
+		_refuse("<br>".join(problems), UNEXPLAINED_DISCOUNT_LOG_TITLE)
+	# Submitted: no longer a draft (rolled back with the submit if it fails later).
+	_forget_checked_paid_draft(doc)
+	problems = list(dict.fromkeys(problems + held))
 	if not problems:
 		return
-	if not offline_sync:
-		_refuse("<br>".join(problems), UNEXPLAINED_DISCOUNT_LOG_TITLE)
 	reference = doc.name or doc.get("offline_id") or "new"
 	for problem in problems:
 		log_error_without_telemetry(UNEXPLAINED_DISCOUNT_LOG_TITLE, f"Invoice {reference}: {problem}")
@@ -5370,9 +5737,6 @@ def _redeem_on_submit(doc) -> list[str]:
 	context.load(rows)
 	item_data = context.item_data
 	index = {id(row): idx for idx, row in enumerate(paid_rows)}
-	# Promotions judges an F&F line on a POS invoice in this same save (Ruling 118); a
-	# Desk invoice's mark is the caller's and explains nothing.
-	fnf_judged = cint(doc.get("is_pos")) and _promotions_evaluates_offers()
 	discounted, below = [], []
 	for row in rows:
 		precision = row.precision("rate")
@@ -5383,8 +5747,6 @@ def _redeem_on_submit(doc) -> list[str]:
 		if cint(row.get("is_free_item")):
 			discounted.append(row)
 		elif flt(row.rate) < list_price - tolerance:
-			if fnf_judged and row.get("posnext_discount_source") == FNF_DISCOUNT_SOURCE:
-				continue
 			below.append((row, list_price, tolerance))
 	# Only a row some one-time rule matches can redeem or re-give one: the server's offers
 	# are evaluated for those alone.
@@ -5394,6 +5756,10 @@ def _redeem_on_submit(doc) -> list[str]:
 		else {}
 	)
 	dates = _offer_dates(doc)
+	# F&F explains a marked row only down to the rate the provider computes (Ruling 120).
+	fnf_rates = _fnf_line_rates(
+		doc, {id(row): list_price for row, list_price, _t in below if id(row) in matched}
+	)
 	coupon_rates, offers_on = {}, []
 	for row, list_price, tolerance in below:
 		if id(row) not in matched:
@@ -5410,10 +5776,12 @@ def _redeem_on_submit(doc) -> list[str]:
 			if code not in coupon_rates:
 				coupon_rates[code] = _coupon_line_rates(doc, code, paid_rows, context)
 			coupon = coupon_rates[code].get(idx)
-		if offer is not None and (coupon is None or offer < coupon):
+		fnf = fnf_rates.get(id(row))
+		other = min((rate for rate in (coupon, fnf) if rate is not None), default=None)
+		if offer is not None and (other is None or offer < other):
 			# The offer is the row's discount: a one-time rule it applied is this sale's use.
 			offers_on.append(idx)
-		explained = min(rate for rate in (list_price, offer, coupon) if rate is not None)
+		explained = min(rate for rate in (list_price, offer, coupon, fnf) if rate is not None)
 		# Any rest is a discount the matching one-time rule redeems or re-gives.
 		if flt(row.rate) < explained - tolerance:
 			discounted.append(row)
@@ -5459,11 +5827,20 @@ def _redeem_on_submit(doc) -> list[str]:
 
 def _offer_dates(doc) -> list:
 	"""Dates the before_submit check evaluates offers on: the evaluator's own (today, as
-	None), then the day the invoice was first saved (its server-set ``creation``), so a
+	None), then the day the invoice was first saved (its STORED ``creation``), so a
 	printed draft closed the next day keeps its sale day's offers (Ruling 118). Never
-	the caller's ``posting_date``."""
-	created = doc.get("creation") and cstr(getdate(doc.creation))
+	the caller's ``posting_date``, nor a ``creation`` set on the document in memory;
+	an unsaved invoice has today only (Ruling 125)."""
+	created = _stored_creation_day(doc)
 	return [None, created] if created and created != nowdate() else [None]
+
+
+def _stored_creation_day(doc) -> str | None:
+	"""The day the invoice was first saved, read from the database by name, or None."""
+	if not doc.get("name") or (getattr(doc, "is_new", None) and doc.is_new()):
+		return None
+	created = frappe.db.get_value(doc.doctype, doc.name, "creation")
+	return cstr(getdate(created)) if created else None
 
 
 def _used_one_time_item_in_cart(invoice_doc, item_data=None) -> str | None:

@@ -44,6 +44,7 @@ ITEM_NO_PRICE = f"{PREFIX}ITEM_NO_PRICE"
 FNF = invoices.FNF_DISCOUNT_SOURCE
 PRICE = ITEM_PRICES[ITEM_A]  # 50
 RATE_EDIT_OFF = "rate editing is not allowed"
+FNF_NOT_ELIGIBLE = "not eligible for Friends & Family"
 ITEM_DISCOUNT_OFF = "item discounts are not allowed"
 OVER_LIMIT = "maximum allowed discount"
 
@@ -218,20 +219,49 @@ class TestDiscountEnforcement(DiscountEnforcementCase):
 		rule = self._price_rule(10)
 		self.assertRefused(self._payload(20, discount_percentage=60, pricing_rules=rule), ITEM_DISCOUNT_OFF)
 
-	def test_ff_line_left_to_promotions(self):
+	def _paid(self, payload):
+		"""The save as the POS sends it with the payment taken: promotions freezes it, so
+		pos_next judges its F&F rows on the computed rate (Rulings 120, 123)."""
+		paid = sum(flt(row["rate"]) * flt(row["qty"]) for row in payload["items"])
+		return dict(payload, payments=[{"mode_of_payment": self.ctx.mode_of_payment, "amount": paid}])
+
+	def test_ff_line_explained_by_the_rate_promotions_computes(self):
+		"""Ruling 120: a paid F&F line is explained down to the rate the benefit provider
+		computes for an eligible customer; deeper than that it is a manual discount."""
 		enable_ff(self, CUSTOMER, EMAIL_DOMAIN)
 		self._pos_settings(allow_user_to_edit_item_discount=0)
-		evaluator = MagicMock()
-		with patch.object(invoices, "_offer_evaluator", return_value=evaluator):
-			doc = self._draft(self._payload(35, discount_percentage=30, posnext_discount_source=FNF))
-		evaluator.assert_not_called()
+		doc = self._draft(self._paid(self._payload(35, discount_percentage=30, posnext_discount_source=FNF)))
 		self.assertEqual(flt(doc.items[0].rate), 35)
+		self.assertRefused(
+			self._paid(self._payload(30, discount_percentage=40, posnext_discount_source=FNF)),
+			ITEM_DISCOUNT_OFF,
+		)
 
-	def test_ff_mark_without_promotions_explains_nothing(self):
+	def test_ff_mark_of_an_ineligible_customer_explains_nothing(self):
 		self._pos_settings(allow_user_to_edit_item_discount=0)
-		payload = self._payload(35, discount_percentage=30, posnext_discount_source=FNF)
-		with patch.object(invoices.frappe, "override_whitelisted_method", side_effect=lambda method: method):
-			self.assertRefused(payload, ITEM_DISCOUNT_OFF)
+		self.assertRefused(
+			self._paid(self._payload(35, discount_percentage=30, posnext_discount_source=FNF)),
+			FNF_NOT_ELIGIBLE,
+		)
+
+	def test_ff_mark_without_provider_explains_nothing(self):
+		enable_ff(self, CUSTOMER, EMAIL_DOMAIN)
+		self._pos_settings(allow_user_to_edit_item_discount=0)
+		payload = self._paid(self._payload(35, discount_percentage=30, posnext_discount_source=FNF))
+		real = frappe.get_hooks
+
+		def hooks(hook=None, *args, **kwargs):
+			return [] if hook == "pos_next_customer_benefit_providers" else real(hook, *args, **kwargs)
+
+		with patch.object(invoices.frappe, "get_hooks", side_effect=hooks):
+			self.assertRefused(payload, FNF_NOT_ELIGIBLE)
+
+	def test_unpaid_stale_ff_mark_left_to_promotions(self):
+		"""Ruling 123: an unpaid, online save leaves the stale mark to promotions, which
+		re-prices the row to list price in the same save."""
+		self._pos_settings(allow_user_to_edit_item_discount=0)
+		doc = self._draft(self._payload(35, discount_percentage=30, posnext_discount_source=FNF))
+		self.assertEqual(flt(doc.items[0].rate), PRICE)
 
 	def test_ff_mark_cannot_lower_its_own_base(self):
 		"""A forged price_list_rate does not shrink the F&F saving promotions measures (Ruling 88)."""

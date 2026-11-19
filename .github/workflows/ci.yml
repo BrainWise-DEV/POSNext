@@ -182,3 +182,14 @@ jobs:
           bench --site test_site run-tests --module pos_next.api.test_security_hardening
         env:
           TYPE: server
+
+      # One-time offers and paid-row discounts with promotions' F&F rate (Rulings 120, 123).
+      - name: Run One-Time Offer and Discount Enforcement Tests (with satellites)
+        if: matrix.satellites
+        working-directory: /home/runner/frappe-bench
+        run: |
+          bench --site test_site set-config allow_tests true
+          bench --site test_site run-tests --module pos_next.api.test_one_time_offer
+          bench --site test_site run-tests --module pos_next.api.test_discount_enforcement
+        env:
+          TYPE: server

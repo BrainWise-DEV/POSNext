@@ -37,19 +37,27 @@ def redeem(customer: str, pricing_rule: str, sales_invoice: str) -> bool:
 	latest committed row, not the transaction's snapshot. The wait is at most
 	``LOCK_WAIT_SECONDS`` (then ``frappe.QueryTimeoutError``); the session's own
 	lock wait is restored afterwards.
+
+	The invoice may not be in the database yet: one call that inserts it already
+	submitted (``frappe.client.insert`` with docstatus 1) redeems in its
+	before_submit. So the row's links (invoice, customer, rule) are not checked:
+	both callers pass values the server derived. The usage row is written in the
+	invoice's own transaction and goes if it does.
 	"""
+	usage = frappe.get_doc(
+		{
+			"doctype": DOCTYPE,
+			"customer": customer,
+			"pricing_rule": pricing_rule,
+			"sales_invoice": sales_invoice,
+			"redemption_date": now(),
+		}
+	)
+	usage.flags.ignore_links = True
 	previous = frappe.db.sql("select @@session.innodb_lock_wait_timeout")[0][0]
 	frappe.db.sql(f"set session innodb_lock_wait_timeout = {int(LOCK_WAIT_SECONDS)}")
 	try:
-		frappe.get_doc(
-			{
-				"doctype": DOCTYPE,
-				"customer": customer,
-				"pricing_rule": pricing_rule,
-				"sales_invoice": sales_invoice,
-				"redemption_date": now(),
-			}
-		).insert(ignore_permissions=True, ignore_if_duplicate=True)
+		usage.insert(ignore_permissions=True, ignore_if_duplicate=True)
 		holder = frappe.db.get_value(
 			DOCTYPE, usage_name(customer, pricing_rule), "sales_invoice", for_update=True
 		)

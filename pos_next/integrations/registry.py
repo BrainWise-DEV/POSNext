@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import frappe
 
 from pos_next import utils
@@ -95,6 +97,39 @@ def notify_verification_change(
 			error = type(e).__name__
 		if error:
 			_log_hook_failure("Customer benefit provider", method_path, error)
+
+
+def fnf_line_rates(doc) -> dict[str, float]:
+	"""Per-unit rate Friends & Family gives each row of ``doc``: {row name: rate}.
+
+	Calls each benefit provider's optional ``fnf_line_rates(doc)``, which computes the
+	rate on the server's data (the customer's eligibility, the program, its scope),
+	never from a row's F&F mark (Ruling 120). A row no provider names gets no F&F
+	rate. When two providers name a row, the lower rate wins. Values that are not
+	finite numbers are dropped, and negative ones count as 0. A provider without the
+	key is skipped. A failing provider explains nothing: it is logged (path and
+	exception class only), and the rest still run.
+	"""
+	rates = {}
+	for method_path in frappe.get_hooks("pos_next_customer_benefit_providers") or []:
+		error = None
+		try:
+			provider = frappe.get_attr(method_path)()
+			compute = (provider or {}).get("fnf_line_rates")
+			found = dict(compute(doc) or {}) if compute else {}
+		except Exception as e:
+			error, found = type(e).__name__, {}
+		if error:
+			_log_hook_failure("Customer benefit provider", method_path, error)
+		for name, rate in found.items():
+			try:
+				value = float(rate)
+			except (TypeError, ValueError):
+				continue
+			if math.isfinite(value):
+				value = max(value, 0.0)
+				rates[name] = min(rates.get(name, value), value)
+	return rates
 
 
 def extend_bootstrap_settings(settings, pos_profile=None):

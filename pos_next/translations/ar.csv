@@ -2074,6 +2074,7 @@ Points applied: {0}. Please pay remaining {1} with {2},تم خصم النقاط:
 "Row {0}: free item {1} is not backed by an offer (free qty {2} expected, {3} sent).","الصف {0}: الصنف المجاني {1} غير مدعوم بعرض (الكمية المجانية المتوقعة {2}، والمرسلة {3}).",""
 "The offers changed. Refresh and re-apply offers.","تغيرت العروض. حدّث الصفحة وأعد تطبيق العروض.",""
 "Item {0} cannot be sold at zero price. Free items must come from an offer.","لا يمكن بيع الصنف {0} بسعر صفر. الأصناف المجانية تأتي من العروض فقط.",""
+"Row {0}: item {1} is discounted from {2} to {3} as Friends & Family, but this sale is not eligible for Friends & Family on that item.","الصف {0}: الصنف {1} مخفّض من {2} إلى {3} كخصم الأصدقاء والعائلة، لكن هذه العملية غير مؤهلة لخصم الأصدقاء والعائلة على هذا الصنف.",""
 "Row {0}: item {1} is discounted from {2} to {3}, and item discounts are not allowed for this POS Profile.","الصف {0}: الصنف {1} مخفّض من {2} إلى {3}، وخصم الأصناف غير مسموح به لملف نقطة البيع هذا.",""
 "Row {0}: item {1} is priced {3} against a list price of {2}, and rate editing is not allowed for this POS Profile.","الصف {0}: سعر الصنف {1} هو {3} مقابل سعر القائمة {2}، وتعديل السعر غير مسموح به لملف نقطة البيع هذا.",""
 "Row {0}: item {1} is reduced from {2} to {3} ({4}%), above the maximum allowed discount of {5}%.","الصف {0}: الصنف {1} مخفّض من {2} إلى {3} ({4}%)، وهذا أعلى من أقصى خصم مسموح {5}%.",""

@@ -40,6 +40,7 @@ from pos_next.test_promotions import (
 PREFIX = "_PNXT_TEST_OT8P_"
 USAGE = "One Time Customer Offer Usage"
 ALREADY_USED = "was already used by this customer"
+FNF_NOT_ELIGIBLE = "not eligible for Friends & Family"
 
 
 class TestOneTimeOffer(FrappeTestCase):
@@ -1083,3 +1084,608 @@ class TestOneTimeOffer(FrappeTestCase):
 		)
 		self.assertEqual(self._close(printed), 1)
 		self.assertEqual(len(self._usage()), 1)
+
+	# ---- Task 8r (Ruling 120): the F&F rate is the server's, never the mark's ----
+
+	def _pos_api_invoice(self, rate, offline_id=True, docstatus=1, mark=True):
+		"""An is_pos=1 invoice as a Desk or API caller sends it in one call
+		(``frappe.client.insert``), with an F&F mark and an ``offline_id`` key."""
+		import frappe.client
+
+		row = {
+			"item_code": ITEM_C,
+			"qty": 1,
+			"uom": "Nos",
+			"warehouse": self.ctx.warehouse,
+			"rate": rate,
+			"price_list_rate": ITEM_PRICES[ITEM_C],
+		}
+		if mark:
+			row["posnext_discount_source"] = invoices.FNF_DISCOUNT_SOURCE
+		data = {
+			"doctype": "Sales Invoice",
+			"customer": self.customer,
+			"company": self.ctx.company,
+			"selling_price_list": self.ctx.price_list,
+			"currency": self.ctx.currency,
+			"posting_date": nowdate(),
+			"set_warehouse": self.ctx.warehouse,
+			"update_stock": 0,
+			"ignore_pricing_rule": 1,
+			"is_pos": 1,
+			"pos_profile": self.ctx.pos_profile,
+			"docstatus": docstatus,
+			"items": [row],
+			"payments": [{"mode_of_payment": self.ctx.mode_of_payment, "amount": rate}],
+		}
+		if offline_id:
+			data["offline_id"] = f"{PREFIX}API_{frappe.generate_hash(length=8)}"
+		invoices._set_payment_accounts(data["payments"], self.ctx.company)
+		result = frappe.client.insert(data)
+		self.addCleanup(self._discard, result["name"])
+		return frappe.get_doc("Sales Invoice", result["name"])
+
+	def _enable_ff_for_other_customer(self):
+		"""F&F on, for an approved domain this test's customer is not on."""
+		if not invoices._promotions_evaluates_offers():
+			self.skipTest("F&F is judged by promotions, which is not installed")
+		from pos_next.api.test_ff_markers import enable_ff
+
+		other = frappe.get_doc(
+			{
+				"doctype": "Customer",
+				"customer_name": f"{PREFIX}other{frappe.generate_hash(length=6)}",
+				"customer_group": _resolve_customer_group(),
+				"territory": _resolve_territory(),
+				"customer_type": "Individual",
+			}
+		).insert(ignore_permissions=True)
+		enable_ff(self, other.name, "ot8rother.example")
+
+	@contextmanager
+	def _no_benefit_provider(self):
+		real = frappe.get_hooks
+
+		def hooks(hook=None, *args, **kwargs):
+			if hook == "pos_next_customer_benefit_providers":
+				return []
+			return real(hook, *args, **kwargs)
+
+		with patch.object(frappe, "get_hooks", side_effect=hooks):
+			yield
+
+	def test_forged_fnf_mark_with_offline_id_refused(self):
+		"""NB-A: one frappe.client.insert with docstatus=1, an is_pos=1 invoice whose used
+		offer's item carries a forged F&F mark and an offline_id key, is refused."""
+		self._pos_settings(allow_user_to_edit_item_discount=0)
+		self._redeem()
+		self.assertAlreadyUsed(lambda: self._pos_api_invoice(14))
+		self.assertEqual(len(self._usage()), 1)
+
+	def test_forged_fnf_mark_unused_offer_records_once(self):
+		"""NB-A: on an unused offer, the forged F&F invoice at the offer's rate is the offer's
+		use: it is recorded, and the offer's own sale after it is refused."""
+		self._pos_settings(allow_user_to_edit_item_discount=0)
+		forged = self._pos_api_invoice(ITEM_PRICES[ITEM_C] * 0.9)
+		self.assertEqual(forged.docstatus, 1)
+		self.assertEqual(self._usage(), [forged.name])
+		self.assertAlreadyUsed(self._redeem)
+		self.assertEqual(self._usage(), [forged.name])
+
+	def test_fnf_mark_ineligible_customer_not_explained(self):
+		"""F&F is on, but not for this customer: the mark explains nothing, even at the
+		program's own rate."""
+		self._pos_settings(allow_user_to_edit_item_discount=0)
+		self._redeem()
+		self._enable_ff_for_other_customer()
+		self.assertAlreadyUsed(lambda: self._pos_api_invoice(14))
+		self.assertAlreadyUsed(lambda: self._pos_api_invoice(2))
+		self.assertEqual(len(self._usage()), 1)
+
+	def test_real_fnf_printed_draft_still_closes(self):
+		"""C4 regression guard: an eligible customer's real F&F sale on a used offer's item
+		closes as a printed draft, syncs offline and sells online, and records nothing more."""
+		self._pos_settings(allow_user_to_edit_item_discount=0)
+		self._redeem()
+		self._enable_ff()
+		cart = self._marked_cart(30, posnext_discount_source=invoices.FNF_DISCOUNT_SOURCE)
+		printed = self._printed(cart, 14)
+		self.assertEqual(self._close(printed), 1)
+		self.assertEqual(self._stamp(printed), [])
+		before = self._logs()
+		synced = self._submit(cart, offline=True)
+		self.assertEqual((synced.docstatus, flt(synced.items[0].rate)), (1, 14))
+		errors = [frappe.db.get_value("Error Log", name, "error") for name in self._logs() - before]
+		self.assertFalse([error for error in errors if ALREADY_USED in (error or "")], errors)
+		online = self._submit(cart)
+		self.assertEqual((online.docstatus, flt(online.items[0].rate)), (1, 14))
+		self.assertEqual(len(self._usage()), 1)
+
+	def test_real_fnf_sale_never_uses_an_unused_offer(self):
+		"""A real F&F sale (30%) on an unused offer's item (10%) is F&F's, online and offline:
+		the offer stays unused."""
+		self._pos_settings(allow_user_to_edit_item_discount=0)
+		self._enable_ff()
+		cart = self._marked_cart(30, posnext_discount_source=invoices.FNF_DISCOUNT_SOURCE)
+		self.assertEqual(self._submit(cart).docstatus, 1)
+		self.assertEqual(self._submit(cart, offline=True).docstatus, 1)
+		self.assertEqual(self._usage(), [])
+
+	def test_no_provider_fnf_explains_nothing(self):
+		"""Without a benefit provider's fnf_line_rates the F&F mark explains nothing, even
+		for a customer promotions would call eligible."""
+		self._pos_settings(allow_user_to_edit_item_discount=0)
+		self._redeem()
+		self._enable_ff()
+		printed = self._printed(
+			self._marked_cart(30, posnext_discount_source=invoices.FNF_DISCOUNT_SOURCE), 14
+		)
+		doc = frappe.get_doc("Sales Invoice", printed)
+		with self._no_benefit_provider():
+			self.assertAlreadyUsed(doc.submit)
+		self.assertEqual(len(self._usage()), 1)
+
+	def test_offline_already_used_logged_for_fnf_row(self):
+		"""A POS offline sync with a forged F&F mark on a used offer's item is kept (the sale
+		is made) and logged as "already used"; nothing more is recorded."""
+		self._pos_settings(allow_user_to_edit_item_discount=0)
+		self._redeem()
+		before = self._logs()
+		sale = self._submit(
+			self._marked_cart(90, posnext_discount_source=invoices.FNF_DISCOUNT_SOURCE), offline=True
+		)
+		self.assertEqual(sale.docstatus, 1)
+		errors = [frappe.db.get_value("Error Log", name, "error") for name in self._logs() - before]
+		self.assertTrue([error for error in errors if ALREADY_USED in (error or "")], errors)
+		self.assertEqual(len(self._usage()), 1)
+
+	def test_match_dates_include_creation(self):
+		"""An unused offer valid on the draft's creation day (ended since) still matches the
+		printed draft at close, so its use is recorded."""
+		from frappe.utils import add_days, add_to_date, now_datetime
+
+		self._pos_settings(allow_user_to_edit_item_discount=0)
+		printed = self._printed(self._cart(percentage=10, rule=self.rule), ITEM_PRICES[ITEM_C] * 0.9)
+		yesterday = add_days(nowdate(), -1)
+		frappe.db.set_value(
+			"Pricing Rule", self.rule, {"valid_from": add_days(nowdate(), -2), "valid_upto": yesterday}
+		)
+		frappe.db.set_value(
+			"Sales Invoice",
+			printed,
+			{"creation": add_to_date(now_datetime(), days=-1), "pos_applied_one_time_rules": "[]"},
+			update_modified=False,
+		)
+		self.assertEqual(self._close(printed), 1)
+		self.assertEqual(self._usage(), [printed])
+
+	# ---- Task 8r fix round 1 (Ruling 123): an unpaid open check leaves a stale mark to promotions
+
+	def _stale_fnf_cart(self):
+		"""The cart still carries F&F (30%) after the cashier switched to an ineligible customer."""
+		return self._marked_cart(30, posnext_discount_source=invoices.FNF_DISCOUNT_SOURCE)
+
+	def _saved_rate(self, result):
+		doc = frappe.get_doc("Sales Invoice", result["name"])
+		return flt(doc.items[0].rate), doc.items[0].get("posnext_discount_source")
+
+	def test_stale_fnf_mark_open_check_repriced_discounts_off(self):
+		"""I1 (a): item discounts off, offer unused: the open check saves the cart at list
+		price (promotions re-prices it) instead of refusing it."""
+		self._pos_settings(allow_user_to_edit_item_discount=0)
+		self._enable_ff_for_other_customer()
+		result = self._open_check(self._stale_fnf_cart())
+		self.assertEqual(self._saved_rate(result)[0], ITEM_PRICES[ITEM_C])
+		self.assertEqual(self._usage(), [])
+
+	def test_stale_fnf_mark_open_check_repriced_offer_used(self):
+		"""I1 (b): item discounts on, the offer already used: the open check saves at list
+		price, with no "already used" refusal and nothing more recorded."""
+		self._redeem()
+		self._enable_ff_for_other_customer()
+		result = self._open_check(self._stale_fnf_cart())
+		self.assertEqual(self._saved_rate(result)[0], ITEM_PRICES[ITEM_C])
+		self.assertEqual(len(self._usage()), 1)
+
+	def test_stale_fnf_mark_paid_submit_still_refused(self):
+		"""The paid submit of the same stale row is judged on the computed rate: refused,
+		on the create path and on the submit by name of the open check's draft (N1)."""
+		self._redeem()
+		self._enable_ff_for_other_customer()
+		self.assertAlreadyUsed(lambda: self._submit(self._stale_fnf_cart()))
+		draft = self._open_check(self._stale_fnf_cart())
+		self.assertAlreadyUsed(lambda: self._submit(self._stale_fnf_cart(), name=draft["name"]))
+		self.assertEqual(len(self._usage()), 1)
+
+	# ---- Task 8r fix round 2 (Ruling 126) ------------------------------------
+
+	def _ended_ff_back_dated_submit(self):
+		"""F&F ended yesterday. The open check's unpaid draft, then the submit by name re-sends
+		the row at 14 with the mark and a posting date inside the old program window."""
+		from frappe.utils import add_days
+
+		if not invoices._promotions_evaluates_offers():
+			self.skipTest("F&F is judged by promotions, which is not installed")
+		from pos_next.api.test_ff_markers import enable_ff
+
+		enable_ff(
+			self,
+			self.customer,
+			"ot8rended.example",
+			start_date=add_days(nowdate(), -10),
+			end_date=add_days(nowdate(), -1),
+		)
+		draft = self._open_check(self._stale_fnf_cart())
+		cart = dict(self._stale_fnf_cart(), posting_date=add_days(nowdate(), -3), set_posting_time=1)
+		return lambda: self._submit(cart, name=draft["name"])
+
+	def test_back_dated_paid_submit_by_name_used_offer_refused(self):
+		"""D1: item discounts on, R used: refused "already used", nothing more recorded."""
+		self._redeem()
+		self.assertAlreadyUsed(self._ended_ff_back_dated_submit())
+		self.assertEqual(len(self._usage()), 1)
+
+	def test_back_dated_paid_submit_by_name_unused_offer_refused(self):
+		"""D2: item discounts off, R unused: refused, and R is not recorded."""
+		self._pos_settings(allow_user_to_edit_item_discount=0)
+		submit = self._ended_ff_back_dated_submit()
+		with self.assertRaises(frappe.ValidationError):
+			submit()
+		self.assertEqual(self._usage(), [])
+
+	def test_forged_creation_never_explains_an_expired_offer(self):
+		"""Ruling 125: the offers' second day is the STORED creation day; a creation set on
+		the document in memory (or on an unsaved one) counts for nothing."""
+		from frappe.utils import add_days, add_to_date, now_datetime
+
+		frappe.db.set_value("Pricing Rule", self.rule, "priority", "10")
+		self._redeem()
+		self._pos_settings(allow_user_to_edit_item_discount=0)
+		regular = self._regular_rule("ENDS", 5, 5, valid_upto=nowdate())
+		printed = self._printed(self._cart(percentage=5), 19)
+		frappe.db.set_value(
+			"Pricing Rule",
+			regular,
+			{"valid_from": add_days(nowdate(), -2), "valid_upto": add_days(nowdate(), -1)},
+		)
+		doc = frappe.get_doc("Sales Invoice", printed)
+		doc.creation = add_to_date(now_datetime(), days=-1)
+		self.assertEqual(invoices._offer_dates(doc), [None])
+		self.assertTrue([problem for problem in invoices._redeem_on_submit(doc) if ALREADY_USED in problem])
+		unsaved = frappe.get_doc(
+			dict(self._desk_invoice_dict(), creation=add_to_date(now_datetime(), days=-1))
+		)
+		self.assertEqual(invoices._offer_dates(unsaved), [None])
+
+	def test_unjudged_fnf_row_leaves_the_sale_to_before_submit(self):
+		"""Ruling 126: the POS redeem marks the sale checked only when its F&F rows were judged
+		on the computed rate; an F&F row left to promotions (unpaid) is judged again in
+		before_submit."""
+		if not invoices._promotions_evaluates_offers():
+			self.skipTest("F&F is judged by promotions, which is not installed")
+		draft = self._open_check(self._stale_fnf_cart())
+		doc = frappe.get_doc("Sales Invoice", draft["name"])
+		doc.items[0].posnext_discount_source = invoices.FNF_DISCOUNT_SOURCE
+		invoices._redeem_one_time_rules(doc)
+		self.assertFalse(doc.flags.pos_one_time_checked)
+		doc.flags.pos_one_time_checked = False
+		doc.items[0].posnext_discount_source = None
+		invoices._redeem_one_time_rules(doc)
+		self.assertTrue(doc.flags.pos_one_time_checked)
+		paid = frappe.get_doc("Sales Invoice", draft["name"])
+		paid.items[0].posnext_discount_source = invoices.FNF_DISCOUNT_SOURCE
+		paid.set("payments", self._payments(14))
+		invoices._redeem_one_time_rules(paid)
+		self.assertTrue(paid.flags.pos_one_time_checked)
+
+	# ---- Task 8r fix round 3 (Ruling 128): before_submit judges every F&F row ----------
+
+	def _ended_ff(self):
+		"""F&F ended yesterday for this (otherwise eligible) customer."""
+		from frappe.utils import add_days
+
+		if not invoices._promotions_evaluates_offers():
+			self.skipTest("F&F is judged by promotions, which is not installed")
+		from pos_next.api.test_ff_markers import enable_ff
+
+		enable_ff(
+			self,
+			self.customer,
+			"ot8rr3.example",
+			start_date=add_days(nowdate(), -30),
+			end_date=add_days(nowdate(), -1),
+		)
+
+	def _back_dated_fnf(self, item=ITEM_C):
+		"""An F&F row at 30% off, posted 3 days ago, while F&F still ran."""
+		from frappe.utils import add_days
+
+		cart = self._cart(item=item, percentage=30)
+		cart["items"][0]["posnext_discount_source"] = invoices.FNF_DISCOUNT_SOURCE
+		return dict(cart, posting_date=add_days(nowdate(), -3), set_posting_time=1)
+
+	def _credit_sale(self, payload, name=None):
+		invoice = dict(payload, payments=[], is_credit_sale=1)
+		if name:
+			invoice["name"] = name
+		result = submit_invoice(invoice=json.dumps(invoice), data=json.dumps({"is_credit_sale": 1}))
+		self.addCleanup(self._discard, result["name"])
+		return frappe.get_doc("Sales Invoice", result["name"])
+
+	def _no_item_discount_credit(self):
+		self._pos_settings(allow_user_to_edit_item_discount=0, allow_credit_sale=1)
+
+	def test_back_dated_fnf_credit_sale_refused(self):
+		"""C2: a credit sale (no payment) on the create path, F&F ended, R unused: refused,
+		and R is not recorded."""
+		self._no_item_discount_credit()
+		self._ended_ff()
+		with self.assertRaisesRegex(frappe.ValidationError, FNF_NOT_ELIGIBLE):
+			self._credit_sale(self._back_dated_fnf())
+		self.assertEqual(self._usage(), [])
+
+	def test_back_dated_fnf_credit_sale_without_offer_refused(self):
+		"""A1: the same on an item no one-time rule matches."""
+		self._no_item_discount_credit()
+		self._ended_ff()
+		with self.assertRaisesRegex(frappe.ValidationError, FNF_NOT_ELIGIBLE):
+			self._credit_sale(self._back_dated_fnf(ITEM_A))
+
+	def test_back_dated_fnf_credit_sale_by_name_refused(self):
+		"""A2: the open check's draft, then the credit sale by name."""
+		self._no_item_discount_credit()
+		self._ended_ff()
+		draft = self._open_check(self._cart(item=ITEM_A))
+		with self.assertRaisesRegex(frappe.ValidationError, FNF_NOT_ELIGIBLE):
+			self._credit_sale(self._back_dated_fnf(ITEM_A), name=draft["name"])
+
+	def test_back_dated_fnf_customer_credit_sale_refused(self):
+		"""A4: paid with customer credit (no payment rows)."""
+		self._pos_settings(allow_user_to_edit_item_discount=0)
+		self._ended_ff()
+		invoice = dict(self._back_dated_fnf(ITEM_A), payments=[], redeemed_customer_credit=1)
+		with self.assertRaisesRegex(frappe.ValidationError, FNF_NOT_ELIGIBLE):
+			result = submit_invoice(
+				invoice=json.dumps(invoice), data=json.dumps({"redeemed_customer_credit": 1})
+			)
+			self.addCleanup(self._discard, result["name"])
+
+	def _stored_back_dated_draft(self):
+		"""B1: the unpaid open check may store the back-dated F&F row (the skip is kept
+		there); this draft is then submitted with a payment by a route that skips the POS."""
+		self._pos_settings(allow_user_to_edit_item_discount=0)
+		self._ended_ff()
+		doc = frappe.get_doc("Sales Invoice", self._open_check(self._back_dated_fnf(ITEM_A))["name"])
+		doc.append("payments", {"mode_of_payment": self.ctx.mode_of_payment, "amount": flt(doc.grand_total)})
+		invoices._set_payment_accounts(doc.payments, doc.company)
+		return doc
+
+	def test_stored_back_dated_fnf_draft_refused_at_client_submit(self):
+		"""B1 then B2: frappe.client.submit of that draft is refused."""
+		import frappe.client
+
+		doc = self._stored_back_dated_draft()
+		with self.assertRaisesRegex(frappe.ValidationError, FNF_NOT_ELIGIBLE):
+			frappe.client.submit(doc.as_dict(convert_dates_to_str=True))
+		self.assertEqual(frappe.db.get_value("Sales Invoice", doc.name, "docstatus"), 0)
+
+	def test_stored_back_dated_fnf_draft_refused_at_desk_submit(self):
+		"""B1 then B4: a Desk submit of that draft is refused."""
+		doc = self._stored_back_dated_draft()
+		doc.flags.ignore_permissions = True
+		with self.assertRaisesRegex(frappe.ValidationError, FNF_NOT_ELIGIBLE):
+			doc.submit()
+		self.assertEqual(frappe.db.get_value("Sales Invoice", doc.name, "docstatus"), 0)
+
+	def test_real_fnf_credit_sale_still_submits(self):
+		"""C4: an eligible customer's real F&F credit sale on a used offer's item submits at
+		14, and nothing more is recorded."""
+		self._no_item_discount_credit()
+		self._redeem()
+		self._enable_ff()
+		sale = self._credit_sale(self._marked_cart(30, posnext_discount_source=invoices.FNF_DISCOUNT_SOURCE))
+		self.assertEqual((sale.docstatus, flt(sale.items[0].rate)), (1, 14))
+		self.assertEqual(len(self._usage()), 1)
+
+	def _desk_invoice_dict(self):
+		return {
+			"doctype": "Sales Invoice",
+			"customer": self.customer,
+			"company": self.ctx.company,
+			"items": [{"item_code": ITEM_C, "qty": 1}],
+		}
+
+	def test_lapsed_fnf_offline_sync_logged_as_not_eligible(self):
+		"""M2: a late offline sync of an F&F row the customer is no longer eligible for is kept
+		and logged as an F&F row without eligibility, not as a manual discount."""
+		self._pos_settings(allow_user_to_edit_item_discount=0)
+		self._enable_ff_for_other_customer()
+		before = self._logs()
+		sale = self._submit(self._stale_fnf_cart(), offline=True)
+		self.assertEqual(sale.docstatus, 1)
+		errors = [frappe.db.get_value("Error Log", name, "error") or "" for name in self._logs() - before]
+		self.assertTrue([error for error in errors if "not eligible for Friends & Family" in error], errors)
+		self.assertFalse([error for error in errors if "item discounts are not allowed" in error], errors)
+
+	# ---- Task 8r fix round 4 (Ruling 130): a stored paid draft on every route ----------
+
+	def _price_rise(self, item=ITEM_A, price=60):
+		"""The item's list price rises during the shift (a price sync, say)."""
+		name, old = frappe.db.get_value(
+			"Item Price", {"item_code": item, "price_list": self.ctx.price_list}, ["name", "price_list_rate"]
+		)
+		frappe.db.set_value("Item Price", name, "price_list_rate", price)
+		self.addCleanup(frappe.db.set_value, "Item Price", name, "price_list_rate", old)
+		# A deploy or price sync may clear the cache: the stored draft's record survives it.
+		frappe.clear_cache()
+
+	def _fnf_a_cart(self):
+		cart = self._cart(item=ITEM_A, percentage=30)
+		cart["items"][0]["posnext_discount_source"] = invoices.FNF_DISCOUNT_SOURCE
+		return cart
+
+	def _printed_fnf_draft(self):
+		"""I-1: a real F&F sale at 35 (30% off 50), paid and printed through the POS; item
+		discounts off."""
+		self._pos_settings(allow_user_to_edit_item_discount=0)
+		self._enable_ff()
+		return self._printed(self._fnf_a_cart(), 35)
+
+	def _pay_on_desk(self, name):
+		"""A payment added to a stored draft and saved on Desk: the server's paid-row check
+		never ran on it."""
+		doc = frappe.get_doc("Sales Invoice", name)
+		doc.flags.ignore_permissions = True
+		doc.set("payments", self._payments(flt(doc.grand_total)))
+		invoices._set_payment_accounts(doc.payments, doc.company)
+		doc.save()
+		return doc
+
+	def test_printed_fnf_draft_closes_after_list_price_rise(self):
+		"""I-1: the list price rises from 50 to 60 during the shift; the printed F&F draft paid
+		at 35 still closes, at 35."""
+		printed = self._printed_fnf_draft()
+		self._price_rise()
+		self.assertEqual(self._close(printed), 1)
+		self.assertEqual(flt(frappe.db.get_value("Sales Invoice Item", {"parent": printed}, "rate")), 35)
+
+	def test_printed_fnf_draft_desk_submit_after_list_price_rise(self):
+		"""Ruling 130: the same leniency on a Desk submit and on frappe.client.submit."""
+		import frappe.client
+
+		printed = self._printed_fnf_draft()
+		other = self._printed(self._fnf_a_cart(), 35)
+		self._price_rise()
+		doc = frappe.get_doc("Sales Invoice", printed)
+		doc.flags.ignore_permissions = True
+		doc.submit()
+		self.assertEqual(frappe.db.get_value("Sales Invoice", printed, "docstatus"), 1)
+
+		frappe.client.submit(frappe.get_doc("Sales Invoice", other).as_dict(convert_dates_to_str=True))
+		self.assertEqual(frappe.db.get_value("Sales Invoice", other, "docstatus"), 1)
+
+	def test_stored_paid_draft_forged_lower_rate_in_memory_refused(self):
+		"""Forge: the stored paid draft holds 35; a rate of 30 set in memory is judged like a
+		new sale. Asked of the judge itself: on Desk, promotions' validate re-prices the
+		F&F row before before_submit runs."""
+		printed = self._printed_fnf_draft()
+		self._price_rise()
+		doc = frappe.get_doc("Sales Invoice", printed)
+		refused, held = invoices._fnf_rows_on_submit(doc)
+		self.assertEqual((refused, len(held)), ([], 1))
+		doc.items[0].rate = 30
+		refused, held = invoices._fnf_rows_on_submit(doc)
+		self.assertEqual(held, [])
+		self.assertEqual(len(refused), 1)
+		self.assertIn("item discounts are not allowed", refused[0])
+
+	def test_unpaid_stored_draft_forged_payment_in_memory_refused(self):
+		"""Forge: the stored draft is the unpaid open check at 35; a payment appended in
+		memory gives no leniency."""
+		self._pos_settings(allow_user_to_edit_item_discount=0)
+		self._enable_ff()
+		name = self._open_check(self._fnf_a_cart())["name"]
+		self._price_rise()
+		doc = frappe.get_doc("Sales Invoice", name)
+		doc.flags.ignore_permissions = True
+		doc.set("payments", self._payments(35))
+		invoices._set_payment_accounts(doc.payments, doc.company)
+		with self.assertRaisesRegex(frappe.ValidationError, "item discounts are not allowed"):
+			doc.submit()
+		self.assertEqual(frappe.db.get_value("Sales Invoice", name, "docstatus"), 0)
+
+	def test_desk_saved_payment_gives_no_leniency_at_close(self):
+		"""Forge: the unpaid open check at 35, then a payment saved on Desk, printed, and the
+		price rises: the DB holds a paid draft the server never checked, so the close is
+		refused."""
+		self._pos_settings(allow_user_to_edit_item_discount=0)
+		self._enable_ff()
+		name = self._open_check(self._fnf_a_cart())["name"]
+		self._pay_on_desk(name)
+		frappe.db.set_value("Sales Invoice", name, "posa_is_printed", 1)
+		self._price_rise()
+		with self.assertRaisesRegex(frappe.ValidationError, "item discounts are not allowed"):
+			self._close(name)
+		self.assertEqual(frappe.db.get_value("Sales Invoice", name, "docstatus"), 0)
+
+	def test_stored_back_dated_draft_paid_on_desk_refused_at_desk_submit(self):
+		"""B1, then a payment saved on Desk (a dirty Desk form saves before it submits), then
+		the submit: refused."""
+		self._pos_settings(allow_user_to_edit_item_discount=0)
+		self._ended_ff()
+		name = self._open_check(self._back_dated_fnf(ITEM_A))["name"]
+		self._pay_on_desk(name)
+		doc = frappe.get_doc("Sales Invoice", name)
+		doc.flags.ignore_permissions = True
+		with self.assertRaisesRegex(frappe.ValidationError, FNF_NOT_ELIGIBLE):
+			doc.submit()
+		self.assertEqual(frappe.db.get_value("Sales Invoice", name, "docstatus"), 0)
+
+	def test_stored_back_dated_draft_paid_on_desk_refused_by_name(self):
+		"""B1, then a payment saved on Desk, then the POS submits it by name: the Desk-saved
+		payment is no stored paid draft, so the row is judged like a new sale."""
+		self._pos_settings(allow_user_to_edit_item_discount=0)
+		self._ended_ff()
+		cart = self._back_dated_fnf(ITEM_A)
+		name = self._open_check(cart)["name"]
+		self._pay_on_desk(name)
+		with self.assertRaisesRegex(frappe.ValidationError, FNF_NOT_ELIGIBLE):
+			self._submit(cart, name=name, amount=35)
+		self.assertEqual(frappe.db.get_value("Sales Invoice", name, "docstatus"), 0)
+
+	# ---- Task 8r fix round 5 (Ruling 132): only the sealed rows themselves are held ----
+
+	def _sealed_draft_with_more_qty(self):
+		"""I-2: the printed F&F draft at 35 is sealed; the price rises; the row is submitted
+		with 5 units instead of 1, at the sealed rate."""
+		printed = self._printed_fnf_draft()
+		self._price_rise()
+		doc = frappe.get_doc("Sales Invoice", printed)
+		doc.items[0].qty = 5
+		doc.payments[0].amount = 175
+		return doc
+
+	def test_sealed_draft_more_qty_refused_at_client_submit(self):
+		"""X1: frappe.client.submit of the sealed draft with qty 1 -> 5 is judged like a new sale."""
+		import frappe.client
+
+		doc = self._sealed_draft_with_more_qty()
+		with self.assertRaisesRegex(frappe.ValidationError, "item discounts are not allowed"):
+			frappe.client.submit(doc.as_dict(convert_dates_to_str=True))
+		self.assertEqual(frappe.db.get_value("Sales Invoice", doc.name, "docstatus"), 0)
+
+	def test_sealed_draft_more_qty_refused_at_desk_form_submit(self):
+		"""X1h: the same through the Desk form's own Submit call (savedocs)."""
+		from frappe.desk.form.save import savedocs
+
+		doc = self._sealed_draft_with_more_qty()
+		with self.assertRaisesRegex(frappe.ValidationError, "item discounts are not allowed"):
+			savedocs(json.dumps(doc.as_dict(convert_dates_to_str=True), default=str), "Submit")
+		self.assertEqual(frappe.db.get_value("Sales Invoice", doc.name, "docstatus"), 0)
+
+	def test_sealed_draft_extra_row_refused_at_client_submit(self):
+		"""X1b: a second row of the same item at the sealed rate cannot reuse the sealed row's
+		match: refused."""
+		import frappe.client
+
+		printed = self._printed_fnf_draft()
+		self._price_rise()
+		doc = frappe.get_doc("Sales Invoice", printed)
+		row = doc.items[0].as_dict()
+		for key in ("name", "idx"):
+			row.pop(key, None)
+		doc.append("items", row)
+		doc.payments[0].amount = 70
+		with self.assertRaisesRegex(frappe.ValidationError, "item discounts are not allowed"):
+			frappe.client.submit(doc.as_dict(convert_dates_to_str=True))
+		self.assertEqual(frappe.db.get_value("Sales Invoice", printed, "docstatus"), 0)
+
+	def test_sealed_draft_re_saved_with_more_qty_refused(self):
+		"""A paid update_invoice re-save cannot carry the held leniency onto 5 units (and so
+		re-seal them): the changed row is judged like a new sale."""
+		printed = self._printed_fnf_draft()
+		self._price_rise()
+		cart = self._fnf_a_cart()
+		cart["items"][0]["qty"] = 5
+		with self.assertRaisesRegex(frappe.ValidationError, "item discounts are not allowed"):
+			update_invoice(json.dumps(dict(cart, name=printed, payments=self._payments(175))))
