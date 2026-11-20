@@ -44,7 +44,7 @@ def get_opening_dialog_data():
 		# Exclude wallet payment modes from opening balance
 		wallet_modes = get_wallet_payment_modes()
 
-		payment_filters = {"parent": ["in", pos_profiles_list]}
+		payment_filters = {"parent": ["in", pos_profiles_list], "allow_in_opening": 1}
 		if wallet_modes:
 			payment_filters["mode_of_payment"] = ["not in", wallet_modes]
 
