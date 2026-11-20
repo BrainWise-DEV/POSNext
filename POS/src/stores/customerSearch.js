@@ -8,6 +8,10 @@ import { computed, ref } from "vue";
 
 const log = logger.create("CustomerSearch");
 
+function normalizePhone(value) {
+	return String(value || "").replace(/\D/g, "");
+}
+
 export const useCustomerSearchStore = defineStore("customerSearch", () => {
 	// State
 	const allCustomers = ref([]);
@@ -28,13 +32,15 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 	// Ultra-fast search helper - optimized for speed
 	function quickMatch(search, customer) {
 		const term = search.toLowerCase();
+		const phoneTerm = normalizePhone(search);
 
-		// Get or create cached lowercase strings for this customer
+		// Get or create cached lowercase/normalized strings for this customer
 		let cached = searchIndex.value.get(customer.name);
 		if (!cached) {
 			cached = {
 				name: (customer.customer_name || "").toLowerCase(),
 				mobile: (customer.mobile_no || "").toLowerCase(),
+				mobileDigits: normalizePhone(customer.mobile_no),
 				email: (customer.email_id || "").toLowerCase(),
 				id: (customer.name || "").toLowerCase(),
 				// Pre-compute word starts for super fast word matching
@@ -55,7 +61,14 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 
 		if (cached.name.includes(term)) return 180; // Name contains
 
-		// Phone checks (very important for POS)
+		// Phone checks. Compare both displayed formatting and digits-only values so
+		// +965-50759556, 96550759556 and 50759556 all resolve consistently.
+		if (phoneTerm && cached.mobileDigits) {
+			if (cached.mobileDigits === phoneTerm) return 260;
+			if (cached.mobileDigits.startsWith(phoneTerm)) return 235;
+			if (cached.mobileDigits.endsWith(phoneTerm)) return 230;
+			if (cached.mobileDigits.includes(phoneTerm)) return 210;
+		}
 		if (cached.mobile === term) return 250;
 		if (cached.mobile.startsWith(term)) return 225;
 		if (cached.mobile.includes(term)) return 150;
@@ -110,39 +123,23 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 			return cachedResult;
 		}
 
-		// Ultra-fast search with early exit
+		// Scan once and keep both high- and lower-priority matches.
+		// The previous two-pass logic advanced the scan cursor through the entire
+		// customer list during pass one, which accidentally prevented partial mobile,
+		// email and ID matches from ever reaching pass two.
 		const results = [];
 		const maxResults = 50;
-		let scanned = 0;
 
-		// First pass: Get exact and high-scoring matches ONLY
 		for (const cust of allCustomers.value) {
-			scanned++;
 			const score = quickMatch(term, cust);
-
-			if (score >= 240) {
-				// High priority matches
+			if (score > 0) {
 				results.push({ customer: cust, score });
-				if (results.length >= maxResults) break; // Exit immediately when we have enough
 			}
 		}
 
-		// Second pass: Fill remaining slots with lower scores if needed
-		if (results.length < maxResults && scanned < allCustomers.value.length) {
-			for (let i = scanned; i < allCustomers.value.length; i++) {
-				const cust = allCustomers.value[i];
-				const score = quickMatch(term, cust);
-
-				if (score > 0 && score < 240) {
-					results.push({ customer: cust, score });
-					if (results.length >= maxResults) break;
-				}
-			}
-		}
-
-		// Sort ONLY what we found (much faster than sorting everything)
+		// Sort matched customers by relevance, then cap the rendered result set.
 		results.sort((a, b) => b.score - a.score);
-		const final = results.map((r) => r.customer);
+		const final = results.slice(0, maxResults).map((r) => r.customer);
 
 		// Cache this result for instant retrieval
 		resultCache.value.set(cacheKey, final);
