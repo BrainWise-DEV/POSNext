@@ -7,6 +7,7 @@
  * @param {string|null} args.customer - the selected customer name
  * @param {Object} args.paymentData - what the payment dialog collected
  * @param {string|null} [args.editedFrom] - the queued offline sale this one replaces
+ * @param {string|null} [args.idempotencyDoctype] - that key's doctype, when not an invoice
  * @param {string|null} [args.idempotencyKey] - the key of an online submit of this cart
  *   that got no answer (Ruling 139): the sync then returns that sale if it was made
  */
@@ -17,6 +18,7 @@ export function buildOfflineInvoiceData({
 	paymentData,
 	editedFrom = null,
 	idempotencyKey = null,
+	idempotencyDoctype = null,
 }) {
 	const data = {
 		pos_profile: cart.posProfile,
@@ -41,5 +43,9 @@ export function buildOfflineInvoiceData({
 		edited_from: editedFrom || null,
 	};
 	if (idempotencyKey) data.idempotency_key = idempotencyKey;
+	// An order's key carried by this sale (Ruling 146 (c)): the server looks it up as one.
+	if (idempotencyKey && idempotencyDoctype && idempotencyDoctype !== "Sales Invoice") {
+		data.idempotency_doctype = idempotencyDoctype;
+	}
 	return data;
 }

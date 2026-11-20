@@ -71,6 +71,7 @@ vi.mock("@/stores/posSettings", () => ({
 const { usePOSCartStore } = await import("@/stores/posCart")
 const { usePaymentOpenCheck } = await import("@/composables/usePaymentOpenCheck")
 const { cleanupUserSession } = await import("@/utils/sessionCleanup")
+const { offlineState } = await import("@/utils/offline/offlineState")
 
 const item = {
 	item_code: "A",
@@ -83,6 +84,19 @@ const item = {
 }
 
 const keys = () => server.submits.map((s) => s.data.idempotency_key)
+
+/** The key this very cart carries (its pending submit's, when the cart is unchanged), else null. */
+const keyFor = (cart) =>
+	cart.pendingSubmit && cart.pendingMatchesCart("Sales Invoice") ? cart.pendingSubmit.key : null
+
+/** Offline, does the checkout ask the cashier "is this the same sale?" (Rulings 146, 149)? */
+async function offlineAsks(cart) {
+	const running = cart.settlePendingSubmit({ offline: true })
+	const asked = Boolean(cart.submitDecision)
+	if (asked) cart.decideSubmit(null)
+	await running
+	return asked
+}
 
 describe("online submit idempotency", () => {
 	let cart
@@ -101,6 +115,8 @@ describe("online submit idempotency", () => {
 			checkSynced: undefined,
 		})
 		toast.messages.length = 0
+		// Online throughout, as POSSale's online branch is (the real flag follows timers).
+		vi.spyOn(offlineState, "isOffline", "get").mockReturnValue(false)
 		cart = usePOSCartStore()
 		cart.posProfile = "POS-1"
 		cart.customer = "CUST-1"
@@ -120,8 +136,10 @@ describe("online submit idempotency", () => {
 		expect(cart.invoiceItems).toHaveLength(1)
 		expect(cart.hasUnresolvedSubmit()).toBe(true)
 
+		// Ruling 149: the very cart, retried: no gate, the same key, the server's sale.
 		const result = await cart.submitInvoice()
 		expect(result.name).toBe("SINV-1")
+		expect(server.checks).toEqual([])
 		expect(keys()).toHaveLength(2)
 		expect(keys()[1]).toBe(keys()[0])
 		expect(server.seq).toBe(1)
@@ -173,21 +191,21 @@ describe("online submit idempotency", () => {
 	it("the same cart queued offline after a lost response carries its key (Ruling 139)", async () => {
 		server.loseNext = true
 		await expect(cart.submitInvoice()).rejects.toThrow()
-		expect(cart.submitKeyForCart()).toBe(keys()[0])
-		expect(cart.offlineCheckoutBlocked()).toBe(false)
+		expect(keyFor(cart)).toBe(keys()[0])
+		expect(await offlineAsks(cart)).toBe(false)
 	})
 
 	it("a changed cart after a lost response cannot carry the key: offline checkout is blocked", async () => {
 		server.loseNext = true
 		await expect(cart.submitInvoice()).rejects.toThrow()
 		cart.addItem({ ...item, item_code: "B", item_name: "B" })
-		expect(cart.submitKeyForCart()).toBeNull()
-		expect(cart.offlineCheckoutBlocked()).toBe(true)
+		expect(keyFor(cart)).toBeNull()
+		expect(await offlineAsks(cart)).toBe(true)
 	})
 
-	it("no online attempt: no key and nothing blocked", () => {
-		expect(cart.submitKeyForCart()).toBeNull()
-		expect(cart.offlineCheckoutBlocked()).toBe(false)
+	it("no online attempt: no key and nothing blocked", async () => {
+		expect(keyFor(cart)).toBeNull()
+		expect(await offlineAsks(cart)).toBe(false)
 	})
 
 	it("offline, a blocked checkout never opens payment", async () => {
@@ -210,25 +228,26 @@ describe("online submit idempotency", () => {
 		await expect(cart.submitInvoice()).rejects.toThrow()
 		await cart.clearCart()
 		cart.addItem({ ...item, item_code: "B", item_name: "B" })
-		expect(cart.offlineCheckoutBlocked()).toBe(false)
-		expect(cart.submitKeyForCart()).toBeNull()
+		expect(await offlineAsks(cart)).toBe(false)
+		expect(keyFor(cart)).toBeNull()
 	})
 
 	it("Ruling 141: an edited re-entry of the unanswered cart (not cleared) is blocked", async () => {
 		server.loseNext = true
 		await expect(cart.submitInvoice()).rejects.toThrow()
 		cart.updateItemQuantity(cart.invoiceItems[0].item_code, 2)
-		expect(cart.offlineCheckoutBlocked()).toBe(true)
+		expect(await offlineAsks(cart)).toBe(true)
 	})
 
-	it("Ruling 141: an exact re-entry after Clear Cart carries the key", async () => {
+	it("Ruling 141/146: an exact re-entry after Clear Cart matches the key; offline the cashier is asked", async () => {
 		server.loseNext = true
 		await expect(cart.submitInvoice()).rejects.toThrow()
 		await cart.clearCart()
 		cart.customer = "CUST-1"
 		cart.addItem({ ...item })
-		expect(cart.submitKeyForCart()).toBe(keys()[0])
-		expect(cart.offlineCheckoutBlocked()).toBe(false)
+		expect(keyFor(cart)).toBe(keys()[0])
+		// A cleared cart rung again may be a new sale: the cashier decides (Ruling 146 (b)).
+		expect(await offlineAsks(cart)).toBe(true)
 	})
 
 	it("Ruling 143: a sale the server made is told once, then its key is dropped", async () => {
@@ -239,20 +258,24 @@ describe("online submit idempotency", () => {
 		server.checkFails = true
 		await cart.resolvePendingSubmit()
 		expect(toast.messages).toEqual([])
+		expect(cart.madeSaleNotice).toBeNull()
 		cart.customer = "CUST-1"
 		cart.addItem({ ...item })
-		expect(cart.submitKeyForCart()).toBe(keys()[0])
+		expect(keyFor(cart)).toBe(keys()[0])
 		await cart.clearCart()
 		server.checkFails = false
 		await cart.resolvePendingSubmit()
 		expect(server.checks.at(-1)).toBe(`pos_online:${keys()[0]}`)
-		// The spec's __() appends the arguments to the template.
-		expect(toast.messages).toEqual(["The last sale was saved as {0} SINV-1"])
+		// A dialog the cashier must dismiss (F6, Ruling 144), not a toast.
+		expect(cart.madeSaleNotice).toBe("SINV-1")
+		expect(toast.messages).toEqual([])
+		cart.dismissMadeSaleNotice()
+		expect(cart.madeSaleNotice).toBeNull()
 		await cart.resolvePendingSubmit()
-		expect(toast.messages).toHaveLength(1)
+		expect(cart.madeSaleNotice).toBeNull()
 		cart.customer = "CUST-1"
 		cart.addItem({ ...item })
-		expect(cart.submitKeyForCart()).toBeNull()
+		expect(keyFor(cart)).toBeNull()
 	})
 
 	it("Ruling 143: an identical next sale after that makes a new invoice", async () => {
@@ -276,8 +299,9 @@ describe("online submit idempotency", () => {
 		await cart.resolvePendingSubmit()
 		cart.customer = "CUST-1"
 		cart.addItem({ ...item })
-		expect(cart.submitKeyForCart()).toBeNull()
+		expect(keyFor(cart)).toBeNull()
 		expect(toast.messages).toEqual([])
+		expect(cart.madeSaleNotice).toBeNull()
 	})
 
 	it("on reconnect the key of a cart still on screen is kept (the resume re-sends it)", async () => {
@@ -285,14 +309,14 @@ describe("online submit idempotency", () => {
 		await expect(cart.submitInvoice()).rejects.toThrow()
 		await cart.resolvePendingSubmit()
 		expect(cart.hasUnresolvedSubmit()).toBe(true)
-		expect(cart.submitKeyForCart()).toBe(keys()[0])
+		expect(keyFor(cart)).toBe(keys()[0])
 	})
 
 	it("the key is dropped on shift close and on logout", async () => {
 		server.loseNext = true
 		await expect(cart.submitInvoice()).rejects.toThrow()
 		cart.dropPendingSubmit()
-		expect(cart.submitKeyForCart()).toBeNull()
+		expect(keyFor(cart)).toBeNull()
 		expect(cart.hasUnresolvedSubmit()).toBe(false)
 
 		cart.customer = "CUST-1"
@@ -302,8 +326,8 @@ describe("online submit idempotency", () => {
 		expect(cart.invoiceItems).toHaveLength(0)
 		cart.customer = "CUST-1"
 		cart.addItem({ ...item })
-		expect(cart.submitKeyForCart()).toBeNull()
-		expect(cart.offlineCheckoutBlocked()).toBe(false)
+		expect(keyFor(cart)).toBeNull()
+		expect(await offlineAsks(cart)).toBe(false)
 	})
 
 	it("the cart hash does not depend on row order", async () => {
@@ -314,7 +338,7 @@ describe("online submit idempotency", () => {
 		cart.customer = "CUST-1"
 		cart.addItem({ ...item, item_code: "B", item_name: "B" })
 		cart.addItem({ ...item })
-		expect(cart.submitKeyForCart()).toBe(keys()[0])
+		expect(keyFor(cart)).toBe(keys()[0])
 	})
 
 	it("N-5: an answered online submit lifts the block", async () => {
@@ -324,18 +348,21 @@ describe("online submit idempotency", () => {
 		cart.customer = "CUST-1"
 		cart.addItem({ ...item, item_code: "B", item_name: "B" })
 		cart.payments = [{ mode_of_payment: "Cash", amount: 50 }]
+		// Ruling 146 (a): the server says the last sale was made: told, this submit stops.
+		expect(await cart.submitInvoice()).toEqual({ stopped: true })
+		expect(cart.madeSaleNotice).toBe("SINV-1")
 		expect((await cart.submitInvoice())?.name).toBeTruthy()
 		cart.addItem({ ...item })
-		expect(cart.offlineCheckoutBlocked()).toBe(false)
+		expect(await offlineAsks(cart)).toBe(false)
 	})
 
 	it("a key handed to the queued offline sale no longer blocks", async () => {
 		server.loseNext = true
 		await expect(cart.submitInvoice()).rejects.toThrow()
-		expect(cart.submitKeyForCart()).toBeTruthy()
+		expect(keyFor(cart)).toBeTruthy()
 		cart.releaseSubmitKey()
 		await cart.clearCart()
 		cart.addItem({ ...item })
-		expect(cart.offlineCheckoutBlocked()).toBe(false)
+		expect(await offlineAsks(cart)).toBe(false)
 	})
 })

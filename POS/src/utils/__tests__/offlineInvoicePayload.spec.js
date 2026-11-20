@@ -63,4 +63,12 @@ describe("buildOfflineInvoiceData", () => {
 		const plain = buildOfflineInvoiceData({ cart: cart(), shift, customer: "Cust", paymentData: {} });
 		expect(plain).not.toHaveProperty("idempotency_key");
 	});
+
+	it("an order's carried key names its doctype; an invoice's does not (Ruling 146 (c))", () => {
+		const base = { cart: cart(), shift, customer: "Cust", paymentData: {}, idempotencyKey: "key-12345678" };
+		const order = buildOfflineInvoiceData({ ...base, idempotencyDoctype: "Sales Order" });
+		expect(order.idempotency_doctype).toBe("Sales Order");
+		const invoice = buildOfflineInvoiceData({ ...base, idempotencyDoctype: "Sales Invoice" });
+		expect(invoice).not.toHaveProperty("idempotency_doctype");
+	});
 });

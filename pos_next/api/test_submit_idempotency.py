@@ -187,6 +187,188 @@ class TestSubmitIdempotency(FrappeTestCase):
 				submit_invoice(invoice=json.dumps(self._invoice()), data=json.dumps({"idempotency_key": bad}))
 
 
+def _discard_order(name):
+	if not frappe.db.exists("Sales Order", name):
+		return
+	doc = frappe.get_doc("Sales Order", name)
+	if doc.docstatus == 1:
+		doc.flags.ignore_permissions = True
+		doc.cancel()
+	frappe.delete_doc("Sales Order", name, force=True, ignore_permissions=True)
+
+
+class TestSalesOrderSubmitKey(FrappeTestCase):
+	"""F6 item 2 (Ruling 138, F4 I-R1): the key covers a Sales Order submit too, so a
+	restored or retried Sales Order cart never makes a second order."""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		cls.ctx = _ctx()
+
+	def setUp(self):
+		frappe.set_user("Administrator")
+
+	def _order(self):
+		payload = _cart_payload(self.ctx, [_line(self.ctx, ITEM_A)])
+		payload.update({"doctype": "Sales Order", "delivery_date": frappe.utils.nowdate(), "payments": []})
+		return payload
+
+	def _submit(self, order, key):
+		result = submit_invoice(invoice=json.dumps(order), data=json.dumps({"idempotency_key": key}))
+		self.addCleanup(_discard_order, result["name"])
+		return result
+
+	def _count(self):
+		return frappe.db.count("Sales Order", {"customer": self.ctx.customer, "docstatus": 1})
+
+	def _f6_key(self):
+		return f"_PNXT_F6_{frappe.generate_hash(length=20)}"
+
+	def test_repeated_key_returns_the_submitted_order(self):
+		key = self._f6_key()
+		first = self._submit(self._order(), key)
+		self.assertEqual(frappe.db.get_value("Sales Order", first["name"], "docstatus"), 1)
+		before = self._count()
+		again = self._submit(self._order(), key)
+		self.assertEqual(again["name"], first["name"])
+		self.assertTrue(again.get("duplicate_prevented"))
+		self.assertEqual(again.get("idempotency_key"), key)
+		self.assertEqual(self._count(), before, "the retry created a second Sales Order")
+
+	def test_retry_by_name_of_a_new_order_draft_returns_the_order(self):
+		"""The POS saves an order draft before each submit: the retry's new draft is not
+		submitted, the first order is returned."""
+		key = self._f6_key()
+		first = self._submit(self._order(), key)
+		draft = update_invoice(json.dumps(self._order()))
+		self.addCleanup(_discard_order, draft["name"])
+		again = self._submit(dict(self._order(), name=draft["name"]), key)
+		self.assertEqual(again["name"], first["name"])
+		self.assertEqual(frappe.db.get_value("Sales Order", draft["name"], "docstatus"), 0)
+
+	def test_an_order_key_is_not_an_invoice_key(self):
+		"""Reserved per doctype: the same key on an invoice is another sale."""
+		key = self._f6_key()
+		order = self._submit(self._order(), key)
+		invoice = dict(_cart_payload(self.ctx, [_line(self.ctx, ITEM_A)]))
+		invoice["payments"] = [{"mode_of_payment": self.ctx.mode_of_payment, "amount": ITEM_PRICES[ITEM_A]}]
+		made = submit_invoice(invoice=json.dumps(invoice), data=json.dumps({"idempotency_key": key}))
+		self.addCleanup(_discard, made["name"])
+		self.assertTrue(frappe.db.exists("Sales Invoice", made["name"]))
+		self.assertFalse(made.get("duplicate_prevented"))
+		self.assertNotEqual(made["name"], order["name"])
+
+	def test_check_reports_the_made_order(self):
+		"""The POS asks about a cleared key on reconnect (Ruling 143) under its doctype."""
+		key = self._f6_key()
+		order = self._submit(self._order(), key)
+		answer = invoices.check_offline_invoice_synced(f"{invoices.ONLINE_ORDER_KEY_PREFIX}{key}")
+		self.assertTrue(answer.get("synced"))
+		self.assertEqual(answer.get("sales_invoice"), order["name"])
+		self.assertTrue(invoices.ONLINE_ORDER_KEY_PREFIX.startswith(invoices.ONLINE_SUBMIT_KEY_PREFIX))
+
+	def test_offline_sale_carrying_an_order_key_returns_the_order(self):
+		"""Ruling 146 (c): offline, the cashier says it is the same sale as an order whose
+		response was lost. The queued sale (a Sales Invoice payload) carries the order's
+		key and its doctype: the sync returns the order, no invoice is made."""
+		key = self._f6_key()
+		order = self._submit(self._order(), key)
+		invoice = dict(_cart_payload(self.ctx, [_line(self.ctx, ITEM_A)]))
+		invoice["payments"] = [{"mode_of_payment": self.ctx.mode_of_payment, "amount": ITEM_PRICES[ITEM_A]}]
+		offline_id = f"pos_offline__PNXT_F6_{frappe.generate_hash(length=12)}"
+		invoice.update({"offline_id": offline_id, "idempotency_key": key, "idempotency_doctype": "Sales Order"})
+		before = frappe.db.count("Sales Invoice", {"customer": self.ctx.customer, "docstatus": 1})
+		synced = submit_invoice(invoice=json.dumps(invoice), data=json.dumps({}))
+		if frappe.db.exists("Sales Invoice", synced["name"]):
+			self.addCleanup(_discard, synced["name"])
+		self.assertEqual(synced["name"], order["name"])
+		self.assertTrue(synced.get("duplicate_prevented"))
+		self.assertEqual(frappe.db.count("Sales Invoice", {"customer": self.ctx.customer, "docstatus": 1}), before)
+		# Ruling 149: no sync row names the order under the offline id (a broken
+		# Sales Invoice link in the health report); a re-sync is caught by the key.
+		self.assertFalse(frappe.db.exists(SYNC, {"offline_id": offline_id}))
+		again = submit_invoice(invoice=json.dumps(invoice), data=json.dumps({}))
+		self.assertEqual(again["name"], order["name"])
+
+	def test_a_key_carried_into_an_order_is_found_on_a_second_retry(self):
+		"""m-e: an invoice cart's key carried into an order ([Same sale]); the order is made
+		under the invoice key. A second lost response, retried with the same carry, returns
+		that order instead of making a second one."""
+		key = self._f6_key()
+		carried = dict(self._order(), idempotency_doctype="Sales Invoice")
+		first = self._submit(carried, key)
+		before = self._count()
+		again = self._submit(carried, key)
+		self.assertEqual(again["name"], first["name"])
+		self.assertEqual(self._count(), before)
+
+	def test_invalid_key_doctype_refused(self):
+		invoice = dict(_cart_payload(self.ctx, [_line(self.ctx, ITEM_A)]))
+		invoice["payments"] = [{"mode_of_payment": self.ctx.mode_of_payment, "amount": ITEM_PRICES[ITEM_A]}]
+		with patch.object(invoices, "_validate_stock_on_invoice", side_effect=AssertionError("not reached")):
+			with self.assertRaises(frappe.ValidationError) as caught:
+				submit_invoice(
+					invoice=json.dumps(invoice),
+					data=json.dumps({"idempotency_key": self._f6_key(), "idempotency_doctype": "Journal Entry"}),
+				)
+		self.assertIn("Invalid submit key", str(caught.exception))
+
+	def test_a_cancelled_order_frees_its_key(self):
+		"""The key's row points at an order that is gone: the retry makes the order (the
+		row is reused although its link column holds an order name)."""
+		key = self._f6_key()
+		first = self._submit(self._order(), key)
+		doc = frappe.get_doc("Sales Order", first["name"])
+		doc.flags.ignore_permissions = True
+		doc.cancel()
+		again = self._submit(self._order(), key)
+		self.assertNotEqual(again["name"], first["name"])
+		self.assertEqual(frappe.db.get_value("Sales Order", again["name"], "docstatus"), 1)
+
+
+class TestSubmittedBeforeStock(FrappeTestCase):
+	"""F6 item 3 (Ruling 138, F4 re-review): saving a draft that was already submitted
+	is refused as submitted, before stock is checked, so a stock error (the sale took
+	the last unit) never hides it from the POS."""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		cls.ctx = _ctx()
+
+	def setUp(self):
+		frappe.set_user("Administrator")
+
+	def test_submitted_draft_refused_as_submitted_not_as_stock(self):
+		line = _line(self.ctx, ITEM_A)
+		payload = _cart_payload(self.ctx, [line])
+		payload["payments"] = [{"mode_of_payment": self.ctx.mode_of_payment, "amount": ITEM_PRICES[ITEM_A]}]
+		made = submit_invoice(invoice=json.dumps(payload), data=json.dumps({}))
+		self.addCleanup(_discard, made["name"])
+		stock_error = [{"item_code": ITEM_A, "message": "_PNXT_F6_ out of stock"}]
+		with patch.object(invoices, "_should_block", return_value=True), patch.object(
+			invoices, "_collect_stock_errors", return_value=stock_error
+		):
+			with self.assertRaises(frappe.DocstatusTransitionError) as caught:
+				update_invoice(json.dumps(dict(payload, name=made["name"], payments=[])))
+		self.assertIn(made["name"], str(caught.exception))
+		self.assertEqual(frappe.db.get_value("Sales Invoice", made["name"], "docstatus"), 1)
+
+	def test_a_draft_still_gets_the_stock_error(self):
+		"""Guard: a real draft is still refused for stock."""
+		payload = _cart_payload(self.ctx, [_line(self.ctx, ITEM_A)])
+		draft = update_invoice(json.dumps(payload))
+		self.addCleanup(_discard, draft["name"])
+		stock_error = [{"item_code": ITEM_A, "message": "_PNXT_F6_ out of stock"}]
+		with patch.object(invoices, "_should_block", return_value=True), patch.object(
+			invoices, "_collect_stock_errors", return_value=stock_error
+		):
+			with self.assertRaises(frappe.ValidationError) as caught:
+				update_invoice(json.dumps(dict(payload, name=draft["name"])))
+		self.assertNotIsInstance(caught.exception, frappe.DocstatusTransitionError)
+
+
 class TestSubmitIdempotencyConcurrent(unittest.TestCase):
 	"""Two requests with one key at the same time, each on its own DB connection.
 
@@ -304,6 +486,79 @@ class TestSubmitKeysDoNotSerialise(unittest.TestCase):
 		print("KEYS timing", timing, "errors", errors, flush=True)
 		self.assertEqual(errors, [])
 		self.assertLess(timing[second], 3, "the second key waited on the first key's open reservation")
+
+
+class TestKeyCheckSeesInFlight(unittest.TestCase):
+	"""Ruling 149 (C-1): asking about a key never reports a submit that is still running
+	as "not made". The check probes by inserting the reservation in a savepoint (a record
+	lock through the unique index, no gap lock) and rolls it back; a Pending or
+	uncommitted reservation answers as in flight, which the POS treats as no answer."""
+
+	HOLD = 3
+
+	def setUp(self):
+		frappe.set_user("Administrator")
+		self.ids = []
+
+	def tearDown(self):
+		frappe.db.rollback()
+		for offline_id in self.ids:
+			frappe.db.delete(SYNC, {"offline_id": offline_id})
+		frappe.db.commit()
+
+	def _id(self):
+		offline_id = f"{invoices.ONLINE_SUBMIT_KEY_PREFIX}_PNXT_F6_{frappe.generate_hash(length=16)}"
+		self.ids.append(offline_id)
+		return offline_id
+
+	def test_a_pending_reservation_is_in_flight(self):
+		offline_id = self._id()
+		invoices._insert_sync_reservation(offline_id)
+		frappe.db.commit()
+		answer = invoices.check_offline_invoice_synced(offline_id)
+		self.assertFalse(answer.get("synced"))
+		self.assertTrue(answer.get("in_flight"), answer)
+
+	def test_a_key_never_made_is_not_in_flight(self):
+		answer = invoices.check_offline_invoice_synced(self._id())
+		self.assertFalse(answer.get("synced"))
+		self.assertFalse(answer.get("in_flight"))
+		self.assertEqual(frappe.db.count(SYNC, {"offline_id": self.ids[-1]}), 0, "the probe left a row")
+
+	def test_an_uncommitted_reservation_is_waited_for_and_reported_in_flight(self):
+		"""The first submit is still running: its reservation is not committed yet."""
+		offline_id = self._id()
+		site = frappe.local.site
+		reserved = threading.Event()
+		errors = []
+
+		def hold():
+			frappe.init(site=site)
+			frappe.connect()
+			try:
+				frappe.set_user("Administrator")
+				invoices._insert_sync_reservation(offline_id)
+				reserved.set()
+				time.sleep(self.HOLD)
+				frappe.db.commit()  # the reservation lands (still Pending: the submit goes on)
+			except Exception as error:
+				errors.append(f"{type(error).__name__}: {error}")
+				reserved.set()
+			finally:
+				frappe.destroy()
+
+		thread = threading.Thread(target=hold)
+		thread.start()
+		reserved.wait(timeout=30)
+		frappe.db.rollback()
+		started = time.monotonic()
+		answer = invoices.check_offline_invoice_synced(offline_id)
+		waited = time.monotonic() - started
+		thread.join(timeout=60)
+		self.assertEqual(errors, [])
+		self.assertFalse(answer.get("synced"))
+		self.assertTrue(answer.get("in_flight"), answer)
+		self.assertGreater(waited, self.HOLD - 1, "the check did not wait for the open reservation")
 
 
 class TestSyncHealthReport(FrappeTestCase):

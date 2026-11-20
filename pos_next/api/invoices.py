@@ -30,6 +30,7 @@ FIELD_ALLOW_NEGATIVE_STOCK = "allow_negative_stock"
 
 # Doctypes
 DOCTYPE_SALES_INVOICE = "Sales Invoice"
+DOCTYPE_SALES_ORDER = "Sales Order"
 DOCTYPE_POS_SETTINGS = "POS Settings"
 DOCTYPE_POS_PROFILE = "POS Profile"
 DOCTYPE_COMMENT = "Comment"
@@ -2827,6 +2828,13 @@ def _update_invoice(data: str | dict, offline_sync: bool = False, submitting: bo
 		paid_draft_rows = []
 		if data.get("name"):
 			invoice_doc = frappe.get_doc(doctype, data.get("name"))
+			if invoice_doc.docstatus == 1:
+				# First, before any check (stock among them): the POS reads this as "already
+				# submitted" and closes the cart as sold (F6, Ruling 138).
+				frappe.throw(
+					_("Invoice {0} was already submitted").format(invoice_doc.name),
+					frappe.DocstatusTransitionError,
+				)
 			paid_draft_free = _paid_draft_free_qty(invoice_doc)
 			stored_sources = _stored_line_sources(invoice_doc)
 			paid_draft_rates = _paid_draft_rates(invoice_doc)
@@ -3212,6 +3220,8 @@ def _reuse_sync_record(sync_record_name):
 	sync_doc.status = "Pending"
 	sync_doc.synced_at = None
 	sync_doc.flags.ignore_permissions = True
+	# An order key's row holds a Sales Order name in the link column (F6).
+	sync_doc.flags.ignore_links = True
 	sync_doc.save()
 	return {"already_synced": False, "sync_record_name": sync_record_name}
 
@@ -3243,7 +3253,9 @@ def _insert_sync_reservation(offline_id, pos_profile=None, customer=None) -> str
 	return name
 
 
-def _ensure_offline_uniqueness(offline_id, pos_profile=None, customer=None, _retry=True):
+def _ensure_offline_uniqueness(
+	offline_id, pos_profile=None, customer=None, _retry=True, doctype=DOCTYPE_SALES_INVOICE
+):
 	"""
 	Ensure offline invoice uniqueness with race condition protection.
 
@@ -3260,6 +3272,8 @@ def _ensure_offline_uniqueness(offline_id, pos_profile=None, customer=None, _ret
 	    offline_id: The unique offline ID from the client
 	    pos_profile: POS Profile name
 	    customer: Customer name
+	    doctype: what the record's link column names: a Sales Invoice, or a Sales
+	        Order for an order's online submit key (F6)
 
 	Returns:
 	    dict with:
@@ -3282,7 +3296,7 @@ def _ensure_offline_uniqueness(offline_id, pos_profile=None, customer=None, _ret
 	if not existing_sync:
 		# Deleted between the insert and the read (or a name collision): once more.
 		if _retry:
-			return _ensure_offline_uniqueness(offline_id, pos_profile, customer, _retry=False)
+			return _ensure_offline_uniqueness(offline_id, pos_profile, customer, _retry=False, doctype=doctype)
 		frappe.throw(_("This invoice is currently being processed. Please wait."), title="SYNC_IN_PROGRESS")
 
 	if existing_sync.pos_profile and existing_sync.pos_profile != pos_profile:
@@ -3310,7 +3324,15 @@ def _ensure_offline_uniqueness(offline_id, pos_profile=None, customer=None, _ret
 
 	# Handle Synced status - verify invoice still valid
 	if sync_status == "Synced" and existing_sync.sales_invoice:
-		invoice_data = _synced_invoice_data(existing_sync.sales_invoice)
+		invoice_data = _synced_invoice_data(existing_sync.sales_invoice, doctype)
+		if not invoice_data and str(offline_id).startswith(ONLINE_SUBMIT_KEY_PREFIX):
+			# A key carried across doctypes completes under the document made (m-e).
+			for other in _key_doctypes(offline_id)[1:]:
+				# A plain check first: a locking read of a missing name takes a gap lock.
+				if frappe.db.exists(other, existing_sync.sales_invoice):
+					invoice_data = _synced_invoice_data(existing_sync.sales_invoice, other)
+				if invoice_data:
+					break
 		if invoice_data:
 			invoice_data["offline_id"] = offline_id
 			return {"already_synced": True, "invoice_data": invoice_data}
@@ -3328,15 +3350,17 @@ def _record_offline_id_as(offline_id, invoice_name, pos_profile=None, customer=N
 		_complete_offline_sync(result["sync_record_name"], invoice_name, strict=True)
 
 
-def _synced_invoice_data(invoice_name) -> dict | None:
-	"""What a repeated submit returns for the submitted invoice ``invoice_name``, or None.
+def _synced_invoice_data(invoice_name, doctype=DOCTYPE_SALES_INVOICE) -> dict | None:
+	"""What a repeated submit returns for the submitted ``doctype`` ``invoice_name``, or None.
 
 	A locking read: after waiting on the other request's reservation, this transaction's
 	REPEATABLE READ snapshot predates that request's commit, so a plain read would not
 	see the invoice it made.
 	"""
-	fields = ["name", "docstatus", "grand_total", "total", "net_total", "outstanding_amount", "paid_amount", "change_amount"]
-	existing = frappe.db.get_value("Sales Invoice", invoice_name, fields, as_dict=True, for_update=True)
+	fields = ["name", "docstatus", "grand_total", "total", "net_total"]
+	if doctype == DOCTYPE_SALES_INVOICE:
+		fields += ["outstanding_amount", "paid_amount", "change_amount"]
+	existing = frappe.db.get_value(doctype, invoice_name, fields, as_dict=True, for_update=True)
 	if not existing or existing.docstatus != 1:
 		return None
 	return {
@@ -3345,9 +3369,9 @@ def _synced_invoice_data(invoice_name) -> dict | None:
 		"grand_total": existing.grand_total,
 		"total": existing.total,
 		"net_total": existing.net_total,
-		"outstanding_amount": existing.outstanding_amount or 0,
-		"paid_amount": existing.paid_amount or 0,
-		"change_amount": existing.change_amount or 0,
+		"outstanding_amount": existing.get("outstanding_amount") or 0,
+		"paid_amount": existing.get("paid_amount") or 0,
+		"change_amount": existing.get("change_amount") or 0,
 		"duplicate_prevented": True,
 	}
 
@@ -3408,6 +3432,8 @@ def _cleanup_failed_sync(sync_record_name):
 		sync_doc.status = "Failed"
 		sync_doc.synced_at = frappe.utils.now_datetime()
 		sync_doc.flags.ignore_permissions = True
+		# An order key's row holds a Sales Order name in the link column (F6).
+		sync_doc.flags.ignore_links = True
 		sync_doc.save()
 	except Exception as error:
 		frappe.log_error(
@@ -3419,6 +3445,10 @@ def _cleanup_failed_sync(sync_record_name):
 # An online submit's client key (D-19) is reserved in the Offline Invoice Sync table
 # under this prefix: the unique ``offline_id`` index makes one invoice per key.
 ONLINE_SUBMIT_KEY_PREFIX = "pos_online:"
+# A Sales Order's key (F6): reserved per doctype, so an order key is never an invoice
+# key. Under the same prefix, so the sync report still leaves it out; a key cannot
+# contain ":". The row's ``sales_invoice`` column then holds the order's name.
+ONLINE_ORDER_KEY_PREFIX = f"{ONLINE_SUBMIT_KEY_PREFIX}SO:"
 _ONLINE_SUBMIT_KEY_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
 
 
@@ -3426,17 +3456,47 @@ def _online_submit_key(invoice, data, doctype) -> str | None:
 	"""The reservation name of an online submit's ``idempotency_key``, or None.
 
 	The POS sends one key per checkout attempt and keeps it while it retries the same
-	cart. Only a Sales Invoice is reserved (the sync row links a Sales Invoice); an
-	offline sale is reserved by its ``offline_id`` instead.
+	cart. A Sales Invoice and a Sales Order are reserved, each under its own prefix
+	(F6); an offline sale is reserved by its ``offline_id`` instead.
 	"""
 	key = data.get("idempotency_key")
 	if key is None:
 		key = invoice.get("idempotency_key")
-	if key is None or doctype != DOCTYPE_SALES_INVOICE:
+	if key is None or doctype not in (DOCTYPE_SALES_INVOICE, DOCTYPE_SALES_ORDER):
 		return None
 	if not isinstance(key, str) or not 8 <= len(key) <= 100 or not set(key) <= _ONLINE_SUBMIT_KEY_CHARS:
 		frappe.throw(_("Invalid submit key"))
-	return f"{ONLINE_SUBMIT_KEY_PREFIX}{key}"
+	prefix = ONLINE_ORDER_KEY_PREFIX if _key_doctype_of(invoice, data, doctype) == DOCTYPE_SALES_ORDER else ONLINE_SUBMIT_KEY_PREFIX
+	return f"{prefix}{key}"
+
+
+def _key_doctype_of(invoice, data, doctype) -> str:
+	"""The doctype a submit key was made for (Ruling 146 (c)). It is the submitted one,
+	unless the cashier carried an earlier sale's key over (``idempotency_doctype``): an
+	offline sale queued as an invoice may be the same sale as an order whose response
+	was lost, and must then find that order."""
+	key_doctype = data.get("idempotency_doctype") or invoice.get("idempotency_doctype") or doctype
+	if key_doctype not in (DOCTYPE_SALES_INVOICE, DOCTYPE_SALES_ORDER):
+		frappe.throw(_("Invalid submit key"))
+	return key_doctype
+
+
+def _key_doctype(offline_id) -> str:
+	"""The doctype a sync record's link column names (F6)."""
+	if str(offline_id or "").startswith(ONLINE_ORDER_KEY_PREFIX):
+		return DOCTYPE_SALES_ORDER
+	return DOCTYPE_SALES_INVOICE
+
+
+def _key_doctypes(offline_id) -> tuple:
+	"""Where an online key's sale may be: its own doctype first. A key the cashier carried
+	across doctypes (Ruling 146) completes under the document actually made, so the
+	other doctype is read too (m-e). An offline id names a Sales Invoice only."""
+	own = _key_doctype(offline_id)
+	if not str(offline_id or "").startswith(ONLINE_SUBMIT_KEY_PREFIX):
+		return (own,)
+	other = DOCTYPE_SALES_INVOICE if own == DOCTYPE_SALES_ORDER else DOCTYPE_SALES_ORDER
+	return (own, other)
 
 
 @frappe.whitelist()
@@ -3457,23 +3517,85 @@ def check_offline_invoice_synced(offline_id):
 		OfflineInvoiceSync,
 	)
 
+	if str(offline_id or "").startswith(ONLINE_SUBMIT_KEY_PREFIX):
+		return _probe_online_key(offline_id)
+
 	result = OfflineInvoiceSync.is_synced(offline_id)
 
 	# Defensive check - ensure result is a dict
 	if not result or not isinstance(result, dict):
 		return {"synced": False, "sales_invoice": None}
 
-	# Additionally verify the sales invoice still exists and is submitted
+	if result.get("status") == "Pending":
+		# A submit holding this key is still running, or stopped without completing it:
+		# not "not made" (Ruling 149). The POS treats this as no answer.
+		return dict(result, in_flight=True)
+
+	# Additionally verify the sales invoice (an order key's Sales Order) still exists and is submitted
 	if result.get("synced") and result.get("sales_invoice"):
-		if frappe.db.exists("Sales Invoice", result["sales_invoice"]):
-			docstatus = frappe.db.get_value("Sales Invoice", result["sales_invoice"], "docstatus")
-			if docstatus == 1:  # Submitted
+		for doctype in _key_doctypes(offline_id):
+			if frappe.db.get_value(doctype, result["sales_invoice"], "docstatus") == 1:  # Submitted
 				return result
 
 		# Invoice was deleted or not submitted, clear the sync record
 		return {"synced": False, "sales_invoice": None}
 
 	return result
+
+
+KEY_PROBE_SAVEPOINT = "pos_next_key_probe"
+
+
+def _probe_online_key(offline_id) -> dict:
+	"""Is an online submit key's reservation absent, even from a submit still running?
+	(Ruling 149, C-1).
+
+	A plain read cannot see a reservation an in-flight submit has not committed yet, so it
+	would answer "not made" for a sale about to be made. Instead the reservation is
+	inserted inside a savepoint and rolled back: through the unique ``offline_id`` index
+	that insert waits for an open holder (a record lock, no gap lock: no FOR UPDATE, so no
+	site-wide wait, Ruling 139).
+
+	Returns the "never reserved" answer when the insert went in (nobody holds the key),
+	the "in flight" answer when the wait timed out or the row is Pending, else the row's
+	answer. The row is read in share mode: after the wait, this transaction's snapshot
+	may predate the other request's commit. The row exists (the insert hit it), so that
+	is a record lock on the unique index, no gap lock.
+	"""
+	try:
+		frappe.db.savepoint(KEY_PROBE_SAVEPOINT)
+		reserved = _insert_sync_reservation(offline_id)
+	except (frappe.QueryTimeoutError, frappe.QueryDeadlockError):
+		_rollback_key_probe()
+		return {"synced": False, "sales_invoice": None, "status": "Pending", "in_flight": True}
+	_rollback_key_probe()
+	if reserved:
+		return {"synced": False, "sales_invoice": None, "status": None, "in_flight": False}
+	row = frappe.db.sql(
+		"select sales_invoice, status from `tabOffline Invoice Sync` where offline_id = %s lock in share mode",
+		(offline_id,),
+		as_dict=True,
+	)
+	if not row:
+		return {"synced": False, "sales_invoice": None, "status": None, "in_flight": False}
+	status, name = row[0].status, row[0].sales_invoice
+	if status == "Pending":
+		return {"synced": False, "sales_invoice": None, "status": status, "in_flight": True}
+	if status == "Synced" and name:
+		for doctype in _key_doctypes(offline_id):
+			made = frappe.db.sql(
+				f"select docstatus from `tab{doctype}` where name = %s lock in share mode", (name,)
+			)
+			if made and made[0][0] == 1:
+				return {"synced": True, "sales_invoice": name, "status": status, "in_flight": False}
+	return {"synced": False, "sales_invoice": None, "status": status, "in_flight": False}
+
+
+def _rollback_key_probe() -> None:
+	try:
+		frappe.db.rollback(save_point=KEY_PROBE_SAVEPOINT)
+	except Exception:
+		frappe.db.rollback()
 
 
 SUBMIT_SAVEPOINT = "pos_next_submit_invoice"
@@ -3572,7 +3694,9 @@ def submit_invoice(invoice: str | dict | None = None, data: str | dict | None = 
 	# An offline sale queued after a lost response carries the same key (Ruling 139): the
 	# key is reserved first, so the sync returns the online invoice instead of a second.
 	submit_key = _online_submit_key(invoice, data, doctype)
+	key_doctype = _key_doctype(submit_key) if submit_key else doctype
 	invoice.pop("idempotency_key", None)
+	invoice.pop("idempotency_doctype", None)
 	sync_record_name = None
 	key_record_name = None
 
@@ -3580,15 +3704,19 @@ def submit_invoice(invoice: str | dict | None = None, data: str | dict | None = 
 		# One row per key (the unique ``offline_id`` index), inserted first: a concurrent
 		# request with the same key waits for this one, then finds its Synced row.
 		key_result = _ensure_offline_uniqueness(
-			offline_id=submit_key, pos_profile=pos_profile, customer=invoice.get("customer")
+			offline_id=submit_key, pos_profile=pos_profile, customer=invoice.get("customer"), doctype=key_doctype
 		)
 		if key_result.get("already_synced"):
 			existing = dict(key_result.get("invoice_data") or {})
-			existing["idempotency_key"] = submit_key[len(ONLINE_SUBMIT_KEY_PREFIX) :]
+			existing["idempotency_key"] = submit_key.split(":")[-1]
 			existing.pop("offline_id", None)
 			if offline_id:
-				# The queued sale is that invoice: its offline id points there too.
-				_record_offline_id_as(offline_id, existing["name"], pos_profile, invoice.get("customer"))
+				# The queued sale is that invoice: its offline id points there too. A carried
+				# order key's sale is an order: no row is recorded for the offline id, which
+				# names an invoice (it would show as a broken link in the sync report);
+				# a re-sync is still caught by the key.
+				if frappe.db.exists(doctype, existing["name"]):
+					_record_offline_id_as(offline_id, existing["name"], pos_profile, invoice.get("customer"))
 				existing["offline_id"] = offline_id
 			return existing
 		key_record_name = key_result.get("sync_record_name")

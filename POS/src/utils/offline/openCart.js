@@ -96,6 +96,18 @@ export function writeOpenCart(record) {
 	}, false);
 }
 
+/**
+ * The offline queue row of `offlineId` (any status: pending, synced or superseded),
+ * null when there is none, undefined when the queue could not be read (F6).
+ */
+export function findQueuedSale(offlineId) {
+	if (!offlineId) return Promise.resolve(null);
+	return enqueue(
+		async () => (await offlineDb.db.invoice_queue.where("offline_id").equals(offlineId).first()) || null,
+		undefined
+	);
+}
+
 /** Forget this tab's saved cart. */
 export function deleteOpenCart() {
 	return enqueue(async () => {

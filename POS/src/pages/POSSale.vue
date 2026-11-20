@@ -1097,6 +1097,49 @@
 				</template>
 			</Dialog>
 
+			<!-- The last sale was saved: told once, kept until the cashier dismisses it (Ruling 144) -->
+			<Dialog
+				v-model="showMadeSaleNotice"
+				:disableOutsideClickToClose="true"
+				:options="{ title: __('Last sale already saved'), size: 'md' }"
+			>
+				<template #body-content>
+					<p class="py-3 text-sm text-gray-700">
+						{{ __("The last sale was saved as {0}", [cartStore.madeSaleNotice]) }}
+					</p>
+				</template>
+				<template #actions>
+					<div class="flex justify-end w-full">
+						<Button variant="solid" @click="cartStore.dismissMadeSaleNotice()">
+							{{ __("Done") }}
+						</Button>
+					</div>
+				</template>
+			</Dialog>
+
+			<!-- The last sale may already be saved: the cashier decides (Ruling 146 (b)) -->
+			<Dialog
+				v-model="showSubmitDecision"
+				:disableOutsideClickToClose="true"
+				:options="{ title: __('The last sale may already be saved'), size: 'md' }"
+			>
+				<template #body-content>
+					<p class="py-3 text-sm text-gray-700">
+						{{ __("The last sale may already be saved. Is this the same sale?") }}
+					</p>
+				</template>
+				<template #actions>
+					<div class="flex justify-end gap-2 w-full">
+						<Button variant="subtle" @click="cartStore.decideSubmit('new')">
+							{{ __("New sale") }}
+						</Button>
+						<Button variant="solid" @click="cartStore.decideSubmit('same')">
+							{{ __("Same sale — don't charge again") }}
+						</Button>
+					</div>
+				</template>
+			</Dialog>
+
 			<!-- Clear Cache Overlay -->
 			<ClearCacheOverlay
 				ref="clearCacheOverlayRef"
@@ -1278,13 +1321,11 @@ const paymentCheck = usePaymentOpenCheck({
 	// A submit of this cart that got no answer may already be made (D-19): send it
 	// again, with its key and payments, instead of re-pricing an already-made sale.
 	resumeUnresolved: () =>
-		lastOnlinePayment && cartStore.hasUnresolvedSubmit()
-			? handlePaymentCompleted(lastOnlinePayment)
+		cartStore.lastOnlinePayment && cartStore.hasUnresolvedSubmit()
+			? handlePaymentCompleted(cartStore.lastOnlinePayment)
 			: null,
-	offlineBlocked: () => (cartStore.offlineCheckoutBlocked() ? OFFLINE_BLOCKED_MESSAGE() : null),
+	// No offline block: at the submit the cashier decides (Ruling 146 (b)).
 });
-// An online submit of an earlier cart got no answer (Ruling 139).
-const OFFLINE_BLOCKED_MESSAGE = () => __("The last sale may already be saved. Reconnect to confirm.");
 // Back online: settle a cleared, unanswered submit's key (Ruling 141).
 watch(
 	() => offlineStore.isOffline,
@@ -1292,8 +1333,19 @@ watch(
 		if (!offline && wasOffline) cartStore.resolvePendingSubmit();
 	}
 );
-// The payment of the last online checkout, re-sent by resumeUnresolved above.
-let lastOnlinePayment = null;
+const showSubmitDecision = computed({
+	get: () => Boolean(cartStore.submitDecision),
+	set: (open) => {
+		// Closed without a choice: nothing is submitted.
+		if (!open) cartStore.decideSubmit(null);
+	},
+});
+const showMadeSaleNotice = computed({
+	get: () => Boolean(cartStore.madeSaleNotice),
+	set: (open) => {
+		if (!open) cartStore.dismissMadeSaleNotice();
+	},
+});
 const showTotalChangedDialog = computed({
 	get: () => Boolean(paymentCheck.pendingChange.value),
 	set: (open) => {
@@ -2093,6 +2145,18 @@ watch(
 	}
 );
 
+// A restored cart whose offline sale was queued before the reload is closed (F6)
+watch(
+	() => cartStore.alreadyQueuedSale,
+	(sale) => {
+		if (!sale) return;
+		cartStore.alreadyQueuedSale = null;
+		previousCartHash = "";
+		uiStore.showPaymentDialog = false;
+		showWarning(__("This sale is already queued offline. The restored cart was closed."));
+	}
+);
+
 /** Who the open cart is saved for (D-4): this user, POS Profile and opening shift. */
 function openCartScope() {
 	return {
@@ -2366,9 +2430,10 @@ async function handlePaymentCompleted(paymentData) {
 		if (offlineStore.isOffline) {
 			// A restored cart whose draft may be sold already is not paid offline (Ruling 136 (b))
 			if (cartStore.paymentBlockedMessage) throw new Error(cartStore.paymentBlockedMessage);
-			if (cartStore.offlineCheckoutBlocked()) {
+			// An earlier submit's outcome is unknown: the cashier decides (Ruling 146 (b)).
+			const gate = await cartStore.settlePendingSubmit({ offline: true });
+			if (gate.stop) {
 				uiStore.showPaymentDialog = false;
-				showError(OFFLINE_BLOCKED_MESSAGE());
 				return;
 			}
 			const invoiceData = {
@@ -2378,8 +2443,10 @@ async function handlePaymentCompleted(paymentData) {
 					customer: customerValue,
 					paymentData,
 					editedFrom: editingOfflineContext?.originalOfflineId,
-					// The same cart after a lost online submit: the sync returns that sale.
-					idempotencyKey: cartStore.submitKeyForCart(),
+					// The cashier said "same sale": the sync returns that sale if it was made,
+					// an order's too (Ruling 146 (c)).
+					idempotencyKey: gate.carry?.key || null,
+					idempotencyDoctype: gate.carry?.doctype || null,
 				}),
 				// The cart's own id, saved with it: paying a restored cart again finds this
 				// sale already queued, and the server dedups one already synced (Ruling 136 (d)).
@@ -2502,11 +2569,19 @@ async function handlePaymentCompleted(paymentData) {
 			const soldItemCodes = cartStore.invoiceItems.map((item) => item.item_code);
 			const soldBatches = cartStore.invoiceItems.filter((item) => item.batch_no);
 
-			lastOnlinePayment = paymentData;
+			// Re-sent by resumeUnresolved above; saved with the cart, so it survives a reload (F6).
+			cartStore.lastOnlinePayment = JSON.parse(JSON.stringify(paymentData));
 			const result = await cartStore.submitInvoice({
 				isCreditSale: Boolean(paymentData.is_credit_sale),
 				receivableAccount: paymentData.receivable_account || null,
 			});
+
+			// The last sale was made (the notice tells it), or the cashier closed the
+			// "same sale?" dialog: nothing was submitted and the cart stays (Ruling 146).
+			if (result?.stopped) {
+				uiStore.showPaymentDialog = false;
+				return;
+			}
 
 			if (result) {
 				uiStore.clearLastOfflinePrintDoc();

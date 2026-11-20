@@ -36,6 +36,7 @@ import {
 	deleteOpenCart,
 	deleteOpenCarts,
 	openCartScopeKey,
+	findQueuedSale,
 	readOpenCart,
 	writeOpenCart,
 } from "@/utils/offline/openCart";
@@ -154,9 +155,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		removeItem,
 		updateItemQuantity: baseUpdateItemQuantity,
 		submitInvoice: baseSubmitInvoice,
-		hasUnresolvedSubmit,
-		submitKeyForCart,
-		offlineCheckoutBlocked,
+		pendingSubmit,
+		setBeforeSubmitRequest,
+		hasUnresolvedSubmit: baseHasUnresolvedSubmit,
+		pendingMatchesCart: basePendingMatchesCart,
+		adoptPendingSubmitFor,
 		releaseSubmitKey,
 		resolvePendingSubmit: baseResolvePendingSubmit,
 		dropPendingSubmit,
@@ -209,9 +212,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	let openCartTimer = null;
 	let stopRepriceWhenOnline = null;
 	const cartOfflineId = ref(null); // the offline_id this cart's offline sale is queued under
-	const submitIdempotencyKey = ref(null); // F5 hook: the online submit key, saved with the cart
+	// What POSSale's resume re-sends for an unanswered submit (D-19); saved with the cart,
+	// so the resume still works after a reload (F6).
+	const lastOnlinePayment = ref(null);
 	const unverifiedDraftName = ref(null); // a restored payment draft not yet checked on the server
 	const alreadySubmittedInvoice = ref(null); // { name, grand_total, ... } of a cart sold before the reload
+	const alreadyQueuedSale = ref(null); // { offline_id } of a restored cart already queued offline (F6)
 
 	// Offer processing state management
 	const offerProcessingState = ref({
@@ -391,11 +397,13 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		stopWaitingForOnline();
 		openCartSuspended = false;
 		cartOfflineId.value = null;
-		submitIdempotencyKey.value = null;
+		lastOnlinePayment.value = null;
 		unverifiedDraftName.value = null;
-		if (openCartScope) deleteOpenCart();
 
 		clearInvoiceCart({ returnSerials });
+		// An unanswered submit's key, now marked cleared, stays in the tab's slot so a
+		// reload keeps it (Ruling 146 (d)); otherwise the saved cart goes.
+		if (openCartScope && !pendingSubmit.value?.unresolved) deleteOpenCart();
 		offerHeaderDiscount.value = 0;
 		customer.value = null;
 		offersStore.clearOneTimeContext();
@@ -445,11 +453,94 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		writeOffAmount.value = amount || 0;
 	}
 
+	/** The cart on screen, as the doctype it targets (or `doctype`), is the pending submit's cart. */
+	function pendingMatchesCart(doctype = targetDoctype.value) {
+		return basePendingMatchesCart(doctype);
+	}
+
+	/** An unanswered submit of the cart on screen, as the doctype it targets now (F6). */
+	function hasUnresolvedSubmit() {
+		return baseHasUnresolvedSubmit(targetDoctype.value);
+	}
+
+	// The sale a cleared, unanswered submit made: POSSale shows it in a dialog the cashier
+	// must dismiss, not a toast that may pass unseen (Ruling 144).
+	const madeSaleNotice = ref(null);
+
+	function dismissMadeSaleNotice() {
+		madeSaleNotice.value = null;
+	}
+
 	/** Back online: settle a cleared submit's key; tell the cashier once about a sale it made (Ruling 143). */
 	async function resolvePendingSubmitAndTell() {
-		const name = await baseResolvePendingSubmit();
-		if (name) showSuccess(__("The last sale was saved as {0}", [name]));
-		return name;
+		const { made } = await baseResolvePendingSubmit();
+		if (made) madeSaleNotice.value = made;
+		return made;
+	}
+
+	// Ruling 146 (b): "The last sale may already be saved. Is this the same sale?"
+	// { identical } while the cashier is asked; decideSubmit() answers it.
+	const submitDecision = ref(null);
+	let submitDecisionAnswer = null;
+
+	function askIfSameSale(identical) {
+		if (submitDecisionAnswer) submitDecisionAnswer(null);
+		return new Promise((resolve) => {
+			submitDecisionAnswer = resolve;
+			submitDecision.value = { identical };
+		});
+	}
+
+	/** @param {"same"|"new"|null} choice - null: the dialog was closed, nothing is submitted */
+	function decideSubmit(choice) {
+		const answer = submitDecisionAnswer;
+		submitDecisionAnswer = null;
+		submitDecision.value = null;
+		answer?.(choice === "same" || choice === "new" ? choice : null);
+	}
+
+	/**
+	 * Before any submit, online or offline, while an earlier submit's outcome is unknown
+	 * (Ruling 146): the CASHIER decides, never a silent guess.
+	 * (a) Online, the server is asked first. "Made": stop, and tell the cashier (the cart
+	 *     stays; the next press is a new sale). "Not made": the key is dropped, go on.
+	 * (b) No answer (offline, or the check failed), with this very cart or an edited one:
+	 *     "Is this the same sale?" Same: carry the old key, so the server dedups. New: a
+	 *     new key. A different cart after Clear Cart is a new sale (Ruling 141).
+	 * (c) A Sales Order's key follows the same rules; it keeps its doctype when carried.
+	 * @returns {Promise<{stop: true} | {proceed: true, carry: {key: string, doctype: string}|null}>}
+	 */
+	async function settlePendingSubmit({ offline = offlineState.isOffline } = {}) {
+		const pending = pendingSubmit.value;
+		if (!pending?.unresolved) return { proceed: true, carry: null };
+		// The very cart on screen, unchanged and not cleared (a retry, or the resume after a
+		// reload): no gate, the same key (Ruling 149). The server returns the sale it made,
+		// waits for one still running, or makes it once; the sale then closes as usual.
+		if (!pending.cleared && pendingMatchesCart(targetDoctype.value)) {
+			return { proceed: true, carry: { key: pending.key, doctype: pending.doctype || "Sales Invoice" } };
+		}
+		if (!offline) {
+			const { answered, made } = await baseResolvePendingSubmit({ anyKey: true });
+			if (made) {
+				madeSaleNotice.value = made;
+				return { stop: true };
+			}
+			if (answered) return { proceed: true, carry: null };
+		}
+		if (pendingSubmit.value !== pending) return { proceed: true, carry: null };
+		const identical = pendingMatchesCart(targetDoctype.value);
+		if (!identical && pending.cleared) return { proceed: true, carry: null };
+		const choice = await askIfSameSale(identical);
+		if (!choice) return { stop: true };
+		if (pendingSubmit.value !== pending) return { proceed: true, carry: null };
+		if (choice === "same") {
+			adoptPendingSubmitFor(targetDoctype.value);
+			return { proceed: true, carry: { key: pending.key, doctype: pending.doctype || "Sales Invoice" } };
+		}
+		// A new sale. Online it gets a new key; offline the old key stays, so the
+		// reconnect still asks about it once the cart is cleared.
+		if (!offline) dropPendingSubmit();
+		return { proceed: true, carry: null };
 	}
 
 	async function submitInvoice(options = {}) {
@@ -475,6 +566,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			paymentCheck.value = null;
 			throw new Error(__("The cart changed after its total was checked. Check the total again."));
 		}
+
+		// An earlier submit's outcome is unknown: settle it first (Ruling 146). Always, so a
+		// stale offline flag can never skip it; offline it asks the cashier, not the server.
+		const gate = await settlePendingSubmit({ offline: wasOffline });
+		if (gate.stop) return { stopped: true };
 
 		const result = await baseSubmitInvoice(
 			targetDoctype.value,
@@ -2787,6 +2883,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * @param {boolean} force - If true, bypass hash check and force processing
 	 */
 	function triggerOfferProcessing(force = false) {
+		// The cart of an unanswered submit is not re-priced: changed rows would give it a
+		// new key, and so a second sale (F6). Any edit of the cart lifts this.
+		if (hasUnresolvedSubmit()) return;
 		// Increment generation to invalidate any in-flight operations
 		const currentGen = ++cartGeneration;
 
@@ -3002,8 +3101,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			current_draft_id: currentDraftId.value,
 			// The offline sale is queued under this id, so paying the cart again dedups (Ruling 136 (d)).
 			offline_id: cartOfflineId.value,
-			// Hook for F5: the online submit idempotency key is stored here once F5 lands.
-			idempotency_key: submitIdempotencyKey.value,
+			// F5's online submit key and its state (F6): a cart restored while its submit
+			// had no answer re-sends the same key, so the server returns that sale.
+			idempotency_key: pendingSubmit.value?.key || null,
+			pending_submit: pendingSubmit.value,
+			last_online_payment: lastOnlinePayment.value,
 			updated_at: new Date().toISOString(),
 		};
 	}
@@ -3011,6 +3113,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	/** A cart worth keeping: lines, or a customer other than the profile default. */
 	function hasOpenCartContent() {
 		if (invoiceItems.value.length > 0) return true;
+		if (pendingSubmit.value?.unresolved) return true; // a cleared key is kept (Ruling 146 (d))
 		const name = currentCustomerName();
 		return Boolean(name) && name !== (defaultCustomerName.value || null);
 	}
@@ -3039,6 +3142,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		cancelOpenCartSave();
 		return saveOpenCart();
 	}
+	// The submit key is saved before its request goes out (F6).
+	setBeforeSubmitRequest(flushOpenCartSave);
 
 	/**
 	 * The offline_id this cart's offline sale is queued under. Made once per cart and
@@ -3067,6 +3172,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	/** The draft was submitted after all: close the cart as sold, never sell it again. */
 	function closeAsAlreadySubmitted(row) {
 		unverifiedDraftName.value = null;
+		// Its sale is known: no key is left to ask about (no second notice for it).
+		dropPendingSubmit();
 		clearCart({ returnSerials: false });
 		alreadySubmittedInvoice.value = {
 			name: row.name,
@@ -3175,7 +3282,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		unverifiedDraftName.value = paymentDraftName.value;
 		currentDraftId.value = record.current_draft_id || null;
 		cartOfflineId.value = record.offline_id || null;
-		submitIdempotencyKey.value = record.idempotency_key || null;
+		pendingSubmit.value = record.pending_submit?.key ? record.pending_submit : null;
+		lastOnlinePayment.value = record.last_online_payment || null;
 
 		const coupon = record.applied_coupon || null;
 		if (isWholeCartCoupon(coupon)) {
@@ -3215,6 +3323,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		};
 		if (!record) return false;
 		const hasLines = Array.isArray(record.items) && record.items.length > 0;
+		if (openCartScopeKey(record.scope) === key && !hasLines && record.pending_submit?.unresolved && record.pending_submit.key) {
+			// Only a cleared, unanswered submit's key was kept (Ruling 146 (d)): no cart.
+			pendingSubmit.value = record.pending_submit;
+			return false;
+		}
 		if (openCartScopeKey(record.scope) !== key || (!hasLines && !record.customer)) {
 			await deleteOpenCart();
 			return false;
@@ -3226,11 +3339,22 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			clearCart();
 			return false;
 		}
+		// Its offline sale was queued before the crash: paying it again, online, would be
+		// a second sale beside the queued one (F6, F4 m2).
+		const offlineId = cartOfflineId.value;
+		if (offlineId && (await findQueuedSale(offlineId))) {
+			dropPendingSubmit();
+			clearCart({ returnSerials: false });
+			alreadyQueuedSale.value = { offline_id: offlineId };
+			return false;
+		}
 		if (unverifiedDraftName.value && !offlineState.isOffline) {
 			// Checked before the cart is shown: a sold cart never comes back.
 			if ((await verifyPaymentDraft()) === "submitted") return false;
 		}
-		repriceRestoredCart();
+		// A submit of this cart got no answer: it is re-sent as it was. A re-price could
+		// change its rows, and so its key: a second sale (F6).
+		if (!hasUnresolvedSubmit()) repriceRestoredCart();
 		return true;
 	}
 
@@ -3267,7 +3391,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			paymentDraftName,
 			currentDraftId,
 			cartOfflineId,
-			submitIdempotencyKey,
+			pendingSubmit,
+			lastOnlinePayment,
 		],
 		scheduleOpenCartSave,
 		{ deep: true }
@@ -3311,8 +3436,17 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		fnfCouponOverride, // PN-130: coupon that replaced F&F, if any
 		paymentDraftName, // the server-checked unpaid draft (Ruling 101)
 		alreadySubmittedInvoice, // set when a restored cart turned out sold (Ruling 136 (a))
+		alreadyQueuedSale, // set when a restored cart's offline sale was already queued (F6)
+		madeSaleNotice, // the sale a cleared, unanswered submit made (Ruling 144)
+		dismissMadeSaleNotice,
+		submitDecision, // "is this the same sale?" while the cashier is asked (Ruling 146)
+		decideSubmit,
+		settlePendingSubmit,
+		pendingMatchesCart,
+		pendingSubmit,
+		closeAsAlreadySubmitted,
 		paymentBlockedMessage, // non-empty while a restored draft is unchecked (Ruling 136 (b))
-		submitIdempotencyKey, // F5 hook: saved with the cart
+		lastOnlinePayment, // saved with the cart (F6)
 
 		// Computed
 		itemCount,
@@ -3334,8 +3468,6 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		setTaxInclusive,
 		submitInvoice,
 		hasUnresolvedSubmit,
-		submitKeyForCart,
-		offlineCheckoutBlocked,
 		releaseSubmitKey,
 		resolvePendingSubmit: resolvePendingSubmitAndTell,
 		dropPendingSubmit,

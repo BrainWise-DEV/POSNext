@@ -1144,6 +1144,13 @@ export function useInvoice() {
 	 * returns the invoice the server already made instead of a second sale.
 	 */
 	const pendingSubmit = ref(null);
+	// Runs after the key is set and before the request goes out (F6): the POS saves the
+	// open cart with its key first, so a reload mid-submit re-sends the same key.
+	let beforeSubmitRequest = null;
+
+	function setBeforeSubmitRequest(fn) {
+		beforeSubmitRequest = fn;
+	}
 
 	function newSubmitKey() {
 		if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
@@ -1156,6 +1163,8 @@ export function useInvoice() {
 		// are the same cart.
 		const rows = (invoiceData.items || []).map((row) => JSON.stringify(row)).sort();
 		return JSON.stringify([
+			// An invoice and an order of the same cart are different sales (F6).
+			invoiceData.doctype || "Sales Invoice",
 			invoiceData.customer,
 			rows,
 			invoiceData.discount_amount || 0,
@@ -1163,61 +1172,86 @@ export function useInvoice() {
 		]);
 	}
 
-	function currentSubmitCartHash() {
+	/** The hash the cart on screen would have, submitted as `doctype` (the pending one's). */
+	function currentSubmitCartHash(doctype = pendingSubmit.value?.doctype || "Sales Invoice") {
 		return submitCartHash({
+			doctype,
 			customer: resolveCustomerName(),
-			items: formatItemsForSubmission(itemsForDoctype("Sales Invoice", toRaw(invoiceItems.value))),
+			items: formatItemsForSubmission(itemsForDoctype(doctype, toRaw(invoiceItems.value))),
 			discount_amount: additionalDiscount.value || 0,
 			coupon_code: couponCode.value,
 		});
 	}
 
-	/** A submit of this very cart reached no server answer: it may have been made. */
-	function hasUnresolvedSubmit() {
+	/**
+	 * A submit of this very cart reached no server answer: it may have been made.
+	 * @param {string} [doctype] - the cart's target: the same cart as another doctype is
+	 *   another sale (F6)
+	 */
+	function hasUnresolvedSubmit(doctype = null) {
 		const pending = pendingSubmit.value;
-		return Boolean(pending?.unresolved && pending.hash === currentSubmitCartHash());
+		if (doctype && (pending?.doctype || "Sales Invoice") !== doctype) return false;
+		// A cleared one is no longer this cart's: an identical re-entry is settled by
+		// the submit first (Ruling 144), never resumed with the old payment.
+		return Boolean(pending?.unresolved && !pending.cleared && pending.hash === currentSubmitCartHash());
 	}
 
-	/** The key of an earlier online submit of this very cart, else null (Ruling 139). */
-	function submitKeyForCart() {
+	/** The cart on screen, as `doctype`, is the very cart of the pending submit (Ruling 146). */
+	function pendingMatchesCart(doctype) {
 		const pending = pendingSubmit.value;
-		return pending && pending.hash === currentSubmitCartHash() ? pending.key : null;
+		if (!pending || (pending.doctype || "Sales Invoice") !== doctype) return false;
+		return pending.hash === currentSubmitCartHash(doctype);
 	}
 
 	/**
-	 * An online submit got no answer and the cart has changed since, so its key cannot
-	 * go with an offline sale: that sale may already be made (Ruling 139).
+	 * The cashier says the cart on screen is the pending submit's sale (Ruling 146 (b)):
+	 * it goes with that key, so the server returns the sale if it was made. The key keeps
+	 * its own doctype, which the request names (idempotency_doctype).
 	 */
-	function offlineCheckoutBlocked() {
-		// After Clear Cart a different cart is a new sale (Ruling 141): only an edited
-		// version of the unanswered cart still on screen is blocked.
+	function adoptPendingSubmitFor(doctype) {
 		const pending = pendingSubmit.value;
-		return Boolean(pending?.unresolved && !pending.cleared && pending.hash !== currentSubmitCartHash());
+		if (!pending) return;
+		pending.hash = submitCartHash({
+			doctype,
+			customer: resolveCustomerName(),
+			items: formatItemsForSubmission(itemsForDoctype(doctype, toRaw(invoiceItems.value))),
+			discount_amount: additionalDiscount.value || 0,
+			coupon_code: couponCode.value,
+		});
+		pending.cleared = false;
+	}
+
+	/** Where the server reserves a pending submit's key (F6: per doctype). */
+	function pendingKeyId(pending) {
+		return pending.doctype === "Sales Order" ? `pos_online:SO:${pending.key}` : `pos_online:${pending.key}`;
 	}
 
 	/**
-	 * Back online: ask the server about a cleared, unanswered submit's key (Rulings 141,
-	 * 143). Any answer drops the key; a made sale's invoice name is returned, so the
-	 * cashier is told once. After that a re-entered cart is a new sale (a kept key would
-	 * turn the next customer's identical sale into the old invoice). A cart still on
-	 * screen keeps its key (Checkout re-sends it); no answer keeps the key.
-	 * @returns {Promise<string|null>} the made sale's name
+	 * Ask the server about an unanswered submit's key (Rulings 141, 143, 146). Any answer
+	 * drops the key; a made sale's name is returned, so the cashier is told once. After
+	 * that a re-entered cart is a new sale. No answer keeps the key. By default only a
+	 * cleared key is asked about (the reconnect); before a submit, any key is (146 (a)).
+	 * @param {{ anyKey?: boolean }} [options]
+	 * @returns {Promise<{ answered: boolean, made: string|null }>}
 	 */
-	async function resolvePendingSubmit() {
+	async function resolvePendingSubmit({ anyKey = false } = {}) {
+		const none = { answered: false, made: null };
 		const pending = pendingSubmit.value;
-		if (!pending?.unresolved || !pending.cleared) return null;
+		if (!pending?.unresolved || (!anyKey && !pending.cleared)) return none;
 		let answer;
 		try {
 			const response = await call("pos_next.api.invoices.check_offline_invoice_synced", {
-				offline_id: `pos_online:${pending.key}`,
+				offline_id: pendingKeyId(pending),
 			});
 			answer = response?.message ?? response;
 		} catch {
-			return null; // Still unreachable: keep the key.
+			return none; // Still unreachable: keep the key.
 		}
-		if (!answer || typeof answer !== "object" || pendingSubmit.value !== pending) return null;
+		if (!answer || typeof answer !== "object" || pendingSubmit.value !== pending) return none;
+		// A submit still running is not "not made" (Ruling 149): keep the key, no answer.
+		if (answer.in_flight || answer.status === "Pending") return none;
 		pendingSubmit.value = null;
-		return answer.synced ? answer.sales_invoice || null : null;
+		return { answered: true, made: answer.synced ? answer.sales_invoice || null : null };
 	}
 
 	/** Shift close and logout: the next shift or cashier starts without it. */
@@ -1305,6 +1339,14 @@ export function useInvoice() {
 					}));
 				}
 
+				// One key per checkout attempt, kept while this cart is retried (D-19), for an
+				// invoice or an order (F6).
+				const hash = submitCartHash(invoiceData);
+				const retrying = pendingSubmit.value?.hash === hash;
+				if (!retrying) {
+					pendingSubmit.value = { key: newSubmitKey(), hash, unresolved: false, doctype: targetDoctype };
+				}
+
 				let invoiceDoc;
 				if (targetDoctype === "Sales Invoice") {
 					// One request (Ruling 101): the payments reach the server only with the
@@ -1313,6 +1355,10 @@ export function useInvoice() {
 					invoiceDoc = paymentDraftName.value
 						? { ...invoiceData, name: paymentDraftName.value }
 						: invoiceData;
+				} else if (retrying) {
+					// A retried order goes straight to the keyed submit: the server returns
+					// the order the key made, or makes it (no second order draft).
+					invoiceDoc = invoiceData;
 				} else {
 					const draftInvoice = await updateInvoiceResource.submit({
 						data: invoiceData,
@@ -1342,14 +1388,17 @@ export function useInvoice() {
 							: [],
 				};
 
-				if (targetDoctype === "Sales Invoice") {
-					// One key per checkout attempt, kept while this cart is retried (D-19).
-					const hash = submitCartHash(invoiceData);
-					if (!pendingSubmit.value || pendingSubmit.value.hash !== hash) {
-						pendingSubmit.value = { key: newSubmitKey(), hash, unresolved: false };
-					}
-					pendingSubmit.value.unresolved = true;
-					submitData.idempotency_key = pendingSubmit.value.key;
+				pendingSubmit.value.unresolved = true;
+				// Submitted again: the cart is on screen, no longer a cleared one.
+				pendingSubmit.value.cleared = false;
+				submitData.idempotency_key = pendingSubmit.value.key;
+				// A key the cashier carried over from the other doctype keeps its own (146).
+				const keyDoctype = pendingSubmit.value.doctype || "Sales Invoice";
+				if (keyDoctype !== targetDoctype) submitData.idempotency_doctype = keyDoctype;
+				try {
+					await beforeSubmitRequest?.();
+				} catch (error) {
+					console.warn("Could not save the cart before the submit:", error);
 				}
 
 				if (redeemedCustomerCredit > 0 && customerCreditDict.length > 0) {
@@ -1651,9 +1700,11 @@ export function useInvoice() {
 		savePaymentDraft,
 		paymentDraftName,
 		defaultCustomerName,
+		pendingSubmit,
+		setBeforeSubmitRequest,
 		hasUnresolvedSubmit,
-		submitKeyForCart,
-		offlineCheckoutBlocked,
+		pendingMatchesCart,
+		adoptPendingSubmitFor,
 		releaseSubmitKey,
 		resolvePendingSubmit,
 		dropPendingSubmit,
