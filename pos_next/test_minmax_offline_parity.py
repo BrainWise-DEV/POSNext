@@ -92,7 +92,7 @@ class TestMinMaxOfflineParity(unittest.TestCase):
 					self.assertAlmostEqual(flt(item.rate), want["rate"], places=9, msg=msg)
 					self.assertAlmostEqual(flt(item.rate * item.qty, 2), want["amount"], places=9, msg=msg)
 				cases += 1
-		self.assertEqual(cases, 16)
+		self.assertEqual(cases, 26)
 
 	def test_min_and_max_pick_opposite_lines(self):
 		offers = {t: d["offer"] for t, d in self.fixture["rules"].items()}

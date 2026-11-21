@@ -1705,6 +1705,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 					max_amt: offer.max_amt,
 				});
 				appliedOffers.value = updatedEntries;
+				stampServerScopes();
 
 				offerProcessingState.value.lastProcessedAt = Date.now();
 
@@ -1829,6 +1830,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				appliedOffers.value = appliedOffers.value.filter((entry) =>
 					remainingCodes.includes(entry.code)
 				);
+				stampServerScopes();
 
 				offerProcessingState.value.lastProcessedAt = Date.now();
 
@@ -1937,6 +1939,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 					appliedOffers.value = appliedOffers.value.filter((entry) =>
 						appliedRules.includes(entry.code)
 					);
+					stampServerScopes();
 				}
 
 				// Wait for Vue to update before showing toast
@@ -2099,6 +2102,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			// blended % would go stale (a one-unit winner at 100% would ring 4 units
 			// up at 0), so the offer comes off its lines, which sell at full price.
 			if (!strategy && offer?.apply_discount_on_price) {
+				// Its scope lines are as the server priced them: the server's price stands.
+				if (entry.server_scope && entry.server_scope === offerScopeSignature(offer)) {
+					kept.push(entry);
+					continue;
+				}
 				warnUnhandledOfflineMode(offer);
 				releaseOfferFromLines(entry.code);
 				recomputed = true;
@@ -2130,15 +2138,48 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			if (!rules.includes(offerCode)) continue;
 			const rest = rules.filter((name) => name !== offerCode);
 			item.pricing_rules = rest;
-			if (rest.length === 0) {
+			// A cashier's own discount is not the offer's: only the rule name comes off.
+			if (rest.length === 0 && item.discount_source !== "manual_discount") {
 				item.discount_percentage = 0;
 				item.discount_amount = 0;
 				item.is_already_discounted = 0;
-				if (item.discount_source && item.discount_source !== "manual_discount") {
-					item.discount_source = "";
-				}
+				item.is_accumulative_discount = 0;
+				item.discount_source = "";
 			}
 			recalculateItem(item);
+		}
+	}
+
+	/**
+	 * What an offer's price depends on, from its scope lines: item, qty, UOM and list
+	 * price of each line, or for an offer summed per scope present
+	 * (`accumulative_scope_field`) only which scope values are in the cart. Taken when
+	 * the server prices the cart (`server_scope` on the applied entry), so offline an
+	 * offer no strategy can price again keeps the server's price until its scope
+	 * changes, e.g. a line outside the scope or a new customer leaves it alone (I-1).
+	 */
+	function offerScopeSignature(offer) {
+		const lines = offerScopeItems(offer).filter((item) => !item.is_free_item);
+		const field = offer.accumulative_scope_field;
+		if (field) {
+			return JSON.stringify([...new Set(lines.map((item) => item[field]))].sort());
+		}
+		return JSON.stringify(
+			lines.map((item) => [
+				item.item_code,
+				Number(item.quantity) || 0,
+				item.uom || item.stock_uom || "",
+				Number(item.price_list_rate) || 0,
+			])
+		);
+	}
+
+	/** Record each applied offer's scope as the server just priced it (see offerScopeSignature). */
+	function stampServerScopes() {
+		for (const entry of appliedOffers.value) {
+			const offer =
+				entry.offer || offersStore.availableOffers.find((o) => o.name === entry.code);
+			if (offer) entry.server_scope = offerScopeSignature(offer);
 		}
 	}
 
@@ -2992,6 +3033,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				}
 
 				appliedOffers.value = nextAppliedOffers;
+				stampServerScopes();
 
 				// 6. UI Feedback
 				if (invalidOffers.length > 0) {

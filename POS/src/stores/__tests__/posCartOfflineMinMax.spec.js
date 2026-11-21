@@ -152,6 +152,11 @@ function expectServerLines(cart, expected) {
 		expect(ruleNames(got.pricing_rules), msg).toEqual(
 			ruleNames(want.pricing_rules),
 		)
+		// The flags the server stamps (mark_item_discount_flags), which later passes read.
+		expect(got.discount_source || "", msg).toBe(want.discount_source)
+		expect(Number(got.is_already_discounted || 0), msg).toBe(
+			want.is_already_discounted,
+		)
 	}
 	const saved = round2(
 		expected.reduce((sum, l) => sum + round2(l.rate * l.qty), 0),
@@ -190,6 +195,32 @@ function registerPromotions() {
 		registerProductOfferStrategy: registry.registerProductOfferStrategy,
 	})
 }
+
+/**
+ * Price the cart online with the server's answer (its lines carry the
+ * discount_source / is_already_discounted the server stamped), then go offline.
+ */
+async function pricedOnline(offer, lines, answer, applied = [offer.name]) {
+	vi.spyOn(offlineState, "isOffline", "get").mockReturnValue(false)
+	freshCart(offer)
+	for (const [code, qty] of lines) addLine(cart, code, qty)
+	cart.cancelPendingOfferProcessing()
+	server.offers = {
+		items: answer.map((l) => ({ ...l })),
+		free_items: [],
+		applied_pricing_rules: applied,
+	}
+	await cart.applyOffer(offer, cart.posProfile)
+	vi.spyOn(offlineState, "isOffline", "get").mockReturnValue(true)
+}
+
+const rule = (title) => fixture.rules[title]
+const serverCase = (title, cartLines) =>
+	rule(title).cases.find(
+		(c) => JSON.stringify(c.cart) === JSON.stringify(cartLines),
+	)
+const A = "_PNXT_TEST_ITEM_A"
+const B = "_PNXT_TEST_ITEM_B"
 
 describe("G7 safety net: a Min/Max offer with no strategy is skipped offline", () => {
 	it("buy one on 6 × 50 sells at the full 300.00, and warns once", async () => {
@@ -233,25 +264,6 @@ describe("G7 safety net: a Min/Max offer with no strategy is skipped offline", (
 		expect(cart.grandTotal).toBe(260)
 	})
 
-	/** Price the cart online with the server's answer, then go offline. */
-	async function pricedOnline(offer, lines, answer) {
-		vi.spyOn(offlineState, "isOffline", "get").mockReturnValue(false)
-		freshCart(offer)
-		for (const [code, qty] of lines) addLine(cart, code, qty)
-		cart.cancelPendingOfferProcessing()
-		server.offers = {
-			items: answer.map((l) => ({
-				...l,
-				discount_source: "pricing_rule",
-				is_already_discounted: 0,
-			})),
-			free_items: [],
-			applied_pricing_rules: [offer.name],
-		}
-		await cart.applyOffer(offer, cart.posProfile)
-		vi.spyOn(offlineState, "isOffline", "get").mockReturnValue(true)
-	}
-
 	it("a one-unit winner priced online at 100%, raised to 4 offline, is not 4 free units", async () => {
 		const { offer, cases } = fixture.rules._PNXT_G7_MinAB
 		const { cart: lines, lines: answer } = cases.find((c) => c.cart[0][1] === 1)
@@ -278,6 +290,125 @@ describe("G7 safety net: a Min/Max offer with no strategy is skipped offline", (
 		cart.updateItemQuantity("_PNXT_TEST_ITEM_A", 7)
 		await settle(cart)
 		expect(cart.grandTotal).toBe(350)
+	})
+
+	it("a line outside the offer's scope added offline keeps the server's 250.02 (I-1)", async () => {
+		const { offer } = rule("_PNXT_G7_BuyOneA")
+		await pricedOnline(
+			offer,
+			[[A, 6]],
+			serverCase("_PNXT_G7_BuyOneA", [[A, 6]]).lines,
+		)
+		expect(cart.grandTotal).toBe(250.02)
+
+		addLine(cart, B, 1)
+		await settle(cart)
+		expect(line(cart, A).amount).toBe(250.02)
+		expect(cart.grandTotal).toBe(250.02 + 80)
+		expect(cart.appliedOffers.map((o) => o.code)).toEqual([offer.name])
+	})
+
+	it("a customer change offline keeps the server's 250.02 (I-1)", async () => {
+		const { offer } = rule("_PNXT_G7_BuyOneA")
+		await pricedOnline(
+			offer,
+			[[A, 6]],
+			serverCase("_PNXT_G7_BuyOneA", [[A, 6]]).lines,
+		)
+		cart.customer = "_PNXT_TEST_OTHER_CUSTOMER"
+		await settle(cart)
+		expect(line(cart, A).amount).toBe(250.02)
+		expect(cart.grandTotal).toBe(250.02)
+	})
+
+	it("a cashier's own % on a line the offer leaves keeps the %, only the rule comes off (m-10)", async () => {
+		const { offer } = rule("_PNXT_G7_BuyOneA")
+		await pricedOnline(
+			offer,
+			[[A, 6]],
+			serverCase("_PNXT_G7_BuyOneA", [[A, 6]]).lines,
+		)
+		Object.assign(line(cart, A), {
+			discount_percentage: 10,
+			discount_source: "manual_discount",
+			is_already_discounted: 1,
+		})
+		cart.updateItemQuantity(A, 7)
+		await settle(cart)
+		const a = line(cart, A)
+		expect(ruleNames(a.pricing_rules)).toEqual([])
+		expect(a.discount_percentage).toBe(10)
+		expect(a.amount).toBe(315)
+	})
+
+	const accumulative = {
+		...rule("_PNXT_G7_MinAB").offer,
+		name: "_PNXT_G7_ACCUM",
+		apply_discount_on_price: "Accumulative",
+		accumulative_scope_field: "item_code",
+		accumulative_scopes: [
+			{ values: [A], discount_percentage: 10 },
+			{ values: [B], discount_percentage: 5 },
+		],
+		min_qty: 0,
+	}
+	const accumulativeAnswer = (qa, qb) => [
+		{
+			item_code: A,
+			qty: qa,
+			price_list_rate: 50,
+			discount_percentage: 15,
+			rate: 42.5,
+			amount: 42.5 * qa,
+			pricing_rules: accumulative.name,
+			discount_source: "accumulative_promotion",
+			is_already_discounted: 1,
+		},
+		{
+			item_code: B,
+			qty: qb,
+			price_list_rate: 80,
+			discount_percentage: 15,
+			rate: 68,
+			amount: 68 * qb,
+			pricing_rules: accumulative.name,
+			discount_source: "accumulative_promotion",
+			is_already_discounted: 1,
+		},
+	]
+
+	it("an Accumulative offer keeps its % on a qty change: only which scopes are present matters (I-1)", async () => {
+		await pricedOnline(
+			accumulative,
+			[
+				[A, 2],
+				[B, 1],
+			],
+			accumulativeAnswer(2, 1),
+		)
+		expect(cart.grandTotal).toBe(85 + 68)
+		cart.updateItemQuantity(A, 3)
+		await settle(cart)
+		expect(line(cart, A).amount).toBe(127.5)
+		expect(cart.grandTotal).toBe(127.5 + 68)
+	})
+
+	it("an Accumulative line released when a scope leaves the cart drops its accumulative flag (m-3)", async () => {
+		await pricedOnline(
+			accumulative,
+			[
+				[A, 2],
+				[B, 1],
+			],
+			accumulativeAnswer(2, 1),
+		)
+		expect(line(cart, A).is_accumulative_discount).toBe(1)
+		cart.removeItem(B)
+		await settle(cart)
+		const a = line(cart, A)
+		expect(a.amount).toBe(100)
+		expect(a.is_accumulative_discount || 0).toBe(0)
+		expect(a.is_already_discounted || 0).toBe(0)
 	})
 })
 
@@ -375,6 +506,113 @@ describe.skipIf(!requirePromotions && !promotions?.minMaxStrategy)(
 			expect(line(cart, "_PNXT_TEST_ITEM_A").amount).toBe(want.invoice.amount)
 			expect(sentRows(cart)[0].rate).toBe(want.invoice.rate)
 			expect(cart.grandTotal).toBe(want.invoice.grand_total)
+		})
+
+		it("Item Level Discount: priced online on A×1 + B×3, A raised to 4 offline is the server's 390 (C-1)", async () => {
+			const title = "_PNXT_G7_MinAB_ItemLevel"
+			const first = serverCase(title, [
+				[A, 1],
+				[B, 3],
+			])
+			await pricedOnline(rule(title).offer, first.cart, first.lines)
+			expect(line(cart, A).amount).toBe(0)
+			expect(line(cart, A).discount_source).toBe("item_level_promotion")
+
+			cart.updateItemQuantity(A, 4)
+			await settle(cart)
+			expectServerLines(
+				cart,
+				serverCase(title, [
+					[A, 4],
+					[B, 3],
+				]).lines,
+			)
+			expect(cart.grandTotal).toBe(390)
+		})
+
+		it("Item Level Discount: priced online at 6, 7 offline is the server's 300.02 (C-1)", async () => {
+			const title = "_PNXT_G7_BuyOneA_ItemLevel"
+			const first = serverCase(title, [[A, 6]])
+			await pricedOnline(rule(title).offer, first.cart, first.lines)
+			expect(cart.grandTotal).toBe(250.02)
+
+			cart.updateItemQuantity(A, 7)
+			await settle(cart)
+			expectServerLines(cart, serverCase(title, [[A, 7]]).lines)
+		})
+
+		it("Auto Discount: lines the rule stamped auto_discount, A raised to 4 offline, sell at the server's full price (C-1)", async () => {
+			// apply_offers never applies an Auto Discount Min/Max rule (the fixture), so
+			// the stamp can only come from an older answer: the rule must still come off.
+			const title = "_PNXT_G7_MinAB_Auto"
+			const stamped = serverCase("_PNXT_G7_MinAB", [
+				[A, 1],
+				[B, 3],
+			]).lines.map((l) => ({
+				...l,
+				discount_source: "auto_discount",
+				is_already_discounted: 0,
+			}))
+			await pricedOnline(
+				rule(title).offer,
+				[
+					[A, 1],
+					[B, 3],
+				],
+				stamped,
+			)
+			expect(line(cart, A).amount).toBe(0)
+
+			cart.updateItemQuantity(A, 4)
+			await settle(cart)
+			expectServerLines(
+				cart,
+				serverCase(title, [
+					[A, 4],
+					[B, 3],
+				]).lines,
+			)
+			expect(cart.grandTotal).toBe(440)
+			expect(cart.appliedOffers).toHaveLength(0)
+		})
+
+		it("Auto Discount: 6 → 7 offline sells at the server's full price, never a stale 291.69 (C-1)", async () => {
+			const title = "_PNXT_G7_BuyOneA_Auto"
+			const stamped = serverCase("_PNXT_G7_BuyOneA", [[A, 6]]).lines.map(
+				(l) => ({
+					...l,
+					discount_source: "auto_discount",
+				}),
+			)
+			await pricedOnline(rule(title).offer, [[A, 6]], stamped)
+			cart.updateItemQuantity(A, 7)
+			await settle(cart)
+			expectServerLines(cart, serverCase(title, [[A, 7]]).lines)
+		})
+
+		it("a coupon line carrying the rule is ranked but never written; when it wins no other line is discounted (Q6)", async () => {
+			const title = "_PNXT_G7_MinAB"
+			const first = serverCase(title, [
+				[A, 2],
+				[B, 2],
+			])
+			await pricedOnline(rule(title).offer, first.cart, first.lines)
+			const a = line(cart, A)
+			Object.assign(a, {
+				discount_source: "coupon",
+				coupon_code: "_PNXT_G7_COUPON",
+			})
+			const before = {
+				pct: a.discount_percentage,
+				rules: ruleNames(a.pricing_rules),
+			}
+
+			cart.updateItemQuantity(B, 3)
+			await settle(cart)
+			expect(line(cart, A).discount_percentage).toBe(before.pct)
+			expect(ruleNames(line(cart, A).pricing_rules)).toEqual(before.rules)
+			expect(line(cart, B).amount).toBe(240)
+			expect(line(cart, B).discount_percentage || 0).toBe(0)
 		})
 	},
 )
