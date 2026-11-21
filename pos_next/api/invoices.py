@@ -3558,15 +3558,19 @@ def _ensure_offline_uniqueness(
 
 	# Handle Synced status - verify invoice still valid
 	if sync_status == "Synced" and existing_sync.sales_invoice:
-		invoice_data = _synced_invoice_data(existing_sync.sales_invoice, doctype)
+		name = existing_sync.sales_invoice
+		invoice_data = _synced_invoice_data(name, doctype)
 		if not invoice_data and str(offline_id).startswith(ONLINE_SUBMIT_KEY_PREFIX):
 			# A key carried across doctypes completes under the document made (m-e).
-			for other in _key_doctypes(offline_id)[1:]:
-				# A plain check first: a locking read of a missing name takes a gap lock.
-				if frappe.db.exists(other, existing_sync.sales_invoice):
-					invoice_data = _synced_invoice_data(existing_sync.sales_invoice, other)
-				if invoice_data:
-					break
+			# A plain check first: a locking read of a missing name takes a gap lock.
+			invoice_data = next(
+				(
+					data
+					for other in _key_doctypes(offline_id)[1:]
+					if frappe.db.exists(other, name) and (data := _synced_invoice_data(name, other))
+				),
+				None,
+			)
 		if invoice_data:
 			invoice_data["offline_id"] = offline_id
 			return {"already_synced": True, "invoice_data": invoice_data}
