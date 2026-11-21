@@ -223,7 +223,7 @@ class TestOfflineFlagWiring(unittest.TestCase):
 	def test_update_and_submit_mark_offline_payloads(self):
 		self.assertIn(
 			'invoice_doc.flags.pos_offline_sync = bool(data.get("offline_id"))',
-			inspect.getsource(invoices.update_invoice),
+			inspect.getsource(invoices._update_invoice),
 		)
 		self.assertIn(
 			"invoice_doc.flags.pos_offline_sync = bool(offline_id)",
@@ -572,7 +572,7 @@ class TestEnsureInvoiceCustomer(unittest.TestCase):
 
 	def test_customer_checks_run_after_auto_create(self, _t):
 		"""S1: develop's auto-create must run before the customer is validated."""
-		source = inspect.getsource(invoices.update_invoice)
+		source = inspect.getsource(invoices._update_invoice)
 		auto_create = source.index("Failed to create customer")
 		self.assertLess(auto_create, source.index("_ensure_invoice_customer(invoice_doc, pos_profile)"))
 		self.assertLess(auto_create, source.index("_validate_customer_for_receivable_payments(invoice_doc)"))
