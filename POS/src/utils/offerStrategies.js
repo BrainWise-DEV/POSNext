@@ -40,6 +40,8 @@
  * whole scope (G7).
  */
 
+import { satellitePosAssetUrl } from "@/utils/offline/satelliteAssets";
+
 const priceStrategies = new Map();
 const productStrategies = new Map();
 
@@ -134,7 +136,8 @@ export async function loadOfferStrategyPlugins() {
 		const { isPromotionsAppInstalled } = await import("@/utils/promoApi");
 		if (!isPromotionsAppInstalled()) return;
 
-		const url = "/assets/posnext_promotions/pos/offer-strategies.js";
+		// Cached for offline reloads by the service worker (satelliteAssets.js).
+		const url = satellitePosAssetUrl("posnext_promotions", "offer-strategies.js");
 		try {
 			const plugin = await import(/* @vite-ignore */ url);
 			await plugin.register?.({
