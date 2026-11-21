@@ -68,7 +68,15 @@ try:
 	from erpnext.accounts.doctype.pricing_rule.utils import (
 		get_other_conditions as erpnext_get_other_conditions,
 	)
+	from erpnext.accounts.doctype.pricing_rule.utils import (
+		get_pricing_rule_items as erpnext_get_pricing_rule_items,
+	)
+	from erpnext.accounts.doctype.pricing_rule.utils import (
+		get_pricing_rules as erpnext_get_pricing_rules,
+	)
 except Exception:  # pragma: no cover
+	erpnext_get_pricing_rules = None
+	erpnext_get_pricing_rule_items = None
 	erpnext_get_item_pricing_rules = None
 	erpnext_filter_pricing_rule_based_on_condition = None
 	erpnext_filter_pricing_rules_for_qty_amount = None
@@ -426,12 +434,17 @@ def _force_item_factors(
 		)
 
 
-def _list_prices(invoice_doc, rows, item_data) -> dict:
-	"""id(row) → list price from the POS Profile's price list (else the invoice's), or None."""
+def _server_price_list(invoice_doc) -> str | None:
+	"""The POS Profile's selling price list, else the invoice's (a sale without a profile)."""
 	profile = invoice_doc.get("pos_profile")
-	price_list = (
+	return (
 		profile and frappe.get_cached_value(DOCTYPE_POS_PROFILE, profile, "selling_price_list")
 	) or invoice_doc.get("selling_price_list")
+
+
+def _list_prices(invoice_doc, rows, item_data) -> dict:
+	"""id(row) → list price from the POS Profile's price list (else the invoice's), or None."""
+	price_list = _server_price_list(invoice_doc)
 	codes = list({row.item_code for row in rows})
 	if not price_list or not codes:
 		return {}
@@ -748,8 +761,11 @@ def _desk_pricing_profile(invoice_doc) -> frappe._dict:
 	)
 
 
-def _evaluate_offers(invoice_doc, payload) -> tuple[dict, Exception | None]:
+def _evaluate_offers(invoice_doc, payload, selected_offers=None) -> tuple[dict, Exception | None]:
 	"""One call to the cart's evaluator; an error is logged and returned, never raised.
+
+	``selected_offers`` (rule names the server verified, never the client's as sent)
+	is passed on as the cart passes its applied offers.
 
 	A sale without a POS Profile (Desk) is evaluated by pos_next's own evaluator on the
 	invoice's pricing facts (``_desk_pricing_profile``). On a Sales Invoice, the one-time
@@ -758,13 +774,19 @@ def _evaluate_offers(invoice_doc, payload) -> tuple[dict, Exception | None]:
 	evaluator's own date; an unresolved rule conflict is an error, which explains
 	nothing.
 	"""
+	selected = json.dumps(sorted(selected_offers)) if selected_offers else None
 	if payload.get("pos_profile"):
-		evaluator = _offer_evaluator()
+		cart_evaluator = _offer_evaluator()
+
+		def evaluator(data):
+			if selected:
+				return cart_evaluator(data, selected_offers=selected)
+			return cart_evaluator(data)
 	else:
 		profile = _desk_pricing_profile(invoice_doc)
 
 		def evaluator(data):
-			return _apply_offers(data, profile=profile)
+			return _apply_offers(data, selected, profile=profile)
 
 	payload = json.dumps(payload, default=str)
 	message_count = len(frappe.local.message_log or [])
@@ -979,16 +1001,220 @@ def _check_free_rows_backed(
 	if not remaining:
 		return
 	result, evaluator_error = context.paid_offers(paid_rows)
+	free_items = list(result.get("free_items") or [])
+	if not evaluator_error:
+		free_items += _selected_gift_free_items(invoice_doc, rows, paid_rows, context, result)
 	_check_free_rows(
 		invoice_doc,
 		remaining,
-		result.get("free_items") or [],
+		free_items,
 		evaluator_error,
 		item_data,
 		offline_sync,
 		paid_draft_free,
 		sourceless,
 	)
+
+
+def _free_item_rules(free_items) -> set[str]:
+	return {name for free in free_items or [] for name in _rule_names(free.get("pricing_rules") or "")}
+
+
+AGGREGATED_RULES_FLAG = "pos_next_aggregated_rule_totals"
+# The gifts promotions' cart evaluator grants on the cart's summed quantity.
+AGGREGATED_PROMOTION_TYPES = ("GWP", "Gift Pool")
+
+
+def _install_aggregated_qty() -> None:
+	"""Let ERPNext's quantity and amount filter judge some rules on cart totals.
+
+	While ``frappe.flags`` holds a callable (``AGGREGATED_RULES_FLAG``), each rule it
+	gives totals for is judged on them: the cart's summed quantity and amount over
+	the rule's items, as the cart's evaluator grants a GWP or Gift Pool. Every other
+	rule keeps the row's own quantity. ERPNext's selection (priority, apply multiple,
+	conflicts) is otherwise its own. ``filter_pricing_rules_for_qty_amount`` is looked
+	up on the module when called, so one wrapper there is enough; it is installed
+	once per process and does nothing while the flag is unset.
+	"""
+	from erpnext.accounts.doctype.pricing_rule import utils
+
+	if getattr(utils.filter_pricing_rules_for_qty_amount, "pos_next_aggregates", False):
+		return
+	original = utils.filter_pricing_rules_for_qty_amount
+
+	def filter_pricing_rules_for_qty_amount(qty, rate, pricing_rules, args=None):
+		totals = frappe.flags.get(AGGREGATED_RULES_FLAG)
+		if not totals:
+			return original(qty, rate, pricing_rules, args)
+		kept = []
+		for rule in pricing_rules:
+			rule_qty, rule_amount = totals(rule) or (qty, rate)
+			if original(rule_qty, rule_amount, [rule], args):
+				kept.append(rule)
+		return kept
+
+	filter_pricing_rules_for_qty_amount.pos_next_aggregates = True
+	utils.filter_pricing_rules_for_qty_amount = filter_pricing_rules_for_qty_amount
+
+
+class _ServerCart(frappe._dict):
+	"""The cart on server data, as ERPNext's rule selection reads a document: the
+	invoice's fields (for a rule's Python condition) and its paid rows."""
+
+	def as_dict(self, *args, **kwargs):
+		return self
+
+
+def _server_cart(invoice_doc, paid_rows, item_data, list_prices, price_list) -> _ServerCart:
+	items = []
+	for row in paid_rows:
+		factor = item_data.factor(row.item_code, row.get("uom"), row.get("conversion_factor"))
+		list_price = list_prices.get(id(row))
+		price = flt(row.rate) if list_price is None else flt(list_price)
+		items.append(
+			frappe._dict(
+				item_code=row.item_code,
+				item_group=item_data.get(row.item_code, "item_group"),
+				brand=item_data.get(row.item_code, "brand"),
+				uom=row.get("uom"),
+				conversion_factor=factor,
+				qty=flt(row.qty),
+				stock_qty=flt(row.qty) * factor,
+				price_list_rate=price,
+				rate=price,
+				warehouse=row.get("warehouse"),
+			)
+		)
+	cart = _ServerCart(invoice_doc.as_dict())
+	cart.update(items=items, selling_price_list=price_list)
+	return cart
+
+
+def _rule_totals(cart):
+	"""rule → (stock qty, amount) of the cart's paid rows in the rule's scope, for a GWP
+	or Gift Pool rule (a Gift Pool's own pool items do not count); None otherwise."""
+	cache = {}
+
+	def totals(rule):
+		name = rule.get("name")
+		if cstr(rule.get("promotion_type")) not in AGGREGATED_PROMOTION_TYPES or not name:
+			return None
+		if name not in cache:
+			pr_doc = frappe.get_cached_doc("Pricing Rule", name)
+			scope = set(erpnext_get_pricing_rule_items(pr_doc) or [])
+			field = frappe.scrub(pr_doc.apply_on or "")
+			pool = set()
+			if pr_doc.get("promotion_type") == "Gift Pool" and pr_doc.get("promotional_scheme"):
+				for codes in (_gift_pool_groups({pr_doc.promotional_scheme}).get(pr_doc.promotional_scheme) or {}).values():
+					pool |= codes
+			rows = [item for item in cart["items"] if item.get(field) in scope and item.item_code not in pool]
+			cache[name] = (
+				sum(item.stock_qty for item in rows),
+				sum(item.price_list_rate * item.qty for item in rows),
+			)
+		return cache[name]
+
+	return totals
+
+
+def _cart_gift_winners(invoice_doc, rows, paid_rows, context, granted) -> set[str]:
+	"""Product rules named on the cart's rows that win ERPNext's own rule selection for
+	this cart (Ruling 148), less ``granted`` (rules the plain evaluation already gave).
+
+	A named rule counts only when ERPNext's ``get_pricing_rules`` returns it for a paid
+	row: on server data (item, item group, brand, UOM, warehouse, list price), the POS
+	Profile's price list (never the client's), today, the customer and its groups and
+	territory, POS-only rules for a POS sale, with the rule's condition, quantity and amount thresholds, priority,
+	``apply_multiple_pricing_rules`` and every competing rule, Price rules included. A
+	GWP or Gift Pool rule is judged on the cart's summed quantity, as the cart's
+	evaluator grants it (``_install_aggregated_qty``); a redeemed one-time rule is left
+	out of the lookup. A conflict ERPNext cannot resolve picks nothing. Without the
+	lookup: none.
+	"""
+	sent = {name for row in rows for name in _rule_names(row.get("pricing_rules") or "")} - set(granted)
+	if not sent or not paid_rows or not (erpnext_get_pricing_rules and erpnext_get_pricing_rule_items):
+		return set()
+	products = set(
+		frappe.get_all(
+			"Pricing Rule",
+			filters={
+				"name": ["in", list(sent)],
+				"price_or_product_discount": "Product",
+				"coupon_code_based": 0,
+			},
+			pluck="name",
+		)
+	)
+	if not products:
+		return set()
+	price_list = _server_price_list(invoice_doc)
+	item_data = context.item_data
+	cart = _server_cart(invoice_doc, paid_rows, item_data, context.list_prices, price_list)
+	base = frappe._dict(
+		_one_time_match_args(invoice_doc, invoice_doc.get("customer")),
+		price_list=price_list,
+		currency=invoice_doc.get("currency"),
+		transaction_date=nowdate(),
+		# A sale through a POS Profile is a POS sale: POS-only rules apply to it.
+		is_pos=1 if invoice_doc.get("pos_profile") else cint(invoice_doc.get("is_pos")),
+	)
+	redeemed = set()
+	if invoice_doc.doctype == DOCTYPE_SALES_INVOICE:
+		redeemed = set(_redeemed_one_time_records(invoice_doc)[1])
+	won = set()
+
+	def lookup():
+		for item in cart["items"]:
+			args = frappe._dict(base, **item)
+			message_count = len(frappe.local.message_log or [])
+			try:
+				rules = erpnext_get_pricing_rules(args, cart) or []
+			except Exception:
+				# An unresolved conflict (or any lookup error) picks nothing here.
+				del frappe.local.message_log[message_count:]
+				continue
+			won.update(rule.get("name") for rule in rules if isinstance(rule, dict) and rule.get("name"))
+			if products <= won:
+				return
+
+	_install_aggregated_qty()
+	previous = frappe.flags.get(AGGREGATED_RULES_FLAG)
+	frappe.flags[AGGREGATED_RULES_FLAG] = _rule_totals(cart)
+	try:
+		_evaluate_without(redeemed, lookup)
+	finally:
+		frappe.flags[AGGREGATED_RULES_FLAG] = previous
+	return won & products - redeemed
+
+
+def _selected_gift_free_items(invoice_doc, rows, paid_rows, context, result) -> list:
+	"""Free rows of rules the cart applied that the plain evaluation does not grant
+	(D-R2-08), when the server confirms them.
+
+	A mixed-SKU GWP (buy A + B, 2 in all) is granted by the cart's evaluator only for
+	a selected rule: ERPNext's per-item lookup reads min_qty on each item alone. A
+	rule the rows name counts only if it wins ERPNext's own selection for this cart
+	(``_cart_gift_winners``, Ruling 148). Those rules are selected, with every rule the
+	plain evaluation applied, and only their free rows are taken from that
+	evaluation: each rule's gift comes from one evaluation, and that evaluation
+	decides its quantity.
+	"""
+	granted = _free_item_rules(result.get("free_items"))
+	extra = _cart_gift_winners(invoice_doc, rows, paid_rows, context, granted)
+	if not extra:
+		return []
+	applied = set(result.get("applied_pricing_rules") or [])
+	for line in result.get("items") or []:
+		applied.update(_rule_names(_pricing_rule_to_string(line.get("pricing_rules"))))
+	payload = _offer_payload(invoice_doc, paid_rows, context.item_data, context.list_prices)
+	selected, error = _evaluate_offers(invoice_doc, payload, extra | applied | granted)
+	if error:
+		return []
+	return [
+		free
+		for free in selected.get("free_items") or []
+		if _free_item_rules([free]) and _free_item_rules([free]) <= extra
+	]
 
 
 def _check_free_rows(
