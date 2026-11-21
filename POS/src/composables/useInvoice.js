@@ -12,12 +12,12 @@ import {
 	roundCurrency,
 	taxAfterHeaderDiscount,
 	unitRateLineDiscount,
+	unitRoundedAmountDiscount,
 } from "@/utils/currency";
 import {
 	fnfLockedDiscountAmount,
 	fnfReplacedDiscount,
 	fnfSubmissionMarkers,
-	hasPricingRules,
 	stripFnfKeys,
 	stripFriendsAndFamilyForOrder,
 } from "@/utils/friendsAndFamily";
@@ -720,22 +720,31 @@ export function useInvoice() {
 		if (fnfAmount !== null) {
 			discountAmount = fnfAmount;
 		} else if (!amountMode && item.discount_percentage > 0) {
-			// A promotion's % is priced per unit, as apply_offers prices it: a unit rate at
-			// currency precision, times qty. The rate sent then reproduces the line, so the
-			// cart shows and collects what the invoice saves (G6).
-			discountAmount =
-				!isManuallyEdited && hasPricingRules(item.pricing_rules)
-					? unitRateLineDiscount(roundedRate, item.quantity, item.discount_percentage)
-					: roundCurrency((baseAmount * item.discount_percentage) / 100);
+			// The invoice saves the unit rate the cart sends, so every discount is priced
+			// per unit: a % as a unit rate at currency precision, times qty, as apply_offers
+			// prices it. The cart then shows and collects what the invoice saves (G6, G8).
+			discountAmount = unitRateLineDiscount(roundedRate, item.quantity, item.discount_percentage);
+			// Stacked percentages stop at the line's value (100%), never beyond it.
+			if (item.discount_percentage > 100) item.discount_percentage = 100;
 			item.discount_mode = "percentage";
+			item._unit_discount_amount = null;
 		} else if (item.discount_amount > 0) {
-			discountAmount = roundCurrency(item.discount_amount);
+			// A fixed amount is taken as whole cents a unit (G8). What was asked for is
+			// kept, so a qty change splits the asked amount again, not the last rounding.
+			const requested =
+				item._requested_discount_amount > 0 && item.discount_amount === item._unit_discount_amount
+					? item._requested_discount_amount
+					: item.discount_amount;
+			discountAmount = unitRoundedAmountDiscount(requested, item.quantity, baseAmount);
+			item._requested_discount_amount = requested;
+			item._unit_discount_amount = discountAmount;
 			// Sync percentage when amount is provided directly
 			item.discount_percentage = baseAmount > 0 ? (discountAmount / baseAmount) * 100 : 0;
 			item.discount_mode = "amount";
 			item._derived_discount_percentage = item.discount_percentage;
 		} else {
 			item.discount_mode = null;
+			item._unit_discount_amount = null;
 		}
 		// Stacked discounts stop at the line's value (100%), never beyond it.
 		if (discountAmount > baseAmount) {

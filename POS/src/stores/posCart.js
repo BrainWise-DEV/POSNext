@@ -790,7 +790,14 @@ export const usePOSCartStore = defineStore("posCart", () => {
 					item.pricing_rules = [];
 					item.is_already_discounted = 0;
 				} else {
-					item.discount_percentage = Number(row.discount_percentage) || 0;
+					// The row's saved rate, not its 2-dp %: priced per unit, the cart then
+					// gives the line the draft holds (16.67% of 50 is 41.66, the row 41.67).
+					const price = Number(item.price_list_rate || item.rate) || 0;
+					const rowRate = Number.parseFloat(row.rate);
+					item.discount_percentage =
+						price > 0 && Number.isFinite(rowRate) && item.is_rate_manually_edited !== 1
+							? ((price - rowRate) / price) * 100
+							: Number(row.discount_percentage) || 0;
 					item.discount_amount = serverPerUnit * qty;
 				}
 				recalculateItem(item);

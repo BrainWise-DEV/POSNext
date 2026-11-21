@@ -33,10 +33,12 @@ describe("useInvoice line discount mode", () => {
 		inv.recalculateItem(item)
 		expect(item.amount).toBe(480)
 
+		// 20 over 3 units is taken as 6.66 a unit (G8): the unit rate sent, 243.34,
+		// gives the line the invoice saves.
 		inv.updateItemQuantity("A", 3)
 		const after3 = inv.invoiceItems.value[0]
-		expect(after3.discount_amount).toBe(20)
-		expect(after3.amount).toBe(730)
+		expect(after3.discount_amount).toBe(19.98)
+		expect(after3.amount).toBe(730.02)
 
 		inv.updateItemQuantity("A", 2)
 		const back = inv.invoiceItems.value[0]

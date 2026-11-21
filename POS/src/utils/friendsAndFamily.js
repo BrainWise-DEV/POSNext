@@ -139,8 +139,7 @@ function round2(value) {
 	return Math.round((num(value) + Number.EPSILON) * 100) / 100;
 }
 
-/** True when a line's `pricing_rules` (array or comma string) names a rule. */
-export function hasPricingRules(value) {
+function hasPricingRules(value) {
 	if (!value) return false;
 	if (Array.isArray(value)) return value.some(Boolean);
 	return typeof value === "string" && value.replace(/[[\]"\s,]/g, "").length > 0;

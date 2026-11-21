@@ -12,7 +12,7 @@ the invoices nexus.local saved for "buy one" carts; this test checks the server'
 algorithm still gives them. Read-only: no documents are written.
 
 	bench --site nexus.local execute pos_next.dev_tests.run \
-		--kwargs "{'module': 'pos_next.test_minmax_unit_rate'}"
+		--kwargs "{'module': 'pos_next.api.test_minmax_unit_rate'}"
 """
 
 import json
@@ -23,7 +23,7 @@ import frappe
 from frappe.utils import flt
 
 FIXTURE = os.path.join(
-	os.path.dirname(__file__), "..", "POS", "src", "stores", "__tests__", "fixtures-minmax-buy-one.json"
+	os.path.dirname(__file__), "..", "..", "POS", "src", "stores", "__tests__", "fixtures-minmax-buy-one.json"
 )
 
 # "buy one": 100% off one unit of the cheapest line (Min, discounted-qty limit 1).
@@ -47,7 +47,8 @@ class TestMinMaxUnitRate(unittest.TestCase):
 		with open(FIXTURE) as f:
 			fixture = json.load(f)
 		self.assertEqual([case["qty"] for case in fixture["cases"]], [2, 3, 4, 6, 7])
-		for case in fixture["cases"]:
+		self.assertEqual([case["qty"] for case in fixture["cases_80"]], [6, 7])
+		for case in fixture["cases"] + fixture["cases_80"]:
 			expected = case["line"]
 			item = self.line(expected["price_list_rate"], case["qty"])
 			msg = f"qty {case['qty']}"

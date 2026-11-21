@@ -276,9 +276,9 @@ export function roundTo(value, precision = settings.currency) {
 }
 
 /**
- * The discount of a promotion's line % priced per unit, as apply_offers prices it
- * (ERPNext's calculate_item_values formula) and as an invoice row holds it: the unit
- * rate at currency precision, times qty. A Min/Max rule's blended % does not split
+ * The discount of a line % priced per unit, as apply_offers prices it (ERPNext's
+ * calculate_item_values formula) and as an invoice row holds it: the unit rate at
+ * currency precision, times qty. A Min/Max rule's blended % does not split
  * evenly into units: one free in six at 50 is 41.67 a unit, so the line is 250.02,
  * not 250.00 (G6).
  */
@@ -288,6 +288,21 @@ export function unitRateLineDiscount(unitPrice, qty, percentage) {
 	const pct = Math.min(Math.max(Number(percentage) || 0, 0), 100);
 	const rate = roundCurrency(price * (1 - pct / 100));
 	return roundCurrency(roundCurrency(price * units) - roundCurrency(rate * units));
+}
+
+/**
+ * A fixed line discount rounded DOWN to a whole per-unit amount (never more than asked,
+ * nor than the line), so the unit rate the cart sends reproduces the line the invoice
+ * saves: 10 off 3 × 50 is 3.33 a unit, 9.99, so the line is 140.01 (G8). As
+ * couponLines' fixedCouponLineDiscount does for a fixed coupon.
+ */
+export function unitRoundedAmountDiscount(amount, qty, baseAmount) {
+	const units = Number(qty) || 0;
+	if (units <= 0) return 0;
+	const allowed = Math.min(Math.max(Number(amount) || 0, 0), Math.max(Number(baseAmount) || 0, 0));
+	const factor = 10 ** settings.currency;
+	const perUnit = Math.floor((allowed / units) * factor + 1e-6);
+	return roundCurrency((perUnit * units) / factor);
 }
 
 /** Round using system float precision */

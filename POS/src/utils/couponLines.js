@@ -12,6 +12,8 @@
  * coupon, and removing the coupon gives it back.
  */
 
+import { roundCurrency, unitRateLineDiscount, unitRoundedAmountDiscount } from "@/utils/currency";
+
 export const COUPON_DISCOUNT_SOURCE = "coupon";
 
 const NO_DISCOUNT = Object.freeze({
@@ -54,9 +56,10 @@ export function preCouponLineDiscount(item) {
 	const pre = preCouponDiscount(item);
 	const unitPrice =
 		item.is_rate_manually_edited === 1 ? Number(item.rate) || 0 : Number(item.price_list_rate || item.rate) || 0;
-	const base = unitPrice * (Number(item.quantity) || 0);
-	if (pre.discount_percentage > 0) return (base * pre.discount_percentage) / 100;
-	return Math.min(Number(pre.discount_amount) || 0, base);
+	const qty = Number(item.quantity) || 0;
+	const base = roundCurrency(roundCurrency(unitPrice) * qty);
+	if (pre.discount_percentage > 0) return unitRateLineDiscount(unitPrice, qty, pre.discount_percentage);
+	return unitRoundedAmountDiscount(pre.discount_amount, qty, base);
 }
 
 export function hasFixedCouponDiscount(item) {
