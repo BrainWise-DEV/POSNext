@@ -31,8 +31,8 @@ jobs:
 
     env:
       # Compatible satellite branches; a repo variable overrides them.
-      PROMOTIONS_REF: ${{ vars.PROMOTIONS_REF || 'feature/friends-family-fixes' }}
-      MAGENTO_REF: ${{ vars.MAGENTO_REF || 'feature/friends-family-magento-otp' }}
+      PROMOTIONS_REF: ${{ vars.PROMOTIONS_REF || 'feature/ff-generic-redesign' }}
+      MAGENTO_REF: ${{ vars.MAGENTO_REF || 'feature/ff-generic-redesign' }}
 
     services:
       redis-cache:
