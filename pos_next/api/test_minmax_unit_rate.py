@@ -34,9 +34,8 @@ class TestMinMaxUnitRate(unittest.TestCase):
 	def setUp(self):
 		if "posnext_promotions" not in frappe.get_installed_apps():
 			self.skipTest("posnext_promotions is not installed")
-		from posnext_promotions.overrides.pricing_rule import _apply_discount
-
-		self.apply = _apply_discount
+		# By name: pos_next never imports posnext_promotions (test_no_promotions_import).
+		self.apply = frappe.get_attr("posnext_promotions.overrides.pricing_rule._apply_discount")
 
 	def line(self, price, qty, eligible_qty=1, rule=BUY_ONE):
 		item = frappe._dict(price_list_rate=price, qty=qty)
