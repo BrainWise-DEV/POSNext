@@ -406,8 +406,22 @@ class TestReturnSafety(FrappeTestCase):
 		self.assertEqual(flt(sum(discounts), 2), 10)
 		self.assertEqual(flt(sum(refunds), 2), flt(sale.paid_amount, 2))
 
+	def _round_to_whole_units(self):
+		"""ERPNext rounds to the currency's smallest fraction (USD: 0.01, so 89.99 stays)."""
+		currency = self.ctx.currency
+		saved = frappe.db.get_value("Currency", currency, "smallest_currency_fraction_value")
+
+		def restore():
+			frappe.db.set_value("Currency", currency, "smallest_currency_fraction_value", saved)
+			frappe.clear_document_cache("Currency", currency)
+
+		self.addCleanup(restore)
+		frappe.db.set_value("Currency", currency, "smallest_currency_fraction_value", 1)
+		frappe.clear_document_cache("Currency", currency)
+
 	def test_rounded_total_full_return_refunds_paid(self):
-		# Rounding on: 89.99 is rounded to 90.00 and 90.00 is paid.
+		# Rounding on, to whole units: 89.99 is rounded to 90.00 and 90.00 is paid.
+		self._round_to_whole_units()
 		sale = self._sale(
 			[_line(self.ctx, ITEM_C, qty=3, price_list_rate=33.33)], discount_amount=10, rounded=True
 		)
