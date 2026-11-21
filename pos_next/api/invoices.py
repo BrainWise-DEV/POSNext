@@ -1757,8 +1757,9 @@ def _manual_discount_problem(row, list_price, unexplained, tolerance, settings) 
 		in_discount = min(unexplained, rate * percentage / (100 - percentage))
 		# The POS sends the percentage at 2 decimals and the rate rounded to the currency
 		# unit (G8). Read back through the %, a rate error grows by 1 / (1 - %), so allow
-		# a unit and the 2-dp % on the rate itself, scaled the same way.
-		in_rate = unexplained - in_discount - (tolerance + list_price * 0.0001) * 100 / (100 - percentage)
+		# a currency unit plus half a 2-dp % step (list × 0.00005) on the rate itself,
+		# scaled the same way.
+		in_rate = unexplained - in_discount - (tolerance + list_price * 0.00005) * 100 / (100 - percentage)
 	prices = (row.idx, row.item_code, list_price, rate)
 	if in_discount > tolerance and not cint(settings[FIELD_ALLOW_USER_TO_EDIT_ITEM_DISCOUNT]):
 		return _(
