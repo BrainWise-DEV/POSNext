@@ -1,5 +1,10 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { capInvoiceDiscount, manualDiscountError } from "../manualDiscount";
+import {
+	appliedAmountHint,
+	capInvoiceDiscount,
+	manualDiscountError,
+	requestedDiscountAmount,
+} from "../manualDiscount";
 
 beforeAll(() => {
 	globalThis.__ = (s, args) => (args ? s.replace(/\{(\d)\}/g, (_, i) => args[i]) : s);
@@ -90,5 +95,30 @@ describe("capInvoiceDiscount (invoice-level discount, as the server caps it)", (
 	it("negative or empty input is no discount", () => {
 		expect(cap({ value: -5 })).toEqual({ amount: 0, value: 0, limited: false });
 		expect(cap({ value: "" })).toEqual({ amount: 0, value: 0, limited: false });
+	});
+});
+
+describe("appliedAmountHint (G8 round 1, m-1)", () => {
+	it("says what a fixed amount becomes when it does not split into whole cents a unit", () => {
+		expect(appliedAmountHint({ amount: 10, qty: 3, subtotal: 150 })).toEqual({ applied: 9.99, perUnit: 3.33 });
+		// Less than a cent a unit: nothing is applied, and the cashier is told so.
+		expect(appliedAmountHint({ amount: 0.02, qty: 3, subtotal: 150 })).toEqual({ applied: 0, perUnit: 0 });
+	});
+
+	it("says nothing when the amount splits exactly", () => {
+		expect(appliedAmountHint({ amount: 10, qty: 4, subtotal: 200 })).toBeNull();
+		expect(appliedAmountHint({ amount: 0, qty: 3, subtotal: 150 })).toBeNull();
+	});
+});
+
+describe("requestedDiscountAmount (G8 round 1, m-2)", () => {
+	it("is the amount asked for while the line holds its own rounding of it", () => {
+		const item = { discount_amount: 9.99, _unit_discount_amount: 9.99, _requested_discount_amount: 10 };
+		expect(requestedDiscountAmount(item)).toBe(10);
+	});
+
+	it("is the line's amount once something else wrote it", () => {
+		expect(requestedDiscountAmount({ discount_amount: 5, _unit_discount_amount: 9.99, _requested_discount_amount: 10 })).toBe(5);
+		expect(requestedDiscountAmount({ discount_amount: 9.99, _unit_discount_amount: null, _requested_discount_amount: 10 })).toBe(9.99);
 	});
 });

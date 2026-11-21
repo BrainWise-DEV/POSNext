@@ -41,6 +41,7 @@ const fixture = (await import("./fixtures-minmax-buy-one.json")).default
 const { usePOSCartStore } = await import("@/stores/posCart")
 const { usePaymentOpenCheck } = await import("@/composables/usePaymentOpenCheck")
 const { buildOfflineInvoiceData } = await import("@/utils/offlineInvoicePayload")
+const { restorePreCouponDiscount, stashPreCouponDiscount } = await import("@/utils/couponLines")
 
 const ITEM = {
 	item_code: "_PNXT_TEST_ITEM_A",
@@ -235,6 +236,43 @@ describe("G8: a cashier's own discount is priced as the invoice saves it", () =>
 		cart.updateItemQuantity(ITEM.item_code, 3)
 		expect(cart.invoiceItems[0].discount_amount).toBe(9.99)
 		expect(cart.invoiceItems[0].amount).toBe(140.01)
+	})
+
+	// pos-dev probe (G8 round 1): a 15% inclusive template on a POS Profile with
+	// tax_inclusive set saves grand = gross, and the net and tax the cart computes.
+	for (const [what, fields, grand, tax] of [
+		["10 off 3 × 50", { item_code: ITEM.item_code, qty: 3, discount_amount: 10 }, 140.01, 18.26],
+		["16.67% of 6 × 50", { item_code: ITEM.item_code, qty: 6, discount_percentage: 16.67 }, 249.96, 32.6],
+		["30 off 7 × 50", { item_code: ITEM.item_code, qty: 7, discount_amount: 30 }, 320.04, 41.74],
+	]) {
+		it(`tax-inclusive 15%, ${what}: the cart's gross, tax and sent rate are the invoice's`, async () => {
+			server.taxes = [{ charge_type: "On Net Total", rate: 15, account_head: "VAT" }]
+			const cart = manualCart(fields)
+			await cart.loadTaxRules("POS-1")
+			cart.setTaxInclusive(true)
+			expect(cart.grandTotal).toBe(grand)
+			expect(cart.totalTax).toBe(tax)
+			expect(savedTotal(cart.formatItemsForSubmission(cart.invoiceItems))).toBe(grand)
+		})
+	}
+
+	it("typing exactly the applied figure makes it the new request (m-2a)", async () => {
+		const cart = manualCart(fixture.manual[0]) // 10 off 3 × 50 → 9.99
+		await cart.updateItemDetails(ITEM.item_code, { discount_amount: 9.99, discount_percentage: 0 })
+		cart.updateItemQuantity(ITEM.item_code, 4) // 9.99 over 4: 2.49 a unit
+		expect(cart.invoiceItems[0].discount_amount).toBe(9.96)
+	})
+
+	it("removing a coupon gives back the amount asked for, not its rounding (m-2b)", () => {
+		const cart = manualCart(fixture.manual[0]) // 10 off 3 × 50 → 9.99
+		const line = cart.invoiceItems[0]
+		stashPreCouponDiscount(line)
+		Object.assign(line, { discount_amount: 20, discount_percentage: 0, discount_source: "coupon", coupon_code: "SAVE20" })
+		cart.recalculateItem(line)
+		restorePreCouponDiscount(line)
+		line.quantity = 4
+		cart.recalculateItem(line)
+		expect(line.discount_amount).toBe(10)
 	})
 
 	it("offline, a manual amount discount is queued paid at what the server will save", () => {

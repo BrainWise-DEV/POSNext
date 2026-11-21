@@ -2587,8 +2587,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			if (updates.warehouse !== undefined) cartItem.warehouse = updates.warehouse;
 			if (updates.discount_percentage !== undefined && !isFnf)
 				cartItem.discount_percentage = updates.discount_percentage;
-			if (updates.discount_amount !== undefined && !isFnf)
+			if (updates.discount_amount !== undefined && !isFnf) {
 				cartItem.discount_amount = updates.discount_amount;
+				// What the cashier typed is the request, even the figure the line showed (G8).
+				cartItem._unit_discount_amount = null;
+			}
 			if (updates.rate !== undefined) cartItem.rate = updates.rate;
 			if (updates.price_list_rate !== undefined)
 				cartItem.price_list_rate = updates.price_list_rate;

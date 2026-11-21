@@ -4,6 +4,7 @@
 from __future__ import unicode_literals
 
 import json
+import math
 from functools import lru_cache
 
 import frappe
@@ -1754,8 +1755,10 @@ def _manual_discount_problem(row, list_price, unexplained, tolerance, settings) 
 	in_discount, in_rate = 0, unexplained
 	if 0 < percentage < 100:
 		in_discount = min(unexplained, rate * percentage / (100 - percentage))
-		# The POS sends the percentage at 2 decimals: allow that much on the split.
-		in_rate = unexplained - in_discount - list_price * 0.0001
+		# The POS sends the percentage at 2 decimals and the rate rounded to the currency
+		# unit (G8). Read back through the %, a rate error grows by 1 / (1 - %), so allow
+		# a unit and the 2-dp % on the rate itself, scaled the same way.
+		in_rate = unexplained - in_discount - (tolerance + list_price * 0.0001) * 100 / (100 - percentage)
 	prices = (row.idx, row.item_code, list_price, rate)
 	if in_discount > tolerance and not cint(settings[FIELD_ALLOW_USER_TO_EDIT_ITEM_DISCOUNT]):
 		return _(
@@ -1769,7 +1772,11 @@ def _manual_discount_problem(row, list_price, unexplained, tolerance, settings) 
 		).format(*prices)
 	limit = flt(settings[FIELD_MAX_DISCOUNT_ALLOWED])
 	taken = flt(unexplained / list_price * 100, 2)
-	if limit > 0 and taken > limit:
+	# The lowest rate the limit allows, at the rate's own precision: the maximum typed
+	# exactly and rounded to the cent (50% of 20.01 is 10.00) is never over it.
+	precision = -round(math.log10(tolerance)) if tolerance > 0 else 2
+	lowest = flt(list_price * (1 - limit / 100), precision)
+	if limit > 0 and flt(lowest - (list_price - unexplained), precision + 2) > tolerance:
 		return _(
 			"Row {0}: item {1} is reduced from {2} to {3} ({4}%), above the maximum allowed discount of {5}%."
 		).format(*prices, taken, limit)

@@ -5,6 +5,36 @@
  * from list price (rate edit plus discount). 0 = no limit.
  */
 
+import { roundCurrency, unitRoundedAmountDiscount } from "@/utils/currency";
+
+/**
+ * The fixed discount the cashier asked for on a line. The line holds it as whole cents
+ * a unit (G8), so while `discount_amount` is still the cart's own rounding of the
+ * request, the request is what counts: a qty change splits it again. Anything that
+ * writes the amount (the cashier, the server, a coupon) clears `_unit_discount_amount`
+ * or writes another figure, and its figure becomes the request.
+ */
+export function requestedDiscountAmount(item) {
+	const amount = Number(item?.discount_amount) || 0;
+	const requested = Number(item?._requested_discount_amount) || 0;
+	const ownRounding = item?._unit_discount_amount != null && amount === item._unit_discount_amount;
+	return requested > 0 && ownRounding ? requested : amount;
+}
+
+/**
+ * What a fixed amount becomes on the line when it does not split into whole cents a
+ * unit (10 off 3 units is 9.99, 3.33 a unit), or null when it is applied as typed.
+ * @returns {{applied: number, perUnit: number}|null}
+ */
+export function appliedAmountHint({ amount, qty, subtotal }) {
+	const asked = roundCurrency(Number(amount) || 0);
+	const units = Number(qty) || 0;
+	if (asked <= 0 || units <= 0) return null;
+	const applied = unitRoundedAmountDiscount(asked, units, subtotal);
+	if (Math.abs(applied - Math.min(asked, Number(subtotal) || 0)) < 1e-9) return null;
+	return { applied, perUnit: roundCurrency(applied / units) };
+}
+
 /**
  * @param {Object} line
  * @param {number} line.listPrice - list price per unit (before any manual edit)

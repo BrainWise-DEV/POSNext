@@ -22,6 +22,7 @@ import {
 	stripFriendsAndFamilyForOrder,
 } from "@/utils/friendsAndFamily";
 import { preCouponDiscount, preCouponLineDiscount } from "@/utils/couponLines";
+import { requestedDiscountAmount } from "@/utils/manualDiscount";
 
 const log = logger.create("Invoice");
 
@@ -731,10 +732,7 @@ export function useInvoice() {
 		} else if (item.discount_amount > 0) {
 			// A fixed amount is taken as whole cents a unit (G8). What was asked for is
 			// kept, so a qty change splits the asked amount again, not the last rounding.
-			const requested =
-				item._requested_discount_amount > 0 && item.discount_amount === item._unit_discount_amount
-					? item._requested_discount_amount
-					: item.discount_amount;
+			const requested = requestedDiscountAmount(item);
 			discountAmount = unitRoundedAmountDiscount(requested, item.quantity, baseAmount);
 			item._requested_discount_amount = requested;
 			item._unit_discount_amount = discountAmount;

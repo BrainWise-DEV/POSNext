@@ -2297,3 +2297,4 @@ Points applied: {0}. Please pay remaining {1} with {2},تم خصم النقاط:
 "The refund {0} does not match the return total {1}. Reopen the return and try again.","المبلغ المسترد {0} لا يطابق إجمالي المرتجع {1}. أعد فتح المرتجع وحاول مرة أخرى.",""
 "The refund {0} does not match the refund due {1}. Reload the POS and open the return again.","المبلغ المسترد {0} لا يطابق المبلغ المستحق للاسترداد {1}. أعد تحميل نقطة البيع وافتح المرتجع مرة أخرى.",""
 "Refund Mismatch","عدم تطابق المبلغ المسترد",""
+"Applied {0} ({1} per unit)","مُطبَّق {0} ({1} لكل وحدة)",""

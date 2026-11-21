@@ -13,6 +13,7 @@
  */
 
 import { roundCurrency, unitRateLineDiscount, unitRoundedAmountDiscount } from "@/utils/currency";
+import { requestedDiscountAmount } from "@/utils/manualDiscount";
 
 export const COUPON_DISCOUNT_SOURCE = "coupon";
 
@@ -39,7 +40,12 @@ export function preCouponDiscount(item) {
 }
 
 export function stashPreCouponDiscount(item) {
-	item.pre_coupon_discount = { ...preCouponDiscount(item) };
+	// The fixed amount asked for, not its rounding to whole cents a unit (G8).
+	const amountLine = !isCouponLine(item) && item.discount_mode === "amount";
+	item.pre_coupon_discount = {
+		...preCouponDiscount(item),
+		requested_discount_amount: amountLine ? requestedDiscountAmount(item) : 0,
+	};
 }
 
 export function restorePreCouponDiscount(item) {
@@ -48,6 +54,14 @@ export function restorePreCouponDiscount(item) {
 	item.discount_amount = pre.discount_amount || 0;
 	item.discount_source = pre.discount_source || "";
 	item.is_already_discounted = pre.is_already_discounted || 0;
+	if (pre.requested_discount_amount > 0) {
+		// A fixed amount again, held as its own rounding of the request: a qty change
+		// splits the request, and its derived % is not read as a real one.
+		item.discount_mode = "amount";
+		item._derived_discount_percentage = item.discount_percentage;
+		item._requested_discount_amount = pre.requested_discount_amount;
+		item._unit_discount_amount = item.discount_amount;
+	}
 	item.pre_coupon_discount = null;
 }
 
@@ -59,7 +73,7 @@ export function preCouponLineDiscount(item) {
 	const qty = Number(item.quantity) || 0;
 	const base = roundCurrency(roundCurrency(unitPrice) * qty);
 	if (pre.discount_percentage > 0) return unitRateLineDiscount(unitPrice, qty, pre.discount_percentage);
-	return unitRoundedAmountDiscount(pre.discount_amount, qty, base);
+	return unitRoundedAmountDiscount(pre.requested_discount_amount || pre.discount_amount, qty, base);
 }
 
 export function hasFixedCouponDiscount(item) {
