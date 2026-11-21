@@ -1628,6 +1628,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				offerProcessingState.value.error = null;
 
 				const invoiceData = buildOfferEvaluationPayload(currentProfile);
+				const pricedLines = snapshotPricedLines();
+				const sentHash = generateCartHash();
 				const offerNames = [...new Set([...existingCodes, offerCode])];
 
 				const response = await applyOffersResource.submit({
@@ -1637,6 +1639,15 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 				// Check if cancelled during API call
 				if (signal?.aborted) return;
+
+				// The cart changed while the request was in flight: the answer prices a cart
+				// that is gone, so it is dropped, as the auto pass drops a stale answer (I-1r).
+				if (generateCartHash() !== sentHash) {
+					showWarning(__("The cart changed while the offer was being applied. Please apply it again."));
+					offersDialogRef?.resetApplyingState();
+					result = false;
+					return;
+				}
 
 				const {
 					items: responseItems,
@@ -1705,7 +1716,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 					max_amt: offer.max_amt,
 				});
 				appliedOffers.value = updatedEntries;
-				stampServerScopes();
+				stampServerScopes(pricedLines);
 
 				offerProcessingState.value.lastProcessedAt = Date.now();
 
@@ -1806,6 +1817,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				offerProcessingState.value.error = null;
 
 				const invoiceData = buildOfferEvaluationPayload(currentProfile);
+				const pricedLines = snapshotPricedLines();
+				const sentHash = generateCartHash();
 
 				const response = await applyOffersResource.submit({
 					invoice_data: invoiceData,
@@ -1813,6 +1826,17 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				});
 
 				if (signal?.aborted) return;
+
+				// The cart changed while the request was in flight: the answer is dropped and
+				// the offer comes off the list; the next pass (the change queued one) prices
+				// the cart with the offers left (I-1r).
+				if (generateCartHash() !== sentHash) {
+					appliedOffers.value = appliedOffers.value.filter((entry) =>
+						remainingCodes.includes(entry.code)
+					);
+					result = true;
+					return;
+				}
 
 				const {
 					items: responseItems,
@@ -1830,7 +1854,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				appliedOffers.value = appliedOffers.value.filter((entry) =>
 					remainingCodes.includes(entry.code)
 				);
-				stampServerScopes();
+				stampServerScopes(pricedLines);
 
 				offerProcessingState.value.lastProcessedAt = Date.now();
 
@@ -1915,6 +1939,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				} else {
 					// Reapply only valid offers
 					const invoiceData = buildOfferEvaluationPayload(currentProfile);
+					const pricedLines = snapshotPricedLines();
 					const response = await applyOffersResource.submit({
 						invoice_data: invoiceData,
 						selected_offers: validOfferCodes,
@@ -1939,7 +1964,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 					appliedOffers.value = appliedOffers.value.filter((entry) =>
 						appliedRules.includes(entry.code)
 					);
-					stampServerScopes();
+					stampServerScopes(pricedLines);
 				}
 
 				// Wait for Vue to update before showing toast
@@ -2064,24 +2089,24 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		}
 	}
 
-	/** The cart lines an offer's apply_on scope covers (offline). */
-	function offerScopeItems(offer) {
+	/** The cart lines (or `lines`) an offer's apply_on scope covers (offline). */
+	function offerScopeItems(offer, lines = invoiceItems.value) {
 		if (offer.apply_on === "Item Code") {
 			const eligibleCodes = offer.eligible_items || [];
-			return invoiceItems.value.filter((item) => eligibleCodes.includes(item.item_code));
+			return lines.filter((item) => eligibleCodes.includes(item.item_code));
 		}
 		if (offer.apply_on === "Item Group") {
 			const eligibleGroups = offer.eligible_item_groups || [];
 			return eligibleGroups.includes("All Item Groups")
-				? invoiceItems.value
-				: invoiceItems.value.filter((item) => eligibleGroups.includes(item.item_group));
+				? lines
+				: lines.filter((item) => eligibleGroups.includes(item.item_group));
 		}
 		if (offer.apply_on === "Brand") {
 			const eligibleBrands = offer.eligible_brands || [];
-			return invoiceItems.value.filter((item) => eligibleBrands.includes(item.brand));
+			return lines.filter((item) => eligibleBrands.includes(item.brand));
 		}
 		// Transaction-level discount applies to all items
-		if (offer.apply_on === "Transaction") return invoiceItems.value;
+		if (offer.apply_on === "Transaction") return lines;
 		return [];
 	}
 
@@ -2158,8 +2183,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * offer no strategy can price again keeps the server's price until its scope
 	 * changes, e.g. a line outside the scope or a new customer leaves it alone (I-1).
 	 */
-	function offerScopeSignature(offer) {
-		const lines = offerScopeItems(offer).filter((item) => !item.is_free_item);
+	function offerScopeSignature(offer, cartLines = invoiceItems.value) {
+		const lines = offerScopeItems(offer, cartLines).filter((item) => !item.is_free_item);
 		const field = offer.accumulative_scope_field;
 		if (field) {
 			return JSON.stringify([...new Set(lines.map((item) => item[field]))].sort());
@@ -2174,13 +2199,23 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		);
 	}
 
-	/** Record each applied offer's scope as the server just priced it (see offerScopeSignature). */
-	function stampServerScopes() {
+	/**
+	 * Record each applied offer's scope as the server priced it (see offerScopeSignature):
+	 * from `pricedLines`, the lines as they were when the request was built, never the
+	 * cart after the answer arrived, or a change made while it was in flight would be
+	 * signed as server-confirmed (I-1r).
+	 */
+	function stampServerScopes(pricedLines) {
 		for (const entry of appliedOffers.value) {
 			const offer =
 				entry.offer || offersStore.availableOffers.find((o) => o.name === entry.code);
-			if (offer) entry.server_scope = offerScopeSignature(offer);
+			if (offer) entry.server_scope = offerScopeSignature(offer, pricedLines);
 		}
+	}
+
+	/** A copy of the cart lines a request is built from, for stampServerScopes. */
+	function snapshotPricedLines() {
+		return invoiceItems.value.map((item) => ({ ...item }));
 	}
 
 	/**
@@ -2977,6 +3012,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				rememberRemovedOffers(invalidOffers);
 			} else if (combinedCodes.length > 0) {
 				const invoiceData = buildOfferEvaluationPayload(currentProfile);
+				const pricedLines = snapshotPricedLines();
 				const response = await applyOffersResource.submit({
 					invoice_data: invoiceData,
 					selected_offers: combinedCodes,
@@ -3033,7 +3069,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				}
 
 				appliedOffers.value = nextAppliedOffers;
-				stampServerScopes();
+				stampServerScopes(pricedLines);
 
 				// 6. UI Feedback
 				if (invalidOffers.length > 0) {

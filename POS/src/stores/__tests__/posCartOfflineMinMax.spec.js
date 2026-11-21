@@ -21,13 +21,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const server = vi.hoisted(() => {
 	globalThis.__ = (s, args) => (args ? `${s} ${args.join(" ")}` : s)
-	return { offers: null }
+	return { offers: null, inFlight: null }
 })
 vi.mock("frappe-ui", () => ({
 	call: vi.fn(async () => ({})),
 	createResource: ({ url } = {}) => ({
 		submit: vi.fn(async () => {
-			if (String(url).endsWith("apply_offers")) return server.offers
+			if (String(url).endsWith("apply_offers")) {
+				// A cashier's change while the request is in flight (round 2, I-1r).
+				const change = server.inFlight
+				server.inFlight = null
+				change?.()
+				return server.offers
+			}
 			return {
 				items: [],
 				free_items: [],
@@ -184,6 +190,7 @@ function freshCart(offer) {
 beforeEach(() => {
 	registry.clearOfferStrategies()
 	server.offers = null
+	server.inFlight = null
 	vi.spyOn(offlineState, "isOffline", "get").mockReturnValue(true)
 	warn = vi.spyOn(console, "warn").mockImplementation(() => {})
 })
@@ -200,7 +207,13 @@ function registerPromotions() {
  * Price the cart online with the server's answer (its lines carry the
  * discount_source / is_already_discounted the server stamped), then go offline.
  */
-async function pricedOnline(offer, lines, answer, applied = [offer.name]) {
+async function pricedOnline(
+	offer,
+	lines,
+	answer,
+	applied = [offer.name],
+	inFlight = null,
+) {
 	vi.spyOn(offlineState, "isOffline", "get").mockReturnValue(false)
 	freshCart(offer)
 	for (const [code, qty] of lines) addLine(cart, code, qty)
@@ -210,7 +223,10 @@ async function pricedOnline(offer, lines, answer, applied = [offer.name]) {
 		free_items: [],
 		applied_pricing_rules: applied,
 	}
+	server.inFlight = inFlight
 	await cart.applyOffer(offer, cart.posProfile)
+	// The connection drops before any later pass reaches the server.
+	cart.cancelPendingOfferProcessing()
 	vi.spyOn(offlineState, "isOffline", "get").mockReturnValue(true)
 }
 
@@ -391,6 +407,45 @@ describe("G7 safety net: a Min/Max offer with no strategy is skipped offline", (
 		await settle(cart)
 		expect(line(cart, A).amount).toBe(127.5)
 		expect(cart.grandTotal).toBe(127.5 + 68)
+	})
+
+	it("an answer for A×1 + B×3 that returns after A was raised to 4 is not kept offline: never 4 free units (I-1r)", async () => {
+		const title = "_PNXT_G7_MinAB"
+		const first = serverCase(title, [
+			[A, 1],
+			[B, 3],
+		])
+		await pricedOnline(
+			rule(title).offer,
+			first.cart,
+			first.lines,
+			undefined,
+			() => cart.updateItemQuantity(A, 4),
+		)
+		// The stale answer is dropped, not applied (the request's cart is gone).
+		expect(cart.appliedOffers).toHaveLength(0)
+		expect(line(cart, A).discount_percentage || 0).toBe(0)
+		cart.customer = "_PNXT_TEST_OTHER_CUSTOMER"
+		await settle(cart)
+		expect(line(cart, A).quantity).toBe(4)
+		expect(line(cart, A).amount).toBe(200)
+		expect(cart.grandTotal).toBe(200 + 240)
+	})
+
+	it("an answer for A×6 that returns after A was raised to 7 is not kept offline: never a stale 291.69 (I-1r)", async () => {
+		const title = "_PNXT_G7_BuyOneA"
+		const first = serverCase(title, [[A, 6]])
+		await pricedOnline(
+			rule(title).offer,
+			first.cart,
+			first.lines,
+			undefined,
+			() => cart.updateItemQuantity(A, 7),
+		)
+		cart.customer = "_PNXT_TEST_OTHER_CUSTOMER"
+		await settle(cart)
+		expect(line(cart, A).quantity).toBe(7)
+		expect(cart.grandTotal).toBe(350)
 	})
 
 	it("an Accumulative line released when a scope leaves the cart drops its accumulative flag (m-3)", async () => {
