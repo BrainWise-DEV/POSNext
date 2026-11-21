@@ -136,6 +136,20 @@ function createAsyncQueue() {
 	};
 }
 
+// Price modes already warned about offline, so a skipped offer warns once, not every pass.
+const warnedOfflineModes = new Set();
+
+/** Warn, once per mode, that an offline offer was skipped for want of its strategy. */
+function warnUnhandledOfflineMode(offer) {
+	const mode = offer.apply_discount_on_price;
+	if (warnedOfflineModes.has(mode)) return;
+	warnedOfflineModes.add(mode);
+	console.warn(
+		`[posCart] offline: no strategy for apply_discount_on_price "${mode}"; ` +
+			`offer ${offer.name} is skipped and its lines sell at full price`
+	);
+}
+
 export const usePOSCartStore = defineStore("posCart", () => {
 	// Use the existing invoice composable for core functionality
 	const {
@@ -1972,18 +1986,19 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			const cartSnapshot = buildCartSnapshot();
 			offersStore.updateCartSnapshot(cartSnapshot);
 
+			// Offers whose result depends on the whole cart (Min/Max) are priced again
+			// on every change, or a qty change keeps a stale blended % (G7).
+			const recomputed = recomputeAppliedOffersOffline();
+
 			// Get eligible auto offers
 			const eligibleOffers = offersStore.autoEligibleOffers;
-
-			if (eligibleOffers.length === 0) {
-				return;
-			}
 
 			// Find new offers to apply (both price and product discounts)
 			const appliedOfferCodes = new Set(appliedOffers.value.map((o) => o.code));
 			const newOffers = eligibleOffers.filter((offer) => !appliedOfferCodes.has(offer.name));
 
 			if (newOffers.length === 0) {
+				if (recomputed) rebuildIncrementalCache();
 				return;
 			}
 
@@ -1997,30 +2012,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				// Determine offer type: "Item Price" (discount) or "Give Product" (free item)
 				const isProductDiscount = offer.offer === "Give Product";
 
-				// Find eligible items based on offer.apply_on
-				let eligibleItems = [];
-
-				if (offer.apply_on === "Item Code") {
-					const eligibleCodes = offer.eligible_items || [];
-					eligibleItems = invoiceItems.value.filter((item) =>
-						eligibleCodes.includes(item.item_code)
-					);
-				} else if (offer.apply_on === "Item Group") {
-					const eligibleGroups = offer.eligible_item_groups || [];
-					eligibleItems = eligibleGroups.includes("All Item Groups")
-						? invoiceItems.value
-						: invoiceItems.value.filter((item) =>
-								eligibleGroups.includes(item.item_group)
-							);
-				} else if (offer.apply_on === "Brand") {
-					const eligibleBrands = offer.eligible_brands || [];
-					eligibleItems = invoiceItems.value.filter((item) =>
-						eligibleBrands.includes(item.brand)
-					);
-				} else if (offer.apply_on === "Transaction") {
-					// Transaction-level discount applies to all items
-					eligibleItems = invoiceItems.value;
-				}
+				const eligibleItems = offerScopeItems(offer);
 
 				if (eligibleItems.length === 0) continue;
 
@@ -2058,12 +2050,95 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			}
 
 			// Rebuild cache after bulk changes
-			if (newlyAppliedOffers.length > 0) {
+			if (newlyAppliedOffers.length > 0 || recomputed) {
 				rebuildIncrementalCache();
+			}
+			if (newlyAppliedOffers.length > 0) {
 				showSuccess(__("Offline: {0} applied", [newlyAppliedOffers.join(", ")]));
 			}
 		} catch (error) {
 			console.error("Error applying offers offline:", error);
+		}
+	}
+
+	/** The cart lines an offer's apply_on scope covers (offline). */
+	function offerScopeItems(offer) {
+		if (offer.apply_on === "Item Code") {
+			const eligibleCodes = offer.eligible_items || [];
+			return invoiceItems.value.filter((item) => eligibleCodes.includes(item.item_code));
+		}
+		if (offer.apply_on === "Item Group") {
+			const eligibleGroups = offer.eligible_item_groups || [];
+			return eligibleGroups.includes("All Item Groups")
+				? invoiceItems.value
+				: invoiceItems.value.filter((item) => eligibleGroups.includes(item.item_group));
+		}
+		if (offer.apply_on === "Brand") {
+			const eligibleBrands = offer.eligible_brands || [];
+			return invoiceItems.value.filter((item) => eligibleBrands.includes(item.brand));
+		}
+		// Transaction-level discount applies to all items
+		if (offer.apply_on === "Transaction") return invoiceItems.value;
+		return [];
+	}
+
+	/**
+	 * Price again the applied offers whose strategy says its result depends on the
+	 * whole cart (`recomputesOffline`, e.g. Min/Max), online- or offline-applied.
+	 * One that no longer qualifies is taken off its lines and out of the applied list.
+	 * @returns {boolean} True if any such offer was priced again
+	 */
+	function recomputeAppliedOffersOffline() {
+		let recomputed = false;
+		const kept = [];
+		for (const entry of appliedOffers.value) {
+			const offer =
+				entry.offer || offersStore.availableOffers.find((o) => o.name === entry.code);
+			const strategy = offer && getStrategyForOffer(offer);
+			// Priced online by a cross-cart mode no strategy here can price again: its
+			// blended % would go stale (a one-unit winner at 100% would ring 4 units
+			// up at 0), so the offer comes off its lines, which sell at full price.
+			if (!strategy && offer?.apply_discount_on_price) {
+				warnUnhandledOfflineMode(offer);
+				releaseOfferFromLines(entry.code);
+				recomputed = true;
+				continue;
+			}
+			if (!strategy?.recomputesOffline) {
+				kept.push(entry);
+				continue;
+			}
+			recomputed = true;
+			const { eligible } = offersStore.checkOfferEligibility(offer);
+			const ctx = { recalculateItem, invoiceItems: invoiceItems.value };
+			if (strategy.apply(offer, eligible ? offerScopeItems(offer) : [], ctx)) {
+				kept.push(entry);
+			}
+		}
+		if (kept.length !== appliedOffers.value.length) appliedOffers.value = kept;
+		return recomputed;
+	}
+
+	/**
+	 * Take one offer off the lines carrying it, and its discount with it where it
+	 * was the line's only rule. Coupon and F&F lines keep their own discount.
+	 */
+	function releaseOfferFromLines(offerCode) {
+		for (const item of invoiceItems.value) {
+			if (item.is_free_item || isCouponLine(item) || isFnfLine(item)) continue;
+			const rules = normalizePricingRules(item.pricing_rules);
+			if (!rules.includes(offerCode)) continue;
+			const rest = rules.filter((name) => name !== offerCode);
+			item.pricing_rules = rest;
+			if (rest.length === 0) {
+				item.discount_percentage = 0;
+				item.discount_amount = 0;
+				item.is_already_discounted = 0;
+				if (item.discount_source && item.discount_source !== "manual_discount") {
+					item.discount_source = "";
+				}
+			}
+			recalculateItem(item);
 		}
 	}
 
@@ -2076,7 +2151,18 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	function applyOfflinePriceDiscount(offer, eligibleItems) {
 		const strategy = getStrategyForOffer(offer);
 		if (strategy) {
-			return strategy.apply(offer, eligibleItems, { recalculateItem });
+			return strategy.apply(offer, eligibleItems, {
+				recalculateItem,
+				invoiceItems: invoiceItems.value,
+			});
+		}
+		// A cross-cart mode (Min, Max, Accumulative) with no strategy loaded must not
+		// fall through to the flat %: that would put the rule's full % on every line
+		// in scope (a "buy one free" rule rang up a whole line, or a whole group, at
+		// 0). The offer is skipped and the lines sell at full price (G7).
+		if (offer.apply_discount_on_price) {
+			warnUnhandledOfflineMode(offer);
+			return false;
 		}
 
 		const discountType = offer.discount_type || offer.rate_or_discount;

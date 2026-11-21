@@ -1,0 +1,715 @@
+{
+	"_source": "Captured 2026-11-21 from nexus.local (posnext_promotions ff-generic-on-develop a087e19, pos_next fix/g6-minmax-cents 216f9f1d) by a temporary probe: one _PNXT_G7_ Pricing Rule at a time (Price, apply_discount_on_price Min/Max), created, read back through posnext_promotions get_offers (offer), each cart sent to posnext_promotions apply_offers with that rule selected (lines: the answer per line; rate x qty is the row the invoice saves, see g6-report.md), and the rule deleted. Items: _PNXT_TEST_ITEM_A 50, _PNXT_TEST_ITEM_B 80, _PNXT_TEST_ITEM_C 20, all in Products. Currency precision 2. See .superpowers/sdd/2026-11-16-ff-phase2-unlock/g7-report.md.",
+	"rules": {
+		"_PNXT_G7_BuyOneA": {
+			"offer": {
+				"name": "PRLE-5421",
+				"title": "_PNXT_G7_BuyOneA",
+				"apply_on": "Item Code",
+				"offer": "Item Price",
+				"auto": 1,
+				"coupon_based": 0,
+				"min_qty": 2.0,
+				"max_qty": 0.0,
+				"min_amt": 0.0,
+				"max_amt": 0.0,
+				"discount_type": "Discount Percentage",
+				"rate": 0.0,
+				"discount_amount": 0.0,
+				"discount_percentage": 100.0,
+				"apply_discount_on_price": "Min",
+				"min_or_max_discount_qty_limit": 1,
+				"eligible_items": [
+					"_PNXT_TEST_ITEM_A"
+				],
+				"eligible_item_groups": [],
+				"eligible_brands": [],
+				"promotion_type": null,
+				"one_time_per_customer": 0
+			},
+			"cases": [
+				{
+					"cart": [
+						[
+							"_PNXT_TEST_ITEM_A",
+							1
+						]
+					],
+					"applied": [],
+					"lines": [
+						{
+							"item_code": "_PNXT_TEST_ITEM_A",
+							"qty": 1,
+							"price_list_rate": 50.0,
+							"discount_percentage": 0,
+							"rate": 50.0,
+							"amount": 50.0,
+							"pricing_rules": null
+						}
+					]
+				},
+				{
+					"cart": [
+						[
+							"_PNXT_TEST_ITEM_A",
+							2
+						]
+					],
+					"applied": [
+						"PRLE-5421"
+					],
+					"lines": [
+						{
+							"item_code": "_PNXT_TEST_ITEM_A",
+							"qty": 2,
+							"price_list_rate": 50.0,
+							"discount_percentage": 50.0,
+							"rate": 25.0,
+							"amount": 50.0,
+							"pricing_rules": "PRLE-5421"
+						}
+					]
+				},
+				{
+					"cart": [
+						[
+							"_PNXT_TEST_ITEM_A",
+							3
+						]
+					],
+					"applied": [
+						"PRLE-5421"
+					],
+					"lines": [
+						{
+							"item_code": "_PNXT_TEST_ITEM_A",
+							"qty": 3,
+							"price_list_rate": 50.0,
+							"discount_percentage": 33.33333333333333,
+							"rate": 33.33,
+							"amount": 99.99,
+							"pricing_rules": "PRLE-5421"
+						}
+					]
+				},
+				{
+					"cart": [
+						[
+							"_PNXT_TEST_ITEM_A",
+							6
+						]
+					],
+					"applied": [
+						"PRLE-5421"
+					],
+					"lines": [
+						{
+							"item_code": "_PNXT_TEST_ITEM_A",
+							"qty": 6,
+							"price_list_rate": 50.0,
+							"discount_percentage": 16.666666666666664,
+							"rate": 41.67,
+							"amount": 250.02,
+							"pricing_rules": "PRLE-5421"
+						}
+					]
+				},
+				{
+					"cart": [
+						[
+							"_PNXT_TEST_ITEM_A",
+							7
+						]
+					],
+					"applied": [
+						"PRLE-5421"
+					],
+					"lines": [
+						{
+							"item_code": "_PNXT_TEST_ITEM_A",
+							"qty": 7,
+							"price_list_rate": 50.0,
+							"discount_percentage": 14.285714285714285,
+							"rate": 42.86,
+							"amount": 300.02,
+							"pricing_rules": "PRLE-5421"
+						}
+					]
+				}
+			]
+		},
+		"_PNXT_G7_MinAB": {
+			"offer": {
+				"name": "PRLE-5421",
+				"title": "_PNXT_G7_MinAB",
+				"apply_on": "Item Code",
+				"offer": "Item Price",
+				"auto": 1,
+				"coupon_based": 0,
+				"min_qty": 2.0,
+				"max_qty": 0.0,
+				"min_amt": 0.0,
+				"max_amt": 0.0,
+				"discount_type": "Discount Percentage",
+				"rate": 0.0,
+				"discount_amount": 0.0,
+				"discount_percentage": 100.0,
+				"apply_discount_on_price": "Min",
+				"min_or_max_discount_qty_limit": 1,
+				"eligible_items": [
+					"_PNXT_TEST_ITEM_A",
+					"_PNXT_TEST_ITEM_B"
+				],
+				"eligible_item_groups": [],
+				"eligible_brands": [],
+				"promotion_type": null,
+				"one_time_per_customer": 0
+			},
+			"cases": [
+				{
+					"cart": [
+						[
+							"_PNXT_TEST_ITEM_A",
+							2
+						],
+						[
+							"_PNXT_TEST_ITEM_B",
+							2
+						]
+					],
+					"applied": [
+						"PRLE-5421"
+					],
+					"lines": [
+						{
+							"item_code": "_PNXT_TEST_ITEM_A",
+							"qty": 2,
+							"price_list_rate": 50.0,
+							"discount_percentage": 50.0,
+							"rate": 25.0,
+							"amount": 50.0,
+							"pricing_rules": "PRLE-5421"
+						},
+						{
+							"item_code": "_PNXT_TEST_ITEM_B",
+							"qty": 2,
+							"price_list_rate": 80.0,
+							"discount_percentage": 0,
+							"rate": 80.0,
+							"amount": 160.0,
+							"pricing_rules": "PRLE-5421"
+						}
+					]
+				},
+				{
+					"cart": [
+						[
+							"_PNXT_TEST_ITEM_B",
+							3
+						],
+						[
+							"_PNXT_TEST_ITEM_A",
+							2
+						]
+					],
+					"applied": [
+						"PRLE-5421"
+					],
+					"lines": [
+						{
+							"item_code": "_PNXT_TEST_ITEM_B",
+							"qty": 3,
+							"price_list_rate": 80.0,
+							"discount_percentage": 0,
+							"rate": 80.0,
+							"amount": 240.0,
+							"pricing_rules": "PRLE-5421"
+						},
+						{
+							"item_code": "_PNXT_TEST_ITEM_A",
+							"qty": 2,
+							"price_list_rate": 50.0,
+							"discount_percentage": 50.0,
+							"rate": 25.0,
+							"amount": 50.0,
+							"pricing_rules": "PRLE-5421"
+						}
+					]
+				},
+				{
+					"cart": [
+						[
+							"_PNXT_TEST_ITEM_A",
+							1
+						],
+						[
+							"_PNXT_TEST_ITEM_B",
+							3
+						]
+					],
+					"applied": [
+						"PRLE-5421"
+					],
+					"lines": [
+						{
+							"item_code": "_PNXT_TEST_ITEM_A",
+							"qty": 1,
+							"price_list_rate": 50.0,
+							"discount_percentage": 100.0,
+							"rate": 0.0,
+							"amount": 0.0,
+							"pricing_rules": "PRLE-5421"
+						},
+						{
+							"item_code": "_PNXT_TEST_ITEM_B",
+							"qty": 3,
+							"price_list_rate": 80.0,
+							"discount_percentage": 0,
+							"rate": 80.0,
+							"amount": 240.0,
+							"pricing_rules": "PRLE-5421"
+						}
+					]
+				}
+			]
+		},
+		"_PNXT_G7_MaxAB": {
+			"offer": {
+				"name": "PRLE-5421",
+				"title": "_PNXT_G7_MaxAB",
+				"apply_on": "Item Code",
+				"offer": "Item Price",
+				"auto": 1,
+				"coupon_based": 0,
+				"min_qty": 2.0,
+				"max_qty": 0.0,
+				"min_amt": 0.0,
+				"max_amt": 0.0,
+				"discount_type": "Discount Percentage",
+				"rate": 0.0,
+				"discount_amount": 0.0,
+				"discount_percentage": 100.0,
+				"apply_discount_on_price": "Max",
+				"min_or_max_discount_qty_limit": 1,
+				"eligible_items": [
+					"_PNXT_TEST_ITEM_B",
+					"_PNXT_TEST_ITEM_A"
+				],
+				"eligible_item_groups": [],
+				"eligible_brands": [],
+				"promotion_type": null,
+				"one_time_per_customer": 0
+			},
+			"cases": [
+				{
+					"cart": [
+						[
+							"_PNXT_TEST_ITEM_A",
+							2
+						],
+						[
+							"_PNXT_TEST_ITEM_B",
+							2
+						]
+					],
+					"applied": [
+						"PRLE-5421"
+					],
+					"lines": [
+						{
+							"item_code": "_PNXT_TEST_ITEM_A",
+							"qty": 2,
+							"price_list_rate": 50.0,
+							"discount_percentage": 0,
+							"rate": 50.0,
+							"amount": 100.0,
+							"pricing_rules": "PRLE-5421"
+						},
+						{
+							"item_code": "_PNXT_TEST_ITEM_B",
+							"qty": 2,
+							"price_list_rate": 80.0,
+							"discount_percentage": 50.0,
+							"rate": 40.0,
+							"amount": 80.0,
+							"pricing_rules": "PRLE-5421"
+						}
+					]
+				},
+				{
+					"cart": [
+						[
+							"_PNXT_TEST_ITEM_A",
+							3
+						],
+						[
+							"_PNXT_TEST_ITEM_B",
+							1
+						]
+					],
+					"applied": [
+						"PRLE-5421"
+					],
+					"lines": [
+						{
+							"item_code": "_PNXT_TEST_ITEM_A",
+							"qty": 3,
+							"price_list_rate": 50.0,
+							"discount_percentage": 0,
+							"rate": 50.0,
+							"amount": 150.0,
+							"pricing_rules": "PRLE-5421"
+						},
+						{
+							"item_code": "_PNXT_TEST_ITEM_B",
+							"qty": 1,
+							"price_list_rate": 80.0,
+							"discount_percentage": 100.0,
+							"rate": 0.0,
+							"amount": 0.0,
+							"pricing_rules": "PRLE-5421"
+						}
+					]
+				},
+				{
+					"cart": [
+						[
+							"_PNXT_TEST_ITEM_A",
+							3
+						],
+						[
+							"_PNXT_TEST_ITEM_B",
+							6
+						]
+					],
+					"applied": [
+						"PRLE-5421"
+					],
+					"lines": [
+						{
+							"item_code": "_PNXT_TEST_ITEM_A",
+							"qty": 3,
+							"price_list_rate": 50.0,
+							"discount_percentage": 0,
+							"rate": 50.0,
+							"amount": 150.0,
+							"pricing_rules": "PRLE-5421"
+						},
+						{
+							"item_code": "_PNXT_TEST_ITEM_B",
+							"qty": 6,
+							"price_list_rate": 80.0,
+							"discount_percentage": 16.666666666666664,
+							"rate": 66.67,
+							"amount": 400.02,
+							"pricing_rules": "PRLE-5421"
+						}
+					]
+				}
+			]
+		},
+		"_PNXT_G7_MinGroup": {
+			"offer": {
+				"name": "PRLE-5421",
+				"title": "_PNXT_G7_MinGroup",
+				"apply_on": "Item Group",
+				"offer": "Item Price",
+				"auto": 1,
+				"coupon_based": 0,
+				"min_qty": 2.0,
+				"max_qty": 0.0,
+				"min_amt": 0.0,
+				"max_amt": 0.0,
+				"discount_type": "Discount Percentage",
+				"rate": 0.0,
+				"discount_amount": 0.0,
+				"discount_percentage": 100.0,
+				"apply_discount_on_price": "Min",
+				"min_or_max_discount_qty_limit": 1,
+				"eligible_items": [],
+				"eligible_item_groups": [
+					"Products"
+				],
+				"eligible_brands": [],
+				"promotion_type": null,
+				"one_time_per_customer": 0
+			},
+			"cases": [
+				{
+					"cart": [
+						[
+							"_PNXT_TEST_ITEM_A",
+							2
+						],
+						[
+							"_PNXT_TEST_ITEM_B",
+							2
+						],
+						[
+							"_PNXT_TEST_ITEM_C",
+							3
+						]
+					],
+					"applied": [
+						"PRLE-5421"
+					],
+					"lines": [
+						{
+							"item_code": "_PNXT_TEST_ITEM_A",
+							"qty": 2,
+							"price_list_rate": 50.0,
+							"discount_percentage": 0,
+							"rate": 50.0,
+							"amount": 100.0,
+							"pricing_rules": "PRLE-5421"
+						},
+						{
+							"item_code": "_PNXT_TEST_ITEM_B",
+							"qty": 2,
+							"price_list_rate": 80.0,
+							"discount_percentage": 0,
+							"rate": 80.0,
+							"amount": 160.0,
+							"pricing_rules": "PRLE-5421"
+						},
+						{
+							"item_code": "_PNXT_TEST_ITEM_C",
+							"qty": 3,
+							"price_list_rate": 20.0,
+							"discount_percentage": 33.33333333333333,
+							"rate": 13.33,
+							"amount": 39.99,
+							"pricing_rules": "PRLE-5421"
+						}
+					]
+				},
+				{
+					"cart": [
+						[
+							"_PNXT_TEST_ITEM_A",
+							2
+						],
+						[
+							"_PNXT_TEST_ITEM_B",
+							2
+						],
+						[
+							"_PNXT_TEST_ITEM_C",
+							1
+						]
+					],
+					"applied": [
+						"PRLE-5421"
+					],
+					"lines": [
+						{
+							"item_code": "_PNXT_TEST_ITEM_A",
+							"qty": 2,
+							"price_list_rate": 50.0,
+							"discount_percentage": 0,
+							"rate": 50.0,
+							"amount": 100.0,
+							"pricing_rules": "PRLE-5421"
+						},
+						{
+							"item_code": "_PNXT_TEST_ITEM_B",
+							"qty": 2,
+							"price_list_rate": 80.0,
+							"discount_percentage": 0,
+							"rate": 80.0,
+							"amount": 160.0,
+							"pricing_rules": "PRLE-5421"
+						},
+						{
+							"item_code": "_PNXT_TEST_ITEM_C",
+							"qty": 1,
+							"price_list_rate": 20.0,
+							"discount_percentage": 100.0,
+							"rate": 0.0,
+							"amount": 0.0,
+							"pricing_rules": "PRLE-5421"
+						}
+					]
+				},
+				{
+					"cart": [
+						[
+							"_PNXT_TEST_ITEM_A",
+							1
+						],
+						[
+							"_PNXT_TEST_ITEM_B",
+							1
+						],
+						[
+							"_PNXT_TEST_ITEM_C",
+							1
+						]
+					],
+					"applied": [
+						"PRLE-5421"
+					],
+					"lines": [
+						{
+							"item_code": "_PNXT_TEST_ITEM_A",
+							"qty": 1,
+							"price_list_rate": 50.0,
+							"discount_percentage": 0,
+							"rate": 50.0,
+							"amount": 50.0,
+							"pricing_rules": "PRLE-5421"
+						},
+						{
+							"item_code": "_PNXT_TEST_ITEM_B",
+							"qty": 1,
+							"price_list_rate": 80.0,
+							"discount_percentage": 0,
+							"rate": 80.0,
+							"amount": 80.0,
+							"pricing_rules": "PRLE-5421"
+						},
+						{
+							"item_code": "_PNXT_TEST_ITEM_C",
+							"qty": 1,
+							"price_list_rate": 20.0,
+							"discount_percentage": 100.0,
+							"rate": 0.0,
+							"amount": 0.0,
+							"pricing_rules": "PRLE-5421"
+						}
+					]
+				}
+			]
+		},
+		"_PNXT_G7_MaxRate": {
+			"offer": {
+				"name": "PRLE-5421",
+				"title": "_PNXT_G7_MaxRate",
+				"apply_on": "Item Code",
+				"offer": "Item Price",
+				"auto": 1,
+				"coupon_based": 0,
+				"min_qty": 0.0,
+				"max_qty": 0.0,
+				"min_amt": 0.0,
+				"max_amt": 0.0,
+				"discount_type": "Rate",
+				"rate": 10.0,
+				"discount_amount": 0.0,
+				"discount_percentage": 0.0,
+				"apply_discount_on_price": "Max",
+				"min_or_max_discount_qty_limit": 2,
+				"eligible_items": [
+					"_PNXT_TEST_ITEM_A",
+					"_PNXT_TEST_ITEM_B"
+				],
+				"eligible_item_groups": [],
+				"eligible_brands": [],
+				"promotion_type": null,
+				"one_time_per_customer": 0
+			},
+			"cases": [
+				{
+					"cart": [
+						[
+							"_PNXT_TEST_ITEM_A",
+							3
+						],
+						[
+							"_PNXT_TEST_ITEM_B",
+							3
+						]
+					],
+					"applied": [
+						"PRLE-5421"
+					],
+					"lines": [
+						{
+							"item_code": "_PNXT_TEST_ITEM_A",
+							"qty": 3,
+							"price_list_rate": 50.0,
+							"discount_percentage": 0,
+							"rate": 50.0,
+							"amount": 150.0,
+							"pricing_rules": "PRLE-5421"
+						},
+						{
+							"item_code": "_PNXT_TEST_ITEM_B",
+							"qty": 3,
+							"price_list_rate": 80.0,
+							"discount_percentage": 58.333333333333336,
+							"rate": 33.33,
+							"amount": 99.99,
+							"pricing_rules": "PRLE-5421"
+						}
+					]
+				}
+			]
+		},
+		"_PNXT_G7_MinAmount": {
+			"offer": {
+				"name": "PRLE-5421",
+				"title": "_PNXT_G7_MinAmount",
+				"apply_on": "Item Code",
+				"offer": "Item Price",
+				"auto": 1,
+				"coupon_based": 0,
+				"min_qty": 0.0,
+				"max_qty": 0.0,
+				"min_amt": 0.0,
+				"max_amt": 0.0,
+				"discount_type": "Discount Amount",
+				"rate": 0.0,
+				"discount_amount": 15.0,
+				"discount_percentage": 0.0,
+				"apply_discount_on_price": "Min",
+				"min_or_max_discount_qty_limit": 0,
+				"eligible_items": [
+					"_PNXT_TEST_ITEM_A",
+					"_PNXT_TEST_ITEM_B"
+				],
+				"eligible_item_groups": [],
+				"eligible_brands": [],
+				"promotion_type": null,
+				"one_time_per_customer": 0
+			},
+			"cases": [
+				{
+					"cart": [
+						[
+							"_PNXT_TEST_ITEM_A",
+							3
+						],
+						[
+							"_PNXT_TEST_ITEM_B",
+							1
+						]
+					],
+					"applied": [
+						"PRLE-5421"
+					],
+					"lines": [
+						{
+							"item_code": "_PNXT_TEST_ITEM_A",
+							"qty": 3,
+							"price_list_rate": 50.0,
+							"discount_percentage": 30.0,
+							"rate": 35.0,
+							"amount": 105.0,
+							"pricing_rules": "PRLE-5421"
+						},
+						{
+							"item_code": "_PNXT_TEST_ITEM_B",
+							"qty": 1,
+							"price_list_rate": 80.0,
+							"discount_percentage": 0,
+							"rate": 80.0,
+							"amount": 80.0,
+							"pricing_rules": "PRLE-5421"
+						}
+					]
+				}
+			]
+		}
+	}
+}
