@@ -10,7 +10,16 @@ import frappe
 from erpnext.accounts.doctype.sales_invoice.sales_invoice import get_bank_cash_account
 from erpnext.stock.doctype.batch.batch import get_batch_no, get_batch_qty
 from frappe import _
-from frappe.utils import cint, cstr, flt, get_datetime, getdate, nowdate, nowtime
+from frappe.utils import (
+	cint,
+	cstr,
+	flt,
+	get_datetime,
+	getdate,
+	nowdate,
+	nowtime,
+	round_based_on_smallest_currency_fraction,
+)
 
 from pos_next.utils import log_error_without_telemetry, validate_pos_profile_access
 
@@ -2789,6 +2798,9 @@ def validate_cart_items(items, pos_profile=None):
 
 # Child-row field that links a return row to its original row, per invoice doctype.
 RETURN_ROW_LINK_FIELD = {"Sales Invoice": "sales_invoice_item", "POS Invoice": "pos_invoice_item"}
+# A refund may differ from a return's total by its rounding plus a cent a row
+# (the dialog rounds each row); more than that is refused (D-R2-16).
+RETURN_REFUND_TOLERANCE = 0.01
 
 
 def _currency_precision(currency):
@@ -3290,6 +3302,11 @@ def _update_invoice(data: str | dict, offline_sync: bool = False, submitting: bo
 
 		# A return's header discount is worked out here, from the original invoice
 		_apply_return_header_discount(invoice_doc)
+		# It rounds, and is taxed, like the original; its refund rows are kept
+		# before the totals
+		_apply_return_rounding(invoice_doc)
+		_apply_return_taxes(invoice_doc)
+		sent_refund = _sent_return_refund(invoice_doc)
 
 		# Calculate totals and apply discounts (with rounding disabled)
 		invoice_doc.calculate_taxes_and_totals()
@@ -3320,17 +3337,8 @@ def _update_invoice(data: str | dict, offline_sync: bool = False, submitting: bo
 		# Set accounts for payment methods before saving
 		_set_payment_accounts(invoice_doc.payments, invoice_doc.company)
 
-		# For return invoices, ensure payments are negative
-		if invoice_doc.get("is_return"):
-			# Return handling is primarily for Sales Invoice
-			if doctype == "Sales Invoice" and invoice_doc.get("payments"):
-				for payment in invoice_doc.payments:
-					payment.amount = -abs(payment.amount)
-					if payment.base_amount:
-						payment.base_amount = -abs(payment.base_amount)
-
-				invoice_doc.paid_amount = flt(sum(p.amount for p in invoice_doc.payments))
-				invoice_doc.base_paid_amount = flt(sum(p.base_amount or 0 for p in invoice_doc.payments))
+		# A return refunds its payable total, negative, through the rows sent
+		_set_return_refund(invoice_doc, sent_refund)
 
 		# Validate and track POS Coupon if coupon_code is provided
 		coupon_code = data.get("coupon_code")
@@ -4048,6 +4056,11 @@ def submit_invoice(invoice: str | dict | None = None, data: str | dict | None = 
 			if invoice_doc.get("is_return"):
 				_apply_return_header_discount(invoice_doc)
 				_validate_return_rows(invoice_doc)
+				_apply_return_rounding(invoice_doc)
+				_apply_return_taxes(invoice_doc)
+				sent_refund = _sent_return_refund(invoice_doc)
+				invoice_doc.calculate_taxes_and_totals()
+				_set_return_refund(invoice_doc, sent_refund)
 
 		# Keep permission bypass consistent for POS API flow.
 		invoice_doc.flags.ignore_permissions = True
@@ -4237,7 +4250,7 @@ def submit_invoice(invoice: str | dict | None = None, data: str | dict | None = 
 
 				try:
 					credit_return_to_wallet(
-						return_invoice=invoice_doc.name, amount=abs(flt(invoice_doc.grand_total))
+						return_invoice=invoice_doc.name, amount=_return_credit_amount(invoice_doc)
 					)
 				except Exception as wallet_credit_error:
 					frappe.log_error(
@@ -4904,32 +4917,35 @@ def _parse_item_wise_tax_detail(raw_detail):
 	return raw_detail
 
 
-def _build_item_tax_map(taxes: list) -> dict:
-	"""Build item_code -> tax_amount map from taxes child table.
+def _return_row_tax(items: list, taxes: list) -> dict:
+	"""Row idx -> the row's tax (absolute value), from the taxes child table.
 
-	Args:
-	    taxes: List of tax row dicts containing item_wise_tax_detail
-
-	Returns:
-	    Dict mapping item_code to total tax amount (absolute value)
-
-	Note:
-	    item_wise_tax_detail format: {"ITEM-CODE": [tax_rate, tax_amount]}
-	    Return documents have negative amounts, hence abs() is used.
+	item_wise_tax_detail ({"ITEM-CODE": [tax_rate, tax_amount]}) is kept per item
+	code, so an item on several rows (a paid row and its free row, or two paid
+	rows) has its tax shared by the rows' net amounts: a free row carries none.
+	Return documents have negative amounts, hence abs().
 	"""
-	from collections import defaultdict
-
-	tax_map = defaultdict(float)
-
+	item_tax = {}
 	for tax_row in taxes:
 		try:
 			details = _parse_item_wise_tax_detail(tax_row.get("item_wise_tax_detail"))
 			for item_code, (_, tax_amount) in details.items():
-				tax_map[item_code] += abs(flt(tax_amount))
+				item_tax[item_code] = item_tax.get(item_code, 0) + abs(flt(tax_amount))
 		except (json.JSONDecodeError, TypeError, ValueError, KeyError):
 			continue
 
-	return dict(tax_map)
+	weights = {}
+	for item in items:
+		weights.setdefault(item.get("item_code"), []).append(
+			(item.get("idx"), abs(flt(item.get("net_amount"))))
+		)
+
+	row_tax = {}
+	for item_code, rows in weights.items():
+		total = sum(weight for _, weight in rows)
+		for idx, weight in rows:
+			row_tax[idx] = item_tax.get(item_code, 0) * weight / total if total else 0
+	return row_tax
 
 
 def _remap_foreign_payment_modes(payments_data, current_profile, original_profile):
@@ -5108,6 +5124,10 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
 			si.total,
 			si.discount_amount,
 			si.apply_discount_on,
+			si.rounded_total,
+			si.disable_rounded_total,
+			si.change_amount,
+			si.base_change_amount,
 		)
 		.where(si.name == invoice_name)
 	).run(as_dict=True)
@@ -5184,6 +5204,9 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
 		.select(si_payment.mode_of_payment, si_payment.amount, si_payment.base_amount, si_payment.account)
 		.where(si_payment.parent == invoice_name)
 	).run(as_dict=True)
+	payments_data = _payments_net_of_change(
+		payments_data, invoice_info.change_amount, invoice_info.base_change_amount
+	)
 
 	# Cross-branch return: remap foreign payment modes to the current profile.
 	#
@@ -5217,9 +5240,18 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
 		"payments": payments_data,
 		"net_total": invoice_info.net_total,
 		"total_taxes_and_charges": invoice_info.total_taxes_and_charges,
+		# The return rounds as this invoice did (see _apply_return_rounding): the
+		# dialog rounds its refund the same way.
+		"rounded_total": invoice_info.rounded_total,
+		"disable_rounded_total": cint(invoice_info.disable_rounded_total),
+		# Cash still refundable on it: the dialog refunds no more (Ruling 147)
+		"refundable_cash": _return_refundable_cash("Sales Invoice", invoice_name)[0],
+		"smallest_currency_fraction_value": flt(
+			frappe.get_cached_value("Currency", invoice_info.currency, "smallest_currency_fraction_value")
+		),
 	}
 
-	item_tax_map = _build_item_tax_map(return_dict.get("taxes", []))
+	row_tax = _return_row_tax(return_dict.get("items", []), return_dict.get("taxes", []))
 
 	# Check if taxes are inclusive by inspecting the tax rows copied from the original
 	# invoice (immutable after submission, unlike POS Settings which can change later).
@@ -5264,9 +5296,11 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
 		# Get rate breakdown for display
 		price_list_rate = flt(item.get("price_list_rate") or item.get("rate"), precision)
 		net_rate = flt(item.get("net_rate") or item.get("rate"), precision)
-		tax_per_unit = (
-			flt(item_tax_map.get(item.get("item_code"), 0) / original_qty, precision) if original_qty else 0
-		)
+		# This row's tax for the qty left to return, unrounded so qty x rate_with_tax
+		# gives the row's refund (a free row has none).
+		row_qty = abs(flt(item.get("qty")))
+		exact_tax_per_unit = row_tax.get(item.get("idx"), 0) / row_qty if row_qty else 0
+		tax_per_unit = flt(exact_tax_per_unit, precision)
 
 		# For inclusive taxes, use the original rate (already includes tax) to prevent
 		# ERPNext from back-calculating and double-reducing the tax.
@@ -5275,12 +5309,12 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
 		# Otherwise (exclusive taxes) use net_rate as before.
 		if tax_inclusive or discount_plan:
 			item_rate = flt(item.get("rate"), precision)
-			rate_with_tax = item_rate if tax_inclusive else flt(net_rate + tax_per_unit, precision)
+			rate_with_tax = item_rate if tax_inclusive else net_rate + exact_tax_per_unit
 			# Both price_list_rate and rate are tax-inclusive, so discount is their difference
 			discount_per_unit = flt(price_list_rate - item_rate, precision)
 		else:
 			item_rate = net_rate
-			rate_with_tax = flt(net_rate + tax_per_unit, precision)
+			rate_with_tax = net_rate + exact_tax_per_unit
 			discount_per_unit = flt(price_list_rate - net_rate, precision)
 
 		if discount_plan and rate_is_gross:
@@ -5458,6 +5492,324 @@ def _apply_return_header_discount(invoice_doc):
 	if invoice_doc.meta.has_field("is_cash_or_non_trade_discount"):
 		invoice_doc.is_cash_or_non_trade_discount = plan.is_cash_or_non_trade_discount
 	invoice_doc.discount_amount = -_return_discount_amount(plan, return_qty)
+
+
+def _payments_net_of_change(payments, change_amount, base_change_amount=None):
+	"""The original payment rows as the customer kept them paid: change given back
+	comes off the cash row (else the largest row), and empty rows are dropped.
+	The return dialog starts its refund rows from these (D-R2-16)."""
+	payments = [frappe._dict(p) for p in payments]
+	change = flt(change_amount)
+	if change and payments:
+		cash = _refund_cash_row(payments)
+		cash.amount = max(flt(cash.amount) - change, 0)
+		if cash.get("base_amount") is not None:
+			base_change = change if base_change_amount is None else flt(base_change_amount)
+			cash.base_amount = max(flt(cash.base_amount) - base_change, 0)
+	return [p for p in payments if flt(p.amount) > 0]
+
+
+def _refund_cash_row(rows):
+	"""The row a refund's rounding (or a sale's change) goes on: the first Cash
+	row, else the largest one."""
+	for row in rows:
+		if frappe.get_cached_value("Mode of Payment", row.get("mode_of_payment"), "type") == "Cash":
+			return row
+	return max(rows, key=lambda row: abs(flt(row.get("amount"))))
+
+
+def _apply_return_rounding(invoice_doc):
+	"""A return against an invoice rounds as that invoice did (D-R2-16).
+
+	The original's flag is read from its submitted record: the POS Profile may
+	have changed since the sale, and a full return must refund what was paid.
+	"""
+	if invoice_doc.get("is_return") and invoice_doc.get("return_against"):
+		invoice_doc.disable_rounded_total = cint(
+			frappe.db.get_value(invoice_doc.doctype, invoice_doc.return_against, "disable_rounded_total")
+		)
+
+
+def _sent_return_refund(invoice_doc):
+	"""A POS return's refund rows as sent, before ERPNext's totals see them.
+
+	On a POS return that refunds more than its total, ERPNext's
+	set_total_amount_to_default_mop replaces every payment row with one row on
+	the default mode for the excess only (D-R2-16), so _set_return_refund works
+	from this copy. ``None`` for anything else.
+	"""
+	if invoice_doc.doctype != DOCTYPE_SALES_INVOICE or not invoice_doc.get("is_return"):
+		return None
+	return [row.as_dict(no_default_fields=True) for row in invoice_doc.get("payments", [])]
+
+
+def _return_refundable_cash(doctype, original_name):
+	"""(cash still refundable, amount still owed) on a return's original (Ruling 147).
+
+	What was paid on the original, at the POS or later, less what its submitted
+	returns took back. Each return lowers the original's outstanding by its
+	payable total less its refund and write-off, so this is the original's
+	payable, less its write-off, its returns' payable totals (net of their
+	write-offs) and what it still owes. A partly paid original thus refunds at
+	most what was paid, and the returns together never refund more. A credit
+	already given back (a negative outstanding) counts as refunded.
+	"""
+	original = frappe.db.get_value(
+		doctype,
+		original_name,
+		["rounded_total", "grand_total", "write_off_amount", "outstanding_amount", "currency"],
+		as_dict=True,
+	)
+	if not original:
+		return None, 0
+	precision = _currency_precision(original.currency)
+	returned = sum(
+		abs(flt(r.rounded_total or r.grand_total)) - abs(flt(r.write_off_amount))
+		for r in frappe.get_all(
+			doctype,
+			filters={"return_against": original_name, "is_return": 1, "docstatus": 1},
+			fields=["rounded_total", "grand_total", "write_off_amount"],
+		)
+	)
+	owed = flt(original.outstanding_amount, precision)
+	refundable = flt(
+		flt(original.rounded_total or original.grand_total)
+		- abs(flt(original.write_off_amount))
+		- returned
+		- max(owed, 0),
+		precision,
+	)
+	return max(refundable, 0), owed
+
+
+def _return_empties_original(invoice_doc):
+	"""Whether this return takes back everything left of its original's paid rows.
+
+	Free rows (no net amount) need not come back: they carry no money.
+	"""
+	link_field = RETURN_ROW_LINK_FIELD.get(invoice_doc.doctype)
+	original = invoice_doc.get("return_against")
+	if not (link_field and original):
+		return False
+	sold = {
+		row.name: abs(flt(row.qty))
+		for row in frappe.get_all(
+			f"{invoice_doc.doctype} Item",
+			filters={"parent": original, "parenttype": invoice_doc.doctype},
+			fields=["name", "qty", "net_amount"],
+		)
+		if flt(row.net_amount)
+	}
+	if not sold:
+		return False
+	returned = {}
+	earlier = frappe.get_all(
+		invoice_doc.doctype,
+		filters={"return_against": original, "is_return": 1, "docstatus": 1},
+		pluck="name",
+	)
+	if earlier:
+		for row in frappe.get_all(
+			f"{invoice_doc.doctype} Item",
+			filters={"parent": ["in", earlier], "parenttype": invoice_doc.doctype},
+			fields=[link_field, "qty"],
+		):
+			returned[row.get(link_field)] = returned.get(row.get(link_field), 0) + abs(flt(row.qty))
+	for row in invoice_doc.get("items", []):
+		linked = row.get(link_field)
+		returned[linked] = returned.get(linked, 0) + abs(flt(row.qty))
+	return all(returned.get(name, 0) >= qty for name, qty in sold.items())
+
+
+def return_payable_target(invoice_doc):
+	"""The payable total a POS return must have, or ``None`` to keep ERPNext's (Ruling 151).
+
+	A POS return being saved or submitted that empties its original (every paid row returned) of an
+	original that owes nothing refunds exactly the paid remainder
+	(_return_refundable_cash), even when its own rounded total differs: the
+	partial returns before it took their own rounding. The return's
+	rounded_total is set to it (see CustomSalesInvoice.calculate_taxes_and_totals),
+	so ERPNext neither replaces the refund rows nor leaves a residue.
+	Only when the return rounds: unrounded totals take no rounding to make up.
+	"""
+	if not (
+		invoice_doc.doctype == DOCTYPE_SALES_INVOICE
+		and cint(invoice_doc.get("is_pos"))
+		and invoice_doc.get("is_return")
+		and invoice_doc.get("return_against")
+		# A draft, or the submit's own validate (docstatus is already 1 there)
+		and (not invoice_doc.docstatus or getattr(invoice_doc, "_action", None) == "submit")
+		and not cint(invoice_doc.get("disable_rounded_total"))
+	):
+		return None
+	refundable, owed = _return_refundable_cash(invoice_doc.doctype, invoice_doc.return_against)
+	if refundable is None or owed > 0 or not _return_empties_original(invoice_doc):
+		return None
+	return refundable
+
+
+def return_target_is_rounding(invoice_doc, target):
+	"""Whether ``target`` differs from the return's own rounded total by rounding only (Ruling 153).
+
+	Each rounded document (the original and every submitted return on it,
+	this one included) drifts by at most half the currency's rounding unit
+	(its smallest fraction, else 1). A larger gap (an Actual charge copied
+	onto every partial return, an earlier write-off) is no rounding: the
+	return keeps ERPNext's total and _set_return_refund caps and writes it off.
+	"""
+	unit = (
+		flt(
+			frappe.db.get_value(
+				"Currency", invoice_doc.currency, "smallest_currency_fraction_value", cache=True
+			)
+		)
+		or 1
+	)
+	documents = (
+		frappe.db.count(
+			invoice_doc.doctype,
+			{"return_against": invoice_doc.return_against, "is_return": 1, "docstatus": 1},
+		)
+		+ 1  # this return
+		+ 1  # the original
+	)
+	gap = abs(flt(target) - abs(flt(invoice_doc.rounded_total)))
+	return flt(gap, invoice_doc.precision("rounded_total")) <= flt(0.5 * unit * documents, 9)
+
+
+def _set_return_refund(invoice_doc, sent):
+	"""Refund a POS return through the rows the cashier chose (D-R2-16, Ruling 147).
+
+	Run after the totals, with ``sent`` from _sent_return_refund. The return
+	refunds its ``rounded_total or grand_total`` (it rounds like its original),
+	but never more than is still refundable on the original
+	(_return_refundable_cash):
+
+	- no refund rows (or all 0), e.g. "Add to Customer Credit": kept, the return
+	  stays outstanding as the customer's credit;
+	- a rounding difference: taken up on the cash row (else the largest row);
+	- a refund below that, while the original still owes money: kept (the
+	  dialog refunds the paid share, the rest clears what is owed);
+	- anything else is refused: the cashier was shown another amount.
+
+	What the original neither still owes nor can refund (the rounding earlier
+	partial returns took) is written off, so the returns together refund
+	exactly what was paid.
+	"""
+	if sent is None:
+		return
+	rows = [frappe._dict(row) for row in sent]
+	for row in rows:
+		row.amount = abs(flt(row.amount))
+	precision = invoice_doc.precision("paid_amount")
+	sent_total = flt(sum(row.amount for row in rows), precision)
+	payable = abs(flt(invoice_doc.rounded_total or invoice_doc.grand_total, precision))
+	refundable, owed = payable, 0
+	if invoice_doc.get("return_against"):
+		refundable, owed = _return_refundable_cash(invoice_doc.doctype, invoice_doc.return_against)
+		refundable = payable if refundable is None else min(payable, refundable)
+
+	if sent_total:
+		difference = flt(sent_total - refundable, precision)
+		# What the dialog's per-row rounding and the return's rounding can account
+		# for. It only gates the refusal: an accepted refund is set to the refundable.
+		# ERPNext's own rounding of the return, not a payable set by return_payable_target.
+		natural_rounding = (
+			0
+			if cint(invoice_doc.get("disable_rounded_total"))
+			else round_based_on_smallest_currency_fraction(
+				flt(invoice_doc.grand_total), invoice_doc.currency, precision
+			)
+			- flt(invoice_doc.grand_total)
+		)
+		tolerance = flt(
+			abs(natural_rounding) + RETURN_REFUND_TOLERANCE * max(len(invoice_doc.get("items", [])), 1),
+			precision,
+		)
+		keeps_lower = difference < 0 and owed > 0
+		if abs(difference) > tolerance and not keeps_lower:
+			frappe.throw(
+				_(
+					"The refund {0} does not match the refund due {1}. Reload the POS and open the return again."
+				).format(
+					frappe.format_value(sent_total, {"fieldtype": "Currency"}),
+					frappe.format_value(refundable, {"fieldtype": "Currency"}),
+				),
+				title=_("Refund Mismatch"),
+			)
+		if difference and not keeps_lower:
+			paying = [row for row in rows if row.amount] or rows
+			row = _refund_cash_row(paying)
+			if row.amount - difference < 0:
+				row = max(paying, key=lambda r: r.amount)
+			row.amount = flt(row.amount - difference, precision)
+
+	for row in rows:
+		row.amount = -row.amount
+		row.base_amount = flt(row.amount * flt(invoice_doc.conversion_rate or 1), precision)
+	invoice_doc.set("payments", rows)
+	_set_payment_accounts(invoice_doc.payments, invoice_doc.company)
+	_set_return_write_off(invoice_doc, flt(payable - max(owed, 0) - refundable, precision))
+	invoice_doc.calculate_taxes_and_totals()
+
+
+def _return_credit_amount(invoice_doc):
+	"""What a submitted "Add to Customer Credit" return gives the customer (Ruling 151).
+
+	Its payable, net of any write-off, but no more than the credit it left on its
+	original: on a partly paid original the part that clears what was owed is no
+	credit, so no wallet credit is made for money never paid.
+	"""
+	amount = abs(flt(invoice_doc.rounded_total or invoice_doc.grand_total)) - abs(
+		flt(invoice_doc.write_off_amount)
+	)
+	if invoice_doc.get("return_against") and not invoice_doc.get("update_outstanding_for_self"):
+		owed = flt(frappe.db.get_value(invoice_doc.doctype, invoice_doc.return_against, "outstanding_amount"))
+		amount = min(amount, max(-owed, 0))
+	return flt(max(amount, 0), invoice_doc.precision("grand_total"))
+
+
+def _set_return_write_off(invoice_doc, amount):
+	"""Write off ``amount`` (positive) of a return: what it would give back beyond
+	what is refundable on its original (Ruling 147)."""
+	amount = max(flt(amount), 0)
+	invoice_doc.write_off_amount = -amount
+	invoice_doc.base_write_off_amount = flt(-amount * flt(invoice_doc.conversion_rate or 1))
+	if not amount:
+		return
+	profile = (
+		frappe.db.get_value(
+			"POS Profile",
+			invoice_doc.pos_profile,
+			["write_off_account", "write_off_cost_center"],
+			as_dict=True,
+		)
+		if invoice_doc.get("pos_profile")
+		else None
+	) or frappe._dict()
+	invoice_doc.write_off_account = invoice_doc.get("write_off_account") or profile.write_off_account
+	invoice_doc.write_off_cost_center = (
+		invoice_doc.get("write_off_cost_center") or profile.write_off_cost_center
+	)
+
+
+def _apply_return_taxes(invoice_doc):
+	"""A return against an invoice carries that invoice's taxes (Ruling 147).
+
+	Tax rows sent by the client, and today's POS Profile template, are ignored:
+	the refund is priced from the original. Actual charges are negated, as in
+	ERPNext's make_sales_return.
+	"""
+	if not (invoice_doc.get("is_return") and invoice_doc.get("return_against")):
+		return
+	original = frappe.get_doc(invoice_doc.doctype, invoice_doc.return_against)
+	invoice_doc.taxes_and_charges = original.get("taxes_and_charges")
+	invoice_doc.set("taxes", [])
+	for tax in original.get("taxes", []):
+		row = tax.as_dict(no_default_fields=True)
+		if row.get("charge_type") == "Actual":
+			row["tax_amount"] = -abs(flt(row.get("tax_amount")))
+		invoice_doc.append("taxes", row)
 
 
 @frappe.whitelist()

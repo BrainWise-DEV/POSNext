@@ -11,9 +11,8 @@ import frappe
 from frappe import _
 from erpnext.accounts.doctype.sales_invoice.sales_invoice import SalesInvoice
 from erpnext.accounts.utils import get_account_currency
+from erpnext.controllers.taxes_and_totals import calculate_taxes_and_totals
 from frappe.utils import cint, flt
-
-
 
 
 def _get_post_change_gl_entries_setting():
@@ -61,9 +60,7 @@ def _resolve_pos_customer(invoice_doc):
 		if frappe.db.exists("Customer", customer):
 			return customer
 		frappe.throw(
-			_("Customer {0} does not exist. Please select a valid customer.").format(
-				frappe.bold(customer)
-			),
+			_("Customer {0} does not exist. Please select a valid customer.").format(frappe.bold(customer)),
 			title=_("Invalid Customer"),
 		)
 
@@ -74,6 +71,28 @@ def _resolve_pos_customer(invoice_doc):
 			return default_customer
 
 	return None
+
+
+class _ReturnPayableTotals(calculate_taxes_and_totals):
+	"""ERPNext's totals, with a POS return's rounded total set to ``-payable``."""
+
+	def __init__(self, doc, payable):
+		self.pos_return_payable = payable
+		super().__init__(doc)
+
+	def set_rounded_total(self):
+		from pos_next.api.invoices import return_target_is_rounding
+
+		super().set_rounded_total()
+		if self.doc.is_rounded_total_disabled():
+			return
+		if not return_target_is_rounding(self.doc, self.pos_return_payable):
+			return
+		self.doc.rounded_total = -flt(self.pos_return_payable, self.doc.precision("rounded_total"))
+		self.doc.rounding_adjustment = flt(
+			self.doc.rounded_total - self.doc.grand_total, self.doc.precision("rounding_adjustment")
+		)
+		self._set_in_company_currency(self.doc, ["rounding_adjustment", "rounded_total"])
 
 
 class CustomSalesInvoice(SalesInvoice):
@@ -93,6 +112,22 @@ class CustomSalesInvoice(SalesInvoice):
 		# POS clients do not send it, so this must run after super().
 		if cint(self.is_pos):
 			self._validate_pos_payment_accounts()
+
+	def calculate_taxes_and_totals(self):
+		"""A POS return that empties its original refunds the paid remainder (Ruling 151).
+
+		ERPNext's calculator, with the return's rounded total set to
+		return_payable_target when there is one; recomputed on every pass, so it
+		holds through every save.
+		"""
+		from pos_next.api.invoices import return_payable_target
+
+		target = return_payable_target(self) if self.get("is_return") else None
+		if target is None:
+			return super().calculate_taxes_and_totals()
+		_ReturnPayableTotals(self, target)
+		self.calculate_commission()
+		self.calculate_contribution()
 
 	def calculate_contribution(self):
 		"""Use per-line Item Group commission rates when item-level SP is in play."""
@@ -332,4 +367,3 @@ class CustomSalesInvoice(SalesInvoice):
 				continue
 			if tracking.has_batch_no or tracking.has_serial_no:
 				pi.use_serial_batch_fields = 1
-

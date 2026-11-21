@@ -67,6 +67,9 @@ def apply_tax_inclusive(doc):
 	"""
 	if not doc.pos_profile:
 		return
+	# A return keeps its original's taxes as they were (Ruling 147)
+	if doc.get("is_return") and doc.get("return_against"):
+		return
 
 	try:
 		# Get POS Settings for this profile

@@ -416,8 +416,8 @@ class TestReturnSafety(FrappeTestCase):
 		self.assertEqual(flt(sale.paid_amount), 90)
 
 		payload, refund = self._frontend_return_payload(prepare_return_invoice(sale.name))
-		# The dialog shows the unrounded 89.99; the return is rounded the same way
-		# as the sale, so 90.00 is refunded.
+		# The rows add up to 89.99; the return is rounded the same way as the sale,
+		# so the dialog refunds 90.00 (D-R2-16, returnRefund.js).
 		self.assertEqual(refund, 89.99)
 		payload["payments"][0]["amount"] = -90
 		ret_doc = self._submit_return(payload)

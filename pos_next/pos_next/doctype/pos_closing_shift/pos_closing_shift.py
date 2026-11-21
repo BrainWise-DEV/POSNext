@@ -462,8 +462,8 @@ def _process_invoice(invoice, invoice_field, company_currency, cash_mode, paymen
 
 	# Money actually collected on this sale, in company currency.  A pure
 	# Pay-on-Account credit sale has paid_amount == 0; a partial sale carries
-	# only its cash/card down-payment.  Returns keep the full (signed) amount —
-	# the return branch already reflects real refunds via payment rows.
+	# only its cash/card down-payment.  A return counts the cash it refunded
+	# (its signed paid_amount), not its grand_total (Ruling 147).
 	# paid_amount is the raw tendered total, so change given back to the
 	# customer (e.g. a $20 bill on a $15.50 sale) must be netted out — it
 	# never stayed in the drawer.
@@ -474,7 +474,7 @@ def _process_invoice(invoice, invoice_field, company_currency, cash_mode, paymen
 	# replacing them: grand_total / net_total / taxes stay invoiced so they
 	# keep tying to the GL and to every existing report, while
 	# collected_amount / outstanding_total answer "what is in the drawer".
-	collected = base_grand_total if is_return else base_paid
+	collected = base_paid
 	outstanding = 0 if is_return else (base_grand_total - base_paid)
 
 	# Build transaction record
