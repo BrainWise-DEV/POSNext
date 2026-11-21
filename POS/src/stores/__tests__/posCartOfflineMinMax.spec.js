@@ -432,6 +432,63 @@ describe("G7 safety net: a Min/Max offer with no strategy is skipped offline", (
 		expect(cart.grandTotal).toBe(200 + 240)
 	})
 
+	it("an offer removed while the cart changes in flight comes off its lines, and stays off offline (m-r2-1)", async () => {
+		const buyOne = rule("_PNXT_G7_BuyOneA").offer
+		const tenOffB = {
+			...buyOne,
+			name: "_PNXT_G7_TEN_OFF_B",
+			title: "_PNXT_G7_TEN_OFF_B",
+			apply_discount_on_price: null,
+			min_or_max_discount_qty_limit: 0,
+			min_qty: 0,
+			discount_percentage: 10,
+			eligible_items: [B],
+		}
+		const aLine = serverCase("_PNXT_G7_BuyOneA", [[A, 6]]).lines[0]
+		const bLine = (qty) => ({
+			item_code: B,
+			qty,
+			price_list_rate: 80,
+			discount_percentage: 10,
+			rate: 72,
+			amount: 72 * qty,
+			pricing_rules: tenOffB.name,
+			discount_source: "pricing_rule",
+			is_already_discounted: 0,
+		})
+		vi.spyOn(offlineState, "isOffline", "get").mockReturnValue(false)
+		freshCart(buyOne)
+		offers.setAvailableOffers([buyOne, tenOffB])
+		addLine(cart, A, 6)
+		addLine(cart, B, 2)
+		cart.cancelPendingOfferProcessing()
+		server.offers = {
+			items: [{ ...aLine }, bLine(2)],
+			free_items: [],
+			applied_pricing_rules: [buyOne.name, tenOffB.name],
+		}
+		await cart.applyOffer(buyOne, cart.posProfile)
+		await cart.applyOffer(tenOffB, cart.posProfile)
+		expect(cart.appliedOffers.map((o) => o.code).sort()).toEqual(
+			[buyOne.name, tenOffB.name].sort(),
+		)
+		expect(line(cart, A).amount).toBe(250.02)
+
+		// Remove buy one; B changes while the request is in flight, so the answer is dropped.
+		server.inFlight = () => cart.updateItemQuantity(B, 3)
+		await cart.removeOffer(buyOne, cart.posProfile)
+		cart.cancelPendingOfferProcessing()
+		vi.spyOn(offlineState, "isOffline", "get").mockReturnValue(true)
+		expect(cart.appliedOffers.map((o) => o.code)).toEqual([tenOffB.name])
+		expect(ruleNames(line(cart, A).pricing_rules)).toEqual([])
+		expect(line(cart, A).amount).toBe(300)
+
+		cart.customer = "_PNXT_TEST_OTHER_CUSTOMER"
+		await settle(cart)
+		expect(line(cart, A).amount).toBe(300)
+		expect(cart.appliedOffers.map((o) => o.code)).toEqual([tenOffB.name])
+	})
+
 	it("an answer for A×6 that returns after A was raised to 7 is not kept offline: never a stale 291.69 (I-1r)", async () => {
 		const title = "_PNXT_G7_BuyOneA"
 		const first = serverCase(title, [[A, 6]])

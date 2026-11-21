@@ -1827,13 +1827,15 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 				if (signal?.aborted) return;
 
-				// The cart changed while the request was in flight: the answer is dropped and
-				// the offer comes off the list; the next pass (the change queued one) prices
-				// the cart with the offers left (I-1r).
+				// The cart changed while the request was in flight: the answer is dropped, and
+				// the offer comes off the list and off its lines (so it cannot stay on them, or
+				// come back offline); the next pass, the one the change queued, prices the cart
+				// with the offers left (I-1r, m-r2-1).
 				if (generateCartHash() !== sentHash) {
 					appliedOffers.value = appliedOffers.value.filter((entry) =>
 						remainingCodes.includes(entry.code)
 					);
+					releaseOfferFromLines(offerCode);
 					result = true;
 					return;
 				}
