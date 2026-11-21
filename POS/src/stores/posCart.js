@@ -1714,12 +1714,23 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	function dropOfferDiscountsFromLines() {
 		invoiceItems.value.forEach((item) => {
 			if (dropPromotionUnderCoupon(item)) return;
-			if (item.pricing_rules && item.pricing_rules.length > 0) {
+			// Drop the rule itself, not only its discount: a Buy X Get Y line keeps
+			// pricing_rules after qty falls under min_qty, and the F&F pass would
+			// then see a BXGY line and refuse to reapply Friends & Family.
+			if (hasPricingRules(item.pricing_rules)) {
 				item.discount_percentage = 0;
 				item.discount_amount = 0;
 				item.pricing_rules = [];
 				item.is_already_discounted = 0;
 				item.is_accumulative_discount = 0;
+				if (
+					item.discount_source &&
+					item.discount_source !== "manual_discount" &&
+					item.discount_source !== COUPON_DISCOUNT_SOURCE &&
+					!isFnfLine(item)
+				) {
+					item.discount_source = "";
+				}
 				recalculateItem(item);
 			}
 		});
