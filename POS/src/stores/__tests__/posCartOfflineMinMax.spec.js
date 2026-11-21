@@ -281,8 +281,18 @@ describe("G7 safety net: a Min/Max offer with no strategy is skipped offline", (
 	})
 })
 
-// A sibling checkout older than G7 has no Min/Max strategy: skip, don't fail.
-describe.skipIf(!promotions?.minMaxStrategy)(
+// POSNEXT_PROMOTIONS_DIR (CI) demands the strategy: a missing file or a checkout
+// older than G7 fails there. A bench sibling without it is skipped instead.
+const requirePromotions = Boolean(process.env.POSNEXT_PROMOTIONS_DIR)
+it.runIf(requirePromotions)(
+	"POSNEXT_PROMOTIONS_DIR holds promotions' Min/Max strategy",
+	() => {
+		expect(hasPromotions, strategyFile).toBe(true)
+		expect(typeof promotions?.minMaxStrategy?.apply).toBe("function")
+	},
+)
+
+describe.skipIf(!requirePromotions && !promotions?.minMaxStrategy)(
 	"G7: offline Min/Max matches what the server saves",
 	() => {
 		beforeEach(registerPromotions)

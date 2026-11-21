@@ -92,9 +92,17 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-yarn-
 
+      # The offline offer strategies live in posnext_promotions; the cart specs load
+      # them from POSNEXT_PROMOTIONS_DIR (posCartOfflineMinMax.spec.js), same ref as the server leg.
+      - name: Clone posnext_promotions for the frontend tests
+        if: matrix.leg == 'core'
+        run: git clone --depth 1 --branch "$PROMOTIONS_REF" https://github.com/BrainWise-DEV/Promotions "$RUNNER_TEMP/posnext_promotions"
+
       - name: Run Frontend Tests
         if: matrix.leg == 'core'
         working-directory: POS
+        env:
+          POSNEXT_PROMOTIONS_DIR: ${{ runner.temp }}/posnext_promotions
         run: yarn install --frozen-lockfile && yarn test:run
 
       - name: Install MariaDB Client
