@@ -652,6 +652,9 @@ class TestOneTimeOffer(FrappeTestCase):
 		# A fresh transaction: earlier locking reads in this one hold gap locks on the
 		# usage table that would block the other connection's insert.
 		frappe.db.rollback()
+		# The rollback also drops setUpClass's uncommitted fixtures (a fresh site's test
+		# items and prices): rebuild them, or every later test in the class loses them.
+		type(self).ctx = _ctx()
 		self.setUp()
 		mine = self._open_check(self._cart())["name"]
 		before = frappe.db.sql("select @@session.innodb_lock_wait_timeout")[0][0]
