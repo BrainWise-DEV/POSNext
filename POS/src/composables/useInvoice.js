@@ -7,11 +7,17 @@ import { useSerialNumberStore } from "@/stores/serialNumber";
 import { shiftState } from "@/composables/useShift";
 import { CoalescingMutex } from "@/utils/mutex";
 import { logger } from "@/utils/logger";
-import { invoiceRoundedTotal, roundCurrency, taxAfterHeaderDiscount } from "@/utils/currency";
+import {
+	invoiceRoundedTotal,
+	roundCurrency,
+	taxAfterHeaderDiscount,
+	unitRateLineDiscount,
+} from "@/utils/currency";
 import {
 	fnfLockedDiscountAmount,
 	fnfReplacedDiscount,
 	fnfSubmissionMarkers,
+	hasPricingRules,
 	stripFnfKeys,
 	stripFriendsAndFamilyForOrder,
 } from "@/utils/friendsAndFamily";
@@ -714,7 +720,13 @@ export function useInvoice() {
 		if (fnfAmount !== null) {
 			discountAmount = fnfAmount;
 		} else if (!amountMode && item.discount_percentage > 0) {
-			discountAmount = roundCurrency((baseAmount * item.discount_percentage) / 100);
+			// A promotion's % is priced per unit, as apply_offers prices it: a unit rate at
+			// currency precision, times qty. The rate sent then reproduces the line, so the
+			// cart shows and collects what the invoice saves (G6).
+			discountAmount =
+				!isManuallyEdited && hasPricingRules(item.pricing_rules)
+					? unitRateLineDiscount(roundedRate, item.quantity, item.discount_percentage)
+					: roundCurrency((baseAmount * item.discount_percentage) / 100);
 			item.discount_mode = "percentage";
 		} else if (item.discount_amount > 0) {
 			discountAmount = roundCurrency(item.discount_amount);

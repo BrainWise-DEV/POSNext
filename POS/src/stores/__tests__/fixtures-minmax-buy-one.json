@@ -1,0 +1,106 @@
+{
+	"_source": "Captured 2026-11-21 from nexus.local (posnext_promotions f06f0d4, pos_next c2b18c5c): Price rule on _PNXT_TEST_ITEM_A (Standard Selling 50), Discount Percentage 100, apply_discount_on_price Min, min_or_max_discount_qty_limit 1, min_qty 2 ('buy one'). line: the apply_offers answer for the line. invoice: the Sales Invoice update_invoice + submit_invoice saved for that cart (rate, amount, grand_total). Banker's Rounding, currency precision 2. See .superpowers/sdd/2026-11-16-ff-phase2-unlock/g6-report.md.",
+	"rule": "PRLE-BUY-ONE",
+	"cases": [
+		{
+			"qty": 2,
+			"line": {
+				"item_code": "_PNXT_TEST_ITEM_A",
+				"qty": 2,
+				"price_list_rate": 50.0,
+				"discount_percentage": 50.0,
+				"discount_amount": 25.0,
+				"rate": 25.0,
+				"amount": 50.0,
+				"pricing_rules": "PRLE-BUY-ONE",
+				"discount_source": "pricing_rule",
+				"is_already_discounted": 0
+			},
+			"invoice": {
+				"rate": 25.0,
+				"amount": 50.0,
+				"grand_total": 50.0
+			}
+		},
+		{
+			"qty": 3,
+			"line": {
+				"item_code": "_PNXT_TEST_ITEM_A",
+				"qty": 3,
+				"price_list_rate": 50.0,
+				"discount_percentage": 33.33333333333333,
+				"discount_amount": 16.67,
+				"rate": 33.33,
+				"amount": 99.99,
+				"pricing_rules": "PRLE-BUY-ONE",
+				"discount_source": "pricing_rule",
+				"is_already_discounted": 0
+			},
+			"invoice": {
+				"rate": 33.33,
+				"amount": 99.99,
+				"grand_total": 99.99
+			}
+		},
+		{
+			"qty": 4,
+			"line": {
+				"item_code": "_PNXT_TEST_ITEM_A",
+				"qty": 4,
+				"price_list_rate": 50.0,
+				"discount_percentage": 25.0,
+				"discount_amount": 12.5,
+				"rate": 37.5,
+				"amount": 150.0,
+				"pricing_rules": "PRLE-BUY-ONE",
+				"discount_source": "pricing_rule",
+				"is_already_discounted": 0
+			},
+			"invoice": {
+				"rate": 37.5,
+				"amount": 150.0,
+				"grand_total": 150.0
+			}
+		},
+		{
+			"qty": 6,
+			"line": {
+				"item_code": "_PNXT_TEST_ITEM_A",
+				"qty": 6,
+				"price_list_rate": 50.0,
+				"discount_percentage": 16.666666666666664,
+				"discount_amount": 8.33,
+				"rate": 41.67,
+				"amount": 250.02,
+				"pricing_rules": "PRLE-BUY-ONE",
+				"discount_source": "pricing_rule",
+				"is_already_discounted": 0
+			},
+			"invoice": {
+				"rate": 41.67,
+				"amount": 250.02,
+				"grand_total": 250.02
+			}
+		},
+		{
+			"qty": 7,
+			"line": {
+				"item_code": "_PNXT_TEST_ITEM_A",
+				"qty": 7,
+				"price_list_rate": 50.0,
+				"discount_percentage": 14.285714285714285,
+				"discount_amount": 7.14,
+				"rate": 42.86,
+				"amount": 300.02,
+				"pricing_rules": "PRLE-BUY-ONE",
+				"discount_source": "pricing_rule",
+				"is_already_discounted": 0
+			},
+			"invoice": {
+				"rate": 42.86,
+				"amount": 300.02,
+				"grand_total": 300.02
+			}
+		}
+	]
+}

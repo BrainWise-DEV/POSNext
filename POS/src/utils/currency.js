@@ -275,6 +275,21 @@ export function roundTo(value, precision = settings.currency) {
 	return round(Number(value) || 0, precision);
 }
 
+/**
+ * The discount of a promotion's line % priced per unit, as apply_offers prices it
+ * (ERPNext's calculate_item_values formula) and as an invoice row holds it: the unit
+ * rate at currency precision, times qty. A Min/Max rule's blended % does not split
+ * evenly into units: one free in six at 50 is 41.67 a unit, so the line is 250.02,
+ * not 250.00 (G6).
+ */
+export function unitRateLineDiscount(unitPrice, qty, percentage) {
+	const price = roundCurrency(Number(unitPrice) || 0);
+	const units = Number(qty) || 0;
+	const pct = Math.min(Math.max(Number(percentage) || 0, 0), 100);
+	const rate = roundCurrency(price * (1 - pct / 100));
+	return roundCurrency(roundCurrency(price * units) - roundCurrency(rate * units));
+}
+
 /** Round using system float precision */
 export function roundFloat(value) {
 	return round(value, settings.float);
