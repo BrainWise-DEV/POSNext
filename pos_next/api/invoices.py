@@ -1615,9 +1615,32 @@ def _offer_rate(result, idx, list_price) -> float | None:
 	return max(min(by_percentage, by_amount), 0)
 
 
+# Fields of a line the server's offer evaluation priced, as the coupon resolver reads a
+# cart line's own discount (an F&F line also carries the signed snapshot of the offer
+# it displaced, which promotions verifies itself).
+OFFER_PRICED_FIELDS = (
+	"discount_percentage",
+	"discount_amount",
+	"discount_source",
+	"is_already_discounted",
+	"pricing_rules",
+	"posnext_discount_source",
+	"posnext_fnf_percentage",
+	"posnext_fnf_program",
+	FNF_REPLACED_FIELD,
+)
+
+
 def _coupon_line_rates(invoice_doc, coupon_code, paid_rows, context) -> dict[int, float]:
-	"""Per-unit rate the invoice's coupon gives each paid line, on the server's list
-	price with no other discount: {line index: rate}. Empty without promotions."""
+	"""Per-unit rate the invoice's coupon gives each paid line: {line index: rate}.
+	Empty without promotions.
+
+	The coupon is priced on the server's list price with no other discount. A coupon
+	that stacks on an offer ("Add on top") is also priced on the line as the server's
+	own offer evaluation prices it (``_offer_priced_payload``): where promotions' resolver
+	stacks it there, the rate is the offer-priced rate less the coupon. Nothing the
+	client sent prices either payload.
+	"""
 	measures = {
 		id(row): flt(row.get("price_list_rate"))
 		if context.list_prices.get(id(row)) is None
@@ -1628,7 +1651,37 @@ def _coupon_line_rates(invoice_doc, coupon_code, paid_rows, context) -> dict[int
 		invoice_doc, paid_rows, context.item_data, measures, normalised={id(row) for row in paid_rows}
 	)
 	updates = _coupon_line_updates(invoice_doc, coupon_code, payload, UNEXPLAINED_DISCOUNT_LOG_TITLE)
-	return {idx: flt(update["rate"]) for idx, update in (updates or {}).items() if "rate" in update}
+	rates = {idx: flt(update["rate"]) for idx, update in (updates or {}).items() if "rate" in update}
+	if updates is None:
+		return rates
+	priced = _offer_priced_payload(invoice_doc, payload)
+	if priced is not None:
+		stacked = _coupon_line_updates(invoice_doc, coupon_code, priced, UNEXPLAINED_DISCOUNT_LOG_TITLE)
+		for idx, update in (stacked or {}).items():
+			if update.get("stacked") and "rate" in update:
+				rates[idx] = flt(update["rate"])
+	return rates
+
+
+def _offer_priced_payload(invoice_doc, payload) -> dict | None:
+	"""``payload`` (paid lines at list price, no discount) with each line's discount as the
+	server's offer evaluation of that same payload gives it, or None when nothing is
+	discounted or the offers could not be evaluated."""
+	result, error = _evaluate_offers(invoice_doc, payload)
+	lines = result.get("items") or []
+	if error or len(lines) != len(payload["items"]):
+		return None
+	items, changed = [], False
+	for line, evaluated in zip(payload["items"], lines, strict=True):
+		line = dict(line)
+		if flt(evaluated.get("discount_percentage")) > 0 or flt(evaluated.get("discount_amount")) > 0:
+			for field in OFFER_PRICED_FIELDS:
+				if field in evaluated:
+					line[field] = evaluated[field]
+			line["pricing_rules"] = _pricing_rule_to_string(line.get("pricing_rules"))
+			changed = True
+		items.append(line)
+	return dict(payload, items=items) if changed else None
 
 
 NEW_ROW_KEY = "pos-next-new-row-"

@@ -10,7 +10,7 @@ import frappe
 
 # app -> (minimum FF_CONTRACT, release that provides it)
 REQUIREMENTS = {
-	"posnext_promotions": (2, "0.2.0"),
+	"posnext_promotions": (3, "0.3.0"),
 	"magento_integration": (1, "0.2.0"),
 }
 

@@ -3,8 +3,8 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - frappe may not be installed during setup
 	frappe = None
 
-__version__ = "2.5.0"
-FF_CONTRACT = 1
+__version__ = "2.6.0"
+FF_CONTRACT = 2
 
 
 def console(*data):

@@ -10,11 +10,12 @@ import { logger } from "@/utils/logger";
 import { invoiceRoundedTotal, roundCurrency, taxAfterHeaderDiscount } from "@/utils/currency";
 import {
 	fnfLockedDiscountAmount,
+	fnfReplacedDiscount,
 	fnfSubmissionMarkers,
 	stripFnfKeys,
 	stripFriendsAndFamilyForOrder,
 } from "@/utils/friendsAndFamily";
-import { preCouponLineDiscount } from "@/utils/couponLines";
+import { preCouponDiscount, preCouponLineDiscount } from "@/utils/couponLines";
 
 const log = logger.create("Invoice");
 
@@ -851,6 +852,11 @@ export function useInvoice() {
 				: 0,
 			sales_person: item.sales_person || null,
 			...fnfSubmissionMarkers(item),
+			// An "Add on top" line over the discount F&F displaced: the server-signed snapshot
+			// of that discount, which the server verifies to work out the coupon's share (G5).
+			...(isAppliedCouponLine(item) && item.coupon_stacked
+				? fnfReplacedDiscount(item, preCouponDiscount(item).discount_source)
+				: {}),
 		});
 
 		const out = [];

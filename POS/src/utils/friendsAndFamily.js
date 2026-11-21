@@ -108,6 +108,9 @@ const PROMOTION_DISCOUNT_SOURCES = new Set([
 const FREE_DISCOUNT_SOURCES = new Set(["gwp", "free_item"]);
 
 /** Client-only fields stamped on cart items by the F&F integration. */
+/** Sales Invoice Item field: the signed snapshot of the discount F&F replaced. */
+export const FNF_REPLACED_FIELD = "posnext_fnf_replaced_discount";
+
 export const FNF_ITEM_FIELDS = Object.freeze([
 	"fnf_reason",
 	"fnf_capped",
@@ -289,6 +292,7 @@ export function stampFnfLine(item, line, { precision = getPrecision().currency ?
 	item.fnf_discount_amount = amount;
 	item.fnf_qty = qty;
 	item.fnf_rate = rate;
+	item[FNF_REPLACED_FIELD] = line[FNF_REPLACED_FIELD] || null;
 	annotateFnfLine(item, line);
 }
 
@@ -341,7 +345,19 @@ export function stripFnfLine(item) {
 	item.fnf_discount_amount = 0;
 	item.fnf_qty = 0;
 	item.fnf_rate = 0;
+	item[FNF_REPLACED_FIELD] = null;
 	return wasFnf;
+}
+
+/**
+ * The server-signed snapshot of the discount F&F displaced on this line, as the
+ * coupon resolver must see it, else {}. Sent with a line whose pre-coupon state is
+ * F&F, so an "Add on top" coupon can stack on that discount (G5). The server verifies
+ * the signature; the cart never reads or builds it.
+ */
+export function fnfReplacedDiscount(item, preDiscountSource) {
+	const snapshot = item?.[FNF_REPLACED_FIELD];
+	return preDiscountSource === FNF_DISCOUNT_SOURCE && snapshot ? { [FNF_REPLACED_FIELD]: snapshot } : {};
 }
 
 function normalizePricingRules(value) {

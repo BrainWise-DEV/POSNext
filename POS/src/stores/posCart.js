@@ -50,6 +50,8 @@ import { call } from "@/utils/apiWrapper";
 import { isPromotionsAppInstalled, promoApi } from "@/utils/promoApi";
 import {
 	FNF_DISCOUNT_SOURCE,
+	FNF_REPLACED_FIELD,
+	fnfReplacedDiscount,
 	annotateFnfLine,
 	clearFnfAnnotations,
 	indexFnfLines,
@@ -1012,6 +1014,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	function stripStashedFnf(item) {
 		if (isCouponLine(item) && item.pre_coupon_discount?.discount_source === FNF_DISCOUNT_SOURCE) {
 			item.pre_coupon_discount = { discount_percentage: 0, discount_amount: 0, discount_source: "", is_already_discounted: 0 };
+			item[FNF_REPLACED_FIELD] = null;
 			return true;
 		}
 		return false;
@@ -1129,6 +1132,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				is_already_discounted: pre.is_already_discounted || 0,
 				discount_source: pre.discount_source || "",
 				coupon_code: "",
+				...fnfReplacedDiscount(item, pre.discount_source),
 			};
 		});
 	}
@@ -1322,6 +1326,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 					is_already_discounted: pre.is_already_discounted || 0,
 					discount_source: pre.discount_source || "",
 					coupon_code: "",
+					...fnfReplacedDiscount(item, pre.discount_source),
 					item_group: item.item_group,
 					brand: item.brand,
 					amount: item.amount,
@@ -1432,6 +1437,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 					});
 				}
 				item.pricing_rules = normalizePricingRules(serverItem.pricing_rules);
+				// The snapshot F&F signed for the line under the coupon, if F&F holds it.
+				const fnfLine = fnfLines.get(index);
+				item[FNF_REPLACED_FIELD] = fnfLine?.applies ? fnfLine[FNF_REPLACED_FIELD] || null : null;
 				item.free_qty = Number.parseFloat(serverItem.free_qty) || 0;
 				item.is_accumulative_discount =
 					serverItem.discount_source === "accumulative_promotion" ? 1 : 0;
