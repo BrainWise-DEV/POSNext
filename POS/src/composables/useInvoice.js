@@ -7,7 +7,7 @@ import { useSerialNumberStore } from "@/stores/serialNumber";
 import { shiftState } from "@/composables/useShift";
 import { CoalescingMutex } from "@/utils/mutex";
 import { logger } from "@/utils/logger";
-import { invoiceRoundedTotal, roundCurrency } from "@/utils/currency";
+import { invoiceRoundedTotal, roundCurrency, taxAfterHeaderDiscount } from "@/utils/currency";
 import {
 	fnfLockedDiscountAmount,
 	fnfSubmissionMarkers,
@@ -200,7 +200,21 @@ export function useInvoice() {
 	// ========================================================================
 	// Use roundCurrency for monetary totals to match ERPNext's currency precision (from System Settings)
 	const subtotal = computed(() => roundCurrency(_cachedSubtotal.value));
-	const totalTax = computed(() => roundCurrency(_cachedTotalTax.value));
+	// The tax the server saves: a Grand Total header discount lowers it (D-R2-07).
+	// grandTotal below is unchanged: it already takes the whole discount off.
+	// The lines' tax before any header discount: what the cart's arithmetic uses (its
+	// displayed grand total, a coupon's net base), as grandTotal does. Not the Tax row.
+	const lineTotalTax = computed(() => roundCurrency(_cachedTotalTax.value));
+	const totalTax = computed(() => {
+		const lineTax = lineTotalTax.value;
+		const net = _cachedSubtotal.value - _cachedTotalDiscount.value;
+		return taxAfterHeaderDiscount({
+			tax: lineTax,
+			total: taxInclusive.value ? net : net + _cachedTotalTax.value,
+			discount: additionalDiscount.value || 0,
+			applyDiscountOn: shiftState.value?.pos_profile?.apply_discount_on || "Grand Total",
+		});
+	});
 	const totalDiscount = computed(() =>
 		roundCurrency(_cachedTotalDiscount.value + (additionalDiscount.value || 0))
 	);
@@ -1675,6 +1689,7 @@ export function useInvoice() {
 		// Computed
 		subtotal,
 		totalTax,
+		lineTotalTax,
 		totalDiscount,
 		grandTotal,
 		roundedTotal,

@@ -26,6 +26,7 @@ import {
 	stampFnfLine,
 	lineCouponFnfView,
 	stripFnfLine,
+	invoiceDiscountFnfConflict,
 } from "@/utils/friendsAndFamily";
 
 const fmt = (v) => `EGP ${Number(v).toFixed(2)}`;
@@ -401,6 +402,24 @@ describe("buildFnfCartMessages", () => {
 		expect(msgs[2].text).toBe("Monthly Friends & Family balance: EGP 100.00 left, EGP 0.00 after this order");
 	});
 
+	it("D-R2-04: an order promotion won → the monthly balance with no deduction", () => {
+		const caps = { active: true, monthly_remaining: 1750.04, monthly_remaining_after: 1720.04, fnf_applied_total: 30 };
+		const best = { winner: "promotion", suppressed: ["friends_and_family"], message_en: "The order promotion is better." };
+		const result = normalizeFnfResult(
+			{ ...appliedBlock, applied_count: 0, reason: "order_discount_better", caps },
+			best
+		);
+		const monthly = buildFnfCartMessages({ result, formatAmount: fmt }).find((m) => m.key === "monthly");
+		expect(monthly.text).toBe("Monthly Friends & Family balance: EGP 1750.04 left");
+	});
+
+	it("D-R2-04: no F&F line applied → the monthly balance with no deduction", () => {
+		const caps = { active: true, monthly_remaining: 100, monthly_remaining_after: 70, fnf_applied_total: 30 };
+		const result = normalizeFnfResult({ ...appliedBlock, applied_count: 0, caps });
+		const monthly = buildFnfCartMessages({ result, formatAmount: fmt }).find((m) => m.key === "monthly");
+		expect(monthly.text).toBe("Monthly Friends & Family balance: EGP 100.00 left");
+	});
+
 	it("coupon beat F&F → only the coupon explanation", () => {
 		const msgs = buildFnfCartMessages({
 			result: normalizeFnfResult(appliedBlock, bestDiscount),
@@ -560,5 +579,29 @@ describe("mandatory Approved Domains (rev. 2)", () => {
 	it("ffMember is false for non-members and missing flags", () => {
 		expect(normalizeEligibility({ eligible: false, reason: "not_eligible" }).ffMember).toBe(false);
 		expect(normalizeEligibility({ eligible: true, ff_member: true, discount_percentage: 30 }).ffMember).toBe(true);
+	});
+});
+
+describe("D-R2-14: an invoice discount on an F&F cart is explained when entered", () => {
+	const fnfLine = { discount_source: "friends_and_family", discount_amount: 69, quantity: 2 };
+	const plainLine = { discount_source: "", discount_amount: 0, quantity: 1 };
+
+	it("F&F saves more → the invoice discount will not be applied", () => {
+		const text = invoiceDiscountFnfConflict({ items: [fnfLine, plainLine], invoiceDiscount: 14, formatAmount: fmt });
+		expect(text).toBe(
+			"Friends & Family (EGP 69.00) is better than this invoice discount (EGP 14.00). They are never combined: the invoice discount will not be applied when you pay."
+		);
+	});
+
+	it("the invoice discount is bigger → the better of the two is kept at payment", () => {
+		const text = invoiceDiscountFnfConflict({ items: [fnfLine], invoiceDiscount: 100, formatAmount: fmt });
+		expect(text).toContain("never combined");
+		expect(text).toContain("the better of the two is kept");
+	});
+
+	it("no F&F line or no discount → nothing", () => {
+		expect(invoiceDiscountFnfConflict({ items: [plainLine], invoiceDiscount: 14 })).toBe("");
+		expect(invoiceDiscountFnfConflict({ items: [fnfLine], invoiceDiscount: 0 })).toBe("");
+		expect(invoiceDiscountFnfConflict({ items: [{ ...fnfLine, is_free_item: 1 }], invoiceDiscount: 14 })).toBe("");
 	});
 });

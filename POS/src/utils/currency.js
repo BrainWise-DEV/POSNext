@@ -326,3 +326,18 @@ export function invoiceRoundedTotal(grandTotal, profile = null) {
 function isRoundingDisabled(value) {
 	return value === undefined || value === null || value === "" || Boolean(Number(value));
 }
+
+/**
+ * The tax ERPNext saves after a header discount on the Grand Total (D-R2-07). It
+ * spreads the discount over the total it was taken from, tax included, so the tax
+ * falls by the same share: tax × (1 − discount / total). `total` is the grand total
+ * before the discount (net + tax, or the gross when prices include tax). A "Net Total"
+ * discount is not handled here: the cart keeps its tax.
+ */
+export function taxAfterHeaderDiscount({ tax, total, discount, applyDiscountOn = "Grand Total" } = {}) {
+	const lineTax = Number(tax) || 0;
+	const header = Number(discount) || 0;
+	const base = Number(total) || 0;
+	if (lineTax <= 0 || header <= 0 || base <= 0 || applyDiscountOn === "Net Total") return lineTax;
+	return roundCurrency(Math.max(0, lineTax * (1 - Math.min(header, base) / base)));
+}

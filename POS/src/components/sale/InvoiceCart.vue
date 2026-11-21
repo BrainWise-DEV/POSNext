@@ -1446,6 +1446,26 @@
 
 		<!-- Totals Summary -->
 		<div class="p-1.5 sm:p-2 bg-white border-t border-gray-200">
+			<!-- D-R2-17: a one-time offer this customer already used is not applied; say so -->
+			<div
+				v-if="items.length > 0 && offersStore.usedOneTimeOffers.length > 0"
+				class="mb-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 flex flex-col gap-0.5"
+				role="status"
+				aria-live="polite"
+				data-testid="one-time-offer-used"
+			>
+				<p
+					v-for="offer in offersStore.usedOneTimeOffers"
+					:key="offer.name"
+					class="text-[10px] sm:text-[11px] leading-snug text-amber-800"
+				>
+					{{
+						__("{0} not applied: this customer already used this one-time offer", [
+							offer.title || offer.name,
+						])
+					}}
+				</p>
+			</div>
 			<!-- PN-130: Friends & Family cashier messages (applied / cap / exclusions / comparison) -->
 			<div
 				v-if="fnfCartMessages.length > 0"
@@ -1675,6 +1695,7 @@ import {
 	pickLocalizedMessage,
 } from "@/utils/friendsAndFamily";
 import { isZeroTotal } from "@/utils/paymentCompletion";
+import { cartDisplayTotals, isFullyDiscountedLine, lineDiscountPercent, lineSavingTitle } from "@/utils/cartLineLabels";
 import {
 	getDisplayQuantity as getDisplayQuantityForLine,
 	resolvePaidQuantityFromDisplay as resolvePaidQtyForLine,
@@ -2116,15 +2137,18 @@ const totalQuantity = computed(() => {
  *
  * @returns {Number} Subtotal amount to display (net amount before tax)
  */
-const displaySubtotal = computed(() => {
-	if (cartStore.taxInclusive) {
-		// Tax inclusive: subtotal from store is gross (includes tax)
-		// Display the net amount (before tax) for clarity
-		return props.subtotal - props.taxAmount;
-	}
-	// Tax exclusive: subtotal is already net (before tax)
-	return props.subtotal;
-});
+// The Tax row shows the server's post-discount tax (D-R2-07); the totals are built
+// from the lines' tax before the header discount, which already takes its share.
+const displayTotals = computed(() =>
+	cartDisplayTotals({
+		subtotal: props.subtotal,
+		lineTax: cartStore.lineTotalTax ?? props.taxAmount,
+		discount: displayDiscountAmount.value,
+		taxInclusive: cartStore.taxInclusive,
+	})
+);
+
+const displaySubtotal = computed(() => displayTotals.value.subtotal);
 
 /**
  * Display grand total that visually equals Subtotal + Tax - Discount.
@@ -2134,9 +2158,7 @@ const displaySubtotal = computed(() => {
  *
  * @returns {Number} Grand total amount to display
  */
-const displayGrandTotal = computed(() => {
-	return displaySubtotal.value + props.taxAmount - displayDiscountAmount.value;
-});
+const displayGrandTotal = computed(() => displayTotals.value.grandTotal);
 
 const hasRounding = computed(() => !isZeroTotal(Number(props.roundingAdjustment) || 0));
 
@@ -2390,25 +2412,13 @@ function savingOffer(item) {
 }
 
 // What the customer gets on this line: "1 free", "20% off", "Coupon WELCOME10"
-function savingTitle(item) {
-	if (item.coupon_code) {
-		// A coupon stacked on a promotion names both
-		const pre = Number(item.pre_coupon_discount?.discount_percentage) || 0;
-		return pre > 0
-			? __("{0}% off + Coupon {1}", [pre.toFixed(0), item.coupon_code])
-			: __("Coupon {0}", [item.coupon_code]);
-	}
-	if (isGiftSaving(item)) {
-		const unit = Number.parseFloat(item.price_list_rate || item.rate) || 0;
-		const units = unit ? Math.round(lineSaving(item) / unit) : 0;
-		if (units > 0) return __("{0} free", [units]);
-	}
-	return __("{0}% off", [Number(getItemDiscountPercent(item)).toFixed(0)]);
-}
+const savingTitle = lineSavingTitle;
 
 // The offer that gave it, shown quieter beside the title
 function savingSource(item) {
-	return item.coupon_code ? "" : savingOffer(item)?.name || "";
+	// A free coupon line's title is "Free": the coupon is named beside it.
+	if (item.coupon_code) return isFullyDiscountedLine(item) ? item.coupon_code : "";
+	return savingOffer(item)?.name || "";
 }
 
 const resolvePaidQuantityFromDisplay = resolvePaidQtyForLine;
@@ -2451,17 +2461,7 @@ function getLineStrikePrice(item) {
 	return list > net + 0.0001 ? list : null;
 }
 
-function getItemDiscountPercent(item) {
-	const pct = Number.parseFloat(item?.discount_percentage) || 0;
-	if (pct > 0) return pct;
-	const discountAmount = Number.parseFloat(item?.discount_amount) || 0;
-	if (discountAmount <= 0) return 0;
-	const qty = Number.parseFloat(item?.quantity || item?.qty) || 0;
-	const rate = Number.parseFloat(item?.price_list_rate || item?.rate) || 0;
-	const base = qty * rate;
-	if (base <= 0) return 0;
-	return (discountAmount / base) * 100;
-}
+const getItemDiscountPercent = lineDiscountPercent;
 
 /**
  * Format a numeric amount as currency string.

@@ -57,6 +57,7 @@ import {
 	isFnfLine,
 	mergeServerLine,
 	fnfEmailBlockMessage,
+	isSettingsEligibility,
 	normalizeEligibility,
 	normalizeFnfResult,
 	pickLocalizedMessage,
@@ -140,6 +141,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		customer,
 		subtotal,
 		totalTax,
+		lineTotalTax,
 		totalDiscount,
 		grandTotal,
 		roundedTotal,
@@ -624,7 +626,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			fnfEligibilityKey = customerName;
 			return null;
 		}
-		if (!force && fnfEligibilityKey === customerName) {
+		// An answer from the F&F Settings (program off…) is asked again: the settings may
+		// have changed since (D-R2-03), as a customer change asks again.
+		if (!force && fnfEligibilityKey === customerName && !isSettingsEligibility(fnfEligibility.value)) {
 			return fnfEligibility.value;
 		}
 		if (offlineState.isOffline) {
@@ -880,9 +884,31 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		return { checked: true, changed, previousTotal: previousPayable, total: payable, message };
 	}
 
-	async function setCustomer(selectedCustomer) {
+	/**
+	 * D-16 (D-R2-11): a line coupon is never carried to another customer. Its lines go
+	 * back to what they had before it, minus the old customer's F&F, and are re-priced.
+	 */
+	function dropLineCouponForCustomerChange() {
+		const coupon = appliedCoupon.value;
+		if (!isLineLevelCoupon(coupon)) return;
+		for (const item of invoiceItems.value) stripStashedFnf(item);
+		clearCouponLines();
+		couponCode.value = null;
+		appliedCoupon.value = null;
+		fnfCouponOverride.value = null;
+		showWarning(__("Coupon {0} removed: the customer changed", [coupon.code || coupon.name || ""]));
+		forceRefreshOffers();
+	}
+
+	/**
+	 * @param {Object|string|null} selectedCustomer
+	 * @param {{ restoring?: boolean }} options restoring: a loaded draft sets its own
+	 *   customer; its coupon is restored after, so nothing is dropped here.
+	 */
+	async function setCustomer(selectedCustomer, { restoring = false } = {}) {
 		const previous = currentCustomerName();
 		customer.value = selectedCustomer;
+		if (!restoring && currentCustomerName() !== previous) dropLineCouponForCustomerChange();
 		const [, eligibility] = await Promise.all([
 			syncOneTimeContextForCurrentCustomer(),
 			refreshFriendsAndFamilyEligibility(true),
@@ -1112,6 +1138,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		item.coupon_code = null;
 		item.coupon_fixed_discount = null;
 		item.coupon_percentage_cap = null;
+		item.coupon_stacked = false;
 		recalculateItem(item);
 	}
 
@@ -1148,6 +1175,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			item.discount_amount = fixedAmount;
 			item.coupon_fixed_discount = percentage > 0 ? null : fixedAmount;
 			item.coupon_percentage_cap = percentage > 0 || stacked ? null : couponPercentage || null;
+			// Only a stacked line keeps what it had under the coupon; the cart label says so (D-R2-05).
+			item.coupon_stacked = stacked;
 			item.discount_source = COUPON_DISCOUNT_SOURCE;
 			item.coupon_code = code;
 			recalculateItem(item);
@@ -3415,6 +3444,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		customer,
 		subtotal,
 		totalTax,
+		lineTotalTax, // tax before the header discount (D-R2-07): for arithmetic, not the Tax row
 		totalDiscount,
 		grandTotal,
 		posProfile,

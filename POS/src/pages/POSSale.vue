@@ -614,7 +614,7 @@
 			<CouponDialog
 				v-model="uiStore.showCouponDialog"
 				:subtotal="cartStore.subtotal"
-				:tax-amount="cartStore.totalTax"
+				:tax-amount="cartStore.lineTotalTax"
 				:grand-total="cartStore.grandTotal"
 				:items="cartStore.invoiceItems"
 				:pos-profile="shiftStore.profileName"
@@ -2918,7 +2918,8 @@ async function handleLoadDraft(draft) {
 
 		const draftData = await draftsStore.loadDraft(draft);
 		cartStore.invoiceItems = draftData.items;
-		cartStore.setCustomer(draftData.customer);
+		// The draft's own coupon is restored below, so the customer change keeps it.
+		cartStore.setCustomer(draftData.customer, { restoring: true });
 		cartStore.currentDraftId = draft.draft_id; // Set current draft ID
 		cartStore.restoreLineCoupon(draftData.applied_coupon);
 
@@ -3038,6 +3039,8 @@ async function handleRefresh() {
 			customerSearchStore.loadAllCustomers(shiftStore.profileName, true),
 			// Refresh stock from server (preserves reservations internally)
 			stockStore.refresh(null, shiftStore.profileWarehouse),
+			// F&F Settings may have changed (D-R2-03): ask again and re-price the cart.
+			Promise.resolve(cartStore.recheckFriendsAndFamily?.()).catch(() => {}),
 		]);
 
 		// Refresh cache stats to update "Last Updated" timestamp

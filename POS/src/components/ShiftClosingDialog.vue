@@ -1041,6 +1041,33 @@
 						</div>
 					</div>
 
+					<!-- D-R2-18: drafts still open on the shift, before it is closed -->
+					<div
+						v-if="openDrafts && !showSuccessReport"
+						class="rounded-lg bg-amber-50 border border-amber-200 p-3 md:p-4"
+						role="alert"
+						data-testid="shift-open-drafts"
+					>
+						<h4 class="text-xs md:text-sm font-medium text-amber-800">
+							{{ openDrafts.title }}
+						</h4>
+						<p class="text-xs md:text-sm text-amber-700 mt-1">{{ openDrafts.detail }}</p>
+						<ul class="mt-2 space-y-0.5 text-xs md:text-sm text-amber-900">
+							<li
+								v-for="draft in openDrafts.drafts"
+								:key="draft.name"
+								class="flex justify-between gap-2"
+							>
+								<span class="truncate"
+									>{{ draft.name }} · {{ draft.customer_name || draft.customer }}</span
+								>
+								<span class="font-medium" dir="ltr">{{
+									formatCurrency(draft.rounded_total || draft.grand_total)
+								}}</span>
+							</li>
+						</ul>
+					</div>
+
 					<!-- Error Display -->
 					<div
 						v-if="submitResource.error || (errorMessage && !closingDataResource.error)"
@@ -1184,6 +1211,7 @@ import { useToast } from "../composables/useToast";
 import { usePOSSettingsStore } from "../stores/posSettings";
 import { usePOSShiftStore } from "../stores/posShift";
 import { printEODReport } from "../utils/printEod";
+import { closingShiftPayload, openDraftsNotice } from "../utils/shiftGuards";
 import TranslatedHTML from "./common/TranslatedHTML.vue";
 
 const props = defineProps({
@@ -1337,7 +1365,7 @@ async function submitClosing() {
 		}
 
 		// Submit to server
-		const result = await submitResource.submit({ closing_shift: closingData.value });
+		const result = await submitResource.submit({ closing_shift: closingShiftPayload(closingData.value) });
 		const closingShiftName = result?.name ?? submitResource.data?.name;
 		if (closingShiftName) {
 			try {
@@ -1403,6 +1431,8 @@ function closeDialog() {
 }
 
 // UI State Computed Properties
+const openDrafts = computed(() => openDraftsNotice(closingData.value));
+
 const shouldShowSummary = computed(() => !hideExpectedAmount.value || showSuccessReport.value);
 
 const isInEntryMode = computed(() => hideExpectedAmount.value && !showSuccessReport.value);

@@ -547,6 +547,25 @@ def _process_invoice(invoice, invoice_field, company_currency, cash_mode, paymen
 	return transaction
 
 
+def get_open_shift_drafts(pos_opening_shift, doctype="Sales Invoice"):
+	"""The unprinted drafts still open on the shift (D-R2-18), oldest first.
+
+	Printed drafts are submitted by the close itself (submit_printed_invoices); these
+	stay at docstatus 0, or are deleted at close when the POS Profile allows it
+	(delete_draft_invoices). The POS lists them so the cashier decides before closing.
+	"""
+	return frappe.get_all(
+		doctype,
+		filters={
+			"posa_pos_opening_shift": pos_opening_shift,
+			"docstatus": 0,
+			"posa_is_printed": 0,
+		},
+		fields=["name", "customer", "customer_name", "grand_total", "rounded_total", "currency", "modified"],
+		order_by="creation asc",
+	)
+
+
 @frappe.whitelist()
 def make_closing_shift_from_opening(opening_shift):
 	opening_shift = json.loads(opening_shift)
@@ -689,6 +708,11 @@ def make_closing_shift_from_opening(opening_shift):
 			"expenses_count": len(pos_expenses_table),
 			"pos_expenses": pos_expenses_table,
 			"pos_transactions": pos_transactions,  # Include return info for display
+			# Display only: drafts still open on the shift, and whether the close deletes them.
+			"open_drafts": get_open_shift_drafts(opening_shift.get("name"), doctype),
+			"open_drafts_deleted_on_close": bool(
+				frappe.db.get_value("POS Profile", opening_shift.get("pos_profile"), "posa_allow_delete")
+			),
 		}
 	)
 

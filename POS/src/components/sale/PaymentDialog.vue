@@ -617,7 +617,7 @@
 										>
 											{{ item.item_name || item.item_code
 											}}<span
-												v-if="item.is_free_item"
+												v-if="item.is_free_item || isFullyDiscountedLine(item)"
 												class="text-xs font-bold"
 											>
 												({{ __("Free") }})</span
@@ -629,13 +629,7 @@
 										</div>
 									</div>
 									<div class="text-sm font-semibold text-gray-900 text-end">
-										{{
-											formatCurrency(
-												item.amount ||
-													(item.qty || item.quantity) *
-														(item.rate || item.price_list_rate)
-											)
-										}}
+										{{ formatCurrency(paymentLineAmount(item)) }}
 									</div>
 								</div>
 
@@ -812,6 +806,16 @@
 										{{ currencySymbol }}
 									</button>
 								</div>
+								<!-- D-R2-14: an invoice discount is never combined with F&F; say so as it is entered -->
+								<p
+									v-if="fnfDiscountConflict"
+									class="mt-1.5 text-[11px] leading-snug text-amber-700"
+									role="status"
+									aria-live="polite"
+									data-testid="fnf-invoice-discount-conflict"
+								>
+									{{ fnfDiscountConflict }}
+								</p>
 							</div>
 							<!-- Subtotal -->
 							<div class="flex items-center justify-between text-sm">
@@ -2084,6 +2088,8 @@ import { offlineWorker } from "@/utils/offline/workerClient";
 import { logger } from "@/utils/logger";
 import { capInvoiceDiscount } from "@/utils/manualDiscount";
 import { canCompletePayment, isZeroTotal } from "@/utils/paymentCompletion";
+import { isFullyDiscountedLine, paymentLineAmount } from "@/utils/cartLineLabels";
+import { invoiceDiscountFnfConflict } from "@/utils/friendsAndFamily";
 import { Dialog, FeatherIcon, createResource, call } from "frappe-ui";
 import { computed, ref, watch, nextTick } from "vue";
 import { useToast } from "@/composables/useToast";
@@ -2795,6 +2801,17 @@ const calculatedAdditionalDiscount = computed(() => {
 	}
 	return roundCurrency(localAdditionalDiscount.value);
 });
+
+// D-R2-14: why an invoice discount on an F&F cart may not apply
+const fnfDiscountConflict = computed(() =>
+	localAdditionalDiscount.value > 0
+		? invoiceDiscountFnfConflict({
+				items: props.items,
+				invoiceDiscount: calculatedAdditionalDiscount.value,
+				formatAmount: formatCurrency,
+		  })
+		: ""
+);
 
 const remainingAmount = computed(() => {
 	const remaining = roundCurrency(props.grandTotal) - totalPaid.value;

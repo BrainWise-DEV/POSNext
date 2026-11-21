@@ -57,6 +57,21 @@ export const FNF_EMAIL_REASONS = Object.freeze([
 ]);
 
 /**
+ * Eligibility reasons that come from the program's settings, not from the customer
+ * (D-R2-03). They can change at any time, so they are never kept per customer.
+ */
+export const FNF_SETTINGS_REASONS = Object.freeze([
+	FNF_REASON.PROGRAM_INACTIVE,
+	FNF_REASON.NO_APPROVED_DOMAINS,
+	FNF_REASON.PROFILE_NOT_ALLOWED,
+]);
+
+/** True when a normalizeEligibility() answer depends on the F&F Settings only. */
+export function isSettingsEligibility(eligibility) {
+	return Boolean(eligibility) && !eligibility.eligible && FNF_SETTINGS_REASONS.includes(eligibility.reason);
+}
+
+/**
  * Cashier note when an F&F member is blocked by the Approved Domains email rule,
  * else "". Uses the server's translated message, with a local fallback.
  */
@@ -685,7 +700,9 @@ export function buildFnfCartMessages({
 	}
 
 	if (caps.active && caps.monthly_remaining !== null && caps.monthly_remaining !== undefined) {
-		const after = caps.monthly_remaining_after;
+		// Only F&F that applies is deducted: none when an order discount won or no line kept it (D-R2-04).
+		const deducted = result.appliedCount > 0 && !orderLost;
+		const after = deducted ? caps.monthly_remaining_after : null;
 		messages.push({
 			key: "monthly",
 			tone: "muted",
@@ -783,4 +800,34 @@ export function stripFriendsAndFamilyForOrder(items) {
 		return copy;
 	});
 	return { items: out, stripped };
+}
+
+/**
+ * D-R2-14: what the payment dialog says when an invoice discount is entered on a cart
+ * with F&F lines, else "". The two are never combined; the server keeps the better
+ * one when the sale is paid. When F&F already saves at least as much, the invoice
+ * discount will not apply.
+ */
+export function invoiceDiscountFnfConflict({
+	items = [],
+	invoiceDiscount = 0,
+	formatAmount = (v) => round2(v).toFixed(2),
+} = {}) {
+	const discount = num(invoiceDiscount);
+	const fnfSaving = round2(
+		(items || [])
+			.filter((item) => isFnfLine(item) && !item.is_free_item)
+			.reduce((sum, item) => sum + num(item.discount_amount), 0)
+	);
+	if (discount <= 0 || fnfSaving <= 0) return "";
+	if (fnfSaving >= discount) {
+		return t(
+			"Friends & Family ({0}) is better than this invoice discount ({1}). They are never combined: the invoice discount will not be applied when you pay.",
+			[formatAmount(fnfSaving), formatAmount(discount)]
+		);
+	}
+	return t(
+		"Friends & Family ({0}) and this invoice discount ({1}) are never combined: when you pay, the better of the two is kept and the total may change.",
+		[formatAmount(fnfSaving), formatAmount(discount)]
+	);
 }

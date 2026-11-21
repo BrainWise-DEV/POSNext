@@ -287,7 +287,7 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 	 * @param {Object} offer - The offer to check
 	 * @returns {Object} {eligible: boolean, reason: string|null}
 	 */
-	function checkOfferEligibility(offer) {
+	function checkOfferEligibility(offer, { ignoreOneTime = false } = {}) {
 		const itemCount = cartSnapshot.value.itemCount || 0;
 		const cartItemCodes = cartSnapshot.value.itemCodes || [];
 		const cartItemGroups = cartSnapshot.value.itemGroups || [];
@@ -304,7 +304,7 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 		// One-time-per-customer gate (mirrors the server gate in apply_offers):
 		// such offers require an identified (non walk-in) customer and must not
 		// re-apply to a customer who has already redeemed them.
-		if (offer?.one_time_per_customer) {
+		if (offer?.one_time_per_customer && !ignoreOneTime) {
 			if (!oneTimeCustomerIdentified.value) {
 				return {
 					eligible: false,
@@ -438,6 +438,21 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 
 	const autoEligibleCount = computed(() => autoEligibleOffers.value.length);
 
+	/**
+	 * One-time offers the cart meets but this (identified) customer already used, so
+	 * the cart shows no discount for them; the cashier is told why (D-R2-17).
+	 */
+	const usedOneTimeOffers = computed(() => {
+		if (!oneTimeCustomerIdentified.value) return [];
+		return availableOffers.value.filter(
+			(offer) =>
+				offer?.one_time_per_customer &&
+				!offer?.coupon_based &&
+				redeemedOneTimeRules.value.includes(offer.name) &&
+				checkOfferEligibility(offer, { ignoreOneTime: true }).eligible
+		);
+	});
+
 	function getUnlockAmount(offer) {
 		// Same basis as the eligibility gate, or the prompt would ask for an
 		// amount that does not actually unlock the offer.
@@ -540,6 +555,7 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 		allEligibleOffersSorted,
 		autoEligibleOffers,
 		autoEligibleCount,
+		usedOneTimeOffers,
 
 		// Actions
 		updateCartSnapshot,
