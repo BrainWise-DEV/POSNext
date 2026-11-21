@@ -851,10 +851,9 @@ class TestPromotions(FrappeTestCase):
 		self.assertAlmostEqual(flt(final.items[0].discount_percentage), 15, places=2)
 		self.assertAlmostEqual(flt(final.items[0].discount_amount), 7.5, places=2)
 		self.assertAlmostEqual(flt(final.items[0].rate), 42.5, places=2)
-		# POS Next clears item.pricing_rules pre-save to avoid the ERPNext
-		# removal branch; the rule is still effectively applied via the
-		# discount fields.
-		self.assertFalse(final.items[0].pricing_rules)
+		# The discount survives both saves, and the row keeps the server-confirmed
+		# rule tag (Ruling 137: a promotion-won row keeps the server's rule).
+		self.assertIn(rule, final.items[0].pricing_rules or "")
 
 	def test_transaction_harvest_response(self):
 		"""Canary for the transaction-level harvest fix.
