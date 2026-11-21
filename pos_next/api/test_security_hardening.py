@@ -702,3 +702,32 @@ class TestSecurityHardening(FrappeTestCase):
 				update_invoice(json.dumps(payload))
 			messages.append(str(ctx.exception))
 		self.assertEqual(messages[0], messages[1])
+
+
+class TestFixturePermissionsKeepStandardRoles(FrappeTestCase):
+	"""The Custom DocPerm fixture carries only POS Next roles; it must not take a
+	DocType's standard roles away (any Custom DocPerm row replaces them all)."""
+
+	FLAGS = ("role", "permlevel", "read", "write", "create", "submit", "cancel", "delete")
+
+	def _rows(self, table):
+		rows = frappe.get_all(table, filters={"parent": "Sales Invoice"}, fields=list(self.FLAGS))
+		return sorted(tuple(r[f] for f in self.FLAGS) for r in rows)
+
+	def test_fresh_doctype_gets_its_standard_rows_before_the_fixture(self):
+		from pos_next.install import preserve_standard_permissions
+
+		frappe.db.savepoint("fixture_perms")
+		self.addCleanup(frappe.clear_cache, doctype="Sales Invoice")
+		self.addCleanup(frappe.db.rollback, save_point="fixture_perms")
+		frappe.db.delete("Custom DocPerm", {"parent": "Sales Invoice"})  # as on a fresh site
+		preserve_standard_permissions()
+		self.assertEqual(self._rows("Custom DocPerm"), self._rows("DocPerm"))
+		# A DocType that already has Custom DocPerm rows is left alone.
+		before = frappe.db.count("Custom DocPerm")
+		preserve_standard_permissions()
+		self.assertEqual(frappe.db.count("Custom DocPerm"), before)
+
+	def test_runs_before_the_fixture_sync_on_migrate(self):
+		hooks = frappe.get_hooks("before_migrate", app_name="pos_next")
+		self.assertIn("pos_next.install.preserve_standard_permissions", hooks)

@@ -105,7 +105,11 @@ fixtures = [
 after_install = "pos_next.install.after_install"
 
 # Version gate: stops a migrate when a companion app is too old (runs on every migrate).
-before_migrate = ["pos_next.integrations.contract_gate.before_migrate"]
+before_migrate = [
+	"pos_next.integrations.contract_gate.before_migrate",
+	# Before sync_fixtures: the Custom DocPerm fixture must not drop standard roles.
+	"pos_next.install.preserve_standard_permissions",
+]
 after_migrate = "pos_next.install.after_migrate"
 
 # Uninstallation
