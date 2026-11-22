@@ -3,13 +3,16 @@
 Only a sha256 of customer, email and code is cached (never the code itself);
 the code is bound to the customer and email it was sent to.
 
-The mail is sent with redact_message_after_send so the code is wiped from the
-Email Queue after a successful send; a failed send leaves an unredacted queue
-row until it is retried or cleared. Callers must enforce verify-attempt limits.
+The mail is sent with redact_message_after_send when the installed Frappe
+version supports it (and otherwise the returned Email Queue row's message is
+cleared after a successful send) so the code is wiped from the Email Queue;
+a failed send leaves an unredacted queue row until it is retried or cleared.
+Callers must enforce verify-attempt limits.
 """
 
 import hashlib
 import hmac
+import inspect
 import secrets
 from types import SimpleNamespace
 
@@ -55,24 +58,38 @@ def _result(ok, code, message=""):
 	return {"ok": ok, "code": code, "message": message}
 
 
+def _sendmail_supports_redact() -> bool:
+	try:
+		params = inspect.signature(frappe.sendmail).parameters
+		return "redact_message_after_send" in params or any(
+			p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+		)
+	except (TypeError, ValueError):
+		return False
+
+
 def _send(ctx):
 	ttl = _ttl(ctx.pos_profile)
 	code = f"{secrets.randbelow(10**OTP_LENGTH):0{OTP_LENGTH}d}"
 	frappe.cache().set_value(_key(ctx.customer), _hash(ctx.customer, ctx.email, code), expires_in_sec=ttl)
 	error = None
 	try:
-		frappe.sendmail(
-			recipients=[ctx.email],
-			subject=_("Your verification code"),
-			template="customer_email_otp",
-			args={
+		kwargs = {
+			"recipients": [ctx.email],
+			"subject": _("Your verification code"),
+			"template": "customer_email_otp",
+			"args": {
 				"code": code,
 				"minutes": max(ttl // 60, 1),
 				"company": _company(ctx.pos_profile),
 			},
-			now=True,
-			redact_message_after_send=True,
-		)
+			"now": True,
+		}
+		if _sendmail_supports_redact():
+			kwargs["redact_message_after_send"] = True
+		email_queue = frappe.sendmail(**kwargs)
+		if "redact_message_after_send" not in kwargs and isinstance(getattr(email_queue, "name", None), str):
+			frappe.db.set_value("Email Queue", email_queue.name, "message", "", update_modified=False)
 	except Exception as e:
 		error = type(e).__name__
 	if error:
