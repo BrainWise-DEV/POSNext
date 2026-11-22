@@ -84,6 +84,45 @@ class TestOtpFrappeEmail(FrappeTestCase):
 		_, _, sm = self._send()
 		self.assertTrue(sm.call_args.kwargs["redact_message_after_send"])
 
+	def test_sendmail_without_redact_kwarg_keeps_an_unsent_message(self):
+		def legacy_sendmail(recipients=None, subject="", template=None, args=None, now=None):
+			return frappe._dict(name="EQ-LEGACY-2")
+
+		with (
+			patch.object(frappe, "sendmail", legacy_sendmail),
+			patch.object(frappe.db, "get_value", return_value="Error"),
+			patch.object(frappe.db, "set_value") as set_value,
+		):
+			self.p.send(_ctx())
+
+		set_value.assert_not_called()
+
+	def test_sendmail_without_redact_kwarg_clears_email_queue(self):
+		sent = {}
+
+		def legacy_sendmail(recipients=None, subject="", template=None, args=None, now=None):
+			sent["kwargs"] = {
+				"recipients": recipients,
+				"subject": subject,
+				"template": template,
+				"args": args,
+				"now": now,
+			}
+			return frappe._dict(name="EQ-LEGACY-1")
+
+		with (
+			patch.object(frappe, "sendmail", legacy_sendmail),
+			patch.object(frappe.db, "get_value", return_value="Sent"),
+			patch.object(frappe.db, "set_value") as set_value,
+		):
+			res = self.p.send(_ctx())
+
+		self.assertEqual((res["ok"], res["code"]), (True, "sent"))
+		self.assertNotIn("redact_message_after_send", sent["kwargs"])
+		set_value.assert_called_once_with("Email Queue", "EQ-LEGACY-1", "message", "", update_modified=False)
+		code = sent["kwargs"]["args"]["code"]
+		self.assertEqual(self.p.verify(_ctx(), code)["code"], "verified")
+
 	def test_customer_save_without_email_change_keeps_code(self):
 		from pos_next.api.email_verification import reset_email_verification_on_email_change
 
