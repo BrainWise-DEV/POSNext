@@ -89,7 +89,9 @@ def _send(ctx):
 			kwargs["redact_message_after_send"] = True
 		email_queue = frappe.sendmail(**kwargs)
 		if "redact_message_after_send" not in kwargs and isinstance(getattr(email_queue, "name", None), str):
-			frappe.db.set_value("Email Queue", email_queue.name, "message", "", update_modified=False)
+			# As redact_message_after_send does: wipe only a sent mail, so a retried row never mails a blank code.
+			if frappe.db.get_value("Email Queue", email_queue.name, "status") == "Sent":
+				frappe.db.set_value("Email Queue", email_queue.name, "message", "", update_modified=False)
 	except Exception as e:
 		error = type(e).__name__
 	if error:
