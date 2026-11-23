@@ -73,8 +73,9 @@ class TestContractGate(FrappeTestCase):
 		invoice's own redemption as an earlier one and refuses the sale."""
 		import pos_next
 
-		self.assertEqual(pos_next.FF_CONTRACT, 2)
-		self.assertEqual(pos_next.__version__, "2.6.0")
+		# 3 (2.7.0): the whole-cart coupon strip (K1); the requirement on promotions is unchanged.
+		self.assertEqual(pos_next.FF_CONTRACT, 3)
+		self.assertEqual(pos_next.__version__, "2.7.0")
 		self.assertEqual(contract_gate.REQUIREMENTS["posnext_promotions"], (4, "0.4.0"))
 		imp = _importer(
 			posnext_promotions=SimpleNamespace(FF_CONTRACT=3),

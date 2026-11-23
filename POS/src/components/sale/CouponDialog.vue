@@ -538,9 +538,9 @@ function fnfComparisonMessage(data) {
 }
 
 /**
- * F&F customer: the coupon is applied as an order discount, so the final
- * decision is the order-level comparison (calculate_coupon_discount) — the
- * coupon only goes on when it saves more than F&F; then F&F is suppressed.
+ * F&F customer: calculate_coupon_discount compares the coupon with F&F as Friends and
+ * Family Settings "F&F and a Coupon on One Cart" says (whole cart, or per line). The
+ * coupon is always a line discount, before tax (posnext_promotions K1).
  */
 async function applyCouponAgainstFriendsAndFamily(coupon) {
 	const payload = buildCartPayload();
@@ -560,16 +560,21 @@ async function applyCouponAgainstFriendsAndFamily(coupon) {
 		return;
 	}
 
-	// Per-line decision (uncapped % coupon): the coupon takes only the lines it wins,
-	// every other line keeps its Friends & Family discount.
+	// Every coupon comes back per line: the coupon takes the lines the server gave it.
+	// Under "per line" the other lines keep their Friends & Family discount; under
+	// "whole cart" (replaces_friends_and_family_on_cart) the cart strips F&F from every
+	// line, those the coupon does not cover too (the invoice refuses the two mixed).
 	if (data.granularity === "line" && Array.isArray(data.line_updates) && data.line_updates.length) {
 		applyLineCoupon(coupon || data.coupon || {}, {
 			...data,
 			total_discount: data.discount,
+			suppress_friends_and_family: Boolean(data.replaces_friends_and_family_on_cart),
 		});
 		return;
 	}
 
+	// Order discount: only a posnext_promotions older than K1 answers this way. Remove once
+	// pos_next's gate requires the K1 release.
 	const discountAmount = Math.max(Number.parseFloat(data.discount) || 0, 0);
 	const suppress = Boolean(data.suppress_friends_and_family);
 	// Coupon base without the F&F line discounts it replaces.
@@ -616,6 +621,8 @@ function applyLineCoupon(coupon, result) {
 		line_updates: result.line_updates || [],
 		// The F&F comparison text, when the coupon took F&F lines (D-15)
 		fnf_message: fnfComparisonMessage(result),
+		// The coupon holds the whole cart: posCart strips F&F from every line (K1)
+		suppress_friends_and_family: Boolean(result.suppress_friends_and_family),
 	};
 	emit("discount-applied", appliedDiscount.value);
 	// Lines whose own promotion beats the coupon (coupon set to "Better of the two")

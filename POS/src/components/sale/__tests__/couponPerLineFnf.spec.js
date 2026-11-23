@@ -74,7 +74,8 @@ describe("CouponDialog coupon vs F&F per line", () => {
 		expect(discount.line_level).toBe(true);
 		expect(discount.line_updates).toHaveLength(1);
 		expect(discount.amount).toBe(20);
-		expect(discount.suppress_friends_and_family).toBeUndefined();
+		// Per line (no replaces_friends_and_family_on_cart): F&F stays on the other lines.
+		expect(discount.suppress_friends_and_family).toBe(false);
 	});
 
 	it("D-15: a line coupon that beat F&F carries the comparison for coupon-applied-fnf-message", async () => {
@@ -92,7 +93,8 @@ describe("CouponDialog coupon vs F&F per line", () => {
 		const discount = await apply();
 		expect(discount.line_level).toBe(true);
 		expect(discount.fnf_message).toMatchObject({ message_en: text });
-		expect(discount.suppress_friends_and_family).toBeUndefined();
+		// Per line (no replaces_friends_and_family_on_cart): F&F stays on the other lines.
+		expect(discount.suppress_friends_and_family).toBe(false);
 	});
 
 	it("order_level_coupon_uses_header", async () => {

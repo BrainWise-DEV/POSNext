@@ -1367,9 +1367,14 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			if (seq !== couponRevalidateSeq || appliedCoupon.value?.code !== coupon.code) return;
 
 			if (!result?.valid) {
+				const hadFnfOverride = Boolean(fnfCouponOverride.value);
 				clearCouponLines();
 				couponCode.value = null;
 				appliedCoupon.value = null;
+				// A coupon that held the whole cart had taken F&F off every line: bring it back,
+				// as dropRefusedCoupon does, or the customer pays without it (K1 R1-I1).
+				fnfCouponOverride.value = null;
+				if (hadFnfOverride) forceRefreshOffers();
 				showWarning(
 					__("Coupon {0} removed: {1}", [
 						coupon.code,
