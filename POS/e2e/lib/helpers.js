@@ -16,7 +16,7 @@ export const ARTIFACTS = path.resolve(process.env.UIT_ARTIFACTS || path.join(E2E
 export const SNAPSHOT = path.join(ARTIFACTS, "settings-snapshot-pre.json");
 export const PROFILE = "UIT-FF Profile";
 export const MAILPIT = (process.env.UIT_MAILPIT_URL || "http://localhost:8025").replace(/\/$/, "");
-const SITES = process.env.UIT_SITES_DIR || "/home/ubuntu/frappe-bench/sites";
+const SITES = process.env.UIT_SITES_DIR || path.resolve(here, "../../../../../sites");
 const PY = path.join(SITES, "..", "env", "bin", "python");
 
 fs.mkdirSync(ARTIFACTS, { recursive: true });
