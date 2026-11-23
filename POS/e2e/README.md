@@ -1,4 +1,28 @@
-# POS Next UI smoke harness (Playwright)
+# POS Next UI harness (Playwright)
+
+## Run 3 (pos-dev)
+
+```
+cd POS
+e2e/run.sh                      # every spec, in file order, one worker
+e2e/run.sh 10-defects           # one group (a file-name filter)
+e2e/run.sh bxgy-ff              # only Buy X Get Y x F&F x the "Allow Free Gift with F&F" checkbox
+e2e/run.sh bxgy-ff -g "\(c\)"   # only one case of a group
+```
+
+`run.sh` reads the uit-* passwords from `sites/pos-dev/private/uit-passwords.tsv` into env vars (never printed),
+logs in from a Chromium page (Node cannot resolve `*.localhost`), and writes evidence, screenshots, the HTML report
+and `changes.log` to `UIT_ARTIFACTS` (default: the run-3 artifacts folder). `lib/server.py` is the Python
+verifier/setup route (run as Administrator from `sites/`). Every settings change is restored in a `finally`, and
+each test ends with a diff against `settings-snapshot-pre.json`. Traces are off (they carry the session cookie);
+set `UIT_TRACE=1` only for local debugging.
+
+`bxgy-ff.e2e.js` case (c) (Price buy-one rule `UIT-PR-BUY1`, created and removed by the spec) is marked
+`test.fail()` ("pending port, Price buy-one = BXGY") until the posnext_promotions port is deployed; flip it then.
+The rule has the specified fields (Price, discount 100%, apply_discount_on_price Max, min_or_max_discount_qty_limit 1,
+UIT-A) **plus min_qty 2**, so qty 1 is below the offer as with BXGY; remove min_qty if the port defines it otherwise.
+
+## Run 1-2 notes (original smoke)
 
 Automates 12 paths of the UI test plan `docs/superpowers/plans/2026-11-18-ui-test-plan-ff-coupons-offers.md` (section 6).
 Not run against any site yet: the selectors come from reading `POS/src`.
