@@ -165,6 +165,7 @@
 <script setup>
 import { useFormatters } from "@/composables/useFormatters"
 import { useToast } from "@/composables/useToast"
+import { usePOSSettingsStore } from "@/stores/posSettings"
 import { DEFAULT_CURRENCY, DEFAULT_LOCALE, formatCurrency as formatCurrencyUtil } from "@/utils/currency"
 import { getInvoiceStatusColor } from "@/utils/invoice"
 import { Button, Dialog, Input, createResource } from "frappe-ui"
@@ -172,6 +173,7 @@ import { computed, ref, watch } from "vue"
 import ReturnInvoiceDialog from "./ReturnInvoiceDialog.vue"
 
 const { showError } = useToast();
+const posSettingsStore = usePOSSettingsStore();
 const { formatDate, formatTime } = useFormatters();
 
 const props = defineProps({
@@ -333,7 +335,13 @@ function canCreateReturn(invoice) {
 	// 1. Invoice is submitted (docstatus === 1)
 	// 2. Not already a return invoice
 	// 3. Status is not "Credit Note Issued" (already has a return)
-	return invoice.docstatus === 1 && !invoice.is_return && invoice.status !== 'Credit Note Issued'
+	// 4. POS Settings "Allow Return" is on (D-R3-10)
+	return (
+		posSettingsStore.allowReturn &&
+		invoice.docstatus === 1 &&
+		!invoice.is_return &&
+		invoice.status !== 'Credit Note Issued'
+	)
 }
 
 function openReturnModal(invoice) {

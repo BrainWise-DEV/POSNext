@@ -86,6 +86,16 @@ describe("EmailVerificationPanel", () => {
 		w.unmount()
 	})
 
+	it("turns Arabic-Indic and Eastern Arabic-Indic digits into ASCII", async () => {
+		const w = factory()
+		await toCodeSent(w)
+		const input = find(w, "otp-input")
+		await input.setValue("٤٨٢x۹۱٣")
+		expect(input.element.value).toBe("482913")
+		expect(find(w, "verify").attributes("disabled")).toBeUndefined()
+		w.unmount()
+	})
+
 	it("accepts only digits, max 6, and enables Verify at 6 digits", async () => {
 		const w = factory()
 		await toCodeSent(w)
@@ -176,13 +186,57 @@ describe("EmailVerificationPanel", () => {
 		w.unmount()
 	})
 
-	it("send error stays idle and shows the mapped message", async () => {
+	it("busy at verify keeps the code step and the entered code for a retry", async () => {
+		const message = "The system is busy. Please try again."
 		const w = factory()
-		callMock.mockResolvedValueOnce({ ok: false, code: "not_synced", message: "Customer is not registered in Magento yet." })
+		await toCodeSent(w)
+		await find(w, "otp-input").setValue("111111")
+		callMock.mockResolvedValueOnce({ ok: false, code: "busy", message })
+		await find(w, "verify").trigger("click")
+		await flushPromises()
+		expect(find(w, "error-msg").text()).toBe(message)
+		expect(find(w, "otp-input").element.value).toBe("111111")
+		expect(find(w, "verify").attributes("disabled")).toBeUndefined()
+		expect(w.emitted("lock-change").at(-1)).toEqual([true])
+		callMock.mockResolvedValueOnce({ ok: true, code: "verified", verified_email: "jane@example.com" })
+		await find(w, "verify").trigger("click")
+		await flushPromises()
+		expect(w.emitted("verified")).toBeTruthy()
+		w.unmount()
+	})
+
+	it.each([
+		["email_in_use", "This email is already verified for another customer."],
+		[
+			"verification_not_saved",
+			"The code was accepted, but the verification could not be saved. Request a new code.",
+		],
+	])("%s at verify shows the message and leaves the code step", async (code, message) => {
+		const w = factory()
+		await toCodeSent(w)
+		expect(w.emitted("lock-change").at(-1)).toEqual([true])
+		await find(w, "otp-input").setValue("111111")
+		callMock.mockResolvedValueOnce({ ok: false, code, message })
+		await find(w, "verify").trigger("click")
+		await flushPromises()
+		expect(find(w, "error-msg").text()).toBe(message)
+		expect(find(w, "otp-input").exists()).toBe(false)
+		expect(find(w, "send-code").exists()).toBe(true)
+		expect(find(w, "verified-badge").exists()).toBe(false)
+		expect(w.emitted("verified")).toBeUndefined()
+		expect(w.emitted("lock-change").at(-1)).toEqual([false])
+		w.unmount()
+	})
+
+	it("not_configured shows the server's generic message and stays idle", async () => {
+		const msg = "Email verification is not set up. Ask an administrator."
+		const w = factory()
+		callMock.mockResolvedValueOnce({ ok: false, code: "not_configured", message: msg })
 		await find(w, "send-code").trigger("click")
 		await flushPromises()
-		expect(find(w, "error-msg").text()).toContain("not registered in Magento")
+		expect(find(w, "error-msg").text()).toBe(msg)
 		expect(find(w, "send-code").exists()).toBe(true)
+		expect(w.html()).not.toMatch(/magento|miraaya|iraq/i)
 		w.unmount()
 	})
 
@@ -205,8 +259,8 @@ describe("EmailVerificationPanel", () => {
 		w.unmount()
 	})
 
-	it("disabled for blank, fabricated or unsaved emails", async () => {
-		for (const email of ["", "pos.7701234567@pos.miraaya", "nope"]) {
+	it("disabled for blank, invalid or unsaved emails", async () => {
+		for (const email of ["", "nope"]) {
 			const w = factory({ email, savedEmail: email })
 			expect(find(w, "send-code").attributes("disabled")).toBeDefined()
 			w.unmount()
@@ -228,25 +282,27 @@ describe("EmailVerificationPanel", () => {
 		w.unmount()
 	})
 
-	it("new customer without Magento id: shows sync hint but keeps Verify enabled", () => {
-		const w = factory({ magentoSynced: false })
-		expect(find(w, "sync-pending-hint").exists()).toBe(true)
-		expect(find(w, "send-code").attributes("disabled")).toBeUndefined()
+	it("unsaved email offers Save email & send code, which emits save-and-send", async () => {
+		const w = factory({ email: "new@example.com", savedEmail: "jane@example.com" })
+		await find(w, "save-and-send").trigger("click")
+		expect(w.emitted("save-and-send")).toHaveLength(1)
+		expect(callMock).not.toHaveBeenCalled()
 		w.unmount()
 	})
 
-	it("synced customer: no sync hint", () => {
+	it("exposes send() for the parent to call after saving", async () => {
+		const w = factory()
+		callMock.mockResolvedValueOnce(sent)
+		await w.vm.send()
+		await flushPromises()
+		expect(find(w, "otp-input").exists()).toBe(true)
+		w.unmount()
+	})
+
+	it("a saved email shows no sync hint", () => {
 		const w = factory()
 		expect(find(w, "sync-pending-hint").exists()).toBe(false)
-		w.unmount()
-	})
-
-	it("sync_pending from the server shows the server message, not 'not registered'", async () => {
-		const msg = "Customer is saved but not synced with Magento yet. Please try again in a moment."
-		const w = factory({ magentoSynced: false })
-		await toCodeSent(w, { ok: false, code: "sync_pending", message: msg })
-		expect(w.text()).toContain(msg)
-		expect(w.text()).not.toContain("not registered")
+		expect(w.html()).not.toMatch(/magento|miraaya/i)
 		w.unmount()
 	})
 })

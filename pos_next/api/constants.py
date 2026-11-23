@@ -39,6 +39,7 @@ POS_SETTINGS_FIELDS = [
 	"create_only_sales_order",
 	"enable_session_lock",
 	"session_lock_timeout",
+	"offline_offer_validity_hours",
 	"show_variants_as_items",
 	"enable_loyalty_program",
 	"default_loyalty_program",
@@ -48,6 +49,13 @@ POS_SETTINGS_FIELDS = [
 	"cart_lifo",
 	"display_item_code",
 	"enable_customer_email_verification",
+	"verification_provider",
+	"otp_ttl_seconds",
+	"otp_resend_cooldown",
+	"otp_max_sends_per_hour",
+	"default_phone_country",
+	"placeholder_email_domain",
+	"require_split_name",
 ]
 
 # Default POS Settings values
@@ -63,7 +71,7 @@ DEFAULT_POS_SETTINGS = {
 	"disable_rounded_total": 0,  # Derived from POS Profile
 	"allow_credit_sale": 0,
 	"allow_customer_credit_payment": 0,
-	"allow_return": 0,
+	"allow_return": 1,
 	"allow_write_off_change": 0,  # Derived from POS Profile
 	"allow_partial_payment": 0,
 	"use_exact_amount": 0,
@@ -78,6 +86,7 @@ DEFAULT_POS_SETTINGS = {
 	"create_only_sales_order": 0,
 	"enable_session_lock": 0,
 	"session_lock_timeout": 5,
+	"offline_offer_validity_hours": 24,
 	"show_variants_as_items": 0,
 	"enable_loyalty_program": 0,
 	"default_loyalty_program": "",
@@ -85,18 +94,24 @@ DEFAULT_POS_SETTINGS = {
 	"auto_create_wallet": 1,
 	"loyalty_to_wallet": 1,
 	"magento_loyalty_available": 0,
-	"miraaya_installed": 0,
 	"cart_lifo": 0,
 	"display_item_code": 1,
 	"enable_customer_email_verification": 0,
+	"verification_provider": "",
+	"otp_ttl_seconds": 900,
+	"otp_resend_cooldown": 60,
+	"otp_max_sends_per_hour": 5,
+	"default_phone_country": "",
+	"placeholder_email_domain": "",
+	"require_split_name": 0,
 }
 
 
 def merge_pos_settings(row=None):
 	"""DB row over defaults so runtime integration flags always exist.
 
-	`miraaya_installed` / `magento_loyalty_available` are not DocType columns;
-	hooks may overwrite them, but vanilla benches still need the keys present
+	`magento_loyalty_available` is not a DocType column;
+	hooks may overwrite it, but vanilla benches still need the keys present
 	when a POS Settings row exists (defaults alone only apply on miss/error).
 	"""
 	settings = DEFAULT_POS_SETTINGS.copy()
@@ -111,4 +126,5 @@ EMAIL_VERIFICATION_FIELDS = [
 	"custom_email_verified",
 	"custom_verified_email",
 	"custom_email_verified_on",
+	"custom_email_verified_via",
 ]

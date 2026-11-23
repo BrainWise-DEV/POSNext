@@ -42,7 +42,8 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Sales Invoice",
-   "options": "Sales Invoice"
+   "options": "Sales Invoice",
+   "search_index": 1
   },
   {
    "fieldname": "redemption_date",
@@ -52,7 +53,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-06-11 15:39:20.745470",
+ "modified": "2026-11-18 19:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "One Time Customer Offer Usage",

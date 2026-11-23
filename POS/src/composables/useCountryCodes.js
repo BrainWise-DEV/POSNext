@@ -1,6 +1,7 @@
 import { createResource } from "frappe-ui";
 import { ref, computed } from "vue";
 import { logger } from "@/utils/logger";
+import { isValidIsd, normalizeIsd, parsePhoneNumberWith } from "@/utils/isd";
 
 const log = logger.create("useCountryCodes");
 
@@ -32,11 +33,11 @@ export function useCountryCodes() {
 	// Format countries for dropdown use
 	function formatCountries(countryInfo) {
 		return Object.entries(countryInfo)
-			.filter(([_, info]) => info.isd) // Only countries with ISD codes
+			.filter(([_, info]) => isValidIsd(info.isd)) // Only countries with a usable ISD code
 			.map(([name, info]) => ({
 				name,
 				code: info.code?.toUpperCase() || "",
-				isd: info.isd,
+				isd: normalizeIsd(info.isd),
 				flagUrl: `https://flagcdn.com/${info.code}.svg`,
 				// Fallback emoji flag using regional indicator symbols
 				flagEmoji: getCountryFlagEmoji(info.code),
@@ -99,37 +100,7 @@ export function useCountryCodes() {
 
 	// Parse phone number with country code
 	function parsePhoneNumber(fullNumber) {
-		if (!fullNumber) return { isd: "", number: "" };
-
-		const raw = String(fullNumber).trim();
-		if (!raw) return { isd: "", number: "" };
-
-		// Preferred stored format: +20-1012345678
-		if (raw.includes("-")) {
-			const [isd, ...rest] = raw.split("-");
-			return {
-				isd,
-				number: rest.join("-"),
-			};
-		}
-
-		// Legacy / pasted: +201012345678 (ISD prefix, no separator)
-		if (raw.startsWith("+") && countries.value.length) {
-			const matches = countries.value
-				.filter((c) => c.isd && raw.startsWith(c.isd))
-				.sort((a, b) => b.isd.length - a.isd.length);
-			if (matches[0]) {
-				return {
-					isd: matches[0].isd,
-					number: raw.slice(matches[0].isd.length),
-				};
-			}
-		}
-
-		return {
-			isd: "",
-			number: raw,
-		};
+		return parsePhoneNumberWith(fullNumber, countries.value);
 	}
 
 	// Validate phone number format (basic validation)

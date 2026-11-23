@@ -10,6 +10,7 @@ __pycache__
 pos_next/public/pos/
 pos_next/www/
 yarn.lock
+!POS/yarn.lock
 package-lock.json
 CLAUDE.md
 

@@ -23,7 +23,7 @@ describe("typed paid qty (PRLE-1585)", () => {
 	it.each([
 		["plain line", {}],
 		["server-stamped free_item line", { discount_source: "free_item", free_qty: 1 }],
-		["gwp line", { discount_source: "gwp", gwp_free_qty: 1, free_qty: 1 }],
+		["gwp line", { discount_source: "gwp", free_qty: 1 }],
 	])("display ↔ paid round-trips for %s", (_, extra) => {
 		const item = line(extra);
 		for (const q of [1, 2, 3, 4]) {

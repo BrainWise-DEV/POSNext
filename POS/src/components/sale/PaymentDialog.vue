@@ -617,7 +617,7 @@
 										>
 											{{ item.item_name || item.item_code
 											}}<span
-												v-if="item.is_free_item"
+												v-if="item.is_free_item || isFullyDiscountedLine(item)"
 												class="text-xs font-bold"
 											>
 												({{ __("Free") }})</span
@@ -629,13 +629,7 @@
 										</div>
 									</div>
 									<div class="text-sm font-semibold text-gray-900 text-end">
-										{{
-											formatCurrency(
-												item.amount ||
-													(item.qty || item.quantity) *
-														(item.rate || item.price_list_rate)
-											)
-										}}
+										{{ formatCurrency(paymentLineAmount(item)) }}
 									</div>
 								</div>
 
@@ -756,7 +750,7 @@
 											:max="
 												additionalDiscountType === 'percentage'
 													? 100
-													: subtotal
+													: invoiceDiscountBase
 											"
 											step="1"
 											class="flex-1 h-9 px-1 text-sm font-semibold text-center bg-transparent border-none focus:outline-none focus:ring-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
@@ -812,6 +806,16 @@
 										{{ currencySymbol }}
 									</button>
 								</div>
+								<!-- D-R2-14: an invoice discount is never combined with F&F; say so as it is entered -->
+								<p
+									v-if="fnfDiscountConflict"
+									class="mt-1.5 text-[11px] leading-snug text-amber-700"
+									role="status"
+									aria-live="polite"
+									data-testid="fnf-invoice-discount-conflict"
+								>
+									{{ fnfDiscountConflict }}
+								</p>
 							</div>
 							<!-- Subtotal -->
 							<div class="flex items-center justify-between text-sm">
@@ -840,6 +844,17 @@
 									>-{{ formatCurrency(discountAmount) }}</span
 								>
 							</div>
+							<!-- Rounding (POS Profile rounds the total, D-5) -->
+							<div
+								v-if="hasRounding"
+								class="flex items-center justify-between text-sm"
+								data-testid="payment-rounding-adjustment"
+							>
+								<span class="text-gray-600 text-start">{{ __("Rounding Adjustment") }}</span>
+								<span class="font-medium text-gray-900 text-end" dir="ltr">{{
+									formatCurrency(roundingAdjustment)
+								}}</span>
+							</div>
 							<!-- Grand Total -->
 							<div
 								class="flex items-center justify-between pt-2 mt-1 border-t border-gray-300"
@@ -849,7 +864,7 @@
 										'font-bold text-gray-900 text-start',
 										isCompactMode ? 'text-sm' : 'text-base',
 									]"
-									>{{ __("Grand Total") }}</span
+									>{{ hasRounding ? __("Rounded Total") : __("Grand Total") }}</span
 								>
 								<span
 									:class="[
@@ -2071,6 +2086,10 @@ import {
 } from "@/utils/currency";
 import { offlineWorker } from "@/utils/offline/workerClient";
 import { logger } from "@/utils/logger";
+import { capInvoiceDiscount } from "@/utils/manualDiscount";
+import { canCompletePayment, isZeroTotal } from "@/utils/paymentCompletion";
+import { isFullyDiscountedLine, paymentLineAmount } from "@/utils/cartLineLabels";
+import { invoiceDiscountFnfConflict } from "@/utils/friendsAndFamily";
 import { Dialog, FeatherIcon, createResource, call } from "frappe-ui";
 import { computed, ref, watch, nextTick } from "vue";
 import { useToast } from "@/composables/useToast";
@@ -2086,6 +2105,11 @@ const { showWarning, showInfo } = useToast();
 const props = defineProps({
 	modelValue: Boolean,
 	grandTotal: {
+		type: Number,
+		default: 0,
+	},
+	// grandTotal is the rounded total when the POS Profile rounds; this is rounded − grand (D-5)
+	roundingAdjustment: {
 		type: Number,
 		default: 0,
 	},
@@ -2760,13 +2784,34 @@ const remainingAvailableCredit = computed(() => {
 	return remaining > 0 ? roundCurrency(remaining) : 0;
 });
 
+// The total the invoice discount applies to: the subtotal after line discounts
+// (the server measures the manual invoice discount on it).
+const invoiceDiscountBase = computed(() => {
+	const lineDiscounts = props.items.reduce(
+		(sum, item) => sum + (Number.parseFloat(item.discount_amount) || 0),
+		0
+	);
+	return Math.max(props.subtotal - lineDiscounts, 0);
+});
+
 // Calculate the actual discount amount based on type (percentage or fixed amount)
 const calculatedAdditionalDiscount = computed(() => {
 	if (additionalDiscountType.value === "percentage") {
-		return roundCurrency((props.subtotal * localAdditionalDiscount.value) / 100);
+		return roundCurrency((invoiceDiscountBase.value * localAdditionalDiscount.value) / 100);
 	}
 	return roundCurrency(localAdditionalDiscount.value);
 });
+
+// D-R2-14: why an invoice discount on an F&F cart may not apply
+const fnfDiscountConflict = computed(() =>
+	localAdditionalDiscount.value > 0
+		? invoiceDiscountFnfConflict({
+				items: props.items,
+				invoiceDiscount: calculatedAdditionalDiscount.value,
+				formatAmount: formatCurrency,
+		  })
+		: ""
+);
 
 const remainingAmount = computed(() => {
 	const remaining = roundCurrency(props.grandTotal) - totalPaid.value;
@@ -2954,40 +2999,27 @@ const isExactAmountValid = computed(() => {
 	return totalPaid.value <= roundCurrency(props.grandTotal);
 });
 
-const canComplete = computed(() => {
-	// Check sales person validation first (mandatory when enabled)
-	if (!isSalesPersonValid.value) {
-		return false;
-	}
+const hasRounding = computed(() => !isZeroTotal(Number(props.roundingAdjustment) || 0));
 
-	// Receivable payment modes require a customer on the invoice
-	if (requiresCustomerForPayment.value && !hasCustomerForPayment.value) {
-		return false;
-	}
-
-	// Check exact amount validation
-	if (!isExactAmountValid.value) {
-		return false;
-	}
-
-	// "Pay on Receivable Account": the chosen account holds the unpaid balance
-	if (selectedReceivableAccount.value && props.allowCreditSale) {
-		return totalPaid.value <= roundCurrency(props.grandTotal) + 0.01;
-	}
-
-	// If partial payment is allowed, can complete with any amount > 0
-	if (props.allowPartialPayment) {
-		return totalPaid.value > 0 && paymentEntries.value.length > 0;
-	}
-
-	// If write-off is applied and covers the remaining amount, can complete
-	if (applyWriteOff.value && canWriteOff.value) {
-		return paymentEntries.value.length > 0;
-	}
-
-	// Otherwise require full payment
-	return remainingAmount.value === 0 && paymentEntries.value.length > 0;
-});
+const canComplete = computed(() =>
+	canCompletePayment({
+		// Before rounding: 0.40 rounds to 0 but still needs a payment (D-14)
+		invoiceTotal: props.grandTotal - (Number(props.roundingAdjustment) || 0),
+		remaining: remainingAmount.value,
+		totalPaid: totalPaid.value,
+		entryCount: paymentEntries.value.length,
+		// Sales person is mandatory when enabled
+		salesPersonValid: isSalesPersonValid.value,
+		// Receivable payment modes require a customer on the invoice
+		customerOk: !(requiresCustomerForPayment.value && !hasCustomerForPayment.value),
+		exactAmountValid: isExactAmountValid.value,
+		// "Pay on Receivable Account": the chosen account holds the unpaid balance
+		receivableAccount: Boolean(selectedReceivableAccount.value && props.allowCreditSale),
+		receivableLimit: roundCurrency(props.grandTotal),
+		allowPartialPayment: props.allowPartialPayment,
+		writeOffCovers: Boolean(applyWriteOff.value && canWriteOff.value),
+	})
+);
 
 const paymentButtonText = computed(() => {
 	// Show "Complete Payment" if fully paid or write-off covers remaining
@@ -3059,6 +3091,9 @@ watch(
 
 watch(show, (newVal) => {
 	if (newVal) {
+		// None loaded at start (an offline start, or the server was down): load them now,
+		// from the server or the offline cache (D-R4-02)
+		if (paymentMethods.value.length === 0) loadPaymentMethods();
 		// Reset state when dialog opens (but NOT customerBalance - it's pre-fetched)
 		paymentEntries.value = [];
 		customAmount.value = "";
@@ -3608,70 +3643,28 @@ function getMethodTotal(methodName) {
 
 // Additional discount handlers
 function handleAdditionalDiscountChange() {
-	let discountValue = localAdditionalDiscount.value;
-	let discountAmount = 0;
-
-	// If percentage mode, calculate amount
-	if (additionalDiscountType.value === "percentage") {
-		// Validate against max_discount_allowed if configured
-		if (
-			settingsStore.maxDiscountAllowed > 0 &&
-			discountValue > settingsStore.maxDiscountAllowed
-		) {
-			localAdditionalDiscount.value = settingsStore.maxDiscountAllowed;
-			discountValue = settingsStore.maxDiscountAllowed;
-			// Show warning toast
-			showWarning(
-				__("Maximum allowed discount is {0}%", [settingsStore.maxDiscountAllowed])
-			);
-		}
-
-		// Ensure percentage is between 0-100
-		if (discountValue > 100) {
-			localAdditionalDiscount.value = 100;
-			discountValue = 100;
-		}
-
-		// Convert percentage to amount
-		discountAmount = (props.subtotal * discountValue) / 100;
-	} else {
-		// Amount mode
-		discountAmount = discountValue;
-
-		// For amount mode, check if it exceeds percentage limit when converted
-		if (settingsStore.maxDiscountAllowed > 0 && props.subtotal > 0) {
-			const percentageEquivalent = (discountAmount / props.subtotal) * 100;
-			if (percentageEquivalent > settingsStore.maxDiscountAllowed) {
-				const maxAmount = (props.subtotal * settingsStore.maxDiscountAllowed) / 100;
-				localAdditionalDiscount.value = maxAmount;
-				discountAmount = maxAmount;
-				// Show warning toast
-				showWarning(
-					__("Maximum allowed discount is {0}% ({1} {2})", [
+	const isPercentage = additionalDiscountType.value === "percentage";
+	const { amount, value, limited } = capInvoiceDiscount({
+		value: localAdditionalDiscount.value,
+		isPercentage,
+		base: invoiceDiscountBase.value,
+		maxDiscount: settingsStore.maxDiscountAllowed,
+	});
+	if (value !== (Number(localAdditionalDiscount.value) || 0)) {
+		localAdditionalDiscount.value = value;
+	}
+	if (limited) {
+		showWarning(
+			isPercentage
+				? __("Maximum allowed discount is {0}%", [settingsStore.maxDiscountAllowed])
+				: __("Maximum allowed discount is {0}% ({1} {2})", [
 						settingsStore.maxDiscountAllowed,
 						props.currency,
-						maxAmount.toFixed(2),
+						value.toFixed(2),
 					])
-				);
-			}
-		}
+		);
 	}
-
-	// Ensure discount doesn't exceed subtotal
-	if (discountAmount > props.subtotal) {
-		if (additionalDiscountType.value === "amount") {
-			localAdditionalDiscount.value = props.subtotal;
-		}
-		discountAmount = props.subtotal;
-	}
-
-	// Ensure non-negative
-	if (discountAmount < 0) {
-		localAdditionalDiscount.value = 0;
-		discountAmount = 0;
-	}
-
-	emit("update-additional-discount", discountAmount);
+	emit("update-additional-discount", amount);
 }
 
 function handleAdditionalDiscountTypeChange() {

@@ -30,6 +30,17 @@ export const generateUUID = () => {
 export const generateOfflineId = () => `pos_offline_${generateUUID()}`;
 
 /**
+ * The offline_id an offline sale is queued under: the cart's own (Ruling 136 (d)), so
+ * paying a restored cart again finds the sale already queued, else a new one.
+ * @param {{ offline_id?: string }} invoiceData
+ * @returns {string}
+ */
+export const queuedOfflineId = (invoiceData) => {
+	const given = invoiceData?.offline_id;
+	return typeof given === "string" && /^pos_offline_[\w-]+$/.test(given) ? given : generateOfflineId();
+};
+
+/**
  * Generate a unique offline ID for expense deduplication.
  * Format: pos_expense_<uuid>
  * @returns {string} Unique offline expense ID

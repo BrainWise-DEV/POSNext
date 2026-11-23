@@ -322,7 +322,11 @@ const { locale } = useLocale();
 // Friends & Family customers get the best-discount comparison (PN-128): the
 // coupon is validated against the cart, and only applied when it beats F&F.
 const fnfEligible = computed(() =>
-	Boolean(cartStore.fnfEligibility?.eligible && promoApi.applyFriendsAndFamilyDiscount())
+	Boolean(
+		cartStore.fnfEligibility?.eligible &&
+			cartStore.targetDoctype !== "Sales Order" && // a Sales Order carries no F&F
+			promoApi.applyFriendsAndFamilyDiscount()
+	)
 );
 const fnfPercentText = computed(() =>
 	String(Number(Number(cartStore.fnfEligibility?.discountPercentage || 0).toFixed(2)))
@@ -365,6 +369,8 @@ async function validateCouponCode(withItems) {
 		customer: props.customer,
 		company: props.company,
 		pos_profile: props.posProfile || undefined,
+		// Promotions drops F&F as a rival on a Sales Order.
+		target_doctype: cartStore.targetDoctype,
 	};
 	if (withItems || fnfEligible.value) {
 		params.items = JSON.stringify(cartStore.buildCouponItemsPayload());
@@ -447,7 +453,6 @@ async function applyCoupon() {
 			errorMessage.value =
 				pickLocalizedMessage(validationData, locale.value) ||
 				__("The coupon code you entered is not valid");
-			showError(errorMessage.value);
 			return;
 		}
 
@@ -521,14 +526,21 @@ function showBetterDiscountMessage(response) {
 	comparisonMessage.value =
 		pickLocalizedMessage(response, locale.value) ||
 		__("A better discount already applies — the coupon was not applied.");
-	showWarning(comparisonMessage.value);
 	return true;
 }
 
+function fnfComparisonMessage(data) {
+	const hasMessage =
+		Boolean(data.best_discount) && Boolean(data.message_en || data.message_ar || data.message);
+	return hasMessage
+		? { message: data.message, message_en: data.message_en, message_ar: data.message_ar }
+		: null;
+}
+
 /**
- * F&F customer: the coupon is applied as an order discount, so the final
- * decision is the order-level comparison (calculate_coupon_discount) — the
- * coupon only goes on when it saves more than F&F; then F&F is suppressed.
+ * F&F customer: calculate_coupon_discount compares the coupon with F&F as Friends and
+ * Family Settings "F&F and a Coupon on One Cart" says (whole cart, or per line). The
+ * coupon is always a line discount, before tax (posnext_promotions K1).
  */
 async function applyCouponAgainstFriendsAndFamily(coupon) {
 	const payload = buildCartPayload();
@@ -537,6 +549,7 @@ async function applyCouponAgainstFriendsAndFamily(coupon) {
 		invoice_data: payload,
 		customer: props.customer,
 		company: props.company,
+		target_doctype: cartStore.targetDoctype,
 	});
 	const data = response?.message && typeof response.message === "object" ? response.message : response;
 
@@ -544,10 +557,24 @@ async function applyCouponAgainstFriendsAndFamily(coupon) {
 		if (showBetterDiscountMessage(data)) return;
 		errorMessage.value =
 			pickLocalizedMessage(data, locale.value) || __("The coupon code you entered is not valid");
-		showError(errorMessage.value);
 		return;
 	}
 
+	// Every coupon comes back per line: the coupon takes the lines the server gave it.
+	// Under "per line" the other lines keep their Friends & Family discount; under
+	// "whole cart" (replaces_friends_and_family_on_cart) the cart strips F&F from every
+	// line, those the coupon does not cover too (the invoice refuses the two mixed).
+	if (data.granularity === "line" && Array.isArray(data.line_updates) && data.line_updates.length) {
+		applyLineCoupon(coupon || data.coupon || {}, {
+			...data,
+			total_discount: data.discount,
+			suppress_friends_and_family: Boolean(data.replaces_friends_and_family_on_cart),
+		});
+		return;
+	}
+
+	// Order discount: only a posnext_promotions older than K1 answers this way. Remove once
+	// pos_next's gate requires the K1 release.
 	const discountAmount = Math.max(Number.parseFloat(data.discount) || 0, 0);
 	const suppress = Boolean(data.suppress_friends_and_family);
 	// Coupon base without the F&F line discounts it replaces.
@@ -557,11 +584,7 @@ async function applyCouponAgainstFriendsAndFamily(coupon) {
 	const baseAmount = getCouponBaseAmount(coupon || data.coupon || {}) + fnfLineTotal;
 	const code = couponCode.value.toUpperCase();
 	// Only the F&F comparison text (best_discount present), not the plain coupon message.
-	const hasMessage =
-		Boolean(data.best_discount) && Boolean(data.message_en || data.message_ar || data.message);
-	const fnfMessage = hasMessage
-		? { message: data.message, message_en: data.message_en, message_ar: data.message_ar }
-		: null;
+	const fnfMessage = fnfComparisonMessage(data);
 
 	appliedDiscount.value = {
 		name: coupon?.coupon_name || coupon?.coupon_code || code,
@@ -596,6 +619,10 @@ function applyLineCoupon(coupon, result) {
 		apply_on: coupon.apply_on,
 		line_level: true,
 		line_updates: result.line_updates || [],
+		// The F&F comparison text, when the coupon took F&F lines (D-15)
+		fnf_message: fnfComparisonMessage(result),
+		// The coupon holds the whole cart: posCart strips F&F from every line (K1)
+		suppress_friends_and_family: Boolean(result.suppress_friends_and_family),
 	};
 	emit("discount-applied", appliedDiscount.value);
 	// Lines whose own promotion beats the coupon (coupon set to "Better of the two")

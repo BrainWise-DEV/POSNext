@@ -270,7 +270,104 @@ export function roundCurrency(value) {
 	return round(value, settings.currency);
 }
 
+/** Round to `precision` with the system rounding method (frappe flt), e.g. banker's: 0.325 → 0.32 */
+export function roundTo(value, precision = settings.currency) {
+	return round(Number(value) || 0, precision);
+}
+
+/**
+ * The discount of a line % priced per unit, as apply_offers prices it (ERPNext's
+ * calculate_item_values formula) and as an invoice row holds it: the unit rate at
+ * currency precision, times qty. A Min/Max rule's blended % does not split
+ * evenly into units: one free in six at 50 is 41.67 a unit, so the line is 250.02,
+ * not 250.00 (G6).
+ */
+export function unitRateLineDiscount(unitPrice, qty, percentage) {
+	const price = roundCurrency(Number(unitPrice) || 0);
+	const units = Number(qty) || 0;
+	const pct = Math.min(Math.max(Number(percentage) || 0, 0), 100);
+	const rate = roundCurrency(price * (1 - pct / 100));
+	return roundCurrency(roundCurrency(price * units) - roundCurrency(rate * units));
+}
+
+/**
+ * A fixed line discount rounded DOWN to a whole per-unit amount (never more than asked,
+ * nor than the line), so the unit rate the cart sends reproduces the line the invoice
+ * saves: 10 off 3 × 50 is 3.33 a unit, 9.99, so the line is 140.01 (G8). As
+ * couponLines' fixedCouponLineDiscount does for a fixed coupon.
+ */
+export function unitRoundedAmountDiscount(amount, qty, baseAmount) {
+	const units = Number(qty) || 0;
+	if (units <= 0) return 0;
+	const allowed = Math.min(Math.max(Number(amount) || 0, 0), Math.max(Number(baseAmount) || 0, 0));
+	const factor = 10 ** settings.currency;
+	const perUnit = Math.floor((allowed / units) * factor + 1e-6);
+	return roundCurrency((perUnit * units) / factor);
+}
+
 /** Round using system float precision */
 export function roundFloat(value) {
 	return round(value, settings.float);
+}
+
+// =============================================================================
+// Rounded total (matches ERPNext's set_rounded_total)
+// =============================================================================
+
+/**
+ * frappe.utils.round_based_on_smallest_currency_fraction: with a smallest fraction
+ * (e.g. 0.05) round to it, a remainder of exactly half going DOWN; without one
+ * (EGP, SAR…) round to a whole unit with the system rounding method (banker's by
+ * default: 80.50 → 80, 287.50 → 288). Then round to `precision`.
+ */
+export function roundBasedOnSmallestCurrencyFraction(value, fraction = 0, precision = settings.currency) {
+	let result = Number(value) || 0;
+	const smallest = Number(fraction) || 0;
+	if (smallest > 0) {
+		// frappe.utils.remainder at `precision`, with Python's modulo sign (returns)
+		const multiplier = 10 ** precision;
+		const divisor = smallest * multiplier;
+		const remainder = ((((result * multiplier) % divisor) + divisor) % divisor) / multiplier;
+		if (remainder > smallest / 2) result += smallest - remainder;
+		else result -= remainder;
+	} else {
+		result = round(result, 0);
+	}
+	return round(result, precision);
+}
+
+/**
+ * What an invoice from this POS Profile is paid at: its rounded total when the
+ * profile rounds (`disable_rounded_total` 0), else the grand total. `profile` is the
+ * shift's POS Profile; the shift payload adds `smallest_currency_fraction_value`
+ * for its currency. No profile, or no fraction in it → no rounding.
+ */
+export function invoiceRoundedTotal(grandTotal, profile = null) {
+	const total = Number(grandTotal) || 0;
+	if (!profile || isRoundingDisabled(profile.disable_rounded_total)) return total;
+	// A shift cached before the fraction was sent: unknown, so no rounding (0 would round
+	// a USD 80.49 to 80). The payment-open check still collects the server's rounded total.
+	const fraction = profile.smallest_currency_fraction_value;
+	if (fraction === undefined || fraction === null || fraction === "") return total;
+	// ERPNext collects `rounded_total or grand_total`: a 0.40 that rounds to 0 is paid at 0.40.
+	return roundBasedOnSmallestCurrencyFraction(total, fraction) || total;
+}
+
+function isRoundingDisabled(value) {
+	return value === undefined || value === null || value === "" || Boolean(Number(value));
+}
+
+/**
+ * The tax ERPNext saves after a header discount on the Grand Total (D-R2-07). It
+ * spreads the discount over the total it was taken from, tax included, so the tax
+ * falls by the same share: tax × (1 − discount / total). `total` is the grand total
+ * before the discount (net + tax, or the gross when prices include tax). A "Net Total"
+ * discount is not handled here: the cart keeps its tax.
+ */
+export function taxAfterHeaderDiscount({ tax, total, discount, applyDiscountOn = "Grand Total" } = {}) {
+	const lineTax = Number(tax) || 0;
+	const header = Number(discount) || 0;
+	const base = Number(total) || 0;
+	if (lineTax <= 0 || header <= 0 || base <= 0 || applyDiscountOn === "Net Total") return lineTax;
+	return roundCurrency(Math.max(0, lineTax * (1 - Math.min(header, base) / base)));
 }

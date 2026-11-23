@@ -1,7 +1,7 @@
 {
 	"name": "pos-next-frontend",
 	"private": true,
-	"version": "2.0.0",
+	"version": "2.7.0",
 	"type": "module",
 	"scripts": {
 		"dev": "vite",
@@ -13,7 +13,8 @@
 		"test": "vitest",
 		"test:run": "vitest run",
 		"test:coverage": "vitest run --coverage",
-		"copy-html-entry": "cp ../pos_next/public/pos/index.html ../pos_next/www/pos.html"
+		"copy-html-entry": "cp ../pos_next/public/pos/index.html ../pos_next/www/pos.html",
+		"e2e": "playwright test -c e2e"
 	},
 	"dependencies": {
 		"@abdulrysr/saudi-riyal-new-symbol-font": "^1.0.8",
@@ -35,6 +36,7 @@
 	"devDependencies": {
 		"@biomejs/biome": "1.9.4",
 		"@iconify-json/lucide": "^1.2.79",
+		"@playwright/test": "^1.65.1",
 		"@vitejs/plugin-vue": "^5.2.4",
 		"@vitest/coverage-v8": "^4.1.11",
 		"autoprefixer": "^10.4.24",

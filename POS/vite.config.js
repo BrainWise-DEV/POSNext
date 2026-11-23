@@ -5,6 +5,7 @@ import frappeui from "frappe-ui/vite";
 import { defineConfig } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 import { viteStaticCopy } from "vite-plugin-static-copy";
+import { satellitePosAssetCaching } from "./src/utils/offline/satelliteAssets.js";
 
 // Get build version from environment or use timestamp
 const buildVersion = process.env.POS_NEXT_BUILD_VERSION || Date.now().toString();
@@ -160,6 +161,9 @@ export default defineConfig({
 							},
 						},
 					},
+					// Scripts optional apps serve for the POS (e.g. promotions' offline offer
+					// strategies), so a reload while offline still has them (G7)
+					satellitePosAssetCaching,
 					// Cache product images with StaleWhileRevalidate for better UX
 					{
 						urlPattern: /\/files\/.*\.(jpg|jpeg|png|gif|webp|svg)$/i,

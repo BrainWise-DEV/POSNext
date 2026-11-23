@@ -65,8 +65,11 @@ vi.mock("@/stores/countries", () => ({
 
 const posSettings = {
 	customerEmailVerificationEnabled: false,
-	miraayaInstalled: false,
+	requireSplitName: false,
+	placeholderEmailDomain: "",
 }
+const canOffer = vi.fn(() => false)
+const panelSend = vi.fn()
 
 vi.mock("@/stores/posSettings", () => ({
 	usePOSSettingsStore: () => posSettings,
@@ -95,7 +98,7 @@ vi.mock("@/utils/offline/offlineState", () => ({
 }))
 
 vi.mock("@/utils/customerVerification", () => ({
-	canOfferEmailVerification: () => false,
+	canOfferEmailVerification: (...a) => canOffer(...a),
 	fetchFnfMembership: vi.fn(async () => false),
 	fetchVerificationStatus: vi.fn(),
 }))
@@ -105,7 +108,15 @@ vi.mock("@/utils/logger", () => ({
 }))
 
 vi.mock("@/components/sale/EmailVerificationPanel.vue", () => ({
-	default: { name: "EmailVerificationPanel", template: "<div />" },
+	default: {
+		name: "EmailVerificationPanel",
+		props: ["customer", "email", "savedEmail"],
+		emits: ["save-and-send"],
+		setup(_, { expose }) {
+			expose({ send: (...a) => panelSend(...a) })
+		},
+		template: '<div data-testid="panel-stub" />',
+	},
 }))
 
 import CreateCustomerDialog from "../CreateCustomerDialog.vue"
@@ -117,7 +128,7 @@ const existingCustomer = {
 	name: "CUST-2026-68541",
 	customer_name: "ZZ Test POSSync1",
 	mobile_no: "+964-7754539344",
-	email_id: "pos.9647754539344@pos.miraaya",
+	email_id: "pos.9647754539344@pos.example",
 }
 
 function createResourceOnSuccess(url) {
@@ -143,14 +154,14 @@ describe("CreateCustomerDialog existing-customer response", () => {
 		canCreateCustomer.mockReset()
 		canCreateCustomer.mockResolvedValue(true)
 		posSettings.customerEmailVerificationEnabled = false
-		posSettings.miraayaInstalled = false
+		posSettings.requireSplitName = false
 	})
 
 	afterEach(() => {
 		document.body.innerHTML = ""
 	})
 
-	it("shows Magento's exact email message and lets the cashier select the existing customer", async () => {
+	it("shows the server's exact email message and lets the cashier select the existing customer", async () => {
 		const wrapper = factory()
 		const onSuccess = createResourceOnSuccess("pos_next.api.customers.create_customer")
 		const message = "A customer with this email already exists."
@@ -182,7 +193,7 @@ describe("CreateCustomerDialog existing-customer response", () => {
 		wrapper.unmount()
 	})
 
-	it("shows Magento's exact phone message and does not create a new customer", async () => {
+	it("shows the server's exact phone message and does not create a new customer", async () => {
 		const wrapper = factory()
 		const onSuccess = createResourceOnSuccess("pos_next.api.customers.create_customer")
 		const message = "A customer with this phone already exists."
@@ -225,8 +236,8 @@ function resourceFor(url) {
 	return entry
 }
 
-function mountEditor(customer, { miraaya = true, modelValue = true } = {}) {
-	posSettings.miraayaInstalled = miraaya
+function mountEditor(customer, { splitName = true, modelValue = true } = {}) {
+	posSettings.requireSplitName = splitName
 	return mount(CreateCustomerDialog, {
 		props: { modelValue, posProfile: "POS-A", customer },
 		global: { mocks: { __: t } },
@@ -241,12 +252,12 @@ describe("CreateCustomerDialog edit mode", () => {
 		canCreateCustomer.mockReset()
 		canCreateCustomer.mockResolvedValue(true)
 		posSettings.customerEmailVerificationEnabled = false
-		posSettings.miraayaInstalled = true
+		posSettings.requireSplitName = true
 	})
 
 	afterEach(() => {
 		document.body.innerHTML = ""
-		posSettings.miraayaInstalled = false
+		posSettings.requireSplitName = false
 	})
 
 	it("opens as Edit Customer and prefills first/last name by splitting customer_name", async () => {
@@ -339,7 +350,25 @@ describe("CreateCustomerDialog edit mode", () => {
 		wrapper.unmount()
 	})
 
-	it("shows Magento's message when an email update is rejected", async () => {
+	it("keeps the dialog open when the new email belongs to another customer", async () => {
+		const wrapper = mountEditor(editCustomer)
+		await flushPromises()
+
+		const update = resourceFor("pos_next.api.customers.update_customer")
+		await update.opts.onSuccess({
+			already_exists: true,
+			message: "A customer with this email already exists.",
+			existing_customer: { name: "CUST-OTHER", customer_name: "Other" },
+		})
+		await flushPromises()
+
+		expect(showSuccess).not.toHaveBeenCalled()
+		expect(showError).toHaveBeenCalledWith("A customer with this email already exists.")
+		expect(wrapper.emitted("customer-updated")).toBeUndefined()
+		wrapper.unmount()
+	})
+
+	it("shows the server's message when an email update is rejected", async () => {
 		const wrapper = mountEditor(editCustomer)
 		await flushPromises()
 
@@ -353,6 +382,246 @@ describe("CreateCustomerDialog edit mode", () => {
 		expect(showError).toHaveBeenCalledWith(
 			"A customer with the same email already exists in an associated website."
 		)
+		wrapper.unmount()
+	})
+})
+
+describe("CreateCustomerDialog settings-driven behaviour", () => {
+	beforeEach(() => {
+		resourceConfigs.length = 0
+		showSuccess.mockReset()
+		showError.mockReset()
+		panelSend.mockReset()
+		canOffer.mockReset()
+		canOffer.mockReturnValue(false)
+		posSettings.customerEmailVerificationEnabled = false
+		posSettings.placeholderEmailDomain = ""
+	})
+	afterEach(() => {
+		document.body.innerHTML = ""
+		posSettings.requireSplitName = false
+		posSettings.placeholderEmailDomain = ""
+	})
+
+	it("generic site has no vendor text", async () => {
+		const wrapper = mountEditor(editCustomer, { splitName: false })
+		await flushPromises()
+		expect(wrapper.html()).not.toMatch(/magento|miraaya|iraq/i)
+		wrapper.unmount()
+	})
+
+	it("split name follows setting", async () => {
+		let wrapper = mountEditor(editCustomer, { splitName: true })
+		await flushPromises()
+		expect(find(wrapper, "customer-first-name").exists()).toBe(true)
+		expect(find(wrapper, "customer-last-name").exists()).toBe(true)
+		wrapper.unmount()
+		wrapper = mountEditor(editCustomer, { splitName: false })
+		await flushPromises()
+		expect(find(wrapper, "customer-first-name").exists()).toBe(false)
+		wrapper.unmount()
+	})
+
+	it("placeholder email from setting hides the panel", async () => {
+		canOffer.mockReturnValue(true)
+		posSettings.placeholderEmailDomain = "pos.example"
+		let wrapper = mountEditor({ ...editCustomer, email_id: "a@pos.example" })
+		await flushPromises()
+		expect(find(wrapper, "panel-stub").exists()).toBe(false)
+		wrapper.unmount()
+		wrapper = mountEditor(editCustomer)
+		await flushPromises()
+		expect(find(wrapper, "panel-stub").exists()).toBe(true)
+		wrapper.unmount()
+		// blank setting: nothing is a placeholder
+		posSettings.placeholderEmailDomain = ""
+		wrapper = mountEditor({ ...editCustomer, email_id: "a@pos.example" })
+		await flushPromises()
+		expect(find(wrapper, "panel-stub").exists()).toBe(true)
+		wrapper.unmount()
+	})
+
+	it("save and send keeps dialog open, updates email and calls panel send()", async () => {
+		canOffer.mockReturnValue(true)
+		const wrapper = mountEditor(editCustomer)
+		await flushPromises()
+		const update = resourceFor("pos_next.api.customers.update_customer")
+		await wrapper.findComponent({ name: "EmailVerificationPanel" }).vm.$emit("save-and-send")
+		await flushPromises()
+		expect(update.resource.submit).toHaveBeenCalled()
+		await update.opts.onSuccess({ ...editCustomer, email_id: "new@example.com" })
+		await flushPromises()
+		expect(wrapper.emitted("customer-updated")).toBeFalsy()
+		expect(wrapper.emitted("update:modelValue")).toBeFalsy()
+		expect(wrapper.findComponent({ name: "EmailVerificationPanel" }).props("savedEmail")).toBe(
+			"new@example.com"
+		)
+		expect(panelSend).toHaveBeenCalledTimes(1)
+
+		// a normal save afterwards closes as before
+		await update.opts.onSuccess({ ...editCustomer })
+		expect(wrapper.emitted("customer-updated")).toBeTruthy()
+		expect(panelSend).toHaveBeenCalledTimes(1)
+		wrapper.unmount()
+	})
+})
+
+describe("CreateCustomerDialog loading when Selling Settings is forbidden (D-1)", () => {
+	beforeEach(() => {
+		resourceConfigs.length = 0
+		canCreateCustomer.mockResolvedValue(true)
+	})
+
+	it("reads the defaults from the pos_next endpoint, not Selling Settings", () => {
+		factory()
+		const urls = resourceConfigs.map((c) => c.opts.url)
+		expect(urls).toContain("pos_next.api.customers.get_customer_defaults")
+		const doctypes = resourceConfigs
+			.filter((c) => c.opts.makeParams)
+			.map((c) => c.opts.makeParams().doctype)
+		expect(doctypes).not.toContain("Selling Settings")
+	})
+
+	it("still loads territories and governorates when the defaults call fails", async () => {
+		const wrapper = factory()
+		const byUrl = (url, doctype) =>
+			resourceConfigs.find(
+				(c) => c.opts.url === url && (!doctype || c.opts.makeParams?.().doctype === doctype)
+			).resource
+		byUrl("pos_next.api.customers.get_customer_defaults").reload.mockRejectedValue(
+			Object.assign(new Error("Forbidden"), { status: 403 })
+		)
+		const lists = [
+			byUrl("frappe.client.get_list", "Territory"),
+			byUrl("pos_next.api.customers.get_governorates"),
+		]
+		lists.forEach((r) => r.reload.mockResolvedValue([]))
+		await wrapper.setProps({ modelValue: true })
+		await flushPromises()
+		lists.forEach((r) => expect(r.reload).toHaveBeenCalled())
+		wrapper.unmount()
+	})
+
+	it("reads governorates and districts through whitelisted methods a cashier may call (D-R4-10)", () => {
+		factory().unmount()
+		const listed = resourceConfigs
+			.filter((c) => c.opts.url === "frappe.client.get_list")
+			.map((c) => c.opts.makeParams?.().doctype)
+		expect(listed).not.toContain("POS Governorate")
+		expect(listed).not.toContain("POS District")
+		const urls = resourceConfigs.map((c) => c.opts.url)
+		expect(urls).toContain("pos_next.api.customers.get_governorates")
+		expect(urls).toContain("pos_next.api.customers.get_districts")
+	})
+
+	it("takes the Customer Group list from the endpoint, since a cashier cannot read the doctype", async () => {
+		const wrapper = factory()
+		const defaults = resourceConfigs.find(
+			(c) => c.opts.url === "pos_next.api.customers.get_customer_defaults"
+		)
+		const groupLists = resourceConfigs.filter(
+			(c) => c.opts.url === "frappe.client.get_list" && c.opts.makeParams?.().doctype === "Customer Group"
+		)
+		expect(groupLists).toHaveLength(0)
+		defaults.resource.data = {
+			customer_group: "Individual",
+			territory: "Iraq",
+			customer_groups: ["Commercial", "Individual"],
+		}
+		defaults.resource.reload.mockResolvedValue(defaults.resource.data)
+		resourceConfigs
+			.filter((c) => c.opts.url === "frappe.client.get_list")
+			.forEach((c) => c.resource.reload.mockResolvedValue([]))
+		await wrapper.setProps({ modelValue: true })
+		await flushPromises()
+		expect(wrapper.vm.$.setupState.customerGroups).toEqual(["Commercial", "Individual"])
+		expect(wrapper.vm.$.setupState.customerData.customer_group).toBe("Individual")
+		wrapper.unmount()
+	})
+})
+
+describe("CreateCustomerDialog inline validation", () => {
+	beforeEach(() => {
+		resourceConfigs.length = 0
+		showSuccess.mockReset()
+		showError.mockReset()
+		canCreateCustomer.mockReset()
+		canCreateCustomer.mockResolvedValue(true)
+		posSettings.customerEmailVerificationEnabled = false
+		posSettings.requireSplitName = false
+	})
+	afterEach(() => {
+		document.body.innerHTML = ""
+	})
+
+	it("shows each required message under its field instead of submitting", async () => {
+		const wrapper = factory()
+		await flushPromises()
+		const submit = find(wrapper, "customer-submit")
+		expect(submit.attributes("disabled")).toBeUndefined()
+		await submit.trigger("click")
+		await flushPromises()
+
+		expect(find(wrapper, "error-customer-name").text()).toBe("Customer Name is required")
+		expect(find(wrapper, "error-mobile").text()).toBe("Mobile Number is required")
+		expect(resourceFor("pos_next.api.customers.create_customer").resource.submit).not.toHaveBeenCalled()
+
+		const name = wrapper.find("input[aria-describedby]")
+		expect(name.attributes("aria-invalid")).toBe("true")
+		await name.setValue("Mona Said")
+		await flushPromises()
+		expect(find(wrapper, "error-customer-name").exists()).toBe(false)
+		wrapper.unmount()
+	})
+})
+
+describe("CreateCustomerDialog country picker and params", () => {
+	beforeEach(() => {
+		resourceConfigs.length = 0
+		posSettings.customerEmailVerificationEnabled = false
+		posSettings.requireSplitName = false
+	})
+	afterEach(() => {
+		document.body.innerHTML = ""
+	})
+
+	it("Escape in the country search closes only the picker, never the dialog", async () => {
+		const wrapper = mount(CreateCustomerDialog, {
+			props: { modelValue: true, posProfile: "POS-A" },
+			global: { mocks: { __: t } },
+			attachTo: document.body,
+		})
+		await flushPromises()
+		await find(wrapper, "country-code-button").trigger("click")
+		await flushPromises()
+		expect(find(wrapper, "country-picker").exists()).toBe(true)
+
+		// Reka/frappe-ui close the dialog from a window keydown listener
+		const reachedWindow = vi.fn()
+		window.addEventListener("keydown", reachedWindow)
+		await wrapper.find('[data-testid="country-picker"] input').trigger("keydown", { key: "Escape" })
+		await flushPromises()
+		window.removeEventListener("keydown", reachedWindow)
+
+		expect(reachedWindow).not.toHaveBeenCalled()
+		expect(find(wrapper, "country-picker").exists()).toBe(false)
+		expect(wrapper.emitted("update:modelValue")).toBeUndefined()
+
+		// Picker closed: Escape is left alone for the dialog
+		const again = vi.fn()
+		window.addEventListener("keydown", again)
+		await find(wrapper, "country-code-button").trigger("keydown", { key: "Escape" })
+		window.removeEventListener("keydown", again)
+		expect(again).toHaveBeenCalled()
+		wrapper.unmount()
+	})
+
+	it("sends the customer name trimmed", async () => {
+		const wrapper = factory()
+		await flushPromises()
+		await wrapper.find("input[type=text]").setValue("  Mona Said  ")
+		const params = resourceFor("pos_next.api.customers.create_customer").opts.makeParams()
+		expect(params.customer_name).toBe("Mona Said")
 		wrapper.unmount()
 	})
 })

@@ -12,6 +12,9 @@
  * coupon, and removing the coupon gives it back.
  */
 
+import { roundCurrency, unitRateLineDiscount, unitRoundedAmountDiscount } from "@/utils/currency";
+import { requestedDiscountAmount } from "@/utils/manualDiscount";
+
 export const COUPON_DISCOUNT_SOURCE = "coupon";
 
 const NO_DISCOUNT = Object.freeze({
@@ -37,7 +40,12 @@ export function preCouponDiscount(item) {
 }
 
 export function stashPreCouponDiscount(item) {
-	item.pre_coupon_discount = { ...preCouponDiscount(item) };
+	// The fixed amount asked for, not its rounding to whole cents a unit (G8).
+	const amountLine = !isCouponLine(item) && item.discount_mode === "amount";
+	item.pre_coupon_discount = {
+		...preCouponDiscount(item),
+		requested_discount_amount: amountLine ? requestedDiscountAmount(item) : 0,
+	};
 }
 
 export function restorePreCouponDiscount(item) {
@@ -46,6 +54,14 @@ export function restorePreCouponDiscount(item) {
 	item.discount_amount = pre.discount_amount || 0;
 	item.discount_source = pre.discount_source || "";
 	item.is_already_discounted = pre.is_already_discounted || 0;
+	if (pre.requested_discount_amount > 0) {
+		// A fixed amount again, held as its own rounding of the request: a qty change
+		// splits the request, and its derived % is not read as a real one.
+		item.discount_mode = "amount";
+		item._derived_discount_percentage = item.discount_percentage;
+		item._requested_discount_amount = pre.requested_discount_amount;
+		item._unit_discount_amount = item.discount_amount;
+	}
 	item.pre_coupon_discount = null;
 }
 
@@ -54,9 +70,22 @@ export function preCouponLineDiscount(item) {
 	const pre = preCouponDiscount(item);
 	const unitPrice =
 		item.is_rate_manually_edited === 1 ? Number(item.rate) || 0 : Number(item.price_list_rate || item.rate) || 0;
-	const base = unitPrice * (Number(item.quantity) || 0);
-	if (pre.discount_percentage > 0) return (base * pre.discount_percentage) / 100;
-	return Math.min(Number(pre.discount_amount) || 0, base);
+	const qty = Number(item.quantity) || 0;
+	const base = roundCurrency(roundCurrency(unitPrice) * qty);
+	if (pre.discount_percentage > 0) return unitRateLineDiscount(unitPrice, qty, pre.discount_percentage);
+	return unitRoundedAmountDiscount(pre.requested_discount_amount || pre.discount_amount, qty, base);
+}
+
+/**
+ * Line discount that prices a stacked ("Add on top") coupon line at the server's unit
+ * rate to the cent, the rate the invoice saves (D-R4-03: 37.503 is 37.50 a unit).
+ */
+export function stackedUnitRateDiscount(item, serverRate) {
+	const unitPrice =
+		item.is_rate_manually_edited === 1 ? Number(item.rate) || 0 : Number(item.price_list_rate || item.rate) || 0;
+	const qty = Number(item.quantity) || 0;
+	const perUnit = Math.max(roundCurrency(unitPrice) - roundCurrency(serverRate), 0);
+	return roundCurrency(perUnit * qty);
 }
 
 export function hasFixedCouponDiscount(item) {

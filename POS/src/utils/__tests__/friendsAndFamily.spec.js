@@ -5,6 +5,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	buildFnfCartMessages,
+	cappedUnitValues,
 	fnfEmailBlockMessage,
 	FNF_REASON,
 	isFnfAllowedForProfile,
@@ -23,7 +24,9 @@ import {
 	pickLocalizedMessage,
 	resolveHeaderDiscount,
 	stampFnfLine,
+	lineCouponFnfView,
 	stripFnfLine,
+	invoiceDiscountFnfConflict,
 } from "@/utils/friendsAndFamily";
 
 const fmt = (v) => `EGP ${Number(v).toFixed(2)}`;
@@ -179,7 +182,7 @@ describe("fnfLockedDiscountAmount (capped lines)", () => {
 	it("uses the server amount instead of the unrounded %", () => {
 		// Per-order cap 100 on an 899 line → 11.1234…% on the server.
 		const item = cartLine();
-		stampFnfLine(item, { ...appliedBlock.items[0], discount_percentage: 11.123470522803114, discount_amount: 100, capped: true });
+		stampFnfLine(item, { ...appliedBlock.items[0], discount_percentage: 11.123470522803114, discount_amount: 100, rate: 799, capped: true });
 		expect(fnfLockedDiscountAmount(item, 899)).toBe(100);
 	});
 	it("falls back to normal maths once the quantity changed", () => {
@@ -193,6 +196,106 @@ describe("fnfLockedDiscountAmount (capped lines)", () => {
 	});
 });
 
+describe("D-7: a capped line uses the server's per-unit rate", () => {
+	// posnext_promotions _capped_line_values(100, 3, 50, AMOUNT_BASIS_UNIT) → rate 83.34, saving 49.98
+	it("pins 83.34 × 3 for a cap of 50 on 3 × 100", () => {
+		const v = cappedUnitValues(100, 3, 50, 2);
+		expect(v.rate).toBe(83.34);
+		expect(v.amount).toBe(49.98);
+		expect(v.percentage).toBeCloseTo(16.66, 10);
+	});
+	it("pins UIT-ODD × 7 (33.33, cap 50) at 26.19 / 183.33", () => {
+		const v = cappedUnitValues(33.33, 7, 50, 2);
+		expect(v.rate).toBe(26.19);
+		expect(v.amount).toBe(49.98);
+		expect(Math.round((33.33 * 7 - v.amount) * 100) / 100).toBe(183.33);
+	});
+	// The same inputs as pos_next/api/test_ff_capped_unit_rate.py (the server pin)
+	it("pins cap 40 on 3 × 50 at 36.67 / 39.99 and cap 50 on 7 × 50 at 42.86 / 49.98", () => {
+		expect(cappedUnitValues(50, 3, 40, 2)).toMatchObject({ rate: 36.67, amount: 39.99 });
+		expect(cappedUnitValues(50, 7, 50, 2)).toMatchObject({ rate: 42.86, amount: 49.98 });
+		// From the line-basis payload's rate, as the cart stamps it
+		expect(cappedUnitValues(50, 3, 40, 2, 50 - 40 / 3)).toMatchObject({ rate: 36.67, amount: 39.99 });
+		expect(cappedUnitValues(50, 7, 50, 2, 50 - 50 / 7)).toMatchObject({ rate: 42.86, amount: 49.98 });
+	});
+	it("is idempotent on an amount that already divides evenly", () => {
+		expect(cappedUnitValues(100, 3, 49.98, 2)).toEqual(cappedUnitValues(100, 3, 50, 2));
+		expect(cappedUnitValues(899, 1, 100, 2).amount).toBe(100);
+	});
+	it("stamps the line-basis cart payload and the unit-basis invoice payload alike", () => {
+		const line = { applies: true, capped: true, discount_percentage: 16.666666666666664, discount_amount: 50, rate: 83.33333333333333 };
+		const unit = { applies: true, capped: true, discount_percentage: 16.66, discount_amount: 49.98, rate: 83.34 };
+		const a = cartLine({ quantity: 3, rate: 100, price_list_rate: 100 });
+		const b = cartLine({ quantity: 3, rate: 100, price_list_rate: 100 });
+		stampFnfLine(a, line);
+		stampFnfLine(b, unit);
+		for (const key of ["discount_percentage", "discount_amount", "fnf_discount_amount", "fnf_rate"]) {
+			expect(a[key]).toBe(b[key]);
+		}
+		expect(a.fnf_rate).toBe(83.34);
+		expect(fnfLockedDiscountAmount(a, 300)).toBe(49.98);
+	});
+	it("leaves an uncapped line to the server's amount", () => {
+		const item = cartLine({ quantity: 3, rate: 33.33, price_list_rate: 33.33 });
+		stampFnfLine(item, { applies: true, capped: false, discount_percentage: 30, discount_amount: 29.997, rate: 23.331 });
+		expect(item.discount_amount).toBe(29.997);
+		expect(item.discount_percentage).toBe(30);
+	});
+});
+
+describe("Fix round 1: capped stamps match the saved invoice", () => {
+	// C2: qty 2.5 × 10, cap 0.33. Server (unit basis, banker's): 0.13 a unit, rate 9.87, saving 0.32.
+	const fractionalLine = { applies: true, capped: true, discount_percentage: 1.32, discount_amount: 0.33, rate: 10 - 0.33 / 2.5 };
+	const fractionalUnit = { applies: true, capped: true, discount_percentage: 1.3, discount_amount: 0.32, rate: 9.87 };
+
+	it("C2: a fractional qty stamps 9.87 / 0.32 from both payloads (banker's rounding)", () => {
+		for (const line of [fractionalLine, fractionalUnit]) {
+			const item = cartLine({ quantity: 2.5, rate: 10, price_list_rate: 10 });
+			stampFnfLine(item, line);
+			expect(item.fnf_rate).toBe(9.87);
+			expect(item.discount_amount).toBe(0.32);
+		}
+	});
+
+	it("C2: the stamp is idempotent: the cart's own stamp after the adopted draft keeps the draft's values", () => {
+		const item = cartLine({ quantity: 2.5, rate: 10, price_list_rate: 10 });
+		stampFnfLine(item, fractionalUnit); // payment-open check adopts the draft
+		const adopted = { rate: item.fnf_rate, amount: item.discount_amount };
+		stampFnfLine(item, fractionalLine); // the cart's own evaluation runs again
+		stampFnfLine(item, { ...fractionalUnit, rate: adopted.rate, discount_amount: adopted.amount });
+		expect({ rate: item.fnf_rate, amount: item.discount_amount }).toEqual(adopted);
+		stampFnfLine(item, fractionalLine);
+		expect({ rate: item.fnf_rate, amount: item.discount_amount }).toEqual(adopted);
+	});
+
+	it("I1: a UOM-scaled price (10/3) is priced at currency precision, as the invoice is: 4.97", () => {
+		// The evaluation payload sends the rounded price (3.33), so the line basis is 3.33 − 4.98/7.
+		const line = { applies: true, capped: true, discount_percentage: 21.36, discount_amount: 4.98, rate: 3.33 - 4.98 / 7 };
+		const unit = { applies: true, capped: true, discount_percentage: 21.32, discount_amount: 4.97, rate: 2.62 };
+		for (const payload of [line, unit]) {
+			const item = cartLine({ quantity: 7, rate: 10 / 3, price_list_rate: 10 / 3 });
+			stampFnfLine(item, payload);
+			expect(item.fnf_rate).toBe(2.62);
+			expect(item.discount_amount).toBe(4.97);
+		}
+	});
+
+	it("I2: a capped line's message and balance use the stamped saving (49.98, not 50.00)", () => {
+		const items = [cartLine({ quantity: 3, rate: 100, price_list_rate: 100 })];
+		stampFnfLine(items[0], { applies: true, capped: true, discount_percentage: 50 / 3, discount_amount: 50, rate: 100 - 50 / 3 });
+		const result = {
+			eligible: true,
+			appliedCount: 1,
+			lines: [{ idx: 0, applies: true, capped: true, discount_amount: 50 }],
+			caps: { active: true, fnf_applied_total: 50, monthly_remaining: 100, monthly_remaining_after: 50 },
+		};
+		const view = lineCouponFnfView({ result, items, appliedCoupon: null });
+		expect(view.override).toBeNull();
+		expect(view.result.caps.fnf_applied_total).toBe(49.98);
+		expect(view.result.caps.monthly_remaining_after).toBe(50.02);
+	});
+});
+
 describe("lineDiscountSource / lineBreakdown", () => {
 	it("labels F&F, promotion, coupon, manual and none", () => {
 		expect(lineDiscountSource(cartLine({ discount_source: FNF_DISCOUNT_SOURCE, discount_amount: 1 }))).toBe(LINE_SOURCE.FRIENDS_AND_FAMILY);
@@ -202,6 +305,12 @@ describe("lineDiscountSource / lineBreakdown", () => {
 		expect(lineDiscountSource(cartLine({ discount_percentage: 5 }))).toBe(LINE_SOURCE.MANUAL);
 		expect(lineDiscountSource(cartLine())).toBe(LINE_SOURCE.NONE);
 		expect(lineDiscountSource(cartLine({ is_free_item: 1 }))).toBe(LINE_SOURCE.FREE);
+	});
+
+	it("a gift is a free row: a stray gwp_free_qty on a paid line does not make it free", () => {
+		// The GWP line-discount gift is gone (promotions P1 6g): no server sends gwp_free_qty.
+		const item = cartLine({ discount_percentage: 10, pricing_rules: ["PRLE-0001"], gwp_free_qty: 1 });
+		expect(lineDiscountSource(item)).toBe(LINE_SOURCE.PROMOTION);
 	});
 
 	it("shows original − discount = final", () => {
@@ -275,6 +384,23 @@ describe("buildFnfCartMessages", () => {
 		expect(buildFnfCartMessages({ result, locale: "ar" }).find((m) => m.key === "comparison").text).toBe(best.message_ar);
 	});
 
+	it("D-R4-06: the comparison a line already notes is not repeated above the cart", () => {
+		const best = {
+			winner: "promotion",
+			suppressed: ["friends_and_family"],
+			message_en: "The promotion (50%) is better than the Friends & Family discount (30%) — the promotion applied instead of Friends & Family.",
+		};
+		const line = { idx: 0, applies: false, reason: "other_better", best_discount: best }
+		const result = normalizeFnfResult({ ...appliedBlock, applied_count: 0, items: [line] }, best);
+		expect(keys(buildFnfCartMessages({ result, locale: "en" }))).not.toContain("comparison");
+	});
+
+	it("D-R4-06: a comparison no line notes still heads the cart", () => {
+		const best = { winner: "promotion", suppressed: ["friends_and_family"], message_en: "The promotion is better." };
+		const result = normalizeFnfResult({ ...appliedBlock, applied_count: 0, items: [{ idx: 0, applies: false }] }, best);
+		expect(keys(buildFnfCartMessages({ result, locale: "en" }))).toContain("comparison");
+	});
+
 	it("cap hit → cap message + monthly remaining", () => {
 		const caps = {
 			active: true,
@@ -291,6 +417,24 @@ describe("buildFnfCartMessages", () => {
 		expect(keys(msgs)).toEqual(["applied", "cap", "monthly"]);
 		expect(msgs[1].text).toBe(caps.message_en);
 		expect(msgs[2].text).toBe("Monthly Friends & Family balance: EGP 100.00 left, EGP 0.00 after this order");
+	});
+
+	it("D-R2-04: an order promotion won → the monthly balance with no deduction", () => {
+		const caps = { active: true, monthly_remaining: 1750.04, monthly_remaining_after: 1720.04, fnf_applied_total: 30 };
+		const best = { winner: "promotion", suppressed: ["friends_and_family"], message_en: "The order promotion is better." };
+		const result = normalizeFnfResult(
+			{ ...appliedBlock, applied_count: 0, reason: "order_discount_better", caps },
+			best
+		);
+		const monthly = buildFnfCartMessages({ result, formatAmount: fmt }).find((m) => m.key === "monthly");
+		expect(monthly.text).toBe("Monthly Friends & Family balance: EGP 1750.04 left");
+	});
+
+	it("D-R2-04: no F&F line applied → the monthly balance with no deduction", () => {
+		const caps = { active: true, monthly_remaining: 100, monthly_remaining_after: 70, fnf_applied_total: 30 };
+		const result = normalizeFnfResult({ ...appliedBlock, applied_count: 0, caps });
+		const monthly = buildFnfCartMessages({ result, formatAmount: fmt }).find((m) => m.key === "monthly");
+		expect(monthly.text).toBe("Monthly Friends & Family balance: EGP 100.00 left");
 	});
 
 	it("coupon beat F&F → only the coupon explanation", () => {
@@ -348,6 +492,15 @@ describe("mergeServerLine (apply_offers → cart)", () => {
 		const res = mergeServerLine(item, { discount_percentage: 30, discount_amount: 269.7, discount_source: FNF_DISCOUNT_SOURCE }, appliedBlock.items[0], { fnfSuppressed: true });
 		expect(res.stripped).toBe(true);
 		expect(item.discount_amount).toBe(0);
+	});
+
+	it("does not copy gwp_free_qty from the server line", () => {
+		const promo = cartLine();
+		mergeServerLine(promo, { discount_percentage: 10, discount_amount: 89.9, pricing_rules: "PRLE-0009", gwp_free_qty: 1 }, undefined);
+		expect(promo).not.toHaveProperty("gwp_free_qty");
+		const fnf = cartLine();
+		mergeServerLine(fnf, { discount_percentage: 30, discount_amount: 269.7, discount_source: FNF_DISCOUNT_SOURCE, gwp_free_qty: 1 }, appliedBlock.items[0]);
+		expect(fnf).not.toHaveProperty("gwp_free_qty");
 	});
 
 	it("keeps a manual cashier discount when the server sends nothing", () => {
@@ -443,5 +596,29 @@ describe("mandatory Approved Domains (rev. 2)", () => {
 	it("ffMember is false for non-members and missing flags", () => {
 		expect(normalizeEligibility({ eligible: false, reason: "not_eligible" }).ffMember).toBe(false);
 		expect(normalizeEligibility({ eligible: true, ff_member: true, discount_percentage: 30 }).ffMember).toBe(true);
+	});
+});
+
+describe("D-R2-14: an invoice discount on an F&F cart is explained when entered", () => {
+	const fnfLine = { discount_source: "friends_and_family", discount_amount: 69, quantity: 2 };
+	const plainLine = { discount_source: "", discount_amount: 0, quantity: 1 };
+
+	it("F&F saves more → the invoice discount will not be applied", () => {
+		const text = invoiceDiscountFnfConflict({ items: [fnfLine, plainLine], invoiceDiscount: 14, formatAmount: fmt });
+		expect(text).toBe(
+			"Friends & Family (EGP 69.00) is better than this invoice discount (EGP 14.00). They are never combined: the invoice discount will not be applied when you pay."
+		);
+	});
+
+	it("the invoice discount is bigger → the better of the two is kept at payment", () => {
+		const text = invoiceDiscountFnfConflict({ items: [fnfLine], invoiceDiscount: 100, formatAmount: fmt });
+		expect(text).toContain("never combined");
+		expect(text).toContain("the better of the two is kept");
+	});
+
+	it("no F&F line or no discount → nothing", () => {
+		expect(invoiceDiscountFnfConflict({ items: [plainLine], invoiceDiscount: 14 })).toBe("");
+		expect(invoiceDiscountFnfConflict({ items: [fnfLine], invoiceDiscount: 0 })).toBe("");
+		expect(invoiceDiscountFnfConflict({ items: [{ ...fnfLine, is_free_item: 1 }], invoiceDiscount: 14 })).toBe("");
 	});
 });

@@ -15,8 +15,10 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		auto_create_wallet: 1,
 		loyalty_to_wallet: 1,
 		magento_loyalty_available: 0,
-		miraaya_installed: 0,
 		enable_customer_email_verification: 0,
+		verification_provider: "",
+		require_split_name: 0,
+		placeholder_email_domain: "",
 		// General Settings
 		max_discount_allowed: 0,
 		use_percentage_discount: 0,
@@ -26,7 +28,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		disable_rounded_total: 1, // Disable rounding for accurate totals
 		allow_credit_sale: 0,
 		allow_customer_credit_payment: 0,
-		allow_return: 0,
+		allow_return: 1,
 		allow_write_off_change: 0,
 		allow_partial_payment: 0,
 		use_exact_amount: 0,
@@ -73,6 +75,8 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		// Security
 		enable_session_lock: 0,
 		session_lock_timeout: 5,
+		// Offline offer list validity (D-R4-01)
+		offline_offer_validity_hours: 24,
 	});
 
 	const isLoading = ref(false);
@@ -85,7 +89,8 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	const autoCreateWallet = computed(() => Boolean(settings.value.auto_create_wallet));
 	const loyaltyToWallet = computed(() => Boolean(settings.value.loyalty_to_wallet));
 	const magentoLoyaltyAvailable = computed(() => Boolean(settings.value.magento_loyalty_available));
-	const miraayaInstalled = computed(() => Boolean(settings.value.miraaya_installed));
+	const requireSplitName = computed(() => Boolean(Number(settings.value.require_split_name)));
+	const placeholderEmailDomain = computed(() => settings.value.placeholder_email_domain || "");
 	const customerEmailVerificationEnabled = computed(() =>
 		Boolean(Number(settings.value.enable_customer_email_verification))
 	);
@@ -250,8 +255,10 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 			auto_create_wallet: 1,
 			loyalty_to_wallet: 1,
 			magento_loyalty_available: 0,
-			miraaya_installed: 0,
 			enable_customer_email_verification: 0,
+			verification_provider: "",
+			require_split_name: 0,
+			placeholder_email_domain: "",
 			// General Settings
 			max_discount_allowed: 0,
 			use_percentage_discount: 0,
@@ -261,7 +268,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 			disable_rounded_total: 1,
 			allow_credit_sale: 0,
 			allow_customer_credit_payment: 0,
-			allow_return: 0,
+			allow_return: 1,
 			allow_write_off_change: 0,
 			allow_partial_payment: 0,
 			use_exact_amount: 0,
@@ -300,6 +307,8 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 			// Security
 			enable_session_lock: 0,
 			session_lock_timeout: 5,
+		// Offline offer list validity (D-R4-01)
+		offline_offer_validity_hours: 24,
 		};
 		isLoaded.value = false;
 	}
@@ -367,7 +376,8 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		autoCreateWallet,
 		loyaltyToWallet,
 		magentoLoyaltyAvailable,
-		miraayaInstalled,
+		requireSplitName,
+		placeholderEmailDomain,
 		customerEmailVerificationEnabled,
 
 		// Computed - General Settings

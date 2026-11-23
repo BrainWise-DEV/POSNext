@@ -151,7 +151,7 @@
 										</div>
 										<div class="text-end ms-2">
 											<p class="text-sm font-medium text-gray-900">
-												{{ formatCurrency(suggestion.grand_total) }}
+												{{ formatCurrency(returnListAmount(suggestion)) }}
 											</p>
 											<p class="text-xs text-gray-400">
 												{{ formatDate(suggestion.posting_date) }}
@@ -244,7 +244,7 @@
 								<!-- Amount (End Side) -->
 								<div class="text-end flex-shrink-0">
 									<p class="text-sm font-bold text-gray-900">
-										{{ formatCurrency(invoice.grand_total) }}
+										{{ formatCurrency(returnListAmount(invoice)) }}
 									</p>
 								</div>
 							</div>
@@ -564,7 +564,7 @@
 										<span
 											v-if="item.discount_per_unit > 0"
 											class="inline-flex items-center px-1 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700"
-											>−{{ formatCurrency(item.discount_per_unit) }}</span
+											>−{{ perUnitLabel(formatCurrency(item.discount_per_unit), item.uom) }}</span
 										>
 										<span
 											v-if="
@@ -573,14 +573,14 @@
 											class="inline-flex items-center px-1 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700"
 											>{{
 												__("incl. {0} tax", [
-													formatCurrency(item.tax_per_unit),
+													perUnitLabel(formatCurrency(item.tax_per_unit), item.uom),
 												])
 											}}</span
 										>
 										<span
 											v-else-if="item.tax_per_unit > 0"
 											class="inline-flex items-center px-1 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700"
-											>+{{ formatCurrency(item.tax_per_unit) }}</span
+											>+{{ perUnitLabel(formatCurrency(item.tax_per_unit), item.uom) }}</span
 										>
 									</p>
 								</div>
@@ -691,7 +691,7 @@
 												v-if="item.discount_per_unit > 0"
 												class="inline-flex items-center px-1 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700"
 												>−{{
-													formatCurrency(item.discount_per_unit)
+													perUnitLabel(formatCurrency(item.discount_per_unit), item.uom)
 												}}</span
 											>
 											<span
@@ -702,14 +702,14 @@
 												class="inline-flex items-center px-1 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700"
 												>{{
 													__("incl. {0} tax", [
-														formatCurrency(item.tax_per_unit),
+														perUnitLabel(formatCurrency(item.tax_per_unit), item.uom),
 													])
 												}}</span
 											>
 											<span
 												v-else-if="item.tax_per_unit > 0"
 												class="inline-flex items-center px-1 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700"
-												>+{{ formatCurrency(item.tax_per_unit) }}</span
+												>+{{ perUnitLabel(formatCurrency(item.tax_per_unit), item.uom) }}</span
 											>
 										</p>
 									</div>
@@ -945,7 +945,7 @@
 								}}</span>
 								<span class="font-bold text-gray-900">{{
 									formatCurrency(
-										isPartiallyPaid ? maxRefundableAmount : returnTotal
+										maxRefundableAmount
 									)
 								}}</span>
 							</div>
@@ -956,9 +956,7 @@
 										'font-bold',
 										Math.abs(
 											totalPaymentAmount -
-												(isPartiallyPaid
-													? maxRefundableAmount
-													: returnTotal)
+												maxRefundableAmount
 										) < 0.01
 											? 'text-green-600'
 											: 'text-red-600',
@@ -971,7 +969,7 @@
 								v-if="
 									Math.abs(
 										totalPaymentAmount -
-											(isPartiallyPaid ? maxRefundableAmount : returnTotal)
+											maxRefundableAmount
 									) >= 0.01
 								"
 								class="mt-2 text-xs text-amber-600 text-start"
@@ -1184,6 +1182,7 @@
 </template>
 
 <script setup>
+import { perUnitLabel, returnListAmount } from "@/utils/returnDisplay";
 import { useAuthorization } from "@/composables/useAuthorization";
 import { isAuthorizationError } from "@/utils/authorizationError";
 import { useOfflineStatus } from "@/composables/useOfflineStatus";
@@ -1196,6 +1195,13 @@ import {
 	roundCurrency,
 } from "@/utils/currency";
 import { getInvoiceStatusColor } from "@/utils/invoice";
+import {
+	capRefund,
+	emptiesOriginal,
+	returnRefundAmount,
+	refundWeight,
+	splitRefund,
+} from "@/utils/returnRefund";
 import { Button, Dialog, FeatherIcon, createResource } from "frappe-ui";
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 
@@ -1380,12 +1386,20 @@ const fetchInvoiceResource = createResource({
 				name: data.return_against,
 				customer: data.customer,
 				customer_name: origInvoice.customer_name || data.customer_name,
+				// The status pill (D-R4-09 d)
+				status: origInvoice.status || "",
 				company: data.company,
 				posting_date: origInvoice.posting_date,
 				grand_total: origInvoice.grand_total,
 				paid_amount: origInvoice.paid_amount,
+				change_amount: origInvoice.change_amount,
 				outstanding_amount: origInvoice.outstanding_amount,
 				payments: origInvoice.payments || [],
+				// The return rounds as the original did (D-R2-16)
+				disable_rounded_total: origInvoice.disable_rounded_total,
+				smallest_currency_fraction_value: origInvoice.smallest_currency_fraction_value,
+				// Cash still refundable on it after earlier returns (Ruling 147)
+				refundable_cash: origInvoice.refundable_cash,
 				docstatus: 1, // Already validated by backend
 				is_return: 0,
 			};
@@ -1612,14 +1626,16 @@ const filteredReturnItems = computed(() => {
 
 const hasOpenShift = computed(() => Boolean(props.posOpeningShift));
 
-// Use rate_with_tax (includes tax) for accurate refund calculation
+// Use rate_with_tax (includes tax) for accurate refund calculation, rounded as
+// the server rounds the return (D-R2-16): what the customer gets back
 const returnTotal = computed(() =>
-	roundCurrency(
+	returnRefundAmount(
 		selectedItems.value.reduce(
 			(sum, item) =>
 				sum + roundCurrency(item.return_qty * (item.rate_with_tax || item.rate)),
 			0
-		)
+		),
+		originalInvoice.value
 	)
 );
 
@@ -1629,13 +1645,20 @@ const totalPaymentAmount = computed(() =>
 	)
 );
 
+// The refund due: never more than is still refundable on the original (Ruling 147)
 const maxRefundableAmount = computed(() => {
 	if (!originalInvoice.value) return 0;
-	if (!isPartiallyPaid.value && !isOriginalCreditSale.value) return returnTotal.value;
+	const refundable = originalInvoice.value.refundable_cash;
+	// Everything left of a fully paid original: the paid remainder (Ruling 151)
+	if (!isPartiallyPaid.value && !isOriginalCreditSale.value)
+		return capRefund(returnTotal.value, refundable, emptiesOriginal(returnItems.value));
 
 	const grandTotal = Math.abs(originalInvoice.value.grand_total) || 1;
 	const returnRatio = returnTotal.value / grandTotal;
-	return roundCurrency(Math.min(returnTotal.value, originalPaidAmount.value * returnRatio));
+	return capRefund(
+		roundCurrency(Math.min(returnTotal.value, originalPaidAmount.value * returnRatio)),
+		refundable
+	);
 });
 
 // Amount that goes toward credit balance (for partially paid invoices)
@@ -1651,7 +1674,7 @@ const summaryRefundLabel = computed(() =>
 	showPartialBreakdown.value ? "Cash Refund:" : "Refund Amount:"
 );
 const summaryRefundAmount = computed(() =>
-	showPartialBreakdown.value ? maxRefundableAmount.value : returnTotal.value
+	maxRefundableAmount.value
 );
 
 // Cache RTL direction check (only needs to run once per session)
@@ -1682,7 +1705,9 @@ const canCreateReturn = computed(() => {
 	const hasValidPayments = payments.every(
 		(payment) => payment.mode_of_payment && payment.amount > 0
 	);
-	return hasValidPayments && Math.abs(totalPaymentAmount.value - returnTotal.value) < 0.01;
+	return (
+		hasValidPayments && Math.abs(totalPaymentAmount.value - maxRefundableAmount.value) < 0.01
+	);
 });
 
 // Shared filter function to avoid duplicate code
@@ -1741,14 +1766,21 @@ watch(normalizedSearchTerm, (searchTerm) => {
 	}, SEARCH_DEBOUNCE_MS);
 });
 
-// Auto-populate payment amount when return total changes (single payment only)
+// Auto-populate payment amounts when return total changes: a single row takes it
+// all, rows from the original invoice share it as the customer paid
 watch(returnTotal, (newTotal) => {
 	if (!returnModal.visible || !showDialog.value || isOriginalCreditSale.value) return;
-	if (refundPayments.value.length !== 1 || newTotal <= 0) return;
+	if (!refundPayments.value.length || newTotal <= 0) return;
+	const rows = refundPayments.value;
+	if (rows.length > 1 && !rows.some((row) => row.weight > 0)) return;
 
-	refundPayments.value[0].amount = isPartiallyPaid.value
-		? roundCurrency(maxRefundableAmount.value)
-		: newTotal;
+	const refund = maxRefundableAmount.value;
+	splitRefund(
+		refund,
+		rows.map((row) => row.weight || 0)
+	).forEach((amount, index) => {
+		rows[index].amount = amount;
+	});
 });
 
 // Methods
@@ -1858,6 +1890,8 @@ function initializePaymentsFromInvoice() {
 					? defaultMode
 					: payment.mode_of_payment,
 			amount: isPartiallyPaid.value ? 0 : Math.abs(payment.amount),
+			// What this mode still has to refund: its share of the refund (D-R3-03)
+			weight: refundWeight(payment),
 		}));
 	} else {
 		refundPayments.value = [

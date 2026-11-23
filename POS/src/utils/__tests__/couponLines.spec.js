@@ -96,4 +96,15 @@ describe("couponLines", () => {
 		const item = { discount_percentage: 5, discount_amount: 0, discount_source: "manual_discount" };
 		expect(preCouponDiscount(item)).toMatchObject({ discount_percentage: 5, discount_source: "manual_discount" });
 	});
+
+	it("prices the discount under a coupon per unit, as the line itself is priced (G8)", () => {
+		// "buy one" on 6 × 50 under the coupon: 41.67 a unit, so 49.98 off, not 50.
+		const item = line({ price_list_rate: 50, quantity: 6 });
+		item.pre_coupon_discount = { discount_percentage: 100 / 6, discount_amount: 0, discount_source: "pricing_rule" };
+		expect(preCouponLineDiscount(item)).toBe(49.98);
+		// A fixed 10 off 3 × 50 under the coupon: 3.33 a unit.
+		const fixed = line({ price_list_rate: 50, quantity: 3 });
+		fixed.pre_coupon_discount = { discount_percentage: 0, discount_amount: 10, discount_source: "manual_discount" };
+		expect(preCouponLineDiscount(fixed)).toBe(9.99);
+	});
 });

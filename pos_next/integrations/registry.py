@@ -2,17 +2,29 @@
 
 from __future__ import annotations
 
+import math
+
 import frappe
+
+from pos_next import utils
+
+
+def _log_hook_failure(title, method_path, error):
+	"""Hook failures: path and exception class only, no Sentry (see utils)."""
+	utils.log_error_without_telemetry(title, f"{method_path}: {error}")
 
 
 def get_loyalty_provider():
 	for method_path in frappe.get_hooks("pos_next_loyalty_provider") or []:
+		error = None
 		try:
 			provider = frappe.get_attr(method_path)()
 			if provider:
 				return provider
-		except Exception:
-			frappe.log_error(frappe.get_traceback(), f"Loyalty provider hook failed: {method_path}")
+		except Exception as e:
+			error = type(e).__name__
+		if error:
+			_log_hook_failure("Loyalty provider hook failed", method_path, error)
 	return None
 
 
@@ -40,12 +52,95 @@ def get_external_loyalty_balance(customer):
 	return get_balance(customer) if get_balance else None
 
 
+def is_benefit_member(customer, pos_profile=None):
+	"""True when any ``pos_next_customer_benefit_providers`` provider says the customer is a member.
+
+	Each hook is a callable returning ``{"is_member": callable(customer, pos_profile=None)}``.
+	A failing provider counts as "not a member"; only its path is logged.
+	"""
+	if not customer:
+		return False
+	for method_path in frappe.get_hooks("pos_next_customer_benefit_providers") or []:
+		error = None
+		try:
+			provider = frappe.get_attr(method_path)()
+			is_member = (provider or {}).get("is_member")
+			if is_member and is_member(customer, pos_profile=pos_profile):
+				return True
+		except Exception as e:
+			error = type(e).__name__
+		if error:
+			_log_hook_failure("Customer benefit provider", method_path, error)
+	return False
+
+
+def notify_verification_change(
+	customer: str, verified: bool, email_domain: str | None, via: str | None
+) -> None:
+	"""Tell each benefit provider that a customer's email verification changed.
+
+	Calls the provider's optional ``on_verification_change(customer, verified,
+	email_domain, via)``. Providers are dicts (like ``is_member``), so a provider
+	without the key is skipped. Only the email domain is passed, never the
+	address. A failing provider is logged (its path only) and the rest still run.
+	"""
+	if not customer:
+		return
+	for method_path in frappe.get_hooks("pos_next_customer_benefit_providers") or []:
+		error = None
+		try:
+			provider = frappe.get_attr(method_path)()
+			on_change = (provider or {}).get("on_verification_change")
+			if on_change:
+				on_change(customer, verified, email_domain, via)
+		except Exception as e:
+			error = type(e).__name__
+		if error:
+			_log_hook_failure("Customer benefit provider", method_path, error)
+
+
+def fnf_line_rates(doc) -> dict[str, float]:
+	"""Per-unit rate Friends & Family gives each row of ``doc``: {row name: rate}.
+
+	Calls each benefit provider's optional ``fnf_line_rates(doc)``, which computes the
+	rate on the server's data (the customer's eligibility, the program, its scope),
+	never from a row's F&F mark (Ruling 120). A row no provider names gets no F&F
+	rate. When two providers name a row, the lower rate wins. Values that are not
+	finite numbers are dropped, and negative ones count as 0. A provider without the
+	key is skipped. A failing provider explains nothing: it is logged (path and
+	exception class only), and the rest still run.
+	"""
+	rates = {}
+	for method_path in frappe.get_hooks("pos_next_customer_benefit_providers") or []:
+		error = None
+		try:
+			provider = frappe.get_attr(method_path)()
+			compute = (provider or {}).get("fnf_line_rates")
+			found = dict(compute(doc) or {}) if compute else {}
+		except Exception as e:
+			error, found = type(e).__name__, {}
+		if error:
+			_log_hook_failure("Customer benefit provider", method_path, error)
+		for name, rate in found.items():
+			try:
+				value = float(rate)
+			except (TypeError, ValueError):
+				continue
+			if math.isfinite(value):
+				value = max(value, 0.0)
+				rates[name] = min(rates.get(name, value), value)
+	return rates
+
+
 def extend_bootstrap_settings(settings, pos_profile=None):
 	for method_path in frappe.get_hooks("pos_next_bootstrap_settings") or []:
+		error = None
 		try:
 			frappe.get_attr(method_path)(settings, pos_profile)
-		except Exception:
-			frappe.log_error(frappe.get_traceback(), f"Bootstrap settings hook failed: {method_path}")
+		except Exception as e:
+			error = type(e).__name__
+		if error:
+			_log_hook_failure("Bootstrap settings hook failed", method_path, error)
 
 
 def validate_customer_create(**kwargs):
@@ -157,4 +252,5 @@ def clear_customer_sync_error(customer):
 def get_customer_sync_error(customer):
 	if not customer:
 		return None
-	return frappe.cache().get_value(_SYNC_ERROR_KEY.format(customer)) or None
+	# expires=True: a TTL key must not be memoised per process.
+	return frappe.cache().get_value(_SYNC_ERROR_KEY.format(customer), expires=True) or None

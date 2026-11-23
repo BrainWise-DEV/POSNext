@@ -19,10 +19,31 @@ import frappe
 logger = logging.getLogger(__name__)
 
 
+def preserve_standard_permissions():
+	"""Copy each fixture DocType's standard permissions into Custom DocPerm first.
+
+	Any Custom DocPerm row for a DocType replaces all of its DocType permissions,
+	and the custom_docperm fixture only carries POS Next's own roles (hooks.py
+	filter). Without this, syncing it would leave e.g. Sales Invoice to the
+	POSNext Cashier alone and take it from Accounts User. Runs before the fixture
+	sync (after_install and before_migrate); a DocType that already has Custom
+	DocPerm rows is left as the site has it.
+	"""
+	from frappe.permissions import setup_custom_perms
+
+	path = frappe.get_app_path("pos_next", "fixtures", "custom_docperm.json")
+	for doctype in sorted({row["parent"] for row in frappe.get_file_json(path)}):
+		if frappe.db.exists("DocType", doctype):
+			setup_custom_perms(doctype)
+
+
 def after_install():
 	"""Hook that runs after app installation"""
 	try:
 		log_message("POS Next: Running post-install setup", level="info")
+
+		# Before sync_fixtures (it runs after this hook)
+		preserve_standard_permissions()
 
 		# Setup default print format for POS Profiles
 		setup_default_print_format()

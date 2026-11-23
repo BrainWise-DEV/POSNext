@@ -1202,7 +1202,7 @@ const settings = ref({
 	allow_user_to_edit_rate: 0,
 	disable_rounded_total: 1,
 	allow_credit_sale: 0,
-	allow_return: 0,
+	allow_return: 1,
 	allow_write_off_change: 0,
 	allow_partial_payment: 0,
 	silent_print: 0,
