@@ -15,6 +15,14 @@ OFFLINE_OVERSHOOT_REJECT = "Reject"
 LIMIT_MAXIMUM_USE = "maximum_use"
 LIMIT_PER_CUSTOMER = "maximum_use_per_customer"
 CHECK_VALIDITY = "validity"
+
+
+class CouponNotApplicableError(frappe.ValidationError):
+	"""A sale's coupon is refused when it is saved or submitted (title "Coupon Not
+	Applicable"). The POS keys on this exception type, never on the translated text,
+	to drop the coupon from the cart (D-R3-08)."""
+
+
 # Fields count_usage_on_submit reads under the row lock
 _SUBMIT_COUPON_FIELDS = (
 	"name",
@@ -117,6 +125,8 @@ def check_coupon_code(coupon_code, customer=None, company=None):
 	# Check usage limits
 	if coupon.used and coupon.maximum_use and coupon.used >= coupon.maximum_use:
 		res["msg"] = _("Sorry, this coupon code has been fully redeemed")
+		res["reason"] = LIMIT_MAXIMUM_USE
+		res["code"] = coupon.coupon_code
 		return res
 
 	# Per-customer usage limit
@@ -324,7 +334,7 @@ def count_usage_on_submit(doc, method=None) -> None:
 	failed = _failed_checks(doc, coupon)
 	if failed:
 		if not doc.flags.pos_offline_sync or not offline_overshoot_allowed(doc.get("pos_profile")):
-			frappe.throw(failed[0][1], title=_("Coupon Not Applicable"))
+			frappe.throw(failed[0][1], CouponNotApplicableError, title=_("Coupon Not Applicable"))
 		frappe.log_error(
 			title=COUPON_OVERSHOOT_LOG_TITLE,
 			message=(

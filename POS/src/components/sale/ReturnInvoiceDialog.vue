@@ -1198,6 +1198,7 @@ import {
 	capRefund,
 	emptiesOriginal,
 	returnRefundAmount,
+	refundWeight,
 	splitRefund,
 } from "@/utils/returnRefund";
 import { Button, Dialog, FeatherIcon, createResource } from "frappe-ui";
@@ -1885,8 +1886,8 @@ function initializePaymentsFromInvoice() {
 					? defaultMode
 					: payment.mode_of_payment,
 			amount: isPartiallyPaid.value ? 0 : Math.abs(payment.amount),
-			// What this mode kept paid (net of change): its share of the refund
-			weight: Math.abs(payment.amount),
+			// What this mode still has to refund: its share of the refund (D-R3-03)
+			weight: refundWeight(payment),
 		}));
 	} else {
 		refundPayments.value = [

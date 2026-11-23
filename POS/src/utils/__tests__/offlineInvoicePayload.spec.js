@@ -72,3 +72,50 @@ describe("buildOfflineInvoiceData", () => {
 		expect(invoice).not.toHaveProperty("idempotency_doctype");
 	});
 });
+
+describe("buildOfflineInvoiceData for a Sales Order cart (H2 round 1, I-2)", () => {
+	const fnfLine = {
+		item_code: "A",
+		rate: 100,
+		price_list_rate: 100,
+		discount_percentage: 30,
+		discount_amount: 30,
+		discount_source: "friends_and_family",
+	};
+
+	it("queues a Sales Order with its delivery date", () => {
+		const data = buildOfflineInvoiceData({
+			cart: cart({ targetDoctype: "Sales Order", deliveryDate: "2026-11-30" }),
+			shift,
+			customer: "Cust",
+			paymentData: {},
+		});
+		expect(data.doctype).toBe("Sales Order");
+		expect(data.delivery_date).toBe("2026-11-30");
+	});
+
+	it("carries no F&F on an order", () => {
+		const data = buildOfflineInvoiceData({
+			cart: cart({
+				targetDoctype: "Sales Order",
+				invoiceItems: [fnfLine],
+				formatItemsForSubmission: (items) => items.map((i) => ({ ...i })),
+			}),
+			shift,
+			customer: "Cust",
+			paymentData: {},
+		});
+		expect(data.items[0]).toMatchObject({ discount_percentage: 0, discount_amount: 0 });
+	});
+
+	it("an invoice cart queues a Sales Invoice with no delivery date", () => {
+		const data = buildOfflineInvoiceData({
+			cart: cart({ targetDoctype: "Sales Invoice", deliveryDate: "2026-11-30" }),
+			shift,
+			customer: "Cust",
+			paymentData: {},
+		});
+		expect(data.doctype).toBe("Sales Invoice");
+		expect(data.delivery_date).toBeUndefined();
+	});
+});

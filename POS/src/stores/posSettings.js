@@ -28,7 +28,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		disable_rounded_total: 1, // Disable rounding for accurate totals
 		allow_credit_sale: 0,
 		allow_customer_credit_payment: 0,
-		allow_return: 0,
+		allow_return: 1,
 		allow_write_off_change: 0,
 		allow_partial_payment: 0,
 		use_exact_amount: 0,
@@ -266,7 +266,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 			disable_rounded_total: 1,
 			allow_credit_sale: 0,
 			allow_customer_credit_payment: 0,
-			allow_return: 0,
+			allow_return: 1,
 			allow_write_off_change: 0,
 			allow_partial_payment: 0,
 			use_exact_amount: 0,

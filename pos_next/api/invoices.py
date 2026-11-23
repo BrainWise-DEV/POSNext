@@ -1632,15 +1632,16 @@ OFFER_PRICED_FIELDS = (
 )
 
 
-def _coupon_line_rates(invoice_doc, coupon_code, paid_rows, context) -> dict[int, float]:
-	"""Per-unit rate the invoice's coupon gives each paid line: {line index: rate}.
-	Empty without promotions.
+def _coupon_line_rates(invoice_doc, coupon_code, paid_rows, context) -> tuple[dict[int, float], set[int]]:
+	"""Per-unit rate the invoice's coupon gives each paid line, ({line index: rate},
+	stacked line indexes). Both empty without promotions.
 
 	The coupon is priced on the server's list price with no other discount. A coupon
 	that stacks on an offer ("Add on top") is also priced on the line as the server's
 	own offer evaluation prices it (``_offer_priced_payload``): where promotions' resolver
-	stacks it there, the rate is the offer-priced rate less the coupon. Nothing the
-	client sent prices either payload.
+	stacks it there, the rate is the offer-priced rate less the coupon, and the line is
+	in the stacked set: its discount is the offer's and the coupon's together (D-R3-04).
+	Nothing the client sent prices either payload.
 	"""
 	measures = {
 		id(row): flt(row.get("price_list_rate"))
@@ -1653,15 +1654,17 @@ def _coupon_line_rates(invoice_doc, coupon_code, paid_rows, context) -> dict[int
 	)
 	updates = _coupon_line_updates(invoice_doc, coupon_code, payload, UNEXPLAINED_DISCOUNT_LOG_TITLE)
 	rates = {idx: flt(update["rate"]) for idx, update in (updates or {}).items() if "rate" in update}
+	stacked_lines = set()
 	if updates is None:
-		return rates
+		return rates, stacked_lines
 	priced = _offer_priced_payload(invoice_doc, payload)
 	if priced is not None:
 		stacked = _coupon_line_updates(invoice_doc, coupon_code, priced, UNEXPLAINED_DISCOUNT_LOG_TITLE)
 		for idx, update in (stacked or {}).items():
 			if update.get("stacked") and "rate" in update:
 				rates[idx] = flt(update["rate"])
-	return rates
+				stacked_lines.add(idx)
+	return rates, stacked_lines
 
 
 def _offer_priced_payload(invoice_doc, payload) -> dict | None:
@@ -1869,12 +1872,13 @@ def _check_paid_row_discounts(invoice_doc, offline_sync=False, paid_draft_rows=N
 	for row, list_price, tolerance in below:
 		idx = index[id(row)]
 		offer = _offer_rate(result, idx, list_price)
-		coupon = None
+		coupon, stacked = None, False
 		code = row.get("posnext_coupon_code")
 		if code:
 			if code not in coupon_rates:
 				coupon_rates[code] = _coupon_line_rates(invoice_doc, code, paid_rows, context)
-			coupon = coupon_rates[code].get(idx)
+			coupon = coupon_rates[code][0].get(idx)
+			stacked = idx in coupon_rates[code][1]
 		fnf = fnf_rates.get(id(row))
 		other = min((rate for rate in (coupon, fnf) if rate is not None), default=None)
 		if other is None or (offer is not None and offer < other):
@@ -1884,6 +1888,13 @@ def _check_paid_row_discounts(invoice_doc, offline_sync=False, paid_draft_rows=N
 			if offer is not None and abs(offer - flt(row.rate)) <= tolerance:
 				# Written to the row at before_submit (Ruling 137): the server's names only.
 				row.flags.pos_server_rules = ",".join(sorted(_server_line_rules(result, [idx])))
+		elif stacked and flt(row.rate) <= coupon + tolerance:
+			# At the coupon's rate or below it: any further cut is a manual discount judged
+			# below, and the offer is still part of the line's discount (H2 round 1).
+			# An "Add on top" coupon priced on the offer: the offer is part of the line's
+			# discount, so the row keeps its rules and a one-time one is stamped (D-R3-04).
+			offer_lines.append(idx)
+			row.flags.pos_server_rules = ",".join(sorted(_server_line_rules(result, [idx])))
 		if (
 			min(rate for rate in (list_price, offer, coupon, fnf) if rate is not None) - flt(row.rate)
 			<= tolerance
@@ -2003,7 +2014,7 @@ def _fnf_rows_on_submit(doc) -> tuple[list[str], list[str]]:
 		if code:
 			if code not in coupon_rates:
 				coupon_rates[code] = _coupon_line_rates(doc, code, paid_rows, context)
-			coupon = coupon_rates[code].get(idx)
+			coupon = coupon_rates[code][0].get(idx)
 		problem, kept = _row_discount_problem(
 			doc,
 			row,
@@ -3069,6 +3080,95 @@ def _check_return_quantities(
 	return {"valid": True}
 
 
+SALES_ORDERS_ONLY_LOG_TITLE = "Sales Invoice synced under Create Only Sales Order"
+
+
+def _enforce_sales_orders_only(payload, offline_sync=False):
+	"""POS Settings "Create Only Sales Order": the POS makes no Sales Invoice (H2 round 1, I-2).
+
+	An online sale is refused. A sale synced from offline already happened: it is kept
+	and logged under a fixed title, never stranded in the queue. Returns are not sales
+	and are left alone.
+	"""
+	if (payload.get("doctype") or DOCTYPE_SALES_INVOICE) != DOCTYPE_SALES_INVOICE:
+		return
+	pos_profile = payload.get("pos_profile")
+	if not pos_profile or not cint(
+		frappe.db.get_value("POS Settings", {"pos_profile": pos_profile}, "create_only_sales_order")
+	):
+		return
+	is_return = payload.get("is_return")
+	name = payload.get("name")
+	if not is_return and name and frappe.db.exists(DOCTYPE_SALES_INVOICE, name):
+		is_return = frappe.db.get_value(DOCTYPE_SALES_INVOICE, name, "is_return")
+	if cint(is_return):
+		return
+	if offline_sync:
+		log_error_without_telemetry(
+			SALES_ORDERS_ONLY_LOG_TITLE,
+			f"POS Profile {pos_profile}: offline sale {payload.get('offline_id') or name or '-'} "
+			"was synced as a Sales Invoice while Create Only Sales Order is on; it is kept.",
+		)
+		return
+	frappe.throw(
+		_(
+			"Only Sales Orders are made on POS Profile {0}: Create Only Sales Order is on in its POS Settings."
+		).format(pos_profile),
+		title=_("Sales Orders Only"),
+	)
+
+
+def _refuse_return_if_disallowed(pos_profile):
+	"""Throw unless POS Settings "Allow Return" is on for ``pos_profile`` (D-R3-10).
+
+	The server is the authority: a client that ignores the setting is refused. A
+	profile with no POS Settings row has returns on, as the field and the POS
+	default it.
+	"""
+	value = (
+		frappe.db.get_value("POS Settings", {"pos_profile": pos_profile}, "allow_return")
+		if pos_profile
+		else 0
+	)
+	allowed = 1 if value is None else cint(value)
+	if not allowed:
+		frappe.throw(
+			_("Returns are not allowed on POS Profile {0}: Allow Return is off in its POS Settings.").format(
+				pos_profile or ""
+			),
+			title=_("Returns Not Allowed"),
+		)
+
+
+def _mirror_return_free_rows(invoice_doc):
+	"""A return row takes ``is_free_item`` from the original row it returns (D-R3-05).
+
+	The return dialog rebuilds its rows without the flag, so a returned free row was
+	saved as a paid row at rate 0. The original row is the authority, both ways.
+	"""
+	link_field = RETURN_ROW_LINK_FIELD.get(invoice_doc.doctype)
+	if not (link_field and invoice_doc.get("return_against")):
+		return
+	linked = [row.get(link_field) for row in invoice_doc.get("items", []) if row.get(link_field)]
+	if not linked:
+		return
+	free = {
+		row.name: cint(row.is_free_item)
+		for row in frappe.get_all(
+			f"{invoice_doc.doctype} Item",
+			filters={
+				"parent": invoice_doc.return_against,
+				"parenttype": invoice_doc.doctype,
+				"name": ["in", linked],
+			},
+			fields=["name", "is_free_item"],
+		)
+	}
+	for row in invoice_doc.get("items", []):
+		if row.get(link_field) in free:
+			row.is_free_item = free[row.get(link_field)]
+
+
 def _validate_return_rows(invoice_doc):
 	"""Throw unless every row of a return against an invoice passes ``validate_return_items``."""
 	if not invoice_doc.get("return_against"):
@@ -3110,6 +3210,9 @@ def _update_invoice(data: str | dict, offline_sync: bool = False, submitting: bo
 	if not isinstance(data, dict):
 		frappe.throw(_("Invalid invoice format"))
 	_validate_invoice_profile(data)
+	if not submitting:
+		# submit_invoice checks its own payload (and knows whether it is an offline sync)
+		_enforce_sales_orders_only(data)
 	try:
 		data = _strip_server_managed_fields(data)
 
@@ -3387,6 +3490,8 @@ def _update_invoice(data: str | dict, offline_sync: bool = False, submitting: bo
 		# Validate return rows after the totals, so the rates checked are the
 		# rates that will be saved
 		if invoice_doc.get("is_return"):
+			_refuse_return_if_disallowed(invoice_doc.get("pos_profile"))
+			_mirror_return_free_rows(invoice_doc)
 			_validate_return_rows(invoice_doc)
 		elif doctype == "Sales Invoice":
 			_stamp_one_time_transaction_rules(invoice_doc, pos_profile_doc)
@@ -3407,6 +3512,8 @@ def _update_invoice(data: str | dict, offline_sync: bool = False, submitting: bo
 			# Validate POS Coupon exists and is valid
 			if frappe.db.table_exists("POS Coupon"):
 				from pos_next.pos_next.doctype.pos_coupon.pos_coupon import (
+					LIMIT_MAXIMUM_USE,
+					CouponNotApplicableError,
 					check_coupon_code,
 					offline_overshoot_allowed,
 					resolve_coupon_name,
@@ -3426,8 +3533,16 @@ def _update_invoice(data: str | dict, offline_sync: bool = False, submitting: bo
 						coupon_code, customer=invoice_doc.customer, company=invoice_doc.company
 					)
 					if not coupon_result or not coupon_result.get("valid"):
-						# check_coupon_code returns its msg already translated
-						frappe.throw((coupon_result or {}).get("msg") or _("Invalid coupon code"))
+						coupon_result = coupon_result or {}
+						if coupon_result.get("reason") == LIMIT_MAXIMUM_USE:
+							# Used up since it was applied, e.g. by another cashier (D-R3-08)
+							message = _("Coupon {0} has reached its usage limit").format(
+								coupon_result.get("code") or coupon_code
+							)
+						else:
+							# check_coupon_code returns its msg already translated
+							message = coupon_result.get("msg") or _("Invalid coupon code")
+						frappe.throw(message, CouponNotApplicableError, title=_("Coupon Not Applicable"))
 					canonical_code = coupon_result["coupon"].coupon_code
 
 				# Store the coupon's own code (canonical case) on the invoice for tracking
@@ -4046,6 +4161,7 @@ def submit_invoice(invoice: str | dict | None = None, data: str | dict | None = 
 	frappe.db.savepoint(SUBMIT_SAVEPOINT)
 
 	try:
+		_enforce_sales_orders_only(invoice, offline_sync=offline_sync)
 		invoice_name = invoice.get("name")
 		# Set below when a stored paid draft is re-saved
 		paid_draft_header, paid_draft_rates, paid_draft_rows = None, {}, []
@@ -4119,6 +4235,8 @@ def submit_invoice(invoice: str | dict | None = None, data: str | dict | None = 
 			# Validating before totals is safe here: it checks only row links,
 			# quantities and rates, and recalculating totals does not change rates.
 			if invoice_doc.get("is_return"):
+				_refuse_return_if_disallowed(invoice_doc.get("pos_profile"))
+				_mirror_return_free_rows(invoice_doc)
 				_apply_return_header_discount(invoice_doc)
 				_validate_return_rows(invoice_doc)
 				_apply_return_rounding(invoice_doc)
@@ -5210,6 +5328,15 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
 	if invoice_info.is_return:
 		frappe.throw(_("Cannot create return against a return invoice"))
 
+	# Returns off in the POS Settings of the profile the return is made under: the
+	# cashier's shift profile, else the original's (D-R3-10)
+	shift_profile = (
+		frappe.db.get_value("POS Opening Shift", pos_opening_shift, "pos_profile")
+		if pos_opening_shift
+		else None
+	)
+	_refuse_return_if_disallowed(shift_profile or invoice_info.pos_profile)
+
 	# Check return validity period from POS Settings
 	if invoice_info.pos_profile:
 		return_validity_days = cint(
@@ -5272,6 +5399,7 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
 	payments_data = _payments_net_of_change(
 		payments_data, invoice_info.change_amount, invoice_info.base_change_amount
 	)
+	_set_refunded_by_mode(payments_data, invoice_name)
 
 	# Cross-branch return: remap foreign payment modes to the current profile.
 	#
@@ -5572,6 +5700,36 @@ def _payments_net_of_change(payments, change_amount, base_change_amount=None):
 			base_change = change if base_change_amount is None else flt(base_change_amount)
 			cash.base_amount = max(flt(cash.base_amount) - base_change, 0)
 	return [p for p in payments if flt(p.amount) > 0]
+
+
+def _set_refunded_by_mode(payments, original_name):
+	"""Set ``refunded`` on each original payment row: what earlier submitted returns
+	refunded through its mode (D-R3-03).
+
+	The return dialog shares a refund over the modes by what each still has to
+	refund, so the last return lands every mode on its exact remainder. A mode on
+	several rows is taken from them in order. Refunds through a mode the original
+	did not use (a cross-branch remap) are not matched to any row.
+	"""
+	returns = frappe.get_all(
+		DOCTYPE_SALES_INVOICE,
+		filters={"return_against": original_name, "is_return": 1, "docstatus": 1},
+		pluck="name",
+	)
+	left = {}
+	if returns:
+		for row in frappe.get_all(
+			"Sales Invoice Payment",
+			filters={"parent": ["in", returns], "parenttype": DOCTYPE_SALES_INVOICE},
+			fields=["mode_of_payment", "amount"],
+		):
+			left[row.mode_of_payment] = left.get(row.mode_of_payment, 0) + abs(flt(row.amount))
+	precision = frappe.get_precision("Sales Invoice Payment", "amount") or 2
+	for row in payments:
+		refunded = flt(min(flt(row.amount), left.get(row.mode_of_payment, 0)), precision)
+		row["refunded"] = refunded
+		if row.mode_of_payment in left:
+			left[row.mode_of_payment] -= refunded
 
 
 def _refund_cash_row(rows):
@@ -6712,17 +6870,21 @@ def _redeem_on_submit(doc) -> list[str]:
 		# Ruling 117), on each date (``_offer_dates``); the most any gives explains.
 		offers = [_offer_rate(context.paid_offers(paid_rows, on)[0], idx, list_price) for on in dates]
 		offer = min((rate for rate in offers if rate is not None), default=None)
-		coupon = None
+		coupon, stacked = None, False
 		code = row.get("posnext_coupon_code")
 		if code:
 			# pos_next's coupon resolver, for the invoice's own coupon only (Ruling 118).
 			if code not in coupon_rates:
 				coupon_rates[code] = _coupon_line_rates(doc, code, paid_rows, context)
-			coupon = coupon_rates[code].get(idx)
+			coupon = coupon_rates[code][0].get(idx)
+			stacked = idx in coupon_rates[code][1]
 		fnf = fnf_rates.get(id(row))
 		other = min((rate for rate in (coupon, fnf) if rate is not None), default=None)
-		if offer is not None and (other is None or offer < other):
-			# The offer is the row's discount: a one-time rule it applied is this sale's use.
+		if (offer is not None and (other is None or offer < other)) or (
+			stacked and flt(row.rate) <= coupon + tolerance
+		):
+			# The offer is the row's discount, or part of it under an "Add on top" coupon
+			# (D-R3-04): a one-time rule it applied is this sale's use.
 			offers_on.append(idx)
 		explained = min(rate for rate in (list_price, offer, coupon, fnf) if rate is not None)
 		# Any rest is a discount the matching one-time rule redeems or re-gives.

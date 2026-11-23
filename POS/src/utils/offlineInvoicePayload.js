@@ -1,5 +1,9 @@
+import { stripFnfKeys, stripFriendsAndFamilyForOrder } from "@/utils/friendsAndFamily";
+
 /**
  * The sale queued by an offline checkout (synced later through submit_invoice).
+ * It is the cart's own doctype: a Sales Order cart queues a Sales Order, with its
+ * delivery date and no F&F, as the online submit sends it (H2 round 1, I-2).
  *
  * @param {Object} args
  * @param {Object} args.cart - the POS cart store
@@ -20,13 +24,19 @@ export function buildOfflineInvoiceData({
 	idempotencyKey = null,
 	idempotencyDoctype = null,
 }) {
+	const doctype = cart.targetDoctype || "Sales Invoice";
 	const data = {
+		doctype,
 		pos_profile: cart.posProfile,
 		posa_pos_opening_shift: cart.posOpeningShift,
 		company: shift.profileCompany,
 		customer: customer || shift.profileCustomer,
 		// The same items as the online submit (rate, discounts, pricing_rules, coupon tags).
-		items: cart.formatItemsForSubmission(cart.invoiceItems),
+		items: cart.formatItemsForSubmission(
+			doctype === "Sales Order"
+				? stripFriendsAndFamilyForOrder(cart.invoiceItems).items
+				: cart.invoiceItems
+		),
 		payments: JSON.parse(JSON.stringify(cart.payments)),
 		sales_team: JSON.parse(JSON.stringify(cart.salesTeam || [])),
 		grand_total: cart.grandTotal,
@@ -42,6 +52,10 @@ export function buildOfflineInvoiceData({
 		receivable_account: paymentData.receivable_account || null,
 		edited_from: editedFrom || null,
 	};
+	if (doctype === "Sales Order") {
+		stripFnfKeys(data);
+		if (cart.deliveryDate) data.delivery_date = cart.deliveryDate;
+	}
 	if (idempotencyKey) data.idempotency_key = idempotencyKey;
 	// An order's key carried by this sale (Ruling 146 (c)): the server looks it up as one.
 	if (idempotencyKey && idempotencyDoctype && idempotencyDoctype !== "Sales Invoice") {

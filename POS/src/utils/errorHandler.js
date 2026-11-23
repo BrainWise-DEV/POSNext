@@ -33,7 +33,11 @@ function cleanErrorMessage(rawMessage) {
 		return cleanErrorMessage(rawMessage.message || rawMessage.title || rawMessage.value);
 	}
 
-	let text = typeof rawMessage === "string" ? rawMessage : String(rawMessage);
+	// A line break the server put between sentences stays a space (D-R3-09)
+	let text = (typeof rawMessage === "string" ? rawMessage : String(rawMessage)).replace(
+		/<br\s*\/?>/gi,
+		" "
+	);
 
 	// Remove HTML tags
 	if (typeof window !== "undefined" && typeof document !== "undefined") {
@@ -105,6 +109,16 @@ export function parseError(error) {
 	// Categorize by exception type and message content
 	const normalizedMessage = (context.message || "").toLowerCase();
 	const excType = (error.exc_type || "").toLowerCase();
+
+	// The server refused the sale's coupon (pos_coupon.CouponNotApplicableError, D-R3-08):
+	// the caller drops it from the cart. Keyed on the type, never on translated text.
+	if (excType === "couponnotapplicableerror") {
+		context.type = "validation";
+		context.title = __("Coupon Not Applicable");
+		context.couponRefused = true;
+		context.retryable = false;
+		return context;
+	}
 
 	// Insufficient Stock
 	if (

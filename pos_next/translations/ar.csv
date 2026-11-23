@@ -2299,3 +2299,7 @@ Points applied: {0}. Please pay remaining {1} with {2},تم خصم النقاط:
 "Refund Mismatch","عدم تطابق المبلغ المسترد",""
 "Applied {0} ({1} per unit)","مُطبَّق {0} ({1} لكل وحدة)",""
 "The cart changed while the offer was being applied. Please apply it again.","تغيّرت السلة أثناء تطبيق العرض. يرجى تطبيقه مرة أخرى.",""
+Returns are not allowed on POS Profile {0}: Allow Return is off in its POS Settings.,المرتجعات غير مسموح بها في ملف نقطة البيع {0}: خيار السماح بالإرجاع مُعطّل في إعدادات نقطة البيع الخاصة به.,
+Returns Not Allowed,المرتجعات غير مسموح بها,
+Only Sales Orders are made on POS Profile {0}: Create Only Sales Order is on in its POS Settings.,لا يتم إنشاء سوى أوامر البيع في ملف نقطة البيع {0}: خيار إنشاء أوامر البيع فقط مُفعّل في إعدادات نقطة البيع الخاصة به.,
+Sales Orders Only,أوامر البيع فقط,

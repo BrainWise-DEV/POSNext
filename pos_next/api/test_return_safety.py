@@ -103,6 +103,9 @@ class TestReturnSafety(FrappeTestCase):
 		cls.tax_account = _ensure_tax_account(cls.ctx.company)
 		cls.pos_settings, cls.created_pos_settings = _ensure_pos_settings(cls.ctx.pos_profile)
 		cls.saved_tax_inclusive = frappe.db.get_value("POS Settings", cls.pos_settings, "tax_inclusive")
+		# POS returns need POS Settings "Allow Return" (D-R3-10)
+		cls.saved_allow_return = frappe.db.get_value("POS Settings", cls.pos_settings, "allow_return")
+		frappe.db.set_value("POS Settings", cls.pos_settings, "allow_return", 1)
 		cls.saved_rounding = frappe.db.get_value("POS Profile", cls.ctx.pos_profile, "disable_rounded_total")
 		frappe.db.commit()
 
@@ -112,6 +115,7 @@ class TestReturnSafety(FrappeTestCase):
 			frappe.delete_doc("POS Settings", cls.pos_settings, force=True, ignore_permissions=True)
 		else:
 			frappe.db.set_value("POS Settings", cls.pos_settings, "tax_inclusive", cls.saved_tax_inclusive)
+			frappe.db.set_value("POS Settings", cls.pos_settings, "allow_return", cls.saved_allow_return)
 		frappe.db.set_value("POS Profile", cls.ctx.pos_profile, "disable_rounded_total", cls.saved_rounding)
 		frappe.clear_document_cache("POS Profile", cls.ctx.pos_profile)
 		frappe.db.delete("POS Invoice Item", {"parent": POS_INVOICE})

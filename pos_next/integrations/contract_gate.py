@@ -10,7 +10,8 @@ import frappe
 
 # app -> (minimum FF_CONTRACT, release that provides it)
 REQUIREMENTS = {
-	"posnext_promotions": (3, "0.3.0"),
+	# 4: an invoice's own one-time redemption is not an earlier one (D-R3-04 b, Ruling 162)
+	"posnext_promotions": (4, "0.4.0"),
 	"magento_integration": (1, "0.2.0"),
 }
 

@@ -42,6 +42,9 @@ class TestReturnRefunds(FrappeTestCase):
 		cls.tax_account = _ensure_tax_account(cls.ctx.company)
 		cls.pos_settings, cls.created_pos_settings = _ensure_pos_settings(cls.ctx.pos_profile)
 		cls.saved_tax_inclusive = frappe.db.get_value("POS Settings", cls.pos_settings, "tax_inclusive")
+		# POS returns need POS Settings "Allow Return" (D-R3-10)
+		cls.saved_allow_return = frappe.db.get_value("POS Settings", cls.pos_settings, "allow_return")
+		frappe.db.set_value("POS Settings", cls.pos_settings, "allow_return", 1)
 		cls.saved_rounding = frappe.db.get_value("POS Profile", cls.ctx.pos_profile, "disable_rounded_total")
 		frappe.db.commit()
 
@@ -51,6 +54,7 @@ class TestReturnRefunds(FrappeTestCase):
 			frappe.delete_doc("POS Settings", cls.pos_settings, force=True, ignore_permissions=True)
 		else:
 			frappe.db.set_value("POS Settings", cls.pos_settings, "tax_inclusive", cls.saved_tax_inclusive)
+			frappe.db.set_value("POS Settings", cls.pos_settings, "allow_return", cls.saved_allow_return)
 		frappe.db.set_value("POS Profile", cls.ctx.pos_profile, "disable_rounded_total", cls.saved_rounding)
 		frappe.clear_document_cache("POS Profile", cls.ctx.pos_profile)
 		frappe.db.commit()
@@ -191,6 +195,30 @@ class TestReturnRefunds(FrappeTestCase):
 		)
 
 	# ------------------------------------------------------------------
+	# POS Settings "Allow Return" (D-R3-10)
+	# ------------------------------------------------------------------
+
+	def test_allow_return_off_refuses_prepare_and_submit(self):
+		sale = self._sale([_line(self.ctx, ITEM_C, price_list_rate=50)])
+		prepared = prepare_return_invoice(sale.name)
+		payload = self._payload(prepared, 50)
+
+		frappe.db.set_value("POS Settings", self.pos_settings, "allow_return", 0)
+		with self.assertRaisesRegex(frappe.ValidationError, "Allow Return is off"):
+			prepare_return_invoice(sale.name)
+		# A client that ignores the setting is refused when it saves or submits
+		with self.assertRaisesRegex(frappe.ValidationError, "Allow Return is off"):
+			update_invoice(json.dumps(payload, default=str))
+		with self.assertRaisesRegex(frappe.ValidationError, "Allow Return is off"):
+			submit_invoice(invoice=json.dumps(payload, default=str), data=json.dumps({}))
+		self.assertFalse(frappe.db.exists("Sales Invoice", {"return_against": sale.name, "docstatus": 1}))
+
+	def test_allow_return_on_accepts_the_return(self):
+		sale = self._sale([_line(self.ctx, ITEM_C, price_list_rate=50)])
+		ret = self._return(self._payload(prepare_return_invoice(sale.name), 50))
+		self._assert_refunded(ret, 50)
+
+	# ------------------------------------------------------------------
 	# Rounded originals
 	# ------------------------------------------------------------------
 
@@ -279,6 +307,13 @@ class TestReturnRefunds(FrappeTestCase):
 		self.assertEqual(
 			sorted(flt(i.rate) for i in ret.items), [0, 50], "return rates stay locked to the original rows"
 		)
+
+	def test_returned_free_row_keeps_is_free_item(self):
+		# D-R3-05: the dialog sends no is_free_item; the return row mirrors its original
+		sale = self._free_row_sale()
+		self.assertEqual(sorted((flt(i.rate), i.is_free_item) for i in sale.items), [(0, 1), (50, 0)])
+		ret = self._return(self._payload(prepare_return_invoice(sale.name), 115))
+		self.assertEqual(sorted((flt(i.rate), i.is_free_item) for i in ret.items), [(0, 1), (50, 0)])
 
 	def test_free_row_overrefund_is_refused_not_booked(self):
 		# The old dialog added the paid row's tax to the free row: 115 + 15
@@ -500,6 +535,31 @@ class TestReturnRefunds(FrappeTestCase):
 		ret = self._return(self._payload(prepared, 0, payments=[(cash, 20.5), (card, 14)]))
 		self.assertEqual(self._modes(ret), sorted([(cash, -20), (card, -14)]))
 		self.assertEqual(flt(ret.outstanding_amount), 0)
+
+	def test_prepared_payments_say_what_each_mode_refunded_already(self):
+		# D-R3-03: the dialog shares a refund by what each mode still has to refund
+		card = self._mode("_PNXT_TEST_RR_CARD")
+		cash = self.ctx.mode_of_payment
+		self._set_rounding(False)
+		sale = self._sale(
+			[_line(self.ctx, ITEM_C, qty=3, price_list_rate=115)], payments=[(cash, 245), (card, 100)]
+		)
+		prepared = prepare_return_invoice(sale.name)
+		self.assertEqual(
+			sorted(
+				(p["mode_of_payment"], flt(p["refunded"])) for p in prepared["_original_invoice"]["payments"]
+			),
+			sorted([(cash, 0), (card, 0)]),
+		)
+		row = prepared["items"][0]["sales_invoice_item"]
+		self._return(self._payload(prepared, 115, qty={row: 1}, payments=[(cash, 81.67), (card, 33.33)]))
+		prepared = prepare_return_invoice(sale.name)
+		self.assertEqual(
+			sorted(
+				(p["mode_of_payment"], flt(p["refunded"])) for p in prepared["_original_invoice"]["payments"]
+			),
+			sorted([(cash, 81.67), (card, 33.33)]),
+		)
 
 	def test_wallet_original_refunds_to_the_wallet(self):
 		wallet = self._mode("_PNXT_TEST_RR_WALLET", wallet=1)

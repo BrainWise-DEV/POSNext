@@ -175,7 +175,7 @@
 						<span>{{ __("POS Expense") }}</span>
 					</button>
 					<button
-						v-if="canAccessShiftActions"
+						v-if="canAccessShiftActions && posSettingsStore.allowReturn"
 						@click="openReturnDialog"
 						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-red-50 flex items-center gap-3 transition-colors"
 					>
@@ -1316,6 +1316,12 @@ const paymentCheck = usePaymentOpenCheck({
 	},
 	showError: (error) => {
 		const errorContext = parseError(error);
+		if (errorContext.couponRefused) {
+			// The coupon is gone from the cart; the cashier sees why (D-R3-08)
+			cartStore.dropRefusedCoupon();
+			uiStore.showError(errorContext.title, errorContext.message);
+			return;
+		}
 		showError(errorContext.message || __("Could not check the invoice total"));
 	},
 	// A submit of this cart that got no answer may already be made (D-19): send it
@@ -2488,13 +2494,15 @@ async function handlePaymentCompleted(paymentData) {
 
 			const offlinePrintDoc = {
 				name: offlineReceiptName,
-				doctype: "Sales Invoice",
+				// The queued document's own doctype: an order prints as an order (I-2)
+				doctype: invoiceData.doctype || "Sales Invoice",
 				is_offline: true,
 				pos_profile: cartStore.posProfile,
 				posting_date: new Date().toISOString().slice(0, 10),
 				company: shiftStore.profileCompany || undefined,
 				customer_name: customerLabel,
-				items: preparedItems.map((item) => ({
+				// The items the queued sale carries, as formatItemsForSubmission built them
+				items: invoiceData.items.map((item) => ({
 					...item,
 					quantity: item.qty ?? item.quantity,
 				})),
@@ -2512,9 +2520,10 @@ async function handlePaymentCompleted(paymentData) {
 			uiStore.setLastOfflinePrintDoc(offlinePrintDoc);
 			cacheOfflineReceiptPayload(offlineReceiptName, offlinePrintDoc);
 
-			// Deduct sold stock locally; the server refresh after sync replaces it
+			// Deduct sold stock locally; the server refresh after sync replaces it. An order
+			// takes no stock (I-2).
 			const soldQty = new Map();
-			for (const item of preparedItems) {
+			for (const item of invoiceData.doctype === "Sales Order" ? [] : invoiceData.items) {
 				const qty = (item.qty || 0) * (item.conversion_factor || 1);
 				soldQty.set(item.item_code, (soldQty.get(item.item_code) || 0) + qty);
 				if (item.batch_no) {
@@ -2662,6 +2671,13 @@ async function handlePaymentCompleted(paymentData) {
 		editingOfflineContext = null;
 
 		const errorContext = parseError(error);
+		if (errorContext.couponRefused) {
+			// The coupon was used up before this sale was submitted (D-R3-08): the cart
+			// drops it and is re-priced; the cashier pays again at the new total.
+			cartStore.dropRefusedCoupon();
+			uiStore.showError(errorContext.title, errorContext.message);
+			return;
+		}
 		// The cart is kept. Online, the price check runs again (Ruling 101): when the
 		// total changed, the cashier confirms the new one, with the server's message.
 		// A submit with no answer is not re-checked: it may already be made (D-19).
@@ -2824,7 +2840,8 @@ function openHistoryDialog() {
 }
 
 function openReturnDialog() {
-	if (!canAccessShiftActions.value) {
+	// POS Settings "Allow Return" off: no returns from this POS (D-R3-10)
+	if (!canAccessShiftActions.value || !posSettingsStore.allowReturn) {
 		return;
 	}
 

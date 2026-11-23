@@ -214,11 +214,12 @@
 
 						<!-- Document Type Card -->
 						<div
-							v-if="settingsStore.allowSalesOrder"
+							v-if="settingsStore.allowSalesOrder || settingsStore.createOnlySalesOrder"
 							class="flex items-center bg-white border border-gray-200 rounded-xl p-1.5 shadow-sm flex-shrink-0"
 						>
 							<div class="flex items-center bg-gray-100 rounded-lg p-0.5">
 								<button
+									v-if="!settingsStore.createOnlySalesOrder"
 									type="button"
 									@click="selectDocType('Sales Invoice')"
 									class="px-2.5 py-1.5 text-[11px] font-semibold rounded-md transition-all duration-200 flex items-center gap-1"
@@ -346,10 +347,11 @@
 
 						<!-- Document Type Toggle (Sales Invoice / Sales Order) -->
 						<div
-							v-if="settingsStore.allowSalesOrder"
+							v-if="settingsStore.allowSalesOrder || settingsStore.createOnlySalesOrder"
 							class="flex items-center bg-gray-100 rounded-xl p-0.5 h-10"
 						>
 							<button
+								v-if="!settingsStore.createOnlySalesOrder"
 								type="button"
 								@click="selectDocType('Sales Invoice')"
 								class="h-full px-2.5 text-xs font-semibold rounded-lg transition-all duration-200 flex items-center gap-1.5"
@@ -894,6 +896,7 @@
 
 					<!-- Return Invoice -->
 					<button
+						v-if="settingsStore.allowReturn"
 						type="button"
 						@click="$emit('show-return')"
 						class="flex flex-col items-center justify-center p-3 sm:p-4 bg-white border border-gray-200 rounded-lg hover:border-red-300 hover:bg-red-50 active:bg-red-100 transition-colors shadow-sm hover:shadow touch-manipulation group"

@@ -211,6 +211,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	const selectionMode = ref("uom"); // 'uom' or 'variant'
 	const currentDraftId = ref(null);
 	const targetDoctype = ref("Sales Invoice");
+	/** POS Settings "Create Only Sales Order": every cart is a Sales Order (D-R3-12). */
+	function defaultTargetDoctype() {
+		return settingsStore.createOnlySalesOrder ? "Sales Order" : "Sales Invoice";
+	}
 
 	// Friends & Family (PN-130). The server decides everything; the cart only
 	// mirrors its last answer for badges, breakdowns and cashier messages.
@@ -432,7 +436,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		fnfResult.value = null;
 		fnfCouponOverride.value = null;
 		currentDraftId.value = null;
-		targetDoctype.value = "Sales Invoice";
+		targetDoctype.value = defaultTargetDoctype();
 
 		// Reset offer processing state
 		offerProcessingState.value.lastCartHash = "";
@@ -443,7 +447,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		syncOfferSnapshot();
 	}
 
-	function setTargetDoctype(doctype) {
+	function setTargetDoctype(requested) {
+		// Only Sales Orders are made while POS Settings say so
+		const doctype = settingsStore.createOnlySalesOrder ? "Sales Order" : requested;
 		const previous = targetDoctype.value;
 		targetDoctype.value = doctype;
 		if (doctype === previous) return;
@@ -930,12 +936,23 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 */
 	async function setCustomer(selectedCustomer, { restoring = false } = {}) {
 		const previous = currentCustomerName();
+		const wasEligible = Boolean(fnfEligibility.value?.eligible);
 		customer.value = selectedCustomer;
 		if (!restoring && currentCustomerName() !== previous) dropLineCouponForCustomerChange();
 		const [, eligibility] = await Promise.all([
 			syncOneTimeContextForCurrentCustomer(),
 			refreshFriendsAndFamilyEligibility(true),
 		]);
+		// The same customer, saved again (e.g. a new email clears its verification): when
+		// its F&F eligibility changed, re-price the open cart as a customer change does (D-R3-07).
+		if (
+			!restoring &&
+			currentCustomerName() === previous &&
+			Boolean(eligibility?.eligible) !== wasEligible &&
+			invoiceItems.value.length > 0
+		) {
+			triggerOfferProcessing(true);
+		}
 		const emailBlock = fnfEmailBlockMessage(eligibility);
 		if (emailBlock && currentCustomerName() !== previous) {
 			showWarning(emailBlock);
@@ -1029,6 +1046,26 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		showSuccess(__("Discount has been removed from cart"));
 		// Bring Friends & Family back now that the coupon is gone.
 		if (hadFnfOverride) forceRefreshOffers();
+	}
+
+	/**
+	 * The server refused the cart's coupon at Checkout (Coupon Not Applicable, e.g. used
+	 * up by another cashier since it was applied, D-R3-08): drop it and re-price.
+	 * Returns whether a coupon was dropped.
+	 */
+	function dropRefusedCoupon() {
+		const coupon = appliedCoupon.value;
+		if (!coupon && !couponCode.value) return false;
+		if (isLineLevelCoupon(coupon)) {
+			clearCouponLines();
+			couponCode.value = null;
+		} else {
+			removeDiscount();
+		}
+		appliedCoupon.value = null;
+		fnfCouponOverride.value = null;
+		forceRefreshOffers();
+		return true;
 	}
 
 	/** Drop every F&F stamp in the cart (coupon won, program ended, customer changed…). */
@@ -2907,9 +2944,24 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			return;
 		}
 
-		// Skip offer processing if POS Profile has ignore_pricing_rule enabled
+		// POS Profile ignore_pricing_rule: no pricing rule applies. F&F is not a pricing
+		// rule: the server still prices it on save, so the cart shows it too (D-R3-11).
 		const shiftStore = usePOSShiftStore();
 		if (shiftStore.currentProfile?.ignore_pricing_rule) {
+			if (offlineState.isOffline) return;
+			try {
+				await refreshFriendsAndFamilyEligibility();
+				if (signal?.aborted || (generation > 0 && generation < cartGeneration)) return;
+				await evaluateFriendsAndFamilyOnly(
+					{ customer: customer.value?.name || customer.value },
+					signal,
+					generation
+				);
+			} catch (error) {
+				if (signal?.aborted) return;
+				console.error("Error applying Friends & Family:", error);
+				offerProcessingState.value.error = error.message;
+			}
 			return;
 		}
 
@@ -3202,6 +3254,16 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			triggerOfferProcessing(false);
 		}
 	};
+
+	// "Create Only Sales Order" turned on (or loaded after the cart): the open cart
+	// becomes a Sales Order, its F&F stripped as the Order switch strips it (D-R3-12).
+	watch(
+		() => settingsStore.createOnlySalesOrder,
+		(only) => {
+			if (only) setTargetDoctype("Sales Order");
+		},
+		{ immediate: true }
+	);
 
 	// Watch for ANY cart changes that might affect offer eligibility
 	// This includes: items, quantities, customer, subtotal, etc.
@@ -3500,7 +3562,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		fnfEligibilityKey = null;
 		fnfResult.value = record.fnf_result || null;
 		fnfCouponOverride.value = record.fnf_coupon_override || null;
-		targetDoctype.value = record.target_doctype || "Sales Invoice";
+		targetDoctype.value = settingsStore.createOnlySalesOrder
+			? "Sales Order"
+			: record.target_doctype || "Sales Invoice";
 		paymentDraftName.value = record.payment_draft_name || null;
 		// Possibly submitted before the reload: payment waits for the server's answer.
 		unverifiedDraftName.value = paymentDraftName.value;
@@ -3703,6 +3767,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		roundingAdjustment,
 		applyDiscountToCart,
 		removeDiscountFromCart,
+		dropRefusedCoupon,
 		buildCouponItemsPayload,
 		restoreLineCoupon,
 		applyOffer,

@@ -70,7 +70,7 @@ DEFAULT_POS_SETTINGS = {
 	"disable_rounded_total": 0,  # Derived from POS Profile
 	"allow_credit_sale": 0,
 	"allow_customer_credit_payment": 0,
-	"allow_return": 0,
+	"allow_return": 1,
 	"allow_write_off_change": 0,  # Derived from POS Profile
 	"allow_partial_payment": 0,
 	"use_exact_amount": 0,

@@ -165,6 +165,63 @@ class TestCouponStacking(DiscountEnforcementCase):
 		self.assertEqual(doc.docstatus, 1)
 		self.assertAlmostEqual(flt(doc.items[0].get(SHARE)), 4)
 
+	def test_stacked_line_keeps_its_promotion_tag(self):
+		# D-R3-04: the coupon's rate (36) is below the offer's (40), yet the offer is part
+		# of the line's discount: the sold row keeps the rule's name.
+		rule = self._rule(20)
+		code = self._coupon()
+		doc = self._submitted(self._coupon_row_payload(code, 36, rule=rule))
+		self.assertEqual(doc.docstatus, 1)
+		self.assertEqual(doc.items[0].pricing_rules, rule)
+
+	def _one_time_stack(self):
+		rule = self._rule(20)
+		frappe.db.set_value("Pricing Rule", rule, "one_time_per_customer", 1)
+		self.addCleanup(frappe.db.delete, "One Time Customer Offer Usage", {"pricing_rule": rule})
+		return rule, self._coupon()
+
+	def test_one_time_offer_under_an_add_on_top_coupon_is_redeemed(self):
+		# D-R3-04 sibling: a one-time offer given under a stacked coupon is this sale's use
+		rule, code = self._one_time_stack()
+		doc = self._submitted(self._coupon_row_payload(code, 36, rule=rule))
+		self.assertEqual(doc.docstatus, 1)
+		self.assertEqual(json.loads(doc.pos_applied_one_time_rules or "[]"), [rule])
+		self.assertEqual(
+			frappe.db.count("One Time Customer Offer Usage", {"pricing_rule": rule, "customer": CUSTOMER}),
+			1,
+		)
+
+	def test_one_time_offer_under_an_add_on_top_coupon_is_not_given_twice(self):
+		rule, code = self._one_time_stack()
+		self._submitted(self._coupon_row_payload(code, 36, rule=rule))
+		with self.assertRaises(frappe.ValidationError):
+			self._submitted(self._coupon_row_payload(code, 36, rule=rule))
+		self.assertEqual(
+			frappe.db.count("One Time Customer Offer Usage", {"pricing_rule": rule, "customer": CUSTOMER}),
+			1,
+		)
+
+	def test_one_time_offer_under_a_stacked_coupon_and_a_manual_discount_is_redeemed(self):
+		# H2 round 1: a permitted manual cut below the coupon's rate (36 -> 35.50) still
+		# leaves the one-time offer as part of the line's discount. Promotions' scoped-coupon
+		# check refuses any cut past the coupon's % on a coupon line today; it is patched out
+		# so pos_next's own judgment is tested should a coupon ever allow it.
+		from unittest.mock import patch
+
+		self._pos_settings(allow_user_to_edit_item_discount=1, allow_user_to_edit_rate=1)
+		rule, code = self._one_time_stack()
+		with patch(
+			"posnext_promotions.overrides.scoped_coupon.validate_scoped_coupon_lines",
+			lambda doc, method=None: None,
+		):
+			doc = self._submitted(self._coupon_row_payload(code, 35.5, rule=rule))
+		self.assertEqual(doc.docstatus, 1)
+		self.assertEqual(json.loads(doc.pos_applied_one_time_rules or "[]"), [rule])
+		self.assertEqual(
+			frappe.db.count("One Time Customer Offer Usage", {"pricing_rule": rule, "customer": CUSTOMER}),
+			1,
+		)
+
 	def test_client_share_is_overwritten(self):
 		rule = self._rule(20)
 		code = self._coupon(max_amount=0)

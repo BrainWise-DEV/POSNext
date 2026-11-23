@@ -228,7 +228,7 @@
    "label": "Allow Customer Credit Payment"
   },
   {
-   "default": "0",
+   "default": "1",
    "description": "Enable product returns",
    "fieldname": "allow_return",
    "fieldtype": "Check",
@@ -647,7 +647,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-11-17 18:00:00.000000",
+ "modified": "2026-11-22 03:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Settings",

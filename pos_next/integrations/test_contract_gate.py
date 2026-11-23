@@ -56,31 +56,33 @@ class TestContractGate(FrappeTestCase):
 				contract_gate.before_migrate(importer=imp)
 		self.assertEqual(
 			str(cm.exception),
-			"Update posnext_promotions to >= 0.3.0 before migrating (an older version is installed).",
+			"Update posnext_promotions to >= 0.4.0 before migrating (an older version is installed).",
 		)
 
 	def test_hook_passes_when_current(self):
 		imp = _importer(
-			posnext_promotions=SimpleNamespace(FF_CONTRACT=3),
+			posnext_promotions=SimpleNamespace(FF_CONTRACT=4),
 			magento_integration=SimpleNamespace(FF_CONTRACT=1),
 		)
 		with patch("frappe.get_installed_apps", return_value=["posnext_promotions", "magento_integration"]):
 			contract_gate.before_migrate(importer=imp)
 
-	def test_contract_needs_promotions_3(self):
-		"""G5: pos_next's F&F contract is 2 and needs posnext_promotions' contract 3."""
+	def test_contract_needs_promotions_4(self):
+		"""H2: pos_next stamps a one-time offer under an "Add on top" coupon (D-R3-04 b),
+		which needs posnext_promotions' contract 4: an older coupon-share check reads the
+		invoice's own redemption as an earlier one and refuses the sale."""
 		import pos_next
 
 		self.assertEqual(pos_next.FF_CONTRACT, 2)
 		self.assertEqual(pos_next.__version__, "2.6.0")
-		self.assertEqual(contract_gate.REQUIREMENTS["posnext_promotions"], (3, "0.3.0"))
+		self.assertEqual(contract_gate.REQUIREMENTS["posnext_promotions"], (4, "0.4.0"))
 		imp = _importer(
-			posnext_promotions=SimpleNamespace(FF_CONTRACT=2),
+			posnext_promotions=SimpleNamespace(FF_CONTRACT=3),
 			magento_integration=SimpleNamespace(FF_CONTRACT=1),
 		)
 		self.assertEqual(
 			check(contract_gate.REQUIREMENTS, ["posnext_promotions", "magento_integration"], imp),
-			["Update posnext_promotions to >= 0.3.0 before migrating (an older version is installed)."],
+			["Update posnext_promotions to >= 0.4.0 before migrating (an older version is installed)."],
 		)
 
 	def test_gate_registered_in_before_migrate_hooks(self):

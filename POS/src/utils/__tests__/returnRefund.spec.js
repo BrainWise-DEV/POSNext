@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { capRefund, emptiesOriginal, returnRefundAmount, splitRefund } from "../returnRefund";
+import {
+	capRefund,
+	emptiesOriginal,
+	refundWeight,
+	returnRefundAmount,
+	splitRefund,
+} from "../returnRefund";
 
 const rounds = { disable_rounded_total: 0, smallest_currency_fraction_value: 0 };
 const exact = { disable_rounded_total: 1, smallest_currency_fraction_value: 0 };
@@ -128,3 +134,26 @@ describe("emptiesOriginal", () => {
 		expect(emptiesOriginal([])).toBe(false);
 	});
 });
+
+describe("refundWeight (D-R3-03)", () => {
+	it("is what the mode kept paid less what earlier returns refunded through it", () => {
+		expect(refundWeight({ amount: 245 })).toBe(245)
+		expect(refundWeight({ amount: 245, refunded: 81.67 })).toBe(163.33)
+		expect(refundWeight({ amount: 100, refunded: 120 })).toBe(0)
+	})
+
+	it("three thirds of a Cash 245 + Card 100 sale land each mode on its exact amount", () => {
+		const original = [
+			{ mode: "Cash", amount: 245, refunded: 0 },
+			{ mode: "Card", amount: 100, refunded: 0 },
+		]
+		for (let part = 0; part < 3; part++) {
+			const split = splitRefund(115, original.map(refundWeight))
+			expect(split[0] + split[1]).toBeCloseTo(115, 6)
+			split.forEach((amount, index) => {
+				original[index].refunded = Math.round((original[index].refunded + amount) * 100) / 100
+			})
+		}
+		expect(original.map((row) => row.refunded)).toEqual([245, 100])
+	})
+})

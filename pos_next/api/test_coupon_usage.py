@@ -255,6 +255,34 @@ class TestCouponUsage(FrappeTestCase):
 		self.assertEqual(frappe.db.get_value("Sales Invoice", second["name"], "docstatus"), 0)
 		self.assertEqual(_used(), 1)
 
+	def _last_message_title(self):
+		log = frappe.local.message_log or []
+		last = log[-1] if log else {}
+		if isinstance(last, str):
+			last = json.loads(last)
+		return last.get("title")
+
+	def test_used_up_coupon_at_checkout_is_not_applicable(self):
+		# D-R3-08: another cashier used the last use between Apply and Checkout
+		frappe.db.set_value("POS Coupon", self.coupon, {"used": 1, "maximum_use": 1})
+		frappe.local.message_log = []
+		with self.assertRaisesRegex(
+			frappe.ValidationError, f"^Coupon {COUPON_CODE} has reached its usage limit$"
+		) as raised:
+			update_invoice(json.dumps(self._payload()))
+		# The POS keys on the exception type to drop the coupon, not on the text
+		self.assertEqual(type(raised.exception).__name__, "CouponNotApplicableError")
+		self.assertEqual(self._last_message_title(), "Coupon Not Applicable")
+
+	def test_used_up_coupon_at_submit_is_not_applicable(self):
+		frappe.db.set_value("POS Coupon", self.coupon, "maximum_use", 1)
+		first = update_invoice(json.dumps(self._payload()))
+		second = update_invoice(json.dumps(self._payload()))
+		submit_invoice(invoice=json.dumps(first, default=str), data=json.dumps({}))
+		with self.assertRaisesRegex(frappe.ValidationError, "has reached its usage limit") as raised:
+			submit_invoice(invoice=json.dumps(second, default=str), data=json.dumps({}))
+		self.assertEqual(type(raised.exception).__name__, "CouponNotApplicableError")
+
 	def _offline_id(self):
 		return f"pnxt-8c-{frappe.generate_hash(length=10)}"
 

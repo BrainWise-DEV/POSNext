@@ -44,6 +44,17 @@ export function emptiesOriginal(items) {
 }
 
 /**
+ * What an original payment row still has to refund: what it kept paid, net of
+ * change, less what earlier returns refunded through its mode (`refunded`, from
+ * prepare_return_invoice). Weighting by it lands the last return on each mode's
+ * exact remainder (D-R3-03).
+ */
+export function refundWeight(payment) {
+	const paid = Math.abs(Number(payment?.amount) || 0);
+	return roundCurrency(Math.max(0, paid - Math.abs(Number(payment?.refunded) || 0)));
+}
+
+/**
  * Split `total` over refund rows in proportion to `weights`: what each original
  * payment row kept, net of change. The rounding remainder goes on the row with
  * the largest weight. With no weights, everything goes on the first row.
