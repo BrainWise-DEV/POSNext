@@ -425,7 +425,7 @@ class TestGetSalesPersons(unittest.TestCase):
 		with (
 			patch.object(frappe, "db", db),
 			patch.object(frappe, "session", SimpleNamespace(user="cashier@example.com")),
-			patch.object(frappe, "get_list", return_value=rows) as get_list,
+			patch.object(frappe, "get_all", return_value=rows) as get_list,
 			patch.object(spc, "get_sales_person_commission_maps", side_effect=AssertionError),
 		):
 			# Bypass the whitelist type-validation wrapper (needs a request context)

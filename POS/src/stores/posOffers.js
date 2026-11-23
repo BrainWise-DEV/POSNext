@@ -11,6 +11,13 @@ import {
 	addOneTimeRedemptions,
 } from "@/utils/offline/db";
 import { usePOSShiftStore } from "@/stores/posShift";
+import { usePOSSettingsStore } from "@/stores/posSettings";
+
+/** Hours an offer list stays usable offline when POS Settings does not say (D-R4-01). */
+export const DEFAULT_OFFLINE_OFFER_VALIDITY_HOURS = 24;
+
+/** A cache-served offer list is fetched again at most this often after a failure. */
+const OFFER_REFETCH_INTERVAL_MS = 60 * 1000;
 
 const defaultSnapshot = () => ({
 	subtotal: 0,
@@ -45,6 +52,10 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 	const availableOffers = ref([]);
 	const cartSnapshot = ref(defaultSnapshot());
 	const hasFetched = ref(false);
+	// When the list was fetched from the server (a cached list: when it was cached), and
+	// whether it came from the offline cache: online, such a list is fetched again.
+	const offersFetchedAt = ref(0);
+	const offersFromCache = ref(false);
 
 	// One-time-per-customer context (mirrors the server gate in apply_offers).
 	// `oneTimeCustomerIdentified` is false for the walk-in/default customer;
@@ -170,18 +181,45 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 		cartSnapshot.value = defaultSnapshot();
 	}
 
-	function setAvailableOffers(offers = []) {
+	function setAvailableOffers(offers = [], { fetchedAt = Date.now(), fromCache = false } = {}) {
 		if (!Array.isArray(offers)) {
 			availableOffers.value = [];
 		} else {
 			availableOffers.value = offers;
 		}
+		offersFetchedAt.value = fetchedAt;
+		offersFromCache.value = fromCache;
 		hasFetched.value = true;
 	}
 
 	function clearOffers() {
 		availableOffers.value = [];
 		hasFetched.value = false;
+		offersFetchedAt.value = 0;
+		offersFromCache.value = false;
+	}
+
+	/** POS Settings' offline validity of the offer list, in hours (D-R4-01). */
+	function offlineOfferValidityHours() {
+		const hours = Number.parseFloat(usePOSSettingsStore().settings?.offline_offer_validity_hours);
+		return hours > 0 ? hours : DEFAULT_OFFLINE_OFFER_VALIDITY_HOURS;
+	}
+
+	/**
+	 * Offline, a list older than its validity prices nothing: an offer ended on the server
+	 * meanwhile must not keep being given away by a till that cannot ask (D-R4-01).
+	 */
+	function offersExpiredOffline() {
+		if (!isOffline() || !offersFetchedAt.value) return false;
+		return Date.now() - offersFetchedAt.value > offlineOfferValidityHours() * 3600 * 1000;
+	}
+
+	/** The offline cache of a profile's offers, with when it was written. */
+	async function loadCachedOffers(posProfile) {
+		const cached = (await offlineWorker.getCachedOffers(posProfile)) || [];
+		const stamps = cached.map((offer) => Number(offer?._cached_at) || 0).filter(Boolean);
+		setAvailableOffers(cached, { fetchedAt: stamps.length ? Math.min(...stamps) : 0, fromCache: true });
+		return cached.length > 0;
 	}
 
 	/**
@@ -292,6 +330,15 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 		const cartItemCodes = cartSnapshot.value.itemCodes || [];
 		const cartItemGroups = cartSnapshot.value.itemGroups || [];
 		const cartBrands = cartSnapshot.value.brands || [];
+
+		if (offersExpiredOffline()) {
+			return {
+				eligible: false,
+				reason: __("Offers were last refreshed over {0} hours ago. Connect to refresh them.", [
+					offlineOfferValidityHours(),
+				]),
+			};
+		}
 
 		// Check if cart is empty
 		if (itemCount === 0) {
@@ -465,6 +512,8 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 
 	// Track if we're currently fetching to prevent duplicate requests
 	let fetchPromise = null;
+	// When the last online fetch failed (review M9)
+	let lastFailedFetchAt = 0;
 
 	/**
 	 * Ensures offers are fetched before offer processing.
@@ -484,8 +533,13 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 			return false;
 		}
 
-		// If already fetched, return immediately
-		if (hasFetched.value) {
+		// If already fetched, return immediately. A list served from the offline cache is
+		// fetched again once the server answers, but not on every cart pass after a failed
+		// fetch: at most once a minute (Refresh and reconnect call refreshOffers, which
+		// fetches at once).
+		const retryCacheServed =
+			offersFromCache.value && !isOffline() && Date.now() - lastFailedFetchAt >= OFFER_REFETCH_INTERVAL_MS;
+		if (hasFetched.value && !retryCacheServed) {
 			return true;
 		}
 
@@ -504,14 +558,7 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 			try {
 				if (isOffline()) {
 					// Load offers from cache when offline
-					const cachedOffers = await offlineWorker.getCachedOffers(posProfile);
-					if (cachedOffers && cachedOffers.length > 0) {
-						setAvailableOffers(cachedOffers);
-						return true;
-					}
-					// No cached offers available offline
-					hasFetched.value = true; // Mark as fetched to prevent retries
-					return false;
+					return await loadCachedOffers(posProfile);
 				}
 
 				// Online: fetch from API
@@ -519,21 +566,32 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 					pos_profile: posProfile,
 				});
 
-				const offers = response?.message || response || [];
+				const offers = response?.message ?? response;
+				// Only a list is the server's answer: anything else is a failure, and the
+				// offline cache is kept, never cleared by it (D-R4-01 review I-2)
+				if (!Array.isArray(offers)) throw new Error("get_offers did not answer a list");
 				setAvailableOffers(offers);
 
-				// Cache offers for offline use
-				if (offers.length > 0) {
-					offlineWorker.cacheOffers(offers, posProfile).catch(() => {
-						// Silently ignore cache errors
-					});
-				}
+				// Cache offers for offline use; an empty list clears the cache, so an offer
+				// that ended is not kept for the next offline start (D-R4-01). The plain
+				// array: the worker cannot be sent the store's reactive copy.
+				offlineWorker.cacheOffers(offers, posProfile).catch((error) => {
+					console.warn("Offers not cached for offline use:", error?.message || error);
+				});
 
 				return true;
 			} catch (error) {
 				console.error("Error fetching offers:", error);
-				hasFetched.value = true; // Mark as fetched to prevent infinite retries
-				return false;
+				lastFailedFetchAt = Date.now();
+				// No answer (an offline start not detected yet): the cached list, fetched
+				// again once the server answers (D-R4-02)
+				try {
+					return await loadCachedOffers(posProfile);
+				} catch {
+					hasFetched.value = true; // Mark as fetched to prevent infinite retries
+					offersFromCache.value = true;
+					return false;
+				}
 			} finally {
 				fetchPromise = null;
 			}
@@ -542,11 +600,24 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 		return fetchPromise;
 	}
 
+	/**
+	 * Fetch the offer list from the server again and rewrite the offline cache (the
+	 * header Refresh, D-R4-01). Offline there is nothing to fetch: the list is kept.
+	 */
+	async function refreshOffers(posProfile) {
+		if (isOffline() || !posProfile) return false;
+		if (fetchPromise) await fetchPromise;
+		lastFailedFetchAt = 0;
+		clearOffers();
+		return ensureOffersFetched(posProfile);
+	}
+
 	return {
 		// State
 		availableOffers,
 		cartSnapshot,
 		hasFetched,
+		offersFromCache,
 		oneTimeCustomerIdentified,
 		redeemedOneTimeRules,
 
@@ -567,6 +638,7 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 		getEligibleItemAmount,
 		getUnlockAmount,
 		ensureOffersFetched,
+		refreshOffers,
 		setOneTimeContext,
 		addRedeemedOneTimeRule,
 		clearOneTimeContext,

@@ -51,7 +51,7 @@
 									<span dir="ltr">{{ formatDateTime(draft.created_at) }}</span>
 									<span class="text-gray-400">·</span>
 									<span class="text-blue-700 tabular-nums">{{
-										formatCurrency(calculateTotal(draft.items))
+										formatCurrency(heldCartTotal(draft))
 									}}</span>
 								</h4>
 								<p
@@ -184,9 +184,9 @@ import {
 	DEFAULT_CURRENCY,
 	DEFAULT_LOCALE,
 	formatCurrency as formatCurrencyUtil,
-	roundCurrency,
 } from "@/utils/currency";
 import { clearAllDrafts, deleteDraft, getAllDrafts } from "@/utils/draftManager";
+import { heldCartTotal } from "@/utils/draftTotal";
 import { printInvoiceCustom } from "@/utils/printInvoice";
 import { useToast } from "@/composables/useToast";
 import { usePOSShiftStore } from "@/stores/posShift";
@@ -267,7 +267,7 @@ function handlePrintDraft(draft) {
 			company: shiftStore.profileCompany,
 			items: draft.items,
 			payments: [],
-			grand_total: calculateTotal(draft.items),
+			grand_total: heldCartTotal(draft),
 			posting_date: draft.created_at,
 			customer_name: draft.customer?.customer_name || draft.customer?.name || draft.customer,
 			status: "Draft",
@@ -339,16 +339,4 @@ function formatCurrency(amount) {
 	return formatCurrencyUtil(Number.parseFloat(amount || 0), props.currency);
 }
 
-function calculateTotal(items) {
-	if (!items || items.length === 0) return 0;
-	return roundCurrency(
-		items.reduce((sum, item) => {
-			// A held line's amount is its net total after offers and coupons; older drafts lack it
-			if (typeof item.amount === "number") return sum + roundCurrency(item.amount);
-			const qty = item.quantity || item.qty || 1;
-			const rate = item.rate || 0;
-			return sum + roundCurrency(qty * roundCurrency(rate));
-		}, 0)
-	);
-}
 </script>

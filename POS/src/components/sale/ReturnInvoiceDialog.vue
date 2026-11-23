@@ -151,7 +151,7 @@
 										</div>
 										<div class="text-end ms-2">
 											<p class="text-sm font-medium text-gray-900">
-												{{ formatCurrency(suggestion.grand_total) }}
+												{{ formatCurrency(returnListAmount(suggestion)) }}
 											</p>
 											<p class="text-xs text-gray-400">
 												{{ formatDate(suggestion.posting_date) }}
@@ -244,7 +244,7 @@
 								<!-- Amount (End Side) -->
 								<div class="text-end flex-shrink-0">
 									<p class="text-sm font-bold text-gray-900">
-										{{ formatCurrency(invoice.grand_total) }}
+										{{ formatCurrency(returnListAmount(invoice)) }}
 									</p>
 								</div>
 							</div>
@@ -564,7 +564,7 @@
 										<span
 											v-if="item.discount_per_unit > 0"
 											class="inline-flex items-center px-1 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700"
-											>−{{ formatCurrency(item.discount_per_unit) }}</span
+											>−{{ perUnitLabel(formatCurrency(item.discount_per_unit), item.uom) }}</span
 										>
 										<span
 											v-if="
@@ -573,14 +573,14 @@
 											class="inline-flex items-center px-1 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700"
 											>{{
 												__("incl. {0} tax", [
-													formatCurrency(item.tax_per_unit),
+													perUnitLabel(formatCurrency(item.tax_per_unit), item.uom),
 												])
 											}}</span
 										>
 										<span
 											v-else-if="item.tax_per_unit > 0"
 											class="inline-flex items-center px-1 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700"
-											>+{{ formatCurrency(item.tax_per_unit) }}</span
+											>+{{ perUnitLabel(formatCurrency(item.tax_per_unit), item.uom) }}</span
 										>
 									</p>
 								</div>
@@ -691,7 +691,7 @@
 												v-if="item.discount_per_unit > 0"
 												class="inline-flex items-center px-1 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700"
 												>−{{
-													formatCurrency(item.discount_per_unit)
+													perUnitLabel(formatCurrency(item.discount_per_unit), item.uom)
 												}}</span
 											>
 											<span
@@ -702,14 +702,14 @@
 												class="inline-flex items-center px-1 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700"
 												>{{
 													__("incl. {0} tax", [
-														formatCurrency(item.tax_per_unit),
+														perUnitLabel(formatCurrency(item.tax_per_unit), item.uom),
 													])
 												}}</span
 											>
 											<span
 												v-else-if="item.tax_per_unit > 0"
 												class="inline-flex items-center px-1 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-700"
-												>+{{ formatCurrency(item.tax_per_unit) }}</span
+												>+{{ perUnitLabel(formatCurrency(item.tax_per_unit), item.uom) }}</span
 											>
 										</p>
 									</div>
@@ -1182,6 +1182,7 @@
 </template>
 
 <script setup>
+import { perUnitLabel, returnListAmount } from "@/utils/returnDisplay";
 import { useAuthorization } from "@/composables/useAuthorization";
 import { isAuthorizationError } from "@/utils/authorizationError";
 import { useOfflineStatus } from "@/composables/useOfflineStatus";
@@ -1385,10 +1386,13 @@ const fetchInvoiceResource = createResource({
 				name: data.return_against,
 				customer: data.customer,
 				customer_name: origInvoice.customer_name || data.customer_name,
+				// The status pill (D-R4-09 d)
+				status: origInvoice.status || "",
 				company: data.company,
 				posting_date: origInvoice.posting_date,
 				grand_total: origInvoice.grand_total,
 				paid_amount: origInvoice.paid_amount,
+				change_amount: origInvoice.change_amount,
 				outstanding_amount: origInvoice.outstanding_amount,
 				payments: origInvoice.payments || [],
 				// The return rounds as the original did (D-R2-16)

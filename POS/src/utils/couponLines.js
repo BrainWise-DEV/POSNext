@@ -76,6 +76,18 @@ export function preCouponLineDiscount(item) {
 	return unitRoundedAmountDiscount(pre.requested_discount_amount || pre.discount_amount, qty, base);
 }
 
+/**
+ * Line discount that prices a stacked ("Add on top") coupon line at the server's unit
+ * rate to the cent, the rate the invoice saves (D-R4-03: 37.503 is 37.50 a unit).
+ */
+export function stackedUnitRateDiscount(item, serverRate) {
+	const unitPrice =
+		item.is_rate_manually_edited === 1 ? Number(item.rate) || 0 : Number(item.price_list_rate || item.rate) || 0;
+	const qty = Number(item.quantity) || 0;
+	const perUnit = Math.max(roundCurrency(unitPrice) - roundCurrency(serverRate), 0);
+	return roundCurrency(perUnit * qty);
+}
+
 export function hasFixedCouponDiscount(item) {
 	return isCouponLine(item) && item.coupon_fixed_discount != null;
 }

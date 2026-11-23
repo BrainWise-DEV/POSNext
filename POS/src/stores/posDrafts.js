@@ -43,7 +43,8 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 		posProfile,
 		appliedOffers = [],
 		draftId = null,
-		appliedCoupon = null
+		appliedCoupon = null,
+		grandTotal = null
 	) {
 		if (invoiceItems.length === 0) {
 			showWarning(__("Cannot save an empty cart as draft"));
@@ -58,6 +59,9 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 				applied_offers: appliedOffers, // Save applied offers
 				// Scoped coupons live on the lines; the coupon must travel with them.
 				applied_coupon: appliedCoupon?.line_level ? appliedCoupon : null,
+				// The total the cart showed, header discount included: the draft list shows
+				// it (D-R4-09 a, review M8)
+				grand_total: Number.isFinite(Number(grandTotal)) && grandTotal !== null ? Number(grandTotal) : null,
 			};
 
 			let savedDraft;

@@ -712,7 +712,11 @@ export function buildFnfCartMessages({
 	const orderLost = result.reason === FNF_REASON.ORDER_DISCOUNT_BETTER;
 	if (suppressed.length > 0 || orderLost) {
 		const text = pickLocalizedMessage(best, locale);
-		if (text) messages.push({ key: "comparison", tone: "info", text });
+		// A line that lost F&F already says so under itself: not twice (D-R4-06)
+		const notedOnALine = (result.lines || []).some(
+			(line) => line?.best_discount && pickLocalizedMessage(line.best_discount, locale) === text
+		);
+		if (text && !notedOnALine) messages.push({ key: "comparison", tone: "info", text });
 	}
 
 	if (caps.active && caps.monthly_remaining !== null && caps.monthly_remaining !== undefined) {

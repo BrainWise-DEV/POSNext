@@ -42,6 +42,12 @@ class POSSettings(Document):
 
 		self.validate_verification_provider()
 
+		# 0 would read as "never expire" or "never apply offline": neither is what the POS
+		# does, so at least an hour (None before the column is migrated: nothing to check)
+		hours = self.get("offline_offer_validity_hours")
+		if hours is not None and cint(hours) < 1:
+			frappe.throw(_("Offline Offer Validity must be at least 1 hour"))
+
 	def validate_verification_provider(self):
 		"""A set provider must be registered; blank means the built-in frappe_email."""
 		if not self.verification_provider:

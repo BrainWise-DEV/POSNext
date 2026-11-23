@@ -11,7 +11,9 @@ import {
 	hasFixedCouponDiscount,
 	isCouponLine,
 	preCouponDiscount,
+	preCouponLineDiscount,
 	restorePreCouponDiscount,
+	stackedUnitRateDiscount,
 	stashPreCouponDiscount,
 } from "@/utils/couponLines";
 import { getPrecision, roundCurrency } from "@/utils/currency";
@@ -168,6 +170,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		salesTeam,
 		additionalDiscount,
 		taxInclusive,
+		taxRulesNeedReload,
 		isSubmitting,
 		addItem: addItemToInvoice,
 		removeItem,
@@ -919,14 +922,16 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 */
 	function dropLineCouponForCustomerChange() {
 		const coupon = appliedCoupon.value;
-		if (!isLineLevelCoupon(coupon)) return;
+		if (!isLineLevelCoupon(coupon)) return "";
 		for (const item of invoiceItems.value) stripStashedFnf(item);
 		clearCouponLines();
 		couponCode.value = null;
 		appliedCoupon.value = null;
 		fnfCouponOverride.value = null;
-		showWarning(__("Coupon {0} removed: the customer changed", [coupon.code || coupon.name || ""]));
+		const notice = __("Coupon {0} removed: the customer changed", [coupon.code || coupon.name || ""]);
+		showWarning(notice);
 		forceRefreshOffers();
+		return notice;
 	}
 
 	/**
@@ -938,7 +943,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		const previous = currentCustomerName();
 		const wasEligible = Boolean(fnfEligibility.value?.eligible);
 		customer.value = selectedCustomer;
-		if (!restoring && currentCustomerName() !== previous) dropLineCouponForCustomerChange();
+		// Said again with the F&F message below, which would otherwise replace it (D-R4-09 b)
+		const couponNotice =
+			!restoring && currentCustomerName() !== previous ? dropLineCouponForCustomerChange() : "";
 		const [, eligibility] = await Promise.all([
 			syncOneTimeContextForCurrentCustomer(),
 			refreshFriendsAndFamilyEligibility(true),
@@ -954,16 +961,16 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			triggerOfferProcessing(true);
 		}
 		const emailBlock = fnfEmailBlockMessage(eligibility);
+		const withCouponNotice = (text) => [couponNotice, text].filter(Boolean).join(" ");
 		if (emailBlock && currentCustomerName() !== previous) {
-			showWarning(emailBlock);
+			showWarning(withCouponNotice(emailBlock));
 		}
 		if (eligibility?.eligible && currentCustomerName() !== previous) {
-			showSuccess(
+			const welcome =
 				pickLocalizedMessage(eligibility.customerMessage, currentUiLocale()) ||
-					__("Friends & Family customer — {0}% discount", [
-						String(eligibility.discountPercentage),
-					])
-			);
+				__("Friends & Family customer — {0}% discount", [String(eligibility.discountPercentage)]);
+			if (couponNotice) showWarning(withCouponNotice(welcome));
+			else showSuccess(welcome);
 		}
 	}
 
@@ -1030,6 +1037,19 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		applyDiscount(discount);
 		appliedCoupon.value = discount;
 		showSuccess(__("{0} applied successfully", [discount.name]));
+	}
+
+	/**
+	 * The grand total a held cart charges when resumed, or null when it is not this one:
+	 * a hold keeps the lines and a line coupon, and offers re-apply their own order
+	 * discount, but an order-level coupon or a manual header discount is not kept, so
+	 * the draft list must sum the lines instead (review R1-m1).
+	 */
+	function resumableGrandTotal() {
+		if (isWholeCartCoupon(appliedCoupon.value)) return null;
+		const header = Number(additionalDiscount.value) || 0;
+		if (header > 0 && Math.abs(header - (Number(offerHeaderDiscount.value) || 0)) > 1e-9) return null;
+		return grandTotal.value;
 	}
 
 	function removeDiscountFromCart() {
@@ -1229,9 +1249,18 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			// Cart changed while the request was in flight; the revalidation watcher catches up.
 			if (!item || item.item_code !== update.item_code) continue;
 			const percentage = Number.parseFloat(update.discount_percentage) || 0;
-			const fixedAmount = percentage > 0 ? 0 : Number.parseFloat(update.discount_amount) || 0;
 			// A stacked line's discount includes what it already had, so the coupon % is no cap for it.
 			const stacked = Boolean(update.stacked);
+			// A stacked line is priced at the server's unit rate to the cent, as the invoice saves
+			// it: 37.503 is 37.50, not a line discount floored to 37.51 a unit (D-R4-03).
+			const serverRate = Number.parseFloat(update.rate);
+			const atServerRate = percentage <= 0 && stacked && Number.isFinite(serverRate);
+			const fixedAmount =
+				percentage > 0
+					? 0
+					: atServerRate
+						? stackedUnitRateDiscount(item, serverRate)
+						: Number.parseFloat(update.discount_amount) || 0;
 			stashPreCouponDiscount(item);
 			item.discount_percentage = percentage;
 			item.discount_amount = fixedAmount;
@@ -1242,12 +1271,17 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			item.discount_source = COUPON_DISCOUNT_SOURCE;
 			item.coupon_code = code;
 			recalculateItem(item);
+			if (atServerRate) {
+				// The chip shows what the line takes over its promotion, as the invoice row sends it
+				total += Math.max(roundCurrency(item.discount_amount - preCouponLineDiscount(item)), 0);
+				continue;
+			}
 			// The server names the coupon's own share coupon_only_discount (older builds: coupon_discount_amount)
 			const couponPart = Number.parseFloat(update.coupon_only_discount ?? update.coupon_discount_amount);
 			total += Number.isFinite(couponPart) ? couponPart : item.discount_amount;
 		}
 		rebuildIncrementalCache();
-		return total;
+		return roundCurrency(total);
 	}
 
 	// Keep fixed coupon lines within their allocation after a local quantity/UOM change.
@@ -3743,6 +3777,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		hasCustomer,
 		isProcessingOffers, // True when any offer operation is in progress
 		isSubmitting, // True when invoice submission is in progress (mutex protected)
+		taxRulesNeedReload, // Tax rules came from the offline cache (or none): reload online
 
 		// Actions
 		addItem,
@@ -3801,6 +3836,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			offerQueue.cancel();
 		},
 		forceRefreshOffers, // Force reprocess offers from scratch
+		resumableGrandTotal, // The total a hold keeps, else null (R1-m1)
 		refreshFriendsAndFamilyEligibility,
 		recheckFriendsAndFamily,
 

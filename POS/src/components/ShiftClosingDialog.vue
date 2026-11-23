@@ -1210,7 +1210,7 @@ import { useFormatters } from "../composables/useFormatters";
 import { useToast } from "../composables/useToast";
 import { usePOSSettingsStore } from "../stores/posSettings";
 import { usePOSShiftStore } from "../stores/posShift";
-import { printEODReport } from "../utils/printEod";
+import { eodPrintFailureMessage, printEODReport } from "../utils/printEod";
 import { closingShiftPayload, openDraftsNotice } from "../utils/shiftGuards";
 import TranslatedHTML from "./common/TranslatedHTML.vue";
 
@@ -1235,7 +1235,7 @@ const open = computed({
 
 const { getClosingShiftData, submitClosingShift } = useShift();
 const { formatCurrency, formatQuantity, formatDateTime, formatTime } = useFormatters();
-const { showSuccess, showWarning } = useToast();
+const { showSuccess, showError } = useToast();
 const posSettingsStore = usePOSSettingsStore();
 const { hideExpectedAmount } = storeToRefs(posSettingsStore);
 
@@ -1373,7 +1373,7 @@ async function submitClosing() {
 				eodPrintFailed.value = null;
 			} catch (err) {
 				console.warn("[eod] print failed", err);
-				showWarning(__("EOD report did not print. Use the Reprint button to retry."));
+				showError(eodPrintFailureMessage(err));
 				eodPrintFailed.value = { closingShiftName };
 				showSuccessReport.value = true;
 				return;
@@ -1410,7 +1410,7 @@ async function retryEodPrint() {
 		closeDialog();
 	} catch (err) {
 		console.warn("[eod] retry print failed", err);
-		showWarning(__("EOD report did not print. Please check QZ Tray and retry."));
+		showError(eodPrintFailureMessage(err));
 	} finally {
 		retryPrintLoading.value = false;
 	}

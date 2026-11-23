@@ -211,6 +211,7 @@ export function parseError(error) {
 		context.title = __("Connection Error");
 		context.message = __("Unable to connect to server. Check your internet connection.");
 		context.retryable = true;
+		context.connectionError = true;
 	}
 	// Duplicate Errors
 	else if (
@@ -222,6 +223,27 @@ export function parseError(error) {
 		context.retryable = false;
 	}
 
+	return context;
+}
+
+/**
+ * The error a failed submit shows. A connection error on a submit whose outcome is
+ * unknown (the request may have reached the server, D-19) must not say "Unable to
+ * connect": the sale may already be saved, and a cashier told otherwise may ring it
+ * again by hand. Try Again checks it and never makes a second sale (D-R4-09 c).
+ *
+ * @param {Error} error
+ * @param {{ outcomeUnknown?: boolean }} options
+ */
+export function submitErrorContext(error, { outcomeUnknown = false } = {}) {
+	const context = parseError(error);
+	if (outcomeUnknown && context.connectionError) {
+		context.title = __("No answer from the server");
+		context.message = __(
+			"The sale may already be saved: the server's answer did not arrive. Press Try Again to check it. It never makes a second sale, so do not ring it up again."
+		);
+		context.retryable = true;
+	}
 	return context;
 }
 

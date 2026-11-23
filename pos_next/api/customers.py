@@ -285,6 +285,37 @@ def get_customer_defaults():
 	}
 
 
+def _can_edit_customers():
+	"""The customer dialog's permission: create a customer, or edit one."""
+	if not (frappe.has_permission("Customer", "create") or frappe.has_permission("Customer", "write")):
+		frappe.throw(_("Not permitted to create or edit customers"), frappe.PermissionError)
+
+
+@frappe.whitelist()
+def get_governorates():
+	"""Governorates for the customer dialog, which a cashier cannot list itself (D-R4-10).
+
+	Names only; same permission as creating or editing a customer.
+	"""
+	_can_edit_customers()
+	return frappe.get_all("POS Governorate", pluck="name", order_by="name asc", limit_page_length=500)
+
+
+@frappe.whitelist()
+def get_districts(governorate=None):
+	"""Districts of one governorate for the customer dialog (D-R4-10). Same permission."""
+	_can_edit_customers()
+	if not governorate:
+		return []
+	return frappe.get_all(
+		"POS District",
+		filters={"governorate": governorate},
+		fields=["name", "district"],
+		order_by="district asc",
+		limit_page_length=0,
+	)
+
+
 def _is_leaf_territory(name):
 	"""True when name exists and is not a group node."""
 	if not name:

@@ -14,6 +14,9 @@
 					<Transition name="dialog-content">
 						<div
 							v-if="show"
+							role="dialog"
+							aria-modal="true"
+							aria-labelledby="edit-item-dialog-title"
 							class="my-8 inline-block w-full max-w-md transform overflow-hidden rounded-xl bg-white text-left align-middle shadow-xl dialog-content z-dialog-content"
 						>
 							<!-- Header - matching frappe-ui Dialog style -->
@@ -23,6 +26,7 @@
 										<div class="mb-6 flex items-center justify-between">
 											<div class="flex items-center space-x-2">
 												<h3
+													id="edit-item-dialog-title"
 													class="text-2xl font-semibold leading-6 text-gray-900"
 												>
 													{{ __("Edit Item Details") }}
@@ -30,6 +34,7 @@
 											</div>
 											<button
 												type="button"
+												:aria-label="__('Close')"
 												@click="cancel"
 												class="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
 											>

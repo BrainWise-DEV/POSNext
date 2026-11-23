@@ -286,6 +286,8 @@ def _reset_row_pricing_rules(items) -> set[str]:
 		if item.get("pricing_rules"):
 			seen.update(_rule_names(item.pricing_rules))
 			if not cint(item.get("is_free_item")):
+				# What the client said priced the row, for the ended-offer check (D-R4-01)
+				item.flags.pos_client_rules = _rule_names(item.pricing_rules)
 				item.pricing_rules = ""
 	_keep_gift_rule_names(items)
 	return seen
@@ -1352,6 +1354,61 @@ def _zero_price_message(row) -> str:
 
 
 UNEXPLAINED_DISCOUNT_LOG_TITLE = "Unexplained discount"
+ENDED_OFFER_LOG_TITLE = "Offline discount from an ended offer"
+
+
+def _ended_rule_reasons(rule_names, on_date) -> dict[str, str]:
+	"""{rule: why it no longer prices a sale} for the named Pricing Rules that are disabled,
+	or out of their validity on ``on_date``."""
+	if not rule_names:
+		return {}
+	rows = frappe.get_all(
+		"Pricing Rule",
+		filters={"name": ["in", list(rule_names)]},
+		fields=["name", "title", "disable", "valid_from", "valid_upto"],
+	)
+	day = getdate(on_date)
+	reasons = {}
+	for rule in rows:
+		if cint(rule.disable):
+			# Known only as of now: it may still have been live when the till sold (review M4)
+			reason = "disabled at sync"
+		elif rule.valid_upto and getdate(rule.valid_upto) < day:
+			reason = f"expired on {rule.valid_upto}"
+		elif rule.valid_from and getdate(rule.valid_from) > day:
+			reason = f"not valid before {rule.valid_from}"
+		else:
+			continue
+		reasons[rule.name] = f"{rule.name} ({rule.title}) {reason}" if rule.title else f"{rule.name} {reason}"
+	return reasons
+
+
+def _log_ended_offer_rows(invoice_doc, below) -> None:
+	"""Offline sync (D-R4-01): a paid row the till priced with an offer that has since been
+	disabled or has expired is not taken on the rule's word. The sale is kept (offline
+	policy: keep and log, never strand) and each such row is logged once, with its rule,
+	row and rate, whatever else would explain the discount."""
+	named = {id(row): row.flags.get("pos_client_rules") or [] for row, *_ in below}
+	ended = _ended_rule_reasons(
+		{rule for rules in named.values() for rule in rules}, invoice_doc.get("posting_date") or nowdate()
+	)
+	if not ended:
+		return
+	done = invoice_doc.flags.setdefault("pos_ended_offer_logged", set())
+	reference = invoice_doc.name or invoice_doc.get("offline_id") or "new"
+	for row, list_price, _tolerance in below:
+		for rule in named[id(row)]:
+			key = (row.idx, rule)
+			if rule not in ended or key in done:
+				continue
+			done.add(key)
+			log_error_without_telemetry(
+				ENDED_OFFER_LOG_TITLE,
+				f"Invoice {reference} (offline): Row {row.idx}: item {row.item_code} sold at {flt(row.rate)} "
+				f"against a list price of {flt(list_price)} by offer {ended[rule]}; the sale is kept.",
+			)
+
+
 FNF_DISCOUNT_SOURCE = "friends_and_family"
 FIELD_ALLOW_USER_TO_EDIT_ITEM_DISCOUNT = "allow_user_to_edit_item_discount"
 FIELD_ALLOW_USER_TO_EDIT_ADDITIONAL_DISCOUNT = "allow_user_to_edit_additional_discount"
@@ -1860,6 +1917,8 @@ def _check_paid_row_discounts(invoice_doc, offline_sync=False, paid_draft_rows=N
 		below.append((row, list_price, tolerance))
 	if not below:
 		return
+	if offline_sync:
+		_log_ended_offer_rows(invoice_doc, below)
 
 	result, _error = context.paid_offers(paid_rows)
 	index = {id(row): idx for idx, row in enumerate(paid_rows)}
@@ -4891,6 +4950,9 @@ def get_returnable_invoices(limit=50, pos_profile=None):
 			si.contact_mobile,
 			si.posting_date,
 			si.grand_total,
+			si.rounded_total,
+			si.paid_amount,
+			si.change_amount,
 			si.status,
 		)
 		.where((si.docstatus == 1) & (si.is_return == 0) & (si.is_pos == 1))
@@ -4944,6 +5006,9 @@ def search_invoice_by_number(search_term, pos_profile=None):
 			si.contact_mobile,
 			si.posting_date,
 			si.grand_total,
+			si.rounded_total,
+			si.paid_amount,
+			si.change_amount,
 			si.status,
 		)
 		.where(
@@ -5311,6 +5376,7 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
 			si.disable_rounded_total,
 			si.change_amount,
 			si.base_change_amount,
+			si.status,
 		)
 		.where(si.name == invoice_name)
 	).run(as_dict=True)
@@ -5424,8 +5490,11 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
 	# Include original invoice data for reference (payments, amounts, etc.)
 	return_dict["_original_invoice"] = {
 		"name": invoice_name,
+		# The return dialog's status pill (D-R4-09 d)
+		"status": invoice_info.status,
 		"grand_total": invoice_info.grand_total,
 		"paid_amount": invoice_info.paid_amount,
+		"change_amount": invoice_info.change_amount,
 		"outstanding_amount": invoice_info.outstanding_amount,
 		"customer": invoice_info.customer,
 		"customer_name": invoice_info.customer_name,

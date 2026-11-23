@@ -75,6 +75,8 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		// Security
 		enable_session_lock: 0,
 		session_lock_timeout: 5,
+		// Offline offer list validity (D-R4-01)
+		offline_offer_validity_hours: 24,
 	});
 
 	const isLoading = ref(false);
@@ -305,6 +307,8 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 			// Security
 			enable_session_lock: 0,
 			session_lock_timeout: 5,
+		// Offline offer list validity (D-R4-01)
+		offline_offer_validity_hours: 24,
 		};
 		isLoaded.value = false;
 	}

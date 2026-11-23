@@ -1207,7 +1207,7 @@ import { useLocale } from "@/composables/useLocale";
 import { usePaymentOpenCheck } from "@/composables/usePaymentOpenCheck";
 import { session } from "@/data/session";
 import { useUserData } from "@/data/user";
-import { parseError } from "@/utils/errorHandler";
+import { parseError, submitErrorContext } from "@/utils/errorHandler";
 import { cleanupUserSession } from "@/utils/sessionCleanup";
 import { offlineWorker } from "@/utils/offline/workerClient";
 import { deductCachedBatchQty } from "@/utils/offline/items";
@@ -1233,6 +1233,9 @@ import { useStockStore } from "@/stores/stock";
 // Pinia Stores
 import { usePOSCartStore } from "@/stores/posCart";
 import { usePOSDraftsStore } from "@/stores/posDrafts";
+import { usePOSOffersStore } from "@/stores/posOffers";
+import { useReconnectRecovery } from "@/composables/useReconnectRecovery";
+import { useCacheWriteWarning } from "@/composables/useCacheWriteWarning";
 import { usePOSSettingsStore } from "@/stores/posSettings";
 import { usePOSShiftStore } from "@/stores/posShift";
 import { usePOSSyncStore } from "@/stores/posSync";
@@ -1249,11 +1252,25 @@ const shiftStore = usePOSShiftStore();
 const uiStore = usePOSUIStore();
 const offlineStore = usePOSSyncStore();
 const draftsStore = usePOSDraftsStore();
+const offersStore = usePOSOffersStore();
 const posSettingsStore = usePOSSettingsStore();
 const itemStore = useItemSearchStore();
 const stockStore = useStockStore();
 const customerSearchStore = useCustomerSearchStore();
 const bootstrapStore = useBootstrapStore();
+
+// Back online after an offline start: reload tax rules, offers and items (D-R4-02)
+useReconnectRecovery({
+	isOffline: () => offlineStore.isOffline,
+	isReady: () => Boolean(_initializedKey),
+	cart: cartStore,
+	offers: offersStore,
+	items: itemStore,
+	profileName: () => shiftStore.profileName,
+	settings: () => posSettingsStore.settings,
+	worker: offlineWorker,
+});
+
 // Note: settingsStore is an alias to posSettingsStore (same Pinia store singleton)
 const settingsStore = posSettingsStore;
 
@@ -1280,6 +1297,8 @@ const {
 
 // Initialize toast
 const { showSuccess, showError, showWarning } = useToast();
+// An offline cache write lost because the worker is down is said, once in a while
+useCacheWriteWarning(showWarning);
 
 // Initialize logger
 const log = logger.create("POSSale");
@@ -2670,7 +2689,7 @@ async function handlePaymentCompleted(paymentData) {
 		// checkout doesn't supersede the wrong row on a fresh, unrelated sale.
 		editingOfflineContext = null;
 
-		const errorContext = parseError(error);
+		const errorContext = submitErrorContext(error, { outcomeUnknown: cartStore.hasUnresolvedSubmit() });
 		if (errorContext.couponRefused) {
 			// The coupon was used up before this sale was submitted (D-R3-08): the cart
 			// drops it and is re-priced; the cashier pays again at the new total.
@@ -2899,7 +2918,8 @@ async function handleSaveDraft() {
 		cartStore.posProfile,
 		cartStore.appliedOffers,
 		cartStore.currentDraftId,
-		cartStore.appliedCoupon
+		cartStore.appliedCoupon,
+		cartStore.resumableGrandTotal()
 	);
 	if (savedDraft) {
 		// The draft now holds the serials
@@ -2919,7 +2939,8 @@ async function handleLoadDraft(draft) {
 				cartStore.posProfile,
 				cartStore.appliedOffers,
 				cartStore.currentDraftId,
-				cartStore.appliedCoupon
+				cartStore.appliedCoupon,
+				cartStore.resumableGrandTotal()
 			);
 
 			if (!saved) {
@@ -3046,7 +3067,10 @@ async function handleCustomerUpdated(updatedCustomer) {
 
 async function handleRefresh() {
 	try {
-		log.info("Manual refresh initiated (items, customers, stock)");
+		log.info("Manual refresh initiated (items, customers, stock, offers)");
+
+		// The refresh rewrites the offline cache: start the worker again if it gave up
+		await offlineWorker.revive().catch(() => false);
 
 		// Refresh items, customers, and stock in parallel
 		await Promise.all([
@@ -3058,13 +3082,18 @@ async function handleRefresh() {
 			stockStore.refresh(null, shiftStore.profileWarehouse),
 			// F&F Settings may have changed (D-R2-03): ask again and re-price the cart.
 			Promise.resolve(cartStore.recheckFriendsAndFamily?.()).catch(() => {}),
+			// Offers too (D-R4-01): a new or ended offer, and the offline cache rewritten.
+			offersStore
+				.refreshOffers(shiftStore.profileName)
+				.then((fetched) => fetched && cartStore.forceRefreshOffers())
+				.catch(() => {}),
 		]);
 
 		// Refresh cache stats to update "Last Updated" timestamp
 		const stats = await offlineWorker.getCacheStats();
 		itemStore.cacheStats = stats;
 
-		log.success("Manual refresh completed (items, customers, stock)");
+		log.success("Manual refresh completed (items, customers, stock, offers)");
 	} catch (error) {
 		log.error("Manual refresh failed:", error);
 	}

@@ -65,3 +65,16 @@ describe("posDrafts held coupons", () => {
 		expect(saveDraft.mock.calls.map(([data]) => data.applied_coupon?.code ?? null)).toEqual([null, "L10"])
 	})
 })
+
+describe("posDrafts held total (review M8)", () => {
+	beforeEach(() => {
+		setActivePinia(createPinia())
+		saveDraft.mockClear()
+	})
+
+	it("a held cart keeps the total it showed, header discount included", async () => {
+		const store = usePOSDraftsStore()
+		await store.saveDraftInvoice([{ item_code: "UIT-C", quantity: 2 }], "C", "P", [], null, null, 29)
+		expect(saveDraft).toHaveBeenCalledWith(expect.objectContaining({ grand_total: 29 }))
+	})
+})

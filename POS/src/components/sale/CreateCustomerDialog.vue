@@ -1202,8 +1202,14 @@ const territoriesResource = createListResource("Territory", (names) => {
 	}
 });
 
-const governoratesResource = createListResource("POS Governorate", (names) => {
-	governorates.value = names;
+// A cashier cannot list POS Governorate / POS District: whitelisted reads (D-R4-10)
+const governoratesResource = createResource({
+	url: "pos_next.api.customers.get_governorates",
+	auto: false,
+	onSuccess: (data) => {
+		governorates.value = Array.isArray(data) ? data : [];
+	},
+	onError: (err) => log.error("Error loading POS Governorate", err),
 });
 
 const customerLocationResource = createResource({
@@ -1236,14 +1242,8 @@ const customerDetailsResource = createResource({
 });
 
 const districtsResource = createResource({
-	url: "frappe.client.get_list",
-	makeParams: () => ({
-		doctype: "POS District",
-		fields: ["name", "district"],
-		filters: { governorate: customerData.value.custom_governorate },
-		limit_page_length: 0,
-		order_by: "district asc",
-	}),
+	url: "pos_next.api.customers.get_districts",
+	makeParams: () => ({ governorate: customerData.value.custom_governorate }),
 	auto: false,
 	onSuccess: (data) => {
 		districts.value = data || [];

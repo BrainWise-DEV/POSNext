@@ -3091,6 +3091,9 @@ watch(
 
 watch(show, (newVal) => {
 	if (newVal) {
+		// None loaded at start (an offline start, or the server was down): load them now,
+		// from the server or the offline cache (D-R4-02)
+		if (paymentMethods.value.length === 0) loadPaymentMethods();
 		// Reset state when dialog opens (but NOT customerBalance - it's pre-fetched)
 		paymentEntries.value = [];
 		customAmount.value = "";

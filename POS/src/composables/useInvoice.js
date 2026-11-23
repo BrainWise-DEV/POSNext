@@ -52,6 +52,10 @@ export function useInvoice() {
 	const additionalDiscount = ref(0);
 	const couponCode = ref(null);
 	const taxRules = ref([]); // Tax rules from POS Profile
+	// The server did not answer the last load: the rules are the offline cache's (or none),
+	// and are loaded again when the POS is back online (D-R4-02)
+	const taxRulesNeedReload = ref(false);
+	let taxRulesGeneration = 0;
 	const taxInclusive = ref(false); // Tax inclusive setting from POS Settings
 
 	// Submission state - prevents duplicate submissions
@@ -1661,9 +1665,39 @@ export function useInvoice() {
 		/**
 		 * Load tax rules from POS Profile and tax inclusive setting from POS Settings
 		 */
+		// Only the latest load applies: an older one that answers late (a connection that
+		// flapped) must not undo it (review M3)
+		const generation = ++taxRulesGeneration;
+		const stale = () => generation !== taxRulesGeneration;
 		try {
-			const result = await getTaxesResource.submit({ pos_profile: profileName });
-			taxRules.value = result?.data || result || [];
+			const cacheKey = `tax_rules:${profileName}`;
+			// IndexedDB is a browser API: loaded when needed, not at module load
+			const offlineDb = () => import("@/utils/offline/db");
+			try {
+				const result = await getTaxesResource.submit({ pos_profile: profileName });
+				if (stale()) return taxRules.value;
+				taxRules.value = result?.data || result || [];
+				taxRulesNeedReload.value = false;
+				// Kept for an offline start: without them every line is taxed 0 (D-R4-02)
+				if (profileName) {
+					const rules = JSON.parse(JSON.stringify(taxRules.value));
+					await offlineDb()
+						.then(({ setSetting }) => setSetting(cacheKey, rules))
+						.catch(() => {});
+				}
+			} catch (error) {
+				if (stale()) return taxRules.value;
+				taxRulesNeedReload.value = true;
+				const cached = profileName
+					? await offlineDb()
+							.then(({ getSetting }) => getSetting(cacheKey, null))
+							.catch(() => null)
+					: null;
+				if (stale()) return taxRules.value;
+				if (!Array.isArray(cached)) throw error;
+				console.warn("Tax rules from the offline cache:", error?.message || error);
+				taxRules.value = cached;
+			}
 
 			// Load tax inclusive setting from POS Settings if provided
 			if (posSettings && posSettings.tax_inclusive !== undefined) {
@@ -1678,9 +1712,9 @@ export function useInvoice() {
 
 			return taxRules.value;
 		} catch (error) {
+			// Rules already loaded are kept: a failed reload must not untax the cart
 			console.error("Error loading tax rules:", error);
-			taxRules.value = [];
-			return [];
+			return taxRules.value;
 		}
 	}
 
@@ -1708,6 +1742,7 @@ export function useInvoice() {
 		additionalDiscount,
 		couponCode,
 		taxRules,
+		taxRulesNeedReload,
 		taxInclusive,
 		isSubmitting,
 

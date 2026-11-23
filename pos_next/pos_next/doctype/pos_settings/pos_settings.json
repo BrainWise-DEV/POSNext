@@ -64,6 +64,7 @@
   "allow_duplicate_customer_names",
   "fetch_coupon",
   "offline_coupon_overshoot",
+  "offline_offer_validity_hours",
   "section_break_printing",
   "allow_print_last_invoice",
   "silent_print",
@@ -438,6 +439,14 @@
    "options": "Allow and log\nReject"
   },
   {
+   "default": "24",
+   "description": "Offline, the offers this till last fetched are applied for this many hours after they were fetched (at least 1); after that no offer is applied until the till is online again. Refresh in the POS header fetches them again.",
+   "fieldname": "offline_offer_validity_hours",
+   "fieldtype": "Int",
+   "label": "Offline Offer Validity (hours)",
+   "non_negative": 1
+  },
+  {
    "collapsible": 1,
    "fieldname": "section_break_printing",
    "fieldtype": "Section Break",
@@ -647,7 +656,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-11-22 03:00:00.000000",
+ "modified": "2026-11-23 06:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Settings",

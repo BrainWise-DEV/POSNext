@@ -491,14 +491,27 @@ describe("CreateCustomerDialog loading when Selling Settings is forbidden (D-1)"
 		byUrl("pos_next.api.customers.get_customer_defaults").reload.mockRejectedValue(
 			Object.assign(new Error("Forbidden"), { status: 403 })
 		)
-		const lists = ["Territory", "POS Governorate"].map((d) =>
-			byUrl("frappe.client.get_list", d)
-		)
+		const lists = [
+			byUrl("frappe.client.get_list", "Territory"),
+			byUrl("pos_next.api.customers.get_governorates"),
+		]
 		lists.forEach((r) => r.reload.mockResolvedValue([]))
 		await wrapper.setProps({ modelValue: true })
 		await flushPromises()
 		lists.forEach((r) => expect(r.reload).toHaveBeenCalled())
 		wrapper.unmount()
+	})
+
+	it("reads governorates and districts through whitelisted methods a cashier may call (D-R4-10)", () => {
+		factory().unmount()
+		const listed = resourceConfigs
+			.filter((c) => c.opts.url === "frappe.client.get_list")
+			.map((c) => c.opts.makeParams?.().doctype)
+		expect(listed).not.toContain("POS Governorate")
+		expect(listed).not.toContain("POS District")
+		const urls = resourceConfigs.map((c) => c.opts.url)
+		expect(urls).toContain("pos_next.api.customers.get_governorates")
+		expect(urls).toContain("pos_next.api.customers.get_districts")
 	})
 
 	it("takes the Customer Group list from the endpoint, since a cashier cannot read the doctype", async () => {

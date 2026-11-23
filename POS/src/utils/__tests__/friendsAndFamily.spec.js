@@ -384,6 +384,23 @@ describe("buildFnfCartMessages", () => {
 		expect(buildFnfCartMessages({ result, locale: "ar" }).find((m) => m.key === "comparison").text).toBe(best.message_ar);
 	});
 
+	it("D-R4-06: the comparison a line already notes is not repeated above the cart", () => {
+		const best = {
+			winner: "promotion",
+			suppressed: ["friends_and_family"],
+			message_en: "The promotion (50%) is better than the Friends & Family discount (30%) — the promotion applied instead of Friends & Family.",
+		};
+		const line = { idx: 0, applies: false, reason: "other_better", best_discount: best }
+		const result = normalizeFnfResult({ ...appliedBlock, applied_count: 0, items: [line] }, best);
+		expect(keys(buildFnfCartMessages({ result, locale: "en" }))).not.toContain("comparison");
+	});
+
+	it("D-R4-06: a comparison no line notes still heads the cart", () => {
+		const best = { winner: "promotion", suppressed: ["friends_and_family"], message_en: "The promotion is better." };
+		const result = normalizeFnfResult({ ...appliedBlock, applied_count: 0, items: [{ idx: 0, applies: false }] }, best);
+		expect(keys(buildFnfCartMessages({ result, locale: "en" }))).toContain("comparison");
+	});
+
 	it("cap hit → cap message + monthly remaining", () => {
 		const caps = {
 			active: true,
