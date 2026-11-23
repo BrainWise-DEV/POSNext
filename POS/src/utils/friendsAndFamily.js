@@ -614,6 +614,48 @@ export function lineCouponFnfView({ result = null, items = [], appliedCoupon = n
 	return { override: null, result: view };
 }
 
+/**
+ * J1: an F&F result after the cart took F&F off some of its lines by itself (offline,
+ * a same-item Buy X Get Y gift beside an F&F line, box off). The stripped lines no
+ * longer apply; the count, the saving and the monthly balance after this order count
+ * only the lines that still hold F&F, so the cart summary agrees with its lines.
+ *
+ * @param {Object|null} result   normalizeFnfResult() of the last evaluation
+ * @param {Array} items          cart lines, in the order the result's `idx` refers to
+ * @param {Array} stripped       the cart lines F&F was taken off
+ * @returns {Object|null}
+ */
+export function fnfResultWithoutLines(result, items = [], stripped = []) {
+	if (!result || !stripped.length) return result;
+	const fnfItems = (items || []).filter((item) => isFnfLine(item) && !item.is_free_item);
+	const keptTotal = round2(fnfItems.reduce((sum, item) => sum + num(item.discount_amount), 0));
+	return {
+		...result,
+		appliedCount: fnfItems.length,
+		lines: (result.lines || []).map((line) =>
+			stripped.includes(items[Number.parseInt(line?.idx, 10)])
+				? { ...line, applies: false, discount_amount: 0, capped: false, reason: FNF_REASON.SCHEME_NOT_ELIGIBLE }
+				: line
+		),
+		caps: capsForSaving(result, keptTotal),
+	};
+}
+
+/**
+ * A Price "buy one" offer (100% off, or a zero Rate, on a limited number of units of a
+ * Min/Max rule): the server classifies it as Buy X Get Y (ff_classifier.is_price_bxgy_rule).
+ */
+export function isPriceBuyOneOffer(offer) {
+	if (!offer || offer.offer === "Give Product") return false;
+	if (String(offer.apply_on || "").trim() === "Transaction") return false;
+	if (!["Min", "Max"].includes(offer.apply_discount_on_price)) return false;
+	if (!(num(offer.min_or_max_discount_qty_limit) > 0)) return false;
+	const kind = offer.discount_type || offer.rate_or_discount || "Discount Percentage";
+	if (kind === "Discount Percentage") return num(offer.discount_percentage) >= 100 - 0.0001;
+	if (kind === "Rate") return num(offer.rate) <= 0;
+	return false;
+}
+
 /** `result.caps` with `fnf_applied_total` = `saving` and the monthly balance moved by the difference. */
 function capsForSaving(result, saving) {
 	if (!result.caps) return null;

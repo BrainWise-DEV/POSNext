@@ -28,6 +28,7 @@ import {
 	rowStockQty,
 } from "@/utils/stockValidator";
 import {
+	findPaidCartItem,
 	resolveFreeItemMinQty,
 	syncCartFreeItems,
 	withCarvedQtyRestored,
@@ -52,8 +53,11 @@ import { call } from "@/utils/apiWrapper";
 import { isPromotionsAppInstalled, promoApi } from "@/utils/promoApi";
 import {
 	FNF_DISCOUNT_SOURCE,
+	FNF_REASON,
 	FNF_REPLACED_FIELD,
 	fnfReplacedDiscount,
+	fnfResultWithoutLines,
+	isPriceBuyOneOffer,
 	annotateFnfLine,
 	clearFnfAnnotations,
 	indexFnfLines,
@@ -1166,6 +1170,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		if (!eligible && !hasFnfLines) return;
 
 		const payload = buildOfferEvaluationPayload(currentProfile);
+		const askedFor = offerCartSignature();
 		const response = await call(method, {
 			customer: payload.customer,
 			items: payload.items,
@@ -1173,6 +1178,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			pos_profile: posProfile.value || undefined,
 		});
 		if (signal?.aborted || (generation > 0 && generation < cartGeneration)) return;
+		// J1: the cart changed while the answer was out (a qty typed or pressed before its
+		// debounce ran): the answer is for the old cart. The next pass asks for this one.
+		if (offerCartSignature() !== askedFor) return;
 
 		const result = normalizeFnfResult(response);
 		fnfResult.value = result?.eligible ? result : null;
@@ -2013,12 +2021,20 @@ export const usePOSCartStore = defineStore("posCart", () => {
 					// Reapply only valid offers
 					const invoiceData = buildOfferEvaluationPayload(currentProfile);
 					const pricedLines = snapshotPricedLines();
+					// J1: POSSale's watcher fires this outside the offer queue. An answer for a
+					// cart the cashier changed meanwhile is dropped, as in processOffersInternal,
+					// and the current cart is priced instead.
+					const askedFor = offerCartSignature();
 					const response = await applyOffersResource.submit({
 						invoice_data: invoiceData,
 						selected_offers: validOfferCodes,
 					});
 
 					if (signal?.aborted) return false;
+					if (offerCartSignature() !== askedFor) {
+						debouncedProcessOffers();
+						return false;
+					}
 
 					const {
 						items: responseItems,
@@ -2320,6 +2336,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		const rate = Number.parseFloat(offer.rate) || 0;
 
 		let applied = false;
+		const buyOne = isPriceBuyOneOffer(offer);
 
 		for (const item of eligibleItems) {
 			const stacks =
@@ -2331,6 +2348,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 			// Only apply if no existing pricing rule
 			if (item.pricing_rules && item.pricing_rules.length > 0 && !stacks) continue;
+			// J1: an F&F line keeps the price the server gave it rather than also taking a
+			// Price "buy one" offer (Buy X Get Y on the server): F&F or the free unit, never both.
+			if (buyOne && isFnfLine(item)) continue;
 
 			if (discountType === "Discount Percentage" && discountPercentage > 0) {
 				if (stacks) {
@@ -2380,6 +2400,43 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		}
 
 		return applied;
+	}
+
+	/**
+	 * J1: "Allow Free Gift with F&F" off — a line gets F&F or its Buy X Get Y free unit,
+	 * never both (task 8s, Q1). Offline the line keeps the F&F price the server gave it,
+	 * and an offline same-item BXGY gift would sit next to it: the line the gift belongs
+	 * to (same item and unit) goes back to its price, as the server prices it at sync,
+	 * and the F&F result drops it too, so the summary agrees with the lines.
+	 *
+	 * The box comes from the customer's last eligibility answer. With no answer it reads
+	 * as off, the Settings default: the safe side of "never both", and the server judges
+	 * the sale again at sync. Online every answer comes from the server.
+	 */
+	function dropFnfBesideOfflineBxgyGift() {
+		if (fnfEligibility.value?.program?.allow_free_gift_with_ff) return;
+		const bxgyRules = new Set(
+			appliedOffers.value
+				.map((entry) => entry.offer)
+				.filter((offer) => offer?.offer === "Give Product" && Number(offer.same_item) === 1)
+				.map((offer) => offer.name)
+		);
+		if (!bxgyRules.size) return;
+		const items = invoiceItems.value;
+		const stripped = [];
+		for (const gift of items) {
+			if (!gift.is_free_item) continue;
+			if (!normalizePricingRules(gift.pricing_rules).some((rule) => bxgyRules.has(rule))) continue;
+			const line = findPaidCartItem(items, gift.item_code, gift.uom || gift.stock_uom);
+			if (!line || !isFnfLine(line) || stripped.includes(line)) continue;
+			stripFnfLine(line);
+			annotateFnfLine(line, { reason: FNF_REASON.SCHEME_NOT_ELIGIBLE });
+			recalculateItem(line);
+			stripped.push(line);
+		}
+		if (!stripped.length) return;
+		fnfResult.value = fnfResultWithoutLines(fnfResult.value, items, stripped);
+		rebuildIncrementalCache();
 	}
 
 	/**
@@ -3037,10 +3094,17 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		// Update offer snapshot for eligibility checking
 		syncOfferSnapshot();
 
+		// J1: what this pass prices. A qty change while an answer is out does not move
+		// cartGeneration until its debounce runs, so the generation check alone lets the old
+		// cart's answer through, and stamping the hash of the new cart then skips pricing it.
+		const pricedCart = offerCartSignature();
+		const cartChangedMeanwhile = () => offerCartSignature() !== pricedCart;
+
 		// === OFFLINE MODE ===
 		// When offline, use cached offers and apply discounts client-side
 		if (offlineState.isOffline) {
 			applyOffersOffline();
+			dropFnfBesideOfflineBxgyGift();
 			offerProcessingState.value.lastCartHash = generateCartHash();
 			offerProcessingState.value.lastProcessedAt = Date.now();
 			return;
@@ -3108,6 +3172,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 				// Check for cancellation or stale operation
 				if (signal?.aborted || (generation > 0 && generation < cartGeneration)) return;
+				if (cartChangedMeanwhile()) {
+					debouncedProcessOffers();
+					return;
+				}
 
 				const {
 					items: responseItems,
@@ -3176,6 +3244,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			if (!evaluatedOnServer) {
 				await evaluateFriendsAndFamilyOnly(currentProfile, signal, generation);
 				if (signal?.aborted || (generation > 0 && generation < cartGeneration)) return;
+				// Its answer was for the cart this pass priced, and was dropped if the cart
+				// changed meanwhile: then the hash below would mark the new cart as priced.
+				if (cartChangedMeanwhile()) {
+					debouncedProcessOffers();
+					return;
+				}
 			}
 			// Update last processed hash on success
 			offerProcessingState.value.lastCartHash = generateCartHash();

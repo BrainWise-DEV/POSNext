@@ -1053,46 +1053,14 @@
 						(item.is_free_item ? '-free' : '')
 					"
 				>
-					<!-- Free gift: its own mini line under the line that earned it, no quantity controls -->
-					<div
+					<!-- Free gift: the same full-width card for every kind, after the line that earned it -->
+					<FreeGiftRow
 						v-if="isLockedFreeRow(item)"
-						:class="[
-							'flex items-center gap-2 rounded-md border border-[#0f7a4a]/30 bg-[#e9f5ef] p-2',
-							item._giftOf ? 'ms-6 -mt-0.5' : '',
-						]"
-					>
-						<div
-							class="w-10 h-10 sm:w-12 sm:h-12 flex-shrink-0 rounded-lg overflow-hidden bg-white border border-[#0f7a4a]/20 flex items-center justify-center"
-						>
-							<img
-								v-if="giftImage(item)"
-								:src="giftImage(item)"
-								:alt="item.item_name"
-								loading="lazy"
-								class="w-full h-full object-cover"
-							/>
-							<FeatherIcon v-else name="gift" class="w-5 h-5 text-[#0f7a4a]" />
-						</div>
-						<div class="flex-1 min-w-0">
-							<span
-								class="inline-flex items-center gap-1 rounded-full bg-[#0f7a4a] px-2 py-0.5 text-[11px] font-bold text-white"
-							>
-								<FeatherIcon name="gift" class="w-3 h-3" />{{ __("Free gift") }}
-							</span>
-							<div dir="auto" class="mt-0.5 text-sm font-semibold text-[#1d2433] leading-snug line-clamp-2">
-								{{ item.item_name }}
-							</div>
-						</div>
-						<div class="flex-shrink-0 text-end tabular-nums">
-							<div class="text-sm font-bold text-[#0f7a4a]">{{ __("Free of charge") }}</div>
-							<div v-if="giftValue(item) > 0" class="text-xs text-gray-500 line-through">
-								<bdi>{{ formatCurrency(giftValue(item)) }}</bdi>
-							</div>
-							<div class="text-xs text-gray-600 inline-flex items-center gap-1">
-								<bdi>{{ formatQuantity(item.quantity) }}</bdi><span aria-hidden="true">×</span>
-							</div>
-						</div>
-					</div>
+						:item="item"
+						:image="giftImage(item)"
+						:value-text="giftValue(item) > 0 ? formatCurrency(giftValue(item)) : ''"
+						:quantity-text="formatQuantity(item.quantity)"
+					/>
 
 					<!-- Paid line -->
 					<div
@@ -1684,6 +1652,7 @@ const log = logger.create("InvoiceCart");
 import { createResource } from "frappe-ui";
 import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from "vue";
 import EditItemDialog from "./EditItemDialog.vue";
+import FreeGiftRow from "./FreeGiftRow.vue";
 import { useLocale } from "@/composables/useLocale";
 import {
 	buildFnfCartMessages,
