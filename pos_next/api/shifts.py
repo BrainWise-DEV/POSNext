@@ -8,7 +8,7 @@ import frappe
 from frappe import _
 from frappe.utils import nowdate, nowtime, get_datetime, flt, cint
 from pos_next.api.utilities import get_wallet_payment_modes
-from pos_next.api.security import ensure_desk_user
+from pos_next.api.security import ensure_desk_user, ensure_pos_user, is_pos_supervisor
 
 
 @frappe.whitelist()
@@ -71,9 +71,14 @@ def get_opening_dialog_data():
 @frappe.whitelist()
 def check_opening_shift(user=None):
 	"""Check if user has an open shift"""
-	ensure_desk_user()
+	current_user = ensure_desk_user()
 	if not user:
-		user = frappe.session.user
+		user = current_user
+	elif user != current_user and not is_pos_supervisor(current_user):
+		frappe.throw(
+			_("You are not authorized to inspect another user's shift"),
+			frappe.PermissionError,
+		)
 
 	open_shifts = frappe.db.get_all(
 		"POS Opening Shift",
@@ -106,8 +111,15 @@ def check_opening_shift(user=None):
 @frappe.whitelist()
 def create_opening_shift(pos_profile, company, balance_details):
 	"""Create a new POS Opening Shift"""
-	ensure_desk_user()
+	ensure_pos_user(pos_profile)
 	balance_details = json.loads(balance_details) if isinstance(balance_details, str) else balance_details
+
+	profile_company = frappe.get_cached_value("POS Profile", pos_profile, "company")
+	if not profile_company:
+		frappe.throw(_("POS Profile {0} not found").format(pos_profile))
+	if company and company != profile_company:
+		frappe.throw(_("Company does not match POS Profile"), frappe.ValidationError)
+	company = profile_company
 
 	# Check if user already has an open shift
 	existing_shift = check_opening_shift(frappe.session.user)
@@ -137,7 +149,7 @@ def create_opening_shift(pos_profile, company, balance_details):
 		)
 
 	new_pos_opening.set("balance_details", formatted_balance_details)
-	new_pos_opening.insert(ignore_permissions=True)
+	new_pos_opening.insert()
 	new_pos_opening.submit()
 
 	data = {}
@@ -155,18 +167,13 @@ def get_closing_shift_data(opening_shift):
 	from pos_next.pos_next.doctype.pos_closing_shift.pos_closing_shift import make_closing_shift_from_opening
 
 	try:
-		# Get the opening shift document
-		opening_shift_doc = frappe.get_doc("POS Opening Shift", opening_shift)
-
-		# Convert to dict with proper datetime serialization
-		opening_shift_dict = opening_shift_doc.as_dict()
-		opening_shift_json = json.dumps(opening_shift_dict, default=str)
-
-		# Create closing shift from opening shift (returns a dict)
-		closing_data = make_closing_shift_from_opening(opening_shift_json)
+		# Create closing shift from opening shift (validates ownership/supervisor and loads from DB)
+		closing_data = make_closing_shift_from_opening(opening_shift)
 
 		# Ensure datetime values are JSON serializable
 		return json.loads(json.dumps(closing_data, default=str))
+	except frappe.PermissionError:
+		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Get Closing Shift Data Error")
 		frappe.throw(_("Error getting closing shift data: {0}").format(str(e)))
@@ -188,6 +195,8 @@ def submit_closing_shift(closing_shift):
 
 		result = submit_shift(closing_shift)
 		return {"name": result, "status": "success"}
+	except frappe.PermissionError:
+		raise
 	except Exception as e:
 		frappe.log_error(frappe.get_traceback(), "Submit Closing Shift Error")
 		frappe.throw(_("Error submitting closing shift: {0}").format(str(e)))
