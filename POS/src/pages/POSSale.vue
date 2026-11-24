@@ -2658,9 +2658,12 @@ async function handleLoadDraft(draft) {
 		// Restore applied offers if they were saved
 		if (draftData.applied_offers && draftData.applied_offers.length > 0) {
 			cartStore.appliedOffers = draftData.applied_offers;
-			// Trigger offer reapplication to ensure they apply to all items
-			await cartStore.reapplyOffer(shiftStore.currentProfile);
 		}
+		// Re-price the loaded cart with a full, forced offer pass: it drops saved offers
+		// the cart no longer meets, applies new ones and re-checks Friends & Family.
+		// reapplyOffer() only re-checked the saved offers, and now that it runs in the
+		// offer queue it could replace a pending pass and return before running.
+		cartStore.forceRefreshOffers();
 
 		// Initialize cart hash for the loaded cart so watchers work correctly
 		previousCartHash = computeCartHash();

@@ -13,7 +13,7 @@ const CUSTOMER = "FNF-TEST-CUSTOMER"
 
 const server = vi.hoisted(() => {
 	globalThis.__ = (s, args) => (args ? `${s} ${args.join(" ")}` : s)
-	return { requests: [], omitAppliedRules: false, customApplyOffers: null }
+	return { requests: [], omitAppliedRules: false, customApplyOffers: null, hold: null }
 })
 
 const clone = (v) => JSON.parse(JSON.stringify(v))
@@ -128,7 +128,12 @@ vi.mock("frappe-ui", () => ({
 		submit: vi.fn(async (params) => {
 			if (!String(url).includes("apply_offers")) return {}
 			server.requests.push({ method: "apply_offers", params: clone(params) })
-			return applyOffersAnswer(params)
+			const answer = applyOffersAnswer(params)
+			if (!server.hold) return answer
+			// Held: the test decides when this answer arrives.
+			return new Promise((resolve) => {
+				server.hold.release = () => resolve(answer)
+			})
 		}),
 		reload: vi.fn(),
 		fetch: vi.fn(),
@@ -232,6 +237,7 @@ describe("F&F discount restoration after promotion applies and qty decreases (de
 		server.requests = []
 		server.omitAppliedRules = false
 		server.customApplyOffers = null
+		server.hold = null
 		vi.spyOn(offlineState, "isOffline", "get").mockReturnValue(false)
 		setActivePinia(createPinia())
 		usePOSOffersStore().setAvailableOffers([BXGY_OFFER])
@@ -357,6 +363,52 @@ describe("F&F discount restoration after promotion applies and qty decreases (de
 		expect(cart.appliedOffers).toHaveLength(0)
 		expect(cart.additionalDiscount).toBe(0)
 		expect(server.requests.at(-1).method).toBe("fnf_only")
+		expect(isFnfLine(paidLine(cart))).toBe(true)
+		expect(paidLine(cart).amount).toBeCloseTo(18900, 2)
+	})
+
+	it("loading a draft while an offer pass is in flight: the forced pass prices the loaded cart and F&F comes back", async () => {
+		cart.addItem(COSRX_ITEM)
+		await settle(cart, 0)
+		expect(isFnfLine(paidLine(cart))).toBe(true)
+
+		// An offer pass for qty 2 is out when the cashier opens a draft.
+		server.hold = {}
+		cart.updateItemQuantity(ITEM, 2)
+		await vi.waitFor(() => expect(server.hold.release).toBeTypeOf("function"), { timeout: 3000, interval: 5 })
+		const held = server.hold
+		server.hold = null
+
+		// What POSSale.vue loadDraft does: the draft's lines (qty 1 with a stale BXGY tag
+		// and its old gift row) and its saved offers, then a forced offer pass.
+		const base = clone(paidLine(cart))
+		cart.invoiceItems = [
+			{
+				...base,
+				quantity: 1,
+				discount_percentage: 0,
+				discount_amount: 0,
+				discount_source: "gwp",
+				pricing_rules: [RULE],
+				gwp_free_qty: 1,
+				is_already_discounted: 1,
+			},
+			{ ...base, quantity: 1, rate: 0, price_list_rate: 0, discount_source: "", pricing_rules: RULE, is_free_item: 1 },
+		]
+		cart.appliedOffers = [
+			{ name: BXGY_OFFER.title, code: RULE, offer: BXGY_OFFER, source: "auto", applied: true, rules: [RULE] },
+		]
+		const seen = server.requests.length
+		cart.forceRefreshOffers()
+		held.release()
+		await settle(cart, seen)
+
+		const sent = server.requests.slice(seen).at(-1)
+		expect(sent.method).toBe("fnf_only")
+		expect(sent.params.items.flatMap((i) => ruleNames(i.pricing_rules))).not.toContain(RULE)
+		expect(cart.appliedOffers).toHaveLength(0)
+		expect(freeRows(cart)).toHaveLength(0)
+		expect(ruleNames(paidLine(cart).pricing_rules)).toEqual([])
 		expect(isFnfLine(paidLine(cart))).toBe(true)
 		expect(paidLine(cart).amount).toBeCloseTo(18900, 2)
 	})

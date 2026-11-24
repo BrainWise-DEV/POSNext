@@ -19,6 +19,8 @@
  * Pure functions only (no stores, no network) so they are unit-testable.
  */
 
+import { COUPON_DISCOUNT_SOURCE } from "./couponLines";
+
 export const FNF_DISCOUNT_SOURCE = "friends_and_family";
 
 export const FNF_REASON = Object.freeze({
@@ -353,7 +355,7 @@ export function mergeServerLine(item, serverLine = {}, fnfLine = null, { fnfSupp
 		if (
 			item.discount_source &&
 			item.discount_source !== "manual_discount" &&
-			item.discount_source !== "coupon" &&
+			item.discount_source !== COUPON_DISCOUNT_SOURCE &&
 			item.discount_source !== "pos_coupon" &&
 			!item.posnext_coupon_code &&
 			!isFnfLine(item)
