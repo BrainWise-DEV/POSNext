@@ -202,9 +202,18 @@ export function nestFreeRows(items) {
 		Array.isArray(item.pricing_rules)
 			? item.pricing_rules
 			: String(item.pricing_rules || "").split(",").map((r) => r.trim());
-	const parentOf = (gift) =>
-		findPaidCartItem(paid, gift.item_code, gift.uom || gift.stock_uom) ||
-		paid.find((item) => gift.pricing_rules && rulesOf(item).includes(gift.pricing_rules));
+	// The line carrying the gift's rule earned it; a paid line of the gift item without the rule did not
+	const parentOf = (gift) => {
+		const uom = gift.uom || gift.stock_uom;
+		const withRule = gift.pricing_rules
+			? paid.filter((item) => rulesOf(item).includes(gift.pricing_rules))
+			: [];
+		return (
+			findPaidCartItem(withRule, gift.item_code, uom) ||
+			withRule[0] ||
+			findPaidCartItem(paid, gift.item_code, uom)
+		);
+	};
 	const gifts = rows
 		.filter((item) => item.is_free_item)
 		.map((gift) => ({ gift, parent: parentOf(gift) }));

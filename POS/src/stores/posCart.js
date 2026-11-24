@@ -1386,6 +1386,15 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 			const amount = applyCouponLineUpdates(coupon.code, result.line_updates, coupon.coupon);
 			appliedCoupon.value = { ...appliedCoupon.value, amount, line_updates: result.line_updates };
+			// The coupon-vs-F&F banner shows this check's comparison, not the one from Apply
+			if (fnfCouponOverride.value?.code === coupon.code && result.best_discount && result.message) {
+				fnfCouponOverride.value = {
+					...fnfCouponOverride.value,
+					message: result.message,
+					message_en: result.message_en || "",
+					message_ar: result.message_ar || "",
+				};
+			}
 		} catch (error) {
 			console.error("Error re-validating coupon:", error);
 			showWarning(
