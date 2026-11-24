@@ -6,6 +6,7 @@ from erpnext.accounts.utils import get_balance_on
 from frappe import _
 from frappe.model.document import Document
 from frappe.utils import flt
+from pos_next.api.security import ensure_desk_user
 
 
 class Wallet(Document):
@@ -66,6 +67,10 @@ class Wallet(Document):
 @frappe.whitelist()
 def get_customer_wallet(customer, company=None):
 	"""Get wallet for a customer"""
+	ensure_desk_user()
+	if not customer:
+		frappe.throw(_("Customer is required"))
+	frappe.has_permission("Customer", "read", customer, throw=True)
 	filters = {"customer": customer}
 	if company:
 		filters["company"] = company
@@ -94,6 +99,10 @@ def get_customer_wallet_balance(customer, company=None, exclude_invoice=None):
 	Returns:
 		float: Available wallet balance
 	"""
+	ensure_desk_user()
+	if not customer:
+		frappe.throw(_("Customer is required"))
+	frappe.has_permission("Customer", "read", customer, throw=True)
 	try:
 		filters = {"customer": customer, "status": "Active"}
 		if company:
@@ -170,6 +179,11 @@ def create_customer_wallet(customer, company, account=None):
 		Wallet document
 	"""
 	# Check if wallet already exists
+	ensure_desk_user()
+	if not customer:
+		frappe.throw(_("Customer is required"))
+	frappe.has_permission("Customer", "read", customer, throw=True)
+	frappe.has_permission("Wallet", "create", throw=True)
 	existing = frappe.db.exists("Wallet", {"customer": customer, "company": company})
 	if existing:
 		return frappe.get_doc("Wallet", existing)
@@ -190,7 +204,7 @@ def create_customer_wallet(customer, company, account=None):
 			"status": "Active",
 		}
 	)
-	wallet.insert(ignore_permissions=True)
+	wallet.insert()
 
 	return wallet
 
@@ -216,6 +230,7 @@ def get_default_wallet_account(company):
 @frappe.whitelist()
 def get_or_create_wallet(customer, company):
 	"""Get existing wallet or create a new one"""
+	ensure_desk_user()
 	wallet = get_customer_wallet(customer, company)
 
 	if not wallet:

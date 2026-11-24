@@ -5,6 +5,7 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 from frappe.utils import flt, today
+from pos_next.api.security import ensure_desk_user
 
 
 class BankDeposits(Document):
@@ -89,6 +90,7 @@ class BankDeposits(Document):
 @frappe.validate_and_sanitize_search_inputs
 def get_pos_closing_shifts(doctype, txt, searchfield, start, page_len, filters):
 	"""Return submitted, closed POS Closing Shifts without an existing Bank Deposit."""
+	ensure_desk_user()
 	filters = filters or {}
 	pos_profile = filters.get("pos_profile")
 	profile_condition = "AND pcs.pos_profile = %(pos_profile)s" if pos_profile else ""

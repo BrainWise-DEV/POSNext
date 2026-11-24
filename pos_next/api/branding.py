@@ -12,6 +12,7 @@ import json
 
 import frappe
 from frappe import _
+from pos_next.api.security import ensure_desk_user
 
 
 @frappe.whitelist(allow_guest=False)
@@ -20,6 +21,7 @@ def get_branding_config():
 	Get branding configuration with encryption
 	Returns obfuscated branding data for frontend use
 	"""
+	ensure_desk_user()
 	try:
 		# Check if doctype exists and get config
 		if not frappe.db.exists("DocType", "BrainWise Branding"):
@@ -85,6 +87,7 @@ def validate_branding(client_signature=None, brand_name=None, brand_url=None):
 	Validate branding integrity from client
 	Logs tampering attempts and validates signatures
 	"""
+	ensure_desk_user()
 	try:
 		# Check if doctype exists
 		if not frappe.db.exists("DocType", "BrainWise Branding"):
@@ -135,6 +138,7 @@ def log_client_event(event_type=None, details=None):
 	Log client-side events (clicks, removals, modifications)
 	Used for monitoring branding tampering attempts
 	"""
+	ensure_desk_user()
 	try:
 		# Check if doctype exists
 		if not frappe.db.exists("DocType", "BrainWise Branding"):
@@ -203,6 +207,7 @@ def log_tampering_attempt(doc, details):
 @frappe.whitelist(allow_guest=False)
 def get_tampering_stats():
 	"""Get tampering statistics (admin only)"""
+	ensure_desk_user()
 	if "System Manager" not in frappe.get_roles():
 		frappe.throw(_("Insufficient permissions"), frappe.PermissionError)
 

@@ -10,7 +10,25 @@ from erpnext.accounts.doctype.pos_invoice_merge_log.pos_invoice_merge_log import
 )
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import flt
+from frappe.utils import flt, nowdate
+from pos_next.api.security import ensure_desk_user, is_pos_supervisor
+
+ALLOWED_INVOICE_DOCTYPES = frozenset({"Sales Invoice", "POS Invoice"})
+
+
+def _ensure_opening_shift_access(pos_opening_shift: str):
+	"""Load a POS Opening Shift and verify the caller owns it or is a POS supervisor."""
+	current_user = ensure_desk_user()
+	if not pos_opening_shift or not isinstance(pos_opening_shift, str):
+		frappe.throw(_("POS Opening Shift is required"), frappe.ValidationError)
+
+	opening_shift_doc = frappe.get_doc("POS Opening Shift", pos_opening_shift)
+	if opening_shift_doc.user != current_user and not is_pos_supervisor(current_user):
+		frappe.throw(
+			_("You are not authorized to access this POS Opening Shift"),
+			frappe.PermissionError,
+		)
+	return opening_shift_doc
 
 
 def get_base_value(doc, fieldname, base_fieldname=None, conversion_rate=None):
@@ -40,7 +58,36 @@ def get_base_value(doc, fieldname, base_fieldname=None, conversion_rate=None):
 
 class POSClosingShift(Document):
 	def validate(self):
-		user = frappe.get_all(
+		if not self.pos_opening_shift:
+			frappe.throw(_("POS Opening Shift is required."), title=_("Invalid Opening Entry"))
+
+		opening_shift = frappe.db.get_value(
+			"POS Opening Shift",
+			self.pos_opening_shift,
+			["name", "user", "pos_profile", "company", "period_start_date", "status", "docstatus"],
+			as_dict=True,
+		)
+		if not opening_shift:
+			frappe.throw(
+				_("POS Opening Shift {0} not found.").format(self.pos_opening_shift),
+				title=_("Invalid Opening Entry"),
+			)
+
+		current_user = frappe.session.user
+		if opening_shift.user != current_user and not is_pos_supervisor(current_user):
+			frappe.throw(
+				_("You can only close your own POS Opening Shift."),
+				frappe.PermissionError,
+			)
+
+		# Always derive authoritative shift ownership and scope from the opening shift
+		self.user = opening_shift.user
+		self.pos_profile = opening_shift.pos_profile
+		self.company = opening_shift.company
+		if opening_shift.period_start_date:
+			self.period_start_date = opening_shift.period_start_date
+
+		existing = frappe.get_all(
 			"POS Closing Shift",
 			filters={
 				"user": self.user,
@@ -50,7 +97,7 @@ class POSClosingShift(Document):
 			},
 		)
 
-		if user:
+		if existing:
 			frappe.throw(
 				_(
 					f"POS Closing Shift <strong>already exists</strong> against {frappe.bold(self.user)} between selected period"
@@ -58,7 +105,7 @@ class POSClosingShift(Document):
 				title=_("Invalid Period"),
 			)
 
-		if frappe.db.get_value("POS Opening Shift", self.pos_opening_shift, "status") != "Open":
+		if opening_shift.docstatus != 1 or opening_shift.status != "Open":
 			frappe.throw(
 				_("Selected POS Opening Shift should be open."),
 				title=_("Invalid Opening Entry"),
@@ -180,6 +227,7 @@ class POSClosingShift(Document):
 
 	@frappe.whitelist()
 	def get_payment_reconciliation_details(self):
+		ensure_desk_user()
 		company_currency = frappe.get_cached_value("Company", self.company, "default_currency")
 
 		sales_breakdown = defaultdict(float)
@@ -337,6 +385,7 @@ class POSClosingShift(Document):
 
 @frappe.whitelist()
 def get_cashiers(doctype, txt, searchfield, start, page_len, filters):
+	ensure_desk_user()
 	cashiers_list = frappe.get_all("POS Profile User", filters=filters, fields=["user"])
 	result = []
 	for cashier in cashiers_list:
@@ -349,9 +398,12 @@ def get_cashiers(doctype, txt, searchfield, start, page_len, filters):
 
 @frappe.whitelist()
 def get_pos_invoices(pos_opening_shift, doctype=None):
+	ensure_desk_user()
+	_ensure_opening_shift_access(pos_opening_shift)
 	if not doctype:
-		use_pos_invoice = False
-		doctype = "POS Invoice" if use_pos_invoice else "Sales Invoice"
+		doctype = "Sales Invoice"
+	if doctype not in ALLOWED_INVOICE_DOCTYPES:
+		frappe.throw(_("Invalid invoice doctype"), frappe.PermissionError)
 	submit_printed_invoices(pos_opening_shift, doctype)
 	cond = " and ifnull(consolidated_invoice,'') = ''" if doctype == "POS Invoice" else ""
 	data = frappe.db.sql(
@@ -374,6 +426,8 @@ def get_pos_invoices(pos_opening_shift, doctype=None):
 
 @frappe.whitelist()
 def get_payments_entries(pos_opening_shift):
+	ensure_desk_user()
+	_ensure_opening_shift_access(pos_opening_shift)
 	return frappe.get_all(
 		"Payment Entry",
 		filters={
@@ -549,7 +603,18 @@ def _process_invoice(invoice, invoice_field, company_currency, cash_mode, paymen
 
 @frappe.whitelist()
 def make_closing_shift_from_opening(opening_shift):
-	opening_shift = json.loads(opening_shift)
+	ensure_desk_user()
+	if isinstance(opening_shift, str):
+		try:
+			parsed = json.loads(opening_shift)
+		except (ValueError, TypeError):
+			parsed = opening_shift
+	else:
+		parsed = opening_shift
+
+	opening_shift_name = parsed.get("name") if isinstance(parsed, dict) else parsed
+	opening_shift_doc = _ensure_opening_shift_access(opening_shift_name)
+	opening_shift = opening_shift_doc.as_dict()
 	doctype = "Sales Invoice"
 	invoice_field = "sales_invoice"
 
@@ -697,10 +762,75 @@ def make_closing_shift_from_opening(opening_shift):
 
 @frappe.whitelist()
 def submit_closing_shift(closing_shift):
-	closing_shift = json.loads(closing_shift)
-	closing_shift_doc = frappe.get_doc(closing_shift)
-	closing_shift_doc.flags.ignore_permissions = True
-	closing_shift_doc.save()
+	ensure_desk_user()
+	if isinstance(closing_shift, str):
+		closing_shift = json.loads(closing_shift)
+	if not isinstance(closing_shift, dict):
+		frappe.throw(_("Invalid closing shift payload"), frappe.ValidationError)
+
+	# Reject any attempt to create/submit a doctype other than POS Closing Shift
+	payload_doctype = closing_shift.get("doctype")
+	if payload_doctype and payload_doctype != "POS Closing Shift":
+		frappe.throw(_("Only POS Closing Shift documents may be submitted here"), frappe.PermissionError)
+
+	opening_shift_name = closing_shift.get("pos_opening_shift")
+	opening_shift_doc = _ensure_opening_shift_access(opening_shift_name)
+
+	# Recompute authoritative transactions, taxes, payments, expenses, and expected amounts server-side
+	computed = make_closing_shift_from_opening(opening_shift_doc.name)
+
+	# Only accept counted closing amounts per mode_of_payment from the client payload
+	closing_amounts_by_mode = {}
+	for row in closing_shift.get("payment_reconciliation") or []:
+		if isinstance(row, dict) and row.get("mode_of_payment"):
+			closing_amounts_by_mode[row["mode_of_payment"]] = flt(row.get("closing_amount"))
+
+	payment_reconciliation = []
+	for row in computed.get("payment_reconciliation") or []:
+		mop = row.get("mode_of_payment")
+		payment_reconciliation.append(
+			{
+				"mode_of_payment": mop,
+				"opening_amount": flt(row.get("opening_amount")),
+				"expected_amount": flt(row.get("expected_amount")),
+				"closing_amount": closing_amounts_by_mode.get(mop, flt(row.get("closing_amount"))),
+			}
+		)
+
+	pos_transactions = [
+		{
+			k: v
+			for k, v in txn.items()
+			if k not in ("is_return", "return_against", "collected_amount", "outstanding_amount")
+		}
+		for txn in (computed.get("pos_transactions") or [])
+	]
+
+	closing_shift_doc = frappe.new_doc("POS Closing Shift")
+	closing_shift_doc.update(
+		{
+			"pos_opening_shift": opening_shift_doc.name,
+			"period_start_date": opening_shift_doc.period_start_date,
+			"period_end_date": computed.get("period_end_date") or frappe.utils.get_datetime(),
+			"posting_date": closing_shift.get("posting_date") or nowdate(),
+			"pos_profile": opening_shift_doc.pos_profile,
+			"user": opening_shift_doc.user,
+			"company": opening_shift_doc.company,
+			"grand_total": computed.get("grand_total") or 0,
+			"net_total": computed.get("net_total") or 0,
+			"collected_amount": computed.get("collected_amount") or 0,
+			"outstanding_total": computed.get("outstanding_total") or 0,
+			"total_quantity": computed.get("total_quantity") or 0,
+			"total_pos_expenses": computed.get("total_pos_expenses") or 0,
+		}
+	)
+	closing_shift_doc.set("pos_transactions", pos_transactions)
+	closing_shift_doc.set("payment_reconciliation", payment_reconciliation)
+	closing_shift_doc.set("taxes", computed.get("taxes") or [])
+	closing_shift_doc.set("pos_payments", computed.get("pos_payments") or [])
+	closing_shift_doc.set("pos_expenses", computed.get("pos_expenses") or [])
+
+	closing_shift_doc.insert()
 	closing_shift_doc.submit()
 	return closing_shift_doc.name
 

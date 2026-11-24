@@ -2,6 +2,7 @@ import frappe
 from frappe import _
 from frappe.rate_limiter import rate_limit
 from frappe.utils.password import check_password
+from pos_next.api.security import ensure_desk_user
 
 
 @frappe.whitelist()
@@ -14,6 +15,7 @@ def verify_session_password(password=None):
 	exception type, which would destroy the user's session on a wrong password.
 	Instead, we return a structured response indicating success or failure.
 	"""
+	ensure_desk_user()
 	if not password:
 		return {"verified": False, "message": _("Password is required")}
 

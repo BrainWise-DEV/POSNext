@@ -79,6 +79,14 @@ stored at shift-close time — the authoritative source, no fuzzy matching.
 import frappe
 from frappe import _
 from frappe.utils import cint, flt, getdate, time_diff_in_hours
+from pos_next.api.security import ensure_desk_user, ensure_pos_user, is_pos_supervisor
+
+
+def _ensure_report_chart_access(filters: dict) -> None:
+	if filters and filters.get("pos_profile"):
+		ensure_pos_user(filters["pos_profile"])
+	elif not is_pos_supervisor() and not frappe.has_permission("POS Closing Shift", "read"):
+		frappe.throw(_("You don't have permission to view shift reports"), frappe.PermissionError)
 
 
 def execute(filters=None):
@@ -1139,7 +1147,9 @@ def get_chart(data):
 @frappe.whitelist()
 def get_hourly_breakdown(filters):
 	"""Get hourly sales breakdown"""
-	filters = frappe.parse_json(filters) if isinstance(filters, str) else filters
+	ensure_desk_user()
+	filters = frappe.parse_json(filters) if isinstance(filters, str) else (filters or {})
+	_ensure_report_chart_access(filters)
 
 	conditions = []
 	if filters.get("from_date"):
@@ -1173,7 +1183,9 @@ def get_hourly_breakdown(filters):
 @frappe.whitelist()
 def get_payment_method_breakdown(filters):
 	"""Get payment method breakdown"""
-	filters = frappe.parse_json(filters) if isinstance(filters, str) else filters
+	ensure_desk_user()
+	filters = frappe.parse_json(filters) if isinstance(filters, str) else (filters or {})
+	_ensure_report_chart_access(filters)
 
 	conditions = []
 	if filters.get("from_date"):
@@ -1208,7 +1220,9 @@ def get_payment_method_breakdown(filters):
 @frappe.whitelist()
 def get_daily_trend(filters):
 	"""Get daily sales trend"""
-	filters = frappe.parse_json(filters) if isinstance(filters, str) else filters
+	ensure_desk_user()
+	filters = frappe.parse_json(filters) if isinstance(filters, str) else (filters or {})
+	_ensure_report_chart_access(filters)
 
 	conditions = []
 	if filters.get("from_date"):

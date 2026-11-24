@@ -7,6 +7,7 @@ from frappe.model.naming import make_autoname
 from frappe.utils import cint, cstr, flt
 
 from pos_next.api.items import _get_pos_profile_allowed_item_groups
+from pos_next.api.security import ensure_desk_user
 
 # Image types this screen can render. The site's own allowed_file_extensions
 # list covers every file type (CSV, PDF, ...), so it is intersected with this
@@ -56,6 +57,7 @@ def _validate_pos_profile_access(pos_profile: str) -> None:
 @frappe.whitelist()
 def get_product_management_permissions() -> dict:
 	"""Return permissions required to show and use POS Product Management."""
+	ensure_desk_user()
 	can_read_item = frappe.has_permission("Item", "read")
 	can_create_item = frappe.has_permission("Item", "create")
 	can_write_item = frappe.has_permission("Item", "write")
@@ -92,6 +94,7 @@ def get_product_image_settings() -> dict:
 	Hardcoding these client-side lets the picker accept a file the server will
 	then reject, so they are read rather than assumed.
 	"""
+	ensure_desk_user()
 	allowed = cstr(frappe.get_system_settings("allowed_file_extensions") or "").strip()
 
 	if allowed:
@@ -113,6 +116,7 @@ def get_product_image_settings() -> dict:
 @frappe.whitelist()
 def get_item_groups(pos_profile: str) -> list:
 	"""Get leaf item groups allowed for product management in this POS Profile."""
+	ensure_desk_user()
 	if not frappe.has_permission("Item", "read"):
 		frappe.throw(_("Not permitted to read Item"))
 
@@ -141,6 +145,7 @@ def get_products(
 	limit: int = DEFAULT_PAGE_LENGTH,
 ) -> list:
 	"""Get products for management"""
+	ensure_desk_user()
 	if not frappe.has_permission("Item", "read"):
 		frappe.throw(_("Not permitted to read Item"))
 
@@ -224,6 +229,7 @@ def get_products(
 @frappe.whitelist()
 def save_product(pos_profile: str, data: str) -> dict:
 	"""Create or update a product for POS"""
+	ensure_desk_user()
 	data = json.loads(data)
 	item_name = (data.get("item_name") or "").strip()
 	item_group = (data.get("item_group") or "").strip()
@@ -329,6 +335,7 @@ def save_product(pos_profile: str, data: str) -> dict:
 @frappe.whitelist()
 def update_product_image(pos_profile: str, item_code: str, file_url: str) -> dict:
 	"""Update only the image, enforcing the same profile boundary as product saves."""
+	ensure_desk_user()
 	_validate_pos_profile_access(pos_profile)
 	item = frappe.get_doc("Item", item_code)
 	item.check_permission("write")

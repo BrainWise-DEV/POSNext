@@ -31,6 +31,7 @@ from frappe.query_builder.functions import Coalesce
 from frappe.utils import get_system_timezone
 
 from pos_next.api.constants import DEFAULT_POS_SETTINGS, POS_SETTINGS_FIELDS, merge_pos_settings
+from pos_next.api.security import ensure_desk_user
 
 
 @frappe.whitelist()
@@ -57,6 +58,7 @@ def get_initial_data():
 	Raises:
 		AuthenticationError: If user is not logged in (Guest)
 	"""
+	ensure_desk_user()
 	if frappe.session.user == "Guest":
 		frappe.throw(_("Authentication required"), frappe.AuthenticationError)
 

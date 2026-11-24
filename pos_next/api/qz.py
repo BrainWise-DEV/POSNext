@@ -21,6 +21,19 @@ import os
 
 import frappe
 from frappe import _
+from pos_next.api.security import ensure_desk_user, is_pos_supervisor
+
+MAX_QZ_MESSAGE_LENGTH = 65536
+
+
+def _ensure_qz_pos_user() -> str:
+	"""Ensure caller is an enabled Desk user assigned to a POS Profile or a supervisor."""
+	user = ensure_desk_user()
+	if is_pos_supervisor(user):
+		return user
+	if not frappe.db.exists("POS Profile User", {"user": user}):
+		frappe.throw(_("POS profile membership is required to use QZ Tray signing"), frappe.PermissionError)
+	return user
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -47,6 +60,8 @@ def _key_path():
 @frappe.whitelist()
 def get_certificate():
 	"""Return the public certificate PEM text for QZ Tray signing."""
+	ensure_desk_user()
+	_ensure_qz_pos_user()
 	path = _cert_path()
 	if not os.path.exists(path):
 		frappe.throw(
@@ -61,6 +76,8 @@ def get_certificate():
 @frappe.whitelist()
 def get_certificate_download():
 	"""Return the certificate PEM and company name for download."""
+	ensure_desk_user()
+	_ensure_qz_pos_user()
 	path = _cert_path()
 	if not os.path.exists(path):
 		frappe.throw(
@@ -85,6 +102,12 @@ def sign_message(message):
 	Returns:
 		Base64-encoded RSA-PKCS1v15-SHA512 signature.
 	"""
+	ensure_desk_user()
+	_ensure_qz_pos_user()
+	if not isinstance(message, str) or not message:
+		frappe.throw(_("Message to sign is required"), frappe.ValidationError)
+	if len(message) > MAX_QZ_MESSAGE_LENGTH:
+		frappe.throw(_("Message exceeds maximum allowed signing length"), frappe.ValidationError)
 	path = _key_path()
 	if not os.path.exists(path):
 		frappe.throw(
@@ -115,6 +138,7 @@ def setup_qz_certificate():
 	Returns the path to the certificate file so the admin can download
 	and import it into QZ Tray on each POS machine.
 	"""
+	ensure_desk_user()
 	if "System Manager" not in frappe.get_roles():
 		frappe.throw(_("Only System Managers can set up QZ certificates."), frappe.PermissionError)
 

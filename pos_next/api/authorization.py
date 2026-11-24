@@ -20,6 +20,7 @@ from frappe.utils import flt
 from pos_next.authorization import gate, grants, log, policy, registry
 from pos_next.authorization import pin as pin_store
 from pos_next.authorization.actions.pos_expense import ACTION_VOID_POS_EXPENSE, resolve_void_context
+from pos_next.api.security import ensure_desk_user, ensure_pos_user
 
 
 def _parse_context(context) -> dict:
@@ -35,6 +36,9 @@ def _parse_context(context) -> dict:
 
 @frappe.whitelist()
 def get_authorization_policy(pos_profile: str | None = None) -> dict:
+	ensure_desk_user()
+	if pos_profile:
+		ensure_pos_user(pos_profile)
 	policy_map = {}
 	for action in registry.all_actions():
 		if gate.is_required(action.name, pos_profile):
@@ -45,6 +49,9 @@ def get_authorization_policy(pos_profile: str | None = None) -> dict:
 
 @frappe.whitelist()
 def get_authorizers(action: str, pos_profile: str | None = None, context=None) -> list[dict]:
+	ensure_desk_user()
+	if pos_profile:
+		ensure_pos_user(pos_profile)
 	action_def = registry.get(action)
 	if not action_def:
 		return []
@@ -76,6 +83,7 @@ def get_authorizers(action: str, pos_profile: str | None = None, context=None) -
 
 @frappe.whitelist()
 def get_authorization_readiness(action: str, pos_profile: str | None = None) -> dict:
+	ensure_desk_user()
 	frappe.only_for("System Manager")
 
 	rule = policy.resolve_rule(action, pos_profile)
@@ -99,6 +107,7 @@ RATE_LIMIT_PER_MINUTE = 20
 @rate_limit(key="approver", limit=RATE_LIMIT_PER_MINUTE, seconds=60, ip_based=True)
 def request_grant(action: str, approver: str, pin: str, context=None) -> dict:
 
+	ensure_desk_user()
 	approver = (approver or "").strip()
 	if not approver:
 		return {"authorized": False, "message": _("Select an approver")}
@@ -173,6 +182,7 @@ def request_grant(action: str, approver: str, pin: str, context=None) -> dict:
 
 @frappe.whitelist()
 def set_authorization_pin(user: str, new_pin: str, current_pin: str | None = None) -> dict:
+	ensure_desk_user()
 	user = user or frappe.session.user
 	pin_store.validate_format(new_pin)
 
@@ -193,6 +203,7 @@ def set_authorization_pin(user: str, new_pin: str, current_pin: str | None = Non
 @frappe.whitelist()
 def clear_authorization_pin(user: str) -> dict:
 	"""Remove a user's PIN. System Manager only — this revokes their ability to approve."""
+	ensure_desk_user()
 	frappe.only_for("System Manager")
 
 	pin_store.clear_pin(user)
@@ -203,6 +214,7 @@ def clear_authorization_pin(user: str) -> dict:
 
 @frappe.whitelist()
 def has_authorization_pin(user: str | None = None) -> dict:
+	ensure_desk_user()
 	user = user or frappe.session.user
 	if user != frappe.session.user:
 		frappe.has_permission("User", ptype="read", doc=user, throw=True)

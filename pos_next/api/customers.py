@@ -5,6 +5,7 @@ Handles customer search, creation, and management for POS operations
 
 import frappe
 from frappe import _
+from frappe.utils import cint
 
 from pos_next.api.constants import EMAIL_VERIFICATION_FIELDS
 from pos_next.integrations.registry import (
@@ -16,6 +17,31 @@ from pos_next.integrations.registry import (
 	resolve_existing_customer,
 	validate_customer_create,
 )
+from pos_next.api.security import ensure_desk_user, ensure_pos_user
+
+MAX_CUSTOMERS_LIMIT = 50
+
+CUSTOMER_DETAIL_FIELDS = (
+	"name",
+	"customer_name",
+	"customer_type",
+	"customer_group",
+	"territory",
+	"mobile_no",
+	"email_id",
+	"disabled",
+	"loyalty_program",
+	"default_currency",
+	"default_price_list",
+	"custom_governorate",
+	"custom_district",
+	"custom_first_name",
+	"custom_last_name",
+	"custom_is_publish",
+	*EMAIL_VERIFICATION_FIELDS,
+)
+
+
 @frappe.whitelist()
 def get_customers(search_term="", pos_profile=None, limit=20, modified_since=None):
 	"""
@@ -24,12 +50,17 @@ def get_customers(search_term="", pos_profile=None, limit=20, modified_since=Non
 	Args:
 	    search_term (str): Search query (name, mobile, or customer ID)
 	    pos_profile (str): POS Profile to filter by customer group
-	    limit (int): Maximum number of results to return
+	    limit (int): Maximum number of results to return (clamped to 1..50)
 	    modified_since (str): Fetch customers modified after this timestamp (ISO format)
 
 	Returns:
 	    list: List of customer dictionaries with name, customer_name, mobile_no, email_id, disabled
 	"""
+	ensure_desk_user()
+	if pos_profile:
+		ensure_pos_user(pos_profile)
+	if not frappe.has_permission("Customer", "read"):
+		frappe.throw(_("You don't have permission to view customers"), frappe.PermissionError)
 	try:
 		frappe.logger().debug(
 			f"get_customers called with search_term={search_term}, pos_profile={pos_profile}, limit={limit}, modified_since={modified_since}"
@@ -64,7 +95,8 @@ def get_customers(search_term="", pos_profile=None, limit=20, modified_since=Non
 				["Customer", "email_id", "like", like_term],
 			]
 
-		customer_limit = limit if limit not in (None, 0) else frappe.db.count("Customer", filters)
+		parsed_limit = cint(limit)
+		customer_limit = min(parsed_limit, MAX_CUSTOMERS_LIMIT) if parsed_limit > 0 else MAX_CUSTOMERS_LIMIT
 		result = frappe.get_all(
 			"Customer",
 			filters=filters,
@@ -75,6 +107,8 @@ def get_customers(search_term="", pos_profile=None, limit=20, modified_since=Non
 		)
 		frappe.logger().debug(f"get_customers returned {len(result)} customers")
 		return result
+	except frappe.PermissionError:
+		raise
 	except Exception as e:
 		frappe.logger().error(f"Error in get_customers: {e!s}")
 		frappe.logger().error(frappe.get_traceback())
@@ -117,6 +151,9 @@ def create_customer(
 	    dict: Created customer document
 	"""
 	# Check if user has permission to create customers
+	ensure_desk_user()
+	if pos_profile:
+		ensure_pos_user(pos_profile)
 	if not frappe.has_permission("Customer", "create"):
 		frappe.throw(_("You don't have permission to create customers"), frappe.PermissionError)
 
@@ -402,21 +439,29 @@ def get_default_loyalty_program_from_settings(company=None, pos_profile=None):
 
 
 @frappe.whitelist()
-def get_customer_details(customer):
+def get_customer_details(customer, pos_profile=None):
 	"""
-	Get detailed customer information.
+	Get detailed customer information (allowlisted POS fields only).
 
 	Args:
 	    customer (str): Customer ID
+	    pos_profile (str): Optional POS Profile for access validation
 
 	Returns:
-	    dict: Customer details
+	    dict: Allowlisted customer fields
 	"""
+	ensure_desk_user()
+	if pos_profile:
+		ensure_pos_user(pos_profile)
 	if not customer:
 		frappe.throw(_("Customer is required"))
 
+	if not frappe.has_permission("Customer", "read", customer):
+		frappe.throw(_("You don't have permission to view this customer"), frappe.PermissionError)
+
 	# Avoid a stale cache after the primary Contact (and fetch_from fields) change.
-	return frappe.get_doc("Customer", customer).as_dict()
+	doc = frappe.get_doc("Customer", customer)
+	return {field: doc.get(field) for field in CUSTOMER_DETAIL_FIELDS if doc.get(field) is not None or field in ("name", "customer_name", "mobile_no", "email_id", "disabled")}
 
 
 @frappe.whitelist()
@@ -441,6 +486,9 @@ def update_customer(
 	successful save, then fetch_from overwrites them with the unchanged Contact.
 	This updates the Contact first, then the Customer.
 	"""
+	ensure_desk_user()
+	if pos_profile:
+		ensure_pos_user(pos_profile)
 	if not name:
 		frappe.throw(_("Customer is required"))
 

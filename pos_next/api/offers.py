@@ -14,6 +14,7 @@ from typing import Dict, List, Optional
 import frappe
 from frappe import _
 from frappe.utils import flt, getdate, nowdate
+from pos_next.api.security import ensure_desk_user, ensure_pos_user
 
 # ============================================================================
 # Constants
@@ -420,6 +421,7 @@ def get_offers(pos_profile: str) -> list[dict]:
 	Returns:
 		List of offer dictionaries
 	"""
+	ensure_pos_user(pos_profile)
 	try:
 		profile = frappe.get_doc("POS Profile", pos_profile)
 
@@ -454,8 +456,10 @@ def get_customer_one_time_redemptions(customer: str) -> list[str]:
 	the cart caches this list when a customer is selected (while online) so the
 	offline offer engine can mirror the server-side gate in ``apply_offers``.
 	"""
+	ensure_desk_user()
 	if not customer or not frappe.db.table_exists("One Time Customer Offer Usage"):
 		return []
+	frappe.has_permission("Customer", "read", customer, throw=True)
 
 	return frappe.get_all(
 		"One Time Customer Offer Usage",
@@ -574,6 +578,9 @@ def _get_standalone_pricing_rule_offers(company: str, date: str) -> list[Offer]:
 @frappe.whitelist()
 def get_active_coupons(customer: str, company: str) -> list[dict]:
 	"""Get active gift card coupons for a customer"""
+	ensure_desk_user()
+	if customer:
+		frappe.has_permission("Customer", "read", customer, throw=True)
 	if not frappe.db.table_exists("POS Coupon"):
 		return []
 
@@ -594,6 +601,9 @@ def get_active_coupons(customer: str, company: str) -> list[dict]:
 @frappe.whitelist()
 def validate_coupon(coupon_code: str, company: str, customer: str | None = None) -> dict:
 	"""Validate a coupon code and return its details"""
+	ensure_desk_user()
+	if customer:
+		frappe.has_permission("Customer", "read", customer, throw=True)
 	if not frappe.db.table_exists("POS Coupon"):
 		return {"valid": False, "message": _("Coupons are not enabled")}
 

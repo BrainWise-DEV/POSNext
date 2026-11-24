@@ -8,6 +8,7 @@ from frappe import _
 from frappe.utils import flt, today
 
 from pos_next.api.wallet import get_or_create_wallet
+from pos_next.api.security import ensure_desk_user, ensure_pos_user
 
 
 class WalletTransaction(AccountsController):
@@ -213,7 +214,15 @@ def create_wallet_credit(
 	Returns:
 		Wallet Transaction document
 	"""
+	ensure_desk_user()
+	frappe.has_permission("Wallet Transaction", "create", throw=True)
+	if submit:
+		frappe.has_permission("Wallet Transaction", "submit", throw=True)
+	if flt(amount) <= 0:
+		frappe.throw(_("Amount must be greater than zero"))
+
 	wallet_doc = frappe.get_doc("Wallet", wallet)
+	frappe.has_permission("Customer", "read", wallet_doc.customer, throw=True)
 
 	# Get source account based on source type
 	source_account = None
@@ -241,7 +250,7 @@ def create_wallet_credit(
 		}
 	)
 
-	transaction.insert(ignore_permissions=True)
+	transaction.insert()
 
 	if submit:
 		transaction.submit()
@@ -263,6 +272,10 @@ def credit_loyalty_points_to_wallet(customer, company, loyalty_points, conversio
 	Returns:
 		Wallet Transaction document or None
 	"""
+	ensure_desk_user()
+	frappe.has_permission("Customer", "read", customer, throw=True)
+	frappe.has_permission("Wallet Transaction", "create", throw=True)
+	frappe.has_permission("Wallet Transaction", "submit", throw=True)
 	if flt(loyalty_points) <= 0:
 		return None
 
@@ -281,8 +294,10 @@ def credit_loyalty_points_to_wallet(customer, company, loyalty_points, conversio
 	if credit_amount <= 0:
 		return None
 
-	# Get or create customer wallet
-	wallet = get_or_create_wallet(customer, company, force_create=True)
+	# Get or create customer wallet (internal server hook)
+	from pos_next.api.wallet import _get_or_create_wallet
+
+	wallet = _get_or_create_wallet(customer, company, force_create=True)
 
 	# Create wallet credit transaction
 	transaction = create_wallet_credit(
@@ -337,8 +352,10 @@ def credit_return_to_wallet(return_invoice, amount=None):
 	if credit_amount <= 0:
 		return None
 
-	# Get or create customer wallet
-	wallet = get_or_create_wallet(customer, company, force_create=True)
+	# Get or create customer wallet (internal server hook)
+	from pos_next.api.wallet import _get_or_create_wallet
+
+	wallet = _get_or_create_wallet(customer, company, force_create=True)
 
 	if not wallet:
 		frappe.log_error(
@@ -444,7 +461,11 @@ def reverse_wallet_transactions_for_return(original_invoice, return_invoice):
 		return_invoice: Return Sales Invoice name (is_return=1)
 	"""
 	# Get the return invoice to calculate return ratio
+	ensure_desk_user()
+	frappe.has_permission("Sales Invoice", "read", return_invoice, throw=True)
 	return_doc = frappe.get_doc("Sales Invoice", return_invoice)
+	if return_doc.get("pos_profile"):
+		ensure_pos_user(return_doc.pos_profile)
 	original_doc = frappe.get_doc("Sales Invoice", original_invoice)
 
 	if not return_doc.is_return or return_doc.return_against != original_invoice:
