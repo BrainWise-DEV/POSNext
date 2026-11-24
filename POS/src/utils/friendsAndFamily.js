@@ -348,6 +348,18 @@ export function mergeServerLine(item, serverLine = {}, fnfLine = null, { fnfSupp
 		item.discount_amount = 0;
 		item.pricing_rules = [];
 		item.is_already_discounted = 0;
+		item.free_qty = 0;
+		item.gwp_free_qty = 0;
+		if (
+			item.discount_source &&
+			item.discount_source !== "manual_discount" &&
+			item.discount_source !== "coupon" &&
+			item.discount_source !== "pos_coupon" &&
+			!item.posnext_coupon_code &&
+			!isFnfLine(item)
+		) {
+			item.discount_source = "";
+		}
 	}
 
 	if (result.stripped) {
