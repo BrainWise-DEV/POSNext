@@ -2426,17 +2426,33 @@ def delete_invoice(invoice):
 	return _("Invoice {0} Deleted").format(invoice)
 
 
+MIN_DRAFT_CLEANUP_AGE_HOURS = 24
+
+
 @frappe.whitelist()
 def cleanup_old_drafts(pos_profile=None, max_age_hours=48):
 	"""
 	Clean up old draft invoices to prevent stock reservation issues.
-	Deletes drafts older than max_age_hours (default 24 hours).
+	Deletes drafts older than max_age_hours (minimum 24 hours).
 	"""
-	ensure_desk_user()
+	current_user = ensure_desk_user()
 	from datetime import datetime, timedelta
 
-	doctype = "Sales Invoice"
-	cutoff_time = datetime.now() - timedelta(hours=int(max_age_hours))
+	age_hours = cint(max_age_hours)
+	if age_hours < MIN_DRAFT_CLEANUP_AGE_HOURS:
+		frappe.throw(
+			_("max_age_hours must be at least {0} hours").format(MIN_DRAFT_CLEANUP_AGE_HOURS),
+			frappe.ValidationError,
+		)
+
+	supervisor = is_pos_supervisor(current_user)
+	if pos_profile:
+		ensure_pos_user(pos_profile, current_user)
+	elif not supervisor:
+		frappe.throw(_("POS Profile is required"), frappe.ValidationError)
+
+	doctype = DOCTYPE_SALES_INVOICE
+	cutoff_time = datetime.now() - timedelta(hours=age_hours)
 
 	filters = {
 		"docstatus": 0,  # Draft only
@@ -2447,6 +2463,10 @@ def cleanup_old_drafts(pos_profile=None, max_age_hours=48):
 	# Optionally filter by POS profile
 	if pos_profile:
 		filters["pos_profile"] = pos_profile
+
+	# Non-supervisors may only clean up their own old drafts
+	if not supervisor:
+		filters["owner"] = current_user
 
 	# Get old drafts
 	old_drafts = frappe.get_all(
@@ -2534,7 +2554,12 @@ def get_returnable_invoices(limit=50, pos_profile=None):
 	2. Filter out fully-returned ones via _filter_fully_returned
 	"""
 	ensure_desk_user()
+	if pos_profile:
+		ensure_pos_user(pos_profile)
+	frappe.has_permission("Sales Invoice", "read", throw=True)
 	from frappe.utils import add_days, today
+
+	safe_limit = min(max(cint(limit) or 50, 1), 100)
 
 	# Check return validity days from POS Settings
 	return_validity_days = 0
@@ -2546,7 +2571,7 @@ def get_returnable_invoices(limit=50, pos_profile=None):
 	si = frappe.qb.DocType("Sales Invoice")
 
 	# Over-fetch to compensate for fully-returned invoices removed in step 2
-	fetch_limit = cint(limit) * 2
+	fetch_limit = safe_limit * 2
 
 	# Step 1: fetch candidates (lightweight, no JOINs)
 	query = (
@@ -2573,7 +2598,7 @@ def get_returnable_invoices(limit=50, pos_profile=None):
 	candidates = query.run(as_dict=True)
 
 	# Step 2: filter out fully-returned invoices, then trim to requested limit
-	return _filter_fully_returned(candidates)[: cint(limit)]
+	return _filter_fully_returned(candidates)[:safe_limit]
 
 
 @frappe.whitelist()
@@ -2593,6 +2618,9 @@ def search_invoice_by_number(search_term, pos_profile=None):
 	    List of matching invoices with return availability info (max 10 results)
 	"""
 	ensure_desk_user()
+	if pos_profile:
+		ensure_pos_user(pos_profile)
+	frappe.has_permission("Sales Invoice", "read", throw=True)
 	if not search_term or len(search_term) < 3:
 		return []
 
@@ -2636,6 +2664,7 @@ def check_invoice_return_validity(invoice_name):
 	- Additional context (invoice_date, days_since, allowed_days) for expired returns
 	"""
 	ensure_desk_user()
+	frappe.has_permission("Sales Invoice", "read", invoice_name, throw=True)
 	from frappe.utils import date_diff, formatdate, getdate
 
 	# Fetch only the fields needed for validation
@@ -2687,6 +2716,7 @@ def get_invoice_for_return(invoice_name):
 	only the remaining returnable quantity (original qty minus already returned).
 	"""
 	ensure_desk_user()
+	frappe.has_permission("Sales Invoice", "read", invoice_name, throw=True)
 	from frappe.query_builder.functions import Abs, Coalesce, Sum
 	from frappe.utils import date_diff, getdate
 
@@ -2950,6 +2980,9 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
 	        - Each item includes original_qty, already_returned, and remaining_qty
 	"""
 	ensure_desk_user()
+	frappe.has_permission("Sales Invoice", "read", invoice_name, throw=True)
+	if pos_opening_shift:
+		_ensure_opening_shift_for_invoice(pos_opening_shift, None)
 	from erpnext.accounts.doctype.sales_invoice.sales_invoice import make_sales_return
 	from frappe.query_builder.functions import Abs, Coalesce, Sum
 	from frappe.utils import date_diff, getdate
@@ -3178,9 +3211,12 @@ def search_invoices_for_return(
 	Returns invoices with their items adjusted to show remaining returnable quantities.
 	"""
 	ensure_desk_user()
+	if doctype not in ALLOWED_RETURN_DOCTYPES:
+		frappe.throw(_("Invalid invoice doctype"), frappe.PermissionError)
+	frappe.has_permission(doctype, "read", throw=True)
 	from frappe.query_builder.functions import Abs, Count, Sum
 
-	page = cint(page) or 1
+	page = max(cint(page) or 1, 1)
 	page_length = 100
 	start = (page - 1) * page_length
 

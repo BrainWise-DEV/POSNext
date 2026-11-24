@@ -33,7 +33,7 @@ import frappe
 import requests
 from frappe import _
 from frappe.utils import cint, now_datetime
-from pos_next.api.security import ensure_desk_user
+from pos_next.api.security import ensure_desk_user, ensure_pos_user
 
 SEND_ENDPOINT = "/rest/V1/miraaya/email-verification/customer/otp/send"
 VERIFY_ENDPOINT = "/rest/V1/miraaya/email-verification/customer/otp/verify"
@@ -461,6 +461,8 @@ def _audit(customer, action, code, email, phone, http_status=None):
 def send_email_otp(customer, email=None, pos_profile=None):
 	"""Send a verification code to the customer's saved email."""
 	ensure_desk_user()
+	if pos_profile:
+		ensure_pos_user(pos_profile)
 	ctx, err = _prepare(customer, email, pos_profile)
 	if err:
 		return err
@@ -528,6 +530,8 @@ def send_email_otp(customer, email=None, pos_profile=None):
 def verify_email_otp(customer, otp, email=None, pos_profile=None):
 	"""Verify the 6-digit code. Success is decided by the response body ``status``."""
 	ensure_desk_user()
+	if pos_profile:
+		ensure_pos_user(pos_profile)
 	ctx, err = _prepare(customer, email, pos_profile)
 	if err:
 		return err

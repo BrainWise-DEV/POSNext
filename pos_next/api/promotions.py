@@ -898,6 +898,9 @@ def apply_referral_code(referral_code, customer):
 		dict with generated coupon information
 	"""
 	ensure_desk_user()
+	if not customer:
+		frappe.throw(_("Customer is required"))
+	frappe.has_permission("Customer", "write", customer, throw=True)
 	from pos_next.pos_next.doctype.referral_code.referral_code import apply_referral_code as apply_code
 
 	try:
@@ -908,6 +911,8 @@ def apply_referral_code(referral_code, customer):
 			"referrer_coupon": result.get("referrer_coupon"),
 			"referee_coupon": result.get("referee_coupon"),
 		}
+	except frappe.PermissionError:
+		raise
 	except Exception as e:
 		frappe.db.rollback()
 		frappe.log_error(title=_("Apply Referral Code Failed"), message=frappe.get_traceback())
@@ -918,6 +923,7 @@ def apply_referral_code(referral_code, customer):
 def get_referral_codes(company=None, include_disabled=False):
 	"""Get all referral codes with optional filters."""
 	ensure_desk_user()
+	check_promotion_permissions("read")
 	filters = {}
 
 	if company:

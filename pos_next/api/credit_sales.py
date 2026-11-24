@@ -12,7 +12,7 @@ Handles credit sale operations including:
 import frappe
 from frappe import _
 from frappe.utils import cint, flt, get_datetime, nowdate, today
-from pos_next.api.security import ensure_desk_user
+from pos_next.api.security import ensure_desk_user, ensure_pos_user, is_pos_supervisor
 
 # Invoices whose negative outstanding counts as customer credit. Linked returns
 # with update_outstanding_for_self = 0 are excluded: their credit is on the original invoice.
@@ -55,6 +55,7 @@ def get_customer_balance(customer, company=None):
 	ensure_desk_user()
 	if not customer:
 		frappe.throw(_("Customer is required"))
+	frappe.has_permission("Customer", "read", customer, throw=True)
 
 	try:
 		filters = {"customer": customer, "docstatus": 1, **({"company": company} if company else {})}
@@ -136,8 +137,11 @@ def get_available_credit(customer, company, pos_profile=None):
 		list: Available credit sources with amounts and modified timestamps
 	"""
 	ensure_desk_user()
+	if pos_profile:
+		ensure_pos_user(pos_profile)
 	if not customer:
 		frappe.throw(_("Customer is required"))
+	frappe.has_permission("Customer", "read", customer, throw=True)
 
 	if not company:
 		frappe.throw(_("Company is required"))
@@ -240,6 +244,10 @@ def redeem_customer_credit(invoice_name, customer_credit_dict):
 
 	# Get invoice document
 	invoice_doc = frappe.get_doc("Sales Invoice", invoice_name)
+	if invoice_doc.get("pos_profile"):
+		ensure_pos_user(invoice_doc.pos_profile)
+	if not is_pos_supervisor() and not frappe.has_permission("Sales Invoice", "write", invoice_name):
+		frappe.throw(_("You don't have permission to redeem credit on this invoice"), frappe.PermissionError)
 
 	if invoice_doc.docstatus != 1:
 		frappe.throw(_("Invoice must be submitted to redeem credit"))
@@ -566,6 +574,8 @@ def cancel_credit_journal_entries(invoice_name):
 		invoice_name: Sales Invoice name
 	"""
 	ensure_desk_user()
+	if not is_pos_supervisor() and not frappe.has_permission("Sales Invoice", "cancel", invoice_name):
+		frappe.throw(_("You don't have permission to cancel credit journal entries"), frappe.PermissionError)
 	remark = get_credit_redeem_remark(invoice_name)
 
 	# Find linked journal entries
@@ -615,9 +625,7 @@ def get_credit_sale_summary(pos_profile):
 	Returns:
 		dict: Summary statistics
 	"""
-	ensure_desk_user()
-	if not pos_profile:
-		frappe.throw(_("POS Profile is required"))
+	ensure_pos_user(pos_profile)
 
 	# Get credit sales (outstanding > 0)
 	summary = frappe.db.sql(
@@ -650,20 +658,13 @@ def get_credit_invoices(pos_profile, limit=100):
 
 	Args:
 		pos_profile: POS Profile name
-		limit: Maximum number of invoices to return
+		limit: Maximum number of invoices to return (clamped to 1..100)
 
 	Returns:
 		list: Credit sale invoices
 	"""
-	ensure_desk_user()
-	if not pos_profile:
-		frappe.throw(_("POS Profile is required"))
-
-	# Check if user has access to this POS Profile
-	has_access = frappe.db.exists("POS Profile User", {"parent": pos_profile, "user": frappe.session.user})
-
-	if not has_access and not frappe.has_permission("Sales Invoice", "read"):
-		frappe.throw(_("You don't have access to this POS Profile"))
+	ensure_pos_user(pos_profile)
+	limit = min(max(cint(limit) or 100, 1), 100)
 
 	# Query for credit invoices
 	invoices = frappe.db.sql(
