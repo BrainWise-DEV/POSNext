@@ -16,6 +16,7 @@ from pos_next.integrations.registry import (
 	resolve_existing_customer,
 	validate_customer_create,
 )
+from pos_next.api.security import ensure_desk_user
 @frappe.whitelist()
 def get_customers(search_term="", pos_profile=None, limit=20, modified_since=None):
 	"""
@@ -30,6 +31,7 @@ def get_customers(search_term="", pos_profile=None, limit=20, modified_since=Non
 	Returns:
 	    list: List of customer dictionaries with name, customer_name, mobile_no, email_id, disabled
 	"""
+	ensure_desk_user()
 	try:
 		frappe.logger().debug(
 			f"get_customers called with search_term={search_term}, pos_profile={pos_profile}, limit={limit}, modified_since={modified_since}"
@@ -117,6 +119,7 @@ def create_customer(
 	    dict: Created customer document
 	"""
 	# Check if user has permission to create customers
+	ensure_desk_user()
 	if not frappe.has_permission("Customer", "create"):
 		frappe.throw(_("You don't have permission to create customers"), frappe.PermissionError)
 
@@ -412,6 +415,7 @@ def get_customer_details(customer):
 	Returns:
 	    dict: Customer details
 	"""
+	ensure_desk_user()
 	if not customer:
 		frappe.throw(_("Customer is required"))
 
@@ -441,6 +445,7 @@ def update_customer(
 	successful save, then fetch_from overwrites them with the unchanged Contact.
 	This updates the Contact first, then the Customer.
 	"""
+	ensure_desk_user()
 	if not name:
 		frappe.throw(_("Customer is required"))
 

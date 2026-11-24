@@ -14,6 +14,7 @@ from pos_next.integrations.registry import (
 	get_external_loyalty_balance,
 	is_external_loyalty_mode,
 )
+from pos_next.api.security import ensure_desk_user
 
 
 def validate_wallet_payment(doc, method=None):
@@ -222,6 +223,7 @@ def get_customer_wallet_balance(customer, company=None, exclude_invoice=None, po
 	Returns:
 		float: Available wallet balance
 	"""
+	ensure_desk_user()
 	if is_external_loyalty_mode(pos_profile):
 		try:
 			balance = get_external_loyalty_balance(customer)
@@ -289,6 +291,7 @@ def get_pending_wallet_payments(customer, exclude_invoice=None):
 @frappe.whitelist()
 def get_customer_wallet(customer, company=None):
 	"""Get wallet details for a customer."""
+	ensure_desk_user()
 	filters = {"customer": customer}
 	if company:
 		filters["company"] = company
@@ -343,6 +346,7 @@ def get_or_create_wallet(customer, company, pos_settings=None, force_create=Fals
 	"""Get existing wallet or create a new one."""
 
 	# Check if wallet exists
+	ensure_desk_user()
 	wallet = frappe.db.get_value(
 		"Wallet",
 		{"customer": customer, "company": company},
@@ -430,6 +434,7 @@ def get_pos_settings(pos_profile):
 @frappe.whitelist()
 def get_wallet_payment_methods(pos_profile):
 	"""Get payment methods that are wallet-enabled for a POS profile."""
+	ensure_desk_user()
 	payment_methods = frappe.get_all(
 		"POS Payment Method", filters={"parent": pos_profile}, fields=["mode_of_payment", "default"]
 	)
@@ -455,6 +460,7 @@ def get_wallet_info(customer, company, pos_profile=None):
 	Get comprehensive wallet information for a customer.
 	Used by POS frontend.
 	"""
+	ensure_desk_user()
 	result = {
 		"wallet_enabled": False,
 		"wallet_exists": False,
@@ -545,6 +551,7 @@ def create_manual_wallet_credit(customer, company, amount, remarks=None):
 	Returns:
 		Wallet Transaction document name
 	"""
+	ensure_desk_user()
 	frappe.has_permission("Wallet Transaction", "create", throw=True)
 
 	if flt(amount) <= 0:

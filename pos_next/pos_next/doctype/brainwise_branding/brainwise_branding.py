@@ -11,6 +11,7 @@ from typing import ClassVar
 
 import frappe
 from frappe.model.document import Document
+from pos_next.api.security import ensure_desk_user
 
 # MASTER KEY HASH - Only the person with the original key can disable branding
 # This hash was created from: secrets.token_urlsafe(32)
@@ -227,6 +228,7 @@ class BrainWiseBranding(Document):
 @frappe.whitelist(allow_guest=False)
 def get_branding_config():
 	"""API endpoint to get branding configuration"""
+	ensure_desk_user()
 	try:
 		doc = frappe.get_single("BrainWise Branding")
 
@@ -265,6 +267,7 @@ def get_branding_config():
 @frappe.whitelist(allow_guest=False)
 def validate_branding(client_signature=None, brand_name=None, brand_url=None):
 	"""Validate branding integrity from client"""
+	ensure_desk_user()
 	try:
 		doc = frappe.get_single("BrainWise Branding")
 
@@ -305,6 +308,7 @@ def validate_branding(client_signature=None, brand_name=None, brand_url=None):
 @frappe.whitelist(allow_guest=False)
 def log_client_event(event_type=None, details=None):
 	"""Log client-side events (clicks, removals, modifications)"""
+	ensure_desk_user()
 	try:
 		doc = frappe.get_single("BrainWise Branding")
 
@@ -344,6 +348,7 @@ def verify_master_key(master_key_input):
 	Returns True/False without making any changes
 	"""
 	# Only System Managers can check
+	ensure_desk_user()
 	if "System Manager" not in frappe.get_roles():
 		frappe.throw("Only System Managers can verify the master key", frappe.PermissionError)
 
@@ -394,6 +399,7 @@ def generate_new_master_key():
 	Only accessible by System Manager
 	WARNING: This should only be used during initial setup!
 	"""
+	ensure_desk_user()
 	if "System Manager" not in frappe.get_roles():
 		frappe.throw("Only System Managers can generate master keys", frappe.PermissionError)
 

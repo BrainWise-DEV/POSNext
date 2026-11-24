@@ -7,6 +7,7 @@ import json
 import frappe
 from frappe import _
 from frappe.utils import cint
+from pos_next.api.security import ensure_desk_user
 
 
 @frappe.whitelist()
@@ -20,6 +21,7 @@ def get_csrf_token():
 	- Session must be valid
 	- User must be enabled
 	"""
+	ensure_desk_user()
 	if frappe.session.user == "Guest":
 		frappe.throw(_("Authentication required"), frappe.AuthenticationError)
 

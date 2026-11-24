@@ -8,11 +8,13 @@ import frappe
 from frappe import _
 from frappe.utils import nowdate, nowtime, get_datetime, flt, cint
 from pos_next.api.utilities import get_wallet_payment_modes
+from pos_next.api.security import ensure_desk_user
 
 
 @frappe.whitelist()
 def get_opening_dialog_data():
 	"""Get data required for opening shift dialog"""
+	ensure_desk_user()
 	data = {}
 
 	# Get POS Profiles where current user is defined in POS Profile User table
@@ -69,6 +71,7 @@ def get_opening_dialog_data():
 @frappe.whitelist()
 def check_opening_shift(user=None):
 	"""Check if user has an open shift"""
+	ensure_desk_user()
 	if not user:
 		user = frappe.session.user
 
@@ -103,6 +106,7 @@ def check_opening_shift(user=None):
 @frappe.whitelist()
 def create_opening_shift(pos_profile, company, balance_details):
 	"""Create a new POS Opening Shift"""
+	ensure_desk_user()
 	balance_details = json.loads(balance_details) if isinstance(balance_details, str) else balance_details
 
 	# Check if user already has an open shift
@@ -147,6 +151,7 @@ def create_opening_shift(pos_profile, company, balance_details):
 @frappe.whitelist()
 def get_closing_shift_data(opening_shift):
 	"""Get data for closing shift"""
+	ensure_desk_user()
 	from pos_next.pos_next.doctype.pos_closing_shift.pos_closing_shift import make_closing_shift_from_opening
 
 	try:
@@ -170,6 +175,7 @@ def get_closing_shift_data(opening_shift):
 @frappe.whitelist()
 def submit_closing_shift(closing_shift):
 	"""Submit closing shift"""
+	ensure_desk_user()
 	from pos_next.pos_next.doctype.pos_closing_shift.pos_closing_shift import (
 		submit_closing_shift as submit_shift,
 	)
@@ -209,6 +215,7 @@ def get_shift_history(filters=None, limit=25, offset=0, pos_profile=None):
 	Security: The session user restriction is always enforced server-side.
 	Clients cannot override it by passing filters.
 	"""
+	ensure_desk_user()
 	if not frappe.has_permission("POS Opening Shift", "read"):
 		frappe.throw(_("Insufficient permissions to view shift history"))
 

@@ -79,6 +79,7 @@ stored at shift-close time — the authoritative source, no fuzzy matching.
 import frappe
 from frappe import _
 from frappe.utils import cint, flt, getdate, time_diff_in_hours
+from pos_next.api.security import ensure_desk_user
 
 
 def execute(filters=None):
@@ -1139,6 +1140,7 @@ def get_chart(data):
 @frappe.whitelist()
 def get_hourly_breakdown(filters):
 	"""Get hourly sales breakdown"""
+	ensure_desk_user()
 	filters = frappe.parse_json(filters) if isinstance(filters, str) else filters
 
 	conditions = []
@@ -1173,6 +1175,7 @@ def get_hourly_breakdown(filters):
 @frappe.whitelist()
 def get_payment_method_breakdown(filters):
 	"""Get payment method breakdown"""
+	ensure_desk_user()
 	filters = frappe.parse_json(filters) if isinstance(filters, str) else filters
 
 	conditions = []
@@ -1208,6 +1211,7 @@ def get_payment_method_breakdown(filters):
 @frappe.whitelist()
 def get_daily_trend(filters):
 	"""Get daily sales trend"""
+	ensure_desk_user()
 	filters = frappe.parse_json(filters) if isinstance(filters, str) else filters
 
 	conditions = []

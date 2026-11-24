@@ -8,6 +8,7 @@ from frappe import _
 from frappe.utils import flt, today
 
 from pos_next.api.wallet import get_or_create_wallet
+from pos_next.api.security import ensure_desk_user
 
 
 class WalletTransaction(AccountsController):
@@ -213,6 +214,7 @@ def create_wallet_credit(
 	Returns:
 		Wallet Transaction document
 	"""
+	ensure_desk_user()
 	wallet_doc = frappe.get_doc("Wallet", wallet)
 
 	# Get source account based on source type
@@ -263,6 +265,7 @@ def credit_loyalty_points_to_wallet(customer, company, loyalty_points, conversio
 	Returns:
 		Wallet Transaction document or None
 	"""
+	ensure_desk_user()
 	if flt(loyalty_points) <= 0:
 		return None
 
@@ -444,6 +447,7 @@ def reverse_wallet_transactions_for_return(original_invoice, return_invoice):
 		return_invoice: Return Sales Invoice name (is_return=1)
 	"""
 	# Get the return invoice to calculate return ratio
+	ensure_desk_user()
 	return_doc = frappe.get_doc("Sales Invoice", return_invoice)
 	original_doc = frappe.get_doc("Sales Invoice", original_invoice)
 

@@ -7,11 +7,13 @@ from frappe import _
 from frappe.utils import cint
 
 from pos_next.api.utilities import _parse_list_parameter, check_user_company
+from pos_next.api.security import ensure_desk_user
 
 
 @frappe.whitelist()
 def get_pos_profiles():
 	"""Get all POS Profiles accessible by current user"""
+	ensure_desk_user()
 	pos_profiles = frappe.db.sql(
 		"""
 		SELECT DISTINCT p.name, p.company, p.currency, p.warehouse,
@@ -31,6 +33,7 @@ def get_pos_profiles():
 @frappe.whitelist()
 def get_pos_profile_data(pos_profile):
 	"""Get detailed POS Profile data with hierarchical item groups for instant UI rendering."""
+	ensure_desk_user()
 	if not pos_profile:
 		frappe.throw(_("POS Profile is required"))
 
@@ -68,6 +71,7 @@ def get_pos_profile_data(pos_profile):
 @frappe.whitelist()
 def get_pos_settings(pos_profile):
 	"""Get POS Settings for a given POS Profile"""
+	ensure_desk_user()
 	from pos_next.api.constants import DEFAULT_POS_SETTINGS, POS_SETTINGS_FIELDS, merge_pos_settings
 
 	if not pos_profile:
@@ -92,6 +96,7 @@ def get_pos_settings(pos_profile):
 @frappe.whitelist()
 def get_payment_methods(pos_profile):
 	"""Get available payment methods from POS Profile with optimized queries"""
+	ensure_desk_user()
 	try:
 		# Validate pos_profile parameter
 		if not pos_profile:
@@ -147,6 +152,7 @@ def get_receivable_accounts(pos_profile):
 	"Pay on Account" button). Returns an empty list when credit sales are not enabled
 	for the profile, so the feature stays hidden behind the same gate.
 	"""
+	ensure_desk_user()
 	if not pos_profile:
 		frappe.throw(_("POS Profile is required"))
 
@@ -180,6 +186,7 @@ def get_receivable_accounts(pos_profile):
 @frappe.whitelist()
 def get_taxes(pos_profile):
 	"""Get tax configuration from POS Profile"""
+	ensure_desk_user()
 	try:
 		if not pos_profile:
 			return []
@@ -218,6 +225,7 @@ def get_taxes(pos_profile):
 @frappe.whitelist()
 def get_warehouses(pos_profile):
 	"""Get all warehouses for the company in POS Profile"""
+	ensure_desk_user()
 	try:
 		if not pos_profile:
 			return []
@@ -247,6 +255,7 @@ def get_warehouses(pos_profile):
 @frappe.whitelist()
 def get_default_customer(pos_profile):
 	"""Get the default customer configured in POS Profile"""
+	ensure_desk_user()
 	try:
 		if not pos_profile:
 			return {"customer": None}
@@ -272,6 +281,7 @@ def get_default_customer(pos_profile):
 @frappe.whitelist()
 def update_warehouse(pos_profile, warehouse):
 	"""Update warehouse in POS Profile"""
+	ensure_desk_user()
 	try:
 		if not pos_profile:
 			frappe.throw(_("POS Profile is required"))
@@ -324,6 +334,7 @@ def get_wallet_payment_flags(methods):
 	Returns:
 		Dict mapping mode_of_payment name to is_wallet_payment flag
 	"""
+	ensure_desk_user()
 	import json
 
 	if not methods:
@@ -363,6 +374,7 @@ def get_sales_persons(pos_profile=None):
 	are resolved server-side when the invoice is saved
 	(``pos_next.pos_next.utils.sales_person_commission``), so they are not sent.
 	"""
+	ensure_desk_user()
 	if not pos_profile:
 		frappe.throw(_("POS Profile is required"))
 
@@ -408,6 +420,7 @@ def get_create_pos_profile(*args, **kwargs):
 		- customer_groups: Available customer groups
 		- brands: Available brands
 	"""
+	ensure_desk_user()
 	try:
 		user_company = check_user_company()
 		user_company = user_company.get("company")
@@ -514,6 +527,7 @@ def create_pos_profile(*arg, **parameters):
 	"""
 
 	# Extract list parameters
+	ensure_desk_user()
 	payments = parameters.pop("payments", [])
 	applicable_for_users = parameters.pop("applicable_for_users", [])
 	item_groups = parameters.pop("item_groups", [])
@@ -601,6 +615,7 @@ def update_pos_profile(*args, **parameters):
 		parameters: Update parameters (all optional)
 	"""
 	# Extract child table parameters BEFORE prepare_query_parameters filters them
+	ensure_desk_user()
 	payments = parameters.pop("payments", None)
 	applicable_for_users = parameters.pop("applicable_for_users", None)
 	item_groups = parameters.pop("item_groups", None)
@@ -702,5 +717,6 @@ def delete_pos_profile(pos_profile):
 	Args:
 		pos_profile: POS Profile name
 	"""
+	ensure_desk_user()
 	pos_profile = frappe.get_doc("POS Profile", pos_profile)
 	pos_profile.delete()

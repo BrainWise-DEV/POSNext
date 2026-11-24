@@ -12,6 +12,7 @@ Handles credit sale operations including:
 import frappe
 from frappe import _
 from frappe.utils import cint, flt, get_datetime, nowdate, today
+from pos_next.api.security import ensure_desk_user
 
 # Invoices whose negative outstanding counts as customer credit. Linked returns
 # with update_outstanding_for_self = 0 are excluded: their credit is on the original invoice.
@@ -51,6 +52,7 @@ def get_customer_balance(customer, company=None):
 			'net_balance': float (positive = customer owes, negative = customer has credit)
 		}
 	"""
+	ensure_desk_user()
 	if not customer:
 		frappe.throw(_("Customer is required"))
 
@@ -133,6 +135,7 @@ def get_available_credit(customer, company, pos_profile=None):
 	Returns:
 		list: Available credit sources with amounts and modified timestamps
 	"""
+	ensure_desk_user()
 	if not customer:
 		frappe.throw(_("Customer is required"))
 
@@ -223,6 +226,7 @@ def redeem_customer_credit(invoice_name, customer_credit_dict):
 	Returns:
 		list: Created journal entry names
 	"""
+	ensure_desk_user()
 	import json
 
 	if isinstance(customer_credit_dict, str):
@@ -561,6 +565,7 @@ def cancel_credit_journal_entries(invoice_name):
 	Args:
 		invoice_name: Sales Invoice name
 	"""
+	ensure_desk_user()
 	remark = get_credit_redeem_remark(invoice_name)
 
 	# Find linked journal entries
@@ -610,6 +615,7 @@ def get_credit_sale_summary(pos_profile):
 	Returns:
 		dict: Summary statistics
 	"""
+	ensure_desk_user()
 	if not pos_profile:
 		frappe.throw(_("POS Profile is required"))
 
@@ -649,6 +655,7 @@ def get_credit_invoices(pos_profile, limit=100):
 	Returns:
 		list: Credit sale invoices
 	"""
+	ensure_desk_user()
 	if not pos_profile:
 		frappe.throw(_("POS Profile is required"))
 

@@ -4,6 +4,7 @@
 import frappe
 from frappe.model.document import Document
 from frappe.utils import cint, flt
+from pos_next.api.security import ensure_desk_user
 
 
 class POSSettings(Document):
@@ -93,6 +94,7 @@ def get_pos_settings(pos_profile):
 	source of truth, preventing confusion when the checkbox appears enabled
 	but the global setting was changed elsewhere.
 	"""
+	ensure_desk_user()
 	from frappe import _
 
 	if not pos_profile:
@@ -141,6 +143,7 @@ def create_default_settings(pos_profile):
 @frappe.whitelist()
 def update_pos_settings(pos_profile, settings):
 	"""Update POS Settings for a POS Profile"""
+	ensure_desk_user()
 	import json
 
 	from frappe import _

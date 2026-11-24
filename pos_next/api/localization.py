@@ -3,6 +3,7 @@
 
 import frappe
 from frappe import translate
+from pos_next.api.security import ensure_desk_user
 
 
 @frappe.whitelist()
@@ -18,6 +19,7 @@ def get_app_translations():
 	Returns:
 		dict: Translation dictionary {source: translated}
 	"""
+	ensure_desk_user()
 	lang = frappe.local.lang or "en"
 	return {
 		**translate.get_all_translations(lang),
@@ -38,6 +40,7 @@ def get_user_language():
 	- User must be authenticated (not Guest)
 	"""
 	# Check if user is authenticated
+	ensure_desk_user()
 	if frappe.session.user == "Guest":
 		frappe.throw("Authentication required", frappe.AuthenticationError)
 
@@ -55,6 +58,7 @@ def get_allowed_locales():
 	Returns:
 		dict: List of allowed locale codes
 	"""
+	ensure_desk_user()
 	allowed = get_allowed_locales_from_settings()
 	return {"success": True, "locales": list(allowed)}
 
@@ -102,6 +106,7 @@ def change_user_language(locale):
 	- User must be enabled
 	"""
 	# Check if user is authenticated
+	ensure_desk_user()
 	if frappe.session.user == "Guest":
 		frappe.throw("Authentication required", frappe.AuthenticationError)
 

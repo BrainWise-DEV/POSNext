@@ -11,6 +11,7 @@ from erpnext.accounts.doctype.sales_invoice.sales_invoice import get_bank_cash_a
 from erpnext.stock.doctype.batch.batch import get_batch_no, get_batch_qty
 from frappe import _
 from frappe.utils import cint, cstr, flt, get_datetime, nowdate, nowtime
+from pos_next.api.security import ensure_desk_user
 
 # ==========================================
 # Constants for field names (avoid typos and enable refactoring)
@@ -805,6 +806,7 @@ def validate_cart_items(items, pos_profile=None):
 	Returns a list of item dicts where requested quantity exceeds availability.
 	This can be used on the front-end for pre-submission checks.
 	"""
+	ensure_desk_user()
 	if isinstance(items, str):
 		items = json.loads(items)
 
@@ -829,6 +831,7 @@ def validate_return_items(original_invoice_name, return_items, doctype="Sales In
 	Uses query builder for parameterized queries. Fetches invoice details, original
 	item quantities, and already-returned quantities in 3 queries total.
 	"""
+	ensure_desk_user()
 	from frappe.query_builder.functions import Abs, Sum
 	from frappe.utils import date_diff, getdate
 
@@ -973,6 +976,7 @@ def _check_return_quantities(original_invoice_name, original_items, returned_qty
 @frappe.whitelist()
 def update_invoice(data):
 	"""Create or update invoice draft (Step 1)."""
+	ensure_desk_user()
 	try:
 		data = json.loads(data) if isinstance(data, str) else data
 		data = _strip_server_managed_fields(data)
@@ -1508,6 +1512,7 @@ def check_offline_invoice_synced(offline_id):
 	Returns:
 	    dict with 'synced' (bool) and 'sales_invoice' (str or None)
 	"""
+	ensure_desk_user()
 	from pos_next.pos_next.doctype.offline_invoice_sync.offline_invoice_sync import (
 		OfflineInvoiceSync,
 	)
@@ -1535,6 +1540,7 @@ def check_offline_invoice_synced(offline_id):
 def submit_invoice(invoice=None, data=None):
 	"""Submit the invoice (Step 2)."""
 	# Handle different calling conventions
+	ensure_desk_user()
 	if invoice is None:
 		if data:
 			# Check if data is a JSON string containing both params
@@ -1908,6 +1914,7 @@ def get_invoice(invoice_name):
 	Returns:
 		Complete invoice document with items and payments
 	"""
+	ensure_desk_user()
 	if not invoice_name:
 		frappe.throw(_("Invoice name is required"))
 
@@ -1942,6 +1949,7 @@ def get_invoices(pos_profile: str, search=None, limit: int = 20, offset=0, from_
 	Returns:
 		List of invoice dicts with basic fields (no per-invoice item loading)
 	"""
+	ensure_desk_user()
 	if not pos_profile:
 		frappe.throw(_("POS Profile is required"))
 
@@ -2084,6 +2092,7 @@ def get_invoices(pos_profile: str, search=None, limit: int = 20, offset=0, from_
 @frappe.whitelist()
 def get_draft_invoices(pos_opening_shift, doctype="Sales Invoice"):
 	"""Get all draft invoices for a POS opening shift."""
+	ensure_desk_user()
 	filters = {
 		"docstatus": 0,
 	}
@@ -2113,6 +2122,7 @@ def get_draft_invoices(pos_opening_shift, doctype="Sales Invoice"):
 @frappe.whitelist()
 def delete_invoice(invoice):
 	"""Delete draft invoice."""
+	ensure_desk_user()
 	doctype = "Sales Invoice"
 
 	if not frappe.db.exists(doctype, invoice):
@@ -2132,6 +2142,7 @@ def cleanup_old_drafts(pos_profile=None, max_age_hours=48):
 	Clean up old draft invoices to prevent stock reservation issues.
 	Deletes drafts older than max_age_hours (default 24 hours).
 	"""
+	ensure_desk_user()
 	from datetime import datetime, timedelta
 
 	doctype = "Sales Invoice"
@@ -2232,6 +2243,7 @@ def get_returnable_invoices(limit=50, pos_profile=None):
 	1. Fetch recent POS invoices (fast indexed query, no JOINs)
 	2. Filter out fully-returned ones via _filter_fully_returned
 	"""
+	ensure_desk_user()
 	from frappe.utils import add_days, today
 
 	# Check return validity days from POS Settings
@@ -2290,6 +2302,7 @@ def search_invoice_by_number(search_term, pos_profile=None):
 	Returns:
 	    List of matching invoices with return availability info (max 10 results)
 	"""
+	ensure_desk_user()
 	if not search_term or len(search_term) < 3:
 		return []
 
@@ -2332,6 +2345,7 @@ def check_invoice_return_validity(invoice_name):
 	- error_type: 'not_found' or 'return_period_expired' if invalid
 	- Additional context (invoice_date, days_since, allowed_days) for expired returns
 	"""
+	ensure_desk_user()
 	from frappe.utils import date_diff, formatdate, getdate
 
 	# Fetch only the fields needed for validation
@@ -2382,6 +2396,7 @@ def get_invoice_for_return(invoice_name):
 	Returns the full invoice document with each item's qty adjusted to show
 	only the remaining returnable quantity (original qty minus already returned).
 	"""
+	ensure_desk_user()
 	from frappe.query_builder.functions import Abs, Coalesce, Sum
 	from frappe.utils import date_diff, getdate
 
@@ -2644,6 +2659,7 @@ def prepare_return_invoice(invoice_name, pos_opening_shift=None):
 	        - _original_invoice: Reference data from original invoice (payments, amounts)
 	        - Each item includes original_qty, already_returned, and remaining_qty
 	"""
+	ensure_desk_user()
 	from erpnext.accounts.doctype.sales_invoice.sales_invoice import make_sales_return
 	from frappe.query_builder.functions import Abs, Coalesce, Sum
 	from frappe.utils import date_diff, getdate
@@ -2871,6 +2887,7 @@ def search_invoices_for_return(
 
 	Returns invoices with their items adjusted to show remaining returnable quantities.
 	"""
+	ensure_desk_user()
 	from frappe.query_builder.functions import Abs, Count, Sum
 
 	page = cint(page) or 1
@@ -3230,6 +3247,7 @@ def apply_offers(invoice_data, selected_offers=None):
 	                When provided, results are filtered to only include these rules.
 	                ERPNext handles all conflict resolution based on priority.
 	"""
+	ensure_desk_user()
 	try:
 		if isinstance(invoice_data, str):
 			invoice_data = json.loads(invoice_data or "{}")

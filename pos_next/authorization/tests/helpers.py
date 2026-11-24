@@ -24,6 +24,7 @@ CASHIER = f"{_U}cashier@example.com"
 MANAGER = f"{_U}manager@example.com"
 OUTSIDER = f"{_U}outsider@example.com"
 ROLE = f"{PREFIX}Approver"
+DESK_ROLE = f"{PREFIX}Desk"
 
 GOOD_PIN = "8317"
 OTHER_PIN = "2946"
@@ -44,7 +45,13 @@ registry.register(
 )
 
 
-def make_user(email: str, roles: list[str] | None = None) -> str:
+def make_user(email: str, roles: list[str] | None = None, user_type: str = "System User") -> str:
+	effective_roles = list(roles or [])
+	if user_type == "System User":
+		make_role(DESK_ROLE, desk_access=1)
+		if DESK_ROLE not in effective_roles:
+			effective_roles.append(DESK_ROLE)
+
 	if not frappe.db.exists("User", email):
 		user = frappe.get_doc(
 			{
@@ -53,22 +60,25 @@ def make_user(email: str, roles: list[str] | None = None) -> str:
 				"first_name": email.split("@")[0],
 				"send_welcome_email": 0,
 				"enabled": 1,
+				"user_type": user_type,
 			}
 		)
 		user.insert(ignore_permissions=True)
 	else:
 		user = frappe.get_doc("User", email)
+		if user.user_type != user_type:
+			user.user_type = user_type
 
-	for role in roles or []:
+	for role in effective_roles:
 		if not any(r.role == role for r in user.get("roles") or []):
 			user.append("roles", {"role": role})
 	user.save(ignore_permissions=True)
 	return email
 
 
-def make_role(name: str) -> str:
+def make_role(name: str, desk_access: int = 0) -> str:
 	if not frappe.db.exists("Role", name):
-		frappe.get_doc({"doctype": "Role", "role_name": name, "desk_access": 0}).insert(
+		frappe.get_doc({"doctype": "Role", "role_name": name, "desk_access": desk_access}).insert(
 			ignore_permissions=True
 		)
 	return name

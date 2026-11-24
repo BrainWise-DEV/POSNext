@@ -28,6 +28,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import frappe
 from frappe import _
 from frappe.utils import cint, flt, get_datetime, get_time, nowdate
+from pos_next.api.security import ensure_desk_user
 
 # ==========================================
 # Constants and Configuration
@@ -522,6 +523,7 @@ def get_partial_paid_invoices(pos_profile: str, limit: int = DEFAULT_INVOICE_LIM
 	    frappe.PermissionError: If user lacks access
 	"""
 	# Input validation
+	ensure_desk_user()
 	if not pos_profile:
 		frappe.throw(_("POS Profile is required"))
 
@@ -599,6 +601,7 @@ def get_unpaid_invoices(pos_profile: str, limit: int = DEFAULT_INVOICE_LIMIT) ->
 	    frappe.PermissionError: If user lacks access
 	"""
 	# Input validation
+	ensure_desk_user()
 	if not pos_profile:
 		frappe.throw(_("POS Profile is required"))
 
@@ -669,6 +672,7 @@ def get_partial_payment_details(invoice_name: str) -> Dict:
 	    frappe.DoesNotExistError: If invoice doesn\'t exist
 	"""
 	# Input validation
+	ensure_desk_user()
 	if not invoice_name:
 		frappe.throw(_("Invoice name is required"))
 
@@ -750,6 +754,7 @@ def add_payment_to_partial_invoice(invoice_name: str, payments, pos_opening_shif
 	    ...     [{"mode_of_payment": "Cash", "amount": 100.00}, {"mode_of_payment": "Card", "amount": 50.00}],
 	    ... )
 	"""
+	ensure_desk_user()
 	import json
 
 	# Input validation
@@ -864,6 +869,7 @@ def get_partial_payment_summary(pos_profile: str) -> Dict:
 	    frappe.PermissionError: If user lacks access
 	"""
 	# Input validation
+	ensure_desk_user()
 	if not pos_profile:
 		frappe.throw(_("POS Profile is required"))
 
@@ -927,6 +933,7 @@ def get_unpaid_summary(pos_profile: str) -> Dict:
 	    frappe.PermissionError: If user lacks access
 	"""
 	# Input validation
+	ensure_desk_user()
 	if not pos_profile:
 		frappe.throw(_("POS Profile is required"))
 

@@ -21,6 +21,7 @@ import os
 
 import frappe
 from frappe import _
+from pos_next.api.security import ensure_desk_user
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -47,6 +48,7 @@ def _key_path():
 @frappe.whitelist()
 def get_certificate():
 	"""Return the public certificate PEM text for QZ Tray signing."""
+	ensure_desk_user()
 	path = _cert_path()
 	if not os.path.exists(path):
 		frappe.throw(
@@ -61,6 +63,7 @@ def get_certificate():
 @frappe.whitelist()
 def get_certificate_download():
 	"""Return the certificate PEM and company name for download."""
+	ensure_desk_user()
 	path = _cert_path()
 	if not os.path.exists(path):
 		frappe.throw(
@@ -85,6 +88,7 @@ def sign_message(message):
 	Returns:
 		Base64-encoded RSA-PKCS1v15-SHA512 signature.
 	"""
+	ensure_desk_user()
 	path = _key_path()
 	if not os.path.exists(path):
 		frappe.throw(
@@ -115,6 +119,7 @@ def setup_qz_certificate():
 	Returns the path to the certificate file so the admin can download
 	and import it into QZ Tray on each POS machine.
 	"""
+	ensure_desk_user()
 	if "System Manager" not in frappe.get_roles():
 		frappe.throw(_("Only System Managers can set up QZ certificates."), frappe.PermissionError)
 

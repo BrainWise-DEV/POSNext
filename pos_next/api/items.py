@@ -12,6 +12,7 @@ from frappe.query_builder import DocType
 from frappe.query_builder import functions as fn
 from frappe.query_builder.functions import IfNull
 from frappe.utils import flt, getdate, nowdate
+from pos_next.api.security import ensure_desk_user
 
 ITEM_RESULT_FIELDS = [
 	"name as item_code",
@@ -370,6 +371,7 @@ def get_item_detail(item, doc=None, warehouse=None, price_list=None, company=Non
 @frappe.whitelist()
 def search_by_barcode(barcode, pos_profile):
 	"""Search item by barcode"""
+	ensure_desk_user()
 	try:
 		# Parse pos_profile if it's a JSON string
 		if isinstance(pos_profile, str):
@@ -480,6 +482,7 @@ def search_by_barcode(barcode, pos_profile):
 @frappe.whitelist()
 def get_item_stock(item_code, warehouse):
 	"""Get real-time stock for item"""
+	ensure_desk_user()
 	try:
 		# Get both quantities in a single query (performance optimization)
 		bin_data = (
@@ -510,6 +513,7 @@ def get_item_stock(item_code, warehouse):
 @frappe.whitelist()
 def get_batch_serial_details(item_code, warehouse):
 	"""Get batch/serial number details"""
+	ensure_desk_user()
 	try:
 		# Get both flags in a single query (performance optimization)
 		item_flags = (
@@ -564,6 +568,7 @@ def get_batch_serial_details(item_code, warehouse):
 @frappe.whitelist()
 def get_item_variants(template_item, pos_profile):
 	"""Get all variants for a template item with prices and stock"""
+	ensure_desk_user()
 	try:
 		pos_profile_doc = frappe.get_cached_doc("POS Profile", pos_profile)
 
@@ -1201,6 +1206,7 @@ def get_items(
 	"""
 	# Enforce the same mutual exclusivity as the frontend:
 	# brand filter and item_group filter cannot be used together.
+	ensure_desk_user()
 	if item_group and brand:
 		frappe.throw(
 			_("You can filter by either Item Group or Brand, not both at the same time."),
@@ -1568,6 +1574,7 @@ def get_items_bulk(
 		include_variants: If 1, include variant items (for offline caching)
 		show_variants_as_items: If 1, show variants directly and exclude templates
 	"""
+	ensure_desk_user()
 	try:
 		if isinstance(item_groups, str):
 			item_groups = json.loads(item_groups) if item_groups else []
@@ -1749,6 +1756,7 @@ def get_items_count(pos_profile, item_group=None, brand=None, include_variants=0
 	Returns:
 		int: Total count of distinct matching items
 	"""
+	ensure_desk_user()
 	try:
 		pos_profile_doc = frappe.get_cached_doc("POS Profile", pos_profile)
 		show_variants_mode = int(show_variants_as_items)
@@ -1786,6 +1794,7 @@ def get_items_count(pos_profile, item_group=None, brand=None, include_variants=0
 @frappe.whitelist()
 def get_item_details(item_code, pos_profile, customer=None, qty=1, uom=None):
 	"""Get detailed item info including price, tax, stock"""
+	ensure_desk_user()
 	try:
 		# Parse pos_profile if it's a JSON string
 		if isinstance(pos_profile, str):
@@ -1836,6 +1845,7 @@ def get_item_details(item_code, pos_profile, customer=None, qty=1, uom=None):
 @frappe.whitelist()
 def get_item_groups(pos_profile):
 	"""Get item groups configured in POS Profile with hierarchy info for filtering."""
+	ensure_desk_user()
 	cache_key = f"pos_item_groups:{pos_profile}"
 	cached = frappe.cache().get_value(cache_key)
 	if cached:
@@ -1888,6 +1898,7 @@ def get_item_groups(pos_profile):
 @frappe.whitelist()
 def get_brands(pos_profile):
 	"""Get brands configured in POS Profile for filtering."""
+	ensure_desk_user()
 	cache_key = f"pos_brands:{pos_profile}"
 	cached = frappe.cache().get_value(cache_key)
 	if cached:
@@ -1930,6 +1941,7 @@ def get_stock_quantities(item_codes, warehouse):
 	Returns:
 		List of dicts with item_code, warehouse, and actual_qty
 	"""
+	ensure_desk_user()
 	try:
 		# Parse item_codes if it's a JSON string
 		if isinstance(item_codes, str):
@@ -2118,6 +2130,7 @@ def get_item_warehouse_availability(item_code=None, item_codes=None, company=Non
 			"company": str
 		}]
 	"""
+	ensure_desk_user()
 	try:
 		# ---------------------------------------------------------------------
 		# STEP 1: Determine which items to check
@@ -2255,6 +2268,7 @@ def get_product_bundle_availability(item_code, warehouse):
 			]
 		}
 	"""
+	ensure_desk_user()
 	try:
 		# Use bulk calculation for single bundle
 		bundle_availability = _calculate_bundle_availability_bulk([item_code], warehouse)
@@ -2350,6 +2364,7 @@ def get_batch_serial_data_for_items(item_codes, warehouse):
 				...
 			}
 	"""
+	ensure_desk_user()
 	try:
 		if isinstance(item_codes, str):
 			item_codes = json.loads(item_codes)

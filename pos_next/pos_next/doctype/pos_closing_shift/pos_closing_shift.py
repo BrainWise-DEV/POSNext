@@ -11,6 +11,7 @@ from erpnext.accounts.doctype.pos_invoice_merge_log.pos_invoice_merge_log import
 from frappe import _
 from frappe.model.document import Document
 from frappe.utils import flt
+from pos_next.api.security import ensure_desk_user
 
 
 def get_base_value(doc, fieldname, base_fieldname=None, conversion_rate=None):
@@ -180,6 +181,7 @@ class POSClosingShift(Document):
 
 	@frappe.whitelist()
 	def get_payment_reconciliation_details(self):
+		ensure_desk_user()
 		company_currency = frappe.get_cached_value("Company", self.company, "default_currency")
 
 		sales_breakdown = defaultdict(float)
@@ -337,6 +339,7 @@ class POSClosingShift(Document):
 
 @frappe.whitelist()
 def get_cashiers(doctype, txt, searchfield, start, page_len, filters):
+	ensure_desk_user()
 	cashiers_list = frappe.get_all("POS Profile User", filters=filters, fields=["user"])
 	result = []
 	for cashier in cashiers_list:
@@ -349,6 +352,7 @@ def get_cashiers(doctype, txt, searchfield, start, page_len, filters):
 
 @frappe.whitelist()
 def get_pos_invoices(pos_opening_shift, doctype=None):
+	ensure_desk_user()
 	if not doctype:
 		use_pos_invoice = False
 		doctype = "POS Invoice" if use_pos_invoice else "Sales Invoice"
@@ -374,6 +378,7 @@ def get_pos_invoices(pos_opening_shift, doctype=None):
 
 @frappe.whitelist()
 def get_payments_entries(pos_opening_shift):
+	ensure_desk_user()
 	return frappe.get_all(
 		"Payment Entry",
 		filters={
@@ -549,6 +554,7 @@ def _process_invoice(invoice, invoice_field, company_currency, cash_mode, paymen
 
 @frappe.whitelist()
 def make_closing_shift_from_opening(opening_shift):
+	ensure_desk_user()
 	opening_shift = json.loads(opening_shift)
 	doctype = "Sales Invoice"
 	invoice_field = "sales_invoice"
@@ -697,6 +703,7 @@ def make_closing_shift_from_opening(opening_shift):
 
 @frappe.whitelist()
 def submit_closing_shift(closing_shift):
+	ensure_desk_user()
 	closing_shift = json.loads(closing_shift)
 	closing_shift_doc = frappe.get_doc(closing_shift)
 	closing_shift_doc.flags.ignore_permissions = True

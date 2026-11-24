@@ -23,6 +23,7 @@ from frappe.utils import cint, cstr, flt, getdate, today
 from pos_next.authorization.actions.pos_expense import ACTION_VOID_POS_EXPENSE
 from pos_next.authorization import grants
 from pos_next.authorization.gate import enforce_context
+from pos_next.api.security import ensure_desk_user
 
 EXPENSE_ACCOUNT_PAGE_LENGTH = 50
 
@@ -30,6 +31,7 @@ EXPENSE_ACCOUNT_PAGE_LENGTH = 50
 @frappe.whitelist()
 def get_expense_dialog_data(pos_profile, pos_opening_shift):
 	"""Return expense accounts and payment methods for the expense dialog."""
+	ensure_desk_user()
 	validate_pos_expense_enabled(pos_profile)
 	shift = validate_open_shift(pos_opening_shift, pos_profile)
 
@@ -63,6 +65,7 @@ def get_expense_dialog_data(pos_profile, pos_opening_shift):
 @frappe.whitelist()
 def search_expense_accounts(pos_profile, pos_opening_shift, txt=None):
 	"""Server-side expense account search for the POS dialog."""
+	ensure_desk_user()
 	validate_pos_expense_enabled(pos_profile)
 	shift = validate_open_shift(pos_opening_shift, pos_profile)
 	return get_expense_accounts(shift.company, txt=txt, pos_profile=pos_profile)
@@ -91,6 +94,7 @@ def create_pos_expense(
 	When ``offline_id`` is set, uses Offline Expense Sync reservation/dedup
 	so reconnect retries do not create a second Journal Entry.
 	"""
+	ensure_desk_user()
 	amount = flt(amount)
 	remarks = (remarks or "").strip()
 	expense_account = _coerce_account_name(expense_account)
@@ -160,6 +164,7 @@ def check_offline_expense_synced(offline_id):
 	Submitted (docstatus 1) and cancelled (docstatus 2) Journal Entries are both
 	terminal for a given ``offline_id`` — a resend must not mint a second JE.
 	"""
+	ensure_desk_user()
 	from pos_next.pos_next.doctype.offline_expense_sync.offline_expense_sync import (
 		OfflineExpenseSync,
 	)
@@ -367,6 +372,7 @@ def cancel_pos_expense(journal_entry, pos_opening_shift, pos_profile, authorizat
 	server-side (validated shift, Journal Entry), never from client-supplied values.
 	The grant is released again if the cancel itself fails.
 	"""
+	ensure_desk_user()
 	if not journal_entry:
 		frappe.throw(_("Journal Entry is required"))
 
@@ -421,6 +427,7 @@ def attach_pos_expense_file(journal_entry, pos_opening_shift, pos_profile):
 	File size is capped with ``get_max_file_size()`` before buffering the full body.
 	Idempotent for the same filename + size on the same Journal Entry.
 	"""
+	ensure_desk_user()
 	if not journal_entry:
 		frappe.throw(_("Journal Entry is required"))
 
