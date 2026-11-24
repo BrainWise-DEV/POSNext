@@ -1654,63 +1654,10 @@ watch(
 	}
 );
 
-// Watch for cart changes to re-apply offers
-// Comprehensive watcher that detects all cart changes including:
-// - Items added/removed (length changes)
-// - Quantity changes
-// - Rate/price changes
-// - Discount changes
-// - Item properties that affect offers
-watch(
-	() => computeCartHash(),
-	(newHash) => {
-		// Only proceed if there are applied offers
-		if (cartStore.appliedOffers.length === 0) {
-			return;
-		}
-
-		// Skip if cart content hasn't actually changed
-		if (newHash === previousCartHash) {
-			return;
-		}
-
-		previousCartHash = newHash;
-
-		// Clear existing timer to prevent multiple API calls
-		if (offerReapplyTimer.value) {
-			clearTimeout(offerReapplyTimer.value);
-		}
-
-		// Set new timer - reapply offers after 500ms of no changes
-		offerReapplyTimer.value = setTimeout(async () => {
-			await cartStore.reapplyOffer(shiftStore.currentProfile);
-		}, 500);
-	}
-);
-
-// Watch for customer changes - customer affects which offers are applicable
-watch(
-	() => cartStore.customer,
-	(newCustomer, oldCustomer) => {
-		const newCustomerName = newCustomer?.name || newCustomer;
-		const oldCustomerName = oldCustomer?.name || oldCustomer;
-
-		// Only reapply if customer actually changed
-		if (newCustomerName !== oldCustomerName) {
-			// Clear existing timer
-			if (offerReapplyTimer.value) {
-				clearTimeout(offerReapplyTimer.value);
-			}
-
-			// Reapply offers immediately when customer changes
-			// This will discover newly eligible offers even if cart has no current offers
-			offerReapplyTimer.value = setTimeout(async () => {
-				await cartStore.reapplyOffer(shiftStore.currentProfile);
-			}, 300);
-		}
-	},
-	{ deep: true }
-);
+// Cart and customer offer synchronization is handled centrally in posCart.js via
+// debouncedProcessOffers() inside offerQueue, so no duplicate reapplyOffer
+// timers are needed here (running reapplyOffer outside offerQueue raced with
+// processOffersInternal and skipped F&F re-evaluation).
 
 // Watch for applied offers changes - handle when offers are added/removed
 watch(
@@ -2711,9 +2658,12 @@ async function handleLoadDraft(draft) {
 		// Restore applied offers if they were saved
 		if (draftData.applied_offers && draftData.applied_offers.length > 0) {
 			cartStore.appliedOffers = draftData.applied_offers;
-			// Trigger offer reapplication to ensure they apply to all items
-			await cartStore.reapplyOffer(shiftStore.currentProfile);
 		}
+		// Re-price the loaded cart with a full, forced offer pass: it drops saved offers
+		// the cart no longer meets, applies new ones and re-checks Friends & Family.
+		// reapplyOffer() only re-checked the saved offers, and now that it runs in the
+		// offer queue it could replace a pending pass and return before running.
+		cartStore.forceRefreshOffers();
 
 		// Initialize cart hash for the loaded cart so watchers work correctly
 		previousCartHash = computeCartHash();
