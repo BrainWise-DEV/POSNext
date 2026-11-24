@@ -249,4 +249,26 @@ describe("nestFreeRows — gifts under the line that earned them", () => {
 		expect(rows[0]._bundledFreeQty).toBe(0);
 		expect(rows[1]._giftOf).toBe("SKU-A-Nos");
 	});
+
+	it("credits the gift to the line carrying its rule when the gift item is also sold", () => {
+		const rows = nestFreeRows([
+			paidLine({ item_code: "GIFT", quantity: 2 }),
+			paidLine({ item_code: "TRIG", quantity: 1, pricing_rules: "PR-FREE" }),
+			gift({ item_code: "GIFT", pricing_rules: "PR-FREE" }),
+		]);
+
+		expect(rows.map((r) => r.item_code)).toEqual(["GIFT", "TRIG", "GIFT"]);
+		expect(rows[2]._giftOf).toBe("TRIG-Nos");
+		expect(rows[2]._giftFor).toBe("TRIG");
+	});
+
+	it("keeps a mixed GWP gift under its own item when every scope line carries the rule", () => {
+		const rows = nestFreeRows([
+			paidLine({ item_code: "GWP2", quantity: 1, pricing_rules: "PR-GWP" }),
+			paidLine({ item_code: "GWP1", quantity: 1, pricing_rules: "PR-GWP" }),
+			gift({ item_code: "GWP1", pricing_rules: "PR-GWP" }),
+		]);
+
+		expect(rows[2]._giftOf).toBe("GWP1-Nos");
+	});
 });

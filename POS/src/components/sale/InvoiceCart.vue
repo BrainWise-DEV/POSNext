@@ -1253,7 +1253,7 @@
 										<input
 											:value="formatQuantity(getDisplayQuantity(item))"
 											@input="updateQuantity(item, $event.target.value)"
-											@blur="handleQuantityBlur(item)"
+											@blur="handleQuantityBlur(item, $event.target.value)"
 											@keydown.enter="$event.target.blur()"
 											type="text"
 											inputmode="decimal"
@@ -2678,8 +2678,8 @@ function updateQuantity(item, value) {
 
 	const paidQty = resolvePaidQuantityFromDisplay(item, displayQty);
 
-	// If quantity is zero or negative, remove the item from the cart
-	if (paidQty <= 0) return emit("remove-item", item.item_code, item.uom);
+	// Zero or negative is kept while typing ("0" of "0.5"); blur or Enter removes the item
+	if (paidQty <= 0) return;
 
 	// For positive numbers, update paid quantity (free row stays separate in data)
 	emit("update-quantity", item.item_code, paidQty, item.uom);
@@ -2688,15 +2688,16 @@ function updateQuantity(item, value) {
 /**
  * Handle quantity input blur - validate and round.
  * Called when user leaves the quantity input field.
- * - Removes item if quantity is 0 or invalid
+ * - Removes item if the typed or held quantity is 0 or invalid
  * - Rounds to 4 decimal places for consistency
  *
  * @param {Object} item - Cart item that lost focus
+ * @param {string} [typed] - Value left in the input; a typed 0 or negative is not applied while typing
  */
-function handleQuantityBlur(item) {
+function handleQuantityBlur(item, typed) {
 	if (isLockedFreeRow(item)) return;
 	// When user leaves the input field, round and validate
-	if (!item.quantity || item.quantity <= 0) {
+	if (!item.quantity || item.quantity <= 0 || Number.parseFloat(typed) <= 0) {
 		// If quantity is 0 or invalid, remove the item
 		emit("remove-item", item.item_code, item.uom);
 	} else {
