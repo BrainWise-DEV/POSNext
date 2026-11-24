@@ -68,6 +68,9 @@ class Wallet(Document):
 def get_customer_wallet(customer, company=None):
 	"""Get wallet for a customer"""
 	ensure_desk_user()
+	if not customer:
+		frappe.throw(_("Customer is required"))
+	frappe.has_permission("Customer", "read", customer, throw=True)
 	filters = {"customer": customer}
 	if company:
 		filters["company"] = company
@@ -97,6 +100,9 @@ def get_customer_wallet_balance(customer, company=None, exclude_invoice=None):
 		float: Available wallet balance
 	"""
 	ensure_desk_user()
+	if not customer:
+		frappe.throw(_("Customer is required"))
+	frappe.has_permission("Customer", "read", customer, throw=True)
 	try:
 		filters = {"customer": customer, "status": "Active"}
 		if company:
@@ -174,6 +180,10 @@ def create_customer_wallet(customer, company, account=None):
 	"""
 	# Check if wallet already exists
 	ensure_desk_user()
+	if not customer:
+		frappe.throw(_("Customer is required"))
+	frappe.has_permission("Customer", "read", customer, throw=True)
+	frappe.has_permission("Wallet", "create", throw=True)
 	existing = frappe.db.exists("Wallet", {"customer": customer, "company": company})
 	if existing:
 		return frappe.get_doc("Wallet", existing)
@@ -194,7 +204,7 @@ def create_customer_wallet(customer, company, account=None):
 			"status": "Active",
 		}
 	)
-	wallet.insert(ignore_permissions=True)
+	wallet.insert()
 
 	return wallet
 

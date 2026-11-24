@@ -14,7 +14,7 @@ from pos_next.integrations.registry import (
 	get_external_loyalty_balance,
 	is_external_loyalty_mode,
 )
-from pos_next.api.security import ensure_desk_user
+from pos_next.api.security import ensure_desk_user, ensure_pos_user, is_pos_supervisor
 
 
 def validate_wallet_payment(doc, method=None):
@@ -224,6 +224,11 @@ def get_customer_wallet_balance(customer, company=None, exclude_invoice=None, po
 		float: Available wallet balance
 	"""
 	ensure_desk_user()
+	if pos_profile:
+		ensure_pos_user(pos_profile)
+	if not customer:
+		frappe.throw(_("Customer is required"))
+	frappe.has_permission("Customer", "read", customer, throw=True)
 	if is_external_loyalty_mode(pos_profile):
 		try:
 			balance = get_external_loyalty_balance(customer)
@@ -292,6 +297,9 @@ def get_pending_wallet_payments(customer, exclude_invoice=None):
 def get_customer_wallet(customer, company=None):
 	"""Get wallet details for a customer."""
 	ensure_desk_user()
+	if not customer:
+		frappe.throw(_("Customer is required"))
+	frappe.has_permission("Customer", "read", customer, throw=True)
 	filters = {"customer": customer}
 	if company:
 		filters["company"] = company
@@ -336,7 +344,7 @@ def create_wallet_on_customer_insert(doc, method=None):
 		return
 
 	try:
-		get_or_create_wallet(doc.name, company, pos_settings=pos_settings)
+		_get_or_create_wallet(doc.name, company, pos_settings=pos_settings)
 	except Exception:
 		frappe.log_error(frappe.get_traceback(), f"Wallet auto-create failed for {doc.name}")
 
@@ -344,9 +352,28 @@ def create_wallet_on_customer_insert(doc, method=None):
 @frappe.whitelist()
 def get_or_create_wallet(customer, company, pos_settings=None, force_create=False):
 	"""Get existing wallet or create a new one."""
-
-	# Check if wallet exists
 	ensure_desk_user()
+	if not customer:
+		frappe.throw(_("Customer is required"))
+	frappe.has_permission("Customer", "read", customer, throw=True)
+
+	wallet = frappe.db.get_value(
+		"Wallet",
+		{"customer": customer, "company": company},
+		["name", "customer", "company", "account", "status"],
+		as_dict=True,
+	)
+	if wallet:
+		return wallet
+
+	if not is_pos_supervisor() and not frappe.has_permission("Wallet", "create"):
+		frappe.throw(_("You don't have permission to create wallets"), frappe.PermissionError)
+
+	return _get_or_create_wallet(customer, company, pos_settings=pos_settings, force_create=force_create)
+
+
+def _get_or_create_wallet(customer, company, pos_settings=None, force_create=False):
+	"""Internal helper: get existing wallet or create a new one."""
 	wallet = frappe.db.get_value(
 		"Wallet",
 		{"customer": customer, "company": company},
@@ -434,7 +461,7 @@ def get_pos_settings(pos_profile):
 @frappe.whitelist()
 def get_wallet_payment_methods(pos_profile):
 	"""Get payment methods that are wallet-enabled for a POS profile."""
-	ensure_desk_user()
+	ensure_pos_user(pos_profile)
 	payment_methods = frappe.get_all(
 		"POS Payment Method", filters={"parent": pos_profile}, fields=["mode_of_payment", "default"]
 	)
@@ -461,6 +488,11 @@ def get_wallet_info(customer, company, pos_profile=None):
 	Used by POS frontend.
 	"""
 	ensure_desk_user()
+	if pos_profile:
+		ensure_pos_user(pos_profile)
+	if not customer:
+		frappe.throw(_("Customer is required"))
+	frappe.has_permission("Customer", "read", customer, throw=True)
 	result = {
 		"wallet_enabled": False,
 		"wallet_exists": False,
@@ -520,7 +552,7 @@ def get_wallet_info(customer, company, pos_profile=None):
 	elif result["auto_create"]:
 		# Auto-create wallet for customer if enabled
 		try:
-			new_wallet = get_or_create_wallet(customer, company, pos_settings)
+			new_wallet = _get_or_create_wallet(customer, company, pos_settings)
 			if new_wallet:
 				result["wallet_exists"] = True
 				result["wallet_name"] = (
@@ -552,13 +584,15 @@ def create_manual_wallet_credit(customer, company, amount, remarks=None):
 		Wallet Transaction document name
 	"""
 	ensure_desk_user()
+	frappe.has_permission("Customer", "read", customer, throw=True)
 	frappe.has_permission("Wallet Transaction", "create", throw=True)
+	frappe.has_permission("Wallet Transaction", "submit", throw=True)
 
 	if flt(amount) <= 0:
 		frappe.throw(_("Amount must be greater than zero"))
 
 	# Manual credits should be able to create wallets even when POS auto-create is disabled.
-	wallet = get_or_create_wallet(customer, company, force_create=True)
+	wallet = _get_or_create_wallet(customer, company, force_create=True)
 
 	if not wallet:
 		frappe.throw(_("Could not create wallet for customer {0}").format(customer))
