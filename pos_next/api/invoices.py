@@ -11,6 +11,7 @@ from erpnext.accounts.doctype.sales_invoice.sales_invoice import get_bank_cash_a
 from erpnext.stock.doctype.batch.batch import get_batch_no, get_batch_qty
 from frappe import _
 from frappe.utils import cint, cstr, flt, get_datetime, nowdate, nowtime
+from pos_next.api.pricing import _draft_pricing_matches_db, enforce_server_side_pricing
 from pos_next.api.security import ensure_desk_user, ensure_pos_user, is_pos_supervisor
 
 ALLOWED_RETURN_DOCTYPES = frozenset({"Sales Invoice", "POS Invoice"})
@@ -1315,7 +1316,13 @@ def update_invoice(data):
 			pos_settings_cache = frappe.db.get_value(
 				DOCTYPE_POS_SETTINGS,
 				{"pos_profile": pos_profile},
-				[FIELD_ALLOW_USER_TO_EDIT_RATE, FIELD_MAX_DISCOUNT_ALLOWED, FIELD_ALLOW_NEGATIVE_STOCK],
+				[
+					FIELD_ALLOW_USER_TO_EDIT_RATE,
+					"allow_user_to_edit_item_discount",
+					"allow_user_to_edit_additional_discount",
+					FIELD_MAX_DISCOUNT_ALLOWED,
+					FIELD_ALLOW_NEGATIVE_STOCK,
+				],
 				as_dict=True,
 			)
 			# disable_rounded_total is on POS Profile, not POS Settings
@@ -1328,74 +1335,20 @@ def update_invoice(data):
 				pos_settings_cache = {FIELD_DISABLE_ROUNDED_TOTAL: pos_profile_rounded}
 
 		# ========================================================================
-		# DISCOUNT CALCULATION - CRITICAL LOGIC
+		# SERVER-SIDE PRICING & DISCOUNT ENFORCEMENT (MW.WA.03)
 		# ========================================================================
-		# Frontend sends: rate (discounted), price_list_rate (original), discount_percentage
-		# Priority: Trust frontend's price_list_rate if provided (avoids rounding errors)
-		# Fallback: Reverse-calculate price_list_rate from rate and discount_percentage
-		#
-		# Formula: rate = price_list_rate * (1 - discount_percentage/100)
-		# Reverse: price_list_rate = rate / (1 - discount_percentage/100)
-		# ========================================================================
+		enforce_server_side_pricing(
+			invoice_doc,
+			pos_profile=pos_profile,
+			pos_profile_doc=pos_profile_doc,
+			pos_settings_cache=pos_settings_cache,
+			is_offline_sync=bool(invoice_doc.flags.get("pos_offline_sync")),
+			validate_manual_rate_edit_fn=validate_manual_rate_edit,
+		)
+
 		# Collect applied pricing rule names before we clear item.pricing_rules
 		applied_rule_names_seen = set()
 		for item in invoice_doc.get("items", []):
-			item_rate = flt(item.rate or 0)
-			discount_pct = flt(item.discount_percentage or 0)
-			frontend_price_list_rate = flt(item.get("price_list_rate") or 0)
-			is_manual_edit = cint(item.get(FIELD_IS_RATE_MANUALLY_EDITED) or 0)
-
-			if is_manual_edit:
-				# MANUAL RATE EDIT: preserve original price_list_rate for audit
-				original_rate = flt(item.get(FIELD_ORIGINAL_RATE) or item.get(FIELD_PRICE_LIST_RATE) or 0)
-				if original_rate > 0:
-					item.price_list_rate = original_rate
-
-				# Validate manual rate edit against business rules (uses cached settings)
-				validation = validate_manual_rate_edit(item, pos_profile, pos_settings_cache)
-				if not validation.get("valid"):
-					frappe.throw(validation.get("message"))
-			else:
-				# NORMAL FLOW: Trust frontend's price_list_rate if provided and valid
-				if frontend_price_list_rate > 0:
-					item.price_list_rate = frontend_price_list_rate
-				# Fallback: reverse-calculate if discount exists but no price_list_rate
-				elif discount_pct > 0 and discount_pct < 100 and item_rate > 0:
-					item.price_list_rate = calculate_price_list_rate(
-						item_rate, discount_pct, frontend_price_list_rate
-					)
-				else:
-					# No discount or price_list_rate - use rate as is
-					item.price_list_rate = item_rate
-
-				# Ensure price_list_rate is never less than rate (data integrity)
-				if flt(item.price_list_rate) < item_rate:
-					item.price_list_rate = item_rate
-
-			# IMPORTANT: Keep the rate from frontend (do NOT set to 0)
-			# ERPNext will recalculate if needed, but preserving frontend rate
-			# prevents rounding issues and ensures UI matches invoice
-
-			# POS Next computes offers itself (via apply_offers) and sends each
-			# item with discount_percentage / discount_amount / rate already set.
-			# We pair that with invoice_doc.ignore_pricing_rule = 1 so ERPNext's
-			# own pricing engine stays out of the way.
-			#
-			# However, ERPNext's get_pricing_rule_for_item() has a branch that
-			# fires when ignore_pricing_rule=1 AND the doc already exists in DB
-			# AND item.pricing_rules is non-empty — it interprets that as the
-			# user disabling pricing rules on an invoice that previously had
-			# them, calls remove_pricing_rule_for_item(), and silently zeroes
-			# discount_percentage / discount_amount / rate on the next save.
-			# That branch fires on the 2nd save (submit step), producing
-			# "Partly Paid" invoices where the cashier collected the discounted
-			# amount but the saved grand_total reverted to the pre-discount
-			# price. See erpnext/accounts/doctype/pricing_rule/pricing_rule.py
-			# around line 421.
-			#
-			# Clearing item.pricing_rules here avoids that branch entirely. The
-			# discount itself is preserved via the discount_percentage /
-			# discount_amount fields we already set above.
 			if item.get("pricing_rules"):
 				if erpnext_get_applied_pricing_rules:
 					applied_rule_names_seen.update(
@@ -1873,10 +1826,18 @@ def submit_invoice(invoice=None, data=None):
 		else:
 			invoice_doc = _ensure_invoice_draft_access(invoice_name, pos_profile=pos_profile)
 			existing_customer = invoice_doc.customer
+			pricing_unchanged = _draft_pricing_matches_db(invoice_doc, invoice)
 			update_invoice_fields = {k: v for k, v in invoice.items() if k not in ("name", "doctype")}
 			invoice_doc.update(update_invoice_fields)
 			if not invoice_doc.get("customer") and existing_customer:
 				invoice_doc.customer = existing_customer
+			if not pricing_unchanged:
+				enforce_server_side_pricing(
+					invoice_doc,
+					pos_profile=pos_profile,
+					is_offline_sync=bool(offline_id),
+					validate_manual_rate_edit_fn=validate_manual_rate_edit,
+				)
 
 		# Keep permission bypass consistent for POS API flow.
 		invoice_doc.flags.ignore_permissions = True
