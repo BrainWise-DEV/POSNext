@@ -4,7 +4,7 @@
 import frappe
 from frappe.model.document import Document
 from frappe.utils import cint, flt
-from pos_next.api.security import ensure_desk_user
+from pos_next.api.security import ensure_desk_user, ensure_pos_user, is_pos_supervisor
 
 
 class POSSettings(Document):
@@ -100,11 +100,7 @@ def get_pos_settings(pos_profile):
 	if not pos_profile:
 		return None
 
-	# Check if user has access to this POS Profile
-	has_access = frappe.db.exists("POS Profile User", {"parent": pos_profile, "user": frappe.session.user})
-
-	if not has_access and not frappe.has_permission("POS Settings", "read"):
-		frappe.throw(_("You don't have access to this POS Profile"))
+	ensure_pos_user(pos_profile)
 
 	from pos_next.api.constants import merge_pos_settings
 
@@ -151,11 +147,9 @@ def update_pos_settings(pos_profile, settings):
 	if isinstance(settings, str):
 		settings = json.loads(settings)
 
-	# Check if user has access to this POS Profile
-	has_access = frappe.db.exists("POS Profile User", {"parent": pos_profile, "user": frappe.session.user})
-
-	if not has_access and not frappe.has_permission("POS Settings", "write"):
-		frappe.throw(_("You don't have permission to update this POS Profile"))
+	# Only supervisors or users with POS Settings write permission may update settings
+	if not is_pos_supervisor() and not frappe.has_permission("POS Settings", "write"):
+		frappe.throw(_("You don't have permission to update POS Settings"), frappe.PermissionError)
 
 	# Check if settings exist
 	existing = frappe.db.exists("POS Settings", {"pos_profile": pos_profile})

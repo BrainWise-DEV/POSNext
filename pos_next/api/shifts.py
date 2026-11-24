@@ -256,6 +256,7 @@ def get_shift_history(filters=None, limit=25, offset=0, pos_profile=None):
 			values["to_date"] = filters["to_date"]
 
 	if pos_profile:
+		ensure_pos_user(pos_profile)
 		conditions.append("os.pos_profile = %(pos_profile)s")
 		values["pos_profile"] = pos_profile
 

@@ -20,7 +20,7 @@ from frappe.utils import flt
 from pos_next.authorization import gate, grants, log, policy, registry
 from pos_next.authorization import pin as pin_store
 from pos_next.authorization.actions.pos_expense import ACTION_VOID_POS_EXPENSE, resolve_void_context
-from pos_next.api.security import ensure_desk_user
+from pos_next.api.security import ensure_desk_user, ensure_pos_user
 
 
 def _parse_context(context) -> dict:
@@ -37,6 +37,8 @@ def _parse_context(context) -> dict:
 @frappe.whitelist()
 def get_authorization_policy(pos_profile: str | None = None) -> dict:
 	ensure_desk_user()
+	if pos_profile:
+		ensure_pos_user(pos_profile)
 	policy_map = {}
 	for action in registry.all_actions():
 		if gate.is_required(action.name, pos_profile):
@@ -48,6 +50,8 @@ def get_authorization_policy(pos_profile: str | None = None) -> dict:
 @frappe.whitelist()
 def get_authorizers(action: str, pos_profile: str | None = None, context=None) -> list[dict]:
 	ensure_desk_user()
+	if pos_profile:
+		ensure_pos_user(pos_profile)
 	action_def = registry.get(action)
 	if not action_def:
 		return []

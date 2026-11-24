@@ -6,7 +6,7 @@ import re
 import frappe
 from frappe import _
 from frappe.utils import cint, cstr, flt, getdate, nowdate
-from pos_next.api.security import ensure_desk_user
+from pos_next.api.security import ensure_desk_user, ensure_pos_user
 
 
 def check_promotion_permissions(action="read"):
@@ -37,6 +37,8 @@ def check_promotion_permissions(action="read"):
 def get_promotions(pos_profile=None, company=None, include_disabled=False):
 	"""Get all promotional schemes AND standalone pricing rules for POS with simplified structure."""
 	ensure_desk_user()
+	if pos_profile:
+		ensure_pos_user(pos_profile)
 	check_promotion_permissions("read")
 
 	filters = {}
@@ -526,6 +528,8 @@ def search_items(search_term, pos_profile=None, limit=20):
 	"""Search for items."""
 	# Rate limiting: Track API calls per user
 	ensure_desk_user()
+	if pos_profile:
+		ensure_pos_user(pos_profile)
 	cache_key = f"search_items_rate_limit:{frappe.session.user}"
 	call_count_raw = frappe.cache().get(cache_key)
 	call_count = int(call_count_raw) if call_count_raw else 0

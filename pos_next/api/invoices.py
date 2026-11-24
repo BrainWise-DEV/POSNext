@@ -1031,6 +1031,8 @@ def validate_cart_items(items, pos_profile=None):
 	This can be used on the front-end for pre-submission checks.
 	"""
 	ensure_desk_user()
+	if pos_profile:
+		ensure_pos_user(pos_profile)
 	if isinstance(items, str):
 		items = json.loads(items)
 

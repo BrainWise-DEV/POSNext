@@ -12,7 +12,20 @@ from frappe.query_builder import DocType
 from frappe.query_builder import functions as fn
 from frappe.query_builder.functions import IfNull
 from frappe.utils import flt, getdate, nowdate
-from pos_next.api.security import ensure_desk_user
+from pos_next.api.security import ensure_desk_user, ensure_pos_user
+
+
+def _normalize_pos_profile_arg(pos_profile):
+	if isinstance(pos_profile, str):
+		try:
+			parsed = json.loads(pos_profile)
+			if isinstance(parsed, dict):
+				pos_profile = parsed
+		except (json.JSONDecodeError, ValueError):
+			pass
+	if isinstance(pos_profile, dict):
+		pos_profile = pos_profile.get("name") or pos_profile.get("pos_profile")
+	return pos_profile
 
 ITEM_RESULT_FIELDS = [
 	"name as item_code",
@@ -372,21 +385,9 @@ def get_item_detail(item, doc=None, warehouse=None, price_list=None, company=Non
 def search_by_barcode(barcode, pos_profile):
 	"""Search item by barcode"""
 	ensure_desk_user()
+	pos_profile = _normalize_pos_profile_arg(pos_profile)
+	ensure_pos_user(pos_profile)
 	try:
-		# Parse pos_profile if it's a JSON string
-		if isinstance(pos_profile, str):
-			try:
-				pos_profile = json.loads(pos_profile)
-			except (json.JSONDecodeError, ValueError):
-				pass  # It's already a plain string
-
-		# Ensure pos_profile is a string (handle dict or string input)
-		if isinstance(pos_profile, dict):
-			pos_profile = pos_profile.get("name") or pos_profile.get("pos_profile")
-
-		if not pos_profile:
-			frappe.throw(_("POS Profile is required"))
-
 		# Try to resolve weighted/priced barcodes if barcode_resolver is available
 		resolved_barcode_data = None
 		effective_barcode = barcode
@@ -568,7 +569,7 @@ def get_batch_serial_details(item_code, warehouse):
 @frappe.whitelist()
 def get_item_variants(template_item, pos_profile):
 	"""Get all variants for a template item with prices and stock"""
-	ensure_desk_user()
+	ensure_pos_user(pos_profile)
 	try:
 		pos_profile_doc = frappe.get_cached_doc("POS Profile", pos_profile)
 
@@ -1206,7 +1207,7 @@ def get_items(
 	"""
 	# Enforce the same mutual exclusivity as the frontend:
 	# brand filter and item_group filter cannot be used together.
-	ensure_desk_user()
+	ensure_pos_user(pos_profile)
 	if item_group and brand:
 		frappe.throw(
 			_("You can filter by either Item Group or Brand, not both at the same time."),
@@ -1574,7 +1575,7 @@ def get_items_bulk(
 		include_variants: If 1, include variant items (for offline caching)
 		show_variants_as_items: If 1, show variants directly and exclude templates
 	"""
-	ensure_desk_user()
+	ensure_pos_user(pos_profile)
 	try:
 		if isinstance(item_groups, str):
 			item_groups = json.loads(item_groups) if item_groups else []
@@ -1756,7 +1757,7 @@ def get_items_count(pos_profile, item_group=None, brand=None, include_variants=0
 	Returns:
 		int: Total count of distinct matching items
 	"""
-	ensure_desk_user()
+	ensure_pos_user(pos_profile)
 	try:
 		pos_profile_doc = frappe.get_cached_doc("POS Profile", pos_profile)
 		show_variants_mode = int(show_variants_as_items)
@@ -1795,21 +1796,11 @@ def get_items_count(pos_profile, item_group=None, brand=None, include_variants=0
 def get_item_details(item_code, pos_profile, customer=None, qty=1, uom=None):
 	"""Get detailed item info including price, tax, stock"""
 	ensure_desk_user()
+	pos_profile = _normalize_pos_profile_arg(pos_profile)
+	ensure_pos_user(pos_profile)
+	if customer:
+		frappe.has_permission("Customer", "read", customer, throw=True)
 	try:
-		# Parse pos_profile if it's a JSON string
-		if isinstance(pos_profile, str):
-			try:
-				pos_profile = json.loads(pos_profile)
-			except (json.JSONDecodeError, ValueError):
-				pass  # It's already a plain string
-
-		# Ensure pos_profile is a string (handle dict or string input)
-		if isinstance(pos_profile, dict):
-			pos_profile = pos_profile.get("name") or pos_profile.get("pos_profile")
-
-		if not pos_profile:
-			frappe.throw(_("POS Profile is required"))
-
 		pos_profile_doc = frappe.get_cached_doc("POS Profile", pos_profile)
 		item_doc = frappe.get_cached_doc("Item", item_code)
 
@@ -1845,7 +1836,7 @@ def get_item_details(item_code, pos_profile, customer=None, qty=1, uom=None):
 @frappe.whitelist()
 def get_item_groups(pos_profile):
 	"""Get item groups configured in POS Profile with hierarchy info for filtering."""
-	ensure_desk_user()
+	ensure_pos_user(pos_profile)
 	cache_key = f"pos_item_groups:{pos_profile}"
 	cached = frappe.cache().get_value(cache_key)
 	if cached:
@@ -1898,7 +1889,7 @@ def get_item_groups(pos_profile):
 @frappe.whitelist()
 def get_brands(pos_profile):
 	"""Get brands configured in POS Profile for filtering."""
-	ensure_desk_user()
+	ensure_pos_user(pos_profile)
 	cache_key = f"pos_brands:{pos_profile}"
 	cached = frappe.cache().get_value(cache_key)
 	if cached:
