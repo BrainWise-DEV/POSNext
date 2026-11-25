@@ -128,6 +128,8 @@ ALLOWED_INVOICE_ITEM_FIELDS = frozenset(
 		"discount_percentage",
 		"discount_amount",
 		"discount_source",
+		"margin_type",
+		"margin_rate_or_amount",
 		"is_already_discounted",
 		"is_accumulative_discount",
 		"pricing_rules",
@@ -255,6 +257,59 @@ except Exception:  # pragma: no cover
 # ==========================================
 # Helper Functions
 # ==========================================
+
+
+def validate_manual_rate_edit(item, pos_profile=None, pos_settings_cache=None):
+	"""Validate manually edited item rates against POS Settings business rules."""
+	is_manual_edit = cint(item.get(FIELD_IS_RATE_MANUALLY_EDITED) or 0)
+	if not is_manual_edit:
+		return {"valid": True}
+
+	item_code = item.get(FIELD_ITEM_CODE)
+	item_rate = flt(item.get(FIELD_RATE) or 0)
+	original_rate = flt(item.get(FIELD_ORIGINAL_RATE) or item.get(FIELD_PRICE_LIST_RATE) or 0)
+
+	if item_rate <= 0:
+		return {"valid": False, "message": _("Rate for item {0} must be greater than zero").format(item_code)}
+
+	if not pos_profile:
+		return {
+			"valid": False,
+			"message": _("POS Profile is required to validate rate edit for item {0}").format(item_code),
+		}
+
+	pos_settings = pos_settings_cache
+	if pos_settings is None:
+		pos_settings = frappe.db.get_value(
+			DOCTYPE_POS_SETTINGS,
+			{"pos_profile": pos_profile},
+			[FIELD_ALLOW_USER_TO_EDIT_RATE, FIELD_MAX_DISCOUNT_ALLOWED],
+			as_dict=True,
+		)
+
+	if not pos_settings:
+		return {
+			"valid": False,
+			"message": _("POS Settings not found for profile {0}. Cannot validate rate edit.").format(
+				pos_profile
+			),
+		}
+
+	if not cint(pos_settings.get(FIELD_ALLOW_USER_TO_EDIT_RATE)):
+		return {"valid": False, "message": _("Rate editing is not allowed for this POS Profile")}
+
+	max_discount = flt(pos_settings.get(FIELD_MAX_DISCOUNT_ALLOWED) or 0)
+	if max_discount > 0 and original_rate > 0 and item_rate < original_rate:
+		discount_pct = round(((original_rate - item_rate) / original_rate) * 100, 2)
+		if discount_pct > max_discount:
+			return {
+				"valid": False,
+				"message": _(
+					"Rate reduction for item {0} is {1}% which exceeds the maximum allowed discount of {2}%"
+				).format(item_code, discount_pct, max_discount),
+			}
+
+	return {"valid": True}
 
 
 def calculate_price_list_rate(item_rate, discount_pct, current_price_list_rate):
@@ -2605,7 +2660,8 @@ def _validate_invoice_profile(payload):
 		frappe.throw(_("Invalid invoice format"), frappe.PermissionError)
 
 	stored = None
-	if frappe.get_meta(doctype).has_field("pos_profile"):
+	has_profile_field = doctype == DOCTYPE_SALES_INVOICE or frappe.get_meta(doctype).has_field("pos_profile")
+	if has_profile_field:
 		stored = frappe.db.get_value(doctype, name, ["name", "pos_profile"], as_dict=True)
 	else:
 		stored = frappe.db.get_value(doctype, name, ["name"], as_dict=True)
@@ -4441,7 +4497,7 @@ def submit_invoice(invoice: str | dict | None = None, data: str | dict | None = 
 	doctype = invoice.get("doctype") or DOCTYPE_SALES_INVOICE
 
 	if invoice.get("name") and frappe.db.exists(doctype, invoice.get("name")):
-		if frappe.get_meta(doctype).has_field("pos_profile"):
+		if doctype == DOCTYPE_SALES_INVOICE or frappe.get_meta(doctype).has_field("pos_profile"):
 			existing_profile = frappe.db.get_value(doctype, invoice.get("name"), "pos_profile")
 			pos_profile = pos_profile or existing_profile
 

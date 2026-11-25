@@ -2025,137 +2025,123 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * @returns {boolean} True if any offers were removed
 	 */
 	async function reapplyOffer(currentProfile, signal = null) {
-		const run = async (activeSignal) => {
-			// Clear offers if cart is empty
-			if (invoiceItems.value.length === 0 && appliedOffers.value.length) {
-				appliedOffers.value = [];
-				processFreeItems([]); // Remove all free items when cart is empty
-				applyHeaderDiscountFromServer(null);
-				return true;
-			}
-
-			// Only validate if there are applied offers
-			if (appliedOffers.value.length === 0 || invoiceItems.value.length === 0) {
-				return false;
-			}
-
-			// Check if operation was cancelled
-			if (activeSignal?.aborted) return false;
-
-			try {
-				// Build current cart snapshot for validation
-				const cartSnapshot = buildCartSnapshot();
-
-				// Check each applied offer against current cart state
-				const invalidOffers = [];
-				for (const appliedOffer of appliedOffers.value) {
-					const offer = appliedOffer.offer;
-					if (!offer) continue;
-
-					// Use offersStore to check eligibility
-					offersStore.updateCartSnapshot(cartSnapshot);
-					const { eligible, reason } = offersStore.checkOfferEligibility(offer);
-
-					if (!eligible) {
-						invalidOffers.push({
-							...appliedOffer,
-							reason,
-						});
-					}
-				}
-
-				// Check for cancellation
-				if (activeSignal?.aborted) return false;
-
-				// If any offers are invalid, remove them and reapply remaining
-				if (invalidOffers.length > 0) {
-					const validOfferCodes = appliedOffers.value
-						.filter((o) => !invalidOffers.find((inv) => inv.code === o.code))
-						.map((o) => o.code);
-
-					if (validOfferCodes.length === 0) {
-						// All offers invalid - clear everything and re-evaluate F&F
-						appliedOffers.value = [];
-						processFreeItems([]);
-						dropOfferDiscountsFromLines();
-						applyHeaderDiscountFromServer(null);
-						await evaluateFriendsAndFamilyOnly(currentProfile, activeSignal);
-						if (activeSignal?.aborted) return false;
-						offerProcessingState.value.lastCartHash = generateCartHash();
-						offerProcessingState.value.lastProcessedAt = Date.now();
-					} else {
-						// Reapply only valid offers
-						const invoiceData = buildOfferEvaluationPayload(currentProfile);
-						const pricedLines = snapshotPricedLines();
-						// J1: An answer for a cart the cashier changed meanwhile is dropped, as in
-						// processOffersInternal, and the current cart is priced instead.
-						const askedFor = offerCartSignature();
-						const response = await applyOffersResource.submit({
-							invoice_data: invoiceData,
-							selected_offers: validOfferCodes,
-						});
-
-						if (activeSignal?.aborted) return false;
-						if (offerCartSignature() !== askedFor) {
-							debouncedProcessOffers();
-							return false;
-						}
-
-						const {
-							items: responseItems,
-							freeItems,
-							appliedRules,
-							headerDiscount,
-							friendsAndFamily,
-						} = parseOfferResponse(response);
-
-						applyDiscountsFromServer(responseItems, friendsAndFamily);
-						processFreeItems(freeItems);
-						applyHeaderDiscountFromServer(headerDiscount);
-						filterActiveOffers(appliedRules);
-
-						// Update appliedOffers to only include valid ones
-						appliedOffers.value = appliedOffers.value.filter((entry) =>
-							appliedRules.includes(entry.code)
-						);
-						stampServerScopes(pricedLines);
-						offerProcessingState.value.lastCartHash = generateCartHash();
-						offerProcessingState.value.lastProcessedAt = Date.now();
-					}
-
-					// Wait for Vue to update before showing toast
-					await nextTick();
-
-					// The line's saving row disappears; the offers popup lists what the cart lacks
-					rememberRemovedOffers(invalidOffers);
-					return true;
-				}
-				return false;
-			} catch (error) {
-				if (activeSignal?.aborted) return false;
-				console.error("Error validating offers:", error);
-				offerProcessingState.value.error = error.message;
-				return false;
-			}
-		};
-
-		if (signal) {
-			return await run(signal);
+		// Clear offers if cart is empty
+		if (invoiceItems.value.length === 0 && appliedOffers.value.length) {
+			appliedOffers.value = [];
+			processFreeItems([]); // Remove all free items when cart is empty
+			applyHeaderDiscountFromServer(null);
+			return true;
 		}
 
-		debouncedProcessOffers.cancel();
-		let removed = false;
-		await offerQueue.enqueue(async (queuedSignal) => {
-			if (queuedSignal?.aborted) return;
-			try {
-				offerProcessingState.value.isProcessing = true;
-				offerProcessingState.value.error = null;
-				removed = await run(queuedSignal);
-			} finally {
-				offerProcessingState.value.isProcessing = false;
+		// Only validate if there are applied offers
+		if (appliedOffers.value.length === 0 || invoiceItems.value.length === 0) {
+			return false;
+		}
+
+		// Check if operation was cancelled
+		if (signal?.aborted) return false;
+
+		try {
+			// Build current cart snapshot for validation
+			const cartSnapshot = buildCartSnapshot();
+
+			// Check each applied offer against current cart state
+			const invalidOffers = [];
+			for (const appliedOffer of appliedOffers.value) {
+				const offer = appliedOffer.offer;
+				if (!offer) continue;
+
+				// Use offersStore to check eligibility
+				offersStore.updateCartSnapshot(cartSnapshot);
+				const { eligible, reason } = offersStore.checkOfferEligibility(offer);
+
+				if (!eligible) {
+					invalidOffers.push({
+						...appliedOffer,
+						reason,
+					});
+				}
 			}
-		});
-		return removed;
+
+			// Check for cancellation
+			if (signal?.aborted) return false;
+
+			// If any offers are invalid, remove them and reapply remaining
+			if (invalidOffers.length > 0) {
+				const validOfferCodes = appliedOffers.value
+					.filter((o) => !invalidOffers.find((inv) => inv.code === o.code))
+					.map((o) => o.code);
+
+				if (validOfferCodes.length === 0) {
+					// All offers invalid - clear everything and re-evaluate F&F
+					appliedOffers.value = [];
+					processFreeItems([]);
+					dropOfferDiscountsFromLines();
+					applyHeaderDiscountFromServer(null);
+					const askedFor = offerCartSignature();
+					await evaluateFriendsAndFamilyOnly(currentProfile, signal);
+					if (signal?.aborted) return false;
+					if (offerCartSignature() !== askedFor) {
+						debouncedProcessOffers();
+						return false;
+					}
+					offerProcessingState.value.lastCartHash = generateCartHash();
+					offerProcessingState.value.lastProcessedAt = Date.now();
+				} else {
+					// Reapply only valid offers
+					const invoiceData = buildOfferEvaluationPayload(currentProfile);
+					const pricedLines = snapshotPricedLines();
+					// J1: POSSale's watcher fires this outside the offer queue. An answer for a
+					// cart the cashier changed meanwhile is dropped, as in processOffersInternal,
+					// and the current cart is priced instead.
+					const askedFor = offerCartSignature();
+					const response = await applyOffersResource.submit({
+						invoice_data: invoiceData,
+						selected_offers: validOfferCodes,
+					});
+
+					if (signal?.aborted) return false;
+					if (offerCartSignature() !== askedFor) {
+						debouncedProcessOffers();
+						return false;
+					}
+
+					const {
+						items: responseItems,
+						freeItems,
+						appliedRules,
+						headerDiscount,
+						friendsAndFamily,
+					} = parseOfferResponse(response);
+
+					applyDiscountsFromServer(responseItems, friendsAndFamily);
+					processFreeItems(freeItems);
+					applyHeaderDiscountFromServer(headerDiscount);
+					filterActiveOffers(appliedRules);
+
+					// Update appliedOffers to only include valid ones
+					appliedOffers.value = appliedOffers.value.filter((entry) =>
+						appliedRules.includes(entry.code)
+					);
+					stampServerScopes(pricedLines);
+					offerProcessingState.value.lastCartHash = generateCartHash();
+					offerProcessingState.value.lastProcessedAt = Date.now();
+				}
+
+				// Wait for Vue to update before showing toast
+				await nextTick();
+
+				// The line's saving row disappears; the offers popup lists what the cart lacks
+				rememberRemovedOffers(invalidOffers);
+				return true;
+			}
+			return false;
+		} catch (error) {
+			if (signal?.aborted) return false;
+			console.error("Error validating offers:", error);
+			offerProcessingState.value.error = error.message;
+			return false;
+		}
 	}
 
 	/**

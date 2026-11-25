@@ -29,6 +29,8 @@ from dataclasses import dataclass
 import frappe
 from frappe import _
 
+from pos_next.api.security import ensure_desk_user
+
 from pos_next import utils
 
 OTP_PROVIDER_API = 1
@@ -161,11 +163,9 @@ def can_manage_verification(user: str | None = None) -> bool:
 @frappe.whitelist()
 def get_provider_options() -> list[dict]:
 	"""Registered providers with their health, for the POS Settings form (admins only)."""
-	from pos_next.api.security import ensure_desk_user
-
-	ensure_desk_user()
 	if not can_manage_verification():
 		frappe.throw(_("Not permitted to manage email verification providers"), frappe.PermissionError)
+	ensure_desk_user()
 	options = []
 	for provider in get_providers().values():
 		health = _call_provider_health(provider)

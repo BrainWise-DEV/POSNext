@@ -310,6 +310,7 @@ def get_customer_defaults():
 	Returns the Selling Settings default Customer Group and Territory, and the selectable
 	(non-group) Customer Groups. Same permission as create_customer.
 	"""
+	ensure_desk_user()
 	frappe.has_permission("Customer", "create", throw=True)
 	return {
 		"customer_group": frappe.db.get_single_value("Selling Settings", "customer_group"),
@@ -332,6 +333,7 @@ def get_governorates():
 
 	Names only; same permission as creating or editing a customer.
 	"""
+	ensure_desk_user()
 	_can_edit_customers()
 	return frappe.get_all("POS Governorate", pluck="name", order_by="name asc", limit_page_length=500)
 
@@ -339,6 +341,7 @@ def get_governorates():
 @frappe.whitelist()
 def get_districts(governorate=None):
 	"""Districts of one governorate for the customer dialog (D-R4-10). Same permission."""
+	ensure_desk_user()
 	_can_edit_customers()
 	if not governorate:
 		return []
