@@ -4,6 +4,8 @@
 import unittest
 from unittest.mock import Mock, patch
 
+import frappe
+
 from pos_next.api.customers import (
 	_get_customer_assignment_context,
 	create_customer,
@@ -39,14 +41,14 @@ class TestCustomersAPI(unittest.TestCase):
 			],
 		)
 
-	@patch("pos_next.api.customers.frappe.db.rollback")
-	def test_get_default_loyalty_program_from_settings_uses_explicit_pos_profile(self, mock_db):
-		mock_db.get_value.return_value = "LOYALTY-A"
+	@patch("pos_next.api.customers.frappe.db.get_value")
+	def test_get_default_loyalty_program_from_settings_uses_explicit_pos_profile(self, mock_get_value):
+		mock_get_value.return_value = "LOYALTY-A"
 
 		result = get_default_loyalty_program_from_settings(pos_profile="POS-A")
 
 		self.assertEqual(result, "LOYALTY-A")
-		mock_db.get_value.assert_called_once_with(
+		mock_get_value.assert_called_once_with(
 			"POS Settings",
 			{"enabled": 1, "pos_profile": "POS-A"},
 			"default_loyalty_program",
@@ -115,7 +117,6 @@ class TestCustomersAPI(unittest.TestCase):
 		mock_get_loyalty.assert_called_once_with(company=None, pos_profile="POS-A")
 		customer_doc.insert.assert_called_once_with()
 		self.assertEqual(result["loyalty_program"], "LOYALTY-A")
-
 
 	@patch(
 		"pos_next.api.customers.frappe.flags",
@@ -200,9 +201,7 @@ class TestCustomersAPI(unittest.TestCase):
 		]
 		customer_doc = Mock()
 		mock_get_doc.return_value = customer_doc
-		mock_after_insert.side_effect = ExistingCustomerFound(
-			"A customer with this phone already exists."
-		)
+		mock_after_insert.side_effect = ExistingCustomerFound("A customer with this phone already exists.")
 
 		result = create_customer(
 			customer_name="Someone Else",
@@ -215,7 +214,6 @@ class TestCustomersAPI(unittest.TestCase):
 		self.assertTrue(result["already_exists"])
 		self.assertEqual(result["message"], "A customer with this phone already exists.")
 		self.assertEqual(result["existing_customer"]["name"], "CUST-2026-68541")
-
 
 	@patch(
 		"pos_next.api.customers.frappe.flags",
@@ -314,7 +312,6 @@ class TestCustomersAPI(unittest.TestCase):
 		self.assertNotEqual(result.get("name"), "CUST-NEW")
 
 
-
 class _Row(dict):
 	def __getattr__(self, key):
 		try:
@@ -372,8 +369,10 @@ class TestContactPrimaryHelpers(unittest.TestCase):
 class TestUpdateCustomer(unittest.TestCase):
 	def setUp(self):
 		# @frappe.whitelist() reads frappe.local.flags.in_test
-		import frappe
 		from types import SimpleNamespace
+
+		import frappe
+
 		if not hasattr(frappe.local, "flags"):
 			frappe.local.flags = SimpleNamespace(in_test=True)
 		else:
@@ -394,9 +393,14 @@ class TestUpdateCustomer(unittest.TestCase):
 		doc.custom_is_publish = 1
 		doc.get = lambda key, default=None: getattr(doc, key, default)
 		doc.has_permission.return_value = True
-		doc.as_dict.return_value = {"name": doc.name, "customer_name": "ZZ Test New", "email_id": "new@example.com"}
+		doc.as_dict.return_value = {
+			"name": doc.name,
+			"customer_name": "ZZ Test New",
+			"email_id": "new@example.com",
+		}
 		return doc
 
+	@patch("pos_next.api.customers.resolve_existing_customer", return_value=None)
 	@patch("pos_next.api.customers.get_customer_sync_error", return_value=None)
 	@patch("pos_next.api.customers.after_customer_update")
 	@patch("pos_next.api.customers.sync_primary_contact")
@@ -415,6 +419,7 @@ class TestUpdateCustomer(unittest.TestCase):
 		mock_sync,
 		mock_after,
 		_sync_error,
+		mock_resolve,
 	):
 		customer = self._customer_doc()
 		mock_get_doc.return_value = customer
@@ -446,6 +451,8 @@ class TestUpdateCustomer(unittest.TestCase):
 		mock_after.assert_called_once()
 		self.assertEqual(result["email_id"], "new@example.com")
 		customer.reload.assert_called_once_with()
+		# The changed email/phone is checked against other customers, never this one.
+		self.assertEqual(mock_resolve.call_args.kwargs["exclude_customer"], "CUST-2026-68545")
 
 	@patch("pos_next.api.customers.frappe.get_doc")
 	def test_sync_primary_contact_updates_and_saves_contact(self, mock_get_doc):
@@ -468,6 +475,7 @@ class TestUpdateCustomer(unittest.TestCase):
 		self.assertEqual(contact.email_id, "new@example.com")
 		self.assertEqual(contact.mobile_no, "+964-7111111111")
 
+	@patch("pos_next.api.customers.resolve_existing_customer", return_value=None)
 	@patch("pos_next.api.customers.get_customer_sync_error", return_value=None)
 	@patch("pos_next.api.customers.after_customer_update")
 	@patch("pos_next.api.customers.sync_primary_contact")
@@ -486,6 +494,7 @@ class TestUpdateCustomer(unittest.TestCase):
 		mock_sync,
 		mock_after,
 		_sync_error,
+		mock_resolve,
 	):
 		from pos_next.integrations.registry import ExternalCustomerRejected
 
@@ -508,3 +517,31 @@ class TestUpdateCustomer(unittest.TestCase):
 		customer.save.assert_called_once_with()
 		# Flag must be restored even when Magento rejects the update.
 		self.assertFalse(flags.skip_magento_customer_sync)
+
+
+class TestDuplicateDisplayName(unittest.TestCase):
+	def tearDown(self):
+		for name in getattr(self, "created", []):
+			frappe.delete_doc("Customer", name, force=True)
+		frappe.db.commit()
+
+	def test_duplicate_display_name_created_without_message(self):
+		display = f"Dup Name {frappe.generate_hash(length=6)}"
+		self.created = []
+		first = create_customer(
+			customer_name=display, customer_group="Individual", territory="All Territories"
+		)
+		self.created.append(first["name"])
+		frappe.local.message_log = []
+		second = create_customer(
+			customer_name=display, customer_group="Individual", territory="All Territories"
+		)
+		self.created.append(second["name"])
+
+		self.assertTrue(second["name"].endswith(" - 1"))
+		self.assertEqual(second["customer_name"], display)
+		self.assertEqual(first["customer_name"], display)
+		rename_note = frappe._("Changed customer name to '{}' as '{}' already exists.").format(
+			second["name"], display
+		)
+		self.assertNotIn(rename_note, str(frappe.local.message_log))

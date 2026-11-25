@@ -103,6 +103,13 @@ fixtures = [
 
 # before_install = "pos_next.install.before_install"
 after_install = "pos_next.install.after_install"
+
+# Version gate: stops a migrate when a companion app is too old (runs on every migrate).
+before_migrate = [
+	"pos_next.integrations.contract_gate.before_migrate",
+	# Before sync_fixtures: the Custom DocPerm fixture must not drop standard roles.
+	"pos_next.install.preserve_standard_permissions",
+]
 after_migrate = "pos_next.install.after_migrate"
 
 # Uninstallation
@@ -162,16 +169,21 @@ doc_events = {
 			"pos_next.api.sales_invoice_hooks.validate",
 			"pos_next.api.wallet.validate_wallet_payment",
 		],
-		"before_submit": "pos_next.authorization.gate.enforce_document",
+		"before_submit": [
+			"pos_next.authorization.gate.enforce_document",
+			"pos_next.api.sales_invoice_hooks.check_one_time_offers",
+		],
 		"before_cancel": "pos_next.api.sales_invoice_hooks.before_cancel",
 		"on_submit": [
 			"pos_next.realtime_events.emit_stock_update_event",
 			"pos_next.api.wallet.process_loyalty_to_wallet",
 			"pos_next.api.sales_invoice_hooks.record_one_time_offer_usage",
+			"pos_next.pos_next.doctype.pos_coupon.pos_coupon.count_usage_on_submit",
 		],
 		"on_cancel": [
 			"pos_next.realtime_events.emit_stock_update_event",
 			"pos_next.api.sales_invoice_hooks.release_one_time_offer_usage",
+			"pos_next.pos_next.doctype.pos_coupon.pos_coupon.release_usage_on_cancel",
 		],
 		"after_insert": "pos_next.realtime_events.emit_invoice_created_event",
 	},
@@ -273,6 +285,11 @@ permission_query_conditions = {
 	"Journal Entry": "pos_next.api.expenses.get_journal_entry_permission_query_conditions",
 }
 
+# POS Settings rows are per POS Profile: write only on the profiles a user works in.
+has_permission = {
+	"POS Settings": "pos_next.pos_next.doctype.pos_settings.pos_settings.has_permission",
+}
+
 # auth_hooks = [
 # 	"pos_next.auth.validate"
 # ]
@@ -294,6 +311,8 @@ pos_next_customer_prepare = []
 pos_next_customer_after_insert = []
 pos_next_customer_after_update = []
 pos_next_customer_resolve_existing = []
+pos_next_email_otp_providers = ["pos_next.integrations.otp_frappe_email.get_provider"]
+pos_next_customer_benefit_providers = []
 
 
 website_route_rules = [

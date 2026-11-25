@@ -9,6 +9,41 @@ import { offlineState } from "./offlineState";
 
 const log = logger.create("OfflineWorker");
 
+/** Dispatched on window when an offline cache write is lost because the worker is down. */
+export const CACHE_WRITE_FAILED_EVENT = "posnext:offline-cache-write-failed";
+
+const REVIVE_INTERVAL_MS = 60 * 1000;
+
+/** Writes to the offline cache, which only the worker performs. */
+const WORKER_WRITES = new Set([
+	"CACHE_ITEMS",
+	"CACHE_CUSTOMERS",
+	"CACHE_PAYMENT_METHODS",
+	"CACHE_SALES_PERSONS",
+	"CACHE_OFFERS",
+	"CLEAR_OFFERS_CACHE",
+	"UPDATE_STOCK_QUANTITIES",
+	"CLEAR_ITEMS_CACHE",
+	"CLEAR_CUSTOMERS_CACHE",
+	"REMOVE_ITEMS_BY_GROUPS",
+]);
+
+/** Worker reads the page can answer itself from IndexedDB (see mainThreadReads.js). */
+const MAIN_THREAD_READS = {
+	GET_PAYMENT_METHODS: (reads, p) => reads.cachedPaymentMethods(p.posProfile),
+	GET_CACHED_OFFERS: (reads, p) => reads.cachedOffers(p.posProfile),
+	IS_CACHE_READY: async (reads) => (await reads.cachedItemCount()) > 0,
+	GET_CACHE_STATS: (reads, _p, variants) => reads.cacheStats(variants),
+	SEARCH_ITEMS: (reads, p, variants) => reads.searchItems(p.searchTerm, p.limit, p.offset || 0, variants),
+	SEARCH_ITEMS_BY_GROUP: (reads, p, variants) =>
+		reads.searchItemsByGroup(p.itemGroups, p.limit, p.offset || 0, variants),
+	SEARCH_CUSTOMERS: (reads, p) => reads.searchCustomers(p.searchTerm, p.limit),
+	GET_INVOICE_COUNT: (reads) => reads.queuedInvoiceCount(),
+	GET_INVOICES: (reads) => reads.queuedInvoices(),
+	// An offline sale must still be queued when the worker is down
+	SAVE_INVOICE: (reads, p) => reads.queueInvoice(p.invoiceData),
+};
+
 class OfflineWorkerClient {
 	constructor() {
 		this.worker = null;
@@ -18,6 +53,8 @@ class OfflineWorkerClient {
 		this.serverOnline = true;
 		this.retryAttempts = new Map(); // Track retry attempts per message type
 		this.workerCrashed = false;
+		// Display mode the worker was told, for the main-thread fallback reads
+		this.showVariantsAsItems = false;
 		this.initAttempts = 0;
 		this.maxInitAttempts = 3;
 		this.healthCheckInterval = null;
@@ -28,6 +65,39 @@ class OfflineWorkerClient {
 		this.maxRetries = 3;
 		this.retryDelay = 1000; // Base delay in ms
 		this.retryMultiplier = 2; // Exponential backoff multiplier
+
+		// A worker that gave up (e.g. its script was not reachable on an offline start)
+		// is started again when the connection comes back (D-R4-02 review I-1)
+		this.lastReviveAt = 0;
+		offlineState.subscribe((state) => {
+			if (state?.transition === "went-online" && this.workerCrashed) this.revive();
+		});
+	}
+
+	/** Resolves true once the worker is ready, false when it crashed or the wait ran out. */
+	async waitReady(timeoutMs = 5000) {
+		const started = Date.now();
+		while (!this.ready && !this.workerCrashed && Date.now() - started < timeoutMs) {
+			await new Promise((resolve) => setTimeout(resolve, 50));
+		}
+		return this.ready;
+	}
+
+	/**
+	 * Start the worker again after it gave up its restarts: on reconnect, on the header
+	 * Refresh, and before a cache write. Until then every cache write fails and the
+	 * offline cache keeps the data of the last start (D-R4-02 review I-1).
+	 * @returns {Promise<boolean>} true when the worker is ready
+	 */
+	async revive(timeoutMs = 5000) {
+		if (this.worker && !this.workerCrashed) return this.ready || this.waitReady(timeoutMs);
+		this.lastReviveAt = Date.now();
+		this.initAttempts = 0;
+		this.workerCrashed = false;
+		this.worker = null;
+		this.ready = false;
+		this.init();
+		return this.waitReady(timeoutMs);
 	}
 
 	init() {
@@ -276,16 +346,38 @@ class OfflineWorkerClient {
 	 */
 	rejectAllPending(reason) {
 		const error = new Error(reason);
-		for (const [id, { reject }] of this.pendingMessages) {
-			reject(error);
+		for (const [id, { resolve, reject, messageType, payload }] of this.pendingMessages) {
+			// A read the page can answer itself is answered, not failed (D-R4-02)
+			if (MAIN_THREAD_READS[messageType]) {
+				this.gracefulFallback(messageType, payload).then(resolve, reject);
+			} else {
+				reject(error);
+			}
 		}
 		this.pendingMessages.clear();
 	}
 
 	async sendMessage(type, payload = {}, isRetry = false) {
+		// A cache write to a worker that gave up: try to start it again first (at most
+		// once a minute), so the write is not lost while the server is reachable
+		if (
+			this.workerCrashed &&
+			this.initAttempts >= this.maxInitAttempts &&
+			WORKER_WRITES.has(type) &&
+			Date.now() - this.lastReviveAt > REVIVE_INTERVAL_MS
+		) {
+			await this.revive();
+		}
+
 		// If worker has permanently failed, return graceful degradation
 		if (this.workerCrashed && this.initAttempts >= this.maxInitAttempts) {
 			log.warn(`Worker unavailable, gracefully degrading for: ${type}`);
+			return this.gracefulFallback(type, payload);
+		}
+
+		// A crashed worker restarts in the background; what the page can read itself is
+		// answered now, not after the restart wait (D-R4-02)
+		if (this.workerCrashed && MAIN_THREAD_READS[type]) {
 			return this.gracefulFallback(type, payload);
 		}
 
@@ -357,8 +449,21 @@ class OfflineWorkerClient {
 	 * Graceful fallback when worker is unavailable
 	 * Returns empty/default values instead of throwing errors
 	 */
-	gracefulFallback(type, payload) {
+	async gracefulFallback(type, payload = {}) {
 		log.warn(`Graceful fallback for ${type}`);
+
+		// The cache the worker would read is the page's IndexedDB too: read it here, or an
+		// offline start without the worker shows no items, payment methods or offers
+		// although they are cached (D-R4-02).
+		const mainThreadRead = MAIN_THREAD_READS[type];
+		if (mainThreadRead) {
+			try {
+				const reads = await import("./mainThreadReads");
+				return await mainThreadRead(reads, payload, this.showVariantsAsItems);
+			} catch (error) {
+				log.error(`Main-thread read failed for ${type}`, error);
+			}
+		}
 
 		switch (type) {
 			case "GET_INVOICE_COUNT":
@@ -375,6 +480,9 @@ class OfflineWorkerClient {
 				return 0;
 			case "IS_CACHE_READY":
 				return false;
+			case "SET_SHOW_VARIANTS_AS_ITEMS":
+				this.showVariantsAsItems = Boolean(payload.value);
+				return { success: true };
 			case "GET_CACHE_STATS":
 				return {
 					items: 0,
@@ -395,9 +503,16 @@ class OfflineWorkerClient {
 			case "CLEAR_ITEMS_CACHE":
 			case "CLEAR_CUSTOMERS_CACHE":
 			case "REMOVE_ITEMS_BY_GROUPS":
+			case "CACHE_SALES_PERSONS":
 			case "CACHE_OFFERS":
 			case "CLEAR_OFFERS_CACHE":
-				// For write operations, throw error so caller knows to handle differently
+				// For write operations, throw error so caller knows to handle differently.
+				// Said out loud: the offline data on this device is now older than the
+				// page's (D-R4-02 review I-1).
+				log.error(`Offline cache not written: ${type} (worker unavailable)`);
+				if (typeof window !== "undefined") {
+					window.dispatchEvent(new CustomEvent(CACHE_WRITE_FAILED_EVENT, { detail: { type } }));
+				}
 				throw new Error(`Worker unavailable: Cannot perform ${type}`);
 			default:
 				throw new Error(`Worker unavailable: Unknown operation ${type}`);
@@ -505,6 +620,7 @@ class OfflineWorkerClient {
 	}
 
 	async setShowVariantsAsItems(value) {
+		this.showVariantsAsItems = Boolean(value);
 		return this.sendMessage("SET_SHOW_VARIANTS_AS_ITEMS", { value: Boolean(value) });
 	}
 

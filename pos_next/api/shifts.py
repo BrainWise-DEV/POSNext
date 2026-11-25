@@ -99,8 +99,8 @@ def check_opening_shift(user=None):
 	shift_data = open_shifts[0]
 	data = {}
 	data["pos_opening_shift"] = frappe.get_doc("POS Opening Shift", shift_data["name"])
-	data["pos_profile"] = frappe.get_doc("POS Profile", shift_data["pos_profile"])
-	data["company"] = frappe.get_doc("Company", data["pos_profile"].company)
+	data["pos_profile"] = _pos_profile_payload(shift_data["pos_profile"])
+	data["company"] = frappe.get_doc("Company", data["pos_profile"]["company"])
 	# Include server timestamp so frontend can compute shift duration
 	# without timezone mismatch (period_start_date is in server timezone)
 	data["server_now"] = str(get_datetime())
@@ -154,10 +154,28 @@ def create_opening_shift(pos_profile, company, balance_details):
 
 	data = {}
 	data["pos_opening_shift"] = new_pos_opening.as_dict()
-	data["pos_profile"] = frappe.get_doc("POS Profile", pos_profile)
+	data["pos_profile"] = _pos_profile_payload(pos_profile)
 	data["company"] = frappe.get_doc("Company", company)
 
 	return data
+
+
+def _pos_profile_payload(pos_profile: str) -> dict:
+	"""The shift's POS Profile for the POS, plus its currency's smallest fraction.
+
+	The POS shows and collects the rounded total when the profile rounds
+	(``disable_rounded_total`` 0), rounded as ERPNext's
+	``round_based_on_smallest_currency_fraction`` does (D-5); cashiers cannot read
+	Currency themselves.
+	"""
+	profile = frappe.get_doc("POS Profile", pos_profile)
+	payload = profile.as_dict(no_nulls=True)
+	payload["smallest_currency_fraction_value"] = (
+		flt(frappe.db.get_value("Currency", profile.currency, "smallest_currency_fraction_value", cache=True))
+		if profile.currency
+		else 0.0
+	)
+	return payload
 
 
 @frappe.whitelist()

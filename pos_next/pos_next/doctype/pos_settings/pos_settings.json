@@ -17,6 +17,13 @@
   "loyalty_to_wallet",
   "section_break_customer_email_verification",
   "enable_customer_email_verification",
+  "verification_provider",
+  "otp_ttl_seconds",
+  "otp_resend_cooldown",
+  "otp_max_sends_per_hour",
+  "default_phone_country",
+  "placeholder_email_domain",
+  "require_split_name",
   "section_break_general",
   "allow_user_to_edit_additional_discount",
   "allow_user_to_edit_item_discount",
@@ -56,6 +63,8 @@
   "allow_customer_purchase_order",
   "allow_duplicate_customer_names",
   "fetch_coupon",
+  "offline_coupon_overshoot",
+  "offline_offer_validity_hours",
   "section_break_printing",
   "allow_print_last_invoice",
   "silent_print",
@@ -220,7 +229,7 @@
    "label": "Allow Customer Credit Payment"
   },
   {
-   "default": "0",
+   "default": "1",
    "description": "Enable product returns",
    "fieldname": "allow_return",
    "fieldtype": "Check",
@@ -422,6 +431,22 @@
    "label": "Auto Fetch Coupon Gifts"
   },
   {
+   "default": "Allow and log",
+   "description": "When an offline sale is synced after its coupon reached a usage limit (total or per customer). Allow and log: the sale is kept, counted and written to Error Log. Reject: the sync fails like an online sale.",
+   "fieldname": "offline_coupon_overshoot",
+   "fieldtype": "Select",
+   "label": "Offline Coupon Over Limit",
+   "options": "Allow and log\nReject"
+  },
+  {
+   "default": "24",
+   "description": "Offline, the offers this till last fetched are applied for this many hours after they were fetched (at least 1); after that no offer is applied until the till is online again. Refresh in the POS header fetches them again.",
+   "fieldname": "offline_offer_validity_hours",
+   "fieldtype": "Int",
+   "label": "Offline Offer Validity (hours)",
+   "non_negative": 1
+  },
+  {
    "collapsible": 1,
    "fieldname": "section_break_printing",
    "fieldtype": "Section Break",
@@ -568,19 +593,70 @@
   {
    "fieldname": "section_break_customer_email_verification",
    "fieldtype": "Section Break",
-   "label": "Customer Email Verification"
+   "label": "Customer Verification"
   },
   {
    "default": "0",
-   "description": "Show the 'Verify email' (OTP) action in the customer dialog. Requires a Magento-synced customer and a configured Magento Setting. Informational badge only.",
+   "description": "Show the 'Verify email' (OTP) action in the customer dialog. Codes are sent by the selected verification provider. Informational badge only.",
    "fieldname": "enable_customer_email_verification",
    "fieldtype": "Check",
-   "label": "Enable Customer Email Verification"
+   "label": "Enable Customer Email Verification",
+   "permlevel": 1
+  },
+  {
+   "description": "Service that sends and checks email verification codes. Leave blank to use the built-in Frappe email provider.",
+   "fieldname": "verification_provider",
+   "fieldtype": "Select",
+   "label": "Verification Provider",
+   "permlevel": 1
+  },
+  {
+   "default": "900",
+   "fieldname": "otp_ttl_seconds",
+   "fieldtype": "Int",
+   "label": "Code Validity (seconds)",
+   "permlevel": 1
+  },
+  {
+   "default": "60",
+   "fieldname": "otp_resend_cooldown",
+   "fieldtype": "Int",
+   "label": "Resend Cooldown (seconds)",
+   "permlevel": 1
+  },
+  {
+   "default": "5",
+   "fieldname": "otp_max_sends_per_hour",
+   "fieldtype": "Int",
+   "label": "Max Codes per Hour",
+   "permlevel": 1
+  },
+  {
+   "fieldname": "default_phone_country",
+   "fieldtype": "Link",
+   "label": "Default Phone Country",
+   "options": "Country",
+   "permlevel": 1
+  },
+  {
+   "description": "Domain used for emails generated when a customer has no real email. Leave blank to disable.",
+   "fieldname": "placeholder_email_domain",
+   "fieldtype": "Data",
+   "label": "Placeholder Email Domain",
+   "permlevel": 1
+  },
+  {
+   "default": "0",
+   "description": "Customer dialog asks for first and last name separately.",
+   "fieldname": "require_split_name",
+   "fieldtype": "Check",
+   "label": "Require First and Last Name",
+   "permlevel": 1
   }
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-06-03 15:54:09.903964",
+ "modified": "2026-11-23 06:00:00.000000",
  "modified_by": "Administrator",
  "module": "POS Next",
  "name": "POS Settings",
@@ -630,6 +706,23 @@
    "read": 1,
    "role": "POSNext Cashier",
    "write": 1
+  },
+  {
+   "permlevel": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  },
+  {
+   "permlevel": 1,
+   "read": 1,
+   "role": "Nexus POS Manager",
+   "write": 1
+  },
+  {
+   "permlevel": 1,
+   "read": 1,
+   "role": "POSNext Cashier"
   }
  ],
  "row_format": "Dynamic",

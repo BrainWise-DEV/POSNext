@@ -69,3 +69,43 @@ class TestPosPageContext(FrappeTestCase):
 			"pos_next.optional_apps.update_pos_page_context",
 			frappe.get_hooks("update_website_context"),
 		)
+
+
+class TestPosAssetVersions(FrappeTestCase):
+	"""?v= of each optional app's POS scripts: a new release is a new URL (G7)."""
+
+	def test_boot_carries_a_content_hash_per_optional_app(self):
+		import os
+		import tempfile
+
+		from pos_next.optional_apps import get_pos_asset_versions
+
+		with tempfile.TemporaryDirectory() as app_dir:
+			pos_dir = os.path.join(app_dir, "public", "pos")
+			os.makedirs(pos_dir)
+			script = os.path.join(pos_dir, "offer-strategies.js")
+			with open(script, "w") as f:
+				f.write("export const a = 1;")
+			with (
+				patch("frappe.get_installed_apps", return_value=["posnext_promotions"]),
+				patch("frappe.get_app_path", side_effect=lambda app, *parts: os.path.join(app_dir, *parts)),
+			):
+				first = get_pos_asset_versions()
+				self.assertEqual(list(first), ["posnext_promotions"])
+				self.assertRegex(first["posnext_promotions"], r"^[0-9a-f]{12}$")
+				self.assertEqual(get_pos_asset_versions(), first)
+
+				with open(script, "w") as f:
+					f.write("export const a = 22;")
+				self.assertNotEqual(get_pos_asset_versions(), first)
+
+				context = frappe._dict(path="pos")
+				with patch("frappe.sessions.get_csrf_token", return_value="tok"):
+					update_pos_page_context(context)
+				self.assertEqual(context.boot["posnext_asset_versions"], get_pos_asset_versions())
+
+	def test_no_optional_app_no_versions(self):
+		from pos_next.optional_apps import get_pos_asset_versions
+
+		with patch("frappe.get_installed_apps", return_value=["frappe", "erpnext"]):
+			self.assertEqual(get_pos_asset_versions(), {})

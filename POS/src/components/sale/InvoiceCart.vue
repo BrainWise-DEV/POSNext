@@ -214,11 +214,12 @@
 
 						<!-- Document Type Card -->
 						<div
-							v-if="settingsStore.allowSalesOrder"
+							v-if="settingsStore.allowSalesOrder || settingsStore.createOnlySalesOrder"
 							class="flex items-center bg-white border border-gray-200 rounded-xl p-1.5 shadow-sm flex-shrink-0"
 						>
 							<div class="flex items-center bg-gray-100 rounded-lg p-0.5">
 								<button
+									v-if="!settingsStore.createOnlySalesOrder"
 									type="button"
 									@click="selectDocType('Sales Invoice')"
 									class="px-2.5 py-1.5 text-[11px] font-semibold rounded-md transition-all duration-200 flex items-center gap-1"
@@ -346,10 +347,11 @@
 
 						<!-- Document Type Toggle (Sales Invoice / Sales Order) -->
 						<div
-							v-if="settingsStore.allowSalesOrder"
+							v-if="settingsStore.allowSalesOrder || settingsStore.createOnlySalesOrder"
 							class="flex items-center bg-gray-100 rounded-xl p-0.5 h-10"
 						>
 							<button
+								v-if="!settingsStore.createOnlySalesOrder"
 								type="button"
 								@click="selectDocType('Sales Invoice')"
 								class="h-full px-2.5 text-xs font-semibold rounded-lg transition-all duration-200 flex items-center gap-1.5"
@@ -894,6 +896,7 @@
 
 					<!-- Return Invoice -->
 					<button
+						v-if="settingsStore.allowReturn"
 						type="button"
 						@click="$emit('show-return')"
 						class="flex flex-col items-center justify-center p-3 sm:p-4 bg-white border border-gray-200 rounded-lg hover:border-red-300 hover:bg-red-50 active:bg-red-100 transition-colors shadow-sm hover:shadow touch-manipulation group"
@@ -1050,46 +1053,14 @@
 						(item.is_free_item ? '-free' : '')
 					"
 				>
-					<!-- Free gift: its own mini line under the line that earned it, no quantity controls -->
-					<div
+					<!-- Free gift: the same full-width card for every kind, after the line that earned it -->
+					<FreeGiftRow
 						v-if="isLockedFreeRow(item)"
-						:class="[
-							'flex items-center gap-2 rounded-md border border-[#0f7a4a]/30 bg-[#e9f5ef] p-2',
-							item._giftOf ? 'ms-6 -mt-0.5' : '',
-						]"
-					>
-						<div
-							class="w-10 h-10 sm:w-12 sm:h-12 flex-shrink-0 rounded-lg overflow-hidden bg-white border border-[#0f7a4a]/20 flex items-center justify-center"
-						>
-							<img
-								v-if="giftImage(item)"
-								:src="giftImage(item)"
-								:alt="item.item_name"
-								loading="lazy"
-								class="w-full h-full object-cover"
-							/>
-							<FeatherIcon v-else name="gift" class="w-5 h-5 text-[#0f7a4a]" />
-						</div>
-						<div class="flex-1 min-w-0">
-							<span
-								class="inline-flex items-center gap-1 rounded-full bg-[#0f7a4a] px-2 py-0.5 text-[11px] font-bold text-white"
-							>
-								<FeatherIcon name="gift" class="w-3 h-3" />{{ __("Free gift") }}
-							</span>
-							<div dir="auto" class="mt-0.5 text-sm font-semibold text-[#1d2433] leading-snug line-clamp-2">
-								{{ item.item_name }}
-							</div>
-						</div>
-						<div class="flex-shrink-0 text-end tabular-nums">
-							<div class="text-sm font-bold text-[#0f7a4a]">{{ __("Free of charge") }}</div>
-							<div v-if="giftValue(item) > 0" class="text-xs text-gray-500 line-through">
-								<bdi>{{ formatCurrency(giftValue(item)) }}</bdi>
-							</div>
-							<div class="text-xs text-gray-600 inline-flex items-center gap-1">
-								<bdi>{{ formatQuantity(item.quantity) }}</bdi><span aria-hidden="true">×</span>
-							</div>
-						</div>
-					</div>
+						:item="item"
+						:image="giftImage(item)"
+						:value-text="giftValue(item) > 0 ? formatCurrency(giftValue(item)) : ''"
+						:quantity-text="formatQuantity(item.quantity)"
+					/>
 
 					<!-- Paid line -->
 					<div
@@ -1446,6 +1417,26 @@
 
 		<!-- Totals Summary -->
 		<div class="p-1.5 sm:p-2 bg-white border-t border-gray-200">
+			<!-- D-R2-17: a one-time offer this customer already used is not applied; say so -->
+			<div
+				v-if="items.length > 0 && offersStore.usedOneTimeOffers.length > 0"
+				class="mb-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 flex flex-col gap-0.5"
+				role="status"
+				aria-live="polite"
+				data-testid="one-time-offer-used"
+			>
+				<p
+					v-for="offer in offersStore.usedOneTimeOffers"
+					:key="offer.name"
+					class="text-[10px] sm:text-[11px] leading-snug text-amber-800"
+				>
+					{{
+						__("{0} not applied: this customer already used this one-time offer", [
+							offer.title || offer.name,
+						])
+					}}
+				</p>
+			</div>
 			<!-- PN-130: Friends & Family cashier messages (applied / cap / exclusions / comparison) -->
 			<div
 				v-if="fnfCartMessages.length > 0"
@@ -1543,16 +1534,27 @@
 				</div>
 			</div>
 
-			<!-- Grand Total -->
+			<!-- Grand Total (the rounded total when the POS Profile rounds, D-5) -->
 			<div class="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-2.5 mb-1.5">
+				<div
+					v-if="hasRounding"
+					class="flex items-center justify-between text-[11px] text-gray-600 mb-1"
+					data-testid="cart-rounding-adjustment"
+				>
+					<span>{{ __("Grand Total") }} {{ formatCurrency(displayPayableTotal - roundingAdjustment) }}</span>
+					<span dir="ltr"
+						>{{ __("Rounding Adjustment") }} {{ formatCurrency(roundingAdjustment) }}</span
+					>
+				</div>
 				<div class="flex items-center justify-between">
 					<span class="text-sm font-extrabold text-gray-900">{{
-						__("Grand Total")
+						hasRounding ? __("Rounded Total") : __("Grand Total")
 					}}</span>
 					<span
 						class="text-lg sm:text-xl font-extrabold text-blue-600 text-center min-w-[60px]"
+						data-testid="cart-grand-total"
 					>
-						{{ formatCurrency(displayGrandTotal) }}
+						{{ formatCurrency(displayPayableTotal) }}
 					</span>
 				</div>
 			</div>
@@ -1650,9 +1652,11 @@ const log = logger.create("InvoiceCart");
 import { createResource } from "frappe-ui";
 import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from "vue";
 import EditItemDialog from "./EditItemDialog.vue";
+import FreeGiftRow from "./FreeGiftRow.vue";
 import { useLocale } from "@/composables/useLocale";
 import {
 	buildFnfCartMessages,
+	lineCouponFnfView,
 	discountTotalsBySource,
 	fnfLineNote,
 	LINE_SOURCE,
@@ -1662,6 +1666,8 @@ import {
 	lineSourceShortLabel,
 	pickLocalizedMessage,
 } from "@/utils/friendsAndFamily";
+import { isZeroTotal } from "@/utils/paymentCompletion";
+import { cartDisplayTotals, isFullyDiscountedLine, lineDiscountPercent, lineSavingTitle } from "@/utils/cartLineLabels";
 import {
 	getDisplayQuantity as getDisplayQuantityForLine,
 	resolvePaidQuantityFromDisplay as resolvePaidQtyForLine,
@@ -1716,6 +1722,11 @@ const props = defineProps({
 		default: 0,
 	},
 	grandTotal: {
+		type: Number,
+		default: 0,
+	},
+	// Rounded − grand total when the POS Profile rounds (D-5); 0 otherwise
+	roundingAdjustment: {
 		type: Number,
 		default: 0,
 	},
@@ -2098,15 +2109,18 @@ const totalQuantity = computed(() => {
  *
  * @returns {Number} Subtotal amount to display (net amount before tax)
  */
-const displaySubtotal = computed(() => {
-	if (cartStore.taxInclusive) {
-		// Tax inclusive: subtotal from store is gross (includes tax)
-		// Display the net amount (before tax) for clarity
-		return props.subtotal - props.taxAmount;
-	}
-	// Tax exclusive: subtotal is already net (before tax)
-	return props.subtotal;
-});
+// The Tax row shows the server's post-discount tax (D-R2-07); the totals are built
+// from the lines' tax before the header discount, which already takes its share.
+const displayTotals = computed(() =>
+	cartDisplayTotals({
+		subtotal: props.subtotal,
+		lineTax: cartStore.lineTotalTax ?? props.taxAmount,
+		discount: displayDiscountAmount.value,
+		taxInclusive: cartStore.taxInclusive,
+	})
+);
+
+const displaySubtotal = computed(() => displayTotals.value.subtotal);
 
 /**
  * Display grand total that visually equals Subtotal + Tax - Discount.
@@ -2116,9 +2130,18 @@ const displaySubtotal = computed(() => {
  *
  * @returns {Number} Grand total amount to display
  */
-const displayGrandTotal = computed(() => {
-	return displaySubtotal.value + props.taxAmount - displayDiscountAmount.value;
-});
+const displayGrandTotal = computed(() => displayTotals.value.grandTotal);
+
+const hasRounding = computed(() => !isZeroTotal(Number(props.roundingAdjustment) || 0));
+
+/**
+ * What the sale is paid at (D-5): what payment collects (the server's rounded total
+ * while a payment check is current, else the cart's), never the line-sum total plus an
+ * adjustment computed on another total (that could show a number nobody collects).
+ */
+const displayPayableTotal = computed(() =>
+	hasRounding.value ? cartStore.paymentTotal : displayGrandTotal.value
+);
 
 /**
  * Sum line discounts directly from cart items for instant, exact footer display.
@@ -2334,7 +2357,7 @@ function lineSaving(item) {
 }
 
 function isGwpItem(item) {
-	return item?.discount_source === "gwp" || Number.parseFloat(item?.gwp_free_qty) > 0;
+	return item?.discount_source === "gwp";
 }
 
 function hasBundledSameItemFree(item) {
@@ -2361,25 +2384,13 @@ function savingOffer(item) {
 }
 
 // What the customer gets on this line: "1 free", "20% off", "Coupon WELCOME10"
-function savingTitle(item) {
-	if (item.coupon_code) {
-		// A coupon stacked on a promotion names both
-		const pre = Number(item.pre_coupon_discount?.discount_percentage) || 0;
-		return pre > 0
-			? __("{0}% off + Coupon {1}", [pre.toFixed(0), item.coupon_code])
-			: __("Coupon {0}", [item.coupon_code]);
-	}
-	if (isGiftSaving(item)) {
-		const unit = Number.parseFloat(item.price_list_rate || item.rate) || 0;
-		const units = unit ? Math.round(lineSaving(item) / unit) : 0;
-		if (units > 0) return __("{0} free", [units]);
-	}
-	return __("{0}% off", [Number(getItemDiscountPercent(item)).toFixed(0)]);
-}
+const savingTitle = lineSavingTitle;
 
 // The offer that gave it, shown quieter beside the title
 function savingSource(item) {
-	return item.coupon_code ? "" : savingOffer(item)?.name || "";
+	// A free coupon line's title is "Free": the coupon is named beside it.
+	if (item.coupon_code) return isFullyDiscountedLine(item) ? item.coupon_code : "";
+	return savingOffer(item)?.name || "";
 }
 
 const resolvePaidQuantityFromDisplay = resolvePaidQtyForLine;
@@ -2422,17 +2433,7 @@ function getLineStrikePrice(item) {
 	return list > net + 0.0001 ? list : null;
 }
 
-function getItemDiscountPercent(item) {
-	const pct = Number.parseFloat(item?.discount_percentage) || 0;
-	if (pct > 0) return pct;
-	const discountAmount = Number.parseFloat(item?.discount_amount) || 0;
-	if (discountAmount <= 0) return 0;
-	const qty = Number.parseFloat(item?.quantity || item?.qty) || 0;
-	const rate = Number.parseFloat(item?.price_list_rate || item?.rate) || 0;
-	const base = qty * rate;
-	if (base <= 0) return 0;
-	return (discountAmount / base) * 100;
-}
+const getItemDiscountPercent = lineDiscountPercent;
 
 /**
  * Format a numeric amount as currency string.
@@ -2450,11 +2451,21 @@ function formatCurrency(amount) {
 // ─────────────────────────────────────────────────────────────────────────────
 const { locale } = useLocale();
 
+// A line coupon that took the F&F lines mutes F&F like an order coupon (D-15).
+const fnfView = computed(() => {
+	const view = lineCouponFnfView({
+		result: cartStore.fnfResult,
+		items: props.items,
+		appliedCoupon: cartStore.appliedCoupon,
+	});
+	return { override: cartStore.fnfCouponOverride || view.override, result: view.result };
+});
+
 const fnfCustomerBadge = computed(() => {
 	const eligibility = cartStore.fnfEligibility;
 	if (!eligibility?.eligible) return null;
 	const pct = Number(eligibility.discountPercentage || 0);
-	const override = cartStore.fnfCouponOverride;
+	const override = fnfView.value.override;
 	return {
 		text: __("F&F {0}%", [String(Number(pct.toFixed(2)))]),
 		muted: Boolean(override),
@@ -2466,9 +2477,9 @@ const fnfCustomerBadge = computed(() => {
 
 const fnfCartMessages = computed(() =>
 	buildFnfCartMessages({
-		result: cartStore.fnfResult,
+		result: fnfView.value.result,
 		eligibility: cartStore.fnfEligibility,
-		couponOverride: cartStore.fnfCouponOverride,
+		couponOverride: fnfView.value.override,
 		locale: locale.value,
 		formatAmount: formatCurrency,
 		hasItems: props.items.length > 0,
@@ -2529,7 +2540,7 @@ function getLineBreakdownView(item) {
 function getFnfLineNoteView(item) {
 	if (!item || item.is_free_item) return null;
 	if (!cartStore.fnfEligibility?.eligible && !cartStore.fnfResult) return null;
-	if (cartStore.fnfCouponOverride) return null;
+	if (fnfView.value.override) return null;
 	return fnfLineNote(item, { locale: locale.value });
 }
 

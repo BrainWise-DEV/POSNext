@@ -18,6 +18,7 @@ from pos_next.integrations.registry import (
 	validate_customer_create,
 )
 from pos_next.api.security import ensure_desk_user, ensure_pos_user
+from pos_next.utils import validate_pos_profile_access
 
 MAX_CUSTOMERS_LIMIT = 50
 
@@ -115,6 +116,23 @@ def get_customers(search_term="", pos_profile=None, limit=20, modified_since=Non
 		frappe.throw(_("Error fetching customers: {0}").format(str(e)))
 
 
+def _drop_rename_note():
+	"""Drop ERPNext's "Changed customer name to ... already exists" note.
+
+	Duplicate display names are allowed; the record keeps ERPNext's unique ID, and the
+	note reads as an error to cashiers. Matches the translated text, so it works in any
+	language, and leaves every other message in place.
+	"""
+	prefix = _("Changed customer name to '{}' as '{}' already exists.").split("{}")[0]
+
+	def text(entry):
+		message = entry.get("message") if isinstance(entry, dict) else entry
+		return message if isinstance(message, str) else ""
+
+	log = frappe.local.message_log
+	log[:] = [entry for entry in log if not text(entry).startswith(prefix)]
+
+
 @frappe.whitelist()
 def create_customer(
 	customer_name,
@@ -143,9 +161,9 @@ def create_customer(
 	    pos_profile (str): POS Profile (optional, preferred for context-aware loyalty assignment)
 	    custom_governorate (str): Governorate (optional)
 	    custom_district (str): District (optional, must belong to the governorate)
-	    custom_first_name (str): First name for Magento sync (required when masar_miraaya installed)
-	    custom_last_name (str): Last name for Magento sync (required when masar_miraaya installed)
-	    custom_is_publish (int): Publish customer to Magento (default 1)
+	    custom_first_name (str): First name (required when the customer sync provider requires split names)
+	    custom_last_name (str): Last name (required when the customer sync provider requires split names)
+	    custom_is_publish (int): Publish customer to the external store (default 1)
 
 	Returns:
 	    dict: Created customer document
@@ -223,6 +241,7 @@ def create_customer(
 	try:
 		try:
 			customer.insert()
+			_drop_rename_note()
 			if sync_external_customer:
 				after_customer_insert(
 					customer,
@@ -282,6 +301,54 @@ def _is_leaf_customer_group(name):
 	if not name:
 		return False
 	return frappe.db.get_value("Customer Group", name, "is_group") == 0
+
+
+@frappe.whitelist()
+def get_customer_defaults():
+	"""What the new-customer dialog needs and a cashier cannot read itself.
+
+	Returns the Selling Settings default Customer Group and Territory, and the selectable
+	(non-group) Customer Groups. Same permission as create_customer.
+	"""
+	frappe.has_permission("Customer", "create", throw=True)
+	return {
+		"customer_group": frappe.db.get_single_value("Selling Settings", "customer_group"),
+		"territory": frappe.db.get_single_value("Selling Settings", "territory"),
+		"customer_groups": frappe.get_all(
+			"Customer Group", filters={"is_group": 0}, pluck="name", limit_page_length=500
+		),
+	}
+
+
+def _can_edit_customers():
+	"""The customer dialog's permission: create a customer, or edit one."""
+	if not (frappe.has_permission("Customer", "create") or frappe.has_permission("Customer", "write")):
+		frappe.throw(_("Not permitted to create or edit customers"), frappe.PermissionError)
+
+
+@frappe.whitelist()
+def get_governorates():
+	"""Governorates for the customer dialog, which a cashier cannot list itself (D-R4-10).
+
+	Names only; same permission as creating or editing a customer.
+	"""
+	_can_edit_customers()
+	return frappe.get_all("POS Governorate", pluck="name", order_by="name asc", limit_page_length=500)
+
+
+@frappe.whitelist()
+def get_districts(governorate=None):
+	"""Districts of one governorate for the customer dialog (D-R4-10). Same permission."""
+	_can_edit_customers()
+	if not governorate:
+		return []
+	return frappe.get_all(
+		"POS District",
+		filters={"governorate": governorate},
+		fields=["name", "district"],
+		order_by="district asc",
+		limit_page_length=0,
+	)
 
 
 def _is_leaf_territory(name):
@@ -466,18 +533,18 @@ def get_customer_details(customer, pos_profile=None):
 
 @frappe.whitelist()
 def update_customer(
-	name,
-	customer_name=None,
-	mobile_no=None,
-	email_id=None,
-	customer_group=None,
-	territory=None,
-	custom_governorate=None,
-	custom_district=None,
-	custom_first_name=None,
-	custom_last_name=None,
-	pos_profile=None,
-	company=None,
+	name: str,
+	customer_name: str | None = None,
+	mobile_no: str | None = None,
+	email_id: str | None = None,
+	customer_group: str | None = None,
+	territory: str | None = None,
+	custom_governorate: str | None = None,
+	custom_district: str | None = None,
+	custom_first_name: str | None = None,
+	custom_last_name: str | None = None,
+	pos_profile: str | None = None,
+	company: str | None = None,
 ):
 	"""Update an existing POS customer, including email and mobile.
 
@@ -495,6 +562,8 @@ def update_customer(
 	customer = frappe.get_doc("Customer", name)
 	if not customer.has_permission("write"):
 		frappe.throw(_("You don't have permission to update this customer"), frappe.PermissionError)
+	if pos_profile:
+		validate_pos_profile_access(pos_profile, frappe.PermissionError)
 	meta = frappe.get_meta("Customer")
 
 	first = (custom_first_name or "").strip()
@@ -508,6 +577,33 @@ def update_customer(
 		customer_name = (customer_name or "").strip()
 		if not customer_name:
 			frappe.throw(_("Customer name is required"))
+
+	# A changed email or phone must not take over another customer's (same rule as create).
+	email_changed = (
+		email_id is not None and (email_id or "").strip().lower() != (customer.email_id or "").strip().lower()
+	)
+	mobile_changed = mobile_no is not None and (mobile_no or "").strip() != (customer.mobile_no or "").strip()
+	if email_changed or mobile_changed:
+		existing = resolve_existing_customer(
+			customer_name=customer_name or customer.customer_name,
+			email_id=(email_id or "").strip() if email_changed else None,
+			mobile_no=(mobile_no or "").strip() if mobile_changed else None,
+			custom_first_name=first or customer.get("custom_first_name"),
+			custom_last_name=last or customer.get("custom_last_name"),
+			custom_is_publish=customer.get("custom_is_publish") or 0,
+			customer_group=customer.customer_group,
+			territory=customer.territory,
+			company=company,
+			pos_profile=pos_profile,
+			exclude_customer=name,
+		)
+		found = (existing or {}).get("existing_customer")
+		if found and found.get("name") != name:
+			return {
+				"already_exists": True,
+				"message": existing.get("message") or _("A customer with this email already exists."),
+				"existing_customer": found,
+			}
 
 	validate_customer_create(
 		customer_name=customer_name or customer.customer_name,

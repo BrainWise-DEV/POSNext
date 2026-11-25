@@ -516,8 +516,8 @@ def _process_invoice(invoice, invoice_field, company_currency, cash_mode, paymen
 
 	# Money actually collected on this sale, in company currency.  A pure
 	# Pay-on-Account credit sale has paid_amount == 0; a partial sale carries
-	# only its cash/card down-payment.  Returns keep the full (signed) amount —
-	# the return branch already reflects real refunds via payment rows.
+	# only its cash/card down-payment.  A return counts the cash it refunded
+	# (its signed paid_amount), not its grand_total (Ruling 147).
 	# paid_amount is the raw tendered total, so change given back to the
 	# customer (e.g. a $20 bill on a $15.50 sale) must be netted out — it
 	# never stayed in the drawer.
@@ -528,7 +528,7 @@ def _process_invoice(invoice, invoice_field, company_currency, cash_mode, paymen
 	# replacing them: grand_total / net_total / taxes stay invoiced so they
 	# keep tying to the GL and to every existing report, while
 	# collected_amount / outstanding_total answer "what is in the drawer".
-	collected = base_grand_total if is_return else base_paid
+	collected = base_paid
 	outstanding = 0 if is_return else (base_grand_total - base_paid)
 
 	# Build transaction record
@@ -599,6 +599,25 @@ def _process_invoice(invoice, invoice_field, company_currency, cash_mode, paymen
 		_aggregate_payment(payments, cash_mode, -base_change)
 
 	return transaction
+
+
+def get_open_shift_drafts(pos_opening_shift, doctype="Sales Invoice"):
+	"""The unprinted drafts still open on the shift (D-R2-18), oldest first.
+
+	Printed drafts are submitted by the close itself (submit_printed_invoices); these
+	stay at docstatus 0, or are deleted at close when the POS Profile allows it
+	(delete_draft_invoices). The POS lists them so the cashier decides before closing.
+	"""
+	return frappe.get_all(
+		doctype,
+		filters={
+			"posa_pos_opening_shift": pos_opening_shift,
+			"docstatus": 0,
+			"posa_is_printed": 0,
+		},
+		fields=["name", "customer", "customer_name", "grand_total", "rounded_total", "currency", "modified"],
+		order_by="creation asc",
+	)
 
 
 @frappe.whitelist()
@@ -754,6 +773,11 @@ def make_closing_shift_from_opening(opening_shift):
 			"expenses_count": len(pos_expenses_table),
 			"pos_expenses": pos_expenses_table,
 			"pos_transactions": pos_transactions,  # Include return info for display
+			# Display only: drafts still open on the shift, and whether the close deletes them.
+			"open_drafts": get_open_shift_drafts(opening_shift.get("name"), doctype),
+			"open_drafts_deleted_on_close": bool(
+				frappe.db.get_value("POS Profile", opening_shift.get("pos_profile"), "posa_allow_delete")
+			),
 		}
 	)
 
@@ -846,4 +870,11 @@ def submit_printed_invoices(pos_opening_shift, doctype):
 	)
 	for invoice in invoices_list:
 		invoice_doc = frappe.get_doc(doctype, invoice.name)
-		invoice_doc.submit()
+		try:
+			invoice_doc.submit()
+		except frappe.ValidationError as error:
+			# The shift does not close past it, and the cashier is told which (Ruling 114).
+			frappe.throw(
+				_("Printed invoice {0} could not be submitted: {1}").format(invoice.name, error),
+				type(error),
+			)

@@ -175,7 +175,7 @@
 						<span>{{ __("POS Expense") }}</span>
 					</button>
 					<button
-						v-if="canAccessShiftActions"
+						v-if="canAccessShiftActions && posSettingsStore.allowReturn"
 						@click="openReturnDialog"
 						class="w-full text-start px-4 py-2.5 text-sm text-gray-700 hover:bg-red-50 flex items-center gap-3 transition-colors"
 					>
@@ -414,6 +414,7 @@
 								:tax-amount="cartStore.totalTax"
 								:discount-amount="cartStore.totalDiscount"
 								:grand-total="cartStore.grandTotal"
+								:rounding-adjustment="cartStore.paymentRoundingAdjustment"
 								:pos-profile="shiftStore.profileName"
 								:company="shiftStore.profileCompany"
 								:currency="shiftStore.profileCurrency"
@@ -534,7 +535,8 @@
 			<!-- Payment Dialog -->
 			<PaymentDialog
 				v-model="uiStore.showPaymentDialog"
-				:grand-total="cartStore.grandTotal"
+				:grand-total="cartStore.paymentTotal"
+				:rounding-adjustment="cartStore.paymentRoundingAdjustment"
 				:subtotal="cartStore.subtotal"
 				:pos-profile="shiftStore.profileName"
 				:currency="shiftStore.profileCurrency"
@@ -612,7 +614,7 @@
 			<CouponDialog
 				v-model="uiStore.showCouponDialog"
 				:subtotal="cartStore.subtotal"
-				:tax-amount="cartStore.totalTax"
+				:tax-amount="cartStore.lineTotalTax"
 				:grand-total="cartStore.grandTotal"
 				:items="cartStore.invoiceItems"
 				:pos-profile="shiftStore.profileName"
@@ -763,6 +765,41 @@
 				:currency="shiftStore.profileCurrency"
 				@print-invoice="handlePrintInvoice"
 			/>
+
+			<!-- Payment-open re-check: the server total changed (Ruling 101) -->
+			<Dialog
+				v-model="showTotalChangedDialog"
+				:options="{ title: __('Invoice Total Changed'), size: 'sm' }"
+			>
+				<template #body-content>
+					<div class="py-3 space-y-2">
+						<p
+							v-if="paymentCheck.pendingChange.value?.message"
+							class="text-sm text-red-600"
+						>
+							{{ paymentCheck.pendingChange.value.message }}
+						</p>
+						<p class="text-sm text-gray-600">
+							{{
+								__("The invoice total is now {0} (was {1}). Continue to payment?", [
+									formatCurrency(paymentCheck.pendingChange.value?.total),
+									formatCurrency(paymentCheck.pendingChange.value?.previousTotal),
+								])
+							}}
+						</p>
+					</div>
+				</template>
+				<template #actions>
+					<div class="flex gap-2 w-full">
+						<Button class="flex-1" variant="subtle" @click="paymentCheck.cancelChange()">
+							{{ __("Cancel") }}
+						</Button>
+						<Button class="flex-1" variant="solid" @click="paymentCheck.confirmChange()">
+							{{ __("Continue to Payment") }}
+						</Button>
+					</div>
+				</template>
+			</Dialog>
 
 			<!-- Clear Cart Confirmation Dialog -->
 			<Dialog
@@ -1060,6 +1097,49 @@
 				</template>
 			</Dialog>
 
+			<!-- The last sale was saved: told once, kept until the cashier dismisses it (Ruling 144) -->
+			<Dialog
+				v-model="showMadeSaleNotice"
+				:disableOutsideClickToClose="true"
+				:options="{ title: __('Last sale already saved'), size: 'md' }"
+			>
+				<template #body-content>
+					<p class="py-3 text-sm text-gray-700">
+						{{ __("The last sale was saved as {0}", [cartStore.madeSaleNotice]) }}
+					</p>
+				</template>
+				<template #actions>
+					<div class="flex justify-end w-full">
+						<Button variant="solid" @click="cartStore.dismissMadeSaleNotice()">
+							{{ __("Done") }}
+						</Button>
+					</div>
+				</template>
+			</Dialog>
+
+			<!-- The last sale may already be saved: the cashier decides (Ruling 146 (b)) -->
+			<Dialog
+				v-model="showSubmitDecision"
+				:disableOutsideClickToClose="true"
+				:options="{ title: __('The last sale may already be saved'), size: 'md' }"
+			>
+				<template #body-content>
+					<p class="py-3 text-sm text-gray-700">
+						{{ __("The last sale may already be saved. Is this the same sale?") }}
+					</p>
+				</template>
+				<template #actions>
+					<div class="flex justify-end gap-2 w-full">
+						<Button variant="subtle" @click="cartStore.decideSubmit('new')">
+							{{ __("New sale") }}
+						</Button>
+						<Button variant="solid" @click="cartStore.decideSubmit('same')">
+							{{ __("Same sale — don't charge again") }}
+						</Button>
+					</div>
+				</template>
+			</Dialog>
+
 			<!-- Clear Cache Overlay -->
 			<ClearCacheOverlay
 				ref="clearCacheOverlayRef"
@@ -1124,9 +1204,10 @@ import { useGlobalShortcuts } from "@/composables/useKeyboardShortcuts";
 import { getDistinctUoms } from "@/utils/itemUoms";
 import { usePOSEvents } from "@/composables/usePOSEvents";
 import { useLocale } from "@/composables/useLocale";
+import { usePaymentOpenCheck } from "@/composables/usePaymentOpenCheck";
 import { session } from "@/data/session";
 import { useUserData } from "@/data/user";
-import { parseError } from "@/utils/errorHandler";
+import { parseError, submitErrorContext } from "@/utils/errorHandler";
 import { cleanupUserSession } from "@/utils/sessionCleanup";
 import { offlineWorker } from "@/utils/offline/workerClient";
 import { deductCachedBatchQty } from "@/utils/offline/items";
@@ -1152,12 +1233,16 @@ import { useStockStore } from "@/stores/stock";
 // Pinia Stores
 import { usePOSCartStore } from "@/stores/posCart";
 import { usePOSDraftsStore } from "@/stores/posDrafts";
+import { usePOSOffersStore } from "@/stores/posOffers";
+import { useReconnectRecovery } from "@/composables/useReconnectRecovery";
+import { useCacheWriteWarning } from "@/composables/useCacheWriteWarning";
 import { usePOSSettingsStore } from "@/stores/posSettings";
 import { usePOSShiftStore } from "@/stores/posShift";
 import { usePOSSyncStore } from "@/stores/posSync";
 import { usePOSUIStore } from "@/stores/posUI";
 import { useBootstrapStore } from "@/stores/bootstrap";
 import { logger } from "@/utils/logger";
+import { buildOfflineInvoiceData } from "@/utils/offlineInvoicePayload";
 import { canCloseShiftWithPendingExpenses } from "@/utils/shiftGuards";
 import { shouldValidateItemStock } from "@/utils/stockValidator";
 
@@ -1167,11 +1252,25 @@ const shiftStore = usePOSShiftStore();
 const uiStore = usePOSUIStore();
 const offlineStore = usePOSSyncStore();
 const draftsStore = usePOSDraftsStore();
+const offersStore = usePOSOffersStore();
 const posSettingsStore = usePOSSettingsStore();
 const itemStore = useItemSearchStore();
 const stockStore = useStockStore();
 const customerSearchStore = useCustomerSearchStore();
 const bootstrapStore = useBootstrapStore();
+
+// Back online after an offline start: reload tax rules, offers and items (D-R4-02)
+useReconnectRecovery({
+	isOffline: () => offlineStore.isOffline,
+	isReady: () => Boolean(_initializedKey),
+	cart: cartStore,
+	offers: offersStore,
+	items: itemStore,
+	profileName: () => shiftStore.profileName,
+	settings: () => posSettingsStore.settings,
+	worker: offlineWorker,
+});
+
 // Note: settingsStore is an alias to posSettingsStore (same Pinia store singleton)
 const settingsStore = posSettingsStore;
 
@@ -1198,6 +1297,8 @@ const {
 
 // Initialize toast
 const { showSuccess, showError, showWarning } = useToast();
+// An offline cache write lost because the worker is down is said, once in a while
+useCacheWriteWarning(showWarning);
 
 // Initialize logger
 const log = logger.create("POSSale");
@@ -1225,6 +1326,57 @@ watch(containerRef, (el, oldEl) => {
 });
 const dividerRef = ref(null);
 const pendingPaymentAfterCustomer = ref(false);
+// Opening payment re-checks the price online first (Ruling 101)
+const paymentCheck = usePaymentOpenCheck({
+	isOffline: () => offlineStore.isOffline,
+	checkPrice: () => cartStore.checkPriceBeforePayment(),
+	openPayment: () => {
+		uiStore.showPaymentDialog = true;
+	},
+	showError: (error) => {
+		const errorContext = parseError(error);
+		if (errorContext.couponRefused) {
+			// The coupon is gone from the cart; the cashier sees why (D-R3-08)
+			cartStore.dropRefusedCoupon();
+			uiStore.showError(errorContext.title, errorContext.message);
+			return;
+		}
+		showError(errorContext.message || __("Could not check the invoice total"));
+	},
+	// A submit of this cart that got no answer may already be made (D-19): send it
+	// again, with its key and payments, instead of re-pricing an already-made sale.
+	resumeUnresolved: () =>
+		cartStore.lastOnlinePayment && cartStore.hasUnresolvedSubmit()
+			? handlePaymentCompleted(cartStore.lastOnlinePayment)
+			: null,
+	// No offline block: at the submit the cashier decides (Ruling 146 (b)).
+});
+// Back online: settle a cleared, unanswered submit's key (Ruling 141).
+watch(
+	() => offlineStore.isOffline,
+	(offline, wasOffline) => {
+		if (!offline && wasOffline) cartStore.resolvePendingSubmit();
+	}
+);
+const showSubmitDecision = computed({
+	get: () => Boolean(cartStore.submitDecision),
+	set: (open) => {
+		// Closed without a choice: nothing is submitted.
+		if (!open) cartStore.decideSubmit(null);
+	},
+});
+const showMadeSaleNotice = computed({
+	get: () => Boolean(cartStore.madeSaleNotice),
+	set: (open) => {
+		if (!open) cartStore.dismissMadeSaleNotice();
+	},
+});
+const showTotalChangedDialog = computed({
+	get: () => Boolean(paymentCheck.pendingChange.value),
+	set: (open) => {
+		if (!open) paymentCheck.cancelChange();
+	},
+});
 const logoutAfterClose = ref(false);
 const editCustomer = ref(null); // Customer being edited (null for create mode)
 const showClearCacheDialog = ref(false);
@@ -1636,6 +1788,11 @@ onMounted(async () => {
 		// Load tax rules (depends on settings being loaded)
 		await cartStore.loadTaxRules(shiftStore.profileName, posSettingsStore.settings);
 
+		// Bring back the cart open before the reload (D-4), after the default customer
+		// is set and before the cart is first shown.
+		await cartStore.restoreOpenCart(openCartScope());
+		previousCartHash = computeCartHash();
+
 		_initializedKey = `${shiftStore.profileName}::${shiftStore.currentShift?.name}`;
 	}
 });
@@ -1935,6 +2092,10 @@ async function handleShiftOpened() {
 	// Load tax rules (depends on settings being loaded)
 	await cartStore.loadTaxRules(shiftStore.profileName, posSettingsStore.settings);
 
+	// Save the open cart for this shift from now on (D-4).
+	await cartStore.restoreOpenCart(openCartScope());
+	previousCartHash = computeCartHash();
+
 	_initializedKey = `${shiftStore.profileName}::${shiftStore.currentShift?.name}`;
 
 	// Start session lock tracking now that a shift is open and POS is ready
@@ -1942,9 +2103,51 @@ async function handleShiftOpened() {
 	showSuccess(__("You can now start making sales"));
 }
 
+// A restored cart that was sold before the reload is shown as that sale (Ruling 136 (a))
+watch(
+	() => cartStore.alreadySubmittedInvoice,
+	(invoice) => {
+		if (!invoice) return;
+		cartStore.alreadySubmittedInvoice = null;
+		previousCartHash = "";
+		uiStore.showPaymentDialog = false;
+		const total = invoice.rounded_total || invoice.grand_total || 0;
+		uiStore.showSuccess(invoice.name, total, invoice.paid_amount || total);
+		showWarning(__("Invoice {0} was already submitted. The restored cart was closed.", [invoice.name]));
+	}
+);
+
+// A restored cart whose offline sale was queued before the reload is closed (F6)
+watch(
+	() => cartStore.alreadyQueuedSale,
+	(sale) => {
+		if (!sale) return;
+		cartStore.alreadyQueuedSale = null;
+		previousCartHash = "";
+		uiStore.showPaymentDialog = false;
+		showWarning(__("This sale is already queued offline. The restored cart was closed."));
+	}
+);
+
+/** Who the open cart is saved for (D-4): this user, POS Profile and opening shift. */
+function openCartScope() {
+	return {
+		user: session.user,
+		pos_profile: shiftStore.profileName,
+		pos_opening_shift: shiftStore.currentShift?.name,
+	};
+}
+
 async function handleShiftClosed() {
 	uiStore.showCloseShiftDialog = false;
+	// The next shift starts without the last unanswered submit's key (Ruling 141).
+	cartStore.dropPendingSubmit();
 	showSuccess(__("Shift closed successfully"));
+
+	// The closed shift's cart is dropped, in memory and in storage (D-4).
+	await cartStore.stopCartPersistence();
+	previousCartHash = "";
+	editingOfflineContext = null;
 
 	// Check if logout should happen after closing shift
 	if (logoutAfterClose.value) {
@@ -2063,12 +2266,13 @@ function handleAdditionalDiscountUpdate(discountAmount) {
 
 function handleCustomerSelected(selectedCustomer) {
 	if (selectedCustomer) {
-		cartStore.setCustomer(selectedCustomer);
+		const customerReady = Promise.resolve(cartStore.setCustomer(selectedCustomer)).catch(() => {});
 		uiStore.showCustomerDialog = false;
 
 		if (pendingPaymentAfterCustomer.value) {
 			pendingPaymentAfterCustomer.value = false;
-			uiStore.showPaymentDialog = true;
+			// The check prices the cart for this customer: wait for setCustomer.
+			customerReady.then(() => paymentCheck.requestPayment());
 		}
 	} else {
 		cartStore.setCustomer(null);
@@ -2087,7 +2291,7 @@ function handleEditCustomer(customer) {
 	uiStore.showCreateCustomerDialog = true;
 }
 
-function handleProceedToPayment() {
+async function handleProceedToPayment() {
 	if (cartStore.isEmpty) {
 		showWarning(__("Please add items to cart before proceeding to payment"));
 		return;
@@ -2101,7 +2305,14 @@ function handleProceedToPayment() {
 		return;
 	}
 
-	uiStore.showPaymentDialog = true;
+	// A cart restored with a payment draft is checked first: it may be sold already (Ruling 136)
+	const gate = await cartStore.ensurePaymentAllowed();
+	if (!gate.allowed) {
+		if (gate.message) showWarning(gate.message);
+		return;
+	}
+
+	paymentCheck.requestPayment();
 }
 
 async function handleDeleteFailedInvoice() {
@@ -2131,12 +2342,14 @@ async function handleDeleteFailedExpense() {
 }
 
 async function handleErrorRetry() {
+	// clearError resets the retry action: read it first.
+	const action = uiStore.errorRetryAction;
 	uiStore.clearError();
-	if (uiStore.errorRetryAction === "payment") {
+	if (action === "payment") {
 		setTimeout(() => {
-			uiStore.showPaymentDialog = true;
+			paymentCheck.requestPayment();
 		}, 300);
-	} else if (uiStore.errorRetryAction === "sync") {
+	} else if (action === "sync") {
 		await offlineStore.loadPendingInvoices();
 		setTimeout(() => {
 			handleSyncClick();
@@ -2187,33 +2400,37 @@ async function handlePaymentCompleted(paymentData) {
 		const draftIdToDelete = cartStore.currentDraftId;
 
 		if (offlineStore.isOffline) {
-			// Use the same item transformation as online flow for consistency
-			// This ensures rate, discount_percentage, discount_amount, and pricing_rules
-			// are all correctly formatted for ERPNext
-			const preparedItems = cartStore.formatItemsForSubmission(cartStore.invoiceItems);
-
+			// A restored cart whose draft may be sold already is not paid offline (Ruling 136 (b))
+			if (cartStore.paymentBlockedMessage) throw new Error(cartStore.paymentBlockedMessage);
+			// An earlier submit's outcome is unknown: the cashier decides (Ruling 146 (b)).
+			const gate = await cartStore.settlePendingSubmit({ offline: true });
+			if (gate.stop) {
+				uiStore.showPaymentDialog = false;
+				return;
+			}
 			const invoiceData = {
-				pos_profile: cartStore.posProfile,
-				posa_pos_opening_shift: cartStore.posOpeningShift,
-				company: shiftStore.profileCompany,
-				customer: customerValue || shiftStore.profileCustomer,
-				items: preparedItems,
-				payments: JSON.parse(JSON.stringify(cartStore.payments)),
-				sales_team: JSON.parse(JSON.stringify(cartStore.salesTeam || [])),
-				grand_total: cartStore.grandTotal,
-				total_tax: cartStore.totalTax,
-				total_discount: cartStore.totalDiscount,
-				write_off_amount: paymentData.write_off_amount || 0,
-				change_amount: paymentData.change_amount || 0,
-				is_credit_sale: paymentData.is_credit_sale ? 1 : 0,
-				receivable_account: paymentData.receivable_account || null,
-				edited_from: editingOfflineContext?.originalOfflineId || null,
+				...buildOfflineInvoiceData({
+					cart: cartStore,
+					shift: shiftStore,
+					customer: customerValue,
+					paymentData,
+					editedFrom: editingOfflineContext?.originalOfflineId,
+					// The cashier said "same sale": the sync returns that sale if it was made,
+					// an order's too (Ruling 146 (c)).
+					idempotencyKey: gate.carry?.key || null,
+					idempotencyDoctype: gate.carry?.doctype || null,
+				}),
+				// The cart's own id, saved with it: paying a restored cart again finds this
+				// sale already queued, and the server dedups one already synced (Ruling 136 (d)).
+				offline_id: await cartStore.checkoutOfflineId(),
 			};
 
 			// Save to the offline queue first so we can use the worker's
 			// canonical pos_offline_<uuid> id as the cache key — keeping
 			// IndexedDB and sessionStorage aligned on a single identifier.
 			const saveResult = await offlineStore.saveInvoiceOffline(invoiceData);
+			// The queued sale carries the pending key (if any); its sync resolves it.
+			if (invoiceData.idempotency_key) cartStore.releaseSubmitKey();
 			const offlineReceiptName =
 				saveResult?.offline_id || invoiceData.offline_id || `pos_offline_${Date.now()}`;
 
@@ -2231,8 +2448,10 @@ async function handlePaymentCompleted(paymentData) {
 				editingOfflineContext = null;
 			}
 
-			const paidAmount = paymentData.paid_amount ?? cartStore.grandTotal ?? 0;
 			const grandTotal = cartStore.grandTotal || 0;
+			// Paid at the rounded total when the POS Profile rounds (D-5)
+			const payableTotal = cartStore.roundedTotal ?? grandTotal;
+			const paidAmount = paymentData.paid_amount ?? payableTotal ?? 0;
 			const customerLabel =
 				cartStore.customer?.customer_name ||
 				cartStore.customer?.name ||
@@ -2241,31 +2460,36 @@ async function handlePaymentCompleted(paymentData) {
 
 			const offlinePrintDoc = {
 				name: offlineReceiptName,
-				doctype: "Sales Invoice",
+				// The queued document's own doctype: an order prints as an order (I-2)
+				doctype: invoiceData.doctype || "Sales Invoice",
 				is_offline: true,
 				pos_profile: cartStore.posProfile,
 				posting_date: new Date().toISOString().slice(0, 10),
 				company: shiftStore.profileCompany || undefined,
 				customer_name: customerLabel,
-				items: preparedItems.map((item) => ({
+				// The items the queued sale carries, as formatItemsForSubmission built them
+				items: invoiceData.items.map((item) => ({
 					...item,
 					quantity: item.qty ?? item.quantity,
 				})),
 				grand_total: grandTotal,
+				rounded_total: payableTotal,
+				rounding_adjustment: cartStore.roundingAdjustment || 0,
 				total_taxes_and_charges: cartStore.totalTax,
 				payments: invoiceData.payments,
 				paid_amount: paidAmount,
 				change_amount: paymentData.change_amount || 0,
-				outstanding_amount: Math.max(0, grandTotal - paidAmount),
-				status: Math.max(0, grandTotal - paidAmount) < 0.01 ? "Paid" : "Unpaid",
+				outstanding_amount: Math.max(0, payableTotal - paidAmount),
+				status: Math.max(0, payableTotal - paidAmount) < 0.01 ? "Paid" : "Unpaid",
 				docstatus: 0,
 			};
 			uiStore.setLastOfflinePrintDoc(offlinePrintDoc);
 			cacheOfflineReceiptPayload(offlineReceiptName, offlinePrintDoc);
 
-			// Deduct sold stock locally; the server refresh after sync replaces it
+			// Deduct sold stock locally; the server refresh after sync replaces it. An order
+			// takes no stock (I-2).
 			const soldQty = new Map();
-			for (const item of preparedItems) {
+			for (const item of invoiceData.doctype === "Sales Order" ? [] : invoiceData.items) {
 				const qty = (item.qty || 0) * (item.conversion_factor || 1);
 				soldQty.set(item.item_code, (soldQty.get(item.item_code) || 0) + qty);
 				if (item.batch_no) {
@@ -2303,7 +2527,7 @@ async function handlePaymentCompleted(paymentData) {
 					);
 				} catch (error) {
 					log.error("Offline auto-print error:", error);
-					uiStore.showSuccess(offlineReceiptName, grandTotal, paymentData.paid_amount);
+					uiStore.showSuccess(offlineReceiptName, payableTotal, paymentData.paid_amount);
 					showWarning(
 						__(
 							"Invoice {0} saved offline but print failed — open Print from the success dialog",
@@ -2312,7 +2536,7 @@ async function handlePaymentCompleted(paymentData) {
 					);
 				}
 			} else {
-				uiStore.showSuccess(offlineReceiptName, grandTotal, paymentData.paid_amount);
+				uiStore.showSuccess(offlineReceiptName, payableTotal, paymentData.paid_amount);
 				showSuccess(__("Invoice saved offline. Will sync when online"));
 			}
 		} else {
@@ -2320,10 +2544,19 @@ async function handlePaymentCompleted(paymentData) {
 			const soldItemCodes = cartStore.invoiceItems.map((item) => item.item_code);
 			const soldBatches = cartStore.invoiceItems.filter((item) => item.batch_no);
 
+			// Re-sent by resumeUnresolved above; saved with the cart, so it survives a reload (F6).
+			cartStore.lastOnlinePayment = JSON.parse(JSON.stringify(paymentData));
 			const result = await cartStore.submitInvoice({
 				isCreditSale: Boolean(paymentData.is_credit_sale),
 				receivableAccount: paymentData.receivable_account || null,
 			});
+
+			// The last sale was made (the notice tells it), or the cashier closed the
+			// "same sale?" dialog: nothing was submitted and the cart stays (Ruling 146).
+			if (result?.stopped) {
+				uiStore.showPaymentDialog = false;
+				return;
+			}
 
 			if (result) {
 				uiStore.clearLastOfflinePrintDoc();
@@ -2351,7 +2584,10 @@ async function handlePaymentCompleted(paymentData) {
 				}
 
 				const invoiceName = result.name || result.message?.name || __("Unknown");
-				const invoiceTotal = result.grand_total || result.total || 0;
+				// What was collected: the rounded total when the invoice rounds (D-5); submit_invoice
+				// does not return rounded_total, so the payable total of the cart is the fallback.
+				const invoiceTotal =
+					result.rounded_total || cartStore.paymentTotal || result.grand_total || result.total || 0;
 				const paidAmount = paymentData.paid_amount || invoiceTotal;
 
 				uiStore.showPaymentDialog = false;
@@ -2400,7 +2636,23 @@ async function handlePaymentCompleted(paymentData) {
 		// checkout doesn't supersede the wrong row on a fresh, unrelated sale.
 		editingOfflineContext = null;
 
-		const errorContext = parseError(error);
+		const errorContext = submitErrorContext(error, { outcomeUnknown: cartStore.hasUnresolvedSubmit() });
+		if (errorContext.couponRefused) {
+			// The coupon was used up before this sale was submitted (D-R3-08): the cart
+			// drops it and is re-priced; the cashier pays again at the new total.
+			cartStore.dropRefusedCoupon();
+			uiStore.showError(errorContext.title, errorContext.message);
+			return;
+		}
+		// The cart is kept. Online, the price check runs again (Ruling 101): when the
+		// total changed, the cashier confirms the new one, with the server's message.
+		// A submit with no answer is not re-checked: it may already be made (D-19).
+		if (
+			!cartStore.hasUnresolvedSubmit() &&
+			(await paymentCheck.recheckAfterRefusal(errorContext.message || ""))
+		)
+			return;
+
 		uiStore.showError(
 			errorContext.title || __("Error"),
 			errorContext.message || __("An unexpected error occurred"),
@@ -2554,7 +2806,8 @@ function openHistoryDialog() {
 }
 
 function openReturnDialog() {
-	if (!canAccessShiftActions.value) {
+	// POS Settings "Allow Return" off: no returns from this POS (D-R3-10)
+	if (!canAccessShiftActions.value || !posSettingsStore.allowReturn) {
 		return;
 	}
 
@@ -2612,7 +2865,8 @@ async function handleSaveDraft() {
 		cartStore.posProfile,
 		cartStore.appliedOffers,
 		cartStore.currentDraftId,
-		cartStore.appliedCoupon
+		cartStore.appliedCoupon,
+		cartStore.resumableGrandTotal()
 	);
 	if (savedDraft) {
 		// The draft now holds the serials
@@ -2632,7 +2886,8 @@ async function handleLoadDraft(draft) {
 				cartStore.posProfile,
 				cartStore.appliedOffers,
 				cartStore.currentDraftId,
-				cartStore.appliedCoupon
+				cartStore.appliedCoupon,
+				cartStore.resumableGrandTotal()
 			);
 
 			if (!saved) {
@@ -2648,7 +2903,8 @@ async function handleLoadDraft(draft) {
 
 		const draftData = await draftsStore.loadDraft(draft);
 		cartStore.invoiceItems = draftData.items;
-		cartStore.setCustomer(draftData.customer);
+		// The draft's own coupon is restored below, so the customer change keeps it.
+		cartStore.setCustomer(draftData.customer, { restoring: true });
 		cartStore.currentDraftId = draft.draft_id; // Set current draft ID
 		cartStore.restoreLineCoupon(draftData.applied_coupon);
 
@@ -2761,7 +3017,10 @@ async function handleCustomerUpdated(updatedCustomer) {
 
 async function handleRefresh() {
 	try {
-		log.info("Manual refresh initiated (items, customers, stock)");
+		log.info("Manual refresh initiated (items, customers, stock, offers)");
+
+		// The refresh rewrites the offline cache: start the worker again if it gave up
+		await offlineWorker.revive().catch(() => false);
 
 		// Refresh items, customers, and stock in parallel
 		await Promise.all([
@@ -2771,13 +3030,20 @@ async function handleRefresh() {
 			customerSearchStore.loadAllCustomers(shiftStore.profileName, true),
 			// Refresh stock from server (preserves reservations internally)
 			stockStore.refresh(null, shiftStore.profileWarehouse),
+			// F&F Settings may have changed (D-R2-03): ask again and re-price the cart.
+			Promise.resolve(cartStore.recheckFriendsAndFamily?.()).catch(() => {}),
+			// Offers too (D-R4-01): a new or ended offer, and the offline cache rewritten.
+			offersStore
+				.refreshOffers(shiftStore.profileName)
+				.then((fetched) => fetched && cartStore.forceRefreshOffers())
+				.catch(() => {}),
 		]);
 
 		// Refresh cache stats to update "Last Updated" timestamp
 		const stats = await offlineWorker.getCacheStats();
 		itemStore.cacheStats = stats;
 
-		log.success("Manual refresh completed (items, customers, stock)");
+		log.success("Manual refresh completed (items, customers, stock, offers)");
 	} catch (error) {
 		log.error("Manual refresh failed:", error);
 	}
@@ -2867,6 +3133,9 @@ async function handleEditOfflineInvoice(invoice) {
 		}
 
 		cartStore.clearCart();
+		// Not saved for a reload: restored without its edit context (below), paying
+		// would queue a second invoice. The next clearCart() saves carts again.
+		cartStore.suspendCartPersistence();
 
 		const invoiceData = invoice.data;
 

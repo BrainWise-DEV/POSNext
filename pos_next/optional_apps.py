@@ -9,6 +9,10 @@ monkey-patches when the owning app is installed.
 
 from __future__ import annotations
 
+import hashlib
+import os
+from functools import lru_cache
+
 import frappe
 from frappe.utils import cint
 
@@ -33,6 +37,42 @@ def get_pos_ui_app_flags() -> dict:
 	return {app: 1 for app in POS_UI_OPTIONAL_APPS if app in installed}
 
 
+def get_pos_asset_versions() -> dict:
+	"""{app_name: content hash} of the scripts each optional app serves for the POS.
+
+	An app's POS scripts live in its ``public/pos/`` (served at ``/assets/<app>/pos/``).
+	The POS adds the hash to their URL (``?v=``), so the service worker can keep them
+	cache-first for offline reloads and a new release is a new URL, never a stale copy
+	(POS/src/utils/offline/satelliteAssets.js). Found by path, no import of the app.
+	"""
+	versions = {}
+	for app in get_pos_ui_app_flags():
+		try:
+			folder = frappe.get_app_path(app, "public", "pos")
+		except Exception:
+			continue
+		stamp = []
+		for root, _dirs, files in os.walk(folder):
+			for name in files:
+				path = os.path.join(root, name)
+				stat = os.stat(path)
+				stamp.append((os.path.relpath(path, folder), stat.st_mtime_ns, stat.st_size, path))
+		if stamp:
+			versions[app] = _content_hash(tuple(sorted(stamp)))
+	return versions
+
+
+@lru_cache(maxsize=32)
+def _content_hash(stamp: tuple) -> str:
+	"""Hash of the files' contents; memoised on (name, mtime, size), so it is read once per change."""
+	digest = hashlib.sha256()
+	for rel, _mtime, _size, path in stamp:
+		digest.update(rel.encode())
+		with open(path, "rb") as f:
+			digest.update(f.read())
+	return digest.hexdigest()[:12]
+
+
 def update_pos_page_context(context):
 	"""update_website_context hook: expose optional-app flags on the /pos page.
 
@@ -46,6 +86,8 @@ def update_pos_page_context(context):
 		return
 	boot = dict(context.get("boot") or {})
 	boot["posnext_app_flags"] = get_pos_ui_app_flags()
+	# ?v= of each optional app's POS scripts (window.posnext_asset_versions)
+	boot["posnext_asset_versions"] = get_pos_asset_versions()
 	# Lets the POS allow plain-http login on a developer_mode site (window.posnext_developer_mode)
 	boot["posnext_developer_mode"] = cint(frappe.conf.get("developer_mode"))
 	# www/ is a gitignored build output, so a pos.py that sets the CSRF token is

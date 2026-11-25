@@ -445,7 +445,9 @@ def get_offers(pos_profile: str) -> list[dict]:
 
 	except Exception as e:
 		frappe.log_error(f"Error fetching offers: {e!s}", "Offers API")
-		return []
+		# Not answered as "no offers": the POS clears its offline offer cache on an empty
+		# list, and keeps it when the request fails (D-R4-01 review I-2).
+		raise
 
 
 @frappe.whitelist()

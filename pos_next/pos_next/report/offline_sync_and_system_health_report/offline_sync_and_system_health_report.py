@@ -5,6 +5,8 @@ import frappe
 from frappe import _
 from frappe.utils import flt, get_datetime, time_diff_in_hours
 
+from pos_next.api.invoices import ONLINE_SUBMIT_KEY_PREFIX
+
 
 def execute(filters=None):
 	columns = get_columns()
@@ -137,7 +139,9 @@ def get_data(filters):
 
 def get_conditions(filters):
 	"""Build WHERE conditions"""
-	conditions = []
+	# Online submit keys (D-19) share the table; they are not offline syncs. The totals
+	# and the chart are built from these rows, so they leave them out too.
+	conditions = [f"ois.offline_id NOT LIKE '{ONLINE_SUBMIT_KEY_PREFIX}%%'"]
 
 	if filters.get("from_date"):
 		conditions.append("ois.synced_at >= %(from_date)s")

@@ -8,7 +8,8 @@
  * must go through syncCartFreeItems / processFreeItems.
  */
 
-function findPaidCartItem(items, itemCode, uom) {
+/** The paid line a free row belongs to: same item and unit, else the item's first paid line. */
+export function findPaidCartItem(items, itemCode, uom) {
 	if (!itemCode) return null;
 	const paid = items.filter((item) => !item.is_free_item && item.item_code === itemCode);
 	if (!paid.length) return null;
@@ -211,6 +212,8 @@ export function nestFreeRows(items) {
 		...gift,
 		_isStandaloneFreeRow: true,
 		_giftOf: parent ? `${parent.item_code}-${parent.uom || ""}` : null,
+		// The card's "For …" caption: the line that earned the gift
+		_giftFor: parent ? parent.item_name || parent.item_code : null,
 	});
 
 	return [

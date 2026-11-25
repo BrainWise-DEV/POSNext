@@ -1,14 +1,28 @@
 import { promoApi } from "@/utils/promoApi";
 import { createResource } from "frappe-ui";
+import { call } from "@/utils/apiWrapper";
 import { computed, ref, toRaw } from "vue";
 import { isOffline, getCachedItem } from "@/utils/offline";
 import { useSerialNumberStore } from "@/stores/serialNumber";
 import { shiftState } from "@/composables/useShift";
 import { CoalescingMutex } from "@/utils/mutex";
 import { logger } from "@/utils/logger";
-import { roundCurrency } from "@/utils/currency";
-import { fnfLockedDiscountAmount } from "@/utils/friendsAndFamily";
-import { preCouponLineDiscount } from "@/utils/couponLines";
+import {
+	invoiceRoundedTotal,
+	roundCurrency,
+	taxAfterHeaderDiscount,
+	unitRateLineDiscount,
+	unitRoundedAmountDiscount,
+} from "@/utils/currency";
+import {
+	fnfLockedDiscountAmount,
+	fnfReplacedDiscount,
+	fnfSubmissionMarkers,
+	stripFnfKeys,
+	stripFriendsAndFamilyForOrder,
+} from "@/utils/friendsAndFamily";
+import { preCouponDiscount, preCouponLineDiscount } from "@/utils/couponLines";
+import { requestedDiscountAmount } from "@/utils/manualDiscount";
 
 const log = logger.create("Invoice");
 
@@ -38,6 +52,10 @@ export function useInvoice() {
 	const additionalDiscount = ref(0);
 	const couponCode = ref(null);
 	const taxRules = ref([]); // Tax rules from POS Profile
+	// The server did not answer the last load: the rules are the offline cache's (or none),
+	// and are loaded again when the POS is back online (D-R4-02)
+	const taxRulesNeedReload = ref(false);
+	let taxRulesGeneration = 0;
 	const taxInclusive = ref(false); // Tax inclusive setting from POS Settings
 
 	// Submission state - prevents duplicate submissions
@@ -194,7 +212,21 @@ export function useInvoice() {
 	// ========================================================================
 	// Use roundCurrency for monetary totals to match ERPNext's currency precision (from System Settings)
 	const subtotal = computed(() => roundCurrency(_cachedSubtotal.value));
-	const totalTax = computed(() => roundCurrency(_cachedTotalTax.value));
+	// The tax the server saves: a Grand Total header discount lowers it (D-R2-07).
+	// grandTotal below is unchanged: it already takes the whole discount off.
+	// The lines' tax before any header discount: what the cart's arithmetic uses (its
+	// displayed grand total, a coupon's net base), as grandTotal does. Not the Tax row.
+	const lineTotalTax = computed(() => roundCurrency(_cachedTotalTax.value));
+	const totalTax = computed(() => {
+		const lineTax = lineTotalTax.value;
+		const net = _cachedSubtotal.value - _cachedTotalDiscount.value;
+		return taxAfterHeaderDiscount({
+			tax: lineTax,
+			total: taxInclusive.value ? net : net + _cachedTotalTax.value,
+			discount: additionalDiscount.value || 0,
+			applyDiscountOn: shiftState.value?.pos_profile?.apply_discount_on || "Grand Total",
+		});
+	});
 	const totalDiscount = computed(() =>
 		roundCurrency(_cachedTotalDiscount.value + (additionalDiscount.value || 0))
 	);
@@ -211,10 +243,14 @@ export function useInvoice() {
 			return roundCurrency(_cachedSubtotal.value + _cachedTotalTax.value - discount);
 		}
 	});
+	// What the invoice is paid at: the rounded total when the POS Profile rounds (D-5),
+	// as ERPNext's set_rounded_total computes it on the server.
+	const roundedTotal = computed(() => invoiceRoundedTotal(grandTotal.value, shiftState.value?.pos_profile));
+	const roundingAdjustment = computed(() => roundCurrency(roundedTotal.value - grandTotal.value));
 	const totalPaid = computed(() => _cachedTotalPaid.value);
 
 	const remainingAmount = computed(() => {
-		return grandTotal.value - totalPaid.value;
+		return roundedTotal.value - totalPaid.value;
 	});
 
 	const canSubmit = computed(() => {
@@ -689,16 +725,33 @@ export function useInvoice() {
 		if (fnfAmount !== null) {
 			discountAmount = fnfAmount;
 		} else if (!amountMode && item.discount_percentage > 0) {
-			discountAmount = roundCurrency((baseAmount * item.discount_percentage) / 100);
+			// The invoice saves the unit rate the cart sends, so every discount is priced
+			// per unit: a % as a unit rate at currency precision, times qty, as apply_offers
+			// prices it. The cart then shows and collects what the invoice saves (G6, G8).
+			discountAmount = unitRateLineDiscount(roundedRate, item.quantity, item.discount_percentage);
+			// Stacked percentages stop at the line's value (100%), never beyond it.
+			if (item.discount_percentage > 100) item.discount_percentage = 100;
 			item.discount_mode = "percentage";
+			item._unit_discount_amount = null;
 		} else if (item.discount_amount > 0) {
-			discountAmount = roundCurrency(item.discount_amount);
+			// A fixed amount is taken as whole cents a unit (G8). What was asked for is
+			// kept, so a qty change splits the asked amount again, not the last rounding.
+			const requested = requestedDiscountAmount(item);
+			discountAmount = unitRoundedAmountDiscount(requested, item.quantity, baseAmount);
+			item._requested_discount_amount = requested;
+			item._unit_discount_amount = discountAmount;
 			// Sync percentage when amount is provided directly
 			item.discount_percentage = baseAmount > 0 ? (discountAmount / baseAmount) * 100 : 0;
 			item.discount_mode = "amount";
 			item._derived_discount_percentage = item.discount_percentage;
 		} else {
 			item.discount_mode = null;
+			item._unit_discount_amount = null;
+		}
+		// Stacked discounts stop at the line's value (100%), never beyond it.
+		if (discountAmount > baseAmount) {
+			discountAmount = baseAmount;
+			item.discount_percentage = Math.min(item.discount_percentage || 0, 100);
 		}
 		item.discount_amount = discountAmount;
 
@@ -768,6 +821,29 @@ export function useInvoice() {
 	 * @param {Array} items - Raw cart items
 	 * @returns {Array} Items formatted for ERPNext Sales Invoice
 	 */
+	/** A legacy same-item BOGO line (`free_qty`) with no dedicated free row gets one. */
+	function needsSynthesizedFreeRow(item, items) {
+		if (item.is_free_item || !(Number.parseFloat(item.free_qty) > 0)) return false;
+		const u = item.uom || item.stock_uom;
+		return !items.some(
+			(i) => i.is_free_item && i.item_code === item.item_code && (i.uom || i.stock_uom) === u
+		);
+	}
+
+	/**
+	 * The cart item behind each row formatItemsForSubmission sends, in order; a
+	 * synthesized free row maps to null. Server answers indexed by payload row (the
+	 * F&F block's `idx`) are mapped back to cart lines with it.
+	 */
+	function payloadRowOwners(items) {
+		const owners = [];
+		for (const item of items) {
+			owners.push(item);
+			if (needsSynthesizedFreeRow(item, items)) owners.push(null);
+		}
+		return owners;
+	}
+
 	function formatItemsForSubmission(items) {
 		const isAppliedCouponLine = (item) =>
 			item.discount_source === "coupon" && item.coupon_code && item.coupon_code === couponCode.value;
@@ -798,6 +874,12 @@ export function useInvoice() {
 				? Math.max(roundCurrency((item.discount_amount || 0) - preCouponLineDiscount(item)), 0)
 				: 0,
 			sales_person: item.sales_person || null,
+			...fnfSubmissionMarkers(item),
+			// An "Add on top" line over the discount F&F displaced: the server-signed snapshot
+			// of that discount, which the server verifies to work out the coupon's share (G5).
+			...(isAppliedCouponLine(item) && item.coupon_stacked
+				? fnfReplacedDiscount(item, preCouponDiscount(item).discount_source)
+				: {}),
 		});
 
 		const out = [];
@@ -805,14 +887,7 @@ export function useInvoice() {
 			out.push(mapRow(item));
 			const fq = Number.parseFloat(item.free_qty) || 0;
 			if (!item.is_free_item && fq > 0) {
-				const u = item.uom || item.stock_uom;
-				const hasDedicatedFree = items.some(
-					(i) =>
-						i.is_free_item &&
-						i.item_code === item.item_code &&
-						(i.uom || i.stock_uom) === u
-				);
-				if (!hasDedicatedFree) {
+				if (needsSynthesizedFreeRow(item, items)) {
 					out.push({
 						item_code: item.item_code,
 						item_name: item.item_name,
@@ -969,13 +1044,18 @@ export function useInvoice() {
 		};
 	}
 
+	/** Sales Orders carry no F&F: price those lines at list rate with no discount. */
+	function itemsForDoctype(doctype, items) {
+		return doctype === "Sales Order" ? stripFriendsAndFamilyForOrder(items).items : items;
+	}
+
 	async function saveDraft(targetDoctype = "Sales Invoice") {
 		/**
 		 * Save invoice as draft (Step 1)
 		 * This creates the invoice with docstatus=0
 		 */
 		// Use toRaw() to ensure we get current, non-reactive values (prevents stale cached quantities)
-		const rawItems = toRaw(invoiceItems.value);
+		const rawItems = itemsForDoctype(targetDoctype, toRaw(invoiceItems.value));
 		const rawPayments = toRaw(payments.value);
 		const { invoicePayments } = buildCustomerCreditPayload(rawPayments);
 
@@ -993,6 +1073,7 @@ export function useInvoice() {
 		};
 
 		if (targetDoctype === "Sales Order") {
+			stripFnfKeys(invoiceData);
 			const today = new Date().toISOString().split("T")[0];
 			invoiceData.delivery_date = today;
 			invoiceData.transaction_date = today;
@@ -1000,6 +1081,235 @@ export function useInvoice() {
 
 		const result = await updateInvoiceResource.submit({ data: invoiceData });
 		return result?.data || result;
+	}
+
+	/**
+	 * The unpaid draft saved when the payment dialog opens (Ruling 101). The sale is
+	 * submitted as that draft, so an abandoned check leaves one unpaid draft at most
+	 * (clearCart's cleanup_old_drafts removes it).
+	 */
+	const paymentDraftName = ref(null);
+
+	/**
+	 * Save the cart as an UNPAID draft when the payment dialog opens (Ruling 101).
+	 *
+	 * Never sends payments, even when a refused submit left them in the cart: with no
+	 * payments the server re-prices Friends & Family to the customer's remaining
+	 * allowance. Returns the saved draft, with the server `grand_total` and its F&F
+	 * block (`friends_and_family`).
+	 */
+	async function saveUnpaidDraft(invoiceData) {
+		const response = await updateInvoiceResource.submit({ data: invoiceData });
+		return response && typeof response === "object" && "data" in response ? response.data : response;
+	}
+
+	/**
+	 * The server answers a draft name it does not know (or not under this profile) with
+	 * one PermissionError, before it writes anything.
+	 */
+	function isMissingDraftError(error) {
+		const parts = [error?.exc_type, error?.resourceError?.exc_type, error?.exception, error?.message];
+		return parts.some((part) => String(part || "").includes("PermissionError"));
+	}
+
+	/**
+	 * The stored draft name is a submitted invoice: the save tried to move it from
+	 * docstatus 1 back to 0 (Frappe's DocstatusTransitionError). The sale is done.
+	 */
+	function isAlreadySubmittedError(error) {
+		const parts = [
+			error?.exc_type,
+			error?.resourceError?.exc_type,
+			error?.exception,
+			error?.message,
+			error?.resourceError?.message,
+		];
+		return parts.some((part) => {
+			const text = String(part || "");
+			return text.includes("DocstatusTransitionError") || text.includes("from 1 (Submitted) to 0");
+		});
+	}
+
+	async function savePaymentDraft() {
+		const rawSalesTeam = toRaw(salesTeam.value);
+		const invoiceData = {
+			doctype: "Sales Invoice",
+			pos_profile: posProfile.value,
+			posa_pos_opening_shift: posOpeningShift.value,
+			customer: resolveCustomerName(),
+			items: formatItemsForSubmission(toRaw(invoiceItems.value)),
+			payments: [],
+			discount_amount: additionalDiscount.value || 0,
+			coupon_code: couponCode.value,
+			is_pos: 1,
+			update_stock: 1,
+		};
+		if (paymentDraftName.value) invoiceData.name = paymentDraftName.value;
+		if (rawSalesTeam && rawSalesTeam.length > 0) {
+			invoiceData.sales_team = rawSalesTeam.map((member) => ({
+				sales_person: member.sales_person,
+				allocated_percentage: member.allocated_percentage || 0,
+			}));
+		}
+
+		let draft;
+		try {
+			draft = await saveUnpaidDraft(invoiceData);
+		} catch (error) {
+			// The stored draft is already a submitted invoice (a lost response, then F5):
+			// never start a new draft for this cart, which would sell it twice (Ruling 136 (c)).
+			if (invoiceData.name && isAlreadySubmittedError(error)) {
+				const submitted = new Error(__("Invoice {0} was already submitted", [invoiceData.name]));
+				submitted.already_submitted = true;
+				submitted.invoice_name = invoiceData.name;
+				submitted.cause = error;
+				throw submitted;
+			}
+			// A draft that could not be saved (or was cleaned up) is not reused.
+			paymentDraftName.value = null;
+			if (!invoiceData.name || !isMissingDraftError(error)) throw error;
+			// The stored draft is gone (cleanup_old_drafts): start a new one.
+			delete invoiceData.name;
+			draft = await saveUnpaidDraft(invoiceData);
+		}
+		if (!draft?.name) {
+			paymentDraftName.value = null;
+			throw new Error(__("Could not check the invoice total"));
+		}
+		paymentDraftName.value = draft.name;
+		return draft;
+	}
+
+	/**
+	 * The open online submit attempt (D-19): its idempotency key, the cart it was made
+	 * for, and whether its outcome is unknown (the request got no server answer). The
+	 * key is kept while the same cart is retried, so a submit whose response was lost
+	 * returns the invoice the server already made instead of a second sale.
+	 */
+	const pendingSubmit = ref(null);
+	// Runs after the key is set and before the request goes out (F6): the POS saves the
+	// open cart with its key first, so a reload mid-submit re-sends the same key.
+	let beforeSubmitRequest = null;
+
+	function setBeforeSubmitRequest(fn) {
+		beforeSubmitRequest = fn;
+	}
+
+	function newSubmitKey() {
+		if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+		return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+	}
+
+	/** What identifies the cart of a submit attempt (the payments may be re-entered). */
+	function submitCartHash(invoiceData) {
+		// Row order is not part of the sale: the same items re-entered in another order
+		// are the same cart.
+		const rows = (invoiceData.items || []).map((row) => JSON.stringify(row)).sort();
+		return JSON.stringify([
+			// An invoice and an order of the same cart are different sales (F6).
+			invoiceData.doctype || "Sales Invoice",
+			invoiceData.customer,
+			rows,
+			invoiceData.discount_amount || 0,
+			invoiceData.coupon_code || null,
+		]);
+	}
+
+	/** The hash the cart on screen would have, submitted as `doctype` (the pending one's). */
+	function currentSubmitCartHash(doctype = pendingSubmit.value?.doctype || "Sales Invoice") {
+		return submitCartHash({
+			doctype,
+			customer: resolveCustomerName(),
+			items: formatItemsForSubmission(itemsForDoctype(doctype, toRaw(invoiceItems.value))),
+			discount_amount: additionalDiscount.value || 0,
+			coupon_code: couponCode.value,
+		});
+	}
+
+	/**
+	 * A submit of this very cart reached no server answer: it may have been made.
+	 * @param {string} [doctype] - the cart's target: the same cart as another doctype is
+	 *   another sale (F6)
+	 */
+	function hasUnresolvedSubmit(doctype = null) {
+		const pending = pendingSubmit.value;
+		if (doctype && (pending?.doctype || "Sales Invoice") !== doctype) return false;
+		// A cleared one is no longer this cart's: an identical re-entry is settled by
+		// the submit first (Ruling 144), never resumed with the old payment.
+		return Boolean(pending?.unresolved && !pending.cleared && pending.hash === currentSubmitCartHash());
+	}
+
+	/** The cart on screen, as `doctype`, is the very cart of the pending submit (Ruling 146). */
+	function pendingMatchesCart(doctype) {
+		const pending = pendingSubmit.value;
+		if (!pending || (pending.doctype || "Sales Invoice") !== doctype) return false;
+		return pending.hash === currentSubmitCartHash(doctype);
+	}
+
+	/**
+	 * The cashier says the cart on screen is the pending submit's sale (Ruling 146 (b)):
+	 * it goes with that key, so the server returns the sale if it was made. The key keeps
+	 * its own doctype, which the request names (idempotency_doctype).
+	 */
+	function adoptPendingSubmitFor(doctype) {
+		const pending = pendingSubmit.value;
+		if (!pending) return;
+		pending.hash = submitCartHash({
+			doctype,
+			customer: resolveCustomerName(),
+			items: formatItemsForSubmission(itemsForDoctype(doctype, toRaw(invoiceItems.value))),
+			discount_amount: additionalDiscount.value || 0,
+			coupon_code: couponCode.value,
+		});
+		pending.cleared = false;
+	}
+
+	/** Where the server reserves a pending submit's key (F6: per doctype). */
+	function pendingKeyId(pending) {
+		return pending.doctype === "Sales Order" ? `pos_online:SO:${pending.key}` : `pos_online:${pending.key}`;
+	}
+
+	/**
+	 * Ask the server about an unanswered submit's key (Rulings 141, 143, 146). Any answer
+	 * drops the key; a made sale's name is returned, so the cashier is told once. After
+	 * that a re-entered cart is a new sale. No answer keeps the key. By default only a
+	 * cleared key is asked about (the reconnect); before a submit, any key is (146 (a)).
+	 * @param {{ anyKey?: boolean }} [options]
+	 * @returns {Promise<{ answered: boolean, made: string|null }>}
+	 */
+	async function resolvePendingSubmit({ anyKey = false } = {}) {
+		const none = { answered: false, made: null };
+		const pending = pendingSubmit.value;
+		if (!pending?.unresolved || (!anyKey && !pending.cleared)) return none;
+		let answer;
+		try {
+			const response = await call("pos_next.api.invoices.check_offline_invoice_synced", {
+				offline_id: pendingKeyId(pending),
+			});
+			answer = response?.message ?? response;
+		} catch {
+			return none; // Still unreachable: keep the key.
+		}
+		if (!answer || typeof answer !== "object" || pendingSubmit.value !== pending) return none;
+		// A submit still running is not "not made" (Ruling 149): keep the key, no answer.
+		if (answer.in_flight || answer.status === "Pending") return none;
+		pendingSubmit.value = null;
+		return { answered: true, made: answer.synced ? answer.sales_invoice || null : null };
+	}
+
+	/** Shift close and logout: the next shift or cashier starts without it. */
+	function dropPendingSubmit() {
+		pendingSubmit.value = null;
+	}
+
+	/** The pending key went with the queued offline sale, whose sync resolves it. */
+	function releaseSubmitKey() {
+		pendingSubmit.value = null;
+	}
+
+	/** The server answered (a refusal it rolled back), as opposed to a lost request. */
+	function serverAnswered(error) {
+		return Boolean(error?.exc_type || error?.resourceError?.exc_type);
 	}
 
 	async function submitInvoice(
@@ -1035,7 +1345,7 @@ export function useInvoice() {
 			try {
 				// Step 1: Create invoice draft
 				// Use toRaw() to ensure we get current, non-reactive values (prevents stale cached quantities)
-				const rawItems = toRaw(invoiceItems.value);
+				const rawItems = itemsForDoctype(targetDoctype, toRaw(invoiceItems.value));
 				const rawPayments = toRaw(payments.value);
 				const rawSalesTeam = toRaw(salesTeam.value);
 				const { invoicePayments, redeemedCustomerCredit, customerCreditDict } =
@@ -1059,6 +1369,7 @@ export function useInvoice() {
 					invoiceData.receivable_account = receivableAccount;
 				}
 
+				if (targetDoctype === "Sales Order") stripFnfKeys(invoiceData);
 				if (targetDoctype === "Sales Order" && deliveryDate) {
 					invoiceData.delivery_date = deliveryDate;
 				}
@@ -1071,17 +1382,39 @@ export function useInvoice() {
 					}));
 				}
 
-				const draftInvoice = await updateInvoiceResource.submit({
-					data: invoiceData,
-				});
-
-				let invoiceDoc = draftInvoice;
-				if (draftInvoice && typeof draftInvoice === "object" && "data" in draftInvoice) {
-					invoiceDoc = draftInvoice.data;
+				// One key per checkout attempt, kept while this cart is retried (D-19), for an
+				// invoice or an order (F6).
+				const hash = submitCartHash(invoiceData);
+				const retrying = pendingSubmit.value?.hash === hash;
+				if (!retrying) {
+					pendingSubmit.value = { key: newSubmitKey(), hash, unresolved: false, doctype: targetDoctype };
 				}
 
-				if (!invoiceDoc || !invoiceDoc.name) {
-					throw new Error("Failed to create draft invoice - no invoice name returned");
+				let invoiceDoc;
+				if (targetDoctype === "Sales Invoice") {
+					// One request (Ruling 101): the payments reach the server only with the
+					// submit, which keeps nothing when it is refused. The payment-open draft
+					// is submitted when there is one; otherwise submit_invoice creates it.
+					invoiceDoc = paymentDraftName.value
+						? { ...invoiceData, name: paymentDraftName.value }
+						: invoiceData;
+				} else if (retrying) {
+					// A retried order goes straight to the keyed submit: the server returns
+					// the order the key made, or makes it (no second order draft).
+					invoiceDoc = invoiceData;
+				} else {
+					const draftInvoice = await updateInvoiceResource.submit({
+						data: invoiceData,
+					});
+
+					invoiceDoc = draftInvoice;
+					if (draftInvoice && typeof draftInvoice === "object" && "data" in draftInvoice) {
+						invoiceDoc = draftInvoice.data;
+					}
+
+					if (!invoiceDoc || !invoiceDoc.name) {
+						throw new Error("Failed to create draft invoice - no invoice name returned");
+					}
 				}
 
 				const submitData = {
@@ -1098,6 +1431,19 @@ export function useInvoice() {
 							: [],
 				};
 
+				pendingSubmit.value.unresolved = true;
+				// Submitted again: the cart is on screen, no longer a cleared one.
+				pendingSubmit.value.cleared = false;
+				submitData.idempotency_key = pendingSubmit.value.key;
+				// A key the cashier carried over from the other doctype keeps its own (146).
+				const keyDoctype = pendingSubmit.value.doctype || "Sales Invoice";
+				if (keyDoctype !== targetDoctype) submitData.idempotency_doctype = keyDoctype;
+				try {
+					await beforeSubmitRequest?.();
+				} catch (error) {
+					console.warn("Could not save the cart before the submit:", error);
+				}
+
 				if (redeemedCustomerCredit > 0 && customerCreditDict.length > 0) {
 					submitData.redeemed_customer_credit = redeemedCustomerCredit;
 					submitData.customer_credit_dict = customerCreditDict;
@@ -1107,10 +1453,23 @@ export function useInvoice() {
 				}
 
 				try {
-					const result = await submitInvoiceResource.submit({
-						invoice: invoiceDoc,
-						data: submitData,
-					});
+					let result;
+					try {
+						result = await submitInvoiceResource.submit({
+							invoice: invoiceDoc,
+							data: submitData,
+						});
+					} catch (error) {
+						// The checked draft is gone (cleanup_old_drafts): refused before any
+						// write, so submit the cart as a new invoice.
+						if (!(paymentDraftName.value && invoiceDoc.name === paymentDraftName.value)) throw error;
+						if (!isMissingDraftError(error)) throw error;
+						paymentDraftName.value = null;
+						result = await submitInvoiceResource.submit({
+							invoice: invoiceData,
+							data: submitData,
+						});
+					}
 
 					// Check if resource has error (frappe-ui pattern)
 					if (submitInvoiceResource.error) {
@@ -1171,6 +1530,7 @@ export function useInvoice() {
 			} catch (error) {
 				// Outer catch to ensure error propagates
 				console.error("Submit invoice outer error:", error);
+				if (pendingSubmit.value && serverAnswered(error)) pendingSubmit.value.unresolved = false;
 				throw error;
 			} finally {
 				isSubmitting.value = false;
@@ -1234,6 +1594,8 @@ export function useInvoice() {
 	function resetInvoice() {
 		invoiceItems.value = [];
 		payments.value = [];
+		paymentDraftName.value = null;
+		pendingSubmit.value = null;
 		additionalDiscount.value = 0;
 		couponCode.value = null;
 
@@ -1266,6 +1628,12 @@ export function useInvoice() {
 
 		invoiceItems.value = [];
 		payments.value = [];
+		paymentDraftName.value = null;
+		// An unanswered online submit may already be a sale: clearing the cart keeps the
+		// offline block until an online submit is answered (N-5).
+		// Kept, marked cleared (Ruling 141): an exact re-entry still carries the key.
+		if (pendingSubmit.value?.unresolved) pendingSubmit.value = { ...pendingSubmit.value, cleared: true };
+		else pendingSubmit.value = null;
 		additionalDiscount.value = 0;
 		couponCode.value = null;
 
@@ -1297,9 +1665,39 @@ export function useInvoice() {
 		/**
 		 * Load tax rules from POS Profile and tax inclusive setting from POS Settings
 		 */
+		// Only the latest load applies: an older one that answers late (a connection that
+		// flapped) must not undo it (review M3)
+		const generation = ++taxRulesGeneration;
+		const stale = () => generation !== taxRulesGeneration;
 		try {
-			const result = await getTaxesResource.submit({ pos_profile: profileName });
-			taxRules.value = result?.data || result || [];
+			const cacheKey = `tax_rules:${profileName}`;
+			// IndexedDB is a browser API: loaded when needed, not at module load
+			const offlineDb = () => import("@/utils/offline/db");
+			try {
+				const result = await getTaxesResource.submit({ pos_profile: profileName });
+				if (stale()) return taxRules.value;
+				taxRules.value = result?.data || result || [];
+				taxRulesNeedReload.value = false;
+				// Kept for an offline start: without them every line is taxed 0 (D-R4-02)
+				if (profileName) {
+					const rules = JSON.parse(JSON.stringify(taxRules.value));
+					await offlineDb()
+						.then(({ setSetting }) => setSetting(cacheKey, rules))
+						.catch(() => {});
+				}
+			} catch (error) {
+				if (stale()) return taxRules.value;
+				taxRulesNeedReload.value = true;
+				const cached = profileName
+					? await offlineDb()
+							.then(({ getSetting }) => getSetting(cacheKey, null))
+							.catch(() => null)
+					: null;
+				if (stale()) return taxRules.value;
+				if (!Array.isArray(cached)) throw error;
+				console.warn("Tax rules from the offline cache:", error?.message || error);
+				taxRules.value = cached;
+			}
 
 			// Load tax inclusive setting from POS Settings if provided
 			if (posSettings && posSettings.tax_inclusive !== undefined) {
@@ -1314,9 +1712,9 @@ export function useInvoice() {
 
 			return taxRules.value;
 		} catch (error) {
+			// Rules already loaded are kept: a failed reload must not untax the cart
 			console.error("Error loading tax rules:", error);
-			taxRules.value = [];
-			return [];
+			return taxRules.value;
 		}
 	}
 
@@ -1344,14 +1742,18 @@ export function useInvoice() {
 		additionalDiscount,
 		couponCode,
 		taxRules,
+		taxRulesNeedReload,
 		taxInclusive,
 		isSubmitting,
 
 		// Computed
 		subtotal,
 		totalTax,
+		lineTotalTax,
 		totalDiscount,
 		grandTotal,
+		roundedTotal,
+		roundingAdjustment,
 		totalPaid,
 		remainingAmount,
 		canSubmit,
@@ -1370,6 +1772,17 @@ export function useInvoice() {
 		updatePayment,
 		validateStock,
 		saveDraft,
+		savePaymentDraft,
+		paymentDraftName,
+		defaultCustomerName,
+		pendingSubmit,
+		setBeforeSubmitRequest,
+		hasUnresolvedSubmit,
+		pendingMatchesCart,
+		adoptPendingSubmitFor,
+		releaseSubmitKey,
+		resolvePendingSubmit,
+		dropPendingSubmit,
 		submitInvoice,
 		resetInvoice,
 		clearCart,
@@ -1379,6 +1792,7 @@ export function useInvoice() {
 		recalculateItem,
 		rebuildIncrementalCache,
 		formatItemsForSubmission,
+		payloadRowOwners,
 		resolveUomPricing,
 
 		// Resources

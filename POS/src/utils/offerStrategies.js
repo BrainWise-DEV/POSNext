@@ -21,13 +21,26 @@
  *   {
  *     order?: number,                        // higher runs first (default 0)
  *     apply(offer, eligibleItems, ctx),      // -> boolean, true if a line changed
+ *     recomputesOffline?: boolean,           // re-run apply on every offline cart change
  *     claimsLine?(item),                     // -> boolean, this strategy owns the line
  *     allowsAutoDiscountStacking?(item),     // -> boolean, Auto Discount may stack on it
  *   }
  *
  * `ctx` carries host callbacks the strategy is not allowed to import:
  *   { recalculateItem, invoiceItems }
+ *
+ * A strategy with `recomputesOffline` (Min/Max: the winning line and its blended %
+ * depend on every line) is called again for an already-applied offer on each
+ * offline pass, with no eligible items once the offer stops qualifying, so it must
+ * be idempotent and take its own discount off the lines first. It returns false
+ * when it no longer discounts anything, and the offer is then no longer applied.
+ *
+ * A price mode with no strategy registered (e.g. Min/Max without posnext_promotions'
+ * strategies loaded) is skipped offline: the cart never puts its flat % on the
+ * whole scope (G7).
  */
+
+import { satellitePosAssetUrl } from "@/utils/offline/satelliteAssets";
 
 const priceStrategies = new Map();
 const productStrategies = new Map();
@@ -123,7 +136,8 @@ export async function loadOfferStrategyPlugins() {
 		const { isPromotionsAppInstalled } = await import("@/utils/promoApi");
 		if (!isPromotionsAppInstalled()) return;
 
-		const url = "/assets/posnext_promotions/pos/offer-strategies.js";
+		// Cached for offline reloads by the service worker (satelliteAssets.js).
+		const url = satellitePosAssetUrl("posnext_promotions", "offer-strategies.js");
 		try {
 			const plugin = await import(/* @vite-ignore */ url);
 			await plugin.register?.({

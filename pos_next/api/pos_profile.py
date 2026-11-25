@@ -358,11 +358,21 @@ def get_wallet_payment_flags(methods):
 def get_sales_persons(pos_profile=None):
 	"""Get all active individual sales persons (not groups) for POS.
 
+	For a user of the POS Profile, when its POS Settings enable sales persons; else
+	none. A cashier needs no read permission on Sales Person (D-R4-07).
+
 	Returns only the picker fields. Item / Item Group / Brand commission overrides
 	are resolved server-side when the invoice is saved
 	(``pos_next.pos_next.utils.sales_person_commission``), so they are not sent.
 	"""
 	ensure_pos_user(pos_profile)
+
+	# Nothing to pick when the profile does not use sales persons
+	setting = frappe.db.get_value(
+		"POS Settings", {"pos_profile": pos_profile, "enabled": 1}, "enable_sales_persons"
+	)
+	if not setting or setting == "Disabled":
+		return []
 
 	filters = {
 		"enabled": 1,
@@ -373,10 +383,16 @@ def get_sales_persons(pos_profile=None):
 	if frappe.db.has_column("Sales Person", "company") and company:
 		filters["company"] = company
 
-	sales_persons = frappe.get_list(
+	# get_all, not get_list (D-R4-07): a cashier of the profile may not read Sales
+	# Person, and get_list would refuse the picker it needs. What stands in for the
+	# doctype permission: the caller is a user of this POS Profile (checked above), the
+	# profile's POS Settings use sales persons, the list is the profile's company's
+	# enabled individuals, and only the picker's fields leave (commission_rate is shown
+	# beside each name). User Permissions on Sales Person are not applied here.
+	sales_persons = frappe.get_all(
 		"Sales Person",
 		filters=filters,
-		fields=["name", "sales_person_name", "commission_rate", "employee"],
+		fields=["name", "sales_person_name", "commission_rate"],
 		order_by="sales_person_name",
 		limit_page_length=0,
 	)

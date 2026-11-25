@@ -10,6 +10,8 @@ import frappe
 from frappe import _
 from frappe.utils import cint
 
+from pos_next.utils import log_error_without_telemetry
+
 
 def validate(doc, method=None):
 	"""
@@ -25,6 +27,32 @@ def validate(doc, method=None):
 	apply_tax_inclusive(doc)
 	auto_assign_loyalty_program_on_invoice(doc)
 	sync_return_loyalty_program(doc)
+	blank_rule_tags_of_desk_copy(doc)
+
+
+def blank_rule_tags_of_desk_copy(doc):
+	"""A Desk copy (Amend, Duplicate) of a POS sale keeps its prices, not its rule tags.
+
+	A submitted POS sale's paid rows carry the rules the server confirmed (Ruling 137)
+	next to ``ignore_pricing_rule=1``. ``frappe.copy_doc`` copies both, and on the
+	copy's next save ERPNext's ``get_pricing_rule_for_item`` takes its
+	ignore-pricing-rule branch for a stored row that lists rules and removes the
+	discount (N-1). So on the copy's first save (insert: that branch needs a stored
+	doc) the paid rows' tags are blanked, as pos_next saves its own drafts.
+
+	Only for a POS invoice inserted outside the pos_next API (Ruling 140): pos_next's
+	own saves (``flags.pos_next_api``) keep their tags, which its checks read. Free
+	rows keep their gift rule. A return is ERPNext's (its mapping clears the tags).
+	"""
+	if doc.doctype != "Sales Invoice" or not (doc.flags.in_insert or doc.is_new()):
+		return
+	if doc.flags.pos_next_api or not cint(doc.get("is_pos")) or not cint(doc.get("ignore_pricing_rule")):
+		return
+	if cint(doc.get("is_return")):
+		return
+	for row in doc.get("items") or []:
+		if row.get("pricing_rules") and not cint(row.get("is_free_item")):
+			row.pricing_rules = ""
 
 
 def apply_tax_inclusive(doc):
@@ -38,6 +66,9 @@ def apply_tax_inclusive(doc):
 		doc: Sales Invoice document
 	"""
 	if not doc.pos_profile:
+		return
+	# A return keeps its original's taxes as they were (Ruling 147)
+	if doc.get("is_return") and doc.get("return_against"):
 		return
 
 	try:
@@ -141,6 +172,17 @@ def sync_return_loyalty_program(doc):
 	doc.loyalty_program = original_program or None
 
 
+USAGE_LOG_TITLE = "One-time offer usage"
+
+
+def check_one_time_offers(doc, method=None):
+	"""before_submit: a one-time offer this customer already used is refused on every
+	origin, Desk included (``invoices.check_one_time_offers_on_submit``)."""
+	from pos_next.api.invoices import check_one_time_offers_on_submit
+
+	check_one_time_offers_on_submit(doc)
+
+
 def record_one_time_offer_usage(doc, method=None):
 	"""Record redemption of one-time-per-customer Pricing Rules on submit.
 
@@ -148,7 +190,7 @@ def record_one_time_offer_usage(doc, method=None):
 	JSON list stamped by update_invoice before item.pricing_rules is cleared —
 	the cleared field can't be read back here). Inserts a
 	``One Time Customer Offer Usage`` row per (customer, rule); the doctype's
-	composite name ({customer}::{pricing_rule}) makes a duplicate insert raise
+	composite name ({customer}:{pricing_rule}) makes a duplicate insert raise
 	DuplicateEntryError, so it stays idempotent and race-safe.
 	"""
 	from pos_next.optional_apps import promotions_installed
@@ -187,6 +229,12 @@ def record_one_time_offer_usage(doc, method=None):
 		except frappe.DuplicateEntryError:
 			# Customer already recorded for this rule — one-time guard intact.
 			pass
+		except frappe.QueryTimeoutError:
+			# Another sale holds the key: never fail this submit over the record (Ruling 113).
+			log_error_without_telemetry(
+				USAGE_LOG_TITLE,
+				f"Invoice {doc.name}: usage of {rule} by {doc.customer} not recorded (lock wait timeout)",
+			)
 
 
 def release_one_time_offer_usage(doc, method=None):

@@ -3,7 +3,10 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - frappe may not be installed during setup
 	frappe = None
 
-__version__ = "2.0.0"
+__version__ = "2.7.0"
+# 3: the line coupon path strips F&F from the whole cart when posnext_promotions says the
+# coupon holds it (replaces_friends_and_family_on_cart, its contract 5; K1).
+FF_CONTRACT = 3
 
 
 def console(*data):

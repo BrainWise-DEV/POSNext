@@ -309,13 +309,16 @@ def _max_coupon_discount_amount(
 
 
 def _has_active_friends_and_family_discount(pos_profile: str | None, customer: str | None) -> float:
-	"""Return active Friends & Family discount percentage if posnext_promotions is installed and eligible."""
+	"""Return active Friends & Family discount percentage if a benefit provider is installed and eligible."""
 	if not pos_profile or not customer:
 		return 0.0
 	try:
-		from posnext_promotions.promotions.friends_and_family import check_customer_eligibility
-
-		res = check_customer_eligibility(customer=customer, pos_profile=pos_profile)
+		if "posnext_promotions" not in frappe.get_installed_apps():
+			return 0.0
+		check_fn = frappe.get_attr(
+			"posnext_promotions.api.friends_and_family.check_friends_and_family_eligibility"
+		)
+		res = check_fn(customer=customer, pos_profile=pos_profile)
 		if isinstance(res, dict) and res.get("eligible"):
 			return max(0.0, min(flt(res.get("discount_percentage")), 100.0))
 	except Exception:

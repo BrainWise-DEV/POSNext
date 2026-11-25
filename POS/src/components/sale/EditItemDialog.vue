@@ -14,6 +14,9 @@
 					<Transition name="dialog-content">
 						<div
 							v-if="show"
+							role="dialog"
+							aria-modal="true"
+							aria-labelledby="edit-item-dialog-title"
 							class="my-8 inline-block w-full max-w-md transform overflow-hidden rounded-xl bg-white text-left align-middle shadow-xl dialog-content z-dialog-content"
 						>
 							<!-- Header - matching frappe-ui Dialog style -->
@@ -23,6 +26,7 @@
 										<div class="mb-6 flex items-center justify-between">
 											<div class="flex items-center space-x-2">
 												<h3
+													id="edit-item-dialog-title"
 													class="text-2xl font-semibold leading-6 text-gray-900"
 												>
 													{{ __("Edit Item Details") }}
@@ -30,6 +34,7 @@
 											</div>
 											<button
 												type="button"
+												:aria-label="__('Close')"
 												@click="cancel"
 												class="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
 											>
@@ -498,6 +503,13 @@
 																}}
 															</span>
 														</div>
+														<!-- A fixed amount is applied as whole cents a unit (G8) -->
+														<p
+															v-if="appliedDiscountHint"
+															class="mt-1 text-xs text-gray-500 text-start"
+														>
+															{{ appliedDiscountHint }}
+														</p>
 													</div>
 												</div>
 												<!-- Compact warning when discount editing disabled due to pricing rules -->
@@ -611,10 +623,17 @@ import {
 	formatCurrency as formatCurrencyUtil,
 	getCurrencySymbol,
 	roundCurrency,
+	unitRateLineDiscount,
+	unitRoundedAmountDiscount,
 } from "@/utils/currency";
 import { call } from "@/utils/apiWrapper";
 import { loadSalesPersonsForProfile } from "@/utils/salesPersonsList";
 import { isFnfLine, lineBreakdown } from "@/utils/friendsAndFamily";
+import {
+	appliedAmountHint,
+	manualDiscountError,
+	requestedDiscountAmount,
+} from "@/utils/manualDiscount";
 import {
 	scaleRateForUomChange,
 	shouldPreserveRateOnUomChange,
@@ -788,6 +807,19 @@ const canEditRate = computed(() => {
 });
 
 // Item discount editing is allowed only if no promotional offer covers this item
+// A fixed amount that does not split into whole cents a unit: what the line takes (m-1).
+const appliedDiscountHint = computed(() => {
+	if (discountType.value !== "amount" || !canEditDiscount.value) return "";
+	const hint = appliedAmountHint({
+		amount: discountValue.value,
+		qty: localQuantity.value,
+		subtotal: calculatedSubtotal.value,
+	});
+	return hint
+		? __("Applied {0} ({1} per unit)", [formatCurrency(hint.applied), formatCurrency(hint.perUnit)])
+		: "";
+});
+
 const canEditDiscount = computed(() => {
 	return settingsStore.allowItemDiscount && !hasPricingRules.value && !isFnfItem.value;
 });
@@ -901,6 +933,10 @@ watch(
 				// Exact server amount — an F&F capped line has an unrounded %.
 				discountType.value = "amount";
 				discountValue.value = newItem.discount_amount;
+			} else if (newItem.discount_mode === "amount" && Number(newItem.discount_amount) > 0) {
+				// The amount the cashier asked for, not the line's whole-cents rounding of it (G8).
+				discountType.value = "amount";
+				discountValue.value = requestedDiscountAmount(newItem);
 			} else if (newItem.discount_percentage && newItem.discount_percentage > 0) {
 				discountType.value = "percentage";
 				discountValue.value = newItem.discount_percentage;
@@ -1177,15 +1213,22 @@ function calculateDiscount() {
 		if (discountValue.value > 100) {
 			discountValue.value = 100;
 		}
-		calculatedDiscount.value = roundCurrency(
-			(calculatedSubtotal.value * discountValue.value) / 100
+		// Priced as the cart prices it, per unit (G8).
+		calculatedDiscount.value = unitRateLineDiscount(
+			localRate.value,
+			localQuantity.value,
+			discountValue.value
 		);
 	} else {
 		// Ensure amount doesn't exceed subtotal
 		if (discountValue.value > calculatedSubtotal.value) {
 			discountValue.value = roundCurrency(calculatedSubtotal.value);
 		}
-		calculatedDiscount.value = roundCurrency(discountValue.value);
+		calculatedDiscount.value = unitRoundedAmountDiscount(
+			discountValue.value,
+			localQuantity.value,
+			calculatedSubtotal.value
+		);
 	}
 	calculatedTotal.value = roundCurrency(calculatedSubtotal.value - calculatedDiscount.value);
 }
@@ -1284,6 +1327,19 @@ function updateItem() {
 			showError(
 				__("Cannot add item discount while a promotional offer applies to this item")
 			);
+			return;
+		}
+	} else {
+		const discountError = manualDiscountError({
+			listPrice: originalPriceListRate.value,
+			rate: localRate.value,
+			qty: localQuantity.value,
+			discountPercentage,
+			discountAmount,
+			maxDiscount: settingsStore.maxDiscountAllowed,
+		});
+		if (discountError) {
+			showError(discountError);
 			return;
 		}
 	}

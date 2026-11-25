@@ -212,13 +212,13 @@ def get_customer_wallet_balance(customer, company=None, exclude_invoice=None, po
 	- Negative GL balance = customer has credit (we owe them) = positive wallet balance
 	- Positive GL balance = customer owes us = no wallet balance
 
-	When masar_miraaya is active, returns Magento LP balance (balance_iqd).
+	When a loyalty provider app supplies the balance, returns that balance instead.
 
 	Args:
 		customer: Customer ID
 		company: Company (optional)
 		exclude_invoice: Invoice name to exclude from pending calculations
-		pos_profile: POS Profile (optional, used for Magento loyalty mode)
+		pos_profile: POS Profile (optional, used by loyalty provider apps)
 
 	Returns:
 		float: Available wallet balance

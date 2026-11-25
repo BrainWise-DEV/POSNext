@@ -36,7 +36,7 @@ async function fetchFromServer(posProfile) {
 
 /**
  * @param {string} posProfile - POS Profile name
- * @returns {Promise<Array>} sales persons (name, sales_person_name, commission_rate, employee)
+ * @returns {Promise<Array>} sales persons (name, sales_person_name, commission_rate)
  */
 export function loadSalesPersonsForProfile(posProfile) {
 	if (!posProfile) return Promise.resolve([]);

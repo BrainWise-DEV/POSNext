@@ -102,6 +102,25 @@ class TestNoPromotionsImport(unittest.TestCase):
 		self.assertNotIn("masar_miraaya", dialog)
 		self.assertNotIn("magento_integration", dialog)
 
+	def test_no_vendor_or_country_strings(self):
+		files = [
+			POS_NEXT_PKG / "api" / "email_verification.py",
+			POS_NEXT_PKG / "api" / "constants.py",
+			POS_NEXT_PKG / "integrations" / "registry.py",
+			*sorted((POS_NEXT_PKG / "integrations").glob("otp*.py")),
+			POS_NEXT_PKG / "pos_next" / "doctype" / "pos_settings" / "pos_settings.json",
+			POS_NEXT_APP / "POS" / "src" / "components" / "sale" / "CreateCustomerDialog.vue",
+			POS_NEXT_APP / "POS" / "src" / "components" / "sale" / "EmailVerificationPanel.vue",
+			POS_NEXT_APP / "POS" / "src" / "stores" / "posSettings.js",
+		]
+		forbidden = ("miraaya", "iraq", "/rest/v1", "magento setting")
+		violations = []
+		for path in files:
+			self.assertTrue(path.exists(), f"{path} is missing")
+			text = path.read_text(encoding="utf-8").lower()
+			violations += [f"{path.name}: {word}" for word in forbidden if word in text]
+		self.assertEqual(violations, [], "vendor/country strings are forbidden:\n" + "\n".join(violations))
+
 
 if __name__ == "__main__":
 	unittest.main()
