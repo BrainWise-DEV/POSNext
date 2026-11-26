@@ -157,7 +157,9 @@ def get_wallet_amount_from_payments(payments):
 
 	wallet_modes = _get_wallet_payment_modes()
 	for payment in payments:
-		mode_of_payment = payment.get("mode_of_payment") if isinstance(payment, dict) else payment.mode_of_payment
+		mode_of_payment = (
+			payment.get("mode_of_payment") if isinstance(payment, dict) else payment.mode_of_payment
+		)
 		if not mode_of_payment:
 			continue
 
@@ -508,9 +510,7 @@ def get_wallet_info(customer, company, pos_profile=None):
 	if wallet:
 		result["wallet_exists"] = True
 		result["wallet_name"] = wallet.name
-		result["wallet_balance"] = get_customer_wallet_balance(
-			customer, company, pos_profile=pos_profile
-		)
+		result["wallet_balance"] = get_customer_wallet_balance(customer, company, pos_profile=pos_profile)
 	elif result["auto_create"]:
 		# Auto-create wallet for customer if enabled
 		try:

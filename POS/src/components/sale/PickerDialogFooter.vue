@@ -17,7 +17,8 @@
 			<kbd
 				class="hidden sm:inline-flex items-center rounded border border-white/40 px-1 text-[11px] font-normal leading-4 text-white/80"
 				aria-hidden="true"
-			>↵</kbd>
+				>↵</kbd
+			>
 		</button>
 	</div>
 </template>

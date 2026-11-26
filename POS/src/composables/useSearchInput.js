@@ -82,7 +82,10 @@ export function useSearchInput({ itemStore, onItemFound, showWarning, isAnyDialo
 			if (!count) return;
 			event.preventDefault();
 			const step = event.key === "ArrowDown" ? 1 : -1;
-			highlightedIndex.value = Math.min(count - 1, Math.max(0, highlightedIndex.value + step));
+			highlightedIndex.value = Math.min(
+				count - 1,
+				Math.max(0, highlightedIndex.value + step)
+			);
 			return;
 		}
 		if (event.key === "Escape") {
@@ -95,7 +98,9 @@ export function useSearchInput({ itemStore, onItemFound, showWarning, isAnyDialo
 
 			// Snapshot the barcode and the visible results NOW, before anything overwrites them
 			const barcode = searchInputRef.value?.value?.trim() || itemStore.searchTerm?.trim();
-			const visibleItems = itemStore.searchTerm?.trim() ? [...(itemStore.filteredItems || [])] : [];
+			const visibleItems = itemStore.searchTerm?.trim()
+				? [...(itemStore.filteredItems || [])]
+				: [];
 			const highlighted = visibleItems[highlightedIndex.value];
 			if (barcode) {
 				// Clear input immediately so next scan starts clean
@@ -203,14 +208,17 @@ export function useSearchInput({ itemStore, onItemFound, showWarning, isAnyDialo
 					if (searchInputRef.value) searchInputRef.value.value = barcode;
 				}
 				showWarning(
-					__("No barcode matches «{0}». Pick from the results or scan the barcode again.", [
-						barcode,
-					])
+					__(
+						"No barcode matches «{0}». Pick from the results or scan the barcode again.",
+						[barcode]
+					)
 				);
 				focusSearchInput();
 				return;
 			}
-			showWarning(__("No item matches «{0}». Search by name or scan the barcode again.", [barcode]));
+			showWarning(
+				__("No item matches «{0}». Search by name or scan the barcode again.", [barcode])
+			);
 			focusSearchInput();
 		});
 	}

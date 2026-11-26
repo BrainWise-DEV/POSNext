@@ -517,9 +517,13 @@
 															</label>
 															<SelectInput
 																v-model="form.promotion_type"
-																:disabled="!isCreating || isPricingRule"
+																:disabled="
+																	!isCreating || isPricingRule
+																"
 																:options="promotionTypeOptions"
-																:placeholder="__('Select promotion type')"
+																:placeholder="
+																	__('Select promotion type')
+																"
 															/>
 															<p
 																v-if="isGiftPoolPromotionType"
@@ -1218,7 +1222,12 @@
 								<Button @click="cancelDelete" variant="ghost">
 									{{ __("Cancel") }}
 								</Button>
-								<Button @click="confirmDelete" variant="solid" theme="red" class="pos-btn pos-btn-danger">
+								<Button
+									@click="confirmDelete"
+									variant="solid"
+									theme="red"
+									class="pos-btn pos-btn-danger"
+								>
 									<template #prefix>
 										<FeatherIcon name="trash-2" class="w-4 h-4" />
 									</template>
@@ -1300,7 +1309,7 @@ const promotionTypeOptions = promotionsInstalled
 	? [
 			{ label: __("Standard"), value: "" },
 			{ label: __("Gift Pool"), value: PROMOTION_TYPE_GIFT_POOL },
-		]
+	  ]
 	: [];
 
 // Form state

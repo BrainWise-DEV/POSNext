@@ -195,8 +195,10 @@ class TestSend(EmailOTPTestBase):
 			(400, {"message": "No customer was found with this phone"}),
 			(200, {"success": False, "message": "No customer was found"}),
 		):
-			with self.subTest(status=status), self.post(status, body), patch(
-				"pos_next.integrations.registry.get_customer_sync_error", return_value=None
+			with (
+				self.subTest(status=status),
+				self.post(status, body),
+				patch("pos_next.integrations.registry.get_customer_sync_error", return_value=None),
 			):
 				res = ev.send_email_otp("CUST-1")
 			self.assertEqual((res["ok"], res["code"]), (False, "sync_pending"))
@@ -240,9 +242,10 @@ class TestSend(EmailOTPTestBase):
 		# the OTP lookup by phone then finds nobody. Show the real reason.
 		self.row.custom_customer_id = None
 		api_text = "Email is already registered to another account"
-		with patch(
-			"pos_next.integrations.registry.get_customer_sync_error", return_value=api_text
-		), self.post(400, {"message": "No customer was found with this phone"}):
+		with (
+			patch("pos_next.integrations.registry.get_customer_sync_error", return_value=api_text),
+			self.post(400, {"message": "No customer was found with this phone"}),
+		):
 			res = ev.send_email_otp("CUST-1")
 		self.assertEqual((res["ok"], res["code"], res["message"]), (False, "email_taken", api_text))
 
@@ -466,18 +469,14 @@ class TestDocEvents(unittest.TestCase):
 		return doc
 
 	def test_reset_on_email_change(self):
-		doc = self._doc(
-			custom_email_verified=1, custom_verified_email="a@x.com", email_id="b@x.com"
-		)
+		doc = self._doc(custom_email_verified=1, custom_verified_email="a@x.com", email_id="b@x.com")
 		ev.reset_email_verification_on_email_change(doc)
 		doc.db_set.assert_called_once()
 		self.assertEqual(doc.db_set.call_args.args[0]["custom_email_verified"], 0)
 		self.assertEqual(doc._store["custom_email_verified"], 0)
 
 	def test_no_reset_when_same_email_case_insensitive(self):
-		doc = self._doc(
-			custom_email_verified=1, custom_verified_email="a@x.com", email_id="A@X.com"
-		)
+		doc = self._doc(custom_email_verified=1, custom_verified_email="a@x.com", email_id="A@X.com")
 		ev.reset_email_verification_on_email_change(doc)
 		doc.db_set.assert_not_called()
 

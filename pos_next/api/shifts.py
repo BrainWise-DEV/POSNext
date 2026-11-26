@@ -6,7 +6,8 @@ import json
 
 import frappe
 from frappe import _
-from frappe.utils import nowdate, nowtime, get_datetime, flt, cint
+from frappe.utils import cint, flt, get_datetime, nowdate, nowtime
+
 from pos_next.api.utilities import get_wallet_payment_modes
 
 
@@ -216,7 +217,7 @@ def get_shift_history(filters=None, limit=25, offset=0, pos_profile=None):
 		filters = json.loads(filters)
 
 	# Clamp page size: minimum 1, maximum 100
-	page_size   = max(1, min(cint(limit) or 25, 100))
+	page_size = max(1, min(cint(limit) or 25, 100))
 	page_offset = max(0, cint(offset) or 0)
 
 	# Mandatory WHERE conditions — user is always enforced server-side
@@ -226,8 +227,8 @@ def get_shift_history(filters=None, limit=25, offset=0, pos_profile=None):
 	]
 	values = {
 		"session_user": frappe.session.user,
-		"limit":        page_size,
-		"offset":       page_offset,
+		"limit": page_size,
+		"offset": page_offset,
 	}
 
 	if filters:
@@ -286,8 +287,8 @@ def get_shift_history(filters=None, limit=25, offset=0, pos_profile=None):
 	for row in data:
 		row.opening_amount = flt(row.opening_amount)
 		row.closing_amount = flt(row.closing_amount)
-		row.sales_total    = flt(row.sales_total)
-		row.difference     = flt(row.difference)
+		row.sales_total = flt(row.sales_total)
+		row.difference = flt(row.difference)
 
 	# ── Totals query (no LIMIT) ───────────────────────────────────────────────
 	# Runs across the full filter set so summary cards are always accurate
@@ -315,8 +316,8 @@ def get_shift_history(filters=None, limit=25, offset=0, pos_profile=None):
 	return {
 		"rows": data,
 		"totals": {
-			"total_shifts":    int(totals.get("total_shifts",    len(data))),
-			"total_sales":     flt(totals.get("total_sales",     0)),
+			"total_shifts": int(totals.get("total_shifts", len(data))),
+			"total_sales": flt(totals.get("total_sales", 0)),
 			"total_cash_diff": flt(totals.get("total_cash_diff", 0)),
 		},
 	}

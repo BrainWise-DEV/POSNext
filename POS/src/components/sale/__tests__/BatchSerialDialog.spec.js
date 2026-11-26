@@ -17,7 +17,11 @@ vi.mock("frappe-ui", () => ({
 	createResource: () => ({ reload: vi.fn() }),
 }));
 vi.mock("@/stores/serialNumber", () => ({
-	useSerialNumberStore: () => ({ loading: false, consumeSerials: vi.fn(), setWarehouse: vi.fn() }),
+	useSerialNumberStore: () => ({
+		loading: false,
+		consumeSerials: vi.fn(),
+		setWarehouse: vi.fn(),
+	}),
 }));
 vi.mock("@/stores/posCart", () => ({ usePOSCartStore: () => ({ invoiceItems: [] }) }));
 vi.mock("@/utils/offline/items", () => ({
@@ -28,7 +32,10 @@ vi.mock("@/utils/offline/items", () => ({
 vi.mock("@/utils/offline", () => ({ isOffline: () => false }));
 
 const mountDialog = (props) =>
-	mount(BatchSerialDialog, { props: { modelValue: false, ...props }, global: { mocks: { __: globalThis.__ } } });
+	mount(BatchSerialDialog, {
+		props: { modelValue: false, ...props },
+		global: { mocks: { __: globalThis.__ } },
+	});
 
 describe("BatchSerialDialog batch picker", () => {
 	beforeEach(() => {
@@ -48,7 +55,12 @@ describe("BatchSerialDialog batch picker", () => {
 		];
 		await nextTick();
 		expect(state.selectedBatch.batch_no).toBe("SOON");
-		expect(state.availableBatches.map((b) => b.batch_no)).toEqual(["SOON", "LATE", "NODATE", "OLD"]);
+		expect(state.availableBatches.map((b) => b.batch_no)).toEqual([
+			"SOON",
+			"LATE",
+			"NODATE",
+			"OLD",
+		]);
 	});
 
 	it("passes the chosen batch's expiry with the batch number", async () => {
@@ -57,7 +69,10 @@ describe("BatchSerialDialog batch picker", () => {
 		state.warehouseBatches = [{ batch_no: "SOON", qty: 3, expiry_date: "2026-11-05" }];
 		await nextTick();
 		state.handleConfirm();
-		expect(wrapper.emitted("batch-serial-selected")[0][0]).toEqual({ batch_no: "SOON", batch_expiry_date: "2026-11-05" });
+		expect(wrapper.emitted("batch-serial-selected")[0][0]).toEqual({
+			batch_no: "SOON",
+			batch_expiry_date: "2026-11-05",
+		});
 	});
 
 	it("labels expiry with an unambiguous date, a relative day count and a tone", () => {
@@ -75,16 +90,25 @@ describe("BatchSerialDialog serial picker", () => {
 	const serials = [{ serial_no: "SN-0001" }, { serial_no: "SN-0002" }];
 
 	it("selects an exact scanned serial on Enter and confirms once the quantity is met", () => {
-		const wrapper = mountDialog({ item: { item_code: "PHONE", has_serial_no: 1 }, quantity: 1 });
+		const wrapper = mountDialog({
+			item: { item_code: "PHONE", has_serial_no: 1 },
+			quantity: 1,
+		});
 		const state = wrapper.vm.$.setupState;
 		state.availableSerials = serials;
 		state.serialSearchQuery = "sn-0002";
 		state.handleSerialEnter();
-		expect(wrapper.emitted("batch-serial-selected")[0][0]).toEqual({ serial_no: "SN-0002", quantity: 1 });
+		expect(wrapper.emitted("batch-serial-selected")[0][0]).toEqual({
+			serial_no: "SN-0002",
+			quantity: 1,
+		});
 	});
 
 	it("waits for the required quantity and clears the search for the next scan", () => {
-		const wrapper = mountDialog({ item: { item_code: "PHONE", has_serial_no: 1 }, quantity: 2 });
+		const wrapper = mountDialog({
+			item: { item_code: "PHONE", has_serial_no: 1 },
+			quantity: 2,
+		});
 		const state = wrapper.vm.$.setupState;
 		state.availableSerials = serials;
 		state.serialSearchQuery = "SN-0001";
@@ -97,7 +121,10 @@ describe("BatchSerialDialog serial picker", () => {
 	});
 
 	it("hides Select All for a single-unit sale", async () => {
-		const wrapper = mountDialog({ item: { item_code: "PHONE", has_serial_no: 1 }, quantity: 1 });
+		const wrapper = mountDialog({
+			item: { item_code: "PHONE", has_serial_no: 1 },
+			quantity: 1,
+		});
 		wrapper.vm.$.setupState.availableSerials = serials;
 		await nextTick();
 		expect(wrapper.text()).not.toContain("Select All");

@@ -149,7 +149,8 @@ export function isFnfAllowedForProfile(profile) {
 export function pickLocalizedMessage(payload, locale = "en") {
 	if (!payload || typeof payload !== "object") return "";
 	const lang = String(locale || "en").toLowerCase();
-	if (lang.startsWith("ar")) return payload.message_ar || payload.message || payload.message_en || "";
+	if (lang.startsWith("ar"))
+		return payload.message_ar || payload.message || payload.message_en || "";
 	if (lang.startsWith("en")) return payload.message_en || payload.message || "";
 	return payload.message || payload.message_en || "";
 }
@@ -162,12 +163,15 @@ export function normalizeCustomerMessage(customerMessage) {
 		message_ar: customerMessage.ar || customerMessage.message_ar || "",
 		message_en: customerMessage.en || customerMessage.message_en || "",
 	};
-	return normalized.message || normalized.message_ar || normalized.message_en ? normalized : null;
+	return normalized.message || normalized.message_ar || normalized.message_en
+		? normalized
+		: null;
 }
 
 /** Normalize check_friends_and_family_eligibility() for the store. */
 export function normalizeEligibility(response, customer = null) {
-	const payload = response?.message && typeof response.message === "object" ? response.message : response;
+	const payload =
+		response?.message && typeof response.message === "object" ? response.message : response;
 	if (!payload || typeof payload !== "object") return null;
 	const eligible = Boolean(payload.eligible);
 	return {
@@ -308,7 +312,12 @@ function normalizePricingRules(value) {
  * Mutates `item`; the caller recalculates totals.
  * @returns {{discounted: boolean, stamped: boolean, stripped: boolean}}
  */
-export function mergeServerLine(item, serverLine = {}, fnfLine = null, { fnfSuppressed = false } = {}) {
+export function mergeServerLine(
+	item,
+	serverLine = {},
+	fnfLine = null,
+	{ fnfSuppressed = false } = {}
+) {
 	const result = { discounted: false, stamped: false, stripped: false };
 	if (!item) return result;
 	const serverItem = serverLine || {};
@@ -369,7 +378,8 @@ export function mergeServerLine(item, serverLine = {}, fnfLine = null, { fnfSupp
 	} else if (serverItem.is_already_discounted !== undefined) {
 		item.is_already_discounted = serverItem.is_already_discounted ? 1 : 0;
 	}
-	item.is_accumulative_discount = serverItem.discount_source === "accumulative_promotion" ? 1 : 0;
+	item.is_accumulative_discount =
+		serverItem.discount_source === "accumulative_promotion" ? 1 : 0;
 	return result;
 }
 
@@ -391,10 +401,15 @@ export function lineDiscountSource(item) {
 	if (item.is_free_item) return LINE_SOURCE.FREE;
 	const source = item.discount_source || "";
 	if (source === FNF_DISCOUNT_SOURCE) return LINE_SOURCE.FRIENDS_AND_FAMILY;
-	if (FREE_DISCOUNT_SOURCES.has(source) || num(item.free_qty) > 0 || num(item.gwp_free_qty) > 0) {
+	if (
+		FREE_DISCOUNT_SOURCES.has(source) ||
+		num(item.free_qty) > 0 ||
+		num(item.gwp_free_qty) > 0
+	) {
 		return LINE_SOURCE.FREE;
 	}
-	if (num(item.discount_amount) <= 0 && num(item.discount_percentage) <= 0) return LINE_SOURCE.NONE;
+	if (num(item.discount_amount) <= 0 && num(item.discount_percentage) <= 0)
+		return LINE_SOURCE.NONE;
 	if (source === "coupon" || item.posnext_coupon_code) return LINE_SOURCE.COUPON;
 	if (PROMOTION_DISCOUNT_SOURCES.has(source) || hasPricingRules(item.pricing_rules)) {
 		return LINE_SOURCE.PROMOTION;
@@ -486,12 +501,18 @@ export function fnfLineNote(item, { locale = "en" } = {}) {
 		case FNF_REASON.CAP_REACHED:
 			return { tone: "warning", text: t("Friends & Family limit reached") };
 		case FNF_REASON.ORDER_DISCOUNT_BETTER:
-			return { tone: "info", text: t("Invoice promotion applied instead of Friends & Family") };
+			return {
+				tone: "info",
+				text: t("Invoice promotion applied instead of Friends & Family"),
+			};
 		case FNF_REASON.SCHEME_NOT_ELIGIBLE:
 			return { tone: "info", text: t("Promotion item — not eligible for Friends & Family") };
 		case FNF_REASON.OTHER_BETTER: {
 			const text = pickLocalizedMessage(item.fnf_decision, locale);
-			return { tone: "info", text: text || t("A better discount applies instead of Friends & Family") };
+			return {
+				tone: "info",
+				text: text || t("A better discount applies instead of Friends & Family"),
+			};
 		}
 		default:
 			return null;
@@ -538,9 +559,10 @@ export function buildFnfCartMessages({
 			tone: "info",
 			text:
 				pickLocalizedMessage(couponOverride, locale) ||
-				t("Coupon {0} applied instead of Friends & Family — discounts are never combined.", [
-					couponOverride.code || "",
-				]),
+				t(
+					"Coupon {0} applied instead of Friends & Family — discounts are never combined.",
+					[couponOverride.code || ""]
+				),
 		});
 		return messages;
 	}
@@ -575,7 +597,9 @@ export function buildFnfCartMessages({
 		messages.push({
 			key: "cap",
 			tone: "warning",
-			text: pickLocalizedMessage(caps, locale) || t("Friends & Family discount limited by the program cap"),
+			text:
+				pickLocalizedMessage(caps, locale) ||
+				t("Friends & Family discount limited by the program cap"),
 		});
 	}
 
@@ -583,7 +607,9 @@ export function buildFnfCartMessages({
 		messages.push({
 			key: "coverage",
 			tone: "warning",
-			text: t("No Friends & Family discount — every item in the cart is excluded or out of scope."),
+			text: t(
+				"No Friends & Family discount — every item in the cart is excluded or out of scope."
+			),
 		});
 	}
 
@@ -606,7 +632,9 @@ export function buildFnfCartMessages({
 							formatAmount(caps.monthly_remaining),
 							formatAmount(after),
 					  ])
-					: t("Monthly Friends & Family balance: {0} left", [formatAmount(caps.monthly_remaining)]),
+					: t("Monthly Friends & Family balance: {0} left", [
+							formatAmount(caps.monthly_remaining),
+					  ]),
 		});
 	}
 

@@ -39,9 +39,8 @@ def _get_item_price_transaction_date(transaction_date=None):
 def _item_price_validity_conditions(ItemPrice, transaction_date=None):
 	"""Match ERPNext get_item_price: only prices valid on transaction_date."""
 	date = _get_item_price_transaction_date(transaction_date)
-	return (
-		(IfNull(ItemPrice.valid_from, "2000-01-01") <= date)
-		& (IfNull(ItemPrice.valid_upto, "2500-12-31") >= date)
+	return (IfNull(ItemPrice.valid_from, "2000-01-01") <= date) & (
+		IfNull(ItemPrice.valid_upto, "2500-12-31") >= date
 	)
 
 

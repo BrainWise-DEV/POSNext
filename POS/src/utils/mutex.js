@@ -192,3 +192,66 @@ export class QueuedMutex {
 		});
 	}
 }
+
+/** Returned by {@link SkipIfBusyMutex#run} when another run is in flight. */
+export const SKIPPED = Symbol("SkipIfBusyMutex.skipped");
+
+/**
+ * Gate that lets one operation run at a time and drops callers that arrive meanwhile.
+ *
+ * Unlike CoalescingMutex (which re-runs the caller's function after the active one
+ * finishes, right for syncs), a busy caller is NOT queued and NOT re-run: it gets
+ * {@link SKIPPED} immediately. Right for "submit this sale": a second click while
+ * the first is processing must not start another submit once the first finishes
+ * (the cart is already cleared by then).
+ *
+ * The gate is released when the timeout fires, so the cashier can retry; the work
+ * itself is not cancelled (callers rely on a server-side idempotency key for that).
+ */
+export class SkipIfBusyMutex {
+	/**
+	 * @param {Object} options
+	 * @param {number} options.timeout - Milliseconds before the gate is released (default 60000)
+	 * @param {string} options.name - Name used in the timeout error
+	 */
+	constructor(options = {}) {
+		this._active = null;
+		this._timeout = options.timeout ?? 60000;
+		this._name = options.name || "SkipIfBusyMutex";
+	}
+
+	get isLocked() {
+		return this._active !== null;
+	}
+
+	/**
+	 * @param {Function} fn - Async function to run
+	 * @param {Function} logFn - Optional logger, called when a caller is skipped
+	 * @returns {Promise<*>} fn's result, or SKIPPED if another run is in flight
+	 */
+	async run(fn, logFn = null) {
+		if (this._active) {
+			logFn?.(`${this._name}: busy, skipping duplicate request`);
+			return SKIPPED;
+		}
+
+		const active = new Promise((resolve, reject) => {
+			const timeoutId = setTimeout(() => {
+				reject(new Error(`${this._name}: Operation timed out after ${this._timeout}ms`));
+			}, this._timeout);
+
+			fn()
+				.then(resolve, reject)
+				.finally(() => clearTimeout(timeoutId));
+		});
+		this._active = active;
+
+		try {
+			return await active;
+		} finally {
+			if (this._active === active) {
+				this._active = null;
+			}
+		}
+	}
+}

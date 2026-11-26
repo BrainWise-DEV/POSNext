@@ -109,7 +109,7 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 
 	/** Combined pending invoices + expenses for header badge */
 	const totalPendingCount = computed(
-		() => pendingInvoicesCount.value + pendingExpensesCount.value,
+		() => pendingInvoicesCount.value + pendingExpensesCount.value
 	);
 
 	const hasPendingExpenses = computed(() => pendingExpensesCount.value > 0);
@@ -407,17 +407,19 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 						{
 							pos_profile: currentProfile.name,
 							pos_opening_shift: posOpeningShift,
-						},
+						}
 					);
 					if (expenseDialogData) {
 						const ok = await cacheExpenseDialogData(
 							currentProfile.name,
 							posOpeningShift,
-							JSON.parse(JSON.stringify(expenseDialogData)),
+							JSON.parse(JSON.stringify(expenseDialogData))
 						);
 						if (ok) {
 							log.success(
-								`Cached expense dialog data (${expenseDialogData.expense_accounts?.length || 0} accounts)`,
+								`Cached expense dialog data (${
+									expenseDialogData.expense_accounts?.length || 0
+								} accounts)`
 							);
 						} else {
 							log.warn("Expense dialog cache write failed");

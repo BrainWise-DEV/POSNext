@@ -36,12 +36,16 @@ describe("offerProgress", () => {
 
 describe("offer labels", () => {
 	it("leads with what the customer gets", () => {
-		expect(offerBenefit({ offer: "Item Price", discount_percentage: 20 }, money)).toBe("20% off");
-		expect(offerBenefit({ offer: "Item Price", discount_amount: 5 }, money)).toBe("E£5 off");
-		expect(offerBenefit({ offer: "Give Product", same_item: 1, free_qty: 1 }, money)).toBe("1 free");
-		expect(offerBenefit({ offer: "Give Product", free_item: "Charger", free_qty: 1 }, money)).toBe(
-			"Gift: Charger"
+		expect(offerBenefit({ offer: "Item Price", discount_percentage: 20 }, money)).toBe(
+			"20% off"
 		);
+		expect(offerBenefit({ offer: "Item Price", discount_amount: 5 }, money)).toBe("E£5 off");
+		expect(offerBenefit({ offer: "Give Product", same_item: 1, free_qty: 1 }, money)).toBe(
+			"1 free"
+		);
+		expect(
+			offerBenefit({ offer: "Give Product", free_item: "Charger", free_qty: 1 }, money)
+		).toBe("Gift: Charger");
 	});
 
 	it("maps raw ERPNext offer types to labels", () => {
@@ -53,9 +57,9 @@ describe("offer labels", () => {
 
 describe("offer gift names", () => {
 	it("names the gift instead of showing its item code", () => {
-		const name = (code) => ({ "EG-1221": "Samsung charger" })[code] || code;
-		expect(offerBenefit({ offer: "Give Product", free_item: "EG-1221", free_qty: 1 }, money, name)).toBe(
-			"Gift: Samsung charger"
-		);
+		const name = (code) => ({ "EG-1221": "Samsung charger" }[code] || code);
+		expect(
+			offerBenefit({ offer: "Give Product", free_item: "EG-1221", free_qty: 1 }, money, name)
+		).toBe("Gift: Samsung charger");
 	});
 });

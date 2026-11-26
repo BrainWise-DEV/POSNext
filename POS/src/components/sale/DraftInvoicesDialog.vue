@@ -45,8 +45,12 @@
 						<div class="flex items-start justify-between gap-2 mb-2">
 							<!-- Customer · time · total -->
 							<div class="flex-1 min-w-0">
-								<h4 class="text-sm font-semibold text-gray-900 flex flex-wrap gap-x-1.5">
-									<span dir="auto" class="truncate">{{ draftCustomer(draft) }}</span>
+								<h4
+									class="text-sm font-semibold text-gray-900 flex flex-wrap gap-x-1.5"
+								>
+									<span dir="auto" class="truncate">{{
+										draftCustomer(draft)
+									}}</span>
 									<span class="text-gray-400">·</span>
 									<span dir="ltr">{{ formatDateTime(draft.created_at) }}</span>
 									<span class="text-gray-400">·</span>
@@ -137,7 +141,10 @@
 	</Dialog>
 
 	<!-- Delete Single Draft Confirmation -->
-	<Dialog v-model="showDeleteDialog" :options="{ title: __('Delete held invoice?'), size: 'xs' }">
+	<Dialog
+		v-model="showDeleteDialog"
+		:options="{ title: __('Delete held invoice?'), size: 'xs' }"
+	>
 		<template #body-content>
 			<div class="py-3">
 				<p class="text-sm text-gray-600">
@@ -253,7 +260,9 @@ function isOpen(draft) {
 }
 
 function draftCustomer(draft) {
-	return draft.customer?.customer_name || draft.customer?.name || draft.customer || __("Walk-in");
+	return (
+		draft.customer?.customer_name || draft.customer?.name || draft.customer || __("Walk-in")
+	);
 }
 
 function handlePrintDraft(draft) {

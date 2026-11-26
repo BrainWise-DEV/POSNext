@@ -8,7 +8,9 @@ const press = (target, key) =>
 	target.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
 
 function mountWith(setupFn) {
-	return mount(defineComponent({ setup: setupFn, template: "<div />" }), { attachTo: document.body });
+	return mount(defineComponent({ setup: setupFn, template: "<div />" }), {
+		attachTo: document.body,
+	});
 }
 
 describe("useGlobalShortcuts", () => {
@@ -28,7 +30,9 @@ describe("useGlobalShortcuts", () => {
 	it("keeps non F-keys guarded in inputs and honours the block guard", () => {
 		const onKey = vi.fn();
 		const blocked = ref(false);
-		const wrapper = mountWith(() => useGlobalShortcuts(() => blocked.value, { "/": onKey, F4: onKey }));
+		const wrapper = mountWith(() =>
+			useGlobalShortcuts(() => blocked.value, { "/": onKey, F4: onKey })
+		);
 		const input = document.createElement("input");
 		document.body.appendChild(input);
 		input.focus();
@@ -53,7 +57,11 @@ describe("usePickerEnter", () => {
 		expect(onEnter).not.toHaveBeenCalled();
 		open.value = true;
 		await Promise.resolve();
-		const event = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+		const event = new KeyboardEvent("keydown", {
+			key: "Enter",
+			bubbles: true,
+			cancelable: true,
+		});
 		button.dispatchEvent(event);
 		expect(onEnter).toHaveBeenCalledTimes(1);
 		expect(event.defaultPrevented).toBe(true);

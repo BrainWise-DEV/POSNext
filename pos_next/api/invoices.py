@@ -1,7 +1,6 @@
 # Copyright (c) 2025, BrainWise and contributors
 # For license information, please see license.txt
 
-from __future__ import unicode_literals
 
 import json
 from functools import lru_cache
@@ -11,6 +10,8 @@ from erpnext.accounts.doctype.sales_invoice.sales_invoice import get_bank_cash_a
 from erpnext.stock.doctype.batch.batch import get_batch_no, get_batch_qty
 from frappe import _
 from frappe.utils import cint, cstr, flt, get_datetime, nowdate, nowtime
+
+from pos_next.perf import StepTimer
 
 # ==========================================
 # Constants for field names (avoid typos and enable refactoring)
@@ -973,6 +974,7 @@ def _check_return_quantities(original_invoice_name, original_items, returned_qty
 @frappe.whitelist()
 def update_invoice(data):
 	"""Create or update invoice draft (Step 1)."""
+	timer = StepTimer("update_invoice")
 	try:
 		data = json.loads(data) if isinstance(data, str) else data
 		data = _strip_server_managed_fields(data)
@@ -992,6 +994,8 @@ def update_invoice(data):
 			invoice_doc.update(data)
 		else:
 			invoice_doc = frappe.get_doc(data)
+
+		timer.mark("build_doc")
 
 		# Important: set before set_missing_values()/pricing/validation paths that may
 		# read linked docs (e.g., Customer) and trigger controller permission checks.
@@ -1065,6 +1069,8 @@ def update_invoice(data):
 			if company and invoice_doc.get("payments"):
 				_validate_customer_for_receivable_payments(invoice_doc)
 				_validate_payment_account_not_debit_to(invoice_doc)
+
+		timer.mark("prepare_customer_payments")
 
 		# Disable automatic pricing rules (we handle discounts manually from POS)
 		invoice_doc.ignore_pricing_rule = 1
@@ -1171,6 +1177,8 @@ def update_invoice(data):
 					)
 				item.pricing_rules = ""
 
+		timer.mark("items_loop")
+
 		if doctype == "Sales Invoice":
 			one_time_applied = (
 				frappe.get_all(
@@ -1234,9 +1242,14 @@ def update_invoice(data):
 		#   - tax_category         → sent from frontend or not needed
 		# ========================================================================
 		invoice_doc.set_missing_values(for_validate=True)
+		# The save() below validates the same, unchanged items: let that validate skip
+		# its repeat of this pass (see CustomSalesInvoice.set_missing_values).
+		invoice_doc.flags.pos_missing_values_done = True
+		timer.mark("set_missing_values")
 
 		# Calculate totals and apply discounts (with rounding disabled)
 		invoice_doc.calculate_taxes_and_totals()
+		timer.mark("calculate_taxes_and_totals")
 		if invoice_doc.grand_total is None:
 			invoice_doc.grand_total = 0.0
 		if invoice_doc.base_grand_total is None:
@@ -1292,6 +1305,8 @@ def update_invoice(data):
 					if errors:
 						frappe.throw(frappe.as_json({"errors": errors}), frappe.ValidationError)
 
+		timer.mark("coupon_and_stock_check")
+
 		# Resolve item-level + invoice-level sales persons into sales_team.
 		# Use only the cashier payload team — never the (possibly rebuilt) doc.sales_team.
 		if doctype == "Sales Invoice":
@@ -1300,6 +1315,7 @@ def update_invoice(data):
 				sales_team_data=data.get("sales_team") if isinstance(data.get("sales_team"), list) else [],
 				pos_profile=pos_profile,
 			)
+		timer.mark("sales_team")
 
 		# Save as draft
 		if doctype == "Sales Invoice":
@@ -1310,14 +1326,33 @@ def update_invoice(data):
 		frappe.flags.ignore_account_permission = True
 		invoice_doc.docstatus = 0
 		invoice_doc.save()
+		timer.mark("save")
 
-		return invoice_doc.as_dict()
+		result = invoice_doc.as_dict()
+		timer.finish(invoice=invoice_doc.name, items=len(invoice_doc.items), pos_profile=pos_profile)
+		return result
 	except Exception:
+		timer.finish(status="error")
 		frappe.log_error(frappe.get_traceback(), "Update Invoice Error")
 		raise
 
 
 PENDING_TIMEOUT_MINUTES = 5  # Pending records older than this are considered stale
+CLIENT_REQUEST_ID_MAX_LENGTH = 140
+
+
+def _clean_client_request_id(value) -> str | None:
+	"""Return a usable idempotency key from the client, or None.
+
+	Only plain, bounded strings are accepted; anything else is ignored so a
+	malformed key can never fail or alter a sale.
+	"""
+	if not isinstance(value, str):
+		return None
+	value = value.strip()
+	if not value or len(value) > CLIENT_REQUEST_ID_MAX_LENGTH:
+		return None
+	return value
 
 
 def _is_pending_expired(modified_time):
@@ -1338,7 +1373,7 @@ def _reuse_sync_record(sync_record_name):
 	return {"already_synced": False, "sync_record_name": sync_record_name}
 
 
-def _ensure_offline_uniqueness(offline_id, pos_profile=None, customer=None):
+def _ensure_offline_uniqueness(offline_id, pos_profile=None, customer=None, lock_existing=True):
 	"""
 	Ensure offline invoice uniqueness with race condition protection.
 
@@ -1355,6 +1390,11 @@ def _ensure_offline_uniqueness(offline_id, pos_profile=None, customer=None):
 	    offline_id: The unique offline ID from the client
 	    pos_profile: POS Profile name
 	    customer: Customer name
+	    lock_existing: Read the existing record with FOR UPDATE. Online checkout
+	        passes False: a FOR UPDATE on a key that does not exist yet takes an
+	        InnoDB gap lock, and two cashiers doing that at once deadlock on the
+	        insert. The unique index on offline_id already serializes a retry
+	        behind the request that is still running.
 
 	Returns:
 	    dict with:
@@ -1368,7 +1408,7 @@ def _ensure_offline_uniqueness(offline_id, pos_profile=None, customer=None):
 		{"offline_id": offline_id},
 		["name", "sales_invoice", "status", "modified"],
 		as_dict=True,
-		for_update=True,
+		for_update=lock_existing,
 	)
 
 	if existing_sync:
@@ -1438,7 +1478,7 @@ def _ensure_offline_uniqueness(offline_id, pos_profile=None, customer=None):
 	except frappe.DuplicateEntryError:
 		# Race condition: another request just created the record
 		# Retry the check to get the new record
-		return _ensure_offline_uniqueness(offline_id, pos_profile, customer)
+		return _ensure_offline_uniqueness(offline_id, pos_profile, customer, lock_existing)
 
 
 def _complete_offline_sync(sync_record_name, invoice_name):
@@ -1506,7 +1546,9 @@ def check_offline_invoice_synced(offline_id):
 	    offline_id: The unique offline ID to check
 
 	Returns:
-	    dict with 'synced' (bool) and 'sales_invoice' (str or None)
+	    dict with 'synced' (bool) and 'sales_invoice' (str or None). When the
+	    invoice is submitted and readable by the caller, also 'invoice': its
+	    totals, in the same shape submit_invoice returns.
 	"""
 	from pos_next.pos_next.doctype.offline_invoice_sync.offline_invoice_sync import (
 		OfflineInvoiceSync,
@@ -1520,10 +1562,36 @@ def check_offline_invoice_synced(offline_id):
 
 	# Additionally verify the sales invoice still exists and is submitted
 	if result.get("synced") and result.get("sales_invoice"):
-		if frappe.db.exists("Sales Invoice", result["sales_invoice"]):
-			docstatus = frappe.db.get_value("Sales Invoice", result["sales_invoice"], "docstatus")
-			if docstatus == 1:  # Submitted
-				return result
+		invoice_row = frappe.db.get_value(
+			"Sales Invoice",
+			result["sales_invoice"],
+			[
+				"docstatus",
+				"grand_total",
+				"total",
+				"net_total",
+				"outstanding_amount",
+				"paid_amount",
+				"change_amount",
+			],
+			as_dict=True,
+		)
+		if invoice_row and invoice_row.docstatus == 1:  # Submitted
+			# Totals let the client finish a checkout whose response it never
+			# received (submit timed out client-side) without a second request.
+			if frappe.has_permission("Sales Invoice", "read", doc=result["sales_invoice"]):
+				result["invoice"] = {
+					"name": result["sales_invoice"],
+					"status": invoice_row.docstatus,
+					"grand_total": invoice_row.grand_total,
+					"total": invoice_row.total,
+					"net_total": invoice_row.net_total,
+					"outstanding_amount": invoice_row.outstanding_amount,
+					"paid_amount": invoice_row.paid_amount,
+					"change_amount": invoice_row.change_amount,
+					"client_request_id": offline_id,
+				}
+			return result
 
 		# Invoice was deleted or not submitted, clear the sync record
 		return {"synced": False, "sales_invoice": None}
@@ -1534,6 +1602,7 @@ def check_offline_invoice_synced(offline_id):
 @frappe.whitelist()
 def submit_invoice(invoice=None, data=None):
 	"""Submit the invoice (Step 2)."""
+	timer = StepTimer("submit_invoice")
 	# Handle different calling conventions
 	if invoice is None:
 		if data:
@@ -1590,19 +1659,37 @@ def submit_invoice(invoice=None, data=None):
 	# update to "synced" after successful submission.
 	# ========================================================================
 	offline_id = invoice.get("offline_id") or data.get("offline_id")
+	# Online checkout sends its own idempotency key so a retry after a client
+	# timeout (the first request may still be running or already committed)
+	# returns the invoice that was created instead of creating a second one.
+	# Kept separate from offline_id: offline_id also relaxes the Sales Person
+	# checks (flags.pos_offline_sync), which an online sale must never get.
+	client_request_id = _clean_client_request_id(
+		data.get("client_request_id") or invoice.get("client_request_id")
+	)
+	dedupe_key = offline_id or client_request_id
 	sync_record_name = None
 
-	if offline_id:
+	if dedupe_key:
 		dedup_result = _ensure_offline_uniqueness(
-			offline_id=offline_id, pos_profile=pos_profile, customer=invoice.get("customer")
+			offline_id=dedupe_key,
+			pos_profile=pos_profile,
+			customer=invoice.get("customer"),
+			lock_existing=bool(offline_id),
 		)
 
 		if dedup_result and dedup_result.get("already_synced"):
 			# Invoice was already synced - return the existing invoice details
-			return dedup_result.get("invoice_data", {})
+			existing_invoice_data = dedup_result.get("invoice_data", {})
+			if not offline_id:
+				existing_invoice_data.pop("offline_id", None)
+				existing_invoice_data["client_request_id"] = client_request_id
+			return existing_invoice_data
 
 		# Store the sync record name for later update
 		sync_record_name = dedup_result.get("sync_record_name") if dedup_result else None
+
+	timer.mark("parse_and_dedupe")
 
 	# Track whether invoice was successfully submitted
 	invoice_submitted = False
@@ -1625,6 +1712,8 @@ def submit_invoice(invoice=None, data=None):
 			invoice_doc.update(invoice)
 			if not invoice_doc.get("customer") and existing_customer:
 				invoice_doc.customer = existing_customer
+
+		timer.mark("load_doc")
 
 		# Keep permission bypass consistent for POS API flow.
 		invoice_doc.flags.ignore_permissions = True
@@ -1679,20 +1768,7 @@ def submit_invoice(invoice=None, data=None):
 				pos_profile=pos_profile,
 			)
 
-		# Handle POS Coupon if coupon_code is provided
-		coupon_code = invoice.get("coupon_code") or data.get("coupon_code")
-		if coupon_code:
-			# Increment usage counter for POS Coupon
-			if frappe.db.table_exists("POS Coupon"):
-				try:
-					from pos_next.pos_next.doctype.pos_coupon.pos_coupon import increment_coupon_usage
-
-					increment_coupon_usage(coupon_code)
-				except Exception as e:
-					frappe.log_error(
-						title="Failed to increment coupon usage",
-						message=f"Coupon: {coupon_code}, Error: {e!s}",
-					)
+		timer.mark("prepare_and_sales_team")
 
 		# Auto-set batch numbers for returns
 		_auto_set_return_batches(invoice_doc)
@@ -1732,6 +1808,7 @@ def submit_invoice(invoice=None, data=None):
 		# _validate_stock_on_invoice checks _should_block internally
 		# (global Stock Settings, POS Settings, and POS Profile flags)
 		_validate_stock_on_invoice(invoice_doc)
+		timer.mark("validate_stock")
 
 		# Allow pure customer-credit POS sales to submit without a payment row.
 		customer_credit_dict = data.get("customer_credit_dict") or invoice.get("customer_credit_dict")
@@ -1757,13 +1834,16 @@ def submit_invoice(invoice=None, data=None):
 				frappe.throw(_("Customer is required for credit sales"), title=_("Customer Required"))
 			invoice_doc.flags.pos_next_credit_sale = 1
 
-		# Save before submit
+		# No separate save() here: submit() below runs the same validate and writes
+		# the same fields in one pass. A draft save first re-ran ERPNext's whole
+		# validate (item details, taxes/totals, hooks) a second time for no
+		# difference in the stored result, ~15% of the submit time on large carts.
 		invoice_doc.flags.ignore_permissions = True
 		frappe.flags.ignore_account_permission = True
 		if doctype == "Sales Invoice":
 			_ensure_invoice_customer(invoice_doc, pos_profile)
 			_apply_pos_item_accounting_dimensions(invoice_doc)
-		invoice_doc.save()
+		timer.mark("prepare_submit")
 
 		from pos_next.authorization.gate import TOKEN_FLAG
 
@@ -1772,6 +1852,22 @@ def submit_invoice(invoice=None, data=None):
 		# Submit invoice
 		invoice_doc.submit()
 		invoice_submitted = True
+		timer.mark("submit")
+
+		# Count the coupon use only once the sale is final: counting it earlier used
+		# the coupon up even when the sale then failed, and held the coupon row locked
+		# for the whole save/submit.
+		coupon_code = invoice.get("coupon_code") or data.get("coupon_code")
+		if coupon_code and frappe.db.table_exists("POS Coupon"):
+			try:
+				from pos_next.pos_next.doctype.pos_coupon.pos_coupon import increment_coupon_usage
+
+				increment_coupon_usage(coupon_code)
+			except Exception as e:
+				frappe.log_error(
+					title="Failed to increment coupon usage",
+					message=f"Coupon: {coupon_code}, Error: {e!s}",
+				)
 		# Handle wallet transaction reversal for returns
 		wallet_reversal_ok = False
 		if invoice_doc.get("is_return") and invoice_doc.get("return_against"):
@@ -1879,10 +1975,15 @@ def submit_invoice(invoice=None, data=None):
 		# Include offline_id in response for client-side tracking
 		if offline_id:
 			result["offline_id"] = offline_id
+		elif client_request_id:
+			result["client_request_id"] = client_request_id
 
+		timer.mark("post_submit")
+		timer.finish(invoice=invoice_doc.name, items=len(invoice_doc.items), pos_profile=pos_profile)
 		return result
 
 	except Exception:
+		timer.finish(status="error")
 		frappe.log_error(frappe.get_traceback(), "Submit Invoice Error")
 		raise
 
@@ -1925,7 +2026,17 @@ def get_invoice(invoice_name):
 
 
 @frappe.whitelist()
-def get_invoices(pos_profile: str, search=None, limit: int = 20, offset=0, from_date=None, to_date=None, include_items=False, docstatus=None, start: int = 0) -> list:
+def get_invoices(
+	pos_profile: str,
+	search=None,
+	limit: int = 20,
+	offset=0,
+	from_date=None,
+	to_date=None,
+	include_items=False,
+	docstatus=None,
+	start: int = 0,
+) -> list:
 	"""
 	Get paginated, server-side filtered list of invoices for a POS Profile.
 
@@ -1965,7 +2076,7 @@ def get_invoices(pos_profile: str, search=None, limit: int = 20, offset=0, from_
 	params = {"pos_profile": pos_profile, "limit": limit, "offset": offset}
 
 	if docstatus is not None:
-		if isinstance(docstatus, (list, tuple)):
+		if isinstance(docstatus, list | tuple):
 			docstatus_list = [cint(d) for d in docstatus]
 			conditions.append(f"docstatus IN ({','.join(map(str, docstatus_list))})")
 		else:
@@ -3626,7 +3737,9 @@ def apply_offers(invoice_data, selected_offers=None):
 			"items": [dict(item) for item in prepared_items],
 			# Free rows carry the item image so gifts not already in the cart show it
 			"free_items": [
-				dict(item, image=item.get("image") or frappe.get_cached_value("Item", item.item_code, "image"))
+				dict(
+					item, image=item.get("image") or frappe.get_cached_value("Item", item.item_code, "image")
+				)
 				for item in free_items_map.values()
 			],
 			"applied_pricing_rules": sorted(applied_rules),

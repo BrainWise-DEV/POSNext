@@ -219,7 +219,9 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 			if (!isOffline()) {
 				// Empty cache: a delta since the last sync would return nothing, so fetch everything
 				const lastSync =
-					forceReload || !cachedCustomers?.length ? null : localStorage.getItem(CUSTOMERS_SYNC_KEY);
+					forceReload || !cachedCustomers?.length
+						? null
+						: localStorage.getItem(CUSTOMERS_SYNC_KEY);
 
 				const response = await call("pos_next.api.customers.get_customers", {
 					pos_profile: posProfile,

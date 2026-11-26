@@ -4,20 +4,28 @@ import { computed, ref, toRaw } from "vue";
 import { isOffline, getCachedItem } from "@/utils/offline";
 import { useSerialNumberStore } from "@/stores/serialNumber";
 import { shiftState } from "@/composables/useShift";
-import { CoalescingMutex } from "@/utils/mutex";
+import { SKIPPED, SkipIfBusyMutex } from "@/utils/mutex";
+import { call } from "@/utils/apiWrapper";
 import { logger } from "@/utils/logger";
 import { roundCurrency } from "@/utils/currency";
 import { fnfLockedDiscountAmount } from "@/utils/friendsAndFamily";
 import { preCouponLineDiscount } from "@/utils/couponLines";
+import { createSubmitRequestTracker, isSubmitTimeoutError } from "@/utils/submitRequestId";
+import { recoverTimedOutSubmit } from "@/utils/submitTimeoutRecovery";
 
 const log = logger.create("Invoice");
 
-// Shared mutex for invoice submission across all useInvoice instances
-// This prevents duplicate invoice creation from rapid clicks or concurrent submissions
-const submitMutex = new CoalescingMutex({
+// Shared gate for invoice submission across all useInvoice instances.
+// A submit that arrives while another is in flight is dropped (returns null), never
+// queued: queuing would re-run it after the first finishes, against an already
+// cleared cart.
+const submitGate = new SkipIfBusyMutex({
 	timeout: 60000,
 	name: "InvoiceSubmit",
 });
+
+// One idempotency key per unchanged checkout payload, shared by all instances.
+const submitRequests = createSubmitRequestTracker();
 
 export function useInvoice() {
 	// Serial Number Store for returning serials when items are removed
@@ -227,8 +235,7 @@ export function useInvoice() {
 	function addItem(item, quantity = 1) {
 		const itemUom = item.uom || item.stock_uom;
 		const existingItem = invoiceItems.value.find(
-			(i) =>
-				!i.is_free_item && i.item_code === item.item_code && i.uom === itemUom
+			(i) => !i.is_free_item && i.item_code === item.item_code && i.uom === itemUom
 		);
 
 		if (existingItem) {
@@ -770,7 +777,9 @@ export function useInvoice() {
 	 */
 	function formatItemsForSubmission(items) {
 		const isAppliedCouponLine = (item) =>
-			item.discount_source === "coupon" && item.coupon_code && item.coupon_code === couponCode.value;
+			item.discount_source === "coupon" &&
+			item.coupon_code &&
+			item.coupon_code === couponCode.value;
 		const mapRow = (item) => ({
 			item_code: item.item_code,
 			item_name: item.item_name,
@@ -795,7 +804,10 @@ export function useInvoice() {
 			// Lines discounted by a line-level coupon; posnext_promotions re-checks them on validate.
 			posnext_coupon_code: isAppliedCouponLine(item) ? item.coupon_code : null,
 			posnext_coupon_discount: isAppliedCouponLine(item)
-				? Math.max(roundCurrency((item.discount_amount || 0) - preCouponLineDiscount(item)), 0)
+				? Math.max(
+						roundCurrency((item.discount_amount || 0) - preCouponLineDiscount(item)),
+						0
+				  )
 				: 0,
 			sales_person: item.sales_person || null,
 		});
@@ -1023,159 +1035,212 @@ export function useInvoice() {
 		 * @param {string|null} deliveryDate - Delivery date for Sales Orders
 		 * @param {number} writeOffAmount - Amount to write off (small remaining balances)
 		 */
-		return await submitMutex.withLock(async () => {
-			// Check if already submitting (belt and suspenders with mutex)
-			if (isSubmitting.value) {
-				log.warn("Invoice submission already in progress, skipping duplicate request");
-				return null;
-			}
-
-			isSubmitting.value = true;
-
-			try {
-				// Step 1: Create invoice draft
-				// Use toRaw() to ensure we get current, non-reactive values (prevents stale cached quantities)
-				const rawItems = toRaw(invoiceItems.value);
-				const rawPayments = toRaw(payments.value);
-				const rawSalesTeam = toRaw(salesTeam.value);
-				const { invoicePayments, redeemedCustomerCredit, customerCreditDict } =
-					buildCustomerCreditPayload(rawPayments);
-
-				const invoiceData = {
-					doctype: targetDoctype,
-					pos_profile: posProfile.value,
-					posa_pos_opening_shift: posOpeningShift.value,
-					customer: resolveCustomerName(),
-					items: formatItemsForSubmission(rawItems),
-					payments: invoicePayments,
-					discount_amount: additionalDiscount.value || 0,
-					coupon_code: couponCode.value,
-					is_pos: 1,
-					update_stock: 1, // Critical: Ensures stock is updated
-				};
-
-				// "Pay on Receivable Account": route the invoice's debit_to to a chosen AR
-				if (receivableAccount) {
-					invoiceData.receivable_account = receivableAccount;
+		// Set once the cashier has been told this attempt timed out: the request may still
+		// finish later, and must then leave the (possibly new) cart and guard alone.
+		const attempt = { abandoned: false };
+		return await submitGate
+			.run(async () => {
+				// Check if already submitting (belt and suspenders with mutex)
+				if (isSubmitting.value) {
+					log.warn("Invoice submission already in progress, skipping duplicate request");
+					return null;
 				}
 
-				if (targetDoctype === "Sales Order" && deliveryDate) {
-					invoiceData.delivery_date = deliveryDate;
-				}
-
-				// Add sales_team if provided
-				if (rawSalesTeam && rawSalesTeam.length > 0) {
-					invoiceData.sales_team = rawSalesTeam.map((member) => ({
-						sales_person: member.sales_person,
-						allocated_percentage: member.allocated_percentage || 0,
-					}));
-				}
-
-				const draftInvoice = await updateInvoiceResource.submit({
-					data: invoiceData,
-				});
-
-				let invoiceDoc = draftInvoice;
-				if (draftInvoice && typeof draftInvoice === "object" && "data" in draftInvoice) {
-					invoiceDoc = draftInvoice.data;
-				}
-
-				if (!invoiceDoc || !invoiceDoc.name) {
-					throw new Error("Failed to create draft invoice - no invoice name returned");
-				}
-
-				const submitData = {
-					change_amount: remainingAmount.value < 0 ? Math.abs(remainingAmount.value) : 0,
-					write_off_amount: writeOffAmount || 0,
-					// Pass cashier invoice-level team explicitly — never rely on the
-					// draft's rebuilt sales_team (item-level SPs aggregated in).
-					sales_team:
-						rawSalesTeam && rawSalesTeam.length > 0
-							? rawSalesTeam.map((member) => ({
-									sales_person: member.sales_person,
-									allocated_percentage: member.allocated_percentage || 0,
-								}))
-							: [],
-				};
-
-				if (redeemedCustomerCredit > 0 && customerCreditDict.length > 0) {
-					submitData.redeemed_customer_credit = redeemedCustomerCredit;
-					submitData.customer_credit_dict = customerCreditDict;
-				}
-				if (isCreditSale && invoicePayments.length === 0) {
-					submitData.is_credit_sale = 1;
-				}
+				isSubmitting.value = true;
 
 				try {
-					const result = await submitInvoiceResource.submit({
-						invoice: invoiceDoc,
-						data: submitData,
+					// Step 1: Create invoice draft
+					// Use toRaw() to ensure we get current, non-reactive values (prevents stale cached quantities)
+					const rawItems = toRaw(invoiceItems.value);
+					const rawPayments = toRaw(payments.value);
+					const rawSalesTeam = toRaw(salesTeam.value);
+					const { invoicePayments, redeemedCustomerCredit, customerCreditDict } =
+						buildCustomerCreditPayload(rawPayments);
+
+					const invoiceData = {
+						doctype: targetDoctype,
+						pos_profile: posProfile.value,
+						posa_pos_opening_shift: posOpeningShift.value,
+						customer: resolveCustomerName(),
+						items: formatItemsForSubmission(rawItems),
+						payments: invoicePayments,
+						discount_amount: additionalDiscount.value || 0,
+						coupon_code: couponCode.value,
+						is_pos: 1,
+						update_stock: 1, // Critical: Ensures stock is updated
+					};
+
+					// "Pay on Receivable Account": route the invoice's debit_to to a chosen AR
+					if (receivableAccount) {
+						invoiceData.receivable_account = receivableAccount;
+					}
+
+					if (targetDoctype === "Sales Order" && deliveryDate) {
+						invoiceData.delivery_date = deliveryDate;
+					}
+
+					// Add sales_team if provided
+					if (rawSalesTeam && rawSalesTeam.length > 0) {
+						invoiceData.sales_team = rawSalesTeam.map((member) => ({
+							sales_person: member.sales_person,
+							allocated_percentage: member.allocated_percentage || 0,
+						}));
+					}
+
+					const draftInvoice = await updateInvoiceResource.submit({
+						data: invoiceData,
 					});
 
-					// Check if resource has error (frappe-ui pattern)
-					if (submitInvoiceResource.error) {
-						const resourceError = submitInvoiceResource.error;
-						console.error("Submit invoice resource error:", resourceError);
-
-						// Create a detailed error object
-						const detailedError = new Error(
-							resourceError.message || "Invoice submission failed"
-						);
-						detailedError.exc_type = resourceError.exc_type;
-						detailedError._server_messages = resourceError._server_messages;
-						detailedError.httpStatus = resourceError.httpStatus;
-						detailedError.messages = resourceError.messages;
-
-						throw detailedError;
+					let invoiceDoc = draftInvoice;
+					if (
+						draftInvoice &&
+						typeof draftInvoice === "object" &&
+						"data" in draftInvoice
+					) {
+						invoiceDoc = draftInvoice.data;
 					}
 
-					resetInvoice();
-					return result;
-				} catch (error) {
-					// Preserve original error object with all its properties
-					console.error("Submit invoice error:", error);
-					console.log("submitInvoiceResource.error:", submitInvoiceResource.error);
+					if (!invoiceDoc || !invoiceDoc.name) {
+						throw new Error(
+							"Failed to create draft invoice - no invoice name returned"
+						);
+					}
 
-					// If resource has error data, extract and attach it
-					if (submitInvoiceResource.error) {
-						const resourceError = submitInvoiceResource.error;
-						console.log("Resource error details:", {
-							exc_type: resourceError.exc_type,
-							_server_messages: resourceError._server_messages,
-							httpStatus: resourceError.httpStatus,
-							messages: resourceError.messages,
-							messagesContent: JSON.stringify(resourceError.messages),
-							data: resourceError.data,
-							exception: resourceError.exception,
-							keys: Object.keys(resourceError),
+					const submitData = {
+						change_amount:
+							remainingAmount.value < 0 ? Math.abs(remainingAmount.value) : 0,
+						write_off_amount: writeOffAmount || 0,
+						// Pass cashier invoice-level team explicitly — never rely on the
+						// draft's rebuilt sales_team (item-level SPs aggregated in).
+						sales_team:
+							rawSalesTeam && rawSalesTeam.length > 0
+								? rawSalesTeam.map((member) => ({
+										sales_person: member.sales_person,
+										allocated_percentage: member.allocated_percentage || 0,
+								  }))
+								: [],
+					};
+
+					if (redeemedCustomerCredit > 0 && customerCreditDict.length > 0) {
+						submitData.redeemed_customer_credit = redeemedCustomerCredit;
+						submitData.customer_credit_dict = customerCreditDict;
+					}
+					if (isCreditSale && invoicePayments.length === 0) {
+						submitData.is_credit_sale = 1;
+					}
+
+					// Same payload => same key, so a retry after a client timeout is
+					// de-duplicated by the server instead of creating a second invoice.
+					submitData.client_request_id = submitRequests.idFor({
+						invoiceData,
+						submitData: { ...submitData, client_request_id: undefined },
+					});
+
+					try {
+						const result = await submitInvoiceResource.submit({
+							invoice: invoiceDoc,
+							data: submitData,
 						});
 
-						// The messages array likely contains the detailed error info
-						if (resourceError.messages && resourceError.messages.length > 0) {
-							console.log("First message:", resourceError.messages[0]);
+						// Check if resource has error (frappe-ui pattern)
+						if (submitInvoiceResource.error) {
+							const resourceError = submitInvoiceResource.error;
+							console.error("Submit invoice resource error:", resourceError);
+
+							// Create a detailed error object
+							const detailedError = new Error(
+								resourceError.message || "Invoice submission failed"
+							);
+							detailedError.exc_type = resourceError.exc_type;
+							detailedError._server_messages = resourceError._server_messages;
+							detailedError.httpStatus = resourceError.httpStatus;
+							detailedError.messages = resourceError.messages;
+
+							throw detailedError;
 						}
 
-						// Attach all resource error properties to the error
-						error.exc_type = resourceError.exc_type || error.exc_type;
-						error._server_messages = resourceError._server_messages;
-						error.httpStatus = resourceError.httpStatus;
-						error.messages = resourceError.messages;
-						error.exception = resourceError.exception;
-						error.data = resourceError.data;
+						if (!attempt.abandoned) {
+							submitRequests.reset();
+							resetInvoice();
+						}
+						return result;
+					} catch (error) {
+						// Preserve original error object with all its properties
+						console.error("Submit invoice error:", error);
+						console.log("submitInvoiceResource.error:", submitInvoiceResource.error);
 
-						console.log("After attaching, error.messages:", error.messages);
+						// If resource has error data, extract and attach it
+						if (submitInvoiceResource.error) {
+							const resourceError = submitInvoiceResource.error;
+							console.log("Resource error details:", {
+								exc_type: resourceError.exc_type,
+								_server_messages: resourceError._server_messages,
+								httpStatus: resourceError.httpStatus,
+								messages: resourceError.messages,
+								messagesContent: JSON.stringify(resourceError.messages),
+								data: resourceError.data,
+								exception: resourceError.exception,
+								keys: Object.keys(resourceError),
+							});
+
+							// The messages array likely contains the detailed error info
+							if (resourceError.messages && resourceError.messages.length > 0) {
+								console.log("First message:", resourceError.messages[0]);
+							}
+
+							// Attach all resource error properties to the error
+							error.exc_type = resourceError.exc_type || error.exc_type;
+							error._server_messages = resourceError._server_messages;
+							error.httpStatus = resourceError.httpStatus;
+							error.messages = resourceError.messages;
+							error.exception = resourceError.exception;
+							error.data = resourceError.data;
+
+							console.log("After attaching, error.messages:", error.messages);
+						}
+
+						throw error;
 					}
-
+				} catch (error) {
+					// Outer catch to ensure error propagates
+					console.error("Submit invoice outer error:", error);
 					throw error;
+				} finally {
+					if (!attempt.abandoned) isSubmitting.value = false;
 				}
-			} catch (error) {
-				// Outer catch to ensure error propagates
-				console.error("Submit invoice outer error:", error);
-				throw error;
-			} finally {
+			})
+			.then((outcome) => (outcome === SKIPPED ? null : outcome))
+			.catch(async (error) => {
+				if (!isSubmitTimeoutError(error)) throw error;
+
+				// The gate gave up, but the first request keeps running on the server.
+				// Release the guard so the cashier is never stuck, then find out whether
+				// the sale was in fact completed.
+				attempt.abandoned = true;
 				isSubmitting.value = false;
-			}
-		}); // End of submitMutex.withLock
+				const requestId = submitRequests.current();
+				log.warn("Invoice submit timed out client-side; checking the server", {
+					requestId,
+				});
+
+				const recovered = await recoverTimedOutSubmit(requestId, {
+					check: (id) =>
+						call("pos_next.api.invoices.check_offline_invoice_synced", {
+							offline_id: id,
+						}),
+				});
+				if (recovered) {
+					submitRequests.reset();
+					resetInvoice();
+					return recovered;
+				}
+
+				// Not found yet. Retrying is safe: the same key makes the server return
+				// the invoice if it completes, rather than creating a second one.
+				error.timeoutUnresolved = true;
+				error.message = `${error.message}. The sale may still be processing on the server: check Invoice History before retrying. Retrying will not create a duplicate.`;
+				throw error;
+			}); // End of submitGate.run
 	}
 
 	/**

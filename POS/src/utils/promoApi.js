@@ -35,82 +35,115 @@ function promoOrNull(promoPath) {
 
 export const promoApi = {
 	applyOffers: () =>
-		promoOrPos("posnext_promotions.api.offers.apply_offers", "pos_next.api.invoices.apply_offers"),
-	getOffers: () => promoOrPos("posnext_promotions.api.offers.get_offers", "pos_next.api.offers.get_offers"),
+		promoOrPos(
+			"posnext_promotions.api.offers.apply_offers",
+			"pos_next.api.invoices.apply_offers"
+		),
+	getOffers: () =>
+		promoOrPos("posnext_promotions.api.offers.get_offers", "pos_next.api.offers.get_offers"),
 	validateCoupon: () =>
-		promoOrPos("posnext_promotions.api.offers.validate_coupon", "pos_next.api.offers.validate_coupon"),
+		promoOrPos(
+			"posnext_promotions.api.offers.validate_coupon",
+			"pos_next.api.offers.validate_coupon"
+		),
 	getActiveCoupons: () =>
 		promoOrPos(
 			"posnext_promotions.api.offers.get_active_coupons",
-			"pos_next.api.offers.get_active_coupons",
+			"pos_next.api.offers.get_active_coupons"
 		),
 	calculateCouponDiscount: () =>
 		promoOrPos(
 			"posnext_promotions.api.offers.calculate_coupon_discount",
-			"pos_next.api.offers.calculate_coupon_discount",
+			"pos_next.api.offers.calculate_coupon_discount"
 		),
 	itemHasActivePromotion: () =>
 		promoOrPos(
 			"posnext_promotions.api.offers.item_has_active_promotion",
-			"pos_next.api.offers.item_has_active_promotion",
+			"pos_next.api.offers.item_has_active_promotion"
 		),
 	getCustomerOneTimeRedemptions: () =>
 		promoOrPos(
 			"posnext_promotions.api.offers.get_customer_one_time_redemptions",
-			"pos_next.api.offers.get_customer_one_time_redemptions",
+			"pos_next.api.offers.get_customer_one_time_redemptions"
 		),
 	// Friends & Family (PN-124..PN-130) exists only in POSNext Promotions;
 	// null when the app is absent so callers skip F&F entirely.
 	checkFriendsAndFamilyEligibility: () =>
-		promoOrNull("posnext_promotions.api.friends_and_family.check_friends_and_family_eligibility"),
+		promoOrNull(
+			"posnext_promotions.api.friends_and_family.check_friends_and_family_eligibility"
+		),
 	applyFriendsAndFamilyDiscount: () =>
 		promoOrNull("posnext_promotions.api.friends_and_family.apply_friends_and_family_discount"),
 	getPromotions: () =>
-		promoOrPos("posnext_promotions.api.promotions.get_promotions", "pos_next.api.promotions.get_promotions"),
+		promoOrPos(
+			"posnext_promotions.api.promotions.get_promotions",
+			"pos_next.api.promotions.get_promotions"
+		),
 	getPromotionDetails: () =>
 		promoOrPos(
 			"posnext_promotions.api.promotions.get_promotion_details",
-			"pos_next.api.promotions.get_promotion_details",
+			"pos_next.api.promotions.get_promotion_details"
 		),
 	createPromotion: () =>
 		promoOrPos(
 			"posnext_promotions.api.promotions.create_promotion",
-			"pos_next.api.promotions.create_promotion",
+			"pos_next.api.promotions.create_promotion"
 		),
 	updatePromotion: () =>
 		promoOrPos(
 			"posnext_promotions.api.promotions.update_promotion",
-			"pos_next.api.promotions.update_promotion",
+			"pos_next.api.promotions.update_promotion"
 		),
 	togglePromotion: () =>
 		promoOrPos(
 			"posnext_promotions.api.promotions.toggle_promotion",
-			"pos_next.api.promotions.toggle_promotion",
+			"pos_next.api.promotions.toggle_promotion"
 		),
 	deletePromotion: () =>
 		promoOrPos(
 			"posnext_promotions.api.promotions.delete_promotion",
-			"pos_next.api.promotions.delete_promotion",
+			"pos_next.api.promotions.delete_promotion"
 		),
 	getItemGroups: () =>
-		promoOrPos("posnext_promotions.api.promotions.get_item_groups", "pos_next.api.promotions.get_item_groups"),
+		promoOrPos(
+			"posnext_promotions.api.promotions.get_item_groups",
+			"pos_next.api.promotions.get_item_groups"
+		),
 	getBrands: () =>
-		promoOrPos("posnext_promotions.api.promotions.get_brands", "pos_next.api.promotions.get_brands"),
+		promoOrPos(
+			"posnext_promotions.api.promotions.get_brands",
+			"pos_next.api.promotions.get_brands"
+		),
 	getCoupons: () =>
-		promoOrPos("posnext_promotions.api.promotions.get_coupons", "pos_next.api.promotions.get_coupons"),
+		promoOrPos(
+			"posnext_promotions.api.promotions.get_coupons",
+			"pos_next.api.promotions.get_coupons"
+		),
 	getCouponDetails: () =>
 		promoOrPos(
 			"posnext_promotions.api.promotions.get_coupon_details",
-			"pos_next.api.promotions.get_coupon_details",
+			"pos_next.api.promotions.get_coupon_details"
 		),
 	createCoupon: () =>
-		promoOrPos("posnext_promotions.api.promotions.create_coupon", "pos_next.api.promotions.create_coupon"),
+		promoOrPos(
+			"posnext_promotions.api.promotions.create_coupon",
+			"pos_next.api.promotions.create_coupon"
+		),
 	updateCoupon: () =>
-		promoOrPos("posnext_promotions.api.promotions.update_coupon", "pos_next.api.promotions.update_coupon"),
+		promoOrPos(
+			"posnext_promotions.api.promotions.update_coupon",
+			"pos_next.api.promotions.update_coupon"
+		),
 	toggleCoupon: () =>
-		promoOrPos("posnext_promotions.api.promotions.toggle_coupon", "pos_next.api.promotions.toggle_coupon"),
+		promoOrPos(
+			"posnext_promotions.api.promotions.toggle_coupon",
+			"pos_next.api.promotions.toggle_coupon"
+		),
 	deleteCoupon: () =>
-		promoOrPos("posnext_promotions.api.promotions.delete_coupon", "pos_next.api.promotions.delete_coupon"),
+		promoOrPos(
+			"posnext_promotions.api.promotions.delete_coupon",
+			"pos_next.api.promotions.delete_coupon"
+		),
 	getAuthorizers: () => "pos_next.api.authorization.get_authorizers",
 	requestGrant: () => "pos_next.api.authorization.request_grant",
 	getAuthorizationPolicy: () => "pos_next.api.authorization.get_authorization_policy",

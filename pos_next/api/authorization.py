@@ -98,7 +98,6 @@ RATE_LIMIT_PER_MINUTE = 20
 @frappe.whitelist()
 @rate_limit(key="approver", limit=RATE_LIMIT_PER_MINUTE, seconds=60, ip_based=True)
 def request_grant(action: str, approver: str, pin: str, context=None) -> dict:
-
 	approver = (approver or "").strip()
 	if not approver:
 		return {"authorized": False, "message": _("Select an approver")}

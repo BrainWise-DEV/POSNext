@@ -78,30 +78,26 @@ export async function saveDraft(invoiceData) {
 export async function updateDraft(draftId, invoiceData) {
 	const database = await initDB();
 
-	return new Promise(async (resolve, reject) => {
-		try {
-			// Get existing draft
-			const existingDraft = await getDraftById(draftId);
-			if (!existingDraft) {
-				return reject(new Error("Draft not found"));
-			}
+	// Get existing draft
+	const existingDraft = await getDraftById(draftId);
+	if (!existingDraft) {
+		throw new Error("Draft not found");
+	}
 
-			const sanitizedInvoiceData = sanitizeDraftData(invoiceData) || {};
-			const updatedDraft = {
-				...existingDraft,
-				...sanitizedInvoiceData,
-				updated_at: new Date().toISOString(),
-			};
+	const sanitizedInvoiceData = sanitizeDraftData(invoiceData) || {};
+	const updatedDraft = {
+		...existingDraft,
+		...sanitizedInvoiceData,
+		updated_at: new Date().toISOString(),
+	};
 
-			const transaction = database.transaction([STORE_NAME], "readwrite");
-			const store = transaction.objectStore(STORE_NAME);
-			const request = store.put(updatedDraft);
+	return new Promise((resolve, reject) => {
+		const transaction = database.transaction([STORE_NAME], "readwrite");
+		const store = transaction.objectStore(STORE_NAME);
+		const request = store.put(updatedDraft);
 
-			request.onsuccess = () => resolve(updatedDraft);
-			request.onerror = () => reject(request.error);
-		} catch (error) {
-			reject(error);
-		}
+		request.onsuccess = () => resolve(updatedDraft);
+		request.onerror = () => reject(request.error);
 	});
 }
 
@@ -144,22 +140,18 @@ export async function getDraftById(draftId) {
 export async function deleteDraft(draftId) {
 	const database = await initDB();
 
-	return new Promise(async (resolve, reject) => {
-		try {
-			const draft = await getDraftById(draftId);
-			if (!draft) {
-				return reject(new Error("Draft not found"));
-			}
+	const draft = await getDraftById(draftId);
+	if (!draft) {
+		throw new Error("Draft not found");
+	}
 
-			const transaction = database.transaction([STORE_NAME], "readwrite");
-			const store = transaction.objectStore(STORE_NAME);
-			const request = store.delete(draft.id);
+	return new Promise((resolve, reject) => {
+		const transaction = database.transaction([STORE_NAME], "readwrite");
+		const store = transaction.objectStore(STORE_NAME);
+		const request = store.delete(draft.id);
 
-			request.onsuccess = () => resolve(true);
-			request.onerror = () => reject(request.error);
-		} catch (error) {
-			reject(error);
-		}
+		request.onsuccess = () => resolve(true);
+		request.onerror = () => reject(request.error);
 	});
 }
 

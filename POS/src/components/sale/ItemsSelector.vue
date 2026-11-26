@@ -13,8 +13,19 @@
 					:aria-label="__('Show previous categories')"
 					@click="scrollChips(-1)"
 				>
-					<svg class="w-4 h-4 rtl:-scale-x-100" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+					<svg
+						class="w-4 h-4 rtl:-scale-x-100"
+						fill="none"
+						stroke="currentColor"
+						viewBox="0 0 24 24"
+						aria-hidden="true"
+					>
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							stroke-width="2"
+							d="M15 19l-7-7 7-7"
+						/>
 					</svg>
 				</button>
 			</div>
@@ -33,12 +44,7 @@
 							: 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 active:bg-gray-100',
 					]"
 				>
-					<svg
-						class="w-4 h-4"
-						fill="none"
-						stroke="currentColor"
-						viewBox="0 0 24 24"
-					>
+					<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 						<path
 							stroke-linecap="round"
 							stroke-linejoin="round"
@@ -75,8 +81,19 @@
 					:aria-label="__('Show more categories')"
 					@click="scrollChips(1)"
 				>
-					<svg class="w-4 h-4 rtl:-scale-x-100" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+					<svg
+						class="w-4 h-4 rtl:-scale-x-100"
+						fill="none"
+						stroke="currentColor"
+						viewBox="0 0 24 24"
+						aria-hidden="true"
+					>
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							stroke-width="2"
+							d="M9 5l7 7-7 7"
+						/>
 					</svg>
 				</button>
 			</div>
@@ -152,8 +169,19 @@
 							:aria-label="__('Clear search')"
 							@click="clearSearchAndResetInput"
 						>
-							<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+							<svg
+								class="w-4 h-4"
+								fill="none"
+								stroke="currentColor"
+								viewBox="0 0 24 24"
+								aria-hidden="true"
+							>
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									stroke-width="2"
+									d="M6 18L18 6M6 6l12 12"
+								/>
 							</svg>
 						</button>
 						<kbd
@@ -589,18 +617,29 @@
 							>
 								{{ Object.values(item.attributes).join(" / ") }}
 							</p>
-							<div class="mt-auto pt-1 flex items-center justify-between gap-1 min-h-target">
+							<div
+								class="mt-auto pt-1 flex items-center justify-between gap-1 min-h-target"
+							>
 								<p class="min-w-0 truncate leading-tight">
-									<span class="text-[14px] font-semibold text-pos-ink tabular-nums">{{
-										formatCurrency(item.rate || item.price_list_rate || 0)
-									}}</span>
-									<span v-if="isNonDefaultUom(item)" class="text-xs text-gray-500">
+									<span
+										class="text-[14px] font-semibold text-pos-ink tabular-nums"
+										>{{
+											formatCurrency(item.rate || item.price_list_rate || 0)
+										}}</span
+									>
+									<span
+										v-if="isNonDefaultUom(item)"
+										class="text-xs text-gray-500"
+									>
 										/ {{ item.uom }}</span
 									>
 								</p>
 								<!-- Other warehouses: visible affordance (was a hidden long-press) -->
 								<button
-									v-if="(item.is_stock_item || item.is_bundle) && !isOutOfStock(item)"
+									v-if="
+										(item.is_stock_item || item.is_bundle) &&
+										!isOutOfStock(item)
+									"
 									type="button"
 									class="flex-shrink-0 flex items-center justify-center min-h-target min-w-target -me-1.5 rounded-md text-gray-500 hover:text-pos-action hover:bg-pos-action-soft pos-focus"
 									:title="__('Check availability in other warehouses')"
@@ -611,8 +650,19 @@
 									@keydown.enter.stop
 									@keydown.space.stop
 								>
-									<svg class="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+									<svg
+										class="w-[18px] h-[18px]"
+										fill="none"
+										stroke="currentColor"
+										viewBox="0 0 24 24"
+										aria-hidden="true"
+									>
+										<path
+											stroke-linecap="round"
+											stroke-linejoin="round"
+											stroke-width="2"
+											d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+										/>
 									</svg>
 								</button>
 							</div>
@@ -627,8 +677,19 @@
 								@keydown.enter.stop
 								@keydown.space.stop
 							>
-								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+								<svg
+									class="w-4 h-4"
+									fill="none"
+									stroke="currentColor"
+									viewBox="0 0 24 24"
+									aria-hidden="true"
+								>
+									<path
+										stroke-linecap="round"
+										stroke-linejoin="round"
+										stroke-width="2"
+										d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+									/>
 								</svg>
 								{{ __("Other warehouses") }}
 							</button>
@@ -741,7 +802,11 @@
 							:data-item-code="item.item_code"
 							@keydown.enter.prevent="selectItem(item)"
 							@keydown.space.prevent="selectItem(item)"
-							:class="activeHighlightCode === item.item_code ? 'bg-pos-action-soft ring-2 ring-inset ring-pos-action' : ''"
+							:class="
+								activeHighlightCode === item.item_code
+									? 'bg-pos-action-soft ring-2 ring-inset ring-pos-action'
+									: ''
+							"
 							class="group cursor-pointer focus-visible:outline-none focus-visible:bg-pos-action-soft focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-pos-action hover:bg-blue-50 hover:shadow-md transition-[background-color,box-shadow] duration-100 touch-manipulation active:bg-blue-100"
 						>
 							<td class="px-2 sm:px-3 py-2 whitespace-nowrap w-[50px] sm:w-[60px]">
@@ -856,8 +921,19 @@
 										@keydown.enter.stop
 										@keydown.space.stop
 									>
-										<svg class="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+										<svg
+											class="w-[18px] h-[18px]"
+											fill="none"
+											stroke="currentColor"
+											viewBox="0 0 24 24"
+											aria-hidden="true"
+										>
+											<path
+												stroke-linecap="round"
+												stroke-linejoin="round"
+												stroke-width="2"
+												d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+											/>
 										</svg>
 									</button>
 								</div>

@@ -285,7 +285,6 @@ permission_query_conditions = {
 # }
 
 
-
 # Extension points consumed by POS Next, implemented by optional apps
 pos_next_loyalty_provider = []
 pos_next_bootstrap_settings = []

@@ -143,7 +143,7 @@ class TestMagentoSplitSmoke(unittest.TestCase):
 
 	def test_pos_next_has_no_magento_module(self):
 		with self.assertRaises((ImportError, ModuleNotFoundError)):
-			import pos_next.api.magento_loyalty  # noqa: F401
+			import pos_next.api.magento_loyalty
 
 	def test_integration_flag_defaults_live_in_constants(self):
 		from pos_next.api.constants import DEFAULT_POS_SETTINGS, merge_pos_settings

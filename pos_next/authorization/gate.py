@@ -35,7 +35,6 @@ def is_internal_context() -> bool:
 
 
 def is_pos_document(doc) -> bool:
-
 	return bool(doc.get("is_pos") or doc.get("pos_profile"))
 
 

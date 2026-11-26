@@ -16,7 +16,12 @@ vi.mock("frappe-ui", () => ({
 }));
 vi.mock("@/composables/useToast", () => ({
 	useToast: () => {
-		Object.assign(toast, { showSuccess: vi.fn(), showError: vi.fn(), showWarning: vi.fn(), showInfo: vi.fn() });
+		Object.assign(toast, {
+			showSuccess: vi.fn(),
+			showError: vi.fn(),
+			showWarning: vi.fn(),
+			showInfo: vi.fn(),
+		});
 		return toast;
 	},
 }));
@@ -27,13 +32,23 @@ vi.mock("@/stores/posSettings", () => ({
 
 const { usePOSCartStore } = await import("../posCart");
 
-const chipsy = { item_code: "CHIPSY", item_name: "Chipsy", rate: 15, price_list_rate: 15, uom: "Nos", stock_uom: "Nos", conversion_factor: 1 };
+const chipsy = {
+	item_code: "CHIPSY",
+	item_name: "Chipsy",
+	rate: 15,
+	price_list_rate: 15,
+	uom: "Nos",
+	stock_uom: "Nos",
+	conversion_factor: 1,
+};
 
 // Server answer for "buy 2 get the 3rd free" (min_qty 2): one free unit once 2 are paid
 const offerPass = (cart) => {
 	const paid = cart.invoiceItems.find((i) => !i.is_free_item)?.quantity || 0;
 	const free = paid >= 2 ? [{ item_code: "CHIPSY", qty: 1, uom: "Nos", min_qty: 2 }] : [];
-	cart.invoiceItems = syncCartFreeItems(cart.invoiceItems, free, { recalculateItem: cart.recalculateItem });
+	cart.invoiceItems = syncCartFreeItems(cart.invoiceItems, free, {
+		recalculateItem: cart.recalculateItem,
+	});
 };
 const paidQty = (cart) => cart.invoiceItems.find((i) => !i.is_free_item)?.quantity;
 
@@ -96,7 +111,12 @@ describe("posCart whole-cart coupon", () => {
 		cart = usePOSCartStore();
 		cart.addItem({ ...chipsy });
 		cart.customer = "CUST-1";
-		cart.applyDiscountToCart({ name: "WELCOME10", code: "WELCOME10", percentage: 0, amount: 5 });
+		cart.applyDiscountToCart({
+			name: "WELCOME10",
+			code: "WELCOME10",
+			percentage: 0,
+			amount: 5,
+		});
 	});
 
 	it("says why when removing the customer drops the coupon", async () => {
@@ -130,7 +150,14 @@ describe("posCart line coupon on top of a promotion", () => {
 			line_level: true,
 			coupon: { discount_type: "Amount" },
 			line_updates: [
-				{ line_key: 0, item_code: "CHIPSY", discount_percentage: 0, discount_amount: 5, stacked: true, coupon_only_discount: 2 },
+				{
+					line_key: 0,
+					item_code: "CHIPSY",
+					discount_percentage: 0,
+					discount_amount: 5,
+					stacked: true,
+					coupon_only_discount: 2,
+				},
 			],
 		});
 		expect(cart.appliedCoupon.amount).toBe(2);

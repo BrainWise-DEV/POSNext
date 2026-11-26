@@ -187,11 +187,7 @@
 												: 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50',
 										]"
 									>
-										{{
-											__("Unpaid ({0})", [
-												unpaidBucketCounts.unpaid,
-											])
-										}}
+										{{ __("Unpaid ({0})", [unpaidBucketCounts.unpaid]) }}
 									</button>
 									<button
 										@click="unpaidFilter = 'overdue'"
@@ -202,11 +198,7 @@
 												: 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50',
 										]"
 									>
-										{{
-											__("Overdue ({0})", [
-												unpaidBucketCounts.overdue,
-											])
-										}}
+										{{ __("Overdue ({0})", [unpaidBucketCounts.overdue]) }}
 									</button>
 								</div>
 
@@ -313,15 +305,33 @@
 									class="bg-white rounded-lg border border-gray-200 overflow-x-auto"
 								>
 									<table class="min-w-full text-pos-sm">
-										<thead class="bg-pos-panel text-xs font-semibold text-gray-700">
+										<thead
+											class="bg-pos-panel text-xs font-semibold text-gray-700"
+										>
 											<tr>
-												<th scope="col" class="px-3 py-2 text-start">{{ __("Invoice") }}</th>
-												<th scope="col" class="px-3 py-2 text-start">{{ __("Customer") }}</th>
-												<th scope="col" class="px-3 py-2 text-start">{{ __("Date") }}</th>
-												<th scope="col" class="px-3 py-2 text-end">{{ __("Total Amount") }}</th>
-												<th scope="col" class="px-3 py-2 text-end">{{ __("Paid") }}</th>
-												<th scope="col" class="px-3 py-2 text-end">{{ __("Outstanding") }}</th>
-												<th scope="col" class="px-3 py-2"><span class="sr-only">{{ __("Add Payment") }}</span></th>
+												<th scope="col" class="px-3 py-2 text-start">
+													{{ __("Invoice") }}
+												</th>
+												<th scope="col" class="px-3 py-2 text-start">
+													{{ __("Customer") }}
+												</th>
+												<th scope="col" class="px-3 py-2 text-start">
+													{{ __("Date") }}
+												</th>
+												<th scope="col" class="px-3 py-2 text-end">
+													{{ __("Total Amount") }}
+												</th>
+												<th scope="col" class="px-3 py-2 text-end">
+													{{ __("Paid") }}
+												</th>
+												<th scope="col" class="px-3 py-2 text-end">
+													{{ __("Outstanding") }}
+												</th>
+												<th scope="col" class="px-3 py-2">
+													<span class="sr-only">{{
+														__("Add Payment")
+													}}</span>
+												</th>
 											</tr>
 										</thead>
 										<tbody class="divide-y divide-gray-200">
@@ -331,7 +341,10 @@
 												class="hover:bg-gray-50 align-middle"
 											>
 												<td class="px-3 py-2 whitespace-nowrap">
-													<div class="font-semibold text-pos-ink tabular-nums" dir="ltr">
+													<div
+														class="font-semibold text-pos-ink tabular-nums"
+														dir="ltr"
+													>
 														{{ invoice.name }}
 													</div>
 													<span
@@ -343,43 +356,64 @@
 														{{ __(invoice.status) }}
 													</span>
 												</td>
-												<td class="px-3 py-2 max-w-[14rem] truncate text-pos-ink" dir="auto">
+												<td
+													class="px-3 py-2 max-w-[14rem] truncate text-pos-ink"
+													dir="auto"
+												>
 													{{ invoice.customer_name || invoice.customer }}
 												</td>
-												<td class="px-3 py-2 whitespace-nowrap text-gray-600 tabular-nums">
+												<td
+													class="px-3 py-2 whitespace-nowrap text-gray-600 tabular-nums"
+												>
 													<span dir="ltr">
 														{{ formatDate(invoice.posting_date) }}
 														{{ formatTime(invoice.posting_time) }}
 													</span>
 												</td>
-												<td class="px-3 py-2 text-end whitespace-nowrap font-medium text-pos-ink tabular-nums">
+												<td
+													class="px-3 py-2 text-end whitespace-nowrap font-medium text-pos-ink tabular-nums"
+												>
 													{{ formatCurrency(invoice.grand_total) }}
 												</td>
-												<td class="px-3 py-2 text-end whitespace-nowrap tabular-nums">
+												<td
+													class="px-3 py-2 text-end whitespace-nowrap tabular-nums"
+												>
 													<div class="font-medium text-pos-saving">
 														{{ formatCurrency(invoice.paid_amount) }}
 													</div>
 													<!-- Payment history, one line per payment -->
 													<div
-														v-for="(payment, idx) in invoice.payments || []"
+														v-for="(
+															payment, idx
+														) in invoice.payments || []"
 														:key="idx"
 														class="text-xs text-gray-600"
-														:title="getPaymentSourceLabel(payment.source)"
+														:title="
+															getPaymentSourceLabel(payment.source)
+														"
 													>
 														{{ payment.mode_of_payment || __("N/A") }}
 														{{ formatCurrency(payment.amount) }}
 													</div>
 												</td>
-												<td class="px-3 py-2 text-end whitespace-nowrap font-semibold text-pos-caution tabular-nums">
-													{{ formatCurrency(invoice.outstanding_amount) }}
+												<td
+													class="px-3 py-2 text-end whitespace-nowrap font-semibold text-pos-caution tabular-nums"
+												>
+													{{
+														formatCurrency(invoice.outstanding_amount)
+													}}
 												</td>
 												<td class="px-3 py-2 text-end whitespace-nowrap">
 													<button
 														@click="selectInvoiceForPayment(invoice)"
-														:disabled="loadingInvoiceDetails || isOffline()"
+														:disabled="
+															loadingInvoiceDetails || isOffline()
+														"
 														:title="
 															isOffline()
-																? __('Payments cannot be added while offline')
+																? __(
+																		'Payments cannot be added while offline'
+																  )
 																: ''
 														"
 														class="pos-btn pos-btn-primary"

@@ -156,8 +156,8 @@ function toDate(value) {
 	const date = ymd
 		? new Date(ymd[1], ymd[2] - 1, ymd[3])
 		: hms
-			? new Date(1970, 0, 1, hms[1], hms[2])
-			: new Date(typeof value === "string" ? value.replace(" ", "T") : value);
+		? new Date(1970, 0, 1, hms[1], hms[2])
+		: new Date(typeof value === "string" ? value.replace(" ", "T") : value);
 	return Number.isNaN(date.getTime()) ? null : date;
 }
 

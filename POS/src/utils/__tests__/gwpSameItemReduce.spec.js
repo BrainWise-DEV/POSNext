@@ -1,26 +1,47 @@
 import { describe, expect, it } from "vitest";
-import { syncCartFreeItems, totalSkuQty, withCarvedQtyRestored } from "@/utils/gwpSameItemFreeRows";
+import {
+	syncCartFreeItems,
+	totalSkuQty,
+	withCarvedQtyRestored,
+} from "@/utils/gwpSameItemFreeRows";
 
 // PRLE-1585-like: same item, min_qty 2, free_qty 1, not recursive, rate 100.
 // Server qualifies on paid qty only and returns the gift as a free_items row on top.
 const MIN = 2;
-const line = (quantity) => ({ item_code: "ZZFS-A", quantity, uom: "Nos", stock_uom: "Nos", rate: 100, is_free_item: 0 });
+const line = (quantity) => ({
+	item_code: "ZZFS-A",
+	quantity,
+	uom: "Nos",
+	stock_uom: "Nos",
+	rate: 100,
+	is_free_item: 0,
+});
 const paidDemand = (items) =>
-	withCarvedQtyRestored(items).filter((i) => !i.is_free_item).reduce((s, i) => s + i.quantity, 0);
+	withCarvedQtyRestored(items)
+		.filter((i) => !i.is_free_item)
+		.reduce((s, i) => s + i.quantity, 0);
 function evaluate(items) {
-	const free = paidDemand(items) >= MIN ? [{ item_code: "ZZFS-A", qty: 1, uom: "Nos", min_qty: MIN }] : [];
+	const free =
+		paidDemand(items) >= MIN
+			? [{ item_code: "ZZFS-A", qty: 1, uom: "Nos", min_qty: MIN }]
+			: [];
 	return syncCartFreeItems(items, free);
 }
 const rows = (c) => c.map((i) => `${i.is_free_item ? "free" : "paid"}:${i.quantity}`).join(",");
-const setPaid = (c, q) => { c.find((i) => !i.is_free_item).quantity = q; return c; };
+const setPaid = (c, q) => {
+	c.find((i) => !i.is_free_item).quantity = q;
+	return c;
+};
 
 describe("same-SKU GWP: changing paid qty (PRLE-1585)", () => {
-	it.each([[1, "paid:1"], [2, "paid:2,free:1"], [3, "paid:3,free:1"], [4, "paid:4,free:1"]])(
-		"paid %i → %s",
-		(q, expected) => {
-			expect(rows(evaluate([line(q)]))).toBe(expected);
-		}
-	);
+	it.each([
+		[1, "paid:1"],
+		[2, "paid:2,free:1"],
+		[3, "paid:3,free:1"],
+		[4, "paid:4,free:1"],
+	])("paid %i → %s", (q, expected) => {
+		expect(rows(evaluate([line(q)]))).toBe(expected);
+	});
 
 	it("up 1→4 then down 4→1 mirrors, gift drops only at 1", () => {
 		let c = evaluate([line(1)]);
@@ -30,8 +51,12 @@ describe("same-SKU GWP: changing paid qty (PRLE-1585)", () => {
 			seen.push(rows(c));
 		}
 		expect(seen).toEqual([
-			"paid:2,free:1", "paid:3,free:1", "paid:4,free:1",
-			"paid:3,free:1", "paid:2,free:1", "paid:1",
+			"paid:2,free:1",
+			"paid:3,free:1",
+			"paid:4,free:1",
+			"paid:3,free:1",
+			"paid:2,free:1",
+			"paid:1",
 		]);
 		expect(totalSkuQty(c, "ZZFS-A")).toBe(1);
 	});

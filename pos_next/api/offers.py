@@ -9,7 +9,7 @@ Promotional Schemes and standalone Pricing Rules.
 """
 
 from dataclasses import asdict, dataclass
-from typing import Dict, List, Optional
+from typing import Optional
 
 import frappe
 from frappe import _

@@ -200,7 +200,9 @@ export function nestFreeRows(items) {
 	const rulesOf = (item) =>
 		Array.isArray(item.pricing_rules)
 			? item.pricing_rules
-			: String(item.pricing_rules || "").split(",").map((r) => r.trim());
+			: String(item.pricing_rules || "")
+					.split(",")
+					.map((r) => r.trim());
 	const parentOf = (gift) =>
 		findPaidCartItem(paid, gift.item_code, gift.uom || gift.stock_uom) ||
 		paid.find((item) => gift.pricing_rules && rulesOf(item).includes(gift.pricing_rules));

@@ -65,8 +65,7 @@ def _restore_item_prices(rows) -> None:
 		for row in chunk:
 			values.extend(row[column] for column in columns)
 		frappe.db.sql(
-			f"REPLACE INTO `tabItem Price` ({collist}) VALUES "
-			+ ", ".join([row_placeholder] * len(chunk)),
+			f"REPLACE INTO `tabItem Price` ({collist}) VALUES " + ", ".join([row_placeholder] * len(chunk)),
 			values,
 		)
 		frappe.db.commit()

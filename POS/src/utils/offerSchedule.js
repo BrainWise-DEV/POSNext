@@ -42,7 +42,8 @@ export function secondsSinceMidnight(timezone, now = new Date()) {
 			minute: "2-digit",
 			second: "2-digit",
 		}).formatToParts(now);
-		const get = (type) => Number.parseInt(parts.find((p) => p.type === type)?.value ?? "0", 10);
+		const get = (type) =>
+			Number.parseInt(parts.find((p) => p.type === type)?.value ?? "0", 10);
 		let hour = get("hour");
 		if (hour === 24) hour = 0; // some engines render midnight as 24
 		return hour * 3600 + get("minute") * 60 + get("second");

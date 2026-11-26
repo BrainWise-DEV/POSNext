@@ -47,10 +47,7 @@ export function registerOfferStrategy(mode, strategy) {
  */
 export function registerProductOfferStrategy(promotionType, strategy) {
 	if (!promotionType || !strategy || typeof strategy.apply !== "function") {
-		console.warn(
-			"[posCart] ignoring invalid product offer strategy for type:",
-			promotionType
-		);
+		console.warn("[posCart] ignoring invalid product offer strategy for type:", promotionType);
 		return;
 	}
 	productStrategies.set(promotionType, strategy);

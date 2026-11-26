@@ -64,7 +64,11 @@ describe("couponLines", () => {
 			is_already_discounted: 1,
 		};
 		stashPreCouponDiscount(item);
-		Object.assign(item, { discount_percentage: 28, discount_source: "coupon", coupon_code: "SAVE" });
+		Object.assign(item, {
+			discount_percentage: 28,
+			discount_source: "coupon",
+			coupon_code: "SAVE",
+		});
 
 		expect(preCouponDiscount(item)).toMatchObject({
 			discount_percentage: 20,
@@ -85,7 +89,10 @@ describe("couponLines", () => {
 
 	it("treats a coupon line without a stash as undiscounted before the coupon", () => {
 		const item = line({ discount_percentage: 10 });
-		expect(preCouponDiscount(item)).toMatchObject({ discount_percentage: 0, discount_amount: 0 });
+		expect(preCouponDiscount(item)).toMatchObject({
+			discount_percentage: 0,
+			discount_amount: 0,
+		});
 		expect(preCouponLineDiscount(item)).toBe(0);
 		restorePreCouponDiscount(item);
 		expect(item.discount_percentage).toBe(0);
@@ -93,7 +100,14 @@ describe("couponLines", () => {
 	});
 
 	it("shows a line that is not a coupon line as it is", () => {
-		const item = { discount_percentage: 5, discount_amount: 0, discount_source: "manual_discount" };
-		expect(preCouponDiscount(item)).toMatchObject({ discount_percentage: 5, discount_source: "manual_discount" });
+		const item = {
+			discount_percentage: 5,
+			discount_amount: 0,
+			discount_source: "manual_discount",
+		};
+		expect(preCouponDiscount(item)).toMatchObject({
+			discount_percentage: 5,
+			discount_source: "manual_discount",
+		});
 	});
 });

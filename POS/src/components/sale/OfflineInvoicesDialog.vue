@@ -419,7 +419,11 @@
 </template>
 
 <script setup>
-import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil, formatDateTime } from "@/utils/currency";
+import {
+	DEFAULT_CURRENCY,
+	formatCurrency as formatCurrencyUtil,
+	formatDateTime,
+} from "@/utils/currency";
 import { Button, Dialog } from "frappe-ui";
 import { computed, ref, watch } from "vue";
 

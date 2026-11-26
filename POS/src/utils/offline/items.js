@@ -243,7 +243,9 @@ export const deductCachedBatchQty = async (itemCode, batchNo, qty) => {
 			if (!item?.batch_no_data?.length) return;
 
 			const batch_no_data = item.batch_no_data.map((b) =>
-				b.batch_no === batchNo ? { ...b, batch_qty: Math.max(0, (b.batch_qty || 0) - qty) } : b
+				b.batch_no === batchNo
+					? { ...b, batch_qty: Math.max(0, (b.batch_qty || 0) - qty) }
+					: b
 			);
 			await db.items.update(itemCode, { batch_no_data });
 		});

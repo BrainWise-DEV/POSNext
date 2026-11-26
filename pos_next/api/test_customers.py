@@ -116,7 +116,6 @@ class TestCustomersAPI(unittest.TestCase):
 		customer_doc.insert.assert_called_once_with()
 		self.assertEqual(result["loyalty_program"], "LOYALTY-A")
 
-
 	@patch(
 		"pos_next.api.customers.frappe.flags",
 		new=Mock(pos_next_customer_company=None, pos_next_customer_pos_profile=None),
@@ -200,9 +199,7 @@ class TestCustomersAPI(unittest.TestCase):
 		]
 		customer_doc = Mock()
 		mock_get_doc.return_value = customer_doc
-		mock_after_insert.side_effect = ExistingCustomerFound(
-			"A customer with this phone already exists."
-		)
+		mock_after_insert.side_effect = ExistingCustomerFound("A customer with this phone already exists.")
 
 		result = create_customer(
 			customer_name="Someone Else",
@@ -215,7 +212,6 @@ class TestCustomersAPI(unittest.TestCase):
 		self.assertTrue(result["already_exists"])
 		self.assertEqual(result["message"], "A customer with this phone already exists.")
 		self.assertEqual(result["existing_customer"]["name"], "CUST-2026-68541")
-
 
 	@patch(
 		"pos_next.api.customers.frappe.flags",
@@ -314,7 +310,6 @@ class TestCustomersAPI(unittest.TestCase):
 		self.assertNotEqual(result.get("name"), "CUST-NEW")
 
 
-
 class _Row(dict):
 	def __getattr__(self, key):
 		try:
@@ -372,8 +367,10 @@ class TestContactPrimaryHelpers(unittest.TestCase):
 class TestUpdateCustomer(unittest.TestCase):
 	def setUp(self):
 		# @frappe.whitelist() reads frappe.local.flags.in_test
-		import frappe
 		from types import SimpleNamespace
+
+		import frappe
+
 		if not hasattr(frappe.local, "flags"):
 			frappe.local.flags = SimpleNamespace(in_test=True)
 		else:
@@ -394,7 +391,11 @@ class TestUpdateCustomer(unittest.TestCase):
 		doc.custom_is_publish = 1
 		doc.get = lambda key, default=None: getattr(doc, key, default)
 		doc.has_permission.return_value = True
-		doc.as_dict.return_value = {"name": doc.name, "customer_name": "ZZ Test New", "email_id": "new@example.com"}
+		doc.as_dict.return_value = {
+			"name": doc.name,
+			"customer_name": "ZZ Test New",
+			"email_id": "new@example.com",
+		}
 		return doc
 
 	@patch("pos_next.api.customers.get_customer_sync_error", return_value=None)

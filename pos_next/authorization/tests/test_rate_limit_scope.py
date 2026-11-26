@@ -111,14 +111,13 @@ class TestRequestGrantRateLimitScope(FrappeTestCase):
 		"""
 		seen = fn
 		while seen is not None:
-			freevars = getattr(seen, "__code__", None) and seen.__code__.co_freevars or ()
+			freevars = (getattr(seen, "__code__", None) and seen.__code__.co_freevars) or ()
 			if "ip_based" in freevars:
 				cells = seen.__closure__ or ()
 				return dict(zip(freevars, (c.cell_contents for c in cells), strict=False))
 			seen = getattr(seen, "__wrapped__", None)
 
 		raise AssertionError("request_grant is not wrapped by frappe.rate_limiter.rate_limit")
-
 
 	def test_request_grant_is_wired_with_the_intended_scope(self):
 		closure = self._rate_limit_arguments(authorization.request_grant)

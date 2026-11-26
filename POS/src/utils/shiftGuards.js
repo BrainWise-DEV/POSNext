@@ -9,5 +9,5 @@
  * @returns {boolean}
  */
 export function canCloseShiftWithPendingExpenses(pendingExpensesCount) {
-	return !(Number(pendingExpensesCount) > 0)
+	return !(Number(pendingExpensesCount) > 0);
 }

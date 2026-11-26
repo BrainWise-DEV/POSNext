@@ -514,19 +514,18 @@
 						v-if="hasExpenses"
 						class="bg-white border border-gray-200 rounded-lg overflow-hidden shadow-sm"
 					>
-						<div class="px-3 py-3 md:px-6 md:py-4 border-b border-gray-200 bg-amber-50">
+						<div
+							class="px-3 py-3 md:px-6 md:py-4 border-b border-gray-200 bg-amber-50"
+						>
 							<h3 class="text-sm md:text-lg font-semibold text-gray-900 text-start">
 								{{ __("POS Expenses") }}
 							</h3>
 							<p class="text-xs md:text-sm text-gray-600 text-start">
 								{{
-									__(
-										"{0} expenses totaling {1}",
-										[
-											closingData.expenses_count,
-											formatCurrency(closingData.expenses_total),
-										]
-									)
+									__("{0} expenses totaling {1}", [
+										closingData.expenses_count,
+										formatCurrency(closingData.expenses_total),
+									])
 								}}
 							</p>
 						</div>
@@ -750,10 +749,9 @@
 													class="text-xs md:text-sm text-amber-700 text-start"
 												>
 													{{
-														__(
-															"Expenses: -{0}",
-															[formatCurrency(payment.expense_amount)],
-														)
+														__("Expenses: -{0}", [
+															formatCurrency(payment.expense_amount),
+														])
 													}}
 												</p>
 											</div>
@@ -1439,7 +1437,7 @@ const netCashImpact = computed(() => {
 	if (!closingData.value) return 0;
 	// ?? keeps sales_total=0; || would fall back to grand_total and double-count returns
 	const sales = Number.parseFloat(
-		closingData.value.sales_total ?? closingData.value.grand_total ?? 0,
+		closingData.value.sales_total ?? closingData.value.grand_total ?? 0
 	);
 	const returns = Number.parseFloat(closingData.value.returns_total || 0);
 	const expenses = Number.parseFloat(closingData.value.expenses_total || 0);

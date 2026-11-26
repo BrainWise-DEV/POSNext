@@ -63,6 +63,7 @@ _ARABIC_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "0123
 # Messages / responses
 # ---------------------------------------------------------------------------
 
+
 def _messages():
 	# Function (not a constant) so strings are translated at call time.
 	return {
@@ -71,9 +72,7 @@ def _messages():
 		"invalid_email": _("Enter a valid email address."),
 		"customer_not_found": _("No Magento account was found for this customer's phone number."),
 		"not_synced": _("Customer is not registered in Magento yet."),
-		"sync_pending": _(
-			"Customer is saved but not synced with Magento yet. Please try again in a moment."
-		),
+		"sync_pending": _("Customer is saved but not synced with Magento yet. Please try again in a moment."),
 		"email_taken": _("This email belongs to another account."),
 		"registration_failed": _("Magento rejected this customer's registration."),
 		"server_error": _("Could not send the code, please try again."),
@@ -107,6 +106,7 @@ def _too_many(retry_after):
 # ---------------------------------------------------------------------------
 # Normalisation / validation helpers
 # ---------------------------------------------------------------------------
+
 
 def normalize_iraqi_phone(value):
 	"""Normalise an Iraqi mobile number to ``+9647XXXXXXXXX`` or return None.
@@ -160,6 +160,7 @@ def mask_phone(phone):
 # ---------------------------------------------------------------------------
 # Feature flag / Magento configuration
 # ---------------------------------------------------------------------------
+
 
 def is_feature_enabled(pos_profile=None):
 	"""POS Settings flag (per POS Profile). Without a profile: any enabled row."""
@@ -219,6 +220,7 @@ def _get_magento_config():
 # Rate limiting (frappe cache)
 # ---------------------------------------------------------------------------
 
+
 def _cache():
 	return frappe.cache() if callable(frappe.cache) else frappe.cache
 
@@ -229,7 +231,7 @@ def _state_key(customer):
 
 def _load_state(customer):
 	raw = _cache().get_value(_state_key(customer))
-	if isinstance(raw, (str, bytes)):
+	if isinstance(raw, str | bytes):
 		try:
 			raw = json.loads(raw)
 		except ValueError:
@@ -288,6 +290,7 @@ class _Lock:
 # ---------------------------------------------------------------------------
 # Magento HTTP
 # ---------------------------------------------------------------------------
+
 
 def _post(path, payload):
 	"""POST to Magento. Returns (http_status, body) or (None, None) when unreachable.
@@ -365,6 +368,7 @@ def _error_from(http_status, body, default_code):
 # ---------------------------------------------------------------------------
 # Common checks
 # ---------------------------------------------------------------------------
+
 
 def _prepare(customer, email, pos_profile):
 	"""Run checks common to send/verify. Returns (ctx, error_result)."""
@@ -456,6 +460,7 @@ def _audit(customer, action, code, email, phone, http_status=None):
 # Whitelisted API
 # ---------------------------------------------------------------------------
 
+
 @frappe.whitelist(methods=["POST"])
 def send_email_otp(customer, email=None, pos_profile=None):
 	"""Send a verification code to the customer's saved email."""
@@ -519,7 +524,9 @@ def send_email_otp(customer, email=None, pos_profile=None):
 
 		expires_in = cint(body.get("expires_in")) or DEFAULT_OTP_TTL
 		resend_in = max(cint(body.get("resend_in")), RESEND_COOLDOWN)
-		return _result(True, "sent", _("Verification code sent by email."), expires_in=expires_in, resend_in=resend_in)
+		return _result(
+			True, "sent", _("Verification code sent by email."), expires_in=expires_in, resend_in=resend_in
+		)
 
 
 @frappe.whitelist(methods=["POST"])
@@ -545,9 +552,7 @@ def verify_email_otp(customer, otp, email=None, pos_profile=None):
 		state["attempts"] += 1
 		_save_state(customer, state)
 
-		http_status, body = _post(
-			VERIFY_ENDPOINT, {"phone": ctx["phone"], "email": ctx["email"], "otp": otp}
-		)
+		http_status, body = _post(VERIFY_ENDPOINT, {"phone": ctx["phone"], "email": ctx["email"], "otp": otp})
 
 		if http_status == "not_configured":
 			return _result(False, "not_configured")
@@ -621,6 +626,7 @@ def _log_unexpected(title):
 # ---------------------------------------------------------------------------
 # Customer doc events
 # ---------------------------------------------------------------------------
+
 
 def protect_email_verification_fields(doc, method=None):
 	"""validate: the verified fields can only be set by this module.

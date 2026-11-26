@@ -241,14 +241,14 @@ export function buildReceiptHTML(invoiceData) {
 				<div class="invoice-info">
 					<div><span>${__("Invoice #:")}</span><span><strong>${invoiceData.name}</strong></span></div>
 					<div><span>${__("Date:")}</span><span>${
-						invoiceData.posting_date && !invoiceData.posting_time
-							? formatDate(invoiceData.posting_date)
-							: formatDateTime(
-									invoiceData.posting_date
-										? `${invoiceData.posting_date} ${invoiceData.posting_time}`
-										: Date.now()
-								)
-					}</span></div>
+		invoiceData.posting_date && !invoiceData.posting_time
+			? formatDate(invoiceData.posting_date)
+			: formatDateTime(
+					invoiceData.posting_date
+						? `${invoiceData.posting_date} ${invoiceData.posting_time}`
+						: Date.now()
+			  )
+	}</span></div>
 					${
 						invoiceData.customer_name || invoiceData.customer
 							? `<div><span>${__("Customer:")}</span><span>${
@@ -258,12 +258,16 @@ export function buildReceiptHTML(invoiceData) {
 					}
 					${
 						salesPersonNames
-							? `<div><span>${__("Sales Person")}:</span><span>${salesPersonNames}</span></div>`
+							? `<div><span>${__(
+									"Sales Person"
+							  )}:</span><span>${salesPersonNames}</span></div>`
 							: ""
 					}
 					${
 						invoiceData.coupon_code
-							? `<div><span>${__("Coupon:")}</span><span>${invoiceData.coupon_code}</span></div>`
+							? `<div><span>${__("Coupon:")}</span><span>${
+									invoiceData.coupon_code
+							  }</span></div>`
 							: ""
 					}
 					${

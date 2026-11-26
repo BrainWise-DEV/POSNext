@@ -43,7 +43,6 @@ def _read(key: bytes) -> dict | None:
 
 
 def ttl_seconds() -> int:
-
 	try:
 		minutes = cint(frappe.get_cached_doc(SETTINGS_DOCTYPE).get("grant_ttl_minutes"))
 	except Exception:
@@ -53,7 +52,6 @@ def ttl_seconds() -> int:
 
 
 def _write(key: bytes, grant: dict) -> None:
-
 	frappe.cache().set(key, pickle.dumps(grant), ex=ttl_seconds())
 
 

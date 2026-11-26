@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { nestFreeRows, resolveFreeItemMinQty, syncCartFreeItems, totalSkuQty } from "@/utils/gwpSameItemFreeRows";
+import {
+	nestFreeRows,
+	resolveFreeItemMinQty,
+	syncCartFreeItems,
+	totalSkuQty,
+} from "@/utils/gwpSameItemFreeRows";
 
 function paidLine({ item_code = "SKU-A", quantity = 3, uom = "Nos", ...rest } = {}) {
 	return {
@@ -60,17 +65,23 @@ describe("syncCartFreeItems — same-SKU GWP carve/restore", () => {
 		const recalc = vi.fn();
 		let items = [
 			paidLine({ quantity: 2 }),
-			{ item_code: "SKU-A", quantity: 1, uom: "Nos", stock_uom: "Nos", is_free_item: 1, gwp_same_item_row: 1, rate: 0 },
+			{
+				item_code: "SKU-A",
+				quantity: 1,
+				uom: "Nos",
+				stock_uom: "Nos",
+				is_free_item: 1,
+				gwp_same_item_row: 1,
+				rate: 0,
+			},
 		];
 		items = syncCartFreeItems(items, [], { recalculateItem: recalc });
 		expect(items).toHaveLength(1);
 		expect(items[0].quantity).toBe(3);
 
-		items = syncCartFreeItems(
-			items,
-			[{ item_code: "SKU-A", qty: 1, uom: "Nos" }],
-			{ recalculateItem: recalc }
-		);
+		items = syncCartFreeItems(items, [{ item_code: "SKU-A", qty: 1, uom: "Nos" }], {
+			recalculateItem: recalc,
+		});
 		expect(items[0].quantity).toBe(3);
 		expect(items[1].gwp_same_item_row).toBe(0);
 		expect(totalSkuQty(items, "SKU-A")).toBe(4);
@@ -101,9 +112,14 @@ describe("syncCartFreeItems — same-SKU GWP carve/restore", () => {
 	it("is idempotent across echo passes (no drift of paid qty)", () => {
 		let items = [paidLine({ quantity: 3 })];
 		for (let i = 0; i < 3; i++) {
-			items = syncCartFreeItems(items, [{ item_code: "SKU-A", qty: 1, uom: "Nos", min_qty: 2 }]);
+			items = syncCartFreeItems(items, [
+				{ item_code: "SKU-A", qty: 1, uom: "Nos", min_qty: 2 },
+			]);
 		}
-		expect(items.map((x) => `${x.is_free_item ? "free" : "paid"}:${x.quantity}`)).toEqual(["paid:3", "free:1"]);
+		expect(items.map((x) => `${x.is_free_item ? "free" : "paid"}:${x.quantity}`)).toEqual([
+			"paid:3",
+			"free:1",
+		]);
 	});
 
 	it("does not carve when the free gift is a different SKU", () => {
@@ -180,7 +196,8 @@ describe("same-SKU buy 2 get 1 at exactly min_qty (PRLE-1585 style GWP rule)", (
 	const offer = { name: "PRLE-1585", min_qty: 2, eligible_items: ["ZZFS-A", "ZZFS-C"] };
 	const serverFree = { item_code: "ZZFS-A", qty: 1, uom: "Nos", pricing_rules: "PRLE-1585" };
 	const paidEligible = (cart) =>
-		cart.filter((i) => !i.is_free_item && offer.eligible_items.includes(i.item_code))
+		cart
+			.filter((i) => !i.is_free_item && offer.eligible_items.includes(i.item_code))
 			.reduce((s, i) => s + i.quantity, 0);
 
 	it.each([
@@ -200,22 +217,39 @@ describe("same-SKU buy 2 get 1 at exactly min_qty (PRLE-1585 style GWP rule)", (
 		[2, 2, 1],
 		[3, 3, 1],
 		[4, 4, 1],
-	])("scanned %i -> %i paid + %i free, still eligible across two passes", (scanned, paid, free) => {
-		let cart = [paidLine({ item_code: "ZZFS-A", quantity: scanned })];
-		for (let pass = 0; pass < 2; pass++) {
-			const freeItems = [
-				{ ...serverFree, min_qty: resolveFreeItemMinQty(serverFree, [], [{ code: offer.name, offer }]) },
-			];
-			cart = syncCartFreeItems(cart, freeItems);
-			expect(paidEligible(cart)).toBe(paid);
-			expect(paidEligible(cart)).toBeGreaterThanOrEqual(offer.min_qty);
-			expect(cart.filter((i) => i.is_free_item).map((i) => i.quantity)).toEqual([free]);
+	])(
+		"scanned %i -> %i paid + %i free, still eligible across two passes",
+		(scanned, paid, free) => {
+			let cart = [paidLine({ item_code: "ZZFS-A", quantity: scanned })];
+			for (let pass = 0; pass < 2; pass++) {
+				const freeItems = [
+					{
+						...serverFree,
+						min_qty: resolveFreeItemMinQty(
+							serverFree,
+							[],
+							[{ code: offer.name, offer }]
+						),
+					},
+				];
+				cart = syncCartFreeItems(cart, freeItems);
+				expect(paidEligible(cart)).toBe(paid);
+				expect(paidEligible(cart)).toBeGreaterThanOrEqual(offer.min_qty);
+				expect(cart.filter((i) => i.is_free_item).map((i) => i.quantity)).toEqual([free]);
+			}
 		}
-	});
+	);
 });
 
 describe("nestFreeRows — gifts under the line that earned them", () => {
-	const gift = (rest) => ({ quantity: 1, uom: "Nos", stock_uom: "Nos", is_free_item: 1, rate: 0, ...rest });
+	const gift = (rest) => ({
+		quantity: 1,
+		uom: "Nos",
+		stock_uom: "Nos",
+		is_free_item: 1,
+		rate: 0,
+		...rest,
+	});
 
 	it("puts each gift right after its paid line and counts carved qty on it", () => {
 		const rows = nestFreeRows([
@@ -233,16 +267,20 @@ describe("nestFreeRows — gifts under the line that earned them", () => {
 	});
 
 	it("keeps a gift with no matching line at the bottom, unnested", () => {
-		const rows = nestFreeRows([gift({ item_code: "GIFT-X" }), paidLine({ item_code: "SKU-A" })]);
+		const rows = nestFreeRows([
+			gift({ item_code: "GIFT-X" }),
+			paidLine({ item_code: "SKU-A" }),
+		]);
 		expect(rows.map((r) => r.item_code)).toEqual(["SKU-A", "GIFT-X"]);
 		expect(rows[1]._giftOf).toBeNull();
 		expect(rows[1]._isStandaloneFreeRow).toBe(true);
 	});
 
 	it("on-top same-SKU gift (not carved) nests under its line without inflating displayed qty", () => {
-		let cart = syncCartFreeItems([paidLine({ item_code: "SKU-A", quantity: 2 })], [
-			{ item_code: "SKU-A", qty: 1, uom: "Nos", min_qty: 2 },
-		]);
+		let cart = syncCartFreeItems(
+			[paidLine({ item_code: "SKU-A", quantity: 2 })],
+			[{ item_code: "SKU-A", qty: 1, uom: "Nos", min_qty: 2 }]
+		);
 		const rows = nestFreeRows(cart);
 		expect(rows.map((r) => r.item_code)).toEqual(["SKU-A", "SKU-A"]);
 		expect(rows[0].quantity).toBe(2);

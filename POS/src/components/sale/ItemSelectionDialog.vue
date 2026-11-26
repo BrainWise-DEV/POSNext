@@ -1,5 +1,8 @@
 <template>
-	<Dialog v-model="isOpen" :options="{ title: dialogTitle, size: mode === 'variant' ? '3xl' : 'md' }">
+	<Dialog
+		v-model="isOpen"
+		:options="{ title: dialogTitle, size: mode === 'variant' ? '3xl' : 'md' }"
+	>
 		<template #body-content>
 			<div class="py-4">
 				<div v-if="item" class="mb-4">
@@ -63,55 +66,55 @@
 							class="w-40 h-40 object-contain rounded-lg transition-opacity duration-300"
 						/>
 
-					<!-- Show selected variant info -->
-					<div
-						v-if="matchedVariant"
-						class="w-full p-3 bg-green-50 border border-green-200 rounded-lg"
-					>
-						<div class="flex items-center justify-between">
-							<div>
-								<p class="text-sm font-semibold text-gray-900">
-									{{ matchedVariant.label }}
-								</p>
-								<p class="text-xs text-gray-500">
-									{{ matchedVariant.description }}
-								</p>
-							</div>
-							<div class="text-end">
-								<p class="text-sm font-bold text-blue-600">
-									{{ formatCurrency(matchedVariant.rate || 0) }}
-								</p>
-								<p
-									class="text-xs"
-									:class="
-										(matchedVariant.stock ??
-											matchedVariant.data?.actual_qty ??
-											0) > 0
-											? 'text-green-600'
-											: 'text-red-600'
-									"
-								>
-									{{
-										__("Stock: {0}", [
-											matchedVariant.stock ??
+						<!-- Show selected variant info -->
+						<div
+							v-if="matchedVariant"
+							class="w-full p-3 bg-green-50 border border-green-200 rounded-lg"
+						>
+							<div class="flex items-center justify-between">
+								<div>
+									<p class="text-sm font-semibold text-gray-900">
+										{{ matchedVariant.label }}
+									</p>
+									<p class="text-xs text-gray-500">
+										{{ matchedVariant.description }}
+									</p>
+								</div>
+								<div class="text-end">
+									<p class="text-sm font-bold text-blue-600">
+										{{ formatCurrency(matchedVariant.rate || 0) }}
+									</p>
+									<p
+										class="text-xs"
+										:class="
+											(matchedVariant.stock ??
 												matchedVariant.data?.actual_qty ??
-												0,
-										])
-									}}
-								</p>
+												0) > 0
+												? 'text-green-600'
+												: 'text-red-600'
+										"
+									>
+										{{
+											__("Stock: {0}", [
+												matchedVariant.stock ??
+													matchedVariant.data?.actual_qty ??
+													0,
+											])
+										}}
+									</p>
+								</div>
 							</div>
 						</div>
-					</div>
 
-					<!-- Warning if combination not found -->
-					<div
-						v-else-if="allAttributesSelected"
-						class="w-full p-3 bg-orange-50 border border-orange-200 rounded-lg"
-					>
-						<p class="text-xs text-orange-700">
-							{{ __("This combination is not available") }}
-						</p>
-					</div>
+						<!-- Warning if combination not found -->
+						<div
+							v-else-if="allAttributesSelected"
+							class="w-full p-3 bg-orange-50 border border-orange-200 rounded-lg"
+						>
+							<p class="text-xs text-orange-700">
+								{{ __("This combination is not available") }}
+							</p>
+						</div>
 					</div>
 
 					<!-- Attribute groups side by side -->
@@ -121,66 +124,71 @@
 							Object.keys(variantAttributesMap).length > 1 ? 'md:grid-cols-2' : '',
 						]"
 					>
-					<!-- Group variants by attributes -->
-					<div
-						v-for="(values, attrName) in variantAttributesMap"
-						:key="attrName"
-						class="flex flex-col gap-2"
-					>
-						<label class="text-sm font-semibold text-gray-900 text-start block">{{
-							attrName
-						}}</label>
-						<div class="flex flex-wrap gap-2">
-							<button
-								v-for="value in values"
-								:key="value"
-								type="button"
-								@click="selectAttribute(attrName, value)"
-								:aria-pressed="selectedAttributes[attrName] === value"
-								:class="[
-									'min-h-[44px] px-3 py-1.5 rounded-lg border-2 text-sm font-medium transition-colors inline-flex items-center gap-2 text-start',
-									selectedAttributes[attrName] === value
-										? 'border-[#0b63ce] bg-[#0b63ce] text-white'
-										: isChipInStock(attrName, value)
+						<!-- Group variants by attributes -->
+						<div
+							v-for="(values, attrName) in variantAttributesMap"
+							:key="attrName"
+							class="flex flex-col gap-2"
+						>
+							<label class="text-sm font-semibold text-gray-900 text-start block">{{
+								attrName
+							}}</label>
+							<div class="flex flex-wrap gap-2">
+								<button
+									v-for="value in values"
+									:key="value"
+									type="button"
+									@click="selectAttribute(attrName, value)"
+									:aria-pressed="selectedAttributes[attrName] === value"
+									:class="[
+										'min-h-[44px] px-3 py-1.5 rounded-lg border-2 text-sm font-medium transition-colors inline-flex items-center gap-2 text-start',
+										selectedAttributes[attrName] === value
+											? 'border-[#0b63ce] bg-[#0b63ce] text-white'
+											: isChipInStock(attrName, value)
 											? 'border-gray-300 bg-white text-gray-800 hover:border-[#0b63ce]/50'
 											: 'border-dashed border-gray-300 bg-gray-50 text-gray-400',
-								]"
-							>
-								<span
-									v-if="swatchColor(attrName, value)"
-									class="w-4 h-4 rounded-full flex-shrink-0 ring-1 ring-black/15"
-									:style="{ backgroundColor: swatchColor(attrName, value) }"
-									aria-hidden="true"
-								></span>
-								<span class="flex flex-col leading-tight">
+									]"
+								>
 									<span
-										:class="{
-											'line-through': !isChipInStock(attrName, value) && selectedAttributes[attrName] !== value,
-										}"
-									>{{ value }}</span>
-									<span
-										v-if="resolveChip(attrName, value)"
-										:class="[
-											'text-[11px] font-normal tabular-nums',
-											selectedAttributes[attrName] === value
-												? 'text-white/85'
-												: resolveChip(attrName, value).stock > 0
+										v-if="swatchColor(attrName, value)"
+										class="w-4 h-4 rounded-full flex-shrink-0 ring-1 ring-black/15"
+										:style="{ backgroundColor: swatchColor(attrName, value) }"
+										aria-hidden="true"
+									></span>
+									<span class="flex flex-col leading-tight">
+										<span
+											:class="{
+												'line-through':
+													!isChipInStock(attrName, value) &&
+													selectedAttributes[attrName] !== value,
+											}"
+											>{{ value }}</span
+										>
+										<span
+											v-if="resolveChip(attrName, value)"
+											:class="[
+												'text-[11px] font-normal tabular-nums',
+												selectedAttributes[attrName] === value
+													? 'text-white/85'
+													: resolveChip(attrName, value).stock > 0
 													? 'text-[#0f7a4a]'
 													: 'text-gray-400',
-										]"
-									>
-										{{ formatCurrency(resolveChip(attrName, value).rate) }} ·
-										{{
-											resolveChip(attrName, value).stock > 0
-												? __("Stock: {0}", [resolveChip(attrName, value).stock])
-												: __("Out of Stock")
-										}}
+											]"
+										>
+											{{ formatCurrency(resolveChip(attrName, value).rate) }}
+											·
+											{{
+												resolveChip(attrName, value).stock > 0
+													? __("Stock: {0}", [
+															resolveChip(attrName, value).stock,
+													  ])
+													: __("Out of Stock")
+											}}
+										</span>
 									</span>
-								</span>
-							</button>
+								</button>
+							</div>
 						</div>
-					</div>
-
 					</div>
 				</div>
 
@@ -446,13 +454,38 @@ const dialogDescription = computed(() => {
 
 // Common colour names (English / Arabic) for variant swatches
 const COLOUR_SWATCHES = {
-	white: "#ffffff", ابيض: "#ffffff", black: "#111827", اسود: "#111827",
-	blue: "#2563eb", ازرق: "#2563eb", red: "#dc2626", احمر: "#dc2626",
-	green: "#16a34a", اخضر: "#16a34a", yellow: "#facc15", اصفر: "#facc15",
-	gray: "#9ca3af", grey: "#9ca3af", رمادي: "#9ca3af", silver: "#d1d5db", فضي: "#d1d5db",
-	gold: "#d4a017", ذهبي: "#d4a017", pink: "#f472b6", وردي: "#f472b6", بمبي: "#f472b6",
-	purple: "#9333ea", بنفسجي: "#9333ea", orange: "#f97316", برتقالي: "#f97316",
-	brown: "#92400e", بني: "#92400e", navy: "#1e3a8a", كحلي: "#1e3a8a", beige: "#e7d8b9", بيج: "#e7d8b9",
+	white: "#ffffff",
+	ابيض: "#ffffff",
+	black: "#111827",
+	اسود: "#111827",
+	blue: "#2563eb",
+	ازرق: "#2563eb",
+	red: "#dc2626",
+	احمر: "#dc2626",
+	green: "#16a34a",
+	اخضر: "#16a34a",
+	yellow: "#facc15",
+	اصفر: "#facc15",
+	gray: "#9ca3af",
+	grey: "#9ca3af",
+	رمادي: "#9ca3af",
+	silver: "#d1d5db",
+	فضي: "#d1d5db",
+	gold: "#d4a017",
+	ذهبي: "#d4a017",
+	pink: "#f472b6",
+	وردي: "#f472b6",
+	بمبي: "#f472b6",
+	purple: "#9333ea",
+	بنفسجي: "#9333ea",
+	orange: "#f97316",
+	برتقالي: "#f97316",
+	brown: "#92400e",
+	بني: "#92400e",
+	navy: "#1e3a8a",
+	كحلي: "#1e3a8a",
+	beige: "#e7d8b9",
+	بيج: "#e7d8b9",
 };
 
 // Computed: Stock warning when quantity exceeds available stock
@@ -539,7 +572,9 @@ const matchedVariant = computed(() => {
 /** Variants matching the current pick with one attribute set to `value` */
 function variantsWith(attributeName, value) {
 	const pick = { ...selectedAttributes.value, [attributeName]: value };
-	return options.value.filter((o) => Object.entries(pick).every(([k, v]) => o.attributes[k] === v));
+	return options.value.filter((o) =>
+		Object.entries(pick).every(([k, v]) => o.attributes[k] === v)
+	);
 }
 
 /** True when the chip can form an in-stock variant with the other picked attributes */
@@ -550,7 +585,9 @@ function isChipInStock(attributeName, value) {
 /** The single variant this chip resolves to when every other attribute is picked */
 function resolveChip(attributeName, value) {
 	const others = Object.keys(variantAttributesMap.value).filter((k) => k !== attributeName);
-	return others.every((k) => selectedAttributes.value[k]) ? variantsWith(attributeName, value)[0] || null : null;
+	return others.every((k) => selectedAttributes.value[k])
+		? variantsWith(attributeName, value)[0] || null
+		: null;
 }
 
 /** Swatch colour for a colour attribute value, matched on the full value or its first word */
@@ -715,7 +752,7 @@ function buildUomOptions() {
 						uomData.uom,
 						uomData.conversion_factor,
 						props.item.stock_uom,
-					]),
+				  ]),
 		rate: getUomPrice(uomData.uom, uomData.conversion_factor),
 		priceLabel: __("per {0}", [uomData.uom]),
 	}));

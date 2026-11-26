@@ -1,11 +1,11 @@
 <template>
-	<Dialog
-		v-model="show"
-		:key="dialogKey"
-		:options="dialogOptions"
-	>
+	<Dialog v-model="show" :key="dialogKey" :options="dialogOptions">
 		<template #body-content>
-			<div v-if="createdCustomer" class="flex flex-col gap-4" data-testid="created-verify-step">
+			<div
+				v-if="createdCustomer"
+				class="flex flex-col gap-4"
+				data-testid="created-verify-step"
+			>
 				<p class="text-sm text-gray-700">
 					{{ __("Customer {0} created successfully", [createdCustomer.customer_name]) }}
 				</p>
@@ -537,7 +537,9 @@ const currentVerification = computed(
 const verificationVerified = computed(() =>
 	Boolean(Number(currentVerification.value.custom_email_verified))
 );
-const verificationVerifiedEmail = computed(() => currentVerification.value.custom_verified_email || "");
+const verificationVerifiedEmail = computed(
+	() => currentVerification.value.custom_verified_email || ""
+);
 
 const requiresSplitCustomerName = computed(() => Boolean(posSettingsStore.miraayaInstalled));
 
@@ -857,13 +859,17 @@ const createCustomerResource = createResource({
 		}
 		// Offer "Verify email now" when enabled (or the new customer is an F&F
 		// member, who needs a verified email), online and a real email was entered
-		const realEmail = hasRealEmail(data.email_id || customerData.value.email_id) && !isOffline();
+		const realEmail =
+			hasRealEmail(data.email_id || customerData.value.email_id) && !isOffline();
 		const offerVerification =
 			realEmail &&
 			(posSettingsStore.customerEmailVerificationEnabled ||
 				(await fetchFnfMembership(data.name, props.posProfile)));
 		if (offerVerification) {
-			createdCustomer.value = { ...data, email_id: data.email_id || customerData.value.email_id };
+			createdCustomer.value = {
+				...data,
+				email_id: data.email_id || customerData.value.email_id,
+			};
 			return;
 		}
 		emit("customer-created", data);
@@ -893,7 +899,7 @@ const updateCustomerResource = createResource({
 			? {
 					custom_first_name: customerData.value.custom_first_name || "",
 					custom_last_name: customerData.value.custom_last_name || "",
-				}
+			  }
 			: {}),
 		pos_profile: props.posProfile,
 	}),
@@ -1065,10 +1071,7 @@ const loadDialogData = async () => {
 		governoratesResource.reload(),
 	]);
 	if (isEditMode.value && editingCustomerName.value) {
-		await Promise.all([
-			customerDetailsResource.reload(),
-			customerLocationResource.reload(),
-		]);
+		await Promise.all([customerDetailsResource.reload(), customerLocationResource.reload()]);
 	}
 	if (customerData.value.custom_governorate) {
 		await districtsResource.reload();
@@ -1163,7 +1166,6 @@ const clearExistingDuplicate = () => {
 };
 
 const resetForm = () => {
-
 	const settings = sellingSettingsResource.data || {};
 	Object.assign(customerData.value, {
 		customer_name: "",

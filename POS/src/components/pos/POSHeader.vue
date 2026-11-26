@@ -24,7 +24,9 @@
 				<!-- Left Side: Brand Info -->
 				<div class="flex items-center gap-1 sm:gap-4 min-w-0 flex-1 overflow-hidden">
 					<div class="min-w-0 flex-shrink overflow-hidden flex items-baseline gap-2">
-						<h1 class="text-pos-sm sm:text-pos-md font-bold text-pos-ink truncate flex-shrink">
+						<h1
+							class="text-pos-sm sm:text-pos-md font-bold text-pos-ink truncate flex-shrink"
+						>
 							{{ "POS Next" }}
 						</h1>
 						<span
