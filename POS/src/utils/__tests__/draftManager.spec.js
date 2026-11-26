@@ -32,7 +32,8 @@ function installFakeIndexedDB() {
 			}),
 		delete: (id) => respond(() => rows.delete(id)),
 		index: () => ({
-			get: (draftId) => respond(() => [...rows.values()].find((r) => r.draft_id === draftId)),
+			get: (draftId) =>
+				respond(() => [...rows.values()].find((r) => r.draft_id === draftId)),
 		}),
 	};
 	const database = {
@@ -73,7 +74,9 @@ describe("draftManager update/delete (no async Promise executors)", () => {
 	});
 
 	it("rejects when updating a draft that does not exist", async () => {
-		await expect(manager.updateDraft("missing", { customer: "C" })).rejects.toThrow("Draft not found");
+		await expect(manager.updateDraft("missing", { customer: "C" })).rejects.toThrow(
+			"Draft not found"
+		);
 	});
 
 	it("deletes an existing draft", async () => {
