@@ -4,20 +4,28 @@ import { computed, ref, toRaw } from "vue";
 import { isOffline, getCachedItem } from "@/utils/offline";
 import { useSerialNumberStore } from "@/stores/serialNumber";
 import { shiftState } from "@/composables/useShift";
-import { CoalescingMutex } from "@/utils/mutex";
+import { SKIPPED, SkipIfBusyMutex } from "@/utils/mutex";
+import { call } from "@/utils/apiWrapper";
 import { logger } from "@/utils/logger";
 import { roundCurrency } from "@/utils/currency";
 import { fnfLockedDiscountAmount } from "@/utils/friendsAndFamily";
 import { preCouponLineDiscount } from "@/utils/couponLines";
+import { createSubmitRequestTracker, isSubmitTimeoutError } from "@/utils/submitRequestId";
+import { recoverTimedOutSubmit } from "@/utils/submitTimeoutRecovery";
 
 const log = logger.create("Invoice");
 
-// Shared mutex for invoice submission across all useInvoice instances
-// This prevents duplicate invoice creation from rapid clicks or concurrent submissions
-const submitMutex = new CoalescingMutex({
+// Shared gate for invoice submission across all useInvoice instances.
+// A submit that arrives while another is in flight is dropped (returns null), never
+// queued: queuing would re-run it after the first finishes, against an already
+// cleared cart.
+const submitGate = new SkipIfBusyMutex({
 	timeout: 60000,
 	name: "InvoiceSubmit",
 });
+
+// One idempotency key per unchanged checkout payload, shared by all instances.
+const submitRequests = createSubmitRequestTracker();
 
 export function useInvoice() {
 	// Serial Number Store for returning serials when items are removed
@@ -1023,7 +1031,10 @@ export function useInvoice() {
 		 * @param {string|null} deliveryDate - Delivery date for Sales Orders
 		 * @param {number} writeOffAmount - Amount to write off (small remaining balances)
 		 */
-		return await submitMutex.withLock(async () => {
+		// Set once the cashier has been told this attempt timed out: the request may still
+		// finish later, and must then leave the (possibly new) cart and guard alone.
+		const attempt = { abandoned: false };
+		return await submitGate.run(async () => {
 			// Check if already submitting (belt and suspenders with mutex)
 			if (isSubmitting.value) {
 				log.warn("Invoice submission already in progress, skipping duplicate request");
@@ -1106,6 +1117,13 @@ export function useInvoice() {
 					submitData.is_credit_sale = 1;
 				}
 
+				// Same payload => same key, so a retry after a client timeout is
+				// de-duplicated by the server instead of creating a second invoice.
+				submitData.client_request_id = submitRequests.idFor({
+					invoiceData,
+					submitData: { ...submitData, client_request_id: undefined },
+				});
+
 				try {
 					const result = await submitInvoiceResource.submit({
 						invoice: invoiceDoc,
@@ -1129,7 +1147,10 @@ export function useInvoice() {
 						throw detailedError;
 					}
 
-					resetInvoice();
+					if (!attempt.abandoned) {
+						submitRequests.reset();
+						resetInvoice();
+					}
 					return result;
 				} catch (error) {
 					// Preserve original error object with all its properties
@@ -1173,9 +1194,36 @@ export function useInvoice() {
 				console.error("Submit invoice outer error:", error);
 				throw error;
 			} finally {
-				isSubmitting.value = false;
+				if (!attempt.abandoned) isSubmitting.value = false;
 			}
-		}); // End of submitMutex.withLock
+		})
+			.then((outcome) => (outcome === SKIPPED ? null : outcome))
+			.catch(async (error) => {
+				if (!isSubmitTimeoutError(error)) throw error;
+
+				// The gate gave up, but the first request keeps running on the server.
+				// Release the guard so the cashier is never stuck, then find out whether
+				// the sale was in fact completed.
+				attempt.abandoned = true;
+				isSubmitting.value = false;
+				const requestId = submitRequests.current();
+				log.warn("Invoice submit timed out client-side; checking the server", { requestId });
+
+				const recovered = await recoverTimedOutSubmit(requestId, {
+					check: (id) => call("pos_next.api.invoices.check_offline_invoice_synced", { offline_id: id }),
+				});
+				if (recovered) {
+					submitRequests.reset();
+					resetInvoice();
+					return recovered;
+				}
+
+				// Not found yet. Retrying is safe: the same key makes the server return
+				// the invoice if it completes, rather than creating a second one.
+				error.timeoutUnresolved = true;
+				error.message = `${error.message}. The sale may still be processing on the server: check Invoice History before retrying. Retrying will not create a duplicate.`;
+				throw error;
+			}); // End of submitGate.run
 	}
 
 	/**
