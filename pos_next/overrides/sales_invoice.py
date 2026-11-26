@@ -85,6 +85,23 @@ class CustomSalesInvoice(SalesInvoice):
 	for wallet payment methods marked with is_wallet_payment.
 	"""
 
+	@frappe.whitelist()
+	def set_missing_values(self, for_validate=False):
+		"""Skip the one validate pass that repeats update_invoice's explicit pass.
+
+		update_invoice fills item details (set_missing_values) and then saves, and
+		save() runs validate, which does the very same lookup again on the same
+		unchanged document: ~100 item-detail lookups per 100-line cart, done while
+		the naming-series lock is held. ``pos_missing_values_done`` is set by
+		update_invoice right after its explicit pass and consumed here, so only
+		that one repeat is skipped. Any other caller (including the submit-time
+		validate, which re-reads items from the client) still runs it in full.
+		"""
+		if for_validate and self.flags.get("pos_missing_values_done"):
+			self.flags.pos_missing_values_done = False
+			return None
+		return super().set_missing_values(for_validate)
+
 	def validate(self):
 		if cint(self.is_pos):
 			self._ensure_pos_customer()

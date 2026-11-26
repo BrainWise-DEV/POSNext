@@ -18,6 +18,7 @@ from collections import defaultdict
 import frappe
 from frappe import _
 from frappe.utils import cint, flt
+from frappe.utils.caching import request_cache
 
 FIELD_ITEM_COMMISSIONS = "custom_item_commissions"
 FIELD_ITEM_GROUP_COMMISSIONS = "custom_item_group_commissions"
@@ -196,6 +197,28 @@ def resolve_commission_rate(
 	return flt(frappe.db.get_value("Sales Person", sales_person, "commission_rate") or 0)
 
 
+@request_cache
+def _load_item_master_dims(item_code: str) -> dict:
+	"""Read item_group, brand, grant_commission for one Item (once per request).
+
+	A submit resolves the same item dimensions many times (commission build,
+	rate lookup, validation, three saves). Without the request cache each lookup
+	was its own query: ~12 per cart line.
+	"""
+	row = frappe.db.get_value(
+		"Item",
+		item_code,
+		["item_group", "brand", "grant_commission"],
+		as_dict=True,
+	)
+	return {
+		"item_group": row.item_group if row else None,
+		"brand": row.brand if row else None,
+		# ERPNext Item default for grant_commission is 1
+		"grant_commission": cint(row.grant_commission) if row and row.grant_commission is not None else 1,
+	}
+
+
 def _get_item_master_dims(item_code: str | None, cache: dict | None = None) -> dict:
 	"""Load item_group, brand, grant_commission from Item master (never trust client)."""
 	if not item_code:
@@ -204,18 +227,7 @@ def _get_item_master_dims(item_code: str | None, cache: dict | None = None) -> d
 	if cache is not None and item_code in cache:
 		return cache[item_code]
 
-	row = frappe.db.get_value(
-		"Item",
-		item_code,
-		["item_group", "brand", "grant_commission"],
-		as_dict=True,
-	)
-	dims = {
-		"item_group": row.item_group if row else None,
-		"brand": row.brand if row else None,
-		# ERPNext Item default for grant_commission is 1
-		"grant_commission": cint(row.grant_commission) if row and row.grant_commission is not None else 1,
-	}
+	dims = _load_item_master_dims(item_code)
 	if cache is not None:
 		cache[item_code] = dims
 	return dims
