@@ -28,7 +28,9 @@ vi.mock("@/composables/useToast", () => ({
 }));
 vi.mock("@/stores/posShift", () => ({ usePOSShiftStore: () => ({}) }));
 vi.mock("@/stores/posCart", () => ({ usePOSCartStore: () => ({ currentDraftId: "D-OPEN" }) }));
-vi.mock("@/stores/posDrafts", () => ({ usePOSDraftsStore: () => ({ returnDraftSerials: vi.fn() }) }));
+vi.mock("@/stores/posDrafts", () => ({
+	usePOSDraftsStore: () => ({ returnDraftSerials: vi.fn() }),
+}));
 
 const { default: DraftInvoicesDialog } = await import("../DraftInvoicesDialog.vue");
 

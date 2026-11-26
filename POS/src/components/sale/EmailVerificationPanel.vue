@@ -1,5 +1,8 @@
 <template>
-	<div class="rounded-lg border border-gray-200 bg-gray-50 p-3" data-testid="email-verification-panel">
+	<div
+		class="rounded-lg border border-gray-200 bg-gray-50 p-3"
+		data-testid="email-verification-panel"
+	>
 		<!-- Verified badge (idle view only; stays correct while the email is unchanged) -->
 		<div
 			v-if="view === 'verified'"
@@ -39,8 +42,16 @@
 			<p v-else-if="emailDirty" class="text-xs text-gray-500" data-testid="unsaved-msg">
 				{{ __("Save the customer's email before verifying it.") }}
 			</p>
-			<p v-else-if="!magentoSynced" class="text-xs text-amber-700" data-testid="sync-pending-hint">
-				{{ __("Customer is saved but not synced with Magento yet. Verification may take a moment to become available.") }}
+			<p
+				v-else-if="!magentoSynced"
+				class="text-xs text-amber-700"
+				data-testid="sync-pending-hint"
+			>
+				{{
+					__(
+						"Customer is saved but not synced with Magento yet. Verification may take a moment to become available."
+					)
+				}}
 			</p>
 		</div>
 
@@ -50,7 +61,9 @@
 			class="flex items-center gap-2 text-sm text-gray-600"
 			data-testid="sending"
 		>
-			<span class="inline-block h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-blue-600" />
+			<span
+				class="inline-block h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-blue-600"
+			/>
 			{{ __("Sending code…") }}
 		</div>
 
@@ -82,12 +95,16 @@
 					:disabled="!otpComplete || state === 'verifying' || offline"
 					@click="verify"
 				>
-					<span v-if="state === 'verifying'" data-testid="verifying">{{ __("Verifying email…") }}</span>
+					<span v-if="state === 'verifying'" data-testid="verifying">{{
+						__("Verifying email…")
+					}}</span>
 					<span v-else>{{ __("Verify") }}</span>
 				</button>
 			</div>
 			<div class="flex items-center justify-between text-xs text-gray-500">
-				<span data-testid="countdown">{{ __("Code expires in {0}", [countdownLabel]) }}</span>
+				<span data-testid="countdown">{{
+					__("Code expires in {0}", [countdownLabel])
+				}}</span>
 				<button
 					type="button"
 					class="text-blue-600 disabled:text-gray-400 disabled:cursor-not-allowed"
@@ -112,10 +129,17 @@
 			</button>
 		</div>
 
-		<p v-if="state === 'error' && errorMessage" class="mt-2 text-xs text-red-600" data-testid="error-msg" role="alert">
+		<p
+			v-if="state === 'error' && errorMessage"
+			class="mt-2 text-xs text-red-600"
+			data-testid="error-msg"
+			role="alert"
+		>
 			{{ errorMessage }}
 		</p>
-		<p v-if="infoMessage" class="mt-2 text-xs text-gray-600" data-testid="info-msg">{{ infoMessage }}</p>
+		<p v-if="infoMessage" class="mt-2 text-xs text-gray-600" data-testid="info-msg">
+			{{ infoMessage }}
+		</p>
 	</div>
 </template>
 
@@ -304,7 +328,8 @@ async function sendCode() {
 			cooldownUntil.value = now.value + Number(res.retry_after) * 1000;
 			startTimer();
 		}
-		const keep = previous === "code_sent" ? "code_sent" : previous === "expired" ? "expired" : "idle";
+		const keep =
+			previous === "code_sent" ? "code_sent" : previous === "expired" ? "expired" : "idle";
 		fail(messageFrom(res, __("Could not send the code, please try again.")), keep);
 	} catch (err) {
 		fail(exceptionMessage(err), previous === "code_sent" ? "code_sent" : "idle");
@@ -330,7 +355,10 @@ async function verify() {
 			justVerifiedEmail.value = res.verified_email || props.email.trim();
 			// The verified badge is derived from the idle view + matching email
 			setState("idle");
-			emit("verified", { customer: props.customer, verified_email: justVerifiedEmail.value });
+			emit("verified", {
+				customer: props.customer,
+				verified_email: justVerifiedEmail.value,
+			});
 			return;
 		}
 		if (res?.code === "expired") {

@@ -19,11 +19,15 @@ const log = logger.create("TranslationCache");
  * @module translationCache
  */
 
+/* global __BUILD_VERSION__ -- injected by Vite `define` (vite.config.js) */
+
 /** @constant {number} Cache time-to-live in milliseconds (24 hours) */
 const CACHE_TTL = 24 * 60 * 60 * 1000;
 
 /** @constant {string} Bundle format version plus the build, so each release refetches its strings */
-export const CACHE_VERSION = `2-${typeof __BUILD_VERSION__ !== "undefined" ? __BUILD_VERSION__ : "dev"}`;
+export const CACHE_VERSION = `2-${
+	typeof __BUILD_VERSION__ !== "undefined" ? __BUILD_VERSION__ : "dev"
+}`;
 
 /** @type {Map<string, TranslationEntry>} In-memory cache for fast lookups */
 const memoryCache = new Map();

@@ -297,7 +297,8 @@
 													class="block text-sm font-medium text-gray-700 mb-2 text-start"
 												>
 													{{ __("Sales Person") }}
-													<span class="ms-1 text-xs text-gray-400 font-normal"
+													<span
+														class="ms-1 text-xs text-gray-400 font-normal"
 														>({{ __("Optional") }})</span
 													>
 												</label>
@@ -398,29 +399,49 @@
 															)
 														}}
 													</div>
-													<div class="mt-2 grid grid-cols-3 gap-2 text-center">
+													<div
+														class="mt-2 grid grid-cols-3 gap-2 text-center"
+													>
 														<div>
 															<div class="text-gray-500">
 																{{ __("Original price") }}
 															</div>
-															<div class="font-semibold text-gray-900">
-																{{ formatCurrency(fnfBreakdown.original) }}
+															<div
+																class="font-semibold text-gray-900"
+															>
+																{{
+																	formatCurrency(
+																		fnfBreakdown.original
+																	)
+																}}
 															</div>
 														</div>
 														<div>
 															<div class="text-gray-500">
 																{{ __("F&F discount") }}
 															</div>
-															<div class="font-semibold text-pink-700">
-																-{{ formatCurrency(fnfBreakdown.discount) }}
+															<div
+																class="font-semibold text-pink-700"
+															>
+																-{{
+																	formatCurrency(
+																		fnfBreakdown.discount
+																	)
+																}}
 															</div>
 														</div>
 														<div>
 															<div class="text-gray-500">
 																{{ __("Final price") }}
 															</div>
-															<div class="font-semibold text-gray-900">
-																{{ formatCurrency(fnfBreakdown.final) }}
+															<div
+																class="font-semibold text-gray-900"
+															>
+																{{
+																	formatCurrency(
+																		fnfBreakdown.final
+																	)
+																}}
 															</div>
 														</div>
 													</div>
@@ -428,7 +449,11 @@
 														v-if="localItem && localItem.fnf_capped"
 														class="mt-2 text-amber-700"
 													>
-														{{ __("Friends & Family reduced by the discount limit") }}
+														{{
+															__(
+																"Friends & Family reduced by the discount limit"
+															)
+														}}
 													</p>
 												</div>
 											</div>
@@ -505,10 +530,7 @@
 													v-if="hasPricingRules"
 													class="mt-2 text-xs text-amber-600 flex items-center gap-1"
 												>
-													<FeatherIcon
-														name="lock"
-														class="w-3 h-3"
-													/>
+													<FeatherIcon name="lock" class="w-3 h-3" />
 													{{ __("Locked (promotional offer)") }}
 												</p>
 											</div>
@@ -517,7 +539,11 @@
 												v-else-if="isItemLevelPromotion"
 												class="border-t border-gray-200 pt-4 text-xs text-amber-700"
 											>
-												{{ __("SKU promotion applied — discount is locked") }}
+												{{
+													__(
+														"SKU promotion applied — discount is locked"
+													)
+												}}
 											</div>
 
 											<!-- Totals -->
@@ -615,10 +641,7 @@ import {
 import { call } from "@/utils/apiWrapper";
 import { loadSalesPersonsForProfile } from "@/utils/salesPersonsList";
 import { isFnfLine, lineBreakdown } from "@/utils/friendsAndFamily";
-import {
-	scaleRateForUomChange,
-	shouldPreserveRateOnUomChange,
-} from "@/utils/uomPricingLock";
+import { scaleRateForUomChange, shouldPreserveRateOnUomChange } from "@/utils/uomPricingLock";
 import { Button, FeatherIcon, createResource } from "frappe-ui";
 import { computed, ref, watch } from "vue";
 import SelectInput from "@/components/common/SelectInput.vue";
@@ -760,11 +783,7 @@ const hasPricingRules = computed(() => {
 	if (!localItem.value) return false;
 	if (localItem.value.is_free_item) return true;
 	if (itemHasActivePromotion.value) return true;
-	return isItemCoveredByOffer(
-		localItem.value,
-		offersStore.availableOffers,
-		localQuantity.value
-	);
+	return isItemCoveredByOffer(localItem.value, offersStore.availableOffers, localQuantity.value);
 });
 
 const isItemLevelPromotion = computed(() => {
@@ -894,8 +913,7 @@ watch(
 
 			// Initialize discount
 			const usesExactPromoDiscount =
-				(newItem.discount_source === "free_item" ||
-					newItem.discount_source === "gwp") &&
+				(newItem.discount_source === "free_item" || newItem.discount_source === "gwp") &&
 				Number(newItem.discount_amount) > 0;
 			if (usesExactPromoDiscount || isFnfLine(newItem)) {
 				// Exact server amount — an F&F capped line has an unrounded %.
@@ -1081,11 +1099,7 @@ async function handleUomChange(newUom) {
 			scaleRateForUomChange(localRate.value, oldConversion, newConversionFactor)
 		);
 		const scaledListRate = roundCurrency(
-			scaleRateForUomChange(
-				originalPriceListRate.value,
-				oldConversion,
-				newConversionFactor
-			)
+			scaleRateForUomChange(originalPriceListRate.value, oldConversion, newConversionFactor)
 		);
 
 		localRate.value = scaledRate;
@@ -1254,8 +1268,7 @@ function updateItem() {
 	// ========================================================================
 	// ITEM DISCOUNT VALIDATION — block manual discount when offer is applied
 	// ========================================================================
-	let discountPercentage =
-		discountType.value === "percentage" ? discountValue.value : 0;
+	let discountPercentage = discountType.value === "percentage" ? discountValue.value : 0;
 	let discountAmount = discountType.value === "amount" ? discountValue.value : 0;
 
 	if (isFnfItem.value) {
@@ -1276,9 +1289,7 @@ function updateItem() {
 				? Number(localItem.value.discount_percentage) || 0
 				: 0;
 		const initAmt =
-			discountType.value === "amount"
-				? Number(localItem.value.discount_amount) || 0
-				: 0;
+			discountType.value === "amount" ? Number(localItem.value.discount_amount) || 0 : 0;
 
 		if (attemptedPct !== initPct || attemptedAmt !== initAmt) {
 			showError(
@@ -1315,9 +1326,7 @@ function updateItem() {
 		is_rate_manually_edited: isRateManuallyEdited ? 1 : 0,
 		original_rate: isRateManuallyEdited ? originalPriceListRate.value : null,
 		sales_person: selectedSp,
-		sales_person_name: selectedSp
-			? selectedSpMeta?.sales_person_name || selectedSp
-			: null,
+		sales_person_name: selectedSp ? selectedSpMeta?.sales_person_name || selectedSp : null,
 	};
 
 	// Update serial numbers if item has serials

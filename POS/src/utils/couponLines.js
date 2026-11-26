@@ -53,7 +53,9 @@ export function restorePreCouponDiscount(item) {
 export function preCouponLineDiscount(item) {
 	const pre = preCouponDiscount(item);
 	const unitPrice =
-		item.is_rate_manually_edited === 1 ? Number(item.rate) || 0 : Number(item.price_list_rate || item.rate) || 0;
+		item.is_rate_manually_edited === 1
+			? Number(item.rate) || 0
+			: Number(item.price_list_rate || item.rate) || 0;
 	const base = unitPrice * (Number(item.quantity) || 0);
 	if (pre.discount_percentage > 0) return (base * pre.discount_percentage) / 100;
 	return Math.min(Number(pre.discount_amount) || 0, base);

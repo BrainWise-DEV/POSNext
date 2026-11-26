@@ -1,7 +1,6 @@
 # Copyright (c) 2025, BrainWise and contributors
 # For license information, please see license.txt
 
-from __future__ import unicode_literals
 
 import json
 from functools import lru_cache
@@ -2027,7 +2026,17 @@ def get_invoice(invoice_name):
 
 
 @frappe.whitelist()
-def get_invoices(pos_profile: str, search=None, limit: int = 20, offset=0, from_date=None, to_date=None, include_items=False, docstatus=None, start: int = 0) -> list:
+def get_invoices(
+	pos_profile: str,
+	search=None,
+	limit: int = 20,
+	offset=0,
+	from_date=None,
+	to_date=None,
+	include_items=False,
+	docstatus=None,
+	start: int = 0,
+) -> list:
 	"""
 	Get paginated, server-side filtered list of invoices for a POS Profile.
 
@@ -2067,7 +2076,7 @@ def get_invoices(pos_profile: str, search=None, limit: int = 20, offset=0, from_
 	params = {"pos_profile": pos_profile, "limit": limit, "offset": offset}
 
 	if docstatus is not None:
-		if isinstance(docstatus, (list, tuple)):
+		if isinstance(docstatus, list | tuple):
 			docstatus_list = [cint(d) for d in docstatus]
 			conditions.append(f"docstatus IN ({','.join(map(str, docstatus_list))})")
 		else:
@@ -3728,7 +3737,9 @@ def apply_offers(invoice_data, selected_offers=None):
 			"items": [dict(item) for item in prepared_items],
 			# Free rows carry the item image so gifts not already in the cart show it
 			"free_items": [
-				dict(item, image=item.get("image") or frappe.get_cached_value("Item", item.item_code, "image"))
+				dict(
+					item, image=item.get("image") or frappe.get_cached_value("Item", item.item_code, "image")
+				)
 				for item in free_items_map.values()
 			],
 			"applied_pricing_rules": sorted(applied_rules),

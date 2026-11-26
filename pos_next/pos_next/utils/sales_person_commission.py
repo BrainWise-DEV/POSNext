@@ -387,7 +387,7 @@ def drop_missing_sales_persons(invoice_doc, invoice_level_team=None) -> list:
 	invoice_doc.flags.pos_dropped_sales_persons = sorted(missing)
 	frappe.log_error(
 		title="POS Next: dropped missing Sales Persons",
-		message="Invoice {0}: Sales Person(s) {1} no longer exist and were removed from the "
+		message="Invoice {}: Sales Person(s) {} no longer exist and were removed from the "
 		"sales team.".format(_doc_get(invoice_doc, "name") or "(new)", ", ".join(sorted(missing))),
 	)
 	return [row for row in team if _row_sales_person(row) not in missing]

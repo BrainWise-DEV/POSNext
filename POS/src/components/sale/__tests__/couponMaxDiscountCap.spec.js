@@ -45,7 +45,13 @@ vi.mock("@/composables/useInvoice", () => ({
 describe("CouponDialog max discount cap", () => {
 	it("emits the capped amount with percentage 0 so the cart keeps the cap", async () => {
 		const wrapper = mount(CouponDialog, {
-			props: { modelValue: true, subtotal: 9952, grandTotal: 9952, customer: "Walk-In Customer", company: "Nexus" },
+			props: {
+				modelValue: true,
+				subtotal: 9952,
+				grandTotal: 9952,
+				customer: "Walk-In Customer",
+				company: "Nexus",
+			},
 			global: { mocks: { __: globalThis.__ } },
 		});
 		wrapper.vm.$.setupState.couponCode = "WELCOME10";

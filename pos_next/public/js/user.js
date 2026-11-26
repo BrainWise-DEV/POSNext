@@ -1,8 +1,6 @@
 // Copyright (c) 2026, BrainWise and contributors
 // For license information, please see license.txt
 
-
-
 frappe.ui.form.on("User", {
 	refresh(frm) {
 		if (frm.is_new()) {
@@ -35,7 +33,6 @@ frappe.ui.form.on("User", {
 });
 
 function show_pin_dialog(frm, has_pin, is_self, pin_length, strict_pin_enforced) {
-
 	const needs_current = has_pin && is_self;
 	const strictness_hint = strict_pin_enforced
 		? __("Avoid repeated digits and simple sequences. ")
@@ -61,7 +58,13 @@ function show_pin_dialog(frm, has_pin, is_self, pin_length, strict_pin_enforced)
 				length: pin_length,
 				description: __("Exactly {0} digits", [pin_length]),
 			},
-			{ fieldname: "confirm_pin", fieldtype: "Password", label: __("Confirm PIN"), reqd: 1, length: pin_length },
+			{
+				fieldname: "confirm_pin",
+				fieldtype: "Password",
+				label: __("Confirm PIN"),
+				reqd: 1,
+				length: pin_length,
+			},
 			{
 				fieldtype: "HTML",
 				options: `<p class="text-muted small">${strictness_hint}${__(

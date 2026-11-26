@@ -39,6 +39,8 @@ export function offerBenefit(offer, formatCurrency, itemName = (code) => code) {
 
 /** Label for ERPNext's raw offer type ("Give Product", "Item Price"). */
 export function offerTypeLabel(type) {
-	return { "Give Product": __("Free gift"), "Item Price": __("Price discount") }[type] || __("Discount");
+	return (
+		{ "Give Product": __("Free gift"), "Item Price": __("Price discount") }[type] ||
+		__("Discount")
+	);
 }
-

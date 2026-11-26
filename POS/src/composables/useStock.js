@@ -81,7 +81,10 @@ export function useStock() {
 	 * @returns {Object} Same shape as getStockStatus
 	 */
 	function getItemStockStatus(item) {
-		return getStockStatus(item?.actual_qty ?? item?.stock_qty ?? 0, getLowStockThreshold(item));
+		return getStockStatus(
+			item?.actual_qty ?? item?.stock_qty ?? 0,
+			getLowStockThreshold(item)
+		);
 	}
 
 	return {

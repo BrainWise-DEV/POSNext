@@ -109,7 +109,7 @@ describe("offline expense queue helpers", () => {
 				remarks: "Taxi",
 			},
 			[{ name: "r.txt", type: "text/plain", size: 5, blob }],
-			{ maximum_expense_amount: 100, shift_expense_total: 0, max_file_size: 1024 },
+			{ maximum_expense_amount: 100, shift_expense_total: 0, max_file_size: 1024 }
 		);
 
 		expect(result.success).toBe(true);
@@ -131,7 +131,7 @@ describe("offline expense queue helpers", () => {
 				remarks: "A",
 			},
 			[],
-			{ maximum_expense_amount: 100, shift_expense_total: 0 },
+			{ maximum_expense_amount: 100, shift_expense_total: 0 }
 		);
 		const id2 = await saveOfflineExpense(
 			{
@@ -143,7 +143,7 @@ describe("offline expense queue helpers", () => {
 				remarks: "B",
 			},
 			[],
-			{ maximum_expense_amount: 100, shift_expense_total: 5 },
+			{ maximum_expense_amount: 100, shift_expense_total: 5 }
 		);
 		expenseRows.set(id2.id, { ...expenseRows.get(id2.id), synced: true });
 
@@ -161,16 +161,16 @@ describe("offline expense queue helpers", () => {
 				remarks: "Del",
 			},
 			[],
-			{ maximum_expense_amount: 100, shift_expense_total: 0 },
+			{ maximum_expense_amount: 100, shift_expense_total: 0 }
 		);
 		await deleteOfflineExpense(saved.id);
 		expect(expenseRows.has(saved.id)).toBe(false);
 	});
 
 	it("rejects invalid file type", () => {
-		expect(
-			validateExpenseQueueAttachment({ name: "x.exe", size: 10 }, 1024),
-		).toMatch(/not allowed/i);
+		expect(validateExpenseQueueAttachment({ name: "x.exe", size: 10 }, 1024)).toMatch(
+			/not allowed/i
+		);
 	});
 
 	it("rejects queue save when max missing", async () => {
@@ -185,8 +185,8 @@ describe("offline expense queue helpers", () => {
 					remarks: "No max",
 				},
 				[],
-				{ maximum_expense_amount: 0, shift_expense_total: 0 },
-			),
+				{ maximum_expense_amount: 0, shift_expense_total: 0 }
+			)
 		).rejects.toThrow(/not configured/i);
 	});
 
@@ -201,7 +201,7 @@ describe("offline expense queue helpers", () => {
 				remarks: "First",
 			},
 			[],
-			{ maximum_expense_amount: 100, shift_expense_total: 0 },
+			{ maximum_expense_amount: 100, shift_expense_total: 0 }
 		);
 
 		await expect(
@@ -215,8 +215,8 @@ describe("offline expense queue helpers", () => {
 					remarks: "Over",
 				},
 				[],
-				{ maximum_expense_amount: 100, shift_expense_total: 0 },
-			),
+				{ maximum_expense_amount: 100, shift_expense_total: 0 }
+			)
 		).rejects.toThrow(/exceeds/i);
 	});
 
@@ -226,16 +226,16 @@ describe("offline expense queue helpers", () => {
 				maximumExpenseAmount: 100,
 				shiftExpenseTotal: 20,
 				pendingLocalTotal: 30,
-			}),
+			})
 		).toBe(50);
 	});
 
 	it("expense dialog cache key is scoped to profile and shift", () => {
 		expect(expenseDialogCacheKey("PROFILE-1", "SHIFT-A")).toBe(
-			"expense_dialog_cache:PROFILE-1:SHIFT-A",
+			"expense_dialog_cache:PROFILE-1:SHIFT-A"
 		);
 		expect(expenseDialogCacheKey("PROFILE-1", "SHIFT-A")).not.toBe(
-			expenseDialogCacheKey("PROFILE-1", "SHIFT-B"),
+			expenseDialogCacheKey("PROFILE-1", "SHIFT-B")
 		);
 	});
 
@@ -250,7 +250,7 @@ describe("offline expense queue helpers", () => {
 				remarks: "Posted",
 			},
 			[],
-			{ maximum_expense_amount: 100, shift_expense_total: 0 },
+			{ maximum_expense_amount: 100, shift_expense_total: 0 }
 		);
 		expenseRows.set(saved.id, {
 			...expenseRows.get(saved.id),
@@ -272,7 +272,7 @@ describe("offline expense queue helpers", () => {
 				remarks: "Partial",
 			},
 			[],
-			{ maximum_expense_amount: 100, shift_expense_total: 0 },
+			{ maximum_expense_amount: 100, shift_expense_total: 0 }
 		);
 		expenseRows.set(saved.id, {
 			...expenseRows.get(saved.id),

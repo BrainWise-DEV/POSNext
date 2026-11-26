@@ -47,7 +47,7 @@ export function useAuthorization() {
 	 *   the action's binding uses — for returns that is pos_profile, return_against or
 	 *   customer, and amount.
 	 * @param {object} [options]
-	 * @param {boolean} [options.force] 
+	 * @param {boolean} [options.force]
 	 * @returns {Promise<object|null>} The grant, or null when the user cancelled.
 	 *   Returns a stub grant with no token when the action is not gated, so callers can
 	 *   treat "not required" and "approved" the same way.

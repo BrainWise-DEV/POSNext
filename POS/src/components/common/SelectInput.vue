@@ -119,7 +119,9 @@
 								</span>
 								<div v-if="option.subtitle" class="flex flex-col min-w-0">
 									<span class="text-sm font-medium">{{ option.label }}</span>
-									<span class="text-xs text-gray-500">{{ option.subtitle }}</span>
+									<span class="text-xs text-gray-500">{{
+										option.subtitle
+									}}</span>
 								</div>
 								<span v-else class="min-w-0 truncate">{{ option.label }}</span>
 							</div>

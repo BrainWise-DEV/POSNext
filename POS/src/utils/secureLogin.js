@@ -6,7 +6,11 @@
  * @param {{ isSecureContext?: boolean, frontendDev?: boolean, backendDev?: boolean|number }} env
  * @returns {boolean}
  */
-export function canLogin({ isSecureContext = false, frontendDev = false, backendDev = false } = {}) {
+export function canLogin({
+	isSecureContext = false,
+	frontendDev = false,
+	backendDev = false,
+} = {}) {
 	return Boolean(isSecureContext || frontendDev || backendDev);
 }
 

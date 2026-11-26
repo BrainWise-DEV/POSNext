@@ -5,7 +5,6 @@ const formatAmount = (value) => `EGP ${value.toFixed(2)}`;
 const build = (state) => buildAuthorizationSummary(state, { formatAmount });
 const byKey = (rows) => Object.fromEntries(rows.map((r) => [r.key, r.value]));
 
-
 describe("buildAuthorizationSummary", () => {
 	it("shows action, refund amount and source invoice for a return", () => {
 		const rows = build({
@@ -48,19 +47,30 @@ describe("buildAuthorizationSummary", () => {
 	});
 
 	it("omits the amount row when the action carries no amount", () => {
-		const rows = build({ action: "Discount Override", context: { pos_profile: "Cairo Branch" } });
+		const rows = build({
+			action: "Discount Override",
+			context: { pos_profile: "Cairo Branch" },
+		});
 
 		expect(rows.map((r) => r.key)).toEqual(["action"]);
 	});
 
 	it("treats a zero or unparseable amount as nothing to show", () => {
-		expect(build({ action: "X", context: { amount: 0 } }).map((r) => r.key)).toEqual(["action"]);
-		expect(build({ action: "X", context: { amount: null } }).map((r) => r.key)).toEqual(["action"]);
-		expect(build({ action: "X", context: { amount: "abc" } }).map((r) => r.key)).toEqual(["action"]);
+		expect(build({ action: "X", context: { amount: 0 } }).map((r) => r.key)).toEqual([
+			"action",
+		]);
+		expect(build({ action: "X", context: { amount: null } }).map((r) => r.key)).toEqual([
+			"action",
+		]);
+		expect(build({ action: "X", context: { amount: "abc" } }).map((r) => r.key)).toEqual([
+			"action",
+		]);
 	});
 
 	it("accepts a numeric string amount, as JSON round-trips can produce", () => {
-		expect(byKey(build({ action: "X", context: { amount: "237.5" } })).amount).toBe("EGP 237.50");
+		expect(byKey(build({ action: "X", context: { amount: "237.5" } })).amount).toBe(
+			"EGP 237.50"
+		);
 	});
 
 	it("renders nothing rather than throwing when state is empty", () => {

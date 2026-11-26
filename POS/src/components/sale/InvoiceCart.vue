@@ -456,10 +456,17 @@
 								}}</span>
 							</div>
 							<div class="flex-1 min-w-0 pointer-events-none">
-								<p dir="auto" class="text-[11px] font-semibold text-gray-900 truncate">
+								<p
+									dir="auto"
+									class="text-[11px] font-semibold text-gray-900 truncate"
+								>
 									{{ cust.customer_name }}
 								</p>
-								<p v-if="cust.mobile_no" dir="ltr" class="text-[9px] text-gray-600 text-start">
+								<p
+									v-if="cust.mobile_no"
+									dir="ltr"
+									class="text-[9px] text-gray-600 text-start"
+								>
 									{{ cust.mobile_no }}
 								</p>
 							</div>
@@ -721,9 +728,14 @@
 						class="flex-1 flex items-center gap-1.5 px-2.5 py-2 min-w-0 text-start"
 						:aria-label="__('Coupon')"
 					>
-						<FeatherIcon name="tag" class="w-3.5 h-3.5 text-emerald-700 flex-shrink-0" />
+						<FeatherIcon
+							name="tag"
+							class="w-3.5 h-3.5 text-emerald-700 flex-shrink-0"
+						/>
 						<span class="text-xs font-bold text-emerald-800 truncate" dir="ltr">
-							{{ cartStore.appliedCoupon.code }} −{{ formatCurrency(cartStore.appliedCoupon.amount) }}
+							{{ cartStore.appliedCoupon.code }} −{{
+								formatCurrency(cartStore.appliedCoupon.amount)
+							}}
 						</span>
 					</button>
 					<button
@@ -1076,17 +1088,26 @@
 							>
 								<FeatherIcon name="gift" class="w-3 h-3" />{{ __("Free gift") }}
 							</span>
-							<div dir="auto" class="mt-0.5 text-sm font-semibold text-[#1d2433] leading-snug line-clamp-2">
+							<div
+								dir="auto"
+								class="mt-0.5 text-sm font-semibold text-[#1d2433] leading-snug line-clamp-2"
+							>
 								{{ item.item_name }}
 							</div>
 						</div>
 						<div class="flex-shrink-0 text-end tabular-nums">
-							<div class="text-sm font-bold text-[#0f7a4a]">{{ __("Free of charge") }}</div>
-							<div v-if="giftValue(item) > 0" class="text-xs text-gray-500 line-through">
+							<div class="text-sm font-bold text-[#0f7a4a]">
+								{{ __("Free of charge") }}
+							</div>
+							<div
+								v-if="giftValue(item) > 0"
+								class="text-xs text-gray-500 line-through"
+							>
 								<bdi>{{ formatCurrency(giftValue(item)) }}</bdi>
 							</div>
 							<div class="text-xs text-gray-600 inline-flex items-center gap-1">
-								<bdi>{{ formatQuantity(item.quantity) }}</bdi><span aria-hidden="true">×</span>
+								<bdi>{{ formatQuantity(item.quantity) }}</bdi
+								><span aria-hidden="true">×</span>
 							</div>
 						</div>
 					</div>
@@ -1124,7 +1145,9 @@
 
 							<div class="flex-1 min-w-0">
 								<!-- Name and line total; the total wraps under the name below 1100px -->
-								<div class="flex flex-col min-[1100px]:flex-row min-[1100px]:items-start gap-x-2">
+								<div
+									class="flex flex-col min-[1100px]:flex-row min-[1100px]:items-start gap-x-2"
+								>
 									<h4
 										dir="auto"
 										class="flex-1 min-w-0 text-sm font-semibold text-gray-900 leading-snug line-clamp-2"
@@ -1135,8 +1158,15 @@
 										<div class="text-base font-bold text-[#1d2433]">
 											{{ formatCurrency(getLineAmount(item)) }}
 										</div>
-										<div v-if="lineSaving(item) > 0" class="text-xs text-gray-500 line-through">
-											{{ formatCurrency(getLineAmount(item) + lineSaving(item)) }}
+										<div
+											v-if="lineSaving(item) > 0"
+											class="text-xs text-gray-500 line-through"
+										>
+											{{
+												formatCurrency(
+													getLineAmount(item) + lineSaving(item)
+												)
+											}}
 										</div>
 									</div>
 								</div>
@@ -1150,11 +1180,18 @@
 										<bdi>{{ formatQuantity(item.quantity) }}</bdi>
 										<span aria-hidden="true">×</span>
 										<s v-if="getLineStrikePrice(item)" class="text-gray-500"
-											><bdi>{{ formatCurrency(getLineStrikePrice(item)) }}</bdi></s
+											><bdi>{{
+												formatCurrency(getLineStrikePrice(item))
+											}}</bdi></s
 										>
-										<bdi :class="getLineStrikePrice(item) ? 'font-semibold text-[#0f7a4a]' : ''">{{
-											formatCurrency(getLineNetRate(item))
-										}}</bdi>
+										<bdi
+											:class="
+												getLineStrikePrice(item)
+													? 'font-semibold text-[#0f7a4a]'
+													: ''
+											"
+											>{{ formatCurrency(getLineNetRate(item)) }}</bdi
+										>
 									</span>
 									<!-- Discount Badge (hide when same-item free gift is bundled on this line) -->
 									<div
@@ -1205,7 +1242,10 @@
 									<span v-if="item.batch_no" :class="batchExpiryClass(item)">
 										{{ __("Batch {0}", [item.batch_no]) }}
 										<template v-if="batchExpiry(item)">
-											· {{ __("expires {0}", [formatDate(batchExpiry(item))]) }}
+											·
+											{{
+												__("expires {0}", [formatDate(batchExpiry(item))])
+											}}
 										</template>
 									</span>
 									<span
@@ -1243,7 +1283,10 @@
 										<span
 											class="flex items-center h-10 px-2 rounded-md bg-blue-50 border border-blue-200 text-sm font-bold text-blue-700 tabular-nums"
 										>
-											<FeatherIcon name="hash" class="w-3.5 h-3.5 me-0.5" />{{ item.quantity }}
+											<FeatherIcon
+												name="hash"
+												class="w-3.5 h-3.5 me-0.5"
+											/>{{ item.quantity }}
 										</span>
 										<button
 											type="button"
@@ -1328,23 +1371,33 @@
 													: __('Click to change unit')
 											"
 										>
-											{{ item.uom || item.stock_uom || __("Nos", null, "UOM") }}
+											{{
+												item.uom ||
+												item.stock_uom ||
+												__("Nos", null, "UOM")
+											}}
 											<FeatherIcon
 												name="chevron-down"
 												:class="[
 													'w-3.5 h-3.5 transition-transform',
-													openUomDropdown === `${item.item_code}-${item.uom}`
+													openUomDropdown ===
+													`${item.item_code}-${item.uom}`
 														? 'rotate-180'
 														: '',
 												]"
 											/>
 										</button>
 										<div
-											v-if="openUomDropdown === `${item.item_code}-${item.uom}`"
+											v-if="
+												openUomDropdown === `${item.item_code}-${item.uom}`
+											"
 											class="absolute top-full start-0 mt-0.5 bg-white border border-gray-200 rounded-md shadow-xl z-50 min-w-full overflow-hidden"
 										>
 											<button
-												v-for="uom in [item.stock_uom, ...item.item_uoms.map((u) => u.uom)]"
+												v-for="uom in [
+													item.stock_uom,
+													...item.item_uoms.map((u) => u.uom),
+												]"
 												:key="uom"
 												type="button"
 												@click="selectUom(item, uom)"
@@ -1386,7 +1439,11 @@
 											<span class="truncate">{{ savingTitle(item) }}</span>
 										</span>
 										<span class="font-bold tabular-nums flex-shrink-0">
-											{{ __("You save {0}", [formatCurrency(lineSaving(item))]) }}
+											{{
+												__("You save {0}", [
+													formatCurrency(lineSaving(item)),
+												])
+											}}
 										</span>
 									</div>
 									<div
@@ -1486,18 +1543,27 @@
 					class="flex items-center justify-between gap-2 mb-0.5 bg-emerald-50 rounded px-1.5 py-1 -mx-0.5"
 				>
 					<div class="flex items-center gap-1.5 min-w-0">
-						<FeatherIcon name="tag" class="w-3.5 h-3.5 text-emerald-700 flex-shrink-0" />
-						<span class="text-xs font-bold text-emerald-800">{{ __("Customer saves") }}</span>
+						<FeatherIcon
+							name="tag"
+							class="w-3.5 h-3.5 text-emerald-700 flex-shrink-0"
+						/>
+						<span class="text-xs font-bold text-emerald-800">{{
+							__("Customer saves")
+						}}</span>
 						<span
 							v-if="cartStore.appliedCoupon"
 							class="inline-flex items-center rounded-full border border-emerald-300 bg-white ps-2 text-[11px] font-bold text-emerald-800 min-w-0"
 						>
-							<span class="truncate" dir="ltr">{{ cartStore.appliedCoupon.code }}</span>
+							<span class="truncate" dir="ltr">{{
+								cartStore.appliedCoupon.code
+							}}</span>
 							<button
 								type="button"
 								@click="cartStore.removeDiscountFromCart()"
 								class="w-7 h-6 flex items-center justify-center hover:text-red-700"
-								:aria-label="__('Remove coupon {0}', [cartStore.appliedCoupon.code])"
+								:aria-label="
+									__('Remove coupon {0}', [cartStore.appliedCoupon.code])
+								"
 							>
 								<FeatherIcon name="x" class="w-3 h-3" />
 							</button>
@@ -1784,7 +1850,7 @@ const {
 	getCartSortIconState,
 } = useCartSort(
 	() => props.items,
-	computed(() => settingsStore.cartLifo),
+	computed(() => settingsStore.cartLifo)
 );
 
 /**
@@ -2324,7 +2390,9 @@ function batchExpiry(item) {
 /** Amber when the batch expires within 30 days */
 function batchExpiryClass(item) {
 	const expiry = batchExpiry(item);
-	return expiry && new Date(expiry) - Date.now() < 30 * 86400000 ? "text-amber-700 font-semibold" : "";
+	return expiry && new Date(expiry) - Date.now() < 30 * 86400000
+		? "text-amber-700 font-semibold"
+		: "";
 }
 
 /** "20% off (Fairy 3 pcs)": the discount and the offer or coupon that gave it */
@@ -2460,7 +2528,8 @@ const fnfCustomerBadge = computed(() => {
 		muted: Boolean(override),
 		title: override
 			? __("Coupon {0} applied instead of Friends & Family", [override.code || ""])
-			: pickLocalizedMessage(eligibility.customerMessage, locale.value) || __("Friends & Family customer"),
+			: pickLocalizedMessage(eligibility.customerMessage, locale.value) ||
+			  __("Friends & Family customer"),
 	};
 });
 
@@ -2519,7 +2588,11 @@ function getLineBreakdownView(item) {
 	if (!item || item.is_free_item || item._isStandaloneFreeRow) return null;
 	if (isGwpItem(item) || hasBundledSameItemFree(item)) return null;
 	const view = lineBreakdown(item);
-	if (view.discount <= 0 || view.source === LINE_SOURCE.FREE || view.source === LINE_SOURCE.NONE) {
+	if (
+		view.discount <= 0 ||
+		view.source === LINE_SOURCE.FREE ||
+		view.source === LINE_SOURCE.NONE
+	) {
 		return null;
 	}
 	return { ...view, label: lineSourceLabel(view.source) };
@@ -2558,7 +2631,12 @@ const discountBreakdownRows = computed(() => {
 		totals[LINE_SOURCE.FRIENDS_AND_FAMILY],
 		"text-pink-700"
 	);
-	push(LINE_SOURCE.PROMOTION, __("Promotion discount"), totals[LINE_SOURCE.PROMOTION], "text-red-600");
+	push(
+		LINE_SOURCE.PROMOTION,
+		__("Promotion discount"),
+		totals[LINE_SOURCE.PROMOTION],
+		"text-red-600"
+	);
 	push(LINE_SOURCE.COUPON, __("Coupon discount"), totals[LINE_SOURCE.COUPON], "text-purple-700");
 	push(LINE_SOURCE.MANUAL, __("Manual discount"), totals[LINE_SOURCE.MANUAL], "text-gray-600");
 	const header = Number.parseFloat(cartStore.additionalDiscount) || 0;

@@ -211,7 +211,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	function offerCartSignature() {
 		const paid = withCarvedQtyRestored(invoiceItems.value)
 			.filter((i) => !i.is_free_item)
-			.map((i) => `${i.item_code}:${i.quantity}:${i.uom || ""}:${i.price_list_rate || i.rate || 0}`)
+			.map(
+				(i) =>
+					`${i.item_code}:${i.quantity}:${i.uom || ""}:${
+						i.price_list_rate || i.rate || 0
+					}`
+			)
 			.join("|");
 		return `${paid}::${customer.value?.name || customer.value || "none"}`;
 	}
@@ -278,7 +283,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			// different product must not inflate requested qty (Iphone 17 x6 +
 			// Aqua Water free x1 is 6 phones, not 7).
 			const totalQty =
-				getCartStockQtyForItem(invoiceItems.value, item.item_code) + rowStockQty(item, qty);
+				getCartStockQtyForItem(invoiceItems.value, item.item_code) +
+				rowStockQty(item, qty);
 			const warehouse = item.warehouse || currentProfile.warehouse;
 
 			const check = checkStockAvailability(item, totalQty, warehouse);
@@ -302,7 +308,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		const item = uom
 			? invoiceItems.value.find(
 					(i) => i.item_code === itemCode && i.uom === uom && !i.is_free_item
-				)
+			  )
 			: invoiceItems.value.find((i) => i.item_code === itemCode && !i.is_free_item);
 
 		if (!item) return;
@@ -317,7 +323,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				i.uom === item.uom
 		);
 		const lineQty =
-			item.quantity + carved.reduce((sum, i) => sum + (Number.parseFloat(i.quantity) || 0), 0);
+			item.quantity +
+			carved.reduce((sum, i) => sum + (Number.parseFloat(i.quantity) || 0), 0);
 
 		// Only validate when quantity is increasing
 		if (
@@ -326,7 +333,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			shouldValidateItemStock(item)
 		) {
 			const otherLinesQty =
-				getCartStockQtyForItem(invoiceItems.value, item.item_code) - rowStockQty(item, lineQty);
+				getCartStockQtyForItem(invoiceItems.value, item.item_code) -
+				rowStockQty(item, lineQty);
 			const totalQty = otherLinesQty + rowStockQty(item, newQty);
 			const check = checkStockAvailability(item, totalQty);
 			if (!check.available) {
@@ -567,14 +575,22 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			if (appliedCoupon.value && !isLineLevelCoupon(appliedCoupon.value)) {
 				removeDiscount();
 			}
-			const amount = applyCouponLineUpdates(discount.code, discount.line_updates, discount.coupon);
+			const amount = applyCouponLineUpdates(
+				discount.code,
+				discount.line_updates,
+				discount.coupon
+			);
 			couponCode.value = discount.code;
 			appliedCoupon.value = { ...discount, amount };
 			showSuccess(__("{0} applied successfully", [discount.name]));
 			return;
 		}
 		if (offerHeaderDiscount.value > 0) {
-			showWarning(__("{0} can't be combined with the order discount already applied", [discount.name]));
+			showWarning(
+				__("{0} can't be combined with the order discount already applied", [
+					discount.name,
+				])
+			);
 			return false;
 		}
 		clearCouponLines();
@@ -743,19 +759,23 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			// Cart changed while the request was in flight; the revalidation watcher catches up.
 			if (!item || item.item_code !== update.item_code) continue;
 			const percentage = Number.parseFloat(update.discount_percentage) || 0;
-			const fixedAmount = percentage > 0 ? 0 : Number.parseFloat(update.discount_amount) || 0;
+			const fixedAmount =
+				percentage > 0 ? 0 : Number.parseFloat(update.discount_amount) || 0;
 			// A stacked line's discount includes what it already had, so the coupon % is no cap for it.
 			const stacked = Boolean(update.stacked);
 			stashPreCouponDiscount(item);
 			item.discount_percentage = percentage;
 			item.discount_amount = fixedAmount;
 			item.coupon_fixed_discount = percentage > 0 ? null : fixedAmount;
-			item.coupon_percentage_cap = percentage > 0 || stacked ? null : couponPercentage || null;
+			item.coupon_percentage_cap =
+				percentage > 0 || stacked ? null : couponPercentage || null;
 			item.discount_source = COUPON_DISCOUNT_SOURCE;
 			item.coupon_code = code;
 			recalculateItem(item);
 			// The server names the coupon's own share coupon_only_discount (older builds: coupon_discount_amount)
-			const couponPart = Number.parseFloat(update.coupon_only_discount ?? update.coupon_discount_amount);
+			const couponPart = Number.parseFloat(
+				update.coupon_only_discount ?? update.coupon_discount_amount
+			);
 			total += Number.isFinite(couponPart) ? couponPart : item.discount_amount;
 		}
 		rebuildIncrementalCache();
@@ -784,7 +804,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 */
 	function restoreLineCoupon(coupon) {
 		const code = coupon?.code;
-		const hasLines = Boolean(code) && invoiceItems.value.some((item) => isCouponLine(item) && item.coupon_code === code);
+		const hasLines =
+			Boolean(code) &&
+			invoiceItems.value.some((item) => isCouponLine(item) && item.coupon_code === code);
 		if (isLineLevelCoupon(coupon) && hasLines) {
 			for (const item of invoiceItems.value) {
 				if (isCouponLine(item) && item.coupon_code !== code) {
@@ -849,7 +871,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			}
 
 			const amount = applyCouponLineUpdates(coupon.code, result.line_updates, coupon.coupon);
-			appliedCoupon.value = { ...appliedCoupon.value, amount, line_updates: result.line_updates };
+			appliedCoupon.value = {
+				...appliedCoupon.value,
+				amount,
+				line_updates: result.line_updates,
+			};
 		} catch (error) {
 			console.error("Error re-validating coupon:", error);
 			showWarning(
@@ -873,7 +899,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			selling_price_list: currentProfile?.selling_price_list,
 			currency: currentProfile?.currency,
 			// A whole-cart coupon's amount is not sent, so the server can't echo it back as an order discount
-			discount_amount: isWholeCartCoupon(appliedCoupon.value) ? 0 : additionalDiscount.value || 0,
+			discount_amount: isWholeCartCoupon(appliedCoupon.value)
+				? 0
+				: additionalDiscount.value || 0,
 			coupon_code: appliedCoupon.value?.name || "",
 			// Offers see coupon lines without the coupon; otherwise its discount reads as a manual one.
 			items: rawItems.map((item) => {
@@ -1009,9 +1037,14 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				return;
 			}
 
-			const { discounted } = mergeServerLine(item, serverItems[index] || {}, fnfLines.get(index), {
-				fnfSuppressed,
-			});
+			const { discounted } = mergeServerLine(
+				item,
+				serverItems[index] || {},
+				fnfLines.get(index),
+				{
+					fnfSuppressed,
+				}
+			);
 			if (discounted) hasDiscounts = true;
 			recalculateItem(item);
 		});
@@ -1081,7 +1114,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			},
 			// PN-130: F&F decision + best-discount explanation. null when the
 			// server sent no F&F block (ineligible customer / program off).
-			friendsAndFamily: normalizeFnfResult(payload.friends_and_family, payload.best_discount),
+			friendsAndFamily: normalizeFnfResult(
+				payload.friends_and_family,
+				payload.best_discount
+			),
 		};
 	}
 
@@ -1113,7 +1149,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			removeDiscount();
 			appliedCoupon.value = null;
 			fnfCouponOverride.value = null;
-			showWarning(__("Coupon {0} removed: it can't be combined with the order discount", [coupon.code]));
+			showWarning(
+				__("Coupon {0} removed: it can't be combined with the order discount", [
+					coupon.code,
+				])
+			);
 		}
 		additionalDiscount.value = offerHeaderDiscount.value;
 		rebuildIncrementalCache();
@@ -1640,7 +1680,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 						? invoiceItems.value
 						: invoiceItems.value.filter((item) =>
 								eligibleGroups.includes(item.item_group)
-							);
+						  );
 				} else if (offer.apply_on === "Brand") {
 					const eligibleBrands = offer.eligible_brands || [];
 					eligibleItems = invoiceItems.value.filter((item) =>
@@ -1719,7 +1759,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			const stacks =
 				offer.promotion_type === "Auto Discount" && allowsAutoDiscountStacking(item);
 
-			if (offer.promotion_type === "Auto Discount" && item.is_already_discounted && !stacks) {
+			if (
+				offer.promotion_type === "Auto Discount" &&
+				item.is_already_discounted &&
+				!stacks
+			) {
 				continue;
 			}
 
@@ -1747,7 +1791,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 							? item.rate
 							: item.price_list_rate || item.rate;
 					const baseAmount =
-						(Number.parseFloat(item.quantity) || 0) * (Number.parseFloat(effectiveRate) || 0);
+						(Number.parseFloat(item.quantity) || 0) *
+						(Number.parseFloat(effectiveRate) || 0);
 					const existing = Number.parseFloat(item.discount_amount) || 0;
 					item.discount_amount = Math.min(existing + discountAmount, baseAmount);
 					item.pricing_rules = [...(item.pricing_rules || []), offer.name];
@@ -1952,7 +1997,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * Paid lines only — free gifts must not inflate min_qty/max_qty/min_amt checks.
 	 */
 	function buildCartSnapshot() {
-		const items = withCarvedQtyRestored(invoiceItems.value).filter((item) => !item.is_free_item);
+		const items = withCarvedQtyRestored(invoiceItems.value).filter(
+			(item) => !item.is_free_item
+		);
 		const totalQty = items.reduce((sum, item) => sum + (item.quantity || 0), 0);
 		const itemCodes = items.map((item) => item.item_code);
 		const itemGroups = items.map((item) => item.item_group).filter(Boolean);
@@ -2024,10 +2071,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			if (item.item_code !== itemCode) return false;
 			if (uom && item.uom !== uom) return false;
 			// When same SKU has paid + free rows, match the intended line.
-			if (
-				isFreeItem !== undefined &&
-				Boolean(item.is_free_item) !== Boolean(isFreeItem)
-			) {
+			if (isFreeItem !== undefined && Boolean(item.is_free_item) !== Boolean(isFreeItem)) {
 				return false;
 			}
 			return true;
@@ -2282,9 +2326,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				cachedItemGroups = [
 					...new Set(paidItems.map((item) => item.item_group).filter(Boolean)),
 				];
-				cachedBrands = [
-					...new Set(paidItems.map((item) => item.brand).filter(Boolean)),
-				];
+				cachedBrands = [...new Set(paidItems.map((item) => item.brand).filter(Boolean))];
 
 				// Build quantity maps for accurate offer validation
 				cachedItemQuantities = {};
@@ -2465,7 +2507,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			const combinedCodes = [...new Set([...validExistingCodes, ...newOfferCodes])];
 
 			// All applied offers became invalid (or orphaned offer tags/rows remain) and no new offers apply.
-			if (combinedCodes.length === 0 && (invalidOffers.length > 0 || hasOrphanedOfferState())) {
+			if (
+				combinedCodes.length === 0 &&
+				(invalidOffers.length > 0 || hasOrphanedOfferState())
+			) {
 				appliedOffers.value = [];
 				processFreeItems([]);
 				dropOfferDiscountsFromLines();
@@ -2705,9 +2750,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 						.filter((item) => !item.is_free_item)
 						.map(
 							(item) =>
-								`${item.item_code}:${item.quantity}:${item.uom || ""}:${item.price_list_rate || 0}:${
-									item.is_rate_manually_edited ? item.rate : ""
-								}`
+								`${item.item_code}:${item.quantity}:${item.uom || ""}:${
+									item.price_list_rate || 0
+								}:${item.is_rate_manually_edited ? item.rate : ""}`
 						)
 						.join(",")}::${customer.value?.name || customer.value || ""}`
 				: null,
@@ -2722,7 +2767,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	watch(
 		() => invoiceItems.value.some((item) => !item.is_free_item),
 		(hasPaidItems) => {
-			if (hasPaidItems || !appliedCoupon.value || isLineLevelCoupon(appliedCoupon.value)) return;
+			if (hasPaidItems || !appliedCoupon.value || isLineLevelCoupon(appliedCoupon.value))
+				return;
 			removeDiscount();
 			appliedCoupon.value = null;
 		}
@@ -2739,7 +2785,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 						coupon_code: coupon.code,
 						customer: name,
 						company: usePOSShiftStore().currentProfile?.company,
-					}).catch(() => ({ valid: true }))
+				  }).catch(() => ({ valid: true }))
 				: { valid: false, message: __("No customer selected") };
 			if (result?.valid || appliedCoupon.value !== coupon) return;
 			removeDiscount();

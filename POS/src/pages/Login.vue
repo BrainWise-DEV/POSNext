@@ -15,10 +15,18 @@
 			<div class="bg-white py-8 px-6 shadow rounded-lg">
 				<form class="space-y-6" @submit.prevent="submit">
 					<!-- Plain http outside dev mode: never send the password -->
-					<div v-if="!loginAllowed" role="alert" class="rounded-md bg-amber-50 p-4 text-sm text-amber-900">
+					<div
+						v-if="!loginAllowed"
+						role="alert"
+						class="rounded-md bg-amber-50 p-4 text-sm text-amber-900"
+					>
 						<p class="font-semibold">{{ __("Secure connection required") }}</p>
 						<p class="mt-1">
-							{{ __("Open POS Next over https:// to sign in. Passwords are never sent over an insecure connection.") }}
+							{{
+								__(
+									"Open POS Next over https:// to sign in. Passwords are never sent over an insecure connection."
+								)
+							}}
 						</p>
 					</div>
 					<div v-if="session.login.error" class="rounded-md bg-red-50 p-4">

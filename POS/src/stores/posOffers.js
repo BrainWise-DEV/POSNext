@@ -141,8 +141,7 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 				: {};
 
 		// Amount maps mirroring the server's min_amt/max_amt bases.
-		const asAmountMap = (value) =>
-			value && typeof value === "object" ? value : {};
+		const asAmountMap = (value) => (value && typeof value === "object" ? value : {});
 		const netSubtotal = Number.isFinite(Number.parseFloat(snapshot.netSubtotal))
 			? Number.parseFloat(snapshot.netSubtotal)
 			: subtotal;

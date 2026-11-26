@@ -16,6 +16,8 @@ from pos_next.integrations.registry import (
 	resolve_existing_customer,
 	validate_customer_create,
 )
+
+
 @frappe.whitelist()
 def get_customers(search_term="", pos_profile=None, limit=20, modified_since=None):
 	"""

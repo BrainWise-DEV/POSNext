@@ -8,12 +8,10 @@ Handles wallet payments that require party information for Receivable accounts.
 """
 
 import frappe
-from frappe import _
 from erpnext.accounts.doctype.sales_invoice.sales_invoice import SalesInvoice
 from erpnext.accounts.utils import get_account_currency
+from frappe import _
 from frappe.utils import cint, flt
-
-
 
 
 def _get_post_change_gl_entries_setting():
@@ -61,9 +59,7 @@ def _resolve_pos_customer(invoice_doc):
 		if frappe.db.exists("Customer", customer):
 			return customer
 		frappe.throw(
-			_("Customer {0} does not exist. Please select a valid customer.").format(
-				frappe.bold(customer)
-			),
+			_("Customer {0} does not exist. Please select a valid customer.").format(frappe.bold(customer)),
 			title=_("Invalid Customer"),
 		)
 
@@ -349,4 +345,3 @@ class CustomSalesInvoice(SalesInvoice):
 				continue
 			if tracking.has_batch_no or tracking.has_serial_no:
 				pi.use_serial_batch_fields = 1
-

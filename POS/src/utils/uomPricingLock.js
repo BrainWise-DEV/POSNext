@@ -7,10 +7,7 @@
  * rate editing.
  */
 
-const PROMO_DISCOUNT_SOURCES = new Set([
-	"item_level_promotion",
-	"accumulative_promotion",
-]);
+const PROMO_DISCOUNT_SOURCES = new Set(["item_level_promotion", "accumulative_promotion"]);
 
 /**
  * Free / GWP rows are wholly owned by the promotion engine.

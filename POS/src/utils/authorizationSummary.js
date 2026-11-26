@@ -9,7 +9,6 @@ export function buildAuthorizationSummary(state = {}, { formatAmount = formatCur
 	const context = state.context || {};
 	const rows = [];
 
-
 	const action = state.actionLabel || state.action;
 	if (action) {
 		rows.push({ key: "action", label: t("Action"), value: String(action) });
@@ -25,7 +24,11 @@ export function buildAuthorizationSummary(state = {}, { formatAmount = formatCur
 	}
 
 	if (context.journal_entry) {
-		rows.push({ key: "journal_entry", label: t("Journal Entry"), value: String(context.journal_entry) });
+		rows.push({
+			key: "journal_entry",
+			label: t("Journal Entry"),
+			value: String(context.journal_entry),
+		});
 	}
 
 	if (context.return_against) {

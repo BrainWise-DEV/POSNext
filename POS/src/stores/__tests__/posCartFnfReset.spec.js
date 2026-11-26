@@ -4,21 +4,23 @@
  * reapplyOffer, or removeOffer on a Transaction header offer).
  * @vitest-environment jsdom
  */
-import { createPinia, setActivePinia } from "pinia"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { createPinia, setActivePinia } from "pinia";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const RULE = "PRLE-BXGY-COSRX"
-const ITEM = "COSRX-EYE-CREAM-25ML"
-const CUSTOMER = "FNF-TEST-CUSTOMER"
+const RULE = "PRLE-BXGY-COSRX";
+const ITEM = "COSRX-EYE-CREAM-25ML";
+const CUSTOMER = "FNF-TEST-CUSTOMER";
 
 const server = vi.hoisted(() => {
-	globalThis.__ = (s, args) => (args ? `${s} ${args.join(" ")}` : s)
-	return { requests: [], omitAppliedRules: false, customApplyOffers: null, hold: null }
-})
+	globalThis.__ = (s, args) => (args ? `${s} ${args.join(" ")}` : s);
+	return { requests: [], omitAppliedRules: false, customApplyOffers: null, hold: null };
+});
 
-const clone = (v) => JSON.parse(JSON.stringify(v))
+const clone = (v) => JSON.parse(JSON.stringify(v));
 const ruleNames = (value) =>
-	(Array.isArray(value) ? value : String(value || "").split(",")).map((s) => s.trim()).filter(Boolean)
+	(Array.isArray(value) ? value : String(value || "").split(","))
+		.map((s) => s.trim())
+		.filter(Boolean);
 
 const ELIGIBILITY = {
 	customer: CUSTOMER,
@@ -28,7 +30,7 @@ const ELIGIBILITY = {
 	program_active: true,
 	discount_percentage: 30,
 	program: { active: true, discount_percentage: 30, discount_scope: "Entire Cart" },
-}
+};
 
 function makeFnfBlock(applies, rate = 18900, discountAmount = 8100, reason = "applied") {
 	return {
@@ -48,15 +50,15 @@ function makeFnfBlock(applies, rate = 18900, discountAmount = 8100, reason = "ap
 				reason,
 			},
 		],
-	}
+	};
 }
 
 function applyOffersAnswer({ invoice_data, selected_offers }) {
 	if (server.customApplyOffers) {
-		return server.customApplyOffers({ invoice_data, selected_offers })
+		return server.customApplyOffers({ invoice_data, selected_offers });
 	}
-	const paid = invoice_data.items.filter((i) => !i.is_free_item)
-	const qty = paid.reduce((sum, i) => sum + Number(i.qty), 0)
+	const paid = invoice_data.items.filter((i) => !i.is_free_item);
+	const qty = paid.reduce((sum, i) => sum + Number(i.qty), 0);
 	if (qty >= 2) {
 		return {
 			items: [
@@ -90,7 +92,7 @@ function applyOffersAnswer({ invoice_data, selected_offers }) {
 			discount_amount: 0,
 			apply_discount_on: "Grand Total",
 			friends_and_family: makeFnfBlock(false, 27000, 0, "scheme_not_eligible"),
-		}
+		};
 	}
 	return {
 		items: [
@@ -111,44 +113,44 @@ function applyOffersAnswer({ invoice_data, selected_offers }) {
 		discount_amount: 0,
 		apply_discount_on: "Grand Total",
 		friends_and_family: makeFnfBlock(true),
-	}
+	};
 }
 
 function fnfOnlyAnswer({ items }) {
-	const hasStaleRule = items.some((i) => ruleNames(i.pricing_rules).includes(RULE))
+	const hasStaleRule = items.some((i) => ruleNames(i.pricing_rules).includes(RULE));
 	if (hasStaleRule) {
-		return makeFnfBlock(false, 27000, 0, "scheme_not_eligible")
+		return makeFnfBlock(false, 27000, 0, "scheme_not_eligible");
 	}
-	return makeFnfBlock(true)
+	return makeFnfBlock(true);
 }
 
 vi.mock("frappe-ui", () => ({
 	call: vi.fn(async () => ({})),
 	createResource: ({ url } = {}) => ({
 		submit: vi.fn(async (params) => {
-			if (!String(url).includes("apply_offers")) return {}
-			server.requests.push({ method: "apply_offers", params: clone(params) })
-			const answer = applyOffersAnswer(params)
-			if (!server.hold) return answer
+			if (!String(url).includes("apply_offers")) return {};
+			server.requests.push({ method: "apply_offers", params: clone(params) });
+			const answer = applyOffersAnswer(params);
+			if (!server.hold) return answer;
 			// Held: the test decides when this answer arrives.
 			return new Promise((resolve) => {
-				server.hold.release = () => resolve(answer)
-			})
+				server.hold.release = () => resolve(answer);
+			});
 		}),
 		reload: vi.fn(),
 		fetch: vi.fn(),
 	}),
-}))
+}));
 vi.mock("@/utils/apiWrapper", () => ({
 	call: vi.fn(async (method, params) => {
-		if (method.includes("check_friends_and_family_eligibility")) return clone(ELIGIBILITY)
+		if (method.includes("check_friends_and_family_eligibility")) return clone(ELIGIBILITY);
 		if (method.includes("apply_friends_and_family_discount")) {
-			server.requests.push({ method: "fnf_only", params: clone(params) })
-			return fnfOnlyAnswer(params)
+			server.requests.push({ method: "fnf_only", params: clone(params) });
+			return fnfOnlyAnswer(params);
 		}
-		return []
+		return [];
 	}),
-}))
+}));
 vi.mock("@/utils/promoApi", () => ({
 	isPromotionsAppInstalled: () => true,
 	promoApi: {
@@ -157,32 +159,38 @@ vi.mock("@/utils/promoApi", () => ({
 			"posnext_promotions.api.friends_and_family.apply_friends_and_family_discount",
 		checkFriendsAndFamilyEligibility: () =>
 			"posnext_promotions.api.friends_and_family.check_friends_and_family_eligibility",
-		getCustomerOneTimeRedemptions: () => "posnext_promotions.api.offers.get_customer_one_time_redemptions",
+		getCustomerOneTimeRedemptions: () =>
+			"posnext_promotions.api.offers.get_customer_one_time_redemptions",
 		getOffers: () => "posnext_promotions.api.offers.get_offers",
 		validateCoupon: () => "posnext_promotions.api.offers.validate_coupon",
 	},
-}))
+}));
 vi.mock("@/utils/offerStrategies", async (importOriginal) => ({
 	...(await importOriginal()),
 	loadOfferStrategyPlugins: async () => {},
-}))
+}));
 vi.mock("@/composables/useToast", () => ({
-	useToast: () => ({ showSuccess: vi.fn(), showError: vi.fn(), showWarning: vi.fn(), showInfo: vi.fn() }),
-}))
-vi.mock("@/utils/offline", () => ({ isOffline: () => false, getCachedItem: vi.fn() }))
+	useToast: () => ({
+		showSuccess: vi.fn(),
+		showError: vi.fn(),
+		showWarning: vi.fn(),
+		showInfo: vi.fn(),
+	}),
+}));
+vi.mock("@/utils/offline", () => ({ isOffline: () => false, getCachedItem: vi.fn() }));
 vi.mock("@/utils/offline/db", () => ({
 	getOneTimeRedemptions: async () => [],
 	setOneTimeRedemptions: async () => {},
 	addOneTimeRedemptions: async () => {},
-}))
+}));
 vi.mock("@/stores/posSettings", () => ({
 	usePOSSettingsStore: () => ({ shouldEnforceStockValidation: () => false }),
-}))
+}));
 
-const { usePOSCartStore } = await import("../posCart")
-const { usePOSOffersStore } = await import("../posOffers")
-const { isFnfLine } = await import("@/utils/friendsAndFamily")
-const { offlineState } = await import("@/utils/offline/offlineState")
+const { usePOSCartStore } = await import("../posCart");
+const { usePOSOffersStore } = await import("../posOffers");
+const { isFnfLine } = await import("@/utils/friendsAndFamily");
+const { offlineState } = await import("@/utils/offline/offlineState");
 
 const BXGY_OFFER = {
 	name: RULE,
@@ -204,7 +212,7 @@ const BXGY_OFFER = {
 	free_item_uom: "Nos",
 	same_item: 1,
 	is_recursive: 0,
-}
+};
 
 const COSRX_ITEM = {
 	item_code: ITEM,
@@ -214,104 +222,104 @@ const COSRX_ITEM = {
 	uom: "Nos",
 	stock_uom: "Nos",
 	conversion_factor: 1,
-}
+};
 
-const paidLine = (cart) => cart.invoiceItems.find((i) => !i.is_free_item)
-const freeRows = (cart) => cart.invoiceItems.filter((i) => i.is_free_item)
+const paidLine = (cart) => cart.invoiceItems.find((i) => !i.is_free_item);
+const freeRows = (cart) => cart.invoiceItems.filter((i) => i.is_free_item);
 
 async function settle(cart, seen) {
 	await vi.waitFor(
 		() => {
-			expect(server.requests.length).toBeGreaterThan(seen)
-			expect(cart.offerProcessingState.isProcessing).toBe(false)
+			expect(server.requests.length).toBeGreaterThan(seen);
+			expect(cart.offerProcessingState.isProcessing).toBe(false);
 		},
 		{ timeout: 3000, interval: 20 }
-	)
-	await new Promise((resolve) => setTimeout(resolve, 150))
-	await vi.waitFor(() => expect(cart.offerProcessingState.isProcessing).toBe(false))
+	);
+	await new Promise((resolve) => setTimeout(resolve, 150));
+	await vi.waitFor(() => expect(cart.offerProcessingState.isProcessing).toBe(false));
 }
 
 describe("F&F discount restoration after promotion applies and qty decreases (develop)", () => {
-	let cart
+	let cart;
 	beforeEach(() => {
-		server.requests = []
-		server.omitAppliedRules = false
-		server.customApplyOffers = null
-		server.hold = null
-		vi.spyOn(offlineState, "isOffline", "get").mockReturnValue(false)
-		setActivePinia(createPinia())
-		usePOSOffersStore().setAvailableOffers([BXGY_OFFER])
-		cart = usePOSCartStore()
-		cart.posProfile = "_PNXT_TEST_POS_PROFILE"
-		cart.customer = CUSTOMER
-	})
+		server.requests = [];
+		server.omitAppliedRules = false;
+		server.customApplyOffers = null;
+		server.hold = null;
+		vi.spyOn(offlineState, "isOffline", "get").mockReturnValue(false);
+		setActivePinia(createPinia());
+		usePOSOffersStore().setAvailableOffers([BXGY_OFFER]);
+		cart = usePOSCartStore();
+		cart.posProfile = "_PNXT_TEST_POS_PROFILE";
+		cart.customer = CUSTOMER;
+	});
 
 	it("qty 1 has F&F, qty 2 applies BXGY, qty 1 restores F&F and clears free row", async () => {
-		cart.addItem(COSRX_ITEM)
-		await settle(cart, 0)
-		expect(isFnfLine(paidLine(cart))).toBe(true)
-		expect(paidLine(cart).amount).toBeCloseTo(18900, 2)
+		cart.addItem(COSRX_ITEM);
+		await settle(cart, 0);
+		expect(isFnfLine(paidLine(cart))).toBe(true);
+		expect(paidLine(cart).amount).toBeCloseTo(18900, 2);
 
-		let seen = server.requests.length
-		cart.updateItemQuantity(ITEM, 2)
-		await settle(cart, seen)
-		expect(isFnfLine(paidLine(cart))).toBe(false)
-		expect(freeRows(cart)).toHaveLength(1)
+		let seen = server.requests.length;
+		cart.updateItemQuantity(ITEM, 2);
+		await settle(cart, seen);
+		expect(isFnfLine(paidLine(cart))).toBe(false);
+		expect(freeRows(cart)).toHaveLength(1);
 
-		seen = server.requests.length
-		cart.updateItemQuantity(ITEM, 1)
-		await settle(cart, seen)
-		expect(isFnfLine(paidLine(cart))).toBe(true)
-		expect(paidLine(cart).amount).toBeCloseTo(18900, 2)
-		expect(ruleNames(paidLine(cart).pricing_rules)).toEqual([])
-		expect(freeRows(cart)).toHaveLength(0)
-	})
+		seen = server.requests.length;
+		cart.updateItemQuantity(ITEM, 1);
+		await settle(cart, seen);
+		expect(isFnfLine(paidLine(cart))).toBe(true);
+		expect(paidLine(cart).amount).toBeCloseTo(18900, 2);
+		expect(ruleNames(paidLine(cart).pricing_rules)).toEqual([]);
+		expect(freeRows(cart)).toHaveLength(0);
+	});
 
 	it("cleans orphaned promotion tags when applied_pricing_rules was omitted", async () => {
-		server.omitAppliedRules = true
-		cart.addItem(COSRX_ITEM)
-		await settle(cart, 0)
-		expect(isFnfLine(paidLine(cart))).toBe(true)
+		server.omitAppliedRules = true;
+		cart.addItem(COSRX_ITEM);
+		await settle(cart, 0);
+		expect(isFnfLine(paidLine(cart))).toBe(true);
 
-		let seen = server.requests.length
-		cart.updateItemQuantity(ITEM, 2)
-		await settle(cart, seen)
-		expect(cart.appliedOffers).toHaveLength(0)
-		expect(ruleNames(paidLine(cart).pricing_rules)).toEqual([RULE])
-		expect(freeRows(cart)).toHaveLength(1)
-		expect(isFnfLine(paidLine(cart))).toBe(false)
+		let seen = server.requests.length;
+		cart.updateItemQuantity(ITEM, 2);
+		await settle(cart, seen);
+		expect(cart.appliedOffers).toHaveLength(0);
+		expect(ruleNames(paidLine(cart).pricing_rules)).toEqual([RULE]);
+		expect(freeRows(cart)).toHaveLength(1);
+		expect(isFnfLine(paidLine(cart))).toBe(false);
 
-		seen = server.requests.length
-		cart.updateItemQuantity(ITEM, 1)
-		await settle(cart, seen)
-		const last = server.requests.at(-1)
-		expect(last.method).toBe("fnf_only")
-		expect(last.params.items.flatMap((i) => ruleNames(i.pricing_rules))).not.toContain(RULE)
-		expect(isFnfLine(paidLine(cart))).toBe(true)
-		expect(paidLine(cart).amount).toBeCloseTo(18900, 2)
-		expect(paidLine(cart).gwp_free_qty).toBe(0)
-		expect(freeRows(cart)).toHaveLength(0)
-	})
+		seen = server.requests.length;
+		cart.updateItemQuantity(ITEM, 1);
+		await settle(cart, seen);
+		const last = server.requests.at(-1);
+		expect(last.method).toBe("fnf_only");
+		expect(last.params.items.flatMap((i) => ruleNames(i.pricing_rules))).not.toContain(RULE);
+		expect(isFnfLine(paidLine(cart))).toBe(true);
+		expect(paidLine(cart).amount).toBeCloseTo(18900, 2);
+		expect(paidLine(cart).gwp_free_qty).toBe(0);
+		expect(freeRows(cart)).toHaveLength(0);
+	});
 
 	it("reapplyOffer clearing the last offer restores F&F", async () => {
-		cart.addItem(COSRX_ITEM)
-		await settle(cart, 0)
-		let seen = server.requests.length
-		cart.updateItemQuantity(ITEM, 2)
-		await settle(cart, seen)
-		expect(cart.appliedOffers.map((o) => o.code)).toEqual([RULE])
+		cart.addItem(COSRX_ITEM);
+		await settle(cart, 0);
+		let seen = server.requests.length;
+		cart.updateItemQuantity(ITEM, 2);
+		await settle(cart, seen);
+		expect(cart.appliedOffers.map((o) => o.code)).toEqual([RULE]);
 
-		cart.updateItemQuantity(ITEM, 1)
-		cart.cancelPendingOfferProcessing()
-		seen = server.requests.length
-		const removed = await cart.reapplyOffer({})
-		expect(removed).toBe(true)
-		expect(server.requests.length).toBeGreaterThan(seen)
-		expect(server.requests.at(-1).method).toBe("fnf_only")
-		expect(isFnfLine(paidLine(cart))).toBe(true)
-		expect(paidLine(cart).amount).toBeCloseTo(18900, 2)
-		expect(freeRows(cart)).toHaveLength(0)
-	})
+		cart.updateItemQuantity(ITEM, 1);
+		cart.cancelPendingOfferProcessing();
+		seen = server.requests.length;
+		const removed = await cart.reapplyOffer({});
+		expect(removed).toBe(true);
+		expect(server.requests.length).toBeGreaterThan(seen);
+		expect(server.requests.at(-1).method).toBe("fnf_only");
+		expect(isFnfLine(paidLine(cart))).toBe(true);
+		expect(paidLine(cart).amount).toBeCloseTo(18900, 2);
+		expect(freeRows(cart)).toHaveLength(0);
+	});
 
 	it("removeOffer on a Transaction header offer restores F&F without a qty change", async () => {
 		const ORDER_OFFER = {
@@ -328,10 +336,10 @@ describe("F&F discount restoration after promotion applies and qty decreases (de
 			free_item: null,
 			free_qty: 0,
 			same_item: 0,
-		}
-		usePOSOffersStore().setAvailableOffers([ORDER_OFFER])
+		};
+		usePOSOffersStore().setAvailableOffers([ORDER_OFFER]);
 		server.customApplyOffers = ({ invoice_data, selected_offers }) => {
-			const hasOrder = (selected_offers || []).includes("ORDER_OFFER")
+			const hasOrder = (selected_offers || []).includes("ORDER_OFFER");
 			return {
 				items: invoice_data.items.map((i) => ({
 					...i,
@@ -348,40 +356,43 @@ describe("F&F discount restoration after promotion applies and qty decreases (de
 				friends_and_family: hasOrder
 					? makeFnfBlock(false, 27000, 0, "order_discount_better")
 					: makeFnfBlock(true),
-			}
-		}
+			};
+		};
 
-		cart.addItem(COSRX_ITEM)
-		await settle(cart, 0)
-		expect(cart.appliedOffers.map((o) => o.code)).toEqual(["ORDER_OFFER"])
-		expect(cart.additionalDiscount).toBe(10000)
-		expect(isFnfLine(paidLine(cart))).toBe(false)
+		cart.addItem(COSRX_ITEM);
+		await settle(cart, 0);
+		expect(cart.appliedOffers.map((o) => o.code)).toEqual(["ORDER_OFFER"]);
+		expect(cart.additionalDiscount).toBe(10000);
+		expect(isFnfLine(paidLine(cart))).toBe(false);
 
-		const seen = server.requests.length
-		await cart.removeOffer("ORDER_OFFER", {})
-		await settle(cart, seen)
-		expect(cart.appliedOffers).toHaveLength(0)
-		expect(cart.additionalDiscount).toBe(0)
-		expect(server.requests.at(-1).method).toBe("fnf_only")
-		expect(isFnfLine(paidLine(cart))).toBe(true)
-		expect(paidLine(cart).amount).toBeCloseTo(18900, 2)
-	})
+		const seen = server.requests.length;
+		await cart.removeOffer("ORDER_OFFER", {});
+		await settle(cart, seen);
+		expect(cart.appliedOffers).toHaveLength(0);
+		expect(cart.additionalDiscount).toBe(0);
+		expect(server.requests.at(-1).method).toBe("fnf_only");
+		expect(isFnfLine(paidLine(cart))).toBe(true);
+		expect(paidLine(cart).amount).toBeCloseTo(18900, 2);
+	});
 
 	it("loading a draft while an offer pass is in flight: the forced pass prices the loaded cart and F&F comes back", async () => {
-		cart.addItem(COSRX_ITEM)
-		await settle(cart, 0)
-		expect(isFnfLine(paidLine(cart))).toBe(true)
+		cart.addItem(COSRX_ITEM);
+		await settle(cart, 0);
+		expect(isFnfLine(paidLine(cart))).toBe(true);
 
 		// An offer pass for qty 2 is out when the cashier opens a draft.
-		server.hold = {}
-		cart.updateItemQuantity(ITEM, 2)
-		await vi.waitFor(() => expect(server.hold.release).toBeTypeOf("function"), { timeout: 3000, interval: 5 })
-		const held = server.hold
-		server.hold = null
+		server.hold = {};
+		cart.updateItemQuantity(ITEM, 2);
+		await vi.waitFor(() => expect(server.hold.release).toBeTypeOf("function"), {
+			timeout: 3000,
+			interval: 5,
+		});
+		const held = server.hold;
+		server.hold = null;
 
 		// What POSSale.vue loadDraft does: the draft's lines (qty 1 with a stale BXGY tag
 		// and its old gift row) and its saved offers, then a forced offer pass.
-		const base = clone(paidLine(cart))
+		const base = clone(paidLine(cart));
 		cart.invoiceItems = [
 			{
 				...base,
@@ -393,23 +404,38 @@ describe("F&F discount restoration after promotion applies and qty decreases (de
 				gwp_free_qty: 1,
 				is_already_discounted: 1,
 			},
-			{ ...base, quantity: 1, rate: 0, price_list_rate: 0, discount_source: "", pricing_rules: RULE, is_free_item: 1 },
-		]
+			{
+				...base,
+				quantity: 1,
+				rate: 0,
+				price_list_rate: 0,
+				discount_source: "",
+				pricing_rules: RULE,
+				is_free_item: 1,
+			},
+		];
 		cart.appliedOffers = [
-			{ name: BXGY_OFFER.title, code: RULE, offer: BXGY_OFFER, source: "auto", applied: true, rules: [RULE] },
-		]
-		const seen = server.requests.length
-		cart.forceRefreshOffers()
-		held.release()
-		await settle(cart, seen)
+			{
+				name: BXGY_OFFER.title,
+				code: RULE,
+				offer: BXGY_OFFER,
+				source: "auto",
+				applied: true,
+				rules: [RULE],
+			},
+		];
+		const seen = server.requests.length;
+		cart.forceRefreshOffers();
+		held.release();
+		await settle(cart, seen);
 
-		const sent = server.requests.slice(seen).at(-1)
-		expect(sent.method).toBe("fnf_only")
-		expect(sent.params.items.flatMap((i) => ruleNames(i.pricing_rules))).not.toContain(RULE)
-		expect(cart.appliedOffers).toHaveLength(0)
-		expect(freeRows(cart)).toHaveLength(0)
-		expect(ruleNames(paidLine(cart).pricing_rules)).toEqual([])
-		expect(isFnfLine(paidLine(cart))).toBe(true)
-		expect(paidLine(cart).amount).toBeCloseTo(18900, 2)
-	})
-})
+		const sent = server.requests.slice(seen).at(-1);
+		expect(sent.method).toBe("fnf_only");
+		expect(sent.params.items.flatMap((i) => ruleNames(i.pricing_rules))).not.toContain(RULE);
+		expect(cart.appliedOffers).toHaveLength(0);
+		expect(freeRows(cart)).toHaveLength(0);
+		expect(ruleNames(paidLine(cart).pricing_rules)).toEqual([]);
+		expect(isFnfLine(paidLine(cart))).toBe(true);
+		expect(paidLine(cart).amount).toBeCloseTo(18900, 2);
+	});
+});

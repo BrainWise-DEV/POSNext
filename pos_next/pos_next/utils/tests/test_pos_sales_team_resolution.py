@@ -14,6 +14,7 @@ from __future__ import annotations
 import inspect
 import unittest
 from types import SimpleNamespace
+from typing import ClassVar
 from unittest.mock import MagicMock, patch
 
 import frappe
@@ -451,7 +452,7 @@ def _returned(item_code, row, qty):
 
 
 class TestCheckReturnQuantities(unittest.TestCase):
-	ORIGINAL = [_orig("r1", "A", 2), _orig("r2", "A", 3), _orig("r3", "B", 1)]
+	ORIGINAL: ClassVar[list] = [_orig("r1", "A", 2), _orig("r2", "A", 3), _orig("r3", "B", 1)]
 
 	def check(self, return_items, returned=()):
 		return invoices._check_return_quantities("SI-1", self.ORIGINAL, list(returned), return_items)

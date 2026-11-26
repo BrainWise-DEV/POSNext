@@ -12,7 +12,6 @@ def console(*data):
 		frappe.publish_realtime("toconsole", data, user=frappe.session.user)
 
 
-
 # Frappe/ERPNext compatibility shim:
 # ERPNext may pass do_not_round_fields to round_floats_in, but older Frappe
 # versions don't accept that kwarg.

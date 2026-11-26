@@ -160,7 +160,12 @@
 							)
 						}}
 					</p>
-					<Button v-if="permissions.create" @click="handleCreateNew" variant="solid" class="pos-btn pos-btn-primary">
+					<Button
+						v-if="permissions.create"
+						@click="handleCreateNew"
+						variant="solid"
+						class="pos-btn pos-btn-primary"
+					>
 						<template #prefix>
 							<FeatherIcon name="plus" class="w-4 h-4" />
 						</template>
@@ -605,7 +610,9 @@
 												:key="row[activeScope.column]"
 												class="border-t border-gray-100"
 											>
-												<td class="px-3 py-2 text-gray-500">{{ index + 1 }}</td>
+												<td class="px-3 py-2 text-gray-500">
+													{{ index + 1 }}
+												</td>
 												<td class="px-3 py-2 text-gray-900">
 													{{ row[activeScope.column] }}
 												</td>
@@ -801,7 +808,13 @@
 					<Button @click="showDeleteConfirm = false" variant="ghost">
 						{{ __("Cancel") }}
 					</Button>
-					<Button @click="confirmDelete" variant="solid" theme="red" class="pos-btn pos-btn-danger" :loading="loading">
+					<Button
+						@click="confirmDelete"
+						variant="solid"
+						theme="red"
+						class="pos-btn pos-btn-danger"
+						:loading="loading"
+					>
 						<template #prefix>
 							<FeatherIcon name="trash-2" class="w-4 h-4" />
 						</template>

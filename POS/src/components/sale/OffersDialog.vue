@@ -64,7 +64,10 @@
 											: 'bg-green-600',
 									]"
 								>
-									<div class="text-base font-bold leading-snug break-words" dir="auto">
+									<div
+										class="text-base font-bold leading-snug break-words"
+										dir="auto"
+									>
 										{{ offerBenefit(offer, formatCurrency, itemName) }}
 									</div>
 								</div>
@@ -87,11 +90,17 @@
 
 							<!-- Offer Header -->
 							<div class="mb-3">
-								<h4 class="text-sm font-semibold text-gray-900 text-start" dir="auto">
+								<h4
+									class="text-sm font-semibold text-gray-900 text-start"
+									dir="auto"
+								>
 									{{ offer.title || offer.name }}
 								</h4>
 								<p
-									v-if="offer.description && offer.description !== (offer.title || offer.name)"
+									v-if="
+										offer.description &&
+										offer.description !== (offer.title || offer.name)
+									"
 									class="text-xs text-gray-600 mt-1 text-start"
 								>
 									{{ offer.description }}

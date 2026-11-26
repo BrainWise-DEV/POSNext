@@ -7,11 +7,22 @@ import {
 
 // Typed qty in InvoiceCart goes display → paid via resolvePaidQuantityFromDisplay,
 // then the same update-quantity path as +/-. They must round-trip.
-const line = (extra = {}) => ({ item_code: "ZZFS-A", quantity: 2, uom: "Nos", stock_uom: "Nos", rate: 100, is_free_item: 0, ...extra });
+const line = (extra = {}) => ({
+	item_code: "ZZFS-A",
+	quantity: 2,
+	uom: "Nos",
+	stock_uom: "Nos",
+	rate: 100,
+	is_free_item: 0,
+	...extra,
+});
 const rows = (c) => c.map((i) => `${i.is_free_item ? "free" : "paid"}:${i.quantity}`).join(",");
 const evaluate = (c) => {
 	const paid = c.filter((i) => !i.is_free_item).reduce((s, i) => s + i.quantity, 0);
-	return syncCartFreeItems(c, paid >= 2 ? [{ item_code: "ZZFS-A", qty: 1, uom: "Nos", min_qty: 2 }] : []);
+	return syncCartFreeItems(
+		c,
+		paid >= 2 ? [{ item_code: "ZZFS-A", qty: 1, uom: "Nos", min_qty: 2 }] : []
+	);
 };
 const typeQty = (c, value) => {
 	const paid = c.find((i) => !i.is_free_item);
@@ -33,8 +44,12 @@ describe("typed paid qty (PRLE-1585)", () => {
 	});
 
 	it("typed qty on a free_item-stamped line is the paid qty (was: free_qty subtracted)", () => {
-		expect(resolvePaidQuantityFromDisplay(line({ discount_source: "free_item", free_qty: 1 }), 1)).toBe(1);
-		expect(resolvePaidQuantityFromDisplay(line({ discount_source: "free_item", free_qty: 1 }), 3)).toBe(3);
+		expect(
+			resolvePaidQuantityFromDisplay(line({ discount_source: "free_item", free_qty: 1 }), 1)
+		).toBe(1);
+		expect(
+			resolvePaidQuantityFromDisplay(line({ discount_source: "free_item", free_qty: 1 }), 3)
+		).toBe(3);
 	});
 
 	it("bundled display subtracts the bundled free units", () => {

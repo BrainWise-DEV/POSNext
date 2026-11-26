@@ -72,10 +72,7 @@
 								: 'bg-purple-50 border border-purple-200',
 						]"
 					>
-						<p
-							v-if="allItemsHaveSalesPerson"
-							class="text-xs text-purple-700 mb-1.5"
-						>
+						<p v-if="allItemsHaveSalesPerson" class="text-xs text-purple-700 mb-1.5">
 							{{
 								__(
 									"All items have a Sales Person — invoice-level selection is optional."
@@ -1198,10 +1195,7 @@
 									]"
 								>
 									{{ formatCurrency(availableWalletBalance) }}
-									<span
-										v-if="walletInfo.balance_points"
-										class="ms-0.5"
-									>
+									<span v-if="walletInfo.balance_points" class="ms-0.5">
 										({{ walletInfo.balance_points }} {{ __("pts") }})
 									</span>
 								</span>
@@ -1283,7 +1277,9 @@
 								>
 									<FeatherIcon
 										name="file-text"
-										:class="isSmallMobile ? 'w-3 h-3' : 'w-4 h-4 lg:w-5 lg:h-5'"
+										:class="
+											isSmallMobile ? 'w-3 h-3' : 'w-4 h-4 lg:w-5 lg:h-5'
+										"
 									/>
 									<span class="truncate max-w-[80px] lg:max-w-none">{{
 										__(acc.account_name || acc.name)
@@ -1586,8 +1582,8 @@
 										isSubmitting || !isSalesPersonValid
 											? 'border-gray-200 text-gray-400 cursor-not-allowed'
 											: creditConfirming
-												? 'border-amber-700 bg-amber-700 text-white'
-												: 'border-amber-600 bg-white text-amber-800 active:bg-amber-50',
+											? 'border-amber-700 bg-amber-700 text-white'
+											: 'border-amber-600 bg-white text-amber-800 active:bg-amber-50',
 										mobileButtonSize.height,
 										mobileButtonSize.text,
 										mobileButtonSize.gap,
@@ -1632,8 +1628,8 @@
 										isSubmitting
 											? __("Processing...")
 											: creditConfirming
-												? __("Tap again to confirm")
-												: __("On Account")
+											? __("Tap again to confirm")
+											: __("On Account")
 									}}</span>
 								</button>
 							</div>
@@ -1757,7 +1753,10 @@
 						</div>
 
 						<!-- Keypad Grid (4 columns) -->
-						<div dir="ltr" :class="['grid grid-cols-4', isCompactMode ? 'gap-1' : 'gap-1.5']">
+						<div
+							dir="ltr"
+							:class="['grid grid-cols-4', isCompactMode ? 'gap-1' : 'gap-1.5']"
+						>
 							<!-- Row 1: 7, 8, 9, Backspace -->
 							<button
 								v-for="num in ['7', '8', '9']"
@@ -1896,8 +1895,8 @@
 								paymentEntries.length > 0 || isSubmitting || !isSalesPersonValid
 									? 'border-gray-200 text-gray-400 cursor-not-allowed'
 									: creditConfirming
-										? 'border-amber-700 bg-amber-700 text-white'
-										: 'border-amber-600 bg-white text-amber-800 hover:bg-amber-50 focus-visible:ring-2 focus-visible:ring-amber-500',
+									? 'border-amber-700 bg-amber-700 text-white'
+									: 'border-amber-600 bg-white text-amber-800 hover:bg-amber-50 focus-visible:ring-2 focus-visible:ring-amber-500',
 							]"
 						>
 							<svg
@@ -1938,8 +1937,8 @@
 								isSubmitting
 									? __("Processing...")
 									: creditConfirming
-										? __("Click again to confirm")
-										: __("Pay on Account")
+									? __("Click again to confirm")
+									: __("Pay on Account")
 							}}</span>
 						</button>
 
@@ -1955,8 +1954,12 @@
 							]"
 						>
 							<FeatherIcon name="dollar-sign" class="w-4 h-4" />
-							<span dir="auto">{{ __("Exact cash {0}", [formatCurrency(remainingAmount)]) }}</span>
-							<kbd class="text-[11px] font-mono bg-blue-600 rounded px-1.5 py-0.5">Enter</kbd>
+							<span dir="auto">{{
+								__("Exact cash {0}", [formatCurrency(remainingAmount)])
+							}}</span>
+							<kbd class="text-[11px] font-mono bg-blue-600 rounded px-1.5 py-0.5"
+								>Enter</kbd
+							>
 						</button>
 						<!-- Complete/Partial Payment Button -->
 						<button
@@ -2483,7 +2486,7 @@ const requiresCustomerForPayment = computed(() => {
 	if (selectedReceivableAccount.value) return true;
 	return paymentEntries.value.some((entry) => {
 		const method = paymentMethods.value.find(
-			(m) => m.mode_of_payment === entry.mode_of_payment,
+			(m) => m.mode_of_payment === entry.mode_of_payment
 		);
 		return isReceivablePaymentMethod(method);
 	});
@@ -3198,7 +3201,7 @@ function switchToNextPaymentMethod(partialAmount) {
 function _upsertPaymentEntry(method, amt) {
 	if (isReceivablePaymentMethod(method) && !hasCustomerForPayment.value) {
 		showWarning(
-			__("Please select a customer before paying with {0}", [method.mode_of_payment]),
+			__("Please select a customer before paying with {0}", [method.mode_of_payment])
 		);
 		return;
 	}
@@ -3498,7 +3501,11 @@ function confirmCreditSale() {
 function paymentFeatherIcon(method) {
 	if (isCashPaymentMethod(method)) return "dollar-sign";
 	const type = (method?.type || "").toLowerCase();
-	return type === "bank" ? "home" : type === "phone" || type.includes("mobile") ? "smartphone" : "credit-card";
+	return type === "bank"
+		? "home"
+		: type === "phone" || type.includes("mobile")
+		? "smartphone"
+		: "credit-card";
 }
 
 function addCreditAccountPayment() {

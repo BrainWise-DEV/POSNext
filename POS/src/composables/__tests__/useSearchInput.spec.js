@@ -26,7 +26,12 @@ function setup({ results = [chipsy], barcodeItem = null } = {}) {
 	});
 	const onItemFound = vi.fn(() => true);
 	const showWarning = vi.fn();
-	const search = useSearchInput({ itemStore, onItemFound, showWarning, isAnyDialogOpen: { value: false } });
+	const search = useSearchInput({
+		itemStore,
+		onItemFound,
+		showWarning,
+		isAnyDialogOpen: { value: false },
+	});
 	const input = document.createElement("input");
 	document.body.appendChild(input);
 	search.searchInputRef.value = input;
@@ -48,7 +53,9 @@ describe("useSearchInput Enter on a name search", () => {
 	});
 
 	it("keeps the query and asks the cashier to pick when several results show", async () => {
-		const { onItemFound, showWarning, type, press, input, itemStore } = setup({ results: [chipsy, lays] });
+		const { onItemFound, showWarning, type, press, input, itemStore } = setup({
+			results: [chipsy, lays],
+		});
 		type("chips");
 		press("Enter");
 		await vi.waitFor(() => expect(showWarning).toHaveBeenCalled());
@@ -70,7 +77,9 @@ describe("useSearchInput Enter on a name search", () => {
 		type("zzz");
 		press("Enter");
 		await vi.waitFor(() => expect(showWarning).toHaveBeenCalled());
-		expect(showWarning.mock.calls[0][0]).toBe("No item matches «zzz». Search by name or scan the barcode again.");
+		expect(showWarning.mock.calls[0][0]).toBe(
+			"No item matches «zzz». Search by name or scan the barcode again."
+		);
 	});
 });
 

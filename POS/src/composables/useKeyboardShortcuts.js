@@ -30,15 +30,21 @@ export function useGlobalShortcuts(isBlocked, handlers) {
  */
 export function usePickerEnter(isOpen, onEnter) {
 	const onKeydown = (event) => {
-		if (event.key !== "Enter" || event.isComposing || ["INPUT", "TEXTAREA"].includes(event.target?.tagName)) return;
+		if (
+			event.key !== "Enter" ||
+			event.isComposing ||
+			["INPUT", "TEXTAREA"].includes(event.target?.tagName)
+		)
+			return;
 		event.preventDefault();
 		event.stopPropagation();
 		onEnter(event);
 	};
 	const stop = watch(
 		isOpen,
-		(open) => window[open ? "addEventListener" : "removeEventListener"]("keydown", onKeydown, true),
-		{ immediate: true },
+		(open) =>
+			window[open ? "addEventListener" : "removeEventListener"]("keydown", onKeydown, true),
+		{ immediate: true }
 	);
 	onUnmounted(() => {
 		stop();

@@ -17,7 +17,7 @@ export const usePOSShiftStore = defineStore("posShift", () => {
 	const profileCurrency = computed(() => currentProfile.value?.currency || DEFAULT_CURRENCY);
 	/** Company.default_currency — basis for POS expense amounts and shift limits. */
 	const companyCurrency = computed(
-		() => shiftState.value.company?.default_currency || profileCurrency.value,
+		() => shiftState.value.company?.default_currency || profileCurrency.value
 	);
 	const profileWarehouse = computed(() => currentProfile.value?.warehouse);
 	const profileCompany = computed(() => currentProfile.value?.company);
@@ -27,10 +27,10 @@ export const usePOSShiftStore = defineStore("posShift", () => {
 	const writeOffCostCenter = computed(() => currentProfile.value?.write_off_cost_center);
 	const writeOffLimit = computed(() => currentProfile.value?.write_off_limit || 0);
 	const allowPosExpense = computed(
-		() => Number(currentProfile.value?.posa_allow_pos_expense || 0) === 1,
+		() => Number(currentProfile.value?.posa_allow_pos_expense || 0) === 1
 	);
 	const maximumExpenseAmount = computed(
-		() => Number.parseFloat(currentProfile.value?.posa_maximum_expense_amount) || 0,
+		() => Number.parseFloat(currentProfile.value?.posa_maximum_expense_amount) || 0
 	);
 
 	// Actions

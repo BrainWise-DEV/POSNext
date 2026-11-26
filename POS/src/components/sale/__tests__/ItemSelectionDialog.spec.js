@@ -21,26 +21,49 @@ vi.mock("@/utils/offline/offlineState", () => ({ offlineState: { isOffline: fals
 vi.mock("@/utils/offline/items", () => ({ getCachedVariants: vi.fn(), cacheItems: vi.fn() }));
 
 const mountDialog = (props) =>
-	mount(ItemSelectionDialog, { props: { modelValue: false, ...props }, global: { mocks: { __: globalThis.__ } } });
+	mount(ItemSelectionDialog, {
+		props: { modelValue: false, ...props },
+		global: { mocks: { __: globalThis.__ } },
+	});
 
 describe("unit picker", () => {
-	const oreo = { item_code: "EG-1135", stock_uom: "Nos", rate: 13.95, item_uoms: [{ uom: "Nos", conversion_factor: 1 }] };
+	const oreo = {
+		item_code: "EG-1135",
+		stock_uom: "Nos",
+		rate: 13.95,
+		item_uoms: [{ uom: "Nos", conversion_factor: 1 }],
+	};
 
 	it("counts the stock unit once", () => {
 		expect(getDistinctUoms(oreo).map((u) => u.uom)).toEqual(["Nos"]);
-		const box = { ...oreo, item_uoms: [...oreo.item_uoms, { uom: "Box", conversion_factor: 12 }] };
+		const box = {
+			...oreo,
+			item_uoms: [...oreo.item_uoms, { uom: "Box", conversion_factor: 12 }],
+		};
 		expect(getDistinctUoms(box).map((u) => u.uom)).toEqual(["Nos", "Box"]);
 	});
 
 	it("lists each unit once in the dialog", () => {
-		const state = mountDialog({ item: { ...oreo, item_uoms: [...oreo.item_uoms, { uom: "Box", conversion_factor: 12 }] } }).vm.$.setupState;
+		const state = mountDialog({
+			item: {
+				...oreo,
+				item_uoms: [...oreo.item_uoms, { uom: "Box", conversion_factor: 12 }],
+			},
+		}).vm.$.setupState;
 		state.loadOptions();
 		expect(state.options.map((o) => o.label)).toEqual(["Nos", "Box"]);
 	});
 });
 
 describe("variant picker", () => {
-	const variant = (code, Color, Storage, actual_qty, rate) => ({ item_code: code, item_name: code, attributes: { Color, Storage }, actual_qty, rate, stock_uom: "Nos" });
+	const variant = (code, Color, Storage, actual_qty, rate) => ({
+		item_code: code,
+		item_name: code,
+		attributes: { Color, Storage },
+		actual_qty,
+		rate,
+		stock_uom: "Nos",
+	});
 	const variants = [
 		variant("BLUE-256", "Blue", "256", 0, 77699),
 		variant("BLUE-512", "Blue", "512", 3, 93899),

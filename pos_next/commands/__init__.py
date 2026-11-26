@@ -25,9 +25,7 @@ def _run(command: list[str]) -> None:
 	click.echo(f"$ {' '.join(command)}")
 	result = subprocess.run(command, cwd=BENCH_PATH)
 	if result.returncode != 0:
-		raise click.ClickException(
-			f"Command failed with exit code {result.returncode}: {' '.join(command)}"
-		)
+		raise click.ClickException(f"Command failed with exit code {result.returncode}: {' '.join(command)}")
 
 
 def _is_app_in_bench(app_name: str) -> bool:
@@ -47,9 +45,7 @@ def _is_app_on_site(site: str, app_name: str) -> bool:
 	)
 	if result.returncode != 0:
 		detail = (result.stderr or result.stdout or "").strip() or f"exit code {result.returncode}"
-		raise click.ClickException(
-			f"Could not list apps for site '{site}': {detail}"
-		)
+		raise click.ClickException(f"Could not list apps for site '{site}': {detail}")
 	installed = {line.strip().split()[0] for line in result.stdout.splitlines() if line.strip()}
 	return app_name in installed
 
@@ -82,8 +78,7 @@ def _check_required_site_apps(site: str, required_apps: tuple[str, ...]) -> None
 	missing = [app for app in required_apps if not _is_app_on_site(site, app)]
 	if missing:
 		raise click.ClickException(
-			"Cannot install pos_next: required site app(s) missing: "
-			+ ", ".join(missing)
+			"Cannot install pos_next: required site app(s) missing: " + ", ".join(missing)
 		)
 
 
@@ -115,9 +110,7 @@ def bootstrap(site: str, with_posnext_promotions: bool) -> None:
 			branch=POSNEXT_PROMOTIONS_BRANCH,
 		)
 	else:
-		click.echo(
-			f"Skipping {POSNEXT_PROMOTIONS_APP}: pass --with-posnext-promotions to install"
-		)
+		click.echo(f"Skipping {POSNEXT_PROMOTIONS_APP}: pass --with-posnext-promotions to install")
 
 	_check_required_site_apps(site, REQUIRED_SITE_APPS)
 	if _is_app_on_site(site, "pos_next"):

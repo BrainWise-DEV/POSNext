@@ -343,14 +343,26 @@ const serialSearchQuery = ref("");
 const serialSearchInput = ref(null);
 
 const MONTHS = [
-	"January", "February", "March", "April", "May", "June",
-	"July", "August", "September", "October", "November", "December",
+	"January",
+	"February",
+	"March",
+	"April",
+	"May",
+	"June",
+	"July",
+	"August",
+	"September",
+	"October",
+	"November",
+	"December",
 ];
 
 /** Whole days from today (local date) to a YYYY-MM-DD expiry date; negative once expired */
 function daysToExpiry(dateStr) {
 	const d = new Date();
-	const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+	const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+		d.getDate()
+	).padStart(2, "0")}`;
 	return Math.round((Date.parse(dateStr.slice(0, 10)) - Date.parse(today)) / 86400000);
 }
 
@@ -369,8 +381,8 @@ function expiryTone(dateStr) {
 	return days < 0
 		? "bg-red-50 text-red-700 font-medium"
 		: days < 30
-			? "bg-[#b45309]/10 text-[#b45309] font-medium"
-			: "text-gray-600";
+		? "bg-[#b45309]/10 text-[#b45309] font-medium"
+		: "text-gray-600";
 }
 
 // FEFO order: unexpired by earliest expiry, then undated, then expired
@@ -378,8 +390,8 @@ const fefoKey = (batch) =>
 	!batch.expiry_date
 		? "1"
 		: daysToExpiry(batch.expiry_date) < 0
-			? `2${batch.expiry_date}`
-			: `0${batch.expiry_date}`;
+		? `2${batch.expiry_date}`
+		: `0${batch.expiry_date}`;
 
 // Computed: Available batches with cart quantities subtracted
 const availableBatches = computed(() => {
@@ -613,5 +625,4 @@ function resetSelection() {
 	warehouseBatches.value = [];
 	// Don't clear availableSerials - it's managed by the store cache
 }
-
 </script>

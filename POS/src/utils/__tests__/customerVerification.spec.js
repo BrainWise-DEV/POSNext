@@ -31,7 +31,9 @@ describe("customerVerification", () => {
 	});
 
 	it("unwraps {message} and returns null on error", async () => {
-		callMock.mockResolvedValueOnce({ message: { custom_email_verified: 1, custom_verified_email: "a@b.com" } });
+		callMock.mockResolvedValueOnce({
+			message: { custom_email_verified: 1, custom_verified_email: "a@b.com" },
+		});
 		expect((await fetchVerificationStatus("C")).custom_email_verified).toBe(1);
 		callMock.mockRejectedValueOnce(new Error("x"));
 		expect(await fetchVerificationStatus("C")).toBeNull();
@@ -52,7 +54,8 @@ describe("customerVerification", () => {
 });
 
 describe("F&F membership (verification offered to F&F members)", () => {
-	const ELIGIBILITY = "posnext_promotions.api.friends_and_family.check_friends_and_family_eligibility";
+	const ELIGIBILITY =
+		"posnext_promotions.api.friends_and_family.check_friends_and_family_eligibility";
 	beforeEach(() => {
 		callMock.mockReset();
 		vi.stubGlobal("window", { posnext_app_flags: { posnext_promotions: 1 } });
@@ -60,10 +63,19 @@ describe("F&F membership (verification offered to F&F members)", () => {
 	afterEach(() => vi.unstubAllGlobals());
 
 	it("reads ff_member from the eligibility payload", async () => {
-		callMock.mockResolvedValueOnce({ message: { eligible: false, reason: "email_not_verified", ff_member: true } });
+		callMock.mockResolvedValueOnce({
+			message: { eligible: false, reason: "email_not_verified", ff_member: true },
+		});
 		expect(await fetchFnfMembership("CUST-1", "P1")).toBe(true);
-		expect(callMock).toHaveBeenCalledWith(ELIGIBILITY, { customer: "CUST-1", pos_profile: "P1" });
-		callMock.mockResolvedValueOnce({ eligible: false, reason: "not_eligible", ff_member: false });
+		expect(callMock).toHaveBeenCalledWith(ELIGIBILITY, {
+			customer: "CUST-1",
+			pos_profile: "P1",
+		});
+		callMock.mockResolvedValueOnce({
+			eligible: false,
+			reason: "not_eligible",
+			ff_member: false,
+		});
 		expect(await fetchFnfMembership("CUST-2")).toBe(false);
 		callMock.mockRejectedValueOnce(new Error("x"));
 		expect(await fetchFnfMembership("CUST-3")).toBe(false);

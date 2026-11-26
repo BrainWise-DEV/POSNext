@@ -850,7 +850,9 @@ async function cacheItemsFromServer(items, batchSize) {
 		await db.transaction("rw", "items", "item_prices", "settings", async () => {
 			for (const batch of batches) {
 				// Keep cached batch/serial data: server item rows don't carry it
-				const existing = await db.table("items").bulkGet(batch.map((item) => item.item_code));
+				const existing = await db
+					.table("items")
+					.bulkGet(batch.map((item) => item.item_code));
 
 				// Normalize data using helper (zero-copy where possible)
 				const processedItems = batch.map((item, index) => ({

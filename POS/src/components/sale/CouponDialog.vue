@@ -538,12 +538,14 @@ async function applyCouponAgainstFriendsAndFamily(coupon) {
 		customer: props.customer,
 		company: props.company,
 	});
-	const data = response?.message && typeof response.message === "object" ? response.message : response;
+	const data =
+		response?.message && typeof response.message === "object" ? response.message : response;
 
 	if (!data || !data.valid) {
 		if (showBetterDiscountMessage(data)) return;
 		errorMessage.value =
-			pickLocalizedMessage(data, locale.value) || __("The coupon code you entered is not valid");
+			pickLocalizedMessage(data, locale.value) ||
+			__("The coupon code you entered is not valid");
 		showError(errorMessage.value);
 		return;
 	}
@@ -600,7 +602,8 @@ function applyLineCoupon(coupon, result) {
 	emit("discount-applied", appliedDiscount.value);
 	// Lines whose own promotion beats the coupon (coupon set to "Better of the two")
 	const kept = (result.kept_promotion_items || []).map(
-		(itemCode) => cartStore.invoiceItems.find((i) => i.item_code === itemCode)?.item_name || itemCode
+		(itemCode) =>
+			cartStore.invoiceItems.find((i) => i.item_code === itemCode)?.item_name || itemCode
 	);
 	showSuccess(
 		kept.length

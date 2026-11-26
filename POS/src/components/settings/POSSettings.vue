@@ -719,12 +719,20 @@
 											<CheckboxField
 												v-model="settings.cart_lifo"
 												:label="__('LIFO Cart Order (Newest on Top)')"
-												:description="__('Show the most recently added item at the top of the cart instead of the bottom.')"
+												:description="
+													__(
+														'Show the most recently added item at the top of the cart instead of the bottom.'
+													)
+												"
 											/>
 											<CheckboxField
 												v-model="settings.print_multiple_sales_persons"
 												:label="__('Print Multiple Sales Persons')"
-												:description="__('Print all sales persons on the receipt when an invoice has more than one. When off, receipts with multiple sales persons do not show them (a single sales person always prints).')"
+												:description="
+													__(
+														'Print all sales persons on the receipt when an invoice has more than one. When off, receipts with multiple sales persons do not show them (a single sales person always prints).'
+													)
+												"
 											/>
 											<CheckboxField
 												v-model="settings.silent_print"

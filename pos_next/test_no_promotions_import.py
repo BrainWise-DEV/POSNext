@@ -49,7 +49,9 @@ class TestNoPromotionsImport(unittest.TestCase):
 
 	def test_no_python_import_of_posnext_promotions(self):
 		violations = _forbidden_imports("posnext_promotions", skip_names=SKIP_IMPORT_FILES)
-		self.assertEqual(violations, [], "posnext_promotions imports are forbidden:\n" + "\n".join(violations))
+		self.assertEqual(
+			violations, [], "posnext_promotions imports are forbidden:\n" + "\n".join(violations)
+		)
 
 	def test_no_python_import_of_magento_or_miraaya(self):
 		for pkg in ("magento_integration", "masar_miraaya"):
@@ -82,7 +84,9 @@ class TestNoPromotionsImport(unittest.TestCase):
 		self.assertNotIn("magento_integration", invoice_cart)
 
 	def test_gift_pool_vue_is_boot_gated(self):
-		promo_mgmt = (POS_NEXT_APP / "POS" / "src" / "components" / "sale" / "PromotionManagement.vue").read_text()
+		promo_mgmt = (
+			POS_NEXT_APP / "POS" / "src" / "components" / "sale" / "PromotionManagement.vue"
+		).read_text()
 		self.assertIn("isPromotionsAppInstalled", promo_mgmt)
 		self.assertIn("Gift Pool", promo_mgmt)
 		# Product types (Gift Pool / GWP) register via the strategy plugin seam —
@@ -97,7 +101,9 @@ class TestNoPromotionsImport(unittest.TestCase):
 		self.assertNotIn('promotion_type === "Gift Pool"', pos_cart)
 
 	def test_customer_create_uses_bootstrap_flag(self):
-		dialog = (POS_NEXT_APP / "POS" / "src" / "components" / "sale" / "CreateCustomerDialog.vue").read_text()
+		dialog = (
+			POS_NEXT_APP / "POS" / "src" / "components" / "sale" / "CreateCustomerDialog.vue"
+		).read_text()
 		self.assertIn("requiresSplitCustomerName", dialog)
 		self.assertNotIn("masar_miraaya", dialog)
 		self.assertNotIn("magento_integration", dialog)

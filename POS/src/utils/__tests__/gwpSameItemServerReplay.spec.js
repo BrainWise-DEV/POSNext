@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { syncCartFreeItems, totalSkuQty, withCarvedQtyRestored } from "@/utils/gwpSameItemFreeRows";
+import {
+	syncCartFreeItems,
+	totalSkuQty,
+	withCarvedQtyRestored,
+} from "@/utils/gwpSameItemFreeRows";
 
 // Replays posnext_promotions apply_offers for PRLE-1585 (same-SKU GWP, min_qty 2,
 // free_qty 1, not recursive) after fix/same-item-gwp-min-qty-paid-only:
@@ -12,19 +16,42 @@ function server(payloadItems) {
 	return {
 		items: payloadItems,
 		free_items: ok
-			? [{ item_code: "ZZFS-A", qty: 1, uom: "Nos", rate: 0, is_free_item: 1, pricing_rules: RULE }]
+			? [
+					{
+						item_code: "ZZFS-A",
+						qty: 1,
+						uom: "Nos",
+						rate: 0,
+						is_free_item: 1,
+						pricing_rules: RULE,
+					},
+			  ]
 			: [],
 		applied_pricing_rules: ok ? [RULE] : [],
 	};
 }
-const line = (quantity) => ({ item_code: "ZZFS-A", quantity, uom: "Nos", stock_uom: "Nos", rate: 100, is_free_item: 0 });
+const line = (quantity) => ({
+	item_code: "ZZFS-A",
+	quantity,
+	uom: "Nos",
+	stock_uom: "Nos",
+	rate: 100,
+	is_free_item: 0,
+});
 const rows = (c) => c.map((i) => `${i.is_free_item ? "free" : "paid"}:${i.quantity}`).join(",");
-const paidDemand = (c) => withCarvedQtyRestored(c).filter((i) => !i.is_free_item).reduce((s, i) => s + i.quantity, 0);
+const paidDemand = (c) =>
+	withCarvedQtyRestored(c)
+		.filter((i) => !i.is_free_item)
+		.reduce((s, i) => s + i.quantity, 0);
 
 // One posCart pass: buildOfferEvaluationPayload → server → processFreeItems.
 // "Offer removed" fires when a previously applied rule disappears.
 function pass(cart, state) {
-	const payload = withCarvedQtyRestored(cart).map((i) => ({ item_code: i.item_code, qty: i.quantity, is_free_item: i.is_free_item || 0 }));
+	const payload = withCarvedQtyRestored(cart).map((i) => ({
+		item_code: i.item_code,
+		qty: i.quantity,
+		is_free_item: i.is_free_item || 0,
+	}));
 	const res = server(payload);
 	const applied = res.applied_pricing_rules.includes(RULE);
 	if (state.applied && !applied) state.removed.push(paidDemand(cart));

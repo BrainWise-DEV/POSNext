@@ -816,7 +816,8 @@ export const bumpExpenseDialogCacheShiftTotal = async (posProfile, posOpeningShi
 	return cacheExpenseDialogData(posProfile, posOpeningShift, {
 		...cache,
 		shift_expense_total: shiftTotal,
-		remaining_expense_amount: max > 0 ? Math.max(0, max - shiftTotal) : cache.remaining_expense_amount,
+		remaining_expense_amount:
+			max > 0 ? Math.max(0, max - shiftTotal) : cache.remaining_expense_amount,
 	});
 };
 
@@ -862,7 +863,10 @@ const isAllowedExpenseExtension = (fileName) => {
  * @param {number} maxFileSize
  * @returns {string|null} Error message or null
  */
-export const validateExpenseQueueAttachment = (fileLike, maxFileSize = DEFAULT_EXPENSE_MAX_FILE_SIZE) => {
+export const validateExpenseQueueAttachment = (
+	fileLike,
+	maxFileSize = DEFAULT_EXPENSE_MAX_FILE_SIZE
+) => {
 	const name = fileLike?.name || "";
 	const size = Number(fileLike?.size ?? fileLike?.blob?.size ?? 0);
 	if (!name || !isAllowedExpenseExtension(name)) {
@@ -935,7 +939,7 @@ export const saveOfflineExpense = async (expenseData, attachments = [], limits =
 	const maxAmount = Number(limits.maximum_expense_amount);
 	if (!Number.isFinite(maxAmount) || maxAmount <= 0) {
 		throw new Error(
-			"Maximum Expense Amount is not configured. Open expenses once while online to cache limits.",
+			"Maximum Expense Amount is not configured. Open expenses once while online to cache limits."
 		);
 	}
 
@@ -988,7 +992,10 @@ export const saveOfflineExpense = async (expenseData, attachments = [], limits =
 		retry_count: 0,
 	});
 
-	log.info("Expense saved to offline queue", { offline_id: offlineId, attachments: normalizedAttachments.length });
+	log.info("Expense saved to offline queue", {
+		offline_id: offlineId,
+		attachments: normalizedAttachments.length,
+	});
 	return { success: true, id, offline_id: offlineId };
 };
 
@@ -1031,7 +1038,7 @@ export const deleteOfflineExpense = async (id) => {
 		}
 		if (row.server_journal_entry) {
 			throw new Error(
-				"Journal Entry already created on the server. Discard remaining attachments instead of deleting.",
+				"Journal Entry already created on the server. Discard remaining attachments instead of deleting."
 			);
 		}
 		await db.expense_queue.delete(id);
@@ -1093,11 +1100,7 @@ const rememberExpenseJournalEntry = async (expense, journalEntry) => {
 	const posOpeningShift = expense.data?.pos_opening_shift;
 	let cacheCounted = Boolean(expense.cache_counted);
 	if (!cacheCounted && posProfile && posOpeningShift && amount > 0) {
-		cacheCounted = await bumpExpenseDialogCacheShiftTotal(
-			posProfile,
-			posOpeningShift,
-			amount,
-		);
+		cacheCounted = await bumpExpenseDialogCacheShiftTotal(posProfile, posOpeningShift, amount);
 	}
 	await db.expense_queue.update(expense.id, {
 		server_journal_entry: journalEntry,
@@ -1116,7 +1119,13 @@ const isExpenseDuplicateError = (error) => {
 	);
 };
 
-const uploadExpenseAttachmentBlob = async ({ blob, name, journalEntry, posOpeningShift, posProfile }) => {
+const uploadExpenseAttachmentBlob = async ({
+	blob,
+	name,
+	journalEntry,
+	posOpeningShift,
+	posProfile,
+}) => {
 	const formData = new FormData();
 	formData.append("file", blob, name);
 	formData.append("journal_entry", journalEntry);
@@ -1133,9 +1142,7 @@ const uploadExpenseAttachmentBlob = async ({ blob, name, journalEntry, posOpenin
 	const responseData = await response.json().catch(() => ({}));
 	if (!response.ok || responseData.exc) {
 		const message =
-			responseData?.message ||
-			responseData?._error_message ||
-			`Failed to attach ${name}`;
+			responseData?.message || responseData?._error_message || `Failed to attach ${name}`;
 		throw new Error(typeof message === "string" ? message : `Failed to attach ${name}`);
 	}
 	if (!responseData.message?.file_url && !responseData.message?.name) {
@@ -1241,7 +1248,7 @@ const syncExpenseToServer = async (expense, retryCount = 0) => {
 			const remaining = attachments.slice(index);
 			await rememberExpenseJournalEntry(
 				{ ...expense, server_journal_entry: journalEntry },
-				journalEntry,
+				journalEntry
 			);
 			await db.expense_queue.update(expense.id, {
 				attachments: remaining,

@@ -492,10 +492,7 @@
 			</div>
 
 			<!-- No Shift Placeholder -->
-			<div
-				v-else
-				class="flex-1 min-h-0 flex items-center justify-center bg-gray-50"
-			>
+			<div v-else class="flex-1 min-h-0 flex items-center justify-center bg-gray-50">
 				<div class="text-center">
 					<div
 						class="mx-auto flex items-center justify-center h-24 w-24 rounded-full bg-blue-100"
@@ -1350,7 +1347,7 @@ const profileWarehouses = computed(() => {
 
 const canAccessShiftActions = computed(() => shiftStore.hasOpenShift);
 const canRecordPosExpense = computed(
-	() => canAccessShiftActions.value && shiftStore.allowPosExpense,
+	() => canAccessShiftActions.value && shiftStore.allowPosExpense
 );
 
 /** Desk link only for users with the Nexus POS Manager role (from bootstrap API). */
@@ -1608,8 +1605,8 @@ onMounted(async () => {
 				? offlineStore.checkOfflineCacheAvailability()
 				: offlineStore.preloadDataForOffline(
 						shiftStore.currentProfile,
-						shiftStore.currentShift?.name,
-					),
+						shiftStore.currentShift?.name
+				  ),
 			draftsStore.updateDraftsCount(),
 			// Invoices queued in an earlier offline session: sync now, not on the next reconnect
 			offlineStore.isOffline ? null : offlineStore.syncAllPending(),
@@ -1911,8 +1908,8 @@ async function handleShiftOpened() {
 			? offlineStore.checkOfflineCacheAvailability()
 			: offlineStore.preloadDataForOffline(
 					shiftStore.currentProfile,
-					shiftStore.currentShift?.name,
-				),
+					shiftStore.currentShift?.name
+			  ),
 		draftsStore.updateDraftsCount(),
 		// Invoices queued in an earlier offline session: sync now, not on the next reconnect
 		offlineStore.isOffline ? null : offlineStore.syncAllPending(),
@@ -2524,8 +2521,8 @@ function handleCloseShift() {
 	if (!canCloseShiftWithPendingExpenses(offlineStore.pendingExpensesCount)) {
 		showError(
 			__(
-				"Sync or delete pending offline expenses before closing this shift. Unsynced cash expenses cannot be booked after the shift is closed.",
-			),
+				"Sync or delete pending offline expenses before closing this shift. Unsynced cash expenses cannot be booked after the shift is closed."
+			)
 		);
 		return;
 	}
@@ -2593,8 +2590,8 @@ function logoutWithCloseShift() {
 		uiStore.showLogoutDialog = false;
 		showError(
 			__(
-				"Sync or delete pending offline expenses before closing this shift. Unsynced cash expenses cannot be booked after the shift is closed.",
-			),
+				"Sync or delete pending offline expenses before closing this shift. Unsynced cash expenses cannot be booked after the shift is closed."
+			)
 		);
 		return;
 	}

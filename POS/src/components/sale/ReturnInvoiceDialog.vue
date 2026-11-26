@@ -234,7 +234,10 @@
 									<p class="text-xs text-gray-600 mt-1 text-start">
 										<span dir="auto">{{ invoice.customer_name }}</span>
 										<span v-if="invoice.contact_mobile" class="text-gray-400">
-											• <span dir="ltr">{{ invoice.contact_mobile }}</span></span
+											•
+											<span dir="ltr">{{
+												invoice.contact_mobile
+											}}</span></span
 										>
 									</p>
 									<p class="text-xs text-gray-500 text-start">
@@ -311,7 +314,9 @@
 								<p class="text-xs text-gray-500 text-center">
 									{{
 										invoiceListFilter.trim()
-											? __("Try a different search term or check the invoice number")
+											? __(
+													"Try a different search term or check the invoice number"
+											  )
 											: __("Type an invoice number to search all invoices")
 									}}
 								</p>
@@ -2064,7 +2069,8 @@ async function handleCreateReturn() {
 					{
 						pos_profile: props.posProfile,
 						return_against: returnAgainst,
-						customer: preparedReturnDoc.value?.customer || originalInvoice.value?.customer,
+						customer:
+							preparedReturnDoc.value?.customer || originalInvoice.value?.customer,
 						amount: returnTotal.value,
 					},
 					{ force: true }

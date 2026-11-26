@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { isAuthorizationError, isRateLimitError } from "@/utils/authorizationError";
 
-
 describe("isAuthorizationError", () => {
 	it("matches the real _server_messages payload the gate produces", () => {
 		const error = {

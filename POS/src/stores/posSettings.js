@@ -84,7 +84,9 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	const walletAccount = computed(() => settings.value.wallet_account || "");
 	const autoCreateWallet = computed(() => Boolean(settings.value.auto_create_wallet));
 	const loyaltyToWallet = computed(() => Boolean(settings.value.loyalty_to_wallet));
-	const magentoLoyaltyAvailable = computed(() => Boolean(settings.value.magento_loyalty_available));
+	const magentoLoyaltyAvailable = computed(() =>
+		Boolean(settings.value.magento_loyalty_available)
+	);
 	const miraayaInstalled = computed(() => Boolean(settings.value.miraaya_installed));
 	const customerEmailVerificationEnabled = computed(() =>
 		Boolean(Number(settings.value.enable_customer_email_verification))
@@ -286,7 +288,6 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 			allow_print_last_invoice: 0,
 			silent_print: 0,
 			print_multiple_sales_persons: 0,
-		print_multiple_sales_persons: 0,
 			use_delivery_charges: 0,
 			auto_set_delivery_charges: 0,
 			use_limit_search: 0,
