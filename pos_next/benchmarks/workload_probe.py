@@ -105,6 +105,11 @@ def _worker(args: dict) -> list[dict]:
 
 	frappe.init(site=args["site"], sites_path=args["sites_path"])
 	frappe.connect()
+	if args["lock_wait_s"]:
+		# Session-scoped: shorten this worker's lock wait so 1205s show up in a short run.
+		frappe.db.sql(f"SET SESSION innodb_lock_wait_timeout = {int(args['lock_wait_s'])}")
+	for key, value in (args["conf"] or {}).items():
+		frappe.conf[key] = value  # per-worker site-config overrides, to compare behaviours
 	frappe.set_user("Administrator")
 	profile = frappe.get_doc("POS Profile", args["pos_profile"])
 	pool = [frappe._dict(name=c, item_name=c, stock_uom="Nos") for c in args["item_codes"]]
@@ -116,7 +121,9 @@ def _worker(args: dict) -> list[dict]:
 	out = []
 	for n in range(args["invoices"]):
 		lines = rng.randint(3, args["max_lines"])
-		picked = rng.sample(pool, lines)  # random subset AND random order
+		hot = pool[: args["hot_items"]]  # every cart contains these (fast-moving items)
+		picked = hot + rng.sample(pool[args["hot_items"] :], max(lines - len(hot), 0))
+		rng.shuffle(picked)  # random order
 		if args["sorted_items"]:
 			picked.sort(key=lambda i: i.name)  # same subset, one consistent order
 		data = _build_invoice(profile, picked, lines)
@@ -129,6 +136,7 @@ def _worker(args: dict) -> list[dict]:
 		try:
 			draft = invoices.update_invoice(json.dumps(data))
 			frappe.db.commit()
+			record["draft_ms"] = int((time.perf_counter() - started) * 1000)
 			if rng.random() < args["edit_ratio"]:
 				record["phase"] = "edit"
 				draft["remarks"] = "benchmark edit"
@@ -182,6 +190,9 @@ def run(
 	edit_ratio: float = 0.1,
 	wallet_share: float = 0.0,
 	sorted_items: bool = False,
+	hot_items: int = 0,
+	lock_wait_s: int | None = None,
+	conf: dict | None = None,
 	seed: int = 1,
 ) -> None:
 	from pos_next.benchmarks.concurrent_benchmark import cleanup
@@ -214,6 +225,9 @@ def run(
 				"edit_ratio": edit_ratio,
 				"wallet_share": wallet_share,
 				"sorted_items": sorted_items,
+				"hot_items": hot_items,
+				"lock_wait_s": lock_wait_s,
+				"conf": conf,
 				"cashier": c,
 				"seed": seed * 1000 + c,
 				"run_id": run_id,
@@ -237,11 +251,12 @@ def run(
 		app_events = _read_deadlock_log(started_epoch)[log_before:]
 		located = Counter(
 			(
+				e.get("kind"),
 				e.get("operation"),
 				(e.get("failing") or {}).get("doctype"),
 				(e.get("failing") or {}).get("db_call"),
 				e.get("statement"),
-				(e.get("isolation") or {}).get("session"),
+				(e.get("connection") or {}).get("innodb_lock_wait_timeout_session"),
 			)
 			for e in app_events
 		)
@@ -250,6 +265,9 @@ def run(
 				{
 					"item_order": "sorted" if sorted_items else "random",
 					"pool": pool,
+					"hot_items": hot_items,
+					"lock_wait_s": lock_wait_s,
+					"worker_site_config": conf or "(defaults)",
 					"customers": customers or f"default ({profile.customer})",
 					"cashiers": cashiers,
 					"invoices": len(results),
@@ -261,6 +279,8 @@ def run(
 						Counter(f"{r['phase']}: {r['message']}" for r in failed).most_common(5)
 					),
 					"by_payment_kind": by_kind,
+					"draft_p50_ms": _percentile([r["draft_ms"] for r in results if "draft_ms" in r], 50),
+					"draft_p95_ms": _percentile([r["draft_ms"] for r in results if "draft_ms" in r], 95),
 					"p50_ms": _percentile([r["ms"] for r in ok], 50),
 					"p95_ms": _percentile([r["ms"] for r in ok], 95),
 					"invoices_per_min": round(len(ok) / wall * 60, 1) if wall else 0,
@@ -268,13 +288,14 @@ def run(
 					"deadlock_locations": [
 						{
 							"count": n,
+							"kind": kind,
 							"operation": op,
 							"child_doctype": doctype,
 							"db_call": call,
 							"last_statement": stmt,
-							"session_isolation": iso,
+							"session_lock_wait_s": wait,
 						}
-						for (op, doctype, call, stmt, iso), n in located.most_common()
+						for (kind, op, doctype, call, stmt, wait), n in located.most_common()
 					],
 				}
 			)
