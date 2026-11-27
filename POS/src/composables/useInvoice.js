@@ -11,6 +11,7 @@ import { roundCurrency } from "@/utils/currency";
 import { fnfLockedDiscountAmount } from "@/utils/friendsAndFamily";
 import { preCouponLineDiscount } from "@/utils/couponLines";
 import { createSubmitRequestTracker, isSubmitTimeoutError } from "@/utils/submitRequestId";
+import { retryOnDeadlock } from "@/utils/retryOnDeadlock";
 import { recoverTimedOutSubmit } from "@/utils/submitTimeoutRecovery";
 
 const log = logger.create("Invoice");
@@ -23,6 +24,10 @@ const submitGate = new SkipIfBusyMutex({
 	timeout: 60000,
 	name: "InvoiceSubmit",
 });
+
+function logDeadlockRetry(attempt) {
+	log.warn(`Database deadlock during checkout (attempt ${attempt}); retrying automatically`);
+}
 
 // One idempotency key per unchanged checkout payload, shared by all instances.
 const submitRequests = createSubmitRequestTracker();
@@ -1087,9 +1092,10 @@ export function useInvoice() {
 						}));
 					}
 
-					const draftInvoice = await updateInvoiceResource.submit({
-						data: invoiceData,
-					});
+					const draftInvoice = await retryOnDeadlock(
+						() => updateInvoiceResource.submit({ data: invoiceData }),
+						{ onRetry: logDeadlockRetry }
+					);
 
 					let invoiceDoc = draftInvoice;
 					if (
@@ -1137,10 +1143,14 @@ export function useInvoice() {
 					});
 
 					try {
-						const result = await submitInvoiceResource.submit({
-							invoice: invoiceDoc,
-							data: submitData,
-						});
+						const result = await retryOnDeadlock(
+							() =>
+								submitInvoiceResource.submit({
+									invoice: invoiceDoc,
+									data: submitData,
+								}),
+							{ onRetry: logDeadlockRetry }
+						);
 
 						// Check if resource has error (frappe-ui pattern)
 						if (submitInvoiceResource.error) {

@@ -154,3 +154,76 @@ describe("useInvoice submit gate and timeout recovery", () => {
 		expect(invoice.invoiceItems.value).toHaveLength(1); // cart not wiped by the stale request
 	});
 });
+
+describe("useInvoice deadlock retry", () => {
+	const deadlock = () =>
+		Object.assign(new Error("Internal Server Error"), { exc_type: "QueryDeadlockError" });
+
+	beforeEach(() => {
+		setActivePinia(createPinia());
+		vi.useFakeTimers();
+		call.mockReset();
+		resources["pos_next.api.invoices.update_invoice"] = vi.fn().mockResolvedValue(DRAFT);
+		resources["pos_next.api.invoices.submit_invoice"] = vi.fn().mockResolvedValue(SUBMITTED);
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it("a deadlock on the submit call is retried invisibly, with the same key", async () => {
+		resources["pos_next.api.invoices.submit_invoice"] = vi
+			.fn()
+			.mockRejectedValueOnce(deadlock())
+			.mockResolvedValue(SUBMITTED);
+		const invoice = newInvoiceWithCart();
+
+		const pending = invoice.submitInvoice();
+		await vi.advanceTimersByTimeAsync(2000);
+
+		expect(await pending).toEqual(SUBMITTED);
+		expect(submitCalls()).toHaveLength(2);
+		expect(requestIdOf(submitCalls()[1])).toBe(requestIdOf(submitCalls()[0]));
+		expect(resources["pos_next.api.invoices.update_invoice"]).toHaveBeenCalledTimes(1);
+		expect(invoice.invoiceItems.value).toHaveLength(0);
+	});
+
+	it("a deadlock while creating the draft is retried too", async () => {
+		resources["pos_next.api.invoices.update_invoice"] = vi
+			.fn()
+			.mockRejectedValueOnce(deadlock())
+			.mockResolvedValue(DRAFT);
+		const invoice = newInvoiceWithCart();
+
+		const pending = invoice.submitInvoice();
+		await vi.advanceTimersByTimeAsync(2000);
+
+		expect(await pending).toEqual(SUBMITTED);
+		expect(resources["pos_next.api.invoices.update_invoice"]).toHaveBeenCalledTimes(2);
+	});
+
+	it("keeps failing deadlocks visible after 3 attempts and keeps the cart", async () => {
+		resources["pos_next.api.invoices.submit_invoice"] = vi.fn().mockRejectedValue(deadlock());
+		const invoice = newInvoiceWithCart();
+
+		const pending = invoice.submitInvoice();
+		pending.catch(() => {});
+		await vi.advanceTimersByTimeAsync(5000);
+
+		await expect(pending).rejects.toMatchObject({ exc_type: "QueryDeadlockError" });
+		expect(submitCalls()).toHaveLength(3);
+		expect(invoice.invoiceItems.value).toHaveLength(1);
+		expect(invoice.isSubmitting.value).toBe(false);
+	});
+
+	it("other errors are not retried", async () => {
+		const stock = Object.assign(new Error("1 units needed in"), {
+			exc_type: "NegativeStockError",
+		});
+		resources["pos_next.api.invoices.submit_invoice"] = vi.fn().mockRejectedValue(stock);
+		const invoice = newInvoiceWithCart();
+
+		await expect(invoice.submitInvoice()).rejects.toBe(stock);
+		expect(submitCalls()).toHaveLength(1);
+	});
+});

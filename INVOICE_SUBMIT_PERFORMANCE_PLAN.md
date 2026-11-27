@@ -99,6 +99,29 @@ checkout can reuse the last result.
 - `main`'s wallet account belongs to another company, so every submit there logs
   "Loyalty to Wallet Conversion Error"; fix the data before benchmarking again.
 
+## 3b. Deadlocks reported by the client (open)
+
+Two reports from the client's server: `QueryDeadlockError` when paying with loyalty points, and
+"Internal Server Error / QueryDeadlockError" in the checkout dialog now and then.
+
+- **Fixed (a65c5f18):** a repeat/overlapping submit of the same sale (double tap, retry after a slow
+  response, sync worker resend) failed with a deadlock or `Offline Invoice Sync <name> not found`. Cause
+  and proof are in that commit; probe: `benchmarks/dup_submit_probe.py`.
+- **Mitigated (frontend):** `retryOnDeadlock` re-sends the draft and submit calls up to 3 times with a
+  jittered backoff when the database reports a deadlock. Safe because the victim is rolled back and the
+  repeat carries the same `client_request_id`. Real errors (stock, validation) are not retried.
+- **Not reproduced:** 8 cashiers selling overlapping items in random order (40 sales,
+  `benchmarks/deadlock_probe.py`): 0 deadlocks. So item/stock-row ordering is not confirmed as a cause.
+- **Still unknown:** which statements deadlock on the client's server (loyalty / wallet rows are the
+  suspects; `main` cannot exercise them because its wallet account belongs to another company).
+  To find out, from the client's server:
+  1. Set `innodb_print_all_deadlocks = ON` (MariaDB). Every deadlock then writes both statements to the
+     error log. No restart needed: `SET GLOBAL innodb_print_all_deadlocks = ON;`
+  2. Send the Error Log entries titled "Submit Invoice Error" / "Update Invoice Error" (traceback shows
+     which hook or posting step) and `SHOW ENGINE INNODB STATUS` -> LATEST DETECTED DEADLOCK.
+  3. If the traceback points at loyalty/wallet hooks, reproduce on a test site with a valid wallet
+     account, a customer with a loyalty program and several cashiers on the same customer.
+
 ## 4. Tried and rejected (do not repeat)
 
 - **Late series naming** (validate first, take the series lock just before the INSERT): no gain at the
