@@ -11,6 +11,7 @@ import { roundCurrency } from "@/utils/currency";
 import { fnfLockedDiscountAmount } from "@/utils/friendsAndFamily";
 import { preCouponLineDiscount } from "@/utils/couponLines";
 import { createSubmitRequestTracker, isSubmitTimeoutError } from "@/utils/submitRequestId";
+import { classifyCheckoutError } from "@/utils/checkoutErrors";
 import { retryOnDeadlock } from "@/utils/retryOnDeadlock";
 import { recoverTimedOutSubmit } from "@/utils/submitTimeoutRecovery";
 
@@ -25,8 +26,11 @@ const submitGate = new SkipIfBusyMutex({
 	name: "InvoiceSubmit",
 });
 
-function logDeadlockRetry(attempt) {
-	log.warn(`Database deadlock during checkout (attempt ${attempt}); retrying automatically`);
+function logDeadlockRetry(attempt, error) {
+	const { kind } = classifyCheckoutError(error);
+	log.warn(`Database ${kind} during checkout (attempt ${attempt}); retrying automatically`, {
+		kind,
+	});
 }
 
 // One idempotency key per unchanged checkout payload, shared by all instances.
@@ -1092,26 +1096,6 @@ export function useInvoice() {
 						}));
 					}
 
-					const draftInvoice = await retryOnDeadlock(
-						() => updateInvoiceResource.submit({ data: invoiceData }),
-						{ onRetry: logDeadlockRetry }
-					);
-
-					let invoiceDoc = draftInvoice;
-					if (
-						draftInvoice &&
-						typeof draftInvoice === "object" &&
-						"data" in draftInvoice
-					) {
-						invoiceDoc = draftInvoice.data;
-					}
-
-					if (!invoiceDoc || !invoiceDoc.name) {
-						throw new Error(
-							"Failed to create draft invoice - no invoice name returned"
-						);
-					}
-
 					const submitData = {
 						change_amount:
 							remainingAmount.value < 0 ? Math.abs(remainingAmount.value) : 0,
@@ -1141,6 +1125,38 @@ export function useInvoice() {
 						invoiceData,
 						submitData: { ...submitData, client_request_id: undefined },
 					});
+
+					// A retry of the SAME unchanged cart (same key) reuses the draft the first attempt
+					// created: no second draft, no second invoice-number lock. If that draft has gone,
+					// or the sale was already completed, the server copes (see submit_invoice).
+					let invoiceDoc = submitRequests.draft();
+					if (invoiceDoc) {
+						log.info("Reusing the draft of the previous attempt", {
+							name: invoiceDoc.name,
+						});
+					} else {
+						const draftInvoice = await retryOnDeadlock(
+							() => updateInvoiceResource.submit({ data: invoiceData }),
+							{ onRetry: logDeadlockRetry }
+						);
+
+						invoiceDoc = draftInvoice;
+						if (
+							draftInvoice &&
+							typeof draftInvoice === "object" &&
+							"data" in draftInvoice
+						) {
+							invoiceDoc = draftInvoice.data;
+						}
+
+						if (!invoiceDoc || !invoiceDoc.name) {
+							throw new Error(
+								"Failed to create draft invoice - no invoice name returned"
+							);
+						}
+
+						submitRequests.rememberDraft(invoiceDoc);
+					}
 
 					try {
 						const result = await retryOnDeadlock(
@@ -1221,6 +1237,8 @@ export function useInvoice() {
 			})
 			.then((outcome) => (outcome === SKIPPED ? null : outcome))
 			.catch(async (error) => {
+				const { kind } = classifyCheckoutError(error);
+				if (kind !== "other") log.warn("Checkout failed", { kind, type: error?.exc_type });
 				if (!isSubmitTimeoutError(error)) throw error;
 
 				// The gate gave up, but the first request keeps running on the server.
@@ -1307,6 +1325,9 @@ export function useInvoice() {
 	 * If a POS Profile is active and has a default customer, it will be pre-selected.
 	 */
 	function resetInvoice() {
+		// A cleared or completed cart ends the checkout in progress: its retry key and its draft must
+		// not be inherited by a later, identical-looking cart.
+		submitRequests.reset();
 		invoiceItems.value = [];
 		payments.value = [];
 		additionalDiscount.value = 0;

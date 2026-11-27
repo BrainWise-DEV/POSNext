@@ -7,23 +7,18 @@
  * repeat also carries the same client_request_id, so even if the first attempt had
  * somehow been kept the server would return that invoice instead of creating another.
  *
- * Only deadlocks are retried: validation, stock and permission errors are real answers
- * and are thrown straight away.
+ * Only deadlocks (1213) and snapshot conflicts (1020) are retried. Lock wait timeouts (1205),
+ * validation, stock and permission errors, network failures and screen timeouts are thrown
+ * straight away: see checkoutErrors.js for why each is treated as it is.
  */
+
+import { classifyCheckoutError } from "@/utils/checkoutErrors";
 
 const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export function isDeadlockError(error) {
-	const text = [
-		error?.exc_type,
-		error?.resourceError?.exc_type,
-		error?.exception,
-		error?._error_message,
-		error?.message,
-	]
-		.filter(Boolean)
-		.join(" ");
-	return /QueryDeadlockError|deadlock found/i.test(text);
+	// 1213 and 1020 only; a lock wait timeout (1205) is deliberately NOT retried (see checkoutErrors)
+	return classifyCheckoutError(error).autoRetry;
 }
 
 /**

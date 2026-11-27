@@ -54,6 +54,7 @@ const requestIdOf = (callArgs) =>
 describe("useInvoice submit gate and timeout recovery", () => {
 	beforeEach(() => {
 		setActivePinia(createPinia());
+		useInvoice().resetInvoice(); // module-level checkout state (key, draft) is shared
 		vi.useFakeTimers();
 		call.mockReset();
 		resources["pos_next.api.invoices.update_invoice"] = vi.fn().mockResolvedValue(DRAFT);
@@ -161,6 +162,7 @@ describe("useInvoice deadlock retry", () => {
 
 	beforeEach(() => {
 		setActivePinia(createPinia());
+		useInvoice().resetInvoice();
 		vi.useFakeTimers();
 		call.mockReset();
 		resources["pos_next.api.invoices.update_invoice"] = vi.fn().mockResolvedValue(DRAFT);
@@ -250,6 +252,101 @@ describe("useInvoice deadlock retry", () => {
 		expect(await first).toEqual(SUBMITTED);
 		expect(submitCalls()).toHaveLength(2); // one failed attempt + one retry, nothing extra
 		expect(resources["pos_next.api.invoices.update_invoice"]).toHaveBeenCalledTimes(1);
+	});
+
+	it("a lock wait timeout (1205) is not retried automatically, keeps the cart, and the manual retry reuses the key", async () => {
+		const timeout = Object.assign(
+			new Error("(1205, 'Lock wait timeout exceeded; try restarting transaction')"),
+			{ exc_type: "QueryTimeoutError" }
+		);
+		resources["pos_next.api.invoices.submit_invoice"] = vi
+			.fn()
+			.mockRejectedValueOnce(timeout)
+			.mockResolvedValue(SUBMITTED);
+		const invoice = newInvoiceWithCart();
+
+		await expect(invoice.submitInvoice()).rejects.toBe(timeout);
+		expect(submitCalls()).toHaveLength(1); // not repeated: the blocker is probably still there
+		expect(invoice.invoiceItems.value).toHaveLength(1);
+		expect(invoice.isSubmitting.value).toBe(false);
+
+		expect(await invoice.submitInvoice()).toEqual(SUBMITTED); // cashier presses pay again
+		expect(requestIdOf(submitCalls()[1])).toBe(requestIdOf(submitCalls()[0]));
+	});
+
+	it("a manual retry of the same cart reuses the draft: no second draft, no second series lock", async () => {
+		const netError = new Error("Failed to fetch");
+		resources["pos_next.api.invoices.submit_invoice"] = vi
+			.fn()
+			.mockRejectedValueOnce(netError)
+			.mockResolvedValue(SUBMITTED);
+		const invoice = newInvoiceWithCart();
+
+		await expect(invoice.submitInvoice()).rejects.toBe(netError);
+		expect(await invoice.submitInvoice()).toEqual(SUBMITTED); // cashier presses pay again, same cart
+
+		expect(resources["pos_next.api.invoices.update_invoice"]).toHaveBeenCalledTimes(1);
+		expect(submitCalls()).toHaveLength(2);
+		expect(submitCalls()[1][0].invoice.name).toBe(DRAFT.name); // the first attempt's draft
+		expect(requestIdOf(submitCalls()[1])).toBe(requestIdOf(submitCalls()[0]));
+	});
+
+	it("an edited cart gets a new draft and a new key, never the old draft", async () => {
+		const netError = new Error("Failed to fetch");
+		resources["pos_next.api.invoices.submit_invoice"] = vi
+			.fn()
+			.mockRejectedValueOnce(netError)
+			.mockResolvedValue(SUBMITTED);
+		resources["pos_next.api.invoices.update_invoice"] = vi
+			.fn()
+			.mockResolvedValueOnce({ name: "DRAFT-1", docstatus: 0 })
+			.mockResolvedValueOnce({ name: "DRAFT-2", docstatus: 0 });
+		const invoice = newInvoiceWithCart();
+
+		await expect(invoice.submitInvoice()).rejects.toBe(netError);
+		invoice.invoiceItems.value[0].quantity = 3; // the cashier changes the cart
+		await invoice.submitInvoice();
+
+		expect(resources["pos_next.api.invoices.update_invoice"]).toHaveBeenCalledTimes(2);
+		expect(submitCalls()[1][0].invoice.name).toBe("DRAFT-2");
+		expect(requestIdOf(submitCalls()[1])).not.toBe(requestIdOf(submitCalls()[0]));
+	});
+
+	it("after a completed sale the next sale starts with a fresh draft", async () => {
+		resources["pos_next.api.invoices.update_invoice"] = vi
+			.fn()
+			.mockResolvedValueOnce({ name: "DRAFT-1", docstatus: 0 })
+			.mockResolvedValueOnce({ name: "DRAFT-2", docstatus: 0 });
+		const invoice = newInvoiceWithCart();
+
+		await invoice.submitInvoice(); // success clears the cart and the checkout state
+		const second = newInvoiceWithCart(); // the next sale, same items
+		await second.submitInvoice();
+
+		expect(resources["pos_next.api.invoices.update_invoice"]).toHaveBeenCalledTimes(2);
+		expect(submitCalls()[1][0].invoice.name).toBe("DRAFT-2");
+	});
+
+	it("clearing the cart forgets the old draft and key, so an identical later cart is a new sale", async () => {
+		const netError = new Error("Failed to fetch");
+		resources["pos_next.api.invoices.submit_invoice"] = vi
+			.fn()
+			.mockRejectedValueOnce(netError)
+			.mockResolvedValue(SUBMITTED);
+		resources["pos_next.api.invoices.update_invoice"] = vi
+			.fn()
+			.mockResolvedValueOnce({ name: "DRAFT-1", docstatus: 0 })
+			.mockResolvedValueOnce({ name: "DRAFT-2", docstatus: 0 });
+		const invoice = newInvoiceWithCart();
+
+		await expect(invoice.submitInvoice()).rejects.toBe(netError);
+		invoice.resetInvoice(); // the cashier clears the cart ...
+		const rebuilt = newInvoiceWithCart(); // ... and builds the very same cart again
+		await rebuilt.submitInvoice();
+
+		expect(resources["pos_next.api.invoices.update_invoice"]).toHaveBeenCalledTimes(2);
+		expect(submitCalls()[1][0].invoice.name).toBe("DRAFT-2");
+		expect(requestIdOf(submitCalls()[1])).not.toBe(requestIdOf(submitCalls()[0]));
 	});
 
 	it("other errors are not retried", async () => {
