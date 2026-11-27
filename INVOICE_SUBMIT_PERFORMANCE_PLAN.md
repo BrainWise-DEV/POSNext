@@ -1,5 +1,7 @@
 # Invoice Submit Performance: status and next steps
 
+> **Correction:** the READ COMMITTED recommendation in earlier versions of this file is withdrawn (see 3.1).
+
 Context: a client with large POS invoices and many cashiers hit
 `Invoice Submit: Operation timed out after 60000ms`. It did not reproduce locally.
 This file records what was done, what was measured, what was rejected and why,
@@ -18,7 +20,7 @@ and what is left.
 With many cashiers the limit is not CPU: submits queue on the Sales Invoice naming-series
 row lock (`SELECT ... FOR UPDATE` on `tabSeries`, taken before validate and held until
 commit) and on slow item INSERTs that wait on InnoDB gap locks under the default
-`REPEATABLE READ`.
+`REPEATABLE READ`. Changing the isolation level is NOT a safe fix (see 3.1).
 
 ## 2. Done (this branch)
 
@@ -50,16 +52,17 @@ down about 27%; 100 lines 5.2 s to 3.3 s. POS vs Desk: no meaningful POSNext ove
 
 ## 3. Next steps (in priority order)
 
-### 3.1 MariaDB `READ COMMITTED` on the client's server (largest lever)
-Only change that moved many-cashier throughput: 8 cashiers, 100-line invoices, about 21 to 40
-invoices/min, median 21 s to 10 s, series-lock waiting 294 s to 7 s. Cannot be switched on from inside
-a request (the transaction has already started) and Frappe has no setting for it, so it is a server
-change: `transaction-isolation = READ-COMMITTED` in the MariaDB config.
-- Check `binlog_format` is not `STATEMENT` (writes fail under READ COMMITTED with it).
-- Test the client's real flows on staging first; Frappe/ERPNext are tested on the default level.
-- Owner: whoever runs the client's database. Not a code change.
+### 3.1 MariaDB `READ COMMITTED`: DO NOT USE (earlier recommendation withdrawn)
+An earlier version of this plan recommended `transaction-isolation = READ-COMMITTED` because it roughly
+doubled throughput (8 cashiers, 100-line invoices: about 21 to 40 invoices/min). That test gave every
+cashier DIFFERENT items. With cashiers selling OVERLAPPING items (the normal case in a shop) it is
+harmful: 16 cashiers, 192 sales, 40 shared items: **106 of 192 sales failed with deadlocks in ERPNext's
+stock-ledger posting** (`get_previous_sle_of_current_voucher`, `get_next_stock_reco`), against 0 of 192
+at the default `REPEATABLE READ`. ERPNext's stock posting relies on the default level's locking, so this is
+also a stock-accuracy risk, not only an availability one. Keep the default isolation level.
+(`benchmarks/deadlock_probe.py`, `isolation` option.)
 
-### 3.2 Naming series per POS Profile / branch (business decision)
+### 3.2 Naming series per POS Profile / branch (business decision; next best lever)
 Locks are per series, so branches stop queuing behind each other. Cashiers on the same series still
 queue. Changes invoice numbering, so needs the client's sign-off.
 
@@ -112,6 +115,11 @@ Two reports from the client's server: `QueryDeadlockError` when paying with loya
   repeat carries the same `client_request_id`. Real errors (stock, validation) are not retried.
 - **Not reproduced:** 8 cashiers selling overlapping items in random order (40 sales,
   `benchmarks/deadlock_probe.py`): 0 deadlocks. So item/stock-row ordering is not confirmed as a cause.
+- **Client traceback (received):** the deadlock is raised in `update_invoice` at `invoice_doc.save()` ->
+  `Document.insert()` -> `d.db_insert()`, i.e. the INSERT of a child row of a NEW draft (step 1 of
+  checkout), not in the stock/ledger posting. Not reproduced at 16 cashiers / 192 sales with split payments
+  at the default isolation level (0 failures), so the other transaction in the cycle is still unidentified
+  (candidates: another request editing a draft, a submit, a POS Closing Shift, or a background job).
 - **Still unknown:** which statements deadlock on the client's server (loyalty / wallet rows are the
   suspects; `main` cannot exercise them because its wallet account belongs to another company).
   To find out, from the client's server:
@@ -126,7 +134,7 @@ Two reports from the client's server: `QueryDeadlockError` when paying with loya
 
 - **Late series naming** (validate first, take the series lock just before the INSERT): no gain at the
   default isolation level and 7 deadlocks in 32 invoices at 8 cashiers (0 without it); it changes the
-  order in which locks are taken. It only helped under READ COMMITTED.
+  order in which locks are taken. It only helped under READ COMMITTED, which is itself unsafe (3.1).
 - **In-app `pos_next_read_committed` flag** (set the session level inside the request): no effect,
   because the transaction has already started; the only in-app routes are a mid-request commit/rollback
   (forbidden) or patching core.

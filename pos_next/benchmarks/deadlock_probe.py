@@ -34,6 +34,9 @@ def _worker(args: dict) -> list[dict]:
 
 	frappe.init(site=args["site"], sites_path=args["sites_path"])
 	frappe.connect()
+	if args["isolation"]:
+		# Session-scoped, before this worker's first transaction (models the server setting).
+		frappe.db.sql(f"SET SESSION TRANSACTION ISOLATION LEVEL {args['isolation']}")
 	frappe.set_user("Administrator")
 	profile = frappe.get_doc("POS Profile", args["pos_profile"])
 	pool = [frappe._dict(name=c, item_name=c, stock_uom="Nos") for c in args["item_codes"]]
@@ -49,6 +52,12 @@ def _worker(args: dict) -> list[dict]:
 			picked.sort(key=lambda i: i.name)
 		data = _build_invoice(profile, picked, args["lines"])
 		data["po_no"] = f"_BENCHC-deadlock-{args['run_id']}-{args['cashier']}-{n}"
+		if args["split_payment"]:
+			total = sum(r["qty"] * r["rate"] for r in data["items"])
+			data["payments"] = [
+				{"mode_of_payment": "Cash", "amount": round(total / 2, 2)},
+				{"mode_of_payment": "Credit Card", "amount": round(total - round(total / 2, 2), 2)},
+			]
 		record = {"step": "update"}
 		try:
 			draft = invoices.update_invoice(json.dumps(data))
@@ -74,6 +83,8 @@ def run(
 	lines: int = 20,
 	pool: int = 30,
 	same_order: bool = False,
+	isolation: str | None = None,
+	split_payment: bool = True,
 ) -> None:
 	from pos_next.benchmarks.concurrent_benchmark import cleanup
 	from pos_next.benchmarks.submit_benchmark import _create_stocked_items
@@ -98,6 +109,8 @@ def run(
 				"cashier": c,
 				"seed": c + 1,
 				"same_order": same_order,
+				"isolation": isolation,
+				"split_payment": split_payment,
 				"run_id": run_id,
 				"start_at": start_at,
 			}
@@ -111,6 +124,7 @@ def run(
 			json.dumps(
 				{
 					"same_order": same_order,
+					"isolation": isolation or "server default",
 					"cashiers": cashiers,
 					"invoices": len(results),
 					"ok": ok,
