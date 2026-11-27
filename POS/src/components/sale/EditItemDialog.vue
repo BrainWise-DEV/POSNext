@@ -747,6 +747,8 @@ async function checkItemPromotion(itemCode, qty) {
 			item_code: itemCode,
 			company: company || undefined,
 			qty: quantity,
+			// a promotion limited to another warehouse must not lock this line's discount
+			warehouse: localWarehouse.value || undefined,
 		});
 		if (requestId !== promotionCheckRequestId) return;
 		const result = resp?.message ?? resp;
@@ -1132,6 +1134,9 @@ async function handleUomChange(newUom) {
 
 async function handleWarehouseChange() {
 	if (!localItem.value || !localWarehouse.value) return;
+
+	// the rules that apply depend on the warehouse the line is sold from
+	checkItemPromotion(localItem.value.item_code, localQuantity.value);
 
 	isCheckingStock.value = true;
 	try {
