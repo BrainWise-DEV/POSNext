@@ -301,11 +301,13 @@ def _fingerprint_scenarios(profile, items) -> dict:
 	return out
 
 
-def fingerprint(out_file: str, pos_profile: str = "Cairo Branch") -> None:
+def fingerprint(out_file: str, pos_profile: str = "Cairo Branch", conf: dict | None = None) -> None:
 	"""Write the business outcome of fixed scenarios to ``out_file`` (JSON).
 
 	Run before and after a change and diff the two files: they must be identical.
 	"""
+	for key, value in (conf or {}).items():
+		frappe.conf[key] = value  # e.g. restore Frappe's stock save locking to compare outcomes
 	frappe.set_user("Administrator")
 	profile = frappe.get_doc("POS Profile", pos_profile)
 	items = _create_stocked_items(profile, 30)

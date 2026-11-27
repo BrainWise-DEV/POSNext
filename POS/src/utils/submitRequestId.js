@@ -16,6 +16,7 @@ const defaultMakeId = () => `pos_online_${globalThis.crypto.randomUUID()}`;
 export function createSubmitRequestTracker(makeId = defaultMakeId) {
 	let currentId = null;
 	let currentFingerprint = null;
+	let currentDraft = null;
 
 	return {
 		/** Key for this payload; reused only if the payload is identical to the last one. */
@@ -24,8 +25,21 @@ export function createSubmitRequestTracker(makeId = defaultMakeId) {
 			if (currentId === null || fingerprint !== currentFingerprint) {
 				currentId = makeId();
 				currentFingerprint = fingerprint;
+				currentDraft = null; // a draft belongs to one payload only
 			}
 			return currentId;
+		},
+		/**
+		 * Remember the server draft created for the current payload, so a manual retry of the
+		 * SAME unchanged cart goes straight to submit instead of creating (and orphaning) another
+		 * draft and taking another invoice-number lock.
+		 */
+		rememberDraft(draft) {
+			currentDraft = draft || null;
+		},
+		/** The draft created for the current payload, or null. */
+		draft() {
+			return currentDraft;
 		},
 		/** The key of the checkout in progress (null before the first submit / after reset). */
 		current() {
@@ -35,6 +49,7 @@ export function createSubmitRequestTracker(makeId = defaultMakeId) {
 		reset() {
 			currentId = null;
 			currentFingerprint = null;
+			currentDraft = null;
 		},
 	};
 }

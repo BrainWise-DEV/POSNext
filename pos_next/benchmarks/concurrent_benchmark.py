@@ -231,6 +231,28 @@ def _remove_error_logs_for_deleted_invoices(since) -> int:
 	return len(doomed)
 
 
+CUSTOMER_PREFIX = "_BENCH-CUST"
+
+
+def _remove_test_customers() -> None:
+	"""Delete the customers, wallets and wallet transactions workload_probe created."""
+	wallets = frappe.get_all("Wallet", filters={"customer": ["like", f"{CUSTOMER_PREFIX}%"]}, pluck="name")
+	if wallets:
+		transactions = frappe.get_all("Wallet Transaction", filters={"wallet": ["in", wallets]}, pluck="name")
+		if transactions:
+			frappe.db.delete(
+				"GL Entry", {"voucher_type": "Wallet Transaction", "voucher_no": ["in", transactions]}
+			)
+			frappe.db.delete("Payment Ledger Entry", {"voucher_no": ["in", transactions]})
+			frappe.db.delete("Wallet Transaction", {"name": ["in", transactions]})
+		frappe.db.delete("Wallet", {"name": ["in", wallets]})
+	frappe.db.delete("GL Entry", {"party_type": "Customer", "party": ["like", f"{CUSTOMER_PREFIX}%"]})
+	frappe.db.delete("Loyalty Point Entry", {"customer": ["like", f"{CUSTOMER_PREFIX}%"]})
+	for name in frappe.get_all("Customer", filters={"name": ["like", f"{CUSTOMER_PREFIX}%"]}, pluck="name"):
+		frappe.delete_doc("Customer", name, force=1, ignore_permissions=True)
+	frappe.db.commit()
+
+
 def cleanup(since=None) -> dict:
 	"""Remove everything benchmark runs created; return leftover counts (all must be 0).
 
@@ -270,6 +292,7 @@ def cleanup(since=None) -> dict:
 
 	# Default window: the last 6 hours. run() passes the exact start of its own run.
 	since = since or frappe.utils.add_to_date(frappe.utils.now_datetime(), hours=-6)
+	_remove_test_customers()
 	removed_logs = _remove_error_logs_for_deleted_invoices(since)
 
 	return {
@@ -279,6 +302,8 @@ def cleanup(since=None) -> dict:
 		"invoices": frappe.db.count("Sales Invoice", {"name": ["in", invoice_names]}) if invoice_names else 0,
 		"sle": frappe.db.count("Stock Ledger Entry", {"voucher_no": ["in", vouchers]}) if vouchers else 0,
 		"gl": frappe.db.count("GL Entry", {"voucher_no": ["in", vouchers]}) if vouchers else 0,
+		"customers": frappe.db.count("Customer", {"name": ["like", f"{CUSTOMER_PREFIX}%"]}),
+		"wallets": frappe.db.count("Wallet", {"customer": ["like", f"{CUSTOMER_PREFIX}%"]}),
 		"sync_rows": frappe.db.count("Offline Invoice Sync", {"offline_id": ["like", "%BENCHC%"]}),
 	}
 
