@@ -11,6 +11,7 @@ from erpnext.stock.doctype.batch.batch import get_batch_no, get_batch_qty
 from frappe import _
 from frappe.utils import cint, cstr, flt, get_datetime, nowdate, nowtime
 
+from pos_next.diagnostics import log_deadlock
 from pos_next.perf import StepTimer
 
 # ==========================================
@@ -1331,8 +1332,16 @@ def update_invoice(data):
 		result = invoice_doc.as_dict()
 		timer.finish(invoice=invoice_doc.name, items=len(invoice_doc.items), pos_profile=pos_profile)
 		return result
-	except Exception:
+	except Exception as exc:
 		timer.finish(status="error")
+		if isinstance(exc, frappe.QueryDeadlockError):
+			existing_draft = bool((locals().get("data") or {}).get("name"))
+			log_deadlock(
+				exc,
+				"update_invoice:" + ("edit_draft" if existing_draft else "new_draft"),
+				doc=locals().get("invoice_doc"),
+				timer=timer,
+			)
 		frappe.log_error(frappe.get_traceback(), "Update Invoice Error")
 		raise
 
@@ -2054,8 +2063,10 @@ def submit_invoice(invoice=None, data=None):
 		timer.finish(invoice=invoice_doc.name, items=len(invoice_doc.items), pos_profile=pos_profile)
 		return result
 
-	except Exception:
+	except Exception as exc:
 		timer.finish(status="error")
+		if isinstance(exc, frappe.QueryDeadlockError):
+			log_deadlock(exc, "submit_invoice", doc=locals().get("invoice_doc"), timer=timer)
 		frappe.log_error(frappe.get_traceback(), "Submit Invoice Error")
 		raise
 

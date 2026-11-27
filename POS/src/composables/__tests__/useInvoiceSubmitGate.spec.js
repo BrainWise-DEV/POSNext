@@ -216,6 +216,42 @@ describe("useInvoice deadlock retry", () => {
 		expect(invoice.isSubmitting.value).toBe(false);
 	});
 
+	it("an ambiguous failure (no answer from the server) is not auto-retried, and a manual retry reuses the key", async () => {
+		// The request may or may not have been committed: only a human retry, carrying the
+		// same key so the server returns the existing invoice if it was, is allowed.
+		const networkError = new Error("Failed to fetch");
+		resources["pos_next.api.invoices.submit_invoice"] = vi
+			.fn()
+			.mockRejectedValueOnce(networkError)
+			.mockResolvedValue(SUBMITTED);
+		const invoice = newInvoiceWithCart();
+
+		await expect(invoice.submitInvoice()).rejects.toBe(networkError);
+		expect(submitCalls()).toHaveLength(1); // not repeated behind the cashier's back
+		expect(invoice.invoiceItems.value).toHaveLength(1); // cart intact
+		expect(invoice.isSubmitting.value).toBe(false);
+
+		expect(await invoice.submitInvoice()).toEqual(SUBMITTED); // the cashier presses pay again
+		expect(requestIdOf(submitCalls()[1])).toBe(requestIdOf(submitCalls()[0]));
+	});
+
+	it("a second click while a deadlock retry is waiting is dropped, not sent", async () => {
+		resources["pos_next.api.invoices.submit_invoice"] = vi
+			.fn()
+			.mockRejectedValueOnce(deadlock())
+			.mockResolvedValue(SUBMITTED);
+		const invoice = newInvoiceWithCart();
+
+		const first = invoice.submitInvoice();
+		await vi.advanceTimersByTimeAsync(10); // first attempt failed, retry delay running
+		expect(await invoice.submitInvoice()).toBeNull(); // double click during the backoff
+		await vi.advanceTimersByTimeAsync(2000);
+
+		expect(await first).toEqual(SUBMITTED);
+		expect(submitCalls()).toHaveLength(2); // one failed attempt + one retry, nothing extra
+		expect(resources["pos_next.api.invoices.update_invoice"]).toHaveBeenCalledTimes(1);
+	});
+
 	it("other errors are not retried", async () => {
 		const stock = Object.assign(new Error("1 units needed in"), {
 			exc_type: "NegativeStockError",

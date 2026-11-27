@@ -10,6 +10,7 @@ method; the test is skipped if the site has none.
 """
 
 import json
+import os
 from unittest.mock import patch
 
 import frappe
@@ -370,6 +371,157 @@ class TestCouponUsageInSubmit(_SubmitPathBase):
 			increment_coupon_usage(self.COUPON)
 			increment_coupon_usage(self.COUPON.lower())
 		self.assertEqual(self._used(), before + 2)
+
+
+class TestDiagnosticsLoggersReallyWrite(FrappeTestCase):
+	"""frappe.logger() defaults to ERROR, which silently drops warnings: check the real loggers."""
+
+	def _read_new_lines(self, logger_name, action):
+		path = frappe.get_site_path("logs", f"{logger_name}.log")
+		before = os.path.getsize(path) if os.path.exists(path) else 0
+		action()
+		for handler in frappe.logger(logger_name).handlers:
+			handler.flush()
+		with open(path) as fh:
+			fh.seek(before)
+			return fh.read()
+
+	def test_slow_call_warning_is_written_with_default_settings(self):
+		with patch.dict(frappe.conf, {"pos_next_slow_submit_ms": 0, "pos_next_perf_log_all": 0}):
+			written = self._read_new_lines("pos_next_perf", lambda: StepTimer("slow_probe").finish())
+		self.assertIn("slow_probe", written)
+
+	def test_deadlock_context_line_is_written_with_default_settings(self):
+		from pos_next.diagnostics import log_deadlock
+
+		def action():
+			try:
+				raise frappe.QueryDeadlockError("synthetic")
+			except frappe.QueryDeadlockError as exc:
+				log_deadlock(exc, "unit_probe")
+
+		written = self._read_new_lines("pos_next_deadlock", action)
+		self.assertIn("unit_probe", written)
+
+	def test_statement_shape_never_contains_values(self):
+		from pos_next.diagnostics import statement_shape
+
+		self.assertEqual(
+			statement_shape(
+				"INSERT INTO `tabSales Invoice Item` (`name`, `item_code`) VALUES ('A1', 'SECRET')"
+			),
+			"INSERT INTO `tabSales Invoice Item`",
+		)
+		self.assertEqual(
+			statement_shape("SELECT `current` FROM `tabSeries` WHERE `name`='ACC-SINV-2026-' FOR UPDATE"),
+			"SELECT `tabSeries` FOR UPDATE",
+		)
+		self.assertIsNone(statement_shape(None))
+
+	def test_failing_child_table_is_read_from_the_traceback(self):
+		from pos_next.diagnostics import describe_deadlock
+
+		item = frappe.new_doc("Sales Invoice Item")
+		item.parenttype, item.parentfield, item.idx = "Sales Invoice", "items", 7
+
+		def db_insert(self):  # same function name Frappe uses
+			raise frappe.QueryDeadlockError("synthetic")
+
+		try:
+			db_insert(item)
+		except frappe.QueryDeadlockError as exc:
+			info = describe_deadlock(exc, "unit")
+		self.assertEqual(info["failing"]["doctype"], "Sales Invoice Item")
+		self.assertEqual(info["failing"]["parentfield"], "items")
+		self.assertEqual(info["failing"]["row_idx"], 7)
+		self.assertEqual(info["isolation"]["session"], info["isolation"]["global"])
+
+
+class TestDeadlockRetrySafety(_SubmitPathBase):
+	"""What a deadlock victim leaves behind, and that repeating the call is safe.
+
+	Frappe rolls the whole request back when it raises (app.py: ``rollback`` stays True and
+	the ``finally`` block calls ``frappe.db.rollback()`` for POST requests). A savepoint
+	stands in for that rollback here, because rolling back the whole test transaction would
+	also remove the items and stock these tests need.
+	"""
+
+	def _deadlock_once_on(self, target):
+		"""Raise QueryDeadlockError the first time ``target`` is called (Document.<name>)."""
+		from frappe.model.document import Document
+
+		real = getattr(Document, target)
+		state = {"raised": 0}
+
+		def flaky(doc, *args, **kwargs):
+			if state["raised"] == 0 and (target != "db_insert" or doc.doctype == "Sales Invoice Item"):
+				state["raised"] += 1
+				raise frappe.QueryDeadlockError("(1213, 'Deadlock found when trying to get lock')")
+			return real(doc, *args, **kwargs)
+
+		return patch.object(Document, target, flaky)
+
+	def _count(self, marker):
+		return frappe.db.count("Sales Invoice", {"po_no": marker})
+
+	def test_deadlock_while_creating_the_draft_leaves_nothing_and_retry_creates_one(self):
+		marker = "_BENCHC-retry-draft"
+		data = _build_invoice(self.profile, self.items, 4)
+		data["po_no"] = marker
+
+		frappe.db.savepoint("before_attempt")
+		with self._deadlock_once_on("db_insert"):
+			with self.assertRaises(frappe.QueryDeadlockError):  # same type, not wrapped or swallowed
+				invoices.update_invoice(json.dumps(data))
+		frappe.db.rollback(save_point="before_attempt")
+		self.assertEqual(self._count(marker), 0)
+
+		draft = invoices.update_invoice(json.dumps(data))  # the cashier screen's retry
+		self.assertEqual(self._count(marker), 1)
+		self.assertEqual(draft["docstatus"], 0)
+
+	def test_deadlock_during_submit_then_retry_with_same_key_makes_exactly_one_sale(self):
+		marker, key = "_BENCHC-retry-submit", "pos_online_test-retry-submit"
+		data = _build_invoice(self.profile, self.items, 4)
+		data["po_no"] = marker
+		draft = invoices.update_invoice(json.dumps(data))
+		submit_data = {"client_request_id": key}
+
+		frappe.db.savepoint("before_attempt")
+		with self._deadlock_once_on("submit"):
+			with self.assertRaises(frappe.QueryDeadlockError):
+				self._submit(draft, submit_data)
+		frappe.db.rollback(save_point="before_attempt")
+		# the failed attempt left no retry-key row behind to block the retry
+		self.assertFalse(frappe.db.exists("Offline Invoice Sync", {"offline_id": key}))
+
+		result = self._submit(draft, submit_data)  # retry, same key
+		self.assertEqual(frappe.db.get_value("Sales Invoice", result["name"], "docstatus"), 1)
+		self.assertEqual(frappe.db.count("Sales Invoice", {"po_no": marker, "docstatus": 1}), 1)
+		self.assertEqual(
+			frappe.db.count("Stock Ledger Entry", {"voucher_no": result["name"], "is_cancelled": 0}), 4
+		)  # stock moved once
+		self.assertEqual(frappe.db.get_value("Offline Invoice Sync", {"offline_id": key}, "status"), "Synced")
+
+		# even a third, unnecessary repeat cannot make a second sale
+		again = self._submit(draft, submit_data)
+		self.assertEqual(again["name"], result["name"])
+		self.assertTrue(again["duplicate_prevented"])
+
+	def test_checkout_calls_never_commit_so_the_rollback_discards_everything(self):
+		draft_data = _build_invoice(self.profile, self.items, 3)
+		with patch.object(frappe.db, "commit", side_effect=CommitCalled("commit inside checkout")):
+			draft = invoices.update_invoice(json.dumps(draft_data))
+			self._submit(draft, {"client_request_id": "pos_online_test-no-commit"})
+
+	def test_realtime_events_are_deferred_until_commit(self):
+		"""So a rolled-back attempt announces nothing (a full rollback clears the after-commit queue)."""
+		emitted = []
+		with patch.object(frappe, "publish_realtime", side_effect=lambda *a, **k: emitted.append(k)):
+			draft = invoices.update_invoice(json.dumps(_build_invoice(self.profile, self.items, 3)))
+			self._submit(draft, {})
+		self.assertTrue(emitted, "expected the checkout to emit realtime events")
+		self.assertTrue(all(call.get("after_commit") for call in emitted), emitted)
 
 
 class TestStepTimer(FrappeTestCase):

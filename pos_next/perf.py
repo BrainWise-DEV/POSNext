@@ -64,11 +64,13 @@ class StepTimer:
 				frappe.flags.setdefault("pos_next_perf_records", []).append(payload)
 
 			logger = frappe.logger(LOGGER_NAME, allow_site=True, file_count=5, max_size=1_000_000)
+			# frappe.logger() defaults to ERROR, which silently drops warning() and info().
+			log_all = bool(frappe.conf.get("pos_next_perf_log_all"))
+			logger.setLevel(logging.INFO if log_all else logging.WARNING)
 			line = json.dumps(payload, default=str)
 			if total_ms >= slow_ms:
 				logger.warning(line)
-			elif frappe.conf.get("pos_next_perf_log_all"):
-				logger.setLevel("INFO")
+			elif log_all:
 				logger.info(line)
 		except Exception:
 			# Instrumentation must never break a sale. Use the stdlib logger here:

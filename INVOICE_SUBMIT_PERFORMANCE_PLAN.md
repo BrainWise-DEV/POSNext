@@ -102,33 +102,53 @@ checkout can reuse the last result.
 - `main`'s wallet account belongs to another company, so every submit there logs
   "Loyalty to Wallet Conversion Error"; fix the data before benchmarking again.
 
-## 3b. Deadlocks reported by the client (open)
+## 3b. Deadlocks reported by the client (OPEN: root cause not confirmed)
 
-Two reports from the client's server: `QueryDeadlockError` when paying with loyalty points, and
-"Internal Server Error / QueryDeadlockError" in the checkout dialog now and then.
+**Confirmed facts**
+- The client's traceback: `update_invoice` -> `invoice_doc.save()` -> `Document.insert()` ->
+  `d.db_insert()` (the INSERT of a child row of a NEW draft). It does not say which child table, which
+  statement, or who the other transaction was.
+- Frappe sets no isolation level on MariaDB connections, so a connection gets the server's global
+  value at the moment it opens. Locally: `REPEATABLE-READ` global and session. The client's value is unknown.
+- The site's database user has no PROCESS / SUPER, so a full MariaDB deadlock report cannot be read
+  from the application. It must come from the database administrator (`docs/DEADLOCK_DIAGNOSTICS.md`).
 
-- **Fixed (a65c5f18):** a repeat/overlapping submit of the same sale (double tap, retry after a slow
-  response, sync worker resend) failed with a deadlock or `Offline Invoice Sync <name> not found`. Cause
-  and proof are in that commit; probe: `benchmarks/dup_submit_probe.py`.
-- **Mitigated (frontend):** `retryOnDeadlock` re-sends the draft and submit calls up to 3 times with a
-  jittered backoff when the database reports a deadlock. Safe because the victim is rolled back and the
-  repeat carries the same `client_request_id`. Real errors (stock, validation) are not retried.
-- **Not reproduced:** 8 cashiers selling overlapping items in random order (40 sales,
-  `benchmarks/deadlock_probe.py`): 0 deadlocks. So item/stock-row ordering is not confirmed as a cause.
-- **Client traceback (received):** the deadlock is raised in `update_invoice` at `invoice_doc.save()` ->
-  `Document.insert()` -> `d.db_insert()`, i.e. the INSERT of a child row of a NEW draft (step 1 of
-  checkout), not in the stock/ledger posting. Not reproduced at 16 cashiers / 192 sales with split payments
-  at the default isolation level (0 failures), so the other transaction in the cycle is still unidentified
-  (candidates: another request editing a draft, a submit, a POS Closing Shift, or a background job).
-- **Still unknown:** which statements deadlock on the client's server (loyalty / wallet rows are the
-  suspects; `main` cannot exercise them because its wallet account belongs to another company).
-  To find out, from the client's server:
-  1. Set `innodb_print_all_deadlocks = ON` (MariaDB). Every deadlock then writes both statements to the
-     error log. No restart needed: `SET GLOBAL innodb_print_all_deadlocks = ON;`
-  2. Send the Error Log entries titled "Submit Invoice Error" / "Update Invoice Error" (traceback shows
-     which hook or posting step) and `SHOW ENGINE INNODB STATUS` -> LATEST DETECTED DEADLOCK.
-  3. If the traceback points at loyalty/wallet hooks, reproduce on a test site with a valid wallet
-     account, a customer with a loyalty program and several cashiers on the same customer.
+**Reproduced here (default isolation, realistic mix, `benchmarks/workload_probe.py`)**
+
+| Run (12 cashiers) | Sales | Deadlocks |
+|---|--:|--:|
+| 40 items, loyalty customers | 180 | 2 |
+| 20 items, random item order | 240 | 5 |
+| 20 items, one consistent item order | 240 | 4 |
+| 200 items, loyalty customers | 240 | 3 |
+| 20 items, default customer (no loyalty) | 240 | 2 |
+
+About 1-2% of sales deadlock **in `submit_invoice`**; 8 of the 14 located ones at the Stock Ledger Entry
+INSERT. Not explained by item order, loyalty customers or (as far as the sample sizes can tell) item
+overlap. Earlier probes with short 5-line carts and 16 cashiers had 0 of 192, so the rate probably
+grows with cart size (more stock ledger rows per submit). **The draft-insert deadlock the client sees
+was NOT reproduced in any run** (0 in `update_invoice`).
+
+**Unknown (do not present as fact):** the other transaction and the lock type in either deadlock; whether
+the stock-ledger deadlocks here are the same phenomenon as the client's draft-insert one; the effect
+of wallet/loyalty payments (`main` cannot run them: the `Redeem Points` mode maps to a Cash account,
+and POSNext rejects a wallet mode whose account equals the invoice receivable, so a valid test needs a
+second receivable account).
+
+**Mitigation in place (not a fix):** `retryOnDeadlock` re-sends the draft and submit calls up to 3
+times with jittered backoff. Verified: a victim is rolled back by Frappe's request handler (`app.py`
+rolls back for POST on any exception) and our code never commits in these calls; a retry with the same
+`client_request_id` yields exactly one sale and one stock movement; realtime events are deferred
+until commit; other errors, and ambiguous (no-answer) failures, are never auto-retried; the cart and the
+retry key are kept; a second click during the retry delay is dropped.
+
+**To find the root cause (needs a database administrator)**
+1. Client: follow `docs/DEADLOCK_DIAGNOSTICS.md` (enable `innodb_print_all_deadlocks`, send 3+ reports,
+   `pos_next_deadlock.log`, the matching Error Log entries and `db_report` output).
+2. Locally the same reports can be produced: a privileged MariaDB user runs
+   `SET GLOBAL innodb_print_all_deadlocks = ON;` and reads the error log after
+   `workload_probe` (it reproduces at ~1-2%). I do not have, and did not try to obtain, that privilege.
+3. Only then propose a root-cause fix; candidates cannot be ranked without the lock report.
 
 ## 4. Tried and rejected (do not repeat)
 
