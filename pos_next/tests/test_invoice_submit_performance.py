@@ -11,6 +11,7 @@ method; the test is skipped if the site has none.
 
 import json
 import os
+import time
 from unittest.mock import patch
 
 import frappe
@@ -392,16 +393,33 @@ class TestDiagnosticsLoggersReallyWrite(FrappeTestCase):
 		self.assertIn("slow_probe", written)
 
 	def test_deadlock_context_line_is_written_with_default_settings(self):
-		from pos_next.diagnostics import log_deadlock
+		from pos_next.diagnostics import log_lock_failure
 
 		def action():
 			try:
 				raise frappe.QueryDeadlockError("synthetic")
 			except frappe.QueryDeadlockError as exc:
-				log_deadlock(exc, "unit_probe")
+				log_lock_failure(exc, "unit_probe")
 
 		written = self._read_new_lines("pos_next_deadlock", action)
 		self.assertIn("unit_probe", written)
+
+	def test_blocked_statement_is_read_from_the_failing_sql_frame_without_values(self):
+		from pos_next.diagnostics import describe_lock_failure
+
+		def sql(self, query):  # same name and module path as Frappe's Database.sql
+			raise frappe.QueryTimeoutError("(1205, 'Lock wait timeout exceeded')")
+
+		sql.__code__ = sql.__code__.replace(co_filename="/x/frappe/database/database.py")
+		try:
+			sql(None, "SELECT `current` FROM `tabSeries` WHERE `name`='SECRET-VALUE-' FOR UPDATE")
+		except frappe.QueryTimeoutError as exc:
+			info = describe_lock_failure(exc, "unit")
+		self.assertEqual(info["statement"], "SELECT `tabSeries` FOR UPDATE")
+		self.assertNotIn("SECRET", json.dumps(info, default=str))
+		self.assertEqual(
+			info["kind"], "lock_wait_timeout_unknown_errno"
+		)  # no MariaDB number on this synthetic error
 
 	def test_statement_shape_never_contains_values(self):
 		from pos_next.diagnostics import statement_shape
@@ -419,7 +437,7 @@ class TestDiagnosticsLoggersReallyWrite(FrappeTestCase):
 		self.assertIsNone(statement_shape(None))
 
 	def test_failing_child_table_is_read_from_the_traceback(self):
-		from pos_next.diagnostics import describe_deadlock
+		from pos_next.diagnostics import describe_lock_failure
 
 		item = frappe.new_doc("Sales Invoice Item")
 		item.parenttype, item.parentfield, item.idx = "Sales Invoice", "items", 7
@@ -430,11 +448,13 @@ class TestDiagnosticsLoggersReallyWrite(FrappeTestCase):
 		try:
 			db_insert(item)
 		except frappe.QueryDeadlockError as exc:
-			info = describe_deadlock(exc, "unit")
+			info = describe_lock_failure(exc, "unit")
 		self.assertEqual(info["failing"]["doctype"], "Sales Invoice Item")
 		self.assertEqual(info["failing"]["parentfield"], "items")
 		self.assertEqual(info["failing"]["row_idx"], 7)
-		self.assertEqual(info["isolation"]["session"], info["isolation"]["global"])
+		self.assertEqual(
+			info["connection"]["tx_isolation_session"], info["connection"]["tx_isolation_global"]
+		)
 
 
 class TestDeadlockRetrySafety(_SubmitPathBase):
@@ -522,6 +542,351 @@ class TestDeadlockRetrySafety(_SubmitPathBase):
 			self._submit(draft, {})
 		self.assertTrue(emitted, "expected the checkout to emit realtime events")
 		self.assertTrue(all(call.get("after_commit") for call in emitted), emitted)
+
+
+class TestDbErrorClassification(FrappeTestCase):
+	"""Errors are told apart by the real MariaDB error number, never by message text alone."""
+
+	def _wrapped(self, errno, wrapper):
+		import pymysql
+
+		driver = pymysql.err.OperationalError(errno, "text")
+		try:
+			raise wrapper(driver) from driver
+		except wrapper as exc:
+			return exc
+
+	def test_each_failure_kind_has_its_own_class(self):
+		from pos_next.db_errors import classify
+
+		cases = {
+			1213: (frappe.QueryDeadlockError, "deadlock_1213"),
+			1020: (frappe.QueryDeadlockError, "snapshot_conflict_1020"),  # Frappe also calls this a deadlock
+			1205: (frappe.QueryTimeoutError, "lock_wait_timeout_1205"),
+			3024: (Exception, "query_time_limit"),
+			2013: (Exception, "connection_lost"),
+		}
+		for errno, (wrapper, kind) in cases.items():
+			result = classify(self._wrapped(errno, wrapper))
+			self.assertEqual((result["kind"], result["errno"]), (kind, errno), errno)
+
+	def test_only_lock_errors_are_reraised_by_the_guard(self):
+		from pos_next.db_errors import reraise_if_lock_error
+
+		for errno, wrapper in ((1213, frappe.QueryDeadlockError), (1205, frappe.QueryTimeoutError)):
+			with self.assertRaises(wrapper):
+				reraise_if_lock_error(self._wrapped(errno, wrapper))
+		reraise_if_lock_error(ValueError("not a lock error"))  # must not raise
+
+
+class TestLockErrorsAreNotSwallowed(_SubmitPathBase):
+	"""A lock error inside a hook that catches everything must still fail the checkout.
+
+	Emulates what the server does (a savepoint rollback to the request start stands for
+	InnoDB rolling back the whole transaction on a deadlock; a plain error for a 1205 that only
+	undoes one statement) inside process_loyalty_to_wallet, which runs after the stock and
+	ledger postings. Before the fix, submit_invoice returned success while the invoice was still
+	a draft with no stock or GL entries (deadlock), or lost the wallet credit silently (timeout).
+	"""
+
+	def setUp(self):
+		super().setUp()
+		if not frappe.db.exists("Loyalty Program", "Wallet"):
+			self.skipTest("Loyalty Program 'Wallet' missing")
+		self.loyalty_profile = None
+		for name in frappe.get_all("POS Profile", filters={"disabled": 0}, pluck="name"):
+			settings = frappe.db.get_value(
+				"POS Settings",
+				{"pos_profile": name},
+				["enable_loyalty_program", "loyalty_to_wallet"],
+				as_dict=True,
+			)
+			profile = frappe.get_doc("POS Profile", name)
+			has_cash = any(p.mode_of_payment == "Cash" for p in profile.payments)
+			if settings and settings.enable_loyalty_program and settings.loyalty_to_wallet and has_cash:
+				self.loyalty_profile = profile
+				break
+		if not self.loyalty_profile:
+			self.skipTest("No POS Profile with loyalty-to-wallet conversion enabled")
+		cls = type(self)
+		if getattr(cls, "_loyalty_items", None) is None:  # items and stock are created once per class
+			cls._loyalty_items = _create_stocked_items(self.loyalty_profile, 3, prefix="_BENCH-LOCK-ITEM")
+			cls._customer_made = False
+		self.loyalty_items = cls._loyalty_items
+
+	def _loyalty_sale(self):
+		if not frappe.db.exists("Customer", {"customer_name": "_BENCH-CUST-LOCK"}):
+			frappe.get_doc(
+				{
+					"doctype": "Customer",
+					"customer_name": "_BENCH-CUST-LOCK",
+					"customer_group": frappe.db.get_value("Customer Group", {"is_group": 0}, "name"),
+					"territory": frappe.db.get_value("Territory", {"is_group": 0}, "name"),
+					"customer_type": "Individual",
+					"loyalty_program": "Wallet",
+				}
+			).insert(ignore_permissions=True)
+		customer = frappe.get_doc("Customer", {"customer_name": "_BENCH-CUST-LOCK"})
+		data = _build_invoice(self.loyalty_profile, self.loyalty_items, 3)
+		data["customer"] = customer.name
+		for row in data["items"]:
+			row["rate"] = row["price_list_rate"] = 600.0  # above the program's minimum spend
+		data["payments"] = [{"mode_of_payment": "Cash", "amount": 1800.0}]
+		return invoices.update_invoice(json.dumps(data))
+
+	def _victim(self, error_class, rollback_whole_transaction):
+		def fail(*args, **kwargs):
+			if rollback_whole_transaction:
+				frappe.db.sql("rollback to savepoint request_start")
+			raise error_class("lock error")
+
+		return patch("pos_next.api.wallet.get_or_create_wallet", fail)
+
+	def _ledger_rows(self, name):
+		return (
+			frappe.db.count("Stock Ledger Entry", {"voucher_no": name, "is_cancelled": 0}),
+			frappe.db.count("GL Entry", {"voucher_no": name, "is_cancelled": 0}),
+		)
+
+	def test_deadlock_in_the_hook_fails_the_checkout_instead_of_returning_success(self):
+		draft = self._loyalty_sale()
+		frappe.db.savepoint("request_start")
+		with self._victim(frappe.QueryDeadlockError, rollback_whole_transaction=True):
+			with self.assertRaises(frappe.QueryDeadlockError):
+				self._submit(draft, {})
+		# the request handler's rollback: nothing of the failed attempt remains, and the draft is intact
+		frappe.db.rollback(save_point="request_start")
+		self.assertEqual(frappe.db.get_value("Sales Invoice", draft["name"], "docstatus"), 0)
+		self.assertEqual(self._ledger_rows(draft["name"]), (0, 0))
+
+	def test_lock_timeout_in_the_hook_fails_the_checkout_instead_of_dropping_the_wallet_credit(self):
+		draft = self._loyalty_sale()
+		frappe.db.savepoint("request_start")
+		with self._victim(frappe.QueryTimeoutError, rollback_whole_transaction=False):
+			with self.assertRaises(frappe.QueryTimeoutError):
+				self._submit(draft, {})
+		# a 1205 undoes one statement only: the earlier postings are still in the open transaction,
+		# which is exactly why the request MUST be rolled back as a whole
+		self.assertGreater(self._ledger_rows(draft["name"])[0], 0)
+		frappe.db.rollback(save_point="request_start")
+		self.assertEqual(self._ledger_rows(draft["name"]), (0, 0))
+		self.assertEqual(frappe.db.get_value("Sales Invoice", draft["name"], "docstatus"), 0)
+
+	def test_other_errors_in_the_hook_are_still_tolerated(self):
+		"""Behaviour that is kept on purpose: a non-lock failure must not fail the sale."""
+		draft = self._loyalty_sale()
+		with patch("pos_next.api.wallet.get_or_create_wallet", side_effect=ValueError("bad wallet config")):
+			result = self._submit(draft, {})
+		self.assertEqual(frappe.db.get_value("Sales Invoice", result["name"], "docstatus"), 1)
+
+
+class _RealLockBase(_SubmitPathBase):
+	"""Base for 1205 tests: a real second connection holds a real lock (innodb_lock_wait_timeout = 1 s).
+
+	One test per subclass on purpose: a savepoint rollback does not release row locks, so a lock the
+	test's own transaction took in an earlier test would block the blocker connection itself.
+	"""
+
+	def setUp(self):
+		super().setUp()
+		if frappe.db.db_type != "mariadb":
+			self.skipTest("MariaDB only")
+		self.blocker = None
+		frappe.db.sql("set session innodb_lock_wait_timeout = 1")
+
+	def tearDown(self):
+		self._release()
+		frappe.db.sql("set session innodb_lock_wait_timeout = %s", (50,))
+
+	def _hold(self, query, params):
+		import pymysql
+
+		self.blocker = pymysql.connect(**frappe.db.get_connection_settings())
+		self.blocker.autocommit(False)
+		with self.blocker.cursor() as cur:
+			cur.execute(query, params)  # a locking read: the lock lives until the connection rolls back
+
+	def _release(self):
+		if self.blocker is not None:
+			self.blocker.rollback()
+			self.blocker.close()
+			self.blocker = None
+
+	def _series_key(self):
+		key = f"ACC-SINV-{frappe.utils.nowdate()[:4]}-"
+		if not frappe.db.exists("Series", key):
+			self.skipTest(f"Series {key} not present")
+		return key
+
+
+class TestRealLockWaitTimeoutOnUpdateInvoice(_RealLockBase):
+	"""update_invoice blocked on the invoice-number series row."""
+
+	def test_update_invoice_blocked_on_the_series_row(self):
+		marker = "_BENCHC-1205-draft"
+		data = _build_invoice(self.profile, self.items, 3)
+		data["po_no"] = marker
+		self._hold("select name from `tabSeries` where name = %s for update", (self._series_key(),))
+
+		self.assertEqual(frappe.db.sql("select @@global.innodb_rollback_on_timeout")[0][0], 0)
+		frappe.db.savepoint("request_start")
+		frappe.db.sql(
+			"insert into `tabToDo` (name, creation, modified, owner, modified_by, description) "
+			"values ('_bench1205', now(), now(), 'Administrator', 'Administrator', 'marker')"
+		)
+		started = time.time()
+		with self.assertRaises(frappe.QueryTimeoutError) as caught:
+			invoices.update_invoice(json.dumps(data))
+		self.assertGreaterEqual(time.time() - started, 0.9)  # it really waited for the lock
+
+		from pos_next.db_errors import classify
+
+		self.assertEqual(classify(caught.exception)["kind"], "lock_wait_timeout_1205")
+		# 1205 undid only the blocked statement: earlier work of this request is still there ...
+		self.assertTrue(frappe.db.exists("ToDo", "_bench1205"))
+		# ... until the request handler rolls the whole transaction back
+		frappe.db.rollback(save_point="request_start")
+		self.assertFalse(frappe.db.exists("ToDo", "_bench1205"))
+		self.assertEqual(frappe.db.count("Sales Invoice", {"po_no": marker}), 0)
+
+		self._release()  # the blocker finishes; the cashier's retry now works
+		draft = invoices.update_invoice(json.dumps(data))
+		self.assertEqual(frappe.db.count("Sales Invoice", {"po_no": marker}), 1)
+		self.assertEqual(draft["docstatus"], 0)
+
+
+class TestRealLockWaitTimeoutOnSubmitInvoice(_RealLockBase):
+	"""submit_invoice blocked on the Company row that every submit updates."""
+
+	def test_submit_invoice_blocked_on_the_company_row(self):
+		marker, key = "_BENCHC-1205-submit", "pos_online_test-1205-submit"
+		data = _build_invoice(self.profile, self.items, 3)
+		data["po_no"] = marker
+		draft = invoices.update_invoice(json.dumps(data))
+		self._hold("select name from `tabCompany` where name = %s for update", (self.profile.company,))
+
+		frappe.db.savepoint("request_start")
+		with self.assertRaises(frappe.QueryTimeoutError):
+			self._submit(draft, {"client_request_id": key})
+
+		# statement-level rollback only: the stock postings made before the blocked UPDATE are
+		# still in the open transaction, so the retry-key row and the invoice are half done ...
+		self.assertGreater(
+			frappe.db.count("Stock Ledger Entry", {"voucher_no": draft["name"], "is_cancelled": 0}), 0
+		)
+		# ... until the request is rolled back as a whole (what Frappe does for a failed POST)
+		frappe.db.rollback(save_point="request_start")
+		self.assertEqual(frappe.db.get_value("Sales Invoice", draft["name"], "docstatus"), 0)
+		self.assertEqual(frappe.db.count("Stock Ledger Entry", {"voucher_no": draft["name"]}), 0)
+		self.assertEqual(frappe.db.count("GL Entry", {"voucher_no": draft["name"]}), 0)
+		self.assertFalse(frappe.db.exists("Offline Invoice Sync", {"offline_id": key}))
+
+		self._release()
+		result = self._submit(draft, {"client_request_id": key})  # retry, same key
+		self.assertEqual(frappe.db.get_value("Sales Invoice", result["name"], "docstatus"), 1)
+		self.assertEqual(frappe.db.count("Sales Invoice", {"po_no": marker, "docstatus": 1}), 1)
+		self.assertEqual(
+			frappe.db.count("Stock Ledger Entry", {"voucher_no": result["name"], "is_cancelled": 0}), 3
+		)
+		again = self._submit(draft, {"client_request_id": key})
+		self.assertTrue(again["duplicate_prevented"])  # a further repeat cannot add a second sale
+
+
+class TestSaveKeepsFrappesChildTableLocking(FrappeTestCase):
+	"""Guard: do NOT remove the child-table locking Frappe takes when saving an existing invoice.
+
+	Saving an existing Sales Invoice loads the stored copy ``FOR UPDATE`` (every child table) and
+	runs a ``DELETE ... WHERE parent = ...`` per child table. Under REPEATABLE READ those range locks
+	block another cashier's NEW draft inserts (measured: a 1205 on ``INSERT INTO tabSales Invoice
+	Item`` for as long as a submit lasted). They were removed in an experiment, which fixed that
+	blocking but made concurrent submits of the same items deadlock in the stock ledger:
+
+	    12 cashiers, 2 hot items, 144 sales:   Frappe locking   143 ok, 1 deadlock
+	                                           locks removed     48 ok, 96 deadlocks (stock ledger)
+
+	The locks also serialise submits of adjacent invoices, which ERPNext's stock ledger posting
+	depends on. Overriding ``load_doc_before_save`` or ``update_child_table`` for POS invoices is
+	therefore unsafe. See INVOICE_SUBMIT_PERFORMANCE_PLAN.md (section 3c).
+	"""
+
+	def test_the_overrides_that_removed_those_locks_stay_removed(self):
+		from erpnext.accounts.doctype.sales_invoice.sales_invoice import SalesInvoice
+		from frappe.model.document import Document
+
+		from pos_next.overrides.sales_invoice import CustomSalesInvoice
+
+		for name in ("load_doc_before_save", "update_child_table"):
+			self.assertIs(
+				getattr(CustomSalesInvoice, name),
+				getattr(SalesInvoice, name),
+				f"CustomSalesInvoice must not override {name} (see this test's docstring)",
+			)
+		self.assertIs(SalesInvoice.update_child_table, Document.update_child_table)
+
+
+class TestItemDetailsStayInsideTheSave(_SubmitPathBase):
+	"""Guard: submit_invoice must NOT refresh item details before Frappe's save takes its locks.
+
+	Doing that refresh (about a fifth of a 100-line submit) just before the save shortened the
+	locked window by ~13% and halved draft-creation latency, but it multiplied stock-ledger
+	deadlocks about 80 times:
+
+	    12 cashiers, 2 hot items, 3 seeds x 144 sales, default lock wait
+	                         sales ok    1213 deadlocks (all in the stock ledger)   draft p50
+	    refresh in the save    430/432                    2                          6.6 s
+	    refresh before locks   273/432                  159                          3.6 s
+
+	The timing of submits relative to each other decides whether they collide in the stock ledger;
+	ERPNext's stock posting only stays safe with the current order. Do not move work across the
+	point where the save takes its locks. See INVOICE_SUBMIT_PERFORMANCE_PLAN.md (section 3d).
+	"""
+
+	def test_the_refresh_happens_inside_the_save_after_the_locks(self):
+		from erpnext.accounts.doctype.sales_invoice.sales_invoice import SalesInvoice
+		from frappe.model.document import Document
+
+		draft = invoices.update_invoice(json.dumps(_build_invoice(self.profile, self.items, 4)))
+		events = []
+		real_missing, real_latest = SalesInvoice.set_missing_values, Document.check_if_latest
+
+		def missing(doc, *args, **kwargs):
+			events.append("item_details")
+			return real_missing(doc, *args, **kwargs)
+
+		def latest(doc, *args, **kwargs):
+			events.append("locks_taken")  # check_if_latest loads the stored copy FOR UPDATE
+			return real_latest(doc, *args, **kwargs)
+
+		with patch.object(SalesInvoice, "set_missing_values", missing):
+			with patch.object(Document, "check_if_latest", latest):
+				self._submit(draft, {})
+		order = [e for e in events if e in ("item_details", "locks_taken")]
+		self.assertEqual(order[0], "locks_taken", order)
+		self.assertIn("item_details", order[1:], order)
+
+
+class TestSubmitWithAVanishedDraft(_SubmitPathBase):
+	"""The cashier screen reuses the draft of an unchanged cart when the payment is retried.
+
+	If that draft was removed meanwhile (cleanup of old drafts, an administrator), the submit must
+	create a fresh one instead of failing on the stale name.
+	"""
+
+	def test_submit_recreates_a_deleted_draft_instead_of_failing(self):
+		marker = "_BENCHC-vanished-draft"
+		data = _build_invoice(self.profile, self.items, 3)
+		data["po_no"] = marker
+		draft = invoices.update_invoice(json.dumps(data))
+		frappe.delete_doc("Sales Invoice", draft["name"], force=1, ignore_permissions=True)
+		self.assertFalse(frappe.db.exists("Sales Invoice", draft["name"]))
+
+		result = self._submit(draft, {"client_request_id": "pos_online_test-vanished"})
+
+		self.assertEqual(frappe.db.get_value("Sales Invoice", result["name"], "docstatus"), 1)
+		self.assertEqual(frappe.db.count("Sales Invoice", {"po_no": marker, "docstatus": 1}), 1)
+		self.assertEqual(
+			frappe.db.count("Stock Ledger Entry", {"voucher_no": result["name"], "is_cancelled": 0}), 3
+		)
 
 
 class TestStepTimer(FrappeTestCase):

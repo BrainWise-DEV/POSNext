@@ -46,6 +46,10 @@ class StepTimer:
 		self.steps[step] = self.steps.get(step, 0) + _ms(now - self._last)
 		self._last = now
 
+	def elapsed_ms(self) -> int:
+		"""Milliseconds since this timer started (includes the step still running)."""
+		return _ms(time.perf_counter() - self._start)
+
 	def finish(self, status: str = "ok", **context) -> int:
 		"""Emit the log line and return the total duration in ms."""
 		total_ms = _ms(time.perf_counter() - self._start)

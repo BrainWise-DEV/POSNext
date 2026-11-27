@@ -8,6 +8,8 @@ from frappe.model.document import Document
 from frappe.query_builder.functions import Coalesce
 from frappe.utils import flt, getdate, strip, today
 
+from pos_next.db_errors import reraise_if_lock_error
+
 ONE_USE_COUPON_DOCTYPES = ("Sales Invoice", "POS Invoice")
 
 
@@ -196,6 +198,7 @@ def increment_coupon_usage(coupon_code):
 			.where(coupon.coupon_code == coupon_code.upper())
 		).run()
 	except Exception as e:
+		reraise_if_lock_error(e)
 		frappe.log_error(
 			title="Coupon Usage Increment Failed",
 			message=f"Failed to increment usage for coupon {coupon_code}: {e!s}",

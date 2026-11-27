@@ -11,7 +11,8 @@ from erpnext.stock.doctype.batch.batch import get_batch_no, get_batch_qty
 from frappe import _
 from frappe.utils import cint, cstr, flt, get_datetime, nowdate, nowtime
 
-from pos_next.diagnostics import log_deadlock
+from pos_next.db_errors import is_lock_error, reraise_if_lock_error
+from pos_next.diagnostics import log_lock_failure
 from pos_next.perf import StepTimer
 
 # ==========================================
@@ -520,6 +521,7 @@ def _set_payment_accounts(payments, company):
 				else:
 					payment["account"] = account
 		except Exception as e:
+			reraise_if_lock_error(e)
 			frappe.log_error(
 				f"Failed to get payment account for {mode_of_payment}: {e}",
 				"Payment Account Lookup",
@@ -1009,7 +1011,8 @@ def update_invoice(data):
 		if pos_profile:
 			try:
 				pos_profile_doc = frappe.get_cached_doc("POS Profile", pos_profile)
-			except Exception:
+			except Exception as exc:
+				reraise_if_lock_error(exc)
 				frappe.throw(_("Unable to load POS Profile {0}").format(pos_profile))
 
 			invoice_doc.pos_profile = pos_profile
@@ -1060,6 +1063,7 @@ def update_invoice(data):
 				invoice_doc.customer = cust.name
 				invoice_doc.customer_name = cust.customer_name
 			except Exception as e:
+				reraise_if_lock_error(e)
 				frappe.log_error(f"Failed to create customer {customer_name}: {e}")
 
 		# Customer checks run only after the auto-create above, so a customer typed
@@ -1334,9 +1338,9 @@ def update_invoice(data):
 		return result
 	except Exception as exc:
 		timer.finish(status="error")
-		if isinstance(exc, frappe.QueryDeadlockError):
+		if is_lock_error(exc):
 			existing_draft = bool((locals().get("data") or {}).get("name"))
-			log_deadlock(
+			log_lock_failure(
 				exc,
 				"update_invoice:" + ("edit_draft" if existing_draft else "new_draft"),
 				doc=locals().get("invoice_doc"),
@@ -1582,6 +1586,7 @@ def _complete_offline_sync(sync_record_name, invoice_name):
 		sync_doc.flags.ignore_permissions = True
 		sync_doc.save()
 	except Exception as error:
+		reraise_if_lock_error(error)
 		frappe.log_error(
 			title="Offline Sync Completion Error",
 			message=f"Failed to complete sync record {sync_record_name} for invoice {invoice_name}: {error!s}",
@@ -1780,6 +1785,11 @@ def submit_invoice(invoice=None, data=None):
 
 		# Get or create invoice
 		if not invoice_name or not frappe.db.exists(doctype, invoice_name):
+			if invoice_name:
+				# The draft the caller refers to is gone (old drafts are cleaned up, or an administrator
+				# removed it). Create it again from the cart: with the stale name still in the payload
+				# update_invoice would try to load a document that no longer exists.
+				invoice = {k: v for k, v in invoice.items() if k not in ("name", "modified", "creation")}
 			created = update_invoice(json.dumps(invoice))
 			if not created or not isinstance(created, dict):
 				frappe.throw(_("Failed to create invoice draft"))
@@ -1827,6 +1837,7 @@ def submit_invoice(invoice=None, data=None):
 							item.branch = pos_profile_doc.branch
 			except Exception as e:
 				# Branch is optional, log and continue
+				reraise_if_lock_error(e)
 				frappe.log_error(
 					f"Failed to set branch from POS Profile {pos_profile}: {e}", "POS Profile Branch"
 				)
@@ -1880,6 +1891,7 @@ def submit_invoice(invoice=None, data=None):
 						invoice_doc.write_off_amount = write_off_amount
 						invoice_doc.base_write_off_amount = write_off_amount  # Assuming same currency
 				except Exception as e:
+					reraise_if_lock_error(e)
 					frappe.log_error(
 						f"Failed to apply write-off from POS Profile {pos_profile}: {e}",
 						"POS Write-Off Error",
@@ -1945,6 +1957,7 @@ def submit_invoice(invoice=None, data=None):
 
 				increment_coupon_usage(coupon_code)
 			except Exception as e:
+				reraise_if_lock_error(e)
 				frappe.log_error(
 					title="Failed to increment coupon usage",
 					message=f"Coupon: {coupon_code}, Error: {e!s}",
@@ -1962,6 +1975,7 @@ def submit_invoice(invoice=None, data=None):
 				)
 				wallet_reversal_ok = True
 			except Exception as wallet_reversal_error:
+				reraise_if_lock_error(wallet_reversal_error)
 				frappe.log_error(
 					title="Wallet Reversal Error",
 					message=(
@@ -1994,6 +2008,7 @@ def submit_invoice(invoice=None, data=None):
 						return_invoice=invoice_doc.name, amount=abs(flt(invoice_doc.grand_total))
 					)
 				except Exception as wallet_credit_error:
+					reraise_if_lock_error(wallet_credit_error)
 					frappe.log_error(
 						title="Wallet Credit on Return Error",
 						message=(
@@ -2065,8 +2080,8 @@ def submit_invoice(invoice=None, data=None):
 
 	except Exception as exc:
 		timer.finish(status="error")
-		if isinstance(exc, frappe.QueryDeadlockError):
-			log_deadlock(exc, "submit_invoice", doc=locals().get("invoice_doc"), timer=timer)
+		if is_lock_error(exc):
+			log_lock_failure(exc, "submit_invoice", doc=locals().get("invoice_doc"), timer=timer)
 		frappe.log_error(frappe.get_traceback(), "Submit Invoice Error")
 		raise
 

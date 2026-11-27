@@ -8,6 +8,7 @@ from frappe import _
 from frappe.utils import flt, today
 
 from pos_next.api.wallet import get_or_create_wallet
+from pos_next.db_errors import reraise_if_lock_error
 
 
 class WalletTransaction(AccountsController):
@@ -391,7 +392,8 @@ def credit_return_to_wallet(return_invoice, amount=None):
 			try:
 				existing_transaction.flags.ignore_permissions = True
 				existing_transaction.cancel()
-			except Exception:
+			except Exception as exc:
+				reraise_if_lock_error(exc)
 				frappe.log_error(
 					title="Wallet Transaction Recovery Error",
 					message=f"Could not cancel broken WT {existing_transaction.name}: {frappe.get_traceback()}",
@@ -567,6 +569,7 @@ def reverse_wallet_transactions_for_return(original_invoice, return_invoice):
 					indicator="blue",
 				)
 			except Exception as e:
+				reraise_if_lock_error(e)
 				frappe.log_error(
 					title="Wallet Transaction Cancel on Return Error",
 					message=f"WT: {wt.name}, Return: {return_invoice}, Error: {e!s}\n{frappe.get_traceback()}",
@@ -608,6 +611,7 @@ def reverse_wallet_transactions_for_return(original_invoice, return_invoice):
 					indicator="blue",
 				)
 			except Exception as e:
+				reraise_if_lock_error(e)
 				frappe.log_error(
 					title="Wallet Transaction Reverse on Partial Return Error",
 					message=(

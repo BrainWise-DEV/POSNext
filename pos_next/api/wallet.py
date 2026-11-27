@@ -10,6 +10,7 @@ import frappe
 from frappe import _
 from frappe.utils import cint, flt
 
+from pos_next.db_errors import reraise_if_lock_error
 from pos_next.integrations.registry import (
 	get_external_loyalty_balance,
 	is_external_loyalty_mode,
@@ -141,6 +142,7 @@ def process_loyalty_to_wallet(doc, method=None):
 		)
 
 	except Exception as e:
+		reraise_if_lock_error(e)
 		frappe.log_error(
 			title="Loyalty to Wallet Conversion Error",
 			message=f"Invoice: {doc.name}, Error: {e!s}\n{frappe.get_traceback()}",
@@ -228,7 +230,8 @@ def get_customer_wallet_balance(customer, company=None, exclude_invoice=None, po
 		try:
 			balance = get_external_loyalty_balance(customer)
 			return flt(balance.get("balance_iqd")) if balance else 0.0
-		except Exception:
+		except Exception as exc:
+			reraise_if_lock_error(exc)
 			frappe.log_error(frappe.get_traceback(), "Magento LP Balance Error")
 			return 0.0
 
@@ -257,7 +260,8 @@ def get_customer_wallet_balance(customer, company=None, exclude_invoice=None, po
 
 		return available_balance if available_balance > 0 else 0.0
 
-	except Exception:
+	except Exception as exc:
+		reraise_if_lock_error(exc)
 		frappe.log_error(frappe.get_traceback(), "Wallet Balance Error")
 		return 0.0
 
@@ -336,7 +340,8 @@ def create_wallet_on_customer_insert(doc, method=None):
 
 	try:
 		get_or_create_wallet(doc.name, company, pos_settings=pos_settings)
-	except Exception:
+	except Exception as exc:
+		reraise_if_lock_error(exc)
 		frappe.log_error(frappe.get_traceback(), f"Wallet auto-create failed for {doc.name}")
 
 
