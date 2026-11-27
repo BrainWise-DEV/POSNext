@@ -1364,8 +1364,13 @@ def _is_pending_expired(modified_time):
 
 
 def _reuse_sync_record(sync_record_name):
-	"""Reset an existing sync record to Pending status for retry."""
-	sync_doc = frappe.get_doc("Offline Invoice Sync", sync_record_name)
+	"""Reset an existing sync record to Pending status for retry.
+
+	``for_update`` makes this a current read: the record may have been committed by
+	another request after this request's snapshot was taken, and a plain read would
+	then raise DoesNotExistError ("Offline Invoice Sync ... not found").
+	"""
+	sync_doc = frappe.get_doc("Offline Invoice Sync", sync_record_name, for_update=True)
 	sync_doc.status = "Pending"
 	sync_doc.synced_at = None
 	sync_doc.flags.ignore_permissions = True
@@ -1373,28 +1378,140 @@ def _reuse_sync_record(sync_record_name):
 	return {"already_synced": False, "sync_record_name": sync_record_name}
 
 
-def _ensure_offline_uniqueness(offline_id, pos_profile=None, customer=None, lock_existing=True):
+SYNC_LOOKUP_ATTEMPTS = 3
+
+
+def _read_sync_record(offline_id, lock=None):
+	"""Read the sync record for a key.
+
+	``lock``: None = plain (snapshot) read; "update" = ``FOR UPDATE``; "share" = shared
+	lock. After our own insert collided with the first request's row, InnoDB leaves a
+	shared lock on that row for this transaction; asking for ``FOR UPDATE`` then makes
+	every waiting retry wait for the others' shared locks (deadlock), while a shared
+	locking read is compatible with them. Both locking forms are current reads, so they
+	see what the first request committed.
 	"""
-	Ensure offline invoice uniqueness with race condition protection.
+	if lock == "share":
+		# frappe.qb has no shared-lock mode, so raw SQL with a bound parameter and two
+		# literal statements (no string building).
+		if frappe.db.db_type == "postgres":
+			rows = frappe.db.sql(
+				"select name, sales_invoice, status, modified from `tabOffline Invoice Sync` "
+				"where offline_id = %s limit 1 for share",
+				(offline_id,),
+				as_dict=True,
+			)
+		else:
+			rows = frappe.db.sql(
+				"select name, sales_invoice, status, modified from `tabOffline Invoice Sync` "
+				"where offline_id = %s limit 1 lock in share mode",
+				(offline_id,),
+				as_dict=True,
+			)
+		return rows[0] if rows else None
+
+	return frappe.db.get_value(
+		"Offline Invoice Sync",
+		{"offline_id": offline_id},
+		["name", "sales_invoice", "status", "modified"],
+		as_dict=True,
+		for_update=lock == "update",
+	)
+
+
+def _resolve_existing_sync(existing_sync, offline_id, retry_offline_id=None):
+	"""Decide what to do with a sync record that already exists for this key.
+
+	Every read here is a *current* read (``for_update``). Under REPEATABLE READ a plain
+	read only sees what was committed before this request's first query, so a retry that
+	waited for the first request to commit would not see that request's invoice or
+	sync record and fail with "... not found" or wrongly treat the sale as missing.
+	"""
+	sync_status = existing_sync.get("status")
+	sync_record_name = existing_sync.name
+
+	if sync_status == "Pending":
+		if _is_pending_expired(existing_sync.get("modified")):
+			# Expired pending - allow retry
+			return _reuse_sync_record(sync_record_name)
+		# Active pending - reject with specific error code
+		frappe.throw(
+			_("This invoice is currently being processed. Please wait."),
+			exc=frappe.ValidationError,
+			title="SYNC_IN_PROGRESS",
+		)
+
+	# Failed status - allow retry
+	if sync_status == "Failed":
+		return _reuse_sync_record(sync_record_name)
+
+	# Synced status - verify invoice still valid
+	if sync_status == "Synced" and existing_sync.sales_invoice:
+		invoice = frappe.db.get_value(
+			"Sales Invoice",
+			existing_sync.sales_invoice,
+			[
+				"name",
+				"docstatus",
+				"grand_total",
+				"total",
+				"net_total",
+				"outstanding_amount",
+				"paid_amount",
+				"change_amount",
+			],
+			as_dict=True,
+			for_update=True,
+		)
+		if invoice and invoice.docstatus == 1:
+			return {
+				"already_synced": True,
+				"invoice_data": {
+					"name": invoice.name,
+					"status": invoice.docstatus,
+					"grand_total": invoice.grand_total,
+					"total": invoice.total,
+					"net_total": invoice.net_total,
+					"outstanding_amount": invoice.outstanding_amount or 0,
+					"paid_amount": invoice.paid_amount or 0,
+					"change_amount": invoice.change_amount or 0,
+					"duplicate_prevented": True,
+					"offline_id": offline_id,
+				},
+			}
+
+		# Synced record points to deleted/invalid invoice - allow retry
+		return _reuse_sync_record(sync_record_name)
+
+	# Unknown status or synced without invoice - allow retry
+	return _reuse_sync_record(sync_record_name)
+
+
+def _ensure_offline_uniqueness(offline_id, pos_profile=None, customer=None):
+	"""
+	Ensure invoice uniqueness for a client key (offline_id or client_request_id)
+	with race condition protection.
 
 	Uses a reservation pattern:
-	1. Check if a sync record exists (with row-level lock)
-	2. If synced with valid invoice, return existing invoice
-	3. If synced but invoice deleted/invalid, allow retry
-	4. If pending but expired (>5 min), allow retry
-	5. If pending and active, reject (another request processing)
-	6. If failed, allow retry
-	7. If not exists, create pending reservation
+	1. Read the sync record WITHOUT a lock. A locking read on a key that does not
+	   exist yet takes an InnoDB gap lock, and several requests doing that at once
+	   deadlock on the insert (QueryDeadlockError).
+	2. If it exists, re-read it with a lock: the row exists, so this is a plain
+	   record lock, and it is a current read that sees what the other request
+	   committed.
+	3. If synced with valid invoice, return existing invoice
+	4. If synced but invoice deleted/invalid, allow retry
+	5. If pending but expired (>5 min), allow retry
+	6. If pending and active, reject (another request processing)
+	7. If failed, allow retry
+	8. If not exists, create the pending reservation. The unique index on
+	   offline_id makes a concurrent request wait for the first one and then fail
+	   with DuplicateEntryError, after which step 2 applies.
 
 	Args:
-	    offline_id: The unique offline ID from the client
+	    offline_id: The unique key from the client
 	    pos_profile: POS Profile name
 	    customer: Customer name
-	    lock_existing: Read the existing record with FOR UPDATE. Online checkout
-	        passes False: a FOR UPDATE on a key that does not exist yet takes an
-	        InnoDB gap lock, and two cashiers doing that at once deadlock on the
-	        insert. The unique index on offline_id already serializes a retry
-	        behind the request that is still running.
 
 	Returns:
 	    dict with:
@@ -1402,83 +1519,39 @@ def _ensure_offline_uniqueness(offline_id, pos_profile=None, customer=None, lock
 	    - invoice_data (dict): Existing invoice data if already_synced
 	    - sync_record_name (str): Name of the sync record for this attempt
 	"""
-	# Acquire row-level lock to prevent race conditions
-	existing_sync = frappe.db.get_value(
-		"Offline Invoice Sync",
-		{"offline_id": offline_id},
-		["name", "sales_invoice", "status", "modified"],
-		as_dict=True,
-		for_update=lock_existing,
+	for _attempt in range(SYNC_LOOKUP_ATTEMPTS):
+		if _read_sync_record(offline_id):
+			existing_sync = _read_sync_record(offline_id, lock="update")
+			if existing_sync:
+				return _resolve_existing_sync(existing_sync, offline_id)
+
+		try:
+			pending_sync = frappe.get_doc(
+				{
+					"doctype": "Offline Invoice Sync",
+					"offline_id": offline_id,
+					"sales_invoice": "",
+					"pos_profile": pos_profile,
+					"customer": customer,
+					"status": "Pending",
+				}
+			)
+			pending_sync.flags.ignore_permissions = True
+			pending_sync.insert()
+			return {"already_synced": False, "sync_record_name": pending_sync.name}
+		except (frappe.DuplicateEntryError, frappe.UniqueValidationError):
+			# Another request created the record (it has committed by now: the insert
+			# waited on it). The unique index on offline_id raises UniqueValidationError
+			# (DuplicateEntryError is only the primary-key case). Read it with a current read.
+			existing_sync = _read_sync_record(offline_id, lock="share")
+			if existing_sync:
+				return _resolve_existing_sync(existing_sync, offline_id)
+
+	frappe.throw(
+		_("This invoice is currently being processed. Please wait."),
+		exc=frappe.ValidationError,
+		title="SYNC_IN_PROGRESS",
 	)
-
-	if existing_sync:
-		sync_status = existing_sync.get("status")
-		sync_record_name = existing_sync.name
-
-		# Handle Pending status
-		if sync_status == "Pending":
-			if _is_pending_expired(existing_sync.get("modified")):
-				# Expired pending - allow retry
-				return _reuse_sync_record(sync_record_name)
-			else:
-				# Active pending - reject with specific error code
-				frappe.throw(
-					_("This invoice is currently being processed. Please wait."),
-					exc=frappe.ValidationError,
-					title="SYNC_IN_PROGRESS",
-				)
-
-		# Handle Failed status - allow retry
-		if sync_status == "Failed":
-			return _reuse_sync_record(sync_record_name)
-
-		# Handle Synced status - verify invoice still valid
-		if sync_status == "Synced" and existing_sync.sales_invoice:
-			if frappe.db.exists("Sales Invoice", existing_sync.sales_invoice):
-				existing_invoice = frappe.get_doc("Sales Invoice", existing_sync.sales_invoice)
-				if existing_invoice.docstatus == 1:
-					return {
-						"already_synced": True,
-						"invoice_data": {
-							"name": existing_invoice.name,
-							"status": existing_invoice.docstatus,
-							"grand_total": existing_invoice.grand_total,
-							"total": existing_invoice.total,
-							"net_total": existing_invoice.net_total,
-							"outstanding_amount": getattr(existing_invoice, "outstanding_amount", 0),
-							"paid_amount": getattr(existing_invoice, "paid_amount", 0),
-							"change_amount": getattr(existing_invoice, "change_amount", 0),
-							"duplicate_prevented": True,
-							"offline_id": offline_id,
-						},
-					}
-
-			# Synced record points to deleted/invalid invoice - allow retry
-			return _reuse_sync_record(sync_record_name)
-
-		# Unknown status or synced without invoice - allow retry
-		return _reuse_sync_record(sync_record_name)
-
-	# No existing record - create pending reservation
-	try:
-		pending_sync = frappe.get_doc(
-			{
-				"doctype": "Offline Invoice Sync",
-				"offline_id": offline_id,
-				"sales_invoice": "",
-				"pos_profile": pos_profile,
-				"customer": customer,
-				"status": "Pending",
-			}
-		)
-		pending_sync.flags.ignore_permissions = True
-		pending_sync.insert()
-
-		return {"already_synced": False, "sync_record_name": pending_sync.name}
-	except frappe.DuplicateEntryError:
-		# Race condition: another request just created the record
-		# Retry the check to get the new record
-		return _ensure_offline_uniqueness(offline_id, pos_profile, customer, lock_existing)
 
 
 def _complete_offline_sync(sync_record_name, invoice_name):
@@ -1675,7 +1748,6 @@ def submit_invoice(invoice=None, data=None):
 			offline_id=dedupe_key,
 			pos_profile=pos_profile,
 			customer=invoice.get("customer"),
-			lock_existing=bool(offline_id),
 		)
 
 		if dedup_result and dedup_result.get("already_synced"):

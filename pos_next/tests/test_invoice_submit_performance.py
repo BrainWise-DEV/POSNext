@@ -182,12 +182,10 @@ class TestInvoiceSubmitPath(_SubmitPathBase):
 
 	def test_request_id_lookup_does_not_take_gap_lock(self):
 		with patch.object(frappe.db, "get_value", wraps=frappe.db.get_value) as get_value:
-			invoices._ensure_offline_uniqueness("pos_online_test-lock", lock_existing=False)
-		offline_lookup = [
-			c for c in get_value.call_args_list if c.args and c.args[0] == "Offline Invoice Sync"
-		]
-		self.assertTrue(offline_lookup)
-		self.assertFalse(offline_lookup[0].kwargs.get("for_update"))
+			invoices._ensure_offline_uniqueness("pos_online_test-lock")
+		lookups = [c for c in get_value.call_args_list if c.args and c.args[0] == "Offline Invoice Sync"]
+		self.assertEqual(len(lookups), 1)  # missing key: one plain read, no locking read
+		self.assertFalse(lookups[0].kwargs.get("for_update"))
 
 
 class TestRepeatedItemDetailPass(_SubmitPathBase):
@@ -239,6 +237,89 @@ class TestRepeatedItemDetailPass(_SubmitPathBase):
 		from pos_next.overrides.sales_invoice import CustomSalesInvoice
 
 		self.assertIn(CustomSalesInvoice.set_missing_values, frappe.whitelisted)
+
+
+class TestRetryKeyLookup(FrappeTestCase):
+	"""Concurrent / overlapping requests with the same key (offline_id or client_request_id)."""
+
+	def _other_connection(self):
+		import pymysql
+
+		conn = pymysql.connect(**frappe.db.get_connection_settings())
+		conn.autocommit(True)
+		return conn
+
+	def test_row_committed_after_our_snapshot_is_found_not_reported_missing(self):
+		"""The reported bug: 'Offline Invoice Sync <name> not found' on an overlapping retry.
+
+		Another request commits the sync record after this request's snapshot was taken.
+		A locking read sees it; a later plain read would not.
+		"""
+		if frappe.db.db_type != "mariadb":
+			self.skipTest("MariaDB only")
+
+		frappe.db.sql("select count(*) from `tabItem`")  # take this transaction's snapshot
+		key, name = "pos_online_test-snapshot-1", "benchsnap0001"
+		other = self._other_connection()
+		try:
+			with other.cursor() as cur:
+				cur.execute(
+					"insert into `tabOffline Invoice Sync` "
+					"(name, creation, modified, modified_by, owner, docstatus, idx, offline_id, status, sales_invoice) "
+					"values (%s, now(6), now(6), 'Administrator', 'Administrator', 0, 0, %s, 'Failed', '')",
+					(name, key),
+				)
+			result = invoices._ensure_offline_uniqueness(key)
+			self.assertEqual(result["sync_record_name"], name)
+			self.assertFalse(result["already_synced"])
+			self.assertEqual(frappe.db.get_value("Offline Invoice Sync", name, "status"), "Pending")
+		finally:
+			frappe.db.rollback()
+			with other.cursor() as cur:
+				cur.execute("delete from `tabOffline Invoice Sync` where name = %s", (name,))
+			other.close()
+
+	def test_synced_invoice_is_read_with_a_current_read(self):
+		sync_row = frappe._dict(
+			name="syncrow1", sales_invoice="ACC-SINV-X", status="Synced", modified=frappe.utils.now_datetime()
+		)
+		invoice_row = frappe._dict(
+			name="ACC-SINV-X",
+			docstatus=1,
+			grand_total=10,
+			total=10,
+			net_total=9,
+			outstanding_amount=0,
+			paid_amount=10,
+			change_amount=0,
+		)
+		reads = []
+
+		def fake_get_value(doctype, filters=None, fieldname=None, **kwargs):
+			reads.append((doctype, kwargs.get("for_update")))
+			return sync_row if doctype == "Offline Invoice Sync" else invoice_row
+
+		with patch.object(frappe.db, "get_value", side_effect=fake_get_value):
+			result = invoices._ensure_offline_uniqueness("key-1")
+
+		self.assertTrue(result["already_synced"])
+		self.assertTrue(result["invoice_data"]["duplicate_prevented"])
+		self.assertEqual(result["invoice_data"]["name"], "ACC-SINV-X")
+		self.assertIn(("Sales Invoice", True), reads)  # not a snapshot read
+		self.assertIn(("Offline Invoice Sync", True), reads)  # existing row: locking, current read
+
+	def test_lookup_gives_up_cleanly_instead_of_recursing_forever(self):
+		with (
+			patch.object(invoices, "_read_sync_record", return_value=None),
+			patch.object(frappe, "get_doc") as get_doc,
+		):
+			get_doc.return_value.insert.side_effect = frappe.UniqueValidationError(
+				"Offline Invoice Sync", "x"
+			)
+			with self.assertRaises(frappe.ValidationError) as ctx:
+				invoices._ensure_offline_uniqueness("key-2")
+		self.assertIn("currently being processed", str(ctx.exception))
+		self.assertEqual(get_doc.return_value.insert.call_count, invoices.SYNC_LOOKUP_ATTEMPTS)
 
 
 class CommitCalled(BaseException):
