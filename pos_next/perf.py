@@ -14,8 +14,6 @@ Usage::
 Calls slower than ``pos_next_slow_submit_ms`` (site config, default 5000) are
 written as one JSON line at WARNING to ``sites/<site>/logs/pos_next_perf.log``.
 Set ``pos_next_perf_log_all`` in site config to also log every call (INFO).
-For tooling, set ``frappe.flags.pos_next_collect_perf = True`` and read the
-records from ``frappe.flags.pos_next_perf_records``.
 The timer never raises and never touches the database.
 """
 
@@ -64,9 +62,6 @@ class StepTimer:
 				**self.context,
 				**context,
 			}
-			if frappe.flags.get("pos_next_collect_perf"):
-				frappe.flags.setdefault("pos_next_perf_records", []).append(payload)
-
 			logger = frappe.logger(LOGGER_NAME, allow_site=True, file_count=5, max_size=1_000_000)
 			# frappe.logger() defaults to ERROR, which silently drops warning() and info().
 			log_all = bool(frappe.conf.get("pos_next_perf_log_all"))

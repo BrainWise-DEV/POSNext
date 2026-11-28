@@ -19,13 +19,13 @@ from frappe.tests.utils import FrappeTestCase
 from frappe.utils import flt
 
 from pos_next.api import invoices
-from pos_next.benchmarks.submit_benchmark import (
-	_build_invoice,
-	_create_stocked_items,
-	_fingerprint,
-	_QueryCounter,
-)
 from pos_next.perf import StepTimer
+from pos_next.tests.invoice_fixtures import (
+	QueryCounter,
+	build_invoice,
+	create_stocked_items,
+	fingerprint,
+)
 
 LARGE_INVOICE_LINES = 60
 # Measured ~70 queries per cart line after optimisation (was ~95). The budget is
@@ -55,7 +55,7 @@ class _SubmitPathBase(FrappeTestCase):
 		cls.profile = _find_pos_profile()
 		if not cls.profile:
 			return
-		cls.items = _create_stocked_items(cls.profile, LARGE_INVOICE_LINES)
+		cls.items = create_stocked_items(cls.profile, LARGE_INVOICE_LINES)
 
 	def setUp(self):
 		if not self.profile:
@@ -63,7 +63,7 @@ class _SubmitPathBase(FrappeTestCase):
 		frappe.set_user("Administrator")
 
 	def _draft(self, lines, request_id=None):
-		data = _build_invoice(self.profile, self.items, lines)
+		data = build_invoice(self.profile, self.items, lines)
 		draft = invoices.update_invoice(json.dumps(data))
 		submit_data = {"client_request_id": request_id} if request_id else {}
 		return draft, submit_data
@@ -79,9 +79,9 @@ class TestInvoiceSubmitPath(_SubmitPathBase):
 		draft, data = self._draft(LARGE_INVOICE_LINES)
 		result = self._submit(draft, data)
 
-		fp = _fingerprint(result["name"])
+		fp = fingerprint(result["name"])
 		expected_total = sum(
-			flt(r["rate"]) for r in _build_invoice(self.profile, self.items, LARGE_INVOICE_LINES)["items"]
+			flt(r["rate"]) for r in build_invoice(self.profile, self.items, LARGE_INVOICE_LINES)["items"]
 		)
 
 		self.assertEqual(fp["docstatus"], 1)
@@ -96,7 +96,7 @@ class TestInvoiceSubmitPath(_SubmitPathBase):
 
 	def test_query_count_per_line_stays_bounded(self):
 		draft, data = self._draft(LARGE_INVOICE_LINES)
-		with _QueryCounter() as counter:
+		with QueryCounter() as counter:
 			self._submit(draft, data)
 		self.assertLess(counter.count / LARGE_INVOICE_LINES, MAX_QUERIES_PER_LINE)
 
@@ -162,8 +162,8 @@ class TestInvoiceSubmitPath(_SubmitPathBase):
 		if not profile:
 			self.skipTest("No POS Profile with Sales Persons enabled on this site")
 
-		items = _create_stocked_items(profile, 3, prefix="_BENCH-SP-ITEM")
-		data = _build_invoice(profile, items, 3)
+		items = create_stocked_items(profile, 3, prefix="_BENCH-SP-ITEM")
+		data = build_invoice(profile, items, 3)
 		for row in data["items"]:
 			row.pop("sales_person", None)
 		data["client_request_id"] = "pos_online_test-no-relax"
@@ -202,7 +202,7 @@ class TestRepeatedItemDetailPass(_SubmitPathBase):
 		return parent.call_count
 
 	def test_update_invoice_runs_the_pass_once_not_twice(self):
-		data = json.dumps(_build_invoice(self.profile, self.items, 5))
+		data = json.dumps(build_invoice(self.profile, self.items, 5))
 		self.assertEqual(self._count_item_detail_passes(lambda: invoices.update_invoice(data)), 1)
 
 	def test_submit_time_validate_still_runs_the_full_pass(self):
@@ -342,7 +342,7 @@ class TestCouponUsageInSubmit(_SubmitPathBase):
 		return frappe.db.get_value("POS Coupon", {"coupon_code": self.COUPON}, "used") or 0
 
 	def _coupon_invoice(self, request_id):
-		data = _build_invoice(self.profile, self.items, 3)
+		data = build_invoice(self.profile, self.items, 3)
 		data["coupon_code"] = self.COUPON
 		draft = invoices.update_invoice(json.dumps(data))
 		return draft, {"client_request_id": request_id}
@@ -486,7 +486,7 @@ class TestDeadlockRetrySafety(_SubmitPathBase):
 
 	def test_deadlock_while_creating_the_draft_leaves_nothing_and_retry_creates_one(self):
 		marker = "_BENCHC-retry-draft"
-		data = _build_invoice(self.profile, self.items, 4)
+		data = build_invoice(self.profile, self.items, 4)
 		data["po_no"] = marker
 
 		frappe.db.savepoint("before_attempt")
@@ -502,7 +502,7 @@ class TestDeadlockRetrySafety(_SubmitPathBase):
 
 	def test_deadlock_during_submit_then_retry_with_same_key_makes_exactly_one_sale(self):
 		marker, key = "_BENCHC-retry-submit", "pos_online_test-retry-submit"
-		data = _build_invoice(self.profile, self.items, 4)
+		data = build_invoice(self.profile, self.items, 4)
 		data["po_no"] = marker
 		draft = invoices.update_invoice(json.dumps(data))
 		submit_data = {"client_request_id": key}
@@ -529,7 +529,7 @@ class TestDeadlockRetrySafety(_SubmitPathBase):
 		self.assertTrue(again["duplicate_prevented"])
 
 	def test_checkout_calls_never_commit_so_the_rollback_discards_everything(self):
-		draft_data = _build_invoice(self.profile, self.items, 3)
+		draft_data = build_invoice(self.profile, self.items, 3)
 		with patch.object(frappe.db, "commit", side_effect=CommitCalled("commit inside checkout")):
 			draft = invoices.update_invoice(json.dumps(draft_data))
 			self._submit(draft, {"client_request_id": "pos_online_test-no-commit"})
@@ -538,7 +538,7 @@ class TestDeadlockRetrySafety(_SubmitPathBase):
 		"""So a rolled-back attempt announces nothing (a full rollback clears the after-commit queue)."""
 		emitted = []
 		with patch.object(frappe, "publish_realtime", side_effect=lambda *a, **k: emitted.append(k)):
-			draft = invoices.update_invoice(json.dumps(_build_invoice(self.profile, self.items, 3)))
+			draft = invoices.update_invoice(json.dumps(build_invoice(self.profile, self.items, 3)))
 			self._submit(draft, {})
 		self.assertTrue(emitted, "expected the checkout to emit realtime events")
 		self.assertTrue(all(call.get("after_commit") for call in emitted), emitted)
@@ -610,7 +610,7 @@ class TestLockErrorsAreNotSwallowed(_SubmitPathBase):
 			self.skipTest("No POS Profile with loyalty-to-wallet conversion enabled")
 		cls = type(self)
 		if getattr(cls, "_loyalty_items", None) is None:  # items and stock are created once per class
-			cls._loyalty_items = _create_stocked_items(self.loyalty_profile, 3, prefix="_BENCH-LOCK-ITEM")
+			cls._loyalty_items = create_stocked_items(self.loyalty_profile, 3, prefix="_BENCH-LOCK-ITEM")
 			cls._customer_made = False
 		self.loyalty_items = cls._loyalty_items
 
@@ -627,7 +627,7 @@ class TestLockErrorsAreNotSwallowed(_SubmitPathBase):
 				}
 			).insert(ignore_permissions=True)
 		customer = frappe.get_doc("Customer", {"customer_name": "_BENCH-CUST-LOCK"})
-		data = _build_invoice(self.loyalty_profile, self.loyalty_items, 3)
+		data = build_invoice(self.loyalty_profile, self.loyalty_items, 3)
 		data["customer"] = customer.name
 		for row in data["items"]:
 			row["rate"] = row["price_list_rate"] = 600.0  # above the program's minimum spend
@@ -724,7 +724,7 @@ class TestRealLockWaitTimeoutOnUpdateInvoice(_RealLockBase):
 
 	def test_update_invoice_blocked_on_the_series_row(self):
 		marker = "_BENCHC-1205-draft"
-		data = _build_invoice(self.profile, self.items, 3)
+		data = build_invoice(self.profile, self.items, 3)
 		data["po_no"] = marker
 		self._hold("select name from `tabSeries` where name = %s for update", (self._series_key(),))
 
@@ -760,7 +760,7 @@ class TestRealLockWaitTimeoutOnSubmitInvoice(_RealLockBase):
 
 	def test_submit_invoice_blocked_on_the_company_row(self):
 		marker, key = "_BENCHC-1205-submit", "pos_online_test-1205-submit"
-		data = _build_invoice(self.profile, self.items, 3)
+		data = build_invoice(self.profile, self.items, 3)
 		data["po_no"] = marker
 		draft = invoices.update_invoice(json.dumps(data))
 		self._hold("select name from `tabCompany` where name = %s for update", (self.profile.company,))
@@ -845,7 +845,7 @@ class TestItemDetailsStayInsideTheSave(_SubmitPathBase):
 		from erpnext.accounts.doctype.sales_invoice.sales_invoice import SalesInvoice
 		from frappe.model.document import Document
 
-		draft = invoices.update_invoice(json.dumps(_build_invoice(self.profile, self.items, 4)))
+		draft = invoices.update_invoice(json.dumps(build_invoice(self.profile, self.items, 4)))
 		events = []
 		real_missing, real_latest = SalesInvoice.set_missing_values, Document.check_if_latest
 
@@ -874,7 +874,7 @@ class TestSubmitWithAVanishedDraft(_SubmitPathBase):
 
 	def test_submit_recreates_a_deleted_draft_instead_of_failing(self):
 		marker = "_BENCHC-vanished-draft"
-		data = _build_invoice(self.profile, self.items, 3)
+		data = build_invoice(self.profile, self.items, 3)
 		data["po_no"] = marker
 		draft = invoices.update_invoice(json.dumps(data))
 		frappe.delete_doc("Sales Invoice", draft["name"], force=1, ignore_permissions=True)
@@ -891,16 +891,13 @@ class TestSubmitWithAVanishedDraft(_SubmitPathBase):
 
 class TestStepTimer(FrappeTestCase):
 	def test_records_steps_and_total(self):
-		frappe.flags.pos_next_collect_perf = True
-		frappe.flags.pos_next_perf_records = []
-		try:
-			timer = StepTimer("unit", pos_profile="P")
-			timer.mark("a")
-			timer.mark("b")
-			total = timer.finish(invoice="X")
-			record = frappe.flags.pos_next_perf_records[-1]
-		finally:
-			frappe.flags.pos_next_collect_perf = False
+		with patch.object(frappe, "logger") as get_logger:
+			with patch.dict(frappe.conf, {"pos_next_perf_log_all": 1}):
+				timer = StepTimer("unit", pos_profile="P")
+				timer.mark("a")
+				timer.mark("b")
+				total = timer.finish(invoice="X")
+		record = json.loads(get_logger.return_value.info.call_args.args[0])
 
 		self.assertEqual(record["op"], "unit")
 		self.assertEqual(set(record["steps_ms"]), {"a", "b"})
