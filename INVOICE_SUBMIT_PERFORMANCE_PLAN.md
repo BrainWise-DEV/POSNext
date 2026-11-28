@@ -41,9 +41,12 @@ Code:
 - POS Coupon: `increment_coupon_usage` no longer commits mid-submit (it leaked partial work and could
   leave the retry key stuck as Pending); atomic UPDATE; counted after the sale is final.
 
-Tooling (test sites only): `pos_next/benchmarks/submit_benchmark.py` (rollback-only benchmark and
-business-result fingerprint), `concurrent_benchmark.py` (committed multi-cashier runs with full
-cleanup), `desk_vs_pos.py` (POS cashier path vs standard Desk path, equivalence-checked).
+Measurement tooling (test sites only) was used for every number in this document and has since been
+removed from the repository, because it only ever ran on test sites and creates and deletes data. Its
+last version is in commit `70089575` (`git show 70089575:pos_next/benchmarks/<file>`): `submit_benchmark.py`
+(rollback-only benchmark and fingerprint), `concurrent_benchmark.py`, `workload_probe.py`, `gap_lock_probe.py`,
+`race_probe.py`, `lock_timeline.py`, `deadlock_probe.py`, `dup_submit_probe.py`, `desk_vs_pos.py`. References
+to `benchmarks/...` below point at those files.
 
 Measured on a dev site (indicative, loaded machine): single-request time down about 30%, queries
 down about 27%; 100 lines 5.2 s to 3.3 s. POS vs Desk: no meaningful POSNext overhead
@@ -253,18 +256,17 @@ counts 1213s. Stock-ledger creation is core ERPNext (57% of the window) and not 
 
 ## 5. How to re-measure
 
+The tools are no longer in the tree (see the note near the top). To re-measure, restore them on a TEST
+site checkout, for example:
+
 ```bash
-# single request, rolled back
+git checkout 70089575 -- pos_next/benchmarks
 bench --site <test-site> execute pos_next.benchmarks.submit_benchmark.run \
   --kwargs '{"line_counts": [10, 100, 200], "repeat": 3}'
-# business-result fingerprint (diff before/after a change; must be identical)
-bench --site <test-site> execute pos_next.benchmarks.submit_benchmark.fingerprint \
-  --kwargs '{"out_file": "/tmp/fp.json"}'
-# POS vs Desk
-bench --site <test-site> execute pos_next.benchmarks.desk_vs_pos.check_equivalence
-bench --site <test-site> execute pos_next.benchmarks.desk_vs_pos.run --kwargs '{"rounds": 5}'
-# committed multi-cashier runs (clean up after themselves; test sites only)
-bench --site <test-site> execute pos_next.benchmarks.concurrent_benchmark.run \
-  --kwargs '{"cashiers": [1, 4, 8], "invoices_per_cashier": 4, "lines": 100, "disjoint": True}'
-bench --site <test-site> execute pos_next.benchmarks.concurrent_benchmark.cleanup   # if a run was interrupted
+bench --site <test-site> execute pos_next.benchmarks.concurrent_benchmark.cleanup   # after an interrupted run
+git rm -rf --cached pos_next/benchmarks && rm -rf pos_next/benchmarks               # do not commit them back
 ```
+
+What they measured: single-request time and query counts (rolled back), a business-result fingerprint to
+prove an optimisation changes nothing visible, POS-vs-Desk equivalence, and committed multi-cashier runs
+that report sales, deadlocks (1213), lock timeouts (1205) and draft latency.
