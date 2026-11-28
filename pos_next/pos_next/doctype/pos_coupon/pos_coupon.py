@@ -5,7 +5,10 @@
 import frappe
 from frappe import _
 from frappe.model.document import Document
+from frappe.query_builder.functions import Coalesce
 from frappe.utils import flt, getdate, strip, today
+
+from pos_next.db_errors import reraise_if_lock_error
 
 ONE_USE_COUPON_DOCTYPES = ("Sales Invoice", "POS Invoice")
 
@@ -179,13 +182,23 @@ def apply_coupon_discount(coupon, cart_total, net_total=None):
 
 
 def increment_coupon_usage(coupon_code):
-	"""Increment the usage counter for a coupon"""
+	"""Increment the usage counter for a coupon.
+
+	No commit here: this runs inside the invoice submit request, and a commit would
+	make everything written so far in that request permanent even if the sale then
+	fails (leaving, among other things, the retry key stuck as "Pending"). The
+	request commits when the sale completes. The increment is a single atomic UPDATE,
+	so two cashiers using the same coupon cannot overwrite each other's count.
+	"""
 	try:
-		coupon = frappe.get_doc("POS Coupon", {"coupon_code": coupon_code.upper()})
-		coupon.used = (coupon.used or 0) + 1
-		coupon.db_set("used", coupon.used)
-		frappe.db.commit()
+		coupon = frappe.qb.DocType("POS Coupon")
+		(
+			frappe.qb.update(coupon)
+			.set(coupon.used, Coalesce(coupon.used, 0) + 1)
+			.where(coupon.coupon_code == coupon_code.upper())
+		).run()
 	except Exception as e:
+		reraise_if_lock_error(e)
 		frappe.log_error(
 			title="Coupon Usage Increment Failed",
 			message=f"Failed to increment usage for coupon {coupon_code}: {e!s}",

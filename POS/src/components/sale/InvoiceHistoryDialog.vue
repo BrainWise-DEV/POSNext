@@ -9,7 +9,7 @@
 							v-model="searchTerm"
 							type="text"
 							:placeholder="__('Search by invoice number or customer...')"
-							@input="searchInvoices"
+							@input="onSearchInput"
 						>
 							<template #prefix>
 								<svg
@@ -31,9 +31,10 @@
 					<Button
 						variant="subtle"
 						@click="loadInvoices"
-						:loading="invoicesResource.loading"
+						:loading="invoicesResource.loading && !isLoadingMore"
 						:title="__('Refresh')"
 					>
+						<!-- RotateCcw icon -->
 						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 							<path
 								stroke-linecap="round"
@@ -70,10 +71,11 @@
 					<p class="mt-2 text-sm text-gray-500">{{ __("No invoices found") }}</p>
 				</div>
 
+				<!-- Invoices List -->
 				<div v-else class="flex flex-col gap-2 max-h-96 overflow-y-auto pe-2">
 					<div
-						v-for="invoice in filteredInvoices"
-						:key="invoice.name"
+						v-for="(invoice, index) in filteredInvoices"
+						:key="invoice.name + invoice.posting_date"
 						class="bg-white border border-gray-200 rounded-lg p-3 hover:shadow-md transition-all"
 					>
 						<div class="flex items-start justify-between gap-3">
@@ -83,14 +85,14 @@
 									<h4 class="text-sm font-semibold text-gray-900">
 										{{ invoice.name }}
 									</h4>
-									<!-- Show Return badge (red) if it's a return invoice -->
+									<!-- Return badge -->
 									<span
 										v-if="invoice.is_return"
 										class="text-xs px-2 py-0.5 rounded-full font-medium bg-red-100 text-red-800"
 									>
 										{{ __("Return") }}
 									</span>
-									<!-- Otherwise show regular status badge -->
+									<!-- Status badge -->
 									<span
 										v-else
 										:class="[
@@ -120,9 +122,11 @@
 									{{ formatCurrency(invoice.grand_total) }}
 								</p>
 								<div class="flex items-center gap-1 mt-2">
-									<button
+									<Button
+										variant="ghost"
+										theme="blue"
+										size="sm"
 										@click="viewInvoice(invoice)"
-										class="p-1.5 hover:bg-blue-50 rounded transition-colors"
 										:title="__('View Details')"
 									>
 										<svg
@@ -144,10 +148,12 @@
 												d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
 											/>
 										</svg>
-									</button>
-									<button
+									</Button>
+									<Button
+										variant="ghost"
+										theme="green"
+										size="sm"
 										@click="printInvoice(invoice)"
-										class="p-1.5 hover:bg-green-50 rounded transition-colors"
 										:title="__('Print')"
 									>
 										<svg
@@ -163,11 +169,13 @@
 												d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"
 											/>
 										</svg>
-									</button>
-									<button
+									</Button>
+									<Button
 										v-if="canCreateReturn(invoice)"
+										variant="ghost"
+										theme="orange"
+										size="sm"
 										@click="openReturnModal(invoice)"
-										class="p-1.5 hover:bg-orange-50 rounded transition-colors"
 										:title="__('Create Return')"
 									>
 										<svg
@@ -183,7 +191,7 @@
 												d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"
 											/>
 										</svg>
-									</button>
+									</Button>
 								</div>
 							</div>
 						</div>
@@ -217,9 +225,13 @@
 </template>
 
 <script setup>
-import { useToast } from "@/composables/useToast";
 import { useFormatters } from "@/composables/useFormatters";
-import { DEFAULT_CURRENCY, formatCurrency as formatCurrencyUtil } from "@/utils/currency";
+import { useToast } from "@/composables/useToast";
+import {
+	DEFAULT_CURRENCY,
+	DEFAULT_LOCALE,
+	formatCurrency as formatCurrencyUtil,
+} from "@/utils/currency";
 import { getInvoiceStatusColor } from "@/utils/invoice";
 import { Button, Dialog, Input, createResource } from "frappe-ui";
 import { computed, ref, watch } from "vue";
@@ -270,8 +282,9 @@ const invoicesResource = createResource({
 	makeParams() {
 		return {
 			pos_profile: props.posProfile,
-			start: page.value * pageSize,
+			search: searchTerm.value || undefined,
 			limit: pageSize,
+			offset: page.value * pageSize,
 		};
 	},
 	auto: false,
@@ -294,6 +307,7 @@ const invoicesResource = createResource({
 			hasMore.value = data.length === pageSize;
 			isLoadingMore.value = false;
 		}
+		isLoadingMore.value = false;
 	},
 	onError(error) {
 		console.error("Error loading invoices:", error);
@@ -307,13 +321,20 @@ watch(
 	(val) => {
 		show.value = val;
 		if (val && props.posProfile) {
-			invoicesResource.reload();
+			loadInvoices();
 		}
 	}
 );
 
 watch(show, (val) => {
 	emit("update:modelValue", val);
+	// Dialog cleanup: reset state when dialog closes
+	if (!val) {
+		searchTerm.value = "";
+		page.value = 0;
+		invoices.value = [];
+		hasMore.value = true;
+	}
 });
 
 // Clear selected invoice when return dialog closes
@@ -329,32 +350,10 @@ const filteredInvoices = computed(() => {
 	const term = searchTerm.value.toLowerCase();
 	return invoices.value.filter(
 		(inv) =>
-			inv.name?.toLowerCase().includes(term) ||
+			inv.name.toLowerCase().includes(term) ||
 			inv.customer_name?.toLowerCase().includes(term)
 	);
 });
-
-function formatPaymentModes(invoice) {
-	const payments = Array.isArray(invoice?.payments) ? invoice.payments : [];
-	const validPayments = payments.filter((payment) => payment.mode_of_payment);
-
-	if (validPayments.length === 0) {
-		return __("No payment mode");
-	}
-
-	if (validPayments.length === 1) {
-		return __(validPayments[0].mode_of_payment);
-	}
-
-	return validPayments
-		.map(
-			(payment) =>
-				`${__(payment.mode_of_payment)} ${formatCurrency(
-					Number.parseFloat(payment.amount || 0)
-				)}`
-		)
-		.join(", ");
-}
 
 function loadInvoices() {
 	if (props.posProfile) {
@@ -371,8 +370,20 @@ function loadMore() {
 	invoicesResource.reload();
 }
 
-function searchInvoices() {
-	// Debounced search - already filtered by computed property
+function debounce(fn, wait) {
+	let timer;
+	return (...args) => {
+		clearTimeout(timer);
+		timer = setTimeout(() => fn(...args), wait);
+	};
+}
+
+const _debouncedSearch = debounce(() => {
+	loadInvoices();
+}, 300);
+
+function onSearchInput() {
+	_debouncedSearch();
 }
 
 function viewInvoice(invoice) {
@@ -409,5 +420,27 @@ function formatDateTime(date, time) {
 	const dateStr = formatDate(date);
 	const timeStr = formatTime(time);
 	return [dateStr, timeStr].filter(Boolean).join(" ");
+}
+
+function formatPaymentModes(invoice) {
+	const payments = Array.isArray(invoice?.payments) ? invoice.payments : [];
+	const validPayments = payments.filter((payment) => payment.mode_of_payment);
+
+	if (validPayments.length === 0) {
+		return __("No payment mode");
+	}
+
+	if (validPayments.length === 1) {
+		return __(validPayments[0].mode_of_payment);
+	}
+
+	return validPayments
+		.map(
+			(payment) =>
+				`${__(payment.mode_of_payment)} ${formatCurrency(
+					Number.parseFloat(payment.amount || 0)
+				)}`
+		)
+		.join(", ");
 }
 </script>

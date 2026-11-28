@@ -15,6 +15,8 @@
   "column_break_wallet",
   "auto_create_wallet",
   "loyalty_to_wallet",
+  "section_break_customer_email_verification",
+  "enable_customer_email_verification",
   "section_break_general",
   "allow_user_to_edit_additional_discount",
   "allow_user_to_edit_item_discount",
@@ -37,6 +39,7 @@
   "display_discount_percentage",
   "display_discount_amount",
   "show_variants_as_items",
+  "cart_lifo",
   "section_break_operations",
   "allow_sales_order",
   "allow_select_sales_order",
@@ -56,6 +59,7 @@
   "section_break_printing",
   "allow_print_last_invoice",
   "silent_print",
+  "print_multiple_sales_persons",
   "section_break_delivery",
   "use_delivery_charges",
   "auto_set_delivery_charges",
@@ -258,7 +262,7 @@
    "label": "Default Card View"
   },
   {
-   "default": "0",
+   "default": "1",
    "description": "Show item codes in the UI",
    "fieldname": "display_item_code",
    "fieldtype": "Check",
@@ -302,6 +306,13 @@
    "fieldname": "show_variants_as_items",
    "fieldtype": "Check",
    "label": "Show Variants as Items"
+  },
+  {
+   "default": "0",
+   "description": "Show most recently added item at the top of the cart",
+   "fieldname": "cart_lifo",
+   "fieldtype": "Check",
+   "label": "LIFO Cart Order (Newest on Top)"
   },
   {
    "collapsible": 1,
@@ -431,6 +442,13 @@
    "label": "Enable Silent Print"
   },
   {
+   "default": "0",
+   "description": "Print all sales persons on the receipt when an invoice has more than one. When off, receipts with multiple sales persons do not show them (a single sales person always prints).",
+   "fieldname": "print_multiple_sales_persons",
+   "fieldtype": "Check",
+   "label": "Print Multiple Sales Persons"
+  },
+  {
    "collapsible": 1,
    "fieldname": "section_break_delivery",
    "fieldtype": "Section Break",
@@ -546,6 +564,18 @@
    "fieldtype": "Table",
    "label": "Barcode Rules",
    "options": "POS Barcode Rules"
+  },
+  {
+   "fieldname": "section_break_customer_email_verification",
+   "fieldtype": "Section Break",
+   "label": "Customer Email Verification"
+  },
+  {
+   "default": "0",
+   "description": "Show the 'Verify email' (OTP) action in the customer dialog. Requires a Magento-synced customer and a configured Magento Setting. Informational badge only.",
+   "fieldname": "enable_customer_email_verification",
+   "fieldtype": "Check",
+   "label": "Enable Customer Email Verification"
   }
  ],
  "index_web_pages_for_search": 1,

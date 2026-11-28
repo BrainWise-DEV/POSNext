@@ -30,15 +30,65 @@ export function shouldValidateItemStock(item) {
 }
 
 /**
+ * Stock qty for a single cart/catalog row (qty × conversion_factor).
+ * @param {Object} row
+ * @returns {number}
+ */
+export function rowStockQty(row, qtyOverride = null) {
+	const qty =
+		qtyOverride !== null && qtyOverride !== undefined
+			? Number.parseFloat(qtyOverride)
+			: Number.parseFloat(row?.quantity ?? row?.qty ?? 0);
+	const factor = Number.parseFloat(row?.conversion_factor) || 1;
+	return (Number.isFinite(qty) ? qty : 0) * factor;
+}
+
+/**
+ * Sum stock qty already in the cart for one SKU only.
+ * Includes paid and free rows of that item_code; never other products
+ * (e.g. a free Aqua Water line must not count against iPhone 17).
+ *
+ * @param {Array} cartItems
+ * @param {string} itemCode
+ * @returns {number}
+ */
+export function getCartStockQtyForItem(cartItems, itemCode) {
+	if (!itemCode || !Array.isArray(cartItems)) return 0;
+	return cartItems.reduce((sum, row) => {
+		if (row?.item_code !== itemCode) return sum;
+		return sum + rowStockQty(row);
+	}, 0);
+}
+
+/**
+ * Warehouse (Bin) qty for the item.
+ *
+ * Grid items inject remaining stock into `actual_qty` (server − cart reserved)
+ * and keep Bin qty on `original_stock`. Cart lines store Bin qty on `actual_qty`.
+ * Always prefer `original_stock` so we never compare "qty already in cart + new"
+ * against remaining stock (that double-counts and inflates requested vs available).
+ *
+ * @param {Object} item
+ * @returns {number}
+ */
+export function getWarehouseStockQty(item) {
+	if (!item) return 0;
+	if (item.original_stock !== undefined && item.original_stock !== null) {
+		return Number.parseFloat(item.original_stock) || 0;
+	}
+	return Number.parseFloat(item.actual_qty ?? item.stock_qty ?? 0) || 0;
+}
+
+/**
  * Check if the requested quantity exceeds available stock.
  *
- * @param {Object}  item       - Item with actual_qty / stock_qty
- * @param {number}  requestedQty - Total quantity to validate against
+ * @param {Object}  item       - Item with actual_qty / stock_qty / original_stock
+ * @param {number}  requestedQty - Total quantity to validate against (this SKU only)
  * @param {string}  [warehouse]  - Warehouse name (for error message)
  * @returns {{ available: boolean, actualQty: number, error: string|null }}
  */
 export function checkStockAvailability(item, requestedQty, warehouse) {
-	const actualQty = item.actual_qty ?? item.stock_qty ?? 0;
+	const actualQty = getWarehouseStockQty(item);
 	const wh = warehouse || item.warehouse || "";
 
 	if (actualQty >= requestedQty) {

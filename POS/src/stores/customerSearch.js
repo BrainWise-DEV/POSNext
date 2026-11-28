@@ -217,7 +217,11 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 
 			// Step 2: If online, fetch delta from server
 			if (!isOffline()) {
-				const lastSync = forceReload ? null : localStorage.getItem(CUSTOMERS_SYNC_KEY);
+				// Empty cache: a delta since the last sync would return nothing, so fetch everything
+				const lastSync =
+					forceReload || !cachedCustomers?.length
+						? null
+						: localStorage.getItem(CUSTOMERS_SYNC_KEY);
 
 				const response = await call("pos_next.api.customers.get_customers", {
 					pos_profile: posProfile,
@@ -302,7 +306,17 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 	// Real-time Push Integration
 	const { onCustomerUpdate } = useRealtimeCustomers();
 	onCustomerUpdate(async (data) => {
-		const { name, action, customer_name, mobile_no, email_id, disabled } = data;
+		const {
+			name,
+			action,
+			customer_name,
+			mobile_no,
+			email_id,
+			disabled,
+			custom_email_verified,
+			custom_verified_email,
+			custom_email_verified_on,
+		} = data;
 		console.log("Customer update via real-time:", data);
 		if (action === "delete" || disabled) {
 			// Remove from memory
@@ -323,6 +337,9 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 				customer_name,
 				mobile_no,
 				email_id,
+				custom_email_verified,
+				custom_verified_email,
+				custom_email_verified_on,
 				disabled: !!disabled,
 			};
 			await addCustomerToCache(customer);

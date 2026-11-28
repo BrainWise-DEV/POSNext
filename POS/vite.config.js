@@ -43,6 +43,9 @@ function posNextBuildVersionPlugin(version) {
 	};
 }
 
+// vite-plugin-pwa instance, captured for the pos-sw-absolute-entries plugin below
+let pwaPlugin;
+
 // https://vitejs.dev/config/
 export default defineConfig({
 	plugins: [
@@ -69,7 +72,8 @@ export default defineConfig({
 		}),
 		VitePWA({
 			registerType: "autoUpdate",
-			includeAssets: ["favicon.png", "icon.svg", "icon-maskable.svg"],
+			// Registered from main.js at /pos-sw.js so its scope covers the /pos page
+			injectRegister: false,
 			manifest: {
 				name: "POSNext",
 				short_name: "POSNext",
@@ -78,7 +82,7 @@ export default defineConfig({
 				theme_color: "#4F46E5",
 				background_color: "#ffffff",
 				display: "standalone",
-				scope: "/assets/pos_next/pos/",
+				scope: "/pos",
 				start_url: "/pos",
 				icons: [
 					{
@@ -111,6 +115,10 @@ export default defineConfig({
 				globPatterns: ["**/*.{js,css,html,ico,png,svg,woff,woff2}"],
 				maximumFileSizeToCacheInBytes: 4 * 1024 * 1024, // 3 MB
 				navigateFallback: null,
+				// sw.js is also served from the site root, so precache URLs must be absolute
+				modifyURLPrefix: { "": "/assets/pos_next/pos/" },
+				// Single file: the copy served from the site root has no sibling workbox chunk
+				inlineWorkboxRuntime: true,
 				navigateFallbackDenylist: [/^\/api/, /^\/app/],
 				runtimeCaching: [
 					{
@@ -167,21 +175,8 @@ export default defineConfig({
 							},
 						},
 					},
-					{
-						urlPattern: /\/api\/.*/i,
-						handler: "NetworkFirst",
-						options: {
-							cacheName: "api-cache",
-							networkTimeoutSeconds: 10,
-							expiration: {
-								maxEntries: 100,
-								maxAgeSeconds: 60 * 60 * 24, // 24 hours
-							},
-							cacheableResponse: {
-								statuses: [0, 200],
-							},
-						},
-					},
+					// No /api rule: API calls must reach the server (a cached ping hides being offline);
+					// offline data lives in IndexedDB
 					{
 						urlPattern: ({ request, url }) =>
 							request.mode === "navigate" && url.pathname.startsWith("/pos"),
@@ -189,10 +184,9 @@ export default defineConfig({
 						options: {
 							cacheName: "pos-page-cache",
 							networkTimeoutSeconds: 3,
-							expiration: {
-								maxEntries: 1,
-								maxAgeSeconds: 60 * 60 * 24, // 24 hours
-							},
+							// One entry for every /pos route (offline there is no server to redirect),
+							// kept until the next online load replaces it
+							plugins: [{ cacheKeyWillBeUsed: async () => "/pos/" }],
 						},
 					},
 				],
@@ -205,6 +199,23 @@ export default defineConfig({
 				type: "module",
 			},
 		}),
+		{
+			// vite-plugin-pwa adds the web manifest and manifest icons to the precache
+			// with relative URLs; sw.js is also served from the site root, so make them absolute
+			name: "pos-sw-absolute-entries",
+			configResolved(config) {
+				pwaPlugin = config.plugins.find((p) => p.name === "vite-plugin-pwa");
+			},
+			buildStart() {
+				pwaPlugin?.api?.extendManifestEntries((entries) =>
+					entries.map((entry) =>
+						typeof entry === "string" || entry.url.startsWith("/")
+							? entry
+							: { ...entry, url: `/assets/pos_next/pos/${entry.url}` }
+					)
+				);
+			},
+		},
 	],
 	build: {
 		chunkSizeWarningLimit: 1500,

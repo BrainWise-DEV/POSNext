@@ -1,15 +1,50 @@
 <template>
-	<Dialog
-		v-model="show"
-		:options="{
-			title: isEditMode ? __('Edit Customer') : __('Create New Customer'),
-			size: 'md',
-		}"
-	>
+	<Dialog v-model="show" :key="dialogKey" :options="dialogOptions">
 		<template #body-content>
-			<div class="flex flex-col gap-6">
+			<div
+				v-if="createdCustomer"
+				class="flex flex-col gap-4"
+				data-testid="created-verify-step"
+			>
+				<p class="text-sm text-gray-700">
+					{{ __("Customer {0} created successfully", [createdCustomer.customer_name]) }}
+				</p>
+				<EmailVerificationPanel
+					:customer="createdCustomer.name"
+					:email="customerData.email_id"
+					:saved-email="createdCustomer.email_id || ''"
+					:verified="Boolean(Number(createdCustomer.custom_email_verified))"
+					:verified-email="createdCustomer.custom_verified_email || ''"
+					:magento-synced="Boolean(createdCustomer.custom_customer_id)"
+					:pos-profile="posProfile"
+					@verified="handleEmailVerified"
+					@lock-change="(v) => (emailVerificationLocked = v)"
+				/>
+			</div>
+			<div v-else class="flex flex-col gap-6">
+				<div
+					v-if="existingDuplicate"
+					class="px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg"
+					data-testid="existing-customer-warning"
+				>
+					<p class="text-sm font-medium text-amber-900">
+						{{ existingDuplicate.message }}
+					</p>
+					<div class="mt-2 text-sm text-amber-800">
+						<p class="font-medium">
+							{{ existingDuplicate.existing_customer.customer_name }}
+						</p>
+						<p>{{ existingDuplicate.existing_customer.name }}</p>
+						<p v-if="existingDuplicate.existing_customer.mobile_no">
+							{{ existingDuplicate.existing_customer.mobile_no }}
+						</p>
+						<p v-if="existingDuplicate.existing_customer.email_id">
+							{{ existingDuplicate.existing_customer.email_id }}
+						</p>
+					</div>
+				</div>
 				<!-- Customer Name (Required) -->
-				<div>
+				<div v-if="!requiresSplitCustomerName">
 					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
 						{{ __("Customer Name") }} <span class="text-red-500">*</span>
 					</label>
@@ -21,10 +56,50 @@
 					/>
 				</div>
 
+				<template v-else>
+					<div class="grid grid-cols-2 gap-4">
+						<div>
+							<label class="block text-start text-sm font-medium text-gray-700 mb-2">
+								{{ __("First Name") }} <span class="text-red-500">*</span>
+							</label>
+							<Input
+								v-model="customerData.custom_first_name"
+								type="text"
+								:placeholder="__('First name')"
+								data-testid="customer-first-name"
+								required
+							/>
+						</div>
+						<div>
+							<label class="block text-start text-sm font-medium text-gray-700 mb-2">
+								{{ __("Last Name") }} <span class="text-red-500">*</span>
+							</label>
+							<Input
+								v-model="customerData.custom_last_name"
+								type="text"
+								:placeholder="__('Last name')"
+								data-testid="customer-last-name"
+								required
+							/>
+						</div>
+					</div>
+					<div>
+						<label class="block text-start text-sm font-medium text-gray-700 mb-2">
+							{{ __("Customer Name") }}
+						</label>
+						<Input
+							:model-value="computedCustomerName"
+							type="text"
+							disabled
+							:placeholder="__('Auto-generated from first and last name')"
+						/>
+					</div>
+				</template>
+
 				<!-- Mobile Number with Country Code Selector -->
 				<div>
 					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
-						{{ __("Mobile Number") }}
+						{{ __("Mobile Number") }} <span class="text-red-500">*</span>
 					</label>
 					<div class="flex gap-2">
 						<!-- Country Code Dropdown -->
@@ -35,13 +110,26 @@
 								class="flex items-center gap-1 w-24 ps-2 pe-1 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white hover:bg-gray-50"
 							>
 								<img
+									v-if="currentCountryCode"
 									:src="`https://flagcdn.com/h24/${currentCountryCode}.png`"
 									:alt="currentCountryCode"
 									class="w-6 h-auto rounded-sm"
 									@error="handleFlagError"
 								/>
+								<svg
+									v-else
+									class="w-4 h-4 text-gray-400"
+									fill="currentColor"
+									viewBox="0 0 20 20"
+								>
+									<path
+										fill-rule="evenodd"
+										d="M10 18a8 8 0 100-16 8 8 0 000 16zM4.332 8.027a6.012 6.012 0 011.912-2.706C6.512 5.73 6.974 6 7.5 6A1.5 1.5 0 019 7.5V8a2 2 0 004 0 2 2 0 011.523-1.943A5.977 5.977 0 0116 10c0 .34-.028.675-.083 1H15a2 2 0 00-2 2v2.197A5.973 5.973 0 0110 16v-2a2 2 0 00-2-2 2 2 0 01-2-2 2 2 0 00-1.668-1.973z"
+										clip-rule="evenodd"
+									/>
+								</svg>
 								<span class="flex-1 text-start">{{
-									selectedCountryCode || "+20"
+									selectedCountryCode || "+"
 								}}</span>
 								<svg
 									class="w-4 h-4 text-gray-400"
@@ -114,11 +202,12 @@
 							:placeholder="__('Enter phone number')"
 							class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-start"
 							@input="updateMobileNumber"
+							required
 						/>
 					</div>
 				</div>
 
-				<!-- Email -->
+				<!-- Email (optional; Magento sync uses a default if blank) -->
 				<div>
 					<label class="block text-start text-sm font-medium text-gray-700 mb-2">
 						{{ __("Email") }}
@@ -126,7 +215,20 @@
 					<Input
 						v-model="customerData.email_id"
 						type="email"
-						:placeholder="__('Enter email address')"
+						:placeholder="__('Enter email address (optional)')"
+						:disabled="emailVerificationLocked"
+					/>
+					<EmailVerificationPanel
+						v-if="showEmailVerification"
+						class="mt-2"
+						:customer="verificationCustomerName"
+						:email="customerData.email_id"
+						:saved-email="verificationSavedEmail"
+						:verified="verificationVerified"
+						:verified-email="verificationVerifiedEmail"
+						:pos-profile="posProfile"
+						@verified="handleEmailVerified"
+						@lock-change="(v) => (emailVerificationLocked = v)"
 					/>
 				</div>
 
@@ -245,7 +347,20 @@
 					</div>
 				</div>
 
-				<div class="flex gap-2">
+				<div v-if="createdCustomer" class="flex gap-2">
+					<Button variant="solid" @click="finishCreated">
+						{{ __("Done") }}
+					</Button>
+				</div>
+				<div v-else-if="existingDuplicate" class="flex gap-2">
+					<Button variant="solid" @click="selectExistingCustomer">
+						{{ __("Select this customer") }}
+					</Button>
+					<Button variant="subtle" @click="clearExistingDuplicate">
+						{{ __("Back") }}
+					</Button>
+				</div>
+				<div v-else class="flex gap-2">
 					<Button
 						variant="solid"
 						@click="handleCreate"
@@ -254,7 +369,7 @@
 							updateCustomerResource.loading ||
 							checkingPermission
 						"
-						:disabled="!customerData.customer_name || !hasPermission"
+						:disabled="!canSubmitCustomer"
 					>
 						{{ isEditMode ? __("Save Changes") : __("Create Customer") }}
 					</Button>
@@ -273,6 +388,7 @@
  *
  * Features:
  * - Country code selector with flag icons and search
+ * - Default mobile ISD from POS Profile country (Company.country)
  * - Auto-sets territory based on selected country
  * - Permission checking before allowing creation
  * - Lazy loads countries data when dialog opens (not on app startup)
@@ -280,7 +396,18 @@
 
 import { usePOSPermissions } from "@/composables/usePermissions";
 import { useToast } from "@/composables/useToast";
+import EmailVerificationPanel from "@/components/sale/EmailVerificationPanel.vue";
+import { useBootstrapStore } from "@/stores/bootstrap";
 import { useCountriesStore } from "@/stores/countries";
+import { usePOSSettingsStore } from "@/stores/posSettings";
+import { usePOSShiftStore } from "@/stores/posShift";
+import { useCustomerSearchStore } from "@/stores/customerSearch";
+import { isOffline } from "@/utils/offline/offlineState";
+import {
+	canOfferEmailVerification,
+	fetchFnfMembership,
+	fetchVerificationStatus,
+} from "@/utils/customerVerification";
 import { logger } from "@/utils/logger";
 import { Button, Dialog, Input, createResource } from "frappe-ui";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
@@ -292,8 +419,12 @@ const log = logger.create("CreateCustomerDialog");
 // =============================================================================
 
 const countriesStore = useCountriesStore();
+const posSettingsStore = usePOSSettingsStore();
+const shiftStore = usePOSShiftStore();
+const bootstrapStore = useBootstrapStore();
+const customerSearchStore = useCustomerSearchStore();
 const { canCreateCustomer } = usePOSPermissions();
-const { showSuccess, showError } = useToast();
+const { showSuccess, showError, handleError } = useToast();
 
 // =============================================================================
 // Props & Emits
@@ -306,7 +437,12 @@ const props = defineProps({
 	customer: Object, // Customer object for edit mode
 });
 
-const emit = defineEmits(["update:modelValue", "customer-created", "customer-updated"]);
+const emit = defineEmits([
+	"update:modelValue",
+	"customer-created",
+	"customer-updated",
+	"customer-verified",
+]);
 
 // =============================================================================
 // State
@@ -320,6 +456,17 @@ const showCountryDropdown = ref(false);
 const countrySearchQuery = ref("");
 const dropdownRef = ref(null);
 const countrySearchRef = ref(null);
+/** Ensures POS Profile default ISD is applied only once per dialog open */
+const defaultCountryApplied = ref(false);
+
+/** Email OTP verification (flag: POS Settings > Enable Customer Email Verification) */
+const emailVerificationLocked = ref(false);
+/** Customer just created in this dialog, kept open to offer "Verify email" */
+const createdCustomer = ref(null);
+const existingDuplicate = ref(null);
+const verifiedOverride = ref(null);
+/** Fresh server status fetched when the dialog opens in edit mode (cached objects can be stale) */
+const freshVerification = ref(null);
 
 const customerGroups = ref([]);
 const territories = ref([]);
@@ -334,6 +481,8 @@ const customerData = ref({
 	territory: "",
 	custom_governorate: "",
 	custom_district: "",
+	custom_first_name: "",
+	custom_last_name: "",
 });
 
 // =============================================================================
@@ -345,11 +494,79 @@ const show = computed({
 	set: (val) => emit("update:modelValue", val),
 });
 
-const isEditMode = computed(() => !!props.customer?.name);
+const editingCustomerName = computed(() => {
+	const customer = props.customer;
+	if (!customer) return "";
+	if (typeof customer === "string") return customer;
+	return customer.name || "";
+});
+const isEditMode = computed(() => !!editingCustomerName.value);
+const dialogKey = computed(() =>
+	isEditMode.value ? `edit-${editingCustomerName.value}` : "create"
+);
+const dialogOptions = computed(() => ({
+	title: isEditMode.value ? __("Edit Customer") : __("Create New Customer"),
+	size: "md",
+}));
+
+const FABRICATED_EMAIL_SUFFIX = "@pos.miraaya";
+const hasRealEmail = (email) => {
+	const e = (email || "").trim().toLowerCase();
+	return Boolean(e) && e.includes("@") && !e.endsWith(FABRICATED_EMAIL_SUFFIX);
+};
+
+// F&F members need a verified email for Friends & Family, so the panel is
+// offered to them even when the general POS verification switch is off.
+const fnfMember = ref(false);
+
+// Edit mode only (customer exists); create mode uses the post-create step.
+const showEmailVerification = computed(
+	() =>
+		isEditMode.value &&
+		canOfferEmailVerification({
+			switchEnabled: posSettingsStore.customerEmailVerificationEnabled,
+			fnfMember: fnfMember.value,
+		}) &&
+		hasRealEmail(props.customer?.email_id || customerData.value.email_id)
+);
+const verificationCustomerName = computed(() => editingCustomerName.value);
+const verificationSavedEmail = computed(() => props.customer?.email_id || "");
+const currentVerification = computed(
+	() => verifiedOverride.value || freshVerification.value || props.customer || {}
+);
+const verificationVerified = computed(() =>
+	Boolean(Number(currentVerification.value.custom_email_verified))
+);
+const verificationVerifiedEmail = computed(
+	() => currentVerification.value.custom_verified_email || ""
+);
+
+const requiresSplitCustomerName = computed(() => Boolean(posSettingsStore.miraayaInstalled));
+
+const computedCustomerName = computed(() => {
+	const first = (customerData.value.custom_first_name || "").trim();
+	const last = (customerData.value.custom_last_name || "").trim();
+	return [first, last].filter(Boolean).join(" ");
+});
+
+const hasValidCustomerName = computed(() => {
+	if (requiresSplitCustomerName.value) {
+		return Boolean(computedCustomerName.value);
+	}
+	return Boolean((customerData.value.customer_name || "").trim());
+});
+
+const canSubmitCustomer = computed(
+	() =>
+		hasValidCustomerName.value &&
+		Boolean(phoneNumber.value) &&
+		Boolean(selectedCountryCode.value) &&
+		hasPermission.value
+);
 
 const currentCountryCode = computed(() => {
 	const country = countriesStore.countries.find((c) => c.isd === selectedCountryCode.value);
-	return country?.code.toLowerCase() || "eg";
+	return country?.code.toLowerCase() || "";
 });
 
 const filteredCountries = computed(() => {
@@ -375,12 +592,95 @@ const selectCountry = (country) => {
 	showCountryDropdown.value = false;
 	countrySearchQuery.value = "";
 	updateMobileNumber();
+	// Manual pick only — do not auto-change territory on open/default
+	updateTerritoryFromCountry();
 };
 
+const DEFAULT_MOBILE_ISD = "+20";
+
 const updateMobileNumber = () => {
-	customerData.value.mobile_no = phoneNumber.value
+	if (!phoneNumber.value) {
+		customerData.value.mobile_no = "";
+		return;
+	}
+	// Never persist a leading "-" when ISD is still unresolved
+	customerData.value.mobile_no = selectedCountryCode.value
 		? `${selectedCountryCode.value}-${phoneNumber.value}`
-		: "";
+		: phoneNumber.value;
+};
+
+/** Split a full customer name into first + remaining last-name parts. */
+const splitCustomerName = (fullName) => {
+	const parts = (fullName || "").trim().split(/\s+/).filter(Boolean);
+	if (parts.length === 0) return { first: "", last: "" };
+	if (parts.length === 1) return { first: parts[0], last: "" };
+	return { first: parts[0], last: parts.slice(1).join(" ") };
+};
+
+const firstAndLastFromCustomer = (customer) => {
+	const first = (customer.custom_first_name || customer.first_name || "").trim();
+	const last = (customer.custom_last_name || customer.last_name || "").trim();
+	if (first || last) return { first, last };
+	return splitCustomerName(customer.customer_name);
+};
+
+const applyCustomerToForm = (customer) => {
+	if (!customer || typeof customer !== "object") return;
+
+	if (customer.customer_name) {
+		customerData.value.customer_name = customer.customer_name;
+	} else if (customer.custom_first_name || customer.custom_last_name) {
+		customerData.value.customer_name = [customer.custom_first_name, customer.custom_last_name]
+			.filter(Boolean)
+			.join(" ")
+			.trim();
+	}
+
+	if (customer.email_id != null) {
+		customerData.value.email_id = customer.email_id || "";
+	}
+	if (customer.customer_group) {
+		customerData.value.customer_group = customer.customer_group;
+	} else if (!customerData.value.customer_group) {
+		customerData.value.customer_group = customerGroups.value[0] || "";
+	}
+	if (customer.territory) {
+		customerData.value.territory = customer.territory;
+	} else if (!customerData.value.territory) {
+		customerData.value.territory =
+			territories.value.find((n) => n === "All Territories") || territories.value[0] || "";
+	}
+	if (customer.custom_governorate != null) {
+		customerData.value.custom_governorate = customer.custom_governorate || "";
+	}
+	if (customer.custom_district != null) {
+		customerData.value.custom_district = customer.custom_district || "";
+	}
+
+	const { first, last } = firstAndLastFromCustomer(customer);
+	customerData.value.custom_first_name = first;
+	customerData.value.custom_last_name = last;
+
+	if (customer.mobile_no) {
+		hydrateMobileFields(customer.mobile_no);
+	}
+};
+
+/** Split stored mobile into ISD + national number (supports legacy formats). */
+const hydrateMobileFields = (mobile) => {
+	if (!mobile) {
+		phoneNumber.value = "";
+		return;
+	}
+	customerData.value.mobile_no = mobile;
+	const parsed = countriesStore.parsePhoneNumber(mobile);
+	if (parsed.isd) {
+		selectedCountryCode.value = parsed.isd;
+		phoneNumber.value = parsed.number;
+	} else {
+		// Leave selectedCountryCode for applyDefaultCountryCode (profile / fallback)
+		phoneNumber.value = parsed.number || mobile;
+	}
 };
 
 const handleClickOutside = (event) => {
@@ -390,20 +690,104 @@ const handleClickOutside = (event) => {
 	}
 };
 
-const setCountryFromName = (countryName) => {
-	if (!countryName) {
-		selectedCountryCode.value = "+20";
+/** Resolve ISD from country name, ISO code, or ISD itself. */
+const resolveCountryIsd = (value) => {
+	if (!value) return null;
+
+	const byName = countriesStore.countryNameToISDMap[value];
+	if (byName) return byName;
+
+	const byCode = countriesStore.findCountryByCode(value);
+	if (byCode?.isd) return byCode.isd;
+
+	const byIsd = countriesStore.findCountryByISD(value);
+	if (byIsd?.isd) return byIsd.isd;
+
+	// Value may already be an ISD like "+20"
+	if (String(value).startsWith("+")) return value;
+
+	return null;
+};
+
+/** Set selectedCountryCode from POS Profile country / country code (once). */
+const setCountryFromProfileValue = (profileCountry) => {
+	const isd = resolveCountryIsd(profileCountry);
+	if (!isd) {
+		log.warn(`Country "${profileCountry}" not found in countries list`);
+		return false;
+	}
+	selectedCountryCode.value = isd;
+	log.info(`Set country code to ${isd} for ${profileCountry}`);
+	return true;
+};
+
+/** POS Profile country (Company → country), from shift/bootstrap or API. */
+const resolvePosProfileCountry = async () => {
+	const fromShift = shiftStore.currentProfile?.country;
+	if (fromShift) return fromShift;
+
+	const fromBootstrap = bootstrapStore.getPreloadedPOSProfile()?.country;
+	if (fromBootstrap) return fromBootstrap;
+
+	if (!props.posProfile) return null;
+
+	try {
+		const data = await posProfileResource.reload();
+		return data?.country || null;
+	} catch (err) {
+		log.error("Error loading POS Profile country", err);
+		return null;
+	}
+};
+
+/**
+ * Apply a default mobile ISD once when opening the dialog, unless one is already
+ * set. In create mode that's every time (no code picked yet); in edit mode it's a
+ * gap-filler for customers whose stored mobile_no predates the ISD-prefix format
+ * (no "-" for the customer-prop watcher to split on) — without this, such a
+ * customer can never satisfy canSubmitCustomer and Save Changes stays disabled.
+ * Never re-applies after open / user pick.
+ */
+const applyDefaultCountryCode = async () => {
+	if (defaultCountryApplied.value || selectedCountryCode.value) {
+		defaultCountryApplied.value = true;
 		return;
 	}
 
-	const isd = countriesStore.countryNameToISDMap[countryName];
-	if (isd) {
-		selectedCountryCode.value = isd;
-		log.info(`Set country code to ${isd} for ${countryName}`);
-	} else {
-		log.warn(`Country "${countryName}" not found`);
-		selectedCountryCode.value = "+20";
+	await countriesStore.loadCountries();
+
+	// Re-parse stored mobile now that ISD list is available (e.g. "+2010..." without "-")
+	if (!selectedCountryCode.value && customerData.value.mobile_no) {
+		hydrateMobileFields(customerData.value.mobile_no);
 	}
+
+	// Bail if cashier already picked a code while countries were loading, or parse found ISD
+	if (selectedCountryCode.value) {
+		defaultCountryApplied.value = true;
+		if (phoneNumber.value) updateMobileNumber();
+		return;
+	}
+
+	const profileCountry = await resolvePosProfileCountry();
+
+	if (selectedCountryCode.value) {
+		defaultCountryApplied.value = true;
+		if (phoneNumber.value) updateMobileNumber();
+		return;
+	}
+
+	const applied = setCountryFromProfileValue(profileCountry);
+	if (!applied && !selectedCountryCode.value) {
+		const fallback =
+			resolveCountryIsd(DEFAULT_MOBILE_ISD) ||
+			countriesStore.countries[0]?.isd ||
+			DEFAULT_MOBILE_ISD;
+		selectedCountryCode.value = fallback;
+		log.warn(`Falling back to default ISD ${fallback}`);
+	}
+	defaultCountryApplied.value = true;
+	// Legacy edit: keep Save enabled and normalize mobile once ISD is resolved
+	if (phoneNumber.value) updateMobileNumber();
 };
 
 /** Auto-set territory based on selected country (exact or fuzzy match) */
@@ -440,49 +824,97 @@ const updateTerritoryFromCountry = () => {
 const createCustomerResource = createResource({
 	url: "pos_next.api.customers.create_customer",
 	makeParams: () => ({
-		customer_name: customerData.value.customer_name,
+		customer_name: requiresSplitCustomerName.value
+			? computedCustomerName.value
+			: customerData.value.customer_name,
 		mobile_no: customerData.value.mobile_no || "",
 		email_id: customerData.value.email_id || "",
 		customer_group: customerData.value.customer_group || "",
 		territory: customerData.value.territory || "",
 		custom_governorate: customerData.value.custom_governorate || "",
 		custom_district: customerData.value.custom_district || "",
+		custom_first_name: customerData.value.custom_first_name || "",
+		custom_last_name: customerData.value.custom_last_name || "",
+		custom_is_publish: 1,
 		pos_profile: props.posProfile,
 	}),
-	onSuccess: (data) => {
+	onSuccess: async (data) => {
+		if (data?.already_exists && data.existing_customer) {
+			const existingName = data.existing_customer.name;
+			// Editing this same customer is not a duplicate of itself.
+			if (isEditMode.value && existingName && existingName === editingCustomerName.value) {
+				return;
+			}
+			existingDuplicate.value = {
+				message: data.message || __("A customer with this email already exists."),
+				existing_customer: data.existing_customer,
+			};
+			return;
+		}
 		showSuccess(__("Customer {0} created successfully", [data.customer_name]));
+		if (data.external_sync_error) {
+			// Saved in POS, but Magento rejected it (e.g. email already registered
+			// with a different mobile number): show Magento's own message.
+			showError(data.external_sync_error);
+		}
+		// Offer "Verify email now" when enabled (or the new customer is an F&F
+		// member, who needs a verified email), online and a real email was entered
+		const realEmail =
+			hasRealEmail(data.email_id || customerData.value.email_id) && !isOffline();
+		const offerVerification =
+			realEmail &&
+			(posSettingsStore.customerEmailVerificationEnabled ||
+				(await fetchFnfMembership(data.name, props.posProfile)));
+		if (offerVerification) {
+			createdCustomer.value = {
+				...data,
+				email_id: data.email_id || customerData.value.email_id,
+			};
+			return;
+		}
 		emit("customer-created", data);
 		show.value = false;
 	},
 	onError: (error) => {
 		log.error("Error creating customer", error);
-		showError(error.message || __("Failed to create customer"));
+		// Prefer _server_messages / messages from frappe.throw (e.g. Magento rejection).
+		handleError(error, __("Failed to create customer"));
 	},
 });
 
 const updateCustomerResource = createResource({
-	url: "frappe.client.set_value",
+	url: "pos_next.api.customers.update_customer",
 	makeParams: () => ({
-		doctype: "Customer",
-		name: props.customer?.name,
-		fieldname: {
-			customer_name: customerData.value.customer_name,
-			customer_group: customerData.value.customer_group || "",
-			territory: customerData.value.territory || "",
-			mobile_no: customerData.value.mobile_no || "",
-			email_id: customerData.value.email_id || "",
-			custom_governorate: customerData.value.custom_governorate || "",
-			custom_district: customerData.value.custom_district || "",
-		},
+		name: editingCustomerName.value,
+		customer_name: requiresSplitCustomerName.value
+			? computedCustomerName.value
+			: customerData.value.customer_name,
+		customer_group: customerData.value.customer_group || "",
+		territory: customerData.value.territory || "",
+		mobile_no: customerData.value.mobile_no || "",
+		email_id: customerData.value.email_id || "",
+		custom_governorate: customerData.value.custom_governorate || "",
+		custom_district: customerData.value.custom_district || "",
+		...(requiresSplitCustomerName.value
+			? {
+					custom_first_name: customerData.value.custom_first_name || "",
+					custom_last_name: customerData.value.custom_last_name || "",
+			  }
+			: {}),
+		pos_profile: props.posProfile,
 	}),
 	onSuccess: (data) => {
 		showSuccess(__("Customer {0} updated successfully", [data.customer_name]));
+		if (data.external_sync_error) {
+			// Saved in POS, but Magento rejected or could not apply the change.
+			showError(data.external_sync_error);
+		}
 		emit("customer-updated", data);
 		show.value = false;
 	},
 	onError: (error) => {
 		log.error("Error updating customer", error);
-		showError(error.message || __("Failed to update customer"));
+		handleError(error, __("Failed to update customer"));
 	},
 });
 
@@ -535,7 +967,7 @@ const territoriesResource = createListResource("Territory", (names) => {
 	}
 });
 
-const governoratesResource = createListResource("Governorate", (names) => {
+const governoratesResource = createListResource("POS Governorate", (names) => {
 	governorates.value = names;
 });
 
@@ -543,7 +975,7 @@ const customerLocationResource = createResource({
 	url: "frappe.client.get_value",
 	makeParams: () => ({
 		doctype: "Customer",
-		filters: { name: props.customer?.name },
+		filters: { name: editingCustomerName.value },
 		fieldname: ["custom_governorate", "custom_district"],
 	}),
 	auto: false,
@@ -554,10 +986,24 @@ const customerLocationResource = createResource({
 	onError: (err) => log.error("Error loading customer location", err),
 });
 
+const customerDetailsResource = createResource({
+	url: "pos_next.api.customers.get_customer_details",
+	makeParams: () => ({ customer: editingCustomerName.value }),
+	auto: false,
+	onSuccess: (data) => {
+		if (!data) return;
+		if (editingCustomerName.value && data.name && data.name !== editingCustomerName.value) {
+			return;
+		}
+		applyCustomerToForm(data);
+	},
+	onError: (err) => log.error("Error loading customer details", err),
+});
+
 const districtsResource = createResource({
 	url: "frappe.client.get_list",
 	makeParams: () => ({
-		doctype: "District",
+		doctype: "POS District",
 		fields: ["name", "district"],
 		filters: { governorate: customerData.value.custom_governorate },
 		limit_page_length: 0,
@@ -585,21 +1031,31 @@ const posProfileResource = createResource({
 		fieldname: ["country"],
 	}),
 	auto: false,
-	onSuccess: (data) => setCountryFromName(data?.country || "Egypt"),
-	onError: (err) => {
-		log.error("Error loading POS Profile", err);
-		selectedCountryCode.value = "+20";
-	},
+	onError: (err) => log.error("Error loading POS Profile", err),
 });
 
 // =============================================================================
 // Dialog Lifecycle
 // =============================================================================
 
-const loadDialogData = async () => {
-	// Lazy load countries (non-blocking)
-	countriesStore.loadCountries();
+const loadFreshVerification = async () => {
+	freshVerification.value = null;
+	fnfMember.value = false;
+	if (!props.customer?.name || isOffline()) return;
+	const name = props.customer.name;
+	const [status, member] = await Promise.all([
+		fetchVerificationStatus(name),
+		posSettingsStore.customerEmailVerificationEnabled
+			? Promise.resolve(false)
+			: fetchFnfMembership(name, props.posProfile),
+	]);
+	if (props.customer?.name !== name) return;
+	if (status) freshVerification.value = status;
+	fnfMember.value = member;
+};
 
+const loadDialogData = async () => {
+	loadFreshVerification();
 	await sellingSettingsResource.reload();
 
 	if (!isEditMode.value) {
@@ -607,26 +1063,23 @@ const loadDialogData = async () => {
 		customerData.value.territory = "";
 	}
 
-	// Load form options
+	// Load form options + countries (awaited so ISD map is ready before default)
 	await Promise.all([
+		countriesStore.loadCountries(),
 		territoriesResource.reload(),
 		customerGroupsResource.reload(),
 		governoratesResource.reload(),
 	]);
-	if (isEditMode.value && props.customer?.name) {
-		await customerLocationResource.reload();
+	if (isEditMode.value && editingCustomerName.value) {
+		await Promise.all([customerDetailsResource.reload(), customerLocationResource.reload()]);
 	}
 	if (customerData.value.custom_governorate) {
 		await districtsResource.reload();
 	}
 	checkPermissions();
 
-	// Set country from POS Profile
-	if (props.posProfile) {
-		await posProfileResource.reload();
-	} else {
-		selectedCountryCode.value = "+20";
-	}
+	// Default mobile country code from POS Profile → Company country
+	await applyDefaultCountryCode();
 };
 
 const checkPermissions = async () => {
@@ -641,15 +1094,75 @@ const checkPermissions = async () => {
 	}
 };
 
+const handleEmailVerified = async ({ verified_email }) => {
+	const patch = {
+		custom_email_verified: 1,
+		custom_verified_email: verified_email,
+		custom_email_verified_on: new Date().toISOString(),
+	};
+	verifiedOverride.value = patch;
+	// Let the parent refresh the (stale) edit/selected-cart customer objects
+	if (props.customer?.name) emit("customer-verified", { name: props.customer.name, patch });
+	const base = createdCustomer.value || props.customer;
+	if (createdCustomer.value) createdCustomer.value = { ...createdCustomer.value, ...patch };
+	// Keep the POS customer cache in sync without closing/selecting anything
+	try {
+		if (base?.name) await customerSearchStore.addCustomerToCache({ ...base, ...patch });
+	} catch (err) {
+		log.error("Failed to refresh customer cache after verification", err);
+	}
+};
+
+const finishCreated = () => {
+	const created = createdCustomer.value;
+	if (
+		emailVerificationLocked.value &&
+		!window.confirm(__("Email verification is in progress. Leave without verifying?"))
+	) {
+		return;
+	}
+	createdCustomer.value = null;
+	emailVerificationLocked.value = false;
+	if (created) emit("customer-created", created);
+	show.value = false;
+};
+
 const handleCreate = async () => {
-	if (!customerData.value.customer_name) {
+	if (
+		emailVerificationLocked.value &&
+		!window.confirm(__("Email verification is in progress. Leave without verifying?"))
+	) {
+		return;
+	}
+	if (requiresSplitCustomerName.value) {
+		if (!customerData.value.custom_first_name?.trim()) {
+			return showError(__("First Name is required"));
+		}
+		if (!customerData.value.custom_last_name?.trim()) {
+			return showError(__("Last Name is required"));
+		}
+	} else if (!customerData.value.customer_name) {
 		return showError(__("Customer Name is required"));
 	}
-	if (isEditMode.value) {
-		await updateCustomerResource.submit();
-	} else {
-		await createCustomerResource.submit();
+	if (!phoneNumber.value) {
+		return showError(__("Mobile Number is required"));
 	}
+	if (isEditMode.value && editingCustomerName.value) {
+		await updateCustomerResource.submit();
+		return;
+	}
+	await createCustomerResource.submit();
+};
+
+const selectExistingCustomer = () => {
+	const customer = existingDuplicate.value?.existing_customer;
+	existingDuplicate.value = null;
+	if (customer) emit("customer-created", customer);
+	show.value = false;
+};
+
+const clearExistingDuplicate = () => {
+	existingDuplicate.value = null;
 };
 
 const resetForm = () => {
@@ -664,10 +1177,14 @@ const resetForm = () => {
 		),
 		custom_governorate: "",
 		custom_district: "",
+		custom_first_name: "",
+		custom_last_name: "",
 	});
 	districts.value = [];
 	selectedCountryCode.value = "";
 	phoneNumber.value = "";
+	defaultCountryApplied.value = false;
+	existingDuplicate.value = null;
 };
 
 // =============================================================================
@@ -683,30 +1200,8 @@ watch(
 watch(
 	() => props.customer,
 	(customer) => {
-		if (customer?.name) {
-			customerData.value.customer_name = customer.customer_name || "";
-			customerData.value.email_id = customer.email_id || "";
-			customerData.value.customer_group =
-				customer.customer_group || customerGroups.value[0] || "";
-			customerData.value.territory =
-				customer.territory ||
-				territories.value.find((n) => n === "All Territories") ||
-				territories.value[0] ||
-				"";
-
-			customerData.value.custom_governorate = customer.custom_governorate || "";
-			customerData.value.custom_district = customer.custom_district || "";
-			// Handle mobile_no with country code
-			if (customer.mobile_no) {
-				customerData.value.mobile_no = customer.mobile_no;
-				if (customer.mobile_no.includes("-")) {
-					const [code, ...rest] = customer.mobile_no.split("-");
-					selectedCountryCode.value = code;
-					phoneNumber.value = rest.join("-");
-				} else {
-					phoneNumber.value = customer.mobile_no;
-				}
-			}
+		if (customer && typeof customer === "object" && customer.name) {
+			applyCustomerToForm(customer);
 		}
 	},
 	{ immediate: true }
@@ -715,19 +1210,14 @@ watch(
 watch(
 	() => customerData.value.mobile_no,
 	(value) => {
-		if (value?.includes("-")) {
-			const [code, ...rest] = value.split("-");
-			selectedCountryCode.value = code;
-			phoneNumber.value = rest.join("-");
-		}
+		// Only sync from stored mobile when editing; never overwrite create-mode default
+		if (!isEditMode.value || !value) return;
+		const parsed = countriesStore.parsePhoneNumber(value);
+		if (!parsed.isd) return;
+		selectedCountryCode.value = parsed.isd;
+		phoneNumber.value = parsed.number;
 	}
 );
-
-watch(selectedCountryCode, async (newVal, oldVal) => {
-	if (!oldVal) return;
-	await nextTick();
-	updateTerritoryFromCountry();
-});
 
 watch(
 	() => customerData.value.custom_governorate,
@@ -751,7 +1241,17 @@ watch(showCountryDropdown, async (isOpen) => {
 watch(
 	() => props.modelValue,
 	async (isOpen) => {
-		isOpen ? await loadDialogData() : resetForm();
+		if (isOpen) return await loadDialogData();
+		// Closed (X / Esc) while the post-create verify step was open: still hand the customer over
+		if (createdCustomer.value) {
+			const created = createdCustomer.value;
+			createdCustomer.value = null;
+			emit("customer-created", created);
+		}
+		emailVerificationLocked.value = false;
+		verifiedOverride.value = null;
+		freshVerification.value = null;
+		resetForm();
 	}
 );
 

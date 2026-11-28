@@ -35,7 +35,7 @@ from erpnext.stock.doctype.stock_entry.test_stock_entry import make_stock_entry
 from frappe.tests.utils import FrappeTestCase
 from frappe.utils import add_days, flt, nowdate
 
-import pos_next  # noqa: F401 — ensure app hooks load.
+import pos_next
 from pos_next.api.invoices import apply_offers, submit_invoice, update_invoice
 
 ITEM_A = "_PNXT_TEST_ITEM_A"  # Standard Selling: 50

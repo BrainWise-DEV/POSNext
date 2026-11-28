@@ -1,27 +1,53 @@
+import { promoApi } from "@/utils/promoApi";
 import { createResource } from "frappe-ui";
 import { computed, ref, toRaw } from "vue";
 import { isOffline, getCachedItem } from "@/utils/offline";
 import { useSerialNumberStore } from "@/stores/serialNumber";
-import { CoalescingMutex } from "@/utils/mutex";
+import { shiftState } from "@/composables/useShift";
+import { SKIPPED, SkipIfBusyMutex } from "@/utils/mutex";
+import { call } from "@/utils/apiWrapper";
 import { logger } from "@/utils/logger";
 import { roundCurrency } from "@/utils/currency";
+import { fnfLockedDiscountAmount } from "@/utils/friendsAndFamily";
+import { preCouponLineDiscount } from "@/utils/couponLines";
+import { createSubmitRequestTracker, isSubmitTimeoutError } from "@/utils/submitRequestId";
+import { classifyCheckoutError } from "@/utils/checkoutErrors";
+import { retryOnDeadlock } from "@/utils/retryOnDeadlock";
+import { recoverTimedOutSubmit } from "@/utils/submitTimeoutRecovery";
 
 const log = logger.create("Invoice");
 
-// Shared mutex for invoice submission across all useInvoice instances
-// This prevents duplicate invoice creation from rapid clicks or concurrent submissions
-const submitMutex = new CoalescingMutex({
+// Shared gate for invoice submission across all useInvoice instances.
+// A submit that arrives while another is in flight is dropped (returns null), never
+// queued: queuing would re-run it after the first finishes, against an already
+// cleared cart.
+const submitGate = new SkipIfBusyMutex({
 	timeout: 60000,
 	name: "InvoiceSubmit",
 });
+
+function logDeadlockRetry(attempt, error) {
+	const { kind } = classifyCheckoutError(error);
+	log.warn(`Database ${kind} during checkout (attempt ${attempt}); retrying automatically`, {
+		kind,
+	});
+}
+
+// One idempotency key per unchanged checkout payload, shared by all instances.
+const submitRequests = createSubmitRequestTracker();
 
 export function useInvoice() {
 	// Serial Number Store for returning serials when items are removed
 	const serialStore = useSerialNumberStore();
 
+	function resolveCustomerName() {
+		return customer.value?.name || customer.value || defaultCustomerName.value || null;
+	}
+
 	// State
 	const invoiceItems = ref([]);
 	const customer = ref(null);
+	const defaultCustomerName = ref(null);
 	const payments = ref([]);
 	const salesTeam = ref([]); // Sales team for Sales Invoice
 	const posProfile = ref(null);
@@ -82,7 +108,7 @@ export function useInvoice() {
 	});
 
 	const applyOffersResource = createResource({
-		url: "pos_next.api.invoices.apply_offers",
+		url: promoApi.applyOffers(),
 		makeParams({ invoice_data, selected_offers }) {
 			const params = {
 				invoice_data: JSON.stringify(invoice_data),
@@ -119,7 +145,7 @@ export function useInvoice() {
 				const itemDetails = await getItemDetailsResource.submit({
 					item_code: item.item_code,
 					pos_profile: posProfile.value,
-					customer: customer.value?.name || customer.value,
+					customer: resolveCustomerName(),
 					qty,
 					uom,
 				});
@@ -218,7 +244,7 @@ export function useInvoice() {
 	function addItem(item, quantity = 1) {
 		const itemUom = item.uom || item.stock_uom;
 		const existingItem = invoiceItems.value.find(
-			(i) => i.item_code === item.item_code && i.uom === itemUom
+			(i) => !i.is_free_item && i.item_code === item.item_code && i.uom === itemUom
 		);
 
 		if (existingItem) {
@@ -276,6 +302,7 @@ export function useInvoice() {
 				has_batch_no: item.has_batch_no || 0,
 				has_serial_no: item.has_serial_no || 0,
 				batch_no: item.batch_no,
+				batch_expiry_date: item.batch_expiry_date, // Cart meta row only, not sent to the server
 				serial_no: item.serial_no,
 				item_uoms: item.item_uoms || [], // Available UOMs for this item
 				// Add item_group and brand for offer eligibility checking
@@ -284,10 +311,15 @@ export function useInvoice() {
 				// Resolved barcode flag - prevents editing qty/uom/rate for weighted/priced barcodes
 				is_resolved_barcode: item.is_resolved_barcode || false,
 				// Stock validation fields — needed for qty increase checks in cart
-				actual_qty: item.actual_qty ?? 0,
+				// Prefer Bin qty (original_stock). Grid actual_qty is remaining after cart reserve.
+				actual_qty: item.original_stock ?? item.actual_qty ?? 0,
+				original_stock: item.original_stock ?? item.actual_qty ?? 0,
 				is_stock_item: item.is_stock_item ?? 1,
 				is_bundle: item.is_bundle || false,
 				allow_negative_stock: item.allow_negative_stock || 0,
+				// Optional item-level Sales Person (commission attribution)
+				sales_person: item.sales_person || null,
+				sales_person_name: item.sales_person_name || null,
 			};
 			invoiceItems.value.push(newItem);
 			// Recalculate the newly added item to apply taxes
@@ -360,9 +392,11 @@ export function useInvoice() {
 	function updateItemQuantity(itemCode, quantity, uom = null) {
 		let item;
 		if (uom) {
-			item = invoiceItems.value.find((i) => i.item_code === itemCode && i.uom === uom);
+			item = invoiceItems.value.find(
+				(i) => i.item_code === itemCode && i.uom === uom && !i.is_free_item
+			);
 		} else {
-			item = invoiceItems.value.find((i) => i.item_code === itemCode);
+			item = invoiceItems.value.find((i) => i.item_code === itemCode && !i.is_free_item);
 		}
 
 		if (item) {
@@ -654,13 +688,33 @@ export function useInvoice() {
 		const baseAmount = roundCurrency(item.quantity * roundedRate);
 
 		// Calculate discount from either percentage or fixed amount
+		// A fixed-amount discount also gets a derived percentage (for display and
+		// the payload). Remember that the percentage was derived, so the next
+		// recalc (e.g. a qty change) keeps the fixed amount instead of re-reading
+		// the stale percentage as a real percentage discount. Any caller that
+		// writes a different percentage, or clears the amount, leaves amount mode.
+		const amountMode =
+			item.discount_mode === "amount" &&
+			item.discount_amount > 0 &&
+			(!(item.discount_percentage > 0) ||
+				item.discount_percentage === item._derived_discount_percentage);
 		let discountAmount = 0;
-		if (item.discount_percentage > 0) {
+		// Friends & Family (PN-130): the server's line amount is authoritative —
+		// a capped line carries an unrounded %, so recomputing would drift.
+		const fnfAmount = isManuallyEdited ? null : fnfLockedDiscountAmount(item, baseAmount);
+		if (fnfAmount !== null) {
+			discountAmount = fnfAmount;
+		} else if (!amountMode && item.discount_percentage > 0) {
 			discountAmount = roundCurrency((baseAmount * item.discount_percentage) / 100);
+			item.discount_mode = "percentage";
 		} else if (item.discount_amount > 0) {
 			discountAmount = roundCurrency(item.discount_amount);
 			// Sync percentage when amount is provided directly
 			item.discount_percentage = baseAmount > 0 ? (discountAmount / baseAmount) * 100 : 0;
+			item.discount_mode = "amount";
+			item._derived_discount_percentage = item.discount_percentage;
+		} else {
+			item.discount_mode = null;
 		}
 		item.discount_amount = discountAmount;
 
@@ -731,6 +785,10 @@ export function useInvoice() {
 	 * @returns {Array} Items formatted for ERPNext Sales Invoice
 	 */
 	function formatItemsForSubmission(items) {
+		const isAppliedCouponLine = (item) =>
+			item.discount_source === "coupon" &&
+			item.coupon_code &&
+			item.coupon_code === couponCode.value;
 		const mapRow = (item) => ({
 			item_code: item.item_code,
 			item_name: item.item_name,
@@ -752,6 +810,15 @@ export function useInvoice() {
 			is_rate_manually_edited: item.is_rate_manually_edited || 0,
 			original_rate: item.original_rate || null,
 			is_free_item: item.is_free_item || 0,
+			// Lines discounted by a line-level coupon; posnext_promotions re-checks them on validate.
+			posnext_coupon_code: isAppliedCouponLine(item) ? item.coupon_code : null,
+			posnext_coupon_discount: isAppliedCouponLine(item)
+				? Math.max(
+						roundCurrency((item.discount_amount || 0) - preCouponLineDiscount(item)),
+						0
+				  )
+				: 0,
+			sales_person: item.sales_person || null,
 		});
 
 		const out = [];
@@ -785,6 +852,8 @@ export function useInvoice() {
 						is_rate_manually_edited: 0,
 						original_rate: null,
 						is_free_item: 1,
+						// Inherit parent line SP so free rows never block coverage
+						sales_person: item.sales_person || null,
 					});
 				}
 			}
@@ -935,7 +1004,7 @@ export function useInvoice() {
 			doctype: targetDoctype,
 			pos_profile: posProfile.value,
 			posa_pos_opening_shift: posOpeningShift.value,
-			customer: customer.value?.name || customer.value,
+			customer: resolveCustomerName(),
 			items: formatItemsForSubmission(rawItems),
 			payments: invoicePayments,
 			discount_amount: additionalDiscount.value || 0,
@@ -975,160 +1044,250 @@ export function useInvoice() {
 		 * @param {string|null} deliveryDate - Delivery date for Sales Orders
 		 * @param {number} writeOffAmount - Amount to write off (small remaining balances)
 		 */
-		return await submitMutex.withLock(async () => {
-			// Check if already submitting (belt and suspenders with mutex)
-			if (isSubmitting.value) {
-				log.warn("Invoice submission already in progress, skipping duplicate request");
-				return null;
-			}
-
-			isSubmitting.value = true;
-
-			try {
-				// Step 1: Create invoice draft
-				// Use toRaw() to ensure we get current, non-reactive values (prevents stale cached quantities)
-				const rawItems = toRaw(invoiceItems.value);
-				const rawPayments = toRaw(payments.value);
-				const rawSalesTeam = toRaw(salesTeam.value);
-				const { invoicePayments, redeemedCustomerCredit, customerCreditDict } =
-					buildCustomerCreditPayload(rawPayments);
-
-				const invoiceData = {
-					doctype: targetDoctype,
-					pos_profile: posProfile.value,
-					posa_pos_opening_shift: posOpeningShift.value,
-					customer: customer.value?.name || customer.value,
-					items: formatItemsForSubmission(rawItems),
-					payments: invoicePayments,
-					discount_amount: additionalDiscount.value || 0,
-					coupon_code: couponCode.value,
-					is_pos: 1,
-					update_stock: 1, // Critical: Ensures stock is updated
-				};
-
-				// "Pay on Receivable Account": route the invoice's debit_to to a chosen AR
-				if (receivableAccount) {
-					invoiceData.receivable_account = receivableAccount;
+		// Set once the cashier has been told this attempt timed out: the request may still
+		// finish later, and must then leave the (possibly new) cart and guard alone.
+		const attempt = { abandoned: false };
+		return await submitGate
+			.run(async () => {
+				// Check if already submitting (belt and suspenders with mutex)
+				if (isSubmitting.value) {
+					log.warn("Invoice submission already in progress, skipping duplicate request");
+					return null;
 				}
 
-				if (targetDoctype === "Sales Order" && deliveryDate) {
-					invoiceData.delivery_date = deliveryDate;
-				}
-
-				// Add sales_team if provided
-				if (rawSalesTeam && rawSalesTeam.length > 0) {
-					invoiceData.sales_team = rawSalesTeam.map((member) => ({
-						sales_person: member.sales_person,
-						allocated_percentage: member.allocated_percentage || 0,
-					}));
-				}
-
-				const draftInvoice = await updateInvoiceResource.submit({
-					data: invoiceData,
-				});
-
-				let invoiceDoc = draftInvoice;
-				if (draftInvoice && typeof draftInvoice === "object" && "data" in draftInvoice) {
-					invoiceDoc = draftInvoice.data;
-				}
-
-				if (!invoiceDoc || !invoiceDoc.name) {
-					throw new Error("Failed to create draft invoice - no invoice name returned");
-				}
-
-				const submitData = {
-					change_amount: remainingAmount.value < 0 ? Math.abs(remainingAmount.value) : 0,
-					write_off_amount: writeOffAmount || 0,
-				};
-
-				if (redeemedCustomerCredit > 0 && customerCreditDict.length > 0) {
-					submitData.redeemed_customer_credit = redeemedCustomerCredit;
-					submitData.customer_credit_dict = customerCreditDict;
-				}
-				if (isCreditSale && invoicePayments.length === 0) {
-					submitData.is_credit_sale = 1;
-				}
+				isSubmitting.value = true;
 
 				try {
-					const result = await submitInvoiceResource.submit({
-						invoice: invoiceDoc,
-						data: submitData,
+					// Step 1: Create invoice draft
+					// Use toRaw() to ensure we get current, non-reactive values (prevents stale cached quantities)
+					const rawItems = toRaw(invoiceItems.value);
+					const rawPayments = toRaw(payments.value);
+					const rawSalesTeam = toRaw(salesTeam.value);
+					const { invoicePayments, redeemedCustomerCredit, customerCreditDict } =
+						buildCustomerCreditPayload(rawPayments);
+
+					const invoiceData = {
+						doctype: targetDoctype,
+						pos_profile: posProfile.value,
+						posa_pos_opening_shift: posOpeningShift.value,
+						customer: resolveCustomerName(),
+						items: formatItemsForSubmission(rawItems),
+						payments: invoicePayments,
+						discount_amount: additionalDiscount.value || 0,
+						coupon_code: couponCode.value,
+						is_pos: 1,
+						update_stock: 1, // Critical: Ensures stock is updated
+					};
+
+					// "Pay on Receivable Account": route the invoice's debit_to to a chosen AR
+					if (receivableAccount) {
+						invoiceData.receivable_account = receivableAccount;
+					}
+
+					if (targetDoctype === "Sales Order" && deliveryDate) {
+						invoiceData.delivery_date = deliveryDate;
+					}
+
+					// Add sales_team if provided
+					if (rawSalesTeam && rawSalesTeam.length > 0) {
+						invoiceData.sales_team = rawSalesTeam.map((member) => ({
+							sales_person: member.sales_person,
+							allocated_percentage: member.allocated_percentage || 0,
+						}));
+					}
+
+					const submitData = {
+						change_amount:
+							remainingAmount.value < 0 ? Math.abs(remainingAmount.value) : 0,
+						write_off_amount: writeOffAmount || 0,
+						// Pass cashier invoice-level team explicitly — never rely on the
+						// draft's rebuilt sales_team (item-level SPs aggregated in).
+						sales_team:
+							rawSalesTeam && rawSalesTeam.length > 0
+								? rawSalesTeam.map((member) => ({
+										sales_person: member.sales_person,
+										allocated_percentage: member.allocated_percentage || 0,
+								  }))
+								: [],
+					};
+
+					if (redeemedCustomerCredit > 0 && customerCreditDict.length > 0) {
+						submitData.redeemed_customer_credit = redeemedCustomerCredit;
+						submitData.customer_credit_dict = customerCreditDict;
+					}
+					if (isCreditSale && invoicePayments.length === 0) {
+						submitData.is_credit_sale = 1;
+					}
+
+					// Same payload => same key, so a retry after a client timeout is
+					// de-duplicated by the server instead of creating a second invoice.
+					submitData.client_request_id = submitRequests.idFor({
+						invoiceData,
+						submitData: { ...submitData, client_request_id: undefined },
 					});
 
-					// Check if resource has error (frappe-ui pattern)
-					if (submitInvoiceResource.error) {
-						const resourceError = submitInvoiceResource.error;
-						console.error("Submit invoice resource error:", resourceError);
-
-						// Create a detailed error object
-						const detailedError = new Error(
-							resourceError.message || "Invoice submission failed"
-						);
-						detailedError.exc_type = resourceError.exc_type;
-						detailedError._server_messages = resourceError._server_messages;
-						detailedError.httpStatus = resourceError.httpStatus;
-						detailedError.messages = resourceError.messages;
-
-						throw detailedError;
-					}
-
-					resetInvoice();
-					return result;
-				} catch (error) {
-					// Preserve original error object with all its properties
-					console.error("Submit invoice error:", error);
-					console.log("submitInvoiceResource.error:", submitInvoiceResource.error);
-
-					// If resource has error data, extract and attach it
-					if (submitInvoiceResource.error) {
-						const resourceError = submitInvoiceResource.error;
-						console.log("Resource error details:", {
-							exc_type: resourceError.exc_type,
-							_server_messages: resourceError._server_messages,
-							httpStatus: resourceError.httpStatus,
-							messages: resourceError.messages,
-							messagesContent: JSON.stringify(resourceError.messages),
-							data: resourceError.data,
-							exception: resourceError.exception,
-							keys: Object.keys(resourceError),
+					// A retry of the SAME unchanged cart (same key) reuses the draft the first attempt
+					// created: no second draft, no second invoice-number lock. If that draft has gone,
+					// or the sale was already completed, the server copes (see submit_invoice).
+					let invoiceDoc = submitRequests.draft();
+					if (invoiceDoc) {
+						log.info("Reusing the draft of the previous attempt", {
+							name: invoiceDoc.name,
 						});
+					} else {
+						const draftInvoice = await retryOnDeadlock(
+							() => updateInvoiceResource.submit({ data: invoiceData }),
+							{ onRetry: logDeadlockRetry }
+						);
 
-						// The messages array likely contains the detailed error info
-						if (resourceError.messages && resourceError.messages.length > 0) {
-							console.log("First message:", resourceError.messages[0]);
+						invoiceDoc = draftInvoice;
+						if (
+							draftInvoice &&
+							typeof draftInvoice === "object" &&
+							"data" in draftInvoice
+						) {
+							invoiceDoc = draftInvoice.data;
 						}
 
-						// Attach all resource error properties to the error
-						error.exc_type = resourceError.exc_type || error.exc_type;
-						error._server_messages = resourceError._server_messages;
-						error.httpStatus = resourceError.httpStatus;
-						error.messages = resourceError.messages;
-						error.exception = resourceError.exception;
-						error.data = resourceError.data;
+						if (!invoiceDoc || !invoiceDoc.name) {
+							throw new Error(
+								"Failed to create draft invoice - no invoice name returned"
+							);
+						}
 
-						console.log("After attaching, error.messages:", error.messages);
+						submitRequests.rememberDraft(invoiceDoc);
 					}
 
+					try {
+						const result = await retryOnDeadlock(
+							() =>
+								submitInvoiceResource.submit({
+									invoice: invoiceDoc,
+									data: submitData,
+								}),
+							{ onRetry: logDeadlockRetry }
+						);
+
+						// Check if resource has error (frappe-ui pattern)
+						if (submitInvoiceResource.error) {
+							const resourceError = submitInvoiceResource.error;
+							console.error("Submit invoice resource error:", resourceError);
+
+							// Create a detailed error object
+							const detailedError = new Error(
+								resourceError.message || "Invoice submission failed"
+							);
+							detailedError.exc_type = resourceError.exc_type;
+							detailedError._server_messages = resourceError._server_messages;
+							detailedError.httpStatus = resourceError.httpStatus;
+							detailedError.messages = resourceError.messages;
+
+							throw detailedError;
+						}
+
+						if (!attempt.abandoned) {
+							submitRequests.reset();
+							resetInvoice();
+						}
+						return result;
+					} catch (error) {
+						// Preserve original error object with all its properties
+						console.error("Submit invoice error:", error);
+						console.log("submitInvoiceResource.error:", submitInvoiceResource.error);
+
+						// If resource has error data, extract and attach it
+						if (submitInvoiceResource.error) {
+							const resourceError = submitInvoiceResource.error;
+							console.log("Resource error details:", {
+								exc_type: resourceError.exc_type,
+								_server_messages: resourceError._server_messages,
+								httpStatus: resourceError.httpStatus,
+								messages: resourceError.messages,
+								messagesContent: JSON.stringify(resourceError.messages),
+								data: resourceError.data,
+								exception: resourceError.exception,
+								keys: Object.keys(resourceError),
+							});
+
+							// The messages array likely contains the detailed error info
+							if (resourceError.messages && resourceError.messages.length > 0) {
+								console.log("First message:", resourceError.messages[0]);
+							}
+
+							// Attach all resource error properties to the error
+							error.exc_type = resourceError.exc_type || error.exc_type;
+							error._server_messages = resourceError._server_messages;
+							error.httpStatus = resourceError.httpStatus;
+							error.messages = resourceError.messages;
+							error.exception = resourceError.exception;
+							error.data = resourceError.data;
+
+							console.log("After attaching, error.messages:", error.messages);
+						}
+
+						throw error;
+					}
+				} catch (error) {
+					// Outer catch to ensure error propagates
+					console.error("Submit invoice outer error:", error);
 					throw error;
+				} finally {
+					if (!attempt.abandoned) isSubmitting.value = false;
 				}
-			} catch (error) {
-				// Outer catch to ensure error propagates
-				console.error("Submit invoice outer error:", error);
-				throw error;
-			} finally {
+			})
+			.then((outcome) => (outcome === SKIPPED ? null : outcome))
+			.catch(async (error) => {
+				const { kind } = classifyCheckoutError(error);
+				if (kind !== "other") log.warn("Checkout failed", { kind, type: error?.exc_type });
+				if (!isSubmitTimeoutError(error)) throw error;
+
+				// The gate gave up, but the first request keeps running on the server.
+				// Release the guard so the cashier is never stuck, then find out whether
+				// the sale was in fact completed.
+				attempt.abandoned = true;
 				isSubmitting.value = false;
-			}
-		}); // End of submitMutex.withLock
+				const requestId = submitRequests.current();
+				log.warn("Invoice submit timed out client-side; checking the server", {
+					requestId,
+				});
+
+				const recovered = await recoverTimedOutSubmit(requestId, {
+					check: (id) =>
+						call("pos_next.api.invoices.check_offline_invoice_synced", {
+							offline_id: id,
+						}),
+				});
+				if (recovered) {
+					submitRequests.reset();
+					resetInvoice();
+					return recovered;
+				}
+
+				// Not found yet. Retrying is safe: the same key makes the server return
+				// the invoice if it completes, rather than creating a second one.
+				error.timeoutUnresolved = true;
+				error.message = `${error.message}. The sale may still be processing on the server: check Invoice History before retrying. Retrying will not create a duplicate.`;
+				throw error;
+			}); // End of submitGate.run
 	}
 
 	/**
 	 * Sets the default customer from POS Profile if available.
 	 * This is called when resetting/clearing the cart to auto-select
 	 * the default customer configured in the POS Profile.
+	 *
+	 * @param {string|null} profileCustomer - Optional customer from the active shift profile (sync seed)
 	 */
-	async function setDefaultCustomer() {
-		// Reset to null first
+	async function setDefaultCustomer(profileCustomer = null) {
 		customer.value = null;
+		defaultCustomerName.value = profileCustomer || null;
+
+		if (profileCustomer) {
+			customer.value = {
+				name: profileCustomer,
+				customer_name: profileCustomer,
+			};
+		}
 
 		// Only fetch default customer if we have a POS Profile
 		if (!posProfile.value) {
@@ -1142,6 +1301,7 @@ export function useInvoice() {
 
 			// Set the default customer if one is configured
 			if (result && result.customer) {
+				defaultCustomerName.value = result.customer;
 				// Create customer object matching the structure from customer selection
 				customer.value = {
 					name: result.customer,
@@ -1150,8 +1310,13 @@ export function useInvoice() {
 				};
 			}
 		} catch (error) {
-			// Silently fail - default customer is optional
-			console.log("No default customer set in POS Profile");
+			// Offline or request failed: use the default customer from the cached POS Profile
+			const fallback = shiftState.value.pos_profile?.customer;
+			if (fallback) {
+				customer.value = { name: fallback, customer_name: fallback };
+			} else {
+				console.log("No default customer set in POS Profile");
+			}
 		}
 	}
 
@@ -1160,6 +1325,9 @@ export function useInvoice() {
 	 * If a POS Profile is active and has a default customer, it will be pre-selected.
 	 */
 	function resetInvoice() {
+		// A cleared or completed cart ends the checkout in progress: its retry key and its draft must
+		// not be inherited by a later, identical-looking cart.
+		submitRequests.reset();
 		invoiceItems.value = [];
 		payments.value = [];
 		additionalDiscount.value = 0;
@@ -1178,12 +1346,17 @@ export function useInvoice() {
 	/**
 	 * Clears the cart and resets to default state.
 	 * If a POS Profile is active and has a default customer, it will be pre-selected.
+	 * @param {{ returnSerials?: boolean }} [options]
+	 *   When false (post-submit), sold serials stay consumed in durable cache.
+	 *   Default true restores serials for abandoned / cleared carts.
 	 */
-	async function clearCart() {
-		// Return all serial numbers back to cache before clearing
-		for (const item of invoiceItems.value) {
-			if (item.has_serial_no && item.serial_no) {
-				serialStore.returnSerials(item.item_code, item.serial_no);
+	async function clearCart({ returnSerials = true } = {}) {
+		// Return serials only when the cart is abandoned — not after a successful sale
+		if (returnSerials) {
+			for (const item of invoiceItems.value) {
+				if (item.has_serial_no && item.serial_no) {
+					serialStore.returnSerials(item.item_code, item.serial_no);
+				}
 			}
 		}
 

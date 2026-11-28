@@ -23,7 +23,7 @@ Architecture:
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import frappe
 from frappe import _
@@ -59,7 +59,7 @@ DEFAULT_PAYMENT_MODE = "Cash"
 # ==========================================
 
 
-def get_payment_history(invoice_name: str, include_metadata: bool = True) -> Dict:
+def get_payment_history(invoice_name: str, include_metadata: bool = True) -> dict:
 	"""
 	Get complete payment history from Payment Ledger using optimized queries.
 
@@ -237,7 +237,7 @@ def get_payment_history(invoice_name: str, include_metadata: bool = True) -> Dic
 	}
 
 
-def _determine_payment_source(payment_ledger_entry: Dict, payment_entries_map: Dict[str, Any]) -> str:
+def _determine_payment_source(payment_ledger_entry: dict, payment_entries_map: dict[str, Any]) -> str:
 	"""
 	Determine the source of a payment for audit trail.
 
@@ -259,7 +259,7 @@ def _determine_payment_source(payment_ledger_entry: Dict, payment_entries_map: D
 	return PaymentSource.UNKNOWN.value
 
 
-def _derive_payment_method(payment_entry_data: Dict) -> str:
+def _derive_payment_method(payment_entry_data: dict) -> str:
 	"""
 	Derive payment method from Payment Entry when mode_of_payment is not set.
 
@@ -286,7 +286,7 @@ def _derive_payment_method(payment_entry_data: Dict) -> str:
 	return account_type or "Unknown"
 
 
-def enrich_invoice_with_payment_history(invoice: Dict, include_metadata: bool = True) -> Dict:
+def enrich_invoice_with_payment_history(invoice: dict, include_metadata: bool = True) -> dict:
 	"""
 	Enrich invoice dict with payment history from Payment Ledger.
 
@@ -316,7 +316,7 @@ def enrich_invoice_with_payment_history(invoice: Dict, include_metadata: bool = 
 				"payment_count": payment_data["payment_count"],
 			}
 		)
-	except Exception as e:
+	except Exception:
 		# Log but don't fail - return invoice without payment history
 		frappe.log_error(
 			title=f"Failed to enrich invoice {invoice.get('name')} with payment history",
@@ -342,10 +342,11 @@ def create_payment_entry(
 	invoice_name: str,
 	amount: float,
 	mode_of_payment: str = DEFAULT_PAYMENT_MODE,
-	payment_account: Optional[str] = None,
-	reference_no: Optional[str] = None,
-	remarks: Optional[str] = None,
-	posting_date: Optional[str] = None,
+	payment_account: str | None = None,
+	reference_no: str | None = None,
+	remarks: str | None = None,
+	posting_date: str | None = None,
+	pos_opening_shift: str | None = None,
 ) -> str:
 	"""
 	Create a proper Payment Entry that updates Payment Ledger.
@@ -369,6 +370,7 @@ def create_payment_entry(
 	    reference_no: Optional reference number
 	    remarks: Optional remarks
 	    posting_date: Optional posting date (defaults to today)
+	    pos_opening_shift: Optional active opening shift for POS reconciliation
 
 	Returns:
 	    str: Created Payment Entry name
@@ -419,6 +421,17 @@ def create_payment_entry(
 	if not frappe.db.exists("Mode of Payment", mode_of_payment):
 		frappe.throw(_("Mode of Payment {0} does not exist").format(mode_of_payment))
 
+	if pos_opening_shift and not frappe.db.exists(
+		"POS Opening Shift",
+		{
+			"name": pos_opening_shift,
+			"user": frappe.session.user,
+			"status": "Open",
+			"docstatus": 1,
+		},
+	):
+		frappe.throw(_("Shift {0} is not open for you. Reload POS and try again.").format(pos_opening_shift))
+
 	# Save and submit with proper error handling
 	try:
 		from erpnext.accounts.doctype.payment_entry.payment_entry import get_payment_entry
@@ -450,6 +463,10 @@ def create_payment_entry(
 
 		if reference_no:
 			pe.reference_no = str(reference_no)[:140]
+		elif pos_opening_shift:
+			# Tag with the opening shift name so POS shift closing can find
+			# this payment entry during reconciliation.
+			pe.reference_no = str(pos_opening_shift)[:140]
 		else:
 			pe.reference_no = f"POS-{invoice_name}"
 
@@ -466,7 +483,7 @@ def create_payment_entry(
 
 		return pe.name
 
-	except frappe.ValidationError as e:
+	except frappe.ValidationError:
 		frappe.log_error(
 			title=f"Payment Entry Validation Failed for {invoice_name}", message=frappe.get_traceback()
 		)
@@ -484,7 +501,7 @@ def create_payment_entry(
 
 
 @frappe.whitelist()
-def get_partial_paid_invoices(pos_profile: str, limit: int = DEFAULT_INVOICE_LIMIT) -> List[Dict]:
+def get_partial_paid_invoices(pos_profile: str, limit: int = DEFAULT_INVOICE_LIMIT) -> list[dict]:
 	"""
 	Get partially paid invoices for a POS Profile.
 
@@ -561,7 +578,7 @@ def get_partial_paid_invoices(pos_profile: str, limit: int = DEFAULT_INVOICE_LIM
 
 
 @frappe.whitelist()
-def get_unpaid_invoices(pos_profile: str, limit: int = DEFAULT_INVOICE_LIMIT) -> List[Dict]:
+def get_unpaid_invoices(pos_profile: str, limit: int = DEFAULT_INVOICE_LIMIT) -> list[dict]:
 	"""
 	Get all unpaid invoices (partial + fully unpaid) for a POS Profile.
 
@@ -634,7 +651,7 @@ def get_unpaid_invoices(pos_profile: str, limit: int = DEFAULT_INVOICE_LIMIT) ->
 
 
 @frappe.whitelist()
-def get_partial_payment_details(invoice_name: str) -> Dict:
+def get_partial_payment_details(invoice_name: str) -> dict:
 	"""
 	Get detailed payment information for an invoice.
 
@@ -700,7 +717,7 @@ def get_partial_payment_details(invoice_name: str) -> Dict:
 
 
 @frappe.whitelist()
-def add_payment_to_partial_invoice(invoice_name: str, payments) -> Dict:
+def add_payment_to_partial_invoice(invoice_name: str, payments, pos_opening_shift: str | None = None) -> dict:
 	"""
 	Add payments to a partially paid invoice via Payment Entry.
 
@@ -718,6 +735,7 @@ def add_payment_to_partial_invoice(invoice_name: str, payments) -> Dict:
 	        - account: (optional) Specific payment account
 	        - reference_no: (optional) Reference number
 	    Can also accept JSON string which will be parsed.
+	    pos_opening_shift: Optional active opening shift for POS reconciliation
 
 	Returns:
 	    dict: Updated invoice details with created Payment Entry names
@@ -799,6 +817,7 @@ def add_payment_to_partial_invoice(invoice_name: str, payments) -> Dict:
 				payment_account=payment_account,
 				reference_no=reference_no,
 				remarks=f"POS Payment - {mode_of_payment}",
+				pos_opening_shift=pos_opening_shift,
 			)
 
 			payment_entries_created.append(pe_name)
@@ -807,7 +826,7 @@ def add_payment_to_partial_invoice(invoice_name: str, payments) -> Dict:
 		frappe.db.rollback(save_point=batch_savepoint)
 		frappe.log_error(
 			title=f"Payment Entry Creation Failed for {invoice_name}",
-			message=f"Payments: {payments}\nError: {str(e)}\n\n{frappe.get_traceback()}",
+			message=f"Payments: {payments}\nError: {e!s}\n\n{frappe.get_traceback()}",
 		)
 		frappe.throw(
 			_("Failed to create payment entry: {0}. All changes have been rolled back.").format(str(e))
@@ -822,7 +841,7 @@ def add_payment_to_partial_invoice(invoice_name: str, payments) -> Dict:
 
 
 @frappe.whitelist()
-def get_partial_payment_summary(pos_profile: str) -> Dict:
+def get_partial_payment_summary(pos_profile: str) -> dict:
 	"""
 	Get summary statistics for partial payments.
 
@@ -885,7 +904,7 @@ def get_partial_payment_summary(pos_profile: str) -> Dict:
 
 
 @frappe.whitelist()
-def get_unpaid_summary(pos_profile: str) -> Dict:
+def get_unpaid_summary(pos_profile: str) -> dict:
 	"""
 	Get summary statistics for all unpaid invoices.
 

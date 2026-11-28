@@ -6,6 +6,17 @@ Handles customer search, creation, and management for POS operations
 import frappe
 from frappe import _
 
+from pos_next.api.constants import EMAIL_VERIFICATION_FIELDS
+from pos_next.integrations.registry import (
+	ExistingCustomerFound,
+	after_customer_insert,
+	after_customer_update,
+	get_customer_sync_error,
+	prepare_customer_doc,
+	resolve_existing_customer,
+	validate_customer_create,
+)
+
 
 @frappe.whitelist()
 def get_customers(search_term="", pos_profile=None, limit=20, modified_since=None):
@@ -60,7 +71,7 @@ def get_customers(search_term="", pos_profile=None, limit=20, modified_since=Non
 			"Customer",
 			filters=filters,
 			or_filters=or_filters or None,
-			fields=["name", "customer_name", "mobile_no", "email_id", "disabled"],
+			fields=["name", "customer_name", "mobile_no", "email_id", "disabled", *EMAIL_VERIFICATION_FIELDS],
 			limit=customer_limit,
 			order_by="customer_name asc",
 		)
@@ -83,6 +94,9 @@ def create_customer(
 	pos_profile=None,
 	custom_governorate=None,
 	custom_district=None,
+	custom_first_name=None,
+	custom_last_name=None,
+	custom_is_publish=1,
 ):
 	"""
 	Create a new customer from POS.
@@ -97,6 +111,9 @@ def create_customer(
 	    pos_profile (str): POS Profile (optional, preferred for context-aware loyalty assignment)
 	    custom_governorate (str): Governorate (optional)
 	    custom_district (str): District (optional, must belong to the governorate)
+	    custom_first_name (str): First name for Magento sync (required when masar_miraaya installed)
+	    custom_last_name (str): Last name for Magento sync (required when masar_miraaya installed)
+	    custom_is_publish (int): Publish customer to Magento (default 1)
 
 	Returns:
 	    dict: Created customer document
@@ -108,27 +125,41 @@ def create_customer(
 	if not customer_name:
 		frappe.throw(_("Customer name is required"))
 
+	validate_customer_create(
+		customer_name=customer_name,
+		email_id=email_id,
+		mobile_no=mobile_no,
+		custom_first_name=custom_first_name,
+		custom_last_name=custom_last_name,
+		custom_is_publish=custom_is_publish,
+	)
+
+	existing = resolve_existing_customer(
+		customer_name=customer_name,
+		email_id=email_id,
+		mobile_no=mobile_no,
+		custom_first_name=custom_first_name,
+		custom_last_name=custom_last_name,
+		custom_is_publish=custom_is_publish,
+		customer_group=customer_group,
+		territory=territory,
+		company=company,
+		pos_profile=pos_profile,
+	)
+	if existing and existing.get("existing_customer"):
+		return {
+			"already_exists": True,
+			"message": existing.get("message") or _("A customer with this email already exists."),
+			"existing_customer": existing["existing_customer"],
+		}
+
 	loyalty_program = get_default_loyalty_program_from_settings(
 		company=company,
 		pos_profile=pos_profile,
 	)
 
-	resolved_customer_group = customer_group
-	if not resolved_customer_group:
-		resolved_customer_group = frappe.db.get_single_value("Selling Settings", "customer_group")
-	if not resolved_customer_group:
-		resolved_customer_group = (
-			frappe.db.get_value("Customer Group", {"is_group": 0}, "name", order_by="lft")
-			or "All Customer Groups"
-		)
-
-	resolved_territory = territory
-	if not resolved_territory:
-		resolved_territory = frappe.db.get_single_value("Selling Settings", "territory")
-	if not resolved_territory:
-		resolved_territory = (
-			frappe.db.get_value("Territory", {"is_group": 0}, "name", order_by="lft") or "All Territories"
-		)
+	resolved_customer_group = _resolve_leaf_customer_group(customer_group)
+	resolved_territory = _resolve_leaf_territory(territory)
 
 	customer = frappe.get_doc(
 		{
@@ -145,15 +176,127 @@ def create_customer(
 		}
 	)
 
+	sync_external_customer = prepare_customer_doc(
+		customer,
+		custom_first_name=custom_first_name,
+		custom_last_name=custom_last_name,
+		custom_is_publish=custom_is_publish,
+	)
+
 	frappe.flags.pos_next_customer_company = company
 	frappe.flags.pos_next_customer_pos_profile = pos_profile
 	try:
-		customer.insert()
+		try:
+			customer.insert()
+			if sync_external_customer:
+				after_customer_insert(
+					customer,
+					email_id=email_id,
+					mobile_no=mobile_no,
+					custom_first_name=custom_first_name,
+					custom_last_name=custom_last_name,
+					custom_is_publish=custom_is_publish,
+				)
+		except ExistingCustomerFound as exc:
+			message = str(getattr(exc, "message", None) or exc or "").strip() or _(
+				"A customer with this email already exists."
+			)
+			existing_doc = getattr(exc, "existing_customer", None)
+			frappe.db.rollback()
+			if not existing_doc:
+				resolved = resolve_existing_customer(
+					customer_name=customer_name,
+					email_id=email_id,
+					mobile_no=mobile_no,
+					custom_first_name=custom_first_name,
+					custom_last_name=custom_last_name,
+					custom_is_publish=custom_is_publish,
+					customer_group=customer_group,
+					territory=territory,
+					company=company,
+					pos_profile=pos_profile,
+				)
+				if resolved:
+					existing_doc = resolved.get("existing_customer")
+					message = resolved.get("message") or message
+			if existing_doc:
+				return {
+					"already_exists": True,
+					"message": message,
+					"existing_customer": existing_doc,
+				}
+			frappe.throw(message)
 	finally:
 		frappe.flags.pos_next_customer_company = None
 		frappe.flags.pos_next_customer_pos_profile = None
 
-	return customer.as_dict()
+	out = customer.as_dict()
+	if sync_external_customer:
+		from pos_next.integrations.registry import get_customer_sync_error
+
+		sync_error = get_customer_sync_error(customer.name)
+		if sync_error:
+			# Saved locally, but the external system (Magento) rejected it — e.g.
+			# the email is already registered with a different mobile number.
+			out["external_sync_error"] = sync_error
+	return out
+
+
+def _is_leaf_customer_group(name):
+	"""True when name exists and is not a group node."""
+	if not name:
+		return False
+	return frappe.db.get_value("Customer Group", name, "is_group") == 0
+
+
+def _is_leaf_territory(name):
+	"""True when name exists and is not a group node."""
+	if not name:
+		return False
+	return frappe.db.get_value("Territory", name, "is_group") == 0
+
+
+def _resolve_leaf_customer_group(customer_group=None):
+	"""
+	Resolve a non-group Customer Group for POS creates.
+
+	Selling Settings often defaults to 'All Customer Groups' (is_group=1), which
+	ERPNext rejects on Customer.validate. Prefer an explicit leaf, then Selling
+	Settings only if it is a leaf, then any leaf group.
+	"""
+	candidates = [
+		customer_group,
+		frappe.db.get_single_value("Selling Settings", "customer_group"),
+	]
+	for name in candidates:
+		if _is_leaf_customer_group(name):
+			return name
+
+	leaf = frappe.db.get_value("Customer Group", {"is_group": 0}, "name", order_by="lft")
+	if leaf:
+		return leaf
+
+	frappe.throw(_("No non-group Customer Group found. Please create one in Customer Group."))
+
+
+def _resolve_leaf_territory(territory=None):
+	"""Resolve a Territory ERPNext will accept on Customer (prefer non-group)."""
+	candidates = [
+		territory,
+		frappe.db.get_single_value("Selling Settings", "territory"),
+	]
+	for name in candidates:
+		# Territory allows selecting group nodes in some setups; prefer leaves.
+		# Non-leaf / missing names fall through to the next candidate or fallback.
+		if _is_leaf_territory(name):
+			return name
+
+	leaf = frappe.db.get_value("Territory", {"is_group": 0}, "name", order_by="lft")
+	if leaf:
+		return leaf
+
+	# Last resort — ERPNext ships with this; better than failing create.
+	return "All Territories"
 
 
 def get_default_loyalty_program(company):
@@ -274,4 +417,227 @@ def get_customer_details(customer):
 	if not customer:
 		frappe.throw(_("Customer is required"))
 
-	return frappe.get_cached_doc("Customer", customer).as_dict()
+	# Avoid a stale cache after the primary Contact (and fetch_from fields) change.
+	return frappe.get_doc("Customer", customer).as_dict()
+
+
+@frappe.whitelist()
+def update_customer(
+	name,
+	customer_name=None,
+	mobile_no=None,
+	email_id=None,
+	customer_group=None,
+	territory=None,
+	custom_governorate=None,
+	custom_district=None,
+	custom_first_name=None,
+	custom_last_name=None,
+	pos_profile=None,
+	company=None,
+):
+	"""Update an existing POS customer, including email and mobile.
+
+	Customer.email_id and Customer.mobile_no are read-only fields fetched from
+	the primary Contact. Writing them with frappe.client.set_value looks like a
+	successful save, then fetch_from overwrites them with the unchanged Contact.
+	This updates the Contact first, then the Customer.
+	"""
+	if not name:
+		frappe.throw(_("Customer is required"))
+
+	customer = frappe.get_doc("Customer", name)
+	if not customer.has_permission("write"):
+		frappe.throw(_("You don't have permission to update this customer"), frappe.PermissionError)
+	meta = frappe.get_meta("Customer")
+
+	first = (custom_first_name or "").strip()
+	last = (custom_last_name or "").strip()
+	if first or last:
+		computed_name = " ".join(part for part in (first, last) if part).strip()
+		if computed_name:
+			customer_name = computed_name
+
+	if customer_name is not None:
+		customer_name = (customer_name or "").strip()
+		if not customer_name:
+			frappe.throw(_("Customer name is required"))
+
+	validate_customer_create(
+		customer_name=customer_name or customer.customer_name,
+		email_id=customer.email_id if email_id is None else email_id,
+		mobile_no=customer.mobile_no if mobile_no is None else mobile_no,
+		custom_first_name=first or customer.get("custom_first_name"),
+		custom_last_name=last or customer.get("custom_last_name"),
+		custom_is_publish=customer.get("custom_is_publish") or 0,
+	)
+
+	if customer_name is not None:
+		customer.customer_name = customer_name
+	if customer_group:
+		customer.customer_group = _resolve_leaf_customer_group(customer_group)
+	if territory:
+		customer.territory = _resolve_leaf_territory(territory)
+	if custom_governorate is not None and meta.has_field("custom_governorate"):
+		customer.custom_governorate = custom_governorate or None
+	if custom_district is not None and meta.has_field("custom_district"):
+		customer.custom_district = custom_district or None
+	if first and meta.has_field("custom_first_name"):
+		customer.custom_first_name = first
+	if last and meta.has_field("custom_last_name"):
+		customer.custom_last_name = last
+
+	resolved_email = customer.email_id if email_id is None else (email_id or "").strip()
+	resolved_mobile = customer.mobile_no if mobile_no is None else (mobile_no or "").strip()
+	if email_id is not None:
+		customer.email_id = resolved_email
+		if meta.has_field("custom_email"):
+			customer.custom_email = resolved_email
+	if mobile_no is not None:
+		customer.mobile_no = resolved_mobile
+
+	update_hooks = frappe.get_hooks("pos_next_customer_after_update") or []
+	if update_hooks:
+		frappe.flags.skip_magento_customer_sync = True
+	try:
+		sync_primary_contact(
+			customer,
+			email_id=None if email_id is None else resolved_email,
+			mobile_no=None if mobile_no is None else resolved_mobile,
+			first_name=first or None,
+			last_name=last or None,
+		)
+		customer.save()
+		if update_hooks:
+			after_customer_update(
+				customer,
+				email_id=resolved_email,
+				mobile_no=resolved_mobile,
+				custom_first_name=first or customer.get("custom_first_name"),
+				custom_last_name=last or customer.get("custom_last_name"),
+			)
+	finally:
+		frappe.flags.skip_magento_customer_sync = False
+
+	customer.reload()
+	out = customer.as_dict()
+	sync_error = get_customer_sync_error(customer.name)
+	if sync_error:
+		out["external_sync_error"] = sync_error
+	return out
+
+
+def sync_primary_contact(
+	customer,
+	email_id=None,
+	mobile_no=None,
+	first_name=None,
+	last_name=None,
+):
+	"""Update the primary Contact so Customer email_id / mobile_no stay in sync.
+
+	These Customer fields are fetched from customer_primary_contact. Changing
+	them on Customer alone is reverted on save. Returns True when the Contact
+	was saved.
+	"""
+	contact_name = customer.get("customer_primary_contact") or frappe.db.get_value(
+		"Customer", customer.name, "customer_primary_contact"
+	)
+	if not contact_name:
+		# Customer.on_update.create_primary_contact creates one when email/mobile are set.
+		return False
+
+	contact = frappe.get_doc("Contact", contact_name)
+	changed = False
+
+	if email_id is not None:
+		email_id = (email_id or "").strip()
+		changed = set_contact_primary_email(contact, email_id) or changed
+		if (contact.email_id or "") != email_id:
+			contact.email_id = email_id
+			changed = True
+
+	if mobile_no is not None:
+		mobile_no = (mobile_no or "").strip()
+		changed = set_contact_primary_mobile(contact, mobile_no) or changed
+		if (contact.mobile_no or "") != mobile_no:
+			contact.mobile_no = mobile_no
+			changed = True
+
+	if first_name:
+		first_name = first_name.strip()
+		if contact.first_name != first_name:
+			contact.first_name = first_name
+			changed = True
+	if last_name is not None:
+		last_name = (last_name or "").strip()
+		if contact.last_name != last_name:
+			contact.last_name = last_name
+			changed = True
+
+	if changed:
+		contact.save(ignore_permissions=True)
+	return changed
+
+
+def set_contact_primary_email(contact, email_id):
+	"""Set or replace the Contact's primary email. Returns whether a child row changed."""
+	changed = False
+	primary = None
+	for row in contact.email_ids:
+		if not row.is_primary:
+			continue
+		if primary is None:
+			primary = row
+			continue
+		row.is_primary = 0
+		changed = True
+
+	if email_id:
+		if primary:
+			if (primary.email_id or "").strip() != email_id:
+				primary.email_id = email_id
+				changed = True
+			if not primary.is_primary:
+				primary.is_primary = 1
+				changed = True
+		else:
+			contact.append("email_ids", {"email_id": email_id, "is_primary": 1})
+			changed = True
+	elif primary:
+		contact.remove(primary)
+		changed = True
+	return changed
+
+
+def set_contact_primary_mobile(contact, mobile_no):
+	"""Set or replace the Contact's primary mobile number. Returns whether a child row changed."""
+	changed = False
+	primary = None
+	for row in contact.phone_nos:
+		if not row.is_primary_mobile_no:
+			continue
+		if primary is None:
+			primary = row
+			continue
+		row.is_primary_mobile_no = 0
+		changed = True
+
+	if mobile_no:
+		if primary:
+			if (primary.phone or "").strip() != mobile_no:
+				primary.phone = mobile_no
+				changed = True
+			if not primary.is_primary_mobile_no:
+				primary.is_primary_mobile_no = 1
+				changed = True
+		else:
+			contact.append(
+				"phone_nos",
+				{"phone": mobile_no, "is_primary_mobile_no": 1},
+			)
+			changed = True
+	elif primary:
+		contact.remove(primary)
+		changed = True
+	return changed
